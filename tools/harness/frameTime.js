@@ -228,6 +228,12 @@ async function runBackend(backend) {
   if (got !== backend) { fail(`${backend}: the request was honoured`, `acquired ${got}`); return null; }
 
   await js(PROBE);
+  // `CLEO_NO_MARCH=1` switches the terrain's residual parallax march off for the run, so its cost can be
+  // read as a difference rather than guessed at. It is the one switch that removes the march and nothing
+  // else — the bake, the weights, the blend and every texture stay as they are. See `__setMarchDepth`.
+  if (process.env.CLEO_NO_MARCH === '1')
+    console.log('   march disabled: u_marchDepth0 = '
+                + await js('window.__setMarchDepth ? window.__setMarchDepth(0) : "no probe"'));
   // A warm-up that is NOT measured: the first frames after load compile pipelines and upload textures,
   // which is real work but not the steady state the complaint is about. The orbit phase below is where
   // first-sight compilation is supposed to show up, deliberately.

@@ -23,14 +23,31 @@ describe('Geometry.boundingBox', () => {
      * build, the first probe near any never-picked mesh would hitch — and the symptom (one bad frame,
      * once) is nearly impossible to attribute after the fact.
      */
-    it('does not build the BVH', () => {
+    it('does not build the BVH — and neither does boundingSphere any more', () => {
         const g = geometryOf([[0, 0, 0], [1, 0, 0], [0, 1, 0]]);
         void g.boundingBox;
         expect((g as any)._bvh).toBeUndefined();
 
-        // Control: boundingSphere *does* build it, which is what this guard is protecting against.
+        // This used to be a CONTROL asserting that `boundingSphere` did build the hierarchy. It no
+        // longer does: the sphere is derived from the box. Terrain is what forced it — every sculpt or
+        // paint frame calls `invalidateBounds()` on a refreshed chunk, so every chunk whose sphere
+        // frustum culling reads would discard and rebuild a BVH over its whole triangle list, once per
+        // frame of a brush drag, scaled by the render-density multiplier.
         void g.boundingSphere;
-        expect((g as any)._bvh).toBeDefined();
+        expect((g as any)._bvh, 'the sphere must not force-build the hierarchy either').toBeUndefined();
+    });
+
+    it('the sphere still contains every vertex', () => {
+        // The sphere is now the box's circumsphere. A position-pass box is a superset of the triangle
+        // box whenever a vertex is referenced by no triangle, so this can only ever be conservative —
+        // the right direction for culling.
+        const points: [number, number, number][] = [[-2, 0, 1], [3, 4, -5], [0, -1, 2], [1, 1, 1]];
+        const g = geometryOf(points);
+        const { center, radius } = g.boundingSphere;
+        for (const p of points) {
+            const d = Math.hypot(p[0] - center[0], p[1] - center[1], p[2] - center[2]);
+            expect(d).toBeLessThanOrEqual(radius + 1e-6);
+        }
     });
 
     it('handles a single vertex as a degenerate box', () => {

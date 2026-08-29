@@ -16,9 +16,12 @@ const DEFAULTS = {
   // Debug channels blit an internal buffer instead of the composited image; the grid is editor chrome.
   // Reset here so one configuration cannot leak into the next.
   debugView: 'final', gridVisible: false,
-  bloomIntensity: 0, bloomThreshold: 1,
+  bloomIntensity: 0, bloomThreshold: 2,
   ssaoEnabled: false, ssaoRadius: 0.5, ssaoPower: 1.0, motionBlurEnabled: false,
   chromaticAberrationStrength: 0, shadowsEnabled: true, renderScale: 1, exposure: 2,
+  // Reset alongside the rest: a configuration that turned metering on must not leak an adapted
+  // exposure into the next one, which would make every later signature depend on the order.
+  autoExposureEnabled: false, exposureCompensation: 0,
 };
 
 /**
@@ -28,7 +31,25 @@ const DEFAULTS = {
 const CONFIGS = [
   { name: 'base', patch: {} },
   // bloom*.fs, bloomDownsample, bloomUpsample — 3 programs, none previously exercised.
-  { name: 'bloom', patch: { bloomIntensity: 2, bloomThreshold: 0.4 } },
+  // Retuned when bloom started working. `intensity 2, threshold 0.4` was chosen while the bright pass
+  // was reading an unwritten mip and emitting almost nothing; against a real bloom it saturates the
+  // whole frame to near-white, which is a WORSE gate than no bloom at all — a blown frame has almost no
+  // per-cell variance left for a signature to measure. These values glow clearly without clipping.
+  { name: 'bloom', patch: { bloomIntensity: 1.0, bloomThreshold: 1.4 } },
+  // Auto-exposure. Two things make this a gate rather than a formality.
+  //
+  // The half-lives are ZEROED so the metered value is reached in one frame instead of eased into over a
+  // second — with the easing left in, this signature would record how fast the machine happened to be
+  // running rather than what the meter decided.
+  //
+  // And it carries +2 stops of COMPENSATION, because without it the configuration is nearly a no-op: on
+  // this scene the meter lands within 2% of the hand-set exposure of 2.0 (measured), so a signature
+  // taken with metering switched on and one taken with it broken would look the same. Compensation is
+  // applied only on the metered path — `_adaptExposure` returns early before the first sample lands —
+  // so a frame four times brighter than `base` is proof the whole chain ran.
+  { name: 'autoExposure',
+    patch: { autoExposureEnabled: true, exposureSpeedUp: 0, exposureSpeedDown: 0,
+             exposureCompensation: 2 } },
   // ssao.fs + ssaoBlur.fs. NOT exact, and not fixable by tuning: `_generateSSAOKernelAndNoise` builds
   // both the hemisphere kernel and the 4x4 rotation-noise texture from `Math.random()` at renderer
   // construction, so two sessions genuinely produce different AO. That is normal for SSAO, and it means

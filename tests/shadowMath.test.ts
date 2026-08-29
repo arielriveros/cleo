@@ -246,25 +246,19 @@ describe('cascadeDepthScale', () => {
 });
 
 describe('spotShadowFar', () => {
-    it('solves the quadratic attenuation for a positive distance', () => {
-        const c = 1, l = 0.09, q = 0.032;
-        const d = spotShadowFar(c, l, q, 1000);
-        expect(d).toBeGreaterThan(0);
-        // At that distance the attenuation is the requested 1/256 of full brightness.
-        expect(1 / (c + l * d + q * d * d)).toBeCloseTo(1 / 256, 6);
-    });
-
-    it('handles pure linear falloff', () => {
-        const d = spotShadowFar(1, 0.5, 0, 1000);
-        expect(d).toBeCloseTo((256 - 1) / 0.5, 6);
-    });
-
-    it('clamps to the global cap when the light never falls off', () => {
-        expect(spotShadowFar(1, 0, 0, 250)).toBe(250);
+    // The 1/256 quadratic solve this used to do moved to `graphics/lighting.ts` as `legacyRange`,
+    // where the migration needs it; a light carries a real range now. The two must agree, which
+    // `tests/lightMigration.test.ts` asserts — otherwise a migrated spot's shadow frustum ends
+    // somewhere other than its light.
+    it('is the light range, capped by the renderer distance', () => {
+        expect(spotShadowFar(40, 1000)).toBe(40);
+        expect(spotShadowFar(400, 250)).toBe(250);
     });
 
     it('never returns a degenerate far plane', () => {
-        expect(spotShadowFar(1e9, 0.09, 0.032, 500)).toBeGreaterThanOrEqual(1);
+        expect(spotShadowFar(0.2, 500)).toBe(1);
+        expect(spotShadowFar(0, 500)).toBe(500);
+        expect(spotShadowFar(NaN, 500)).toBe(500);
     });
 });
 

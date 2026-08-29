@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react'
-import { LightNode, PointLight, Spotlight, SpriteNode } from 'cleo'
+import { DirectionalLight, LightNode, PointLight, Spotlight, SpriteNode } from 'cleo'
 import { vec3ToHex } from '../../../utils/UtilFunctions';
 import { useEventBus } from '../../EventBusContext';
 import Collapsable from '../../../components/Collapsable'
-import { ColorInput, PropertyTable, PropertyRow, Slider, Section, Toggle, Hint } from '../../../components/ui'
+import { Button, ColorInput, PropertyTable, PropertyRow, NumberInput, Slider, Section, Toggle, Hint } from '../../../components/ui'
 import { LightIcon } from '../sectionIcons'
 
 // Re-exported so SkyAtmosphereEditor and VolumetricCloudsEditor keep resolving ColorInput from here.
 export { ColorInput };
+
+/** A punctual light is either kind; both carry the same three photometric properties. */
+type Punctual = PointLight | Spotlight;
 
 export default function LightEditor(props: {node: LightNode}) {
   const eventEmitter = useEventBus();
@@ -15,89 +18,105 @@ export default function LightEditor(props: {node: LightNode}) {
   const markLightDirty = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'light', node: props.node });
 
   const [castShadows, setCastShadows] = useState(props.node.castShadows);
-  const [diffuse, setDiffuse] = useState(vec3ToHex(light.diffuse));
-  const [specular, setSpecular] = useState(vec3ToHex(light.specular));
-  const [ambient, setAmbient] = useState(vec3ToHex(light.ambient));
-  const [properties, setProperties] = useState<{constant?: number, linear?: number, quadratic?: number, cutOff?: number, outerCutOff?: number}>({
-    constant: 0,
-    linear: 0,
-    quadratic: 0,
-    cutOff: 0,
-    outerCutOff: 0
-  });
+  const [color, setColor] = useState(vec3ToHex(light.color));
+  // One state bag for every numeric property; which of them are shown depends on the light type.
+  const [values, setValues] = useState<{
+    intensity: number, angularRadius: number,
+    range: number, sourceRadius: number,
+    cutOff: number, outerCutOff: number,
+  }>({ intensity: 0, angularRadius: 0, range: 0, sourceRadius: 0, cutOff: 0, outerCutOff: 0 });
+  const [legacy, setLegacy] = useState(false);
+
+  const read = () => {
+    const l = props.node.light;
+    setValues({
+      intensity: (l as DirectionalLight | Punctual).intensity,
+      angularRadius: l instanceof DirectionalLight ? l.angularRadius : 0,
+      range: l instanceof DirectionalLight ? 0 : (l as Punctual).range,
+      sourceRadius: l instanceof DirectionalLight ? 0 : (l as Punctual).sourceRadius,
+      cutOff: l instanceof Spotlight ? l.cutOff : 0,
+      outerCutOff: l instanceof Spotlight ? l.outerCutOff : 0,
+    });
+    setLegacy(l.legacyFalloff);
+  };
 
   useEffect(() => {
     setCastShadows(props.node.castShadows);
-    setDiffuse(vec3ToHex(light.diffuse));
-    setSpecular(vec3ToHex(light.specular));
-    setAmbient(vec3ToHex(light.ambient));
-
-    if (props.node.light instanceof PointLight) {
-      setProperties({
-        constant: (props.node.light as PointLight).constant,
-        linear: (props.node.light as PointLight).linear,
-        quadratic: (props.node.light as PointLight).quadratic
-      });
-    }
-
-    if (props.node.light instanceof Spotlight) {
-      setProperties({
-        constant: (props.node.light as Spotlight).constant,
-        linear: (props.node.light as Spotlight).linear,
-        quadratic: (props.node.light as Spotlight).quadratic,
-        cutOff: (props.node.light as Spotlight).cutOff,
-        outerCutOff: (props.node.light as Spotlight).outerCutOff
-      });
-    }
-
+    setColor(vec3ToHex(props.node.light.color));
+    read();
   }, [props.node])
-
-  useEffect(() => {
-    if (props.node.light instanceof PointLight) {
-      (props.node.light as PointLight).constant = properties.constant!;
-      (props.node.light as PointLight).linear = properties.linear!;
-      (props.node.light as PointLight).quadratic = properties.quadratic!;
-    }
-    if (props.node.light instanceof Spotlight) {
-      (props.node.light as Spotlight).constant = properties.constant!;
-      (props.node.light as Spotlight).linear = properties.linear!;
-      (props.node.light as Spotlight).quadratic = properties.quadratic!;
-      if (properties.cutOff! > properties.outerCutOff!) {
-        // outerCutOff must stay greater than cutOff.
-        setProperties({...properties, outerCutOff: properties.cutOff! + 0.01});
-        return;
-      }
-      (props.node.light as Spotlight).cutOff = properties.cutOff!;
-      (props.node.light as Spotlight).outerCutOff = properties.outerCutOff!;
-    }
-  }, [properties])
 
   useEffect(() => {
     const editorSprite = props.node.getChildByName('__editor__LightSprite');
     if (editorSprite[0])
-      (editorSprite[0] as SpriteNode).tint = [light.diffuse[0], light.diffuse[1], light.diffuse[2]];
-  }, [props.node, diffuse])
+      (editorSprite[0] as SpriteNode).tint = [light.color[0], light.color[1], light.color[2]];
+  }, [props.node, color])
 
-  const set = (patch: Partial<typeof properties>) => {
-    setProperties((prev) => ({ ...prev, ...patch }));
+  /** Write one property through to the light, then re-read: setters clamp, so the UI must follow. */
+  const set = (patch: Partial<typeof values>) => {
+    const l = props.node.light;
+    if (patch.intensity !== undefined) (l as DirectionalLight | Punctual).intensity = Math.max(0, patch.intensity);
+    if (patch.angularRadius !== undefined && l instanceof DirectionalLight) l.angularRadius = Math.max(0, patch.angularRadius);
+    if (patch.range !== undefined && !(l instanceof DirectionalLight)) (l as Punctual).range = patch.range;
+    if (patch.sourceRadius !== undefined && !(l instanceof DirectionalLight)) (l as Punctual).sourceRadius = patch.sourceRadius;
+    if (l instanceof Spotlight) {
+      if (patch.cutOff !== undefined) l.cutOff = patch.cutOff;
+      if (patch.outerCutOff !== undefined) l.outerCutOff = patch.outerCutOff;
+      // The outer cone must stay outside the inner one, or the falloff has nowhere to happen.
+      if (l.outerCutOff <= l.cutOff) l.outerCutOff = l.cutOff + 0.01;
+    }
+    setValues(v => ({ ...v, ...patch }));
+    read();
     markLightDirty();
   };
+
+  const resetPhysical = () => {
+    (props.node.light as Punctual).resetToPhysicalDefaults();
+    read();
+    markLightDirty();
+  };
+
+  const isDirectional = light instanceof DirectionalLight;
+  const isSpot = light instanceof Spotlight;
 
   return (
     <Collapsable title='Light' icon={<LightIcon />} persistKey='light'>
     <div className='w-full p-2'>
-      <Section title='Colors'>
-        <PropertyTable columns={['35%', '65%']}>
-          <PropertyRow label='Diffuse'>
-            <ColorInput color={diffuse} onChange={(color) => { light.diffuse = color; setDiffuse(vec3ToHex(color)); markLightDirty(); }} />
+      <Section title='Emission'>
+        <PropertyTable columns={['40%', '60%']}>
+          <PropertyRow label='Color'>
+            <ColorInput color={color} onChange={(c) => { light.color = c; setColor(vec3ToHex(c)); markLightDirty(); }} />
           </PropertyRow>
-          <PropertyRow label='Specular'>
-            <ColorInput color={specular} onChange={(color) => { light.specular = color; setSpecular(vec3ToHex(color)); markLightDirty(); }} />
+          <PropertyRow label={isDirectional ? 'Intensity (lx)' : 'Intensity (lm)'} divider={!isDirectional}>
+            <NumberInput value={values.intensity} min={0} step={isDirectional ? 1000 : 100}
+              onChange={(v) => set({ intensity: v })} />
           </PropertyRow>
-          <PropertyRow label='Ambient' divider={false}>
-            <ColorInput color={ambient} onChange={(color) => { light.ambient = color; setAmbient(vec3ToHex(color)); markLightDirty(); }} />
-          </PropertyRow>
+          {!isDirectional && <PropertyRow label='Range (m)'>
+            <NumberInput value={values.range} min={0.01} step={0.5} onChange={(v) => set({ range: v })} />
+          </PropertyRow>}
+          {!isDirectional && <PropertyRow label='Source Radius (m)' divider={false}>
+            <NumberInput value={values.sourceRadius} min={0} step={0.01} onChange={(v) => set({ sourceRadius: v })} />
+          </PropertyRow>}
         </PropertyTable>
+
+        {isDirectional
+          ? <Hint>Illuminance in LUX. A clear midday sun is around 100,000; an overcast one 10,000.
+              Brightness lives here, not in the colour — keep the colour as the light&apos;s tint.</Hint>
+          : <Hint>Luminous power in LUMENS. A 100 W-equivalent bulb is about 1500; a candle about 12.
+              Range is where the falloff reaches zero, and is also the light&apos;s culling radius.
+              Source radius is how big the bulb is: it spreads the highlight into an image of the source
+              rather than a point, dimming its peak by the same amount it widens. Dramatic on polished
+              surfaces, invisible on rough ones.</Hint>}
+
+        {legacy && <>
+          <Hint>This light&apos;s numbers were converted from the old constant/linear/quadratic falloff,
+            which had no physical scale — a lamp and the sun were both authored as colour 1. The
+            conversion preserves how the light LOOKS, which is why the number is enormous. Reset it to
+            re-author the light in real units.</Hint>
+          <Button variant='subtle' className='mt-1 w-full' onClick={resetPhysical}>
+            Reset to physical defaults
+          </Button>
+        </>}
       </Section>
 
       <Section title='Shadows'>
@@ -107,26 +126,33 @@ export default function LightEditor(props: {node: LightNode}) {
           ? <Hint>The FIRST directional light with this on is the scene&apos;s sun: the renderer fits its
               shadow cascades around the camera for it. Tune them in Renderer mode.</Hint>
           : props.node.type === 'spotlight'
-            ? <Hint>Spot lights get their own shadow map, sized to the outer cone. A few can cast at
-                once (see Spot Shadows in Renderer mode); any beyond that cap go unshadowed.</Hint>
+            ? <Hint>Spot lights get their own shadow map, sized to the outer cone and reaching as far as
+                the light&apos;s range. A few can cast at once (see Spot Shadows in Renderer mode); any
+                beyond that cap go unshadowed.</Hint>
             : <Hint>Point lights do not cast shadows — that needs a cubemap per light, which the
                 renderer has no path for. The flag is still saved.</Hint>}
       </Section>
 
-      { props.node.light instanceof PointLight &&
-        <Section title='Point Light'>
-          <Slider label='Constant' min={0} max={1} step={0.01} value={properties.constant ?? 0} onChange={(v) => set({ constant: v })} />
-          <Slider label='Linear' min={0} max={1} step={0.01} value={properties.linear ?? 0} onChange={(v) => set({ linear: v })} />
-          <Slider label='Quadratic' min={0} max={1} step={0.01} value={properties.quadratic ?? 0} onChange={(v) => set({ quadratic: v })} />
+      { isSpot &&
+        <Section title='Cone'>
+          <Slider label='Inner Angle' min={0} max={80} step={0.5} value={values.cutOff}
+            onChange={(v) => set({ cutOff: v })} />
+          <Slider label='Outer Angle' min={0} max={80} step={0.5} value={values.outerCutOff}
+            onChange={(v) => set({ outerCutOff: v })} />
+          <Hint>Half-angles in degrees. Full brightness inside the inner cone, falling to nothing at the
+            outer one. Narrowing the cone does not brighten the light — intensity is in lumens either
+            way, so the beam shape and its brightness are independent.</Hint>
         </Section>
       }
-      { props.node.light instanceof Spotlight &&
-        <Section title='Spot Light'>
-          <Slider label='Constant' min={0} max={1} step={0.1} value={properties.constant ?? 0} onChange={(v) => set({ constant: v })} />
-          <Slider label='Linear' min={0} max={1} step={0.01} value={properties.linear ?? 0} onChange={(v) => set({ linear: v })} />
-          <Slider label='Quadratic' min={0} max={1} step={0.001} value={properties.quadratic ?? 0} onChange={(v) => set({ quadratic: v })} />
-          <Slider label='Cut Off' min={0} max={60} step={0.01} value={properties.cutOff ?? 0} onChange={(v) => set({ cutOff: v })} />
-          <Slider label='Outer Cut' min={0} max={60} step={0.01} value={properties.outerCutOff ?? 0} onChange={(v) => set({ outerCutOff: v })} />
+
+      { isDirectional &&
+        <Section title='Source'>
+          <Slider label='Angular Radius' min={0} max={0.1} step={0.001} value={values.angularRadius}
+            onChange={(v) => set({ angularRadius: v })} />
+          <Hint>Apparent radius in radians; the real sun is 0.00465. It sets how broad the sun&apos;s
+            reflection is — most visible on smooth, polished surfaces, and barely at all on rough ones.
+            It also softens shadow edges, though only proportionally: a real penumbra widens with
+            distance from whatever casts it, and that needs a blocker search this renderer has not got.</Hint>
         </Section>
       }
     </div>

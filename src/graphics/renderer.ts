@@ -16,7 +16,7 @@ import { TilemapLayer } from '../graphics/tilemap/tilemapLayer';
 import { TileMesh } from '../graphics/tilemap/tileMesh';
 import { CHUNK_SIZE, TileChunk } from '../graphics/tilemap/chunk';
 import { cellToWorld } from '../graphics/tilemap/cellMath';
-import { PointLight, Spotlight } from './lighting';
+import { DEFAULT_ANGULAR_RADIUS, DEFAULT_SCENE_AMBIENT_LUX, DirectionalLight, PointLight, REFERENCE_ILLUMINANCE, Spotlight } from './lighting';
 import { Mesh } from './mesh';
 import type { ShaderProgram, ShaderProgramDescriptor } from './rhi/shaderProgram';
 import { Framebuffer } from './framebuffer';
@@ -67,6 +67,7 @@ import PresentProgram from './shaders/wgsl/present.wgsl'
 import DebugViewProgram from './shaders/wgsl/debugView.wgsl'
 import OverdrawProgram from './shaders/wgsl/overdraw.wgsl'
 import BloomProgram from './shaders/wgsl/bloom.wgsl'
+import ExposureMeterProgram from './shaders/wgsl/exposureMeter.wgsl'
 import BloomDownsampleProgram from './shaders/wgsl/bloomDownsample.wgsl'
 import BloomUpsampleProgram from './shaders/wgsl/bloomUpsample.wgsl'
 import ChromaticAberrationProgram from './shaders/wgsl/chromaticAberration.wgsl'
@@ -116,7 +117,7 @@ import { gpuProfiler, initializeGpuProfiler, RENDER_PASSES, RenderPass } from '.
 import { buildSSAOKernel } from './ssaoKernel';
 import { TerrainLodSettings } from '../terrain/terrain';
 import type { FoliageCell } from '../terrain/foliage';
-import { collectOrphanedFoliageBuffers } from '../terrain/foliage';
+import { collectOrphanedFoliageBuffers, collectOrphanedFoliageMeshes } from '../terrain/foliage';
 
 // The context now lives in its own leaf module (see glContext.ts); re-exported here so every existing
 // `import { gl } from './renderer'` keeps working.
@@ -152,8 +153,8 @@ const MAX_LIGHT_SLOTS = 32;
  */
 const GLSL_MAX_POINT_LIGHTS = 16;
 const GLSL_MAX_SPOTLIGHTS = 8;
-const POINT_LIGHT_FIELDS = ['position', 'diffuse', 'specular', 'ambient', 'constant', 'linear', 'quadratic'] as const;
-const SPOT_LIGHT_FIELDS = ['position', 'direction', 'diffuse', 'specular', 'ambient', 'constant', 'linear', 'quadratic', 'cutOff', 'outerCutOff'] as const;
+const POINT_LIGHT_FIELDS = ['position', 'invRangeSquared', 'color', 'intensity', 'sourceRadius'] as const;
+const SPOT_LIGHT_FIELDS = ['position', 'invRangeSquared', 'direction', 'sourceRadius', 'color', 'intensity', 'coneScale', 'coneOffset'] as const;
 
 function buildLightNames(arrayName: string, fields: readonly string[]): Record<string, string>[] {
     const out: Record<string, string>[] = [];
@@ -222,6 +223,67 @@ export interface RenderSettings {
     /** Final-image saturation trim. 1 = untouched. A sky light's cloud response multiplies on top. */
     saturation: number;
     ssaoEnabled: boolean;
+    /**
+     * Whether the indirect SPECULAR lobe gets its own occlusion term rather than the diffuse one.
+     *
+     * On is correct and is the default: an AO map and SSAO both measure how much of the HEMISPHERE is
+     * blocked, which is the right question for a diffuse lobe and the wrong one for a narrow specular
+     * cone (see `computeSpecularAO`). Off restores the older behaviour of multiplying both by the same
+     * number, which visibly strips the reflection off a polished floor standing in a corner.
+     *
+     * It is a setting rather than a constant for two reasons: it is the only way to gate the feature
+     * from the harness, since unlike a light radius it is shading behaviour with nothing to patch; and
+     * it gives an artist the same escape hatch every other AO knob here already has.
+     */
+    specularOcclusionEnabled: boolean;
+    /**
+     * Geometric specular antialiasing: widen roughness by the sub-pixel variance of the normal, so a
+     * sharp highlight over a curved or normal-mapped surface stops flickering as it moves.
+     *
+     * On by default. It is a setting for the same two reasons {@link specularOcclusionEnabled} is: it
+     * is the only way to A/B the feature from the harness, and it costs two derivative pairs per
+     * fragment in four programs, which is a bill somebody may not want to pay.
+     *
+     * Applies to the PBR and terrain paths only — the metallic-roughness family, where the widened
+     * NDF means something. Blinn-Phong's forward shading is genuine `pow(NdotH, shininess)` with no
+     * roughness to filter, and its deferred twin derives one from shininess, so filtering there would
+     * WIDEN the gap between its two paths rather than close it.
+     */
+    specularAaEnabled: boolean;
+    /**
+     * Horizon occlusion: drop the indirect specular where the reflection ray points INTO the surface.
+     *
+     * On by default. A normal map tilts the shading normal away from the real surface, and the
+     * reflection is computed against the tilted one — so at a glancing angle the ray dips below the
+     * geometry and the surface reflects sky it cannot see. That is the wet-looking rim on strongly
+     * normal-mapped materials viewed at an angle.
+     *
+     * The forward path reads the geometric normal off the vertex basis for free. The deferred path
+     * REBUILDS it from the depth buffer (`geometricNormal` in deferredLighting.wgsl), because the
+     * G-buffer carries the shading normal only and the channel oct-packing freed went to reflectance.
+     * Four extra depth taps, against the 8 bytes per pixel per frame a fourth attachment would cost.
+     */
+    horizonOcclusionEnabled: boolean;
+    /**
+     * Meter the frame and drive {@link exposure} from it, instead of holding a hand-set value.
+     *
+     * On by default, which is the point of phase 1: once lights carry lux and lumens, a fixed exposure
+     * is the last non-physical link in the chain, and one global number can only meter one decade — at
+     * EV100 15 a 1500 lm bulb two metres away is invisible, and that is physics rather than a bug.
+     */
+    autoExposureEnabled: boolean;
+    /** Artist trim on the metered result, in stops. Positive is brighter, as on a camera. */
+    exposureCompensation: number;
+    /** Clamps on the metered EV100. Defaults span a night interior to a sunlit exterior. */
+    exposureMinEV: number;
+    exposureMaxEV: number;
+    /**
+     * Adaptation RATES, matching Unreal's `AutoExposureSpeedUp` / `SpeedDown` in both name and meaning:
+     * higher adapts faster, and the defaults 3.0 and 1.0 are Unreal's. `Up` is the scene getting
+     * brighter, which an eye handles faster than the reverse. 0 snaps instantly.
+     */
+    exposureSpeedUp: number;
+    exposureSpeedDown: number;
     ssaoRadius: number;
     ssaoPower: number;
     ssaoBias: number;
@@ -353,13 +415,39 @@ export class Renderer {
     // A linear scale applied before the ACES tonemap. The default compensates for the Lambertian
     // albedo/PI diffuse, which otherwise leaves a white surface at ~0.3 raw radiance.
     private _exposure: number = 2.0;
-    // HDR bloom: luminance where bloom starts, soft-knee width around it, and additive strength.
-    private _bloomThreshold: number = 1.0;
+    /**
+     * HDR bloom: luminance where bloom starts, soft-knee width around it, and additive strength.
+     *
+     * The threshold is EXPOSED luminance (see bloom.wgsl), and 2.0 rather than the 1.0 it sat at for as
+     * long as bloom has existed. 1.0 was chosen while the bright pass was reading an unwritten mip of
+     * the compose buffer and contributing almost nothing, so it was never really tested; with the
+     * sampling fixed it selects 16% of an ordinary frame and lays a haze over everything.
+     *
+     * 2.0 is where the tonemapper gives out rather than an arbitrary knob: ACES does not reach white
+     * until an exposed luminance around 2, so "bloom what would clip on screen" IS this number. Measured
+     * on the harness base scene, it selects 1.3% of the frame — the blown specular highlights and
+     * nothing else — against 16% at 1.0 and 71% at 0.8.
+     */
+    private _bloomThreshold: number = 2.0;
     private _bloomKnee: number = 0.5;
-    private _bloomIntensity: number = 0.6;
+    /**
+     * Additive strength of the bloom pyramid, 0.35.
+     *
+     * It was 0.6, set while the bright pass was reading an unwritten mip and adding almost nothing.
+     * Against a working bloom that is too much: measured on the `full` scene it lifts the frame mean by
+     * 3.8%, and what that looks like is a checkerboard floor losing its contrast and a bright sphere
+     * turning into a ball of haze. 0.35 lifts it by 2.8%, keeps the floor readable, and still glows
+     * clearly on the blown highlights.
+     *
+     * For reference, Unreal ships 0.675 — but over a DIFFERENT model, with no threshold at all and five
+     * weighted passes summing to roughly 0.7 tint, which is a wide thin veiling glare rather than this
+     * pyramid's thresholded glow. The number does not transfer; the restraint does.
+     */
+    private _bloomIntensity: number = 0.35;
     // The intensity the USER asked for, remembered across quality changes — a tier that disables bloom
-    // zeroes `_bloomIntensity`, and this is what it restores from.
-    private _bloomIntensityUser: number = 0.6;
+    // zeroes `_bloomIntensity`, and this is what it restores from. Must track the default above, or a
+    // quality switch silently reinstates the old value.
+    private _bloomIntensityUser: number = 0.35;
     // Restrict bloom to surfaces that set the scene buffer's alpha mask. Off by default: only
     // deferred-lit geometry, a baked sky and clouds can set it, so sprites and transparents never bloom.
     private _bloomMaskEnabled: boolean = false;
@@ -587,7 +675,60 @@ export class Renderer {
     // Whichever AO buffer the lighting pass should read: the blurred one, or the raw one when the
     // blur is off.
     private _ssaoResult!: Framebuffer;
+    /**
+     * Did the SSAO pass actually RUN this frame — not merely: is SSAO switched on.
+     *
+     * `_ssaoResult` holds a framebuffer, and a framebuffer keeps its contents when nothing draws into
+     * it. So a frame that skips the pass still binds last frame's occlusion, and the lighting pass
+     * still reads it, and the picture does not change. That made the Performance panel's `ssao` kill
+     * switch a liar: it stopped the WORK and left the EFFECT, so the panel reported a pass costing
+     * time and contributing nothing, which is the opposite of what it was built to show.
+     *
+     * Three conditions skip the pass — the setting, an empty G-buffer, and the kill switch — and the
+     * shader has to be told about all three the same way. `u_ssaoEnabled` is uploaded from this rather
+     * than from `_ssaoEnabled` for exactly that reason.
+     */
+    private _ssaoProducedThisFrame: boolean = false;
     private _ssaoEnabled: boolean;
+    private _specularOcclusionEnabled: boolean = true;
+    private _specularAaEnabled: boolean = true;
+    private _horizonOcclusionEnabled: boolean = true;
+
+    // --- auto-exposure ------------------------------------------------------------------------
+    private _autoExposureEnabled: boolean = true;
+    // +1 stop, which is Unreal's `AutoExposureBias` default. Metering to middle grey alone lands a
+    // scene about a stop under where a hand-set exposure usually sits — measured on the harness scene,
+    // frame mean 202 to 146 — because 0.18 is a reflectance target and most content is not an 18% grey
+    // card. Every engine that ships auto-exposure ships a positive bias on top of it for that reason.
+    private _exposureCompensation: number = 1.0;
+    private _exposureMinEV: number = 2.0;
+    private _exposureMaxEV: number = 17.0;
+    private _exposureSpeedUp: number = 3.0;
+    private _exposureSpeedDown: number = 1.0;
+    /** Two 1x1 metering targets. See `_exposurePass` for why they are read a frame late. */
+    private _exposureFBOs: Framebuffer[] = [];
+    private _exposureWrite: number = 0;
+    /** True once a readback has landed; until then the hand-set exposure stands. */
+    private _exposureMetered: boolean = false;
+    private _exposureReadPending: boolean = false;
+    /** Which metering target the end of the frame should read, or -1 for none. */
+    private _exposureReadDue: number = -1;
+    /**
+     * Frames between readbacks. Metering runs every frame — it is 256 fetches into one fragment — but
+     * the READ is the expensive half: `readPixels` is synchronous under the hood on WebGL2, so every
+     * one of them drains the pipeline. Six is 10Hz at 60fps, against an adaptation half-life measured
+     * in seconds.
+     */
+    private static readonly EXPOSURE_READ_INTERVAL = 6;
+    /** The adapted value, in EV100. Seeded from the initial exposure so frame one does not jump. */
+    private _exposureEV: number = 0;
+    /** Must match LOG_LUM_MIN/MAX in exposureMeter.wgsl. */
+    private static readonly LOG_LUMINANCE_WINDOW: [number, number] = [-12.0, 8.0];
+    /**
+     * Where the metered average is placed. 0.18 is middle grey — the reflectance a light meter assumes
+     * and the value every photographic exposure system is calibrated around.
+     */
+    private static readonly EXPOSURE_KEY = 0.18;
     private _ssaoKernel: Float32Array = new Float32Array(64 * 3);
     /** Kernel samples actually taken per pixel. 64 was the fixed value; the shader now breaks early. */
     private _ssaoSamples: number = 24;
@@ -904,7 +1045,18 @@ export class Renderer {
         this._cloudsFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         // Same float/LINEAR config: the resolve reads it with bilinear taps for its neighbourhood bounds.
         this._cloudTraceFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
-        this._compose_FBOs = [new Framebuffer({ colorTextureOptions: {precision: 'high'}}), new Framebuffer({ colorTextureOptions: {precision: 'high'}})];
+        // `mipMap: false` matters here more than anywhere else in this list, and it was the ONE
+        // render target missing it.
+        //
+        // `Texture` defaults `mipMap` to true, which sets `minFilter: 'linear-mipmap-linear'` over a
+        // chain that nothing ever generates. Present samples the compose buffer 1:1, so it takes LOD 0
+        // and the frame looked perfect. The BLOOM BRIGHT PASS halves the resolution, so its implicit
+        // LOD lands on level 1 — unwritten memory — and bloom has been extracting its highlights from
+        // that instead of from the scene for as long as the pyramid has existed. It read as "bloom does
+        // not respond to any setting": the threshold, knee and intensity all worked perfectly, on an
+        // image that was not the frame.
+        this._compose_FBOs = [new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }),
+                              new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } })];
         // Motion blur velocity buffers (signed velocity -> float precision).
         this._velocityFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         this._velocityTileFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
@@ -912,6 +1064,10 @@ export class Renderer {
         // SSAO is one 8-bit scalar per pixel: R8, not RGBA8, and no depth attachment — both passes are
         // fullscreen with depth testing off.
         const aoOptions = { colorTextureOptions: { mipMap: false, channels: 'r' as const }, depth: false };
+        // Metering targets: 1x1, and 8-BIT rather than float because `readPixels` refuses anything
+        // else on WebGL2. Two of them, ping-ponged — see `_exposurePass`.
+        this._exposureFBOs = [new Framebuffer({ colorTextureOptions: { mipMap: false } }),
+                              new Framebuffer({ colorTextureOptions: { mipMap: false } })];
         this._ssaoFBO = new Framebuffer(aoOptions);
         this._ssaoBlurFBO = new Framebuffer(aoOptions);
         // BRDF integration LUT (computed once) — high precision, no mipmaps.
@@ -1058,6 +1214,7 @@ export class Renderer {
             ['debugView',                    DebugViewProgram],
             ['shadowDebug',                  ShadowDebugProgram],
             ['bloom',                        BloomProgram],
+            ['exposureMeter',                ExposureMeterProgram],
             // Reuses the selection-mask vertex shader: the minimal MVP transform the mask pass already drives
             // over these same meshes, so no new vertex path is introduced.
             ['overdraw',                     OverdrawProgram],
@@ -1094,6 +1251,8 @@ export class Renderer {
         const rw = this._renderWidth, rh = this._renderHeight;
         this._sceneFBO.create(rw, rh);
         this._gBufferFBO.create(rw, rh);
+        this._exposureFBOs[0].create(1, 1);
+        this._exposureFBOs[1].create(1, 1);
         this._ssaoFBO.create(this._ssaoWidth, this._ssaoHeight);
         this._ssaoBlurFBO.create(this._ssaoWidth, this._ssaoHeight);
         this._outlineMaskFBO.create(rw, rh);
@@ -1266,6 +1425,8 @@ export class Renderer {
         // end-of-frame drain, which would otherwise be charged to `present`.
         gpuProfiler.beginPass('frameEnd');
 
+        this._readExposureSample();
+
         // Close the last open GPU scope and read back whichever earlier frames have resolved. Must be
         // the final thing in the frame: results are collected from frames already retired, never waited
         // on, so this never blocks on the GPU.
@@ -1378,10 +1539,13 @@ export class Renderer {
             this._shaderManager.bind(shaderName);
             this._shaderManager.setUniform('u_numPointLights', Math.min(scene.numPointLights, GLSL_MAX_POINT_LIGHTS));
             this._shaderManager.setUniform('u_numSpotlights', Math.min(scene.numSpotlights, GLSL_MAX_SPOTLIGHTS));
-            this._shaderManager.setUniform('u_dirLight.direction', [0, 0, 0]);
-            this._shaderManager.setUniform('u_dirLight.diffuse', [0, 0, 0]);
-            this._shaderManager.setUniform('u_dirLight.specular', [0, 0, 0]);
-            this._shaderManager.setUniform('u_dirLight.ambient', [0, 0, 0]);
+            this._clearDirectional();
+            this._shaderManager.setUniform('u_sceneAmbient', this._internalAmbient(scene));
+            // The forward path has no SSAO, but it does have the material AO map, so it needs the same
+            // flag. Declared in chunks/pbrForward.wgsl and uploaded nowhere would mean it read 0 and
+            // specular occlusion was silently off in every forward material.
+            this._shaderManager.setUniform('u_specularOcclusion', this._specularOcclusionEnabled);
+            this._shaderManager.setUniform('u_horizonOcclusion', this._horizonOcclusionEnabled);
             // The sky light is not a light NODE, so the per-light loop that follows never reaches it and
             // this is where it has to be uploaded. A scene with a sky light and no directional light is
             // perfectly ordinary — an overcast day is exactly that.
@@ -1453,7 +1617,11 @@ export class Renderer {
         // BOTH counters, not just `objects`: instanced foliage bumps only `instances`, and a landscape
         // whose only deferred geometry is grass would otherwise lose its AO.
         const gBufferHasGeometry = frameStats.objects > 0 || frameStats.instances > 0;
-        if (this._ssaoEnabled && gBufferHasGeometry && this._beginPass('ssao')) this._ssaoPass();
+        this._ssaoProducedThisFrame = false;
+        if (this._ssaoEnabled && gBufferHasGeometry && this._beginPass('ssao')) {
+            this._ssaoPass();
+            this._ssaoProducedThisFrame = true;
+        }
         // 2. Light the G-buffer in a single fullscreen pass into the scene FBO.
         gpuProfiler.beginPass('lighting');
         this._deferredLightingPass(scene, shadowLight);
@@ -1572,6 +1740,7 @@ export class Renderer {
         // Buffers of layers disposed with their terrain. Drained ahead of the landscape loop — no live
         // landscape can reach them per-layer.
         for (const buf of collectOrphanedFoliageBuffers()) buf.destroy();
+        for (const mesh of collectOrphanedFoliageMeshes()) mesh.dispose();
 
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
@@ -1594,6 +1763,10 @@ export class Renderer {
 
                 // Free GPU buffers orphaned by a previous cell-layout rebuild (painting, a resize, ...).
                 for (const buf of layer.collectStaleBuffers()) buf.destroy();
+
+                // ...and the prototype meshes a prototype swap retired. Same reason those buffers are
+                // freed here rather than at the swap: this pass owns the GL context, the edit does not.
+                for (const mesh of layer.collectRetiredMeshes()) mesh.dispose();
 
                 // Each cell's static matrices, uploaded once per layout version and then reused by
                 // every sub-model of every level, in both the colour and the shadow pass.
@@ -1768,8 +1941,7 @@ export class Renderer {
                             pass.setBindGroup(0, this._textureBindGroup(pipeline, 0,
                                                                        [tex ?? this._fallbackTexture]));
                         } else {
-                            for (const [name, value] of model.material.properties)
-                                this._shaderManager.setUniform(`u_material.${name}`, value);
+                            this._applyMaterialProperties(model.material);
                             pass.setBindGroup(0, this._materialBindGroup(pipeline, model.material));
                         }
 
@@ -2076,8 +2248,9 @@ export class Renderer {
             if (mat.type === 'terrain') {
                 // u_viewPos again, and deliberately: terrain reads it from its OWN uniform block
                 // (TerrainUniforms), not from the transform block set above. Two blocks, two writes.
-                this._shaderManager.setUniform('u_viewPos', this._activeCamera.position); // parallax view vector
-                this._shaderManager.setUniform('u_sunDirection', this._sunDirection);   // parallax self-shadow
+                this._shaderManager.setUniform('u_viewPos', this._activeCamera.position); // parallax V + specular V
+                this._shaderManager.setUniform('u_sunDirection', this._sunDirection);      // self-shadow
+                this._shaderManager.setUniform('u_specularAA', this._specularAaEnabled);   // roughness filter
                 for (const [name, value] of mat.properties) this._shaderManager.setUniform(name, value);
                 const terrainPipeline = this._pipelineFor(shaderType, reflection, {
                     cullMode: Renderer._cullFor(mat.config.side),
@@ -2128,8 +2301,7 @@ export class Renderer {
                 builtFor: node.model.material.type,   // skinned too — see the note above
             });
             pass.setPipeline(pipeline);
-            for (const [name, value] of mat.properties)
-                this._shaderManager.setUniform(`u_material.${name}`, value);
+            this._applyMaterialProperties(mat);
             pass.setBindGroup(0, this._materialBindGroup(pipeline, mat));
             return true;
         }, pass);
@@ -2246,8 +2418,7 @@ export class Renderer {
             pass.setPipeline(pipeline);
             this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
             this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
-            for (const [name, value] of material.properties)
-                this._shaderManager.setUniform(`u_material.${name}`, value);
+            this._applyMaterialProperties(material);
             pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
         } else {
             this._shaderManager.bind(shaderType);
@@ -2362,7 +2533,9 @@ export class Renderer {
 
         // SSAO (unit 4). Always bind a complete texture so the sampler is valid; the shader only
         // reads it when u_ssaoEnabled is true.
-        this._shaderManager.setUniform('u_ssaoEnabled', this._ssaoEnabled);
+        this._shaderManager.setUniform('u_ssaoEnabled', this._ssaoProducedThisFrame);
+        this._shaderManager.setUniform('u_specularOcclusion', this._specularOcclusionEnabled);
+        this._shaderManager.setUniform('u_horizonOcclusion', this._horizonOcclusionEnabled);
         // Texel size drives the depth-aware upsample. Zero when the AO buffer is already full
         // resolution, which tells the shader to take the plain (and then exact) bilinear fetch.
         this._shaderManager.setUniform('u_ssaoTexelSize',
@@ -2381,6 +2554,34 @@ export class Renderer {
      * uniform array is only reachable through its `[0]` location, so those are cached per program.
      * A program that declares none of them gets null locations and no-op writes, as intended.
      */
+    /**
+     * How much wider this scene's sun makes the shadow filter, relative to the real sun.
+     *
+     * The specular half of "a light has a size" is exact — see `sphereLightSample` / `discLightSample`.
+     * The shadow half is not, and cannot be without a blocker search: this scales a CONSTANT penumbra
+     * by the source's angular size, so a bigger sun gets a proportionally softer edge, but the penumbra
+     * still does not grow with distance from the caster the way a real one does. It exists so the two
+     * systems stop flatly contradicting each other.
+     *
+     * A real PCSS blocker search was attempted and BACKED OUT — see DIRECT_LIGHTING_ROADMAP.md. It needs
+     * the cascade array bound a second time with a plain sampler, and that combination makes naga keep
+     * `#extension GL_EXT_texture_shadow_lod : require`, which this driver rejects outright.
+     *
+     * Anchored on the REAL sun, so the default reproduces the previous shadows exactly and no baseline
+     * moves unless a scene authors a different one. Capped, because the filter is a fixed tap count and
+     * a very wide radius turns a smooth penumbra into visible banding rather than a softer edge.
+     */
+    private _sunPenumbraScale(): number {
+        const light = this._shadowLight?.light;
+        if (!(light instanceof DirectionalLight)) return 1;
+        const ratio = light.angularRadius / DEFAULT_ANGULAR_RADIUS;
+        return Math.min(Renderer.MAX_SUN_PENUMBRA_SCALE, Math.max(1, ratio));
+    }
+
+    /** Beyond this the fixed tap count bands rather than softens. Measured, not principled. */
+    private static readonly MAX_SUN_PENUMBRA_SCALE = 8;
+
+
     private _uploadShadowUniforms(shaderKey: string): void {
         const shader = this._shaderManager.getShader(shaderKey);
         if (!shader) return;
@@ -2395,7 +2596,8 @@ export class Renderer {
         this._shaderManager.setUniform('u_shadowTexel', [1 / this._shadowMapResolution, 1 / this._shadowMapResolution]);
         this._shaderManager.setUniform('u_shadowDepthBias', this._shadowDepthBias);
         this._shaderManager.setUniform('u_shadowNormalBias', this._shadowNormalBias);
-        this._shaderManager.setUniform('u_shadowFilterRadius', this._shadowFilterRadius);
+        this._shaderManager.setUniform('u_shadowFilterRadius',
+                                       this._shadowFilterRadius * this._sunPenumbraScale());
         this._shaderManager.setUniform('u_shadowFilterMode', this._shadowFilterMode);
         this._shaderManager.setUniform('u_shadowStrength', this._shadowStrength);
         this._shaderManager.setUniform('u_cascadeBlend', this._cascadeBlend);
@@ -2465,59 +2667,22 @@ export class Renderer {
     private _setDeferredLighting(scene: Scene): void {
         this._shaderManager.bind('deferredLighting');
         this._uploadSkyLight();
+        const grade = this._cloudGrade(scene);
         this._shaderManager.setUniform('u_numPointLights', Math.min(scene.numPointLights, GLSL_MAX_POINT_LIGHTS));
         this._shaderManager.setUniform('u_numSpotlights', Math.min(scene.numSpotlights, GLSL_MAX_SPOTLIGHTS));
+        this._shaderManager.setUniform('u_sceneAmbient', this._internalAmbient(scene));
         let hasDirectional = false;
         for (const node of scene.lights) {
-            switch (node.type) {
-                case 'directional': {
-                    hasDirectional = true;
-                    const g = this._cloudGrade(scene);
-                    this._shaderManager.setUniform('u_dirLight.diffuse', this._gradedSun(node.light.diffuse, g));
-                    this._shaderManager.setUniform('u_dirLight.specular', this._gradedSun(node.light.specular, g));
-                    this._shaderManager.setUniform('u_dirLight.ambient', node.light.ambient);
-                    this._shaderManager.setUniform('u_dirLight.direction', node.worldForward);
-                    break;
-                }
-                case 'point': {
-                    const PL = POINT_LIGHT_NAMES;
-                    this._shaderManager.setUniform(PL[node.index]['position'], node.worldPosition);
-                    this._shaderManager.setUniform(PL[node.index]['diffuse'], node.light.diffuse);
-                    this._shaderManager.setUniform(PL[node.index]['specular'], node.light.specular);
-                    this._shaderManager.setUniform(PL[node.index]['ambient'], node.light.ambient);
-                    this._shaderManager.setUniform(PL[node.index]['constant'], (node.light as PointLight).constant);
-                    this._shaderManager.setUniform(PL[node.index]['linear'], (node.light as PointLight).linear);
-                    this._shaderManager.setUniform(PL[node.index]['quadratic'], (node.light as PointLight).quadratic);
-                    break;
-                }
-                case 'spotlight': {
-                    const SL = SPOT_LIGHT_NAMES;
-                    this._shaderManager.setUniform(SL[node.index]['position'], node.worldPosition);
-                    this._shaderManager.setUniform(SL[node.index]['direction'], node.worldForward);
-                    this._shaderManager.setUniform(SL[node.index]['diffuse'], node.light.diffuse);
-                    this._shaderManager.setUniform(SL[node.index]['specular'], node.light.specular);
-                    this._shaderManager.setUniform(SL[node.index]['ambient'], node.light.ambient);
-                    this._shaderManager.setUniform(SL[node.index]['constant'], (node.light as Spotlight).constant);
-                    this._shaderManager.setUniform(SL[node.index]['linear'], (node.light as Spotlight).linear);
-                    this._shaderManager.setUniform(SL[node.index]['quadratic'], (node.light as Spotlight).quadratic);
-                    // The shaders compare these against `dot(L, -direction)`, a COSINE — so the cosine is what
-                    // belongs in the uniform. They used to receive the half-angle in radians, which made
-                    // every spotlight's cone ~46-52 degrees regardless of what was authored.
-                    this._shaderManager.setUniform(SL[node.index]['cutOff'], Math.cos((node.light as Spotlight).cutOff * Math.PI / 180));
-                    this._shaderManager.setUniform(SL[node.index]['outerCutOff'], Math.cos((node.light as Spotlight).outerCutOff * Math.PI / 180));
-                    break;
-                }
-            }
+            // Slot -1 is a light past the shader array's end; Scene stops numbering there rather than
+            // letting the 17th point light write `u_pointLights[16]`, a name no block has.
+            if (node.type !== 'directional' && node.index < 0) continue;
+            if (node.type === 'directional') hasDirectional = true;
+            this._uploadLight(node, grade);
         }
 
         // The shader applies the directional light whenever its direction is non-zero — there is no
         // count to gate it — so deleting the light means zeroing the direction here.
-        if (!hasDirectional) {
-            this._shaderManager.setUniform('u_dirLight.direction', [0, 0, 0]);
-            this._shaderManager.setUniform('u_dirLight.diffuse', [0, 0, 0]);
-            this._shaderManager.setUniform('u_dirLight.specular', [0, 0, 0]);
-            this._shaderManager.setUniform('u_dirLight.ambient', [0, 0, 0]);
-        }
+        if (!hasDirectional) this._clearDirectional();
     }
 
     // Build the hemisphere sample kernel (biased toward the origin) and a small tiled rotation-noise
@@ -2970,13 +3135,89 @@ export class Renderer {
         return this._saturation * (1 - Renderer.CLOUD_DESATURATE * c);
     }
 
-    /** A directional light's diffuse/specular after the cloud grade. */
-    private _gradedSun(colour: ArrayLike<number>, grade: { sun: number, white: number }): number[] {
+    /**
+     * Push ONE light's uniforms to the currently bound program.
+     *
+     * One copy, called by both the deferred pass and the forward loop. They used to be two hand-kept
+     * copies of the same twenty lines, and the failure mode of a divergence is the worst kind: a
+     * correct deferred image and a wrong forward one, or the reverse, with nothing saying so.
+     *
+     * Everything photometric is converted to the engine's internal radiance scale here (see
+     * REFERENCE_ILLUMINANCE), and everything derived — the inverse-square range, the cone's
+     * scale/offset — is computed here rather than per pixel.
+     */
+    private _uploadLight(node: LightNode, grade: { sun: number, white: number }): void {
+        switch (node.type) {
+            case 'directional': {
+                const light = node.light as DirectionalLight;
+                // Graded, not mutated — see `_cloudGrade`. The node keeps what the user authored. The
+                // grade now splits in two: cloud whitening is a COLOUR change and dimming is an
+                // INTENSITY change, which is what those two things physically are.
+                this._shaderManager.setUniform('u_dirLight.color', this._whitenedSun(light.color, grade));
+                this._shaderManager.setUniform('u_dirLight.intensity', light.internalIntensity * grade.sun);
+                this._shaderManager.setUniform('u_dirLight.angularRadius', light.angularRadius);
+                this._shaderManager.setUniform('u_dirLight.direction', node.worldForward);
+                break;
+            }
+            case 'point': {
+                const light = node.light as PointLight;
+                const PL = POINT_LIGHT_NAMES[node.index];
+                this._shaderManager.setUniform(PL['position'], node.worldPosition);
+                this._shaderManager.setUniform(PL['color'], light.color);
+                this._shaderManager.setUniform(PL['intensity'], light.internalIntensity);
+                this._shaderManager.setUniform(PL['invRangeSquared'], light.invRangeSquared);
+                this._shaderManager.setUniform(PL['sourceRadius'], light.sourceRadius);
+                break;
+            }
+            case 'spotlight': {
+                const light = node.light as Spotlight;
+                const SL = SPOT_LIGHT_NAMES[node.index];
+                const [coneScale, coneOffset] = light.coneScaleOffset;
+                this._shaderManager.setUniform(SL['position'], node.worldPosition);
+                this._shaderManager.setUniform(SL['direction'], node.worldForward);
+                this._shaderManager.setUniform(SL['color'], light.color);
+                this._shaderManager.setUniform(SL['intensity'], light.internalIntensity);
+                this._shaderManager.setUniform(SL['invRangeSquared'], light.invRangeSquared);
+                this._shaderManager.setUniform(SL['sourceRadius'], light.sourceRadius);
+                // The cone arrives pre-solved into `saturate(cosAngle * scale + offset)`. It was four
+                // copies of an UNGUARDED `1 / (cosInner - cosOuter)` in the shaders, one per lighting
+                // path, every one of which divided by zero when the two angles were equal.
+                this._shaderManager.setUniform(SL['coneScale'], coneScale);
+                this._shaderManager.setUniform(SL['coneOffset'], coneOffset);
+                break;
+            }
+        }
+    }
+
+    /** Zero the directional slot on the currently bound program: no light, not a black one. */
+    private _clearDirectional(): void {
+        this._shaderManager.setUniform('u_dirLight.direction', [0, 0, 0]);
+        this._shaderManager.setUniform('u_dirLight.color', [0, 0, 0]);
+        this._shaderManager.setUniform('u_dirLight.intensity', 0);
+        this._shaderManager.setUniform('u_dirLight.angularRadius', 0);
+    }
+
+    /**
+     * The scene's indirect fill on the internal radiance scale.
+     *
+     * NOT cloud-graded, deliberately. The overcast fill the grade describes is already delivered by the
+     * sky light, which receives what the sun loses (see _uploadSkyLight and CLOUD_SKY_FILL); applying
+     * the same grade here as well would count it twice. This term is the floor for a scene that has
+     * no sky light at all.
+     */
+    private _internalAmbient(scene: Scene | null): number[] {
+        const lux = scene ? scene.ambientLight : [DEFAULT_SCENE_AMBIENT_LUX, DEFAULT_SCENE_AMBIENT_LUX, DEFAULT_SCENE_AMBIENT_LUX];
+        const k = 1 / REFERENCE_ILLUMINANCE;
+        return [lux[0] * k, lux[1] * k, lux[2] * k];
+    }
+
+    /** A directional light's colour after the cloud grade: whitened, but NOT dimmed — see _uploadLight. */
+    private _whitenedSun(colour: ArrayLike<number>, grade: { white: number }): number[] {
         const lum = 0.2126 * colour[0] + 0.7152 * colour[1] + 0.0722 * colour[2];
         return [
-            (colour[0] + (lum - colour[0]) * grade.white) * grade.sun,
-            (colour[1] + (lum - colour[1]) * grade.white) * grade.sun,
-            (colour[2] + (lum - colour[2]) * grade.white) * grade.sun,
+            colour[0] + (lum - colour[0]) * grade.white,
+            colour[1] + (lum - colour[1]) * grade.white,
+            colour[2] + (lum - colour[2]) * grade.white,
         ];
     }
 
@@ -4138,14 +4379,41 @@ export class Renderer {
         'specularMap', 'reflectivityMap'
     ]);
 
-    private _applyMaterial(material: Material): void {
+    /**
+     * Every scalar the material block wants: the material's own properties, and the per-frame camera
+     * and sun that parallax occlusion mapping marches against.
+     *
+     * The last two are why this is a method rather than a two-line loop at each call site. They are NOT
+     * material constants — they change every frame — but the deferred geometry stage has no other
+     * group-1 block to read them from, so they ride in `PBRMaterial` (see chunks/pbrGBuffer.wgsl).
+     * They used to be written ONLY in `_applyMaterial`, which the RHI migration quietly demoted to the
+     * legacy no-reflection fallback: every real PBR draw took an inline `mat.properties` loop instead
+     * and wrote neither. `UniformBlockSet.set` returns false for a name it does not know and
+     * `setUniform` swallows that, so nothing reported it and both members simply stayed ZERO.
+     *
+     * A zero `viewPos` does not switch parallax off — it moves the eye to the world ORIGIN. `toEye`
+     * becomes `normalize(-fragPos)`, which still varies per fragment and still produces a plausible
+     * offset, so the relief looked real. It just could not respond to the camera: the effect was welded
+     * to the object and sat still while you orbited it. A zero `sunDirection` did switch the
+     * height-field self-shadow off outright.
+     *
+     * Called for every material on every pipeline. `setUniform` no-ops where a name is not declared,
+     * which is what makes it safe on the forward and sprite paths that read the camera from their own
+     * lighting block instead.
+     */
+    private _applyMaterialProperties(material: Material): void {
         for (const [name, value] of material.properties)
             this._shaderManager.setUniform(`u_material.${name}`, value);
-        // Camera and sun for parallax occlusion mapping, in the MATERIAL block — the deferred geometry
-        // stage has no other group-1 block to read. Written for every material; `setUniform` no-ops
-        // where the name is not declared.
         this._shaderManager.setUniform('u_material.viewPos', this._activeCamera.position);
         this._shaderManager.setUniform('u_material.sunDirection', this._sunDirection);
+        // Renderer state in a material block for the third time, and the same reason as the two above:
+        // the deferred geometry stage binds no lighting block. `setUniform` no-ops on the material
+        // types that do not declare it (basic, blinn-phong), which is what keeps this one line enough.
+        this._shaderManager.setUniform('u_material.specularAA', this._specularAaEnabled);
+    }
+
+    private _applyMaterial(material: Material): void {
+        this._applyMaterialProperties(material);
         for (const [name, tex] of material.textures) {
             if (Renderer._SOURCE_SLOTS.has(name)) continue;
             const slot = this._textureSlot(name);
@@ -4934,6 +5202,10 @@ export class Renderer {
             // declares. They move when their material application does.
             if (mat.type === 'terrain') {
                 for (const [name, value] of mat.properties) this._shaderManager.setUniform(name, value);
+                // The forward terrain twin needs the roughness filter flag too, or a probe capture
+                // shades terrain with a different NDF width than the frame it is a probe for. It does
+                // NOT need u_sunDirection: this pass reads the sun from its own light list.
+                this._shaderManager.setUniform('u_specularAA', this._specularAaEnabled);
                 if (!viaRHI) { this._applyTerrainMaterial(mat); return false; }
                 const terrainPipeline = this._pipelineFor(shaderType, reflection, {
                     cullMode: Renderer._cullFor(mat.config.side),
@@ -4993,8 +5265,7 @@ export class Renderer {
                 builtFor: node.model.material.type,   // skinned too — see `_geometryPass`
             });
             pass!.setPipeline(pipeline);
-            for (const [name, value] of mat.properties)
-                this._shaderManager.setUniform(`u_material.${name}`, value);
+            this._applyMaterialProperties(mat);
             pass!.setBindGroup(0, this._materialBindGroup(pipeline, mat, envCube));
             // Group 3 when the program has one. The unlit Basic family does not sample shadows at all,
             // so asking for a group it never declared is an error rather than an empty bind — the same
@@ -5080,8 +5351,7 @@ export class Renderer {
 
         // Set material uniforms + bind textures
         if (pipeline) {
-            for (const [name, value] of material.properties)
-                this._shaderManager.setUniform(`u_material.${name}`, value);
+            this._applyMaterialProperties(material);
             pass!.setBindGroup(0, this._materialBindGroup(pipeline, material));
         } else this._applyMaterial(material);
 
@@ -5271,7 +5541,7 @@ export class Renderer {
             // Widen slightly past the outer cone so the falloff's last degree is not clipped by the
             // map's own edge (which the shader treats as "unshadowed").
             const halfFov = Math.min(89, light.outerCutOff * 1.05) * Math.PI / 180;
-            const far = spotShadowFar(light.constant, light.linear, light.quadratic, this._spotShadowDistance);
+            const far = spotShadowFar(light.range, this._spotShadowDistance);
             mat4.perspective(this._spotProj, halfFov * 2, 1, 0.1, far);
             mat4.multiply(this._spotShadowMatrices[layer], this._spotProj, this._spotView);
 
@@ -5392,58 +5662,16 @@ export class Renderer {
     }
 
     private _setLighting(node: LightNode, numPointLights: number, numSpotlights: number): void {
-        const setLights = (shaderName: string, node: LightNode) => {
-            this._shaderManager.bind(shaderName);
-            // console.log(node.type)
-            switch (node.type) {
-                case 'directional': {
-                    // Graded, not mutated — see `_cloudGrade`. The node keeps the colour the user authored.
-                    const g = this._currentScene ? this._cloudGrade(this._currentScene)
-                                                 : { sun: 1, white: 0, sky: 1, flat: 0 };
-                    this._shaderManager.setUniform('u_dirLight.diffuse', this._gradedSun(node.light.diffuse, g));
-                    this._shaderManager.setUniform('u_dirLight.specular', this._gradedSun(node.light.specular, g));
-                    this._shaderManager.setUniform('u_dirLight.ambient', node.light.ambient);
-                    this._shaderManager.setUniform('u_dirLight.direction', node.worldForward);
-                    break;
-                }
-                case 'point': {
-                    const PL = POINT_LIGHT_NAMES;
-                    this._shaderManager.setUniform(PL[node.index]['position'], node.worldPosition);
-                    this._shaderManager.setUniform(PL[node.index]['diffuse'], node.light.diffuse);
-                    this._shaderManager.setUniform(PL[node.index]['specular'], node.light.specular);
-                    this._shaderManager.setUniform(PL[node.index]['ambient'], node.light.ambient);
-                    this._shaderManager.setUniform(PL[node.index]['constant'], (node.light as PointLight).constant);
-                    this._shaderManager.setUniform(PL[node.index]['linear'], (node.light as PointLight).linear);
-                    this._shaderManager.setUniform(PL[node.index]['quadratic'], (node.light as PointLight).quadratic);
-                    break;
-                }
-                case 'spotlight': {
-                    const SL = SPOT_LIGHT_NAMES;
-                    this._shaderManager.setUniform(SL[node.index]['position'], node.worldPosition);
-                    this._shaderManager.setUniform(SL[node.index]['direction'], node.worldForward);
-                    this._shaderManager.setUniform(SL[node.index]['diffuse'], node.light.diffuse);
-                    this._shaderManager.setUniform(SL[node.index]['specular'], node.light.specular);
-                    this._shaderManager.setUniform(SL[node.index]['ambient'], node.light.ambient);
-                    this._shaderManager.setUniform(SL[node.index]['constant'], (node.light as Spotlight).constant);
-                    this._shaderManager.setUniform(SL[node.index]['linear'], (node.light as Spotlight).linear);
-                    this._shaderManager.setUniform(SL[node.index]['quadratic'], (node.light as Spotlight).quadratic);
-                    // The shaders compare these against `dot(L, -direction)`, a COSINE — so the cosine is what
-                    // belongs in the uniform. They used to receive the half-angle in radians, which made
-                    // every spotlight's cone ~46-52 degrees regardless of what was authored.
-                    this._shaderManager.setUniform(SL[node.index]['cutOff'], Math.cos((node.light as Spotlight).cutOff * Math.PI / 180));
-                    this._shaderManager.setUniform(SL[node.index]['outerCutOff'], Math.cos((node.light as Spotlight).outerCutOff * Math.PI / 180));
-                    break;
-                }
-            }
-        }
-
+        if (node.type !== 'directional' && node.index < 0) return;
+        const grade = this._currentScene ? this._cloudGrade(this._currentScene)
+                                         : { sun: 1, white: 0, sky: 1, flat: 0 };
         // Set lighting for both default shaders
         for (const shaderName of allForwardShaders()) {
             try {
                 this._shaderManager.bind(shaderName);
                 this._shaderManager.setUniform('u_numPointLights', Math.min(numPointLights, GLSL_MAX_POINT_LIGHTS));
                 this._shaderManager.setUniform('u_numSpotlights', Math.min(numSpotlights, GLSL_MAX_SPOTLIGHTS));
-                setLights(shaderName, node);
+                this._uploadLight(node, grade);
             } catch (error) {
                 // Shader may not have lighting uniforms (e.g., basic shader)
                 Logger.print('warn', [`Could not set lighting uniforms for shader ${shaderName}:`, error], 'Renderer');
@@ -5486,6 +5714,17 @@ export class Renderer {
         }
         // Both branches above land the image in compose[0]; god rays and bloom keep it there.
         this._composeIndex = 0;
+
+        // Auto-exposure meters `_sceneFBO` — the lit scene, BEFORE god rays and bloom add light back
+        // into the compose buffer. Metering after them would make exposure and bloom chase each other:
+        // bloom brightens the frame, the meter darkens the exposure, which moves bloom's
+        // display-referred threshold, and round again.
+        const nowMs = performance.now();
+        // Clamped: a backgrounded tab or a shader compile can produce a multi-second gap, and letting
+        // that through would snap the exposure in one frame instead of easing.
+        const dt = Math.min(0.25, Math.max(0, (nowMs - this._lastExposureMs) / 1000));
+        this._lastExposureMs = nowMs;
+        this._exposurePass(dt);
 
         // God rays: additively composite the sun's light shafts into the scene BEFORE bloom, so the
         // shafts bloom and go through the single final tonemap like any other light.
@@ -5735,7 +5974,11 @@ export class Renderer {
             // Mode 3 reads its own `texture_depth_2d` binding rather than this one — a depth texture
             // cannot satisfy a colour sampler on WebGPU. The colour slot still needs SOMETHING valid.
             case 'depth':     tex = this._gBufferFBO.colors[0];    mode = 3; break;
-            case 'ssao':      tex = this._ssaoBlurFBO.colors[0];   mode = 4; break;
+            // `_ssaoResult`, not `_ssaoBlurFBO`: the blur is a separately switchable pass, and with it
+            // off the lighting pass reads the RAW buffer while this channel would have gone on showing
+            // a blurred one nothing was consuming. A debug channel that disagrees with the frame is
+            // worse than no channel.
+            case 'ssao':      tex = (this._ssaoResult ?? this._ssaoBlurFBO).colors[0]; mode = 4; break;
             case 'bloom':     tex = this._bloomMips[0].colors[0];  mode = 6; break;
             // The bloom-eligibility mask itself: the scene buffer's ALPHA, as greyscale. White blooms,
             // black cannot. Exists because "bloom does nothing" is otherwise indistinguishable between
@@ -5768,6 +6011,114 @@ export class Renderer {
      * Call of Duty: Advanced Warfare", SIGGRAPH 2014). Chain: bright-pass into mip 0, downsample to
      * the smallest mip, upsample back with additive blending, composite mip 0 over the scene.
      */
+    /**
+     * Meter the lit scene into a 1x1 target, and adapt `_exposure` toward what LAST frame measured.
+     *
+     * A FRAME LATE, deliberately. Reading a target the GPU finished with a frame ago costs nothing;
+     * reading the one just written forces the pipeline to drain, and `readPixels` is synchronous under
+     * the hood on WebGL2. One frame of lag is invisible against an adaptation half-life measured in
+     * seconds — the smoothing below would swallow far more than that.
+     *
+     * `_sceneFBO`, not the compose buffer: metering has to happen on the lit scene before bloom adds
+     * light back into it, or exposure and bloom chase each other — bloom brightens the frame, the meter
+     * darkens the exposure, which changes bloom's display-referred threshold, and so on.
+     */
+    private _exposurePass(dtSeconds: number): void {
+        if (!this._autoExposureEnabled || !this._beginPass('exposure')) return;
+
+        const write = this._exposureWrite;
+        const read = 1 - write;
+        const pass = this._beginFullscreenPass(this._exposureFBOs[write].renderTarget, 'exposure', true,
+                                               undefined, false);
+        const pipeline = this._fullscreenPipeline('exposureMeter', ExposureMeterProgram);
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._sceneFBO.colors[0]]));
+        this._drawFullscreen(pass);
+        this._endFullscreenPass(pass);
+        this._exposureWrite = read;
+
+        // The READ does not happen here. `readPixels` binds a scratch framebuffer of its own and
+        // unbinds to the default one when it is done, so calling it between two passes leaves the
+        // chain that follows drawing somewhere else — measured, and it cost the WebGL2 context
+        // outright (error 37442, CONTEXT_LOST_WEBGL, raised at the next frame's prologue). It is
+        // deferred to `_readExposureSample`, after the frame is finished.
+        this._exposureReadDue = read;
+        this._adaptExposure(dtSeconds);
+    }
+
+    /**
+     * Pull the metering result back, at the very end of the frame and only every few frames.
+     *
+     * Both halves of that matter. `readPixels` binds and then UNBINDS a framebuffer, so between passes
+     * it redirects everything after it; and it is synchronous on WebGL2, so every call drains the
+     * pipeline. Here there is no pass left to disturb, and the interval keeps the drain occasional.
+     */
+    private _readExposureSample(): void {
+        const due = this._exposureReadDue;
+        this._exposureReadDue = -1;
+        if (due < 0 || this._exposureReadPending) return;
+        if (this._exposureMetered && this._frameIndex % Renderer.EXPOSURE_READ_INTERVAL !== 0) return;
+        const target = this._exposureFBOs[due];
+        if (!target || target.colors.length === 0) return;
+
+        this._exposureReadPending = true;
+        device.readPixels(target.colors[0].attachmentView, 0, 0, 1, 1)
+            .then(px => { this._onExposureSample((px[0] + px[1] / 255) / 255); })
+            .catch(() => { /* a resize can invalidate the view mid-flight; the next read recovers */ })
+            .finally(() => { this._exposureReadPending = false; });
+    }
+
+    /** Decode one metering sample into the target EV100 the adaptation is chasing. */
+    private _onExposureSample(encoded: number): void {
+        const [lo, hi] = Renderer.LOG_LUMINANCE_WINDOW;
+        const avgLuminance = Math.pow(2, lo + encoded * (hi - lo));
+        // Place the metered average at middle grey, then read that exposure back as an EV100 so the
+        // clamps and the compensation below are in the unit the inspector already speaks.
+        const wanted = Renderer.EXPOSURE_KEY / Math.max(avgLuminance, 1e-9);
+        this._exposureTargetEV = Math.log2(REFERENCE_ILLUMINANCE / (1.2 * Math.max(1e-9, wanted)));
+        if (!this._exposureMetered) {
+            // First sample: snap rather than ease, or the opening second of every scene is a fade-in.
+            this._exposureEV = this._clampExposureEV(this._exposureTargetEV);
+            this._exposureMetered = true;
+        }
+    }
+    private _exposureTargetEV: number = 0;
+    private _lastExposureMs: number = performance.now();
+
+    private _clampExposureEV(ev: number): number {
+        // Compensation is SUBTRACTED: +1 stop of exposure compensation means a brighter picture, which
+        // on a meter is a LOWER EV. Applied after the clamp so the trim can still reach past it.
+        const lo = Math.min(this._exposureMinEV, this._exposureMaxEV);
+        const hi = Math.max(this._exposureMinEV, this._exposureMaxEV);
+        return Math.min(hi, Math.max(lo, ev)) - this._exposureCompensation;
+    }
+
+    /**
+     * Ease `_exposure` toward the metered target, in EV (log) space, at a rate that does not depend on
+     * the frame rate.
+     *
+     * `1 - exp(-dt * speed)` rather than a fixed `dt * k` per frame: the naive form adapts twice as fast
+     * at 120fps as at 60, so a scene's look would depend on the machine it ran on.
+     *
+     * A RATE, not a duration — `* speed`, not `/ speed`. This was the other way round when it landed,
+     * which made the settings a time constant in seconds while carrying Unreal's rate NAMES and Unreal's
+     * rate VALUES. The digits matched and the meaning did not: at 3.0 it was a three-second constant
+     * where Unreal's is a third of a second, so adaptation ran nine times slower than the numbers
+     * implied, and a slider labelled speed would have moved the wrong way.
+     */
+    private _adaptExposure(dtSeconds: number): void {
+        if (!this._exposureMetered) return;
+        const target = this._clampExposureEV(this._exposureTargetEV);
+        // Brightening the PICTURE means the EV falls, and that is the direction an eye is slow in.
+        const speed = target < this._exposureEV ? this._exposureSpeedDown : this._exposureSpeedUp;
+        // 0 snaps rather than freezing. A rate of zero would literally never converge, which is useless
+        // as the bottom of a slider and is also what `passConfigs.js` relies on to gate this
+        // deterministically.
+        const t = speed <= 0 ? 1 : 1 - Math.exp(-Math.max(0, dtSeconds) * speed);
+        this._exposureEV += (target - this._exposureEV) * t;
+        this._exposure = REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, this._exposureEV));
+    }
+
     private _bloomPass(): void {
         // Nothing to add back: skip the whole chain rather than blurring an image no one will read.
         if (this._bloomIntensity <= 0 || !this._passEnabled['bloom.bright']) return;
@@ -6079,6 +6430,28 @@ export class Renderer {
     public get exposure(): number { return this._exposure; }
     public set exposure(exposure: number) { this._exposure = Math.max(0, exposure); }
 
+    /**
+     * Exposure as a photographic EV100, which is the same setting written the way a light meter writes
+     * it: `exposure = REFERENCE_ILLUMINANCE / (1.2 * 2^EV100)`.
+     *
+     * A re-parameterisation, not a new control — `_exposure` remains the storage, and EV100 15 is
+     * exactly the default 2.0, so nothing moves by adding this. It exists because photometric lights
+     * make exposure LOAD-BEARING PER SCENE: at EV100 15 (a sunny exterior) a 1500 lm bulb two metres
+     * away is invisible, and that is physics rather than a bug — the sun really is about three decades
+     * brighter than a lamp, and one global exposure can only meter one of them. An interior wants
+     * roughly EV100 5. Metering it automatically is a later change; this is the manual escape hatch,
+     * and without it the lux and lumen numbers in the inspector mean nothing to the eye.
+     *
+     * Exposure is already per-scene state (the editor stores `config.render` in each scene's blob), so
+     * a cave and a hillside in one project can each carry their own.
+     */
+    public get ev100(): number {
+        return Math.log2(REFERENCE_ILLUMINANCE / (1.2 * Math.max(1e-6, this._exposure)));
+    }
+    public set ev100(ev: number) {
+        this._exposure = REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, ev));
+    }
+
     public get bloomThreshold(): number { return this._bloomThreshold; }
     public set bloomThreshold(v: number) { this._bloomThreshold = Math.max(0, v); }
 
@@ -6121,6 +6494,37 @@ export class Renderer {
     public set ssaoPower(power: number) { this._ssaoPower = Math.max(0, power); }
     public get ssaoBias(): number { return this._ssaoBias; }
     public set ssaoBias(bias: number) { this._ssaoBias = Math.max(0, bias); }
+
+    /** See {@link RenderSettings.specularOcclusionEnabled}. */
+    public get specularOcclusionEnabled(): boolean { return this._specularOcclusionEnabled; }
+    public set specularOcclusionEnabled(on: boolean) { this._specularOcclusionEnabled = on; }
+
+    /** See {@link RenderSettings.specularAaEnabled}. */
+    public get specularAaEnabled(): boolean { return this._specularAaEnabled; }
+    public set specularAaEnabled(on: boolean) { this._specularAaEnabled = on; }
+
+    /** See {@link RenderSettings.horizonOcclusionEnabled}. */
+    public get horizonOcclusionEnabled(): boolean { return this._horizonOcclusionEnabled; }
+    public set horizonOcclusionEnabled(on: boolean) { this._horizonOcclusionEnabled = on; }
+
+    /** See {@link RenderSettings.autoExposureEnabled}. */
+    public get autoExposureEnabled(): boolean { return this._autoExposureEnabled; }
+    public set autoExposureEnabled(on: boolean) {
+        // Seed the adaptation from wherever the manual value stands, so switching it on eases away
+        // from the current picture instead of snapping to the metered one.
+        if (on && !this._autoExposureEnabled) { this._exposureEV = this.ev100; this._exposureMetered = false; }
+        this._autoExposureEnabled = on;
+    }
+    public get exposureCompensation(): number { return this._exposureCompensation; }
+    public set exposureCompensation(v: number) { this._exposureCompensation = v; }
+    public get exposureMinEV(): number { return this._exposureMinEV; }
+    public set exposureMinEV(v: number) { this._exposureMinEV = v; }
+    public get exposureMaxEV(): number { return this._exposureMaxEV; }
+    public set exposureMaxEV(v: number) { this._exposureMaxEV = v; }
+    public get exposureSpeedUp(): number { return this._exposureSpeedUp; }
+    public set exposureSpeedUp(v: number) { this._exposureSpeedUp = Math.max(0, v); }
+    public get exposureSpeedDown(): number { return this._exposureSpeedDown; }
+    public set exposureSpeedDown(v: number) { this._exposureSpeedDown = Math.max(0, v); }
 
     /** Per-object camera frustum culling for the main color passes (on by default). */
     public get frustumCulling(): boolean { return this._frustumCulling; }
@@ -6400,6 +6804,15 @@ export class Renderer {
             chromaticAberrationStrength: this._chromaticAberrationStrength,
             saturation: this._saturation,
             ssaoEnabled: this._ssaoEnabled,
+            specularOcclusionEnabled: this._specularOcclusionEnabled,
+            specularAaEnabled: this._specularAaEnabled,
+            horizonOcclusionEnabled: this._horizonOcclusionEnabled,
+            autoExposureEnabled: this._autoExposureEnabled,
+            exposureCompensation: this._exposureCompensation,
+            exposureMinEV: this._exposureMinEV,
+            exposureMaxEV: this._exposureMaxEV,
+            exposureSpeedUp: this._exposureSpeedUp,
+            exposureSpeedDown: this._exposureSpeedDown,
             ssaoRadius: this._ssaoRadius,
             ssaoPower: this._ssaoPower,
             ssaoBias: this._ssaoBias,
@@ -6459,6 +6872,17 @@ export class Renderer {
         if (s.chromaticAberrationStrength !== undefined) this.chromaticAberrationStrength = s.chromaticAberrationStrength;
         if (s.saturation !== undefined) this.saturation = s.saturation;
         if (s.ssaoEnabled !== undefined) this.ssaoEnabled = s.ssaoEnabled;
+        if (s.specularOcclusionEnabled !== undefined)
+            this.specularOcclusionEnabled = s.specularOcclusionEnabled;
+        if (s.specularAaEnabled !== undefined) this.specularAaEnabled = s.specularAaEnabled;
+        if (s.horizonOcclusionEnabled !== undefined)
+            this.horizonOcclusionEnabled = s.horizonOcclusionEnabled;
+        if (s.autoExposureEnabled !== undefined) this.autoExposureEnabled = s.autoExposureEnabled;
+        if (s.exposureCompensation !== undefined) this._exposureCompensation = s.exposureCompensation;
+        if (s.exposureMinEV !== undefined) this._exposureMinEV = s.exposureMinEV;
+        if (s.exposureMaxEV !== undefined) this._exposureMaxEV = s.exposureMaxEV;
+        if (s.exposureSpeedUp !== undefined) this._exposureSpeedUp = Math.max(0, s.exposureSpeedUp);
+        if (s.exposureSpeedDown !== undefined) this._exposureSpeedDown = Math.max(0, s.exposureSpeedDown);
         if (s.ssaoRadius !== undefined) this.ssaoRadius = s.ssaoRadius;
         if (s.ssaoPower !== undefined) this.ssaoPower = s.ssaoPower;
         if (s.ssaoBias !== undefined) this.ssaoBias = s.ssaoBias;
@@ -6599,8 +7023,7 @@ export class Renderer {
             this._shaderManager.setUniform('u_model', node.worldTransform);
 
             // Set Material related uniforms
-            for (const [name, value] of node.model.material.properties)
-                this._shaderManager.setUniform(`u_material.${name}`, value);
+            this._applyMaterialProperties(node.model.material);
 
             // Textures: a bind group when the program has build-time reflection, otherwise the hand-
             // rolled slot table this used to carry — which was a third copy of `_textureSlot`, drifting

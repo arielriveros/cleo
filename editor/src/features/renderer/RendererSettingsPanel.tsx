@@ -68,12 +68,34 @@ const MB_QUALITY: { label: string; samples: number }[] = [
 ];
 
 export default function RendererSettingsPanel() {
-  const { instance, isPlayMode } = useCleoEngine();
+  const { instance, isPlayMode, eventEmitter } = useCleoEngine();
   const renderer: any = instance?.renderer ?? null;
+
+  /**
+   * Mark the scene dirty after a settings change, so the change is actually SAVED.
+   *
+   * Everything in this panel lives in `Renderer.getRenderSettings()`, which `saveCurrentScene` folds
+   * into the scene blob as `config.render` and `applyGameData` restores on every open — so these are
+   * per-scene state and ride the same blob through publish, export and the standalone player. What was
+   * missing is the notification: writing `renderer.x = v` mutates the engine directly and emits
+   * nothing, so a tuned look survived until the next refresh only if some UNRELATED edit happened to
+   * mark the scene dirty first. `SceneSettings` does the same thing for the clear colour.
+   */
+  const touch = () => eventEmitter?.emit('SCENE_CHANGED');
 
   // Local mirror of renderer state so the controls re-render; initialized from the renderer getters.
   const [debugView, setDebugViewState] = useState<string>(() => renderer?.debugView ?? 'final');
-  const [exposure, setExposure] = useState<number>(() => renderer?.exposure ?? 2.0);
+  // EV100, not the raw multiplier: same storage, written the way a photographer writes it.
+  const [ev100, setEv100] = useState<number>(() => renderer?.ev100 ?? 15);
+  const [autoExposure, setAutoExposure] = useState<boolean>(() => renderer?.autoExposureEnabled ?? true);
+  const [specularOcclusion, setSpecularOcclusion] = useState<boolean>(() => renderer?.specularOcclusionEnabled ?? true);
+  const [specularAa, setSpecularAa] = useState<boolean>(() => renderer?.specularAaEnabled ?? true);
+  const [horizonOcclusion, setHorizonOcclusion] = useState<boolean>(() => renderer?.horizonOcclusionEnabled ?? true);
+  const [exposureComp, setExposureComp] = useState<number>(() => renderer?.exposureCompensation ?? 0);
+  const [exposureMinEV, setExposureMinEV] = useState<number>(() => renderer?.exposureMinEV ?? 2);
+  const [exposureMaxEV, setExposureMaxEV] = useState<number>(() => renderer?.exposureMaxEV ?? 17);
+  const [exposureSpeedUp, setExposureSpeedUp] = useState<number>(() => renderer?.exposureSpeedUp ?? 3);
+  const [exposureSpeedDown, setExposureSpeedDown] = useState<number>(() => renderer?.exposureSpeedDown ?? 1);
   const [bloomThreshold, setBloomThreshold] = useState<number>(() => renderer?.bloomThreshold ?? 1.0);
   const [bloomKnee, setBloomKnee] = useState<number>(() => renderer?.bloomKnee ?? 0.5);
   const [bloomIntensity, setBloomIntensity] = useState<number>(() => renderer?.bloomIntensity ?? 0.6);
@@ -126,7 +148,16 @@ export default function RendererSettingsPanel() {
   const syncFromRenderer = useCallback(() => {
     if (!renderer) return;
     setDebugViewState(renderer.debugView);
-    setExposure(renderer.exposure);
+    setEv100(renderer.ev100);
+    setAutoExposure(renderer.autoExposureEnabled);
+    setSpecularOcclusion(renderer.specularOcclusionEnabled);
+    setSpecularAa(renderer.specularAaEnabled);
+    setHorizonOcclusion(renderer.horizonOcclusionEnabled);
+    setExposureComp(renderer.exposureCompensation);
+    setExposureMinEV(renderer.exposureMinEV);
+    setExposureMaxEV(renderer.exposureMaxEV);
+    setExposureSpeedUp(renderer.exposureSpeedUp);
+    setExposureSpeedDown(renderer.exposureSpeedDown);
     setBloomThreshold(renderer.bloomThreshold);
     setBloomKnee(renderer.bloomKnee);
     setBloomIntensity(renderer.bloomIntensity);
@@ -227,53 +258,80 @@ export default function RendererSettingsPanel() {
             + 'levels meet seamlessly.'}
       >
         <Toggle label='Frustum Culling' checked={frustumCulling} className='my-1'
-          onChange={(c) => { renderer.frustumCulling = c; setFrustumCulling(c); }} />
+          onChange={(c) => { renderer.frustumCulling = c; setFrustumCulling(c); touch(); }} />
         <Field label='Foliage Dist'>
           <NumberInput value={foliageCullDistance} min={0} step={5} className='flex-1 text-right px-1 py-0.5'
-            onChange={(v) => { renderer.foliageCullDistance = v; setFoliageCullDistance(v); }} />
+            onChange={(v) => { renderer.foliageCullDistance = v; setFoliageCullDistance(v); touch(); }} />
         </Field>
         <Field label='Cell Size'>
           <NumberInput value={foliageCellSize} min={1} step={4} className='flex-1 text-right px-1 py-0.5'
-            onChange={(v) => { renderer.foliageCellSize = v; setFoliageCellSize(v); }} />
+            onChange={(v) => { renderer.foliageCellSize = v; setFoliageCellSize(v); touch(); }} />
         </Field>
         <Toggle label='Terrain LOD' checked={terrainLod} className='my-1'
-          onChange={(c) => { renderer.terrainLodEnabled = c; setTerrainLod(c); }} />
+          onChange={(c) => { renderer.terrainLodEnabled = c; setTerrainLod(c); touch(); }} />
         <Field label='LOD1 Dist'>
           <NumberInput value={terrainLodDist1} min={0} step={10} className='flex-1 text-right px-1 py-0.5'
-            onChange={(v) => { renderer.terrainLodDistance1 = v; setTerrainLodDist1(renderer.terrainLodDistance1); }} />
+            onChange={(v) => { renderer.terrainLodDistance1 = v; setTerrainLodDist1(renderer.terrainLodDistance1); touch(); }} />
         </Field>
         <div className='flex items-center gap-1 my-1 text-xs'>
           <span className='w-[70px] shrink-0'>LOD1 Detail</span>
           <SegmentedControl
             value={terrainLodStep1}
-            onChange={(step) => { renderer.terrainLodStep1 = step; setTerrainLodStep1(step); }}
+            onChange={(step) => { renderer.terrainLodStep1 = step; setTerrainLodStep1(step); touch(); }}
             options={LOD_DETAIL.map((d) => ({ value: d.step, label: d.label, title: d.title }))}
           />
         </div>
         <Field label='LOD2 Dist'>
           <NumberInput value={terrainLodDist2} min={0} step={10} className='flex-1 text-right px-1 py-0.5'
-            onChange={(v) => { renderer.terrainLodDistance2 = v; setTerrainLodDist2(renderer.terrainLodDistance2); }} />
+            onChange={(v) => { renderer.terrainLodDistance2 = v; setTerrainLodDist2(renderer.terrainLodDistance2); touch(); }} />
         </Field>
         <div className='flex items-center gap-1 my-1 text-xs'>
           <span className='w-[70px] shrink-0'>LOD2 Detail</span>
           <SegmentedControl
             value={terrainLodStep2}
-            onChange={(step) => { renderer.terrainLodStep2 = step; setTerrainLodStep2(step); }}
+            onChange={(step) => { renderer.terrainLodStep2 = step; setTerrainLodStep2(step); touch(); }}
             options={LOD_DETAIL.map((d) => ({ value: d.step, label: d.label, title: d.title }))}
           />
         </div>
       </Section>
 
-      <Section title='Tone / Post' hint={'Exposure scales linear HDR before the ACES tonemap and sRGB encode at the final present. '
+      <Section title='Tone / Post' hint={'Exposure is written as a photographic EV100 — the same setting a light meter reads. '
+        + 'It matters more than it used to: lights carry real photometric intensity, and the sun is about three decades '
+        + 'brighter than a lamp, so one exposure can only meter one of them. A sunny exterior sits near EV 15, an '
+        + 'interior near EV 5. Exposure is per-scene, so a cave and a hillside can each carry their own. '
         + 'Saturation is a trim applied in linear, before the tonemap, so the filmic shoulder still rolls off correctly — '
         + 'a Sky Light with clouds multiplies its own desaturation on top of this. '
         + 'Chromatic aberration offsets the colour channels radially.'}>
-        <Slider label='Exposure' value={exposure} min={0} max={5} step={0.05}
-          onChange={(v) => { renderer.exposure = v; setExposure(v); }} />
+        <Toggle label='Auto exposure' checked={autoExposure}
+          onChange={(v) => { renderer.autoExposureEnabled = v; setAutoExposure(v); touch(); }} />
+        {/* The manual slider is REPLACED rather than disabled while metering is on: a control that
+            silently loses its value on the next frame is worse than one that is not there. The
+            artist's handle is Compensation, which is how a camera works. */}
+        {!autoExposure && <Slider label={`Exposure (EV ${ev100.toFixed(2)})`}
+          value={ev100} min={-4} max={17} step={0.25}
+          onChange={(v) => { renderer.ev100 = v; setEv100(v); touch(); }} />}
+        {autoExposure && <>
+          <Hint>Metered at EV {ev100.toFixed(2)}.</Hint>
+          <Slider label='Compensation (stops)' value={exposureComp} min={-4} max={4} step={0.1}
+            onChange={(v) => { renderer.exposureCompensation = v; setExposureComp(v); touch(); }} />
+          <Slider label='Min EV' value={exposureMinEV} min={-4} max={17} step={0.5}
+            onChange={(v) => { renderer.exposureMinEV = v; setExposureMinEV(v); touch(); }} />
+          <Slider label='Max EV' value={exposureMaxEV} min={-4} max={20} step={0.5}
+            onChange={(v) => { renderer.exposureMaxEV = v; setExposureMaxEV(v); touch(); }} />
+          {/* SPEEDS, so right is faster — the same two controls Unreal exposes, under the same names
+              and with its defaults (3 and 1). They were labelled as durations in seconds while the
+              code treated them as a time constant, which made a higher number adapt SLOWER. */}
+          <Slider label='Adaptation speed (to bright)' value={exposureSpeedUp} min={0} max={10} step={0.1}
+            onChange={(v) => { renderer.exposureSpeedUp = v; setExposureSpeedUp(v); touch(); }} />
+          <Slider label='Adaptation speed (to dark)' value={exposureSpeedDown} min={0} max={10} step={0.1}
+            onChange={(v) => { renderer.exposureSpeedDown = v; setExposureSpeedDown(v); touch(); }} />
+          <Hint>Higher adapts faster; 0 snaps with no easing. Eyes adjust to brightening
+            faster than to darkening, which is why the two differ by default.</Hint>
+        </>}
         <Slider label='Saturation' value={saturation} min={0} max={2} step={0.01}
-          onChange={(v) => { renderer.saturation = v; setSaturation(v); }} />
+          onChange={(v) => { renderer.saturation = v; setSaturation(v); touch(); }} />
         <Slider label='Chromatic' value={chromatic} min={0} max={2} step={0.01}
-          onChange={(v) => { renderer.chromaticAberrationStrength = v; setChromatic(v); }} />
+          onChange={(v) => { renderer.chromaticAberrationStrength = v; setChromatic(v); touch(); }} />
       </Section>
 
       <Section
@@ -284,26 +342,26 @@ export default function RendererSettingsPanel() {
             + 'set it, so they never bloom while it is on (see the Bloom Mask channel).'}
       >
         <Slider label='Threshold' value={bloomThreshold} min={0} max={5} step={0.05}
-          onChange={(v) => { renderer.bloomThreshold = v; setBloomThreshold(v); }} />
+          onChange={(v) => { renderer.bloomThreshold = v; setBloomThreshold(v); touch(); }} />
         <Slider label='Knee' value={bloomKnee} min={0} max={2} step={0.05}
-          onChange={(v) => { renderer.bloomKnee = v; setBloomKnee(v); }} />
+          onChange={(v) => { renderer.bloomKnee = v; setBloomKnee(v); touch(); }} />
         <Slider label='Intensity' value={bloomIntensity} min={0} max={3} step={0.05}
-          onChange={(v) => { renderer.bloomIntensity = v; setBloomIntensity(v); }} />
+          onChange={(v) => { renderer.bloomIntensity = v; setBloomIntensity(v); touch(); }} />
         <Toggle label='Restrict to lit surfaces' checked={bloomMask}
-          onChange={(v) => { renderer.bloomMaskEnabled = v; setBloomMask(v); }} />
+          onChange={(v) => { renderer.bloomMaskEnabled = v; setBloomMask(v); touch(); }} />
         {bloomOff && <Hint>Bloom is currently inactive: {bloomOff}</Hint>}
       </Section>
 
       <Section title='Motion Blur' hint='Camera-reprojection motion blur (UE5-style). Amount scales the shutter length.'>
         <Toggle label='Enabled' checked={motionBlur} className='my-1'
-          onChange={(c) => { renderer.motionBlurEnabled = c; setMotionBlur(c); }} />
+          onChange={(c) => { renderer.motionBlurEnabled = c; setMotionBlur(c); touch(); }} />
         <Slider label='Amount' value={motionBlurIntensity} min={0} max={4} step={0.05}
-          onChange={(v) => { renderer.motionBlurIntensity = v; setMotionBlurIntensity(v); }} />
+          onChange={(v) => { renderer.motionBlurIntensity = v; setMotionBlurIntensity(v); touch(); }} />
         <div className='flex items-center gap-1 my-1 text-xs'>
           <span className='w-[70px] shrink-0'>Quality</span>
           <SegmentedControl
             value={motionBlurSamples}
-            onChange={(samples) => { renderer.motionBlurSamples = samples; setMotionBlurSamples(samples); }}
+            onChange={(samples) => { renderer.motionBlurSamples = samples; setMotionBlurSamples(samples); touch(); }}
             options={MB_QUALITY.map((q) => ({ value: q.samples, label: q.label }))}
           />
         </div>
@@ -323,13 +381,13 @@ export default function RendererSettingsPanel() {
             + 'still captures occluders.'}
       >
         <Toggle label='Enabled' checked={shadowsEnabled} className='my-1'
-          onChange={(c) => { renderer.shadowsEnabled = c; setShadowsEnabled(c); }} />
+          onChange={(c) => { renderer.shadowsEnabled = c; setShadowsEnabled(c); touch(); }} />
 
         <div className='flex items-center gap-1 my-1 text-xs'>
           <span className='w-[70px] shrink-0'>Resolution</span>
           <SegmentedControl
             value={shadowRes}
-            onChange={(size) => { renderer.shadowMapResolution = size; setShadowRes(renderer.shadowMapResolution); }}
+            onChange={(size) => { renderer.shadowMapResolution = size; setShadowRes(renderer.shadowMapResolution); touch(); }}
             options={SHADOW_RES.map((r) => ({ value: r.size, label: r.label, title: r.title }))}
           />
         </div>
@@ -337,45 +395,45 @@ export default function RendererSettingsPanel() {
           <span className='w-[70px] shrink-0'>Cascades</span>
           <SegmentedControl
             value={shadowCascades}
-            onChange={(n) => { renderer.shadowCascades = n; setShadowCascades(renderer.shadowCascades); }}
+            onChange={(n) => { renderer.shadowCascades = n; setShadowCascades(renderer.shadowCascades); touch(); }}
             options={SHADOW_CASCADES}
           />
         </div>
         <Field label='Distance'>
           <NumberInput value={shadowDistance} min={1} step={10} className='flex-1 text-right px-1 py-0.5'
-            onChange={(v) => { renderer.shadowDistance = v; setShadowDistance(renderer.shadowDistance); }} />
+            onChange={(v) => { renderer.shadowDistance = v; setShadowDistance(renderer.shadowDistance); touch(); }} />
         </Field>
         <Slider label='Split &#955;' value={shadowLambda} min={0} max={1} step={0.05}
-          onChange={(v) => { renderer.shadowSplitLambda = v; setShadowLambda(v); }} />
+          onChange={(v) => { renderer.shadowSplitLambda = v; setShadowLambda(v); touch(); }} />
 
         <div className='flex items-center gap-1 my-1 text-xs'>
           <span className='w-[70px] shrink-0'>Filter</span>
           <SegmentedControl
             value={shadowFilterMode}
-            onChange={(m) => { renderer.shadowFilterMode = m; setShadowFilterMode(renderer.shadowFilterMode); }}
+            onChange={(m) => { renderer.shadowFilterMode = m; setShadowFilterMode(renderer.shadowFilterMode); touch(); }}
             options={SHADOW_FILTER.map((f) => ({ value: f.mode, label: f.label, title: f.title }))}
           />
         </div>
         <Slider label='Softness' value={shadowSoftness} min={0} max={8} step={0.25}
           readout={(v) => (v <= 0 ? 'hard' : `${v.toFixed(2)} px`)}
-          onChange={(v) => { renderer.shadowFilterRadius = v; setShadowSoftness(v); }} />
+          onChange={(v) => { renderer.shadowFilterRadius = v; setShadowSoftness(v); touch(); }} />
         <Slider label='Strength' value={shadowStrength} min={0} max={1} step={0.05}
-          onChange={(v) => { renderer.shadowStrength = v; setShadowStrength(v); }} />
+          onChange={(v) => { renderer.shadowStrength = v; setShadowStrength(v); touch(); }} />
         <Slider label='Blend' value={shadowBlend} min={0} max={0.5} step={0.01}
-          onChange={(v) => { renderer.shadowCascadeBlend = v; setShadowBlend(v); }} />
+          onChange={(v) => { renderer.shadowCascadeBlend = v; setShadowBlend(v); touch(); }} />
 
         <Slider label='Depth Bias' value={shadowDepthBias} min={0} max={0.5} step={0.005}
-          onChange={(v) => { renderer.shadowDepthBias = v; setShadowDepthBias(v); }} />
+          onChange={(v) => { renderer.shadowDepthBias = v; setShadowDepthBias(v); touch(); }} />
         <Slider label='Normal Bias' value={shadowNormalBias} min={0} max={8} step={0.1}
-          onChange={(v) => { renderer.shadowNormalBias = v; setShadowNormalBias(v); }} />
+          onChange={(v) => { renderer.shadowNormalBias = v; setShadowNormalBias(v); touch(); }} />
 
         <Toggle label='Stabilize' checked={shadowStabilize} className='my-1'
-          onChange={(c) => { renderer.shadowStabilize = c; setShadowStabilize(c); }} />
+          onChange={(c) => { renderer.shadowStabilize = c; setShadowStabilize(c); touch(); }} />
         <Toggle label='Stagger Updates' checked={shadowStagger} className='my-1'
-          onChange={(c) => { renderer.shadowStagger = c; setShadowStagger(c); }} />
+          onChange={(c) => { renderer.shadowStagger = c; setShadowStagger(c); touch(); }} />
         <Field label='Caster Pad'>
           <NumberInput value={shadowCasterPad} min={0} step={5} className='flex-1 text-right px-1 py-0.5'
-            onChange={(v) => { renderer.shadowCasterPad = v; setShadowCasterPad(renderer.shadowCasterPad); }} />
+            onChange={(v) => { renderer.shadowCasterPad = v; setShadowCasterPad(renderer.shadowCasterPad); touch(); }} />
         </Field>
 
         {debugView === 'shadow' && (
@@ -383,7 +441,7 @@ export default function RendererSettingsPanel() {
             <span className='w-[70px] shrink-0'>View Layer</span>
             <SegmentedControl
               value={shadowDebugLayer}
-              onChange={(n) => { renderer.shadowDebugLayer = n; setShadowDebugLayer(renderer.shadowDebugLayer); }}
+              onChange={(n) => { renderer.shadowDebugLayer = n; setShadowDebugLayer(renderer.shadowDebugLayer); touch(); }}
               options={Array.from({ length: shadowCascades }, (_, i) => ({ value: i, label: String(i) }))}
             />
           </div>
@@ -399,44 +457,63 @@ export default function RendererSettingsPanel() {
             + `DEPTH units here, not world units: perspective depth does not convert linearly.`}
       >
         <Toggle label='Enabled' checked={spotShadows} className='my-1'
-          onChange={(c) => { renderer.spotShadowsEnabled = c; setSpotShadows(c); }} />
+          onChange={(c) => { renderer.spotShadowsEnabled = c; setSpotShadows(c); touch(); }} />
         <div className='flex items-center gap-1 my-1 text-xs'>
           <span className='w-[70px] shrink-0'>Resolution</span>
           <SegmentedControl
             value={spotShadowRes}
-            onChange={(size) => { renderer.spotShadowResolution = size; setSpotShadowRes(renderer.spotShadowResolution); }}
+            onChange={(size) => { renderer.spotShadowResolution = size; setSpotShadowRes(renderer.spotShadowResolution); touch(); }}
             options={SPOT_RES.map((r) => ({ value: r.size, label: r.label }))}
           />
         </div>
         <Field label='Max Dist'>
           <NumberInput value={spotShadowDist} min={1} step={10} className='flex-1 text-right px-1 py-0.5'
-            onChange={(v) => { renderer.spotShadowDistance = v; setSpotShadowDist(renderer.spotShadowDistance); }} />
+            onChange={(v) => { renderer.spotShadowDistance = v; setSpotShadowDist(renderer.spotShadowDistance); touch(); }} />
         </Field>
         <Slider label='Bias' value={spotShadowBias} min={0} max={0.02} step={0.0005}
           readout={(v) => v.toFixed(4)}
-          onChange={(v) => { renderer.spotShadowBias = v; setSpotShadowBias(v); }} />
+          onChange={(v) => { renderer.spotShadowBias = v; setSpotShadowBias(v); touch(); }} />
         {!shadowsEnabled && <Hint>The global Shadows toggle above is off, which also disables these.</Hint>}
       </Section>
 
       <Section title='SSAO' hint='Screen-space ambient occlusion, deferred path only. Radius is in world units; Power sharpens the falloff; Bias lifts the sample off the surface to stop it occluding itself.'>
         <Toggle label='Enabled' checked={ssaoEnabled} className='my-1'
-          onChange={(c) => { renderer.ssaoEnabled = c; setSsaoEnabled(c); }} />
+          onChange={(c) => { renderer.ssaoEnabled = c; setSsaoEnabled(c); touch(); }} />
         <Slider label='Radius' value={ssaoRadius} min={0} max={2} step={0.05}
-          onChange={(v) => { renderer.ssaoRadius = v; setSsaoRadius(v); }} />
+          onChange={(v) => { renderer.ssaoRadius = v; setSsaoRadius(v); touch(); }} />
         <Slider label='Power' value={ssaoPower} min={0} max={5} step={0.1}
-          onChange={(v) => { renderer.ssaoPower = v; setSsaoPower(v); }} />
+          onChange={(v) => { renderer.ssaoPower = v; setSsaoPower(v); touch(); }} />
         <Slider label='Bias' value={ssaoBias} min={0} max={0.2} step={0.005}
-          onChange={(v) => { renderer.ssaoBias = v; setSsaoBias(v); }} />
+          onChange={(v) => { renderer.ssaoBias = v; setSsaoBias(v); touch(); }} />
+      </Section>
+
+      <Section title='Shading'
+        hint={'Three corrections to how the specular lobe behaves, all on by default and all all but '
+            + 'invisible on rough surfaces by design — they act where the highlight is sharp. '
+            + 'Specular occlusion asks how much of the narrow reflection CONE is blocked rather than '
+            + 'the whole hemisphere, so a polished floor in a corner keeps the reflection of the room. '
+            + 'Specular AA widens roughness by the sub-pixel variance of the normal, which is what '
+            + 'stops a sharp highlight flickering as it moves — MSAA cannot fix that, because the '
+            + 'aliasing is in the shading rather than the coverage. Horizon occlusion drops the '
+            + 'reflection where a normal map has tilted it INTO the surface, which is the wet-looking '
+            + 'rim on strongly normal-mapped materials seen at an angle. Turn one off to see what it '
+            + 'was doing.'}>
+        <Toggle label='Specular occlusion' checked={specularOcclusion} className='my-1'
+          onChange={(c) => { renderer.specularOcclusionEnabled = c; setSpecularOcclusion(c); touch(); }} />
+        <Toggle label='Specular antialiasing' checked={specularAa} className='my-1'
+          onChange={(c) => { renderer.specularAaEnabled = c; setSpecularAa(c); touch(); }} />
+        <Toggle label='Horizon occlusion' checked={horizonOcclusion} className='my-1'
+          onChange={(c) => { renderer.horizonOcclusionEnabled = c; setHorizonOcclusion(c); touch(); }} />
       </Section>
 
       <Section title='Grid' hint='Editor-only reference grid. Never rendered in a published game.'>
         <Toggle label='Visible' checked={gridVisible} className='my-1'
-          onChange={(c) => { renderer.setGridVisible(c); setGridVisible(c); }} />
+          onChange={(c) => { renderer.setGridVisible(c); setGridVisible(c); touch(); }} />
         <div className='flex items-center gap-1 my-1 text-xs'>
           <span className='w-[70px] shrink-0'>Plane</span>
           <SegmentedControl
             value={gridPlane}
-            onChange={(p) => { renderer.setGridPlane(p); setGridPlane(p); }}
+            onChange={(p) => { renderer.setGridPlane(p); setGridPlane(p); touch(); }}
             itemClassName='uppercase'
             options={[{ value: 'xz', label: 'XZ' }, { value: 'xy', label: 'XY' }]}
           />

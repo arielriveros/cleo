@@ -37,7 +37,7 @@ struct BasicGeometryMaterial {
 
 struct GBuffer {
     @location(0) gAlbedoMetallic: vec4<f32>,    // rgb = albedo (0 => unlit), a = metallic
-    @location(1) gNormalRoughness: vec4<f32>,   // rgb = world normal (unused for unlit), a = roughness
+    @location(1) gNormalRoughness: vec4<f32>,   // rg = oct normal, b = reflectance, a = roughness (normal unused: unlit)
     @location(2) gEmissiveAO: vec4<f32>,        // rgb = emissive (the colour), a = ambient occlusion
 };
 
@@ -57,7 +57,9 @@ fn fs_main(in: VertexOutput) -> GBuffer {
 
     var out: GBuffer;
     out.gAlbedoMetallic = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-    out.gNormalRoughness = vec4<f32>(0.0, 0.0, 1.0, 1.0);
+    // (0, 0) IS the octahedral encoding of +Z, so this writes the same normal it always did without
+    // needing the encoder. Unlit anyway — deferredLighting takes the emissive branch for this material.
+    out.gNormalRoughness = vec4<f32>(0.0, 0.0, 0.5, 1.0);
     out.gEmissiveAO = vec4<f32>(color, 1.0);
     return out;
 }

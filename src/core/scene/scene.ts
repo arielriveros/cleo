@@ -17,6 +17,7 @@ import { UINode } from "./nodes/ui/uiNode";
 import { UIRootNode } from "./nodes/ui/uiRoot";
 import { parseNodeJson } from "./nodes/parseNodeJson";
 import { mat4, vec3 } from "gl-matrix";
+import { DEFAULT_SCENE_AMBIENT_LUX, legacyAmbientFromSceneJson, MAX_POINT_LIGHTS, MAX_SPOTLIGHTS } from "../../graphics/lighting";
 import { Logger } from '../logger'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
 import { sceneStats, resetSceneStats, SceneStats } from "./sceneStats";
@@ -70,6 +71,17 @@ export class Scene {
     private _skyAtmosphere: SkyAtmosphereNode | null = null;
     private _skyLight: SkyLightNode | null = null;
     private _environmentMap: Texture | null = null;
+    /**
+     * Scene-wide indirect fill, in LUX. What every surface receives from nothing in particular.
+     *
+     * This was `light.ambient`, a per-light property that behaved as though it were not: every shading
+     * path added the DIRECTIONAL light's copy to every pixel, whether or not that light could reach it.
+     * So it was always scene state, and moving it here is what let the light structs drop it. A scene
+     * with a sky light or a light probe wants this near zero; one with neither needs it, or unlit
+     * surfaces go to black.
+     */
+    private _ambientLight: vec3 = vec3.fromValues(DEFAULT_SCENE_AMBIENT_LUX, DEFAULT_SCENE_AMBIENT_LUX,
+                                                  DEFAULT_SCENE_AMBIENT_LUX);
     private _dirty: boolean = true;
     private _hasStarted: boolean = false;
     // When false, ModelNode animators are NOT driven by scene.update (skinned meshes hold their bind
@@ -546,6 +558,7 @@ export class Scene {
         return new Promise((resolve, reject) => {
             this._root.serialize().then((json: any) => {
                 output.scene = json;
+                output.scene.ambientLight = [this._ambientLight[0], this._ambientLight[1], this._ambientLight[2]];
                 if (this._environmentMap) {
                     try {
                         output.scene.environmentMap = TextureManager.Instance.serializeCubeMap(this._environmentMap);
@@ -573,6 +586,12 @@ export class Scene {
         let newScene = new Node('root');
         newScene.scene = this;
         Node.parse(newScene, json.scene);
+
+        // Absent means a pre-photometric save: recover the fill from the directional light that
+        // used to carry it, and fall back to the default rather than to black.
+        const ambient = json.scene?.ambientLight ?? legacyAmbientFromSceneJson(json);
+        this._ambientLight = ambient ? vec3.fromValues(ambient[0], ambient[1], ambient[2])
+            : vec3.fromValues(DEFAULT_SCENE_AMBIENT_LUX, DEFAULT_SCENE_AMBIENT_LUX, DEFAULT_SCENE_AMBIENT_LUX);
 
         const env = json.scene?.environmentMap;
         if (env) {
@@ -612,15 +631,16 @@ export class Scene {
         let spotlights = 0;
         for (const node of nodes) {
             if (node instanceof LightNode) {
-                if (node.type === 'point') {
-                    node.index = pointLights;
-                    pointLights++;
-                }
+                // A slot past the shader array's end is -1, not the next integer. Numbering
+                // straight through meant the 17th point light was handed index 16 and the upload
+                // then wrote `u_pointLights[16].position` — a name the 16-element block does not
+                // contain, which resolves to nothing on one backend and to whatever follows it on
+                // the other.
+                if (node.type === 'point')
+                    node.index = pointLights < MAX_POINT_LIGHTS ? pointLights++ : -1;
 
-                if (node.type === 'spotlight') {
-                    node.index = spotlights;
-                    spotlights++;
-                }
+                if (node.type === 'spotlight')
+                    node.index = spotlights < MAX_SPOTLIGHTS ? spotlights++ : -1;
             }
         }
         this._numPointLights = pointLights;
@@ -794,6 +814,10 @@ export class Scene {
         unbounded.sort(byDist);
         return [...bounded, ...unbounded].slice(0, max);
     }
+
+    /** Scene-wide indirect fill, in lux. See {@link _ambientLight}. */
+    public get ambientLight(): vec3 { return this._ambientLight; }
+    public set ambientLight(value: vec3) { this._ambientLight = vec3.clone(value as vec3); }
 
     public get environmentMap(): Texture | null { return this._environmentMap; }
     public set environmentMap(envMapTex: Texture | null) { this._environmentMap = envMapTex; }

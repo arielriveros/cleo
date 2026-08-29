@@ -70,12 +70,27 @@ function compare(a, b) {
  * a state change by one call, and measuring once produced a clean off-by-one where a changed frame
  * showed up in the next reading.
  */
-async function captureSignature(win, sleep) {
+/**
+ * Capture and reduce. `rect` ({x, y, width, height}) crops BEFORE the grid is laid down, which is the
+ * only way to see an effect that is large per-pixel but small in area.
+ *
+ * The arithmetic is the whole reason it exists. At the standard 1000x700 window a full-frame cell is
+ * ~125x87 = 10,875 pixels, so a highlight covering 300 of them has to shift those pixels by most of the
+ * luma range to move that cell's quantised mean by one step. It was MEASURED that this hides the area
+ * lights completely: toggling a 5 cm `sourceRadius` between 0.05 and 0 moves ZERO of the 128 values even
+ * against a mirror-finish sphere, 0.5 m moves zero, and it takes a 1 m bulb to move two. Cropping to a
+ * 120x120 box around the object turns the same grid into 15x15 cells and the same highlight into most
+ * of one, which is a difference of roughly 700x in sensitivity for no new machinery.
+ *
+ * Electron's `capturePage` takes the rect itself, and `signature` already takes its own width/height, so
+ * nothing downstream changes.
+ */
+async function captureSignature(win, sleep, rect) {
     await win.webContents.capturePage();
     await sleep(300);
-    const img = await win.webContents.capturePage();
+    const img = await win.webContents.capturePage(rect);
     const size = img.getSize();
     return signature(img.toBitmap(), size.width, size.height);
 }
 
-module.exports = { signature, compare, captureSignature, NOISE };
+module.exports = { signature, compare, captureSignature, NOISE, GRID };

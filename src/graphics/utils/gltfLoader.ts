@@ -53,6 +53,18 @@ interface GLTFMaterial {
     alphaMode?: string;
     alphaCutoff?: number;
     doubleSided?: boolean;
+    /**
+     * The only glTF extension this loader reads.
+     *
+     * `emissiveFactor` is capped at 1 per channel by the spec, so glTF has the same problem this engine
+     * had: an emissive surface cannot be authored bright enough to do anything in an HDR pipeline.
+     * `KHR_materials_emissive_strength` is the spec's answer, and it maps exactly onto
+     * `emissiveIntensity`. Silently dropping it meant every emissive material imported from a modern
+     * exporter arrived at a fraction of its authored brightness.
+     */
+    extensions?: {
+        KHR_materials_emissive_strength?: { emissiveStrength?: number };
+    };
 }
 
 interface GLTFTexture {
@@ -172,6 +184,8 @@ export interface GltfMaterialDescriptor {
     roughness: number;
     opacity: number;
     emissiveFactor: [number, number, number];
+    /** KHR_materials_emissive_strength, or 1. Multiplies the factor above. */
+    emissiveIntensity: number;
     doubleSided: boolean;
     transparent: boolean;
     /** glTF `alphaMode: MASK` as a cutoff; 0 when the material is not masked. */
@@ -522,7 +536,7 @@ export class GLTFLoader {
     /** Material parameters plus image *indices* — no texture ids, so no GL. */
     private describeMaterial(materialIndex?: number): GltfMaterialDescriptor {
         if (materialIndex === undefined || !this.gltf.materials)
-            return { baseColor: [1, 1, 1], metallic: 1, roughness: 1, opacity: 1, emissiveFactor: [0, 0, 0], doubleSided: false, transparent: false, textures: {} };
+            return { baseColor: [1, 1, 1], metallic: 1, roughness: 1, opacity: 1, emissiveFactor: [0, 0, 0], emissiveIntensity: 1, doubleSided: false, transparent: false, textures: {} };
 
         const gltfMaterial = this.gltf.materials[materialIndex];
         const pbr = gltfMaterial.pbrMetallicRoughness;
@@ -544,6 +558,8 @@ export class GLTFLoader {
             emissiveFactor: gltfMaterial.emissiveFactor
                 ? [gltfMaterial.emissiveFactor[0], gltfMaterial.emissiveFactor[1], gltfMaterial.emissiveFactor[2]]
                 : [0, 0, 0],
+            emissiveIntensity:
+                gltfMaterial.extensions?.KHR_materials_emissive_strength?.emissiveStrength ?? 1,
             doubleSided: !!gltfMaterial.doubleSided,
             transparent: gltfMaterial.alphaMode === 'BLEND',
             // 0.5 is the glTF default for MASK; 0 disables the cutout for every other alpha mode.
@@ -877,6 +893,8 @@ export class GLTFLoader {
             // See describeMaterial: MASK is a cutout, not transparency.
             alphaCutoff: gltfMaterial.alphaMode === 'MASK' ? (gltfMaterial.alphaCutoff ?? 0.5) : 0,
             emissiveFactor,
+            emissiveIntensity:
+                gltfMaterial.extensions?.KHR_materials_emissive_strength?.emissiveStrength ?? 1,
             textures
         }, {
             side: gltfMaterial.doubleSided ? 'double' : 'front',

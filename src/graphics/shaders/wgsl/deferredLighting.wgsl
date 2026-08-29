@@ -7,6 +7,7 @@
 // pass, the forward materials, custom materials and the god rays cannot drift apart.
 #include "./chunks/shadows.wgsl"
 #include "./chunks/pbrLighting.wgsl"
+#include "./chunks/octNormal.wgsl"
 
 // Mirrors shaders/constants.glsl. Spelled out here rather than included because the GLSL constants
 // file has no WGSL twin and these are the only two values this shader needs from it.
@@ -20,7 +21,7 @@ const AO_DEPTH_TOLERANCE: f32 = 0.02;
 // --- G-buffer -----------------------------------------------------------------------------------
 @group(0) @binding(0) var u_gAlbedoMetallic_texture: texture_2d<f32>;    // rgb = albedo, a = metallic
 @group(0) @binding(1) var u_gAlbedoMetallic_sampler: sampler;
-@group(0) @binding(2) var u_gNormalRoughness_texture: texture_2d<f32>;   // rgb = world normal, a = roughness
+@group(0) @binding(2) var u_gNormalRoughness_texture: texture_2d<f32>;   // rg = oct normal, b = reflectance, a = roughness
 @group(0) @binding(3) var u_gNormalRoughness_sampler: sampler;
 @group(0) @binding(4) var u_gEmissiveAO_texture: texture_2d<f32>;        // rgb = emissive, a = ao
 @group(0) @binding(5) var u_gEmissiveAO_sampler: sampler;
@@ -63,6 +64,8 @@ struct Lighting {
     u_spotlights: array<SpotLight, 8>,
 
     u_viewPos: vec3<f32>,
+    /** Scene-wide indirect fill, in internal radiance units. Replaces the per-light ambient. */
+    u_sceneAmbient: vec3<f32>,
     u_probeBlend0: vec3<f32>,       // per-axis feather as a fraction of the unit cube (0 = hard edge)
     u_probeBlend1: vec3<f32>,
     /** One AO texel in this pass's UV space; (0,0) means the AO buffer is full resolution. */
@@ -78,6 +81,10 @@ struct Lighting {
     u_probeUnbounded1: i32,
     u_useEnvMap: i32,
     u_ssaoEnabled: i32,
+    /** 0 restores the pre-phase-4 behaviour of occluding both lobes by the same hemisphere term. */
+    u_specularOcclusion: i32,
+    /** 0 lets a normal-mapped surface keep reflecting the sky along rays that point into itself. */
+    u_horizonOcclusion: i32,
 };
 @group(1) @binding(0) var<uniform> u_lighting: Lighting;
 
@@ -85,6 +92,62 @@ fn reconstructWorldPos(uv: vec2<f32>, depth: f32) -> vec3<f32> {
     let clip = vec4<f32>(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
     let world = u_lighting.u_invViewProj * clip;
     return world.xyz / world.w;
+}
+
+/**
+ * The GEOMETRIC normal, rebuilt from the depth buffer, for `horizonOcclusion`.
+ *
+ * The G-buffer carries the SHADING normal only, and horizon occlusion is precisely a comparison
+ * between the two — a term computed against one normal twice is identically 1, because `reflect` can
+ * never send a ray below the normal it reflected about. A second normal is not optional here.
+ *
+ * Storing one would cost a fourth attachment: a direction is two channels even oct-packed, and the one
+ * channel this pass freed by oct-packing the shading normal already went to reflectance. Depth is
+ * already bound, already reconstructed to world space one line above, and the surface it describes is
+ * exactly the geometry — so four extra taps buy what 8 bytes per pixel per frame would have.
+ *
+ * MIN-ABS NEIGHBOUR SELECTION, which is the whole difficulty. A plain forward difference straddles
+ * silhouettes: at the edge of an object one of the two neighbours belongs to whatever is behind it, and
+ * the cross product of that pair describes a plane joining two unrelated surfaces — nearly edge-on to
+ * the camera, so `dot(R, Ng)` goes hard negative and the term paints a black outline around every
+ * object. Picking, per axis, whichever neighbour's depth is CLOSER to the centre keeps both samples on
+ * the near surface; the winding is then corrected by the sign the choice implies, or half the
+ * the near surface.
+ *
+ * No derivatives, deliberately: `dpdx` would be shorter and is illegal here, since this pass discards
+ * on background before it reaches any of this. Explicit taps carry no uniformity requirement.
+ */
+fn geometricNormal(uv: vec2<f32>, centerDepth: f32, centerPos: vec3<f32>) -> vec3<f32> {
+    let texel = 1.0 / vec2<f32>(textureDimensions(u_gDepth_texture, 0));
+    let dx = vec2<f32>(texel.x, 0.0);
+    let dy = vec2<f32>(0.0, texel.y);
+
+    let dL = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, uv - dx, 0);
+    let dR = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, uv + dx, 0);
+    let dU = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, uv - dy, 0);
+    let dD = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, uv + dy, 0);
+
+    let leftCloser = abs(dL - centerDepth) < abs(dR - centerDepth);
+    let upCloser = abs(dU - centerDepth) < abs(dD - centerDepth);
+    let uvX = select(uv + dx, uv - dx, leftCloser);
+    let uvY = select(uv + dy, uv - dy, upCloser);
+    let depthX = select(dR, dL, leftCloser);
+    let depthY = select(dD, dU, upCloser);
+
+    let alongX = reconstructWorldPos(uvX, depthX) - centerPos;
+    let alongY = reconstructWorldPos(uvY, depthY) - centerPos;
+    let n = cross(alongX, alongY);
+    // A degenerate pair — two coincident reconstructions, which a flat far plane produces — would
+    // normalise to NaN and take every lit pixel downstream with it.
+    if (dot(n, n) < 1e-20) { return vec3<f32>(0.0, 1.0, 0.0); }
+
+    // ORIENTED TOWARD THE VIEWER rather than by a winding rule, and that is not laziness. The sign of
+    // this cross product depends on which way the uv axes run AND on which neighbour the min-abs test
+    // picked on each axis — four combinations, two of them inverted, and a backward choice happens
+    // exactly at the silhouettes where being wrong is most visible. A visible surface faces the camera
+    // by definition, so that fact settles the sign for all four cases at once.
+    let toEye = u_lighting.u_viewPos - centerPos;
+    return normalize(n) * select(-1.0, 1.0, dot(n, toEye) >= 0.0);
 }
 
 // --- Image-based lighting -----------------------------------------------------------------------
@@ -104,6 +167,17 @@ fn probeWeight(worldPos: vec3<f32>, invVolume: mat4x4<f32>, blend: vec3<f32>, un
 }
 
 /**
+ * Indirect light, kept SPLIT rather than summed.
+ *
+ * The two lobes are occluded differently — a hemisphere-wide AO term is right for diffuse and wrong for
+ * specular — so they cannot be added until after occlusion is applied. See `computeSpecularAO`.
+ */
+struct IndirectLight {
+    diffuse: vec3<f32>,
+    specular: vec3<f32>,
+};
+
+/**
  * Split-sum IBL from one probe slot's cubemaps.
  *
  * The slot's textures are passed by value rather than indexed, because a sampler array cannot be
@@ -112,16 +186,25 @@ fn probeWeight(worldPos: vec3<f32>, invVolume: mat4x4<f32>, blend: vec3<f32>, un
 fn probeIBL(irr: texture_cube<f32>, irrSampler: sampler,
             pref: texture_cube<f32>, prefSampler: sampler,
             N: vec3<f32>, V: vec3<f32>, albedo: vec3<f32>,
-            metallic: f32, roughness: f32, F0: vec3<f32>) -> vec3<f32> {
-    let F = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
-    let kD = (vec3<f32>(1.0) - F) * (1.0 - metallic);
-    let diffuseIBL = textureSampleLevel(irr, irrSampler, N, 0.0).rgb * albedo;
+            metallic: f32, roughness: f32, F0: vec3<f32>) -> IndirectLight {
+    let NoV = max(dot(N, V), 0.0);
+    let F = fresnelSchlickRoughness(NoV, F0, roughness);
+    // `(1 - metallic)` alone, matching `accumulateLight`. The `(1 - F)` factor this used to carry is
+    // not in any modern reference BRDF and double-counted Fresnel; a metal's reflection and its
+    // highlight have to split energy the same way or one of them is wrong.
+    let kD = vec3<f32>(1.0 - metallic);
     let R = reflect(-V, N);
     let prefiltered = textureSampleLevel(pref, prefSampler, R, roughness * MAX_REFLECTION_LOD).rgb;
     let brdf = textureSampleLevel(u_brdfLUT_texture, u_brdfLUT_sampler,
-                                  vec2<f32>(max(dot(N, V), 0.0), roughness), 0.0).rg;
-    let specularIBL = prefiltered * (F * brdf.x + brdf.y);
-    return kD * diffuseIBL + specularIBL;
+                                  vec2<f32>(NoV, roughness), 0.0).rg;
+
+    var result: IndirectLight;
+    result.diffuse = kD * textureSampleLevel(irr, irrSampler, N, 0.0).rgb * albedo;
+    // The split-sum term uses the REAL baked LUT, which this pass has bound and the forward paths
+    // cannot. Only the multi-scatter multiplier is the analytic fit — deliberately, so that a surface
+    // shaded forward and the same surface shaded deferred recover the same amount of energy.
+    result.specular = prefiltered * (F * brdf.x + brdf.y) * energyCompensation(F0, NoV, roughness);
+    return result;
 }
 
 /**
@@ -201,7 +284,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let albedo = albedoMetallic.rgb;
     let metallic = albedoMetallic.a;
-    let N = normalize(normalRoughness.rgb);
+    // Two channels, not three — see chunks/octNormal.wgsl. The third now carries the dielectric
+    // specular level, which is why every non-metal in the scene no longer has identical reflectivity.
+    let N = octDecode(vec2<f32>(normalRoughness.x, normalRoughness.y));
+    let reflectance = normalRoughness.b;
     let roughness = normalRoughness.a;
     let emissive = emissiveAO.rgb;
     let ao = emissiveAO.a;
@@ -211,30 +297,49 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Indirect lighting. When a light probe / environment is available, use full split-sum IBL
     // (diffuse irradiance + prefiltered specular + BRDF LUT); otherwise fall back to flat ambient.
-    let F0 = mix(vec3<f32>(0.04), albedo, metallic);
+    // `dielectricF0(reflectance)`, not the 0.04 literal this used to hardcode. A conductor still takes
+    // its base colour; what changes is that water, skin and a gemstone stop sharing one specular level.
+    let F0 = mix(vec3<f32>(dielectricF0(reflectance)), albedo, metallic);
     let ssao = sampleAO(uv, depth);
 
-    // Fallback indirect term used where no probe volume applies: the directional light's ambient as a
-    // simple fill floor (matches the forward Blinn-Phong path; zeroed when the light is removed so
-    // deleting every light still goes to black), plus a crude env reflection when a map is present.
-    // The sky light is scene-wide indirect: it belongs in the FALLBACK term, so a light probe still
-    // wins wherever its volume covers the pixel and the two blend by the same weights as before. That
-    // is why it is added here rather than after the probe blend.
-    var fallbackAmbient = (u_lighting.u_dirLight.ambient
-                           + skyIrradiance(u_lighting.u_skyLight, N)) * albedo;
+    // Fallback indirect term used where no probe volume applies: the scene ambient as a simple fill
+    // floor, plus a crude env reflection when a map is present. The sky light is scene-wide indirect: it
+    // belongs in the FALLBACK term, so a light probe still wins wherever its volume covers the pixel and
+    // the two blend by the same weights as before. That is why it is added here rather than after the
+    // probe blend.
+    var indirect: IndirectLight;
+    indirect.diffuse = (u_lighting.u_sceneAmbient
+                        + skyIrradiance(u_lighting.u_skyLight, N)) * albedo;
+    indirect.specular = vec3<f32>(0.0);
     if (u_lighting.u_useEnvMap != 0) {
-        let kS = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
+        let NoV = max(dot(N, V), 0.0);
         let R = reflect(-V, N);
-        let env = textureSample(u_envMap_texture, u_envMap_sampler, R).rgb;
-        let specAtten = pow(1.0 - roughness, 4.0);
-        fallbackAmbient += env * kS * specAtten;
+        let env = textureSampleLevel(u_envMap_texture, u_envMap_sampler, R,
+                                     roughness * MAX_REFLECTION_LOD).rgb;
+        // TWO SEPARATE FACTORS that used to be one, and the distinction is the whole point.
+        //
+        // The DFG pair is ENERGY: how much of the incoming environment a surface of this roughness and
+        // this f0 actually reflects. It replaces the `kS` Fresnel this used to use, which was the right
+        // shape but not the right integral.
+        //
+        // The roughness ramp is NOT energy. The cube DOES have a mip chain — `Texture` defaults
+        // `mipMap` to true and scene.ts does not opt out — so the level fetch below is a real blur.
+        // But `generateMipmap` box-filters each face independently: it is not a GGX prefilter, and on
+        // WebGL2 cube mips do not filter across face seams. So the chain under-blurs, and at high
+        // roughness it would still show a recognisable sky where a prefiltered probe shows a wash.
+        // The ramp covers that gap. A light probe is the real answer and does the prefilter properly;
+        // this branch is the fallback for scenes that have no probe at all.
+        let dfg = EnvBRDFApprox(NoV, roughness);
+        let sharpnessFade = pow(1.0 - roughness, 4.0);
+        indirect.specular = env * (F0 * dfg.x + dfg.y)
+                          * energyCompensation(F0, NoV, roughness) * sharpnessFade;
     }
 
-    var ambient = fallbackAmbient;
     if (u_lighting.u_probeCount > 0) {
         // Priority blend: slot 0 (nearest/bounded first — see Scene.probesForFrame) claims its weight,
         // slot 1 fills what remains, and the fallback covers the rest. A single unbounded probe reduces
-        // to w0 = 1 -> exactly the legacy full-IBL result.
+        // to w0 = 1 -> exactly the legacy full-IBL result. Both lobes blend by the SAME weights: the
+        // split is about how they are occluded, not about where they come from.
         let w0 = probeWeight(worldPos, u_lighting.u_probeInvVolume0, u_lighting.u_probeBlend0,
                              u_lighting.u_probeUnbounded0);
         var w1 = 0.0;
@@ -245,16 +350,23 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let c0 = w0;
         let c1 = w1 * (1.0 - w0);
         let rest = (1.0 - w0) * (1.0 - w1);
-        ambient = fallbackAmbient * rest;
+        indirect.diffuse *= rest;
+        indirect.specular *= rest;
         if (c0 > 0.0) {
-            ambient += probeIBL(u_irradiance0_texture, u_irradiance0_sampler,
-                                u_prefiltered0_texture, u_prefiltered0_sampler,
-                                N, V, albedo, metallic, roughness, F0) * u_lighting.u_iblIntensity0 * c0;
+            let probe = probeIBL(u_irradiance0_texture, u_irradiance0_sampler,
+                                 u_prefiltered0_texture, u_prefiltered0_sampler,
+                                 N, V, albedo, metallic, roughness, F0);
+            let k = u_lighting.u_iblIntensity0 * c0;
+            indirect.diffuse += probe.diffuse * k;
+            indirect.specular += probe.specular * k;
         }
         if (c1 > 0.0) {
-            ambient += probeIBL(u_irradiance1_texture, u_irradiance1_sampler,
-                                u_prefiltered1_texture, u_prefiltered1_sampler,
-                                N, V, albedo, metallic, roughness, F0) * u_lighting.u_iblIntensity1 * c1;
+            let probe = probeIBL(u_irradiance1_texture, u_irradiance1_sampler,
+                                 u_prefiltered1_texture, u_prefiltered1_sampler,
+                                 N, V, albedo, metallic, roughness, F0);
+            let k = u_lighting.u_iblIntensity1 * c1;
+            indirect.diffuse += probe.diffuse * k;
+            indirect.specular += probe.specular * k;
         }
     }
 
@@ -263,42 +375,41 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var Lo = vec3<f32>(0.0);
 
-    // Directional light + shadow (guard against an unset/zero direction -> normalize(0) = NaN)
-    let dirD = u_lighting.u_dirLight.direction;
-    if (dot(dirD, dirD) > 1e-6) {
-        let shadow = directionalShadow(worldPos, N, viewDepth);
-        let Ld = normalize(-dirD);
-        Lo += accumulateLight(N, V, albedo, metallic, roughness, Ld,
-                              u_lighting.u_dirLight.diffuse * (1.0 - shadow));
-    }
+    Lo += evaluateDirectionalLight(u_lighting.u_dirLight, N, V, albedo, metallic, roughness,
+                                   1.0 - directionalShadow(worldPos, N, viewDepth));
 
     for (var i = 0; i < u_lighting.u_numPointLights; i++) {
-        let p = u_lighting.u_pointLights[i];
-        let L = normalize(p.position - worldPos);
-        let dist = length(p.position - worldPos);
-        let att = 1.0 / (p.constant + p.linear * dist + p.quadratic * dist * dist);
-        Lo += accumulateLight(N, V, albedo, metallic, roughness, L, p.diffuse * att);
+        Lo += evaluatePointLight(u_lighting.u_pointLights[i], worldPos, N, V, albedo, metallic, roughness);
     }
 
     for (var i = 0; i < u_lighting.u_numSpotlights; i++) {
         let sl = u_lighting.u_spotlights[i];
-        let L = normalize(sl.position - worldPos);
-        let dist = length(sl.position - worldPos);
-        let att = 1.0 / (sl.constant + sl.linear * dist + sl.quadratic * dist * dist);
-        let theta = dot(L, normalize(-sl.direction));
-        // cutOff/outerCutOff are COSINES of the half-angles (see Renderer's spot upload), so the inner
-        // one is the LARGER value and the falloff denominator is inner - outer.
-        let epsilon = sl.cutOff - sl.outerCutOff;
-        let intensity = clamp((theta - sl.outerCutOff) / epsilon, 0.0, 1.0);
-        let spotSh = spotShadowFor(i, worldPos, N, sl.position);
-        Lo += accumulateLight(N, V, albedo, metallic, roughness, L,
-                              sl.diffuse * att * intensity * (1.0 - spotSh));
+        Lo += evaluateSpotLight(sl, worldPos, N, V, albedo, metallic, roughness,
+                                1.0 - spotShadowFor(i, worldPos, N, sl.position));
     }
 
     // Output LINEAR HDR radiance. Exposure, tonemap and sRGB encode are applied once at the final
     // present. Unlit "basic" materials arrive as zero albedo + authored emissive, so they pass straight
     // through here and are tonemapped uniformly with everything else.
-    var color = ambient * ao * ssao + Lo + emissive;
+    //
+    // The two indirect lobes take DIFFERENT occlusion. `ao` (the material's map) and `ssao` both measure
+    // how much of the hemisphere is blocked, which is the right question for diffuse and the wrong one
+    // for a narrow specular cone — see `computeSpecularAO`. Multiplying both by the same number is what
+    // used to strip the reflection off a polished floor standing in a corner.
+    let diffuseAO = ao * ssao;
+    var specularAO = diffuseAO;
+    if (u_lighting.u_specularOcclusion != 0) {
+        specularAO = computeSpecularAO(max(dot(N, V), 0.0), diffuseAO, roughness);
+    }
+    // Horizon occlusion rides on the same factor, because it is the same kind of statement: how much
+    // of the specular lobe survives. One multiply here covers BOTH indirect specular sources — the
+    // probe blend and the env fallback — which is why it is applied to the factor and not to either
+    // term. The geometric normal is rebuilt from depth; see `geometricNormal`.
+    if (u_lighting.u_horizonOcclusion != 0) {
+        let Ng = geometricNormal(uv, depth, worldPos);
+        specularAO *= horizonOcclusion(reflect(-V, N), Ng);
+    }
+    var color = indirect.diffuse * diffuseAO + indirect.specular * specularAO + Lo + emissive;
 
     // Cascade debug channel: replace the shading with a flat per-cascade tint, modulated by the shadow
     // term so the shadow shapes stay readable inside each coloured band.

@@ -1,4 +1,4 @@
-import { DirectionalLight, Light, PointLight, Spotlight } from "../../../graphics/lighting";
+import { DirectionalLight, Light, LIGHT_UNIT, PointLight, Spotlight } from "../../../graphics/lighting";
 import { Logger } from "../../logger";
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
@@ -34,80 +34,62 @@ export class LightNode extends Node {
     }
 
     protected _serializePayload(): any {
-            let lightData = {};
-            switch (this._type) {
-                case 'directional':
-                    lightData = {
-                        diffuse: [this._light.diffuse[0], this._light.diffuse[1], this._light.diffuse[2]],
-                        specular: [this._light.specular[0], this._light.specular[1], this._light.specular[2]],
-                        ambient: [this._light.ambient[0], this._light.ambient[1], this._light.ambient[2]],
-                    };
-                    break;
-                case 'point':
-                    lightData = {
-                        diffuse: [this._light.diffuse[0], this._light.diffuse[1], this._light.diffuse[2]],
-                        specular: [this._light.specular[0], this._light.specular[1], this._light.specular[2]],
-                        ambient: [this._light.ambient[0], this._light.ambient[1], this._light.ambient[2]],
-                        constant: (this._light as PointLight).constant,
-                        linear: (this._light as PointLight).linear,
-                        quadratic: (this._light as PointLight).quadratic
-                    };
-                    break;
-                case 'spotlight':
-                    lightData = {
-                        diffuse: [this._light.diffuse[0], this._light.diffuse[1], this._light.diffuse[2]],
-                        specular: [this._light.specular[0], this._light.specular[1], this._light.specular[2]],
-                        ambient: [this._light.ambient[0], this._light.ambient[1], this._light.ambient[2]],
-                        constant: (this._light as PointLight).constant,
-                        linear: (this._light as Spotlight).linear,
-                        quadratic: (this._light as Spotlight).quadratic,
-                        cutOff: (this._light as Spotlight).cutOff,
-                        outerCutOff: (this._light as Spotlight).outerCutOff
-                    };
-                    break;
+        const light = this._light;
+        const colour = [light.color[0], light.color[1], light.color[2]];
+        // `unit` is what makes the migration idempotent: a payload carrying it is already photometric
+        // and the constructors leave it alone. Mirrors FOLIAGE_DENSITY_UNIT — see graphics/lighting.ts.
+        let lightData: any = { unit: LIGHT_UNIT, color: colour };
+
+        switch (this._type) {
+            case 'directional': {
+                const d = light as DirectionalLight;
+                lightData.intensity = d.intensity;           // lux
+                lightData.angularRadius = d.angularRadius;
+                break;
             }
+            case 'point': {
+                const p = light as PointLight;
+                lightData.intensity = p.intensity;           // lumens
+                lightData.range = p.range;
+                lightData.sourceRadius = p.sourceRadius;
+                lightData.legacyFalloff = p.legacyFalloff;
+                break;
+            }
+            case 'spotlight': {
+                const s = light as Spotlight;
+                lightData.intensity = s.intensity;           // lumens
+                lightData.range = s.range;
+                lightData.sourceRadius = s.sourceRadius;
+                lightData.cutOff = s.cutOff;
+                lightData.outerCutOff = s.outerCutOff;
+                lightData.legacyFalloff = s.legacyFalloff;
+                break;
+            }
+        }
+
         return {
-                    lightType: this._type,
-                    light: lightData,
-                    castShadows: this._castShadows,
+            lightType: this._type,
+            light: lightData,
+            castShadows: this._castShadows,
         };
     }
 
     public static parse(parent: Node, json: any) {
         let light;
+        // The payload is forwarded WHOLE rather than field by field, which is what lets the light
+        // constructors own the legacy conversion: a pre-photometric save still carries
+        // diffuse/constant/linear/quadratic, and they migrate on the way in. Naming the fields here
+        // instead would mean this function had to know both schemas.
         switch (json.lightType) {
-            case 'directional':
-                light = new DirectionalLight({
-                    diffuse: json.light.diffuse,
-                    specular: json.light.specular,
-                    ambient: json.light.ambient,
-                });
-                break;
-            case 'point':
-                light = new PointLight({
-                    diffuse: json.light.diffuse,
-                    specular: json.light.specular,
-                    ambient: json.light.ambient,
-                    linear: json.light.linear,
-                    quadratic: json.light.quadratic
-                });
-                break;
-            case 'spotlight':
-                light = new Spotlight({
-                    diffuse: json.light.diffuse,
-                    specular: json.light.specular,
-                    ambient: json.light.ambient,
-                    linear: json.light.linear,
-                    quadratic: json.light.quadratic,
-                    cutOff: json.light.cutOff,
-                    outerCutOff: json.light.outerCutOff
-                });
-                break;
+            case 'directional': light = new DirectionalLight(json.light); break;
+            case 'point': light = new PointLight(json.light); break;
+            case 'spotlight': light = new Spotlight(json.light); break;
             default:
                 const errMsg = `Light ${json} of type ${json.type} not supported`;
                 Logger.error(errMsg);
                 throw new Error(errMsg);
         }
+        light.legacyFalloff = json.light?.legacyFalloff ?? light.legacyFalloff;
         // Saves predating the serialized flag carry no key; for those, directional lights cast and
         // nothing else does.
         const castShadows = json.castShadows ?? (json.lightType === 'directional');

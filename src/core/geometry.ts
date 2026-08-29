@@ -158,31 +158,26 @@ export class Geometry {
     /**
      * Object-space bounding sphere (center + radius), computed lazily and cached. Purely local-space,
      * so only a vertex edit invalidates it, via {@link invalidateBounds}.
+     *
+     * Derived from {@link boundingBox}, and it MUST NOT go back to `this.bvh.bounds` — the warning on
+     * boundingBox applies here for the same reason and bit harder. Touching `bvh` force-builds the
+     * hierarchy, and frustum culling reads this sphere every frame for every node; terrain then makes it
+     * pathological, because `_refreshChunkGeometry` calls `invalidateBounds()` on every sculpt or paint
+     * frame, so every chunk would discard and rebuild a BVH over its whole triangle list per frame of a
+     * brush drag — and that cost scales with the render-density multiplier.
+     *
+     * A position-pass AABB is a superset of the triangle AABB whenever a vertex is referenced by no
+     * triangle, so the sphere can only ever be conservative. That is the right direction for culling,
+     * and this function already fell back to exactly this pass whenever the BVH held no triangles.
      */
     public get boundingSphere(): { center: vec3; radius: number } {
         if (this._boundingSphere) return this._boundingSphere;
 
-        let min: [number, number, number];
-        let max: [number, number, number];
-        const bvh = this.bvh;
-        if (bvh.triangleCount > 0) {
-            const b = bvh.bounds;
-            min = b.min; max = b.max;
-        } else if (this._positions.length > 0) {
-            min = [Infinity, Infinity, Infinity];
-            max = [-Infinity, -Infinity, -Infinity];
-            for (let i = 0; i < this._positions.length; i += 3)
-                for (let a = 0; a < 3; a++) {
-                    const v = this._positions[i + a];
-                    if (v < min[a]) min[a] = v;
-                    if (v > max[a]) max[a] = v;
-                }
-        } else {
-            min = [0, 0, 0]; max = [0, 0, 0];
-        }
-
-        const center = vec3.fromValues((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
-        const dx = max[0] - min[0], dy = max[1] - min[1], dz = max[2] - min[2];
+        const box = this.boundingBox;
+        const center = vec3.fromValues((box.min[0] + box.max[0]) / 2,
+                                       (box.min[1] + box.max[1]) / 2,
+                                       (box.min[2] + box.max[2]) / 2);
+        const dx = box.max[0] - box.min[0], dy = box.max[1] - box.min[1], dz = box.max[2] - box.min[2];
         const radius = 0.5 * Math.sqrt(dx * dx + dy * dy + dz * dz);
         this._boundingSphere = { center, radius };
         return this._boundingSphere;

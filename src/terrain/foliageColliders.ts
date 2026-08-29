@@ -37,7 +37,8 @@ export class FoliageColliderField {
     private _active = new Map<string, Body>();
     /** Shape signature -> bodies evicted from the world, ready to be re-placed. */
     private _free = new Map<string, Body[]>();
-    /** Layer name -> the layer.version the active set was computed against. */
+    /** Layer KEY -> the layer.version the active set was computed against. Keyed by the stable
+     *  identity, not the name: renaming a rule is not a reason to rebuild every collider. */
     private _versions = new Map<string, number>();
     private _lastCam: vec3 = [NaN, NaN, NaN];
     private _lastOrigin: vec3 = [NaN, NaN, NaN];
@@ -65,7 +66,7 @@ export class FoliageColliderField {
         this._lastRefresh = Date.now();
         vec3.copy(this._lastCam as vec3, camPos);
         vec3.copy(this._lastOrigin as vec3, origin);
-        for (const layer of layers) this._versions.set(layer.name, layer.version);
+        for (const layer of layers) this._versions.set(layer.key, layer.version);
 
         // 1. Collect every collidable instance inside the activation disc.
         const wanted = new Map<string, Wanted>();
@@ -74,7 +75,7 @@ export class FoliageColliderField {
             if (!col || layer.count === 0) continue;
             layer.forEachInstanceNear(camPos[0], camPos[2], settings.radius, (index, ix, iy, iz, yaw, scale) => {
                 const dx = ix - camPos[0], dy = iy - camPos[1], dz = iz - camPos[2];
-                wanted.set(`${layer.name}#${index}`, {
+                wanted.set(`${layer.key}#${index}`, {
                     sig: signatureOf(col, scale), x: ix, y: iy, z: iz, yaw, scale,
                     d2: dx * dx + dy * dy + dz * dz,
                 });
@@ -132,7 +133,7 @@ export class FoliageColliderField {
         // Instances are stored in world space, so moving the terrain invalidates every cached position.
         if (vec3.squaredDistance(origin, this._lastOrigin as vec3) > 1e-8) return true;
         for (const layer of layers)
-            if (this._versions.get(layer.name) !== layer.version) return true;
+            if (this._versions.get(layer.key) !== layer.version) return true;
         return false;
     }
 
@@ -161,8 +162,10 @@ function signatureOf(col: FoliageCollision, scale: number): string {
 
 /** The collision descriptor of the layer an instance key belongs to. */
 function layerCollisionFor(layers: FoliageLayer[], key: string): FoliageCollision | null {
-    const name = key.slice(0, key.lastIndexOf('#'));
-    for (const l of layers) if (l.name === name) return l.collision;
+    // The prefix is the layer's stable key, which is what `wanted` composed these from. Matching on
+    // the display name would lose every active body the moment a rule was renamed.
+    const layerKey = key.slice(0, key.lastIndexOf('#'));
+    for (const l of layers) if (l.key === layerKey) return l.collision;
     return null;
 }
 

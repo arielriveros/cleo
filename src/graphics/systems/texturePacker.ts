@@ -36,6 +36,17 @@ export interface PackSpec {
     g: ChannelSource;
     b: ChannelSource;
     a: ChannelSource;
+    /**
+     * Wrap mode for the BAKED texture. Defaults to inheriting the first source's, which is what this
+     * used to do unconditionally — and it is a trap, because a pack is sampled at the CALLER's tiling,
+     * not its sources'.
+     *
+     * `Texture` defaults to `clamp`. A terrain layer samples its pack at `baseUv * tiling` with tiling
+     * around 20-50, so a clamped pack shows one instance in the first tile and a stretched edge texel
+     * across the rest of the terrain — the height and normal appear tens of times larger than the
+     * albedo beside them, which repeats. That is a caller's concern, so the caller states it.
+     */
+    wrapping?: 'clamp' | 'repeat' | 'mirror';
 }
 
 /** Prefix on every packer-owned texture id. Derived textures are never authored, serialized or listed. */
@@ -252,11 +263,17 @@ export class TexturePacker {
         return this._bake(key, spec, sources, frame);
     }
 
-    /** Stable key for a spec. Two materials with the same sources share one packed texture. */
+    /**
+     * Stable key for a spec. Two materials with the same sources share one packed texture.
+     *
+     * `wrapping` is PART OF THE KEY, and has to be: it is baked into the output texture's sampler, so
+     * without it the first caller to request a given source/channel combination would decide the wrap
+     * mode for every later caller, silently and invisibly — the sources themselves look identical.
+     */
     private _specKey(spec: PackSpec): string {
         const part = (source: ChannelSource) =>
             'constant' in source ? `#${source.constant}` : `${source.textureId}.${source.channel}`;
-        return `${part(spec.r)}|${part(spec.g)}|${part(spec.b)}|${part(spec.a)}`;
+        return `${part(spec.r)}|${part(spec.g)}|${part(spec.b)}|${part(spec.a)}@${spec.wrapping ?? 'src'}`;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -296,13 +313,17 @@ export class TexturePacker {
         if (width > minWidth * 2 || height > minHeight * 2)
             Logger.warn(`Packing sources of very different sizes (${minWidth}x${minHeight} into ${width}x${height}); the smaller map is upscaled`, 'TexturePacker');
 
-        // One texture can only have one wrap mode. Sources that disagree are an authoring error; first
-        // wins, because there is no answer that satisfies both.
-        const wrapping = textures[0].config.wrapping;
-        for (const texture of textures) {
-            if (texture.config.wrapping === wrapping) continue;
-            Logger.warn(`Packing sources with different wrapping modes; using '${wrapping}' for all channels`, 'TexturePacker');
-            break;
+        // The caller's wrap mode wins when it states one, because the pack is sampled at the CALLER's
+        // tiling and its sources' modes say nothing about that. Only when it does not are the sources
+        // consulted — one texture can have one wrap mode, so a disagreement is an authoring error and
+        // first wins, there being no answer that satisfies both.
+        const wrapping = spec.wrapping ?? textures[0].config.wrapping;
+        if (!spec.wrapping) {
+            for (const texture of textures) {
+                if (texture.config.wrapping === wrapping) continue;
+                Logger.warn(`Packing sources with different wrapping modes; using '${wrapping}' for all channels`, 'TexturePacker');
+                break;
+            }
         }
 
         // A colour texture is already allocated RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_* (see

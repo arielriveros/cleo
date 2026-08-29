@@ -269,6 +269,7 @@ export class Loader {
                 opacity: d.opacity,
                 alphaCutoff: d.alphaCutoff ?? 0,
                 emissiveFactor: d.emissiveFactor,
+                emissiveIntensity: d.emissiveIntensity ?? 1,
                 textures
             }, {
                 side: d.doubleSided ? 'double' : 'front',

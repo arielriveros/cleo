@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { assembleCustomFragment, vulkanUnsupportedReason } from '../src/graphics/systems/customShaders';
+import { assembleCustomFragment, customSeedTemplate, vulkanUnsupportedReason } from '../src/graphics/systems/customShaders';
 import type { CustomUniform } from '../src/graphics/material';
 
 /**
@@ -164,6 +164,50 @@ describe('assembleCustomFragment — ES 300 (WebGL2)', () => {
         expect(deferred).toContain('struct Surface');
     });
 
+    it('pastes the light structs and the BRDF that were GENERATED from chunks/pbrLighting.wgsl', () => {
+        // The whole point of pbrLightingChunk.wgsl: this text is no longer hand-copied, so it cannot
+        // drift from the shading the engine's own programs do. What is asserted here is the SHAPE the
+        // prelude depends on — the struct members user source names, the BRDF entry points it calls,
+        // and the one thing the split has to remove.
+        const src = assembleCustomFragment('forward', 'vec4 fragment() { return vec4(1.0); }', []);
+
+        for (const decl of ['struct DirectionalLight', 'struct PointLight', 'struct SpotLight',
+                            'struct AreaLightSample'])
+            expect(src).toContain(decl);
+        // Members user-authored GLSL reads by name.
+        for (const member of ['float intensity;', 'float invRangeSquared;', 'float sourceRadius;', 'float coneScale;'])
+            expect(src).toContain(member);
+        for (const fn of ['fresnelSchlick', 'fresnelSchlickRoughness',
+                          'distanceAttenuation', 'spotAttenuation', 'evaluatePointLight', 'evaluateSpotLight',
+                          // The phase-2 BRDF. Each of these is exported ONLY because
+                          // pbrLightingChunk.wgsl's dummy entry point calls it — naga emits what an
+                          // entry point reaches, so a helper missing from that list vanishes silently.
+                          'D_GGX', 'V_SmithGGXCorrelated', 'Fd_Burley', 'EnvBRDFApprox',
+                          // The phase-3 area lights, same reasoning.
+                          'shadeSurface', 'sphereLightSample', 'discLightSample', 'areaNormalization',
+                          // Phase 4.
+                          'computeSpecularAO',
+                          'energyCompensation'])
+            expect(src).toContain(fn + '(');
+
+        // The superseded trio, kept callable for user-authored GLSL in saved projects. Their removal
+        // has to be a deliberate act, not a side effect of tidying the chunk.
+        for (const deprecated of ['DistributionGGX', 'GeometrySchlickGGX', 'GeometrySmith'])
+            expect(src, `${deprecated} is deprecated but must stay callable`).toContain(deprecated + '(');
+
+        // Both spellings of accumulateLight: the generated one returns, the documented one accumulates.
+        expect(src).toMatch(/vec3 accumulateLight\(vec3 \w+, vec3 \w+, vec3 albedo/);
+        expect(src).toContain('inout vec3 Lo)');
+
+        // Structs come BEFORE the block that has members of them, functions after — a Vulkan block
+        // member needs its type already declared, and the generated chunk arrives as one blob.
+        expect(src.indexOf('struct PointLight')).toBeLessThan(src.indexOf('u_pointLights'));
+        expect(src.indexOf('u_pointLights')).toBeLessThan(src.indexOf('float DistributionGGX'));
+
+        // Exactly one PI. The chunk brings its own and COMMON_BODY already declared one.
+        expect(src.match(/const float PI\b/g)).toHaveLength(1);
+    });
+
     it('still hands lit materials a TBN, now rebuilt from three varyings', () => {
         // The transport changed (a mat3 is not a valid interface type outside GLSL ES) but the NAME did
         // not, and must not: user source in saved projects reads `TBN` directly, and `getNormal()` is
@@ -239,15 +283,13 @@ describe('assembleCustomFragment — Vulkan (naga)', () => {
 vec4 fragment() {
     vec3 N = getNormal();
     vec3 V = normalize(u_viewPos - fragPos);
-    vec3 Lo = vec3(0.0);
-    accumulateLight(N, V, u_tint, 0.0, u_rough, -u_dirLight.direction, u_dirLight.diffuse, Lo);
-    for (int i = 0; i < u_numPointLights; ++i) {
-        vec3 d = u_pointLights[i].position - fragPos;
-        accumulateLight(N, V, u_tint, 0.0, u_rough, normalize(d), u_pointLights[i].diffuse, Lo);
-    }
+    vec3 Lo = evaluateDirectionalLight(u_dirLight, N, V, u_tint, 0.0, u_rough,
+                                       1.0 - shadowCalculation() * 0.5);
+    for (int i = 0; i < u_numPointLights; ++i)
+        Lo += evaluatePointLight(u_pointLights[i], fragPos, N, V, u_tint, 0.0, u_rough);
     for (int i = 0; i < u_numSpotlights; ++i)
-        Lo += u_spotlights[i].ambient * u_spotlights[i].cutOff;
-    Lo *= 1.0 - shadowCalculation() * 0.5;
+        Lo += u_spotlights[i].color * u_spotlights[i].coneScale;
+    accumulateLight(N, V, u_tint, 0.0, u_rough, -u_dirLight.direction, u_sceneAmbient, Lo);
     if (u_useEnvMap) Lo += texture(u_envMap, reflect(-V, N)).rgb * 0.1;
     return vec4(Lo * texture(u_mask, fragTexCoord).r, 1.0);
 }
@@ -263,6 +305,36 @@ vec4 fragment() {
         expect(wgsl).toContain('struct DirectionalLight');
         expect(wgsl).toContain('texture_depth_2d_array');   // the shadow cascades survived the split
         expect(wgsl).toContain('sampler_comparison');
+    });
+
+    // Every SEED template, through naga. These are the scaffolds a new custom material starts from, so
+    // a broken one does not fail a build — it hands the author a magenta material and a compile error
+    // the moment they create it. Nothing else in the suite compiles them, and phase 4 edited FWD_PBR.
+    it('translates every seed template a new material can start from', () => {
+        // A seed is written against the uniforms its base type gives a new material, so the union of
+        // them is what makes this compile. Missing one shows up as UnknownVariable, which is the same
+        // failure an author would hit — so the list itself is part of the contract being tested.
+        const seedUniforms = [
+            { name: 'baseColor', type: 'vec3', value: [1, 1, 1] },
+            { name: 'metallic', type: 'float', value: 0 },
+            { name: 'roughness', type: 'float', value: 1 },
+            { name: 'emissive', type: 'vec3', value: [0, 0, 0] },
+            { name: 'color', type: 'vec3', value: [1, 1, 1] },
+            { name: 'tint', type: 'vec3', value: [1, 1, 1] },
+            { name: 'diffuse', type: 'vec3', value: [1, 1, 1] },
+            { name: 'specular', type: 'vec3', value: [1, 1, 1] },
+            { name: 'shininess', type: 'float', value: 32 },
+            { name: 'intensity', type: 'float', value: 1 },
+        ] as any;
+        const modes = [['forward', ['pbr', 'blinn_phong', 'basic', 'custom']],
+                       ['deferred', ['pbr', 'blinn_phong', 'basic', 'custom']],
+                       ['screen', ['custom']]] as const;
+        for (const [mode, bases] of modes)
+            for (const base of bases) {
+                const seed = customSeedTemplate(base as any, mode as any);
+                const built = assembleCustomFragment(mode as any, seed, seedUniforms, 'vulkan');
+                expect(() => glslToWgsl(built, 'fragment'), `${mode}/${base}`).not.toThrow();
+            }
     });
 
     it('translates a realistic deferred material all the way to WGSL', () => {

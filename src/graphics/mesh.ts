@@ -51,7 +51,12 @@ export class Mesh {
 
     constructor() {
         // COPY_DST because terrain sculpting rewrites the geometry in place through updateVertexData.
-        this._vertexBuffer = device.createBuffer({ label: 'mesh.vertices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
+        // STORAGE because `terrainDisplaceCompute.wgsl` writes terrain chunk buffers from a dispatch —
+        // the first `var<storage, read_write>` in the engine. It is a usage FLAG, so it costs nothing on
+        // a mesh nothing displaces, and WebGL2 ignores it outright (there is no storage-buffer concept
+        // there). It has to be declared here rather than added later: a GPUBuffer fixes its usage at
+        // creation, so a mesh that might one day be displaced has to ask for it now.
+        this._vertexBuffer = device.createBuffer({ label: 'mesh.vertices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST | BufferUsage.STORAGE });
         this._indexBuffer = null;
         this._boneIndicesBuffer = null;
         this._boneWeightsBuffer = null;

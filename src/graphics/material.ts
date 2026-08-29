@@ -6,7 +6,7 @@ interface MaterialConfig {
     wireframe?: boolean;
 }
 
-interface BasicProperties {
+interface BasicProperties extends HeightConfig {
     color?: number[];
     texture?: string;
     opacity?: number;
@@ -26,9 +26,18 @@ interface BasicProperties {
      * This is where an FBX/OBJ opacity map (aiTextureType_OPACITY) lands on import.
      */
     mask?: string;
+    /**
+     * Height field, read from RED. Present on EVERY material type, not just PBR, because a terrain paint
+     * layer can be based on any of them and terrain reads its height from this one slot.
+     *
+     * Inert on a standard Basic or Blinn-Phong material: only chunks/pbrGBuffer.wgsl and
+     * chunks/pbrForward.wgsl carry the parallax march. What it always does is feed a terrain layer's
+     * height-aware blend, which is base-type agnostic.
+     */
+    displacementMap?: string;
 }
 
-interface DefaultProperties {
+interface DefaultProperties extends HeightConfig {
     diffuse?: number[];
     specular?: number[];
     ambient?: number[];
@@ -54,6 +63,15 @@ interface DefaultProperties {
         normal?: string;
         mask?: string;
         reflectivity?: string;
+        /**
+         * Height field, read from RED. Present on EVERY material type, not just PBR, because a terrain paint
+         * layer can be based on any of them and terrain reads its height from this one slot.
+         *
+         * Inert on a standard Basic or Blinn-Phong material: only chunks/pbrGBuffer.wgsl and
+         * chunks/pbrForward.wgsl carry the parallax march. What it always does is feed a terrain layer's
+         * height-aware blend, which is base-type agnostic.
+         */
+        displacementMap?: string;
     }
 }
 
@@ -61,6 +79,18 @@ interface PBRProperties {
     baseColor?: number[];
     metallic?: number;
     roughness?: number;
+    /**
+     * Dielectric specular level, 0..1. Default 0.5.
+     *
+     * Every non-metal in this engine used to reflect exactly 4% at normal incidence, because `F0` was
+     * the literal `0.04` in four shaders. Real dielectrics are not all the same: water is near 0.02,
+     * skin about 0.028, most gemstones 0.05 to 0.08. Filament's remapping is `F0 = 0.16 * r^2`, which
+     * puts 0.5 at exactly the old constant — so every material that does not set this is bit-identical
+     * to what it was — and spans 0 to 0.16 across the slider.
+     *
+     * Ignored where `metallic` is 1: a conductor's F0 is its base colour, not a scalar.
+     */
+    reflectance?: number;
     opacity?: number;
     /**
      * glTF `alphaMode: MASK`. Below this base-colour alpha the fragment is discarded; the surface
@@ -68,8 +98,46 @@ interface PBRProperties {
      */
     alphaCutoff?: number;
     emissiveFactor?: number[];
-    /** Parallax occlusion mapping depth, in UV units. Inert without a `displacementMap`. */
+    /**
+     * HDR headroom for {@link emissiveFactor}, default 1.
+     *
+     * The colour is authored through a hex picker and so cannot exceed 1 on any channel, which put a
+     * ceiling on emissive brightness BELOW the point where anything happens: bloom thresholds in
+     * display-referred terms, and at the default exposure a mid-tone emissive lands at exposed luma
+     * 1.0 — exactly the default threshold — and contributes nothing at all. Pure white only doubles
+     * it. There was no combination of bloom settings at which an authored emissive material glowed.
+     *
+     * Keep the colour for hue and this for how hot, which is what glTF's
+     * `KHR_materials_emissive_strength` means by the same split.
+     */
+    emissiveIntensity?: number;
+    /**
+     * Height relief depth. UV units on an ordinary material, where the parallax march offsets texture
+     * coordinates; WORLD METRES on a terrain layer, where it moves the terrain's own vertices.
+     *
+     * The two are different quantities because they do different things, and pretending otherwise is
+     * what made terrain relief unauthorable: a shared unit meant the terrain number changed meaning with
+     * the terrain's size.
+     */
     displacementScale?: number;
+    /**
+     * The `displacementMap` is a DEPTH map (white = deep), not the height map the engine authors.
+     *
+     * There is nothing to detect here. The two conventions are the same bytes, and a wrong guess does
+     * not degrade — it turns the relief inside out, so brick reads as mortar. The engine's own maps and
+     * every terrain layer are height maps, so this defaults off; a downloaded `*_disp.png` usually
+     * needs it on.
+     */
+    invertHeight?: boolean;
+    /**
+     * Discard where the parallax ray walks off the edge of the face, so the SILHOUETTE follows the
+     * height field instead of staying a straight polygon edge.
+     *
+     * Off by default, and it has to be: the test is against the 0..1 uv rectangle, which is a real
+     * border only on a surface mapped 0..1 (a cube face, a quad). A tiled surface has no border there
+     * and would come out punched with a grid of holes.
+     */
+    clipSilhouette?: boolean;
     textures?: {
         baseColorTexture?: string;
         /**
@@ -88,8 +156,9 @@ interface PBRProperties {
          */
         mask?: string;
         /**
-         * Height field for parallax occlusion mapping, read from RED (0 = floor, 1 = surface). Unlike
-         * the ORM sources above, this is bound directly on its own texture unit.
+         * Height field for parallax occlusion mapping, read from RED (0 = floor, 1 = surface — set
+         * `invertHeight` for a depth map, which runs the other way). Unlike the ORM sources above, this
+         * is bound directly on its own texture unit.
          */
         displacementMap?: string;
         /** Legacy/glTF input only: a pre-packed map, fanned out to metallicMap + roughnessMap. Never written back. */
@@ -114,6 +183,49 @@ export function applyMask(material: Material, mask: string | undefined | null,
     material.properties.set('hasMaskMap', mask ? true : false);
     if (mask) material.textures.set('maskMap', mask);
     material.properties.set('alphaCutoff', alphaCutoff ?? (mask ? 0.5 : 0));
+}
+
+/**
+ * What a height field does, and where.
+ *
+ * On an ORDINARY material it is parallax occlusion mapping: the fragment stage offsets texture
+ * coordinates and never moves a vertex, so a silhouette stays a straight polygon edge and the relief
+ * flattens under a grazing view. Cheap and resolution-independent.
+ *
+ * On a TERRAIN paint layer it raises the terrain's own vertices — always, with no mode to choose. Real
+ * geometry, so it silhouettes and self-occludes. Only terrain can do this, because only terrain rebuilds
+ * its vertices from a field it owns; a mesh's vertices are what `Model.serialize()` writes, so
+ * displacing them would be saved over the authored asset. See `Terrain._displacementAt`.
+ *
+ * `displacementScale` is read in each mode's natural unit: tiled uv for the march (which offsets texture
+ * coordinates and has no world scale of its own), world metres for terrain (which moves vertices, and
+ * where an artist is asking for "three centimetres of gravel"). Terrains authored before the terrain unit
+ * changed are migrated on load by `Terrain.deserialize`.
+ */
+
+/** Everything on the height slot except the texture itself. */
+export interface HeightConfig {
+    displacementScale?: number;
+    invertHeight?: boolean;
+    clipSilhouette?: boolean;
+}
+
+/**
+ * Assign the height field and its settings, for any material type.
+ *
+ * Centralised for the same reason applyMask is: the slot lives on all three material types, and
+ * `hasDisplacementMap` — which the PBR shaders branch on — has to be written in lock step with the
+ * texture, or the march reads a sampler nothing bound. Basic and Blinn-Phong set the flag too and
+ * simply never read it; cheaper than three near-identical pairs of lines that can drift apart.
+ */
+export function applyHeight(material: Material, height: string | undefined | null,
+                            cfg: HeightConfig = {}): void {
+    // Always written, so a material that gains a height map later already has a usable depth.
+    material.properties.set('dispScale', cfg.displacementScale ?? 0.05);
+    material.properties.set('invertHeight', cfg.invertHeight ? true : false);
+    material.properties.set('clipSilhouette', cfg.clipSilhouette ? true : false);
+    material.properties.set('hasDisplacementMap', height ? true : false);
+    if (height) material.textures.set('displacementMap', height);
 }
 
 enum MaterialType {
@@ -157,6 +269,7 @@ export class Material {
         }
 
         applyMask(material, properties.mask, properties.alphaCutoff);
+        applyHeight(material, properties.displacementMap, properties);
 
         return material;
     }
@@ -201,6 +314,7 @@ export class Material {
         }
 
         applyMask(material, properties.textures?.mask, properties.alphaCutoff);
+        applyHeight(material, properties.textures?.displacementMap, properties);
 
         material.properties.set('hasReflectivityMap', properties.textures?.reflectivity ? true : false);
 
@@ -218,8 +332,13 @@ export class Material {
         material.properties.set('baseColor', properties.baseColor || [1.0, 1.0, 1.0]);
         material.properties.set('metallic', properties.metallic === undefined ? 0.0 : properties.metallic);
         material.properties.set('roughness', properties.roughness === undefined ? 1.0 : properties.roughness);
+        // 0.5 -> F0 0.04, which is what every dielectric was hardcoded to before this existed. That
+        // default is what makes the whole change a no-op on content authored before it.
+        material.properties.set('reflectance', properties.reflectance === undefined ? 0.5 : properties.reflectance);
         material.properties.set('opacity', properties.opacity === undefined ? 1.0 : properties.opacity);
         material.properties.set('emissiveFactor', properties.emissiveFactor || [0.0, 0.0, 0.0]);
+        material.properties.set('emissiveIntensity',
+                                properties.emissiveIntensity === undefined ? 1.0 : properties.emissiveIntensity);
 
         // Textures flags
         const tex = properties.textures || {};
@@ -252,10 +371,7 @@ export class Material {
         // it to 0 first would hand applyMask a concrete 0 and leave every hand-assigned mask inert.
         applyMask(material, tex.mask, properties.alphaCutoff);
 
-        // Always written, so a material that gains a height map later already has a usable depth.
-        material.properties.set('dispScale', properties.displacementScale ?? 0.05);
-        material.properties.set('hasDisplacementMap', tex.displacementMap ? true : false);
-        if (tex.displacementMap) material.textures.set('displacementMap', tex.displacementMap);
+        applyHeight(material, tex.displacementMap, properties);
 
         return material;
     }
@@ -281,8 +397,16 @@ export class Material {
             material.properties.set(`u_roughness${i}`, 1);
             material.properties.set(`u_hasAlbedo${i}`, 0);
             material.properties.set(`u_hasNormal${i}`, 0);
-            material.properties.set(`u_hasDisp${i}`, 0);
+            material.properties.set(`u_hasHeight${i}`, 0);
+            material.properties.set(`u_invertHeight${i}`, 0);
             material.properties.set(`u_dispScale${i}`, 0.05);
+            // The march's half of the height-map split, zeroed until a layer resolves one. See
+            // `Terrain._writeMarchUniforms`; zero here means "march nothing", which is the right
+            // answer for a terrain with no layers assigned.
+            material.properties.set(`u_splitLod${i}`, 0);
+            material.properties.set(`u_residRange${i}`, 0);
+            material.properties.set(`u_residBot${i}`, 0);
+            material.properties.set(`u_marchDepth${i}`, 0);
             material.properties.set(`u_heightBlend${i}`, 0);
         }
         return material;
@@ -309,9 +433,13 @@ export class Material {
                 color: this.properties.get('color'),
                 opacity: this.properties.get('opacity'),
                 alphaCutoff: this.properties.get('alphaCutoff'),
+                displacementScale: this.properties.get('dispScale'),
+                invertHeight: this.properties.get('invertHeight'),
+                clipSilhouette: this.properties.get('clipSilhouette'),
                 textures: {
                     texture: this.textures.get('texture'),
-                    mask: this.textures.get('maskMap')
+                    mask: this.textures.get('maskMap'),
+                    displacementMap: this.textures.get('displacementMap')
                 },
                 config: cfg
             };
@@ -321,10 +449,14 @@ export class Material {
                 baseColor: this.properties.get('baseColor'),
                 metallic: this.properties.get('metallic'),
                 roughness: this.properties.get('roughness'),
+                reflectance: this.properties.get('reflectance'),
                 opacity: this.properties.get('opacity'),
                 alphaCutoff: this.properties.get('alphaCutoff'),
                 emissiveFactor: this.properties.get('emissiveFactor'),
+                emissiveIntensity: this.properties.get('emissiveIntensity'),
                 displacementScale: this.properties.get('dispScale'),
+                invertHeight: this.properties.get('invertHeight'),
+                clipSilhouette: this.properties.get('clipSilhouette'),
                 // Fixed keys, not a dump of the map: that keeps the derived `ormTexture` out of assets.
                 textures: {
                     baseColorTexture: this.textures.get('baseColorTexture'),
@@ -348,13 +480,17 @@ export class Material {
                 shininess: this.properties.get('shininess'),
                 opacity: this.properties.get('opacity'),
                 alphaCutoff: this.properties.get('alphaCutoff'),
+                displacementScale: this.properties.get('dispScale'),
+                invertHeight: this.properties.get('invertHeight'),
+                clipSilhouette: this.properties.get('clipSilhouette'),
                 textures: {
                     base: this.textures.get('baseTexture'),
                     specular: this.textures.get('specularMap'),
                     normal: this.textures.get('normalMap'),
                     emissive: this.textures.get('emissiveMap'),
                     mask: this.textures.get('maskMap'),
-                    reflectivity: this.textures.get('reflectivityMap')
+                    reflectivity: this.textures.get('reflectivityMap'),
+                    displacementMap: this.textures.get('displacementMap')
                 },
                 config: cfg
             };
@@ -387,20 +523,32 @@ export class Material {
                 // Undefined when absent, never 0: applyMask has to tell "no cutoff stored" from
                 // "cutoff explicitly off" so a mask can still pick up its 0.5 default.
                 alphaCutoff: m.alphaCutoff,
-                mask: m.textures?.mask
+                mask: m.textures?.mask,
+                displacementMap: m.textures?.displacementMap,
+                displacementScale: m.displacementScale ?? 0.05,
+                invertHeight: !!m.invertHeight,
+                clipSilhouette: !!m.clipSilhouette,
             }, config);
         } else if (type === 'pbr') {
             return Material.PBR({
                 baseColor: m.baseColor || [1, 1, 1],
                 metallic: m.metallic ?? 0.0,
                 roughness: m.roughness ?? 1.0,
+                // `??`, so a project saved before reflectance existed reloads at the neutral 0.5
+                // rather than at 0, which would strip the specular off every dielectric in it.
+                reflectance: m.reflectance ?? 0.5,
                 opacity: m.opacity ?? 1.0,
                 // Left undefined when absent rather than forced to 0: applyMask needs to tell "no
                 // cutoff stored" from "cutoff explicitly off", so a mask can still pick up its 0.5
                 // default. With no mask, undefined resolves to 0 and an old scene reloads unchanged.
                 alphaCutoff: m.alphaCutoff,
                 emissiveFactor: m.emissiveFactor || [0, 0, 0],
+                // `??`, so a project saved before the multiplier existed reloads at 1 rather than at 0
+                // — which would black out every emissive material in it.
+                emissiveIntensity: m.emissiveIntensity ?? 1.0,
                 displacementScale: m.displacementScale ?? 0.05,
+                invertHeight: !!m.invertHeight,
+                clipSilhouette: !!m.clipSilhouette,
                 // `metallicRoughnessTexture` is the pre-split key; Material.PBR fans it out to both slots.
                 textures: {
                     baseColorTexture: m.textures?.baseColorTexture,
@@ -424,13 +572,17 @@ export class Material {
                 shininess: m.shininess,
                 opacity: m.opacity,
                 alphaCutoff: m.alphaCutoff,
+                displacementScale: m.displacementScale ?? 0.05,
+                invertHeight: !!m.invertHeight,
+                clipSilhouette: !!m.clipSilhouette,
                 textures: {
                     base: texData.base,
                     specular: texData.specular,
                     normal: texData.normal,
                     emissive: texData.emissive,
                     mask: texData.mask,
-                    reflectivity: texData.reflectivity
+                    reflectivity: texData.reflectivity,
+                    displacementMap: texData.displacementMap
                 }
             }, config);
         }
@@ -475,12 +627,34 @@ export function migrateFoliageRule<T extends { density?: number; densityUnit?: s
 }
 
 /**
+ * The stable key a runtime foliage layer is filed under.
+ *
+ * Three tiers, most stable first. `id` is the real answer and every newly written rule carries one.
+ * `modelId` covers every library-linked mesh rule authored before ids existed, which is the bulk of
+ * real content. `name` is the last resort and the only tier a rename can break — which is exactly the
+ * behaviour this replaces, so nothing regresses by falling through to it.
+ */
+export function foliageRuleKey(rule: TerrainFoliageRule): string {
+    return rule.id ?? rule.modelId ?? rule.meshId ?? rule.name;
+}
+
+/**
  * A foliage prototype a TerrainMaterial auto-instances, or — named in an exclude list — one to keep
  * off that material. Plain data only, to keep this module free of a cycle with `terrain/foliage.ts`.
  */
 export interface TerrainFoliageRule {
     kind: 'mesh' | 'billboard';
-    /** Stable identifier; also what exclude lists reference. */
+    /**
+     * Stable identity, independent of the display name. Never shown, never referenced by an exclude
+     * list — it exists so a runtime foliage layer can follow its rule across a RENAME instead of being
+     * orphaned with its scattered instances.
+     *
+     * Optional because it is migrated in, not required: {@link foliageRuleKey} falls back through
+     * `modelId` to `name`, so a rule authored before this existed keeps working and converges on an id
+     * the next time the editor writes it.
+     */
+    id?: string;
+    /** Display name. Also what exclude lists reference, so it is NOT an identity — see `id`. */
     name: string;
     /** Billboard albedo (TextureManager id). Unused for 'mesh'. */
     textureId?: string | null;
@@ -523,9 +697,74 @@ export class TerrainMaterial extends Material {
     public hRange: [number, number] = [0, 100];
     /** Slope band (0 flat .. 1 vertical) the layer is visible in (auto blend). */
     public sRange: [number, number] = [0, 1];
-    /** Parallax strength for the layer's displacement (height) map (0 = flat). */
+    /**
+     * Relief depth for this layer's height map, in WORLD METRES.
+     *
+     * Unlike a standard material's `displacementScale`, which is in the surface's own uv, this is a
+     * distance: 0.05 is five centimetres of relief whatever the terrain's size and whatever the layer's
+     * tiling. That is what makes a library material tunable once and reusable — the old tiled-uv unit
+     * meant ten times more relief on a 200 m terrain than on a 20 m one.
+     */
     public displacementScale: number = 0.05;
-    /** Height-aware blend sharpness (0 = plain linear splat blend; higher = high spots poke through). */
+    /**
+     * Whether {@link displacementScale} has been converted to metres yet.
+     *
+     * False on any material parsed from JSON written before the unit changed, and the ONE signal that
+     * lets `applyTerrainMaterialToLayer` convert it against the terrain it is being applied to. Without
+     * it, assigning a library material re-applied the raw pre-metres number — ten times too shallow on
+     * a default landscape — which looked exactly like "saving the material switched displacement off".
+     *
+     * Not serialized as a boolean: `serialize` stamps `depthUnit: 'metres'`, which is self-describing
+     * in the file and matches the marker `Terrain.serialize` already writes.
+     */
+    public depthIsMetres: boolean = true;
+    /**
+     * "My source is already a HEIGHT map (white = high)."
+     *
+     * Reads backwards from its name, and the name is kept because it is the same control a standard
+     * material has. The slot is documented as a DEPTH map in four places — `displacementMap`,
+     * `material.ts` above, `chunks/terrainLayers.wgsl` and `chunks/parallax.wgsl` ("ship a DEPTH map,
+     * `*_disp.png`, white = deep. The two are indistinguishable from the bytes"). TERRAIN now honours
+     * that: `Terrain._deriveLayerSurface` inverts by default, so with this off a depth map pops out,
+     * which is what the slot promises and what an author expects from an untouched checkbox.
+     *
+     * Standard materials still read the slot as a height map. That divergence is deliberate and
+     * recorded rather than fixed here: the same map reads opposite on a mesh until that path is
+     * revisited.
+     */
+    public invertHeight: boolean = false;
+    /**
+     * Extra depth for the MARCHED half of the relief only, 1 = none.
+     *
+     * `displacementScale` is one number driving two mechanisms: the vertices carry everything coarser
+     * than `displaceSplitLod`, the parallax march carries the rest. That coupling has a sharp edge.
+     * Parallax offset is `depth * tan(view)`, which is ZERO looking straight down — measured in texels
+     * of the height map it is about 1 texel a metre from the camera against 13 at thirteen metres — so
+     * the close ground reads flat however the map is authored. Deepening enough to fix that (~10x) also
+     * puts half-metre bumps into the vertices, which is the "bumps and cliffs" failure this whole
+     * feature started from.
+     *
+     * So the march gets its own multiplier. `displacementScale` stays the physical relief depth for the
+     * geometry; this buys back the near field without touching it. Applied in exactly one place,
+     * `Terrain._writeMarchUniforms`, so the bake cannot pick it up by accident.
+     *
+     * It cannot help past the point where the residual collapses (~64 m at a 2 m eye height): there is
+     * nothing left for it to scale there.
+     */
+    public reliefDetail: number = 1;
+    /**
+     * What this layer's height map does: march it per fragment, or raise the terrain's own vertices.
+     *
+     * A displaced layer is skipped by the parallax march entirely — see `Terrain._writeLayerUniforms`
+     * for how — and contributes to the chunk geometry instead. Mixing the two across layers is the
+     * useful case: displacement for the low frequencies, parallax for the fine detail on top.
+     */
+    /**
+     * Height-aware blend sharpness (0 = plain linear splat blend; higher = high spots poke through).
+     *
+     * The second thing terrain does with a height map, alongside the parallax march above: where two
+     * layers overlap, the one standing higher takes the fragment instead of the two averaging into mud.
+     */
     public heightBlend: number = 0;
     /** Foliage prototypes this material scatters under the foliage brush. */
     public foliageInclude: TerrainFoliageRule[] = [];
@@ -546,6 +785,15 @@ export class TerrainMaterial extends Material {
     }
 
     public serialize(): any {
+        // The height map rides in `textures` like every other slot now. It used to be emitted as a
+        // TOP-LEVEL sibling, because `Material.serialize()` writes a FIXED key list per base type and
+        // only the pbr branch listed a displacement slot — so a basic- or blinn_phong-based layer had
+        // nowhere else to put it. All three branches carry the slot now, which removes the terrain-only
+        // shape that `terrainMaterials.ts`, `bundleMerge.ts` and `references.ts` each had to special-case.
+        //
+        // `parse` still READS the old top-level key, and must forever: asset JSON on disk is never
+        // rewritten until that asset is re-saved, and the shipped 3d-example stores its height ids there
+        // and nowhere else.
         return {
             ...super.serialize(), // base surface shape, keyed by this.type (basic/pbr/blinn_phong)
             terrainMaterial: true,
@@ -553,9 +801,12 @@ export class TerrainMaterial extends Material {
             auto: this.auto,
             hRange: [this.hRange[0], this.hRange[1]],
             sRange: [this.sRange[0], this.sRange[1]],
-            // super.serialize() emits fixed base-type keys only, so carry displacement explicitly.
-            displacementMap: this.textures.get('displacementMap') ?? null,
             displacementScale: this.displacementScale,
+            // Stamping the unit on the way out is what makes the conversion happen exactly once. See
+            // `depthIsMetres`, and the twin marker in `Terrain.serialize`.
+            depthUnit: 'metres',
+            reliefDetail: this.reliefDetail,
+            invertHeight: this.invertHeight,
             heightBlend: this.heightBlend,
             // Stamping the unit on the way out is what makes the round trip idempotent.
             foliageInclude: this.foliageInclude.map(r => ({ ...r, densityUnit: FOLIAGE_DENSITY_UNIT })),
@@ -576,8 +827,28 @@ export class TerrainMaterial extends Material {
         tm.auto = !!m.auto;
         tm.hRange = m.hRange ? [m.hRange[0], m.hRange[1]] : [0, 100];
         tm.sRange = m.sRange ? [m.sRange[0], m.sRange[1]] : [0, 1];
+        // LEGACY READ, and it stays. Terrain used to serialize its height map as a top-level sibling of
+        // `textures`; it now rides inside `textures` like every other slot (see serialize above). Every
+        // project saved before that — the shipped 3d-example included — has the id ONLY out here, and
+        // nothing rewrites an asset until the user re-saves it. Dropping this line loads those terrains
+        // with no height at all: `u_hasHeight{i}` goes to 0 and the height-aware blend silently becomes a
+        // plain linear splat, with nothing logged.
+        //
         if (m.displacementMap) tm.textures.set('displacementMap', m.displacementMap);
         tm.displacementScale = m.displacementScale ?? 0.05;
+        // An unstamped asset predates the metres unit. A default-constructed material is already in
+        // metres, so the flag defaults true and only a parse can clear it — which keeps every path that
+        // BUILDS a material (Create, the editor's own edits) out of the migration's way entirely.
+        tm.depthIsMetres = m.depthUnit === 'metres' || m.displacementScale === undefined;
+        // CARRIED THROUGH UNCHANGED, deliberately. There was a migration here that flipped this on
+        // load for assets written before terrain honoured the depth-map convention, so that nothing
+        // already authored would change on screen — and it cancelled the very fix it accompanied.
+        // `Terrain._deriveLayerSurface` inverts on the way to the layer, so flipping again here returned
+        // `X -> !X -> X` and every saved material rendered exactly as wrongly as before. Preserving the
+        // appearance was the mistake: the appearance was the bug. Existing materials flip on load now,
+        // which is the point.
+        tm.invertHeight = !!m.invertHeight;
+        tm.reliefDetail = m.reliefDetail ?? 1;
         tm.heightBlend = m.heightBlend ?? 0;
         // The only JSON -> live-rule path, so the density migration runs here. Downstream consumers
         // may assume every live foliageInclude entry is already per-m².

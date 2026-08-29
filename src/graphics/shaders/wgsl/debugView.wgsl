@@ -3,6 +3,7 @@
 
 #include "./chunks/fullscreen.wgsl"
 #include "./chunks/tonemap.wgsl"
+#include "./chunks/octNormal.wgsl"
 
 @group(0) @binding(0) var u_screenTexture_texture: texture_2d<f32>;
 @group(0) @binding(1) var u_screenTexture_sampler: sampler;
@@ -43,8 +44,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let t = textureSample(u_screenTexture_texture, u_screenTexture_sampler, in.uv);
     let mode = u_debug.u_mode;
 
-    // World-space normals stored in [-1,1] -> remap to viewable [0,1] colour.
-    if (mode == 1) { return vec4<f32>(t.rgb * 0.5 + 0.5, 1.0); }
+    // World-space normals, DECODED from the octahedral pair first — displaying the raw rg would show
+    // the encoding rather than the normal, which looks plausible enough to be believed.
+    if (mode == 1) { return vec4<f32>(octDecode(vec2<f32>(t.r, t.g)) * 0.5 + 0.5, 1.0); }
     // Scalar packed in the alpha channel (metallic / roughness / ambient occlusion).
     if (mode == 2) { return vec4<f32>(vec3<f32>(t.a), 1.0); }
     // Non-linear depth; a contrast curve spreads the far-weighted range so structure shows. Read from

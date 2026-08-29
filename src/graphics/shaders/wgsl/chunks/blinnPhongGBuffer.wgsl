@@ -21,6 +21,8 @@
 struct BlinnPhongGeometryMaterial {
     diffuse: vec3<f32>,
     emissive: vec3<f32>,
+    /** HDR headroom for the emissive colour, default 1. See chunks/pbrGBuffer.wgsl for why. */
+    emissiveIntensity: f32,
     shininess: f32,
     reflectivity: f32,
     // i32 rather than bool: WGSL forbids bool in a uniform buffer. Call sites still pass booleans.
@@ -35,7 +37,7 @@ struct BlinnPhongGeometryMaterial {
 
 struct GBuffer {
     @location(0) gAlbedoMetallic: vec4<f32>,    // rgb = albedo, a = metallic
-    @location(1) gNormalRoughness: vec4<f32>,   // rgb = world normal, a = roughness
+    @location(1) gNormalRoughness: vec4<f32>,   // rg = oct normal, b = reflectance, a = roughness
     @location(2) gEmissiveAO: vec4<f32>,        // rgb = emissive, a = ambient occlusion
 };
 
@@ -73,16 +75,19 @@ fn fs_main(in: VertexOutput) -> GBuffer {
     }
 
     // Match the old forward path's emissive boost of 1.25.
-    var emissive = u_material.emissive * 1.25;
+    var emissive = u_material.emissive * 1.25 * u_material.emissiveIntensity;
     if (u_material.hasEmissiveMap != 0) {
         // sRGB -> linear
         let t = textureSample(u_material_emissiveMap_texture, u_material_emissiveMap_sampler, in.uv).rgb;
-        emissive = pow(t, vec3<f32>(2.2)) * u_material.emissive * 1.25;
+        emissive = pow(t, vec3<f32>(2.2)) * u_material.emissive * 1.25 * u_material.emissiveIntensity;
     }
 
     var out: GBuffer;
     out.gAlbedoMetallic = vec4<f32>(albedo, metallic);
-    out.gNormalRoughness = vec4<f32>(normalize(N), roughness);
+    // Reflectance 0.5 — the neutral dielectric, i.e. exactly the 0.04 F0 this path has always had.
+    // Blinn-Phong has no reflectance to author: its `reflectivity` already means metallic here.
+    let octN = octEncode(normalize(N));
+    out.gNormalRoughness = vec4<f32>(octN.x, octN.y, 0.5, roughness);
     out.gEmissiveAO = vec4<f32>(emissive, 1.0);
     return out;
 }

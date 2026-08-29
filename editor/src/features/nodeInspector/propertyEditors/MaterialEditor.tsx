@@ -32,10 +32,25 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   const [baseColor, setBaseColor] = useState<string>(vec3ToHex(material.properties.get('baseColor') || [1,1,1]));
   const [metallic, setMetallic] = useState<number>(material.properties.get('metallic') ?? 0);
   const [roughness, setRoughness] = useState<number>(material.properties.get('roughness') ?? 1);
+  const [reflectance, setReflectance] = useState<number>(material.properties.get('reflectance') ?? 0.5);
   const [emissiveFactor, setEmissiveFactor] = useState<string>(vec3ToHex(material.properties.get('emissiveFactor') || [0,0,0]));
+  const [emissiveIntensity, setEmissiveIntensity] = useState<number>(material.properties.get('emissiveIntensity') ?? 1);
   const [pbrOpacity, setPbrOpacity] = useState<number>(material.properties.get('opacity') ?? 1);
   // Parallax occlusion depth; inert without a Height map.
-  const [dispScale, setDispScale] = useState<number>(material.properties.get('dispScale') ?? 0.05);
+  const [dispScale, setDispScale] = useState<number>(
+    (material as any).displacementScale ?? material.properties.get('dispScale') ?? 0.05);
+  const [reliefDetail, setReliefDetail] = useState<number>((material as any).reliefDetail ?? 1);
+  // Whether the Height map is really a DEPTH map (white = deep), the convention most downloaded PBR
+  // packs ship. Nothing can detect this from the bytes, and the wrong answer inverts the relief.
+  const [invertHeight, setInvertHeight] = useState<boolean>(
+    !!((material as any).invertHeight ?? material.properties.get('invertHeight')));
+  // Discard where the march walks off the face, so the outline follows the height field.
+  const [clipSilhouette, setClipSilhouette] = useState<boolean>(!!material.properties.get('clipSilhouette'));
+  // A terrain paint layer, which mounts this editor whole. It marches its height map exactly as a
+  // standard material does, so Depth and Invert apply — but Clip silhouette does not: that test is
+  // against a 0..1 uv chart and terrain is tiled, so it has no border to clip to.
+  const isTerrain = (material as any).terrainMaterial === true
+    || (material as any).foliageInclude !== undefined;
   // Cutout threshold, shared by all three shader types. 0 means no cutout.
   const [alphaCutoff, setAlphaCutoff] = useState<number>(material.properties.get('alphaCutoff') ?? 0);
   const [defaultOpacity, setDefaultOpacity] = useState<number>(material.properties.get('opacity') ?? 1);
@@ -68,7 +83,9 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     setBaseColor(vec3ToHex(material.properties.get('baseColor') || [1,1,1]));
     setMetallic(material.properties.get('metallic') ?? 0);
     setRoughness(material.properties.get('roughness') ?? 1);
+    setReflectance(material.properties.get('reflectance') ?? 0.5);
     setEmissiveFactor(vec3ToHex(material.properties.get('emissiveFactor') || [0,0,0]));
+    setEmissiveIntensity(material.properties.get('emissiveIntensity') ?? 1);
     setPbrOpacity(material.properties.get('opacity') ?? 1);
     setDefaultOpacity(material.properties.get('opacity') ?? 1);
 
@@ -113,6 +130,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
       material.properties.set('baseColor', carried);
       if (material.properties.get('metallic') === undefined) material.properties.set('metallic', 0.0);
       if (material.properties.get('roughness') === undefined) material.properties.set('roughness', 1.0);
+      if (material.properties.get('reflectance') === undefined) material.properties.set('reflectance', 0.5);
       if (material.properties.get('opacity') === undefined) material.properties.set('opacity', 1.0);
       if (!material.properties.get('emissiveFactor')) material.properties.set('emissiveFactor', material.properties.get('emissive') || [0,0,0]);
       if (material.properties.get('hasBaseColorTexture') === undefined) material.properties.set('hasBaseColorTexture', false);
@@ -120,6 +138,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
       if (material.properties.get('hasRoughnessMap') === undefined) material.properties.set('hasRoughnessMap', false);
       if (material.properties.get('hasNormalMap') === undefined) material.properties.set('hasNormalMap', false);
       if (material.properties.get('hasOcclusionMap') === undefined) material.properties.set('hasOcclusionMap', false);
+      if (material.properties.get('emissiveIntensity') === undefined) material.properties.set('emissiveIntensity', 1.0);
       if (material.properties.get('hasEmissiveMap') === undefined) material.properties.set('hasEmissiveMap', false);
     }
   }, [shaderType, material]);
@@ -167,6 +186,108 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   const updateOption = (patch: Partial<typeof options>) => { setOptions((prev) => ({ ...prev, ...patch })); markMaterialDirty(); };
 
   // Called as a function, not a component, so each TextureInspector stays mounted across re-renders.
+  // -------------------------------------------------------------------------------------------
+  // The Height section, rendered by all three shader types.
+  //
+  // In all three deliberately, not just PBR where the parallax march lives: a TERRAIN paint layer can
+  // be based on any material type and reads its height from this slot, which is the same reason Basic
+  // and Blinn-Phong carry a Height texture slot at all. The Mode row is the part that is terrain-only.
+  // -------------------------------------------------------------------------------------------
+  // A terrain layer's height map always displaces the terrain's vertices; an ordinary material's always
+  // marches. There is nothing to choose, so the rows below are gated on the material KIND.
+  const isDisplace = isTerrain;
+  const setHeightProp = (key: string, value: any) => {
+    // Terrain layers keep their height settings on the TerrainMaterial itself rather than in the
+    // properties map: Terrain._writeLayerUniforms fans each one out to `u_<key>{i}`, one per painted
+    // layer, so there is no single uniform to write.
+    if (isTerrain) (model.material as any)[key === 'dispScale' ? 'displacementScale' : key] = value;
+    else model.material.properties.set(key, value);
+    markMaterialDirty();
+  };
+
+  const heightSection = (
+    <Section title='Height'>
+      <PropertyTable columns={['40%', '60%']}>
+        {/* Each mode's natural unit, because they are different quantities. On an ordinary material the
+            march offsets texture coordinates and has no world scale, so depth is UV units and a tiled
+            surface divides it. On terrain it moves vertices, so it is WORLD METRES — 0.03 is three
+            centimetres of gravel on any terrain, at any size, at any tiling.
+
+            It used to be tiled uv on terrain too, converted by `size / tiling` to match the march. That
+            put this slider's whole range at 0..5 METRES on a default landscape with a 5 cm minimum step,
+            which is why height maps came out as cliffs and why centimetre relief was not expressible. */}
+        <PropertyRow label={isTerrain ? 'Depth (m)' : 'Depth'}>
+          <Slider min={0} max={0.5} step={0.005} value={dispScale}
+                  onChange={(v) => { setHeightProp('dispScale', v); setDispScale(v); }} />
+        </PropertyRow>
+        {/* Terrain relief is carried by TWO mechanisms and Depth drives both: the vertices take
+            everything coarser than one vertex spacing, the parallax march takes the rest. The march's
+            offset is `depth * tan(view)`, which is ZERO looking straight down - about one texel of the
+            height map a metre from the camera against thirteen at thirteen metres - so the ground at
+            your feet reads flat no matter how the map is authored. Deepening enough to fix that also
+            deepens the VERTICES by the same factor, which is how a rock texture turns into cliffs.
+            This scales only the marched half, so the close ground can be brought up while the coarse
+            relief stays at the centimetres it was authored at. It cannot help beyond the distance where
+            the residual collapses - there is nothing left there for it to scale. */}
+        {isTerrain && (
+          <PropertyRow label='Relief detail'>
+            {/* Up to 8x, not 4x: a coarsely tiled layer's relief is shallow in PROPORTION to its
+                features, and the deficit is the repeat size. At tiling 31 on a 400 m terrain a brick is
+                3.2 m wide and an authored 6 cm is 2% of it, against 24% for the same texture on a mesh -
+                a 12x shortfall that a 4x ceiling cannot reach. Raising the tiling is the real fix (the
+                repeat is quoted in the Terrain Material inspector); this is for when the tiling is
+                already what the layer needs. */}
+            <Slider min={0.25} max={8} step={0.25} value={reliefDetail}
+                    onChange={(v) => { setHeightProp('reliefDetail', v); setReliefDetail(v); }} />
+          </PropertyRow>
+        )}
+        {/* A height map is white at the PEAKS. A depth map - what `*_disp.png` in most PBR packs
+            actually is - is white in the CREVICES. They are the same bytes, so nothing can tell them
+            apart; getting it wrong turns brick into mortar rather than looking slightly off. If the
+            relief reads inside out, this is the switch. */}
+        <PropertyRow label='Depth map' divider={isDisplace || !isTerrain}>
+          <Toggle label='Invert' checked={invertHeight}
+                  onChange={(c) => { setHeightProp('invertHeight', c); setInvertHeight(c); }} />
+        </PropertyRow>
+
+        {/* Parallax only. The only thing a march can do about a BORDER: it offsets texture coordinates
+            and never moves a vertex, so an outline is straight by construction - this discards where
+            the ray walks off the face instead, biting the height field into the edge. It can only carve
+            inward, never bulge out. Displacement has no use for it, because it moves the edge itself.
+
+            Off by default and deliberately not inferred: the test is against the 0..1 uv rectangle,
+            which is a real border only on a surface mapped 0..1 - a cube face, a quad. Terrain is
+            tiled, so it never gets this row at all. */}
+        {!isDisplace && !isTerrain &&
+        <PropertyRow label='Silhouette' divider={false}>
+          <Toggle label='Clip at UV border' checked={clipSilhouette} onChange={(c) => {
+            model.material.properties.set('clipSilhouette', c);
+            setClipSilhouette(c);
+            markMaterialDirty();
+          }} />
+        </PropertyRow>}
+
+        {/* The honest limit, on the one surface where it bites. Terrain vertex spacing is
+            `size / (resolution - 1)` - 0.78 m at the default 129 over 100 m - while a layer height map
+            tiles 20-50x, putting one tile period at 2-5 m. That is 3-6 vertices per tile: terrain
+            displacement can carry only the LOWEST frequencies of a height map, and asking it for fine
+            detail will alias. Raising the terrain resolution is the lever; parallax is still the right
+            tool for the detail, which is why the modes are per layer rather than one switch. */}
+        {isDisplace &&
+        <PropertyRow label='Note' divider={false}>
+          <span className='text-muted text-xs'>
+            Terrain relief is real geometry, so nothing finer than about twice the vertex spacing can
+            appear — the Landscape inspector reports that figure. Detail below it (individual pebbles,
+            twigs) is filtered out rather than shrunk, so a height map reads as its broad shape.
+            Resolution and Relief detail are the levers. Physics follows the sculpted surface, so a
+            displaced terrain is not walked on.
+          </span>
+        </PropertyRow>}
+
+      </PropertyTable>
+    </Section>
+  );
+
   const texSlot = (label: string, tex: string) => (
     <div className='flex flex-col items-center gap-1'>
       <span className='text-[10px] text-muted'>{label}</span>
@@ -208,8 +329,13 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 {texSlot('Emission', 'emissiveMap')}
                 {texSlot('Mask', 'maskMap')}
                 {texSlot('Reflectivity', 'reflectivityMap')}
+                {/* Inert on this material type — only the PBR chunks carry the parallax march. It is
+                    here because a TERRAIN paint layer can be based on any material type and reads its
+                    height from this one slot, for the height-aware blend. */}
+                {texSlot('Height', 'displacementMap')}
               </div>
             </Section>
+            {heightSection}
             <Section title='Cutout'>
               <PropertyTable columns={['40%', '60%']}>
                 {/* The Mask slot lives with the other textures above; this is just its threshold. It
@@ -230,9 +356,16 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 <PropertyRow label='Opacity' divider={false}><Slider min={0} max={1} step={0.01} value={basicOpacity} onChange={setNum('opacity', setBasicOpacity)} /></PropertyRow>
               </PropertyTable>
             </Section>
-            <Section title='Texture'>
-              <div className='flex flex-wrap gap-3'>{texSlot('Texture', 'texture')}</div>
+            <Section title='Textures'>
+              <div className='flex flex-wrap gap-3'>
+                {texSlot('Texture', 'texture')}
+                {/* Inert on this material type — only the PBR chunks carry the parallax march. It is
+                    here because a TERRAIN paint layer can be based on any material type and reads its
+                    height from this one slot, for the height-aware blend. */}
+                {texSlot('Height', 'displacementMap')}
+              </div>
             </Section>
+            {heightSection}
             <Section title='Cutout'>
               <PropertyTable columns={['40%', '60%']}>
                 {/* The mask is read from RED, so a grayscale map is what belongs here. 0 disables the
@@ -255,8 +388,20 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 <PropertyRow label='Base Color'><ColorInput color={baseColor} onChange={setColor('baseColor', setBaseColor)} /></PropertyRow>
                 <PropertyRow label='Metallic'><Slider min={0} max={1} step={0.01} value={metallic} onChange={setNum('metallic', setMetallic)} /></PropertyRow>
                 <PropertyRow label='Roughness'><Slider min={0} max={1} step={0.01} value={roughness} onChange={setNum('roughness', setRoughness)} /></PropertyRow>
+                {/* Dielectric specular level. 0.5 is the neutral default and reproduces the fixed 4%
+                    reflectance every non-metal in this engine used to have, so leaving it alone changes
+                    nothing. The useful range is narrow and low: water sits near 0.35, skin near 0.42,
+                    gemstones between 0.55 and 0.7. Has no effect at metallic 1. */}
+                <PropertyRow label='Reflectance'><Slider min={0} max={1} step={0.01} value={reflectance} onChange={setNum('reflectance', setReflectance)} /></PropertyRow>
                 <PropertyRow label='Opacity'><Slider min={0} max={1} step={0.01} value={pbrOpacity} onChange={setNum('opacity', setPbrOpacity)} /></PropertyRow>
-                <PropertyRow label='Emissive' divider={false}><ColorInput color={emissiveFactor} onChange={setColor('emissiveFactor', setEmissiveFactor)} /></PropertyRow>
+                <PropertyRow label='Emissive'><ColorInput color={emissiveFactor} onChange={setColor('emissiveFactor', setEmissiveFactor)} /></PropertyRow>
+                {/* The colour is a hex picker and so cannot exceed 1 per channel — which is below the
+                    brightness at which anything happens, because bloom thresholds in display-referred
+                    terms and a mid-tone emissive lands exactly ON the default threshold. The colour is
+                    the hue; this is how hot. Above ~2 an emissive surface starts to bloom. */}
+                <PropertyRow label='Emissive power' divider={false}>
+                  <Slider min={0} max={20} step={0.1} value={emissiveIntensity} onChange={setNum('emissiveIntensity', setEmissiveIntensity)} />
+                </PropertyRow>
               </PropertyTable>
             </Section>
             <Section title='Textures'>
@@ -274,16 +419,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 {texSlot('Height', 'displacementMap')}
               </div>
             </Section>
-            <Section title='Parallax'>
-              <PropertyTable columns={['40%', '60%']}>
-                {/* Depth of the height field in UV units. Only the Height map above switches parallax
-                    on; with no map this is inert, and the same number means the same thing on a
-                    terrain paint layer. Past ~0.15 a surface starts to smear at grazing angles. */}
-                <PropertyRow label='Depth' divider={false}>
-                  <Slider min={0} max={0.2} step={0.005} value={dispScale} onChange={setNum('dispScale', setDispScale)} />
-                </PropertyRow>
-              </PropertyTable>
-            </Section>
+            {heightSection}
             <Section title='Cutout'>
               <PropertyTable columns={['40%', '60%']}>
                 {/* The mask is read from RED, so a grayscale map is what belongs here. 0 disables the

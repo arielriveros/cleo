@@ -2,13 +2,15 @@ import { useMemo, useState } from 'react'
 import {
   Node, ModelNode, TerrainMaterial, TerrainFoliageRule, Model, TextureManager, Logger,
   DEFAULT_FOLIAGE_DENSITY, FOLIAGE_DENSITY_UNIT, MAX_INSTANCES,
+  vertsPerRepeat, CARVE_VERTS_PER_REPEAT,
 } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
 import MaterialEditor from '../nodeInspector/propertyEditors/MaterialEditor'
 import TextureInspector from '../nodeInspector/propertyEditors/TextureInspector'
 import { buildFoliageRuleFromModelAsset } from '../../utils/foliageRules'
-import { Toggle } from '../../components/ui'
+import { cryptoRandomId } from '../../utils/ids'
+import { Hint, Slider, Toggle } from '../../components/ui'
 
 /** Terrain side length the density estimate is quoted against (matches the Landscape panel's default). */
 const ESTIMATE_SIZE = 200
@@ -20,7 +22,7 @@ const estimateFor = (r: TerrainFoliageRule): number =>
 // Right-sidebar inspector for the active terrain-material tab: the base surface, the terrain blend
 // fields and the foliage include/exclude lists, edited on the preview sphere's TerrainMaterial in place.
 export default function TerrainMaterialInspector(props: { node: Node | null }) {
-  const { eventEmitter, editingTerrainMaterialName, setActiveTerrainMaterialName, terrainMaterials, models, refreshTerrainMaterialPreview } = useCleoEngine()
+  const { eventEmitter, editingTerrainMaterialName, setActiveTerrainMaterialName, terrainMaterials, models, refreshTerrainMaterialPreview, editorScene } = useCleoEngine()
   const [, force] = useState(0)
   const [newFoliageTex, setNewFoliageTex] = useState('')
   const [newFoliageModel, setNewFoliageModel] = useState('')
@@ -61,6 +63,9 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
     // densityUnit must be stamped here: a rule pushed straight onto a live material never passes through
     // TerrainMaterial.parse, where an unmarked rule is treated as legacy and divided by 100.
     mat.foliageInclude.push({
+      // A stable identity so the scattered layer follows this rule through a rename. A billboard has
+      // no modelId to fall back on, so without this its only key would be the name.
+      id: cryptoRandomId(),
       kind: 'billboard', name, textureId: newFoliageTex,
       density: DEFAULT_FOLIAGE_DENSITY.billboard, densityUnit: FOLIAGE_DENSITY_UNIT,
       minScale: 0.8, maxScale: 1.4,
@@ -72,6 +77,9 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
     Model.fromFile({ files: Array.from(files) }).then(models => {
       if (!models.length) return
       const rule: TerrainFoliageRule = {
+        // An imported rule carries no modelId (nothing links it to a library asset), so this id is
+        // the only thing that can keep its layer through a rename.
+        id: cryptoRandomId(),
         kind: 'mesh', // rendering mode: real geometry, as opposed to 'billboard'
         name: `${models[0].name}_${mat.foliageInclude.length}`,
         model: models[0].model.serialize(),
@@ -116,6 +124,26 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
     changed()
   }
 
+  // The active landscape decides what a tiling number means in metres; without one, quote the default
+  // the Landscape panel creates so the figure is never silently absent. `mat.tiling` is in the deps but
+  // not read: it is the re-render this panel already causes on every edit, and reusing it keeps the
+  // lookup refreshing as landscapes come and go without a subscription of its own.
+  const landscape = useMemo(() => {
+    for (const l of editorScene.landscapes) return l.terrain
+    return null
+  }, [editorScene, mat.tiling])
+  const landscapeSize = landscape?.size ?? ESTIMATE_SIZE
+  const repeatMetres = landscapeSize / Math.max(mat.tiling, 0.01)
+  const relativeDepth = mat.textures.get('displacementMap')
+    ? mat.displacementScale / Math.max(repeatMetres, 1e-6) : null
+  // Whether the geometry half reproduces the texture's own features as ground shape is decided by the
+  // vertices across one repeat, which `displaceSplitLod` already computes to place the split. Read from
+  // there rather than re-derived from the two lengths above, so the hint and the bake agree by
+  // construction.
+  const perRepeat = landscape
+    ? vertsPerRepeat(mat.tiling, landscape.resolution, landscape.densityFor()) : 0
+  const carvesTerrain = relativeDepth !== null && perRepeat > CARVE_VERTS_PER_REPEAT
+
   return (
     <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-y-auto'>
       <div className='p-2 border-b border-success'>
@@ -134,12 +162,36 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
           <MaterialEditor node={node as ModelNode} />
         </div>}
 
+      {/* Derived here rather than in the JSX so the arithmetic is readable: a repeat is
+          `size / tiling` metres, and the vertex grid starts carving the texture once a repeat spans
+          more than a few vertices. `Terrain.densityFor()` owns the spacing, so it is read rather than
+          re-derived. */}
       <Collapsable title='Terrain blend'>
         <div className='p-2 space-y-2'>
           <div className='flex items-center justify-between'>
             <span className={label}>Tiling</span>
-            <input type='number' className={num} value={mat.tiling} onChange={e => { mat.tiling = Number(e.target.value); changed() }} />
+            {/* Floored: 0 or a negative makes `log2(tiling)` -inf in the shader. */}
+            <input type='number' className={num} min={0.01} step={1} value={mat.tiling}
+                   onChange={e => { mat.tiling = Math.max(0.01, Number(e.target.value)); changed() }} />
           </div>
+          {/* THE NUMBER NOBODY COULD SEE, and the one that decides whether relief reads at all.
+              Tiling is a repeat COUNT across the whole terrain, so what it means in metres depends on a
+              size that is edited in a different panel. At 31 across 400 m one repeat is 12.9 m — a brick
+              in a brick texture is then over three metres wide, 6 cm of depth is 2% of it, and the
+              relief looks flat next to the identical map on a mesh (whose uv repeats about every metre,
+              making the same depth ~24% of a brick). Worse, once a repeat is wide enough for the vertex
+              grid to resolve it, the geometry half starts carving the TEXTURE into terrain and each
+              brick becomes a real plateau. Both were invisible until derived by hand. */}
+          <Hint>
+            One repeat = <b>{repeatMetres.toFixed(2)} m</b> across a {landscapeSize} m terrain
+            {relativeDepth !== null && <> · depth is <b>{(relativeDepth * 100).toFixed(1)}%</b> of a
+              repeat{relativeDepth < 0.02 && <>, which reads as <b>flat</b> — the march offsets the same
+              centimetres a mesh does, but against a feature this wide they are invisible. Raise Tiling
+              until this passes ~5%.</>}</>}
+            {carvesTerrain && <> · <b>{perRepeat.toFixed(0)} vertices span one repeat</b>, so the
+              height map is shaping the ground itself and each feature becomes a real plateau — raise
+              Tiling until it does not.</>}
+          </Hint>
           <div className='flex items-center justify-between'>
             <span className={label}>Auto height/slope</span>
             <Toggle checked={mat.auto} onChange={c => { mat.auto = c; changed() }} />
@@ -161,19 +213,21 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
             </div>
           </>}
 
-          {/* Displacement (height) map: drives parallax depth + height-aware blending. */}
+          {/* The SECOND thing terrain does with a height map. The map itself, its Depth and its Invert
+              live in the material editor above, in the same Parallax section every material type has —
+              terrain marches its height field exactly as a normal material does.
+
+              This one has no equivalent on a normal material, which is why it is here: where two layers
+              overlap, it decides how hard the one standing higher pushes through the one painted over
+              it. A slider rather than a number box because 0 means "off" and that is the default, so
+              the range is the only thing that makes the control legible. */}
           <div className='pt-1 border-t border-control space-y-1'>
-            <span className={label}>Displacement (height) map</span>
-            <div onChange={() => changed()}>
-              <TextureInspector tex='displacementMap' material={mat} />
-            </div>
-            <div className='flex items-center justify-between'>
-              <span className={label}>Parallax scale</span>
-              <input type='number' step={0.01} min={0} className={num} value={mat.displacementScale} onChange={e => { mat.displacementScale = Number(e.target.value); changed() }} />
-            </div>
-            <div className='flex items-center justify-between'>
+            <div className='flex items-center justify-between gap-2'>
               <span className={label}>Height blend</span>
-              <input type='number' step={0.5} min={0} className={num} value={mat.heightBlend} onChange={e => { mat.heightBlend = Number(e.target.value); changed() }} />
+              <div className='flex-1'>
+                <Slider min={0} max={8} step={0.25} value={mat.heightBlend}
+                        onChange={(v: number) => { mat.heightBlend = v; changed() }} />
+              </div>
             </div>
           </div>
         </div>

@@ -28,6 +28,7 @@
     "naga:build": "node tools/naga-wasm/build.mjs",
     "harness:mesh": "node desktop/node_modules/electron/cli.js tools/harness/meshCheck.js",
     "harness:pass": "node desktop/node_modules/electron/cli.js tools/harness/passCheck.js",
+    "harness:lighting": "node desktop/node_modules/electron/cli.js tools/harness/lightingCheck.js",
     "harness:frametime": "node desktop/node_modules/electron/cli.js tools/harness/frameTime.js",
     "harness:backenddiff": "node desktop/node_modules/electron/cli.js tools/harness/backendDiff.js",
     "harness:backenddiff:full": "node -e \"process.env.CLEO_SCENE='full';require('child_process').spawnSync(process.execPath,['desktop/node_modules/electron/cli.js','tools/harness/backendDiff.js'],{stdio:'inherit',env:process.env})\"",

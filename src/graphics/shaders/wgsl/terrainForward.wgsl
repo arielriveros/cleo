@@ -28,6 +28,7 @@ struct TerrainLightingUniforms {
     u_skyLight: SkyLight,
     u_pointLights: array<PointLight, 16>,
     u_spotlights: array<SpotLight, 8>,
+    u_sceneAmbient: vec3<f32>,
     u_numPointLights: i32,
     u_numSpotlights: i32,
 };
@@ -39,48 +40,35 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // taking it from the same place it lights with keeps the two from ever disagreeing.
     let surface = resolveTerrainSurface(in.fragPos, in.uv, tbnOf(in), u_lighting.u_dirLight.direction);
 
+    // Filtered here rather than inside resolveTerrainSurface, because a derivative belongs at the top
+    // level of a fragment stage where control flow is still uniform, and the blend runs branches.
+    let roughness = filterSpecularRoughness(surface.roughness, surface.normal, u_terrain.u_specularAA);
+
     let v = normalize(u_terrain.u_viewPos - in.fragPos);
     // Terrain is the reason the sky light is nine uniforms rather than a cube: this shader's layer
     // samplers occupy units 0-8, so it can never bind one.
-    let ambient = (u_lighting.u_dirLight.ambient
-                   + skyIrradiance(u_lighting.u_skyLight, surface.normal)) * surface.albedo;
+    // This pass has no environment map and no probe, so its indirect term is purely diffuse — which
+    // is why occlusion is one multiply here and a split into two lobes in the deferred twin.
+    let ambient = (u_lighting.u_sceneAmbient
+                   + skyIrradiance(u_lighting.u_skyLight, surface.normal)) * surface.albedo * surface.ao;
 
     var lo = vec3<f32>(0.0);
 
-    // A zero direction means "no directional light", which is how the renderer switches the sun off —
-    // normalising it would produce NaN rather than darkness.
-    let dirD = u_lighting.u_dirLight.direction;
-    if (dot(dirD, dirD) > 1e-6) {
-        // Self-shadowing applied to the SUN's radiance, which is what it actually describes. The
-        // deferred twin has to fold it into albedo instead; see geometryTerrain.
-        lo += accumulateLight(surface.normal, v, surface.albedo, surface.metallic, surface.roughness,
-                              normalize(-dirD), u_lighting.u_dirLight.diffuse * surface.shadow);
-    }
+    // Self-shadowing applied to the SUN's visibility, which is what it actually describes. The
+    // deferred twin has to fold it into albedo instead; see geometryTerrain.
+    lo += evaluateDirectionalLight(u_lighting.u_dirLight, surface.normal, v, surface.albedo,
+                                   surface.metallic, roughness, surface.shadow);
 
     for (var i = 0; i < MAX_POINT_LIGHTS; i++) {
         if (i >= u_lighting.u_numPointLights) { break; }
-        let p = u_lighting.u_pointLights[i];
-        let toLight = p.position - in.fragPos;
-        let dist = length(toLight);
-        let att = 1.0 / (p.constant + p.linear * dist + p.quadratic * dist * dist);
-        lo += accumulateLight(surface.normal, v, surface.albedo, surface.metallic, surface.roughness,
-                              normalize(toLight), p.diffuse * att);
+        lo += evaluatePointLight(u_lighting.u_pointLights[i], in.fragPos, surface.normal, v,
+                                 surface.albedo, surface.metallic, roughness);
     }
 
     for (var i = 0; i < MAX_SPOTLIGHTS; i++) {
         if (i >= u_lighting.u_numSpotlights) { break; }
-        let s = u_lighting.u_spotlights[i];
-        let toLight = s.position - in.fragPos;
-        let dist = length(toLight);
-        let att = 1.0 / (s.constant + s.linear * dist + s.quadratic * dist * dist);
-        let l = normalize(toLight);
-        let theta = dot(l, normalize(-s.direction));
-        // cutOff/outerCutOff are COSINES of the half-angles (see the renderer's spot upload), so the
-        // inner one is the LARGER value and the falloff denominator is inner - outer.
-        let epsilon = s.cutOff - s.outerCutOff;
-        let intensity = clamp((theta - s.outerCutOff) / epsilon, 0.0, 1.0);
-        lo += accumulateLight(surface.normal, v, surface.albedo, surface.metallic, surface.roughness,
-                              l, s.diffuse * att * intensity);
+        lo += evaluateSpotLight(u_lighting.u_spotlights[i], in.fragPos, surface.normal, v,
+                                surface.albedo, surface.metallic, roughness, 1.0);
     }
 
     // Output stays LINEAR HDR: the probe capture bakes it, and IBL/present tonemap later.

@@ -23,8 +23,25 @@
 struct PBRMaterial {
     baseColor: vec3<f32>,
     emissiveFactor: vec3<f32>,
+    /**
+     * HDR headroom for the emissive colour, default 1.
+     *
+     * `emissiveFactor` is a COLOUR and the editor authors it through a hex picker, so it cannot exceed
+     * 1 on any channel. That put a hard ceiling on how bright an emissive surface could be, and the
+     * ceiling sat below the point where anything happens: bloom's threshold is display-referred, so at
+     * the default exposure a mid-tone emissive reaches exposed luma 1.0 — exactly the threshold — and
+     * contributes nothing. Even pure white only doubles it. There was no setting at which an authored
+     * emissive material glowed, which is what this multiplier is for.
+     */
+    emissiveIntensity: f32,
     metallic: f32,
     roughness: f32,
+    /**
+     * Dielectric specular level, 0..1, remapped to F0 by `dielectricF0` (0.5 -> the 0.04 every
+     * dielectric in this engine used to be hardcoded to). Ignored where `metallic` is 1: a conductor's
+     * F0 is its base colour.
+     */
+    reflectance: f32,
     opacity: f32,
     /**
      * glTF alphaMode MASK. Below this base-colour alpha the fragment is discarded; 0 disables it.
@@ -71,12 +88,44 @@ struct PBRMaterial {
      * blinn-phong through the packer as well, and teaching TexturePacker to hold more than one pack
      * per material. A texture unit is the cheaper thing to spend.
      *
-     * These two must exist in BOTH this chunk and its forward/deferred twin, or the two paths shade
+     * `invertHeight` says the map is a DEPTH map (white = deep) rather than the height map the engine
+     * authors. See parallaxHeight in chunks/parallax.wgsl: the two conventions are indistinguishable
+     * from the bytes and the wrong one turns the relief inside out.
+     *
+     * These three must exist in BOTH this chunk and its forward/deferred twin, or the two paths shade
      * differently and nothing says so. (The camera/sun members below are deferred-only, because the
      * forward twin already has both in its lighting block — those are plumbing, not authored state.)
      */
     dispScale: f32,
     hasDisplacementMap: i32,
+    invertHeight: i32,
+    /**
+     * Discard where the march's hit uv leaves the 0..1 rectangle, so the SILHOUETTE follows the height
+     * field instead of staying a straight polygon edge.
+     *
+     * This is the only thing parallax can do about a border. The march is a fragment-stage trick that
+     * offsets texture coordinates and never moves a vertex, so an outline is untouched by construction —
+     * the reference this follows has flat-edged quads for exactly that reason. Clipping cannot add
+     * geometry either; it only removes fragments, so a corner gets BITTEN INTO rather than made bumpy.
+     *
+     * Off by default and not inferrable: the test is against the 0..1 uv rectangle, which is a real
+     * border only where the surface is mapped 0..1 (a cube face, a quad). Tiled ground has no border
+     * there and would come out punched with a grid of holes.
+     *
+     * Depth is NOT modified — see the G-buffer note below on why frag_depth is refused — so shadows and
+     * intersections still see the unclipped surface, and on a closed back-face-culled mesh a clipped
+     * fragment shows the background rather than the inside of the notch.
+     */
+    clipSilhouette: i32,
+    /**
+     * Geometric specular antialiasing, on or off. Renderer state, not a material constant — the same
+     * reason `viewPos` and `sunDirection` below ride in this block: the deferred geometry stage has no
+     * other group-1 block to read per-frame values from.
+     *
+     * See `filterSpecularRoughness` in chunks/modelVarying.wgsl for what it does and why it must be
+     * called in uniform control flow.
+     */
+    specularAA: i32,
     /**
      * Camera and sun, for the parallax march. Per-frame view state rather than material constants,
      * and they sit in the material block anyway because it is the only group-1 block this stage has.
@@ -97,7 +146,7 @@ struct PBRMaterial {
 
 struct GBuffer {
     @location(0) gAlbedoMetallic: vec4<f32>,    // rgb = albedo, a = metallic
-    @location(1) gNormalRoughness: vec4<f32>,   // rgb = world normal, a = roughness
+    @location(1) gNormalRoughness: vec4<f32>,   // rg = oct normal, b = reflectance, a = roughness
     @location(2) gEmissiveAO: vec4<f32>,        // rgb = emissive, a = ambient occlusion
 };
 
@@ -151,19 +200,39 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     var uv = in.uv;
     var selfShadow = 1.0;
     if (u_material.hasDisplacementMap != 0) {
+        let invert = u_material.invertHeight != 0;
         let dims = vec2<f32>(textureDimensions(u_material_displacementMap_texture, 0));
-        let fade = parallaxFade(ddx, ddy, dims);
+        // One LOD, hoisted: the fade, the step count and every fetch in both marches read it, so they
+        // cannot disagree about which mip the surface lives on.
+        let lod = parallaxLod(ddx, ddy, dims);
         let vTan = parallaxToTangent(frame, toEye);
+        // A clipped material is depth-bounded; see parallaxBoundedDepth. The band the clip carves IS
+        // the lateral travel, so the two have to be capped together or a deep surface loses a third of
+        // itself to the discard.
+        let depth = select(u_material.dispScale,
+                           parallaxBoundedDepth(vTan, u_material.dispScale, POM_CLIP_REACH),
+                           u_material.clipSilhouette != 0);
         let hit = parallaxOcclusion(u_material_displacementMap_texture,
                                     u_material_displacementMap_sampler,
-                                    in.uv, ddx, ddy, vTan, u_material.dispScale, fade);
+                                    in.uv, ddx, ddy, vTan, depth, dims, lod, invert);
         uv = hit.xy;
+        // Safe here: ddx/ddy were taken in uniform control flow at the top of the stage and every fetch
+        // below is textureSampleGrad, so this introduces no derivative under a per-fragment branch.
+        //
+        // Against the fragment's OWN tile, not a literal 0..1. A mesh whose uv runs 0..8 has only one
+        // fragment in [0,1]; testing the absolute uv discarded everything outside the first tile, which
+        // is not the "grid of holes" the note above once claimed but near-total erasure of the mesh.
+        // `floor(in.uv)` is 0 for a 0..1 chart, so this is identical where the feature is meant to be
+        // used and merely local where it is not.
+        let tile = floor(in.uv);
+        if (u_material.clipSilhouette != 0
+            && (any(hit.xy < tile) || any(hit.xy > tile + vec2<f32>(1.0)))) { discard; }
         let sunDir = u_material.sunDirection;
         if (dot(sunDir, sunDir) > 1e-6) {
             let lTan = parallaxToTangent(frame, normalize(-sunDir));
             selfShadow = parallaxShadow(u_material_displacementMap_texture,
                                         u_material_displacementMap_sampler,
-                                        uv, ddx, ddy, lTan, hit.z, u_material.dispScale, fade);
+                                        uv, lTan, hit.z, depth, lod, invert);
         }
     }
 
@@ -200,28 +269,45 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
         if (u_material.hasMetallicMap != 0) { metallic = orm.b; }
     }
 
-    var emissive = u_material.emissiveFactor;
+    var emissive = u_material.emissiveFactor * u_material.emissiveIntensity;
     if (u_material.hasEmissiveMap != 0) {
         // sRGB -> linear
         let t = textureSampleGrad(u_material_emissiveMap_texture, u_material_emissiveMap_sampler,
                                   uv, ddx, ddy).rgb;
-        emissive = pow(t, vec3<f32>(2.2)) * u_material.emissiveFactor;
+        emissive = pow(t, vec3<f32>(2.2)) * u_material.emissiveFactor * u_material.emissiveIntensity;
     }
 
     let N = normalize(getNormal(in, front, uv, ddx, ddy));
 
     var out: GBuffer;
     // The parallax self-shadow is folded into ALBEDO - an approximation the G-buffer forces. There is
-    // no spare channel, and AO is not a substitute: deferredLighting spends AO on the ambient term
-    // only (`ambient * ao * ssao + Lo`), so a sun shadow routed through it would never darken the sun.
-    // Albedo does reach the direct term (accumulateLight computes `kD * albedo / PI + specular`), so
-    // this darkens direct and ambient diffuse correctly and misses only the specular lobe. The
-    // alternatives were all worse: octahedral-packing the normal to free a channel breaks the
-    // custom-material G-buffer contract, a fourth target costs bandwidth every frame, and frag_depth
-    // would disable early-Z for the entire pass. chunks/pbrForward.wgsl, which has the light list,
-    // applies the same term properly.
+    // no spare channel, and AO is not a substitute: deferredLighting spends AO on the INDIRECT terms
+    // only, so a sun shadow routed through it would never darken the sun.
+    // Albedo does reach the direct term (accumulateLight's diffuse lobe is
+    // `albedo * (1 - metallic) * Fd_Burley(...)`), so this darkens direct and ambient diffuse
+    // correctly and misses only the specular lobe. Of the alternatives, a fourth target costs
+    // bandwidth every frame and frag_depth would disable early-Z for the entire pass.
+    //
+    // CORRECTION, 2026-08-28. This comment used to also claim that octahedral-packing the normal to
+    // free a channel "breaks the custom-material G-buffer contract". That is FALSE, and it was blocking
+    // a design decision on a false premise. A custom deferred material fills a `Surface` struct and
+    // never writes a target: `DEFERRED_EPILOGUE` in systems/customShaders.ts does
+    // `gNormalRoughness = vec4(normalize(s.normal), s.roughness)` after the user's `surface(s)` returns,
+    // so how those bits are encoded is entirely the engine's business. Oct-packing IS available, frees
+    // exactly one channel, and only four engine-owned consumers decode the normal (deferredLighting,
+    // ssao, debugView, and the hand-written fallback FS in customShaders.ts). One trap if anyone takes
+    // it: ssao.wgsl's `dot(normalW, normalW) < 1e-6` "nothing was written here" sentinel stops working,
+    // because (0,0) is a VALID oct direction.
+    //
+    // chunks/pbrForward.wgsl, which has the light list, applies the same term properly.
     out.gAlbedoMetallic = vec4<f32>(albedo * selfShadow, metallic);
-    out.gNormalRoughness = vec4<f32>(N, roughness);
+    // The roughness written here is FILTERED — see filterSpecularRoughness. It has to happen in this
+    // pass and not in deferredLighting: taking dpdx of the G-buffer normal in a fullscreen pass would
+    // straddle silhouettes, sampling two unrelated surfaces into one variance estimate and painting a
+    // rim of blur around every object. Here the derivative is taken across one triangle's own normal.
+    let octN = octEncode(N);
+    out.gNormalRoughness = vec4<f32>(octN.x, octN.y, u_material.reflectance,
+                                     filterSpecularRoughness(roughness, N, u_material.specularAA));
     out.gEmissiveAO = vec4<f32>(emissive, ao);
     return out;
 }

@@ -5,6 +5,7 @@ import { Logger } from '../../core/logger';
 import PBR_VERTEX_SRC from '../shaders/materials/pbr.vs';
 import SCREEN_VERTEX_SRC from '../shaders/screen/screen.vs';
 import ShadowsChunk from '../shaders/wgsl/shadowsChunk.wgsl';
+import PbrLightingChunk from '../shaders/wgsl/pbrLightingChunk.wgsl';
 import ScreenProgram from '../shaders/wgsl/screen.wgsl';
 import GeometryPBRProgram from '../shaders/wgsl/geometryPBR.wgsl';
 import PBRProgram from '../shaders/wgsl/pbr.wgsl';
@@ -20,13 +21,34 @@ import type { ShaderResource } from '../rhi/types';
 // Runtime compilation of user-authored custom-material fragment shaders: a user's `fragment()` or
 // `surface()` plus a fixed PRELUDE, compiled and registered under the material's `type` key.
 //
-// MUST be kept in sync by hand with the build-time shaders — runtime GLSL cannot `#include`:
-// light counts (constants.glsl), light structs and PBR helpers (pbr.fs), the G-buffer layout
-// (geometryPBR.fs), and toLinear/toSrgb (tonemap.glsl). The shadow library is imported, not copied.
+// Runtime GLSL cannot `#include`, so everything the prelude needs has to arrive as text. Most of it
+// is now GENERATED from the WGSL rather than copied: the shadow library from `shadowsChunk.wgsl`, the
+// light structs and the PBR BRDF from `pbrLightingChunk.wgsl`, and the light-array lengths from
+// `pbr.wgsl`'s own reflected layout. What is still hand-maintained: the G-buffer layout
+// (geometryPBR.wgsl), toLinear/toSrgb (chunks/tonemap.wgsl), and the seed templates at the bottom
+// of this file.
 // -----------------------------------------------------------------------------------------------
 
-const MAX_POINT_LIGHTS = 16;
-const MAX_SPOTLIGHTS = 8;
+/**
+ * The declared length of one light array, read off `pbr.wgsl`'s reflected uniform layout.
+ *
+ * Derived rather than written down, because a custom material's block has to be the SAME SIZE as the
+ * engine's — a shorter array here does not merely drop lights, it moves every member after it and
+ * the whole block reads garbage. The counts cannot live in the generated chunk instead: the include
+ * resolver has no include-once guard (see terrainForward.wgsl), so a shared `const` collides for any
+ * program that pulls in two chunks declaring it.
+ */
+function lightArrayLength(member: string): number {
+    for (const block of PBRProgram.uniformBlocks) {
+        const found = block.members.find(m => m.name === member);
+        const count = found && /,\s*(\d+)\s*>/.exec(found.type);
+        if (count) return Number(count[1]);
+    }
+    throw new Error(`customShaders: pbr.wgsl declares no ${member} array to take a length from`);
+}
+
+const MAX_POINT_LIGHTS = lightArrayLength('u_pointLights');
+const MAX_SPOTLIGHTS = lightArrayLength('u_spotlights');
 
 // --- sampler declaration primitives -------------------------------------------------------------
 // Must stay ABOVE the interfaces, which reach for these while the module is still evaluating; moving
@@ -147,39 +169,38 @@ function vulkanShadowLibrary(): string {
     return out;
 }
 
+/**
+ * The light structs and the PBR BRDF, GENERATED from chunks/pbrLighting.wgsl at build time, split
+ * into the two places a prelude puts them.
+ *
+ * Split, because `renderPrelude` emits `structs` BEFORE the uniform block and `body` AFTER it — a
+ * Vulkan block member needs its type already declared — while naga hands back one blob. The struct
+ * names are asserted rather than assumed: if naga's output shape changes, this must fail loudly at
+ * module load rather than emit a prelude missing a type nobody notices until a material goes magenta.
+ *
+ * The generated `PI` is dropped. It is correct, but `COMMON_BODY` already declares one for every mode
+ * (including the two that do not paste this chunk), and GLSL has no redefinition.
+ */
+function splitLightingChunk(chunk: string): { structs: string; body: string } {
+    const structs: string[] = [];
+    // No nested braces in any of these, which is what lets one match take a whole struct.
+    const body = chunk
+        .replace(/^struct\s+\w+\s*\{[^}]*\};?[^\S\n]*\n?/gm, (found) => { structs.push(found.trim()); return ''; })
+        .replace(/^const\s+float\s+PI\s*=\s*[^;]+;[^\S\n]*\n?/m, '');
+
+    for (const required of ['DirectionalLight', 'PointLight', 'SpotLight'])
+        if (!structs.some(d => d.startsWith(`struct ${required} `)))
+            throw new Error(`customShaders: generated lighting chunk has no ${required} — naga output shape changed`);
+
+    return { structs: structs.join(NL) + NL, body: body.trim() + NL };
+}
+
+const LIGHTING_CHUNK = splitLightingChunk(PbrLightingChunk.glslChunk!);
+
 // The light structs, declared as TYPES so the uniform block can have members of them — Vulkan GLSL
-// refuses a loose uniform of struct type.
-const LIGHT_STRUCTS = `
-struct DirectionalLight {
-    vec3 direction;
-    vec3 ambient;
-    vec3 diffuse;
-    vec3 specular;
-};
-
-struct PointLight {
-    vec3 position;
-    vec3 ambient;
-    vec3 diffuse;
-    vec3 specular;
-    float constant;
-    float linear;
-    float quadratic;
-};
-
-struct SpotLight {
-    vec3 position;
-    vec3 direction;
-    vec3 ambient;
-    vec3 diffuse;
-    vec3 specular;
-    float constant;
-    float linear;
-    float quadratic;
-    float cutOff;      // cosine of the inner half-angle
-    float outerCutOff; // cosine of the outer half-angle (smaller than cutOff)
-};
-`;
+// refuses a loose uniform of struct type. `SkyLight` rides along unused: the chunk emits every struct
+// its module declares, and a spare type declaration costs nothing.
+const LIGHT_STRUCTS = LIGHTING_CHUNK.structs;
 
 /** The lighting inputs, as data. Loose uniforms under ES, members of one bound block under Vulkan. */
 const LIGHTING_UNIFORMS: ValueDecl[] = [
@@ -187,6 +208,7 @@ const LIGHTING_UNIFORMS: ValueDecl[] = [
     { name: 'u_numPointLights', type: 'int' },
     { name: 'u_numSpotlights', type: 'int' },
     { name: 'u_view', type: 'mat4', comment: 'only to get the view-space depth that selects a cascade' },
+    { name: 'u_sceneAmbient', type: 'vec3', comment: 'scene-wide indirect fill (internal radiance units)' },
     { name: 'u_dirLight', type: 'DirectionalLight' },
     { name: 'u_pointLights', type: 'PointLight', array: MAX_POINT_LIGHTS },
     { name: 'u_spotlights', type: 'SpotLight', array: MAX_SPOTLIGHTS },
@@ -206,41 +228,12 @@ float cleoViewDepth() { return -(u_view * vec4(fragPos, 1.0)).z; }
 float shadowCalculation() { return directionalShadow(fragPos, getNormal(), cleoViewDepth()); }
 float shadowCalculation(vec4 ignored) { return shadowCalculation(); }
 
-float DistributionGGX(vec3 N, vec3 H, float roughness) {
-    float a = roughness * roughness;
-    float a2 = a * a;
-    float NdotH = max(dot(N, H), 0.0);
-    float NdotH2 = NdotH * NdotH;
-    float denom = (NdotH2 * (a2 - 1.0) + 1.0);
-    return a2 / (PI * denom * denom);
-}
+${LIGHTING_CHUNK.body}
 
-float GeometrySchlickGGX(float NdotV, float roughness) {
-    float r = (roughness + 1.0);
-    float k = (r * r) / 8.0;
-    return NdotV / (NdotV * (1.0 - k) + k);
-}
-
-float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
-    return GeometrySchlickGGX(max(dot(N, V), 0.0), roughness) * GeometrySchlickGGX(max(dot(N, L), 0.0), roughness);
-}
-
-vec3 fresnelSchlick(float cosTheta, vec3 F0) {
-    return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
-}
-
-vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
-    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - cosTheta, 5.0);
-}
-
+// accumulateLight RETURNS its contribution; the inout form is what user-authored GLSL in existing
+// projects calls, so both spellings stay.
 void accumulateLight(vec3 N, vec3 V, vec3 albedo, float metallic, float roughness, vec3 lightDir, vec3 radiance, inout vec3 Lo) {
-    vec3 H = normalize(V + lightDir);
-    float NDF = DistributionGGX(N, H, roughness);
-    float G = GeometrySmith(N, V, lightDir, roughness);
-    vec3 F = fresnelSchlick(max(dot(H, V), 0.0), mix(vec3(0.04), albedo, metallic));
-    vec3 specular = (NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * max(dot(N, lightDir), 0.0) + 0.001);
-    vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
-    Lo += (kD * albedo / PI + specular) * radiance * max(dot(N, lightDir), 0.0);
+    Lo += accumulateLight(N, V, albedo, metallic, roughness, lightDir, radiance);
 }
 `;
 
@@ -275,7 +268,7 @@ const DEFERRED_INTERFACE: PreludeInterface = {
     varyings: DEFERRED_VARYINGS,
     outputs: [
         { name: 'gAlbedoMetallic', type: 'vec4', comment: 'rgb = albedo, a = metallic' },
-        { name: 'gNormalRoughness', type: 'vec4', comment: 'rgb = world normal, a = roughness' },
+        { name: 'gNormalRoughness', type: 'vec4', comment: 'written for you from Surface.normal — do not assign' },
         { name: 'gEmissiveAO', type: 'vec4', comment: 'rgb = emissive, a = ambient occlusion' },
     ],
     // No engine samplers: a G-buffer pass writes surface parameters and samples no environment.
@@ -284,6 +277,18 @@ const DEFERRED_INTERFACE: PreludeInterface = {
     engineBlock: LIT_ENGINE_BLOCK,
     userBlock: LIT_USER_BLOCK,
     body: `${COMMON_BODY}
+
+// The octahedral encoder, hand-written in GLSL because this prelude is assembled as text and never
+// goes through the WGSL chunk resolver. It MUST stay identical to chunks/octNormal.wgsl: a custom
+// material writing a differently-encoded normal would be lit as though it faced somewhere else, and
+// nothing in the pipeline would say so.
+vec2 cleoOctWrap(vec2 v) {
+    return (1.0 - abs(v.yx)) * vec2(v.x >= 0.0 ? 1.0 : -1.0, v.y >= 0.0 ? 1.0 : -1.0);
+}
+vec2 cleoOctEncode(vec3 n) {
+    vec2 p = n.xy * (1.0 / max(abs(n.x) + abs(n.y) + abs(n.z), 1e-6));
+    return n.z >= 0.0 ? p : cleoOctWrap(p);
+}
 
 struct Surface {
     vec3 albedo;
@@ -311,7 +316,10 @@ void main() {
     s.ao = 1.0;
     surface(s);
     gAlbedoMetallic  = vec4(s.albedo, s.metallic) + _cleoInterface();   // see keepInterfaceAlive
-    gNormalRoughness = vec4(normalize(s.normal), s.roughness);
+    // rg = octahedral normal, b = reflectance, a = roughness. The author still writes s.normal as a
+    // world-space vec3 and never sees this — which is exactly why the packing was free to change.
+    // 0.5 reflectance is the neutral dielectric; a custom material has no slot to author one.
+    gNormalRoughness = vec4(cleoOctEncode(normalize(s.normal)), 0.5, s.roughness);
     gEmissiveAO      = vec4(s.emissive, s.ao);
 }
 `;
@@ -656,6 +664,36 @@ function vertexSource(renderMode: CustomRenderMode): string {
 
 const registered = new Set<string>();           // ShaderManager keys we've compiled+registered
 const failed = new Set<string>();               // keys whose user source failed to compile (magenta fallback in use)
+/**
+ * Names a light field carried before lights went photometric, mapped to what replaced it.
+ *
+ * A material written against the old prelude does not fail loudly — it fails to COMPILE, falls back to
+ * magenta, and the driver's message is "'diffuse' : no such field in structure", which says nothing
+ * about why a project that worked last week does not now. This turns that into a sentence.
+ */
+const RETIRED_LIGHT_FIELDS: Record<string, string> = {
+    'diffuse': 'color * intensity',
+    'specular': 'color * intensity (lights no longer carry a separate specular colour)',
+    'ambient': 'u_sceneAmbient, which is scene state rather than a light property',
+    'constant': 'invRangeSquared, via distanceAttenuation()',
+    'linear': 'invRangeSquared, via distanceAttenuation()',
+    'quadratic': 'invRangeSquared, via distanceAttenuation()',
+    'cutOff': 'coneScale / coneOffset, via spotAttenuation()',
+    'outerCutOff': 'coneScale / coneOffset, via spotAttenuation()',
+};
+
+function annotateCompileError(message: string, source: string): string {
+    const used = Object.keys(RETIRED_LIGHT_FIELDS).filter(field =>
+        new RegExp('\\b(u_dirLight|u_pointLights\\s*\\[[^\\]]*\\]|u_spotlights\\s*\\[[^\\]]*\\])\\s*\\.\\s*' + field + '\\b')
+            .test(source) && message.includes(field));
+    if (!used.length) return message;
+    const hints = used.map(f => `  .${f} -> ${RETIRED_LIGHT_FIELDS[f]}`).join('\n');
+    return message + '\n\nThis material reads light fields that no longer exist — lights now carry a'
+        + ' photometric intensity and a windowed inverse-square falloff:\n' + hints
+        + '\nThe engine\'s own loop is available as evaluateDirectionalLight / evaluatePointLight /'
+        + ' evaluateSpotLight; a new material of this type is seeded with it.';
+}
+
 const errors = new Map<string, string>();       // last compile error per key
 const fallbackByMode = new Map<CustomRenderMode, ShaderProgram>();
 // The translated WGSL per key, plus the vertex module its pipeline pairs it with. naga translates only
@@ -729,11 +767,18 @@ mat3 TBN;
 layout(location = 0) out vec4 gAlbedoMetallic;
 layout(location = 1) out vec4 gNormalRoughness;
 layout(location = 2) out vec4 gEmissiveAO;
+vec2 cleoOctWrap(vec2 v) {
+    return (1.0 - abs(v.yx)) * vec2(v.x >= 0.0 ? 1.0 : -1.0, v.y >= 0.0 ? 1.0 : -1.0);
+}
+vec2 cleoOctEncode(vec3 n) {
+    vec2 p = n.xy * (1.0 / max(abs(n.x) + abs(n.y) + abs(n.z), 1e-6));
+    return n.z >= 0.0 ? p : cleoOctWrap(p);
+}
 void main() {
     TBN = mat3(fragTangent, fragBitangent, fragNormal);
     float k = 0.0 * (fragPos.x + fragTexCoord.x + TBN[0].x);
     gAlbedoMetallic  = vec4(1.0, 0.0, 1.0, 0.0) + k;   // magenta = compile error
-    gNormalRoughness = vec4(normalize(TBN[2]), 1.0);
+    gNormalRoughness = vec4(cleoOctEncode(normalize(TBN[2])), 0.5, 1.0);
     gEmissiveAO      = vec4(0.0, 0.0, 0.0, 1.0);
 }
 `;
@@ -812,7 +857,7 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
         errors.delete(key);
         return true;
     } catch (e: any) {
-        errors.set(key, String(e?.message ?? e));
+        errors.set(key, annotateCompileError(String(e?.message ?? e), mat.fragmentSource));
         const magenta = fallbackShader(mat.renderMode);
         if (!magenta) {
             unbuildable.add(key);
@@ -1032,20 +1077,22 @@ const FWD_BLINN = `// FORWARD custom material extending Blinn-Phong. Edit freely
 vec4 fragment() {
     vec3 N = getNormal();
     vec3 V = normalize(u_viewPos - fragPos);
-    vec3 color = u_ambient * u_diffuse;
+    vec3 color = u_sceneAmbient * u_diffuse;
     if (dot(u_dirLight.direction, u_dirLight.direction) > 1e-6) {
         vec3 L = normalize(-u_dirLight.direction);
         vec3 H = normalize(L + V);
         float shadow = shadowCalculation();
-        color += u_dirLight.diffuse * (1.0 - shadow) *
+        vec3 radiance = u_dirLight.color * u_dirLight.intensity * (1.0 - shadow);
+        color += radiance *
                  (max(dot(N, L), 0.0) * u_diffuse + pow(max(dot(N, H), 0.0), u_shininess) * u_specular);
     }
     for (int i = 0; i < u_numPointLights; i++) {
-        vec3 L = normalize(u_pointLights[i].position - fragPos);
-        float d = length(u_pointLights[i].position - fragPos);
-        float att = 1.0 / (u_pointLights[i].constant + u_pointLights[i].linear * d + u_pointLights[i].quadratic * d * d);
+        vec3 toLight = u_pointLights[i].position - fragPos;
+        float att = distanceAttenuation(dot(toLight, toLight), u_pointLights[i].invRangeSquared);
+        vec3 L = normalize(toLight);
         vec3 H = normalize(L + V);
-        color += u_pointLights[i].diffuse * att *
+        vec3 radiance = u_pointLights[i].color * (u_pointLights[i].intensity * att);
+        color += radiance *
                  (max(dot(N, L), 0.0) * u_diffuse + pow(max(dot(N, H), 0.0), u_shininess) * u_specular);
     }
     return vec4(color, 1.0);
@@ -1062,38 +1109,36 @@ vec4 fragment() {
 
     // Ambient / image-based lighting
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
-    vec3 F = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
-    vec3 kS = F;
-    vec3 kD = (1.0 - kS) * (1.0 - metallic);
-    vec3 ambient = u_dirLight.ambient * albedo;
+    float NoV = max(dot(N, V), 0.0);
+    // Indirect, kept SPLIT: the two lobes are occluded differently. computeSpecularAO() is the
+    // correction — a hemisphere-wide AO term is right for diffuse and wrong for a narrow specular cone.
+    vec3 ambientDiffuse = u_sceneAmbient * albedo;
+    vec3 ambientSpecular = vec3(0.0);
     if (u_useEnvMap) {
         vec3 R = reflect(normalize(fragPos - u_viewPos), N);
-        vec3 envC = texture(u_envMap, R).rgb;
-        ambient += (u_envMapLinear ? envC : toLinear(envC)) * kS * pow(1.0 - roughness, 4.0);
+        vec3 envC = textureLod(u_envMap, R, roughness * 4.0).rgb;
+        vec3 env = u_envMapLinear ? envC : toLinear(envC);
+        vec2 dfg = EnvBRDFApprox(NoV, roughness);
+        ambientSpecular = env * (F0 * dfg.x + dfg.y)
+                        * energyCompensation(F0, NoV, roughness)
+                        * pow(1.0 - roughness, 4.0);
     }
 
+    // The three evaluate* helpers are the SAME code the engine's own programs run, so a custom
+    // material picks up any change to the falloff or the BRDF for free. Open-coding a light loop
+    // still works — every field is there — it just stops tracking the engine.
     vec3 Lo = vec3(0.0);
-    if (dot(u_dirLight.direction, u_dirLight.direction) > 1e-6) {
-        float shadow = shadowCalculation();
-        accumulateLight(N, V, albedo, metallic, roughness, normalize(-u_dirLight.direction), u_dirLight.diffuse * (1.0 - shadow), Lo);
-    }
+    Lo += evaluateDirectionalLight(u_dirLight, N, V, albedo, metallic, roughness,
+                                   1.0 - shadowCalculation());
     for (int i = 0; i < u_numPointLights; i++) {
-        vec3 L = normalize(u_pointLights[i].position - fragPos);
-        float d = length(u_pointLights[i].position - fragPos);
-        float att = 1.0 / (u_pointLights[i].constant + u_pointLights[i].linear * d + u_pointLights[i].quadratic * d * d);
-        accumulateLight(N, V, albedo, metallic, roughness, L, u_pointLights[i].diffuse * att, Lo);
+        Lo += evaluatePointLight(u_pointLights[i], fragPos, N, V, albedo, metallic, roughness);
     }
     for (int i = 0; i < u_numSpotlights; i++) {
-        vec3 L = normalize(u_spotlights[i].position - fragPos);
-        float d = length(u_spotlights[i].position - fragPos);
-        float att = 1.0 / (u_spotlights[i].constant + u_spotlights[i].linear * d + u_spotlights[i].quadratic * d * d);
-        float theta = dot(L, normalize(-u_spotlights[i].direction));
-        float inten = clamp((theta - u_spotlights[i].outerCutOff) / (u_spotlights[i].cutOff - u_spotlights[i].outerCutOff), 0.0, 1.0);
-        float spotSh = spotShadowFor(i, fragPos, N, u_spotlights[i].position);
-        accumulateLight(N, V, albedo, metallic, roughness, L, u_spotlights[i].diffuse * att * inten * (1.0 - spotSh), Lo);
+        Lo += evaluateSpotLight(u_spotlights[i], fragPos, N, V, albedo, metallic, roughness,
+                                1.0 - spotShadowFor(i, fragPos, N, u_spotlights[i].position));
     }
 
-    return vec4(ambient + Lo + u_emissive, 1.0);
+    return vec4(ambientDiffuse + ambientSpecular + Lo + u_emissive, 1.0);
 }`;
 
 const DEF_SCRATCH = `// DEFERRED custom material. Fill the G-buffer surface; the engine lights it (SSAO/IBL/shadows).

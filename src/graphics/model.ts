@@ -19,7 +19,9 @@ interface FromFileOptions {
 export type Submesh = { start: number; count: number };
 
 export class Model {
-    private readonly  _geometry: Geometry;
+    private _geometry: Geometry;
+    // Bumped on every swap; `ModelNode` compares it to decide whether the upload is still valid.
+    private _geometryVersion: number = 0;
     private readonly  _mesh: Mesh;
     // One material per submesh; `material` is the get/set alias for `materials[0]`.
     private _materials: Material[];
@@ -113,6 +115,26 @@ export class Model {
     }
 
     public get geometry(): Geometry { return this._geometry; }
+    /** Identity of the current geometry, for `ModelNode`'s re-upload check. */
+    public get geometryVersion(): number { return this._geometryVersion; }
+
+    /**
+     * Replace this model's geometry. **Terrain chunks only** — see
+     * `Terrain._rebuildChunksIfDensityChanged`, which is its one caller.
+     *
+     * Chunks are built in the terrain's constructor, before any layer exists, so the first `setLayer` is
+     * when the real vertex density becomes knowable and every chunk has to be rebuilt at it. That
+     * changes the vertex COUNT, and `Mesh.updateVertexData` is a fixed-size write. Bumping the version
+     * makes
+     * `ModelNode.initialized` go false, which re-runs `initializeModel` and therefore `Mesh.create`,
+     * which reallocates. Nothing else should call this: an ordinary model's geometry is the authored
+     * asset, and `serialize()` writes it.
+     */
+    public setGeometry(geometry: Geometry): void {
+        if (this._geometry === geometry) return;
+        this._geometry = geometry;
+        this._geometryVersion++;
+    }
     public get mesh(): Mesh { return this._mesh; }
     /** The first material. Assigning replaces it, leaving any further submesh materials alone. */
     public get material(): Material { return this._materials[0]; }

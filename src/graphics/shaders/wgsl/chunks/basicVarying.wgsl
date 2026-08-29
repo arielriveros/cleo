@@ -7,6 +7,8 @@
 // Included by each basic VERTEX chunk and by no fragment chunk — a program includes exactly one vertex
 // chunk, so this lands once. The include resolver has no include-once guard.
 
+#include "./octNormal.wgsl"
+
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,

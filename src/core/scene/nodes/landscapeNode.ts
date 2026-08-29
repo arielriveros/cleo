@@ -96,6 +96,20 @@ export class LandscapeNode extends Node {
             }
             chunk.lod = this._terrain.lodFor(chunk, camPos, settings);
             mesh.activeLod = chunk.lod;
+
+            // AND THAT IS ALL. Nothing here may touch vertices.
+            //
+            // This used to re-bake a chunk's displacement whenever its level changed, so that a distant
+            // chunk carried only the relief its decimated triangulation could show. The cost was
+            // unaffordable: one flip rebuilt the geometry (330k sampler evaluations), re-derived every
+            // normal, and pushed ~7.4 MB of vertex data plus 1.6 MB of indices — and `lodFor`'s
+            // hysteresis only damps REFINING, so the frame a camera reached a threshold every chunk on
+            // that ring flipped at once. That is the spike.
+            //
+            // Displacement is baked once now, when the chunks are built, at one density for the whole
+            // terrain. LOD does what it always did: swap a prebuilt index buffer, which is the integer
+            // assignment above. The relief a distant chunk loses to decimation is a few centimetres —
+            // depth is metres now — so the pop the re-bake was buying against is not worth a frame hitch.
         }
     }
 

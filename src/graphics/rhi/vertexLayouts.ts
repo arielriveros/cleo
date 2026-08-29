@@ -40,6 +40,28 @@ const BY_NAME: ReadonlyMap<string, ModelAttribute> = (() => {
 /** Whether `name` is one of the standard model attributes (under any accepted spelling). */
 export function isModelAttribute(name: string): boolean { return BY_NAME.has(name); }
 
+/**
+ * The `Geometry.getData()` attribute names a program's reflected attributes ask for, in canonical order.
+ *
+ * `ModelNode.initializeModel` uses it to pack the upload. It lives here rather than inline there so
+ * that anything else needing to know the layout reads the same derivation — the stride is not constant
+ * (a position-and-uv program packs to 20 bytes, a full PBR one to 56) and a mismatch walks every
+ * third vertex.
+ */
+export function geometryAttributesFor(shaderAttributes: readonly { name: string }[]): string[] {
+    const GEOMETRY_NAME: Record<string, string> = {
+        a_position: 'position', a_normal: 'normal', a_texCoord: 'uv',
+        a_tangent: 'tangent', a_bitangent: 'bitangent',
+    };
+    const out: string[] = [];
+    for (const attribute of shaderAttributes) {
+        const canonical = BY_NAME.get(attribute.name);
+        if (!canonical) throw new Error(`Attribute ${attribute.name} not supported`);
+        out.push(GEOMETRY_NAME[canonical.name]);
+    }
+    return out;
+}
+
 /** A shader attribute as `Shader` reflects it back from the linked program. */
 export interface ReflectedAttribute {
     name: string;

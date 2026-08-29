@@ -5,8 +5,9 @@
 // deferredLighting.fs.
 
 #include "./chunks/fullscreen.wgsl"
+#include "./chunks/octNormal.wgsl"
 
-@group(0) @binding(0) var u_gNormalRoughness_texture: texture_2d<f32>;  // rgb = world-space normal
+@group(0) @binding(0) var u_gNormalRoughness_texture: texture_2d<f32>;  // rg = oct world normal
 @group(0) @binding(1) var u_gNormalRoughness_sampler: sampler;
 @group(0) @binding(2) var u_gDepth_texture: texture_depth_2d;            // non-linear device depth
 @group(0) @binding(3) var u_gDepth_sampler: sampler;
@@ -61,9 +62,28 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (depth >= 1.0) { return vec4<f32>(1.0); }
 
     let fragPos = viewPosFromUV(in.uv);
-    let normalW = textureSampleLevel(u_gNormalRoughness_texture, u_gNormalRoughness_sampler,
-                                 in.uv, 0.0).rgb;
-    if (dot(normalW, normalW) < 1e-6) { return vec4<f32>(1.0); }
+    // POINT-SAMPLED, by snapping to the source texel centre. This pass runs at a FRACTION of the
+    // render resolution (`_ssaoResolutionScale`, 0.5 by default) against the full-resolution G-buffer,
+    // whose textures are linearly filtered — so at half scale every one of these fetches lands exactly
+    // between two full-res texels and returns their average, everywhere, not only at edges.
+    //
+    // That was survivable while the normal was three raw channels: averaging with a cleared (0,0,0)
+    // texel only SHORTENED the vector, and the `normalize` below recovered its direction unharmed. It
+    // is not survivable now. An octahedral (0,0) decodes to a real direction, +Z, so a blend with the
+    // background drags the hemisphere toward world +Z, and a blend across any normal discontinuity
+    // interpolates a parametrisation rather than a direction. The old `dot(n, n) < 1e-6` guard could
+    // not have caught either case — it only ever saw texels that were EXACTLY cleared, and at this
+    // scale there are none.
+    //
+    // Bilinear at an exact texel centre returns that texel and nothing else, which is what a G-buffer
+    // fetch always wanted. `textureLoad` would say it more directly and is avoided on purpose: it
+    // leaves `u_gNormalRoughness_sampler` unused, naga is then free to drop it from the reflection, and
+    // this engine's bind groups pair (texture, sampler) by index.
+    let dims = vec2<f32>(textureDimensions(u_gNormalRoughness_texture, 0));
+    let snapped = (floor(in.uv * dims) + 0.5) / dims;
+    let octN = textureSampleLevel(u_gNormalRoughness_texture, u_gNormalRoughness_sampler,
+                                 snapped, 0.0).rg;
+    let normalW = octDecode(octN);
 
     // The rotation part of the view matrix. WGSL has no mat3(mat4) narrowing constructor, so the three
     // columns are taken explicitly.

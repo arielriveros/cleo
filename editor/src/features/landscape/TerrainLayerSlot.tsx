@@ -65,7 +65,10 @@ export default function TerrainLayerSlot(props: { landscape: LandscapeNode | nul
 
       <div className='flex items-center justify-between pt-1'>
         <span className={label}>Tiling</span>
-        <input type='number' className={num} value={layer?.tiling ?? 20} onChange={e => setBlend({ tiling: Number(e.target.value) })} />
+        {/* Floored at TILING_EPSILON: 0 or a negative makes `log2(tiling)` in terrainLayers.wgsl
+            -inf and divides by zero in the displacement bake. */}
+        <input type='number' className={num} min={0.01} step={1} value={layer?.tiling ?? 20}
+               onChange={e => setBlend({ tiling: Math.max(0.01, Number(e.target.value)) })} />
       </div>
       <div className='flex items-center justify-between'>
         <span className={label}>Auto (height/slope)</span>

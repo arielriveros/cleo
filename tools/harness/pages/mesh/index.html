@@ -143,8 +143,21 @@ window.__error = null;
     camera.active = true;
     scene.addNode(camera);
 
+    // The scene fill. It used to ride on the sun's own `ambient`, which every shading path added to
+    // every pixel whether or not the sun reached it; it is scene state now, and a page that builds its
+    // scene in code has to set it rather than inherit it from a save's migration. Same numbers, times
+    // REFERENCE_ILLUMINANCE, so this configuration means exactly what it meant.
+    scene.ambientLight = [0.18 * cleo.REFERENCE_ILLUMINANCE, 0.19 * cleo.REFERENCE_ILLUMINANCE,
+                          0.24 * cleo.REFERENCE_ILLUMINANCE];
     const sun = new cleo.LightNode('sun', new cleo.DirectionalLight({
       diffuse: [1.0, 0.97, 0.9], specular: [1, 1, 1], ambient: [0.18, 0.19, 0.24],
+      // Twenty times the real sun, and unphysical on purpose. It is the only thing in any harness
+      // scene that reaches `discLightSample`, and the only thing that makes the renderer's
+      // `_sunPenumbraScale` return anything but 1 — so without it, both are dead code as far as
+      // every gate is concerned. It is measurable but only just: it widens `noShadows` from 11 to
+      // 17 differing cells while every one of them stays inside the noise floor. Coverage, again,
+      // rather than a gate.
+      angularRadius: 0.1,
     }), true);
     sun.setPosition([0, 1, 0]);
     sun.setRotation([100, 25, 0]);
@@ -195,6 +208,15 @@ window.__error = null;
     const lamp = new cleo.LightNode('lamp', new cleo.PointLight({
       diffuse: [1.0, 0.55, 0.2], specular: [1, 0.7, 0.4], ambient: [0, 0, 0],
       constant: 1.0, linear: 0.14, quadratic: 0.07,
+      // A HALF-METRE BULB, for COVERAGE rather than for a gate, and the distinction was measured
+      // rather than assumed. Sphere lights are a per-pixel effect over a small part of the frame,
+      // and the 8x8 quantised signature cannot resolve them at any sane size: toggling this between
+      // 0.05 and 0 moves ZERO of the 128 values even against a mirror-finish sphere, 0.5 moves zero,
+      // and it takes a full 1 m bulb to move two. So this does NOT gate `sphereLightSample` against
+      // a numerical regression. What it does do is EXECUTE it, every run, on a real driver — which
+      // is what catches a NaN, a divide by zero, or a shader that stops compiling, and those are
+      // the failures this path is most likely to have. Anything finer needs a dedicated probe page.
+      sourceRadius: 0.5,
     }));
     lamp.setPosition([2.2, 1.1, 1.6]);
     scene.addNode(lamp);
@@ -393,7 +415,18 @@ window.__error = null;
       // Small and LOW-resolution. Resolution drives the heightfield grid and therefore the chunk count;
       // a coarse grid is enough to exercise the splat blend and the LOD index buffers, which is what
       // these shaders are being gated on — not visual quality.
-      const terrain = new cleo.Terrain({ size: 24, resolution: 33 });
+      // renderDensity 2: four render vertices per height cell, so the displaced layer below carries one
+      // more octave of its height map in real geometry instead of in the parallax march. It also puts
+      // the density vertex mapping under the same visual gate as everything else — the mapping breaks
+      // silently (a frozen tail of vertices, or indices addressing a quarter of the buffer) rather than
+      // throwing, so a picture is the only thing that catches it.
+      // `targetVertsPerTile` 8 against the rock layer's tiling of 8 on a 33 grid derives density 2 — the
+      // dense-chunk path under test, at a cost this scene can carry. The editor default of 32 would ask
+      // for density 8 here (66k vertices in one chunk, 743k triangles once the shadow cascades draw it),
+      // which would slow every harness run to gate the same code.
+      const terrain = new cleo.Terrain({
+        size: 24, resolution: 33, targetVertsPerTile: everyScene ? 8 : 0, renderDensity: 1,
+      });
 
       // Sculpt through the PUBLIC brush rather than writing `terrain.heights` directly: the height array
       // is exposed but the chunk-geometry refresh that follows a write is not, so a direct write would
@@ -575,6 +608,47 @@ window.__error = null;
       solid('metalGrad', 255, 40, 40);
       solid('roughGrad', 40, 255, 40);
       solid('aoGrad', 40, 40, 255);
+      // A height map with detail at BOTH scales: broad lobes the terrain's vertices can carry, and
+      // grain finer than one vertex, which only the parallax march can. That second band is the entire
+      // subject of the geometry/march split, and no other fixture on this page contains any.
+      (() => {
+        const n = 256;
+        const c = document.createElement('canvas');
+        c.width = c.height = n;
+        const cg = c.getContext('2d');
+        const img = cg.createImageData(n, n);
+        // Deterministic by construction rather than by seeding Math.random: this runs on every profile
+        // and a fixture that differs between two runs would show up as backend divergence.
+        const hash = (x, y) => {
+          const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+          return s - Math.floor(s);
+        };
+        const valueNoise = (x, y, period) => {
+          const xi = Math.floor(x / period), yi = Math.floor(y / period);
+          const xf = (x / period) - xi, yf = (y / period) - yi;
+          const sx = xf * xf * (3 - 2 * xf), sy = yf * yf * (3 - 2 * yf);
+          const a = hash(xi, yi), b = hash(xi + 1, yi);
+          const cc = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+          return (a + (b - a) * sx) + ((cc + (d - cc) * sx) - (a + (b - a) * sx)) * sy;
+        };
+        for (let y = 0; y < n; y++)
+          for (let x = 0; x < n; x++) {
+            const v = 0.45 * valueNoise(x, y, 64)    // broad: the vertices carry this
+                    + 0.35 * valueNoise(x, y, 12)    // mid
+                    + 0.20 * valueNoise(x, y, 3);    // grain: only the march can carry this
+            const p = (y * n + x) * 4;
+            img.data[p] = img.data[p + 1] = img.data[p + 2] = Math.round(Math.max(0, Math.min(1, v)) * 255);
+            img.data[p + 3] = 255;
+          }
+        cg.putImageData(img, 0, 0);
+        cleo.TextureManager.Instance.addTextureFromBase64(c.toDataURL('image/png'), { mipMap: true }, 'heightRocks');
+      })();
+      // TERRAIN occlusion, which needs its OWN map rather than `aoGrad`: the packer reads channel 0,
+      // and aoGrad's red ramps 0 -> 40/255, so every terrain fragment would sit in near-total shadow
+      // and the layer's parallax/displacement signal would be buried under it. A full 0 -> 1 diagonal
+      // ramp keeps the mean near 0.5 and, tiled 8x across the terrain, gives the 8x8 signature real
+      // per-cell variance to lose if the occlusion stops arriving.
+      solid('aoTerrain', 255, 255, 255);
       // A normal map has to be a NORMAL map: a flat (128,128,255) would leave the TBN path
       // mathematically idle and a wrong basis would look identical to a right one.
       const nrm = document.createElement('canvas');
@@ -644,6 +718,11 @@ window.__error = null;
           // Deeper than the 0.05 default so the march runs several steps at this camera angle; a depth
           // small enough to resolve in one step would gate the plumbing and not the algorithm.
           displacementScale: 0.12,
+          // Silhouette clipping ON. A Cube's faces are mapped 0..1, which is exactly the case the
+          // clip test is for, and a discard nothing ever executes is a discard nothing gates. It
+          // bites the height field into the cube's outline; the straight-edged result is what the
+          // technique CANNOT do, so a baseline with clean edges here would mean the flag died.
+          clipSilhouette: true,
           textures: { baseColorTexture: 'checker', normalMap: 'normalGrad', displacementMap: 'heightGrad' },
         }),
       ));
@@ -660,6 +739,7 @@ window.__error = null;
           map: String(m.textures.get('displacementMap') ?? null),
           has: m.properties.get('hasDisplacementMap') === true || m.properties.get('hasDisplacementMap') === 1,
           scale: m.properties.get('dispScale'),
+          clip: m.properties.get('clipSilhouette') === true || m.properties.get('clipSilhouette') === 1,
         });
       };
 
@@ -844,9 +924,13 @@ window.__error = null;
       // 6. Terrain layer textures.
       //
       // The landscape `full` builds is untextured, so `u_layerCount` is 0 and every branch in
-      // chunks/terrainLayers.wgsl that reads an albedo, a normal or a displacement map is skipped —
-      // including the parallax offset and the height-aware blend. Two layers with different maps make
-      // the splat blend do real work.
+      // chunks/terrainLayers.wgsl that reads an albedo, a normal or a height map is skipped — the
+      // height-aware blend included. Two layers with different maps make the splat blend do real work.
+      //
+      // Terrain marches its height field exactly as a standard material does, so this layer covers the
+      // BLENDED four-layer march (one shared ray, chunks/terrainLayers.wgsl) that `parallaxCube` — a
+      // single-field standard PBR material — does not reach. Deeper than the 0.05 default so the march
+      // runs several steps at this camera angle rather than resolving in one.
       const land = [...scene.landscapes][0];
       if (land) {
         const rock = cleo.TerrainMaterial.Create('pbr', {
@@ -854,9 +938,29 @@ window.__error = null;
           textures: { baseColorTexture: 'checker', normalMap: 'normalGrad' },
         });
         rock.tiling = 8;
-        rock.displacementScale = 0.08;
+        rock.displacementScale = 0.09;
         rock.heightBlend = 1.5;
-        rock.textures.set('displacementMap', 'aoGrad');
+        // `heightRocks`, NOT `aoGrad`, and the difference is the whole gate below.
+        //
+        // `aoGrad` is a 32x32 LINEAR RAMP, and it made the march inert here in two independent ways.
+        // Its split lands at `log2(32/8) = 2`, which the marched level sat past while `parallaxLod`
+        // floored the base-uv footprint before the per-layer tiling shift — so both taps of
+        // `residualHeight` hit the same mip and the residual was identically zero at every fragment.
+        // That floor has moved behind the shift, so the level now resolves to 0 and the taps do differ;
+        // what remains is the deeper problem, which is that a linear ramp has almost no residual to
+        // carry even in principle. Either way the assertions passed throughout, because they read a
+        // UNIFORM rather than pixels.
+        //
+        // 256 texels of fine noise puts the split at `log2(256/8) = 5`, comfortably above the level a
+        // near-field fragment resolves, so the marched half is real and the A/B in meshCheck can see it.
+        rock.textures.set('displacementMap', 'heightRocks');
+        // TERRAIN AMBIENT OCCLUSION. Terrain hardcoded `ao = 1` until now, so it took full ambient
+        // everywhere while a mesh beside it got cavity darkening. The map rides in the ALPHA of the
+        // packed `u_albedo0` -- terrain's nine texture units were full, and `addLayer` only ever
+        // sampled `.rgb`, so the channel was already there and unused. Layer 1 deliberately has no
+        // occlusion map, which keeps the `hasAO == 0` branch and the weighted blend of a mapped
+        // against an unmapped layer on the gated path too.
+        rock.textures.set('occlusionMap', 'aoTerrain');
         land.terrain.setLayer(0, rock);
 
         const moss = cleo.TerrainMaterial.Create('pbr', {
@@ -868,7 +972,109 @@ window.__error = null;
         moss.hRange = [0, 3];
         moss.sRange = [0, 0.5];
         land.terrain.setLayer(1, moss);
+
+        // TERRAIN VERTEX DISPLACEMENT, which had no coverage at all.
+        //
+        // This terrain is `size 24, resolution 33` and the layer tiles 8x — so it gets four vertices
+        // per repeat of its height map. That is the WORST case for the band split, which is exactly why
+        // the gate belongs here: at this sample rate a point-sampled bake aliases into low-frequency
+        // blobs, and a band-limited one must not. The split level lands high, so almost all of the
+        // relief is carried by the march rather than the vertices — also worth exercising.
+        // No mode to set: a terrain layer displaces because it has a height map. The depth is WORLD
+        // METRES as authored — 0.35 m here, whatever the terrain's size or the layer's tiling. It used
+        // to be tiled uv converted by `size / tiling`, which made this same number mean 1.05 m.
+        rock.displacementScale = 0.35;
+        land.terrain.setLayer(0, rock);
+
+        // Reports what HAPPENED, not what was asked for. A bake that never ran leaves the mode set and
+        // the surface identical to the sculpted heights, which reads as "displacement covered" in a
+        // baseline while covering nothing — so the spread between the rendered surface and `_heights`
+        // is the number that matters.
+        window.__terrainDisplaced = () => {
+          const land = engine.scene && [...engine.scene.landscapes][0];
+          if (!land) return JSON.stringify({ error: 'no landscape' });
+          const t = land.terrain;
+          const heights = t.heights;
+          const surface = t.renderHeights;
+          let moved = 0, maxDelta = 0;
+          if (surface) {
+            for (let i = 0; i < heights.length; i++) {
+              const d = Math.abs(surface[i] - heights[i]);
+              if (d > 1e-6) moved++;
+              if (d > maxDelta) maxDelta = d;
+            }
+          }
+          const m = t.material;
+          return JSON.stringify({
+            baked: !!surface,
+            moved,
+            total: heights.length,
+            maxDelta: +maxDelta.toFixed(4),
+            // A displaced layer must STAY in the march, carrying the residual the grid cannot hold.
+            // `u_hasHeight` also drives `layerHeights`, which the height-aware blend needs.
+            marches: m.properties.get('u_hasHeight0') === 1,
+            // THE SPLIT, as the shader will read it. `u_marchDepth0` is the residual's depth already
+            // converted to base uv, and it must be POSITIVE: a zero there is the state this whole round
+            // was about — the geometry carrying the coarse band and nothing drawing the fine one.
+            // `u_splitLod0` is where the two halves meet, in the packed texture's mip space.
+            marchDepth: +(m.properties.get('u_marchDepth0') || 0).toFixed(6),
+            splitLod: +(m.properties.get('u_splitLod0') || 0).toFixed(3),
+            residRange: +(m.properties.get('u_residRange0') || 0).toFixed(4),
+            // The relief depth the ENGINE will apply, in world metres. Read straight off the layer,
+            // because that IS the amplitude now — re-deriving it here with a `size / tiling` conversion
+            // is what let the old assertion keep passing after the engine stopped doing that.
+            amplitude: +(t.layers[0] ? t.layers[0].dispScale : 0).toFixed(4),
+            // `lod`, not `displaceLod`: a chunk carries its LOD level and its displace KEY, and there
+            // has never been a `displaceLod` on one. This reported `[null]` for every chunk, which reads
+            // exactly like a terrain that has not picked a level yet.
+            chunkLods: t.chunks.map(c => c.lod),
+            // A layer with no height map has nothing to split and nothing to march.
+            otherLayerMarchDepth: +(m.properties.get('u_marchDepth1') || 0).toFixed(6),
+            // The dense mesh, reported from what was actually BUILT rather than from the config: a
+            // mapping that ignored the density would leave the vertex count at its density-1 value.
+            // The chunk's OWN density, derived from the detail target and the layers — not the config's
+            // fixed multiplier, which is only the fallback when the target is 0.
+            renderDensity: t.densityFor(0),
+            chunkVerts: t.chunks[0] ? t.chunks[0].model.geometry.vertexCount : 0,
+            // From the TERRAIN's density, not `chunks[0].density` — which this used to read and which
+            // has never existed on a chunk. Density moved from per-chunk to one number for the whole
+            // terrain (`Every chunk is built at one density now`), and nothing updated this line, so
+            // `expectedVerts` was `Math.pow(NaN, 2)` -> null. The gate that reads it could then only
+            // pass in the one state where the comparison is vacuous — before any chunk exists, where
+            // both sides are 0 — which is precisely the state it was written to reject.
+            expectedVerts: t.chunks[0]
+              ? Math.pow((t.chunks[0].c1 - t.chunks[0].c0) * t.densityFor(0) + 1, 2) : 0,
+            chunkCount: t.chunks.length,
+          });
+        };
         window.__terrainLayers = () => land.terrain.layers.filter(l => l && l.albedoId).length;
+
+        // THE MARCH, MEASURED IN PIXELS. Every other assertion about it reads a uniform, and a uniform
+        // being right is not the same as the effect reaching the screen — the residual march was
+        // completely inert on this page for a whole round while `marchDepth > 0` passed, because the
+        // fixture's height map was a linear ramp and `residualHeight`'s two taps landed on the same mip.
+        //
+        // Setting the depth to 0 is the one switch that removes the march and changes nothing else: the
+        // bake, the weights, the blend and every texture stay exactly as they are. Capture a frame each
+        // way and the signature must differ.
+        //
+        // The override has to SURVIVE A FRAME, which is the part that is not obvious: `syncPackedLayers`
+        // runs once per landscape per frame and calls `_writeMarchUniforms`, so a plain property write
+        // is overwritten before anything is composited. The first attempt at this probe reported 0/128
+        // for exactly that reason and looked like a shader that ignored the uniform. The pack is fully
+        // resolved by the time this runs, so suspending the sync for the two captures changes nothing
+        // else about the frame.
+        let marchDepth0 = null;
+        let syncPacked = null;
+        window.__setMarchDepth = (v) => {
+          const t = land.terrain, m = t.material;
+          if (marchDepth0 === null) marchDepth0 = m.properties.get('u_marchDepth0');
+          if (syncPacked === null) syncPacked = t.syncPackedLayers.bind(t);
+          if (v === null) { t.syncPackedLayers = syncPacked; syncPacked = null; }
+          else { t.syncPackedLayers = () => {}; }
+          m.properties.set('u_marchDepth0', v === null ? marchDepth0 : v);
+          return String(m.properties.get('u_marchDepth0'));
+        };
       } else {
         window.__terrainLayers = () => -1;
       }
@@ -1114,6 +1320,16 @@ window.__error = null;
         out[name] = shader.describeBlockLayout();
       return out;
     };
+    // AUTO-EXPOSURE OFF for every gated scene, and this is not a way of dodging a baseline move.
+    //
+    // Adaptation is TEMPORAL: the exposure eases toward the metered target over about a second, so a
+    // captured frame would depend on how many frames had elapsed and how fast the machine ran them.
+    // That is the same shape as the terrain-density race that made the dense-mesh gate decide its own
+    // result by luck, and it is not worth re-learning. The feature is gated deterministically by the
+    // `autoExposure` entry in passConfigs.js, which turns it on with the adaptation forced instant.
+    engine.renderer.autoExposureEnabled = false;
+    engine.renderer.exposure = 2.0;
+
     window.__setExposure = (v) => { engine.renderer.exposure = v; };
 
     // Assign renderer feature toggles by name, so the driver can walk a table of configurations without
@@ -1199,6 +1415,164 @@ window.__error = null;
       if (!sky) return 'no sky node';
       for (const key of Object.keys(patch)) sky[key] = patch[key];
       return Object.keys(patch).join(',');
+    };
+
+    // Material properties, by node name. The third sibling of __setProbe/__setLight, and it exists
+    // for the same reason: a pass config reaches renderer state and nothing else, and some gates need
+    // to move the SURFACE. Specular occlusion is the case in point — its correction only diverges
+    // from plain AO at low roughness, so measuring it needs a smoother material than the fixture
+    // authors anywhere.
+    window.__setMaterial = (name, patch) => {
+      const node = (scene.getNodeByName ? scene.getNodeByName(name) : null)
+                || [...(scene.nodes || [])].find(n => n && n.name === name);
+      const material = node && node.model && node.model.material;
+      if (!material) return "no material " + name;
+      const applied = [];
+      for (const key of Object.keys(patch)) {
+        if (!material.properties.has(key)) continue;
+        material.properties.set(key, patch[key]);
+        applied.push(key);
+      }
+      return applied.join(",");
+    };
+
+    // The deferred env-map fallback, on demand.
+    //
+    // That branch (`u_useEnvMap` in deferredLighting.wgsl) has never been reachable from any harness
+    // scene, and it needs TWO independent things that no page supplied. First, `scene.environmentMap` —
+    // the deferred pass reads that alone (`renderer.ts`, `_setDeferredLighting`), unlike the forward one
+    // which takes the probe's own cube from `probeForPoint`, so a skybox does not reach it. Second, a
+    // BOUNDED probe: the fallback is scaled by `rest = (1 - w0) * (1 - w1)`, and this page's probe is
+    // unbounded, so `probeWeight` returns 1 and `rest` is 0 whatever the env flag says.
+    //
+    // Six faces drawn here rather than loaded, so the bytes are a valid PNG the browser will decode, and
+    // each face a different hue so a reflection of it is unmistakable. Built once and cached: creating a
+    // cubemap per toggle would measure the upload path rather than the shading.
+    let __envCube = null;
+    const __makeFace = (hex) => new Promise((resolve) => {
+      const c = document.createElement('canvas');
+      c.width = c.height = 32;
+      const gg = c.getContext('2d');
+      gg.fillStyle = hex;
+      gg.fillRect(0, 0, 32, 32);
+      // A bright corner so the face is not flat — a constant cube reflects identically from every
+      // direction, which would make the case pass for the wrong reason.
+      gg.fillStyle = '#ffffff';
+      gg.fillRect(0, 0, 12, 12);
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.src = c.toDataURL('image/png');
+    });
+    window.__setEnvMap = async (enabled) => {
+      if (!enabled) { scene.environmentMap = null; return 'off'; }
+      if (!__envCube) {
+        const hues = ['#b03030', '#30b030', '#3030b0', '#b0b030', '#b030b0', '#30b0b0'];
+        const [posX, negX, posY, negY, posZ, negZ] = await Promise.all(hues.map(__makeFace));
+        const tex = new cleo.Texture({ target: 'cubemap', flipY: true });
+        tex.create({ posX, negX, posY, negY, posZ, negZ }, 32, 32);
+        __envCube = tex;
+      }
+      scene.environmentMap = __envCube;
+      return 'on';
+    };
+
+    // A normal map, on demand, for whichever material the caller names.
+    //
+    // Horizon occlusion cannot be gated without one. The term compares the reflection ray against the
+    // GEOMETRIC normal, and on a surface with no normal map the shading and geometric normals are the
+    // same vector — `reflect` can never send a ray below the normal it reflected about, so the term is
+    // identically 1 and a differential measures two identical frames.
+    //
+    // On demand rather than authored into the scene, which is the same choice `__setEnvMap` makes and
+    // for the same reason: a normal map on a base-scene object would move every base baseline in the
+    // repo to gate one feature. `__setMaterial` cannot do this — it patches scalar PROPERTIES only, and
+    // a normal map is a texture plus its `hasNormalMap` flag.
+    let __gateNormal = null;
+    window.__setNormalMap = (name, enabled) => {
+      const node = (scene.getNodeByName ? scene.getNodeByName(name) : null)
+                || [...(scene.nodes || [])].find(n => n && n.name === name);
+      const material = node && node.model && node.model.material;
+      if (!material) return 'no material ' + name;
+      if (!enabled) {
+        material.textures.delete('normalMap');
+        material.properties.set('hasNormalMap', false);
+        return 'off';
+      }
+      if (!__gateNormal) {
+        // A REAL normal map: a flat (128,128,255) would leave the TBN path mathematically idle and the
+        // term it is here to exercise would stay at 1. Steep enough (+-110 of 128) that the perturbed
+        // reflection actually crosses the surface plane at this camera's angle on the cube.
+        const c = document.createElement('canvas');
+        c.width = c.height = 32;
+        const g = c.getContext('2d');
+        for (let y = 0; y < 32; y++)
+          for (let x = 0; x < 32; x++) {
+            const bump = Math.sin(x * 0.9) * Math.cos(y * 0.9);
+            g.fillStyle = `rgb(${Math.round(128 + bump * 110)}, ${Math.round(128 - bump * 110)}, 190)`;
+            g.fillRect(x, y, 1, 1);
+          }
+        cleo.TextureManager.Instance.addTextureFromBase64(c.toDataURL('image/png'), { mipMap: true },
+                                                          'gateNormal');
+        __gateNormal = 'gateNormal';
+      }
+      material.textures.set('normalMap', __gateNormal);
+      material.properties.set('hasNormalMap', true);
+      return 'on';
+    };
+    // Light state, by node name. The sibling of __setProbe, and it exists for the same reason: a pass
+    // config can only patch RENDERER properties (see passConfigs.js `__setRender`), and the things the
+    // lighting gate has to move — a light's sourceRadius, a sun's angularRadius — live on the light,
+    // not on the renderer. Returns the keys it applied, so a renamed property fails loudly rather than
+    // leaving the configuration silently measuring nothing.
+    window.__setLight = (name, patch) => {
+      const node = (scene.getNodeByName ? scene.getNodeByName(name) : null)
+                || [...(scene.nodes || [])].find(n => n && n.name === name);
+      if (!node || !node.light) return 'no light ' + name;
+      const applied = [];
+      for (const key of Object.keys(patch)) {
+        if (!(key in node.light)) continue;
+        node.light[key] = patch[key];
+        applied.push(key);
+      }
+      return applied.join(',');
+    };
+    // Where a named node lands on screen, in 0..1 viewport coordinates with y already flipped to
+    // top-down so a driver can turn it straight into a capture rect.
+    //
+    // The lighting gate crops to a box around one object, because a full-frame 8x8 grid cannot resolve
+    // a specular highlight (see signature.js). Deriving the box from the node's WORLD position rather
+    // than from measured pixel coordinates is what keeps that gate from silently drifting off its
+    // subject the first time anyone nudges the camera or the window size.
+    window.__projectToScreen = (name) => {
+      const node = (scene.getNodeByName ? scene.getNodeByName(name) : null)
+                || [...(scene.nodes || [])].find(n => n && n.name === name);
+      if (!node) return null;
+      const camNode = scene.activeCamera;
+      const cam = camNode && camNode.camera;
+      if (!cam) return null;
+      const p = node.worldPosition;
+      // Two steps rather than a combined matrix: `Camera` exposes view and projection separately and
+      // the page has no matrix library. Column-major, as gl-matrix stores them.
+      const m = (a, x, y, z, w) => [
+        a[0] * x + a[4] * y + a[8] * z + a[12] * w,
+        a[1] * x + a[5] * y + a[9] * z + a[13] * w,
+        a[2] * x + a[6] * y + a[10] * z + a[14] * w,
+        a[3] * x + a[7] * y + a[11] * z + a[15] * w,
+      ];
+      const view = m(cam.viewMatrix, p[0], p[1], p[2], 1);
+      const clip = m(cam.projectionMatrix, view[0], view[1], view[2], view[3]);
+      if (!(Math.abs(clip[3]) > 1e-6)) return null;
+      return { x: (clip[0] / clip[3]) * 0.5 + 0.5, y: 0.5 - (clip[1] / clip[3]) * 0.5,
+               behind: clip[3] < 0 };
+    };
+
+    window.__lightState = (name) => {
+      const node = (scene.getNodeByName ? scene.getNodeByName(name) : null)
+                || [...(scene.nodes || [])].find(n => n && n.name === name);
+      if (!node || !node.light) return 'no light ' + name;
+      const l = node.light;
+      return { intensity: l.intensity, sourceRadius: l.sourceRadius, angularRadius: l.angularRadius,
+               range: l.range };
     };
 
     // Aim the camera above the horizon.
@@ -1308,13 +1682,13 @@ vec4 fragment() {
     vec3 d = texture(u_detail, fragTexCoord * 2.0).rgb;
     float sh = shadowCalculation();
     vec3 Lo = vec3(0.0);
-    accumulateLight(n, normalize(u_viewPos - fragPos), u_base * d, u_metal, 0.5,
-                    normalize(-u_dirLight.direction), u_dirLight.diffuse * sh, Lo);
+    Lo += evaluateDirectionalLight(u_dirLight, n, normalize(u_viewPos - fragPos), u_base * d,
+                                  u_metal, 0.5, sh);
     float counts = float(u_numPointLights + u_numSpotlights);
     // The detail texture is added unconditionally, not only through the lit term: a material that is
     // black because it is unlit and one that is black because its sampler is bound wrong look the
     // same, and only one of those is a regression.
-    return vec4(Lo + u_dirLight.ambient * u_base * counts * 0.0 + d * 0.6 + u_time * 0.0, 1.0);
+    return vec4(Lo + u_sceneAmbient * u_base * counts * 0.0 + d * 0.6 + u_time * 0.0, 1.0);
 }
 `,
       },

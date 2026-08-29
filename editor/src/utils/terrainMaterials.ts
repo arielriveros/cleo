@@ -96,6 +96,27 @@ export function parseTerrainMaterialAsset(asset: TerrainMaterialAsset): TerrainM
 }
 
 /**
+ * Convert a pre-metres relief depth to metres, against the terrain it is being applied to.
+ *
+ * Relief depth used to be authored in the layer's TILED uv and turned into a distance with
+ * `size / tiling`; it is metres outright now. `Terrain.deserialize` converts the copy embedded in a
+ * scene, but the LIBRARY asset keeps the old number until something converts it — and the conversion
+ * needs a terrain size, which a material asset does not carry.
+ *
+ * So it happens here, at the moment a material meets a terrain. Without it, assigning or re-saving a
+ * library material re-applied the raw number: ten times too shallow on a default 200 m landscape,
+ * which reads as "updating the material turned displacement off" rather than as a unit change.
+ *
+ * `depthIsMetres` makes it idempotent — a material converted once is stamped, and re-saving the asset
+ * writes `depthUnit: 'metres'` so it never needs converting again.
+ */
+export function migrateTerrainMaterialDepth(tm: TerrainMaterial, referenceSize: number): void {
+  if (tm.depthIsMetres) return
+  tm.displacementScale *= referenceSize / Math.max(tm.tiling, 0.01)
+  tm.depthIsMetres = true
+}
+
+/**
  * Assign a terrain-material asset to a terrain paint layer (0..3): restore textures, parse, link by id.
  *
  * When the material defines foliage, the layer covers some of the terrain, and nothing has been scattered
@@ -107,12 +128,19 @@ export function parseTerrainMaterialAsset(asset: TerrainMaterialAsset): TerrainM
  */
 export function applyTerrainMaterialToLayer(
   terrain: Terrain, index: number, asset: TerrainMaterialAsset,
-  opts?: { skipAutoGenerate?: boolean },
+  opts?: { skipAutoGenerate?: boolean; rescatterOnDensityChange?: boolean },
 ): void {
   const tm = parseTerrainMaterialAsset(asset)
+  // Before setLayer, because setLayer is what reads `displacementScale` into the layer.
+  migrateTerrainMaterialDepth(tm, terrain.size)
   terrain.setLayer(index, tm, { materialId: asset.id })
   // Existing scattered layers pick up changed prototypes without losing instances.
-  terrain.refreshFoliagePrototypes()
+  //
+  // `rescatterOnDensityChange` is opt-in and only the terrain-material SAVE passes it: density is the
+  // one rule field the existing instances cannot answer for, so that layer is re-scattered. Opening a
+  // scene deliberately does not — re-rolling a user's foliage as a side effect of opening a file would
+  // be the worst possible moment for it.
+  terrain.refreshFoliagePrototypes({ rescatterOnDensityChange: opts?.rescatterOnDensityChange })
   if (opts?.skipAutoGenerate) return
   const alreadyScattered = terrain.foliage.some(f => f.count > 0)
   if (tm.foliageInclude.length > 0 && !alreadyScattered && terrain.layerCoverage(index) > 0.05)

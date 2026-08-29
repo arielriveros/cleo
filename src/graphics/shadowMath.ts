@@ -152,26 +152,18 @@ export function buildCascadeMatrix(
 }
 
 /**
- * Distance at which a spot light's attenuation has fallen to `cutoffRatio` of its peak, used as the
- * far plane of its shadow frustum. Solves `1 / (c + l*d + q*d^2) = cutoffRatio` for d.
+ * Far plane of a spot light's shadow frustum: its own range, floored at 1 m and capped by the
+ * renderer's spot-shadow distance.
+ *
+ * This used to solve `1 / (c + l*d + q*d^2) = 1/256` for d, because a legacy light had no range and
+ * one had to be inferred. Lights carry a real range now, and that solve moved to
+ * `graphics/lighting.ts` as `legacyRange`, where the migration uses it — the two must agree or a
+ * migrated light's shadow frustum ends somewhere other than its light, and a shadow clipped partway
+ * down a cone does not look like a units bug.
  */
-export function spotShadowFar(
-    constant: number, linear: number, quadratic: number, maxFar: number, cutoffRatio: number = 1 / 256,
-): number {
-    const target = 1 / Math.max(1e-6, cutoffRatio); // c + l*d + q*d^2 == target
-    const b = target - constant;
-    let d: number;
-    if (quadratic > 1e-9) {
-        const disc = linear * linear + 4 * quadratic * b;
-        d = disc > 0 ? (-linear + Math.sqrt(disc)) / (2 * quadratic) : 0;
-    } else if (linear > 1e-9) {
-        d = b / linear;
-    } else {
-        // No falloff at all: only the global cap bounds it.
-        d = maxFar;
-    }
-    if (!(d > 0) || !isFinite(d)) d = maxFar;
-    return Math.min(maxFar, Math.max(1, d));
+export function spotShadowFar(range: number, maxFar: number): number {
+    if (!(range > 0) || !isFinite(range)) return maxFar;
+    return Math.min(maxFar, Math.max(1, range));
 }
 
 /**

@@ -19,12 +19,15 @@ import NullImage from '../images/null.png';
 import EventEmitter from "events";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
 import { createMaterialPreviewScene } from './demoScene/createMaterialPreviewScene';
+import { previewSphereGeometry, PREVIEW_TERRAIN_RADIUS, PREVIEW_TERRAIN_SIZE, REFERENCE_LANDSCAPE }
+  from './demoScene/previewFraming';
+import { buildTerrainPreviewSubject } from './demoScene/previewTerrainSubject';
 import { createAnimationEditorScene } from './demoScene/createAnimationEditorScene';
 import { createAssetEditScene } from './demoScene/createAssetEditScene';
 import { parseByType, regenerateIds, stripDebug } from "../utils/nodeSubtree";
 import { cryptoRandomId } from "../utils/ids";
 import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR } from "../utils/templates";
-import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getMaterialIdsOf, getNodeMaterial, unlinkToFallback, unlinkMaterialAt, materialSlotsReferencing, resolveMaterialRefs } from "../utils/materials";
+import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getMaterialIdsOf, getNodeMaterial, unlinkToFallback, unlinkMaterialAt, materialSlotsReferencing, resolveMaterialRefs, serializedVar, MATERIAL_ID_VAR, MATERIAL_IDS_VAR } from "../utils/materials";
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
@@ -2510,7 +2513,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       }
     }
     const material: Material = asset ? Material.parse(asset.material) : Material.PBR({});
-    const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), material));
+    const sphere = new ModelNode('preview', new Model(previewSphereGeometry(), material));
     scene.addNode(sphere);
     // Screen-mode custom materials are camera post passes, not mesh surfaces: run the SAME instance on the
     // preview camera so it previews live. The sphere still carries it for the inspector; the renderer skips
@@ -2736,13 +2739,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // After a mesh asset is saved, refresh every terrain-material foliage rule that references it
   // (rule.modelId): rebuild the embedded flattened LOD payload in the library asset, then swap
   // prototypes on live terrain layers using those materials — WITHOUT re-scattering instances.
-  const syncFoliageRulesForModel = (modelAsset: ModelAsset) => {
+  //
+  // Reads the REFS, not the state: every caller reaches here from an async save that has already
+  // awaited, so the captured `terrainMaterials`/`models` closures can be a render behind.
+  const syncFoliageRulesForModel = (modelAsset: ModelAsset, exceptTabId?: string) => {
     const updated: TerrainMaterialAsset[] = [];
-    for (const tmAsset of terrainMaterials) {
+    for (const tmAsset of terrainMaterialsRef.current) {
       const rules = tmAsset.material?.foliageInclude;
       if (!Array.isArray(rules) || !rules.some((r: any) => r?.modelId === modelAsset.id)) continue;
       try {
-        const nextRules = rules.map((r: any) => r?.modelId === modelAsset.id ? buildFoliageRuleFromModelAsset(modelAsset, r, modelsRef.current) : r);
+        const nextRules = rules.map((r: any) => r?.modelId === modelAsset.id
+          ? buildFoliageRuleFromModelAsset(modelAsset, r, modelsRef.current, materialsRef.current) : r);
         const material = { ...tmAsset.material, foliageInclude: nextRules };
         const patched: TerrainMaterialAsset = { ...tmAsset, material, textureIds: [...collectTerrainMaterialTextureIds(material)] };
         updateTerrainMaterial(tmAsset.id, patched);
@@ -2753,17 +2760,59 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
     if (updated.length === 0) return;
 
-    // Re-apply each updated material to the game-scene terrain layers that link it. skipAutoGenerate:
-    // this is an edit sync, so scattered foliage keeps its instances and only the prototypes change.
-    for (const landscape of editorSceneRef.current.landscapes) {
-      const terrain = landscape.terrain;
-      for (const asset of updated) {
-        terrain.layers.forEach((layer, i) => {
-          if (layer.materialId === asset.id) applyTerrainMaterialToLayer(terrain, i, asset, { skipAutoGenerate: true });
-        });
+    // An OPEN terrain-material tab holds its own live TerrainMaterial, and saving that tab serializes it
+    // back over the asset. Without this the freshly re-baked rules would be silently reverted by the
+    // next save of a tab the user never touched.
+    for (const [tabId, rt] of tabRuntimeRef.current.entries()) {
+      if (tabId === exceptTabId) continue;
+      const tm = (rt as any).tm;
+      if (!tm) continue;
+      const asset = updated.find(a => a.id === (rt as any).terrainMaterialId);
+      if (asset?.material?.foliageInclude) tm.foliageInclude = JSON.parse(JSON.stringify(asset.material.foliageInclude));
+    }
+
+    // Every live scene, not just the open one — matching syncModelInstances and
+    // syncTerrainMaterialInstances. Scenes that are not live are handled pull-side by resyncScene.
+    // skipAutoGenerate: this is an edit sync, so a bare terrain must not sprout foliage from it.
+    for (const scene of liveScenes(exceptTabId)) {
+      for (const landscape of Array.from(scene.landscapes) as any[]) {
+        const terrain = landscape.terrain;
+        if (!terrain) continue;
+        for (const asset of updated) {
+          terrain.layers.forEach((layer: any, i: number) => {
+            if (layer.materialId === asset.id) applyTerrainMaterialToLayer(terrain, i, asset, { skipAutoGenerate: true });
+          });
+        }
       }
     }
     eventEmitter.current.emit('SCENE_CHANGED');
+  };
+
+  // The other half of "the model changed": a foliage prototype bakes its material INLINE, so editing a
+  // shared Material asset never reached scattered foliage at all — syncMaterialInstances only walks
+  // scene nodes, and a prototype is reachable from none. Re-derive through the model path for every
+  // model asset that links this material, which is also what picks up the newly-resolved material.
+  const syncFoliageRulesForMaterial = (materialId: string, exceptTabId?: string) => {
+    const linksMaterial = (json: any): boolean => {
+      if (!json || typeof json !== 'object') return false;
+      if (serializedVar(json, MATERIAL_ID_VAR) === materialId) return true;
+      const list = serializedVar(json, MATERIAL_IDS_VAR);
+      if (list) {
+        try { if ((JSON.parse(list) as any[]).includes(materialId)) return true; } catch { /* corrupt link */ }
+      }
+      return (json.children ?? []).some(linksMaterial);
+    };
+
+    // Only models a rule actually references — re-baking a model nothing scatters is wasted work.
+    const scattered = new Set<string>();
+    for (const tmAsset of terrainMaterialsRef.current)
+      for (const r of tmAsset.material?.foliageInclude ?? []) if ((r as any)?.modelId) scattered.add((r as any).modelId);
+
+    for (const modelAsset of modelsRef.current) {
+      if (!scattered.has(modelAsset.id)) continue;
+      if (!linksMaterial(modelAsset.nodeJson)) continue;
+      syncFoliageRulesForModel(modelAsset, exceptTabId);
+    }
   };
 
   // Save a mesh tab back to the library and propagate to placed instances.
@@ -2866,7 +2915,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       updateModel(tab.modelId, asset);
       withoutDirty(() => {
         syncModelInstances(tab.modelId!, asset, tab.id);
-        syncFoliageRulesForModel(asset);
+        syncFoliageRulesForModel(asset, tab.id);
         // Levels are references, so this mesh may be a LOD of others whose placed instances embed a copy of
         // what was just edited. Refresh those too. One hop only: a level renders the referenced mesh's own
         // subtree, never its levels, so this cannot cascade.
@@ -2874,7 +2923,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           if (dependent.id === tab.modelId) continue;
           if (!dependent.lods?.some(l => l.modelId === tab.modelId)) continue;
           syncModelInstances(dependent.id, dependent, tab.id);
-          syncFoliageRulesForModel(dependent);
+          syncFoliageRulesForModel(dependent, tab.id);
         }
       });
       clearTabDirty(tab.id);
@@ -3441,7 +3490,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         updateMaterial(tab.materialId, asset);
         // Propagation edits other scenes and must not mark them dirty: they store the link (__materialId)
         // and resyncScene re-resolves it on open. Dirtying here would keep Save All from ever going clean.
-        withoutDirty(() => syncMaterialInstances(tab.materialId!, asset, tab.id)); // push edits to placed references
+        withoutDirty(() => {
+          syncMaterialInstances(tab.materialId!, asset, tab.id); // push edits to placed references
+          // Foliage prototypes bake their material inline and hang off no node, so the walk above
+          // cannot reach them; this re-derives every scattered rule whose model links this material.
+          syncFoliageRulesForMaterial(tab.materialId!, tab.id);
+        });
       } else {
         const asset = buildMaterialAsset(sphere.model.material, tab.title, thumbnail);
         addMaterial(asset); // asset carries a fresh id
@@ -3471,7 +3525,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         const terrain = ln.terrain;
         const layers = terrain?.layers ?? [];
         for (let i = 0; i < layers.length; i++) {
-          if (layers[i]?.materialId === id) { applyTerrainMaterialToLayer(terrain, i, asset); changed = true; }
+          // Density lives on the rule and is authored HERE, so this is the one propagation path that
+          // may re-scatter — and only for a layer whose density actually moved.
+          if (layers[i]?.materialId === id) {
+            applyTerrainMaterialToLayer(terrain, i, asset, { rescatterOnDensityChange: true });
+            changed = true;
+          }
         }
       }
     }
@@ -3502,16 +3561,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // can only blame the ACTIVE tab. The tab-activate effect re-arms once the new tab is showing.
     dirtyArmedRef.current = false;
     const scene = new Scene();
-    void createMaterialPreviewScene(scene); // env map + skybox attach once the cubemap images load
+    // Framed for a terrain PATCH, not the unit sphere the ordinary material editor previews.
+    void createMaterialPreviewScene(scene, { subjectRadius: PREVIEW_TERRAIN_RADIUS });
     const tm = asset ? parseTerrainMaterialAsset(asset) : TerrainMaterial.Create('pbr', { baseColor: [0.38, 0.5, 0.28] });
-    // A tiny helper terrain owns a composite Material.Terrain (+ a fully-layer-0 splat); layer 0 = the edited
-    // material, so the preview renders through the terrain shader (displacement/parallax/height-blend visible).
-    const helperTerrain = new Terrain({ size: 2, resolution: 2 });
-    // auto off so the preview always shows the surface; tiling pinned to 1 so the sphere previews the
-    // surface itself, not the terrain-space texture repeat (the tm's own tiling is untouched).
-    helperTerrain.setLayer(0, tm, { auto: false, tiling: 1 });
-    const previewNode = new ModelNode('preview', new Model(Geometry.Sphere(48), helperTerrain.material));
-    scene.addNode(previewNode);
+    // A REAL landscape, not a sphere borrowing the composite material. Terrain relief is geometry now —
+    // the layer displaces the terrain's own vertices and the march is off for it — so a sphere shows the
+    // albedo and nothing else. See `buildTerrainPreviewSubject` for the two less obvious things this
+    // also fixes (the pack being resolved once and then swept).
+    // Scaled against the landscape the material will actually be painted on, so metres-per-repeat and
+    // metres-per-vertex match and the preview resolves the same geometry/march split the ground does.
+    const previewNode = buildTerrainPreviewSubject(scene, tm, activeLandscapeTerrain());
+    const helperTerrain = previewNode.terrain;
     scene.start();
     // Unrendered node whose material IS the TerrainMaterial — the MaterialEditor/inspector edit target.
     const editNode = new ModelNode('__tmedit', new Model(Geometry.Sphere(8), tm));
@@ -3524,10 +3584,31 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     );
   };
 
+  /**
+   * The terrain a material preview should be scaled against: the scene's own landscape.
+   *
+   * A terrain material's tiling is a COUNT across the whole terrain and its relief depth is world
+   * metres, so neither number means anything without a size to read it against. The first landscape is
+   * the right answer in every practical case — a scene with two differently-sized terrains cannot have
+   * one honest preview anyway, and picking one beats picking the patch's own 8 m.
+   */
+  const activeLandscapeTerrain = (): Terrain | null => {
+    for (const l of editorSceneRef.current.landscapes) return l.terrain;
+    return null;
+  };
+
   // Re-derive the composite preview from the edited TerrainMaterial after any inspector change.
   const refreshTerrainMaterialPreview = () => {
     const runtime = tabRuntimeRef.current.get(activeTabId);
-    if (runtime?.helperTerrain && runtime.tm) runtime.helperTerrain.setLayer(0, runtime.tm, { auto: false, tiling: 1 });
+    if (!runtime?.helperTerrain || !runtime.tm) return;
+    // The layer's tiling REBASED to the preview patch, never 1. Pinning it to 1 contradicted
+    // `buildTerrainPreviewSubject` — which sets the scaled tiling when the tab opens — so the first
+    // inspector edit silently rescaled the preview to something no landscape will ever show, and took
+    // the derived density down to 1 with it. See previewTerrainSubject.ts for what the scale is for.
+    const size = activeLandscapeTerrain()?.size ?? REFERENCE_LANDSCAPE.size;
+    runtime.helperTerrain.setLayer(0, runtime.tm, {
+        auto: false, tiling: runtime.tm.tiling * PREVIEW_TERRAIN_SIZE / Math.max(size, 1e-6),
+    });
   };
 
   const enterTerrainMaterialEditor = (terrainMaterialId?: string, adoptTabId?: string) => {

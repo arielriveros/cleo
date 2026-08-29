@@ -1,8 +1,8 @@
 import { Terrain, LandscapeNode } from 'cleo'
 import type { TerrainConfig } from 'cleo'
 
-// Re-create a landscape's terrain at a different size / resolution / chunk size, carrying everything the
-// author made across onto it. The order of the carry-over steps is load-bearing.
+// Re-create a landscape's terrain at a different size / resolution / chunk size / render density,
+// carrying everything the author made across onto it. The order of the carry-over steps is load-bearing.
 
 /**
  * Swap `node`'s terrain for one built to `cfg`, resampling the sculpted shape, the painted splat, the
@@ -20,11 +20,15 @@ export function rebuildTerrain(node: LandscapeNode, cfg: Required<TerrainConfig>
   next.resampleSplatFrom(old)
   for (let i = 0; i < old.layers.length && i < 4; i++) {
     const layer = old.layers[i]
-    if (!layer.material) continue
-    next.setLayer(i, layer.material, {
-      tiling: layer.tiling, auto: layer.auto, hRange: layer.hRange, sRange: layer.sRange,
-      materialId: layer.materialId ?? null,
-    })
+    const blend = { tiling: layer.tiling, auto: layer.auto, hRange: layer.hRange, sRange: layer.sRange }
+    if (layer.material) {
+      next.setLayer(i, layer.material, { ...blend, materialId: layer.materialId ?? null })
+    } else if (layer.albedoId) {
+      // A legacy plain-albedo layer, from an old scene or a bare texture pick. It has no
+      // `TerrainMaterial`, and skipping it — which this used to do — silently erased the layer on
+      // rebuild, taking its paint with it while reporting that nothing authored was lost.
+      next.setLayer(i, { textureId: layer.albedoId, ...blend })
+    }
   }
   next.foliageColliders = { ...old.foliageColliders }
   next.resampleFoliageFrom(old)

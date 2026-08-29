@@ -2,8 +2,9 @@ import { mat4, quat } from 'gl-matrix';
 import type { Buffer as RhiBuffer } from '../graphics/rhi/resources';
 import { Geometry } from '../core/geometry';
 import { Model } from '../graphics/model';
+import type { Mesh } from '../graphics/mesh';
 import {
-    Material, TerrainFoliageRule, FoliageCollision,
+    Material, TerrainFoliageRule, FoliageCollision, foliageRuleKey,
     FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY,
 } from '../graphics/material';
 
@@ -30,6 +31,19 @@ const ORPHANED_FOLIAGE_BUFFERS: RhiBuffer[] = [];
 export function collectOrphanedFoliageBuffers(): RhiBuffer[] {
     if (ORPHANED_FOLIAGE_BUFFERS.length === 0) return [];
     return ORPHANED_FOLIAGE_BUFFERS.splice(0, ORPHANED_FOLIAGE_BUFFERS.length);
+}
+
+/**
+ * Prototype meshes of disposed layers. The same story as ORPHANED_FOLIAGE_BUFFERS, for the other half
+ * of a layer's GPU footprint: `_applyMeshPrototype` replaces `levels`/`billboardModel` wholesale, and
+ * a dropped JS reference frees no VBO, IBO or VAO.
+ */
+const ORPHANED_FOLIAGE_MESHES: Mesh[] = [];
+
+/** Drain the prototype meshes of disposed foliage layers. Called by the renderer. */
+export function collectOrphanedFoliageMeshes(): Mesh[] {
+    if (ORPHANED_FOLIAGE_MESHES.length === 0) return [];
+    return ORPHANED_FOLIAGE_MESHES.splice(0, ORPHANED_FOLIAGE_MESHES.length);
 }
 
 /**
@@ -83,7 +97,20 @@ export function crossQuadGeometry(width: number = 1, height: number = 1): Geomet
  */
 export class FoliageLayer {
     public readonly kind: FoliageKind;
+    /**
+     * Display name. Mutable, and what exclude lists match on — so it is not this layer's identity.
+     * A rename follows the rule; see `key`.
+     */
     public name: string;
+    /**
+     * Stable identity, the map key `Terrain._foliageByKey` files this layer under.
+     *
+     * Separate from `name` because a rename used to orphan a populated layer: the terrain looked the
+     * layer up by the rule's new name, missed, and built a second one — leaving the scattered instances
+     * drawn by a layer nothing could reach, and which `pruneFoliage` would not collect because it was
+     * not empty. Defaults to the name so a layer with no rule behind it behaves exactly as before.
+     */
+    public key: string;
     /** The primary model — always levels[0].models[0]. */
     public model: Model;
     public textureId: string | null;
@@ -125,6 +152,14 @@ export class FoliageLayer {
     // GPU buffers orphaned by a rebuild (cells are recreated), drained + deleted by the renderer.
     private _stale: RhiBuffer[] = [];
 
+    // Prototype meshes orphaned by a prototype swap, drained + disposed by the renderer.
+    //
+    // Separate from `_stale` because these are Meshes, not raw buffers: a Mesh owns a VAO and several
+    // buffers and knows how to release them. Before this queue existed, every refresh leaked the whole
+    // outgoing LOD chain — which mattered little when the only trigger was a manual re-sync, and
+    // matters now that a model or material save re-derives automatically.
+    private _retiredMeshes: Mesh[] = [];
+
     // Set by pushInstance(); commit() rebuilds once for a whole batch.
     private _dirty = false;
 
@@ -134,6 +169,7 @@ export class FoliageLayer {
     constructor(kind: FoliageKind, name: string, model: Model, textureId: string | null, params?: Partial<FoliageParams>) {
         this.kind = kind;
         this.name = name;
+        this.key = name;   // callers that build from a rule overwrite this with foliageRuleKey(rule)
         this.model = model;
         this.textureId = textureId;
         this.params = { ...DEFAULT_PARAMS, ...params };
@@ -158,6 +194,7 @@ export class FoliageLayer {
         if (rule.maxScale !== undefined) params.maxScale = rule.maxScale;
         if (rule.kind === 'billboard') {
             const bb = FoliageLayer.Billboard(rule.name, rule.textureId || 'Null', params);
+            bb.key = foliageRuleKey(rule);
             bb.collision = rule.collision ?? null;
             bb.castShadows = !!rule.castShadows;
             // Must be read here as well as in `_applyMeshPrototype`, or a billboard rule's cull distance
@@ -167,6 +204,7 @@ export class FoliageLayer {
         }
         const base = (rule.models?.length ? rule.models[0] : rule.model);
         const layer = FoliageLayer.Mesh(rule.name, Model.parse(base), params);
+        layer.key = foliageRuleKey(rule);
         layer._applyMeshPrototype(rule);
         return layer;
     }
@@ -180,6 +218,7 @@ export class FoliageLayer {
         // Levels are only rebuilt when the payload carries a base — appending `lods` to levels that were
         // kept from before would duplicate them on every refresh.
         if (baseModels) {
+            this._retireMeshes(this.levels.flatMap(l => l.models));
             this.levels = [{ models: baseModels.map((m: any) => Model.parse(m)), distance: 0 }];
             if (Array.isArray(src.lods)) {
                 for (const l of src.lods)
@@ -193,10 +232,12 @@ export class FoliageLayer {
             // Sized to the prototype it replaces, NOT 1x1: an instance scale MULTIPLIES the authored size
             // on the mesh but IS the size in metres on a unit quad, so a unit card would not match.
             const [w, h] = this._prototypeFootprint();
+            if (this.billboardModel) this._retireMeshes([this.billboardModel]);
             this.billboardModel = new Model(crossQuadGeometry(w, h), material);
             this.billboardTextureId = src.billboard.textureId;
             this.billboardDistance = Math.max(0, Number(src.billboard.distance) || 0);
         } else {
+            if (this.billboardModel) this._retireMeshes([this.billboardModel]);
             this.billboardModel = null;
             this.billboardTextureId = null;
             this.billboardDistance = Infinity;
@@ -225,14 +266,32 @@ export class FoliageLayer {
         return [Number.isFinite(w) && w > 1e-4 ? w : 1, Number.isFinite(h) && h > 1e-4 ? h : 1];
     }
 
-    /** Swap this layer's prototypes for an updated rule WITHOUT touching the scattered instances (used
-     *  when the source mesh asset or terrain material was edited). Cells are re-bucketed only to refresh
-     *  their AABB extents against the new geometry. */
-    public setPrototype(rule: TerrainFoliageRule): void {
+    /**
+     * Swap this layer's prototypes for an updated rule WITHOUT touching the scattered instances (used
+     * when the source mesh asset, its material, or the terrain material was edited).
+     *
+     * Instance matrices carry only position, yaw and scale — a prototype's own transform is baked into
+     * its vertices editor-side — so a geometry or material edit cannot invalidate one. That is what
+     * lets hand-painted placement survive an edit, and it is why this refreshes cell EXTENTS rather
+     * than rebuilding: the AABBs pad by the prototype's size, so only they depend on the new geometry.
+     *
+     * `density` is the one field this cannot absorb, because it decides how many instances should
+     * exist rather than what they look like. It is reported back instead; the caller owns the choice
+     * to re-scatter, since that is the one operation here that discards the user's placement.
+     */
+    public setPrototype(rule: TerrainFoliageRule): { densityChanged: boolean } {
+        const prevDensity = this.params.density;
+        const prevMin = this.params.minScale, prevMax = this.params.maxScale;
         if (rule.density !== undefined) this.params.density = rule.density;
         if (rule.minScale !== undefined) this.params.minScale = rule.minScale;
         if (rule.maxScale !== undefined) this.params.maxScale = rule.maxScale;
         this.castShadows = !!rule.castShadows;
+
+        // A scale RANGE change is different from every other field here: per-instance scale really is
+        // baked into the matrices. Re-rolling it in place keeps each instance's position and yaw, so
+        // the pattern is untouched while the plants take their new sizes.
+        const scaleChanged = this.params.minScale !== prevMin || this.params.maxScale !== prevMax;
+
         if (this.kind === 'billboard') {
             this.collision = rule.collision ?? null;
             this.cullDistance = Math.max(0, Number(rule.cullDistance) || 0);
@@ -240,13 +299,79 @@ export class FoliageLayer {
             if (tex !== this.textureId) {
                 this.textureId = tex;
                 const material = Material.Basic({ color: [1, 1, 1], texture: tex }, { side: 'double', castShadow: false });
+                this._retireMeshes(this.levels.flatMap(l => l.models));
                 this.model = new Model(crossQuadGeometry(), material);
                 this.levels = [{ models: [this.model], distance: 0 }];
                 this.initialized = false;
             }
-            return;
+            // A billboard's card is a unit quad, so its geometry extent never changes — but
+            // `_instanceExtent` multiplies by `params.maxScale`, which just might have. This branch
+            // used to return without refreshing anything, leaving the cell AABBs too tight and
+            // culling tall tufts at the screen edge.
+            if (scaleChanged) this._rerollScales();
+            else this._refreshExtents();
+            return { densityChanged: this.params.density !== prevDensity };
         }
+
         this._applyMeshPrototype(rule);
+        if (scaleChanged) this._rerollScales();
+        else this._refreshExtents();
+        return { densityChanged: this.params.density !== prevDensity };
+    }
+
+    /** Queue prototype meshes for the renderer to dispose. Safe on models never uploaded. */
+    private _retireMeshes(models: Model[]): void {
+        for (const m of models) if (m.mesh) this._retiredMeshes.push(m.mesh);
+    }
+
+    /** Prototype meshes orphaned by a prototype swap; the renderer disposes these. Returns and clears. */
+    public collectRetiredMeshes(): Mesh[] {
+        const m = this._retiredMeshes;
+        this._retiredMeshes = [];
+        return m;
+    }
+
+    /**
+     * Re-pad every cell's AABB against the current prototype, touching nothing else.
+     *
+     * The cheap half of `_rebuild`. A prototype swap does not move an instance, so re-bucketing them,
+     * reallocating every matrix array and bumping `version` — which forces the renderer to re-upload
+     * every cell's buffer — is all work whose result is identical to what was already there. Only the
+     * extent padding actually depends on the new geometry.
+     *
+     * `cell.lod` MUST be reset when the level count or the impostor changes: the renderer indexes the
+     * billboard bucket at `layer.levels.length`, so a cell remembering a level that no longer exists
+     * would select past the end. `_rebuild` got this for free by allocating fresh cells.
+     */
+    private _refreshExtents(): void {
+        const extent = this._instanceExtent();
+        const buckets = this.levels.length + (this.billboardModel ? 1 : 0);
+        for (const c of this.cells) {
+            let minX = Infinity, minY = Infinity, minZ = Infinity;
+            let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+            for (let j = 0; j < c.indices.length; j++) {
+                const b = c.indices[j] * 5;
+                const x = this._instances[b], y = this._instances[b + 1], z = this._instances[b + 2];
+                if (x < minX) minX = x; if (y < minY) minY = y; if (z < minZ) minZ = z;
+                if (x > maxX) maxX = x; if (y > maxY) maxY = y; if (z > maxZ) maxZ = z;
+            }
+            c.min = [minX - extent, minY - extent, minZ - extent];
+            c.max = [maxX + extent, maxY + extent, maxZ + extent];
+            if (c.lod >= buckets) c.lod = 0;
+        }
+    }
+
+    /**
+     * Draw a fresh scale for every instance from the current range, keeping position and yaw.
+     *
+     * The narrow case where instance data genuinely has to change without the layout changing: scale
+     * IS in the matrix. Re-scattering would achieve the same visual result and throw the placement
+     * away with it.
+     */
+    private _rerollScales(): void {
+        const { minScale, maxScale } = this.params;
+        for (let i = 0; i < this._instances.length; i += 5)
+            this._instances[i + 4] = minScale + Math.random() * (maxScale - minScale);
         this._rebuild();
     }
 
@@ -284,6 +409,12 @@ export class FoliageLayer {
         for (const c of this.cells) if (c.glBuffer) ORPHANED_FOLIAGE_BUFFERS.push(c.glBuffer);
         for (const b of this._stale) ORPHANED_FOLIAGE_BUFFERS.push(b);
         this._stale = [];
+        // Prototype meshes too: the renderer's foliage pass only walks LIVE landscapes, so once this
+        // layer is off a terrain nothing else can reach them.
+        this._retireMeshes(this.levels.flatMap(l => l.models));
+        if (this.billboardModel) this._retireMeshes([this.billboardModel]);
+        for (const m of this._retiredMeshes) ORPHANED_FOLIAGE_MESHES.push(m);
+        this._retiredMeshes = [];
         this.cells = [];
         this._instances = [];
         this._dirty = false;
@@ -452,6 +583,8 @@ export class FoliageLayer {
         return {
             kind: this.kind,
             name: this.name,
+            // Persisted, or a reload would file every layer under its name again and undo the re-key.
+            key: this.key !== this.name ? this.key : undefined,
             textureId: this.textureId,
             params: this.params,
             // `params.density` round-trips independently of the terrain material's rule, so it carries
@@ -491,6 +624,9 @@ export class FoliageLayer {
             layer._applyMeshPrototype(json);
         }
         layer.castShadows = !!json.castShadows;
+        // Absent on anything saved before layers had a stable key; the name is what it was filed under
+        // then, and Terrain migrates it onto the rule's key the first time it resolves one.
+        layer.key = json.key ?? json.name;
         if (json.instances) {
             const bin = atob(json.instances);
             const bytes = new Uint8Array(bin.length);

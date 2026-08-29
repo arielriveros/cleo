@@ -79,6 +79,9 @@ export { GLTFLoader } from "./graphics/utils/gltfLoader";
 export type { GltfParseResult, GltfMeshDescriptor, GltfMaterialDescriptor, GltfImageSource } from "./graphics/utils/gltfLoader";
 export { InputManager } from "./input/inputManager";
 export { TextureManager } from "./graphics/systems/textureManager";
+// The editor quotes the texture's world scale beside the tiling input; it reads the threshold from
+// the same place the bake does so the warning and the split cannot drift apart.
+export { vertsPerRepeat, CARVE_VERTS_PER_REPEAT } from "./graphics/systems/displacement";
 // Channel packing: metallic/roughness/occlusion (and specular/reflectivity) source maps combined into
 // one texture before the shaders sample them. `isDerivedTextureId` identifies the results, which are
 // engine-owned — never assignable, listable or serializable.
@@ -134,7 +137,10 @@ export type {
 } from "./graphics/animator";
 export { Sprite, gridTileset, legacySheetTileset, remapLegacyFrame, isInlineTilesetId, INLINE_TILESET_PREFIX } from "./graphics/sprite";
 export type { SpriteOptions, SpriteSide } from "./graphics/sprite";
-export { DirectionalLight, PointLight, Spotlight } from "./graphics/lighting";
+export { DirectionalLight, PointLight, Spotlight, LIGHT_UNIT, REFERENCE_ILLUMINANCE, DEFAULT_DIRECTIONAL_LUX,
+         DEFAULT_LUMENS, DEFAULT_RANGE, DEFAULT_SOURCE_RADIUS, DEFAULT_ANGULAR_RADIUS,
+         DEFAULT_SCENE_AMBIENT_LUX, MAX_POINT_LIGHTS, MAX_SPOTLIGHTS, legacyRange,
+         distanceAttenuation, legacyAmbientFromSceneJson } from "./graphics/lighting";
 export { Shape } from "./physics/shape";
 export { PhysicsSystem } from "./physics/physicsSystem";
 export type { PhysicsRaycastHit, PhysicsRaycastOptions } from "./physics/physicsSystem";

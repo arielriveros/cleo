@@ -1090,10 +1090,9 @@ async function buildModelAsset(name, parts, extra = {}) {
       tm.auto = !!cfg.auto;
       if (cfg.hRange) tm.hRange = cfg.hRange;
       if (cfg.sRange) tm.sRange = cfg.sRange;
-      // The displacement map lives in the material's own texture map, not the PBR slot set: the
-      // terrain shader reads it for the parallax offset and the height-aware blend.
+      // The height map lives in the material's own texture map, not the PBR slot set. Terrain reads
+      // it for the height-aware blend and nothing else — it does not displace.
       tm.textures.set('displacementMap', surface.disp);
-      tm.displacementScale = cfg.displacementScale;
       tm.heightBlend = cfg.heightBlend;
       tm.foliageInclude = rules;
       tm.foliageExclude = exclude ?? [];
@@ -1120,7 +1119,7 @@ async function buildModelAsset(name, parts, extra = {}) {
     // to the horizon. Kept mild — this multiplies an albedo that is already a photographed soil, and
     // a strong green here turns the near field into felt.
     const meadow = makeTerrainMaterial('Meadow Soil', SOIL, [0.86, 0.93, 0.70], 0.95,
-      { tiling: 52, displacementScale: 0.05, heightBlend: 1.4 },
+      { tiling: 52, heightBlend: 1.4 },
       [
         // THREE rules rather than one dense one. `want` is per m² of the WHOLE terrain and a rule places
         // about `want * 65536` instances, so `FoliageLayer`'s MAX_INSTANCES (200,000) is a hard ceiling
@@ -1153,7 +1152,7 @@ async function buildModelAsset(name, parts, extra = {}) {
 
     // Darker and greener than the meadow: leaf litter under canopy, not open ground.
     const forest = makeTerrainMaterial('Forest Floor', SOIL, [0.68, 0.78, 0.58], 0.92,
-      { tiling: 44, auto: true, hRange: [3, 34], sRange: [0, 0.55], displacementScale: 0.07, heightBlend: 1.8 },
+      { tiling: 44, auto: true, hRange: [3, 34], sRange: [0, 0.55], heightBlend: 1.8 },
       [
         foliageRule('pine', {
           name: 'pine', layer: 1, want: 0.0010, minScale: 0.7, maxScale: 1.35, castShadows: true,
@@ -1178,7 +1177,7 @@ async function buildModelAsset(name, parts, extra = {}) {
 
     // Layer 2 — Ground110, the gravel/scree set, on the steepest fifth of the terrain.
     const rocky = makeTerrainMaterial('Rocky Slope', GRAVEL, [1.00, 1.00, 1.00], 0.80,
-      { tiling: 30, auto: true, hRange: [0, 60], sRange: [0.38, 1], displacementScale: 0.12, heightBlend: 2.6 },
+      { tiling: 30, auto: true, hRange: [0, 60], sRange: [0.38, 1], heightBlend: 2.6 },
       ['07', '10', '11', '13'].map(n => foliageRule('rock_' + n, {
         name: 'boulder ' + n, layer: 2, want: 0.005, minScale: 0.7, maxScale: 1.9,
         collision: { shape: 'sphere', radius: 0.6 },
@@ -1191,7 +1190,7 @@ async function buildModelAsset(name, parts, extra = {}) {
     // Layer 3 — the same gravel at half the tiling, so the creek bed reads as coarse pebbles rather
     // than as more of the slope above it.
     const dirt = makeTerrainMaterial('Creek Gravel', GRAVEL, [1.00, 0.97, 0.92], 0.88,
-      { tiling: 16, auto: true, hRange: [0, 9], sRange: [0, 0.4], displacementScale: 0.06, heightBlend: 1.2 },
+      { tiling: 16, auto: true, hRange: [0, 9], sRange: [0, 0.4], heightBlend: 1.2 },
       [
         foliageRule('rock_08', {
           name: 'creek stone', layer: 3, want: 0.007, minScale: 0.5, maxScale: 1.1,
@@ -1239,6 +1238,10 @@ async function buildModelAsset(name, parts, extra = {}) {
     log('assembling scene');
     const scene = new cleo.Scene();
 
+    // See the mesh page: the fill is scene state now, not the sun's. Same numbers as the `ambient` this
+    // light used to carry, times REFERENCE_ILLUMINANCE.
+    scene.ambientLight = [0.26 * cleo.REFERENCE_ILLUMINANCE, 0.29 * cleo.REFERENCE_ILLUMINANCE,
+                          0.34 * cleo.REFERENCE_ILLUMINANCE];
     const sun = new cleo.LightNode('sun', new cleo.DirectionalLight({
       diffuse: [1.0, 0.94, 0.82], specular: [1.0, 0.97, 0.9], ambient: [0.26, 0.29, 0.34],
     }), true);

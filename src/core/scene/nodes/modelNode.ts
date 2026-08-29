@@ -3,6 +3,7 @@ import { AnimationMapping, AnimationStateMachine, Animator } from "../../../grap
 import { Material } from "../../../graphics/material";
 import { Model } from "../../../graphics/model";
 import { ShaderManager } from "../../../graphics/systems/shaderManager";
+import { geometryAttributesFor } from '../../../graphics/rhi/vertexLayouts';
 import type { RagdollOptions } from "../../../physics/ragdoll";
 import type { BVH } from "../../bvh";
 import { Logger } from "../../logger";
@@ -28,6 +29,10 @@ export class ModelNode extends Node {
     // Material type the mesh VAO/vertex data were last built for. basic and default/pbr use different
     // vertex attribute layouts, so a type change forces a rebuild — see the `initialized` getter.
     private _initializedType: string | null = null;
+    // The geometry the current upload came from. `_initializedType` alone cannot see a geometry swap —
+    // the material type has not changed — and a terrain chunk changing density changes its vertex COUNT,
+    // which `Mesh.updateVertexData` cannot express. Companion key, checked in the same place.
+    private _initializedGeometry: number = -1;
     private _animator: Animator | null;
     private _movementDirection: vec3;
     /** Optional per-node ragdoll simulation config (skinned meshes). Persisted with the scene; read by Ragdoll. */
@@ -49,42 +54,15 @@ export class ModelNode extends Node {
     public initializeModel(): void {
         const shader = ShaderManager.Instance.getShader(this._model.material.type);
         this._model.mesh.initializeVAO(shader.attributes);
-        const attributes = [];
+        // Extracted rather than inline so the packing rule has one home: the stride is not constant —
+        // a position-and-uv program packs to 20 bytes and a full PBR one to 56.
+        const attributes = geometryAttributesFor(shader.attributes);
 
-        for (const attr of shader.attributes) {
-            switch (attr.name) {
-                case 'position':
-                case 'a_position':
-                    attributes.push('position');
-                    break;
-                case 'normal':
-                case 'a_normal':
-                    attributes.push('normal');
-                    break;
-                case 'uv':
-                case 'a_uv':
-                case 'texCoord':
-                case 'a_texCoord':
-                    attributes.push('uv');
-                    break;
-                case 'tangent':
-                case 'a_tangent':
-                    attributes.push('tangent');
-                    break;
-                case 'bitangent':
-                case 'a_bitangent':
-                    attributes.push('bitangent');
-                    break;
-                default:
-                    const errMsg = `Attribute ${attr.name} not supported`;
-                    Logger.error(errMsg)
-                    throw new Error(errMsg);
-            }
-        }
-
-        this._model.mesh.create(this._model.geometry.getData(attributes), this._model.geometry.vertexCount, this._model.geometry.indices);
+        const geometry = this._model.geometry;
+        this._model.mesh.create(geometry.getData(attributes), geometry.vertexCount, geometry.indices);
         this._initialized = true;
         this._initializedType = this._model.material.type;
+        this._initializedGeometry = this._model.geometryVersion;
     }
 
     protected _serializePayload(): any {
@@ -126,7 +104,8 @@ export class ModelNode extends Node {
     // Reports uninitialized when the material type changed since the mesh was built, so the renderer
     // rebuilds the VAO for the new material's attribute layout.
     public get initialized(): boolean {
-        return this._initialized && this._initializedType === this._model.material.type;
+        return this._initialized && this._initializedType === this._model.material.type
+            && this._initializedGeometry === this._model.geometryVersion;
     }
     public get animator(): Animator | null { return this._animator; }
     public get ragdollConfig(): RagdollOptions | null { return this._ragdollConfig; }

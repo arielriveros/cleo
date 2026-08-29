@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { SkyboxNode } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
 import Collapsable from '../../../components/Collapsable'
-import { PropertyTable, PropertyRow, TextInput, Button, ColorInput, SegmentedControl } from '../../../components/ui'
+import { PropertyTable, PropertyRow, TextInput, Button, ColorInput, NumberInput, SegmentedControl } from '../../../components/ui'
 import { InfoIcon } from '../sectionIcons'
 
 // The inspector for the scene ASSET, shown when the scene tab's root node is selected. Everything here
@@ -43,6 +43,19 @@ export default function SceneSettings() {
     eventEmitter.emit('SCENE_CHANGED')
   }
 
+  // Scene-wide indirect fill, in lux. This was `light.ambient` — a per-light property that behaved as
+  // though it were not, since every shading path added the DIRECTIONAL light's copy to every pixel
+  // whether or not that light reached it. A scene with a sky light or a light probe wants this near
+  // zero; a scene with neither needs it, or unlit surfaces go black.
+  const ambient = editorScene.ambientLight
+  const ambientLux = Math.max(ambient[0], ambient[1], ambient[2])
+  const ambientUnit: [number, number, number] = ambientLux > 0
+    ? [ambient[0] / ambientLux, ambient[1] / ambientLux, ambient[2] / ambientLux]
+    : [1, 1, 1]
+  const setAmbient = (rgb: readonly number[], lux: number) => {
+    editorScene.ambientLight = [rgb[0] * lux, rgb[1] * lux, rgb[2] * lux]
+    eventEmitter.emit('SCENE_CHANGED')
+  }
   // The environment map drives reflections on PBR/Blinn materials and is sourced from the scene's own
   // skybox. It serializes as six base64 images inside the scene blob, so a scene with one is much bigger.
   const skybox = Array.from(editorScene.nodes).find(n => n.nodeType === 'skybox') as SkyboxNode | undefined
@@ -103,6 +116,13 @@ export default function SceneSettings() {
           <PropertyTable columns={['32%', '68%']}>
             <PropertyRow label='Clear color'>
               <ColorInput color={rgbToHex(clearColor)} onChange={setClearColor} />
+            </PropertyRow>
+            <PropertyRow label='Ambient'>
+              <ColorInput color={rgbToHex(ambientUnit)} onChange={(rgb) => setAmbient(rgb, ambientLux)} />
+            </PropertyRow>
+            <PropertyRow label='Ambient (lx)'>
+              <NumberInput value={Math.round(ambientLux)} min={0} step={500}
+                onChange={(lx) => setAmbient(ambientUnit, lx)} />
             </PropertyRow>
             <PropertyRow label='Reflections' divider={false}>
               <span className='text-muted'>{hasEnv ? 'From a cubemap' : 'None'}</span>

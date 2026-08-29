@@ -58,12 +58,29 @@ describe('published texture references', () => {
     })).toEqual(['grain']);
   });
 
-  it('finds terrain layer surface + displacement textures', () => {
-    // displacementMap is a top-level terrain field, NOT inside the `textures` map.
+  it('finds a terrain layer height map in the LEGACY top-level shape', () => {
+    // Terrain used to serialize its height map as a top-level sibling of `textures`, because
+    // Material.serialize()'s basic/blinn_phong branches had no displacement slot to put it in. Asset
+    // JSON on disk is never rewritten until the user re-saves that asset — the shipped 3d-example is
+    // still in this shape — so the collector must keep understanding it. Missing it flags the texture
+    // as orphaned and omits it from published builds, which breaks the layer permanently.
     expect(ids({
       children: [{
         terrain: {
           layers: [{ material: { textures: { baseColorTexture: 'rock' }, displacementMap: 'rock_h' } }],
+        },
+        children: [],
+      }],
+    })).toEqual(['rock', 'rock_h']);
+  });
+
+  it('finds a terrain layer height map in the CURRENT `textures` shape', () => {
+    // Every material type carries a `displacementMap` slot now, so a fresh save puts the id in the
+    // textures map like any other — where the generic deep walk finds it with no special case.
+    expect(ids({
+      children: [{
+        terrain: {
+          layers: [{ material: { textures: { baseColorTexture: 'rock', displacementMap: 'rock_h' } } }],
         },
         children: [],
       }],

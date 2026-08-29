@@ -9,17 +9,24 @@
 
 const SAMPLE_COUNT: u32 = 1024u;
 
-/** Schlick-GGX geometry term with the IBL `k`, which is a^2/2 rather than the direct-lighting form. */
-fn geometrySchlickGGX(nDotV: f32, roughness: f32) -> f32 {
-    let a = roughness;
-    let k = (a * a) / 2.0;
-    return nDotV / (nDotV * (1.0 - k) + k);
-}
-
-fn geometrySmith(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughness: f32) -> f32 {
-    let ggx2 = geometrySchlickGGX(max(dot(n, v), 0.0), roughness);
-    let ggx1 = geometrySchlickGGX(max(dot(n, l), 0.0), roughness);
-    return ggx1 * ggx2;
+/**
+ * Height-correlated Smith VISIBILITY — `G / (4 NoV NoL)` — matching `chunks/pbrLighting.wgsl`.
+ *
+ * A DELIBERATE COPY rather than an include, for two reasons: `pbrLighting.wgsl` declares `PI`, which
+ * `chunks/importanceSample.wgsl` above already declares and the include resolver has no include-once
+ * guard; and it brings the three light structs, which a bake with no lights has no use for.
+ *
+ * What it replaced was a local separable Smith with the IBL remap `k = a^2/2`. That was the right
+ * companion to the separable `k = (r+1)^2/8` the direct path used to use — but the direct path is
+ * height-correlated now, and a LUT integrated against a different visibility function than the shading
+ * it feeds means a metal's REFLECTION and its HIGHLIGHT disagree about how much light survives.
+ * Nothing links these two files at compile time, so the only thing keeping them honest is this comment.
+ */
+fn V_SmithGGXCorrelated(nDotV: f32, nDotL: f32, alpha: f32) -> f32 {
+    let a2 = alpha * alpha;
+    let ggxV = nDotL * sqrt(nDotV * nDotV * (1.0 - a2) + a2);
+    let ggxL = nDotV * sqrt(nDotL * nDotL * (1.0 - a2) + a2);
+    return 0.5 / max(ggxV + ggxL, 1e-5);
 }
 
 fn integrateBRDF(nDotV: f32, roughness: f32) -> vec2<f32> {
@@ -41,8 +48,13 @@ fn integrateBRDF(nDotV: f32, roughness: f32) -> vec2<f32> {
         let vDotH = max(dot(v, h), 0.0);
 
         if (nDotL > 0.0) {
-            let g = geometrySmith(n, v, l, roughness);
-            let gVis = (g * vDotH) / (nDotH * nDotV);
+            // The Monte Carlo weight for a GGX-importance-sampled half vector. With a VISIBILITY term
+            // (which already carries the 1 / (4 NoV NoL)) the estimator is `4 * V * NoL * VoH / NoH`;
+            // with a geometry term it was the algebraically identical `G * VoH / (NoH * NoV)`. The
+            // alpha is `roughness^2` because that is the remap `importanceSampleGGX` applies to the
+            // same argument — the two have to agree or the estimator and its distribution disagree.
+            let vis = V_SmithGGXCorrelated(nDotV, nDotL, roughness * roughness);
+            let gVis = 4.0 * vis * nDotL * vDotH / max(nDotH, 1e-5);
             let fc = pow(1.0 - vDotH, 5.0);
             a += (1.0 - fc) * gVis;
             b += fc * gVis;

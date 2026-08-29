@@ -1,7 +1,8 @@
 import { Scene, Node, ModelNode, Model, Geometry, Material, TextureManager, CleoEngine, AnimatedModel, Terrain } from 'cleo';
 import { createModelPreviewScene } from '../features/demoScene/createModelPreviewScene';
 import { createMaterialPreviewScene } from '../features/demoScene/createMaterialPreviewScene';
-import { fitDistance, MATERIAL_SPHERE_RADIUS } from '../features/demoScene/previewFraming';
+import { fitDistance, MATERIAL_SPHERE_RADIUS, previewSphereGeometry, PREVIEW_TERRAIN_RADIUS } from '../features/demoScene/previewFraming';
+import { buildTerrainPreviewSubject } from '../features/demoScene/previewTerrainSubject';
 import type { MaterialAsset } from './materials';
 import { ModelAsset } from './models';
 import { parseByType, regenerateIds } from './nodeSubtree';
@@ -216,7 +217,7 @@ export async function renderMaterialThumbnail(engine: CleoEngine, material: Mate
     const ready = createMaterialPreviewScene(s, { skybox: false, silently });
     // An independent copy: never share GPU/material state with the live node's material.
     const mat = Material.parse(material.serialize());
-    const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), mat));
+    const sphere = new ModelNode('preview', new Model(previewSphereGeometry(), mat));
     s.addNode(sphere);
     s.start();
     return { scene: s, envReady: ready, preview: mat };
@@ -275,18 +276,28 @@ export async function renderTerrainMaterialAssetThumbnail(engine: CleoEngine, as
   const texIds = restoreEmbeddedTextures(asset.textures);
   const tm = parseTerrainMaterialAsset(asset);
 
-  const { scene, envReady } = silently(() => {
+  // The textures are awaited BEFORE the layer is assigned, and that ordering is a fix rather than a
+  // tidy-up: `setLayer` resolves the normal+height pack synchronously, and against undecoded images it
+  // resolves to nothing — so terrain-material thumbnails never showed a height or normal map at all.
+  // Nothing retried it, because a one-shot capture never reaches the per-frame sync.
+  await awaitTexturesReady(texIds);
+
+  const { scene, node, envReady } = silently(() => {
     const s = new Scene();
-    const ready = createMaterialPreviewScene(s, { skybox: false, silently }); // see renderMaterialThumbnail
-    const helperTerrain = new Terrain({ size: 2, resolution: 2 });
-    helperTerrain.setLayer(0, tm, { auto: false, tiling: 1 }); // always show the surface, without terrain-space tiling
-    const sphere = new ModelNode('preview', new Model(Geometry.Sphere(48), helperTerrain.material));
-    s.addNode(sphere);
+    const ready = createMaterialPreviewScene(s, {
+      skybox: false, silently, subjectRadius: PREVIEW_TERRAIN_RADIUS,   // see renderMaterialThumbnail
+    });
+    // A real terrain patch, the same subject the editor tab previews — see buildTerrainPreviewSubject.
+    const landscape = buildTerrainPreviewSubject(s, tm);
     s.start();
-    return { scene: s, envReady: ready };
+    return { scene: s, node: landscape, envReady: ready };
   });
 
-  await awaitTexturesReady(texIds);
   await envReady;
+  // `screenshotOffscreen` renders once and never calls `scene.update()`, so the chunk vertex upload —
+  // which is what carries the baked displacement to the GPU — would never happen. Pump it by hand, the
+  // way renderModelThumbnail already does for transforms.
+  scene.root.updateTransforms();
+  node.update(0, 0);
   return captureClean(engine, scene);
 }

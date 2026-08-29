@@ -116,12 +116,24 @@ app.whenReady().then(async () => {
 
   // A configuration whose signature equals `base` did not change the picture, which for these passes
   // means it did not run — the gate would then be watching nothing.
+  //
+  // `differing`, not `material`, and the difference matters. The test is "did this pass run at all",
+  // and a pass that did not run gives a signature IDENTICAL to base — zero differing cells. Requiring
+  // the difference to clear the noise floor as well was a stricter claim than the one above, and it
+  // tripped over something real: `noShadows` had exactly one quantisation step of margin (11 cells at
+  // worst delta 8 against a `> 4` threshold), and the phase-2 BRDF made the frame bright enough that
+  // ACES shoulder compression cost ~10% of the shadow contrast, which was enough to halve the quantised
+  // delta to 4. The same 11 cells still differ, in the same places; only the per-cell magnitude fell to
+  // the step size. Shadows themselves are held by two other gates that did not move at all —
+  // `debugShadow` (119/128, worst delta 144) and the draw count, which drops 87 -> 18 with the cascade
+  // path off. The margin is printed below so its erosion stays visible rather than silent.
   for (const cfg of CONFIGS) {
     if (cfg.name === 'base' || cfg.motion) continue;   // motion pair is judged against each other below
     const d = compare(signatures.base, signatures[cfg.name]);
-    check(`${cfg.name} visibly changes the frame`, d.material > 0,
-          'nothing moved beyond the noise floor — the pass did not run, so nothing here is under test');
-    if (d.differing) console.log(`      ${cfg.name}: ${d.differing}/128 values differ, worst delta ${d.worst}`);
+    check(`${cfg.name} visibly changes the frame`, d.differing > 0,
+          'signature is identical to base — the pass did not run, so nothing here is under test');
+    if (d.differing) console.log(`      ${cfg.name}: ${d.differing}/128 values differ, ` +
+                                 `${d.material} beyond the noise floor, worst delta ${d.worst}`);
   }
 
   // The motion-blur contract, compared against its own motion-matched control rather than against base.
