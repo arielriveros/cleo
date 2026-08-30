@@ -65,15 +65,16 @@ describe('the preview patch matches the landscape it will be painted on', () => 
         expect(metresPerRepeat(preview)).toBeCloseTo(metresPerRepeat(landscape), 6);
     });
 
-    it('one vertex covers the same metres, which is what fixes the geometry/march split', () => {
-        // `displaceSplitLod` is driven by vertices per repeat. Match the spacing and the preview cuts
-        // the height map at the same place the landscape does — so what is geometry there is geometry
-        // here, and what the march carries there is what it carries here.
+    it('and the patch is fine enough to be a surface', () => {
+        // The spacing match used to be load-bearing: relief was split between the terrain's vertices
+        // and the march at a mip derived from vertices-per-repeat, so a preview at a different vertex
+        // density cut the height map somewhere else and showed a different surface. Relief is entirely
+        // marched now, so the grid only has to resolve the patch — but a preview built from one quad
+        // would have no interior and nothing to shade, so the lower bound still matters.
         const landscape = new Terrain({ size: 200, resolution: 129, chunkQuads: 32 });
         landscape.setLayer(0, material());
         const preview = buildTerrainPreviewSubject(new Scene(), material(), landscape).terrain;
-        expect(spacing(preview) / spacing(landscape)).toBeGreaterThan(0.5);
-        expect(spacing(preview) / spacing(landscape)).toBeLessThan(2);
+        expect(preview.resolution).toBeGreaterThanOrEqual(9);
     });
 
     it('tracks a landscape of another size', () => {
@@ -94,14 +95,15 @@ describe('the preview patch matches the landscape it will be painted on', () => 
 });
 
 describe('the reference constant', () => {
-    it('is the density the engine actually derives for a default landscape', () => {
-        // A hardcoded number in the editor mirroring one the engine computes. Pinned against a real
-        // Terrain so it cannot drift into a lie the moment the budget or the target changes.
+    it('names a real default landscape, for a material authored before one exists', () => {
+        // It used to carry a `density` too, mirroring a vertex density the engine derived; that went
+        // with the vertex bake. What is left has to stay constructible, or the no-landscape fallback
+        // quotes a terrain that could never exist.
         const landscape = new Terrain({
             size: REFERENCE_LANDSCAPE.size, resolution: REFERENCE_LANDSCAPE.resolution, chunkQuads: 32,
         });
-        landscape.setLayer(0, material());
-        expect(landscape.densityFor()).toBe(REFERENCE_LANDSCAPE.density);
+        expect(landscape.size).toBe(REFERENCE_LANDSCAPE.size);
+        expect(landscape.resolution).toBe(REFERENCE_LANDSCAPE.resolution);
     });
 });
 

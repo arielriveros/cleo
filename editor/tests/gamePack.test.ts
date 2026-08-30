@@ -272,3 +272,84 @@ describe('game.bin round-trip', () => {
     expect(asBin).toBeLessThan(asJson / 2);
   });
 });
+
+/**
+ * `Model.serialize` writes vertex buffers and per-vertex bone data as TYPED arrays now (a plain number[]
+ * costs 8 bytes an element and doubled every stored mesh). That is invisible to geometry, which was
+ * already chunked — but a skinned model's `jointIndices`/`jointWeights` used to ride along in the
+ * manifest JSON, where a typed array stringifies as `{"0":…}` and loads back as nothing. They are
+ * chunked now, which is what PLAYER_CONTRACT 6 marks.
+ */
+describe('game.bin — skinned models and typed arrays', () => {
+  const typedCube = () => ({
+    positions: new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]),
+    normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
+    texCoords: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
+    indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+  });
+
+  const JOINTS = [0, 1, 0, 0, 1, 2, 0, 0, 2, 3, 0, 0, 3, 0, 0, 0];
+  const WEIGHTS = [1, 0, 0, 0, 0.5, 0.5, 0, 0, 0.25, 0.75, 0, 0, 1, 0, 0, 0];
+
+  const skinned = (typed: boolean) => ({
+    model: {
+      geometry: typed ? typedCube() : cube(),
+      material: { type: 'pbr' },
+      jointIndices: typed ? new Float32Array(JOINTS) : JOINTS.slice(),
+      jointWeights: typed ? new Float32Array(WEIGHTS) : WEIGHTS.slice(),
+      skin: { name: 'Armature', joints: [{ nodeIndex: 0, inverseBindMatrix: new Float32Array(16), parentIndex: -1 }] },
+    },
+    children: [],
+  });
+
+  it('packs typed geometry byte-for-byte', () => {
+    const { buffer } = packGameBin(gameWith([skinned(true)]));
+    const game = unpackGameBin(buffer);
+    const geometry = game.geometryFor(Object.keys(game.manifest.geometries)[0])!;
+    expect(Array.from(geometry.positions!)).toEqual([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]);
+    expect(Array.from(geometry.indices!)).toEqual([0, 1, 2, 0, 2, 3]);
+  });
+
+  it('restores bone data through the scene inflate', () => {
+    const data = gameWith([skinned(true)]);
+    const { buffer } = packGameBin(data);
+    const game = unpackGameBin(buffer);
+    const scene = game.manifest.scenes.main.scene;
+    inflateSceneGeometry(scene, game);
+
+    const model = (scene as any).children[0].model;
+    expect(Array.from(model.jointIndices)).toEqual(JOINTS);
+    expect(Array.from(model.jointWeights)).toEqual(WEIGHTS);
+    // The marker must be gone, or AnimatedModel.parse sees a field it does not know.
+    expect(model.jointIndicesChunk).toBeUndefined();
+    expect(model.jointWeightsChunk).toBeUndefined();
+  });
+
+  it('works the same for a model that still carries plain arrays', () => {
+    const data = gameWith([skinned(false)]);
+    const { buffer } = packGameBin(data);
+    const game = unpackGameBin(buffer);
+    const scene = game.manifest.scenes.main.scene;
+    inflateSceneGeometry(scene, game);
+    expect(Array.from((scene as any).children[0].model.jointIndices)).toEqual(JOINTS);
+  });
+
+  it('leaves NO typed array in the manifest JSON', () => {
+    // The failure this guards: `{"0":0,"1":1,…}` in the manifest, which the player reads as an empty
+    // buffer and renders as a character collapsed onto the origin, silently.
+    const { buffer } = packGameBin(gameWith([skinned(true)]));
+    const game = unpackGameBin(buffer);
+    const json = JSON.stringify(game.manifest);
+    expect(json.includes('"0":')).toBe(false);
+    expect(json.includes('jointIndices"')).toBe(false);
+    // The skin's inverse-bind matrices are small enough to stay inline, but as a plain ARRAY.
+    const skin = (game.manifest.scenes.main.scene as any).children[0].model.skin;
+    expect(Array.isArray(skin.joints[0].inverseBindMatrix)).toBe(true);
+  });
+
+  it('is stamped with the contract that introduced the joint chunks', () => {
+    const { buffer } = packGameBin(gameWith([skinned(true)]));
+    expect(unpackGameBin(buffer).manifest.contract).toBe(PLAYER_CONTRACT);
+    expect(PLAYER_CONTRACT).toBeGreaterThanOrEqual(6);
+  });
+});

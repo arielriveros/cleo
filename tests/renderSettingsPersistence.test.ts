@@ -87,6 +87,14 @@ describe('RenderSettings survives save, publish and export', () => {
         ]) expect(declared, `${key} is not a persisted render setting`).toContain(key);
     });
 
+    it('does not persist which host is allowed to meter', () => {
+        // `exposureMeteringAllowed` is view state, like `debugView`: the editor suppresses metering on
+        // preview tabs, and that must not be written into the project or a scene saved from a material
+        // tab would come back with auto-exposure disabled.
+        expect(serializedKeys()).not.toContain('exposureMeteringAllowed');
+        expect(interfaceKeys()).not.toContain('exposureMeteringAllowed');
+    });
+
     it('does not persist the debug channel', () => {
         // `debugView` blits an internal buffer instead of the frame. It is a way of LOOKING at a scene,
         // not part of it, and a published game that opened on the normal channel would be a bug.

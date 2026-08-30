@@ -108,6 +108,11 @@ export interface BundleGeometry extends Partial<Record<GeometryAttr, ChunkRef & 
    * The BYTES still dedupe across the two; only the record differs.
    */
   nested?: true
+  /**
+   * The source attributes were typed arrays (what `Model.serialize` writes), so inflate must rebuild them
+   * that way. The twin of `nested`, and mutually exclusive with it — a nested tuple shape is always plain.
+   */
+  typed?: true
 }
 
 /** A blob chunk that carries an image, so inflate can rebuild the exact data URI it came from. */

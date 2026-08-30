@@ -5,6 +5,7 @@ import { resolveMaterialRefs, applyMaterialAsset, applyMaterialAssets, serialize
 import { skinnedModelJsonOf as skinnedJson, flattenModelAsset, nodeJsonTrs, modelTransformDelta } from './modelClips'
 import type { AnimationAsset } from './animationAssets'
 import { applyModelAnimations } from './animationResolve'
+import { deepClone } from './deepClone'
 
 // MODEL assets: a named, thumbnailed subtree of ModelNodes sharing a material, with optional LOD levels
 // and a cull distance. Vocabulary: a "mesh" is the GPU-side structure, internal to the engine and never
@@ -155,6 +156,14 @@ export type ModelAsset = {
    * skeleton at instantiation. Clips embedded directly in `nodeJson` also still play.
    */
   animationIds?: string[]
+  /**
+   * Present only on a GENERATED LOD level: which model it was decimated from, and which level it is.
+   *
+   * Provenance, not a reference — `lods` on the source is what actually wires the levels together. This
+   * exists so regenerating a model's LODs can UPDATE the assets it minted last time instead of adding a
+   * second set on every press, which would fill the library with orphans.
+   */
+  lodSource?: { modelId: string; level: number }
 }
 
 /**
@@ -404,11 +413,70 @@ function isIdentityTransform(node: Node): boolean {
 }
 
 /**
- * Turn one imported subtree into a separate ModelAsset per sub-mesh (the import modal's "Separate parts"
- * option), each re-centred on its own bounds so it drops where the user points.
+ * Sit `child` on its holder's origin, centred on its own bounds, so the asset drops where the user points.
  *
  * Re-centre with the NODE TRANSFORM, never by translating vertices: a skinned model's vertices are bound
  * to its skeleton. Rotation and scale are kept — only the position (the file's layout) is dropped.
+ * `holder` must be at the origin carrying only `rootScale`, which is what makes the division below the
+ * whole world→local conversion.
+ */
+function recenterOnBounds(holder: Node, child: Node, rootScale: ArrayLike<number>): void {
+  child.setPosition([0, 0, 0]) // drop the file's authored layout; keep rotation + scale
+  holder.updateTransforms()
+
+  // getBoundingSphere is WORLD space; the holder is at the origin with only a scale, so dividing that
+  // scale back out converts the centre to the child's local space.
+  const center = child.getBoundingSphere().center
+  const sx = rootScale[0] || 1, sy = rootScale[1] || 1, sz = rootScale[2] || 1
+  child.setPosition([-center[0] / sx, -center[1] / sy, -center[2] / sz])
+  holder.updateTransforms()
+}
+
+/**
+ * Centre a holder's SEVERAL children on their combined bounds — the multi-node case of
+ * {@link recenterOnBounds}, reached when a group's parts could not be merged into one mesh. Every child
+ * moves by the same delta so the layout the file gave them survives.
+ *
+ * The bounds are the box around the members' world bounding spheres, which is enough to put the asset's
+ * origin in the middle of it; the exact enclosing sphere (combineBounds) lives in modelThumbnails and
+ * pulling it in here would mean a GL-side import in a module the headless tests load.
+ */
+function recenterGroupOnBounds(holder: Node, children: Node[], rootScale: ArrayLike<number>): void {
+  holder.updateTransforms()
+
+  let minX = Infinity, minY = Infinity, minZ = Infinity
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+  for (const child of children) {
+    const s = child.getBoundingSphere()
+    if (!s || !isFinite(s.radius)) continue
+    minX = Math.min(minX, s.center[0] - s.radius); maxX = Math.max(maxX, s.center[0] + s.radius)
+    minY = Math.min(minY, s.center[1] - s.radius); maxY = Math.max(maxY, s.center[1] + s.radius)
+    minZ = Math.min(minZ, s.center[2] - s.radius); maxZ = Math.max(maxZ, s.center[2] + s.radius)
+  }
+  if (!isFinite(minX)) return
+
+  // World → the children's local space: the holder is at the origin carrying only rootScale.
+  const sx = rootScale[0] || 1, sy = rootScale[1] || 1, sz = rootScale[2] || 1
+  const dx = (minX + maxX) / 2 / sx, dy = (minY + maxY) / 2 / sy, dz = (minZ + maxZ) / 2 / sz
+  for (const child of children) {
+    const p = child.position
+    child.setPosition([p[0] - dx, p[1] - dy, p[2] - dz])
+  }
+  holder.updateTransforms()
+}
+
+/** A holder Node carrying the import root's scale, ready to receive sub-meshes destined for one asset. */
+function assetHolder(name: string, rootScale: ArrayLike<number>): Node {
+  const holder = new Node(name)
+  // normalizeRootScale scales a SKINNED subtree through the root's transform, so a child pulled out of
+  // that subtree loses its normalization without this.
+  holder.setScale([rootScale[0], rootScale[1], rootScale[2]])
+  return holder
+}
+
+/**
+ * Turn one imported subtree into a separate ModelAsset per sub-mesh (the import modal's "Separate parts"
+ * option), each re-centred on its own bounds so it drops where the user points.
  */
 export async function separateSubModels(
   root: Node,
@@ -423,24 +491,70 @@ export async function separateSubModels(
     const child = children[i]
     const name = child.name?.trim() || `${bundleName}_${i + 1}`
 
-    const holder = new Node(name)
-    // normalizeRootScale scales a SKINNED subtree through the root's transform, so a separated skinned
-    // child loses its normalization without this.
-    holder.setScale([rootScale[0], rootScale[1], rootScale[2]])
-
-    child.setPosition([0, 0, 0]) // drop the file's authored layout; keep rotation + scale
+    const holder = assetHolder(name, rootScale)
     holder.addChild(child)
-    holder.updateTransforms()
-
-    // getBoundingSphere is WORLD space; the holder is at the origin with only a scale, so dividing that
-    // scale back out converts the centre to the child's local space.
-    const center = child.getBoundingSphere().center
-    const sx = rootScale[0] || 1, sy = rootScale[1] || 1, sz = rootScale[2] || 1
-    child.setPosition([-center[0] / sx, -center[1] / sy, -center[2] / sz])
-    holder.updateTransforms()
+    recenterOnBounds(holder, child, rootScale)
 
     const materialId = materialIdOfChild.get(child)
     assets.push(flattenModelAsset(await buildModelAsset(holder, materialId ? [materialId] : [], '')))
+  }
+
+  return assets
+}
+
+/**
+ * Turn one imported subtree into a ModelAsset per GROUP of sub-meshes — the general case of which
+ * {@link separateSubModels} (a group per part) and {@link mergeSubModels} (one group of everything) are
+ * the two ends. Used when the import modal's separate + merge toggles are BOTH on and the user has
+ * partitioned the parts (see utils/submeshGroups).
+ *
+ * Each group's members are merged into a single mesh carrying one submesh per material. A group the
+ * merge rejects — mixed material types, mixed opaque/transparent, different skeletons, a part with its
+ * own transform — still becomes ONE asset, just with its parts as separate nodes; the reason is logged
+ * by mergeSubModels.
+ *
+ * `groups[].parts` index into `children`; callers must validate them (isValidGrouping) first.
+ */
+export async function groupSubModels(
+  root: Node,
+  children: ModelNode[],
+  bundleName: string,
+  groups: { name: string; parts: number[] }[],
+  materialIdOfChild: Map<ModelNode, string>,
+  materialAssetOfChild: Map<ModelNode, MaterialAsset>,
+): Promise<ModelAsset[]> {
+  const assets: ModelAsset[] = []
+  const rootScale = root.scale
+
+  for (let g = 0; g < groups.length; g++) {
+    const group = groups[g]
+    // File order, not drag order: merged geometry is concatenated in the order the parts are passed.
+    const members = [...group.parts].sort((a, b) => a - b).map(i => children[i]).filter(Boolean)
+    if (!members.length) continue
+
+    const name = group.name?.trim() || `${bundleName}_${g + 1}`
+    const holder = assetHolder(name, rootScale)
+    for (const child of members) holder.addChild(child)
+    holder.updateTransforms()
+
+    // Merge BEFORE re-centring: mergeSubModels requires its children at identity, and re-centring is
+    // exactly what breaks that. On a blocker it returns null and the group keeps its parts as nodes.
+    const merged = members.length > 1 ? mergeSubModels(holder, members, materialAssetOfChild) : null
+    const content = merged ?? members
+
+    // One node collapses onto the holder's origin; several must keep their relative layout, so every
+    // part shifts by the SAME delta instead of each centring on itself.
+    if (content.length === 1) recenterOnBounds(holder, content[0], rootScale)
+    else recenterGroupOnBounds(holder, content, rootScale)
+
+    // Only the materials THIS asset's mesh uses, deduped but in submesh order.
+    const ids: string[] = []
+    for (const child of members) {
+      const id = materialIdOfChild.get(child)
+      if (id && !ids.includes(id)) ids.push(id)
+    }
+
+    assets.push(flattenModelAsset(await buildModelAsset(holder, ids, '')))
   }
 
   return assets
@@ -462,11 +576,11 @@ export function instantiateModelAsset(asset: ModelAsset, parent: Node, materials
         distances: [0, ...lods.map(l => l.distance)],
         cullDistance: asset.cullDistance ?? 0,
         children: [
-          JSON.parse(JSON.stringify(asset.nodeJson)),
-          ...lods.map(l => JSON.parse(JSON.stringify(l.nodeJson))),
+          deepClone(asset.nodeJson),
+          ...lods.map(l => deepClone(l.nodeJson)),
         ],
       } as any
-    : JSON.parse(JSON.stringify(asset.nodeJson))
+    : deepClone(asset.nodeJson)
 
   if (materials) resolveMaterialRefs(clone, materials)
   const idMap = new Map<string, string>()

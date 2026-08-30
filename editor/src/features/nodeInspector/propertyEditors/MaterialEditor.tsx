@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ModelNode, Material, CustomMaterial } from 'cleo';
+import { ModelNode, Material, CustomMaterial, TERRAIN_RELIEF_ENABLED } from 'cleo';
 import { useEventBus } from '../../EventBusContext';
 import { vec3ToHex } from '../../../utils/UtilFunctions';
 import { newCustomMaterial } from '../../../utils/customMaterials';
@@ -39,7 +39,6 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   // Parallax occlusion depth; inert without a Height map.
   const [dispScale, setDispScale] = useState<number>(
     (material as any).displacementScale ?? material.properties.get('dispScale') ?? 0.05);
-  const [reliefDetail, setReliefDetail] = useState<number>((material as any).reliefDetail ?? 1);
   // Whether the Height map is really a DEPTH map (white = deep), the convention most downloaded PBR
   // packs ship. Nothing can detect this from the bytes, and the wrong answer inverts the relief.
   const [invertHeight, setInvertHeight] = useState<boolean>(
@@ -193,9 +192,9 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   // be based on any material type and reads its height from this slot, which is the same reason Basic
   // and Blinn-Phong carry a Height texture slot at all. The Mode row is the part that is terrain-only.
   // -------------------------------------------------------------------------------------------
-  // A terrain layer's height map always displaces the terrain's vertices; an ordinary material's always
-  // marches. There is nothing to choose, so the rows below are gated on the material KIND.
-  const isDisplace = isTerrain;
+  // Terrain and ordinary materials both MARCH their height map now, with the same unit and the same
+  // meaning, so there is nothing here to gate on the material kind any more. A terrain layer briefly
+  // displaced the terrain's own vertices instead, and these rows forked on that.
   const setHeightProp = (key: string, value: any) => {
     // Terrain layers keep their height settings on the TerrainMaterial itself rather than in the
     // properties map: Terrain._writeLayerUniforms fans each one out to `u_<key>{i}`, one per painted
@@ -205,47 +204,38 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     markMaterialDirty();
   };
 
-  const heightSection = (
+  // HIDDEN FOR TERRAIN while `TERRAIN_RELIEF_ENABLED` is off. The engine writes a depth of zero for a
+  // terrain layer, so Depth, Invert and the Height slot would all be controls that change nothing —
+  // which is worse than their absence, because the only way to discover it is to author with them and
+  // wonder why the ground never moves. A mesh material keeps every one of them; only terrain is off.
+  //
+  // The height map is still read for the height-aware layer blend, so it is not that the slot is
+  // meaningless on terrain — it is that the RELIEF half of it is switched off. When the flag comes back
+  // this returns with it and nothing else here changes.
+  const showHeight = !isTerrain || TERRAIN_RELIEF_ENABLED;
+
+  const heightSection = showHeight ? (
     <Section title='Height'>
       <PropertyTable columns={['40%', '60%']}>
-        {/* Each mode's natural unit, because they are different quantities. On an ordinary material the
-            march offsets texture coordinates and has no world scale, so depth is UV units and a tiled
-            surface divides it. On terrain it moves vertices, so it is WORLD METRES — 0.03 is three
-            centimetres of gravel on any terrain, at any size, at any tiling.
+        {/* ONE unit everywhere: a fraction of one texture repeat. The march offsets texture
+            coordinates, so a repeat is the only length either surface knows about, and that is what
+            makes the same material read the same on a mesh and on a terrain layer.
 
-            It used to be tiled uv on terrain too, converted by `size / tiling` to match the march. That
-            put this slider's whole range at 0..5 METRES on a default landscape with a 5 cm minimum step,
-            which is why height maps came out as cliffs and why centimetre relief was not expressible. */}
-        <PropertyRow label={isTerrain ? 'Depth (m)' : 'Depth'}>
+            It was briefly WORLD METRES on terrain, because a layer's relief was baked into the terrain's
+            vertices and a bake works in metres. One authored number driving two mechanisms forced a unit
+            that meant nothing to the texture: 6 cm on a 3.2 m brick is 2% of the feature where the same
+            map on a mesh gets 24%, so terrain looked flat beside an identical material. The Terrain
+            Material inspector quotes the repeat in metres beside Tiling, which is what turns this
+            fraction back into a distance. */}
+        <PropertyRow label='Depth'>
           <Slider min={0} max={0.5} step={0.005} value={dispScale}
                   onChange={(v) => { setHeightProp('dispScale', v); setDispScale(v); }} />
         </PropertyRow>
-        {/* Terrain relief is carried by TWO mechanisms and Depth drives both: the vertices take
-            everything coarser than one vertex spacing, the parallax march takes the rest. The march's
-            offset is `depth * tan(view)`, which is ZERO looking straight down - about one texel of the
-            height map a metre from the camera against thirteen at thirteen metres - so the ground at
-            your feet reads flat no matter how the map is authored. Deepening enough to fix that also
-            deepens the VERTICES by the same factor, which is how a rock texture turns into cliffs.
-            This scales only the marched half, so the close ground can be brought up while the coarse
-            relief stays at the centimetres it was authored at. It cannot help beyond the distance where
-            the residual collapses - there is nothing left there for it to scale. */}
-        {isTerrain && (
-          <PropertyRow label='Relief detail'>
-            {/* Up to 8x, not 4x: a coarsely tiled layer's relief is shallow in PROPORTION to its
-                features, and the deficit is the repeat size. At tiling 31 on a 400 m terrain a brick is
-                3.2 m wide and an authored 6 cm is 2% of it, against 24% for the same texture on a mesh -
-                a 12x shortfall that a 4x ceiling cannot reach. Raising the tiling is the real fix (the
-                repeat is quoted in the Terrain Material inspector); this is for when the tiling is
-                already what the layer needs. */}
-            <Slider min={0.25} max={8} step={0.25} value={reliefDetail}
-                    onChange={(v) => { setHeightProp('reliefDetail', v); setReliefDetail(v); }} />
-          </PropertyRow>
-        )}
         {/* A height map is white at the PEAKS. A depth map - what `*_disp.png` in most PBR packs
             actually is - is white in the CREVICES. They are the same bytes, so nothing can tell them
             apart; getting it wrong turns brick into mortar rather than looking slightly off. If the
             relief reads inside out, this is the switch. */}
-        <PropertyRow label='Depth map' divider={isDisplace || !isTerrain}>
+        <PropertyRow label='Depth map' divider={!isTerrain}>
           <Toggle label='Invert' checked={invertHeight}
                   onChange={(c) => { setHeightProp('invertHeight', c); setInvertHeight(c); }} />
         </PropertyRow>
@@ -258,7 +248,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
             Off by default and deliberately not inferred: the test is against the 0..1 uv rectangle,
             which is a real border only on a surface mapped 0..1 - a cube face, a quad. Terrain is
             tiled, so it never gets this row at all. */}
-        {!isDisplace && !isTerrain &&
+        {!isTerrain &&
         <PropertyRow label='Silhouette' divider={false}>
           <Toggle label='Clip at UV border' checked={clipSilhouette} onChange={(c) => {
             model.material.properties.set('clipSilhouette', c);
@@ -267,26 +257,25 @@ export default function MaterialEditor(props: {node: ModelNode}) {
           }} />
         </PropertyRow>}
 
-        {/* The honest limit, on the one surface where it bites. Terrain vertex spacing is
-            `size / (resolution - 1)` - 0.78 m at the default 129 over 100 m - while a layer height map
-            tiles 20-50x, putting one tile period at 2-5 m. That is 3-6 vertices per tile: terrain
-            displacement can carry only the LOWEST frequencies of a height map, and asking it for fine
-            detail will alias. Raising the terrain resolution is the lever; parallax is still the right
-            tool for the detail, which is why the modes are per layer rather than one switch. */}
-        {isDisplace &&
+        {/* The limit that IS still real, and the one that replaced it. Terrain no longer carries a
+            layer's relief in its vertices, so vertex spacing does not bound it — the march does, and a
+            march has no silhouette and fades out under minification. What bounds it instead is the
+            texture's world scale: depth is a fraction of a repeat, and at a coarse tiling a repeat is
+            metres wide, so the same authored number is a very different distance. The Terrain Material
+            inspector quotes the repeat beside Tiling for exactly that reason. */}
+        {isTerrain &&
         <PropertyRow label='Note' divider={false}>
           <span className='text-muted text-xs'>
-            Terrain relief is real geometry, so nothing finer than about twice the vertex spacing can
-            appear — the Landscape inspector reports that figure. Detail below it (individual pebbles,
-            twigs) is filtered out rather than shrunk, so a height map reads as its broad shape.
-            Resolution and Relief detail are the levers. Physics follows the sculpted surface, so a
-            displaced terrain is not walked on.
+            Depth is a fraction of one texture repeat, the same as on any mesh — so this material reads
+            the same on both. The Terrain Material inspector shows what that is in metres. Relief is
+            drawn per fragment: it shades and self-shadows but has no silhouette, and physics follows
+            the sculpted surface.
           </span>
         </PropertyRow>}
 
       </PropertyTable>
     </Section>
-  );
+  ) : null;
 
   const texSlot = (label: string, tex: string) => (
     <div className='flex flex-col items-center gap-1'>
@@ -332,7 +321,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 {/* Inert on this material type — only the PBR chunks carry the parallax march. It is
                     here because a TERRAIN paint layer can be based on any material type and reads its
                     height from this one slot, for the height-aware blend. */}
-                {texSlot('Height', 'displacementMap')}
+                {showHeight && texSlot('Height', 'displacementMap')}
               </div>
             </Section>
             {heightSection}
@@ -362,7 +351,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 {/* Inert on this material type — only the PBR chunks carry the parallax march. It is
                     here because a TERRAIN paint layer can be based on any material type and reads its
                     height from this one slot, for the height-aware blend. */}
-                {texSlot('Height', 'displacementMap')}
+                {showHeight && texSlot('Height', 'displacementMap')}
               </div>
             </Section>
             {heightSection}
@@ -416,7 +405,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 {texSlot('Normal', 'normalMap')}
                 {texSlot('Occlusion', 'occlusionMap')}
                 {texSlot('Emissive', 'emissiveMap')}
-                {texSlot('Height', 'displacementMap')}
+                {showHeight && texSlot('Height', 'displacementMap')}
               </div>
             </Section>
             {heightSection}

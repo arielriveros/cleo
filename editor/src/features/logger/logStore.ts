@@ -69,6 +69,9 @@ function preview(value: any): string {
   if (value === null || typeof value !== 'object') return String(value);
   try {
     const name = value.constructor?.name ?? 'Object';
+    // A typed array is summarised, never keyed: `Object.keys` on one materialises a string PER ELEMENT
+    // before the slice can drop them, so logging a vertex buffer would freeze the editor outright.
+    if (ArrayBuffer.isView(value)) return `${name}(${(value as any).length})`;
     return `${name} ${Object.keys(value).slice(0, 12).join(' ')}`;
   } catch {
     return '';

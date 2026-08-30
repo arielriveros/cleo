@@ -14,6 +14,8 @@ import {
 import { cryptoRandomId } from '../../utils/ids'
 import { deleteTextures } from '../../utils/textureStore'
 import { AssetKind, KIND_LABEL } from '../../utils/vfs'
+import { deepClone } from '../../utils/deepClone'
+import { estimateBytes } from '../../utils/assetSize'
 
 // One adapter per asset kind, so the file-manager event bridge never has to branch five ways.
 
@@ -72,10 +74,6 @@ export type AssetDeps = {
 
 type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | AnimationAsset | TilesetAsset | SceneMeta
 
-function deepClone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value))
-}
-
 /** The asset record behind an entry, or undefined. Textures have no record — they return undefined. */
 export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsset | undefined {
   switch (kind) {
@@ -108,7 +106,9 @@ export function sizeOfAsset(kind: AssetKind, id: string, deps: AssetDeps): numbe
   }
   const asset = findAsset(kind, id, deps)
   if (!asset) return undefined
-  try { return JSON.stringify(asset).length } catch { return undefined }
+  // Walked, not stringified: a model asset carries its vertex buffers, and building the text of one is
+  // minutes of work ending in `RangeError: Invalid string length` — for a number on a card. See assetSize.
+  try { return estimateBytes(asset) } catch { return undefined }
 }
 
 /** The preview image for a card: the asset's rendered thumbnail, or the texture's own image. */

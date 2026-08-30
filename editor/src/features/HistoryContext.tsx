@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { HistoryManager, Node, Scene, parseNodeJson } from 'cleo'
 import type { HistoryEntry, SceneChange, NodePlacement } from 'cleo'
 import { useCleoEngine } from './EngineContext'
+import { sameSnapshot, shareBuffers } from '../utils/snapshotDiff'
 
 // Undo/redo for the editor. One HistoryManager PER TAB, not one shared stack: each asset tab owns its own
 // throwaway Scene, and a single stack would undo a material edit into the scene tab's graph.
@@ -74,8 +75,19 @@ export function HistoryProvider({ children }: { children: React.ReactNode }) {
   const sceneRef = useRef<Scene>(editorScene)
   sceneRef.current = editorScene
 
-  const snapshot = useCallback(async (node: Node): Promise<any | null> => {
-    try { return await node.serialize() } catch { return null }
+  /**
+   * A node's subtree, with every buffer that has not changed since `against` replaced by that snapshot's
+   * own array object.
+   *
+   * `serialize()` COPIES each vertex buffer, so without the sharing pass a history over a model holds one
+   * copy of the mesh per entry — 200 entries deep, 200 meshes. It also makes the comparison below hit an
+   * identity check instead of walking millions of floats.
+   */
+  const snapshot = useCallback(async (node: Node, against?: any): Promise<any | null> => {
+    try {
+      const json = await node.serialize()
+      return against ? shareBuffers(json, against) : json
+    } catch { return null }
   }, [])
 
   useEffect(() => {
@@ -83,7 +95,8 @@ export function HistoryProvider({ children }: { children: React.ReactNode }) {
     const node = sceneRef.current.getNodeById(selectedNode)
     if (!node) return
     let cancelled = false
-    void snapshot(node).then(json => { if (!cancelled && json) baselineRef.current.set(node.id, json) })
+    const previous = baselineRef.current.get(node.id)
+    void snapshot(node, previous).then(json => { if (!cancelled && json) baselineRef.current.set(node.id, json) })
     return () => { cancelled = true }
   }, [selectedNode, snapshot, activeTabId])
 
@@ -115,11 +128,13 @@ export function HistoryProvider({ children }: { children: React.ReactNode }) {
     if (!open) return
     const node = sceneRef.current.getNodeById(open.nodeId)
     if (!node) return
-    void snapshot(node).then(after => {
+    void snapshot(node, open.before).then(after => {
       if (!after) return
       baselineRef.current.set(open.nodeId, after)
       const before = open.before
-      if (JSON.stringify(before) === JSON.stringify(after)) return
+      // Structural compare, never a stringify: a model node's subtree carries its vertex buffers, so
+      // building the text of one costs minutes and eventually throws `RangeError: Invalid string length`.
+      if (sameSnapshot(before, after)) return
       managerFor(open.tabId).push({
         label: KIND_LABEL[open.kind] ?? 'Edit',
         time: Date.now(),

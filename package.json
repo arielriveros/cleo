@@ -26,6 +26,7 @@
     "terrain:decimate": "node --max-old-space-size=8192 tools/terrain/decimateTrees.mjs",
     "build:landscape": "node desktop/node_modules/electron/cli.js tools/terrain/buildLandscape.js",
     "naga:build": "node tools/naga-wasm/build.mjs",
+    "harness:pom": "node desktop/node_modules/electron/cli.js tools/harness/pomShots.js",
     "harness:mesh": "node desktop/node_modules/electron/cli.js tools/harness/meshCheck.js",
     "harness:pass": "node desktop/node_modules/electron/cli.js tools/harness/passCheck.js",
     "harness:lighting": "node desktop/node_modules/electron/cli.js tools/harness/lightingCheck.js",

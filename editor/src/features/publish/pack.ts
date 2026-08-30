@@ -129,6 +129,18 @@ function toFloats(input: any, stride: number): Float32Array {
 
 const EMPTY_F32 = new Float32Array(0);
 
+/** Turn every typed array left in a structure into a plain array, in place. @see plainifyBuffers use. */
+function plainifyBuffers(value: any, seen = new Set<object>()): void {
+  if (!value || typeof value !== 'object' || seen.has(value)) return;
+  seen.add(value);
+  const keys = Array.isArray(value) ? value.map((_, i) => i) : Object.keys(value);
+  for (const key of keys as any[]) {
+    const child = (value as any)[key];
+    if (ArrayBuffer.isView(child)) (value as any)[key] = Array.from(child as any);
+    else if (child && typeof child === 'object') plainifyBuffers(child, seen);
+  }
+}
+
 // Geometry dedup hashes the bytes it is about to write (hashBytes, chunkBlob.ts).
 
 /** Typed arrays for one geometry, before layout. */
@@ -205,9 +217,20 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
   };
 
   const internModelJson = (model: any): void => {
-    if (model && model.geometry && typeof model.geometry === 'object') {
+    if (!model || typeof model !== 'object') return;
+    if (model.geometry && typeof model.geometry === 'object') {
       model.geometryRef = intern(model.geometry);
       delete model.geometry;
+    }
+    // A skinned model's per-vertex bone data is 8 more floats a vertex — as big as positions+normals —
+    // and `Model.serialize` now writes it as a Float32Array, which JSON.stringify would render as
+    // `{"0":…}` and the player would read back as an empty buffer. Chunked, like terrain's grids.
+    for (const name of ['jointIndices', 'jointWeights'] as const) {
+      const value = model[name];
+      if (value && value.length > 0) {
+        model[`${name}Chunk`] = addChunk(toFloats(value, 4));
+        delete model[name];
+      }
     }
   };
 
@@ -283,6 +306,12 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
     geometries,
     textures,
   };
+
+  // Last line of defence before the manifest becomes text. Anything still holding a typed array —
+  // a skin's inverse-bind matrices, an animation sampler, a field added later — would stringify as
+  // `{"0":…}` and load back as nothing. Chunked payloads are already gone by now; what is left is small,
+  // so a plain array is the right shape for it.
+  plainifyBuffers(manifest);
 
   const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
   const blobStart = align4(PACK_HEADER_BYTES + manifestBytes.length);

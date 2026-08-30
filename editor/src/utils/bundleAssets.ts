@@ -20,6 +20,7 @@ import { base64ToBytes, bytesToBase64, bytesToDataUrl, parseBase64DataUri, defla
 import {
   ATTR_STRIDE, GEOMETRY_ATTRS, type BundleAssetIndex, type BundleData, type BundleGeometry,
 } from './bundle'
+import { isBinaryPayload } from './binaryPayload'
 
 /**
  * What a packed value looks like while it sits in the JSON.
@@ -34,9 +35,9 @@ import {
  */
 type Marker =
   | { $geo: string }
-  | { $f32: ChunkRef }
-  | { $f64: ChunkRef }
-  | { $idx: ChunkRef & { bits: 16 | 32 } }
+  | { $f32: ChunkRef; t?: 1 }
+  | { $f64: ChunkRef; t?: 1 }
+  | { $idx: ChunkRef & { bits: 16 | 32 }; t?: 1 }
   | { $b64: ChunkRef; z?: 1 }
   | { $url: ChunkRef; mime: string }
 
@@ -89,8 +90,19 @@ function toTuples(flat: ArrayLike<number>, stride: number): number[][] {
   return out
 }
 
-const isNumberArray = (v: any): v is number[] =>
-  Array.isArray(v) && v.length > 0 && typeof v[0] === 'number'
+/**
+ * A flat run of numbers, in either container. The view branch is load-bearing: `Model.serialize` writes
+ * joint attributes and skin matrices as `Float32Array` (see serializeGeometry in src/graphics/model.ts),
+ * and an `Array.isArray`-only guard silently skips them — they then fall through to `JSON.stringify` and
+ * land in the zip as `{"0":…}` text.
+ */
+const isNumberArray = (v: any): v is ArrayLike<number> =>
+  (Array.isArray(v) && v.length > 0 && typeof v[0] === 'number') ||
+  (ArrayBuffer.isView(v) && !(v instanceof DataView) && (v as any).length > 0)
+
+/** Whether a packed payload must be restored as a typed array to reproduce the original JSON. */
+const wasTyped = (v: any): 1 | undefined =>
+  ArrayBuffer.isView(v) && !(v instanceof DataView) ? 1 : undefined
 
 /**
  * The narrowest float array that holds `values` exactly.
@@ -104,9 +116,13 @@ function narrowest(values: ArrayLike<number>): Float32Array | Float64Array {
   return new Float32Array(values)
 }
 
-/** Every own key of an object or index of an array, so both can be walked by the same code. */
+/**
+ * Every own key of an object or index of an array, so both can be walked by the same code.
+ * A binary payload has no slots worth visiting — and `Object.keys` on a typed array would materialise one
+ * string per element. Anything in one has already been packed by the time the walk reaches it.
+ */
 const slotsOf = (v: any): (string | number)[] =>
-  Array.isArray(v) ? v.map((_, i) => i) : Object.keys(v)
+  isBinaryPayload(v) ? [] : Array.isArray(v) ? v.map((_, i) => i) : Object.keys(v)
 
 // ---------------------------------------------------------------------------------------------------
 // Packing
@@ -131,21 +147,24 @@ export async function packBundleAssets(bundle: BundleData): Promise<PackBundleRe
   const floats = (values: ArrayLike<number>): Marker => {
     const array = narrowest(values)
     const ref = writer.addInterned(array)
-    return array instanceof Float64Array ? { $f64: ref } : { $f32: ref }
+    const t = wasTyped(values)
+    return array instanceof Float64Array ? { $f64: ref, t } : { $f32: ref, t }
   }
 
   const indices = (values: ArrayLike<number>): Marker => {
     const array = toIndexArray(values)
-    return { $idx: { ...writer.addInterned(array), bits: array instanceof Uint32Array ? 32 : 16 } }
+    return { $idx: { ...writer.addInterned(array), bits: array instanceof Uint32Array ? 32 : 16 }, t: wasTyped(values) }
   }
 
   const internGeometry = (raw: any): string => {
     const record: BundleGeometry = {}
     let nested = false
+    let typed = false
     for (const name of GEOMETRY_ATTRS) {
       const source = raw[name]
       if (!source || source.length === 0) continue
       if (isNestedArray(source)) nested = true
+      if (wasTyped(source)) typed = true
       const flat = toFlat(source, ATTR_STRIDE[name])
       if (flat.length === 0) continue
       const array = narrowest(flat)
@@ -158,6 +177,8 @@ export async function packBundleAssets(bundle: BundleData): Promise<PackBundleRe
       record.indices = { ...writer.addInterned(array), bits: array instanceof Uint32Array ? 32 : 16 }
     }
     if (nested) record.nested = true
+    // Mutually exclusive with `nested` by construction: the nested tuple shape is only ever plain arrays.
+    else if (typed || wasTyped(raw.indices)) record.typed = true
 
     const key = JSON.stringify(record)
     const hit = geometryIds.get(key)
@@ -330,11 +351,15 @@ export async function inflateBundleAssets(
       const chunk = record[name] as (ChunkRef & { f64?: 1 }) | undefined
       if (!chunk) continue
       const flat = chunk.f64 ? readDoubles(chunk) : reader.floats(chunk)!
-      out[name] = record.nested ? toTuples(flat, ATTR_STRIDE[name]) : Array.from(flat)
+      // Copied out either way — `reader.floats` is a VIEW into the whole blob, so keeping it would pin
+      // the entire assets.bin in memory behind one attribute.
+      out[name] = record.nested ? toTuples(flat, ATTR_STRIDE[name])
+        : record.typed ? new Float32Array(flat)
+        : Array.from(flat)
     }
     if (record.indices) {
       const array = record.indices.bits === 32 ? reader.u32(record.indices)! : reader.u16(record.indices)!
-      out.indices = Array.from(array)
+      out.indices = record.typed ? new Uint32Array(array) : Array.from(array)
     }
     return out
   }
@@ -342,11 +367,14 @@ export async function inflateBundleAssets(
   /** The synchronous markers. `$b64` is handled separately — inflating it is async. */
   const restore = (marker: Marker): any => {
     if ('$geo' in marker) return restoreGeometry(marker.$geo)
-    if ('$f32' in marker) return Array.from(reader.floats(marker.$f32)!)
-    if ('$f64' in marker) return Array.from(readDoubles(marker.$f64))
+    // `t` says the value was a typed array before it was packed. Restoring the ORIGINAL container is the
+    // round-trip rule (see rule 3 at the top): a model's joint attributes are Float32Array, while an
+    // animation sampler and a baked foliage grid are plain arrays, and both must come back as they went.
+    if ('$f32' in marker) return marker.t ? new Float32Array(reader.floats(marker.$f32)!) : Array.from(reader.floats(marker.$f32)!)
+    if ('$f64' in marker) return marker.t ? new Float32Array(readDoubles(marker.$f64)) : Array.from(readDoubles(marker.$f64))
     if ('$idx' in marker) {
       const array = marker.$idx.bits === 32 ? reader.u32(marker.$idx)! : reader.u16(marker.$idx)!
-      return Array.from(array)
+      return marker.t ? new Float32Array(array) : Array.from(array)
     }
     if ('$url' in marker) return bytesToDataUrl(reader.bytes(marker.$url)!, marker.mime)
     return undefined

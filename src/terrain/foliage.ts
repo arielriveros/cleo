@@ -22,6 +22,36 @@ const DEFAULT_PARAMS: FoliageParams = { density: DEFAULT_FOLIAGE_DENSITY.billboa
 export const MAX_INSTANCES = 200000;
 
 /**
+ * Squared distance at which a cell should be culled, given whether it is currently drawn.
+ *
+ * The foliage distance cull is a step function: the frame a cell crosses it, the whole cell's instance
+ * count appears (or vanishes) at once. Undamped, a cell parked on the boundary flips every frame on
+ * sub-metre camera jitter and pays that cost repeatedly. The band is asymmetric in the cheap direction —
+ * appear at the threshold, disappear only past `threshold × hysteresis` — so the expensive transition
+ * (coming in) happens at the authored distance and the free one is what gets delayed.
+ *
+ * Lives here rather than in the renderer so it can be tested without a GL context; the per-cell LOD band
+ * a few lines below its call site has used the same ×0.9 shape all along.
+ */
+export function foliageCullLimitSq(maxD2: number, wasVisible: boolean, hysteresis: number): number {
+    if (!isFinite(maxD2)) return maxD2;
+    return wasVisible ? maxD2 * hysteresis * hysteresis : maxD2;
+}
+
+/**
+ * How many newly-visible cells to admit this frame, from `pending.length` waiting.
+ *
+ * `firstSight` — no cell of the layer was up last frame — means a scene load or the camera arriving at a
+ * new landscape. Budgeting there would not smooth a spike, it would fade the whole layer in over a
+ * second, so everything is admitted at once and the load cost is paid as it always was. The budget is for
+ * the steady state, where a moving camera crosses a few cell boundaries at a time.
+ */
+export function foliageAdmitCount(pendingCount: number, budget: number, firstSight: boolean): number {
+    if (firstSight || budget <= 0) return pendingCount;
+    return Math.min(budget, pendingCount);
+}
+
+/**
  * GPU buffers left behind by layers disposed with their terrain. The renderer's foliage pass only walks
  * LIVE landscapes, so this queue is the only way those buffers still reach a `destroy()`.
  */
@@ -60,6 +90,15 @@ export interface FoliageCell {
     glBuffer: RhiBuffer | null;        // renderer-owned; lazily created
     uploadedVersion: number;              // renderer's record of which layer.version is on the GPU
     lod: number;                          // current detail level (renderer-owned hysteresis memory)
+    /**
+     * Was this cell drawn last frame? Renderer-owned, like `lod`.
+     *
+     * Two jobs, both about the DISTANCE CULL being a step function. It is the state the cull's hysteresis
+     * band tests against, so a cell hovering on the boundary cannot flip in and out on sub-metre camera
+     * jitter; and it is how the renderer tells a cell that is merely still visible from one that is
+     * newly visible and therefore subject to the per-frame admission budget.
+     */
+    visible: boolean;
 }
 
 /** One detail level of a mesh foliage layer: the sub-mesh models drawn per instance (transforms baked
@@ -144,7 +183,16 @@ export class FoliageLayer {
     // Spatial grid over the instances (world XZ), rebuilt on scatter/erase. Cell world-unit size:
     // larger = fewer draw calls but looser culling.
     public cells: FoliageCell[] = [];
-    public cellSize = 32;
+    /**
+     * Grid cell size for culling and instance bucketing.
+     *
+     * MUST match the renderer's `_foliageCellSize`. The renderer reconciles any mismatch on its first
+     * frame (`layer.cellSize !== this._foliageCellSize` -> `setCellSize`), and that call is a full
+     * `_rebuild()` over every instance plus a re-upload of every cell buffer — so a default that differs
+     * buys a guaranteed hitch on the first frame after every scene load. `deserialize` restores the
+     * stored value for the same reason.
+     */
+    public cellSize = 13;
 
     // Whether the (static) per-vertex mesh + VAO have been uploaded (set by the renderer's foliage pass).
     public initialized = false;
@@ -514,7 +562,12 @@ export class FoliageLayer {
     private _instanceExtent(): number {
         let e = 0;
         for (const m of this.levels[0].models) {
-            const b = m.geometry.bvh.bounds;
+            // `boundingBox`, NEVER `bvh.bounds`: reading `bvh` force-builds the whole hierarchy over the
+            // prototype's triangles (geometry.ts warns about this twice). For a heavy tree across several
+            // prototypes that is a multi-hundred-millisecond hitch, and it is re-paid on every prototype
+            // refresh and every brush stroke, because _applyMeshPrototype allocates fresh Model objects
+            // and discards the memoised hierarchy. The sibling _prototypeFootprint already does this.
+            const b = m.geometry.boundingBox;
             e = Math.max(e,
                 Math.abs(b.min[0]), Math.abs(b.max[0]),
                 Math.abs(b.min[1]), Math.abs(b.max[1]),
@@ -565,6 +618,7 @@ export class FoliageLayer {
                 max: [maxX + extent, maxY + extent, maxZ + extent],
                 glBuffer: null,
                 uploadedVersion: -1,
+                visible: false,
                 lod: 0,
             });
         }
@@ -603,6 +657,7 @@ export class FoliageLayer {
                 ? { textureId: this.billboardTextureId, distance: this.billboardDistance } : undefined,
             cullDistance: this.cullDistance > 0 ? this.cullDistance : undefined,
             castShadows: this.castShadows || undefined,
+            cellSize: this.cellSize,
             instances: btoa(bin),
         };
     }
@@ -624,6 +679,10 @@ export class FoliageLayer {
             layer._applyMeshPrototype(json);
         }
         layer.castShadows = !!json.castShadows;
+        // Restored BEFORE the instance rebuild below: setting it after would bucket every instance at the
+        // default size and leave the renderer to notice the mismatch and rebuild the whole grid again on
+        // its first frame. A layer saved before this was persisted keeps whatever default it loads with.
+        if (Number(json.cellSize) > 0) layer.cellSize = Number(json.cellSize);
         // Absent on anything saved before layers had a stable key; the name is what it was filed under
         // then, and Terrain migrates it onto the rule's key the first time it resolves one.
         layer.key = json.key ?? json.name;

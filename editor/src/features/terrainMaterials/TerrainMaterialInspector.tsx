@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import {
   Node, ModelNode, TerrainMaterial, TerrainFoliageRule, Model, TextureManager, Logger,
   DEFAULT_FOLIAGE_DENSITY, FOLIAGE_DENSITY_UNIT, MAX_INSTANCES,
-  vertsPerRepeat, CARVE_VERTS_PER_REPEAT,
 } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
@@ -47,6 +46,20 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
     Array.from(TextureManager.Instance.textures.keys()).filter(id => !id.startsWith('__editor__') && !id.startsWith('__debug__')),
     [isTerrain])
 
+  // ABOVE the `isTerrain` guard below, and it has to be: this is a hook, and the guard returns early.
+  // With it underneath, a render where `isTerrain` was false ran six hooks and the next one — after the
+  // panel had a terrain material to show — ran seven, which is the "Rendered more hooks than during the
+  // previous render" crash. `tm?.tiling` rather than `mat.tiling` for the same reason: `mat` is the
+  // non-null alias that only exists past the guard.
+  //
+  // The active landscape decides what a tiling number means in metres; without one, quote the default
+  // the Landscape panel creates so the figure is never silently absent. The tiling is in the deps but
+  // not read: it is the re-render this panel already causes on every edit, and reusing it keeps the
+  // lookup refreshing as landscapes come and go without a subscription of its own.
+  const landscape = useMemo(() => {
+    for (const l of editorScene.landscapes) return l.terrain
+    return null
+  }, [editorScene, tm?.tiling])
   const changed = () => { refreshTerrainMaterialPreview(); eventEmitter.emit('SCENE_CHANGED'); rerender() }
 
   const label = 'text-xs text-slate-300'
@@ -124,25 +137,12 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
     changed()
   }
 
-  // The active landscape decides what a tiling number means in metres; without one, quote the default
-  // the Landscape panel creates so the figure is never silently absent. `mat.tiling` is in the deps but
-  // not read: it is the re-render this panel already causes on every edit, and reusing it keeps the
-  // lookup refreshing as landscapes come and go without a subscription of its own.
-  const landscape = useMemo(() => {
-    for (const l of editorScene.landscapes) return l.terrain
-    return null
-  }, [editorScene, mat.tiling])
   const landscapeSize = landscape?.size ?? ESTIMATE_SIZE
   const repeatMetres = landscapeSize / Math.max(mat.tiling, 0.01)
-  const relativeDepth = mat.textures.get('displacementMap')
-    ? mat.displacementScale / Math.max(repeatMetres, 1e-6) : null
-  // Whether the geometry half reproduces the texture's own features as ground shape is decided by the
-  // vertices across one repeat, which `displaceSplitLod` already computes to place the split. Read from
-  // there rather than re-derived from the two lengths above, so the hint and the bake agree by
-  // construction.
-  const perRepeat = landscape
-    ? vertsPerRepeat(mat.tiling, landscape.resolution, landscape.densityFor()) : 0
-  const carvesTerrain = relativeDepth !== null && perRepeat > CARVE_VERTS_PER_REPEAT
+  // The depth half of this readout is gone with `TERRAIN_RELIEF_ENABLED`: quoting a relief depth for a
+  // march that is switched off is exactly the kind of number that sends someone hunting for a bug. The
+  // repeat itself still earns its place — it is the only thing that turns a tiling COUNT into a size an
+  // author can picture, and tiling still drives every layer texture.
 
   return (
     <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-y-auto'>
@@ -163,9 +163,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
         </div>}
 
       {/* Derived here rather than in the JSX so the arithmetic is readable: a repeat is
-          `size / tiling` metres, and the vertex grid starts carving the texture once a repeat spans
-          more than a few vertices. `Terrain.densityFor()` owns the spacing, so it is read rather than
-          re-derived. */}
+          `size / tiling` metres, and depth is a fraction of that repeat. */}
       <Collapsable title='Terrain blend'>
         <div className='p-2 space-y-2'>
           <div className='flex items-center justify-between'>
@@ -174,23 +172,12 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
             <input type='number' className={num} min={0.01} step={1} value={mat.tiling}
                    onChange={e => { mat.tiling = Math.max(0.01, Number(e.target.value)); changed() }} />
           </div>
-          {/* THE NUMBER NOBODY COULD SEE, and the one that decides whether relief reads at all.
-              Tiling is a repeat COUNT across the whole terrain, so what it means in metres depends on a
-              size that is edited in a different panel. At 31 across 400 m one repeat is 12.9 m — a brick
-              in a brick texture is then over three metres wide, 6 cm of depth is 2% of it, and the
-              relief looks flat next to the identical map on a mesh (whose uv repeats about every metre,
-              making the same depth ~24% of a brick). Worse, once a repeat is wide enough for the vertex
-              grid to resolve it, the geometry half starts carving the TEXTURE into terrain and each
-              brick becomes a real plateau. Both were invisible until derived by hand. */}
+          {/* THE NUMBER NOBODY COULD SEE. Tiling is a repeat COUNT across the whole terrain, so what
+              it means in metres depends on a size edited in a different panel: 31 across 400 m is a
+              12.9 m repeat, which makes a brick in a brick texture over three metres wide. Nothing
+              anywhere said so, and it is the figure that decides whether a texture reads at all. */}
           <Hint>
             One repeat = <b>{repeatMetres.toFixed(2)} m</b> across a {landscapeSize} m terrain
-            {relativeDepth !== null && <> · depth is <b>{(relativeDepth * 100).toFixed(1)}%</b> of a
-              repeat{relativeDepth < 0.02 && <>, which reads as <b>flat</b> — the march offsets the same
-              centimetres a mesh does, but against a feature this wide they are invisible. Raise Tiling
-              until this passes ~5%.</>}</>}
-            {carvesTerrain && <> · <b>{perRepeat.toFixed(0)} vertices span one repeat</b>, so the
-              height map is shaping the ground itself and each feature becomes a real plateau — raise
-              Tiling until it does not.</>}
           </Hint>
           <div className='flex items-center justify-between'>
             <span className={label}>Auto height/slope</span>

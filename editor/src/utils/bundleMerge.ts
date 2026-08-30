@@ -11,6 +11,8 @@ import type { ModelAsset } from './models'
 import type { AnimationAsset } from './animationAssets'
 import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
+import { deepClone } from './deepClone'
+import { isBinaryPayload } from './binaryPayload'
 
 // Pure merge logic for importing a bundle alongside an existing project (the "Merge", not "Replace",
 // path). An imported id that collides with a local one is re-minted, and every cross-reference to it is
@@ -75,10 +77,14 @@ const sub = (m: Map<string, string>, v: any): any => (typeof v === 'string' && m
  */
 export function remapDeep(obj: any, r: Remaps): void {
   if (!obj || typeof obj !== 'object') return
+  // Vertex buffers carry no ids. Skipping them is what keeps a merge from walking every float in the
+  // project — and from calling Object.keys on a typed array. See utils/binaryPayload.
+  if (isBinaryPayload(obj)) return
   if (Array.isArray(obj)) { obj.forEach(o => remapDeep(o, r)); return }
 
   for (const key of Object.keys(obj)) {
     const val = obj[key]
+    if (isBinaryPayload(val)) continue
     if (key === 'textures' && val && typeof val === 'object' && !Array.isArray(val)) {
       for (const slot of Object.keys(val)) val[slot] = sub(r.tex, val[slot])
       continue
@@ -165,11 +171,12 @@ function uniqueName(base: string, taken: Set<string>): string {
 }
 
 export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
-  // Deep-clone: the caller may still hold the parsed bundle.
-  const data: BundleData = JSON.parse(JSON.stringify({
+  // Deep-clone: the caller may still hold the parsed bundle. structuredClone, not a JSON round trip —
+  // an imported bundle's model library can exceed the maximum string length. See utils/deepClone.
+  const data = deepClone({
     manifest: bundle.manifest, scenes: bundle.scenes, libraries: bundle.libraries, vfs: bundle.vfs,
-  }))
-  // Textures carry ArrayBuffers, which do not survive that clone; keep the originals and remap ids apart.
+  }) as Omit<BundleData, 'textures'>
+  // Textures are deliberately left out of that clone; keep the originals and remap their ids apart.
   const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), model: new Map(), script: new Map(), afield: new Map(), anim: new Map(), tileset: new Map() }
 
   // 1) Textures first, so their remaps are known before rewriting references.

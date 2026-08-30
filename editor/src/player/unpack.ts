@@ -30,6 +30,8 @@ export interface UnpackedGame {
   geometryFor(ref: string): GeometryArrays | undefined;
   /** Raw bytes of a blob chunk (terrain splat/height payloads), bounds-checked. */
   chunkBytes(chunk: { o: number; l: number } | undefined): Uint8Array | undefined;
+  /** Floats of a blob chunk (a skinned model's per-vertex bone data), bounds-checked. */
+  chunkFloats(chunk: { o: number; l: number } | undefined): Float32Array | undefined;
 }
 
 function readHeader(buffer: ArrayBuffer): { manifest: PackManifest; blobStart: number } {
@@ -91,14 +93,30 @@ export function unpackGameBin(buffer: ArrayBuffer): UnpackedGame {
   const chunkBytes = (chunk: { o: number; l: number } | undefined): Uint8Array | undefined =>
     reader.bytes(chunk);
 
-  return { manifest, textures, geometryFor, chunkBytes };
+  // Copied, not viewed: AnimatedModel keeps these arrays and a shared view over the whole game.bin would
+  // pin the download in memory — and two models sharing one chunk must not share one buffer.
+  const chunkFloats = (chunk: { o: number; l: number } | undefined): Float32Array | undefined => {
+    const floats = reader.floats(chunk);
+    return floats ? floats.slice() : undefined;
+  };
+
+  return { manifest, textures, geometryFor, chunkBytes, chunkFloats };
 }
 
 function inflateModelJson(model: any, game: UnpackedGame): void {
-  if (model && typeof model.geometryRef === 'string') {
+  if (!model || typeof model !== 'object') return;
+  if (typeof model.geometryRef === 'string') {
     const geometry = game.geometryFor(model.geometryRef);
     if (geometry) model.geometry = geometry;
     delete model.geometryRef;
+  }
+  // The skinned half — see internModelJson in publish/pack.ts, which the two must always mirror.
+  for (const name of ['jointIndices', 'jointWeights'] as const) {
+    const chunk = model[`${name}Chunk`];
+    if (!chunk) continue;
+    const floats = game.chunkFloats(chunk);
+    if (floats) model[name] = floats;
+    delete model[`${name}Chunk`];
   }
 }
 

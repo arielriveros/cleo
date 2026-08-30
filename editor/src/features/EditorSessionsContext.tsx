@@ -26,7 +26,7 @@ export type EditorSessionsContextValue = Pick<EngineValue,
   | 'linkAnimationToModel' | 'unlinkAnimationFromModel' | 'editSharedClip'
   // Model
   | 'enterModelEditor' | 'adoptModelAsset' | 'resolveModelAssetId' | 'modelSession' | 'modelEditTargetId' | 'setActiveModelName'
-  | 'addModelLodFromAsset' | 'removeModelLod' | 'setModelLodDistance' | 'setModelCullDistance'
+  | 'addModelLodFromAsset' | 'generateModelLods' | 'removeModelLod' | 'setModelLodDistance' | 'setModelCullDistance'
   | 'setActiveModelLevel' | 'importModelFiles' | 'pendingModelImport' | 'resolveModelImport'
   // Script
   | 'enterScriptEditor' | 'setScriptTabSource' | 'getScriptTabSource' | 'saveScriptSource'

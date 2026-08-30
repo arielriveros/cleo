@@ -128,3 +128,54 @@ describe('hashesComparable — the format-version gate', () => {
         expect(hashesComparable(undefined, ASSET_HASH_VERSION - 1)).toBe(true);
     });
 });
+
+/**
+ * `Model.serialize` writes vertex buffers as typed arrays now. `JSON.stringify` renders one as
+ * `{"0":…,"1":…}`, so without a replacer branch a mesh would hash differently purely by which container
+ * it sat in — and building that text for a real mesh is a few hundred MB of string, one step from the
+ * `RangeError: Invalid string length` recorded in utils/deepClone. Buffers stand in for themselves as a
+ * short `f32:<length>:<digest>` instead.
+ */
+describe('hashAsset over vertex buffers', () => {
+    const asset = (positions: any) => ({ id: 'm', nodeJson: { model: { geometry: { positions } } } });
+    const values = Array.from({ length: 300 }, (_, i) => i * 0.5);
+
+    it('hashes a typed array and the equal number[] the SAME', () => {
+        // The bundle round trip may hand either container back; an asset must not appear to have changed
+        // just by being exported and re-imported.
+        expect(hashAsset(asset(new Float32Array(values)))).toBe(hashAsset(asset(values)));
+    });
+
+    it('changes when the values change', () => {
+        const other = values.slice();
+        other[7] += 1;
+        expect(hashAsset(asset(new Float32Array(values)))).not.toBe(hashAsset(asset(new Float32Array(other))));
+    });
+
+    it('changes when the length changes, not just the bytes', () => {
+        expect(hashAsset(asset(new Float32Array(values))))
+            .not.toBe(hashAsset(asset(new Float32Array(values.slice(0, 299)))));
+    });
+
+    it('is stable across calls', () => {
+        const a = asset(new Float32Array(values));
+        expect(hashAsset(a)).toBe(hashAsset(a));
+    });
+
+    it('digests a big buffer without building a big string', () => {
+        // 4M floats: as JSON text this is well over 60MB, and the old path scaled with that. The digest
+        // is 8 hex chars, so what gets hashed is a handful of bytes whatever the mesh size.
+        const huge = new Float32Array(4_000_000);
+        for (let i = 0; i < huge.length; i++) huge[i] = i % 97;
+        const started = Date.now();
+        expect(hashAsset(asset(huge))).toHaveLength(8);
+        expect(Date.now() - started).toBeLessThan(10_000);
+    });
+
+    it('leaves short number arrays alone — a transform is not a buffer', () => {
+        // A position/rotation/scale triple must keep hashing as itself; only long runs are digested.
+        const a = { id: 'n', nodeJson: { position: [1, 2, 3], scale: [1, 1, 1] } };
+        const b = { id: 'n', nodeJson: { position: [1, 2, 4], scale: [1, 1, 1] } };
+        expect(hashAsset(a)).not.toBe(hashAsset(b));
+    });
+});

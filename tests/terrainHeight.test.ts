@@ -3,7 +3,7 @@ import { setGLContext } from '../src/graphics/glContext';
 import { WebGL2Device } from '../src/graphics/rhi/webgl2/webgl2Device';
 import { setDevice } from '../src/graphics/rhi/deviceHandle';
 import { TerrainMaterial } from '../src/graphics/material';
-import { Terrain } from '../src/terrain/terrain';
+import { Terrain, TERRAIN_RELIEF_ENABLED } from '../src/terrain/terrain';
 
 /**
  * A terrain paint layer treats its height map exactly as a standard PBR material does.
@@ -68,13 +68,17 @@ describe('the layer uniforms actually reach the material', () => {
         terrain.setLayer(1, tm);
 
         const p = (terrain as any)._material.properties as Map<string, any>;
-        expect(p.get('u_dispScale1')).toBe(0.11);
-        // NEGATED, and this test is not the place that decides that. Terrain reads its height slot as
-        // the DEPTH map it is documented to be, so `_deriveLayerSurface` inverts the material's flag on
-        // the way to the layer; what THIS case guards is that the plumbing reaches the shader at all.
-        // The polarity itself, and the single-choke-point rule that keeps the CPU bake and the GPU from
-        // disagreeing about it, live in `terrainHeightPolarity.test.ts`.
-        expect(p.get('u_invertHeight1')).toBe(tm.invertHeight ? 0 : 1);
+        // ZERO WHILE TERRAIN RELIEF IS OFF, and that is the assertion — `TERRAIN_RELIEF_ENABLED` is the
+        // switch, and writing the authored depth anyway would leave a march running that the flag says
+        // is off. The layer still HOLDS what was authored, so nothing is lost and re-enabling is one
+        // constant.
+        expect(p.get('u_dispScale1')).toBe(TERRAIN_RELIEF_ENABLED ? 0.11 : 0);
+        expect((terrain as any)._layers[1].dispScale, 'the layer keeps what was authored').toBe(0.11);
+        // CARRIED THROUGH, not negated. Terrain used to read this slot as a DEPTH map while every
+        // other material read it as a HEIGHT map, so `_deriveLayerSurface` flipped it on the way to the
+        // layer; that divergence existed only because terrain relief was geometry, which adds, against
+        // a march, which carves. Terrain marches now and the flag means one thing everywhere.
+        expect(p.get('u_invertHeight1')).toBe(tm.invertHeight ? 1 : 0);
     });
 
     it('an untouched layer keeps inert defaults rather than undefined', () => {

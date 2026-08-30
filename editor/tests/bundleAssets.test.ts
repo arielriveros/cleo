@@ -443,3 +443,103 @@ describe('assets.bin round-trip', () => {
     expect(index.textures).toEqual([]);
   });
 });
+
+/**
+ * `Model.serialize` writes geometry and joint attributes as TYPED arrays (see serializeGeometry in
+ * src/graphics/model.ts) — a plain `number[]` costs 8 bytes an element and doubled every stored mesh.
+ * The round-trip rule is unchanged by that: inflate must restore the container the value went in as, or
+ * an asset's content hash moves just by being exported and imported. The `t` flag on a marker, and
+ * `typed` on a geometry record, are what remember it.
+ */
+describe('assets.bin round-trip — typed arrays', () => {
+  const typedCube = () => ({
+    positions: new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]),
+    normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
+    tangents: new Float32Array([1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]),
+    bitangents: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0]),
+    texCoords: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
+    indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+  });
+
+  const sceneWith = (model: any) =>
+    bundleWith({ scenes: { s1: { scene: { name: 'root', children: [{ model, children: [] }] }, savedAt: 0 } as any } });
+
+  const outModel = (out: BundleData) => (out.scenes.s1.scene as any).children[0].model;
+
+  it('restores typed geometry as typed arrays, with the same values', async () => {
+    const source = typedCube();
+    const out = await roundTrip(sceneWith({ geometry: typedCube(), material: { type: 'blinn' } }));
+    const geometry = outModel(out).geometry;
+
+    expect(geometry.positions).toBeInstanceOf(Float32Array);
+    expect(geometry.indices).toBeInstanceOf(Uint32Array);
+    expect(Array.from(geometry.positions)).toEqual(Array.from(source.positions));
+    expect(Array.from(geometry.indices)).toEqual(Array.from(source.indices));
+  });
+
+  it('still restores PLAIN geometry as plain arrays — an older asset must not change shape', async () => {
+    const out = await roundTrip(sceneWith({ geometry: cube(), material: { type: 'blinn' } }));
+    expect(Array.isArray(outModel(out).geometry.positions)).toBe(true);
+  });
+
+  it('packs typed joint attributes instead of leaving them in the JSON as {"0":…}', async () => {
+    const bundle = sceneWith({
+      geometry: typedCube(),
+      material: { type: 'blinn' },
+      jointIndices: new Float32Array([0, 1, 2, 3]),
+      jointWeights: new Float32Array([1, 0, 0, 0]),
+    });
+    await packBundleAssets(bundle);
+    const json = JSON.stringify(bundle);
+    // The bug an `Array.isArray`-only guard causes: the buffer survives as an object literal in the zip.
+    expect(json.includes('"0":0')).toBe(false);
+    expect(json.includes('$f32')).toBe(true);
+  });
+
+  it('restores typed joint attributes as typed arrays', async () => {
+    const out = await roundTrip(sceneWith({
+      geometry: typedCube(),
+      material: { type: 'blinn' },
+      jointIndices: new Float32Array([0, 1, 2, 3]),
+      jointWeights: new Float32Array([1, 0, 0, 0]),
+    }));
+    expect(outModel(out).jointIndices).toBeInstanceOf(Float32Array);
+    expect(Array.from(outModel(out).jointWeights)).toEqual([1, 0, 0, 0]);
+  });
+
+  it('keeps the two containers apart within ONE model — the reason the flag is per payload', async () => {
+    // A skinned model carries typed joint data and plain-array animation samplers at the same time.
+    const out = await roundTrip(sceneWith({
+      geometry: typedCube(),
+      material: { type: 'blinn' },
+      jointIndices: new Float32Array([0, 1, 2, 3]),
+      animations: [clip()],
+    }));
+    expect(outModel(out).jointIndices).toBeInstanceOf(Float32Array);
+    expect(Array.isArray(outModel(out).animations[0].samplers[0].input)).toBe(true);
+    expect(outModel(out).animations[0]).toEqual(clip());
+  });
+
+  it('interns the same mesh once whichever container it arrived in', async () => {
+    // The bytes are identical, so a typed copy and a plain copy must not cost two chunks.
+    const bundle = bundleWith({
+      scenes: {
+        s1: {
+          scene: {
+            name: 'root',
+            children: [
+              { model: { geometry: typedCube(), material: { type: 'blinn' } }, children: [] },
+              { model: { geometry: cube(), material: { type: 'blinn' } }, children: [] },
+            ],
+          },
+          savedAt: 0,
+        } as any,
+      },
+    });
+    const { index } = await packBundleAssets(bundle);
+    // Two geometry RECORDS (they restore differently), but the chunk offsets they point at are shared.
+    const records = Object.values(index.geometries);
+    expect(records).toHaveLength(2);
+    expect(records[0].positions!.o).toBe(records[1].positions!.o);
+  });
+});

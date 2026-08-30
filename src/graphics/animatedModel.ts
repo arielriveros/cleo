@@ -1,6 +1,6 @@
 import { Mesh } from './mesh';
 import { Material } from './material';
-import type { Submesh } from './model';
+import { serializeGeometry, type Submesh } from './model';
 import { Geometry } from '../core/geometry';
 import { Logger } from '../core/logger';
 import { mat4 } from 'gl-matrix';
@@ -292,15 +292,8 @@ export class AnimatedModel {
 
     /** Flatten the model to plain JSON. Clips backed by a shared animation asset are omitted. */
     public serialize(): any {
-        // Array.from is mandatory: JSON.stringify turns a typed array into an object, not an array.
-        const geometry = {
-            positions: Array.from(this._geometry.positions),
-            normals: Array.from(this._geometry.normals),
-            tangents: Array.from(this._geometry.tangents),
-            bitangents: Array.from(this._geometry.bitangents),
-            texCoords: Array.from(this._geometry.uvs),
-            indices: Array.from(this._geometry.indices)
-        };
+        // Typed arrays, copied — see serializeGeometry in model.ts for why this is not Array.from.
+        const geometry = serializeGeometry(this._geometry);
         
         // Skinned type variants normalize back to their base type: the renderer picks the skinned
         // program from the model, not from the saved material.
@@ -390,10 +383,10 @@ export class AnimatedModel {
             }
             
             // Serialize nodeTransforms map
-            const nodeTransforms: [number, number[]][] = [];
+            const nodeTransforms: [number, Float32Array][] = [];
             if (this._skin.nodeTransforms) {
                 for (const [key, value] of this._skin.nodeTransforms.entries()) {
-                    nodeTransforms.push([key, Array.from(value)]);
+                    nodeTransforms.push([key, new Float32Array(value)]);
                 }
             }
 
@@ -409,7 +402,7 @@ export class AnimatedModel {
                 name: this._skin.name,
                 joints: this._skin.joints.map(j => ({
                     nodeIndex: j.nodeIndex,
-                    inverseBindMatrix: Array.from(j.inverseBindMatrix),
+                    inverseBindMatrix: new Float32Array(j.inverseBindMatrix),
                     parentIndex: j.parentIndex
                 })),
                 skeleton: this._skin.skeleton,
@@ -421,8 +414,8 @@ export class AnimatedModel {
         }
         
         // Serialize joint attributes
-        let jointIndices = this._jointIndices ? Array.from(this._jointIndices) : null;
-        let jointWeights = this._jointWeights ? Array.from(this._jointWeights) : null;
+        let jointIndices = this._jointIndices ? new Float32Array(this._jointIndices) : null;
+        let jointWeights = this._jointWeights ? new Float32Array(this._jointWeights) : null;
         
         // Must emit a COPY, never the live array: `parse` adopts what it is given by reference, so two
         // models round-tripped through one payload would share `_animations`.

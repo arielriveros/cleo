@@ -1,5 +1,6 @@
 import { Logger } from 'cleo'
 import { idbGet, idbSet, idbDelete, idbKeysByPrefix } from './idb'
+import { readModelLibrary, replaceModelLibrary, appendModelLibrary } from './modelStore'
 import { VfsIndex, EMPTY_VFS, withAncestors, repairVfs } from './vfs'
 import { ProjectMeta } from './sceneStorage'
 import { libKey, metaKey, sceneKey, scenePrefix, vfsKey } from './storageKeys'
@@ -36,7 +37,7 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
   await idbSet(libKey('materials', pid), bundle.libraries.materials)
   await idbSet(libKey('terrainMaterials', pid), bundle.libraries.terrainMaterials)
   await idbSet(libKey('templates', pid), bundle.libraries.templates)
-  await idbSet(libKey('models', pid), bundle.libraries.models)
+  await replaceModelLibrary(bundle.libraries.models, pid) // one record per asset — see modelStore
   await idbSet(libKey('scripts', pid), bundle.libraries.scripts ?? [])
   await idbSet(libKey('animationFields', pid), bundle.libraries.animationFields ?? [])
   await idbSet(libKey('animations', pid), bundle.libraries.animations ?? [])
@@ -93,7 +94,7 @@ async function readLocalState(): Promise<LocalState> {
     idbGet<any[]>(libKey('materials')),
     idbGet<any[]>(libKey('terrainMaterials')),
     idbGet<any[]>(libKey('templates')),
-    idbGet<any[]>(libKey('models')),
+    readModelLibrary(),
     idbGet<any[]>(libKey('scripts')),
     idbGet<any[]>(libKey('animationFields')),
     idbGet<any[]>(libKey('animations')),
@@ -136,7 +137,7 @@ export async function applyBundleMerge(bundle: BundleData): Promise<void> {
   await append(libKey('materials'), plan.materials)
   await append(libKey('terrainMaterials'), plan.terrainMaterials)
   await append(libKey('templates'), plan.templates)
-  await append(libKey('models'), plan.models)
+  await appendModelLibrary(plan.models)
   await append(libKey('scripts'), plan.scripts)
   await append(libKey('animationFields'), plan.animationFields)
   await append(libKey('animations'), plan.animations)

@@ -18,6 +18,30 @@ interface FromFileOptions {
 /** One slice of a model's index buffer, drawn with `materials[i]`. */
 export type Submesh = { start: number; count: number };
 
+/**
+ * A geometry's buffers as they go into a serialized model — **typed arrays, copied**.
+ *
+ * Not `Array.from`: a plain `number[]` is PACKED_DOUBLE_ELEMENTS, 8 bytes per element, so writing a mesh
+ * out that way doubles it, and an asset library of them stops fitting through a structured clone
+ * (`DataCloneError … out of memory` on the way to IndexedDB). Everything that reads this shape back
+ * already prefers typed arrays: `Geometry`'s constructor passes a `Float32Array`/`Uint32Array` through
+ * with NO copy, and both the bundle and publish packers convert to typed arrays as their first step.
+ *
+ * Copied rather than aliased on purpose. `Array.from` was also acting as a defensive copy, and handing
+ * out the live buffer would leave a stored asset sharing memory with the scene it was captured from.
+ * A copy at 4 bytes an element is still half of what this used to cost.
+ */
+export function serializeGeometry(geometry: Geometry): any {
+    return {
+        positions: new Float32Array(geometry.positions),
+        normals: new Float32Array(geometry.normals),
+        tangents: new Float32Array(geometry.tangents),
+        bitangents: new Float32Array(geometry.bitangents),
+        texCoords: new Float32Array(geometry.uvs),
+        indices: new Uint32Array(geometry.indices),
+    };
+}
+
 export class Model {
     private _geometry: Geometry;
     // Bumped on every swap; `ModelNode` compares it to decide whether the upload is still valid.
@@ -94,15 +118,7 @@ export class Model {
     }
 
     public serialize(): any {
-        // Array.from is mandatory: JSON.stringify turns a Float32Array into an object, not an array.
-        const geometry = {
-            positions: Array.from(this._geometry.positions),
-            normals: Array.from(this._geometry.normals),
-            tangents: Array.from(this._geometry.tangents),
-            bitangents: Array.from(this._geometry.bitangents),
-            texCoords: Array.from(this._geometry.uvs),
-            indices: Array.from(this._geometry.indices)
-        };
+        const geometry = serializeGeometry(this._geometry);
 
         // `material` is written for every model so readers of the single-material shape keep working;
         // `materials`/`submeshes` appear only when there are several.

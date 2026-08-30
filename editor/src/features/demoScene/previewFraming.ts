@@ -34,11 +34,12 @@ export const PREVIEW_TERRAIN_SIZE = 8;
  * depth then reads twenty-five times more pronounced here than on the ground. `buildTerrainPreviewSubject`
  * matches metres-per-repeat and metres-per-vertex to these instead of matching the tile count.
  *
- * Mirrors the default landscape `addCatalog.ts` creates (200 m, resolution 129) and the density that
- * config derives; `previewTerrainScale.test.ts` pins the density against a real `Terrain` so this
- * cannot quietly drift from the engine's own answer.
+ * Mirrors the default landscape `addCatalog.ts` creates (200 m, resolution 129). It carried a vertex
+ * `density` too, back when a paint layer's relief was baked into the terrain's mesh and the preview had
+ * to match the spacing to resolve the same geometry/march cut; relief is entirely marched now, so only
+ * the size matters — it is what turns a tiling COUNT into a repeat in metres.
  */
-export const REFERENCE_LANDSCAPE = { size: 200, resolution: 129, density: 4 };
+export const REFERENCE_LANDSCAPE = { size: 200, resolution: 129 };
 /** Half-diagonal of the patch, which is what the orbit camera has to clear. */
 export const PREVIEW_TERRAIN_RADIUS = (PREVIEW_TERRAIN_SIZE * Math.SQRT2) / 2;
 

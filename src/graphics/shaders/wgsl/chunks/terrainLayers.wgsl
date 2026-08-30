@@ -96,43 +96,21 @@ struct TerrainUniforms {
     u_tiling1: f32,
     u_tiling2: f32,
     u_tiling3: f32,
-    // Relief depth per layer, in WORLD METRES as authored. Read by the CPU/compute bake; the march
-    // reads `u_marchDepth{i}` below, which is this converted and scaled to the part the march owns.
+    // Relief depth per layer, in the layer's own TILED uv — the same unit and the same meaning as a
+    // standard material's `dispScale` (see chunks/pbrGBuffer.wgsl). `blendedDepth` converts to BASE uv
+    // by dividing by the tiling; nothing else touches it.
+    //
+    // This block used to carry `u_splitLod{i}`, `u_residRange{i}`, `u_residBot{i}` and `u_marchDepth{i}`
+    // instead, because a layer's height map was cut in two: everything coarser than the mip covering one
+    // terrain vertex was baked into the terrain's VERTEX POSITIONS, and the march only carried the
+    // residual above that cut. The two halves were parameterised by unrelated quantities — vertex
+    // spacing on one side, texture footprint on the other — so they could not be made to agree, and the
+    // same map never read the same on terrain as on a mesh. There is one mechanism now, and the authored
+    // number means what it means everywhere else.
     u_dispScale0: f32,
     u_dispScale1: f32,
     u_dispScale2: f32,
     u_dispScale3: f32,
-    // THE SPLIT. A terrain layer's height map is divided in two at `u_splitLod{i}`, the mip whose texel
-    // covers one terrain vertex: everything at or below that frequency becomes real geometry, and
-    // everything above it — which at landscape scale is nearly the whole map — is marched here.
-    //
-    // Before this, a displaced layer was simply removed from the march, so the fine half was computed,
-    // discarded, and never drawn. A 200 m terrain at tiling 20 splits at mip 5.3, meaning the geometry
-    // received a 26x26 reduction of a 1024 map and the rocks in it reached nothing.
-    //
-    // In the PACKED texture's mip space, not the raw map's: `TexturePacker` sizes a pack as the max of
-    // its sources, so a 2048 normal beside a 1024 height would otherwise shift every level an octave.
-    u_splitLod0: f32,
-    u_splitLod1: f32,
-    u_splitLod2: f32,
-    u_splitLod3: f32,
-    // The residual's range, `max(H_full - H_low) - min(...)`, and its floor. `layerHeights` normalises
-    // the residual to 0..1 with these so the march has a field of the shape it requires.
-    u_residRange0: f32,
-    u_residRange1: f32,
-    u_residRange2: f32,
-    u_residRange3: f32,
-    u_residBot0: f32,
-    u_residBot1: f32,
-    u_residBot2: f32,
-    u_residBot3: f32,
-    // The march's depth for this layer, in BASE uv: `dispScale * residRange / terrainSize`. Converted
-    // on the CPU (`Terrain._writeMarchUniforms`) because every term is a per-layer constant, and doing
-    // it there keeps the terrain's size out of this block entirely.
-    u_marchDepth0: f32,
-    u_marchDepth1: f32,
-    u_marchDepth2: f32,
-    u_marchDepth3: f32,
     // Sharpness of the height-aware blend. 0 is a plain linear splat blend.
     u_heightBlend0: f32,
     u_heightBlend1: f32,
@@ -224,7 +202,7 @@ fn band(range: vec2<f32>, v: f32, edge: f32) -> f32 {
 
 /** A layer contributing less than this is not sampled at all. */
 const LAYER_MIN_W: f32 = 1e-3;
-/** Smallest usable tiling. Mirrors `TILING_EPSILON` in `systems/displacement.ts`. */
+/** Smallest usable tiling. Mirrors `TILING_EPSILON` in `terrain/terrain.ts`. */
 const TILING_EPSILON: f32 = 0.01;
 
 /**
@@ -240,8 +218,10 @@ fn layerHeights(baseUv: vec2<f32>, w: vec4<f32>, lod: f32) -> vec4<f32> {
     var h = vec4<f32>(0.0);
     if (u_terrain.u_hasHeight0 == 1 && w.x > LAYER_MIN_W) {
         let t = max(u_terrain.u_tiling0, TILING_EPSILON);
-        // `max(.., 0.0)` for the same reason as `residualHeight`: the clamp belongs in the layer's own
-        // space, after `log2(t)`, not in the base uv the level arrives in.
+        // CLAMPED AFTER THE SHIFT, never before. `lod` is a base-uv footprint and may be negative;
+        // adding `log2(t)` is what puts it in THIS layer's space, and only there does "below mip 0"
+        // mean anything. Flooring in base uv instead cost this march four of its five octaves -- see
+        // `parallaxLodRaw` in chunks/parallax.wgsl.
         let r = textureSampleLevel(u_normal0_texture, u_normal0_sampler, baseUv * t,
                                    max(lod + log2(t), 0.0)).a;
         h.x = select(r, 1.0 - r, u_terrain.u_invertHeight0 == 1);
@@ -263,61 +243,6 @@ fn layerHeights(baseUv: vec2<f32>, w: vec4<f32>, lod: f32) -> vec4<f32> {
         let r = textureSampleLevel(u_normal3_texture, u_normal3_sampler, baseUv * t,
                                    max(lod + log2(t), 0.0)).a;
         h.w = select(r, 1.0 - r, u_terrain.u_invertHeight3 == 1);
-    }
-    return h;
-}
-
-/**
- * One layer's RESIDUAL height, normalised to 0..1 — the field the march actually intersects.
- *
- * `full - low` is what is left of the map once the band the terrain's vertices already carry is taken
- * out of it, and `(r - bot) / range` puts that on the 0..1 scale the march requires, 1 at the residual's
- * highest point. Paired with `u_marchDepth{i}` the two reconstruct the map exactly: the bake lifted its
- * surface by `amplitude * top`, and `(1 - hRes) * depth` carves back `amplitude * (top - r)`, so what is
- * drawn is `amplitude * (H_full - mean)` — the whole height map, split across the only two mechanisms
- * that can each carry their half.
- *
- * `max(l, split)` rather than `split`: where the fragment's own footprint is already coarser than the
- * split, the two samples coincide, the residual goes to zero and the march flattens out by itself —
- * which is the right answer at that distance and costs no branch to get.
- */
-fn residualHeight(tex: texture_2d<f32>, samp: sampler, baseUv: vec2<f32>, lod: f32,
-                  tiling: f32, split: f32, range: f32, bot: f32, invert: i32) -> f32 {
-    let t = max(tiling, TILING_EPSILON);
-    // CLAMPED AFTER THE SHIFT, never before. `lod` is a base-uv footprint and may be negative; adding
-    // `log2(t)` is what puts it in THIS layer's space, and only there does "below mip 0" mean anything.
-    // Flooring in base uv instead cost this march four of its five octaves — see `parallaxLodRaw`.
-    let l = max(lod + log2(t), 0.0);
-    let full = textureSampleLevel(tex, samp, baseUv * t, l).a;
-    let low = textureSampleLevel(tex, samp, baseUv * t, max(l, split)).a;
-    // Inverting both halves and subtracting is the same as negating the difference, so `invert` stays a
-    // negated relief rather than a different offset — the property `_displacementAt` keeps as well.
-    let r = select(full - low, low - full, invert == 1);
-    return clamp((r - bot) / max(range, 1e-6), 0.0, 1.0);
-}
-
-/** The four residual heights, for the march. `layerHeights` stays the FULL field, for the blend. */
-fn layerResiduals(baseUv: vec2<f32>, w: vec4<f32>, lod: f32) -> vec4<f32> {
-    var h = vec4<f32>(0.0);
-    if (u_terrain.u_hasHeight0 == 1 && w.x > LAYER_MIN_W) {
-        h.x = residualHeight(u_normal0_texture, u_normal0_sampler, baseUv, lod, u_terrain.u_tiling0,
-                             u_terrain.u_splitLod0, u_terrain.u_residRange0, u_terrain.u_residBot0,
-                             u_terrain.u_invertHeight0);
-    }
-    if (u_terrain.u_hasHeight1 == 1 && w.y > LAYER_MIN_W) {
-        h.y = residualHeight(u_normal1_texture, u_normal1_sampler, baseUv, lod, u_terrain.u_tiling1,
-                             u_terrain.u_splitLod1, u_terrain.u_residRange1, u_terrain.u_residBot1,
-                             u_terrain.u_invertHeight1);
-    }
-    if (u_terrain.u_hasHeight2 == 1 && w.z > LAYER_MIN_W) {
-        h.z = residualHeight(u_normal2_texture, u_normal2_sampler, baseUv, lod, u_terrain.u_tiling2,
-                             u_terrain.u_splitLod2, u_terrain.u_residRange2, u_terrain.u_residBot2,
-                             u_terrain.u_invertHeight2);
-    }
-    if (u_terrain.u_hasHeight3 == 1 && w.w > LAYER_MIN_W) {
-        h.w = residualHeight(u_normal3_texture, u_normal3_sampler, baseUv, lod, u_terrain.u_tiling3,
-                             u_terrain.u_splitLod3, u_terrain.u_residRange3, u_terrain.u_residBot3,
-                             u_terrain.u_invertHeight3);
     }
     return h;
 }
@@ -349,55 +274,32 @@ fn blendedSurface(h: vec4<f32>, wN: vec4<f32>) -> f32 {
 /** Where the view ray met the blended height field, and each layer's height there. */
 struct ParallaxHit {
     uv: vec2<f32>,     // BASE-space uv; each layer re-tiles it
-    h: vec4<f32>,      // per-layer FULL height at the hit, for the height-aware blend
-    // Per-layer RESIDUAL height at the hit, on the 0..1 scale `layerResiduals` returns. The two are
-    // not interchangeable: `h` answers "which layer stands higher here", a question about the whole
-    // surface, while this is the field the ray actually intersected. `terrainSelfShadow` needs THIS
-    // one, because its `h` argument is where the shadow ray starts on the field it is about to test —
-    // start it on one field and test against another and the ray's rise and its reach are scaled by
-    // unrelated numbers.
-    hRes: vec4<f32>,
+    h: vec4<f32>,      // per-layer height at the hit — the field marched, and the blend's input
 };
 
 /**
  * The blended field's depth, in BASE uv. Zero when no weighted layer wants the ray offset.
  *
- * A displaced layer contributes its RESIDUAL depth, not its full one: the band its relief is already in
- * the vertices for is subtracted (see `residualHeight`), so marching what is left applies each half of
- * the height map exactly once. An earlier version excluded displaced layers outright, which avoided the
- * double-application by discarding the fine half altogether — invisible in a screenshot, because the
- * coarse band still moved vertices and the terrain looked plausible.
+ * `u_dispScale{i}` is authored in the layer's TILED uv, exactly as a standard material's `dispScale` is
+ * authored in its own uv, while the ray travels in BASE uv — so the conversion is `dispScale / tiling`.
+ * That is the whole reason the same map now reads the same on terrain as on a mesh: on both, the number
+ * means a fraction of ONE TEXTURE REPEAT, and the repeat is the only thing either surface knows about.
+ *
+ * This briefly read `u_marchDepth{i}`, a world-metres depth converted CPU-side by `/ terrainSize`,
+ * because the depth had to agree with a vertex bake that worked in metres. Two mechanisms sharing one
+ * authored number forced a unit that meant nothing to the texture, and 6 cm on a 3.2 m brick is 2% of
+ * the feature where the same map on a mesh gets 24%. The bake is gone; the unit went back.
  *
  * Zero for a layer with no height map, so a terrain with none takes `marchTerrain`'s early return,
  * which is the cheapest possible outcome.
  */
 fn blendedDepth(wN: vec4<f32>) -> f32 {
-    // Already in base uv and already scaled to the residual — `Terrain._writeMarchUniforms` does both,
-    // because every term is a per-layer constant. This used to read `dispScale / tiling`, the
-    // conversion from the layer's TILED uv back when depth was authored there. Depth is world metres
-    // now, so the conversion is `metres / terrainSize`, and the stale divisor survived only because it
-    // was multiplied by nothing: every height-mapped layer was excluded from the march, so this sum was
-    // always exactly zero and no amount of looking at the rendered image could have caught it.
-    return wN.x * u_terrain.u_marchDepth0 + wN.y * u_terrain.u_marchDepth1
-         + wN.z * u_terrain.u_marchDepth2 + wN.w * u_terrain.u_marchDepth3;
-}
-
-/**
- * The split the marched depth actually belongs to, in the same mip space `lodAvg` is measured in.
- *
- * Weighted by each layer's CONTRIBUTION TO THE DEPTH, not by its splat weight. A layer with no height
- * map has `u_splitLod{i}` of 0, and averaging those in by weight alone would drag the blended split
- * toward zero wherever a displaced layer neighbours a plain one — fading the march out on exactly the
- * fragments that have relief to show. `u_marchDepth{i}` is zero for those same layers, so weighting by
- * it counts only the layers whose relief is being marched. The denominator is `blendedDepth` itself,
- * and the caller has already established it is non-zero before asking.
- */
-fn blendedSplit(wN: vec4<f32>, depth: f32) -> f32 {
-    let d = vec4<f32>(u_terrain.u_marchDepth0, u_terrain.u_marchDepth1,
-                      u_terrain.u_marchDepth2, u_terrain.u_marchDepth3) * wN;
-    let s = vec4<f32>(u_terrain.u_splitLod0, u_terrain.u_splitLod1,
-                      u_terrain.u_splitLod2, u_terrain.u_splitLod3);
-    return dot(d, s) / max(depth, 1e-12);
+    var d = 0.0;
+    if (u_terrain.u_hasHeight0 == 1) { d += wN.x * u_terrain.u_dispScale0 / max(u_terrain.u_tiling0, TILING_EPSILON); }
+    if (u_terrain.u_hasHeight1 == 1) { d += wN.y * u_terrain.u_dispScale1 / max(u_terrain.u_tiling1, TILING_EPSILON); }
+    if (u_terrain.u_hasHeight2 == 1) { d += wN.z * u_terrain.u_dispScale2 / max(u_terrain.u_tiling2, TILING_EPSILON); }
+    if (u_terrain.u_hasHeight3 == 1) { d += wN.w * u_terrain.u_dispScale3 / max(u_terrain.u_tiling3, TILING_EPSILON); }
+    return d;
 }
 
 /**
@@ -413,26 +315,26 @@ fn marchTerrain(baseUv: vec2<f32>, wN: vec4<f32>, vTan: vec3<f32>,
     hit.uv = baseUv;
 
     // TWO LEVELS, AND THEY ARE NOT INTERCHANGEABLE. `lod` is the footprint in BASE uv, which is what
-    // the fetches want because `layerHeights` / `layerResiduals` each add their own `log2(tiling)` to
-    // reach their layer's space. `lodAvg` is that same footprint already shifted by the weighted
-    // average tiling, which is what the FADE and the STEP COUNT want: both ask about the texture being
-    // sampled, and `dims` is likewise passed in pre-scaled by that average.
+    // the fetches want because `layerHeights` adds its own `log2(tiling)` per layer to reach that
+    // layer's space. `lodAvg` is that same footprint already shifted by the weighted average tiling,
+    // which is what the FADE and the STEP COUNT want: both ask about the texture being sampled, and
+    // `dims` is likewise passed in pre-scaled by that average.
     //
     // Passing the tiled level to the fetches was the bug that made terrain relief blur out and then
-    // disappear. `layerHeights` shifted it a second time, so at tiling 20 every height came from a mip
-    // `log2(20) = 4.3` levels too coarse — a 1024-texel map read as 51 texels — and `residualHeight`'s
-    // `max(l, split)` then found both taps on the same mip, making the residual identically zero.
-    // Faded to the SPLIT, not to the fixed aliasing band. See `parallaxFadeToSplit`: the two bands are
-    // set by unrelated quantities, and every octave between them was being dropped by both halves.
-    let raw = blendedDepth(wN);
-    let depth = raw * parallaxFadeToSplit(lodAvg, blendedSplit(wN, raw)) * parallaxGrazeFade(vTan.z);
+    // disappear: `layerHeights` shifted it a second time, so at tiling 20 every height came from a mip
+    // `log2(20) = 4.3` levels too coarse — a 1024-texel map read as 51 texels. Four uv spaces in one
+    // march need this separation whatever field is marched; it is not split machinery.
+    //
+    // `parallaxFade`, the same fixed aliasing band chunks/pbrGBuffer.wgsl uses. There was briefly a
+    // `parallaxFadeToSplit` here, terminating the march where the vertex bake took over; with no bake
+    // there is nothing to hand off to and the ordinary band is the whole answer.
+    let depth = blendedDepth(wN) * parallaxFade(lodAvg) * parallaxGrazeFade(vTan.z);
 
     // Nothing displaced, or minified past the fade, or too edge-on for a flat-surface approximation.
-    // Both height sets are still wanted either way: the height-aware blend reads `h` whether or not
-    // anything was offset, and `hRes` is what the self-shadow starts its ray on.
+    // The heights are still wanted either way: the height-aware blend reads them whether or not
+    // anything was offset.
     if (depth <= 1e-7) {
         hit.h = layerHeights(baseUv, wN, lod);
-        hit.hRes = layerResiduals(baseUv, wN, lod);
         return hit;
     }
 
@@ -440,17 +342,12 @@ fn marchTerrain(baseUv: vec2<f32>, wN: vec4<f32>, vTan: vec3<f32>,
     let steps = parallaxSteps(pMax, dims, lodAvg);
     let dStep = 1.0 / steps;
 
-    // `1.0 - h`: the packed alpha is 1 at the TOP of the field, so this is depth below the geometric
-    // surface. `ray` walks the same axis, 0 at the surface down to 1 at the floor.
-    //
-    // THE FIELD MARCHED HERE IS THE RESIDUAL, not the full height map, and the distinction is the whole
-    // point of the split. The terrain's own vertices already carry everything at or below
-    // `u_splitLod{i}`; marching the full map as well would apply that band twice, once as geometry and
-    // once as a uv offset. `layerResiduals` returns what the vertices could NOT represent, which the
-    // bake has left room for by lifting its surface — see `residualHeight`.
+    // `1.0 - h` (inside `blendedSurface`): the packed alpha is 1 at the TOP of the field, so this is
+    // depth below the geometric surface. `ray` walks the same axis, 0 at the surface down to 1 at the
+    // floor. The field is the WHOLE height map — one mechanism owns all of it.
     var ray = 0.0;
     var uv = baseUv;
-    var hs = layerResiduals(uv, wN, lod);
+    var hs = layerHeights(uv, wN, lod);
     var surf = blendedSurface(hs, wN);
     var prevUv = uv;
     var prevRay = ray;
@@ -465,7 +362,7 @@ fn marchTerrain(baseUv: vec2<f32>, wN: vec4<f32>, vTan: vec3<f32>,
         // Recomputed from `ray` rather than subtracted step by step: a base-uv offset here runs to a
         // few thousandths, and repeatedly accumulating an increment that small is worse conditioned.
         uv = baseUv - pMax * ray;
-        hs = layerResiduals(uv, wN, lod);
+        hs = layerHeights(uv, wN, lod);
         surf = blendedSurface(hs, wN);
     }
 
@@ -481,28 +378,22 @@ fn marchTerrain(baseUv: vec2<f32>, wN: vec4<f32>, vTan: vec3<f32>,
     let before = prevSurf - prevRay;
     let t = clamp(after / min(after - before, -1e-8), 0.0, 1.0);
     hit.uv = mix(uv, prevUv, t);
-    // FULL heights at the hit, not residuals. `hit.h` feeds the height-aware layer blend
-    // (`exp(u_heightBlend * hit.h)` below), which asks "which layer stands higher here" — a question
-    // about the actual surface, not about the half of it the march happens to own. One extra sample set
-    // at the hit point, rather than per step.
-    hit.h = layerHeights(hit.uv, wN, lod);
     // Re-sampled at the REFINED uv, not carried over from `hs` at the last step — which is precisely
-    // the quantisation the paragraph above says the refinement exists to remove. `hRes` is what the
-    // self-shadow starts its ray on, and there `(1 - h)` scales both the rise and the reach, so a hit
-    // taken one step deep changes the shadow's whole geometry rather than just its origin.
-    hit.hRes = layerResiduals(hit.uv, wN, lod);
+    // the quantisation the paragraph above says the refinement exists to remove. These heights feed the
+    // height-aware layer blend AND are where `terrainSelfShadow` starts its ray, and there `(1 - h)`
+    // scales both the rise and the reach, so a hit taken one step deep changes the shadow's whole
+    // geometry rather than just its origin.
+    hit.h = layerHeights(hit.uv, wN, lod);
     return hit;
 }
 
 /** Soft self-shadowing of the blended field, marched from the hit toward the sun. See parallaxShadow. */
 fn terrainSelfShadow(uv: vec2<f32>, wN: vec4<f32>, lTan: vec3<f32>,
                      h: f32, lod: f32, lodAvg: f32) -> f32 {
-    // Same split as `marchTerrain`: `lodAvg` for the fade, `lod` for the fetches. And `h` must be on
-    // the RESIDUAL scale, because that is the field sampled below.
-    // The SAME fade the view march used. A shadow that outlived the relief casting it would darken a
-    // surface that is no longer there.
-    let raw = blendedDepth(wN);
-    let depth = raw * parallaxFadeToSplit(lodAvg, blendedSplit(wN, raw)) * parallaxGrazeFade(lTan.z);
+    // Same split of levels as `marchTerrain`: `lodAvg` for the fade, `lod` for the fetches. And the
+    // same fade — a shadow that outlived the relief casting it would darken a surface that is no
+    // longer there.
+    let depth = blendedDepth(wN) * parallaxFade(lodAvg) * parallaxGrazeFade(lTan.z);
     if (depth <= 1e-7 || lTan.z <= 0.0) { return 1.0; }
 
     let pMax = parallaxRay(lTan, depth);
@@ -520,7 +411,7 @@ fn terrainSelfShadow(uv: vec2<f32>, wN: vec4<f32>, lTan: vec3<f32>,
         let f = f32(i) / steps;
         // 1 - blendedSurface, i.e. the same field the view ray intersected. Reading a plain dot here
         // would shadow a different surface than the one on screen.
-        let sampleH = 1.0 - blendedSurface(layerResiduals(uv + reach * f, wN, lod), wN);
+        let sampleH = 1.0 - blendedSurface(layerHeights(uv + reach * f, wN, lod), wN);
         let rayH = h + dh * f32(i);
         if (sampleH > rayH) {
             // Nearer blockers weigh more; the falloff keeps this soft rather than binary.
@@ -691,7 +582,7 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
     if (dot(sunDir, sunDir) > 1e-6) {
         let lTan = parallaxToTangent(frame, normalize(-sunDir));
         out.shadow = terrainSelfShadow(hit.uv, wN, lTan,
-                                       1.0 - blendedSurface(hit.hRes, wN), lod, lodAvg);
+                                       1.0 - blendedSurface(hit.h, wN), lod, lodAvg);
     }
 
     // Height-aware blend, biased by the heights AT THE HIT rather than under it — the whole point of

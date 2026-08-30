@@ -130,21 +130,6 @@ app.whenReady().then(async () => {
   // Let a few frames land so frameStats reflects a steady frame, not the first one.
   await sleep(3000);
 
-  // And then WAIT FOR THE TERRAIN, rather than assuming three seconds covered it.
-  //
-  // The derived render density is not known when the terrain is constructed — it comes from the
-  // displaced layer's tiling, so the first `setLayer` is the earliest it can be computed, and the
-  // chunks built before that have to be rebuilt at the new density. Until that lands the terrain is a
-  // 33x33 grid instead of 65x65, which is 6144 triangles per draw and 30720 across the main pass and
-  // four shadow cascades. A fixed sleep therefore decides the triangle count by race: the same build
-  // reported 98596 and 129316 on consecutive runs, and the baseline can only match one of them.
-  const terrainReady = await until(async () => {
-    if (!(await js('typeof window.__terrainDisplaced === "function"'))) return true;
-    const td = JSON.parse(JSON.parse(await js('JSON.stringify(window.__terrainDisplaced())')));
-    return td && td.chunkCount > 0 && td.chunkVerts === td.expectedVerts;
-  }, 20000);
-  check('terrain finished rebuilding at its derived density', terrainReady !== null,
-        'chunks never reached the density `densityFor` derives — frame stats below are a race');
   const stats = await js('window.__stats ? window.__stats() : null');
   check('frames are rendering', stats && stats.drawCalls > 0, JSON.stringify(stats));
 
@@ -413,46 +398,55 @@ app.whenReady().then(async () => {
   if (scene === 'every') {
     const td = await js('JSON.stringify(window.__terrainDisplaced())').then(JSON.parse).then(JSON.parse).catch(() => null);
     console.log('      terrainDisplaced: ' + JSON.stringify(td));
-    check('terrain displacement baked', !!td && td.baked === true && td.moved > 0, JSON.stringify(td));
+    // THE MESH IS THE SCULPTED FIELD, and nothing else in the harness looks at terrain geometry. A
+    // vertex bake reintroduced anywhere would show up here and nowhere else.
+    check('terrain vertices follow the sculpted heightfield', !!td && td.meshMatchesHeights === true,
+          JSON.stringify(td && { maxDelta: td.maxDelta }));
     // `u_hasHeight` must SURVIVE. Clearing it is the obvious way to take a layer out of the march and
     // it is wrong: the flag also drives `layerHeights`, whose output feeds the height-aware layer blend.
     check('the displaced layer keeps its height flag for the blend', !!td && td.marches === true,
           'u_hasHeight0 was cleared, which silently disables the height-aware blend');
-    // THE SPLIT, and the gate that would have caught the original bug. A displaced layer used to be
-    // taken out of `blendedDepth` entirely, so everything finer than the vertex grid was band-limited
-    // away and then drawn by nothing — invisible in a screenshot, because the coarse band still moved
-    // vertices and the terrain looked plausible. A positive march depth is the observable.
-    check('the residual is handed to the march, not discarded', !!td && td.marchDepth > 0,
-          JSON.stringify(td && { marchDepth: td.marchDepth, splitLod: td.splitLod, residRange: td.residRange }));
-    check('and the split is where the bake put it', !!td && td.splitLod > 0,
-          JSON.stringify(td && { splitLod: td.splitLod }));
+    // TERRAIN RELIEF IS OFF (`TERRAIN_RELIEF_ENABLED`), and this is what holds it off: a zero depth
+    // makes `marchTerrain` early-return, stopping the ray, the self-shadow and every per-step fetch.
+    //
+    // Kept as an assertion rather than deleted with the feature, because "off" has to be observable.
+    // The failure this replaces is the one that started the whole area: a layer's relief was computed
+    // and then drawn by nothing, which looked exactly like a terrain that was never displaced. Flip the
+    // constant and this gate is what says the march came back.
+    check('terrain relief is off at the uniform', !!td && td.marchDepth === 0,
+          JSON.stringify(td && { marchDepth: td.marchDepth, tiling: td.tiling }));
     check('a layer with no height map marches nothing', !!td && td.otherLayerMarchDepth === 0,
           JSON.stringify(td && { otherLayerMarchDepth: td.otherLayerMarchDepth }));
     // AND IT REACHES PIXELS. The three checks above read uniforms, which is exactly how the march
-    // shipped completely inert once already: `u_marchDepth0` was positive, `u_splitLod0` was positive,
+    // shipped completely inert once already: the depth uniform was positive, the height flag was set,
     // and `residualHeight` still returned zero at every fragment because the level it sampled sat past
     // the split. Turning the depth off is the one switch that removes the march and nothing else, so a
     // signature that does not move means the effect is not in the image.
-    const marchOn = await captureSignature(win, sleep);
-    await js('window.__setMarchDepth(0)');
+    // Driven the other way while the feature is off: the shipped state is depth 0, so the A/B raises
+    // it instead of zeroing it. Same question either way — does the depth uniform reach pixels — and
+    // the gate keeps working whichever side of the flag the default sits on.
     const marchOff = await captureSignature(win, sleep);
+    await js('window.__setMarchDepth(0.35)');
+    const marchOn = await captureSignature(win, sleep);
     await js('window.__setMarchDepth(null)');
     const marchAB = compare(marchOn, marchOff);
-    check('and the march reaches pixels, not just uniforms', marchAB.material > 0,
-          'zeroing u_marchDepth0 changed nothing: the residual is inert at every fragment');
+    check('and the march would reach pixels if it were on', marchAB.material > 0,
+          'raising the layer depth changed nothing: the height field is inert at every fragment');
     console.log('      march A/B: ' + marchAB.material + '/128 values move beyond the noise floor'
                 + ' when it is switched off (worst ' + marchAB.worst + ')');
-    // Relief depth is world METRES, full stop — 0.35 m here, and the same on any terrain size or tiling.
-    // It used to be tiled uv converted by `size / tiling`, which put the Depth slider's whole range at
-    // 0 to 5 metres on a default landscape and made height maps read as cliffs.
-    check('relief depth is world metres', !!td && Math.abs(td.amplitude - 0.35) < 1e-3,
+    // Relief depth is a fraction of ONE TEXTURE REPEAT — the same unit and the same number a standard
+    // material would use for the same relief, which is what makes a library material read the same on
+    // terrain and on a mesh. It was briefly world metres, because relief was split between a vertex
+    // bake and the march and a bake works in metres.
+    check('relief depth is a fraction of a repeat, as authored',
+          !!td && Math.abs(td.amplitude - 0.35) < 1e-3,
           JSON.stringify(td && { amplitude: td.amplitude }));
-    // The density mapping, from the mesh that was actually built. Four functions share one vertex->grid
-    // convention and each breaks differently and SILENTLY when density is missed — a running counter
-    // that rewrites only the first (cols+1)*(rows+1) vertices, or an index set addressing a quarter of
-    // the buffer. Neither throws, so the count is the observable.
-    check('the dense terrain mesh is actually dense', !!td && td.renderDensity > 1 && td.chunkVerts === td.expectedVerts,
-          JSON.stringify(td && { renderDensity: td.renderDensity, chunkVerts: td.chunkVerts, expected: td.expectedVerts }));
+    // The chunk mesh is one vertex per height-grid point. A density multiplier used to subdivide it so
+    // a layer's height map could be carried as real geometry, and four functions shared one
+    // vertex->grid convention that broke silently when the density was missed.
+    check('the chunk mesh is one vertex per height-grid point',
+          !!td && td.chunkVerts === td.expectedVerts,
+          JSON.stringify(td && { chunkVerts: td.chunkVerts, expected: td.expectedVerts }));
   }
 
   // Did the probe actually bake? `probesForFrame` skips any probe without baked maps, so an unbaked

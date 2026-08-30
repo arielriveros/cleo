@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { useEditorSessions } from '../EditorSessionsContext'
 import { Modal, ModalHeader, ModalFooter, Toggle } from '../../components/ui'
+import SubmeshGroupEditor from './SubmeshGroupEditor'
+import { defaultGroupsByMaterial, compactGroups, type PartGroup } from '../../utils/submeshGroups'
 
 // Review modal shown once per imported model, between parsing and committing to the library: import
 // state, replacements for referenced-but-missing textures, and scale normalization.
@@ -14,6 +16,8 @@ export default function ModelImportModal() {
   const [targetSize, setTargetSize] = useState(2)
   const [separate, setSeparate] = useState(false)
   const [merge, setMerge] = useState(false)
+  // Only meaningful with both toggles on; seeded on the transition into that state, not on every render.
+  const [groups, setGroups] = useState<PartGroup[]>([])
 
   useEffect(() => {
     setExtraFiles([])
@@ -23,10 +27,19 @@ export default function ModelImportModal() {
     setTargetSize(2)
     setSeparate(false)
     setMerge(false)
+    setGroups([])
   }, [pendingModelImport])
 
   if (!pendingModelImport) return null
   const info = pendingModelImport
+
+  // Both toggles on = "split into assets, and merge within each" — which only has an answer once the
+  // user says what goes with what, so the grouping editor appears and its result is the import.
+  const grouping = separate && merge && info.subMeshCount > 1
+  const assetCount = compactGroups(groups).length
+
+  // Seed on the transition into grouping, keeping any partition the user already built this session.
+  const seedGroups = () => setGroups(g => (g.length ? g : defaultGroupsByMaterial(info.parts, info.bundleName)))
 
   const currentSize = info.sizeRadius * 2
   const factor = normalize && info.sizeRadius > 0 ? targetSize / (info.sizeRadius * 2) : 1
@@ -58,13 +71,16 @@ export default function ModelImportModal() {
     extraFiles,
     normalize,
     targetSize: targetSize > 0 ? targetSize : 2,
+    // separate/merge stay mutually exclusive on the wire: they are what the import falls back to if the
+    // grouping can no longer be applied (a re-parse for missing textures rebuilds the sub-mesh list).
     separate: separate && info.subMeshCount > 1,
     merge: merge && !separate && info.subMeshCount > 1,
+    groups: grouping ? compactGroups(groups) : undefined,
   })
   const cancel = () => resolveModelImport(null)
 
   return (
-    <Modal onClose={cancel} className='w-[420px]'>
+    <Modal onClose={cancel} className={grouping ? 'w-[600px]' : 'w-[420px]'}>
         <ModalHeader>
           <div className='text-sm font-semibold'>Import model</div>
           <div className='text-lg font-bold truncate' title={info.bundleName}>{info.bundleName}</div>
@@ -147,13 +163,15 @@ export default function ModelImportModal() {
               <div className='text-xs font-semibold mb-1'>Contents</div>
               <Toggle label='Separate sub-models into individual assets'
                       checked={separate}
-                      onChange={(v: boolean) => { setSeparate(v); if (v) setMerge(false) }} />
+                      onChange={(v: boolean) => { setSeparate(v); if (v && merge) seedGroups() }} />
               <p className='text-[11px] text-gray-400 mt-1'>
-                {separate
-                  ? `Creates ${info.subMeshCount} separate model assets, each centred on its own origin.`
-                  : merge
-                    ? `Creates 1 model asset with a single merged mesh.`
-                    : `Creates 1 model asset containing all ${info.subMeshCount} parts.`}
+                {grouping
+                  ? `Creates ${assetCount} model asset${assetCount === 1 ? '' : 's'}, each a single merged mesh — one per group below.`
+                  : separate
+                    ? `Creates ${info.subMeshCount} separate model assets, each centred on its own origin.`
+                    : merge
+                      ? `Creates 1 model asset with a single merged mesh.`
+                      : `Creates 1 model asset containing all ${info.subMeshCount} parts.`}
               </p>
 
               {/* The opposite of the toggle above. Worth offering because the split is an artefact of the
@@ -163,11 +181,13 @@ export default function ModelImportModal() {
               <div className='mt-2'>
                 <Toggle label='Merge sub-meshes into a single mesh'
                         checked={merge}
-                        onChange={(v: boolean) => { setMerge(v); if (v) setSeparate(false) }} />
+                        onChange={(v: boolean) => { setMerge(v); if (v && separate) seedGroups() }} />
                 <p className='text-[11px] text-gray-400 mt-1'>
-                  {merge
-                    ? `Combines all ${info.subMeshCount} parts into one mesh, keeping one material slot per part.`
-                    : 'Keeps the file’s parts as separate nodes under one asset.'}
+                  {grouping
+                    ? 'Merges within each group, so a group of several parts imports as one mesh.'
+                    : merge
+                      ? `Combines all ${info.subMeshCount} parts into one mesh, keeping one material slot per part.`
+                      : 'Keeps the file’s parts as separate nodes under one asset.'}
                 </p>
                 {merge && (
                   <p className='text-[11px] text-gray-500 mt-1'>
@@ -176,7 +196,17 @@ export default function ModelImportModal() {
                   </p>
                 )}
               </div>
-              {separate && (
+
+              {/* Both on: neither answer is complete on its own, so ask what goes with what. Seeded one
+                  group per material, which is both the usual intent and always mergeable. */}
+              {grouping && (
+                <div className='mt-3 pt-3 border-t border-control'>
+                  <SubmeshGroupEditor parts={info.parts} bundleName={info.bundleName}
+                                      groups={groups} onChange={setGroups} />
+                </div>
+              )}
+
+              {separate && !merge && (
                 <p className='text-[11px] text-warning mt-1'>
                   A single model split across several materials will import as separate pieces — leave this
                   off for characters and props that are meant to stay together.

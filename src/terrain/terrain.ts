@@ -9,11 +9,6 @@ import { Material, TerrainMaterial, TerrainFoliageRule, foliageRuleKey } from '.
 import { Texture } from '../graphics/texture';
 import { TextureManager } from '../graphics/systems/textureManager';
 import { TexturePacker } from '../graphics/systems/texturePacker';
-import { heightPyramid, sampleHeightLod, displaceSplitLod, pyramidMean, pyramidResidualBounds, band,
-    TILING_EPSILON, HeightField } from '../graphics/systems/displacement';
-import { device } from '../graphics/rhi/deviceHandle';
-import { BufferUsage, ShaderStage } from '../graphics/rhi/types';
-import TerrainDisplaceComputeProgram from '../graphics/shaders/wgsl/terrainDisplaceCompute.wgsl';
 import { Loader } from '../graphics/loader';
 import { Logger } from '../core/logger';
 import { authoring } from '../core/eventBus';
@@ -52,18 +47,14 @@ export interface TerrainLayer {
     /** The height map is a DEPTH map (white = deep). */
     invertHeight: boolean;
     /**
-     * Whether this layer raises the terrain's VERTICES. True exactly when it has a height map — terrain
-     * always displaces, and there is no per-layer mode.
+     * Whether this layer has relief to march. True exactly when it has a height map.
      *
-     * That is a deliberate narrowing. A terrain layer used to be able to march its height field per
-     * fragment instead, and keeping both meant the CPU bake and the shader had to agree on which band
-     * each of them carried — through a split mip level, a headroom constant, a packed texture whose
-     * size did not match the source map, and a weight set the CPU never fully resolved. Every one of
-     * those was a way to be silently wrong. Geometry is now the only source of terrain relief.
-     *
-     * The honest limit belongs next to the flag: vertex spacing is `size / (resolution - 1)` while a
-     * layer tiles 20-50x, so the grid gets roughly six vertices per tile and can only carry the lowest
-     * frequencies of a height map. `renderDensity` and `resolution` are the levers.
+     * It used to mean "raises the terrain's VERTICES", and for a while terrain relief was geometry
+     * only: a layer's height map was cut at the mip covering one vertex, the coarse half was baked into
+     * the mesh and the fine half marched. Two mechanisms sharing one authored number could not be made
+     * to agree — vertex spacing and texture footprint are unrelated quantities — so the same map never
+     * read the same on terrain as on a mesh. Terrain marches its whole height map now, exactly as a
+     * standard material does, and the terrain's own sculpted heightfield is its only geometry.
      */
     displace: boolean;
     /** Height-aware blend sharpness (0 = linear splat blend). */
@@ -111,64 +102,47 @@ export interface TerrainConfig {
     resolution?: number;
     /** Quads per side of each render chunk (keeps each chunk under the 65k Uint16 index limit). */
     chunkQuads?: number;
-    /**
-     * Render vertices per repeat of a layer's height map, TARGETED. This is the control that makes
-     * displacement detail independent of the terrain's height resolution: a coarse height grid is
-     * compensated by a denser render mesh rather than losing the relief.
-     *
-     * Terrain relief is geometry now, and the vertex grid can only carry frequencies coarser than its
-     * own spacing. At the editor defaults the grid gets `(129 - 1) / 20` = 6.4 vertices per repeat, so
-     * the bake band-limits a 1024-texel map down to roughly 4x4 — very nearly its flat average. Asking
-     * for 32 here gets the map's actual relief instead.
-     *
-     * Only chunks NEAR the camera pay for it; see `Terrain.densityFor`.
-     */
-    targetVertsPerTile?: number;
-    /**
-     * Hard cap on the per-axis density the target may ask for. Present so a pathological tiling cannot
-     * allocate an unbounded mesh; the per-chunk vertex ceiling below is the one that usually binds.
-     *
-     * RENDER ONLY. `heights`, the splat, physics, `heightAt()`, picking, foliage and the saved blob all
-     * stay on the authored grid — this multiplies the mesh the GPU draws and nothing else.
-     *
-     * It exists for ONE reason: a displaced paint layer can only carry frequencies coarser than the
-     * vertex spacing, and everything finer is handed to the parallax march instead (see
-     * `systems/displacement.ts`). Each doubling here moves exactly one octave of the height map out of
-     * the march and into real geometry — which is what buys a silhouette and self-shadowing for it.
-     * With every layer on parallax the extra vertices carry NO new information: a bilinear subdivision
-     * of the height grid renders identically to the coarse mesh, so it is pure cost.
-     *
-     * Powers of two, capped at 4 (16x the vertices; ~14 MB of vertex data on a default 200 m terrain).
-     */
-    renderDensity?: number;
 }
 
 /**
- * Ceiling on the per-axis render density, and on the vertices one chunk may hold.
- *
- * The vertex ceiling is the one that usually binds and is the honest cost control: at the default
- * `chunkQuads` of 32, density 8 is 66k vertices — 3.7 MB for that chunk. Only the handful of chunks near
- * the camera are built at it, so a 200 m terrain pays roughly 22 MB rather than the 56 MB it would cost
- * to build every chunk that dense.
+ * Smallest usable tiling. Mirrors `TILING_EPSILON` in chunks/terrainLayers.wgsl, where a layer's
+ * `log2(tiling)` mip shift and its `dispScale / tiling` depth conversion both divide by it.
  */
-const MAX_DENSITY = 8;
-/**
- * Whole-terrain vertex budget. Every chunk is built at one density now, so the ceiling has to be about
- * the terrain rather than about a chunk: 300k vertices is roughly 16 MB of vertex data, which is density
- * 4 on a default 200 m / resolution 129 landscape and resolves relief down to about 0.78 m.
- */
-const MAX_TERRAIN_VERTICES = 300000;
+export const TILING_EPSILON = 0.01;
 
-/** Per-layer inputs to `_displacementAt`, resolved once per bake rather than per vertex. */
-interface DisplaceContext {
-    /**
-     * `mean` is what the layer's relief is centred on, and `residual` is the part of the map the
-     * geometry cannot carry — see `Terrain._displacementAt` and `pyramidResidualBounds`.
-     */
-    layers: {
-        i: number; L: TerrainLayer; pyramid: HeightField[]; lod: number; mean: number;
-        residual: { top: number; bot: number };
-    }[];
+/**
+ * TERRAIN LAYER RELIEF IS OFF.
+ *
+ * Turned off deliberately, not broken and not half-removed. A terrain layer's height map still loads,
+ * still packs into `u_normal{i}`'s alpha, and still drives the height-aware blend (`u_heightBlend{i}`) —
+ * only the parallax march is suppressed, by writing a depth of zero in `_writeLayerUniforms`. That is
+ * the single switch: `marchTerrain` early-returns on a zero depth, so the ray, the self-shadow and the
+ * per-step fetches all stop with it, and nothing else in the pipeline changes.
+ *
+ * Why a flag rather than a deletion: the feature is being deferred, not abandoned. It has been through
+ * a vertex bake, a geometry/march split and a full-map march, and each rewrite cost more than it
+ * returned; the code that survives here is the version that is at least self-consistent, and flipping
+ * this back to `true` is the whole of re-enabling it. The editor hides the authoring controls behind
+ * the same decision — see `MaterialEditor`'s height section — so nothing is exposed that does nothing.
+ *
+ * Not a runtime setting on purpose. A per-terrain toggle would mean saving it, migrating it and
+ * supporting both paths, which is the cost this exists to avoid.
+ */
+export const TERRAIN_RELIEF_ENABLED = false;
+
+/**
+ * A smooth 0..1 window over `range`, with `edge` of feather at each end — the auto height/slope mask.
+ *
+ * The CPU twin of `band()` in chunks/terrainLayers.wgsl. The two used to have to agree exactly, because
+ * a vertex bake resolved the same masked weights the shader shaded with and would otherwise displace
+ * ground the shader drew bare. There is no bake now, so the shader is the only consumer that matters;
+ * this stays for callers that want to predict a layer's coverage without rendering it.
+ */
+export function band(range: readonly number[], v: number, edge: number): number {
+    const lo = range[0], hi = range[1];
+    if (hi <= lo) return 0;
+    const e = Math.max(edge, 1e-6);
+    return Math.min(Math.max((v - lo) / e, 0), 1) * Math.min(Math.max((hi - v) / e, 0), 1);
 }
 
 /** One render tile of the terrain: a Model whose geometry Y is driven by the shared height field. */
@@ -204,10 +178,6 @@ function resolveConfig(c: TerrainConfig): Required<TerrainConfig> {
         size: c.size ?? 200,
         resolution: Math.max(2, Math.floor(c.resolution ?? 129)),
         chunkQuads: Math.max(4, Math.floor(c.chunkQuads ?? 32)),
-        // Snapped to a power of two: the vertex grid has to nest inside the height grid for
-        // `_vertexGrid` to land on exact cell fractions, and the LOD decimation steps are scaled by it.
-        renderDensity: Math.min(MAX_DENSITY, Math.max(1, 1 << Math.round(Math.log2(Math.max(1, c.renderDensity ?? 1))))),
-        targetVertsPerTile: Math.max(0, Math.floor(c.targetVertsPerTile ?? 32)),
     };
 }
 
@@ -272,8 +242,6 @@ export class Terrain {
     }
 
     public get config(): Required<TerrainConfig> { return this._cfg; }
-    /** Render vertices per height-grid cell, per axis. See {@link TerrainConfig.renderDensity}. */
-    public get renderDensity(): number { return this._cfg.renderDensity; }
     public get chunks(): TerrainChunk[] { return this._chunks; }
     public get heights(): Float32Array { return this._heights; }
     public get resolution(): number { return this._R; }
@@ -293,18 +261,14 @@ export class Terrain {
     //
     // Four functions have always shared one convention: `cols = c1 - c0`, `stride = cols + 1`, row-major
     // with inclusive endpoints, and chunk vertex `k` at local `(i, j)` being height-grid cell
-    // `(c0 + i, r0 + j)`. `renderDensity` breaks that one-to-one mapping, so it is expressed here once
-    // and every one of those four goes through it rather than re-deriving it and drifting.
+    // `(c0 + i, r0 + j)`. There was briefly a render-density multiplier that broke that one-to-one
+    // mapping; it existed to buy vertices for the displacement bake and went with it.
 
-    /** A chunk's vertex extents. At density 1 these are its grid extents, exactly as before. */
+    /** A chunk's vertex extents — one vertex per height-grid point. */
     private _chunkSpan(chunk: TerrainChunk): { cols: number; rows: number; stride: number } {
-        const d = this.densityFor();
-        const cols = (chunk.c1 - chunk.c0) * d, rows = (chunk.r1 - chunk.r0) * d;
+        const cols = chunk.c1 - chunk.c0, rows = chunk.r1 - chunk.r0;
         return { cols, rows, stride: cols + 1 };
     }
-
-    /** The (fractional) height-grid column a chunk's local vertex column sits on. */
-    private _vertexGrid(base: number, i: number, density: number): number { return base + i / density; }
 
     // --- height sampling ----------------------------------------------------------------------
 
@@ -366,270 +330,14 @@ export class Terrain {
         }
     }
 
-    /**
-     * How far the displaced layers raise the surface at a fractional grid coordinate.
-     *
-     * THE one formula. `_rebuildRenderHeights` evaluates it on the grid to build the field that bounds,
-     * LOD and the density-1 mesh all read; `_refreshChunkGeometry` evaluates it between grid points for
-     * the dense mesh; and `terrainDisplaceCompute.wgsl` is a transcription of it. Three callers, one
-     * expression, so they cannot drift.
-     *
-     * `ctx` carries the decoded pyramids and the split level per layer, because both of those are
-     * per-layer constants and looking them up per vertex would dominate the loop.
-     */
-    private _displacementAt(gx: number, gz: number, ctx: DisplaceContext,
-                            weights: [number, number, number, number]): number {
-        this._resolveWeights(gx, gz, weights);
-        const inv = 1 / Math.max(1, this._R - 1);
-        const u = gx * inv, v = gz * inv;
-        let sum = 0;
-        for (const layer of ctx.layers) {
-            const w = weights[layer.i];
-            if (w <= 0) continue;
-            // CENTRED ON THE MAP'S MEAN, and that is the whole answer to "I have to invert the height
-            // map to make it look right". The polarity was never wrong — white has always been high at
-            // every step. What changed when parallax gave way to geometry is the REFERENCE PLANE.
-            //
-            // Parallax could only carve INTO the surface: white sat at the sculpted ground and black one
-            // depth below it, so a map read as pits. Displacement only adds: white sits one depth ABOVE
-            // and black at the ground, so the same map reads as bumps AND the whole painted region steps
-            // up against unpainted terrain beside it. Inverting turns bumps back into pits, which is why
-            // it looked like a fix.
-            //
-            // Subtracting the mean puts the relief both above and below the sculpt. The painted ground
-            // keeps the level it was sculpted at, the step at a paint boundary disappears, and `invert`
-            // goes back to meaning what it says: `(1-h) - (1-mean)` is `-(h - mean)`, a negated relief
-            // rather than a different offset.
-            // LIFTED BY THE RESIDUAL'S PEAK, so the half of the map the geometry cannot carry has room
-            // to hang below this surface. Parallax only carves inward: the march removes
-            // `amplitude * (top - r)` per fragment, which averages to `amplitude * top` and cancels this
-            // exactly, leaving the shaded surface at the mean-centred FULL height. Without the lift the
-            // residual would have to straddle the geometry, which no inward-only march can express.
-            //
-            // What it costs is a constant step of `amplitude * top` — around a centimetre — in the
-            // GEOMETRY at a paint boundary, well under the 0.78 m the vertex grid can resolve.
-            sum += w * this._layerAmplitude(layer.L) * (sampleHeightLod(
-                layer.pyramid, u * layer.L.tiling, v * layer.L.tiling, layer.lod, layer.L.invertHeight)
-                - layer.mean + layer.residual.top);
-        }
-        return sum;
-    }
 
-    /**
-     * A layer's relief depth, in WORLD METRES — which is simply what was authored.
-     *
-     * It used to be `dispScale * size / tiling`, converting from the layer's tiled uv. That existed for
-     * exactly one reason: to agree with the parallax march, whose `blendedDepth` is `dispScale / tiling`
-     * in base uv. **The march no longer runs for a displaced layer**, so there is nothing left to agree
-     * with, and the conversion had become pure cost — the same authored number meant ten times more
-     * relief on a 200 m terrain than on a 20 m one, and the depth slider's 0..0.5 range spanned 0 to
-     * FIVE METRES at the editor defaults with a 5 cm minimum step. Three centimetres of gravel, the
-     * thing this feature is for, was not expressible at all.
-     *
-     * Metres make the number mean one thing everywhere: 0.03 is three centimetres of relief on any
-     * terrain, at any size, at any tiling. Terrains saved under the old unit are migrated on load — see
-     * `deserialize` — so nothing already authored moves on screen.
-     */
-    private _layerAmplitude(L: TerrainLayer): number {
-        return L.dispScale;
-    }
 
-    /**
-     * The blend weights at a grid coordinate, resolved the way `resolveTerrainSurface` resolves them.
-     *
-     * The geometry has to be raised by the weights the SHADER draws with, not by the raw splat. Three
-     * things stand between the two, and all three were being skipped — so a layer masked out of the
-     * picture still displaced the ground under it, with nothing on screen to explain the bump:
-     *
-     *   1. the `u_layerCount` cut, which zeroes any slot past the last active layer;
-     *   2. the automatic height/slope mask, when any layer has `auto` set;
-     *   3. the divide by the weight sum.
-     *
-     * THE MASK READS THE SCULPTED SURFACE, not the displaced one. Displacement changes height and slope,
-     * which changes the mask, which changes displacement — evaluating against the sculpt cuts that loop
-     * and makes the bake a fixed point rather than something whose answer depends on how many times it
-     * has run. The shader evaluates it against the drawn surface; the difference is second-order (a
-     * fraction of the relief depth against bands metres wide) and buys determinism.
-     */
-    private _resolveWeights(gx: number, gz: number, out: [number, number, number, number]): void {
-        this._splatAt(gx, gz, out);
 
-        let count = 0;
-        for (let i = 0; i < this._layers.length; i++) if (this._layerActive(this._layers[i])) count = i + 1;
-        for (let i = count; i < 4; i++) out[i] = 0;
 
-        let useAuto = false;
-        for (const L of this._layers) if (L?.auto) { useAuto = true; break; }
-        if (useAuto) {
-            // World Y and slope of the sculpted surface, matching the shader's `fragPos.y` and
-            // `1 - nGeom.y`. The origin is added because `hRange` is authored in world space.
-            const height = this._bilinearAt(this._heights, gx, gz) + this._origin[1];
-            // `_normalAtGrid` over `_baseAt`, NOT `_normalAt`, and it fixes two faults in one line.
-            //
-            // `_normalAt` indexes `Float32Array` directly, but this function runs at FRACTIONAL grid
-            // coordinates on the dense path (`_vertexGrid` returns `base + i/density`). A fractional
-            // index reads `undefined`, so `dhx` was NaN — and `Math.hypot(NaN,1,NaN) || 1` evaluates to
-            // 1, so it returned `[NaN, 1, NaN]` and the slope came out EXACTLY 0. At density 4 that is
-            // three vertices in four silently unmasked, with the fourth reading a surface that is not
-            // the one being drawn.
-            //
-            // And it reads `_surfaceHeights` — the DISPLACED field — where the height above it reads the
-            // sculpted one. The mask is deliberately evaluated on the sculpt so the bake is a fixed
-            // point rather than something whose answer depends on how many times it has run; `_baseAt`
-            // is that field, sampled bilinearly, at any coordinate.
-            this._normalAtGrid(gx, gz, this._baseSampler, Terrain._weightNormal, 1);
-            const slope = Math.min(1, Math.max(0, 1 - Terrain._weightNormal[1]));
-            // Kept so the mask can be BACKED OUT if it masks everything. See below.
-            const w0 = out[0], w1 = out[1], w2 = out[2], w3 = out[3];
-            for (let i = 0; i < 4 && i < this._layers.length; i++) {
-                const L = this._layers[i];
-                if (!L?.auto) continue;
-                out[i] *= band(L.hRange, height, 2.0) * band(L.sRange, slope, 0.08);
-            }
-            // THE MASK MAY NOT ERASE THE TERRAIN. `hRange` defaults to [0, 100] and `band` smoothsteps
-            // in across `range[0] ± 2`, so it returns 0.5 at y = 0 — where a default terrain sits — and
-            // 0 below about y = -2. A terrain sculpted with valleys, or a landscape node moved down (the
-            // origin is added above), therefore drove every auto layer to zero, and the collapse below
-            // zeroed all four weights: no displacement, and the shader's matching early-out dropped the
-            // layers from the shading too. Whole regions went flat and base-coloured.
-            //
-            // Falling back to the UNMASKED weights is the only answer that degrades sensibly. The mask
-            // exists to CHOOSE between layers — rock on slopes, grass on flats — so with nothing left to
-            // choose between it has no opinion to express, and the painted splat is the better answer
-            // than nothing. `resolveTerrainSurface` in chunks/terrainLayers.wgsl carries the same
-            // fallback; if these two ever disagree the bake displaces ground the shader draws bare.
-            const masked = out[0] + out[1] + out[2] + out[3];
-            if (masked < 1e-4) { out[0] = w0; out[1] = w1; out[2] = w2; out[3] = w3; }
-        }
 
-        const sum = out[0] + out[1] + out[2] + out[3];
-        if (sum < 1e-4) { out[0] = out[1] = out[2] = out[3] = 0; return; }
-        for (let i = 0; i < 4; i++) out[i] /= sum;
-    }
 
-    /** Scratch for `_resolveWeights`, so the per-vertex path allocates nothing. */
-    private static readonly _weightNormal: [number, number, number] = [0, 1, 0];
-    /** The sculpted field as a sampler, bound once — `_resolveWeights` runs per vertex. */
-    private readonly _baseSampler = (x: number, z: number): number => this._baseAt(x, z);
 
-    /**
-     * The decoded inputs `_displacementAt` needs, or null when nothing displaces or a height map has not
-     * finished decoding. `density` scales the split level: a denser grid resolves a finer band, which is
-     * the entire point of `renderDensity`.
-     */
-    /**
-     * The render density EVERY chunk is built at. One number for the terrain, computed once.
-     *
-     * Derived from `targetVertsPerTile` rather than authored as a multiple of the height resolution,
-     * which is what makes relief detail independent of the terrain's Resolution:
-     *
-     *     density = ceil_pow2( targetVertsPerTile * tiling / (resolution - 1) )
-     *
-     * over the finest-tiling displaced layer, since that is the one needing the most vertices. A terrain
-     * with nothing displaced stays at 1 — extra vertices would be a bilinear subdivision of the same
-     * height grid and would render identically.
-     *
-     * The `lod` parameter is gone in all but name. Density used to fall with a chunk's LOD level so only
-     * the near field paid, which meant a chunk crossing a distance threshold had to be REBUILT — and
-     * that rebuild, times every chunk on the ring that crossed together, was the frame spike. Relief is
-     * baked once now and LOD decimates indices, which costs an integer.
-     */
-    public densityFor(_lod: number = 0): number {
-        if (this._density > 0) return this._density;
-        let density = this._baseDensity();
-        // Capped by a WHOLE-TERRAIN vertex budget, not a per-chunk one: every chunk is now built at this
-        // density, so the cost is paid across the terrain rather than only near the camera.
-        const chunksPerSide = Math.ceil((this._R - 1) / this._cfg.chunkQuads);
-        const chunks = chunksPerSide * chunksPerSide;
-        while (density > 1 && Math.pow(this._cfg.chunkQuads * density + 1, 2) * chunks > MAX_TERRAIN_VERTICES)
-            density >>= 1;
-        this._density = density;
-        return density;
-    }
 
-    /**
-     * Memoised, and that is not just a micro-optimisation.
-     *
-     * This used to be evaluated per chunk PER FRAME from `LandscapeNode.updateLod` — `_baseDensity`'s
-     * layer scan plus a `Math.pow` inside a `while` loop, sixteen times a frame, to answer a question
-     * whose answer cannot change without a rebuild. Invalidated by `setLayer`, since the derived density
-     * depends on the displaced layers' tiling.
-     */
-    private _density: number = 0;
-    private _invalidateDensity(): void { this._density = 0; }
-    /** The density the chunks in `_chunks` were actually BUILT at. */
-    private _builtDensity: number = 0;
-
-    /**
-     * Rebuild every chunk's geometry if the derived density has moved since they were built.
-     *
-     * Needed because a terrain's chunks are constructed BEFORE any layer exists — `_buildChunks` runs in
-     * the constructor — while the density is derived from the displaced layers' tiling. So the first
-     * `setLayer` is normally the moment the real density becomes knowable, and the chunks built at the
-     * placeholder have to catch up.
-     *
-     * This is the ONLY thing that changes a chunk's vertex count after construction, and it happens on
-     * layer assignment — an editor action — never on the camera path. That distinction is the whole
-     * point: the per-frame version of this was the frame spike.
-     */
-    private _rebuildChunksIfDensityChanged(): void {
-        const density = this.densityFor();
-        if (density === this._builtDensity || this._chunks.length === 0) return;
-        this._builtDensity = density;
-        for (const chunk of this._chunks) {
-            chunk.model.setGeometry(
-                this._buildChunkGeometry(chunk.c0, chunk.r0, chunk.c1, chunk.r1, density));
-            chunk.lodSteps = null;      // the coarse index sets address the old vertex span
-            this._refreshChunkGeometry(chunk);
-        }
-    }
-
-    /** The density the near field wants, before the chunk ceiling and the LOD falloff. */
-    private _baseDensity(): number {
-        // 0 hands control back to the authored multiplier, which is the escape hatch for anyone who
-        // wants to pin it — and what the density tests use to talk about the multiplier itself.
-        const target = this._cfg.targetVertsPerTile;
-        if (target <= 0) return this._cfg.renderDensity;
-
-        let tiling = 0;
-        for (const L of this._layers) if (this._layerDisplaces(L)) tiling = Math.max(tiling, L.tiling);
-        if (tiling <= 0) return 1;   // nothing displaces: extra vertices would carry no new information
-
-        const wanted = (target * tiling) / Math.max(1, this._R - 1);
-        return Math.min(MAX_DENSITY, Math.max(1, 1 << Math.ceil(Math.log2(Math.max(1, wanted)))));
-    }
-
-    /**
-     * The decoded inputs `_displacementAt` needs, or null when nothing displaces, a height map has not
-     * finished decoding, or the density is 0 (a chunk far enough out to be flat).
-     */
-    private _displaceContext(density: number): DisplaceContext | null {
-        if (density <= 0) return null;
-        const displaced = this._layers
-            .map((L, i) => ({ L, i }))
-            .filter(({ L }) => this._layerDisplaces(L));
-        if (displaced.length === 0) return null;
-
-        const layers: DisplaceContext['layers'] = [];
-        for (const { L, i } of displaced) {
-            const pyramid = heightPyramid(L.heightId as string);
-            if (!pyramid) return null;   // still decoding: retry next frame rather than baking a partial
-            // The RAW map's width, not the packed texture's. Band-limiting still matters — it is what
-            // stops an undersampled height map folding into low-frequency blobs — but it no longer has
-            // to line up with a mip the shader samples, because the shader no longer marches these
-            // layers at all. That removes two silent failures at once: `TexturePacker` sizes a pack as
-            // the MAX of its sources, so a 2048 normal beside a 1024 height shifted every level by an
-            // octave; and the packed width was not in the rebuild key, so a bake done against the
-            // fallback guess was never redone once the real pack landed.
-            const lod = displaceSplitLod(pyramid[0].width, L.tiling, this._R, density);
-            layers.push({
-                i, L, pyramid, lod,
-                mean: pyramidMean(pyramid, L.invertHeight),
-                residual: pyramidResidualBounds(pyramid, lod, L.invertHeight),
-            });
-        }
-        return { layers };
-    }
 
     /**
      * Surface normal at a fractional grid coordinate, from central differences over the DISPLACED
@@ -657,9 +365,7 @@ export class Terrain {
         const R = this._R, e = this._element;
         const cl = Math.max(0, c - 1), cr = Math.min(R - 1, c + 1);
         const rd = Math.max(0, r - 1), ru = Math.min(R - 1, r + 1);
-        // The RENDERED surface, so the normal picks up the layer gradient for free: the central
-        // difference over the total field already includes it, and nothing extra has to be derived.
-        const h = this._surfaceHeights;
+        const h = this._heights;
         const dhx = (h[r * R + cr] - h[r * R + cl]) / ((cr - cl) * e || e);
         const dhz = (h[ru * R + c] - h[rd * R + c]) / ((ru - rd) * e || e);
         const nx = -dhx, ny = 1, nz = -dhz;
@@ -677,7 +383,7 @@ export class Terrain {
             for (let c0 = 0; c0 < quads; c0 += step) {
                 const c1 = Math.min(c0 + step, quads);
                 const r1 = Math.min(r0 + step, quads);
-                const geometry = this._buildChunkGeometry(c0, r0, c1, r1, this.densityFor());
+                const geometry = this._buildChunkGeometry(c0, r0, c1, r1);
                 const chunk: TerrainChunk = {
                     model: new Model(geometry, this._material),
                     c0, r0, c1, r1, dirty: false,
@@ -685,13 +391,12 @@ export class Terrain {
                 };
                 this._updateChunkBounds(chunk);
                 this._chunks.push(chunk);
-                this._builtDensity = this.densityFor();
             }
         }
     }
 
     /** Build a chunk geometry spanning global grid cols [c0..c1], rows [r0..r1] (vertices inclusive). */
-    private _buildChunkGeometry(c0: number, r0: number, c1: number, r1: number, d: number): Geometry {
+    private _buildChunkGeometry(c0: number, r0: number, c1: number, r1: number): Geometry {
         const positions: [number, number, number][] = [];
         const normals: [number, number, number][] = [];
         const uvs: [number, number][] = [];
@@ -699,21 +404,18 @@ export class Terrain {
         const bitangents: [number, number, number][] = [];
         const indices: number[] = [];
         const half = this._cfg.size / 2, e = this._element, R = this._R;
-        const cols = (c1 - c0) * d, rows = (r1 - r0) * d;
+        const cols = c1 - c0, rows = r1 - r0;
         const n: [number, number, number] = [0, 1, 0];
-        const base = (x: number, z: number) => this._baseAt(x, z);
 
-        // Over the VERTEX span, which is the grid span times the density. Every quantity here is already
-        // a continuous function of the grid coordinate — the world position is `grid * elementSize`, the
-        // uv is `grid / (R - 1)` — so a fractional grid coordinate needs no special case. Only the
-        // height and the normal do, and both have continuous forms above.
+        // One vertex per height-grid point. A `density` multiplier used to subdivide this span so a
+        // layer's height map could be evaluated between grid points and carried as real geometry; with
+        // the bake gone the extra vertices carry no information a bilinear subdivision would not.
         for (let j = 0; j <= rows; j++) {
-            const gz = this._vertexGrid(r0, j, d);
+            const gz = r0 + j;
             for (let i = 0; i <= cols; i++) {
-                const gx = this._vertexGrid(c0, i, d);
+                const gx = c0 + i;
                 positions.push([-half + gx * e, this._baseAt(gx, gz), -half + gz * e]);
-                if (d === 1) this._normalAt(gx, gz, n);
-                else this._normalAtGrid(gx, gz, base, n, d);
+                this._normalAt(gx, gz, n);
                 normals.push([n[0], n[1], n[2]]);
                 uvs.push([gx / (R - 1), gz / (R - 1)]);
                 // UVs are axis-aligned (u -> +X, v -> +Z), so the tangent frame is constant. Must be
@@ -745,100 +447,9 @@ export class Terrain {
         return new Geometry(positions, normals, uvs, tangents, bitangents, indices);
     }
 
-    /**
-     * The height field the RENDERED surface uses: the sculpted heights plus every displaced layer.
-     *
-     * `_heights` itself is never modified, and that is the load-bearing rule of the whole terrain half.
-     * It is the sculpted, serialized, physics-authoritative field: the terrain blob round-trips from it,
-     * the heightfield collider is built from it, and `heightAt()` answers from it. Layer displacement is
-     * RENDER-ONLY, which keeps all three stable and means a material tweak never rebuilds a physics body.
-     *
-     * A DISPLACED TERRAIN IS NOT WALKED ON. The collider follows `_heights`, so a character stands on
-     * the sculpted surface while the eye sees the displaced one. For the centimetre relief this is meant
-     * for that is right and cheap; for anything larger the answer is to sculpt, not to displace.
-     *
-     * Aliased to `_heights` outright when no layer displaces, so the common case allocates nothing and
-     * every read below is the same array it always was.
-     */
-    private _renderHeights: Float32Array | null = null;
-    private get _surfaceHeights(): Float32Array { return this._renderHeights ?? this._heights; }
 
-    /**
-     * The RENDERED height field when layer displacement has produced one, else null.
-     *
-     * Read-only and diagnostic — the harness compares it against {@link heights} to prove a bake ran,
-     * which a screenshot cannot do: a displaced layer that never baked renders exactly like one that
-     * was never displaced. Nothing in the engine should route through this; use `heightAt()`, which
-     * deliberately answers from the SCULPTED field that physics and picking share.
-     */
-    public get renderHeights(): Float32Array | null { return this._renderHeights; }
-    /** Bumped wherever `_heights` or `_splat` changes, so the derived field knows to recompute. */
-    private _surfaceRev: number = 0;
-    /** The inputs `_renderHeights` was last built from. Empty while a rebuild is still owed. */
-    private _renderHeightsKey: string = '';
 
-    /**
-     * Recompute {@link _surfaceHeights} from `_heights` and the displaced layers, then refresh every
-     * chunk through the EXISTING rewrite path.
-     *
-     * The splat map is one RGBA texel per height-grid point (`_splatRes === _R`), so the layer weights
-     * line up with the grid exactly and there is no resampling to get wrong. Weights are read from the
-     * CPU-side `_splat`, so nothing here needs a GPU readback.
-     */
-    private _rebuildRenderHeights(): void {
-        const displaced = this._layers
-            .map((L, i) => ({ L, i }))
-            .filter(({ L }) => L.displace && L.heightId && L.dispScale !== 0);
 
-        // Called every frame, so it has to be cheap when nothing moved. The key covers everything the
-        // accumulation reads: the sculpted heights and the splat (through `_surfaceRev`) and each
-        // displaced layer's parameters. Without it this would recompute a 129x129 field and re-upload
-        // every chunk on every frame a terrain had one displaced layer.
-        const key = displaced.length === 0 ? '' : this._surfaceRev + '|' + displaced
-            // `auto`/`hRange`/`sRange` are in the key because the bake resolves the same masked weights
-            // the shader shades with — without them, editing an auto band would never re-bake.
-            .map(({ L, i }) => `${i}:${L.heightId}:${L.dispScale}:${L.tiling}:${L.invertHeight ? 1 : 0}`
-                + `:${L.auto ? 1 : 0}:${L.hRange[0]},${L.hRange[1]}:${L.sRange[0]},${L.sRange[1]}`)
-            .join(',');
-
-        if (displaced.length === 0) {
-            if (this._renderHeights === null) return;
-            this._renderHeights = null;
-            this._renderHeightsKey = key;
-            for (const ch of this._chunks) this._refreshChunkGeometry(ch);
-            return;
-        }
-        if (key === this._renderHeightsKey && this._renderHeights) return;
-
-        // A layer whose height map has not decoded yet leaves the context null, and the bake retries on
-        // a later call — the same idiom the packer uses, and the reason nothing here awaits anything.
-        // The key is NOT recorded until every field read, so a partial bake keeps retrying.
-        //
-        // BAND-LIMITED at the GRID's spacing, which is the difference between relief and blobs: the grid
-        // samples a layer's map `(R - 1) / tiling` times per repeat — 6.4 at the editor defaults — and a
-        // point sample of a 1024-texel map at that rate folds its detail down into low-frequency beats.
-        // `_displacementAt` samples the mip whose texel covers one vertex instead. Detail finer than
-        // that is genuinely gone — nothing marches it any more — which is what `targetVertsPerTile`
-        // exists to buy back, by giving the near field enough vertices to carry it.
-        const ctx = this._displaceContext(1);
-        if (!ctx) return;
-
-        const R = this._R;
-        const out = new Float32Array(this._heights.length);
-        out.set(this._heights);
-        const weights: [number, number, number, number] = [0, 0, 0, 0];
-
-        for (let r = 0; r < R; r++)
-            for (let c = 0; c < R; c++)
-                out[r * R + c] += this._displacementAt(c, r, ctx, weights);
-
-        this._renderHeights = out;
-        this._renderHeightsKey = key;
-        for (const ch of this._chunks) this._refreshChunkGeometry(ch);
-    }
-
-    /** Re-bake one chunk's vertices. Public for `LandscapeNode.updateLod`, which re-bakes on a level change. */
-    public refreshChunk(chunk: TerrainChunk): void { this._refreshChunkGeometry(chunk); }
 
     /** Rewrite a chunk geometry's Y + normals in place from the current heights and flag it dirty. */
     private _refreshChunkGeometry(chunk: TerrainChunk): void {
@@ -848,62 +459,18 @@ export class Terrain {
         const n: [number, number, number] = [0, 1, 0];
         let i = 0;
 
-        // DENSITY 1 IS THE UNCHANGED PATH, deliberately. It reads the precomputed grid field and the
-        // grid normal, which is both cheaper and bit-identical to what terrain has always produced — so
-        // adding the density option cannot move a terrain that never asked for it. The continuous
-        // sampling below only runs where there are vertices between grid points.
-        // At density 1 AND LOD 0 the answer is already in `_renderHeights`, which the whole terrain
-        // shares — read it rather than recomputing per chunk. Any other combination is chunk-specific
-        // (a coarser band for a distant chunk, or vertices between grid points) and takes the general
-        // path below.
-        if (this.densityFor() === 1) {
-            for (let r = chunk.r0; r <= chunk.r1; r++) {
-                for (let c = chunk.c0; c <= chunk.c1; c++) {
-                    const i3 = i * 3;
-                    positions[i3 + 1] = this._surfaceHeights[r * R + c];
-                    this._normalAt(c, r, n);
-                    normals[i3] = n[0]; normals[i3 + 1] = n[1]; normals[i3 + 2] = n[2];
-                    i++;
-                }
-            }
-        } else {
-            // The dense mesh evaluates the displacement at its OWN spacing, with a split level one
-            // octave finer per doubling — that extra octave becoming real geometry is the entire reason
-            // the option exists. `_renderHeights` is not read here: it is the grid-resolution field, and
-            // interpolating it would reproduce the coarse surface at 16x the vertex cost.
-            const ctx = this._displaceContext(this.densityFor());
-            const weights: [number, number, number, number] = [0, 0, 0, 0];
-            const { cols, rows } = this._chunkSpan(chunk);
-
-            // ONE SAMPLER, on the CPU, on every device. There used to be two: a compute dispatch
-            // overwrote Y and the normal on WebGPU, so this wrote only the grid-level surface there and
-            // the full displacement everywhere else.
-            //
-            // That dispatch is gone, and dropping it was measured rather than assumed. Forcing both
-            // backends onto this sampler collapsed `harness:backenddiff`'s deferred.every debugAO from
-            // 24/128 differing cells at a worst delta of 100/255 to ZERO, and cleared fourteen of the
-            // fifteen configurations that had moved. The two bakes ran the same ALGORITHM — a parity
-            // test pinned that — over DIFFERENT DATA: the dispatch sampled the packed layer texture's
-            // GPU-generated mips while this samples a pyramid built here from the raw height map, and a
-            // 32x32 linear-ramp test fixture had hidden the difference for as long as it existed.
-            //
-            // What made it affordable to delete is that the bake no longer runs on the camera path.
-            // Relief is baked once when chunks are built, and again only on a sculpt, a paint stroke or
-            // a layer change — so the dispatch was optimising something that happens a handful of times
-            // in a session, at the cost of an entire class of cross-backend divergence.
-            const sample = (x: number, z: number) => this._baseAt(x, z)
-                + (ctx ? this._displacementAt(x, z, ctx, weights) : 0);
-
-            for (let j = 0; j <= rows; j++) {
-                const gz = this._vertexGrid(chunk.r0, j, this.densityFor());
-                for (let k = 0; k <= cols; k++) {
-                    const gx = this._vertexGrid(chunk.c0, k, this.densityFor());
-                    const i3 = i * 3;
-                    positions[i3 + 1] = sample(gx, gz);
-                    this._normalAtGrid(gx, gz, sample, n, this.densityFor());
-                    normals[i3] = n[0]; normals[i3 + 1] = n[1]; normals[i3 + 2] = n[2];
-                    i++;
-                }
+        // One vertex per height-grid point, straight off the sculpted field. This used to fork: a
+        // density-1 fast path reading a baked `_renderHeights`, and a dense path that evaluated a
+        // layer's height map BETWEEN grid points so the extra vertices carried an octave of it as real
+        // geometry. Both are gone with the bake — terrain's shape is what was sculpted, and a layer's
+        // relief is marched per fragment like any other material's.
+        for (let r = chunk.r0; r <= chunk.r1; r++) {
+            for (let c = chunk.c0; c <= chunk.c1; c++) {
+                const i3 = i * 3;
+                positions[i3 + 1] = this._heights[r * R + c];
+                this._normalAt(c, r, n);
+                normals[i3] = n[0]; normals[i3 + 1] = n[1]; normals[i3 + 2] = n[2];
+                i++;
             }
         }
 
@@ -920,10 +487,7 @@ export class Terrain {
         let min = Infinity, max = -Infinity;
         for (let r = chunk.r0; r <= chunk.r1; r++) {
             for (let c = chunk.c0; c <= chunk.c1; c++) {
-                // The rendered surface: these bounds feed terrain LOD and culling, and a chunk whose
-                // layers pushed it up would otherwise be measured at the sculpted height it no longer
-                // draws at.
-                const h = this._surfaceHeights[r * R + c];
+                const h = this._heights[r * R + c];
                 if (h < min) min = h;
                 if (h > max) max = h;
             }
@@ -931,32 +495,12 @@ export class Terrain {
         chunk.minY = isFinite(min) ? min : 0;
         chunk.maxY = isFinite(max) ? max : 0;
 
-        // A dense mesh carries relief BETWEEN grid points, which the loop above cannot see. Expanding by
-        // the deepest displaced layer is conservative — the splat weights sum to 1, so no vertex can be
-        // raised by more than the largest single layer contributes — and costs nothing but a slightly
-        // early LOD transition. Without it a chunk is measured at a height it no longer draws at.
-        if (this.densityFor() > 1) {
-            let reach = 0;
-            // Both directions, because relief is centred on the map's mean — it reaches below the
-            // sculpted surface as well as above it. The `+ 1` covers the residual LIFT on top of that:
-            // the bake adds `amplitude * residualTop`, and `top` is bounded by 1 since both halves of
-            // the residual are samples of a 0..1 field. Doubling the reach keeps the claim this bound
-            // rests on literally true — no vertex can leave the box — rather than true in the common
-            // case. It costs a slightly early LOD transition and nothing else; the geometry's own
-            // bounding sphere, which is what culls, is recomputed from the moved vertices.
-            for (const L of this._layers)
-                if (this._layerDisplaces(L)) reach = Math.max(reach, Math.abs(this._layerAmplitude(L)));
-
-            chunk.minY -= 2 * reach;
-            chunk.maxY += 2 * reach;
-        }
+        // No inflation. There used to be one here, because a displaced layer moved vertices above and
+        // below the sculpted field — including BETWEEN grid points, which the loop above cannot see.
+        // The drawn surface is the sculpted one again, so these bounds are exact.
     }
 
     private _markRegionDirty(cMin: number, rMin: number, cMax: number, rMax: number): void {
-        // The sculpted field moved, so the derived one is stale. `_rebuildRenderHeights` runs from the
-        // per-frame `syncPackedLayers` rather than here: sculpting marks many regions per stroke, and
-        // rebuilding the whole field on each of them would make the brush unusable.
-        this._surfaceRev++;
         for (const ch of this._chunks) {
             if (ch.c1 < cMin || ch.c0 > cMax || ch.r1 < rMin || ch.r0 > rMax) continue;
             this._refreshChunkGeometry(ch);
@@ -1174,7 +718,6 @@ export class Terrain {
                 } else this._splat[out] = 255;
             }
         }
-        this._surfaceRev++;   // the splat drives the displaced-layer weights
         this._splatTex.updateRegion(0, 0, S, S, this._splat);
     }
 
@@ -1274,24 +817,18 @@ export class Terrain {
         // through the material editor's existing Occlusion slot with nothing new to author.
         const aoId = t.get('occlusionMap') ?? null;
         const dispScale = tm.displacementScale;
-        // INVERTED BY DEFAULT, because the slot is a DEPTH map (white = deep). That is what
-        // `displacementMap` is documented as in four separate places — here in material.ts, on
-        // `TerrainMaterial.invertHeight`, in chunks/terrainLayers.wgsl, and in chunks/parallax.wgsl
-        // ("ship a DEPTH map, `*_disp.png`, white = deep. The two are indistinguishable from the
-        // bytes"). Terrain used to read it as a HEIGHT map, so an untouched checkbox pushed relief IN
-        // and authors had to tick Invert to get it to pop out — the control meaning the opposite of its
-        // label.
+        // CARRIED THROUGH UNCHANGED, and this used to be a negation.
         //
-        // THIS IS THE ONLY PLACE THE FLIP MAY LIVE. Everything downstream reads `L.invertHeight`: the
-        // CPU bake through `_displacementAt`, `pyramidMean` and `pyramidResidualBounds`, and the GPU
-        // through `_writeLayerUniforms` -> `u_invertHeight{i}`. Flipping at any single one of those
-        // would leave the two halves of the split disagreeing about which way relief goes, which is the
-        // failure this area produces every time it is touched. Stored values are migrated once by
-        // `TerrainMaterial.parse` (`heightPolarity`), so nothing already authored changes on screen.
+        // Terrain read the slot as a DEPTH map (white = deep) while every standard material read it as a
+        // HEIGHT map, so `invertHeight` meant opposite things on the two paths and the same texture came
+        // out inside-out depending on what it was applied to. That divergence was recorded as deliberate
+        // "until that path is revisited" — it existed because terrain's relief was geometry, which only
+        // ADDS, while a parallax march only CARVES, so the two needed opposite reference planes.
         //
-        // Standard materials still read the slot as a height map; the divergence is deliberate.
-        const invertHeight = !tm.invertHeight;
-        // Terrain always displaces: having a height map IS the condition. No mode to read.
+        // Terrain marches now, like everything else, so there is one reference plane and one meaning.
+        // Existing terrain materials flip on load, which is the point: the old appearance was the bug.
+        const invertHeight = tm.invertHeight;
+        // A layer has relief exactly when it has a height map. No mode to read.
         const displace = !!heightId;
         const heightBlend = tm.heightBlend;
         if (bt === 'basic') {
@@ -1355,14 +892,9 @@ export class Terrain {
         if (!id) { clear(); return; }
         m.textures.set(`u_normal${index}`, id);
         m.properties.set(`u_hasNormal${index}`, L.normalId ? 1 : 0);
-        // Written HERE rather than in `_writeLayerUniforms` because it needs the resolved pack: the
-        // split level has to be expressed in the PACKED texture's mip space, and the pack is what this
-        // function just produced. Per frame, which is also the retry for a height map still decoding.
-        //
-        // `u_hasHeight{i}` stays set for a displaced layer. It drives `layerHeights`, which feeds the
-        // height-aware layer BLEND as well as the march, so clearing it to change what the march does
-        // (the obvious move, and what this used to do) would silently switch a separate feature off.
-        this._writeMarchUniforms(index, L);
+        // `u_hasHeight{i}` gates BOTH the march and the height-aware layer blend, so it tracks whether
+        // the layer has a height map and nothing else. Clearing it to change what the march does is the
+        // obvious move and silently switches a separate feature off.
         m.properties.set(`u_hasHeight${index}`, L.heightId ? 1 : 0);
     }
 
@@ -1373,12 +905,6 @@ export class Terrain {
             this._syncAlbedoPack(i, this._layers[i], frame);
             this._syncLayerPack(i, this._layers[i], frame);
         }
-        // Retried per frame for the same reason the pack is: a displaced layer's height map decodes
-        // asynchronously, so the first few calls find nothing to read and the rebuild is a no-op.
-        // `_rebuildRenderHeights` is idempotent once the pixels land — it recomputes from `_heights`
-        // rather than accumulating — so calling it every frame is safe, and it early-outs when no layer
-        // displaces, which is the only cost a normal terrain pays.
-        this._rebuildRenderHeights();
     }
 
     /**
@@ -1435,8 +961,15 @@ export class Terrain {
         m.properties.set(`u_color${index}`, [L.color[0], L.color[1], L.color[2]]);
         m.properties.set(`u_metallic${index}`, L.metallic);
         m.properties.set(`u_roughness${index}`, L.roughness);
-        m.properties.set(`u_dispScale${index}`, L.dispScale);
-        this._writeMarchUniforms(index, L);
+        // THE SWITCH. Zero here is what turns terrain relief off: `marchTerrain` early-returns on a
+        // zero blended depth, so the ray, its self-shadow and every per-step fetch stop with it. The
+        // height map itself is untouched — it still packs, and `u_hasHeight{i}` still drives the
+        // height-aware blend, which is a separate feature that must not go with it.
+        //
+        // The authored value's unit, for when this comes back: the layer's own TILED uv, exactly as a
+        // standard material's `dispScale` is authored in its own uv. `blendedDepth` divides by the
+        // tiling to reach the base uv the ray travels in.
+        m.properties.set(`u_dispScale${index}`, TERRAIN_RELIEF_ENABLED ? L.dispScale : 0);
         m.properties.set(`u_invertHeight${index}`, L.invertHeight ? 1 : 0);
         m.properties.set(`u_heightBlend${index}`, L.heightBlend);
         m.properties.set(`u_tiling${index}`, L.tiling);
@@ -1445,87 +978,7 @@ export class Terrain {
         m.properties.set(`u_sRange${index}`, [L.sRange[0], L.sRange[1]]);
     }
 
-    /**
-     * Tell the shader WHERE this layer's height map is cut in two, and how deep the half it owns is.
-     *
-     * A layer's relief is split at the mip whose texel covers one terrain vertex: at or below that
-     * frequency it becomes geometry, above it the parallax march carries it. This writes the march's
-     * side of that contract — the split level, the residual's range and floor, and the depth in base uv.
-     *
-     * It replaced a single `u_displaces{i}` flag that told `blendedDepth` to SKIP a displaced layer, so
-     * the fine half of every terrain height map was computed, band-limited away and then drawn by
-     * nothing at all. On a 200 m terrain at tiling 20 the split falls at mip 5.3, which left the
-     * geometry a 26x26 reduction of a 1024 map and put every rock in it out of reach.
-     *
-     * Called from `_syncLayerPack`, per frame, which is what makes the two retries below safe: a height
-     * map that has not decoded, or a pack that has not resolved, writes zeros this frame — the march
-     * contributes nothing rather than something wrong — and is picked up on a later one.
-     */
-    private _writeMarchUniforms(index: number, L: TerrainLayer): void {
-        const m = this._material;
-        const zero = () => {
-            m.properties.set(`u_splitLod${index}`, 0);
-            m.properties.set(`u_residRange${index}`, 0);
-            m.properties.set(`u_residBot${index}`, 0);
-            m.properties.set(`u_marchDepth${index}`, 0);
-        };
-        if (!this._layerDisplaces(L)) { zero(); return; }
-        const pyramid = heightPyramid(L.heightId as string);
-        if (!pyramid) { zero(); return; }
 
-        const raw = pyramid[0].width;
-        // The SAME number `_displaceContext` bakes at, density included — the two halves of a split
-        // that do not agree on where it is either double-count a band or leave a gap in one.
-        const split = displaceSplitLod(raw, L.tiling, this._R, this.densityFor());
-        const { top, bot } = pyramidResidualBounds(pyramid, split, L.invertHeight);
-
-        // IN THE PACKED TEXTURE'S MIP SPACE. `split` is derived from the raw height map's width, but the
-        // shader samples the pack, and `TexturePacker` sizes a pack as the MAX of its sources — so a
-        // 2048 normal beside a 1024 height map puts every level an octave out. `_displaceContext` says
-        // it can use the raw width because nothing sampled a matching mip; the march does now.
-        const packId = m.textures.get(`u_normal${index}`);
-        const packed = packId ? (TextureManager.Instance.getTexture(packId)?.width || raw) : raw;
-        const octaves = Math.log2(Math.max(1, packed) / Math.max(1, raw));
-
-        m.properties.set(`u_splitLod${index}`, split + octaves);
-        m.properties.set(`u_residRange${index}`, top - bot);
-        m.properties.set(`u_residBot${index}`, bot);
-        // METRES TO BASE UV. The march offsets `baseUv`, which spans the terrain's `size`; depth is
-        // authored in world metres. Scaled by the residual's range because that is the fraction of the
-        // map this half carries — the geometry has the rest.
-        // METRES TO BASE UV, dividing by the TERRAIN SIZE — the same unit `_displacementAt` bakes the
-        // geometry half in, so `dispScale` means one thing on the slider and the two halves compose.
-        //
-        // It was briefly `/ tiling`, to match a standard material's "depth in UV units"
-        // (chunks/pbrGBuffer.wgsl). That is wrong here, and the arithmetic says so plainly: dividing by
-        // the tiling multiplies the WORLD depth by the repeat size in metres. On a 400 m terrain at
-        // tiling 31 the repeat is 12.9 m, so an authored 0.06 m became 0.62 m of marched relief — POM
-        // offsetting uv by half a metre at grazing angles, which reads as smearing. It looked right when
-        // checked against a mesh only because a mesh's texture repeats about every metre, making that
-        // factor ~1.
-        //
-        // Two things settle the direction. The formulas AGREE wherever the repeat is about a metre, and
-        // `/ size` stays bounded where the tiling is coarse while `/ tiling` explodes. And under
-        // `/ tiling` the number needed for 5 cm of relief at these settings is 0.004 — below the
-        // slider's own 0.005 step, so the correct value was not even expressible.
-        //
-        // What DOES make relief read like a mesh's is the texture's world scale, not this conversion:
-        // at tiling 31 one brick spans 3.2 m and 6 cm of depth is 2% of it, where the same map on a mesh
-        // gives 25 cm bricks and 24%. The inspector surfaces the repeat in metres so that is visible.
-        m.properties.set(`u_marchDepth${index}`,
-            this._layerAmplitude(L) * this._layerReliefDetail(L) * (top - bot)
-            / Math.max(this._cfg.size, 1e-6));
-    }
-
-    /**
-     * The marched half's extra depth, 1 when the layer has no material to read it from.
-     *
-     * Deliberately NOT folded into `_layerAmplitude`: that number is the physical relief depth in
-     * metres and the geometry bake depends on it meaning exactly that. See `TerrainMaterial.reliefDetail`.
-     */
-    private _layerReliefDetail(L: TerrainLayer): number {
-        return Math.max(0, L.material?.reliefDetail ?? 1);
-    }
 
     /** A layer contributes vertex relief exactly when it has a height map and a non-zero depth. */
     private _layerDisplaces(L: TerrainLayer): boolean {
@@ -1574,10 +1027,6 @@ export class Terrain {
         if (opts.sRange) L.sRange = [opts.sRange[0], opts.sRange[1]];
         if (opts.materialId !== undefined) L.materialId = opts.materialId;
 
-        // The derived density reads the displaced layers' tiling, so a layer change invalidates it —
-        // and may change it, which means the chunks have to be rebuilt at the new one.
-        this._invalidateDensity();
-        this._rebuildChunksIfDensityChanged();
         this._writeLayerUniforms(index, L);
         this._syncLayerUniforms();
     }
@@ -1652,8 +1101,7 @@ export class Terrain {
                 const srcStart = ((rMin + r) * S + cMin) * 4;
                 sub.set(this._splat.subarray(srcStart, srcStart + w * 4), r * w * 4);
             }
-            this._surfaceRev++;   // the splat drives the displaced-layer weights
-            this._splatTex.updateRegion(cMin, rMin, w, h, sub);
+                this._splatTex.updateRegion(cMin, rMin, w, h, sub);
         }
         return changed;
     }
@@ -2101,11 +1549,6 @@ export class Terrain {
             size: this._cfg.size,
             resolution: this._cfg.resolution,
             chunkQuads: this._cfg.chunkQuads,
-            renderDensity: this._cfg.renderDensity,
-            targetVertsPerTile: this._cfg.targetVertsPerTile,
-            // Marks the unit each layer's `displacementScale` is stored in. Absent means the blob
-            // predates the change and `deserialize` migrates it — see there.
-            depthUnit: 'metres',
             heightFormat: 'u16',
             heightMin: min,
             heightMax: max,
@@ -2128,13 +1571,9 @@ export class Terrain {
 
     public static deserialize(json: any, material?: Material): Terrain {
         const terrain = new Terrain({
+            // `renderDensity` and `targetVertsPerTile` may be present in a blob saved while terrain
+            // relief was geometry. They are ignored: the mesh is one vertex per height-grid point again.
             size: json.size, resolution: json.resolution, chunkQuads: json.chunkQuads,
-            // Absent in anything saved before the option existed, and `resolveConfig` defaults it to 1 —
-            // which is the unchanged mesh, so an old terrain reloads exactly as it was.
-            renderDensity: json.renderDensity,
-            // Absent before the control existed; `resolveConfig` defaults it, so an old terrain reloads
-            // with the same detail target a new one gets.
-            targetVertsPerTile: json.targetVertsPerTile,
         }, material);
         // `heightsU16` / `splatData` are pre-decoded typed arrays supplied by the published-game loader
         // (which inflates them out of game.bin); `heights` / `splat` are the base64 form the editor saves.
@@ -2191,22 +1630,18 @@ export class Terrain {
                     // MIGRATION. Relief depth used to be authored in the layer's tiled uv and converted
                     // to metres with `size / tiling`; it is now metres outright. Scaling by the factor
                     // that used to be applied means the terrain draws exactly what it drew before — only
-                    // the number in the Depth box changes, from something whose meaning depended on the
-                    // terrain's size to something that reads as a distance.
+                     // UN-MIGRATED, not migrated. There was a conversion here that multiplied
+                    // `displacementScale` by `size / tiling` to turn a tiled-uv depth into world
+                    // metres, because relief was geometry and geometry works in metres. Relief is a
+                    // parallax march again and the authored number is a fraction of one texture repeat,
+                    // exactly as on a mesh — the unit these blobs used before the bake existed.
                     //
-                    // It lands on the parsed COPY, which is what this terrain uses. The library asset it
-                    // came from is migrated separately, by `migrateTerrainMaterialDepth` on the editor
-                    // side — an earlier version of this comment called that "unavoidable" and it was
-                    // not: the conversion needs a terrain size, and every path that assigns a library
-                    // material to a layer has a terrain in hand. Skipping it there meant re-saving a
-                    // material re-applied the raw pre-metres number, ten times too shallow.
-                    //
-                    // Guarded by the MATERIAL's own stamp as well as the terrain's, so that whichever
-                    // side converted it first, the other cannot convert it again and square the factor.
-                    if (json.depthUnit !== 'metres' && !tm.depthIsMetres) {
-                        tm.displacementScale *= json.size / Math.max(lj.tiling ?? tm.tiling, TILING_EPSILON);
-                        tm.depthIsMetres = true;
-                    }
+                    // So a blob WITHOUT the stamp is already correct as stored and is left alone; one
+                    // WITH it was mechanically converted and gets that exact factor divided back out.
+                    // This is the only place both the marker and the terrain size are in hand.
+                    if (json.depthUnit === 'metres')
+                        tm.displacementScale *= Math.max(lj.tiling ?? tm.tiling, TILING_EPSILON)
+                            / Math.max(json.size ?? 200, 1e-6);
                     terrain.setLayer(i, tm, {
                         tiling: lj.tiling, auto: lj.auto, hRange: lj.hRange, sRange: lj.sRange,
                         materialId: lj.materialId ?? null,

@@ -1,14 +1,28 @@
+import { useState } from 'react'
+import { TextureManager } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
+import GenerateLodsModal, { defaultSpecs, type GenerateLodsSpec } from './GenerateLodsModal'
+import { modelAssetTextureIds } from '../../utils/models'
+
+/** Triangles in a serialized model subtree, for the generate dialog's before/after figures. */
+function countTriangles(nodeJson: any): number {
+  if (!nodeJson || typeof nodeJson !== 'object') return 0
+  let n = Math.floor((nodeJson.model?.geometry?.indices?.length ?? 0) / 3)
+  for (const child of nodeJson.children ?? []) n += countTriangles(child)
+  return n
+}
 
 // Right-sidebar inspector for the active model tab: asset name, LOD levels (each another model asset
 // plus the camera distance where it takes over) and the distance-cull threshold.
 export default function ModelInspector() {
   const {
     activeTab, modelSession, setActiveModelName, models,
-    addModelLodFromAsset, removeModelLod, setModelLodDistance, setModelCullDistance, setActiveModelLevel,
-    animationFields, createAnimationFieldForModel, enterAnimationFieldEditor,
+    addModelLodFromAsset, generateModelLods, removeModelLod, setModelLodDistance, setModelCullDistance,
+    setActiveModelLevel, animationFields, createAnimationFieldForModel, enterAnimationFieldEditor,
   } = useCleoEngine()
+
+  const [generating, setGenerating] = useState(false)
 
   if (!modelSession) return null
 
@@ -19,11 +33,32 @@ export default function ModelInspector() {
     m.id !== activeTab.modelId && !modelSession.lodRefs.some(l => l.modelId === m.id))
   const nameOf = (modelId?: string) => modelId ? (models.find(m => m.id === modelId)?.name ?? 'missing model') : 'embedded (legacy)'
 
+  // Read off the SAVED asset rather than the live tab scene: the modal only needs figures to quote, and
+  // the asset is what generation will actually reduce.
+  const asset = models.find(m => m.id === activeTab.modelId)
+  const sourceTriangles = countTriangles(asset?.nodeJson)
+  const largestTexture = (asset ? modelAssetTextureIds(asset) : []).reduce((max, id) => {
+    const image = TextureManager.Instance.getTexture(id)?.data as HTMLImageElement | undefined
+    return Math.max(max, image?.naturalWidth ?? 0, image?.naturalHeight ?? 0)
+  }, 0)
+
   const label = 'text-xs text-slate-300'
   const num = 'w-16 bg-control text-white border border-border rounded px-1 py-[2px] text-xs'
 
   return (
     <div className='flex flex-col text-white bg-surface-raised w-full'>
+      {generating && (
+        <GenerateLodsModal
+          modelName={activeTab.title}
+          sourceTriangles={sourceTriangles}
+          largestTexture={largestTexture}
+          initial={defaultSpecs(2)}
+          onCancel={() => setGenerating(false)}
+          onGenerate={(specs: GenerateLodsSpec[], downscale: boolean) => {
+            setGenerating(false)
+            void generateModelLods(specs, downscale)
+          }} />
+      )}
       <div className='p-2 border-b border-border'>
         <label className='text-xs text-slate-300 block mb-1'>Model name</label>
         <input
@@ -104,6 +139,16 @@ export default function ModelInspector() {
                   )}
                 </div>
               ))}
+              <button
+                className='w-full text-xs bg-primary hover:bg-primary-hover rounded px-2 py-1.5 font-semibold disabled:opacity-40'
+                disabled={sourceTriangles === 0}
+                title={sourceTriangles === 0
+                  ? 'This model has no geometry to reduce'
+                  : 'Decimate this model into reduced levels, with half-resolution textures'}
+                onClick={() => setGenerating(true)}>
+                Generate LOD levels…
+              </button>
+
               {candidates.length > 0 ? (
                 <select
                   className='w-full bg-control text-white border border-border rounded px-2 py-1 text-xs'

@@ -2,6 +2,7 @@ import { Node, TextureManager } from 'cleo'
 import { cryptoRandomId } from './ids'
 import { parseByType, stripDebug, collectIds, collectTextureIds, regenerateIds } from './nodeSubtree'
 import { resolveMaterialRefs, MaterialAsset } from './materials'
+import { deepClone } from './deepClone'
 
 // A reusable node template: a serialized node subtree plus every asset/script it depends on.
 export type Template = {
@@ -73,7 +74,7 @@ export async function buildTemplateFromNode(node: Node, maps: EngineMaps): Promi
  * current material rather than the copy frozen into the template. Omit it to keep the embedded copies.
  */
 export function instantiateTemplate(template: Template, parent: Node, maps: EngineMaps, materials?: MaterialAsset[]): string {
-  const clone = JSON.parse(JSON.stringify(template.nodeJson))
+  const clone = deepClone(template.nodeJson)
   if (materials) resolveMaterialRefs(clone, materials)
   const idMap = new Map<string, string>()
   regenerateIds(clone, idMap)

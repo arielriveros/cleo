@@ -59,55 +59,69 @@ const legacy = (size: number, tiling: number, dispScale: number) => {
     return json;
 };
 
-describe('a terrain saved under the old unit', () => {
-    it('comes back scaled by size / tiling, so it renders unchanged', () => {
-        // 200 m at tiling 20 is a factor of 10: a stored 0.05 was drawing 0.5 m, and after migration it
-        // says 0.5 m. Same picture, honest number.
-        expect(depthOf(Terrain.deserialize(legacy(200, 20, 0.05)))).toBeCloseTo(0.5, 10);
+describe('a terrain saved under the METRES unit is converted back', () => {
+    // The conversion this file used to pin ran the other way. Relief depth is a fraction of one texture
+    // repeat — the same unit a standard material uses, which is what makes a library material read the
+    // same on terrain and on a mesh. For a while terrain relief was baked into the terrain's VERTICES
+    // instead; geometry works in metres, so every authored depth was multiplied by `size / tiling` and
+    // the blob stamped `depthUnit: 'metres'`.
+    //
+    // That stamp now means "this number was mechanically converted", and the same factor is divided
+    // back out so the value returns to what its author typed. A blob WITHOUT the stamp was never
+    // converted and must be left exactly alone — which covers everything written before the bake and
+    // everything written after it was removed.
+
+    const parsed = (json: any) => {
+        const t = Terrain.deserialize(json);
+        return (t as any)._layers[0].dispScale as number;
+    };
+    const blob = (over: any = {}) => ({
+        size: 200, resolution: 5, chunkQuads: 4,
+        layers: [{ material: { terrainMaterial: true, displacementScale: 0.5, tiling: 20 }, tiling: 20 }],
+        ...over,
     });
 
-    it('uses the terrain&apos;s own size, not a fixed one', () => {
-        // The old unit depended on the terrain, which is exactly why it had to go — and why the
-        // migration has to be per terrain rather than a single constant.
-        for (const [size, tiling, stored, expected] of
-                [[400, 20, 0.05, 1.0], [100, 10, 0.02, 0.2], [24, 8, 0.35, 1.05]] as number[][]) {
-            expect(depthOf(Terrain.deserialize(legacy(size, tiling, stored))), `${size}m/${tiling}`)
-                .toBeCloseTo(expected, 10);
-        }
+    it('an unstamped blob is left exactly as stored', () => {
+        expect(parsed(blob())).toBeCloseTo(0.5, 12);
     });
 
-    it('is not migrated a second time', () => {
-        // The one that would destroy content: the factor squares, and 5 cm becomes 5 m.
-        const once = Terrain.deserialize(legacy(200, 20, 0.05));
-        expect(depthOf(once)).toBeCloseTo(0.5, 10);
-
-        const again = Terrain.deserialize(once.serialize());
-        expect(depthOf(again), 'the marker must stop a second pass').toBeCloseTo(0.5, 10);
+    it('a stamped blob has size / tiling divided back out', () => {
+        expect(parsed(blob({ depthUnit: 'metres' }))).toBeCloseTo(0.5 * 20 / 200, 12);
     });
 
-    it('a blob already carrying the marker is left alone', () => {
-        const json = blob(200, 20, 0.05);
-        expect((json as any).depthUnit).toBe('metres');
-        expect(depthOf(Terrain.deserialize(json))).toBeCloseTo(0.05, 10);
+    it('using the blob own size and the layer own tiling', () => {
+        expect(parsed(blob({ depthUnit: 'metres', size: 400 }))).toBeCloseTo(0.5 * 20 / 400, 12);
+        const t50 = blob({ depthUnit: 'metres' });
+        t50.layers[0].tiling = 50;
+        expect(parsed(t50)).toBeCloseTo(0.5 * 50 / 200, 12);
+    });
+
+    it('and it exactly inverts the conversion that produced the stamp', () => {
+        // The round trip is the whole claim: whatever the author typed comes back.
+        const authored = 0.06, size = 400, tiling = 31;
+        const asMetres = authored * size / tiling;          // what the removed migration wrote
+        const t = blob({ depthUnit: 'metres', size });
+        t.layers[0].tiling = tiling;
+        t.layers[0].material.displacementScale = asMetres;
+        t.layers[0].material.tiling = tiling;
+        expect(parsed(t)).toBeCloseTo(authored, 12);
     });
 
     it('a degenerate tiling does not divide by zero', () => {
-        expect(Number.isFinite(depthOf(Terrain.deserialize(legacy(200, 0, 0.05))))).toBe(true);
-    });
-
-    it('the terrain marker alone is enough to stop it', () => {
-        // A project saved between the two changes: the terrain carries `depthUnit` and its embedded
-        // material does not, because materials only started stamping it later. That number is already
-        // metres, and migrating on the missing material marker would square the factor.
-        const json = blob(200, 20, 0.05) as any;
-        for (const l of json.layers ?? []) if (l?.material) delete l.material.depthUnit;
-        expect(depthOf(Terrain.deserialize(json))).toBeCloseTo(0.05, 10);
+        const t = blob({ depthUnit: 'metres' });
+        t.layers[0].tiling = 0;
+        expect(Number.isFinite(parsed(t))).toBe(true);
     });
 });
 
-describe('the marker is written on every save', () => {
-    it('so a terrain saved today is never migrated tomorrow', () => {
-        expect((blob(200, 20, 0.05) as any).depthUnit).toBe('metres');
+describe('nothing stamps the metres marker any more', () => {
+    it('so a terrain saved today is never converted tomorrow', () => {
+        const t = new Terrain({ size: 200, resolution: 5, chunkQuads: 4 });
+        expect((t.serialize() as any).depthUnit).toBeUndefined();
+    });
+
+    it('nor does a terrain material', () => {
+        expect((TerrainMaterial.Create('pbr', {}).serialize() as any).depthUnit).toBeUndefined();
     });
 });
 
@@ -143,15 +157,6 @@ describe('the height polarity is NOT migrated, deliberately', () => {
             expect(back.invertHeight, `round ${i}`).toBe(true);
             json = back.serialize();
         }
-    });
-});
-
-describe('reliefDetail survives the round trip', () => {
-    it('defaults to 1 and carries its value', () => {
-        expect(TerrainMaterial.parse({ terrainMaterial: true } as any).reliefDetail).toBe(1);
-        const tm = TerrainMaterial.Create('pbr', {});
-        tm.reliefDetail = 6;
-        expect(TerrainMaterial.parse(tm.serialize()).reliefDetail).toBe(6);
     });
 });
 

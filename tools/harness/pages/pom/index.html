@@ -114,7 +114,7 @@ function normalFromHeight(src, strength) {
 
     // --- the landscape, at the reported settings -------------------------------------------------
     const SIZE = 400, RES = 400;
-    const terrain = new cleo.Terrain({ size: SIZE, resolution: RES, targetVertsPerTile: 0, renderDensity: 1 });
+    const terrain = new cleo.Terrain({ size: SIZE, resolution: RES });
     const land = new cleo.LandscapeNode('landscape', terrain);
     scene.addNode(land);
 
@@ -124,7 +124,6 @@ function normalFromHeight(src, strength) {
     });
     mat.tiling = Number(q.get('tiling') || 31);
     mat.displacementScale = Number(q.get('depth') || 0.06);
-    mat.reliefDetail = Number(q.get('relief') || 1);
     mat.textures.set('displacementMap', 'brickH');
     terrain.setLayer(0, mat);
 
@@ -135,44 +134,50 @@ function normalFromHeight(src, strength) {
     // is 8 m with uv 0..1, so `Geometry.Plane`'s own uv repeats once over 8 m; the map is asked to
     // repeat every metre by tiling the material, which is what makes this the "same texture on a mesh"
     // the terrain is being judged against.
-    const planeMat = cleo.Material.PBR({
-      baseColor: [1, 1, 1], metallic: 0, roughness: 0.96,
-      displacementScale: Number(q.get('depth') || 0.06),
-      textures: { baseColorTexture: 'brickA', normalMap: 'brickN', displacementMap: 'brickH' },
-    });
-    // IN FRAME, BESIDE THE TERRAIN, and lying on it. This is the whole point of the page: the same maps
-    // and the same authored depth on the two shading paths, in one image, under one light, so "terrain
-    // looks flat next to a mesh" is a thing that can be looked at rather than argued about.
+    // THE SAME MATERIAL ON THREE SUBJECTS, in one frame, under one light.
     //
-    // 2 m square with uv 0..1, so a brick is 0.67 m -- a standard material has no tiling control, its uv
-    // is the geometry's. Terrain at tiling 300 on 400 m gives a 1.33 m repeat, so the two are within
-    // a factor of two of each other in world scale, which is as close as these two paths get.
-    const plane = new cleo.ModelNode('refPlane', new cleo.Model(cleo.Geometry.Plane(2, 2, 1, 1), planeMat));
-    plane.setPosition([1.5, 0.35, -3.0]);
-    scene.addNode(plane);
+    // The material editor previews on `Geometry.Sphere(48)`; a scene object is whatever the author
+    // made. If those two disagree about which way relief goes, the disagreement is a property of the
+    // GEOMETRY, not of the shader — `parallaxFrame` builds its basis from screen-space derivatives of
+    // position and uv, while `getNormal` decodes the normal map through the interpolated `tbn`, and the
+    // two only agree if the mesh's tangents match the chart its uv actually describes.
+    const subjectMat = () => {
+        const m = cleo.Material.PBR({
+            baseColor: [1, 1, 1], metallic: 0, roughness: 0.9,
+            displacementScale: Number(q.get('depth') || 0.06),
+            textures: { baseColorTexture: 'brickA', normalMap: 'brickN', displacementMap: 'brickH' },
+        });
+        return m;
+    };
+    const subjects = [
+        ['sphere', cleo.Geometry.Sphere(48)],
+        ['cube', cleo.Geometry.Cube(1.6, 1.6, 1.6)],
+        ['plane', cleo.Geometry.Plane(1.8, 1.8, 1, 1)],
+    ];
+    subjects.forEach(([name, g], i) => {
+        const n = new cleo.ModelNode(name, new cleo.Model(g, subjectMat()));
+        // A row at one distance and one height, so nothing about the comparison depends on framing.
+        n.setPosition([(i - 1) * 2.2, 1.0, -3.4]);
+        // The plane is XY; stand it up to face the camera like the other two.
+        scene.addNode(n);
+    });
 
-    // LOW, so the relief has a long shadow to cast along the surface. A sun overhead lights a groove
-    // and its wall equally and the whole effect reads as a flat texture whatever the shader did.
+    // HIGH and to one side. A sun near the horizon puts the whole frame in a grazing specular lobe;
+    // what makes relief DIRECTION legible is a clear lit-side / shadow-side gradient across each
+    // feature, which needs the light up and off-axis. `+pitch` is DOWN and a light's forward is where
+    // it shines, so ~120 is a sun about 30 degrees past vertical, shining down and toward the camera.
     const sun = new cleo.LightNode('sun', new cleo.DirectionalLight({
       diffuse: [1.0, 0.96, 0.88], specular: [1, 1, 1], ambient: [0.16, 0.17, 0.21],
     }), true);
-    // LOW to the horizon. A sun overhead lights a groove and its wall equally and the relief reads as a
-    // flat texture whatever the shader did; the long shadow across the surface is most of what makes
-    // parallax legible at all. `setRotation([80, ...])` is a sun about 10 degrees up -- +pitch is DOWN,
-    // and a light's forward is where it shines.
-    // Pitch ~100, copied from the mesh page rather than reasoned about. A LightNode's forward is where
-    // it shines and +pitch is DOWN, so 55 aims it 35 degrees ABOVE the horizon shining forward -- the
-    // ground then gets almost no diffuse and the whole frame is the grazing specular lobe, bright at the
-    // horizon and black underfoot. That is the gradient this page rendered for four runs.
     sun.setPosition([0, 1, 0]);
-    sun.setRotation([Number(q.get('sun') || 108), 25, 0]);
+    sun.setRotation([Number(q.get('sun') || 120), 55, 0]);
     scene.addNode(sun);
 
     const cam = new cleo.CameraNode('cam', new cleo.Camera({ type: 'perspective', far: 800 }));
-    cam.setPosition([0, Number(q.get('camy') || 1.3), Number(q.get('camz') || 0)]);
+    cam.setPosition([0, Number(q.get('camy') || 1.0), Number(q.get('camz') || 0)]);
     // +pitch looks DOWN. Guessing this the other way aims the camera at the sky and renders nothing,
     // which is the trap the mesh page documents at its own camera.
-    cam.setRotation([Number(q.get('pitch') || 14), 0, 0]);
+    cam.setRotation([Number(q.get('pitch') || 0), 0, 0]);
     cam.active = true;                      // `activeCamera` is a getter over this flag; there is no setter
     scene.addNode(cam);
 
@@ -196,20 +201,22 @@ function normalFromHeight(src, strength) {
     let saved = null, syncPacked = null;
     window.__setMarch = (v) => {
       const m = terrain.material;
-      if (saved === null) saved = m.properties.get('u_marchDepth0');
+      if (saved === null) saved = m.properties.get('u_dispScale0');
       if (syncPacked === null) syncPacked = terrain.syncPackedLayers.bind(terrain);
       if (v === null) { terrain.syncPackedLayers = syncPacked; syncPacked = null; }
       else terrain.syncPackedLayers = () => {};
-      m.properties.set('u_marchDepth0', v === null ? saved : v);
-      return String(m.properties.get('u_marchDepth0'));
+      m.properties.set('u_dispScale0', v === null ? saved : v);
+      return String(m.properties.get('u_dispScale0'));
     };
     window.__uniforms = () => {
       const m = terrain.material, p = (k) => m.properties.get(k);
       return JSON.stringify({
         tiling: mat.tiling, depth: mat.displacementScale, size: SIZE, resolution: RES,
-        marchDepth0: p('u_marchDepth0'), splitLod0: p('u_splitLod0'),
-        residRange0: p('u_residRange0'), residBot0: p('u_residBot0'),
-        marchDepthMetres: p('u_marchDepth0') * SIZE,
+        dispScale0: p('u_dispScale0'), tiling0: p('u_tiling0'),
+        // What the shader will actually offset by, in base uv, and the same in metres — the two
+        // numbers an author cannot see anywhere else.
+        depthBaseUv: p('u_dispScale0') / Math.max(p('u_tiling0'), 0.01),
+        depthMetres: p('u_dispScale0') * SIZE / Math.max(p('u_tiling0'), 0.01) / SIZE * SIZE,
         hasHeight0: p('u_hasHeight0'), hasNormal0: p('u_hasNormal0'),
         packId: String(m.textures.get('u_normal0') ?? null),
         // The layer as TERRAIN derived it, not as the material was authored. `_deriveLayerSurface` is

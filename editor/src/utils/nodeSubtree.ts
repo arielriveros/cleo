@@ -1,5 +1,6 @@
 import { parseNodeJson, collectNodeIds, regenerateNodeIds, remapNodeRefs as engineRemapNodeRefs } from 'cleo'
 import { cryptoRandomId } from './ids'
+import { isBinaryPayload } from './binaryPayload'
 
 // Shared helpers for serialized node subtrees, used by both the Template and Model asset systems, so
 // template instances and imported meshes reconstruct identically.
@@ -28,9 +29,13 @@ export const collectIds = collectNodeIds
 /** Collect every texture id referenced anywhere in the subtree (material.textures maps). */
 export function collectTextureIds(obj: any, set: Set<string>): void {
   if (!obj || typeof obj !== 'object') return
+  // A vertex buffer holds no texture ids, and descending into one is millions of wasted calls — or, for a
+  // typed array, millions of materialised string keys. See utils/binaryPayload.
+  if (isBinaryPayload(obj)) return
   if (Array.isArray(obj)) { obj.forEach(o => collectTextureIds(o, set)); return }
   for (const key of Object.keys(obj)) {
     const val = obj[key]
+    if (isBinaryPayload(val)) continue
     if (key === 'textures' && val && typeof val === 'object' && !Array.isArray(val)) {
       for (const t of Object.values(val)) if (typeof t === 'string' && t) set.add(t)
     } else {

@@ -67,14 +67,6 @@ const POM_GRAZE_HI: f32 = 0.15;
 const POM_FADE_START: f32 = 4.5;
 /** ...and where it is gone. Both are mip levels. */
 const POM_FADE_END: f32 = 7.5;
-/**
- * Octaves over which a split-terminated march fades out. See parallaxFadeToSplit.
- *
- * Two, because the handoff wants to be gradual enough not to read as an edge and short enough that the
- * march still owns real signal right up to it. The residual is already collapsing across this band, so
- * the amplitude given up is small.
- */
-const POM_SPLIT_FADE_OCTAVES: f32 = 2.0;
 /** Steps in the self-shadow march. Shorter than the view march: it only has to find a blocker. */
 const POM_SHADOW_STEPS: i32 = 8;
 /**
@@ -203,45 +195,6 @@ fn parallaxFade(lod: f32) -> f32 {
 }
 
 /**
- * The same fade for a march that HANDS OFF to geometry — terrain's — ending at the split, not at a
- * fixed mip.
- *
- * POM_FADE_START/END are an absolute aliasing floor, correct for a material whose height map has
- * nowhere else to go: past that footprint the offset is bigger than the thing it offsets, so it must
- * stop. Terrain is not that case. Its map is divided at `u_splitLod{i}`, everything coarser than which
- * the VERTICES carry, and the march owns the band from the fragment's footprint up to that split. Those
- * two bands are set by unrelated quantities — one by a constant, the other by the terrain's vertex
- * spacing — and where the split lands above the constant, the octaves between them belong to NOBODY.
- *
- * That gap is why raising the tiling did not fix flat terrain relief, and it gets worse the more you
- * raise it. On a 400 m terrain at tiling 400 the split is mip 10 while this fade zeroed at 7.5: the
- * relief was correct at 2 m, half strength at 20 m and gone at 40 m with TWO AND A HALF OCTAVES of
- * residual still in the map and no geometry carrying them. At tiling 31 the split is 6.31, below the
- * constant, so the residual ran out on its own first and the gap never opened — which is why the fixed
- * band looked innocent at coarse tiling and only bit where the setting was otherwise right.
- *
- * Fading to the split closes it: the march reaches zero exactly where the geometry's band begins, so
- * one of the two always owns every octave. It is also self-limiting for aliasing, which is what the
- * fixed band was for — `residualHeight`'s two taps converge as the footprint approaches the split, so
- * the field being marched flattens toward a constant on its own, and this fades that constant out
- * rather than leaving it to slide with the camera.
- */
-fn parallaxFadeToSplit(lod: f32, split: f32) -> f32 {
-    // The LATER of the two guards, not the split's alone. Replacing the fixed band outright was a
-    // regression and the harness caught it: the `every` fixture splits at mip 5, so `[3, 5]` fades out
-    // EARLIER than `[4.5, 7.5]` and cut the march short across the middle distance - 57 of 128
-    // signature cells moved, every one of them toward a flatter, brighter image.
-    //
-    // Taking the max is what makes this a pure extension. Below the split the march is inherently safe
-    // whatever the footprint, because `residualHeight`'s two taps converge as `l` approaches `split` and
-    // the field it marches collapses to a constant on its own - so the fixed band can only ever discard
-    // signal there, never protect anything. Above the split there is nothing left to march and the
-    // geometry has it. So: a coarse split keeps exactly the old behaviour, and a fine one gets the
-    // octaves the fixed band used to drop.
-    return max(1.0 - smoothstep(split - POM_SPLIT_FADE_OCTAVES, split, lod), parallaxFade(lod));
-}
-
-/**
  * The mip level this fragment's footprint deserves, as a number, computed BY HAND.
  *
  * Neither backend exposes `textureQueryLod`, so a march that wants an explicit level has to derive it —
@@ -266,10 +219,9 @@ fn parallaxLodRaw(ddx: vec2<f32>, ddy: vec2<f32>, dims: vec2<f32>) -> f32 {
     // Terrain is that caller. It derives one level in BASE uv and each layer adds `log2(tiling)` to
     // reach its own space, so flooring here would clamp a quantity that is not yet a mip index of
     // anything. At tiling 20 a fragment three metres away has a true footprint of 0.0164 texels in base
-    // uv — 0.33 in the layer's space, mip 0 — but floored-then-shifted it samples mip 4.32, against a
-    // split at 5.32. The residual it could march then spans ONE octave of the five that are there, and
-    // at EVERY distance, because the floor pins it regardless of the camera. That is what "the relief is
-    // flat" looked like.
+    // uv — 0.33 in the layer's space, mip 0 — but floored-then-shifted it samples mip 4.32, four levels
+    // too coarse, at EVERY distance, because the floor pins it regardless of the camera. That is what
+    // "the relief is flat" looked like.
     let px = sqrt(max(length(ddx * dims) * length(ddy * dims), 1e-12));
     return log2(px);
 }

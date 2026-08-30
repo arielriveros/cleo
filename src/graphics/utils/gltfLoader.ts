@@ -204,6 +204,8 @@ export interface GltfGeometryDescriptor {
     normals: Float32Array;
     uvs: Float32Array;
     tangents: Float32Array;
+    /** Built from `TANGENT.w`, the authored handedness. Empty when the file supplies no tangents. */
+    bitangents: Float32Array;
     indices: Uint32Array;
 }
 
@@ -572,7 +574,7 @@ export class GLTFLoader {
     private describeGeometry(primitive: GLTFMesh['primitives'][0]): GltfGeometryDescriptor {
         const empty = new Float32Array(0);
         let positions: Float32Array = empty, normals: Float32Array = empty;
-        let uvs: Float32Array = empty, tangents: Float32Array = empty;
+        let uvs: Float32Array = empty, tangents: Float32Array = empty, bitangents: Float32Array = empty;
 
         if (primitive.attributes.POSITION !== undefined)
             positions = this.getAccessorData(primitive.attributes.POSITION) as Float32Array;
@@ -589,12 +591,31 @@ export class GLTFLoader {
             }
         }
 
-        // glTF tangents are vec4 (xyz + handedness); Geometry stores vec3, so drop w.
+        // glTF tangents are vec4: xyz plus a HANDEDNESS in w, with `bitangent = cross(N, T) * w`.
+        //
+        // `w` used to be dropped here ("Geometry stores vec3"), and dropping it cost the frame twice
+        // over. It is the only record of whether the mesh's uv chart is right- or left-handed; and
+        // because `Geometry` runs `_calculateTangents` whenever EITHER tangents or bitangents are
+        // missing, arriving with tangents but no bitangents also threw the authored tangents away and
+        // recomputed them. A mesh whose `w` is the opposite of the engine's assumed convention came out
+        // mirrored in V, which decodes the normal map's green channel backwards.
+        //
+        // Note the V flip a few lines above: `uvs[i + 1] = 1.0 - src[i + 1]` reverses the chart's V
+        // axis, which reverses its handedness — so the authored `w` is negated here to match the uv
+        // this loader actually emits, rather than the uv the file was authored against.
         if (primitive.attributes.TANGENT !== undefined) {
             const src = this.getAccessorData(primitive.attributes.TANGENT) as Float32Array;
-            tangents = new Float32Array((src.length / 4) * 3);
+            const count = src.length / 4;
+            tangents = new Float32Array(count * 3);
+            bitangents = new Float32Array(count * 3);
             for (let i = 0, o = 0; i < src.length; i += 4, o += 3) {
-                tangents[o] = src[i]; tangents[o + 1] = src[i + 1]; tangents[o + 2] = src[i + 2];
+                const tx = src[i], ty = src[i + 1], tz = src[i + 2];
+                tangents[o] = tx; tangents[o + 1] = ty; tangents[o + 2] = tz;
+                const nx = normals[o], ny = normals[o + 1], nz = normals[o + 2];
+                const w = -(src[i + 3] < 0 ? -1 : 1);   // negated: this loader flips V
+                bitangents[o] = (ny * tz - nz * ty) * w;
+                bitangents[o + 1] = (nz * tx - nx * tz) * w;
+                bitangents[o + 2] = (nx * ty - ny * tx) * w;
             }
         }
 
@@ -609,7 +630,7 @@ export class GLTFLoader {
             for (let i = 0; i < count; i++) indices[i] = i;
         }
 
-        return { positions, normals, uvs, tangents, indices };
+        return { positions, normals, uvs, tangents, bitangents, indices };
     }
 
     /**
@@ -717,7 +738,7 @@ export class GLTFLoader {
         };
         for (const m of result.meshes) {
             add(m.geometry.positions); add(m.geometry.normals); add(m.geometry.uvs);
-            add(m.geometry.tangents); add(m.geometry.indices);
+            add(m.geometry.tangents); add(m.geometry.bitangents); add(m.geometry.indices);
             add(m.jointIndices); add(m.jointWeights);
         }
         for (const img of result.images) if (img.kind === 'bytes') add(img.bytes);
@@ -855,7 +876,7 @@ export class GLTFLoader {
     // Eager-path geometry, delegating to `describeGeometry` so attribute decoding has one implementation.
     private async createGeometry(primitive: GLTFMesh['primitives'][0]): Promise<Geometry> {
         const g = this.describeGeometry(primitive);
-        return new Geometry(g.positions, g.normals, g.uvs, g.tangents, [], g.indices);
+        return new Geometry(g.positions, g.normals, g.uvs, g.tangents, g.bitangents, g.indices);
     }
 
     private async createMaterial(materialIndex?: number): Promise<Material> {

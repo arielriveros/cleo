@@ -96,24 +96,25 @@ export function parseTerrainMaterialAsset(asset: TerrainMaterialAsset): TerrainM
 }
 
 /**
- * Convert a pre-metres relief depth to metres, against the terrain it is being applied to.
+ * Undo the world-metres depth conversion, against the terrain the material is being applied to.
  *
- * Relief depth used to be authored in the layer's TILED uv and turned into a distance with
- * `size / tiling`; it is metres outright now. `Terrain.deserialize` converts the copy embedded in a
- * scene, but the LIBRARY asset keeps the old number until something converts it — and the conversion
- * needs a terrain size, which a material asset does not carry.
+ * Relief depth is a fraction of ONE TEXTURE REPEAT — the same unit a standard material uses, which is
+ * what makes a library material read identically on terrain and on a mesh. For a while terrain relief
+ * was baked into the mesh's vertices instead, geometry works in metres, and so a converter multiplied
+ * every authored depth by `terrainSize / tiling` and stamped `depthUnit: 'metres'` on the asset.
  *
- * So it happens here, at the moment a material meets a terrain. Without it, assigning or re-saving a
- * library material re-applied the raw number: ten times too shallow on a default 200 m landscape,
- * which reads as "updating the material turned displacement off" rather than as a unit change.
+ * That stamp is the marker for exactly this: an asset carrying it has a mechanically converted number,
+ * and dividing the same factor back out returns the value its author typed. An asset WITHOUT the stamp
+ * was never converted and is already correct, which covers everything predating the bake.
  *
- * `depthIsMetres` makes it idempotent — a material converted once is stamped, and re-saving the asset
- * writes `depthUnit: 'metres'` so it never needs converting again.
+ * Done here rather than in `TerrainMaterial.parse` because the factor needs a terrain size, and a
+ * material asset does not carry one — but every path that assigns a material to a layer has a terrain
+ * in hand. `Terrain.deserialize` does the same for the copy embedded in a scene.
  */
-export function migrateTerrainMaterialDepth(tm: TerrainMaterial, referenceSize: number): void {
-  if (tm.depthIsMetres) return
-  tm.displacementScale *= referenceSize / Math.max(tm.tiling, 0.01)
-  tm.depthIsMetres = true
+export function unmigrateTerrainMaterialDepth(tm: TerrainMaterial, asset: TerrainMaterialAsset,
+                                              referenceSize: number): void {
+  if ((asset.material as any)?.depthUnit !== 'metres') return
+  tm.displacementScale *= Math.max(tm.tiling, 0.01) / Math.max(referenceSize, 1e-6)
 }
 
 /**
@@ -132,7 +133,7 @@ export function applyTerrainMaterialToLayer(
 ): void {
   const tm = parseTerrainMaterialAsset(asset)
   // Before setLayer, because setLayer is what reads `displacementScale` into the layer.
-  migrateTerrainMaterialDepth(tm, terrain.size)
+  unmigrateTerrainMaterialDepth(tm, asset, terrain.size)
   terrain.setLayer(index, tm, { materialId: asset.id })
   // Existing scattered layers pick up changed prototypes without losing instances.
   //

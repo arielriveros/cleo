@@ -23,6 +23,8 @@ function format(data: any[]): string {
     if (value === null || typeof value !== 'object') return String(value);
     try {
       const name = value.constructor?.name ?? 'Object';
+      // See logStore's preview(): Object.keys on a typed array is a string per element.
+      if (ArrayBuffer.isView(value)) return `${name}(${(value as any).length})`;
       return `${name} ${Object.keys(value).slice(0, 8).join(' ')}`;
     } catch {
       return '';

@@ -12,6 +12,7 @@ import type { AssetLibs } from '../../utils/assetHash'
 import type { BodyDescription, ShapeDescription } from '../EngineContext'
 import { migrateLegacyUI } from '../../utils/uiMigration'
 import type { ScriptAsset } from '../../utils/scripts'
+import { deepClone } from '../../utils/deepClone'
 
 // game.json v2: a multi-scene published game. The entry (main) scene runs first; scripts call
 // Game.loadScene(name|id) to switch at runtime. Textures are serialized ONCE at the top level (they are
@@ -56,7 +57,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     // libraries, then serialize it the normal way.
     const data = await loadSceneData(meta.id)
     if (!data) continue
-    const clone = JSON.parse(JSON.stringify({ scene: data.scene, ui: data.ui }))
+    const clone = deepClone({ scene: data.scene, ui: data.ui })
     // A scene never opened in this build still carries its UI as the legacy blob; without this it
     // publishes and runs with no HUD.
     migrateLegacyUI(clone.scene, clone.ui)

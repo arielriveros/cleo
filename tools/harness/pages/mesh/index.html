@@ -415,17 +415,8 @@ window.__error = null;
       // Small and LOW-resolution. Resolution drives the heightfield grid and therefore the chunk count;
       // a coarse grid is enough to exercise the splat blend and the LOD index buffers, which is what
       // these shaders are being gated on — not visual quality.
-      // renderDensity 2: four render vertices per height cell, so the displaced layer below carries one
-      // more octave of its height map in real geometry instead of in the parallax march. It also puts
-      // the density vertex mapping under the same visual gate as everything else — the mapping breaks
-      // silently (a frozen tail of vertices, or indices addressing a quarter of the buffer) rather than
-      // throwing, so a picture is the only thing that catches it.
-      // `targetVertsPerTile` 8 against the rock layer's tiling of 8 on a 33 grid derives density 2 — the
-      // dense-chunk path under test, at a cost this scene can carry. The editor default of 32 would ask
-      // for density 8 here (66k vertices in one chunk, 743k triangles once the shadow cascades draw it),
-      // which would slow every harness run to gate the same code.
       const terrain = new cleo.Terrain({
-        size: 24, resolution: 33, targetVertsPerTile: everyScene ? 8 : 0, renderDensity: 1,
+        size: 24, resolution: 33,
       });
 
       // Sculpt through the PUBLIC brush rather than writing `terrain.heights` directly: the height array
@@ -986,64 +977,50 @@ window.__error = null;
         rock.displacementScale = 0.35;
         land.terrain.setLayer(0, rock);
 
-        // Reports what HAPPENED, not what was asked for. A bake that never ran leaves the mode set and
-        // the surface identical to the sculpted heights, which reads as "displacement covered" in a
-        // baseline while covering nothing — so the spread between the rendered surface and `_heights`
-        // is the number that matters.
+        // Reports what the MARCH will actually do, not what was asked for.
+        //
+        // This used to report a vertex bake — the spread between a rendered surface and `_heights` —
+        // because a layer's relief was cut at the mip covering one terrain vertex, baked below it and
+        // marched above it. That split is gone: the terrain's mesh is its sculpted heightfield, and a
+        // layer's whole height map is marched per fragment like any other material's.
         window.__terrainDisplaced = () => {
           const land = engine.scene && [...engine.scene.landscapes][0];
           if (!land) return JSON.stringify({ error: 'no landscape' });
           const t = land.terrain;
-          const heights = t.heights;
-          const surface = t.renderHeights;
-          let moved = 0, maxDelta = 0;
-          if (surface) {
-            for (let i = 0; i < heights.length; i++) {
-              const d = Math.abs(surface[i] - heights[i]);
-              if (d > 1e-6) moved++;
-              if (d > maxDelta) maxDelta = d;
-            }
-          }
           const m = t.material;
+          // THE MESH IS THE SCULPTED FIELD. Asserted rather than assumed: a bake reintroduced anywhere
+          // would show up here as chunk vertices that no longer match `_heights`, and nothing else in
+          // the harness looks at terrain geometry at all.
+          let maxDelta = 0;
+          const ch = t.chunks[0];
+          if (ch) {
+            const pos = ch.model.geometry.positions;
+            const R = t.resolution, stride = ch.c1 - ch.c0 + 1;
+            for (let r = ch.r0; r <= ch.r1; r++)
+              for (let c = ch.c0; c <= ch.c1; c++) {
+                const k = ((r - ch.r0) * stride + (c - ch.c0)) * 3 + 1;
+                maxDelta = Math.max(maxDelta, Math.abs(pos[k] - t.heights[r * R + c]));
+              }
+          }
           return JSON.stringify({
-            baked: !!surface,
-            moved,
-            total: heights.length,
-            maxDelta: +maxDelta.toFixed(4),
-            // A displaced layer must STAY in the march, carrying the residual the grid cannot hold.
-            // `u_hasHeight` also drives `layerHeights`, which the height-aware blend needs.
+            meshMatchesHeights: maxDelta < 1e-4,
+            maxDelta: +maxDelta.toFixed(6),
+            // `u_hasHeight` gates the march AND the height-aware blend, so it must stay set for a layer
+            // that has a height map whatever the march is doing.
             marches: m.properties.get('u_hasHeight0') === 1,
-            // THE SPLIT, as the shader will read it. `u_marchDepth0` is the residual's depth already
-            // converted to base uv, and it must be POSITIVE: a zero there is the state this whole round
-            // was about — the geometry carrying the coarse band and nothing drawing the fine one.
-            // `u_splitLod0` is where the two halves meet, in the packed texture's mip space.
-            marchDepth: +(m.properties.get('u_marchDepth0') || 0).toFixed(6),
-            splitLod: +(m.properties.get('u_splitLod0') || 0).toFixed(3),
-            residRange: +(m.properties.get('u_residRange0') || 0).toFixed(4),
-            // The relief depth the ENGINE will apply, in world metres. Read straight off the layer,
-            // because that IS the amplitude now — re-deriving it here with a `size / tiling` conversion
-            // is what let the old assertion keep passing after the engine stopped doing that.
+            // The depth the shader divides by the tiling to reach base uv. It must be POSITIVE: a zero
+            // is the state that had the fine half of every height map computed and drawn by nothing.
+            marchDepth: +(m.properties.get('u_dispScale0') || 0).toFixed(6),
+            tiling: +(m.properties.get('u_tiling0') || 0).toFixed(3),
+            // A fraction of one texture REPEAT, read straight off the layer — the same unit and the
+            // same number a standard material would use for the same relief.
             amplitude: +(t.layers[0] ? t.layers[0].dispScale : 0).toFixed(4),
-            // `lod`, not `displaceLod`: a chunk carries its LOD level and its displace KEY, and there
-            // has never been a `displaceLod` on one. This reported `[null]` for every chunk, which reads
-            // exactly like a terrain that has not picked a level yet.
             chunkLods: t.chunks.map(c => c.lod),
-            // A layer with no height map has nothing to split and nothing to march.
-            otherLayerMarchDepth: +(m.properties.get('u_marchDepth1') || 0).toFixed(6),
-            // The dense mesh, reported from what was actually BUILT rather than from the config: a
-            // mapping that ignored the density would leave the vertex count at its density-1 value.
-            // The chunk's OWN density, derived from the detail target and the layers — not the config's
-            // fixed multiplier, which is only the fallback when the target is 0.
-            renderDensity: t.densityFor(0),
-            chunkVerts: t.chunks[0] ? t.chunks[0].model.geometry.vertexCount : 0,
-            // From the TERRAIN's density, not `chunks[0].density` — which this used to read and which
-            // has never existed on a chunk. Density moved from per-chunk to one number for the whole
-            // terrain (`Every chunk is built at one density now`), and nothing updated this line, so
-            // `expectedVerts` was `Math.pow(NaN, 2)` -> null. The gate that reads it could then only
-            // pass in the one state where the comparison is vacuous — before any chunk exists, where
-            // both sides are 0 — which is precisely the state it was written to reject.
-            expectedVerts: t.chunks[0]
-              ? Math.pow((t.chunks[0].c1 - t.chunks[0].c0) * t.densityFor(0) + 1, 2) : 0,
+            // A layer with no height map marches nothing.
+            otherLayerMarchDepth: (m.properties.get('u_hasHeight1') === 1)
+              ? +(m.properties.get('u_dispScale1') || 0).toFixed(6) : 0,
+            chunkVerts: ch ? ch.model.geometry.vertexCount : 0,
+            expectedVerts: ch ? Math.pow(ch.c1 - ch.c0 + 1, 2) : 0,
             chunkCount: t.chunks.length,
           });
         };
@@ -1068,12 +1045,12 @@ window.__error = null;
         let syncPacked = null;
         window.__setMarchDepth = (v) => {
           const t = land.terrain, m = t.material;
-          if (marchDepth0 === null) marchDepth0 = m.properties.get('u_marchDepth0');
+          if (marchDepth0 === null) marchDepth0 = m.properties.get('u_dispScale0');
           if (syncPacked === null) syncPacked = t.syncPackedLayers.bind(t);
           if (v === null) { t.syncPackedLayers = syncPacked; syncPacked = null; }
           else { t.syncPackedLayers = () => {}; }
-          m.properties.set('u_marchDepth0', v === null ? marchDepth0 : v);
-          return String(m.properties.get('u_marchDepth0'));
+          m.properties.set('u_dispScale0', v === null ? marchDepth0 : v);
+          return String(m.properties.get('u_dispScale0'));
         };
       } else {
         window.__terrainLayers = () => -1;

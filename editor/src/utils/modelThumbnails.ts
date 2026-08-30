@@ -8,6 +8,7 @@ import { ModelAsset } from './models';
 import { parseByType, regenerateIds } from './nodeSubtree';
 import { TerrainMaterialAsset, parseTerrainMaterialAsset } from './terrainMaterials';
 import { awaitTexturesReady } from './textureReady';
+import { deepClone } from './deepClone';
 
 const THUMB_SIZE = 256;
 
@@ -259,7 +260,7 @@ export async function renderModelAssetThumbnail(engine: CleoEngine, asset: Model
   restoreEmbeddedTextures(asset.textures); // legacy embedded-texture assets
   const root = silently(() => {
     const holder = new Node('__thumb');
-    const clone = JSON.parse(JSON.stringify(asset.nodeJson));
+    const clone = deepClone(asset.nodeJson);
     regenerateIds(clone, new Map());
     parseByType(holder, clone);
     return holder.children[0];
@@ -294,9 +295,9 @@ export async function renderTerrainMaterialAssetThumbnail(engine: CleoEngine, as
   });
 
   await envReady;
-  // `screenshotOffscreen` renders once and never calls `scene.update()`, so the chunk vertex upload —
-  // which is what carries the baked displacement to the GPU — would never happen. Pump it by hand, the
-  // way renderModelThumbnail already does for transforms.
+  // `screenshotOffscreen` renders once and never calls `scene.update()`, so a chunk whose geometry was
+  // rebuilt would never reach the GPU. Pump it by hand, the way renderModelThumbnail already does for
+  // transforms.
   scene.root.updateTransforms();
   node.update(0, 0);
   return captureClean(engine, scene);

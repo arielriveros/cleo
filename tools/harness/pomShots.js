@@ -54,7 +54,7 @@ app.whenReady().then(async () => {
   win.webContents.on('console-message', (_e, lvl, msg) => { if (lvl === 3) errs.push(msg); });
 
   for (const tiling of TILINGS) {
-    await win.loadURL(`app://pom/index.html?tiling=${tiling}&depth=${DEPTH}&relief=${RELIEF}&camy=${CAMY}&pitch=${PITCH}`);
+    await win.loadURL(`app://pom/index.html?tiling=${tiling}&depth=${DEPTH}&camy=${CAMY}&pitch=${PITCH}`);
     const js = (s) => win.webContents.executeJavaScript(s);
     for (let i = 0; i < 200; i++) {
       const r = await js('window.__ready === true ? (window.__error || true) : null').catch(() => null);

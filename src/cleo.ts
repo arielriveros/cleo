@@ -79,9 +79,6 @@ export { GLTFLoader } from "./graphics/utils/gltfLoader";
 export type { GltfParseResult, GltfMeshDescriptor, GltfMaterialDescriptor, GltfImageSource } from "./graphics/utils/gltfLoader";
 export { InputManager } from "./input/inputManager";
 export { TextureManager } from "./graphics/systems/textureManager";
-// The editor quotes the texture's world scale beside the tiling input; it reads the threshold from
-// the same place the bake does so the warning and the split cannot drift apart.
-export { vertsPerRepeat, CARVE_VERTS_PER_REPEAT } from "./graphics/systems/displacement";
 // Channel packing: metallic/roughness/occlusion (and specular/reflectivity) source maps combined into
 // one texture before the shaders sample them. `isDerivedTextureId` identifies the results, which are
 // engine-owned — never assignable, listable or serializable.
@@ -155,6 +152,9 @@ export type { PassTiming, RenderPass, FrameSample } from "./graphics/gpuProfiler
 export { convexHull, hullFromPositions, HULL_BUDGETS } from "./physics/convexHull";
 export type { Hull, HullQuality } from "./physics/convexHull";
 export { Terrain } from "./terrain/terrain";
+// Terrain layer relief is off; the editor hides its authoring controls behind the same flag so
+// nothing is exposed that does nothing. See the constant for why it is a flag and not a deletion.
+export { TERRAIN_RELIEF_ENABLED } from "./terrain/terrain";
 export type { TerrainConfig, SculptBrush, SculptMode, TerrainLayer, PaintBrush, TerrainChunk, TerrainLodSettings, FoliageGenerateResult } from "./terrain/terrain";
 export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES } from "./terrain/foliage";
 export type { FoliageKind, FoliageParams } from "./terrain/foliage";

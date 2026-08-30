@@ -19,10 +19,11 @@ import { PREVIEW_TERRAIN_SIZE, REFERENCE_LANDSCAPE } from './previewFraming';
  * same 5 cm of authored depth read as pronounced relief in this window and as a half-percent grade on
  * the terrain — a factor of twenty-five, in the one picture an author uses to judge the number.
  *
- * So both scales are matched instead of the tile count: one repeat covers the same METRES, and one
- * vertex covers the same metres. The preview then resolves the identical `displaceSplitLod`, which is
- * what decides how much of the height map becomes geometry and how much is left to the parallax march
- * — so what is geometry here is geometry there, and what is marched here is marched there.
+ * So the REPEAT is matched instead of the tile count: one repeat covers the same metres here as on the
+ * landscape, which is what makes the depth slider mean the same thing in both places. A second match on
+ * metres-per-VERTEX used to matter too, back when a layer's height map was split between the terrain's
+ * vertices and the march and the preview had to resolve the same cut; relief is entirely marched now,
+ * so the vertex grid only has to be fine enough to be a surface.
  */
 export function buildTerrainPreviewSubject(scene: Scene, tm: TerrainMaterial,
                                            reference?: Terrain | null): LandscapeNode {
@@ -30,18 +31,14 @@ export function buildTerrainPreviewSubject(scene: Scene, tm: TerrainMaterial,
     // being authored before any terrain exists still has to be judged against something.
     const size = reference ? reference.size : REFERENCE_LANDSCAPE.size;
     const spacing = reference
-        ? reference.size / Math.max(1, (reference.resolution - 1) * reference.densityFor())
-        : REFERENCE_LANDSCAPE.size
-            / ((REFERENCE_LANDSCAPE.resolution - 1) * REFERENCE_LANDSCAPE.density);
+        ? reference.size / Math.max(1, reference.resolution - 1)
+        : REFERENCE_LANDSCAPE.size / (REFERENCE_LANDSCAPE.resolution - 1);
 
     // Enough vertices to span the patch at the landscape's own spacing. Clamped at both ends: too few
     // and the patch is not a surface, too many and a preview costs more than the terrain it previews.
     const quads = Math.max(8, Math.min(128, Math.round(PREVIEW_TERRAIN_SIZE / spacing)));
     const terrain = new Terrain({
         size: PREVIEW_TERRAIN_SIZE, resolution: quads + 1, chunkQuads: quads,
-        // Density PINNED at 1. `targetVertsPerTile` would re-derive a density for a terrain this size
-        // and undo the spacing match above — the resolution already carries it.
-        targetVertsPerTile: 0, renderDensity: 1,
     });
 
     // The tiling that puts one repeat at the same number of METRES it would cover on the landscape.

@@ -18,7 +18,10 @@ export const KEYS = {
   materials: 'cleo_materials',
   terrainMaterials: 'cleo_terrain_materials',
   templates: 'cleo_templates',
+  /** Pre-sharding single array of model assets. Still READ, to migrate it; never written again. */
   models: 'cleo_models',
+  /** Model assets are one key each, `cleo_model:<id>` — see modelStore for why. */
+  modelPrefix: 'cleo_model:',
   scripts: 'cleo_scripts',
   animationFields: 'cleo_animation_fields',
   animations: 'cleo_animations',
@@ -55,6 +58,15 @@ export function scenePrefix(projectId?: string): string {
 
 export function sceneKey(id: string, projectId?: string): string {
   return scenePrefix(projectId) + id;
+}
+
+/** `p:<project>:cleo_model:` — the prefix a model-shard scan (idbKeysByPrefix) must use. */
+export function modelPrefix(projectId?: string): string {
+  return scoped(KEYS.modelPrefix, projectId);
+}
+
+export function modelKey(id: string, projectId?: string): string {
+  return modelPrefix(projectId) + id;
 }
 
 export function vfsKey(projectId?: string): string {

@@ -20,30 +20,23 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
   const [size, setSize] = useState(cfg.size)
   const [resolution, setResolution] = useState(cfg.resolution)
   const [chunkQuads, setChunkQuads] = useState(cfg.chunkQuads)
-  const [targetVertsPerTile, setTargetVertsPerTile] = useState(cfg.targetVertsPerTile)
   const [amplitude, setAmplitude] = useState(30)
   const [busy, setBusy] = useState(false)
 
   const pending = size !== cfg.size || resolution !== cfg.resolution || chunkQuads !== cfg.chunkQuads
-    || targetVertsPerTile !== cfg.targetVertsPerTile
 
-  // The WHOLE-TERRAIN cost, because that is what is paid now. Density used to fall with distance so only
-  // near chunks were dense — but that meant a chunk crossing a LOD threshold had to be rebuilt, and that
-  // rebuild was the frame spike. Relief is baked once at one density for every chunk, so the honest
-  // figure is the total, not a per-chunk one.
-  const density = terrain.densityFor()
+  // One vertex per height-grid point. There was briefly a "Relief detail" control here that multiplied
+  // the render mesh's density, because a paint layer's height map was baked into the vertices and the
+  // grid was the only thing that could carry it. Layer relief is a parallax march again, so extra
+  // vertices carry nothing a bilinear subdivision would not, and the mesh is the height grid.
   const chunksPerSide = Math.ceil((resolution - 1) / chunkQuads)
-  const totalVerts = Math.pow(chunkQuads * density + 1, 2) * chunksPerSide * chunksPerSide
+  const totalVerts = Math.pow(chunkQuads + 1, 2) * chunksPerSide * chunksPerSide
   const totalMB = (totalVerts * 56) / 1048576
-  // The number that decides whether a height map reads as rocks or as broad lumps: geometry cannot
-  // represent anything finer than two vertex spacings, so detail below this is filtered out entirely.
-  // Reported because it is the whole limit of the technique and was previously invisible.
-  const finestFeature = (2 * size) / ((resolution - 1) * density)
 
   const rebuild = () => {
     setBusy(true)
     try {
-      rebuildTerrain(props.node, { size, resolution, chunkQuads, targetVertsPerTile, renderDensity: cfg.renderDensity })
+      rebuildTerrain(props.node, { size, resolution, chunkQuads })
       eventEmitter.emit('SCENE_CHANGED')
     } finally { setBusy(false) }
   }
@@ -88,32 +81,10 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
         </div>
         <Hint>Smaller chunks give finer culling and LOD granularity, at more draw calls.</Hint>
 
-        <div className='flex items-center justify-between'>
-          <span className={label} title='Render vertices per repeat of a paint layer height map. Render-only: physics, sculpting and the saved heightmap all stay on the height grid.'>
-            Relief detail
-          </span>
-          <NumberInput className='w-20' value={targetVertsPerTile} step={4} min={0} max={128}
-            onChange={(v) => setTargetVertsPerTile(Math.max(0, Math.min(128, Math.round(v))))} />
-        </div>
-        {/* Vertices per REPEAT of the height map, not per height sample — which is what makes relief
-            detail independent of the terrain's Resolution: a coarse height grid is compensated by a
-            denser render mesh instead of losing the relief. Terrain relief is real geometry, so the
-            vertex grid is the only thing that can carry it.
-
-            Only chunks near the camera are built dense; the rest halve per LOD level, so the cost shown
-            is per near chunk rather than for the whole terrain. 0 hands control back to the fixed
-            multiplier in the terrain config. */}
         <Hint>
-          Vertices per repeat of a layer&apos;s height map, independent of Resolution. Baked once for the
-          whole terrain: {density}x density, {totalVerts.toLocaleString()} verts ({totalMB.toFixed(1)} MB).
-          {density >= 8 ? ' Capped by the vertex budget.' : ''}
-        </Hint>
-        <Hint>
-          Finest relief carried by GEOMETRY: <b>{finestFeature < 1
-            ? `${Math.round(finestFeature * 100)} cm`
-            : `${finestFeature.toFixed(2)} m`}</b>. Detail finer than that is drawn by the parallax
-          march instead — shaded and self-shadowed, but without a silhouette, and it fades out with
-          distance. Raise this to move more of a height map into real geometry.
+          {totalVerts.toLocaleString()} vertices ({totalMB.toFixed(1)} MB) across the whole terrain.
+          A layer&apos;s height map is drawn by the parallax march, not by these vertices, so Resolution
+          controls the terrain&apos;s SHAPE and a material&apos;s Depth controls its surface relief.
         </Hint>
 
         {/* Enabled even with no pending config change: a rebuild also re-bakes relief and re-resamples

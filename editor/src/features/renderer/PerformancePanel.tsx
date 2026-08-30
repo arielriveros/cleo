@@ -78,7 +78,7 @@ type Sample = {
   fps: number; frameMs: number; p50: number; p95: number; worst: number;
   cpuMs: number; gpuMs: number; gpuAvailable: boolean; gpuOn: boolean;
   physicsMs: number; stepMs: number; writeBackMs: number; rayMs: number; rayCount: number;
-  bodies: number; contacts: number;
+  bodies: number; contacts: number; terrainMs: number;
   sceneMs: number; transformMs: number; scriptMs: number; animatorMs: number; rigMs: number; nodes: number;
   textures: number; textureMB: number; gpuMB: number;
   heapUsedMB: number | null; heapLimitMB: number | null;
@@ -90,7 +90,7 @@ type Sample = {
 const EMPTY: Sample = {
   fps: 0, frameMs: 0, p50: 0, p95: 0, worst: 0,
   cpuMs: 0, gpuMs: 0, gpuAvailable: false, gpuOn: false,
-  physicsMs: 0, stepMs: 0, writeBackMs: 0, rayMs: 0, rayCount: 0, bodies: 0, contacts: 0,
+  physicsMs: 0, stepMs: 0, writeBackMs: 0, rayMs: 0, rayCount: 0, bodies: 0, contacts: 0, terrainMs: 0,
   sceneMs: 0, transformMs: 0, scriptMs: 0, animatorMs: 0, rigMs: 0, nodes: 0,
   textures: 0, textureMB: 0, gpuMB: 0, heapUsedMB: null, heapLimitMB: null,
   lights: 0, sprites: 0,
@@ -182,14 +182,15 @@ export default function PerformancePanel() {
           gpuMs: gpuProfiler.totalMs,
           gpuAvailable: gpuProfiler.available,
           gpuOn: gpuProfiler.enabled,
-          physicsMs: phys?.totalMs ?? 0,
+          physicsMs: phys?.frameMs ?? 0,
           stepMs: phys?.stepMs ?? 0,
           writeBackMs: phys?.writeBackMs ?? 0,
           rayMs: phys?.rayMs ?? 0,
           rayCount: phys?.rayCount ?? 0,
           bodies: phys?.bodies ?? 0,
           contacts: phys?.contacts ?? 0,
-          sceneMs: sceneS?.totalMs ?? 0,
+          terrainMs: phys?.terrainMs ?? 0,
+          sceneMs: sceneS?.frameMs ?? 0,
           transformMs: sceneS?.transformMs ?? 0,
           scriptMs: sceneS?.scriptMs ?? 0,
           animatorMs: sceneS?.animatorMs ?? 0,
@@ -315,6 +316,10 @@ export default function PerformancePanel() {
         <Row label='· step' value={`${fmt(d.stepMs)} ms`} title="cannon's solver — the part a worker could take off this thread." />
         <Row label='· write-back' value={`${fmt(d.writeBackMs)} ms`} title='Scene-graph sync, which would stay on this thread regardless.' />
         <Row label='· rays' value={`${fmt(d.rayMs)} ms · ${d.rayCount.toLocaleString()}`} />
+        {/* Brackets updateFoliageColliders exactly. Foliage collision defaults to OFF, so a non-zero
+            reading here is the one that says the collider pool — not the draw path — is the cost. */}
+        <Row label='· foliage colliders' value={`${fmt(d.terrainMs)} ms`} hl={d.terrainMs > 2}
+             title='Pooling foliage collision bodies in and out around the camera. 0 unless a foliage rule has a collision shape.' />
         {/* The slice between physics and render: scripts, animators, transform propagation, camera rigs. */}
         <Row label='Scene' value={`${fmt(d.sceneMs)} ms`} hl={d.sceneMs > 5}
              title='Scripts, animators, transform propagation and camera rigs.' />

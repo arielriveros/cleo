@@ -4,6 +4,7 @@ import type { BodyDescription, ShapeDescription } from '../EngineContext';
 import { fanOutScripts, SCRIPT_ID_VAR, type ScriptAsset } from '../../utils/scripts';
 import type { Template } from '../../utils/templates';
 import { resolveMaterialRefs, type MaterialAsset } from '../../utils/materials';
+import { deepClone } from '../../utils/deepClone';
 
 // Sources needed to assemble a complete, self-contained game JSON.
 export interface GameDataSources {
@@ -112,7 +113,7 @@ export function bakeTemplates(templates: Template[], materials?: MaterialAsset[]
   };
 
   return templates.map(template => {
-    const node = JSON.parse(JSON.stringify(template.nodeJson));
+    const node = deepClone(template.nodeJson);
     if (materials) resolveMaterialRefs(node, materials);
     // The template's own inline sources first; shared script assets fill in whatever they do not cover.
     const scripts = new Map(Object.entries(template.scripts ?? {}));

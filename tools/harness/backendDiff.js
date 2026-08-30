@@ -132,31 +132,35 @@ async function runBackend(backend) {
   check(`${backend}: the request was honoured`, got === backend, `acquired ${got}`);
   if (got !== backend) return null;
 
-  // THE BAKE ACTUALLY RAN. A terrain whose layer relief never baked renders exactly like one that was
-  // never displaced, so a signature taken before it lands compares two backends on a surface neither of
-  // them was asked to draw.
+  // THE LAYER PACK ACTUALLY RESOLVED. A terrain whose packed normal+height texture has not been built
+  // renders with `u_hasHeight{i}` at 0 — no march, and no height-aware blend either — so a signature
+  // taken before it lands compares two backends on a surface neither of them was asked to draw.
   //
-  // There is only ONE executor now, and that is the point rather than a simplification. This used to
-  // assert which of two ran — JS on WebGL2, a compute dispatch on WebGPU — and that asymmetry was
-  // itself the largest source of divergence in this file: forcing both onto the JS bake took
-  // deferred.every debugAO from 24/128 differing cells at a worst delta of 100/255 to zero, and cleared
-  // fourteen other configurations with it. The two ran the same algorithm over different data (the
-  // dispatch sampled the packed layer texture's GPU mips; the JS bake builds its own pyramid from the
-  // raw height map), and a linear-ramp test fixture had hidden the gap for as long as it existed. The
-  // dispatch is deleted; the bake happens once at chunk build rather than on the camera path, which is
-  // what made it affordable to drop.
+  // This used to wait on a VERTEX BAKE instead, and the reason it was here at all is worth keeping: a
+  // layer's relief was cut at the mip covering one terrain vertex, baked below the cut and marched
+  // above it, and the two halves were executed by different code on the two backends — JS on WebGL2, a
+  // compute dispatch on WebGPU. That asymmetry was the largest single source of divergence in this
+  // file: forcing both onto the JS bake took deferred.every debugAO from 24/128 differing cells at a
+  // worst delta of 100/255 to zero, and cleared fourteen other configurations with it. The whole split
+  // is gone now — terrain marches its full height map in the shader, so both backends run the same
+  // code over the same texture — but the readiness barrier is still needed, because the PACK is still
+  // built asynchronously.
   if (scene === 'every') {
-    // POLLED, not read once. The bake is retried per frame until the layer's height map has decoded —
-    // there is no event for that — so reading straight after `__ready` catches a terrain that has not
-    // baked yet and reports a failure that is really a timing artefact.
+    // POLLED, not read once. The pack is retried per frame until the layer's height map has decoded —
+    // there is no event for that — so reading straight after `__ready` catches a terrain that is not
+    // marching yet and reports a failure that is really a timing artefact.
     let td = null;
     for (let i = 0; i < 60; i++) {
       td = await js('window.__terrainDisplaced ? JSON.parse(window.__terrainDisplaced()) : null').catch(() => null);
-      if (td && td.baked === true && td.moved > 0) break;
+      if (td && td.marches === true) break;
       await sleep(100);
     }
-    check(`${backend}: the terrain displacement bake ran`,
-          !!td && td.baked === true && td.moved > 0, JSON.stringify(td));
+    // `marches` is `u_hasHeight0`, which the PACK sets — so it is the readiness signal whether or not
+    // the march itself is enabled. The depth is deliberately NOT part of the barrier: terrain relief is
+    // off (`TERRAIN_RELIEF_ENABLED`), so it is zero by design, and waiting on it would spin for six
+    // seconds and then report a timing failure as a backend one.
+    check(`${backend}: the terrain layer pack resolved`,
+          !!td && td.marches === true, JSON.stringify(td));
   }
 
   const capture = () => captureSignature(win, sleep);

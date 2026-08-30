@@ -79,11 +79,14 @@ async function copyProjectKeys(from: string | null, toPrefix: string): Promise<v
     const value = await idbGet<any>(fromPrefix + name);
     if (value !== null && value !== undefined) await idbSet(toPrefix + name, value);
   }
-  for (const key of await idbKeysByPrefix(fromPrefix + KEYS.scenePrefix)) {
-    // Only same-level keys; an unscoped scan also matches every project's already-scoped scene blobs.
-    if (fromPrefix === '' && key.startsWith('p:')) continue;
-    const value = await idbGet<any>(key);
-    if (value !== null && value !== undefined) await idbSet(toPrefix + key.slice(fromPrefix.length), value);
+  // Scene blobs and model assets are one key each, so they are found by prefix rather than enumerated.
+  for (const prefix of [KEYS.scenePrefix, KEYS.modelPrefix]) {
+    for (const key of await idbKeysByPrefix(fromPrefix + prefix)) {
+      // Only same-level keys; an unscoped scan also matches every project's already-scoped blobs.
+      if (fromPrefix === '' && key.startsWith('p:')) continue;
+      const value = await idbGet<any>(key);
+      if (value !== null && value !== undefined) await idbSet(toPrefix + key.slice(fromPrefix.length), value);
+    }
   }
 }
 
@@ -95,8 +98,8 @@ async function hasLegacyWorkspace(): Promise<boolean> {
     const value = await idbGet<any>(name);
     if (Array.isArray(value) ? value.length > 0 : !!value) return true;
   }
-  const scenes = await idbKeysByPrefix(KEYS.scenePrefix);
-  return scenes.some(k => !k.startsWith('p:'));
+  const perKey = [...await idbKeysByPrefix(KEYS.scenePrefix), ...await idbKeysByPrefix(KEYS.modelPrefix)];
+  return perKey.some(k => !k.startsWith('p:'));
 }
 
 /**
@@ -125,8 +128,10 @@ async function migrateWorkspace(existing?: ProjectRecord): Promise<ProjectRecord
   await writeActiveId(record.id);
 
   for (const name of MIGRATABLE_KEYS) await idbDelete(name);
-  for (const key of await idbKeysByPrefix(KEYS.scenePrefix)) {
-    if (!key.startsWith('p:')) await idbDelete(key);
+  for (const prefix of [KEYS.scenePrefix, KEYS.modelPrefix]) {
+    for (const key of await idbKeysByPrefix(prefix)) {
+      if (!key.startsWith('p:')) await idbDelete(key);
+    }
   }
   for (const name of MIGRATABLE_LS_KEYS) {
     try { localStorage.removeItem(name); } catch { /* ignore */ }
@@ -209,7 +214,8 @@ export async function createProject(name: string): Promise<ProjectRecord> {
   await idbSet(libKey('materials', id), []);
   await idbSet(libKey('terrainMaterials', id), []);
   await idbSet(libKey('templates', id), []);
-  await idbSet(libKey('models', id), []);
+  // No models key: they are one record per asset now (modelStore), and a fresh project has none. The
+  // library keys above already make the project visible to that prefix scan.
   await idbSet(libKey('scripts', id), []);
   await idbSet(libKey('animationFields', id), []);
   await saveProjects([...(await loadProjects()), record]);

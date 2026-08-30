@@ -400,13 +400,6 @@ export class Material {
             material.properties.set(`u_hasHeight${i}`, 0);
             material.properties.set(`u_invertHeight${i}`, 0);
             material.properties.set(`u_dispScale${i}`, 0.05);
-            // The march's half of the height-map split, zeroed until a layer resolves one. See
-            // `Terrain._writeMarchUniforms`; zero here means "march nothing", which is the right
-            // answer for a terrain with no layers assigned.
-            material.properties.set(`u_splitLod${i}`, 0);
-            material.properties.set(`u_residRange${i}`, 0);
-            material.properties.set(`u_residBot${i}`, 0);
-            material.properties.set(`u_marchDepth${i}`, 0);
             material.properties.set(`u_heightBlend${i}`, 0);
         }
         return material;
@@ -698,67 +691,33 @@ export class TerrainMaterial extends Material {
     /** Slope band (0 flat .. 1 vertical) the layer is visible in (auto blend). */
     public sRange: [number, number] = [0, 1];
     /**
-     * Relief depth for this layer's height map, in WORLD METRES.
+     * Relief depth for this layer's height map, as a fraction of ONE TEXTURE REPEAT.
      *
-     * Unlike a standard material's `displacementScale`, which is in the surface's own uv, this is a
-     * distance: 0.05 is five centimetres of relief whatever the terrain's size and whatever the layer's
-     * tiling. That is what makes a library material tunable once and reusable — the old tiled-uv unit
-     * meant ten times more relief on a 200 m terrain than on a 20 m one.
+     * The same unit and the same meaning as a standard material's `displacementScale`, which is what
+     * makes a library material read identically on terrain and on a mesh: both surfaces know their own
+     * texture repeat and nothing else. `chunks/terrainLayers.wgsl`'s `blendedDepth` divides by the
+     * layer's tiling to reach the base uv the ray travels in.
+     *
+     * This was briefly WORLD METRES, because relief was split between a vertex bake and the march and a
+     * bake works in metres. One authored number driving two mechanisms forced a unit that meant nothing
+     * to the texture: 6 cm on a 3.2 m brick is 2% of the feature, where the same map on a mesh gets 24%,
+     * so terrain read flat next to an identical material. The bake is gone and so is the unit.
      */
     public displacementScale: number = 0.05;
-    /**
-     * Whether {@link displacementScale} has been converted to metres yet.
-     *
-     * False on any material parsed from JSON written before the unit changed, and the ONE signal that
-     * lets `applyTerrainMaterialToLayer` convert it against the terrain it is being applied to. Without
-     * it, assigning a library material re-applied the raw pre-metres number — ten times too shallow on
-     * a default landscape — which looked exactly like "saving the material switched displacement off".
-     *
-     * Not serialized as a boolean: `serialize` stamps `depthUnit: 'metres'`, which is self-describing
-     * in the file and matches the marker `Terrain.serialize` already writes.
-     */
-    public depthIsMetres: boolean = true;
     /**
      * "My source is already a HEIGHT map (white = high)."
      *
      * Reads backwards from its name, and the name is kept because it is the same control a standard
-     * material has. The slot is documented as a DEPTH map in four places — `displacementMap`,
-     * `material.ts` above, `chunks/terrainLayers.wgsl` and `chunks/parallax.wgsl` ("ship a DEPTH map,
-     * `*_disp.png`, white = deep. The two are indistinguishable from the bytes"). TERRAIN now honours
-     * that: `Terrain._deriveLayerSurface` inverts by default, so with this off a depth map pops out,
-     * which is what the slot promises and what an author expects from an untouched checkbox.
+     * material has — and now it means the same thing. The slot is documented as a DEPTH map
+     * (`*_disp.png`, white = deep; the two are indistinguishable from the bytes), so with this off a
+     * depth map recesses on terrain exactly as it does on a mesh.
      *
-     * Standard materials still read the slot as a height map. That divergence is deliberate and
-     * recorded rather than fixed here: the same map reads opposite on a mesh until that path is
-     * revisited.
+     * `Terrain._deriveLayerSurface` used to NEGATE this on the way to the layer, because terrain relief
+     * was geometry: geometry only adds, a march only carves, so the two needed opposite reference
+     * planes and the same map came out inside-out depending on what it was applied to. Terrain marches
+     * now; the negation is gone and there is one meaning.
      */
     public invertHeight: boolean = false;
-    /**
-     * Extra depth for the MARCHED half of the relief only, 1 = none.
-     *
-     * `displacementScale` is one number driving two mechanisms: the vertices carry everything coarser
-     * than `displaceSplitLod`, the parallax march carries the rest. That coupling has a sharp edge.
-     * Parallax offset is `depth * tan(view)`, which is ZERO looking straight down — measured in texels
-     * of the height map it is about 1 texel a metre from the camera against 13 at thirteen metres — so
-     * the close ground reads flat however the map is authored. Deepening enough to fix that (~10x) also
-     * puts half-metre bumps into the vertices, which is the "bumps and cliffs" failure this whole
-     * feature started from.
-     *
-     * So the march gets its own multiplier. `displacementScale` stays the physical relief depth for the
-     * geometry; this buys back the near field without touching it. Applied in exactly one place,
-     * `Terrain._writeMarchUniforms`, so the bake cannot pick it up by accident.
-     *
-     * It cannot help past the point where the residual collapses (~64 m at a 2 m eye height): there is
-     * nothing left for it to scale there.
-     */
-    public reliefDetail: number = 1;
-    /**
-     * What this layer's height map does: march it per fragment, or raise the terrain's own vertices.
-     *
-     * A displaced layer is skipped by the parallax march entirely — see `Terrain._writeLayerUniforms`
-     * for how — and contributes to the chunk geometry instead. Mixing the two across layers is the
-     * useful case: displacement for the low frequencies, parallax for the fine detail on top.
-     */
     /**
      * Height-aware blend sharpness (0 = plain linear splat blend; higher = high spots poke through).
      *
@@ -802,10 +761,6 @@ export class TerrainMaterial extends Material {
             hRange: [this.hRange[0], this.hRange[1]],
             sRange: [this.sRange[0], this.sRange[1]],
             displacementScale: this.displacementScale,
-            // Stamping the unit on the way out is what makes the conversion happen exactly once. See
-            // `depthIsMetres`, and the twin marker in `Terrain.serialize`.
-            depthUnit: 'metres',
-            reliefDetail: this.reliefDetail,
             invertHeight: this.invertHeight,
             heightBlend: this.heightBlend,
             // Stamping the unit on the way out is what makes the round trip idempotent.
@@ -836,10 +791,11 @@ export class TerrainMaterial extends Material {
         //
         if (m.displacementMap) tm.textures.set('displacementMap', m.displacementMap);
         tm.displacementScale = m.displacementScale ?? 0.05;
-        // An unstamped asset predates the metres unit. A default-constructed material is already in
-        // metres, so the flag defaults true and only a parse can clear it — which keeps every path that
-        // BUILDS a material (Create, the editor's own edits) out of the migration's way entirely.
-        tm.depthIsMetres = m.depthUnit === 'metres' || m.displacementScale === undefined;
+        // NOT un-migrated here, deliberately. A `depthUnit: 'metres'` stamp means the value was
+        // multiplied by `terrainSize / tiling` while terrain relief was geometry, and undoing that needs
+        // the terrain size — which this function does not have and the stamp does not carry. It is done
+        // where both are in hand: `Terrain.deserialize` for an embedded layer material, and
+        // `unmigrateTerrainMaterialDepth` on the editor side for a library asset.
         // CARRIED THROUGH UNCHANGED, deliberately. There was a migration here that flipped this on
         // load for assets written before terrain honoured the depth-map convention, so that nothing
         // already authored would change on screen — and it cancelled the very fix it accompanied.
@@ -848,7 +804,6 @@ export class TerrainMaterial extends Material {
         // appearance was the mistake: the appearance was the bug. Existing materials flip on load now,
         // which is the point.
         tm.invertHeight = !!m.invertHeight;
-        tm.reliefDetail = m.reliefDetail ?? 1;
         tm.heightBlend = m.heightBlend ?? 0;
         // The only JSON -> live-rule path, so the density migration runs here. Downstream consumers
         // may assume every live foliageInclude entry is already per-m².

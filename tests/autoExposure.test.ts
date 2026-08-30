@@ -194,6 +194,95 @@ describe('adaptation', () => {
     });
 });
 
+describe('the authored exposure is kept apart from the metered one', () => {
+    const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
+
+    it('serializes the AUTHORED value, not whatever the meter was at', () => {
+        // `exposure: this._exposure` made a scene's saved exposure depend on where the camera happened
+        // to be pointing when Save was pressed.
+        expect(RENDERER).toContain('exposure: this._baseExposure,');
+    });
+
+    it('never lets the meter write the authored value', () => {
+        // The meter owns `_exposure`; `_baseExposure` is written only by the setters and by
+        // applyRenderSettings. If the adaptation touched it, suppressing metering would leave a preview
+        // sitting on the last adapted value, which is the bug this split exists to remove.
+        const fn = RENDERER.slice(RENDERER.indexOf('private _adaptExposure('));
+        expect(fn.slice(0, fn.indexOf('\n    }'))).not.toContain('_baseExposure');
+    });
+
+    it('resolves the exposure ABOVE the thumbnail early-return', () => {
+        // The ordering IS the feature. `screenshotOffscreen` sets `_presentTarget`, and
+        // `_applyPostProcessing` returns on it before the metering pass — so a thumbnail never meters,
+        // and without a resolve above that return it would render at the scene's last metered value.
+        // Two thumbnails a second apart then come out at different brightnesses.
+        const post = RENDERER.slice(RENDERER.indexOf('private _applyPostProcessing('));
+        const body = post.slice(0, post.indexOf('this._presentThumbnail()'));
+        expect(body).toContain('this._resolveExposure();');
+    });
+
+    it("renders a preview at a FIXED exposure, not the project's", () => {
+        // The distinction this got wrong once. Using the project's authored value looks reasonable and
+        // is not: a scene saved while auto-exposure had opened up on a dim interior banks a very large
+        // exposure, and every preview in the editor then renders blown out. A constant is also what
+        // keeps thumbnails comparable with each other and stable as the scene is retuned.
+        expect(RENDERER).toContain('this._exposure = Renderer.PREVIEW_EXPOSURE;');
+        expect(RENDERER).toContain('PREVIEW_EXPOSURE = 2.0');
+        const fn = RENDERER.slice(RENDERER.indexOf('private _resolveExposure()'));
+        const body = fn.slice(0, fn.indexOf('\n    }'));
+        // The offscreen thumbnail path counts as a preview whichever tab it was taken from.
+        expect(body).toContain('!this._exposureMeteringAllowed || this._presentTarget');
+    });
+
+    it('leaves a manual exposure alone when metering is merely switched off', () => {
+        // Auto-exposure off project-wide is not a preview: the artist's own exposure has to stand.
+        const fn = RENDERER.slice(RENDERER.indexOf('private _resolveExposure()'));
+        const body = fn.slice(0, fn.indexOf('\n    }'));
+        expect(body).toContain('if (!this._autoExposureEnabled) this._exposure = this._baseExposure;');
+        expect(RENDERER).toContain('return this._autoExposureEnabled && this._exposureMeteringAllowed;');
+    });
+});
+
+describe('metering is suppressed outside the scene tab', () => {
+    const CONTEXT = readFileSync(join(__dirname, '..', 'editor', 'src', 'features', 'EngineContext.tsx'), 'utf-8');
+
+    /** The `TabKind` union and the table that must cover it. */
+    const tabKinds = () => {
+        const line = CONTEXT.match(/export type TabKind = ([^;]+);/);
+        expect(line, 'TabKind not found').toBeTruthy();
+        return [...line![1].matchAll(/'([a-zA-Z]+)'/g)].map(m => m[1]);
+    };
+    const tableEntries = () => {
+        const start = CONTEXT.indexOf('export const TAB_METERS_EXPOSURE');
+        const body = CONTEXT.slice(start, CONTEXT.indexOf('};', start));
+        return Object.fromEntries([...body.matchAll(/^\s{2}([a-zA-Z]+):\s*(true|false)/gm)]
+            .map(m => [m[1], m[2] === 'true']));
+    };
+
+    it('covers every tab kind', () => {
+        // The same exhaustiveness `MODE_RENDERS_VIEWPORT` has, for the same reason: a new tab kind
+        // added without an entry would silently inherit metering it should not have.
+        const table = tableEntries();
+        for (const kind of tabKinds()) expect(table, `no TAB_METERS_EXPOSURE entry for '${kind}'`).toHaveProperty(kind);
+    });
+
+    it('allows it for the scene tab and nothing else', () => {
+        const table = tableEntries();
+        expect(table.scene).toBe(true);
+        for (const [kind, on] of Object.entries(table))
+            if (kind !== 'scene') expect(on, `'${kind}' is a preview and must not meter`).toBe(false);
+    });
+
+    it('drives it from all three places the renderer is configured per context', () => {
+        // Tab switch, play start (the running game is the scene whichever tab Play came from), and play
+        // stop (hand it back to whatever tab is underneath). Missing the play pair leaves a game
+        // metering-suppressed because Play happened to be pressed from a material tab.
+        expect(CONTEXT).toContain('setExposureMeteringAllowed(TAB_METERS_EXPOSURE[tab.kind])');
+        expect(CONTEXT).toContain('setExposureMeteringAllowed(true)');
+        expect(CONTEXT).toContain('setExposureMeteringAllowed(TAB_METERS_EXPOSURE[activeTabKindRef.current])');
+    });
+});
+
 describe('the shader and the renderer agree on the window', () => {
     const SHADER = readFileSync(
         join(__dirname, '..', 'src', 'graphics', 'shaders', 'wgsl', 'exposureMeter.wgsl'), 'utf-8');

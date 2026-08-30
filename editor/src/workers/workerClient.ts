@@ -4,6 +4,7 @@
 
 import { runJob, ProjectJob, ProjectJobResult, PublishFiles, PlayerTemplates } from './projectJobs';
 import type { BundleData } from '../utils/bundle';
+import type { SimplifyBuffers } from '../utils/simplify';
 
 interface Response {
   id: number;
@@ -67,11 +68,38 @@ function dispatch(job: ProjectJob, transfer: Transferable[] = []): Promise<Proje
   return new Promise<ProjectJobResult>((resolve, reject) => {
     const id = nextId++;
     pending.set(id, { job, resolve, reject });
-    w.postMessage({ id, job }, transfer);
+    try {
+      w.postMessage({ id, job }, transfer);
+    } catch (e) {
+      // postMessage throws SYNCHRONOUSLY when the payload cannot be structured-cloned — most often
+      // `DataCloneError: … out of memory` on a large asset library. Two things have to happen here:
+      //
+      //   - drop the pending entry. It holds `job`, so leaving it in the map retains a whole copy of the
+      //     payload, and a debounced writer retrying every 400ms piles those up until the tab dies.
+      //   - run the job INLINE rather than rejecting. For a `save` that is strictly cheaper than the
+      //     worker: the payload is structured-cloned once into IndexedDB instead of twice (main→worker,
+      //     then worker→IndexedDB), so the copy that just failed may well succeed.
+      //
+      // The worker itself is fine, so `unavailable` stays false — only this payload was too big.
+      pending.delete(id);
+      runJob(job).then(outcome => resolve(outcome.result), reject);
+    }
   });
 }
 
 // ---- Typed job helpers -----------------------------------------------------------------------
+
+/**
+ * Decimate a geometry to `ratio` of its triangles, off the main thread.
+ *
+ * The buffers are NOT listed as transferable on the way in: the caller still holds the model's live
+ * geometry, and detaching it would empty the mesh the editor is drawing.
+ */
+export async function decimateGeometry(buffers: SimplifyBuffers, ratio: number): Promise<SimplifyBuffers> {
+  const result = await dispatch({ kind: 'decimate', buffers, ratio });
+  if (result.kind !== 'decimate') throw new Error('Unexpected job result');
+  return result.buffers;
+}
 
 /** Persist a value to IndexedDB off the main thread. */
 export async function saveToStorage(key: string, payload: any): Promise<void> {

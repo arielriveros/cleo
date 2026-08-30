@@ -316,6 +316,10 @@ export class Geometry {
     private _calculateTangents(): void {
         const n = this.vertexCount;
         const acc = new Float32Array(n * 3);
+        // The BITANGENT is accumulated too, and only for its SIGN. Without it this function had no way
+        // to know whether a mesh's uv chart is right- or left-handed, so it forced one handedness on
+        // every mesh — see the sign derivation at the bottom of the loop below.
+        const bacc = new Float32Array(n * 3);
         const hasUvs = this._uvs.length >= n * 2;
 
         for (let i = 0; i + 2 < this._indices.length; i += 3) {
@@ -339,6 +343,14 @@ export class Geometry {
             acc[p0] += tx; acc[p0 + 1] += ty; acc[p0 + 2] += tz;
             acc[p1] += tx; acc[p1 + 1] += ty; acc[p1 + 2] += tz;
             acc[p2] += tx; acc[p2 + 1] += ty; acc[p2 + 2] += tz;
+            // The matching dP/dv. Its magnitude is discarded below; what is kept is which side of
+            // `cross(N, T)` it falls on, which is the chart's handedness.
+            const bx = f * (du1 * e2x - du2 * e1x);
+            const by = f * (du1 * e2y - du2 * e1y);
+            const bz = f * (du1 * e2z - du2 * e1z);
+            bacc[p0] += bx; bacc[p0 + 1] += by; bacc[p0 + 2] += bz;
+            bacc[p1] += bx; bacc[p1 + 1] += by; bacc[p1 + 2] += bz;
+            bacc[p2] += bx; bacc[p2 + 1] += by; bacc[p2 + 2] += bz;
         }
 
         this._tangents = new Float32Array(n * 3);
@@ -364,10 +376,36 @@ export class Geometry {
             }
             tx /= len; ty /= len; tz /= len;
             this._tangents[i3] = tx; this._tangents[i3 + 1] = ty; this._tangents[i3 + 2] = tz;
-            // Bitangent = -(normal x tangent), matching the engine's existing convention (default.vs negates it).
-            this._bitangents[i3] = -(ny * tz - nz * ty);
-            this._bitangents[i3 + 1] = -(nz * tx - nx * tz);
-            this._bitangents[i3 + 2] = -(nx * ty - ny * tx);
+            // HANDEDNESS IS MEASURED FROM THE CHART, not assumed — Lengyel's `w`, the same quantity
+            // glTF stores in `TANGENT.w`.
+            //
+            // This used to be `-(N x T)` unconditionally, "matching the engine's existing convention".
+            // The convention is real — `chunks/modelVarying.wgsl` negates the bitangent again for the
+            // green-down normal maps the importers produce — but a convention cannot substitute for a
+            // measurement: a uv chart is right- or left-handed as a fact about the mesh, and forcing one
+            // sign MIRRORS THE V AXIS on every mesh whose chart runs the other way. A mirrored V decodes
+            // the normal map's green channel backwards, so the relief lights from the wrong side and
+            // reads inside-out, while the parallax march — which builds its own basis from screen-space
+            // derivatives in `chunks/parallax.wgsl` and is therefore always right — shifts the other
+            // way. The two disagreeing is what "the parallax is inverted" looks like.
+            //
+            // It went unnoticed because the engine's own primitives supply explicit tangents AND
+            // bitangents, so they never reach this function; only meshes that arrive without a full
+            // frame do, which in practice means imported ones. Hence "correct in the material preview,
+            // inverted in the scene": the preview subject is `Geometry.Sphere`.
+            //
+            // `< 0` keeps the old result exactly wherever the old result was right, so nothing that
+            // already looked correct moves.
+            const cx = ny * tz - nz * ty, cy = nz * tx - nx * tz, cz = nx * ty - ny * tx;
+            const dot = cx * bacc[i3] + cy * bacc[i3 + 1] + cz * bacc[i3 + 2];
+            // A vertex whose chart is degenerate — a sphere's poles, where every triangle collapses in
+            // uv — has no measurable handedness, and the sign of near-zero noise is not one. Falling
+            // back to the old fixed convention keeps those vertices bit-identical to what they were
+            // instead of letting a pole flip against the rest of the surface it belongs to.
+            const w = Math.abs(dot) < 1e-8 ? -1 : (dot < 0 ? -1 : 1);
+            this._bitangents[i3] = cx * w;
+            this._bitangents[i3 + 1] = cy * w;
+            this._bitangents[i3 + 2] = cz * w;
         }
     }
 

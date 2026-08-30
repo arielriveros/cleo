@@ -6,6 +6,7 @@ import { ModelAsset, resolvedLods } from './models'
 import { MaterialAsset, resolveMaterialRefs } from './materials'
 import { parseByType, regenerateIds } from './nodeSubtree'
 import { cryptoRandomId } from './ids'
+import { deepClone } from './deepClone'
 
 // Builds engine-consumable foliage rules from mesh library assets. A TerrainFoliageRule must stay plain
 // JSON (material.ts cannot import scene/foliage classes), so a mesh asset's subtree is flattened here:
@@ -20,7 +21,7 @@ import { cryptoRandomId } from './ids'
  */
 function flattenLevel(nodeJson: any, materials?: MaterialAsset[]): any[] {
   const holder = new Node('__foliage_flatten')
-  const clone = JSON.parse(JSON.stringify(nodeJson))
+  const clone = deepClone(nodeJson)
   regenerateIds(clone, new Map())
   // Re-resolve `__materialId` against the CURRENT library before baking, exactly as openMeshTab and
   // instantiateModelAsset do. A model asset's embedded material is a fallback, not the source of truth,

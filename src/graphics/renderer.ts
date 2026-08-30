@@ -117,7 +117,7 @@ import { gpuProfiler, initializeGpuProfiler, RENDER_PASSES, RenderPass } from '.
 import { buildSSAOKernel } from './ssaoKernel';
 import { TerrainLodSettings } from '../terrain/terrain';
 import type { FoliageCell } from '../terrain/foliage';
-import { collectOrphanedFoliageBuffers, collectOrphanedFoliageMeshes } from '../terrain/foliage';
+import { collectOrphanedFoliageBuffers, collectOrphanedFoliageMeshes, foliageCullLimitSq, foliageAdmitCount } from '../terrain/foliage';
 
 // The context now lives in its own leaf module (see glContext.ts); re-exported here so every existing
 // `import { gl } from './renderer'` keeps working.
@@ -414,7 +414,35 @@ export class Renderer {
 
     // A linear scale applied before the ACES tonemap. The default compensates for the Lambertian
     // albedo/PI diffuse, which otherwise leaves a white surface at ~0.3 raw radiance.
+    /**
+     * The EFFECTIVE exposure the shaders use. With metering live this is the adapted value, rewritten
+     * every frame; otherwise it is `_baseExposure` below.
+     */
     private _exposure: number = 2.0;
+    /**
+     * The AUTHORED exposure — what the artist set, what a scene saves, and what a preview renders at.
+     *
+     * Separate from `_exposure` because the meter overwrites that one continuously. Without the split,
+     * `getRenderSettings()` saved whatever the meter happened to be at the instant of the save, and
+     * suppressing metering for a preview would leave the preview sitting on the last adapted value —
+     * so two thumbnails captured a second apart came out at different brightnesses.
+     *
+     * Written by the `exposure` / `ev100` setters and by `applyRenderSettings`. NEVER by the meter.
+     */
+    private _baseExposure: number = 2.0;
+    /**
+     * Whether this host currently permits metering at all — distinct from {@link
+     * RenderSettings.autoExposureEnabled}, which is the project's setting and rides `config.render`.
+     *
+     * The editor suppresses metering on every tab that is not the scene: those render a throwaway
+     * preview with `createMaterialPreviewScene`'s fixed studio rig, which has nothing to do with the
+     * project, so an exposure metered from it means nothing. Toggling the SETTING per tab instead would
+     * either fight the saved value or mark the scene dirty on a tab switch.
+     *
+     * Defaults to allowed, so the standalone player and any non-editor host meter with no extra call.
+     * Deliberately not part of `RenderSettings` — it is view state, like `debugView`.
+     */
+    private _exposureMeteringAllowed: boolean = true;
     /**
      * HDR bloom: luminance where bloom starts, soft-knee width around it, and additive strength.
      *
@@ -844,7 +872,28 @@ export class Renderer {
     // Foliage cells beyond this camera distance are skipped (world units; 0 = disabled).
     private _foliageCullDistance: number = 65;
     // Foliage spatial-grid cell size (world units); smaller = tighter culling, more draw calls.
+    // MUST match FoliageLayer.cellSize's default, or the first frame after every load rebuilds the grid.
     private _foliageCellSize: number = 13;
+    /**
+     * Hysteresis on the foliage DISTANCE CULL: a visible cell stays visible out to
+     * `cullDistance × this`, while a hidden one only appears at `cullDistance`.
+     *
+     * Without a band the cull is a bare `d2 > maxD2` and a cell sitting on the boundary flips in and out
+     * on sub-metre camera jitter — each flip costing its whole instance count in draws. The per-cell LOD
+     * band immediately below the cull already damps itself by ×0.9 for the same reason, as does
+     * LodGroupNode; the cull was the one transition left undamped.
+     */
+    private _foliageCullHysteresis: number = 1.1;
+    /**
+     * How many NEWLY visible foliage cells may be admitted per frame, per layer.
+     *
+     * Crossing the cull boundary is a step change: the frame a cell is admitted must draw its entire
+     * instance count × every prototype, with nothing amortising it. Admitting the nearest few per frame
+     * spreads that ramp over a handful of frames. A cell that was already visible is NEVER delayed, so
+     * this can only ever hold back the far edge of the view, where a cell arriving two frames late is
+     * imperceptible. 0 disables the budget.
+     */
+    private _foliageAdmitPerFrame: number = 4;
     // Distance-based terrain LOD: chunks past distance1/distance2 drop to a grid decimated by step1/step2
     // (triangles scale by 1/step²). Applied per chunk, per frame, before the shadow passes.
     private _terrainLodEnabled: boolean = true;
@@ -1833,9 +1882,12 @@ export class Renderer {
                     let bound = false;
                     for (const cell of layer.cells) {
                         if (!cell.glBuffer) continue;
-                        // Same distance cull as the colour pass: foliage the camera cannot see does not
-                        // need to cast either, and this is what keeps the added cost proportional.
-                        if (this._aabbDistSq(camPos, cell.min, cell.max) > maxD2) continue;
+                        // Same distance cull as the colour pass — including its hysteresis band, so a
+                        // cell on the boundary does not flicker its shadow in and out. `cell.visible` is
+                        // READ, never written, here: the colour pass owns that flag, and it is cleared by
+                        // the distance test alone, which makes it exactly "inside the damped cull range".
+                        const limit2 = foliageCullLimitSq(maxD2, cell.visible, this._foliageCullHysteresis);
+                        if (this._aabbDistSq(camPos, cell.min, cell.max) > limit2) continue;
                         if (!this._shadowFrustum.intersectsAABB(cell.min, cell.max)) continue;
 
                         if (!bound) {
@@ -1878,18 +1930,47 @@ export class Renderer {
                 // Bucket index levels.length is the billboard-impostor bucket.
                 const billboardBucket = layer.levels.length;
                 const buckets: FoliageCell[][] = [];
+                // Newly-visible cells, nearest first, so the admission budget below spends itself on the
+                // ones the camera is heading towards rather than on whichever the grid happened to list.
+                const pending: { cell: FoliageCell; d2: number }[] = [];
+                // Was ANY cell of this layer already up? If not, this is the layer's first sight — a
+                // scene load, or the camera reaching a new landscape — and the budget is skipped. Rate-
+                // limiting there would not smooth a spike, it would just make the whole layer fade in
+                // over a second. The budget exists for the steady state, where a moving camera admits a
+                // few cells at a time.
+                let anyWasVisible = false;
                 for (const cell of layer.cells) {
+                    // Read BEFORE any cull branch: a cell that is visible but frustum-culled this frame
+                    // still proves the layer is up. Sampling it after the culls would let a fast turn —
+                    // every old cell swinging out of frustum at once — read as "first sight" and admit a
+                    // whole new view in one frame, which is the exact spike being smoothed.
+                    const wasVisible = cell.visible;
+                    anyWasVisible ||= wasVisible;
                     const d2 = this._aabbDistSq(camPos, cell.min, cell.max);
-                    // Distance cull: nearest point of the cell's AABB to the camera.
-                    if (d2 > maxD2) {
+                    // Distance cull: nearest point of the cell's AABB to the camera, with a hysteresis
+                    // band so a cell on the boundary cannot flip every frame. Coming IN costs a whole
+                    // cell's worth of draws, so the band is asymmetric in the cheap direction: appear at
+                    // cullDistance, disappear only past cullDistance × hysteresis.
+                    const limit2 = foliageCullLimitSq(maxD2, wasVisible, this._foliageCullHysteresis);
+                    if (d2 > limit2) {
                         frameStats.culledInstances += cell.count;
+                        cell.visible = false;
                         continue;
                     }
-                    // Frustum cull (honors the global toggle).
+                    // Frustum cull (honors the global toggle). Deliberately NOT hysteresis-damped and it
+                    // does not clear `visible`: turning on the spot must not make the cell behind you
+                    // re-pay admission when you turn back.
                     if (this._frustumCulling && !this._frustum.intersectsAABB(cell.min, cell.max)) {
                         frameStats.culledInstances += cell.count;
                         continue;
                     }
+                    // Newly visible: queue for the budget rather than drawing it this frame.
+                    if (!wasVisible && this._foliageAdmitPerFrame > 0) {
+                        pending.push({ cell, d2 });
+                        frameStats.culledInstances += cell.count;
+                        continue;
+                    }
+                    cell.visible = true;
 
                     // Per-cell LOD by the same distance bands a mesh asset's LodGroup uses, with the
                     // same ×0.9 hysteresis: coarsen immediately, refine only comfortably inside.
@@ -1911,6 +1992,17 @@ export class Renderer {
                     }
                     cell.lod = target;
                     (buckets[target] ??= []).push(cell);
+                }
+
+                // Admit the nearest few newly-visible cells. They are marked visible but NOT drawn this
+                // frame: the draw waits one more frame, which is what keeps the ramp flat. `sort` runs on
+                // the pending list only — typically empty, and a handful of entries while moving.
+                if (pending.length) {
+                    // Nearest first, so the budget is spent on the cells the camera is heading towards.
+                    // The sort runs on the pending list only — empty when parked, a handful when moving.
+                    pending.sort((a, b) => a.d2 - b.d2);
+                    const admit = foliageAdmitCount(pending.length, this._foliageAdmitPerFrame, !anyWasVisible);
+                    for (let i = 0; i < admit; i++) pending[i].cell.visible = true;
                 }
 
                 const drawBucket = (cells: FoliageCell[] | undefined, models: Model[], billboard: boolean) => {
@@ -5680,6 +5772,10 @@ export class Renderer {
     }
 
     private _applyPostProcessing(scene: Scene): void {
+        // BEFORE the thumbnail branch below, so an offscreen capture gets the authored exposure rather
+        // than the scene's last metered one. See `_resolveExposure`.
+        this._resolveExposure();
+
         // Fullscreen post passes want a known, blend-free, depth-write state.
         GLState.blend(false);
         GLState.depthTest(false);
@@ -6024,7 +6120,7 @@ export class Renderer {
      * darkens the exposure, which changes bloom's display-referred threshold, and so on.
      */
     private _exposurePass(dtSeconds: number): void {
-        if (!this._autoExposureEnabled || !this._beginPass('exposure')) return;
+        if (!this._meteringActive() || !this._beginPass('exposure')) return;
 
         const write = this._exposureWrite;
         const read = 1 - write;
@@ -6045,6 +6141,46 @@ export class Renderer {
         this._exposureReadDue = read;
         this._adaptExposure(dtSeconds);
     }
+
+    /** Is metering driving the exposure this frame? The project's setting AND this host's permission. */
+    private _meteringActive(): boolean {
+        return this._autoExposureEnabled && this._exposureMeteringAllowed;
+    }
+
+    /**
+     * Decide which exposure is in force before anything reads it.
+     *
+     * Called at the TOP of `_applyPostProcessing`, above the thumbnail early-return, and that placement
+     * is the point: `screenshotOffscreen` sets `_presentTarget`, which returns before the metering pass
+     * ever runs — so a thumbnail never meters, but without this it would still render at whatever the
+     * last live frame had adapted to. Two thumbnails captured a second apart came out at different
+     * brightnesses, and the whole asset library shifted whenever the scene's exposure moved.
+     */
+    private _resolveExposure(): void {
+        // A PREVIEW renders at a fixed exposure, not the project's. The preview scenes carry their own
+        // studio rig, so the exposure that renders them correctly is a constant — and pinning it is what
+        // keeps every thumbnail in the asset library comparable with the others and stable as the scene
+        // is retuned. Using the project's authored value instead looks reasonable and is not: a scene
+        // saved while auto-exposure had opened up on a dim interior banks a very large exposure, and
+        // every preview in the editor then renders blown out.
+        //
+        // `_presentTarget` counts as a preview whichever tab it was taken from: that is the offscreen
+        // thumbnail path, and a thumbnail keyed to the scene's momentary exposure is the inconsistency
+        // this whole split exists to remove.
+        if (!this._exposureMeteringAllowed || this._presentTarget) {
+            this._exposure = Renderer.PREVIEW_EXPOSURE;
+            return;
+        }
+        // Metering allowed but switched off for the project: the artist's manual exposure stands.
+        if (!this._autoExposureEnabled) this._exposure = this._baseExposure;
+    }
+
+    /**
+     * The exposure every preview and thumbnail renders at: EV100 15, the engine default, and the value
+     * the preview scenes were authored against long before auto-exposure existed. Deliberately a
+     * constant rather than the project's setting — see `_resolveExposure`.
+     */
+    private static readonly PREVIEW_EXPOSURE = 2.0;
 
     /**
      * Pull the metering result back, at the very end of the frame and only every few frames.
@@ -6427,8 +6563,16 @@ export class Renderer {
         if (typeof gl !== 'undefined' && gl) gl.clearColor(color[0], color[1], color[2], color[3] ?? 1);
     }
 
+    /** The EFFECTIVE exposure — metered when metering is live, authored otherwise. */
     public get exposure(): number { return this._exposure; }
-    public set exposure(exposure: number) { this._exposure = Math.max(0, exposure); }
+    /**
+     * Set the AUTHORED exposure. Applied to the effective value immediately as well, so a manual change
+     * shows at once; the next frame's `_resolveExposure` re-decides which of the two is in force.
+     */
+    public set exposure(exposure: number) {
+        this._baseExposure = Math.max(0, exposure);
+        this._exposure = this._baseExposure;
+    }
 
     /**
      * Exposure as a photographic EV100, which is the same setting written the way a light meter writes
@@ -6449,7 +6593,7 @@ export class Renderer {
         return Math.log2(REFERENCE_ILLUMINANCE / (1.2 * Math.max(1e-6, this._exposure)));
     }
     public set ev100(ev: number) {
-        this._exposure = REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, ev));
+        this.exposure = REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, ev));
     }
 
     public get bloomThreshold(): number { return this._bloomThreshold; }
@@ -6509,6 +6653,21 @@ export class Renderer {
 
     /** See {@link RenderSettings.autoExposureEnabled}. */
     public get autoExposureEnabled(): boolean { return this._autoExposureEnabled; }
+    /**
+     * Allow or suppress metering for this host. See `_exposureMeteringAllowed`.
+     *
+     * Re-allowing re-seeds the adaptation from the current picture, so returning to the scene tab eases
+     * rather than snapping — the same thing the `autoExposureEnabled` setter does.
+     */
+    public setExposureMeteringAllowed(allowed: boolean): void {
+        if (allowed && !this._exposureMeteringAllowed) {
+            this._exposureEV = this.ev100;
+            this._exposureMetered = false;
+        }
+        this._exposureMeteringAllowed = allowed;
+    }
+    public get exposureMeteringAllowed(): boolean { return this._exposureMeteringAllowed; }
+
     public set autoExposureEnabled(on: boolean) {
         // Seed the adaptation from wherever the manual value stands, so switching it on eases away
         // from the current picture instead of snapping to the metered one.
@@ -6796,7 +6955,9 @@ export class Renderer {
             spotShadowBias: this._spotShadowBias,
             bloomEnabled: this._bloomIntensity > 0,
             clearColor: this.clearColor,
-            exposure: this._exposure,
+            // The AUTHORED value. Serializing `_exposure` saved whatever the meter was at when the
+            // save happened, which made a scene's stored exposure depend on where the camera pointed.
+            exposure: this._baseExposure,
             bloomThreshold: this._bloomThreshold,
             bloomKnee: this._bloomKnee,
             bloomIntensity: this._bloomIntensity,

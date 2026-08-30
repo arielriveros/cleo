@@ -5,6 +5,7 @@ import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { ScriptAsset } from './scripts'
 import type { AnimationAsset } from './animationAssets'
 import type { TilesetAsset } from './tilesets'
+import { isTupleBuffer } from './binaryPayload'
 
 // Content hashes let a closed scene decide, on its next open, whether each asset it references actually
 // changed — so an unchanged model or template is not re-instantiated, which would churn node ids and drop
@@ -39,7 +40,7 @@ const NON_STRUCTURAL_KEYS = new Set(['thumbnail', 'ikRig', 'nodeNames'])
  * template and character is re-instantiated from an asset that knows nothing about how it was configured.
  * The version turns that mass rebuild into a no-op instead.
  */
-export const ASSET_HASH_VERSION = 4
+export const ASSET_HASH_VERSION = 5
 
 /**
  * Whether a scene's stored hashes can be compared against ones produced by the CURRENT {@link hashAsset}.
@@ -57,9 +58,70 @@ export function hashesComparable(
   return (savedVersion ?? 1) === ASSET_HASH_VERSION
 }
 
+/** 32-bit FNV-1a over raw bytes, returned as an 8-char hex. The binary twin of {@link fnv1a}. */
+function fnv1aBytes(view: ArrayBufferView): string {
+  const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
+  let h = 0x811c9dc5
+  for (let i = 0; i < bytes.length; i++) {
+    h ^= bytes[i]
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0
+  }
+  return h.toString(16).padStart(8, '0')
+}
+
+/**
+ * A vertex buffer stands in for itself as `f32:12000:9a3b1c04` — its kind, length and a hash of its bytes.
+ *
+ * Two reasons this cannot be left to `JSON.stringify`. It renders a typed array as `{"0":…,"1":…}`, so a
+ * mesh would hash differently depending only on whether it happened to be stored as a typed array or a
+ * plain one — and it would build that text at roughly 20 bytes a number, which for a large mesh is a
+ * few hundred MB of string and one step from the `RangeError` recorded in utils/deepClone. A plain
+ * number[] of the same values normalises to the same descriptor, so the two forms hash EQUAL and the
+ * bundle round trip stays stable whichever one it restores.
+ */
+function bufferDigest(value: any): string {
+  // EVERY form normalises to the same float32 byte image, so the digest cannot depend on which container
+  // the values happen to be in: a Float32Array, the Float64Array the bundle packer may narrow from, a
+  // Uint32Array of indices and a plain number[] of the same values all produce one descriptor. Picking a
+  // kind per container instead would make an asset change hash purely by being round-tripped. Float32 is
+  // exact for indices up to 2^24 — 16.7M vertices, far past what a single mesh carries.
+  //
+  // The tuple shape has to be FLATTENED first, not fed to the Float32Array constructor: that yields one
+  // NaN per vertex, and every mesh would then digest identically.
+  const flat = isTupleBuffer(value) ? flattenTuples(value) : value
+  const f32 = flat instanceof Float32Array ? flat : new Float32Array(flat as ArrayLike<number>)
+  return `f32:${f32.length}:${fnv1aBytes(f32)}`
+}
+
+/** `[[x,y,z], …]` -> a flat Float32Array. The stride comes from the first tuple; the shape is regular. */
+function flattenTuples(tuples: number[][]): Float32Array {
+  const stride = tuples[0].length
+  const out = new Float32Array(tuples.length * stride)
+  for (let i = 0; i < tuples.length; i++)
+    for (let k = 0; k < stride; k++) out[i * stride + k] = tuples[i][k] ?? 0
+  return out
+}
+
+/**
+ * A value that is really a buffer, long enough that hashing its text would hurt. Both shapes: the flat
+ * arrays a mesh serializes as, and the `[[x,y,z], …]` a baked foliage rule carries.
+ * A short run stays literal — a position triple must keep hashing as itself.
+ */
+const isBufferArray = (v: any): boolean =>
+  (Array.isArray(v) && v.length >= 16 && typeof v[0] === 'number' && typeof v[v.length - 1] === 'number') ||
+  (isTupleBuffer(v) && v.length >= 8)
+
 /** Deep-stringify `obj` with the non-structural fields omitted at every level, then hash it. */
 export function hashAsset(obj: any): string {
-  const json = JSON.stringify(obj, (key, value) => (NON_STRUCTURAL_KEYS.has(key) ? undefined : value))
+  const json = JSON.stringify(obj, function (key, value) {
+    if (NON_STRUCTURAL_KEYS.has(key)) return undefined
+    // `value` is post-toJSON; a typed array has none, so it arrives intact. Read the RAW property off the
+    // holder as well, because JSON.stringify hands a typed array through as a plain object otherwise.
+    const raw = (this as any)?.[key]
+    if (ArrayBuffer.isView(raw)) return bufferDigest(raw as ArrayBufferView)
+    if (isBufferArray(value)) return bufferDigest(value)
+    return value
+  })
   return fnv1a(json ?? '')
 }
 

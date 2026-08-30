@@ -18,7 +18,7 @@ import { join } from 'path';
  *     effective level = lod_base + 2 * log2(tiling)
  *
  * At tiling 20 that is log2(20) = 4.32 extra mips: a 1024-texel height map read as 51 texels. And it
- * did not merely blur. `residualHeight` takes its low band at `max(l, split)` with `u_splitLod` around
+ * did not merely blur. The march's low band used to be taken at `max(l, split)` with `u_splitLod` around
  * 5.3, so an inflated `l` put both taps on the SAME mip, making the residual identically zero and
  * switching the march off entirely.
  *
@@ -62,12 +62,12 @@ describe('the shared level is the BASE-uv footprint', () => {
     });
 
     it('every height fetch adds its own layer shift, exactly once', () => {
-        // Four in `layerHeights`, one in `residualHeight` (which serves all four layers). If the shared
-        // level is base-uv, this is what converts it to each layer's space.
+        // Four fetches, one per layer. There used to be a fifth in `residualHeight`, which sampled
+        // each map twice to subtract the band the terrain's vertices carried; the whole map is
+        // marched now. If the shared level is base-uv, this is what converts it to each layer's space.
         expect(bodyOf('layerHeights').match(/lod \+ log2\(t\)/g)?.length, 'all four layers').toBe(4);
-        expect(bodyOf('residualHeight')).toMatch(/let l = max\(lod \+ log2\(t\), 0\.0\);/);
-        // AFTER the shift, never before — the clamp is only meaningful once the level is in the layer's
-        // own space. All five fetch sites (four in `layerHeights`, one in `residualHeight`) clamp.
+        // AFTER the shift, never before — the clamp is only meaningful once the level is in the
+        // layer's own space. Flooring in base uv cost this march four of its five octaves.
         expect(bodyOf('layerHeights').match(/max\(lod \+ log2\(t\), 0\.0\)/g)?.length,
                'every layer clamps after its own shift').toBe(4);
     });
@@ -94,13 +94,16 @@ describe('the fade and the step count get the TILED level instead', () => {
         // It decides when the march retires, and `POM_FADE_START/END` are calibrated in texels of the
         // SAMPLED texture. On a base-uv level the march would stay on 4.3 levels too far out — the
         // opposite error, and the expensive direction.
+        //
+        // There was briefly a `parallaxFadeToSplit(lodAvg, ...)` here, which terminated the march
+        // where the vertex bake took over instead of at the aliasing floor. With no bake there is
+        // nothing to hand off to, and this is the same fixed band chunks/pbrGBuffer.wgsl uses.
         for (const fn of ['marchTerrain', 'terrainSelfShadow'])
-            // `parallaxFadeToSplit` now, but the invariant is unchanged and is the point of this case:
-            // the fade is asked about the TILED level. It takes the split as a second argument - see
-            // the handoff cases below for why the band it fades over moved.
-            expect(bodyOf(fn), `${fn} fade`).toMatch(/parallaxFadeToSplit\(lodAvg,/);
+            expect(bodyOf(fn), `${fn} fade`).toMatch(/parallaxFade\(lodAvg\)/);
         expect(bare(), 'no fade may read the base level')
-            .not.toMatch(/parallaxFade(ToSplit)?\(lod[,)]/);
+            .not.toMatch(/parallaxFade\(lod[,)]/);
+        expect(bare(), 'the split fade went with the split')
+            .not.toContain('parallaxFadeToSplit');
     });
 
     it('parallaxSteps reads lodAvg, to match the dims it is handed', () => {
@@ -111,27 +114,32 @@ describe('the fade and the step count get the TILED level instead', () => {
     });
 
     it('the fetches inside the march still read the base level', () => {
+        // Four of them: the early return, the loop seed, the loop step, and the refined hit. They
+        // used to be `layerResiduals`, which sampled the map twice per layer and subtracted the band
+        // the terrain's vertices carried; the whole map is marched now, so one tap does it.
         const body = bodyOf('marchTerrain');
-        expect(body.match(/layerResiduals\([^)]*, lod\)/g)?.length,
+        expect(body.match(/layerHeights\([^)]*, lod\)/g)?.length,
                'early return, loop seed, loop step, and the refined hit').toBe(4);
-        expect(body).toMatch(/layerHeights\([^)]*, lod\)/);
+        expect(bare(), 'the residual field is gone').not.toContain('layerResiduals');
+        expect(bare(), 'and so is the function that built it').not.toContain('residualHeight');
     });
 });
 
-describe('the self-shadow marches the field it was given a height on', () => {
-    it('is handed the RESIDUAL surface, not the full one', () => {
-        // `hit.h` is deliberately the full height — it feeds the height-aware layer blend — but this
-        // function samples `layerResiduals`, and its `h` argument is where the shadow ray STARTS on the
-        // field it is about to test. `h` also scales the ray's rise AND its lateral reach, so mixing the
-        // two scales does not shift the shadow, it changes its geometry.
-        expect(bare()).toMatch(/terrainSelfShadow\(hit\.uv, wN, lTan,\s*\n?\s*1\.0 - blendedSurface\(hit\.hRes, wN\)/);
-        expect(bodyOf('terrainSelfShadow'), 'and it tests against residuals').toMatch(/layerResiduals\(/);
+describe('the self-shadow marches the same field the view ray did', () => {
+    it('is handed the surface the march intersected', () => {
+        // `h` is where the shadow ray STARTS on the field it is about to test, and it scales both the
+        // ray's rise AND its lateral reach — so handing it a height on a different field does not
+        // shift the shadow, it changes its geometry. There used to be two fields to confuse here (the
+        // full map for the blend, the residual for the march); there is one now, which is the point.
+        expect(bare()).toMatch(/terrainSelfShadow\(hit\.uv, wN, lTan,\s*\n?\s*1\.0 - blendedSurface\(hit\.h, wN\)/);
+        expect(bodyOf('terrainSelfShadow'), 'and it tests against the same heights')
+            .toMatch(/layerHeights\(/);
     });
 
-    it('ParallaxHit carries both fields, because both are needed', () => {
-        expect(WGSL).toMatch(/struct ParallaxHit \{[\s\S]*?h: vec4<f32>,[\s\S]*?hRes: vec4<f32>,[\s\S]*?\}/);
-        expect(bodyOf('marchTerrain'), 'hit.h stays the full field for the blend')
-            .toMatch(/hit\.h = layerHeights\(/);
+    it('ParallaxHit carries one height field', () => {
+        expect(WGSL).toMatch(/struct ParallaxHit \{[\s\S]*?h: vec4<f32>,[\s\S]*?\}/);
+        expect(WGSL, 'the residual twin is gone').not.toContain('hRes');
+        expect(bodyOf('marchTerrain')).toMatch(/hit\.h = layerHeights\(/);
     });
 });
 
@@ -143,67 +151,5 @@ describe('the single-uv reference this generalises', () => {
                                       'chunks', 'pbrGBuffer.wgsl'), 'utf-8').replace(/\/\/[^\n]*/g, '');
         expect(pbr).toMatch(/let lod = parallaxLod\(ddx, ddy, dims\);/);
         expect(pbr).toMatch(/let ddx = dpdx\(in\.uv\);/);
-    });
-});
-
-describe('the march hands off to the geometry, and does not stop short of it', () => {
-    // The gap that made "raise the tiling" fail. Terrain's height map is split at `u_splitLod{i}`:
-    // coarser than that the VERTICES carry it, finer than that the march does. But the march was faded
-    // out by POM_FADE_START/END, an absolute aliasing floor meant for a material whose map has nowhere
-    // else to go. Nothing tied the two together, so wherever the split landed above the fixed band the
-    // octaves between them were carried by neither half.
-    //
-    // On a 400 m terrain at tiling 400 - a 1 m repeat, the setting that makes terrain match a mesh
-    // exactly up close - the split is mip 10 and the fixed band zeroed at 7.5. Measured against the
-    // shader's own arithmetic, the relief was full strength at 10 m, half at 20 m and GONE at 40 m with
-    // 2.53 octaves of residual still in the map. Raising the tiling bought correct close-up relief and
-    // paid for it with a flat middle distance, which is why it read as "still doesn't work".
-    //
-    // At tiling 31 the split is 6.31, BELOW the fixed band, so `residualHeight`'s two taps converged
-    // before the fade could bite and the bug was invisible. It only appears once the tiling is right.
-
-    const ss = (e0: number, e1: number, x: number) => {
-        const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1);
-        return t * t * (3 - 2 * t);
-    };
-    const fixed = (lod: number) => 1 - ss(4.5, 7.5, lod);
-    const toSplit = (lod: number, split: number) =>
-        Math.max(1 - ss(split - 2, split, lod), fixed(lod));
-
-    it('terrain fades on the split, never on the fixed band', () => {
-        const src = require('fs').readFileSync(
-            'src/graphics/shaders/wgsl/chunks/terrainLayers.wgsl', 'utf-8');
-        expect(src, 'the march must terminate where the geometry takes over')
-            .toContain('parallaxFadeToSplit');
-        expect(src, 'the fixed aliasing band belongs to single-material paths only')
-            .not.toContain('parallaxFade(lodAvg)');
-    });
-
-    it('and the fixed band dropped octaves the geometry was never going to carry', () => {
-        // split 10 (tiling 400 on a 400-vertex, 400 m terrain against a 1024 map).
-        const split = 10;
-        for (const lod of [5.98, 7.48]) {
-            expect(split - lod, `mip ${lod} still has residual`).toBeGreaterThan(2);
-            expect(fixed(lod), `the fixed band gave up at mip ${lod}`).toBeLessThan(0.55);
-            expect(toSplit(lod, split), `the split fade keeps it`).toBeCloseTo(1, 6);
-        }
-    });
-
-    it('never fades EARLIER than the fixed band did, at any split', () => {
-        // The regression the harness caught. Replacing the band outright made a coarse split fade out
-        // sooner than before - the `every` fixture splits at mip 5, so `[3, 5]` beat `[4.5, 7.5]` and
-        // moved 57 of 128 signature cells toward a flatter image. Taking the max makes this a pure
-        // extension: it can only ever add reach.
-        for (const split of [3, 5, 6.31, 8, 10])
-            for (let lod = 0; lod <= 12; lod += 0.25)
-                expect(toSplit(lod, split), `split ${split}, mip ${lod}`)
-                    .toBeGreaterThanOrEqual(fixed(lod) - 1e-12);
-    });
-
-    it('and a coarse split keeps the old behaviour exactly', () => {
-        // At split 5 the residual is exhausted before the fixed band would have mattered, so nothing
-        // about that terrain's relief may change.
-        for (let lod = 0; lod <= 12; lod += 0.25)
-            expect(toSplit(lod, 5), `mip ${lod}`).toBeCloseTo(fixed(lod), 12);
     });
 });

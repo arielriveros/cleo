@@ -10,6 +10,8 @@
 // `cleo` → ../dist link, can exercise it.
 // ---------------------------------------------------------------------------------------------------
 
+import { deepClone } from './deepClone'
+
 /** The shape these helpers need from a model asset. Structural, so ModelAsset satisfies it. */
 export type ClipBearingAsset = { nodeJson: any }
 
@@ -41,7 +43,7 @@ export function uniqueClipName(name: string, taken: Set<string>): string {
  * skinned model to patch). The input is never modified — asset libraries are React state.
  */
 function withClips<T extends ClipBearingAsset>(asset: T, mutate: (clips: any[]) => any[]): T {
-  const nodeJson = JSON.parse(JSON.stringify(asset.nodeJson))
+  const nodeJson = deepClone(asset.nodeJson)
   const model = skinnedModelJsonOf(nodeJson)
   if (!model) return asset
   const before = model.animations ?? []
@@ -97,7 +99,7 @@ export function assetWithClipRootMotion<T extends ClipBearingAsset>(asset: T, na
  * AnimatedModel.parse reads back.
  */
 export function assetWithBoneNames<T extends ClipBearingAsset>(asset: T, names: Map<number, string>): T {
-  const nodeJson = JSON.parse(JSON.stringify(asset.nodeJson))
+  const nodeJson = deepClone(asset.nodeJson)
   const model = skinnedModelJsonOf(nodeJson)
   if (!model?.skin) return asset
   const merged = new Map<number, string>(
@@ -125,7 +127,7 @@ export function assetWithIkRig<T extends ClipBearingAsset>(asset: T, rig: any | 
   // Hand the ORIGINAL back on a no-op: a new-but-equal object triggers a full IndexedDB rewrite.
   if (JSON.stringify(current ?? null) === JSON.stringify(rig ?? null)) return asset
 
-  const nodeJson = JSON.parse(JSON.stringify(asset.nodeJson))
+  const nodeJson = deepClone(asset.nodeJson)
   const model = skinnedModelJsonOf(nodeJson)
   if (!model?.skin) return asset
   // `null`, not `undefined`, matching what AnimatedModel.serialize writes for an absent rig.
@@ -192,7 +194,7 @@ export function flattenModelAsset<T extends { nodeJson: any }>(asset: T): T {
 export function assetWithoutEmbeddedClips<T extends ClipBearingAsset>(asset: T): T {
   const model = skinnedModelJsonOf(asset.nodeJson)
   if (!model?.animations?.length) return asset
-  const nodeJson = JSON.parse(JSON.stringify(asset.nodeJson))
+  const nodeJson = deepClone(asset.nodeJson)
   const target = skinnedModelJsonOf(nodeJson)
   if (target) target.animations = null   // null, not [], to match what AnimatedModel.serialize writes
   return { ...asset, nodeJson }

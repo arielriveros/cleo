@@ -194,3 +194,26 @@ on, and SSAO roughly doubles that because it compares reconstructed depths again
 rounding difference flips a sample in or out. It is NOT the rotation noise — holding that constant on
 both backends changes nothing, which is worth writing down because it is the obvious suspect. Outside
 SSAO, eleven pixels in the whole frame differ by more than 40/255, all of them one specular highlight.
+
+## `pomShots.js` — the parallax comparison, as pictures
+
+`npm run harness:pom`. Not a gate: it renders and writes PNGs to `tools/harness/shots/pom/`, to be
+looked at.
+
+It builds a 400 m landscape carrying a brick height map at whatever tiling is asked for, plus the same
+maps on a standard PBR slab beside it, captures the frame with the march on and with the layer depth
+zeroed, and writes both plus an amplified difference. The difference is also reduced to a number —
+mean, worst, and the percentage of pixels that moved — so "the relief looks flat" can be answered with
+a measurement instead of an opinion.
+
+    CLEO_POM_TILINGS=31,300   tilings to render (default 31,300)
+    CLEO_POM_DEPTH=0.06       displacementScale, a fraction of one texture repeat
+    CLEO_POM_CAMY=1.3         camera height, metres
+    CLEO_POM_PITCH=14         camera pitch, degrees down
+
+It exists because every other gate here answers "is the march alive", and none of them answers "does it
+look like the same material on a mesh" — which was the actual complaint, and which four rounds of
+reasoning about uniforms failed to settle. Two traps it was built on top of are worth knowing:
+`scene.start()` does not start the render loop (`engine.isPaused = false; engine.run()` does), and POM
+with a flat albedo and no normal map renders perfectly flat *correctly*, because a marched uv has
+nothing to reveal.
