@@ -87,8 +87,7 @@ export default function SpriteSheetEditor() {
           {!asset ? (
             <Hint className='mt-2'>Assign a tileset above to choose this sprite’s frames.</Hint>
           ) : frameSource === 'node' ? (
-            <Section title='Frames'>
-              <Hint className='mb-1'>Drag a rectangle over the atlas to set the frames, in reading order.</Hint>
+            <Section title='Frames' hint='Drag a rectangle over the atlas to set the frames, in reading order.'>
               <TileGrid
                 className='max-h-[280px]'
                 asset={asset}
@@ -102,8 +101,7 @@ export default function SpriteSheetEditor() {
               <TextInput value={framesText} onChange={applyFramesText} placeholder='e.g. 0,1,2,3,2,1' />
             </Section>
           ) : (
-            <Section title='Tile'>
-              <Hint className='mb-1'>Pick the tile whose animation this sprite plays.</Hint>
+            <Section title='Tile' hint='Pick the tile whose animation this sprite plays.'>
               <TileGrid
                 className='max-h-[280px]'
                 asset={asset}

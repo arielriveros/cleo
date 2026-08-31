@@ -32,9 +32,8 @@
     "declarationDir": "dist"
   },
   // `src/cleo.ts` is the engine's entry point and pulls in everything it exports. The WebGPU
-  // backend is NOT among them yet — nothing shipped imports it — so it has to be named here or it
-  // is typechecked by nothing at all: the harness bundle that does import it runs ts-loader with
-  // `transpileOnly`. That gap let a device method referencing three unimported names build clean.
+  // backend is NOT among them — nothing imports it yet — so it has to be named here or it is
+  // typechecked by nothing at all.
   "files": [
     "src/cleo.ts", "src/glsl.d.ts", "src/webgpu.d.ts", "src/webglHandles.d.ts", "src/wgsl.d.ts",
     "src/graphics/rhi/webgpu/webgpuDevice.ts", "src/graphics/rhi/webgpu/webgpuShaderProgram.ts"

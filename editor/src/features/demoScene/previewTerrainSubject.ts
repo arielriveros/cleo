@@ -1,5 +1,6 @@
 import { Scene, Terrain, TerrainMaterial, LandscapeNode } from 'cleo';
 import { PREVIEW_TERRAIN_SIZE, REFERENCE_LANDSCAPE } from './previewFraming';
+import { clamp } from '../../utils/math';
 
 /**
  * The subject of a terrain-material preview: a real patch of terrain carrying the material as layer 0.
@@ -36,7 +37,7 @@ export function buildTerrainPreviewSubject(scene: Scene, tm: TerrainMaterial,
 
     // Enough vertices to span the patch at the landscape's own spacing. Clamped at both ends: too few
     // and the patch is not a surface, too many and a preview costs more than the terrain it previews.
-    const quads = Math.max(8, Math.min(128, Math.round(PREVIEW_TERRAIN_SIZE / spacing)));
+    const quads = clamp(Math.round(PREVIEW_TERRAIN_SIZE / spacing), 8, 128);
     const terrain = new Terrain({
         size: PREVIEW_TERRAIN_SIZE, resolution: quads + 1, chunkQuads: quads,
     });

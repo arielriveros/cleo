@@ -11,6 +11,10 @@ const TOOLS: { id: TerrainTool; label: string }[] = [
     { id: 'flatten', label: 'Flatten' },
 ];
 
+const FOLIAGE_HINT = 'The brush scatters each painted material’s foliage (and skips excluded types), and so does the Paint tool. Define a material’s foliage in the “Terrain Mat.” tab, then paint that material here.';
+
+const PANEL_HINT = 'Size, resolution and the heightmap live on the Landscape node. Move it with the gizmo in Scene mode.';
+
 /**
  * Floating tool card shown while landscape mode is active: sculpt, paint terrain materials onto the 4
  * layers, and scatter each painted material's foliage. Editing only — creation, size/resolution and
@@ -57,8 +61,8 @@ export default function LandscapeInspector() {
     };
 
     const label = 'text-xs text-gray-300';
-    const modeBtn = (m: TerrainBrushMode, text: string) =>
-        <button className={`flex-1 rounded px-2 py-1 text-xs ${mode === m ? 'bg-selected' : 'bg-control hover:bg-control-hover'}`} onClick={() => setMode(m)}>{text}</button>;
+    const modeBtn = (m: TerrainBrushMode, text: string, title?: string) =>
+        <button title={title} className={`flex-1 rounded px-2 py-1 text-xs ${mode === m ? 'bg-selected' : 'bg-control hover:bg-control-hover'}`} onClick={() => setMode(m)}>{text}</button>;
 
     if (!node) {
         return (
@@ -70,7 +74,7 @@ export default function LandscapeInspector() {
 
     return (
         <div data-cleo-overlay className="absolute top-2 left-2 z-20 w-64 max-h-[85%] overflow-y-auto bg-surface-raised/95 border border-control rounded-md p-3 text-white shadow-lg select-none">
-            <div className="font-semibold text-sm mb-2">Landscape</div>
+            <div className="font-semibold text-sm mb-2" title={PANEL_HINT}>Landscape</div>
 
             {landscapes.length > 1 && (
                 <Select
@@ -83,7 +87,7 @@ export default function LandscapeInspector() {
                 </Select>
             )}
 
-            <div className="grid grid-cols-3 gap-1 mb-2">{modeBtn('sculpt', 'Sculpt')}{modeBtn('paint', 'Paint')}{modeBtn('foliage', 'Foliage')}</div>
+            <div className="grid grid-cols-3 gap-1 mb-2">{modeBtn('sculpt', 'Sculpt')}{modeBtn('paint', 'Paint')}{modeBtn('foliage', 'Foliage', FOLIAGE_HINT)}</div>
 
             {mode === 'sculpt' && (
                 <div className="mb-2">
@@ -120,11 +124,6 @@ export default function LandscapeInspector() {
                     </div>
                     <button className="w-full bg-success hover:bg-success-hover rounded px-2 py-1 text-xs" onClick={generateFoliage}>Generate Foliage (whole terrain)</button>
                     {foliageStatus && <p className="text-[10px] text-gray-300 bg-surface/60 rounded px-1.5 py-1">{foliageStatus}</p>}
-                    <p className="text-[10px] text-gray-400">
-                        The brush scatters each painted material’s foliage (and skips excluded types), and so
-                        does the Paint tool. Define a material’s foliage in the “Terrain Mat.” tab, then paint
-                        that material here.
-                    </p>
                 </div>
             )}
 
@@ -142,11 +141,6 @@ export default function LandscapeInspector() {
                     <input type="range" className="w-full" min={0} max={1} step={0.05} value={falloff} onChange={e => setFalloff(Number(e.target.value))} />
                 </div>
             </div>
-
-            <Hint className="mt-2">
-                Size, resolution and the heightmap live on the Landscape node. Move it with the gizmo in
-                Scene mode.
-            </Hint>
         </div>
     );
 }

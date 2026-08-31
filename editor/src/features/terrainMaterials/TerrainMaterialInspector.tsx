@@ -267,8 +267,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
       </Collapsable>
 
       <Collapsable title='Foliage'>
-        <div className='p-2 space-y-2'>
-          <p className='text-[11px] text-gray-400'>Foliage the landscape brush scatters where this material is painted.</p>
+        <div className='p-2 space-y-2' title='Foliage the landscape brush scatters where this material is painted.'>
           <div className='border border-control rounded p-2 space-y-1'>
             <div className={label}>Add grass billboard</div>
             <div className='flex gap-1'>
@@ -402,8 +401,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
       </Collapsable>
 
       <Collapsable title='Exclude foliage'>
-        <div className='p-2 space-y-1'>
-          <p className='text-[11px] text-gray-400'>Foliage kept off this material even where a neighbouring material would place it.</p>
+        <div className='p-2 space-y-1' title='Foliage kept off this material even where a neighbouring material would place it.'>
           {knownFoliageNames.length === 0 && <p className='text-[11px] text-gray-500'>No foliage defined in the library yet.</p>}
           {knownFoliageNames.map(name => (
             <div key={name} className='flex items-center justify-between'>

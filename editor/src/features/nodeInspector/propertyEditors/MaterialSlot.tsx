@@ -5,6 +5,7 @@ import Collapsable from '../../../components/Collapsable'
 import { getMaterialIdsOf, applyMaterialAsset, unlinkMaterialAt } from '../../../utils/materials'
 import { Select, Button, Hint, cn, valueClass } from '../../../components/ui'
 import { MaterialIcon } from '../sectionIcons'
+import { useAssetDrop } from '../../../utils/useAssetDrop'
 
 // The material reference control for model/sprite nodes: the linked material (thumbnail + edit/unlink), or
 // a create/link affordance when none is set. A model merged at import carries one material per SUBMESH — an
@@ -40,7 +41,6 @@ function Slot(props: {
   onChanged: () => void
 }) {
   const { materials, enterMaterialEditor, createMaterialForNode, eventEmitter } = useCleoEngine()
-  const [dragOver, setDragOver] = useState(false)
 
   const asset = props.linkedId ? materials.find(m => m.id === props.linkedId) : undefined
 
@@ -57,17 +57,10 @@ function Slot(props: {
   }
   // Clears THIS submesh only, never the whole node.
   const unlink = () => { unlinkMaterialAt(props.node, props.submesh); changed() }
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault(); setDragOver(false)
-    const id = e.dataTransfer.getData('text/cleo-material')
-    if (id) link(id)
-  }
-  const onDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('text/cleo-material')) { e.preventDefault(); setDragOver(true) }
-  }
+  const { dragOver, dropProps } = useAssetDrop('text/cleo-material', link)
 
   return (
-    <div className='w-full p-2' onDragOver={onDragOver} onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
+    <div className='w-full p-2' {...dropProps}>
       {props.showIndex && <Hint className='mb-1'>Sub-mesh {props.submesh + 1}</Hint>}
       {asset ? (
         <div className={`flex items-center gap-2 p-2 bg-control border rounded ${dragOver ? 'border-selected' : 'border-border'}`}>

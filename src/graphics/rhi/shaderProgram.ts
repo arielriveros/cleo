@@ -60,8 +60,6 @@ export interface ShaderProgram {
     /** Upload whatever uniform writes are pending. Call immediately before a draw, not per `setUniform`. */
     flushUniformBlocks(): void;
 
-    /** The uniform-block layout as the BACKEND sees it, for `harness:uniforms`. Empty when there is none. */
-    describeBlockLayout(): unknown[];
 
     dispose(): void;
 }

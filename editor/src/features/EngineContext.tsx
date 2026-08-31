@@ -14,7 +14,7 @@ import { EditorSessionsContext, type EditorSessionsContextValue } from "./Editor
 import { useStableActions } from "../utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
 import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey } from "cleo";
-import type { AnimationCompatibility, BoneMapping, HullQuality, SceneChange, TerrainFoliageRule } from "cleo";
+import type { SceneChange, TerrainFoliageRule } from "cleo";
 import NullImage from '../images/null.png';
 import EventEmitter from "events";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
@@ -36,129 +36,21 @@ import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScri
 import { pushExternalSource } from "./scriptWorkspace/externalSourceStore";
 import { AnimationAsset, buildAnimationAsset, storeSkin, findEquivalentAnimation, withAnimationRef, withoutAnimationRef, extractEmbeddedClips } from "../utils/animationAssets";
 import { modelAssetSkin, applyModelAnimations, invalidateAnimationCache, resolveAnimationAsset } from "../utils/animationResolve";
-import { AnimationFieldAsset, buildAnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
-import { TilesetAsset, buildTilesetAsset, guessTileSize, reembedTilesets, detachTileset } from "../utils/tilesets";
-import { importAtlasImage } from "./tileset/importAtlas";
-import { renderTilesetThumbnail } from "./tileset/tilesetThumbnail";
+import { AnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
+import { TilesetAsset, reembedTilesets, detachTileset } from "../utils/tilesets";
 import { groupImportFiles } from "../utils/importGrouping";
 import {
   normalizeRootScale, meshBoundsRadius, combineBounds, awaitSubtreeTexturesReady, captureMaterialSphere,
-  renderModelAssetThumbnail, renderMaterialAssetThumbnail, renderTerrainMaterialAssetThumbnail,
+  renderModelAssetThumbnail,
   setThumbnailDirtySuppressor, bakeModelImpostor, impostorTextureId } from "../utils/modelThumbnails";
 import { parseBundleToRoot, type UnresolvedTexture } from "../utils/modelImport";
-import { isValidGrouping, compactGroups, type PartInfo, type PartGroup } from "../utils/submeshGroups";
+import { isValidGrouping, compactGroups, type PartInfo } from "../utils/submeshGroups";
 import { readModelLibrary, writeModelLibrary } from "../utils/modelStore";
 import { generateLodLevel, hasSkinnedPart, subtreeTriangles } from "../utils/lodGenerate";
 import { registerFoliageSourceResolver } from "../utils/foliageRules";
 import { decimateGeometry } from "../workers/workerClient";
 import { cancelAllImports, ImportCancelled, parseAnimationFiles } from "../workers/importClient";
 import { detectMissingTextures } from "../utils/textureRefs";
-
-// A mesh awaiting user review in the import modal (parsed but not yet committed to the library).
-export type PendingModelImportView = {
-  bundleName: string;
-  subMeshCount: number;
-  materialCount: number;
-  /** Referenced texture files not present in the upload — pickable. `from` names the material + slot. */
-  missing: UnresolvedTexture[];
-  /**
-   * References no upload can fix: a texture embedded in the model itself that could not be decoded
-   * (a .dds/.tga payload, or raw pixels). Not pickable.
-   */
-  unloadable: UnresolvedTexture[];
-  sizeRadius: number;     // combined bounding radius at scale 1 (diameter = 2*radius)
-  /** One entry per sub-mesh, in parse order — what the modal's grouping editor lists and drags. */
-  parts: PartInfo[];
-};
-// The user's decision from the import modal.
-export type ModelImportDecision = {
-  extraFiles: File[];     // textures uploaded to fill missing references (aliased to expected names)
-  normalize: boolean;
-  targetSize: number;     // desired bounding diameter in world units
-  /** Split the file's sub-models into one ModelAsset each, instead of a single asset for the whole file. */
-  separate: boolean;
-  /**
-   * Collapse the file's sub-meshes into ONE mesh carrying one submesh per material — the opposite of
-   * `separate`. Merged, a character is one node with one Animator instead of several over one skeleton.
-   */
-  merge: boolean;
-  /**
-   * How to partition the sub-meshes into assets when `separate` and `merge` are BOTH on: one asset per
-   * group, each group merged into a single mesh. Indices address the REVIEW-TIME sub-mesh order, so the
-   * import re-validates them (isValidGrouping) — supplying missing textures re-parses the bundle.
-   */
-  groups?: PartGroup[];
-};
-
-// ---- Import progress -------------------------------------------------------------------------------
-// Every step importModelFiles walks a bundle through, in order. Maps onto the shared progress store's
-// generic steps (features/progress).
-type ImportStage =
-  | 'queued'       // not started
-  | 'parsing'      // Loader: assimp/GLTF parse of the model files
-  | 'review'       // parked on the user in ModelImportModal (indefinite — the bar deliberately stalls)
-  | 'reparsing'    // user supplied missing textures; parse again so they wire into the materials
-  | 'scaling'      // normalizeRootScale bakes the fit-to-size factor into the vertices
-  | 'textures'     // waiting on async image decode before anything can be serialized
-  | 'materials'    // registering a MaterialAsset per unique material
-  | 'saving'       // buildModelAsset: serialize the subtree(s) into the model library
-  | 'done'
-  | 'failed'
-  | 'skipped';     // cancelled before it ran
-
-/** Each stage's label + how far through a bundle it is. `review` stalls: it is waiting on a human. */
-const IMPORT_STAGES: Record<ImportStage, { label: string; progress: number; status: StepStatus }> = {
-  queued:    { label: 'Queued',                       progress: 0,    status: 'pending' },
-  parsing:   { label: 'Parsing model',                progress: 0.15, status: 'running' },
-  review:    { label: 'Waiting for you',              progress: 0.25, status: 'paused'  },
-  reparsing: { label: 'Re-parsing with new textures', progress: 0.35, status: 'running' },
-  scaling:   { label: 'Normalizing scale',            progress: 0.45, status: 'running' },
-  textures:  { label: 'Decoding textures',            progress: 0.6,  status: 'running' },
-  materials: { label: 'Registering materials',        progress: 0.8,  status: 'running' },
-  saving:    { label: 'Saving to library',            progress: 0.92, status: 'running' },
-  done:      { label: 'Imported',                     progress: 1,    status: 'done'    },
-  failed:    { label: 'Failed',                       progress: 1,    status: 'failed'  },
-  skipped:   { label: 'Skipped',                      progress: 1,    status: 'skipped' },
-};
-/** Stages an animation-clip import walks through. Mirrors ImportStage; `review` waits on a human. */
-type AnimImportStage = 'parsing' | 'review' | 'retargeting' | 'saving' | 'done' | 'failed' | 'skipped';
-const ANIM_IMPORT_STAGES: Record<AnimImportStage, { label: string; progress: number; status: StepStatus }> = {
-  parsing:     { label: 'Reading animation',   progress: 0.15, status: 'running' },
-  review:      { label: 'Waiting for you',     progress: 0.35, status: 'paused'  },
-  retargeting: { label: 'Retargeting clips',   progress: 0.7,  status: 'running' },
-  saving:      { label: 'Saving to library',   progress: 0.9,  status: 'running' },
-  done:        { label: 'Imported',            progress: 1,    status: 'done'    },
-  failed:      { label: 'Failed',              progress: 1,    status: 'failed'  },
-  skipped:     { label: 'Skipped',             progress: 1,    status: 'skipped' },
-};
-
-/** A bone the mapping table lists in a target-joint dropdown: its node index and display name. */
-export type RetargetBoneOption = { node: number; name: string };
-// Animation clips parsed from a file, each with a compatibility report vs the target skeleton, plus the
-// bone mapping (retarget) the user can inspect and correct — all awaiting review in the import modal.
-export type PendingAnimationImportView = {
-  fileName: string;
-  /** `animatedNodes` are the source bones THIS clip drives, so the modal can recount matched/missing
-   *  against the edited mapping. */
-  clips: { name: string; report: AnimationCompatibility; animatedNodes: number[] }[];
-  /** The source→target bone mapping the reports were computed from. Edited in the modal. */
-  mapping: BoneMapping;
-  /** Source bones the clips animate (the mapping's left column), and every target joint (the dropdowns). */
-  sourceBones: RetargetBoneOption[];
-  targetBones: RetargetBoneOption[];
-};
-/** The rig picker's data: which skinned models the animation could be retargeted onto. */
-export type PendingRigPickView = { fileName: string; models: { id: string; name: string }[] };
-
-export type AnimationImportDecision = {
-  include: boolean[];
-  mapping: BoneMapping;
-  /**
-   * Per-clip name as typed in the modal, parallel to `include`; blank or missing keeps the parsed name.
-   * Rename HERE: a later rename rewrites state-machine references but not Animation Field samples.
-   */
-  names?: string[];
-};
 import { buildGameData } from "./publish/buildGameData";
 import { applyGameData, extractNodeState, ProjectPrefs } from "../utils/projectStorage";
 import { migrateLegacyUI } from "../utils/uiMigration";
@@ -181,343 +73,38 @@ import { assetIdOfTab, loadTabState, saveTabState, MainMode } from "../utils/tab
 import { activeProjectAllowsLegacyImport, touchProject } from "../utils/projects";
 import { activeProjectId } from "../utils/projectScope";
 import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextureIds, legacyTexturesOf, deleteTextures } from "../utils/textureStore";
-import { saveToStorage } from "../workers/workerClient";
 import { startTask, StepStatus } from "./progress/progressStore";
 import { reconcileEditorHelpers } from "../utils/editorHelpers";
 import { readBackendPreference } from './renderer/backendPreference';
 import { deepClone } from '../utils/deepClone';
+import { buildProbeIconDataURL, buildLightIconDataURL } from './editorIcons';
+import { ImportStage, IMPORT_STAGES, AnimImportStage, ANIM_IMPORT_STAGES } from './importStages';
+import { usePersistedLibrary, usePersistedModelLibrary } from './persistLibrary';
+import { useAssetThumbnails } from './hooks/useAssetThumbnails';
+import { useSaving } from './hooks/useSaving';
+import { usePendingDecisions } from './hooks/usePendingDecisions';
+import { useTilesetEditor } from './hooks/useTilesetEditor';
+import { useAnimationFieldEditor } from './hooks/useAnimationFieldEditor';
+import {
+  EDITOR_CLEAR_COLOR, LEGACY_CLEAR_COLOR, TAB_METERS_EXPOSURE, SCENE_TAB_ID, KIND_LABEL,
+} from './engineContextTypes';
+import type {
+  PendingModelImportView, ModelImportDecision, PendingAnimationImportView, PendingRigPickView,
+  AnimationImportDecision, BodyDescription, ShapeDescription, LoadingProgress, EditorMode, GizmoMode,
+  SavingState, TabKind, ModelEditSession, EditorTab, TerrainBrushState, TilemapBrushState,
+} from './engineContextTypes';
 
-// Rasterise the light-probe glyph (inner ring + dashed outer ring, matching the inspector's ProbeIcon) to
-// a white-on-transparent PNG data URL for the probe's billboard; a sprite Material.Basic tints it cyan.
-function buildProbeIconDataURL(): string {
-  const size = 64, cx = size / 2, cy = size / 2;
-  const canvas = document.createElement('canvas');
-  canvas.width = size; canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return '';
-  ctx.strokeStyle = 'white';
-  ctx.lineWidth = 4;
-  ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.stroke();
-  ctx.setLineDash([4, 6]);
-  ctx.beginPath(); ctx.arc(cx, cy, 24, 0, Math.PI * 2); ctx.stroke();
-  return canvas.toDataURL('image/png');
-}
-
-// Rasterise the light glyph (a filled core with eight rays, matching the inspector's LightIcon) to a
-// white-on-transparent PNG data URL for the light's billboard; a sprite Material.Basic tints it.
-function buildLightIconDataURL(): string {
-  const size = 64, c = size / 2;
-  const canvas = document.createElement('canvas');
-  canvas.width = size; canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return '';
-  ctx.strokeStyle = 'white';
-  ctx.fillStyle = 'white';
-  ctx.lineCap = 'round';
-  ctx.lineWidth = 5;
-  ctx.beginPath(); ctx.arc(c, c, 11, 0, Math.PI * 2); ctx.fill();
-  for (let i = 0; i < 8; ++i) {
-    const a = (i / 8) * Math.PI * 2;
-    const cos = Math.cos(a), sin = Math.sin(a);
-    ctx.beginPath();
-    ctx.moveTo(c + cos * 18, c + sin * 18);
-    ctx.lineTo(c + cos * 27, c + sin * 27);
-    ctx.stroke();
-  }
-  return canvas.toDataURL('image/png');
-}
-
-type BoxShapeDescription = {
-  type: 'box';
-  offset: number[];
-  rotation: number[];
-
-  width: number;
-  height: number;
-  depth: number;
-};
-
-type SphereShapeDescription = {
-  type: 'sphere';
-  offset: number[];
-  rotation: number[];
-
-  radius: number;
-};
-
-type CylinderShapeDescription = {
-  type: 'cylinder';
-  offset: number[];
-  rotation: number[];
-
-  radius: number;
-  height: number;
-  numSegments: number;
-};
-
-/**
- * Capsule collider. `height` is the TOTAL tip-to-tip height, so the straight section is
- * `height - 2 * radius` and a height at or below `2 * radius` is a sphere.
- */
-type CapsuleShapeDescription = {
-  type: 'capsule';
-  offset: number[];
-  rotation: number[];
-
-  radius: number;
-  height: number;
-  numSegments: number;
-};
-
-type PlaneShapeDescription = {
-  type: 'plane';
-  offset: number[];
-  rotation: number[];
-};
-
-/**
- * Convex hull fitted to a mesh (see `hullFromPositions`). Vertices/faces are baked at authoring time and
- * centered on the hull's centroid; that displacement is folded into `offset`.
- */
-type ConvexShapeDescription = {
-  type: 'convex';
-  offset: number[];
-  rotation: number[];
-
-  quality: HullQuality;
-  vertices: number[][];
-  faces: number[][];
-  /**
-   * Hull algorithm version. 3 = AABB-anchored carve with a containment audit over every mesh vertex.
-   * Older hulls are rebuilt on load by the editor-helper reconciler.
-   */
-  v?: number;
-};
-
-export type BodyDescription = {
-  mass: number;
-  linearDamping: number;
-  angularDamping: number;
-  linearConstraints: [number, number, number];
-  angularConstraints: [number, number, number];
-  /**
-   * Surface properties; absent = the engine defaults, 0.3 friction / 0 restitution.
-   * Two bodies combine with min(friction) and max(restitution), so the deliberately-set value wins.
-   */
-  friction?: number;
-  restitution?: number;
-  /**
-   * Two independent channels; absent means `true` for both. `simulatePhysics: false` leaves a ghost the
-   * solver ignores but a camera probe still sees; `cameraCollision: false` is the reverse.
-   */
-  simulatePhysics?: boolean;
-  cameraCollision?: boolean;
-  /**
-   * Meters below the collider's feet that still count as grounded. Absent/0 = off, grounding from solver
-   * contacts only. ~0.1–0.2 stops `isGrounded` flickering under a resting body.
-   */
-  groundProbeDistance?: number;
-  /** Time constant for this body's MEASURED motion, in seconds. 0/absent = the engine default (~0.09s). */
-  motionSmoothing?: number;
-  shapes: ShapeDescription[];
-}
-export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | CylinderShapeDescription | CapsuleShapeDescription | PlaneShapeDescription | ConvexShapeDescription;
-
-export type LoadingProgress = { loaded: number; total: number; label: string };
-
-// Soft pastel-blue editor viewport background, used across every editor mode.
-export const EDITOR_CLEAR_COLOR: [number, number, number, number] = [0.68, 0.80, 0.90, 1.0];
-const LEGACY_CLEAR_COLOR = [0.65, 0.65, 0.71];
-
-/**
- * Persist an asset library to IndexedDB whenever it changes. A write rewrites the WHOLE array, so it is
- * debounced and goes through the project worker (saveToStorage) to keep the transaction off-thread.
- */
-function usePersistedLibrary<T>(key: string, value: T, loaded: React.MutableRefObject<boolean>): void {
-  useEffect(() => {
-    if (!loaded.current) return; // don't write back before the initial read lands (would clobber it)
-    const timer = setTimeout(() => {
-      // Logger, not console.warn: a library that silently stops persisting is the worst outcome here —
-      // the user keeps working and loses everything on reload with nothing on screen having said so.
-      saveToStorage(key, value).catch(e => Logger.error(`Failed to save ${key}: ${e}`, 'Editor'));
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [key, value, loaded]);
-}
-
-/**
- * The models library, persisted one record per asset (utils/modelStore).
- *
- * It cannot use {@link usePersistedLibrary}: that writes the whole value under one key, and a model
- * library is large enough that doing so on every edit is what broke persistence in the first place.
- * `persisted` is what storage already holds, so each pass writes only the assets that actually changed.
- *
- * That ref is SEEDED by the load with the assets it read, and that seeding is load-bearing: starting it
- * empty would make the first debounce after every boot diff the whole library against nothing and rewrite
- * every asset — the exact write this hook exists to avoid, just moved to startup.
- */
-function usePersistedModelLibrary(
-  models: ModelAsset[],
-  loaded: React.MutableRefObject<boolean>,
-  persisted: React.MutableRefObject<ModelAsset[]>,
-): void {
-  useEffect(() => {
-    if (!loaded.current) return;
-    const timer = setTimeout(() => {
-      const prev = persisted.current;
-      // Claim the write BEFORE awaiting: a second edit landing mid-write must diff against what this pass
-      // is persisting, not against the state before it, or its changes are never written at all.
-      persisted.current = models;
-      writeModelLibrary(models, prev).catch(e => {
-        persisted.current = prev; // failed — the next pass must retry these assets
-        Logger.error(`Failed to save the model library: ${e}`, 'Editor');
-      });
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [models, loaded, persisted]);
-}
-
-export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset';
-
-/**
- * Whether a mode paints the 3D viewport, or replaces it with a full-panel editor of its own; the
- * viewport's floating chrome is gated on it. Exhaustive by design — a new mode with no entry is a
- * compile error.
- */
-export const MODE_RENDERS_VIEWPORT: Record<EditorMode, boolean> = {
-  scene: true,
-  landscape: true,
-  tilemap: true,
-  ui: true,
-  template: true,
-  renderer: true,        // its own perf HUD sits over a live render
-  material: true,        // preview sphere
-  terrainMaterial: true, // preview sphere
-  animation: true,       // except in Graph view — see `hideForGraph`
-  animationField: true,  // the blend-space plot is translucent over the 3D preview
-  model: true,
-  script: false,         // ScriptTabView fills the panel
-  tileset: false,        // TilesetTabView fills the panel
-};
-export type GizmoMode = 'position' | 'rotation' | 'scale';
-export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
-
-// Browser-style editor tabs. `editorMode` is derived from the active tab (see EngineProvider). The scene
-// tab hosts the open scene asset; the library tabs each own a live edit session (a throwaway Scene in
-// tabRuntimeRef), except 'script' and 'tileset', which own no 3D scene and get no tabRuntimeRef entry.
-export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset';
-
-/**
- * Whether a tab's contents may drive AUTO-EXPOSURE. Exhaustive, like `MODE_RENDERS_VIEWPORT` above — a
- * new tab kind with no entry is a compile error.
- *
- * Only the scene tab. Every other tab renders a throwaway session lit by
- * `createMaterialPreviewScene`'s fixed key/fill studio rig, which has nothing to do with the project —
- * so an exposure metered from it is meaningless, and it drifts as the preview subject changes. With
- * metering suppressed those tabs fall back to the AUTHORED exposure, which keeps every thumbnail in the
- * asset library comparable with the others and stable as the scene is retuned.
- *
- * `template` is false deliberately: it is a throwaway edit session under the preview rig, not the
- * project's scene.
- */
-export const TAB_METERS_EXPOSURE: Record<TabKind, boolean> = {
-  scene: true,           // the project's scene, in every one of its sub-modes
-  template: false,
-  material: false,       // preview sphere
-  terrainMaterial: false,// preview sphere
-  animation: false,
-  animationField: false,
-  model: false,
-  script: false,         // no viewport at all
-  tileset: false,        // no viewport at all
-};
-
-/**
- * The scene tab's id — a fixed sentinel, unlike the library tabs' random ids. Deliberately NOT the open
- * scene's id: the tab is a stable slot different scene assets pass through, and only its title follows
- * the open scene's name.
- */
-export const SCENE_TAB_ID = 'main';
-
-/** What each tab kind edits, for save progress detail and the Save button's tooltip. */
-export const KIND_LABEL: Record<TabKind, string> = {
-  scene: 'Scene',
-  template: 'Template',
-  material: 'Material',
-  terrainMaterial: 'Terrain material',
-  animation: 'Animation',
-  animationField: 'Animation field',
-  model: 'Model',
-  script: 'Script',
-  tileset: 'Tileset',
-};
-
-// Reactive per-mesh-tab edit state (the tab's Scene itself lives in tabRuntimeRef). levelIds[i] is the
-// node id of LOD level i's root inside the tab scene; distances[i] is the camera distance where level i
-// takes over (distances[0] is always 0).
-export type ModelEditSession = {
-  /** Root node id per level in the edit scene. Index 0 is the mesh itself; 1..n are previews of the
-   *  referenced LOD assets, shown so the user can compare them but not authored here. */
-  levelIds: string[];
-  /** The LOD definition behind each extra level, aligned to `levelIds[i + 1]`. Normally a `modelId`
-   *  reference; a legacy embedded level is carried through unchanged so saving cannot drop it. */
-  lodRefs: ModelLodDef[];
-  distances: number[];
-  cullDistance: number;
-  activeLevel: number;
-  /** Any level contains a skinned model — LOD/cull authoring is disabled (static-only v1). */
-  skinned: boolean;
-};
-export interface EditorTab {
-  id: string;
-  kind: TabKind;
-  title: string;
-  templateId?: string | null; // template tabs: source template id, null = unsaved new template
-  materialId?: string | null; // material tabs: source material asset id, null = unsaved new material
-  terrainMaterialId?: string | null; // terrain-material tabs: source terrain-material asset id
-  animationSourceId?: string | null; // animation tabs: id of the original skinned node in the main scene
-  modelId?: string | null; // mesh tabs: the previewed mesh asset id
-  scriptId?: string | null; // script tabs: the edited script asset id
-  animationFieldId?: string | null; // animation-field tabs: the edited field asset id
-  tilesetId?: string | null; // tileset tabs: the edited tileset asset id
-}
-export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
-// No 'move': landscape mode is brushes only; a landscape is positioned with the scene-mode gizmo.
-export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage';
-export type TerrainBrushState = {
-  mode: TerrainBrushMode;
-  tool: TerrainTool;
-  radius: number;
-  strength: number;
-  falloff: number;
-  /** Active splat layer (0..3) for the paint tool. */
-  paintLayer: number;
-  /** When true the foliage tool erases instead of scatters. */
-  foliageErase: boolean;
-  /** Id of the landscape node currently being edited (set by the inspector). */
-  activeLandscapeId: string | null;
-};
-
-export type TilemapTool =
-  | 'brush' | 'eraser' | 'rect' | 'bucket' | 'stamp' | 'eyedropper' | 'randomize' | 'autotile';
-
-/**
- * The tilemap painting state, shared between the floating tool card, the palette panel and the viewport
- * brush. Held in a ref: the brush reads it from pointer handlers that register once.
- */
-export type TilemapBrushState = {
-  tool: TilemapTool;
-  /** Id of the tilemap node being painted (set by the inspector; falls back to the first in the scene). */
-  activeTilemapId: string | null;
-  activeLayer: number;
-  /** The palette selection as a rectangle — a single tile for the brush, a block for the stamp. */
-  stamp: { w: number; h: number; tiles: number[] };
-  /** Orientation applied to every tile this brush places. */
-  orient: { flipX: boolean; flipY: boolean; rot90: boolean };
-  /** Variant set the randomize tool draws from, and terrain set the auto-tile tool resolves against. */
-  variantSetId: number | null;
-  terrainId: number | null;
-};
+// The types, constant tables and standalone helpers this file used to declare inline now live in sibling
+// modules. They are re-exported here verbatim so every consumer keeps importing them from EngineContext.
+export {
+  EDITOR_CLEAR_COLOR, MODE_RENDERS_VIEWPORT, TAB_METERS_EXPOSURE, SCENE_TAB_ID, KIND_LABEL,
+} from './engineContextTypes';
+export type {
+  PendingModelImportView, ModelImportDecision, RetargetBoneOption, PendingAnimationImportView,
+  PendingRigPickView, AnimationImportDecision, BodyDescription, ShapeDescription, LoadingProgress,
+  EditorMode, GizmoMode, SavingState, TabKind, ModelEditSession, EditorTab, TerrainTool,
+  TerrainBrushMode, TerrainBrushState, TilemapTool, TilemapBrushState,
+} from './engineContextTypes';
 
 const EngineContext = createContext<{
   instance: CleoEngine | null;
@@ -1549,10 +1136,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       return;
     }
     initialResyncDoneRef.current = true;
-    console.info('[DIAG] startup resync running for real:', {
-      materials: libs.materials.length, models: libs.models.length, templates: libs.templates.length,
-      terrainMaterials: libs.terrainMaterials.length, scripts: libs.scripts.length,
-    });
     // Propagation, not the user's work — resyncing must not make a freshly-opened scene look unsaved.
     withoutDirty(() => {
       const changed = resyncScene(editorSceneRef.current, engineMaps(), libs, stashed.hashes);
@@ -1660,73 +1243,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [assetsLoaded, textureEpoch, materials, terrainMaterials, templates, models]);
 
-  // Mesh import review modal: importModelFiles parks each parsed mesh here and awaits the user's decision
-  // (resolved by ModelImportModal via resolveModelImport). The resolver lives in a ref so the promise in
-  // importModelFiles can be settled from the modal without re-rendering churn.
-  const [pendingModelImport, setPendingModelImport] = useState<PendingModelImportView | null>(null);
-  const pendingResolverRef = useRef<((d: ModelImportDecision | null) => void) | null>(null);
-  const resolveModelImport = (decision: ModelImportDecision | null) => {
-    const r = pendingResolverRef.current;
-    pendingResolverRef.current = null;
-    setPendingModelImport(null);
-    if (r) r(decision);
-  };
-
-  // Rig picker, shown before the review modal when the import did not come from an open Animation Editor:
-  // an animation file carries no character, so the rig it retargets onto has to be chosen.
-  const [pendingRigPick, setPendingRigPick] = useState<PendingRigPickView | null>(null);
-  const pendingRigResolverRef = useRef<((id: string | null) => void) | null>(null);
-  const resolveRigPick = (modelId: string | null) => {
-    const r = pendingRigResolverRef.current;
-    pendingRigResolverRef.current = null;
-    setPendingRigPick(null);
-    if (r) r(modelId);
-  };
-
-  // Animation import review modal — same "park then resolve a promise" pattern as the mesh import.
-  const [pendingAnimationImport, setPendingAnimationImport] = useState<PendingAnimationImportView | null>(null);
-  const pendingAnimResolverRef = useRef<((d: AnimationImportDecision | null) => void) | null>(null);
-  const resolveAnimationImport = (decision: AnimationImportDecision | null) => {
-    const r = pendingAnimResolverRef.current;
-    pendingAnimResolverRef.current = null;
-    setPendingAnimationImport(null);
-    if (r) r(decision);
-  };
-
-  // Unsaved-changes confirm dialog — same "park then resolve a promise" pattern as the import modals.
-  // Two callers park here: openScene (switching away from a scene with unsaved edits) and closeTab
-  // (closing a dirty asset tab). `action` only changes the wording; both resolve the same three ways.
-  const [pendingSceneConfirm, setPendingSceneConfirm] = useState<{ sceneName: string; action: 'switch' | 'close' } | null>(null);
-  const sceneConfirmResolverRef = useRef<((d: 'save' | 'discard' | 'cancel') => void) | null>(null);
-  const confirmUnsavedScene = (sceneName: string, action: 'switch' | 'close' = 'switch'): Promise<'save' | 'discard' | 'cancel'> =>
-    new Promise(resolve => {
-      sceneConfirmResolverRef.current = resolve;
-      setPendingSceneConfirm({ sceneName, action });
-    });
-  const resolveSceneConfirm = (decision: 'save' | 'discard' | 'cancel') => {
-    const r = sceneConfirmResolverRef.current;
-    sceneConfirmResolverRef.current = null;
-    setPendingSceneConfirm(null);
-    if (r) r(decision);
-  };
-
-  // Same park-then-resolve pattern, for switching a scene between 2D and 3D while it holds authoring only
-  // the OTHER dimension uses. The data is kept and the switch is reversible, but a published build
-  // discards it.
-  const [pendingDimensionConfirm, setPendingDimensionConfirm] =
-    useState<{ to: '2D' | '3D'; losing: 'tilemap' | 'landscape'; count: number } | null>(null);
-  const dimensionConfirmResolverRef = useRef<((proceed: boolean) => void) | null>(null);
-  const confirmDimensionSwitch = (to: '2D' | '3D', losing: 'tilemap' | 'landscape', count: number): Promise<boolean> =>
-    new Promise(resolve => {
-      dimensionConfirmResolverRef.current = resolve;
-      setPendingDimensionConfirm({ to, losing, count });
-    });
-  const resolveDimensionConfirm = (proceed: boolean) => {
-    const r = dimensionConfirmResolverRef.current;
-    dimensionConfirmResolverRef.current = null;
-    setPendingDimensionConfirm(null);
-    if (r) r(proceed);
-  };
+  // The five park-then-resolve modals (mesh import review, rig pick, animation import review, unsaved-
+  // changes confirm, dimension-switch confirm). See hooks/usePendingDecisions.
+  const {
+    pendingModelImport, setPendingModelImport, pendingResolverRef, resolveModelImport,
+    pendingRigPick, setPendingRigPick, pendingRigResolverRef, resolveRigPick,
+    pendingAnimationImport, setPendingAnimationImport, pendingAnimResolverRef, resolveAnimationImport,
+    pendingSceneConfirm, confirmUnsavedScene, resolveSceneConfirm,
+    pendingDimensionConfirm, confirmDimensionSwitch, resolveDimensionConfirm,
+  } = usePendingDecisions();
 
   const activeTab = tabs.find(t => t.id === activeTabId) ?? tabs[0];
   const activeRuntime = activeTab.kind !== 'scene' ? tabRuntimeRef.current.get(activeTab.id) : undefined;
@@ -1842,15 +1367,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // library arriving, and resolving against [] there would read as "template deleted".
       const t = templatesRef.current.find(x => x.id === templateId);
       if (!t) {
-        // ---- TEMPORARY DIAGNOSTIC ----
-        console.warn('[DIAG] Template not found', {
-          wanted: templateId,
-          stateIds: templates.map(x => x.id),
-          refIds: templatesRef.current.map(x => x.id),
-          stateCount: templates.length,
-          refCount: templatesRef.current.length,
-        });
-        // ------------------------------
         Logger.error(`Template not found (id ${templateId})`, 'Editor');
         return;
       }
@@ -2673,46 +2189,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // ---- Thumbnails on open --------------------------------------------------------------------------
-  //
-  // An asset is stored with an empty thumbnail (the explorer shows the kind's icon) and its preview is
-  // rendered the first time it is opened — every capture is a full GL frame. Always render from the
-  // asset's *saved* data, never a live tab scene: renderModelThumbnail reparents the node it is given.
-  const thumbnailPendingRef = useRef(new Set<string>());
-
-  const captureAssetThumbnail = (kind: 'material' | 'terrainMaterial' | 'model', id: string) => {
-    const engine = instanceRef.current;
-    if (!engine) return;
-    // One capture per asset in flight; a re-open while one is running must not queue a second GL render.
-    if (thumbnailPendingRef.current.has(id)) return;
-    thumbnailPendingRef.current.add(id);
-
-    // Deliberately not awaited: the tab opens immediately and the card updates whenever the render lands.
-    // The write patches only `thumbnail` through the functional setter, so a concurrent edit is not lost.
-    (async () => {
-      try {
-        if (kind === 'material') {
-          const asset = materials.find(m => m.id === id);
-          if (!asset) return;
-          const thumbnail = await renderMaterialAssetThumbnail(engine, asset);
-          if (thumbnail) setMaterials(prev => prev.map(x => x.id === id ? { ...x, thumbnail } : x));
-        } else if (kind === 'terrainMaterial') {
-          const asset = terrainMaterials.find(m => m.id === id);
-          if (!asset) return;
-          const thumbnail = await renderTerrainMaterialAssetThumbnail(engine, asset);
-          if (thumbnail) setTerrainMaterials(prev => prev.map(x => x.id === id ? { ...x, thumbnail } : x));
-        } else {
-          const asset = models.find(m => m.id === id);
-          if (!asset) return;
-          const thumbnail = await renderModelAssetThumbnail(engine, asset);
-          if (thumbnail) setModels(prev => prev.map(x => x.id === id ? { ...x, thumbnail } : x));
-        }
-      } catch (e) {
-        Logger.warn(`Could not render the thumbnail for this asset: ${e}`, 'Editor');
-      } finally {
-        thumbnailPendingRef.current.delete(id);
-      }
-    })();
-  };
+  const { captureAssetThumbnail } = useAssetThumbnails({
+    instanceRef, materials, setMaterials, terrainMaterials, setTerrainMaterials, models, setModels,
+  });
 
   // ---- Mesh edit tab ---------------------------------------------------------------------------------
 
@@ -3483,165 +2962,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // ---- Animation Field editor ------------------------------------------------------------------------
-
-  // Open (or focus) an Animation Field's edit tab. Like the model tab it owns a throwaway scene, holding
-  // ONE instance of the field's source model asset — the field editor's transport drives that model's
-  // animator directly (the scene is paused), so the blend can be previewed live while it is authored.
-  const enterAnimationFieldEditor = (fieldId?: string, adoptTabId?: string) => {
-    if (!instanceRef.current || !fieldId) return;
-    const field = animationFieldsRef.current.find(f => f.id === fieldId);
-    if (!field) { Logger.error('Animation field not found', 'Editor'); return; }
-
-    if (!adoptTabId) {
-      const existing = tabs.find(t => t.kind === 'animationField' && t.animationFieldId === fieldId);
-      if (existing) { setActiveTab(existing.id); return; }
-    }
-
-    const model = modelsRef.current.find(m => m.id === field.modelId);
-    if (!model) {
-      Logger.error(`"${field.name}" blends a model that no longer exists — the field cannot be opened`, 'Editor');
-      return;
-    }
-
-    // Disarm before constructing the preview scene — see openMeshTab for why this is not optional.
-    dirtyArmedRef.current = false;
-    const scene = new Scene();
-    scene.animationsEnabled = false; // the field transport drives the animator itself, not scene.update
-    scene.spawnRulesEnabled = false;
-    void createAssetEditScene(scene, withoutDirty);
-
-    const holder = new Node(field.name);
-    scene.addNode(holder);
-    instantiateModelAsset(model, holder, materialsRef.current, modelsRef.current, animationsRef.current);
-    scene.root.updateTransforms();
-
-    const skinned = firstSkinnedModelNode(holder);
-    if (!skinned) {
-      Logger.error(`"${model.name}" has no skeleton — an animation field needs a skinned model`, 'Editor');
-      return;
-    }
-    // Frame the camera + shadow-catching ground around the model, exactly as the Animation Editor does.
-    const bounds = combineBounds(skinned);
-    createAnimationEditorScene(scene, bounds.center, bounds.radius);
-    scene.start();
-    skinned.animator?.showBindPose();
-
-    const tabId = adoptTabId ?? cryptoRandomId();
-    tabRuntimeRef.current.set(tabId, { scene, rootId: holder.id });
-    commitTab({ id: tabId, kind: 'animationField', title: field.name, animationFieldId: fieldId }, adoptTabId);
-    eventEmitter.current.emit('TEXTURES_CHANGED');
-  };
-
-  /** Create a field for a skinned model asset and open it. Returns the new field's id, or null. */
-  const createAnimationFieldForModel = (modelId: string): string | null => {
-    const model = modelsRef.current.find(m => m.id === modelId);
-    if (!model) { Logger.error('Model not found', 'Editor'); return null; }
-    if (!modelAssetIsSkinned(model)) {
-      Logger.warn(`"${model.name}" has no skeleton — only skinned models can be blended in an animation field`, 'Editor');
-      return null;
-    }
-    const asset = buildAnimationFieldAsset(`${model.name} Field`, modelId);
-    addAnimationField(asset);
-    // The library update lands in the next commit, so the open has to read the asset we just built rather
-    // than the (still stale) state — hence seeding the ref directly.
-    animationFieldsRef.current = [...animationFieldsRef.current, asset];
-    enterAnimationFieldEditor(asset.id);
-    return asset.id;
-  };
-
-  /**
-   * Persist an edited field and push it into everything already playing it. The re-embed is what keeps
-   * embed-on-Apply honest: a state stores a COPY of the field, so without it an edit would only reach nodes
-   * whose machine was applied again afterwards. Every live scene is walked.
-   */
-  const saveAnimationField = (asset: AnimationFieldAsset) => {
-    updateAnimationField(asset.id, asset);
-    const fields = animationFieldsRef.current.map(f => f.id === asset.id ? asset : f);
-    animationFieldsRef.current = fields;
-
-    let count = 0;
-    for (const scene of liveScenes()) {
-      for (const n of Array.from(scene.nodes)) {
-        if (!(n instanceof ModelNode) || !n.animator) continue;
-        const sm = n.animator.getStateMachine();
-        if (!machineUsesField(sm, asset.id)) continue;
-        n.animator.setStateMachine(reembedFields(sm as any, fields) as any);
-        count++;
-      }
-    }
-    if (count) {
-      // The edit landed on nodes in those scenes, so their owners have unsaved changes. Only the scene tab
-      // can be identified generically here; an asset tab's own save re-serializes its subtree anyway.
-      markTabDirty(SCENE_TAB_ID, 'animation-field-reembed');
-      eventEmitter.current.emit('SCENE_CHANGED');
-    }
-    Logger.info(`Animation field "${asset.name}" saved${count ? ` (updated ${count} model${count === 1 ? '' : 's'})` : ''}`, 'Editor');
-  };
+  const { enterAnimationFieldEditor, createAnimationFieldForModel, saveAnimationField } = useAnimationFieldEditor({
+    instanceRef, animationFieldsRef, modelsRef, materialsRef, animationsRef, tabRuntimeRef,
+    dirtyArmedRef, eventEmitter, tabs, setActiveTab, commitTab, withoutDirty, liveScenes,
+    markTabDirty, addAnimationField, updateAnimationField,
+  });
 
   // ---- Tileset editor --------------------------------------------------------------------------------
-
-  // Unlike every other asset tab this one owns NO scene: a tileset is an image with a grid drawn over it,
-  // so the tab needs no tabRuntimeRef entry, no throwaway Scene and no renderer involvement.
-  const enterTilesetEditor = (tilesetId?: string, adoptTabId?: string) => {
-    let asset = tilesetId ? tilesetsRef.current.find(t => t.id === tilesetId) : undefined;
-
-    if (!tilesetId) {
-      // A brand-new tileset starts with no atlas: the image is assigned from the editor's own slot, which
-      // is where its pixel dimensions come from.
-      asset = buildTilesetAsset('Tileset', '', 0, 0);
-      addTileset(asset);
-      // The library update lands in the next commit, so seed the ref directly — otherwise the tab opens
-      // against state that does not yet contain the asset it was just given.
-      tilesetsRef.current = [...tilesetsRef.current, asset];
-    }
-    if (!asset) { Logger.error('Tileset not found', 'Editor'); return; }
-
-    if (!adoptTabId && tilesetId) {
-      const existing = tabsRef.current.find(t => t.kind === 'tileset' && t.tilesetId === tilesetId);
-      if (existing) { setActiveTab(existing.id); return; }
-    }
-    const tabId = adoptTabId ?? cryptoRandomId();
-    commitTab({ id: tabId, kind: 'tileset', title: asset.name, tilesetId: asset.id }, adoptTabId);
-  };
-
-  /**
-   * Import an image and build a tileset around it in one step — the "+ Add > Tileset" path. The tile size
-   * is guessed from the image. Returns null when the file could not be decoded (importAtlasImage logs why).
-   */
-  const createTilesetFromImage = async (file: File): Promise<TilesetAsset | null> => {
-    const imported = await importAtlasImage(file, (event) => eventEmitter.current.emit(event as any));
-    if (!imported) return null;
-    const tile = guessTileSize(imported.width, imported.height);
-    // A texture's id is its filename; trim the extension for a readable asset name.
-    const name = imported.textureId.replace(/\.[^./\\]+$/, '') || imported.textureId;
-    const asset = buildTilesetAsset(name, imported.textureId, imported.width, imported.height, {
-      tileWidth: tile, tileHeight: tile,
-    });
-    // The image is already decoded on this path (importAtlasImage registers it through addTextureFromData),
-    // so the card preview can be rendered now rather than waiting for the first save.
-    asset.thumbnail = renderTilesetThumbnail(asset) ?? undefined;
-    addTileset(asset);
-    // The library update lands in the next commit, so seed the ref directly — enterTilesetEditor reads it.
-    tilesetsRef.current = [...tilesetsRef.current, asset];
-    enterTilesetEditor(asset.id);
-    // The asset itself, not just its id: a caller that wants to reference it immediately (a sprite's
-    // tileset slot) cannot find it in `tilesets` yet — that state update lands a commit later.
-    return asset;
-  };
-
-  /** Persist an edited tileset and push it into every tilemap already drawing from a copy of it. */
-  const saveTileset = (input: TilesetAsset) => {
-    // The card preview is a plain canvas downscale of the atlas, cheap enough to refresh on every save.
-    const asset = { ...input, thumbnail: renderTilesetThumbnail(input) ?? input.thumbnail };
-    updateTileset(asset.id, asset);
-    tilesetsRef.current = tilesetsRef.current.map(t => t.id === asset.id ? asset : t);
-    const open = tabsRef.current.find(t => t.kind === 'tileset' && t.tilesetId === asset.id);
-    if (open) {
-      clearTabDirty(open.id);
-      if (open.title !== asset.name) setTabs(prev => prev.map(t => t.id === open.id ? { ...t, title: asset.name } : t));
-    }
-    Logger.info(`Tileset "${asset.name}" saved`, 'Editor');
-  };
+  const { enterTilesetEditor, createTilesetFromImage, saveTileset } = useTilesetEditor({
+    tilesetsRef, tabsRef, setTabs, eventEmitter,
+    addTileset, updateTileset, setActiveTab, commitTab, clearTabDirty,
+  });
 
   // Import one or more model files (and folders) into the mesh library: one bundle per model file, each
   // parsed, reviewed in the import modal (missing textures + scale normalization), then normalized, its
@@ -4251,129 +3582,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   // ---- Saving: one action per tab, plus Save All ------------------------------------------------
-
-  // The live animation session's Apply, registered by StateMachineProvider — and by AnimationFieldProvider
-  // for a field tab. Neither can be saved from here: both keep their working copy as React state inside
-  // their own provider. Only the active tab ever has a session, so one slot is enough.
-  const animationApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
-  const registerAnimationApply = (reg: { tabId: string; apply: () => void } | null) => { animationApplyRef.current = reg; };
-
-  // Same arrangement for the tileset session: TilesetProvider keeps the working copy as its own React
-  // state, so saving a tileset tab from here means calling back into it.
-  const tilesetApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
-  const registerTilesetApply = (reg: { tabId: string; apply: () => void } | null) => { tilesetApplyRef.current = reg; };
-
-  /**
-   * Save one tab, whichever kind it is. Returns whether the tab came out clean — each save path clears the
-   * tab's dirty flag on success and logs + returns early on failure, so the flag is the honest signal.
-   */
-  const saveTabById = async (tabId: string): Promise<boolean> => {
-    const tab = tabsRef.current.find(t => t.id === tabId);
-    if (!tab) return false;
-    switch (tab.kind) {
-      case 'scene': return await saveCurrentScene();
-      case 'template': await saveTemplateTab(tabId); break;
-      case 'model': await saveModelTab(tabId); break;
-      case 'material': await saveMaterialTab(tabId); break;
-      case 'terrainMaterial': await saveTerrainMaterialTab(tabId); break;
-      case 'script': saveScriptTab(tabId); break;
-      case 'tileset': {
-        const session = tilesetApplyRef.current;
-        if (!session || session.tabId !== tabId) return false;
-        session.apply();
-        break;
-      }
-      case 'animation':
-      case 'animationField': {
-        const reg = animationApplyRef.current;
-        if (!reg || reg.tabId !== tabId) return false;
-        // Animation: writes the machine onto the source model, dirtying ITS tab.
-        // Animation field: writes the field asset to the library and re-embeds it where it is played.
-        reg.apply();
-        break;
-      }
-    }
-    return !dirtyTabsRef.current[tabId];
-  };
-
-  const savingRef = useRef(false);
-
-  /**
-   * The one save runner: drives `tabIds` sequentially, one progress step each, and owns `savingState`. Every
-   * save entry point goes through here, so they cannot drift or nest tasks. Each step races a 15s timeout,
-   * so a wedged serialize can never leave the UI stuck on "Saving…".
-   */
-  const runSave = async (tabIds: string[], title: string): Promise<boolean> => {
-    if (savingRef.current || !tabIds.length) return false;
-    const named = tabIds.map(id => ({ id, tab: tabsRef.current.find(t => t.id === id) }));
-    savingRef.current = true;
-    setSavingState('saving');
-    const task = startTask({
-      title,
-      steps: named.map(n => ({ name: n.tab?.title ?? 'Asset', status: 'pending' as const })),
-      cancellable: tabIds.length > 1,
-    });
-    let failed = 0;
-    try {
-      for (let i = 0; i < named.length; i++) {
-        if (task.cancelled) {
-          for (let j = i; j < named.length; j++) task.setStep(j, { status: 'skipped' });
-          failed++;
-          break;
-        }
-        task.setStep(i, { status: 'running', detail: named[i].tab ? KIND_LABEL[named[i].tab!.kind] : undefined });
-        try {
-          const ok = await Promise.race<boolean>([
-            saveTabById(named[i].id),
-            new Promise<boolean>((_, rej) => setTimeout(() => rej(new Error('Save timed out')), 15000)),
-          ]);
-          task.setStep(i, ok ? { status: 'done', detail: 'Saved' } : { status: 'failed', error: 'Save failed' });
-          if (!ok) failed++;
-        } catch (e: any) {
-          Logger.error(`Failed to save "${named[i].tab?.title}": ${e?.message || e}`, 'Editor');
-          task.setStep(i, { status: 'failed', error: String(e?.message || e) });
-          failed++;
-        }
-      }
-      setSavingState(failed ? 'error' : 'saved');
-      return failed === 0;
-    } finally {
-      task.finish();
-      savingRef.current = false;
-      setTimeout(() => setSavingState('idle'), 2000);
-    }
-  };
-
-  const saveActiveTab = async (): Promise<boolean> => {
-    const tab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
-    if (!tab) return false;
-    return runSave([tab.id], `Saving ${tab.title}`);
-  };
-
-  /**
-   * Save every tab with unsaved edits. Order is load-bearing: animation applies first (applying is what
-   * makes the source model's tab dirty), then leaf assets, then the models and templates that embed them,
-   * then the scene — saveCurrentScene hashes referenced assets and must not hash one about to be rewritten.
-   */
-  const saveAll = async (): Promise<void> => {
-    if (savingRef.current) return;
-
-    const live = animationApplyRef.current;
-    if (live && dirtyTabsRef.current[live.tabId]) live.apply();
-
-    const ORDER: Record<TabKind, number> = {
-      material: 0, terrainMaterial: 0, script: 0, animation: 0, animationField: 0, tileset: 0,
-      model: 1, template: 2, scene: 3,
-    };
-    // Snapshot taken up front, so the loop is finite by construction.
-    const targets = tabsRef.current
-      .filter(t => dirtyTabsRef.current[t.id])
-      .sort((a, b) => ORDER[a.kind] - ORDER[b.kind]);
-    if (!targets.length) return;
-    await runSave(targets.map(t => t.id), `Saving ${targets.length} asset${targets.length === 1 ? '' : 's'}`);
-  };
-
-  const saveProjectToStorage = (): Promise<boolean> => runSave([SCENE_TAB_ID], 'Saving scene');
+  const {
+    registerAnimationApply, registerTilesetApply, saveTabById, runSave,
+    saveActiveTab, saveAll, saveProjectToStorage,
+  } = useSaving({
+    tabsRef, dirtyTabsRef, activeTabIdRef, setSavingState,
+    saveCurrentScene, saveTemplateTab, saveModelTab, saveMaterialTab, saveTerrainMaterialTab, saveScriptTab,
+  });
 
   // ---- Scene assets (multi-scene project) ------------------------------------------------------
 
@@ -4778,7 +3993,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (activeTabKindRef.current === 'scene') viewDimensionRef.current = dimension;
 
       if (!instanceRef.current.scene) {
-        console.log('Scene not ready yet, retrying...');
         setTimeout(() => {
           eventEmitter.current.emit('CHANGE_DIMENSION', dimension);
         }, 100);
@@ -4938,7 +4152,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     });
 
     eventEmitter.current.on('SELECT_NODE', (node: string | null) => {
-      console.log('SELECT_NODE event received:', node);
       // A model tab edits ONE thing and has no tree to browse, so the selection is pinned to the active LOD
       // level's root: the Transform panel always edits the model's transform, never a sub-mesh's.
       if (activeTabKindRef.current === 'model') {
@@ -4953,18 +4166,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (instanceRef.current && instanceRef.current.renderer) {
         const outlineTarget = (activeTabKindRef.current === 'material' || activeTabKindRef.current === 'terrainMaterial') ? null : node;
         instanceRef.current.renderer.setSelectedNode(outlineTarget);
-        console.log('Selection updated in renderer:', outlineTarget);
       }
     });
 
-    eventEmitter.current.on('GIZMO_DRAG_START', (data: { axis: string, nodeId: string }) => {
-      console.log('GIZMO_DRAG_START event received:', data);
+    eventEmitter.current.on('GIZMO_DRAG_START', () => {
       setIsGizmoDragging(true);
       isGizmoDraggingRef.current = true;
     });
 
-    eventEmitter.current.on('GIZMO_DRAG_END', (data: { axis: string | null, nodeId: string | null }) => {
-      console.log('GIZMO_DRAG_END event received:', data);
+    eventEmitter.current.on('GIZMO_DRAG_END', () => {
       setIsGizmoDragging(false);
       isGizmoDraggingRef.current = false;
     });

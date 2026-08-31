@@ -1,10 +1,15 @@
 import React, { useState } from 'react'
 import { Modal, ModalHeader, ModalFooter, Toggle } from '../../components/ui'
 import { halveTo } from '../../utils/lodTextures'
+import { clamp } from '../../utils/math';
 
 // Per-level control over generated LOD levels. Hosted by ModelInspector with plain local state rather
 // than the globally-mounted pending/resolver pattern — that exists for flows that PARK on the user's
 // answer (model import awaits it mid-parse); this one just collects a form and calls an action.
+
+const GENERATE_HINT = 'Each level becomes its own model asset in the library, decimated from this one and referenced as a level. Regenerating updates those assets rather than adding more.'
+const DOWNSCALE_ON_HINT = 'Levels landing on the same size share one image, so a second level costs no extra texture memory. Small maps stop at 64px, and maps whose alpha carries data are left at full size.'
+const DOWNSCALE_OFF_HINT = 'Levels reuse this model’s materials and textures unchanged — only the triangle count drops.'
 
 export interface GenerateLodsSpec {
     ratio: number
@@ -60,12 +65,7 @@ export default function GenerateLodsModal(props: GenerateLodsModalProps) {
                 <div className='text-lg font-bold truncate' title={props.modelName}>{props.modelName}</div>
             </ModalHeader>
 
-            <div className='px-4 py-3 space-y-3 text-sm'>
-                <p className='text-[11px] text-gray-400'>
-                    Each level becomes its own model asset in the library, decimated from this one and
-                    referenced as a level. Regenerating updates those assets rather than adding more.
-                </p>
-
+            <div className='px-4 py-3 space-y-3 text-sm' title={GENERATE_HINT}>
                 <div className='space-y-2'>
                     <div className='flex items-center gap-2 text-[11px] text-gray-400 px-1'>
                         <span className='w-[46px]'>Level</span>
@@ -79,7 +79,7 @@ export default function GenerateLodsModal(props: GenerateLodsModalProps) {
                             <div className='flex-1 flex items-center gap-2'>
                                 <input type='number' min={1} max={99} className={num}
                                        value={Math.round(s.ratio * 100)}
-                                       onChange={e => patch(i, { ratio: Math.min(0.99, Math.max(0.01, Number(e.target.value) / 100)) })} />
+                                       onChange={e => patch(i, { ratio: clamp(Number(e.target.value) / 100, 0.01, 0.99) })} />
                                 <span className='text-[11px] text-gray-400'>% · ~{tris(s.ratio)}</span>
                             </div>
                             <input type='number' min={0} className={num}
@@ -101,12 +101,8 @@ export default function GenerateLodsModal(props: GenerateLodsModalProps) {
                 </div>
 
                 <div className='pt-2 border-t border-control'>
-                    <Toggle label='Halve texture resolution per level' checked={downscale} onChange={setDownscale} />
-                    <p className='text-[11px] text-gray-400 mt-1'>
-                        {downscale
-                            ? 'Levels landing on the same size share one image, so a second level costs no extra texture memory. Small maps stop at 64px, and maps whose alpha carries data are left at full size.'
-                            : 'Levels reuse this model’s materials and textures unchanged — only the triangle count drops.'}
-                    </p>
+                    <Toggle label='Halve texture resolution per level' checked={downscale} onChange={setDownscale}
+                            title={downscale ? DOWNSCALE_ON_HINT : DOWNSCALE_OFF_HINT} />
                 </div>
 
                 {outOfOrder && (

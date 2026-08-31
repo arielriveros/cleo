@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { cn } from './cn';
 import { labelClass, valueClass } from './typography';
+import { clamp } from '../../utils/math';
 
 export interface SliderProps {
   value: number;
@@ -37,12 +38,12 @@ export function Slider({
   title,
 }: SliderProps) {
   const [editing, setEditing] = useState(false);
-  const pct = max > min ? Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100)) : 0;
+  const pct = max > min ? clamp(((value - min) / (max - min)) * 100, 0, 100) : 0;
   const text = typeof readout === 'function' ? readout(value) : value.toFixed(2);
 
   const commit = (raw: string) => {
     const v = parseFloat(raw);
-    if (Number.isFinite(v)) onChange(Math.min(max, Math.max(min, v)));
+    if (Number.isFinite(v)) onChange(clamp(v, min, max));
     setEditing(false);
   };
 

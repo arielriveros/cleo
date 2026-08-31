@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { useEditorSessions } from '../EditorSessionsContext'
 import { cn, TextInput, Hint } from '../../components/ui'
+import { useAssetDrop } from '../../utils/useAssetDrop'
 
 // Links shared `.anim` assets to a model. The link lives on the MODEL asset, not the node, so one stored
 // clip plays on every placement of a character.
@@ -17,7 +18,6 @@ export default function AnimationAssetPicker(props: {
   const { linkAnimationToModel, unlinkAnimationFromModel } = useEditorSessions()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [dragOver, setDragOver] = useState(false)
 
   const asset = props.modelId ? models.find(m => m.id === props.modelId) : undefined
   const linkedIds = asset?.animationIds ?? []
@@ -30,19 +30,8 @@ export default function AnimationAssetPicker(props: {
     if (modelId) linkAnimationToModel(modelId, animationId)
   }
 
-  const onDragOver = (e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes('text/cleo-animation')) return
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'copy'
-    setDragOver(true)
-  }
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragOver(false)
-    const id = e.dataTransfer.getData('text/cleo-animation')
-    if (id) void link(id)
-  }
+  const { dragOver, dropProps } = useAssetDrop('text/cleo-animation', id => void link(id),
+    { dropEffect: 'copy', stopPropagation: true })
 
   const candidates = animations.filter(a =>
     !linkedIds.includes(a.id) && a.name.toLowerCase().includes(query.trim().toLowerCase()))
@@ -53,9 +42,7 @@ export default function AnimationAssetPicker(props: {
     <div
       className={cn('flex flex-col gap-1 rounded border-2 border-dashed p-1.5',
         dragOver ? 'border-selected bg-border/30' : 'border-border', props.className)}
-      onDragOver={onDragOver}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={onDrop}
+      {...dropProps}
     >
       {linkedIds.map(id => {
         const anim = animations.find(a => a.id === id)

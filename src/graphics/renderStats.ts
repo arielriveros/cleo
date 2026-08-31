@@ -6,7 +6,7 @@ export interface RenderStats {
     drawCalls: number;
     /** Subset of drawCalls issued via gl.drawElementsInstanced / drawArraysInstanced. */
     instancedDrawCalls: number;
-    /** Draws recorded through the RHI command model rather than by `Mesh` directly. Pinned by the harness. */
+    /** Draws recorded through the RHI command model rather than by `Mesh` directly. */
     rhiDrawCalls: number;
     /** Scene meshes drawn in the color pass (post-`visible`; excludes shadow/IBL re-draws and foliage blades). */
     objects: number;

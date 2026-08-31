@@ -133,7 +133,6 @@ import { gl, setGLContext } from './glContext';
 import { describeCapabilities } from './rhi/device';
 import type { BackendKind, DeviceCapabilities, Device } from './rhi/device';
 import { resolveBackendRequest } from './rhi/backendSelect';
-import type { DeviceProbe } from './rhi/backendSelect';
 // Imported unconditionally: it pulls in no naga or wasm, and a dynamic import would make acquisition
 // failure and chunk-load failure the same observable event.
 import { acquireWebGPUDevice } from './rhi/webgpu/webgpuDevice';
@@ -983,19 +982,9 @@ export class Renderer {
     // callers get the SAME promise.
     private _initializing: Promise<void> | null = null;
 
-    /** See {@link deviceProbe}. Mutated in place by {@link _stage}. */
-    private _deviceProbe: DeviceProbe = {
-        requested: 'webgl2', acquired: null, fallbackReason: null, reached: [], failedAt: null,
-    };
-
-    /** Whether the `firstFrame` probe stage has been taken — see {@link render}. */
-    private _firstFrameStaged: boolean = false;
-    /** Set once `firstFrame` completes: after that `_stage` is a pass-through. See `_stage`. */
-    private _probeComplete: boolean = false;
-
     /**
      * Acquire the GPU device and allocate every render target. Idempotent, and must complete before any
-     * Texture, Mesh or Shader is constructed. The STAGE ORDER below is load-bearing for the boot probe.
+     * Texture, Mesh or Shader is constructed.
      */
     public initialize(): Promise<void> {
         if (this._deviceReady) return Promise.resolve();
@@ -1007,24 +996,18 @@ export class Renderer {
     }
 
     private async _initializeOnce(): Promise<void> {
-        this._deviceProbe.requested = this._config.backend ?? 'webgl2';
-
-        const gpu = await this._stage('device', () => this._acquireDevice());
+        const gpu = await this._acquireDevice();
         // Published through a live binding so the low-level wrappers can reach the device without
         // importing the renderer.
         setDevice(gpu);
         this._capabilities = gpu.capabilities;
-        this._deviceProbe.acquired = gpu.backend;
-        this._deviceProbe.fallbackReason = this._backendFallbackReason;
 
         // Install the profiler backend for whichever device we got. `gl` is read only on the WebGL2
         // branch — on WebGPU the live binding is undefined, and null is the honest thing to pass.
-        this._stage('profiler', () => {
-            initializeGpuProfiler(gpu, gpu.backend === 'webgl2' ? gl : null);
-        });
+        initializeGpuProfiler(gpu, gpu.backend === 'webgl2' ? gl : null);
 
-        this._stage('screenQuad', () => { this._screenQuad = new Mesh(); });
-        this._stage('framebuffers', () => this._allocateTargets());
+        this._screenQuad = new Mesh();
+        this._allocateTargets();
 
         this._deviceReady = true;
         Logger.info(`Graphics device ready — ${describeCapabilities(this._capabilities)}`, 'Runtime');
@@ -1054,45 +1037,6 @@ export class Renderer {
         return new WebGL2Device(context);
     }
 
-    // Run one named startup stage, recording whether it was reached. Takes sync and promise bodies
-    // through one call; a promise records when it SETTLES. Always re-throws — this measures a
-    // failure, it never handles one.
-    private _stage<T>(name: string, body: () => T): T {
-        // Only until the probe has seen a whole frame: `_render`'s phases are staged too, and `reached`
-        // would otherwise grow by eight entries every frame forever.
-        if (this._probeComplete) return body();
-        try {
-            const result = body();
-            if (result instanceof Promise)
-                return result.then(
-                    value => { this._deviceProbe.reached.push(name); return value; },
-                    error => { this._recordStageFailure(name, error); throw error; },
-                ) as unknown as T;
-            this._deviceProbe.reached.push(name);
-            return result;
-        } catch (error) {
-            this._recordStageFailure(name, error);
-            throw error;
-        }
-    }
-
-    /** First failure only — the ones after it are consequences, and overwriting loses the cause. */
-    private _recordStageFailure(stage: string, error: unknown): void {
-        if (this._deviceProbe.failedAt) return;
-        this._deviceProbe.failedAt = {
-            stage,
-            message: error instanceof Error ? error.message : String(error),
-            // The stack is the whole point on the WebGPU path: 'a WebGL2-only path was reached' names
-            // the rule that was broken but not the call that broke it, and the call is the work item.
-            stack: (error instanceof Error && error.stack) ? error.stack : '',
-        };
-    }
-
-    /**
-     * How far startup got on this backend, and where it stopped. The live object, not a copy; read by
-     * `tools/harness/webgpuBootCheck.js`, which ratchets on `failedAt.stage`.
-     */
-    public get deviceProbe(): DeviceProbe { return this._deviceProbe; }
 
     // Allocate every render target. Nothing here is backend-aware and nothing should become so — the
     // porting work belongs inside `Framebuffer`, not in this list.
@@ -1166,15 +1110,12 @@ export class Renderer {
         return this._capabilities;
     }
 
-    /**
-     * Bring the acquired device to the state every pass assumes, then build every program. Two probe
-     * stages, because the raw-`gl.*` state block and the portable program creation fail differently.
-     */
+    /** Bring the acquired device to the state every pass assumes, then build every program. */
     public preInitialize(): void {
         if (!this._deviceReady)
             throw new Error('Renderer.preInitialize() called before initialize() — await the device first');
-        this._stage('preInitialize', () => this._configureDefaultState());
-        this._stage('programs', () => this._createPrograms());
+        this._configureDefaultState();
+        this._createPrograms();
     }
 
     // The default GL state, deliberately still raw `gl.*`: under WebGPU this throws on the first
@@ -1362,27 +1303,16 @@ export class Renderer {
         Logger.info('Renderer ready')
     }
 
-    /**
-     * Draw one frame. Wrapped so the boot probe can record `firstFrame` as a stage — a device that
-     * acquires and links everything but throws on its first draw is still a device that does not work.
-     */
+    /** Draw one frame. */
     public render(scene: Scene): void {
-        if (this._firstFrameStaged) return this._render(scene);
-        this._firstFrameStaged = true;
-        const result = this._stage('firstFrame', () => this._render(scene));
-        this._probeComplete = true;
-        return result;
-    }
-
-    private _render(scene: Scene): void {
         // Set active camera
         if (!scene.activeCamera) return;
         this._frameEncoder = device.createCommandEncoder('frame');
         try {
             this._renderFrame(scene);
         } finally {
-            // `finally`, because `_stage` re-throws: an encoder left open would leak every pass recorded
-            // into it and the next frame would start on a stale one.
+            // `finally`, because `_renderFrame` can throw: an encoder left open would leak every pass
+            // recorded into it and the next frame would start on a stale one.
             this._flushFrameEncoder();
         }
     }
@@ -1407,7 +1337,7 @@ export class Renderer {
 
         // Combine each material's separate metallic/roughness/occlusion (and specular/reflectivity) maps
         // into the single packed texture the shaders sample. Before any pass binds a material.
-        this._stage('frame.packTextures', () => this._ensurePackedTextures(scene));
+        this._ensurePackedTextures(scene);
 
         // Cache view/projection/inverse and update the culling frustum for this frame
         const view = this._activeCamera.viewMatrix;
@@ -1458,39 +1388,34 @@ export class Renderer {
         // its own scope: a layer whose prototypes were just re-derived re-uploads every cell here, and
         // that cost is invisible if it is charged to whichever pass happens to open next.
         this._scope('foliage.upload');
-        this._stage('frame.foliage', () => this._ensureFoliageUploaded(scene));
+        this._ensureFoliageUploaded(scene);
         this._endScope();
         this._checkGLErrors('framePrologue');
 
         this._shadowsActive = false;
         if (shadowLight && this._shadowsEnabled) {
             if (this._beginPass('shadows.cascades')) {
-                this._stage('frame.cascades', () => this._renderCascades(scene, shadowLight!));
+                this._renderCascades(scene, shadowLight!);
                 this._shadowsActive = true;
                 this._shadowMapsDirty = true;
             }
         }
         this._checkGLErrors('cascades');
-        this._stage('frame.spotShadows', () => this._renderSpotShadows(scene));
+        this._renderSpotShadows(scene);
         this._checkGLErrors('spotShadows');
 
-        // Staged individually rather than as one `frame.shadows`: the three shadow paths are mutually
-        // exclusive and each fails differently, so collapsing them would tell you a frame died in
-        // "shadows" without saying which of the three ran.
         if (!this._shadowsActive) {
             // No caster: the pass above is skipped, so the layers still hold the LAST scene's depth and
             // every lighting shader samples them regardless. Clear to the far plane, once.
-            this._stage('frame.clearShadows', () => this._clearShadowMaps());
+            this._clearShadowMaps();
         }
 
-        this._stage('frame.scene', () => {
-            if (this._deferred) this._renderDeferred(scene, shadowLight);
-            else this._renderForward(scene, shadowLight);
-        });
+        if (this._deferred) this._renderDeferred(scene, shadowLight);
+        else this._renderForward(scene, shadowLight);
         this._checkGLErrors('scene');
 
         // Apply post processing
-        this._stage('frame.post', () => this._applyPostProcessing(scene));
+        this._applyPostProcessing(scene);
         this._checkGLErrors('post');
 
         // Remember this frame's camera transform so next frame's motion blur can reproject against it.

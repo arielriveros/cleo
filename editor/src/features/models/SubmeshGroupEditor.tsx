@@ -37,15 +37,15 @@ export default function SubmeshGroupEditor({ parts, bundleName, groups, onChange
   return (
     <div>
       <div className='flex items-center justify-between mb-1'>
-        <span className='text-xs font-semibold'>Groups</span>
+        <span className='text-xs font-semibold'
+              title='Each group becomes one model asset, its parts merged into a single mesh. Drag a part to move it.'>
+          Groups
+        </span>
         <button className='text-[11px] bg-control hover:bg-control-hover rounded px-2 py-1'
                 onClick={() => onChange(addGroup(groups, bundleName))}>
           + Add group
         </button>
       </div>
-      <p className='text-[11px] text-gray-400 mb-2'>
-        Each group becomes one model asset, its parts merged into a single mesh. Drag a part to move it.
-      </p>
 
       <div className='flex gap-2 overflow-x-auto pb-1'>
         {groups.map((group, gi) => (

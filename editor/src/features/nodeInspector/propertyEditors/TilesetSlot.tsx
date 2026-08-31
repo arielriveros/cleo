@@ -5,6 +5,7 @@ import Collapsable from '../../../components/Collapsable'
 import { TilesetAsset, toRuntimeTileset } from '../../../utils/tilesets'
 import { Select, Button, Hint, cn, valueClass } from '../../../components/ui'
 import { TilesetIcon } from '../sectionIcons'
+import { useAssetDrop } from '../../../utils/useAssetDrop'
 
 // The tileset reference control on a sprite node, and the only way a sprite gets an image. Assigning stores
 // the runtime copy on the node, so the sprite keeps drawing even if the library is not in scope.
@@ -16,7 +17,6 @@ export function tilesetAssetOf(node: SpriteNode, tilesets: TilesetAsset[]): Tile
 
 export default function TilesetSlot(props: { node: SpriteNode; onChange?: () => void }) {
   const { tilesets, enterTilesetEditor, createTilesetFromImage, eventEmitter } = useCleoEngine()
-  const [dragOver, setDragOver] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
 
   const linkedId = props.node.tileset?.id
@@ -47,18 +47,12 @@ export default function TilesetSlot(props: { node: SpriteNode; onChange?: () => 
     assign(await createTilesetFromImage(file) ?? undefined)
   }
 
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault(); setDragOver(false)
-    const id = e.dataTransfer.getData('text/cleo-tileset')
-    if (id) assign(tilesets.find(t => t.id === id))
-  }
-  const onDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('text/cleo-tileset')) { e.preventDefault(); setDragOver(true) }
-  }
+  const { dragOver, dropProps } = useAssetDrop('text/cleo-tileset',
+    id => assign(tilesets.find(t => t.id === id)))
 
   return (
     <Collapsable title='Tileset' icon={<TilesetIcon />} persistKey='tilesetSlot'>
-      <div className='w-full p-2' onDragOver={onDragOver} onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
+      <div className='w-full p-2' {...dropProps}>
         <input ref={fileInput} type='file' accept='image/*' className='hidden' onChange={onPickImage} />
         {asset ? (
           <div className={`flex items-center gap-2 p-2 bg-control border rounded ${dragOver ? 'border-selected' : 'border-border'}`}>

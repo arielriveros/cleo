@@ -3,7 +3,7 @@
 
 export { cn } from './cn';
 
-export { labelClass, valueClass, hintClass, sectionTitleClass, headerClass } from './typography';
+export { labelClass, valueClass, hintClass, sectionTitleClass } from './typography';
 
 export { Button, buttonVariants, ButtonWithConfirm } from './Button';
 export type { ButtonProps, ButtonWithConfirmProps } from './Button';
@@ -11,7 +11,7 @@ export type { ButtonProps, ButtonWithConfirmProps } from './Button';
 export { SegmentedControl } from './SegmentedControl';
 export type { SegmentedControlProps, SegmentedOption } from './SegmentedControl';
 
-export { NumberInput, TextInput, Select, controlClass } from './inputs';
+export { NumberInput, TextInput, Select } from './inputs';
 export type { NumberInputProps, TextInputProps, SelectProps } from './inputs';
 
 
@@ -33,8 +33,7 @@ export type { TypeSelectProps } from './TypeSelect';
 export { AccessSelect, ACCESS_META } from './AccessSelect';
 export type { AccessSelectProps } from './AccessSelect';
 
-export { TYPE_META, typeMeta } from './dataTypes';
-export type { TypeMeta } from './dataTypes';
+
 
 export { Field, Hint } from './Field';
 export type { FieldProps } from './Field';
@@ -45,14 +44,13 @@ export type { ColorInputProps } from './ColorInput';
 export { PropertyTable, PropertyRow } from './PropertyTable';
 export type { PropertyTableProps, PropertyRowProps } from './PropertyTable';
 
-export { Panel, PanelHeader, Section } from './Panel';
+export { Panel, Section } from './Panel';
 export type { SectionProps } from './Panel';
 
 export { Modal, ModalHeader, ModalFooter } from './Modal';
 export type { ModalProps } from './Modal';
 
-export { OverlayPanel } from './OverlayPanel';
-export type { OverlayPanelProps } from './OverlayPanel';
+
 
 // Primitives that live outside ui/, re-exported for a single import surface.
 export { default as Collapsable } from '../Collapsable';

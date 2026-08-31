@@ -244,17 +244,22 @@ describe('the authored exposure is kept apart from the metered one', () => {
 });
 
 describe('metering is suppressed outside the scene tab', () => {
-    const CONTEXT = readFileSync(join(__dirname, '..', 'editor', 'src', 'features', 'EngineContext.tsx'), 'utf-8');
+    const editorFile = (...parts: string[]) =>
+        readFileSync(join(__dirname, '..', 'editor', 'src', 'features', ...parts), 'utf-8');
+
+    // The declarations live in the types module; the WIRING that reads them is in the provider.
+    const TYPES = editorFile('engineContextTypes.ts');
+    const CONTEXT = editorFile('EngineContext.tsx');
 
     /** The `TabKind` union and the table that must cover it. */
     const tabKinds = () => {
-        const line = CONTEXT.match(/export type TabKind = ([^;]+);/);
+        const line = TYPES.match(/export type TabKind = ([^;]+);/);
         expect(line, 'TabKind not found').toBeTruthy();
         return [...line![1].matchAll(/'([a-zA-Z]+)'/g)].map(m => m[1]);
     };
     const tableEntries = () => {
-        const start = CONTEXT.indexOf('export const TAB_METERS_EXPOSURE');
-        const body = CONTEXT.slice(start, CONTEXT.indexOf('};', start));
+        const start = TYPES.indexOf('export const TAB_METERS_EXPOSURE');
+        const body = TYPES.slice(start, TYPES.indexOf('};', start));
         return Object.fromEntries([...body.matchAll(/^\s{2}([a-zA-Z]+):\s*(true|false)/gm)]
             .map(m => [m[1], m[2] === 'true']));
     };

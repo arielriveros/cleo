@@ -4,6 +4,7 @@ import { Button, Hint, Select } from '../../components/ui'
 import { toRuntimeTileset } from '../../utils/tilesets'
 import TileGrid from '../tileset/TileGrid'
 import { useActiveTilemap } from './useActiveTilemap'
+import { useAssetDrop } from '../../utils/useAssetDrop'
 
 // The tilemap mode's palette panel: pick the layer's tileset, then pick what the brush paints. Dragging a
 // rectangle across the atlas builds a multi-tile stamp rather than selecting one tile.
@@ -12,7 +13,6 @@ export default function TilePalette() {
   const { tilesets, tilemapBrush, eventEmitter, enterTilesetEditor } = useCleoEngine()
   const { node, revision } = useActiveTilemap()
   const [zoom, setZoom] = useState(2)
-  const [dragOver, setDragOver] = useState(false)
 
   const layerIndex = tilemapBrush.current.activeLayer
   const layer = node?.tilemap.layers[layerIndex]
@@ -34,14 +34,7 @@ export default function TilePalette() {
     eventEmitter.emit('SCENE_CHANGED')
   }
 
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault(); setDragOver(false)
-    const id = e.dataTransfer.getData('text/cleo-tileset')
-    if (id) assign(id)
-  }
-  const onDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('text/cleo-tileset')) { e.preventDefault(); setDragOver(true) }
-  }
+  const { dragOver, dropProps } = useAssetDrop('text/cleo-tileset', assign)
 
   const selection = tilemapBrush.current.stamp.tiles
 
@@ -52,9 +45,7 @@ export default function TilePalette() {
   return (
     <div
       className={`flex flex-col h-full w-full bg-surface-raised text-white ${dragOver ? 'ring-1 ring-selected' : ''}`}
-      onDragOver={onDragOver}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={onDrop}
+      {...dropProps}
     >
       <div className='h-[26px] shrink-0 flex items-center gap-1 px-1.5 border-b border-border'>
         <Select

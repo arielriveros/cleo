@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '../../components/ui'
 import type { TilesetAsset } from '../../utils/tilesets'
 import { awaitTextureImage, textureImage } from '../../utils/textureReady'
+import { clamp } from '../../utils/math';
 
 // The atlas with its slicing grid drawn over it, plus rectangular selection. Shared by the tileset editor
 // (picking the tile being edited) and the tilemap palette (picking the brush, a rectangle being a stamp).
@@ -111,7 +112,7 @@ export default function TileGrid({
     ctx.stroke()
 
     if (markerOf) {
-      const size = Math.max(3, Math.min(6, tw * 0.25))
+      const size = clamp(tw * 0.25, 3, 6)
       for (let i = 0; i < asset.columns * asset.rows; i++) {
         const colour = markerOf(i)
         if (!colour) continue
@@ -210,7 +211,7 @@ export default function TileGrid({
   const onWheel = (e: React.WheelEvent) => {
     if (!e.ctrlKey && !e.metaKey) return
     e.preventDefault()
-    setZoom(Math.max(0.25, Math.min(16, zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15))))
+    setZoom(clamp(zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 0.25, 16))
   }
 
   if (!src) {

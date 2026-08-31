@@ -1,6 +1,7 @@
 import { Scene, Node, Camera, CameraNode, LightNode, DirectionalLight, InputManager } from 'cleo';
 import { PREVIEW_FOV, fitDistance, previewClipPlanes } from './previewFraming';
 import { applyPreviewEnvironment } from './previewEnvironment';
+import { clamp } from '../../utils/math';
 
 const RADIUS = 3.2;       // camera distance from the sphere (at the origin)
 // Closer than the sphere's fit distance (~2.8) crops it; thumbnail capture clamps back out
@@ -67,11 +68,11 @@ export function createMaterialPreviewScene(
     if (mouse.buttons.Left) {
       yaw -= mouse.velocity[0] * delta * ROT_SPEED;
       pitch += mouse.velocity[1] * delta * ROT_SPEED;
-      pitch = Math.max(-85, Math.min(85, pitch)); // don't roll over the poles
+      pitch = clamp(pitch, -85, 85); // don't roll over the poles
       pivot.setRotation([pitch, yaw, 0]);
     }
     if (Math.abs(mouse.wheel.deltaY) > 0 && InputManager.instance.isMouseOverCanvas()) {
-      radius = Math.max(minRadius, Math.min(maxRadius, radius + mouse.wheel.deltaY * ZOOM_SPEED));
+      radius = clamp(radius + mouse.wheel.deltaY * ZOOM_SPEED, minRadius, maxRadius);
       cam.setPosition([0, 0, -radius]);
     }
   };

@@ -73,16 +73,6 @@ export class WebGPUShaderProgram implements ShaderProgram {
 
     public flushUniformBlocks(): void { this._uniforms.flush(this._device); }
 
-    public describeBlockLayout(): unknown[] {
-        return this._uniforms.blocks.map(block => ({
-            name: block.layout.name,
-            group: block.layout.group,
-            binding: block.layout.binding,
-            size: block.layout.size,
-            members: block.layout.flat.map(m => ({ name: m.name, offset: m.offset, size: m.size })),
-        }));
-    }
-
     public dispose(): void {
         if (this._disposed) return;
         this._disposed = true;

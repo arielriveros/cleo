@@ -8,6 +8,9 @@ import { modelAssetTextureIds, modelAssetDiameter } from '../../utils/models'
 // renderer instance is not in scope here, and this panel only needs it to warn about a dead band.
 const GLOBAL_FOLIAGE_CULL = 65
 
+const FIELDS_HINT = 'A field blends this model’s clips by 1D or 2D parameters. Use one as a state in the animation graph instead of a single clip.'
+const LOD_HINT = 'Each level references another model from the library and takes over at its distance — editing that model updates every level using it. Only LOD0 is edited here; selecting a level just previews it.'
+
 /** Triangles in a serialized model subtree, for the generate dialog's before/after figures. */
 function countTriangles(nodeJson: any): number {
   if (!nodeJson || typeof nodeJson !== 'object') return 0
@@ -85,11 +88,7 @@ export default function ModelInspector() {
           natural place to create one. Static models have no clips to blend. */}
       {modelSession.skinned && activeTab.modelId && (
         <Collapsable title='Animation fields' badge={fields.length || undefined} defaultOpen>
-          <div className='p-2 space-y-1'>
-            <p className='text-[11px] text-gray-400'>
-              A field blends this model’s clips by 1D or 2D parameters. Use one as a state in the
-              animation graph instead of a single clip.
-            </p>
+          <div className='p-2 space-y-1' title={FIELDS_HINT}>
             {fields.map(f => (
               <button key={f.id}
                 className='w-full rounded border border-control-hover px-2 py-1 text-left text-xs hover:bg-control'
@@ -109,16 +108,11 @@ export default function ModelInspector() {
       )}
 
       <Collapsable title='LOD levels'>
-        <div className='p-2 space-y-2'>
+        <div className='p-2 space-y-2' title={modelSession.skinned ? undefined : LOD_HINT}>
           {modelSession.skinned ? (
             <p className='text-[11px] text-gray-400'>LOD levels are not available for skinned models.</p>
           ) : (
             <>
-              <p className='text-[11px] text-gray-400'>
-                Each level references another model from the library and takes over at its distance —
-                editing that model updates every level using it. Only LOD0 is edited here; selecting a
-                level just previews it.
-              </p>
               {modelSession.levelIds.map((_, i) => (
                 <div key={i} className='border border-control rounded p-2 space-y-1'>
                   <div className='flex items-center gap-2'>

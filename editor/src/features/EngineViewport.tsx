@@ -197,18 +197,13 @@ export default function EngineViewport() {
             }
 
             try {
-                console.log('Click detected in viewport');
-                
                 if (!instance.scene || !instance.scene.activeCamera) {
-                    console.log('No scene or active camera');
                     return;
                 }
 
                 const rect = viewportRef.current!.getBoundingClientRect();
                 const x = event.clientX - rect.left;
                 const y = event.clientY - rect.top;
-                
-                console.log('Mouse position:', { x, y, rectWidth: rect.width, rectHeight: rect.height });
                 
                 const ray = Raycaster.screenToRay(
                     x, 
@@ -218,23 +213,17 @@ export default function EngineViewport() {
                     instance.scene.activeCamera.camera
                 );
 
-                console.log('Ray created:', { origin: ray.origin, direction: ray.direction });
-
                 // Get all selectable nodes from the scene. Exclude gizmo nodes so a stray ray can never
                 // select the transform gizmo itself (the gizmo has its own grab raycast in PositionGizmo).
                 const allNodes = Array.from(editorScene.nodes).filter(n => !(n as any).isGizmo);
-                console.log('Total nodes in scene:', allNodes.length);
-                console.log('Nodes:', allNodes.map(n => ({ id: n.id, name: n.name, type: n.nodeType, visible: n.visible })));
 
                 const hits = Raycaster.raycast(ray, allNodes);
-                console.log('Raycast hits:', hits.length);
 
                 if (hits.length > 0) {
                     // Select the closest hit. In scene mode, a placed template instance behaves as one
                     // object: redirect a hit on any instance child up to the instance root.
                     const hit = hits[0].node;
                     const target = editorMode === 'scene' ? (templateInstanceRootOf(hit) ?? hit) : hit;
-                    console.log('Selected node:', { id: target.id, name: target.name, type: target.nodeType });
                     eventEmitter.emit('SELECT_NODE', target.id);
                 } else {
                     // Nothing ordinary was hit. Terrain and tilemaps are deliberately skipped by

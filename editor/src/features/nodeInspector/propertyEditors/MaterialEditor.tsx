@@ -9,6 +9,8 @@ import CustomMaterialEditor from './CustomMaterialEditor';
 import { PropertyTable, PropertyRow, Field, Select, NumberInput, Slider, Toggle, ColorInput, Section } from '../../../components/ui';
 import { MaterialIcon } from '../sectionIcons';
 
+const TERRAIN_HEIGHT_HINT = 'Depth is a fraction of one texture repeat, the same as on any mesh — so this material reads the same on both. The Terrain Material inspector shows what that is in metres. Relief is drawn per fragment: it shades and self-shadows but has no silhouette, and physics follows the sculpted surface.';
+
 export default function MaterialEditor(props: {node: ModelNode}) {
   if (!props.node.model) {
     return <div>No model available for this node.</div>;
@@ -215,7 +217,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   const showHeight = !isTerrain || TERRAIN_RELIEF_ENABLED;
 
   const heightSection = showHeight ? (
-    <Section title='Height'>
+    <Section title='Height' hint={isTerrain ? TERRAIN_HEIGHT_HINT : undefined}>
       <PropertyTable columns={['40%', '60%']}>
         {/* ONE unit everywhere: a fraction of one texture repeat. The march offsets texture
             coordinates, so a repeat is the only length either surface knows about, and that is what
@@ -263,16 +265,6 @@ export default function MaterialEditor(props: {node: ModelNode}) {
             texture's world scale: depth is a fraction of a repeat, and at a coarse tiling a repeat is
             metres wide, so the same authored number is a very different distance. The Terrain Material
             inspector quotes the repeat beside Tiling for exactly that reason. */}
-        {isTerrain &&
-        <PropertyRow label='Note' divider={false}>
-          <span className='text-muted text-xs'>
-            Depth is a fraction of one texture repeat, the same as on any mesh — so this material reads
-            the same on both. The Terrain Material inspector shows what that is in metres. Relief is
-            drawn per fragment: it shades and self-shadows but has no silhouette, and physics follows
-            the sculpted surface.
-          </span>
-        </PropertyRow>}
-
       </PropertyTable>
     </Section>
   ) : null;

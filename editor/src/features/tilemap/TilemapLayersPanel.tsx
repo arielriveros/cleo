@@ -1,6 +1,7 @@
 import { useCleoEngine } from '../EngineContext'
 import { Button, ButtonWithConfirm, Hint, NumberInput, Select, TextInput, Toggle } from '../../components/ui'
 import { useActiveTilemap } from './useActiveTilemap'
+import { clamp } from '../../utils/math';
 
 // The tilemap mode's layer stack: order, visibility, opacity, parallax, Y-sorting and which layer is the
 // collision override. Painting always targets the ACTIVE layer, which is selected here.
@@ -85,7 +86,7 @@ export default function TilemapLayersPanel() {
               <div className='flex items-center justify-between'>
                 <span className={label}>Opacity</span>
                 <NumberInput className='w-16' value={layer.cfg.opacity} step={0.05} min={0} max={1}
-                  onChange={(v) => { layer.cfg.opacity = Math.max(0, Math.min(1, v)); layer.markAllMeshesDirty(); commit() }} />
+                  onChange={(v) => { layer.cfg.opacity = clamp(v, 0, 1); layer.markAllMeshesDirty(); commit() }} />
               </div>
               <div className='flex items-center justify-between'>
                 <span className={label} title='Draw band. Layers sort by this before anything else.'>Order</span>

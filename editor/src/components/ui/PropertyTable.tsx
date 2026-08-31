@@ -1,6 +1,7 @@
 import React from 'react';
 import { cn } from './cn';
 import { labelClass, valueClass } from './typography';
+import { hintAffordance } from './Field';
 
 export interface PropertyTableProps {
   /** Column widths, e.g. `['25%', '75%']` or `[25, 75]`. Defaults to a 40/60 split. */
@@ -32,6 +33,8 @@ export interface PropertyRowProps {
   className?: string;
   labelClassName?: string;
   valueClassName?: string;
+  /** Native tooltip on the label, for explanation that would otherwise be a paragraph under the row. */
+  hint?: string;
 }
 
 /** A two-cell inspector row (label + value). Use inside `PropertyTable`. */
@@ -42,10 +45,11 @@ export function PropertyRow({
   className,
   labelClassName,
   valueClassName,
+  hint,
 }: PropertyRowProps) {
   return (
     <tr className={cn(divider && 'border-b border-border', className)}>
-      <td className={cn(labelClass, 'py-1 pr-2', labelClassName)}>{label}</td>
+      <td className={cn(labelClass, 'py-1 pr-2', hintAffordance(hint), labelClassName)} title={hint}>{label}</td>
       <td className={cn(valueClass, 'py-1', valueClassName)}>{children}</td>
     </tr>
   );

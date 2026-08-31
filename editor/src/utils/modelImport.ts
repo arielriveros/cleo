@@ -1,5 +1,6 @@
 import { Logger, Node, ModelNode, Model, AnimatedModel, Loader } from 'cleo'
 import { parseModelFiles, parseGltfFiles, parseModelAsGltfFiles, ImportCancelled } from '../workers/importClient'
+import { clamp } from './math';
 
 /** Reports parse progress (0..1) and the current stage. See importClient for why this exists. */
 export type ImportProgress = (fraction: number, stage: string) => void
@@ -29,7 +30,7 @@ type ParsedEntry = { name: string; model: Model | AnimatedModel; transform?: Imp
 // leaves _euler stale, so the rotation vanishes on save/load.
 function quatToEulerDeg([x, y, z, w]: [number, number, number, number]): [number, number, number] {
   const rad = 180 / Math.PI
-  const sy = Math.min(1, Math.max(-1, 2 * (w * y - x * z)))
+  const sy = clamp(2 * (w * y - x * z), -1, 1)
   return [
     Math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y)) * rad,
     Math.asin(sy) * rad,

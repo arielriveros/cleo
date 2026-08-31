@@ -5,6 +5,7 @@ import { useVfs } from '../../assets/VfsContext'
 import Collapsable from '../../../components/Collapsable'
 import { Select, Button, Hint, cn, valueClass } from '../../../components/ui'
 import { ScriptIcon } from '../sectionIcons'
+import { useAssetDrop } from '../../../utils/useAssetDrop'
 import { getScriptIdOf, baseTypeMatchesNode, BASE_TYPE_LABEL } from '../../../utils/scripts'
 import { templateInstanceRootOf, TEMPLATE_ID_VAR } from '../../../utils/templates'
 import { applyAdd, uniquePath, dirOf, KIND_EXT } from '../../../utils/vfs'
@@ -15,7 +16,6 @@ import { applyAdd, uniquePath, dirOf, KIND_EXT } from '../../../utils/vfs'
 export default function ScriptSlot(props: { node: Node; onChanged: () => void }) {
   const { scriptAssets, createScriptForNode, attachScriptToNode, detachScriptFromNode, enterScriptEditor } = useCleoEngine()
   const { vfs, setVfs } = useVfs()
-  const [dragOver, setDragOver] = useState(false)
   const [, force] = useState(0)
 
   const linkedId = getScriptIdOf(props.node)
@@ -50,18 +50,12 @@ export default function ScriptSlot(props: { node: Node; onChanged: () => void })
   const handleLink = (id: string) => { if (id && attachScriptToNode(props.node, id)) changed() }
   const handleRemove = () => { detachScriptFromNode(props.node); changed() }
 
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault(); setDragOver(false)
-    const id = e.dataTransfer.getData('text/cleo-script')
-    if (id && attachScriptToNode(props.node, id)) changed()
-  }
-  const onDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('text/cleo-script')) { e.preventDefault(); setDragOver(true) }
-  }
+  const { dragOver, dropProps } = useAssetDrop('text/cleo-script',
+    id => { if (attachScriptToNode(props.node, id)) changed() })
 
   return (
     <Collapsable title='Script' icon={<ScriptIcon />} persistKey='scriptSlot'>
-      <div className='w-full p-2' onDragOver={onDragOver} onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
+      <div className='w-full p-2' {...dropProps}>
         {asset ? (
           <div className={`flex items-center gap-2 p-2 bg-control border rounded ${dragOver ? 'border-selected' : 'border-border'}`}>
             <span className={cn(valueClass, 'truncate flex-1')} title={`${asset.name} · extends ${BASE_TYPE_LABEL[asset.baseType]}`}>

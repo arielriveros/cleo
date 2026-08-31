@@ -9,6 +9,7 @@ import ConditionTree from './ConditionTree'
 import AnimationAssetPicker from './AnimationAssetPicker'
 import Collapsable from '../../components/Collapsable'
 import { SegmentedControl, Toggle } from '../../components/ui'
+import { clamp } from '../../utils/math';
 
 // The Animation State Machine inspector, as three DOCK PANELS (Clips / Variables / State Machine) sharing
 // one working copy from StateMachineContext, which wraps the whole dock. Adding, moving and connecting
@@ -251,7 +252,8 @@ function SelectedState() {
       {playsField && (animationFields.length === 0
         ? <p className='text-[10px] text-warning'>No animation fields yet — create one from a model in the Assets explorer.</p>
         : <>
-          <select className={input + ' flex-1 min-w-0'} title='Animation field' value={s.fieldId ?? ''}
+          <select className={input + ' flex-1 min-w-0'} value={s.fieldId ?? ''}
+            title='Animation field. Fields are re-embedded on Apply to Model.'
             onChange={e => setState(i, { fieldId: e.target.value })}>
             <option value=''>(no field)</option>
             {!field && s.fieldId && <option value={s.fieldId}>{s.fieldId} — missing</option>}
@@ -274,7 +276,6 @@ function SelectedState() {
                 responds — worth calling out, since nothing else in the UI would show it. */}
             {!s.fieldInputs?.x && <p className='text-[10px] text-warning'>Bind “{field.xAxis.name}” to a parameter or the blend will not move.</p>}
           </>}
-          <p className='text-[10px] text-gray-500'>Fields are re-embedded on <b>Apply to Model</b>.</p>
         </>)}
 
       <div className='flex items-center gap-2'>
@@ -305,14 +306,15 @@ function SelectedState() {
         {byParam
           ? (speedParams.length === 0
               ? <span className='text-[10px] text-warning flex-1'>No numeric parameter to bind.</span>
-              : <select className={input + ' flex-1 min-w-0'} value={s.speedParam} onChange={e => setState(i, { speedParam: e.target.value })}>
+              : <select className={input + ' flex-1 min-w-0'} value={s.speedParam}
+                  title='Falls back to the fixed speed if the parameter goes missing.'
+                  onChange={e => setState(i, { speedParam: e.target.value })}>
                   {!speedParams.some(p => p.name === s.speedParam) && <option value={s.speedParam}>{s.speedParam} — missing</option>}
                   {speedParams.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
                 </select>)
           : <input className={input + ' w-[56px]'} type='number' step='0.1' min='0' value={s.speed}
               onChange={e => setState(i, { speed: Math.max(0, parseFloat(e.target.value) || 0) })} />}
       </div>
-      {byParam && !speedByParamOnField && !signedSpeed && <p className='text-[10px] text-gray-500 -mt-1'>Falls back to the fixed speed if the parameter goes missing.</p>}
       {byParam && signedSpeed && (
         <p className='text-[10px] text-warning -mt-1'>
           <b>“{signedSpeed}” goes negative</b> — and there is no reverse playback, so the rate is clamped to 0
@@ -354,6 +356,7 @@ function SelectedState() {
           ? (speedParams.length === 0
             ? <span className='text-warning'>no numeric parameters</span>
             : <select className={input + ' w-[110px]'} value={s.ikWeightParam}
+                title='Falls back to fully on if the parameter goes missing.'
                 onChange={e => setState(i, { ikWeightParam: e.target.value })}>
                 {!speedParams.some(p => p.name === s.ikWeightParam) && <option value={s.ikWeightParam}>{s.ikWeightParam} — missing</option>}
                 {speedParams.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
@@ -362,11 +365,10 @@ function SelectedState() {
               value={s.ikWeight ?? 1}
               onChange={e => {
                 const v = parseFloat(e.target.value)
-                setState(i, { ikWeight: Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : undefined })
+                setState(i, { ikWeight: Number.isFinite(v) ? clamp(v, 0, 1) : undefined })
               }} />}
         <span className='text-dim'>{!s.ikWeightParam && s.ikWeight === undefined ? '(on)' : ''}</span>
       </div>
-      {s.ikWeightParam && <p className='text-[10px] text-gray-500 -mt-1'>Falls back to fully on if the parameter goes missing.</p>}
 
       <div className='text-[10px] uppercase tracking-wide text-gray-400 mt-1'>Links</div>
       {linked.length === 0
@@ -545,7 +547,7 @@ function SelectedTransition() {
               <Toggle label='has exit time' checked={!!t.hasExitTime} onChange={c => setTransition(from, to, { hasExitTime: c })} className='text-[10px]' />
               {t.hasExitTime && (
                 <input className={input + ' w-[52px]'} type='number' step='0.05' min='0' max='1' value={t.exitTime ?? 1}
-                  onChange={e => setTransition(from, to, { exitTime: Math.min(1, Math.max(0, parseFloat(e.target.value) || 0)) })} />
+                  onChange={e => setTransition(from, to, { exitTime: clamp(parseFloat(e.target.value) || 0, 0, 1) })} />
               )}
             </div>
             {/* Per-edge cross-fade. Empty falls back to the animator-wide default, so a landing can snap

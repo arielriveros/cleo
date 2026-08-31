@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import { cn } from './ui/cn';
 import { headerClass } from './ui/typography';
+import { hintAffordance } from './ui/Field';
 
 interface CollapsableProps {
     title: string;
@@ -15,11 +16,13 @@ interface CollapsableProps {
     /** When set, the open/closed state is remembered in localStorage under this key. */
     persistKey?: string;
     className?: string;
+    /** Native tooltip on the header, for explanation that covers the whole panel rather than one control. */
+    hint?: string;
 }
 
 const storagePrefix = 'cleo.collapsable.';
 
-export default function Collapsable({ title, children, icon, badge, right, defaultOpen = true, persistKey, className }: CollapsableProps) {
+export default function Collapsable({ title, children, icon, badge, right, defaultOpen = true, persistKey, className, hint }: CollapsableProps) {
     const contentId = useId();
     const storageKey = persistKey ? storagePrefix + persistKey : null;
 
@@ -49,7 +52,7 @@ export default function Collapsable({ title, children, icon, badge, right, defau
             >
                 <span className={cn('text-[11px] text-muted transition-transform duration-200', open ? '' : '-rotate-90')}>▼</span>
                 {icon && <span className='shrink-0 text-muted group-hover:text-white transition-colors'>{icon}</span>}
-                <span className={cn(headerClass, 'truncate')}>{title}</span>
+                <span className={cn(headerClass, 'truncate', hintAffordance(hint))} title={hint}>{title}</span>
                 {badge !== undefined && badge !== null && badge !== false && (
                     <span className='shrink-0 min-w-[18px] h-[18px] px-1.5 inline-flex items-center justify-center rounded-full bg-border-subtle text-[10px] text-muted tabular-nums'>
                         {badge}

@@ -143,41 +143,6 @@ export class UniformBlockSet {
         list.push({ block, member });
     }
 
-    /**
-     * Every reflected member with the byte layout the DRIVER reports, so `tools/wgslLayout.mjs`'s
-     * computed offsets can be checked against a real driver. See `tools/harness/uniformLayoutCheck.js`.
-     */
-    public describeLayout(): { block: string; blockSize: number; name: string; offset: number;
-                               arrayStride: number; matrixStride: number }[] {
-        const seen = new Set<BlockMember>();
-        const out: { block: string; blockSize: number; name: string; offset: number;
-                     arrayStride: number; matrixStride: number }[] = [];
-        for (const entries of this._members.values()) {
-            for (const { block, member } of entries) {
-                if (seen.has(member)) continue;   // one member is registered under several aliases
-                seen.add(member);
-                out.push({
-                    block: block.name,
-                    blockSize: block.cpu.byteLength,
-                    name: member.name,
-                    offset: member.offset,
-                    arrayStride: member.arrayStride,
-                    matrixStride: member.matrixStride,
-                });
-            }
-        }
-        return out;
-    }
-
-    public describeBuffers(): string {
-        return this._blocks.map(b => {
-            gl.bindBuffer(gl.UNIFORM_BUFFER, b.buffer.handle);
-            const store = gl.getBufferParameter(gl.UNIFORM_BUFFER, gl.BUFFER_SIZE);
-            const bound = gl.getIndexedParameter(gl.UNIFORM_BUFFER_BINDING, b.bindingPoint);
-            return `${b.name}@${b.bindingPoint} cpu${b.cpu.byteLength} store${store} ${bound === b.buffer.handle ? 'MINE' : 'FOREIGN'}`;
-        }).join(' | ');
-    }
-
     public has(name: string): boolean { return this._members.has(name); }
 
     /** How many block members a name writes to. 1 for almost everything; 2 for a cross-stage uniform. */

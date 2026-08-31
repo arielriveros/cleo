@@ -67,6 +67,7 @@ function AtlasSlot() {
       onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
       onDragLeave={() => setDragOver(false)}
       onDrop={onDrop}
+      title='You can also drop an image file, or a texture from the Assets explorer, onto this box.'
       className={`space-y-1 border rounded p-2 ${dragOver ? 'border-selected' : 'border-control'}`}
     >
       <div className='flex items-center gap-2'>
@@ -98,7 +99,6 @@ function AtlasSlot() {
         <option value=''>…or link an imported texture</option>
         {textureIds.map(id => <option key={id} value={id}>{id}</option>)}
       </Select>
-      <Hint>You can also drop an image file, or a texture from the Assets explorer, onto this box.</Hint>
     </div>
   )
 }
@@ -130,9 +130,9 @@ function TileMetaEditor() {
     <div className='space-y-2'>
       <div className='flex items-center justify-between'>
         <span className={label}>Solid</span>
-        <Toggle checked={!!primary.solid} onChange={(c) => apply({ solid: c })} />
+        <Toggle checked={!!primary.solid} title='Solid tiles become colliders on any layer with parallax 1.'
+          onChange={(c) => apply({ solid: c })} />
       </div>
-      <Hint>Solid tiles become colliders on any layer with parallax 1.</Hint>
 
       <div className='flex items-center justify-between'>
         <span className={label} title='Rows down from this tile that it sorts at — a 2-tall tree anchors at its trunk'>
@@ -223,7 +223,6 @@ function TerrainSetsEditor() {
 
   return (
     <div className='space-y-2'>
-      {asset.terrains.length === 0 && <Hint>An auto-tile set picks the right edge/corner tile as you paint.</Hint>}
       {asset.terrains.map((set, i) => (
         <div key={set.id} className='border border-control rounded p-2 space-y-1'>
           <div className='flex items-center gap-1'>
@@ -279,7 +278,8 @@ function TerrainSetsEditor() {
           </Button>
         </div>
       ))}
-      <Button size='sm' variant='ghost' className='w-full' onClick={addSet}>+ Auto-tile set</Button>
+      <Button size='sm' variant='ghost' className='w-full' onClick={addSet}
+        title='An auto-tile set picks the right edge/corner tile as you paint.'>+ Auto-tile set</Button>
     </div>
   )
 }
@@ -291,7 +291,6 @@ function VariantSetsEditor() {
 
   return (
     <div className='space-y-2'>
-      {asset.variantSets.length === 0 && <Hint>A variant set lets the randomize brush scatter alternatives.</Hint>}
       {asset.variantSets.map((set, i) => (
         <div key={set.id} className='border border-control rounded p-2 space-y-1'>
           <div className='flex items-center gap-1'>
@@ -340,6 +339,7 @@ function VariantSetsEditor() {
       ))}
       <Button
         size='sm' variant='ghost' className='w-full'
+        title='A variant set lets the randomize brush scatter alternatives.'
         onClick={() => {
           const id = (asset.variantSets.reduce((m, v) => Math.max(m, v.id), 0) + 1) || 1
           patch({ variantSets: [...asset.variantSets, { id, name: `Variants ${id}`, tiles: [] }] })

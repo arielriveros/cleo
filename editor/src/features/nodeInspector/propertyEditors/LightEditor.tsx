@@ -12,6 +12,8 @@ export { ColorInput };
 /** A punctual light is either kind; both carry the same three photometric properties. */
 type Punctual = PointLight | Spotlight;
 
+const CONE_HINT = 'Half-angles in degrees. Full brightness inside the inner cone, falling to nothing at the outer one. Narrowing the cone does not brighten the light — intensity is in lumens either way, so beam shape and brightness are independent.';
+
 export default function LightEditor(props: {node: LightNode}) {
   const eventEmitter = useEventBus();
   const light = props.node.light;
@@ -87,26 +89,22 @@ export default function LightEditor(props: {node: LightNode}) {
           <PropertyRow label='Color'>
             <ColorInput color={color} onChange={(c) => { light.color = c; setColor(vec3ToHex(c)); markLightDirty(); }} />
           </PropertyRow>
-          <PropertyRow label={isDirectional ? 'Intensity (lx)' : 'Intensity (lm)'} divider={!isDirectional}>
+          <PropertyRow label={isDirectional ? 'Intensity (lx)' : 'Intensity (lm)'} divider={!isDirectional}
+            hint={isDirectional
+              ? 'Illuminance in LUX. A clear midday sun is around 100,000; an overcast one 10,000. Brightness lives here, not in the colour — keep the colour as the light’s tint.'
+              : 'Luminous power in LUMENS. A 100 W-equivalent bulb is about 1500; a candle about 12.'}>
             <NumberInput value={values.intensity} min={0} step={isDirectional ? 1000 : 100}
               onChange={(v) => set({ intensity: v })} />
           </PropertyRow>
-          {!isDirectional && <PropertyRow label='Range (m)'>
+          {!isDirectional && <PropertyRow label='Range (m)'
+            hint='Where the falloff reaches zero, and also the light’s culling radius.'>
             <NumberInput value={values.range} min={0.01} step={0.5} onChange={(v) => set({ range: v })} />
           </PropertyRow>}
-          {!isDirectional && <PropertyRow label='Source Radius (m)' divider={false}>
+          {!isDirectional && <PropertyRow label='Source Radius (m)' divider={false}
+            hint='How big the bulb is. It spreads the highlight into an image of the source rather than a point, dimming its peak by the same amount it widens. Dramatic on polished surfaces, invisible on rough ones.'>
             <NumberInput value={values.sourceRadius} min={0} step={0.01} onChange={(v) => set({ sourceRadius: v })} />
           </PropertyRow>}
         </PropertyTable>
-
-        {isDirectional
-          ? <Hint>Illuminance in LUX. A clear midday sun is around 100,000; an overcast one 10,000.
-              Brightness lives here, not in the colour — keep the colour as the light&apos;s tint.</Hint>
-          : <Hint>Luminous power in LUMENS. A 100 W-equivalent bulb is about 1500; a candle about 12.
-              Range is where the falloff reaches zero, and is also the light&apos;s culling radius.
-              Source radius is how big the bulb is: it spreads the highlight into an image of the source
-              rather than a point, dimming its peak by the same amount it widens. Dramatic on polished
-              surfaces, invisible on rough ones.</Hint>}
 
         {legacy && <>
           <Hint>This light&apos;s numbers were converted from the old constant/linear/quadratic falloff,
@@ -121,38 +119,28 @@ export default function LightEditor(props: {node: LightNode}) {
 
       <Section title='Shadows'>
         <Toggle label='Cast Shadows' checked={castShadows} className='my-1'
+          title={props.node.type === 'directional'
+            ? 'The FIRST directional light with this on is the scene’s sun: the renderer fits its shadow cascades around the camera for it. Tune them in Renderer mode.'
+            : props.node.type === 'spotlight'
+              ? 'Spot lights get their own shadow map, sized to the outer cone and reaching as far as the light’s range. A few can cast at once (see Spot Shadows in Renderer mode); any beyond that cap go unshadowed.'
+              : 'Point lights do not cast shadows — that needs a cubemap per light, which the renderer has no path for. The flag is still saved.'}
           onChange={(c) => { props.node.castShadows = c; setCastShadows(c); markLightDirty(); }} />
-        {props.node.type === 'directional'
-          ? <Hint>The FIRST directional light with this on is the scene&apos;s sun: the renderer fits its
-              shadow cascades around the camera for it. Tune them in Renderer mode.</Hint>
-          : props.node.type === 'spotlight'
-            ? <Hint>Spot lights get their own shadow map, sized to the outer cone and reaching as far as
-                the light&apos;s range. A few can cast at once (see Spot Shadows in Renderer mode); any
-                beyond that cap go unshadowed.</Hint>
-            : <Hint>Point lights do not cast shadows — that needs a cubemap per light, which the
-                renderer has no path for. The flag is still saved.</Hint>}
       </Section>
 
       { isSpot &&
         <Section title='Cone'>
           <Slider label='Inner Angle' min={0} max={80} step={0.5} value={values.cutOff}
-            onChange={(v) => set({ cutOff: v })} />
+            title={CONE_HINT} onChange={(v) => set({ cutOff: v })} />
           <Slider label='Outer Angle' min={0} max={80} step={0.5} value={values.outerCutOff}
-            onChange={(v) => set({ outerCutOff: v })} />
-          <Hint>Half-angles in degrees. Full brightness inside the inner cone, falling to nothing at the
-            outer one. Narrowing the cone does not brighten the light — intensity is in lumens either
-            way, so the beam shape and its brightness are independent.</Hint>
+            title={CONE_HINT} onChange={(v) => set({ outerCutOff: v })} />
         </Section>
       }
 
       { isDirectional &&
         <Section title='Source'>
           <Slider label='Angular Radius' min={0} max={0.1} step={0.001} value={values.angularRadius}
+            title={'Apparent radius in radians; the real sun is 0.00465. It sets how broad the sun’s reflection is — most visible on smooth, polished surfaces, barely at all on rough ones. It also softens shadow edges, but only proportionally.'}
             onChange={(v) => set({ angularRadius: v })} />
-          <Hint>Apparent radius in radians; the real sun is 0.00465. It sets how broad the sun&apos;s
-            reflection is — most visible on smooth, polished surfaces, and barely at all on rough ones.
-            It also softens shadow edges, though only proportionally: a real penumbra widens with
-            distance from whatever casts it, and that needs a blocker search this renderer has not got.</Hint>
         </Section>
       }
     </div>

@@ -1,10 +1,13 @@
 import { LightProbeNode } from 'cleo';
 import { useState, useEffect, useCallback } from 'react';
 import Collapsable from '../../../components/Collapsable';
-import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Hint } from '../../../components/ui';
+import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button } from '../../../components/ui';
 import { ProbeIcon } from '../sectionIcons';
+
+const BOUNDS_HINT = 'Set all three sizes above 0 and the probe only lights meshes/pixels inside its box volume, which moves and rotates with the node; the IBL feathers out over the blend distance. Any size at 0 leaves the probe unbounded: it affects the whole scene (legacy behavior).';
 import { useEventBus } from '../../EventBusContext';
 import { useCleoEngine } from '../../EngineContext';
+import { clamp } from '../../../utils/math';
 
 export default function LightProbeEditor(props: { node: LightProbeNode }) {
   const [state, setState] = useState({
@@ -48,7 +51,6 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
     eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: props.node });
   };
 
-  const bounded = state.sizeX > 0 && state.sizeY > 0 && state.sizeZ > 0;
 
   // --- Cubemap preview -------------------------------------------------------
   const { instance } = useCleoEngine();
@@ -73,7 +75,7 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
   useEffect(() => {
     if (state.mode !== 'realtime') return;
     let last = props.node.lastBakeTime;
-    const pollMs = Math.max(250, Math.min(1000, state.updateFrequency * 1000));
+    const pollMs = clamp(state.updateFrequency * 1000, 250, 1000);
     const id = window.setInterval(() => {
       if (props.node.lastBakeTime !== last) {
         last = props.node.lastBakeTime;
@@ -121,24 +123,20 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
           <PropertyRow label='Intensity'>
             <Slider min={0} max={3} step={0.05} value={state.intensity} onChange={(v) => update({ intensity: v })} />
           </PropertyRow>
-          <PropertyRow label='Size X'>
+          <PropertyRow label='Size X' hint={BOUNDS_HINT}>
             <NumberInput min={0} step={0.5} value={state.sizeX} onChange={(v) => update({ sizeX: Math.max(0, v) })} />
           </PropertyRow>
-          <PropertyRow label='Size Y'>
+          <PropertyRow label='Size Y' hint={BOUNDS_HINT}>
             <NumberInput min={0} step={0.5} value={state.sizeY} onChange={(v) => update({ sizeY: Math.max(0, v) })} />
           </PropertyRow>
-          <PropertyRow label='Size Z'>
+          <PropertyRow label='Size Z' hint={BOUNDS_HINT}>
             <NumberInput min={0} step={0.5} value={state.sizeZ} onChange={(v) => update({ sizeZ: Math.max(0, v) })} />
           </PropertyRow>
-          <PropertyRow label='Blend Distance' divider={false}>
+          <PropertyRow label='Blend Distance' divider={false}
+            hint='How far a bounded probe’s IBL feathers out at the edge of its box volume.'>
             <NumberInput min={0} step={0.1} value={state.blendDistance} onChange={(v) => update({ blendDistance: Math.max(0, v) })} />
           </PropertyRow>
         </PropertyTable>
-        <Hint className='mt-2'>
-          {bounded
-            ? 'This probe only lights meshes/pixels inside its box volume (moves and rotates with the node); the IBL feathers out over the blend distance. Set any size to 0 for an unbounded probe.'
-            : 'Size 0 = unbounded: the probe affects the whole scene (legacy behavior). Set all three sizes to bound it to a box volume.'}
-        </Hint>
         <div className='mt-2'>
           <div className='text-xs text-muted mb-1'>Cubemap Preview</div>
           {previewSrc ? (

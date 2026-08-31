@@ -23,7 +23,7 @@ export default function TilemapEditor(props: { node: TilemapNode }) {
     <Collapsable title='Tilemap' persistKey='node.tilemap' defaultOpen>
       <div className='p-2 space-y-2'>
         <div className='flex items-center justify-between'>
-          <span className={label}>Grid</span>
+          <span className={label} title='How a cell coordinate is laid out. Isometric here is a screen-space diamond on the XY plane, not a 3D projection.'>Grid</span>
           <Select
             className='w-28 text-xs'
             value={grid.kind}
@@ -78,10 +78,6 @@ export default function TilemapEditor(props: { node: TilemapNode }) {
           </>
         )}
 
-        {grid.kind === 'isometric' && (
-          <Hint>Isometric here is a screen-space diamond on the XY plane, not a 3D projection.</Hint>
-        )}
-
         <div className='flex items-center justify-between pt-1'>
           <span className={label} title='Sprites join this layer’s draw band when they depth-sort'>Entity layer</span>
           <Select
@@ -94,17 +90,10 @@ export default function TilemapEditor(props: { node: TilemapNode }) {
         </div>
 
         <div className='flex items-center justify-between'>
-          <span className={label} title='Half-depth along Z given to generated colliders'>Collision depth</span>
+          <span className={label} title='Half-depth along Z given to generated colliders. Only square grids merge their solid cells into large collider boxes; isometric and hexagonal maps emit one convex prism per solid cell.'>Collision depth</span>
           <NumberInput className='w-16' value={tilemap.collisionDepth} step={0.1} min={0.01}
             onChange={(v) => { tilemap.collisionDepth = Math.max(0.01, v); commit() }} />
         </div>
-
-        {grid.kind !== 'orthogonal' && (
-          <Hint>
-            Only square grids merge their solid cells into large collider boxes; isometric and hexagonal
-            maps emit one convex prism per solid cell.
-          </Hint>
-        )}
 
         <div className='flex items-center justify-between pt-1'>
           <span className={label}>Layers</span>

@@ -4,11 +4,17 @@ import Collapsable from '../../../components/Collapsable'
 import { Button, Hint, NumberInput } from '../../../components/ui'
 import { useCleoEngine } from '../../EngineContext'
 import { rebuildTerrain } from '../../landscape/rebuildTerrain'
+import { clamp } from '../../../utils/math';
 
 // Node inspector for a LandscapeNode: the terrain's STRUCTURE — size, sampling, chunking — plus the
 // heightmap import/export that replaces its shape wholesale. Landscape mode holds the brushes that edit it.
 
 const label = 'text-xs text-gray-300'
+
+const RESOLUTION_HINT = 'Height samples per side. More detail, more memory. A layer’s height map is drawn by the parallax march, not by these vertices, so Resolution controls the terrain’s SHAPE and a material’s Depth controls its surface relief.'
+const CHUNK_QUADS_HINT = 'Quads per side of each render chunk: the unit of frustum culling and distance LOD. Smaller chunks give finer culling and LOD granularity, at more draw calls.'
+const REBUILD_HINT = 'Rebuilds at the current settings, resampling the sculpted shape, the painted layers and the scattered foliage onto it. Nothing you authored is lost.'
+const IMPORT_HINT = 'Importing replaces the sculpted shape; the painted layers and foliage stay.'
 
 export default function LandscapeEditor(props: { node: LandscapeNode }) {
   const { eventEmitter } = useCleoEngine()
@@ -68,38 +74,26 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
             onChange={(v) => setSize(Math.max(10, v))} />
         </div>
         <div className='flex items-center justify-between'>
-          <span className={label} title='Height samples per side. More detail, more memory.'>Resolution</span>
+          <span className={label} title={RESOLUTION_HINT}>Resolution</span>
           <NumberInput className='w-20' value={resolution} step={1} min={8} max={513}
-            onChange={(v) => setResolution(Math.max(8, Math.min(513, v)))} />
+            onChange={(v) => setResolution(clamp(v, 8, 513))} />
         </div>
         <div className='flex items-center justify-between'>
-          <span className={label} title='Quads per side of each render chunk: the unit of frustum culling and distance LOD'>
+          <span className={label} title={CHUNK_QUADS_HINT}>
             Chunk quads
           </span>
           <NumberInput className='w-20' value={chunkQuads} step={8} min={8} max={64}
-            onChange={(v) => setChunkQuads(Math.max(8, Math.min(64, v)))} />
+            onChange={(v) => setChunkQuads(clamp(v, 8, 64))} />
         </div>
-        <Hint>Smaller chunks give finer culling and LOD granularity, at more draw calls.</Hint>
-
-        <Hint>
-          {totalVerts.toLocaleString()} vertices ({totalMB.toFixed(1)} MB) across the whole terrain.
-          A layer&apos;s height map is drawn by the parallax march, not by these vertices, so Resolution
-          controls the terrain&apos;s SHAPE and a material&apos;s Depth controls its surface relief.
-        </Hint>
+        <Hint>{totalVerts.toLocaleString()} vertices ({totalMB.toFixed(1)} MB) across the whole terrain.</Hint>
 
         {/* Enabled even with no pending config change: a rebuild also re-bakes relief and re-resamples
             the layers, which is the natural thing to reach for after editing a terrain material. It used
             to be disabled unless one of the four fields above differed, so pressing it did nothing and
             looked exactly like a rebuild that had run and changed nothing. */}
-        <Button className='w-full' variant={pending ? 'primary' : 'default'} disabled={busy} onClick={rebuild}>
+        <Button className='w-full' variant={pending ? 'primary' : 'default'} disabled={busy} onClick={rebuild} title={REBUILD_HINT}>
           {busy ? 'Rebuilding…' : pending ? 'Rebuild terrain' : 'Rebuild terrain (re-bake relief)'}
         </Button>
-        {pending && (
-          <Hint>
-            Rebuilds at the new settings, resampling the sculpted shape, the painted layers and the
-            scattered foliage onto it. Nothing you authored is lost.
-          </Hint>
-        )}
 
         <div className='pt-2 border-t border-control space-y-2'>
           <div className='flex items-center justify-between'>
@@ -109,7 +103,8 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
             <NumberInput className='w-20' value={amplitude} step={1} onChange={setAmplitude} />
           </div>
           <div className='flex gap-1'>
-            <label className='flex-1 bg-control hover:bg-control-hover rounded px-2 py-1 text-xs text-center cursor-pointer'>
+            <label className='flex-1 bg-control hover:bg-control-hover rounded px-2 py-1 text-xs text-center cursor-pointer'
+              title={IMPORT_HINT}>
               Import heightmap
               <input type='file' className='hidden' accept='.png,.jpg,.jpeg,.bmp'
                 onChange={(e) => importHeightmap(e.target.files)} />
@@ -118,7 +113,6 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
               Export
             </Button>
           </div>
-          <Hint>Importing replaces the sculpted shape; the painted layers and foliage stay.</Hint>
         </div>
 
         <Hint>Sculpt, paint and scatter foliage in Landscape mode. Move it with the transform gizmo.</Hint>

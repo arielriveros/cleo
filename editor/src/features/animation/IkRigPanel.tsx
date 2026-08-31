@@ -163,11 +163,8 @@ export default function IkRigPanel({ skin, selectedJoint }: { skin: Skin; select
 
   return (
     <Collapsable title='Foot IK' badge={current.feet.length || undefined}>
-      <div className='flex flex-col gap-2 p-2'>
-        <p className='text-[10px] text-gray-500'>
-          Select a bone, then click the role it fills. Runs in Play only — the editor has no physics to stand on.
-        </p>
-
+      <div className='flex flex-col gap-2 p-2'
+        title='Select a bone, then click the role it fills. Runs in Play only — the editor has no physics to stand on.'>
         <div className='flex items-center gap-1'>
           <button className={ghost} onClick={autoFill}
             title='Fill both legs from the bone names, where they are recognizable. Whatever it cannot identify is left blank for you to assign.'>

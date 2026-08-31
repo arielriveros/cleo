@@ -122,7 +122,6 @@ export class CleoEngine {
   /**
    * The error that stopped {@link initialize}, or null. A host that awaits `initialize()` gets it as a
    * rejection instead; `run()` is fire-and-forget, so this is that path's only signal.
-   * `renderer.deviceProbe` says at which STAGE it happened.
    */
   public get initializeError(): Error | null { return this._initializeError; }
 

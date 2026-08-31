@@ -3,6 +3,7 @@ import { CameraNode, CameraRigNode, Node } from 'cleo';
 import Collapsable from '../../../components/Collapsable';
 import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Hint, cn, valueClass } from '../../../components/ui';
 import { CameraIcon, MaterialIcon } from '../sectionIcons';
+import { useAssetDrop } from '../../../utils/useAssetDrop';
 import { useEventBus } from '../../EventBusContext';
 import { useAssetLibrary } from '../../AssetLibraryContext';
 import { useEditorSessions } from '../../EditorSessionsContext';
@@ -117,7 +118,6 @@ function ScreenMaterialsList(props: { node: CameraNode }) {
   const { materials } = useAssetLibrary();
   const { enterMaterialEditor } = useEditorSessions();
   const eventEmitter = useEventBus();
-  const [dragOver, setDragOver] = useState(false);
   const [, force] = useState(0); // node mutations don't trigger React; bump to re-read the list
 
   const ids = getScreenMaterialIds(props.node);
@@ -142,19 +142,15 @@ function ScreenMaterialsList(props: { node: CameraNode }) {
     commit(next);
   };
 
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault(); setDragOver(false);
-    const id = e.dataTransfer.getData('text/cleo-material');
-    if (id && materials.find((m) => m.id === id && isScreenMaterialAsset(m))) add(id);
-  };
-  const onDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('text/cleo-material')) { e.preventDefault(); setDragOver(true); }
-  };
+  // Only a SCREEN material may be dropped here; any other material asset is ignored.
+  const { dragOver, dropProps } = useAssetDrop('text/cleo-material', id => {
+    if (materials.find((m) => m.id === id && isScreenMaterialAsset(m))) add(id);
+  });
 
   return (
-    <Collapsable title='Screen-Space Materials' icon={<MaterialIcon />} persistKey='cameraScreenMaterials'>
-      <div className={`w-full p-2 flex flex-col gap-2 ${dragOver ? 'bg-border/30' : ''}`}
-        onDragOver={onDragOver} onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
+    <Collapsable title='Screen-Space Materials' icon={<MaterialIcon />} persistKey='cameraScreenMaterials'
+      hint='Passes run top to bottom after the built-in post-processing, before tonemapping.'>
+      <div className={`w-full p-2 flex flex-col gap-2 ${dragOver ? 'bg-border/30' : ''}`} {...dropProps}>
         {ids.map((id, i) => {
           const asset = materials.find((m) => m.id === id);
           return (
@@ -186,7 +182,6 @@ function ScreenMaterialsList(props: { node: CameraNode }) {
         ) : (
           <Hint>No screen-space materials in the library yet — create a material and set its custom shader Mode to <b>Screen (post-process)</b>.</Hint>
         )}
-        {ids.length > 0 && <Hint>Passes run top to bottom after the built-in post-processing, before tonemapping.</Hint>}
       </div>
     </Collapsable>
   );

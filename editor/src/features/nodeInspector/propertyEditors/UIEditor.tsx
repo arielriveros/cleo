@@ -7,6 +7,7 @@ import Collapsable from '../../../components/Collapsable';
 import { ColorInput, NumberInput, TextInput, Select, Toggle, Slider, PropertyTable, PropertyRow } from '../../../components/ui';
 import { useEventBus } from '../../EventBusContext';
 import { TextureManager, isDerivedTextureId } from 'cleo';
+import { clamp } from '../../../utils/math';
 
 /** The inspector for every UI element type; the rect/appearance block is shared and only the payload differs. */
 
@@ -43,7 +44,7 @@ function TexturePicker({ value, onChange }: { value: string | null, onChange: (i
 
 /** UI colours are 0..1 sRGB (see `UIColor`); the DOM colour input speaks hex. */
 const toHex = (c: UIColor): string =>
-    '#' + [c[0], c[1], c[2]].map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
+    '#' + [c[0], c[1], c[2]].map(v => Math.round(clamp(v, 0, 1) * 255).toString(16).padStart(2, '0')).join('');
 
 /** Re-render this panel whenever the node changes, including from a script or an undo. */
 function useNodeVersion(node: UINode): () => void {

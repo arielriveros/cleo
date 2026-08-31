@@ -1,3 +1,4 @@
+import { clamp } from '../../utils/math';
 // The editor's shared progress store: one place every long operation reports to, rendered by
 // ProgressWindow. Lives outside React because producers are not all components.
 //
@@ -56,7 +57,7 @@ export interface StartTaskOptions {
 
 /** How far through a step is, for the overall bar. A settled step counts as complete either way. */
 export function stepFraction(step: TaskStep): number {
-  if (step.progress !== undefined) return Math.max(0, Math.min(1, step.progress))
+  if (step.progress !== undefined) return clamp(step.progress, 0, 1)
   switch (step.status) {
     case 'done':
     case 'failed':

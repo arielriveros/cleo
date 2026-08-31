@@ -67,13 +67,13 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean}) {
           <PropertyRow label='Type'><span className='text-muted'>{props.node.nodeType.charAt(0).toUpperCase() + props.node.nodeType.slice(1)}</span></PropertyRow>
           <PropertyRow label='Children' divider={props.node.name !== 'root'}><span className='text-muted'>{childCount}</span></PropertyRow>
           {props.node.name !== 'root' &&
-            <PropertyRow label='Spawn on start' divider={false}>
+            <PropertyRow label='Spawn on start' divider={false}
+              hint={`Off, the node stays dormant when the game starts — no rendering, updates, animation or physics — until a script calls spawn() on it. It is still findable: this.findNode('${props.node.name}').spawn(). Only onConstruct runs while dormant, so a node can spawn itself from there.`}>
               <Toggle checked={spawnOnStart} disabled={props.readOnly} onChange={handleSpawnOnStartChange} />
             </PropertyRow>
           }
         </PropertyTable>
         {props.node.name !== 'root' && !spawnOnStart && <>
-          <Hint className='mt-1'>Stays dormant when the game starts — no rendering, updates, animation or physics — until a script calls <code>spawn()</code> on it. It is still findable: <code>this.findNode('{props.node.name}').spawn()</code>. Only <code>onConstruct</code> runs while dormant, so a node can spawn itself from there.</Hint>
           {/* The trap that costs an hour: flagging a group AND its contents, then spawning the group and
               seeing nothing. Descendants keep their own flag by design (a spawner must not fire everything
               parked under it), so say so exactly where it is set. */}

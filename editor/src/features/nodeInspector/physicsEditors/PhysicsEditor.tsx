@@ -12,6 +12,13 @@ import { PhysicsIcon, ShapeIcon } from '../sectionIcons'
 
 const LABEL = 'w-[130px]';
 
+const SIMULATE_HINT = 'Whether this body takes part in the physics solver. Off makes it a ghost — nothing collides with it, but it can still block a camera rig.';
+const CAMERA_COLLISION_HINT = 'Whether camera rigs collide with this body. Off and they pass straight through it. Independent of Simulate Physics on purpose: scenery can block the camera without blocking the character, or the reverse.';
+const MASS_HINT = 'Mass of 0 will make the object static.';
+const FRICTION_HINT = 'Contact friction. At 0 the body is frictionless — nothing will slow it down but damping. What a character wants, since its script sets its own speed.';
+const GROUND_PROBE_HINT = 'Counts as grounded while the collider’s feet are within this distance of solid ground, probed every frame. Removes isGrounded flicker (and false falling animations) for a character resting on terrain. Also what makes the groundDistance animation built-in answer. At 0 it is off and grounding comes from solver contacts only — raise it (~0.1–0.2) if a resting character flickers to airborne.';
+const MOTION_SMOOTHING_HINT = 'Time constant for this body’s measured motion — currentSpeed, planarSpeed, acceleration, turn rate. Higher is steadier but slower to react. At 0 the default (~0.09s) applies. Raise it if an animation blend driven by this body’s speed vibrates or jitters; lower it if a script needs a faster answer than it gets.';
+
 // 3 axis toggles (used for linear/angular constraints; value is a [x,y,z] of 0|1).
 // Must stay at module scope: a component declared inside a render body is a new type every render, which
 // remounts its subtree and wipes the drag state of the vector inputs.
@@ -300,37 +307,25 @@ export default function PhysicsEditor(props: {node: Node}) {
           : <>
               {/* The two channels this body takes part in. Independent on purpose: scenery can block
                   the camera without blocking the character, or the reverse. */}
-              <Toggle label='Simulate Physics' className='my-1'
+              <Toggle label='Simulate Physics' className='my-1' title={SIMULATE_HINT}
                 checked={bodyProperties.simulatePhysics ?? true}
                 onChange={(c) => setBodyProperties({ ...bodyProperties, simulatePhysics: c })} />
-              <Toggle label='Camera Collision' className='my-1'
+              <Toggle label='Camera Collision' className='my-1' title={CAMERA_COLLISION_HINT}
                 checked={bodyProperties.cameraCollision ?? true}
                 onChange={(c) => setBodyProperties({ ...bodyProperties, cameraCollision: c })} />
-              {bodyProperties.simulatePhysics === false &&
-                <Hint className='mb-1'>Ghost — nothing collides with it, but it can still block a camera rig.</Hint>}
-              {bodyProperties.cameraCollision === false &&
-                <Hint className='mb-1'>Camera rigs pass through this body.</Hint>}
-              <Field label='Mass' labelClassName={LABEL}>
+              <Field label='Mass' labelClassName={LABEL} hint={MASS_HINT}>
                 <NumberInput value={bodyProperties.mass} onChange={(v) => setBodyProperties({ ...bodyProperties, mass: v })} />
               </Field>
-              {bodyProperties.mass === 0 && <Hint className='mb-1'>Mass of 0 will make the object static.</Hint>}
               <Slider label='Damping' labelClassName={LABEL} min={0} max={1} step={0.01} value={bodyProperties.linearDamping} onChange={(v) => setBodyProperties({ ...bodyProperties, linearDamping: v })} />
               <Slider label='Angular Damping' labelClassName={LABEL} min={0} max={1} step={0.01} value={bodyProperties.angularDamping} onChange={(v) => setBodyProperties({ ...bodyProperties, angularDamping: v })} />
-              <Slider label='Friction' labelClassName={LABEL} min={0} max={1} step={0.01} value={bodyProperties.friction ?? 0.3} onChange={(v) => setBodyProperties({ ...bodyProperties, friction: v })} />
-              {bodyProperties.friction === 0 && <Hint className='mb-1'>Frictionless — nothing will slow this down but damping. What a character wants, since its script sets its own speed.</Hint>}
+              <Slider label='Friction' labelClassName={LABEL} title={FRICTION_HINT} min={0} max={1} step={0.01} value={bodyProperties.friction ?? 0.3} onChange={(v) => setBodyProperties({ ...bodyProperties, friction: v })} />
               <Slider label='Restitution' labelClassName={LABEL} min={0} max={1} step={0.01} value={bodyProperties.restitution ?? 0} onChange={(v) => setBodyProperties({ ...bodyProperties, restitution: v })} />
-              <Slider label='Ground probe' labelClassName={LABEL} min={0} max={0.5} step={0.01} value={bodyProperties.groundProbeDistance ?? 0} onChange={(v) => setBodyProperties({ ...bodyProperties, groundProbeDistance: v })} />
-              {(bodyProperties.groundProbeDistance ?? 0) > 0
-                ? <Hint className='mb-1'>Counts as grounded while the collider's feet are within this distance of solid ground, probed every frame. Removes isGrounded flicker (and false falling animations) for a character resting on terrain. Also what makes the groundDistance animation built-in answer.</Hint>
-                : <Hint className='mb-1'>Off — grounding comes from solver contacts only. Raise it (~0.1–0.2) if a resting character flickers to airborne.</Hint>}
+              <Slider label='Ground probe' labelClassName={LABEL} title={GROUND_PROBE_HINT} min={0} max={0.5} step={0.01} value={bodyProperties.groundProbeDistance ?? 0} onChange={(v) => setBodyProperties({ ...bodyProperties, groundProbeDistance: v })} />
               {/* Filters the MEASURED motion this body reports — currentSpeed, planarSpeed,
                   planarAcceleration, turnRate. Those are what an animation field's axes and a machine's
                   speed thresholds read, so this slider is the first thing to reach for when a blend
                   vibrates: the noise is in the measurement, not the animation. */}
-              <Slider label='Motion smoothing' labelClassName={LABEL} min={0} max={0.5} step={0.01} value={bodyProperties.motionSmoothing ?? 0} onChange={(v) => setBodyProperties({ ...bodyProperties, motionSmoothing: v })} />
-              {(bodyProperties.motionSmoothing ?? 0) > 0
-                ? <Hint className='mb-1'>Time constant for this body's measured motion — currentSpeed, planarSpeed, acceleration, turn rate. Higher is steadier but slower to react. Raise it if an animation blend driven by speed vibrates.</Hint>
-                : <Hint className='mb-1'>Default (~0.09s). Raise it if animations driven by this body's speed jitter; lower it if a script needs a faster answer than it gets.</Hint>}
+              <Slider label='Motion smoothing' labelClassName={LABEL} title={MOTION_SMOOTHING_HINT} min={0} max={0.5} step={0.01} value={bodyProperties.motionSmoothing ?? 0} onChange={(v) => setBodyProperties({ ...bodyProperties, motionSmoothing: v })} />
               <AxisToggles label='Linear Constraints' value={bodyProperties.linearConstraints} onChange={(v) => setBodyProperties({ ...bodyProperties, linearConstraints: v as [number, number, number] })} />
               <AxisToggles label='Angular Constraints' value={bodyProperties.angularConstraints} onChange={(v) => setBodyProperties({ ...bodyProperties, angularConstraints: v as [number, number, number] })} />
               <Button variant='danger' size='sm' className='mt-2' onClick={removeBody}>Remove Rigid Body</Button>
@@ -360,9 +355,9 @@ export default function PhysicsEditor(props: {node: Node}) {
     </Collapsable>
 
     { isSkinned && ragdoll &&
-    <Collapsable title='Ragdoll' icon={<PhysicsIcon />} persistKey='ragdoll'>
+    <Collapsable title='Ragdoll' icon={<PhysicsIcon />} persistKey='ragdoll'
+      hint='How this skinned mesh simulates when turned into a ragdoll.'>
       <div className='w-full p-2'>
-        <Hint className='mb-2'>How this skinned mesh simulates when turned into a ragdoll.</Hint>
         <Field label='Joint Type' labelClassName={LABEL}>
           <Select value={ragdoll.jointType} onChange={(e) => setRagdoll({ ...ragdoll, jointType: e.target.value as 'ball' | 'coneTwist' })}>
             <option value='ball'>Ball (free, stable)</option>

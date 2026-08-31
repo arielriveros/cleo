@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { useAnimationField } from './AnimationFieldContext'
+import { clamp } from '../../utils/math';
 
 // The blend-space plot: the Animation Field mode's center canvas, an absolute overlay over the WebGL
 // viewport. Hand-rolled SVG because a sample's position IS its data, in real axis units. Drag a sample to
@@ -51,9 +52,9 @@ export default function FieldGraph() {
   const px = (x: number) => PAD.left + ((x - field.xAxis.min) / spanX) * plotW
   const py = (y: number) => (is2D ? PAD.top + plotH - ((y - field.yAxis.min) / spanY) * plotH : PAD.top + plotH / 2)
   const ux = (clientX: number, rect: DOMRect) =>
-    field.xAxis.min + Math.min(1, Math.max(0, (clientX - rect.left - PAD.left) / plotW)) * spanX
+    field.xAxis.min + clamp((clientX - rect.left - PAD.left) / plotW, 0, 1) * spanX
   const uy = (clientY: number, rect: DOMRect) =>
-    field.yAxis.min + (1 - Math.min(1, Math.max(0, (clientY - rect.top - PAD.top) / plotH))) * spanY
+    field.yAxis.min + (1 - clamp((clientY - rect.top - PAD.top) / plotH, 0, 1)) * spanY
 
   const weightOf = (clipName: string) => weights.find(w => w.clipName === clipName)?.weight ?? 0
 

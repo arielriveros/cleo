@@ -54,10 +54,12 @@ export default function WorkspaceStatusChip() {
               </Button>
               {needsAttention && (
                 <>
-                  <Button size='sm' variant='primary' onClick={() => { void ws.resync(); setExpanded(false) }}>
+                  <Button size='sm' variant='primary' title='Restores the folder from the script library.'
+                    onClick={() => { void ws.resync(); setExpanded(false) }}>
                     Rewrite from editor
                   </Button>
-                  <Button size='sm' variant='danger' onClick={() => { void ws.applyPendingDeletions(); setExpanded(false) }}>
+                  <Button size='sm' variant='danger' title='Removes the scripts pending deletion from every node that uses them.'
+                    onClick={() => { void ws.applyPendingDeletions(); setExpanded(false) }}>
                     Apply deletions
                   </Button>
                 </>
@@ -69,8 +71,7 @@ export default function WorkspaceStatusChip() {
 
             {needsAttention && (
               <p className='mt-2 text-[10px] text-dim leading-snug'>
-                Nothing has been changed in the editor. “Rewrite from editor” restores the folder from the
-                script library; “Apply deletions” removes those scripts from every node that uses them.
+                Nothing has been changed in the editor.
               </p>
             )}
           </div>

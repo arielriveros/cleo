@@ -3,6 +3,8 @@ import { ShapeDescription } from '../../EngineContext';
 import { HULL_QUALITIES } from './hullQuality';
 import { PropertyTable, PropertyRow, NumberInput, Section, Button, VectorInput, SegmentedControl, Hint } from '../../../components/ui';
 
+const CAPSULE_HEIGHT_HINT = 'Total height, spanning the caps too: the straight section is height − 2 × radius. At or below 2 × radius the shape is a sphere — raise the height to get a capsule.';
+
 export default function ShapeEditor(props: {
   shape: ShapeDescription;
   setShape: (shape: any) => void;
@@ -35,12 +37,8 @@ export default function ShapeEditor(props: {
             <PropertyRow label='Radius'><NumberInput value={s.radius} step={0.01} onChange={(v) => patch({ radius: Math.max(0.001, v) })} /></PropertyRow>
             {/* Labelled "Total" because it spans the caps too (as in Unity/Godot): the straight section is
                 height - 2*radius, and there is no way to read that off a bare "Height". */}
-            <PropertyRow label='Total Height'><NumberInput value={s.height} step={0.01} onChange={(v) => patch({ height: Math.max(0, v) })} /></PropertyRow>
+            <PropertyRow label='Total Height' hint={CAPSULE_HEIGHT_HINT}><NumberInput value={s.height} step={0.01} onChange={(v) => patch({ height: Math.max(0, v) })} /></PropertyRow>
             <PropertyRow label='Segments'><NumberInput value={s.numSegments} step={1} onChange={(v) => patch({ numSegments: Math.max(3, Math.round(v)) })} /></PropertyRow>
-            { s.height <= 2 * s.radius &&
-              <PropertyRow label=''>
-                <Hint>Total height is at or below 2 × radius, so this is a sphere. Raise the height to get a capsule.</Hint>
-              </PropertyRow> }
           </>}
           {s.type === 'convex' && <>
             <PropertyRow label='Definition'>

@@ -30,7 +30,7 @@ function persist(key: string, value: boolean): void {
 
 // Cached in module state, never re-read from localStorage per call: logDirtySkip runs on EVERY change
 // event, which during a camera orbit is every frame.
-let enabled = readFlag(KEY_ON, true);
+let enabled = readFlag(KEY_ON, false);
 let verbose = readFlag(KEY_VERBOSE, false);
 
 /** Running totals per rejection key, so a repeated skip updates one row instead of appending. */

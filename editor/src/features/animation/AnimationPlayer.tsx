@@ -3,6 +3,7 @@ import { useCleoEngine } from '../EngineContext'
 import { getAnimationTarget } from './skeleton'
 import { useStateMachine } from './StateMachineContext'
 import { Toggle } from '../../components/ui'
+import { clamp } from '../../utils/math';
 
 // Floating bottom transport for the Animation Editor: play/scrub the target clip and host its event
 // markers. The editor scene is paused (animators do not tick), so this drives the animator itself
@@ -140,7 +141,7 @@ export default function AnimationPlayer() {
   const timeAt = (clientX: number) => {
     const r = trackRef.current?.getBoundingClientRect()
     if (!r || r.width === 0 || duration <= 0) return 0
-    return Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * duration
+    return clamp((clientX - r.left) / r.width, 0, 1) * duration
   }
 
   const onTrackDown = (e: React.PointerEvent) => {
@@ -169,7 +170,7 @@ export default function AnimationPlayer() {
 
   const btn = 'px-2 py-1 rounded bg-control hover:bg-control-hover border border-control-hover text-white'
   const fmt = (s: number) => `${s.toFixed(2)}s`
-  const pct = (t: number) => `${duration > 0 ? Math.max(0, Math.min(1, t / duration)) * 100 : 0}%`
+  const pct = (t: number) => `${duration > 0 ? clamp(t / duration, 0, 1) * 100 : 0}%`
 
   return (
     <div

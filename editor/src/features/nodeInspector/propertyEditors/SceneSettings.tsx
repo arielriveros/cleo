@@ -4,6 +4,7 @@ import { useCleoEngine } from '../../EngineContext'
 import Collapsable from '../../../components/Collapsable'
 import { PropertyTable, PropertyRow, TextInput, Button, ColorInput, NumberInput, SegmentedControl } from '../../../components/ui'
 import { InfoIcon } from '../sectionIcons'
+import { clamp } from '../../../utils/math';
 
 // The inspector for the scene ASSET, shown when the scene tab's root node is selected. Everything here
 // lives on SceneMeta (name, main, dimension) or on the live Scene/Renderer (clear color, environment map),
@@ -11,7 +12,7 @@ import { InfoIcon } from '../sectionIcons'
 
 const rgbToHex = (c: readonly number[] | null | undefined): string => {
   if (!c) return '#000000'
-  const h = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')
+  const h = (v: number) => Math.round(clamp(v, 0, 1) * 255).toString(16).padStart(2, '0')
   return `#${h(c[0])}${h(c[1])}${h(c[2])}`
 }
 
@@ -101,7 +102,7 @@ export default function SceneSettings() {
 
           <div className='mt-2'>
             {isMain
-              ? <div className='text-xs text-muted px-1'>This is the main scene — the one a published game starts in.</div>
+              ? <div className='text-xs text-muted px-1' title='The main scene is the one a published game starts in.'>This is the main scene.</div>
               : <Button variant='subtle' size='sm' className='w-full'
                   title='Make this the scene a published game starts in'
                   onClick={() => setMainScene(meta.id)}>

@@ -13,6 +13,16 @@ import Sparkline from './Sparkline';
 //
 // Explanatory prose belongs in `title` tooltips, not visible captions: this is a long column already.
 
+// Appended to the Passes tooltip when `attribution` says the rows are passes. The two backends do not
+// measure the same thing and the rows are not interchangeable between them, so a reader comparing a
+// WebGPU capture against a WebGL2 one needs this before they draw a conclusion from the difference.
+const PASS_ATTRIBUTION_HINT =
+  ' Rows are render PASSES, not the renderer scopes WebGL2 times. Passes with no matching scope appear '
+  + 'as “pass:…”; “frameEnd” has no row because per-pass timestamps already exclude the driver’s '
+  + 'end-of-frame drain it exists to absorb. Absolute values run high — the renderer submits one command '
+  + 'buffer per pass today, so each pass pays a submission at both ends of its own window. Compare passes '
+  + 'with each other, not with WebGL2.';
+
 const REFRESH_MS = 250; // fast enough to feel live, slow enough not to churn React
 /** Slack on the frame budget before the readout turns red — see `overBudget`. */
 const BUDGET_TOLERANCE = 0.05;
@@ -360,7 +370,8 @@ export default function PerformancePanel() {
             + 'it. They answer different questions — a scope that is expensive on the CPU and cheap on '
             + 'the GPU is issuing too many draws, not shading too much, and no amount of LOD will help '
             + 'it. CPU timing is always available; GPU timer queries are gated by driver and browser '
-            + 'flags, and when they are missing the pass switches below attribute cost by A/B instead.'}
+            + 'flags, and when they are missing the pass switches below attribute cost by A/B instead.'
+            + (gpuProfiler.attribution === 'passes' ? PASS_ATTRIBUTION_HINT : '')}
       >
         <Toggle
           label='Timer queries'
@@ -372,18 +383,6 @@ export default function PerformancePanel() {
         />
         {!gpuProfiler.available && (
           <Hint>{gpuProfiler.unavailableReason ?? 'GPU timing is unavailable here.'} Use the pass switches below.</Hint>
-        )}
-        {/* One line, driven by `attribution`. The two backends do not measure the same thing and the
-            rows are not interchangeable between them, so a reader comparing a WebGPU capture against a
-            WebGL2 one needs to be told before they draw a conclusion from the difference. */}
-        {gpuProfiler.available && gpuProfiler.attribution === 'passes' && (
-          <Hint>
-            Rows are render PASSES, not the renderer scopes WebGL2 times. Passes with no matching scope
-            appear as <code>pass:…</code>; <code>frameEnd</code> has no row because per-pass timestamps
-            already exclude the driver's end-of-frame drain it exists to absorb. Absolute values run
-            high — the renderer submits one command buffer per pass today, so each pass pays a
-            submission at both ends of its own window. Compare passes with each other, not with WebGL2.
-          </Hint>
         )}
         {rows.length === 0 && <div className='text-muted mt-2'>waiting for results…</div>}
         {rows.length > 0 && (

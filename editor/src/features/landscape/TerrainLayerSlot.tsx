@@ -3,12 +3,12 @@ import { LandscapeNode } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { applyTerrainMaterialToLayer } from '../../utils/terrainMaterials'
 import { Toggle } from '../../components/ui'
+import { useAssetDrop } from '../../utils/useAssetDrop'
 
 // The active-paint-layer control in the Landscape inspector: a terrain-material slot (drop / link /
 // edit / clear) plus per-layer blend overrides (tiling + automatic height/slope masking).
 export default function TerrainLayerSlot(props: { landscape: LandscapeNode | null; layerIndex: number }) {
   const { terrainMaterials, enterTerrainMaterialEditor, eventEmitter } = useCleoEngine()
-  const [dragOver, setDragOver] = useState(false)
   const [, force] = useState(0)
   const rerender = () => force(x => x + 1)
 
@@ -16,30 +16,25 @@ export default function TerrainLayerSlot(props: { landscape: LandscapeNode | nul
   const layer = terrain ? terrain.layers[props.layerIndex] : undefined
   const asset = layer?.materialId ? terrainMaterials.find(m => m.id === layer.materialId) : undefined
 
+  const assign = (id: string) => {
+    const a = terrainMaterials.find(m => m.id === id)
+    if (!a || !terrain) return
+    applyTerrainMaterialToLayer(terrain, props.layerIndex, a)
+    eventEmitter.emit('TEXTURES_CHANGED'); eventEmitter.emit('SCENE_CHANGED'); rerender()
+  }
+  // Above the early return: a hook cannot be called conditionally.
+  const { dragOver, dropProps } = useAssetDrop('text/cleo-terrain-material', assign)
+
   const label = 'text-xs text-gray-300'
   const num = 'w-14 bg-surface-raised text-white border border-control-hover rounded px-1 py-[2px] text-xs'
 
   if (!terrain) return <div className='text-[10px] text-gray-400'>Create a terrain first.</div>
 
-  const assign = (id: string) => {
-    const a = terrainMaterials.find(m => m.id === id)
-    if (!a) return
-    applyTerrainMaterialToLayer(terrain, props.layerIndex, a)
-    eventEmitter.emit('TEXTURES_CHANGED'); eventEmitter.emit('SCENE_CHANGED'); rerender()
-  }
   const clear = () => { terrain.clearLayer(props.layerIndex); eventEmitter.emit('SCENE_CHANGED'); rerender() }
   const setBlend = (patch: any) => { terrain.setLayer(props.layerIndex, undefined, patch); eventEmitter.emit('SCENE_CHANGED'); rerender() }
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault(); setDragOver(false)
-    const id = e.dataTransfer.getData('text/cleo-terrain-material')
-    if (id) assign(id)
-  }
-  const onDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('text/cleo-terrain-material')) { e.preventDefault(); setDragOver(true) }
-  }
 
   return (
-    <div onDragOver={onDragOver} onDragLeave={() => setDragOver(false)} onDrop={onDrop}
+    <div {...dropProps}
       className={`space-y-1 border rounded p-2 ${dragOver ? 'border-selected' : 'border-control'}`}>
       {asset ? (
         <div className='flex items-center gap-2'>

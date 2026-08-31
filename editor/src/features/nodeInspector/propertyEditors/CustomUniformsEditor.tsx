@@ -127,12 +127,9 @@ export default function CustomUniformsEditor(props: { material: CustomMaterial, 
   }
 
   return (
-    <Collapsable title='Uniforms' icon={<UniformsIcon />} badge={list.length || undefined} persistKey='uniforms'>
+    <Collapsable title='Uniforms' icon={<UniformsIcon />} badge={list.length || undefined} persistKey='uniforms'
+      hint={'Declared uniforms are available in the shader as u_<name>. Samplers bind to your chosen texture; scalars/vectors upload their value each frame.'}>
       <div className='w-full p-2'>
-        <Hint className='mb-2'>
-          Declared uniforms are available in the shader as <code>u_&lt;name&gt;</code>. Samplers bind to your
-          chosen texture; scalars/vectors upload their value each frame.
-        </Hint>
         {list.length === 0 && <Hint className='mb-2'>No uniforms yet.</Hint>}
         {list.map(u => (
           <div key={u.name} className='flex items-center gap-1.5 mb-2'>

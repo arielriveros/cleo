@@ -2,6 +2,7 @@ import {
     UINode, UIRootNode, UITextNode, UIImageNode, UIButtonNode, UIProgressBarNode,
     UISliderNode, UIToggleNode, UITextInputNode, UIColor, TextureManager,
 } from 'cleo';
+import { clamp } from '../../utils/math';
 
 /**
  * The imperative half of the game-UI renderer.
@@ -32,8 +33,8 @@ export type UIRegistry = Map<string, UIBinding>;
 /** `[r,g,b,a]` in 0..1 sRGB to a CSS colour. */
 export function cssColor(c: UIColor | undefined): string {
     if (!c) return 'transparent';
-    const to255 = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
-    return `rgba(${to255(c[0])}, ${to255(c[1])}, ${to255(c[2])}, ${Math.max(0, Math.min(1, c[3]))})`;
+    const to255 = (v: number) => Math.round(clamp(v, 0, 1) * 255);
+    return `rgba(${to255(c[0])}, ${to255(c[1])}, ${to255(c[2])}, ${clamp(c[3], 0, 1)})`;
 }
 
 /**
