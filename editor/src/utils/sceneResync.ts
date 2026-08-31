@@ -9,6 +9,7 @@ import { toRuntimeTileset } from './tilesets'
 import { getScriptIdOf, seedScriptFields, unlinkScript } from './scripts'
 import { hashAsset, assetHashKey, AssetLibs, hashesComparable } from './assetHash'
 import { captureAnimationState, restoreAnimationState, applyIkRig } from './placedAnimation'
+import { disposeModelSubtree } from 'cleo'
 
 // Pull-based cross-scene propagation: re-resolves every asset link a stored scene carries (__materialId /
 // __modelId / __templateId, terrain layer.materialId, foliage rule.modelId) against the CURRENT libraries,
@@ -63,6 +64,9 @@ function reinstantiate(
   for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id) }
   // removeChild detaches synchronously; Node.remove() only marks and its deferred sweep mis-splices.
   parent.removeChild(inst)
+  // …and free the GPU buffers behind it. removeChild only detaches, so a resync that rebuilt every
+  // placed copy used to orphan a full mesh set per instance — per LEVEL, for a LOD-bearing asset.
+  disposeModelSubtree(inst)
   const newId = make(parent)
   const newNode = scene.getNodeById(newId)
   if (newNode) {
@@ -101,6 +105,21 @@ export function resyncScene(
   const changedSince = (kind: 'material' | 'model' | 'template' | 'terrainMaterial' | 'script' | 'tileset', id: string, current: string): boolean =>
     comparable ? (!savedHashes || savedHashes[assetHashKey(kind, id)] !== current) : false
 
+  /**
+   * `hashAsset` memoised for the length of one resync.
+   *
+   * It was called INSIDE the per-node loops, so a model placed fifty times was hashed fifty times — and
+   * hashing a model means walking its whole serialized geometry, tens of milliseconds and megabytes of
+   * garbage a go. The asset cannot change while this function runs, so once per asset is exactly right.
+   * This is what made resync feel slow in proportion to how much of a model was placed.
+   */
+  const hashCache = new Map<any, string>()
+  const hashOf = (asset: any): string => {
+    let h = hashCache.get(asset)
+    if (h === undefined) { h = hashAsset(asset); hashCache.set(asset, h) }
+    return h
+  }
+
   const materialById = new Map(libs.materials.map(m => [m.id, m]))
   const modelById = new Map(libs.models.map(m => [m.id, m]))
   const templateById = new Map(libs.templates.map(t => [t.id, t]))
@@ -117,7 +136,7 @@ export function resyncScene(
     if (!tplId) continue
     const asset = templateById.get(tplId)
     if (!asset) { node.removeVariable(TEMPLATE_ID_VAR); changed = true; continue }
-    if (changedSince('template', tplId, hashAsset(asset))) {
+    if (changedSince('template', tplId, hashOf(asset))) {
       reinstantiate(scene, node, maps, parent => instantiateTemplate(asset, parent, maps, libs.materials))
       changed = true
     }
@@ -134,7 +153,7 @@ export function resyncScene(
     // instance belongs to the pass above: rebuilding it from the model asset would replace the template's
     // subtree with a bare model and drop `__templateId` along with it.
     let live = node
-    if (!node.getVariable(TEMPLATE_ID_VAR) && changedSince('model', modelId, hashAsset(asset))) {
+    if (!node.getVariable(TEMPLATE_ID_VAR) && changedSince('model', modelId, hashOf(asset))) {
       live = reinstantiate(scene, node, maps,
         parent => instantiateModelAsset(asset, parent, libs.materials, libs.models, libs.animations),
         // The rebuild restores this copy's own transform, so a change the MODEL made to its root transform
@@ -159,7 +178,7 @@ export function resyncScene(
     if (!scriptId) continue
     const asset = scriptById.get(scriptId)
     if (!asset) { unlinkScript(node, undefined, maps.scripts); changed = true; continue }
-    if (changedSince('script', scriptId, hashAsset(asset))) {
+    if (changedSince('script', scriptId, hashOf(asset))) {
       maps.scripts.set(node.id, asset.source)
       seedScriptFields(node, asset, false)
       changed = true
@@ -180,7 +199,7 @@ export function resyncScene(
       if (!matId) continue
       const asset = materialById.get(matId)
       if (!asset) { unlinkMaterialAt(node, slot); changed = true }
-      else if (changedSince('material', matId, hashAsset(asset))) { applyMaterialAsset(node, asset, slot); changed = true }
+      else if (changedSince('material', matId, hashOf(asset))) { applyMaterialAsset(node, asset, slot); changed = true }
     }
     if (node.nodeType === 'camera') {
       const cam = node as CameraNode
@@ -190,7 +209,7 @@ export function resyncScene(
         const assets = kept.map(id => materialById.get(id)).filter((a): a is MaterialAsset => !!a)
         if (kept.length !== ids.length) { setScreenMaterialIds(cam, kept); changed = true }
         // Re-apply if any referenced material changed, or the list shrank.
-        if (kept.length !== ids.length || kept.some(id => changedSince('material', id, hashAsset(materialById.get(id)!)))) {
+        if (kept.length !== ids.length || kept.some(id => changedSince('material', id, hashOf(materialById.get(id)!)))) {
           applyScreenMaterials(cam, assets)
           changed = true
         }
@@ -208,7 +227,7 @@ export function resyncScene(
       if (!layerMatId) continue
       const asset = terrainMatById.get(layerMatId)
       if (!asset) { terrain.clearLayer(i); changed = true; continue }
-      if (changedSince('terrainMaterial', layerMatId, hashAsset(asset))) {
+      if (changedSince('terrainMaterial', layerMatId, hashOf(asset))) {
         // skipAutoGenerate: keep scattered foliage instances, only swap prototypes/rules.
         applyTerrainMaterialToLayer(terrain, i, asset, { skipAutoGenerate: true })
         changed = true
@@ -226,7 +245,7 @@ export function resyncScene(
       if (!id) continue
       const asset = tilesetById.get(id)
       if (!asset) { layer.cfg.tilesetId = null; layer.markAllMeshesDirty(); changed = true; continue }
-      if (changedSince('tileset', id, hashAsset(asset))) {
+      if (changedSince('tileset', id, hashOf(asset))) {
         tilemap.registerTileset(toRuntimeTileset(asset))
         changed = true
       }
@@ -241,7 +260,7 @@ export function resyncScene(
     if (!id || isInlineTilesetId(id)) continue
     const asset = tilesetById.get(id)
     if (!asset) { sprite.tileset = null; changed = true; continue }
-    if (changedSince('tileset', id, hashAsset(asset))) {
+    if (changedSince('tileset', id, hashOf(asset))) {
       sprite.tileset = toRuntimeTileset(asset)
       changed = true
     }

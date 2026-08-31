@@ -14,6 +14,20 @@ export interface RenderStats {
     culledObjects: number;
     /** Foliage instances skipped this frame by the distance or frustum test (per blade, not per cell). */
     culledInstances: number;
+    /** Instanced draws the foliage COLOUR pass issued. One per prototype sub-model per detail level. */
+    foliageDraws: number;
+    /** Instanced draws the foliage SHADOW pass issued, summed over the cascades rendered this frame. */
+    foliageShadowDraws: number;
+    /** Foliage cells that survived culling and were packed for drawing (colour pass). */
+    foliageCells: number;
+    /**
+     * Cell culling TESTS run this frame, colour and shadow together.
+     *
+     * Separate from `foliageCells` because the two diverge for a reason worth seeing: the scan is a
+     * linear walk of every cell in every layer, and the shadow pass repeats it per cascade. A large
+     * terrain can pay tens of thousands of tests to draw a handful of cells, and only this number says so.
+     */
+    foliageCellsScanned: number;
     /** Total instances submitted across all instanced draws (PBR batches + foliage). */
     instances: number;
     /** Triangles submitted to the GPU this frame (× instanceCount for instanced draws). */
@@ -44,6 +58,10 @@ export const frameStats: RenderStats = {
     objects: 0,
     culledObjects: 0,
     culledInstances: 0,
+    foliageDraws: 0,
+    foliageShadowDraws: 0,
+    foliageCells: 0,
+    foliageCellsScanned: 0,
     instances: 0,
     triangles: 0,
     vertices: 0,
@@ -82,6 +100,10 @@ export function resetFrameStats(): void {
     frameStats.objects = 0;
     frameStats.culledObjects = 0;
     frameStats.culledInstances = 0;
+    frameStats.foliageDraws = 0;
+    frameStats.foliageShadowDraws = 0;
+    frameStats.foliageCells = 0;
+    frameStats.foliageCellsScanned = 0;
     frameStats.instances = 0;
     frameStats.triangles = 0;
     frameStats.vertices = 0;

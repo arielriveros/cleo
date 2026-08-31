@@ -51,6 +51,195 @@ export function foliageAdmitCount(pendingCount: number, budget: number, firstSig
     return Math.min(budget, pendingCount);
 }
 
+/** Shared empty scratch, so a layer that has never packed anything holds no buffer of its own. */
+const EMPTY_SCRATCH = new Float32Array(0);
+
+/**
+ * Triangles one merged foliage draw may submit before it is split in two.
+ *
+ * Merging removed the only thing that used to bound a foliage submission: one draw per spatial cell
+ * meant ~a cell's worth of instances each, and a driver could preempt between them. Merged, a whole
+ * layer can land in ONE `drawElementsInstanced` — and `generateFoliageEverywhere` followed by a
+ * layer's "first sight" (which skips the admission budget on purpose) makes every cell visible on the
+ * same frame. A heavy prototype at that scale is seconds of GPU work in a single submission, which is
+ * a TDR timeout and a removed device, not a slow frame.
+ *
+ * The budget is on TRIANGLES rather than instances because that is what the cost actually tracks: the
+ * same instance count is trivial for a grass card and ruinous for a 200k-triangle tree.
+ */
+export const FOLIAGE_DRAW_TRIANGLE_BUDGET = 4_000_000;
+
+/** Ceiling regardless of how light the prototype is, so a grass field is not one colossal draw. */
+export const FOLIAGE_DRAW_MAX_INSTANCES = 8192;
+
+/**
+ * Floor, so a very heavy prototype still batches. Below this the split costs more than it saves, and
+ * the per-cell drawing this replaced averaged about this many instances per call anyway — so a
+ * capped merged draw is never worse than what it replaced.
+ */
+export const FOLIAGE_DRAW_MIN_INSTANCES = 8;
+
+/**
+ * How much of a detail level's instances survive, per level away from the base.
+ *
+ * Density scaling, as an open-world renderer does it: LOD reduces the cost of ONE instance, this
+ * reduces how many there are. Neither alone bounds a scatter — density and cull distance can still
+ * ask for hundreds of millions of triangles, and nothing downstream refuses.
+ *
+ * 1.0 disables it entirely and every instance draws, which is exactly what happened before this existed.
+ */
+export const FOLIAGE_DENSITY_FALLOFF = 0.75;
+
+/** Never thin past this, however many levels deep: a band that keeps a quarter already reads as thinner. */
+export const FOLIAGE_DENSITY_FLOOR = 0.25;
+
+/**
+ * Fraction of each cell's instances a draw bucket keeps.
+ *
+ * Two properties matter more than the curve. It is **monotonically non-increasing** with distance, and
+ * `packFoliageInstances` takes a PREFIX — so the set a far band draws is a strict subset of the set a
+ * near band draws. An instance that thinned out at one distance cannot pop back in at a greater one,
+ * which is the artefact that makes naive density scaling unusable.
+ *
+ * The impostor bucket inherits the last mesh level's fraction rather than returning to 1.0. Cards are
+ * nearly free, so keeping them all would cost little — but it would also mean trees reappearing as
+ * the camera backs away, which reads as a bug however cheap it is.
+ */
+export function foliageKeepFraction(bucket: number, levelCount: number, falloff: number): number {
+    if (!(falloff > 0) || falloff >= 1) return 1;
+    // Bucket `levelCount` is the impostor; clamp it onto the last mesh level.
+    const level = Math.max(0, Math.min(bucket, levelCount - 1));
+    return Math.max(FOLIAGE_DENSITY_FLOOR, Math.pow(falloff, level));
+}
+
+/** Instances one draw may carry, given the triangle count of a single instance of the prototype. */
+export function foliageChunkLimit(trianglesPerInstance: number): number {
+    if (!(trianglesPerInstance > 0)) return FOLIAGE_DRAW_MAX_INSTANCES;
+    const byTriangles = Math.floor(FOLIAGE_DRAW_TRIANGLE_BUDGET / trianglesPerInstance);
+    return Math.max(FOLIAGE_DRAW_MIN_INSTANCES, Math.min(FOLIAGE_DRAW_MAX_INSTANCES, byTriangles));
+}
+
+/**
+ * Where to cut `cells` into runs whose instance totals stay within `limit`. Returns the END index of
+ * each run, so run k is `cells[out[k-1] .. out[k])`.
+ *
+ * A cell is never split: its matrices are contiguous and a draw cannot start part-way into an instance
+ * buffer without a base-instance offset, which WebGL2 does not have. So a single cell larger than the
+ * limit goes alone and overshoots, which is the honest outcome — the fix for that is a smaller cell
+ * size, not a smaller draw.
+ */
+export function foliageChunkBounds(cells: readonly FoliageCell[], limit: number, out: number[]): number[] {
+    out.length = 0;
+    const cap = Math.max(1, limit);
+    let running = 0;
+    for (let i = 0; i < cells.length; i++) {
+        // Break BEFORE adding, and only when the run already has something in it.
+        if (running > 0 && running + cells[i].count > cap) { out.push(i); running = 0; }
+        running += cells[i].count;
+    }
+    if (cells.length > 0) out.push(cells.length);
+    return out;
+}
+
+/**
+ * One draw bucket's instances, merged into a single GPU buffer.
+ *
+ * Foliage used to issue one instanced draw PER SPATIAL CELL per prototype sub-model, and again per
+ * shadow cascade — draw count proportional to terrain area, which is what a 241 ms CPU frame against
+ * a 48 ms GPU looks like. Every one of those draws also landed on its own VAO, because the WebGL2 VAO
+ * cache keys on the instance buffer and each cell had a different one.
+ *
+ * Merging is the shape an engine with instanced-static-mesh components uses: the visible cells of one
+ * detail level go into one buffer and are drawn once per sub-model. Cells stay the unit of CULLING —
+ * only the unit of SUBMISSION changes.
+ */
+export interface FoliageBatch {
+    /** Merged per-instance matrices. Renderer-owned: allocated, resized and destroyed by the renderer. */
+    buffer: RhiBuffer | null;
+    /** Instances currently in `buffer`. */
+    count: number;
+    /** The keep-fraction this pack was made with; a changed density setting has to repack. */
+    keep: number;
+    /**
+     * Instances `buffer` has ROOM for, which is >= `count`.
+     *
+     * Kept so a changed cell set is a sub-write into existing storage rather than a fresh allocation.
+     * `bufferData` re-specifies the whole buffer, and doing that every frame a camera crosses a cell
+     * boundary makes the driver rename a multi-megabyte resource per frame; growth is rare, writes are
+     * not. Grows with slack so a set that oscillates by a cell does not reallocate on every crossing.
+     */
+    capacity: number;
+    /** Cell indices packed, in order. Grow-only; only the first `cellCount` entries are live. */
+    cells: Int32Array;
+    cellCount: number;
+    /** The `layer.version` this pack was made from; a rebuild moved the instances underneath it. */
+    version: number;
+}
+
+export function createFoliageBatch(): FoliageBatch {
+    return { buffer: null, count: 0, capacity: 0, keep: 1, cells: new Int32Array(0), cellCount: 0, version: -1 };
+}
+
+/**
+ * Whether `batch` still describes exactly `cells` at `version`.
+ *
+ * Compared element-wise rather than hashed on purpose: the sets are cell-sized (tens to hundreds), so
+ * the two cost the same, and a hash collision here would silently draw last frame's instances until
+ * the visible set happened to change again — a bug that would look like corrupted placement.
+ *
+ * The cull hysteresis and the admission budget are what make this pay: a parked camera produces the
+ * same list every frame, so a parked camera repacks and uploads nothing at all.
+ */
+export function foliageBatchStale(batch: FoliageBatch, cells: readonly FoliageCell[], version: number,
+                                  keep: number): boolean {
+    if (batch.version !== version || batch.cellCount !== cells.length || batch.keep !== keep) return true;
+    for (let i = 0; i < cells.length; i++) if (batch.cells[i] !== cells[i].index) return true;
+    return false;
+}
+
+/**
+ * Total instances across `cells` once `keep` has thinned them — the length the merged buffer needs.
+ *
+ * `ceil`, so a cell never thins to nothing: a lone tree on a hilltop is exactly the instance whose
+ * disappearance would be noticed.
+ */
+export function foliageBatchInstances(cells: readonly FoliageCell[], keep: number = 1): number {
+    let n = 0;
+    for (const c of cells) n += keep >= 1 ? c.count : Math.min(c.count, Math.ceil(c.count * keep));
+    return n;
+}
+
+/**
+ * Copy every cell's matrices into `out` back to back. Returns the instance count written.
+ *
+ * `out` must hold `foliageBatchInstances(cells) * 16` floats. A cell's matrices are already packed and
+ * static — baked once in `_rebuild` — so this is a run of memcpys, not per-instance maths.
+ */
+export function packFoliageInstances(cells: readonly FoliageCell[], out: Float32Array,
+                                     keep: number = 1): number {
+    let at = 0;
+    for (const c of cells) {
+        // A PREFIX, never a sample: instances were scattered in random order, so the first N are already
+        // a spatially even subset, and prefixes NEST. That nesting is what stops an instance dropped at
+        // one detail level from reappearing at a coarser one.
+        const take = keep >= 1 ? c.count : Math.min(c.count, Math.ceil(c.count * keep));
+        const floats = take * 16;
+        out.set(c.matrices.subarray(0, floats), at);
+        at += floats;
+    }
+    return at / 16;
+}
+
+/** Record which cells a batch now holds, so the next frame can skip an identical repack. */
+export function rememberFoliageBatch(batch: FoliageBatch, cells: readonly FoliageCell[], version: number,
+                                     keep: number): void {
+    if (batch.cells.length < cells.length) batch.cells = new Int32Array(cells.length);
+    for (let i = 0; i < cells.length; i++) batch.cells[i] = cells[i].index;
+    batch.cellCount = cells.length;
+    batch.version = version;
+    batch.keep = keep;
+}
+
 /**
  * GPU buffers left behind by layers disposed with their terrain. The renderer's foliage pass only walks
  * LIVE landscapes, so this queue is the only way those buffers still reach a `destroy()`.
@@ -87,8 +276,11 @@ export interface FoliageCell {
     indices: Int32Array;                 // instance indices in this cell (see forEachInstanceNear)
     min: [number, number, number];       // world AABB (instance extents, expanded by geometry size)
     max: [number, number, number];
-    glBuffer: RhiBuffer | null;        // renderer-owned; lazily created
-    uploadedVersion: number;              // renderer's record of which layer.version is on the GPU
+    /**
+     * Position in `layer.cells`, assigned by `_rebuild`. The identity a packed batch is keyed on, so
+     * the renderer can tell "the same cells as last frame" from "a different set" without hashing.
+     */
+    index: number;
     lod: number;                          // current detail level (renderer-owned hysteresis memory)
     /**
      * Was this cell drawn last frame? Renderer-owned, like `lod`.
@@ -180,6 +372,30 @@ export class FoliageLayer {
     public count = 0;
     public version = 0;
 
+    /**
+     * Merged instance buffers by DRAW BUCKET: index i is detail level i, and `levels.length` is the
+     * billboard impostor. Each bucket holds a LIST, because a bucket is split into chunks small enough
+     * to keep one submission bounded — see {@link foliageChunkLimit}. Renderer-owned, like
+     * `cell.visible` and `cell.lod`; the layer only holds them so they can be freed with it.
+     */
+    public batches: FoliageBatch[][] = [];
+    /** The same, one per shadow cascade: a cascade sees a different set of cells from the camera. */
+    public shadowBatches: FoliageBatch[][] = [];
+    /**
+     * The cells selected for each colour bucket this frame, parallel to {@link batches}.
+     *
+     * Renderer-owned frame state. It lives here rather than in a per-frame Map because the CULL that
+     * fills it and the PASS that draws from it are deliberately separated: every instance upload has to
+     * happen while no render pass is open (see `Renderer._packFoliageBatch`), so the selection runs in
+     * the frame prologue and the pass only binds and draws what it finds here.
+     */
+    public buckets: FoliageCell[][] = [];
+    /**
+     * CPU staging for whichever batch is being packed. Shared across buckets and grow-only: both
+     * backends COPY on upload, so it is free the moment `reallocateBuffer` returns.
+     */
+    public batchScratch: Float32Array = EMPTY_SCRATCH;
+
     // Spatial grid over the instances (world XZ), rebuilt on scatter/erase. Cell world-unit size:
     // larger = fewer draw calls but looser culling.
     public cells: FoliageCell[] = [];
@@ -197,13 +413,9 @@ export class FoliageLayer {
     // Whether the (static) per-vertex mesh + VAO have been uploaded (set by the renderer's foliage pass).
     public initialized = false;
 
-    // GPU buffers orphaned by a rebuild (cells are recreated), drained + deleted by the renderer.
-    private _stale: RhiBuffer[] = [];
-
     // Prototype meshes orphaned by a prototype swap, drained + disposed by the renderer.
     //
-    // Separate from `_stale` because these are Meshes, not raw buffers: a Mesh owns a VAO and several
-    // buffers and knows how to release them. Before this queue existed, every refresh leaked the whole
+    // Meshes, not raw buffers: a Mesh owns a VAO and several buffers and knows how to release them. Before this queue existed, every refresh leaked the whole
     // outgoing LOD chain — which mattered little when the only trigger was a manual re-sync, and
     // matters now that a model or material save re-derives automatically.
     private _retiredMeshes: Mesh[] = [];
@@ -454,9 +666,13 @@ export class FoliageLayer {
 
     /** Release this layer's GPU buffers (queued for the renderer to delete) and drop its instances. */
     public dispose(): void {
-        for (const c of this.cells) if (c.glBuffer) ORPHANED_FOLIAGE_BUFFERS.push(c.glBuffer);
-        for (const b of this._stale) ORPHANED_FOLIAGE_BUFFERS.push(b);
-        this._stale = [];
+        for (const list of [...this.batches, ...this.shadowBatches])
+            for (const b of list ?? [])
+                if (b?.buffer) ORPHANED_FOLIAGE_BUFFERS.push(b.buffer);
+        this.batches = [];
+        this.shadowBatches = [];
+        this.buckets = [];
+        this.batchScratch = EMPTY_SCRATCH;
         // Prototype meshes too: the renderer's foliage pass only walks LIVE landscapes, so once this
         // layer is off a terrain nothing else can reach them.
         this._retireMeshes(this.levels.flatMap(l => l.models));
@@ -550,13 +766,6 @@ export class FoliageLayer {
         return true;
     }
 
-    /** WebGL buffers left over from the previous cell layout; the renderer deletes these. Returns and clears. */
-    public collectStaleBuffers(): RhiBuffer[] {
-        const s = this._stale;
-        this._stale = [];
-        return s;
-    }
-
     /** Largest absolute local-space coordinate of the instance geometry, scaled by the max instance scale.
      *  Expands each cell's AABB so it fully contains the meshes/billboards standing on it. */
     private _instanceExtent(): number {
@@ -580,8 +789,8 @@ export class FoliageLayer {
     private _rebuild(): void {
         this.count = this._instances.length / 5;
 
-        // Retire the previous cells' GPU buffers (a new cell layout gets fresh buffers).
-        for (const c of this.cells) if (c.glBuffer) this._stale.push(c.glBuffer);
+        // Nothing GPU-side to retire: cells hold CPU matrices only, and the merged batch buffers the
+        // renderer draws from are reused in place — `version` below is what tells it to repack them.
 
         // Bucket instance indices into a uniform XZ grid.
         const cs = this.cellSize;
@@ -616,8 +825,7 @@ export class FoliageLayer {
                 indices: Int32Array.from(arr),
                 min: [minX - extent, minY - extent, minZ - extent],
                 max: [maxX + extent, maxY + extent, maxZ + extent],
-                glBuffer: null,
-                uploadedVersion: -1,
+                index: cells.length,
                 visible: false,
                 lod: 0,
             });

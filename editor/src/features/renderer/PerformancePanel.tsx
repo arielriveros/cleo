@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { gpuProfiler, frameHistory, frameStats, sceneStatsDetail, TextureManager, TOGGLEABLE_PASSES } from 'cleo';
+import { gpuProfiler, cpuProfiler, frameHistory, frameStats, sceneStatsDetail, TextureManager, TOGGLEABLE_PASSES } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
 import { Section, Slider, Toggle, SegmentedControl, Button, Hint } from '../../components/ui';
 import Sparkline from './Sparkline';
@@ -35,14 +35,15 @@ const QUALITY_OPTIONS = [
   { value: 'ultra', label: 'Ultra' },
 ];
 
-type PassRow = { name: string; avgMs: number; maxMs: number };
+type PassRow = { name: string; avgMs: number; maxMs: number; cpuMs: number };
 
 // Counters sampled EVERY frame and reported as mean + range, never grabbed once per refresh: shadow
 // cascades are staggered on a 4-frame cycle, so draw calls and triangles swing several-fold frame to
 // frame and a single raw sample reads as noise.
 const RANGED = ['drawCalls', 'instancedDrawCalls', 'objects', 'instances', 'triangles',
                 'culledObjects', 'culledInstances', 'fullscreenPasses', 'shadedMpx',
-                'stateChanges', 'stateChangesSaved'] as const;
+                'stateChanges', 'stateChangesSaved',
+                'foliageDraws', 'foliageShadowDraws', 'foliageCells', 'foliageCellsScanned'] as const;
 type RangedKey = typeof RANGED[number];
 type Range = { min: number; max: number; mean: number };
 
@@ -76,7 +77,7 @@ function RangeRow(props: { label: string; r: Range; dp?: number; unit?: string; 
 /** Everything the panel samples once per refresh, in one shape so one loop can fill it. */
 type Sample = {
   fps: number; frameMs: number; p50: number; p95: number; worst: number;
-  cpuMs: number; gpuMs: number; gpuAvailable: boolean; gpuOn: boolean;
+  cpuMs: number; cpuPassMs: number; gpuMs: number; gpuAvailable: boolean; gpuOn: boolean;
   physicsMs: number; stepMs: number; writeBackMs: number; rayMs: number; rayCount: number;
   bodies: number; contacts: number; terrainMs: number;
   sceneMs: number; transformMs: number; scriptMs: number; animatorMs: number; rigMs: number; nodes: number;
@@ -89,7 +90,7 @@ type Sample = {
 
 const EMPTY: Sample = {
   fps: 0, frameMs: 0, p50: 0, p95: 0, worst: 0,
-  cpuMs: 0, gpuMs: 0, gpuAvailable: false, gpuOn: false,
+  cpuMs: 0, cpuPassMs: 0, gpuMs: 0, gpuAvailable: false, gpuOn: false,
   physicsMs: 0, stepMs: 0, writeBackMs: 0, rayMs: 0, rayCount: 0, bodies: 0, contacts: 0, terrainMs: 0,
   sceneMs: 0, transformMs: 0, scriptMs: 0, animatorMs: 0, rigMs: 0, nodes: 0,
   textures: 0, textureMB: 0, gpuMB: 0, heapUsedMB: null, heapLimitMB: null,
@@ -171,7 +172,17 @@ export default function PerformancePanel() {
         } catch { /* registry not ready */ }
         const mem = (performance as any).memory ?? null;
 
-        setRows(gpuProfiler.passes.map((p) => ({ name: p.name, avgMs: p.avgMs, maxMs: p.maxMs })));
+        // One row per scope, from BOTH profilers. They share their boundaries (see Renderer._scope),
+        // so a scope with a GPU number and no CPU one, or the reverse, is a real asymmetry worth seeing
+        // rather than a mismatch in how the two were placed.
+        const cpuByName = new Map(cpuProfiler.passes.map(t => [t.name, t.avgMs]));
+        const merged = new Map<string, PassRow>();
+        for (const t of gpuProfiler.passes)
+          merged.set(t.name, { name: t.name, avgMs: t.avgMs, maxMs: t.maxMs, cpuMs: cpuByName.get(t.name) ?? 0 });
+        for (const t of cpuProfiler.passes)
+          if (!merged.has(t.name))
+            merged.set(t.name, { name: t.name, avgMs: 0, maxMs: 0, cpuMs: t.avgMs });
+        setRows([...merged.values()].sort((a, b) => (b.avgMs + b.cpuMs) - (a.avgMs + a.cpuMs)));
         setD({
           fps: (frames.current * 1000) / acc.current,
           frameMs: acc.current / frames.current,
@@ -179,6 +190,7 @@ export default function PerformancePanel() {
           p95: frameHistory.frame.percentile(0.95),
           worst: frameHistory.frame.max,
           cpuMs: stats?.frameMs ?? 0,
+          cpuPassMs: cpuProfiler.totalMs,
           gpuMs: gpuProfiler.totalMs,
           gpuAvailable: gpuProfiler.available,
           gpuOn: gpuProfiler.enabled,
@@ -236,7 +248,7 @@ export default function PerformancePanel() {
   const overBudget = d.frameMs > budgetMs * (1 + BUDGET_TOLERANCE);
   // Bars scale against the slowest pass, not the frame budget: a budget-relative scale renders every
   // pass as an invisible sliver.
-  const maxPassMs = rows.length > 0 ? Math.max(...rows.map(r => r.avgMs)) : 1;
+  const maxPassMs = rows.length > 0 ? Math.max(...rows.map(r => Math.max(r.avgMs, r.cpuMs))) : 1;
 
   const togglePass = (name: string, on: boolean) => {
     renderer?.setPassEnabled(name, on);
@@ -261,7 +273,8 @@ export default function PerformancePanel() {
       `physics ${fmt(d.physicsMs)}ms - scene ${fmt(d.sceneMs)}ms`,
       `quality ${quality} - renderScale ${renderScale} - ${d.backend}/${d.pipeline}`,
       '',
-      ...rows.map(r => `${r.name.padEnd(20)} ${fmt(r.avgMs).padStart(8)} ms  (max ${fmt(r.maxMs)})`),
+      ...rows.map(r => `${r.name.padEnd(20)} gpu ${fmt(r.avgMs).padStart(8)} ms`
+        + `  cpu ${fmt(r.cpuMs).padStart(8)} ms  (gpu max ${fmt(r.maxMs)})`),
     ];
     navigator.clipboard?.writeText(lines.join('\n'));
   };
@@ -342,10 +355,12 @@ export default function PerformancePanel() {
       </Section>
 
       <Section
-        title='GPU passes'
-        hint={'Timer queries give a direct per-pass number, but the extension is gated by driver and '
-            + 'browser flags. When it is missing, use the pass switches below to attribute cost by A/B '
-            + 'instead — they need no extension and also capture downstream savings a timer would miss.'}
+        title='Passes (CPU / GPU)'
+        hint={'Two numbers per scope: the CPU time spent SUBMITTING it and the GPU time spent running '
+            + 'it. They answer different questions — a scope that is expensive on the CPU and cheap on '
+            + 'the GPU is issuing too many draws, not shading too much, and no amount of LOD will help '
+            + 'it. CPU timing is always available; GPU timer queries are gated by driver and browser '
+            + 'flags, and when they are missing the pass switches below attribute cost by A/B instead.'}
       >
         <Toggle
           label='Timer queries'
@@ -370,17 +385,27 @@ export default function PerformancePanel() {
             submission at both ends of its own window. Compare passes with each other, not with WebGL2.
           </Hint>
         )}
-        {enabled && gpuProfiler.available && rows.length === 0 &&
-          <div className='text-muted mt-2'>waiting for results…</div>}
-        {enabled && rows.length > 0 && (
+        {rows.length === 0 && <div className='text-muted mt-2'>waiting for results…</div>}
+        {rows.length > 0 && (
           <div className='mt-2 space-y-[3px]'>
+            <div className='flex justify-between text-[10px] text-muted'>
+              <span>scope</span><span>cpu / gpu</span>
+            </div>
             {rows.map(r => (
-              <div key={r.name} className='leading-4' title={`max ${fmt(r.maxMs)} ms`}>
+              <div key={r.name} className='leading-4' title={`gpu max ${fmt(r.maxMs)} ms`}>
                 <div className='flex justify-between'>
                   <span className='truncate'>{r.name}</span>
-                  <span className='font-mono text-muted ml-2 shrink-0'>{fmt(r.avgMs)} ms</span>
+                  <span className='font-mono text-muted ml-2 shrink-0'>
+                    {fmt(r.cpuMs)} / {enabled ? fmt(r.avgMs) : '—'} ms
+                  </span>
                 </div>
+                {/* Two bars on one baseline: CPU above, GPU below, both scaled to the same maximum so
+                    the taller one names the bottleneck at a glance. */}
                 <div className='h-1 bg-control rounded-sm overflow-hidden'>
+                  <div className='h-full bg-warning'
+                       style={{ width: `${Math.max(1, (r.cpuMs / maxPassMs) * 100)}%` }} />
+                </div>
+                <div className='h-1 bg-control rounded-sm overflow-hidden mt-[1px]'>
                   <div
                     className={r.avgMs > budgetMs * 0.33 ? 'h-full bg-danger' : 'h-full bg-success'}
                     style={{ width: `${Math.max(1, (r.avgMs / maxPassMs) * 100)}%` }}
@@ -390,7 +415,7 @@ export default function PerformancePanel() {
             ))}
             <div className='flex justify-between pt-1 font-semibold'>
               <span>total</span>
-              <span className='font-mono'>{fmt(d.gpuMs)} ms</span>
+              <span className='font-mono'>{fmt(d.cpuPassMs)} / {enabled ? fmt(d.gpuMs) : '—'} ms</span>
             </div>
           </div>
         )}
@@ -415,6 +440,20 @@ export default function PerformancePanel() {
         <RangeRow label='Culled (instances)' r={r.culledInstances}
                   title='Foliage instances rejected by the distance or frustum test, counted per blade.' />
         <Row label='Nodes' value={d.nodes.toLocaleString()} />
+        {/* Foliage draws are the counter that used to grow with terrain AREA: one per spatial cell per
+            prototype sub-model, and again per shadow cascade. Merged batching made it one per sub-model
+            per detail level, so a number in the hundreds here means something is wrong upstream —
+            usually a rule with no LOD chain, or two layers where there should be one. */}
+        <RangeRow label='Foliage draws' r={r.foliageDraws} hl={r.foliageDraws.mean > 64}
+                  title='Instanced draws the foliage colour pass issued. One per prototype sub-model per detail level in view.' />
+        <RangeRow label='· shadow' r={r.foliageShadowDraws}
+                  title='The same, for the shadow cascades rendered this frame. Zero unless a foliage rule opts into casting.' />
+        <RangeRow label='Foliage cells' r={r.foliageCells}
+                  title='Cells that survived culling and were packed into a merged instance buffer.' />
+        {/* Scanned-vs-drawn is the ratio that says whether the CULL is the cost rather than the draws:
+            the scan is a linear walk of every cell in every layer, repeated per cascade. */}
+        <RangeRow label='· scanned' r={r.foliageCellsScanned}
+                  title='Cell culling tests run this frame, colour and shadow together. Far above "Foliage cells" means the linear scan itself is the cost, not the draws.' />
       </Section>
 
       <Section

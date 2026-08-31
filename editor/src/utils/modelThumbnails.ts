@@ -1,5 +1,5 @@
-import { Scene, Node, ModelNode, Model, Geometry, Material, TextureManager, CleoEngine, AnimatedModel, Terrain } from 'cleo';
-import { createModelPreviewScene } from '../features/demoScene/createModelPreviewScene';
+import { Scene, Node, ModelNode, Model, Geometry, Material, TextureManager, CleoEngine, AnimatedModel, Terrain, Camera, CameraNode } from 'cleo';
+import { createModelPreviewScene, addPreviewLights } from '../features/demoScene/createModelPreviewScene';
 import { createMaterialPreviewScene } from '../features/demoScene/createMaterialPreviewScene';
 import { fitDistance, MATERIAL_SPHERE_RADIUS, previewSphereGeometry, PREVIEW_TERRAIN_RADIUS } from '../features/demoScene/previewFraming';
 import { buildTerrainPreviewSubject } from '../features/demoScene/previewTerrainSubject';
@@ -35,13 +35,13 @@ function syncPreviewCamera(scene: Scene): void {
 // The restore must NOT be awaited: `screenshotOffscreen` has already drawn the frame by the time it
 // returns its promise, so the grid goes back on immediately. Awaiting first leaves the live viewport
 // without its grid for the whole readback, which on WebGPU is a visible gap.
-async function captureClean(engine: CleoEngine, scene: Scene): Promise<string> {
+async function captureClean(engine: CleoEngine, scene: Scene, size: number = THUMB_SIZE): Promise<string> {
   const prevGrid = engine.renderer.gridVisible;
   engine.renderer.setGridVisible(false);
   let pending: Promise<string>;
   try {
     syncPreviewCamera(scene);
-    pending = engine.renderer.screenshotOffscreen(scene, THUMB_SIZE);
+    pending = engine.renderer.screenshotOffscreen(scene, size);
   } finally {
     engine.renderer.setGridVisible(prevGrid);
   }
@@ -112,6 +112,30 @@ export function combineBounds(root: Node, cullingMargin = true): { center: [numb
     r = newR;
   }
   return { center: [cx, cy, cz], radius: r };
+}
+
+/**
+ * World-space AABB of every ModelNode in a subtree.
+ *
+ * A BOX, where {@link combineBounds} gives a sphere, because an impostor has to match the card that
+ * replaces it and that card is sized `[width, height]` from the prototype's box — see
+ * `FoliageLayer._prototypeFootprint`. A sphere fitted to a tall thin tree would frame mostly empty air
+ * and the card would not line up with the mesh it stands in for.
+ */
+export function combineBox(root: Node): { min: [number, number, number]; max: [number, number, number] } {
+  const models: ModelNode[] = [];
+  collectModelNodes(root, models);
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const m of models) {
+    const b = m.getBoundingBox();
+    if (!b || !isFinite(b.min[0]) || !isFinite(b.max[0])) continue;
+    minX = Math.min(minX, b.min[0]); maxX = Math.max(maxX, b.max[0]);
+    minY = Math.min(minY, b.min[1]); maxY = Math.max(maxY, b.max[1]);
+    minZ = Math.min(minZ, b.min[2]); maxZ = Math.max(maxZ, b.max[2]);
+  }
+  if (!isFinite(minX)) return { min: [0, 0, 0], max: [0, 0, 0] };
+  return { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] };
 }
 
 /**
@@ -267,6 +291,152 @@ export async function renderModelAssetThumbnail(engine: CleoEngine, asset: Model
   });
   if (!root) return '';
   return renderModelThumbnail(engine, root); // reparents `root` into its own preview scene
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Impostor bake
+// ---------------------------------------------------------------------------------------------------
+
+/** Side of the baked impostor sheet. Four times a thumbnail: this one is looked at in the world. */
+export const IMPOSTOR_SIZE = 512;
+
+/**
+ * The texture id an asset's impostor is registered under. Deterministic, so re-baking REPLACES the card
+ * a foliage rule already points at instead of leaving the library to accumulate orphans — the same
+ * reasoning as `lodTextures`' derived ids.
+ */
+export function impostorTextureId(modelId: string): string { return `${modelId}__impostor`; }
+
+/** Where the impostor camera goes and what it sees. Pure, so the arithmetic can be tested. */
+export interface ImpostorFraming {
+  /** Card size the capture is framed for, matching `FoliageLayer._prototypeFootprint`. */
+  width: number;
+  height: number;
+  /** Orthographic camera position, looking down -Z. */
+  position: [number, number, number];
+  /** Half-extents of the orthographic volume. */
+  left: number; right: number; bottom: number; top: number;
+  near: number; far: number;
+}
+
+/**
+ * Frame an orthographic camera onto a subject's world AABB for an impostor capture.
+ *
+ * Separated from the bake because it is the part most likely to be subtly wrong and the part a GPU is
+ * not needed to check: a clip plane through the subject, or a card sized off the wrong axis, produces a
+ * picture that looks plausible and lines up with nothing.
+ *
+ * `width`/`height` are the same two numbers `FoliageLayer._prototypeFootprint` derives from the runtime
+ * prototype — `max(dx, dz)` and `dy` — because the card this feeds is `crossQuadGeometry(width, height)`
+ * and the two have to agree or the impostor is a different size from the mesh it stands in for.
+ */
+export function impostorFraming(box: { min: [number, number, number]; max: [number, number, number] }): ImpostorFraming {
+  const dx = box.max[0] - box.min[0];
+  const dy = box.max[1] - box.min[1];
+  const dz = box.max[2] - box.min[2];
+  // The same degenerate fallback the runtime footprint uses: a flat or empty subject gets a unit card
+  // rather than collapsing to a zero-area quad that would draw nothing and look like a missing asset.
+  const width = Math.max(dx, dz) > 1e-4 ? Math.max(dx, dz) : 1;
+  const height = dy > 1e-4 ? dy : 1;
+
+  const cx = (box.min[0] + box.max[0]) / 2;
+  const cy = (box.min[1] + box.max[1]) / 2;
+  const cz = (box.min[2] + box.max[2]) / 2;
+
+  // Back off along +Z past the subject's own extent. An orthographic projection does not care how far
+  // the camera is, but the CLIP PLANES do, and a near plane cutting into the subject silently slices
+  // the front off the card.
+  const depth = Math.max(dz, width, height);
+  const dist = depth * 2 + 1;
+
+  return {
+    width, height,
+    position: [cx, cy, cz + dist],
+    // Half-extents. `Camera` scales left/right by the aspect ratio and leaves top/bottom alone; the
+    // capture target is square, so aspect is 1 and these are used as written.
+    left: -width / 2, right: width / 2, bottom: -height / 2, top: height / 2,
+    // `near` clears the subject's far side by the same margin the distance was built with.
+    near: Math.max(0.01, dist - depth), far: dist + depth * 2 + 1,
+  };
+}
+
+/** What a bake produced: the registered texture, and the card size it was framed for. */
+export interface ImpostorBake { id: string; data: string; width: number; height: number }
+
+/**
+ * Render a model asset to a single flat card, for foliage to draw past its farthest LOD band.
+ *
+ * This is the change that matters most for a heavy prototype. A LOD level reduces triangles linearly;
+ * a card replaces a hundred thousand of them with four, and at the distances it takes over the
+ * difference is invisible. It also sidesteps the real cost of distant foliage, which is not the
+ * triangle COUNT but that every one of those triangles is smaller than a pixel and still costs a whole
+ * 2x2 rasterizer quad.
+ *
+ * Three things make the framing correct, and all three are load-bearing:
+ *
+ * - **Orthographic.** A perspective capture bakes in convergence, and the card it lands on is flat, so
+ *   the tree would appear to lean as the camera moved past it.
+ * - **Framed to the BOX, not the bounding sphere**, matching `FoliageLayer._prototypeFootprint`:
+ *   `width = max(dx, dz)`, `height = dy`. The runtime card is `crossQuadGeometry(width, height)`.
+ * - **Square target, non-square framing.** The capture stretches the subject to fill a square sheet;
+ *   the card's 0..1 UV over a `width x height` quad stretches it back by exactly the inverse. So a
+ *   square texture is correct with no letterboxing and no wasted texels — which matters, because
+ *   `screenshotOffscreen` is square-only.
+ *
+ * Coverage comes from the scene DEPTH buffer (`_presentThumbnail`), never the colour alpha, so the
+ * cut-out gaps between leaves come back transparent and the runtime `c.a < 0.5` test lands on the
+ * silhouette rather than on the bloom mask.
+ *
+ * Lit by the same key + fill the library thumbnail uses, so a card reads as the asset it replaces. The
+ * runtime billboard shader writes a fixed straight-up normal, so this bake carries its lighting in the
+ * albedo; a baked normal map is the separable next step, and until it exists a distant tree lights
+ * flatly rather than following the sun.
+ */
+export async function bakeModelImpostor(engine: CleoEngine, asset: ModelAsset): Promise<ImpostorBake | null> {
+  restoreEmbeddedTextures(asset.textures);
+
+  const root = silently(() => {
+    const holder = new Node('__impostor');
+    const clone = deepClone(asset.nodeJson);
+    regenerateIds(clone, new Map());
+    parseByType(holder, clone);
+    return holder.children[0];
+  });
+  if (!root) return null;
+
+  const framed = silently(() => {
+    const s = new Scene();
+    s.addNode(root);
+    s.root.updateTransforms();
+
+    const f = impostorFraming(combineBox(root));
+
+    const cam = new CameraNode('__impostor__Camera', new Camera({
+      type: 'orthographic',
+      left: f.left, right: f.right, bottom: f.bottom, top: f.top,
+      near: f.near, far: f.far,
+    }));
+    cam.active = true;
+    // Rotation [0,0,0] looks down -Z, so the camera sits on +Z. A front elevation, level with the
+    // subject: the view a distant instance is almost always seen from.
+    cam.setPosition(f.position);
+    cam.setRotation([0, 0, 0]);
+    s.addNode(cam);
+
+    addPreviewLights(s);
+    s.start();
+    return { scene: s, width: f.width, height: f.height };
+  });
+
+  await awaitSubtreeTexturesReady(root);
+  const data = await captureClean(engine, framed.scene, IMPOSTOR_SIZE);
+  if (!data) return null;
+
+  const id = impostorTextureId(asset.id);
+  // Replace in place: a re-bake must update the card a rule already names, not mint a second one.
+  TextureManager.Instance.removeTexture(id);
+  TextureManager.Instance.addTextureFromBase64(data, { mipMap: true }, id);
+  return { id, data, width: framed.width, height: framed.height };
 }
 
 /**

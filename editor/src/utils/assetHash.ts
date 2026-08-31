@@ -40,7 +40,7 @@ const NON_STRUCTURAL_KEYS = new Set(['thumbnail', 'ikRig', 'nodeNames'])
  * template and character is re-instantiated from an asset that knows nothing about how it was configured.
  * The version turns that mass rebuild into a no-op instead.
  */
-export const ASSET_HASH_VERSION = 5
+export const ASSET_HASH_VERSION = 6
 
 /**
  * Whether a scene's stored hashes can be compared against ones produced by the CURRENT {@link hashAsset}.
@@ -60,12 +60,23 @@ export function hashesComparable(
 
 /** 32-bit FNV-1a over raw bytes, returned as an 8-char hex. The binary twin of {@link fnv1a}. */
 function fnv1aBytes(view: ArrayBufferView): string {
-  const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
   let h = 0x811c9dc5
-  for (let i = 0; i < bytes.length; i++) {
-    h ^= bytes[i]
+  const mix = (v: number) => {
+    h ^= v
     h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0
   }
+  // A WORD at a time where the buffer allows it. Byte-at-a-time over a multi-megabyte mesh is tens of
+  // milliseconds, and this runs once per referenced asset on every scene open and save. The tail is
+  // handled bytewise, and the word path needs 4-byte alignment — a view into a packed blob may not have
+  // it, hence the offset check rather than assuming.
+  const aligned = view.byteOffset % 4 === 0
+  const words = aligned ? (view.byteLength >> 2) : 0
+  if (words > 0) {
+    const u32 = new Uint32Array(view.buffer, view.byteOffset, words)
+    for (let i = 0; i < u32.length; i++) mix(u32[i])
+  }
+  const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
+  for (let i = words * 4; i < bytes.length; i++) mix(bytes[i])
   return h.toString(16).padStart(8, '0')
 }
 

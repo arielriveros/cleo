@@ -90,10 +90,12 @@ export function simplify(input: SimplifyBuffers, targetRatio: number): SimplifyB
 
     const topoOf = new Uint32Array(vertexCount);
     const tx: number[] = [], ty: number[] = [], tz: number[] = [];
-    const qx: number[] = [], qy: number[] = [], qz: number[] = [];
+    // Weld scratch. Declared `let` so it can be released the moment the weld is done — held to the end of
+    // the call it is tens of MB of quantised coordinates and one JS array per bucket, all dead.
+    let qx: number[] | null = [], qy: number[] | null = [], qz: number[] | null = [];
     // Numeric hash buckets rather than string keys: one string per vertex is a real cost on the meshes
     // this exists for, and the quantised triple is compared exactly inside the bucket anyway.
-    const buckets = new Map<number, number[]>();
+    let buckets: Map<number, number[]> | null = new Map<number, number[]>();
     for (let i = 0; i < vertexCount; i++) {
         const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
         const ix = Math.round(x * inv), iy = Math.round(y * inv), iz = Math.round(z * inv);
@@ -115,6 +117,7 @@ export function simplify(input: SimplifyBuffers, targetRatio: number): SimplifyB
         topoOf[i] = found;
     }
     const topoCount = tx.length;
+    qx = null; qy = null; qz = null; buckets = null;
 
     // ---- 2. Triangles, in topology space and attribute space ---------------------------------------
     const ranges: SimplifyRange[] = input.submeshes?.length
@@ -169,7 +172,7 @@ export function simplify(input: SimplifyBuffers, targetRatio: number): SimplifyB
 
     // Edges with anything other than two adjacent faces are boundaries or non-manifold seams. They are
     // constrained below via BOUNDARY_WEIGHT rather than locked; see that constant.
-    const edgeFaces = new Map<number, number>();
+    let edgeFaces: Map<number, number> | null = new Map<number, number>();
     const edgeKey = (a: number, b: number) => (a < b ? a * topoCount + b : b * topoCount + a);
     for (let t = 0; t < triCount; t++) {
         if (!alive[t]) continue;
@@ -189,7 +192,12 @@ export function simplify(input: SimplifyBuffers, targetRatio: number): SimplifyB
         Q[o + 9] += d * d;
     };
     const n3: number[] = [0, 0, 0];
-    const faceNormal = (t: number, out: number[]): number => {
+    // Cached face normal + length per triangle. `wouldFlip` reads the BEFORE normal of every triangle
+    // around a candidate edge, on every candidate it examines — recomputing it there was the single
+    // biggest time sink in the whole decimator. Invalidated for the affected triangles on each collapse.
+    const faceN = new Float64Array(triCount * 3);
+    const faceLen = new Float64Array(triCount).fill(-1);
+    const computeFaceNormal = (t: number, out: number[]): number => {
         const a = triTopo[t * 3], b = triTopo[t * 3 + 1], c = triTopo[t * 3 + 2];
         const ux = tx[b] - tx[a], uy = ty[b] - ty[a], uz = tz[b] - tz[a];
         const vx = tx[c] - tx[a], vy = ty[c] - ty[a], vz = tz[c] - tz[a];
@@ -197,6 +205,15 @@ export function simplify(input: SimplifyBuffers, targetRatio: number): SimplifyB
         out[1] = uz * vx - ux * vz;
         out[2] = ux * vy - uy * vx;
         return Math.hypot(out[0], out[1], out[2]);
+    };
+    const faceNormal = (t: number, out: number[]): number => {
+        if (faceLen[t] < 0) {
+            faceLen[t] = computeFaceNormal(t, out);
+            faceN[t * 3] = out[0]; faceN[t * 3 + 1] = out[1]; faceN[t * 3 + 2] = out[2];
+            return faceLen[t];
+        }
+        out[0] = faceN[t * 3]; out[1] = faceN[t * 3 + 1]; out[2] = faceN[t * 3 + 2];
+        return faceLen[t];
     };
     for (let t = 0; t < triCount; t++) {
         if (!alive[t]) continue;
@@ -232,6 +249,8 @@ export function simplify(input: SimplifyBuffers, targetRatio: number): SimplifyB
             addPlane(b, px * BOUNDARY_WEIGHT, py * BOUNDARY_WEIGHT, pz * BOUNDARY_WEIGHT, d * BOUNDARY_WEIGHT);
         }
     }
+
+    edgeFaces = null; // the boundary term above was its last reader
 
     /** v^T (Qa + Qb) v — the squared distance to the planes both endpoints came from. */
     const errorAt = (va: number, vb: number, x: number, y: number, z: number): number => {
@@ -334,6 +353,10 @@ export function simplify(input: SimplifyBuffers, targetRatio: number): SimplifyB
         return top;
     };
 
+    // Reused across collapses in place of a per-collapse Set; see the collapse loop.
+    const stamp = new Int32Array(topoCount).fill(-1);
+    let epoch = 0;
+
     const pos3: number[] = [0, 0, 0];
     const considerEdge = (a: number, b: number) => {
         if (a === b || dead[a] || dead[b] || locked[a] || locked[b]) return;
@@ -341,7 +364,7 @@ export function simplify(input: SimplifyBuffers, targetRatio: number): SimplifyB
         push({ cost, a, b, va: version[a], vb: version[b] });
     };
 
-    const seen = new Set<number>();
+    let seen: Set<number> | null = new Set<number>();
     for (let t = 0; t < triCount; t++) {
         if (!alive[t]) continue;
         for (let k = 0; k < 3; k++) {
@@ -352,6 +375,8 @@ export function simplify(input: SimplifyBuffers, targetRatio: number): SimplifyB
             considerEdge(a, b);
         }
     }
+
+    seen = null; // seeding is done; this is one boxed key per edge and stays alive otherwise
 
     // Floor of two triangles per non-empty range. One collapse removes a pair, so a target of 1 overshoots
     // straight to an EMPTY submesh — and an empty range whose material the caller then prunes can leave a
@@ -431,25 +456,45 @@ export function simplify(input: SimplifyBuffers, targetRatio: number): SimplifyB
             if (c0 === a) triTopo[i0] = b;
             if (c1 === a) triTopo[i0 + 1] = b;
             if (c2 === a) triTopo[i0 + 2] = b;
+            faceLen[t] = -1; // its corner moved
             vertTris[b].push(t);
         }
+        // b inherits a's whole star, and nothing is ever removed from these lists — dead triangles and
+        // transitively-inherited ones accumulate until a hub vertex's list is in the thousands, which the
+        // three loops that scan it then pay for on every candidate. Compact when it is mostly dead.
+        const list = vertTris[b];
+        if (list.length > 16) {
+            let live = 0;
+            for (const t of list) if (alive[t]) live++;
+            if (live * 2 < list.length) vertTris[b] = list.filter(t => alive[t]);
+        }
+        // Every triangle still touching b has a moved corner.
+        for (const t of vertTris[b]) faceLen[t] = -1;
         dead[a] = 1;
         collapsedTo[a] = b;
         version[a]++;
         version[b]++;
 
-        // Re-cost every edge now incident on b, and bump its neighbours so their stale entries are
-        // discarded on pop rather than searched for and removed.
-        const touched = new Set<number>();
+        // Re-cost every edge now incident on b.
+        //
+        // ONLY `a` and `b` have their version bumped, above. Bumping the neighbours too — which this did
+        // originally, to "discard their stale entries" — was a correctness bug: an edge (v,w) between two
+        // neighbours of b has unchanged endpoints and unchanged quadrics, so it is not stale at all, and
+        // invalidating it without re-queueing it destroyed O(valence²) candidates per collapse while
+        // replacing only O(valence). The queue starved and the mesh came out silently under-decimated.
+        //
+        // The stamp buffer replaces a `new Set()` per collapse (~90k of them on a heavy mesh): `epoch`
+        // increments, and a vertex counts as seen when its stamp already equals it.
+        epoch++;
         for (const t of vertTris[b]) {
             if (!alive[t]) continue;
             for (let k = 0; k < 3; k++) {
                 const v = triTopo[t * 3 + k];
-                if (v !== b) touched.add(v);
+                if (v === b || stamp[v] === epoch) continue;
+                stamp[v] = epoch;
+                considerEdge(b, v);
             }
         }
-        for (const v of touched) version[v]++;
-        for (const v of touched) considerEdge(b, v);
     }
 
     // ---- 6. Rebuild --------------------------------------------------------------------------------

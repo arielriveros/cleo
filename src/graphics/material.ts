@@ -635,6 +635,22 @@ export function foliageRuleKey(rule: TerrainFoliageRule): string {
  * A foliage prototype a TerrainMaterial auto-instances, or — named in an exclude list — one to keep
  * off that material. Plain data only, to keep this module free of a cycle with `terrain/foliage.ts`.
  */
+/**
+ * A foliage rule as it should be PERSISTED: without the baked prototype geometry when that geometry can
+ * be rebuilt from the model library. See TerrainMaterial.serialize for why.
+ */
+function stripDerivedFoliageGeometry(rule: TerrainFoliageRule): TerrainFoliageRule {
+    const out: any = { ...rule, densityUnit: FOLIAGE_DENSITY_UNIT };
+    if (out.kind === 'mesh' && (out.modelId || out.meshId)) {
+        delete out.model;
+        delete out.models;
+        // The LOD levels' geometry goes with them; their DISTANCES come back from the model asset's own
+        // levels, which is where they were authored.
+        delete out.lods;
+    }
+    return out;
+}
+
 export interface TerrainFoliageRule {
     kind: 'mesh' | 'billboard';
     /**
@@ -764,7 +780,14 @@ export class TerrainMaterial extends Material {
             invertHeight: this.invertHeight,
             heightBlend: this.heightBlend,
             // Stamping the unit on the way out is what makes the round trip idempotent.
-            foliageInclude: this.foliageInclude.map(r => ({ ...r, densityUnit: FOLIAGE_DENSITY_UNIT })),
+            //
+            // A mesh rule's baked prototypes are NOT written when it has a `modelId`: they are a derived
+            // cache of that model asset, and persisting them put a full copy of every tree in every
+            // terrain material that scattered it — and a second copy in every scene blob, since a scene
+            // serializes its layer materials too. The editor rebuilds them on load
+            // (resolveFoliageRuleGeometry). A rule with no `modelId` has nothing to rebuild FROM, so it
+            // keeps carrying its geometry.
+            foliageInclude: this.foliageInclude.map(r => stripDerivedFoliageGeometry(r)),
             foliageExclude: [...this.foliageExclude],
         };
     }

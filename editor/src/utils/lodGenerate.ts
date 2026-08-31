@@ -71,6 +71,14 @@ export async function generateLodLevel(
         sourceModelId: string
         materials: MaterialAsset[]
         downscaleTextures: boolean
+        /**
+         * Halvings to apply to THIS level's textures, relative to the materials on `baseRoot`.
+         *
+         * Not the absolute level: when levels cascade, `baseRoot` is the previous level and its
+         * materials already point at downscaled twins, so halving by the absolute level again would
+         * shrink 1/8 where 1/4 was asked for. Defaults to the level for a non-cascaded call.
+         */
+        textureHalvings?: number
         decimate: (buffers: SimplifyBuffers, ratio: number) => Promise<SimplifyBuffers>
         existingId?: string
     },
@@ -117,7 +125,7 @@ export async function generateLodLevel(
                 if (!sourceAsset) { levelMaterials.push(undefined); continue }
                 let ids = new Map<string, string>()
                 if (options.downscaleTextures) {
-                    const result = await downscaleTextures(sourceAsset.textureIds ?? [], level)
+                    const result = await downscaleTextures(sourceAsset.textureIds ?? [], options.textureHalvings ?? level)
                     ids = result.ids
                     bytesSaved += result.bytesSaved
                 }

@@ -205,6 +205,17 @@ export class ModelNode extends Node {
         return this._worldSphere;
     }
 
+    /**
+     * Release this node's GPU buffers. For a whole subtree use {@link disposeModelSubtree}.
+     *
+     * `Node.removeChild` only detaches; the VBO/IBO/VAO behind a model are driver objects the GC cannot
+     * reach, so without this every rebuild orphaned a full mesh set until the page reloaded. Safe to
+     * call twice.
+     */
+    public dispose(): void {
+        this._model.dispose();
+    }
+
     public update(delta: number, time: number): void {
         super.update(delta, time);
         // Skip animator playback when the scene has animations disabled (editor scenes), so skinned
@@ -216,4 +227,21 @@ export class ModelNode extends Node {
             if (sceneStatsDetail.enabled) sceneStats.animatorMs += performance.now() - start;
         }
     }
+}
+
+/**
+ * Release the GPU buffers of every model in a subtree that is being discarded for good — a replaced
+ * model instance, a removed LOD level, a resync rebuild.
+ *
+ * Walks EVERY node, not just ModelNodes: an instantiated asset is a holder `Node` with the models
+ * beneath it, so stopping at the first non-model would free nothing at all.
+ *
+ * Deliberately NOT wired into `Node.removeChild` — re-parenting goes through that too, and a mesh shared
+ * with a foliage prototype or a terrain chunk would go invisible with nothing logged. Call it only where
+ * the caller provably owns the subtree and is throwing it away.
+ */
+export function disposeModelSubtree(root: Node | null | undefined): void {
+    if (!root) return;
+    if (root instanceof ModelNode) root.dispose();
+    for (const child of root.children) disposeModelSubtree(child);
 }

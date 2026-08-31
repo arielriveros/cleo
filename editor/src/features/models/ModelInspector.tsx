@@ -3,7 +3,10 @@ import { TextureManager } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
 import GenerateLodsModal, { defaultSpecs, type GenerateLodsSpec } from './GenerateLodsModal'
-import { modelAssetTextureIds } from '../../utils/models'
+import { modelAssetTextureIds, modelAssetDiameter } from '../../utils/models'
+// The renderer's own `_foliageCullDistance` default. Mirrored rather than imported because the
+// renderer instance is not in scope here, and this panel only needs it to warn about a dead band.
+const GLOBAL_FOLIAGE_CULL = 65
 
 /** Triangles in a serialized model subtree, for the generate dialog's before/after figures. */
 function countTriangles(nodeJson: any): number {
@@ -37,10 +40,21 @@ export default function ModelInspector() {
   // the asset is what generation will actually reduce.
   const asset = models.find(m => m.id === activeTab.modelId)
   const sourceTriangles = countTriangles(asset?.nodeJson)
+  // The ladder is derived from the model's own size, and this is the number that makes it so. It used
+  // to be a hardcoded 2, which gave EVERY model bands at 16/32/64 m — a 25 m oak dropped to half
+  // detail closer than its own height, while a 0.4 m fern kept full geometry out to the cull distance.
+  // 0 means the asset has no geometry to measure; `defaultSpecs` floors the step, so it is safe to pass.
+  const sourceDiameter = modelAssetDiameter(asset?.nodeJson)
   const largestTexture = (asset ? modelAssetTextureIds(asset) : []).reduce((max, id) => {
     const image = TextureManager.Instance.getTexture(id)?.data as HTMLImageElement | undefined
     return Math.max(max, image?.naturalWidth ?? 0, image?.naturalHeight ?? 0)
   }, 0)
+
+  // A level whose band starts at or past the cull distance is never drawn. It is silent otherwise:
+  // the level exists, its textures were generated, the panel lists it, and nothing renders it. The
+  // effective cull is the asset's own when set, and the renderer's foliage global when it is not.
+  const effectiveCull = modelSession.cullDistance > 0 ? modelSession.cullDistance : GLOBAL_FOLIAGE_CULL
+  const deadFrom = modelSession.distances.findIndex((d, i) => i > 0 && d >= effectiveCull)
 
   const label = 'text-xs text-slate-300'
   const num = 'w-16 bg-control text-white border border-border rounded px-1 py-[2px] text-xs'
@@ -52,7 +66,7 @@ export default function ModelInspector() {
           modelName={activeTab.title}
           sourceTriangles={sourceTriangles}
           largestTexture={largestTexture}
-          initial={defaultSpecs(2)}
+          initial={defaultSpecs(sourceDiameter)}
           onCancel={() => setGenerating(false)}
           onGenerate={(specs: GenerateLodsSpec[], downscale: boolean) => {
             setGenerating(false)
@@ -135,6 +149,13 @@ export default function ModelInspector() {
                           value={modelSession.distances[i] ?? 0}
                           onChange={e => setModelLodDistance(i, Number(e.target.value))} />
                       </div>
+                      {deadFrom >= 0 && i >= deadFrom && (
+                        <p className='text-[11px] text-warning'>
+                          Never drawn: everything is culled at {Math.round(effectiveCull)} m
+                          {modelSession.cullDistance > 0 ? '' : ' (the renderer\'s default)'}.
+                          Raise the cull distance below, or bring this band closer.
+                        </p>
+                      )}
                     </>
                   )}
                 </div>

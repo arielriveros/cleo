@@ -280,6 +280,76 @@ export function refreshModelClips(root: Node, models: ModelAsset[], animations?:
   return count
 }
 
+/**
+ * Bounding diameter of a model asset, in the asset's own units.
+ *
+ * Read straight off the SERIALIZED subtree rather than by instantiating it: this is wanted while
+ * choosing LOD distances, where spinning up a scene, a device and a mesh set to measure a number would
+ * be absurd. Positions are flat `[x,y,z, x,y,z, ...]` (see `serializeGeometry`).
+ *
+ * Node ROTATION is ignored, and deliberately: an axis-aligned box around a rotated child can only come
+ * out too large, and the consumer is a distance ladder where a slightly generous estimate is the safe
+ * direction. Translation and scale ARE applied, because a model whose parts are laid out around the
+ * origin is exactly the case a per-child bound would get wrong.
+ *
+ * 0 for an empty or geometry-less asset, which callers must treat as "unknown" rather than "tiny".
+ */
+export function modelAssetDiameter(nodeJson: any): number {
+  let minX = Infinity, minY = Infinity, minZ = Infinity
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+
+  const walk = (node: any, ox: number, oy: number, oz: number,
+                sx: number, sy: number, sz: number) => {
+    if (!node || typeof node !== 'object') return
+    const p = node.position ?? [0, 0, 0]
+    const k = node.scale ?? [1, 1, 1]
+    const nx = ox + (Number(p[0]) || 0) * sx
+    const ny = oy + (Number(p[1]) || 0) * sy
+    const nz = oz + (Number(p[2]) || 0) * sz
+    const kx = sx * (Number(k[0]) || 1)
+    const ky = sy * (Number(k[1]) || 1)
+    const kz = sz * (Number(k[2]) || 1)
+
+    const positions = node.model?.geometry?.positions
+    if (positions && positions.length >= 3) {
+      for (let i = 0; i + 2 < positions.length; i += 3) {
+        const x = nx + positions[i] * kx
+        const y = ny + positions[i + 1] * ky
+        const z = nz + positions[i + 2] * kz
+        if (x < minX) minX = x
+        if (y < minY) minY = y
+        if (z < minZ) minZ = z
+        if (x > maxX) maxX = x
+        if (y > maxY) maxY = y
+        if (z > maxZ) maxZ = z
+      }
+    }
+    for (const child of node.children ?? []) walk(child, nx, ny, nz, kx, ky, kz)
+  }
+  walk(nodeJson, 0, 0, 0, 1, 1, 1)
+
+  if (!Number.isFinite(minX)) return 0
+  return Math.max(maxX - minX, maxY - minY, maxZ - minZ)
+}
+
+/**
+ * How far past the last LOD band a seeded cull distance sits.
+ *
+ * The coarsest level needs a band of its own to be worth generating. Culling exactly at the last
+ * band means the level the user waited for is never drawn — which is what happened when nothing
+ * seeded a cull distance and the renderer's 65 m global took over a ladder ending at 64 m.
+ */
+export const LOD_CULL_MARGIN = 1.6
+
+/**
+ * Where an impostor takes over when the model has no LOD ladder to end.
+ *
+ * Only a fallback: with bands present the card starts past the last of them, so the mesh ladder plays
+ * out in full. The renderer's impostor test short-circuits level selection, so a distance INSIDE the
+ * ladder retires every level beyond it instead of extending the view.
+ */
+export const DEFAULT_IMPOSTOR_DISTANCE = 60
+
 /** Every texture id a model asset references, whichever format it was saved in. */
 export function modelAssetTextureIds(asset: ModelAsset): string[] {
   if (asset.textureIds?.length) return asset.textureIds

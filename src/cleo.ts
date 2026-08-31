@@ -10,7 +10,12 @@ export { parseNodeJson } from "./core/scene/nodes/parseNodeJson";
 export { cloneNodeJson, collectNodeIds, remapNodeRefs, regenerateNodeIds } from "./core/scene/nodeJson";
 export { Node } from "./core/scene/nodes/node";
 export type { NodeType } from "./core/scene/nodes/nodeType";
-export { ModelNode } from "./core/scene/nodes/modelNode";
+export { ModelNode, disposeModelSubtree } from "./core/scene/nodes/modelNode";
+// Device entry points. Exported so an embedder — or a test that has to construct a Model, which
+// allocates GPU buffers in its constructor — can stand up a context without reaching into src/.
+export { setGLContext } from "./graphics/glContext";
+export { setDevice } from "./graphics/rhi/deviceHandle";
+export { WebGL2Device } from "./graphics/rhi/webgl2/webgl2Device";
 export { LodGroupNode } from "./core/scene/nodes/lodGroupNode";
 export { CameraRigNode } from "./core/scene/nodes/cameraRigNode";
 export type { FollowSpace, AimMode } from "./core/scene/nodes/cameraRigNode";
@@ -55,7 +60,7 @@ export type { EngineEventMap, SceneChange, ChangeKind, StructureOp, NodePlacemen
 export { HistoryManager } from "./core/history";
 export type { HistoryEntry, HistoryOptions } from "./core/history";
 export { Mesh } from "./graphics/mesh";
-export { Material, TerrainMaterial, CustomMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, migrateFoliageRule } from "./graphics/material";
+export { Material, TerrainMaterial, CustomMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, migrateFoliageRule, foliageRuleKey } from "./graphics/material";
 export type { TerrainBaseType, TerrainFoliageRule, FoliageCollision, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";
 export { customSeedTemplate, customSeedUniforms, tryCompileCustom, assembleCustomFragment,
          setWgslTranslator, hasWgslTranslator, vulkanUnsupportedReason } from "./graphics/systems/customShaders";
@@ -149,6 +154,7 @@ export { frameStats, currentViewport } from "./graphics/renderStats";
 export type { RenderStats } from "./graphics/renderStats";
 export { gpuProfiler, frameHistory, Ring, RENDER_PASSES, TOGGLEABLE_PASSES } from "./graphics/gpuProfiler";
 export type { PassTiming, RenderPass, FrameSample } from "./graphics/gpuProfiler";
+export { cpuProfiler } from "./graphics/cpuProfiler";
 export { convexHull, hullFromPositions, HULL_BUDGETS } from "./physics/convexHull";
 export type { Hull, HullQuality } from "./physics/convexHull";
 export { Terrain } from "./terrain/terrain";
@@ -156,7 +162,7 @@ export { Terrain } from "./terrain/terrain";
 // nothing is exposed that does nothing. See the constant for why it is a flag and not a deletion.
 export { TERRAIN_RELIEF_ENABLED } from "./terrain/terrain";
 export type { TerrainConfig, SculptBrush, SculptMode, TerrainLayer, PaintBrush, TerrainChunk, TerrainLodSettings, FoliageGenerateResult } from "./terrain/terrain";
-export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES } from "./terrain/foliage";
+export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES, FOLIAGE_DRAW_TRIANGLE_BUDGET } from "./terrain/foliage";
 export type { FoliageKind, FoliageParams } from "./terrain/foliage";
 export { FoliageColliderField, DEFAULT_FOLIAGE_COLLIDERS } from "./terrain/foliageColliders";
 export type { FoliageColliderSettings } from "./terrain/foliageColliders";

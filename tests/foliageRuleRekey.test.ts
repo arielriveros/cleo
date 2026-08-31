@@ -176,3 +176,50 @@ describe('the key survives a save/load', () => {
         expect(FoliageLayer.deserialize(json).key).toBe('oak');
     });
 });
+
+/**
+ * Deleting a rule has to take its layer with it.
+ *
+ * `pruneFoliage` deliberately keeps any layer that still holds instances — that guard is what makes a
+ * RENAME safe, and it is tested above. The cost is that a DELETED rule leaves its layer behind: still
+ * in `terrain.foliage`, still drawn by the foliage pass, no longer reachable from
+ * `refreshFoliagePrototypes` because no rule names its key any more. Replacing a foliage prop meant
+ * remove-then-add, which is precisely that path, so the scene rendered the old prop at full detail
+ * beside the new one and no amount of LOD work on the new one could show up.
+ */
+describe('removeFoliageLayer — the deliberate delete', () => {
+    const populated = () => {
+        const rule = meshRule({ id: 'RULE' });
+        return { rule, terrain: terrainWith(rule, foliageRuleKey(rule)) };
+    };
+
+    it('removes a populated layer that pruneFoliage refuses to collect', () => {
+        const { rule, terrain } = populated();
+        // The premise: this layer has instances, so the sweep will not touch it.
+        expect(terrain.foliage[0].count).toBeGreaterThan(0);
+        expect(terrain.pruneFoliage()).toBe(0);
+
+        expect(terrain.removeFoliageLayer(foliageRuleKey(rule))).toBe(true);
+        expect(terrain.foliage).toHaveLength(0);
+    });
+
+    it('drops the key as well as the array entry, so a re-add builds a fresh layer', () => {
+        const { rule, terrain } = populated();
+        terrain.removeFoliageLayer(foliageRuleKey(rule));
+        expect((terrain as any)._foliageByKey.has(foliageRuleKey(rule))).toBe(false);
+    });
+
+    it('empties the layer it removed, so nothing can draw from it afterwards', () => {
+        const { rule, terrain } = populated();
+        const layer = terrain.foliage[0];
+        terrain.removeFoliageLayer(foliageRuleKey(rule));
+        expect(layer.count).toBe(0);
+        expect(layer.cells).toHaveLength(0);
+    });
+
+    it('reports false for a key no layer is filed under, rather than removing something else', () => {
+        const { terrain } = populated();
+        expect(terrain.removeFoliageLayer('not-a-key')).toBe(false);
+        expect(terrain.foliage).toHaveLength(1);
+    });
+});

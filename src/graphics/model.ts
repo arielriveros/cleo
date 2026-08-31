@@ -151,6 +151,22 @@ export class Model {
         this._geometry = geometry;
         this._geometryVersion++;
     }
+    /**
+     * Release this model's GPU buffers.
+     *
+     * Dropping the last JS reference to a `Model` frees NOTHING — the VBO, IBO and VAO are driver
+     * objects the GC cannot reach (see Mesh.dispose). Nothing called this until the editor was found
+     * orphaning a full mesh set on every model re-instantiation, LOD regenerate and scene resync.
+     *
+     * Call it ONLY where the caller provably owns the mesh and is discarding it for good. It is
+     * deliberately NOT wired into `Node.removeChild`: re-parenting goes through that too, and foliage
+     * prototypes and terrain chunks share meshes, so an over-eager call renders geometry invisible with
+     * no error at all. Safe to call twice.
+     */
+    public dispose(): void {
+        this._mesh.dispose();
+    }
+
     public get mesh(): Mesh { return this._mesh; }
     /** The first material. Assigning replaces it, leaving any further submesh materials alone. */
     public get material(): Material { return this._materials[0]; }

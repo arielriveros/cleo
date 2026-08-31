@@ -111,6 +111,7 @@ export default function RendererSettingsPanel() {
   const [frustumCulling, setFrustumCulling] = useState<boolean>(() => renderer?.frustumCulling ?? true);
   const [foliageCullDistance, setFoliageCullDistance] = useState<number>(() => renderer?.foliageCullDistance ?? 65);
   const [foliageCellSize, setFoliageCellSize] = useState<number>(() => renderer?.foliageCellSize ?? 13);
+  const [foliageDensity, setFoliageDensity] = useState<number>(() => renderer?.foliageDensityFalloff ?? 0.75);
   const [terrainLod, setTerrainLod] = useState<boolean>(() => renderer?.terrainLodEnabled ?? true);
   const [terrainLodDist1, setTerrainLodDist1] = useState<number>(() => renderer?.terrainLodDistance1 ?? 120);
   const [terrainLodDist2, setTerrainLodDist2] = useState<number>(() => renderer?.terrainLodDistance2 ?? 300);
@@ -173,6 +174,7 @@ export default function RendererSettingsPanel() {
     setFrustumCulling(renderer.frustumCulling);
     setFoliageCullDistance(renderer.foliageCullDistance);
     setFoliageCellSize(renderer.foliageCellSize);
+    setFoliageDensity(renderer.foliageDensityFalloff);
     setTerrainLod(renderer.terrainLodEnabled);
     setTerrainLodDist1(renderer.terrainLodDistance1);
     setTerrainLodDist2(renderer.terrainLodDistance2);
@@ -266,6 +268,12 @@ export default function RendererSettingsPanel() {
         <Field label='Cell Size'>
           <NumberInput value={foliageCellSize} min={1} step={4} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.foliageCellSize = v; setFoliageCellSize(v); touch(); }} />
+        </Field>
+        {/* Density scaling. LOD reduces what one instance COSTS; this reduces how many there are, and
+            neither bounds a scatter on its own. 1 draws every instance. */}
+        <Field label='Foliage Density'>
+          <NumberInput value={foliageDensity} min={0.1} max={1} step={0.05} className='flex-1 text-right px-1 py-0.5'
+            onChange={(v) => { renderer.foliageDensityFalloff = v; setFoliageDensity(renderer.foliageDensityFalloff); touch(); }} />
         </Field>
         <Toggle label='Terrain LOD' checked={terrainLod} className='my-1'
           onChange={(c) => { renderer.terrainLodEnabled = c; setTerrainLod(c); touch(); }} />

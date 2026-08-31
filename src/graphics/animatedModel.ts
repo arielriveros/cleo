@@ -541,6 +541,11 @@ export class AnimatedModel {
     public get geometry(): Geometry { return this._geometry; }
     /** Never swapped — a skinned mesh uploads through `createAnimated` and has no density to vary. */
     public get geometryVersion(): number { return 0; }
+    /** Release this model's GPU buffers. @see Model.dispose for when it is safe to call. */
+    public dispose(): void {
+        this._mesh.dispose();
+    }
+
     public get mesh(): Mesh { return this._mesh; }
     /** The first material. Assigning replaces it, leaving any further submesh materials alone. */
     public get material(): Material { return this._materials[0]; }

@@ -121,8 +121,8 @@ describe('cell bounds track the new prototype', () => {
     });
 
     it('does not re-upload every cell for a prototype-only edit', () => {
-        // `version` is what the renderer compares against `cell.uploadedVersion`. Bumping it for an
-        // edit that cannot change a single matrix would re-upload every cell's buffer for nothing.
+        // `version` is what the renderer keys a packed batch on. Bumping it for an edit that cannot
+        // change a single matrix would repack and re-upload every visible bucket for nothing.
         const layer = scattered(FoliageLayer.fromRule(rule()));
         const version = layer.version;
         layer.setPrototype(rule({ models: [quadJson(4)] }));
@@ -181,5 +181,43 @@ describe('retired prototype meshes are handed back for disposal', () => {
         expect(layer.collectRetiredMeshes().length).toBeGreaterThan(0);
         // Drained, so a second collect returns nothing.
         expect(layer.collectRetiredMeshes()).toHaveLength(0);
+    });
+});
+
+/**
+ * The two ends of the LOD chain that the editor UI silently broke.
+ *
+ * `rule.lods` is what makes the renderer's per-cell detail selection run at all: with a single level it
+ * skips the whole band and draws LOD0 at every distance, which is exactly what "I generated LODs and
+ * nothing got faster" looks like. And a DELETED rule has to take its runtime layer with it, because
+ * `pruneFoliage` keeps any layer that still holds instances — the guard that protects hand-painted
+ * placement through a rename, and that otherwise leaves a replaced prop drawing beside its replacement.
+ */
+describe('a rule carrying LOD levels', () => {
+    const withLods = () => rule({
+        lods: [
+            { models: [quadJson(2)], distance: 20 },
+            { models: [quadJson(4)], distance: 60 },
+        ],
+    } as any);
+
+    it('builds one layer level per LOD level, plus the base', () => {
+        expect(FoliageLayer.fromRule(withLods()).levels).toHaveLength(3);
+    });
+
+    it('keeps the authored distances, base first at 0', () => {
+        expect(FoliageLayer.fromRule(withLods()).levels.map(l => l.distance)).toEqual([0, 20, 60]);
+    });
+
+    it('collapses to a single level when the levels did not resolve', () => {
+        // The failure this pins: `resolvedLods` drops a level whose model asset it cannot find, so a
+        // rule built without the model library arrives here with `lods` absent and no error anywhere.
+        expect(FoliageLayer.fromRule(rule()).levels).toHaveLength(1);
+    });
+
+    it('does not append the levels a second time on a prototype-only refresh', () => {
+        const layer = FoliageLayer.fromRule(withLods());
+        layer.setPrototype(withLods());
+        expect(layer.levels).toHaveLength(3);
     });
 });

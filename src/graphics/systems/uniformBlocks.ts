@@ -237,6 +237,9 @@ function describe(type: number): { components: number; columns: number; integer:
     }
 }
 
+/** One slot lent to scalar writes, so `writeMember` never allocates. Never held. */
+const SCALAR = new Float64Array(1);
+
 // Write one member into its block's CPU buffer, honouring the reported strides. std140 pads every
 // matrix column to a vec4, so a contiguous copy would shear a mat3.
 function writeMember(block: Block, member: BlockMember, value: any, name: string): void {
@@ -247,9 +250,14 @@ function writeMember(block: Block, member: BlockMember, value: any, name: string
     }
 
     const target = shape.integer ? block.ints : block.floats;
-    const flat: number[] = typeof value === 'number' ? [value]
-        : typeof value === 'boolean' ? [value ? 1 : 0]
-        : Array.from(value as ArrayLike<number>);
+    // ArrayLike, NOT `Array.from`. This runs on every non-scalar uniform write, and every draw writes at
+    // least `u_model` — so boxing produced a 16-element JS array per draw, and `bones * 16` per
+    // skinned draw per cascade, purely to read `flat[i]` back out of it. A `vec3`, a `mat4` and a plain
+    // number[] are all indexable already; a scalar borrows one shared slot.
+    let flat: ArrayLike<number>;
+    if (typeof value === 'number') { SCALAR[0] = value; flat = SCALAR; }
+    else if (typeof value === 'boolean') { SCALAR[0] = value ? 1 : 0; flat = SCALAR; }
+    else flat = value as ArrayLike<number>;
 
     const elements = Math.max(1, member.size);
     const perElement = shape.components * shape.columns;

@@ -21,10 +21,13 @@ const estimateFor = (r: TerrainFoliageRule): number =>
 // Right-sidebar inspector for the active terrain-material tab: the base surface, the terrain blend
 // fields and the foliage include/exclude lists, edited on the preview sphere's TerrainMaterial in place.
 export default function TerrainMaterialInspector(props: { node: Node | null }) {
-  const { eventEmitter, editingTerrainMaterialName, setActiveTerrainMaterialName, terrainMaterials, models, refreshTerrainMaterialPreview, editorScene } = useCleoEngine()
+  const { eventEmitter, editingTerrainMaterialName, setActiveTerrainMaterialName, terrainMaterials, models, materials, refreshTerrainMaterialPreview, editorScene, dropFoliageLayer, bakeFoliageImpostor } = useCleoEngine()
   const [, force] = useState(0)
   const [newFoliageTex, setNewFoliageTex] = useState('')
   const [newFoliageModel, setNewFoliageModel] = useState('')
+  // Index of the rule currently baking, so the button can report progress. The bake renders a scene and
+  // reads it back, which is slow enough to need saying.
+  const [bakingRule, setBakingRule] = useState(-1)
   const rerender = () => force(x => x + 1)
 
   const node = props.node
@@ -41,6 +44,16 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
     if (isTerrain) for (const r of tm!.foliageInclude) names.add(r.name)
     return Array.from(names)
   }, [terrainMaterials, isTerrain, tm])
+
+  /**
+   * Models offerable as a foliage prop: everything EXCEPT a generated LOD level.
+   *
+   * `generateLodLevel` strips `lods` and `cullDistance` from a level by design, so a rule built on one
+   * has no chain to descend and no cull distance of its own — it draws that level's full geometry
+   * out to the renderer's global distance. Picking one is always worse than picking the model it came
+   * from, which reaches the same geometry through its LOD chain.
+   */
+  const foliageSourceModels = useMemo(() => models.filter(m => !m.lodSource), [models])
 
   const textureIds = useMemo(() =>
     Array.from(TextureManager.Instance.textures.keys()).filter(id => !id.startsWith('__editor__') && !id.startsWith('__debug__')),
@@ -108,7 +121,11 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
     const asset = models.find(m => m.id === newFoliageModel)
     if (!asset) { alert('Pick a model from the library.'); return }
     try {
-      const rule = buildFoliageRuleFromModelAsset(asset)
+      // `models` and `materials`, NEVER omitted: a LOD level is a REFERENCE to another model asset, so
+      // without the library every level resolves to null and the rule is built with no `lods` at all.
+      // The foliage layer then draws LOD0 at every distance, the readout below says "1 LOD level", and
+      // the whole LOD feature looks broken when only this argument was missing.
+      const rule = buildFoliageRuleFromModelAsset(asset, undefined, models, materials)
       rule.name = `${rule.name}_${mat.foliageInclude.length}`
       mat.foliageInclude.push(rule)
       changed()
@@ -122,13 +139,42 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
     const asset = r.modelId ? models.find(m => m.id === r.modelId) : undefined
     if (!asset) { Logger.warn('The source model asset no longer exists', 'Editor'); return }
     try {
-      mat.foliageInclude[i] = buildFoliageRuleFromModelAsset(asset, r)
+      mat.foliageInclude[i] = buildFoliageRuleFromModelAsset(asset, r, models, materials)
       changed()
     } catch (e) {
       Logger.warn(`${e}`, 'Editor')
     }
   }
-  const removeRule = (i: number) => { mat.foliageInclude.splice(i, 1); changed() }
+  /**
+   * Drop a rule AND the runtime layer scattered from it.
+   *
+   * The layer is filed under `foliageRuleKey`, which is the rule's own id, so once the rule is gone
+   * nothing can reach the layer again: `pruneFoliage` deliberately keeps any layer that still holds
+   * instances, to protect hand-painted placement across a rename. Without this call the old layer kept
+   * every instance and kept drawing — so replacing a prop's model rendered both of them at once.
+   *
+   * This does discard the painted placement. That is the point: the rule that decided where those
+   * instances went no longer exists. Re-run Generate Foliage after adding the replacement.
+   */
+  const bakeImpostor = async (i: number) => {
+    const rule = mat.foliageInclude[i]
+    if (!rule?.modelId) { Logger.warn('This prototype has no library model to bake a card from', 'Editor'); return }
+    setBakingRule(i)
+    try {
+      const id = await bakeFoliageImpostor(rule)
+      if (!id) Logger.warn('Could not bake an impostor for this model', 'Editor')
+      changed()
+    } finally {
+      setBakingRule(-1)
+    }
+  }
+
+  const removeRule = (i: number) => {
+    const rule = mat.foliageInclude[i]
+    mat.foliageInclude.splice(i, 1)
+    if (rule) dropFoliageLayer(rule)
+    changed()
+  }
   const patchRule = (i: number, patch: Partial<TerrainFoliageRule>) => { Object.assign(mat.foliageInclude[i], patch); changed() }
   const toggleExclude = (name: string, on: boolean) => {
     const set = new Set(mat.foliageExclude)
@@ -240,7 +286,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
             <div className='flex gap-1'>
               <select className={`${num} flex-1`} value={newFoliageModel} onChange={e => setNewFoliageModel(e.target.value)}>
                 <option value=''>(model asset)</option>
-                {models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                {foliageSourceModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
               <button className='bg-success hover:bg-success-hover rounded px-2 text-xs' onClick={addModelFromLibrary}>+</button>
             </div>
@@ -286,6 +332,18 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
                     </span>
                     <button className='text-[10px] text-slate-300 underline px-1' title='Rebuild from the current model asset' onClick={() => resyncRule(i)}>re-sync</button>
                   </div>
+                )}
+                {/* The card is what actually makes distant foliage cheap: a LOD level reduces triangles
+                    linearly, this replaces them all with four. Baking is offered only for a rule with a
+                    library model behind it — there is nothing to render otherwise. */}
+                {r.modelId && (
+                  <button
+                    className='w-full text-[11px] bg-control hover:bg-control-hover rounded px-2 py-1 disabled:opacity-40'
+                    disabled={bakingRule >= 0}
+                    title='Render this model to a flat card and use it past the last LOD band. The single biggest win for a heavy prototype.'
+                    onClick={() => void bakeImpostor(i)}>
+                    {bakingRule === i ? 'Baking…' : (r.billboard ? 'Re-bake impostor' : 'Bake impostor')}
+                  </button>
                 )}
                 {/* Billboard impostor: the farthest LOD — past its distance instances draw as cross-quads. */}
                 <div className='flex items-center justify-between'>

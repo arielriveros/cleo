@@ -114,10 +114,17 @@ import { Model, Sprite, TextureManager } from '../cleo';
 import { Logger } from '../core/logger';
 import { frameStats, resetFrameStats, countFullscreenPass, setViewportSize } from './renderStats';
 import { gpuProfiler, initializeGpuProfiler, RENDER_PASSES, RenderPass } from './gpuProfiler';
+import { cpuProfiler } from './cpuProfiler';
 import { buildSSAOKernel } from './ssaoKernel';
 import { TerrainLodSettings } from '../terrain/terrain';
 import type { FoliageCell } from '../terrain/foliage';
-import { collectOrphanedFoliageBuffers, collectOrphanedFoliageMeshes, foliageCullLimitSq, foliageAdmitCount } from '../terrain/foliage';
+import {
+    collectOrphanedFoliageBuffers, collectOrphanedFoliageMeshes, foliageCullLimitSq,
+    foliageAdmitCount, createFoliageBatch, foliageBatchStale, foliageBatchInstances,
+    packFoliageInstances, rememberFoliageBatch, foliageChunkLimit, foliageChunkBounds,
+    foliageKeepFraction, FOLIAGE_DENSITY_FALLOFF,
+} from '../terrain/foliage';
+import type { FoliageBatch, FoliageLayer } from '../terrain/foliage';
 
 // The context now lives in its own leaf module (see glContext.ts); re-exported here so every existing
 // `import { gl } from './renderer'` keeps working.
@@ -292,6 +299,7 @@ export interface RenderSettings {
     motionBlurSamples: number;
     frustumCulling: boolean;
     foliageCullDistance: number;
+    foliageDensityFalloff: number;
     foliageCellSize: number;
     terrainLodEnabled: boolean;
     terrainLodDistance1: number;
@@ -894,6 +902,15 @@ export class Renderer {
      * imperceptible. 0 disables the budget.
      */
     private _foliageAdmitPerFrame: number = 4;
+    /**
+     * Density scaling: how much of a detail level's instances survive, per level away from the base.
+     *
+     * LOD reduces what ONE instance costs; this reduces how many there are. Neither bounds a scatter on
+     * its own — density times area can ask for hundreds of millions of triangles and nothing
+     * downstream refuses. 1.0 turns it off and draws every instance, which is what happened before it
+     * existed. See `foliageKeepFraction`.
+     */
+    private _foliageDensityFalloff: number = FOLIAGE_DENSITY_FALLOFF;
     // Distance-based terrain LOD: chunks past distance1/distance2 drop to a grid decimated by step1/step2
     // (triangles scale by 1/step²). Applied per chunk, per frame, before the shadow passes.
     private _terrainLodEnabled: boolean = true;
@@ -1379,6 +1396,12 @@ export class Renderer {
         // Kept for per-draw lookups (forward light-probe selection) that don't receive the scene.
         this._currentScene = scene;
 
+        // Everything from here to the sky bake runs BEFORE `_statsT0`, so none of it is inside the
+        // `Render (CPU)` figure the HUD shows — it lands in "Unattributed" instead. That exclusion is
+        // deliberate (an occasional probe bake must not spike the frame stat), but it also means a
+        // per-frame full-scene walk here is invisible. The CPU profiler scopes it so it is not.
+        this._scope('prepare');
+
         // Compile+register any custom-material programs before any pass calls initializeModel/getShader.
         this._ensureCustomShaders(scene);
 
@@ -1405,7 +1428,7 @@ export class Renderer {
         this._updateModelLOD(scene);
 
         // Re-bake the sky atmosphere cubemap when the sun moves (before IBL, so probes capture the sky).
-        gpuProfiler.beginPass('sky.bake');
+        this._scope('sky.bake');
         this._updateSkyAtmosphere(scene);
 
         // Re-derive the sky light from the cubemap the bake above just refreshed. Before the probe
@@ -1413,9 +1436,9 @@ export class Renderer {
         this._updateSkyLight(scene);
 
         // Bake/refresh IBL (light probes + scene environment) before the main passes.
-        gpuProfiler.beginPass('ibl.bake');
+        this._scope('ibl.bake');
         this._updateIBL(scene);
-        gpuProfiler.endPass();
+        this._endScope();
 
         // Reset per-frame perf counters AFTER the (occasional) IBL bake so bakes don't spike the stats.
         resetFrameStats();
@@ -1431,8 +1454,12 @@ export class Renderer {
         }
         this._shadowLight = shadowLight; // post passes (volumetric god rays) need the sun
 
-        // Foliage GPU state must be current BEFORE the shadow pass, which can now draw it.
+        // Foliage GPU state must be current BEFORE the shadow pass, which can now draw it. Timed under
+        // its own scope: a layer whose prototypes were just re-derived re-uploads every cell here, and
+        // that cost is invisible if it is charged to whichever pass happens to open next.
+        this._scope('foliage.upload');
         this._stage('frame.foliage', () => this._ensureFoliageUploaded(scene));
+        this._endScope();
         this._checkGLErrors('framePrologue');
 
         this._shadowsActive = false;
@@ -1472,7 +1499,7 @@ export class Renderer {
 
         // Sacrificial trailing scope: whichever query is LAST in a frame absorbs the driver's
         // end-of-frame drain, which would otherwise be charged to `present`.
-        gpuProfiler.beginPass('frameEnd');
+        this._scope('frameEnd');
 
         this._readExposureSample();
 
@@ -1480,6 +1507,7 @@ export class Renderer {
         // the final thing in the frame: results are collected from frames already retired, never waited
         // on, so this never blocks on the GPU.
         gpuProfiler.endFrame();
+        cpuProfiler.endFrame();
 
         this._frameIndex++;
         frameStats.frameMs = performance.now() - _statsT0;
@@ -1659,7 +1687,7 @@ export class Renderer {
 
     private _renderDeferred(scene: Scene, shadowLight: LightNode | null): void {
         // 1. Rasterize all opaque lit geometry into the G-buffer.
-        gpuProfiler.beginPass('geometry');
+        this._scope('geometry');
         this._geometryPass(scene);
         this._checkGLErrors('geometry');
         // 1b. Screen-space ambient occlusion from the G-buffer depth and normals.
@@ -1672,13 +1700,13 @@ export class Renderer {
             this._ssaoProducedThisFrame = true;
         }
         // 2. Light the G-buffer in a single fullscreen pass into the scene FBO.
-        gpuProfiler.beginPass('lighting');
+        this._scope('lighting');
         this._deferredLightingPass(scene, shadowLight);
         this._checkGLErrors('deferredLighting');
         // 3. Forward passes (skybox, transparent, sprites, outlines, gizmos) into the scene FBO.
         this._renderForwardOverlay(scene, shadowLight);
         this._checkGLErrors('forwardOverlay');
-        gpuProfiler.endPass();
+        this._endScope();
     }
 
     // True when `node` is fully outside the camera frustum. PURE — no stat side effect, so use it only
@@ -1776,7 +1804,7 @@ export class Renderer {
             this._foliagePass(scene, foliage);
             this._endFullscreenPass(foliage);
         }
-        gpuProfiler.endPass();
+        this._endScope();
     }
 
     /**
@@ -1810,117 +1838,42 @@ export class Renderer {
                 // Keep the layer's grid at the current global cell size (re-buckets only on change).
                 if (layer.cellSize !== this._foliageCellSize) layer.setCellSize(this._foliageCellSize);
 
-                // Free GPU buffers orphaned by a previous cell-layout rebuild (painting, a resize, ...).
-                for (const buf of layer.collectStaleBuffers()) buf.destroy();
-
-                // ...and the prototype meshes a prototype swap retired. Same reason those buffers are
-                // freed here rather than at the swap: this pass owns the GL context, the edit does not.
+                // The prototype meshes a prototype swap retired. Freed here rather than at the swap
+                // because this pass owns the GL context and the edit does not.
                 for (const mesh of layer.collectRetiredMeshes()) mesh.dispose();
 
-                // Each cell's static matrices, uploaded once per layout version and then reused by
-                // every sub-model of every level, in both the colour and the shadow pass.
-                for (const cell of layer.cells) {
-                    if (!cell.glBuffer)
-                        cell.glBuffer = device.createBuffer({ label: 'foliage.cellMatrices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
-                    if (cell.uploadedVersion !== layer.version) {
-                        cell.glBuffer = device.reallocateBuffer(cell.glBuffer, cell.matrices);
-                        cell.uploadedVersion = layer.version;
-                    }
-                }
+                // Instance matrices are NOT uploaded here. They go up per DRAW BUCKET, merged across
+                // the cells that survive culling — see `_prepareFoliage`. A per-cell buffer would be
+                // a second copy of the same matrices, and the buffers of the ~90% of cells outside the
+                // cull distance would sit in VRAM for a frame that never draws them.
             }
         }
+
+        this._prepareFoliage(scene);
     }
 
-    // Rasterize opted-in foliage layers into the bound cascade layer. Three departures from the colour
-    // pass: cells cull against the LIGHT's frustum; `cell.lod` is never written, since the colour pass
-    // reads it back for hysteresis; and the detail level is fixed rather than distance-picked.
-    private _foliageShadowPass(scene: Scene, lightSpace: mat4, pass: RenderPassEncoder): void {
-        for (const landscape of scene.landscapes) {
-            if (!landscape.visible) continue;
-            for (const layer of landscape.terrain.foliage) {
-                if (!layer.castShadows || layer.count === 0 || !layer.initialized) continue;
-
-                const billboard = layer.kind === 'billboard';
-                // Billboards route every level through the cutout shader (they have only one level);
-                // mesh layers cast from their CHEAPEST real level.
-                const models = billboard ? layer.levels[0].models : layer.levels[layer.levels.length - 1].models;
-
-                const cullDistance = layer.cullDistance > 0 ? layer.cullDistance : this._foliageCullDistance;
-                const maxD2 = cullDistance > 0 ? cullDistance * cullDistance : Infinity;
-                const camPos = this._activeCamera.position;
-
-                // Per-MODEL, never per-layer: a tree's solid bark and its cut-out leaves arrive as two
-                // sub-models of the same prototype and need different programs.
-                const cutoutOf = (model: Model): { texture: Texture, cutoff: number, useRed: boolean } | null => {
-                    if (billboard) {
-                        // A billboard's shape IS its texture's alpha and it has no material to consult,
-                        // so 0.5 stays the threshold here — it is the impostor's own convention.
-                        const tex = layer.textureId ? TextureManager.Instance.getTexture(layer.textureId) : null;
-                        return tex ? { texture: tex, cutoff: 0.5, useRed: false } : null;
-                    }
-                    // Mesh foliage goes through the SAME resolver every other caster uses, so a leaf
-                    // material's mask and its real threshold apply instead of a hardcoded 0.5.
-                    return this._shadowCutoutOf(model.material);
-                };
-
-                for (const model of models) {
-                    const cut = cutoutOf(model);
-                    const cutout = !!cut;
-                    // A cut-out caster culls nothing — its shape is in the texture and its card is
-                    // two-sided; a solid prop keeps the FRONT-face culling the rest of the shadow pass
-                    // uses to push acne out of view.
-                    const pipeline = this._pipelineFor(
-                        cutout ? 'shadowMapInstancedCutout' : 'shadowMapInstanced',
-                        cutout ? ShadowMapInstancedCutoutProgram : ShadowMapInstancedProgram, {
-                        cullMode: cutout || model.material.config.side === 'double' ? 'none' : 'front',
-                        depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
-                        targets: 0,
-                        vertex: 'model+instance',
-                        builtFor: 'blinn_phongGeometry',
-                    });
-                    // Per MODEL, not per layer: the pipeline and the bound texture both change with it.
-                    let bound = false;
-                    for (const cell of layer.cells) {
-                        if (!cell.glBuffer) continue;
-                        // Same distance cull as the colour pass — including its hysteresis band, so a
-                        // cell on the boundary does not flicker its shadow in and out. `cell.visible` is
-                        // READ, never written, here: the colour pass owns that flag, and it is cleared by
-                        // the distance test alone, which makes it exactly "inside the damped cull range".
-                        const limit2 = foliageCullLimitSq(maxD2, cell.visible, this._foliageCullHysteresis);
-                        if (this._aabbDistSq(camPos, cell.min, cell.max) > limit2) continue;
-                        if (!this._shadowFrustum.intersectsAABB(cell.min, cell.max)) continue;
-
-                        if (!bound) {
-                            pass.setPipeline(pipeline);
-                            this._shaderManager.setUniform('u_lightSpace', this._clipProjection(lightSpace));
-                            if (cutout) {
-                                this._shaderManager.setUniform('u_cutoff', cut!.cutoff);
-                                this._shaderManager.setUniform('u_useRed', cut!.useRed);
-                                pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [cut!.texture]));
-                            }
-                            bound = true;
-                        }
-
-                        if (!this._recordFoliageDraw(pass, model.mesh, cell.glBuffer, cell.count)) {
-                            model.mesh.setupInstanceMatrixBuffer(cell.glBuffer, 5);
-                            model.mesh.drawInstanced(cell.count);
-                            // Locations 5-8 left at divisor 1 corrupt the next NON-instanced draw of
-                            // the same mesh, which in this pass is the very next model.
-                            model.mesh.teardownInstanceMatrixBuffer(5);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private _foliagePass(scene: Scene, pass: RenderPassEncoder): void {
+    /**
+     * Cull every foliage layer's cells, bucket them by detail level, and upload each bucket's merged
+     * instance buffer.
+     *
+     * Separated from `_foliagePass`, which now only binds and draws, for one reason: **an instance
+     * upload must never happen while a render pass is open.** `reallocateBuffer`/`writeBuffer` land on a
+     * buffer that a pass may already have bound as a vertex source, and asking a driver to re-specify or
+     * map one mid-pass is how a frame ends in `mapResource` failing and the D3D11 device being removed.
+     * The per-cell buffers this replaced were uploaded here for the same reason; merging them must not
+     * quietly give that invariant up.
+     *
+     * It also has to run before the SHADOW pass, because `cell.visible` is the state the shadow cull's
+     * hysteresis reads.
+     */
+    private _prepareFoliage(scene: Scene): void {
         const camPos = this._activeCamera.position;
 
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
             for (const layer of landscape.terrain.foliage) {
-                if (layer.count === 0) continue;
+                layer.buckets.length = 0;
+                if (layer.count === 0 || !layer.initialized) continue;
 
                 // The layer's own (mesh-asset) cull threshold wins over the global foliage distance.
                 const cullDistance = layer.cullDistance > 0 ? layer.cullDistance : this._foliageCullDistance;
@@ -1929,7 +1882,7 @@ export class Renderer {
                 // Visible cells bucketed by detail level so shader/material binds stay one-per-level.
                 // Bucket index levels.length is the billboard-impostor bucket.
                 const billboardBucket = layer.levels.length;
-                const buckets: FoliageCell[][] = [];
+                const buckets = layer.buckets;
                 // Newly-visible cells, nearest first, so the admission budget below spends itself on the
                 // ones the camera is heading towards rather than on whichever the grid happened to list.
                 const pending: { cell: FoliageCell; d2: number }[] = [];
@@ -1939,6 +1892,7 @@ export class Renderer {
                 // over a second. The budget exists for the steady state, where a moving camera admits a
                 // few cells at a time.
                 let anyWasVisible = false;
+                frameStats.foliageCellsScanned += layer.cells.length;
                 for (const cell of layer.cells) {
                     // Read BEFORE any cull branch: a cell that is visible but frustum-culled this frame
                     // still proves the layer is up. Sampling it after the culls would let a fast turn —
@@ -1949,8 +1903,8 @@ export class Renderer {
                     const d2 = this._aabbDistSq(camPos, cell.min, cell.max);
                     // Distance cull: nearest point of the cell's AABB to the camera, with a hysteresis
                     // band so a cell on the boundary cannot flip every frame. Coming IN costs a whole
-                    // cell's worth of draws, so the band is asymmetric in the cheap direction: appear at
-                    // cullDistance, disappear only past cullDistance × hysteresis.
+                    // cell's worth of instances, so the band is asymmetric in the cheap direction:
+                    // appear at cullDistance, disappear only past cullDistance x hysteresis.
                     const limit2 = foliageCullLimitSq(maxD2, wasVisible, this._foliageCullHysteresis);
                     if (d2 > limit2) {
                         frameStats.culledInstances += cell.count;
@@ -1973,7 +1927,7 @@ export class Renderer {
                     cell.visible = true;
 
                     // Per-cell LOD by the same distance bands a mesh asset's LodGroup uses, with the
-                    // same ×0.9 hysteresis: coarsen immediately, refine only comfortably inside.
+                    // same x0.9 hysteresis: coarsen immediately, refine only comfortably inside.
                     let target = 0;
                     if (billboardBucket > 1 || layer.billboardModel) {
                         const d = Math.sqrt(d2);
@@ -1998,17 +1952,178 @@ export class Renderer {
                 // frame: the draw waits one more frame, which is what keeps the ramp flat. `sort` runs on
                 // the pending list only — typically empty, and a handful of entries while moving.
                 if (pending.length) {
-                    // Nearest first, so the budget is spent on the cells the camera is heading towards.
-                    // The sort runs on the pending list only — empty when parked, a handful when moving.
                     pending.sort((a, b) => a.d2 - b.d2);
                     const admit = foliageAdmitCount(pending.length, this._foliageAdmitPerFrame, !anyWasVisible);
                     for (let i = 0; i < admit; i++) pending[i].cell.visible = true;
                 }
 
-                const drawBucket = (cells: FoliageCell[] | undefined, models: Model[], billboard: boolean) => {
+                // Merge and upload while no pass is open. A bucket left null by the loop above still has
+                // to be visited, or its batch keeps last frame's cells and draws them again.
+                for (let slot = 0; slot <= billboardBucket; slot++) {
+                    const models = slot === billboardBucket
+                        ? (layer.billboardModel ? [layer.billboardModel] : [])
+                        : layer.levels[slot].models;
+                    // Density scaling rides on the BUCKET, not on raw distance: `cell.lod` is already
+                    // hysteresis-damped and already decides membership, so the fraction is constant
+                    // within a bucket and the batch's own staleness check covers a change for free.
+                    const keep = foliageKeepFraction(slot, layer.levels.length, this._foliageDensityFalloff);
+                    this._packFoliageBucket(layer, layer.batches, slot, buckets[slot] ??= [], models, keep);
+                }
+            }
+        }
+    }
+
+    /**
+     * The shadow half of {@link _prepareFoliage}: pick and upload the cells one cascade will rasterize.
+     *
+     * Called from `_renderCascades` BEFORE the cascade's depth pass opens, for the upload reason given
+     * there. It sets `_shadowFrustum` itself rather than borrowing the one `_renderShadowCasters`
+     * builds, because that runs inside the pass, after this.
+     */
+    private _prepareFoliageShadow(scene: Scene, lightSpace: mat4, cascade: number): void {
+        this._shadowFrustum.setFromViewProjection(lightSpace);
+        const camPos = this._activeCamera.position;
+
+        for (const landscape of scene.landscapes) {
+            if (!landscape.visible) continue;
+            for (const layer of landscape.terrain.foliage) {
+                if (!this._foliageCastsShadows(layer)) continue;
+
+                const cullDistance = layer.cullDistance > 0 ? layer.cullDistance : this._foliageCullDistance;
+                const maxD2 = cullDistance > 0 ? cullDistance * cullDistance : Infinity;
+
+                // Computed ONCE per cascade, then shared by every sub-model. It used to run inside the
+                // model loop, so a tree with three sub-models paid three full walks of every cell in the
+                // layer to reach the same answer each time.
+                const visible = this._foliageScratchCells;
+                visible.length = 0;
+                for (const cell of layer.cells) {
+                    // The same distance cull as the colour pass, hysteresis band included, so a cell on
+                    // the boundary does not flicker its shadow in and out. `cell.visible` is READ, never
+                    // written, here: `_prepareFoliage` owns that flag and clears it on the distance test
+                    // alone, which makes it exactly "inside the damped cull range".
+                    const limit2 = foliageCullLimitSq(maxD2, cell.visible, this._foliageCullHysteresis);
+                    if (this._aabbDistSq(camPos, cell.min, cell.max) > limit2) continue;
+                    if (!this._shadowFrustum.intersectsAABB(cell.min, cell.max)) continue;
+                    visible.push(cell);
+                }
+                frameStats.foliageCellsScanned += layer.cells.length;
+                // The cheapest real level is what casts, so it decides the chunk size too.
+                const models = layer.kind === 'billboard'
+                    ? layer.levels[0].models
+                    : layer.levels[layer.levels.length - 1].models;
+                // The SAME fraction the cheapest colour level keeps. Thinning the two differently would
+                // leave shadows with no tree above them, or trees with no shadow beneath them, and the
+                // prefix rule makes the two sets identical rather than merely the same size.
+                const keep = foliageKeepFraction(layer.levels.length - 1, layer.levels.length,
+                                                 this._foliageDensityFalloff);
+                this._packFoliageBucket(layer, layer.shadowBatches, cascade, visible, models, keep);
+            }
+        }
+    }
+
+    /** Whether this layer rasterizes into the shadow cascades at all. One test, two call sites. */
+    private _foliageCastsShadows(layer: FoliageLayer): boolean {
+        return layer.castShadows && layer.count > 0 && layer.initialized;
+    }
+
+    /**
+     * Rasterize opted-in foliage layers into the bound cascade layer.
+     *
+     * Four departures from the colour pass: cells cull against the LIGHT's frustum; `cell.lod` is never
+     * written, since the colour pass reads it back for hysteresis; the detail level is fixed rather
+     * than distance-picked; and the batch is keyed on `cascade`, because each cascade sees a different
+     * set of cells and the distant ones are rasterized on different frames (they are staggered).
+     *
+     * The cell scan is hoisted ABOVE the model loop. It used to run inside it, so a tree with three
+     * sub-models paid three full walks of every cell in the layer, per cascade, to reach the same
+     * answer each time.
+     */
+    private _foliageShadowPass(scene: Scene, lightSpace: mat4, cascade: number,
+                               pass: RenderPassEncoder): void {
+        for (const landscape of scene.landscapes) {
+            if (!landscape.visible) continue;
+            for (const layer of landscape.terrain.foliage) {
+                if (!this._foliageCastsShadows(layer)) continue;
+                // Packed by `_prepareFoliageShadow` before this pass opened, in chunks small enough to
+                // keep one submission bounded.
+                const chunks = layer.shadowBatches[cascade];
+                if (!chunks || chunks.length === 0) continue;
+
+                const billboard = layer.kind === 'billboard';
+                // Billboards route every level through the cutout shader (they have only one level);
+                // mesh layers cast from their CHEAPEST real level.
+                const models = billboard ? layer.levels[0].models : layer.levels[layer.levels.length - 1].models;
+
+                for (const model of models) {
+                    // Per-MODEL, never per-layer: a tree's solid bark and its cut-out leaves arrive as
+                    // two sub-models of the same prototype and need different programs.
+                    //
+                    // A billboard's shape IS its texture's alpha and it has no material to consult, so
+                    // 0.5 stays the threshold there — it is the impostor's own convention. Mesh foliage
+                    // goes through the SAME resolver every other caster uses, so a leaf material's mask
+                    // and its real threshold apply instead.
+                    const cut = billboard
+                        ? (() => {
+                            const tex = layer.textureId ? TextureManager.Instance.getTexture(layer.textureId) : null;
+                            return tex ? { texture: tex, cutoff: 0.5, useRed: false } : null;
+                        })()
+                        : this._shadowCutoutOf(model.material);
+                    const cutout = !!cut;
+                    // A cut-out caster culls nothing — its shape is in the texture and its card is
+                    // two-sided; a solid prop keeps the FRONT-face culling the rest of the shadow pass
+                    // uses to push acne out of view.
+                    const pipeline = this._pipelineFor(
+                        cutout ? 'shadowMapInstancedCutout' : 'shadowMapInstanced',
+                        cutout ? ShadowMapInstancedCutoutProgram : ShadowMapInstancedProgram, {
+                        cullMode: cutout || model.material.config.side === 'double' ? 'none' : 'front',
+                        depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+                        targets: 0,
+                        vertex: 'model+instance',
+                        builtFor: 'blinn_phongGeometry',
+                    });
+                    pass.setPipeline(pipeline);
+                    this._shaderManager.setUniform('u_lightSpace', this._clipProjection(lightSpace));
+                    if (cutout) {
+                        this._shaderManager.setUniform('u_cutoff', cut!.cutoff);
+                        this._shaderManager.setUniform('u_useRed', cut!.useRed);
+                        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [cut!.texture]));
+                    }
+
+                    for (const batch of chunks) {
+                        if (batch.count === 0 || !batch.buffer) continue;
+                        if (!this._recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count)) {
+                            model.mesh.setupInstanceMatrixBuffer(batch.buffer, 5);
+                            model.mesh.drawInstanced(batch.count);
+                            // Locations 5-8 left at divisor 1 corrupt the next NON-instanced draw of
+                            // the same mesh, which in this pass is the very next model.
+                            model.mesh.teardownInstanceMatrixBuffer(5);
+                        }
+                        frameStats.foliageShadowDraws++;
+                    }
+                }
+            }
+        }
+    }
+
+    private _foliagePass(scene: Scene, pass: RenderPassEncoder): void {
+        for (const landscape of scene.landscapes) {
+            if (!landscape.visible) continue;
+            for (const layer of landscape.terrain.foliage) {
+                if (layer.buckets.length === 0) continue;
+
+                // Bucket index levels.length is the billboard-impostor bucket. Everything here was
+                // culled, merged and uploaded by `_prepareFoliage`, before this pass opened — see the
+                // note there for why that separation is load-bearing rather than tidiness.
+                const billboardBucket = layer.levels.length;
+
+                const drawBucket = (models: Model[], billboard: boolean, slot: number) => {
+                    const cells = layer.buckets[slot];
                     if (!cells || cells.length === 0) return;
-                    // The cells' instance buffers were uploaded by _ensureFoliageUploaded, before the
-                    // shadow pass — which is now also a consumer of them.
+                    const chunks = layer.batches[slot];
+                    if (!chunks || chunks.length === 0) return;
+                    frameStats.foliageCells += cells.length;
+
                     for (const model of models) {
                         const shaderType = billboard ? 'foliageBillboardInstanced'
                             : (model.material.type === 'pbr' ? 'pbrGeometryInstanced' : 'blinn_phongGeometryInstanced');
@@ -2037,21 +2152,23 @@ export class Renderer {
                             pass.setBindGroup(0, this._materialBindGroup(pipeline, model.material));
                         }
 
-                        for (const cell of cells) {
-                            const instances = cell.glBuffer!;
-                            if (!this._recordFoliageDraw(pass, model.mesh, instances, cell.count)) {
-                                model.mesh.setupInstanceMatrixBuffer(instances, 5);
-                                model.mesh.drawInstanced(cell.count);
+                        // Every chunk shares the binds above; only the instance buffer differs.
+                        for (const batch of chunks) {
+                            if (batch.count === 0 || !batch.buffer) continue;
+                            if (!this._recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count)) {
+                                model.mesh.setupInstanceMatrixBuffer(batch.buffer, 5);
+                                model.mesh.drawInstanced(batch.count);
                                 model.mesh.teardownInstanceMatrixBuffer(5);
                             }
+                            frameStats.foliageDraws++;
                         }
                     }
                 };
 
                 for (let i = 0; i < layer.levels.length; i++)
-                    drawBucket(buckets[i], layer.levels[i].models, layer.kind === 'billboard');
+                    drawBucket(layer.levels[i].models, layer.kind === 'billboard', i);
                 if (layer.billboardModel)
-                    drawBucket(buckets[billboardBucket], [layer.billboardModel], true);
+                    drawBucket([layer.billboardModel], true, billboardBucket);
             }
         }
     }
@@ -2253,21 +2370,39 @@ export class Renderer {
     private _materialBindGroup(pipeline: RenderPipeline, material: Material,
                                envCube?: Texture | null): BindGroup {
         const textures: Texture[] = [];
-        for (const resource of pipeline.resources) {
-            if (resource.group !== 0 || resource.kind !== 'texture') continue;
+        for (const field of this._materialTextureFields(pipeline)) {
             // The environment cube rides in group 0 alongside the material maps but must NOT be looked
             // up as one: the miss falls back to a 2D texture, a sampler-type mismatch at draw time.
-            if (resource.glslName === 'u_envMap') {
-                textures.push(envCube ?? this._fallbackCube);
-                continue;
-            }
-            const field = resource.glslName.replace(/^u_material_/, '');
+            if (field === null) { textures.push(envCube ?? this._fallbackCube); continue; }
             const id = material.textures.get(field);
             const texture = id ? TextureManager.Instance.getTexture(id) : null;
             textures.push(texture ?? this._fallbackTexture);
         }
         return this._textureBindGroup(pipeline, 0, textures);
     }
+
+    /**
+     * A pipeline's group-0 material texture slots, as the MATERIAL names them, in binding order.
+     * `null` marks the environment cube, which has no material slot behind it.
+     *
+     * Derived once per pipeline rather than per draw: the names come from the shader's reflection and
+     * cannot change, but stripping the `u_material_` prefix off each one used to run a regex per texture
+     * per draw — six throwaway strings on every PBR mesh in the scene, every frame.
+     */
+    private _materialTextureFields(pipeline: RenderPipeline): readonly (string | null)[] {
+        let fields = this._materialFields.get(pipeline);
+        if (fields) return fields;
+        fields = [];
+        for (const resource of pipeline.resources) {
+            if (resource.group !== 0 || resource.kind !== 'texture') continue;
+            fields.push(resource.glslName === 'u_envMap'
+                ? null
+                : resource.glslName.replace(/^u_material_/, ''));
+        }
+        this._materialFields.set(pipeline, fields);
+        return fields;
+    }
+    private readonly _materialFields = new WeakMap<RenderPipeline, (string | null)[]>();
 
     /**
      * A terrain material's nine layer samplers as a bind group. Separate from
@@ -2465,6 +2600,104 @@ export class Renderer {
         if (count > 0) pass.drawIndexed(count, 1, firstIndex);
         return true;
     }
+
+    /**
+     * Merge a draw bucket's visible cells into ONE instance buffer, and return it ready to draw.
+     *
+     * Null when the bucket is empty. `batches` is the layer's colour or shadow list and `slot` the
+     * bucket within it (detail level, impostor, or cascade), so each keeps its own buffer and its own
+     * memory of which cells it holds.
+     *
+     * The repack is skipped whenever the cell set and the layer version are unchanged, which is the
+     * common case: the distance cull's hysteresis band and the admission budget exist precisely to keep
+     * that set stable, so a parked camera uploads nothing at all and a moving one pays one upload per
+     * bucket that actually changed. `reallocateBuffer` re-specifies the storage in place, so the VAO
+     * built over this buffer survives — and because there is now ONE buffer per bucket instead of one
+     * per cell, that VAO is also built once instead of once per cell per sub-model.
+     */
+    private _packFoliageBatch(layer: FoliageLayer, batches: FoliageBatch[], slot: number,
+                              cells: FoliageCell[], keep: number = 1): FoliageBatch | null {
+        let batch = batches[slot];
+        if (!batch) batch = batches[slot] = createFoliageBatch();
+        if (!foliageBatchStale(batch, cells, layer.version, keep)) return batch.count > 0 ? batch : null;
+
+        const instances = foliageBatchInstances(cells, keep);
+        rememberFoliageBatch(batch, cells, layer.version, keep);
+        batch.count = instances;
+        if (instances === 0) return null;
+
+        if (!batch.buffer)
+            batch.buffer = device.createBuffer({ label: 'foliage.batchMatrices', size: 0,
+                                                usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
+        if (instances > batch.capacity) {
+            // Grow, with slack: a camera crossing a cell boundary changes the set by one cell, and
+            // re-specifying the whole buffer for that would make the driver rename it every frame.
+            const capacity = Math.max(instances, Math.ceil(batch.capacity * 1.5), 64);
+            this._packFoliageScratch(layer, cells, capacity, keep);
+            batch.buffer = device.reallocateBuffer(batch.buffer,
+                                                   layer.batchScratch.subarray(0, capacity * 16));
+            batch.capacity = capacity;
+        } else {
+            this._packFoliageScratch(layer, cells, instances, keep);
+            device.writeBuffer(batch.buffer, 0, layer.batchScratch.subarray(0, instances * 16));
+        }
+        return batch;
+    }
+
+    /**
+     * Merge one draw bucket's cells into as few instance buffers as a bounded submission allows.
+     *
+     * ONE buffer would be ideal and is what the draw-call count wants, but a merged draw has no upper
+     * bound on its work: `generateFoliageEverywhere` plus a layer's first sight puts every cell on
+     * screen in the same frame, and a heavy prototype at that scale is a multi-second submission — a
+     * TDR timeout and a removed device. The bucket is therefore cut into chunks sized from the
+     * prototype's own triangle count. Grass stays one or two draws; a 200k-triangle tree gets many, and
+     * still fewer than the one-per-cell it replaced.
+     *
+     * `models` is the bucket's sub-models: the heaviest decides, because each is drawn separately over
+     * the same instances, so the per-DRAW cost is instances x that model's triangles.
+     */
+    private _packFoliageBucket(layer: FoliageLayer, lists: FoliageBatch[][], slot: number,
+                               cells: FoliageCell[], models: Model[], keep: number = 1): void {
+        const chunks = lists[slot] ??= [];
+
+        let trianglesPerInstance = 0;
+        for (const m of models)
+            trianglesPerInstance = Math.max(trianglesPerInstance, m.mesh.activeIndexCount / 3);
+        const bounds = foliageChunkBounds(cells, foliageChunkLimit(trianglesPerInstance),
+                                          this._foliageChunkBounds);
+
+        let start = 0;
+        for (let k = 0; k < bounds.length; k++) {
+            if (!chunks[k]) chunks[k] = createFoliageBatch();
+            // `slice` allocates, but only once per chunk per frame and only when the set moved — the
+            // batch below returns early on an unchanged one.
+            this._packFoliageBatch(layer, chunks, k, cells.slice(start, bounds[k]), keep);
+            start = bounds[k];
+        }
+        // Chunks the bucket no longer needs: emptied rather than destroyed, so a set that oscillates
+        // across a boundary reuses their storage instead of reallocating it.
+        for (let k = bounds.length; k < chunks.length; k++) {
+            chunks[k].count = 0;
+            chunks[k].cellCount = 0;
+            chunks[k].version = -1;
+        }
+    }
+    private readonly _foliageChunkBounds: number[] = [];
+
+    /** Pack `cells` into the layer's staging array, sized for at least `capacity` instances. */
+    private _packFoliageScratch(layer: FoliageLayer, cells: FoliageCell[], capacity: number,
+                                keep: number): void {
+        const floats = capacity * 16;
+        if (layer.batchScratch.length < floats) layer.batchScratch = new Float32Array(floats);
+        packFoliageInstances(cells, layer.batchScratch, keep);
+    }
+
+    /**
+     * Reused list of the cells one prepare step is about to pack. Never held across steps — the shadow
+     * prepare refills it per layer per cascade, and the colour prepare has the layer's own buckets.
+     */
+    private readonly _foliageScratchCells: FoliageCell[] = [];
 
     // Record one foliage cell's instanced draw. The pipeline MUST be told
     // `builtFor: 'blinn_phongGeometry'` — every foliage mesh is initialised from its five attributes,
@@ -3707,7 +3940,7 @@ export class Renderer {
         // Depth WRITES off: the sky must stay at the clear depth for the depth-reading passes.
         GLState.depthMask(false);
         const skyAtmo = scene.skyAtmosphere;
-        gpuProfiler.beginPass('sky');
+        this._scope('sky');
         if (!this._thumbnailMode && this._passEnabled['sky']) {
             const skyPass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'sky', false,
                                                       undefined, false);
@@ -3724,7 +3957,7 @@ export class Renderer {
         // against the deferred opaque geometry (whose depth was blitted into the scene FBO).
         GLState.depthMask(true);
         GLState.blend(false);
-        gpuProfiler.beginPass('forwardOpaque');
+        this._scope('forwardOpaque');
         this._forwardDepthWrite = true;
         this._runForwardQueue('forwardOpaque', opaqueForwardQueue);
 
@@ -3763,7 +3996,7 @@ export class Renderer {
         if (this._selectedNodeId)
             for (const node of scene.sprites)
                 if (node.visible && node.id === this._selectedNodeId) selectedSprites.push(node);
-        gpuProfiler.beginPass('outlineMask');
+        this._scope('outlineMask');
         this._renderSelectionMask(selectedNodes, selectedSprites);
     }
 
@@ -4157,7 +4390,7 @@ export class Renderer {
         this._endFullscreenPass(tracePass);
 
         // --- Resolve: reconstruct full cloud resolution from history + the new samples ---
-        gpuProfiler.beginPass('clouds.resolve');
+        this._scope('clouds.resolve');
         const dst = this._cloudHistoryIndex ^ 1;
         const prev = this._cloudHistoryFBOs[this._cloudHistoryIndex];
         const resolvePass = this._beginFullscreenPass(this._cloudHistoryFBOs[dst].renderTarget,
@@ -4770,6 +5003,26 @@ export class Renderer {
      * The RHI pipeline for `program` under a particular render state, built once per combination and
      * cached on a string key: two draws wanting the same program and state must get the same object.
      */
+    /**
+     * The two halves of the pipeline key that used to go through `JSON.stringify`.
+     *
+     * `_pipelineFor` is called per submesh per draw, and per caster per cascade in the shadow pass, and
+     * every caller hands it a freshly built state literal — so the serialisation could not be hoisted
+     * and ran thousands of times a frame to produce a string the Map lookup below it uses once.
+     * Concatenating the fields by hand is the same key at a fraction of the cost. EVERY field must
+     * appear: a state that differs only in a field left out here would silently reuse the wrong
+     * pipeline.
+     */
+    private static _depthKey(d: DepthStencilState): string {
+        return d.format + (d.depthWriteEnabled ? 'w' : '-') + d.depthCompare
+            + ':' + (d.depthBias ?? 0) + ':' + (d.depthBiasSlopeScale ?? 0);
+    }
+
+    private static _blendKey(b: BlendState): string {
+        return b.color.srcFactor + b.color.dstFactor + b.color.operation
+            + '/' + b.alpha.srcFactor + b.alpha.dstFactor + b.alpha.operation;
+    }
+
     private _pipelineFor(program: string,
                          reflection: { resources: readonly ShaderResource[]; wgsl?: string;
                                        entryPoints?: { vertex?: string; fragment?: string;
@@ -4817,8 +5070,8 @@ export class Renderer {
                             + '|' + (builtFor ?? '') + (cubeFace ? '|cw' : '')
                             + (reflection.vertexWgsl ? '|vs' : '')
                             + '|' + colorFormats.join(',')
-                            + (blend ? '|' + JSON.stringify(blend) : '')
-                            + (resolvedDepth ? '|' + JSON.stringify(resolvedDepth) : '');
+                            + (blend ? '|' + Renderer._blendKey(blend) : '')
+                            + (resolvedDepth ? '|' + Renderer._depthKey(resolvedDepth) : '');
         let pipeline = this._fullscreenPipelines.get(key);
         if (!pipeline) {
             const module = device.createShaderModule({
@@ -4975,8 +5228,27 @@ export class Renderer {
      */
     private _beginPass(name: RenderPass): boolean {
         if (!this._passEnabled[name]) return false;
-        gpuProfiler.beginPass(name);
+        this._scope(name);
         return true;
+    }
+
+    /**
+     * Open one render scope, timed on BOTH sides.
+     *
+     * The two profilers share these boundaries deliberately: a GPU pass table with no CPU column sends
+     * you looking at the GPU when the cost is submission, and two independently placed sets of scopes
+     * would produce rows that cannot be compared. Flat, never nested — WebGL2 allows one active timer
+     * query, so opening a scope closes the previous one on both sides.
+     */
+    private _scope(name: RenderPass | string): void {
+        gpuProfiler.beginPass(name);
+        cpuProfiler.beginPass(name);
+    }
+
+    /** Close the open scope on both profilers. */
+    private _endScope(): void {
+        gpuProfiler.endPass();
+        cpuProfiler.endPass();
     }
 
     public resize(): void {
@@ -5483,6 +5755,10 @@ export class Renderer {
      */
     private _renderShadowCasters(pass: RenderPassEncoder, models: Set<ModelNode>, lightSpace: mat4): void {
         let bound: string | null = null;
+        // The pipeline last SET, not merely last built. This loop runs per caster per cascade and the
+        // pipelines repeat heavily — most scenes use two — so re-setting an identical one was several
+        // undeduped raw `gl` calls plus a state-array allocation per node, for nothing.
+        let boundPipeline: RenderPipeline | null = null;
         // Cull against the LIGHT's frustum, not the camera's.
         this._shadowFrustum.setFromViewProjection(lightSpace);
         for (const node of models) {
@@ -5490,8 +5766,12 @@ export class Renderer {
             // castShadow=false via the visible setter, but the LOD flag never touches the material).
             if (!node.visible) continue;
             // A merged model can have a non-casting submesh among casting ones, so the test is "any
-            // submesh casts" and the draw below restricts itself to those ranges.
-            if (!node.model.materials.some(m => m.config.castShadow && !m.config.wireframe)) continue;
+            // submesh casts" and the draw below restricts itself to those ranges. Written as a loop
+            // rather than `.some(closure)`: this runs per caster per cascade.
+            let anyCasts = false;
+            for (const m of node.model.materials)
+                if (m.config.castShadow && !m.config.wireframe) { anyCasts = true; break; }
+            if (!anyCasts) continue;
             // Skip gizmo/overlay nodes from shadow casting
             if ((node as any).isGizmo) continue;
             // A node added this frame has no mesh yet: this pass runs BEFORE the geometry pass that
@@ -5514,7 +5794,8 @@ export class Renderer {
 
             // Resolved per SUBMESH below; this is only "does any of them need the cutout program".
             const casterMaterials = node.model.materials;
-            const anyCutout = casterMaterials.some(m => this._shadowCutoutOf(m) !== null);
+            let anyCutout = false;
+            for (const m of casterMaterials) if (this._shadowCutoutOf(m) !== null) { anyCutout = true; break; }
             const shaderType = anyCutout ? cutoutType : plainType;
 
             // Uniforms live per-program, so (re)set u_lightSpace whenever the bound program changes.
@@ -5532,7 +5813,10 @@ export class Renderer {
                 // whatever material the node wears — 20 bytes for an unlit caster, 56 for a lit one.
                 builtFor: node.model.material.type,   // skinned too — see `_geometryPass`
             });
-            pass.setPipeline(pipeline);
+            if (pipeline !== boundPipeline) {
+                pass.setPipeline(pipeline);
+                boundPipeline = pipeline;
+            }
             if (shaderType !== bound) {
                 this._shaderManager.setUniform('u_lightSpace', this._clipProjection(lightSpace));
                 bound = shaderType;
@@ -5699,12 +5983,16 @@ export class Renderer {
             this._cascadeDepthScales[i] = cascadeDepthScale(fit.depthRange);
             this._cascadeTexelSizes[i] = fit.texelWorldSize;
 
+            // BEFORE the pass opens: `_prepareFoliageShadow` uploads this cascade's merged instance
+            // buffer, and re-specifying a vertex buffer inside a live pass is what removes a device.
+            this._prepareFoliageShadow(scene, this._cascadeMatrices[i], i);
+
             const pass = this._beginDepthPass(this._shadowCascadeFBO.renderTarget, 'cascade', i);
             this._renderShadowCasters(pass, models, this._cascadeMatrices[i]);
             // Inside the cascade pass, not after it: _renderShadowCasters leaves _shadowFrustum set
             // to this cascade, which is what the foliage cull tests against, and a caster recorded
             // after the encoder closed is not recorded at all on a deferred backend.
-            this._foliageShadowPass(scene, this._cascadeMatrices[i], pass);
+            this._foliageShadowPass(scene, this._cascadeMatrices[i], i, pass);
             this._endFullscreenPass(pass);
         }
         GLState.cullFace('back');
@@ -5798,7 +6086,7 @@ export class Renderer {
             // Populate the velocity buffer anyway when the editor is inspecting the 'velocity' channel.
             if (this._debugView === 'velocity' && this._hasPrevViewProj && this._beginPass('velocity'))
                 this._velocityPass();
-            gpuProfiler.beginPass('present');
+            this._scope('present');
             // The only `compose` label: the plain scene copy. PASS_LABEL_TO_SCOPE files it under
             // `present`, the scope opened right above.
             const pass = this._beginFullscreenPass(this._compose_FBOs[0].renderTarget, 'compose', true);
@@ -5838,7 +6126,7 @@ export class Renderer {
         if (this._beginPass('screenMaterials')) this._screenMaterialsPass(scene);
 
         // Render to screen using default framebuffer
-        gpuProfiler.beginPass('present');
+        this._scope('present');
         if (this._debugView === 'final') {
             if (this._outlineActive) {
                 // Composite the selection outline over the final image on the way to the screen.
@@ -6262,7 +6550,7 @@ export class Renderer {
         const src = this._composeIndex;
 
         // 1. Bright pass into the largest mip (half res). Also writes the scene passthrough into
-        gpuProfiler.beginPass('bloom.bright');
+        this._scope('bloom.bright');
         const mip0 = this._bloomMips[0];
         const brightPass = this._beginFullscreenPass(mip0.renderTarget, 'bloom.bright', true,
                                                      undefined, false);
@@ -6289,7 +6577,7 @@ export class Renderer {
 
         if (this._passEnabled['bloom.blur']) {
             // 2. Downsample: each level reads the one above it at twice the resolution.
-            gpuProfiler.beginPass('bloom.blur');
+            this._scope('bloom.blur');
             for (let i = 1; i < this._bloomMips.length; i++) {
                 const from = this._bloomMips[i - 1];
                 // `loadOp: 'load'` — each level is fully overwritten by the draw, so clearing first
@@ -6343,7 +6631,7 @@ export class Renderer {
 
         // 4. Composite the accumulated bloom back over the scene, into the other compose buffer.
         if (!this._passEnabled['bloom.composite']) return;
-        gpuProfiler.beginPass('bloom.composite');
+        this._scope('bloom.composite');
         const dst = 1 - src;
         const pass = this._beginFullscreenPass(this._compose_FBOs[dst].renderTarget, 'bloom.composite', true);
         const pipeline = this._fullscreenPipeline('composer', ComposerProgram);
@@ -6398,9 +6686,9 @@ export class Renderer {
         const K = Renderer.MOTION_BLUR_TILE;
 
         // 1) Per-pixel velocity.
-        gpuProfiler.beginPass('velocity');
+        this._scope('velocity');
         this._velocityPass();
-        gpuProfiler.beginPass('motionBlur');
+        this._scope('motionBlur');
 
         // 2) TileMax: dominant velocity per KxK tile.
         const tilePass = this._beginFullscreenPass(this._velocityTileFBO.renderTarget, 'velocity.tile', true);
@@ -6464,6 +6752,13 @@ export class Renderer {
             objects: frameStats.objects,
             culledObjects: frameStats.culledObjects,
             culledInstances: frameStats.culledInstances,
+            // Surfaced here, not just on `frameStats`: the performance panel reads its per-frame
+            // counters off THIS object, so a counter added to the accumulator and not to this list
+            // reads as a permanent zero in the HUD - the same way the physics and scene rows once did.
+            foliageDraws: frameStats.foliageDraws,
+            foliageShadowDraws: frameStats.foliageShadowDraws,
+            foliageCells: frameStats.foliageCells,
+            foliageCellsScanned: frameStats.foliageCellsScanned,
             instances: frameStats.instances,
             triangles: frameStats.triangles,
             vertices: frameStats.vertices,
@@ -6494,6 +6789,13 @@ export class Renderer {
 
     /** Per-pass GPU timings. Enable with `renderer.gpuProfilingEnabled = true`. */
     public get gpuProfiler() { return gpuProfiler; }
+
+    /**
+     * Density scaling for distant foliage: the fraction of a detail level's instances that survives, per
+     * level away from the base. 1 draws every instance (the behaviour before this existed).
+     */
+    public get foliageDensityFalloff(): number { return this._foliageDensityFalloff; }
+    public set foliageDensityFalloff(v: number) { this._foliageDensityFalloff = Math.min(1, Math.max(0.1, v)); }
 
     public get gpuProfilingEnabled(): boolean { return gpuProfiler.enabled; }
     public set gpuProfilingEnabled(v: boolean) { gpuProfiler.enabled = v; }
@@ -6982,6 +7284,7 @@ export class Renderer {
             motionBlurSamples: this._motionBlurSamples,
             frustumCulling: this._frustumCulling,
             foliageCullDistance: this._foliageCullDistance,
+            foliageDensityFalloff: this._foliageDensityFalloff,
             foliageCellSize: this._foliageCellSize,
             terrainLodEnabled: this._terrainLodEnabled,
             terrainLodDistance1: this._terrainLodDistance1,
@@ -7052,6 +7355,7 @@ export class Renderer {
         if (s.motionBlurSamples !== undefined) this.motionBlurSamples = s.motionBlurSamples;
         if (s.frustumCulling !== undefined) this.frustumCulling = s.frustumCulling;
         if (s.foliageCullDistance !== undefined) this.foliageCullDistance = s.foliageCullDistance;
+        if (s.foliageDensityFalloff !== undefined) this.foliageDensityFalloff = s.foliageDensityFalloff;
         if (s.foliageCellSize !== undefined) this.foliageCellSize = s.foliageCellSize;
         if (s.terrainLodEnabled !== undefined) this.terrainLodEnabled = s.terrainLodEnabled;
         if (s.terrainLodDistance1 !== undefined) this.terrainLodDistance1 = s.terrainLodDistance1;

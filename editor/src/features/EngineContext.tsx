@@ -13,8 +13,8 @@ import { ProjectContext, type ProjectContextValue } from "./ProjectContext";
 import { EditorSessionsContext, type EditorSessionsContextValue } from "./EditorSessionsContext";
 import { useStableActions } from "../utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
-import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates } from "cleo";
-import type { AnimationCompatibility, BoneMapping, HullQuality, SceneChange } from "cleo";
+import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey } from "cleo";
+import type { AnimationCompatibility, BoneMapping, HullQuality, SceneChange, TerrainFoliageRule } from "cleo";
 import NullImage from '../images/null.png';
 import EventEmitter from "events";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
@@ -31,7 +31,7 @@ import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf,
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
-import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, flattenModelAsset, skinnedModelJsonOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, applyModelTransformDelta, readModelBaseTrs, modelNodeOf } from "../utils/models";
+import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, flattenModelAsset, skinnedModelJsonOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE } from "../utils/models";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, seedScriptFields } from "../utils/scripts";
 import { pushExternalSource } from "./scriptWorkspace/externalSourceStore";
 import { AnimationAsset, buildAnimationAsset, storeSkin, findEquivalentAnimation, withAnimationRef, withoutAnimationRef, extractEmbeddedClips } from "../utils/animationAssets";
@@ -44,12 +44,12 @@ import { groupImportFiles } from "../utils/importGrouping";
 import {
   normalizeRootScale, meshBoundsRadius, combineBounds, awaitSubtreeTexturesReady, captureMaterialSphere,
   renderModelAssetThumbnail, renderMaterialAssetThumbnail, renderTerrainMaterialAssetThumbnail,
-  setThumbnailDirtySuppressor,
-} from "../utils/modelThumbnails";
+  setThumbnailDirtySuppressor, bakeModelImpostor, impostorTextureId } from "../utils/modelThumbnails";
 import { parseBundleToRoot, type UnresolvedTexture } from "../utils/modelImport";
 import { isValidGrouping, compactGroups, type PartInfo, type PartGroup } from "../utils/submeshGroups";
 import { readModelLibrary, writeModelLibrary } from "../utils/modelStore";
-import { generateLodLevel, hasSkinnedPart } from "../utils/lodGenerate";
+import { generateLodLevel, hasSkinnedPart, subtreeTriangles } from "../utils/lodGenerate";
+import { registerFoliageSourceResolver } from "../utils/foliageRules";
 import { decimateGeometry } from "../workers/workerClient";
 import { cancelAllImports, ImportCancelled, parseAnimationFiles } from "../workers/importClient";
 import { detectMissingTextures } from "../utils/textureRefs";
@@ -169,7 +169,7 @@ import {
 import { resyncScene } from "../utils/sceneResync";
 import { migrateSceneSprites } from "../utils/spriteMigration";
 import { captureAnimationState, restoreAnimationState } from "../utils/placedAnimation";
-import { buildAssetHashes, AssetLibs, ASSET_HASH_VERSION } from "../utils/assetHash";
+import { buildAssetHashes, hashAsset, AssetLibs, ASSET_HASH_VERSION } from "../utils/assetHash";
 import {
   collectReferencedMaterialIds, collectReferencedModelIds, collectReferencedTemplateIds,
   collectReferencedTerrainMaterialIds, collectReferencedTextureIds, collectReferencedScriptIds,
@@ -180,7 +180,7 @@ import { KEYS, libKey } from "../utils/storageKeys";
 import { assetIdOfTab, loadTabState, saveTabState, MainMode } from "../utils/tabState";
 import { activeProjectAllowsLegacyImport, touchProject } from "../utils/projects";
 import { activeProjectId } from "../utils/projectScope";
-import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextureIds, legacyTexturesOf } from "../utils/textureStore";
+import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextureIds, legacyTexturesOf, deleteTextures } from "../utils/textureStore";
 import { saveToStorage } from "../workers/workerClient";
 import { startTask, StepStatus } from "./progress/progressStore";
 import { reconcileEditorHelpers } from "../utils/editorHelpers";
@@ -562,6 +562,10 @@ const EngineContext = createContext<{
   editingTerrainMaterialName: string | null;
   editingTerrainMaterialNode: Node | null;
   refreshTerrainMaterialPreview: () => void;
+  /** Delete the runtime foliage layer a rule scattered, across every live scene. See the impl. */
+  dropFoliageLayer: (rule: TerrainFoliageRule) => void;
+  /** Bake a flat card for a foliage rule's model and point the rule's impostor at it. */
+  bakeFoliageImpostor: (rule: TerrainFoliageRule) => Promise<string | null>;
   setActiveTerrainMaterialName: (name: string) => void;
   enterAnimationEditor: (nodeId: string) => void;
   animationTargetId: string | null; // cloned skinned model in the active animation tab's scene
@@ -777,6 +781,8 @@ const EngineContext = createContext<{
     editingTerrainMaterialName: null,
     editingTerrainMaterialNode: null,
     refreshTerrainMaterialPreview: () => {},
+    dropFoliageLayer: () => {},
+    bakeFoliageImpostor: async () => null,
     setActiveTerrainMaterialName: () => {},
     enterAnimationEditor: () => {},
     animationTargetId: null,
@@ -1776,6 +1782,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   terrainMaterialsRef.current = terrainMaterials;
   modelsRef.current = models;
   templatesRef.current = templates;
+
+  // Lets utils/foliageRules rebuild a rule's prototype geometry from the model library without the
+  // library being threaded through parseTerrainMaterialAsset / applyTerrainMaterialToLayer and their
+  // seven call sites. Reads the REFS, so it always sees the current libraries rather than the render
+  // this closure was created on.
+  registerFoliageSourceResolver((modelId: string) => {
+    const model = modelsRef.current.find(m => m.id === modelId);
+    return model ? { model, library: modelsRef.current, materials: materialsRef.current } : null;
+  });
 
   const engineMaps = () => ({ scripts: scriptsRef.current, bodies: bodiesRef.current, triggers: triggersRef.current });
 
@@ -2783,7 +2798,20 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Rebuild every placed instance of a mesh asset after it was saved, preserving each instance's own
   // transform (the template propagation pattern — a mesh instance is a whole copied subtree, so it is
   // re-instantiated rather than patched in place). Runs across every live scene (see liveScenes).
+  /**
+   * Content hash of each model asset as it was last instantiated, so a save that changed only metadata
+   * (a name, a LOD distance) does not rebuild every placed copy. Rebuilding is expensive in a way that
+   * scales badly: a LOD-bearing asset deep-clones EVERY level per instance.
+   */
+  const instantiatedHashRef = useRef(new Map<string, string>());
+
   const syncModelInstances = (modelId: string, asset: ModelAsset, exceptTabId?: string) => {
+    // Structural content only — `hashAsset` already omits the thumbnail and the other non-structural
+    // fields, so a re-render or a rename cannot trip this.
+    const hash = hashAsset(asset);
+    if (instantiatedHashRef.current.get(modelId) === hash) return;
+    instantiatedHashRef.current.set(modelId, hash);
+
     const maps = engineMaps();
     let count = 0;
     let reselectId: string | null = null;
@@ -2810,6 +2838,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
         // Detach synchronously with removeChild, not remove() — see syncTemplateInstances for why.
         parent.removeChild(inst);
+        // …and free its GPU buffers. removeChild only detaches, and a LOD-bearing asset instantiates as
+        // one subtree PER LEVEL, so without this a save orphaned four mesh sets per placed copy — the
+        // leak that actually exhausted the tab.
+        disposeModelSubtree(inst);
         const newId = instantiateModelAsset(asset, parent, materialsRef.current, modelsRef.current, animationsRef.current);
         const newNode = scene.getNodeById(newId);
         if (newNode) {
@@ -2831,43 +2863,39 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
   };
 
-  // After a mesh asset is saved, refresh every terrain-material foliage rule that references it
-  // (rule.modelId): rebuild the embedded flattened LOD payload in the library asset, then swap
-  // prototypes on live terrain layers using those materials — WITHOUT re-scattering instances.
-  //
-  // Reads the REFS, not the state: every caller reaches here from an async save that has already
-  // awaited, so the captured `terrainMaterials`/`models` closures can be a render behind.
+  /**
+   * After a model asset is saved, refresh the live foliage prototypes of every terrain material whose
+   * rules reference it — WITHOUT re-scattering instances.
+   *
+   * It no longer rewrites the terrain-material ASSETS. A rule's baked meshes stopped being persisted
+   * (see TerrainMaterial.serialize) and are rebuilt from the model library on load, so there is nothing
+   * in the asset left to bring up to date — the model save already updated the one copy that exists.
+   * That removed three things from this path per affected material: a full re-bake, an
+   * `updateTerrainMaterial` that rewrote the library, and a `deepClone` of the baked meshes into every
+   * open terrain-material tab. Between them they were what exhausted the editor on save.
+   *
+   * Reads the REFS, not the state: every caller reaches here from an async save that has already
+   * awaited, so the captured `terrainMaterials`/`models` closures can be a render behind.
+   */
   const syncFoliageRulesForModel = (modelAsset: ModelAsset, exceptTabId?: string) => {
-    const updated: TerrainMaterialAsset[] = [];
-    for (const tmAsset of terrainMaterialsRef.current) {
+    const affected = terrainMaterialsRef.current.filter(tmAsset => {
       const rules = tmAsset.material?.foliageInclude;
-      if (!Array.isArray(rules) || !rules.some((r: any) => r?.modelId === modelAsset.id)) continue;
-      try {
-        const nextRules = rules.map((r: any) => r?.modelId === modelAsset.id
-          ? buildFoliageRuleFromModelAsset(modelAsset, r, modelsRef.current, materialsRef.current) : r);
-        const material = { ...tmAsset.material, foliageInclude: nextRules };
-        const patched: TerrainMaterialAsset = { ...tmAsset, material, textureIds: [...collectTerrainMaterialTextureIds(material)] };
-        updateTerrainMaterial(tmAsset.id, patched);
-        updated.push(patched);
-      } catch (e) {
-        Logger.warn(`Foliage rule for model "${modelAsset.name}" in terrain material "${tmAsset.name}" was not updated: ${e}`, 'Editor');
-      }
-    }
-    if (updated.length === 0) return;
+      return Array.isArray(rules) && rules.some((r: any) => r?.modelId === modelAsset.id);
+    });
+    if (affected.length === 0) return;
 
-    // An OPEN terrain-material tab holds its own live TerrainMaterial, and saving that tab serializes it
-    // back over the asset. Without this the freshly re-baked rules would be silently reverted by the
-    // next save of a tab the user never touched.
+    // An OPEN terrain-material tab holds its own live TerrainMaterial whose rules still carry the
+    // PREVIOUS prototypes. Drop them so the next resolve rebuilds from the saved model; the geometry is
+    // derived, so clearing it is safe and is what a re-bake used to accomplish at 60 MB a go.
     for (const [tabId, rt] of tabRuntimeRef.current.entries()) {
       if (tabId === exceptTabId) continue;
       const tm = (rt as any).tm;
-      if (!tm) continue;
-      const asset = updated.find(a => a.id === (rt as any).terrainMaterialId);
-      // deepClone, never a JSON round trip: a foliage rule carries the BAKED MESH of its prototype
-      // (bakeModel in utils/foliageRules.ts), one [x,y,z] per vertex per attribute per LOD. Stringifying
-      // that on the model-save path is minutes of work and eventually RangeError. See utils/deepClone.
-      if (asset?.material?.foliageInclude) tm.foliageInclude = deepClone(asset.material.foliageInclude);
+      if (!tm?.foliageInclude) continue;
+      for (const rule of tm.foliageInclude)
+        if (rule?.modelId === modelAsset.id) { delete rule.models; delete rule.model; delete rule.lods }
     }
+
+    const updated = affected;
 
     // Every live scene, not just the open one — matching syncModelInstances and
     // syncTerrainMaterialInstances. Scenes that are not live are handled pull-side by resyncScene.
@@ -2911,6 +2939,66 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (!linksMaterial(modelAsset.nodeJson)) continue;
       syncFoliageRulesForModel(modelAsset, exceptTabId);
     }
+  };
+
+  /**
+   * Delete the runtime foliage layer a rule scattered, in every live scene.
+   *
+   * Deleting a rule used to leave its layer behind: a layer is filed under `foliageRuleKey` — the
+   * rule's own id — and `pruneFoliage` deliberately refuses to collect one that still holds
+   * instances, because that guard is what keeps hand-painted placement through a rename. So the layer
+   * stayed in `terrain.foliage`, kept drawing its old prototypes, and was unreachable from
+   * `refreshFoliagePrototypes`. Replacing a foliage prop meant remove-then-add, which is exactly that
+   * path: the scene rendered the old prop and the new one at once, at full detail.
+   *
+   * The painted instances go with it. They were placed by a rule that no longer exists; Generate
+   * Foliage re-scatters from whatever rules remain.
+   */
+  const dropFoliageLayer = (rule: TerrainFoliageRule) => {
+    const key = foliageRuleKey(rule);
+    let removed = false;
+    for (const scene of liveScenes()) {
+      for (const landscape of Array.from(scene.landscapes) as any[])
+        if (landscape.terrain?.removeFoliageLayer(key)) removed = true;
+    }
+    if (removed) eventEmitter.current.emit('SCENE_CHANGED');
+  };
+
+  /**
+   * Bake a flat card for a foliage rule's source model, register it, and point the rule at it.
+   *
+   * The single largest thing that can be done for a heavy foliage prototype. A LOD level reduces
+   * triangles linearly; the card replaces them all with four, and past the distance it takes over the
+   * difference is not visible. Returns the texture id, or null when the rule has no model behind it.
+   *
+   * The takeover distance defaults to the model's LAST LOD band, so the mesh ladder plays out in full
+   * and the card picks up where it ends. It is authored on the rule like every other impostor field, so
+   * a hand-set distance is left alone.
+   */
+  const bakeFoliageImpostor = async (rule: TerrainFoliageRule): Promise<string | null> => {
+    const engine = instanceRef.current;
+    const modelId = (rule as any).modelId as string | undefined;
+    if (!engine || !modelId) return null;
+    const asset = modelsRef.current.find(m => m.id === modelId);
+    if (!asset) return null;
+
+    const id = impostorTextureId(modelId);
+    // The stored record has to go BEFORE the re-bake: `persistTextures` skips an id it already has, so
+    // a second bake would leave the old card on disk and the new one only in memory until reload.
+    await deleteTextures([id]);
+
+    const baked = await bakeModelImpostor(engine, asset);
+    if (!baked) return null;
+    await persistTextures([baked.id]);
+
+    // Past the whole mesh ladder. The renderer's impostor test SHORT-CIRCUITS the level selection, so a
+    // distance inside the ladder would retire every level beyond it rather than extending the view.
+    const bands = (rule.lods ?? []).map(l => l.distance).filter(d => d > 0);
+    const takeover = rule.billboard?.distance
+      ?? (bands.length ? Math.round(Math.max(...bands)) : DEFAULT_IMPOSTOR_DISTANCE);
+    rule.billboard = { textureId: baked.id, distance: takeover };
+    eventEmitter.current.emit('SCENE_CHANGED');
+    return baked.id;
   };
 
   // Save a mesh tab back to the library and propagate to placed instances.
@@ -3143,12 +3231,26 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         generatedBefore.set(asset.lodSource.level, asset.id);
         const stale = runtime.scene.getNodeById(session.levelIds[i + 1]);
         if (stale?.parent) stale.parent.removeChild(stale);
+        // Regenerating replaces the preview subtree; without this each press orphans its meshes.
+        disposeModelSubtree(stale);
         return;
       }
       keptRefs.push(ref);
       keptLevelIds.push(session.levelIds[i + 1]);
       keptDistances.push(session.distances[i + 1] ?? ref.distance ?? 0);
     });
+
+    let previousLevelRoot: Node | null = null;
+    const baseTriangles = subtreeTriangles(lod0);
+    // Derived materials this run produced, so the previous run's can be dropped afterwards — model
+    // assets are id-reused via `lodSource`, but materialAssetWithTextures mints a fresh id every time,
+    // so without this every regenerate left another full set of LOD materials in the library.
+    const generatedMaterialIds = new Set<string>();
+    const staleMaterialIds = new Set<string>();
+    for (const ref of session.lodRefs) {
+      const prev = modelsRef.current.find(m => m.id === ref.modelId);
+      if (prev?.lodSource?.modelId === modelId) for (const id of prev.materialIds ?? []) staleMaterialIds.add(id);
+    }
 
     const newRefs: ModelLodDef[] = [];
     const newLevelIds: string[] = [];
@@ -3159,23 +3261,39 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       for (let i = 0; i < specs.length; i++) {
         const level = i + 1;
         task.setStep(i, { status: 'running', detail: 'Decimating' });
-        const built = await generateLodLevel(lod0, level, specs[i], {
+        // CASCADE: level N is decimated from level N-1's subtree, not from LOD0 every time. Same final
+        // ratios (the spec ratio is re-expressed against the previous level below), roughly half the
+        // total decimation work, and each step is a gentler reduction than one big jump from full detail.
+        const from = previousLevelRoot ?? lod0;
+        const previousRatio = i === 0 ? 1 : specs[i - 1].ratio;
+        const stepRatio = Math.min(0.99, specs[i].ratio / previousRatio);
+        const built = await generateLodLevel(from, level, { ...specs[i], ratio: stepRatio }, {
           modelName: tab.title,
           sourceModelId: modelId,
           materials: materialsRef.current,
           downscaleTextures: downscale,
+          // One halving per step, because the source material is the PREVIOUS level's — already halved.
+          textureHalvings: 1,
           decimate: decimateGeometry,
           existingId: generatedBefore.get(level),
         });
 
         for (const mat of built.materials) addMaterial(mat);
         materialsRef.current = [...materialsRef.current, ...built.materials];
+        for (const mat of built.materials) generatedMaterialIds.add(mat.id);
 
         if (generatedBefore.has(level)) updateModel(built.asset.id, built.asset);
         else addModel(built.asset);
         // The ref is mirrored during render, so a freshly added asset is invisible to it inside this
         // handler; seed it by hand, exactly as the tileset and animation-field paths do.
-        modelsRef.current = [...modelsRef.current.filter(m => m.id !== built.asset.id), built.asset];
+        //
+        // IN PLACE for an asset that already existed. Appending instead moves it to the end, and
+        // writeModelLibrary treats position as state — so one regenerate rewrote every asset after the
+        // moved one to IndexedDB, a full structured clone each.
+        const at = modelsRef.current.findIndex(m => m.id === built.asset.id);
+        modelsRef.current = at >= 0
+          ? modelsRef.current.map(m => (m.id === built.asset.id ? built.asset : m))
+          : [...modelsRef.current, built.asset];
 
         // A preview of the level, as a SIBLING of level 0 — the levels are alternatives, and parenting
         // one to another would serialize it into the asset on the next save.
@@ -3185,22 +3303,40 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         clone.name = built.asset.name;
         parseByType(runtime.scene.root, clone);
 
+        // The subtree just parsed into the tab scene IS the next level's source.
+        previousLevelRoot = runtime.scene.getNodeById(clone.id) ?? previousLevelRoot;
+
         newRefs.push({ modelId: built.asset.id, distance: specs[i].distance });
         newLevelIds.push(clone.id);
         newDistances.push(specs[i].distance);
         totalBytesSaved += built.bytesSaved;
         task.setStep(i, {
           status: 'done',
-          detail: `${built.triangles.toLocaleString()} tris (${Math.round((built.triangles / Math.max(1, built.sourceTriangles)) * 100)}%)`,
+          // Against LOD0, not against the level this one was cascaded from — the percentage the user
+          // asked for is the absolute one.
+          detail: `${built.triangles.toLocaleString()} tris (${Math.round((built.triangles / Math.max(1, baseTriangles)) * 100)}%)`,
         });
       }
 
       const levelIds = [...keptLevelIds, ...newLevelIds];
+      const distances = [...keptDistances, ...newDistances];
+      // Seed a cull distance past the last band, when the asset has none.
+      //
+      // Generation never set one, and an unset cull falls back to the renderer's GLOBAL foliage
+      // distance of 65 m — so a ladder ending at 64 m kept its cheapest level alive for a single
+      // metre, and the 10%-triangle level the user just waited for was never drawn at all. PAST the
+      // last band rather than at it, so the coarsest level gets a band of its own; and only when
+      // unset, so a hand-authored value is never overwritten.
+      const lastBand = distances.length ? Math.max(...distances) : 0;
+      const cullDistance = session.cullDistance > 0
+        ? session.cullDistance
+        : Math.round(lastBand * LOD_CULL_MARGIN);
       const next: ModelEditSession = {
         ...session,
         levelIds,
         lodRefs: [...keptRefs, ...newRefs],
-        distances: [...keptDistances, ...newDistances],
+        distances,
+        cullDistance,
         activeLevel: 0, // back to the authored mesh; the levels are there to inspect deliberately
       };
       setModelSessions(prev => ({ ...prev, [tab.id]: next }));
@@ -3209,6 +3345,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       markTabDirty(tab.id, 'model-lod-add');
       eventEmitter.current.emit('TEXTURES_CHANGED');
       eventEmitter.current.emit('SCENE_CHANGED');
+      // Anything the previous run minted that this one did not re-mint is now unreferenced.
+      const orphaned = [...staleMaterialIds].filter(id => !generatedMaterialIds.has(id));
+      if (orphaned.length) {
+        setMaterials(prev => prev.filter(m => !orphaned.includes(m.id)));
+        materialsRef.current = materialsRef.current.filter(m => !orphaned.includes(m.id));
+      }
+
       Logger.info(
         `Generated ${specs.length} LOD level${specs.length === 1 ? '' : 's'} for "${tab.title}"` +
         (totalBytesSaved > 0 ? ` — ${(totalBytesSaved / (1024 * 1024)).toFixed(1)} MB less texture data` : ''),
@@ -3231,6 +3374,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
     const root = runtime.scene.getNodeById(session.levelIds[level]);
     if (root?.parent) root.parent.removeChild(root);
+    disposeModelSubtree(root);
 
     const levelIds = session.levelIds.filter((_, i) => i !== level);
     const distances = session.distances.filter((_, i) => i !== level);
@@ -5160,6 +5304,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       editingTerrainMaterialName,
       editingTerrainMaterialNode,
       refreshTerrainMaterialPreview,
+      dropFoliageLayer,
+      bakeFoliageImpostor,
       setActiveTerrainMaterialName,
       enterAnimationEditor,
       animationTargetId,

@@ -1112,6 +1112,29 @@ export class Terrain {
 
     public addFoliage(layer: FoliageLayer): FoliageLayer { this._foliage.push(layer); return layer; }
 
+    /**
+     * Drop the runtime layer filed under `key`, instances and GPU buffers included.
+     *
+     * The deliberate counterpart to {@link pruneFoliage}, which refuses to collect a layer that still
+     * holds instances — that guard protects hand-painted placement when a rule is merely renamed, and
+     * it also means a DELETED rule leaves its layer behind forever, still drawn by the foliage pass and
+     * no longer reachable from `refreshFoliagePrototypes`. Replacing a foliage prop's model went through
+     * exactly that path, so the scene ended up rendering the old prop and the new one at once.
+     *
+     * Returns whether a layer was there to remove.
+     */
+    public removeFoliageLayer(key: string): boolean {
+        const i = this._foliage.findIndex(l => l.key === key);
+        if (i < 0) return false;
+        const layer = this._foliage[i];
+        // `dispose` queues the buffers and prototype meshes for the renderer: this is called from an
+        // editor action, which does not own the GL context.
+        layer.dispose();
+        this._foliage.splice(i, 1);
+        if (this._foliageByKey.get(key) === layer) this._foliageByKey.delete(key);
+        return true;
+    }
+
     private _heightSampler = (wx: number, wz: number): number =>
         this._origin[1] + this.heightAt(wx - this._origin[0], wz - this._origin[2]);
 
@@ -1514,8 +1537,8 @@ export class Terrain {
         this._body = null;
         this._colliders?.dispose(w ?? undefined);
         this._colliders = null;
-        // Foliage cell buffers reach the renderer through the module-level orphan queue: the foliage
-        // pass only walks LIVE landscapes to drain collectStaleBuffers().
+        // A disposed layer's merged instance buffers reach the renderer through the module-level
+        // orphan queue: the foliage pass only walks LIVE landscapes, so nothing else can free them.
         for (const layer of this._foliage) layer.dispose();
         this._foliage = [];
         this._foliageByKey.clear();

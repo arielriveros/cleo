@@ -176,6 +176,35 @@ describe('reduction actually happens on a mesh with interior to remove', () => {
   });
 });
 
+/**
+ * The regression for the queue-starvation bug.
+ *
+ * Each collapse used to bump `version` for every touched NEIGHBOUR, invalidating every queued edge
+ * incident on them while re-queueing only the ones incident on the collapse target. That destroyed
+ * O(valence²) candidates per collapse and replaced O(valence), so the priority queue drained early and
+ * `simplify` returned quietly short of the requested ratio — no error, no warning, just a level that had
+ * barely been reduced. Only a ratio assertion catches it.
+ */
+describe('reaches the requested ratio on a mesh with interior to spare', () => {
+  const source = buffersOf(Geometry.Sphere(96, 1));
+
+  it.each([0.5, 0.25, 0.1])('hits %s within tolerance', (ratio) => {
+    const out = simplify(source, ratio);
+    const achieved = triangleCount(out) / triangleCount(source);
+    // Generous band, because pinning the exact figure would pin the algorithm rather than the contract.
+    // Pre-fix this stalled far above the target; the point is that it lands NEAR it, from either side.
+    expect(achieved).toBeGreaterThan(ratio * 0.75);
+    expect(achieved).toBeLessThan(ratio * 1.35);
+  });
+
+  it('keeps its shape while doing so', () => {
+    // A decimator can always hit a ratio by destroying the mesh; the volume band says it did not.
+    const before = enclosedVolume(source);
+    const after = enclosedVolume(simplify(source, 0.1));
+    expect(Math.abs(after)).toBeGreaterThan(Math.abs(before) * 0.85);
+  });
+});
+
 describe('submesh ranges', () => {
   const source = Geometry.Sphere(24, 1);
   const third = Math.floor(source.indices.length / 9) * 3;

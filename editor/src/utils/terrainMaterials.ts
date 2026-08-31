@@ -1,5 +1,6 @@
 import { TerrainMaterial, Terrain, TextureManager } from 'cleo'
 import { cryptoRandomId } from './ids'
+import { resolveFoliageRuleGeometry } from './foliageRules'
 
 // A reusable, named terrain material saved to the global terrain-material library, with a rendered
 // preview thumbnail. Mirrors MaterialAsset, but its serialized `material` is a TerrainMaterial (a base
@@ -92,7 +93,12 @@ export function restoreTerrainMaterialTextures(asset: TerrainMaterialAsset): voi
 /** Parse an asset into a live TerrainMaterial, restoring its embedded textures first. */
 export function parseTerrainMaterialAsset(asset: TerrainMaterialAsset): TerrainMaterial {
   restoreTerrainMaterialTextures(asset)
-  return TerrainMaterial.parse(asset.material)
+  const tm = TerrainMaterial.parse(asset.material)
+  // A saved mesh rule carries only its `modelId`; its baked prototypes are a derived cache that is no
+  // longer persisted (see TerrainMaterial.serialize). This is where they come back, on the one path from
+  // a stored asset to a live material. A legacy rule that still embeds them is returned untouched.
+  for (const rule of tm.foliageInclude) resolveFoliageRuleGeometry(rule)
+  return tm
 }
 
 /**

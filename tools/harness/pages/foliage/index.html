@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Cleo foliage stress</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #202028; }
+  #vp { position: absolute; inset: 0; }
+</style>
+<script src="cleo.js"></script>
+</head>
+<body>
+<div id="vp"></div>
+<script>
+// The scene that removed a GPU device.
+//
+// Foliage draws used to be one instanced call per spatial CELL, which bounded a submission to roughly a
+// cell's worth of instances whatever the prototype weighed. Merging them into one call per bucket is
+// the whole point of the batching work — and it removed that bound. `generateFoliageEverywhere`
+// followed by a layer's "first sight" (which skips the admission budget deliberately) makes every cell
+// visible on the same frame, so a heavy prototype lands in a single multi-second `drawElementsInstanced`
+// and the watchdog takes the device out: `mapResource` fails, `DXGI_ERROR_DEVICE_REMOVED`, every
+// subsequent GL call reports `CONTEXT_LOST_KHR`.
+//
+// This page reproduces the SHAPE of that scene — a deliberately heavy prototype, scattered at
+// whole-terrain scale, all of it visible at once — at a size that stays survivable on the machine
+// running the check. The gate is not "did it crash", which would mean crashing to find out; it is the
+// invariant that makes crashing impossible: no single instanced draw may exceed the triangle budget.
+// See FOLIAGE_DRAW_TRIANGLE_BUDGET in src/terrain/foliage.ts.
+window.__ready = false;
+window.__error = null;
+window.__contextLost = false;
+
+(async () => {
+  try {
+    const q = new URLSearchParams(location.search);
+    const forwardMode = q.get('forward') === '1';
+    // Segments, not triangles: Sphere(n) is n*n*2 triangles, so 288 is ~166k — the order a detailed
+    // imported tree arrives at, and the case where a per-instance triangle count actually bites.
+    const segments = Number(q.get('segments') || 288);
+    const instances = Number(q.get('instances') || 600);
+    const shadows = q.get('shadows') !== '0';
+    // `?lods=1` gives the prototype the ladder and the card it should have had. The same scene twice,
+    // once bare and once equipped, is the only honest way to quote what they are worth.
+    const withLods = q.get('lods') === '1';
+
+    const engine = new cleo.CleoEngine({
+      graphics: { clearColor: [0.08, 0.08, 0.11, 1.0], deferred: !forwardMode },
+    });
+    window.__engine = engine;
+    window.__renderer = engine.renderer;
+
+    if (typeof engine.initialize === 'function') await engine.initialize();
+    engine.setViewport(document.getElementById('vp'));
+
+    // Every instanced draw the frame issues, as (triangles per instance, instances).
+    //
+    // Wrapped at the GL call rather than read off `frameStats`, because the counter this gates is the
+    // WORST SINGLE draw and a per-frame total cannot show it. A bounded total made of one colossal
+    // call and a hundred trivial ones is exactly the failure being watched for.
+    const gl = engine.renderer._gl || (engine.renderer.gl) || null;
+    window.__peakDraw = { triangles: 0, instances: 0, calls: 0 };
+    const proto = window.WebGL2RenderingContext && window.WebGL2RenderingContext.prototype;
+    if (proto && proto.drawElementsInstanced) {
+      const real = proto.drawElementsInstanced;
+      proto.drawElementsInstanced = function (mode, count, type, offset, primcount) {
+        if (window.__peakDrawArmed) {
+          const tris = (count / 3) * primcount;
+          window.__peakDraw.calls++;
+          if (tris > window.__peakDraw.triangles) {
+            window.__peakDraw.triangles = tris;
+            window.__peakDraw.instances = primcount;
+          }
+        }
+        return real.call(this, mode, count, type, offset, primcount);
+      };
+    }
+    window.__peakDrawArmed = false;
+    window.__resetPeak = () => {
+      window.__peakDraw = { triangles: 0, instances: 0, calls: 0 };
+      window.__peakDrawArmed = true;
+    };
+
+    const canvasEl = document.querySelector('#vp canvas');
+    if (canvasEl)
+      canvasEl.addEventListener('webglcontextlost', () => { window.__contextLost = true; });
+
+    const scene = new cleo.Scene();
+    scene.ambientLight = [0.18 * cleo.REFERENCE_ILLUMINANCE, 0.19 * cleo.REFERENCE_ILLUMINANCE,
+                          0.24 * cleo.REFERENCE_ILLUMINANCE];
+    const sun = new cleo.LightNode('sun', new cleo.DirectionalLight({
+      diffuse: [1.0, 0.97, 0.9], specular: [1, 1, 1], ambient: [0.18, 0.19, 0.24],
+    }), true);
+    sun.setRotation([50, -30, 0]);
+    scene.addNode(sun);
+
+    // Far enough back that the whole scattered field is on screen at once. That is the reproduction:
+    // the complaint is not a slow orbit, it is the single frame after a whole-terrain generate.
+    const camera = new cleo.CameraNode('camera', new cleo.Camera({ type: 'perspective', far: 4000 }));
+    camera.setPosition([0, 90, 190]);
+    camera.setRotation([22, 0, 0]);
+    camera.active = true;
+    scene.addNode(camera);
+
+    const terrain = new cleo.Terrain({ size: 400, resolution: 65 });
+    const landscape = new cleo.LandscapeNode('landscape', terrain);
+    scene.addNode(landscape);
+
+    // The prototype: one heavy sub-model, as an imported tree arrives after `flattenLevel`.
+    const heavy = new cleo.Model(
+      cleo.Geometry.Sphere(segments, 3.0),
+      cleo.Material.PBR({ baseColor: [0.3, 0.42, 0.2], metallic: 0.0, roughness: 0.8 }),
+    );
+    const layer = cleo.FoliageLayer.Mesh('heavy', heavy, { minScale: 1, maxScale: 1 });
+    layer.castShadows = shadows;
+    // The renderer's global cull distance would hide most of this; the layer's own overrides it, and 0
+    // here means "use the global", so it is set past the far corner of the terrain on purpose.
+    layer.cullDistance = 2000;
+    terrain.addFoliage(layer);
+
+    // Without `?lods=1`: no levels and no impostor. That is the state a foliage rule is in when its LOD
+    // chain failed to resolve — the condition this whole investigation started from. Nothing reduces
+    // with distance, so every visible instance is the full prototype.
+    //
+    // With it: the ladder and the card the prototype should have had. `setPrototype` takes the same
+    // rule-shaped payload the terrain material hands the engine, so this exercises the real derivation
+    // rather than reaching into the layer's fields.
+    if (withLods) {
+      const protoOf = (seg) => new cleo.Model(
+        cleo.Geometry.Sphere(seg, 3.0),
+        cleo.Material.PBR({ baseColor: [0.3, 0.42, 0.2], metallic: 0.0, roughness: 0.8 }),
+      ).serialize();
+
+      // A stand-in for the editor's baked card: the harness has no offscreen bake rig, and what is being
+      // gated here is the RENDERER's impostor bucket, not the quality of the sheet it samples.
+      const c = document.createElement('canvas');
+      c.width = c.height = 64;
+      const cg = c.getContext('2d');
+      cg.fillStyle = 'rgba(70, 110, 50, 1)';
+      cg.beginPath(); cg.arc(32, 32, 30, 0, Math.PI * 2); cg.fill();
+      cleo.TextureManager.Instance.addTextureFromBase64(c.toDataURL('image/png'), { mipMap: true }, 'impostorCard');
+
+      layer.setPrototype({
+        kind: 'mesh', name: 'heavy',
+        models: [protoOf(segments)],
+        lods: [
+          { models: [protoOf(Math.max(8, Math.round(segments / 3))), ], distance: 40 },
+          { models: [protoOf(Math.max(8, Math.round(segments / 9))), ], distance: 90 },
+        ],
+        billboard: { textureId: 'impostorCard', distance: 140 },
+        cullDistance: 2000,
+        castShadows: shadows,
+        // Identical to what the layer already has: a changed scale RANGE re-rolls every instance and
+        // rebuilds the grid, which would make the two runs incomparable.
+        minScale: 1, maxScale: 1,
+      });
+    }
+
+    // A lattice rather than `generateFoliageEverywhere`: same instance count and the same all-visible
+    // first frame, without depending on a splat the page would also have to paint.
+    const side = Math.max(1, Math.round(Math.sqrt(instances)));
+    const step = 380 / side;
+    for (let i = 0; i < side; i++)
+      for (let j = 0; j < side; j++)
+        layer.pushInstance(-190 + i * step, 0, -190 + j * step);
+    layer.commit();
+
+    window.__foliage = () => ({
+      count: layer.count,
+      cells: layer.cells.length,
+      levels: layer.levels.length,
+      impostor: !!layer.billboardModel,
+      impostorFrom: layer.billboardDistance,
+      // Cells resting in each draw bucket. The last entry is the impostor, and a non-zero one is the
+      // proof the card is actually taking over rather than merely being configured.
+      bucketCells: layer.buckets.map(b => (b ? b.length : 0)),
+      castShadows: layer.castShadows,
+      // Chunks actually allocated per bucket, which is the batching decision made visible.
+      colourChunks: layer.batches.map(b => (b ? b.length : 0)),
+      shadowChunks: layer.shadowBatches.map(b => (b ? b.length : 0)),
+    });
+    window.__stats = () => {
+      const s = engine.renderer.stats;
+      return {
+        drawCalls: s.drawCalls, instancedDrawCalls: s.instancedDrawCalls,
+        instances: s.instances, triangles: s.triangles,
+        foliageDraws: s.foliageDraws, foliageShadowDraws: s.foliageShadowDraws,
+        foliageCells: s.foliageCells, foliageCellsScanned: s.foliageCellsScanned,
+        frameMs: s.frameMs,
+      };
+    };
+    window.__budget = cleo.FOLIAGE_DRAW_TRIANGLE_BUDGET;
+
+    engine.setScene(scene);
+    scene.start();
+    engine.run();
+    window.__ready = true;
+  } catch (e) {
+    window.__error = (e && e.stack) || String(e);
+  }
+})();
+</script>
+</body>
+</html>
