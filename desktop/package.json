@@ -1,6 +1,6 @@
 {
   "name": "cleo-desktop",
-  "version": "0.156.27",
+  "version": "1.0.0",
   "description": "Electron desktop shell for the Cleo engine editor + game publishing",
   "main": "main.js",
   "author": "Ariel Riveros",
