@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Texture, Skybox, SkyboxNode } from 'cleo'
-import { CubemapFaces } from 'cleo/graphics/texture';
+// `import type`, not a value import: dist ships only graphics/texture.d.ts, and vite.config.ts aliases
+// `cleo` to the engine source, where this subpath is not a module at all. Both make it type-only.
+import type { CubemapFaces } from 'cleo/graphics/texture';
 import Collapsable from '../../../components/Collapsable'
 import { SkyboxIcon } from '../sectionIcons'
 import { useEventBus } from '../../EventBusContext';

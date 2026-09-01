@@ -5,9 +5,10 @@ import { setWgslTranslator, hasWgslTranslator } from 'cleo'
  * are user GLSL, so the WebGPU check happens in the app; the engine keeps only a slot
  * (`setWgslTranslator`) and a published game never fills it.
  *
- * Two rules keep 1.3 MB of shader compiler out of the bundle: the import must keep `webpackIgnore` so the
- * browser resolves it at runtime, and it must be called on demand from the custom-material inspector
- * rather than at boot. The artifact is copied to `naga/` by CopyWebpackPlugin.
+ * Two rules keep 1.3 MB of shader compiler out of the bundle: the import must keep `@vite-ignore` so the
+ * browser resolves it at runtime rather than the bundler pulling it into the graph, and it must be
+ * called on demand from the custom-material inspector rather than at boot. The artifact is emitted to
+ * `naga/` by the `cleo:naga-assets` plugin in vite.config.ts, which also serves it in dev.
  */
 
 let loading: Promise<boolean> | null = null
@@ -17,7 +18,7 @@ const assetUrl = (file: string) => new URL(`naga/${file}`, document.baseURI).hre
 
 async function load(): Promise<boolean> {
   try {
-    const mod: any = await import(/* webpackIgnore: true */ assetUrl('nagaGlsl.js'))
+    const mod: any = await import(/* @vite-ignore */ assetUrl('nagaGlsl.js'))
     await mod.default({ module_or_path: assetUrl('nagaGlsl_bg.wasm') })
     // naga's errors carry its diagnostic, which names the GLSL construct at fault; pass them through
     // untouched so the material editor can show that text.

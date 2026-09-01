@@ -18,5 +18,9 @@
 <body>
     <div id="game-viewport"></div>
     <div id="ui-root"></div>
+    <!-- Written here rather than injected: this file is copied verbatim by vite.player.config.ts.
+         A classic `defer` script, never type="module" -- a published desktop game is loaded from
+         file:// (desktop/gameTemplates.js), where a module script is blocked by the opaque origin. -->
+    <script defer src="game.js"></script>
 </body>
 </html>

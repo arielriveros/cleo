@@ -16,7 +16,7 @@ import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../ut
 import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey } from "cleo";
 import type { SceneChange, TerrainFoliageRule } from "cleo";
 import NullImage from '../images/null.png';
-import EventEmitter from "events";
+import EventEmitter from "../utils/eventEmitter";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
 import { createMaterialPreviewScene } from './demoScene/createMaterialPreviewScene';
 import { previewSphereGeometry, PREVIEW_TERRAIN_RADIUS, PREVIEW_TERRAIN_SIZE, REFERENCE_LANDSCAPE }

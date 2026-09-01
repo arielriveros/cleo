@@ -20,7 +20,7 @@ const repo = fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]editor[\
 // this builds a workspace the way the editor does and runs the real compiler over it.
 //
 // The declaration payload is gathered from dist/ here rather than through `workspaceTypeFiles()`, which
-// depends on webpack's require.context and cannot run under vitest. The LAYOUT is what is under test, and
+// depends on an `import.meta.glob` the app bundler resolves. The LAYOUT is what is under test, and
 // it is reproduced exactly: node_modules/cleo/<same rel path>, the synthetic package.json, and the two
 // ambient files under .cleo/types.
 
@@ -51,7 +51,7 @@ beforeAll(async () => {
   const dist = path.join(repo, 'dist');
   const glMatrix = path.join(repo, 'editor', 'node_modules', 'gl-matrix', 'index.d.ts');
   const cannon = path.join(repo, 'editor', 'node_modules', 'cannon-es', 'dist', 'cannon-es.d.ts');
-  // dist/ is gitignored and built by webpack, so a clean checkout has nothing to check against.
+  // dist/ is gitignored and built by the engine's webpack, so a clean checkout has nothing to check against.
   if (!existsSync(path.join(dist, 'cleo.d.ts')) || !existsSync(glMatrix) || !existsSync(cannon)) {
     skip = true;
     return;

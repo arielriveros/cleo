@@ -1,4 +1,12 @@
 import { Logger } from "../../core/logger";
+// A static ESM import, not `require`: the editor now compiles the engine from source under Vite
+// (editor/vite.config.ts aliases `cleo` here), and a bare CommonJS `require` survives that build
+// as a literal call -- "require is not defined" in the renderer, at import time. Both bundlers
+// give a CJS module's `module.exports` as the default binding, so this is the same function.
+// It stays STATIC on purpose: `dist/cleo.js` is a single UMD file, and a dynamic import would
+// split this multi-MB emscripten blob into a second chunk nothing loads it from.
+// @ts-ignore -- emscripten UMD artifact, no declarations
+import assimpjs from './assimpjs';
 
 // aiTextureType. A `$tex.file` property carries its type in `semantic`, and a material may well use more
 // than one of these for the same slot, so each slot below is a PREFERENCE LIST tried in order.
@@ -20,8 +28,6 @@ const DECODABLE_HINTS = ['png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp'];
 // Normals: NORMALS is the correct type and what FBX/glTF use. HEIGHT stays as a fallback because assimp
 // maps OBJ's `bump` directive onto it, and that is the case this code was originally written against.
 const NORMAL_SLOT = [NORMALS_TEXTURE, HEIGHT_TEXTURE];
-
-const assimpjs = require('./assimpjs');
 
 // The emscripten module, instantiated once and reused: each `assimpjs()` call builds a fresh WASM
 // instance, and an import can need it twice.

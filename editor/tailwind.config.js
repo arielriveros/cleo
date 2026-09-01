@@ -6,6 +6,7 @@ const rgbVar = (name) => `rgb(var(${name}) / <alpha-value>)`;
 
 module.exports = {
   content: [
+    "./index.html",
     "./src/**/*.{js,ts,jsx,tsx,html}",
     "./public/**/*.{html,js}"
   ],

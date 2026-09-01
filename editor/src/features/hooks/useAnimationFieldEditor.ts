@@ -1,4 +1,4 @@
-import EventEmitter from 'events';
+import EventEmitter from '../../utils/eventEmitter';
 import { Logger, Node, Scene, ModelNode, CleoEngine } from 'cleo';
 import { cryptoRandomId } from '../../utils/ids';
 import { MaterialAsset } from '../../utils/materials';

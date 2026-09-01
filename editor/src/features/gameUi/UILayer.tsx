@@ -11,7 +11,7 @@ import { UIBinding, UIRegistry, syncUI } from './uiSync';
  *
  * Shared verbatim between the editor viewport and the published player, so it must take everything as
  * props and read no React context: the player bundle has no `EngineContext`, and
- * `webpack.player.config.js` forbids anything editor-only from being reachable from its entry.
+ * `vite.player.config.ts` forbids anything editor-only from being reachable from its entry.
  *
  * Structure comes from the scene's UI nodes; geometry and content are written imperatively once per frame
  * by {@link syncUI}.

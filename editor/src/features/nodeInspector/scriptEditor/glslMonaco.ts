@@ -1,7 +1,7 @@
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api'
 
 // Registers a lightweight GLSL language for Monaco: a Monarch tokenizer only, no language worker, so it
-// needs no monaco-editor-webpack-plugin entry. Registered once from ensureMonaco().
+// needs no language contribution in monacoSetup.ts. Registered once from ensureMonaco().
 
 let registered = false
 

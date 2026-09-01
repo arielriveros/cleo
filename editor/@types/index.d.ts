@@ -1,12 +1,6 @@
+// `vite/client` supplies the asset-module declarations this file used to hand-write (*.png, *.jpg,
+// *.svg, *.css ...) plus the two suffix families the script editor relies on -- `?raw` for the engine's
+// declaration text and `?worker` for Monaco's workers -- and the `import.meta.glob` / `import.meta.env`
+// types that replaced webpack's require.context.
+/// <reference types="vite/client" />
 /// <reference types="@webgpu/types" />
-
-declare module '*.jpg';
-declare module '*.png';
-// file-loader hands back a URL string (see editor/webpack.config.js).
-declare module '*.svg' {
-  const url: string;
-  export default url;
-}
-declare module '*.jpeg';
-declare module '*.bmp';
-declare module '*.css';

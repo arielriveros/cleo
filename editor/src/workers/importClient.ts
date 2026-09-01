@@ -35,8 +35,12 @@ function getWorker(): Worker | null {
   if (worker) return worker;
 
   try {
-    // webpack 5 only emits the worker as its own chunk for this exact `new Worker(new URL(...))` form.
-    worker = new Worker(new URL('./importWorker.ts', import.meta.url));
+    // `new Worker(new URL('./x.ts', import.meta.url), { type: 'module' })` is the only form Vite
+    // rewrites into a real worker chunk, and the `{ type: 'module' }` is NOT optional: Vite's
+    // getWorkerType() defaults to "classic" when the second argument is absent, and would then hand a
+    // classic Worker an ES module. That fails inside the worker, trips onerror, and drops every job
+    // into the inline fallback below -- correct results, no error, silently off the worker thread.
+    worker = new Worker(new URL('./importWorker.ts', import.meta.url), { type: 'module' });
   } catch {
     unavailable = true;
     return null;

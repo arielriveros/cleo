@@ -13,9 +13,17 @@ var Module=typeof assimpjs!="undefined"?assimpjs:{};var readyPromiseResolve,read
 
 );
 })();
-if (typeof exports === 'object' && typeof module === 'object')
-  module.exports = assimpjs;
-else if (typeof define === 'function' && define['amd'])
-  define([], function() { return assimpjs; });
-else if (typeof exports === 'object')
-  exports["assimpjs"] = assimpjs;
+// --- Cleo: the vendored artifact's UMD tail, replaced ------------------------------------------
+// It was:
+//     if (typeof exports === 'object' && typeof module === 'object') module.exports = assimpjs;
+//     else if (typeof define === 'function' && define['amd']) define([], () => assimpjs);
+//     else if (typeof exports === 'object') exports['assimpjs'] = assimpjs;
+//
+// Nothing loads this as CommonJS or AMD -- graphics/utils/assimpLoader.ts is the only consumer,
+// and it imports the default. Under vitest and vite-node, though, `module` and `exports` BOTH
+// exist while the module itself is ESM, so that first branch fired and assigned to a namespace
+// object with only getters: "Cannot set property default of [object Module]", at import time,
+// taking twelve test files down with it. One real export is correct in every loader the repo
+// uses: webpack (harmony), Vite, and vite-node.
+// RE-APPLY THIS IF THE ARTIFACT IS REVENDORED.
+export default assimpjs;

@@ -39,7 +39,7 @@ import {
   UIToggleNode,
   UITextInputNode,
 } from 'cleo'
-import type EventEmitter from 'events'
+import type EventEmitter from '../../utils/eventEmitter'
 import type { ShapeDescription } from '../EngineContext'
 import {
   CanvasIcon, WorldUIIcon, PanelIcon, StackIcon, SpacerIcon, TextIcon, ImageIcon,

@@ -1,8 +1,33 @@
 // One-time Monaco bootstrap for the script editor: compiler options, the engine's real types and the two
-// themes. Imported only from the lazily-loaded MonacoCodeEditor, so monaco-editor stays out of the initial
-// bundle. Import the ESM entry, not a subpath: that is what MonacoWebpackPlugin's loader rule matches to
-// prepend a working `self.MonacoEnvironment`.
+// themes. Imported only from the lazily-loaded MonacoCodeEditor, so monaco-editor stays out of the
+// initial bundle.
+//
+// MonacoWebpackPlugin used to synthesise everything below: its loader rewrote an `editor.api` import to
+// also pull in every editor contribution plus the configured languages, and prepended a working
+// `self.MonacoEnvironment`. Vite has no such plugin, so it is spelled out. edcore.main is
+// editor.api + all editor contributions; the three language contributions are exactly the set the
+// plugin was configured with (`languages: ['typescript', 'javascript']`). Adding a language is now an
+// import here -- there is no config knob any more, and forgetting one surfaces at runtime as an
+// unregistered language rather than as a build diff.
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
+import 'monaco-editor/esm/vs/editor/edcore.main.js';
+import 'monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution.js';
+import 'monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution.js';
+import 'monaco-editor/esm/vs/language/typescript/monaco.contribution.js';
+
+// `?worker` compiles each worker to its own bundle and hands back a constructor, so no worker URL is
+// hard-coded any more -- the plugin's `monaco/[name].worker.js` filename convention went with it. Set
+// at module scope, which is the only ordering that matters: Monaco reads MonacoEnvironment lazily, on
+// the first worker spawn, which cannot happen before an editor or model exists.
+import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
+import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
+
+(self as unknown as { MonacoEnvironment: unknown }).MonacoEnvironment = {
+  getWorker(_workerId: string, label: string) {
+    return label === 'typescript' || label === 'javascript' ? new TsWorker() : new EditorWorker();
+  },
+};
+
 import { loadCleoTypes } from './cleoTypes';
 import { defineCleoThemes } from './monacoTheme';
 import { registerGlsl } from './glslMonaco';

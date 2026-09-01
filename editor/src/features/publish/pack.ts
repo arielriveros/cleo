@@ -4,7 +4,7 @@
 // parse and no copy (see player/unpack.ts).
 // Pure data — no DOM, no WebGL, no `cleo` import: this module runs inside projectWorker.ts.
 
-// JSON, not a .ts constant, so webpack.player.config.js (CommonJS) can `require` the same file.
+// JSON, not a .ts constant, so vite.player.config.ts can import the same file to stamp build.json.
 import playerContract from './playerContract.json';
 // The container primitives (alignment, chunk refs, byte hashing) are shared with the project export's
 // assets.bin — see utils/chunkBlob.ts.
