@@ -48,6 +48,13 @@ export class Mesh {
     // Index format per LOD level, parallel to _lodCounts and aliasing level 0 like _lodBuffers does.
     private _lodFormats: IndexFormat[] = [];
     private _lod: number = 0;
+    // A tessellated copy produced by the compute displacer, drawn INSTEAD of the buffers above when
+    // present. Owned by the displacer, not by this Mesh — see setDisplaced.
+    private _displacedVertices: GpuBuffer | null = null;
+    private _displacedIndices: GpuBuffer | null = null;
+    private _displacedVertexCount: number = 0;
+    private _displacedIndexCount: number = 0;
+    private _displacedSegments: number = 0;
 
     constructor() {
         // COPY_DST because terrain sculpting rewrites the geometry in place through updateVertexData.
@@ -385,24 +392,82 @@ export class Mesh {
     /** Null until a legacy draw or `initializeVAO` has needed one — see `_vao`. */
     public get vertexArray(): WebGLVertexArrayObject | null { return this._vertexArray; }
     /** The device-owned vertex buffer. */
-    public get vertexBuffer(): GpuBuffer { return this._vertexBuffer; }
+    public get vertexBuffer(): GpuBuffer { return this._displacedVertices ?? this._vertexBuffer; }
     /** The index buffer, for a draw recorded through the RHI. Read `indexFormat` alongside it. */
-    public get indexBuffer(): GpuBuffer | null { return this._indexBuffer; }
-    public get indexFormat(): IndexFormat { return this._indexFormat; }
-    public get indexCount(): number { return this._indexCount; }
+    public get indexBuffer(): GpuBuffer | null { return this._displacedIndices ?? this._indexBuffer; }
+    public get indexFormat(): IndexFormat {
+        // Tessellation always overflows uint16: level 3 on a 3941-triangle mesh is 177k vertices.
+        return this._displacedIndices ? 'uint32' : this._indexFormat;
+    }
+    public get indexCount(): number {
+        return this._displacedIndices ? this._displacedIndexCount : this._indexCount;
+    }
+
+    /**
+     * The UNDISPLACED buffers, which the compute tessellator reads as storage.
+     *
+     * Named apart from the getters above precisely because those now lie about which buffer is drawn —
+     * a dispatch that read `vertexBuffer` would read its own output and feed the displacement back into
+     * itself, one level deeper every frame.
+     */
+    public get baseVertexBuffer(): GpuBuffer { return this._vertexBuffer; }
+    public get baseIndexBuffer(): GpuBuffer | null { return this._indexBuffer; }
+    public get baseVertexCount(): number { return this._vertexCount; }
+    public get baseIndexCount(): number { return this._indexCount; }
+    public get isDisplaced(): boolean { return this._displacedIndices !== null; }
+    /** Segments per edge the live displaced buffers were built at; 0 when none. See `remapSubmesh`. */
+    public get displacedSegments(): number { return this._displacedSegments; }
+
+    /**
+     * Point the draw getters at a tessellated copy of this mesh. `null` buffers restore the original.
+     *
+     * The buffers are owned by the caller (the displacer pools them per model), not by the Mesh: they
+     * outlive an LOD switch and are rebuilt only when the height map, depth or level changes, whereas
+     * `dispose` runs whenever the model does.
+     */
+    public setDisplaced(vertices: GpuBuffer | null, indices: GpuBuffer | null,
+                        vertexCount: number, indexCount: number, segments: number): void {
+        this._displacedVertices = vertices;
+        this._displacedIndices = indices;
+        this._displacedVertexCount = vertexCount;
+        this._displacedIndexCount = indexCount;
+        this._displacedSegments = vertices && indices ? segments : 0;
+    }
+
+    /**
+     * A submesh's index range, translated onto the tessellated buffer.
+     *
+     * The output index buffer groups its triangles by INPUT triangle, in order, so an input range that
+     * begins at triangle `t` and covers `k` of them becomes one contiguous run of `k * n^2` triangles
+     * starting at `t * n^2`. Without this a multi-material model draws every submesh from the base
+     * offsets into a buffer that is `n^2` times longer, which silently shreds the material assignment.
+     */
+    public remapSubmesh(indexOffset: number, indexCount: number): { offset: number; count: number } {
+        if (!this._displacedIndices) return { offset: indexOffset, count: indexCount };
+        const perTri = this._displacedSegments * this._displacedSegments;
+        return { offset: (indexOffset / 3) * perTri * 3, count: (indexCount / 3) * perTri * 3 };
+    }
     /** The dedicated bone buffers, for a skinned draw recorded through the RHI. */
     public get boneIndicesBuffer(): GpuBuffer | null { return this._boneIndicesBuffer; }
     public get boneWeightsBuffer(): GpuBuffer | null { return this._boneWeightsBuffer; }
     /** The index buffer for the ACTIVE LOD level. Levels share vertices, so only this binding changes. */
     public get activeIndexBuffer(): GpuBuffer | null {
+        // A displaced mesh ignores the LOD index buffers: they address the BASE vertices, and the
+        // tessellated buffer has neither the same count nor the same ordering. Level-of-detail for a
+        // displaced model is the subdivision level, not these.
+        if (this._displacedIndices) return this._displacedIndices;
         return this.hasLods ? this._lodBuffers[this._lod] : this._indexBuffer;
     }
     public get activeIndexCount(): number {
+        if (this._displacedIndices) return this._displacedIndexCount;
         return this.hasLods ? this._lodCounts[this._lod] : this._indexCount;
     }
     public get activeIndexFormat(): IndexFormat {
+        if (this._displacedIndices) return 'uint32';
         return this.hasLods ? this._lodFormats[this._lod] : this._indexFormat;
     }
-    public get vertexCount(): number { return this._vertexCount; }
+    public get vertexCount(): number {
+        return this._displacedVertices ? this._displacedVertexCount : this._vertexCount;
+    }
     public get isAnimated(): boolean { return this._isAnimated; }
 }

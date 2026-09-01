@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { ModelNode, Material, CustomMaterial, TERRAIN_RELIEF_ENABLED } from 'cleo';
+import { useState, useEffect, useMemo } from 'react';
+import { ModelNode, Material, CustomMaterial, TERRAIN_RELIEF_ENABLED, MeshDisplacer, MAX_TESS_LEVEL, tessSegments, tessBudget, TextureManager } from 'cleo';
 import { useEventBus } from '../../EventBusContext';
 import { vec3ToHex } from '../../../utils/UtilFunctions';
 import { newCustomMaterial } from '../../../utils/customMaterials';
@@ -9,6 +9,7 @@ import CustomMaterialEditor from './CustomMaterialEditor';
 import { PropertyTable, PropertyRow, Field, Select, NumberInput, Slider, Toggle, ColorInput, Section } from '../../../components/ui';
 import { MaterialIcon } from '../sectionIcons';
 
+const DISPLACE_HINT = 'Subdivide this mesh in a compute pass and displace it by the Height map, so the relief becomes real geometry — a real silhouette, real self-shadowing, correct depth. Each step multiplies the triangle count by four. WebGPU only; WebGL2 draws the mesh as authored.'
 const TERRAIN_HEIGHT_HINT = 'Depth is a fraction of one texture repeat, the same as on any mesh — so this material reads the same on both. The Terrain Material inspector shows what that is in metres. Relief is drawn per fragment: it shades and self-shadows but has no silhouette, and physics follows the sculpted surface.';
 
 export default function MaterialEditor(props: {node: ModelNode}) {
@@ -41,6 +42,39 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   // Parallax occlusion depth; inert without a Height map.
   const [dispScale, setDispScale] = useState<number>(
     (material as any).displacementScale ?? material.properties.get('dispScale') ?? 0.05);
+  // Which unit that depth is in. Terrain has its own (metres, baked) and never shows this control.
+  const [depthInWorld, setDepthInWorld] = useState<boolean>(
+    material.properties.get('depthInWorld') !== false);
+  // Subdivision level for compute tessellation. On the MATERIAL rather than the model: the surface
+  // decides how it wants to be represented, and a material moved onto another mesh carries its relief.
+  const [displaceLevel, setDisplaceLevel] = useState<number>(
+    Number(material.properties.get('displaceLevel') ?? 0));
+  // World units spanned by one UV unit on THIS mesh. The number that decides whether a uv depth means
+  // millimetres or metres, and the one thing that made parallax on an atlas-mapped scan unusable while
+  // looking correct on every primitive: a tiling material puts one repeat inside a few centimetres, a
+  // photogrammetry scan puts one repeat around the whole object (measured: 47.97 on a scanned branch).
+  const worldPerUv = useMemo(
+    () => (model.geometry ? model.geometry.worldPerUv() : 1),
+    [model.geometry, (model.geometry as any)?.geometryVersion]);
+
+  // What the chosen subdivision costs on THIS mesh, and whether the mesh can carry the map at it.
+  // `texelsPerEdge` is the number that decides the level: it halves every step, and below about two
+  // the vertex grid starts resolving the height map's own features instead of the shape they sit on.
+  const displaceBudget = useMemo(() => {
+    const triangles = Math.floor((model.geometry?.indices.length ?? 0) / 3);
+    return tessBudget(triangles, tessSegments(displaceLevel), 14);
+  }, [model.geometry, displaceLevel]);
+  const heightWidth = (() => {
+    const id = material.textures.get('displacementMap');
+    const image = id ? (TextureManager.Instance.getTexture(id)?.data as HTMLImageElement | undefined) : undefined;
+    return image?.naturalWidth ?? 0;
+  })();
+  // MEASURED from the chart, not guessed from the triangle count — see `Geometry.meanUvEdge`. The
+  // guess read an 8-triangle ramp as 181 texels per edge when the truth is 512, which is why it looked
+  // like the feature was broken rather than like the mesh being too coarse for the map.
+  const texelsPerEdge = heightWidth > 0 && model.geometry
+    ? (model.geometry.meanUvEdge() * heightWidth) / tessSegments(displaceLevel)
+    : 0;
   // Whether the Height map is really a DEPTH map (white = deep), the convention most downloaded PBR
   // packs ship. Nothing can detect this from the bytes, and the wrong answer inverts the relief.
   const [invertHeight, setInvertHeight] = useState<boolean>(
@@ -229,10 +263,74 @@ export default function MaterialEditor(props: {node: ModelNode}) {
             map on a mesh gets 24%, so terrain looked flat beside an identical material. The Terrain
             Material inspector quotes the repeat in metres beside Tiling, which is what turns this
             fraction back into a distance. */}
-        <PropertyRow label='Depth'>
-          <Slider min={0} max={0.5} step={0.005} value={dispScale}
+        <PropertyRow label='Depth' hint={depthInWorld
+          ? `Relief depth in world units. One UV unit is ${worldPerUv.toFixed(2)} on this mesh, so this is ${(dispScale / Math.max(worldPerUv, 1e-6)).toFixed(4)} of a texture repeat.`
+          : `A fraction of one texture repeat. One UV unit is ${worldPerUv.toFixed(2)} world units on this mesh, so this is ${(dispScale * worldPerUv).toFixed(3)} units of relief.`}>
+          {/* The world range is the uv range converted, so nothing the old control could reach becomes
+              unreachable — and on a cube, where one repeat IS one unit, the two are identical. */}
+          <Slider min={0} max={depthInWorld ? 0.5 * worldPerUv : 0.5}
+                  step={(depthInWorld ? 0.5 * worldPerUv : 0.5) / 200}
+                  value={dispScale}
                   onChange={(v) => { setHeightProp('dispScale', v); setDispScale(v); }} />
         </PropertyRow>
+        {/* The readout that would have saved a week. A depth in uv is meaningless until you know what a
+            uv unit is worth, and nothing in the editor said. */}
+        {!isTerrain && (
+          <PropertyRow label='Scale'>
+            <span className='text-xs text-muted'>
+              1 UV = {worldPerUv.toFixed(2)} units{'  ·  '}
+              relief {(depthInWorld ? dispScale : dispScale * worldPerUv).toFixed(3)} units
+            </span>
+          </PropertyRow>
+        )}
+        {!isTerrain && (
+          <PropertyRow label='Depth unit' hint='World units keep one material reading the same on a cube, on tiled ground and on a photogrammetry atlas. UV units are the older meaning, a fraction of one texture repeat, and are what a project saved before this existed keeps.'>
+            <Toggle label='World units' checked={depthInWorld}
+                    onChange={(c) => {
+                      // Convert the NUMBER as the unit changes, so the surface does not jump: the
+                      // control is switching how a depth is spelled, not how deep the relief is.
+                      const converted = c ? dispScale * worldPerUv : dispScale / Math.max(worldPerUv, 1e-6);
+                      setHeightProp('depthInWorld', c); setDepthInWorld(c);
+                      setHeightProp('dispScale', converted); setDispScale(converted);
+                    }} />
+          </PropertyRow>
+        )}
+        {!isTerrain && (
+          <PropertyRow label='Subdivision' hint={DISPLACE_HINT}>
+            {MeshDisplacer.Instance.canDisplace ? (
+              <div className='flex items-center gap-2 w-full'>
+                <Slider min={0} max={MAX_TESS_LEVEL} step={1} value={displaceLevel}
+                        onChange={(v) => { setHeightProp('displaceLevel', v); setDisplaceLevel(v); }} />
+                <span className='text-xs text-muted whitespace-nowrap'>
+                  {displaceLevel === 0 ? 'off' : `x${tessSegments(displaceLevel) ** 2}`}
+                </span>
+              </div>
+            ) : (
+              <span className='text-xs text-muted'>Needs WebGPU — this device has no compute shader.</span>
+            )}
+          </PropertyRow>
+        )}
+        {!isTerrain && displaceLevel > 0 && (
+          <PropertyRow label='Cost'>
+            <span className='text-xs text-muted'>
+              {displaceBudget.triangles.toLocaleString()} triangles{'  ·  '}
+              {(displaceBudget.vertexBytes / 1e6).toFixed(1)} MB
+              {texelsPerEdge > 0 ? `  ·  ~${texelsPerEdge.toFixed(0)} texels/edge` : ''}
+            </span>
+          </PropertyRow>
+        )}
+        {/* The number that explains a flat result, which otherwise reads as the feature not working.
+            Displacement band-limits to the mip matching its vertex spacing — correct, and it means a
+            mesh far coarser than its map carries only the map's lowest frequencies. */}
+        {!isTerrain && displaceLevel > 0 && texelsPerEdge > 8 && (
+          <PropertyRow label=''>
+            <span className='text-xs text-warning'>
+              One edge spans {texelsPerEdge.toFixed(0)} texels, so the geometry can only carry the
+              lowest frequencies of this map and will look nearly flat. Raise the level, tile the UVs,
+              or leave the detail to the normal map.
+            </span>
+          </PropertyRow>
+        )}
         {/* A height map is white at the PEAKS. A depth map - what `*_disp.png` in most PBR packs
             actually is - is white in the CREVICES. They are the same bytes, so nothing can tell them
             apart; getting it wrong turns brick into mortar rather than looking slightly off. If the

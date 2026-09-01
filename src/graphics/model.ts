@@ -1,4 +1,6 @@
 import { Mesh } from './mesh';
+// Runtime import, but not a cycle: meshDisplacer takes `Model` as a TYPE only.
+import { MeshDisplacer } from './systems/meshDisplacer';
 import { Material } from './material';
 import { Geometry } from '../core/geometry';
 import { Loader } from './loader';
@@ -134,6 +136,7 @@ export class Model {
     /** Identity of the current geometry, for `ModelNode`'s re-upload check. */
     public get geometryVersion(): number { return this._geometryVersion; }
 
+
     /**
      * Replace this model's geometry. **Terrain chunks only** — see
      * `Terrain._rebuildChunksIfDensityChanged`, which is its one caller.
@@ -164,6 +167,11 @@ export class Model {
      * no error at all. Safe to call twice.
      */
     public dispose(): void {
+        // Before the mesh, and not optional: a displaced model owns a tessellated vertex buffer of its
+        // own — 9.9 MB at level 3 on a 3941-triangle mesh, 33.8 at level 4 — held in a map keyed by this
+        // object. Every material tab that previews a displaced material mints a fresh Model, so without
+        // this, opening and closing one a few times is hundreds of megabytes the GPU never gets back.
+        MeshDisplacer.Instance.release(this);
         this._mesh.dispose();
     }
 

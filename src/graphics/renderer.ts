@@ -110,6 +110,7 @@ import { CubeFramebuffer } from './cubeFramebuffer';
 import { Material, CustomMaterial } from './material';
 import { ensureCustomShader, customShaderReady, customShaderModules, customForwardTypes, screenShaderResources, screenUserSamplerNames, customShaderResources } from './systems/customShaders';
 import { TexturePacker } from './systems/texturePacker';
+import { MeshDisplacer } from './systems/meshDisplacer';
 import { Model, Sprite, TextureManager } from '../cleo';
 import { Logger } from '../core/logger';
 import { frameStats, resetFrameStats, countFullscreenPass, setViewportSize } from './renderStats';
@@ -1339,6 +1340,12 @@ export class Renderer {
         // into the single packed texture the shaders sample. Before any pass binds a material.
         this._ensurePackedTextures(scene);
 
+        // Compute-tessellate any model asking for it, into buffers its Mesh then draws instead of the
+        // authored ones. Here for the same reason the texture pack is: this is a point in the frame
+        // where NO pass is open, and both open their own encoder. Skipped entirely on WebGL2, which has
+        // no compute stage and keeps the parallax march.
+        this._ensureDisplacedMeshes(scene);
+
         // Cache view/projection/inverse and update the culling frustum for this frame
         const view = this._activeCamera.viewMatrix;
         const proj = this._activeCamera.projectionMatrix;
@@ -1598,6 +1605,27 @@ export class Renderer {
 
     // Keep every material's derived texture slots in step with its authored sources. Per frame rather
     // than on assignment: sources decode asynchronously, and an unresolved pack simply retries.
+    /**
+     * Keep every displaced model's tessellated buffers current.
+     *
+     * Cheap per frame: `MeshDisplacer.update` compares a key over every input the dispatch reads and
+     * returns immediately when nothing moved, so the dispatch fires on a settings change and not
+     * otherwise. Models that stop asking for displacement are released here too, which is what puts
+     * their Mesh back on the authored buffers.
+     */
+    private _ensureDisplacedMeshes(scene: Scene): void {
+        const displacer = MeshDisplacer.Instance;
+        if (!displacer.canDisplace) return;
+        for (const node of scene.models) {
+            // SKINNED MODELS ARE REFUSED, and it is not an oversight. An AnimatedModel's vertices are
+            // deformed by the bone matrices in the VERTEX stage, so a compute pass over its buffer
+            // would tessellate and displace the bind pose and then hand the result to a skinning step
+            // whose joint bindings no longer address it. `lodGenerate` refuses them for the same
+            // reason, and `AnimatedModel.geometryVersion` returns a constant 0 — it never re-uploads.
+            if (node.model instanceof Model) displacer.update(node.model);
+        }
+    }
+
     private _ensurePackedTextures(scene: Scene): void {
         const packer = TexturePacker.Instance;
         // Per submesh material — a merged model's second range has its own maps to channel-pack.

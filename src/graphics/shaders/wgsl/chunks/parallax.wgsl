@@ -39,6 +39,36 @@ const POM_MIN_STEPS: f32 = 4.0;
  */
 const POM_TEXELS_PER_STEP: f32 = 1.0;
 /**
+ * The WORST texels per step the march may degrade to before the RAY is shortened instead.
+ *
+ * `parallaxSteps` asks for one step per texel and is capped at POM_MAX_STEPS. Past that cap the
+ * request is simply not met: the ray keeps its full length and the step grows. Measured against this
+ * file's own arithmetic, dispScale 0.05 at mip 0:
+ *
+ *     angle      1024 map     2048 map
+ *     45 deg      1.00         1.60
+ *     60 deg      1.38         2.77
+ *     70 deg      2.19         4.38
+ *     80 deg      4.28         8.55
+ *
+ * A step of eight texels walks clean over every feature in the height field, so the march reports the
+ * first sample that happens to land under the ray rather than the first intersection — a hit far from
+ * the fragment, in a direction that swings with the view. That is the grazing SMEAR, and no amount of
+ * secant refinement fixes it: the bracket is already eight texels wide.
+ *
+ * So bound what cannot be sampled. Two things could give: the step count (POM_MAX_STEPS, which costs
+ * fragments that are the cheapest in the frame to get wrong) or the ray's reach. Shortening the reach
+ * is Drobot's "limit stop condition to the LOD level" stated as a length, and it is self-correcting:
+ * the limit is in TEXELS, so it widens automatically with the mip as the surface minifies.
+ *
+ * 2, not 1. A bound equal to the target would clamp wherever the count is merely at its cap, which on
+ * a 2048 map starts at 45 degrees and would take 38% of the relief off a moderate view. At 2 nothing
+ * below ~60 degrees moves at all and the cap on undersampling is one octave — a bracket the secant
+ * step still resolves well. It is the knob for this trade: lower is flatter and cleaner at grazing,
+ * higher is deeper and streakier.
+ */
+const POM_MAX_TEXELS_PER_STEP: f32 = 2.0;
+/**
  * Lateral travel ceiling, in multiples of the depth — the value `1/cos(view)` saturates toward.
  *
  * 8, not 2. The reference has no ceiling at all: `P = viewDir.xy / viewDir.z` runs to infinity as the
@@ -81,87 +111,147 @@ const POM_SHADOW_STEPS: i32 = 8;
 const POM_CLIP_REACH: f32 = 0.12;
 
 /**
- * An ORTHONORMAL world<-tangent basis whose first two columns are the TRUE dP/du and dP/dv.
+ * The world -> uv basis the march runs in: how far u and v move per unit of world displacement.
  *
- * Deliberately not built from the tangent varyings, and deliberately not `tbn` with its bitangent
- * flipped back. Two independent things make the vertex frame unusable as a world->tangent transform:
+ * NOT an orthonormal rotation, and that is the whole point of this revision. `parallaxToTangent` reads
+ * it with three dot products, which is the RECIPROCAL (dual) basis' defining operation, not a
+ * transpose that happens to need orthonormality. Written this way the frame is exact for any chart —
+ * skewed, stretched, mirrored — instead of exact only for a square one.
  *
- * Its bitangent's sign is not a fact about the surface. chunks/modelVarying.wgsl negates the
- * bitangent for the green-down normal-map convention the importers produce, and
- * Geometry._calculateTangents FORCES bitangent = -(N x T) rather than reading the mesh's real
- * dP/dv. So tbn[1] lands on -dP/dv for terrain (whose UVs are left-handed: u -> +X, v -> +Z, giving
- * T x B = -N) and on +dP/dv for a right-handed mesh. One flip cannot serve both, and both run
- * through this code: the editor's terrain-material tab previews a TerrainMaterial on a SPHERE.
- * Getting that sign wrong mirrors the V half of the offset against the U half — a sheared,
- * wrong-way relief, which is exactly what this whole change exists to fix.
+ * ---------------------------------------------------------------------------------------------
+ * WHY THE ORTHONORMAL VERSION SHEARED, and why it looked fine until the camera orbited.
  *
- * And it is not orthonormal. Terrain pins T and B to world +X/+Z per vertex while N follows the
- * heightfield, so on any slope the columns are not mutually perpendicular, `transpose` is not
- * `inverse`, and the offset direction skews. Nothing re-orthogonalises after interpolation either.
+ * The previous frame took the chart's u axis and then FORCED `B = cross(n, T)`, i.e. perpendicular to
+ * it. A uv chart is under no obligation to be perpendicular. Measured over the 3941 triangles of a
+ * photogrammetry scan: |90 - angle(dP/du, dP/dv)| is 5 degrees median, 12.5 at p75, **23.9 at p90**,
+ * 34.5 at p95 and 81.5 at worst — **31% of the mesh more than 10 degrees off square**.
  *
- * Derivatives cannot be wrong about either one: they measure the mapping this fragment actually
- * has. The cost is two dpdx/dpdy and two cross products, paid only by surfaces doing parallax; the
- * uv's own derivatives are taken by the caller, which needs them for every textureSampleGrad anyway.
+ * Forcing perpendicularity there does not shrink the offset, it ROTATES it, by an amount that depends
+ * on where the view sits relative to the skew. Checked against the analytic offset
+ * `-D * (v.T*, v.B*) / (v.n)`, on a p90 chart (24 degrees skew, 1.5 anisotropy) at a 60 degree view:
+ *
+ *     azimuth 30 deg:  0.4 degrees of direction error, magnitude 1.10x
+ *     azimuth 75 deg: 28.7 degrees of direction error, magnitude 1.13x
+ *
+ * Same surface, same view angle, only the camera moved AROUND it. That is why zooming looked correct
+ * while rotating or panning broke the illusion, and why it was worst on triangles turned away from the
+ * camera: the offset grows as `tan(theta)`, so the same angular error covers more texels. The dual
+ * form below is exact — 0.00 degrees, 1.000x — in every one of those cases, and reduces to exactly the
+ * old frame on a square chart, so a cube, a plane and a sphere do not move at all.
+ *
+ * THE VERTEX TANGENT CANNOT FIX THIS, which is why this no longer prefers it. `Geometry
+ * ._calculateTangents` stores `bitangent = cross(N, T) * w` — perpendicular BY CONSTRUCTION — so the
+ * varying basis carries no skew to correct with. Skew lives only in the derivatives. (The weld it was
+ * introduced alongside stays: `Geometry.weldSmooth` is worth having on its own, and it more than
+ * halves the vertex count of a converted mesh.) If both are ever wanted at once, the change needed is
+ * on the CPU: store the accumulated dP/dv instead of a forced perpendicular, which `_calculateTangents`
+ * already computes for its handedness test and then throws away.
+ *
+ * Built from SCREEN-SPACE DERIVATIVES. Those measure the mapping this fragment actually has, where the
+ * tangent varyings measure the mapping the exporter recorded — and the two disagree about skew, which
+ * is the quantity that matters here. They are also the only source that does not need a sign
+ * convention: chunks/modelVarying.wgsl negates the bitangent for the green-down normal-map decode and
+ * src/terrain/terrain.ts pushes [0,0,-1] to cancel it, so `tbn[1]` means the opposite thing on a mesh
+ * and on terrain. Nothing below reads it.
  *
  * CALL THIS IN UNIFORM CONTROL FLOW — above every per-fragment branch, exactly like the gradients.
- * `dpdx`/`dpdy` carry the same rule `textureSample` does, and a call sited below a per-fragment
- * early return puts them in non-uniform flow. naga's validator lets that through; Dawn's does not,
- * and a module Dawn rejects takes its pipeline, its bind groups and the whole pass down with it.
+ * `dpdx`/`dpdy` carry the same rule `textureSample` does, and a call sited below a per-fragment early
+ * return puts them in non-uniform flow. naga's validator lets that through; Dawn's does not, and a
+ * module Dawn rejects takes its pipeline, its bind groups and the whole pass down with it.
  *
- * `tbn` itself is left untouched for normal-map decoding. The green-down convention is shared by
- * pbrGBuffer, pbrForward, both blinnPhong chunks, the hand-written materials/pbr.vs and the
- * custom-material varying contract; changing it would flip lit relief across the whole engine.
+ * `tbn` itself is left untouched for normal-map decoding; only its normal is read here.
  */
+struct ParallaxBasis {
+    /**
+     * World -> uv. Columns 0 and 1 are the reciprocal basis scaled by `worldPerUv`, so
+     * `dot(dir, frame[0])` is the u-rate; column 2 is the shading normal, oriented to the eye.
+     *
+     * Deliberately NOT orthonormal: a skewed chart has non-perpendicular duals and forcing them square
+     * is what rotated the offset. Do not "fix" this by normalising the columns.
+     */
+    frame: mat3x3<f32>,
+    /**
+     * World units spanned by ONE UV UNIT, isotropic-equivalent — `sqrt(|dP/du| * |dP/dv|)`.
+     *
+     * The number that decides whether a depth expressed in uv means millimetres or metres, and what
+     * lets a material author relief in WORLD units and read the same on a cube, on tiled ground and on
+     * a photogrammetry scan. Measured on a scanned branch whose 0..1 atlas covers the whole 62-unit
+     * object: 47.97 — so a default depth of 0.05 uv asked for 2.4 units of relief on a branch 12.7
+     * units thick, and the march reached across the atlas for texels belonging to its far side.
+     *
+     * The geometric mean, matching `parallaxFade`/`parallaxLodRaw`: `max` is the right reading when
+     * asking whether something aliases on either axis, and the wrong one for "how big is this chart".
+     */
+    worldPerUv: f32,
+};
+
 fn parallaxFrame(fragPos: vec3<f32>, du1: vec2<f32>, du2: vec2<f32>,
-                 nGeo: vec3<f32>, toEye: vec3<f32>) -> mat3x3<f32> {
-    // Orient the normal by the VIEW VECTOR, not by @builtin(front_facing).
-    //
-    // The march needs a tangent space whose +z faces the camera: every step divides by vTan.z, and a
-    // negative one aims the ray into the surface instead of along it. front_facing looks like the way
-    // to get that and is not — naga lowers it to gl_FrontFacing, whose sense depends on the winding
-    // the projection ends up with, so the two backends can disagree about the same triangle. The view
-    // vector cannot disagree with itself. This also covers a double-sided material's back faces for
-    // free, which is what front_facing was there for.
-    //
-    // The symptom when this was wrong: vTan.z came out negative, parallaxGrazeFade read that as
-    // edge-on and returned 0, and the whole effect silently switched itself off.
-    let n = select(-nGeo, nGeo, dot(nGeo, toEye) >= 0.0);
+                 tbn: mat3x3<f32>, toEye: vec3<f32>) -> ParallaxBasis {
     let dp1 = dpdx(fragPos);
     let dp2 = dpdy(fragPos);
-    let dp2perp = cross(dp2, n);
-    let dp1perp = cross(n, dp1);
-    let t = dp2perp * du1.x + dp1perp * du2.x;
-    let b = dp2perp * du1.y + dp1perp * du2.y;
-    // MEASURE the frame's sign. Do not assume it.
+
+    // THE CHART'S OWN AXES, as LINEAR COMBINATIONS of the derivatives. Invert the chain rule
     //
-    // Work the algebra of the four lines above through and they come out as `t = det * T` and
-    // `b = det * B`, where T and B are the true dP/du and dP/dv and
+    //     dp1 = dP/du * du1.x + dP/dv * du1.y      dp2 = dP/du * du2.x + dP/dv * du2.y
     //
-    //     det = du1.x * du2.y - du2.x * du1.y
+    // and the 2x2 solve falls out with `det` as its only denominator, so multiplying through by `det`
+    // leaves two vectors carrying the chart's full shape — direction, length AND the angle between
+    // them — with no division and no cross product of the derivatives.
     //
-    // is the Jacobian determinant of uv with respect to SCREEN space. `invmax` below is an
-    // `inverseSqrt` — strictly positive — so it fixes the LENGTH and can do nothing about that factor's
-    // sign. Schüler published this frame under OpenGL's y-UP fragment coordinates, where `det` is
-    // positive for a front-facing right-handed chart. WGSL's fragment coordinates run y-DOWN, which
-    // negates `dpdy` and therefore `det`, so both columns come out negated — on every face, all the
-    // time, which is exactly why it never looked like noise.
-    //
-    // What that cost: `vTan.xy` carried the wrong sign, so `cur = uv - pMax * ray` marched TOWARD the
-    // camera instead of away from it and the relief shifted the wrong way as the camera moved. Nothing
-    // downstream could catch it, because a negated frame is still a perfectly valid right-handed
-    // orthonormal basis: (-T) x (-B) = T x B = n. It surfaced only when silhouette clipping made the
-    // direction visible as a shape — the clip fired on the near edge of a cube instead of the far one.
-    //
-    // `det` is computed from the same derivatives the frame is built from, so this is correct on both
-    // backends whichever way their y runs, rather than a constant negation tuned to one of them.
+    // Linear in `dpdx(fragPos)`, which matters: a cross product of two nearly-parallel derivative
+    // vectors can land orders of magnitude below its own terms, and `fragPos` is a world position whose
+    // per-pixel delta is already a difference of two nearly equal large numbers. Using one as a
+    // DIRECTION put blocky per-2x2-quad noise into a flat cube face; using one as a SIGN flipped
+    // between neighbouring quads and marched them in opposite directions. Both were reverted. The only
+    // cross products below are of vectors that are already the size of their own result.
     let det = du1.x * du2.y - du2.x * du1.y;
-    let orient = select(-1.0, 1.0, det >= 0.0);
-    // A fragment with no UV gradient (a degenerate triangle, a collapsed derivative quad) leaves
-    // both vectors at zero. Clamping rather than dividing by that yields a zero basis, so the
-    // tangent view direction comes out zero, so no offset is applied — the right answer for a
-    // surface with no measurable texture mapping, and never a NaN.
-    let invmax = inverseSqrt(max(max(dot(t, t), dot(b, b)), 1e-12)) * orient;
-    return mat3x3<f32>(t * invmax, b * invmax, n);
+    let tu = dp1 * du2.y - dp2 * du1.y;
+    let bu = dp2 * du1.x - dp1 * du2.x;
+
+    // `sqrt(|tu| * |bu|)`, NOT `pow(dot(tu,tu) * dot(bu,bu), 0.25)`.
+    //
+    // Algebraically the same; numerically not. `|tu|` is `|det| * |dP/du|` and `det` is a per-PIXEL
+    // Jacobian, so `dot(tu, tu)` sits near 1e-12 on perfectly ordinary geometry and the PRODUCT of the
+    // two lands near 1e-24 — under any floor written to catch an exact zero. Flooring it there does not
+    // guard anything, it REPLACES a real value: measured, a chart that should report 1 reported 31623.
+    // Taking the lengths first keeps every intermediate the size of its own inputs. Same trap as the
+    // guards in `parallaxOcclusion` and the reverted `dot(t,t) < 1e-11`: an absolute threshold on a
+    // per-pixel quantity is always wrong here.
+    let worldPerUv = sqrt(length(tu) * length(bu)) / max(abs(det), 1e-30);
+
+    // +z must face the camera: every march step divides by `vTan.z`, and a negative one aims the ray
+    // into the surface instead of along it. Orient by the VIEW VECTOR, not by @builtin(front_facing) —
+    // naga lowers that to gl_FrontFacing, whose sense depends on the winding the projection ends up
+    // with, so the two backends can disagree about the same triangle. The view vector cannot disagree
+    // with itself, and this covers a double-sided material's back faces for free.
+    let nShade = normalize(tbn[2]);
+    let n = select(-nShade, nShade, dot(nShade, toEye) >= 0.0);
+
+    // The reciprocal basis, in the SHADING normal's plane.
+    //
+    // `tp`/`bp` are the chart axes with the normal component removed — glTF's, UE's and Unity's habit
+    // of resolving the tangent frame against the shading normal rather than the geometric one, so the
+    // relief agrees with the lighting on a smooth-shaded surface. `jac` is the signed area they span,
+    // and it carries the chart's HANDEDNESS, so a mirrored uv island needs no separate correction:
+    // verified exact against the analytic offset for either sign of `det` and either handedness.
+    let tp = tu - n * dot(n, tu);
+    let bp = bu - n * dot(n, bu);
+    let jac = dot(cross(tp, bp), n);
+
+    // A chart with no measurable area — a degenerate triangle, a collapsed derivative quad, a fragment
+    // whose uv does not move. Zero columns give a zero tangent view direction, so no offset is applied:
+    // the right answer for a surface with no measurable texture mapping, and never a NaN. Relative to
+    // nothing, but `jac` is a product of two quantities already floored above, so an exact-zero test is
+    // the only one that can misfire neither way.
+    if (abs(jac) < 1e-30) {
+        return ParallaxBasis(mat3x3<f32>(vec3<f32>(0.0), vec3<f32>(0.0), n), worldPerUv);
+    }
+
+    // `worldPerUv` folds in here so `vTan.xy` is already in the units `parallaxRay` multiplies by a
+    // depth: with a world depth D = depth_uv * worldPerUv, the reference's `vTan.xy / vTan.z * depth`
+    // comes out as `-D * (v.T*, v.B*) / (v.n)`, which is the exact offset.
+    let k = worldPerUv * det / jac;
+    return ParallaxBasis(mat3x3<f32>(cross(bp, n) * k, cross(n, tp) * k, n), worldPerUv);
 }
 
 /** A world direction in the tangent space of a parallaxFrame basis. */
@@ -373,6 +463,34 @@ fn parallaxHeightLod(tex: texture_2d<f32>, smp: sampler, uv: vec2<f32>,
 }
 
 /**
+ * The authored depth, in UV, whichever unit it was written in.
+ *
+ * `dispScale` was UV-only, and a UV depth is only meaningful once you know what a UV unit is worth.
+ * On a tiling material one repeat is a few centimetres and 0.05 is a sensible few millimetres of
+ * relief; on an atlas-mapped scan one repeat is the whole object and the same number is metres. There
+ * is no default that serves both, and nothing in the shader could have detected the difference —
+ * which is why the control now carries its unit.
+ *
+ * `worldPerUv` comes from the frame, so this costs one divide and no extra derivatives.
+ */
+fn parallaxDepthUv(depth: f32, worldPerUv: f32, inWorld: bool) -> f32 {
+    return select(depth, depth / max(worldPerUv, 1e-6), inWorld);
+}
+
+/**
+ * The furthest the ray may travel, in UV, before the march can no longer sample its own path.
+ *
+ * `POM_MAX_STEPS` steps at `POM_MAX_TEXELS_PER_STEP` texels each, converted out of texels at the mip
+ * being sampled. `max(dims.x, dims.y)` because a step must not overshoot on EITHER axis, which is the
+ * one place in this file where the anisotropic maximum is the right reading rather than the geometric
+ * mean — `parallaxFade` and `parallaxLodRaw` are asking a different question (can this fragment
+ * resolve the field at all) and take the mean for that reason.
+ */
+fn parallaxReachLimit(dims: vec2<f32>, lod: f32) -> f32 {
+    return f32(POM_MAX_STEPS) * POM_MAX_TEXELS_PER_STEP * exp2(lod) / max(max(dims.x, dims.y), 1.0);
+}
+
+/**
  * March a single height field. Returns the offset uv in xy and the height at the hit in z.
  *
  * The loop is https://learnopengl.com/Advanced-Lighting/Parallax-Mapping's `steep parallax mapping`
@@ -385,7 +503,14 @@ fn parallaxHeightLod(tex: texture_2d<f32>, smp: sampler, uv: vec2<f32>,
 fn parallaxOcclusion(tex: texture_2d<f32>, smp: sampler, uv: vec2<f32>,
                      ddx: vec2<f32>, ddy: vec2<f32>, vTan: vec3<f32>,
                      depth: f32, dims: vec2<f32>, lod: f32, invert: bool) -> vec3<f32> {
-    let d = depth * parallaxFade(lod) * parallaxGrazeFade(vTan.z);
+    // Bounded AFTER the two fades, not before: the fades decide how deep the surface is, and this
+    // decides how far a ray of that depth is allowed to travel before the step budget stops being
+    // able to sample it. Applied here rather than at the call sites so every caller gets it and the
+    // bound cannot drift from the `parallaxSteps` it is derived from. It composes with the caller's
+    // own `parallaxBoundedDepth` for silhouette clipping — whichever is tighter wins.
+    let d = parallaxBoundedDepth(vTan,
+                                 depth * parallaxFade(lod) * parallaxGrazeFade(vTan.z),
+                                 parallaxReachLimit(dims, lod));
     if (d <= 1e-7) {
         return vec3<f32>(uv, parallaxHeight(tex, smp, uv, ddx, ddy, invert));
     }

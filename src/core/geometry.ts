@@ -275,6 +275,76 @@ export class Geometry {
     }
 
     /**
+     * World units spanned by ONE UV UNIT on this mesh — `sqrt(surfaceArea / uvArea)`.
+     *
+     * The number that says whether a depth written in uv means millimetres or metres, and the one thing
+     * that would have made a whole class of parallax confusion obvious on sight. A tiling material puts
+     * one repeat inside a few centimetres; an atlas-mapped photogrammetry scan puts one repeat around
+     * the WHOLE OBJECT. Measured on a scanned branch 62 units long whose uv covers it exactly: 47.97 —
+     * so a 0.05 uv relief depth was asking for 2.4 units, a fifth of the branch's thickness.
+     *
+     * Areas rather than per-triangle averages, so slivers and a chaotic auto-unwrap cannot dominate:
+     * both sums are over the same triangles, and their ratio is the mean squared scale. The shader
+     * derives the same quantity per fragment from its own derivatives (`ParallaxBasis.worldPerUv`);
+     * this is the whole-mesh figure, for showing a number in the inspector and choosing a default.
+     *
+     * Returns 1 — a neutral factor, "uv units ARE world units" — for a mesh with no usable chart, so a
+     * caller can divide by it unguarded.
+     */
+    public worldPerUv(): number {
+        const P = this._positions, U = this._uvs, I = this._indices;
+        if (I.length < 3 || U.length < 2 || P.length < 3) return 1;
+
+        let world = 0, chart = 0;
+        for (let i = 0; i + 2 < I.length; i += 3) {
+            const a = I[i], b = I[i + 1], c = I[i + 2];
+            const a3 = a * 3, b3 = b * 3, c3 = c * 3;
+            const e1x = P[b3] - P[a3], e1y = P[b3 + 1] - P[a3 + 1], e1z = P[b3 + 2] - P[a3 + 2];
+            const e2x = P[c3] - P[a3], e2y = P[c3 + 1] - P[a3 + 1], e2z = P[c3 + 2] - P[a3 + 2];
+            const cx = e1y * e2z - e1z * e2y, cy = e1z * e2x - e1x * e2z, cz = e1x * e2y - e1y * e2x;
+            world += Math.hypot(cx, cy, cz);   // twice the triangle's area; the 2s cancel in the ratio
+
+            const a2 = a * 2, b2 = b * 2, c2 = c * 2;
+            const du1 = U[b2] - U[a2], dv1 = U[b2 + 1] - U[a2 + 1];
+            const du2 = U[c2] - U[a2], dv2 = U[c2 + 1] - U[a2 + 1];
+            chart += Math.abs(du1 * dv2 - du2 * dv1);
+        }
+        if (!(world > 0) || !(chart > 0)) return 1;
+        return Math.sqrt(world / chart);
+    }
+
+    /**
+     * Mean triangle edge length in UV SPACE — how much of the chart one edge of this mesh spans.
+     *
+     * The number that decides how finely a height map can be carried by geometry, and it is not
+     * derivable from the triangle count. A displacement bake band-limits to the mip matching its output
+     * vertex spacing, and that spacing is `meanUvEdge / segments` in uv, i.e.
+     * `meanUvEdge * textureWidth / segments` in texels. Guessing it from `sqrt(triangleCount)` instead —
+     * which this originally did — conflates mesh density with CHART density, and is wrong by orders of
+     * magnitude on exactly the meshes that looked worst: an 8-triangle ramp whose faces each carry a
+     * 0..1 chart was read as 181 texels per edge when the truth is 512, so it sampled mip 7.5 of a 4096
+     * map (a 16x16 image) and displaced by a near-constant.
+     *
+     * Measured over EDGES rather than from the uv area: an irregular or sliver-heavy chart has an area
+     * that says little about its edges, and edges are what the subdivision divides.
+     *
+     * Returns 0 for a mesh with no usable chart, which callers should read as "cannot band-limit".
+     */
+    public meanUvEdge(): number {
+        const U = this._uvs, I = this._indices;
+        if (I.length < 3 || U.length < 2) return 0;
+        let total = 0, count = 0;
+        for (let i = 0; i + 2 < I.length; i += 3) {
+            const a = I[i] * 2, b = I[i + 1] * 2, c = I[i + 2] * 2;
+            total += Math.hypot(U[b] - U[a], U[b + 1] - U[a + 1]);
+            total += Math.hypot(U[c] - U[b], U[c + 1] - U[b + 1]);
+            total += Math.hypot(U[a] - U[c], U[a + 1] - U[c + 1]);
+            count += 3;
+        }
+        return count > 0 ? total / count : 0;
+    }
+
+    /**
      * Recompute smooth per-vertex normals in place from the current positions and indices
      * (area-weighted face-normal accumulation). Used after deforming positions at runtime
      * (e.g. terrain sculpting). No-op if the geometry is not indexed.

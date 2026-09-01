@@ -138,6 +138,12 @@ interface PBRProperties {
      * and would come out punched with a grid of holes.
      */
     clipSilhouette?: boolean;
+    /** Unit for `displacementScale`. See {@link HeightConfig.depthSpace} — this is the same flag. */
+    depthSpace?: 'world' | 'uv';
+    /** Whether the parallax march runs. See {@link HeightConfig.parallax} — the same flag. */
+    parallax?: boolean;
+    /** Compute-tessellation level. See {@link HeightConfig.displaceLevel}. */
+    displaceLevel?: number;
     textures?: {
         baseColorTexture?: string;
         /**
@@ -208,6 +214,52 @@ export interface HeightConfig {
     displacementScale?: number;
     invertHeight?: boolean;
     clipSilhouette?: boolean;
+    /**
+     * `'world'` (the default for anything created from here on) reads `displacementScale` as a depth in
+     * WORLD units; `'uv'` is the original meaning, a fraction of one texture repeat.
+     *
+     * A uv depth only means something once you know what a uv unit is worth. On a tiling material one
+     * repeat is a few centimetres and 0.05 is a sensible few millimetres of relief; on an atlas-mapped
+     * scan one repeat is the WHOLE OBJECT and the same number is metres. Measured on a scanned branch,
+     * one uv unit was 47.97 world units — so the default asked for 2.4 units of relief on a branch 12.7
+     * units thick, the march reached across the atlas, and the surface swam as the camera moved.
+     *
+     * A FLAG, not a silent reinterpretation, and there is no numeric migration: converting a stored
+     * number needs the chart's world scale, and that belongs to the MESH, not the material — one
+     * material can sit on a cube and on a scan. So `parse` defaults it to `'uv'` when the marker is
+     * absent (every existing asset is bit-identical) while new materials get `'world'`.
+     *
+     * NOT called `depthUnit`: that key is terrain's, from its retired metres migration, and
+     * `tests/terrainDepthMigration.test.ts` asserts nothing stamps it any more — a stale
+     * `depthUnit: 'metres'` in a saved terrain is the double-migration hazard that marker guards.
+     */
+    depthSpace?: 'world' | 'uv';
+    /**
+     * Subdivision level for compute tessellation, or 0 for none.
+     *
+     * On the MATERIAL, beside the height map it displaces by, rather than on the model — the surface
+     * decides how it wants to be represented, and a material carried onto another mesh brings its relief
+     * with it. Each level multiplies the triangle count by four, so this is a small number; see
+     * `MAX_TESS_LEVEL`.
+     *
+     * WebGPU only. WebGL2 has no compute stage, so it is inert there and the mesh draws as authored —
+     * the intended fallback, not an error.
+     */
+    displaceLevel?: number;
+    /**
+     * Whether the PARALLAX MARCH runs. OFF EVERYWHERE, including for an asset that predates the flag.
+     *
+     * That last part is a deliberate REMOVAL, not the usual legacy-preservation rule every other marker
+     * in this file follows. The behaviour was withdrawn rather than re-defaulted: the editor no longer
+     * offers a control for it, so a material that kept marching would have no way to stop. Displacement
+     * replaced it for the case it was being used for — POM cannot move a silhouette and it flattens at
+     * steep angles, and on the photogrammetry scan that drove this (25.6 degrees of median dihedral,
+     * 80.4 at p90) it never looked like anything but a smear.
+     *
+     * The march itself survives in `chunks/pbrGBuffer.wgsl` and `chunks/pbrForward.wgsl` and still
+     * honours this flag, so an asset that explicitly stores `true` re-enables it.
+     */
+    parallax?: boolean;
 }
 
 /**
@@ -222,6 +274,12 @@ export function applyHeight(material: Material, height: string | undefined | nul
                             cfg: HeightConfig = {}): void {
     // Always written, so a material that gains a height map later already has a usable depth.
     material.properties.set('dispScale', cfg.displacementScale ?? 0.05);
+    // Defaults to WORLD, so anything authored from now on carries a unit the shader can scale. Only
+    // `parse` passes 'uv', for assets written before the unit existed — see HeightConfig.
+    material.properties.set('depthInWorld', (cfg.depthSpace ?? 'world') === 'world');
+    // Off unless asked for. Only `parse` passes true, for assets written before the flag existed.
+    material.properties.set('parallax', cfg.parallax === true);
+    material.properties.set('displaceLevel', Math.max(0, Math.floor(cfg.displaceLevel ?? 0)));
     material.properties.set('invertHeight', cfg.invertHeight ? true : false);
     material.properties.set('clipSilhouette', cfg.clipSilhouette ? true : false);
     material.properties.set('hasDisplacementMap', height ? true : false);
@@ -448,6 +506,12 @@ export class Material {
                 emissiveFactor: this.properties.get('emissiveFactor'),
                 emissiveIntensity: this.properties.get('emissiveIntensity'),
                 displacementScale: this.properties.get('dispScale'),
+                // The unit `displacementScale` is in. Its ABSENCE means 'uv', which is what every asset
+                // written before this existed implies — so the read in `parse` must stay forever. PBR
+                // only: it is the one branch whose shaders actually march.
+                depthSpace: this.properties.get('depthInWorld') === false ? 'uv' : 'world',
+                parallax: this.properties.get('parallax') === true,
+                displaceLevel: this.properties.get('displaceLevel') ?? 0,
                 invertHeight: this.properties.get('invertHeight'),
                 clipSilhouette: this.properties.get('clipSilhouette'),
                 // Fixed keys, not a dump of the map: that keeps the derived `ormTexture` out of assets.
@@ -540,6 +604,17 @@ export class Material {
                 // — which would black out every emissive material in it.
                 emissiveIntensity: m.emissiveIntensity ?? 1.0,
                 displacementScale: m.displacementScale ?? 0.05,
+                // NO marker means UV — the only unit that existed when the asset was written. This read
+                // must stay forever: asset JSON is not rewritten until the asset is re-saved, so dropping
+                // it would silently reinterpret every stored depth as world units. `applyHeight` defaults
+                // the other way (world) for anything CREATED rather than parsed.
+                depthSpace: m.depthSpace === 'world' ? 'world' : 'uv',
+                // `=== true`, NOT `!== false` — and it is the one marker here that does not preserve
+                // old behaviour. An old asset's silence reads as OFF because the march was WITHDRAWN,
+                // not re-defaulted, and the editor has no control left that could switch it back off.
+                // An asset that explicitly stored `true` still marches.
+                parallax: m.parallax === true,
+                displaceLevel: Number(m.displaceLevel ?? 0),
                 invertHeight: !!m.invertHeight,
                 clipSilhouette: !!m.clipSilhouette,
                 // `metallicRoughnessTexture` is the pre-split key; Material.PBR fans it out to both slots.

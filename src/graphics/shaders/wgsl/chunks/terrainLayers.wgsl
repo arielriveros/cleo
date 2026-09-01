@@ -498,7 +498,11 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
     // branch is non-uniform control flow. naga waves that through; Dawn rejects the module, which takes
     // the pipeline, its bind groups and the entire terrain pass with it.
     let toEye = normalize(u_terrain.u_viewPos - fragPos);
-    let frame = parallaxFrame(fragPos, ddxUv, ddyUv, nGeom, toEye);
+    // Terrain keeps UV depth: a layer tiles, so one repeat is a known size and `worldPerUv` would
+    // only restate `size / tiling`. It takes the frame and ignores the scale.
+    // No bitangent convention to pass any more: the frame measures the chart from the derivatives and
+    // reads only the NORMAL out of `tbn`, so a mesh and terrain need nothing different.
+    let frame = parallaxFrame(fragPos, ddxUv, ddyUv, tbn, toEye).frame;
     let vTan = parallaxToTangent(frame, toEye);
 
     var w = textureSampleGrad(u_splat_texture, u_splat_sampler, baseUv, ddxUv, ddyUv);

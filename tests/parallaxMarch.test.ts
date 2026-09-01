@@ -98,6 +98,126 @@ describe('nothing in the march quantises on a camera-relative threshold', () => 
     });
 });
 
+describe('the ray never outruns the march that has to sample it', () => {
+    /**
+     * `parallaxSteps` asks for one step per texel of the ray's path and is capped at POM_MAX_STEPS.
+     * Past that cap the request is simply not met - the ray keeps its length and the STEP grows. A
+     * step of several texels walks over every feature in the height field, so the march returns the
+     * first sample that happens to fall under the ray instead of the first intersection: a hit far
+     * from the fragment, swinging with the view. That is the grazing smear, and the secant step
+     * cannot repair it because the bracket is already several texels wide.
+     *
+     * Measured before the reach limit, dispScale 0.05 at mip 0, in texels per step:
+     *
+     *     angle    1024 map   2048 map
+     *     45 deg     1.00       1.60
+     *     60 deg     1.38       2.77
+     *     70 deg     2.19       4.38
+     *     80 deg     4.28       8.55
+     *
+     * The fix bounds the ray's REACH rather than raising the step count, which would cost the
+     * cheapest fragments in the frame. Because the bound is expressed in texels it widens with the
+     * mip on its own, so a minified surface is untouched.
+     */
+    const src = () => code(read('parallax.wgsl'));
+    // Read ONCE. `constant` re-reads and re-regexes the whole chunk, and the sweep below evaluates
+    // it 1500 times over - which is a nine-thousand-file-read test that passes alone and times out
+    // under the full suite's parallelism.
+    const WGSL = read('parallax.wgsl');
+    const K = (name: string) => constant(WGSL, name);
+    const C = {
+        maxSteps: K('POM_MAX_STEPS'), minSteps: K('POM_MIN_STEPS'),
+        perStep: K('POM_TEXELS_PER_STEP'), maxPerStep: K('POM_MAX_TEXELS_PER_STEP'),
+        ratio: K('POM_MAX_RATIO'),
+        grazeLo: K('POM_GRAZE_LO'), grazeHi: K('POM_GRAZE_HI'),
+        fadeStart: K('POM_FADE_START'), fadeEnd: K('POM_FADE_END'),
+    };
+
+    /** The shader's own arithmetic, driven by the shader's own constants. */
+    const march = (deg: number, depth: number, dims: number, lod: number, bounded: boolean) => {
+        const smoothstep = (e0: number, e1: number, x: number) => {
+            const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+            return t * t * (3 - 2 * t);
+        };
+        const th = (deg * Math.PI) / 180, vz = Math.cos(th), vxy = Math.sin(th);
+        const inv = 1 / Math.max(vz, 1e-3);
+        const ratio = (inv * C.ratio) / Math.sqrt(Math.sqrt(inv ** 4 + C.ratio ** 4));
+
+        let d = depth
+            * (1 - smoothstep(C.fadeStart, C.fadeEnd, lod))
+            * smoothstep(C.grazeLo, C.grazeHi, vz);
+        if (bounded) {
+            // parallaxReachLimit, then parallaxBoundedDepth.
+            const limit = (C.maxSteps * C.maxPerStep * 2 ** lod) / Math.max(dims, 1);
+            d = Math.min(d, limit / Math.max(vxy / Math.max(vz, 1e-3), 1e-4));
+        }
+        const texels = (vxy * ratio * d * dims) / 2 ** lod;
+        const steps = Math.min(C.maxSteps, Math.max(C.minSteps, texels / C.perStep));
+        return { perStep: texels / steps, depth: d };
+    };
+
+    const SWEEP: [number, number, number][] = [];
+    for (const dims of [256, 512, 1024, 2048, 4096])
+        for (const lod of [0, 1, 2, 3, 5])
+            for (const depth of [0.01, 0.02, 0.05, 0.1, 0.25]) SWEEP.push([dims, lod, depth]);
+    const ANGLES = [0, 15, 30, 45, 55, 60, 65, 70, 75, 80, 85, 88];
+
+    it('the step never exceeds POM_MAX_TEXELS_PER_STEP, anywhere in the domain', () => {
+        const cap = C.maxPerStep;
+        let worst = 0, where = '';
+        for (const [dims, lod, depth] of SWEEP)
+            for (const deg of ANGLES) {
+                const r = march(deg, depth, dims, lod, true).perStep;
+                if (r > worst) { worst = r; where = `${dims} map, mip ${lod}, depth ${depth}, ${deg}deg`; }
+            }
+        expect(worst, `worst undersampling was at ${where}`).toBeLessThanOrEqual(cap + 1e-6);
+    });
+
+    it('and without the bound it does - which is the artifact', () => {
+        const cap = C.maxPerStep;
+        let worst = 0;
+        for (const [dims, lod, depth] of SWEEP)
+            for (const deg of ANGLES) worst = Math.max(worst, march(deg, depth, dims, lod, false).perStep);
+        expect(worst, 'the unbounded march must be measurably worse, or this guard proves nothing')
+            .toBeGreaterThan(cap * 2);
+    });
+
+    it('costs nothing until the march is already at its cap', () => {
+        // The trade has to be paid only where it buys something. On a 1024 map at mip 0 the step
+        // count is still meeting its own request out to 60 degrees, so nothing there may move.
+        for (const deg of [0, 30, 45, 60]) {
+            const a = march(deg, 0.05, 1024, 0, false), b = march(deg, 0.05, 1024, 0, true);
+            expect(b.depth, `${deg}deg lost relief it did not need to`).toBeCloseTo(a.depth, 12);
+        }
+    });
+
+    it('does not touch a minified surface - the limit is in texels, so it widens with the mip', () => {
+        for (const deg of ANGLES) {
+            const a = march(deg, 0.05, 1024, 3, false), b = march(deg, 0.05, 1024, 3, true);
+            expect(b.depth, `${deg}deg at mip 3`).toBeCloseTo(a.depth, 12);
+        }
+    });
+
+    it('the march applies it, and to the FADED depth', () => {
+        const fn = src().match(/fn\s+parallaxOcclusion[^{]*\{([\s\S]*?)\n\}/);
+        expect(fn, 'parallaxOcclusion not found').not.toBeNull();
+        const body = fn![1];
+        expect(body, 'the reach limit must reach the march').toMatch(/parallaxReachLimit\(dims, lod\)/);
+        expect(body, 'bounding must wrap the faded depth, not the raw parameter')
+            .toMatch(/parallaxBoundedDepth\(vTan,[\s\S]*?parallaxFade\(lod\)[\s\S]*?parallaxGrazeFade/);
+    });
+
+    it('the limit is the step budget, not a hand-picked distance', () => {
+        const fn = src().match(/fn\s+parallaxReachLimit[^{]*\{([\s\S]*?)\n\}/);
+        expect(fn, 'parallaxReachLimit not found').not.toBeNull();
+        expect(fn![1], 'it must be derived from POM_MAX_STEPS, or it can drift from parallaxSteps')
+            .toMatch(/POM_MAX_STEPS/);
+        expect(fn![1], 'and converted out of texels at the sampled mip').toMatch(/exp2\(lod\)/);
+        expect(fn![1], 'the anisotropic MAXIMUM: a step must not overshoot on either axis')
+            .toMatch(/max\(dims\.x, dims\.y\)/);
+    });
+});
+
 describe('the secant step itself', () => {
     /**
      * The arithmetic the shader performs, in isolation. `after <= 0` (the sample that overshot) and
@@ -312,8 +432,13 @@ describe('a clipped material is depth-bounded', () => {
         for (const file of ['pbrGBuffer.wgsl', 'pbrForward.wgsl']) {
             const src = code(read(file));
             expect(src, `${file} must bound the depth`).toMatch(/parallaxBoundedDepth\([\s\S]{0,80}POM_CLIP_REACH/);
+            // `authored`, not `u_material.dispScale`: the depth passes through parallaxDepthUv first,
+            // which is where a WORLD-unit depth becomes a uv one. The clip bound must see the converted
+            // value, or a world-unit material clips against a number in the wrong space entirely.
+            expect(src, `${file}: the depth is unit-converted before anything else touches it`)
+                .toMatch(/parallaxDepthUv\(u_material\.dispScale, basis\.worldPerUv/);
             expect(src, `${file}: bounded only for a clipped material`)
-                .toMatch(/select\(u_material\.dispScale,[\s\S]{0,160}clipSilhouette != 0\)/);
+                .toMatch(/select\(authored,[\s\S]{0,160}clipSilhouette != 0\)/);
             // The self-shadow must march the SAME field the view ray did, or the relief and its
             // shadow disagree about how deep the surface is.
             expect((src.match(/lod, invert\)/g) ?? []).length, `${file}: march + shadow`).toBe(2);

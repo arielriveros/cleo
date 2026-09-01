@@ -96,6 +96,29 @@ struct PBRMaterial {
     hasDisplacementMap: i32,
     invertHeight: i32,
     /**
+     * Whether `dispScale` is a depth in WORLD units (1) or in UV units (0).
+     *
+     * A UV depth only means something once you know what a UV unit is worth. On a tiling material one
+     * repeat is a few centimetres and 0.05 is a sensible few millimetres of relief; on an atlas-mapped
+     * scan one repeat is the WHOLE OBJECT and the same number is metres. Measured on a scanned branch:
+     * one UV unit was 47.97 world units, so the default asked for 2.4 units of relief on a 12.7-unit
+     * branch and the march reached across the atlas for texels on its far side.
+     *
+     * A flag rather than a silent reinterpretation, because converting a stored number needs the chart
+     * scale and that belongs to the MESH, not the material — one material can sit on a cube and on a
+     * scan. So: world for anything authored from now on, uv for anything loaded without the marker.
+     */
+    depthInWorld: i32,
+    /**
+     * Whether the parallax march runs at all, independent of the height map being present.
+     *
+     * The map also feeds compute-tessellated displacement and terrain's height-aware blend, and POM is
+     * the wrong tool for most surfaces: it cannot move a silhouette and it flattens at steep angles.
+     * Off for anything authored from now on; on when parsing an asset with no marker, because that was
+     * the only behaviour when it was written. See `HeightConfig.parallax`.
+     */
+    parallax: i32,
+    /**
      * Discard where the march's hit uv leaves the 0..1 rectangle, so the SILHOUETTE follows the height
      * field instead of staying a straight polygon edge.
      *
@@ -176,13 +199,16 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     // per-fragment branch below. See the twin in chunks/pbrGBuffer.wgsl for why that matters.
     let ddx = dpdx(in.uv);
     let ddy = dpdy(in.uv);
-    let nRaw = normalize(tbnOf(in)[2]);
     let toEye = normalize(u_lighting.u_viewPos - fragPos);
-    let frame = parallaxFrame(fragPos, ddx, ddy, nRaw, toEye);
+    let basis = parallaxFrame(fragPos, ddx, ddy, tbnOf(in), toEye);
+    let frame = basis.frame;
 
     var uv = in.uv;
     var selfShadow = 1.0;
-    if (u_material.hasDisplacementMap != 0) {
+    // `parallax`, not just the map being present: the height map is also what a
+    // compute-tessellated displacement reads, and a mesh with real geometry must not ALSO
+    // march the same field per fragment.
+    if (u_material.hasDisplacementMap != 0 && u_material.parallax != 0) {
         let invert = u_material.invertHeight != 0;
         let dims = vec2<f32>(textureDimensions(u_material_displacementMap_texture, 0));
         // One LOD, hoisted: the fade, the step count and every fetch in both marches read it, so they
@@ -192,8 +218,13 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
         // A clipped material is depth-bounded; see parallaxBoundedDepth. The band the clip carves IS
         // the lateral travel, so the two have to be capped together or a deep surface loses a third of
         // itself to the discard.
-        let depth = select(u_material.dispScale,
-                           parallaxBoundedDepth(vTan, u_material.dispScale, POM_CLIP_REACH),
+        // Whichever unit the material declared. `basis.worldPerUv` is measured from the chart the
+        // fragment actually has, so one authored world depth reads the same on a cube, on tiled ground
+        // and on a photogrammetry atlas.
+        let authored = parallaxDepthUv(u_material.dispScale, basis.worldPerUv,
+                                       u_material.depthInWorld != 0);
+        let depth = select(authored,
+                           parallaxBoundedDepth(vTan, authored, POM_CLIP_REACH),
                            u_material.clipSilhouette != 0);
         let hit = parallaxOcclusion(u_material_displacementMap_texture,
                                     u_material_displacementMap_sampler,
