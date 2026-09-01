@@ -18,6 +18,12 @@ export interface PhysicsStats {
     rayCount: number;
     /** Bodies currently in the world, including terrain heightfields and ragdoll bones. */
     bodies: number;
+    /**
+     * Bodies the BROADPHASE will iterate next step. Equal to `bodies` in a healthy world; anything
+     * higher is a body that left `world.bodies` without the broadphase hearing about it and is still
+     * being sorted, paired and collided against. See `worldTeardown.clearWorld`.
+     */
+    broadphaseBodies: number;
     /** Contact equations produced by the last step — a rough proxy for solver load. */
     contacts: number;
     /** Everything inside PhysicsSystem.update(). */
@@ -34,14 +40,15 @@ export const physicsStats: PhysicsStats = {
     rayMs: 0,
     rayCount: 0,
     bodies: 0,
+    broadphaseBodies: 0,
     contacts: 0,
     frameMs: 0,
 };
 
 /**
- * Zero the per-frame accumulators at the start of a step. `frameMs`, `bodies` and `contacts` are NOT
- * reset: they are overwritten at the end of `update()` and hold the last completed measurement between
- * frames.
+ * Zero the per-frame accumulators at the start of a step. `frameMs`, `bodies`, `broadphaseBodies` and
+ * `contacts` are NOT reset: they are overwritten at the end of `update()` and hold the last completed
+ * measurement between frames.
  */
 export function resetPhysicsStats(): void {
     physicsStats.stepMs = 0;

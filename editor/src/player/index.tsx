@@ -127,7 +127,12 @@ async function boot(): Promise<void> {
     // Shared clips are not in the serialized scene by design; retarget after parse, before start.
     attachSharedAnimations(scene, data);
     Logger.info(`scene "${entry.name}" nodes=${[...scene.nodes].length}`, 'Player');
+    const outgoing = engine.scene;
     engine.setScene(scene);
+    // The scene we just replaced is gone for good: release its GPU meshes, terrain bodies and its
+    // permanent SCENE_CHANGED subscription. Without this a game that switches scenes leaks a full set
+    // every time.
+    if (outgoing && outgoing !== scene) outgoing.dispose();
     // The new scene needs the viewport before its first layout, or the HUD resolves against the
     // previous scene's box for one frame.
     const uiBox = document.getElementById('ui-root')?.getBoundingClientRect();

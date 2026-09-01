@@ -4196,6 +4196,21 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // the running scene's UI elements — a runtime Game.loadScene switch updates the latter two.
   const playEntrySceneIdRef = useRef<string>('');
   const currentPlaySceneIdRef = useRef<string>('');
+  // The play Scene currently installed on the engine, so it can be released when it is replaced. Without
+  // it a discarded play scene leaks its GPU meshes, its terrain heightfield body, its foliage collider
+  // pool and its permanent SCENE_CHANGED subscription — one full set per Play.
+  const playSceneRef = useRef<Scene | null>(null);
+
+  /**
+   * Release a play scene being thrown away. Guarded twice on purpose: only the scene this ref is holding
+   * is ever released, and never the editor's own scene, which is long-lived and shared with every panel.
+   */
+  const releasePlayScene = () => {
+    const scene = playSceneRef.current;
+    playSceneRef.current = null;
+    if (!scene || scene === editorSceneRef.current) return;
+    try { scene.dispose(); } catch (e) { Logger.error(`Failed to release the play scene: ${e}`, 'Editor'); }
+  };
 
   const buildPlayScene = async (): Promise<Scene> => {
     // useCache: true — textures already live in TextureManager for in-editor play, so skip re-embedding.
@@ -4234,6 +4249,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     tmp.parse({ scene: clone.scene, textures: [] }, true);
     resyncScene(tmp, maps, currentLibs(), data.assetHashes, data.assetHashVersion);
     const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, bodies: maps.bodies, triggers: maps.triggers, scriptAssets: scriptAssetsRef.current, templates: templatesRef.current, materials: materialsRef.current, useCache: true });
+    // `tmp` existed only to be resynced and serialized; `gd` is plain JSON, so its GPU meshes and bus
+    // subscription can go now.
+    tmp.dispose();
     const scene = new Scene();
     registerTemplates(gd.templates);
     scene.parse(gd, true); // gd injects scripts into nodes → compiled here
@@ -4252,6 +4270,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     instance.input.clear();
     instance.physics.clear();
     instance.setScene(scene);
+    // After the swap: the outgoing scene is off the engine and its bodies are out of the world.
+    releasePlayScene();
+    playSceneRef.current = scene;
     currentPlaySceneIdRef.current = target.id;
     instance.isPaused = false;
     setTimeout(() => { instance.scene.start(); }, 50);
@@ -4312,6 +4333,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     currentPlaySceneIdRef.current = openSceneIdRef.current;
     const newScene = await buildPlayScene();
     instance.setScene(newScene);
+    playSceneRef.current = newScene;
     instance.isPaused = false;
     installGameHost();
     // Rebuild runtime debug helpers AFTER scene.start() — the reconcile the isPlayMode flip triggers runs
@@ -4329,6 +4351,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     instance.setScene(editorSceneRef.current);
     instance.input.clear();
     instance.physics.clear();
+    releasePlayScene();
     showBindPoseForSkinnedModels(editorSceneRef.current); // back to the default pose in the editor
     eventEmitter.current.emit('SET_PLAY_STATE', 'stop');
   };
@@ -4343,6 +4366,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     currentPlaySceneIdRef.current = playEntrySceneIdRef.current;
     const newScene = await buildPlayScene();
     instance.setScene(newScene);
+    releasePlayScene();
+    playSceneRef.current = newScene;
     instance.isPaused = false;
     // Reconcile runtime debug helpers after start() (see startPlay) — reset stays in play mode, so the
     // isPlayMode effect won't re-fire on its own.

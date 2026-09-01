@@ -9,6 +9,7 @@ import { RigidBody, DEFAULT_FRICTION, DEFAULT_RESTITUTION } from "./body";
 import { Ragdoll, RagdollOptions } from "./ragdoll";
 import { skipCameraHit, CameraProbeBody, skipRayHit, RayHitBody, RayFilter } from "./cameraRayFilter";
 import { physicsStats, resetPhysicsStats, PhysicsStats } from "./physicsStats";
+import { clearWorld, broadphaseBodyCount } from "./worldTeardown";
 import { MotionRecord, MotionConfig, createMotionRecord, sampleMotion, motionConfig } from "./motion";
 
 /**
@@ -220,6 +221,9 @@ export class PhysicsSystem {
       physicsStats.tilemapColliders = tilemapColliders;
 
       physicsStats.bodies = this._world?.bodies.length ?? 0;
+      // Equal to `bodies` in a healthy world. Larger means bodies were removed without the broadphase
+      // hearing about it and are still being simulated against — see worldTeardown.clearWorld.
+      physicsStats.broadphaseBodies = this._world ? broadphaseBodyCount(this._world) : 0;
       physicsStats.contacts = this._world?.contacts.length ?? 0;
       physicsStats.frameMs = performance.now() - frameStart;
     } catch (e) {
@@ -582,15 +586,10 @@ export class PhysicsSystem {
     for (const constraint of [...this._world.constraints])
       this._world.removeConstraint(constraint);
 
-    this._world.bodies.forEach(body => {
-      body.velocity.set(0, 0, 0);
-      body.angularVelocity.set(0, 0, 0);
-      body.force.set(0, 0, 0);
-      body.torque.set(0, 0, 0);
-      this._world.removeBody(body);
-    });
-    this._world.bodies = [];
-    this._world.clearForces();
+    // Removing bodies is subtle enough to live in its own module — see clearWorld for the two traps
+    // (splice-while-iterating, and truncating world.bodies behind the broadphase's back) that used to
+    // strand half of every play session's bodies in the SAPBroadphase for the lifetime of the page.
+    clearWorld(this._world);
     this._inWorld.clear();
   }
 

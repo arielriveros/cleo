@@ -89,7 +89,7 @@ type Sample = {
   fps: number; frameMs: number; p50: number; p95: number; worst: number;
   cpuMs: number; cpuPassMs: number; gpuMs: number; gpuAvailable: boolean; gpuOn: boolean;
   physicsMs: number; stepMs: number; writeBackMs: number; rayMs: number; rayCount: number;
-  bodies: number; contacts: number; terrainMs: number;
+  bodies: number; broadphaseBodies: number; contacts: number; terrainMs: number;
   sceneMs: number; transformMs: number; scriptMs: number; animatorMs: number; rigMs: number; nodes: number;
   textures: number; textureMB: number; gpuMB: number;
   heapUsedMB: number | null; heapLimitMB: number | null;
@@ -101,7 +101,8 @@ type Sample = {
 const EMPTY: Sample = {
   fps: 0, frameMs: 0, p50: 0, p95: 0, worst: 0,
   cpuMs: 0, cpuPassMs: 0, gpuMs: 0, gpuAvailable: false, gpuOn: false,
-  physicsMs: 0, stepMs: 0, writeBackMs: 0, rayMs: 0, rayCount: 0, bodies: 0, contacts: 0, terrainMs: 0,
+  physicsMs: 0, stepMs: 0, writeBackMs: 0, rayMs: 0, rayCount: 0,
+  bodies: 0, broadphaseBodies: 0, contacts: 0, terrainMs: 0,
   sceneMs: 0, transformMs: 0, scriptMs: 0, animatorMs: 0, rigMs: 0, nodes: 0,
   textures: 0, textureMB: 0, gpuMB: 0, heapUsedMB: null, heapLimitMB: null,
   lights: 0, sprites: 0,
@@ -210,6 +211,7 @@ export default function PerformancePanel() {
           rayMs: phys?.rayMs ?? 0,
           rayCount: phys?.rayCount ?? 0,
           bodies: phys?.bodies ?? 0,
+          broadphaseBodies: phys?.broadphaseBodies ?? 0,
           contacts: phys?.contacts ?? 0,
           terrainMs: phys?.terrainMs ?? 0,
           sceneMs: sceneS?.frameMs ?? 0,
@@ -339,6 +341,12 @@ export default function PerformancePanel() {
         <Row label='· step' value={`${fmt(d.stepMs)} ms`} title="cannon's solver — the part a worker could take off this thread." />
         <Row label='· write-back' value={`${fmt(d.writeBackMs)} ms`} title='Scene-graph sync, which would stay on this thread regardless.' />
         <Row label='· rays' value={`${fmt(d.rayMs)} ms · ${d.rayCount.toLocaleString()}`} />
+        {/* `broadphase` is what the broadphase will actually iterate next step. It must equal `bodies`;
+            anything higher is a body that left the world without the broadphase hearing about it and is
+            still being sorted, paired and collided against. See worldTeardown.clearWorld. */}
+        <Row label='· bodies' value={`${d.bodies.toLocaleString()} · ${d.contacts.toLocaleString()} contacts`} />
+        <Row label='· broadphase' value={d.broadphaseBodies.toLocaleString()} hl={d.broadphaseBodies > d.bodies}
+             title='Bodies the broadphase iterates. Higher than `bodies` means stale bodies from an earlier play session are still being simulated against — a leak.' />
         {/* Brackets updateFoliageColliders exactly. Foliage collision defaults to OFF, so a non-zero
             reading here is the one that says the collider pool — not the draw path — is the cost. */}
         <Row label='· foliage colliders' value={`${fmt(d.terrainMs)} ms`} hl={d.terrainMs > 2}

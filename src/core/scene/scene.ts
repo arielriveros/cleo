@@ -1,6 +1,6 @@
 import { CleoEngine, Texture, TextureManager } from "../../cleo";
 import { Node } from "./nodes/node";
-import { ModelNode } from "./nodes/modelNode";
+import { ModelNode, disposeModelSubtree } from "./nodes/modelNode";
 import { LodGroupNode } from "./nodes/lodGroupNode";
 import { CameraRigNode } from "./nodes/cameraRigNode";
 import { LandscapeNode } from "./nodes/landscapeNode";
@@ -21,6 +21,7 @@ import { DEFAULT_SCENE_AMBIENT_LUX, legacyAmbientFromSceneJson, MAX_POINT_LIGHTS
 import { Logger } from '../logger'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
 import { sceneStats, resetSceneStats, SceneStats } from "./sceneStats";
+import type { SceneChange } from "../eventBus";
 import { cloneNodeJson, regenerateNodeIds } from "./nodeJson";
 import { getTemplate, templateNames } from "./templates";
 
@@ -126,10 +127,15 @@ export class Scene {
 
         // Only STRUCTURAL changes alter which nodes exist, so only they force a re-traversal; property
         // edits share this event and must not. A payload-less emit is treated as structural.
-        CleoEngine.eventEmitter.on('SCENE_CHANGED', (e) => {
-            if (!e || e.kind === 'structure' || e.kind === 'visibility' || e.kind === 'name') this._onChange();
-        });
+        // Held in a field, not written inline: the bus is process-global and the closure captures `this`,
+        // so without a handle to unsubscribe, every scene ever built stays resident forever. See dispose().
+        CleoEngine.eventEmitter.on('SCENE_CHANGED', this._onSceneChanged);
     }
+
+    /** Bound once so {@link dispose} can unsubscribe it — `off` matches by identity. */
+    private readonly _onSceneChanged = (e: SceneChange): void => {
+        if (!e || e.kind === 'structure' || e.kind === 'visibility' || e.kind === 'name') this._onChange();
+    };
 
     public start(): void {
         if (this._hasStarted) return;
@@ -156,6 +162,31 @@ export class Scene {
     public stop(): void {
         this._hasStarted = false;
         Logger.info('Scene stopped');
+    }
+
+    /**
+     * Release everything this scene owns, for a scene being thrown away for good — the play scene behind
+     * a Stop, or the one a runtime `Game.loadScene` replaced.
+     *
+     * Call it ONLY on a scene the caller is discarding: it frees GPU meshes and physics bodies, so
+     * running it on the editor's own scene would gut the viewport. Nothing else does this work — the
+     * `markForRemoval` path that reaches `Terrain.dispose` is per NODE, and a dropped scene never takes
+     * it — so without this call every play session leaks its heightfield body, its foliage collider pool,
+     * its chunk meshes, its splat texture and every model mesh in the tree. Safe to call twice.
+     */
+    public dispose(): void {
+        CleoEngine.eventEmitter.off('SCENE_CHANGED', this._onSceneChanged);
+        this.stop();
+
+        // Both are idempotent, and each falls back to the World it registered with, so no world argument
+        // is needed here.
+        for (const landscape of this.landscapes) landscape.terrain.dispose();
+        for (const tilemap of this.tilemaps) tilemap.tilemap.dispose();
+
+        // The VBO/IBO/VAO behind every model are driver objects the GC cannot reach. Safe on a play
+        // scene: it re-parsed its own geometry, and Model.dispose touches only the mesh, never the
+        // shared TextureManager textures.
+        disposeModelSubtree(this._root);
     }
 
     /** When false, skinned-model animators are not driven by scene.update (they hold bind pose). */
