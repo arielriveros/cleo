@@ -88,6 +88,8 @@ export class PhysicsSystem {
   private _airborne = new WeakMap<Body, { airTime: number; groundedTime: number }>();
   /** Scratch for the per-frame body facing; never escapes the write-back pass. */
   private _forwardScratch = vec3.create();
+  /** Scratch for the per-frame node-space body position; never escapes the write-back pass. */
+  private _originScratch = vec3.create();
   /** Cannon materials by `friction|restitution`, with a ContactMaterial for every pair. See _materialFor. */
   private _materials = new Map<string, Material>();
   /**
@@ -155,20 +157,24 @@ export class PhysicsSystem {
         }
 
         if (node.body) {
-          const pos = node.body.position;
+          // Where the NODE sits, not where the body's centre of mass does: with an offset collider the
+          // two differ by RigidBody's centre-of-mass offset (see CBody.recenterMass).
+          const pos = node.body.originPosition(this._originScratch);
 
           // Must sample after world.step() and before Scene.update runs every script's onUpdate, so a script
           // reading node.currentSpeed sees the step that just happened rather than last frame's.
           let motion = this._motion.get(node.body);
           if (!motion) { motion = createMotionRecord(); this._motion.set(node.body, motion); }
           sampleMotion(
-            motion, [pos.x, pos.y, pos.z], deltaTime, this.up,
+            // The node's own travel, so currentSpeed still measures what the node did — a body spinning
+            // about an offset centre of mass would otherwise read as movement.
+            motion, [pos[0], pos[1], pos[2]], deltaTime, this.up,
             // Facing comes from the BODY, not the node: the node has not been written yet this frame.
             bodyForward(node.body, this._forwardScratch),
             this._motionConfigFor(node.body),
           );
 
-          node.setPosition([pos.x, pos.y, pos.z]);
+          node.setPosition(pos);
 
           const quat = node.body.quaternion;
           node.setQuaternion([quat.x, quat.y, quat.z, quat.w]);

@@ -712,7 +712,7 @@ export class Node {
     if (json.body) {
       // setBody/setTrigger return the body they just created, so the shapes go straight onto that rather
       // than re-reading node._body, which is typed nullable.
-      setShapes(json.body.shapes, node.setBody(
+      const body = node.setBody(
         json.body.mass,
         json.body.linearDamping,
         json.body.angularDamping,
@@ -728,9 +728,16 @@ export class Node {
         json.body.groundProbeDistance,
         // Likewise: absent means 0, which RigidBody reads as "use the engine default".
         json.body.motionSmoothing
-      ));
+      );
+      setShapes(json.body.shapes, body);
+      // AFTER every shape is attached: cannon has no centre of mass (`body.position` is it), so an
+      // offset collider would otherwise leave the mass at the node origin and the geometry hanging off
+      // it — which makes the body rotate until it lines up with whatever it is standing on.
+      body.recenterMass();
     }
 
+    // Triggers are deliberately NOT recentred: they are massless sensors driven straight from
+    // node.worldPosition by PhysicsSystem, so there is no centre of mass to get wrong.
     if (json.trigger)
       setShapes(json.trigger.shapes, node.setTrigger());
 
