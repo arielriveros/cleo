@@ -1,6 +1,6 @@
 {
   "name": "cleo",
-  "version": "1.0.0",
+  "version": "1.2.4",
   "description": "WebGL2 Game Engine",
   "main": "cleo.js",
   "scripts": {
