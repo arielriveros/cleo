@@ -63,4 +63,24 @@ export async function runUpload(files: File[], deps: UploadDeps): Promise<void> 
   }
 
   await deps.importModelFiles(files)
+
+  // ...and then every CLAIMED image the import did not end up registering itself.
+  //
+  // A bundle claims an image so the mesh importer can RESOLVE it, not so it can be swallowed. Several
+  // routes drop maps the file plainly references: an .fbx goes through assimp's glTF2 converter, whose
+  // exporter emits only baseColorTexture (the normal map arrives as aiTextureType_HEIGHT, which it does
+  // not look for, and AO/roughness go the same way), and glTF has no height channel at all. Those files
+  // then exist in NEITHER the material nor the texture library, and the only way to assign one is to
+  // upload it again with the model deselected. groupImportFiles' own doc comment calls this out as the
+  // silent failure over-claiming causes.
+  //
+  // After the import, not before, and keyed by FILENAME — `uniqueTextureId` hands back the bare name
+  // when it is free, so anything the loader already registered is skipped here rather than duplicated
+  // under a "name (2)" alias that no material points at.
+  const unregistered = files.filter(f =>
+    claimed.has(f) && isImageFile(f) && !TextureManager.Instance.textures.has(f.name))
+  if (unregistered.length) {
+    await Promise.all(unregistered.map(addTexture))
+    deps.emit('TEXTURES_CHANGED')
+  }
 }

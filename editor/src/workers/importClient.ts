@@ -138,7 +138,9 @@ export async function parseGltfFiles(files: File[], animated: boolean, onProgres
 export async function parseModelAsGltfFiles(files: File[], animated: boolean, onProgress?: ProgressSink) {
   const result = await dispatch({ kind: 'parseModelAsGltf', files, animated }, onProgress);
   if (result.kind !== 'parseGltf') throw new Error('Unexpected import job result');
-  return result.parsed;
+  // `recovered` rides along: the maps assimp's glTF2 exporter dropped, for assembleGltfModels to
+  // re-attach. Only this route produces it.
+  return { parsed: result.parsed, recovered: result.recovered };
 }
 
 /**

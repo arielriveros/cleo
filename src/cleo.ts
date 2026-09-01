@@ -78,10 +78,10 @@ export type { MergePart } from "./graphics/modelMerge";
 export type { TextureLoadReport, UnresolvedTexture } from "./graphics/loader";
 // The pure (no DOM, no GL) half of model import, so the editor can run it inside a Web Worker.
 // Pair with Loader.assembleAssimpModels, which does the GL half on the main thread.
-export { parseAssimpFiles, parseResultTransferables, convertToGltf2FromFiles } from "./graphics/utils/assimpLoader";
+export { parseAssimpFiles, parseResultTransferables, convertToGltf2FromFiles, readAssimpTextureSlots } from "./graphics/utils/assimpLoader";
 export { MAX_TESS_LEVEL, tessSegments, tessBudget, tessVertsPerTri, tessTrisPerTri } from "./graphics/systems/meshDisplace";
 export { MeshDisplacer } from "./graphics/systems/meshDisplacer";
-export type { AssimpParseResult, ParsedMesh, OutputMaterial } from "./graphics/utils/assimpLoader";
+export type { AssimpParseResult, AssimpTextureSlots, ParsedMesh, OutputMaterial } from "./graphics/utils/assimpLoader";
 export { GLTFLoader } from "./graphics/utils/gltfLoader";
 export type { GltfParseResult, GltfMeshDescriptor, GltfMaterialDescriptor, GltfImageSource } from "./graphics/utils/gltfLoader";
 export { InputManager } from "./input/inputManager";

@@ -1,6 +1,6 @@
 import { Geometry } from "../core/geometry";
 import { Material } from "./material";
-import { OutputMaterial, AssimpParseResult, loadAssimpModel, parseMaterial, convertToGltf2FromFiles, parseAssimpFiles } from "./utils/assimpLoader";
+import { OutputMaterial, AssimpParseResult, AssimpTextureSlots, loadAssimpModel, parseMaterial, convertToGltf2FromFiles, parseAssimpFiles } from "./utils/assimpLoader";
 import { GLTFLoader, ImportTransform, GltfParseResult } from "./utils/gltfLoader";
 // A cycle (model.ts imports Loader), but benign: Model is only referenced inside method bodies.
 import { Model } from "./model";
@@ -216,10 +216,31 @@ export class Loader {
      * Turn the pure output of `GLTFLoader.parseDescriptorsFromFiles` into live engine objects. Must run
      * on the main thread: it uploads every image as a GPU texture, once, shared across materials.
      */
+    /**
+     * `recovered` re-attaches texture slots that assimp's glTF2 EXPORTER dropped, by material index.
+     *
+     * Only the .fbx/.glb route supplies it, and only because that route is a detour: the file is
+     * converted to glTF2 first (for skinning, node transforms and PBR slots) and the exporter emits
+     * `baseColorTexture` and little else — FBX's `Bump` channel reaches assimp as
+     * `aiTextureType_HEIGHT`, which it does not look for, and it has nowhere to put `AMBIENT` or
+     * `SPECULAR` at all. Read back from the same scene via `readAssimpTextureSlots` and merged here so
+     * the images are registered through the SAME `uniqueTextureId` path as the glTF's own, rather than
+     * racing the editor's uploader for the name. A slot the glTF did provide always wins.
+     */
     public static assembleGltfModels(
         parsed: GltfParseResult,
         files: File[],
-        report?: TextureLoadReport
+        report?: TextureLoadReport,
+        recovered?: AssimpTextureSlots[],
+        /**
+         * Auto-smooth angle for the weld, in degrees; 0 leaves the mesh exactly as it arrived.
+         *
+         * Faces meeting at less than this share a normal, faces meeting at more keep their own. 45 is
+         * the default the importer passes: the scanned branch that prompted it has a 25.6 degree median
+         * dihedral with an 80.4 degree p90, so 45 smooths the surface and leaves the real bark creases
+         * hard. A uv seam always splits regardless — averaging a tangent across one is wrong.
+         */
+        weldCreaseDeg: number = 0
     ): { name: string, model: Model | AnimatedModel, transform?: ImportTransform }[] {
         const cfg = { wrapping: 'repeat' as const };
 
@@ -257,10 +278,44 @@ export class Loader {
             }
         });
 
-        const materials = parsed.materials.map(d => {
+        // A recovered slot names a file by whatever path the authoring tool wrote
+        // (`..\..\ScanForge\foo_Normal.jpg`), so it is matched on BASENAME against the upload — the same
+        // rule `findFile` uses for the glTF's own relative URIs. Memoised, because several slots and
+        // several materials routinely point at one image and each registration is a GPU texture.
+        const recoveredIds = new Map<string, string | undefined>();
+        const resolveRecovered = (raw: string | undefined, from: string): string | undefined => {
+            if (!raw) return undefined;
+            const base = textureBaseName(raw);
+            if (recoveredIds.has(base)) return recoveredIds.get(base);
+            const file = files.find(f => f.name.toLowerCase() === base.toLowerCase());
+            let id: string | undefined;
+            if (!file) report?.missingFiles.push({ name: base, from });
+            else {
+                try { id = TextureManager.Instance.addTextureFromFile(file, cfg, uniqueTextureId(file.name)); }
+                catch (error) {
+                    Logger.print('warn', ['Failed to load recovered texture:', error], 'Loader');
+                    report?.unloadable.push({ name: base, from });
+                }
+            }
+            recoveredIds.set(base, id);
+            return id;
+        };
+
+        const materials = parsed.materials.map((d, mi) => {
             const textures: any = {};
             for (const [slot, index] of Object.entries(d.textures) as [string, number | undefined][])
                 if (index !== undefined) textures[slot] = textureIds[index];
+
+            // Never over a slot the glTF itself filled: the conversion is the thing that lost these, so
+            // anything that survived it is the more trustworthy of the two.
+            const extra = recovered?.[mi];
+            if (extra) {
+                for (const [slot, raw] of Object.entries(extra) as [string, string | undefined][]) {
+                    if (!raw || textures[slot] !== undefined) continue;
+                    const id = resolveRecovered(raw, `material ${mi} · ${SLOT_LABELS[slot] ?? slot}`);
+                    if (id) textures[slot] = id;
+                }
+            }
 
             return Material.PBR({
                 baseColor: d.baseColor,
@@ -280,7 +335,22 @@ export class Loader {
         return parsed.meshes.map(mesh => {
             const g = mesh.geometry;
             // Adopts the typed arrays directly — they may have been transferred from a worker.
-            const geometry = new Geometry(g.positions, g.normals, g.uvs, g.tangents, [], g.indices);
+            //
+            // `g.bitangents`, NOT `[]`. `Geometry`'s constructor recomputes the whole frame whenever
+            // EITHER array is missing, so passing an empty one here threw away the glTF's authored
+            // `TANGENT` — and the handedness `gltfLoader` decodes out of its `w` — on every mesh that
+            // came through this path, which is the exact failure that decode exists to prevent. The
+            // worker's transferable list already carries them.
+            const raw = new Geometry(g.positions, g.normals, g.uvs, g.tangents, g.bitangents, g.indices);
+            // WELD, because this route unwelds. Assimp's glTF2 exporter runs `MakeVerboseFormat`, so
+            // every triangle arrives owning its own three vertices — measured on a scanned branch, 1963
+            // authored positions became 11823 vertices under an identity index buffer. Nothing shared
+            // means nothing interpolates ACROSS an edge, so the shading normal jumps at every triangle
+            // boundary (55.8 degrees median between corners at one position, while each sat 9.4 degrees
+            // from its own face) and `_calculateTangents` degenerates to per-face. Both the lighting and
+            // the parallax chart come out faceted, and no amount of per-pixel interpolation can fix data
+            // that is not smooth. `weldSmooth` is a no-op on an already-shared mesh.
+            const geometry = weldCreaseDeg > 0 ? raw.weldSmooth(weldCreaseDeg) : raw;
             const material = materials[mesh.materialIndex] ?? Material.PBR({});
 
             const model = mesh.jointIndices && mesh.jointWeights

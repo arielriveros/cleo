@@ -274,6 +274,117 @@ export class Geometry {
         return out;
     }
 
+
+    /**
+     * Weld duplicated vertices and rebuild the normals as a SOFT field, splitting only at real creases.
+     *
+     * A mesh can arrive with every triangle owning its own three vertices — assimp's glTF2 exporter runs
+     * `MakeVerboseFormat`, so the .fbx/.glb route unindexes everything it touches. Measured on a scanned
+     * branch: 1963 authored positions became 11823 vertices with an identity index buffer. Nothing is
+     * shared, so nothing can be interpolated ACROSS an edge, and both halves of the shading are faceted:
+     *
+     *   - the normals at one position disagreed by **55.8 degrees median** while sitting only 9.4 degrees
+     *     from their own face, i.e. a per-face field wearing a smooth field's clothes. `nShade` is
+     *     interpolated per pixel, but interpolation can only smooth data that is smooth;
+     *   - `Geometry._calculateTangents` accumulates per VERTEX, so with no vertex shared it degenerates
+     *     to per-face and the parallax chart jumps at every triangle boundary too.
+     *
+     * `creaseDeg` is the auto-smooth angle: two faces meeting at less than it share a normal, and at more
+     * they keep their own. 45 by default — the branch's dihedral is 25.6 degrees median with a 80.4
+     * degree p90, so that smooths the surface and leaves the genuine bark creases hard. 0 keeps
+     * everything faceted; 180 smooths everything.
+     *
+     * Returns a NEW geometry (the index buffer is readonly, and the vertex count changes). Tangents are
+     * recomputed afterwards on purpose: they are only worth anything once the vertices they accumulate
+     * over are shared, and `_calculateTangents` measures its own handedness, so seams stay split.
+     */
+    public weldSmooth(creaseDeg: number = 45): Geometry {
+        const P = this._positions, U = this._uvs, I = this._indices;
+        const triCount = Math.floor(I.length / 3);
+        if (triCount === 0 || P.length < 9) return this;
+
+        const cosCrease = Math.cos(Math.max(0, Math.min(180, creaseDeg)) * Math.PI / 180);
+        const hasUvs = U.length >= this.vertexCount * 2;
+
+        // Face normals, NOT normalised: their length is twice the triangle's area, which is the weight
+        // an average should use — a sliver must not count as much as the face beside it.
+        const fx = new Float32Array(triCount), fy = new Float32Array(triCount), fz = new Float32Array(triCount);
+        for (let t = 0; t < triCount; t++) {
+            const a = I[t * 3] * 3, b = I[t * 3 + 1] * 3, c = I[t * 3 + 2] * 3;
+            const e1x = P[b] - P[a], e1y = P[b + 1] - P[a + 1], e1z = P[b + 2] - P[a + 2];
+            const e2x = P[c] - P[a], e2y = P[c + 1] - P[a + 1], e2z = P[c + 2] - P[a + 2];
+            fx[t] = e1y * e2z - e1z * e2y;
+            fy[t] = e1z * e2x - e1x * e2z;
+            fz[t] = e1x * e2y - e1y * e2x;
+        }
+
+        // Corners sharing a POSITION. Exact float keys: the duplication this undoes copies the same
+        // bits, so there is nothing to tolerance away, and a tolerance would weld genuinely distinct
+        // vertices on a dense scan.
+        const atPosition = new Map<string, number[]>();
+        for (let t = 0; t < triCount; t++)
+            for (let k = 0; k < 3; k++) {
+                const v = I[t * 3 + k] * 3;
+                const key = `${P[v]},${P[v + 1]},${P[v + 2]}`;
+                const bucket = atPosition.get(key);
+                if (bucket) bucket.push(t * 3 + k); else atPosition.set(key, [t * 3 + k]);
+            }
+
+        // The smoothed normal per CORNER: the area-weighted sum of every face at that position whose
+        // own normal is within the crease angle of this corner's face. Per corner rather than per
+        // position, so a vertex on a crease gets one normal per side instead of one mush of both.
+        const cn = new Float32Array(triCount * 3 * 3);
+        for (const bucket of atPosition.values()) {
+            for (const corner of bucket) {
+                const t = (corner / 3) | 0;
+                const lx = fx[t], ly = fy[t], lz = fz[t];
+                const lLen = Math.hypot(lx, ly, lz) || 1;
+                let nx = 0, ny = 0, nz = 0;
+                for (const other of bucket) {
+                    const o = (other / 3) | 0;
+                    const ox = fx[o], oy = fy[o], oz = fz[o];
+                    const oLen = Math.hypot(ox, oy, oz) || 1;
+                    // cos of the angle between the two FACE normals, both normalised for the test only.
+                    if ((lx * ox + ly * oy + lz * oz) / (lLen * oLen) < cosCrease) continue;
+                    nx += ox; ny += oy; nz += oz;      // area-weighted: unnormalised on purpose
+                }
+                const len = Math.hypot(nx, ny, nz);
+                const o3 = corner * 3;
+                if (len > 1e-12) { cn[o3] = nx / len; cn[o3 + 1] = ny / len; cn[o3 + 2] = nz / len; }
+                else { cn[o3] = lx / lLen; cn[o3 + 1] = ly / lLen; cn[o3 + 2] = lz / lLen; }
+            }
+        }
+
+        // Rebuild, sharing a vertex only where position, uv AND smoothed normal all agree. That is what
+        // keeps a uv seam and a crease split while everything else welds — 36.3% of the branch's
+        // positions are uv seams, and averaging a tangent across one would be wrong.
+        const remap = new Map<string, number>();
+        const positions: number[] = [], normals: number[] = [], uvs: number[] = [];
+        const indices = new Uint32Array(triCount * 3);
+        for (let corner = 0; corner < triCount * 3; corner++) {
+            const v = I[corner] * 3, v2 = I[corner] * 2, o3 = corner * 3;
+            const nx = Math.round(cn[o3] * 1e4) / 1e4;
+            const ny = Math.round(cn[o3 + 1] * 1e4) / 1e4;
+            const nz = Math.round(cn[o3 + 2] * 1e4) / 1e4;
+            const u = hasUvs ? U[v2] : 0, w = hasUvs ? U[v2 + 1] : 0;
+            const key = `${P[v]},${P[v + 1]},${P[v + 2]}|${u},${w}|${nx},${ny},${nz}`;
+            let index = remap.get(key);
+            if (index === undefined) {
+                index = positions.length / 3;
+                remap.set(key, index);
+                positions.push(P[v], P[v + 1], P[v + 2]);
+                normals.push(cn[o3], cn[o3 + 1], cn[o3 + 2]);
+                if (hasUvs) uvs.push(u, w);
+            }
+            indices[corner] = index;
+        }
+
+        // Empty tangents, so the constructor rebuilds them over the SHARED vertices — which is the
+        // second half of the point. Recomputing is not optional: the old ones index a vertex set that
+        // no longer exists.
+        return new Geometry(new Float32Array(positions), new Float32Array(normals),
+                            new Float32Array(uvs), EMPTY_F32, EMPTY_F32, indices);
+    }
     /**
      * World units spanned by ONE UV UNIT on this mesh — `sqrt(surfaceArea / uvArea)`.
      *

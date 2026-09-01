@@ -67,8 +67,24 @@ export async function parseBundleToRoot(
 
   // The renderer picks the skinned shader for ANY AnimatedModel, and a jointless mesh drawn with it
   // throws GL_INVALID_OPERATION — so the gate is joint BINDINGS, not clips. A skin with zero clips is fine.
-  const fromGltf = (descriptors: Parameters<typeof Loader.assembleGltfModels>[0]): ParsedEntry[] =>
-    Loader.assembleGltfModels(descriptors, files, textures).map(p => ({
+  /**
+   * Auto-smooth angle for the import weld, in degrees.
+   *
+   * Only the CONVERTED route welds. A .gltf the user authored arrives indexed and smoothed the way its
+   * author meant it; assimp's glTF2 exporter runs `MakeVerboseFormat` and hands back a mesh with every
+   * triangle owning its own three vertices, which makes both the lighting and the parallax chart
+   * faceted no matter what the shader does. 45 keeps genuine creases (a scanned branch measures a 25.6
+   * degree median dihedral with an 80.4 degree p90) while smoothing the surface between them.
+   */
+  const WELD_CREASE_DEG = 45
+
+  const fromGltf = (
+    descriptors: Parameters<typeof Loader.assembleGltfModels>[0],
+    // Texture slots assimp's glTF2 exporter dropped; only the .fbx/.glb route has any.
+    recovered?: Parameters<typeof Loader.assembleGltfModels>[3],
+    weldCreaseDeg: number = 0,
+  ): ParsedEntry[] =>
+    Loader.assembleGltfModels(descriptors, files, textures, recovered, weldCreaseDeg).map(p => ({
       name: p.name,
       model: p.model,
       transform: p.transform as ImportedTransform | undefined,
@@ -89,9 +105,9 @@ export async function parseBundleToRoot(
   } else if (convertible) {
     try {
       // Convert and parse both happen in the worker; only the descriptors come back.
-      const descriptors = await parseModelAsGltfFiles(files, true, onProgress)
+      const { parsed: descriptors, recovered } = await parseModelAsGltfFiles(files, true, onProgress)
       onProgress(0.95, 'Building meshes')
-      parsed = fromGltf(descriptors)
+      parsed = fromGltf(descriptors, recovered, WELD_CREASE_DEG)
     } catch (e) {
       if (e instanceof ImportCancelled) throw e
       Logger.warn(`glTF2 conversion of "${name}" failed (${e}); falling back to the direct parse`, 'Import')

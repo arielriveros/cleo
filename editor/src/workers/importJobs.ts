@@ -2,8 +2,8 @@
 // Must never touch the DOM or construct a WebGL object; importing the `cleo` barrel is safe, only
 // constructing a Mesh/Texture needs a GL context. The GL half lives in `Loader`.
 
-import { parseAssimpFiles, parseResultTransferables, convertToGltf2FromFiles, GLTFLoader } from 'cleo'
-import type { AssimpParseResult, GltfParseResult, Animation, Skin } from 'cleo'
+import { parseAssimpFiles, parseResultTransferables, convertToGltf2FromFiles, readAssimpTextureSlots, GLTFLoader } from 'cleo'
+import type { AssimpParseResult, AssimpTextureSlots, GltfParseResult, Animation, Skin } from 'cleo'
 
 /** Non-glTF formats (.obj/.fbx/.glb) — assimp's WASM converter. */
 export interface ParseModelJob {
@@ -55,6 +55,11 @@ export interface ParseAnimationsResult {
 export interface ParseGltfResult {
   kind: 'parseGltf'
   parsed: GltfParseResult
+  /**
+   * Texture slots assimp's glTF2 exporter dropped, by material index — set only by `parseModelAsGltf`.
+   * Plain objects of strings, so the structured clone back to the main thread is free.
+   */
+  recovered?: AssimpTextureSlots[]
 }
 
 export type ImportJobResult = ParseModelResult | ParseGltfResult | ParseAnimationsResult
@@ -85,12 +90,18 @@ export async function runImportJob(job: ImportJob, onProgress: ProgressSink = ()
     case 'parseModelAsGltf': {
       onProgress(0.05, 'Converting model')
       const converted = await convertToGltf2FromFiles(job.files)
-      onProgress(0.5, 'Reading glTF')
+      onProgress(0.4, 'Reading glTF')
       // The ORIGINAL files stay in the list: externally-referenced textures remain relative URIs for
       // GLTFLoader.findFile to resolve. Converted first so its .gltf wins the `.gltf` lookup.
       const parsed = await new GLTFLoader().parseDescriptorsFromFiles([...converted, ...job.files], job.animated)
+      // A second assimp pass over the SOURCE, because the exporter above emits baseColorTexture and
+      // little else — FBX's Bump channel arrives as aiTextureType_HEIGHT, which it does not look for,
+      // and AMBIENT/SPECULAR have no destination in its output at all. Here rather than on the main
+      // thread: it is another full WASM parse, and this job already owns a worker.
+      onProgress(0.8, 'Recovering material maps')
+      const recovered = await readAssimpTextureSlots(job.files)
       onProgress(0.95, 'Parsed')
-      return { result: { kind: 'parseGltf', parsed }, transfer: GLTFLoader.parseResultTransferables(parsed) }
+      return { result: { kind: 'parseGltf', parsed, recovered }, transfer: GLTFLoader.parseResultTransferables(parsed) }
     }
     case 'parseAnimations': {
       // Mirrors Loader.loadAnimationsFromFile rather than calling it: importing `Loader` would drag in

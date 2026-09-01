@@ -154,6 +154,57 @@ async function convertToGltf2FromFiles(files: File[]): Promise<File[]> {
     return out;
 }
 
+/**
+ * Texture slots an assimp scene declares that the glTF2 EXPORT then throws away, by material index.
+ *
+ * The .fbx/.glb route converts to glTF2 first (for skinning, node transforms and PBR slots), and that
+ * exporter writes `baseColorTexture` and essentially nothing else. The maps are not missing from the
+ * source — assimp reads them perfectly well — they are lost in the hand-off, because the exporter looks
+ * for `aiTextureType_NORMALS` while FBX's `Bump` channel arrives as `aiTextureType_HEIGHT`, and it has
+ * no destination at all for `AMBIENT` (occlusion) or `SPECULAR` (roughness). A scanned asset therefore
+ * imports with a base colour and four .jpgs the user has to hunt down and assign by hand.
+ *
+ * Values are the raw `$tex.file` strings, which are whatever path the authoring tool wrote
+ * (`..\..\ScanForge\foo_Normal.jpg` is typical) — the caller resolves them, by basename, against the
+ * files it was given.
+ */
+export interface AssimpTextureSlots {
+    normalMap?: string;
+    occlusionMap?: string;
+    metallicRoughnessTexture?: string;
+}
+
+/**
+ * Read those slots, by running the assjson conversion the mesh path already uses.
+ *
+ * A second WASM pass over the same bytes, which is why it is only worth doing on the routes that lose
+ * something (see {@link convertToGltf2FromFiles}); the emscripten module itself is instantiated once
+ * and reused. Never throws — a scene whose materials cannot be read is a reason to import with fewer
+ * maps, not to fail the import.
+ */
+async function readAssimpTextureSlots(files: File[]): Promise<AssimpTextureSlots[]> {
+    try {
+        const { materials } = await loadAssimpModelFromFiles(files);
+        return (materials ?? []).map((mat: any): AssimpTextureSlots => {
+            const props: AiMaterialProperties[] = mat?.properties ?? [];
+            const texFiles = props.filter(p => p.key === '$tex.file');
+            const pick = (types: number[]): string | undefined => {
+                for (const type of types)
+                    for (const tex of texFiles) if (tex.semantic === type) return tex.value as string;
+                return undefined;
+            };
+            return {
+                normalMap: pick(NORMAL_SLOT),
+                occlusionMap: pick([AMBIENT_TEXTURE]),
+                metallicRoughnessTexture: pick([SPECULAR_TEXTURE]),
+            };
+        });
+    } catch (error) {
+        Logger.print('warn', ['Could not read assimp material slots:', error], 'Import');
+        return [];
+    }
+}
+
 interface AiMaterialProperties {
     key: string;
     type: string;
@@ -376,4 +427,4 @@ function parseResultTransferables(result: AssimpParseResult): ArrayBuffer[] {
     return out;
 }
 
-export { loadAssimpModel, loadAssimpModelFromFiles, parseMaterial, convertToGltf2FromFiles, parseAssimpFiles, parseResultTransferables };
+export { loadAssimpModel, loadAssimpModelFromFiles, parseMaterial, convertToGltf2FromFiles, readAssimpTextureSlots, parseAssimpFiles, parseResultTransferables };
