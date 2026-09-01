@@ -40,6 +40,7 @@ export function createModelPreviewScene(scene: Scene, center: [number, number, n
   cam.setPosition([center[0] + DIAG * dist, center[1] + DIAG * dist, center[2] + DIAG * dist]);
   cam.setRotation([30, -135, 0]);
   scene.addNode(cam);
+  scene.setActiveCamera(cam);
 
   addPreviewLights(scene);
 }

@@ -60,6 +60,7 @@ export function createMaterialPreviewScene(
   // Engine forward is +Z, so the camera sits on the pivot's -Z side and looks back through the origin.
   cam.setPosition([0, 0, -startRadius]);
   pivot.addChild(cam);
+  scene.setActiveCamera(cam);
 
   // CameraNode runs onUpdate before it re-derives the view from the node transform.
   let pitch = startPitch, yaw = INIT_YAW, radius = startRadius;

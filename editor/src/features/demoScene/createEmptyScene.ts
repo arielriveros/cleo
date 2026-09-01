@@ -12,18 +12,24 @@ export function makeEditorCamera(): CameraNode {
 }
 
 /**
- * Ensure the scene has the editor's own navigation camera, adding it whenever it is missing — even
- * when the scene already has active game cameras. As a root-level active camera it wins
- * `scene.activeCamera` over any nested game camera.
+ * Ensure the scene has the editor's own navigation camera, adding it whenever it is missing — even when
+ * the scene already has active game cameras — and PIN it as `scene.activeCamera`.
+ *
+ * The pin is what keeps authored cameras independent of the viewport. Without it the winner was whichever
+ * active camera came first in breadth-first order, so a game camera parsed from a saved scene (parsing
+ * runs before this) outranked the editor camera appended after it: the viewport rendered through the game
+ * camera and the free-fly handler drove it, dragging it around every time the view moved.
  */
 export function ensureEditorCamera(scene: Scene): void {
-  if (scene.getNodesByName('__editor__Camera').length) return;
-  scene.addNode(makeEditorCamera());
+  const existing = scene.getNodesByName('__editor__Camera').find((n): n is CameraNode => n instanceof CameraNode);
+  const cam = existing ?? makeEditorCamera();
+  if (!existing) scene.addNode(cam);
+  scene.setActiveCamera(cam);
 }
 
 /** A blank starting scene: just an editor camera and a single directional light so content is lit. */
 export function createEmptyScene(scene: Scene): void {
-  scene.addNode(makeEditorCamera());
+  ensureEditorCamera(scene);
 
   const light = new LightNode('light', new DirectionalLight({}));
   light.setPosition([0, 1, 0]).setRotation([100, 25, 0]);

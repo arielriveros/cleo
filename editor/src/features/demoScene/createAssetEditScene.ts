@@ -1,5 +1,5 @@
 import { Scene, LightNode, DirectionalLight } from 'cleo';
-import { makeEditorCamera } from './createEmptyScene';
+import { ensureEditorCamera } from './createEmptyScene';
 import { applyPreviewEnvironment } from './previewEnvironment';
 
 /**
@@ -18,7 +18,7 @@ export const PREVIEW_LIGHT_NAME = '__editor__previewLight';
  * @returns A promise resolving once the cubemap has attached.
  */
 export function createAssetEditScene(scene: Scene, silently?: <T>(fn: () => T) => T): Promise<void> {
-  scene.addNode(makeEditorCamera());
+  ensureEditorCamera(scene);
 
   const light = new LightNode(PREVIEW_LIGHT_NAME, new DirectionalLight({}));
   light.setPosition([0, 1, 0]).setRotation([100, 25, 0]);

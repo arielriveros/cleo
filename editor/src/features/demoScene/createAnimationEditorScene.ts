@@ -17,6 +17,7 @@ export function createAnimationEditorScene(scene: Scene, center: [number, number
   cam.setPosition([center[0] + DIAG * dist, center[1] + DIAG * dist, center[2] + DIAG * dist]);
   cam.setRotation([30, -135, 0]);
   scene.addNode(cam);
+  scene.setActiveCamera(cam);
 
   const key = new LightNode('key', new DirectionalLight({ ambient: [0.20, 0.20, 0.22] }));
   key.setPosition([0, 1, 0]).setRotation([115, -30, 0]);

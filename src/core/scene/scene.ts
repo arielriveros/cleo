@@ -50,6 +50,10 @@ export class Scene {
     private _root: Node = new Node('root');
     private _nodes: Set<Node>;
     private _cameras: Set<CameraNode> = new Set();
+    // The camera a host has claimed for its viewport, or null to let the scan below pick one. Order
+    // in `_cameras` is breadth-first, so without a pin whichever camera happens to sit earliest in
+    // the tree wins — which is how the editor's viewport camera lost to a game camera loaded ahead of it.
+    private _pinnedCamera: CameraNode | null = null;
     private _lights: Set<LightNode>;
     private _models: Set<ModelNode>;
     private _sprites: Set<SpriteNode>;
@@ -614,6 +618,9 @@ export class Scene {
     }
 
     public parse(json: any, useCache: boolean = false): void {
+        // The incoming tree replaces the old one wholesale, so a pin on a node of the outgoing tree is
+        // stale. Hosts re-pin after parsing (the editor does so in ensureEditorCamera).
+        this._pinnedCamera = null;
         let newScene = new Node('root');
         newScene.scene = this;
         Node.parse(newScene, json.scene);
@@ -691,16 +698,32 @@ export class Scene {
     }
 
     /**
-     * The first camera in the scene marked active, or `undefined` if there is none — an empty scene, or
-     * one whose cameras are all inactive. Callers must handle the absence.
+     * The pinned camera (see `setActiveCamera`) when there is one, else the first camera in the scene
+     * marked active, or `undefined` if there is none — an empty scene, or one whose cameras are all
+     * inactive. Callers must handle the absence.
      */
     public get activeCamera(): CameraNode | undefined {
         if (this._dirty)
             this._breadthFirstTraversal();
+        // A pin that has left the scene (or been deactivated) falls through to the scan rather than
+        // blanking the view — removing the pinned node must not leave the scene uncameraed.
+        if (this._pinnedCamera && this._pinnedCamera.active && this._cameras.has(this._pinnedCamera))
+            return this._pinnedCamera;
         for (const camera of this._cameras)
             if (camera.active)
                 return camera;
         return undefined;
+    }
+
+    /**
+     * Claim `node` as the camera this scene renders through, independently of tree order and of any other
+     * active camera. The editor uses it for its viewport camera so that cameras authored into the scene
+     * stay inert while editing — a game camera must never capture the viewport, nor be driven by the
+     * editor's navigation. `null` restores the default first-active-in-breadth-first-order scan.
+     * Cleared by `parse`, whose incoming tree makes any pin stale.
+     */
+    public setActiveCamera(node: CameraNode | null): void {
+        this._pinnedCamera = node;
     }
 
     public get lights(): Set<LightNode> {
