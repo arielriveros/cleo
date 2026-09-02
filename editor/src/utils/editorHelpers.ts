@@ -11,6 +11,7 @@ import {
   LightNode,
   CameraNode,
   LightProbeNode,
+  SoundNode,
   Vec,
   hullFromPositions,
 } from 'cleo';
@@ -27,6 +28,8 @@ import type { DebugVisibility, DebugChannel, DebugCategory } from '../features/D
 const LIGHT_ICON = '__editor__LightSprite';
 const CAMERA_GIZMO = '__debug__CameraModel';
 const PROBE_HELPER = '__editor__ProbeHelper';
+const SOUND_ICON = '__editor__SoundSprite';
+const SOUND_RADIUS = '__debug__SoundRadius';
 const BODY_PREFIX = '__debug__body_';
 const TRIGGER_PREFIX = '__debug__trigger_';
 const SHAPE_PREFIX = '__debug__shape_';
@@ -234,6 +237,47 @@ function ensureLightIcon(light: LightNode) {
   }));
   icon.setUniformScale(0.5);
   light.addChild(icon);
+}
+
+/**
+ * Billboard + falloff sphere under a Sound node.
+ *
+ * The sphere is drawn at `maxDistance`, which is where a `linear` emitter goes silent and where the other
+ * two models are clamped — so it answers the one question a placed emitter raises that its numbers do
+ * not: how far does this actually carry, relative to the level around it. Ambient emitters get only the
+ * icon: their world position means nothing, so a radius drawn around it would be a lie.
+ *
+ * The sphere is rebuilt when the radius changes, because the geometry is a unit sphere scaled to it.
+ */
+function ensureSoundHelpers(node: SoundNode) {
+  if (!node.getChildByName(SOUND_ICON).length) {
+    // Tinted to match the sample slot's accent, and distinct from a light's warm icon.
+    const icon = new SpriteNode(SOUND_ICON, Sprite.fromTexture('__editor__sound_icon', {
+      tint: [0.5, 0.7, 0.85],
+    }));
+    icon.setUniformScale(0.5);
+    node.addChild(icon);
+  }
+
+  const existing = node.getChildByName(SOUND_RADIUS)[0];
+  if (node.mode !== 'spatial') {
+    if (existing) node.removeChild(existing);
+    return;
+  }
+
+  const radius = node.maxDistance;
+  // Rebuilt rather than rescaled: the node's own scale would also drive the icon, and reusing the mesh
+  // across radii is what left a stale sphere behind when maxDistance was dragged.
+  if (existing) {
+    if (Math.abs((existing as any).__soundRadius - radius) < 1e-4) return;
+    node.removeChild(existing);
+  }
+
+  const model = new Model(Geometry.Sphere(10, 1), Material.Basic({ color: [0.35, 0.65, 0.9] }, { wireframe: true, castShadow: false }));
+  const sphere = new ModelNode(SOUND_RADIUS, model);
+  sphere.setUniformScale(radius);
+  ;(sphere as any).__soundRadius = radius;
+  node.addChild(sphere);
 }
 
 // Attach a camera frustum wireframe under a camera; the onUpdate cancels the parent's scale so the
@@ -458,6 +502,14 @@ export function reconcileEditorHelpers(
       const existing = node.getChildByName(PROBE_HELPER)[0];
       if (show('probes') && !existing) ensureProbeHelper(node);
       else if (!show('probes') && existing) node.removeChild(existing);
+    } else if (node instanceof SoundNode) {
+      // Reconciled every pass rather than only on absence: the falloff sphere follows `maxDistance`,
+      // which the inspector changes while the helper already exists.
+      if (show('sounds')) ensureSoundHelpers(node);
+      else for (const name of [SOUND_ICON, SOUND_RADIUS]) {
+        const child = node.getChildByName(name)[0];
+        if (child) node.removeChild(child);
+      }
     } else if (node instanceof CameraNode) {
       // Reconcile both ways so a hijacked/active camera's stale gizmo is cleaned up too.
       const existing = node.getChildByName(CAMERA_GIZMO)[0];

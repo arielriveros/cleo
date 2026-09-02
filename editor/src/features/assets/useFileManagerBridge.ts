@@ -14,7 +14,9 @@ import {
 } from './assetKinds'
 import {
   collectReferencedMaterialIds, collectReferencedModelIds, collectReferencedTemplateIds,
-  collectReferencedTerrainMaterialIds, collectReferencedTextureIds, collectReferencedScriptIds,
+  collectReferencedTerrainMaterialIds, collectReferencedTextureIds,
+  collectReferencedSoundIds,
+  collectReferencedAudioIds, collectReferencedScriptIds,
   collectReferencedAnimationFieldIds,
   collectReferencedTilesetIds,
 } from '../../utils/references'
@@ -105,6 +107,10 @@ export function useFileManagerBridge() {
                                            l.tilesets, [engineRef.current?.renderer?.colorGradingLut,
                                             engineRef.current?.renderer?.lensDirtTexture])
           .has(entry.assetId)
+      case 'soundSample': return collectReferencedSoundIds(scene).has(entry.assetId)
+      // A file is "used" when any sample reads it — the node references the sample, not the file.
+      case 'audioSource':
+        return collectReferencedAudioIds(l.soundSamples).has(entry.assetId)
       default: return false
     }
   }, [])

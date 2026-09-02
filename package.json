@@ -28,6 +28,7 @@
   "author": "Ariel Riveros",
   "license": "ISC",
   "devDependencies": {
+    "@types/howler": "^2.2.13",
     "@types/uuid": "^9.0.7",
     "@types/webgl2": "0.0.10",
     "@vitest/coverage-istanbul": "^3.2.7",
@@ -45,6 +46,7 @@
   "dependencies": {
     "cannon-es": "^0.20.0",
     "gl-matrix": "3.4.4",
+    "howler": "^2.2.4",
     "sucrase": "^3.35.1",
     "uuid": "^14.0.1"
   },

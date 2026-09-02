@@ -5,6 +5,7 @@ import { VfsIndex, EMPTY_VFS, withAncestors, repairVfs } from './vfs'
 import { ProjectMeta } from './sceneStorage'
 import { libKey, metaKey, sceneKey, scenePrefix, vfsKey } from './storageKeys'
 import { getAllTextures, putTextures, deleteTextures, StoredTexture } from './textureStore'
+import { getAllAudio, putAudio, deleteAudio, StoredAudio } from './audioStore'
 import { planMerge, LocalState } from './bundleMerge'
 import { createProject, openProject } from './projects'
 import type { BundleData } from './bundle'
@@ -12,6 +13,14 @@ import type { BundleData } from './bundle'
 // Applies an imported bundle to local storage, then reloads. Both modes must write straight to IndexedDB
 // and let the boot path rebuild React/engine state: reconciling live state instead lets the debounced
 // library-persistence resurrect pre-import data.
+
+function audioToRecords(audio: BundleData['audio']): StoredAudio[] {
+  return (audio ?? []).map(a => ({
+    id: a.id,
+    blob: new Blob([a.bytes], { type: a.mime }),
+    mime: a.mime,
+  }))
+}
 
 function texturesToRecords(textures: BundleData['textures']): StoredTexture[] {
   return textures.map(t => ({
@@ -42,6 +51,10 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
   await idbSet(libKey('animationFields', pid), bundle.libraries.animationFields ?? [])
   await idbSet(libKey('animations', pid), bundle.libraries.animations ?? [])
   await idbSet(libKey('tilesets', pid), bundle.libraries.tilesets ?? [])
+  // Both audio halves travel as RECORDS, unlike images/textures — a sample's settings cannot be
+  // re-derived from a .wav, so without these a round trip would reset every sound to defaults.
+  await idbSet(libKey('audioSources', pid), bundle.libraries.audioSources ?? [])
+  await idbSet(libKey('soundSamples', pid), bundle.libraries.soundSamples ?? [])
 
   if (isProject) {
     // Drop every existing scene blob, then write the bundle's. Must stay scoped: an unscoped scan wipes
@@ -77,6 +90,11 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
   await deleteTextures(existing, pid)
   await putTextures(texturesToRecords(bundle.textures), pid)
 
+  // Audio: same wipe-and-rewrite, scoped to this project.
+  const existingAudio = (await getAllAudio(pid)).map(a => a.id)
+  await deleteAudio(existingAudio, pid)
+  await putAudio(audioToRecords(bundle.audio), pid)
+
   Logger.info(`Imported ${isProject ? 'project' : 'asset pack'} (replace) — reloading`, 'Editor')
   if (pid) { await openProject(pid); return }
   window.location.reload()
@@ -90,7 +108,7 @@ export async function applyBundleAsNewProject(bundle: BundleData, name?: string)
 
 /** Read the local state a merge needs to detect id/path/name collisions. */
 async function readLocalState(): Promise<LocalState> {
-  const [materials, terrainMaterials, templates, models, scripts, animationFields, animations, tilesets, vfs, meta, storedTex] = await Promise.all([
+  const [materials, terrainMaterials, templates, models, scripts, animationFields, animations, tilesets, vfs, meta, storedTex, audioSources, soundSamples, storedAudio] = await Promise.all([
     idbGet<any[]>(libKey('materials')),
     idbGet<any[]>(libKey('terrainMaterials')),
     idbGet<any[]>(libKey('templates')),
@@ -102,9 +120,14 @@ async function readLocalState(): Promise<LocalState> {
     idbGet<VfsIndex>(vfsKey()),
     idbGet<ProjectMeta>(metaKey()),
     getAllTextures(),
+    idbGet<any[]>(libKey('audioSources')),
+    idbGet<any[]>(libKey('soundSamples')),
+    getAllAudio(),
   ])
   const textures = new Map<string, { size: number; mime: string }>()
   for (const t of storedTex) textures.set(t.id, { size: t.blob.size, mime: t.mime })
+  const audio = new Map<string, { size: number; mime: string }>()
+  for (const a of storedAudio) audio.set(a.id, { size: a.blob.size, mime: a.mime })
   return {
     materialIds: new Set((materials ?? []).map(m => m.id)),
     terrainMaterialIds: new Set((terrainMaterials ?? []).map(m => m.id)),
@@ -117,6 +140,9 @@ async function readLocalState(): Promise<LocalState> {
     sceneIds: new Set((meta?.scenes ?? []).map(s => s.id)),
     sceneNames: new Set((meta?.scenes ?? []).map(s => s.name)),
     textures,
+    audio,
+    audioSourceIds: new Set((audioSources ?? []).map(a => a.id)),
+    soundSampleIds: new Set((soundSamples ?? []).map(s => s.id)),
     vfsPaths: new Set((vfs?.entries ?? []).map(e => e.path)),
     vfsFolders: new Set(vfs?.folders ?? []),
   }
@@ -142,6 +168,8 @@ export async function applyBundleMerge(bundle: BundleData): Promise<void> {
   await append(libKey('animationFields'), plan.animationFields)
   await append(libKey('animations'), plan.animations)
   await append(libKey('tilesets'), plan.tilesets)
+  await append(libKey('audioSources'), plan.audioSources)
+  await append(libKey('soundSamples'), plan.soundSamples)
 
   // Scenes (project bundles): write each blob, append its meta.
   if (plan.scenes.length) {
@@ -155,6 +183,8 @@ export async function applyBundleMerge(bundle: BundleData): Promise<void> {
 
   // Textures: add the imported payloads (reused-identical ones were dropped by the plan).
   await putTextures(texturesToRecords(plan.textures))
+  // Audio payloads: same rule — reused-identical ones were dropped by the plan.
+  await putAudio(audioToRecords(plan.audio))
 
   // VFS: union folders, append remapped entries.
   const vfs = (await idbGet<VfsIndex>(vfsKey())) ?? EMPTY_VFS

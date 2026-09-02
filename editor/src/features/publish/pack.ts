@@ -63,6 +63,16 @@ export interface PackedTexture {
   l: number;
 }
 
+/** One shipped sound: its original compressed bytes plus the settings the sample was authored with. */
+export interface PackedSound {
+  id: string;
+  mime: string;
+  /** The authored SoundSettings. Unlike a texture's config these cannot be re-derived from the file. */
+  settings: any;
+  o: number;
+  l: number;
+}
+
 export interface PackManifest {
   format: 'cleopak';
   version: number;
@@ -82,11 +92,14 @@ export interface PackManifest {
   config?: any;
   geometries: Record<string, PackedGeometry>;
   textures: PackedTexture[];
+  /** Absent on games published before audio existed, which read back as games with no sound. */
+  sounds?: PackedSound[];
 }
 
 export interface PackStats {
   geometries: number;
   textures: number;
+  sounds: number;
   bytes: number;
 }
 
@@ -291,6 +304,16 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
     textures.push({ id: t.id, mime: t.mime || 'image/png', config: t.config, o: ref.o, l: ref.l });
   }
 
+  // --- Sounds: original compressed bytes, exactly like the textures above -------------------------
+
+  const sounds: PackedSound[] = [];
+  for (const a of (data?.soundBytes ?? [])) {
+    if (!a?.bytes || a.bytes.length === 0) continue;
+    const bytes: Uint8Array = a.bytes instanceof Uint8Array ? a.bytes : new Uint8Array(a.bytes);
+    const ref = addChunk(bytes);
+    sounds.push({ id: a.id, mime: a.mime || 'audio/mpeg', settings: a.settings, o: ref.o, l: ref.l });
+  }
+
   // --- Assemble ---------------------------------------------------------------------------------
 
   const manifest: PackManifest = {
@@ -305,6 +328,7 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
     config: data?.config,
     geometries,
     textures,
+    sounds,
   };
 
   // Last line of defence before the manifest becomes text. Anything still holding a typed array —
@@ -328,6 +352,6 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
 
   return {
     buffer,
-    stats: { geometries: counter, textures: textures.length, bytes: buffer.byteLength },
+    stats: { geometries: counter, textures: textures.length, sounds: sounds.length, bytes: buffer.byteLength },
   };
 }

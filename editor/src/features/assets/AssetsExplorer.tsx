@@ -316,6 +316,7 @@ function AssetsExplorerHost() {
     { label: 'Template', icon: <img src={iconFor('template')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTemplateEditor(), title: 'Author a new template in a dedicated empty scene' },
     { label: 'Script', icon: <img src={iconFor('script')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterScriptEditor(), title: 'Create a new class-based script asset' },
     { label: 'Tileset', icon: <img src={iconFor('tileset')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => document.getElementById('tileset-atlas-import')?.click(), title: 'Pick an atlas image and slice it into a tileset for tilemap layers' },
+    { label: 'Sound', icon: <img src={iconFor('soundSample')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => document.getElementById('sound-import')?.click(), title: 'Import an audio file as a sound sample' },
     { label: 'Animation', icon: <img src={iconFor('animation')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => document.getElementById('animation-clip-import')?.click(), title: 'Import animation clips from a .fbx/.glb/.gltf and pick the rig they belong to' },
     { label: 'Scene', icon: <img src={iconFor('scene')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => { void createScene() }, title: 'Create a new scene asset' },
     { label: 'Folder', icon: <img src={iconFor('folder')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: newFolder, title: 'Create a folder in the current directory' },
@@ -327,7 +328,7 @@ function AssetsExplorerHost() {
         </svg>
       ),
       run: () => document.getElementById('asset-import-files')?.click(),
-      title: 'Import models and textures',
+      title: 'Import models, textures and sounds',
     },
   ]
   const modeButtons: { mode: TMode; title: string; icon: React.ReactNode }[] = [
@@ -360,7 +361,13 @@ function AssetsExplorerHost() {
           )}
         </div>
         <input id='asset-import-files' className='hidden' type='file' multiple
-          accept='.obj,.mtl,.gltf,.glb,.fbx,.bin,.png,.jpg,.jpeg,.bmp,.tga,.tiff,.webp'
+          accept='.obj,.mtl,.gltf,.glb,.fbx,.bin,.png,.jpg,.jpeg,.bmp,.tga,.tiff,.webp,.wav,.mp3,.ogg,.m4a,.flac,.aac,.opus'
+          onChange={onPick} />
+
+        {/* Audio. Routed through the same `runUpload` as everything else — the importer branches on the
+            extension — so a sound picked here lands exactly as one dropped on the explorer does. */}
+        <input id='sound-import' className='hidden' type='file' multiple
+          accept='.wav,.mp3,.ogg,.m4a,.flac,.aac,.opus,.webm,audio/*'
           onChange={onPick} />
 
         {/* "+ Add > Tileset" picks the atlas first and builds the tileset around it, so the new asset opens

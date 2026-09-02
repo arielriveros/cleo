@@ -2,7 +2,7 @@ import { cryptoRandomId } from './ids'
 import { regenerateIds } from './nodeSubtree'
 import { VfsEntry, VfsIndex, withAncestors, uniquePath, dirOf, stemOf, extOf } from './vfs'
 import type { SceneMeta, SceneAssetData } from './sceneStorage'
-import type { BundleData, BundleTexture } from './bundle'
+import type { BundleData, BundleTexture, BundleAudio } from './bundle'
 import type { ScriptAsset } from './scripts'
 import type { MaterialAsset } from './materials'
 import type { TerrainMaterialAsset } from './terrainMaterials'
@@ -10,6 +10,8 @@ import type { Template } from './templates'
 import type { ModelAsset } from './models'
 import type { AnimationAsset } from './animationAssets'
 import type { AnimationFieldAsset } from './animationFields'
+import type { AudioSourceAsset } from './audioSources'
+import type { SoundSampleAsset } from './soundSamples'
 import type { TilesetAsset } from './tilesets'
 import { deepClone } from './deepClone'
 import { isBinaryPayload } from './binaryPayload'
@@ -33,6 +35,10 @@ export interface LocalState {
   sceneNames: Set<string>
   /** Local stored textures, id -> {size,mime}, for reuse-vs-remint decisions. */
   textures: Map<string, { size: number; mime: string }>
+  /** The same, for audio payloads. */
+  audio: Map<string, { size: number; mime: string }>
+  audioSourceIds: Set<string>
+  soundSampleIds: Set<string>
   vfsPaths: Set<string>
   vfsFolders: Set<string>
 }
@@ -50,6 +56,10 @@ export interface MergeResult {
   scenes: { meta: SceneMeta; data: SceneAssetData }[]
   /** Imported textures to add (ids possibly re-minted); reused-identical textures are omitted. */
   textures: BundleTexture[]
+  /** The same, for audio payloads and the two record halves. */
+  audio: BundleAudio[]
+  audioSources: AudioSourceAsset[]
+  soundSamples: SoundSampleAsset[]
   /** Folders to union into the VFS, and entries to append (assetId remapped, path de-duplicated). */
   vfsFolders: string[]
   vfsEntries: VfsEntry[]
@@ -65,6 +75,8 @@ export type Remaps = {
   afield: Map<string, string>
   anim: Map<string, string>
   tileset: Map<string, string>
+  audio: Map<string, string>
+  sound: Map<string, string>
 }
 
 const sub = (m: Map<string, string>, v: any): any => (typeof v === 'string' && m.has(v) ? m.get(v)! : v)
@@ -100,6 +112,12 @@ export function remapDeep(obj: any, r: Remaps): void {
     // A tilemap layer's tileset link and the id on the embedded tileset copy must move together: the layer
     // looks its tileset up by id in the map's own embedded table.
     if (key === 'tilesetId') { obj[key] = sub(r.tileset, val); continue }
+    // A SoundNode's link to the sample it plays, and a SoundSampleAsset's link to its audio file. Both
+    // are plain string references, so one branch each is all they need.
+    if (key === 'sampleId') { obj[key] = sub(r.sound, val); continue }
+    if (key === 'audioId') { obj[key] = sub(r.audio, val); continue }
+    if (key === 'audioIds' && Array.isArray(val)) { obj[key] = val.map((x: any) => sub(r.audio, x)); continue }
+    if (key === 'soundIds' && Array.isArray(val)) { obj[key] = val.map((x: any) => sub(r.sound, x)); continue }
     if (key === 'tilesets' && Array.isArray(val)) {
       for (const ts of val) if (ts && typeof ts === 'object') { ts.id = sub(r.tileset, ts.id); remapDeep(ts, r) }
       continue
@@ -177,13 +195,25 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     manifest: bundle.manifest, scenes: bundle.scenes, libraries: bundle.libraries, vfs: bundle.vfs,
   }) as Omit<BundleData, 'textures'>
   // Textures are deliberately left out of that clone; keep the originals and remap their ids apart.
-  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), model: new Map(), script: new Map(), afield: new Map(), anim: new Map(), tileset: new Map() }
+  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), model: new Map(), script: new Map(), afield: new Map(), anim: new Map(), tileset: new Map(), audio: new Map(), sound: new Map() }
 
   // 1) Textures first, so their remaps are known before rewriting references.
   const textures: BundleTexture[] = []
   for (const t of bundle.textures) {
     const { keep, row } = textureIdFor(t, local, r)
     if (keep) textures.push(row)
+  }
+
+  // 1b) Audio payloads, on the same reuse-vs-remint rule as the textures above: an identical file
+  // already stored under that id is reused rather than duplicated.
+  const audio: BundleAudio[] = []
+  for (const a of (bundle.audio ?? [])) {
+    const existing = local.audio.get(a.id)
+    if (!existing) { audio.push(a); continue }
+    if (existing.size === a.bytes.byteLength && existing.mime === a.mime) continue // identical: reuse
+    const newId = cryptoRandomId()
+    r.audio.set(a.id, newId)
+    audio.push({ ...a, id: newId })
   }
 
   // 2) Re-mint colliding asset ids.
@@ -195,6 +225,14 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   for (const f of data.libraries.animationFields ?? []) if (local.animationFieldIds.has(f.id)) r.afield.set(f.id, cryptoRandomId())
   for (const a of data.libraries.animations ?? []) if (local.animationIds.has(a.id)) r.anim.set(a.id, cryptoRandomId())
   for (const t of data.libraries.tilesets ?? []) if (local.tilesetIds.has(t.id)) r.tileset.set(t.id, cryptoRandomId())
+  // An audio source's record id must follow its PAYLOAD's re-mint, not get an independent one, or the
+  // record would point at a file that is not there. Only a record with no payload (its bytes reused
+  // above, or missing) falls through to the collision check.
+  for (const a of data.libraries.audioSources ?? []) {
+    if (r.audio.has(a.id)) continue
+    if (local.audioSourceIds.has(a.id)) r.audio.set(a.id, cryptoRandomId())
+  }
+  for (const s of data.libraries.soundSamples ?? []) if (local.soundSampleIds.has(s.id)) r.sound.set(s.id, cryptoRandomId())
 
   // 3) Apply the id re-mints to the asset records' own ids, then rewrite all references within them.
   const materials = data.libraries.materials.map(m => ({ ...m, id: sub(r.mat, m.id) }))
@@ -205,6 +243,8 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   const animationFields = (data.libraries.animationFields ?? []).map(f => ({ ...f, id: sub(r.afield, f.id) }))
   const animations = (data.libraries.animations ?? []).map(a => ({ ...a, id: sub(r.anim, a.id) }))
   const tilesets = (data.libraries.tilesets ?? []).map(t => ({ ...t, id: sub(r.tileset, t.id) }))
+  const audioSources = (data.libraries.audioSources ?? []).map(a => ({ ...a, id: sub(r.audio, a.id) }))
+  const soundSamples = (data.libraries.soundSamples ?? []).map(x => ({ ...x, id: sub(r.sound, x.id) }))
   for (const m of materials) remapDeep(m, r)
   for (const m of terrainMaterials) remapDeep(m, r)
   for (const t of templates) remapDeep(t, r)
@@ -215,6 +255,11 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     remapDeep(t, r)
     t.textureIds = [t.textureId]
   }
+  // A sample's `source.audioId` and its `audioIds` mirror follow the PAYLOAD re-mints, and its `soundIds`
+  // mirror follows its own. Both mirrors exist so the reference walkers can find dependencies by field
+  // name, so leaving either stale would ship the wrong file — or none.
+  for (const a of audioSources) remapDeep(a, r)
+  for (const x of soundSamples) remapDeep(x, r)
 
   // 4) Scenes (project bundles): remap references, regenerate node ids, mint a fresh scene id + unique name.
   const takenNames = new Set(local.sceneNames)
@@ -252,6 +297,8 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
       : e.kind === 'script' ? r.script
       : e.kind === 'animationField' ? r.afield
       : e.kind === 'tileset' ? r.tileset
+      : e.kind === 'audioSource' ? r.audio
+      : e.kind === 'soundSample' ? r.sound
       : r.tex
     const assetId = sub(remap, e.assetId)
     let path = e.path
@@ -260,5 +307,5 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     vfsEntries.push({ ...e, path, assetId })
   }
 
-  return { materials, terrainMaterials, templates, models, scripts, animationFields, animations, tilesets, scenes, textures, vfsFolders, vfsEntries }
+  return { materials, terrainMaterials, templates, models, scripts, animationFields, animations, tilesets, scenes, textures, audio, audioSources, soundSamples, vfsFolders, vfsEntries }
 }

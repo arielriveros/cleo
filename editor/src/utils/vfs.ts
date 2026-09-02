@@ -8,6 +8,8 @@ import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
 import type { ImageAsset } from './images'
 import type { TextureAsset } from './textureAssets'
+import type { AudioSourceAsset } from './audioSources'
+import type { SoundSampleAsset } from './soundSamples'
 
 // The editor's virtual filesystem: a side table giving each flat asset library a folder path.
 //
@@ -15,17 +17,20 @@ import type { TextureAsset } from './textureAssets'
 // a virtual extension (.mat/.tmat/.tpl/.model); textures keep their real image extension. As in SVAR's
 // FileTree.normalizeFile, the extension is everything after the LAST dot.
 
-export type AssetKind = 'image' | 'texture' | 'material' | 'terrainMaterial' | 'template' | 'model' | 'scene' | 'script' | 'animationField' | 'animation' | 'tileset'
+export type AssetKind = 'image' | 'texture' | 'audioSource' | 'soundSample' | 'material' | 'terrainMaterial' | 'template' | 'model' | 'scene' | 'script' | 'animationField' | 'animation' | 'tileset'
 
 /**
- * IMAGE is the kind that keeps its real file extension; every other kind carries a virtual one.
+ * The BYTE kinds — image and audioSource — keep their real file extensions; every other kind carries a
+ * virtual one.
  *
- * That exclusion used to be `texture`, back when a texture WAS its image file. Since the split a texture
- * is an authored record — a byte source plus sampling — so it behaves like a material: a real name, a
- * virtual extension, and renaming that does not reclassify it.
+ * That exclusion used to be `texture` alone, back when a texture WAS its image file. Since the split a
+ * texture is an authored record — a byte source plus sampling — so it behaves like a material: a real
+ * name, a virtual extension, and renaming that does not reclassify it. A sound sample is the same shape,
+ * and its audio source is the same shape as an image.
  */
-export const KIND_EXT: Record<Exclude<AssetKind, 'image'>, string> = {
+export const KIND_EXT: Record<Exclude<AssetKind, RawByteKind>, string> = {
   texture: '.tex',
+  soundSample: '.sound',
   material: '.mat',
   terrainMaterial: '.tmat',
   template: '.tpl',
@@ -37,9 +42,25 @@ export const KIND_EXT: Record<Exclude<AssetKind, 'image'>, string> = {
   tileset: '.tileset',
 }
 
+/**
+ * Extensions the audio importer accepts, and therefore the ones `kindOfExt` must claim before falling
+ * back to `image`. Lives here rather than beside IMAGE_EXTS in uploadRouter because `kindOfExt` needs it
+ * and utils must not import from features.
+ */
+export const AUDIO_EXTS = ['.wav', '.mp3', '.ogg', '.m4a', '.flac', '.aac', '.opus', '.webm'] as const
+
+/** The kinds whose VFS entry keeps the real extension of the file its bytes arrived as. */
+export type RawByteKind = 'image' | 'audioSource'
+export const RAW_BYTE_KINDS: readonly RawByteKind[] = ['image', 'audioSource']
+export function isRawByteKind(kind: AssetKind): kind is RawByteKind {
+  return kind === 'image' || kind === 'audioSource'
+}
+
 export const KIND_LABEL: Record<AssetKind, string> = {
   image: 'image',
   texture: 'texture',
+  audioSource: 'audio source',
+  soundSample: 'sound sample',
   material: 'material',
   terrainMaterial: 'terrain material',
   template: 'template',
@@ -85,6 +106,8 @@ export type LibSnapshot = {
   scenes: { id: string; name: string; updatedAt: number; thumbnail?: string }[]
   images: ImageAsset[]
   textures: TextureAsset[]
+  audioSources: AudioSourceAsset[]
+  soundSamples: SoundSampleAsset[]
   /**
    * Every live TextureManager id. No longer drives entries — `textures` does — but bundle export and the
    * missing-asset audit still ask what is actually registered, which is not the same question.
@@ -126,10 +149,19 @@ export function joinPath(dir: string, base: string): string {
   return dir === '/' ? `/${base}` : `${dir}/${base}`
 }
 
-/** Which kind an extension denotes. Anything that isn't a known virtual extension is a raw image file. */
+/**
+ * Which kind an extension denotes.
+ *
+ * The default is `image`, so anything the audio importer accepts has to be named explicitly BEFORE it —
+ * otherwise a `.wav` would be filed as a picture. That is the one asymmetry the second byte kind
+ * introduced: with only images to fall back to, an unknown extension being an image was harmless.
+ */
 export function kindOfExt(ext: string): AssetKind {
-  switch (ext.toLowerCase()) {
+  const lower = ext.toLowerCase()
+  if ((AUDIO_EXTS as readonly string[]).includes(lower)) return 'audioSource'
+  switch (lower) {
     case '.tex': return 'texture'
+    case '.sound': return 'soundSample'
     case '.mat': return 'material'
     case '.tmat': return 'terrainMaterial'
     case '.tpl': return 'template'
@@ -146,10 +178,10 @@ export function kindOfExt(ext: string): AssetKind {
 
 /**
  * Force a user-typed name to keep its kind's extension, so renaming can never reclassify an asset.
- * Images keep whatever the user typed — their extension is the real one the bytes were imported under.
+ * The byte kinds keep whatever the user typed — their extension is the real one the bytes arrived under.
  */
 export function ensureExt(name: string, kind: AssetKind): string {
-  if (kind === 'image') return name
+  if (isRawByteKind(kind)) return name
   const want = KIND_EXT[kind]
   const stem = stemOf(name) || name
   return `${stem}${want}`
@@ -453,14 +485,14 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
    * back out stays where they put it. The reconciler must not fight the user over folder layout.
    */
   const landingFor = (kind: AssetKind): string =>
-    kind === 'image' ? joinPath(landing, SOURCE_FOLDER) : landing
+    isRawByteKind(kind) ? joinPath(landing, SOURCE_FOLDER) : landing
 
   const visit = (kind: AssetKind, assetId: string, name: string) => {
-    const ext = kind === 'image' ? extOf(name) : KIND_EXT[kind]
+    const ext = isRawByteKind(kind) ? extOf(name) : KIND_EXT[kind]
     const existing = byAsset.get(assetKey(kind, assetId))
 
     if (!existing) {
-      const stem = kind === 'image' ? stemOf(name) : name
+      const stem = isRawByteKind(kind) ? stemOf(name) : name
       const path = uniquePath(taken, landingFor(kind), stem, ext)
       taken.add(path)
       entries.push({ path, kind, assetId, created: Date.now(), size: opts.sizeOf?.(kind, assetId) })
@@ -469,8 +501,8 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
     }
 
     kept.add(existing)
-    // An image's name IS the filename its bytes arrived under; for every other kind the record's `name` wins.
-    if (kind !== 'image' && !stemRepresents(stemOf(existing.path), name)) {
+    // A byte asset's name IS the filename it arrived under; for every other kind the record's `name` wins.
+    if (!isRawByteKind(kind) && !stemRepresents(stemOf(existing.path), name)) {
       taken.delete(existing.path)
       const path = uniquePath(taken, dirOf(existing.path), name, ext)
       taken.add(path)
@@ -494,13 +526,21 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   // whatever happens to be registered in the TextureManager.
   for (const i of libs.images) visit('image', i.id, i.name)
   for (const t of libs.textures) visit('texture', t.id, t.name)
+  // The audio split behaves exactly like the image/texture one, down to the pruning gate below: both
+  // halves are minted by a reconciler reading the AudioManager, so they are only trustworthy once
+  // preloadAudio has settled.
+  for (const a of libs.audioSources) visit('audioSource', a.id, a.name)
+  for (const s of libs.soundSamples) visit('soundSample', s.id, s.name)
 
   // An unvisited entry may just be a library that hasn't loaded, so keep it unless pruning is allowed.
   for (const e of prev.entries) {
     if (kept.has(e)) continue
     // Both split halves are gated on pruneTextures: they are populated from the TextureManager by the
     // asset reconciler, so they are only trustworthy once preloadTextures has settled.
-    const prunable = e.kind === 'image' || e.kind === 'texture' ? opts.pruneTextures : opts.prune
+    // Both split halves of BOTH byte kinds are gated on pruneTextures: all four are populated by asset
+    // reconcilers reading a manager, so they are only trustworthy once the preload has settled.
+    const fromManager = isRawByteKind(e.kind) || e.kind === 'texture' || e.kind === 'soundSample'
+    const prunable = fromManager ? opts.pruneTextures : opts.prune
     if (prunable) { changed = true; continue }
     entries.push(e)
   }
@@ -565,6 +605,8 @@ export function findMissingFromExplorer(vfs: VfsIndex, libs: LibSnapshot, treeId
   for (const s of libs.scenes) check('scene', s.id, s.name)
   for (const i of libs.images) check('image', i.id, i.name)
   for (const t of libs.textures) check('texture', t.id, t.name)
+  for (const a of libs.audioSources) check('audioSource', a.id, a.name)
+  for (const s of libs.soundSamples) check('soundSample', s.id, s.name)
 
   return out
 }
@@ -587,8 +629,8 @@ export function findOrphanEntries(vfs: VfsIndex, libs: LibSnapshot): OrphanEntry
 export function restoreMissing(vfs: VfsIndex, missing: MissingAsset, folder: string, size?: number): VfsIndex {
   if (missing.reason !== 'no-entry') return vfs // already indexed; only the store is out of step
   const taken = new Set<string>([...vfs.entries.map(e => e.path), ...vfs.folders])
-  const ext = missing.kind === 'image' ? extOf(missing.name) : KIND_EXT[missing.kind]
-  const stem = missing.kind === 'image' ? stemOf(missing.name) : missing.name
+  const ext = isRawByteKind(missing.kind) ? extOf(missing.name) : KIND_EXT[missing.kind]
+  const stem = isRawByteKind(missing.kind) ? stemOf(missing.name) : missing.name
   const path = uniquePath(taken, folder || '/', stem, ext)
   return applyAdd(vfs, { path, kind: missing.kind, assetId: missing.assetId, created: Date.now(), size })
 }
@@ -610,8 +652,11 @@ function aliveIds(libs: LibSnapshot): Record<AssetKind, Set<string>> {
     scene: new Set(libs.scenes.map(s => s.id)),
     image: new Set(libs.images.map(i => i.id)),
     // The RECORD, not the live registration: a texture whose image failed to decode is still an asset the
-    // user owns and can repair, and dropping its card would make it unreachable.
+    // user owns and can repair, and dropping its card would make it unreachable. Sound samples are judged
+    // the same way, for the same reason.
     texture: new Set(libs.textures.map(t => t.id)),
+    audioSource: new Set(libs.audioSources.map(a => a.id)),
+    soundSample: new Set(libs.soundSamples.map(s => s.id)),
   }
 }
 

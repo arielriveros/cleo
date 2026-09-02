@@ -17,6 +17,7 @@ export const SCRIPT_ID_VAR = '__scriptId'
 export type ScriptBaseType =
   | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'cameraRig'
   | 'sprite' | 'animatedSprite' | 'landscape' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'lodGroup'
+  | 'sound'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput'
 
@@ -36,6 +37,7 @@ export const BASE_CLASS: Record<ScriptBaseType, string> = {
   skyAtmosphere: 'SkyAtmosphereNode',
   skyLight: 'SkyLightNode',
   lodGroup: 'LodGroupNode',
+  sound: 'SoundNode',
   // Concrete UI classes, not a single UINode base, so a script gets typed members in Monaco.
   uiRoot: 'UIRootNode',
   uiPanel: 'UIPanelNode',
@@ -54,7 +56,7 @@ export const BASE_TYPE_LABEL: Record<ScriptBaseType, string> = {
   node: 'Node', model: 'Model', light: 'Light', lightProbe: 'Light Probe', skybox: 'Skybox',
   camera: 'Camera', cameraRig: 'Camera Rig', sprite: 'Sprite', animatedSprite: 'Animated Sprite', landscape: 'Landscape',
   volumetricClouds: 'Volumetric Clouds', skyAtmosphere: 'Sky Atmosphere', skyLight: 'Sky Light',
-  lodGroup: 'LOD Group',
+  lodGroup: 'LOD Group', sound: 'Sound',
   uiRoot: 'UI Canvas', uiPanel: 'UI Panel', uiText: 'UI Text', uiImage: 'UI Image',
   uiButton: 'UI Button', uiStack: 'UI Stack', uiSpacer: 'UI Spacer',
   uiProgressBar: 'UI Progress Bar', uiSlider: 'UI Slider', uiToggle: 'UI Toggle',

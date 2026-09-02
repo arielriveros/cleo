@@ -3,11 +3,17 @@
 //   'kv'       key -> value. The project blob and the asset libraries.
 //   'textures' texture payloads keyed by TextureManager id, held as Blobs (see textureStore.ts). Kept out
 //              of 'kv' so a library write does not drag megabytes of image data through structured clone.
+//   'audio'    sound payloads keyed by AudioManager id, held as Blobs (see audioStore.ts). Separate from
+//              'textures' rather than sharing it: the two are enumerated independently (a range scan over
+//              one must not deserialize the other's blobs), and a project delete drops them by store.
 
 const DB_NAME = 'cleo';
 const STORE = 'kv';
 export const TEXTURE_STORE = 'textures';
-const VERSION = 2;
+export const AUDIO_STORE = 'audio';
+// 3 added the 'audio' store. The upgrade handler creates whatever is missing, so a v1 or v2 database
+// gains it without touching a single existing row.
+const VERSION = 3;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -15,11 +21,12 @@ export function openDB(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, VERSION);
-    // Runs for a fresh DB and for an existing v1 with only 'kv'; both end up with both stores.
+    // Runs for a fresh DB and for any older version; all of them end up with every store.
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
       if (!db.objectStoreNames.contains(TEXTURE_STORE)) db.createObjectStore(TEXTURE_STORE);
+      if (!db.objectStoreNames.contains(AUDIO_STORE)) db.createObjectStore(AUDIO_STORE);
     };
     // Another tab holds the DB open at the old version. Must surface: a silent hang here looks like the
     // editor failing to load.

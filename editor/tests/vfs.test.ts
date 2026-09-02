@@ -18,7 +18,7 @@ import {
 const libs = (over: Partial<LibSnapshot> = {}): LibSnapshot => ({
   materials: [], terrainMaterials: [], templates: [], models: [],
   scripts: [], animationFields: [], animations: [], tilesets: [], scenes: [],
-  images: [], textures: [], textureIds: [],
+  images: [], textures: [], audioSources: [], soundSamples: [], textureIds: [],
   ...over,
 });
 

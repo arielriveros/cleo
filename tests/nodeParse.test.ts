@@ -16,6 +16,7 @@ import { SkyLightNode } from '../src/core/scene/nodes/skyLightNode';
 import { CameraNode } from '../src/core/scene/nodes/cameraNode';
 import { SpriteNode } from '../src/core/scene/nodes/spriteNode';
 import { AnimatedSpriteNode } from '../src/core/scene/nodes/animatedSpriteNode';
+import { SoundNode } from '../src/core/scene/nodes/soundNode';
 import { UIRootNode } from '../src/core/scene/nodes/ui/uiRoot';
 import { UIPanelNode, UIStackNode, UISpacerNode } from '../src/core/scene/nodes/ui/uiContainers';
 import { UITextNode, UIImageNode } from '../src/core/scene/nodes/ui/uiContent';
@@ -60,6 +61,8 @@ const CASES: { label: string, make: () => Node, cls: Function }[] = [
     { label: 'camera', make: () => new CameraNode('cam', new Camera({ type: 'perspective' })), cls: CameraNode },
     { label: 'sprite', make: () => new SpriteNode('spr', new Sprite(), 'spherical'), cls: SpriteNode },
     { label: 'animatedSprite', make: () => new AnimatedSpriteNode('anim', new Sprite(), { frames: [1, 2], fps: 12, loop: true, constraints: 'cylindrical' }), cls: AnimatedSpriteNode },
+    { label: 'sound-ambient', make: () => new SoundNode('music', { mode: 'ambient' }), cls: SoundNode },
+    { label: 'sound-spatial', make: () => new SoundNode('emitter', { mode: 'spatial', sampleId: 'sample-1' }), cls: SoundNode },
     { label: 'uiRoot', make: () => new UIRootNode('UI'), cls: UIRootNode },
     { label: 'uiPanel', make: () => new UIPanelNode('panel'), cls: UIPanelNode },
     { label: 'uiText', make: () => new UITextNode('text'), cls: UITextNode },

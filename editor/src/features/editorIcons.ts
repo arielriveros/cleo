@@ -37,3 +37,36 @@ export function buildLightIconDataURL(): string {
   }
   return canvas.toDataURL('image/png');
 }
+
+// Rasterise the sound glyph (a speaker with two radiating arcs, matching the inspector's SoundIcon) to a
+// white-on-transparent PNG data URL for a Sound node's billboard; a sprite Material.Basic tints it.
+export function buildSoundIconDataURL(): string {
+  const size = 64, c = size / 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+  ctx.strokeStyle = 'white';
+  ctx.fillStyle = 'white';
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 4;
+
+  // The cone, drawn as one filled path so it reads at billboard size.
+  ctx.beginPath();
+  ctx.moveTo(c - 22, c - 8);
+  ctx.lineTo(c - 12, c - 8);
+  ctx.lineTo(c - 2, c - 20);
+  ctx.lineTo(c - 2, c + 20);
+  ctx.lineTo(c - 12, c + 8);
+  ctx.lineTo(c - 22, c + 8);
+  ctx.closePath();
+  ctx.fill();
+
+  for (const r of [10, 18]) {
+    ctx.beginPath();
+    ctx.arc(c - 2, c, r, -Math.PI / 3, Math.PI / 3);
+    ctx.stroke();
+  }
+  return canvas.toDataURL('image/png');
+}

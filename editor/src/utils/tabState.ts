@@ -38,6 +38,7 @@ const ID_FIELD: Partial<Record<TabKind, keyof EditorTab>> = {
   animationField: 'animationFieldId',
   tileset: 'tilesetId',
   texture: 'textureId',
+  soundSample: 'soundId',
 };
 
 /** The asset a tab edits, or null for the scene tab and for unsaved "New Material"-style tabs. */

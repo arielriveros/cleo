@@ -226,6 +226,55 @@ export function collectReferencedTilesetIds(scene: Scene | null | undefined): Se
   return set
 }
 
+/**
+ * Sample ids referenced by a SERIALIZED node tree, walked recursively into `set`.
+ *
+ * The publish twin of `collectReferencedSoundIds`, which walks LIVE nodes: by the time a build is packed
+ * the scenes are JSON, and a template's nodes were never live at all. A SoundNode's payload carries the
+ * reference as `sound.sampleId`, and nothing else in a scene names a sample.
+ */
+export function collectPublishedSoundIds(node: any, set: Set<string>): void {
+  if (!node || typeof node !== 'object') return
+  const id = node.sound?.sampleId
+  if (typeof id === 'string' && id) set.add(id)
+  for (const child of (node.children ?? [])) collectPublishedSoundIds(child, set)
+}
+
+/**
+ * Sound-sample asset ids played by any live Sound node.
+ *
+ * A sample has exactly one kind of referrer, unlike a texture — nothing embeds one, and no asset holds a
+ * copy — so this is a single walk rather than the layered scan `collectReferencedTextureIds` needs.
+ */
+export function collectReferencedSoundIds(scene: Scene | null | undefined): Set<string> {
+  const set = new Set<string>()
+  if (scene) {
+    for (const sn of scene.sounds) {
+      if (sn.sampleId) set.add(sn.sampleId)
+    }
+  }
+  return set
+}
+
+/**
+ * Audio-source asset ids reachable from a set of sound samples.
+ *
+ * The indirection matters for publish and for the orphan badge: a Sound node references a SAMPLE, and the
+ * sample is what names the file. Asking "is this .wav used?" without following that hop would report
+ * every audio source in the project as an orphan.
+ */
+export function collectReferencedAudioIds(
+  samples: { id: string; source: { kind: string; audioId?: string } }[],
+  sampleIds?: Set<string>,
+): Set<string> {
+  const set = new Set<string>()
+  for (const sample of samples) {
+    if (sampleIds && !sampleIds.has(sample.id)) continue
+    if (sample.source?.kind === 'audio' && sample.source.audioId) set.add(sample.source.audioId)
+  }
+  return set
+}
+
 /** Terrain-material asset ids referenced by any live terrain paint layer. */
 export function collectReferencedTerrainMaterialIds(scene: Scene | null | undefined): Set<string> {
   const set = new Set<string>()

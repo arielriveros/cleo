@@ -22,6 +22,17 @@ export const ModelIcon = () => (
   <S><path d="M12 3 20.5 7.5 12 12 3.5 7.5 12 3Z" fill="currentColor" fillOpacity="0.35" /><path d="M3.5 7.5v9L12 21v-9" /><path d="M20.5 7.5v9L12 21" /></S>
 );
 
+// --- Audio -----------------------------------------------------------------------------------------
+
+/** Spatial sound: a speaker with radiating arcs — a source heard from a place in the world. */
+export const SoundIcon = () => (
+  <S><path d="M4 9.5h3.2L12 5.5v13L7.2 14.5H4z" fill="currentColor" fillOpacity="0.3" /><path d="M15.4 9a4.2 4.2 0 0 1 0 6M18.2 6.6a7.8 7.8 0 0 1 0 10.8" /></S>
+);
+/** Ambient sound: a waveform with no speaker — heard everywhere, from nowhere in particular. */
+export const AmbientSoundIcon = () => (
+  <S><path d="M3 12h1.6M7 8v8M10.4 5.5v13M13.8 9v6M17.2 6.5v11M20.6 10.5v3" /></S>
+);
+
 // --- Cameras ---------------------------------------------------------------------------------------
 
 /** Camera body with the lens cone pointing right. */

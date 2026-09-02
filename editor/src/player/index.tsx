@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { CleoEngine, Scene, TextureManager, setGameHost, setScriptProvider, registerTemplates, Logger } from 'cleo';
+import { CleoEngine, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, registerTemplates, Logger } from 'cleo';
 import UILayer from '../features/gameUi/UILayer';
 import { unpackGameBin, inflateSceneGeometry, inflateTerrainData, inflateTilemapData } from './unpack';
 import { attachSharedAnimations } from './animations';
@@ -95,6 +95,16 @@ async function boot(): Promise<void> {
     try { if (!TextureManager.Instance.getTexture(t.id)) TextureManager.Instance.addTextureFromBytes(t.bytes, t.mime, t.config, t.id); } catch { /* skip a bad texture */ }
   }
 
+  // Sounds are global and referenced by id, exactly like textures — and registered BEFORE any scene is
+  // parsed, so a SoundNode resolving `sampleId` on the entry scene finds its sample present.
+  for (const a of pack.sounds) {
+    try {
+      if (!AudioManager.Instance.getSound(a.id)) {
+        AudioManager.Instance.addSoundFromBytes(a.bytes, a.mime, parseSoundSettings(a.settings), a.id);
+      }
+    } catch { /* skip a sound the browser cannot take */ }
+  }
+
   // Templates once, globally: the registry backs scene.instantiate and must survive a Game.loadScene
   // switch. Geometry is inflated eagerly — a script may instantiate one at any moment.
   for (const t of (data.templates ?? [])) inflateSceneGeometry(t.node, pack);
@@ -153,7 +163,7 @@ async function boot(): Promise<void> {
   });
 
   const scriptCount = Object.keys((window as any).CLEO_GAME_SCRIPTS || {}).length;
-  Logger.info(`scenes=${Object.keys(table).length} textures=${pack.textures.length} geometries=${Object.keys(data.geometries ?? {}).length} scriptsInFile=${scriptCount}`, 'Player');
+  Logger.info(`scenes=${Object.keys(table).length} textures=${pack.textures.length} sounds=${pack.sounds.length} geometries=${Object.keys(data.geometries ?? {}).length} scriptsInFile=${scriptCount}`, 'Player');
 
   await startScene(currentId);
 }

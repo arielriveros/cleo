@@ -38,6 +38,7 @@ export default defineConfig({
             // what is still outside the gate (and what to write next), run:
             //     npx vitest run --coverage --coverage.include='src/**/*.ts'
             include: [
+                'src/audio/soundSettings.ts',
                 'src/core/base64.ts',
                 'src/core/cameraRigMath.ts',
                 'src/core/geometry.ts',

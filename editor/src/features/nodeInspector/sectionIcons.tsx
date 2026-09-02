@@ -24,4 +24,6 @@ export const ProbeIcon = () => (<S><circle cx='12' cy='12' r='4' /><circle cx='1
 export const SkyboxIcon = () => (<S><rect x='4' y='4' width='16' height='16' rx='1.5' /><path d='M4 9h16M9 4v16' /></S>);
 export const AnimationIcon = () => (<S><path d='M5 12a7 7 0 1 1 2 5' /><path d='M5 21v-4h4' /></S>);
 export const ScriptIcon = () => (<S><path d='M8 6 3 12l5 6' /><path d='M16 6l5 6-5 6' /></S>);
+export const SoundIcon = () => (<S><path d='M4 9.5h3.2L12 5.5v13L7.2 14.5H4z' /><path d='M15.4 9a4.2 4.2 0 0 1 0 6M18.2 6.6a7.8 7.8 0 0 1 0 10.8' /></S>);
+export const FalloffIcon = () => (<S><circle cx='12' cy='12' r='2.2' fill='currentColor' stroke='none' /><circle cx='12' cy='12' r='5.5' strokeDasharray='2 3' /><circle cx='12' cy='12' r='9' strokeDasharray='2 3' /></S>);
 export const RigIcon = () => (<S><circle cx='5.5' cy='18.5' r='2' /><path d='M7 17.2 13.5 9' /><path d='M11 6.2h3l1-1.7h3l1 1.7h1.5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H11a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1Z' /></S>);

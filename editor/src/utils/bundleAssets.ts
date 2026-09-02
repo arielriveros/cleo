@@ -321,7 +321,18 @@ export async function packBundleAssets(bundle: BundleData): Promise<PackBundleRe
   }
   bundle.textures = []
 
-  return { blob: writer.finish(), index: { version: 1, geometries, textures } }
+  // Audio after the textures, on the same interning writer: two samples sharing a file store its bytes
+  // once, which is the storage half of what the audio-source/sound-sample split buys.
+  const audio: NonNullable<BundleAssetIndex['audio']> = []
+  for (const a of (bundle.audio ?? [])) {
+    const bytes = a.bytes instanceof Uint8Array ? a.bytes : new Uint8Array(a.bytes)
+    if (bytes.length === 0) continue
+    const ref = writer.addInterned(bytes)
+    audio.push({ id: a.id, mime: a.mime || 'audio/mpeg', o: ref.o, l: ref.l })
+  }
+  bundle.audio = []
+
+  return { blob: writer.finish(), index: { version: 1, geometries, textures, audio } }
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -421,5 +432,13 @@ export async function inflateBundleAssets(
     mime: t.mime,
     config: t.config,
     bytes: reader.bytes({ o: t.o, l: t.l })!.slice().buffer as ArrayBuffer,
+  }))
+
+  // Sliced for the same reason as the textures above. `?? []` is the compatibility arm: a bundle written
+  // before audio existed simply has no table here.
+  bundle.audio = (index.audio ?? []).map(a => ({
+    id: a.id,
+    mime: a.mime,
+    bytes: reader.bytes({ o: a.o, l: a.l })!.slice().buffer as ArrayBuffer,
   }))
 }

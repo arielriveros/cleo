@@ -51,6 +51,9 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     animationFields: (await src.json(`${BUNDLE_PATHS.librariesDir}animationFields.json`)) ?? [],
     animations: (await src.json(`${BUNDLE_PATHS.librariesDir}animations.json`)) ?? [],
     tilesets: (await src.json(`${BUNDLE_PATHS.librariesDir}tilesets.json`)) ?? [],
+    // Absent in a bundle written before audio existed, which reads back as a project with no sounds.
+    audioSources: (await src.json(`${BUNDLE_PATHS.librariesDir}audioSources.json`)) ?? [],
+    soundSamples: (await src.json(`${BUNDLE_PATHS.librariesDir}soundSamples.json`)) ?? [],
   };
   const vfs = (await src.json(BUNDLE_PATHS.vfs)) ?? { version: 1, folders: [], entries: [] };
 
@@ -61,10 +64,10 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     ? (((await src.json(BUNDLE_PATHS.texturesIndex)) ?? []) as BundleTextureIndexRow[])
     : [];
 
-  // 9 fixed JSON entries are already read by the time the total is known; report against the full set or
-  // the progress bar jumps backwards.
-  const total = 9 + scenePaths.length + (format === 2 ? 2 : texIndex.length);
-  let done = 9;
+  // 11 fixed JSON entries are already read by the time the total is known (9, plus the two audio
+  // libraries); report against the full set or the progress bar jumps backwards.
+  const total = 11 + scenePaths.length + (format === 2 ? 2 : texIndex.length);
+  let done = 11;
   src.onEntry?.(done, total);
 
   const scenes: Record<string, any> = {};
@@ -76,7 +79,7 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
   }
 
   if (format === 2) {
-    const bundle: BundleData = { manifest, scenes, libraries, vfs, textures: [] };
+    const bundle: BundleData = { manifest, scenes, libraries, vfs, textures: [], audio: [] };
     const index = (await src.json(BUNDLE_PATHS.assetsIndex)) as BundleAssetIndex | null;
     src.onEntry?.(++done, total);
     const blob = await src.bytes(BUNDLE_PATHS.assets);
@@ -84,7 +87,7 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     // A v2 bundle without its blob is truncated, not empty; importing it yields a project of empty meshes.
     if (!index || !blob) throw new Error('Bundle is missing assets.bin');
     await inflateBundleAssets(bundle, blob, index);
-    return { bundle, transfer: bundle.textures.map(t => t.bytes) };
+    return { bundle, transfer: [...bundle.textures.map(t => t.bytes), ...(bundle.audio ?? []).map(a => a.bytes)] };
   }
 
   // --- Format 1: one payload file per texture -----------------------------------------------------
@@ -135,6 +138,8 @@ export async function bundleEntries(bundle: BundleData): Promise<BundleEntry[]> 
     json(`${BUNDLE_PATHS.librariesDir}animations.json`, libraries.animations ?? []),
     json(`${BUNDLE_PATHS.librariesDir}animationFields.json`, libraries.animationFields ?? []),
     json(`${BUNDLE_PATHS.librariesDir}tilesets.json`, libraries.tilesets ?? []),
+    json(`${BUNDLE_PATHS.librariesDir}audioSources.json`, libraries.audioSources ?? []),
+    json(`${BUNDLE_PATHS.librariesDir}soundSamples.json`, libraries.soundSamples ?? []),
   ];
   for (const [id, data] of Object.entries(scenes)) entries.push(json(`${BUNDLE_PATHS.scenesDir}${id}.json`, data));
 

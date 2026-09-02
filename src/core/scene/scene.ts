@@ -3,6 +3,8 @@ import { Node } from "./nodes/node";
 import { ModelNode, disposeModelSubtree } from "./nodes/modelNode";
 import { LodGroupNode } from "./nodes/lodGroupNode";
 import { CameraRigNode } from "./nodes/cameraRigNode";
+import { SoundNode } from "./nodes/soundNode";
+import { AudioManager } from "../../audio/audioManager";
 import { LandscapeNode } from "./nodes/landscapeNode";
 import { TilemapNode } from "./nodes/tilemapNode";
 import { LightNode } from "./nodes/lightNode";
@@ -24,6 +26,9 @@ import { sceneStats, resetSceneStats, SceneStats } from "./sceneStats";
 import type { SceneChange } from "../eventBus";
 import { cloneNodeJson, regenerateNodeIds } from "./nodeJson";
 import { getTemplate, templateNames } from "./templates";
+
+/** Object-space up, rotated by the camera's world orientation to give the audio listener its up axis. */
+const UP_AXIS: vec3 = vec3.fromValues(0, 1, 0);
 
 /** Overrides applied to a freshly instantiated template root. See {@link Scene.instantiate}. */
 export interface InstantiateOptions {
@@ -61,11 +66,14 @@ export class Scene {
     private _tilemaps: Set<TilemapNode> = new Set();
     private _lodGroups: Set<LodGroupNode> = new Set();
     private _cameraRigs: Set<CameraRigNode> = new Set();
+    private _sounds: Set<SoundNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
     private _uiRoots: Set<UIRootNode> = new Set();
     private _uiNodes: Set<UINode> = new Set();
     // Container size for the UI layout pass, in CSS pixels; pushed in via setUIViewport.
     private _uiViewport: { width: number, height: number, dpr: number } = { width: 1920, height: 1080, dpr: 1 };
+    // Reused across frames: the audio pass must not allocate a vector per frame.
+    private readonly _listenerUp: vec3 = vec3.create();
     // Reused across frames: the UI pass must not allocate a matrix per world-space root per frame.
     private readonly _uiViewProj: mat4 = mat4.create();
     // Built alongside _nodes, so getNodesByName/getNodeById are an O(1) lookup rather than a scan.
@@ -92,6 +100,7 @@ export class Scene {
     // When false, ModelNode animators are NOT driven by scene.update (skinned meshes hold their bind
     // pose). The editor sets it false on editing scenes; default true is normal playback.
     private _animationsEnabled: boolean = true;
+    private _soundsEnabled: boolean = true;
     // When false, Node.spawnOnStart is ignored and every node starts spawned. The editor sets it false on
     // editing scenes: spawnOnStart is a RUNTIME rule, honoured only in Play mode and a published game.
     private _spawnRulesEnabled: boolean = true;
@@ -184,6 +193,10 @@ export class Scene {
 
         // Both are idempotent, and each falls back to the World it registered with, so no world argument
         // is needed here.
+        // Voices outlive the scene that started them — a Howl is owned by the AudioManager, not here —
+        // so a scene torn down mid-play would otherwise keep sounding over the next one.
+        for (const sound of this.sounds) sound.stop();
+
         for (const landscape of this.landscapes) landscape.terrain.dispose();
         for (const tilemap of this.tilemaps) tilemap.tilemap.dispose();
 
@@ -196,6 +209,18 @@ export class Scene {
     /** When false, skinned-model animators are not driven by scene.update (they hold bind pose). */
     public get animationsEnabled(): boolean { return this._animationsEnabled; }
     public set animationsEnabled(value: boolean) { this._animationsEnabled = value; }
+
+    /**
+     * When false, `SoundNode.play` is a no-op and the audio pass does not run. The twin of
+     * {@link animationsEnabled}, and set false on the editor's authoring scene for the same reason:
+     * that scene is started AND unpaused so the free-fly camera works, so without this every emitter
+     * in the level would sound the moment a project is opened.
+     */
+    public get soundsEnabled(): boolean { return this._soundsEnabled; }
+    public set soundsEnabled(value: boolean) {
+        this._soundsEnabled = value;
+        if (!value) for (const sound of this.sounds) sound.stop();
+    }
 
     /**
      * When false, `Node.spawnOnStart` is ignored and every node starts spawned — set false on editing
@@ -346,6 +371,8 @@ export class Scene {
                 sceneStats.rigMs = performance.now() - rigStart;
             }
 
+            this._updateAudio();
+
             this._solveUI();
 
             sceneStats.nodes = this._nodes.size;
@@ -353,6 +380,30 @@ export class Scene {
         } catch (e) {
             Logger.error(e);
         }
+    }
+
+    /**
+     * Place the listener and every spatial emitter for this frame.
+     *
+     * Runs AFTER the camera-rig pass for the same reason `_solveUI` does: a rig writes its camera's
+     * transform there, so a listener read before it would trail the camera by a frame. Emitters are
+     * pushed in the same pass so both ends of every spatial relationship are sampled at one instant —
+     * split across two passes, a fast pan smears the stereo image.
+     */
+    private _updateAudio(): void {
+        if (!this._soundsEnabled) return;
+        const sounds = this.sounds;
+        if (sounds.size === 0) return;
+
+        const camera = this.activeCamera;
+        if (camera) {
+            // The camera looks down its own +Z (see CameraNode.update, which aims `eye` that way), and
+            // its up axis is the Y column of its world orientation.
+            const up = vec3.transformQuat(this._listenerUp, UP_AXIS, camera.worldQuaternion);
+            AudioManager.Instance.setListener(camera.worldPosition, camera.worldForward, up);
+        }
+
+        for (const sound of sounds) sound.syncSpatial();
     }
 
     /**
@@ -517,6 +568,7 @@ export class Scene {
         this._tilemaps = new Set();
         this._lodGroups = new Set();
         this._cameraRigs = new Set();
+        this._sounds = new Set();
         this._lightProbes = new Set();
         this._skybox = null;
         this._volumetricClouds = null;
@@ -539,6 +591,8 @@ export class Scene {
                 this._lodGroups.add(node);
             if (node instanceof CameraRigNode)
                 this._cameraRigs.add(node);
+            if (node instanceof SoundNode)
+                this._sounds.add(node);
             if (node instanceof LightProbeNode)
                 this._lightProbes.add(node);
             if (node instanceof SkyboxNode)
@@ -753,6 +807,13 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._cameraRigs;
+    }
+
+    /** Every sound emitter in the scene. Holds only SPAWNED nodes, so a despawn silences one for free. */
+    public get sounds(): Set<SoundNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._sounds;
     }
 
     /**

@@ -1,9 +1,9 @@
-import { Scene, TextureManager } from 'cleo'
+import { Scene, TextureManager, AudioManager } from 'cleo'
 import type { RenderSettings } from 'cleo'
 import { buildGameData, bakeTemplates } from './buildGameData'
 import { compressTerrainData, compressTilemapData } from './terrainImages'
 import { stripDimensionData } from './stripDimensionData'
-import { collectPublishedTextureIds } from '../../utils/references'
+import { collectPublishedTextureIds, collectPublishedSoundIds } from '../../utils/references'
 import { extractNodeState } from '../../utils/projectStorage'
 import { resyncScene } from '../../utils/sceneResync'
 import { loadSceneData } from '../../utils/sceneStorage'
@@ -125,6 +125,19 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
       : TextureManager.Instance.serializeTextureBytes()
   } catch { textureBytes = [] }
 
+  // Sounds, narrowed the same way: what the SERIALIZED scenes and templates actually play. A sample
+  // nothing references is a file the player would download and never use.
+  const wantedSounds = new Set<string>()
+  for (const entry of Object.values(scenes)) collectPublishedSoundIds(entry.scene, wantedSounds)
+  for (const t of templates) collectPublishedSoundIds((t as any).node, wantedSounds)
+
+  let soundBytes: any[] = []
+  try {
+    // Unlike textures there is no ship-everything fallback: a game with no Sound nodes genuinely has no
+    // audio to carry, and guessing would bloat every silent build with the project's whole sound library.
+    soundBytes = wantedSounds.size > 0 ? AudioManager.Instance.serializeSoundBytes(wantedSounds) : []
+  } catch { soundBytes = [] }
+
   // Shared animation clips ONCE for the whole game, in their source rig's space, plus a map of which model
   // asset uses which. `AnimatedModel.serialize` drops an asset-backed clip, so the scenes above carry
   // none; the player resolves and retargets at load. Narrowed to what a shipped model references.
@@ -144,6 +157,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     templates,
     textureBytes,
   }
+  if (soundBytes.length) out.soundBytes = soundBytes
   if (animations.length) { out.animations = animations; out.modelAnimations = modelAnimations }
   if (src.settings) out.config = { graphics: { clearColor: src.settings.clearColor }, render: src.settings }
   return out

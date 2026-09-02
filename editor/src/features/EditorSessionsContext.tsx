@@ -34,6 +34,9 @@ export type EditorSessionsContextValue = Pick<EngineValue,
   // Animation field (blend space)
   | 'enterAnimationFieldEditor' | 'createAnimationFieldForModel' | 'saveAnimationField'
   | 'editingAnimationFieldId' | 'animationFieldTargetId'
+  // Sound sample
+  | 'enterSoundEditor' | 'saveSoundSample' | 'previewSoundSettings' | 'editingSoundId'
+  | 'registerSoundApply'
 >;
 
 export const EditorSessionsContext = createContext<EditorSessionsContextValue | null>(null);

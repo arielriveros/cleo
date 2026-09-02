@@ -32,6 +32,23 @@ export type { SkyAtmosphereOptions } from "./core/scene/nodes/skyAtmosphereNode"
 export { SkyLightNode } from "./core/scene/nodes/skyLightNode";
 export type { SkyLightOptions } from "./core/scene/nodes/skyLightNode";
 export { CameraNode } from "./core/scene/nodes/cameraNode";
+export { SoundNode } from "./core/scene/nodes/soundNode";
+export type { SoundMode, SoundNodeOptions, LoopMode } from "./core/scene/nodes/soundNode";
+// The audio stack. `AudioManager` is the registry a SoundNode resolves its sample through, and the same
+// shape as TextureManager on purpose — the editor's asset reconciler, byte store and packer are written
+// against that surface.
+export { AudioManager } from "./audio/audioManager";
+export { Sound } from "./audio/sound";
+export { EffectRack } from "./audio/effectRack";
+export { Mixer } from "./audio/buses";
+export {
+    BUS_IDS, EFFECT_KINDS, DISTANCE_MODELS, DEFAULT_SOUND_SETTINGS, DEFAULT_SPATIAL_SETTINGS,
+    defaultEffect, normalizeEffect, normalizeEffects, clampSettings, parseSoundSettings,
+    parseSpatialSettings, rackShapeOf, attenuationAt,
+} from "./audio/soundSettings";
+export type {
+    BusId, SoundEffect, EffectKind, SoundSettings, SpatialSettings, DistanceModel, FilterKind, Oversample,
+} from "./audio/soundSettings";
 export { SpriteNode } from "./core/scene/nodes/spriteNode";
 export { AnimatedSpriteNode } from "./core/scene/nodes/animatedSpriteNode";
 export type { SpriteFrameSource } from "./core/scene/nodes/animatedSpriteNode";

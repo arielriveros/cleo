@@ -1,4 +1,4 @@
-import { TextureManager, CleoEngine } from 'cleo'
+import { TextureManager, AudioManager, CleoEngine } from 'cleo'
 import type { MaterialAsset } from '../../utils/materials'
 import type { TerrainMaterialAsset } from '../../utils/terrainMaterials'
 import type { Template } from '../../utils/templates'
@@ -13,10 +13,15 @@ import {
 } from '../../utils/modelThumbnails'
 import { cryptoRandomId } from '../../utils/ids'
 import { deleteTextures, putTextures } from '../../utils/textureStore'
-import { AssetKind, KIND_EXT, KIND_LABEL } from '../../utils/vfs'
+import { AssetKind, AUDIO_EXTS, KIND_EXT, KIND_LABEL } from '../../utils/vfs'
 import type { ImageAsset } from '../../utils/images'
 import { toTextureConfig } from '../../utils/textureAssets'
 import type { TextureAsset } from '../../utils/textureAssets'
+import type { AudioSourceAsset } from '../../utils/audioSources'
+import { formatDuration } from '../../utils/audioSources'
+import type { SoundSampleAsset } from '../../utils/soundSamples'
+import { readsAudio } from '../../utils/soundSamples'
+import { deleteAudio, putAudio } from '../../utils/audioStore'
 import { deepClone } from '../../utils/deepClone'
 import { estimateBytes } from '../../utils/assetSize'
 import { IMAGE_EXTS } from './uploadRouter'
@@ -34,6 +39,8 @@ export type AssetDeps = {
   tilesets: TilesetAsset[]
   images: ImageAsset[]
   textures: TextureAsset[]
+  audioSources: AudioSourceAsset[]
+  soundSamples: SoundSampleAsset[]
   scenes: SceneMeta[]
 
   addMaterial: (m: MaterialAsset) => void
@@ -66,6 +73,12 @@ export type AssetDeps = {
   addTextureAsset: (t: TextureAsset) => void
   updateTextureAsset: (id: string, t: TextureAsset) => void
   removeTextureAsset: (id: string) => void
+  addAudioSource: (a: AudioSourceAsset) => void
+  updateAudioSource: (id: string, a: AudioSourceAsset) => void
+  removeAudioSource: (id: string) => void
+  addSoundSample: (s: SoundSampleAsset) => void
+  updateSoundSample: (id: string, s: SoundSampleAsset) => void
+  removeSoundSample: (id: string) => void
   createScene: (name?: string) => Promise<string>
   renameScene: (sceneId: string, name: string) => void
   deleteScene: (sceneId: string) => Promise<string | null>
@@ -81,11 +94,12 @@ export type AssetDeps = {
   enterAnimationFieldEditor: (id?: string) => void
   enterTilesetEditor: (id?: string) => void
   enterTextureEditor: (id?: string) => void
+  enterSoundEditor: (id?: string) => void
 
   emit: (event: string, payload?: any) => void
 }
 
-type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | AnimationAsset | TilesetAsset | SceneMeta | ImageAsset | TextureAsset
+type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | AnimationAsset | TilesetAsset | SceneMeta | ImageAsset | TextureAsset | AudioSourceAsset | SoundSampleAsset
 
 /** The asset record behind an entry, or undefined. Every kind has one now, textures included. */
 export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsset | undefined {
@@ -101,6 +115,8 @@ export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsse
     case 'scene': return deps.scenes.find(s => s.id === id)
     case 'image': return deps.images.find(i => i.id === id)
     case 'texture': return deps.textures.find(t => t.id === id)
+    case 'audioSource': return deps.audioSources.find(a => a.id === id)
+    case 'soundSample': return deps.soundSamples.find(s => s.id === id)
   }
 }
 
@@ -123,6 +139,9 @@ export function sizeOfAsset(kind: AssetKind, id: string, deps: AssetDeps): numbe
   // A texture is settings and a reference. Counting the image's bytes here as well would double every
   // folder total, and would multiply it again for each texture sharing one image.
   if (kind === 'texture') return undefined
+  // The audio split is the same shape: the source knows its exact byte length, the sample is a reference.
+  if (kind === 'audioSource') return deps.audioSources.find(a => a.id === id)?.byteSize || undefined
+  if (kind === 'soundSample') return undefined
   const asset = findAsset(kind, id, deps)
   if (!asset) return undefined
   // Walked, not stringified: a model asset carries its vertex buffers, and building the text of one is
@@ -136,6 +155,8 @@ export function thumbnailOf(kind: AssetKind, id: string, deps: AssetDeps): strin
   // its own id in the TextureManager; an image shows any texture reading it, since the bytes are the same
   // picture either way and the image itself is never uploaded to the GPU on its own.
   if (kind === 'texture') return liveImageSrc(id)
+  // Neither audio kind has a picture. Their cards show the kind glyph, which is what a null returns.
+  if (kind === 'audioSource' || kind === 'soundSample') return null
   if (kind === 'image') {
     const reader = deps.textures.find(t => t.source.kind === 'image' && t.source.imageId === id)
     return reader ? liveImageSrc(reader.id) : null
@@ -214,6 +235,16 @@ export function renameAsset(kind: AssetKind, id: string, stem: string, deps: Ass
       if (a) deps.updateImage(id, { ...a, name: stem })
       break
     }
+    case 'audioSource': {
+      const a = deps.audioSources.find(x => x.id === id)
+      if (a) deps.updateAudioSource(id, { ...a, name: stem })
+      break
+    }
+    case 'soundSample': {
+      const a = deps.soundSamples.find(x => x.id === id)
+      if (a) deps.updateSoundSample(id, { ...a, name: stem })
+      break
+    }
   }
 }
 
@@ -255,6 +286,29 @@ export function deleteAsset(kind: AssetKind, id: string, deps: AssetDeps): void 
       deps.removeImage(id)
       void deleteTextures([id])
       deps.emit('TEXTURES_CHANGED')
+      break
+    }
+    case 'soundSample': {
+      const asset = deps.soundSamples.find(s => s.id === id)
+      AudioManager.Instance.removeSound(id)
+      deps.removeSoundSample(id)
+      // Same eviction rule as a texture's image: the bytes go only when NOTHING else reads them. Several
+      // samples may share one file — that is the point of the split — so an unconditional delete would
+      // pull the audio out from under every other sample pointing at it.
+      const audioId = asset?.source.kind === 'audio' ? asset.source.audioId : undefined
+      if (audioId && !deps.soundSamples.some(s => s.id !== id && readsAudio(s, audioId))) {
+        deps.removeAudioSource(audioId)
+        void deleteAudio([audioId])
+      }
+      deps.emit('SOUNDS_CHANGED')
+      break
+    }
+    case 'audioSource': {
+      // The file goes, but a sample still pointing at it is left in place rather than silently deleted:
+      // it keeps its settings and can be re-pointed at another file. Mirrors the image arm above.
+      deps.removeAudioSource(id)
+      void deleteAudio([id])
+      deps.emit('SOUNDS_CHANGED')
       break
     }
   }
@@ -364,6 +418,37 @@ export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: 
       deps.addImage({ ...deepClone(a), id: newId, name: stem, created: Date.now() })
       return newId
     }
+    case 'soundSample': {
+      const a = deps.soundSamples.find(s => s.id === id)
+      if (!a) return null
+      const am = AudioManager.Instance
+      // The AudioManager id appears inside every serialized SoundNode; keep the pretty name when free.
+      const soundId = am.getSound(stem) ? `${stem}-${newId.slice(0, 6)}` : stem
+
+      // NO BYTES ARE COPIED. The duplicate shares the original's audio and differs only in its settings —
+      // which is the whole point of the split: one impact.wav dry on a footstep and drenched in a cave.
+      deps.addSoundSample({ ...deepClone(a), id: soundId, name: stem, soundIds: [soundId] })
+
+      // Register the copy so it is playable immediately, reusing the original's retained bytes.
+      const bytes = am.getSource(id)
+      if (bytes) am.addSoundFromBytes(bytes.bytes, bytes.mime, deepClone(a.settings), soundId)
+      deps.emit('SOUNDS_CHANGED')
+      return soundId
+    }
+    case 'audioSource': {
+      const a = deps.audioSources.find(x => x.id === id)
+      if (!a) return null
+      // A real byte copy, unlike a sample duplicate: two audio sources are two independent files.
+      const bytes = AudioManager.Instance.getSource(id)
+      if (!bytes) return null
+      void putAudio([{
+        id: newId,
+        blob: new Blob([bytes.bytes as unknown as BlobPart], { type: bytes.mime }),
+        mime: bytes.mime,
+      }])
+      deps.addAudioSource({ ...deepClone(a), id: newId, name: stem, created: Date.now() })
+      return newId
+    }
   }
 }
 
@@ -409,9 +494,12 @@ export async function regenerateThumbnail(
     case 'animationField':
     // Clips in source-rig space, with no character attached — there is nothing to pose for a picture.
     case 'animation':
-    // Both halves of the split show the decoded image itself — there is nothing to render.
+    // Both halves of the image split show the decoded image itself — there is nothing to render.
     case 'image':
     case 'texture':
+    // The audio kinds have no picture at all; their cards carry the kind glyph.
+    case 'audioSource':
+    case 'soundSample':
       return false
   }
 }
@@ -431,11 +519,15 @@ export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean
     case 'tileset': deps.enterTilesetEditor(id); return true
     case 'scene': void deps.openScene(id); return true
     case 'texture': deps.enterTextureEditor(id); return true
+    case 'soundSample': deps.enterSoundEditor(id); return true
     // Raw bytes have nothing to author, so an image opens the preview pane instead. What makes an image
     // usable — wrap, filters, mipmaps — belongs to a texture, and that is what has an editor.
     case 'image': return false
     // An animation has no editor: source-space clip data, meaningful only against a rig.
     case 'animation': return false
+    // Raw audio, same reasoning as an image: what makes a file usable — volume, loop points, effects,
+    // the bus — belongs to the sound sample, and that is what has an editor.
+    case 'audioSource': return false
   }
 }
 
@@ -453,6 +545,8 @@ export function deleteConsequence(kind: AssetKind): string {
     case 'scene': return 'the project switches to another scene'
     case 'texture': return 'materials and tilesets using it show no texture'
     case 'image': return 'textures sourcing it lose their pixels'
+    case 'soundSample': return 'sound nodes playing it fall silent'
+    case 'audioSource': return 'sound samples sourcing it lose their audio'
   }
 }
 
@@ -475,6 +569,10 @@ export function dragPayload(kind: AssetKind, assetId: string): [string, string][
       ['text/cleo-asset', JSON.stringify({ type: 'texture', id: assetId })],
       ['text/plain', assetId], // TextureInspector's fallback
     ]
+    case 'soundSample': return [['text/cleo-sound-sample', assetId]]
+    // Deliberately NOT the sample payload, for the same reason an image is not a texture: dropping raw
+    // bytes into a Sound node's slot must not appear to work, because a node needs a sample's settings.
+    case 'audioSource': return [['text/cleo-audio', assetId]]
   }
 }
 
@@ -533,6 +631,15 @@ const ICONS: Record<AssetKind | 'folder', string> = {
   image: svg('#9aa4b2',
     `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#4a4a55" fill-opacity=".3"/><circle cx="8.5" cy="9.5" r="1.6" stroke="#ffd27a"/><path d="M4 17.5l5-5.5 3.5 4 3-2.5 4.5 4"/>`,
   ),
+  // A raw waveform: the file itself, with nothing authored about it. The audio twin of `image`.
+  audioSource: svg('#9aa4b2',
+    `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#4a4a55" fill-opacity=".3"/><path d="M3.5 12h1.5M7 8.5v7M10 6v12M13 9v6M16 7v10M19 10.5v3M20.5 12H21" stroke-opacity=".95"/>`,
+  ),
+  // The same waveform with a speaker in front of it — a sample is audio plus how it is played. The audio
+  // twin of `texture`, tinted to match it.
+  soundSample: svg('#7fb2d9',
+    `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#2f5d80" fill-opacity=".35"/><path d="M6 10v4M9 7.5v9M15 8.5v7M18 10.5v3" stroke-opacity=".55"/><path d="M11.5 9.5 13.6 7.8v8.4l-2.1-1.7h-1.2v-5z" fill="#7fb2d9" fill-opacity=".45"/><path d="M16.2 9.6a3.4 3.4 0 0 1 0 4.8" stroke="#ffd27a"/>`,
+  ),
   // The same frame with a sampling grid over it — a texture is an image plus how it is read.
   texture: svg('#7fb2d9',
     `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#2f5d80" fill-opacity=".35"/><path d="M9 4.5v15M15 4.5v15M3 9.5h18M3 14.5h18" stroke-opacity=".45"/><circle cx="7" cy="8" r="1.2" stroke="#ffd27a"/><path d="M3.5 17l4-4 3 3.2 2.5-2 4.5 4" stroke-opacity=".9"/>`,
@@ -566,8 +673,9 @@ export function badgeStyles(): string {
 
   const kinds = (Object.keys(KIND_EXT) as (keyof typeof KIND_EXT)[])
     .map(kind => rule(KIND_EXT[kind], ICONS[kind]))
-  // Images keep their real extension, so they need one rule per format the importer accepts.
+  // The byte kinds keep their real extensions, so each needs one rule per format the importer accepts.
   const images = IMAGE_EXTS.map(ext => rule(ext, ICONS.image))
+  const audio = AUDIO_EXTS.map(ext => rule(ext, ICONS.audioSource))
 
   return [
     // The preview box is the positioning context, so the badge clips to its rounded corner rather than

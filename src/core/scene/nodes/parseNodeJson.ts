@@ -14,6 +14,7 @@ import { SkyLightNode } from "./skyLightNode";
 import { CameraNode } from "./cameraNode";
 import { SpriteNode } from "./spriteNode";
 import { AnimatedSpriteNode } from "./animatedSpriteNode";
+import { SoundNode } from "./soundNode";
 import { UIRootNode } from "./ui/uiRoot";
 import { UIPanelNode, UIStackNode, UISpacerNode } from "./ui/uiContainers";
 import { UITextNode, UIImageNode } from "./ui/uiContent";
@@ -35,6 +36,7 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'camera': CameraNode.parse(parent, json); break;
     case 'sprite': SpriteNode.parse(parent, json); break;
     case 'animatedSprite': AnimatedSpriteNode.parse(parent, json); break;
+    case 'sound': SoundNode.parse(parent, json); break;
     case 'landscape': LandscapeNode.parse(parent, json); break;
     case 'tilemap': TilemapNode.parse(parent, json); break;
     case 'volumetricClouds': VolumetricCloudsNode.parse(parent, json); break;

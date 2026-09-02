@@ -10,6 +10,7 @@ import {
   PointLight,
   SkyboxNode,
   Skybox,
+  SoundNode,
   CameraNode,
   CameraRigNode,
   Camera,
@@ -55,6 +56,7 @@ import {
   DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon,
+  SoundIcon, AmbientSoundIcon,
 } from './nodeIcons'
 
 // The catalog of addable node types, as data rather than closures inside AddNew: the same item is created
@@ -62,13 +64,14 @@ import {
 // receive only the item's `id` through a DataTransfer.
 export const NEW_NODE_MIME = 'text/cleo-new-node';
 
-export type AddCategory = 'common' | 'cameras' | 'lights' | 'sprites' | 'primitives' | 'complex'
+export type AddCategory = 'common' | 'cameras' | 'lights' | 'audio' | 'sprites' | 'primitives' | 'complex'
   | 'environment' | 'uiLayout' | 'uiCore' | 'uiWidgets';
 
 export const ADD_CATEGORIES: { value: AddCategory, label: string }[] = [
   { value: 'common', label: 'Common' },
   { value: 'cameras', label: 'Cameras' },
   { value: 'lights', label: 'Lights' },
+  { value: 'audio', label: 'Audio' },
   { value: 'sprites', label: 'Sprites' },
   // The values are internal; renaming one invalidates the stored cleo.addnew.category preference.
   { value: 'primitives', label: 'Primitive Geometries' },
@@ -301,6 +304,18 @@ export const ADD_ITEMS: AddItem[] = [
     // New probes get a bounded influence volume out of the box; probes from legacy scenes
     // deserialize size [0,0,0] = unbounded (whole scene).
     create: async () => new LightProbeNode('light probe', { size: [10, 10, 10] }),
+  },
+  // Two menu entries, ONE node class, exactly like the three lights above: ambient and spatial differ in
+  // how a sound is heard, not in what it is, so the mode lives in the node's payload.
+  {
+    id: 'spatialSound', label: 'Spatial Sound', icon: SoundIcon, category: 'audio',
+    create: async () => new SoundNode('sound', { mode: 'spatial' }),
+  },
+  {
+    // Heard at a constant level wherever the listener is, so its world position means nothing and a
+    // viewport drop must not try to place it.
+    id: 'ambientSound', label: 'Ambient Sound', icon: AmbientSoundIcon, category: 'audio', placeable: false,
+    create: async () => new SoundNode('ambient sound', { mode: 'ambient' }),
   },
   {
     // Scene-wide, so unplaceable — unlike a light probe, which has a volume.

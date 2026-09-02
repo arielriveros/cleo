@@ -169,7 +169,7 @@ export type LoadingProgress = { loaded: number; total: number; label: string };
 export const EDITOR_CLEAR_COLOR: [number, number, number, number] = [0.68, 0.80, 0.90, 1.0];
 export const LEGACY_CLEAR_COLOR = [0.65, 0.65, 0.71];
 
-export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture';
+export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'renderer' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample';
 
 /**
  * Whether a mode paints the 3D viewport, or replaces it with a full-panel editor of its own; the
@@ -191,6 +191,7 @@ export const MODE_RENDERS_VIEWPORT: Record<EditorMode, boolean> = {
   script: false,         // ScriptTabView fills the panel
   tileset: false,        // TilesetTabView fills the panel
   texture: false,        // TextureTabView fills the panel
+  soundSample: false,    // SoundTabView fills the panel
 };
 export type GizmoMode = 'position' | 'rotation' | 'scale';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
@@ -198,7 +199,7 @@ export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 // Browser-style editor tabs. `editorMode` is derived from the active tab (see EngineProvider). The scene
 // tab hosts the open scene asset; the library tabs each own a live edit session (a throwaway Scene in
 // tabRuntimeRef), except 'script' and 'tileset', which own no 3D scene and get no tabRuntimeRef entry.
-export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture';
+export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample';
 
 /**
  * Whether a tab's contents may drive AUTO-EXPOSURE. Exhaustive, like `MODE_RENDERS_VIEWPORT` above — a
@@ -224,6 +225,7 @@ export const TAB_METERS_EXPOSURE: Record<TabKind, boolean> = {
   script: false,         // no viewport at all
   tileset: false,        // no viewport at all
   texture: false,        // no viewport at all
+  soundSample: false,    // no viewport at all
 };
 
 /**
@@ -245,6 +247,7 @@ export const KIND_LABEL: Record<TabKind, string> = {
   script: 'Script',
   tileset: 'Tileset',
   texture: 'Texture',
+  soundSample: 'Sound',
 };
 
 // Reactive per-mesh-tab edit state (the tab's Scene itself lives in tabRuntimeRef). levelIds[i] is the
@@ -276,6 +279,7 @@ export interface EditorTab {
   animationFieldId?: string | null; // animation-field tabs: the edited field asset id
   tilesetId?: string | null; // tileset tabs: the edited tileset asset id
   textureId?: string | null; // texture tabs: the edited texture asset id (also its TextureManager id)
+  soundId?: string | null; // sound tabs: the edited sample asset id (also its AudioManager id)
 }
 export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
 // No 'move': landscape mode is brushes only; a landscape is positioned with the scene-mode gizmo.

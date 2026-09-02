@@ -9,6 +9,8 @@ import type { ScriptAsset } from './scripts'
 import type { AnimationAsset } from './animationAssets'
 import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
+import type { AudioSourceAsset } from './audioSources'
+import type { SoundSampleAsset } from './soundSamples'
 import type { ChunkRef } from './chunkBlob'
 
 // The portable project/asset-pack bundle format (a .zip). A "project" bundle carries every scene, all
@@ -50,6 +52,18 @@ export interface BundleLibraries {
   animationFields: AnimationFieldAsset[]
   animations: AnimationAsset[]
   tilesets: TilesetAsset[]
+  /**
+   * The audio split's two record halves.
+   *
+   * A DELIBERATE DIVERGENCE from images/textures, which are absent from this interface: those two are
+   * re-derived on import by `reconcileTextureAssets` from the bytes alone, because a texture's sampling
+   * settings can be reconstructed from the `config` frozen into each stored payload. Nothing equivalent
+   * is true of audio — volume, loop points, fades, the bus and the whole effect rack are AUTHORED and
+   * unrecoverable from a `.wav`. Without these two arrays a bundle round-trip would silently reset every
+   * sound in the project to defaults. Optional so a bundle written before audio existed still reads.
+   */
+  audioSources?: AudioSourceAsset[]
+  soundSamples?: SoundSampleAsset[]
 }
 
 /** One texture payload as it crosses the worker boundary and lives inside the zip (bytes, not base64). */
@@ -57,6 +71,13 @@ export interface BundleTexture {
   id: string
   mime: string
   config: any
+  bytes: ArrayBuffer
+}
+
+/** One audio payload as it crosses the worker boundary and lives inside the zip (bytes, not base64). */
+export interface BundleAudio {
+  id: string
+  mime: string
   bytes: ArrayBuffer
 }
 
@@ -68,6 +89,8 @@ export interface BundleData {
   libraries: BundleLibraries
   vfs: VfsIndex
   textures: BundleTexture[]
+  /** Optional so a bundle written before audio existed reads as one with no sounds. */
+  audio?: BundleAudio[]
 }
 
 // Fixed paths inside the archive. `texturesDir`/`texturesIndex` are format 1 only: read, never written.
@@ -127,4 +150,6 @@ export interface BundleAssetIndex {
   /** `model.geometryRef` -> the chunks of one mesh. Shared across every scene, model and template. */
   geometries: Record<string, BundleGeometry>
   textures: { id: string; mime: string; config: any; o: number; l: number }[]
+  /** Absent in a bundle written before audio existed; read as "no sounds". */
+  audio?: { id: string; mime: string; o: number; l: number }[]
 }

@@ -4,7 +4,8 @@ import type { useCleoEngine } from './EngineContext';
 type EngineValue = ReturnType<typeof useCleoEngine>;
 
 /**
- * The asset libraries (templates, materials, terrain materials, models, script assets, animation fields)
+ * The asset libraries (templates, materials, terrain materials, models, script assets, animation fields,
+ * images/textures and audio sources/sound samples)
  * plus their CRUD. The state lives in EngineProvider, persisted to IndexedDB by `usePersistedLibrary`;
  * this context re-exposes it as a narrow, memoized value, derived via `Pick` to stay in lockstep with it.
  */
@@ -19,6 +20,8 @@ export type AssetLibraryContextValue = Pick<EngineValue,
   | 'tilesets' | 'addTileset' | 'removeTileset' | 'updateTileset'
   | 'images' | 'addImage' | 'removeImage' | 'updateImage'
   | 'textures' | 'addTextureAsset' | 'removeTextureAsset' | 'updateTextureAsset'
+  | 'audioSources' | 'addAudioSource' | 'removeAudioSource' | 'updateAudioSource'
+  | 'soundSamples' | 'addSoundSample' | 'removeSoundSample' | 'updateSoundSample'
   | 'assetsLoaded'
 >;
 

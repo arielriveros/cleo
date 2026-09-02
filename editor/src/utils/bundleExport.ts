@@ -1,11 +1,11 @@
-import { Logger, TextureManager } from 'cleo'
+import { Logger, TextureManager, AudioManager } from 'cleo'
 import type { VfsIndex } from './vfs'
 import type { ProjectMeta } from './sceneStorage'
 import { loadSceneData } from './sceneStorage'
 import { referencedTextureIds } from './textureStore'
 import { exportBundleJob } from '../workers/workerClient'
 import {
-  BundleData, BundleLibraries, BundleManifest, BundleTexture, BUNDLE_FORMAT_VERSION,
+  BundleData, BundleLibraries, BundleManifest, BundleTexture, BundleAudio, BUNDLE_FORMAT_VERSION,
 } from './bundle'
 
 export type ExportKind = 'project' | 'assetpack'
@@ -76,10 +76,27 @@ export async function exportBundle(opts: {
     bytes: t.bytes.slice().buffer,
   }))
 
-  const bundle: BundleData = { manifest, scenes, libraries, vfs: exportedVfs, textures }
+  // Audio comes from the live AudioManager for the same reason textures do: the IndexedDB store is
+  // filled by a debounced effect and may not have caught up with a just-imported file.
+  //
+  // A project bundle ships every live sample; an asset pack narrows to the files its samples read.
+  const wantedAudio = kind === 'project'
+    ? undefined
+    : new Set((libraries.soundSamples ?? [])
+        .map(s => (s.source?.kind === 'audio' ? s.source.audioId : s.id))
+        .filter(Boolean) as string[])
+  const audio: BundleAudio[] = AudioManager.Instance.serializeSoundBytes(wantedAudio).map(a => ({
+    id: a.id,
+    mime: a.mime,
+    // A standalone copy, like the textures above: the returned Uint8Array may view a shared buffer, and
+    // the Sound's own retained bytes must not cross the worker's structured-clone boundary.
+    bytes: a.bytes.slice().buffer as ArrayBuffer,
+  }))
+
+  const bundle: BundleData = { manifest, scenes, libraries, vfs: exportedVfs, textures, audio }
   const zip = await exportBundleJob(bundle)
   const slug = (projectName || 'project').trim().replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'project'
   const filename = kind === 'project' ? `${slug}.cleoproj.zip` : 'assets.cleopack.zip'
   download(zip, filename)
-  Logger.info(`Exported ${kind === 'project' ? 'project' : 'asset pack'} (${textures.length} textures)`, 'Editor')
+  Logger.info(`Exported ${kind === 'project' ? 'project' : 'asset pack'} (${textures.length} textures, ${audio.length} sounds)`, 'Editor')
 }

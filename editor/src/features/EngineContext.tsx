@@ -13,7 +13,7 @@ import { ProjectContext, type ProjectContextValue } from "./ProjectContext";
 import { EditorSessionsContext, type EditorSessionsContextValue } from "./EditorSessionsContext";
 import { useStableActions } from "../utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
-import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey } from "cleo";
+import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey } from "cleo";
 import type { SceneChange, TerrainFoliageRule } from "cleo";
 import NullImage from '../images/null.png';
 import EventEmitter from "../utils/eventEmitter";
@@ -39,6 +39,8 @@ import { modelAssetSkin, applyModelAnimations, invalidateAnimationCache, resolve
 import { AnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
 import { TilesetAsset, reembedTilesets, detachTileset } from "../utils/tilesets";
 import type { ImageAsset } from "../utils/images";
+import type { AudioSourceAsset } from "../utils/audioSources";
+import type { SoundSampleAsset } from "../utils/soundSamples";
 import { toTextureConfig } from "../utils/textureAssets";
 import type { TextureAsset } from "../utils/textureAssets";
 import { groupImportFiles } from "../utils/importGrouping";
@@ -76,11 +78,12 @@ import { assetIdOfTab, loadTabState, saveTabState, MainMode } from "../utils/tab
 import { activeProjectAllowsLegacyImport, touchProject } from "../utils/projects";
 import { activeProjectId } from "../utils/projectScope";
 import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextureIds, legacyTexturesOf, deleteTextures } from "../utils/textureStore";
+import { preloadAudio, persistAudio } from "../utils/audioStore";
 import { startTask, StepStatus } from "./progress/progressStore";
 import { reconcileEditorHelpers } from "../utils/editorHelpers";
 import { readBackendPreference } from './renderer/backendPreference';
 import { deepClone } from '../utils/deepClone';
-import { buildProbeIconDataURL, buildLightIconDataURL } from './editorIcons';
+import { buildProbeIconDataURL, buildLightIconDataURL, buildSoundIconDataURL } from './editorIcons';
 import { ImportStage, IMPORT_STAGES, AnimImportStage, ANIM_IMPORT_STAGES } from './importStages';
 import { usePersistedLibrary, usePersistedModelLibrary } from './persistLibrary';
 import { useAssetThumbnails } from './hooks/useAssetThumbnails';
@@ -88,6 +91,7 @@ import { useSaving } from './hooks/useSaving';
 import { usePendingDecisions } from './hooks/usePendingDecisions';
 import { useTilesetEditor } from './hooks/useTilesetEditor';
 import { useTextureEditor } from './hooks/useTextureEditor';
+import { useSoundEditor } from './hooks/useSoundEditor';
 import { useAnimationFieldEditor } from './hooks/useAnimationFieldEditor';
 import {
   EDITOR_CLEAR_COLOR, LEGACY_CLEAR_COLOR, TAB_METERS_EXPOSURE, SCENE_TAB_ID, KIND_LABEL,
@@ -124,6 +128,12 @@ const EngineContext = createContext<{
    * that, a texture that looks absent may only be late: do not GC texture entries from the asset index.
    */
   texturesPreloaded: boolean;
+  /**
+   * True once `preloadAudio()` has settled, so the AudioManager's contents are authoritative. The audio
+   * twin of `texturesPreloaded`, and it gates the sound reconciler and the asset index's sound GC for
+   * exactly the same reason: before it, a sample that looks absent may only be late.
+   */
+  audioPreloaded: boolean;
   editorMode: EditorMode;
   setEditorMode: (mode: EditorMode) => void;
   gizmoMode: GizmoMode;
@@ -143,6 +153,8 @@ const EngineContext = createContext<{
   registerAnimationApply: (reg: { tabId: string; apply: () => void } | null) => void;
   registerTilesetApply: (reg: { tabId: string; apply: () => void } | null) => void;
   registerTextureApply: (reg: { tabId: string; apply: () => void } | null) => void;
+  /** SoundProvider hands its save back here, so Ctrl+S and Save All can reach a sound tab by id. */
+  registerSoundApply: (reg: { tabId: string; apply: () => void } | null) => void;
   enterTemplateEditor: (templateId?: string) => void;
   editingTemplateName: string | null;
   templateRootId: string | null;
@@ -241,6 +253,28 @@ const EngineContext = createContext<{
   removeTextureAsset: (id: string) => void;
   /** Writes the record AND retunes the live GPU texture, so the viewport follows the inspector. */
   updateTextureAsset: (id: string, t: TextureAsset) => void;
+  /** Audio source assets: metadata over bytes in the `audio` store. The audio twin of `images`. */
+  audioSources: AudioSourceAsset[];
+  addAudioSource: (a: AudioSourceAsset) => void;
+  removeAudioSource: (id: string) => void;
+  updateAudioSource: (id: string, a: AudioSourceAsset) => void;
+  /**
+   * Sound sample assets: a byte source plus every playback decision. `id` IS the AudioManager id, so a
+   * sample is renamed through `name` and never by its id, which every serialized SoundNode references.
+   */
+  soundSamples: SoundSampleAsset[];
+  addSoundSample: (s: SoundSampleAsset) => void;
+  removeSoundSample: (id: string) => void;
+  /** Writes the record AND retunes the live Sound, so a playing preview follows the inspector. */
+  updateSoundSample: (id: string, s: SoundSampleAsset) => void;
+  /** The sample asset the active sound tab edits, or null. */
+  editingSoundId: string | null;
+  /** Open (or focus) a Sound Sample asset's edit tab. */
+  enterSoundEditor: (sampleId?: string) => void;
+  /** Write an edited sample back to the library and retune the live Sound. */
+  saveSoundSample: (asset: SoundSampleAsset) => void;
+  /** Retune the LIVE sound without touching the library — used while a control is being dragged. */
+  previewSoundSettings: (asset: SoundSampleAsset) => void;
   // Tileset assets (sliced atlases painted by tilemap layers)
   tilesets: TilesetAsset[];
   addTileset: (t: TilesetAsset) => void;
@@ -369,6 +403,7 @@ const EngineContext = createContext<{
     isPlayMode: false,
     isSceneReady: false,
     texturesPreloaded: false,
+    audioPreloaded: false,
     editorMode: 'scene',
     setEditorMode: () => {},
     gizmoMode: 'position',
@@ -385,6 +420,7 @@ const EngineContext = createContext<{
     registerAnimationApply: () => {},
     registerTilesetApply: () => {},
     registerTextureApply: () => {},
+    registerSoundApply: () => {},
     enterTemplateEditor: () => {},
     editingTemplateName: null,
     templateRootId: null,
@@ -456,6 +492,18 @@ const EngineContext = createContext<{
     textures: [],
     addTextureAsset: () => {},
     removeTextureAsset: () => {},
+    audioSources: [],
+    addAudioSource: () => {},
+    removeAudioSource: () => {},
+    updateAudioSource: () => {},
+    soundSamples: [],
+    addSoundSample: () => {},
+    removeSoundSample: () => {},
+    updateSoundSample: () => {},
+    editingSoundId: null,
+    enterSoundEditor: () => {},
+    saveSoundSample: () => {},
+    previewSoundSettings: () => {},
     updateTextureAsset: () => {},
     tilesets: [],
     addTileset: () => {},
@@ -555,6 +603,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [isPlayMode, setIsPlayMode] = useState(false);
   const [isSceneReady, setIsSceneReady] = useState(false);
   const [texturesPreloaded, setTexturesPreloaded] = useState(false);
+  const [audioPreloaded, setAudioPreloaded] = useState(false);
   /**
    * The open-documents session from the last visit. Must be read ONCE and synchronously before the first
    * render: `editorMode` is derived during render, and DockLayout's controller reads it on its first effect.
@@ -1050,6 +1099,58 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
   const removeTextureAsset = (id: string) => setTextures(prev => prev.filter(x => x.id !== id));
 
+  // The two halves of the audio-source/sound-sample split, the exact twin of the pair above. An
+  // AudioSourceAsset is metadata over bytes in the `audio` IndexedDB store; a SoundSampleAsset is a byte
+  // source plus every playback decision, and its id IS the AudioManager id every serialized SoundNode
+  // references. Neither is minted here — `reconcileSoundAssets` (VfsProvider) derives both from what is
+  // registered in the AudioManager.
+  const [audioSources, setAudioSources] = useState<AudioSourceAsset[]>([]);
+  const audioSourcesLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<AudioSourceAsset[]>(libKey('audioSources'));
+        if (list && list.length) setAudioSources(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load audio sources:', e); }
+      finally { audioSourcesLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary(libKey('audioSources'), audioSources, audioSourcesLoadedRef);
+
+  const audioSourcesRef = useRef<AudioSourceAsset[]>([]);
+  audioSourcesRef.current = audioSources;
+
+  const addAudioSource = (a: AudioSourceAsset) => setAudioSources(prev => [...prev, a]);
+  const updateAudioSource = (id: string, a: AudioSourceAsset) => setAudioSources(prev => prev.map(x => x.id === id ? a : x));
+  const removeAudioSource = (id: string) => setAudioSources(prev => prev.filter(x => x.id !== id));
+
+  const [soundSamples, setSoundSamples] = useState<SoundSampleAsset[]>([]);
+  const soundSamplesLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<SoundSampleAsset[]>(libKey('soundSamples'));
+        if (list && list.length) setSoundSamples(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load sound samples:', e); }
+      finally { soundSamplesLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary(libKey('soundSamples'), soundSamples, soundSamplesLoadedRef);
+
+  const soundSamplesRef = useRef<SoundSampleAsset[]>([]);
+  soundSamplesRef.current = soundSamples;
+
+  const addSoundSample = (s: SoundSampleAsset) => setSoundSamples(prev => [...prev, s]);
+  const updateSoundSample = (id: string, sample: SoundSampleAsset) => {
+    setSoundSamples(prev => prev.map(x => x.id === id ? sample : x));
+    // Playback settings belong to the LIVE Sound, so an edit has to reach howler as well as the record —
+    // otherwise a sound keeps its old volume, loop points and effect rack until the next reload. The twin
+    // of the applySettings call in updateTextureAsset.
+    AudioManager.Instance.applySettings(id, sample.settings);
+    eventEmitter.current.emit('SOUNDS_CHANGED');
+  };
+  const removeSoundSample = (id: string) => setSoundSamples(prev => prev.filter(x => x.id !== id));
+
   const scriptAssetOf = (node: Node | null): ScriptAsset | undefined => {
     const id = getScriptIdOf(node ?? undefined);
     return id ? scriptAssets.find(a => a.id === id) : undefined;
@@ -1178,7 +1279,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     if (assetsLoaded) return;
     const timer = window.setInterval(() => {
-      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && animationsLoadedRef.current && scenesLoadedRef.current && imagesLoadedRef.current && texturesLoadedRef.current) {
+      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && animationsLoadedRef.current && scenesLoadedRef.current && imagesLoadedRef.current && texturesLoadedRef.current && audioSourcesLoadedRef.current && soundSamplesLoadedRef.current) {
         setAssetsLoaded(true);
         window.clearInterval(timer);
       }
@@ -1270,6 +1371,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         case 'script': return libs.scripts.some(s => s.id === id);
         case 'tileset': return libs.tilesets.some(t => t.id === id);
         case 'texture': return texturesRef.current.some(t => t.id === id);
+        case 'soundSample': return soundSamplesRef.current.some(x => x.id === id);
         // A field also needs the model it blends — enterAnimationFieldEditor refuses to open without it.
         case 'animationField': {
           const field = fields.find(f => f.id === id);
@@ -1338,6 +1440,34 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [assetsLoaded, textureEpoch, materials, terrainMaterials, templates, models]);
 
+  // The audio twin of the block above: an epoch bumped by SOUNDS_CHANGED, and a debounced pass that
+  // writes every live sample's bytes into the audio store. Debounced for the same reason — an import
+  // registers samples and adds records in a burst.
+  const [soundEpoch, setSoundEpoch] = useState(0);
+  useEffect(() => {
+    const bump = () => setSoundEpoch(n => n + 1);
+    const emitter = eventEmitter.current;
+    emitter.on('SOUNDS_CHANGED', bump);
+    return () => { emitter.off('SOUNDS_CHANGED', bump); };
+  }, []);
+
+  useEffect(() => {
+    if (!assetsLoaded) return;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          // No id list, same reasoning as textures: a sample can be referenced by the scene without
+          // belonging to any library, and the project blob does not embed audio.
+          const written = await persistAudio();
+          if (written) Logger.info(`Stored ${written} sound${written === 1 ? '' : 's'}`, 'Editor');
+        } catch (e) {
+          Logger.error(`Failed to store audio: ${e}`, 'Editor');
+        }
+      })();
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [assetsLoaded, soundEpoch, soundSamples]);
+
   // The five park-then-resolve modals (mesh import review, rig pick, animation import review, unsaved-
   // changes confirm, dimension-switch confirm). See hooks/usePendingDecisions.
   const {
@@ -1385,6 +1515,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     : null;
   const editingTilesetId = activeTab.kind === 'tileset' ? (activeTab.tilesetId ?? null) : null;
   const editingTextureId = activeTab.kind === 'texture' ? (activeTab.textureId ?? null) : null;
+  const editingSoundId = activeTab.kind === 'soundSample' ? (activeTab.soundId ?? null) : null;
 
   // Non-reactive mirrors of the tab list, the mesh sessions and the asset libraries. The save + propagation
   // paths read these rather than the render-scoped state: Save All walks tabs sequentially with an await
@@ -2073,6 +2204,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       case 'tileset': return !!tab.tilesetId && tilesetsRef.current.some(t => t.id === tab.tilesetId);
       // Same for a texture tab: a 2D viewer over the record, with no scene behind it.
       case 'texture': return !!tab.textureId && texturesRef.current.some(t => t.id === tab.textureId);
+      // And for a sound tab: a waveform and a settings panel over the record.
+      case 'soundSample': return !!tab.soundId && soundSamplesRef.current.some(x => x.id === tab.soundId);
       default: return true;
     }
     // A script tab is a pure code editor and never gets a runtime entry, so it can only be judged by whether
@@ -3074,6 +3207,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   });
 
   // ---- Texture editor --------------------------------------------------------------------------------
+  const { enterSoundEditor, saveSoundSample, previewSoundSettings } = useSoundEditor({
+    soundSamplesRef, tabsRef, setTabs, updateSoundSample, setActiveTab, commitTab, clearTabDirty,
+  });
+
   const { enterTextureEditor, saveTexture, previewTextureSettings } = useTextureEditor({
     texturesRef, tabsRef, setTabs, updateTextureAsset, setActiveTab, commitTab, clearTabDirty,
   });
@@ -3687,7 +3824,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // ---- Saving: one action per tab, plus Save All ------------------------------------------------
   const {
-    registerAnimationApply, registerTilesetApply, registerTextureApply, saveTabById, runSave,
+    registerAnimationApply, registerTilesetApply, registerTextureApply, registerSoundApply, saveTabById, runSave,
     saveActiveTab, saveAll, saveProjectToStorage,
   } = useSaving({
     tabsRef, dirtyTabsRef, activeTabIdRef, setSavingState,
@@ -3905,6 +4042,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       setTexturesPreloaded(true);
     }
 
+    // Then audio, for the same reason and with the same guarantee: a SoundNode resolving `sampleId`
+    // during a scene parse must find its sample already registered.
+    try {
+      const loaded = await preloadAudio();
+      if (loaded) Logger.info(`Loaded ${loaded} sound${loaded === 1 ? '' : 's'}`, 'Editor');
+    } catch (e) {
+      Logger.error(`Failed to load audio: ${e}`, 'Editor');
+    } finally {
+      setAudioPreloaded(true);
+    }
+
     // Multi-scene project: load the meta (migrating a legacy single-scene 'cleo_project' blob once), then
     // parse the last-open scene's blob. A fresh install gets a meta with one empty "Main" scene — the
     // "a project always has ≥1 scene" invariant. The legacy import is gated per PROJECT.
@@ -3992,12 +4140,19 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           TextureManager.Instance.addTextureFromBase64(buildProbeIconDataURL(), {
             mipMap: false
           }, '__editor__probe_icon');
+          // Sound-emitter viewport billboard icon, same arrangement as the two above.
+          TextureManager.Instance.addTextureFromBase64(buildSoundIconDataURL(), {
+            mipMap: false
+          }, '__editor__sound_icon');
           eventEmitter.current.emit('TEXTURES_CHANGED');
 
           engine.setScene(editorSceneRef.current);
           // The editor scene runs unpaused (for camera nav), so disable animator playback and pin
           // skinned models to their bind/T pose — animations only play in Play mode + the Anim Editor.
           editorSceneRef.current.animationsEnabled = false;
+          // ...and for the same reason, no sound: the editor scene is started AND unpaused, so without
+          // this every emitter in the level would fire the moment the project opened.
+          editorSceneRef.current.soundsEnabled = false;
           // spawnRulesEnabled is already off — see createEditorScene, which has to set it before the parse
           // that setupInitialScene() above has already done.
           editorSceneRef.current.start();
@@ -4232,11 +4387,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           // The running game IS the scene, whichever tab Play was pressed from.
           instanceRef.current.renderer.setExposureMeteringAllowed(true);
         }
+        // The running game is the only place sounds play. `scene` is the play scene, not the editor's,
+        // so this never un-silences the authoring one.
+        const playScene = instanceRef.current.scene;
+        if (playScene) playScene.soundsEnabled = true;
+        AudioManager.Instance.resume();
         InputManager.instance.registerKeyPress('Escape', () => InputManager.instance.releaseMouse());
       }
       else if (state === 'pause') {
         instanceRef.current.isPaused = true;
         setIsPlayMode(true);
+        // Muted rather than stopped: resuming must pick the music back up where it was, not restart it.
+        AudioManager.Instance.suspend();
         setSelectedNode(null);
         if (instanceRef.current && instanceRef.current.renderer) {
           instanceRef.current.renderer.setSelectedNode(null);
@@ -4245,6 +4407,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       else if (state === 'stop') {
         instanceRef.current.isPaused = false; // Unpause for editor scene
         setIsPlayMode(false);
+        // Every voice, not just this scene's: a script may have started one on a sample the scene no
+        // longer references, and leaving the editor with audio still playing is never right.
+        AudioManager.Instance.stopAll();
+        AudioManager.Instance.resume();
         // Restore the editor grid when returning to the editor scene, honouring its Editor toggle.
         if (instanceRef.current.renderer) {
           instanceRef.current.renderer.setGridVisible(debugVisibilityRef.current.grid.editor);
@@ -4539,12 +4705,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     addTileset, removeTileset, updateTileset,
     addImage, removeImage, updateImage,
     addTextureAsset, removeTextureAsset, updateTextureAsset,
+    addAudioSource, removeAudioSource, updateAudioSource,
+    addSoundSample, removeSoundSample, updateSoundSample,
   });
   const assetLibraryValue = useMemo<AssetLibraryContextValue>(() => ({
     templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, tilesets,
-    images, textures, assetsLoaded, ...libraryActions,
+    images, textures, audioSources, soundSamples, assetsLoaded, ...libraryActions,
   }), [templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, tilesets,
-       images, textures, assetsLoaded, libraryActions]);
+       images, textures, audioSources, soundSamples, assetsLoaded, libraryActions]);
 
   const documentActions = useStableActions({
     setActiveTab, closeTab, reorderTabs, saveActiveTab, saveAll, markTabDirty, clearTabDirty, withoutDirty,
@@ -4589,6 +4757,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     adoptExternalScriptSource, renameScriptAsset,
     scriptAssetOf, createScriptForNode, attachScriptToNode, detachScriptFromNode,
     enterAnimationFieldEditor, createAnimationFieldForModel, saveAnimationField,
+    enterSoundEditor, saveSoundSample, previewSoundSettings, registerSoundApply,
   });
   const editorSessionsValue = useMemo<EditorSessionsContextValue>(() => ({
     editingTemplateName, templateRootId,
@@ -4596,6 +4765,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editingTerrainMaterialName, editingTerrainMaterialNode,
     animationTargetId, animationSourceId, animationSourceScene, pendingAnimationImport, pendingRigPick,
     editingAnimationFieldId, animationFieldTargetId,
+    editingSoundId,
     modelSession: activeTab.kind === 'model' ? (modelSessions[activeTab.id] ?? null) : null,
     modelEditTargetId: activeTab.kind === 'model' && modelSessions[activeTab.id]
       ? modelSessions[activeTab.id].levelIds[modelSessions[activeTab.id].activeLevel] ?? null
@@ -4606,7 +4776,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editingTemplateName, templateRootId, editingMaterialName,
     editingTerrainMaterialName, editingTerrainMaterialNode,
     animationTargetId, animationSourceId, animationSourceScene, pendingAnimationImport, pendingRigPick,
-    editingAnimationFieldId, animationFieldTargetId,
+    editingAnimationFieldId, animationFieldTargetId, editingSoundId,
     activeTab, modelSessions, pendingModelImport, sessionActions,
   ]);
 
@@ -4621,6 +4791,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       isPlayMode,
       isSceneReady,
       texturesPreloaded,
+      audioPreloaded,
       editorMode,
       setEditorMode,
       gizmoMode,
@@ -4709,6 +4880,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       addTextureAsset,
       removeTextureAsset,
       updateTextureAsset,
+      audioSources,
+      addAudioSource,
+      removeAudioSource,
+      updateAudioSource,
+      soundSamples,
+      addSoundSample,
+      removeSoundSample,
+      updateSoundSample,
+      editingSoundId,
+      enterSoundEditor,
+      saveSoundSample,
+      previewSoundSettings,
       tilesets,
       addTileset,
       removeTileset,
@@ -4721,6 +4904,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       saveTexture,
       previewTextureSettings,
       registerTextureApply,
+      registerSoundApply,
       saveTileset,
       enterScriptEditor,
       setScriptTabSource,

@@ -3,7 +3,7 @@
 // Kept free of DOM and engine imports so it can be unit-tested against the packer under vitest.
 
 import { PACK_MAGIC, PACK_HEADER_BYTES, ATTRS } from '../features/publish/pack';
-import type { PackManifest, PackedTexture } from '../features/publish/pack';
+import type { PackManifest, PackedTexture, PackedSound } from '../features/publish/pack';
 import { ChunkReader, align4 } from '../utils/chunkBlob';
 
 /** The shape Model.parse reads out of `model.geometry`. */
@@ -23,9 +23,19 @@ export interface UnpackedTexture {
   config: any;
 }
 
+export interface UnpackedSound {
+  id: string;
+  bytes: Uint8Array;
+  mime: string;
+  /** The authored SoundSettings, applied when the sample is registered. */
+  settings: any;
+}
+
 export interface UnpackedGame {
   manifest: PackManifest;
   textures: UnpackedTexture[];
+  /** Empty for a game published before audio existed, or one with no Sound nodes. */
+  sounds: UnpackedSound[];
   /** Geometry arrays for a `model.geometryRef`, or undefined if the ref is unknown. */
   geometryFor(ref: string): GeometryArrays | undefined;
   /** Raw bytes of a blob chunk (terrain splat/height payloads), bounds-checked. */
@@ -65,6 +75,13 @@ export function unpackGameBin(buffer: ArrayBuffer): UnpackedGame {
     config: t.config,
   }));
 
+  const sounds: UnpackedSound[] = (manifest.sounds ?? []).map((a: PackedSound) => ({
+    id: a.id,
+    bytes: reader.bytes({ o: a.o, l: a.l })!,
+    mime: a.mime,
+    settings: a.settings,
+  }));
+
   // A geometry referenced by N nodes is read N times. The FIRST reader gets the zero-copy view; every
   // later one MUST get its own copy: Geometry.scale() writes into _positions in place, so a shared
   // view would make one scaled instance deform all the others.
@@ -100,7 +117,7 @@ export function unpackGameBin(buffer: ArrayBuffer): UnpackedGame {
     return floats ? floats.slice() : undefined;
   };
 
-  return { manifest, textures, geometryFor, chunkBytes, chunkFloats };
+  return { manifest, textures, sounds, geometryFor, chunkBytes, chunkFloats };
 }
 
 function inflateModelJson(model: any, game: UnpackedGame): void {

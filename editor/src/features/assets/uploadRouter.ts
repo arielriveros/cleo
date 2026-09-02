@@ -1,5 +1,6 @@
-import { TextureManager } from 'cleo'
+import { TextureManager, AudioManager } from 'cleo'
 import { groupImportFiles, isModelFile } from '../../utils/importGrouping'
+import { AUDIO_EXTS } from '../../utils/vfs'
 
 // Routes a batch of OS files dropped on (or picked from) the asset explorer to the right ingestion path.
 // SVAR's built-in <Uploader> is not used: it never records a dropped file's relative path, and
@@ -14,6 +15,10 @@ function extOf(name: string): string {
 
 export function isImageFile(file: File): boolean {
   return IMAGE_EXTS.includes(extOf(file.name))
+}
+
+export function isAudioFile(file: File): boolean {
+  return (AUDIO_EXTS as readonly string[]).includes(extOf(file.name))
 }
 
 /**
@@ -31,6 +36,23 @@ function addTexture(file: File): void {
   TextureManager.Instance.addTextureFromFile(file, { wrapping: 'repeat' }, file.name)
 }
 
+/**
+ * Register one audio file as a sound sample, keyed by its filename.
+ *
+ * Like `addTexture`, this mints NO asset records: `reconcileSoundAssets` derives both the AudioSource and
+ * the SoundSample from whatever ends up registered in the AudioManager, so this path and a bundle import
+ * and a scene parse all get their records from one place.
+ *
+ * `addSoundFromFile` reads the ArrayBuffer and retains the compressed bytes, which is what makes the
+ * sample persistable and publishable at all.
+ */
+function addSound(file: File, onRegistered: () => void): void {
+  // The emit is deferred to the callback: the bytes are read asynchronously, so a sample is not in the
+  // AudioManager when this returns. Announcing the change early runs the reconciler against a registry
+  // that does not hold it yet — it mints nothing, and nothing fires again to correct that.
+  AudioManager.Instance.addSoundFromFile(file, undefined, file.name, () => onRegistered())
+}
+
 export type UploadDeps = {
   importModelFiles: (files: File[]) => Promise<void>
   emit: (event: string) => void
@@ -43,6 +65,15 @@ export type UploadDeps = {
  */
 export async function runUpload(files: File[], deps: UploadDeps): Promise<void> {
   if (!files.length) return
+
+  // Audio is routed first and independently of everything else: no import bundle ever claims a sound
+  // file, so it can never be double-registered by the model path below.
+  const sounds = files.filter(isAudioFile)
+  if (sounds.length) {
+    // One emit per file that lands, rather than one for the batch: the reads resolve independently, and
+    // the reconciler is idempotent, so the extra passes cost a comparison each.
+    for (const file of sounds) addSound(file, () => deps.emit('SOUNDS_CHANGED'))
+  }
 
   const hasModel = files.some(isModelFile)
   if (!hasModel) {

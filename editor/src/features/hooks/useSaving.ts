@@ -44,6 +44,9 @@ export function useSaving(deps: {
   // the close-tab prompt only know tab ids, so the session hands its save back here.
   const textureApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
   const registerTextureApply = (reg: { tabId: string; apply: () => void } | null) => { textureApplyRef.current = reg; };
+  // And the same again for the sound sample session, whose working copy lives in SoundProvider.
+  const soundApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
+  const registerSoundApply = (reg: { tabId: string; apply: () => void } | null) => { soundApplyRef.current = reg; };
 
   /**
    * Save one tab, whichever kind it is. Returns whether the tab came out clean — each save path clears the
@@ -67,6 +70,12 @@ export function useSaving(deps: {
       }
       case 'texture': {
         const session = textureApplyRef.current;
+        if (!session || session.tabId !== tabId) return false;
+        session.apply();
+        break;
+      }
+      case 'soundSample': {
+        const session = soundApplyRef.current;
         if (!session || session.tabId !== tabId) return false;
         session.apply();
         break;
@@ -151,6 +160,7 @@ export function useSaving(deps: {
 
     const ORDER: Record<TabKind, number> = {
       material: 0, terrainMaterial: 0, script: 0, animation: 0, animationField: 0, tileset: 0, texture: 0,
+      soundSample: 0,
       model: 1, template: 2, scene: 3,
     };
     // Snapshot taken up front, so the loop is finite by construction.
@@ -164,7 +174,7 @@ export function useSaving(deps: {
   const saveProjectToStorage = (): Promise<boolean> => runSave([SCENE_TAB_ID], 'Saving scene');
 
   return {
-    registerAnimationApply, registerTilesetApply, registerTextureApply, saveTabById, runSave,
+    registerAnimationApply, registerTilesetApply, registerTextureApply, registerSoundApply, saveTabById, runSave,
     saveActiveTab, saveAll, saveProjectToStorage,
   };
 }

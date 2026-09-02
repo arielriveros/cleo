@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { Logger, TextureManager, isDerivedTextureId } from 'cleo'
+import { Logger, TextureManager, AudioManager, isDerivedTextureId } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { idbGet, idbSet } from '../../utils/idb'
@@ -10,6 +10,8 @@ import {
 import { AssetDeps, sizeOfAsset } from './assetKinds'
 import { reconcileTextureAssets } from '../../utils/textureAssets'
 import type { LiveTexture } from '../../utils/textureAssets'
+import { reconcileSoundAssets } from '../../utils/soundSamples'
+import type { LiveSound } from '../../utils/soundSamples'
 
 // Owns the asset explorer's virtual filesystem: the folder layout, persisted to IndexedDB under
 // `cleo_vfs`, and the reconciliation that keeps it in step with the five flat asset libraries.
@@ -53,12 +55,13 @@ export function useVfs(): VfsContextValue {
 
 export function VfsProvider({ children }: { children: React.ReactNode }) {
   const engine = useCleoEngine()
-  const { eventEmitter, isSceneReady, texturesPreloaded, sceneList } = engine
+  const { eventEmitter, isSceneReady, texturesPreloaded, audioPreloaded, sceneList } = engine
   // The five libraries come from the split-out slice, so reconciliation re-runs on library changes only.
   const {
     assetsLoaded,
     materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, tilesets,
     images, textures, addImage, addTextureAsset,
+    audioSources, soundSamples, addAudioSource, addSoundSample,
   } = useAssetLibrary()
 
   const [vfs, setVfs] = useState<VfsIndex>(EMPTY_VFS)
@@ -115,15 +118,54 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     for (const texture of next.textures) if (!textures.some(t => t.id === texture.id)) addTextureAsset(texture)
   }, [assetsLoaded, texturesPreloaded, isSceneReady, textureIds, images, textures, addImage, addTextureAsset])
 
+  // Sounds live in the AudioManager singleton, not React state; mirror their ids here and refresh on the
+  // events that add or remove them. The exact shape of the texture mirror above.
+  const [soundIds, setSoundIds] = useState<string[]>([])
+  useEffect(() => {
+    const refresh = () => {
+      const ids = Array.from(AudioManager.Instance.sounds.keys())
+      setSoundIds(prev => (prev.length === ids.length && prev.every((id, i) => id === ids[i]) ? prev : ids))
+    }
+    refresh()
+    eventEmitter.on('SOUNDS_CHANGED', refresh)
+    return () => { eventEmitter.off('SOUNDS_CHANGED', refresh) }
+  }, [eventEmitter])
+
+  /**
+   * Derive the AudioSource and SoundSample records from what is registered in the AudioManager.
+   *
+   * The audio twin of the texture reconciler above, gated the same way and for the same reason: before
+   * the libraries have finished their IndexedDB reads every live sample LOOKS new, and minting against
+   * two empty arrays would produce a duplicate record set that then loses to the real read.
+   */
+  useEffect(() => {
+    if (!assetsLoaded || !audioPreloaded || !isSceneReady) return
+    const am = AudioManager.Instance
+    const live: LiveSound[] = soundIds.map(id => {
+      const sound = am.getSound(id)
+      const source = am.getSource(id)
+      return {
+        id,
+        settings: sound?.settings,
+        duration: sound?.duration ?? 0,
+        source: source ? { mime: source.mime, byteLength: source.bytes.byteLength } : null,
+      }
+    })
+    const next = reconcileSoundAssets(live, audioSources, soundSamples)
+    if (!next.changed) return
+    for (const source of next.sources) if (!audioSources.some(a => a.id === source.id)) addAudioSource(source)
+    for (const sample of next.samples) if (!soundSamples.some(s => s.id === sample.id)) addSoundSample(sample)
+  }, [assetsLoaded, audioPreloaded, isSceneReady, soundIds, audioSources, soundSamples, addAudioSource, addSoundSample])
+
   const libs: LibSnapshot = useMemo(
-    () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, tilesets, scenes: sceneList, images, textures, textureIds }),
-    [materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, tilesets, sceneList, images, textures, textureIds],
+    () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, tilesets, scenes: sceneList, images, textures, audioSources, soundSamples, textureIds }),
+    [materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, tilesets, sceneList, images, textures, audioSources, soundSamples, textureIds],
   )
 
   const depsRef = useRef<AssetDeps>(null as any)
   depsRef.current = {
     materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, tilesets,
-    images, textures,
+    images, textures, audioSources, soundSamples,
     scenes: sceneList,
     addImage: engine.addImage,
     updateImage: engine.updateImage,
@@ -131,6 +173,13 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     addTextureAsset: engine.addTextureAsset,
     updateTextureAsset: engine.updateTextureAsset,
     removeTextureAsset: engine.removeTextureAsset,
+    addAudioSource: engine.addAudioSource,
+    updateAudioSource: engine.updateAudioSource,
+    removeAudioSource: engine.removeAudioSource,
+    addSoundSample: engine.addSoundSample,
+    updateSoundSample: engine.updateSoundSample,
+    removeSoundSample: engine.removeSoundSample,
+    enterSoundEditor: engine.enterSoundEditor,
     addMaterial: engine.addMaterial,
     updateMaterial: engine.updateMaterial,
     removeMaterial: engine.removeMaterial,

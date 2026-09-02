@@ -6,7 +6,7 @@ import type { SceneChange } from 'cleo';
 import { SkyIcon } from '../nodeInspector/sectionIcons'
 import {
   CameraIcon, CameraRigIcon, ModelIcon, LightIcon, LightProbeIcon, SkyboxIcon, SkyLightIcon, CloudsIcon,
-  SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon,
+  SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon,
 } from './nodeIcons'
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
 import { TEMPLATE_ID_VAR, isWithinTemplateInstance } from '../../utils/templates';
@@ -27,6 +27,8 @@ const TYPE_ICONS: Record<string, () => JSX.Element> = {
   light: LightIcon, lightProbe: LightProbeIcon,
   skybox: SkyboxIcon, volumetricClouds: CloudsIcon, skyAtmosphere: SkyIcon, skyLight: SkyLightIcon,
   landscape: LandscapeIcon,
+  // One glyph for both modes: the tree shows what a node IS, and ambient vs spatial is a property of it.
+  sound: SoundIcon,
 };
 
 /** UI node types, kept separate because `isUINodeType` also gates the inspector and picking. */

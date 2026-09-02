@@ -32,14 +32,20 @@ export const KEYS = {
    */
   images: 'cleo_images',
   textures: 'cleo_textures',
+  /**
+   * The two halves of the audio-source/sound-sample split. Metadata only — audio BYTES stay in the
+   * `audio` IndexedDB object store, keyed by audio-source id (see audioStore.ts), never in these arrays.
+   */
+  audioSources: 'cleo_audio_sources',
+  soundSamples: 'cleo_sound_samples',
 } as const;
 
 /** The asset libraries, as `usePersistedLibrary` and the bundle importer address them. */
-export type LibName = 'materials' | 'terrainMaterials' | 'templates' | 'models' | 'scripts' | 'animationFields' | 'animations' | 'tilesets' | 'images' | 'textures';
+export type LibName = 'materials' | 'terrainMaterials' | 'templates' | 'models' | 'scripts' | 'animationFields' | 'animations' | 'tilesets' | 'images' | 'textures' | 'audioSources' | 'soundSamples';
 
 export const LIB_NAMES: readonly LibName[] = [
   'materials', 'terrainMaterials', 'templates', 'models', 'scripts', 'animationFields', 'animations', 'tilesets',
-  'images', 'textures',
+  'images', 'textures', 'audioSources', 'soundSamples',
 ];
 
 /**

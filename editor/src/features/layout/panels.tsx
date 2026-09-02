@@ -19,6 +19,8 @@ import AnimationFieldPanel from '../animationField/AnimationFieldPanel';
 import TilesetTabView from '../tileset/TilesetTabView';
 import TextureTabView from '../texture/TextureTabView';
 import TextureSettingsPanel from '../texture/TextureSettingsPanel';
+import SoundTabView from '../sound/SoundTabView';
+import SoundSettingsPanel from '../sound/SoundSettingsPanel';
 import TilesetInspector from '../tileset/TilesetInspector';
 import TilePalette from '../tilemap/TilePalette';
 import TilemapLayersPanel from '../tilemap/TilemapLayersPanel';
@@ -53,6 +55,8 @@ function ViewportPanel(_: IDockviewPanelProps) {
       {editorMode === 'tileset' && <TilesetTabView />}
       {/* Texture mode: the image, drawn the way its sampling settings say it is read. No 3D preview. */}
       {editorMode === 'texture' && <TextureTabView />}
+      {/* Sound mode: the waveform, transport and loop region fill the main area. No 3D preview. */}
+      {editorMode === 'soundSample' && <SoundTabView />}
       {/* Loading splash covers only the viewport; the rest of the editor stays visible */}
       {!isSceneReady && <LoadingScreen progress={loadingProgress} />}
     </div>
@@ -118,6 +122,7 @@ function PropertiesPanel(_: IDockviewPanelProps) {
   if (editorMode === 'material') return <SidePanel><MaterialPanel /></SidePanel>;
   if (editorMode === 'tileset') return <SidePanel><TilesetInspector /></SidePanel>;
   if (editorMode === 'texture') return <SidePanel><TextureSettingsPanel /></SidePanel>;
+  if (editorMode === 'soundSample') return <SidePanel><SoundSettingsPanel /></SidePanel>;
   // Mesh mode keeps the normal node inspector below the mesh-level controls (LOD levels + cull).
   if (editorMode === 'model') return (
     <SidePanel>
