@@ -67,9 +67,14 @@ describe('samplerBindingsOf', () => {
     });
 
     it('agrees with the engine\'s own shaders', () => {
-        // screen.wgsl: one texture + its sampler. present.wgsl: two pairs, the second a depth texture.
+        // screen.wgsl: one texture + its sampler. present.wgsl: three pairs — the scene colour, a
+        // depth texture, and the 3D colour LUT that chunks/colorLut.wgsl contributes at 4/5.
         expect([...(samplerBindingsOf(ScreenProgram.wgsl).get(0) ?? [])]).toEqual([1]);
-        expect([...(samplerBindingsOf(PresentProgram.wgsl).get(0) ?? [])]).toEqual([1, 3]);
+        // Sorted: the set is what the backend cares about, and DECLARATION order is not stable —
+        // an included chunk's bindings are inlined ahead of the including file's own, so the LUT's
+        // sampler at 5 is seen first.
+        expect([...(samplerBindingsOf(PresentProgram.wgsl).get(0) ?? [])].sort((a, b) => a - b))
+            .toEqual([1, 3, 5]);
     });
 });
 

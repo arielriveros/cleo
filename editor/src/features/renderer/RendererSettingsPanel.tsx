@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { engineEventBus } from 'cleo';
+import { engineEventBus, TextureManager, isDerivedTextureId } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
-import { Section, Slider, Toggle, Field, NumberInput, SegmentedControl, Hint } from '../../components/ui';
+import { Section, Slider, Toggle, Field, NumberInput, SegmentedControl, Select, Hint } from '../../components/ui';
 import BackendSelector from './BackendSelector';
 
 // Debug channels map 1:1 to the renderer's `debugView` setter; the grouping here is display only.
@@ -21,6 +21,7 @@ const CHANNELS: { key: string; label: string }[] = [
   { key: 'bloom',     label: 'Bloom' },
   { key: 'bloomMask', label: 'Bloom Mask' },
   { key: 'velocity',  label: 'Velocity' },
+  { key: 'taaHistory', label: 'TAA History' },
   // Overdraw re-rasterizes the scene additively into its own target, so unlike every other channel
   // here it costs an extra pass.
   { key: 'overdraw',  label: 'Overdraw' },
@@ -68,6 +69,34 @@ const POINT_RES: { label: string; size: number }[] = [
   { label: '1K', size: 1024 },
 ];
 
+// The display transform. AgX is the default; ACES is what every scene authored before this control
+// existed was graded under, which is why it stays on the list rather than being replaced.
+const TONE_MAPPERS: { value: string; label: string; title: string }[] = [
+  { value: 'agx',     label: 'AgX',     title: 'Rolls saturated highlights toward white instead of clipping them to a primary — the default' },
+  { value: 'aces',    label: 'ACES',    title: 'The Narkowicz filmic fit; what this engine used before the curve was selectable' },
+  { value: 'neutral', label: 'Neutral', title: 'Khronos PBR Neutral — leaves in-gamut albedo untouched, for asset and product viewing' },
+  { value: 'none',    label: 'None',    title: 'Exposure and sRGB only, hard-clamped: what the buffer actually holds' },
+];
+
+/**
+ * Picker for the colour-grading LUT, which holds a bare texture id in `RenderSettings` rather than a
+ * `Material` slot. Derived (channel-packed) textures are engine-owned and never assignable.
+ */
+function LutPicker({ value, onChange }: { value: string | null; onChange: (id: string | null) => void }) {
+  const ids = Array.from(TextureManager.Instance.textures.keys())
+    .filter((id) => !isDerivedTextureId(id) && !id.startsWith('__editor__'));
+  return (
+    <Select value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
+      <option value=''>(none)</option>
+      {/* A texture the scene references but the manager has dropped still has to be selectable, or
+          the field silently resets itself the moment anything re-renders. It matters more here than
+          anywhere else: the id lives in the render settings, so no node keeps it alive. */}
+      {value && !ids.includes(value) && <option value={value}>{value} (missing)</option>}
+      {ids.map((id) => <option key={id} value={id}>{id}</option>)}
+    </Select>
+  );
+}
+
 // Motion-blur quality presets: sample taps per pixel (higher = smoother, costlier).
 const MB_QUALITY: { label: string; samples: number }[] = [
   { label: 'Low',  samples: 8 },
@@ -110,6 +139,9 @@ export default function RendererSettingsPanel() {
   const [bloomMask, setBloomMask] = useState<boolean>(() => renderer?.bloomMaskEnabled ?? false);
   const [chromatic, setChromatic] = useState<number>(() => renderer?.chromaticAberrationStrength ?? 0);
   const [saturation, setSaturation] = useState<number>(() => renderer?.saturation ?? 1);
+  const [toneMapper, setToneMapper] = useState<string>(() => renderer?.toneMapper ?? 'agx');
+  const [lutId, setLutId] = useState<string | null>(() => renderer?.colorGradingLut ?? null);
+  const [lutIntensity, setLutIntensity] = useState<number>(() => renderer?.colorGradingIntensity ?? 1);
   const [ssaoEnabled, setSsaoEnabled] = useState<boolean>(() => renderer?.ssaoEnabled ?? true);
   const [ssaoRadius, setSsaoRadius] = useState<number>(() => renderer?.ssaoRadius ?? 0.5);
   const [ssaoPower, setSsaoPower] = useState<number>(() => renderer?.ssaoPower ?? 1.5);
@@ -125,6 +157,7 @@ export default function RendererSettingsPanel() {
   const [terrainLodDist2, setTerrainLodDist2] = useState<number>(() => renderer?.terrainLodDistance2 ?? 300);
   const [terrainLodStep1, setTerrainLodStep1] = useState<number>(() => renderer?.terrainLodStep1 ?? 2);
   const [terrainLodStep2, setTerrainLodStep2] = useState<number>(() => renderer?.terrainLodStep2 ?? 4);
+  const [taa, setTaa] = useState<boolean>(() => renderer?.taaEnabled ?? true);
   const [motionBlur, setMotionBlur] = useState<boolean>(() => renderer?.motionBlurEnabled ?? true);
   const [motionBlurIntensity, setMotionBlurIntensity] = useState<number>(() => renderer?.motionBlurIntensity ?? 1.0);
   const [motionBlurSamples, setMotionBlurSamples] = useState<number>(() => renderer?.motionBlurSamples ?? 12);
@@ -177,6 +210,9 @@ export default function RendererSettingsPanel() {
     setBloomMask(renderer.bloomMaskEnabled);
     setChromatic(renderer.chromaticAberrationStrength);
     setSaturation(renderer.saturation);
+    setToneMapper(renderer.toneMapper);
+    setLutId(renderer.colorGradingLut);
+    setLutIntensity(renderer.colorGradingIntensity);
     setSsaoEnabled(renderer.ssaoEnabled);
     setSsaoRadius(renderer.ssaoRadius);
     setSsaoPower(renderer.ssaoPower);
@@ -192,6 +228,7 @@ export default function RendererSettingsPanel() {
     setTerrainLodDist2(renderer.terrainLodDistance2);
     setTerrainLodStep1(renderer.terrainLodStep1);
     setTerrainLodStep2(renderer.terrainLodStep2);
+    setTaa(renderer.taaEnabled);
     setMotionBlur(renderer.motionBlurEnabled);
     setMotionBlurIntensity(renderer.motionBlurIntensity);
     setMotionBlurSamples(renderer.motionBlurSamples);
@@ -323,8 +360,15 @@ export default function RendererSettingsPanel() {
         + 'It matters more than it used to: lights carry real photometric intensity, and the sun is about three decades '
         + 'brighter than a lamp, so one exposure can only meter one of them. A sunny exterior sits near EV 15, an '
         + 'interior near EV 5. Exposure is per-scene, so a cave and a hillside can each carry their own. '
+        + 'The tone map is the curve that turns linear HDR into a displayable image, and it is the single biggest lever here: '
+        + 'AgX rolls a saturated highlight toward white instead of clipping it to a primary, ACES is the older filmic fit '
+        + 'every scene used before this control existed, and Khronos Neutral leaves in-gamut albedo untouched. '
         + 'Saturation is a trim applied in linear, before the tonemap, so the filmic shoulder still rolls off correctly — '
-        + 'a Sky Light with clouds multiplies its own desaturation on top of this. '
+        + 'a Sky Light with clouds multiplies its own desaturation on top of this. AgX already desaturates highlights by '
+        + 'construction, so the same trim reads stronger under it than under ACES. '
+        + 'The colour LUT is a horizontal strip of N tiles, N by N each (256x16 or 1024x32): red runs left to right within '
+        + 'a tile, green downward from the top row, blue across the tiles. It is applied AFTER the tone map, on the display '
+        + 'colour, which is the space a .cube LUT from a grading tool was measured in. '
         + 'Chromatic aberration offsets the colour channels radially.'}>
         <Toggle label='Auto exposure' checked={autoExposure}
           onChange={(v) => { renderer.autoExposureEnabled = v; setAutoExposure(v); touch(); }} />
@@ -352,10 +396,25 @@ export default function RendererSettingsPanel() {
           <Hint>Higher adapts faster; 0 snaps with no easing. Eyes adjust to brightening
             faster than to darkening, which is why the two differ by default.</Hint>
         </>}
+        <div className='flex items-center gap-1 my-1 text-xs'>
+          <span className='w-[70px] shrink-0'>Tone Map</span>
+          <SegmentedControl
+            value={toneMapper}
+            onChange={(m) => { renderer.toneMapper = m; setToneMapper(m); touch(); }}
+            options={TONE_MAPPERS}
+          />
+        </div>
         <Slider label='Saturation' value={saturation} min={0} max={2} step={0.01}
           onChange={(v) => { renderer.saturation = v; setSaturation(v); touch(); }} />
         <Slider label='Chromatic' value={chromatic} min={0} max={2} step={0.01}
           onChange={(v) => { renderer.chromaticAberrationStrength = v; setChromatic(v); touch(); }} />
+        <Field label='Colour LUT'>
+          <LutPicker value={lutId}
+            onChange={(id) => { renderer.colorGradingLut = id; setLutId(id); touch(); }} />
+        </Field>
+        {/* Hidden rather than disabled with no LUT: there is nothing for it to blend toward. */}
+        {lutId && <Slider label='LUT Amount' value={lutIntensity} min={0} max={1} step={0.01}
+          onChange={(v) => { renderer.colorGradingIntensity = v; setLutIntensity(v); touch(); }} />}
       </Section>
 
       <Section
@@ -374,6 +433,20 @@ export default function RendererSettingsPanel() {
         <Toggle label='Restrict to lit surfaces' checked={bloomMask}
           onChange={(v) => { renderer.bloomMaskEnabled = v; setBloomMask(v); touch(); }} />
         {bloomOff && <Hint>Bloom is currently inactive: {bloomOff}</Hint>}
+      </Section>
+
+      <Section
+        title='Antialiasing'
+        hint={'Temporal antialiasing: the projection is offset by a fraction of a pixel each frame and '
+            + 'the results are accumulated, so a still image converges on about eight times the '
+            + 'sampling. Motion vectors carry the history across camera and object movement; the editor '
+            + 'grid, gizmos and sprites are drawn afterwards and are never blended.'}
+      >
+        <Toggle label='Temporal AA' checked={taa} className='my-1'
+          onChange={(c) => { renderer.taaEnabled = c; setTaa(c); touch(); }} />
+        {taa && !renderer.taaSupported &&
+          <Hint>Disabled on this device: float render targets are unavailable, so the history and
+            velocity buffers cannot hold the values TAA needs.</Hint>}
       </Section>
 
       <Section title='Motion Blur' hint='Camera-reprojection motion blur (UE5-style). Amount scales the shutter length.'>

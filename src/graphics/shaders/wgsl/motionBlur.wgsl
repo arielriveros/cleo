@@ -1,6 +1,8 @@
 // McGuire 2012 "A Reconstruction Filter for Plausible Motion Blur" (the basis of UE's filter).
 
 #include "./chunks/fullscreen.wgsl"
+#include "./chunks/motionBlurShutter.wgsl"
+#include "./chunks/depthLinearize.wgsl"
 
 // Upper bound for the dynamic sample loop (actual count comes from u_samples). WGSL has no
 // preprocessor, so this is a module-scope const rather than a #define — same role, and it is still a
@@ -12,7 +14,7 @@ const SOFT_Z_EXTENT: f32 = 1.0;
 
 @group(0) @binding(0) var u_screenTexture_texture: texture_2d<f32>;   // lit scene color
 @group(0) @binding(1) var u_screenTexture_sampler: sampler;
-@group(0) @binding(2) var u_velocity_texture: texture_2d<f32>;        // full-res per-pixel velocity (UV)
+@group(0) @binding(2) var u_velocity_texture: texture_2d<f32>;        // full-res per-pixel velocity (RAW, UV)
 @group(0) @binding(3) var u_velocity_sampler: sampler;
 @group(0) @binding(4) var u_neighborMax_texture: texture_2d<f32>;     // tile-res dilated velocity (UV)
 @group(0) @binding(5) var u_neighborMax_sampler: sampler;
@@ -24,15 +26,11 @@ struct MotionBlurUniforms {
     u_screenSize: vec2<f32>,   // full-res dimensions (px)
     u_near: f32,
     u_far: f32,
+    u_intensity: f32,          // shutter-like blur scale
+    u_maxVelocityPx: f32,      // clamp blur length to this many pixels
     u_samples: i32,            // taps per pixel
 };
 @group(1) @binding(0) var<uniform> u_mb: MotionBlurUniforms;
-
-fn linearizeDepth(d: f32) -> f32 {
-    let z = d * 2.0 - 1.0;
-    return (2.0 * u_mb.u_near * u_mb.u_far)
-         / (u_mb.u_far + u_mb.u_near - z * (u_mb.u_far - u_mb.u_near));
-}
 
 // Cheap per-pixel dither to break up banding between the discrete taps.
 fn interleavedGradientNoise(p: vec2<f32>) -> f32 {
@@ -57,16 +55,16 @@ fn cylinder(dist: f32, velLen: f32) -> f32 {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv = in.uv;
-    let centerColor = textureSample(u_screenTexture_texture, u_screenTexture_sampler, uv).rgb;
+    let centerColor = textureSampleLevel(u_screenTexture_texture, u_screenTexture_sampler, uv, 0.0).rgb;
 
     // Dominant velocity for this tile (pixels). If nothing is moving, pass the pixel through.
-    let vN = textureSample(u_neighborMax_texture, u_neighborMax_sampler, uv).xy;
+    let vN = textureSampleLevel(u_neighborMax_texture, u_neighborMax_sampler, uv, 0.0).xy;
     let vNlen = length(vN * u_mb.u_screenSize);
     if (vNlen < 0.5) {
         return vec4<f32>(centerColor, 1.0);
     }
 
-    // `textureSampleLevel(..., 0.0)`, not `textureSample`, from here down.
+    // `textureSampleLevel(..., 0.0)`, not `textureSample`, EVERYWHERE in this chain.
     //
     // Everything below the early return above is in NON-UNIFORM control flow — whether a fragment gets
     // here depends on its own tile velocity — and WGSL forbids an implicit-LOD sample there, because
@@ -88,9 +86,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(centerColor, 1.0);
     }
 
-    let vC = vCenter.xy;
+    // The buffer is raw, so the shutter applies here. The tile velocity `vN` above arrived from
+    // TileMax, which already applied it — the two must agree, which is why both call the same helper
+    // with the same uniforms.
+    let vC = applyShutter(vCenter.xy, u_mb.u_screenSize, u_mb.u_intensity, u_mb.u_maxVelocityPx);
     let vClen = max(length(vC * u_mb.u_screenSize), 0.5);
-    let centerDepth = linearizeDepth(textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, uv, 0));
+    let centerDepth = linearizeDepth(textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, uv, 0),
+                                     u_mb.u_near, u_mb.u_far);
 
     // `in.position` is the fragment coordinate — WGSL's gl_FragCoord.
     let jitter = interleavedGradientNoise(in.position.xy) - 0.5;
@@ -107,9 +109,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let t = mix(-1.0, 1.0, (f32(i) + jitter + 1.0) / (f32(samples) + 1.0));
         let sampleUV = uv + vN * t;
 
-        let vS = textureSampleLevel(u_velocity_texture, u_velocity_sampler, sampleUV, 0.0).xy;
+        let vSraw = textureSampleLevel(u_velocity_texture, u_velocity_sampler, sampleUV, 0.0).xy;
+        let vS = applyShutter(vSraw, u_mb.u_screenSize, u_mb.u_intensity, u_mb.u_maxVelocityPx);
         let vSlen = max(length(vS * u_mb.u_screenSize), 0.5);
-        let sampleDepth = linearizeDepth(textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, sampleUV, 0));
+        let sampleDepth = linearizeDepth(textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, sampleUV, 0),
+                                         u_mb.u_near, u_mb.u_far);
 
         let dist = abs(t) * vNlen;
 

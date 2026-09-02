@@ -22,10 +22,8 @@ struct ObjectVelocitySkinnedUniforms {
     u_uvViewProj: mat4x4<f32>,
     u_uvPrevViewProj: mat4x4<f32>,
     u_prevModel: mat4x4<f32>,
-    u_screenSize: vec2<f32>,
-    u_intensity: f32,
-    u_maxVelocityPx: f32,
     u_noBlur: f32,
+    u_trueMotion: f32,
     u_boneMatrices: array<mat4x4<f32>, 100>,
     u_prevBoneMatrices: array<mat4x4<f32>, 100>,
 };
@@ -71,6 +69,5 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return encodeVelocity(in.curClip, in.prevClip, u_ov.u_screenSize,
-                          u_ov.u_intensity, u_ov.u_maxVelocityPx, u_ov.u_noBlur);
+    return encodeVelocity(in.curClip, in.prevClip, u_ov.u_noBlur, u_ov.u_trueMotion);
 }

@@ -19,7 +19,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     for (var y = -1; y <= 1; y++) {
         for (var x = -1; x <= 1; x++) {
             let uv = in.uv + vec2<f32>(f32(x), f32(y)) * u_tile.u_tileTexelSize;
-            let v = textureSample(u_tileMax_texture, u_tileMax_sampler, uv).xy;
+            // Explicit level, like every other read in the velocity chain — see motionBlur.wgsl. This
+            // one is legal today (the loop has no per-fragment exit), and that is exactly the point:
+            // the rule is applied to the whole family so adding one later cannot break the module.
+            let v = textureSampleLevel(u_tileMax_texture, u_tileMax_sampler, uv, 0.0).xy;
             let l = dot(v, v);
             if (l > maxLen) { maxLen = l; maxVel = v; }
         }

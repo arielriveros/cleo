@@ -85,12 +85,18 @@ export interface TextureConfig {
      */
     storage?: boolean;
     /**
-     * A pure DATA texture: only ever read with `textureLoad`, never rendered into and never filtered.
+     * A texture that is only ever SAMPLED OR LOADED: never rendered into, never read back.
      *
      * Two consequences, both needed by the clustered light grid (see `graphics/lightGrid.ts`). It is
      * exempt from the float-to-RGBA8 fallback — see `TextureFormatRequest.loadOnly` for why that is
      * sound — and it asks for no render-attachment usage, so a format that is loadable but not
      * attachable is still allocatable.
+     *
+     * It says nothing about FILTERING, which is configured on the sampler either way. The light grid
+     * happens to read with `textureLoad`, but the colour-grading LUT (`graphics/colorGrading.ts`) is
+     * the same shape — uploaded from the CPU, then sampled trilinearly — and sets this for the usage
+     * flags alone: a 3D texture has no business asking for render-attachment usage, which WebGPU
+     * constrains by dimension.
      */
     loadOnly?: boolean;
 }
@@ -148,6 +154,7 @@ export class Texture {
     private _boundSlot: number = 0;
     // Definite-assignment: written by the constructor, immediately below.
     private _resolvedFormat!: TextureFormat;
+    private _downgraded: boolean = false;
 
     constructor(options?: TextureConfig) {
         this._flipY = options?.flipY || false;
@@ -175,6 +182,7 @@ export class Texture {
             floatSupport(),
         );
         this._resolvedFormat = resolved.format;
+        this._downgraded = resolved.downgraded;
         if (resolved.downgraded) reportFloatDowngrade(resolved.requested, resolved.format);
 
         // Dimensions up front when the caller named them — see TextureConfig.size.
@@ -249,6 +257,15 @@ export class Texture {
 
     /** The format actually allocated, which is not necessarily the one requested. */
     public get format(): TextureFormat { return this._resolvedFormat; }
+    /**
+     * Whether the format policy had to fall back — this is NOT the format that was asked for.
+     *
+     * `reportFloatDowngrade` warns once per format and then throws the fact away, which is enough for
+     * a human reading the console and no use at all to a feature that has to decide whether it can
+     * run. A pass whose correctness depends on signed or HDR values should test this and disable
+     * itself loudly rather than render something wrong (see `Renderer._checkTaaFormats`).
+     */
+    public get downgraded(): boolean { return this._downgraded; }
 
     /** The device-owned handle. Everything below still binds and uploads through it directly. */
     private get _texture(): WebGLTexture { return (this._gpu as WebGL2Texture).handle; }

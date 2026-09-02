@@ -41,6 +41,7 @@ export const RENDER_PASSES = [
     'clouds.resolve',
     'forwardOpaque',
     'skyFog',
+    'taa',
     'grid',
     'transparent',
     '2d',
@@ -65,7 +66,7 @@ export type RenderPass = typeof RENDER_PASSES[number];
 
 /** Passes the profiler panel offers as on/off switches. Excludes any pass the image cannot do without. */
 export const TOGGLEABLE_PASSES: RenderPass[] = [
-    'shadows.cascades', 'shadows.spot', 'shadows.point', 'foliage', 'ssao', 'ssao.blur', 'sky', 'clouds', 'skyFog', 'grid',
+    'shadows.cascades', 'shadows.spot', 'shadows.point', 'foliage', 'ssao', 'ssao.blur', 'sky', 'clouds', 'skyFog', 'taa', 'grid',
     'transparent', '2d', 'gizmos', 'velocity', 'motionBlur', 'godRays', 'bloom.bright',
     'bloom.blur', 'bloom.composite', 'chromatic', 'screenMaterials',
 ];
@@ -89,6 +90,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     gizmos: 'gizmos',
     outlineMask: 'outlineMask',
     velocity: 'velocity',
+    taa: 'taa',
     exposure: 'exposure',
     godRays: 'godRays',
     'bloom.bright': 'bloom.bright',
@@ -115,6 +117,8 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     // The per-object velocity draws run inside the 'velocity' scope, right after the fullscreen
     // camera-reprojection pass that seeds the same buffer.
     'velocity.objects': 'velocity',
+    // The copy back over the scene buffer, which the resolve cannot avoid: it READS that buffer.
+    'taa.copy': 'taa',
     'velocity.tile': 'motionBlur',
     'velocity.neighbor': 'motionBlur',
     // The scene -> compose[0] copy; WebGL2 times it under `present`, which is reported twice a frame.

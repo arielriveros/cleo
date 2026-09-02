@@ -2,7 +2,11 @@
 // scene …) chosen by u_mode. Editor-only; published builds always use the plain 'screen' shader.
 
 #include "./chunks/fullscreen.wgsl"
-#include "./chunks/tonemap.wgsl"
+// grade.wgsl rather than tonemap.wgsl: the linear-HDR channels below resolve with the SCENE's tone
+// curve, so "Lit Scene" cannot disagree with "Final" about what the frame looks like. Deliberately
+// NOT colorLut.wgsl — a preview of an internal buffer is a picture of the BUFFER, and a grade on
+// top would misreport it. That is also why this pass carries no LUT binding to satisfy.
+#include "./chunks/grade.wgsl"
 #include "./chunks/octNormal.wgsl"
 
 @group(0) @binding(0) var u_screenTexture_texture: texture_2d<f32>;
@@ -20,6 +24,7 @@
 struct DebugViewUniforms {
     u_exposure: f32,    // for the tonemapped (linear-HDR) channels
     u_mode: i32,
+    u_toneMapper: i32,  // TONE_* in chunks/grade.wgsl
 };
 @group(1) @binding(0) var<uniform> u_debug: DebugViewUniforms;
 
@@ -58,7 +63,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     // Single-channel value in .r (SSAO occlusion factor).
     if (mode == 4) { return vec4<f32>(vec3<f32>(t.r), 1.0); }
-    // Motion-blur velocity (screen-space, small UV units in .rg). Amplify + bias so it is visible.
+    // Screen-space velocity (RAW motion in UV units in .rg). Amplify + bias so it is visible.
+    // The gain is calibrated so full scale is 1/15 uv of motion per frame — about 128 px at 1080p.
+    // It used to see the shutter-scaled, tile-clamped form, which could never exceed 20 px however
+    // fast a thing moved; the buffer is raw now, so the channel shows true motion and saturates.
     // Velocity: .rg is the motion vector, amplified and biased to mid-grey. .b is the no-blur flag —
     // flat red, so a model excluded from motion blur is identifiable at a glance rather than being
     // indistinguishable from one that simply is not moving.
@@ -67,7 +75,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(t.rg * 15.0 + 0.5, 0.5, 1.0);
     }
     // Linear-HDR channels (lit scene, bloom): resolve to display so the preview matches the image.
-    if (mode == 6) { return vec4<f32>(tonemap(t.rgb, u_debug.u_exposure), 1.0); }
+    if (mode == 6) {
+        return vec4<f32>(toSrgb(toneCurve(t.rgb * u_debug.u_exposure, u_debug.u_toneMapper)), 1.0);
+    }
     if (mode == 7) { return vec4<f32>(heatMap(t.r), 1.0); }
     // Passthrough RGB (albedo, emissive, …).
     return vec4<f32>(t.rgb, 1.0);

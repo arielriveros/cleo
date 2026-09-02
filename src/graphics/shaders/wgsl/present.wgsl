@@ -8,7 +8,10 @@
 // setUniform('u_exposure', ...) call sites keep working unchanged.
 
 #include "./chunks/fullscreen.wgsl"
-#include "./chunks/tonemap.wgsl"
+// grade.wgsl includes tonemap.wgsl itself. Including both here would declare toLinear() twice, and
+// there are no include guards. colorLut.wgsl brings bindings 4/5 with it.
+#include "./chunks/grade.wgsl"
+#include "./chunks/colorLut.wgsl"
 
 struct PresentUniforms {
     u_exposure: f32,
@@ -20,6 +23,12 @@ struct PresentUniforms {
      * but not all of it. This covers the rest without turning the whole feature into a filter.
      */
     u_saturation: f32,
+    /** Which display transform to apply. The TONE_* constants in chunks/grade.wgsl. */
+    u_toneMapper: i32,
+    /** How far toward the colour LUT the display colour is pulled. 0 leaves the frame ungraded. */
+    u_lutIntensity: f32,
+    /** Edge length of the bound LUT volume; 2 when it is the identity placeholder. */
+    u_lutSize: f32,
     // Offscreen thumbnail capture: make the background transparent so asset previews composite over
     // the editor's UI. Coverage comes from the scene DEPTH (1.0 == nothing was drawn) rather than the
     // scene colour's alpha, which carries the bloom mask and would erase dark, non-blooming assets.
@@ -31,6 +40,7 @@ struct PresentUniforms {
 @group(0) @binding(1) var u_screenTexture_sampler: sampler;
 @group(0) @binding(2) var u_coverageDepth_texture: texture_depth_2d;
 @group(0) @binding(3) var u_coverageDepth_sampler: sampler;
+// Bindings 4/5 are the colour LUT, declared by chunks/grade.wgsl.
 @group(1) @binding(0) var<uniform> u_present: PresentUniforms;
 
 @fragment
@@ -43,5 +53,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         alpha = select(0.0, 1.0, coverage < 1.0);
     }
 
-    return vec4<f32>(tonemapGraded(hdr, u_present.u_exposure, u_present.u_saturation), alpha);
+    let display = gradeToDisplay(hdr, u_present.u_exposure, u_present.u_saturation,
+                                 u_present.u_toneMapper);
+    return vec4<f32>(applyColorLut(display, u_present.u_lutSize, u_present.u_lutIntensity), alpha);
 }

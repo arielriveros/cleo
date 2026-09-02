@@ -107,6 +107,10 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   const wanted = new Set<string>()
   for (const entry of Object.values(scenes)) collectPublishedTextureIds(entry.scene, wanted)
   for (const t of templates) collectPublishedTextureIds((t as any).node, wanted)
+  // The colour-grading LUT is referenced by RenderSettings, not by any node, so the walks above
+  // cannot see it. Without this the build ships a LUT id with no bytes behind it and the published
+  // game runs ungraded, with nothing to say why.
+  if (src.settings?.colorGradingLut) wanted.add(src.settings.colorGradingLut)
 
   let textureBytes: any[] = []
   try {

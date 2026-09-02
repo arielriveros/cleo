@@ -15,12 +15,30 @@ import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
  * it is reachable without a GL context (`ModelNode` is not — see tests/nodeParse.test.ts).
  */
 
-/** `chunks/objectVelocity.wgsl`'s `encodeVelocity`, minus the intensity scale and the clamp. */
+/**
+ * `chunks/objectVelocity.wgsl`'s `encodeVelocity`, `.xy` only.
+ *
+ * The shader once scaled this by the shutter and clamped it to one tile; it no longer does, because
+ * TAA reads the same buffer and needs the true delta. So this is the whole of `.xy` now rather than a
+ * stripped-down version of it — see `chunks/motionBlurShutter.wgsl` for where the shutter went.
+ */
 function velocityUV(curClip: vec4, prevClip: vec4): [number, number] {
     return [
         (curClip[0] / curClip[3]) * 0.5 - (prevClip[0] / prevClip[3]) * 0.5,
         (curClip[1] / curClip[3]) * 0.5 - (prevClip[1] / prevClip[3]) * 0.5,
     ];
+}
+
+/**
+ * The full four-component encoding, both flags included.
+ *
+ * `.z` = excluded from motion blur. `.w` = `.xy` is the true screen-space delta, which 'objectOnly'
+ * deliberately is not. Two flags because the two consumers ask different questions of the same vector.
+ */
+function encodeVelocity(curClip: vec4, prevClip: vec4,
+                        mode: 'full' | 'objectOnly' | 'none'): [number, number, number, number] {
+    const [x, y] = velocityUV(curClip, prevClip);
+    return [x, y, mode === 'none' ? 1 : 0, mode === 'objectOnly' ? 0 : 1];
 }
 
 /** The vertex stage: a local position through a model matrix and a view-projection, to clip space. */
@@ -96,6 +114,38 @@ describe('per-object velocity', () => {
             expect(Math.abs(velocity('full', parked, parked, still, movedX)[0])).toBeGreaterThan(BLURRED);
             expect(Math.abs(velocity('objectOnly', parked, parked, still, movedX)[0])).toBeGreaterThan(BLURRED);
         });
+    });
+
+    it("keeps true velocity for a node flagged 'none' instead of zeroing it", () => {
+        // `.z` is a MOTION-BLUR opt-out and nothing else. It used to arrive with a zeroed `.xy`, which
+        // kept the object out of TileMax for free — but TAA reads that same `.xy` to decide where the
+        // pixel was last frame, and a zero there reads as "did not move", which GHOSTS a moving object
+        // rather than leaving it merely aliased. `motionBlurTileMax.wgsl` now skips flagged texels
+        // explicitly, so the two questions get two answers.
+        const cur = toClip(parked, movedX, POINT);
+        const prev = toClip(parked, still, POINT);
+
+        const flagged = encodeVelocity(cur, prev, 'none');
+        const plain = encodeVelocity(cur, prev, 'full');
+
+        expect(flagged[2]).toBe(1);
+        expect(plain[2]).toBe(0);
+        // The motion survives the flag, and is the same motion either way.
+        expect(Math.abs(flagged[0])).toBeGreaterThan(BLURRED);
+        expect(flagged.slice(0, 2)).toEqual(plain.slice(0, 2));
+        // And it is still reprojectable: 'none' opts out of BLUR, not out of being described.
+        expect(flagged[3]).toBe(1);
+    });
+
+    it("marks 'objectOnly' velocity as unusable for reprojection", () => {
+        // The mode divides the camera term out on purpose, so what it stores is world motion, not
+        // screen motion. Good blur, wrong reprojection — and under a moving camera a TAA resolve that
+        // trusted it would fetch history from the wrong pixel and ghost the object. `.w` is how the
+        // resolve is told to leave it alone; see taaResolve.wgsl.
+        const cur = toClip(parked, movedX, POINT);
+        const prev = toClip(parked, still, POINT);
+        expect(encodeVelocity(cur, prev, 'objectOnly')[3]).toBe(0);
+        expect(encodeVelocity(cur, prev, 'full')[3]).toBe(1);
     });
 
     it('emits nothing when the previous transform is the current one', () => {

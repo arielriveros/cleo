@@ -24,8 +24,15 @@ export function collectReferencedTextureIds(
   templates: Template[],
   terrainMaterials: TerrainMaterialAsset[] = [],
   tilesets: TilesetAsset[] = [],
+  /**
+   * Ids referenced from somewhere that is not a node or an asset — today, the colour-grading LUT,
+   * which lives in `RenderSettings`. Nothing in the walks below can reach it, and without it the
+   * LUT a scene is graded with shows as orphaned and is offered for deletion.
+   */
+  extraIds: (string | null | undefined)[] = [],
 ): Set<string> {
   const set = new Set<string>()
+  for (const id of extraIds) if (id) set.add(id)
   if (scene) {
     for (const node of scene.nodes) {
       const mat = getNodeMaterial(node)

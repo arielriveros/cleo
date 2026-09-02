@@ -90,6 +90,8 @@ describe('RenderSettings survives save, publish and export', () => {
             'autoExposureEnabled', 'exposureCompensation', 'exposureMinEV', 'exposureMaxEV',
             'exposureSpeedUp', 'exposureSpeedDown',
             'bloomThreshold', 'bloomKnee', 'bloomIntensity', 'bloomMaskEnabled',
+            'toneMapper', 'colorGradingLut', 'colorGradingIntensity',
+            'taaEnabled',
         ]) expect(declared, `${key} is not a persisted render setting`).toContain(key);
     });
 

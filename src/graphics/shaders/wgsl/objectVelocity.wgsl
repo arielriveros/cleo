@@ -15,10 +15,8 @@ struct ObjectVelocityUniforms {
     u_uvViewProj: mat4x4<f32>,      // via _uvProducing(viewProj)
     u_uvPrevViewProj: mat4x4<f32>,  // via _uvProducing(prevViewProj) — or of viewProj, for 'objectOnly'
     u_prevModel: mat4x4<f32>,
-    u_screenSize: vec2<f32>,
-    u_intensity: f32,
-    u_maxVelocityPx: f32,
-    u_noBlur: f32,
+    u_noBlur: f32,             // motion-blur opt-out flag; the stored velocity stays true either way
+    u_trueMotion: f32,         // 0 in 'objectOnly', where .xy is deliberately not the screen delta
 };
 @group(1) @binding(0) var<uniform> u_ov: ObjectVelocityUniforms;
 
@@ -37,6 +35,5 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return encodeVelocity(in.curClip, in.prevClip, u_ov.u_screenSize,
-                          u_ov.u_intensity, u_ov.u_maxVelocityPx, u_ov.u_noBlur);
+    return encodeVelocity(in.curClip, in.prevClip, u_ov.u_noBlur, u_ov.u_trueMotion);
 }

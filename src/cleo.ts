@@ -69,7 +69,7 @@ export type { ShaderDialect, WgslTranslator } from "./graphics/systems/customSha
 export { webgpuAvailableInBrowser, WEBGPU_IMPLEMENTED } from "./graphics/rhi/backendSelect";
 export type { BackendKind } from "./graphics/rhi/device";
 export { Renderer } from "./graphics/renderer";
-export type { SkeletonOverlay, RenderSettings } from "./graphics/renderer";
+export type { SkeletonOverlay, RenderSettings, QualityPreset, ToneMapper } from "./graphics/renderer";
 export { Skybox } from "./graphics/skybox";
 export { Texture } from "./graphics/texture";
 // The editor authors these: a texture asset's settings compile down to a TextureConfig.

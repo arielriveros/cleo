@@ -101,7 +101,8 @@ export function useFileManagerBridge() {
       case 'animationField': return collectReferencedAnimationFieldIds(scene).has(entry.assetId)
       case 'tileset': return collectReferencedTilesetIds(scene).has(entry.assetId)
       case 'texture':
-        return collectReferencedTextureIds(scene, l.materials, l.models, l.templates, l.terrainMaterials, l.tilesets)
+        return collectReferencedTextureIds(scene, l.materials, l.models, l.templates, l.terrainMaterials,
+                                           l.tilesets, [engineRef.current?.renderer?.colorGradingLut])
           .has(entry.assetId)
       default: return false
     }

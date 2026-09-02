@@ -4,11 +4,16 @@
 // selection reads as a pronounced highlight without repainting the object itself. Works by measuring
 // the distance in pixels from each background pixel to the nearest silhouette texel within a radius.
 //
-// This pass writes to the display, so it also performs the final exposure/ACES/sRGB resolve — it
-// REPLACES the normal present pass rather than running before it.
+// This pass writes to the display, so it also performs the final exposure/tonemap/sRGB resolve — it
+// REPLACES the normal present pass rather than running before it. That means it must carry the WHOLE
+// grade, not just the curve: it used to call the ungraded `tonemap()`, so selecting an object made
+// the saturation trim disappear from the frame.
 
 #include "./chunks/fullscreen.wgsl"
-#include "./chunks/tonemap.wgsl"
+// grade.wgsl includes tonemap.wgsl itself; including both would declare toLinear() twice.
+// colorLut.wgsl brings bindings 4/5 with it.
+#include "./chunks/grade.wgsl"
+#include "./chunks/colorLut.wgsl"
 
 /** Search radius in texels. Bounds the maximum outline width. */
 const R: i32 = 10;
@@ -17,19 +22,27 @@ const R: i32 = 10;
 @group(0) @binding(1) var u_screenTexture_sampler: sampler;
 @group(0) @binding(2) var u_maskTexture_texture: texture_2d<f32>;     // silhouette; white = selected
 @group(0) @binding(3) var u_maskTexture_sampler: sampler;
+// Bindings 4/5 are the colour LUT, declared by chunks/grade.wgsl.
 
 struct OutlinePostUniforms {
     u_texelSize: vec2<f32>,      // 1.0 / mask resolution
     u_outlineColor: vec3<f32>,   // sRGB display colour, composited AFTER tonemapping
     u_outlineWidth: f32,         // outline thickness, in pixels
     u_exposure: f32,
+    // The rest of the grade, so this resolve matches present.wgsl's exactly. See the header.
+    u_saturation: f32,
+    u_toneMapper: i32,
+    u_lutIntensity: f32,
+    u_lutSize: f32,
 };
 @group(1) @binding(0) var<uniform> u_outline: OutlinePostUniforms;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let scene = tonemap(textureSample(u_screenTexture_texture, u_screenTexture_sampler, in.uv).rgb,
-                        u_outline.u_exposure);
+    let hdr = textureSample(u_screenTexture_texture, u_screenTexture_sampler, in.uv).rgb;
+    let scene = applyColorLut(
+        gradeToDisplay(hdr, u_outline.u_exposure, u_outline.u_saturation, u_outline.u_toneMapper),
+        u_outline.u_lutSize, u_outline.u_lutIntensity);
     // The mask is read with `textureSampleLevel` at level 0, both here and in the search loop below.
     // The `center > 0.5` return is a per-fragment branch, so the loop after it is non-uniform control
     // flow, where WGSL forbids `textureSample` and rejects the module — which invalidated `outlinePost`

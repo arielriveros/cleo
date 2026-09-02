@@ -38,8 +38,11 @@ describe('findResources', () => {
         // GLSL ES has only combined samplers, so the pair is one `uniform sampler2D`.
         const resources = findResources(compose('present.wgsl'));
         const pairs = resources.filter(r => r.kind === 'texture' || r.kind === 'sampler');
-        expect(pairs).toHaveLength(4);
-        expect(new Set(pairs.map(r => r.glslName))).toEqual(new Set(['u_screenTexture', 'u_coverageDepth']));
+        // Three pairs: the scene colour, the coverage depth, and the 3D colour LUT that
+        // chunks/colorLut.wgsl contributes. A 3D texture collapses exactly like a 2D one.
+        expect(pairs).toHaveLength(6);
+        expect(new Set(pairs.map(r => r.glslName)))
+            .toEqual(new Set(['u_screenTexture', 'u_coverageDepth', 'u_colorLut']));
     });
 
     it('classifies a uniform buffer by its address space, not its type', () => {
@@ -74,9 +77,14 @@ describe('findUniformBlocks', () => {
             .toEqual([
                 { name: 'u_exposure', type: 'f32', offset: 0 },
                 { name: 'u_saturation', type: 'f32', offset: 4 },
-                { name: 'u_alphaFromDepth', type: 'f32', offset: 8 },
+                // An i32 beside the f32s: both are 4-byte aligned, so the grade packs tightly and
+                // this block is the engine's proof that a MIXED scalar block lays out correctly.
+                { name: 'u_toneMapper', type: 'i32', offset: 8 },
+                { name: 'u_lutIntensity', type: 'f32', offset: 12 },
+                { name: 'u_lutSize', type: 'f32', offset: 16 },
+                { name: 'u_alphaFromDepth', type: 'f32', offset: 20 },
             ]);
-        expect(blocks[0].size).toBe(16);   // three f32s, padded to the struct's 16-byte alignment
+        expect(blocks[0].size).toBe(32);   // six 4-byte scalars, padded to the struct's 16-byte alignment
     });
 
     it('does not lose a member to the comment above it', () => {
