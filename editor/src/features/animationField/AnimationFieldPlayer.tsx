@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { useAnimationField } from './AnimationFieldContext'
 
-// Floating bottom transport for the Animation Field editor: play/scrub plus axis sliders that move the
-// probe. The field tab's scene is paused (animationsEnabled = false), so this drives the target animator
-// itself via requestAnimationFrame.
+// The Animation Field editor's transport, docked under the plot inside the "Blend Space" bottom tab:
+// play/scrub plus axis sliders that move the probe. The field tab's scene is paused
+// (animationsEnabled = false), so this drives the target animator itself via requestAnimationFrame.
 
 export default function AnimationFieldPlayer() {
   const { editorMode, closeTab, activeTabId } = useCleoEngine()
@@ -61,13 +61,10 @@ export default function AnimationFieldPlayer() {
   const btn = 'px-2 py-1 rounded bg-control hover:bg-control-hover border border-control-hover text-white'
 
   return (
-    <div
-      data-cleo-overlay
-      className='absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 flex-col gap-2 rounded border border-border bg-surface-raised/95 px-3 py-2 shadow-lg'
-      style={{ minWidth: 540 }}
-      onMouseDown={e => e.stopPropagation()}>
+    <div className='flex shrink-0 flex-col gap-2 border-t border-border bg-surface-raised px-3 py-2'>
 
-      <div className='flex items-center gap-2 text-xs text-white'>
+      {/* Wraps rather than holding a minimum width: the bottom strip can be dragged narrow. */}
+      <div className='flex flex-wrap items-center gap-2 text-xs text-white'>
         <button className={btn} title='Play the blend' onClick={onPlay} disabled={playing || !animator}>▶</button>
         <button className={btn} title='Pause' onClick={onPause} disabled={!playing}>❚❚</button>
         <button className={btn} title='Rewind to the start of the cycle' onClick={onStop} disabled={!animator}>■</button>

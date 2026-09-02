@@ -11,7 +11,7 @@ function Message({ text, warn }: { text: string; warn: boolean }) {
   return (
     <div className='px-4 py-3 text-sm text-gray-300 space-y-2'>
       {text.split('\n\n').map((paragraph, i) => (
-        <p key={i} className={cn('whitespace-pre-line', warn && 'text-warning')}>{paragraph}</p>
+        <p key={i} className={cn('whitespace-pre-line select-text', warn && 'text-warning')}>{paragraph}</p>
       ))}
     </div>
   )

@@ -50,13 +50,15 @@ const Row: NonNullable<ComponentOverrides['Message']> = ({ log, node, children: 
     <div
       {...rest} // console-feed passes data-method
       className={cn(
-        'flex items-start gap-2 px-2 py-[3px] border-b border-border-subtle/60 font-mono text-xs leading-4',
+        // select-text: the editor is select-none by default (index.css), and log output is the main thing
+        // in it anyone copies.
+        'flex items-start gap-2 px-2 py-[3px] border-b border-border-subtle/60 font-mono text-xs leading-4 select-text',
         '[&_*]:font-mono [&_*]:whitespace-pre-wrap',
         ROW_TONE[entry.method]
       )}
       style={{ contentVisibility: 'auto', containIntrinsicSize: '0 20px' } as React.CSSProperties}
     >
-      <span className='shrink-0 tabular-nums text-dim select-text'>{formatTime(entry.timestamp)}</span>
+      <span className='shrink-0 tabular-nums text-dim'>{formatTime(entry.timestamp)}</span>
       <span
         className='shrink-0 rounded px-1 border'
         style={{ color: `hsl(${hue} 60% 75%)`, borderColor: `hsl(${hue} 45% 40% / 0.5)`, backgroundColor: `hsl(${hue} 45% 40% / 0.15)` }}

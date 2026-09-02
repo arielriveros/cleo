@@ -28,7 +28,7 @@ function StepRow({ step }: { step: TaskStep }) {
           {step.name}
         </div>
         {text && (
-          <div className={cn(hintClass, 'truncate', failed && 'text-danger')} title={text}>{text}</div>
+          <div className={cn(hintClass, 'truncate', failed && 'text-danger select-text')} title={text}>{text}</div>
         )}
       </div>
     </div>

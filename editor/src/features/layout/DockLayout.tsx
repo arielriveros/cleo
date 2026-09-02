@@ -21,9 +21,9 @@ const OLD_LAYOUT_KEY = 'cleo_project_layout';
 const OLD_DOCK_LAYOUT_KEYS = [
   'cleo_dock_layout_v1', 'cleo_dock_layout_v2', 'cleo_dock_layout_v3', 'cleo_dock_layout_v4',
   'cleo_dock_layout_v5', 'cleo_dock_layout_v6', 'cleo_dock_layout_v7', 'cleo_dock_layout_v8',
-  'cleo_dock_layout_v9',
+  'cleo_dock_layout_v9', 'cleo_dock_layout_v10',
 ];
-const LAYOUT_VERSION = 10;
+const LAYOUT_VERSION = 11;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -63,8 +63,11 @@ function activeBottomTab(dock: DockviewApi): BottomPanel | null {
 /** Animation-editor panels. Present in every layout, shown only in animation mode — see hiddenPanelIds. */
 const ANIMATION_PANELS = ['animClips', 'animVariables', 'animStateMachine'] as const;
 
-/** Animation-field panels. Same arrangement, for animationField mode. */
-const ANIMATION_FIELD_PANELS = ['animField'] as const;
+/**
+ * Animation-field panels: the settings sidebar on the right rail, and the blend-space plot down in the
+ * bottom strip with Logger and Assets. Same visibility arrangement as ANIMATION_PANELS.
+ */
+const ANIMATION_FIELD_PANELS = ['animField', 'animFieldPlot'] as const;
 
 /** Tilemap-editor panels: the tile palette and the layer stack. Shown only in tilemap mode. */
 const TILEMAP_PANELS = ['tilePalette', 'tilemapLayers'] as const;
@@ -88,7 +91,7 @@ const PANEL_TITLES: Record<string, string> = {
   viewport: 'Viewport', scene: 'Scene', sceneAdd: 'Scene Elements', uiAdd: 'UI Elements', properties: 'Properties',
   scripts: 'Scripts', physics: 'Physics', logger: 'Logger', assets: 'Assets',
   animClips: 'Clips', animVariables: 'Variables', animStateMachine: 'State Machine',
-  animField: 'Blend Space',
+  animField: 'Field Settings', animFieldPlot: 'Blend Space',
   tilePalette: 'Tiles', tilemapLayers: 'Layers',
   performance: 'Performance', rendererSettings: 'Renderer Settings',
   inputMap: 'Input',
@@ -156,7 +159,7 @@ function buildDefaultLayout(api: DockviewApi) {
   });
   // The animation panels share the Properties tab strip; they are hidden everywhere but animation mode,
   // where Properties itself is hidden.
-  for (const id of [...ANIMATION_PANELS, ...ANIMATION_FIELD_PANELS, ...TILEMAP_PANELS]) {
+  for (const id of [...ANIMATION_PANELS, 'animField', ...TILEMAP_PANELS]) {
     api.addPanel({
       id, component: id, title: PANEL_TITLES[id],
       position: { referencePanel: 'properties', direction: 'within' },
@@ -183,18 +186,26 @@ function buildDefaultLayout(api: DockviewApi) {
     id: 'assets', component: 'assets', title: 'Assets', renderer: 'always',
     position: { referencePanel: 'logger', direction: 'within' },
   });
+  // The blend-space plot belongs with Logger/Assets, not on the right rail: it is a work surface. Also
+  // renderer:'always', so its transport keeps driving the animator while another bottom tab is up.
+  api.addPanel({
+    id: 'animFieldPlot', component: 'animFieldPlot', title: PANEL_TITLES['animFieldPlot'], renderer: 'always',
+    position: { referencePanel: 'logger', direction: 'within' },
+  });
   // Honour the remembered bottom tab; this is also the fallback when restoring a stashed layout fails.
+  // animationField mode overrides this in restoreBottomTab, which runs after every layout build.
   (loadBottomTab() === 'assets' ? assets : logger).api.setActive();
   assertViewportLock(api);
 }
 
 /**
- * Re-assert `renderer: 'always'` on viewport/logger/assets; a restored blob is not guaranteed to carry it.
- * The default 'onlyWhenVisible' unmounts an unselected panel, tearing down the SVAR store and drag patch
- * for `assets` and the WebGL canvas host for `viewport`.
+ * Re-assert `renderer: 'always'` on the panels that cannot survive being unmounted; a restored blob is not
+ * guaranteed to carry it. The default 'onlyWhenVisible' unmounts an unselected panel, tearing down the SVAR
+ * store and drag patch for `assets`, the WebGL canvas host for `viewport`, and the rAF loop that poses the
+ * model for `animFieldPlot`.
  */
 function assertRenderers(api: DockviewApi) {
-  for (const id of ['viewport', 'logger', 'assets']) {
+  for (const id of ['viewport', 'logger', 'assets', 'animFieldPlot']) {
     const panel = api.getPanel(id);
     if (panel && panel.api.renderer !== 'always') panel.api.setRenderer('always');
   }
@@ -326,12 +337,17 @@ export default function DockLayout() {
   /**
    * Put the remembered bottom tab back if a layout pass moved it. A no-op when it is already showing or
    * the mode hides it entirely: `setActive` also takes global focus.
+   *
+   * animationField mode is the exception: the blend-space plot IS its work surface, so it takes the strip
+   * there. bottomTabRef is deliberately not touched, so the user's Logger/Assets choice comes back intact
+   * when the mode is left — which is also why animFieldPlot is not one of BOTTOM_PANELS.
    */
   const restoreBottomTab = useCallback((dock: DockviewApi) => {
-    const want = bottomTabRef.current;
+    const want = editorMode === 'animationField' ? 'animFieldPlot' : bottomTabRef.current;
     const panel = dock.getPanel(want);
-    if (panel && activeBottomTab(dock) !== want) panel.api.setActive();
-  }, []);
+    // Read the group directly rather than activeBottomTab(), which only knows the two persisted ids.
+    if (panel && panel.group?.activePanel?.id !== want) panel.api.setActive();
+  }, [editorMode]);
 
   // Legacy cleanup only. The mode controller below owns every path that builds a tree and runs immediately
   // after this, because `editorMode` is already correct on the first render.

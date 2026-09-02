@@ -85,7 +85,14 @@ body { font-size: var(--text-ui); }
   body { background-color: rgb(var(--bg)); color: rgb(var(--text)); }
   a { @apply text-primary hover:brightness-125; }
   ::selection { background: rgb(var(--primary) / 0.35); color: #fff; }
-  [role='button'], button { @apply select-none; }
+  /* Editor chrome is not a document. Every drag here is a gesture — moving a graph node, scrubbing a
+     slider, sweeping a tree — and the browser's default is to start a text selection under it and leave
+     whatever it swept over highlighted in blue. Off by default; text actually worth copying opts back in,
+     either below or with a `select-text` utility (which wins, being in the utilities layer). */
+  body { @apply select-none; }
+  /* Form controls are listed explicitly: an ancestor `user-select: none` otherwise blocks selecting the
+     text inside them in Chromium. `.monaco-editor` covers the script editor. */
+  input, textarea, [contenteditable='true'], .monaco-editor { @apply select-text; }
 }
 
 @layer components {

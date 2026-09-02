@@ -9,7 +9,6 @@ import TilemapInspector from "./tilemap/TilemapInspector";
 import DebugOverlay from "./logger/DebugOverlay";
 import AnimationSkeletonTool from "./animation/AnimationSkeletonTool";
 import AnimationPlayer from "./animation/AnimationPlayer";
-import AnimationFieldPlayer from "./animationField/AnimationFieldPlayer";
 import DebugVisibilityMenu from "./DebugVisibilityMenu";
 import DebugSkeletonOverlay from "./DebugSkeletonOverlay";
 import DebugAnimationOverlay from "./DebugAnimationOverlay";
@@ -473,10 +472,11 @@ export default function EngineViewport() {
                 <LandscapeBrush viewportRef={viewportRef} />
                 <LandscapeInspector />
             </>}
-            {/* The graph is a full-canvas view, so everything that belongs to the 3D preview steps aside for
-                it — including the transport, which sits at z-20 against the graph's z-10 and would otherwise
-                float on top of it. The Animations|Graph switch is the way back and lives on the graph's own
-                toolbar while it is up. */}
+            {/* The state graph is a full-canvas view, so everything that belongs to the 3D preview steps
+                aside for it — including the transport, which sits at z-20 against the graph's z-10 and would
+                otherwise float on top of it. The Animations|Graph switch is the way back and lives on the
+                graph's own toolbar while it is up. This is the only mode left with that conflict: the
+                Animation Field editor is a bottom-panel tab, so it floats nothing over the viewport. */}
             {editorMode === 'animation' && !graphView && <>
                 <div data-cleo-overlay className='absolute top-2 left-2 z-20' onMouseDown={e => e.stopPropagation()}>
                     <SegmentedControl<'3d' | 'graph'>
@@ -487,9 +487,6 @@ export default function EngineViewport() {
                 <AnimationSkeletonTool viewportRef={viewportRef} />
                 <AnimationPlayer />
             </>}
-            {/* The blend-space plot (FieldGraph, z-10) leaves the bottom strip clear for this, so unlike the
-                animation graph there is nothing to step aside for — you author and preview at the same time. */}
-            {editorMode === 'animationField' && <AnimationFieldPlayer />}
         </div>
     );
 }

@@ -4,7 +4,6 @@ import EngineViewport from '../EngineViewport';
 import UIEditorLayer from '../gameUi/UIEditorLayer';
 import VirtualControlsLayer from '../gameUi/VirtualControlsLayer';
 import StateGraph from '../animation/StateGraph';
-import FieldGraph from '../animationField/FieldGraph';
 import LoadingScreen from '../../components/LoadingScreen';
 import SceneInspector from '../sceneInspector/SceneInspector';
 import AddNew from '../sceneInspector/AddNew';
@@ -17,6 +16,8 @@ import MaterialEditor from '../nodeInspector/propertyEditors/MaterialEditor';
 import ScriptEditor from '../nodeInspector/scriptEditor/ScriptEditor';
 import ScriptTabView from '../nodeInspector/scriptEditor/ScriptTabView';
 import AnimationFieldPanel from '../animationField/AnimationFieldPanel';
+import FieldGraph from '../animationField/FieldGraph';
+import AnimationFieldPlayer from '../animationField/AnimationFieldPlayer';
 import TilesetTabView from '../tileset/TilesetTabView';
 import TextureTabView from '../texture/TextureTabView';
 import TextureSettingsPanel from '../texture/TextureSettingsPanel';
@@ -54,9 +55,6 @@ function ViewportPanel(_: IDockviewPanelProps) {
       {MODE_RENDERS_VIEWPORT[editorMode] && <UIEditorLayer />}
       {/* Animation-mode node graph overlays the viewport when Graph view is active */}
       <StateGraph />
-      {/* Animation-field mode: the blend-space plot overlays the viewport, with the 3D preview showing
-          through it so the pose can be judged while the field is authored */}
-      <FieldGraph />
       {/* Script mode: the dedicated code editor fills the main area (no 3D preview) */}
       {editorMode === 'script' && <ScriptTabView />}
       {/* Tileset mode: the atlas + slicing grid fills the main area (also no 3D preview) */}
@@ -184,8 +182,19 @@ function AssetsPanel(_: IDockviewPanelProps) {
 // The animation editor's three panels. They share one StateMachineProvider session wrapping the whole
 // dock (Editor.tsx), so each can be dragged anywhere. Each fills and scrolls itself, so no SidePanel.
 function AnimClipsPanel(_: IDockviewPanelProps) { return <AnimClips />; }
-// The Animation Field editor's single panel, inside the same dock-wide provider (Editor.tsx).
+// The Animation Field editor's settings sidebar, inside the same dock-wide provider (Editor.tsx).
 function AnimFieldPanel(_: IDockviewPanelProps) { return <AnimationFieldPanel />; }
+// That editor's work surface, docked in the bottom strip beside Logger and Assets rather than floating
+// over the viewport: the blend-space plot with its transport under it. Both read the same provider, so
+// this panel can be dragged anywhere without re-plumbing.
+function AnimFieldPlotPanel(_: IDockviewPanelProps) {
+  return (
+    <div className="flex flex-col h-full w-full overflow-hidden bg-surface-raised">
+      <div className="flex-1 min-h-0"><FieldGraph /></div>
+      <AnimationFieldPlayer />
+    </div>
+  );
+}
 function AnimVariablesPanel(_: IDockviewPanelProps) { return <AnimVariables />; }
 function AnimStateMachinePanel(_: IDockviewPanelProps) { return <AnimStateMachine />; }
 // The tilemap editor's two panels. Shown only in tilemap mode — see hiddenPanelIds.
@@ -240,6 +249,7 @@ export const dockComponents = {
   animVariables: AnimVariablesPanel,
   animStateMachine: AnimStateMachinePanel,
   animField: AnimFieldPanel,
+  animFieldPlot: AnimFieldPlotPanel,
   tilePalette: TilePalettePanel,
   tilemapLayers: TilemapLayersDockPanel,
   performance: PerformanceDockPanel,

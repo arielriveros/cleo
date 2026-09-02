@@ -3,9 +3,10 @@ import { useCleoEngine } from '../EngineContext'
 import { useAnimationField } from './AnimationFieldContext'
 import { clamp } from '../../utils/math';
 
-// The blend-space plot: the Animation Field mode's center canvas, an absolute overlay over the WebGL
-// viewport. Hand-rolled SVG because a sample's position IS its data, in real axis units. Drag a sample to
-// move it in axis space; drag anywhere else to move the probe.
+// The blend-space plot: the Animation Field mode's work surface, docked as the "Blend Space" tab in the
+// bottom strip beside Logger and Assets (see panels.tsx / DockLayout.tsx) so the viewport stays clear for
+// the pose it is authoring against. Hand-rolled SVG because a sample's position IS its data, in real axis
+// units. Drag a sample to move it in axis space; drag anywhere else to move the probe.
 
 const PAD = { left: 56, right: 20, top: 20, bottom: 44 }
 /** How close (in px) a pointer must be to grab a sample instead of moving the probe. */
@@ -39,7 +40,9 @@ export default function FieldGraph() {
     // Re-observed when the box appears: the early return below means it does not exist until a field is open.
   }, [editorMode, !!field])
 
-  if (editorMode !== 'animationField' || !field) return null
+  if (editorMode !== 'animationField') return null
+  // A message rather than null: this is a dock panel now, and an empty tab body reads as a broken panel.
+  if (!field) return <div className='flex h-full w-full flex-col bg-surface-raised p-3 text-sm text-gray-400'>No animation field open.</div>
 
   const is2D = field.mode === '2d'
   const plotW = Math.max(1, size.w - PAD.left - PAD.right)
@@ -117,12 +120,7 @@ export default function FieldGraph() {
   const fmt = (v: number) => (Math.abs(v) >= 100 || Number.isInteger(v) ? v.toFixed(0) : v.toFixed(1))
 
   return (
-    <div
-      data-cleo-overlay
-      className='absolute inset-0 z-10 flex flex-col'
-      // The plot sits over the 3D preview and must stay transparent so the posed model shows through.
-      style={{ background: 'transparent' }}
-      onMouseDown={e => e.stopPropagation()}>
+    <div className='flex h-full w-full flex-col overflow-hidden bg-surface-raised'>
 
       <div className='m-3 mb-1 flex items-center gap-2 self-start rounded border border-border bg-surface-raised/95 px-2 py-1 text-[11px] text-muted shadow-panel'>
         <span className='text-white'>{field.name}</span>
@@ -132,8 +130,7 @@ export default function FieldGraph() {
         <span className='text-dim'>double-click to add · drag a point to move it · drag elsewhere to preview</span>
       </div>
 
-      {/* Bottom padding keeps the plot clear of the floating transport. */}
-      <div ref={measure} className='relative mx-3 mb-24 flex-1 rounded border border-border bg-surface-raised/80 shadow-panel'>
+      <div ref={measure} className='relative mx-3 mb-3 flex-1 rounded border border-border bg-surface-raised/80 shadow-panel'>
         <svg
           width='100%' height='100%'
           className='cursor-crosshair'
