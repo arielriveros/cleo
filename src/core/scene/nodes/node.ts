@@ -24,6 +24,32 @@ import { eulerFromQuatDeg } from "../../math";
  */
 const FALLING_SPEED = -0.5;
 
+/**
+ * How much of the frame's motion is allowed to blur this node.
+ *
+ * The three modes differ only in which camera the previous frame's geometry is projected through, and
+ * the result is easiest to read as a table (+ = blurs, · = stays sharp):
+ *
+ * |                                  | full | objectOnly | none |
+ * |----------------------------------|------|------------|------|
+ * | camera and node move together    |  ·   |     +      |  ·   |
+ * | camera moves, node stands still  |  +   |     ·      |  ·   |
+ * | camera parked, node moves        |  +   |     +      |  ·   |
+ *
+ * - `full` — the true screen-space motion, camera and node together. The default. Worth reading the
+ *   first row: per-object motion vectors ALONE already answer the classic third-person complaint,
+ *   because a character travelling with the camera does not move on screen and so does not blur. That
+ *   was only ever an artefact of camera reprojection, which assumed every world point was static.
+ * - `objectOnly` — the camera's contribution removed, leaving the node's own world-space motion.
+ *   Literally "ignore the camera for this model": it stays sharp however hard the camera pans, orbits
+ *   or shakes. Note it is not simply "less blur" — row one is the case where it blurs and `full` does
+ *   not, because the node genuinely crossed the world even though it held still on screen.
+ * - `none` — never blurred, and never smeared over either: those pixels are flagged so the
+ *   reconstruction filter leaves them alone instead of dragging fast neighbours across them. The
+ *   unconditional "this must always be crisp" answer.
+ */
+export type MotionBlurMode = 'full' | 'objectOnly' | 'none';
+
 export class Node {
   protected readonly _id: string;
   protected _name: string;
@@ -80,6 +106,10 @@ export class Node {
   protected _trigger: Trigger | null;
 
   protected _visible: boolean;
+
+  // How much of the frame's motion may blur this node — see MotionBlurMode. Authored (inspector +
+  // serialized) and read by the renderer's object-velocity pass, never by anything else.
+  protected _motionBlur: MotionBlurMode = 'full';
 
   // Renderer-driven visibility for LOD level switching and distance culling (see LodGroupNode). Must stay
   // separate from _visible: that setter emits SCENE_CHANGED and, on ModelNode, writes castShadow.
@@ -596,6 +626,7 @@ export class Node {
       children: children,
       variables: this._serializeVariables(),
       spawnOnStart: this._spawnOnStart,
+      ...(this._motionBlur !== 'full' ? { motionBlur: this._motionBlur } : {}),
       ...(await this._serializePayload()),
     };
   }
@@ -629,6 +660,10 @@ export class Node {
     // Absent in older saves, which is exactly the `true` default. Must land before the trailing addChild,
     // which may immediately start() the node.
     if (json.spawnOnStart === false) node._spawnOnStart = false;
+
+    // Absent in older saves, which is exactly the 'full' default. Assigned to the field rather than
+    // through the setter: the setter fans out to children, and this node has none yet.
+    if (json.motionBlur === 'objectOnly' || json.motionBlur === 'none') node._motionBlur = json.motionBlur;
 
     // Restore custom variables before scripts so onStart can read them.
     Node._parseVariables(node, json.variables);
@@ -900,6 +935,21 @@ export class Node {
     const prev = this._spawnOnStart;
     this._spawnOnStart = value;
     this._notifyChange('component', 'spawnOnStart', prev, value);
+  }
+
+  /**
+   * How much of the frame's motion may blur this node (default `'full'`). See {@link MotionBlurMode}.
+   *
+   * Setting it fans out to descendants, as {@link visible} does: an imported model is a holder node
+   * with its `ModelNode`s beneath it, so a value set on the character root has to reach the meshes
+   * that are actually drawn.
+   */
+  public get motionBlur(): MotionBlurMode { return this._motionBlur; }
+  public set motionBlur(value: MotionBlurMode) {
+    const prev = this._motionBlur;
+    this._motionBlur = value;
+    for (const child of this._children) child.motionBlur = value;
+    this._notifyChange('component', 'motionBlur', prev, value);
   }
 
   /**

@@ -59,7 +59,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Single-channel value in .r (SSAO occlusion factor).
     if (mode == 4) { return vec4<f32>(vec3<f32>(t.r), 1.0); }
     // Motion-blur velocity (screen-space, small UV units in .rg). Amplify + bias so it is visible.
-    if (mode == 5) { return vec4<f32>(t.rg * 15.0 + 0.5, 0.5, 1.0); }
+    // Velocity: .rg is the motion vector, amplified and biased to mid-grey. .b is the no-blur flag —
+    // flat red, so a model excluded from motion blur is identifiable at a glance rather than being
+    // indistinguishable from one that simply is not moving.
+    if (mode == 5) {
+        if (t.b > 0.5) { return vec4<f32>(0.9, 0.15, 0.15, 1.0); }
+        return vec4<f32>(t.rg * 15.0 + 0.5, 0.5, 1.0);
+    }
     // Linear-HDR channels (lit scene, bloom): resolve to display so the preview matches the image.
     if (mode == 6) { return vec4<f32>(tonemap(t.rgb, u_debug.u_exposure), 1.0); }
     if (mode == 7) { return vec4<f32>(heatMap(t.r), 1.0); }

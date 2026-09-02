@@ -9,6 +9,7 @@ export type { NodeTemplate } from "./core/scene/templates";
 export { parseNodeJson } from "./core/scene/nodes/parseNodeJson";
 export { cloneNodeJson, collectNodeIds, remapNodeRefs, regenerateNodeIds } from "./core/scene/nodeJson";
 export { Node } from "./core/scene/nodes/node";
+export type { MotionBlurMode } from "./core/scene/nodes/node";
 export type { NodeType } from "./core/scene/nodes/nodeType";
 export { ModelNode, disposeModelSubtree } from "./core/scene/nodes/modelNode";
 // Device entry points. Exported so an embedder — or a test that has to construct a Model, which

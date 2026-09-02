@@ -78,7 +78,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // The explicit level is not a behaviour change: these are screen-sized post targets with no mip
     // chain, so level 0 is what the implicit form already resolved to. Same fix, same reason, as the
     // one `ssao` and `deferredLighting` already carry.
-    let vC = textureSampleLevel(u_velocity_texture, u_velocity_sampler, uv, 0.0).xy;
+    let vCenter = textureSampleLevel(u_velocity_texture, u_velocity_sampler, uv, 0.0);
+
+    // .z is the velocity buffer's "leave this pixel alone" flag, written by objects whose motionBlur
+    // mode is 'none'. Zero velocity alone would not be enough: this filter deliberately lets a blurred
+    // FOREGROUND sample cover a sharp centre (the `fg * cone` term), so a hero standing still in front
+    // of a whipping background would still be smeared by it. The flag is the only way to say "never".
+    if (vCenter.z > 0.5) {
+        return vec4<f32>(centerColor, 1.0);
+    }
+
+    let vC = vCenter.xy;
     let vClen = max(length(vC * u_mb.u_screenSize), 0.5);
     let centerDepth = linearizeDepth(textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, uv, 0));
 

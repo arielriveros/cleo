@@ -112,6 +112,9 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     iblConvolve: 'ibl.bake',
     probeCapture: 'ibl.bake',
     godRaysUpsample: 'godRays',
+    // The per-object velocity draws run inside the 'velocity' scope, right after the fullscreen
+    // camera-reprojection pass that seeds the same buffer.
+    'velocity.objects': 'velocity',
     'velocity.tile': 'motionBlur',
     'velocity.neighbor': 'motionBlur',
     // The scene -> compose[0] copy; WebGL2 times it under `present`, which is reported twice a frame.

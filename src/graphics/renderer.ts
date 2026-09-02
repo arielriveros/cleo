@@ -81,6 +81,10 @@ import MotionBlurVelocityProgram from './shaders/wgsl/motionBlurVelocity.wgsl'
 import MotionBlurTileMaxProgram from './shaders/wgsl/motionBlurTileMax.wgsl'
 import MotionBlurNeighborMaxProgram from './shaders/wgsl/motionBlurNeighborMax.wgsl'
 import MotionBlurGatherProgram from './shaders/wgsl/motionBlur.wgsl'
+// Per-object velocity: drawn OVER the camera-reprojection buffer, one variant per vertex layout.
+import ObjectVelocityProgram from './shaders/wgsl/objectVelocity.wgsl'
+import ObjectVelocitySkinnedProgram from './shaders/wgsl/objectVelocitySkinned.wgsl'
+import ObjectVelocityBasicSkinnedProgram from './shaders/wgsl/objectVelocityBasicSkinned.wgsl'
 import PBRProgram from './shaders/wgsl/pbr.wgsl'
 import PBRSkinnedProgram from './shaders/wgsl/pbrSkinned.wgsl'
 import TerrainForwardProgram from './shaders/wgsl/terrainForward.wgsl'
@@ -963,6 +967,27 @@ export class Renderer {
 
     // Reused scratch to avoid per-frame allocations
     private _boneMatrixScratch: Float32Array = new Float32Array(100 * 16);
+
+    // Last frame's world matrix and bone palette per model, for per-object motion vectors.
+    //
+    // A WeakMap rather than a field on ModelNode: this is renderer bookkeeping with a renderer's
+    // lifetime, and a node the renderer stops seeing should take its snapshot with it.
+    //
+    // `frame` is the frame index the entry was written on. An entry that is not from EXACTLY the
+    // previous frame is treated as absent — a node that was just spawned, unhidden, LOD-swapped or
+    // teleported has no honest previous position, and inventing one draws a full-length streak across
+    // the screen on the frame it appears.
+    private readonly _prevXform = new WeakMap<ModelNode, { world: mat4; bones: Float32Array | null; frame: number }>();
+    // Whether anything moved this frame. Widens the motion-blur gate, which used to ask only whether
+    // the CAMERA moved — the question that made a moving object in front of a parked camera produce
+    // nothing at all.
+    private _anyObjectMoved: boolean = false;
+    // `_uvProducing` returns a single shared scratch, so two live results need two homes of their own.
+    private readonly _uvViewProjScratch: mat4 = mat4.create();
+    private readonly _uvPrevViewProjScratch: mat4 = mat4.create();
+    private readonly _prevBoneScratch: Float32Array = new Float32Array(100 * 16);
+    // Reused selection buffer for the object-velocity pass, so picking the movers allocates nothing.
+    private readonly _velocityDrawList: ModelNode[] = [];
     private _boneIdentityScratch: Float32Array;
     // One instance buffer PER GROUP, keyed by the mesh+material key. A single shared buffer would have
     // every group in the pass read the LAST matrices written, and a growth reallocation would destroy
@@ -1109,7 +1134,10 @@ export class Renderer {
         this._compose_FBOs = [new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }),
                               new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } })];
         // Motion blur velocity buffers (signed velocity -> float precision).
-        this._velocityFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
+        // `depth: false`: the fullscreen reprojection tests no depth, and the object pass that does
+        // borrows the opaque buffer through `_velocityObjectsTarget` rather than owning one. The
+        // default would allocate a full-res depth texture nothing ever reads.
+        this._velocityFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
         this._velocityTileFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         this._velocityNeighborFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         // SSAO is one 8-bit scalar per pixel: R8, not RGBA8, and no depth attachment — both passes are
@@ -1281,6 +1309,12 @@ export class Renderer {
             ['motionBlurTileMax',            MotionBlurTileMaxProgram],
             ['motionBlurNeighborMax',        MotionBlurNeighborMaxProgram],
             ['motionBlur',                   MotionBlurGatherProgram],
+            // Per-object velocity, drawn over the reprojection buffer. Three variants for the three
+            // skinned/unskinned vertex layouts — each declares the SAME attributes as the colour
+            // program of its family, so `AnimatedModel.initializeVAO` finds the layout it already built.
+            ['objectVelocity',               ObjectVelocityProgram],
+            ['objectVelocitySkinned',        ObjectVelocitySkinnedProgram],
+            ['objectVelocityBasicSkinned',   ObjectVelocityBasicSkinnedProgram],
         ];
 
         // One program can carry two names, and they must be the SAME object: uniform state lives on
@@ -1405,6 +1439,11 @@ export class Renderer {
         // Same for per-mesh LOD groups: each picks its active level (or distance-culls) before shadows.
         this._updateModelLOD(scene);
 
+        // Which models moved since last frame. AFTER LOD selection, so a level that was just swapped in
+        // is already flagged not-visible-last-frame rather than reading as a teleport, and BEFORE post
+        // processing, which is where the answer is needed — see `_detectObjectMotion`.
+        this._detectObjectMotion(scene);
+
         // Re-bake the sky atmosphere cubemap when the sun moves (before IBL, so probes capture the sky).
         this._scope('sky.bake');
         this._updateSkyAtmosphere(scene);
@@ -1477,6 +1516,11 @@ export class Renderer {
         // Remember this frame's camera transform so next frame's motion blur can reproject against it.
         mat4.copy(this._prevViewProj, this._viewProj);
         this._hasPrevViewProj = true;
+
+        // Same for every model's world matrix and bone pose. Here rather than in `updateTransforms`:
+        // `Scene.update` runs that pass TWICE on frames with camera rigs, and the second run would
+        // overwrite the snapshot with this frame's value.
+        this._capturePrevTransforms(scene);
 
         // Sacrificial trailing scope: whichever query is LAST in a frame absorbs the driver's
         // end-of-frame drain, which would otherwise be charged to `present`.
@@ -1727,6 +1771,28 @@ export class Renderer {
         return outside;
     }
 
+    /**
+     * Whether this node's geometry is what the deferred G-buffer holds: the material-and-visibility
+     * half of {@link _geometryPass}'s accept test.
+     *
+     * The frustum cull is deliberately NOT part of it — `_culled` counts a stat and every node must
+     * reach it at most once per frame — and neither is the lazy `initializeModel`.
+     *
+     * Shared with the object-velocity pass so the two agree exactly. A node they disagreed about would
+     * either lose its motion vector or write one over a surface it does not own.
+     */
+    private _inGBuffer(node: ModelNode): boolean {
+        if (!node.visible) return false;
+        if ((node as any).isGizmo) return false;
+        if (node.model.material.config.transparent) return false;
+        // Forward-rendered types are drawn in the overlay, not the G-buffer: Blinn-Phong and forward
+        // custom materials (deferred custom, 'customGeom:', DOES rasterize there). Screen custom
+        // materials are camera post passes and never rasterize as mesh geometry at all.
+        const dtype = node.model.material.type;
+        return !(dtype === 'blinn_phong' || dtype === 'blinn_phongSkinned'
+                 || dtype.startsWith('custom:') || dtype.startsWith('customScreen:'));
+    }
+
     private _geometryPass(scene: Scene): void {
         // Refreshed here, at the one point in this pass that still has the scene. See `_sunDirection`.
         this._sunDirection = [0, 0, 0];
@@ -1749,17 +1815,10 @@ export class Renderer {
         const instanceGroups = new Map<string, ModelNode[]>();
 
         for (const node of scene.models) {
-            if (!node.visible) continue;
-            if ((node as any).isGizmo) continue;
-            if (node.model.material.config.transparent) continue;
-            if (this._culled(node)) continue;
             // Default (Blinn-Phong) materials are forward-rendered in the overlay so their full feature
             // set (specular/ambient/reflectivity + maps) works; they never enter the deferred G-buffer.
-            const dtype = node.model.material.type;
-            // Forward-rendered types are drawn in the overlay, not the G-buffer: Blinn-Phong and
-            // forward custom materials (deferred custom, 'customGeom:', DOES rasterize here). Screen
-            // custom materials are camera post passes and never rasterize as mesh geometry at all.
-            if (dtype === 'blinn_phong' || dtype === 'blinn_phongSkinned' || dtype.startsWith('custom:') || dtype.startsWith('customScreen:')) continue;
+            if (!this._inGBuffer(node)) continue;
+            if (this._culled(node)) continue;
             if (!node.initialized) node.initializeModel();
 
             const mat = node.model.material;
@@ -2272,6 +2331,13 @@ export class Renderer {
         shadowMapSkinnedCutout: ShadowMapSkinnedCutoutProgram,
         shadowMapBasicCutout: ShadowMapBasicCutoutProgram,
         shadowMapBasicSkinnedCutout: ShadowMapBasicSkinnedCutoutProgram,
+    };
+
+    /** WGSL reflection for the per-object velocity programs, by the name `_velocityShaderFor` picks. */
+    private static readonly _VELOCITY_PROGRAMS: Record<string, { resources: readonly ShaderResource[] }> = {
+        objectVelocity: ObjectVelocityProgram,
+        objectVelocitySkinned: ObjectVelocitySkinnedProgram,
+        objectVelocityBasicSkinned: ObjectVelocityBasicSkinnedProgram,
     };
 
     /**
@@ -4961,6 +5027,78 @@ export class Renderer {
      * Upload the skinning palette. By NAME, never a cached location: `getUniformLocation` returns null
      * for a std140 block member, which is indistinguishable from "this shader has no bones".
      */
+    /** The animated model behind a node when it is genuinely skinned and posed, else null. */
+    private static _skinOf(node: ModelNode): AnimatedModel | null {
+        const model = node.model;
+        if (!(model instanceof AnimatedModel)) return null;
+        return model.hasSkin && node.animator ? model : null;
+    }
+
+    /**
+     * Whether this node's geometry sits somewhere different than it did last frame.
+     *
+     * False without a snapshot from EXACTLY the previous frame: no history is not the same as no
+     * motion, but it is the only safe answer — the alternative is a full-length streak on the frame a
+     * node spawns, unhides or teleports.
+     *
+     * A playing animator counts even when the node transform is identical, which is the whole point of
+     * skinned velocity: a character running on the spot moves every vertex and no matrix.
+     */
+    private _nodeMoved(node: ModelNode): boolean {
+        const prev = this._prevXform.get(node);
+        if (prev === undefined || prev.frame !== this._frameIndex - 1) return false;
+        if (!mat4.exactEquals(prev.world, node.worldTransform)) return true;
+        const animator = node.animator;
+        return !!animator && (animator.isPlaying || animator.isBlending);
+    }
+
+    /**
+     * Set {@link _anyObjectMoved} for this frame.
+     *
+     * Split from {@link _capturePrevTransforms} on purpose. Post-processing has to KNOW whether
+     * anything moved before it decides to run motion blur at all, and the snapshot can only be
+     * replaced after the frame is drawn — so the read happens here, at the top of the frame, and the
+     * write happens at the bottom. Folding them together would leave the gate one frame behind and the
+     * first frame of every motion unblurred.
+     */
+    private _detectObjectMotion(scene: Scene): void {
+        this._anyObjectMoved = false;
+        if (!this._motionBlurEnabled || this._motionBlurIntensity <= 0) return;
+        for (const node of scene.models) {
+            if (!this._inGBuffer(node)) continue;
+            if (this._nodeMoved(node)) { this._anyObjectMoved = true; return; }
+        }
+    }
+
+    /**
+     * Record where every model sat this frame, for next frame's velocity. Runs once, at the tail.
+     *
+     * Skipped entirely while motion blur is off, which costs nothing on the way back: the frame stamps
+     * go stale, `_nodeMoved` reads that as "no history", and the first re-enabled frame emits zero
+     * velocity rather than a streak from wherever things stood when it was switched off.
+     */
+    private _capturePrevTransforms(scene: Scene): void {
+        if (!this._motionBlurEnabled || this._motionBlurIntensity <= 0) return;
+        for (const node of scene.models) {
+            let entry = this._prevXform.get(node);
+            if (entry === undefined) {
+                entry = { world: mat4.create(), bones: null, frame: this._frameIndex };
+                this._prevXform.set(node, entry);
+            }
+            mat4.copy(entry.world, node.worldTransform);
+            entry.frame = this._frameIndex;
+
+            const skin = Renderer._skinOf(node);
+            if (!skin) { entry.bones = null; continue; }
+            // Allocated on first use and reused after: 6.4KB per skinned node, and only for the ones
+            // that actually have a pose to remember.
+            if (!entry.bones) entry.bones = new Float32Array(100 * 16);
+            const boneMatrices = node.animator!.getFinalBoneMatrices();
+            const n = Math.min(100, boneMatrices.length);
+            for (let i = 0; i < n; i++) entry.bones.set(boneMatrices[i], i * 16);
+        }
+    }
+
     private _uploadBoneMatrices(shaderType: string, node: ModelNode): void {
         const animatedModel = node.model as AnimatedModel;
         if (animatedModel.hasSkin && node.animator) {
@@ -6364,8 +6502,11 @@ export class Renderer {
 
         // First, bring the lit scene into _compose_FBOs[0]. Motion blur (when on) reconstructs the
         // image while doing so; otherwise it's a plain copy.
+        // `|| _anyObjectMoved`: asking only whether the CAMERA moved is what made an object crossing
+        // the view of a parked camera produce no blur at all — the chain was never even run.
         const motionBlurOn = this._motionBlurEnabled && this._hasPrevViewProj && this._motionBlurIntensity > 0.0
-                             && this._passEnabled['motionBlur'] && this._cameraMoved();
+                             && this._passEnabled['motionBlur']
+                             && (this._cameraMoved() || this._anyObjectMoved);
         if (motionBlurOn) {
             this._motionBlurPass();
         } else {
@@ -6946,21 +7087,171 @@ export class Renderer {
         this._composeIndex = dst;
     }
 
-    // Camera-reprojection velocity: reconstruct each pixel's world position from the G-buffer depth,
-    // project it with the previous frame's view-projection, and store the screen-space delta (UV
-    // units, clamped to one tile) in _velocityFBO. Also used standalone by the 'velocity' debug view.
+    // Velocity in two stages. First the camera reprojection: reconstruct each pixel's world position
+    // from the opaque depth, project it with the previous frame's view-projection, and store the
+    // screen-space delta (UV units, clamped to one tile) in _velocityFBO — correct for everything that
+    // did not move, and for the sky. Then the movers overwrite their own pixels with the truth.
+    // Also used standalone by the 'velocity' debug view.
     private _velocityPass(): void {
         const w = this._renderWidth, h = this._renderHeight;
         const pass = this._beginFullscreenPass(this._velocityFBO.renderTarget, 'velocity', true);
         const pipeline = this._fullscreenPipeline('motionBlurVelocity', MotionBlurVelocityProgram);
         pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._gBufferFBO.depth]));
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._depthSource()]));
         this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
         this._shaderManager.setUniform('u_prevViewProj', this._uvProducing(this._prevViewProj));
         this._shaderManager.setUniform('u_intensity', this._motionBlurIntensity);
         this._shaderManager.setUniform('u_screenSize', [w, h]);
         this._shaderManager.setUniform('u_maxVelocityPx', Renderer.MOTION_BLUR_TILE);
         this._drawFullscreen(pass);
+        this._endFullscreenPass(pass);
+
+        // Its own pass over the same colour buffer, with the opaque depth attached so the draws can
+        // depth-test. A second pass rather than more draws in the one above: that one owns no depth,
+        // and giving it some would mean clearing the buffer the gather still has to compare against.
+        if (this._currentScene) this._objectVelocityPass(this._currentScene);
+    }
+
+    /**
+     * The opaque depth the velocity chain reconstructs, tests and compares against.
+     *
+     * The deferred pipeline's G-buffer depth, and in the forward pipeline the snapshot
+     * `_copySceneDepth` takes after the opaque draw — the same buffer the other post passes (god rays,
+     * screen materials) already read. The forward branch is not a refinement: `_gBufferFBO.depth` is
+     * never written at all when `deferred` is off, so motion blur was reprojecting an uninitialised
+     * buffer there.
+     */
+    private _depthSource(): Texture {
+        return this._deferred ? this._gBufferFBO.depth : this._sceneDepthFBO.depth;
+    }
+
+    /**
+     * The velocity buffer's colour with the opaque depth attached, so the object pass can depth-test
+     * against the geometry that produced it without owning a depth buffer of its own. Deduped by the
+     * device, so building it per pass is free.
+     */
+    private _velocityObjectsTarget(): RenderTarget {
+        return device.createRenderTarget({
+            label: 'velocity+depth',
+            colorViews: [this._velocityFBO.colors[0].attachmentView],
+            depthView: this._depthSource().attachmentView,
+        });
+    }
+
+    /**
+     * Per-object motion vectors, drawn OVER the camera-reprojection buffer.
+     *
+     * The base pass answers "where was this world point last frame" under the assumption that the point
+     * never moved. For anything that did move that answer is wrong, and this pass overwrites it with
+     * the real one: the same surface point projected through last frame's model matrix, and last
+     * frame's bone pose, instead of this frame's.
+     *
+     * Depth-tested `less-equal` against the opaque depth and writing none of it, so an occluded object
+     * contributes nothing and the buffer keeps the reprojected value for whatever is actually visible.
+     */
+    private _objectVelocityPass(scene: Scene): void {
+        // Selected before the pass is opened, so a scene where nothing qualifies — the common case
+        // under a moving camera — costs no render pass at all rather than an empty load/store of a
+        // full-res target every frame.
+        const movers = this._velocityDrawList;
+        movers.length = 0;
+        for (const node of scene.models) {
+            if (!this._inGBuffer(node)) continue;
+            // The geometry pass initializes a node added this frame; one that never got there has no
+            // mesh to draw and nothing in the depth buffer either.
+            if (!node.initialized) continue;
+            // `_outsideFrustum`, not `_culled`: the stat that one increments was already counted by
+            // the geometry pass, and every node must reach it at most once per frame.
+            if (this._outsideFrustum(node)) continue;
+            // A node that did not move is EXACTLY what the reprojection already describes, so drawing
+            // it would spend a draw call writing back the value already there. The two opt-out modes
+            // always draw: their whole job is to cancel what the base pass wrote.
+            if (node.motionBlur === 'full' && !this._nodeMoved(node)) continue;
+            movers.push(node);
+        }
+        if (movers.length === 0) return;
+
+        // `_uvProducing` hands back one shared scratch, so each result needs a home before the next call.
+        mat4.copy(this._uvViewProjScratch, this._uvProducing(this._viewProj));
+        mat4.copy(this._uvPrevViewProjScratch, this._uvProducing(this._prevViewProj));
+
+        const pass = this._beginFullscreenPass(this._velocityObjectsTarget(), 'velocity.objects', false);
+        // The pipeline last SET, not merely last built — the same dedupe the shadow caster loop uses.
+        let boundPipeline: RenderPipeline | null = null;
+
+        for (const node of movers) {
+            const mode = node.motionBlur;
+            const skin = Renderer._skinOf(node);
+            // The unlit Basic family has no normal/tangent/bitangent, so it packs bone data at
+            // locations 2/3 where every lit family puts it at 5/6 — one program cannot read both.
+            const materialType = node.model.material.type;
+            const basicFamily = materialType === 'basic' || materialType === 'basicSkinned';
+            const shaderType = skin
+                ? (basicFamily ? 'objectVelocityBasicSkinned' : 'objectVelocitySkinned')
+                : 'objectVelocity';
+
+            // Matched to the geometry pass, not assumed: a wireframe model put only its EDGES in the
+            // depth buffer, so filled triangles here would pass `less-equal` across the whole
+            // silhouette — against the background's far depth — and paint the model's velocity over
+            // scenery it never covered.
+            const topology = node.model.material.config.wireframe ? 'line-list' : 'triangle-list';
+
+            const pipeline = this._pipelineFor(shaderType, Renderer._VELOCITY_PROGRAMS[shaderType], {
+                cullMode: Renderer._cullFor(node.model.material.config.side),
+                // Reads the opaque depth and writes none of it: this pass must not disturb a buffer the
+                // gather below still compares against.
+                depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
+                targets: 1,
+                topology,
+                vertex: skin ? 'model+skin' : 'model',
+                // As in the shadow pass: these programs declare a narrow attribute set, but the buffer
+                // under them was packed for whatever material the node wears.
+                builtFor: materialType,
+            });
+            if (pipeline !== boundPipeline) {
+                pass.setPipeline(pipeline);
+                boundPipeline = pipeline;
+            }
+
+            const prev = this._prevXform.get(node);
+            const fresh = prev !== undefined && prev.frame === this._frameIndex - 1;
+
+            this._shaderManager.setUniform('u_model', node.worldTransform);
+            this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+            this._shaderManager.setUniform('u_projection', this._clipProjection(this._activeCamera.projectionMatrix));
+            this._shaderManager.setUniform('u_uvViewProj', this._uvViewProjScratch);
+            // 'objectOnly' is handed THIS frame's view-projection as its previous one, so the camera
+            // term appears on both sides of the subtraction and divides out exactly rather than being
+            // approximated away. What is left is the node's own world-space motion — see MotionBlurMode
+            // for which cases that actually makes sharper, which is not all of them.
+            this._shaderManager.setUniform('u_uvPrevViewProj',
+                mode === 'objectOnly' ? this._uvViewProjScratch : this._uvPrevViewProjScratch);
+            // No usable history means no motion: previous == current, and the object writes zeros.
+            this._shaderManager.setUniform('u_prevModel', fresh ? prev!.world : node.worldTransform);
+            this._shaderManager.setUniform('u_screenSize', [this._renderWidth, this._renderHeight]);
+            this._shaderManager.setUniform('u_intensity', this._motionBlurIntensity);
+            this._shaderManager.setUniform('u_maxVelocityPx', Renderer.MOTION_BLUR_TILE);
+            this._shaderManager.setUniform('u_noBlur', mode === 'none' ? 1 : 0);
+
+            if (skin) {
+                // Initialize the VAO from the program ABOUT TO DRAW IT — see the same note in
+                // `_renderShadowCasters`. These programs declare the same attributes at the same
+                // locations as their family's colour program, so this is a no-op after the geometry
+                // pass rather than a per-frame re-stride.
+                skin.initializeVAO(this._shaderManager.getShader(shaderType).attributes);
+                // Fills _boneMatrixScratch with THIS frame's pose and uploads it as u_boneMatrices —
+                // which is also exactly the right PREVIOUS pose when there is no history to use.
+                this._uploadBoneMatrices(shaderType, node);
+                this._prevBoneScratch.set(fresh && prev!.bones ? prev!.bones : this._boneMatrixScratch);
+                this._shaderManager.setUniform('u_prevBoneMatrices', this._prevBoneScratch);
+            }
+
+            // Velocity is per surface, not per material: a merged model is one draw over its whole
+            // index buffer, with no material bound at all.
+            if (!this._recordDraw(pass, node.model.mesh, 0, 0))
+                node.model.mesh.draw(topology);
+        }
+
         this._endFullscreenPass(pass);
     }
 
@@ -7001,7 +7292,7 @@ export class Renderer {
         gatherPass.setPipeline(gatherPipeline);
         gatherPass.setBindGroup(0, this._textureBindGroup(gatherPipeline, 0, [
             this._sceneFBO.colors[0], this._velocityFBO.colors[0],
-            this._velocityNeighborFBO.colors[0], this._gBufferFBO.depth,
+            this._velocityNeighborFBO.colors[0], this._depthSource(),
         ]));
         this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
         this._shaderManager.setUniform('u_screenSize', [w, h]);

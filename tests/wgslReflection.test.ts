@@ -95,7 +95,10 @@ describe('findUniformBlocks', () => {
 describe('the whole shader tree reflects cleanly', () => {
     // A sweep rather than a list, so a newly converted program is covered the moment it lands.
     const programs = ['screen.wgsl', 'present.wgsl', 'bloom.wgsl', 'composer.wgsl', 'ssao.wgsl',
-                      'motionBlur.wgsl', 'deferredLighting.wgsl', 'grid.wgsl', 'chromaticAberration.wgsl'];
+                      'motionBlur.wgsl', 'deferredLighting.wgsl', 'grid.wgsl', 'chromaticAberration.wgsl',
+                      // Not fullscreen passes: the per-object velocity programs rasterize geometry and
+                      // bind no textures at all, so they exercise the uniform-block half on its own.
+                      'objectVelocity.wgsl', 'objectVelocitySkinned.wgsl', 'objectVelocityBasicSkinned.wgsl'];
 
     it('never reports a resource it could not classify', () => {
         for (const program of programs)
@@ -111,9 +114,16 @@ describe('the whole shader tree reflects cleanly', () => {
     });
 
     it('keeps texture and sampler bindings paired', () => {
-        // Every sampled texture needs a sampler and vice versa. An unpaired one means a binding was
+        // Every SAMPLED texture needs a sampler and vice versa. An unpaired one means a binding was
         // renumbered by hand and the pair fell out of step — which GLSL would not complain about,
         // since it only ever sees the combined name.
+        //
+        // The exception is a texture read only with `textureLoad`, which takes no sampler at all.
+        // Declaring one beside it would be worse than redundant: an unreferenced binding is dropped
+        // from the WebGPU auto-layout, so the engine would hand the pipeline one entry more than the
+        // layout has and invalidate the whole command buffer. cloudUpsample.wgsl documents that trap
+        // at length; chunks/clusteredLights.wgsl is the case this list exists for.
+        const LOAD_ONLY = new Set(['u_lightData']);
         for (const program of programs) {
             const byName = new Map<string, Set<string>>();
             for (const r of findResources(compose(program))) {
@@ -121,8 +131,13 @@ describe('the whole shader tree reflects cleanly', () => {
                 if (!byName.has(r.glslName)) byName.set(r.glslName, new Set());
                 byName.get(r.glslName)!.add(r.kind);
             }
-            for (const [name, kinds] of byName)
+            for (const [name, kinds] of byName) {
+                if (LOAD_ONLY.has(name)) {
+                    expect([...kinds], `${program}:${name} is textureLoad-only`).toEqual(['texture']);
+                    continue;
+                }
                 expect([...kinds].sort(), `${program}:${name}`).toEqual(['sampler', 'texture']);
+            }
         }
     });
 
