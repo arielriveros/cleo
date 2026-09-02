@@ -2889,8 +2889,7 @@ export class Renderer {
         this._shaderManager.bind('deferredLighting');
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
         this._uploadShadowUniforms('deferredLighting');
-        pass.setBindGroup(3, this._shadowBindGroup(pipeline));
-        pass.setBindGroup(4, this._lightGridBindGroup(pipeline));
+        pass.setBindGroup(3, this._frameLightingBindGroup(pipeline));
 
         // Split-sum IBL from up to 2 probe volumes, blended per pixel by feathered containment;
         // uncovered pixels fall back to flat ambient plus the `u_envMap` reflection.
@@ -3025,43 +3024,55 @@ export class Renderer {
     }
 
     /**
-     * The shadow textures as a bind group: the cascade array and the spot atlas, group 3. Every lit
-     * program declares it in the same shape. The accompanying scalars stay in group 4's block.
-     */
-    /**
      * Does this program sample the shadow maps? Asked of the RESOURCE, never the group number —
-     * group 3 is a plain uniform block in `terrainForward`, not textures at all.
+     * group 3 holds the light grid as well, and `terrainForward` takes that half and no shadows.
      */
     private _declaresShadowGroup(pipeline: RenderPipeline): boolean {
         return pipeline.resources.some(r => r.group === 3 && r.glslName === 'u_shadowCascades');
     }
 
     /**
-     * The shadow maps: the cascade array, plus the spot atlas and the point cube atlas when
-     * `withPunctual`. The caller must STATE that — a program declaring the punctual arrays but never
-     * calling them has the binding dead-code eliminated, and an extra bind-group entry invalidates the
-     * whole command buffer. `_textureBindGroup` places the Nth texture at binding 2N, so the ORDER
-     * here is the binding order in chunks/shadows.wgsl and nothing may be skipped in the middle.
-     */
-    /**
      * Does this program read the clustered light grid? Asked of the RESOURCE, like
-     * {@link _declaresShadowGroup} — the unlit Basic family declares no group 4 at all, and binding a
-     * group a program never declared is an error rather than an empty bind.
+     * {@link _declaresShadowGroup} — the unlit Basic family reads neither half of group 3, and binding
+     * a group a program never declared is an error rather than an empty bind.
      */
     private _declaresLightGrid(pipeline: RenderPipeline): boolean {
-        return pipeline.resources.some(r => r.group === 4 && r.glslName === 'u_lightData');
+        return pipeline.resources.some(r => r.group === 3 && r.glslName === 'u_lightData');
     }
 
-    /** The light data texture, group 4. One texture and no sampler — it is only ever `textureLoad`ed. */
-    private _lightGridBindGroup(pipeline: RenderPipeline): BindGroup {
-        return this._textureBindGroup(pipeline, 4, [this._lightGrid.texture]);
+    /** Does this program declare group 3 at all, in either half? */
+    private _declaresFrameLighting(pipeline: RenderPipeline): boolean {
+        return this._declaresShadowGroup(pipeline) || this._declaresLightGrid(pipeline);
     }
 
-    private _shadowBindGroup(pipeline: RenderPipeline, withPunctual: boolean = true): BindGroup {
-        const textures = withPunctual
-            ? [this._shadowCascadeFBO.texture, this._spotShadowFBO.texture, this._pointShadowFBO.texture]
-            : [this._shadowCascadeFBO.texture];
-        return this._textureBindGroup(pipeline, 3, textures);
+    /**
+     * Group 3, the per-frame lighting group: the shadow maps, and the clustered light-data texture.
+     *
+     * TWO CHUNKS SHARE THE GROUP because there is no fifth group to give either of them — WebGPU's
+     * `maxBindGroups` is 4, a CEILING rather than a default (see chunks/clusteredLights.wgsl). A
+     * program takes either half, both, or neither, so the entries carry their BINDING NUMBERS from
+     * chunks/shadows.wgsl (0/2/4) and chunks/clusteredLights.wgsl (6) instead of being counted off:
+     * terrain reads the light grid with no shadow maps at all, which counting would land at binding 0.
+     *
+     * The punctual atlases are the caller's to STATE — a program declaring them but never calling them
+     * has the binding dead-code eliminated, and an entry the layout does not have invalidates the whole
+     * command buffer.
+     */
+    private _frameLightingBindGroup(pipeline: RenderPipeline, withPunctual: boolean = true): BindGroup {
+        const textures: Texture[] = [];
+        const bindings: number[] = [];
+        if (this._declaresShadowGroup(pipeline)) {
+            textures.push(this._shadowCascadeFBO.texture); bindings.push(0);
+            if (withPunctual) {
+                textures.push(this._spotShadowFBO.texture);  bindings.push(2);
+                textures.push(this._pointShadowFBO.texture); bindings.push(4);
+            }
+        }
+        // One texture and no sampler beside it — the light data is only ever `textureLoad`ed.
+        if (this._declaresLightGrid(pipeline)) {
+            textures.push(this._lightGrid.texture); bindings.push(6);
+        }
+        return this._textureBindGroup(pipeline, 3, textures, bindings);
     }
 
     /**
@@ -3903,8 +3914,8 @@ export class Renderer {
         // With no caster the cascade lookups all return "lit" and the shafts degrade to uniform haze,
         // which is why this pass needs no shadow-present branch of its own any more.
         this._uploadShadowUniforms('godRays');
-        // Sun cascades only — see `_shadowBindGroup`. The shafts come from the directional light.
-        rayPass.setBindGroup(3, this._shadowBindGroup(rayPipeline, false));
+        // Sun cascades only — see `_frameLightingBindGroup`. The shafts come from the directional light.
+        rayPass.setBindGroup(3, this._frameLightingBindGroup(rayPipeline, false));
         this._drawFullscreen(rayPass);
         this._endFullscreenPass(rayPass);
 
@@ -5409,11 +5420,13 @@ export class Renderer {
      * recreated `GPUTexture` must invalidate the group naming it. WebGL2's `generation` is constant,
      * so a resize correctly does not invalidate there.
      */
-    private _textureBindGroup(pipeline: RenderPipeline, group: number, textures: Texture[]): BindGroup {
+    private _textureBindGroup(pipeline: RenderPipeline, group: number, textures: Texture[],
+                              bindings?: readonly number[]): BindGroup {
         const layout = pipeline.layoutForGroup(group);
         if (!layout) throw new Error(`${pipeline.label}: no bind group layout for group ${group}`);
 
-        const signature = this._textureGroupKey(group, textures);
+        const at = (i: number) => bindings ? bindings[i] : i * 2;
+        const signature = this._textureGroupKey(group, textures, bindings);
         let byKey = this._textureGroups.get(pipeline);
         if (!byKey) { byKey = new Map(); this._textureGroups.set(pipeline, byKey); }
         const cached = byKey.get(signature);
@@ -5422,9 +5435,11 @@ export class Renderer {
         const made = device.createBindGroup({
             label: `${pipeline.label}:group${group}`,
             layout,
-            // Bindings are (texture, sampler) pairs, so the Nth texture is at binding 2N. The sampler
-            // half is deliberately not listed: this engine keeps filter and wrap state on the texture.
-            entries: textures.map((texture, i) => ({ binding: i * 2, textureView: texture.sampledView })),
+            // Bindings are (texture, sampler) pairs, so the Nth texture is at binding 2N unless the
+            // caller numbered them itself — see `_frameLightingBindGroup`, whose group is shared by two
+            // chunks and so has holes in it. The sampler half is deliberately not listed: this engine
+            // keeps filter and wrap state on the texture.
+            entries: textures.map((texture, i) => ({ binding: at(i), textureView: texture.sampledView })),
         });
         // A cached bind group holds its textures alive and a `Framebuffer` resize can produce NEW
         // `Texture` objects, so the cap bounds what would otherwise leak; the next frame refills.
@@ -5439,8 +5454,8 @@ export class Renderer {
      * A stable key for "these textures, in this order, at these storage generations". `Texture` has no
      * id of its own, so one is handed out lazily and remembered weakly.
      */
-    private _textureGroupKey(group: number, textures: Texture[]): string {
-        let key = String(group);
+    private _textureGroupKey(group: number, textures: Texture[], bindings?: readonly number[]): string {
+        let key = bindings ? group + '@' + bindings.join(',') : String(group);
         for (const texture of textures) {
             let id = this._textureIds.get(texture);
             if (id === undefined) { id = ++this._nextTextureId; this._textureIds.set(texture, id); }
@@ -5866,10 +5881,8 @@ export class Renderer {
                 });
                 pass!.setPipeline(terrainPipeline);
                 pass!.setBindGroup(0, this._terrainBindGroup(terrainPipeline, mat));
-                if (this._declaresShadowGroup(terrainPipeline))
-                    pass!.setBindGroup(3, this._shadowBindGroup(terrainPipeline));
-                if (this._declaresLightGrid(terrainPipeline))
-                    pass!.setBindGroup(4, this._lightGridBindGroup(terrainPipeline));
+                if (this._declaresFrameLighting(terrainPipeline))
+                    pass!.setBindGroup(3, this._frameLightingBindGroup(terrainPipeline));
                 return true;
             }
             if (mat instanceof CustomMaterial) {
@@ -5894,10 +5907,8 @@ export class Renderer {
                 });
                 pass!.setPipeline(customPipeline);
                 pass!.setBindGroup(0, this._customBindGroup(customPipeline, mat, envCube));
-                if (this._declaresShadowGroup(customPipeline))
-                    pass!.setBindGroup(3, this._shadowBindGroup(customPipeline));
-                if (this._declaresLightGrid(customPipeline))
-                    pass!.setBindGroup(4, this._lightGridBindGroup(customPipeline));
+                if (this._declaresFrameLighting(customPipeline))
+                    pass!.setBindGroup(3, this._frameLightingBindGroup(customPipeline));
                 return true;
             }
             if (!viaRHI) { this._applyMaterial(mat); return false; }
@@ -5922,10 +5933,8 @@ export class Renderer {
             // Group 3 when the program has one. The unlit Basic family does not sample shadows at all,
             // so asking for a group it never declared is an error rather than an empty bind — the same
             // rule WebGPU enforces through `layout: 'auto'`.
-            if (this._declaresShadowGroup(pipeline))
-                pass!.setBindGroup(3, this._shadowBindGroup(pipeline));
-            if (this._declaresLightGrid(pipeline))
-                pass!.setBindGroup(4, this._lightGridBindGroup(pipeline));
+            if (this._declaresFrameLighting(pipeline))
+                pass!.setBindGroup(3, this._frameLightingBindGroup(pipeline));
             return true;
         }, pass);
     }

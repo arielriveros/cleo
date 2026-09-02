@@ -5,7 +5,7 @@
 import { Logger } from '../../../core/logger';
 import { frameStats, setViewportSize } from '../../renderStats';
 import { ShaderManager } from '../../systems/shaderManager';
-import { samplerBindingsOf, declaredGroupsOf } from './wgslBindings';
+import { samplerBindingsOf, declaredGroupsOf, MAX_BIND_GROUPS } from './wgslBindings';
 import {
     gpuTextureFormat, rhiTextureFormat, gpuTextureDimension, gpuViewDimension, layersForDimension,
     gpuBufferUsage, gpuTextureUsage, gpuAddressMode, gpuFilterMode, gpuCompare,
@@ -1327,18 +1327,60 @@ export class WebGPUDevice implements Device {
             ...(descriptor.depthStencil ? { depthStencil: toGpuDepthStencil(descriptor.depthStencil) } : {}),
         };
 
-        const handle = this._device.createRenderPipeline(pipelineDescriptor);
-
         // `layout: 'auto'` derives the bind-group layouts from the shaders, so the groups a pipeline has
         // are the union of what its two modules declare — and asking for any other index throws.
         const groups = Array.from(new Set([...vertex.groups, ...fragment.groups])).sort((a, b) => a - b);
+        this._checkGroupIndices(pipelineDescriptor.label!, groups);
+
+        const handle = this._scoped(pipelineDescriptor.label!, 'render pipeline',
+                                    () => this._device.createRenderPipeline(pipelineDescriptor));
         return new WebGPURenderPipeline(descriptor, handle, groups, [vertex, fragment]);
+    }
+
+    /**
+     * Build something inside its own validation error scope, so a failure is reported AGAINST THE
+     * LABEL that caused it.
+     *
+     * A pipeline that fails validation is still handed back as an object, and every use of it from
+     * then on says only `is invalid due to a previous error` — against the bind group, the pass, the
+     * command buffer, the submit. The message that actually says WHY goes to `uncapturederror`,
+     * unlabelled, ahead of a flood of consequences that repeats every frame, which is exactly where it
+     * gets scrolled away. Popping the scope here pins it to the pipeline's name instead.
+     *
+     * The scope resolves a microtask later, so the log arrives after the caller has moved on. That is
+     * why it names the label rather than relying on its position in the console.
+     */
+    private _scoped<T>(label: string, kind: string, build: () => T): T {
+        this._device.pushErrorScope('validation');
+        const made = build();
+        void this._device.popErrorScope().then((error) => {
+            if (error) Logger.error(`${kind} "${label}" is invalid: ${error.message}`, SCOPE);
+        });
+        return made;
+    }
+
+    /**
+     * Say which shader is at fault before the driver stops being able to. A group index at or above
+     * `maxBindGroups` fails pipeline creation outright, and from then on WebGPU reports only "invalid
+     * due to a previous error" — against the pass, the command buffer and the submit, never the
+     * shader. The uncaptured-error handler cannot recover the name either, because the pipeline it
+     * would ask is the invalid object.
+     */
+    private _checkGroupIndices(label: string, groups: readonly number[]): void {
+        const limit = this._device.limits.maxBindGroups;
+        const over = groups.filter(group => group >= limit);
+        if (!over.length) return;
+        Logger.error(`${label}: declares ${over.map(g => `@group(${g})`).join(', ')}, but this device `
+                     + `allows ${limit} bind groups (0-${limit - 1}). Groups are numbered by ROLE, so `
+                     + `a new one must SHARE a group rather than take the next index.`, SCOPE);
     }
 
     public createComputePipeline(descriptor: ComputePipelineDescriptor): ComputePipeline {
         const module = descriptor.compute as WebGPUShaderModule;
-        const handle = this._device.createComputePipeline({
-            label: descriptor.label ?? 'compute-pipeline',
+        const label = descriptor.label ?? 'compute-pipeline';
+        this._checkGroupIndices(label, module.groups);
+        const handle = this._scoped(label, 'compute pipeline', () => this._device.createComputePipeline({
+            label,
             layout: 'auto',
             compute: {
                 module: module.handle,
@@ -1346,7 +1388,7 @@ export class WebGPUDevice implements Device {
                 // to fall back on.
                 entryPoint: module.entryPoints.compute,
             },
-        });
+        }));
         return new WebGPUComputePipeline(descriptor, handle, module.groups, module);
     }
 
@@ -1598,9 +1640,10 @@ const OPTIONAL_FEATURES: GPUFeatureName[] = [
     'depth32float-stencil8',
 ];
 
-// How many bind groups the engine's shaders declare: 0 textures, 1 uniforms, 2 probe cubes, 3 shadows.
-// Also the default `maxBindGroups` and a common adapter maximum, so it is a CEILING, not a preference.
-const REQUIRED_BIND_GROUPS = 4;
+// How many bind groups the engine's shaders declare: 0 textures, 1 uniforms, 2 probe cubes, and 3 for
+// the per-frame lighting — the shadow maps and the clustered light grid, which SHARE it. See
+// MAX_BIND_GROUPS: four is a ceiling, not a preference, and the sharing is what it forces.
+const REQUIRED_BIND_GROUPS = MAX_BIND_GROUPS;
 
 /**
  * Acquire a WebGPU device, or explain why not. Returns null rather than throwing on every "this

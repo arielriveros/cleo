@@ -41,6 +41,9 @@ const MAX_POINT_SHADOWS: i32 = 4;
 // hard 16 (the ES 3.00 minimum, measured on ANGLE/D3D11 — see rhi/webgl2/capabilities.ts).
 @group(3) @binding(4) var u_pointShadows_texture: texture_depth_2d_array;
 @group(3) @binding(5) var u_pointShadows_sampler: sampler_comparison;
+// Group 3 continues in chunks/clusteredLights.wgsl, which takes binding 6 for the light-data
+// texture. It is a SEPARATE chunk in the same group because WebGPU has only four bind groups;
+// bindings here stop at 5.
 
 /**
  * Per-cascade scalars are packed into vec4s, one lane per cascade.

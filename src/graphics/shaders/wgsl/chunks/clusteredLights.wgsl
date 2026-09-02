@@ -67,11 +67,18 @@ struct ClusterUniforms {
 };
 @group(1) @binding(6) var<uniform> u_cluster: ClusterUniforms;
 
-// No sampler beside it, deliberately, and binding 1 is left empty: `textureLoad` takes none, an
+// IN GROUP 3, THE PER-FRAME GROUP, RATHER THAN A ROLE GROUP OF ITS OWN. The groups are numbered by
+// role and this was `@group(4)`, which is not a number WebGPU will accept: `maxBindGroups` is 4, so
+// the legal indices are 0-3, and it is not a limit that can be raised — Dawn's ceiling for it IS 4,
+// so `requiredLimits` cannot buy a fifth group on any Chrome. A pipeline that declares one is
+// rejected outright, and every lit pipeline in the engine includes this chunk. Binding 6 continues
+// chunks/shadows.wgsl, which owns 0-5: the two chunks SHARE group 3 and must not collide.
+//
+// No sampler beside it, deliberately, and binding 7 is left empty: `textureLoad` takes none, an
 // unreferenced binding is dropped from the auto-generated WebGPU layout, and an entry count that
 // disagrees with the layout invalidates the whole command buffer. See cloudUpsample.wgsl, which
 // documents the same trap at length.
-@group(4) @binding(0) var u_lightData_texture: texture_2d<f32>;
+@group(3) @binding(6) var u_lightData_texture: texture_2d<f32>;
 
 /**
  * One texel of the data texture, by linear index.

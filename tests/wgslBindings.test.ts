@@ -86,4 +86,15 @@ describe('declaredGroupsOf', () => {
         expect(declaredGroupsOf('@vertex fn vs_main() -> @builtin(position) vec4<f32> { return vec4<f32>(0.0); }'))
             .toEqual([]);
     });
+
+    it('does not read a group out of a comment', () => {
+        // The caller asks the pipeline for a layout per index it gets back, and `getBindGroupLayout`
+        // THROWS for one the shaders never declared. chunks/clusteredLights.wgsl explains at length why
+        // it does not use `@group(4)`, and that sentence must not take every lit program down with it.
+        expect(declaredGroupsOf(`
+            // this was @group(4), which WebGPU will not accept
+            /* @group(5) neither would this */
+            @group(0) @binding(0) var t: texture_2d<f32>;
+        `)).toEqual([0]);
+    });
 });

@@ -22,6 +22,13 @@ export function glslRaw() {
                 const composed = resolveIncludes(readFileSync(file, 'utf-8'), path.dirname(file), {
                     read: (p) => readFileSync(p, 'utf-8'),
                     resolve: (dir, rel) => path.resolve(dir, rel),
+                    // An `#include` is invisible to Vite's module graph: the importer is `pbr.wgsl`,
+                    // and nothing else links it to the chunk its text came from. Without this the dev
+                    // server keeps serving the shader it composed BEFORE the chunk was edited — the
+                    // TypeScript beside it hot-reloads, so the engine looks current while its shaders
+                    // are hours old, and the only symptom is a validation error naming a line the
+                    // source no longer has. Costs one watched file per include.
+                    onDependency: (p) => this.addWatchFile(p),
                 });
                 const translated = await translateWgsl(composed, path.basename(file));
                 return { code: `export default ${JSON.stringify(translated)};`, map: null };
