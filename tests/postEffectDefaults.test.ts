@@ -94,6 +94,35 @@ describe('every chain effect is gated where the ping-pong is decided', () => {
             expect(GRAPH, `no branch for '${effect}'`).toContain(`entry.effect === '${effect}'`);
     });
 
+    it('skips the whole chain on a preview surface, but keeps the anchors', () => {
+        // A material sphere or a model tab shows the ASSET, not the project's look — bloom, depth of
+        // field, a vignette and grain are all reasons a material would not look like itself.
+        //
+        // The anchors have to survive it. `compose` is what puts the scene INTO the chain, and
+        // `present` is the display resolve; skipping either leaves a black viewport rather than an
+        // un-post-processed one, which is the failure this shape is arranged to avoid.
+        expect(GRAPH).toContain('_postProcessingAllowed');
+        const gate = GRAPH.slice(GRAPH.indexOf('const chain ='), GRAPH.indexOf('for (const entry of chain)'));
+        expect(gate).toContain('_postProcessingAllowed');
+        // Motion blur IS the compose step when it runs, so it is gated on the same flag rather than
+        // left to the loop that no longer executes.
+        const head = GRAPH.slice(GRAPH.indexOf('const blur ='), GRAPH.indexOf("id: 'compose'"));
+        expect(head).toContain('_postProcessingAllowed');
+        // ...and the two anchors are added outside the loop, so nothing about them depends on it.
+        for (const anchor of ["id: 'compose'", "id: 'present'"])
+            expect(GRAPH.indexOf(anchor)).toBeGreaterThan(-1);
+        expect(GRAPH.indexOf("id: 'compose'")).toBeLessThan(GRAPH.indexOf('for (const entry of chain)'));
+        expect(GRAPH.indexOf("id: 'present'")).toBeGreaterThan(GRAPH.indexOf('for (const entry of chain)'));
+    });
+
+    it('leaves antialiasing out of the post chain entirely', () => {
+        // The one effect a preview KEEPS. TAA resolves at the temporal boundary inside the scene
+        // render, not in the chain, which is what lets the chain be switched off wholesale without
+        // taking antialiasing with it. If a `taa` branch ever appears here, that stops being true.
+        expect(GRAPH).not.toContain("entry.effect === 'taa'");
+        expect(RENDERER).toContain('private _taaResolvePass()');
+    });
+
     it('advances the ping-pong only for effects that consume a chain stage', () => {
         // God rays and lens flare composite additively INTO the stage they read, so they must not
         // advance `src`. If they did, the next effect would read a buffer nothing had written.

@@ -94,7 +94,8 @@ import { useTextureEditor } from './hooks/useTextureEditor';
 import { useSoundEditor } from './hooks/useSoundEditor';
 import { useAnimationFieldEditor } from './hooks/useAnimationFieldEditor';
 import {
-  EDITOR_CLEAR_COLOR, LEGACY_CLEAR_COLOR, TAB_METERS_EXPOSURE, SCENE_TAB_ID, KIND_LABEL,
+  EDITOR_CLEAR_COLOR, LEGACY_CLEAR_COLOR, TAB_METERS_EXPOSURE, TAB_RUNS_POST_PROCESSING, SCENE_TAB_ID,
+  KIND_LABEL,
 } from './engineContextTypes';
 import type {
   PendingModelImportView, ModelImportDecision, PendingAnimationImportView, PendingRigPickView,
@@ -105,7 +106,8 @@ import type {
 // The types, constant tables and standalone helpers this file used to declare inline now live in sibling
 // modules. They are re-exported here verbatim so every consumer keeps importing them from EngineContext.
 export {
-  EDITOR_CLEAR_COLOR, MODE_RENDERS_VIEWPORT, TAB_METERS_EXPOSURE, SCENE_TAB_ID, KIND_LABEL,
+  EDITOR_CLEAR_COLOR, MODE_RENDERS_VIEWPORT, TAB_METERS_EXPOSURE, TAB_RUNS_POST_PROCESSING,
+  SCENE_TAB_ID, KIND_LABEL,
 } from './engineContextTypes';
 export type {
   PendingModelImportView, ModelImportDecision, RetargetBoneOption, PendingAnimationImportView,
@@ -3679,6 +3681,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // The project's `autoExposureEnabled` setting is untouched — this is a separate suppression, so a
     // tab switch neither fights the saved value nor marks the scene dirty.
     instance.renderer.setExposureMeteringAllowed(TAB_METERS_EXPOSURE[tab.kind]);
+    // ...and the project's post chain with it: a preview tab shows the asset, not the scene's look.
+    instance.renderer.setPostProcessingAllowed(TAB_RUNS_POST_PROCESSING[tab.kind]);
     requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = true; }));
     // Template scenes are authored in 3D; the Main tab restores its own remembered dimension. (Terrain-)
     // material tabs are skipped: their preview camera uses a self-contained orbit rig
@@ -4384,8 +4388,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           instanceRef.current.renderer.setGridVisible(debugVisibilityRef.current.grid.runtime);
           // Never render a debug channel in the running game (in case Play is pressed in Renderer mode).
           instanceRef.current.renderer.debugView = 'final';
-          // The running game IS the scene, whichever tab Play was pressed from.
+          // The running game IS the scene, whichever tab Play was pressed from — so it meters, and
+          // it wears the project's post-processing, even when Play was pressed from a preview tab.
           instanceRef.current.renderer.setExposureMeteringAllowed(true);
+          instanceRef.current.renderer.setPostProcessingAllowed(true);
         }
         // The running game is the only place sounds play. `scene` is the play scene, not the editor's,
         // so this never un-silences the authoring one.
@@ -4414,8 +4420,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // Restore the editor grid when returning to the editor scene, honouring its Editor toggle.
         if (instanceRef.current.renderer) {
           instanceRef.current.renderer.setGridVisible(debugVisibilityRef.current.grid.editor);
-          // ...and hand metering back to whichever tab we are returning to, which may be a preview.
+          // ...and hand metering and post-processing back to whichever tab we are returning to,
+          // which may be a preview.
           instanceRef.current.renderer.setExposureMeteringAllowed(TAB_METERS_EXPOSURE[activeTabKindRef.current]);
+          instanceRef.current.renderer.setPostProcessingAllowed(
+            TAB_RUNS_POST_PROCESSING[activeTabKindRef.current]);
         }
         InputManager.instance.disableMouseCapture();
       }

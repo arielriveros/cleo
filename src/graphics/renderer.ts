@@ -564,6 +564,23 @@ export class Renderer {
      */
     private _exposureMeteringAllowed: boolean = true;
     /**
+     * Whether the post-process chain runs at all for this host.
+     *
+     * OFF for a preview surface — a material sphere, a model or template tab, an animation preview —
+     * which renders the ASSET rather than the project's look. Bloom, depth of field, a vignette or a
+     * grain the scene happens to be authored with are all reasons a material would not look like
+     * itself, and someone judging a roughness value against a bloomed, defocused sphere is judging the
+     * wrong thing. It is the same argument `_presentThumbnail` already makes for asset thumbnails.
+     *
+     * Antialiasing is deliberately NOT part of this: TAA resolves inside the scene render rather than
+     * in the chain, so it keeps running and a preview stays free of crawling edges.
+     *
+     * A host property, like `_exposureMeteringAllowed` and `debugView` — never a `RenderSettings`
+     * field. It is a way of LOOKING at a scene, not part of one, so it must not ride through save,
+     * publish or the standalone player, where every viewport is the scene.
+     */
+    private _postProcessingAllowed: boolean = true;
+    /**
      * HDR bloom: luminance where bloom starts, soft-knee width around it, and additive strength.
      *
      * The threshold is EXPOSED luminance (see bloom.wgsl), and 2.0 rather than the 1.0 it sat at for as
@@ -7021,7 +7038,8 @@ export class Renderer {
         // The gate was decided at the top of the frame (`_motionBlurWillRun`) because the velocity
         // buffer is produced during the scene render. The second term is not redundant: the chain must
         // not run against a buffer that pass declined to fill.
-        const blur = this._motionBlurWillRun && this._velocityProducedThisFrame;
+        const blur = this._postProcessingAllowed
+                     && this._motionBlurWillRun && this._velocityProducedThisFrame;
         // Captured, never `src` itself: `src` walks along the chain as the loop below adds stages, and
         // a closure over it would resolve to whichever buffer the chain ENDED on by the time the graph
         // runs — which is the last stage's output, not the head this pass is supposed to fill.
@@ -7053,8 +7071,13 @@ export class Renderer {
             graph.addPass({ id: 'exposure', scope: 'exposure', execute: () => this._exposurePass(dt) });
 
         // --- the reorderable middle ---------------------------------------------------------------
-        const materials = scene.activeCamera?.screenMaterials ?? [];
-        for (const entry of resolvePostChain(scene.activeCamera?.postChain, materials.length)) {
+        // Skipped whole on a preview surface: `src` never advances, so the head the scene was composed
+        // into is what `present` resolves, and no effect buffer is ever asked for — the pool allocates
+        // nothing rather than allocating and then not drawing into it.
+        const materials = this._postProcessingAllowed ? (scene.activeCamera?.screenMaterials ?? []) : [];
+        const chain = this._postProcessingAllowed
+            ? resolvePostChain(scene.activeCamera?.postChain, materials.length) : [];
+        for (const entry of chain) {
             if (!entry.enabled) continue;
             const materialIndex = materialIndexOf(entry.effect);
 
@@ -8625,6 +8648,15 @@ export class Renderer {
         this._exposureMeteringAllowed = allowed;
     }
     public get exposureMeteringAllowed(): boolean { return this._exposureMeteringAllowed; }
+
+    /**
+     * Run or suppress the post-process chain for this host. See `_postProcessingAllowed`.
+     *
+     * Nothing to re-seed on the way back, unlike metering: the chain holds no adaptation state, and the
+     * temporal history that DOES persist belongs to TAA, which never stopped running.
+     */
+    public setPostProcessingAllowed(allowed: boolean): void { this._postProcessingAllowed = allowed; }
+    public get postProcessingAllowed(): boolean { return this._postProcessingAllowed; }
 
     public set autoExposureEnabled(on: boolean) {
         // Seed the adaptation from wherever the manual value stands, so switching it on eases away

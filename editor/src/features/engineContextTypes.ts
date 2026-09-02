@@ -229,6 +229,36 @@ export const TAB_METERS_EXPOSURE: Record<TabKind, boolean> = {
 };
 
 /**
+ * Whether a tab's contents run the POST-PROCESS CHAIN. Exhaustive, like the tables above — a new tab
+ * kind with no entry is a compile error.
+ *
+ * Only the scene tab, and for the same underlying reason `TAB_METERS_EXPOSURE` is: every other tab
+ * renders a throwaway preview session, and a preview is a picture of the ASSET rather than of the
+ * project's look. Someone judging a roughness value wants to see the material, not the material behind
+ * whatever bloom, depth of field, vignette and grain the scene happens to be authored with.
+ *
+ * Kept as its own table rather than folded into `TAB_METERS_EXPOSURE`, which it currently matches
+ * entry for entry: the two answer different questions (may this drive exposure adaptation / should
+ * this wear the project's look), and a future tab kind could easily want one without the other.
+ *
+ * Antialiasing is not covered here. TAA resolves inside the scene render rather than in the chain, so
+ * it keeps running everywhere and previews stay free of crawling edges.
+ */
+export const TAB_RUNS_POST_PROCESSING: Record<TabKind, boolean> = {
+  scene: true,           // the project's scene, in every one of its sub-modes
+  template: false,
+  material: false,       // preview sphere
+  terrainMaterial: false,// preview sphere
+  animation: false,
+  animationField: false,
+  model: false,
+  script: false,         // no viewport at all
+  tileset: false,        // no viewport at all
+  texture: false,        // no viewport at all
+  soundSample: false,    // no viewport at all
+};
+
+/**
  * The scene tab's id — a fixed sentinel, unlike the library tabs' random ids. Deliberately NOT the open
  * scene's id: the tab is a stable slot different scene assets pass through, and only its title follows
  * the open scene's name.

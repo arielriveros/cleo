@@ -103,6 +103,15 @@ describe('RenderSettings survives save, publish and export', () => {
         expect(interfaceKeys()).not.toContain('exposureMeteringAllowed');
     });
 
+    it('does not persist whether a host runs post-processing', () => {
+        // Same class as the two above. The editor suppresses the post chain on preview tabs so a
+        // material sphere is judged on the material rather than on the scene's bloom and grain; saving
+        // from one must not bank that, or the project would come back with its whole look switched off
+        // and nothing in the settings panel to explain it.
+        expect(serializedKeys()).not.toContain('postProcessingAllowed');
+        expect(interfaceKeys()).not.toContain('postProcessingAllowed');
+    });
+
     it('does not persist the debug channel', () => {
         // `debugView` blits an internal buffer instead of the frame. It is a way of LOOKING at a scene,
         // not part of it, and a published game that opened on the normal channel would be a bug.
