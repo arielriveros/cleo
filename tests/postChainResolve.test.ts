@@ -20,24 +20,50 @@ import type { PostChainEntry } from '../src/graphics/renderGraph/chain';
  */
 
 describe('default chain', () => {
-    it('is the order _applyPostProcessing has always run', () => {
+    it('is the engine default order', () => {
         // Load-bearing: this list is what an un-migrated scene gets. Changing it changes every
         // existing project's image. Motion blur, exposure and present are deliberately absent —
         // they are anchors, not entries. See the header of chain.ts.
-        expect(DEFAULT_POST_CHAIN).toEqual(['godRays', 'bloom', 'chromatic']);
+        expect(DEFAULT_POST_CHAIN).toEqual([
+            'depthOfField', 'godRays', 'bloom', 'lensFlare', 'chromatic', 'vignette', 'filmGrain',
+        ]);
+    });
+
+    it('leaves the three original effects in the order they already ran', () => {
+        // The guarantee that adding four effects changed nobody's image. Their ABSOLUTE positions
+        // moved (DoF was inserted ahead of them), but nothing was reordered relative to anything that
+        // already existed — and the four newcomers all ship switched off. If this ever fails, every
+        // saved scene in every project has quietly started rendering differently.
+        const original = DEFAULT_POST_CHAIN.filter(id => ['godRays', 'bloom', 'chromatic'].includes(id));
+        expect(original).toEqual(['godRays', 'bloom', 'chromatic']);
+    });
+
+    it('puts depth of field ahead of everything that adds light to the image', () => {
+        // DoF is the lens focusing on the SCENE; god rays, bloom and flare are glare produced inside
+        // the lens, which the focal plane does not act on. Running DoF after them defocuses the glare
+        // by the CoC of whatever geometry happens to sit behind it.
+        const at = (id: string) => DEFAULT_POST_CHAIN.indexOf(id as never);
+        expect(at('depthOfField')).toBeLessThan(at('godRays'));
+        expect(at('depthOfField')).toBeLessThan(at('bloom'));
+        expect(at('depthOfField')).toBeLessThan(at('lensFlare'));
+        // Shafts have to bloom, and flare is composited with the bloom it came from.
+        expect(at('godRays')).toBeLessThan(at('bloom'));
+        expect(at('bloom')).toBeLessThan(at('lensFlare'));
+        // Grain is the sensor's own response: nothing in the lens may follow it.
+        expect(at('filmGrain')).toBe(DEFAULT_POST_CHAIN.length - 1);
     });
 
     it('resolves a camera with no authored chain to the built-ins, all enabled', () => {
-        expect(resolvePostChain(null, 0)).toEqual([
-            { effect: 'godRays', enabled: true },
-            { effect: 'bloom', enabled: true },
-            { effect: 'chromatic', enabled: true },
-        ]);
+        // Enabled here means "in the chain", not "doing something": each effect is gated a second time
+        // in `_buildPostGraph` on its own intensity, and every one added after the first three is zero
+        // by default.
+        expect(resolvePostChain(null, 0))
+            .toEqual(DEFAULT_POST_CHAIN.map(effect => ({ effect, enabled: true })));
     });
 
     it('puts screen materials after the built-ins, which is where _screenMaterialsPass sat', () => {
         expect(resolvePostChain(null, 2).map(e => e.effect))
-            .toEqual(['godRays', 'bloom', 'chromatic', 'material:0', 'material:1']);
+            .toEqual([...DEFAULT_POST_CHAIN, 'material:0', 'material:1']);
     });
 
     it('treats undefined the same as null', () => {
@@ -52,7 +78,8 @@ describe('authored chain resolution', () => {
             { effect: 'bloom', enabled: true },
             { effect: 'godRays', enabled: true },
         ];
-        expect(resolvePostChain(authored, 0).map(e => e.effect))
+        // The authored three keep their order; the effects this camera predates are appended.
+        expect(resolvePostChain(authored, 0).map(e => e.effect).slice(0, 3))
             .toEqual(['chromatic', 'bloom', 'godRays']);
     });
 
@@ -64,24 +91,31 @@ describe('authored chain resolution', () => {
     it('appends a built-in the authored chain never mentioned', () => {
         // A built-in is always PRESENT — off is expressed as `enabled: false`, never as absence. That
         // is what guarantees there is always a row to switch it back on from, and it is also the
-        // repair for a chain written by an older build that did not know about an effect yet.
+        // repair for a chain written by an older build that did not know about an effect yet: every
+        // camera authored before depth of field existed takes this path on load.
         const resolved = resolvePostChain([{ effect: 'chromatic', enabled: true }], 0);
-        expect(resolved.map(e => e.effect)).toEqual(['chromatic', 'godRays', 'bloom']);
+        expect(resolved.map(e => e.effect)).toEqual([
+            'chromatic', ...DEFAULT_POST_CHAIN.filter(id => id !== 'chromatic'),
+        ]);
     });
 
     it('drops an id it does not recognise', () => {
         // Forward compatibility: a chain saved by a NEWER build naming an effect this one has never
         // heard of must not break the scene. Drop the row, keep the rest.
         const resolved = resolvePostChain(
-            [{ effect: 'filmGrain' as never, enabled: true }, { effect: 'bloom', enabled: true }], 0);
-        expect(resolved.map(e => e.effect)).toEqual(['bloom', 'godRays', 'chromatic']);
+            [{ effect: 'nightVision' as never, enabled: true }, { effect: 'bloom', enabled: true }], 0);
+        expect(resolved.map(e => e.effect)).toEqual([
+            'bloom', ...DEFAULT_POST_CHAIN.filter(id => id !== 'bloom'),
+        ]);
     });
 
     it('drops a material whose index is past the end of the camera list', () => {
         // The material was deleted in the inspector while the chain still names it.
         const resolved = resolvePostChain(
             [{ effect: 'material:3', enabled: true }, { effect: 'bloom', enabled: true }], 1);
-        expect(resolved.map(e => e.effect)).toEqual(['bloom', 'godRays', 'chromatic', 'material:0']);
+        expect(resolved.map(e => e.effect)).toEqual([
+            'bloom', ...DEFAULT_POST_CHAIN.filter(id => id !== 'bloom'), 'material:0',
+        ]);
     });
 
     it('appends a material the camera has but the chain does not mention', () => {
@@ -90,8 +124,9 @@ describe('authored chain resolution', () => {
             { effect: 'bloom', enabled: true }, { effect: 'material:0', enabled: true },
             { effect: 'godRays', enabled: true }, { effect: 'chromatic', enabled: true },
         ];
-        expect(resolvePostChain(authored, 2).map(e => e.effect))
-            .toEqual(['bloom', 'material:0', 'godRays', 'chromatic', 'material:1']);
+        const resolved = resolvePostChain(authored, 2).map(e => e.effect);
+        expect(resolved.slice(0, 4)).toEqual(['bloom', 'material:0', 'godRays', 'chromatic']);
+        expect(resolved[resolved.length - 1]).toBe('material:1');
     });
 
     it('keeps the first position of a duplicated entry and ignores the rest', () => {
@@ -101,7 +136,12 @@ describe('authored chain resolution', () => {
             { effect: 'bloom', enabled: false },
         ];
         const resolved = resolvePostChain(authored, 0);
-        expect(resolved.map(e => e.effect)).toEqual(['bloom', 'godRays', 'chromatic']);
+        expect(resolved.map(e => e.effect)).toEqual([
+            'bloom', 'godRays',
+            ...DEFAULT_POST_CHAIN.filter(id => id !== 'bloom' && id !== 'godRays'),
+        ]);
+        // The FIRST occurrence wins, so the trailing `enabled: false` duplicate is ignored outright
+        // rather than switching the effect off from a position it does not occupy.
         expect(resolved[0].enabled).toBe(true);
     });
 
@@ -117,6 +157,9 @@ describe('authored chain resolution', () => {
 describe('chain identity helpers', () => {
     it('recognises built-ins and material ids', () => {
         expect(isBuiltinEffect('bloom')).toBe(true);
+        expect(isBuiltinEffect('depthOfField')).toBe(true);
+        expect(isBuiltinEffect('filmGrain')).toBe(true);
+        expect(isBuiltinEffect('nightVision')).toBe(false);
         expect(isBuiltinEffect('material:0')).toBe(false);
         expect(materialIndexOf('material:4')).toBe(4);
         expect(materialIndexOf('bloom')).toBeNull();

@@ -19,7 +19,8 @@
 // So the chain this module describes is the MIDDLE. The anchors are not entries and cannot be moved.
 
 /** The built-in effects a user may reorder. Anchors are deliberately absent — see the note above. */
-export type BuiltinEffectId = 'godRays' | 'bloom' | 'chromatic';
+export type BuiltinEffectId =
+    | 'depthOfField' | 'godRays' | 'bloom' | 'lensFlare' | 'chromatic' | 'vignette' | 'filmGrain';
 
 /**
  * A screen-space custom material, by INDEX into `CameraNode.screenMaterials`.
@@ -44,11 +45,29 @@ export interface PostChainEntry {
 }
 
 /**
- * The order the engine has always run, and what a camera that has authored no chain of its own gets.
- * Matches the statement order in `Renderer._applyPostProcessing` as of the change that introduced
- * this module; a scene saved before it must render identically, so this list is load-bearing.
+ * What a camera that has authored no chain of its own runs, and the engine's considered answer to what
+ * order these effects belong in. Load-bearing: every scene that has never been reordered renders THIS.
+ *
+ * The reasoning is per effect, not by analogy:
+ *
+ *   depthOfField  first, because it is the lens focusing on the SCENE. Everything after it is glare
+ *                 produced inside the lens, which the focal plane does not act on. It is also what
+ *                 makes bloom worth having here — a defocused highlight blooms as a bokeh disc.
+ *   godRays       shafts must bloom, so before bloom; after DoF because defocusing them by the CoC of
+ *                 whatever geometry sits behind would smear them against the sky.
+ *   bloom         after both, so shafts and bokeh both bloom.
+ *   lensFlare     ghosts and halo come from the same highlights bloom found, and share the dirt overlay.
+ *   chromatic     lens dispersion, on the whole formed image including its glare.
+ *   vignette      lens falloff, multiplicative on linear radiance — which is what it physically is.
+ *   filmGrain     the sensor's own response: the last thing that happens before the image is read out.
+ *
+ * `godRays -> bloom -> chromatic` keep the relative order they had before the other four existed, and
+ * all four ship switched off, so adding them changed no existing project's image. Reordering these, or
+ * shipping one of them on, would.
  */
-export const DEFAULT_POST_CHAIN: readonly BuiltinEffectId[] = ['godRays', 'bloom', 'chromatic'];
+export const DEFAULT_POST_CHAIN: readonly BuiltinEffectId[] = [
+    'depthOfField', 'godRays', 'bloom', 'lensFlare', 'chromatic', 'vignette', 'filmGrain',
+];
 
 export function isBuiltinEffect(id: string): id is BuiltinEffectId {
     return (DEFAULT_POST_CHAIN as readonly string[]).includes(id);

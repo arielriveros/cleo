@@ -111,6 +111,10 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   // cannot see it. Without this the build ships a LUT id with no bytes behind it and the published
   // game runs ungraded, with nothing to say why.
   if (src.settings?.colorGradingLut) wanted.add(src.settings.colorGradingLut)
+  // Same for a lens-dirt mask the project assigned. Leaving it null means the built-in overlay, which
+  // is compiled into the engine and needs nothing here — only a texture the USER picked has bytes to
+  // carry, and without this line it ships as an id with nothing behind it.
+  if (src.settings?.lensDirtTexture) wanted.add(src.settings.lensDirtTexture)
 
   let textureBytes: any[] = []
   try {

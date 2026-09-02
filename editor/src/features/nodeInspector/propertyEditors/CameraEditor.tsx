@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CameraNode, CameraRigNode, Node, resolvePostChain, materialIndexOf } from 'cleo';
+import NodeRefInput from '../NodeRefInput';
+import { useCleoEngine } from '../../EngineContext';
 import type { PostChainEntry, PostEffectId } from 'cleo';
 import Collapsable from '../../../components/Collapsable';
 import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Toggle, Hint, cn, valueClass } from '../../../components/ui';
@@ -12,15 +14,23 @@ import { getScreenMaterialIds, applyScreenMaterials, isScreenMaterialAsset } fro
 
 // Display names for the built-in effects. The chain stores ids; these never reach a saved file.
 const BUILTIN_LABELS: Record<string, string> = {
+  depthOfField: 'Depth of Field',
   godRays: 'God Rays',
   bloom: 'Bloom',
+  lensFlare: 'Lens Flare',
   chromatic: 'Chromatic Aberration',
+  vignette: 'Vignette',
+  filmGrain: 'Film Grain',
 };
 
 const BUILTIN_ICONS: Record<string, string> = {
+  depthOfField: '🔍',
   godRays: '🌤️',
   bloom: '🌟',
+  lensFlare: '✨',
   chromatic: '🌈',
+  vignette: '⬛',
+  filmGrain: '🎞️',
 };
 
 /** The nearest CameraRigNode above this camera, if any — the rig drives its transform. */
@@ -38,6 +48,18 @@ export default function CameraEditor(props: { node: CameraNode }) {
   // The rig writes camera.fov every frame while it owns FOV, so the slider has to be disabled.
   const fovDrivenByRig = !!rig?.fovEnabled;
   const eventEmitter = useEventBus();
+  const { editorScene } = useCleoEngine();
+  const [, forceCamera] = useState(0); // the focus target is node state, not React state
+
+  // Focusing on itself or on something under it is not circular the way a rig's follow target is, but
+  // it is never what anyone means — a camera cannot usefully focus on its own position.
+  const notSelfOrDescendant = (node: Node) => node !== props.node && !node.isDescendantOf(props.node);
+
+  const setFocusTarget = (id: string | null) => {
+    props.node.focusTargetId = id;
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'camera', node: props.node });
+    forceCamera((x) => x + 1);
+  };
 
   const [cameraState, setCameraState] = useState({
     type: props.node.camera.type,
@@ -107,8 +129,20 @@ export default function CameraEditor(props: { node: CameraNode }) {
             <PropertyRow label='Near'>
               <NumberInput value={cameraState.near} onChange={(v) => set({ near: v })} />
             </PropertyRow>
-            <PropertyRow label='Far' divider={cameraState.type === 'orthographic'}>
+            <PropertyRow label='Far' divider={true}>
               <NumberInput value={cameraState.far} onChange={(v) => set({ far: v })} />
+            </PropertyRow>
+            <PropertyRow label='Focus Target' divider={cameraState.type === 'orthographic'}>
+              {/* Depth of field focuses HERE when a node is named, overriding the renderer's authored
+                  focus distance. Measured along the view axis rather than as a straight-line distance,
+                  so a subject off to one side stays sharp. A target that despawns holds the last focus
+                  distance rather than racking the whole frame to the camera. */}
+              <NodeRefInput
+                value={props.node.focusTargetId}
+                scene={editorScene}
+                filter={notSelfOrDescendant}
+                placeholder='(use focus distance)'
+                onChange={(id) => setFocusTarget(id)} />
             </PropertyRow>
             {cameraState.type === 'orthographic' && (
               <>

@@ -21,6 +21,8 @@ import { Mesh } from './mesh';
 import type { ShaderProgram, ShaderProgramDescriptor } from './rhi/shaderProgram';
 import { Framebuffer } from './framebuffer';
 import { LayeredDepthFramebuffer } from './layeredDepthFramebuffer';
+import { BUILTIN_LENS_DIRT_BASE64, BUILTIN_LENS_DIRT_MIME } from './builtinLensDirt';
+import { SENSOR_HEIGHT, circleOfConfusion, focalLengthFromFov, focusDistanceToTarget } from './dofMath';
 import { RenderGraphBuilder } from './renderGraph/graph';
 import type { CompiledGraph, ResourceId } from './renderGraph/graph';
 import { FramebufferPool } from './renderGraph/pool';
@@ -79,6 +81,13 @@ import ExposureMeterProgram from './shaders/wgsl/exposureMeter.wgsl'
 import BloomDownsampleProgram from './shaders/wgsl/bloomDownsample.wgsl'
 import BloomUpsampleProgram from './shaders/wgsl/bloomUpsample.wgsl'
 import ChromaticAberrationProgram from './shaders/wgsl/chromaticAberration.wgsl'
+import DofCocProgram from './shaders/wgsl/dofCoc.wgsl'
+import DofGatherProgram from './shaders/wgsl/dofGather.wgsl'
+import DofCompositeProgram from './shaders/wgsl/dofComposite.wgsl'
+import LensFlareProgram from './shaders/wgsl/lensFlare.wgsl'
+import LensFlareCompositeProgram from './shaders/wgsl/lensFlareComposite.wgsl'
+import VignetteProgram from './shaders/wgsl/vignette.wgsl'
+import FilmGrainProgram from './shaders/wgsl/filmGrain.wgsl'
 import ComposerProgram from './shaders/wgsl/composer.wgsl'
 import VolumetricGodRaysProgram from './shaders/wgsl/volumetricGodRays.wgsl'
 import GridProgram from './shaders/wgsl/grid.wgsl'
@@ -237,6 +246,74 @@ export interface RenderSettings {
     bloomIntensity: number;
     bloomMaskEnabled: boolean;
     chromaticAberrationStrength: number;
+    /**
+     * Lens fall-off toward the corners. 0 = off, 1 = corners fully dark.
+     *
+     * Multiplicative on linear radiance and applied BEFORE the tone curve, because that is what it
+     * physically is: light the barrel stopped from reaching the sensor. Darkening after the curve
+     * instead crushes the corners flat rather than exposing them down.
+     */
+    /**
+     * Depth of field. Off by default; the focus controls below mean nothing until it is on.
+     *
+     * The lens is a thin lens with a real aperture, so the near field blurs harder than the far field
+     * and the far field saturates at infinity — see `dofMath.ts`, which holds the same arithmetic in
+     * a form that can be tested.
+     */
+    dofEnabled: boolean;
+    /**
+     * Metres to the focal plane. Ignored on a camera that names a focus target, which measures the
+     * distance to that node instead — see `CameraNode.focusTargetId`.
+     */
+    dofFocusDistance: number;
+    /** Metres around the plane that stay perfectly sharp. Not physical; it is what "keep the subject sharp" means. */
+    dofFocusRange: number;
+    /** Aperture as written on a lens barrel. Smaller is wider, and shallower. */
+    dofAperture: number;
+    /** Clamp on the blur radius in pixels. A COST control: the gather samples for a fixed radius. */
+    dofMaxBlur: number;
+    /**
+     * Lens flare. 0 = off. Ghosts and a halo, generated from image brightness rather than anchored to
+     * the sun — see lensFlare.wgsl for why that is the occlusion-correct choice, not just the cheap one.
+     */
+    lensFlareIntensity: number;
+    /** Linear-HDR radiance a pixel must exceed before it throws a flare. */
+    lensFlareThreshold: number;
+    /** Ghosts traced back through the centre. Clamped to 8, which is the shader's compiled bound. */
+    lensFlareGhosts: number;
+    /** Radius of the halo ring, in uv. 0 disables the halo and keeps the ghosts. */
+    lensFlareHaloWidth: number;
+    /**
+     * `TextureManager` id of a lens-dirt overlay, or null for the BUILT-IN mask.
+     *
+     * NOTE THE POLARITY, which is the opposite of {@link colorGradingLut}'s: null there means "no
+     * LUT", null here means "the one that ships with the engine". The asymmetry is deliberate — dirt
+     * is a property every real lens has, so the useful default is a sensible mask rather than none,
+     * and {@link lensDirtIntensity} is the switch. A null that meant "off" would leave the built-in
+     * unreachable without first importing a texture.
+     */
+    lensDirtTexture: string | null;
+    /**
+     * How much the dirt overlay boosts the bloom and lens flare it catches. 0 = off, which is the
+     * default: the mask ships, the effect does not.
+     */
+    lensDirtIntensity: number;
+    vignetteStrength: number;
+    /** 0 follows the frame's aspect (a real lens vignettes elliptically); 1 is a circle. */
+    vignetteRoundness: number;
+    /** Width of the falloff band. Small is a hard iris edge, large is a gentle shade. */
+    vignetteSmoothness: number;
+    /**
+     * Film grain. 0 = off; ~0.05 is a subtle 35mm stock, past ~0.3 it reads as sensor noise.
+     *
+     * Scaled by a midtone-peaked luminance response, so black stays clean and a blown highlight does
+     * not sparkle — which is what separates grain from uniform video noise.
+     */
+    filmGrainIntensity: number;
+    /** Grain cell size in pixels. 1 is per-pixel and aliases under TAA; 1.5-3 is filmic. */
+    filmGrainSize: number;
+    /** Tint each channel independently, as colour film does, instead of monochrome grain. */
+    filmGrainColored: boolean;
     /** Final-image saturation trim. 1 = untouched. A sky light's cloud response multiplies on top. */
     saturation: number;
     /** The tone curve at present. See {@link ToneMapper}. */
@@ -523,6 +600,31 @@ export class Renderer {
     // deferred-lit geometry, a baked sky and clouds can set it, so sprites and transparents never bloom.
     private _bloomMaskEnabled: boolean = false;
     private _chromaticAberrationStrength: number = 0.0;
+    // Every effect added after the render graph landed ships OFF, so that adding them to the default
+    // chain changed no existing project's image. See DEFAULT_POST_CHAIN in renderGraph/chain.ts.
+    private _dofEnabled: boolean = false;
+    private _dofFocusDistance: number = 10.0;
+    private _dofFocusRange: number = 0.0;
+    private _dofAperture: number = 2.8;
+    private _dofMaxBlur: number = 24.0;
+    /**
+     * The last focus distance actually used, so a focus target that despawns HOLDS the focal plane
+     * rather than snapping it to the camera. A rack focus to zero is far more visible than a stale one.
+     */
+    private _dofLastFocusDistance: number = 10.0;
+    private _warnedDanglingFocus: boolean = false;
+    private _lensFlareIntensity: number = 0.0;
+    private _lensFlareThreshold: number = 1.0;
+    private _lensFlareGhosts: number = 4;
+    private _lensFlareHaloWidth: number = 0.45;
+    private _lensDirtTexture: string | null = null;
+    private _lensDirtIntensity: number = 0.0;
+    private _vignetteStrength: number = 0.0;
+    private _vignetteRoundness: number = 0.0;
+    private _vignetteSmoothness: number = 0.4;
+    private _filmGrainIntensity: number = 0.0;
+    private _filmGrainSize: number = 2.0;
+    private _filmGrainColored: boolean = false;
     private _selectedNodeId: string | null = null;
 
     // Camera-reprojection motion blur (UE5-style tile reconstruction). Off by default.
@@ -574,6 +676,17 @@ export class Renderer {
     private _fallbackCube!: Texture;
     /** 1x1 white 2D texture, bound wherever a material declares a map it does not have. */
     private _fallbackTexture!: Texture;
+    /**
+     * The built-in lens-dirt overlay, decoded once on first use.
+     *
+     * Held HERE rather than registered in `TextureManager`, and that is what makes it work in a
+     * published game: the editor registers its 'Null' fallback into the manager at boot and the
+     * standalone player does not, so a built-in registered the same way would work in the editor and
+     * silently vanish everywhere else. Staying out of the manager also keeps it invisible to the
+     * publish walk and the orphan collector, so it needs no plumbing in either.
+     */
+    private _builtinLensDirt: Texture | null = null;
+    private _builtinLensDirtRequested: boolean = false;
 
     /** RHI pipelines for the fullscreen passes, by program + blend. See _fullscreenPipeline. */
     private readonly _fullscreenPipelines = new Map<string, RenderPipeline>();
@@ -738,6 +851,10 @@ export class Renderer {
     // whole chain costs about a third of one full-res pass. Allocation stops at 1px.
     private _bloomMips: Framebuffer[] = [];
     private static readonly BLOOM_MIP_COUNT = 6;
+    /** Ghost spacing along the centre line, as a fraction of the distance to it. */
+    private static readonly LENS_FLARE_DISPERSAL = 0.32;
+    /** Channel separation of a ghost, in uv. Small: past ~0.01 it stops reading as glass. */
+    private static readonly LENS_FLARE_CHROMATIC = 0.006;
     // Upsample tent radius, in source-mip texels. ~2 gives a wide, soft falloff without ringing.
     private static readonly BLOOM_FILTER_RADIUS = 2.0;
     // Reduced-resolution volumetric-clouds raymarch target (lazily sized to the node's resolutionScale;
@@ -1409,6 +1526,13 @@ export class Renderer {
             ['bloomDownsample',              BloomDownsampleProgram],
             ['bloomUpsample',                BloomUpsampleProgram],
             ['chromaticAberration',          ChromaticAberrationProgram],
+            ['dofCoc',                       DofCocProgram],
+            ['dofGather',                    DofGatherProgram],
+            ['dofComposite',                 DofCompositeProgram],
+            ['lensFlare',                    LensFlareProgram],
+            ['lensFlareComposite',           LensFlareCompositeProgram],
+            ['vignette',                     VignetteProgram],
+            ['filmGrain',                    FilmGrainProgram],
             // Temporal antialiasing: reproject the history through the velocity buffer and blend.
             ['taaResolve',                   TaaResolveProgram],
             ['composer',                     ComposerProgram],
@@ -6842,7 +6966,16 @@ export class Renderer {
         }
 
         const graph = this._buildPostGraph(scene);
-        graph.execute(this._postPool);
+        // Every node opens its own profiler scope, on both sides, exactly as `_beginPass` did at each
+        // call site before the chain became data. Without this the whole chain reports under whichever
+        // scope happened to be open when it started — which is what the WebGL2 profiler times, so its
+        // per-effect rows would all read zero while `present` absorbed the lot.
+        //
+        // `_beginPass` can also REFUSE, and no node here may be refused: each one was already gated on
+        // its own `_passEnabled` entry in `_buildPostGraph`, because skipping a pass that was going to
+        // write the next chain buffer leaves the stage after it reading one nothing filled. The two
+        // gates agree by construction; `tests/postEffectDefaults` is what keeps them agreeing.
+        graph.execute(this._postPool, scope => this._beginPass(scope as RenderPass));
         // Whatever the chain stopped asking for is released rather than left resident — the point of
         // pooling these instead of allocating one buffer per effect up front.
         this._postPool.trim(graph.slots.length);
@@ -6897,9 +7030,8 @@ export class Renderer {
             id: 'compose', scope: blur ? 'motionBlur' : 'present', writes: [head],
             execute: ctx => {
                 if (blur) { this._motionBlurPass(ctx.target(head)); return; }
-                this._scope('present');
                 // The only `compose` label: the plain scene copy. PASS_LABEL_TO_SCOPE files it under
-                // `present`, the scope opened right above.
+                // `present`, which is the scope this node already opened.
                 const pass = this._beginFullscreenPass(ctx.target(head).renderTarget, 'compose', true);
                 const pipeline = this._fullscreenPipeline('screen', ScreenProgram);
                 pass.setPipeline(pipeline);
@@ -6917,7 +7049,8 @@ export class Renderer {
         this._lastExposureMs = nowMs;
         // It reads `_sceneFBO` and writes its own 1x1 targets, so it touches no chain resource at all —
         // which is why its position is fixed by the comment above rather than by a dependency.
-        graph.addPass({ id: 'exposure', scope: 'exposure', execute: () => this._exposurePass(dt) });
+        if (this._meteringActive() && this._passEnabled['exposure'])
+            graph.addPass({ id: 'exposure', scope: 'exposure', execute: () => this._exposurePass(dt) });
 
         // --- the reorderable middle ---------------------------------------------------------------
         const materials = scene.activeCamera?.screenMaterials ?? [];
@@ -6934,6 +7067,10 @@ export class Renderer {
                 // adding the pass leaves the chain's source buffer as this stage's result, so the
                 // passes that follow still compose.
                 if (!customShaderReady(material)) continue;
+                // Gated here rather than by the profiler switch at execute time, for the reason the
+                // header gives: a skipped material pass would leave the next stage reading a buffer
+                // nothing had written.
+                if (!this._passEnabled['screenMaterials']) continue;
                 const from = src, to = flip();
                 graph.addPass({
                     id: entry.effect, scope: 'screenMaterials', reads: [from], writes: [to],
@@ -6994,6 +7131,61 @@ export class Renderer {
                     execute: ctx => this._chromaticAberrationPass(ctx.read(from), ctx.target(to)),
                 });
                 src = to;
+                continue;
+            }
+
+            if (entry.effect === 'depthOfField') {
+                // `_depthSource()` is only filled outside thumbnail mode, but the whole chain is
+                // bypassed for `_presentTarget` before this runs, so there is no stale-depth path here.
+                if (!this._dofEnabled || this._dofMaxBlur <= 0 || !this._passEnabled['dof.coc']) continue;
+                const from = src, to = flip();
+                const half = { kind: 'scaled' as const, scale: 0.5 };
+                const coc = graph.declare({ ...hdr, name: 'dof.coc', size: half, lifetime: 'transient' });
+                const bokeh = graph.declare({ ...hdr, name: 'dof.bokeh', size: half, lifetime: 'transient' });
+                graph.addPass({
+                    id: 'depthOfField', scope: 'dof.coc', reads: [from], writes: [to, coc, bokeh],
+                    execute: ctx => this._dofPass(scene, ctx.target(coc), ctx.target(bokeh),
+                                                  ctx.read(from), ctx.target(to)),
+                });
+                src = to;
+                continue;
+            }
+
+            if (entry.effect === 'lensFlare') {
+                // The god-rays shape: composited additively INTO the stage it reads, so it consumes no
+                // chain stage. `readWrites` is what tells the pool it may not lend that buffer out.
+                if (this._lensFlareIntensity <= 0 || !this._passEnabled['lensFlare']) continue;
+                const inPlace = src;
+                const scratch = graph.declare({
+                    ...hdr, name: 'lensFlare.scratch', size: { kind: 'scaled', scale: 0.5 },
+                    lifetime: 'transient',
+                });
+                graph.addPass({
+                    id: 'lensFlare', scope: 'lensFlare', readWrites: [inPlace], writes: [scratch],
+                    execute: ctx => this._lensFlarePass(ctx.target(scratch), ctx.target(inPlace)),
+                });
+                continue;
+            }
+
+            if (entry.effect === 'vignette') {
+                if (this._vignetteStrength <= 0 || !this._passEnabled['vignette']) continue;
+                const from = src, to = flip();
+                graph.addPass({
+                    id: 'vignette', scope: 'vignette', reads: [from], writes: [to],
+                    execute: ctx => this._vignettePass(ctx.read(from), ctx.target(to)),
+                });
+                src = to;
+                continue;
+            }
+
+            if (entry.effect === 'filmGrain') {
+                if (this._filmGrainIntensity <= 0 || !this._passEnabled['filmGrain']) continue;
+                const from = src, to = flip();
+                graph.addPass({
+                    id: 'filmGrain', scope: 'filmGrain', reads: [from], writes: [to],
+                    execute: ctx => this._filmGrainPass(ctx.read(from), ctx.target(to)),
+                });
+                src = to;
             }
         }
 
@@ -7002,7 +7194,6 @@ export class Renderer {
         graph.addPass({
             id: 'present', scope: 'present', reads: [result],
             execute: ctx => {
-                this._scope('present');
                 if (this._debugView !== 'final') {
                     // Editor Renderer-mode: blit one internal buffer instead of the composited image.
                     // Overdraw has no buffer of its own until it is asked for, so accumulate it first.
@@ -7305,8 +7496,8 @@ export class Renderer {
      * darkens the exposure, which changes bloom's display-referred threshold, and so on.
      */
     private _exposurePass(dtSeconds: number): void {
-        if (!this._meteringActive() || !this._beginPass('exposure')) return;
-
+        // No gate and no scope of its own: the node is added only when metering is live and the pass is
+        // switched on (see `_buildPostGraph`), and the graph opens the scope for every node it runs.
         const write = this._exposureWrite;
         const read = 1 - write;
         const pass = this._beginFullscreenPass(this._exposureFBOs[write].renderTarget, 'exposure', true,
@@ -7448,7 +7639,6 @@ export class Renderer {
      */
     private _bloomGenerate(source: Framebuffer): void {
         // 1. Bright pass into the largest mip (half res). Also writes the scene passthrough into
-        this._scope('bloom.bright');
         const mip0 = this._bloomMips[0];
         const brightPass = this._beginFullscreenPass(mip0.renderTarget, 'bloom.bright', true,
                                                      undefined, false);
@@ -7530,16 +7720,248 @@ export class Renderer {
 
     /** Composite the accumulated bloom back over the image, from one chain stage into the next. */
     private _bloomComposite(source: Framebuffer, target: Framebuffer): void {
-        this._scope('bloom.composite');
         const pass = this._beginFullscreenPass(target.renderTarget, 'bloom.composite', true);
         const pipeline = this._fullscreenPipeline('composer', ComposerProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_bloomIntensity', this._bloomIntensity);
+        // Dirt rides on the bloom composite because it is only visible where there is glare to catch —
+        // see the header of composer.wgsl. Bound even at intensity 0, because WebGPU requires every
+        // declared binding to be satisfied whether or not the shader reads it.
+        const dirt = this._lensDirtSource();
+        this._shaderManager.setUniform('u_dirtIntensity', this._lensDirtStrength(dirt));
         // The unit numbers are gone: the bind group assigns them and sets u_buffer1/u_buffer2 from the
         // shader's own reflection, so the order here is the order the shader declares.
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-            source.colors[0], this._bloomMips[0].colors[0],
+            source.colors[0], this._bloomMips[0].colors[0], dirt ?? this._fallbackTexture,
         ]));
+        this._drawFullscreen(pass);
+        this._endFullscreenPass(pass);
+    }
+
+    /**
+     * The lens-dirt overlay to sample this frame: the project's texture, or the built-in one.
+     *
+     * Resolved lazily, per frame, INSIDE the pass — never at `applyRenderSettings` time. That is not a
+     * style choice: the standalone player applies render settings before it registers any texture, so
+     * anything that resolved an id up front would come back empty in every published game. The same
+     * reason `ColorGradingLut.volumeFor` works this way.
+     *
+     * Returns null while the built-in is still decoding, which {@link _lensDirtStrength} turns into an
+     * intensity of 0 — so a frame composites against no dirt rather than against a white fallback,
+     * which would flash the bloom to double brightness for the frame or two before the decode lands.
+     */
+    private _lensDirtSource(): Texture | null {
+        if (this._lensDirtTexture) return TextureManager.Instance.getTexture(this._lensDirtTexture) ?? null;
+        if (this._builtinLensDirt) return this._builtinLensDirt;
+        this._decodeBuiltinLensDirt();
+        return null;
+    }
+
+    /** Kick off the one-time decode of the built-in mask. Idempotent; a failure is not retried. */
+    private _decodeBuiltinLensDirt(): void {
+        if (this._builtinLensDirtRequested || typeof Image === 'undefined') return;
+        this._builtinLensDirtRequested = true;
+        // Clamped, not repeated: it is a single overlay stretched across the frame, and a repeat wrap
+        // would seam down the middle of the image the moment a sample landed outside [0,1].
+        const texture = new Texture({ mipMap: false, wrapping: 'clamp' });
+        const image = new Image();
+        image.onload = () => {
+            if (image.width > 0 && image.height > 0) {
+                texture.create(image, image.width, image.height);
+                this._builtinLensDirt = texture;
+            } else Logger.warn('Built-in lens dirt decoded to zero size', 'Renderer');
+        };
+        image.onerror = () => Logger.warn('Failed to decode the built-in lens dirt', 'Renderer');
+        image.src = `data:${BUILTIN_LENS_DIRT_MIME};base64,${BUILTIN_LENS_DIRT_BASE64}`;
+    }
+
+    /** The dirt intensity actually in force: zero unless there is a decoded mask to multiply by. */
+    private _lensDirtStrength(dirt: Texture | null): number {
+        return dirt ? this._lensDirtIntensity : 0;
+    }
+
+    /**
+     * The distance the lens is focused at this frame, in metres.
+     *
+     * A camera that names a focus target measures the distance to it ALONG THE VIEW AXIS — a target
+     * off to one side is further away than the plane it stands on, and focusing on its euclidean
+     * distance would push the plane past it and leave the target itself soft.
+     *
+     * A target that has been removed HOLDS the last distance rather than falling back to the authored
+     * one. Both are defensible; holding is much less alarming to watch, because the alternative racks
+     * focus across the whole frame on the exact frame something despawned.
+     */
+    private _resolveFocusDistance(scene: Scene): number {
+        const node = scene.activeCamera;
+        const targetId = node?.focusTargetId ?? null;
+        if (!targetId) {
+            this._dofLastFocusDistance = this._dofFocusDistance;
+            this._warnedDanglingFocus = false;
+            return this._dofFocusDistance;
+        }
+        const target = node!.focusTarget;
+        if (!target) {
+            if (!this._warnedDanglingFocus) {
+                Logger.warn(`Focus target ${targetId} is not in the scene; holding the last focus distance`,
+                            'Renderer');
+                this._warnedDanglingFocus = true;
+            }
+            return this._dofLastFocusDistance;
+        }
+        this._warnedDanglingFocus = false;
+        const view = this._activeCamera.viewMatrix;
+        // The camera's forward axis, read off the view matrix's third row — the same place
+        // `_captureTemporalCameraState` takes it from, rather than recomputing it from the node.
+        const forward = vec3.fromValues(-view[2], -view[6], -view[10]);
+        const distance = focusDistanceToTarget(this._activeCamera.position, forward, target.worldPosition);
+        // Behind the camera is not a focus distance. Hold rather than invert the image.
+        if (distance > 0.01) this._dofLastFocusDistance = distance;
+        return this._dofLastFocusDistance;
+    }
+
+    /** Everything in the CoC that is constant across the frame. See `dofMath.circleOfConfusion`. */
+    private _dofUniforms(scene: Scene): { focus: number; halfRange: number; focal: number; scale: number } {
+        const focal = focalLengthFromFov(this._activeCamera.fov);
+        return {
+            focus: this._resolveFocusDistance(scene),
+            halfRange: this._dofFocusRange * 0.5,
+            focal,
+            // f*f / N / sensorHeight * screenHeight — the leading term of the thin-lens CoC, in pixels.
+            scale: (focal * focal / Math.max(1e-3, this._dofAperture) / SENSOR_HEIGHT) * this._renderHeight,
+        };
+    }
+
+    /**
+     * Depth of field: CoC prefilter, bokeh gather, composite. Three passes over two half-resolution
+     * buffers the graph owns, so none of it is resident when the effect is off.
+     */
+    private _dofPass(scene: Scene, coc: Framebuffer, bokeh: Framebuffer,
+                     source: Framebuffer, target: Framebuffer): void {
+        const u = this._dofUniforms(scene);
+        const depth = this._depthSource();
+
+        // 1. Half-res colour, and the signed CoC in alpha. The scope is already open — this node
+        //    reports under `dof.coc`, and the two below are opened as it moves through them.
+        const cocPass = this._beginFullscreenPass(coc.renderTarget, 'dof.coc', true, undefined, false);
+        const cocPipeline = this._fullscreenPipeline('dofCoc', DofCocProgram);
+        cocPass.setPipeline(cocPipeline);
+        this._shaderManager.setUniform('u_near', this._activeCamera.near);
+        this._shaderManager.setUniform('u_far', this._activeCamera.far);
+        this._shaderManager.setUniform('u_focusDistance', u.focus);
+        this._shaderManager.setUniform('u_focusHalfRange', u.halfRange);
+        this._shaderManager.setUniform('u_focalLength', u.focal);
+        this._shaderManager.setUniform('u_cocScale', u.scale);
+        this._shaderManager.setUniform('u_maxCocPx', this._dofMaxBlur);
+        this._shaderManager.setUniform('u_srcTexelSize', [1 / this._renderWidth, 1 / this._renderHeight]);
+        cocPass.setBindGroup(0, this._textureBindGroup(cocPipeline, 0, [source.colors[0], depth]));
+        this._drawFullscreen(cocPass);
+        this._endFullscreenPass(cocPass);
+
+        // 2. The bokeh itself.
+        this._scope('dof.gather');
+        const gatherPass = this._beginFullscreenPass(bokeh.renderTarget, 'dof.gather', true,
+                                                     undefined, false);
+        const gatherPipeline = this._fullscreenPipeline('dofGather', DofGatherProgram);
+        gatherPass.setPipeline(gatherPipeline);
+        // The clamp expressed in the grid this pass works in, which is half the render resolution.
+        this._shaderManager.setUniform('u_maxCocHalfPx', this._dofMaxBlur * 0.5);
+        this._shaderManager.setUniform('u_texelSize', [1 / coc.width, 1 / coc.height]);
+        gatherPass.setBindGroup(0, this._textureBindGroup(gatherPipeline, 0, [coc.colors[0]]));
+        this._drawFullscreen(gatherPass);
+        this._endFullscreenPass(gatherPass);
+
+        // 3. Back over the sharp image, with the CoC recomputed at full resolution so the boundary
+        //    between sharp and blurred does not land on the half-res grid.
+        this._scope('dof.composite');
+        const outPass = this._beginFullscreenPass(target.renderTarget, 'dof.composite', true);
+        const outPipeline = this._fullscreenPipeline('dofComposite', DofCompositeProgram);
+        outPass.setPipeline(outPipeline);
+        this._shaderManager.setUniform('u_near', this._activeCamera.near);
+        this._shaderManager.setUniform('u_far', this._activeCamera.far);
+        this._shaderManager.setUniform('u_focusDistance', u.focus);
+        this._shaderManager.setUniform('u_focusHalfRange', u.halfRange);
+        this._shaderManager.setUniform('u_focalLength', u.focal);
+        this._shaderManager.setUniform('u_cocScale', u.scale);
+        this._shaderManager.setUniform('u_maxCocPx', this._dofMaxBlur);
+        outPass.setBindGroup(0, this._textureBindGroup(outPipeline, 0, [
+            source.colors[0], bokeh.colors[0], depth,
+        ]));
+        this._drawFullscreen(outPass);
+        this._endFullscreenPass(outPass);
+    }
+
+    /**
+     * Ghosts and halo, raised at half resolution into `scratch` and composited additively back into
+     * `target`. In place, like god rays, so it neither consumes nor produces a stage of the chain.
+     */
+    private _lensFlarePass(scratch: Framebuffer, target: Framebuffer): void {
+        // 1. Trace the ghosts. Reads the chain image itself, so anything occluded throws no flare.
+        const genPass = this._beginFullscreenPass(scratch.renderTarget, 'lensFlare', true,
+                                                  undefined, false);
+        const genPipeline = this._fullscreenPipeline('lensFlare', LensFlareProgram);
+        genPass.setPipeline(genPipeline);
+        this._shaderManager.setUniform('u_flareThreshold', this._lensFlareThreshold);
+        this._shaderManager.setUniform('u_flareGhosts', this._lensFlareGhosts);
+        // Not a setting: the spacing that puts the ghosts across the frame rather than piled at the
+        // centre. Exposing it alongside the ghost count would mostly be a way to hide them all.
+        this._shaderManager.setUniform('u_flareDispersal', Renderer.LENS_FLARE_DISPERSAL);
+        this._shaderManager.setUniform('u_flareHaloWidth', this._lensFlareHaloWidth);
+        this._shaderManager.setUniform('u_flareChromatic', Renderer.LENS_FLARE_CHROMATIC);
+        genPass.setBindGroup(0, this._textureBindGroup(genPipeline, 0, [target.colors[0]]));
+        this._drawFullscreen(genPass);
+        this._endFullscreenPass(genPass);
+
+        // 2. Add it back, modulated by the dirt overlay. Additive, so the pass returns a contribution
+        // and never reads its own destination — which is what makes the in-place declaration honest.
+        const dirt = this._lensDirtSource();
+        const upPass = this._beginFullscreenPass(target.renderTarget, 'lensFlareComposite', false,
+                                                 undefined, false);
+        const upPipeline = this._fullscreenPipeline('lensFlareComposite', LensFlareCompositeProgram,
+                                                    ADDITIVE_BLEND);
+        upPass.setPipeline(upPipeline);
+        this._shaderManager.setUniform('u_flareIntensity', this._lensFlareIntensity);
+        this._shaderManager.setUniform('u_dirtIntensity', this._lensDirtStrength(dirt));
+        upPass.setBindGroup(0, this._textureBindGroup(upPipeline, 0, [
+            scratch.colors[0], dirt ?? this._fallbackTexture,
+        ]));
+        this._drawFullscreen(upPass);
+        this._endFullscreenPass(upPass);
+
+        // Restored by hand, as god rays does: the passes that follow are still on the legacy path and
+        // enable BLEND without setting the function, so they inherit whatever was left here.
+        GLState.blend(false);
+        this._restoreDefaultBlend();
+    }
+
+    /** Lens fall-off toward the corners, multiplicative on the linear-HDR chain. */
+    private _vignettePass(source: Framebuffer, target: Framebuffer): void {
+        const pass = this._beginFullscreenPass(target.renderTarget, 'vignette', true);
+        const pipeline = this._fullscreenPipeline('vignette', VignetteProgram);
+        pass.setPipeline(pipeline);
+        this._shaderManager.setUniform('u_vignetteStrength', this._vignetteStrength);
+        this._shaderManager.setUniform('u_vignetteRoundness', this._vignetteRoundness);
+        this._shaderManager.setUniform('u_vignetteSmoothness', this._vignetteSmoothness);
+        // The RENDER aspect, not the canvas: internal buffers follow `renderScale` and the present
+        // pass upscales, so a canvas-derived ratio would skew the ellipse at any scale but 1.
+        this._shaderManager.setUniform('u_aspect', this._renderWidth / Math.max(1, this._renderHeight));
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [source.colors[0]]));
+        this._drawFullscreen(pass);
+        this._endFullscreenPass(pass);
+    }
+
+    /** Film grain, animated and midtone-weighted. The last thing in the lens; see filmGrain.wgsl. */
+    private _filmGrainPass(source: Framebuffer, target: Framebuffer): void {
+        const pass = this._beginFullscreenPass(target.renderTarget, 'filmGrain', true);
+        const pipeline = this._fullscreenPipeline('filmGrain', FilmGrainProgram);
+        pass.setPipeline(pipeline);
+        this._shaderManager.setUniform('u_grainIntensity', this._filmGrainIntensity);
+        this._shaderManager.setUniform('u_grainSize', this._filmGrainSize);
+        this._shaderManager.setUniform('u_grainColored', this._filmGrainColored ? 1 : 0);
+        // Wall-clock, as the other animated passes take it. A frame counter would tie the grain's
+        // speed to the frame rate, so it would crawl on a slow machine and shimmer on a fast one.
+        this._shaderManager.setUniform('u_time', performance.now() * 0.001);
+        this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [source.colors[0]]));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
     }
@@ -7845,7 +8267,6 @@ export class Renderer {
         // 1) TileMax: dominant velocity per KxK tile. `_velocityFBO` was already filled during the
         // scene render — see `_produceVelocity` — and it holds the RAW delta, so the shutter scale and
         // the one-tile cap are applied here, inside the tile loop, before the magnitude compare.
-        this._scope('motionBlur');
         const tilePass = this._beginFullscreenPass(this._velocityTileFBO.renderTarget, 'velocity.tile', true);
         const tilePipeline = this._fullscreenPipeline('motionBlurTileMax', MotionBlurTileMaxProgram);
         tilePass.setPipeline(tilePipeline);
@@ -8092,6 +8513,53 @@ export class Renderer {
 
     public get chromaticAberrationStrength(): number { return this._chromaticAberrationStrength; }
     public set chromaticAberrationStrength(strength: number) { this._chromaticAberrationStrength = Math.max(0, strength); }
+
+    public get dofEnabled(): boolean { return this._dofEnabled; }
+    public set dofEnabled(v: boolean) { this._dofEnabled = v; }
+    public get dofFocusDistance(): number { return this._dofFocusDistance; }
+    public set dofFocusDistance(v: number) { this._dofFocusDistance = Math.max(0.01, v); }
+    public get dofFocusRange(): number { return this._dofFocusRange; }
+    public set dofFocusRange(v: number) { this._dofFocusRange = Math.max(0, v); }
+    // f/0.7 is about the fastest lens ever built; the ceiling just keeps the slider honest.
+    public get dofAperture(): number { return this._dofAperture; }
+    public set dofAperture(v: number) { this._dofAperture = Math.min(32, Math.max(0.7, v)); }
+    // Capped at the radius the 48-tap gather can still cover without the disc beading.
+    public get dofMaxBlur(): number { return this._dofMaxBlur; }
+    public set dofMaxBlur(v: number) { this._dofMaxBlur = Math.min(64, Math.max(0, v)); }
+
+    public get lensFlareIntensity(): number { return this._lensFlareIntensity; }
+    public set lensFlareIntensity(v: number) { this._lensFlareIntensity = Math.max(0, v); }
+    public get lensFlareThreshold(): number { return this._lensFlareThreshold; }
+    public set lensFlareThreshold(v: number) { this._lensFlareThreshold = Math.max(0, v); }
+    // Clamped to the shader's GHOST_LIMIT: the loop is compiled with a fixed bound so it can unroll,
+    // and asking for more would silently give you eight rather than what the panel said.
+    public get lensFlareGhosts(): number { return this._lensFlareGhosts; }
+    public set lensFlareGhosts(v: number) { this._lensFlareGhosts = Math.min(8, Math.max(0, Math.round(v))); }
+    public get lensFlareHaloWidth(): number { return this._lensFlareHaloWidth; }
+    public set lensFlareHaloWidth(v: number) { this._lensFlareHaloWidth = Math.min(1, Math.max(0, v)); }
+
+    public get lensDirtTexture(): string | null { return this._lensDirtTexture; }
+    // Empty string folds to null, as `colorGradingLut` does: it is what an editor <select> reports for
+    // its first option, and here null additionally MEANS the built-in rather than "none".
+    public set lensDirtTexture(id: string | null) { this._lensDirtTexture = id || null; }
+    public get lensDirtIntensity(): number { return this._lensDirtIntensity; }
+    public set lensDirtIntensity(v: number) { this._lensDirtIntensity = Math.max(0, v); }
+
+    public get vignetteStrength(): number { return this._vignetteStrength; }
+    public set vignetteStrength(v: number) { this._vignetteStrength = Math.min(1, Math.max(0, v)); }
+    public get vignetteRoundness(): number { return this._vignetteRoundness; }
+    public set vignetteRoundness(v: number) { this._vignetteRoundness = Math.min(1, Math.max(0, v)); }
+    // Never 0: the shader smoothsteps across +/- this, and a zero band is a hard aliased ring.
+    public get vignetteSmoothness(): number { return this._vignetteSmoothness; }
+    public set vignetteSmoothness(v: number) { this._vignetteSmoothness = Math.min(1, Math.max(0.01, v)); }
+
+    public get filmGrainIntensity(): number { return this._filmGrainIntensity; }
+    public set filmGrainIntensity(v: number) { this._filmGrainIntensity = Math.max(0, v); }
+    // Floored at 1: a sub-pixel cell cannot be resolved and only aliases against the pixel grid.
+    public get filmGrainSize(): number { return this._filmGrainSize; }
+    public set filmGrainSize(v: number) { this._filmGrainSize = Math.max(1, v); }
+    public get filmGrainColored(): boolean { return this._filmGrainColored; }
+    public set filmGrainColored(v: boolean) { this._filmGrainColored = v; }
 
     public get motionBlurEnabled(): boolean { return this._motionBlurEnabled; }
     public set motionBlurEnabled(enabled: boolean) { this._motionBlurEnabled = enabled; }
@@ -8517,6 +8985,23 @@ export class Renderer {
             bloomIntensity: this._bloomIntensity,
             bloomMaskEnabled: this._bloomMaskEnabled,
             chromaticAberrationStrength: this._chromaticAberrationStrength,
+            dofEnabled: this._dofEnabled,
+            dofFocusDistance: this._dofFocusDistance,
+            dofFocusRange: this._dofFocusRange,
+            dofAperture: this._dofAperture,
+            dofMaxBlur: this._dofMaxBlur,
+            lensFlareIntensity: this._lensFlareIntensity,
+            lensFlareThreshold: this._lensFlareThreshold,
+            lensFlareGhosts: this._lensFlareGhosts,
+            lensFlareHaloWidth: this._lensFlareHaloWidth,
+            lensDirtTexture: this._lensDirtTexture,
+            lensDirtIntensity: this._lensDirtIntensity,
+            vignetteStrength: this._vignetteStrength,
+            vignetteRoundness: this._vignetteRoundness,
+            vignetteSmoothness: this._vignetteSmoothness,
+            filmGrainIntensity: this._filmGrainIntensity,
+            filmGrainSize: this._filmGrainSize,
+            filmGrainColored: this._filmGrainColored,
             saturation: this._saturation,
             toneMapper: this._toneMapper,
             colorGradingLut: this._colorGradingLut,
@@ -8594,6 +9079,23 @@ export class Renderer {
         if (s.bloomIntensity !== undefined) this.bloomIntensity = s.bloomIntensity;
         if (s.bloomMaskEnabled !== undefined) this._bloomMaskEnabled = s.bloomMaskEnabled;
         if (s.chromaticAberrationStrength !== undefined) this.chromaticAberrationStrength = s.chromaticAberrationStrength;
+        if (s.dofEnabled !== undefined) this.dofEnabled = s.dofEnabled;
+        if (s.dofFocusDistance !== undefined) this.dofFocusDistance = s.dofFocusDistance;
+        if (s.dofFocusRange !== undefined) this.dofFocusRange = s.dofFocusRange;
+        if (s.dofAperture !== undefined) this.dofAperture = s.dofAperture;
+        if (s.dofMaxBlur !== undefined) this.dofMaxBlur = s.dofMaxBlur;
+        if (s.lensFlareIntensity !== undefined) this.lensFlareIntensity = s.lensFlareIntensity;
+        if (s.lensFlareThreshold !== undefined) this.lensFlareThreshold = s.lensFlareThreshold;
+        if (s.lensFlareGhosts !== undefined) this.lensFlareGhosts = s.lensFlareGhosts;
+        if (s.lensFlareHaloWidth !== undefined) this.lensFlareHaloWidth = s.lensFlareHaloWidth;
+        if (s.lensDirtTexture !== undefined) this.lensDirtTexture = s.lensDirtTexture;
+        if (s.lensDirtIntensity !== undefined) this.lensDirtIntensity = s.lensDirtIntensity;
+        if (s.vignetteStrength !== undefined) this.vignetteStrength = s.vignetteStrength;
+        if (s.vignetteRoundness !== undefined) this.vignetteRoundness = s.vignetteRoundness;
+        if (s.vignetteSmoothness !== undefined) this.vignetteSmoothness = s.vignetteSmoothness;
+        if (s.filmGrainIntensity !== undefined) this.filmGrainIntensity = s.filmGrainIntensity;
+        if (s.filmGrainSize !== undefined) this.filmGrainSize = s.filmGrainSize;
+        if (s.filmGrainColored !== undefined) this.filmGrainColored = s.filmGrainColored;
         if (s.saturation !== undefined) this.saturation = s.saturation;
         // Unconditional, unlike its neighbours: absent means "a scene from before the setting
         // existed", and it has to resolve to the same curve every time rather than inheriting

@@ -82,19 +82,28 @@ const TONE_MAPPERS: { value: string; label: string; title: string }[] = [
  * Picker for the colour-grading LUT, which holds a bare texture id in `RenderSettings` rather than a
  * `Material` slot. Derived (channel-packed) textures are engine-owned and never assignable.
  */
-function LutPicker({ value, onChange }: { value: string | null; onChange: (id: string | null) => void }) {
+function TexturePicker(props: {
+  value: string | null;
+  onChange: (id: string | null) => void;
+  /** What the empty option means. For the LUT that is "no LUT"; for lens dirt it is the built-in mask. */
+  emptyLabel: string;
+}) {
   const ids = Array.from(TextureManager.Instance.textures.keys())
     .filter((id) => !isDerivedTextureId(id) && !id.startsWith('__editor__'));
   return (
-    <Select value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
-      <option value=''>(none)</option>
+    <Select value={props.value ?? ''} onChange={(e) => props.onChange(e.target.value || null)}>
+      <option value=''>{props.emptyLabel}</option>
       {/* A texture the scene references but the manager has dropped still has to be selectable, or
           the field silently resets itself the moment anything re-renders. It matters more here than
           anywhere else: the id lives in the render settings, so no node keeps it alive. */}
-      {value && !ids.includes(value) && <option value={value}>{value} (missing)</option>}
+      {props.value && !ids.includes(props.value) && <option value={props.value}>{props.value} (missing)</option>}
       {ids.map((id) => <option key={id} value={id}>{id}</option>)}
     </Select>
   );
+}
+
+function LutPicker({ value, onChange }: { value: string | null; onChange: (id: string | null) => void }) {
+  return <TexturePicker value={value} onChange={onChange} emptyLabel='(none)' />;
 }
 
 // Motion-blur quality presets: sample taps per pixel (higher = smoother, costlier).
@@ -141,6 +150,23 @@ export default function RendererSettingsPanel() {
   const [saturation, setSaturation] = useState<number>(() => renderer?.saturation ?? 1);
   const [toneMapper, setToneMapper] = useState<string>(() => renderer?.toneMapper ?? 'agx');
   const [lutId, setLutId] = useState<string | null>(() => renderer?.colorGradingLut ?? null);
+  const [dofEnabled, setDofEnabled] = useState<boolean>(() => renderer?.dofEnabled ?? false);
+  const [dofFocus, setDofFocus] = useState<number>(() => renderer?.dofFocusDistance ?? 10);
+  const [dofRange, setDofRange] = useState<number>(() => renderer?.dofFocusRange ?? 0);
+  const [dofAperture, setDofAperture] = useState<number>(() => renderer?.dofAperture ?? 2.8);
+  const [dofMaxBlur, setDofMaxBlur] = useState<number>(() => renderer?.dofMaxBlur ?? 24);
+  const [flare, setFlare] = useState<number>(() => renderer?.lensFlareIntensity ?? 0);
+  const [flareThreshold, setFlareThreshold] = useState<number>(() => renderer?.lensFlareThreshold ?? 1);
+  const [flareGhosts, setFlareGhosts] = useState<number>(() => renderer?.lensFlareGhosts ?? 4);
+  const [flareHalo, setFlareHalo] = useState<number>(() => renderer?.lensFlareHaloWidth ?? 0.45);
+  const [dirtId, setDirtId] = useState<string | null>(() => renderer?.lensDirtTexture ?? null);
+  const [dirtIntensity, setDirtIntensity] = useState<number>(() => renderer?.lensDirtIntensity ?? 0);
+  const [vignette, setVignette] = useState<number>(() => renderer?.vignetteStrength ?? 0);
+  const [vignetteRound, setVignetteRound] = useState<number>(() => renderer?.vignetteRoundness ?? 0);
+  const [vignetteSmooth, setVignetteSmooth] = useState<number>(() => renderer?.vignetteSmoothness ?? 0.4);
+  const [grain, setGrain] = useState<number>(() => renderer?.filmGrainIntensity ?? 0);
+  const [grainSize, setGrainSize] = useState<number>(() => renderer?.filmGrainSize ?? 2);
+  const [grainColored, setGrainColored] = useState<boolean>(() => renderer?.filmGrainColored ?? false);
   const [lutIntensity, setLutIntensity] = useState<number>(() => renderer?.colorGradingIntensity ?? 1);
   const [ssaoEnabled, setSsaoEnabled] = useState<boolean>(() => renderer?.ssaoEnabled ?? true);
   const [ssaoRadius, setSsaoRadius] = useState<number>(() => renderer?.ssaoRadius ?? 0.5);
@@ -212,6 +238,23 @@ export default function RendererSettingsPanel() {
     setSaturation(renderer.saturation);
     setToneMapper(renderer.toneMapper);
     setLutId(renderer.colorGradingLut);
+    setDofEnabled(renderer.dofEnabled);
+    setDofFocus(renderer.dofFocusDistance);
+    setDofRange(renderer.dofFocusRange);
+    setDofAperture(renderer.dofAperture);
+    setDofMaxBlur(renderer.dofMaxBlur);
+    setFlare(renderer.lensFlareIntensity);
+    setFlareThreshold(renderer.lensFlareThreshold);
+    setFlareGhosts(renderer.lensFlareGhosts);
+    setFlareHalo(renderer.lensFlareHaloWidth);
+    setDirtId(renderer.lensDirtTexture);
+    setDirtIntensity(renderer.lensDirtIntensity);
+    setVignette(renderer.vignetteStrength);
+    setVignetteRound(renderer.vignetteRoundness);
+    setVignetteSmooth(renderer.vignetteSmoothness);
+    setGrain(renderer.filmGrainIntensity);
+    setGrainSize(renderer.filmGrainSize);
+    setGrainColored(renderer.filmGrainColored);
     setLutIntensity(renderer.colorGradingIntensity);
     setSsaoEnabled(renderer.ssaoEnabled);
     setSsaoRadius(renderer.ssaoRadius);
@@ -433,6 +476,100 @@ export default function RendererSettingsPanel() {
         <Toggle label='Restrict to lit surfaces' checked={bloomMask}
           onChange={(v) => { renderer.bloomMaskEnabled = v; setBloomMask(v); touch(); }} />
         {bloomOff && <Hint>Bloom is currently inactive: {bloomOff}</Hint>}
+      </Section>
+
+      <Section
+        title='Depth of Field'
+        hint={'A thin lens with a real aperture, so the near field blurs harder than the far field and '
+            + 'the far field settles at a fixed blur toward infinity. Aperture is written as an f-stop: '
+            + 'smaller is wider, and shallower. A camera can name a Focus Target node in its inspector, '
+            + 'which overrides the distance here and tracks that object instead.'}
+      >
+        <Toggle label='Enabled' checked={dofEnabled} className='my-1'
+          onChange={(c) => { renderer.dofEnabled = c; setDofEnabled(c); touch(); }} />
+        {dofEnabled && <>
+          <Slider label='Focus Dist' value={dofFocus} min={0.1} max={100} step={0.1}
+            readout={(v) => `${v.toFixed(1)} m`}
+            onChange={(v) => { renderer.dofFocusDistance = v; setDofFocus(v); touch(); }} />
+          <Slider label='Focus Range' value={dofRange} min={0} max={20} step={0.1}
+            readout={(v) => (v <= 0 ? 'one plane' : `${v.toFixed(1)} m`)}
+            onChange={(v) => { renderer.dofFocusRange = v; setDofRange(v); touch(); }} />
+          <Slider label='Aperture' value={dofAperture} min={0.7} max={22} step={0.1}
+            readout={(v) => `f/${v.toFixed(1)}`}
+            onChange={(v) => { renderer.dofAperture = v; setDofAperture(v); touch(); }} />
+          <Slider label='Max Blur' value={dofMaxBlur} min={0} max={64} step={1}
+            readout={(v) => `${v.toFixed(0)} px`}
+            onChange={(v) => { renderer.dofMaxBlur = v; setDofMaxBlur(v); touch(); }} />
+        </>}
+      </Section>
+
+      <Section
+        title='Lens Flare'
+        hint={'Ghosts and a halo, traced from bright areas of the IMAGE rather than from the sun. That '
+            + 'is what makes them occlude correctly: a sun behind a wall is not in the buffer, so it '
+            + 'throws nothing. Threshold is the radiance a pixel must exceed before it flares.'}
+      >
+        <Slider label='Intensity' value={flare} min={0} max={2} step={0.01}
+          onChange={(v) => { renderer.lensFlareIntensity = v; setFlare(v); touch(); }} />
+        {flare > 0 && <>
+          <Slider label='Threshold' value={flareThreshold} min={0} max={10} step={0.1}
+            onChange={(v) => { renderer.lensFlareThreshold = v; setFlareThreshold(v); touch(); }} />
+          <Slider label='Ghosts' value={flareGhosts} min={0} max={8} step={1}
+            readout={(v) => v.toFixed(0)}
+            onChange={(v) => { renderer.lensFlareGhosts = v; setFlareGhosts(renderer.lensFlareGhosts); touch(); }} />
+          <Slider label='Halo' value={flareHalo} min={0} max={1} step={0.01}
+            readout={(v) => (v <= 0 ? 'off' : v.toFixed(2))}
+            onChange={(v) => { renderer.lensFlareHaloWidth = v; setFlareHalo(v); touch(); }} />
+        </>}
+      </Section>
+
+      <Section
+        title='Lens Dirt'
+        hint={'Smudges on the front element, which brighten the bloom and flare that pass through them '
+            + 'and are invisible everywhere else — so nothing shows until there is glare to catch. An '
+            + 'overlay ships with the engine; leave the texture unset to use it.'}
+      >
+        <Slider label='Intensity' value={dirtIntensity} min={0} max={4} step={0.05}
+          onChange={(v) => { renderer.lensDirtIntensity = v; setDirtIntensity(v); touch(); }} />
+        {dirtIntensity > 0 && <Field label='Mask'>
+          <TexturePicker value={dirtId} emptyLabel='(built-in)'
+            onChange={(id) => { renderer.lensDirtTexture = id; setDirtId(id); touch(); }} />
+        </Field>}
+        {dirtIntensity > 0 && bloomOff && flare <= 0 &&
+          <Hint>Nothing to catch: lens dirt only shows where bloom or lens flare put glare on the frame.</Hint>}
+      </Section>
+
+      <Section
+        title='Vignette'
+        hint={'The fall-off toward the corners every real lens has. Applied to linear radiance before '
+            + 'the tone curve, so the corners are exposed down rather than crushed flat. Roundness 0 '
+            + 'follows the frame shape, as a lens does; 1 is a circle.'}
+      >
+        <Slider label='Strength' value={vignette} min={0} max={1} step={0.01}
+          onChange={(v) => { renderer.vignetteStrength = v; setVignette(v); touch(); }} />
+        {vignette > 0 && <>
+          <Slider label='Roundness' value={vignetteRound} min={0} max={1} step={0.01}
+            onChange={(v) => { renderer.vignetteRoundness = v; setVignetteRound(v); touch(); }} />
+          <Slider label='Smoothness' value={vignetteSmooth} min={0.01} max={1} step={0.01}
+            onChange={(v) => { renderer.vignetteSmoothness = v; setVignetteSmooth(v); touch(); }} />
+        </>}
+      </Section>
+
+      <Section
+        title='Film Grain'
+        hint={'Sensor and emulsion noise, weighted toward the midtones — black stays clean and a blown '
+            + 'highlight does not sparkle, which is what separates grain from video noise. Animated, '
+            + 'because a fixed pattern reads as dirt on the screen rather than as film.'}
+      >
+        <Slider label='Intensity' value={grain} min={0} max={0.5} step={0.005}
+          onChange={(v) => { renderer.filmGrainIntensity = v; setGrain(v); touch(); }} />
+        {grain > 0 && <>
+          <Slider label='Size' value={grainSize} min={1} max={6} step={0.1}
+            readout={(v) => `${v.toFixed(1)} px`}
+            onChange={(v) => { renderer.filmGrainSize = v; setGrainSize(v); touch(); }} />
+          <Toggle label='Coloured' checked={grainColored}
+            onChange={(c) => { renderer.filmGrainColored = c; setGrainColored(c); touch(); }} />
+        </>}
       </Section>
 
       <Section

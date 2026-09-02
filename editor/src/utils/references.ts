@@ -25,9 +25,10 @@ export function collectReferencedTextureIds(
   terrainMaterials: TerrainMaterialAsset[] = [],
   tilesets: TilesetAsset[] = [],
   /**
-   * Ids referenced from somewhere that is not a node or an asset — today, the colour-grading LUT,
-   * which lives in `RenderSettings`. Nothing in the walks below can reach it, and without it the
-   * LUT a scene is graded with shows as orphaned and is offered for deletion.
+   * Ids referenced from somewhere that is not a node or an asset — the colour-grading LUT and the
+   * lens-dirt mask, both of which live in `RenderSettings`. Nothing in the walks below can reach
+   * either, and without them the LUT a scene is graded with, or the dirt overlay its bloom is
+   * catching, shows as orphaned and is offered for deletion.
    */
   extraIds: (string | null | undefined)[] = [],
 ): Set<string> {

@@ -2,6 +2,7 @@ import { CustomMaterial, Material } from "../../../graphics/material";
 import { isDefaultChain } from "../../../graphics/renderGraph/chain";
 import type { PostChainEntry } from "../../../graphics/renderGraph/chain";
 import { Camera } from "../../camera";
+import { unwrapScriptNode } from "./nodeScripting";
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
@@ -28,6 +29,16 @@ export class CameraNode extends Node {
      * scene happened to be saved with, so adding a material later would stop appending it.
      */
     private _postChain: PostChainEntry[] | null = null;
+    /**
+     * The node this camera focuses on, for depth of field — an id, with the node handle beside it as a
+     * resolution cache. Exactly the shape `CameraRigNode` uses for its follow and look-at pins, and for
+     * the same reason: the id is what survives a save, and the handle is what makes the per-frame
+     * lookup free.
+     *
+     * Null is the ordinary case: depth of field then focuses at the authored `dofFocusDistance`.
+     */
+    private _focusTargetId: string | null = null;
+    private _focusTargetNode: Node | null = null;
 
     constructor(name: string, camera: Camera, id: string = uuidv4()) {
         super(name, 'camera', id);
@@ -62,6 +73,9 @@ export class CameraNode extends Node {
             .filter((m: Material): m is CustomMaterial => m instanceof CustomMaterial && m.renderMode === 'screen');
         // Shape only. What an entry MEANS — an effect this build knows, a material that still exists —
         // is `resolvePostChain`'s question, and it is asked every frame rather than once on load.
+        // Stored raw and resolved lazily: parse is depth-first over the JSON tree, so the focus
+        // target very often does not exist yet at this point.
+        this._focusTargetId = typeof json.focusTargetId === 'string' ? json.focusTargetId : null;
         this._postChain = Array.isArray(json.postChain)
             ? json.postChain.filter((e: any) => e && typeof e.effect === 'string')
                             .map((e: any) => ({ effect: e.effect, enabled: e.enabled !== false }))
@@ -87,6 +101,9 @@ export class CameraNode extends Node {
                     // the project shows up dirty the first time it is opened.
                     ...(this._postChain && !isDefaultChain(this._postChain, this._screenMaterials.length)
                         ? { postChain: this._postChain } : {}),
+                    // Omitted when unset, for the same reason `postChain` is: a camera nobody has
+                    // pointed at anything must serialize what it did before this field existed.
+                    ...(this._focusTargetId ? { focusTargetId: this._focusTargetId } : {}),
         };
     }
 
@@ -97,6 +114,33 @@ export class CameraNode extends Node {
     public set screenMaterials(mats: CustomMaterial[]) { this._screenMaterials = mats; }
 
     /** The authored post-process order, or null to follow the renderer's default. */
+    /**
+     * The node depth of field focuses on, resolved through the scene. Null when unset, and also when
+     * the target has been removed — the renderer holds the last focus distance rather than racking to
+     * the camera, which is far less alarming to watch.
+     */
+    public get focusTarget(): Node | null {
+        if (!this._focusTargetId) return null;
+        // `scene` is nulled on detach, which is how a despawned target is caught without a map lookup
+        // on the common path.
+        const cache = this._focusTargetNode;
+        if (cache && cache.id === this._focusTargetId && cache.scene && !cache.markForRemoval) return cache;
+        this._focusTargetNode = this.getNodeById(this._focusTargetId) ?? null;
+        return this._focusTargetNode;
+    }
+    public set focusTarget(node: Node | null) {
+        // The script proxy's `set` trap forwards values untouched, so an assignment from a script would
+        // otherwise store a Proxy that never compares equal to the real node.
+        const raw = node ? unwrapScriptNode(node) : null;
+        this._focusTargetNode = raw;
+        this._focusTargetId = raw ? raw.id : null;
+    }
+    public get focusTargetId(): string | null { return this._focusTargetId; }
+    public set focusTargetId(id: string | null) {
+        this._focusTargetId = id || null;
+        this._focusTargetNode = null;
+    }
+
     public get postChain(): readonly PostChainEntry[] | null { return this._postChain; }
     public set postChain(chain: readonly PostChainEntry[] | null) {
         this._postChain = chain ? chain.map(e => ({ effect: e.effect, enabled: e.enabled })) : null;

@@ -50,6 +50,12 @@ export const RENDER_PASSES = [
     'velocity',
     'motionBlur',
     'godRays',
+    'dof.coc',
+    'dof.gather',
+    'dof.composite',
+    'lensFlare',
+    'vignette',
+    'filmGrain',
     'exposure',
     'bloom.bright',
     'bloom.blur',
@@ -69,6 +75,10 @@ export const TOGGLEABLE_PASSES: RenderPass[] = [
     'shadows.cascades', 'shadows.spot', 'shadows.point', 'foliage', 'ssao', 'ssao.blur', 'sky', 'clouds', 'skyFog', 'taa', 'grid',
     'transparent', '2d', 'gizmos', 'velocity', 'motionBlur', 'godRays', 'bloom.bright',
     'bloom.blur', 'bloom.composite', 'chromatic', 'screenMaterials',
+    // `dof.coc` switches depth of field as a whole. Its other two passes report their own timings
+    // but are deliberately NOT switchable: the gather and the composite are halves of one effect,
+    // and a composite that did not run would leave the next stage of the chain unwritten.
+    'dof.coc', 'lensFlare', 'vignette', 'filmGrain',
 ];
 
 /**
@@ -98,6 +108,13 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     'bloom.composite': 'bloom.composite',
     chromatic: 'chromatic',
     motionBlur: 'motionBlur',
+    'dof.coc': 'dof.coc',
+    'dof.gather': 'dof.gather',
+    'dof.composite': 'dof.composite',
+    lensFlare: 'lensFlare',
+    lensFlareComposite: 'lensFlare',
+    vignette: 'vignette',
+    filmGrain: 'filmGrain',
     present: 'present',
     forwardOpaque: 'forwardOpaque',
     transparent: 'transparent',

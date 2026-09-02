@@ -54,6 +54,7 @@ export default defineConfig({
                 'src/graphics/boneNames.ts',
                 'src/graphics/glContext.ts',
                 'src/graphics/ik.ts',
+                'src/graphics/dofMath.ts',
                 'src/graphics/indexFormat.ts',
                 'src/graphics/renderGraph/chain.ts',
                 'src/graphics/renderGraph/graph.ts',

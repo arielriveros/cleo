@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { CameraNode, Camera, Node } from '../src/cleo';
 import { resolvePostChain } from '../src/graphics/renderGraph/chain';
 import type { PostChainEntry } from '../src/graphics/renderGraph/chain';
@@ -110,6 +112,54 @@ describe('camera post chain persistence', () => {
         })).not.toThrow();
         expect((root.children[0] as CameraNode).postChain)
             .toEqual([{ effect: 'bloom', enabled: true }]);
+    });
+
+    it('writes no focusTargetId for a camera pointed at nothing', async () => {
+        // Same discipline as the chain itself: a camera nobody has aimed must serialize exactly what it
+        // did before depth of field existed, or every scene in the project shows up dirty on open.
+        const camera = makeCamera();
+        expect(camera.focusTargetId).toBeNull();
+        expect(await camera.serialize()).not.toHaveProperty('focusTargetId');
+    });
+
+    it('round-trips a focus target id', async () => {
+        const camera = makeCamera();
+        camera.focusTargetId = 'subject-node-id';
+        expect((await camera.serialize()).focusTargetId).toBe('subject-node-id');
+        expect((await roundTrip(camera)).focusTargetId).toBe('subject-node-id');
+    });
+
+    it('resolves a focus target to null when the node is not in the scene', () => {
+        // Dangling is the ordinary case for a despawned target, not an error: the renderer holds the
+        // last focus distance rather than racking the whole frame to the camera.
+        const camera = makeCamera();
+        camera.focusTargetId = 'nobody';
+        expect(camera.focusTarget).toBeNull();
+    });
+
+    it('keeps the id and the node handle in step', () => {
+        // The id is the truth and the handle is only a cache; assigning either has to invalidate the
+        // other, or a stale handle outlives the id that named it.
+        const camera = makeCamera();
+        const target = new Node('subject');
+        camera.parent!.addChild(target);
+
+        camera.focusTarget = target;
+        expect(camera.focusTargetId).toBe(target.id);
+
+        camera.focusTargetId = null;
+        expect(camera.focusTarget).toBeNull();
+
+        camera.focusTarget = null;
+        expect(camera.focusTargetId).toBeNull();
+    });
+
+    it('is listed in NODE_REF_KEYS, so a duplicated subtree repoints at its own copy', () => {
+        // Without this, duplicating a camera together with its subject leaves the COPY focused on the
+        // ORIGINAL subject — which looks correct until the original is moved or deleted.
+        const source = readFileSync(join(__dirname, '..', 'src', 'core', 'scene', 'nodeJson.ts'), 'utf-8');
+        const keys = source.match(/const NODE_REF_KEYS = \[([^\]]*)\]/)?.[1] ?? '';
+        expect(keys).toContain("'focusTargetId'");
     });
 
     it('does not alias the caller’s array', async () => {
