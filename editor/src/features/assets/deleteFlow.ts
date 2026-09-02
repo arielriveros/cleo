@@ -1,5 +1,4 @@
 import { subtreeOf, topMostIds, type VfsEntry, type VfsIndex } from '../../utils/vfs'
-import { deleteConsequence } from './assetKinds'
 import type { DialogOptions } from '../dialogs/dialogStore'
 
 // The decision half of the asset explorer's delete, extracted from useFileManagerBridge's SVAR
@@ -41,15 +40,19 @@ export function planDelete(
 /**
  * The confirmation for a batch that is still referenced. The whole list, unlike the window.confirm
  * string this replaces, which had to stop at six and append "…and N more".
+ *
+ * `describe` is injected rather than imported so this module stays free of assetKinds, which reaches
+ * CleoEngine and the GL thumbnail renderers and cannot be loaded by the node test suite.
  */
-export function inUseDialogOptions(inUse: VfsEntry[], baseOf: (path: string) => string): DialogOptions {
+export function inUseDialogOptions(
+  inUse: VfsEntry[],
+  describe: (entry: VfsEntry) => string,
+): DialogOptions {
   const one = inUse.length === 1
   return {
     title: one ? 'This asset is still in use' : `${inUse.length} of these assets are still in use`,
-    message: one
-      ? 'Deleting it cannot be undone.'
-      : 'Deleting them cannot be undone.',
-    details: inUse.map(e => `${baseOf(e.path)} — ${deleteConsequence(e.kind)}`),
+    message: one ? 'Deleting it cannot be undone.' : 'Deleting them cannot be undone.',
+    details: inUse.map(describe),
     confirmLabel: 'Delete anyway',
     tone: 'danger',
   }

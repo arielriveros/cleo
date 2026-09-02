@@ -24,7 +24,9 @@ import { join } from 'path';
  */
 
 const FILE = join(__dirname, '..', 'src', 'features', 'terrainMaterials', 'TerrainMaterialInspector.tsx');
-const SOURCE = readFileSync(FILE, 'utf-8');
+// Line endings normalised: core.autocrlf checks this tree out with CRLF on Windows, while the offset
+// and blank-line patterns below are all written against \n.
+const SOURCE = readFileSync(FILE, 'utf-8').replace(/\r\n/g, '\n');
 
 describe('TerrainMaterialInspector calls its hooks unconditionally', () => {
     /** Offsets of every top-level hook call in the component body. */

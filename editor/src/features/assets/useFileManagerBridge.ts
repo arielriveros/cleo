@@ -10,7 +10,7 @@ import {
   withAncestors, VfsEntry, VfsIndex,
 } from '../../utils/vfs'
 import {
-  deleteAsset, duplicateAsset, openAsset, regenerateThumbnail, renameAsset, thumbnailOf,
+  deleteAsset, deleteConsequence, duplicateAsset, openAsset, regenerateThumbnail, renameAsset, thumbnailOf,
 } from './assetKinds'
 import { inUseDialogOptions, planDelete } from './deleteFlow'
 import { confirmDialog } from '../dialogs/dialogStore'
@@ -215,7 +215,8 @@ export function useFileManagerBridge() {
         // the delete is re-issued from commitDelete once the user answers — with skipProvider, so we do
         // not come back through here and ask a second time.
         deleteConfirmRef.current = true
-        void confirmDialog(inUseDialogOptions(inUse, baseOf))
+        void confirmDialog(inUseDialogOptions(inUse,
+          e => `${baseOf(e.path)} — ${deleteConsequence(e.kind)}`))
           .then(ok => { if (ok) commitDelete(api, ids) })
           .finally(() => { deleteConfirmRef.current = false })
         return false

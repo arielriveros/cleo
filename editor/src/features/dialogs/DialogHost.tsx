@@ -38,7 +38,7 @@ export default function DialogHost() {
 
   const cancel = () => { if (id) resolveDialog(id, false) }
 
-  const confirm = () => {
+  const accept = () => {
     if (!request) return
     if (request.kind === 'prompt') {
       const message = request.options.validate?.(value) ?? null
@@ -78,7 +78,7 @@ export default function DialogHost() {
       if (e.key === 'Enter') {
         e.preventDefault()
         e.stopPropagation()
-        confirm()
+        accept()
       }
     }
     document.addEventListener('keydown', onKey, true)
@@ -141,7 +141,7 @@ export default function DialogHost() {
             size='sm'
             className='px-3 py-1.5 font-semibold'
             variant={options.tone === 'danger' ? 'danger' : 'primary'}
-            onClick={confirm}
+            onClick={accept}
           >
             {options.confirmLabel ?? 'OK'}
           </Button>
