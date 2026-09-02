@@ -21,7 +21,13 @@ import { join } from 'path';
  * GPU.
  */
 
-const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
+// Line endings normalized on the way in. `blockAfter` closes a block on a literal LF-indent-brace-LF,
+// and a checkout with `core.autocrlf=true` — any default Windows clone — hands back CRLF, which never
+// matches. `appliedKeys` then came back empty and this file went red on the developer's machine while
+// staying green in CI, which is the wrong way round for a guard whose whole job is to catch a setting
+// someone forgot to wire up locally.
+const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8')
+    .replace(/\r\n/g, '\n');
 
 /** The block between a marker and the first line that closes it at the given indent. */
 function blockAfter(marker: string, closer: string): string {
