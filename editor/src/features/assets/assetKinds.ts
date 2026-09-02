@@ -80,6 +80,7 @@ export type AssetDeps = {
   enterScriptEditor: (id?: string) => void
   enterAnimationFieldEditor: (id?: string) => void
   enterTilesetEditor: (id?: string) => void
+  enterTextureEditor: (id?: string) => void
 
   emit: (event: string, payload?: any) => void
 }
@@ -429,11 +430,10 @@ export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean
     case 'animationField': deps.enterAnimationFieldEditor(id); return true
     case 'tileset': deps.enterTilesetEditor(id); return true
     case 'scene': void deps.openScene(id); return true
-    // Raw bytes have nothing to author, so an image opens the preview pane. A texture does have things
-    // to author — wrap, filters, mipmaps, its byte source — but the mode that does it is not built yet,
-    // so for now it shows the same pane rather than pretending to open an editor.
+    case 'texture': deps.enterTextureEditor(id); return true
+    // Raw bytes have nothing to author, so an image opens the preview pane instead. What makes an image
+    // usable — wrap, filters, mipmaps — belongs to a texture, and that is what has an editor.
     case 'image': return false
-    case 'texture': return false
     // An animation has no editor: source-space clip data, meaningful only against a rig.
     case 'animation': return false
   }

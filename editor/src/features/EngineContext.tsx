@@ -87,6 +87,7 @@ import { useAssetThumbnails } from './hooks/useAssetThumbnails';
 import { useSaving } from './hooks/useSaving';
 import { usePendingDecisions } from './hooks/usePendingDecisions';
 import { useTilesetEditor } from './hooks/useTilesetEditor';
+import { useTextureEditor } from './hooks/useTextureEditor';
 import { useAnimationFieldEditor } from './hooks/useAnimationFieldEditor';
 import {
   EDITOR_CLEAR_COLOR, LEGACY_CLEAR_COLOR, TAB_METERS_EXPOSURE, SCENE_TAB_ID, KIND_LABEL,
@@ -141,6 +142,7 @@ const EngineContext = createContext<{
   /** StateMachineProvider publishes the live animation session's Apply here (see saveTabById). */
   registerAnimationApply: (reg: { tabId: string; apply: () => void } | null) => void;
   registerTilesetApply: (reg: { tabId: string; apply: () => void } | null) => void;
+  registerTextureApply: (reg: { tabId: string; apply: () => void } | null) => void;
   enterTemplateEditor: (templateId?: string) => void;
   editingTemplateName: string | null;
   templateRootId: string | null;
@@ -250,6 +252,14 @@ const EngineContext = createContext<{
   createTilesetFromImage: (file: File) => Promise<TilesetAsset | null>;
   /** The tileset asset the active tileset tab edits, or null. */
   editingTilesetId: string | null;
+  /** The texture asset the active texture tab edits, or null. */
+  editingTextureId: string | null;
+  /** Open (or focus) a Texture asset's edit tab. */
+  enterTextureEditor: (textureId?: string) => void;
+  /** Write an edited texture back to the library and retune the live GPU texture. */
+  saveTexture: (asset: TextureAsset) => void;
+  /** Retune the LIVE texture without touching the library — used while a control is being dragged. */
+  previewTextureSettings: (asset: TextureAsset) => void;
   /** Save a tileset asset and push it into every tilemap that embedded a copy. */
   saveTileset: (asset: TilesetAsset) => void;
   /** Open a script asset in its dedicated Script editor tab (creates a new 'node' script when no id is given). */
@@ -374,6 +384,7 @@ const EngineContext = createContext<{
     saveAll: async () => {},
     registerAnimationApply: () => {},
     registerTilesetApply: () => {},
+    registerTextureApply: () => {},
     enterTemplateEditor: () => {},
     editingTemplateName: null,
     templateRootId: null,
@@ -453,6 +464,10 @@ const EngineContext = createContext<{
     enterTilesetEditor: () => {},
     createTilesetFromImage: async () => null,
     editingTilesetId: null,
+    editingTextureId: null,
+    enterTextureEditor: () => {},
+    saveTexture: () => {},
+    previewTextureSettings: () => {},
     saveTileset: () => {},
     enterScriptEditor: () => {},
     setScriptTabSource: () => {},
@@ -1254,6 +1269,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         case 'model': return libs.models.some(m => m.id === id);
         case 'script': return libs.scripts.some(s => s.id === id);
         case 'tileset': return libs.tilesets.some(t => t.id === id);
+        case 'texture': return texturesRef.current.some(t => t.id === id);
         // A field also needs the model it blends — enterAnimationFieldEditor refuses to open without it.
         case 'animationField': {
           const field = fields.find(f => f.id === id);
@@ -1345,6 +1361,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     : activeTab.kind === 'model' ? 'model'
     : activeTab.kind === 'script' ? 'script'
     : activeTab.kind === 'tileset' ? 'tileset'
+    : activeTab.kind === 'texture' ? 'texture'
     : 'template';
   const templateRootId = activeTab.kind === 'template' && activeRuntime ? activeRuntime.rootId : null;
   const editingTemplateName = activeTab.kind === 'template' ? activeTab.title : null;
@@ -1367,6 +1384,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     ? (firstSkinnedModelNode(activeRuntime.scene.getNodeById(activeRuntime.rootId) ?? null)?.id ?? null)
     : null;
   const editingTilesetId = activeTab.kind === 'tileset' ? (activeTab.tilesetId ?? null) : null;
+  const editingTextureId = activeTab.kind === 'texture' ? (activeTab.textureId ?? null) : null;
 
   // Non-reactive mirrors of the tab list, the mesh sessions and the asset libraries. The save + propagation
   // paths read these rather than the render-scoped state: Save All walks tabs sequentially with an await
@@ -2053,6 +2071,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       case 'script': enterScriptEditor(assetId, tab.id); break;
       // A tileset tab is a pure 2D editor over the library record — nothing to build, so it is live already.
       case 'tileset': return !!tab.tilesetId && tilesetsRef.current.some(t => t.id === tab.tilesetId);
+      // Same for a texture tab: a 2D viewer over the record, with no scene behind it.
+      case 'texture': return !!tab.textureId && texturesRef.current.some(t => t.id === tab.textureId);
       default: return true;
     }
     // A script tab is a pure code editor and never gets a runtime entry, so it can only be judged by whether
@@ -3053,6 +3073,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     addTileset, updateTileset, setActiveTab, commitTab, clearTabDirty,
   });
 
+  // ---- Texture editor --------------------------------------------------------------------------------
+  const { enterTextureEditor, saveTexture, previewTextureSettings } = useTextureEditor({
+    texturesRef, tabsRef, setTabs, updateTextureAsset, setActiveTab, commitTab, clearTabDirty,
+  });
+
   // Import one or more model files (and folders) into the mesh library: one bundle per model file, each
   // parsed, reviewed in the import modal (missing textures + scale normalization), then normalized, its
   // materials registered as MaterialAssets linked via __materialId, and stored. Placement is drag-only.
@@ -3662,7 +3687,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // ---- Saving: one action per tab, plus Save All ------------------------------------------------
   const {
-    registerAnimationApply, registerTilesetApply, saveTabById, runSave,
+    registerAnimationApply, registerTilesetApply, registerTextureApply, saveTabById, runSave,
     saveActiveTab, saveAll, saveProjectToStorage,
   } = useSaving({
     tabsRef, dirtyTabsRef, activeTabIdRef, setSavingState,
@@ -4691,6 +4716,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       enterTilesetEditor,
       createTilesetFromImage,
       editingTilesetId,
+      editingTextureId,
+      enterTextureEditor,
+      saveTexture,
+      previewTextureSettings,
+      registerTextureApply,
       saveTileset,
       enterScriptEditor,
       setScriptTabSource,

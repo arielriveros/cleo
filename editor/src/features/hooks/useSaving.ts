@@ -40,6 +40,10 @@ export function useSaving(deps: {
   // state, so saving a tileset tab from here means calling back into it.
   const tilesetApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
   const registerTilesetApply = (reg: { tabId: string; apply: () => void } | null) => { tilesetApplyRef.current = reg; };
+  // Same handshake as the tileset above: the working copy lives in TextureProvider, and Ctrl+S / Save All /
+  // the close-tab prompt only know tab ids, so the session hands its save back here.
+  const textureApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
+  const registerTextureApply = (reg: { tabId: string; apply: () => void } | null) => { textureApplyRef.current = reg; };
 
   /**
    * Save one tab, whichever kind it is. Returns whether the tab came out clean — each save path clears the
@@ -57,6 +61,12 @@ export function useSaving(deps: {
       case 'script': saveScriptTab(tabId); break;
       case 'tileset': {
         const session = tilesetApplyRef.current;
+        if (!session || session.tabId !== tabId) return false;
+        session.apply();
+        break;
+      }
+      case 'texture': {
+        const session = textureApplyRef.current;
         if (!session || session.tabId !== tabId) return false;
         session.apply();
         break;
@@ -140,7 +150,7 @@ export function useSaving(deps: {
     if (live && dirtyTabsRef.current[live.tabId]) live.apply();
 
     const ORDER: Record<TabKind, number> = {
-      material: 0, terrainMaterial: 0, script: 0, animation: 0, animationField: 0, tileset: 0,
+      material: 0, terrainMaterial: 0, script: 0, animation: 0, animationField: 0, tileset: 0, texture: 0,
       model: 1, template: 2, scene: 3,
     };
     // Snapshot taken up front, so the loop is finite by construction.
@@ -154,7 +164,7 @@ export function useSaving(deps: {
   const saveProjectToStorage = (): Promise<boolean> => runSave([SCENE_TAB_ID], 'Saving scene');
 
   return {
-    registerAnimationApply, registerTilesetApply, saveTabById, runSave,
+    registerAnimationApply, registerTilesetApply, registerTextureApply, saveTabById, runSave,
     saveActiveTab, saveAll, saveProjectToStorage,
   };
 }

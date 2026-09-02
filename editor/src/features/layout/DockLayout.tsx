@@ -96,6 +96,7 @@ function panelTitle(id: string, mode: EditorMode): string {
     if (mode === 'material') return 'Material';
     if (mode === 'terrainMaterial') return 'Terrain Material';
     if (mode === 'tileset') return 'Tileset';
+    if (mode === 'texture') return 'Texture';
   }
   return PANEL_TITLES[id];
 }
@@ -281,6 +282,7 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
     case 'material':
     case 'terrainMaterial':
     case 'tileset':
+    case 'texture':
       hide(...ADD_PANELS, 'scene', 'scripts', 'physics');
       break;
     // A script tab is a pure code editor rendered over the viewport.

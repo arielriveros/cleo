@@ -10,6 +10,7 @@ import UnsavedSceneModal from "./dialogs/UnsavedSceneModal";
 import { StateMachineProvider } from "./animation/StateMachineContext";
 import { AnimationFieldProvider } from "./animationField/AnimationFieldContext";
 import { TilesetProvider } from "./tileset/TilesetContext";
+import { TextureProvider } from "./texture/TextureContext";
 import { HistoryProvider, useHistory } from "./HistoryContext";
 import DimensionSwitchModal from "./dialogs/DimensionSwitchModal";
 import { useDocument } from "./DocumentContext";
@@ -71,8 +72,10 @@ function Shell() {
       <StateMachineProvider>
         <AnimationFieldProvider>
           <TilesetProvider>
-            <TabBar />
-            <DockLayout />
+            <TextureProvider>
+              <TabBar />
+              <DockLayout />
+            </TextureProvider>
           </TilesetProvider>
         </AnimationFieldProvider>
       </StateMachineProvider>

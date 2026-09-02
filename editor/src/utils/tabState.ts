@@ -37,6 +37,7 @@ const ID_FIELD: Partial<Record<TabKind, keyof EditorTab>> = {
   script: 'scriptId',
   animationField: 'animationFieldId',
   tileset: 'tilesetId',
+  texture: 'textureId',
 };
 
 /** The asset a tab edits, or null for the scene tab and for unsaved "New Material"-style tabs. */

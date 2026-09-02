@@ -168,6 +168,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     enterModelEditor: engine.enterModelEditor,
     enterAnimationFieldEditor: engine.enterAnimationFieldEditor,
     enterTilesetEditor: engine.enterTilesetEditor,
+    enterTextureEditor: engine.enterTextureEditor,
     emit: (event, payload) => eventEmitter.emit(event as any, payload),
   }
 

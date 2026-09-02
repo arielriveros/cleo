@@ -17,6 +17,8 @@ import ScriptEditor from '../nodeInspector/scriptEditor/ScriptEditor';
 import ScriptTabView from '../nodeInspector/scriptEditor/ScriptTabView';
 import AnimationFieldPanel from '../animationField/AnimationFieldPanel';
 import TilesetTabView from '../tileset/TilesetTabView';
+import TextureTabView from '../texture/TextureTabView';
+import TextureSettingsPanel from '../texture/TextureSettingsPanel';
 import TilesetInspector from '../tileset/TilesetInspector';
 import TilePalette from '../tilemap/TilePalette';
 import TilemapLayersPanel from '../tilemap/TilemapLayersPanel';
@@ -49,6 +51,8 @@ function ViewportPanel(_: IDockviewPanelProps) {
       {editorMode === 'script' && <ScriptTabView />}
       {/* Tileset mode: the atlas + slicing grid fills the main area (also no 3D preview) */}
       {editorMode === 'tileset' && <TilesetTabView />}
+      {/* Texture mode: the image, drawn the way its sampling settings say it is read. No 3D preview. */}
+      {editorMode === 'texture' && <TextureTabView />}
       {/* Loading splash covers only the viewport; the rest of the editor stays visible */}
       {!isSceneReady && <LoadingScreen progress={loadingProgress} />}
     </div>
@@ -113,6 +117,7 @@ function PropertiesPanel(_: IDockviewPanelProps) {
   if (editorMode === 'terrainMaterial') return <SidePanel><TerrainMaterialInspector node={editingTerrainMaterialNode} /></SidePanel>;
   if (editorMode === 'material') return <SidePanel><MaterialPanel /></SidePanel>;
   if (editorMode === 'tileset') return <SidePanel><TilesetInspector /></SidePanel>;
+  if (editorMode === 'texture') return <SidePanel><TextureSettingsPanel /></SidePanel>;
   // Mesh mode keeps the normal node inspector below the mesh-level controls (LOD levels + cull).
   if (editorMode === 'model') return (
     <SidePanel>
