@@ -38,6 +38,9 @@ import { AnimationAsset, buildAnimationAsset, storeSkin, findEquivalentAnimation
 import { modelAssetSkin, applyModelAnimations, invalidateAnimationCache, resolveAnimationAsset } from "../utils/animationResolve";
 import { AnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
 import { TilesetAsset, reembedTilesets, detachTileset } from "../utils/tilesets";
+import type { ImageAsset } from "../utils/images";
+import { toTextureConfig } from "../utils/textureAssets";
+import type { TextureAsset } from "../utils/textureAssets";
 import { groupImportFiles } from "../utils/importGrouping";
 import {
   normalizeRootScale, meshBoundsRadius, combineBounds, awaitSubtreeTexturesReady, captureMaterialSphere,
@@ -222,6 +225,20 @@ const EngineContext = createContext<{
   animationFieldTargetId: string | null;
   /** Save a field asset and re-embed it into every state machine that plays it. */
   saveAnimationField: (asset: AnimationFieldAsset) => void;
+  // Raw image assets: the bytes a texture reads. Renameable; referenced only by TextureAsset.source.
+  images: ImageAsset[];
+  addImage: (i: ImageAsset) => void;
+  removeImage: (id: string) => void;
+  updateImage: (id: string, i: ImageAsset) => void;
+  /**
+   * Texture assets: a byte source plus every sampling decision. `id` IS the TextureManager id, so a
+   * texture is renamed through `name` and never by its id, which is baked into every serialized material.
+   */
+  textures: TextureAsset[];
+  addTextureAsset: (t: TextureAsset) => void;
+  removeTextureAsset: (id: string) => void;
+  /** Writes the record AND retunes the live GPU texture, so the viewport follows the inspector. */
+  updateTextureAsset: (id: string, t: TextureAsset) => void;
   // Tileset assets (sliced atlases painted by tilemap layers)
   tilesets: TilesetAsset[];
   addTileset: (t: TilesetAsset) => void;
@@ -421,6 +438,14 @@ const EngineContext = createContext<{
     editingAnimationFieldId: null,
     animationFieldTargetId: null,
     saveAnimationField: () => {},
+    images: [],
+    addImage: () => {},
+    removeImage: () => {},
+    updateImage: () => {},
+    textures: [],
+    addTextureAsset: () => {},
+    removeTextureAsset: () => {},
+    updateTextureAsset: () => {},
     tilesets: [],
     addTileset: () => {},
     removeTileset: () => {},
@@ -956,6 +981,60 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (open) removeTabById(open.id);
   };
 
+  // The two halves of the image/texture split. An ImageAsset is metadata over the bytes that already live
+  // in the `textures` IndexedDB store; a TextureAsset is a byte source plus every sampling decision, and
+  // its id IS the TextureManager id every serialized material already references.
+  //
+  // Neither is minted here. `reconcileTextureAssets` (VfsProvider) derives both from what is actually
+  // registered in the TextureManager, which is what makes the split a continuous reconciler rather than a
+  // one-shot migration — the same path covers the first boot after the upgrade, a model import, a scene
+  // parse and a bundle import.
+  const [images, setImages] = useState<ImageAsset[]>([]);
+  const imagesLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<ImageAsset[]>(libKey('images'));
+        if (list && list.length) setImages(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load images:', e); }
+      finally { imagesLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary(libKey('images'), images, imagesLoadedRef);
+
+  const imagesRef = useRef<ImageAsset[]>([]);
+  imagesRef.current = images;
+
+  const addImage = (i: ImageAsset) => setImages(prev => [...prev, i]);
+  const updateImage = (id: string, i: ImageAsset) => setImages(prev => prev.map(x => x.id === id ? i : x));
+  const removeImage = (id: string) => setImages(prev => prev.filter(x => x.id !== id));
+
+  const [textures, setTextures] = useState<TextureAsset[]>([]);
+  const texturesLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<TextureAsset[]>(libKey('textures'));
+        if (list && list.length) setTextures(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load textures:', e); }
+      finally { texturesLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary(libKey('textures'), textures, texturesLoadedRef);
+
+  const texturesRef = useRef<TextureAsset[]>([]);
+  texturesRef.current = textures;
+
+  const addTextureAsset = (t: TextureAsset) => setTextures(prev => [...prev, t]);
+  const updateTextureAsset = (id: string, t: TextureAsset) => {
+    setTextures(prev => prev.map(x => x.id === id ? t : x));
+    // Sampling is a property of the LIVE texture, so an edit has to reach the GPU as well as the record —
+    // otherwise the viewport keeps showing the old wrap mode until the next reload.
+    TextureManager.Instance.getTexture(id)?.applySettings(toTextureConfig(t.settings));
+    eventEmitter.current.emit('TEXTURES_CHANGED');
+  };
+  const removeTextureAsset = (id: string) => setTextures(prev => prev.filter(x => x.id !== id));
+
   const scriptAssetOf = (node: Node | null): ScriptAsset | undefined => {
     const id = getScriptIdOf(node ?? undefined);
     return id ? scriptAssets.find(a => a.id === id) : undefined;
@@ -1084,7 +1163,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     if (assetsLoaded) return;
     const timer = window.setInterval(() => {
-      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && animationsLoadedRef.current && scenesLoadedRef.current) {
+      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && animationsLoadedRef.current && scenesLoadedRef.current && imagesLoadedRef.current && texturesLoadedRef.current) {
         setAssetsLoaded(true);
         window.clearInterval(timer);
       }
@@ -4433,10 +4512,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     addAnimationField, removeAnimationField, updateAnimationField,
     addAnimation, removeAnimation, updateAnimation,
     addTileset, removeTileset, updateTileset,
+    addImage, removeImage, updateImage,
+    addTextureAsset, removeTextureAsset, updateTextureAsset,
   });
   const assetLibraryValue = useMemo<AssetLibraryContextValue>(() => ({
-    templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, tilesets, assetsLoaded, ...libraryActions,
-  }), [templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, tilesets, assetsLoaded, libraryActions]);
+    templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, tilesets,
+    images, textures, assetsLoaded, ...libraryActions,
+  }), [templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, tilesets,
+       images, textures, assetsLoaded, libraryActions]);
 
   const documentActions = useStableActions({
     setActiveTab, closeTab, reorderTabs, saveActiveTab, saveAll, markTabDirty, clearTabDirty, withoutDirty,
@@ -4593,6 +4676,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       editingAnimationFieldId,
       animationFieldTargetId,
       saveAnimationField,
+      images,
+      addImage,
+      removeImage,
+      updateImage,
+      textures,
+      addTextureAsset,
+      removeTextureAsset,
+      updateTextureAsset,
       tilesets,
       addTileset,
       removeTileset,

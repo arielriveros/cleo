@@ -12,10 +12,14 @@ import {
   renderMaterialAssetThumbnail, renderModelAssetThumbnail, renderTerrainMaterialAssetThumbnail,
 } from '../../utils/modelThumbnails'
 import { cryptoRandomId } from '../../utils/ids'
-import { deleteTextures } from '../../utils/textureStore'
-import { AssetKind, KIND_LABEL } from '../../utils/vfs'
+import { deleteTextures, putTextures } from '../../utils/textureStore'
+import { AssetKind, KIND_EXT, KIND_LABEL } from '../../utils/vfs'
+import type { ImageAsset } from '../../utils/images'
+import { toTextureConfig } from '../../utils/textureAssets'
+import type { TextureAsset } from '../../utils/textureAssets'
 import { deepClone } from '../../utils/deepClone'
 import { estimateBytes } from '../../utils/assetSize'
+import { IMAGE_EXTS } from './uploadRouter'
 
 // One adapter per asset kind, so the file-manager event bridge never has to branch five ways.
 
@@ -28,6 +32,8 @@ export type AssetDeps = {
   animationFields: AnimationFieldAsset[]
   animations: AnimationAsset[]
   tilesets: TilesetAsset[]
+  images: ImageAsset[]
+  textures: TextureAsset[]
   scenes: SceneMeta[]
 
   addMaterial: (m: MaterialAsset) => void
@@ -54,6 +60,12 @@ export type AssetDeps = {
   addTileset: (t: TilesetAsset) => void
   updateTileset: (id: string, t: TilesetAsset) => void
   removeTileset: (id: string) => void
+  addImage: (i: ImageAsset) => void
+  updateImage: (id: string, i: ImageAsset) => void
+  removeImage: (id: string) => void
+  addTextureAsset: (t: TextureAsset) => void
+  updateTextureAsset: (id: string, t: TextureAsset) => void
+  removeTextureAsset: (id: string) => void
   createScene: (name?: string) => Promise<string>
   renameScene: (sceneId: string, name: string) => void
   deleteScene: (sceneId: string) => Promise<string | null>
@@ -72,9 +84,9 @@ export type AssetDeps = {
   emit: (event: string, payload?: any) => void
 }
 
-type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | AnimationAsset | TilesetAsset | SceneMeta
+type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | AnimationAsset | TilesetAsset | SceneMeta | ImageAsset | TextureAsset
 
-/** The asset record behind an entry, or undefined. Textures have no record — they return undefined. */
+/** The asset record behind an entry, or undefined. Every kind has one now, textures included. */
 export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsset | undefined {
   switch (kind) {
     case 'material': return deps.materials.find(m => m.id === id)
@@ -86,24 +98,30 @@ export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsse
     case 'animation': return deps.animations.find(a => a.id === id)
     case 'tileset': return deps.tilesets.find(t => t.id === id)
     case 'scene': return deps.scenes.find(s => s.id === id)
-    case 'texture': return undefined
+    case 'image': return deps.images.find(i => i.id === id)
+    case 'texture': return deps.textures.find(t => t.id === id)
   }
 }
 
-/** True when the asset still exists (a texture exists iff it is registered in the TextureManager). */
+/**
+ * True when the asset still exists.
+ *
+ * Textures are judged by their RECORD, not by whether the TextureManager currently holds one: a texture
+ * whose image failed to decode is still an asset the user owns and can repair, and treating it as gone
+ * would hide the very card they need to fix it with.
+ */
 export function assetExists(kind: AssetKind, id: string, deps: AssetDeps): boolean {
-  if (kind === 'texture') return !!TextureManager.Instance.getTexture(id)
   return !!findAsset(kind, id, deps)
 }
 
 /** A rough byte size, computed once when an asset is first indexed — never per render. */
 export function sizeOfAsset(kind: AssetKind, id: string, deps: AssetDeps): number | undefined {
-  if (kind === 'texture') {
-    const data = TextureManager.Instance.getTexture(id)?.data as HTMLImageElement | undefined
-    const src = data instanceof HTMLImageElement ? data.src : ''
-    // A data: URL is base64, so ~3 bytes per 4 characters. A blob:/http: src tells us nothing.
-    return src.startsWith('data:') ? Math.round(src.length * 0.75) : undefined
-  }
+  // The bytes belong to the image, and it knows its own length exactly — no more guessing 3/4 of a
+  // base64 string's length and giving up entirely on a blob: URL.
+  if (kind === 'image') return deps.images.find(i => i.id === id)?.byteSize || undefined
+  // A texture is settings and a reference. Counting the image's bytes here as well would double every
+  // folder total, and would multiply it again for each texture sharing one image.
+  if (kind === 'texture') return undefined
   const asset = findAsset(kind, id, deps)
   if (!asset) return undefined
   // Walked, not stringified: a model asset carries its vertex buffers, and building the text of one is
@@ -113,19 +131,30 @@ export function sizeOfAsset(kind: AssetKind, id: string, deps: AssetDeps): numbe
 
 /** The preview image for a card: the asset's rendered thumbnail, or the texture's own image. */
 export function thumbnailOf(kind: AssetKind, id: string, deps: AssetDeps): string | null {
-  if (kind === 'texture') {
-    const data = TextureManager.Instance.getTexture(id)?.data as HTMLImageElement | undefined
-    return data instanceof HTMLImageElement && data.src ? data.src : null
+  // Both halves preview off the live decoded image. A texture shows what it currently samples, which is
+  // its own id in the TextureManager; an image shows any texture reading it, since the bytes are the same
+  // picture either way and the image itself is never uploaded to the GPU on its own.
+  if (kind === 'texture') return liveImageSrc(id)
+  if (kind === 'image') {
+    const reader = deps.textures.find(t => t.source.kind === 'image' && t.source.imageId === id)
+    return reader ? liveImageSrc(reader.id) : null
   }
   // Templates have no thumbnail field; materials/terrain materials have an empty one until first save.
   const asset = findAsset(kind, id, deps) as { thumbnail?: string } | undefined
   return asset?.thumbnail || null
 }
 
+/** The decoded `<img>` behind a live texture, as a URL a card can show. */
+function liveImageSrc(textureId: string): string | null {
+  const data = TextureManager.Instance.getTexture(textureId)?.data as HTMLImageElement | undefined
+  return data instanceof HTMLImageElement && data.src ? data.src : null
+}
+
 /**
  * Rename an asset to `stem` (the new basename without its extension).
- * Textures are exempt: a texture's id is its name and is baked into every serialized material that
- * references it. The VFS path carries the display name instead.
+ *
+ * Textures rename like anything else now. Their ID is still immutable — it is baked into every serialized
+ * material — but the display name is a separate field, which is exactly what the split bought.
  */
 export function renameAsset(kind: AssetKind, id: string, stem: string, deps: AssetDeps): void {
   switch (kind) {
@@ -174,8 +203,16 @@ export function renameAsset(kind: AssetKind, id: string, stem: string, deps: Ass
       if (a) deps.renameScene(id, stem)
       break
     }
-    case 'texture':
+    case 'texture': {
+      const a = deps.textures.find(t => t.id === id)
+      if (a) deps.updateTextureAsset(id, { ...a, name: stem })
       break
+    }
+    case 'image': {
+      const a = deps.images.find(i => i.id === id)
+      if (a) deps.updateImage(id, { ...a, name: stem })
+      break
+    }
   }
 }
 
@@ -194,13 +231,40 @@ export function deleteAsset(kind: AssetKind, id: string, deps: AssetDeps): void 
       void deps.deleteScene(id)
       break
     }
-    case 'texture':
+    case 'texture': {
+      const asset = deps.textures.find(t => t.id === id)
       TextureManager.Instance.removeTexture(id)
-      // Explicit texture deletes only: deleting a material or mesh must NOT evict its maps, shared by id.
+      deps.removeTextureAsset(id)
+      // The bytes are only evicted when NOTHING else reads them. Several textures may share one image —
+      // that is the point of the split — so deleting one unconditionally, as this used to, would pull the
+      // pixels out from under every other texture pointing at the same picture.
+      //
+      // Explicit texture deletes only, either way: deleting a material or a mesh must never evict a map.
+      const imageId = asset?.source.kind === 'image' ? asset.source.imageId : undefined
+      if (imageId && !deps.textures.some(t => t.id !== id && readsImage(t, imageId))) {
+        deps.removeImage(imageId)
+        void deleteTextures([imageId])
+      }
+      deps.emit('TEXTURES_CHANGED')
+      break
+    }
+    case 'image': {
+      // The image goes, but a texture still pointing at it is left in place rather than silently
+      // deleted: it keeps its settings, reports itself broken, and can be re-pointed at another image.
+      deps.removeImage(id)
       void deleteTextures([id])
       deps.emit('TEXTURES_CHANGED')
       break
+    }
   }
+}
+
+/** Whether `texture` reads `imageId`, through either an image source or a baked pack. */
+function readsImage(texture: TextureAsset, imageId: string): boolean {
+  const s = texture.source
+  if (s.kind === 'image') return s.imageId === imageId
+  if (s.kind === 'pack') return s.bakedImageId === imageId
+  return false
 }
 
 /**
@@ -267,16 +331,37 @@ export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: 
       return null
     }
     case 'texture': {
+      const a = deps.textures.find(t => t.id === id)
+      if (!a) return null
       const tm = TextureManager.Instance
-      const source = tm.getTexture(id)
-      if (!source) return null
-      const data = tm.serializeTexture(id) // re-encodes the image to a PNG data URL
-      if (!data) return null
       // The TextureManager id appears inside serialized materials; keep the pretty name when it is free.
       const texId = tm.getTexture(stem) ? `${stem}-${newId.slice(0, 6)}` : stem
-      tm.addTextureFromBase64(data, source.config, texId)
+
+      // NO BYTES ARE COPIED. The duplicate shares the original's image and differs only in its settings —
+      // which is the whole point of splitting them: one rock.png tiling on a wall and clamped on a decal.
+      deps.addTextureAsset({ ...deepClone(a), id: texId, name: stem, textureIds: [texId, ...a.textureIds.slice(1)] })
+
+      // Register the copy so it is assignable immediately, reusing the source texture's own retained
+      // bytes rather than re-encoding the decoded image through a canvas.
+      const bytes = tm.getSource(id)
+      if (bytes) tm.addTextureFromBytes(bytes.bytes, bytes.mime, toTextureConfig(a.settings), texId)
       deps.emit('TEXTURES_CHANGED')
       return texId
+    }
+    case 'image': {
+      const a = deps.images.find(i => i.id === id)
+      if (!a) return null
+      // A real byte copy, unlike a texture duplicate: two image assets are two independent pictures.
+      const bytes = TextureManager.Instance.getSource(id)
+      if (!bytes) return null
+      void putTextures([{
+        id: newId,
+        blob: new Blob([bytes.bytes as unknown as BlobPart], { type: bytes.mime }),
+        mime: bytes.mime,
+        config: undefined,
+      }])
+      deps.addImage({ ...deepClone(a), id: newId, name: stem, created: Date.now() })
+      return newId
     }
   }
 }
@@ -323,6 +408,8 @@ export async function regenerateThumbnail(
     case 'animationField':
     // Clips in source-rig space, with no character attached — there is nothing to pose for a picture.
     case 'animation':
+    // Both halves of the split show the decoded image itself — there is nothing to render.
+    case 'image':
     case 'texture':
       return false
   }
@@ -340,11 +427,15 @@ export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean
     case 'model': deps.enterModelEditor(id); return true
     case 'script': deps.enterScriptEditor(id); return true
     case 'animationField': deps.enterAnimationFieldEditor(id); return true
-    // An animation has no editor: source-space clip data, meaningful only against a rig.
-    case 'animation': return false
     case 'tileset': deps.enterTilesetEditor(id); return true
     case 'scene': void deps.openScene(id); return true
-    default: return false
+    // Raw bytes have nothing to author, so an image opens the preview pane. A texture does have things
+    // to author — wrap, filters, mipmaps, its byte source — but the mode that does it is not built yet,
+    // so for now it shows the same pane rather than pretending to open an editor.
+    case 'image': return false
+    case 'texture': return false
+    // An animation has no editor: source-space clip data, meaningful only against a rig.
+    case 'animation': return false
   }
 }
 
@@ -361,6 +452,7 @@ export function deleteConsequence(kind: AssetKind): string {
     case 'tileset': return 'tilemap layers painted with it, and sprites drawing from it, are cleared'
     case 'scene': return 'the project switches to another scene'
     case 'texture': return 'materials and tilesets using it show no texture'
+    case 'image': return 'textures sourcing it lose their pixels'
   }
 }
 
@@ -376,6 +468,9 @@ export function dragPayload(kind: AssetKind, assetId: string): [string, string][
     case 'animation': return [['text/cleo-animation', assetId]]
     case 'tileset': return [['text/cleo-tileset', assetId]]
     case 'scene': return [['text/cleo-scene', assetId], ['text/plain', assetId]]
+    // Deliberately NOT the texture payload: dropping raw bytes into a material slot must not appear to
+    // work, because a slot needs a texture's sampling, not just an image.
+    case 'image': return [['text/cleo-image', assetId]]
     case 'texture': return [
       ['text/cleo-asset', JSON.stringify({ type: 'texture', id: assetId })],
       ['text/plain', assetId], // TextureInspector's fallback
@@ -433,12 +528,58 @@ const ICONS: Record<AssetKind | 'folder', string> = {
   tileset: svg('#7ec8a9',
     `<rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="#2f7a63" fill-opacity=".2"/><path d="M9 3.5v17M14.5 3.5v17M3.5 9h17M3.5 14.5h17" stroke-opacity=".55"/><rect x="9" y="9" width="5.5" height="5.5" fill="#7ec8a9" fill-opacity=".45" stroke="none"/>`,
   ),
-  texture: svg('#9aa4b2',
+  // A raw picture: the photo frame, unadorned. Kept as the old texture glyph so an existing project's
+  // image cards look like the texture cards they were.
+  image: svg('#9aa4b2',
     `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#4a4a55" fill-opacity=".3"/><circle cx="8.5" cy="9.5" r="1.6" stroke="#ffd27a"/><path d="M4 17.5l5-5.5 3.5 4 3-2.5 4.5 4"/>`,
+  ),
+  // The same frame with a sampling grid over it — a texture is an image plus how it is read.
+  texture: svg('#7fb2d9',
+    `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#2f5d80" fill-opacity=".35"/><path d="M9 4.5v15M15 4.5v15M3 9.5h18M3 14.5h18" stroke-opacity=".45"/><circle cx="7" cy="8" r="1.2" stroke="#ffd27a"/><path d="M3.5 17l4-4 3 3.2 2.5-2 4.5 4" stroke-opacity=".9"/>`,
   ),
 }
 
 /** Icon URL for a file-manager entry, by kind (or 'folder'). */
 export function iconFor(kind: AssetKind | 'folder'): string {
   return ICONS[kind]
+}
+
+/**
+ * CSS that badges a thumbnailed card with its asset type, in the corner opposite the ⋮ menu.
+ *
+ * Only cards showing a GENERATED thumbnail get one: a card with no thumbnail already displays its type
+ * icon as the card image, so a badge there would just repeat it. `.wx-preview.wx-file-preview` is the
+ * library's own class for exactly that state — matched positively, because the third state (neither
+ * thumbnail nor icon, a bare `wxi-` glyph) must not be badged either.
+ *
+ * The kind is read out of `data-id`, which is the VFS path, via an ends-with match on its extension.
+ * That needs no JavaScript and — unlike an attribute stamped onto the node — cannot go stale when the
+ * library reuses a card element for a different row.
+ *
+ * GENERATED rather than hand-written into filemanager.css so a new kind, a new image extension or a
+ * redrawn glyph cannot leave the badge pointing at the icon it used to be.
+ */
+export function badgeStyles(): string {
+  const rule = (ext: string, icon: string) =>
+    `.cleo-fm .wx-cards .wx-item[data-id$="${ext}" i] .wx-preview.wx-file-preview::after` +
+    `{background-image:url("${icon}")}`
+
+  const kinds = (Object.keys(KIND_EXT) as (keyof typeof KIND_EXT)[])
+    .map(kind => rule(KIND_EXT[kind], ICONS[kind]))
+  // Images keep their real extension, so they need one rule per format the importer accepts.
+  const images = IMAGE_EXTS.map(ext => rule(ext, ICONS.image))
+
+  return [
+    // The preview box is the positioning context, so the badge clips to its rounded corner rather than
+    // hanging off the card. Mirrors `.wx-more`, which is the same overlay on the opposite side.
+    '.cleo-fm .wx-cards .wx-preview{position:relative}',
+    '.cleo-fm .wx-cards .wx-preview.wx-file-preview::after{' +
+      'content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;' +
+      'border-radius:calc(var(--radius) - 2px);background-color:rgb(var(--surface) / 0.85);' +
+      'background-size:11px 11px;background-position:center;background-repeat:no-repeat;' +
+      // Under the selected card's name overlay, which sits at 3.
+      'z-index:1;pointer-events:none}',
+    ...kinds,
+    ...images,
+  ].join('\n')
 }

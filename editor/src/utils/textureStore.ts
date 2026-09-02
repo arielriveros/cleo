@@ -6,8 +6,11 @@
 // or instantiated, which is what lets the restore paths stay synchronous.
 
 import { TextureManager, parseBase64DataUri } from 'cleo'
-import { openDB, TEXTURE_STORE } from './idb'
+import { openDB, TEXTURE_STORE, idbGet } from './idb'
 import { projectPrefix } from './projectScope'
+import { libKey } from './storageKeys'
+import { toTextureConfig } from './textureAssets'
+import type { TextureAsset } from './textureAssets'
 
 export type StoredTexture = {
   id: string
@@ -154,7 +157,8 @@ export async function migrateUnscopedTextures(prefix: string): Promise<number> {
  * Omit `ids` to persist EVERY live texture — the right default, since a texture can be referenced by the
  * scene without belonging to any library. Safe under project scoping because the TextureManager only ever
  * holds the OPEN project's textures. Textures with no retained source (built-ins, editor icons, anything
- * loaded from a path) are skipped: they are recreated at boot.
+ * loaded from a path) are skipped: they are recreated at boot. So are textures whose bytes belong to an
+ * image stored under another id — see the set built below.
  */
 export async function persistTextures(ids?: Iterable<string>): Promise<number> {
   const tm = TextureManager.Instance
@@ -162,10 +166,20 @@ export async function persistTextures(ids?: Iterable<string>): Promise<number> {
   if (!wanted.length) return 0
 
   const have = await storedTextureIds()
+  // A texture that reads an image stored under a DIFFERENT id has its bytes already — writing a row per
+  // texture would store N copies of one image the moment a texture is duplicated to give the same image a
+  // second sampler, which is the whole point of the split. Read from storage for the same reason
+  // preloadTextures does: two of the three call sites are nowhere near the React libraries.
+  const textures = (await idbGet<TextureAsset[]>(libKey('textures'))) ?? []
+  const sourcedElsewhere = new Set(
+    textures
+      .filter(t => t?.source?.kind === 'image' && t.source.imageId !== t.id)
+      .map(t => t.id),
+  )
   const records: StoredTexture[] = []
 
   for (const id of wanted) {
-    if (have.has(id)) continue
+    if (have.has(id) || sourcedElsewhere.has(id)) continue
     const source = tm.getSource(id)
     if (!source) continue // built-in / path-loaded: nothing to persist
     const texture = tm.getTexture(id)
@@ -248,10 +262,46 @@ export function legacyTexturesOf(...libraries: AnyAsset[][]): LegacyTexture[] {
  */
 export async function preloadTextures(): Promise<number> {
   const records = await getAllTextures()
+  const byId = new Map(records.map(r => [r.id, r]))
   let loaded = 0
 
+  // Pass 1: the texture library. A TextureAsset names the image it reads and carries the AUTHORED
+  // sampling, which wins over the `config` frozen into the store row — this is where a wrap mode or an
+  // anisotropy set in the texture editor actually reaches the GPU.
+  //
+  // Read here rather than taken as an argument: preloadTextures runs from setupInitialScene, which fires
+  // BEFORE the React libraries finish their async reads, and the boot order cannot be changed — textures
+  // have to be registered before anything is parsed against them, which is what keeps the asset restore
+  // paths synchronous.
+  const textures = (await idbGet<TextureAsset[]>(libKey('textures'))) ?? []
+  const consumed = new Set<string>()
+
+  for (const asset of textures) {
+    if (!asset?.id || TextureManager.Instance.getTexture(asset.id)) continue
+    const imageId = asset.source?.kind === 'image' ? asset.source.imageId
+                  : asset.source?.kind === 'pack' ? asset.source.bakedImageId
+                  : undefined
+    // A `runtime` source has no bytes by definition, and a missing image is reported by the asset audit
+    // rather than faked here — either way there is nothing to upload.
+    if (!imageId) continue
+    const row = byId.get(imageId)
+    if (!row?.blob) continue
+
+    const bytes = new Uint8Array(await row.blob.arrayBuffer())
+    const mime = row.mime || row.blob.type || 'image/png'
+    TextureManager.Instance.addTextureFromBytes(bytes, mime, toTextureConfig(asset.settings), asset.id)
+    // Only the ROW is consumed, not the id: several textures may share one image, and each still needs
+    // its own registration under its own id.
+    consumed.add(imageId)
+    loaded++
+  }
+
+  // Pass 2: every row no texture asset claimed. This is the legacy path AND the first-boot-after-upgrade
+  // path — before the reconciler has minted anything, the library is empty and every row lands here,
+  // registered under its own id exactly as it always was.
   for (const r of records) {
     if (!r?.id || !r.blob) continue
+    if (consumed.has(r.id)) continue
     if (TextureManager.Instance.getTexture(r.id)) continue
     const bytes = new Uint8Array(await r.blob.arrayBuffer())
     TextureManager.Instance.addTextureFromBytes(bytes, r.mime || r.blob.type || 'image/png', r.config, r.id)

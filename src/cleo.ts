@@ -72,6 +72,8 @@ export { Renderer } from "./graphics/renderer";
 export type { SkeletonOverlay, RenderSettings } from "./graphics/renderer";
 export { Skybox } from "./graphics/skybox";
 export { Texture } from "./graphics/texture";
+// The editor authors these: a texture asset's settings compile down to a TextureConfig.
+export type { TextureConfig, WrapMode } from "./graphics/texture";
 export { Loader } from "./graphics/loader";
 // Merging an importer's per-material sub-meshes into one mesh with one submesh per material.
 export { mergeModels, mergeBlocker } from "./graphics/modelMerge";

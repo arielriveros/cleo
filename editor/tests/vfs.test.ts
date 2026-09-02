@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  applyDelete, buildFileManagerData, movablePaths, reconcileVfs, repairVfs, topMostIds,
+  applyDelete, buildFileManagerData, ensureExt, kindOfExt, movablePaths, reconcileVfs, repairVfs,
+  topMostIds, SOURCE_FOLDER,
   type LibSnapshot, type VfsEntry, type VfsIndex,
 } from '../src/utils/vfs';
 
@@ -16,7 +17,8 @@ import {
 
 const libs = (over: Partial<LibSnapshot> = {}): LibSnapshot => ({
   materials: [], terrainMaterials: [], templates: [], models: [],
-  scripts: [], animationFields: [], animations: [], tilesets: [], scenes: [], textureIds: [],
+  scripts: [], animationFields: [], animations: [], tilesets: [], scenes: [],
+  images: [], textures: [], textureIds: [],
   ...over,
 });
 
@@ -207,5 +209,115 @@ describe('movablePaths', () => {
 
   it('returns nothing when every path is unmovable', () => {
     expect(movablePaths(['/Target/a.mat'], '/Target', known)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// The image/texture split
+// ---------------------------------------------------------------------------------------------------
+
+describe('kindOfExt', () => {
+  it('reads a texture from its virtual extension', () => {
+    expect(kindOfExt('.tex')).toBe('texture');
+    expect(kindOfExt('.TEX')).toBe('texture');
+  });
+
+  // The one behavioural change to an existing path. An unknown extension used to mean 'texture' back when
+  // a texture WAS its image file; a file with bytes and no virtual extension is an image now.
+  it('falls back to image, not texture', () => {
+    expect(kindOfExt('.png')).toBe('image');
+    expect(kindOfExt('.jpg')).toBe('image');
+    expect(kindOfExt('')).toBe('image');
+    expect(kindOfExt('.wobble')).toBe('image');
+  });
+
+  it('still resolves every other virtual extension', () => {
+    expect(kindOfExt('.mat')).toBe('material');
+    expect(kindOfExt('.tileset')).toBe('tileset');
+    expect(kindOfExt('.mesh')).toBe('model'); // legacy spelling of .model
+  });
+});
+
+describe('ensureExt', () => {
+  // Images are the kind that keeps a real extension now; textures are forced, like every named asset.
+  it('leaves an image alone and forces a texture', () => {
+    expect(ensureExt('rock.png', 'image')).toBe('rock.png');
+    expect(ensureExt('rock', 'image')).toBe('rock');
+    expect(ensureExt('rock', 'texture')).toBe('rock.tex');
+    expect(ensureExt('rock.png', 'texture')).toBe('rock.tex');
+  });
+
+  it('cannot reclassify by renaming', () => {
+    expect(ensureExt('rock.mat', 'texture')).toBe('rock.tex');
+  });
+});
+
+describe('reconcileVfs — the split', () => {
+  const image = (id: string) => ({ id, name: id }) as any;
+  const texture = (id: string, name: string) => ({ id, name }) as any;
+
+  it('files a texture flat and its image under Source/', () => {
+    const { next } = reconcileVfs(index([], []), libs({
+      images: [image('rock.png')],
+      textures: [texture('rock.png', 'rock')],
+    }));
+    const paths = next.entries.map(e => e.path).sort();
+    expect(paths).toEqual([`/${SOURCE_FOLDER}/rock.png`, '/rock.tex']);
+    expectClosedUnderAncestors(next);
+  });
+
+  it('puts Source/ beside the texture inside the landing folder', () => {
+    const { next } = reconcileVfs(index(['/Props'], []), libs({
+      images: [image('rock.png')],
+      textures: [texture('rock.png', 'rock')],
+    }), { landingFolder: '/Props' });
+    const paths = next.entries.map(e => e.path).sort();
+    expect(paths).toEqual([`/Props/${SOURCE_FOLDER}/rock.png`, '/Props/rock.tex']);
+    expectClosedUnderAncestors(next);
+  });
+
+  // An image and a texture legitimately share an id string — that is what lets the split move no bytes.
+  // They are different kinds, so they must not collide on one entry.
+  it('keeps an image and a texture of the same id as separate entries', () => {
+    const { next } = reconcileVfs(index([], []), libs({
+      images: [image('rock.png')],
+      textures: [texture('rock.png', 'rock')],
+    }));
+    expect(next.entries).toHaveLength(2);
+    expect(new Set(next.entries.map(e => e.kind))).toEqual(new Set(['image', 'texture']));
+  });
+
+  // Source/ is a default placement, not an invariant — the reconciler must not drag a moved image back.
+  it('leaves an image the user moved out of Source/ where they put it', () => {
+    const prev = index(['/Art'], [entry('/Art/rock.png', { kind: 'image', assetId: 'rock.png' })]);
+    const { next, changed } = reconcileVfs(prev, libs({ images: [image('rock.png')] }));
+    expect(changed).toBe(false);
+    expect(next.entries[0].path).toBe('/Art/rock.png');
+  });
+
+  // A texture is a named asset now, so renaming the record moves its entry — which textures never did.
+  it('follows a texture rename', () => {
+    const prev = index([], [entry('/rock.tex', { kind: 'texture', assetId: 'rock.png' })]);
+    const { next, changed } = reconcileVfs(prev, libs({ textures: [texture('rock.png', 'granite')] }));
+    expect(changed).toBe(true);
+    expect(next.entries[0].path).toBe('/granite.tex');
+  });
+
+  // An image's name IS the filename its bytes arrived under, so it does not chase a rename the way a
+  // texture does — the same exemption textures used to have.
+  it('does not rewrite an image path from its record name', () => {
+    const prev = index([], [entry('/rock.png', { kind: 'image', assetId: 'rock.png' })]);
+    const { next, changed } = reconcileVfs(prev, libs({ images: [image('rock.png')] }));
+    expect(changed).toBe(false);
+    expect(next.entries[0].path).toBe('/rock.png');
+  });
+
+  it('holds both split kinds until pruneTextures is armed', () => {
+    const prev = index([], [
+      entry('/gone.png', { kind: 'image', assetId: 'gone.png' }),
+      entry('/gone.tex', { kind: 'texture', assetId: 'gone.png' }),
+    ]);
+    expect(reconcileVfs(prev, libs(), { prune: true }).next.entries).toHaveLength(2);
+    expect(reconcileVfs(prev, libs(), { prune: true, pruneTextures: true }).next.entries).toHaveLength(0);
   });
 });

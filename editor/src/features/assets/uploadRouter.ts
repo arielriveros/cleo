@@ -5,7 +5,7 @@ import { groupImportFiles, isModelFile } from '../../utils/importGrouping'
 // SVAR's built-in <Uploader> is not used: it never records a dropped file's relative path, and
 // groupImportFiles needs those paths to pair a .bin and a textures/ folder with the right .gltf.
 
-const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.bmp', '.tga', '.webp', '.tiff', '.gif']
+export const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.bmp', '.tga', '.webp', '.tiff', '.gif']
 
 function extOf(name: string): string {
   const i = name.lastIndexOf('.')
@@ -16,18 +16,19 @@ export function isImageFile(file: File): boolean {
   return IMAGE_EXTS.includes(extOf(file.name))
 }
 
-/** Register one image file as a texture, keyed by its filename. */
-function addTexture(file: File): Promise<void> {
-  return new Promise(resolve => {
-    const reader = new FileReader()
-    reader.onload = ev => {
-      const data = ev.target?.result as string | undefined
-      if (data) TextureManager.Instance.addTextureFromBase64(data, { wrapping: 'repeat' }, file.name)
-      resolve()
-    }
-    reader.onerror = () => { console.warn('Failed to read texture file:', file.name); resolve() }
-    reader.readAsDataURL(file)
-  })
+/**
+ * Register one image file as a texture, keyed by its filename.
+ *
+ * The Image and Texture ASSET records are not minted here. `reconcileTextureAssets` derives both from
+ * what ends up registered in the TextureManager, so every ingestion path — this one, the model importer,
+ * the atlas importer, a scene parse — gets them for free instead of each remembering to create a pair.
+ *
+ * `addTextureFromFile` rather than a FileReader data URL: it reads the ArrayBuffer directly and retains
+ * the compressed bytes, which is what lets the texture be persisted at all. Routing megabytes of image
+ * through base64 was pure overhead.
+ */
+function addTexture(file: File): void {
+  TextureManager.Instance.addTextureFromFile(file, { wrapping: 'repeat' }, file.name)
 }
 
 export type UploadDeps = {
@@ -47,7 +48,7 @@ export async function runUpload(files: File[], deps: UploadDeps): Promise<void> 
   if (!hasModel) {
     const images = files.filter(isImageFile)
     if (!images.length) return
-    await Promise.all(images.map(addTexture))
+    images.forEach(addTexture)
     deps.emit('TEXTURES_CHANGED')
     return
   }
@@ -58,7 +59,7 @@ export async function runUpload(files: File[], deps: UploadDeps): Promise<void> 
 
   const loose = files.filter(f => !claimed.has(f) && isImageFile(f))
   if (loose.length) {
-    await Promise.all(loose.map(addTexture))
+    loose.forEach(addTexture)
     deps.emit('TEXTURES_CHANGED')
   }
 
@@ -80,7 +81,7 @@ export async function runUpload(files: File[], deps: UploadDeps): Promise<void> 
   const unregistered = files.filter(f =>
     claimed.has(f) && isImageFile(f) && !TextureManager.Instance.textures.has(f.name))
   if (unregistered.length) {
-    await Promise.all(unregistered.map(addTexture))
+    unregistered.forEach(addTexture)
     deps.emit('TEXTURES_CHANGED')
   }
 }

@@ -6,6 +6,8 @@ import type { ScriptAsset } from './scripts'
 import type { AnimationAsset } from './animationAssets'
 import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
+import type { ImageAsset } from './images'
+import type { TextureAsset } from './textureAssets'
 
 // The editor's virtual filesystem: a side table giving each flat asset library a folder path.
 //
@@ -13,9 +15,17 @@ import type { TilesetAsset } from './tilesets'
 // a virtual extension (.mat/.tmat/.tpl/.model); textures keep their real image extension. As in SVAR's
 // FileTree.normalizeFile, the extension is everything after the LAST dot.
 
-export type AssetKind = 'texture' | 'material' | 'terrainMaterial' | 'template' | 'model' | 'scene' | 'script' | 'animationField' | 'animation' | 'tileset'
+export type AssetKind = 'image' | 'texture' | 'material' | 'terrainMaterial' | 'template' | 'model' | 'scene' | 'script' | 'animationField' | 'animation' | 'tileset'
 
-export const KIND_EXT: Record<Exclude<AssetKind, 'texture'>, string> = {
+/**
+ * IMAGE is the kind that keeps its real file extension; every other kind carries a virtual one.
+ *
+ * That exclusion used to be `texture`, back when a texture WAS its image file. Since the split a texture
+ * is an authored record — a byte source plus sampling — so it behaves like a material: a real name, a
+ * virtual extension, and renaming that does not reclassify it.
+ */
+export const KIND_EXT: Record<Exclude<AssetKind, 'image'>, string> = {
+  texture: '.tex',
   material: '.mat',
   terrainMaterial: '.tmat',
   template: '.tpl',
@@ -28,6 +38,7 @@ export const KIND_EXT: Record<Exclude<AssetKind, 'texture'>, string> = {
 }
 
 export const KIND_LABEL: Record<AssetKind, string> = {
+  image: 'image',
   texture: 'texture',
   material: 'material',
   terrainMaterial: 'terrain material',
@@ -58,7 +69,10 @@ export type VfsIndex = {
 export { vfsKey } from './storageKeys'
 export const EMPTY_VFS: VfsIndex = { version: 1, folders: [], entries: [] }
 
-/** Snapshot of the five libraries, as seen by the reconciler. */
+/** The subfolder a texture's source image is filed under, beside the texture that reads it. */
+export const SOURCE_FOLDER = 'Source'
+
+/** Snapshot of the libraries, as seen by the reconciler. */
 export type LibSnapshot = {
   materials: MaterialAsset[]
   terrainMaterials: TerrainMaterialAsset[]
@@ -69,6 +83,12 @@ export type LibSnapshot = {
   animations: AnimationAsset[]
   tilesets: TilesetAsset[]
   scenes: { id: string; name: string; updatedAt: number; thumbnail?: string }[]
+  images: ImageAsset[]
+  textures: TextureAsset[]
+  /**
+   * Every live TextureManager id. No longer drives entries — `textures` does — but bundle export and the
+   * missing-asset audit still ask what is actually registered, which is not the same question.
+   */
   textureIds: string[]
 }
 
@@ -106,9 +126,10 @@ export function joinPath(dir: string, base: string): string {
   return dir === '/' ? `/${base}` : `${dir}/${base}`
 }
 
-/** Which kind an extension denotes. Anything that isn't a known virtual extension is a texture. */
+/** Which kind an extension denotes. Anything that isn't a known virtual extension is a raw image file. */
 export function kindOfExt(ext: string): AssetKind {
   switch (ext.toLowerCase()) {
+    case '.tex': return 'texture'
     case '.mat': return 'material'
     case '.tmat': return 'terrainMaterial'
     case '.tpl': return 'template'
@@ -119,16 +140,16 @@ export function kindOfExt(ext: string): AssetKind {
     case '.afield': return 'animationField'
     case '.anim': return 'animation'
     case '.tileset': return 'tileset'
-    default: return 'texture'
+    default: return 'image'
   }
 }
 
 /**
  * Force a user-typed name to keep its kind's extension, so renaming can never reclassify an asset.
- * Textures keep whatever the user typed (their extension is cosmetic — the TextureManager id is the truth).
+ * Images keep whatever the user typed — their extension is the real one the bytes were imported under.
  */
 export function ensureExt(name: string, kind: AssetKind): string {
-  if (kind === 'texture') return name
+  if (kind === 'image') return name
   const want = KIND_EXT[kind]
   const stem = stemOf(name) || name
   return `${stem}${want}`
@@ -423,13 +444,24 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   const kept = new Set<VfsEntry>()
   let changed = false
 
+  /**
+   * Where an asset of this kind lands when it has no entry yet. Images go into a `Source` subfolder of
+   * the landing folder, so the textures that read them keep the flat, familiar tree and the raw bytes sit
+   * out of the way one level down.
+   *
+   * A DEFAULT, never an invariant: this runs only for an asset with no entry, so an image the user drags
+   * back out stays where they put it. The reconciler must not fight the user over folder layout.
+   */
+  const landingFor = (kind: AssetKind): string =>
+    kind === 'image' ? joinPath(landing, SOURCE_FOLDER) : landing
+
   const visit = (kind: AssetKind, assetId: string, name: string) => {
-    const ext = kind === 'texture' ? extOf(name) : KIND_EXT[kind]
+    const ext = kind === 'image' ? extOf(name) : KIND_EXT[kind]
     const existing = byAsset.get(assetKey(kind, assetId))
 
     if (!existing) {
-      const stem = kind === 'texture' ? stemOf(name) : name
-      const path = uniquePath(taken, landing, stem, ext)
+      const stem = kind === 'image' ? stemOf(name) : name
+      const path = uniquePath(taken, landingFor(kind), stem, ext)
       taken.add(path)
       entries.push({ path, kind, assetId, created: Date.now(), size: opts.sizeOf?.(kind, assetId) })
       changed = true
@@ -437,8 +469,8 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
     }
 
     kept.add(existing)
-    // A texture's name IS its immutable TextureManager id; for every other kind the record's `name` wins.
-    if (kind !== 'texture' && !stemRepresents(stemOf(existing.path), name)) {
+    // An image's name IS the filename its bytes arrived under; for every other kind the record's `name` wins.
+    if (kind !== 'image' && !stemRepresents(stemOf(existing.path), name)) {
       taken.delete(existing.path)
       const path = uniquePath(taken, dirOf(existing.path), name, ext)
       taken.add(path)
@@ -458,12 +490,17 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   for (const a of libs.animations) visit('animation', a.id, a.name)
   for (const t of libs.tilesets) visit('tileset', t.id, t.name)
   for (const s of libs.scenes) visit('scene', s.id, s.name)
-  for (const id of libs.textureIds) visit('texture', id, id)
+  // Both halves of the image/texture split are ordinary libraries now — the entries no longer come from
+  // whatever happens to be registered in the TextureManager.
+  for (const i of libs.images) visit('image', i.id, i.name)
+  for (const t of libs.textures) visit('texture', t.id, t.name)
 
   // An unvisited entry may just be a library that hasn't loaded, so keep it unless pruning is allowed.
   for (const e of prev.entries) {
     if (kept.has(e)) continue
-    const prunable = e.kind === 'texture' ? opts.pruneTextures : opts.prune
+    // Both split halves are gated on pruneTextures: they are populated from the TextureManager by the
+    // asset reconciler, so they are only trustworthy once preloadTextures has settled.
+    const prunable = e.kind === 'image' || e.kind === 'texture' ? opts.pruneTextures : opts.prune
     if (prunable) { changed = true; continue }
     entries.push(e)
   }
@@ -526,7 +563,8 @@ export function findMissingFromExplorer(vfs: VfsIndex, libs: LibSnapshot, treeId
   for (const a of libs.animations) check('animation', a.id, a.name)
   for (const t of libs.tilesets) check('tileset', t.id, t.name)
   for (const s of libs.scenes) check('scene', s.id, s.name)
-  for (const id of libs.textureIds) check('texture', id, id)
+  for (const i of libs.images) check('image', i.id, i.name)
+  for (const t of libs.textures) check('texture', t.id, t.name)
 
   return out
 }
@@ -549,8 +587,8 @@ export function findOrphanEntries(vfs: VfsIndex, libs: LibSnapshot): OrphanEntry
 export function restoreMissing(vfs: VfsIndex, missing: MissingAsset, folder: string, size?: number): VfsIndex {
   if (missing.reason !== 'no-entry') return vfs // already indexed; only the store is out of step
   const taken = new Set<string>([...vfs.entries.map(e => e.path), ...vfs.folders])
-  const ext = missing.kind === 'texture' ? extOf(missing.name) : KIND_EXT[missing.kind]
-  const stem = missing.kind === 'texture' ? stemOf(missing.name) : missing.name
+  const ext = missing.kind === 'image' ? extOf(missing.name) : KIND_EXT[missing.kind]
+  const stem = missing.kind === 'image' ? stemOf(missing.name) : missing.name
   const path = uniquePath(taken, folder || '/', stem, ext)
   return applyAdd(vfs, { path, kind: missing.kind, assetId: missing.assetId, created: Date.now(), size })
 }
@@ -570,7 +608,10 @@ function aliveIds(libs: LibSnapshot): Record<AssetKind, Set<string>> {
     animation: new Set(libs.animations.map(a => a.id)),
     tileset: new Set(libs.tilesets.map(t => t.id)),
     scene: new Set(libs.scenes.map(s => s.id)),
-    texture: new Set(libs.textureIds),
+    image: new Set(libs.images.map(i => i.id)),
+    // The RECORD, not the live registration: a texture whose image failed to decode is still an asset the
+    // user owns and can repair, and dropping its card would make it unreachable.
+    texture: new Set(libs.textures.map(t => t.id)),
   }
 }
 

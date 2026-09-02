@@ -4,13 +4,14 @@ import { Filemanager, WillowDark, getMenuOptions } from '@svar-ui/react-filemana
 import type { IFileMenuOption, IParsedEntity, TContextMenuType, TMode } from '@svar-ui/react-filemanager'
 // filemanager.css @imports the SVAR stylesheet itself, so the skin's rules deterministically follow it.
 import './filemanager.css'
+import { installBadgeStyles } from './badgeStyles'
 
 import { useCleoEngine } from '../EngineContext'
 import { useVfs } from './VfsContext'
 import { useFileManagerBridge, FM_MODE_KEY } from './useFileManagerBridge'
 import { useDragOutPatch } from './useDragOutPatch'
 import { runUpload } from './uploadRouter'
-import { iconFor, thumbnailOf } from './assetKinds'
+import { badgeStyles, iconFor, thumbnailOf } from './assetKinds'
 import MissingAssetsPopover from './MissingAssetsPopover'
 import { baseOf, buildFileManagerData, extOf, kindOfExt, findMissingFromExplorer, findOrphanEntries } from '../../utils/vfs'
 import { readDroppedEntries } from '../../utils/importGrouping'
@@ -20,6 +21,10 @@ import { hoveredScriptStore } from '../sceneInspector/hoveredScriptStore'
 // The bottom bar's single "Assets" tab: one file-manager view over all five asset libraries, with real
 // folders. Folder layout lives in VfsContext, SVAR's store owns what is on screen, useFileManagerBridge
 // stitches them together. Creation and import stay in our toolbar: SVAR's performAction is a closed switch.
+
+// The per-kind card badges. Generated from the icon and extension tables rather than written into
+// filemanager.css, so they cannot drift from the icons they mirror — see `badgeStyles`.
+installBadgeStyles()
 
 export default function AssetsExplorer() {
   const { ready } = useVfs()
@@ -39,7 +44,7 @@ function AssetsExplorerHost() {
     enterMaterialEditor, enterTerrainMaterialEditor, enterTemplateEditor, enterScriptEditor, createTilesetFromImage, importAnimationFiles,
     importModelFiles, addTemplate, createScene, editorScene, scripts, bodies, triggers, eventEmitter,
   } = useCleoEngine()
-  const { vfs, libs, pathIndexRef, landingFolderRef, depsRef } = useVfs()
+  const { vfs, libs, pathIndexRef, folderKindsRef, landingFolderRef, depsRef } = useVfs()
 
   const wrapperRef = useRef<HTMLDivElement>(null)
   const vfsRef = useRef(vfs)
@@ -269,10 +274,16 @@ function AssetsExplorerHost() {
   }, [pathIndexRef, depsRef])
 
   const icons = useCallback((file: Partial<IParsedEntity>): string => {
-    if (!file?.id || file.type === 'folder') return iconFor('folder')
+    if (!file?.id) return iconFor('folder')
+    // A folder holding exactly one kind wears that kind's icon — which is what makes the `Source`
+    // subfolder full of images read as images at a glance, and its parent read as textures.
+    if (file.type === 'folder') {
+      const only = folderKindsRef.current.get(file.id)
+      return iconFor(only ?? 'folder')
+    }
     const entry = pathIndexRef.current.get(file.id)
     return iconFor(entry ? entry.kind : kindOfExt(extOf(file.id)))
-  }, [pathIndexRef])
+  }, [pathIndexRef, folderKindsRef])
 
   const newFolder = useCallback(() => apiRef.current?.exec('create-file', {
     file: { name: 'New folder', type: 'folder' },

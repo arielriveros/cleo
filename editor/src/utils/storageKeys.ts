@@ -26,13 +26,20 @@ export const KEYS = {
   animationFields: 'cleo_animation_fields',
   animations: 'cleo_animations',
   tilesets: 'cleo_tilesets',
+  /**
+   * The two halves of the image/texture split. Metadata only — image BYTES stay in the `textures`
+   * IndexedDB object store, keyed by image id (see textureStore.ts), never in these arrays.
+   */
+  images: 'cleo_images',
+  textures: 'cleo_textures',
 } as const;
 
 /** The asset libraries, as `usePersistedLibrary` and the bundle importer address them. */
-export type LibName = 'materials' | 'terrainMaterials' | 'templates' | 'models' | 'scripts' | 'animationFields' | 'animations' | 'tilesets';
+export type LibName = 'materials' | 'terrainMaterials' | 'templates' | 'models' | 'scripts' | 'animationFields' | 'animations' | 'tilesets' | 'images' | 'textures';
 
 export const LIB_NAMES: readonly LibName[] = [
   'materials', 'terrainMaterials', 'templates', 'models', 'scripts', 'animationFields', 'animations', 'tilesets',
+  'images', 'textures',
 ];
 
 /**
