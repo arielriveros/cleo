@@ -11,13 +11,24 @@ export function timerQueryExtension(gl: WebGL2RenderingContext): any {
     return gl.getExtension('EXT_disjoint_timer_query_webgl2');
 }
 
+/**
+ * The anisotropic-filtering extension object, or null when the driver withholds it.
+ *
+ * Separate from the `maxAnisotropy` capability below because the PNAME lives on the object, not in the
+ * core enum table: a texture that wants to raise anisotropy needs `ext.TEXTURE_MAX_ANISOTROPY_EXT` to
+ * name the parameter, and the limit alone cannot supply it.
+ */
+export function anisotropyExtension(gl: WebGL2RenderingContext): any {
+    return gl.getExtension('EXT_texture_filter_anisotropic');
+}
+
 export function detectWebGL2Capabilities(gl: WebGL2RenderingContext): DeviceCapabilities {
     // Optional and independent: a device can render to a float target while refusing to filter it.
     // Reported separately because texture.ts requires both before allocating RGBA16F.
     const floatRenderable = gl.getExtension('EXT_color_buffer_float') !== null;
     const floatFilterable = gl.getExtension('OES_texture_float_linear') !== null;
 
-    const anisotropic = gl.getExtension('EXT_texture_filter_anisotropic');
+    const anisotropic = anisotropyExtension(gl);
     const maxAnisotropy = anisotropic
         ? gl.getParameter(anisotropic.MAX_TEXTURE_MAX_ANISOTROPY_EXT) as number
         : 1;

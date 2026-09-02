@@ -86,20 +86,51 @@ export function textureByteSize(
 // ------------------------------------------------------------------------------------------------
 
 export type AddressMode = 'clamp-to-edge' | 'repeat' | 'mirror-repeat';
+export type FilterMode = 'nearest' | 'linear';
 
 /**
  * The sampling and colour-space state a texture applies to every upload that follows — a property of
  * the texture, not of a write. Depth overrides it: forced to NEAREST/CLAMP whatever was asked for.
+ *
+ * May be applied MORE THAN ONCE. Re-configuring retunes a texture that already holds pixels, which is
+ * what lets the editor change wrap/filter/anisotropy without re-decoding the image — see
+ * `Texture.applySettings`. A backend must therefore treat this as a write to live state, not as part
+ * of construction.
  */
 export interface TextureConfigureDescriptor {
     readonly format: TextureFormat;
-    readonly addressMode: AddressMode;
-    readonly minFilter: 'nearest' | 'linear' | 'linear-mipmap-linear';
-    /** Images arrive top-left-origin and GL samples bottom-left; false flips on upload. */
+    /** Per axis. W addresses the third axis of a 3D volume and is ignored by 2D and cube targets. */
+    readonly addressModeU: AddressMode;
+    readonly addressModeV: AddressMode;
+    readonly addressModeW: AddressMode;
+    readonly minFilter: FilterMode;
+    readonly magFilter: FilterMode;
+    /**
+     * The filter BETWEEN mip levels, or null for "this texture has no mip chain" — the exact pair
+     * {@link glMinFilter} takes, rather than WebGL2's fused single enum. Fusing them here used to lose
+     * the chain on a nearest-minified texture, which had no spelling in the old union.
+     */
+    readonly mipmapFilter: FilterMode | null;
+    /**
+     * Samples along the axis of anisotropy; 1 disables it. Backends clamp to
+     * {@link DeviceCapabilities.maxAnisotropy}, and force it back to 1 unless all three filters are
+     * linear — WebGPU rejects such a sampler outright, and WebGL2 would silently ignore it.
+     */
+    readonly maxAnisotropy: number;
+    /** The mip range the sampler may read. Omitted means the whole chain. */
+    readonly lodMinClamp?: number;
+    readonly lodMaxClamp?: number;
+    /**
+     * TRUE flips the image vertically on upload. Images arrive top-left-origin and GL samples
+     * bottom-left, so an unflipped upload reads upside down.
+     *
+     * Note the polarity: `TextureConfig.flipY` one layer up means the OPPOSITE, and has to, because its
+     * `false` default is baked into every project saved to date. `Texture`'s constructor is the one
+     * place that inverts, and this descriptor is truthful from here down.
+     */
     readonly flipY: boolean;
     readonly isDepth: boolean;
 }
-export type FilterMode = 'nearest' | 'linear';
 
 export interface SamplerDescriptor {
     addressModeU?: AddressMode;
@@ -114,6 +145,9 @@ export interface SamplerDescriptor {
      */
     compare?: CompareFunction;
     maxAnisotropy?: number;
+    /** The mip range this sampler may read. Omitted means the whole chain. */
+    lodMinClamp?: number;
+    lodMaxClamp?: number;
 }
 
 // ------------------------------------------------------------------------------------------------

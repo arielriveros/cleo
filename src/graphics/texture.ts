@@ -10,7 +10,7 @@ import { WebGL2Texture } from "./rhi/webgl2/webgl2Device";
 import type { Texture as RhiTexture } from "./rhi/resources";
 import { WebGL2TextureView } from "./rhi/webgl2/webgl2Commands";
 import { TextureUsage } from "./rhi/types";
-import type { TextureFormat, TextureDimension, AddressMode } from "./rhi/types";
+import type { TextureFormat, TextureDimension, AddressMode, TextureConfigureDescriptor } from "./rhi/types";
 
 // Float-texture capability, as the device reported it at boot.
 function floatSupport(): { floatRenderable: boolean; floatFilterable: boolean } {
@@ -30,12 +30,41 @@ function reportFloatDowngrade(requested: TextureFormat, actual: TextureFormat): 
     );
 }
 
+/** The three wrap modes, as `TextureConfig` spells them. */
+export type WrapMode = 'clamp' | 'repeat' | 'mirror';
+
 export interface TextureConfig {
+    /**
+     * INVERTED, historically: `false` — the default — means the image IS flipped on upload.
+     *
+     * It cannot be corrected in place. The value is baked into every material, scene, bundle and
+     * published pack written to date, and nothing in an old record distinguishes "written before the
+     * fix" from "written after", so flipping the meaning would silently invert every existing texture.
+     * The editor's `TextureSettings.flipY` is positive and inverts here, at the one boundary; the RHI's
+     * `TextureConfigureDescriptor.flipY` below is truthful.
+     */
     flipY?: boolean;
     usage?: 'color' | 'depth';
-    wrapping?: 'clamp' | 'repeat' | 'mirror';
+    /** Both axes at once. `wrapU`/`wrapV`/`wrapW` override it per axis when given. */
+    wrapping?: WrapMode;
+    wrapU?: WrapMode;
+    wrapV?: WrapMode;
+    /** The third axis of a 3D volume. Ignored by 2D and cube targets. */
+    wrapW?: WrapMode;
     mipMap?: boolean;
     mipMapFilter?: 'nearest' | 'linear';
+    /** Minification within a level. Defaults to linear. */
+    minFilter?: 'nearest' | 'linear';
+    /** Magnification. Defaults to linear; `nearest` is what keeps pixel art sharp when zoomed in. */
+    magFilter?: 'nearest' | 'linear';
+    /**
+     * Samples along the axis of anisotropy; 1 (the default) disables it. Clamped to the device limit,
+     * and ignored unless minification, magnification and the mip filter are all linear.
+     */
+    anisotropy?: number;
+    /** The mip range the sampler may read. Omitted means the whole chain. */
+    lodMin?: number;
+    lodMax?: number;
     precision?: 'low' | 'high';
     target?: 'texture2D' | 'cubemap' | 'texture3D' | 'texture2DArray';
     /** Colour channels. Defaults to RGBA; 'r' is a single-channel target for scalar buffers. */
@@ -89,15 +118,21 @@ export class Texture {
     private _sourceUri: string | null = null; // memoized data URL for _source
     private _objectUrl: string | null = null; // blob: URL backing _data's src; revoked on delete()
     private _flipY: boolean;
+    private _addressU!: AddressMode;
+    private _addressV!: AddressMode;
+    private _addressW!: AddressMode;
+    private _minFilterMode: 'nearest' | 'linear' = 'linear';
+    private _magFilterMode: 'nearest' | 'linear' = 'linear';
+    private _anisotropy: number = 1;
+    private _lodMin: number | undefined;
+    private _lodMax: number | undefined;
     private _usage: 'color' | 'depth';
     private _precision: 'low' | 'high';
-    private _wrapping: number;
     private _addressMode: AddressMode;
     private _mipMapFilter: 'nearest' | 'linear' = 'linear';
     private _target: number;
     private _internalFormat: number;
     private _mipMap: boolean;
-    private _minFilter: number;
     private _format: number;
     private _type: number;
     // Unit this texture was last bound to, so `unbind()` releases that unit rather than assuming 0.
@@ -117,12 +152,17 @@ export class Texture {
                      : '2d';
         this._target = glTextureTarget(dimension);
 
+        // `wrapping` is the both-axes shorthand every existing caller passes; the per-axis fields
+        // override it. `_addressMode` stays the U axis, which is what the legacy `config` getter reports.
         this._addressMode = ADDRESS_MODES[options?.wrapping ?? 'clamp'];
-        this._wrapping = glAddressMode(this._addressMode);
+        this._addressU = ADDRESS_MODES[options?.wrapU ?? options?.wrapping ?? 'clamp'];
+        this._addressV = ADDRESS_MODES[options?.wrapV ?? options?.wrapping ?? 'clamp'];
+        this._addressW = ADDRESS_MODES[options?.wrapW ?? options?.wrapping ?? 'clamp'];
 
         // Format policy, including the float-to-RGBA8 fallback, lives in rhi/textureFormat.ts.
         const resolved = resolveTextureFormat(
-            { usage: this._usage, precision: this._precision, channels: options?.channels, format: options?.format },
+            { usage: this._usage, precision: this._precision, channels: options?.channels,
+              format: options?.format, loadOnly: options?.loadOnly },
             floatSupport(),
         );
         this._resolvedFormat = resolved.format;
@@ -162,16 +202,36 @@ export class Texture {
 
         const filter = options?.mipMapFilter === 'nearest' ? 'nearest' : 'linear';
         this._mipMapFilter = filter;
-        this._minFilter = glMinFilter(filter, this._mipMap ? filter : null);
+        // Minification used to be forced to the mip filter, so a texture could not be minified with
+        // `nearest` while blending between levels with `linear`. They are independent now, and both
+        // default to the old fused value so nothing that omits them changes.
+        this._minFilterMode = options?.minFilter ?? filter;
+        this._magFilterMode = options?.magFilter ?? 'linear';
+        this._anisotropy = Math.max(1, Math.round(options?.anisotropy ?? 1));
+        this._lodMin = options?.lodMin;
+        this._lodMax = options?.lodMax;
 
-        this._gpu.configure({
-            format: resolved.format,
-            addressMode: this._addressMode,
-            minFilter: this._mipMap ? (filter === 'nearest' ? 'nearest' : 'linear-mipmap-linear')
-                                    : filter,
-            flipY: this._flipY,
+        this._gpu.configure(this._samplingDescriptor());
+    }
+
+    /** The device-facing form of this texture's sampling state. The one place the flipY sense flips. */
+    private _samplingDescriptor(): TextureConfigureDescriptor {
+        return {
+            format: this._resolvedFormat,
+            addressModeU: this._addressU,
+            addressModeV: this._addressV,
+            addressModeW: this._addressW,
+            minFilter: this._minFilterMode,
+            magFilter: this._magFilterMode,
+            mipmapFilter: this._mipMap ? this._mipMapFilter : null,
+            maxAnisotropy: this._anisotropy,
+            ...(this._lodMin !== undefined ? { lodMinClamp: this._lodMin } : {}),
+            ...(this._lodMax !== undefined ? { lodMaxClamp: this._lodMax } : {}),
+            // `TextureConfig.flipY` reads backwards for compatibility (see its doc comment); the
+            // descriptor is truthful, so the inversion happens exactly here and nowhere else.
+            flipY: !this._flipY,
             isDepth: this._usage === 'depth',
-        });
+        };
     }
 
     /** The format actually allocated, which is not necessarily the one requested. */
@@ -426,18 +486,78 @@ export class Texture {
         attachment: RhiTextureView | null;
         sampled: RhiTextureView | null;
     } | null = null;
+    /**
+     * The config this texture would be rebuilt from. This is what `serializeTextureData` writes into a
+     * scene, a bundle and a published pack, so ANY authored field missing here is silently lost at save.
+     *
+     * Still incomplete: `size` and `storage` are deliberately absent. `Scene.parse` re-registers from
+     * this, and both change ALLOCATION rather than sampling — emitting them would make a restored data
+     * texture allocate differently from the one that was saved. `channels` is absent for the same
+     * reason, and because `format` below already pins what it was inferring.
+     */
     public get config(): TextureConfig {
+        const wrap = (mode: AddressMode): WrapMode =>
+            mode === 'clamp-to-edge' ? 'clamp' : mode === 'repeat' ? 'repeat' : 'mirror';
         return {
             flipY: this._flipY,
             usage: this._usage,
-            wrapping: this._addressMode === 'clamp-to-edge' ? 'clamp' : this._addressMode === 'repeat' ? 'repeat' : 'mirror',
+            // Kept for readers older than the per-axis fields; they see the U axis, which is what the
+            // single `wrapping` meant when it set both.
+            wrapping: wrap(this._addressMode),
+            wrapU: wrap(this._addressU),
+            wrapV: wrap(this._addressV),
+            wrapW: wrap(this._addressW),
             mipMap: this._mipMap,
             mipMapFilter: this._mipMapFilter,
+            minFilter: this._minFilterMode,
+            magFilter: this._magFilterMode,
+            anisotropy: this._anisotropy,
+            ...(this._lodMin !== undefined ? { lodMin: this._lodMin } : {}),
+            ...(this._lodMax !== undefined ? { lodMax: this._lodMax } : {}),
             precision: this._precision,
+            format: this._resolvedFormat,
             target: this._gpu.dimension === '2d' ? 'texture2D'
                   : this._gpu.dimension === '3d' ? 'texture3D'
                   : this._gpu.dimension === '2d-array' ? 'texture2DArray' : 'cubemap'
         }
+    }
+
+    /**
+     * Retune a LIVE texture's sampling without rebuilding it — what the texture editor drives.
+     *
+     * Only sampler state is settled here. `mipMap` is a property of the UPLOAD (the chain has to exist
+     * before it can be filtered between), so turning it on re-derives the chain from the pixels already
+     * on the device; turning it off only changes the sampler. `flipY` is not settable at all: it is
+     * applied as the bytes are unpacked, so changing it means re-uploading the image, which is the
+     * caller's business.
+     *
+     * Returns false when mipmaps were requested on a texture with nothing uploaded yet.
+     */
+    public applySettings(options: TextureConfig): boolean {
+        const wanted = options.mipMap ?? this._mipMap;
+        const gaining = wanted && !this._mipMap;
+
+        this._addressMode = ADDRESS_MODES[options.wrapping ?? 'clamp'];
+        this._addressU = ADDRESS_MODES[options.wrapU ?? options.wrapping ?? 'clamp'];
+        this._addressV = ADDRESS_MODES[options.wrapV ?? options.wrapping ?? 'clamp'];
+        this._addressW = ADDRESS_MODES[options.wrapW ?? options.wrapping ?? 'clamp'];
+        this._mipMapFilter = options.mipMapFilter === 'nearest' ? 'nearest' : 'linear';
+        this._minFilterMode = options.minFilter ?? this._mipMapFilter;
+        this._magFilterMode = options.magFilter ?? 'linear';
+        this._anisotropy = Math.max(1, Math.round(options.anisotropy ?? 1));
+        this._lodMin = options.lodMin;
+        this._lodMax = options.lodMax;
+        this._mipMap = wanted;
+
+        // The chain must exist before the sampler is told to read it, or the texture samples as
+        // incomplete and comes back black. Size first: it is what fixes the level count.
+        if (gaining) {
+            if (!this._width || !this._height) { this._mipMap = false; return false; }
+            this._syncGpuSize();
+            this._gpu.generateMipmaps();
+        }
+        this._gpu.configure(this._samplingDescriptor());
+        return true;
     }
 
     /** Slices of a 3D volume or layers of a 2D array; 0 for plain 2D and cubemap textures. */

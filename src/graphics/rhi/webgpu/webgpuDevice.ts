@@ -30,6 +30,7 @@ import type { PrimitiveTopology,
     VertexBufferLayout, PrimitiveState, DepthStencilState, ColorTargetState, RenderPassDescriptor,
     ShaderStageFlags, IndexFormat, BlendState, ShaderResource, TextureConfigureDescriptor, AddressMode,
 } from '../types';
+import { resolveSampler, samplerKey } from '../samplerState';
 import { TEXTURE_FORMAT_INFO, textureByteSize, isDepthFormat, ShaderStage, TextureUsage,
          isTriangleTopology } from '../types';
 
@@ -38,7 +39,10 @@ const SCOPE = 'WebGPU';
 // What a texture is sampled with until `configure` says otherwise, so `uploadBytes` can record an
 // address mode on a texture that was never configured.
 const DEFAULT_SAMPLING: TextureConfigureDescriptor = {
-    format: 'rgba8unorm', addressMode: 'clamp-to-edge', minFilter: 'linear', flipY: false, isDepth: false,
+    format: 'rgba8unorm',
+    addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge', addressModeW: 'clamp-to-edge',
+    minFilter: 'linear', magFilter: 'linear', mipmapFilter: null,
+    maxAnisotropy: 1, flipY: true, isDepth: false,
 };
 
 // `copyTextureToBuffer` requires each row to start on a 256-byte boundary — a validation rule, not a
@@ -260,8 +264,17 @@ class WebGPUTexture implements Texture {
 
     private _config: TextureConfigureDescriptor | null = null;
 
-    /** Remembered for the sampler this texture will be paired with; nothing to apply to the texture. */
-    public configure(descriptor: TextureConfigureDescriptor): void { this._config = descriptor; }
+    /**
+     * Remembered for the sampler this texture will be paired with; nothing to apply to the texture.
+     *
+     * A RE-configure bumps {@link generation}, which is what makes retuning a live texture visible: the
+     * renderer keys its bind-group cache on `(texture, generation)` (`Renderer._textureGroupKey`), and a
+     * group holding the old sampler would otherwise be reused for the life of the pipeline.
+     */
+    public configure(descriptor: TextureConfigureDescriptor): void {
+        if (this._config) this.generation++;
+        this._config = descriptor;
+    }
 
     /** The state {@link configure} recorded, for the sampler the bind group pairs with this texture. */
     public get samplingConfig(): TextureConfigureDescriptor | null { return this._config; }
@@ -291,7 +304,10 @@ class WebGPUTexture implements Texture {
      */
     public uploadBytes(data: Uint8Array, width: number, height: number, wrapping: AddressMode): void {
         this.uploadRegion(0, 0, width, height, data);
-        this._config = { ...(this._config ?? DEFAULT_SAMPLING), addressMode: wrapping };
+        this._config = {
+            ...(this._config ?? DEFAULT_SAMPLING),
+            addressModeU: wrapping, addressModeV: wrapping, addressModeW: wrapping,
+        };
     }
 
     public uploadRegion(x: number, y: number, width: number, height: number, data: Uint8Array): void {
@@ -371,7 +387,7 @@ class WebGPUTexture implements Texture {
     private _copyExternal(source: TexImageSource, width: number, height: number,
                           mipLevel: number, layer: number): void {
         this._queue.copyExternalImageToTexture(
-            { source: source as GPUCopyExternalImageSource, flipY: !(this._config?.flipY ?? true) },
+            { source: source as GPUCopyExternalImageSource, flipY: this._config?.flipY ?? true },
             { texture: this.handle, mipLevel, origin: { x: 0, y: 0, z: layer } },
             { width, height, depthOrArrayLayers: 1 });
     }
@@ -431,6 +447,8 @@ class WebGPUSampler implements Sampler {
             mipmapFilter: gpuFilterMode(descriptor.mipmapFilter ?? 'nearest'),
             ...(descriptor.compare ? { compare: gpuCompare(descriptor.compare) } : {}),
             maxAnisotropy: Math.max(1, Math.floor(descriptor.maxAnisotropy ?? 1)),
+            ...(descriptor.lodMinClamp !== undefined ? { lodMinClamp: descriptor.lodMinClamp } : {}),
+            ...(descriptor.lodMaxClamp !== undefined ? { lodMaxClamp: descriptor.lodMaxClamp } : {}),
         });
     }
 
@@ -1186,18 +1204,27 @@ export class WebGPUDevice implements Device {
         const compare = depth && texture.compareEnabled;
         // A depth texture may only be FILTERED through a comparison sampler; sampled ordinarily it
         // must take a non-filtering one, or WebGPU refuses the bind group.
-        const filter = depth && !compare ? 'nearest' as const
-                     : (c?.minFilter === 'nearest' ? 'nearest' as const : 'linear' as const);
-        const key = c ? `${c.addressMode}|${filter}|${compare}` : `default|${filter}|${compare}`;
+        // Every rule about which sampler a texture may legally take lives in resolveSampler, so both
+        // backends apply the same ones and the same asset reads the same way on either device.
+        const r = resolveSampler(c, {
+            isDepth: depth, compare, maxAnisotropy: this.capabilities.maxAnisotropy,
+        });
+
+        const key = samplerKey(r);
         let sampler = this._samplers.get(key);
         if (!sampler) {
             sampler = this.createSampler({
-                addressModeU: c?.addressMode ?? 'clamp-to-edge',
-                addressModeV: c?.addressMode ?? 'clamp-to-edge',
-                addressModeW: c?.addressMode ?? 'clamp-to-edge',
-                magFilter: filter,
-                minFilter: filter,
-                mipmapFilter: !depth && c?.minFilter === 'linear-mipmap-linear' ? 'linear' : 'nearest',
+                addressModeU: r.addressModeU,
+                addressModeV: r.addressModeV,
+                addressModeW: r.addressModeW,
+                magFilter: r.magFilter,
+                minFilter: r.minFilter,
+                // WebGPU has no "no mip chain" spelling: a single-level texture never reaches level 1,
+                // so 'nearest' is the cheap way to name a filter that will not be used.
+                mipmapFilter: r.mipmapFilter ?? 'nearest',
+                ...(r.maxAnisotropy > 1 ? { maxAnisotropy: r.maxAnisotropy } : {}),
+                ...(r.lodMinClamp !== undefined ? { lodMinClamp: r.lodMinClamp } : {}),
+                ...(r.lodMaxClamp !== undefined ? { lodMaxClamp: r.lodMaxClamp } : {}),
                 ...(compare ? { compare: 'less' as const } : {}),
             });
             this._samplers.set(key, sampler);

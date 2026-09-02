@@ -2,8 +2,8 @@ import { gl } from '../../glContext';
 import { GLState } from '../../systems/glState';
 import { Logger } from '../../../core/logger';
 import { setViewportSize } from '../../renderStats';
-import { glBufferTarget, glBufferUsageHint, glTextureTarget, glTextureFormat, glAddressMode, glMinFilter } from './glEnums';
-import { detectWebGL2Capabilities } from './capabilities';
+import { glBufferTarget, glBufferUsageHint, glTextureTarget, glTextureFormat, glAddressMode, glMinFilter, glMagFilter } from './glEnums';
+import { detectWebGL2Capabilities, anisotropyExtension } from './capabilities';
 import { applyVertexLayout } from './vertexArray';
 import {
     WebGL2ShaderModule, WebGL2RenderPipeline, WebGL2BindGroup, WebGL2Sampler,
@@ -496,6 +496,18 @@ export class WebGL2Buffer implements Buffer {
     }
 }
 
+let anisoExt: any | null | undefined;
+
+/**
+ * `EXT_texture_filter_anisotropic`, fetched on FIRST USE rather than at module load: `gl` is a live
+ * binding that is still null while this module is being evaluated. `undefined` means "not asked yet";
+ * `null` means "asked, and the driver withholds it".
+ */
+function anisotropyExt(): any | null {
+    if (anisoExt === undefined) anisoExt = anisotropyExtension(gl) ?? null;
+    return anisoExt;
+}
+
 /**
  * A GPU texture. Byte accounting goes through the shared {@link textureByteSize} and reports the format
  * actually ALLOCATED, not the one requested, so a float downgrade is not counted at 2x.
@@ -521,8 +533,16 @@ export class WebGL2Texture implements Texture {
     private _internalFormat: number = 0;
     private _glFormat: number = 0;
     private _type: number = 0;
-    private _wrapping: number = 0;
+    private _wrapS: number = 0;
+    private _wrapT: number = 0;
+    private _wrapR: number = 0;
     private _minFilter: number = 0;
+    private _magFilter: number = 0;
+    private _maxAnisotropy: number = 1;
+    private _lodMinClamp: number | undefined;
+    private _lodMaxClamp: number | undefined;
+    /** Set once an upload or allocation has given this texture storage worth reconfiguring. */
+    private _hasStorage: boolean = false;
     private _flipY: boolean = false;
     private _isDepth: boolean = false;
     private _boundSlot: number = 0;
@@ -571,14 +591,26 @@ export class WebGL2Texture implements Texture {
         this._internalFormat = triple.internalFormat;
         this._glFormat = triple.format;
         this._type = triple.type;
-        this._wrapping = glAddressMode(descriptor.addressMode);
-        // `linear-mipmap-linear` is the pair, not a third filter: WebGL2 has one enum for both
-        // halves, so the neutral descriptor names the combination and the split happens here.
-        const mip = descriptor.minFilter === 'linear-mipmap-linear';
-        const base = descriptor.minFilter === 'nearest' ? 'nearest' : 'linear';
-        this._minFilter = glMinFilter(base, mip ? base : null);
+        this._wrapS = glAddressMode(descriptor.addressModeU);
+        this._wrapT = glAddressMode(descriptor.addressModeV);
+        this._wrapR = glAddressMode(descriptor.addressModeW);
+        // WebGL2 fuses minification and the mip filter into a single enum. glMinFilter takes exactly the
+        // pair the descriptor carries and does the fold here, which is why the descriptor keeps them
+        // apart: the old fused spelling had no way to say "nearest minification WITH a mip chain".
+        this._minFilter = glMinFilter(descriptor.minFilter, descriptor.mipmapFilter);
+        this._magFilter = glMagFilter(descriptor.magFilter);
+        this._maxAnisotropy = Math.max(1, Math.min(descriptor.maxAnisotropy, device.capabilities.maxAnisotropy));
+        this._lodMinClamp = descriptor.lodMinClamp;
+        this._lodMaxClamp = descriptor.lodMaxClamp;
         this._flipY = descriptor.flipY;
         this._isDepth = descriptor.isDepth;
+        // A RE-configure has no upload behind it to carry the new state to the driver, so it is pushed
+        // now. Skipped before the first upload, when there is no storage to parameterise.
+        if (this._hasStorage) {
+            this.bindForUpload();
+            this._applySamplerState();
+            this.unbind();
+        }
     }
 
     /** Bind for SAMPLING, through the state cache. The frame's hottest bind path. */
@@ -601,22 +633,46 @@ export class WebGL2Texture implements Texture {
         GLState.bindTexture(this._boundSlot, this.target, null);
     }
 
-    /** The sampler state `create()` applies: forced NEAREST/CLAMP for depth, configured otherwise. */
+    /**
+     * The sampler state `create()` applies: forced NEAREST/CLAMP for depth, configured otherwise.
+     * The caller must have bound the texture for mutation — texParameter acts on the active unit.
+     */
     private _applySamplerState(): void {
-        const params = this._isDepth
-            ? [gl.NEAREST, gl.NEAREST, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE]
-            : [this._minFilter, gl.LINEAR, this._wrapping, this._wrapping];
-        gl.texParameteri(this.target, gl.TEXTURE_MIN_FILTER, params[0]);
-        gl.texParameteri(this.target, gl.TEXTURE_MAG_FILTER, params[1]);
-        gl.texParameteri(this.target, gl.TEXTURE_WRAP_S, params[2]);
-        gl.texParameteri(this.target, gl.TEXTURE_WRAP_T, params[3]);
+        this._hasStorage = true;
+        if (this._isDepth) {
+            gl.texParameteri(this.target, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(this.target, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texParameteri(this.target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(this.target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            return;
+        }
+        gl.texParameteri(this.target, gl.TEXTURE_MIN_FILTER, this._minFilter);
+        gl.texParameteri(this.target, gl.TEXTURE_MAG_FILTER, this._magFilter);
+        gl.texParameteri(this.target, gl.TEXTURE_WRAP_S, this._wrapS);
+        gl.texParameteri(this.target, gl.TEXTURE_WRAP_T, this._wrapT);
+        // R addresses the third axis, which only 3D and array targets have. WRAP_R on a 2D texture is
+        // an INVALID_ENUM, so it is gated rather than written unconditionally.
+        if (this.target === gl.TEXTURE_3D || this.target === gl.TEXTURE_2D_ARRAY)
+            gl.texParameteri(this.target, gl.TEXTURE_WRAP_R, this._wrapR);
+
+        // Both clamps go together whenever either is authored: they are texture state, so writing one
+        // and leaving the other at its default silently opens the range back up at that end.
+        if (this._lodMinClamp !== undefined || this._lodMaxClamp !== undefined) {
+            gl.texParameterf(this.target, gl.TEXTURE_MIN_LOD, this._lodMinClamp ?? -1000);
+            gl.texParameterf(this.target, gl.TEXTURE_MAX_LOD, this._lodMaxClamp ?? 1000);
+        }
+
+        // Written even at 1, not only when raised: sampler state lives on the texture object, so a
+        // texture reconfigured back down to isotropic would otherwise keep the driver's last value.
+        const ext = anisotropyExt();
+        if (ext) gl.texParameterf(this.target, ext.TEXTURE_MAX_ANISOTROPY_EXT, this._maxAnisotropy);
     }
 
     /** Upload a 2D image, or allocate an empty 2D render target when `image` is null. */
     public upload2D(image: TexImageSource | null, width: number, height: number, mipMap: boolean): void {
         this.bindForUpload();
         this._clearPendingErrors();
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, this._flipY);
         if (image) gl.texImage2D(this.target, 0, this._internalFormat, this._glFormat, this._type, image);
         else gl.texImage2D(this.target, 0, this._internalFormat, width, height, 0, this._glFormat, this._type, null);
         this._applySamplerState();
@@ -637,7 +693,7 @@ export class WebGL2Texture implements Texture {
     public uploadCube(images: readonly TexImageSource[] | null, width: number, height: number, mipMap: boolean): void {
         this.bindForUpload();
         this._clearPendingErrors();
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, this._flipY);
         const faces = WebGL2Texture.cubeFaces();
         for (let i = 0; i < faces.length; i++) {
             if (images) gl.texImage2D(faces[i], 0, this._internalFormat, this._glFormat, this._type, images[i]);
@@ -653,7 +709,7 @@ export class WebGL2Texture implements Texture {
         this.bindForUpload();
         const target = WebGL2Texture.cubeFaces()[face];
         this._clearPendingErrors();
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, !this._flipY);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, this._flipY);
         gl.texImage2D(target, 0, this._internalFormat, this._glFormat, this._type, image);
         if (mipMap) gl.generateMipmap(this.target);
         this.checkForErrors();
