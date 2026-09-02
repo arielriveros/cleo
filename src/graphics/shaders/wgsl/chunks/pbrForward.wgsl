@@ -8,11 +8,9 @@
 // Uses VertexOutput and tbnOf() without including chunks/modelVarying.wgsl: whichever vertex chunk the
 // program included already brought them in, and a second definition is a compile error.
 
-/** Mip of the environment cube taken at full roughness. Declared here rather than shared for the
- *  same reason the light counts are: the include resolver has no include-once guard. */
+/** Mip of the environment cube taken at full roughness. Declared here rather than in a shared chunk
+ *  because the include resolver has no include-once guard and a duplicate `const` is a compile error. */
 const MAX_REFLECTION_LOD: f32 = 4.0;
-const MAX_POINT_LIGHTS: i32 = 16;
-const MAX_SPOTLIGHTS: i32 = 8;
 
 // Samplers are separate globals named `u_material_<field>`, not members of the material struct: WGSL
 // has no opaque types in a struct, and no legal identifier generates a dotted GLSL name.
@@ -152,13 +150,9 @@ struct ForwardLighting {
     u_view: mat4x4<f32>,        // only to get the view-space depth that selects a cascade
     u_dirLight: DirectionalLight,
     u_skyLight: SkyLight,
-    u_pointLights: array<PointLight, 16>,
-    u_spotlights: array<SpotLight, 8>,
     u_viewPos: vec3<f32>,
     /** Scene-wide indirect fill, in internal radiance units. Replaces the per-light ambient. */
     u_sceneAmbient: vec3<f32>,
-    u_numPointLights: i32,
-    u_numSpotlights: i32,
     u_useEnvMap: i32,
     u_envMapLinear: i32,        // env cube is linear HDR (a light probe) -> skip the sRGB decode
     /** 0 restores the pre-phase-4 behaviour of occluding both lobes by the same hemisphere term. */
@@ -331,14 +325,17 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     Lo += evaluateDirectionalLight(u_lighting.u_dirLight, N, V, albedo, metallic, roughness,
                                    (1.0 - directionalShadow(fragPos, N, viewDepth)) * selfShadow);
 
-    for (var i = 0; i < u_lighting.u_numPointLights; i++) {
-        Lo += evaluatePointLight(u_lighting.u_pointLights[i], fragPos, N, V, albedo, metallic, roughness);
-    }
-
-    for (var i = 0; i < u_lighting.u_numSpotlights; i++) {
-        let sl = u_lighting.u_spotlights[i];
-        Lo += evaluateSpotLight(sl, fragPos, N, V, albedo, metallic, roughness,
-                                1.0 - spotShadowFor(i, fragPos, N, sl.position));
+    // Every punctual light that reaches THIS fragment, and no others. The two loops this replaced ran
+    // over fixed 16- and 8-element arrays for every fragment in the scene, including lights whose own
+    // falloff guarantees they contribute nothing here.
+    let cluster = cleoClusterOf(cleoFragCoord, viewDepth);
+    let first = cleoClusterOffset(cluster);
+    let count = cleoClusterCount(cluster);
+    for (var i = 0; i < count; i++) {
+        let cl = cleoLight(cleoClusterLight(first + i));
+        Lo += evaluateSpotLight(cl.light, fragPos, N, V, albedo, metallic, roughness,
+                                cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
+                                                       fragPos, N, cl.light.position));
     }
 
     // Occlusion came out of the ORM fetch above, and the two indirect lobes take DIFFERENT amounts of

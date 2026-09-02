@@ -55,18 +55,22 @@ export const DEFAULT_SOURCE_RADIUS = 0.05;
 export const DEFAULT_SCENE_AMBIENT_LUX = 0.1 * REFERENCE_ILLUMINANCE;
 
 /**
- * The shader-side light array sizes. Hand-matched to `array<PointLight, N>` in the four lighting
- * blocks, and gated by `npm run harness:uniforms`, which compares every computed offset against a real
- * driver — a mismatch here moves every member after the array and the whole block reads garbage.
+ * The most lights a scene will number, and therefore the most it can light with.
  *
- * They live here rather than in the renderer because the SCENE has to know them too: it stops
- * numbering lights at the cap, and a light past it gets index -1 instead of an out-of-range slot.
- * `systems/customShaders.ts` does not use these — it derives the same numbers from the reflected
- * layout of `pbr.wgsl`, which is a stronger check and available to it because it already imports the
- * program.
+ * A MEMORY budget, not a shader one, and that distinction is the whole point of this constant. What
+ * it replaced was `MAX_POINT_LIGHTS = 16` / `MAX_SPOTLIGHTS = 8`: the lengths of `array<PointLight,
+ * 16>` and `array<SpotLight, 8>` in four separate uniform blocks, hand-matched across eight files,
+ * every one of which had to be edited in lockstep. A scene's seventeenth point light was dropped, and
+ * every fragment in the scene looped over all twenty-four slots whether a light reached it or not.
+ *
+ * Lights now travel in a data texture and are assigned to the clusters they can reach (see
+ * `graphics/clusters.ts`), so nothing in any shader is sized by this. It bounds the record region of
+ * that texture — 64 bytes a light, so 64 KB here — and it is raisable by editing this line alone.
+ *
+ * It lives here rather than in the renderer because the SCENE has to know it: numbering stops at the
+ * cap, and a light past it gets index -1 rather than a record that does not exist.
  */
-export const MAX_POINT_LIGHTS = 16;
-export const MAX_SPOTLIGHTS = 8;
+export const MAX_LIGHTS = 1024;
 
 /** Fraction of peak brightness at which a legacy falloff curve is treated as having ended. */
 const LEGACY_RANGE_CUTOFF = 1 / 256;

@@ -12,9 +12,6 @@
 // precision qualifiers at all and naga emits `precision highp float` for the whole module, so the
 // hazard cannot arise here.
 
-const MAX_POINT_LIGHTS: i32 = 16;
-const MAX_SPOTLIGHTS: i32 = 8;
-
 @group(0) @binding(0) var u_material_baseTexture_texture: texture_2d<f32>;
 @group(0) @binding(1) var u_material_baseTexture_sampler: sampler;
 @group(0) @binding(2) var u_material_specularReflectivityMap_texture: texture_2d<f32>;
@@ -57,13 +54,9 @@ struct BlinnPhongLighting {
     u_view: mat4x4<f32>,        // only to get the view-space depth that selects a cascade
     u_dirLight: DirectionalLight,
     u_skyLight: SkyLight,
-    u_pointLights: array<PointLight, 16>,
-    u_spotlights: array<SpotLight, 8>,
     u_viewPos: vec3<f32>,
     /** Scene-wide indirect fill, in internal radiance units. Replaces the per-light ambient. */
     u_sceneAmbient: vec3<f32>,
-    u_numPointLights: i32,
-    u_numSpotlights: i32,
     u_useEnvMap: i32,
     u_envMapLinear: i32,        // env cube is linear HDR (a light probe) -> skip the sRGB decode
 };
@@ -94,25 +87,17 @@ fn computeDirectionalLight(fragPos: vec3<f32>, normal: vec3<f32>, viewDir: vec3<
     return (1.0 - shadow) * radiance * (diff * materialDiffuse + spec * materialSpecular);
 }
 
-fn computePointLight(fragPos: vec3<f32>, normal: vec3<f32>, viewDir: vec3<f32>, light: PointLight,
-                     materialDiffuse: vec3<f32>, materialSpecular: vec3<f32>) -> vec3<f32> {
-    let toLight = light.position - fragPos;
-    let d2 = dot(toLight, toLight);
-    let attenuation = distanceAttenuation(d2, light.invRangeSquared);
-    if (attenuation <= 0.0) { return vec3<f32>(0.0); }
-
-    let lightDir = normalize(toLight);
-    let diff = max(dot(normal, lightDir), 0.0);
-    let halfwayDir = normalize(lightDir + viewDir);
-    let spec = pow(max(dot(normal, halfwayDir), 0.0), u_material.shininess);
-
-    let radiance = light.color * (light.intensity * attenuation);
-    return radiance * (diff * materialDiffuse + spec * materialSpecular);
-}
-
-fn computeSpotlight(index: i32, fragPos: vec3<f32>, normal: vec3<f32>, viewDir: vec3<f32>,
-                    light: SpotLight,
-                    materialDiffuse: vec3<f32>, materialSpecular: vec3<f32>) -> vec3<f32> {
+/**
+ * One clustered punctual light. Both types come through here.
+ *
+ * The point-light twin this used to sit beside is gone. A point light is uploaded as a spot whose
+ * cone covers everything (`coneScale = 0`, `coneOffset = 1`), and `spotAttenuation` then returns
+ * exactly 1.0 — so the two functions computed the same number for it, one of them via a multiply by
+ * one. See chunks/clusteredLights.wgsl.
+ */
+fn computePunctualLight(fragPos: vec3<f32>, normal: vec3<f32>, viewDir: vec3<f32>,
+                        light: SpotLight, visibility: f32,
+                        materialDiffuse: vec3<f32>, materialSpecular: vec3<f32>) -> vec3<f32> {
     let toLight = light.position - fragPos;
     let d2 = dot(toLight, toLight);
     let attenuation = distanceAttenuation(d2, light.invRangeSquared);
@@ -120,13 +105,12 @@ fn computeSpotlight(index: i32, fragPos: vec3<f32>, normal: vec3<f32>, viewDir: 
 
     let lightDir = normalize(toLight);
     let cone = spotAttenuation(dot(lightDir, normalize(-light.direction)), light.coneScale, light.coneOffset);
-    let shadow = spotShadowFor(index, fragPos, normal, light.position);
 
     let diff = max(dot(normal, lightDir), 0.0);
     let halfwayDir = normalize(lightDir + viewDir);
     let spec = pow(max(dot(normal, halfwayDir), 0.0), u_material.shininess);
 
-    let radiance = light.color * (light.intensity * attenuation * cone * (1.0 - shadow));
+    let radiance = light.color * (light.intensity * attenuation * cone * visibility);
     return radiance * (diff * materialDiffuse + spec * materialSpecular);
 }
 
@@ -187,14 +171,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     result += computeDirectionalLight(fragPos, normal, viewDir, u_lighting.u_dirLight,
                                       matDiffuse, matSpecular);
 
-    for (var i = 0; i < u_lighting.u_numPointLights; i++) {
-        result += computePointLight(fragPos, normal, viewDir, u_lighting.u_pointLights[i],
-                                    matDiffuse, matSpecular);
-    }
-
-    for (var i = 0; i < u_lighting.u_numSpotlights; i++) {
-        result += computeSpotlight(i, fragPos, normal, viewDir, u_lighting.u_spotlights[i],
-                                   matDiffuse, matSpecular);
+    // Every punctual light that reaches THIS fragment. `u_view` is in the block for the cascade
+    // depth already, so the cluster lookup costs one transform that was being paid regardless.
+    let clusterDepth = -(u_lighting.u_view * vec4<f32>(fragPos, 1.0)).z;
+    let cluster = cleoClusterOf(cleoFragCoord, clusterDepth);
+    let first = cleoClusterOffset(cluster);
+    let count = cleoClusterCount(cluster);
+    for (var i = 0; i < count; i++) {
+        let cl = cleoLight(cleoClusterLight(first + i));
+        result += computePunctualLight(fragPos, normal, viewDir, cl.light,
+                                       cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
+                                                              fragPos, normal, cl.light.position),
+                                       matDiffuse, matSpecular);
     }
 
     if (u_lighting.u_useEnvMap != 0) {

@@ -84,6 +84,15 @@ export interface TextureConfig {
      * attachment usage, requires {@link size}, and is ignored on WebGL2.
      */
     storage?: boolean;
+    /**
+     * A pure DATA texture: only ever read with `textureLoad`, never rendered into and never filtered.
+     *
+     * Two consequences, both needed by the clustered light grid (see `graphics/lightGrid.ts`). It is
+     * exempt from the float-to-RGBA8 fallback — see `TextureFormatRequest.loadOnly` for why that is
+     * sound — and it asks for no render-attachment usage, so a format that is loadable but not
+     * attachable is still allocatable.
+     */
+    loadOnly?: boolean;
 }
 
 /** The six images of a cubemap, in GL face order. Every face is required. */
@@ -186,6 +195,10 @@ export class Texture {
                   | TextureUsage.COPY_SRC | TextureUsage.COPY_DST   // _copyDepth blits between targets
                 // STORAGE_BINDING replaces attachment usage rather than joining it — asking for both
                 // narrows the formats WebGPU accepts.
+                // A load-only data texture asks for nothing else: no attachment, no readback. See
+                // `TextureConfig.loadOnly`.
+                : options?.loadOnly
+                    ? TextureUsage.TEXTURE_BINDING | TextureUsage.COPY_DST
                 : options?.storage
                     ? TextureUsage.TEXTURE_BINDING | TextureUsage.COPY_DST | TextureUsage.STORAGE_BINDING
                     // COPY_SRC too: a colour target can be read back (thumbnails, probe preview,

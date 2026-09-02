@@ -17,7 +17,7 @@ import { UINode } from "./nodes/ui/uiNode";
 import { UIRootNode } from "./nodes/ui/uiRoot";
 import { parseNodeJson } from "./nodes/parseNodeJson";
 import { mat4, vec3 } from "gl-matrix";
-import { DEFAULT_SCENE_AMBIENT_LUX, legacyAmbientFromSceneJson, MAX_POINT_LIGHTS, MAX_SPOTLIGHTS } from "../../graphics/lighting";
+import { DEFAULT_SCENE_AMBIENT_LUX, legacyAmbientFromSceneJson, MAX_LIGHTS } from "../../graphics/lighting";
 import { Logger } from '../logger'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
 import { sceneStats, resetSceneStats, SceneStats } from "./sceneStats";
@@ -665,21 +665,26 @@ export class Scene {
     // TODO: Move this to a LightManager class
     private _asignLightIndices(): void {
         const nodes = this.nodes;
+        // ONE sequence for point and spot lights, where there used to be two.
+        //
+        // They shared nothing before because each indexed its own fixed uniform array. They now share a
+        // single record array in the light data texture, and `index` is the record — which is also what
+        // lets a cluster hold one list instead of two and the shader run one loop instead of two.
+        //
+        // Order is the scene-graph traversal order, and the renderer's two passes over `scene.lights`
+        // (the sphere collection and the record packing) both rely on walking the same sequence.
+        let punctual = 0;
         let pointLights = 0;
         let spotlights = 0;
         for (const node of nodes) {
-            if (node instanceof LightNode) {
-                // A slot past the shader array's end is -1, not the next integer. Numbering
-                // straight through meant the 17th point light was handed index 16 and the upload
-                // then wrote `u_pointLights[16].position` — a name the 16-element block does not
-                // contain, which resolves to nothing on one backend and to whatever follows it on
-                // the other.
-                if (node.type === 'point')
-                    node.index = pointLights < MAX_POINT_LIGHTS ? pointLights++ : -1;
+            if (!(node instanceof LightNode) || node.type === 'directional') continue;
 
-                if (node.type === 'spotlight')
-                    node.index = spotlights < MAX_SPOTLIGHTS ? spotlights++ : -1;
-            }
+            // -1, not the next integer, for a light past the cap: it has no record, so nothing can
+            // address it. That also removes it from the shadow passes, which would otherwise spend six
+            // cube faces on a light no fragment can look up.
+            node.index = punctual < MAX_LIGHTS ? punctual++ : -1;
+            if (node.type === 'point') pointLights++;
+            else spotlights++;
         }
         this._numPointLights = pointLights;
         this._numSpotlights = spotlights;
@@ -877,6 +882,12 @@ export class Scene {
     public set environmentMap(envMapTex: Texture | null) { this._environmentMap = envMapTex; }
 
     // TODO: Move this to a LightManager class
+    /**
+     * Counts, for the editor's statistics panel. Nothing gates on them any more — they used to be the
+     * loop bounds `u_numPointLights` / `u_numSpotlights` uploaded to four shaders.
+     */
     public get numPointLights(): number { return this._numPointLights; }
     public get numSpotlights(): number { return this._numSpotlights; }
+    /** Point plus spot: the number of records the light grid carries. */
+    public get numLights(): number { return this._numPointLights + this._numSpotlights; }
 }

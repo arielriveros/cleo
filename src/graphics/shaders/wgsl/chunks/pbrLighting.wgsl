@@ -539,7 +539,7 @@ fn evaluateDirectionalLight(light: DirectionalLight, N: vec3<f32>, V: vec3<f32>,
 }
 
 fn evaluatePointLight(light: PointLight, fragPos: vec3<f32>, N: vec3<f32>, V: vec3<f32>,
-                      albedo: vec3<f32>, metallic: f32, roughness: f32) -> vec3<f32> {
+                      albedo: vec3<f32>, metallic: f32, roughness: f32, visibility: f32) -> vec3<f32> {
     let toLight = light.position - fragPos;
     // A sphere light does not go to infinity at its own centre: inside the bulb the whole surface is
     // at one radius, not at zero. Clamped HERE and not inside `distanceAttenuation`, which has a JS
@@ -549,7 +549,7 @@ fn evaluatePointLight(light: PointLight, fragPos: vec3<f32>, N: vec3<f32>, V: ve
     if (attenuation <= 0.0) { return vec3<f32>(0.0); }
     let dist = sqrt(d2);
     let L = toLight / max(dist, 1e-6);
-    let radiance = light.color * (light.intensity * attenuation);
+    let radiance = light.color * (light.intensity * attenuation * visibility);
 
     let perceptual = max(roughness, MIN_PERCEPTUAL_ROUGHNESS);
     let sphere = sphereLightSample(toLight, dist, light.sourceRadius, reflect(-V, N),

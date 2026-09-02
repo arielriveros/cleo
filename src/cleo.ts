@@ -143,7 +143,7 @@ export { Sprite, gridTileset, legacySheetTileset, remapLegacyFrame, isInlineTile
 export type { SpriteOptions, SpriteSide } from "./graphics/sprite";
 export { DirectionalLight, PointLight, Spotlight, LIGHT_UNIT, REFERENCE_ILLUMINANCE, DEFAULT_DIRECTIONAL_LUX,
          DEFAULT_LUMENS, DEFAULT_RANGE, DEFAULT_SOURCE_RADIUS, DEFAULT_ANGULAR_RADIUS,
-         DEFAULT_SCENE_AMBIENT_LUX, MAX_POINT_LIGHTS, MAX_SPOTLIGHTS, legacyRange,
+         DEFAULT_SCENE_AMBIENT_LUX, MAX_LIGHTS, legacyRange,
          distanceAttenuation, legacyAmbientFromSceneJson } from "./graphics/lighting";
 export { Shape } from "./physics/shape";
 export { PhysicsSystem } from "./physics/physicsSystem";

@@ -7,12 +7,8 @@
 // pass, the forward materials, custom materials and the god rays cannot drift apart.
 #include "./chunks/shadows.wgsl"
 #include "./chunks/pbrLighting.wgsl"
+#include "./chunks/clusteredLights.wgsl"
 #include "./chunks/octNormal.wgsl"
-
-// Mirrors shaders/constants.glsl. Spelled out here rather than included because the GLSL constants
-// file has no WGSL twin and these are the only two values this shader needs from it.
-const MAX_POINT_LIGHTS: i32 = 16;
-const MAX_SPOTLIGHTS: i32 = 8;
 
 const MAX_REFLECTION_LOD: f32 = 4.0;
 /** Relative depth difference beyond which an AO neighbour is treated as a different surface. */
@@ -60,8 +56,6 @@ struct Lighting {
 
     u_dirLight: DirectionalLight,
     u_skyLight: SkyLight,
-    u_pointLights: array<PointLight, 16>,
-    u_spotlights: array<SpotLight, 8>,
 
     u_viewPos: vec3<f32>,
     /** Scene-wide indirect fill, in internal radiance units. Replaces the per-light ambient. */
@@ -73,8 +67,6 @@ struct Lighting {
 
     u_iblIntensity0: f32,
     u_iblIntensity1: f32,
-    u_numPointLights: i32,
-    u_numSpotlights: i32,
     u_probeCount: i32,              // 0 = no baked probes -> flat ambient / crude env fallback
     // i32 rather than bool: WGSL forbids bool in a uniform buffer.
     u_probeUnbounded0: i32,         // true = legacy whole-scene probe (weight 1 everywhere)
@@ -378,14 +370,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     Lo += evaluateDirectionalLight(u_lighting.u_dirLight, N, V, albedo, metallic, roughness,
                                    1.0 - directionalShadow(worldPos, N, viewDepth));
 
-    for (var i = 0; i < u_lighting.u_numPointLights; i++) {
-        Lo += evaluatePointLight(u_lighting.u_pointLights[i], worldPos, N, V, albedo, metallic, roughness);
-    }
-
-    for (var i = 0; i < u_lighting.u_numSpotlights; i++) {
-        let sl = u_lighting.u_spotlights[i];
-        Lo += evaluateSpotLight(sl, worldPos, N, V, albedo, metallic, roughness,
-                                1.0 - spotShadowFor(i, worldPos, N, sl.position));
+    // Every punctual light that reaches THIS fragment, out of however many the scene has. The two
+    // fixed-length loops this replaced ran over 16 point and 8 spot slots for every pixel on screen.
+    let cluster = cleoClusterOf(cleoFragCoord, viewDepth);
+    let first = cleoClusterOffset(cluster);
+    let count = cleoClusterCount(cluster);
+    for (var i = 0; i < count; i++) {
+        let cl = cleoLight(cleoClusterLight(first + i));
+        Lo += evaluateSpotLight(cl.light, worldPos, N, V, albedo, metallic, roughness,
+                                cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
+                                                       worldPos, N, cl.light.position));
     }
 
     // Output LINEAR HDR radiance. Exposure, tonemap and sRGB encode are applied once at the final

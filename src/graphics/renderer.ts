@@ -141,6 +141,9 @@ import { resolveBackendRequest } from './rhi/backendSelect';
 import { acquireWebGPUDevice } from './rhi/webgpu/webgpuDevice';
 import { WebGL2Device, glDevice } from './rhi/webgl2/webgl2Device';
 import { setDevice, device } from './rhi/deviceHandle';
+import { LightGrid, MAX_LIGHTS } from './lightGrid';
+import { DEFAULT_CLUSTER_GRID, spotBoundingSphere, type ClusterLight } from './clusters';
+import { NO_SHADOW_SLOT, POINT_CONE_OFFSET, POINT_CONE_SCALE } from './lightData';
 import type { Buffer as RhiBuffer } from './rhi/resources';
 import { BufferUsage, ShaderStage, ADDITIVE_BLEND, DEFAULT_BLEND } from './rhi/types';
 import type { ShaderResource, BlendState, DepthStencilState, CullMode, PrimitiveTopology, VertexBufferLayout } from './rhi/types';
@@ -153,29 +156,6 @@ import type { WebGL2RenderPassEncoder } from './rhi/webgl2/webgl2Commands';
  *  forward materials are appended at runtime via `customForwardTypes()`. */
 const FORWARD_SHADERS = ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned', 'terrainForward'];
 
-// Precomputed `u_pointLights[i].<field>` / `u_spotlights[i].<field>` names. `_setLighting` runs once
-// per light per forward shader, so building these inline is hundreds of throwaway strings a frame.
-const MAX_LIGHT_SLOTS = 32;
-/**
- * The shader-side array sizes, from shaders/constants.glsl. Clamp the COUNT uniforms against these,
- * never the name table above — the shaders loop to the count and would read out of bounds.
- */
-const GLSL_MAX_POINT_LIGHTS = 16;
-const GLSL_MAX_SPOTLIGHTS = 8;
-const POINT_LIGHT_FIELDS = ['position', 'invRangeSquared', 'color', 'intensity', 'sourceRadius'] as const;
-const SPOT_LIGHT_FIELDS = ['position', 'invRangeSquared', 'direction', 'sourceRadius', 'color', 'intensity', 'coneScale', 'coneOffset'] as const;
-
-function buildLightNames(arrayName: string, fields: readonly string[]): Record<string, string>[] {
-    const out: Record<string, string>[] = [];
-    for (let i = 0; i < MAX_LIGHT_SLOTS; i++) {
-        const entry: Record<string, string> = {};
-        for (const f of fields) entry[f] = `${arrayName}[${i}].${f}`;
-        out.push(entry);
-    }
-    return out;
-}
-const POINT_LIGHT_NAMES = buildLightNames('u_pointLights', POINT_LIGHT_FIELDS);
-const SPOT_LIGHT_NAMES = buildLightNames('u_spotlights', SPOT_LIGHT_FIELDS);
 
 let _forwardShaderCache: string[] = [...FORWARD_SHADERS];
 let _forwardShaderCustomCount = -1;
@@ -668,6 +648,25 @@ export class Renderer {
     private _pointShadowBias: number = 0.0015;
     private _pointShadowsActive: boolean = false;
 
+    /**
+     * The clustered light grid: every point and spot light in the scene, assigned to the parts of the
+     * frustum they can actually reach. Replaces the fixed 16-point / 8-spot uniform arrays.
+     */
+    private readonly _lightGrid: LightGrid = new LightGrid();
+    /**
+     * How far the cluster grid reaches, in world units.
+     *
+     * NOT the camera's far plane, for the same reason `_shadowDistance` is not: the editor camera runs
+     * `far = 10000`, and an exponential slicing over that range spends most of its slices on empty
+     * space beyond anything lit. A light past this distance is dropped from the grid entirely.
+     */
+    private _clusterDistance: number = 500;
+    /** Reused per-frame scratch: one bounding sphere per punctual light, in the grid's own vocabulary. */
+    private readonly _clusterLights: ClusterLight[] = [];
+    /** Backing store for the spheres above, so a frame allocates nothing. */
+    private readonly _clusterCenters: Float32Array[] = [];
+    /** Scratch for a spot light's cone sphere. */
+    private readonly _coneSphere = { center: new Float32Array(3), radius: 0 };
     private _pointShadowsDirty: boolean = false;
     // Force every slot to re-rasterize next frame, bypassing the cache. Required after a
     // reallocation (fresh texStorage3D holds undefined depth) and after anything that moves the face
@@ -1461,6 +1460,12 @@ export class Renderer {
             this._clearShadowMaps();
         }
 
+        // AFTER the shadow passes and before anything shades: the passes above are what hand out the
+        // spot atlas layers and point cube slots, and each light's slot travels inside its record.
+        this._scope('lightGrid');
+        this._buildLightGrid(scene);
+        this._endScope();
+
         if (this._deferred) this._renderDeferred(scene, shadowLight);
         else this._renderForward(scene, shadowLight);
         this._checkGLErrors('scene');
@@ -1578,8 +1583,7 @@ export class Renderer {
     /** Original forward pipeline: light all four material shaders and draw everything in one pass. */
     private _renderForward(scene: Scene, shadowLight: LightNode | null): void {
         this._resetForwardLighting(scene);
-        for (const light of scene.lights)
-            this._setLighting(light, scene.numPointLights, scene.numSpotlights);
+        for (const light of scene.lights) this._setDirectionalOnForward(light);
         this._bindShadowsToForwardShaders();
         this._bindEnvToForwardShaders(scene);
         this._renderScene(scene);
@@ -1590,8 +1594,7 @@ export class Renderer {
     private _resetForwardLighting(scene: Scene): void {
         for (const shaderName of allForwardShaders()) {
             this._shaderManager.bind(shaderName);
-            this._shaderManager.setUniform('u_numPointLights', Math.min(scene.numPointLights, GLSL_MAX_POINT_LIGHTS));
-            this._shaderManager.setUniform('u_numSpotlights', Math.min(scene.numSpotlights, GLSL_MAX_SPOTLIGHTS));
+            this._lightGrid.uploadUniforms(this._shaderManager);
             this._clearDirectional();
             this._shaderManager.setUniform('u_sceneAmbient', this._internalAmbient(scene));
             // The forward path has no SSAO, but it does have the material AO map, so it needs the same
@@ -2821,6 +2824,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
         this._uploadShadowUniforms('deferredLighting');
         pass.setBindGroup(3, this._shadowBindGroup(pipeline));
+        pass.setBindGroup(4, this._lightGridBindGroup(pipeline));
 
         // Split-sum IBL from up to 2 probe volumes, blended per pixel by feathered containment;
         // uncovered pixels fall back to flat ambient plus the `u_envMap` reflection.
@@ -2973,6 +2977,20 @@ export class Renderer {
      * whole command buffer. `_textureBindGroup` places the Nth texture at binding 2N, so the ORDER
      * here is the binding order in chunks/shadows.wgsl and nothing may be skipped in the middle.
      */
+    /**
+     * Does this program read the clustered light grid? Asked of the RESOURCE, like
+     * {@link _declaresShadowGroup} — the unlit Basic family declares no group 4 at all, and binding a
+     * group a program never declared is an error rather than an empty bind.
+     */
+    private _declaresLightGrid(pipeline: RenderPipeline): boolean {
+        return pipeline.resources.some(r => r.group === 4 && r.glslName === 'u_lightData');
+    }
+
+    /** The light data texture, group 4. One texture and no sampler — it is only ever `textureLoad`ed. */
+    private _lightGridBindGroup(pipeline: RenderPipeline): BindGroup {
+        return this._textureBindGroup(pipeline, 4, [this._lightGrid.texture]);
+    }
+
     private _shadowBindGroup(pipeline: RenderPipeline, withPunctual: boolean = true): BindGroup {
         const textures = withPunctual
             ? [this._shadowCascadeFBO.texture, this._spotShadowFBO.texture, this._pointShadowFBO.texture]
@@ -2999,16 +3017,14 @@ export class Renderer {
         this._shaderManager.bind('deferredLighting');
         this._uploadSkyLight();
         const grade = this._cloudGrade(scene);
-        this._shaderManager.setUniform('u_numPointLights', Math.min(scene.numPointLights, GLSL_MAX_POINT_LIGHTS));
-        this._shaderManager.setUniform('u_numSpotlights', Math.min(scene.numSpotlights, GLSL_MAX_SPOTLIGHTS));
+        this._lightGrid.uploadUniforms(this._shaderManager);
         this._shaderManager.setUniform('u_sceneAmbient', this._internalAmbient(scene));
+        // Punctual lights are in the grid; only the sun still travels as uniforms.
         let hasDirectional = false;
         for (const node of scene.lights) {
-            // Slot -1 is a light past the shader array's end; Scene stops numbering there rather than
-            // letting the 17th point light write `u_pointLights[16]`, a name no block has.
-            if (node.type !== 'directional' && node.index < 0) continue;
-            if (node.type === 'directional') hasDirectional = true;
-            this._uploadLight(node, grade);
+            if (node.type !== 'directional') continue;
+            hasDirectional = true;
+            this._uploadDirectional(node, grade);
         }
 
         // The shader applies the directional light whenever its direction is non-zero — there is no
@@ -3224,9 +3240,19 @@ export class Renderer {
         // suppressed throughout: the cascades are fit to the MAIN camera, so a probe elsewhere falls
         // outside them. The BIND still happens — an incomplete texture is a draw-time error.
         this._shadowsSuppressed = true;
-        for (const light of scene.lights) this._setLighting(light, scene.numPointLights, scene.numSpotlights);
+        for (const light of scene.lights) this._setDirectionalOnForward(light);
         this._bindShadowsToForwardShaders();
         this._bindEnvToForwardShaders(scene);
+
+        // A DEGENERATE light grid for the capture: one cluster holding every light. The real grid
+        // describes the main camera's frustum, and these six faces look elsewhere from somewhere else,
+        // so its clusters would silently drop lights from the bake. Rebuilding a real grid per face
+        // would cost six assignments for a low-resolution bake nobody watches; one cluster costs a loop
+        // over the lights and needs no second path in any shader. Restored below.
+        this._lightGrid.buildSingle(this._punctualLightCount(scene));
+        this._packLightRecords(scene);
+        this._lightGrid.upload();
+        this._uploadLightGridToForwardShaders();
 
         const probePos = probe.worldPosition;
         const eye = vec3.create();
@@ -3282,8 +3308,10 @@ export class Renderer {
         this._setViewport(this._renderWidth, this._renderHeight);
         this._shadowsSuppressed = false;
         // The forward programs still hold the capture's u_shadowsEnabled = false; restore them so the
-        // frame that follows this bake is not silently unshadowed.
+        // frame that follows this bake is not silently unshadowed. Same for the one-cluster grid — its
+        // uniforms would otherwise send every fragment of the next frame to cluster 0.
         this._bindShadowsToForwardShaders();
+        this._lightGrid.restoreGrid();
         this._capturing = false;
     }
 
@@ -3467,58 +3495,171 @@ export class Renderer {
     }
 
     /**
-     * Push ONE light's uniforms to the currently bound program.
+     * Push the SUN's uniforms to the currently bound program.
      *
-     * One copy, called by both the deferred pass and the forward loop. They used to be two hand-kept
-     * copies of the same twenty lines, and the failure mode of a divergence is the worst kind: a
-     * correct deferred image and a wrong forward one, or the reverse, with nothing saying so.
+     * The only light that still travels this way. Point and spot lights go into the clustered light
+     * grid instead (see `_buildLightGrid`), because there is no longer a fixed array for them to have
+     * a slot in — which also retired the `u_pointLights[i].<field>` name tables this used to index,
+     * and the O(lights x forward shaders x fields) `setUniform` storm that came with them.
      *
-     * Everything photometric is converted to the engine's internal radiance scale here (see
-     * REFERENCE_ILLUMINANCE), and everything derived — the inverse-square range, the cone's
-     * scale/offset — is computed here rather than per pixel.
+     * A directional light has no position, reaches every cluster by definition, and there is exactly
+     * one of it, so clustering it would be pure overhead.
      */
-    private _uploadLight(node: LightNode, grade: { sun: number, white: number }): void {
-        switch (node.type) {
-            case 'directional': {
-                const light = node.light as DirectionalLight;
-                // Graded, not mutated — see `_cloudGrade`. The node keeps what the user authored. The
-                // grade now splits in two: cloud whitening is a COLOUR change and dimming is an
-                // INTENSITY change, which is what those two things physically are.
-                this._shaderManager.setUniform('u_dirLight.color', this._whitenedSun(light.color, grade));
-                this._shaderManager.setUniform('u_dirLight.intensity', light.internalIntensity * grade.sun);
-                this._shaderManager.setUniform('u_dirLight.angularRadius', light.angularRadius);
-                this._shaderManager.setUniform('u_dirLight.direction', node.worldForward);
-                break;
+    private _uploadDirectional(node: LightNode, grade: { sun: number, white: number }): void {
+        const light = node.light as DirectionalLight;
+        // Graded, not mutated — see `_cloudGrade`. The node keeps what the user authored. The
+        // grade splits in two: cloud whitening is a COLOUR change and dimming is an INTENSITY
+        // change, which is what those two things physically are.
+        this._shaderManager.setUniform('u_dirLight.color', this._whitenedSun(light.color, grade));
+        this._shaderManager.setUniform('u_dirLight.intensity', light.internalIntensity * grade.sun);
+        this._shaderManager.setUniform('u_dirLight.angularRadius', light.angularRadius);
+        this._shaderManager.setUniform('u_dirLight.direction', node.worldForward);
+    }
+
+    /**
+     * Assign every punctual light in the scene to the clusters it can reach, pack the records, and
+     * upload the frame's light data texture.
+     *
+     * Runs once per frame, after the shadow passes (which are what hand out the atlas slots each
+     * record carries) and before anything shades. What it replaced was a `setUniform` per FIELD per
+     * light per forward shader, capped at 16 point and 8 spot lights because that was the size of a
+     * std140 array.
+     *
+     * The camera's far plane is not the grid's. An editor camera runs `far = 10000`, which would spend
+     * every depth slice on empty space; `_clusterDistance` caps it exactly as `_shadowDistance` caps
+     * the cascades.
+     */
+    private _buildLightGrid(scene: Scene): void {
+        const camera = this._activeCamera;
+        const lights = scene.lights;
+
+        // Collect the punctual lights, in the order Scene numbered them — `node.index` IS the record
+        // index, so the two loops below must walk the same sequence.
+        let count = 0;
+        for (const node of lights) {
+            if (node.type === 'directional' || node.index < 0) continue;
+            if (count >= MAX_LIGHTS) break;
+
+            let center = this._clusterCenters[count];
+            if (!center) { center = new Float32Array(3); this._clusterCenters[count] = center; }
+
+            if (node.type === 'spotlight') {
+                const spot = node.light as Spotlight;
+                // The CONE's bounding sphere, not the range sphere. A narrow spot fills a fiftieth of
+                // the sphere around its own position, and clustering that sphere would light every
+                // wall behind the fixture.
+                spotBoundingSphere(node.worldPosition, node.worldForward, spot.range,
+                                   spot.outerCutOff * Math.PI / 180, this._coneSphere);
+                center.set(this._coneSphere.center);
+                this._setClusterLight(count, center, this._coneSphere.radius);
+            } else {
+                const point = node.light as PointLight;
+                const p = node.worldPosition;
+                center[0] = p[0]; center[1] = p[1]; center[2] = p[2];
+                // The windowed falloff reaches EXACTLY zero at `range`, which is what makes this a
+                // cull rather than an approximation. See `distanceAttenuation`.
+                this._setClusterLight(count, center, point.range);
             }
-            case 'point': {
-                const light = node.light as PointLight;
-                const PL = POINT_LIGHT_NAMES[node.index];
-                this._shaderManager.setUniform(PL['position'], node.worldPosition);
-                this._shaderManager.setUniform(PL['color'], light.color);
-                this._shaderManager.setUniform(PL['intensity'], light.internalIntensity);
-                this._shaderManager.setUniform(PL['invRangeSquared'], light.invRangeSquared);
-                this._shaderManager.setUniform(PL['sourceRadius'], light.sourceRadius);
-                break;
-            }
-            case 'spotlight': {
-                const light = node.light as Spotlight;
-                const SL = SPOT_LIGHT_NAMES[node.index];
-                const [coneScale, coneOffset] = light.coneScaleOffset;
-                this._shaderManager.setUniform(SL['position'], node.worldPosition);
-                this._shaderManager.setUniform(SL['direction'], node.worldForward);
-                this._shaderManager.setUniform(SL['color'], light.color);
-                this._shaderManager.setUniform(SL['intensity'], light.internalIntensity);
-                this._shaderManager.setUniform(SL['invRangeSquared'], light.invRangeSquared);
-                this._shaderManager.setUniform(SL['sourceRadius'], light.sourceRadius);
-                // The cone arrives pre-solved into `saturate(cosAngle * scale + offset)`. It was four
-                // copies of an UNGUARDED `1 / (cosInner - cosOuter)` in the shaders, one per lighting
-                // path, every one of which divided by zero when the two angles were equal.
-                this._shaderManager.setUniform(SL['coneScale'], coneScale);
-                this._shaderManager.setUniform(SL['coneOffset'], coneOffset);
-                break;
-            }
+            count++;
+        }
+        this._clusterLights.length = count;
+
+        // An ORTHOGRAPHIC camera gets one cluster holding everything, and is the honest answer rather
+        // than a silently wrong one. The screen extent of a light is found by the tangent lines from
+        // the EYE to its bounding sphere, which is a statement about a perspective projection; under
+        // an orthographic one a sphere's extent is its own diameter wherever it sits, and running the
+        // perspective solve would put lights in the wrong tiles. An ortho camera is an editor and
+        // 2D-scene tool here, where the light counts are small and the acceleration is not missed.
+        if (camera.type === 'orthographic') {
+            this._lightGrid.buildSingle(count);
+        } else {
+            this._lightGrid.restoreGrid(DEFAULT_CLUSTER_GRID);
+            // The last argument is the Y flip: WebGPU's fragment coordinate runs top-down while
+            // `_clipProjection` leaves an ordinary camera's Y alone, so row 0 there is the grid's LAST
+            // tile row rather than its first. `clusterTileScaleBias` carries the derivation.
+            this._lightGrid.build(this._clusterLights, {
+                view: camera.viewMatrix,
+                near: camera.near,
+                far: Math.min(camera.far, this._clusterDistance),
+                fovY: camera.fov * Math.PI / 180,
+                aspect: camera.ratio,
+            }, this._sceneFBO.width, this._sceneFBO.height, device.backend === 'webgpu');
+        }
+
+        this._packLightRecords(scene);
+        this._lightGrid.upload();
+    }
+
+    /** Punctual lights the grid will carry: everything but the sun, capped at `MAX_LIGHTS`. */
+    private _punctualLightCount(scene: Scene): number {
+        let n = 0;
+        for (const node of scene.lights)
+            if (node.type !== 'directional' && node.index >= 0 && n < MAX_LIGHTS) n++;
+        return n;
+    }
+
+    /** Push the grid's addressing uniforms to every forward program. */
+    private _uploadLightGridToForwardShaders(): void {
+        for (const shaderName of allForwardShaders()) {
+            try {
+                this._shaderManager.bind(shaderName);
+                this._lightGrid.uploadUniforms(this._shaderManager);
+            } catch (_) { /* an unlit program has no cluster block; see _declaresLightGrid */ }
         }
     }
+
+    /** Set scratch entry `i` without allocating one. */
+    private _setClusterLight(i: number, center: Float32Array, radius: number): void {
+        const existing = this._clusterLights[i];
+        if (existing) { existing.position = center; existing.radius = radius; }
+        else this._clusterLights[i] = { position: center, radius };
+    }
+
+    /**
+     * Write every punctual light's record into the grid's staging buffer.
+     *
+     * Everything photometric is converted to the engine's internal radiance scale here, and everything
+     * derived — the inverse-square range, the cone's scale/offset — is computed once per light rather
+     * than once per pixel. That division of labour is unchanged; only its destination is.
+     *
+     * A POINT LIGHT IS WRITTEN AS A SPOT whose cone covers everything, so the shader runs one loop
+     * with no branch on light type. `spotAttenuation` returns exactly 1.0 for that cone, and the two
+     * evaluate functions differ by nothing else — see chunks/clusteredLights.wgsl.
+     */
+    private _packLightRecords(scene: Scene): void {
+        let i = 0;
+        for (const node of scene.lights) {
+            if (node.type === 'directional' || node.index < 0) continue;
+            if (i >= MAX_LIGHTS) break;
+
+            if (node.type === 'spotlight') {
+                const spot = node.light as Spotlight;
+                const [coneScale, coneOffset] = spot.coneScaleOffset;
+                this._lightGrid.packRecord(i, node.worldPosition, spot.invRangeSquared,
+                                           spot.color, spot.internalIntensity,
+                                           node.worldForward, spot.sourceRadius,
+                                           coneScale, coneOffset,
+                                           this._spotSlots.layerOf(node.id), NO_SHADOW_SLOT);
+            } else {
+                const point = node.light as PointLight;
+                this._lightGrid.packRecord(i, node.worldPosition, point.invRangeSquared,
+                                           point.color, point.internalIntensity,
+                                           Renderer._POINT_DIRECTION, point.sourceRadius,
+                                           POINT_CONE_SCALE, POINT_CONE_OFFSET,
+                                           NO_SHADOW_SLOT, this._pointSlots.layerOf(node.id));
+            }
+            i++;
+        }
+    }
+
+    /**
+     * The direction a point light is given so it can ride the spot path.
+     *
+     * Any unit vector does: with `coneScale = 0` the cone factor is 1.0 whatever `dot(L, -direction)`
+     * comes to. It must not be ZERO, though — `evaluateSpotLight` normalizes it, and `normalize(0)` is
+     * NaN, which would blacken every pixel the light touches.
+     */
+    private static readonly _POINT_DIRECTION = [0, 0, -1];
 
     /** Zero the directional slot on the currently bound program: no light, not a black one. */
     private _clearDirectional(): void {
@@ -3542,7 +3683,7 @@ export class Renderer {
         return [lux[0] * k, lux[1] * k, lux[2] * k];
     }
 
-    /** A directional light's colour after the cloud grade: whitened, but NOT dimmed — see _uploadLight. */
+    /** A directional light's colour after the cloud grade: whitened, but NOT dimmed — see _uploadDirectional. */
     private _whitenedSun(colour: ArrayLike<number>, grade: { white: number }): number[] {
         const lum = 0.2126 * colour[0] + 0.7152 * colour[1] + 0.0722 * colour[2];
         return [
@@ -3935,8 +4076,7 @@ export class Renderer {
         const needForward = transparentQueue.length > 0 || opaqueForwardQueue.length > 0 || scene.sprites.size > 0 || gizmoNodes.length > 0;
         if (needForward) {
             this._resetForwardLighting(scene);
-            for (const light of scene.lights)
-                this._setLighting(light, scene.numPointLights, scene.numSpotlights);
+            for (const light of scene.lights) this._setDirectionalOnForward(light);
             this._bindShadowsToForwardShaders();
             this._bindEnvToForwardShaders(scene);
         }
@@ -5590,6 +5730,8 @@ export class Renderer {
                 pass!.setBindGroup(0, this._terrainBindGroup(terrainPipeline, mat));
                 if (this._declaresShadowGroup(terrainPipeline))
                     pass!.setBindGroup(3, this._shadowBindGroup(terrainPipeline));
+                if (this._declaresLightGrid(terrainPipeline))
+                    pass!.setBindGroup(4, this._lightGridBindGroup(terrainPipeline));
                 return true;
             }
             if (mat instanceof CustomMaterial) {
@@ -5616,6 +5758,8 @@ export class Renderer {
                 pass!.setBindGroup(0, this._customBindGroup(customPipeline, mat, envCube));
                 if (this._declaresShadowGroup(customPipeline))
                     pass!.setBindGroup(3, this._shadowBindGroup(customPipeline));
+                if (this._declaresLightGrid(customPipeline))
+                    pass!.setBindGroup(4, this._lightGridBindGroup(customPipeline));
                 return true;
             }
             if (!viaRHI) { this._applyMaterial(mat); return false; }
@@ -5642,6 +5786,8 @@ export class Renderer {
             // rule WebGPU enforces through `layout: 'auto'`.
             if (this._declaresShadowGroup(pipeline))
                 pass!.setBindGroup(3, this._shadowBindGroup(pipeline));
+            if (this._declaresLightGrid(pipeline))
+                pass!.setBindGroup(4, this._lightGridBindGroup(pipeline));
             return true;
         }, pass);
     }
@@ -6176,17 +6322,22 @@ export class Renderer {
                                   this._shadowCasterPad, out, this._csmScratch, this._shadowStabilize);
     }
 
-    private _setLighting(node: LightNode, numPointLights: number, numSpotlights: number): void {
-        if (node.type !== 'directional' && node.index < 0) return;
+    /**
+     * Push the sun to every forward program.
+     *
+     * This used to run once per LIGHT per forward shader, writing five to eight named uniforms each
+     * time — the single largest source of `setUniform` traffic in a frame. Punctual lights now reach
+     * the shader through one texture upload, so all that is left is the one light there can only be
+     * one of.
+     */
+    private _setDirectionalOnForward(node: LightNode): void {
+        if (node.type !== 'directional') return;
         const grade = this._currentScene ? this._cloudGrade(this._currentScene)
                                          : { sun: 1, white: 0, sky: 1, flat: 0 };
-        // Set lighting for both default shaders
         for (const shaderName of allForwardShaders()) {
             try {
                 this._shaderManager.bind(shaderName);
-                this._shaderManager.setUniform('u_numPointLights', Math.min(numPointLights, GLSL_MAX_POINT_LIGHTS));
-                this._shaderManager.setUniform('u_numSpotlights', Math.min(numSpotlights, GLSL_MAX_SPOTLIGHTS));
-                this._uploadLight(node, grade);
+                this._uploadDirectional(node, grade);
             } catch (error) {
                 // Shader may not have lighting uniforms (e.g., basic shader)
                 Logger.print('warn', [`Could not set lighting uniforms for shader ${shaderName}:`, error], 'Renderer');
@@ -7238,6 +7389,20 @@ export class Renderer {
     }
 
     /** Max view distance the cascades cover. Beyond it nothing is shadowed. */
+    /** How far the clustered light grid reaches. See {@link _clusterDistance}. */
+    public get clusterDistance(): number { return this._clusterDistance; }
+    public set clusterDistance(d: number) { this._clusterDistance = Math.max(1, d); }
+
+    /** Lights in the grid this frame, index entries they generated, and per-cluster overflow. */
+    public get lightGridStats(): { lights: number; indices: number; overflowed: number; uploadBytes: number } {
+        return {
+            lights: this._lightGrid.lightCount,
+            indices: this._lightGrid.indexCount,
+            overflowed: this._lightGrid.overflowed,
+            uploadBytes: this._lightGrid.uploadBytes,
+        };
+    }
+
     public get shadowDistance(): number { return this._shadowDistance; }
     public set shadowDistance(d: number) { this._shadowDistance = Math.max(1, d); }
 

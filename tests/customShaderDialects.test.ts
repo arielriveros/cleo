@@ -92,12 +92,14 @@ describe('assembleCustomFragment — ES 300 (WebGL2)', () => {
             for (const name of ['u_screenTexture', 'u_depth', 'u_mask'])
                 expect(screen, `${dialect} ${name}`).toContain(`texture(${name}, vec2(0.0)).r`);
 
-            // Forward adds the environment cube and the spot shadows — the shadow library binds four
-            // group-3 entries and `shadowCalculation()` reaches only the two cascade ones.
+            // Forward adds the environment cube, the spot and point shadows, and the clustered light
+            // data texture — the shadow library binds six group-3 entries and `shadowCalculation()`
+            // reaches only the two cascade ones, and a material need not touch the light grid at all.
             const forward = assembleCustomFragment('forward', 'vec4 fragment() { return vec4(1.0); }',
                                                    [], dialect);
             expect(forward, dialect).toContain('texture(u_envMap, vec3(0.0, 0.0, 1.0)).r');
-            expect(forward, dialect).toContain('spotShadowFor(0, fragPos, getNormal(), fragPos)');
+            expect(forward, dialect).toContain('cleoPunctualVisibility(0, 0, fragPos, getNormal(), fragPos)');
+            expect(forward, dialect).toContain('cleoLightTexel(0).r');
         }
     });
 
@@ -201,8 +203,8 @@ describe('assembleCustomFragment — ES 300 (WebGL2)', () => {
 
         // Structs come BEFORE the block that has members of them, functions after — a Vulkan block
         // member needs its type already declared, and the generated chunk arrives as one blob.
-        expect(src.indexOf('struct PointLight')).toBeLessThan(src.indexOf('u_pointLights'));
-        expect(src.indexOf('u_pointLights')).toBeLessThan(src.indexOf('float DistributionGGX'));
+        expect(src.indexOf('struct DirectionalLight')).toBeLessThan(src.indexOf('u_dirLight;'));
+        expect(src.indexOf('u_dirLight;')).toBeLessThan(src.indexOf('float DistributionGGX'));
 
         // Exactly one PI. The chunk brings its own and COMMON_BODY already declared one.
         expect(src.match(/const float PI\b/g)).toHaveLength(1);
@@ -285,10 +287,15 @@ vec4 fragment() {
     vec3 V = normalize(u_viewPos - fragPos);
     vec3 Lo = evaluateDirectionalLight(u_dirLight, N, V, u_tint, 0.0, u_rough,
                                        1.0 - shadowCalculation() * 0.5);
-    for (int i = 0; i < u_numPointLights; ++i)
-        Lo += evaluatePointLight(u_pointLights[i], fragPos, N, V, u_tint, 0.0, u_rough);
-    for (int i = 0; i < u_numSpotlights; ++i)
-        Lo += u_spotlights[i].color * u_spotlights[i].coneScale;
+    int cluster = cleoClusterOf(gl_FragCoord.xy, cleoViewDepth());
+    int first = cleoClusterOffset(cluster);
+    int count = cleoClusterCount(cluster);
+    for (int i = 0; i < count; ++i) {
+        ClusteredLight cl = cleoLight(cleoClusterLight(first + i));
+        Lo += evaluateSpotLight(cl.light, fragPos, N, V, u_tint, 0.0, u_rough,
+                                cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
+                                                       fragPos, N, cl.light.position));
+    }
     accumulateLight(N, V, u_tint, 0.0, u_rough, -u_dirLight.direction, u_sceneAmbient, Lo);
     if (u_useEnvMap) Lo += texture(u_envMap, reflect(-V, N)).rgb * 0.1;
     return vec4(Lo * texture(u_mask, fragTexCoord).r, 1.0);
@@ -404,16 +411,30 @@ void surface(inout Surface s) {
     });
 
     // The three things that used to make FORWARD untranslatable, each checked where it now lands.
-    it('carries the lights as block members, not as loose struct uniforms', () => {
+    it('carries the sun as a block member, not as a loose struct uniform', () => {
         const built = assembleCustomFragment('forward', 'vec4 fragment() { return vec4(1.0); }', [],
                                              'vulkan');
         expect(built).not.toContain('uniform struct');
         expect(built).toContain('struct DirectionalLight {');
         expect(built).toContain('    DirectionalLight u_dirLight;');
-        // A literal length, not MAX_POINT_LIGHTS: a block member's array size has to be a constant
-        // expression already in scope, and the constants are rendered after the uniforms.
-        expect(built).toContain('    PointLight u_pointLights[16];');
-        expect(built).toContain('    SpotLight u_spotlights[8];');
+    });
+
+    it('has no fixed light arrays left in the block', () => {
+        // The point of the whole clustered-lighting change. `u_pointLights[16]` / `u_spotlights[8]`
+        // were the cap: not a budget, just the length of a std140 array, with a scene's seventeenth
+        // point light silently dropped. Punctual lights now arrive through the light data texture.
+        for (const dialect of ['es300', 'vulkan'] as const) {
+            const built = assembleCustomFragment('forward', 'vec4 fragment() { return vec4(1.0); }', [],
+                                                 dialect);
+            expect(built, dialect).not.toContain('u_pointLights');
+            expect(built, dialect).not.toContain('u_spotlights');
+            expect(built, dialect).not.toContain('u_numPointLights');
+            expect(built, dialect).not.toContain('u_numSpotlights');
+            // What replaced them: the addressing block and the accessors that read it.
+            expect(built, dialect).toContain('struct ClusterUniforms {');
+            expect(built, dialect).toContain('int cleoClusterOf(');
+            expect(built, dialect).toContain('ClusteredLight cleoLight(');
+        }
     });
 
     it('gives the shadow library explicit bindings and splits its comparison samplers', () => {

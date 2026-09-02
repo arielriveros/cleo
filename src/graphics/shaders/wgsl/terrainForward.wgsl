@@ -14,23 +14,13 @@
 #include "./chunks/modelVertex.wgsl"
 #include "./chunks/tonemap.wgsl"
 #include "./chunks/pbrLighting.wgsl"
+#include "./chunks/clusteredLights.wgsl"
 #include "./chunks/terrainLayers.wgsl"
-
-// Mirrors MAX_POINT_LIGHTS / MAX_SPOTLIGHTS in shaders/constants.glsl. Declared here rather than taken
-// from chunks/pbrLighting.wgsl because that chunk carries the light STRUCTS only — pbrForward declares
-// its own copies too, and the include resolver has no include-once guard, so a shared definition would
-// collide for any program that included both.
-const MAX_POINT_LIGHTS: i32 = 16;
-const MAX_SPOTLIGHTS: i32 = 8;
 
 struct TerrainLightingUniforms {
     u_dirLight: DirectionalLight,
     u_skyLight: SkyLight,
-    u_pointLights: array<PointLight, 16>,
-    u_spotlights: array<SpotLight, 8>,
     u_sceneAmbient: vec3<f32>,
-    u_numPointLights: i32,
-    u_numSpotlights: i32,
 };
 @group(1) @binding(3) var<uniform> u_lighting: TerrainLightingUniforms;
 
@@ -59,15 +49,22 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     lo += evaluateDirectionalLight(u_lighting.u_dirLight, surface.normal, v, surface.albedo,
                                    surface.metallic, roughness, surface.shadow);
 
-    for (var i = 0; i < MAX_POINT_LIGHTS; i++) {
-        if (i >= u_lighting.u_numPointLights) { break; }
-        lo += evaluatePointLight(u_lighting.u_pointLights[i], in.fragPos, surface.normal, v,
-                                 surface.albedo, surface.metallic, roughness);
-    }
-
-    for (var i = 0; i < MAX_SPOTLIGHTS; i++) {
-        if (i >= u_lighting.u_numSpotlights) { break; }
-        lo += evaluateSpotLight(u_lighting.u_spotlights[i], in.fragPos, surface.normal, v,
+    // Visibility is a flat 1.0: this pass has no shadow maps bound at all (see the header), so there
+    // is nothing to ask. That is also why it can skip `cleoPunctualVisibility`, which lives in
+    // chunks/shadows.wgsl and would drag the whole shadow group in with it.
+    //
+    // RADIAL distance, not the planar view depth every other path uses, because this shader has no
+    // view matrix — its lighting block carries no `u_view`. The renderer hands the probe capture a
+    // DEGENERATE 1x1x1 grid (see `buildSingleCluster`), since the grid describes the main camera and
+    // means nothing to a cube face, so every fragment resolves to cluster 0 and the difference cannot
+    // matter. It is written this way rather than as a hard-coded 0 so that a real grid here would be
+    // slightly conservative rather than silently wrong.
+    let cluster = cleoClusterOf(in.position.xy, distance(u_terrain.u_viewPos, in.fragPos));
+    let first = cleoClusterOffset(cluster);
+    let count = cleoClusterCount(cluster);
+    for (var i = 0; i < count; i++) {
+        let cl = cleoLight(cleoClusterLight(first + i));
+        lo += evaluateSpotLight(cl.light, in.fragPos, surface.normal, v,
                                 surface.albedo, surface.metallic, roughness, 1.0);
     }
 

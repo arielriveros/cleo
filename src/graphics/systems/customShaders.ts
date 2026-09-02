@@ -5,7 +5,7 @@ import { Logger } from '../../core/logger';
 import PBR_VERTEX_SRC from '../shaders/materials/pbr.vs';
 import SCREEN_VERTEX_SRC from '../shaders/screen/screen.vs';
 import ShadowsChunk from '../shaders/wgsl/shadowsChunk.wgsl';
-import PbrLightingChunk from '../shaders/wgsl/pbrLightingChunk.wgsl';
+import ClusteredLightsChunk from '../shaders/wgsl/clusteredLightsChunk.wgsl';
 import ScreenProgram from '../shaders/wgsl/screen.wgsl';
 import GeometryPBRProgram from '../shaders/wgsl/geometryPBR.wgsl';
 import PBRProgram from '../shaders/wgsl/pbr.wgsl';
@@ -22,33 +22,12 @@ import type { ShaderResource } from '../rhi/types';
 // `surface()` plus a fixed PRELUDE, compiled and registered under the material's `type` key.
 //
 // Runtime GLSL cannot `#include`, so everything the prelude needs has to arrive as text. Most of it
-// is now GENERATED from the WGSL rather than copied: the shadow library from `shadowsChunk.wgsl`, the
-// light structs and the PBR BRDF from `pbrLightingChunk.wgsl`, and the light-array lengths from
-// `pbr.wgsl`'s own reflected layout. What is still hand-maintained: the G-buffer layout
-// (geometryPBR.wgsl), toLinear/toSrgb (chunks/tonemap.wgsl), and the seed templates at the bottom
-// of this file.
+// is now GENERATED from the WGSL rather than copied: the shadow library from `shadowsChunk.wgsl`, and
+// the light structs, the PBR BRDF and the clustered light lookup from `clusteredLightsChunk.wgsl`.
+// What is still hand-maintained: the G-buffer layout (geometryPBR.wgsl), toLinear/toSrgb
+// (chunks/tonemap.wgsl), and the seed templates at the bottom of this file.
 // -----------------------------------------------------------------------------------------------
 
-/**
- * The declared length of one light array, read off `pbr.wgsl`'s reflected uniform layout.
- *
- * Derived rather than written down, because a custom material's block has to be the SAME SIZE as the
- * engine's — a shorter array here does not merely drop lights, it moves every member after it and
- * the whole block reads garbage. The counts cannot live in the generated chunk instead: the include
- * resolver has no include-once guard (see terrainForward.wgsl), so a shared `const` collides for any
- * program that pulls in two chunks declaring it.
- */
-function lightArrayLength(member: string): number {
-    for (const block of PBRProgram.uniformBlocks) {
-        const found = block.members.find(m => m.name === member);
-        const count = found && /,\s*(\d+)\s*>/.exec(found.type);
-        if (count) return Number(count[1]);
-    }
-    throw new Error(`customShaders: pbr.wgsl declares no ${member} array to take a length from`);
-}
-
-const MAX_POINT_LIGHTS = lightArrayLength('u_pointLights');
-const MAX_SPOTLIGHTS = lightArrayLength('u_spotlights');
 
 // --- sampler declaration primitives -------------------------------------------------------------
 // Must stay ABOVE the interfaces, which reach for these while the module is still evaluating; moving
@@ -122,8 +101,6 @@ mat3 TBN;
 // keep compiling instead of all falling back to magenta.
 const vec4 fragPosLightSpace = vec4(0.0);
 
-const int MAX_POINT_LIGHTS = ${MAX_POINT_LIGHTS};
-const int MAX_SPOTLIGHTS = ${MAX_SPOTLIGHTS};
 const float PI = 3.14159265359;
 
 vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }
@@ -142,14 +119,23 @@ const FORWARD_ENGINE_SAMPLERS: SamplerDecl[] = [
  * The shadow library in Vulkan GLSL, transformed from the ES chunk rather than generated separately —
  * only three lines differ. Bindings come from `shadowsChunk.wgsl`'s own reflection, never written here.
  */
-function vulkanShadowLibrary(): string {
-    let out = SHADOWS_SRC;
+/**
+ * Rewrite a generated library's ES declarations into Vulkan GLSL: split each combined sampler into a
+ * texture and a sampler at explicit (set, binding), and give the library's uniform block one too.
+ *
+ * Shared by the shadow library and the clustered-light library, which need the identical two
+ * transforms against their own reflected resources — the only difference is the sampler TYPE, and
+ * naga names it in the ES source either way.
+ */
+function vulkanizeLibrary(source: string, resources: readonly ShaderResource[],
+                          samplerType: SamplerType): string {
+    let out = source;
 
-    // Each texture in group 3, with its comparison sampler at binding+1. `glslName` is the combined
-    // name the generated ES source uses, which is exactly the identifier being replaced.
-    for (const r of ShadowsChunk.resources) {
-        if (r.kind !== 'texture' || r.group !== 3) continue;
-        const parts = SAMPLER_PARTS['sampler2DArrayShadow'];
+    // Each texture, with its sampler at binding+1. `glslName` is the combined name the generated ES
+    // source uses, which is exactly the identifier being replaced.
+    for (const r of resources) {
+        if (r.kind !== 'texture') continue;
+        const parts = SAMPLER_PARTS[samplerType];
         const combined = new RegExp(
             String.raw`uniform\s+(?:highp|mediump|lowp)?\s*\w+\s+${r.glslName}\s*;`, 'g');
         out = out.replace(combined,
@@ -160,13 +146,29 @@ function vulkanShadowLibrary(): string {
 
     // The library's own uniform block. naga emits it with `layout(std140)` and no set/binding, which
     // Vulkan GLSL rejects ("uniform/buffer blocks require layout(binding=X)").
-    for (const r of ShadowsChunk.resources) {
+    for (const r of resources) {
         if (r.kind !== 'uniform') continue;
         out = out.replace(/layout\(std140\)\s+uniform\s+(\w+)/g,
                           `layout(std140, set = ${r.group}, binding = ${r.binding}) uniform $1`);
     }
 
     return out;
+}
+
+/**
+ * The clustered-light library in Vulkan GLSL. Its texture is a plain `sampler2D` — it is only ever
+ * `texelFetch`ed, never filtered — and its uniform block is the engine's own cluster block, which is
+ * why the bindings come from the chunk's reflection rather than from anything written here.
+ */
+function vulkanClusterLibrary(): string {
+    return vulkanizeLibrary(LIGHTING_CHUNK.body, ClusteredLightsChunk.resources, 'sampler2D');
+}
+
+function vulkanShadowLibrary(): string {
+    // The WHOLE resource list, not just group 3: the shadow textures are all in group 3, but the
+    // library's uniform BLOCK is group 1, and filtering it out leaves it without the
+    // `layout(binding = …)` Vulkan GLSL requires.
+    return vulkanizeLibrary(SHADOWS_SRC, ShadowsChunk.resources, 'sampler2DArrayShadow');
 }
 
 /**
@@ -195,7 +197,18 @@ function splitLightingChunk(chunk: string): { structs: string; body: string } {
     return { structs: structs.join(NL) + NL, body: body.trim() + NL };
 }
 
-const LIGHTING_CHUNK = splitLightingChunk(PbrLightingChunk.glslChunk!);
+/**
+ * The light structs, the PBR BRDF **and** the clustered light lookup, from ONE generated chunk.
+ *
+ * `clusteredLightsChunk.wgsl` includes `chunks/pbrLighting.wgsl` as well as
+ * `chunks/clusteredLights.wgsl`, so its output is a strict superset of `pbrLightingChunk.wgsl`'s —
+ * every symbol the latter emits, plus the six `cleo*` accessors, the two cluster structs, the cluster
+ * uniform block and the light data sampler. Pasting both would redeclare all of the first.
+ *
+ * `tests/customShaderDialects.test.ts` pins the superset relationship, because the day it stops
+ * holding is the day every custom material loses the BRDF with no error until one is compiled.
+ */
+const LIGHTING_CHUNK = splitLightingChunk(ClusteredLightsChunk.glslChunk!);
 
 // The light structs, declared as TYPES so the uniform block can have members of them — Vulkan GLSL
 // refuses a loose uniform of struct type. `SkyLight` rides along unused: the chunk emits every struct
@@ -205,15 +218,14 @@ const LIGHT_STRUCTS = LIGHTING_CHUNK.structs;
 /** The lighting inputs, as data. Loose uniforms under ES, members of one bound block under Vulkan. */
 const LIGHTING_UNIFORMS: ValueDecl[] = [
     { name: 'u_isTransparent', type: 'bool' },
-    { name: 'u_numPointLights', type: 'int' },
-    { name: 'u_numSpotlights', type: 'int' },
     { name: 'u_view', type: 'mat4', comment: 'only to get the view-space depth that selects a cascade' },
     { name: 'u_sceneAmbient', type: 'vec3', comment: 'scene-wide indirect fill (internal radiance units)' },
     { name: 'u_dirLight', type: 'DirectionalLight' },
-    { name: 'u_pointLights', type: 'PointLight', array: MAX_POINT_LIGHTS },
-    { name: 'u_spotlights', type: 'SpotLight', array: MAX_SPOTLIGHTS },
     { name: 'u_useEnvMap', type: 'bool' },
     { name: 'u_envMapLinear', type: 'bool', comment: 'true when u_envMap is a linear HDR probe cube (skip the sRGB decode)' },
+    // NOTE: the cluster addressing uniforms are NOT listed here. They arrive as their own block, in
+    // the generated library below, byte-identical to the engine's by construction rather than by a
+    // hand-kept list — which is what the old `u_pointLights` array size was, and what it cost.
 ];
 
 /** PBR helpers, the shadow library and the two shadow entry points custom materials call. */
@@ -228,7 +240,17 @@ float cleoViewDepth() { return -(u_view * vec4(fragPos, 1.0)).z; }
 float shadowCalculation() { return directionalShadow(fragPos, getNormal(), cleoViewDepth()); }
 float shadowCalculation(vec4 ignored) { return shadowCalculation(); }
 
-${LIGHTING_CHUNK.body}
+${dialect === 'vulkan' ? vulkanClusterLibrary() : LIGHTING_CHUNK.body}
+
+// The pre-point-shadow signature. evaluatePointLight grew a visibility argument when point lights
+// learned to cast, and WGSL has no overloading, so the engine's own programs all pass it. GLSL does
+// have overloading, and a material written against the old seven-argument form would otherwise fail
+// to LINK -- a magenta fallback with a driver message that explains nothing. Fully lit is what the
+// old form meant. Same shim pattern as the shadowCalculation(vec4) overload above.
+// (No backticks in here: this comment lives inside a JS template literal.)
+vec3 evaluatePointLight(PointLight l, vec3 p, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness) {
+    return evaluatePointLight(l, p, N, V, albedo, metallic, roughness, 1.0);
+}
 
 // accumulateLight RETURNS its contribution; the inout form is what user-authored GLSL in existing
 // projects calls, so both spellings stay.
@@ -246,9 +268,12 @@ const FORWARD_INTERFACE: PreludeInterface = {
     engineBlock: LIT_ENGINE_BLOCK,
     userBlock: LIT_USER_BLOCK,
     structs: LIGHT_STRUCTS,
-    // The shadow library binds FOUR group-3 entries but `shadowCalculation()` reaches only two;
-    // without this a material gets a two-entry layout for the engine's four-entry group.
-    keepAlive: 'spotShadowFor(0, fragPos, getNormal(), fragPos)',
+    // The shadow library binds SIX group-3 entries but `shadowCalculation()` reaches only two, and the
+    // light grid is a group-4 entry a material need not touch at all. Without these calls a material
+    // gets a layout narrower than the engine's group — and `_textureBindGroup` fills a group
+    // POSITIONALLY, so the mismatch is a bind-group error rather than a spare binding nobody reads.
+    keepAlive: 'cleoPunctualVisibility(0, 0, fragPos, getNormal(), fragPos)'
+             + ' + cleoLightTexel(0).r',
     body: (dialect) => COMMON_BODY + LIGHTING_BODY(dialect),
 };
 
@@ -619,9 +644,25 @@ export function customShaderResources(mode: CustomRenderMode, uniforms: CustomUn
                    type: 'sampler', glslName: s.name });
         binding += 2;
     }
-    if (mode === 'forward')
+    if (mode === 'forward') {
         for (const r of ShadowsChunk.resources)
             if (r.group === 3 && (r.kind === 'texture' || r.kind === 'sampler')) out.push(r);
+        // Group 4 is the clustered light data texture, taken from `clusteredLightsChunk.wgsl`'s own
+        // reflection for the same reason group 3 is taken from the shadow chunk's: the engine binds it
+        // by the group number the shader declares, and a hand-written copy would drift.
+        // Both halves. The engine's own programs declare the texture ALONE — `textureLoad` needs no
+        // sampler — but the Vulkan dialect has no combined-sampler type to fetch from, so
+        // `vulkanClusterLibrary` splits it into a texture and a sampler and the layout gains an entry.
+        // A custom material's group 4 is therefore two entries where the engine's is one, which is
+        // fine: they are different pipelines with different layouts, and `_textureBindGroup` fills
+        // both from the same single texture.
+        for (const r of ClusteredLightsChunk.resources) {
+            if (r.group !== 4 || r.kind !== 'texture') continue;
+            out.push(r);
+            out.push({ group: r.group, binding: r.binding + 1, name: r.name.replace('_texture', '_sampler'),
+                       kind: 'sampler', type: 'sampler', glslName: r.glslName });
+        }
+    }
     return out;
 }
 
@@ -682,7 +723,42 @@ const RETIRED_LIGHT_FIELDS: Record<string, string> = {
     'outerCutOff': 'coneScale / coneOffset, via spotAttenuation()',
 };
 
+/**
+ * The fixed light arrays, and what replaced them.
+ *
+ * These went when lights stopped living in a uniform block. A material that loops over
+ * `u_pointLights[i]` no longer COMPILES, and the driver's message for that is "undeclared identifier"
+ * with a line number — true, useless, and identical to a typo. This turns it into the one sentence
+ * that actually helps.
+ */
+const RETIRED_LIGHT_ARRAYS: Record<string, string> = {
+    'u_numPointLights': 'cleoClusterCount(cleoClusterOf(gl_FragCoord.xy, cleoViewDepth()))',
+    'u_numSpotlights': 'the same count — point and spot lights share one clustered list',
+    'u_pointLights': 'cleoLight(cleoClusterLight(first + i)).light',
+    'u_spotlights': 'cleoLight(cleoClusterLight(first + i)).light — one list holds both types',
+};
+
 function annotateCompileError(message: string, source: string): string {
+    const arrays = Object.keys(RETIRED_LIGHT_ARRAYS).filter(name =>
+        new RegExp('\\b' + name + '\\b').test(source) && message.includes(name));
+    if (arrays.length) {
+        const hints = arrays.map(n => `  ${n} -> ${RETIRED_LIGHT_ARRAYS[n]}`).join('\n');
+        return message + '\n\nThis material loops over the fixed light arrays, which no longer exist.'
+            + ' Lights are now assigned to the part of the frustum they can reach, so a fragment reads'
+            + ' its OWN cluster instead of every light in the scene, and there is no maximum light'
+            + ' count any more:\n' + hints
+            + '\n\nThe replacement loop, which a newly seeded material of this type shows:\n'
+            + '  int cluster = cleoClusterOf(gl_FragCoord.xy, cleoViewDepth());\n'
+            + '  int first = cleoClusterOffset(cluster);\n'
+            + '  int count = cleoClusterCount(cluster);\n'
+            + '  for (int i = 0; i < count; i++) {\n'
+            + '      ClusteredLight cl = cleoLight(cleoClusterLight(first + i));\n'
+            + '      Lo += evaluateSpotLight(cl.light, fragPos, N, V, albedo, metallic, roughness,'
+            + '                              cleoPunctualVisibility(cl.spotShadowLayer,'
+            + ' cl.pointShadowSlot, fragPos, N, cl.light.position));\n'
+            + '  }';
+    }
+
     const used = Object.keys(RETIRED_LIGHT_FIELDS).filter(field =>
         new RegExp('\\b(u_dirLight|u_pointLights\\s*\\[[^\\]]*\\]|u_spotlights\\s*\\[[^\\]]*\\])\\s*\\.\\s*' + field + '\\b')
             .test(source) && message.includes(field));
@@ -1060,7 +1136,8 @@ export function customSeedUniforms(baseType: CustomBaseType, renderMode: CustomR
 
 const FWD_SCRATCH = `// FORWARD custom material. Return the final LINEAR-HDR color (tonemap/gamma happen at present).
 // Available: fragPos, fragTexCoord, TBN, getNormal(), u_viewPos, u_time,
-//   lights (u_dirLight, u_pointLights[u_numPointLights], u_spotlights[u_numSpotlights]),
+//   the sun (u_dirLight), and this fragment's own clustered point/spot lights via
+//   cleoClusterOf() / cleoClusterOffset() / cleoClusterCount() / cleoClusterLight() / cleoLight(),
 //   helpers accumulateLight(), shadowCalculation(), fresnelSchlick(), toLinear().
 // Declare your own inputs in the Uniforms panel; they appear here as u_<name>.
 vec4 fragment() {
@@ -1086,12 +1163,20 @@ vec4 fragment() {
         color += radiance *
                  (max(dot(N, L), 0.0) * u_diffuse + pow(max(dot(N, H), 0.0), u_shininess) * u_specular);
     }
-    for (int i = 0; i < u_numPointLights; i++) {
-        vec3 toLight = u_pointLights[i].position - fragPos;
-        float att = distanceAttenuation(dot(toLight, toLight), u_pointLights[i].invRangeSquared);
+    // Every point and spot light that reaches THIS fragment, from the clustered light grid. There is
+    // no cap: the loop runs over this fragment's own cluster, not over the whole scene.
+    int cluster = cleoClusterOf(gl_FragCoord.xy, cleoViewDepth());
+    int first = cleoClusterOffset(cluster);
+    int count = cleoClusterCount(cluster);
+    for (int i = 0; i < count; i++) {
+        ClusteredLight cl = cleoLight(cleoClusterLight(first + i));
+        vec3 toLight = cl.light.position - fragPos;
+        float att = distanceAttenuation(dot(toLight, toLight), cl.light.invRangeSquared);
         vec3 L = normalize(toLight);
         vec3 H = normalize(L + V);
-        vec3 radiance = u_pointLights[i].color * (u_pointLights[i].intensity * att);
+        float cone = spotAttenuation(dot(L, normalize(-cl.light.direction)),
+                                     cl.light.coneScale, cl.light.coneOffset);
+        vec3 radiance = cl.light.color * (cl.light.intensity * att * cone);
         color += radiance *
                  (max(dot(N, L), 0.0) * u_diffuse + pow(max(dot(N, H), 0.0), u_shininess) * u_specular);
     }
@@ -1124,18 +1209,26 @@ vec4 fragment() {
                         * pow(1.0 - roughness, 4.0);
     }
 
-    // The three evaluate* helpers are the SAME code the engine's own programs run, so a custom
-    // material picks up any change to the falloff or the BRDF for free. Open-coding a light loop
-    // still works — every field is there — it just stops tracking the engine.
+    // The evaluate* helpers are the SAME code the engine's own programs run, so a custom material
+    // picks up any change to the falloff or the BRDF for free. Open-coding a light loop still works —
+    // every field is there — it just stops tracking the engine.
     vec3 Lo = vec3(0.0);
     Lo += evaluateDirectionalLight(u_dirLight, N, V, albedo, metallic, roughness,
                                    1.0 - shadowCalculation());
-    for (int i = 0; i < u_numPointLights; i++) {
-        Lo += evaluatePointLight(u_pointLights[i], fragPos, N, V, albedo, metallic, roughness);
-    }
-    for (int i = 0; i < u_numSpotlights; i++) {
-        Lo += evaluateSpotLight(u_spotlights[i], fragPos, N, V, albedo, metallic, roughness,
-                                1.0 - spotShadowFor(i, fragPos, N, u_spotlights[i].position));
+
+    // The scene's point and spot lights, from the clustered light grid: cleoClusterOf() finds the
+    // lights that can reach THIS fragment, and the loop runs over those alone. There is no maximum
+    // light count to respect and no per-type loop -- a point light is a spot whose cone covers
+    // everything, so both come through evaluateSpotLight() unchanged.
+    // (No backticks in here: this comment lives inside a JS template literal.)
+    int cluster = cleoClusterOf(gl_FragCoord.xy, cleoViewDepth());
+    int first = cleoClusterOffset(cluster);
+    int count = cleoClusterCount(cluster);
+    for (int i = 0; i < count; i++) {
+        ClusteredLight cl = cleoLight(cleoClusterLight(first + i));
+        Lo += evaluateSpotLight(cl.light, fragPos, N, V, albedo, metallic, roughness,
+                                cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
+                                                       fragPos, N, cl.light.position));
     }
 
     return vec4(ambientDiffuse + ambientSpecular + Lo + u_emissive, 1.0);

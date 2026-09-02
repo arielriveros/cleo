@@ -10,6 +10,18 @@ export interface TextureFormatRequest {
     channels?: 'rgba' | 'r';
     /** An exact format, bypassing the precision/channels inference. Still subject to the float fallback. */
     format?: TextureFormat;
+    /**
+     * This texture is only ever read with `textureLoad` — never a render target, never filtered.
+     *
+     * Such a texture is EXEMPT from the float fallback below, and that is a statement about the two
+     * APIs rather than a way of opting out of a safety check. The fallback exists because the engine's
+     * float targets are all rendered into and sampled bilinearly, and neither capability is guaranteed;
+     * point-sampling a float texture is core on both back ends (`EXT_color_buffer_float` is needed only
+     * to render INTO one on WebGL2, `OES_texture_float_linear` only to filter one, and WebGPU's
+     * `float32-filterable` likewise). Downgrading a data texture to `rgba8unorm` would not degrade it —
+     * it would quantise every light position in the scene to 256 levels.
+     */
+    loadOnly?: boolean;
 }
 
 /** The device's float-texture capabilities, from {@link DeviceCapabilities}. */
@@ -50,7 +62,7 @@ export function resolveTextureFormat(
 
     const requested: TextureFormat = request.format ?? inferFormat(request);
     const fallback = FLOAT_FALLBACK[requested];
-    if (fallback && !floatUsable(support))
+    if (fallback && !request.loadOnly && !floatUsable(support))
         return { format: fallback, requested, downgraded: true };
 
     return { format: requested, requested, downgraded: false };
