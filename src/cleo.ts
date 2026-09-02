@@ -159,6 +159,9 @@ export { frameStats, currentViewport } from "./graphics/renderStats";
 export type { RenderStats } from "./graphics/renderStats";
 export { gpuProfiler, frameHistory, Ring, RENDER_PASSES, TOGGLEABLE_PASSES } from "./graphics/gpuProfiler";
 export type { PassTiming, RenderPass, FrameSample } from "./graphics/gpuProfiler";
+export { DEFAULT_POST_CHAIN, resolvePostChain, isDefaultChain, isBuiltinEffect, materialIndexOf }
+    from "./graphics/renderGraph/chain";
+export type { PostChainEntry, PostEffectId, BuiltinEffectId } from "./graphics/renderGraph/chain";
 export { cpuProfiler } from "./graphics/cpuProfiler";
 export { convexHull, hullFromPositions, HULL_BUDGETS } from "./physics/convexHull";
 export type { Hull, HullQuality } from "./physics/convexHull";

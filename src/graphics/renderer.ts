@@ -21,6 +21,12 @@ import { Mesh } from './mesh';
 import type { ShaderProgram, ShaderProgramDescriptor } from './rhi/shaderProgram';
 import { Framebuffer } from './framebuffer';
 import { LayeredDepthFramebuffer } from './layeredDepthFramebuffer';
+import { RenderGraphBuilder } from './renderGraph/graph';
+import type { CompiledGraph, ResourceId } from './renderGraph/graph';
+import { FramebufferPool } from './renderGraph/pool';
+import { materialIndexOf, resolvePostChain } from './renderGraph/chain';
+import type { PostEffectId } from './renderGraph/chain';
+import type { ResourceDesc } from './renderGraph/resources';
 import {
     MAX_CASCADES, CascadeSphere, computeCascadeSplits, cascadeSphereFromPerspective,
     cascadeSphereFromCorners, quantizeRadius, cascadeDepthScale, buildCascadeMatrix,
@@ -539,9 +545,10 @@ export class Renderer {
     private _passEnabled: Record<RenderPass, boolean> =
         Object.fromEntries(RENDER_PASSES.map(p => [p, true])) as Record<RenderPass, boolean>;
 
-    // Which of `_compose_FBOs` holds the post-process image. Tracked rather than hard-coded per stage,
-    // so a disabled stage drops out of the chain entirely instead of costing a full-res copy.
-    private _composeIndex: number = 0;
+    // Storage for the post chain's intermediate buffers. Which physical framebuffer backs which stage
+    // is decided per frame by `_buildPostGraph`, and a stage that is switched off never asks for one —
+    // which is what replaced the pair of permanently-resident compose buffers this used to index into.
+    private readonly _postPool = new FramebufferPool();
 
     // Internal render resolution as a fraction of the canvas. Every screen-space buffer is allocated
     // at `canvas * renderScale` while the canvas stays native, so the present upscales.
@@ -727,8 +734,6 @@ export class Renderer {
     private _pointTarget: vec3 = vec3.create();
 
     // Post processing
-    private _compose_FBOs!: Framebuffer[];
-    private _blur_FBOs!: Framebuffer[];
     // Bloom downsample/upsample pyramid: level 0 is half the render size and each halves again, so the
     // whole chain costs about a third of one full-res pass. Allocation stops at 1px.
     private _bloomMips: Framebuffer[] = [];
@@ -1226,7 +1231,6 @@ export class Renderer {
         // ping-pong blur targets are float — an RGBA8 bloom would clamp and defeat the HDR bright-pass.
         for (let i = 0; i < Renderer.BLOOM_MIP_COUNT; i++)
             this._bloomMips.push(new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }));
-        this._blur_FBOs = [new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }), new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } })];
         // Same config as the blur scratch buffers (LINEAR-filtered float) so the low-res clouds upsample smoothly.
         this._cloudsFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         // Same float/LINEAR config: the resolve reads it with bilinear taps for its neighbourhood bounds.
@@ -1241,8 +1245,6 @@ export class Renderer {
         // that instead of from the scene for as long as the pyramid has existed. It read as "bloom does
         // not respond to any setting": the threshold, knee and intensity all worked perfectly, on an
         // image that was not the frame.
-        this._compose_FBOs = [new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }),
-                              new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } })];
         // Motion blur velocity buffers (signed velocity -> float precision).
         // `depth: false`: the fullscreen reprojection tests no depth, and the object pass that does
         // borrows the opaque buffer through `_velocityObjectsTarget` rather than owning one. The
@@ -1463,10 +1465,6 @@ export class Renderer {
         this._spotShadowFBO.create(this._spotShadowResolution, Renderer.MAX_SPOT_SHADOWS);
         this._pointShadowFBO.create(this._pointShadowResolution, MAX_POINT_SHADOWS * 6);
 
-        this._blur_FBOs[0].create(rw / 2, rh / 2);
-        this._blur_FBOs[1].create(rw / 2, rh / 2);
-        this._compose_FBOs[0].create(rw, rh);
-        this._compose_FBOs[1].create(rw, rh);
         this._createBloomMips(rw, rh);
 
         const mbK = Renderer.MOTION_BLUR_TILE;
@@ -2765,7 +2763,7 @@ export class Renderer {
             }
             if (mat instanceof CustomMaterial) {
                 this._applyCustomMaterial(mat, true);   // u_time, u_viewPos + user VALUE uniforms
-                // See `_screenMaterialsPass` for what the WGSL is and why the vertex stage is a
+                // See `_screenMaterialPass` for what the WGSL is and why the vertex stage is a
                 // separate module. Absent on WebGL2 and for a material that could not translate.
                 const customWgsl = customShaderModules(mat);
                 const customPipeline = this._pipelineFor(shaderType, {
@@ -4113,7 +4111,12 @@ export class Renderer {
     // Volumetric god rays for the SkyAtmosphere sun: a half-res raymarch bounded by scene depth,
     // shadow-tested per step, additively upsampled into the pre-bloom scene buffer.
     // No shadow-casting directional light -> uniform (unoccluded) haze.
-    private _renderGodRays(scene: Scene): void {
+    /**
+     * Volumetric light shafts, raymarched at half resolution and composited additively INTO `target` —
+     * before bloom by default, so the shafts bloom and tonemap like any other light. In place, which is
+     * why the graph declares this a `readWrites` rather than a stage of the chain.
+     */
+    private _renderGodRays(scene: Scene, scratch: Framebuffer, target: Framebuffer): void {
         const node = scene.skyAtmosphere;
         if (!node || !node.godRaysEnabled) return;
 
@@ -4129,9 +4132,9 @@ export class Renderer {
                 }
             }
         }
-        // Pass A: raymarch at half resolution into the blur scratch buffer (safe to reuse — bloom,
-        // its only other consumer, runs after god rays and overwrites it). Blend off: plain write.
-        const rayPass = this._beginFullscreenPass(this._blur_FBOs[0].renderTarget, 'godRays', false,
+        // Pass A: raymarch at half resolution into the scratch buffer the graph handed us. Blend off:
+        // plain write. Who else may use that storage is the pool's question now, not a comment's.
+        const rayPass = this._beginFullscreenPass(scratch.renderTarget, 'godRays', false,
                                                   undefined, false);
         const rayPipeline = this._fullscreenPipeline('godRays', VolumetricGodRaysProgram);
         rayPass.setPipeline(rayPipeline);
@@ -4157,14 +4160,14 @@ export class Renderer {
         this._drawFullscreen(rayPass);
         this._endFullscreenPass(rayPass);
 
-        // Pass B: additively upsample into the pre-bloom scene buffer, so the shafts bloom and
-        // tonemap like any other light. In place — follow `_composeIndex`, never assume [0].
-        const upPass = this._beginFullscreenPass(this._compose_FBOs[this._composeIndex].renderTarget,
+        // Pass B: additively upsample into the chain buffer the graph handed us. In place — which
+        // stage that is depends on where the user put this effect, and is not this method's business.
+        const upPass = this._beginFullscreenPass(target.renderTarget,
                                                  'godRaysUpsample', false, undefined, false);
         const upPipeline = this._fullscreenPipeline('screen', ScreenProgram, ADDITIVE_BLEND);
         upPass.setPipeline(upPipeline);
-        upPass.setBindGroup(0, this._textureBindGroup(upPipeline, 0, [this._blur_FBOs[0].colors[0]]));
-        this._blur_FBOs[0].colors[0].bind(0);
+        upPass.setBindGroup(0, this._textureBindGroup(upPipeline, 0, [scratch.colors[0]]));
+        scratch.colors[0].bind(0);
         this._drawFullscreen(upPass);
         this._endFullscreenPass(upPass);
 
@@ -5907,15 +5910,6 @@ export class Renderer {
         const ah = Math.max(1, Math.round(height * this._ssaoResolutionScale));
         this._ssaoFBO.resize(aw, ah);
         this._ssaoBlurFBO.resize(aw, ah);
-        // Floor, don't divide raw: Framebuffer.resize stores the value verbatim and reports it back as
-        // `width`, so an odd render width left these at e.g. 645.5 — a viewport truncated to 645 with a
-        // texel size computed from 645.5, i.e. every consumer sampling on a subtly wrong grid.
-        const hw = Math.max(1, Math.floor(width / 2));
-        const hh = Math.max(1, Math.floor(height / 2));
-        this._blur_FBOs[0].resize(hw, hh);
-        this._blur_FBOs[1].resize(hw, hh);
-        this._compose_FBOs[0].resize(width, height);
-        this._compose_FBOs[1].resize(width, height);
         this._createBloomMips(width, height);
         this._outlineMaskFBO.resize(width, height);
         const mbK = Renderer.MOTION_BLUR_TILE;
@@ -5927,6 +5921,10 @@ export class Renderer {
         // history now points at uninitialized memory — not merely a stale image.
         this._hasPrevViewProj = false;
         this.invalidateTemporalHistory();
+        // The pool has no resize of its own: every slot it holds was built for the OLD extent, and the
+        // next compile asks for the new one. Releasing here rather than reallocating keeps the "a
+        // resize hands back uninitialized memory" contract above true of the chain buffers too.
+        this._postPool.destroy();
     }
 
     public set viewport(viewport: HTMLElement) {
@@ -6222,7 +6220,7 @@ export class Renderer {
             if (mat instanceof CustomMaterial) {
                 if (!viaRHI) { this._applyCustomMaterial(mat); return false; }
                 this._applyCustomMaterial(mat, true);
-                // See `_screenMaterialsPass`. Absent on WebGL2 and for a material that could not
+                // See `_screenMaterialPass`. Absent on WebGL2 and for a material that could not
                 // translate; group 3 (the shadow maps) is bound below as for any lit program.
                 const customWgsl = customShaderModules(mat);
                 const customPipeline = this._pipelineFor(shaderType, {
@@ -6843,155 +6841,258 @@ export class Renderer {
             return;
         }
 
-        // First, bring the lit scene into _compose_FBOs[0]. Motion blur (when on) reconstructs the
-        // image while doing so; otherwise it's a plain copy.
-        // The gate was decided at the top of the frame (`_motionBlurWillRun`) because the velocity
-        // buffer is produced during the scene render. The second term is not redundant: the chain must
-        // not run against a buffer that pass declined to fill.
-        if (this._motionBlurWillRun && this._velocityProducedThisFrame) {
-            this._motionBlurPass();
-        } else {
-            this._scope('present');
-            // The only `compose` label: the plain scene copy. PASS_LABEL_TO_SCOPE files it under
-            // `present`, the scope opened right above.
-            const pass = this._beginFullscreenPass(this._compose_FBOs[0].renderTarget, 'compose', true);
-            const pipeline = this._fullscreenPipeline('screen', ScreenProgram);
-            pass.setPipeline(pipeline);
-            pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._sceneFBO.colors[0]]));
-            this._drawFullscreen(pass);
-            this._endFullscreenPass(pass);
-        }
-        // Both branches above land the image in compose[0]; god rays and bloom keep it there.
-        this._composeIndex = 0;
-
-        // Auto-exposure meters `_sceneFBO` — the lit scene, BEFORE god rays and bloom add light back
-        // into the compose buffer. Metering after them would make exposure and bloom chase each other:
-        // bloom brightens the frame, the meter darkens the exposure, which moves bloom's
-        // display-referred threshold, and round again.
-        const nowMs = performance.now();
-        // Clamped: a backgrounded tab or a shader compile can produce a multi-second gap, and letting
-        // that through would snap the exposure in one frame instead of easing.
-        const dt = Math.min(0.25, Math.max(0, (nowMs - this._lastExposureMs) / 1000));
-        this._lastExposureMs = nowMs;
-        this._exposurePass(dt);
-
-        // God rays: additively composite the sun's light shafts into the scene BEFORE bloom, so the
-        // shafts bloom and go through the single final tonemap like any other light.
-        if (this._beginPass('godRays')) this._renderGodRays(scene);
-
-        // Then, render the screen framebuffer to the bloom framebuffer
-        this._bloomPass();
-
-        // chromaticAberration
-        if (this._chromaticAberrationStrength > 0 && this._beginPass('chromatic'))
-            this._chromaticAberrationPass();
-
-        // User-ordered screen-space custom materials from the active camera (still linear HDR,
-        // before the final exposure/ACES/sRGB resolve below).
-        if (this._beginPass('screenMaterials')) this._screenMaterialsPass(scene);
-
-        // Render to screen using default framebuffer
-        this._scope('present');
-        if (this._debugView === 'final') {
-            if (this._outlineActive) {
-                // Composite the selection outline over the final image on the way to the screen.
-                this._outlinePass();
-            } else {
-                // Single display resolve: exposure -> ACES -> sRGB on the linear-HDR composite.
-                // Uniform VALUES still travel by name through ShaderManager; the backend decides how a
-                // named uniform reaches the GPU.
-                const pass = this._beginFullscreenPass(this._screenTarget(), 'present', true);
-                const pipeline = this._fullscreenPipeline('present', PresentProgram);
-                pass.setPipeline(pipeline);
-                this._shaderManager.setUniform('u_exposure', this._exposure);
-                this._shaderManager.setUniform('u_saturation', this._effectiveSaturation());
-                this._shaderManager.setUniform('u_toneMapper', this._toneMapperId());
-                const lut = this._colorLut.volumeFor(this._colorGradingLut);
-                this._shaderManager.setUniform('u_lutSize', this._colorLut.size);
-                this._shaderManager.setUniform('u_lutIntensity', this._lutIntensity());
-                // Opaque. The flag is reset rather than assumed because uniforms persist across binds,
-                // and a preceding thumbnail capture would otherwise leave it on and punch the page
-                // background through the viewport.
-                this._shaderManager.setUniform('u_alphaFromDepth', 0.0);
-                // Every texture is bound even where it is not read (the coverage depth at
-                // alphaFromDepth 0, the identity LUT at intensity 0) — WebGPU requires every declared
-                // binding to be satisfied.
-                pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-                    this._compose_FBOs[this._composeIndex].colors[0], this._sceneFBO.depth, lut,
-                ]));
-                this._drawFullscreen(pass);
-                this._endFullscreenPass(pass);
-            }
-        } else {
-            // Editor Renderer-mode: blit one internal buffer instead of the composited image.
-            // Overdraw has no buffer of its own until it is asked for, so accumulate it first.
-            if (this._debugView === 'overdraw') this._overdrawPass(scene);
-            this._blitDebugView();
-        }
+        const graph = this._buildPostGraph(scene);
+        graph.execute(this._postPool);
+        // Whatever the chain stopped asking for is released rather than left resident — the point of
+        // pooling these instead of allocating one buffer per effect up front.
+        this._postPool.trim(graph.slots.length);
     }
 
     /**
-     * Run the active camera's ordered screen-space custom materials as fullscreen passes, ping-ponging
-     * the compose buffers. Starts from whichever buffer `_composeIndex` names and leaves the index
-     * pointing at the result. Passes run in linear HDR — the resolve happens afterwards in 'present'.
+     * Build this frame's post chain as a render graph.
+     *
+     * The ORDER comes from the active camera (`resolvePostChain`), not from the order these statements
+     * happen to be written in — that is the whole change. What has NOT moved is the set of steps that
+     * cannot be reordered, and they are not chain entries at all:
+     *
+     *   compose   the scene enters the chain. Motion blur IS this step when it runs, reconstructing
+     *             the image out of `_sceneFBO` and the velocity buffer while copying it in.
+     *   exposure  meters `_sceneFBO` BEFORE god rays or bloom put light into the chain. Metering after
+     *             them makes exposure and bloom chase each other: bloom brightens the frame, the meter
+     *             darkens the exposure, which moves bloom's display-referred threshold, and round again.
+     *   present   the single display resolve. Last by definition.
+     *
+     * Every effect that PING-PONGS is gated here, at build time, rather than inside its own body. It
+     * has to be: skipping a pass that was going to write the next buffer leaves the stage after it
+     * reading one nothing has filled, and a framebuffer keeps its contents — so the frame would come
+     * back holding the previous one rather than failing.
+     */
+    private _buildPostGraph(scene: Scene): CompiledGraph<Framebuffer> {
+        const graph = new RenderGraphBuilder<Framebuffer>();
+
+        // The chain's working format, and it has to stay `rgba16float`: these buffers carry linear HDR
+        // radiance all the way to the present resolve, and their alpha channel is the bloom MASK rather
+        // than coverage. `precision: 'high'` resolved to exactly this, float fallback included.
+        const hdr: Omit<ResourceDesc, 'name' | 'lifetime'> = {
+            size: { kind: 'render' }, format: 'rgba16float', colorAttachments: 1, depth: false,
+        };
+
+        // Two buffers to ping-pong between. Declared rather than owned: a frame whose chain is a single
+        // in-place effect asks for one of them and never allocates the second.
+        const composeA = graph.declare({ ...hdr, name: 'compose.a', lifetime: 'transient' });
+        const composeB = graph.declare({ ...hdr, name: 'compose.b', lifetime: 'transient' });
+        let src = composeA;
+        const flip = (): ResourceId => (src === composeA ? composeB : composeA);
+
+        // --- head: the scene enters the chain ----------------------------------------------------
+        // The gate was decided at the top of the frame (`_motionBlurWillRun`) because the velocity
+        // buffer is produced during the scene render. The second term is not redundant: the chain must
+        // not run against a buffer that pass declined to fill.
+        const blur = this._motionBlurWillRun && this._velocityProducedThisFrame;
+        // Captured, never `src` itself: `src` walks along the chain as the loop below adds stages, and
+        // a closure over it would resolve to whichever buffer the chain ENDED on by the time the graph
+        // runs — which is the last stage's output, not the head this pass is supposed to fill.
+        const head = src;
+        graph.addPass({
+            id: 'compose', scope: blur ? 'motionBlur' : 'present', writes: [head],
+            execute: ctx => {
+                if (blur) { this._motionBlurPass(ctx.target(head)); return; }
+                this._scope('present');
+                // The only `compose` label: the plain scene copy. PASS_LABEL_TO_SCOPE files it under
+                // `present`, the scope opened right above.
+                const pass = this._beginFullscreenPass(ctx.target(head).renderTarget, 'compose', true);
+                const pipeline = this._fullscreenPipeline('screen', ScreenProgram);
+                pass.setPipeline(pipeline);
+                pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._sceneFBO.colors[0]]));
+                this._drawFullscreen(pass);
+                this._endFullscreenPass(pass);
+            },
+        });
+
+        // --- anchor: auto-exposure meters the scene, not the chain --------------------------------
+        // Clamped: a backgrounded tab or a shader compile can produce a multi-second gap, and letting
+        // that through would snap the exposure in one frame instead of easing.
+        const nowMs = performance.now();
+        const dt = Math.min(0.25, Math.max(0, (nowMs - this._lastExposureMs) / 1000));
+        this._lastExposureMs = nowMs;
+        // It reads `_sceneFBO` and writes its own 1x1 targets, so it touches no chain resource at all —
+        // which is why its position is fixed by the comment above rather than by a dependency.
+        graph.addPass({ id: 'exposure', scope: 'exposure', execute: () => this._exposurePass(dt) });
+
+        // --- the reorderable middle ---------------------------------------------------------------
+        const materials = scene.activeCamera?.screenMaterials ?? [];
+        for (const entry of resolvePostChain(scene.activeCamera?.postChain, materials.length)) {
+            if (!entry.enabled) continue;
+            const materialIndex = materialIndexOf(entry.effect);
+
+            if (materialIndex !== null) {
+                const material = materials[materialIndex];
+                if (!(material instanceof CustomMaterial) || material.renderMode !== 'screen') continue;
+                ensureCustomShader(material); // idempotent; magenta fallback under the key on error
+                // ...unless the device could build neither the user's program nor the magenta one,
+                // which is every custom material on WebGPU until the runtime reflection lands. Not
+                // adding the pass leaves the chain's source buffer as this stage's result, so the
+                // passes that follow still compose.
+                if (!customShaderReady(material)) continue;
+                const from = src, to = flip();
+                graph.addPass({
+                    id: entry.effect, scope: 'screenMaterials', reads: [from], writes: [to],
+                    execute: ctx => this._screenMaterialPass(
+                        scene, material, ctx.read(from), ctx.target(to)),
+                });
+                src = to;
+                continue;
+            }
+
+            if (entry.effect === 'godRays') {
+                // In place: the shafts are composited ADDITIVELY into the buffer they are read against,
+                // so this neither consumes nor produces a chain stage. `readWrites` is what tells the
+                // pool it may not lend that buffer to anything live at the same moment.
+                if (!this._passEnabled['godRays'] || !scene.skyAtmosphere?.godRaysEnabled) continue;
+                const inPlace = src;
+                // Half res, and its own resource rather than a standing buffer. It used to borrow
+                // `_blur_FBOs[0]` under the argument that bloom "runs after god rays and overwrites
+                // it" — an argument that stopped being checkable the moment the chain became
+                // reorderable, and that had already gone stale: bloom moved onto its own pyramid and
+                // left both blur buffers to this one pass, the second of them entirely unread.
+                const scratch = graph.declare({
+                    ...hdr, name: 'godRays.scratch', size: { kind: 'scaled', scale: 0.5 },
+                    lifetime: 'transient',
+                });
+                graph.addPass({
+                    id: 'godRays', scope: 'godRays', readWrites: [inPlace], writes: [scratch],
+                    execute: ctx => this._renderGodRays(scene, ctx.target(scratch), ctx.target(inPlace)),
+                });
+                continue;
+            }
+
+            if (entry.effect === 'bloom') {
+                // Two nodes rather than one, because the pyramid and the composite are separately
+                // switchable in the profiler and only the composite consumes a chain stage. Fused,
+                // switching the composite off would advance the ping-pong onto an unwritten buffer.
+                if (this._bloomIntensity <= 0 || !this._passEnabled['bloom.bright']) continue;
+                const from = src;
+                graph.addPass({
+                    id: 'bloom.generate', scope: 'bloom.bright', reads: [from],
+                    execute: ctx => this._bloomGenerate(ctx.read(from)),
+                });
+                if (!this._passEnabled['bloom.composite']) continue;
+                const to = flip();
+                graph.addPass({
+                    id: 'bloom.composite', scope: 'bloom.composite', reads: [from], writes: [to],
+                    execute: ctx => this._bloomComposite(ctx.read(from), ctx.target(to)),
+                });
+                src = to;
+                continue;
+            }
+
+            if (entry.effect === 'chromatic') {
+                if (this._chromaticAberrationStrength <= 0 || !this._passEnabled['chromatic']) continue;
+                const from = src, to = flip();
+                graph.addPass({
+                    id: 'chromatic', scope: 'chromatic', reads: [from], writes: [to],
+                    execute: ctx => this._chromaticAberrationPass(ctx.read(from), ctx.target(to)),
+                });
+                src = to;
+            }
+        }
+
+        // --- tail: the single display resolve -----------------------------------------------------
+        const result = src;
+        graph.addPass({
+            id: 'present', scope: 'present', reads: [result],
+            execute: ctx => {
+                this._scope('present');
+                if (this._debugView !== 'final') {
+                    // Editor Renderer-mode: blit one internal buffer instead of the composited image.
+                    // Overdraw has no buffer of its own until it is asked for, so accumulate it first.
+                    if (this._debugView === 'overdraw') this._overdrawPass(scene);
+                    this._blitDebugView();
+                    return;
+                }
+                // Composite the selection outline over the final image on the way to the screen.
+                if (this._outlineActive) { this._outlinePass(ctx.read(result)); return; }
+                this._presentPass(ctx.read(result));
+            },
+        });
+
+        return graph.compile(this._renderWidth, this._renderHeight);
+    }
+
+    /**
+     * The single display resolve: exposure -> tone curve -> LUT -> sRGB on the linear-HDR composite.
+     * Uniform VALUES still travel by name through ShaderManager; the backend decides how a named
+     * uniform reaches the GPU.
+     */
+    private _presentPass(source: Framebuffer): void {
+        const pass = this._beginFullscreenPass(this._screenTarget(), 'present', true);
+        const pipeline = this._fullscreenPipeline('present', PresentProgram);
+        pass.setPipeline(pipeline);
+        this._shaderManager.setUniform('u_exposure', this._exposure);
+        this._shaderManager.setUniform('u_saturation', this._effectiveSaturation());
+        this._shaderManager.setUniform('u_toneMapper', this._toneMapperId());
+        const lut = this._colorLut.volumeFor(this._colorGradingLut);
+        this._shaderManager.setUniform('u_lutSize', this._colorLut.size);
+        this._shaderManager.setUniform('u_lutIntensity', this._lutIntensity());
+        // Opaque. The flag is reset rather than assumed because uniforms persist across binds, and a
+        // preceding thumbnail capture would otherwise leave it on and punch the page background
+        // through the viewport.
+        this._shaderManager.setUniform('u_alphaFromDepth', 0.0);
+        // Every texture is bound even where it is not read (the coverage depth at alphaFromDepth 0,
+        // the identity LUT at intensity 0) — WebGPU requires every declared binding to be satisfied.
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+            source.colors[0], this._sceneFBO.depth, lut,
+        ]));
+        this._drawFullscreen(pass);
+        this._endFullscreenPass(pass);
+    }
+
+    /**
+     * Run ONE of the active camera's screen-space custom materials as a fullscreen pass, from one chain
+     * stage into the next. Where it sits in the chain — and whether it runs at all — is decided in
+     * `_buildPostGraph`, which is also where a material whose program failed to build is left out
+     * rather than skipped mid-loop. Runs in linear HDR; the resolve happens afterwards in 'present'.
      *
      * These programs compile at RUNTIME from user GLSL, so there is no build-time reflection:
      * `customShaderResources` derives group 0 from the same interface description the prelude is
      * generated from.
      */
-    private _screenMaterialsPass(scene: Scene): void {
-        const mats = scene.activeCamera?.screenMaterials;
-        if (!mats || mats.length === 0) return;
-
+    private _screenMaterialPass(scene: Scene, mat: CustomMaterial,
+                                source: Framebuffer, target: Framebuffer): void {
         const sun = this._sunScreenInfo(scene);
-        let src = this._composeIndex;
-        for (const mat of mats) {
-            if (!(mat instanceof CustomMaterial) || mat.renderMode !== 'screen') continue;
-            ensureCustomShader(mat); // idempotent; magenta fallback under the key on compile error
-            // ...unless the device could build neither the user's program nor the magenta one, which is
-            // every custom material on WebGPU until the runtime reflection lands. Skipping leaves the
-            // chain's source buffer as this stage's result, so the following passes still compose.
-            if (!customShaderReady(mat)) continue;
-            const dst = 1 - src;
-            const pass = this._beginFullscreenPass(this._compose_FBOs[dst].renderTarget, 'screenMaterial',
-                                                   false, undefined, false);
-            // The WGSL, when there is any. On WebGL2 there is none and none is needed — the program
-            // is already linked and `_pipelineFor` reaches it by name. `entryPoints.fragment` is
-            // `main` because that is what naga calls the entry it generates, not `fs_main`.
-            const wgsl = customShaderModules(mat);
-            const pipeline = this._pipelineFor(mat.type, {
-                resources: screenShaderResources(mat.uniforms),
-                ...(wgsl ? { wgsl: wgsl.fragment, entryPoints: { fragment: 'main' },
-                             vertexWgsl: { wgsl: wgsl.vertex, entryPoint: wgsl.vertexEntry } } : {}),
-            }, { vertex: 'model', builtFor: mat.type });
-            pass.setPipeline(pipeline);
-            this._shaderManager.bind(mat.type);
-            // Group 0 is the two engine samplers followed by the user's, in declaration order — the
-            // order `screenShaderResources` and the prelude both use. A user sampler with no texture
-            // assigned gets the shared fallback, because a bind group cannot leave a binding empty.
-            const fallback = TextureManager.Instance.getTexture('Null') ?? this._fallbackTexture;
-            const userTextures = screenUserSamplerNames(mat.uniforms).map((name: string) => {
-                const id = mat.textures.get(name.replace(/^u_/, ''));
-                return (id ? TextureManager.Instance.getTexture(id) : null) ?? fallback;
-            });
-            pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-                this._compose_FBOs[src].colors[0], this._sceneDepthFBO.depth, ...userTextures,
-            ]));
-            this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
-            this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
-            this._shaderManager.setUniform('u_sunDir', sun.dir);
-            this._shaderManager.setUniform('u_sunUV', sun.uv);
-            this._shaderManager.setUniform('u_sunVisible', sun.visible);
-            this._shaderManager.setUniform('u_exposure', this._exposure); // lets a pass invert the final present resolve
-            this._applyCustomMaterial(mat, true);   // u_time, u_viewPos + user VALUE uniforms only
-            this._drawFullscreen(pass);
-            this._endFullscreenPass(pass);
-            src = dst;
-        }
-
-        // No copy-back needed: present/outline follow `_composeIndex` wherever the ping-pong ended,
-        // which removes a full-res blit that used to run on every odd-numbered screen-material count.
-        this._composeIndex = src;
+        const pass = this._beginFullscreenPass(target.renderTarget, 'screenMaterial',
+                                               false, undefined, false);
+        // The WGSL, when there is any. On WebGL2 there is none and none is needed — the program
+        // is already linked and `_pipelineFor` reaches it by name. `entryPoints.fragment` is
+        // `main` because that is what naga calls the entry it generates, not `fs_main`.
+        const wgsl = customShaderModules(mat);
+        const pipeline = this._pipelineFor(mat.type, {
+            resources: screenShaderResources(mat.uniforms),
+            ...(wgsl ? { wgsl: wgsl.fragment, entryPoints: { fragment: 'main' },
+                         vertexWgsl: { wgsl: wgsl.vertex, entryPoint: wgsl.vertexEntry } } : {}),
+        }, { vertex: 'model', builtFor: mat.type });
+        pass.setPipeline(pipeline);
+        this._shaderManager.bind(mat.type);
+        // Group 0 is the two engine samplers followed by the user's, in declaration order — the
+        // order `screenShaderResources` and the prelude both use. A user sampler with no texture
+        // assigned gets the shared fallback, because a bind group cannot leave a binding empty.
+        const fallback = TextureManager.Instance.getTexture('Null') ?? this._fallbackTexture;
+        const userTextures = screenUserSamplerNames(mat.uniforms).map((name: string) => {
+            const id = mat.textures.get(name.replace(/^u_/, ''));
+            return (id ? TextureManager.Instance.getTexture(id) : null) ?? fallback;
+        });
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+            source.colors[0], this._sceneDepthFBO.depth, ...userTextures,
+        ]));
+        this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
+        this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
+        this._shaderManager.setUniform('u_sunDir', sun.dir);
+        this._shaderManager.setUniform('u_sunUV', sun.uv);
+        this._shaderManager.setUniform('u_sunVisible', sun.visible);
+        this._shaderManager.setUniform('u_exposure', this._exposure); // lets a pass invert the final present resolve
+        this._applyCustomMaterial(mat, true);   // u_time, u_viewPos + user VALUE uniforms only
+        this._drawFullscreen(pass);
+        this._endFullscreenPass(pass);
     }
 
     /**
@@ -7026,7 +7127,7 @@ export class Renderer {
 
     // Screen-space selection outline: draws a border just outside the silhouette mask over the
     // final composited image. Renders to whatever framebuffer is currently bound (the screen).
-    private _outlinePass(): void {
+    private _outlinePass(source: Framebuffer): void {
         // The clear moves in here with the pass: the caller used to unbind the scene FBO and clear the
         // screen by hand, which is the same thing said twice and only one of them portable.
         const pass = this._beginFullscreenPass(this._screenTarget(), 'outline', true);
@@ -7045,7 +7146,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_outlineColor', this._outlineColor);
         this._shaderManager.setUniform('u_outlineWidth', this._outlineWidth);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-            this._compose_FBOs[this._composeIndex].colors[0], this._outlineMaskFBO.colors[0], lut,
+            source.colors[0], this._outlineMaskFBO.colors[0], lut,
         ]));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
@@ -7339,12 +7440,13 @@ export class Renderer {
         this._exposure = REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, this._exposureEV));
     }
 
-    private _bloomPass(): void {
-        // Nothing to add back: skip the whole chain rather than blurring an image no one will read.
-        if (this._bloomIntensity <= 0 || !this._passEnabled['bloom.bright']) return;
-
-        const src = this._composeIndex;
-
+    /**
+     * Build the bloom pyramid from `source`: bright pass, downsample chain, additive upsample chain.
+     * Writes only its own mips — the composite that puts the result back over the image is
+     * {@link _bloomComposite}, a separate pass because it is separately switchable and because only it
+     * consumes a stage of the chain.
+     */
+    private _bloomGenerate(source: Framebuffer): void {
         // 1. Bright pass into the largest mip (half res). Also writes the scene passthrough into
         this._scope('bloom.bright');
         const mip0 = this._bloomMips[0];
@@ -7366,7 +7468,7 @@ export class Renderer {
         // Bloom-eligibility mask lives in the raw scene buffer's alpha (motion blur discards alpha, so
         // read it from the scene FBO directly, not the post-processed copy the first entry names).
         brightPass.setBindGroup(0, this._textureBindGroup(brightPipeline, 0, [
-            this._compose_FBOs[src].colors[0], this._sceneFBO.colors[0],
+            source.colors[0], this._sceneFBO.colors[0],
         ]));
         this._drawFullscreen(brightPass);
         this._endFullscreenPass(brightPass);
@@ -7424,36 +7526,32 @@ export class Renderer {
             GLState.blend(false);
             this._restoreDefaultBlend();
         }
+    }
 
-        // 4. Composite the accumulated bloom back over the scene, into the other compose buffer.
-        if (!this._passEnabled['bloom.composite']) return;
+    /** Composite the accumulated bloom back over the image, from one chain stage into the next. */
+    private _bloomComposite(source: Framebuffer, target: Framebuffer): void {
         this._scope('bloom.composite');
-        const dst = 1 - src;
-        const pass = this._beginFullscreenPass(this._compose_FBOs[dst].renderTarget, 'bloom.composite', true);
+        const pass = this._beginFullscreenPass(target.renderTarget, 'bloom.composite', true);
         const pipeline = this._fullscreenPipeline('composer', ComposerProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_bloomIntensity', this._bloomIntensity);
         // The unit numbers are gone: the bind group assigns them and sets u_buffer1/u_buffer2 from the
         // shader's own reflection, so the order here is the order the shader declares.
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-            this._compose_FBOs[src].colors[0], this._bloomMips[0].colors[0],
+            source.colors[0], this._bloomMips[0].colors[0],
         ]));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
-        this._composeIndex = dst;
     }
 
-    private _chromaticAberrationPass(): void {
-        const src = this._composeIndex;
-        const dst = 1 - src;
-        const pass = this._beginFullscreenPass(this._compose_FBOs[dst].renderTarget, 'chromatic', true);
+    private _chromaticAberrationPass(source: Framebuffer, target: Framebuffer): void {
+        const pass = this._beginFullscreenPass(target.renderTarget, 'chromatic', true);
         const pipeline = this._fullscreenPipeline('chromaticAberration', ChromaticAberrationProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_strength', this._chromaticAberrationStrength);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._compose_FBOs[src].colors[0]]));
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [source.colors[0]]));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
-        this._composeIndex = dst;
     }
 
     /**
@@ -7738,9 +7836,9 @@ export class Renderer {
     }
 
     // UE5-style tile reconstruction motion blur: velocity -> TileMax -> NeighborMax -> jittered
-    // gather. Reads the lit scene (_sceneFBO) and writes the blurred result into _compose_FBOs[0],
-    // replacing the plain scene->compose copy so the rest of the post chain is unchanged.
-    private _motionBlurPass(): void {
+    // gather. Reads the lit scene (_sceneFBO) and writes the blurred result into the head of the post
+    // chain, replacing the plain scene->compose copy so the rest of the chain is unchanged.
+    private _motionBlurPass(target: Framebuffer): void {
         const w = this._renderWidth, h = this._renderHeight;
         const K = Renderer.MOTION_BLUR_TILE;
 
@@ -7769,8 +7867,8 @@ export class Renderer {
         this._drawFullscreen(nbPass);
         this._endFullscreenPass(nbPass);
 
-        // 3) Gather: reconstruct the blurred image into _compose_FBOs[0].
-        const gatherPass = this._beginFullscreenPass(this._compose_FBOs[0].renderTarget, 'motionBlur', true);
+        // 3) Gather: reconstruct the blurred image into the head of the chain.
+        const gatherPass = this._beginFullscreenPass(target.renderTarget, 'motionBlur', true);
         const gatherPipeline = this._fullscreenPipeline('motionBlur', MotionBlurGatherProgram);
         gatherPass.setPipeline(gatherPipeline);
         gatherPass.setBindGroup(0, this._textureBindGroup(gatherPipeline, 0, [
@@ -7918,8 +8016,7 @@ export class Renderer {
         addFbo(this._ssaoFBO); addFbo(this._ssaoBlurFBO);
         addFbo(this._brdfFBO); addFbo(this._outlineMaskFBO); addFbo(this._overdrawFBO ?? undefined);
         addFbo(this._velocityFBO); addFbo(this._velocityTileFBO); addFbo(this._velocityNeighborFBO);
-        for (const f of this._blur_FBOs) addFbo(f);
-        for (const f of this._compose_FBOs) addFbo(f);
+        bytes += this._postPool.byteSize;
         for (const tex of TextureManager.Instance.textures.values()) bytes += tex.byteSize;
         return bytes;
     }

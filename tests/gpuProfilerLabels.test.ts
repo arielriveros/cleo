@@ -30,7 +30,12 @@ const RENDERER = readFileSync(join(__dirname, '../src/graphics/renderer.ts'), 'u
  * (`this._cubeFBO.targetFor(cube, face, 0, false)`) and a naive split lands in the middle of it.
  */
 function passLabels(source: string): Set<string> {
-    const found = new Set<string>();
+    return new Set(passLabelList(source));
+}
+
+/** The same labels, with duplicates kept, so a label used at two call sites can be counted. */
+function passLabelList(source: string): string[] {
+    const found: string[] = [];
     const helpers: [string, number][] = [
         ['_beginFullscreenPass(', 1],
         ['_beginDepthPass(', 1],
@@ -43,12 +48,12 @@ function passLabels(source: string): Set<string> {
             const args = splitArgs(source, at + helper.length);
             const arg = args[argIndex]?.trim();
             const literal = arg?.match(/^'([^']*)'$/);
-            if (literal) found.add(literal[1]);
+            if (literal) found.push(literal[1]);
             at = source.indexOf(helper, at + helper.length);
         }
     }
 
-    for (const m of source.matchAll(/^\s*label: '([^']+)',$/gm)) found.add(m[1]);
+    for (const m of source.matchAll(/^\s*label: '([^']+)',$/gm)) found.push(m[1]);
     return found;
 }
 
@@ -67,6 +72,7 @@ function splitArgs(source: string, from: number): string[] {
 }
 
 const LABELS = passLabels(RENDERER);
+const LABEL_LIST = passLabelList(RENDERER);
 
 describe('PASS_LABEL_TO_SCOPE', () => {
     it('finds the renderer pass labels at all', () => {
@@ -105,7 +111,10 @@ describe('the compose labels', () => {
         for (const label of ['bloom.composite', 'chromatic', 'motionBlur'])
             expect(LABELS.has(label)).toBe(true);
         expect(LABELS.has('compose')).toBe(true);
-        expect((RENDERER.match(/'compose'/g) ?? []).length).toBe(1);
+        // Counted in pass-LABEL position rather than over the file's text: `compose` is also the id of
+        // the render-graph node that owns this step, and a raw match would count that too and then
+        // fail for a reason that has nothing to do with what this guards.
+        expect(LABEL_LIST.filter(label => label === 'compose')).toHaveLength(1);
     });
 
     it('files each renamed label under its own scope', () => {

@@ -54,8 +54,8 @@ describe('bloom bright-pass threshold space', () => {
     it('is fed the exposure by the bloom pass itself', () => {
         // A uniform declared and never uploaded reads as 0, which would make luma 0 and take bloom
         // straight back to black — the same failure with a different cause. Scope the check to
-        // _bloomPass: the renderer uploads u_exposure in half a dozen other passes.
-        const body = methodBody(renderer, '_bloomPass');
+        // _bloomGenerate: the renderer uploads u_exposure in half a dozen other passes.
+        const body = methodBody(renderer, '_bloomGenerate');
         expect(body).toContain("setUniform('u_exposure'");
         expect(body).toContain("setUniform('u_bloomMaskEnabled'");
     });
@@ -122,7 +122,7 @@ describe('bloom pyramid grid alignment', () => {
     it('feeds both grids from the renderer', () => {
         // sourceBlockUV needs the destination resolution; unset it reads 0 and floor(0) collapses
         // every texel onto the same source block.
-        const body = methodBody(renderer, '_bloomPass');
+        const body = methodBody(renderer, '_bloomGenerate');
         expect(body).toContain("setUniform('u_srcTexelSize'");
         expect((body.match(/setUniform\('u_dstResolution'/g) ?? []).length).toBe(2); // bright pass + downsample loop
     });
@@ -140,7 +140,11 @@ describe('bloom pyramid grid alignment', () => {
         // Framebuffer.resize stores its arguments verbatim and reports them back as `width`, so a raw
         // width/2 on an odd width left these at e.g. 645.5: a viewport truncated to 645 with a texel
         // size computed from 645.5.
-        expect(renderer).not.toMatch(/_blur_FBOs\[\d\]\.resize\(width \/ 2/);
+        //
+        // The pyramid still sizes itself here. The other half-res buffer this used to cover — the
+        // god-ray scratch — is a render-graph resource now, and the same rule lives in `resolveExtent`
+        // as the FLOOR its 'scaled' arm applies; `tests/renderGraphAliasing` pins it there.
         expect(renderer).toMatch(/Math\.floor\(width \/ 2\)/);
+        expect(renderer).not.toMatch(/\.resize\(width \/ 2/);
     });
 });
