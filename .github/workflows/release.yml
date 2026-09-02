@@ -1,16 +1,32 @@
-# Cuts a release: runs the tests, bumps the version, writes the changelog, tags, builds, publishes and
+# Cuts a release when a pull request from `development` is merged into `main`: runs the tests, bumps
+# the version, writes the PR's own description into the changelog, tags, builds, publishes and
 # deploys -- and on a breaking release, also builds and attaches the desktop installers.
+#
+# THE CHANGELOG IS THE PULL REQUEST DESCRIPTION. It used to be a list of commit subjects between two
+# tags, which is not what CHANGELOG.md reads like: its entries are prose, and prose is what a reviewer
+# has already written by the time a branch is ready to merge. tools/release-pr.mjs is the one place
+# that reads a PR -- it strips the template's HTML comments, drops the `Release:` marker and demotes
+# top-level headings so they nest under the version -- and tools/changelog.mjs still owns the file's
+# shape. The description becomes the GitHub Release body too, so the two cannot disagree.
+#
+# HOW FAR IT BUMPS. A `release:breaking` / `release:feature` / `release:fix` label on the PR decides;
+# failing that, a `Release: <level>` line in the description; failing that, `fix`. A `no-release` label
+# skips the release entirely, and so does a merge from any branch other than `development`. Two
+# release labels is an error rather than a coin toss -- see tools/release-pr.mjs.
 #
 # The version scheme is 1.<breaking>.<feature>.<fix>. npm only accepts three-component semver, so the
 # leading `1.` is a fixed product-line prefix that exists only in tags and in the UI -- package.json
 # stores the remaining x.y.z. tools/bump-version.mjs owns that mapping and is the only thing that
-# rewrites the three package.json files, their lockfiles and src/version.ts. See CHANGELOG.md.
+# rewrites the three package.json files, their lockfiles and src/version.ts.
 #
-# Manual on purpose. Almost every commit in this repo is a `feat:`, so an automatic
-# conventional-commit bump would advance the feature digit on nearly every merge to main.
+# `workflow_dispatch` survives as the manual fallback, and it still takes its notes from the commit
+# list: there is no pull request to read when a human triggers it by hand.
 name: Release
 
 on:
+  pull_request:
+    types: [closed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       bump:
@@ -27,34 +43,106 @@ on:
 permissions:
   contents: write
 
+# Two merges landing close together must not race each other's push to main, and cancelling a release
+# that has already tagged is far worse than making the second one wait.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  # Whether this event releases at all, and how far. A JOB rather than an `if:` on each job below,
+  # because a skipped job has no outputs for the next one to read -- and because "no release, and here
+  # is why" is worth saying out loud in the run summary instead of leaving as a grey skip.
+  gate:
+    name: Decide
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.decide.outputs.release }}
+      bump: ${{ steps.decide.outputs.bump }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide
+        id: decide
+        env:
+          # The body is untrusted text written by whoever opened the PR. It travels as an environment
+          # variable and is never interpolated into a shell line; a `${{ }}` inside a `run:` would
+          # paste it into the script itself, which is a shell injection with extra steps.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          EVENT: ${{ github.event_name }}
+          MANUAL_BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+
+          decline() {
+            echo 'release=false' >> "$GITHUB_OUTPUT"
+            echo 'bump=' >> "$GITHUB_OUTPUT"
+            echo "### No release: $1" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+
+          if [ "$EVENT" = workflow_dispatch ]; then
+            echo 'release=true' >> "$GITHUB_OUTPUT"
+            echo "bump=$MANUAL_BUMP" >> "$GITHUB_OUTPUT"
+            echo "### Manual release ($MANUAL_BUMP), notes from the commit list" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          [ "$MERGED" = true ] || decline 'the pull request was closed without merging.'
+          [ "$HEAD_REF" = development ] || decline "merged from '$HEAD_REF'; only 'development' cuts a release."
+          case "$PR_LABELS" in *'"no-release"'*) decline 'the no-release label is set.' ;; esac
+
+          # Writes release= and bump=. Fails loudly on two release labels rather than picking one.
+          node tools/release-pr.mjs --level
+
+          # The notes are rendered here too, and thrown away, purely so an empty or comment-only
+          # description fails in twenty seconds rather than after the whole suite has run.
+          node tools/release-pr.mjs --notes "$RUNNER_TEMP/notes-check.md"
+          echo "### Releasing $(node tools/release-pr.mjs --level) from '$HEAD_REF'" >> "$GITHUB_STEP_SUMMARY"
+
   # The same file ci.yml calls, so nothing can be released past a suite that a merge would have been
   # blocked on. Typechecks are NOT re-run here: they are advisory in ci.yml, and a warning that does not
   # block a merge has no business blocking a release either.
   tests:
     name: Unit tests
+    needs: gate
+    if: needs.gate.outputs.release == 'true'
     uses: ./.github/workflows/tests.yml
 
   release:
     name: Bump, tag & publish
     runs-on: ubuntu-latest
-    needs: tests
-    # A release is only ever cut from main; the workflow pushes there unconditionally.
-    if: github.ref == 'refs/heads/main'
+    needs: [gate, tests]
     outputs:
       version: ${{ steps.bump.outputs.version }}
 
     steps:
-      # Full history and tags: the changelog diffs against the previous tag, and the editor build reads
-      # `git describe --exact-match` to decide whether it may drop the `-dev` suffix.
+      # `ref: main` explicitly: on a `pull_request` event `github.ref` is refs/pull/N/merge, which is
+      # not a branch anything can be pushed back to. The merge commit is already on main by the time
+      # `closed` fires, so this is the tree that was just approved.
+      #
+      # Full history and tags: the manual changelog path diffs against the previous tag, and the editor
+      # build reads `git describe --exact-match` to decide whether it may drop the `-dev` suffix.
       - uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
+
+      # Before anything is written. A description that somehow survives the gate but not this would
+      # otherwise fail with the version already rewritten in the working tree.
+      - name: Release notes from the pull request
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node tools/release-pr.mjs --notes "$RUNNER_TEMP/notes.md"
 
       # Fatal here, unlike in ci.yml, where the same check only warns: a hand-edit that moved one of the
       # four version sites and not the others would otherwise be baked into a tag that cannot be moved.
@@ -63,9 +151,15 @@ jobs:
 
       - name: Bump version
         id: bump
-        run: node tools/bump-version.mjs ${{ inputs.bump }}
+        run: node tools/bump-version.mjs ${{ needs.gate.outputs.bump }}
 
       - name: Update changelog
+        if: github.event_name == 'pull_request'
+        run: node tools/changelog.mjs --release-from ${{ steps.bump.outputs.version }} "$RUNNER_TEMP/notes.md"
+
+      # The manual path has no pull request to read, so it falls back to the commit list between tags.
+      - name: Update changelog (manual)
+        if: github.event_name == 'workflow_dispatch'
         run: node tools/changelog.mjs --release ${{ steps.bump.outputs.version }} "$RUNNER_TEMP/notes.md"
 
       # Commit and tag BEFORE building. The editor stamps its version from `git describe --exact-match`
@@ -98,6 +192,9 @@ jobs:
             --notes-file "$RUNNER_TEMP/notes.md" \
             "$RUNNER_TEMP/cleo-editor-v${{ steps.bump.outputs.version }}.zip"
 
+      - name: Summary
+        run: echo "### Released v${{ steps.bump.outputs.version }} (${{ needs.gate.outputs.bump }})" >> "$GITHUB_STEP_SUMMARY"
+
       # CI will NOT fire for the push above -- GitHub suppresses workflow triggers for pushes made with
       # the default GITHUB_TOKEN -- so ci.yml's deploy job never runs for a release commit. Without this
       # step the live editor would keep serving the previous, `-dev`-labelled build. It reuses the build
@@ -117,8 +214,8 @@ jobs:
   # else in the release is already published by the job above; this only adds assets to it.
   installers:
     name: Desktop installer (${{ matrix.os }})
-    needs: release
-    if: inputs.bump == 'breaking'
+    needs: [gate, release]
+    if: needs.gate.outputs.bump == 'breaking'
     runs-on: ${{ matrix.os }}
     strategy:
       # One platform failing to package should not withhold the two that succeeded.
