@@ -39,13 +39,23 @@ struct LensFlareUniforms {
  */
 const GHOST_LIMIT: i32 = 8;
 
-/** Everything above the threshold, and nothing below it. The flare's only source of light. */
+/**
+ * Everything above the threshold, and nothing below it. The flare's only source of light.
+ *
+ * Sampled with an EXPLICIT LOD, and masked after the fetch rather than returning early before it.
+ * Both halves are required: this is called from inside the ghost loop, so the fetch sits in
+ * non-uniform control flow, where an implicit derivative is undefined in WGSL. An early `return` in
+ * front of it would put it there even without the loop. WebGPU rejects the module outright — the
+ * pipeline then reports only "invalid due to a previous error" — while naga happily translates it to
+ * GLSL, so WebGL2 and every test in this repo see nothing wrong. `outlinePost.wgsl` carries the same
+ * warning over its own loop.
+ */
 fn bright(uv: vec2<f32>) -> vec3<f32> {
-    // Outside the frame there is no image — not black, but nothing. Sampling a clamped texture there
-    // would smear the edge pixels outward into a bar along whichever side the ghost ran off.
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return vec3<f32>(0.0); }
-    let c = textureSample(u_screenTexture_texture, u_screenTexture_sampler, uv).rgb;
-    return max(c - vec3<f32>(u_flare.u_flareThreshold), vec3<f32>(0.0));
+    let c = textureSampleLevel(u_screenTexture_texture, u_screenTexture_sampler, uv, 0.0).rgb;
+    // Outside the frame there is no image — not black, but nothing. Without this a ghost that ran off
+    // the edge would smear the clamped border pixels back inward as a bar down that side.
+    let inside = select(0.0, 1.0, uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0);
+    return max(c - vec3<f32>(u_flare.u_flareThreshold), vec3<f32>(0.0)) * inside;
 }
 
 /** The three channels sampled slightly apart along `dir`, which is what disperses a ghost. */
