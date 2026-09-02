@@ -2,6 +2,7 @@ import { IDockviewPanelProps, IDockviewPanelHeaderProps } from 'dockview-react';
 import { ModelNode } from 'cleo';
 import EngineViewport from '../EngineViewport';
 import UIEditorLayer from '../gameUi/UIEditorLayer';
+import VirtualControlsLayer from '../gameUi/VirtualControlsLayer';
 import StateGraph from '../animation/StateGraph';
 import FieldGraph from '../animationField/FieldGraph';
 import LoadingScreen from '../../components/LoadingScreen';
@@ -30,16 +31,23 @@ import { useSelectedNode } from '../nodeInspector/useSelectedNode';
 import ConsolePanel from '../logger/ConsolePanel';
 import PerformancePanel from '../renderer/PerformancePanel';
 import RendererSettingsPanel from '../renderer/RendererSettingsPanel';
+import InputMapPanel from '../input/InputMapPanel';
 import AssetsExplorer from '../assets/AssetsExplorer';
 import { useCleoEngine, MODE_RENDERS_VIEWPORT } from '../EngineContext';
 
 // The wrapper must stay `relative` so UIOverlay/StateGraph/LoadingScreen (absolute inset-0) and the
 // data-cleo-overlay HUD anchor to the viewport, not the dock. Its group is locked and headerless.
 function ViewportPanel(_: IDockviewPanelProps) {
-  const { isSceneReady, loadingProgress, editorMode } = useCleoEngine();
+  const { isSceneReady, loadingProgress, editorMode, inputMap, isPlayMode } = useCleoEngine();
   return (
     <div className="relative h-full w-full overflow-hidden">
       <EngineViewport />
+      {/* On-screen touch controls. Drawn while playing (where they are live) and while authoring them
+          in Input mode (where `alwaysShow` previews them on a desktop, which has no touch screen to
+          reveal them otherwise). Draws only — the engine reads the touches off the canvas itself. */}
+      {(isPlayMode || editorMode === 'input') && (
+        <VirtualControlsLayer controls={inputMap.virtualControls} alwaysShow={editorMode === 'input'} />
+      )}
       {/* Game UI: real scene nodes, laid out by the engine and painted as DOM over the canvas. Gated on
           the same predicate as the viewport chrome — a UI node carrying a z-index would otherwise paint
           over the full-panel editors below, which cover the canvas completely. */}
@@ -192,6 +200,14 @@ function PerformanceDockPanel(_: IDockviewPanelProps) {
   );
 }
 
+function InputMapDockPanel(_: IDockviewPanelProps) {
+  return (
+    <div className="flex flex-col h-full w-full bg-surface-raised overflow-hidden">
+      <InputMapPanel />
+    </div>
+  );
+}
+
 function RendererSettingsDockPanel(_: IDockviewPanelProps) {
   return (
     <div className="flex flex-col h-full w-full bg-surface-raised overflow-hidden">
@@ -228,4 +244,5 @@ export const dockComponents = {
   tilemapLayers: TilemapLayersDockPanel,
   performance: PerformanceDockPanel,
   rendererSettings: RendererSettingsDockPanel,
+  inputMap: InputMapDockPanel,
 };

@@ -40,6 +40,17 @@ const RendererIcon = () => (
   </svg>
 );
 
+// A gamepad silhouette: two shoulders, a d-pad and two face buttons. Reads as "controller" at 16px,
+// which "keyboard" does not.
+const InputIcon = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M7.5 8h9a4.5 4.5 0 0 1 4.4 3.6l.7 4A2.6 2.6 0 0 1 19 18.5c-.9 0-1.7-.5-2.2-1.2L15.6 15.5H8.4l-1.2 1.8c-.5.7-1.3 1.2-2.2 1.2a2.6 2.6 0 0 1-2.6-2.9l.7-4A4.5 4.5 0 0 1 7.5 8Z" />
+    <path d="M7 11v2.2M5.9 12.1h2.2" />
+    <circle cx="15.6" cy="11.4" r="1" fill="currentColor" stroke="none" />
+    <circle cx="17.6" cy="13.2" r="1" fill="currentColor" stroke="none" />
+  </svg>
+);
+
 interface SegmentProps {
   active: boolean;
   disabled: boolean;
@@ -99,6 +110,10 @@ export default function ModeSelector() {
         </Segment>
         <Segment active={editorMode === 'renderer'} disabled={isPlayMode} title='Renderer options & debug channels' onClick={() => select('renderer')}>
           <RendererIcon /> Renderer
+        </Segment>
+        {/* Not dimension-gated either: actions are the same on a 2D and a 3D scene. */}
+        <Segment active={editorMode === 'input'} disabled={isPlayMode} title='Input actions & bindings' onClick={() => select('input')}>
+          <InputIcon /> Input
         </Segment>
       </div>
     </div>

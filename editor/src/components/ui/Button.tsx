@@ -35,11 +35,20 @@ export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {}
 
-export function Button({ className, variant, size, active, type = 'button', ...props }: ButtonProps) {
+/** Ref-forwarding so a host can focus it — DialogHost focuses the confirm button when a dialog opens. */
+export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { className, variant, size, active, type = 'button', ...props },
+  ref
+) {
   return (
-    <button type={type} className={cn(buttonVariants({ variant, size, active }), className)} {...props} />
+    <button
+      ref={ref}
+      type={type}
+      className={cn(buttonVariants({ variant, size, active }), className)}
+      {...props}
+    />
   );
-}
+});
 
 export default Button;
 

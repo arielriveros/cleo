@@ -1,6 +1,7 @@
 // Imports must stay type-only: this module has to be dependency-free at runtime (see engineEventBus).
 import type { LogEntry } from './logger';
 import type { Node } from './scene/nodes/node';
+import type { ActionState } from '../input/actionMap';
 
 /**
  * What kind of mutation a `SCENE_CHANGED` event describes. The first three are *structural* — they
@@ -68,6 +69,15 @@ export interface EngineEventMap {
    * shadow resolution and render scale at once. Anything mirroring renderer state must re-read here.
    */
   RENDER_SETTINGS_CHANGED: void;
+  /**
+   * An input action changed phase this frame. GATED on `authoring.enabled`, exactly as the
+   * property-level SCENE_CHANGED kinds are: without that a published game would pay an emit per action
+   * per frame forever. It exists for the editor's live binding monitor, which is what makes tuning a
+   * deadzone something other than guesswork.
+   */
+  INPUT_ACTION: { map: string; action: string; state: ActionState };
+  /** The active input map was replaced — a project load, or an edit in the Input panel. */
+  INPUT_MAP_CHANGED: void;
 }
 
 type Listener<T> = (payload: T) => void;

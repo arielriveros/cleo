@@ -30,6 +30,7 @@ export default defineConfig({
             // clears the thresholds below, and then may not regress. To see what is still outside:
             //     npx vitest run --coverage --coverage.include='src/**/*.ts'
             include: [
+                'src/features/input/inputMapEdits.ts',
                 'src/features/publish/pack.ts',
                 'src/features/publish/stripDimensionData.ts',
                 'src/player/unpack.ts',

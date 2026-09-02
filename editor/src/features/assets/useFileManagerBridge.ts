@@ -10,8 +10,10 @@ import {
   withAncestors, VfsEntry, VfsIndex,
 } from '../../utils/vfs'
 import {
-  deleteAsset, deleteConsequence, duplicateAsset, openAsset, regenerateThumbnail, renameAsset, thumbnailOf,
+  deleteAsset, duplicateAsset, openAsset, regenerateThumbnail, renameAsset, thumbnailOf,
 } from './assetKinds'
+import { inUseDialogOptions, planDelete } from './deleteFlow'
+import { confirmDialog } from '../dialogs/dialogStore'
 import {
   collectReferencedMaterialIds, collectReferencedModelIds, collectReferencedTemplateIds,
   collectReferencedTerrainMaterialIds, collectReferencedTextureIds,
@@ -42,6 +44,10 @@ export function useFileManagerBridge() {
   const engineRef = useRef(instance)
   engineRef.current = instance
   const refreshingRef = useRef(false)
+  // A delete confirmation is on screen. The interceptor is synchronous, so it cancels every pass while
+  // this is set: without it a second Delete press opens a second dialog over the same ids, and once both
+  // are answered the same assets are deleted twice.
+  const deleteConfirmRef = useRef(false)
 
   /**
    * Re-render the thumbnail of every asset shown in `folder` (the breadcrumb refresh button).
@@ -115,6 +121,31 @@ export function useFileManagerBridge() {
     }
   }, [])
 
+  /**
+   * Phase two of a delete the user had to confirm: do what the interceptor would have done, then
+   * re-issue the store action.
+   *
+   * `ids` is already top-most (topMostIds is idempotent, so pass one's output is a fixed point), but the
+   * getFile re-check is NOT optional — the re-issued exec carries `skipProvider`, which returns on the
+   * interceptor's first line, so none of its filtering runs again and DataTree.remove would dereference
+   * a since-vanished id blind.
+   */
+  const commitDelete = useCallback((api: IApi, ids: string[]) => {
+    const live = ids.filter(id => !!api.getFile(id))
+    if (!live.length) return
+
+    // Recomputed rather than carried across the await: anything that landed under these paths while the
+    // dialog was up must go with them, or applyDelete drops the index entry and orphans its asset.
+    const { entries } = subtreeOf(vfsRef.current, live)
+
+    // Same order as the interceptor's clean path. If safeExec swallows a throw the vfs is already
+    // authoritative and useSyncVfsToStore's stale sweep prunes the tree on its next run; the reverse
+    // order would prune the tree and leave the libraries intact.
+    for (const e of entries) deleteAsset(e.kind, e.assetId, depsRef.current)
+    setVfs(v => applyDelete(v, live))
+    safeExec(api, 'delete-files', { ids: live, skipProvider: true })
+  }, [setVfs, depsRef])
+
   const init = useCallback((api: IApi) => {
     apiRef.current = api
 
@@ -170,23 +201,24 @@ export function useFileManagerBridge() {
     // SVAR shows its own confirmation; returning false here cancels before the tree mutates.
     api.intercept('delete-files', (cfg: any) => {
       if (cfg.skipProvider) return true
+      if (deleteConfirmRef.current) return false
 
       // DataTree.remove purges a folder's subtree from the id pool then dereferences `_pool.get(nextId)`
       // blind: pass top-most, still-resolvable ids only or the batch throws and half-applies.
-      const ids = topMostIds(Array.isArray(cfg.ids) ? cfg.ids : []).filter(id => !!api.getFile(id))
+      const { ids, entries, inUse } = planDelete(
+        vfsRef.current, cfg.ids, id => !!api.getFile(id), isReferenced)
       if (!ids.length) return false
       cfg.ids = ids
 
-      const { entries } = subtreeOf(vfsRef.current, ids)
-
-      const inUse = entries.filter(isReferenced)
       if (inUse.length) {
-        const lines = inUse.slice(0, 6).map(e => `  • ${baseOf(e.path)} — ${deleteConsequence(e.kind)}`)
-        const more = inUse.length > 6 ? `\n  …and ${inUse.length - 6} more` : ''
-        const ok = window.confirm(
-          `${inUse.length} of the ${inUse.length === 1 ? 'asset' : 'assets'} you're deleting ${inUse.length === 1 ? 'is' : 'are'} still in use:\n\n${lines.join('\n')}${more}\n\nDelete anyway?`,
-        )
-        if (!ok) return false
+        // This interceptor is synchronous and the dialog is not, so THIS pass is cancelled outright and
+        // the delete is re-issued from commitDelete once the user answers — with skipProvider, so we do
+        // not come back through here and ask a second time.
+        deleteConfirmRef.current = true
+        void confirmDialog(inUseDialogOptions(inUse, baseOf))
+          .then(ok => { if (ok) commitDelete(api, ids) })
+          .finally(() => { deleteConfirmRef.current = false })
+        return false
       }
 
       for (const e of entries) deleteAsset(e.kind, e.assetId, depsRef.current)
@@ -269,7 +301,7 @@ export function useFileManagerBridge() {
     api.on('set-mode', (cfg: any) => {
       try { if (cfg.mode) localStorage.setItem(FM_MODE_KEY, cfg.mode) } catch { /* ignore */ }
     })
-  }, [isReferenced, setVfs, pathIndexRef, depsRef, landingFolderRef, refreshFolderThumbnails])
+  }, [isReferenced, setVfs, pathIndexRef, depsRef, landingFolderRef, refreshFolderThumbnails, commitDelete])
 
   useSyncVfsToStore(apiRef, vfs, libs, pathIndexRef, depsRef)
 

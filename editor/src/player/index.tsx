@@ -1,7 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { CleoEngine, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, registerTemplates, Logger } from 'cleo';
+import { CleoEngine, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, registerTemplates, Logger, InputSystem } from 'cleo';
 import UILayer from '../features/gameUi/UILayer';
+import VirtualControlsLayer from '../features/gameUi/VirtualControlsLayer';
 import { unpackGameBin, inflateSceneGeometry, inflateTerrainData, inflateTilemapData } from './unpack';
 import { attachSharedAnimations } from './animations';
 import { PLAYER_CONTRACT } from '../features/publish/pack';
@@ -68,16 +69,25 @@ async function boot(): Promise<void> {
   await engine.initialize();
 
   engine.renderer.applyRenderSettings(data?.config?.render);
+  // Before engine.run(), so frame one already has bindings. An older build's bin carries no
+  // `config.input`; parseInputMap reads that as the shipped defaults rather than as no bindings at all.
+  InputSystem.instance.setMap(data?.config?.input);
 
   const viewport = document.getElementById('game-viewport');
   if (!viewport) throw new Error('Missing #game-viewport element');
   engine.setViewport(viewport);
-  engine.input.preventDefault();
+  engine.input.preventDefault = true;
 
   // `getScene` must stay a FUNCTION: Game.loadScene replaces engine.scene wholesale.
   const uiRoot = document.getElementById('ui-root');
   if (uiRoot) {
-    ReactDOM.createRoot(uiRoot).render(<UILayer getScene={() => engine.scene} interactive />);
+    ReactDOM.createRoot(uiRoot).render(
+      <>
+        <UILayer getScene={() => engine.scene} interactive />
+        {/* Only appears on a device with a touch screen — see VirtualControlsLayer. */}
+        <VirtualControlsLayer controls={InputSystem.instance.map.virtualControls} />
+      </>
+    );
     // The layout pass anchors to #ui-root, not the canvas, which may be render-scaled.
     const pushViewport = () => {
       const rect = uiRoot.getBoundingClientRect();
@@ -155,7 +165,9 @@ async function boot(): Promise<void> {
       const id = resolve(nameOrId);
       if (!id) { Logger.warn(`loadScene: unknown scene "${nameOrId}"`, 'Player'); return; }
       engine.physics.clear();
-      engine.input.clear();
+      // Held keys and in-flight gestures only — NOT the map. Un-binding the game between scenes would
+      // leave the next one dead.
+      engine.input.resetState();
       void startScene(id).catch(showError);
     },
     currentSceneName: () => table[currentId]?.name ?? '',

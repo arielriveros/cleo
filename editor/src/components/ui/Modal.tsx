@@ -6,12 +6,17 @@ export interface ModalProps {
   children: React.ReactNode;
   /** Classes for the card (typically its width, e.g. `w-[420px]`). */
   className?: string;
+  /** Classes for the full-screen backdrop. A dialog raised over another modal lifts its `z` here. */
+  overlayClassName?: string;
 }
 
 /** Centered modal over a dimmed backdrop; backdrop click closes, card clicks don't propagate. */
-export function Modal({ onClose, children, className }: ModalProps) {
+export function Modal({ onClose, children, className, overlayClassName }: ModalProps) {
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50' onClick={onClose}>
+    <div
+      className={cn('fixed inset-0 z-50 flex items-center justify-center bg-black/50', overlayClassName)}
+      onClick={onClose}
+    >
       <div
         className={cn(
           'max-h-[85vh] overflow-y-auto bg-surface-raised border border-control rounded-md shadow-lg text-white select-none',

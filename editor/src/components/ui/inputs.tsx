@@ -33,10 +33,14 @@ export interface TextInputProps
   onChange: (value: string) => void;
 }
 
-/** Styled single-line text input. */
-export function TextInput({ value, onChange, className, ...rest }: TextInputProps) {
+/** Styled single-line text input. Ref-forwarding so DialogHost can focus and select a prompt's value. */
+export const TextInput = React.forwardRef<HTMLInputElement, TextInputProps>(function TextInput(
+  { value, onChange, className, ...rest },
+  ref
+) {
   return (
     <input
+      ref={ref}
       type='text'
       value={value}
       onChange={(e) => onChange(e.target.value)}
@@ -44,7 +48,7 @@ export function TextInput({ value, onChange, className, ...rest }: TextInputProp
       {...rest}
     />
   );
-}
+});
 
 export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {}
 

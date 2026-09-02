@@ -1,5 +1,5 @@
 import { Renderer } from "../graphics/renderer";
-import { InputManager } from "../input/inputManager";
+import { InputSystem } from "../input/inputSystem";
 import { PhysicsSystem } from "../physics/physicsSystem";
 import { Logger } from "./logger";
 import { Scene } from "./scene/scene";
@@ -98,10 +98,11 @@ export class CleoEngine {
     try {
       if (this._ready) return;
 
-      // Before InputManager, which binds to the canvas, and before anything else touches the GPU.
+      // Before InputSystem, which binds its listeners to the canvas, and before anything else touches
+      // the GPU.
       await this._renderer.initialize();
 
-      InputManager.initialize(this._renderer.canvas);
+      InputSystem.initialize(this._renderer.canvas);
       window.addEventListener('resize', this.onResize.bind(this));
       
       this._renderer.preInitialize();
@@ -152,7 +153,7 @@ export class CleoEngine {
     Logger.info('Shutting down');
     this._ready = false;
 
-    InputManager.instance.clear();
+    InputSystem.instance.dispose();
     this._physicsSystem.clear();
     this._scene.stop();
   }
@@ -163,7 +164,13 @@ export class CleoEngine {
       // Clamped at the source, not per-consumer: _timeSinceStart accumulates this same value, so
       // physics, timers, node.update, onUpdate and `time` stay on one clock. See MAX_DELTA.
       const deltaTime = Math.min((currentTimestamp - this._lastTimestamp) / 1000, MAX_DELTA);
-      
+
+      // FIRST in the frame: poll the pads, step the gestures, resolve every action. Nothing downstream
+      // may read a half-built action table, and physics is downstream. Runs even while paused — a
+      // paused game still has to see the action that unpauses it, and the editor's camera map is live
+      // in edit mode. What pausing gates is DELIVERY to scripts, which Scene.update already handles.
+      InputSystem.instance.beginFrame(deltaTime);
+
       if (!this._paused) {
         this._physicsSystem.update(deltaTime);
         this._timeSinceStart += deltaTime * 1000;
@@ -185,7 +192,10 @@ export class CleoEngine {
       });
 
       this._lastTimestamp = currentTimestamp;
-      InputManager.instance.resetMouseVelocity();
+      // LAST: clear the per-frame accumulators. Must be the END and not the start — DOM events land
+      // between rAF callbacks, so clearing here is what makes "everything that arrived during this
+      // frame is visible during this frame" true. Same reason resetMouseVelocity sat here.
+      InputSystem.instance.endFrame();
       requestAnimationFrame(this._gameLoop.bind(this));
     } catch (e) {
       Logger.error(e);
@@ -210,7 +220,8 @@ export class CleoEngine {
   public get scene(): Scene { return this._scene; }
   public get viewport(): HTMLElement { return this._viewport; }
   public get renderer(): Renderer { return this._renderer; }
-  public get input(): InputManager { return InputManager.instance; }
+  /** The action-mapping input system: `engine.input.pressed('Jump')`, map enable/disable, rebinding. */
+  public get input(): InputSystem { return InputSystem.instance; }
   public get isPaused(): boolean { return this._paused; }
   public set isPaused(paused: boolean) { this._paused = paused; }
   public get physics(): PhysicsSystem { return this._physicsSystem; }

@@ -1,4 +1,5 @@
-import { InputManager, Logger, Node } from 'cleo'
+import { Input, Logger, Node } from 'cleo'
+import type { ActionState } from 'cleo'
 
 /**
  * Third-person STRAFE character controller — attach to the "Playable" root.
@@ -87,23 +88,23 @@ export default class ThirdPersonPlayableNode extends Node {
       Logger.warn(
         `${this.name} has no camera pivot child — movement and facing will follow the world +Z axis instead ` +
         `of the camera. Add the Camera Pivot as a child, or set pivotName to match it.`, 'Script')
-
-    // registerKeyPress is edge-triggered, so holding Space cannot repeat the jump. One callback per key.
-    InputManager.instance.registerKeyPress('Space', () => {
-      if (!this.isGrounded) return
-      const v = this.velocity
-      this.velocity = [v[0], this.jumpSpeed, v[2]]
-      this._jumpCooldown = 0.2
-      this.isJumping = true
-    })
   }
 
-  onDespawn() {
-    InputManager.instance.unregisterKeyPress('Space')
+  // Jump is an ACTION, so it fires for Space, the pad's A button and the on-screen button alike — and
+  // `state.started` is true on exactly the frame of the press, so holding it cannot repeat the jump.
+  //
+  // This replaces a registerKeyPress in onStart and its matching unregisterKeyPress in onDespawn. There
+  // is nothing to unregister: the handler belongs to the node and goes away with it.
+  onAction(action: string, state: ActionState) {
+    if (action !== 'Jump' || !state.started) return
+    if (!this.isGrounded) return
+    const v = this.velocity
+    this.velocity = [v[0], this.jumpSpeed, v[2]]
+    this._jumpCooldown = 0.2
+    this.isJumping = true
   }
 
   onUpdate(delta: number, time: number) {
-    const input = InputManager.instance
     if (this._jumpCooldown > 0) this._jumpCooldown -= delta
     if (this.isJumping && this._jumpCooldown <= 0 && this.isGrounded) this.isJumping = false
 
@@ -123,14 +124,16 @@ export default class ThirdPersonPlayableNode extends Node {
     // instead played the opposite strafe.
     const right = [-Math.cos(yawRad), 0, Math.sin(yawRad)]
 
-    let axisForward = 0
-    let axisRight = 0
-    if (input.isKeyPressed('KeyW')) axisForward += 1
-    if (input.isKeyPressed('KeyS')) axisForward -= 1
-    if (input.isKeyPressed('KeyD')) axisRight += 1
-    if (input.isKeyPressed('KeyA')) axisRight -= 1
+    // One action instead of four key reads. `Move` arrives already composed and normalized, whether it
+    // came from WASD, the arrow keys, a thumbstick or the on-screen joystick.
+    const move = Input.vector('Move')
+    const axisRight = move[0]
+    const axisForward = move[1]
 
-    const moving = axisForward !== 0 || axisRight !== 0
+    // ANALOG-aware: `magnitude` is how far the stick is actually pushed, and it scales the speed below.
+    // A keyboard always produces 1 here, so digital movement is unchanged.
+    const magnitude = Math.hypot(axisRight, axisForward)
+    const moving = magnitude > 1e-3
     const v = this.velocity
 
     if (!moving) {
@@ -167,12 +170,15 @@ export default class ThirdPersonPlayableNode extends Node {
     // controller; only the facing differs.
     let dirX = forward[0] * axisForward + right[0] * axisRight
     let dirZ = forward[2] * axisForward + right[2] * axisRight
+    // GUARDED, and the guard matters twice over. Standing still makes `length` zero, and the unguarded
+    // division this replaces produced a NaN velocity. And with an analog stick `length` is the stick's
+    // own deflection, so dividing by it would stretch a gentle push to a full sprint — the analog range
+    // has to come back through `magnitude` on the speed instead, never through the direction.
     const length = Math.hypot(dirX, dirZ)
-    dirX /= length
-    dirZ /= length
+    if (length > 1e-6) { dirX /= length; dirZ /= length }
 
-    const running = input.isKeyPressed('ShiftLeft')
-    const speed = running ? this.runSpeed : this.walkSpeed
+    const running = Input.pressed('Sprint')
+    const speed = (running ? this.runSpeed : this.walkSpeed) * Math.min(1, magnitude)
 
     // Travel ALONG the ground rather than horizontally through it: project onto the surface.
     const n = this.groundNormal

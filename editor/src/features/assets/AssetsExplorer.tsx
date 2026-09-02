@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Logger } from 'cleo'
+import { confirmDialog } from '../dialogs/dialogStore'
 import { Filemanager, WillowDark, getMenuOptions } from '@svar-ui/react-filemanager'
 import type { IFileMenuOption, IParsedEntity, TContextMenuType, TMode } from '@svar-ui/react-filemanager'
 // filemanager.css @imports the SVAR stylesheet itself, so the skin's rules deterministically follow it.
@@ -206,7 +207,12 @@ function AssetsExplorerHost() {
       const node = editorScene.getNodeById(nodeId)
       if (!node) return
       if (node.name === 'root') { Logger.warn('Cannot template the root node', 'Editor'); return }
-      if (!window.confirm(`Create a template from "${node.name}" (including its children, assets and scripts)?`)) return
+      const proceed = await confirmDialog({
+        title: `Create a template from "${node.name}"?`,
+        message: 'Its children, assets and scripts are captured with it, and it becomes reusable across scenes.',
+        confirmLabel: 'Create template',
+      })
+      if (!proceed) return
       try {
         const template = await buildTemplateFromNode(node, { scripts, bodies, triggers })
         addTemplate(template)

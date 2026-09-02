@@ -15,6 +15,9 @@ export const SCRIPT_HANDLERS = [
     'onConstruct', 'onStart', 'onSpawn', 'onUpdate', 'onCollision', 'onTrigger', 'onDespawn',
     // UI handlers, listed rather than special-cased so they get onUpdate's throw/rejection guarding.
     'onPress', 'onValueChanged', 'onSubmit',
+    // Input actions. Listed here for the same reason: a handler driven by a device event must not be
+    // able to throw out of the frame, which is exactly how the old registerKeyPress callbacks escaped.
+    'onAction',
 ] as const;
 
 const modules = new Map<string, ScriptModule>();

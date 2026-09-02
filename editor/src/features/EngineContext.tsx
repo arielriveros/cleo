@@ -13,8 +13,8 @@ import { ProjectContext, type ProjectContextValue } from "./ProjectContext";
 import { EditorSessionsContext, type EditorSessionsContextValue } from "./EditorSessionsContext";
 import { useStableActions } from "../utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
-import { CleoEngine, Scene, InputManager, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey } from "cleo";
-import type { SceneChange, TerrainFoliageRule } from "cleo";
+import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey } from "cleo";
+import type { SceneChange, TerrainFoliageRule, InputMap } from "cleo";
 import NullImage from '../images/null.png';
 import EventEmitter from "../utils/eventEmitter";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
@@ -73,7 +73,8 @@ import {
   collectReferencedTilesetIds,
 } from "../utils/references";
 import { idbGet, idbSet } from "../utils/idb";
-import { KEYS, libKey } from "../utils/storageKeys";
+import { EDITOR_CAMERA_MAP } from "./input/editorInputMap";
+import { KEYS, libKey, inputMapKey } from "../utils/storageKeys";
 import { assetIdOfTab, loadTabState, saveTabState, MainMode } from "../utils/tabState";
 import { activeProjectAllowsLegacyImport, touchProject } from "../utils/projects";
 import { activeProjectId } from "../utils/projectScope";
@@ -187,6 +188,13 @@ const EngineContext = createContext<{
   startPlay: () => void;
   stopPlay: () => void;
   pausePlay: () => void;
+  /**
+   * The project's input action map. Project-wide rather than per-scene: two scenes disagreeing about
+   * what `Jump` is bound to would be inexplicable to a player. Persisted under its own storage key and
+   * pushed into the running InputSystem on every edit, so Play reflects a rebind with no rebuild.
+   */
+  inputMap: InputMap;
+  setInputMap: React.Dispatch<React.SetStateAction<InputMap>>;
   templates: Template[];
   addTemplate: (t: Template) => void;
   removeTemplate: (id: string) => void;
@@ -452,6 +460,8 @@ const EngineContext = createContext<{
     stopPlay: () => {},
     pausePlay: () => {},
     templates: [],
+    inputMap: DEFAULT_INPUT_MAP,
+    setInputMap: () => {},
     addTemplate: () => {},
     removeTemplate: () => {},
     updateTemplate: () => {},
@@ -737,6 +747,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   });
   const [loadingProgress, setLoadingProgress] = useState<LoadingProgress>({ loaded: 0, total: 6, label: 'Starting…' });
   const isGizmoDraggingRef = useRef(false);
+  /** Cancels the Play-mode Escape subscription. Null while not playing. */
+  const escapeSubRef = useRef<(() => void) | null>(null);
   const scriptsRef = useRef(new Map<string, string>());
   const bodiesRef = useRef(new Map<string, BodyDescription>());
   const triggersRef = useRef(new Map<string, { shapes: ShapeDescription[] }>());
@@ -779,6 +791,45 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     })();
   }, []);
   usePersistedLibrary(libKey('templates'), templates, templatesLoadedRef);
+
+  // ----- The input action map ------------------------------------------------------------------
+  //
+  // Project-wide, not per-scene: two scenes disagreeing about what `Jump` is bound to would be a bug
+  // nobody could explain. Stored under its own key rather than as a LibName — every LibName is read as
+  // an ARRAY by the bundle importer, and an object under one corrupts an import (see storageKeys).
+  const [inputMap, setInputMap] = useState<InputMap>(() => cloneInputMap(DEFAULT_INPUT_MAP));
+  const inputMapLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const stored = await idbGet<InputMap>(inputMapKey());
+        if (stored) setInputMap(parseInputMap(stored));
+      } catch (e) { console.warn('Failed to load the input map:', e); }
+      finally { inputMapLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary(inputMapKey(), inputMap, inputMapLoadedRef);
+
+  // Push edits straight into the running system, so Play picks up a rebind with no rebuild — and
+  // install the editor's own camera map as an OVERLAY, which is never serialized into a build.
+  useEffect(() => {
+    const input = InputSystem.instance;
+    input.setMap(inputMap);
+    input.setOverlayMaps([EDITOR_CAMERA_MAP]);
+    // `setMap` resets every map to its AUTHORED enable state, so the edit/play split has to be applied
+    // again here. Without it, rebinding a key while the game is running would hand the keyboard back to
+    // the editor's camera mid-play.
+    if (isPlayModeRef.current) {
+      input.disableMap('EditorCamera');
+      input.enableMap('Gameplay');
+      input.enableMap('UI');
+    } else {
+      input.enableMap('EditorCamera');
+      // Nothing reads the game maps while authoring, and leaving Gameplay live would mean WASD driving
+      // both the viewport camera and a character that is not running.
+      input.disableMap('Gameplay');
+    }
+  }, [inputMap]);
 
   const addTemplate = (t: Template) => setTemplates(prev => [...prev, t]);
   const removeTemplate = (id: string) => {
@@ -4297,21 +4348,24 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         else cameraNode.setZ(10).setRotation([0, 180, 0]);
         cameraNode.onUpdate = (delta) => {
             const node = cameraNode;
-            const mouse = InputManager.instance.mouse;
+            const input = InputSystem.instance;
             const movement = delta;
-            if ((mouse.buttons.Left || mouse.buttons.Right) && !isGizmoDraggingRef.current) {
-                node.addX(-mouse.velocity[0] * movement);
-                node.addY(mouse.velocity[1] * movement);
-
-                InputManager.instance.isKeyPressed('KeyW') && node.addY(movement * 10);
-                InputManager.instance.isKeyPressed('KeyS') && node.addY(-movement * 10);
-                InputManager.instance.isKeyPressed('KeyA') && node.addX(-movement * 10);
-                InputManager.instance.isKeyPressed('KeyD') && node.addX(movement * 10);
+            // The EditorCamera map is turned OFF during a gizmo drag and during Play, which is what the
+            // `!isGizmoDraggingRef.current` guard used to do at every read site — except that disabling
+            // the map also cancels anything held, so the camera stops rather than freezing mid-motion.
+            const pan = input.vector('EditorCamera/Pan2D');
+            const nudge = input.vector('EditorCamera/Fly');
+            if (pan[0] !== 0 || pan[1] !== 0) {
+                node.addX(-pan[0] * movement);
+                node.addY(pan[1] * movement);
             }
-            if (!isGizmoDraggingRef.current && Math.abs(mouse.wheel.deltaY) > 0 && InputManager.instance.isMouseOverCanvas()) {
+            node.addX(nudge[0] * movement * 10);
+            node.addY(nudge[1] * movement * 10);
+            const wheel = input.value('EditorCamera/Zoom');
+            if (Math.abs(wheel) > 0) {
               // Wheel up (deltaY < 0) SHRINKS the ortho extents — shows less world, zooms in — matching
               // the 3D rig's dolly below and every other wheel in the editor.
-              const step = mouse.wheel.deltaY * 0.001;
+              const step = wheel * 0.001;
               const factor = Math.max(0.1, 1 + step); // avoid inverting the frustum on a fast scroll
               const cam = cameraNode.camera;
               cam.top *= factor;
@@ -4349,25 +4403,26 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         if (remembered) cameraNode.setPosition(remembered.position).setRotation(remembered.rotation);
         cameraNode.onUpdate = (delta) => {
           const node = cameraNode;
-          const mouse = InputManager.instance.mouse;
+          const input = InputSystem.instance;
           const movement = delta * 2;
-          if (mouse.buttons.Left && !isGizmoDraggingRef.current) {
-            node.rotateX( mouse.velocity[1] * movement * 5).rotateY(-mouse.velocity[0] * movement * 5);
-            InputManager.instance.isKeyPressed('KeyW') && node.addForward(movement);
-            InputManager.instance.isKeyPressed('KeyS') && node.addForward(-movement);
-            InputManager.instance.isKeyPressed('KeyA') && node.addRight(-movement);
-            InputManager.instance.isKeyPressed('KeyD') && node.addRight(movement);
-            InputManager.instance.isKeyPressed('KeyE') && node.addY(movement);
-            InputManager.instance.isKeyPressed('KeyQ') && node.addY(-movement);
+          // Every chord below is a BINDING now (see editorInputMap): the button each one needs held is
+          // a modifier on the binding rather than an `if` here, and the whole map goes off during a
+          // gizmo drag and during Play.
+          const look = input.vector('EditorCamera/Look');
+          if (look[0] !== 0 || look[1] !== 0)
+            node.rotateX(look[1] * movement * 5).rotateY(-look[0] * movement * 5);
+          const fly = input.vector('EditorCamera/Fly');
+          const lift = input.value('EditorCamera/Lift');
+          if (fly[1] !== 0) node.addForward(fly[1] * movement);
+          if (fly[0] !== 0) node.addRight(fly[0] * movement);
+          if (lift !== 0) node.addY(lift * movement);
+          const pan = input.vector('EditorCamera/Pan');
+          if (pan[0] !== 0 || pan[1] !== 0) {
+            node.addRight(-pan[0] * movement);
+            node.addUp(pan[1] * movement);
           }
-          if (mouse.buttons.Right && !isGizmoDraggingRef.current) {
-            node.addRight(-mouse.velocity[0] * movement);
-            node.addUp(mouse.velocity[1] * movement);
-          }
-          if (!isGizmoDraggingRef.current && Math.abs(mouse.wheel.deltaY) > 0 && InputManager.instance.isMouseOverCanvas()) {
-            const zoom = -mouse.wheel.deltaY * 0.01; // wheel up -> move forward
-            node.addForward(zoom);
-          }
+          const wheel = input.value('EditorCamera/Zoom');
+          if (Math.abs(wheel) > 0) node.addForward(-wheel * 0.01); // wheel up -> move forward
         };
 
         // Orient the infinite grid onto the ground (XZ) plane for 3D.
@@ -4380,7 +4435,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (state === 'play') {
         instanceRef.current.isPaused = false;
         setIsPlayMode(true);
-        InputManager.instance.enableMouseCapture();
+        InputSystem.instance.pointerLockOnClick = true;
+        // The editor's camera stands down while the game has the keyboard; the game's maps come up.
+        InputSystem.instance.disableMap('EditorCamera');
+        InputSystem.instance.enableMap('Gameplay');
+        InputSystem.instance.enableMap('UI');
         setSelectedNode(null);
         if (instanceRef.current && instanceRef.current.renderer) {
           instanceRef.current.renderer.setSelectedNode(null);
@@ -4398,7 +4457,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         const playScene = instanceRef.current.scene;
         if (playScene) playScene.soundsEnabled = true;
         AudioManager.Instance.resume();
-        InputManager.instance.registerKeyPress('Escape', () => InputManager.instance.releaseMouse());
+        // This used to be `registerKeyPress('Escape', ...)`, which was a silent no-op: Escape was not
+        // in the old 51-key whitelist, so the callback was never registered and never fired.
+        escapeSubRef.current?.();
+        escapeSubRef.current = InputSystem.instance.onAction('UI/Cancel', (state) => {
+          if (state.started) InputSystem.instance.releasePointerLock();
+        });
       }
       else if (state === 'pause') {
         instanceRef.current.isPaused = true;
@@ -4426,7 +4490,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           instanceRef.current.renderer.setPostProcessingAllowed(
             TAB_RUNS_POST_PROCESSING[activeTabKindRef.current]);
         }
-        InputManager.instance.disableMouseCapture();
+        InputSystem.instance.pointerLockOnClick = false;
+        InputSystem.instance.releasePointerLock();
+        escapeSubRef.current?.();
+        escapeSubRef.current = null;
+        // Drop anything the game left held before the editor camera takes the keyboard back.
+        InputSystem.instance.resetState();
+        InputSystem.instance.enableMap('EditorCamera');
+        InputSystem.instance.disableMap('Gameplay');
       }
     });
 
@@ -4451,11 +4522,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     eventEmitter.current.on('GIZMO_DRAG_START', () => {
       setIsGizmoDragging(true);
       isGizmoDraggingRef.current = true;
+      InputSystem.instance.disableMap('EditorCamera');
     });
 
     eventEmitter.current.on('GIZMO_DRAG_END', () => {
       setIsGizmoDragging(false);
       isGizmoDraggingRef.current = false;
+      InputSystem.instance.enableMap('EditorCamera');
     });
 
     isGizmoDraggingRef.current = false;
@@ -4546,7 +4619,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const target = meta?.scenes.find(s => s.id === nameOrId) ?? meta?.scenes.find(s => s.name === nameOrId);
     if (!target) { Logger.warn(`loadScene: no scene "${nameOrId}"`, 'Editor'); return; }
     const scene = await buildPlaySceneById(target.id);
-    instance.input.clear();
+    // Held keys, gestures and edges only — NOT the map. Un-binding the game between scenes would
+    // leave the next one dead.
+    instance.input.resetState();
     instance.physics.clear();
     instance.setScene(scene);
     // After the swap: the outgoing scene is off the engine and its bodies are out of the world.
@@ -4588,7 +4663,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const startPlay = async () => {
     const instance = instanceRef.current;
     if (!instance) return;
-    instance.input.preventDefault();
+    instance.input.preventDefault = true;
     if (startedRef.current) { eventEmitter.current.emit('SET_PLAY_STATE', 'play'); return; }
 
     // Play always runs the game scene, from wherever the user happens to be; Stop brings them back.
@@ -4628,7 +4703,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setGameHost(null);
     if (!instance) return;
     instance.setScene(editorSceneRef.current);
-    instance.input.clear();
+    // Held keys, gestures and edges only — NOT the map. Un-binding the game between scenes would
+    // leave the next one dead.
+    instance.input.resetState();
     instance.physics.clear();
     releasePlayScene();
     showBindPoseForSkinnedModels(editorSceneRef.current); // back to the default pose in the editor
@@ -4639,7 +4716,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const instance = instanceRef.current;
     if (!instance) return;
     // Clear input/physics so key bindings and bodies from the previous run don't stack.
-    instance.input.clear();
+    // Held keys, gestures and edges only — NOT the map. Un-binding the game between scenes would
+    // leave the next one dead.
+    instance.input.resetState();
     instance.physics.clear();
     // Reset returns to the play-session entry scene (where Play was pressed), not the last-loaded one.
     currentPlaySceneIdRef.current = playEntrySceneIdRef.current;
@@ -4846,6 +4925,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       stopPlay,
       pausePlay,
       templates,
+      // The project's input action map, and the setter the Input panel edits it through. Everything
+      // downstream (persistence, the running InputSystem, publish) hangs off this one piece of state.
+      inputMap,
+      setInputMap,
       addTemplate,
       removeTemplate,
       updateTemplate,

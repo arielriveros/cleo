@@ -1,4 +1,4 @@
-import { CameraRigNode, InputManager } from 'cleo'
+import { CameraRigNode, Input } from 'cleo'
 
 /**
  * Third-person orbit camera — attach to the "Camera Pivot" child of the Playable.
@@ -51,22 +51,24 @@ export default class ThirdPersonCameraPivotNode extends CameraRigNode {
   }
 
   onUpdate(delta: number, time: number) {
-    const input = InputManager.instance
-    const mouse = input.mouse
+    // The `Look` action, not the mouse. Its default bindings already carry what this method used to
+    // open with as an early return — "only while the pointer is locked, or while dragging with the left
+    // button" is expressed as a MODIFIER on the pointer bindings — and they add a right thumbstick and
+    // a touch drag for free. Rebinding any of that is now the player's business, not this script's.
+    const look = Input.vector('Look')
 
-    // Look while the pointer is locked, or while dragging with the left button. Play mode already enables
-    // mouse capture, so a single left-click locks and frees the mouse up for full look control.
-    if (!input.isPointerLocked && !mouse.buttons.Left) return
+    // `Look` is pixels (or stick deflection) for THIS frame, so it must not be scaled by delta — that
+    // would make sensitivity depend on the frame rate, since a long frame already carries proportionally
+    // more movement. addYaw/addPitch take exactly this kind of raw per-frame input and apply the rig's
+    // sensitivity, inversion and clamping themselves.
+    this.addYaw(-look[0])
+    this.addPitch(look[1])
 
-    // mouse.velocity is the pixels moved during THIS frame, so it must not be scaled by delta — that would
-    // make sensitivity depend on the frame rate (a long frame already carries proportionally more pixels).
-    // addYaw/addPitch take exactly this kind of raw per-frame input and apply the rig's sensitivity,
-    // inversion and clamping themselves, so the clamping this script used to do is gone.
-    this.addYaw(-mouse.velocity[0])
-    this.addPitch(mouse.velocity[1])
-
-    if (mouse.wheel.deltaY !== 0 && input.isMouseOverCanvas()) {
-      const next = this.armLength + mouse.wheel.deltaY * this.zoomSpeed
+    // `Zoom` is bound to the wheel and to a pinch. It needs no "is the pointer over the canvas" check:
+    // the wheel listener lives on the canvas, so an event the canvas never received never arrives here.
+    const zoom = Input.value('Zoom')
+    if (zoom !== 0) {
+      const next = this.armLength + zoom * this.zoomSpeed
       this.armLength = Math.max(this.minDistance, Math.min(this.maxDistance, next))
     }
 

@@ -1,5 +1,6 @@
 import { Scene, TextureManager, AudioManager } from 'cleo'
-import type { RenderSettings } from 'cleo'
+import type { RenderSettings, InputMap } from 'cleo'
+import { isDefaultInputMap } from 'cleo'
 import { buildGameData, bakeTemplates } from './buildGameData'
 import { compressTerrainData, compressTilemapData } from './terrainImages'
 import { stripDimensionData } from './stripDimensionData'
@@ -31,6 +32,8 @@ export interface MultiSceneSources {
   libs: AssetLibs
   scriptAssets?: ScriptAsset[]
   settings?: RenderSettings
+  /** The project's input action map. Written ONCE at the top level, never inside a scene's blob. */
+  input?: InputMap
   /** The OPEN scene's live dimension. Its meta can be one save behind, and the live value is the truth. */
   liveDimension?: '2D' | '3D'
 }
@@ -159,6 +162,14 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   }
   if (soundBytes.length) out.soundBytes = soundBytes
   if (animations.length) { out.animations = animations; out.modelAnimations = modelAnimations }
-  if (src.settings) out.config = { graphics: { clearColor: src.settings.clearColor }, render: src.settings }
+  // One config for the whole game. `render` is per-project here even though a scene blob carries its
+  // own copy; `input` is project-wide by design and has no per-scene form at all.
+  const config: Record<string, any> = {}
+  if (src.settings) {
+    config.graphics = { clearColor: src.settings.clearColor }
+    config.render = src.settings
+  }
+  if (src.input && !isDefaultInputMap(src.input)) config.input = src.input
+  if (Object.keys(config).length > 0) out.config = config
   return out
 }

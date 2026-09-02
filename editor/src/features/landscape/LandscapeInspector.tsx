@@ -3,6 +3,7 @@ import { useCleoEngine, TerrainTool, TerrainBrushMode } from "../EngineContext";
 import TerrainLayerSlot from "./TerrainLayerSlot";
 import { Hint, Select, Toggle } from "../../components/ui";
 import { useActiveLandscape } from "./useActiveLandscape";
+import { confirmDialog } from "../dialogs/dialogStore";
 
 const TOOLS: { id: TerrainTool; label: string }[] = [
     { id: 'raise', label: 'Raise' },
@@ -42,11 +43,16 @@ export default function LandscapeInspector() {
     }, [mode, tool, radius, strength, falloff, paintLayer, foliageErase, terrainBrush, eventEmitter]);
 
     // Regenerating replaces every scattered instance, so confirm before discarding the author's work.
-    const generateFoliage = () => {
+    const generateFoliage = async () => {
         if (!node) return;
         const existing = node.terrain.foliage.reduce((n, f) => n + f.count, 0);
-        if (existing > 0 && !window.confirm(
-            `Replace ${existing.toLocaleString()} existing foliage instances across this terrain?`)) return;
+        // Only ask when there is work to lose, so an empty terrain generates on one click.
+        if (existing > 0 && !(await confirmDialog({
+            title: 'Replace the existing foliage?',
+            message: `${existing.toLocaleString()} scattered instances across this terrain will be replaced.`,
+            confirmLabel: 'Regenerate',
+            tone: 'warning',
+        }))) return;
 
         const result = node.terrain.generateFoliageEverywhere();
         if (result.reason === 'no-rules')
@@ -122,7 +128,7 @@ export default function LandscapeInspector() {
                         <span className={label}>Erase mode</span>
                         <Toggle checked={foliageErase} onChange={setFoliageErase} />
                     </div>
-                    <button className="w-full bg-success hover:bg-success-hover rounded px-2 py-1 text-xs" onClick={generateFoliage}>Generate Foliage (whole terrain)</button>
+                    <button className="w-full bg-success hover:bg-success-hover rounded px-2 py-1 text-xs" onClick={() => { void generateFoliage(); }}>Generate Foliage (whole terrain)</button>
                     {foliageStatus && <p className="text-[10px] text-gray-300 bg-surface/60 rounded px-1.5 py-1">{foliageStatus}</p>}
                 </div>
             )}

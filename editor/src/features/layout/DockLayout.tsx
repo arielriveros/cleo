@@ -75,6 +75,9 @@ const ADD_PANELS = ['sceneAdd', 'uiAdd'] as const;
 /** Renderer-mode panels: the performance readout and the render settings. Shown only there. */
 const RENDERER_PANELS = ['performance', 'rendererSettings'] as const;
 
+/** Input-mode panel: the action map editor. Shown only there, the same way RENDERER_PANELS are. */
+const INPUT_PANELS = ['inputMap'] as const;
+
 const CHROME_PANELS = [
   'scene', 'properties', 'scripts', 'physics', 'logger', 'assets',
   ...ANIMATION_PANELS, ...ANIMATION_FIELD_PANELS, ...TILEMAP_PANELS, ...ADD_PANELS,
@@ -88,6 +91,7 @@ const PANEL_TITLES: Record<string, string> = {
   animField: 'Blend Space',
   tilePalette: 'Tiles', tilemapLayers: 'Layers',
   performance: 'Performance', rendererSettings: 'Renderer Settings',
+  inputMap: 'Input',
 };
 
 function panelTitle(id: string, mode: EditorMode): string {
@@ -158,9 +162,9 @@ function buildDefaultLayout(api: DockviewApi) {
       position: { referencePanel: 'properties', direction: 'within' },
     });
   }
-  // Docked with Properties on the right rail. Neither is in CHROME_PANELS, so they survive into renderer
-  // mode where the rest of that tab strip is hidden.
-  for (const id of RENDERER_PANELS) {
+  // Docked with Properties on the right rail. None of these is in CHROME_PANELS, so they survive into
+  // the mode that owns them, where the rest of that tab strip is hidden.
+  for (const id of [...RENDERER_PANELS, ...INPUT_PANELS]) {
     api.addPanel({
       id, component: id, title: PANEL_TITLES[id],
       position: { referencePanel: 'properties', direction: 'within' },
@@ -239,11 +243,13 @@ function relayout(api: DockviewApi) {
  */
 function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
   // Renderer mode is the only branch that keeps the renderer panels.
-  if (mode === 'renderer') return CHROME_PANELS;
-  // Play strips the chrome AND both renderer panels.
-  if (playing) return [...CHROME_PANELS, ...RENDERER_PANELS];
+  if (mode === 'renderer') return [...CHROME_PANELS, ...INPUT_PANELS];
+  // Input mode likewise keeps only its own panel over the live viewport.
+  if (mode === 'input') return [...CHROME_PANELS, ...RENDERER_PANELS];
+  // Play strips the chrome AND every mode-specific panel.
+  if (playing) return [...CHROME_PANELS, ...RENDERER_PANELS, ...INPUT_PANELS];
 
-  const hidden = new Set<string>(RENDERER_PANELS);
+  const hidden = new Set<string>([...RENDERER_PANELS, ...INPUT_PANELS]);
 
   // Mode-specific panels: hidden everywhere, revealed by the single mode that owns them.
   if (mode !== 'animation') for (const id of ANIMATION_PANELS) hidden.add(id);

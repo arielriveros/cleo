@@ -38,6 +38,12 @@ export const KEYS = {
    */
   audioSources: 'cleo_audio_sources',
   soundSamples: 'cleo_sound_samples',
+  /**
+   * The project's input action map. Deliberately NOT a LibName: every LibName is read as an array by
+   * the bundle importer (idbGet<any[]> then append), and an object stored under one would corrupt an
+   * import. Being in MIGRATABLE_KEYS is enough for project duplication and workspace migration.
+   */
+  inputMap: 'cleo_input_map',
 } as const;
 
 /** The asset libraries, as `usePersistedLibrary` and the bundle importer address them. */
@@ -54,7 +60,8 @@ export const LIB_NAMES: readonly LibName[] = [
  * Scene blobs are absent on purpose — they are `<prefix><sceneId>` and have to be found with a prefix scan
  * (idbKeysByPrefix), not enumerated. `legacyProject` is absent because it is workspace-wide legacy state.
  */
-export const MIGRATABLE_KEYS: readonly string[] = [KEYS.projectMeta, KEYS.vfs, ...LIB_NAMES.map(n => KEYS[n])];
+export const MIGRATABLE_KEYS: readonly string[] =
+  [KEYS.projectMeta, KEYS.vfs, KEYS.inputMap, ...LIB_NAMES.map(n => KEYS[n])];
 
 // Every accessor takes an optional project id; omitted means "the open project". The two callers that pass
 // one explicitly — importing a bundle into a project that is not open, and deleting one — must do so
@@ -88,4 +95,13 @@ export function vfsKey(projectId?: string): string {
 
 export function libKey(name: LibName, projectId?: string): string {
   return scoped(KEYS[name], projectId);
+}
+
+/**
+ * The input action map. Project-wide, not per-scene — unlike `config.render`, which each scene carries
+ * its own copy of. Two scenes disagreeing about what `Jump` is bound to would be a bug nobody could
+ * explain, so bindings live at the project level and are written into a published build once.
+ */
+export function inputMapKey(projectId?: string): string {
+  return scoped(KEYS.inputMap, projectId);
 }

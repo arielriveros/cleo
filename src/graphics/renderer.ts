@@ -1263,7 +1263,7 @@ export class Renderer {
         this._cascadeCount = Math.min(MAX_CASCADES, Math.max(1, Math.round(config.shadowCascades ?? this._cascadeCount)));
         this._ssaoEnabled = config.ssao !== false; // default: SSAO on
         // The canvas ELEMENT exists from construction, deliberately: the editor re-parents it on every
-        // mode switch and InputManager binds its listeners to it, both of which can happen before a
+        // mode switch and InputSystem binds its listeners to it, both of which can happen before a
         // device has been acquired. Only the context is deferred — see initialize().
         this._canvas = document.createElement('canvas');
 

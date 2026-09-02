@@ -332,13 +332,21 @@ script.
 
 ## Controls
 
-| | |
-|---|---|
-| `W` `A` `S` `D` | move, relative to where the camera is looking (W ahead, A/D strafe, S back) |
-| `Left Shift` | sprint |
-| `Space` | jump (only when grounded — no double jump; ~0.1s of coyote time) |
-| mouse | look; click once to lock the pointer, or hold left-drag. Free to orbit while standing still. |
-| wheel | zoom the camera between `minDistance` and `maxDistance` |
+Neither script names a key. They read ACTIONS, which are authored in the editor's **Input** panel — so the
+same two scripts run on a keyboard, a gamepad and a touch screen, and a player can rebind any of it without
+the script changing.
+
+| action | what it does | bound by default to |
+|---|---|---|
+| `Move` | move, relative to where the camera is looking (up = ahead, left/right = strafe) | `W` `A` `S` `D`, the arrow keys, the left stick, the on-screen joystick |
+| `Sprint` | run instead of walk | `Left Shift`, `L3` |
+| `Jump` | jump (only when grounded — no double jump; ~0.1s of coyote time) | `Space`, pad `A`, the on-screen Jump button |
+| `Look` | orbit the camera. Free to orbit while standing still. | mouse while the pointer is locked or left-dragged, the right stick, a touch drag |
+| `Zoom` | camera distance, between `minDistance` and `maxDistance` | wheel, pinch |
+
+`Move` arrives already composed and normalized, and it is ANALOG: a half-pushed stick walks at half speed,
+while a key is always full. `Jump` is delivered to `onAction` rather than polled, so holding the button
+cannot repeat it — and there is no callback to unregister when the node despawns.
 
 Every tunable is a public field, so it shows up in the node's **Variables** and can be changed per node
 without touching the script (`turnThreshold`, `turnSpeed`, `directionSmoothing`, `walkSpeed`, `runSpeed`, …).

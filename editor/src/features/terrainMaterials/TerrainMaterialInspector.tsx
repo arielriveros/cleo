@@ -10,6 +10,7 @@ import TextureInspector from '../nodeInspector/propertyEditors/TextureInspector'
 import { buildFoliageRuleFromModelAsset } from '../../utils/foliageRules'
 import { cryptoRandomId } from '../../utils/ids'
 import { Hint, Slider, Toggle } from '../../components/ui'
+import { toast } from '../toasts/toastStore'
 
 /** Terrain side length the density estimate is quoted against (matches the Landscape panel's default). */
 const ESTIMATE_SIZE = 200
@@ -84,7 +85,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
   const mat = tm!
 
   const addBillboard = () => {
-    if (!newFoliageTex) { alert('Pick a texture for the grass billboard.'); return }
+    if (!newFoliageTex) { toast.warning('Pick a texture for the grass billboard.'); return }
     const name = `${newFoliageTex.slice(0, 10)}_${mat.foliageInclude.length}`
     // densityUnit must be stamped here: a rule pushed straight onto a live material never passes through
     // TerrainMaterial.parse, where an unmarked rule is treated as legacy and divided by 100.
@@ -119,7 +120,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
   // Stays linked through rule.modelId, so saving the model asset refreshes the rule and live foliage.
   const addModelFromLibrary = () => {
     const asset = models.find(m => m.id === newFoliageModel)
-    if (!asset) { alert('Pick a model from the library.'); return }
+    if (!asset) { toast.warning('Pick a model from the library.'); return }
     try {
       // `models` and `materials`, NEVER omitted: a LOD level is a REFERENCE to another model asset, so
       // without the library every level resolves to null and the rule is built with no `lods` at all.

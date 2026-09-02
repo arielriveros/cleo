@@ -1,5 +1,5 @@
-import type { Scene, Renderer, RenderSettings } from 'cleo';
-import { Logger } from 'cleo';
+import type { Scene, Renderer, RenderSettings, InputMap } from 'cleo';
+import { Logger, InputSystem } from 'cleo';
 import { buildGameData } from '../features/publish/buildGameData';
 import type { ScriptAsset } from './scripts';
 import { idbGet, idbSet, idbDelete } from './idb';
@@ -23,7 +23,7 @@ export interface SavedProject {
   textures?: any;
   /** LEGACY, read-only: `migrateGameDataUI` reads it out of older blobs. Never written. */
   ui?: { version: number; elements: any[] };
-  config?: { graphics?: { clearColor?: number[] }; render?: RenderSettings };
+  config?: { graphics?: { clearColor?: number[] }; render?: RenderSettings; input?: InputMap };
   prefs?: ProjectPrefs;
   savedAt?: number;
 }
@@ -123,6 +123,10 @@ export function applyGameData(json: any, deps: EngineMaps & { renderer?: Rendere
 
   // Restore the saved renderer look so the editor and its Play mode match the last save.
   if (deps.renderer && json.config?.render) deps.renderer.applyRenderSettings(json.config.render);
+
+  // The IMPORT/legacy path for bindings only. The live editor reads the project-scoped inputMap key
+  // instead — this is what carries an input map in from an exported bundle or an older saved blob.
+  if (json.config?.input) InputSystem.instance.setMap(json.config.input);
 
   if (json.scene) extractNodeState(json.scene, deps);
 

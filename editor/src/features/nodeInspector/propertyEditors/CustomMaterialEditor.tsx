@@ -8,12 +8,18 @@ import { ensureWgslTranslator } from '../../../utils/wgslTranslator'
 import GlslCodeEditor from '../scriptEditor/GlslCodeEditor'
 import CustomUniformsEditor from './CustomUniformsEditor'
 import { Select, Field, Hint, Button } from '../../../components/ui'
+import { confirmDialog } from '../../dialogs/dialogStore'
 
 const BASES: { value: string, label: string }[] = [
   { value: 'scratch', label: 'From scratch' },
   { value: 'basic', label: 'Basic' },
   { value: 'blinn_phong', label: 'Blinn-Phong' },
   { value: 'pbr', label: 'PBR' },
+]
+const MODES: { value: CustomRenderMode, label: string }[] = [
+  { value: 'forward', label: 'Forward (lit color)' },
+  { value: 'deferred', label: 'Deferred (G-buffer)' },
+  { value: 'screen', label: 'Screen (post-process)' },
 ]
 const baseKey = (b: CustomBaseType) => (b == null ? 'scratch' : b)
 const keyToBase = (k: string): CustomBaseType => (k === 'scratch' ? null : k as CustomBaseType)
@@ -123,10 +129,20 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
   // Replacing the scaffold discards the current source — confirm if the user edited it.
   const wouldDiscard = () => mat.fragmentSource.trim() !== customSeedTemplate(mat.baseType, mat.renderMode).trim()
 
-  const changeBase = (k: string) => {
+  const changeBase = async (k: string) => {
     const base = keyToBase(k)
     if (base === mat.baseType) return
-    if (wouldDiscard() && !window.confirm('Change the base scaffold? This replaces the current shader source.')) return
+    if (wouldDiscard()) {
+      const ok = await confirmDialog({
+        title: `Change the base scaffold to “${BASES.find(b => b.value === k)?.label ?? k}”?`,
+        message: 'This replaces the current shader source.',
+        confirmLabel: 'Replace source',
+        tone: 'warning',
+      })
+      // The <select> is controlled by mat.baseType, which has not moved, so React already restored the
+      // DOM node when this handler first awaited. Re-rendering pins it there without relying on that.
+      if (!ok) { force(n => n + 1); return }
+    }
     seedCustomMaterial(mat, base, mat.renderMode)
     setSource(mat.fragmentSource)
     // A discrete action, not typing: compile the new scaffold immediately.
@@ -143,9 +159,17 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
     else if (cam.screenMaterials.includes(mat)) cam.screenMaterials = cam.screenMaterials.filter(m => m !== mat)
   }
 
-  const changeMode = (mode: CustomRenderMode) => {
+  const changeMode = async (mode: CustomRenderMode) => {
     if (mode === mat.renderMode) return
-    if (wouldDiscard() && !window.confirm('Switch render mode? Each mode uses a different shader entry point, so this replaces the source.')) return
+    if (wouldDiscard()) {
+      const ok = await confirmDialog({
+        title: `Switch render mode to “${MODES.find(m => m.value === mode)?.label ?? mode}”?`,
+        message: 'Each mode uses a different shader entry point, so this replaces the current source.',
+        confirmLabel: 'Switch mode',
+        tone: 'warning',
+      })
+      if (!ok) { force(n => n + 1); return }
+    }
     seedCustomMaterial(mat, mat.baseType, mode)
     syncPreviewCamera()
     setSource(mat.fragmentSource)
@@ -163,15 +187,13 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
     <div className='w-full p-2'>
       <div className='flex items-center gap-3 mb-2 flex-wrap'>
         <Field label='Mode' className='w-auto'>
-          <Select value={mat.renderMode} onChange={e => changeMode(e.target.value as CustomRenderMode)}>
-            <option value='forward'>Forward (lit color)</option>
-            <option value='deferred'>Deferred (G-buffer)</option>
-            <option value='screen'>Screen (post-process)</option>
+          <Select value={mat.renderMode} onChange={e => { void changeMode(e.target.value as CustomRenderMode) }}>
+            {MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
           </Select>
         </Field>
         {mat.renderMode !== 'screen' && (
           <Field label='Extend base' className='w-auto' labelClassName='w-auto'>
-            <Select value={baseKey(mat.baseType)} onChange={e => changeBase(e.target.value)}>
+            <Select value={baseKey(mat.baseType)} onChange={e => { void changeBase(e.target.value) }}>
               {BASES.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
             </Select>
           </Field>

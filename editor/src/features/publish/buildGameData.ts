@@ -1,5 +1,5 @@
-import type { Scene, RenderSettings, NodeTemplate } from 'cleo';
-import { Logger } from 'cleo';
+import type { Scene, RenderSettings, NodeTemplate, InputMap } from 'cleo';
+import { Logger, isDefaultInputMap } from 'cleo';
 import type { BodyDescription, ShapeDescription } from '../EngineContext';
 import { fanOutScripts, SCRIPT_ID_VAR, type ScriptAsset } from '../../utils/scripts';
 import type { Template } from '../../utils/templates';
@@ -27,6 +27,11 @@ export interface GameDataSources {
   // Snapshot of Renderer.getRenderSettings, serialized into `config` so a published game reproduces the
   // editor's look instead of falling back to renderer defaults.
   settings?: RenderSettings;
+  // The project's input action map. PROJECT-wide, unlike `render` above, which each scene carries its
+  // own copy of — two scenes disagreeing about what `Jump` is bound to would be inexplicable to a
+  // player. Written only when it differs from the shipped defaults, so an untouched project's build
+  // gains no bytes.
+  input?: InputMap;
 }
 
 // Remove editor-only and debug helper nodes so they never ship in a play scene or published game.
@@ -148,12 +153,14 @@ export async function buildGameData(sources: GameDataSources): Promise<any> {
   if (sources.templates?.length)
     json.templates = bakeTemplates(sources.templates, sources.materials, sources.scriptAssets);
   // `graphics` seeds the engine constructor (clear color from frame one); `render` is the full snapshot
-  // the player re-applies to its renderer after boot. Scene.parse ignores `config`.
+  // the player re-applies to its renderer after boot; `input` is the action map the player installs
+  // before the first frame. Scene.parse ignores `config`.
+  const config: Record<string, any> = {};
   if (sources.settings) {
-    json.config = {
-      graphics: { clearColor: sources.settings.clearColor },
-      render: sources.settings,
-    };
+    config.graphics = { clearColor: sources.settings.clearColor };
+    config.render = sources.settings;
   }
+  if (sources.input && !isDefaultInputMap(sources.input)) config.input = sources.input;
+  if (Object.keys(config).length > 0) json.config = config;
   return json;
 }

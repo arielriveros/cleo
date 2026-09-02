@@ -1,4 +1,4 @@
-import { Scene, Node, Camera, CameraNode, LightNode, DirectionalLight, InputManager } from 'cleo';
+import { Scene, Node, Camera, CameraNode, LightNode, DirectionalLight, InputSystem } from 'cleo';
 import { PREVIEW_FOV, fitDistance, previewClipPlanes } from './previewFraming';
 import { applyPreviewEnvironment } from './previewEnvironment';
 import { clamp } from '../../utils/math';
@@ -65,15 +65,20 @@ export function createMaterialPreviewScene(
   // CameraNode runs onUpdate before it re-derives the view from the node transform.
   let pitch = startPitch, yaw = INIT_YAW, radius = startRadius;
   cam.onUpdate = (delta) => {
-    const mouse = InputManager.instance.mouse;
-    if (mouse.buttons.Left) {
-      yaw -= mouse.velocity[0] * delta * ROT_SPEED;
-      pitch += mouse.velocity[1] * delta * ROT_SPEED;
+    const input = InputSystem.instance;
+    // `Look` carries its own left-button gate as a binding modifier, so there is no `if (buttons.Left)`
+    // here any more; `Zoom` needs no over-the-canvas check because the wheel listener is on the canvas,
+    // so an event the canvas never received never reaches the snapshot in the first place.
+    const look = input.vector('EditorCamera/Look');
+    if (look[0] !== 0 || look[1] !== 0) {
+      yaw -= look[0] * delta * ROT_SPEED;
+      pitch += look[1] * delta * ROT_SPEED;
       pitch = clamp(pitch, -85, 85); // don't roll over the poles
       pivot.setRotation([pitch, yaw, 0]);
     }
-    if (Math.abs(mouse.wheel.deltaY) > 0 && InputManager.instance.isMouseOverCanvas()) {
-      radius = clamp(radius + mouse.wheel.deltaY * ZOOM_SPEED, minRadius, maxRadius);
+    const wheel = input.value('EditorCamera/Zoom');
+    if (Math.abs(wheel) > 0) {
+      radius = clamp(radius + wheel * ZOOM_SPEED, minRadius, maxRadius);
       cam.setPosition([0, 0, -radius]);
     }
   };

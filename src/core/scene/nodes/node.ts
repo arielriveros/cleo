@@ -15,6 +15,8 @@ import { parseChild } from "./childParser";
 import type { BVH } from "../../bvh";
 import type { ChangeKind } from "../../eventBus";
 import { eulerFromQuatDeg } from "../../math";
+// Type-only: actionMap is a pure leaf with no imports of its own, so this closes no cycle.
+import type { ActionState } from "../../../input/actionMap";
 
 
 
@@ -172,6 +174,20 @@ export class Node {
    * @param other The node that entered the trigger volume.
    */
   public onTrigger(other: Node): void {}
+
+  /**
+   * Called when an input action this node cares about changes phase — pressed, held past its hold
+   * time, or released. Actions are authored in the editor's Input panel and named there, so the same
+   * handler works on a keyboard, a gamepad and a touch screen.
+   *
+   * Fires just before this frame's {@link onUpdate}, so the two agree about what happened. For
+   * continuous input (movement, aiming) poll `Input.vector(...)` in onUpdate instead — this is for
+   * discrete events.
+   *
+   * @param action The action's name, e.g. `'Jump'`.
+   * @param state  Its full state this frame: `started`/`released`, `phase`, `value`, `vector`.
+   */
+  public onAction(action: string, state: ActionState): void {}
 
   /**
    * Called when this node is removed from the scene, via {@link remove} or a parent's removal.

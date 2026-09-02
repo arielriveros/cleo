@@ -104,7 +104,50 @@ export { MeshDisplacer } from "./graphics/systems/meshDisplacer";
 export type { AssimpParseResult, AssimpTextureSlots, ParsedMesh, OutputMaterial } from "./graphics/utils/assimpLoader";
 export { GLTFLoader } from "./graphics/utils/gltfLoader";
 export type { GltfParseResult, GltfMeshDescriptor, GltfMaterialDescriptor, GltfImageSource } from "./graphics/utils/gltfLoader";
-export { InputManager } from "./input/inputManager";
+// The action-mapping input system. `inputSources` is the device vocabulary a binding names, `actionMap`
+// the serializable model plus its tolerant readers, and the rest the pure math the resolver runs on —
+// all DOM-free, so the editor's panel and the unit suite can import them without a canvas.
+export {
+    KEY_CODES, MOUSE_BUTTONS, POINTER_AXES, GAMEPAD_BUTTONS, GAMEPAD_AXES, TOUCH_GESTURES, DEVICE_KINDS,
+    STATE_FLAGS, MAX_GAMEPAD_PLAYERS, sourceKey, sourceLabel,
+} from "./input/inputSources";
+export type {
+    KeyCode, MouseButton, PointerAxis, GamepadButton, GamepadAxis, TouchGesture, BindingSource,
+    ModifierSource, DeviceKind, StateFlag,
+} from "./input/inputSources";
+export {
+    ACTION_KINDS, ACTION_PHASES, COMPOSITE_PARTS, PROCESSOR_KINDS, DEFAULT_PRESS_POINT,
+    DEFAULT_TOUCH_CONFIG, DEFAULT_INPUT_MAP, IDLE_STATE, idleState, defaultProcessor, cloneInputMap,
+    isDefaultInputMap, normalizeSource, normalizeModifier, normalizeProcessor, normalizeBinding,
+    normalizeAction, normalizeActionMap, normalizeVirtualControl, normalizeTouchConfig, parseInputMap,
+} from "./input/actionMap";
+export type {
+    ActionKind, ActionPhase, ActionState, CompositePart, InputAction, InputActionMap, InputBinding,
+    InputMap, Processor, ProcessorKind, TouchGestureConfig, VirtualControl,
+} from "./input/actionMap";
+export {
+    applyDeadzone1D, applyRadialDeadzone, applyCurve, applyScale, applyInvert, normalizeVec2,
+    smoothToward, runProcessors1D, runProcessors2D,
+} from "./input/processors";
+export type { SmoothingState } from "./input/processors";
+export { createGestureState, stepTouchGestures } from "./input/gestures";
+export type { GestureOutput, GestureState, PointerSample, TrackedPointer } from "./input/gestures";
+export {
+    virtualLayoutRect, layoutVirtualControls, hitTestVirtual, stickVector, createVirtualState,
+    stepVirtualControls,
+} from "./input/virtualControls";
+export type { VirtualLayout, VirtualReading, VirtualState, VirtualTouch } from "./input/virtualControls";
+export { createDeviceSnapshot, createResolveState, resolveFrame } from "./input/resolveActions";
+// The runtime halves: DeviceSampler/GamepadSampler touch the DOM and the Gamepad API, InputSystem wires
+// them to the resolver, and `Input` is the facade a user script imports.
+export { DeviceSampler } from "./input/deviceSampler";
+export { GamepadSampler } from "./input/gamepadSampler";
+export { InputSystem } from "./input/inputSystem";
+export type { ActionListener, RebindFilter, Unsubscribe } from "./input/inputSystem";
+export { Input } from "./input/inputApi";
+export type {
+    ActionChange, DeviceSnapshot, GamepadReading, PointerReading, ResolveResult, ResolveState,
+} from "./input/resolveActions";
 export { TextureManager } from "./graphics/systems/textureManager";
 // Channel packing: metallic/roughness/occlusion (and specular/reflectivity) source maps combined into
 // one texture before the shaders sample them. `isDerivedTextureId` identifies the results, which are

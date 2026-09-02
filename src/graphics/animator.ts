@@ -10,7 +10,7 @@ import { solveTwoBone, ikTuning, validateIkRig, swingReleaseWeight, IkFootChain,
 import { Node } from '../core/scene/nodes/node';
 import { ModelNode } from '../core/scene/nodes/modelNode';
 import { canAccessVariable } from '../core/scene/nodes/nodeVariables';
-import { InputManager } from '../input/inputManager';
+import { InputSystem } from '../input/inputSystem';
 import { Logger } from '../core/logger';
 
 /** Structural view of a physics body driving a ragdoll bone, so the physics layer stays unimported. */
@@ -2663,7 +2663,7 @@ export class Animator {
             return;
         }
         
-        const input = InputManager.instance;
+        const input = InputSystem.instance;
         let triggerFound = false;
         let targetAnimation: string | null = null;
         
@@ -2673,7 +2673,7 @@ export class Animator {
             
             switch (mapping.triggerType) {
                 case 'key':
-                    if (mapping.keyCode && input.isKeyPressed(mapping.keyCode)) {
+                    if (mapping.keyCode && input.isKeyDown(mapping.keyCode)) {
                         shouldTrigger = true;
                     }
                     break;

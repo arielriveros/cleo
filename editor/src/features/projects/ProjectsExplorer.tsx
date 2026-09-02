@@ -10,6 +10,7 @@ import {
   ProjectRecord, createProject, deleteProject, loadProjects, openProject, renameProject,
 } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'
+import { confirmDialog } from '../dialogs/dialogStore'
 
 // The project browser: the same SVAR file manager the Assets tab uses, over the project registry. A flat
 // list — projects do not nest — so every project is one "file" whose id is its display path.
@@ -81,12 +82,17 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
     const record = projectsRef.current.find(p => p.id === id)
     if (!record) return
     const isActive = id === activeId
-    const ok = window.confirm(
-      `Delete "${record.name}"?\n\nEverything in it — every scene, model, material, script, texture and ` +
-      `folder — is deleted with it. Nothing is shared with your other projects, so nothing else is affected.` +
-      `${isActive ? '\n\nThis is the project you have open; the editor will reload into another one.' : ''}` +
-      `\n\nThis cannot be undone.`,
-    )
+    const ok = await confirmDialog({
+      title: `Delete "${record.name}"?`,
+      message: 'This cannot be undone.',
+      details: [
+        'Every scene, model, material, script, texture and folder in it is deleted with it',
+        'Nothing is shared with your other projects, so nothing else is affected',
+        ...(isActive ? ['This is the project you have open; the editor will reload into another one'] : []),
+      ],
+      confirmLabel: 'Delete project',
+      tone: 'danger',
+    })
     if (!ok) return
     setBusy(true)
     try {

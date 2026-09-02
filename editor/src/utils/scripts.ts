@@ -301,8 +301,9 @@ ${body}
 `
   }
 
-  const imports = base === 'Node' ? 'Logger, InputManager, Node' : `Logger, InputManager, Node, ${base}`
+  const imports = base === 'Node' ? 'Input, Logger, Node' : `Input, Logger, Node, ${base}`
   return `import { ${imports} } from 'cleo'
+import type { ActionState } from 'cleo'
 
 // ${className} runs on every node this script is attached to. Handlers are method overrides; class fields are
 // the node's variables — public/private/protected controls inspector visibility & cross-node access, and a
@@ -323,8 +324,17 @@ export default class ${className} extends ${base} {
   }
 
   onUpdate(delta: number, time: number) {
-    if (InputManager.instance.isKeyPressed('KeyW')) this.addZ(this.speed * delta)
+    // ACTIONS, not key codes. 'Move' and 'Jump' are authored in the Input panel, so the same two lines
+    // work on a keyboard, a gamepad and a touch screen — and the player can rebind them.
+    const move = Input.vector('Move')
+    this.addX(move[0] * this.speed * delta)
+    this.addZ(move[1] * this.speed * delta)
     this._elapsed += delta
+  }
+
+  // Fires when an action changes phase. state.started is true on exactly the frame of the press.
+  onAction(action: string, state: ActionState) {
+    if (action === 'Jump' && state.started) Logger.log(this.name + ' jumped', 'Script')
   }
 
   onCollision(other: Node) {

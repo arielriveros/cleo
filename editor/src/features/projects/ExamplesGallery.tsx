@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Logger } from 'cleo'
 import { iconFor } from '../assets/assetKinds'
 import { startTask } from '../progress/progressStore'
+import { confirmDialog } from '../dialogs/dialogStore'
 import {
   ExampleEntry, exampleThumbnailUrl, formatBytes, importExample, loadExampleIndex,
 } from '../../utils/examples'
@@ -48,11 +49,13 @@ export default function ExamplesGallery({ examples, className = '' }: {
   const open = useCallback(async (entry: ExampleEntry) => {
     if (busySlug) return
     if (entry.bytes > CONFIRM_BYTES) {
-      const ok = window.confirm(
-        `"${entry.name}" is ${formatBytes(entry.bytes)}.\n\n` +
-        `It will be downloaded and added as a new project. Your existing projects are not affected.\n\n` +
-        `Continue?`,
-      )
+      const ok = await confirmDialog({
+        title: `Download "${entry.name}"?`,
+        message:
+          `This example is ${formatBytes(entry.bytes)}.\n\n` +
+          'It is downloaded and added as a new project. Your existing projects are not affected.',
+        confirmLabel: 'Download',
+      })
       if (!ok) return
     }
 

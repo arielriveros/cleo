@@ -53,7 +53,7 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, chil
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, tilesets, audioSources, soundSamples, sceneDimension } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, tilesets, audioSources, soundSamples, sceneDimension, inputMap } = useCleoEngine();
   const { vfs } = useVfs();
   // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
   const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
@@ -165,6 +165,8 @@ export default function MenuBar() {
           scriptAssets,
           liveDimension: sceneDimension,
           settings: renderSettings(),
+          // Written once at the top level of the build, never inside a scene: bindings are project-wide.
+          input: inputMap,
         });
       } catch (e: any) {
         task.setStep(0, { status: 'failed', error: String(e?.message ?? e) });

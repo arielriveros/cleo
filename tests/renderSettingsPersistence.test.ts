@@ -8,8 +8,9 @@ import { join } from 'path';
  *
  * The chain is: `Renderer.getRenderSettings()` produces a `RenderSettings`; `saveCurrentScene` folds it
  * into the scene blob as `config.render`; `applyGameData` and the standalone player hand it back to
- * `applyRenderSettings()`. Nothing in the middle whitelists keys — `buildGameData` writes
- * `render: sources.settings` wholesale — so the only place a setting can fall out is at the two ends.
+ * `applyRenderSettings()`. Nothing in the middle whitelists keys — `buildGameData` assigns
+ * `config.render = sources.settings` wholesale — so the only place a setting can fall out is at the two
+ * ends.
  *
  * A setting declared on the interface but missing from `getRenderSettings` is never written. One missing
  * from `applyRenderSettings` is written and never read back. Neither throws, neither shows up in a
@@ -150,6 +151,13 @@ describe('nothing between the ends drops a key', () => {
     it('publishes the settings object wholesale rather than key by key', () => {
         // The moment this becomes a hand-listed set of fields, every future setting ships missing from
         // published games and nothing says so.
-        expect(BUILD).toContain('render: sources.settings');
+        expect(BUILD).toContain('config.render = sources.settings');
+    });
+
+    it('writes an input map into the same config block', () => {
+        // Bindings ship beside the render look, and only when they differ from the shipped defaults —
+        // an untouched project must not gain an input block in its build.
+        expect(BUILD).toContain('config.input = sources.input');
+        expect(BUILD).toContain('isDefaultInputMap');
     });
 });

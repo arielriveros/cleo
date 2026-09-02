@@ -18,6 +18,8 @@ import { SpriteNode } from "./nodes/spriteNode";
 import { UINode } from "./nodes/ui/uiNode";
 import { UIRootNode } from "./nodes/ui/uiRoot";
 import { parseNodeJson } from "./nodes/parseNodeJson";
+import { InputSystem } from "../../input/inputSystem";
+import type { ActionChange } from "../../input/resolveActions";
 import { mat4, vec3 } from "gl-matrix";
 import { DEFAULT_SCENE_AMBIENT_LUX, legacyAmbientFromSceneJson, MAX_LIGHTS } from "../../graphics/lighting";
 import { Logger } from '../logger'
@@ -29,6 +31,23 @@ import { getTemplate, templateNames } from "./templates";
 
 /** Object-space up, rotated by the camera's world orientation to give the audio listener its up axis. */
 const UP_AXIS: vec3 = vec3.fromValues(0, 1, 0);
+
+const EMPTY_ACTIONS: readonly ActionChange[] = [];
+
+/**
+ * Deliver this frame's action changes to one node.
+ *
+ * Only nodes that actually OVERRIDE `onAction` are called: the base stub is a no-op, and skipping it
+ * keeps a scene of hundreds of nodes from paying hundreds of empty calls on every frame an action
+ * fires. The throw guard matches the one around `onUpdate` — a script handler must not escape the loop.
+ */
+function dispatchActions(node: Node, actions: readonly ActionChange[]): void {
+    if (node.onAction === Node.prototype.onAction) return;
+    for (const change of actions) {
+        try { node.onAction(change.action, change.state); }
+        catch (error) { Logger.error(`Error in onAction function for node ${node.name}: ${error}`, 'Script'); }
+    }
+}
 
 /** Overrides applied to a freshly instantiated template root. See {@link Scene.instantiate}. */
 export interface InstantiateOptions {
@@ -322,6 +341,10 @@ export class Scene {
             // against a stale set would skip a just-added node. Light indices are a function of the node
             // set alone, so one pass over the lights answers for the whole frame.
             let assignedLightIndices = false;
+            // Actions that changed phase this frame, delivered to every node that overrides onAction
+            // immediately BEFORE that node's onUpdate, so a handler and the same frame's poll agree.
+            // Empty on almost every frame, so the cost is one length check per node loop.
+            const actions = this._hasStarted && !paused ? InputSystem.instance.changedThisFrame : EMPTY_ACTIONS;
             for (const node of this.nodes) {
                 if (!assignedLightIndices && node instanceof LightNode) {
                     this._asignLightIndices();
@@ -333,8 +356,10 @@ export class Scene {
                     continue;
                 }
 
-                if (this._hasStarted && !paused)
+                if (this._hasStarted && !paused) {
+                    if (actions.length > 0) dispatchActions(node, actions);
                     node.update(delta, time);
+                }
             }
             // Dormant nodes are not in _nodes, so the sweep above never sees one — but `despawn()` then
             // `remove()` is ordinary, and the node would otherwise stay in the tree forever.

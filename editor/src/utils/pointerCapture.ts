@@ -1,27 +1,27 @@
-import { CleoEngine } from 'cleo';
+import { InputSystem } from 'cleo';
+import type { CleoEngine } from 'cleo';
 
 /**
  * Mouse capture for viewport drags (camera orbit/pan, gizmo handles).
  *
- * The lock MUST target the canvas: `InputManager` flips `mouse.captured` only when
- * `document.pointerLockElement` is the canvas it was initialized with, and that flag is what feeds
- * `movementX/Y` into `mouse.velocity`. Locking the viewport div leaves the camera on a frozen cursor.
+ * These three names are kept, but the lock itself is no longer taken here: `InputSystem` is the single
+ * owner of `requestPointerLock`/`exitPointerLock` in the whole app, and these delegate to it. Two
+ * callers racing for the lock is not a theoretical problem — a browser REJECTS a re-lock issued too soon
+ * after an exit, so a gizmo drag and a click-to-capture firing together used to leave the viewport
+ * uncaptured with nothing to say why.
  *
- * Callers must not assume the lock succeeded — a browser rejects a re-lock issued too soon after an exit.
+ * The lock still targets the CANVAS, inside InputSystem: it flips `pointerLocked` only when
+ * `document.pointerLockElement` is the canvas it bound to, and that flag is what turns pointer bindings
+ * into relative motion. Locking the viewport div would leave the camera on a frozen cursor.
+ *
+ * Callers must not assume the lock succeeded.
  */
-export function captureViewport(instance: CleoEngine | null): void {
-  const canvas = instance?.renderer?.canvas;
-  if (!canvas || document.pointerLockElement === canvas) return;
-  try {
-    const locked = canvas.requestPointerLock() as unknown as Promise<void> | undefined;
-    locked?.catch(() => { /* denied (usually a too-soon re-lock); carry on uncaptured */ });
-  } catch { /* older browsers throw instead of rejecting */ }
+export function captureViewport(_instance: CleoEngine | null): void {
+  InputSystem.instance.requestPointerLock();
 }
 
 export function releaseViewport(): void {
-  if (document.pointerLockElement) {
-    try { document.exitPointerLock(); } catch { /* ignore */ }
-  }
+  InputSystem.instance.releasePointerLock();
 }
 
 export const isViewportCaptured = (): boolean => !!document.pointerLockElement;
