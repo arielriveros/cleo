@@ -30,6 +30,7 @@ export interface PassTiming {
 export const RENDER_PASSES = [
     'shadows.cascades',
     'shadows.spot',
+    'shadows.point',
     'geometry',
     'foliage',
     'ssao',
@@ -64,7 +65,7 @@ export type RenderPass = typeof RENDER_PASSES[number];
 
 /** Passes the profiler panel offers as on/off switches. Excludes any pass the image cannot do without. */
 export const TOGGLEABLE_PASSES: RenderPass[] = [
-    'shadows.cascades', 'shadows.spot', 'foliage', 'ssao', 'ssao.blur', 'sky', 'clouds', 'skyFog', 'grid',
+    'shadows.cascades', 'shadows.spot', 'shadows.point', 'foliage', 'ssao', 'ssao.blur', 'sky', 'clouds', 'skyFog', 'grid',
     'transparent', '2d', 'gizmos', 'velocity', 'motionBlur', 'godRays', 'bloom.bright',
     'bloom.blur', 'bloom.composite', 'chromatic', 'screenMaterials',
 ];
@@ -102,6 +103,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     // Renamed but still one-to-one: the pass label and the scope name simply differ.
     cascade: 'shadows.cascades',
     spotShadow: 'shadows.spot',
+    pointShadow: 'shadows.point',
     deferredLighting: 'lighting',
     screenMaterial: 'screenMaterials',
     skyAtmosphereBake: 'sky.bake',

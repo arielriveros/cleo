@@ -25,6 +25,8 @@ import {
     MAX_CASCADES, CascadeSphere, computeCascadeSplits, cascadeSphereFromPerspective,
     cascadeSphereFromCorners, quantizeRadius, cascadeDepthScale, buildCascadeMatrix,
     spotShadowFar, SpotShadowSlots,
+    MAX_POINT_SHADOWS, POINT_SHADOW_FACES, PointShadowCache, pointShadowFov,
+    HASH_SEED, mixString, mixTransform,
 } from './shadowMath';
 import { Geometry } from '../core/geometry';
 import { Frustum } from '../core/frustum';
@@ -329,6 +331,10 @@ export interface RenderSettings {
     spotShadowResolution: number;
     spotShadowDistance: number;
     spotShadowBias: number;
+    pointShadowsEnabled: boolean;
+    pointShadowResolution: number;
+    pointShadowDistance: number;
+    pointShadowBias: number;
 }
 
 /** The knobs each quality tier sets. `custom` has no entry — it means "don't touch anything". */
@@ -625,7 +631,6 @@ export class Renderer {
     private _spotShadowMatPacked: Float32Array = new Float32Array(Renderer.MAX_SPOT_SHADOWS * 16);
     private _spotShadowTexelScalePacked: Float32Array = new Float32Array(Renderer.MAX_SPOT_SHADOWS);
     /** Layer for spot light i, or -1. Rebuilt WHOLE every frame — see the id-keying note above. */
-    private _spotShadowLayerPacked: Int32Array = new Int32Array(GLSL_MAX_SPOTLIGHTS);
     private _spotShadowsEnabled: boolean = true;
     private _spotShadowResolution: number = 1024;
     /** Cap on a spot's derived far plane, so a barely-attenuating light cannot stretch its map flat. */
@@ -637,6 +642,40 @@ export class Renderer {
     private _spotProj: mat4 = mat4.create();
     private _spotTarget: vec3 = vec3.create();
     private _spotUp: vec3 = vec3.create();
+
+    // ---- Point-light shadows -----------------------------------------------------------------
+    // A third depth array, holding an UNWRAPPED cube map per casting point light: six consecutive
+    // layers, one per face, `slot * 6 + face`. Not a hardware cubemap — WebGL2 has no cubemap arrays
+    // and cannot attach a cube face as a depth target at all; see chunks/shadows.wgsl and shadowMath.
+    //
+    // Capped low for a reason a spot light does not share: a caster here is SIX depth rasterizations,
+    // where a spot light is one. The cull-and-cache below is what makes that affordable.
+    private _pointShadowFBO!: LayeredDepthFramebuffer;
+    // Slot per light id. Keyed by NODE ID, never `LightNode.index` — same reason as the spot atlas,
+    // and the class is not spot-specific despite its name.
+    private _pointSlots: SpotShadowSlots = new SpotShadowSlots(MAX_POINT_SHADOWS);
+    private _pointShadowMatrices: mat4[] = [];
+    private _pointShadowMatPacked: Float32Array = new Float32Array(MAX_POINT_SHADOWS * 6 * 16);
+    /** Cube SLOT for point light i, or -1. Rebuilt WHOLE every frame — see the id-keying note above. */
+    /** 2*tan(halfFov)/resolution. ONE value: every face and every slot shares the widened fov. */
+    private _pointShadowTexelScale: number = 0;
+    /** What each slot was last rasterized for, so a static lamp costs nothing after the first frame. */
+    private _pointShadowCache: PointShadowCache = new PointShadowCache(MAX_POINT_SHADOWS);
+    private _pointShadowsEnabled: boolean = true;
+    private _pointShadowResolution: number = 512;
+    /** Cap on a point light's derived far plane, mirroring `_spotShadowDistance`. */
+    private _pointShadowDistance: number = 50;
+    private _pointShadowBias: number = 0.0015;
+    private _pointShadowsActive: boolean = false;
+
+    private _pointShadowsDirty: boolean = false;
+    // Force every slot to re-rasterize next frame, bypassing the cache. Required after a
+    // reallocation (fresh texStorage3D holds undefined depth) and after anything that moves the face
+    // projection, which the cache key deliberately does not carry.
+    private _pointShadowFullUpdate: boolean = true;
+    private _pointView: mat4 = mat4.create();
+    private _pointProj: mat4 = mat4.create();
+    private _pointTarget: vec3 = vec3.create();
 
     // Post processing
     private _compose_FBOs!: Framebuffer[];
@@ -970,6 +1009,7 @@ export class Renderer {
         // Plain mat4s and numbers — CPU scratch for the shadow passes, no GPU resource — so these stay
         // in the constructor while the framebuffers they feed move into initialize().
         for (let i = 0; i < Renderer.MAX_SPOT_SHADOWS; i++) this._spotShadowMatrices.push(mat4.create());
+        for (let i = 0; i < MAX_POINT_SHADOWS * 6; i++) this._pointShadowMatrices.push(mat4.create());
         for (let i = 0; i < MAX_CASCADES; i++) {
             this._cascadeMatrices.push(mat4.create());
             this._cascadeSplits.push(0);
@@ -1046,6 +1086,7 @@ export class Renderer {
         this._sceneDepthFBO = new Framebuffer({ usage: 'depth' });
         this._shadowCascadeFBO = new LayeredDepthFramebuffer();
         this._spotShadowFBO = new LayeredDepthFramebuffer();
+        this._pointShadowFBO = new LayeredDepthFramebuffer();
         this._gBufferFBO = new Framebuffer({ colorAttachments: 3, colorTextureOptions: { mipMap: false, precision: 'high' } });
         // Bloom carries linear HDR (bright pixels can far exceed 1.0), so both the bright buffer and the
         // ping-pong blur targets are float — an RGBA8 bloom would clamp and defeat the HDR bright-pass.
@@ -1275,6 +1316,7 @@ export class Renderer {
         this._shadowMapResolution = SHADOW_MAP_SIZE;
         this._shadowCascadeFBO.create(SHADOW_MAP_SIZE, this._cascadeCount);
         this._spotShadowFBO.create(this._spotShadowResolution, Renderer.MAX_SPOT_SHADOWS);
+        this._pointShadowFBO.create(this._pointShadowResolution, MAX_POINT_SHADOWS * 6);
 
         this._blur_FBOs[0].create(rw / 2, rh / 2);
         this._blur_FBOs[1].create(rw / 2, rh / 2);
@@ -1410,6 +1452,8 @@ export class Renderer {
         this._checkGLErrors('cascades');
         this._renderSpotShadows(scene);
         this._checkGLErrors('spotShadows');
+        this._renderPointShadows(scene);
+        this._checkGLErrors('pointShadows');
 
         if (!this._shadowsActive) {
             // No caster: the pass above is skipped, so the layers still hold the LAST scene's depth and
@@ -2899,8 +2943,15 @@ export class Renderer {
         this._shaderManager.setUniform('u_spotShadowBias', this._spotShadowBias);
         this._shaderManager.setUniform('u_spotShadowMatrices', this._spotShadowMatPacked);
         this._shaderManager.setUniform('u_spotShadowTexelScale', this._spotShadowTexelScalePacked);
-        this._shaderManager.setUniform('u_spotShadowLayer', this._spotShadowLayerPacked);
 
+        // --- point shadows ---
+        this._shaderManager.setUniform('u_pointShadowsEnabled', this._pointShadowsActive && !this._shadowsSuppressed);
+
+        this._shaderManager.setUniform('u_pointShadowTexel',
+                                       [1 / this._pointShadowResolution, 1 / this._pointShadowResolution]);
+        this._shaderManager.setUniform('u_pointShadowBias', this._pointShadowBias);
+        this._shaderManager.setUniform('u_pointShadowTexelScale', this._pointShadowTexelScale);
+        this._shaderManager.setUniform('u_pointShadowMatrices', this._pointShadowMatPacked);
     }
 
     /**
@@ -2916,13 +2967,15 @@ export class Renderer {
     }
 
     /**
-     * The shadow maps: the cascade array, plus the spot atlas when `withSpot`. The caller must STATE
-     * that — a program declaring the spot arrays but never calling them has the binding dead-code
-     * eliminated, and an extra bind-group entry invalidates the whole command buffer.
+     * The shadow maps: the cascade array, plus the spot atlas and the point cube atlas when
+     * `withPunctual`. The caller must STATE that — a program declaring the punctual arrays but never
+     * calling them has the binding dead-code eliminated, and an extra bind-group entry invalidates the
+     * whole command buffer. `_textureBindGroup` places the Nth texture at binding 2N, so the ORDER
+     * here is the binding order in chunks/shadows.wgsl and nothing may be skipped in the middle.
      */
-    private _shadowBindGroup(pipeline: RenderPipeline, withSpot: boolean = true): BindGroup {
-        const textures = withSpot
-            ? [this._shadowCascadeFBO.texture, this._spotShadowFBO.texture]
+    private _shadowBindGroup(pipeline: RenderPipeline, withPunctual: boolean = true): BindGroup {
+        const textures = withPunctual
+            ? [this._shadowCascadeFBO.texture, this._spotShadowFBO.texture, this._pointShadowFBO.texture]
             : [this._shadowCascadeFBO.texture];
         return this._textureBindGroup(pipeline, 3, textures);
     }
@@ -5833,7 +5886,6 @@ export class Renderer {
      */
     private _renderSpotShadows(scene: Scene): void {
         this._spotShadowsActive = false;
-        this._spotShadowLayerPacked.fill(-1);
 
         const casters: LightNode[] = [];
         if (this._shadowsEnabled && this._spotShadowsEnabled)
@@ -5891,13 +5943,143 @@ export class Renderer {
         this._spotShadowsActive = true;
         this._spotShadowsDirty = true;
 
-        // Built from scratch every frame rather than patched: LightNode.index is renumbered by Scene
-        // on any structural change, so last frame's entries describe a mapping that may no longer hold.
-        for (const node of casters) {
-            const layer = this._spotSlots.layerOf(node.id);
-            if (layer >= 0 && node.index >= 0 && node.index < GLSL_MAX_SPOTLIGHTS)
-                this._spotShadowLayerPacked[node.index] = layer;
+    }
+
+    /**
+     * Render six perspective depth maps per shadow-casting point light — an unwrapped cube map, six
+     * consecutive atlas layers per slot. Foliage deliberately does NOT cast into these, as it does not
+     * into the spot maps.
+     *
+     * Six passes per light is the entire cost of this feature, so casters are filtered before any of
+     * them opens: a light whose whole range sphere is off screen is dropped outright, what survives is
+     * ordered nearest-first so the slots go to the lights the camera is among, and a slot whose light
+     * and casters have not moved since it was last drawn is left exactly as it is. A lamp bolted to a
+     * ceiling over static geometry therefore costs nothing after the first frame.
+     */
+    private _renderPointShadows(scene: Scene): void {
+        this._pointShadowsActive = false;
+
+        const casters: LightNode[] = [];
+        if (this._shadowsEnabled && this._pointShadowsEnabled) {
+            for (const node of scene.lights) {
+                if (node.type !== 'point' || !node.castShadows) continue;
+                // Index -1 is a light past `MAX_LIGHTS`, which has no record in the light grid and so
+                // cannot be addressed at all. Six shadow passes for it would be six nothing reads.
+                if (node.index < 0) continue;
+                const pos = node.worldPosition;
+                const far = spotShadowFar((node.light as PointLight).range, this._pointShadowDistance);
+                // A light can only shadow what it lights, and it lights nothing past its own range.
+                // The cheapest cull there is, and it removes a whole SIX-PASS light rather than a draw.
+                if (this._frustumCulling
+                    && !this._frustum.intersectsSphere(pos[0], pos[1], pos[2], far)) continue;
+                casters.push(node);
+            }
         }
+
+        // Nearest first, then truncated, so a light walking up to the camera can claim a free slot
+        // ahead of one further away. `SpotShadowSlots.update` still lets an incumbent keep its slot —
+        // that is what stops a light sitting on the capacity boundary from strobing.
+        if (casters.length > MAX_POINT_SHADOWS) {
+            const cam = this._activeCamera.position;
+            casters.sort((a, b) => vec3.squaredDistance(a.worldPosition, cam)
+                                 - vec3.squaredDistance(b.worldPosition, cam));
+            casters.length = MAX_POINT_SHADOWS;
+        }
+
+        // Reconcile first, THEN read slots back — an id that already held one keeps it.
+        this._pointSlots.update(casters.map(n => n.id));
+
+        if (casters.length === 0) {
+            if (this._pointShadowsDirty) { this._pointShadowFBO.clearAll(); this._pointShadowsDirty = false; }
+            this._pointShadowCache.invalidateAll();
+            return;
+        }
+        if (!this._beginPass('shadows.point')) return;
+
+        GLState.depthTest(true);
+        GLState.depthMask(true);
+        GLState.cull(true);
+        // Front-face culling, exactly as the cascade and spot passes do: rasterizing back faces puts
+        // the recorded occluder depth behind the lit surface, which is what lets the bias stay small.
+        // Safe here only because POINT_SHADOW_FACES are proper rotations — see that table's comment.
+        GLState.cullFace('front');
+
+        // The border, and so the fov, follows the filter radius: the kernel must not reach past what
+        // the map holds. One texel over the radius covers the hardware's own 2x2 comparison filter.
+        const border = Math.ceil(Math.max(0, this._shadowFilterRadius)) + 1;
+        const fov = pointShadowFov(this._pointShadowResolution, border);
+        this._pointShadowTexelScale = (2 * Math.tan(fov * 0.5)) / this._pointShadowResolution;
+
+        for (const node of casters) {
+            const slot = this._pointSlots.layerOf(node.id);
+            if (slot < 0) continue;   // past MAX_POINT_SHADOWS — this light simply goes unshadowed
+
+            const light = node.light as PointLight;
+            const pos = node.worldPosition;
+            const far = spotShadowFar(light.range, this._pointShadowDistance);
+            // Nothing inside the bulb casts, and a near plane kept well under `far` is what buys the
+            // depth precision a constant bias depends on.
+            const near = Math.max(0.05, Math.min(0.5, light.sourceRadius));
+            mat4.perspective(this._pointProj, fov, 1, near, far);
+
+            const stale = this._pointShadowFullUpdate
+                || this._pointShadowCache.needsUpdate(slot, pos, far, this._casterHash(scene, pos, far));
+
+            for (let f = 0; f < 6; f++) {
+                const layer = slot * 6 + f;
+                const face = POINT_SHADOW_FACES[f];
+                vec3.add(this._pointTarget, pos, face.dir);
+                mat4.lookAt(this._pointView, pos, this._pointTarget, face.up);
+                mat4.multiply(this._pointShadowMatrices[layer], this._pointProj, this._pointView);
+
+                // Rebuilt even for a cached slot, and identically so: the cache key covers everything
+                // that moves this matrix, so the recomputed value is the one the layer was drawn with.
+                // `_uvProducing` for the reason the spot matrices take it — the lookup in
+                // chunks/shadows.wgsl turns this into a texture coordinate, and that step is mirrored
+                // on WebGPU. NOT the cube-face capture treatment: this writes a plain 2D array layer.
+                this._pointShadowMatPacked.set(this._uvProducing(this._pointShadowMatrices[layer]), layer * 16);
+                if (!stale) continue;
+
+                const pass = this._beginDepthPass(this._pointShadowFBO.renderTarget, 'pointShadow', layer);
+                this._renderShadowCasters(pass, scene.models, this._pointShadowMatrices[layer]);
+                this._endFullscreenPass(pass);
+            }
+        }
+
+        GLState.cullFace('back');
+        this._pointShadowsActive = true;
+        this._pointShadowsDirty = true;
+        this._pointShadowFullUpdate = false;
+
+    }
+
+    /**
+     * A hash of every shadow caster standing inside this light's range, so the cache can tell "nothing
+     * moved" from "something did".
+     *
+     * A sphere test and a few multiplies per model per casting light, against six rasterizations —
+     * the trade is not close. It collapses to a single lookup the day `Scene` grows a revision
+     * counter; until then this is the only signal available that does not lie when a caster is
+     * animated in place.
+     */
+    private _casterHash(scene: Scene, lightPos: vec3, range: number): number {
+        let h = HASH_SEED;
+        for (const node of scene.models) {
+            if (!node.visible || !node.initialized || (node as any).isGizmo) continue;
+            let casts = false;
+            for (const m of node.model.materials)
+                if (m.config.castShadow && !m.config.wireframe) { casts = true; break; }
+            if (!casts) continue;
+            const s = node.getBoundingSphere();
+            const dx = s.center[0] - lightPos[0];
+            const dy = s.center[1] - lightPos[1];
+            const dz = s.center[2] - lightPos[2];
+            const reach = range + s.radius;
+            if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
+            h = mixString(h, node.id);
+            h = mixTransform(h, node.worldTransform);
+        }
+        return h;
     }
 
     /** Render the directional light's cascaded shadow maps (one array layer per view-frustum slice). */
@@ -6795,6 +6977,7 @@ export class Renderer {
         addFbo(this._sceneFBO); addFbo(this._gBufferFBO);
         bytes += this._shadowCascadeFBO.texture.byteSize; // one array texture, layers included
         bytes += this._spotShadowFBO.texture.byteSize;
+        bytes += this._pointShadowFBO.texture.byteSize;
         for (const m of this._bloomMips) addFbo(m);
         // The cloud temporal targets and baked noise volumes belong here too — an 8MB volume absent
         // from the estimate defeats its purpose.
@@ -7078,7 +7261,13 @@ export class Renderer {
 
     /** PCF kernel radius in shadow texels; 0 collapses to a single (hard-edged) tap. */
     public get shadowFilterRadius(): number { return this._shadowFilterRadius; }
-    public set shadowFilterRadius(v: number) { this._shadowFilterRadius = Math.min(16, Math.max(0, v)); }
+    public set shadowFilterRadius(v: number) {
+        this._shadowFilterRadius = Math.min(16, Math.max(0, v));
+        // The point-shadow face fov is derived from this — a wider kernel needs a wider overlap
+        // border to reach into — and the cube cache keys on the light and its casters, neither of
+        // which moved. Without this the maps keep the old projection while the shader assumes the new.
+        this._pointShadowFullUpdate = true;
+    }
 
     /** 0 = 3x3 tap grid (9 taps), 1 = 16-tap rotated Poisson disk (softer, ~2x the cost). */
     public get shadowFilterMode(): number { return this._shadowFilterMode; }
@@ -7136,6 +7325,41 @@ export class Renderer {
 
     /** How many spot lights can cast at once; extra casters go unshadowed rather than stealing a map. */
     public get maxSpotShadows(): number { return Renderer.MAX_SPOT_SHADOWS; }
+
+    public get pointShadowsEnabled(): boolean { return this._pointShadowsEnabled; }
+    public set pointShadowsEnabled(v: boolean) {
+        if (this._pointShadowsEnabled === v) return;
+        this._pointShadowsEnabled = v;
+        if (!v) this._pointShadowsDirty = true;
+        else this._pointShadowFullUpdate = true;
+    }
+
+    public get pointShadowResolution(): number { return this._pointShadowResolution; }
+    public set pointShadowResolution(size: number) {
+        // Capped at 1024 where spot allows 2048: this atlas is SIX layers per light, so 2K would be
+        // 24 layers of 16 MB — more depth storage than every other target in the renderer combined.
+        const clamped = Math.min(1024, Math.max(256, 1 << Math.round(Math.log2(size))));
+        if (clamped === this._pointShadowResolution) return;
+        this._pointShadowResolution = clamped;
+        if (!this._deviceReady) return;
+        this._pointShadowFBO.create(clamped, MAX_POINT_SHADOWS * 6);
+        this._pointShadowsDirty = true;
+        this._pointShadowsActive = false;
+        // Fresh texStorage3D storage holds undefined depth, and the face fov moved with the
+        // resolution besides — neither is something the cache key can see.
+        this._pointShadowFullUpdate = true;
+        this._pointShadowCache.invalidateAll();
+    }
+
+    public get pointShadowDistance(): number { return this._pointShadowDistance; }
+    public set pointShadowDistance(d: number) {
+        this._pointShadowDistance = Math.max(1, d);
+    }
+
+    public get pointShadowBias(): number { return this._pointShadowBias; }
+    public set pointShadowBias(v: number) { this._pointShadowBias = Math.max(0, v); }
+
+    public get maxPointShadows(): number { return MAX_POINT_SHADOWS; }
 
     /** Editor debug: which cascade layer the 'shadow' channel shows. */
     public get shadowDebugLayer(): number { return this._shadowDebugLayer; }
@@ -7208,6 +7432,10 @@ export class Renderer {
             spotShadowResolution: this._spotShadowResolution,
             spotShadowDistance: this._spotShadowDistance,
             spotShadowBias: this._spotShadowBias,
+            pointShadowsEnabled: this._pointShadowsEnabled,
+            pointShadowResolution: this._pointShadowResolution,
+            pointShadowDistance: this._pointShadowDistance,
+            pointShadowBias: this._pointShadowBias,
             bloomEnabled: this._bloomIntensity > 0,
             clearColor: this.clearColor,
             // The AUTHORED value. Serializing `_exposure` saved whatever the meter was at when the
@@ -7278,6 +7506,10 @@ export class Renderer {
         if (s.spotShadowResolution !== undefined) this.spotShadowResolution = s.spotShadowResolution;
         if (s.spotShadowDistance !== undefined) this.spotShadowDistance = s.spotShadowDistance;
         if (s.spotShadowBias !== undefined) this.spotShadowBias = s.spotShadowBias;
+        if (s.pointShadowsEnabled !== undefined) this.pointShadowsEnabled = s.pointShadowsEnabled;
+        if (s.pointShadowResolution !== undefined) this.pointShadowResolution = s.pointShadowResolution;
+        if (s.pointShadowDistance !== undefined) this.pointShadowDistance = s.pointShadowDistance;
+        if (s.pointShadowBias !== undefined) this.pointShadowBias = s.pointShadowBias;
         if (s.ssaoSamples !== undefined) this.ssaoSamples = s.ssaoSamples;
         if (s.ssaoResolutionScale !== undefined) this.ssaoResolutionScale = s.ssaoResolutionScale;
         if (s.clearColor) this.clearColor = s.clearColor;

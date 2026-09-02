@@ -60,6 +60,14 @@ const SPOT_RES: { label: string; size: number }[] = [
   { label: '2K', size: 2048 },
 ];
 
+// Point-light shadow map resolution, PER CUBE FACE. Six layers per casting light rather than one, so
+// the ladder stops a step below the spot list: 1K here is already 24 array layers of depth.
+const POINT_RES: { label: string; size: number }[] = [
+  { label: '256', size: 256 },
+  { label: '512', size: 512 },
+  { label: '1K', size: 1024 },
+];
+
 // Motion-blur quality presets: sample taps per pixel (higher = smoother, costlier).
 const MB_QUALITY: { label: string; samples: number }[] = [
   { label: 'Low',  samples: 8 },
@@ -139,6 +147,10 @@ export default function RendererSettingsPanel() {
   const [spotShadowRes, setSpotShadowRes] = useState<number>(() => renderer?.spotShadowResolution ?? 1024);
   const [spotShadowDist, setSpotShadowDist] = useState<number>(() => renderer?.spotShadowDistance ?? 100);
   const [spotShadowBias, setSpotShadowBias] = useState<number>(() => renderer?.spotShadowBias ?? 0.0015);
+  const [pointShadows, setPointShadows] = useState<boolean>(() => renderer?.pointShadowsEnabled ?? true);
+  const [pointShadowRes, setPointShadowRes] = useState<number>(() => renderer?.pointShadowResolution ?? 512);
+  const [pointShadowDist, setPointShadowDist] = useState<number>(() => renderer?.pointShadowDistance ?? 50);
+  const [pointShadowBias, setPointShadowBias] = useState<number>(() => renderer?.pointShadowBias ?? 0.0015);
 
   // Leaving Renderer mode (unmount) must restore the normal composited image for the other modes.
   useEffect(() => () => { if (renderer) renderer.debugView = 'final'; }, [renderer]);
@@ -202,6 +214,10 @@ export default function RendererSettingsPanel() {
     setSpotShadowRes(renderer.spotShadowResolution);
     setSpotShadowDist(renderer.spotShadowDistance);
     setSpotShadowBias(renderer.spotShadowBias);
+    setPointShadows(renderer.pointShadowsEnabled);
+    setPointShadowRes(renderer.pointShadowResolution);
+    setPointShadowDist(renderer.pointShadowDistance);
+    setPointShadowBias(renderer.pointShadowBias);
   }, [renderer]);
 
   // Play/stop resets debugView and toggles the grid on the renderer directly.
@@ -481,6 +497,36 @@ export default function RendererSettingsPanel() {
         <Slider label='Bias' value={spotShadowBias} min={0} max={0.02} step={0.0005}
           readout={(v) => v.toFixed(4)}
           onChange={(v) => { renderer.spotShadowBias = v; setSpotShadowBias(v); touch(); }} />
+        {!shadowsEnabled && <Hint>The global Shadows toggle above is off, which also disables these.</Hint>}
+      </Section>
+
+      <Section
+        title='Point Shadows'
+        hint={`Up to ${renderer.maxPointShadows} point lights cast at once — flag them per light with `
+            + `Cast Shadows in the inspector. A point light shadows in every direction, so it costs SIX `
+            + `depth passes (one per cube face) where a spot light costs one; that is why the cap is low `
+            + `and Resolution is per FACE. The lights nearest the camera get the maps, and only lights `
+            + `whose range reaches the view are drawn at all — a light and its surroundings that have `
+            + `not moved keep the maps they already have, so a static lamp is free after the first `
+            + `frame. Bias is in DEPTH units, like Spot.`}
+      >
+        <Toggle label='Enabled' checked={pointShadows} className='my-1'
+          onChange={(c) => { renderer.pointShadowsEnabled = c; setPointShadows(c); touch(); }} />
+        <div className='flex items-center gap-1 my-1 text-xs'>
+          <span className='w-[70px] shrink-0'>Resolution</span>
+          <SegmentedControl
+            value={pointShadowRes}
+            onChange={(size) => { renderer.pointShadowResolution = size; setPointShadowRes(renderer.pointShadowResolution); touch(); }}
+            options={POINT_RES.map((r) => ({ value: r.size, label: r.label }))}
+          />
+        </div>
+        <Field label='Max Dist'>
+          <NumberInput value={pointShadowDist} min={1} step={10} className='flex-1 text-right px-1 py-0.5'
+            onChange={(v) => { renderer.pointShadowDistance = v; setPointShadowDist(renderer.pointShadowDistance); touch(); }} />
+        </Field>
+        <Slider label='Bias' value={pointShadowBias} min={0} max={0.02} step={0.0005}
+          readout={(v) => v.toFixed(4)}
+          onChange={(v) => { renderer.pointShadowBias = v; setPointShadowBias(v); touch(); }} />
         {!shadowsEnabled && <Hint>The global Shadows toggle above is off, which also disables these.</Hint>}
       </Section>
 

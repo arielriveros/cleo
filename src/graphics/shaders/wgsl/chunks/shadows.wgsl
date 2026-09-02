@@ -11,11 +11,17 @@
 //
 // TWO CONSTRAINTS carried over from the GLSL original:
 //
-//  1. Nothing here may collide with constants.glsl (MAX_POINT_LIGHTS, MAX_SPOTLIGHTS, MAX_BONES) or
-//     with the custom-material prelude, which declares those too. There are no include guards, and in
-//     the generated chunk a duplicate `const int` is a compile error. Hence CLEO_MAX_SPOTLIGHTS.
+//  1. Nothing here may collide with the custom-material prelude, which declares its own constants.
+//     There are no include guards, and in the generated chunk a duplicate `const int` is a compile
+//     error. That is why the names here are all `CLEO_`- or `MAX_SHADOW`-prefixed.
 //  2. It must be self-contained. The generated chunk is pasted into a program this file knows nothing
 //     about.
+//
+// A SHADOW SLOT IS NOT A LIGHT INDEX, and it used to be looked up from one: two fixed-size tables,
+// one per light type, sized by the old MAX_SPOTLIGHTS / MAX_POINT_LIGHTS caps — two more copies of a
+// number that no longer exists. The slot now rides in the light's own record (see
+// chunks/clusteredLights.wgsl), so `spotShadow` and `pointShadow` take the slot directly and nothing
+// here knows how many lights a scene has.
 //
 // The cascade maps live in ONE depth texture array with hardware comparison enabled, so a sample
 // returns a bilinearly filtered VISIBILITY (1 = lit) rather than a raw depth, and every tap is already
@@ -24,12 +30,17 @@
 
 const MAX_CASCADES: i32 = 4;
 const MAX_SPOT_SHADOWS: i32 = 4;
-const CLEO_MAX_SPOTLIGHTS: i32 = 8;
+const MAX_POINT_SHADOWS: i32 = 4;
 
 @group(3) @binding(0) var u_shadowCascades_texture: texture_depth_2d_array;
 @group(3) @binding(1) var u_shadowCascades_sampler: sampler_comparison;
 @group(3) @binding(2) var u_spotShadows_texture: texture_depth_2d_array;
 @group(3) @binding(3) var u_spotShadows_sampler: sampler_comparison;
+// The point-light cube atlas: six consecutive layers per light, `slot * 6 + face`. This is the LAST
+// sampler group 3 can take — the deferred lighting pass now binds 14 texture+sampler pairs against a
+// hard 16 (the ES 3.00 minimum, measured on ANGLE/D3D11 — see rhi/webgl2/capabilities.ts).
+@group(3) @binding(4) var u_pointShadows_texture: texture_depth_2d_array;
+@group(3) @binding(5) var u_pointShadows_sampler: sampler_comparison;
 
 /**
  * Per-cascade scalars are packed into vec4s, one lane per cascade.
@@ -42,16 +53,21 @@ const CLEO_MAX_SPOTLIGHTS: i32 = 8;
 struct ShadowUniforms {
     u_cascadeMatrices: array<mat4x4<f32>, 4>,
     u_spotShadowMatrices: array<mat4x4<f32>, 4>,
+    // MAX_POINT_SHADOWS * 6, indexed `slot * 6 + face`. The face matrix is uploaded rather than
+    // rebuilt in the shader from the light's near/far and a constant rotation, which would fit in a
+    // fraction of the space: deriving it means re-implementing `_uvProducing`'s Y flip and the
+    // WebGL/WebGPU NDC depth difference by hand, and sampling with the exact matrix the depth pass
+    // rasterized with is correct on both backends by construction.
+    u_pointShadowMatrices: array<mat4x4<f32>, 24>,
 
     u_cascadeSplits: array<vec4<f32>, 1>,       // view-space far distance of each cascade
     u_cascadeDepthScale: array<vec4<f32>, 1>,   // 1 / world depth range: world bias -> depth units
     u_cascadeTexelSize: array<vec4<f32>, 1>,    // world size of one shadow texel in this cascade
     u_spotShadowTexelScale: array<vec4<f32>, 1>,// per layer: 2*tan(halfFov)/resolution
-    // Atlas layer for spot light i, or -1 if it casts no shadow. Eight ints, two lanes of four.
-    u_spotShadowLayer: array<vec4<i32>, 2>,
 
     u_shadowTexel: vec2<f32>,                   // 1 / resolution
     u_spotShadowTexel: vec2<f32>,
+    u_pointShadowTexel: vec2<f32>,
 
     u_shadowDepthBias: f32,                     // world units, along the light
     u_shadowNormalBias: f32,                    // texels, along the surface normal
@@ -60,6 +76,10 @@ struct ShadowUniforms {
     u_cascadeBlend: f32,                        // fraction of a cascade's range used to cross-fade
     u_spotShadowBias: f32,                      // constant bias in DEPTH units (perspective depth is
                                                 // non-linear, so no single world scale converts it)
+    u_pointShadowBias: f32,                     // likewise, in depth units
+    // World size of one cube-face texel PER UNIT of distance from the light. One value for all six
+    // faces and every slot: they share a projection, differing only by rotation.
+    u_pointShadowTexelScale: f32,
     u_cascadeCount: i32,
     u_shadowFilterMode: i32,                    // 0 = 3x3 grid, 1 = 16-tap rotated Poisson
     // i32 rather than bool throughout: WGSL forbids bool in a uniform buffer. Call sites still pass
@@ -67,6 +87,7 @@ struct ShadowUniforms {
     u_shadowsEnabled: i32,
     u_debugCascades: i32,                       // tint by selected cascade instead of shading
     u_spotShadowsEnabled: i32,
+    u_pointShadowsEnabled: i32,
 };
 @group(1) @binding(2) var<uniform> u_shadow: ShadowUniforms;
 
@@ -111,7 +132,6 @@ fn cleoSplit(i: i32) -> f32 { return u_shadow.u_cascadeSplits[0][i]; }
 fn cleoDepthScale(i: i32) -> f32 { return u_shadow.u_cascadeDepthScale[0][i]; }
 fn cleoTexelSize(i: i32) -> f32 { return u_shadow.u_cascadeTexelSize[0][i]; }
 fn cleoSpotTexelScale(i: i32) -> f32 { return u_shadow.u_spotShadowTexelScale[0][i]; }
-fn cleoSpotLayer(i: i32) -> i32 { return u_shadow.u_spotShadowLayer[i / 4][i % 4]; }
 
 /** Which cascade covers `viewDepth` (distance in front of the camera, always positive). */
 fn cleoCascadeFor(viewDepth: f32) -> i32 {
@@ -271,10 +291,101 @@ fn spotShadow(layer: i32, worldPos: vec3<f32>, N: vec3<f32>, lightPos: vec3<f32>
     return (1.0 - sum / 9.0) * u_shadow.u_shadowStrength;
 }
 
-/** Convenience for the light loops: resolves spot light `i`'s layer and samples it. */
-fn spotShadowFor(i: i32, worldPos: vec3<f32>, N: vec3<f32>, lightPos: vec3<f32>) -> f32 {
-    if (u_shadow.u_spotShadowsEnabled == 0 || i >= CLEO_MAX_SPOTLIGHTS) { return 0.0; }
-    return spotShadow(cleoSpotLayer(i), worldPos, N, lightPos);
+
+// -------------------------------------------------------------------------------------------
+// Point-light shadows.
+//
+// A cube map per casting light, UNWRAPPED into six consecutive layers of a third depth array. Not a
+// hardware cubemap, and that is forced rather than chosen: WebGL2 has no cubemap arrays (GLSL ES 3.00
+// has `samplerCubeShadow` but no `samplerCubeArrayShadow`), so a real depth cube would serve exactly
+// one light and cost its own sampler out of a budget with three left. Unwrapped, the six faces are
+// ordinary perspective shadow maps and everything the spot path already does applies unchanged.
+//
+// Slots are assigned by node id like the spot layers (see SpotShadowSlots), never by light index.
+// -------------------------------------------------------------------------------------------
+
+/**
+ * Major-axis cube face of `d`, in the `+X -X +Y -Y +Z -Z` order the renderer rasterizes.
+ *
+ * The tie-breaks are part of the contract, not an implementation detail: `cubeFaceIndex` in
+ * graphics/shadowMath.ts is the JS twin of this function and tests/shadowMath.test.ts pins them
+ * together. A disagreement samples the face NEXT to the one a fragment was rasterized into, which
+ * shows up as a shadow torn along a 45-degree line rather than as anything resembling an index bug.
+ */
+fn cleoCubeFace(d: vec3<f32>) -> i32 {
+    let a = abs(d);
+    if (a.x >= a.y && a.x >= a.z) { return select(1, 0, d.x > 0.0); }
+    if (a.y >= a.z)               { return select(3, 2, d.y > 0.0); }
+    return select(5, 4, d.z > 0.0);
+}
+
+fn cleoPointTap(uv: vec2<f32>, layer: i32, refDepth: f32) -> f32 {
+    return textureSampleCompareLevel(u_pointShadows_texture, u_pointShadows_sampler, uv, layer, refDepth);
+}
+
+/**
+ * Shadow amount for one point light — 0 fully lit, 1 fully shadowed.
+ *
+ * The normal offset scales with distance from the light for the same reason it does in
+ * `spotShadow`: these are perspective maps, and a texel covers more world the further out it lands.
+ */
+fn pointShadow(slot: i32, worldPos: vec3<f32>, N: vec3<f32>, lightPos: vec3<f32>) -> f32 {
+    if (u_shadow.u_pointShadowsEnabled == 0 || slot < 0 || slot >= MAX_POINT_SHADOWS) { return 0.0; }
+
+    let texelWorld = u_shadow.u_pointShadowTexelScale * distance(lightPos, worldPos);
+    let p = worldPos + N * (u_shadow.u_shadowNormalBias * texelWorld);
+
+    // The face is picked from the OFFSET position, not the original: near a cube edge the normal
+    // offset can push a sample across into the next face, and it has to be looked up in the face it
+    // now lies in or it reads depth from a direction it is not in.
+    let face = cleoCubeFace(p - lightPos);
+    let layer = slot * 6 + face;
+
+    let posLS = u_shadow.u_pointShadowMatrices[layer] * vec4<f32>(p, 1.0);
+    if (posLS.w <= 0.0) { return 0.0; }                 // behind this face
+    var proj = posLS.xyz / posLS.w;
+    proj = proj * 0.5 + 0.5;
+    // Past the light's own range, where nothing was rasterized. No xy test, unlike `spotShadow`:
+    // the faces are rasterized WIDER than 90 degrees (see `pointShadowFov`), so every direction
+    // lands inside its own face with texels to spare.
+    if (proj.z > 1.0) { return 0.0; }
+
+    let refDepth = proj.z - u_shadow.u_pointShadowBias;
+
+    if (u_shadow.u_shadowFilterRadius <= 0.0) {
+        return (1.0 - cleoPointTap(proj.xy, layer, refDepth)) * u_shadow.u_shadowStrength;
+    }
+
+    // Always the 3x3 grid, never the 16-tap disk, for the same reason `spotShadow` uses it: this
+    // runs inside the per-point-light loop, so its cost multiplies by the lights touching the pixel.
+    // The taps are clamped because a face is a layer of a 2D array, not a cube — the hardware will
+    // not wrap one edge onto its neighbour, and the widened fov is what puts real depth under a tap
+    // that the clamp would otherwise pin to the border.
+    let texStep = u_shadow.u_pointShadowTexel * u_shadow.u_shadowFilterRadius;
+    var sum = 0.0;
+    for (var x = -1; x <= 1; x++) {
+        for (var y = -1; y <= 1; y++) {
+            let t = clamp(proj.xy + vec2<f32>(f32(x), f32(y)) * texStep, vec2<f32>(0.0), vec2<f32>(1.0));
+            sum += cleoPointTap(t, layer, refDepth);
+        }
+    }
+    return (1.0 - sum / 9.0) * u_shadow.u_shadowStrength;
+}
+
+/**
+ * VISIBILITY (1 = fully lit) for one clustered punctual light, from whichever shadow map it has.
+ *
+ * A light carries a spot atlas layer or a point cube slot, never both, and the other is -1 — which
+ * both functions above already answer with 0.0 on their first line. So the `max` is exact rather
+ * than a blend, and it costs less than the branch it replaces: a cluster mixes spot and point
+ * lights, so a branch on light type diverges across the wave and executes both sides anyway.
+ *
+ * This is what let the two per-type light loops collapse into one. See chunks/clusteredLights.wgsl.
+ */
+fn cleoPunctualVisibility(spotLayer: i32, pointSlot: i32, worldPos: vec3<f32>, N: vec3<f32>,
+                          lightPos: vec3<f32>) -> f32 {
+    return 1.0 - max(spotShadow(spotLayer, worldPos, N, lightPos),
+                     pointShadow(pointSlot, worldPos, N, lightPos));
 }
 
 /** Debug tint identifying the cascade a pixel selected. Red/green/blue/yellow, near to far. */

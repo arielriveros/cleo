@@ -102,8 +102,13 @@ export class LightNode extends Node {
     public get index(): number { return this._index; }
     public set index(value: number) { this._index = value; }
     /**
-     * Whether this light casts shadows. Only DIRECTIONAL lights are honoured: the renderer fits its
-     * cascades around the camera frustum for the first flagged directional light in the scene.
+     * Whether this light casts shadows. Honoured for all three types, by three different mechanisms:
+     * the FIRST flagged directional light in the scene gets the camera-fitted cascades; a SPOT light
+     * gets one perspective map matching its cone; a POINT light gets six, an unwrapped cube map.
+     *
+     * The last two are capped (see the renderer's MAX_SPOT_SHADOWS / MAX_POINT_SHADOWS) because each
+     * caster is a whole extra depth rasterization — six of them, for a point light. Casters past the
+     * cap go unshadowed rather than stealing a map from another light.
      */
     public get castShadows(): boolean { return this._castShadows; }
     public set castShadows(value: boolean) { this._castShadows = value; }

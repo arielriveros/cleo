@@ -123,7 +123,7 @@ export default function LightEditor(props: {node: LightNode}) {
             ? 'The FIRST directional light with this on is the scene’s sun: the renderer fits its shadow cascades around the camera for it. Tune them in Renderer mode.'
             : props.node.type === 'spotlight'
               ? 'Spot lights get their own shadow map, sized to the outer cone and reaching as far as the light’s range. A few can cast at once (see Spot Shadows in Renderer mode); any beyond that cap go unshadowed.'
-              : 'Point lights do not cast shadows — that needs a cubemap per light, which the renderer has no path for. The flag is still saved.'}
+              : 'Point lights cast in every direction, through a cube map rendered as six depth maps — one per face — reaching as far as the light’s range. A few can cast at once (see Point Shadows in Renderer mode); the nearest to the camera get the maps, and any beyond that cap go unshadowed.'}
           onChange={(c) => { props.node.castShadows = c; setCastShadows(c); markLightDirty(); }} />
       </Section>
 

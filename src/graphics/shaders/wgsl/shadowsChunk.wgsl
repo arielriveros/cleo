@@ -21,7 +21,7 @@ fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
     let N = vec3<f32>(0.0, 1.0, 0.0);
     let keepAlive = directionalShadow(worldPos, N, 1.0)
                   + shadowVisibility(worldPos, 1.0)
-                  + spotShadowFor(0, worldPos, N, worldPos)
+                  + cleoPunctualVisibility(0, 0, worldPos, N, worldPos)
                   + cascadeDebugTint(1.0).x;
     return vec4<f32>(keepAlive);
 }
