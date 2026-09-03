@@ -75,7 +75,7 @@ import {
 import { idbGet, idbSet } from "../utils/idb";
 import { EDITOR_CAMERA_MAP } from "./input/editorInputMap";
 import { KEYS, libKey, inputMapKey } from "../utils/storageKeys";
-import { assetIdOfTab, loadTabState, saveTabState, MainMode } from "../utils/tabState";
+import { assetIdOfTab, loadTabState, saveTabState, MAIN_MODES, MainMode } from "../utils/tabState";
 import { activeProjectAllowsLegacyImport, touchProject } from "../utils/projects";
 import { activeProjectId } from "../utils/projectScope";
 import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextureIds, legacyTexturesOf, deleteTextures } from "../utils/textureStore";
@@ -96,7 +96,7 @@ import { useSoundEditor } from './hooks/useSoundEditor';
 import { useAnimationFieldEditor } from './hooks/useAnimationFieldEditor';
 import {
   EDITOR_CLEAR_COLOR, LEGACY_CLEAR_COLOR, TAB_METERS_EXPOSURE, TAB_RUNS_POST_PROCESSING, SCENE_TAB_ID,
-  KIND_LABEL,
+  KIND_LABEL, TAB_EDITOR_MODE,
 } from './engineContextTypes';
 import type {
   PendingModelImportView, ModelImportDecision, PendingAnimationImportView, PendingRigPickView,
@@ -1535,17 +1535,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const activeRuntime = activeTab.kind !== 'scene' ? tabRuntimeRef.current.get(activeTab.id) : undefined;
   // The scene the inspectors/gizmo/AddNew currently edit: the game scene (Main tab) or a template/material/animation scene.
   const activeScene = activeRuntime ? activeRuntime.scene : editorSceneRef.current;
-  // Single mode value, derived from the active tab kind, for `editorMode === ...` consumers.
-  const editorMode: EditorMode = activeTab.kind === 'scene' ? mainMode
-    : activeTab.kind === 'material' ? 'material'
-    : activeTab.kind === 'terrainMaterial' ? 'terrainMaterial'
-    : activeTab.kind === 'animation' ? 'animation'
-    : activeTab.kind === 'animationField' ? 'animationField'
-    : activeTab.kind === 'model' ? 'model'
-    : activeTab.kind === 'script' ? 'script'
-    : activeTab.kind === 'tileset' ? 'tileset'
-    : activeTab.kind === 'texture' ? 'texture'
-    : 'template';
+  // Single mode value, derived from the active tab kind, for `editorMode === ...` consumers. The map is
+  // exhaustive over TabKind, so a new kind cannot fall through to some other mode's panels.
+  const editorMode: EditorMode = activeTab.kind === 'scene' ? mainMode : TAB_EDITOR_MODE[activeTab.kind];
   const templateRootId = activeTab.kind === 'template' && activeRuntime ? activeRuntime.rootId : null;
   const editingTemplateName = activeTab.kind === 'template' ? activeTab.title : null;
   const editingMaterialName = activeTab.kind === 'material' ? activeTab.title : null;
@@ -1728,10 +1720,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
   };
 
-  // Public mode switch — only the Main tab's sub-mode (scene/landscape/renderer). Template/material/
-  // animation editing are tabs now (opened via enter*Editor), not modes, so they aren't accepted here.
+  // Public mode switch — only the Main tab's sub-mode (scene/landscape/tilemap/ui/renderer/input).
+  // Template/material/animation editing are tabs now (opened via enter*Editor), not modes, so they aren't
+  // accepted here. The guard IS the MainMode narrowing, so a mode missing from it is silently unreachable.
   const setEditorMode = (mode: EditorMode) => {
-    if (mode === 'scene' || mode === 'landscape' || mode === 'tilemap' || mode === 'ui' || mode === 'renderer') setMainMode(mode);
+    if (MAIN_MODES.includes(mode as MainMode)) setMainMode(mode as MainMode);
   };
 
   // Force skinned models to their bind (T) pose, so the editor shows the default pose: animators don't tick

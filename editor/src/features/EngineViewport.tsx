@@ -184,10 +184,12 @@ export default function EngineViewport() {
             // Ignore clicks that land on a floating overlay (2D/3D control, etc.).
             if (inOverlay(event.target)) return;
             if (isPlayMode) return;
-            // In landscape/tilemap/renderer modes the viewport is not a selection surface. In material mode
-            // the preview sphere stays selected (it drives the material inspector), so clicks must not change
-            // it. Animation mode picks joints (see AnimationSkeletonTool), not the mesh, so mesh selection is off.
-            if (editorMode === 'landscape' || editorMode === 'tilemap' || editorMode === 'ui' || editorMode === 'renderer' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'animation' || editorMode === 'animationField') return;
+            // In landscape/tilemap/renderer/input modes the viewport is not a selection surface — input mode
+            // renders live only so bindings and on-screen controls can be judged against the real scene, and it
+            // hides the tree and Properties, so a selection there has nowhere to show. In material mode the
+            // preview sphere stays selected (it drives the material inspector), so clicks must not change it.
+            // Animation mode picks joints (see AnimationSkeletonTool), not the mesh, so mesh selection is off.
+            if (editorMode === 'landscape' || editorMode === 'tilemap' || editorMode === 'ui' || editorMode === 'renderer' || editorMode === 'input' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'animation' || editorMode === 'animationField') return;
             
             if (wasDraggingRef.current || isGizmoDraggingRef.current || justFinishedGizmoDragRef.current) {
                 setIsDragging(false);
@@ -439,7 +441,7 @@ export default function EngineViewport() {
                 {editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && (
                     <DebugVisibilityMenu />
                 )}
-                {editorMode !== 'landscape' && editorMode !== 'tilemap' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && !isPlayMode && (
+                {editorMode !== 'landscape' && editorMode !== 'tilemap' && editorMode !== 'renderer' && editorMode !== 'input' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && !isPlayMode && (
                     <div className='flex items-center rounded overflow-hidden border border-control-hover'>
                         <GizmoSeg active={gizmoMode === 'position'} title='Move (position)' onClick={() => setGizmoMode('position')}><MoveIcon /></GizmoSeg>
                         <GizmoSeg active={gizmoMode === 'rotation'} title='Rotate' onClick={() => setGizmoMode('rotation')}><RotateIcon /></GizmoSeg>
@@ -459,7 +461,7 @@ export default function EngineViewport() {
                     </select>
                 )}
             </div>}
-            {overRender && editorMode !== 'landscape' && editorMode !== 'tilemap' && editorMode !== 'ui' && editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'animation' && <PositionGizmo
+            {overRender && editorMode !== 'landscape' && editorMode !== 'tilemap' && editorMode !== 'ui' && editorMode !== 'renderer' && editorMode !== 'input' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'animation' && <PositionGizmo
                 selectedNodeId={selectedNode}
                 onTransformChange={handleTransformChange}
                 viewportRef={viewportRef}
