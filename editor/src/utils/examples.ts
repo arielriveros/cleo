@@ -2,6 +2,7 @@ import { Logger } from 'cleo';
 import { BUNDLE_PATHS, BundleManifest } from './bundle';
 import { BundleSource, readBundle } from './bundleRead';
 import { applyBundleAsNewProject } from './bundleImport';
+import { confirmDiscard } from '../features/unloadGuard';
 import { parseJsonBuffer } from '../workers/workerClient';
 
 // Example projects that ship with the editor: a project bundle exported and then UNZIPPED into a folder
@@ -124,13 +125,18 @@ function fetchSource(slug: string, onEntry?: (done: number, total: number) => vo
 export async function importExample(
   entry: ExampleEntry,
   onProgress?: (fraction: number) => void,
-): Promise<void> {
+): Promise<boolean> {
+  // Asked BEFORE the download: this ends in a reload into the new project, so anything unsaved in the
+  // open one is lost, and finding that out after fetching several megabytes is the wrong order. On the
+  // boot launcher there is no open project, so there is nothing unsaved and no dialog appears — which
+  // matters, because DialogHost is mounted by the editor shell and not by the launcher.
+  if (!(await confirmDiscard('Opening an example'))) return false;
   const source = fetchSource(entry.slug, (done, total) => onProgress?.(total ? done / total : 0));
   const { bundle } = await readBundle(source);
   if (bundle.manifest.kind !== 'project') {
     throw new Error(`Example "${entry.slug}" is not a project bundle`);
   }
-  await applyBundleAsNewProject(bundle, entry.name);
+  return applyBundleAsNewProject(bundle, entry.name, true);
 }
 
 /** Human-readable download size for a card. */

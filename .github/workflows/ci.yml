@@ -4,8 +4,8 @@
 #
 # Severity is deliberately not uniform:
 #
-#   typecheck  WARNS.  `tsc --noEmit` is the only thing that checks the editor at all (its webpack goes
-#              through babel-loader, which strips types without looking at them), so it has to run -- but
+#   typecheck  WARNS.  `tsc --noEmit` is the only thing that checks the editor at all (Vite transforms
+#              through esbuild, which strips types without looking at them), so it has to run -- but
 #              a type error blocks nothing that a green test suite says is working. It reports as an
 #              annotation plus a job-summary block, and the job stays green.
 #   tests      FAIL.   Plus a coverage floor. They live in tests.yml, which release.yml calls too, so the
@@ -102,11 +102,11 @@ jobs:
 
       - run: npm ci
 
-      # dist/ is untracked and editor/node_modules/cleo points at it, so the engine must be built before
-      # the editor can resolve -- let alone typecheck against -- it. This is also the only automated check
-      # on the engine's emitted .d.ts, which the editor compiles against in strict mode.
-      - name: Build engine (editor resolves cleo -> ../dist)
-        run: npm run build:dev
+      # dist/ is untracked and editor/node_modules/cleo points at it, so the engine's declarations must be
+      # emitted before the editor can resolve -- let alone typecheck against -- `cleo`. This is also the
+      # only automated check on that .d.ts tree, which the editor compiles against in strict mode.
+      - name: Build engine declarations (editor resolves cleo -> ../dist)
+        run: npm run build
 
       - name: Install editor deps
         run: npm ci
@@ -155,9 +155,9 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      # `editor:build` -> `build:player` -> npm's implicit prebuild hook -> root `build:dev`, so the
-      # engine is built as part of this. The old deploy workflow also ran `npm run build` (production)
-      # first, which that hook then overwrote -- dropped rather than reordered, since nothing consumed it.
+      # `editor:build` -> `build:player` -> npm's implicit prebuild hook -> root `build`, so the engine's
+      # declarations are emitted as part of this. Both builds compile engine SOURCE through Vite, so there
+      # is no engine bundle to sequence against.
       - run: npm ci && npm run editor:install && npm run editor:build
 
       - name: Deploy to live

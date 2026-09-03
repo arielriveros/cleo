@@ -1509,9 +1509,9 @@ export class Geometry {
 
     public static async Terrain(heightmapPath: string): Promise<Geometry> {
         // Imported lazily so this module stays a leaf: a top-level import of the loader closes a cycle
-        // back to this file and drags in every GL module. `webpackMode: "eager"` keeps it in the one
-        // library bundle instead of emitting a lazily-fetched chunk.
-        const { Loader } = await import(/* webpackMode: "eager" */ "../graphics/loader");
+        // back to this file and drags in every GL module. The player build is Vite lib/IIFE and inlines
+        // this back into the single bundle; the editor app build lets it become its own chunk.
+        const { Loader } = await import("../graphics/loader");
 
         return new Promise<Geometry>((resolve, reject) => {
             const positions: [number, number, number][] = [];

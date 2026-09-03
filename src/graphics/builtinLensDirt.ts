@@ -8,8 +8,8 @@
 // player does not, so a built-in registered that way would work in the editor and silently disappear
 // from every published game. This module has no such asymmetry: it is imported, so it is simply there.
 //
-// Base64 rather than an image import because the engine's webpack config has no image rule -- see the
-// generator script for the full reasoning.
+// Base64 rather than an image import because the engine emits no assets of its own and src/ imports no
+// images -- see the generator script for the full reasoning.
 
 /** 1024x751 baseline JPEG, quality 82. Decoded lazily; see `Renderer._lensDirtTexture`. */
 export const BUILTIN_LENS_DIRT_MIME = 'image/jpeg';

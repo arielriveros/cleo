@@ -1,10 +1,11 @@
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, mergeConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-// @ts-expect-error -- a plain .mjs shared with the two vitest configs; it has no declarations.
-import { glslRaw } from '../tools/vitestGlsl.mjs'
+// @ts-expect-error -- a plain .mjs; it has no declarations. Needed here only for the worker pass below,
+// which does not inherit the top-level plugins the shared engine config contributes.
+import { glslRaw } from '../tools/viteGlsl.mjs'
+import engineConfig from '../vite.config'
 import { buildVersionDefines } from './buildVersion'
 
 const ENGINE_ROOT = path.resolve(__dirname, '..')
@@ -51,7 +52,10 @@ function nagaAssets(): Plugin {
   }
 }
 
-export default defineConfig({
+// The shared engine config (../vite.config.ts) contributes the shader plugin and the `cleo` ->
+// ../src/cleo.ts alias, so the dev server, this build, the player build and both test suites resolve and
+// transform engine source identically. Everything below is editor-specific.
+export default mergeConfig(engineConfig, defineConfig({
   // desktop/main.js serves editor/dist over app://editor and resolves "/assets/..." against the origin
   // root; Firebase rewrites ** -> /index.html. Both need root-absolute asset URLs.
   base: '/',
@@ -60,29 +64,18 @@ export default defineConfig({
   // buildVersionDefines() already JSON.stringify()s its values, which is exactly what `define` wants.
   define: buildVersionDefines(),
 
-  // glslRaw() is what makes the `cleo` source alias below viable: the engine imports .vs and .wgsl, and
-  // Vite would otherwise hand `#version 300 es` to its JS parser. It is the same plugin both vitest
-  // configs use, so a test, the dev server and the build all see one shader.
-  plugins: [react(), glslRaw(), nagaAssets()],
-
-  resolve: {
-    // The editor imports the engine as `cleo`, which through package.json resolves to the built ../dist
-    // UMD bundle. Aliasing to SOURCE instead means no `npm run build:dev` between an engine edit and
-    // seeing it, HMR across the boundary, and one set of class identities rather than two -- the same
-    // reasoning as editor/vitest.config.ts. dist is still built, but only for its .d.ts tree, which
-    // scriptEditor/cleoTypes.ts and `npm run typecheck` both read.
-    alias: { cleo: fileURLToPath(new URL('../src/cleo.ts', import.meta.url)) },
-  },
+  // glslRaw() comes from the shared engine config; react() and nagaAssets() are the editor-only pair.
+  plugins: [react(), nagaAssets()],
 
   worker: {
     // Both project workers are ES modules (see workers/*Client.ts, which pass { type: 'module' }); this
     // keeps dev and build agreed on that.
     format: 'es',
     // A worker is bundled by its OWN rollup pass, which inherits `resolve` but NOT the top-level
-    // `plugins`. importWorker imports the `cleo` barrel, so without repeating glslRaw() here the build
-    // hands a `.wgsl` file straight to rollup's JS parser -- and the error names channelPack.wgsl, not
-    // the missing plugin. react() and nagaAssets() are deliberately not repeated: no JSX and no asset
-    // emission happens inside a worker.
+    // `plugins` -- including the ones merged in from the shared engine config. importWorker imports the
+    // `cleo` barrel, so without repeating glslRaw() here the build hands a `.wgsl` file straight to
+    // rollup's JS parser -- and the error names channelPack.wgsl, not the missing plugin. react() and
+    // nagaAssets() are deliberately not repeated: no JSX and no asset emission happens inside a worker.
     plugins: () => [glslRaw()],
   },
 
@@ -93,7 +86,7 @@ export default defineConfig({
     // Opening a browser is the `start` script's job (`vite --open`), not the config's: a build,
     // a preview or a scripted dev server must not spawn one.
     fs: {
-      // The engine source and the `cleo` -> ../dist symlink both live outside editor/. Already covered
+      // The engine source and the `cleo` -> ../dist link both live outside editor/. Already covered
       // by the default workspace root (Engine/ has .git), stated explicitly so a checkout without .git
       // -- a release tarball, say -- still serves them.
       allow: [ENGINE_ROOT],
@@ -102,8 +95,8 @@ export default defineConfig({
 
   build: {
     outDir: 'dist',
-    emptyOutDir: true,            // webpack's output.clean
+    emptyOutDir: true,
     // The engine compiles into one large chunk; the default 500 kB warning is pure noise here.
     chunkSizeWarningLimit: 8_000,
   },
-})
+}))

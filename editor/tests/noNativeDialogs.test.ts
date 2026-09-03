@@ -124,7 +124,7 @@ describe('no native browser dialogs in the editor', () => {
     }
     expect(
       offenders,
-      'Use discardAndReload/reloadDiscarding from features/unloadGuard, or switchToProject from ' +
+      'Use reloadDiscarding from features/unloadGuard, or switchToProject from ' +
       'utils/projects. A bare reload leaves the browser to ask about unsaved work in its own words.',
     ).toEqual([]);
   });

@@ -2,7 +2,7 @@
 // in-editor Monaco worker and to the on-disk script workspace an external IDE opens.
 //
 // Note this reads dist, NOT the engine source vite.config.ts aliases `cleo` to: declarations are what
-// Monaco and tsc consume, and only `npm run build:types` produces them.
+// Monaco and tsc consume, and only `npm run build` at the repo root produces them.
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
 
 // gl-matrix and cannon-es are not reachable through the engine's own tree, and without them the dist
@@ -38,9 +38,11 @@ const engineDeclarations = import.meta.glob('../../../../node_modules/cleo/**/*.
 // A silently empty tree is exactly the failure this file exists to prevent: every engine type quietly
 // degrades to `any` and nothing else says so.
 if (import.meta.env.DEV && Object.keys(engineDeclarations).length === 0)
-  console.error('[cleo] No engine declarations found. Run `npm run build:types` at the repo root.');
+  console.error('[cleo] No engine declarations found. Run `npm run build` at the repo root.');
 
-/** dist/package.json has no "types" field, so this is what makes a bare `import … from 'cleo'` resolve. */
+/** The workspace tree is gathered from a glob of .d.ts files, so it carries no manifest of its own; this
+ *  is what makes a bare `import … from 'cleo'` resolve inside it. (The real dist/package.json does have
+ *  a "types" field -- see tools/buildDist.mjs -- but it is not part of the glob.) */
 const CLEO_PACKAGE_JSON = JSON.stringify({ name: 'cleo', version: '1.0.0', types: 'cleo.d.ts' }, null, 2);
 
 /**

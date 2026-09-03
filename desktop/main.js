@@ -135,7 +135,7 @@ function createWindow() {
     clearedToUnload.delete(rendererId);
   });
 
-  // Dev: the editor's webpack dev server. Prod: the built editor bundle over app://.
+  // Dev: the editor's Vite dev server. Prod: the built editor bundle over app://.
   if (isDev) win.loadURL('http://localhost:8080');
   else win.loadURL(`${APP_ORIGIN}/index.html`);
 }

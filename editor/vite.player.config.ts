@@ -1,9 +1,7 @@
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, mergeConfig, type Plugin } from 'vite'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-// @ts-expect-error -- a plain .mjs shared with the two vitest configs; it has no declarations.
-import { glslRaw } from '../tools/vitestGlsl.mjs'
+import engineConfig from '../vite.config'
 import { buildVersionDefines } from './buildVersion'
 import { contract } from './src/features/publish/playerContract.json'
 
@@ -47,10 +45,10 @@ function playerAssets(): Plugin {
 }
 
 /**
- * webpack.player.config.js enforced "no Monaco, no CSS in a published game" by OMISSION: it had no
- * css-loader and no MonacoWebpackPlugin, so either import was a hard build error. Vite has both built in
- * and would silently emit an unreferenced style.css or a megabyte of editor instead, so the guardrail is
- * restored explicitly.
+ * The retired webpack.player.config.js enforced "no Monaco, no CSS in a published game" by OMISSION: it
+ * had no css-loader and no MonacoWebpackPlugin, so either import was a hard build error. Vite has both
+ * built in and would silently emit an unreferenced style.css or a megabyte of editor instead, so the
+ * guardrail is restored explicitly.
  */
 function playerGraphGuard(): Plugin {
   return {
@@ -67,7 +65,10 @@ function playerGraphGuard(): Plugin {
   }
 }
 
-export default defineConfig({
+// The shared engine config (../vite.config.ts) contributes the shader plugin and the `cleo` ->
+// ../src/cleo.ts alias -- the same source the editor dev server and both test suites use, so a published
+// game is built from exactly the engine the editor previewed it with.
+export default mergeConfig(engineConfig, defineConfig({
   // Nothing under src/player/ imports src/version.ts today. The define is here anyway because this is a
   // SEPARATE bundle that drifts silently -- without it, the first shared import to reach the player
   // would be a runtime ReferenceError inside a published game rather than a build error here.
@@ -77,10 +78,7 @@ export default defineConfig({
   // editor/public into editor/public/player. The player needs nothing from there.
   publicDir: false,
 
-  plugins: [glslRaw(), playerGraphGuard(), playerAssets()],
-
-  // Same source alias as vite.config.ts -- see the note there.
-  resolve: { alias: { cleo: fileURLToPath(new URL('../src/cleo.ts', import.meta.url)) } },
+  plugins: [playerGraphGuard(), playerAssets()],
 
   build: {
     outDir: 'public/player',
@@ -94,4 +92,4 @@ export default defineConfig({
       fileName: () => 'game.js',
     },
   },
-})
+}))

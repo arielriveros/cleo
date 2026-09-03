@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build:engine": "cd .. && npm run build:dev",
+    "build:engine": "cd .. && npm run build",
     "prebuild": "npm run build:engine",
     "prebuild:player": "npm run build:engine",
     "start": "vite --open",

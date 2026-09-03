@@ -1,8 +1,9 @@
-// Shared by the engine suite (vitest.config.ts) and the editor suite (editor/vitest.config.ts).
+// The engine's shader loader, contributed by vite.config.ts and therefore present in every consumer:
+// the editor dev server, the editor build, the player build and both vitest suites.
 //
-// webpack resolves the engine's `import shader from './x.vs'` through a raw-loader rule; Vite has no
-// such rule and hands the GLSL to its JS parser, which fails on `#version 300 es`. This is the same
-// "shaders are strings" contract, so importing node.ts/scene.ts does not drag a bundler config along.
+// Vite has no raw rule of its own, so `import shader from './x.vs'` would hand `#version 300 es` to its
+// JS parser. This restores the "shaders are strings" contract the retired webpack loaders provided, so
+// importing node.ts/scene.ts does not drag a bundler config along.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { resolveIncludes } from './shaderIncludes.mjs';
@@ -16,8 +17,8 @@ export function glslRaw() {
             const file = id.split('?')[0];
 
             // WGSL is a PROGRAM, not a stage: the import yields { wgsl, vertex, fragment } with the
-            // GLSL already generated, exactly as the webpack loader emits it. Translating here rather
-            // than shipping raw text keeps a test's view of a shader identical to the build's.
+            // GLSL already generated, exactly as the retired webpack loader emitted it. Translating
+            // here rather than shipping raw text keeps a test's view of a shader identical to the build's.
             if (/\.wgsl$/.test(file)) {
                 const composed = resolveIncludes(readFileSync(file, 'utf-8'), path.dirname(file), {
                     read: (p) => readFileSync(p, 'utf-8'),

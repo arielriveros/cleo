@@ -259,13 +259,17 @@ export default function MenuBar() {
             <CodeIcon /> Edit in VSCode
           </Button>
         ) : <WorkspaceStatusChip />}
+        {/* The bundle is dropped only once the import commits. New project and Merge ask about
+            unsaved work first (see bundleImport), and a declined confirm leaves this modal up so the
+            choice can be made again rather than dumping the user back into the editor. A successful
+            import reloads the page, so nothing here has to clean up after it. */}
         {pendingBundle && (
           <ImportBundleModal
             bundle={pendingBundle}
             onCancel={() => setPendingBundle(null)}
-            onNewProject={() => { const b = pendingBundle; setPendingBundle(null); void applyBundleAsNewProject(b); }}
-            onReplace={() => { const b = pendingBundle; setPendingBundle(null); void applyBundleReplace(b); }}
-            onMerge={() => { const b = pendingBundle; setPendingBundle(null); void applyBundleMerge(b); }}
+            onNewProject={() => { void applyBundleAsNewProject(pendingBundle).then(ok => ok && setPendingBundle(null)); }}
+            onReplace={() => { void applyBundleReplace(pendingBundle).then(ok => ok && setPendingBundle(null)); }}
+            onMerge={() => { void applyBundleMerge(pendingBundle).then(ok => ok && setPendingBundle(null)); }}
           />
         )}
         <div className='relative inline-block' ref={publishRef}>

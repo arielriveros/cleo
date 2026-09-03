@@ -31,7 +31,7 @@ export function unsavedWork(): string[] {
 /**
  * Whether the `beforeunload` guard should stand down for the navigation now happening.
  *
- * Set only by `discardAndReload`, and never cleared: the page is on its way out, and clearing it would
+ * Set only by `reloadDiscarding`, and never cleared: the page is on its way out, and clearing it would
  * re-arm the guard in the window between the reload being requested and the document being replaced.
  */
 export function unloadGuardSuppressed(): boolean {
@@ -42,7 +42,7 @@ export function unloadGuardSuppressed(): boolean {
  * Ask about unsaved work in the editor's own dialog. Returns true when there is nothing to lose, or the
  * user chose to lose it.
  *
- * `action` completes "Closing now discards…" — pass something that reads as a noun phrase, e.g.
+ * `action` completes "<action> discards these unsaved edits." — pass a gerund phrase, e.g.
  * 'Opening another project'.
  */
 export async function confirmDiscard(action: string): Promise<boolean> {
@@ -55,20 +55,6 @@ export async function confirmDiscard(action: string): Promise<boolean> {
     cancelLabel: 'Keep editing',
     tone: 'danger',
   })
-}
-
-/**
- * Confirm, then reload — the in-app replacement for a bare `location.reload()` on a page that may hold
- * unsaved work. Returns false when the user backed out, in which case NOTHING has happened yet and the
- * caller must abandon whatever it was going to do.
- *
- * Callers must do their persistent writes AFTER this resolves true: a project pointer written before the
- * question is asked leaves the wrong project selected when the answer is "keep editing".
- */
-export async function discardAndReload(action: string): Promise<boolean> {
-  if (!(await confirmDiscard(action))) return false
-  reloadDiscarding()
-  return true
 }
 
 /**

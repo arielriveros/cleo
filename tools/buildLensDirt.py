@@ -5,9 +5,9 @@ The lens-dirt overlay ships INSIDE the engine rather than as a project asset, be
 in the standalone player too -- the editor-registered 'Null' texture does not, and a built-in that
 silently vanished in every published game would be worse than no built-in at all.
 
-It travels as a base64 string in a .ts module rather than as an imported image because the engine's
-webpack config handles only .ts, .glsl/.vs/.fs and .wgsl; there is no image rule, and src/ imports no
-images. A string needs no loader in webpack or in the editor's Vite.
+It travels as a base64 string in a .ts module rather than as an imported image because the engine emits
+no assets of its own: src/ imports .ts, .glsl/.vs/.fs and .wgsl and nothing else, and only the editor and
+player builds ever bundle it. A string needs no loader anywhere.
 
 Run from the repo root:  python tools/buildLensDirt.py
 Needs Pillow. Deterministic: same input, same output.
@@ -39,8 +39,8 @@ HEADER = '''// The built-in lens-dirt overlay: the smudges and streaks a real le
 // player does not, so a built-in registered that way would work in the editor and silently disappear
 // from every published game. This module has no such asymmetry: it is imported, so it is simply there.
 //
-// Base64 rather than an image import because the engine's webpack config has no image rule -- see the
-// generator script for the full reasoning.
+// Base64 rather than an image import because the engine emits no assets of its own and src/ imports no
+// images -- see the generator script for the full reasoning.
 
 /** {width}x{height} baseline JPEG, quality {quality}. Decoded lazily; see `Renderer._lensDirtTexture`. */
 export const BUILTIN_LENS_DIRT_MIME = 'image/jpeg';

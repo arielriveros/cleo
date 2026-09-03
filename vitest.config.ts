@@ -1,6 +1,5 @@
-import { defineConfig } from 'vitest/config';
-import { fileURLToPath } from 'url';
-import { glslRaw } from './tools/vitestGlsl.mjs';
+import { defineConfig, mergeConfig } from 'vitest/config';
+import engineConfig from './vite.config';
 
 // The engine is overwhelmingly WebGL2-bound and not testable without a GL context. What IS testable is
 // the pure math/data core — BVH traversal, ray-triangle intersection, convex hull generation, base64 —
@@ -10,14 +9,12 @@ import { glslRaw } from './tools/vitestGlsl.mjs';
 // DOM and of any test that needs a real GL context or an asset fixture.
 //
 // Editor-side tests live in editor/tests and run under editor/vitest.config.ts. This file is engine-only.
-export default defineConfig({
-    plugins: [glslRaw()],
-    // Editor modules under test import the engine as `cleo`, which only resolves inside editor/ (where
-    // the package points at the built dist). Aliasing it to the engine SOURCE keeps the suite independent
-    // of a build step, and — more importantly — gives a test one set of class identities rather than two.
-    resolve: {
-        alias: { cleo: fileURLToPath(new URL('./src/cleo.ts', import.meta.url)) },
-    },
+//
+// The shader plugin and the `cleo` -> src/cleo.ts alias come from ./vite.config.ts, which everything
+// that builds or tests the engine merges — a test, the dev server and a production build then see one
+// shader and one set of class identities. The merge is explicit because vitest ignores vite.config.ts
+// outright once a vitest.config.ts exists.
+export default mergeConfig(engineConfig, defineConfig({
     test: {
         include: ['tests/**/*.test.ts'],
         environment: 'node',
@@ -94,4 +91,4 @@ export default defineConfig({
             thresholds: { statements: 90, functions: 90, lines: 90, branches: 75, perFile: false },
         },
     },
-});
+}));

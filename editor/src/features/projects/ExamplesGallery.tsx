@@ -66,8 +66,13 @@ export default function ExamplesGallery({ examples, className = '' }: {
     })
     try {
       task.setStep(0, { status: 'running', detail: formatBytes(entry.bytes), progress: 0 })
-      await importExample(entry, fraction => task.setStep(0, { progress: fraction }))
-      // importExample ends in openProject's reload, so this only shows if navigation is slow.
+      // False means the unsaved-work confirm was declined, before anything was downloaded: put the
+      // gallery back rather than leaving a progress task parked on a switch that is not coming.
+      if (!await importExample(entry, fraction => task.setStep(0, { progress: fraction }))) {
+        setBusySlug(null)
+        return
+      }
+      // importExample ends in switchToProject's reload, so this only shows if navigation is slow.
       task.setStep(0, { status: 'done' })
       task.setStep(1, { status: 'done', detail: 'Opening' })
     } catch (e: any) {

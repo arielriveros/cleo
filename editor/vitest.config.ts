@@ -1,20 +1,16 @@
-import { defineConfig } from 'vitest/config';
-import { fileURLToPath } from 'node:url';
-import { glslRaw } from '../tools/vitestGlsl.mjs';
+import { defineConfig, mergeConfig } from 'vitest/config';
+import engineConfig from '../vite.config';
 
 // The editor half of the suite: bundle / VFS / publish-pack logic — the pure data transforms that decide
 // whether a saved project can be read back and whether a published game boots. Anything React, DOM or GL
 // stays out; those need a browser, and this suite's value is that it runs in seconds and gates the deploy.
 //
 // Engine tests live in ../tests and run under the root vitest.config.ts. This file is editor-only.
-export default defineConfig({
-    plugins: [glslRaw()],
-    resolve: {
-        // Editor modules import the engine as `cleo`, which inside editor/ resolves to the built ../dist.
-        // Aliasing it to the engine SOURCE means CI can run this suite with no `npm run build:dev` first,
-        // and — more importantly — a test gets one set of class identities rather than two.
-        alias: { cleo: fileURLToPath(new URL('../src/cleo.ts', import.meta.url)) },
-    },
+//
+// The shader plugin and the `cleo` -> ../src/cleo.ts alias come from ../vite.config.ts, the shared engine
+// config. Aliasing to engine SOURCE means CI can run this suite with no build first, and — more
+// importantly — a test gets one set of class identities rather than two.
+export default mergeConfig(engineConfig, defineConfig({
     test: {
         include: ['tests/**/*.test.ts'],
         environment: 'node',
@@ -54,4 +50,4 @@ export default defineConfig({
             thresholds: { statements: 90, functions: 90, lines: 90, branches: 78, perFile: false },
         },
     },
-});
+}));
