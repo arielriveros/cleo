@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { mat4, quat, vec3 } from 'gl-matrix';
 import {
     buildBoneMapping, applyManualMapping, mappingReport, retargetAnimation,
-} from '../src/graphics/animationRetarget';
-import type { Animation, Skin } from '../src/graphics/animatedModel';
+} from '../src/animation/animationRetarget';
+import type { Animation, Skin } from '../src/animation/animatedModel';
 
 // The retarget is only trustworthy if two identities hold: an identical rig must reproduce the clip
 // unchanged, and feeding a rig its OWN bind pose must return the target's bind pose. If either fails the

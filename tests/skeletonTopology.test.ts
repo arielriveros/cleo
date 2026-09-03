@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { mat4 } from 'gl-matrix';
-import { skeletonTopology, isAncestorJoint, nearestCommonAncestor } from '../src/graphics/skeletonTopology';
-import { humanoidRigOf } from '../src/graphics/animationRetarget';
-import type { Skin } from '../src/graphics/animatedModel';
+import { skeletonTopology, isAncestorJoint, nearestCommonAncestor } from '../src/animation/skeletonTopology';
+import { humanoidRigOf } from '../src/animation/animationRetarget';
+import type { Skin } from '../src/animation/animatedModel';
 
 // A Skin says who a joint's parent is in GLTF NODE indices, while everything that consumes a skeleton works
 // in JOINT indices — the ones that index getFinalBoneMatrices(). Five places used to bridge that themselves.

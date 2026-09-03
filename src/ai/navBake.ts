@@ -48,7 +48,7 @@
 import { CleoNavMesh } from "./navMesh";
 import type { NavMeshData } from "./navMesh";
 import { Vector3 } from "./yuka";
-import { clamp } from "../math";
+import { clamp } from "../core/math";
 
 /**
  * Triangles to bake, in WORLD space.

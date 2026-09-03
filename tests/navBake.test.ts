@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
     NAV_BAKE_DEFAULTS, bakeNavMesh, navBakeSettings, simplifyContour,
-} from '../src/core/ai/navBake';
-import type { TriangleSoup } from '../src/core/ai/navBake';
-import { buildNavMesh } from '../src/core/ai/navMesh';
+} from '../src/ai/navBake';
+import type { TriangleSoup } from '../src/ai/navBake';
+import { buildNavMesh } from '../src/ai/navMesh';
 
 // The two assertions that matter most here are the least obvious ones:
 //

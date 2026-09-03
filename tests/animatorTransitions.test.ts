@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { mat4 } from 'gl-matrix';
-import { Animator } from '../src/graphics/animator';
-import type { AnimatedModel, Animation, Skin } from '../src/graphics/animatedModel';
-import type { AnimationStateMachine } from '../src/graphics/animator';
+import { Animator } from '../src/animation/animator';
+import type { AnimatedModel, Animation, Skin } from '../src/animation/animatedModel';
+import type { AnimationStateMachine } from '../src/animation/animator';
 
 // The two gates that stop a state machine changing its mind every frame.
 //

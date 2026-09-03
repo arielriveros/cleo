@@ -125,18 +125,18 @@ export { NavMeshNode, parseRoutes, parseLinks, isDefaultNavMeshSettings } from "
 export {
     CleoNavMesh, EMPTY_NAV_MESH_DATA, buildNavMesh, isNavigableUp, parseNavMeshData, polygonsFromData,
     serializeNavMeshData,
-} from "./core/ai/navMesh";
-export type { NavMeshData, NavMeshJson, NavMeshBuildOptions, NavRoute, OffMeshLink } from "./core/ai/navMesh";
+} from "./ai/navMesh";
+export type { NavMeshData, NavMeshJson, NavMeshBuildOptions, NavRoute, OffMeshLink } from "./ai/navMesh";
 export {
     NAV_BAKE_DEFAULTS, EMPTY_BAKE_RESULT, bakeNavMesh, navBakeSettings, simplifyContour,
-} from "./core/ai/navBake";
-export type { NavBakeSettings, NavBakeResult, TriangleSoup } from "./core/ai/navBake";
+} from "./ai/navBake";
+export type { NavBakeSettings, NavBakeResult, TriangleSoup } from "./ai/navBake";
 export {
     REPATH_DEFAULTS, advancePath, clearNavPath, createNavPath, createRepathState, currentWaypoint,
     followPath, hasPath, insetCorners, markRepathed, onFinalWaypoint, remainingDistance, repathPolicy,
     setNavPath, shouldRepath,
-} from "./core/ai/navPath";
-export type { NavPath, RepathPolicy, RepathState } from "./core/ai/navPath";
+} from "./ai/navPath";
+export type { NavPath, RepathPolicy, RepathState } from "./ai/navPath";
 export { HistoryManager } from "./core/history";
 export type { HistoryEntry, HistoryOptions } from "./core/history";
 export { Mesh } from "./graphics/mesh";
@@ -221,18 +221,18 @@ export { Ragdoll, RAGDOLL_DEFAULTS } from "./physics/ragdoll";
 export type { RagdollOptions } from "./physics/ragdoll";
 export { Model } from "./graphics/model";
 export type { Submesh } from "./graphics/model";
-export { AnimatedModel } from "./graphics/animatedModel";
-export type { Skin, Joint, Animation, AnimationSampler, AnimationChannel } from "./graphics/animatedModel";
-export { remapAnimationToSkin, buildBoneMapping, applyManualMapping, mappingReport, retargetAnimation, describeRetarget, humanoidRigOf } from "./graphics/animationRetarget";
-export { skeletonTopology, isAncestorJoint, nearestCommonAncestor } from "./graphics/skeletonTopology";
-export type { SkeletonTopology } from "./graphics/skeletonTopology";
-export { solveTwoBone, applyTwoBone, ikTuning, validateIkRig, IK_DEFAULTS, DEFAULT_MAX_REACH } from "./graphics/ik";
-export type { IkRig, IkFootChain, IkRigTuning, IkRigProblem, IkRigValidation, TwoBoneSolve, TwoBoneResult } from "./graphics/ik";
-export type { AnimationCompatibility, HierarchyMismatch, BoneMapping, BoneMappingEntry, BoneMatchKind } from "./graphics/animationRetarget";
-export { normalizeBoneName, humanoidSlotOf } from "./graphics/boneNames";
-export { swingReleaseWeight } from "./graphics/ik";
-export { Animator, isConditionGroup, NODE_BUILTINS } from "./graphics/animator";
-export type { NodeBuiltinName } from "./graphics/animator";
+export { AnimatedModel } from "./animation/animatedModel";
+export type { Skin, Joint, Animation, AnimationSampler, AnimationChannel } from "./animation/animatedModel";
+export { remapAnimationToSkin, buildBoneMapping, applyManualMapping, mappingReport, retargetAnimation, describeRetarget, humanoidRigOf } from "./animation/animationRetarget";
+export { skeletonTopology, isAncestorJoint, nearestCommonAncestor } from "./animation/skeletonTopology";
+export type { SkeletonTopology } from "./animation/skeletonTopology";
+export { solveTwoBone, applyTwoBone, ikTuning, validateIkRig, IK_DEFAULTS, DEFAULT_MAX_REACH } from "./animation/ik";
+export type { IkRig, IkFootChain, IkRigTuning, IkRigProblem, IkRigValidation, TwoBoneSolve, TwoBoneResult } from "./animation/ik";
+export type { AnimationCompatibility, HierarchyMismatch, BoneMapping, BoneMappingEntry, BoneMatchKind } from "./animation/animationRetarget";
+export { normalizeBoneName, humanoidSlotOf } from "./animation/boneNames";
+export { swingReleaseWeight } from "./animation/ik";
+export { Animator, isConditionGroup, NODE_BUILTINS } from "./animation/animator";
+export type { NodeBuiltinName } from "./animation/animator";
 export {
     createMotionRecord, sampleMotion, planarSplit, facingComponents, headingAngle, signedAngleBetween, wrapDegrees,
     motionConfig, MOTION_DEFAULTS,
@@ -242,14 +242,14 @@ export {
     fieldWeights, rateScaleOf, phaseOffsetOf, coincidentSamples,
     axisSmoothing, axisDeadzone, axisWrapSpan, weightSmoothing,
     DEFAULT_AXIS_SMOOTHING, DEFAULT_WEIGHT_SMOOTHING,
-} from "./graphics/animationField";
+} from "./animation/animationField";
 export type {
     AnimationField,
     AnimationFieldMode,
     AnimationFieldAxis,
     AnimationFieldSample,
     FieldWeight,
-} from "./graphics/animationField";
+} from "./animation/animationField";
 export type {
     AnimationMapping,
     AnimationStateMachine,
@@ -263,7 +263,7 @@ export type {
     AnimationParameterType,
     AnimationVariableBinding,
     AnimationEventMarker,
-} from "./graphics/animator";
+} from "./animation/animator";
 export { Sprite, gridTileset, legacySheetTileset, remapLegacyFrame, isInlineTilesetId, INLINE_TILESET_PREFIX } from "./graphics/sprite";
 export type { SpriteOptions, SpriteSide } from "./graphics/sprite";
 export { DirectionalLight, PointLight, Spotlight, LIGHT_UNIT, REFERENCE_ILLUMINANCE, DEFAULT_DIRECTIONAL_LUX,

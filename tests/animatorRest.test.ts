@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { mat4, quat, vec3 } from 'gl-matrix';
-import { Animator } from '../src/graphics/animator';
-import type { AnimatedModel, Animation, Skin } from '../src/graphics/animatedModel';
+import { Animator } from '../src/animation/animator';
+import type { AnimatedModel, Animation, Skin } from '../src/animation/animatedModel';
 
 // A bone animated by a ROTATION-ONLY channel must hold its bind translation, not collapse to its parent's
 // origin. This is the normal shape of skeletal animation (non-root bones rotate, they don't translate), and

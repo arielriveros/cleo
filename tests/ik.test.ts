@@ -3,10 +3,10 @@ import { vec3 } from 'gl-matrix';
 import {
     solveTwoBone, applyTwoBone, ikTuning, validateIkRig, swingReleaseWeight,
     IK_DEFAULTS, DEFAULT_MAX_REACH, TwoBoneSolve, IkRig,
-} from '../src/graphics/ik';
-import { skeletonTopology, isAncestorJoint } from '../src/graphics/skeletonTopology';
+} from '../src/animation/ik';
+import { skeletonTopology, isAncestorJoint } from '../src/animation/skeletonTopology';
 import { mat4 } from 'gl-matrix';
-import type { Skin } from '../src/graphics/animatedModel';
+import type { Skin } from '../src/animation/animatedModel';
 
 // The two-bone solve, tested by its PROPERTIES rather than its arithmetic: the tip lands on the target, the
 // bones keep their lengths, the knee keeps pointing the way it was pointing, and none of the degenerate

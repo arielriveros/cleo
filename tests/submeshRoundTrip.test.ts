@@ -4,7 +4,7 @@ import { WebGL2Device } from '../src/graphics/rhi/webgl2/webgl2Device';
 import { setDevice } from '../src/graphics/rhi/deviceHandle';
 import { Geometry } from '../src/core/geometry';
 import { Model } from '../src/graphics/model';
-import { AnimatedModel } from '../src/graphics/animatedModel';
+import { AnimatedModel } from '../src/animation/animatedModel';
 import { Material } from '../src/graphics/material';
 import { mergeModels } from '../src/graphics/modelMerge';
 

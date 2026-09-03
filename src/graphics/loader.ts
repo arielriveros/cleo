@@ -4,7 +4,7 @@ import { OutputMaterial, AssimpParseResult, AssimpTextureSlots, loadAssimpModel,
 import { GLTFLoader, ImportTransform, GltfParseResult } from "./utils/gltfLoader";
 // A cycle (model.ts imports Loader), but benign: Model is only referenced inside method bodies.
 import { Model } from "./model";
-import { AnimatedModel, Animation, Skin } from "./animatedModel";
+import { AnimatedModel, Animation, Skin } from "../animation/animatedModel";
 import { TextureManager } from "./systems/textureManager";
 import { Logger } from "../core/logger";
 

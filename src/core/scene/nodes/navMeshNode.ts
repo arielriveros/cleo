@@ -2,12 +2,12 @@ import { v4 as uuidv4 } from 'uuid';
 import { vec3 } from "gl-matrix";
 import { Logger } from "../../logger";
 import { Node } from "./node";
-import { NAV_BAKE_DEFAULTS, navBakeSettings } from "../../ai/navBake";
-import type { NavBakeSettings } from "../../ai/navBake";
+import { NAV_BAKE_DEFAULTS, navBakeSettings } from "../../../ai/navBake";
+import type { NavBakeSettings } from "../../../ai/navBake";
 import {
     EMPTY_NAV_MESH_DATA, buildNavMesh, isNavigableUp, parseNavMeshData, serializeNavMeshData,
-} from "../../ai/navMesh";
-import type { CleoNavMesh, NavMeshData, NavRoute, OffMeshLink } from "../../ai/navMesh";
+} from "../../../ai/navMesh";
+import type { CleoNavMesh, NavMeshData, NavRoute, OffMeshLink } from "../../../ai/navMesh";
 
 /**
  * A baked navigation mesh, living in the scene.

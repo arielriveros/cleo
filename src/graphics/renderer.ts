@@ -38,7 +38,7 @@ import {
 } from './shadowMath';
 import { Geometry } from '../core/geometry';
 import { Frustum } from '../core/frustum';
-import { AnimatedModel } from './animatedModel';
+import { AnimatedModel } from '../animation/animatedModel';
 
 // Shaders Sources
 import BasicProgram from './shaders/wgsl/basic.wgsl'

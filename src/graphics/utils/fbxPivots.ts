@@ -1,5 +1,5 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
-import { Animation, AnimationSampler, Joint } from '../animatedModel';
+import { Animation, AnimationSampler, Joint } from '../../animation/animatedModel';
 
 // Collapsing assimp's FBX pivot decomposition. Assimp wraps every bone in a chain of synthetic
 // `$AssimpFbx$` nodes, and emits each one only when its FBX property is non-default — so two files

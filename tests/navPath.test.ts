@@ -4,7 +4,7 @@ import {
     advancePath, clearNavPath, createNavPath, createRepathState, currentWaypoint, followPath,
     hasPath, insetCorners, markRepathed, onFinalWaypoint, remainingDistance, repathPolicy, setNavPath,
     shouldRepath, REPATH_DEFAULTS,
-} from '../src/core/ai/navPath';
+} from '../src/ai/navPath';
 import { steeringTuning } from '../src/core/control/steering';
 
 // Path following is where a navmesh becomes motion, so the assertions that matter are the ones about

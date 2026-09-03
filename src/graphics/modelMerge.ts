@@ -1,7 +1,7 @@
 import { Geometry } from '../core/geometry';
 import { Material } from './material';
 import { Model, Submesh } from './model';
-import { AnimatedModel, Animation, Skin } from './animatedModel';
+import { AnimatedModel, Animation, Skin } from '../animation/animatedModel';
 
 // Merging several models into one mesh with one submesh per material. Legal only when the parts share a
 // skin object, a material `type` and `transparent` flag, and carry no per-part transform.

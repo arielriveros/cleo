@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { mat4, quat, vec3 } from 'gl-matrix';
-import { Animator } from '../src/graphics/animator';
-import type { AnimatedModel, Animation, Skin } from '../src/graphics/animatedModel';
+import { Animator } from '../src/animation/animator';
+import type { AnimatedModel, Animation, Skin } from '../src/animation/animatedModel';
 
 // Root motion: a clip flagged `rootMotion` has its ROOT bone's translation/rotation delta applied to the
 // character (the nearest bodied ancestor, else the model node) each frame, while the root bone itself is

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeBoneName, humanoidSlotOf } from '../src/graphics/boneNames';
+import { normalizeBoneName, humanoidSlotOf } from '../src/animation/boneNames';
 
 // Bone-name matching is the difference between a Mixamo clip driving a custom rig and driving nothing at
 // all. It is exact-token, not substring, on purpose: the classic failure is `forearm` being swallowed by an

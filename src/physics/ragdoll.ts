@@ -1,10 +1,10 @@
 import { Body, Sphere, Vec3, Quaternion, PointToPointConstraint, ConeTwistConstraint } from 'cannon-es';
 import { mat4, vec3, quat } from 'gl-matrix';
-import { AnimatedModel } from '../graphics/animatedModel';
-import type { Animator } from '../graphics/animator';
+import { AnimatedModel } from '../animation/animatedModel';
+import type { Animator } from '../animation/animator';
 import type { ModelNode } from '../core/scene/nodes/modelNode';
 import type { PhysicsSystem } from './physicsSystem';
-import { skeletonTopology } from '../graphics/skeletonTopology';
+import { skeletonTopology } from '../animation/skeletonTopology';
 
 export interface RagdollOptions {
     /**

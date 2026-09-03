@@ -31,7 +31,7 @@
  */
 
 import { vec3 } from "gl-matrix";
-import { DEG2RAD, RAD2DEG } from "../math";
+import { DEG2RAD, RAD2DEG } from "../core/math";
 import { Quaternion, Vector3 } from "./yuka";
 
 /** A read-only 3-component vector, in whatever shape the caller already has one. */

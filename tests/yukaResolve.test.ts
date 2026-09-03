@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NavMesh, Polygon, Vector3, Quaternion, Graph, NavNode, NavEdge, AStar } from '../src/core/ai/yuka';
+import { NavMesh, Polygon, Vector3, Quaternion, Graph, NavNode, NavEdge, AStar } from '../src/ai/yuka';
 
 // Yuka ships no TypeScript declarations and no `exports` map: `main` is a UMD bundle and `module` is
 // the ESM one. Under `environment: 'node'` a resolver may legitimately pick either, and the UMD build

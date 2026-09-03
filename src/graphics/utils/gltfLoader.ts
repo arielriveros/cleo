@@ -1,7 +1,7 @@
 import { Geometry } from "../../core/geometry";
 import { Material } from "../material";
 import { TextureManager } from "../systems/textureManager";
-import { AnimatedModel, Skin, Animation, AnimationSampler, AnimationChannel } from "../animatedModel";
+import { AnimatedModel, Skin, Animation, AnimationSampler, AnimationChannel } from "../../animation/animatedModel";
 import { Logger } from "../../core/logger";
 import { mat4, quat, vec3 } from "gl-matrix";
 import { collapseFbxPivots } from "./fbxPivots";

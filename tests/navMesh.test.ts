@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
     CleoNavMesh, EMPTY_NAV_MESH_DATA, buildNavMesh, isNavigableUp, parseNavMeshData,
     polygonsFromData, serializeNavMeshData,
-} from '../src/core/ai/navMesh';
-import type { NavMeshData } from '../src/core/ai/navMesh';
+} from '../src/ai/navMesh';
+import type { NavMeshData } from '../src/ai/navMesh';
 import { vec3 } from 'gl-matrix';
 
 // Every assertion here is pinning a Yuka behaviour the wrapper exists to hide. Three of them are

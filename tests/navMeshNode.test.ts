@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { NavMeshNode, parseLinks, parseRoutes } from '../src/core/scene/nodes/navMeshNode';
 import { Node } from '../src/core/scene/nodes/node';
 import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
-import { bakeNavMesh } from '../src/core/ai/navBake';
+import { bakeNavMesh } from '../src/ai/navBake';
 
 // The node is thin on purpose -- all the geometry lives in core/ai leaves -- so what is worth pinning
 // here is the PERSISTENCE contract. A navmesh that silently fails to round-trip does not error; it

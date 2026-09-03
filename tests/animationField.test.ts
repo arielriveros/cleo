@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     fieldWeights, rateScaleOf, phaseOffsetOf, coincidentSamples,
     AnimationField, AnimationFieldSample,
-} from '../src/graphics/animationField';
+} from '../src/animation/animationField';
 
 // Weighting is the whole contract of a blend space: the Animator turns whatever comes out of fieldWeights
 // straight into a pose, so a weight set that does not sum to 1 shows up as a character melting towards the

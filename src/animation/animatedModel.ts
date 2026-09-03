@@ -1,6 +1,6 @@
-import { Mesh } from './mesh';
-import { Material } from './material';
-import { serializeGeometry, type Submesh } from './model';
+import { Mesh } from '../graphics/mesh';
+import { Material } from '../graphics/material';
+import { serializeGeometry, type Submesh } from '../graphics/model';
 import { Geometry } from '../core/geometry';
 import { Logger } from '../core/logger';
 import { mat4 } from 'gl-matrix';

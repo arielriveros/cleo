@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { vec3 } from 'gl-matrix';
 import {
     fromYuka, resetScratch, scratchVec3, toYuka, yawFromDirection, yawToYukaRotation, yukaVec,
-} from '../src/core/ai/interop';
-import { Quaternion, Vector3 } from '../src/core/ai/yuka';
+} from '../src/ai/interop';
+import { Quaternion, Vector3 } from '../src/ai/yuka';
 import { DEG2RAD } from '../src/core/math';
 
 // The bridge is cheap only because Yuka and Cleo happen to agree: both right-handed, both +Y up, both

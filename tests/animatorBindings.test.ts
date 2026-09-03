@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mat4, vec3 } from 'gl-matrix';
-import { Animator } from '../src/graphics/animator';
+import { Animator } from '../src/animation/animator';
 import { Logger } from '../src/core/logger';
-import type { AnimatedModel, Animation, Skin } from '../src/graphics/animatedModel';
-import type { AnimationStateMachine } from '../src/graphics/animator';
+import type { AnimatedModel, Animation, Skin } from '../src/animation/animatedModel';
+import type { AnimationStateMachine } from '../src/animation/animator';
 
 // How a 'variable' parameter finds the node it reads from — and what happens when it cannot.
 //

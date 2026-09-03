@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { mat4, vec3 } from 'gl-matrix';
-import { Animator } from '../src/graphics/animator';
-import type { AnimatedModel, Animation, Skin } from '../src/graphics/animatedModel';
-import type { IkRig } from '../src/graphics/ik';
+import { Animator } from '../src/animation/animator';
+import type { AnimatedModel, Animation, Skin } from '../src/animation/animatedModel';
+import type { IkRig } from '../src/animation/ik';
 
 // Foot IK inside the Animator: the ground query, the pelvis drop, and the leg solve wired to a real skeleton.
 // solveTwoBone is covered on its own in ik.test.ts; what is tested here is everything around it — which is

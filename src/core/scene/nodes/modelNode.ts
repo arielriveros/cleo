@@ -1,5 +1,5 @@
-import { AnimatedModel } from "../../../graphics/animatedModel";
-import { AnimationMapping, AnimationStateMachine, Animator } from "../../../graphics/animator";
+import { AnimatedModel } from "../../../animation/animatedModel";
+import { AnimationMapping, AnimationStateMachine, Animator } from "../../../animation/animator";
 import { Material } from "../../../graphics/material";
 import { Model } from "../../../graphics/model";
 import { ShaderManager } from "../../../graphics/systems/shaderManager";

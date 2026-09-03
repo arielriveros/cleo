@@ -28,8 +28,8 @@
  */
 
 import { vec3 } from "gl-matrix";
-import { arrive, seek } from "../control/steering";
-import type { SteeringTuning } from "../control/steering";
+import { arrive, seek } from "../core/control/steering";
+import type { SteeringTuning } from "../core/control/steering";
 
 /**
  * A path being walked. The caller owns it — same contract as `SteeringState` and `LocomotionState`.

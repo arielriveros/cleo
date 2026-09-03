@@ -40,7 +40,7 @@
  */
 
 import { vec3 } from "gl-matrix";
-import { base64ToBytes, bytesToBase64 } from "../base64";
+import { base64ToBytes, bytesToBase64 } from "../core/base64";
 import { NavMesh, Polygon, Vector3 } from "./yuka";
 import { scratchVec3, toYuka } from "./interop";
 import type { Vec3Like } from "./interop";

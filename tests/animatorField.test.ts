@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { mat4, vec3 } from 'gl-matrix';
-import { Animator } from '../src/graphics/animator';
-import type { AnimatedModel, Animation, Skin } from '../src/graphics/animatedModel';
-import type { AnimationField } from '../src/graphics/animationField';
-import type { AnimationParameter, AnimationState, AnimationStateMachine } from '../src/graphics/animator';
+import { Animator } from '../src/animation/animator';
+import type { AnimatedModel, Animation, Skin } from '../src/animation/animatedModel';
+import type { AnimationField } from '../src/animation/animationField';
+import type { AnimationParameter, AnimationState, AnimationStateMachine } from '../src/animation/animator';
 
 // Field playback inside the Animator: weighted N-clip posing, the shared phase, and the weighted duration.
 // fieldWeights is covered on its own in animationField.test.ts; what is tested here is everything the

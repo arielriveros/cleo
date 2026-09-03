@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { collapseFbxPivots, isFbxPivotName, type NodeGraph } from '../src/graphics/utils/fbxPivots';
-import type { Animation, Joint } from '../src/graphics/animatedModel';
+import type { Animation, Joint } from '../src/animation/animatedModel';
 
 // Assimp's FBX importer preserves pivots, wrapping every bone in `_$AssimpFbx$_Translation/_PreRotation/
 // _Rotation/_Scaling` nodes — and it emits each one only when its FBX property is non-default, so two
