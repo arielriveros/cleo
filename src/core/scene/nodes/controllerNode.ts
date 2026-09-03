@@ -16,6 +16,12 @@ import {
     AI_GOALS, createBehaviorRuntime, isDefaultBehaviorMachine, parseBehaviorMachine, stepBehavior,
 } from "../../control/behavior";
 import type { AiGoal, BehaviorMachine, BehaviorRuntime, BehaviorState } from "../../control/behavior";
+import {
+    advancePath, clearNavPath, createNavPath, createRepathState, followPath, hasPath, insetCorners,
+    markRepathed, remainingDistance, repathPolicy, setNavPath, shouldRepath,
+} from "../../../ai/navPath";
+import type { NavPath, RepathPolicy, RepathState } from "../../../ai/navPath";
+import { aiStats } from "../../../ai/aiStats";
 import { vec3 } from "gl-matrix";
 
 /**
@@ -131,6 +137,27 @@ export class ControllerNode extends Node {
      */
     public behavior: BehaviorMachine = { parameters: [], states: [], transitions: [] };
 
+    // ----- navigation -------------------------------------------------------------------------------
+    /**
+     * Which navmesh this controller paths on, or null for the scene's first baked one — so a scene
+     * with a single navmesh needs no wiring. In NODE_REF_KEYS, so a duplicated pair paths on its own
+     * copy rather than the original.
+     */
+    private _navMeshId: string | null = null;
+    private _warnedDanglingNavMesh: boolean = false;
+
+    /** Named route walked by the `patrol` goal. Empty patrols in place. */
+    public routeName: string = '';
+
+    /** How often a route is recomputed, and how far the destination may drift before it is. */
+    public repath: RepathPolicy = repathPolicy();
+
+    /**
+     * How close counts as having reached an intermediate waypoint. Too small and an agent circles a
+     * corner it has already rounded; too large and it cuts across geometry the route went around.
+     */
+    public waypointRadius: number = 0.5;
+
     public steering: SteeringTuning = steeringTuning();
     /** How many rays to fan ahead for obstacle avoidance. Only fired while `steering.avoidDistance > 0`. */
     public whiskerCount: number = 3;
@@ -143,6 +170,10 @@ export class ControllerNode extends Node {
     private _steeringState: SteeringState = createSteeringState();
     private _behaviorRuntime: BehaviorRuntime = createBehaviorRuntime();
     private _probes: ProbeHit[] = [];
+    private readonly _path: NavPath = createNavPath();
+    private readonly _repathState: RepathState = createRepathState();
+    private _routeIndex: number = 0;
+    private readonly _pathScratch: vec3[] = [];
     private readonly _desired: vec3 = vec3.create();
     private readonly _selfPos: vec3 = vec3.create();
     private readonly _targetPos: vec3 = vec3.create();
@@ -228,6 +259,27 @@ export class ControllerNode extends Node {
         this._possessed = found instanceof CharacterNode ? found : null;
         if (this._possessed) this._possessed._setController(this);
         return this._possessed;
+    }
+
+    // ----- navigation -------------------------------------------------------------------------------
+
+    public get navMeshId(): string | null { return this._navMeshId; }
+    public set navMeshId(id: string | null) {
+        if (id === this._navMeshId) return;
+        this._navMeshId = id;
+        this._warnedDanglingNavMesh = false;
+        clearNavPath(this._path);
+    }
+
+    /** The route currently being walked. Read-only in spirit — for the editor's readout and onThink. */
+    public get path(): Readonly<NavPath> { return this._path; }
+
+    /** Planar distance still to walk, or 0 when there is no route. Backs the `pathRemaining` sense. */
+    public get pathRemaining(): number {
+        const pawn = this._resolvePossessed();
+        if (!pawn || !hasPath(this._path)) return 0;
+        const p = pawn.worldPosition;
+        return remainingDistance(this._path, vec3.set(this._selfPos, p[0], p[1], p[2]), this._resolveUp());
     }
 
     // ----- aim -------------------------------------------------------------------------------------
@@ -420,12 +472,14 @@ export class ControllerNode extends Node {
 
         // A goal that names a thing and has none holds still rather than walking to the world origin,
         // which is what falling back to an unset `goalPoint` would otherwise do.
-        const needsTarget = goal === 'seek' || goal === 'flee' || goal === 'follow';
+        const needsTarget = goal === 'seek' || goal === 'flee' || goal === 'follow' || goal === 'path';
         if (needsTarget && !target && targetKey !== 'point') {
             vec3.set(this._desired, 0, 0, 0);
         } else {
             switch (goal) {
                 case 'seek': seek(this._desired, this._selfPos, this._targetPos, tuning.maxSpeed, up); break;
+                case 'path': this._steerPath(pawn, tuning, up, delta); break;
+                case 'patrol': this._steerPatrol(pawn, tuning, up); break;
                 case 'flee': flee(this._desired, this._selfPos, this._targetPos, tuning.maxSpeed, up); break;
                 case 'arrive': arrive(this._desired, this._selfPos, this._targetPos, tuning, up); break;
                 case 'follow':
@@ -452,6 +506,99 @@ export class ControllerNode extends Node {
         // The state's own throttle multiplies whatever the steer asked for — a patrol at 0.4 and a chase
         // at 1 with nothing else different between them.
         this._intent.speedScale *= stateScale;
+    }
+
+    /**
+     * Walk a route to the current destination, recomputing it only when the policy says to.
+     *
+     * Falls back to a straight-line `seek` whenever navigation cannot answer — no navmesh in the
+     * scene, nothing baked, or a destination that is simply not reachable. That fallback is what makes
+     * switching a goal from `seek` to `path` safe on a scene nobody has baked yet: it behaves exactly
+     * as it did before, rather than standing still for a reason nothing explains.
+     */
+    private _steerPath(pawn: CharacterNode, tuning: SteeringTuning, up: vec3, delta: number): void {
+        const source = this._resolveNavMesh();
+        if (!source?.mesh) {
+            clearNavPath(this._path);
+            seek(this._desired, this._selfPos, this._targetPos, tuning.maxSpeed, up);
+            return;
+        }
+
+        if (shouldRepath(this._repathState, delta, this._targetPos, this.repath)) {
+            const found = this._scene?.ai?.findPath(source, this._selfPos, this._targetPos, this._pathScratch)
+                ?? source.mesh.findPath(this._selfPos, this._targetPos, this._pathScratch);
+            // Marked BEFORE the emptiness check, so an unreachable destination is retried on the
+            // policy's schedule rather than re-queried every single frame.
+            markRepathed(this._repathState, this._targetPos);
+            if (found.length > 0) {
+                setNavPath(this._path, found);
+                // Agent clearance. The funnel runs exactly through the corner vertex, so an agent
+                // following it raw scrapes the wall -- see navPath.insetCorners.
+                insetCorners(this._path, source.agentRadius, up);
+            } else {
+                clearNavPath(this._path);
+            }
+        }
+
+        if (!hasPath(this._path)) {
+            // Unreachable by the mesh. A straight line at least walks toward it, and the whiskers keep
+            // the agent off the wall.
+            seek(this._desired, this._selfPos, this._targetPos, tuning.maxSpeed, up);
+            return;
+        }
+
+        aiStats.navAgents++;
+        advancePath(this._path, this._selfPos, this.waypointRadius, up);
+        followPath(this._desired, this._selfPos, this._path, tuning, up);
+    }
+
+    /**
+     * Walk an authored route on the navmesh, looping.
+     *
+     * The route's own points ARE the path: they were placed on walkable ground by hand, so routing
+     * between them would be asking the navmesh to improve on an author's decision. Reaching the last
+     * one wraps to the first, which is what makes a patrol a patrol.
+     */
+    private _steerPatrol(pawn: CharacterNode, tuning: SteeringTuning, up: vec3): void {
+        const source = this._resolveNavMesh();
+        const points = this.routeName && source ? source.routePoints(this.routeName) : [];
+        if (points.length === 0) {
+            // A patrol with no route holds still rather than walking to the world origin.
+            vec3.set(this._desired, 0, 0, 0);
+            return;
+        }
+
+        // Re-seed when the route changed under us, or when the last lap finished.
+        if (!hasPath(this._path) || this._path.points.length !== points.length) {
+            setNavPath(this._path, points);
+            this._path.index = this._routeIndex % points.length;
+        }
+
+        aiStats.navAgents++;
+        advancePath(this._path, this._selfPos, this.waypointRadius, up);
+
+        // The final waypoint is never consumed by proximity (`arrive` eases into it), so the wrap is
+        // ours to make: inside the arrive radius of the last point, start the lap again.
+        if (this._path.index >= points.length - 1
+            && vec3.distance(this._selfPos, this._path.points[this._path.index]) <= tuning.arriveRadius) {
+            this._path.index = 0;
+        }
+        this._routeIndex = this._path.index;
+        followPath(this._desired, this._selfPos, this._path, tuning, up);
+    }
+
+    /** The navmesh this controller paths on, warning once if its id names nothing. */
+    private _resolveNavMesh() {
+        const ai = this._scene?.ai;
+        if (!ai) return null;
+        const source = ai.navMeshFor(this._navMeshId);
+        if (this._navMeshId && source?.id !== this._navMeshId && !this._warnedDanglingNavMesh) {
+            this._warnedDanglingNavMesh = true;
+            Logger.warn(
+                `Controller '${this._name}' names navmesh '${this._navMeshId}', which is not in this ` +
+                `scene. It will path on the first baked navmesh instead.`, 'Scene');
+        }
+        return source;
     }
 
     /**
@@ -512,6 +659,8 @@ export class ControllerNode extends Node {
     /** The handful of things only the controller knows, because they are about the GOAL not the pawn. */
     private _sense(name: string, pawn: CharacterNode): number | boolean {
         if (name === 'stateTime') return this._behaviorRuntime.stateTime;
+        if (name === 'hasPath') return hasPath(this._path);
+        if (name === 'pathRemaining') return this.pathRemaining;
 
         const target = this._resolveTarget(this.targetKey);
         if (name === 'hasTarget') return target !== null;
@@ -656,6 +805,9 @@ export class ControllerNode extends Node {
             // right until a second one is spawned and every NPC moves as one.
             possessedId: this._possessedId,
             aimSourceId: this._aimSourceId,
+            // Also a node id, and also in NODE_REF_KEYS: a duplicated navmesh + controller pair must
+            // path on its own copy, not on the original's.
+            navMeshId: this._navMeshId,
 
             controlSource: this.controlSource,
             moveAction: this.moveAction,
@@ -671,6 +823,9 @@ export class ControllerNode extends Node {
             targetKey: this.targetKey,
             goalPoint: [...this.goalPoint],
             steering: { ...this.steering },
+            routeName: this.routeName,
+            repath: { ...this.repath },
+            waypointRadius: this.waypointRadius,
             whiskerCount: this.whiskerCount,
             whiskerSpread: this.whiskerSpread,
             // Written only when authored, so a controller that never opened the Behaviour section adds
@@ -690,6 +845,7 @@ export class ControllerNode extends Node {
         // Stored raw and resolved lazily: parse is depth-first, so the pawn usually does not exist yet.
         node._possessedId = id(json.possessedId);
         node._aimSourceId = id(json.aimSourceId);
+        node._navMeshId = id(json.navMeshId);
 
         if ((CONTROL_SOURCES as readonly string[]).includes(json.controlSource))
             node.controlSource = json.controlSource;
@@ -709,6 +865,12 @@ export class ControllerNode extends Node {
             node.goalPoint = [+json.goalPoint[0] || 0, +json.goalPoint[1] || 0, +json.goalPoint[2] || 0];
         // The tolerant reader defaults and clamps every field, so a partial or stale block passes.
         node.steering = steeringTuning(json.steering);
+        node.routeName = str(json.routeName, node.routeName);
+        // Tolerant readers throughout, so a controller saved before navigation existed reads as one
+        // with the defaults rather than failing the whole scene.
+        node.repath = repathPolicy(json.repath);
+        node.waypointRadius = typeof json.waypointRadius === 'number' && isFinite(json.waypointRadius)
+            ? Math.max(0, json.waypointRadius) : node.waypointRadius;
         node.whiskerCount = Math.max(1, Math.min(9, Math.round(
             typeof json.whiskerCount === 'number' && isFinite(json.whiskerCount)
                 ? json.whiskerCount : node.whiskerCount)));

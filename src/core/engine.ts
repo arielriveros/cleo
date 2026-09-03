@@ -1,6 +1,7 @@
 import { Renderer } from "../graphics/renderer";
 import { InputSystem } from "../input/inputSystem";
 import { PhysicsSystem } from "../physics/physicsSystem";
+import { AISystem } from "../ai/aiSystem";
 import { Logger } from "./logger";
 import { Scene } from "./scene/scene";
 import { engineEventBus, authoring } from "./eventBus";
@@ -45,6 +46,7 @@ export class CleoEngine {
   private _viewport!: HTMLElement;
   private _renderer: Renderer;
   private _physicsSystem: PhysicsSystem;
+  private _aiSystem: AISystem = new AISystem();
 
   private _scene!: Scene;
 
@@ -155,6 +157,7 @@ export class CleoEngine {
 
     InputSystem.instance.dispose();
     this._physicsSystem.clear();
+    this._aiSystem.clear();
     this._scene.stop();
   }
 
@@ -211,6 +214,10 @@ export class CleoEngine {
     this._scene = scene;
     this._scene.update(0, 0, true);
     this._physicsSystem.scene = this._scene;
+    // Binding CLEARS, which is the whole reason it goes through the system rather than being assigned:
+    // the editor calls setScene on every tab switch, and per-scene AI state must not ride along.
+    this._aiSystem.setScene(this._scene);
+    this._scene.ai = this._aiSystem;
   }
 
   public onResize(): void {
@@ -225,6 +232,8 @@ export class CleoEngine {
   public get isPaused(): boolean { return this._paused; }
   public set isPaused(paused: boolean) { this._paused = paused; }
   public get physics(): PhysicsSystem { return this._physicsSystem; }
+  /** Navigation: which navmesh answers a path query, and what those queries cost. */
+  public get ai(): AISystem { return this._aiSystem; }
   /** Milliseconds of unpaused game time since the engine started — the same clock onUpdate's `time` gets. */
   public get timeSinceStart(): number { return this._timeSinceStart; }
 }

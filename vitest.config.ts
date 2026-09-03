@@ -37,6 +37,8 @@ export default mergeConfig(engineConfig, defineConfig({
             include: [
                 'src/audio/soundSettings.ts',
                 'src/core/base64.ts',
+                'src/ai/aiStats.ts',
+                'src/ai/aiSystem.ts',
                 'src/ai/interop.ts',
                 'src/ai/navBake.ts',
                 'src/ai/navMesh.ts',

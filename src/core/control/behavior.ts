@@ -36,7 +36,15 @@ import type { ConditionContext, ConditionGroup, ConditionNode } from "../conditi
  * What a state is trying to do. Shared with `ControllerNode.goal` — a state simply sets it, so a machine
  * with one state is exactly equivalent to setting the goal by hand.
  */
-export const AI_GOALS = ['idle', 'seek', 'flee', 'arrive', 'follow', 'wander', 'script'] as const;
+export const AI_GOALS = [
+    'idle', 'seek', 'flee', 'arrive', 'follow', 'wander',
+    // Navigation goals. `path` walks a route around geometry to wherever `seek` would have gone in a
+    // straight line; `patrol` walks a route authored on the navmesh. Both fall back to their
+    // straight-line equivalent when the scene has no baked navmesh, so adding one is never a
+    // regression on a scene that has not baked yet.
+    'path', 'patrol',
+    'script',
+] as const;
 export type AiGoal = typeof AI_GOALS[number];
 
 export interface BehaviorState {
@@ -83,6 +91,10 @@ export type BehaviorParameterSource =
 
 export const BEHAVIOR_SENSES = [
     'distanceToTarget', 'angleToTarget', 'hasTarget', 'targetVisible', 'stateTime',
+    // Navigation. `pathRemaining` is the distance still to WALK, which is the question a machine
+    // actually wants to ask -- `distanceToTarget` is a straight line and says a wall is one metre away
+    // when the way round it is thirty.
+    'hasPath', 'pathRemaining',
 ] as const;
 export type BehaviorSense = typeof BEHAVIOR_SENSES[number];
 

@@ -122,6 +122,10 @@ export type {
 // Monaco alongside a hand-listed set of `?raw` dependency types, and a dependency it has not been told
 // about degrades to `any` silently, because skipLibCheck swallows it.
 export { NavMeshNode, parseRoutes, parseLinks, isDefaultNavMeshSettings } from "./core/scene/nodes/navMeshNode";
+export { AISystem } from "./ai/aiSystem";
+export type { AISceneLike, NavMeshSource } from "./ai/aiSystem";
+export { aiStats, resetAIStats } from "./ai/aiStats";
+export type { AIStats } from "./ai/aiStats";
 export {
     CleoNavMesh, EMPTY_NAV_MESH_DATA, buildNavMesh, isNavigableUp, parseNavMeshData, polygonsFromData,
     serializeNavMeshData,

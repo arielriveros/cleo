@@ -27,6 +27,8 @@ import { DEFAULT_SCENE_AMBIENT_LUX, legacyAmbientFromSceneJson, MAX_LIGHTS } fro
 import { Logger } from '../logger'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
 import { sceneStats, resetSceneStats, SceneStats } from "./sceneStats";
+import { resetAIStats } from "../../ai/aiStats";
+import type { AISystem } from "../../ai/aiSystem";
 import type { SceneChange } from "../eventBus";
 import { cloneNodeJson, regenerateNodeIds } from "./nodeJson";
 import { getTemplate, templateNames } from "./templates";
@@ -134,6 +136,16 @@ export class Scene {
     /** The physics system driving this scene (set by PhysicsSystem.set scene). Reachable from a script
      *  as `scene.physics`. */
     public physics!: PhysicsSystem;
+
+    /**
+     * The navigation system serving this scene (set by `CleoEngine.setScene`). Reachable from a script
+     * as `scene.ai`.
+     *
+     * Optional, and every reader must treat it so: like `physics`, it is genuinely undefined on any
+     * scene never handed to `setScene` — which is every template and preview-tab scene the editor
+     * builds.
+     */
+    public ai?: AISystem;
 
     // TODO: Move this to a LightManager class
     private _numPointLights: number;
@@ -329,6 +341,8 @@ export class Scene {
         try {
             const frameStart = performance.now();
             resetSceneStats();
+            // Reset before the control pass, which is where path queries are issued.
+            resetAIStats();
 
             const transformStart = performance.now();
             this._root.updateTransforms();
