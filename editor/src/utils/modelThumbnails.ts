@@ -1,4 +1,4 @@
-import { Scene, Node, ModelNode, Model, Geometry, Material, TextureManager, CleoEngine, AnimatedModel, Terrain, Camera, CameraNode } from 'cleo';
+import { Scene, Node, ModelNode, Model, Geometry, Material, TextureManager, CleoEngine, AnimatedModel, Terrain, Camera, CameraNode, Logger } from 'cleo';
 import { createModelPreviewScene, addPreviewLights } from '../features/demoScene/createModelPreviewScene';
 import { createMaterialPreviewScene } from '../features/demoScene/createMaterialPreviewScene';
 import { fitDistance, MATERIAL_SPHERE_RADIUS, previewSphereGeometry, PREVIEW_TERRAIN_RADIUS } from '../features/demoScene/previewFraming';
@@ -312,8 +312,16 @@ export interface ImpostorFraming {
   /** Card size the capture is framed for, matching `FoliageLayer._prototypeFootprint`. */
   width: number;
   height: number;
-  /** Orthographic camera position, looking down -Z. */
+  /** Orthographic camera position. */
   position: [number, number, number];
+  /**
+   * Euler degrees that aim the camera back at the subject from {@link position}.
+   *
+   * Carried here rather than written at the call site so the pair can be checked against each other:
+   * a camera placed correctly and aimed the wrong way captures an empty frame, which is a picture of
+   * nothing that looks exactly like a picture of a missing asset.
+   */
+  rotation: [number, number, number];
   /** Half-extents of the orthographic volume. */
   left: number; right: number; bottom: number; top: number;
   near: number; far: number;
@@ -352,6 +360,11 @@ export function impostorFraming(box: { min: [number, number, number]; max: [numb
   return {
     width, height,
     position: [cx, cy, cz + dist],
+    // Engine forward is +Z (`Node.worldForward`, which `CameraNode.update` turns into the look-at
+    // target), so a camera standing on the subject's +Z side has to be YAWED ROUND to see it. Left
+    // at [0, 0, 0] it looks away and the capture is empty. The 180 also keeps world +X on the right
+    // of the frame, so the sheet is a front elevation rather than a mirror of one.
+    rotation: [0, 180, 0],
     // Half-extents. `Camera` scales left/right by the aspect ratio and leaves top/bottom alone; the
     // capture target is square, so aspect is 1 and these are used as written.
     left: -width / 2, right: width / 2, bottom: -height / 2, top: height / 2,
@@ -361,7 +374,45 @@ export function impostorFraming(box: { min: [number, number, number]; max: [numb
 }
 
 /** What a bake produced: the registered texture, and the card size it was framed for. */
-export interface ImpostorBake { id: string; data: string; width: number; height: number }
+export interface ImpostorBake {
+  id: string; data: string; width: number; height: number;
+  /** Fraction of the sheet the runtime cutout will KEEP. See {@link opaqueFraction}. */
+  coverage: number;
+}
+
+/**
+ * The fraction of a captured sheet the runtime billboard will actually draw.
+ *
+ * Measured against the same threshold the shader uses -- `geometryFoliageBillboard.wgsl` does
+ * `if (c.a < 0.5) { discard; }` -- so this is not a general alpha statistic, it is the answer to
+ * "how much of this card survives the cutout".
+ *
+ * It exists because both ways this bake has failed were SILENT. An empty capture and a fully opaque
+ * one are both just a black PNG, and the editor has no transparency checkerboard anywhere, so a
+ * correct cut-out sheet and a solid black tile look identical against the dark asset panel. One
+ * number distinguishes every case: ~0 is a capture that framed nothing, ~1 is a capture whose
+ * coverage alpha never got written, and anything between is a real silhouette.
+ */
+export async function opaqueFraction(dataUrl: string): Promise<number> {
+  const image = await new Promise<HTMLImageElement | null>(resolve => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+  if (!image || !image.width || !image.height) return NaN;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = image.width; canvas.height = image.height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return NaN;
+  ctx.drawImage(image, 0, 0);
+  const { data } = ctx.getImageData(0, 0, image.width, image.height);
+
+  let kept = 0;
+  for (let i = 3; i < data.length; i += 4) if (data[i] >= 128) kept++;
+  return kept / (data.length / 4);
+}
 
 /**
  * Render a model asset to a single flat card, for foliage to draw past its farthest LOD band.
@@ -417,11 +468,16 @@ export async function bakeModelImpostor(engine: CleoEngine, asset: ModelAsset): 
       near: f.near, far: f.far,
     }));
     cam.active = true;
-    // Rotation [0,0,0] looks down -Z, so the camera sits on +Z. A front elevation, level with the
-    // subject: the view a distant instance is almost always seen from.
+    // A front elevation, level with the subject: the view a distant instance is almost always seen
+    // from. Both halves come from `impostorFraming` — see the note there on why the rotation is not
+    // the identity.
     cam.setPosition(f.position);
-    cam.setRotation([0, 0, 0]);
+    cam.setRotation(f.rotation);
     s.addNode(cam);
+    // Pinned, not merely `active`. One camera in a throwaway scene reaches `Scene.activeCamera`
+    // through the first-active fallback either way, but every other preview builder pins, and the
+    // fallback is tree-order dependent the moment anything else in here grows a camera.
+    s.setActiveCamera(cam);
 
     addPreviewLights(s);
     s.start();
@@ -432,11 +488,26 @@ export async function bakeModelImpostor(engine: CleoEngine, asset: ModelAsset): 
   const data = await captureClean(engine, framed.scene, IMPOSTOR_SIZE);
   if (!data) return null;
 
+  // Checked every time, not only when something looks wrong: a card is authored once and then only
+  // ever seen from far away, so a bad bake is not noticed until someone wonders why the horizon has
+  // black rectangles on it.
+  const coverage = await opaqueFraction(data);
+  if (coverage > 0.98)
+    Logger.print('warn', [`Impostor for "${asset.name}" came back ${Math.round(coverage * 100)}% opaque.`,
+                          'The card will draw as a solid rectangle: the runtime cutout discards on',
+                          'alpha < 0.5 and nothing in this sheet is below it. The capture writes its',
+                          'coverage alpha from the scene depth in Renderer._presentThumbnail.'], 'Editor');
+  else if (coverage < 0.005)
+    Logger.print('warn', [`Impostor for "${asset.name}" is empty (${(coverage * 100).toFixed(2)}% covered).`,
+                          'Nothing was inside the capture frustum -- check impostorFraming.'], 'Editor');
+  else
+    Logger.info(`Baked impostor for "${asset.name}": ${Math.round(coverage * 100)}% of the sheet covered.`, 'Editor');
+
   const id = impostorTextureId(asset.id);
   // Replace in place: a re-bake must update the card a rule already names, not mint a second one.
   TextureManager.Instance.removeTexture(id);
   TextureManager.Instance.addTextureFromBase64(data, { mipMap: true }, id);
-  return { id, data, width: framed.width, height: framed.height };
+  return { id, data, width: framed.width, height: framed.height, coverage };
 }
 
 /**

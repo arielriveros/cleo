@@ -4423,12 +4423,31 @@ export class Renderer {
 
     /**
      * Copy a depth buffer, through the RHI, for a later pass that must depth-test or depth-read
-     * against another attachment. The encoder is mandatory: on WebGPU a copy outside one is not a copy.
+     * against another attachment.
+     *
+     * Recorded into the FRAME's encoder whenever one is open, exactly as `_beginFullscreenPass`
+     * records its passes, and finished here only when this call owns the encoder.
+     *
+     * That is the whole correctness of it on WebGPU, and it used to be wrong. `finish()` SUBMITS,
+     * while the frame's render passes sit unsubmitted in `_frameEncoder` until the end of the
+     * frame -- so a copy on its own encoder ran BEFORE every draw it was supposed to be copying
+     * the results of. It read whatever the depth buffer held before the frame started: the
+     * previous frame's depth in a live viewport, which a barely-moving camera makes look almost
+     * right, and on a resized buffer nothing at all.
+     *
+     * An offscreen capture is where that becomes total rather than subtle. It resizes every
+     * target, renders ONE frame and reads it back, so "before this frame" is a freshly allocated
+     * buffer -- zeroed, which reads as depth 0, which is `covered` everywhere. Every thumbnail and
+     * every baked impostor came back a fully opaque rectangle on WebGPU while WebGL2, whose
+     * commands execute as they are issued, was correct.
+     *
+     * The other two callers were quietly wrong the same way: the deferred G-buffer depth handed to
+     * the forward overlay, and TAA's previous-frame depth.
      */
     private _copyDepth(source: Texture, destination: Texture, width: number, height: number): void {
-        const encoder = device.createCommandEncoder('copyDepth');
+        const encoder = this._acquireEncoder('copyDepth');
         encoder.copyTextureToTexture(source.attachmentView, destination.attachmentView, width, height);
-        encoder.finish();
+        if (encoder !== this._frameEncoder) encoder.finish();
     }
 
     // Aerial-perspective fog for the SkyAtmosphere node: a fullscreen pass tinting opaque geometry
@@ -7004,6 +7023,18 @@ export class Renderer {
         // Thumbnail capture resolves straight into the offscreen target and stops — no post chain at
         // all. Those passes hard-write alpha=1, which would destroy the transparency below.
         if (this._presentTarget) {
+            // The coverage snapshot, taken HERE and nowhere earlier. Two reasons, and both are the
+            // reason the capture path gets its own copy rather than reusing the one at the end of the
+            // opaque draw:
+            //
+            //   * it has to include the TRANSPARENTS. They write depth in thumbnail mode precisely so
+            //     they can be covered (`_renderForwardOverlay`), and an alpha-cutout canopy is drawn
+            //     in that queue -- a snapshot taken before it would cut a tree back to its trunk.
+            //   * `_presentThumbnail` was the ONLY place in the engine that sampled `_sceneFBO.depth`
+            //     directly. Every other depth consumer -- god rays, sky fog, the velocity chain --
+            //     reads this snapshot instead, because sampling a texture that is still a live depth
+            //     ATTACHMENT is the shape WebGL2 calls a feedback loop and leaves undefined.
+            this._copySceneDepth();
             this._presentThumbnail();
             return;
         }
@@ -7336,8 +7367,11 @@ export class Renderer {
     }
 
     /**
-     * Resolve the lit scene into the offscreen thumbnail target with a transparent background. Coverage
-     * comes from the scene DEPTH buffer, never the colour's alpha — that alpha is the bloom mask.
+     * Resolve the lit scene into the offscreen thumbnail target with a transparent background.
+     *
+     * Coverage comes from the depth SNAPSHOT `_applyPostProcessing` takes just above, never the
+     * colour's alpha — that alpha is the bloom mask, and a dark unlit asset would come back as a
+     * hole in its own thumbnail.
      */
     private _presentThumbnail(): void {
         // The same program and pipeline as the on-screen present — only the target, the clear colour
@@ -7358,8 +7392,15 @@ export class Renderer {
         // so a frame that graded the viewport would otherwise leak into every thumbnail after it.
         this._shaderManager.setUniform('u_lutIntensity', 0.0);
         this._shaderManager.setUniform('u_lutSize', IDENTITY_LUT_SIZE);
+        // The whole reason this pass exists. Set here for the same reason the two above are: the
+        // on-screen `_presentPass` writes 0.0 on EVERY frame, so a thumbnail that does not write it
+        // back inherits an opaque alpha and the capture comes out as a solid rectangle — a black one,
+        // since thumbnail mode clears to transparent black and skips the sky. That is exactly what
+        // happened when this line was dropped in the TAA/LUT rewrite, and it took the whole asset
+        // library's transparency with it as well as every baked foliage impostor.
+        this._shaderManager.setUniform('u_alphaFromDepth', 1.0);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-            this._sceneFBO.colors[0], this._sceneFBO.depth, this._colorLut.volumeFor(null),
+            this._sceneFBO.colors[0], this._depthSource(), this._colorLut.volumeFor(null),
         ]));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
