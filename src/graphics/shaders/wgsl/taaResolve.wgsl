@@ -42,6 +42,43 @@ struct TaaUniforms {
 
 fn luma(c: vec3<f32>) -> f32 { return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722)); }
 
+/**
+ * A magnitude no finite render value ever reaches, used to test for one. See `sanitize`.
+ *
+ * DELIBERATELY NOT the exact f32 maximum (3.40282347e38). A literal is converted against the
+ * type's limit BEFORE it is rounded, so a decimal spelling of the maximum reads as larger than the
+ * maximum and is a shader-creation error on Tint -- while naga rounds it to the maximum and accepts
+ * it, so the WebGL2 build stays green and only the WebGPU one dies, with `[Invalid RenderPipeline]`
+ * and no clue which line. Any large finite threshold answers the question being asked here.
+ */
+const F32_MAX: f32 = 3.0e38;
+
+/**
+ * Drop any radiance the accumulation must never be allowed to hold: NaN, +-Inf, or negative.
+ *
+ * THE SINGLE MOST IMPORTANT FUNCTION IN THIS FILE, because this pass is a feedback loop and every
+ * other one is not. One bad texel written into the history is read back next frame, blended, and
+ * written again — and the history is LINEAR-filtered, so every bilinear fetch whose 2x2 footprint
+ * touches it comes back bad too. A NaN therefore does not decay: it spreads about a texel per frame,
+ * for as long as the history survives, which under ordinary camera motion is forever (the only
+ * invalidations are a camera switch, a resize and `_detectTemporalCut`). Downstream the tonemap
+ * turns it into a black blotch that grows. Every other pass in the engine would show the same bad
+ * value for one frame and forget it.
+ *
+ * `select` on a comparison, NOT `clamp`. EVERY comparison against NaN is false, so the one predicate
+ * catches all three cases at once and does so on any compiler; `clamp`/`min`/`max` propagate a NaN
+ * operand or drop it depending on the hardware, which is not something a feedback loop may leave to
+ * the driver.
+ *
+ * Black is the right fallback rather than, say, the neighbourhood mean: the value is CLIPPED against
+ * this frame's neighbourhood a few lines later, so a zeroed history is pulled back to a plausible
+ * colour within a frame or two instead of persisting. This is also what makes `tonemap`'s unguarded
+ * `1 + luma(c)` divisor safe — with `c >= 0` it can never approach zero.
+ */
+fn sanitize(c: vec3<f32>) -> vec3<f32> {
+    return select(vec3<f32>(0.0), c, all(c >= vec3<f32>(0.0)) && all(c <= vec3<f32>(F32_MAX)));
+}
+
 // Karis' reversible tonemap. Range-compresses before the blend so one very bright sample cannot drag
 // the average for thirty frames, and `untonemap` is its exact inverse: with y = x / (1 + L(x)) we get
 // 1 - L(y) = 1 / (1 + L(x)), so x = y / (1 - L(y)). This is the single difference between TAA and a
@@ -72,7 +109,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // WGSL backend and silently accepted by the generated GLSL, so tests/taaResolveShader.test.ts
     // scans for it rather than trusting this comment.
     let uv = in.uv;
-    let current = textureSampleLevel(u_current_texture, u_current_sampler, uv, 0.0);
+    // Scrubbed at the door, because this value reaches the history on EVERY path below, the
+    // `u_historyValid == 0` seeding path included — where it is written out with nothing else mixed
+    // into it, so an unscrubbed one would poison a freshly seeded history outright.
+    let raw = textureSampleLevel(u_current_texture, u_current_sampler, uv, 0.0);
+    // Alpha is the bloom mask, a 0-or-1 flag rather than radiance, so it gets its own predicate.
+    let current = vec4<f32>(sanitize(raw.rgb),
+                            select(0.0, raw.a, raw.a >= 0.0 && raw.a <= 1.0));
 
     // First frame, a camera cut, a resize: there is nothing to blend with, and the pass still writes
     // this out so the next frame has a history to find.
@@ -102,13 +145,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // `.w = 0` marks a vector that is deliberately NOT the screen-space delta: the 'objectOnly' blur
     // mode divides the camera term out on purpose. Reprojecting through it under a moving camera would
     // fetch the wrong history and ghost the object, so it forfeits temporal AA and stays aliased.
-    if (motion.w < 0.5) { return current; }
+    // Written as the NEGATION of the accept condition, like the two tests below it: a NaN velocity
+    // makes `motion.w < 0.5` false and would fall through to reproject through the NaN.
+    if (!(motion.w >= 0.5)) { return current; }
 
     let velocity = motion.xy;
     let prevUV = uv - velocity;
 
     // Off screen last frame: no history existed to accumulate.
-    if (any(prevUV < vec2<f32>(0.0)) || any(prevUV > vec2<f32>(1.0))) { return current; }
+    // NEGATED, not `any(prevUV < 0) || any(prevUV > 1)`. Every comparison against NaN is false, so
+    // the direct form FAILS OPEN: a NaN reprojection passes the off-screen test and goes on to fetch
+    // history at a NaN uv. This one fails closed, which is the only acceptable direction in a loop
+    // that keeps what it accepts.
+    if (!(all(prevUV >= vec2<f32>(0.0)) && all(prevUV <= vec2<f32>(1.0)))) { return current; }
 
     // ---- Is that history still describing this surface? ------------------------------------------
     // On LINEARIZED depth, with a RELATIVE tolerance. Device depth cannot work: it is so compressed
@@ -122,7 +171,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                                 u_taa.u_near, u_taa.u_far);
     let linPrev = linearizeDepth(textureSampleLevel(u_prevDepth_texture, u_prevDepth_sampler, prevUV, 0),
                                  u_taa.u_near, u_taa.u_far);
-    if (abs(linCur - linPrev) > max(0.02 * linCur, 0.1)) { return current; }
+    // Negated for the same reason the off-screen test is; see there.
+    if (!(abs(linCur - linPrev) <= max(0.02 * linCur, 0.1))) { return current; }
 
     // ---- Constrain the history to colours this neighbourhood could plausibly produce -------------
     // Variance clipping, intersected with the true min/max box. The box on its own is defined by its
@@ -137,7 +187,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     for (var y = -1; y <= 1; y++) {
         for (var x = -1; x <= 1; x++) {
             let o = uv + vec2<f32>(f32(x), f32(y)) * u_taa.u_texelSize;
-            let s = textureSampleLevel(u_current_texture, u_current_sampler, o, 0.0).rgb;
+            // Sanitized like the centre tap: the box and the variance are what CONSTRAIN the
+            // history, and a single bad neighbour would widen them to admit anything.
+            let s = sanitize(textureSampleLevel(u_current_texture, u_current_sampler, o, 0.0).rgb);
             let c = rgbToYCoCg(tonemap(s * exposure));
             m1 += c;
             m2 += c * c;
@@ -153,14 +205,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // CLIP toward the centre along the segment, rather than clamping per component. A per-component
     // clamp moves the three axes by different amounts and changes the colour's hue on every pixel it
     // touches; this moves it along the line it already sat on and only shortens it.
-    var history = rgbToYCoCg(tonemap(
-        textureSampleLevel(u_history_texture, u_history_sampler, prevUV, 0.0).rgb * exposure));
+    let historyRgb = sanitize(textureSampleLevel(u_history_texture, u_history_sampler,
+                                                 prevUV, 0.0).rgb);
+    let history = rgbToYCoCg(tonemap(historyRgb * exposure));
     let centre = 0.5 * (lo + hi);
     let extent = max(0.5 * (hi - lo), vec3<f32>(1e-5));
     let offset = history - centre;
     let reach = abs(offset / extent);
     let worst = max(reach.x, max(reach.y, reach.z));
-    if (worst > 1.0) { history = centre + offset / worst; }
+    // UNCONDITIONAL, and that is the point: `if (worst > 1.0) { ... }` is a clamp that a NaN `worst`
+    // walks straight past, leaving the poisoned history untouched to be blended and written back.
+    // `max(worst, 1.0)` is the same arithmetic for every value that matters and has no branch to skip.
+    let clipped = centre + offset / max(worst, 1.0);
 
     // ---- Blend -----------------------------------------------------------------------------------
     // In tonemapped space, which is where the range compression above does its work. Less history
@@ -172,7 +228,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let feedback = mix(u_taa.u_feedbackMax, u_taa.u_feedbackMin, clamp(velocityPx / 20.0, 0.0, 1.0));
 
     let currentYCoCg = rgbToYCoCg(tonemap(current.rgb * exposure));
-    let resolved = untonemap(yCoCgToRgb(mix(currentYCoCg, history, feedback))) / exposure;
+    // Sanitized on the way OUT as well as on the way in. `untonemap` divides by `1 - luma`, floored at
+    // 1e-4, so a clip that lands near the top of the tonemapped range multiplies by up to 1e4 — and
+    // the YCoCg round trip can put a component slightly below zero. Neither is worth writing into a
+    // buffer that is read back forever.
+    let resolved = sanitize(
+        untonemap(yCoCgToRgb(mix(currentYCoCg, clipped, feedback))) / exposure);
 
     // Alpha is the BLOOM MASK, not coverage, and it passes through unfiltered. Temporally filtering a
     // mask that only ever feeds a blur buys nothing, and clamping it against a colour neighbourhood

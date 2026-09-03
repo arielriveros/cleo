@@ -94,6 +94,8 @@ import { useTilesetEditor } from './hooks/useTilesetEditor';
 import { useTextureEditor } from './hooks/useTextureEditor';
 import { useSoundEditor } from './hooks/useSoundEditor';
 import { useAnimationFieldEditor } from './hooks/useAnimationFieldEditor';
+import { getShellBridge } from './desktopShell';
+import { confirmDiscard, setUnsavedWork, unloadGuardSuppressed } from './unloadGuard';
 import {
   EDITOR_CLEAR_COLOR, LEGACY_CLEAR_COLOR, TAB_METERS_EXPOSURE, TAB_RUNS_POST_PROCESSING, SCENE_TAB_ID,
   KIND_LABEL, TAB_EDITOR_MODE,
@@ -4749,15 +4751,50 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (back.tabId !== SCENE_TAB_ID && tabsRef.current.some(t => t.id === back.tabId)) setActiveTab(back.tabId);
   }, [isPlayMode]);
 
-  // Warn before closing/reloading the page while a save is in flight OR any tab has unsaved edits — dirty
-  // state is only ever cleared by an explicit Save, so a reload would otherwise silently drop the work.
+  // Block a close or a reload while a save is in flight OR any tab has unsaved edits — dirty state is
+  // only ever cleared by an explicit Save, so a reload would otherwise silently drop the work.
+  //
+  // `beforeunload` can only BLOCK; who asks about it is the host's business, and neither host asks well.
+  // A browser tab puts up Chrome's "Leave site?" box, which the editor cannot theme or word; the Electron
+  // shell puts up nothing at all and the window just refuses to close. So the shell hands the attempt
+  // back here (features/desktopShell.ts), and the reloads the EDITOR itself starts ask first through
+  // features/unloadGuard.ts. What is left for `beforeunload` is the browser's tab close and its reload
+  // button — the two the page genuinely cannot own.
   const hasUnsavedWork = savingState === 'saving' || Object.keys(dirtyTabs).length > 0;
   useEffect(() => {
     if (!hasUnsavedWork) return;
-    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    const handler = (e: BeforeUnloadEvent) => {
+      // Stand down for a reload the editor asked for: it has already put the same question in a dialog
+      // of its own, and letting this fire too would stack the native box on top of the answer.
+      if (unloadGuardSuppressed()) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [hasUnsavedWork]);
+
+  // Publish what is unsaved for the code that can discard the page but is not a component: the project
+  // switch and the bundle import, both plain async functions in utils/.
+  useEffect(() => {
+    setUnsavedWork(Object.keys(dirtyTabs).map(id => tabsRef.current.find(t => t.id === id)?.title ?? id));
+  }, [dirtyTabs]);
+
+  // The desktop shell's blocked close/reload, answered in the editor's own dialog. Registered once: the
+  // shell only asks when `beforeunload` has already blocked something, so there is always work to lose.
+  useEffect(() => {
+    const shell = getShellBridge();
+    if (!shell) return;
+    return shell.onConfirmUnload(async (action) => {
+      try {
+        shell.respondToUnload(await confirmDiscard(action === 'close' ? 'Closing' : 'Reloading'));
+      } catch {
+        // Never leave the shell on its watchdog: an unanswered request holds the window for five
+        // seconds and then does the thing anyway, which is the one outcome nobody asked for.
+        shell.respondToUnload(false);
+      }
+    });
+  }, []);
 
   // Split-out slice contexts (Selection / Playback / AssetLibrary / Document). The state still lives here;
   // each exposes a narrow, memoized value so a consumer of one slice needn't re-render on every unrelated

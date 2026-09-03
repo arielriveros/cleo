@@ -25,8 +25,20 @@ struct DebugViewUniforms {
     u_exposure: f32,    // for the tonemapped (linear-HDR) channels
     u_mode: i32,
     u_toneMapper: i32,  // TONE_* in chunks/grade.wgsl
+    u_validity: i32,    // != 0: paint invalid texels instead of rendering the channel
 };
 @group(1) @binding(0) var<uniform> u_debug: DebugViewUniforms;
+
+/**
+ * A magnitude no finite render value ever reaches, used to test for one. See `the validity overlay`.
+ *
+ * DELIBERATELY NOT the exact f32 maximum (3.40282347e38). A literal is converted against the
+ * type's limit BEFORE it is rounded, so a decimal spelling of the maximum reads as larger than the
+ * maximum and is a shader-creation error on Tint -- while naga rounds it to the maximum and accepts
+ * it, so the WebGL2 build stays green and only the WebGPU one dies, with `[Invalid RenderPipeline]`
+ * and no clue which line. Any large finite threshold answers the question being asked here.
+ */
+const F32_MAX: f32 = 3.0e38;
 
 /**
  * Overdraw heat map, black -> blue -> green -> yellow -> red.
@@ -48,6 +60,37 @@ fn heatMap(value: f32) -> vec3<f32> {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let t = textureSample(u_screenTexture_texture, u_screenTexture_sampler, in.uv);
     let mode = u_debug.u_mode;
+
+    // VALUE-VALIDITY OVERLAY. Paints a flat classification colour for any texel this buffer should
+    // never be able to hold. It composes with every channel below rather than being a channel of its
+    // own, so one toggle audits the G-buffer, the lit scene, SSAO, velocity and the TAA history in
+    // turn — which is what a hunt for the pass that emits a bad value actually needs.
+    //
+    // WGSL has no `isnan`/`isinf`, and it does not need one: EVERY comparison against NaN is false,
+    // which is exactly the property being tested. `finite` therefore fails for NaN and for the
+    // infinities alike, while `inf` is true only for the infinities, so the difference isolates NaN
+    // without naming it. This form also survives translation to GLSL ES 300 unchanged, where a
+    // literal `isnan()` is permitted but is free to be optimised away under a no-NaN assumption.
+    //
+    // Inf deserves its own colour rather than being folded in with NaN: every one of these targets is
+    // rgba16float, so an Inf here most likely means a value that EXCEEDED 65504 on store rather than
+    // a division by zero, and the two have different repairs.
+    if (u_debug.u_validity != 0) {
+        let inf = any(abs(t) > vec4<f32>(F32_MAX));
+        let finite = all(t >= vec4<f32>(-F32_MAX)) && all(t <= vec4<f32>(F32_MAX));
+        if (!finite && !inf) { return vec4<f32>(1.0, 0.0, 1.0, 1.0); }   // NaN            -> magenta
+        if (inf) { return vec4<f32>(1.0, 0.55, 0.0, 1.0); }              // +-Inf/overflow -> orange
+        // A NEGATIVE is a defect only where the channel's own encoding forbids one. Radiance, albedo,
+        // emissive and the packed scalars cannot go below zero; an octahedral normal (mode 1, and the
+        // rg of the metallic/roughness channels) and a motion vector (mode 5) are signed by
+        // construction. Testing all four components everywhere would paint those solid cyan and the
+        // overlay would report nothing at all.
+        var neg = false;
+        if (mode == 0 || mode == 6) { neg = any(t.rgb < vec3<f32>(0.0)); }
+        if (mode == 2) { neg = t.a < 0.0; }
+        if (mode == 4 || mode == 7) { neg = t.r < 0.0; }
+        if (neg) { return vec4<f32>(0.0, 0.9, 1.0, 1.0); }               // negative       -> cyan
+    }
 
     // World-space normals, DECODED from the octahedral pair first — displaying the raw rg would show
     // the encoding rather than the normal, which looks plausible enough to be believed.

@@ -16,6 +16,23 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) curClip: vec4<f32>,
     @location(1) prevClip: vec4<f32>,
+    /**
+     * `(u_noBlur, u_trueMotion)`, carried down from the vertex stage rather than read from the uniform
+     * block a second time — and that detour is a HARD REQUIREMENT, not a preference.
+     *
+     * A uniform block read from BOTH stages is emitted by naga as two stage-suffixed blocks with no
+     * instance name, and GLSL ES 300 scopes an instance-less block's members globally: two of them
+     * declaring `u_ov` is a LINK error ("Ambiguous field 'u_ov' in blocks ... which don't have
+     * instance names"). Every other group-1 block in the engine is single-stage for exactly this
+     * reason — see PBRMaterial in chunks/pbrGBuffer.wgsl and TerrainUniforms in chunks/terrainLayers
+     * .wgsl, both of which carry per-frame values purely to stay out of the vertex block.
+     *
+     * These three programs did not, so all three failed to link, and `_createPrograms` builds every
+     * program at boot: the renderer came up on NO backend at all. Passing the two flags as a flat
+     * varying keeps the block vertex-only and costs one interpolant, with no second binding for the
+     * bind-group layouts to grow by.
+     */
+    @location(2) @interpolate(flat) flags: vec2<f32>,
 };
 
 /**

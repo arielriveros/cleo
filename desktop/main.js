@@ -38,6 +38,47 @@ function registerAppProtocol() {
   });
 }
 
+// --- Unload guard ------------------------------------------------------------------------------
+//
+// The editor's `beforeunload` handler blocks a close or a reload while a tab has unsaved edits. What it
+// CANNOT do is ask about it: the host owns that dialog. In a browser that is Chrome's "Leave site?" box.
+// Here it is worse than a box — Chromium just cancels the attempt, so the window refuses to close and
+// says nothing at all.
+//
+// `will-prevent-unload` is where the shell gets to answer for itself. Handling it suppresses the default
+// entirely; we bounce the question into the editor, which asks it with `confirmDialog` like every other
+// question, and then carry out or abandon what the user was doing. It fires for a window close AND for a
+// reload, which is why this replaced an earlier close-only guard.
+//
+// Keyed by `webContents.id` rather than by window, so a closed window leaves nothing behind to leak.
+
+/** Renderers cleared to unload exactly once: the confirm came back yes and the retry must go through. */
+const clearedToUnload = new Set();
+/** Renderers whose window close is what triggered the pending unload (as opposed to a reload). */
+const closeAttempts = new Set();
+/** Renderer id -> { action, timer }: the confirm in flight, and the watchdog for one that never answers. */
+const awaitingAnswer = new Map();
+/** How long a hung renderer may hold the window. Long enough for a GC pause, short enough to escape. */
+const UNLOAD_ANSWER_TIMEOUT_MS = 5000;
+
+/** Carry out what the user asked for, with the guard stood down for this one attempt. */
+function proceedWithUnload(win, id, action) {
+  if (!win || win.isDestroyed()) return;
+  clearedToUnload.add(id);
+  if (action === 'close') win.close();
+  else win.webContents.reload();
+}
+
+ipcMain.on('shell:unload-response', (event, allow) => {
+  const id = event.sender.id;
+  const pending = awaitingAnswer.get(id);
+  if (!pending) return;                      // watchdog already fired, or a stray answer
+  clearTimeout(pending.timer);
+  awaitingAnswer.delete(id);
+  if (!allow) return;                        // the user chose to keep editing
+  proceedWithUnload(BrowserWindow.fromWebContents(event.sender), id, pending.action);
+});
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1600,
@@ -55,6 +96,44 @@ function createWindow() {
     win.webContents.on('console-message', (_e, level, message) => console.log(`[renderer:${level}] ${message}`));
     win.webContents.on('did-fail-load', (_e, code, desc, url) => console.log(`[did-fail-load] ${code} ${desc} ${url}`));
   }
+
+  // Captured rather than read off `win` inside the handlers: `webContents.id` is not readable once the
+  // window is gone, and 'closed' has to clean up under that same id.
+  const rendererId = win.webContents.id;
+
+  // 'close' fires BEFORE 'will-prevent-unload', so this is how the guard knows which of the two things
+  // it is about to ask about. Left set when the close is not blocked — the window is going anyway, and
+  // 'closed' clears it.
+  win.on('close', () => { closeAttempts.add(rendererId); });
+
+  // `beforeunload` said no. Deciding here is what stops Chromium deciding: with this handled there is no
+  // default behaviour, so the editor gets to ask instead of the window silently refusing to close.
+  win.webContents.on('will-prevent-unload', (event) => {
+    const action = closeAttempts.delete(rendererId) ? 'close' : 'reload';
+    // Already confirmed: ignore `beforeunload` and let this one through.
+    if (clearedToUnload.delete(rendererId)) { event.preventDefault(); return; }
+    // Already asking. Leaving the event alone cancels the repeat rather than stacking a second dialog.
+    if (awaitingAnswer.has(rendererId)) return;
+
+    win.webContents.send('shell:confirm-unload', action);
+    awaitingAnswer.set(rendererId, {
+      action,
+      // The renderer never answered — hung, or crashed with the listener attached. Trapping the window
+      // behind a dialog that will never appear is worse than doing what was asked.
+      timer: setTimeout(() => {
+        awaitingAnswer.delete(rendererId);
+        proceedWithUnload(win, rendererId, action);
+      }, UNLOAD_ANSWER_TIMEOUT_MS),
+    });
+  });
+
+  win.on('closed', () => {
+    const pending = awaitingAnswer.get(rendererId);
+    if (pending) clearTimeout(pending.timer);
+    awaitingAnswer.delete(rendererId);
+    closeAttempts.delete(rendererId);
+    clearedToUnload.delete(rendererId);
+  });
 
   // Dev: the editor's webpack dev server. Prod: the built editor bundle over app://.
   if (isDev) win.loadURL('http://localhost:8080');

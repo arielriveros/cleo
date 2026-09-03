@@ -30,10 +30,12 @@ fn vs_main(@location(0) position: vec3<f32>) -> VertexOutput {
     out.position = u_ov.u_projection * u_ov.u_view * world;
     out.curClip = u_ov.u_uvViewProj * world;
     out.prevClip = u_ov.u_uvPrevViewProj * prevWorld;
+    // Read HERE, in the only stage allowed to touch this block -- see VertexOutput.flags.
+    out.flags = vec2<f32>(u_ov.u_noBlur, u_ov.u_trueMotion);
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return encodeVelocity(in.curClip, in.prevClip, u_ov.u_noBlur, u_ov.u_trueMotion);
+    return encodeVelocity(in.curClip, in.prevClip, in.flags.x, in.flags.y);
 }

@@ -242,6 +242,56 @@ const DEPTH_SAMPLERS = {
     'texture_depth_cube':     { shadow: 'samplerCubeShadow',    plain: 'samplerCube' },
 };
 
+/**
+ * The GLSL read functions a depth sample can arrive as once its sampler has been walked back to a plain
+ * one. Every one of them returns a `vec4` where WGSL's depth read returns a bare `f32`, so every one of
+ * them needs the `.x`.
+ *
+ * `textureSize` is deliberately absent: it returns an integer size in both languages, so appending a
+ * swizzle to it would break the very code this is here to fix.
+ */
+const DEPTH_READ_CALLS = ['texture', 'textureLod', 'texelFetch'];
+
+/** Index of the `)` closing the `(` at `open`, or -1. */
+function matchParen(source, open) {
+    let depth = 0;
+    for (let i = open; i < source.length; i++) {
+        if (source[i] === '(') depth++;
+        else if (source[i] === ')' && --depth === 0) return i;
+    }
+    return -1;
+}
+
+/**
+ * Append `.x` to every plain read of the depth sampler `name`, and float-ify `textureLod`'s level.
+ *
+ * A BALANCED-PAREN SCAN, not a regex, and that is the whole reason this is a function. A read's
+ * arguments contain calls of their own — `texture(u_depth, vec2(in.uv))` — so a pattern ending at the
+ * first `)` lands inside the argument list. The version this replaced sidestepped that by matching only
+ * the `textureLod(name, …, 0)` shape, which left a depth read written as a plain `texture(...)` — what
+ * `textureSample` translates to — returning a vec4 into an f32. That is a hard compile error
+ * ("'=' : dimension mismatch"), it takes the WHOLE renderer down at `_createPrograms` rather than
+ * degrading one effect, and `dofComposite.wgsl` shipped exactly that way.
+ */
+function appendDepthSwizzle(glsl, name) {
+    const pattern = new RegExp(String.raw`\b(` + DEPTH_READ_CALLS.join('|') + String.raw`)\(\s*` + name + String.raw`\b`, 'g');
+    let out = '';
+    let last = 0;
+    let match;
+    while ((match = pattern.exec(glsl)) !== null) {
+        const open = glsl.indexOf('(', match.index);
+        const close = matchParen(glsl, open);
+        if (close < 0) break;
+        let call = glsl.slice(match.index, close + 1);
+        // WGSL requires an INTEGER exact level for a depth texture; GLSL's `textureLod` takes a float.
+        if (match[1] === 'textureLod') call = call.replace(/,\s*(\d+)\s*\)$/, ', $1.0)');
+        out += glsl.slice(last, match.index) + call + '.x';
+        last = close + 1;
+        pattern.lastIndex = close + 1;
+    }
+    return out + glsl.slice(last);
+}
+
 function fixPlainDepthSamplers(glsl, resources) {
     // Which depth textures are read PLAINLY, decided by the sampler each is paired with rather than by
     // the texture's own type. WGSL splits texture from sampler, so at the point naga emits the
@@ -263,10 +313,9 @@ function fixPlainDepthSamplers(glsl, resources) {
         const name = resource.glslName;
         out = out.replace(new RegExp(spelling.shadow + String.raw`(\s+)` + name + String.raw`\b`, 'g'),
                           spelling.plain + '$1' + name);
-        // WGSL requires an INTEGER exact level for a depth texture where GLSL's `textureLod` takes a
-        // float, and sampling one yields a bare f32 in WGSL against a vec4 from a GLSL sampler.
-        out = out.replace(new RegExp(String.raw`(textureLod\(` + name + String.raw`,[^;]*?),\s*0\)`, 'g'),
-                          '$1, 0.0).x');
+        // Sampling a depth texture yields a bare f32 in WGSL against a vec4 from a GLSL sampler, so
+        // every read of it needs the `.x` — whichever call it came out as.
+        out = appendDepthSwizzle(out, name);
     }
 
     // `textureLod` on a shadow sampler is the one thing this extension exists for. With every shadow

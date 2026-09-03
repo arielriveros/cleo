@@ -82,6 +82,57 @@ describe('taaResolve.wgsl', () => {
         expect(source).toContain('max(0.02 * linCur, 0.1)');
     });
 
+    // ------------------------------------------------------------------------------------------
+    // The feedback loop's own safety. A bad value here is not a bad frame, it is a PERMANENT one:
+    // the history is read back and rewritten every frame and is linear-filtered, so one NaN texel
+    // spreads about a texel per frame and never decays. These four properties are what stop that,
+    // and each of them was absent when a user reported black blotches that grew while the camera
+    // moved away from them.
+    // ------------------------------------------------------------------------------------------
+
+    it('scrubs every value that enters the accumulation', () => {
+        // `current`, the eight neighbourhood taps that build the clamp box, and the history fetch.
+        // Missing any one of the three is enough: the taps define the box that constrains the
+        // history, so a bad neighbour widens it to admit anything.
+        const body = code(source);
+        expect(body).toContain('fn sanitize(');
+        expect(body).toContain('sanitize(raw.rgb)');
+        expect(body).toContain('sanitize(textureSampleLevel(u_current_texture');
+        expect(body).toContain('sanitize(textureSampleLevel(u_history_texture');
+        expect(body).toContain('let resolved = sanitize(');
+    });
+
+    it('scrubs with select on a comparison, not with clamp', () => {
+        // EVERY comparison against NaN is false, so one `select` predicate catches NaN, +-Inf and a
+        // negative at once, on every compiler. `clamp`/`min`/`max` either propagate a NaN operand or
+        // drop it depending on the hardware, which a feedback loop may not leave to the driver.
+        const body = code(source);
+        const at = body.indexOf('fn sanitize(');
+        const fn = body.slice(at, body.indexOf('}', at));
+        expect(fn).toContain('select(');
+        expect(fn).not.toContain('clamp(');
+        expect(fn).not.toContain('min(');
+        expect(fn).not.toContain('max(');
+    });
+
+    it('rejects history by NEGATING the accept condition, so NaN fails closed', () => {
+        // `any(prevUV < 0) || any(prevUV > 1)` and `abs(d) > tol` are both FALSE for a NaN, so the
+        // direct forms accept a NaN reprojection and go on to fetch history at a NaN uv.
+        const body = code(source);
+        expect(body).toContain('if (!(all(prevUV >= vec2<f32>(0.0))');
+        expect(body).toContain('if (!(abs(linCur - linPrev) <=');
+        expect(body).toContain('if (!(motion.w >= 0.5))');
+    });
+
+    it('clips the history unconditionally', () => {
+        // The hole this closes: `if (worst > 1.0) { history = centre + offset / worst; }` is a clamp
+        // that a NaN `worst` walks straight past, leaving the poisoned value untouched to be blended
+        // and written back. There must be no branch for it to skip.
+        const body = code(source);
+        expect(body).toContain('centre + offset / max(worst, 1.0)');
+        expect(body).not.toContain('if (worst >');
+    });
+
     it('does not read the motion-blur opt-out flag', () => {
         // `.z` says "never blur this", not "this did not move". Reading it here would discard history
         // for those objects and ghost them; the encoder keeps their true velocity and TileMax skips

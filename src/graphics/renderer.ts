@@ -658,6 +658,11 @@ export class Renderer {
     private _outlineWidth: number = 5.0;
     // Editor "Renderer" debug view: which buffer to blit to the screen ('final' = normal image).
     private _debugView: DebugView = 'final';
+    // Paint invalid texels (NaN / Inf / illegal negative) over whichever debug channel is selected,
+    // instead of rendering it. A MODIFIER rather than a channel: the question "which buffer first
+    // holds the bad value" is asked of every channel in turn, and a channel of its own could only
+    // ever answer it for one buffer. See debugView.wgsl.
+    private _debugValidity: boolean = false;
 
     // Per-pass kill switches for the profiler's A/B bisection, for when GPU timer queries are
     // unavailable. Editor tooling only; a published build never flips these.
@@ -7489,6 +7494,7 @@ export class Renderer {
         const pipeline = this._fullscreenPipeline('debugView', DebugViewProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_mode', mode);
+        this._shaderManager.setUniform('u_validity', this._debugValidity);
         // The tonemapped channels ('scene', 'bloom', 'overdraw's fallback) resolve with the SCENE's
         // curve, so "Lit Scene" cannot disagree with "Final" about what the frame looks like. No LUT
         // here on purpose — a debug channel is a picture of a BUFFER, and a grade would misreport it.
@@ -9175,6 +9181,10 @@ export class Renderer {
         // flag has to reach a uniform rather than the present pass.
         this._debugCascades = view === 'cascades';
     }
+
+    // Value-validity overlay for the selected debug channel. See `_debugValidity`.
+    public get debugValidity(): boolean { return this._debugValidity; }
+    public set debugValidity(on: boolean) { this._debugValidity = on; }
 
     // Read-only mirrors of the grid state (set via setGridVisible / setGridPlane) for editor UIs.
     public get gridVisible(): boolean { return this._gridEnabled; }

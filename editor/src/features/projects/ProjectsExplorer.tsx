@@ -75,7 +75,10 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
   const open = useCallback(async (id: string) => {
     if (id === activeId) return
     setBusy(true)
-    await openProject(id) // writes the pointer and reloads
+    // Can be declined: openProject asks about unsaved work first. Nothing has happened then, so
+    // the explorer has to come back out of its busy state rather than sit spinning on a reload
+    // that is not coming.
+    if (!await openProject(id)) setBusy(false)
   }, [activeId])
 
   const remove = useCallback(async (id: string) => {
@@ -120,12 +123,13 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
     setBusy(true)
     try {
       const record = await createProject(name)
-      await openProject(record.id) // reloads into the empty project
+      // Same as `open`: a declined confirm leaves the new project created but not switched to.
+      if (!await openProject(record.id)) { setBusy(false); await refresh() }
     } catch (e) {
       setBusy(false)
       Logger.error(`Could not create the project: ${e}`, 'Editor')
     }
-  }, [newName])
+  }, [newName, refresh])
 
   const init = useCallback((api: IApi) => {
     apiRef.current = api

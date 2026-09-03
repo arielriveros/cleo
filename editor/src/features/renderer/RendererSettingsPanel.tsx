@@ -131,6 +131,7 @@ export default function RendererSettingsPanel() {
 
   // Local mirror of renderer state so the controls re-render; initialized from the renderer getters.
   const [debugView, setDebugViewState] = useState<string>(() => renderer?.debugView ?? 'final');
+  const [debugValidity, setDebugValidity] = useState<boolean>(() => renderer?.debugValidity ?? false);
   // EV100, not the raw multiplier: same storage, written the way a photographer writes it.
   const [ev100, setEv100] = useState<number>(() => renderer?.ev100 ?? 15);
   const [autoExposure, setAutoExposure] = useState<boolean>(() => renderer?.autoExposureEnabled ?? true);
@@ -212,7 +213,11 @@ export default function RendererSettingsPanel() {
   const [pointShadowBias, setPointShadowBias] = useState<number>(() => renderer?.pointShadowBias ?? 0.0015);
 
   // Leaving Renderer mode (unmount) must restore the normal composited image for the other modes.
-  useEffect(() => () => { if (renderer) renderer.debugView = 'final'; }, [renderer]);
+  useEffect(() => () => {
+    if (!renderer) return;
+    renderer.debugView = 'final';
+    renderer.debugValidity = false;
+  }, [renderer]);
 
   // Pull every mirrored value back off the renderer. Everything the renderer can change behind this
   // panel's back belongs here, not just what play/stop touches: a quality preset from the Performance
@@ -220,6 +225,7 @@ export default function RendererSettingsPanel() {
   const syncFromRenderer = useCallback(() => {
     if (!renderer) return;
     setDebugViewState(renderer.debugView);
+    setDebugValidity(renderer.debugValidity);
     setEv100(renderer.ev100);
     setAutoExposure(renderer.autoExposureEnabled);
     setSpecularOcclusion(renderer.specularOcclusionEnabled);
@@ -324,6 +330,10 @@ export default function RendererSettingsPanel() {
   if (!renderer) return <div className='p-3 text-muted text-xs'>Renderer not ready.</div>;
 
   const setDebug = (key: string) => { renderer.debugView = key; setDebugViewState(key); };
+  // Beside `setDebug`, and NOT marking the scene dirty for the same reason it does not: both are ways
+  // of LOOKING at a scene rather than part of it, and neither is persisted (asserted in
+  // tests/renderSettingsPersistence.test.ts).
+  const setValidity = (on: boolean) => { renderer.debugValidity = on; setDebugValidity(on); };
 
   return (
     // The content column is capped rather than filling the dock group (see PerformancePanel); the panel
@@ -347,6 +357,12 @@ export default function RendererSettingsPanel() {
           onChange={setDebug}
           options={CHANNELS.map(({ key, label }) => ({ value: key, label, title: label }))}
         />
+        {/* A modifier on the channel above, not a channel of its own: "which buffer first holds the
+            bad value" has to be asked of each one in turn. Magenta = NaN, orange = Inf (on an
+            rgba16float target that usually means a value over 65504 on store, not a division),
+            cyan = a negative where the channel's encoding forbids one. */}
+        <Toggle label='Highlight Invalid Pixels' checked={debugValidity} className='mt-2'
+          onChange={setValidity} />
       </Section>
 
       <Section

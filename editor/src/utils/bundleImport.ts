@@ -7,7 +7,8 @@ import { libKey, metaKey, sceneKey, scenePrefix, vfsKey } from './storageKeys'
 import { getAllTextures, putTextures, deleteTextures, StoredTexture } from './textureStore'
 import { getAllAudio, putAudio, deleteAudio, StoredAudio } from './audioStore'
 import { planMerge, LocalState } from './bundleMerge'
-import { createProject, openProject } from './projects'
+import { createProject, switchToProject } from './projects'
+import { reloadDiscarding } from '../features/unloadGuard'
 import type { BundleData } from './bundle'
 
 // Applies an imported bundle to local storage, then reloads. Both modes must write straight to IndexedDB
@@ -96,8 +97,11 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
   await putAudio(audioToRecords(bundle.audio), pid)
 
   Logger.info(`Imported ${isProject ? 'project' : 'asset pack'} (replace) — reloading`, 'Editor')
-  if (pid) { await openProject(pid); return }
-  window.location.reload()
+  // No unsaved-work question here: ImportBundleModal already asked the one that matters (Replace
+  // discards the project), and the stored data has been rewritten by the time this runs -- so the
+  // browser's "Leave site?" box would be a second dialog with no answer that changes anything.
+  if (pid) { await switchToProject(pid); return }
+  reloadDiscarding()
 }
 
 /** Import a bundle into a brand-new project, leaving the open one untouched, and switch to it. */
@@ -196,5 +200,5 @@ export async function applyBundleMerge(bundle: BundleData): Promise<void> {
   await idbSet(vfsKey(), repairVfs(merged).next)
 
   Logger.info(`Imported ${bundle.manifest.kind} (merge) — reloading`, 'Editor')
-  window.location.reload()
+  reloadDiscarding()
 }

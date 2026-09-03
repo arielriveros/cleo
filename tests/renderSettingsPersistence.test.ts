@@ -119,6 +119,14 @@ describe('RenderSettings survives save, publish and export', () => {
         expect(serializedKeys()).not.toContain('debugView');
         expect(interfaceKeys()).not.toContain('debugView');
     });
+
+    it('does not persist the value-validity overlay', () => {
+        // `debugValidity` paints NaN/Inf/illegal-negative texels over the selected channel. Same class
+        // as `debugView`, and it shares that channel's exemption from the dirty-marking rule below:
+        // its handler deliberately does not call `touch()`, because there is nothing to save.
+        expect(serializedKeys()).not.toContain('debugValidity');
+        expect(interfaceKeys()).not.toContain('debugValidity');
+    });
 });
 
 describe('the editor notifies when a render setting changes', () => {

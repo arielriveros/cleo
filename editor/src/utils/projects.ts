@@ -13,6 +13,7 @@ import { deleteProjectTextures, migrateUnscopedTextures } from './textureStore';
 import { createFreshProjectMeta } from './sceneStorage';
 import { EMPTY_VFS } from './vfs';
 import { cryptoRandomId } from './ids';
+import { confirmDiscard, reloadDiscarding } from '../features/unloadGuard';
 
 export type ProjectRecord = {
   id: string;
@@ -251,11 +252,32 @@ export async function touchProject(id: string, thumbnail?: string): Promise<void
   await saveProjects(list.map(p => (p.id === id ? { ...p, updatedAt: Date.now(), thumbnail: thumbnail ?? p.thumbnail } : p)));
 }
 
-/** Open a project: point the pointer at it and reload. */
-export async function openProject(id: string): Promise<void> {
+/**
+ * Open a project: point the pointer at it and reload.
+ *
+ * Returns false when unsaved work made the user back out — and NOTHING has happened in that case. The
+ * confirm comes before `writeActiveId` on purpose: a pointer written first would leave the editor
+ * opening the other project on its next launch, after the user said not to.
+ *
+ * The confirm lives here rather than at the call sites because the reload does: `location.reload()` on
+ * a page with unsaved edits is what raises the browser's own "Leave site?" box, and asking first (which
+ * also stands the `beforeunload` guard down) is what keeps that box off the screen.
+ */
+export async function openProject(id: string): Promise<boolean> {
+  if (!(await confirmDiscard('Opening another project'))) return false;
+  await switchToProject(id);
+  return true;
+}
+
+/**
+ * Point at a project and reload, asking nothing — for a caller that has already confirmed something more
+ * specific (the import modal's Replace, the delete confirm). Everything the editor holds in memory goes
+ * either way, so a second question, in the browser's voice, would only be noise.
+ */
+export async function switchToProject(id: string): Promise<void> {
   await writeActiveId(id);
   Logger.info('Opening project — reloading', 'Editor');
-  window.location.reload();
+  reloadDiscarding();
 }
 
 /**
@@ -272,6 +294,9 @@ export async function deleteProject(id: string, isActive: boolean): Promise<void
   const next = remaining.length
     ? [...remaining].sort((a, b) => b.updatedAt - a.updatedAt)[0]
     : await createProject('Untitled Project');
+  // Asked BEFORE the pending-delete key is parked: a key left behind by a cancelled delete would wipe
+  // the project on the next reload, whenever that came.
+  if (!(await confirmDiscard('Deleting the open project'))) return;
   try { localStorage.setItem(PENDING_DELETE_KEY, id); } catch { /* ignore */ }
-  await openProject(next.id);
+  await switchToProject(next.id);
 }
