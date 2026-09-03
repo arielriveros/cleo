@@ -20,6 +20,7 @@ import { UIRootNode } from "./nodes/ui/uiRoot";
 import { parseNodeJson } from "./nodes/parseNodeJson";
 import { InputSystem } from "../../input/inputSystem";
 import { ControllerNode } from "./nodes/controllerNode";
+import { NavMeshNode } from './nodes/navMeshNode';
 import type { ActionChange } from "../../input/resolveActions";
 import { mat4, vec3 } from "gl-matrix";
 import { DEFAULT_SCENE_AMBIENT_LUX, legacyAmbientFromSceneJson, MAX_LIGHTS } from "../../graphics/lighting";
@@ -87,6 +88,7 @@ export class Scene {
     private _lodGroups: Set<LodGroupNode> = new Set();
     private _cameraRigs: Set<CameraRigNode> = new Set();
     private _controllers: Set<ControllerNode> = new Set();
+    private _navMeshes: Set<NavMeshNode> = new Set();
     private _sounds: Set<SoundNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
     private _uiRoots: Set<UIRootNode> = new Set();
@@ -613,6 +615,7 @@ export class Scene {
         this._lodGroups = new Set();
         this._cameraRigs = new Set();
         this._controllers = new Set();
+        this._navMeshes = new Set();
         this._sounds = new Set();
         this._lightProbes = new Set();
         this._skybox = null;
@@ -638,6 +641,8 @@ export class Scene {
                 this._cameraRigs.add(node);
             if (node instanceof ControllerNode)
                 this._controllers.add(node);
+            if (node instanceof NavMeshNode)
+                this._navMeshes.add(node);
             if (node instanceof SoundNode)
                 this._sounds.add(node);
             if (node instanceof LightProbeNode)
@@ -861,6 +866,16 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._controllers;
+    }
+
+    /**
+     * Every baked navigation mesh in the scene. Holds only SPAWNED nodes, like every other set here --
+     * a navmesh on a node with `spawnOnStart: false` is deliberately invisible until it spawns.
+     */
+    public get navMeshes(): Set<NavMeshNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._navMeshes;
     }
 
     /** Every sound emitter in the scene. Holds only SPAWNED nodes, so a despawn silences one for free. */

@@ -5,6 +5,7 @@ import { LodGroupNode } from "./lodGroupNode";
 import { CameraRigNode } from "./cameraRigNode";
 import { CharacterNode } from "./characterNode";
 import { ControllerNode } from "./controllerNode";
+import { NavMeshNode } from "./navMeshNode";
 import { LandscapeNode } from "./landscapeNode";
 import { TilemapNode } from "./tilemapNode";
 import { LightNode } from "./lightNode";
@@ -48,6 +49,7 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'cameraRig': CameraRigNode.parse(parent, json); break;
     case 'character': CharacterNode.parse(parent, json); break;
     case 'controller': ControllerNode.parse(parent, json); break;
+    case 'navMesh': NavMeshNode.parse(parent, json); break;
     case 'uiRoot': UIRootNode.parse(parent, json); break;
     case 'uiPanel': UIPanelNode.parse(parent, json); break;
     case 'uiText': UITextNode.parse(parent, json); break;

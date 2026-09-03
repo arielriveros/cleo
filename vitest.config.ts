@@ -37,6 +37,10 @@ export default mergeConfig(engineConfig, defineConfig({
             include: [
                 'src/audio/soundSettings.ts',
                 'src/core/base64.ts',
+                'src/core/ai/interop.ts',
+                'src/core/ai/navBake.ts',
+                'src/core/ai/navMesh.ts',
+                'src/core/ai/navPath.ts',
                 'src/core/cameraRigMath.ts',
                 'src/core/conditions.ts',
                 'src/core/control/behavior.ts',
@@ -46,6 +50,7 @@ export default mergeConfig(engineConfig, defineConfig({
                 'src/core/geometry.ts',
                 'src/core/history.ts',
                 'src/core/math.ts',
+                'src/core/scene/nodes/navMeshNode.ts',
                 'src/core/scene/nodes/nodeType.ts',
                 'src/core/scene/nodes/parseNodeJson.ts',
                 'src/core/scene/nodes/ui/uiContainers.ts',

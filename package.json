@@ -30,6 +30,7 @@
     "@types/howler": "^2.2.13",
     "@types/uuid": "^9.0.7",
     "@types/webgl2": "0.0.10",
+    "@types/yuka": "^0.7.4",
     "@vitest/coverage-istanbul": "^3.2.7",
     "@webgpu/types": "^0.1.72",
     "concurrently": "^8.2.2",
@@ -42,7 +43,8 @@
     "gl-matrix": "3.4.4",
     "howler": "^2.2.4",
     "sucrase": "^3.35.1",
-    "uuid": "^14.0.1"
+    "uuid": "^14.0.1",
+    "yuka": "^0.7.8"
   },
   "engines": {
     "node": ">=22"

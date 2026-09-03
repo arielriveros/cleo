@@ -117,6 +117,26 @@ export type {
     AiGoal, BehaviorMachine, BehaviorState, BehaviorTransition, BehaviorParameter,
     BehaviorParameterSource, BehaviorParameterType, BehaviorRuntime, BehaviorSense, BehaviorStep,
 } from "./core/control/behavior";
+// Navigation. Yuka supplies the funnel and the region merge; everything that touches the engine is
+// ours, and no Yuka TYPE is re-exported here on purpose -- `cleoTypes.ts` feeds dist's declarations to
+// Monaco alongside a hand-listed set of `?raw` dependency types, and a dependency it has not been told
+// about degrades to `any` silently, because skipLibCheck swallows it.
+export { NavMeshNode, parseRoutes, parseLinks, isDefaultNavMeshSettings } from "./core/scene/nodes/navMeshNode";
+export {
+    CleoNavMesh, EMPTY_NAV_MESH_DATA, buildNavMesh, isNavigableUp, parseNavMeshData, polygonsFromData,
+    serializeNavMeshData,
+} from "./core/ai/navMesh";
+export type { NavMeshData, NavMeshJson, NavMeshBuildOptions, NavRoute, OffMeshLink } from "./core/ai/navMesh";
+export {
+    NAV_BAKE_DEFAULTS, EMPTY_BAKE_RESULT, bakeNavMesh, navBakeSettings, simplifyContour,
+} from "./core/ai/navBake";
+export type { NavBakeSettings, NavBakeResult, TriangleSoup } from "./core/ai/navBake";
+export {
+    REPATH_DEFAULTS, advancePath, clearNavPath, createNavPath, createRepathState, currentWaypoint,
+    followPath, hasPath, insetCorners, markRepathed, onFinalWaypoint, remainingDistance, repathPolicy,
+    setNavPath, shouldRepath,
+} from "./core/ai/navPath";
+export type { NavPath, RepathPolicy, RepathState } from "./core/ai/navPath";
 export { HistoryManager } from "./core/history";
 export type { HistoryEntry, HistoryOptions } from "./core/history";
 export { Mesh } from "./graphics/mesh";

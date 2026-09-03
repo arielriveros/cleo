@@ -21,6 +21,7 @@ import { UIRootNode } from '../src/core/scene/nodes/ui/uiRoot';
 import { UIPanelNode, UIStackNode, UISpacerNode } from '../src/core/scene/nodes/ui/uiContainers';
 import { UITextNode, UIImageNode } from '../src/core/scene/nodes/ui/uiContent';
 import { UIButtonNode, UIProgressBarNode, UISliderNode, UIToggleNode, UITextInputNode } from '../src/core/scene/nodes/ui/uiWidgets';
+import { NavMeshNode } from '../src/core/scene/nodes/navMeshNode';
 import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 
 /**
@@ -63,6 +64,7 @@ const CASES: { label: string, make: () => Node, cls: Function }[] = [
     { label: 'animatedSprite', make: () => new AnimatedSpriteNode('anim', new Sprite(), { frames: [1, 2], fps: 12, loop: true, constraints: 'cylindrical' }), cls: AnimatedSpriteNode },
     { label: 'sound-ambient', make: () => new SoundNode('music', { mode: 'ambient' }), cls: SoundNode },
     { label: 'sound-spatial', make: () => new SoundNode('emitter', { mode: 'spatial', sampleId: 'sample-1' }), cls: SoundNode },
+    { label: 'navMesh', make: () => new NavMeshNode('navigation'), cls: NavMeshNode },
     { label: 'uiRoot', make: () => new UIRootNode('UI'), cls: UIRootNode },
     { label: 'uiPanel', make: () => new UIPanelNode('panel'), cls: UIPanelNode },
     { label: 'uiText', make: () => new UITextNode('text'), cls: UITextNode },

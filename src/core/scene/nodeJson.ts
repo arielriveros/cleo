@@ -34,7 +34,7 @@ export function collectNodeIds(json: any, out: string[] = []): string[] {
  * would point at the FIRST enemy, so a crowd of NPCs would move as a single body.
  */
 const NODE_REF_KEYS = ['followId', 'lookAtId', 'cameraNodeId', 'uiTargetId', 'focusTargetId',
-                       'possessedId', 'aimSourceId'];
+                       'possessedId', 'aimSourceId', 'navMeshId'];
 
 /**
  * Rewrite node-reference fields (CameraRigNode's follow/lookAt/camera pins) through an id map.
