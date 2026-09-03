@@ -73,6 +73,24 @@ export interface NavBakeSettings {
     minTriangleArea: number;
     /** How far off a straight line a contour vertex may sit and still be dropped. */
     simplifyTolerance: number;
+    /**
+     * Fuse coplanar neighbours into larger convex regions before storing.
+     *
+     * **Off by default, because Yuka's merge can hang the process.** Its `_buildRegions` relinks
+     * half-edges to test a candidate merge and, when the test fails, restores from references it
+     * cached BEFORE any earlier merge moved them. A stale restore leaves a broken edge ring, and the
+     * very next `Polygon.convex()` walks `edge.next` in a `do/while (edge !== polygon.edge)` that
+     * never comes back round.
+     *
+     * Measured: a flat 5x5 heightfield merges in 1 ms; the same grid tilted into a 45 degree ramp
+     * never returns. Sloped ground is not an edge case -- it is every hillside in every outdoor
+     * scene -- so a bake that hangs the editor on one is not a trade worth taking for a smaller
+     * region count.
+     *
+     * Leaving it off costs one region per triangle. The funnel produces the same path either way; it
+     * is graph size and stored bytes that grow, and both are recoverable later by a merge we own.
+     */
+    mergeRegions: boolean;
 }
 
 export const NAV_BAKE_DEFAULTS: NavBakeSettings = {
@@ -80,6 +98,7 @@ export const NAV_BAKE_DEFAULTS: NavBakeSettings = {
     weldTolerance: 0.01,
     minTriangleArea: 1e-4,
     simplifyTolerance: 1e-3,
+    mergeRegions: false,
 };
 
 function num(v: unknown, fallback: number): number {
@@ -96,6 +115,7 @@ export function navBakeSettings(over?: Partial<NavBakeSettings> | null): NavBake
         weldTolerance: Math.max(1e-5, num(o.weldTolerance, d.weldTolerance)),
         minTriangleArea: Math.max(0, num(o.minTriangleArea, d.minTriangleArea)),
         simplifyTolerance: Math.max(0, num(o.simplifyTolerance, d.simplifyTolerance)),
+        mergeRegions: o.mergeRegions === true,
     };
 }
 
@@ -408,20 +428,38 @@ export function bakeNavMesh(soup: TriangleSoup, over?: Partial<NavBakeSettings> 
         }
     }
 
-    const merged = CleoNavMesh.build({ vertices, counts }, { merge: true });
-    if (!merged) {
-        return { ...EMPTY_BAKE_RESULT, walkableTriangles: welded.walkable, rejectedTriangles: welded.rejected };
-    }
-
-    // Harvest the merged contours, re-snapped to the weld grid. Yuka's merge can emit a vertex a
-    // float-epsilon off the grid its inputs were on, and the rebuild below twins by exact equality.
     const grid = settings.weldTolerance;
     const merged_contours: number[][] = [];
-    for (const region of merged.raw.regions as unknown as Region[]) {
-        const contour = contourOf((region as unknown as { getContour(r: Vector3[]): Vector3[] }).getContour([]));
-        if (contour.length < 9) continue;
-        for (let i = 0; i < contour.length; i++) contour[i] = Math.round(contour[i] / grid) * grid;
-        merged_contours.push(contour);
+
+    if (settings.mergeRegions) {
+        // OPT-IN ONLY, and it can hang -- see NavBakeSettings.mergeRegions.
+        const merged = CleoNavMesh.build({ vertices, counts }, { merge: true });
+        if (!merged) {
+            return {
+                ...EMPTY_BAKE_RESULT,
+                walkableTriangles: welded.walkable,
+                rejectedTriangles: welded.rejected,
+            };
+        }
+        // Re-snapped to the weld grid: Yuka's merge can emit a vertex a float-epsilon off the grid its
+        // inputs were on, and the rebuild below twins by exact equality.
+        for (const region of merged.raw.regions as unknown as Region[]) {
+            const contour = contourOf((region as unknown as { getContour(r: Vector3[]): Vector3[] }).getContour([]));
+            if (contour.length < 9) continue;
+            for (let i = 0; i < contour.length; i++) contour[i] = Math.round(contour[i] / grid) * grid;
+            merged_contours.push(contour);
+        }
+    } else {
+        // One region per triangle. The rebuild below still twins them into a connected graph, so the
+        // only thing lost against a merge is region COUNT.
+        for (let t = 0; t < counts.length; t++) {
+            const b = t * 9;
+            merged_contours.push([
+                vertices[b], vertices[b + 1], vertices[b + 2],
+                vertices[b + 3], vertices[b + 4], vertices[b + 5],
+                vertices[b + 6], vertices[b + 7], vertices[b + 8],
+            ]);
+        }
     }
     if (merged_contours.length === 0) {
         return {

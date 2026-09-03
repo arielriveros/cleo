@@ -141,6 +141,49 @@ describe('T-junctions', () => {
 // every region shrank correctly and the mesh came apart into three islands with no edges between
 // them. Clearance is applied per path instead, by navPath.insetCorners. This test pins the property
 // that broke, so a future erosion attempt has to keep it.
+// Yuka's region merge can HANG THE PROCESS, so it is opt-in and off by default. Its _buildRegions
+// relinks half-edges to test a candidate merge and, when the test fails, restores from references it
+// cached before an earlier merge moved them; the stale restore leaves a broken edge ring and the next
+// Polygon.convex() walks `edge.next` in a do/while that never comes back round.
+//
+// Measured against yuka 0.7.8: a flat 5x5 grid merges in 1ms, the same grid tilted 45 degrees never
+// returns. Sloped ground is every hillside in every outdoor scene, so this is not an edge case. These
+// tests would HANG rather than fail if the default were ever flipped back -- which is the point.
+describe('sloped ground bakes without hanging', () => {
+    /** A grid tilted into a ramp: every triangle coplanar, but not axis-aligned. */
+    function ramp(resolution: number): number[] {
+        const out: number[] = [];
+        for (let r = 0; r + 1 < resolution; r++) {
+            for (let c = 0; c + 1 < resolution; c++) {
+                const p = (rr: number, cc: number) => [cc, rr, rr];
+                const a = p(r, c), b = p(r + 1, c), cc2 = p(r + 1, c + 1), d = p(r, c + 1);
+                out.push(...a, ...cc2, ...d, ...a, ...b, ...cc2);
+            }
+        }
+        return out;
+    }
+
+    it('terminates on a 45 degree ramp', () => {
+        const result = bakeNavMesh(soup(ramp(5)), { maxSlope: 60 });
+        expect(result.walkableTriangles).toBe(32);
+        expect(result.regions).toBeGreaterThan(0);
+    });
+
+    it('keeps the ramp connected end to end', () => {
+        const result = bakeNavMesh(soup(ramp(5)), { maxSlope: 60 });
+        const mesh = buildNavMesh(result.data, { merge: false })!;
+        // Bottom of the ramp to the top.
+        expect(mesh.findPath([0.5, 0.5, 0.5], [3.5, 3.5, 3.5]).length).toBeGreaterThan(0);
+    });
+
+    it('is off by default and stays off through the tolerant reader', () => {
+        expect(NAV_BAKE_DEFAULTS.mergeRegions).toBe(false);
+        expect(navBakeSettings().mergeRegions).toBe(false);
+        expect(navBakeSettings({ mergeRegions: undefined }).mergeRegions).toBe(false);
+        expect(navBakeSettings({ mergeRegions: true }).mergeRegions).toBe(true);
+    });
+});
+
 describe('connectivity survives the whole pipeline', () => {
     it('keeps a corridor and its side room in one connected graph', () => {
         const level = [

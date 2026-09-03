@@ -122,6 +122,10 @@ export type {
 // Monaco alongside a hand-listed set of `?raw` dependency types, and a dependency it has not been told
 // about degrades to `any` silently, because skipLibCheck swallows it.
 export { NavMeshNode, parseRoutes, parseLinks, isDefaultNavMeshSettings } from "./core/scene/nodes/navMeshNode";
+export {
+    SoupBuilder, heightfieldSoup, mergeSoups, tessellateSource, tessellateSources,
+} from "./ai/navSources";
+export type { HeightfieldSource, NavPrimitive, NavSource } from "./ai/navSources";
 export { AISystem } from "./ai/aiSystem";
 export type { AISceneLike, NavMeshSource } from "./ai/aiSystem";
 export { aiStats, resetAIStats } from "./ai/aiStats";

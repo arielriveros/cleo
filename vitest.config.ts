@@ -43,6 +43,7 @@ export default mergeConfig(engineConfig, defineConfig({
                 'src/ai/navBake.ts',
                 'src/ai/navMesh.ts',
                 'src/ai/navPath.ts',
+                'src/ai/navSources.ts',
                 'src/core/cameraRigMath.ts',
                 'src/core/conditions.ts',
                 'src/core/control/behavior.ts',
