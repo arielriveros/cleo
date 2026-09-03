@@ -12,9 +12,10 @@ import { LS_KEYS, lsKey } from './lsScope';
 const tabStateKey = () => lsKey(LS_KEYS.editorTabs);
 
 // 'landscape' and 'tilemap' are the dimension-specific sculpting modes; the selector offers whichever
-// matches the scene's 2D/3D setting. A mode missing from MAIN_MODES silently resets to 'scene' on reload.
-export type MainMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'renderer';
-const MAIN_MODES: readonly MainMode[] = ['scene', 'landscape', 'tilemap', 'ui', 'renderer'];
+// matches the scene's 2D/3D setting. A mode missing from MAIN_MODES silently resets to 'scene' on reload
+// AND cannot be entered at all -- setEditorMode only commits a MainMode.
+export type MainMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'renderer' | 'input';
+export const MAIN_MODES: readonly MainMode[] = ['scene', 'landscape', 'tilemap', 'ui', 'renderer', 'input'];
 
 export type TabState = {
   version: 1;

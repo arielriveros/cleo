@@ -205,6 +205,27 @@ export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample';
 
 /**
+ * The editor mode a library tab puts the editor into. Exhaustive, like `MODE_RENDERS_VIEWPORT` above — a
+ * new tab kind with no entry is a compile error, which is the point: this used to be a `?:` chain ending
+ * in `: 'template'`, so a kind nobody remembered to add silently opened as a TEMPLATE tab, showing the
+ * wrong panels with no error anywhere.
+ *
+ * The scene tab is absent on purpose: its mode is the Main tab's sub-mode (`mainMode`), not a constant.
+ */
+export const TAB_EDITOR_MODE: Record<Exclude<TabKind, 'scene'>, EditorMode> = {
+  template: 'template',
+  material: 'material',
+  terrainMaterial: 'terrainMaterial',
+  animation: 'animation',
+  animationField: 'animationField',
+  model: 'model',
+  script: 'script',
+  tileset: 'tileset',
+  texture: 'texture',
+  soundSample: 'soundSample',
+};
+
+/**
  * Whether a tab's contents may drive AUTO-EXPOSURE. Exhaustive, like `MODE_RENDERS_VIEWPORT` above — a
  * new tab kind with no entry is a compile error.
  *
