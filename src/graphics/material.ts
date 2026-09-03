@@ -75,6 +75,63 @@ interface DefaultProperties extends HeightConfig {
     }
 }
 
+/**
+ * The Cel (toon) model. Not a physical response at all: the Lambert term is quantized into flat bands,
+ * the specular lobe is thresholded into a hard shape, and the rim is an artistic term no light in the
+ * scene contributes to. See chunks/celForward.wgsl.
+ *
+ * Deliberately narrower than `DefaultProperties`: there is no `reflectivity` and no specular MAP,
+ * because cel has no environment reflection to author and never packs a texture (which is what leaves
+ * texture unit 1 free for the ramp — see `Renderer._textureSlot`).
+ */
+interface CelProperties extends HeightConfig {
+    diffuse?: number[];
+    ambient?: number[];
+    /** Tint of the hard highlight. Not a reflectance — nothing in this model conserves energy. */
+    specular?: number[];
+    emissive?: number[];
+    emissiveIntensity?: number;
+    /** Width of the Blinn lobe that `specularThreshold` then cuts. */
+    shininess?: number;
+    opacity?: number;
+    /** See `DefaultProperties.alphaCutoff`; the rule is identical across every shading model. */
+    alphaCutoff?: number;
+
+    /** Step count for the quantizer. Ignored entirely when a ramp texture is assigned. */
+    bands?: number;
+    /**
+     * Edge width as a FRACTION OF ONE BAND, so the same number means the same thing at three bands and
+     * at eight. Shared by the band edges, the specular cut and the rim cut, so one control softens the
+     * whole material consistently.
+     */
+    bandSoftness?: number;
+    /** The lobe value the hard highlight cuts at. Higher is a smaller highlight. */
+    specularThreshold?: number;
+
+    rimColor?: number[];
+    /** Fresnel exponent. Higher is a tighter rim. */
+    rimPower?: number;
+    rimStrength?: number;
+
+    textures?: {
+        base?: string;
+        /**
+         * The light response as a 1-D gradient, sampled at `v = 0.5`. When assigned it REPLACES the
+         * numeric bands wholesale — which is the only way to express a hue shift into shadow, something
+         * no step count can do.
+         *
+         * Must be clamp-wrapped or its darkest band bleeds onto its brightest at `u = 1`. That is the
+         * engine default (see `Texture`), so it costs the author nothing.
+         */
+        ramp?: string;
+        emissive?: string;
+        normal?: string;
+        mask?: string;
+        /** See `DefaultProperties.textures.displacementMap`. Inert here, kept for slot parity. */
+        displacementMap?: string;
+    }
+}
+
 interface PBRProperties {
     baseColor?: number[];
     metallic?: number;
@@ -292,6 +349,11 @@ enum MaterialType {
     BasicSkinned = 'basicSkinned',
     DefaultSkinned = 'blinn_phongSkinned',
     PBR = 'pbr',
+    // Forward-only, like Blinn-Phong: `Renderer._inGBuffer` excludes both, and the forward overlay draws
+    // them. A cel material CANNOT go through the deferred pass — the G-buffer carries no shading-model
+    // id and the lighting pass is Cook-Torrance, so the bands and the rim would simply be lost.
+    Cel = 'cel',
+    CelSkinned = 'celSkinned',
     Terrain = 'terrain'
 }
 
@@ -380,6 +442,61 @@ export class Material {
             const tex = properties.textures.reflectivity;
             material.textures.set('reflectivityMap', tex);
         }
+
+        return material;
+    }
+
+    /**
+     * A Cel (toon) material.
+     *
+     * The defaults are chosen so a material created with no arguments already READS as cel shading —
+     * three bands, a compact highlight and a visible rim. A cel material with one band, no highlight and
+     * no rim is indistinguishable from a broken shader, which is why `rimStrength` does not default to 0
+     * the way an additive term normally would.
+     */
+    public static Cel(properties: CelProperties = {}, config?: MaterialConfig): Material {
+        const material = new Material(config);
+        material.type = MaterialType.Cel;
+        material.properties.set('diffuse', properties.diffuse || [1.0, 1.0, 1.0]);
+        // Falls back to the diffuse tint rather than to grey: the darkest band should read as a dark
+        // version of the surface, not as an unrelated colour.
+        material.properties.set('ambient', properties.ambient || properties.diffuse || [1.0, 1.0, 1.0]);
+        material.properties.set('specular', properties.specular || [1.0, 1.0, 1.0]);
+        material.properties.set('emissive', properties.emissive || [0.0, 0.0, 0.0]);
+        material.properties.set('emissiveIntensity',
+                                properties.emissiveIntensity === undefined ? 1.0 : properties.emissiveIntensity);
+        material.properties.set('shininess', properties.shininess || 32.0);
+        material.properties.set('opacity', properties.opacity === undefined ? 1.0 : properties.opacity);
+
+        // 3 is the canonical toon count — shadow, mid, lit. 2 reads as a cutout and 4+ starts to look
+        // like a gradient again.
+        material.properties.set('bands', properties.bands === undefined ? 3 : properties.bands);
+        // 2% of a band: visually a hard edge, but wide enough to antialias the terminator at 1080p.
+        material.properties.set('bandSoftness',
+                                properties.bandSoftness === undefined ? 0.02 : properties.bandSoftness);
+        // With shininess 32 this puts a compact highlight on a sphere rather than a hemisphere-wide wash.
+        material.properties.set('specularThreshold',
+                                properties.specularThreshold === undefined ? 0.5 : properties.specularThreshold);
+
+        material.properties.set('rimColor', properties.rimColor || [1.0, 1.0, 1.0]);
+        material.properties.set('rimPower', properties.rimPower === undefined ? 4.0 : properties.rimPower);
+        material.properties.set('rimStrength',
+                                properties.rimStrength === undefined ? 0.35 : properties.rimStrength);
+
+        material.properties.set('hasBaseTexture', properties.textures?.base ? true : false);
+        if (properties.textures?.base) material.textures.set('baseTexture', properties.textures.base);
+
+        material.properties.set('hasRampMap', properties.textures?.ramp ? true : false);
+        if (properties.textures?.ramp) material.textures.set('rampMap', properties.textures.ramp);
+
+        material.properties.set('hasEmissiveMap', properties.textures?.emissive ? true : false);
+        if (properties.textures?.emissive) material.textures.set('emissiveMap', properties.textures.emissive);
+
+        material.properties.set('hasNormalMap', properties.textures?.normal ? true : false);
+        if (properties.textures?.normal) material.textures.set('normalMap', properties.textures.normal);
+
+        applyMask(material, properties.textures?.mask, properties.alphaCutoff);
+        applyHeight(material, properties.textures?.displacementMap, properties);
 
         return material;
     }
@@ -475,7 +592,9 @@ export class Material {
             castShadow: this.config.castShadow,
             probeable: this.config.probeable,
         };
-        const normalizeType = (t: string) => t === 'basicSkinned' ? 'basic' : (t === 'blinn_phongSkinned' ? 'blinn_phong' : t);
+        const normalizeType = (t: string) => t === 'basicSkinned' ? 'basic'
+            : t === 'blinn_phongSkinned' ? 'blinn_phong'
+            : t === 'celSkinned' ? 'cel' : t;
         const type = normalizeType(this.type as any);
 
         if (type === 'basic') {
@@ -524,6 +643,40 @@ export class Material {
                     emissiveMap: this.textures.get('emissiveMap'),
                     displacementMap: this.textures.get('displacementMap'),
                     mask: this.textures.get('maskMap')
+                },
+                config: cfg
+            };
+        } else if (type === 'cel') {
+            return {
+                type,
+                diffuse: this.properties.get('diffuse'),
+                ambient: this.properties.get('ambient'),
+                specular: this.properties.get('specular'),
+                emissive: this.properties.get('emissive'),
+                emissiveIntensity: this.properties.get('emissiveIntensity'),
+                shininess: this.properties.get('shininess'),
+                opacity: this.properties.get('opacity'),
+                alphaCutoff: this.properties.get('alphaCutoff'),
+                bands: this.properties.get('bands'),
+                bandSoftness: this.properties.get('bandSoftness'),
+                specularThreshold: this.properties.get('specularThreshold'),
+                rimColor: this.properties.get('rimColor'),
+                rimPower: this.properties.get('rimPower'),
+                rimStrength: this.properties.get('rimStrength'),
+                displacementScale: this.properties.get('dispScale'),
+                invertHeight: this.properties.get('invertHeight'),
+                clipSilhouette: this.properties.get('clipSilhouette'),
+                // The AUTHORING spellings, which differ from the runtime map keys (`base` vs
+                // `baseTexture`, `ramp` vs `rampMap`, `mask` vs `maskMap`) exactly as the Basic and
+                // Blinn-Phong branches do. Anything walking these generically stays correct;
+                // a hand-maintained list would not.
+                textures: {
+                    base: this.textures.get('baseTexture'),
+                    ramp: this.textures.get('rampMap'),
+                    normal: this.textures.get('normalMap'),
+                    emissive: this.textures.get('emissiveMap'),
+                    mask: this.textures.get('maskMap'),
+                    displacementMap: this.textures.get('displacementMap')
                 },
                 config: cfg
             };
@@ -628,6 +781,39 @@ export class Material {
                     emissiveMap: m.textures?.emissiveMap,
                     displacementMap: m.textures?.displacementMap,
                     mask: m.textures?.mask
+                }
+            }, config);
+        } else if (type === 'cel') {
+            const texData = m.textures || {};
+            return Material.Cel({
+                diffuse: m.diffuse,
+                ambient: m.ambient,
+                specular: m.specular,
+                emissive: m.emissive,
+                emissiveIntensity: m.emissiveIntensity,
+                shininess: m.shininess,
+                opacity: m.opacity,
+                // Passed through UNDEFINED when absent, never `?? 0`: `applyMask` reads the absence as
+                // "no threshold stated" and supplies 0.5 whenever a mask is present, which is how a
+                // cutout authored before the property existed keeps working. A literal 0 would mean
+                // "explicitly off" and switch the cutout off instead.
+                alphaCutoff: m.alphaCutoff,
+                bands: m.bands,
+                bandSoftness: m.bandSoftness,
+                specularThreshold: m.specularThreshold,
+                rimColor: m.rimColor,
+                rimPower: m.rimPower,
+                rimStrength: m.rimStrength,
+                displacementScale: m.displacementScale ?? 0.05,
+                invertHeight: !!m.invertHeight,
+                clipSilhouette: !!m.clipSilhouette,
+                textures: {
+                    base: texData.base,
+                    ramp: texData.ramp,
+                    normal: texData.normal,
+                    emissive: texData.emissive,
+                    mask: texData.mask,
+                    displacementMap: texData.displacementMap
                 }
             }, config);
         } else { // 'blinn_phong' (or legacy 'default')

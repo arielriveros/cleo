@@ -46,6 +46,8 @@ import BasicInstancedProgram from './shaders/wgsl/basicInstanced.wgsl'
 import BasicSkinnedProgram from './shaders/wgsl/basicSkinned.wgsl'
 import BlinnPhongProgram from './shaders/wgsl/blinnPhong.wgsl'
 import BlinnPhongSkinnedProgram from './shaders/wgsl/blinnPhongSkinned.wgsl'
+import CelProgram from './shaders/wgsl/cel.wgsl'
+import CelSkinnedProgram from './shaders/wgsl/celSkinned.wgsl'
 import OutlineProgram from './shaders/wgsl/outline.wgsl'
 
 import ShadowMapProgram from './shaders/wgsl/shadowMap.wgsl'
@@ -176,7 +178,8 @@ import type { WebGL2RenderPassEncoder } from './rhi/webgl2/webgl2Commands';
 
 /** The material shader keys that receive per-frame forward lighting/shadow/env uploads. Custom
  *  forward materials are appended at runtime via `customForwardTypes()`. */
-const FORWARD_SHADERS = ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned', 'terrainForward'];
+const FORWARD_SHADERS = ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned', 'terrainForward',
+                         'cel', 'celSkinned'];
 
 
 let _forwardShaderCache: string[] = [...FORWARD_SHADERS];
@@ -1575,6 +1578,10 @@ export class Renderer {
             ['objectVelocity',               ObjectVelocityProgram],
             ['objectVelocitySkinned',        ObjectVelocitySkinnedProgram],
             ['objectVelocityBasicSkinned',   ObjectVelocityBasicSkinnedProgram],
+            // Forward Cel (toon). APPENDED, per the note at the top of this table — cel is
+            // forward-only, so there is no geometry twin to sit beside the other material pairs.
+            ['cel',                          CelProgram],
+            ['celSkinned',                   CelSkinnedProgram],
         ];
 
         // One program can carry two names, and they must be the SAME object: uniform state lives on
@@ -2085,6 +2092,7 @@ export class Renderer {
         // materials are camera post passes and never rasterize as mesh geometry at all.
         const dtype = node.model.material.type;
         return !(dtype === 'blinn_phong' || dtype === 'blinn_phongSkinned'
+                 || dtype === 'cel' || dtype === 'celSkinned'
                  || dtype.startsWith('custom:') || dtype.startsWith('customScreen:'));
     }
 
@@ -2726,6 +2734,10 @@ export class Renderer {
         pbrSkinned: PBRSkinnedProgram,
         blinn_phong: BlinnPhongProgram,
         blinn_phongSkinned: BlinnPhongSkinnedProgram,
+        // Cel declares no env cube, so its group 0 is five plain material slots and
+        // `_materialTextureFields` yields no null entry for `_materialBindGroup` to fill.
+        cel: CelProgram,
+        celSkinned: CelSkinnedProgram,
         terrainForward: TerrainForwardProgram,
         basic: BasicProgram,
         basicSkinned: BasicSkinnedProgram,
@@ -4530,7 +4542,9 @@ export class Renderer {
             if (mat.config.transparent) {
                 if (!selected && this._culled(node)) continue;
                 transparentQueue.push(node);
-            } else if (mat.type === 'blinn_phong' || mat.type === 'blinn_phongSkinned' || mat.type.startsWith('custom:')) {
+            } else if (mat.type === 'blinn_phong' || mat.type === 'blinn_phongSkinned'
+                       || mat.type === 'cel' || mat.type === 'celSkinned'
+                       || mat.type.startsWith('custom:')) {
                 // `_outsideFrustum`, not `_culled`: the geometry pass already tested and counted these
                 // (it culls before it skips forward-rendered material types), so counting again here
                 // would report every off-screen Blinn-Phong model twice.
@@ -5362,6 +5376,11 @@ export class Renderer {
             // parallax height field spends it; see the note in chunks/pbrGBuffer.wgsl for why this
             // gets its own unit rather than riding in the normal map's alpha the way terrain does.
             case 'displacementMap': return 5;
+            // The cel ramp rides unit 1, which is free on a cel material and only on a cel
+            // material: unit 1 belongs to the packed ORM / specular-reflectivity map, and those are
+            // written only by `systems/texturePacker.ts`, whose switch on the material type has no
+            // cel case. Adding one would collide here.
+            case 'rampMap': return 1;
             default: return 0;
         }
     }
@@ -6266,6 +6285,8 @@ export class Renderer {
                 shaderType = 'blinn_phongSkinned';
             } else if (shaderType === 'pbr') {
                 shaderType = 'pbrSkinned';
+            } else if (shaderType === 'cel') {
+                shaderType = 'celSkinned';
             }
             
             // Initialize the VAO for the animated model if not already done

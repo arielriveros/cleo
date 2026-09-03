@@ -189,6 +189,37 @@ export class AnimatedModel {
                     emissiveMap: m.textures?.emissiveMap
                 }
             }, config);
+        } else if (type === 'cel') {
+            const texData = m.textures || {};
+            // Written COMPLETE, unlike the Blinn-Phong arm below, which drops the height slot and the
+            // cutout that `Material.serialize` writes. That gap is pre-existing; do not copy it forward.
+            material = Material.Cel({
+                diffuse: m.diffuse,
+                ambient: m.ambient,
+                specular: m.specular,
+                emissive: m.emissive,
+                emissiveIntensity: m.emissiveIntensity,
+                shininess: m.shininess,
+                opacity: m.opacity,
+                alphaCutoff: m.alphaCutoff,
+                bands: m.bands,
+                bandSoftness: m.bandSoftness,
+                specularThreshold: m.specularThreshold,
+                rimColor: m.rimColor,
+                rimPower: m.rimPower,
+                rimStrength: m.rimStrength,
+                displacementScale: m.displacementScale ?? 0.05,
+                invertHeight: !!m.invertHeight,
+                clipSilhouette: !!m.clipSilhouette,
+                textures: {
+                    base: texData.base,
+                    ramp: texData.ramp,
+                    normal: texData.normal,
+                    emissive: texData.emissive,
+                    mask: texData.mask,
+                    displacementMap: texData.displacementMap
+                }
+            }, config);
         } else {
             const texData = m.textures || {};
             material = Material.Default({
@@ -305,7 +336,9 @@ export class AnimatedModel {
             castShadow: mat.config.castShadow,
             probeable: mat.config.probeable,
         };
-        const normalizeType = (t: string) => t === 'basicSkinned' ? 'basic' : (t === 'blinn_phongSkinned' ? 'blinn_phong' : t);
+        const normalizeType = (t: string) => t === 'basicSkinned' ? 'basic'
+            : t === 'blinn_phongSkinned' ? 'blinn_phong'
+            : t === 'celSkinned' ? 'cel' : t;
         const type = normalizeType(mat.type as any);
 
         let material: any;
@@ -342,6 +375,37 @@ export class AnimatedModel {
                     emissiveMap: mat.textures.get('emissiveMap'),
                     displacementMap: mat.textures.get('displacementMap'),
                     mask: mat.textures.get('maskMap')
+                },
+                config: cfg
+            };
+        } else if (type === 'cel') {
+            // Complete, including the height slot and the cutout the Blinn-Phong arm below still drops.
+            material = {
+                type,
+                diffuse: mat.properties.get('diffuse'),
+                ambient: mat.properties.get('ambient'),
+                specular: mat.properties.get('specular'),
+                emissive: mat.properties.get('emissive'),
+                emissiveIntensity: mat.properties.get('emissiveIntensity'),
+                shininess: mat.properties.get('shininess'),
+                opacity: mat.properties.get('opacity'),
+                alphaCutoff: mat.properties.get('alphaCutoff'),
+                bands: mat.properties.get('bands'),
+                bandSoftness: mat.properties.get('bandSoftness'),
+                specularThreshold: mat.properties.get('specularThreshold'),
+                rimColor: mat.properties.get('rimColor'),
+                rimPower: mat.properties.get('rimPower'),
+                rimStrength: mat.properties.get('rimStrength'),
+                displacementScale: mat.properties.get('dispScale'),
+                invertHeight: mat.properties.get('invertHeight'),
+                clipSilhouette: mat.properties.get('clipSilhouette'),
+                textures: {
+                    base: mat.textures.get('baseTexture'),
+                    ramp: mat.textures.get('rampMap'),
+                    normal: mat.textures.get('normalMap'),
+                    emissive: mat.textures.get('emissiveMap'),
+                    mask: mat.textures.get('maskMap'),
+                    displacementMap: mat.textures.get('displacementMap')
                 },
                 config: cfg
             };

@@ -24,6 +24,7 @@ describe('every material type round-trips a height map', () => {
         ['basic', () => Material.Basic({ color: [1, 1, 1], displacementMap: HEIGHT })],
         ['blinn_phong', () => Material.Default({ textures: { displacementMap: HEIGHT } })],
         ['pbr', () => Material.PBR({ textures: { displacementMap: HEIGHT } })],
+        ['cel', () => Material.Cel({ textures: { displacementMap: HEIGHT } })],
     ])('%s', (_type, make) => {
         const back = Material.parse((make() as Material).serialize());
         expect(back.textures.get('displacementMap')).toBe(HEIGHT);
@@ -34,7 +35,8 @@ describe('every material type round-trips a height map', () => {
         // invisible to it, which is why the old top-level shape needed three hand-written special cases.
         for (const m of [Material.Basic({ displacementMap: HEIGHT }),
                          Material.Default({ textures: { displacementMap: HEIGHT } }),
-                         Material.PBR({ textures: { displacementMap: HEIGHT } })])
+                         Material.PBR({ textures: { displacementMap: HEIGHT } }),
+                         Material.Cel({ textures: { displacementMap: HEIGHT } })])
             expect(m.serialize().textures.displacementMap).toBe(HEIGHT);
     });
 

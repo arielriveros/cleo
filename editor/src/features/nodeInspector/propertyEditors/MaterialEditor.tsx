@@ -20,10 +20,24 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   const model = props.node.model;
   const material = model.material;
 
-  type ShaderType = 'basic' | 'blinn_phong' | 'pbr' | 'custom';
+  // A terrain paint layer, which mounts this editor whole. HOISTED above `detectShaderType`, which
+  // reads it: at its old position further down it is still in the temporal dead zone when the
+  // `useState` below calls that function, which is a ReferenceError on every mount.
+  //
+  // It gates the Cel option, because terrain is DEFERRED-ONLY (Terrain._deriveLayerSurface switches on
+  // TerrainBaseType) and cel is forward-only — a cel terrain layer would silently render as PBR.
+  const isTerrain = (material as any).terrainMaterial === true
+    || (material as any).foliageInclude !== undefined;
+
+  type ShaderType = 'basic' | 'blinn_phong' | 'pbr' | 'cel' | 'custom';
+  // ORDER MATTERS. `basic` is the fallthrough, so every type that is not basic must be matched before
+  // it: a 'cel' material read as basic would have `material.type` rewritten to 'basic' by the seeding
+  // effect below, destroying it just by opening the inspector. `custom` stays first because a
+  // `custom:<hash>` key is base36 and can itself contain the substring 'cel'.
   const detectShaderType = (t: string): ShaderType =>
     t.startsWith('custom') ? 'custom'
-    : (t.includes('blinn_phong') || t.includes('default')) ? 'blinn_phong' : t.includes('pbr') ? 'pbr' : 'basic';
+    : (t.includes('blinn_phong') || t.includes('default')) ? 'blinn_phong' : t.includes('pbr') ? 'pbr'
+    : (!isTerrain && t.includes('cel')) ? 'cel' : 'basic';
   const [shaderType, setShaderType] = useState<ShaderType>(detectShaderType(material.type as string));
 
   const [diffuse, setDiffuse] = useState(vec3ToHex(material.properties.get('diffuse')));
@@ -38,6 +52,19 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   const [reflectance, setReflectance] = useState<number>(material.properties.get('reflectance') ?? 0.5);
   const [emissiveFactor, setEmissiveFactor] = useState<string>(vec3ToHex(material.properties.get('emissiveFactor') || [0,0,0]));
   const [emissiveIntensity, setEmissiveIntensity] = useState<number>(material.properties.get('emissiveIntensity') ?? 1);
+
+  // Cel. `diffuse`/`specular`/`ambient`/`shininess`/`emissive` are shared with Blinn-Phong and already
+  // have state above; only the toon-specific controls need their own.
+  const [bands, setBands] = useState<number>(material.properties.get('bands') ?? 3);
+  const [bandSoftness, setBandSoftness] = useState<number>(material.properties.get('bandSoftness') ?? 0.02);
+  const [specularThreshold, setSpecularThreshold] = useState<number>(material.properties.get('specularThreshold') ?? 0.5);
+  const [rimColor, setRimColor] = useState<string>(vec3ToHex(material.properties.get('rimColor') || [1,1,1]));
+  const [rimPower, setRimPower] = useState<number>(material.properties.get('rimPower') ?? 4);
+  const [rimStrength, setRimStrength] = useState<number>(material.properties.get('rimStrength') ?? 0.35);
+  // Whether a ramp texture is assigned, which decides if the Bands slider means anything. TextureInspector
+  // mutates `material.textures` in place and announces it only on the bus, so this has to follow the bus
+  // rather than be read once at render — otherwise the control goes stale the moment a ramp is dropped in.
+  const [hasRamp, setHasRamp] = useState<boolean>(!!material.textures.get('rampMap'));
   const [pbrOpacity, setPbrOpacity] = useState<number>(material.properties.get('opacity') ?? 1);
   // Parallax occlusion depth; inert without a Height map.
   const [dispScale, setDispScale] = useState<number>(
@@ -81,12 +108,10 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     !!((material as any).invertHeight ?? material.properties.get('invertHeight')));
   // Discard where the march walks off the face, so the outline follows the height field.
   const [clipSilhouette, setClipSilhouette] = useState<boolean>(!!material.properties.get('clipSilhouette'));
-  // A terrain paint layer, which mounts this editor whole. It marches its height map exactly as a
-  // standard material does, so Depth and Invert apply — but Clip silhouette does not: that test is
-  // against a 0..1 uv chart and terrain is tiled, so it has no border to clip to.
-  const isTerrain = (material as any).terrainMaterial === true
-    || (material as any).foliageInclude !== undefined;
-  // Cutout threshold, shared by all three shader types. 0 means no cutout.
+  // `isTerrain` is declared at the top of the component — a terrain layer marches its height map
+  // exactly as a standard material does, so Depth and Invert apply, but Clip silhouette does not: that
+  // test is against a 0..1 uv chart and terrain is tiled, so it has no border to clip to.
+  // Cutout threshold, shared by every shader type. 0 means no cutout.
   const [alphaCutoff, setAlphaCutoff] = useState<number>(material.properties.get('alphaCutoff') ?? 0);
   const [defaultOpacity, setDefaultOpacity] = useState<number>(material.properties.get('opacity') ?? 1);
 
@@ -175,6 +200,28 @@ export default function MaterialEditor(props: {node: ModelNode}) {
       if (material.properties.get('hasOcclusionMap') === undefined) material.properties.set('hasOcclusionMap', false);
       if (material.properties.get('emissiveIntensity') === undefined) material.properties.set('emissiveIntensity', 1.0);
       if (material.properties.get('hasEmissiveMap') === undefined) material.properties.set('hasEmissiveMap', false);
+    } else if (shaderType === 'cel') {
+      // Every CelMaterial member must end up written. An unknown uniform name is swallowed silently by
+      // setUniform, so a member this misses keeps the block's zero: `bands` 0 collapses to one flat
+      // band, which reads as "the cel shader is broken" rather than as a missing default.
+      const carried = material.properties.get('diffuse') || material.properties.get('baseColor') || material.properties.get('color') || [1,1,1];
+      material.properties.set('diffuse', carried);
+      if (!material.properties.get('ambient')) material.properties.set('ambient', carried);
+      if (!material.properties.get('specular')) material.properties.set('specular', [1,1,1]);
+      if (!material.properties.get('emissive')) material.properties.set('emissive', material.properties.get('emissiveFactor') || [0,0,0]);
+      if (material.properties.get('emissiveIntensity') === undefined) material.properties.set('emissiveIntensity', 1.0);
+      if (material.properties.get('shininess') === undefined) material.properties.set('shininess', 32.0);
+      if (material.properties.get('opacity') === undefined) material.properties.set('opacity', 1.0);
+      if (material.properties.get('bands') === undefined) material.properties.set('bands', 3);
+      if (material.properties.get('bandSoftness') === undefined) material.properties.set('bandSoftness', 0.02);
+      if (material.properties.get('specularThreshold') === undefined) material.properties.set('specularThreshold', 0.5);
+      if (!material.properties.get('rimColor')) material.properties.set('rimColor', [1,1,1]);
+      if (material.properties.get('rimPower') === undefined) material.properties.set('rimPower', 4.0);
+      if (material.properties.get('rimStrength') === undefined) material.properties.set('rimStrength', 0.35);
+      if (material.properties.get('hasBaseTexture') === undefined) material.properties.set('hasBaseTexture', false);
+      if (material.properties.get('hasRampMap') === undefined) material.properties.set('hasRampMap', false);
+      if (material.properties.get('hasNormalMap') === undefined) material.properties.set('hasNormalMap', false);
+      if (material.properties.get('hasEmissiveMap') === undefined) material.properties.set('hasEmissiveMap', false);
     }
   }, [shaderType, material]);
 
@@ -190,6 +237,12 @@ export default function MaterialEditor(props: {node: ModelNode}) {
 
   useEffect(() => { eventEmitter.emit('TEXTURES_CHANGED') }, [])
 
+  useEffect(() => {
+    const sync = () => setHasRamp(!!model.material.textures.get('rampMap'));
+    eventEmitter.on('TEXTURES_CHANGED', sync);
+    return () => { eventEmitter.off('TEXTURES_CHANGED', sync); };
+  }, [eventEmitter, model]);
+
   // Switching to or from 'custom' swaps the material INSTANCE, carrying the config across; built-in to
   // built-in stays on the same instance. Read model.material fresh each render so the swap is picked up.
   const handleShaderTypeChange = (next: ShaderType) => {
@@ -201,6 +254,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     } else if (cur === 'custom') {
       model.material = next === 'basic' ? Material.Basic({}, cfg)
         : next === 'pbr' ? Material.PBR({}, cfg)
+        : next === 'cel' ? Material.Cel({}, cfg)
         : Material.Default({}, cfg);
     }
     setShaderType(next);
@@ -382,6 +436,10 @@ export default function MaterialEditor(props: {node: ModelNode}) {
             <option value='basic'>Basic</option>
             <option value='blinn_phong'>Blinn-Phong</option>
             <option value='pbr'>PBR</option>
+            {/* Terrain is deferred-only and cel is forward-only, so a cel paint layer would silently
+                render as PBR. The Terrain Material inspector mounts this editor whole, which is the
+                only way that option would ever be reachable. */}
+            {!isTerrain && <option value='cel'>Cel (toon)</option>}
             <option value='custom'>Custom (shader)</option>
           </Select>
         </Field>
@@ -419,6 +477,72 @@ export default function MaterialEditor(props: {node: ModelNode}) {
               <PropertyTable columns={['40%', '60%']}>
                 {/* The Mask slot lives with the other textures above; this is just its threshold. It
                     replaces a hardcoded 0.5, and defaults to 0.5 for any material that predates it. */}
+                <PropertyRow label='Alpha cutoff' divider={false}>
+                  <Slider min={0} max={1} step={0.01} value={alphaCutoff} onChange={setNum('alphaCutoff', setAlphaCutoff)} />
+                </PropertyRow>
+              </PropertyTable>
+            </Section>
+          </>
+        )}
+
+        {shaderType === 'cel' && (
+          <>
+            <Section title='Colors'>
+              <PropertyTable columns={['40%', '60%']}>
+                <PropertyRow label='Diffuse'><ColorInput color={diffuse} onChange={setColor('diffuse', setDiffuse)} /></PropertyRow>
+                {/* The tint of the DARKEST band, not a separate light. Defaults to the diffuse colour so
+                    shadow reads as a dark version of the surface rather than as grey. */}
+                <PropertyRow label='Ambient'><ColorInput color={ambient} onChange={setColor('ambient', setAmbient)} /></PropertyRow>
+                <PropertyRow label='Specular'><ColorInput color={specular} onChange={setColor('specular', setSpecular)} /></PropertyRow>
+                <PropertyRow label='Emission'><ColorInput color={emission} onChange={setColor('emissive', setEmission)} /></PropertyRow>
+                <PropertyRow label='Rim'><ColorInput color={rimColor} onChange={setColor('rimColor', setRimColor)} /></PropertyRow>
+                <PropertyRow label='Opacity' divider={false}><Slider min={0} max={1} step={0.01} value={defaultOpacity} onChange={setNum('opacity', setDefaultOpacity)} /></PropertyRow>
+              </PropertyTable>
+            </Section>
+            <Section title='Toon'>
+              <PropertyTable columns={['40%', '60%']}>
+                <PropertyRow label='Bands' hint={hasRamp
+                  ? 'Ignored while a Ramp texture is assigned — the ramp supplies the light response directly.'
+                  : 'How many flat steps the light response is quantized into. 3 is shadow, mid and lit.'}>
+                  {hasRamp
+                    ? <span className='text-[11px] text-muted'>From the Ramp texture</span>
+                    : <Slider min={1} max={8} step={1} value={bands} readout={(v) => String(Math.round(v))}                              onChange={(v) => setNum('bands', setBands)(Math.round(v))} />}
+                </PropertyRow>
+                <PropertyRow label='Edge softness' hint='Width of every hard edge in this material — the band boundaries, the highlight and the rim — as a fraction of one band, so it means the same thing at any band count. 0 is aliased; a little antialiases the terminator.'>
+                  <Slider min={0} max={1} step={0.01} value={bandSoftness} onChange={setNum('bandSoftness', setBandSoftness)} />
+                </PropertyRow>
+                <PropertyRow label='Shininess' hint='Width of the specular lobe that the threshold below then cuts into a flat shape.'>
+                  <NumberInput value={Number(shininess)} onChange={setNum('shininess', setShininess)} />
+                </PropertyRow>
+                <PropertyRow label='Highlight cut' hint='Where the specular lobe is cut. Higher is a smaller, tighter highlight; at 1 it disappears.'>
+                  <Slider min={0} max={1} step={0.01} value={specularThreshold} onChange={setNum('specularThreshold', setSpecularThreshold)} />
+                </PropertyRow>
+                <PropertyRow label='Rim power' hint='Fresnel exponent. Higher is a tighter band at the silhouette.'>
+                  <Slider min={0.5} max={16} step={0.1} value={rimPower} onChange={setNum('rimPower', setRimPower)} />
+                </PropertyRow>
+                <PropertyRow label='Rim strength' divider={false} hint='Added outside every light, so it survives on a fragment nothing illuminates. 0 removes the rim.'>
+                  <Slider min={0} max={2} step={0.01} value={rimStrength} onChange={setNum('rimStrength', setRimStrength)} />
+                </PropertyRow>
+              </PropertyTable>
+            </Section>
+            <Section title='Textures'>
+              <div className='flex flex-wrap gap-3'>
+                {texSlot('Diffuse', 'baseTexture')}
+                {/* A 1-D gradient read left-to-right as unlit -> lit. Replaces the Bands slider above
+                    wholesale, and is the only way to shift HUE into shadow. */}
+                {texSlot('Ramp', 'rampMap')}
+                {texSlot('Normal', 'normalMap')}
+                {texSlot('Emission', 'emissiveMap')}
+                {texSlot('Mask', 'maskMap')}
+                {/* Inert on this material type, exactly as on Basic and Blinn-Phong — only the PBR
+                    chunks carry the parallax march. Present because a terrain paint layer can be based
+                    on any type and reads its height from this one slot. */}
+                {showHeight && texSlot('Height', 'displacementMap')}
+              </div>
+            </Section>
+            {heightSection}
+            <Section title='Cutout'>
+              <PropertyTable columns={['40%', '60%']}>
                 <PropertyRow label='Alpha cutoff' divider={false}>
                   <Slider min={0} max={1} step={0.01} value={alphaCutoff} onChange={setNum('alphaCutoff', setAlphaCutoff)} />
                 </PropertyRow>

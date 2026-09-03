@@ -179,6 +179,7 @@ describe('every shadow-sampling program reaches every group-3 binding', () => {
     // check by source text, and the failure it catches is a WebGPU validation error in someone's scene.
     const WGSL = join(SHADERS, 'wgsl');
     const CONSUMERS = ['pbr.wgsl', 'pbrSkinned.wgsl', 'blinnPhong.wgsl', 'blinnPhongSkinned.wgsl',
+                       'cel.wgsl', 'celSkinned.wgsl',
                        'deferredLighting.wgsl', 'shadowsChunk.wgsl'];
 
     for (const name of CONSUMERS) {

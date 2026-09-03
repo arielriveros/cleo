@@ -13,6 +13,7 @@ import { Material } from '../src/graphics/material';
 const basic = (p: any = {}) => Material.Basic(p);
 const blinn = (p: any = {}) => Material.Default(p);
 const pbr = (textures: any = {}, rest: any = {}) => Material.PBR({ textures, ...rest });
+const cel = (p: any = {}) => Material.Cel(p);
 
 describe('the mask slot exists on every textured material', () => {
     it('Basic accepts a mask', () => {
@@ -33,8 +34,15 @@ describe('the mask slot exists on every textured material', () => {
         expect(m.properties.get('hasMaskMap')).toBe(true);
     });
 
+    it('Cel accepts one, under the same authoring key as Blinn-Phong', () => {
+        const m = cel({ textures: { base: 'albedo', mask: 'cut' } });
+        expect(m.textures.get('maskMap')).toBe('cut');
+        expect(m.properties.get('hasMaskMap')).toBe(true);
+    });
+
     it('leaves the flag false and the slot empty when no mask is given', () => {
-        for (const m of [basic({ texture: 'a' }), pbr({ baseColorTexture: 'a' }), blinn({ textures: { base: 'a' } })]) {
+        for (const m of [basic({ texture: 'a' }), pbr({ baseColorTexture: 'a' }),
+                         blinn({ textures: { base: 'a' } }), cel({ textures: { base: 'a' } })]) {
             expect(m.properties.get('hasMaskMap')).toBe(false);
             expect(m.textures.has('maskMap')).toBe(false);
         }
@@ -46,12 +54,14 @@ describe('the threshold default is conditional, so old content is unaffected', (
         expect(basic({ mask: 'cut' }).properties.get('alphaCutoff')).toBe(0.5);
         expect(pbr({ mask: 'cut' }).properties.get('alphaCutoff')).toBe(0.5);
         expect(blinn({ textures: { mask: 'cut' } }).properties.get('alphaCutoff')).toBe(0.5);
+        expect(cel({ textures: { mask: 'cut' } }).properties.get('alphaCutoff')).toBe(0.5);
     });
 
     it('no mask means no cutout, so a material that never had one is untouched', () => {
         expect(basic({ texture: 'a' }).properties.get('alphaCutoff')).toBe(0);
         expect(pbr({ baseColorTexture: 'a' }).properties.get('alphaCutoff')).toBe(0);
         expect(blinn({ textures: { base: 'a' } }).properties.get('alphaCutoff')).toBe(0);
+        expect(cel({ textures: { base: 'a' } }).properties.get('alphaCutoff')).toBe(0);
     });
 
     it('an explicit cutoff always wins, including an explicit 0 that disables a mask', () => {
