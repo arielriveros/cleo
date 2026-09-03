@@ -18,6 +18,9 @@ export const SCRIPT_HANDLERS = [
     // Input actions. Listed here for the same reason: a handler driven by a device event must not be
     // able to throw out of the frame, which is exactly how the old registerKeyPress callbacks escaped.
     'onAction',
+    // A ControllerNode's per-frame decision, run in the scene's control pass. Same reason again — it is
+    // the one handler that runs OUTSIDE the node loop, so an escape would take the whole frame with it.
+    'onThink',
 ] as const;
 
 const modules = new Map<string, ScriptModule>();

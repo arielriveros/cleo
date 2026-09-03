@@ -22,8 +22,11 @@ import { CameraRigNode, Input } from 'cleo'
  *
  * Why the pivot can own its heading at all: the Playable root never rotates — ThirdPersonPlayable
  * turns the Model, not itself — so this node's local yaw is also its world yaw, which is what the
- * controller reads to decide "forward". It reads `this.yaw`, not `rotation[1]`: see _pivotYaw in
- * ThirdPersonPlayable for why the euler value is unusable past a quarter turn.
+ * controller reads to decide "forward". It reads `this.yaw`, not `rotation[1]`, because the euler value
+ * is unusable past a quarter turn — the decomposition can only express |yaw| <= 90.
+ *
+ * The Controller finds this rig by walking the possessed character's subtree, so it no longer matters
+ * what this node is called. The old `pivotName` match broke the moment anyone renamed it.
  */
 export default class ThirdPersonCameraPivotNode extends CameraRigNode {
   /** Mouse-wheel zoom range, applied to the rig's Arm Length. */
@@ -51,21 +54,17 @@ export default class ThirdPersonCameraPivotNode extends CameraRigNode {
   }
 
   onUpdate(delta: number, time: number) {
-    // The `Look` action, not the mouse. Its default bindings already carry what this method used to
-    // open with as an early return — "only while the pointer is locked, or while dragging with the left
-    // button" is expressed as a MODIFIER on the pointer bindings — and they add a right thumbstick and
-    // a touch drag for free. Rebinding any of that is now the player's business, not this script's.
-    const look = Input.vector('Look')
-
-    // `Look` is pixels (or stick deflection) for THIS frame, so it must not be scaled by delta — that
-    // would make sensitivity depend on the frame rate, since a long frame already carries proportionally
-    // more movement. addYaw/addPitch take exactly this kind of raw per-frame input and apply the rig's
-    // sensitivity, inversion and clamping themselves.
-    this.addYaw(-look[0])
-    this.addPitch(look[1])
-
-    // `Zoom` is bound to the wheel and to a pinch. It needs no "is the pointer over the canvas" check:
-    // the wheel listener lives on the canvas, so an event the canvas never received never arrives here.
+    // NO addYaw/addPitch here any more. The Controller possessing the character drives this rig's aim,
+    // in the scene's control pass — before the character reads it, which is what removes the frame of
+    // lag this script used to have between a camera swing and the strafe that should match it.
+    //
+    // Two writers on one rig is a camera that moves at DOUBLE speed, so if you want to steer it from a
+    // script instead, turn off "Drive the camera rig" on the Controller first.
+    //
+    // Zoom stays here: how far back the camera sits is a game decision, not a control-scheme one.
+    // `Zoom` is bound to the wheel and to a pinch, and it needs no "is the pointer over the canvas"
+    // check — the wheel listener lives on the canvas, so an event the canvas never received never
+    // arrives here.
     const zoom = Input.value('Zoom')
     if (zoom !== 0) {
       const next = this.armLength + zoom * this.zoomSpeed

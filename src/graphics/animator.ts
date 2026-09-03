@@ -12,6 +12,13 @@ import { ModelNode } from '../core/scene/nodes/modelNode';
 import { canAccessVariable } from '../core/scene/nodes/nodeVariables';
 import { InputSystem } from '../input/inputSystem';
 import { Logger } from '../core/logger';
+// The condition model and evaluator live in core/conditions.ts — they read a table of named values and
+// answer yes or no, which has nothing to do with animation, and the behavior state machine needs the
+// same latching. See that module for why the band is centred and why latches refresh machine-wide.
+import {
+    ConditionContext, conditionMet, consumeTriggers, forEachCondition, gateMet, isConditionGroup, updateLatch,
+} from '../core/conditions';
+import type { Condition, ConditionGroup, ConditionNode, ConditionOp } from '../core/conditions';
 
 /** Structural view of a physics body driving a ragdoll bone, so the physics layer stays unimported. */
 export interface RagdollBodyRef {
@@ -145,33 +152,17 @@ export interface AnimationState {
     y?: number;
 }
 
+// The condition model is `core/conditions.ts`'s, aliased here under its historical names. These four
+// aliases and the `isConditionGroup` re-export are what let `src/cleo.ts`, the editor's ConditionTree and
+// every authored state machine keep compiling unchanged after the extraction.
+
 /** Comparison operator for a transition condition (interpreted per parameter type). */
-export type AnimationConditionOp = 'gt' | 'lt' | 'eq' | 'neq' | 'true' | 'false' | 'trigger';
-
-export interface AnimationCondition {
-    param: string;
-    op: AnimationConditionOp;
-    /** Threshold for float comparisons ('gt' | 'lt' | 'eq' | 'neq'). */
-    value?: number;
-    /**
-     * Full width of a latching band centred on `value`, for 'gt' and 'lt' only: `> value` engages at
-     * `value + h/2` and releases at `value - h/2`. Latches are keyed by the condition's own terms.
-     */
-    hysteresis?: number;
-}
-
+export type AnimationConditionOp = ConditionOp;
+export type AnimationCondition = Condition;
 /** An AND/OR gate over conditions and nested gates. See {@link AnimationTransition.condition}. */
-export interface AnimationConditionGroup {
-    op: 'and' | 'or';
-    children: AnimationConditionNode[];
-}
-
-export type AnimationConditionNode = AnimationCondition | AnimationConditionGroup;
-
-/** A group carries `children`, a leaf carries `param`. `op` cannot discriminate them — both have one. */
-export function isConditionGroup(node: AnimationConditionNode): node is AnimationConditionGroup {
-    return 'children' in node;
-}
+export type AnimationConditionGroup = ConditionGroup;
+export type AnimationConditionNode = ConditionNode;
+export { isConditionGroup };
 
 export interface AnimationTransition {
     /** Source state name, or '*' to match any state. */
@@ -2211,7 +2202,7 @@ export class Animator {
                 ?? sm.transitions.find(x => x.from === '*' && x.to === b);
             if (!t) { lines.push(`${a} -> ${b}: (no transition)`); continue; }
             const parts: string[] = [];
-            this._forEachCondition(t, c => parts.push(this._describeCondition(c)));
+            forEachCondition(t.condition, t.conditions, c => parts.push(this._describeCondition(c)));
             const gates = [
                 t.minDwell ? `minDwell ${t.minDwell}s` : null,
                 t.hasExitTime ? `exitTime ${t.exitTime ?? 1}` : null,
@@ -2229,7 +2220,7 @@ export class Animator {
         const shown = typeof v === 'number' ? v.toFixed(3) : String(v);
         const target = (c.op === 'gt' || c.op === 'lt' || c.op === 'eq' || c.op === 'neq') ? ` ${c.value ?? 0}` : '';
         const band = c.hysteresis ? ` ±${c.hysteresis}` : '';
-        return `[${c.param} ${c.op}${target}${band} | ${c.param}=${shown} | ${this._conditionMet(c) ? 'MET' : 'not met'}]`;
+        return `[${c.param} ${c.op}${target}${band} | ${c.param}=${shown} | ${conditionMet(this._conditionCtx, c) ? 'MET' : 'not met'}]`;
     }
 
     /** Every parameter and its live value, so a condition reading a stale or defaulted one is visible. */
@@ -2426,90 +2417,26 @@ export class Animator {
 
             // EVERY trigger in the tree is consumed, including under an OR branch that did not
             // contribute: one left raised would fire some other transition next frame.
-            this._forEachCondition(t, c => { if (c.op === 'trigger') this._paramValues.set(c.param, false); });
+            consumeTriggers(this._conditionCtx, t.condition, t.conditions);
             this._enterState(t.to, t.blendTime);
             return;
         }
     }
 
+    /**
+     * The evaluator's view of this animator: the parameter table and the hysteresis latches, handed to
+     * the shared condition code in `core/conditions.ts`.
+     *
+     * The two maps ARE `_paramValues` and `_condLatch` — not copies — so nothing has to be synchronised
+     * and the extraction cost nothing at runtime.
+     */
+    private get _conditionCtx(): ConditionContext {
+        return { values: this._paramValues, latches: this._condLatch };
+    }
+
     /** A transition's gate: the compound tree when present, else the legacy flat (implicitly ANDed) list. */
     private _transitionMet(t: AnimationTransition): boolean {
-        if (t.condition) return this._nodeMet(t.condition);
-        return t.conditions.every(c => this._conditionMet(c));
-    }
-
-    private _nodeMet(node: AnimationConditionNode): boolean {
-        if (!isConditionGroup(node)) return this._conditionMet(node);
-        // An EMPTY group is no constraint, for OR as much as AND: a half-authored group must not block
-        // the transition forever, and an empty `conditions` list means "always fires".
-        if (node.children.length === 0) return true;
-        return node.op === 'or'
-            ? node.children.some(c => this._nodeMet(c))
-            : node.children.every(c => this._nodeMet(c));
-    }
-
-    /** Visit every condition leaf of a transition, whichever shape it is stored in. */
-    private _forEachCondition(t: AnimationTransition, visit: (c: AnimationCondition) => void): void {
-        const walk = (node: AnimationConditionNode) => {
-            if (isConditionGroup(node)) node.children.forEach(walk);
-            else visit(node);
-        };
-        if (t.condition) walk(t.condition);
-        else t.conditions.forEach(visit);
-    }
-
-    private _conditionMet(c: AnimationCondition): boolean {
-        const v = this._paramValues.get(c.param);
-        switch (c.op) {
-            case 'trigger': return v === true;
-            case 'true':    return v === true;
-            case 'false':   return v === false;
-            case 'gt':      return typeof v === 'number' && this._thresholdMet(c, v, true);
-            case 'lt':      return typeof v === 'number' && this._thresholdMet(c, v, false);
-            case 'eq':      return typeof v === 'number' && v === (c.value ?? 0);
-            case 'neq':     return typeof v === 'number' && v !== (c.value ?? 0);
-            default:        return false;
-        }
-    }
-
-    // A 'gt'/'lt' comparison, latching when the condition authors a hysteresis band. The band is CENTRED
-    // on the threshold, which is what pushes a `>`/`<` pair's two engage points apart; widening only the
-    // release would leave both halves satisfiable at the same value. The latch tracks the SIGNAL, which
-    // is what _refreshConditionLatches makes true.
-    private _thresholdMet(c: AnimationCondition, v: number, greater: boolean): boolean {
-        const threshold = c.value ?? 0;
-        if (!(typeof c.hysteresis === 'number' && c.hysteresis > 0)) {
-            return greater ? v > threshold : v < threshold;
-        }
-        // Idempotent, so calling it here as well as in the per-frame refresh is safe.
-        this._updateLatch(c);
-        return this._condLatch.get(this._latchKey(c)) === true;
-    }
-
-    /** Identity of a condition's band: the terms it is asking about, so two identical conditions share one. */
-    private _latchKey(c: AnimationCondition): string {
-        return `${c.param}|${c.op}|${c.value ?? 0}|${c.hysteresis ?? 0}`;
-    }
-
-    // Advance one hysteresis band. Idempotent within a frame: engaging is the stricter test.
-    private _updateLatch(c: AnimationCondition): void {
-        if (c.op !== 'gt' && c.op !== 'lt') return;
-        const h = typeof c.hysteresis === 'number' && c.hysteresis > 0 ? c.hysteresis : 0;
-        if (h === 0) return;
-        const v = this._paramValues.get(c.param);
-        if (typeof v !== 'number') return;
-
-        const greater = c.op === 'gt';
-        const threshold = c.value ?? 0;
-        const half = h / 2;
-        const engage = greater ? threshold + half : threshold - half;
-        const release = greater ? threshold - half : threshold + half;
-
-        const key = this._latchKey(c);
-        const met = this._condLatch.get(key) === true
-            ? (greater ? v > release : v < release)
-            : (greater ? v > engage : v < engage);
-        this._condLatch.set(key, met);
+        return gateMet(this._conditionCtx, t.condition, t.conditions);
     }
 
     // Advance EVERY band in the machine once per frame, whatever state is current. Load-bearing:
@@ -2519,7 +2446,9 @@ export class Animator {
     private _refreshConditionLatches(): void {
         const sm = this._stateMachine;
         if (!sm) return;
-        for (const t of sm.transitions) this._forEachCondition(t, c => this._updateLatch(c));
+        const ctx = this._conditionCtx;
+        for (const t of sm.transitions)
+            forEachCondition(t.condition, t.conditions, c => updateLatch(ctx, c));
     }
 
     /** Fire event markers on the current clip whose time was crossed in (prev, cur]. */

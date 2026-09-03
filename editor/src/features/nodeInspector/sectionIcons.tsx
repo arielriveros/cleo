@@ -26,4 +26,8 @@ export const AnimationIcon = () => (<S><path d='M5 12a7 7 0 1 1 2 5' /><path d='
 export const ScriptIcon = () => (<S><path d='M8 6 3 12l5 6' /><path d='M16 6l5 6-5 6' /></S>);
 export const SoundIcon = () => (<S><path d='M4 9.5h3.2L12 5.5v13L7.2 14.5H4z' /><path d='M15.4 9a4.2 4.2 0 0 1 0 6M18.2 6.6a7.8 7.8 0 0 1 0 10.8' /></S>);
 export const FalloffIcon = () => (<S><circle cx='12' cy='12' r='2.2' fill='currentColor' stroke='none' /><circle cx='12' cy='12' r='5.5' strokeDasharray='2 3' /><circle cx='12' cy='12' r='9' strokeDasharray='2 3' /></S>);
+// A walking figure: the pawn, as opposed to the brain driving it.
+export const CharacterIcon = () => (<S><circle cx='12' cy='4.5' r='2' /><path d='M12 6.5v6' /><path d='M12 8.5 8.5 11' /><path d='M12 8.5 15.5 11' /><path d='M12 12.5 9 20' /><path d='M12 12.5 15 20' /></S>);
+// A gamepad-ish rounded block with a link out of it: something that DRIVES something else.
+export const ControllerIcon = () => (<S><path d='M4 9.5h9a3.5 3.5 0 0 1 3.4 2.7l.6 3A2 2 0 0 1 15 17.6c-.7 0-1.3-.4-1.7-1L12.5 15h-5l-.8 1.6c-.4.6-1 1-1.7 1a2 2 0 0 1-2-2.4l.6-3A3.5 3.5 0 0 1 4 9.5Z' /><path d='M6 12v1.6M5.2 12.8h1.6' /><circle cx='19' cy='5.5' r='2' /><path d='M17.4 6.8 14 9.5' /></S>);
 export const RigIcon = () => (<S><circle cx='5.5' cy='18.5' r='2' /><path d='M7 17.2 13.5 9' /><path d='M11 6.2h3l1-1.7h3l1 1.7h1.5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H11a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1Z' /></S>);

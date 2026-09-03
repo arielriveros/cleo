@@ -19,6 +19,7 @@ import { UINode } from "./nodes/ui/uiNode";
 import { UIRootNode } from "./nodes/ui/uiRoot";
 import { parseNodeJson } from "./nodes/parseNodeJson";
 import { InputSystem } from "../../input/inputSystem";
+import { ControllerNode } from "./nodes/controllerNode";
 import type { ActionChange } from "../../input/resolveActions";
 import { mat4, vec3 } from "gl-matrix";
 import { DEFAULT_SCENE_AMBIENT_LUX, legacyAmbientFromSceneJson, MAX_LIGHTS } from "../../graphics/lighting";
@@ -85,6 +86,7 @@ export class Scene {
     private _tilemaps: Set<TilemapNode> = new Set();
     private _lodGroups: Set<LodGroupNode> = new Set();
     private _cameraRigs: Set<CameraRigNode> = new Set();
+    private _controllers: Set<ControllerNode> = new Set();
     private _sounds: Set<SoundNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
     private _uiRoots: Set<UIRootNode> = new Set();
@@ -334,6 +336,23 @@ export class Scene {
                 const timerStart = performance.now();
                 this._updateTimers(delta);
                 sceneStats.timerMs = performance.now() - timerStart;
+            }
+
+            // THE CONTROL PASS. Every driver writes its pawn's intent BEFORE the node loop, so a pawn
+            // reads a complete intent no matter where its controller sits in the tree. In `onUpdate` a
+            // controller authored after its pawn would write one frame late — the breadth-first mirror of
+            // the bug `CameraRigNode.lateUpdate` exists to avoid.
+            //
+            // It also means the aim rig is steered before the character reads it, so a strafe matches
+            // THIS frame's camera rather than the previous frame's.
+            if (this._hasStarted && !paused) {
+                const controlStart = performance.now();
+                for (const controller of this.controllers) {
+                    // Guarded per controller, like dispatchActions: one bad brain must not take the frame.
+                    try { controller.think(delta); }
+                    catch (error) { Logger.error(`Error in think for controller ${controller.name}: ${error}`, 'Script'); }
+                }
+                sceneStats.scriptMs += performance.now() - controlStart;
             }
 
             const loopStart = performance.now();
@@ -593,6 +612,7 @@ export class Scene {
         this._tilemaps = new Set();
         this._lodGroups = new Set();
         this._cameraRigs = new Set();
+        this._controllers = new Set();
         this._sounds = new Set();
         this._lightProbes = new Set();
         this._skybox = null;
@@ -616,6 +636,8 @@ export class Scene {
                 this._lodGroups.add(node);
             if (node instanceof CameraRigNode)
                 this._cameraRigs.add(node);
+            if (node instanceof ControllerNode)
+                this._controllers.add(node);
             if (node instanceof SoundNode)
                 this._sounds.add(node);
             if (node instanceof LightProbeNode)
@@ -832,6 +854,13 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._cameraRigs;
+    }
+
+    /** Every driver in the scene. Holds only SPAWNED nodes, so a despawn stops one for free. */
+    public get controllers(): Set<ControllerNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._controllers;
     }
 
     /** Every sound emitter in the scene. Holds only SPAWNED nodes, so a despawn silences one for free. */

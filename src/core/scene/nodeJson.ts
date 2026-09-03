@@ -27,8 +27,14 @@ export function collectNodeIds(json: any, out: string[] = []): string[] {
     return out;
 }
 
-/** Fields that store ANOTHER node's id and so must be rewritten alongside it. */
-const NODE_REF_KEYS = ['followId', 'lookAtId', 'cameraNodeId', 'uiTargetId', 'focusTargetId'];
+/**
+ * Fields that store ANOTHER node's id and so must be rewritten alongside it.
+ *
+ * `possessedId` is the one whose absence would be hardest to diagnose: every spawned enemy's controller
+ * would point at the FIRST enemy, so a crowd of NPCs would move as a single body.
+ */
+const NODE_REF_KEYS = ['followId', 'lookAtId', 'cameraNodeId', 'uiTargetId', 'focusTargetId',
+                       'possessedId', 'aimSourceId'];
 
 /**
  * Rewrite node-reference fields (CameraRigNode's follow/lookAt/camera pins) through an id map.

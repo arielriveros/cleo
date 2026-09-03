@@ -39,6 +39,8 @@ import {
   UISliderNode,
   UIToggleNode,
   UITextInputNode,
+  CharacterNode,
+  ControllerNode,
 } from 'cleo'
 import type EventEmitter from '../../utils/eventEmitter'
 import type { ShapeDescription } from '../EngineContext'
@@ -52,7 +54,7 @@ import {
   RampIcon, CornerRampIcon, StairsIcon, SpiralStairsIcon, ArchIcon, TubeIcon, HollowBoxIcon,
 } from './primitiveIcons'
 import {
-  EmptyIcon, TriggerIcon, CameraIcon, CameraRigIcon,
+  EmptyIcon, TriggerIcon, CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon,
   DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon,
@@ -64,11 +66,12 @@ import {
 // receive only the item's `id` through a DataTransfer.
 export const NEW_NODE_MIME = 'text/cleo-new-node';
 
-export type AddCategory = 'common' | 'cameras' | 'lights' | 'audio' | 'sprites' | 'primitives' | 'complex'
+export type AddCategory = 'common' | 'gameplay' | 'cameras' | 'lights' | 'audio' | 'sprites' | 'primitives' | 'complex'
   | 'environment' | 'uiLayout' | 'uiCore' | 'uiWidgets';
 
 export const ADD_CATEGORIES: { value: AddCategory, label: string }[] = [
   { value: 'common', label: 'Common' },
+  { value: 'gameplay', label: 'Gameplay' },
   { value: 'cameras', label: 'Cameras' },
   { value: 'lights', label: 'Lights' },
   { value: 'audio', label: 'Audio' },
@@ -157,6 +160,18 @@ export const ADD_ITEMS: AddItem[] = [
       rig.addChild(cameraNode);
       return rig;
     },
+  },
+
+  // The control pair. Added SEPARATELY on purpose: a Character is a pawn and often already exists
+  // (it is usually the actor you just built), while a Controller is the thing you add to drive it —
+  // and one controller may be re-pointed at different pawns over a game.
+  {
+    id: 'character', label: 'Character', icon: CharacterAddIcon, category: 'gameplay',
+    create: async () => new CharacterNode('character'),
+  },
+  {
+    id: 'controller', label: 'Controller', icon: ControllerAddIcon, category: 'gameplay',
+    create: async () => new ControllerNode('controller'),
   },
 
   // Lights/probes get their editor icon (__editor__LightSprite / __editor__ProbeHelper) added

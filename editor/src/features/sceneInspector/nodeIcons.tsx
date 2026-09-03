@@ -44,6 +44,17 @@ export const CameraRigIcon = () => (
   <S><rect x="11" y="4" width="10.5" height="8" rx="1.8" /><path d="M11 8H6.5a3 3 0 0 0-3 3v3" /><circle cx="3.5" cy="18" r="2.8" /></S>
 );
 
+// --- Gameplay --------------------------------------------------------------------------------------
+
+/** A walking figure: the pawn, as opposed to the brain driving it. */
+export const CharacterAddIcon = () => (
+  <S><circle cx="12" cy="4.5" r="2" /><path d="M12 6.5v6" /><path d="M12 8.5 8.5 11M12 8.5 15.5 11" /><path d="M12 12.5 9 20M12 12.5 15 20" /></S>
+);
+/** A gamepad with a link out of it: something that DRIVES something else. */
+export const ControllerAddIcon = () => (
+  <S><path d="M4 9.5h9a3.5 3.5 0 0 1 3.4 2.7l.6 3A2 2 0 0 1 15 17.6c-.7 0-1.3-.4-1.7-1L12.5 15h-5l-.8 1.6c-.4.6-1 1-1.7 1a2 2 0 0 1-2-2.4l.6-3A3.5 3.5 0 0 1 4 9.5Z" /><path d="M6 12v1.6M5.2 12.8h1.6" /><circle cx="19" cy="5.5" r="2" /><path d="M17.4 6.8 14 9.5" /></S>
+);
+
 // --- Lights ----------------------------------------------------------------------------------------
 
 /** Generic light: a lamp with rays. Used for the tree row, where the light's subtype is not yet known. */

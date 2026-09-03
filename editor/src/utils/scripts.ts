@@ -17,7 +17,7 @@ export const SCRIPT_ID_VAR = '__scriptId'
 export type ScriptBaseType =
   | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'cameraRig'
   | 'sprite' | 'animatedSprite' | 'landscape' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'lodGroup'
-  | 'sound'
+  | 'sound' | 'character' | 'controller'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput'
 
@@ -38,6 +38,8 @@ export const BASE_CLASS: Record<ScriptBaseType, string> = {
   skyLight: 'SkyLightNode',
   lodGroup: 'LodGroupNode',
   sound: 'SoundNode',
+  character: 'CharacterNode',
+  controller: 'ControllerNode',
   // Concrete UI classes, not a single UINode base, so a script gets typed members in Monaco.
   uiRoot: 'UIRootNode',
   uiPanel: 'UIPanelNode',
@@ -56,7 +58,7 @@ export const BASE_TYPE_LABEL: Record<ScriptBaseType, string> = {
   node: 'Node', model: 'Model', light: 'Light', lightProbe: 'Light Probe', skybox: 'Skybox',
   camera: 'Camera', cameraRig: 'Camera Rig', sprite: 'Sprite', animatedSprite: 'Animated Sprite', landscape: 'Landscape',
   volumetricClouds: 'Volumetric Clouds', skyAtmosphere: 'Sky Atmosphere', skyLight: 'Sky Light',
-  lodGroup: 'LOD Group', sound: 'Sound',
+  lodGroup: 'LOD Group', sound: 'Sound', character: 'Character', controller: 'Controller',
   uiRoot: 'UI Canvas', uiPanel: 'UI Panel', uiText: 'UI Text', uiImage: 'UI Image',
   uiButton: 'UI Button', uiStack: 'UI Stack', uiSpacer: 'UI Spacer',
   uiProgressBar: 'UI Progress Bar', uiSlider: 'UI Slider', uiToggle: 'UI Toggle',
@@ -243,6 +245,68 @@ export function scriptClassName(name: string): string {
 }
 
 /** Handler stubs that actually apply to a given UI base type. */
+/**
+ * Starters for the control node pair. Functions rather than strings, because both need the class name.
+ *
+ * The Character one deliberately shows a script READING its own state and leaves locomotion alone; the
+ * Controller one shows `onThink` writing intent, which is the whole extension point for custom AI.
+ */
+const CONTROL_STARTERS: Partial<Record<ScriptBaseType, (className: string, base: string) => string>> = {
+  character: (className, base) => `import { Logger, ${base} } from 'cleo'
+import type { ActionState } from 'cleo'
+
+// ${className} runs on a Character — a pawn whose walking, turning and jumping the ENGINE owns.
+//
+// Do not write this.velocity here: the character's locomotion writes it every frame from the intent a
+// Controller gave it, and a script fighting for the same field produces a character that stutters. To
+// influence movement, either tune the fields in the Character inspector or write the intent itself:
+//
+//   this.drive().speedScale = 0.5     // half speed, whatever is driving
+//
+// What a script on a Character IS for: reacting to what the character is doing, and holding game state.
+export default class ${className} extends ${base} {
+  public health: number = 100
+
+  onUpdate(delta: number, time: number) {
+    // Measured motion, from the physics body — see the Character's Animator outputs in the inspector.
+    if (this.planarSpeed > 0.1 && !this.isGrounded) Logger.log(this.name + ' is airborne', 'Script')
+  }
+
+  onAction(action: string, state: ActionState) {
+    if (action === 'Interact' && state.started) Logger.log(this.name + ' interacted', 'Script')
+  }
+}
+`,
+  controller: (className, base) => `import { Logger, ${base} } from 'cleo'
+
+// ${className} runs on a Controller — the thing that DRIVES a Character.
+//
+// onThink runs once per frame in the scene's control pass, before any node's onUpdate, and it runs LAST
+// within this controller — so whatever the Source (Player / AI) decided is already in place and this
+// method patches or replaces it.
+//
+// Set Source to "AI" in the inspector to write the whole intent yourself.
+export default class ${className} extends ${base} {
+  public followDistance: number = 3
+
+  onThink(delta: number) {
+    const pawn = this.possessed
+    if (!pawn) return
+
+    // \`drive()\` returns the pawn's intent for this frame and marks it fresh. \`move\` is [right, forward]
+    // in the frame named by \`basisYaw\` — leave basisYaw at 0 for world-relative movement.
+    const intent = pawn.drive()
+    intent.basisYaw = 0
+    intent.move[0] = 0
+    intent.move[1] = 1
+    // Face where you are going. Set speedScale below 1 to approach gently.
+    intent.aimYaw = 0
+    intent.speedScale = 1
+  }
+}
+`,
+}
+
 const UI_STARTERS: Partial<Record<ScriptBaseType, string>> = {
   uiButton: `  onPress() {
     Logger.log(this.name + ' pressed', 'Script')
@@ -279,6 +343,12 @@ const UI_STARTERS: Partial<Record<ScriptBaseType, string>> = {
 export function defaultScriptClass(name: string, baseType: ScriptBaseType): string {
   const base = BASE_CLASS[baseType]
   const className = scriptClassName(name)
+
+  // Control scripts get their own starter for the same reason UI ones do: the generic stub below drives
+  // the node by writing its position, which is exactly what a Character must NOT do — its locomotion
+  // owns its velocity, and a script fighting it produces a character that stutters.
+  const control = CONTROL_STARTERS[baseType]
+  if (control) return control(className, base)
 
   // UI scripts need a starter built from the handlers their base class actually has; the generic stub
   // below moves the node and reacts to collisions, which a screen rectangle cannot do.

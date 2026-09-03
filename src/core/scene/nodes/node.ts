@@ -190,6 +190,21 @@ export class Node {
   public onAction(action: string, state: ActionState): void {}
 
   /**
+   * Called once per frame on a ControllerNode, in the scene's CONTROL PASS — before any node's
+   * `onUpdate`, so the intent it writes is complete by the time a character reads it.
+   *
+   * This is where a custom brain lives. Write through `this.possessed?.drive()` to set the movement the
+   * character should attempt, or patch what the controller's own source already decided: the handler
+   * runs last, so it wins.
+   *
+   * Declared on every Node because the legacy `this.onX = ...` script path assigns handler slots
+   * unconditionally, but only a ControllerNode ever dispatches it.
+   *
+   * @param delta Seconds since the previous frame.
+   */
+  public onThink(delta: number): void {}
+
+  /**
    * Called when this node is removed from the scene, via {@link remove} or a parent's removal.
    * Pending {@link after}/{@link every} timers are cancelled around this call, so it is a safe place
    * to release anything the node owns. Re-parenting does NOT fire this.

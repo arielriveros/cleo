@@ -7,7 +7,7 @@
  */
 
 
-export type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'lodGroup' | 'cameraRig' | 'sound'
+export type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'lodGroup' | 'cameraRig' | 'sound' | 'character' | 'controller'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 

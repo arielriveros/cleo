@@ -95,7 +95,34 @@ describe('the shipped example project', () => {
 
     it('drives its character through actions', () => {
         const text = readFileSync(join(__dirname, '..', FIXTURES[0]), 'utf-8');
-        expect(text).toContain('Input.vector(');
         expect(text).toContain('onAction(');
+    });
+
+    it('carries no field from the pre-controller character script', () => {
+        // `_jumpCooldown` and `_smoothDir` were PRIVATE fields of the locomotion that now lives in the
+        // engine. Only a stale copy of the old script has them, so their presence is the cheapest
+        // possible signal that one of these three files was missed by the migration.
+        //
+        // Underscore-prefixed names on purpose: the migrated scripts mention the old design in prose —
+        // `pivotName` appears in a comment explaining what replaced it — and a guard that tripped on
+        // prose would have to be weakened or deleted the first time someone wrote a good comment.
+        for (const rel of FIXTURES) {
+            const text = readFileSync(join(__dirname, '..', rel), 'utf-8');
+            for (const gone of ['_jumpCooldown', '_smoothDir', '_turning'])
+                expect(text.includes(gone), `${rel} still carries ${gone}`).toBe(false);
+        }
+    });
+
+    it('uses the control node pair', () => {
+        // The scene has to demonstrate the thing: a Character that a Controller possesses. A Character
+        // with nothing driving it is inert by design, so a missed controller means a sample project that
+        // opens fine and simply does not respond.
+        const scene = readFileSync(join(__dirname, '..', FIXTURES[2]), 'utf-8');
+        expect(scene).toContain('"type":"character"');
+        expect(scene).toContain('"type":"controller"');
+        expect(scene).toContain('"possessedId"');
+        // ...and the template, or instantiating it gives a plain Node the Character script cannot bind to.
+        const templates = readFileSync(join(__dirname, '..', FIXTURES[1]), 'utf-8');
+        expect(templates).toContain('"type":"character"');
     });
 });

@@ -19,6 +19,11 @@ export { setDevice } from "./graphics/rhi/deviceHandle";
 export { WebGL2Device } from "./graphics/rhi/webgl2/webgl2Device";
 export { LodGroupNode } from "./core/scene/nodes/lodGroupNode";
 export { CameraRigNode } from "./core/scene/nodes/cameraRigNode";
+// The control node family. A ControllerNode possesses a CharacterNode and writes its intent; the
+// character turns intent into motion and never learns where it came from.
+export { CharacterNode } from "./core/scene/nodes/characterNode";
+export { ControllerNode, CONTROL_SOURCES, AIM_SOURCES } from "./core/scene/nodes/controllerNode";
+export type { ControlSource, AimSource, BlackboardValue } from "./core/scene/nodes/controllerNode";
 export type { FollowSpace, AimMode } from "./core/scene/nodes/cameraRigNode";
 export { LandscapeNode } from "./core/scene/nodes/landscapeNode";
 export { TilemapNode } from "./core/scene/nodes/tilemapNode";
@@ -75,6 +80,43 @@ export { Logger } from "./core/logger";
 export type { LogEntry, LogMethod, LogOptions } from "./core/logger";
 export { TypedEmitter, engineEventBus } from "./core/eventBus";
 export type { EngineEventMap, SceneChange, ChangeKind, StructureOp, NodePlacement } from "./core/eventBus";
+// The condition model and evaluator, shared by the animation state machine and the behavior one. The
+// animator re-exports the same types under their historical `Animation*` names.
+export {
+    CONDITION_OPS, createConditionContext, latchKey, updateLatch, forEachCondition, conditionMet,
+    conditionNodeMet, gateMet, consumeTriggers, parseCondition, parseConditionNode,
+} from "./core/conditions";
+export type { Condition, ConditionGroup, ConditionNode, ConditionOp, ConditionContext } from "./core/conditions";
+// The control layer: what a driver WANTS (intent) and how a character turns that into motion. Pure and
+// DOM-free — a `ControllerNode` fills the intent in from player actions, steering or a script, and a
+// `CharacterNode` consumes it, so neither half knows about the other.
+export {
+    INTENT_REQUESTS, createIntent, clearIntent, raiseRequest, isRequested, consumeRequest, decayRequests,
+    forwardFromYaw, rightFromYaw, moveWorldDirection, setMoveWorld, shortestAngle, applyPlayerReading,
+} from "./core/control/intent";
+export type { ControlIntent, IntentRequest, PlayerReading, Vec2 as ControlVec2 } from "./core/control/intent";
+export {
+    FACING_MODES, LOCOMOTION_DEFAULTS, locomotionTuning, createLocomotionState, stepLocomotion,
+} from "./core/control/locomotion";
+export type {
+    FacingMode, LocomotionTuning, LocomotionSense, LocomotionState, LocomotionOutput,
+} from "./core/control/locomotion";
+export {
+    STEERING_DEFAULTS, steeringTuning, createSteeringState, seek, flee, arrive, pursue, followTarget,
+    wander, separate, avoidObstacles, blendSteering, intentFromDesired,
+} from "./core/control/steering";
+export type { SteeringTuning, SteeringState, ProbeHit } from "./core/control/steering";
+// The behaviour state machine: patrol -> chase -> attack as authored data. Reuses core/conditions.ts,
+// which is what keeps it small enough to be worth having.
+export {
+    AI_GOALS, BEHAVIOR_SENSES, BEHAVIOR_PARAM_TYPES, EMPTY_BEHAVIOR, createBehaviorRuntime, entryState,
+    stateNamed, stepBehavior, parseBehaviorMachine, parseBehaviorState, parseBehaviorTransition,
+    parseBehaviorParameter, isDefaultBehaviorMachine,
+} from "./core/control/behavior";
+export type {
+    AiGoal, BehaviorMachine, BehaviorState, BehaviorTransition, BehaviorParameter,
+    BehaviorParameterSource, BehaviorParameterType, BehaviorRuntime, BehaviorSense, BehaviorStep,
+} from "./core/control/behavior";
 export { HistoryManager } from "./core/history";
 export type { HistoryEntry, HistoryOptions } from "./core/history";
 export { Mesh } from "./graphics/mesh";

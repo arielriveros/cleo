@@ -1,13 +1,17 @@
 # Example scripts — third-person strafe character
 
-Two class-based Script assets that together make a third-person **strafe** character: WASD movement relative to
-the camera, Left Shift to sprint, Space to jump, mouse to look. "Forward" is always where the camera looks —
-while moving, the character turns to face the camera and side-steps for A/D (the strafe locomotion set). While
-idle, the camera orbits freely around a still character, and swinging it far enough plays a turn-in-place.
+A third-person **strafe** character: move relative to the camera, sprint, jump, look. "Forward" is always where
+the camera looks — while moving, the character turns to face the camera and side-steps for left/right (the
+strafe locomotion set). While idle, the camera orbits freely around a still character, and swinging it far
+enough plays a turn-in-place.
+
+**Almost none of that is script any more.** Locomotion is a **Character** node and the input wiring is a
+**Controller** node, both engine types with their own inspectors. The two files here are what is left: a few
+lines of game-specific behaviour on top.
 
 | File | Attach to |
 |---|---|
-| `ThirdPersonPlayable.ts` | the **Playable** root (the node with the RigidBody) |
+| `ThirdPersonPlayable.ts` | the **Playable** root — a **Character** node (the one with the RigidBody) |
 | `ThirdPersonCameraPivot.ts` | the **Camera Pivot** child — must be a **Camera Rig** node |
 
 Script assets live in the editor's own storage, so these are source files to copy in: **Assets → + Add →
@@ -18,14 +22,16 @@ way the in-editor Monaco does — it is not part of the engine build.
 ## Hierarchy
 
 ```
-Playable            ← ThirdPersonPlayable.ts   (RigidBody; must sit at the scene root)
+Playable            ← a CHARACTER node (Add ▸ Gameplay ▸ Character). RigidBody; must sit at the scene root.
 ├── Model           ← the animated mesh; no script. Its Animator reads `moveDir` / `turnRequest` from its parent
 └── Camera Pivot    ← ThirdPersonCameraPivot.ts on a Camera Rig node (Add ▸ Cameras ▸ Camera Rig).
     └── Camera         Raise the rig to head height — the camera orbits that point.
+
+Player Controller   ← a CONTROLLER node (Add ▸ Gameplay ▸ Controller), possessing Playable.
 ```
 
-The pivot is found by name (`pivotName`), falling back to whichever child contains the Camera — so renaming it
-is fine.
+The Controller finds the Camera Rig by walking the character's subtree, so the pivot can be called anything.
+(It used to be matched by name, which broke the moment anyone renamed it.)
 
 `ThirdPersonCameraPivot.ts` extends **CameraRigNode**, so the pivot node itself has to be a Camera Rig — a
 plain Empty will not do. The rig owns the camera's placement, and most of what used to be script fields is now
@@ -336,6 +342,9 @@ Neither script names a key. They read ACTIONS, which are authored in the editor'
 same two scripts run on a keyboard, a gamepad and a touch screen, and a player can rebind any of it without
 the script changing.
 
+Which action drives what is set on the **Controller**, and what each action is bound to is set in the **Input**
+panel — so a player can rebind any of it without touching a script.
+
 | action | what it does | bound by default to |
 |---|---|---|
 | `Move` | move, relative to where the camera is looking (up = ahead, left/right = strafe) | `W` `A` `S` `D`, the arrow keys, the left stick, the on-screen joystick |
@@ -356,11 +365,22 @@ raise it for softer direction changes, drop it toward `0` for an instant snap.
 
 ## How they fit together
 
-Facing lives on the **body** (the Playable). The world look direction is simply the Camera Rig's yaw. While you
-hold a movement key, `ThirdPersonPlayable` turns the *body* toward that look direction and drives `node.velocity`
-camera-relative on the horizontal plane, publishing the strafe angle (relative to the body's facing) as
-`moveDir`. Let go and it stops turning the body, so the camera orbits a still character; swing past
-`turnThreshold` and a **root-motion turn clip** rotates the body to catch up.
+Each frame, in this order:
+
+1. **The Controller** reads its actions (`Move`, `Look`, `Jump`, `Sprint` — names, not keys) and writes a
+   **ControlIntent** into the Character: where it wants to go, where it wants to face, what it is asking for.
+   It also steers the Camera Rig with the look delta. This happens in the scene's *control pass*, before any
+   node's `onUpdate`, so the character acts on **this** frame's camera rather than the previous frame's.
+2. **The Character** turns that intent into velocity and facing. Nothing about it knows where the intent came
+   from, which is the point: set the Controller's **Source** to AI, or write an `onThink` handler on it, and
+   the same character walks itself with the same animations.
+3. **The Animator** reads `moveDir` / `turnRequest` / `isJumping` off the Character and picks the pose.
+
+Facing lives on the **body** (the Playable). The world look direction is simply the Camera Rig's yaw. While
+moving, the Character turns the *body* toward that look direction and drives its velocity camera-relative on
+the horizontal plane, publishing the strafe angle (relative to the body's facing) as `moveDir`. Let go and it
+stops turning the body, so the camera orbits a still character; swing past `turnThreshold` and a **root-motion
+turn clip** rotates the body to catch up.
 
 The body turning never disturbs the camera: a **Camera Rig** publishes its yaw as a *world* yaw and cancels its
 parent's rotation every frame (`CameraRigNode._applyRigTransform`), so the aim you set with the mouse is held no

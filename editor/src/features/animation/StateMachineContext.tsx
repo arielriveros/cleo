@@ -88,6 +88,7 @@ interface StateMachineContextValue {
   setCondition: (from: string, to: string, path: CondPath, patch: Partial<AnimationCondition>) => void
   setGroupOp: (from: string, to: string, path: CondPath, op: 'and' | 'or') => void
   removeNode: (from: string, to: string, path: CondPath) => void
+  setTransitionCondition: (from: string, to: string, next: AnimationConditionGroup) => void
 
   addEvent: (e?: Partial<AnimationEventMarker>) => void
   setEvent: (i: number, patch: Partial<AnimationEventMarker>) => void
@@ -430,6 +431,27 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
       return { ...prev, transitions: prev.transitions.map((x, idx) => idx === i ? { ...x, condition: next, conditions: [] } : x) }
     })
 
+  /**
+   * Replace a transition's whole condition tree.
+   *
+   * What `ConditionTreeView` writes through: it owns the recursion and hands back a finished tree, so
+   * the path-addressed mutators below are no longer reached from the UI. They are kept because the
+   * inspector and the graph still call some of them, and because a whole-tree write is the wrong shape
+   * for a single-field edit made from elsewhere.
+   *
+   * `conditions: []` clears the legacy flat list, exactly as `editCondition` does — a transition may not
+   * carry both, and the tree is what the evaluator consults when it is present.
+   */
+  const setTransitionCondition = (from: string, to: string, next: AnimationConditionGroup) =>
+    update(prev => {
+      const i = findT(prev.transitions, from, to)
+      if (i < 0) return prev
+      return {
+        ...prev,
+        transitions: prev.transitions.map((x, idx) => idx === i ? { ...x, condition: next, conditions: [] } : x),
+      }
+    })
+
   const addCondition = (from: string, to: string, path: CondPath) => {
     const p = sm.parameters[0]
     if (!p) return
@@ -515,7 +537,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     addParam, setParam, removeParam,
     addState, setState, removeState, stateIndex, commitLayout, deleteElements,
     links, linkOf, addTransition, setTransition, removeTransition, removeLink,
-    addCondition, addGroup, setCondition, setGroupOp, removeNode,
+    addCondition, addGroup, setCondition, setGroupOp, removeNode, setTransitionCondition,
     addEvent, setEvent, removeEvent,
     renameClip, deleteClip, rootMotionOf, toggleClipRootMotion,
     importAnimationFiles, importSkeletonNames, closeTab, activeTabId,
