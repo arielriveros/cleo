@@ -23,7 +23,8 @@ export { CameraRigNode } from "./core/scene/nodes/cameraRigNode";
 // The control node family. A ControllerNode possesses a CharacterNode and writes its intent; the
 // character turns intent into motion and never learns where it came from.
 export { CharacterNode } from "./core/scene/nodes/characterNode";
-export { ControllerNode, CONTROL_SOURCES, AIM_SOURCES } from "./core/scene/nodes/controllerNode";
+export { ControllerNode, CONTROL_SOURCES, AIM_SOURCES, BRAIN_KINDS } from "./core/scene/nodes/controllerNode";
+export type { BrainKind } from "./core/scene/nodes/controllerNode";
 export type { ControlSource, AimSource, BlackboardValue } from "./core/scene/nodes/controllerNode";
 export type { FollowSpace, AimMode } from "./core/scene/nodes/cameraRigNode";
 export { LandscapeNode } from "./core/scene/nodes/landscapeNode";

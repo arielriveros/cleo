@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
-import { AI_GOALS, BEHAVIOR_SENSES, ControllerNode, parseBehaviorMachine } from 'cleo'
+import { AI_GOALS, ControllerNode, parseBehaviorMachine } from 'cleo'
 import type {
   AiGoal, BehaviorMachine, BehaviorParameter, BehaviorParameterSource, BehaviorParameterType,
   BehaviorState, BehaviorTransition,
 } from 'cleo'
 import ConditionTreeView, { emptyConditionGroup } from '../../../components/ConditionTreeView'
+import ParamSourcePicker from './ParamSourcePicker'
 import type { ConditionParam } from '../../../components/ConditionTreeView'
 import {
   Button, ButtonWithConfirm, Select, Slider, TextInput, Toggle, cn, hintClass, labelClass,
@@ -28,12 +29,6 @@ const PARAM_HINT = 'What the conditions compare. Built-ins read the pawn’s mea
 const ENTRY_HINT = 'The state the machine starts in, and the one it falls back to if the held state is deleted.'
 const DWELL_HINT = 'Seconds the machine must have spent in the source state before this transition may fire. The guard against a pair that flips every frame.'
 
-/** Built-ins worth offering. The same measured-motion surface the Animator binds to. */
-const BUILTINS = [
-  'planarSpeed', 'currentSpeed', 'verticalSpeed', 'isGrounded', 'isFalling', 'isMoving',
-  'stillTime', 'movingTime', 'airTime', 'groundedTime', 'groundDistance', 'slopeAngle', 'turnRate',
-]
-
 const PARAM_TYPES: BehaviorParameterType[] = ['number', 'boolean', 'trigger']
 
 interface Props {
@@ -53,6 +48,11 @@ export default function BehaviorEditor({ node, onChange }: Props) {
     onChange()
   }
   void version
+
+  // Offered to the source picker so a machine can gate on a fuzzy output. Derived from what the
+  // model actually writes, so an output that no rule produces is never suggested.
+  const fuzzyOutputs = useMemo(
+    () => Array.from(new Set(node.fuzzy.rules.map(r => r.variable))), [node.fuzzy])
 
   const params: ConditionParam[] = useMemo(() => machine.parameters.map(p => ({
     name: p.name,
@@ -112,7 +112,8 @@ export default function BehaviorEditor({ node, onChange }: Props) {
                 ✕
               </ButtonWithConfirm>
             </div>
-            <ParamSource source={p.source} onChange={(source) => patchParam(i, { source })} />
+            <ParamSourcePicker source={p.source} fuzzyOutputs={fuzzyOutputs}
+              onChange={(source) => patchParam(i, { source })} />
           </div>
         ))}
         <Button size='sm' variant='ghost'
@@ -241,53 +242,3 @@ export default function BehaviorEditor({ node, onChange }: Props) {
 }
 
 /** Where one parameter reads its value from. */
-function ParamSource(
-  { source, onChange }: { source: BehaviorParameterSource; onChange(s: BehaviorParameterSource): void },
-) {
-  return (
-    <div className='flex items-center gap-1'>
-      <Select className='w-[104px]' value={source.kind}
-        onChange={(e) => {
-          const kind = e.target.value as BehaviorParameterSource['kind']
-          onChange(
-            kind === 'builtin' ? { kind, name: BUILTINS[0] }
-              : kind === 'sense' ? { kind, name: BEHAVIOR_SENSES[0] }
-              : kind === 'blackboard' ? { kind, key: 'target' }
-              : kind === 'variable' ? { kind, varName: '' }
-              : { kind: 'const', value: 0 })
-        }}>
-        <option value='builtin'>Built-in</option>
-        <option value='sense'>Sense</option>
-        <option value='blackboard'>Blackboard</option>
-        <option value='variable'>Variable</option>
-        <option value='const'>Constant</option>
-      </Select>
-
-      {source.kind === 'builtin' && (
-        <Select className='flex-1 min-w-0' value={source.name}
-          onChange={(e) => onChange({ kind: 'builtin', name: e.target.value })}>
-          {!BUILTINS.includes(source.name) && <option value={source.name}>{source.name}</option>}
-          {BUILTINS.map(b => <option key={b} value={b}>{b}</option>)}
-        </Select>
-      )}
-      {source.kind === 'sense' && (
-        <Select className='flex-1 min-w-0' value={source.name}
-          onChange={(e) => onChange({ kind: 'sense', name: e.target.value as typeof BEHAVIOR_SENSES[number] })}>
-          {BEHAVIOR_SENSES.map(s => <option key={s} value={s}>{s}</option>)}
-        </Select>
-      )}
-      {source.kind === 'blackboard' && (
-        <TextInput className='flex-1 min-w-0' value={source.key}
-          onChange={(key) => onChange({ kind: 'blackboard', key })} />
-      )}
-      {source.kind === 'variable' && (
-        <TextInput className='flex-1 min-w-0' value={source.varName}
-          onChange={(varName) => onChange({ kind: 'variable', varName })} />
-      )}
-      {source.kind === 'const' && (
-        <TextInput className='flex-1 min-w-0' value={String(source.value)}
-          onChange={(v) => onChange({ kind: 'const', value: v === 'true' ? true : v === 'false' ? false : (parseFloat(v) || 0) })} />
-      )}
-    </div>
-  )
-}
