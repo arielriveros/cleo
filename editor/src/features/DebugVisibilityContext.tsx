@@ -17,6 +17,7 @@ export type DebugCategory =
   | 'boundingBoxes'
   | 'skeleton'
   | 'animation'
+  | 'navMesh'
   | 'grid';
 
 export type DebugChannel = 'editor' | 'runtime';
@@ -44,6 +45,9 @@ export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
   // Runtime is the point of this one: a blend driven by MEASURED motion reads 0 everywhere in the editor,
   // because the editor has no physics. Play is the only place its inputs are real.
   { key: 'animation', label: 'Animation blend', runtimeAvailable: true },
+  // Worth having at runtime as well as in the editor: a bake can look right standing still and be
+  // wrong the moment an agent tries to cross a seam, and the overlay is how you see which.
+  { key: 'navMesh', label: 'Navigation mesh', runtimeAvailable: true },
   // Runtime-capable even though the grid is renderer chrome rather than a scene node: EngineContext's
   // reconcile asserts `setGridVisible` from whichever channel is in force, so Play honours this switch.
   { key: 'grid', label: 'Reference grid', runtimeAvailable: true },

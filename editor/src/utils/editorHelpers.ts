@@ -35,6 +35,7 @@ const TRIGGER_PREFIX = '__debug__trigger_';
 const SHAPE_PREFIX = '__debug__shape_';
 const AABB_PREFIX = '__debug__aabb_';
 const TERRAIN_PREFIX = '__debug__terrain_';
+const NAVMESH_PREFIX = '__debug__navmesh_';
 
 // Per-scene cache of the last-built shapes signature for each body/trigger id.
 const shapeSignatures = new WeakMap<Scene, Map<string, string>>();
@@ -472,6 +473,81 @@ function ensureTerrainDebug(scene: Scene, landscape: any) {
   };
 }
 
+/**
+ * Wireframe of a baked navigation mesh.
+ *
+ * Drawn at the WORLD ORIGIN with an identity transform, unlike the terrain wireframe which follows its
+ * landscape: navmesh data is baked in world space precisely so that moving the node cannot invalidate
+ * a path, and following the node here would smear the overlay away from the surface it describes.
+ *
+ * Each stored region is a convex contour, so a fan from its first vertex is a valid triangulation --
+ * the same property that lets the funnel cross one in a straight line.
+ */
+function buildNavMeshDebugMesh(navMesh: any): ModelNode | null {
+  const data = navMesh.data;
+  const counts: Uint32Array = data.counts;
+  const verts: Float32Array = data.vertices;
+  if (!counts || counts.length === 0) return null;
+
+  const positions: [number, number, number][] = [];
+  const normals: [number, number, number][] = [];
+  const uvs: [number, number][] = [];
+  const indices: number[] = [];
+
+  let read = 0;
+  for (let r = 0; r < counts.length; r++) {
+    const count = counts[r];
+    if (count < 3 || (read + count) * 3 > verts.length) break;
+    const base = positions.length;
+    for (let i = 0; i < count; i++) {
+      const b = (read + i) * 3;
+      positions.push([verts[b], verts[b + 1], verts[b + 2]]);
+      normals.push([0, 1, 0]);
+      uvs.push([0, 0]);
+    }
+    for (let i = 1; i + 1 < count; i++) indices.push(base, base + i, base + i + 1);
+    read += count;
+  }
+  if (indices.length === 0) return null;
+
+  const geometry = new Geometry(positions, normals, uvs, undefined, undefined, indices);
+  // Lifted a little so it does not z-fight the floor it was baked from -- the surface and the mesh are
+  // the same plane by construction, so without this the overlay stipples.
+  const node = new ModelNode(NAVMESH_PREFIX, new Model(
+    geometry, Material.Basic({ color: [0.1, 0.85, 0.75] }, { wireframe: true, castShadow: false })));
+  node.setPosition(Vec.vec3.fromValues(0, 0.02, 0));
+  return node;
+}
+
+/** Cheap identity of a bake, so the wireframe is rebuilt only when the mesh actually changes. */
+function navMeshSignature(navMesh: any): string {
+  const data = navMesh.data;
+  const counts: Uint32Array = data.counts;
+  const verts: Float32Array = data.vertices;
+  if (!counts || counts.length === 0) return 'empty';
+  // Length plus a few sampled coordinates: a re-bake that produced identical geometry should not
+  // churn the mesh, and one that moved a region will differ in at least one of these.
+  let hash = 0;
+  for (let i = 0; i < verts.length; i += Math.max(3, Math.floor(verts.length / 96)) ) hash += verts[i] * (i + 1);
+  return counts.length + '|' + verts.length + '|' + hash.toFixed(3);
+}
+
+function ensureNavMeshDebug(scene: Scene, navMesh: any) {
+  const name = NAVMESH_PREFIX + navMesh.id;
+  const sig = navMeshSignature(navMesh);
+  const cache = sigMapFor(scene);
+
+  const existing = scene.getNodesByName(name)[0];
+  if (existing && cache.get(name) === sig) return;
+  if (existing) scene.removeNode(existing);
+
+  const mesh = buildNavMeshDebugMesh(navMesh);
+  if (!mesh) { cache.delete(name); return; }
+  mesh.name = name;
+  scene.addNode(mesh);
+  cache.set(name, sig);
+}
+
 export function reconcileEditorHelpers(
   scene: Scene,
   bodies: Map<string, BodyDescription>,
@@ -537,6 +613,12 @@ export function reconcileEditorHelpers(
     }
   }
 
+  // 4b. Navigation meshes. Independently toggled from colliders: a navmesh is DERIVED from them, and
+  // the interesting question is usually where the two disagree.
+  if (show('navMesh')) {
+    for (const navMesh of scene.navMeshes) ensureNavMeshDebug(scene, navMesh);
+  }
+
   // 5. Trigger wireframes (green), following the target's world transform.
   if (show('triggers')) {
     for (const [id, trigger] of triggers) {
@@ -573,6 +655,12 @@ export function reconcileEditorHelpers(
     } else if (node.name.startsWith(TERRAIN_PREFIX)) {
       const id = node.name.slice(TERRAIN_PREFIX.length);
       if (!show('colliders') || !landscapeIds.has(id)) drop();
+    } else if (node.name.startsWith(NAVMESH_PREFIX)) {
+      const id = node.name.slice(NAVMESH_PREFIX.length);
+      const owner = scene.getNodeById(id);
+      // Dropped when hidden, when its node is gone, or when the bake was cleared -- otherwise a
+      // stale wireframe outlives the mesh it described and reads as a navmesh that still works.
+      if (!show('navMesh') || !owner || !(owner as any).isBaked) drop();
     } else if (node.name.startsWith(AABB_PREFIX)) {
       const id = node.name.slice(AABB_PREFIX.length);
       const owner = scene.getNodeById(id);
