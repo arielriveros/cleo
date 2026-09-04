@@ -41,6 +41,7 @@ import {
   UITextInputNode,
   CharacterNode,
   ControllerNode,
+  NavMeshNode,
 } from 'cleo'
 import type EventEmitter from '../../utils/eventEmitter'
 import type { ShapeDescription } from '../EngineContext'
@@ -56,7 +57,7 @@ import {
 import {
   EmptyIcon, TriggerIcon, CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon,
   DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon,
-  SpriteIcon, AnimatedSpriteIcon, TilemapIcon,
+  SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon,
   SoundIcon, AmbientSoundIcon,
 } from './nodeIcons'
@@ -172,6 +173,12 @@ export const ADD_ITEMS: AddItem[] = [
   {
     id: 'controller', label: 'Controller', icon: ControllerAddIcon, category: 'gameplay',
     create: async () => new ControllerNode('controller'),
+  },
+  {
+    // Not placeable: the bake is in WORLD space and ignores this node's transform, so dropping it at a
+    // point in the viewport would imply a relationship that does not exist.
+    id: 'navMesh', label: 'Nav Mesh', icon: NavMeshIcon, category: 'gameplay', placeable: false,
+    create: async () => new NavMeshNode('navigation'),
   },
 
   // Lights/probes get their editor icon (__editor__LightSprite / __editor__ProbeHelper) added

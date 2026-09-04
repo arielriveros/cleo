@@ -5,7 +5,7 @@ import { Logger, Node, isUINodeType } from 'cleo';
 import type { SceneChange } from 'cleo';
 import { SkyIcon } from '../nodeInspector/sectionIcons'
 import {
-  CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon, ModelIcon, LightIcon, LightProbeIcon, SkyboxIcon, SkyLightIcon, CloudsIcon,
+  CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon, NavMeshIcon, ModelIcon, LightIcon, LightProbeIcon, SkyboxIcon, SkyLightIcon, CloudsIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon,
 } from './nodeIcons'
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
@@ -23,7 +23,7 @@ import {
 /** Glyph per node type, as a table rather than a chain of per-type conditionals in the row. */
 const TYPE_ICONS: Record<string, () => JSX.Element> = {
   camera: CameraIcon, cameraRig: CameraRigIcon, model: ModelIcon,
-  character: CharacterAddIcon, controller: ControllerAddIcon,
+  character: CharacterAddIcon, controller: ControllerAddIcon, navMesh: NavMeshIcon,
   sprite: SpriteIcon, animatedSprite: AnimatedSpriteIcon, tilemap: TilemapIcon,
   light: LightIcon, lightProbe: LightProbeIcon,
   skybox: SkyboxIcon, volumetricClouds: CloudsIcon, skyAtmosphere: SkyIcon, skyLight: SkyLightIcon,

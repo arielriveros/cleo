@@ -55,6 +55,14 @@ export const ControllerAddIcon = () => (
   <S><path d="M4 9.5h9a3.5 3.5 0 0 1 3.4 2.7l.6 3A2 2 0 0 1 15 17.6c-.7 0-1.3-.4-1.7-1L12.5 15h-5l-.8 1.6c-.4.6-1 1-1.7 1a2 2 0 0 1-2-2.4l.6-3A3.5 3.5 0 0 1 4 9.5Z" /><path d="M6 12v1.6M5.2 12.8h1.6" /><circle cx="19" cy="5.5" r="2" /><path d="M17.4 6.8 14 9.5" /></S>
 );
 
+/**
+ * Navigation mesh: a triangulated patch of ground with a route threading across it. Reads as "walkable
+ * surface" rather than "graph", which is what an author is placing.
+ */
+export const NavMeshIcon = () => (
+  <S><path d="M3.5 8.5 12 4l8.5 4.5-3 8L12 20l-5.5-3.5Z" /><path d="M3.5 8.5 12 13l8.5-4.5M12 13v7" /><path d="M6.5 16.5 12 13l5.5 3.5" strokeDasharray="2.6 2.2" /></S>
+);
+
 // --- Lights ----------------------------------------------------------------------------------------
 
 /** Generic light: a lamp with rays. Used for the tree row, where the light's subtype is not yet known. */

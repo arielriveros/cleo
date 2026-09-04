@@ -1,4 +1,4 @@
-import { Node, ModelNode, SkyboxNode, LightNode, LightProbeNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, SoundNode, CharacterNode, ControllerNode } from 'cleo'
+import { Node, ModelNode, SkyboxNode, LightNode, LightProbeNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
 import ModelSlot from './ModelSlot'
@@ -16,6 +16,7 @@ import SkyLightEditor from './SkyLightEditor'
 import CameraRigEditor from './CameraRigEditor'
 import CharacterEditor from './CharacterEditor'
 import ControllerEditor from './ControllerEditor'
+import NavMeshEditor from './NavMeshEditor'
 import SoundEditor from './SoundEditor'
 import TilemapEditor from './TilemapEditor'
 import LandscapeEditor from './LandscapeEditor'
@@ -63,6 +64,7 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'cameraRig' && <CameraRigEditor node={props.node as CameraRigNode} /> }
           { props.node.nodeType === 'character' && <CharacterEditor node={props.node as CharacterNode} /> }
           { props.node.nodeType === 'controller' && <ControllerEditor node={props.node as ControllerNode} /> }
+          { props.node.nodeType === 'navMesh' && <NavMeshEditor node={props.node as NavMeshNode} /> }
           { props.node.nodeType === 'sound' && <SoundEditor node={props.node as SoundNode} /> }
           { props.node.nodeType === 'tilemap' && <TilemapEditor node={props.node as TilemapNode} /> }
           { props.node.nodeType === 'landscape' && <LandscapeEditor key={props.node.id} node={props.node as LandscapeNode} /> }
