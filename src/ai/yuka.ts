@@ -57,9 +57,29 @@ export {
     MemoryRecord,
     GameEntity,
 
+    // Fuzzy logic. The seven set shapes, the four hedges, and the module that combines them -- the
+    // machinery behind "how much do I want this, given several things that are each a matter of
+    // degree", which a threshold answers badly.
+    FuzzyModule,
+    FuzzyVariable,
+    FuzzyRule,
+    FuzzyAND,
+    FuzzyOR,
+    FuzzyVERY,
+    FuzzyFAIRLY,
+    TriangularFuzzySet,
+    LeftShoulderFuzzySet,
+    RightShoulderFuzzySet,
+    LeftSCurveFuzzySet,
+    RightSCurveFuzzySet,
+    NormalDistFuzzySet,
+    SingletonFuzzySet,
+
     // Math. Only ever crossed at the `interop.ts` boundary; nothing else should hold one of these.
     Vector3,
     Quaternion,
     Matrix4,
     Ray,
 } from 'yuka';
+
+export type { FuzzySet, FuzzyTerm } from 'yuka';

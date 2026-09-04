@@ -127,6 +127,15 @@ export {
     SoupBuilder, heightfieldSoup, mergeSoups, tessellateSource, tessellateSources,
 } from "./ai/navSources";
 export type { HeightfieldSource, NavPrimitive, NavSource } from "./ai/navSources";
+export {
+    DEFUZZIFICATIONS, EMPTY_FUZZY_MODEL, FUZZY_SET_SHAPES, FuzzyBrain, buildFuzzyModule,
+    isDefaultFuzzyModel, parseFuzzyModel, parseFuzzyRule, parseFuzzySet, parseFuzzyTerm,
+    parseFuzzyVariable,
+} from "./ai/fuzzy";
+export type {
+    Defuzzification, FuzzyModel, FuzzyRuleDefinition, FuzzySetDefinition, FuzzySetShape,
+    FuzzyTermNode, FuzzyVariableDefinition,
+} from "./ai/fuzzy";
 export { PERCEPTION_DEFAULTS, Perception, perceptionTuning } from "./ai/perception";
 export type {
     LineOfSightTest, PerceptionCandidate, PerceptionTuning, Sighting,

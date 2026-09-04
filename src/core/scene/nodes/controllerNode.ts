@@ -13,7 +13,8 @@ import {
 } from "../../control/steering";
 import type { ProbeHit, SteeringState, SteeringTuning } from "../../control/steering";
 import {
-    AI_GOALS, createBehaviorRuntime, isDefaultBehaviorMachine, parseBehaviorMachine, stepBehavior,
+    AI_GOALS, BEHAVIOR_SENSES, createBehaviorRuntime, isDefaultBehaviorMachine, parseBehaviorMachine,
+    stepBehavior,
 } from "../../control/behavior";
 import type { AiGoal, BehaviorMachine, BehaviorRuntime, BehaviorState } from "../../control/behavior";
 import {
@@ -24,6 +25,8 @@ import type { NavPath, RepathPolicy, RepathState } from "../../../ai/navPath";
 import { Perception, perceptionTuning } from "../../../ai/perception";
 import { yawFromDirection } from "../../../ai/interop";
 import type { LineOfSightTest, PerceptionCandidate, PerceptionTuning } from "../../../ai/perception";
+import { EMPTY_FUZZY_MODEL, FuzzyBrain, isDefaultFuzzyModel, parseFuzzyModel } from "../../../ai/fuzzy";
+import type { FuzzyModel } from "../../../ai/fuzzy";
 import { aiStats } from "../../../ai/aiStats";
 import { vec3 } from "gl-matrix";
 
@@ -185,6 +188,18 @@ export class ControllerNode extends Node {
      */
     public waypointRadius: number = 0.5;
 
+    /**
+     * An authored fuzzy model, or an empty one.
+     *
+     * Its INPUT variables are named after senses and motion builtins -- a variable called
+     * `distanceToTarget` is fed from that sense, one called `planarSpeed` from the pawn. That is a
+     * deliberate convention rather than a second mapping to author: the vocabulary already exists, and
+     * a mapping table would be one more place for the two to disagree.
+     *
+     * Outputs are read through a `{ kind: 'fuzzy' }` behaviour parameter.
+     */
+    public fuzzy: FuzzyModel = { ...EMPTY_FUZZY_MODEL };
+
     public steering: SteeringTuning = steeringTuning();
     /** How many rays to fan ahead for obstacle avoidance. Only fired while `steering.avoidDistance > 0`. */
     public whiskerCount: number = 3;
@@ -207,6 +222,11 @@ export class ControllerNode extends Node {
     private readonly _eye: vec3 = vec3.create();
     /** Ids offered to perception this frame, so a hit ON a candidate is not read as a wall. */
     private readonly _candidateIds = new Set<string>();
+    /** Built lazily from `fuzzy`, and rebuilt when the authored model is replaced. */
+    private _fuzzyBrain: FuzzyBrain | null = null;
+    private _fuzzySource: FuzzyModel | null = null;
+    private readonly _fuzzyInputs: Record<string, number> = {};
+    private _fuzzyOutputs: Record<string, number> = {};
     /** Bound once: a fresh closure per frame per agent is the kind of garbage that shows up in a HUD. */
     private readonly _lineOfSight: LineOfSightTest = (from, to, hit) => this._testLineOfSight(from, to, hit);
     private readonly _desired: vec3 = vec3.create();
@@ -580,6 +600,11 @@ export class ControllerNode extends Node {
     private _steer(pawn: CharacterNode, delta: number): void {
         clearIntent(this._intent);
 
+        // Before the machine, which may read a fuzzy output as one of its parameters -- and before
+        // `onThink`, which can read one through `fuzzyValue`. Not inside the machine's parameter
+        // refresh: a model with no machine is a legitimate setup, and it would never run.
+        this._refreshFuzzy(pawn);
+
         // A machine, when there is one, decides the goal; otherwise the node's own fields do. One state
         // with one goal is exactly equivalent to setting that goal by hand, so adding a machine is never
         // a behaviour change on its own.
@@ -774,6 +799,51 @@ export class ControllerNode extends Node {
         return stepped.state;
     }
 
+    /**
+     * Evaluate the fuzzy model for this frame, if there is one.
+     *
+     * Once per frame, before any parameter reads it: `defuzzify` re-runs every rule, so a machine with
+     * four fuzzy parameters would otherwise pay for the whole rule set four times.
+     *
+     * Inputs are resolved BY NAME against the same vocabulary everything else uses -- a sense first,
+     * then a motion builtin on the pawn, then a numeric blackboard entry. A variable named after
+     * nothing is simply never fed, and its rules see the bottom of its range.
+     */
+    private _refreshFuzzy(pawn: CharacterNode): void {
+        if (this.fuzzy !== this._fuzzySource) {
+            this._fuzzySource = this.fuzzy;
+            this._fuzzyBrain = isDefaultFuzzyModel(this.fuzzy) ? null : FuzzyBrain.from(this.fuzzy);
+            this._fuzzyOutputs = {};
+        }
+        const brain = this._fuzzyBrain;
+        if (!brain) return;
+
+        for (const name of brain.inputs) {
+            let value: number | undefined;
+            if ((BEHAVIOR_SENSES as readonly string[]).includes(name)) {
+                const sensed = this._sense(name, pawn);
+                value = typeof sensed === 'number' ? sensed : (sensed ? 1 : 0);
+            } else {
+                const read = (pawn as unknown as Record<string, unknown>)[name];
+                if (typeof read === 'number') value = read;
+                else if (typeof read === 'boolean') value = read ? 1 : 0;
+                else {
+                    const entry = this._blackboard.get(name);
+                    if (typeof entry === 'number') value = entry;
+                    else if (typeof entry === 'boolean') value = entry ? 1 : 0;
+                }
+            }
+            if (value !== undefined) this._fuzzyInputs[name] = value;
+        }
+        this._fuzzyOutputs = brain.evaluate(this._fuzzyInputs);
+    }
+
+    /** A defuzzified output, or 0 when there is no model or no such output. */
+    public fuzzyValue(name: string): number {
+        const value = this._fuzzyOutputs[name];
+        return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    }
+
     /** Fill the machine's parameter table for this frame. */
     private _refreshBehaviorParams(pawn: CharacterNode): void {
         const values = this._behaviorRuntime.ctx.values;
@@ -806,6 +876,9 @@ export class ControllerNode extends Node {
                 }
                 case 'sense':
                     value = this._sense(source.name, pawn);
+                    break;
+                case 'fuzzy':
+                    value = this.fuzzyValue(source.name);
                     break;
             }
             // A trigger a script raised this frame stays raised until a transition consumes it; anything
@@ -1010,6 +1083,8 @@ export class ControllerNode extends Node {
             // Written only when authored, so a controller that never opened the Behaviour section adds
             // nothing to the scene file.
             ...(isDefaultBehaviorMachine(this.behavior) ? {} : { behavior: this.behavior }),
+            // Same rule: a controller that never opened the Fuzzy section adds nothing to the scene.
+            ...(isDefaultFuzzyModel(this.fuzzy) ? {} : { fuzzy: this.fuzzy }),
             // The blackboard is RUNTIME state — a brain writes into it every frame — so only the entries
             // an author typed are carried, and those live in the node's own `variables` instead.
         };
@@ -1061,6 +1136,7 @@ export class ControllerNode extends Node {
         node.whiskerSpread = typeof json.whiskerSpread === 'number' && isFinite(json.whiskerSpread)
             ? Math.max(0, Math.min(360, json.whiskerSpread)) : node.whiskerSpread;
         node.behavior = parseBehaviorMachine(json.behavior);
+        node.fuzzy = parseFuzzyModel(json.fuzzy);
 
         // _commonParse adds the node to its parent — do not addChild again.
         Node.finishParse(node, parent, json);

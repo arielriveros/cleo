@@ -91,7 +91,14 @@ export type BehaviorParameterSource =
     | { kind: 'variable'; varName: string }
     | { kind: 'blackboard'; key: string }
     /** The few things only the controller knows, because they are about the goal rather than the pawn. */
-    | { kind: 'sense'; name: BehaviorSense };
+    | { kind: 'sense'; name: BehaviorSense }
+    /**
+     * A defuzzified output of the controller's fuzzy model.
+     *
+     * The escape hatch from thresholds: "am I winning" is a blend of health, distance and how many
+     * friends are left, and every way of writing that as `>` comparisons is a cliff somewhere.
+     */
+    | { kind: 'fuzzy'; name: string };
 
 export const BEHAVIOR_SENSES = [
     'distanceToTarget', 'angleToTarget', 'hasTarget', 'targetVisible', 'stateTime',
@@ -241,6 +248,10 @@ function parseSource(raw: unknown): BehaviorParameterSource {
             return (BEHAVIOR_SENSES as readonly string[]).includes(name)
                 ? { kind: 'sense', name: name as BehaviorSense }
                 : { kind: 'const', value: 0 };
+        }
+        case 'fuzzy': {
+            const name = str(s.name);
+            return name ? { kind: 'fuzzy', name } : { kind: 'const', value: 0 };
         }
         default:
             return { kind: 'const', value: typeof s.value === 'boolean' ? s.value : num(s.value, 0) };
