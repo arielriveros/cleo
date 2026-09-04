@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useCleoEngine } from "../EngineContext";
-import { Raycaster, ModelNode, Model, Geometry, Material, LandscapeNode } from "cleo";
+import { Raycaster, ModelNode, Model, Geometry, Material, LandscapeNode, markEditorOnly } from "cleo";
 
 // ArrayLike, not `Float32Array | number[]`: gl-matrix's `vec3` is `[number, number, number] |
 // IndexedCollection`, and IndexedCollection is assignable to neither of those.
@@ -46,6 +46,9 @@ export default function LandscapeBrush({ viewportRef }: Props) {
             '__editor__terrainBrush',
             new Model(buildRingGeometry(48), Material.Basic({ color: [1, 0.9, 0.2] }, { wireframe: true, castShadow: false }))
         );
+        // Chrome: this routes the cursor into the renderer's overlay layer, past the post chain, so
+        // the brush ring cannot bloom or smear into depth of field. The name prefix does not do this.
+        markEditorOnly(ring);
         ring.setRotation([-90, 0, 0]); // lie flat on the ground (XZ)
         ring.visible = false;
         editorScene.addNode(ring);

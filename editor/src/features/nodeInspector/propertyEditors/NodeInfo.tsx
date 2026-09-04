@@ -3,10 +3,15 @@ import type { MotionBlurMode } from 'cleo'
 import { useState, useEffect } from 'react';
 import { useCleoEngine } from '../../EngineContext';
 import Collapsable from '../../../components/Collapsable'
-import { PropertyTable, PropertyRow, TextInput, ButtonWithConfirm, Toggle, Hint, SegmentedControl } from '../../../components/ui'
+import { PropertyTable, PropertyRow, TextInput, ButtonWithConfirm, Toggle, Hint, SegmentedControl, Select } from '../../../components/ui'
 import { InfoIcon } from '../sectionIcons'
 import { validateNodeName } from '../../../utils/nodeNames'
 import { modelNodeOf } from '../../../utils/models'
+import { useHistory } from '../../HistoryContext'
+import { CONVERTIBLE_NODE_TYPES, findNodeTypeOption, nodeTypeLabel } from '../../sceneInspector/nodeTypeCatalog'
+import { findAddItem } from '../../sceneInspector/addCatalog'
+import { prepareNodeTypeChange, rebuildNodeInPlace } from '../../../utils/nodeTypeConversion'
+import { baseTypeMatchesNode } from '../../../utils/scripts'
 
 const MOTION_BLUR_OPTIONS: { value: MotionBlurMode; label: string; title: string }[] = [
   { value: 'full', label: 'Full', title: 'The true screen-space motion. A node travelling with the camera does not move on screen, so it already stays sharp.' },
@@ -14,11 +19,13 @@ const MOTION_BLUR_OPTIONS: { value: MotionBlurMode; label: string; title: string
   { value: 'none', label: 'None', title: 'Never blurred, and never smeared over by neighbouring streaks either.' },
 ]
 
-export default function NodeInfo(props: {node: Node, readOnly?: boolean}) {
-  const { eventEmitter: eventEmitter, editorScene } = useCleoEngine();
+export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTypeChange?: boolean}) {
+  const { eventEmitter: eventEmitter, editorScene, scriptAssetOf, attachScriptToNode, detachScriptFromNode } = useCleoEngine();
+  const { push, silently } = useHistory();
   const [nodeName, setNodeName] = useState(props.node.name);
   const [spawnOnStart, setSpawnOnStart] = useState(props.node.spawnOnStart);
   const [motionBlur, setMotionBlur] = useState<MotionBlurMode>(props.node.motionBlur);
+  const [converting, setConverting] = useState(false);
 
   useEffect(() => {
     setNodeName(props.node.name);
@@ -49,6 +56,76 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean}) {
     setMotionBlur(value);
     props.node.motionBlur = value;
     eventEmitter.emit('SCENE_CHANGED');
+  }
+
+  // The node OBJECT is replaced by a conversion while its id is not, so nothing keyed on the id re-resolves
+  // on its own: useSelectedNode's effect deps are [editorScene, selectedNode] and neither changed, so this
+  // panel would keep rendering the destroyed node; and HistoryContext's snapshot baseline for the id still
+  // holds the OLD type's subtree, so the next unrelated edit would record an undo that also reverts the
+  // conversion. Clearing the selection and re-setting it in a LATER task re-runs both effects — same-tick
+  // React would batch the pair into a no-op state write.
+  const reselectAfterConvert = (id: string) => {
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'structure' });
+    eventEmitter.emit('SELECT_NODE', null);
+    setTimeout(() => eventEmitter.emit('SELECT_NODE', id), 0);
+  }
+
+  const handleTypeChange = async (target: string) => {
+    const option = findNodeTypeOption(target);
+    if (!option || option.nodeType === props.node.nodeType || converting) return;
+    // A <select> can fire again while a heavy root is still serializing, and the second call would
+    // serialize a node the first is about to destroy.
+    setConverting(true);
+    const scene = editorScene;
+    const nodeId = props.node.id;
+    try {
+      const item = option.defaultFrom ? findAddItem(option.defaultFrom) : undefined;
+      // None of the offered items reads its AddContext (only Trigger and the two skies do, and all three
+      // are outside the convertible set), so a throwaway trigger map is honest here.
+      const prepared = await prepareNodeTypeChange(props.node, option.nodeType,
+        item ? () => item.create({ editorScene: scene, eventEmitter, triggers: new Map() }) : null);
+      if (!prepared) return;
+      const { before, after } = prepared;
+
+      // A script asset declares the node class it extends, and the link is keyed by node id — so it would
+      // survive the rebuild and leave a Character script attached to a node that is no longer a Character,
+      // to be re-applied on the next save. Decided BEFORE the rebuild so the undo can put it back; scripts
+      // based on plain `node` attach to anything and are never touched.
+      const script = scriptAssetOf(props.node);
+      const strandedScript = script && !baseTypeMatchesNode(script.baseType, option.nodeType) ? script : null;
+
+      // The rebuild fires a `remove` and an `add` structural event, which the recorder would file as two
+      // unrelated undo steps, neither of which reverses the conversion. One hand-built entry replaces both.
+      // `silently` only suspends for the duration of a SYNCHRONOUS call, which is why the async prep above
+      // is already done by this point.
+      const applyAfter = () => {
+        silently(() => {
+          const node = rebuildNodeInPlace(scene, after);
+          // unlinkScript clears both the __scriptId variable and the id-keyed source, so the redo has to
+          // repeat it: the `after` blob still carries the variable it was serialized with.
+          if (node && strandedScript) detachScriptFromNode(node);
+        });
+        reselectAfterConvert(nodeId);
+      }
+      const applyBefore = () => {
+        silently(() => {
+          const node = rebuildNodeInPlace(scene, before);
+          // `before` restores the __scriptId variable, but not the source in the scripts map — only
+          // attachScriptToNode writes that.
+          if (node && strandedScript) attachScriptToNode(node, strandedScript.id);
+        });
+        reselectAfterConvert(nodeId);
+      }
+
+      applyAfter();
+      if (strandedScript)
+        Logger.warn(`Detached script "${strandedScript.name}": it extends ${strandedScript.baseType} and cannot attach to a ${option.nodeType} node.`, 'Editor');
+      push({ label: `Change type to ${option.label}`, undo: applyBefore, redo: applyAfter });
+    } catch (e) {
+      Logger.error(`Could not change node type to ${option.label}: ${e}`, 'Editor');
+    } finally {
+      setConverting(false);
+    }
   }
 
   const handleNodeNameChange = () => {
@@ -86,7 +163,21 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean}) {
               : <span className='text-muted'>{props.node.name}</span>}
           </PropertyRow>
           <PropertyRow label='ID'><span className='text-muted'>{props.node.id}</span></PropertyRow>
-          <PropertyRow label='Type'><span className='text-muted'>{props.node.nodeType.charAt(0).toUpperCase() + props.node.nodeType.slice(1)}</span></PropertyRow>
+          <PropertyRow label='Type'
+            hint={props.allowTypeChange
+              ? 'What this template becomes when it is placed. Changing it rebuilds the root in place: its name, transform, children, variables, script and physics are kept, and everything specific to the old type — the mesh, the light, the camera — is replaced with a default for the new one. A Camera Rig arrives without its camera, since the children you already have are kept instead. Undoable.'
+              : undefined}>
+            {props.allowTypeChange && !props.readOnly
+              ? <Select className='w-full' value={props.node.nodeType} disabled={converting}
+                  onChange={(e) => void handleTypeChange(e.target.value)}>
+                  {/* A root that is already something not on the list — an old template rooted at a skybox —
+                      still needs its own value present, or the select silently displays the first option. */}
+                  {!findNodeTypeOption(props.node.nodeType) &&
+                    <option value={props.node.nodeType}>{nodeTypeLabel(props.node.nodeType)}</option>}
+                  {CONVERTIBLE_NODE_TYPES.map(o => <option key={o.nodeType} value={o.nodeType}>{o.label}</option>)}
+                </Select>
+              : <span className='text-muted'>{nodeTypeLabel(props.node.nodeType)}</span>}
+          </PropertyRow>
           <PropertyRow label='Children' divider={props.node.name !== 'root'}><span className='text-muted'>{childCount}</span></PropertyRow>
           {props.node.name !== 'root' &&
             <PropertyRow label='Spawn on start' divider={hasGeometry}

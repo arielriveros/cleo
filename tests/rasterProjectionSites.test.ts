@@ -72,8 +72,10 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             // --- After the resolve: the flag is already false, and these must stay put. ---
             '_drawSkeletonOverlay',
             '_drawTileBand',
+            // The overlay layer's per-mesh draw, shared by the gizmo and helper sub-passes. It is
+            // composited after the post chain, so it is further from the jitter than anything else here.
+            '_drawOverlayNode',
             '_overdrawPass',
-            '_renderGizmos',
             '_renderSelectionMask',
             '_renderSprite',
         ].sort());

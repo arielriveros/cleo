@@ -300,6 +300,26 @@ export const ADDITIVE_BLEND: BlendState = {
     alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
 };
 
+/**
+ * The editor overlay layer, and the ONE sanctioned exception to the rule above. That buffer is not
+ * the scene buffer: it is composited over the finished image after the post chain, so its alpha is
+ * genuine COVERAGE and every draw has to accumulate it. `DEFAULT_BLEND` here would leave alpha at
+ * the cleared 0 and the whole layer would composite invisibly.
+ */
+export const OVERLAY_BLEND: BlendState = {
+    color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+    alpha: { srcFactor: 'one',       dstFactor: 'one-minus-src-alpha', operation: 'add' },
+};
+
+/**
+ * Premultiplied `over`, for putting that layer onto the resolved image. The overlay composite shader
+ * multiplies by alpha on the way out, so the source factor is `one` rather than `src-alpha`.
+ */
+export const OVERLAY_COMPOSITE_BLEND: BlendState = {
+    color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+    alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+};
+
 export interface ColorTargetState {
     format: TextureFormat;
     /** Absent means blending is disabled for this target. */

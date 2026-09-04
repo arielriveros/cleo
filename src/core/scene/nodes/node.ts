@@ -117,6 +117,21 @@ export class Node {
   // separate from _visible: that setter emits SCENE_CHANGED and, on ModelNode, writes castShadow.
   protected _lodVisible: boolean = true;
 
+  /**
+   * Editor/debug CHROME: a grid, a gizmo, a collider wireframe, a helper icon. The renderer keeps
+   * these out of the G-buffer, the shadow and probe passes and the depth snapshot, and draws them
+   * into an overlay layer composited AFTER the post chain — so they never bloom, throw lens-flare
+   * ghosts or skew auto-exposure. See {@link isEditorOnlyNode} / {@link markEditorOnly}.
+   *
+   * Deliberately a flag rather than an `__editor__` name test. That prefix means "hidden from the
+   * tree and from serialization", which is a strictly larger set: the animation editor's shadow-
+   * catching ground and the preview skybox both carry it and are real, lit content. Opting in is
+   * the safe direction — a helper nobody marked merely keeps its old appearance.
+   *
+   * Never serialized: nothing that carries it survives a save.
+   */
+  public editorOnly: boolean = false;
+
   // Custom user-defined variables editable in the inspector, serialized with the node, and
   // readable from scripts via getData(node) and writable via setData(node, name, value).
   protected _variables: Map<string, NodeVariable> = new Map();

@@ -14,6 +14,7 @@ import {
   SoundNode,
   Vec,
   hullFromPositions,
+  markEditorOnly,
 } from 'cleo';
 import { CameraGeometry } from './EditorModels';
 import type { BodyDescription, ShapeDescription } from '../features/EngineContext';
@@ -23,7 +24,16 @@ import type { DebugVisibility, DebugChannel, DebugCategory } from '../features/D
  * Editor-only visual helpers (light/probe icons, camera frustum gizmos, physics debug wireframes),
  * derived from the objects themselves. Every helper node's name must carry the `__editor__`/`__debug__`
  * prefix — that is what excludes it from selection, serialization, play and published builds.
+ *
+ * Every node built here is also marked `editorOnly` through {@link chrome}. That flag, not the name,
+ * is what routes it into the renderer's overlay layer — composited AFTER the post chain, so a light
+ * icon cannot throw a lens-flare ghost and a collider wireframe cannot bloom. The prefix would be the
+ * obvious test and is the wrong one: `__editor__` also marks real content, such as the animation
+ * editor's lit ground plane, which must stay in the scene the post chain sees.
  */
+
+/** Mark a helper (and anything already under it) as renderer chrome. Returns it, so it can wrap a `new`. */
+const chrome = <T extends Node>(node: T): T => { markEditorOnly(node); return node; };
 
 const LIGHT_ICON = '__editor__LightSprite';
 const CAMERA_GIZMO = '__debug__CameraModel';
@@ -160,7 +170,7 @@ export function buildShapeDebugMesh(shape: ShapeDescription, color: [number, num
     default:
       model = null;
   }
-  return model ? new ModelNode(SHAPE_PREFIX, model) : null;
+  return model ? chrome(new ModelNode(SHAPE_PREFIX, model)) : null;
 }
 
 /**
@@ -233,9 +243,9 @@ function ensureLightIcon(light: LightNode) {
   if (light.getChildByName(LIGHT_ICON).length) return;
   const d = light.light.diffuse;
   // Icons use the synthetic 1x1 tileset, never the tileset library — no asset may appear in the explorer.
-  const icon = new SpriteNode(LIGHT_ICON, Sprite.fromTexture('__editor__light_icon', {
+  const icon = chrome(new SpriteNode(LIGHT_ICON, Sprite.fromTexture('__editor__light_icon', {
     tint: [d[0], d[1], d[2]],
-  }));
+  })));
   icon.setUniformScale(0.5);
   light.addChild(icon);
 }
@@ -253,9 +263,9 @@ function ensureLightIcon(light: LightNode) {
 function ensureSoundHelpers(node: SoundNode) {
   if (!node.getChildByName(SOUND_ICON).length) {
     // Tinted to match the sample slot's accent, and distinct from a light's warm icon.
-    const icon = new SpriteNode(SOUND_ICON, Sprite.fromTexture('__editor__sound_icon', {
+    const icon = chrome(new SpriteNode(SOUND_ICON, Sprite.fromTexture('__editor__sound_icon', {
       tint: [0.5, 0.7, 0.85],
-    }));
+    })));
     icon.setUniformScale(0.5);
     node.addChild(icon);
   }
@@ -275,7 +285,7 @@ function ensureSoundHelpers(node: SoundNode) {
   }
 
   const model = new Model(Geometry.Sphere(10, 1), Material.Basic({ color: [0.35, 0.65, 0.9] }, { wireframe: true, castShadow: false }));
-  const sphere = new ModelNode(SOUND_RADIUS, model);
+  const sphere = chrome(new ModelNode(SOUND_RADIUS, model));
   sphere.setUniformScale(radius);
   ;(sphere as any).__soundRadius = radius;
   node.addChild(sphere);
@@ -289,7 +299,7 @@ function ensureCameraGizmo(camera: CameraNode) {
     new Geometry(CameraGeometry.positions, undefined, CameraGeometry.texCoords, undefined, undefined, CameraGeometry.indices, false),
     Material.Basic({ color: [0.2, 0.2, 0.75] }, { castShadow: false })
   );
-  const gizmo = new ModelNode(CAMERA_GIZMO, model);
+  const gizmo = chrome(new ModelNode(CAMERA_GIZMO, model));
   gizmo.onUpdate = () => {
     if (!gizmo.parent) return;
     const scale = Vec.mat4.getScaling(Vec.vec3.create(), gizmo.parent.worldTransform);
@@ -302,9 +312,9 @@ function ensureCameraGizmo(camera: CameraNode) {
 // Attach a billboard icon under a light probe so it is visible in the viewport (tinted cyan).
 function ensureProbeHelper(probe: LightProbeNode) {
   if (probe.getChildByName(PROBE_HELPER).length) return;
-  const icon = new SpriteNode(PROBE_HELPER, Sprite.fromTexture('__editor__probe_icon', {
+  const icon = chrome(new SpriteNode(PROBE_HELPER, Sprite.fromTexture('__editor__probe_icon', {
     tint: [0.4, 0.8, 1],
-  }));
+  })));
   icon.setUniformScale(0.5);
   probe.addChild(icon);
 }
@@ -328,7 +338,7 @@ function ensureShapeGroup(
   let group = scene.getNodesByName(debugName)[0];
   const isNew = !group;
   if (!group) {
-    group = new Node(debugName);
+    group = chrome(new Node(debugName));
     scene.addNode(group);
   }
 
@@ -387,7 +397,7 @@ function ensureAabbBox(scene: Scene, target: Node) {
   let group = scene.getNodesByName(name)[0] as ModelNode | undefined;
   if (!group) {
     const model = new Model(Geometry.Cube(1, 1, 1, true), Material.Basic({ color: [0.3, 0.9, 0.9] }, { wireframe: true, castShadow: false }));
-    group = new ModelNode(name, model);
+    group = chrome(new ModelNode(name, model));
     scene.addNode(group);
   }
   const box = group;
@@ -437,7 +447,7 @@ function buildTerrainDebugMesh(terrain: any): ModelNode | null {
     }
 
   const geometry = new Geometry(positions, normals, uvs, undefined, undefined, indices);
-  return new ModelNode(TERRAIN_PREFIX, new Model(geometry, Material.Basic({ color: [1, 0, 0] }, { wireframe: true, castShadow: false })));
+  return chrome(new ModelNode(TERRAIN_PREFIX, new Model(geometry, Material.Basic({ color: [1, 0, 0] }, { wireframe: true, castShadow: false }))));
 }
 
 // Cheap identity of a terrain's heights, so the wireframe rebuilds only when the surface is sculpted.
@@ -513,8 +523,8 @@ function buildNavMeshDebugMesh(navMesh: any): ModelNode | null {
   const geometry = new Geometry(positions, normals, uvs, undefined, undefined, indices);
   // Lifted a little so it does not z-fight the floor it was baked from -- the surface and the mesh are
   // the same plane by construction, so without this the overlay stipples.
-  const node = new ModelNode(NAVMESH_PREFIX, new Model(
-    geometry, Material.Basic({ color: [0.1, 0.85, 0.75] }, { wireframe: true, castShadow: false })));
+  const node = chrome(new ModelNode(NAVMESH_PREFIX, new Model(
+    geometry, Material.Basic({ color: [0.1, 0.85, 0.75] }, { wireframe: true, castShadow: false }))));
   node.setPosition(Vec.vec3.fromValues(0, 0.02, 0));
   return node;
 }

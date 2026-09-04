@@ -46,6 +46,9 @@ export const RENDER_PASSES = [
     'transparent',
     '2d',
     'gizmos',
+    // Editor chrome that is neither the grid nor a gizmo: helper wireframes and icon billboards,
+    // plus the composite that puts the whole overlay layer onto the resolved image.
+    'overlay',
     'outlineMask',
     'velocity',
     'motionBlur',
@@ -73,7 +76,7 @@ export type RenderPass = typeof RENDER_PASSES[number];
 /** Passes the profiler panel offers as on/off switches. Excludes any pass the image cannot do without. */
 export const TOGGLEABLE_PASSES: RenderPass[] = [
     'shadows.cascades', 'shadows.spot', 'shadows.point', 'foliage', 'ssao', 'ssao.blur', 'sky', 'clouds', 'skyFog', 'taa', 'grid',
-    'transparent', '2d', 'gizmos', 'velocity', 'motionBlur', 'godRays', 'bloom.bright',
+    'transparent', '2d', 'gizmos', 'overlay', 'velocity', 'motionBlur', 'godRays', 'bloom.bright',
     'bloom.blur', 'bloom.composite', 'chromatic', 'screenMaterials',
     // `dof.coc` switches depth of field as a whole. Its other two passes report their own timings
     // but are deliberately NOT switchable: the gather and the composite are halves of one effect,
@@ -140,6 +143,10 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     'velocity.neighbor': 'motionBlur',
     // The scene -> compose[0] copy; WebGL2 times it under `present`, which is reported twice a frame.
     compose: 'present',
+    // The overlay layer's two labels: the helper/icon draws during the scene render, and the
+    // composite past the end of the post chain. Both report under the one scope.
+    'overlay.helpers': 'overlay',
+    'overlay.composite': 'overlay',
 };
 
 /** The scope a pass label reports under, or a `pass:` row of its own when there is no honest scope. */

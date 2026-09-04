@@ -26,9 +26,13 @@ import { isRootNode } from '../useSelectedNode'
 import { useCleoEngine } from '../../EngineContext'
 
 export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) {
-  const { activeTab } = useCleoEngine();
+  const { activeTab, editorMode, templateRootId } = useCleoEngine();
   const root = isRootNode(props.node);
   const ro = !!props.readOnly;
+  // The template root, and only it. A template's whole point is that its root is the thing you place, and
+  // enterTemplateEditor has to pick a type before you know what you are building — so the choice belongs
+  // here, after the fact. Every other node keeps the plain read-only Type row.
+  const allowTypeChange = editorMode === 'template' && props.node.id === templateRootId;
   // A screen-space UI element has no meaningful world transform: the anchor solve owns its position. A
   // WORLD-space canvas is the exception — its `position` is the point it projects from.
   const isUI = isUINodeType(props.node.nodeType);
@@ -41,7 +45,7 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
   return (
     <>
         {/* NodeInfo (name locked, Delete kept) and Transform stay editable for instances. */}
-        <NodeInfo node={props.node} readOnly={ro} />
+        <NodeInfo node={props.node} readOnly={ro} allowTypeChange={allowTypeChange} />
         {showTransform && <TransformEditor node={props.node} />}
 
         {/* Which model asset this subtree came from. Outside the fieldset below on purpose: it is a label

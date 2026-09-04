@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import {
   Geometry, Material, Model, ModelNode, Raycaster, TilemapNode, cellCorners, cellTile, packCell,
+  markEditorOnly,
 } from 'cleo'
 import type { TileEdit } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
@@ -51,6 +52,8 @@ export default function TilemapBrush({ viewportRef }: Props) {
       '__editor__tilemapCursor',
       new Model(buildOutline(points), Material.Basic({ color: [1, 0.9, 0.2] }, { wireframe: true, castShadow: false })),
     )
+    // Chrome: drawn in the overlay layer the post chain never sees. See LandscapeBrush.
+    markEditorOnly(node)
     node.visible = false
     editorScene.addNode(node)
     cursorRef.current = node

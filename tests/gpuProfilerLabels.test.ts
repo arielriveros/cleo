@@ -40,6 +40,9 @@ function passLabelList(source: string): string[] {
         ['_beginFullscreenPass(', 1],
         ['_beginDepthPass(', 1],
         ['_runForwardQueue(', 0],
+        // The editor overlay layer's own opener. It wraps `_beginFullscreenPass` to clear the buffer
+        // lazily, so its callers name their label here rather than at the wrapped call.
+        ['_beginOverlayPass(', 0],
     ];
 
     for (const [helper, argIndex] of helpers) {

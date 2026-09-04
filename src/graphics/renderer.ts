@@ -76,6 +76,7 @@ import SkyFogProgram from './shaders/wgsl/skyFog.wgsl'
 // and carries the WGSL through for WebGPU. The `.vs`/`.fs` imports above are the unconverted ones.
 import ScreenProgram from './shaders/wgsl/screen.wgsl'
 import PresentProgram from './shaders/wgsl/present.wgsl'
+import OverlayCompositeProgram from './shaders/wgsl/overlayComposite.wgsl'
 import DebugViewProgram from './shaders/wgsl/debugView.wgsl'
 import OverdrawProgram from './shaders/wgsl/overdraw.wgsl'
 import BloomProgram from './shaders/wgsl/bloom.wgsl'
@@ -169,7 +170,9 @@ import { ColorGradingLut, IDENTITY_LUT_SIZE } from './colorGrading';
 import { DEFAULT_CLUSTER_GRID, spotBoundingSphere, type ClusterLight } from './clusters';
 import { NO_SHADOW_SLOT, POINT_CONE_OFFSET, POINT_CONE_SCALE } from './lightData';
 import type { Buffer as RhiBuffer } from './rhi/resources';
-import { BufferUsage, ShaderStage, ADDITIVE_BLEND, DEFAULT_BLEND } from './rhi/types';
+import { BufferUsage, ShaderStage, ADDITIVE_BLEND, DEFAULT_BLEND, OVERLAY_BLEND,
+         OVERLAY_COMPOSITE_BLEND } from './rhi/types';
+import { isEditorOnlyNode } from '../core/scene/editorNodes';
 import type { ShaderResource, BlendState, DepthStencilState, CullMode, PrimitiveTopology, VertexBufferLayout } from './rhi/types';
 import type { RenderPipeline, BindGroup, RenderTarget } from './rhi/resources';
 import type { RenderPassEncoder, CommandEncoder } from './rhi/device';
@@ -659,6 +662,13 @@ export class Renderer {
     private _outlineActive: boolean = false;
     private _outlineColor: [number, number, number] = [1.0, 0.55, 0.1];
     private _outlineWidth: number = 5.0;
+
+    // The editor overlay layer: grid, gizmos, helper wireframes, helper icons. Its own colour buffer
+    // so the post chain never sees any of it, composited over the resolved image in `present`'s wake.
+    // `_overlayDrawn` is set per frame by the first pass that opens it — nothing was drawn, no clear,
+    // no composite, and a published build (which has no editor nodes at all) pays nothing.
+    private _overlayFBO!: Framebuffer;
+    private _overlayDrawn: boolean = false;
     // Editor "Renderer" debug view: which buffer to blit to the screen ('final' = normal image).
     private _debugView: DebugView = 'final';
     // Paint invalid texels (NaN / Inf / illegal negative) over whichever debug channel is selected,
@@ -1410,6 +1420,12 @@ export class Renderer {
         this._skyProjectFBO = new Framebuffer({ colorTextureOptions: { mipMap: false }, depth: false });
         // Selection outline silhouette mask (low precision, no mipmaps).
         this._outlineMaskFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
+        // Editor overlay layer. `precision: 'high'` matches `_sceneFBO`'s rgba16float, so the gizmo,
+        // grid and sprite pipelines keep the same colour format in `_pipelineFor`'s cache key and are
+        // not duplicated there. No depth of its own: `_overlayTarget` borrows the scene's, which is
+        // what keeps helper wireframes occluded by real geometry.
+        this._overlayFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' },
+                                             depth: false });
     }
 
     /** Whether {@link initialize} has completed and GPU resources may be created. */
@@ -1540,6 +1556,9 @@ export class Renderer {
             ['screen',                       ScreenProgram],
             // Final present: exposure -> tonemap -> sRGB (the single display resolve).
             ['present',                      PresentProgram],
+            // Editor overlay composite: sRGB-encode the chrome layer over the resolved image.
+            // APPENDED, never inserted mid-table — drivers assign attribute locations per program.
+            ['overlayComposite',             OverlayCompositeProgram],
             ['godRays',                      VolumetricGodRaysProgram],
             ['debugView',                    DebugViewProgram],
             ['shadowDebug',                  ShadowDebugProgram],
@@ -1605,6 +1624,9 @@ export class Renderer {
         this._ssaoFBO.create(this._ssaoWidth, this._ssaoHeight);
         this._ssaoBlurFBO.create(this._ssaoWidth, this._ssaoHeight);
         this._outlineMaskFBO.create(rw, rh);
+        // Must match `_sceneFBO` exactly: `_overlayTarget` attaches that buffer's depth alongside this
+        // one's colour, and a mismatched extent is an incomplete framebuffer on WebGL2.
+        this._overlayFBO.create(rw, rh);
         this._generateSSAOKernelAndNoise();
 
         // Shared instance-matrix buffer for GPU instancing in the geometry pass
@@ -1745,6 +1767,9 @@ export class Renderer {
                                   && !this._thumbnailMode
                                   && (this._cameraMoved() || this._anyObjectMoved);
         this._velocityProducedThisFrame = false;
+        // Cleared here rather than after the composite: `_buildPostGraph` reads it to decide whether
+        // to add the composite node at all, and that runs after the whole scene render.
+        this._overlayDrawn = false;
 
         // Re-bake the sky atmosphere cubemap when the sun moves (before IBL, so probes capture the sky).
         this._scope('sky.bake');
@@ -2085,7 +2110,10 @@ export class Renderer {
      */
     private _inGBuffer(node: ModelNode): boolean {
         if (!node.visible) return false;
-        if ((node as any).isGizmo) return false;
+        // Editor chrome belongs to the overlay layer, which is composited after the post chain. Keeping
+        // it out of the G-buffer is also what keeps it out of the DEPTH snapshot, and so out of god
+        // rays, sky fog, depth of field and SSAO — a collider box used to punch a hole through all four.
+        if (isEditorOnlyNode(node)) return false;
         if (node.model.material.config.transparent) return false;
         // Forward-rendered types are drawn in the overlay, not the G-buffer: Blinn-Phong and forward
         // custom materials (deferred custom, 'customGeom:', DOES rasterize there). Screen custom
@@ -3726,9 +3754,12 @@ export class Renderer {
             this._forwardDepthWrite = true;
             for (const node of scene.models) {
                 if (!node.visible) continue;
-                if ((node as any).isGizmo) continue;
                 // Exclude editor-only helpers (probe sphere, light icons, camera model, etc.) so they
-                // don't pollute the captured environment.
+                // don't pollute the captured environment. BOTH tests: the flag is the overlay layer's
+                // definition of chrome, the name prefix is the wider "hidden from the tree" set this
+                // pass has always excluded — including preview-scene props like `__editor__ground`,
+                // which are real geometry and must keep being left out of a capture.
+                if (isEditorOnlyNode(node)) continue;
                 if (node.name.startsWith('__editor__') || node.name.startsWith('__debug__')) continue;
                 if (node.model.material.config.transparent) continue;
                 // Per-material opt-out: a mesh flagged non-probeable is excluded from probe captures
@@ -4544,14 +4575,23 @@ export class Renderer {
 
         // Collect the forward-rendered models: transparent (any material), opaque Default (Blinn-Phong,
         // rendered forward so their full material — specular/ambient/reflectivity + maps — works),
-        // plus the selected models (for the outline mask) and gizmos.
+        // plus the selected models (for the outline mask) and the two overlay queues.
         const transparentQueue: ModelNode[] = [];
         const opaqueForwardQueue: ModelNode[] = [];
         const selectedNodes: ModelNode[] = [];
         const gizmoNodes: ModelNode[] = [];
+        const helperNodes: ModelNode[] = [];
         for (const node of scene.models) {
             if (!node.visible) continue;
-            if ((node as any).isGizmo) { gizmoNodes.push(node); continue; }
+            // Editor chrome leaves the scene here, before anything else looks at it. Two queues, and
+            // the split is depth state rather than content: a gizmo is drawn through geometry (compare
+            // 'always'), a helper wireframe is occluded by it. Both land in the overlay buffer, which
+            // no post pass reads. Helpers were never in this loop before — being unlit `basic` they
+            // went through the G-buffer, which is exactly the leak `_inGBuffer` now closes.
+            if (isEditorOnlyNode(node)) {
+                ((node as any).isGizmo ? gizmoNodes : helperNodes).push(node);
+                continue;
+            }
             // The selected node bypasses the frustum test below, as `_forwardPass` also does: the
             // outline mask re-draws it, and its silhouette must not vanish off-screen.
             const selected = !!this._selectedNodeId && node.id === this._selectedNodeId;
@@ -4573,7 +4613,8 @@ export class Renderer {
         }
 
         // Forward lighting is only needed if something is drawn through the material shaders.
-        const needForward = transparentQueue.length > 0 || opaqueForwardQueue.length > 0 || scene.sprites.size > 0 || gizmoNodes.length > 0;
+        const needForward = transparentQueue.length > 0 || opaqueForwardQueue.length > 0 || scene.sprites.size > 0
+                            || gizmoNodes.length > 0 || helperNodes.length > 0;
         if (needForward) {
             this._resetForwardLighting(scene);
             for (const light of scene.lights) this._setDirectionalOnForward(light);
@@ -4619,16 +4660,14 @@ export class Renderer {
         // Everything ABOVE is the scene: sky, clouds, opaques, fog. It is full render resolution,
         // linear HDR, pre-tonemap, and matched by the depth snapshot taken a few lines up — the only
         // point in the frame where all four are true at once.
-        // Everything BELOW — grid, transparents, gizmos, sprites, the selection mask — is drawn ON TOP
-        // of the resolved image and never enters history. That is why TAA resolves here rather than in
+        // Everything BELOW — transparents, sprites, the selection mask — is drawn ON TOP of the
+        // resolved image and never enters history. That is why TAA resolves here rather than in
         // post-processing: the alternative is smearing the editor grid across the viewport every time
-        // the camera moves, which is the first thing anyone notices.
+        // the camera moves, which is the first thing anyone notices. The editor chrome that used to be
+        // in this list has gone further still — into its own buffer, past the end of the post chain.
         this._produceVelocity();
         this._taaResolvePass();
         this._endJitterPhase();
-
-        // Editor infinite grid, composited over the scene/skybox and occluded by geometry.
-        if (!this._thumbnailMode && this._beginPass('grid')) this._renderGrid();
 
         // Transparent models: back-to-front, depth-tested against opaque, no depth writes. Thumbnails
         // are the exception — their coverage alpha comes from the scene depth, so they must write it.
@@ -4642,12 +4681,13 @@ export class Renderer {
         this._forwardDepthWrite = true;
         GLState.depthMask(true);
 
-        // Gizmos on top (also draws the editor skeleton overlay when set).
-        if ((gizmoNodes.length > 0 || this._skeletonOverlay) && this._beginPass('gizmos'))
-            this._renderGizmos(gizmoNodes);
-
-        // Tiles + sprites, depth-sorted together (always transparent, forward).
+        // Tiles + sprites, depth-sorted together (always transparent, forward). Scene content only —
+        // the editor's icon billboards are filtered out and drawn in the overlay below.
         if (this._beginPass('2d')) this._render2DPass(scene);
+
+        // Editor chrome, into the overlay buffer. Last of the scene render and first thing after the
+        // post chain, which is the whole point: nothing between those two moments can see it.
+        this._renderEditorOverlay(scene, helperNodes, gizmoNodes);
 
         // Selection silhouette mask (consumed by the post-process outline pass).
         const selectedSprites: SpriteNode[] = [];
@@ -5161,12 +5201,14 @@ export class Renderer {
 
         // `depthCompare` must be 'less-equal': the engine sets `gl.depthFunc(LEQUAL)` once at init and
         // never changes it, so a pipeline claiming 'less' drops every coplanar fragment.
-        // The alpha half erases the bloom mask under the grid lines, keeping the grid out of bloom.
-        const pass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'grid', false);
-        const pipeline = this._fullscreenPipeline('grid', GridProgram, {
-            color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-            alpha: { srcFactor: 'zero', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-        }, { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' });
+        //
+        // This drew into the scene buffer with a split blend whose alpha half ERASED the bloom mask
+        // under each line — the one trick that kept the grid from glowing. It is gone with the buffer:
+        // the overlay's alpha is coverage, so erasing it would erase the grid. Nothing here can bloom
+        // any more regardless, because nothing here is in the image bloom reads.
+        const pass = this._beginOverlayPass('grid');
+        const pipeline = this._fullscreenPipeline('grid', GridProgram, OVERLAY_BLEND,
+            { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' });
         pass.setPipeline(pipeline);
         // The STABLE inverse, not `_invViewProj`: this pass builds a world ray from the uv rather than
         // unprojecting the depth buffer, and it draws after the TAA resolve, so a jittered ray would
@@ -5194,9 +5236,10 @@ export class Renderer {
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
 
-        // Still restored by hand: the overlay passes that follow are on the legacy path and inherit
-        // blend and depth-mask state rather than declaring their own.
-        this._restoreDefaultBlend();
+        // Still set by hand: the overlay passes that follow are on the legacy path and inherit blend
+        // and depth-mask state rather than declaring their own. The OVERLAY pair, not the default one
+        // — the buffer these are all writing needs its coverage alpha accumulated.
+        this._setOverlayBlend();
         GLState.depthMask(true);
     }
 
@@ -5210,7 +5253,9 @@ export class Renderer {
      */
     private _render2DPass(scene: Scene): void {
         const sprites: SpriteNode[] = [];
-        for (const node of scene.sprites) if (node.visible) sprites.push(node);
+        // Scene content only. The editor's light/sound/probe icons are billboards in `scene.sprites`
+        // too, and they belong to the overlay layer — see `_renderEditorOverlay`.
+        for (const node of scene.sprites) if (node.visible && !isEditorOnlyNode(node)) sprites.push(node);
 
         const tilemaps: TilemapNode[] = [];
         for (const node of scene.tilemaps) if (node.visible) tilemaps.push(node);
@@ -6096,6 +6141,7 @@ export class Renderer {
         this._ssaoBlurFBO.resize(aw, ah);
         this._createBloomMips(width, height);
         this._outlineMaskFBO.resize(width, height);
+        this._overlayFBO.resize(width, height);   // in lockstep with _sceneFBO; see _overlayTarget
         const mbK = Renderer.MOTION_BLUR_TILE;
         this._velocityFBO.resize(width, height);
         this._velocityTileFBO.resize(Math.ceil(width / mbK), Math.ceil(height / mbK));
@@ -6176,15 +6222,18 @@ export class Renderer {
         const opaqueDrawQueue: ModelNode[] = [];
         const selectedNodes: ModelNode[] = [];
         const gizmoNodes: ModelNode[] = [];
+        const helperNodes: ModelNode[] = [];
 
         // First pass: sort every visible model into a queue, so the whole batch can go through one RHI
         // render pass. The queue is appended to in traversal order, which is the draw order.
         for (const node of scene.models) {
             if (!node.visible) continue;
-            
-            // Check if this is a gizmo node and it's visible
-            if ((node as any).isGizmo && node.visible) {
-                gizmoNodes.push(node);
+
+            // Editor chrome first, and before the selection branch — the same split the deferred
+            // pipeline makes in `_renderForwardOverlay`. It leaves the scene here for the overlay
+            // layer; the two queues differ only in depth state.
+            if (isEditorOnlyNode(node)) {
+                ((node as any).isGizmo ? gizmoNodes : helperNodes).push(node);
             }
             // Check if this node is selected
             else if (this._selectedNodeId && node.id === this._selectedNodeId) {
@@ -6229,14 +6278,13 @@ export class Renderer {
         // `_forwardDepthWrite` alone is deliberate, not an omission.
         this._runForwardQueue('transparent', transparentDrawQueue);
 
-        // Render gizmo nodes last (on top of everything); also the editor skeleton overlay when set.
-        if (gizmoNodes.length > 0 || this._skeletonOverlay) {
-            this._renderGizmos(gizmoNodes);
-        }
-
         // Tiles + sprites, depth-sorted together. A selected sprite draws in its own depth order — its
         // outline comes from the mask pass below.
         this._render2DPass(scene);
+
+        // Editor chrome, into the overlay layer. This pipeline gains a grid it never had, for free:
+        // `_renderGrid` was only ever reached from the deferred path.
+        this._renderEditorOverlay(scene, helperNodes, gizmoNodes);
 
         // Selection silhouette mask (consumed by the post-process outline pass).
         const selectedSprites: SpriteNode[] = [];
@@ -6462,7 +6510,7 @@ export class Renderer {
      * pass sets it once around its interleaved list.
      */
     private _renderSprite(node: SpriteNode, manageDepth: boolean = true,
-                          pass?: RenderPassEncoder): void {
+                          pass?: RenderPassEncoder, blend: BlendState = DEFAULT_BLEND): void {
         if (!node.initialized)
             node.initializeSprite();
         frameStats.objects++;
@@ -6477,7 +6525,9 @@ export class Renderer {
         const pipeline = pass && reflection ? this._pipelineFor(material.type, reflection, {
             cullMode: Renderer._cullFor(material.config.side),
             depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
-            blend: DEFAULT_BLEND,
+            // DEFAULT_BLEND for a scene sprite (its alpha must not touch the bloom mask), OVERLAY_BLEND
+            // for an editor icon drawn into the overlay layer, where alpha IS coverage.
+            blend,
             topology: material.config.wireframe ? 'line-list' : 'triangle-list',
             vertex: 'model',
             builtFor: material.type,
@@ -6589,8 +6639,9 @@ export class Renderer {
             for (const m of node.model.materials)
                 if (m.config.castShadow && !m.config.wireframe) { anyCasts = true; break; }
             if (!anyCasts) continue;
-            // Skip gizmo/overlay nodes from shadow casting
-            if ((node as any).isGizmo) continue;
+            // Editor chrome never casts: gizmos, helper wireframes, icon billboards. Mostly redundant
+            // with the wireframe/castShadow scan above, but it states the intent instead of relying on it.
+            if (isEditorOnlyNode(node)) continue;
             // A node added this frame has no mesh yet: this pass runs BEFORE the geometry pass that
             // calls `initializeModel`, so its `Mesh` is still the empty one the constructor made. It
             // cannot cast a shadow, and recording the attempt costs a bind and a zero-count draw.
@@ -6876,7 +6927,8 @@ export class Renderer {
     private _casterHash(scene: Scene, lightPos: vec3, range: number): number {
         let h = HASH_SEED;
         for (const node of scene.models) {
-            if (!node.visible || !node.initialized || (node as any).isGizmo) continue;
+            // Must agree with the caster loop above, or this cache key oscillates every frame.
+            if (!node.visible || !node.initialized || isEditorOnlyNode(node)) continue;
             let casts = false;
             for (const m of node.model.materials)
                 if (m.config.castShadow && !m.config.wireframe) { casts = true; break; }
@@ -7287,6 +7339,33 @@ export class Renderer {
             },
         });
 
+        // --- past the tail: the editor overlay ----------------------------------------------------
+        // Chrome — the grid, gizmos, helper wireframes and helper icons — was drawn into its own
+        // buffer during the scene render, so not one pass above this line has seen it. It joins the
+        // image HERE, after the display resolve, because it is display-referred: exposure, the tone
+        // curve and the LUT describe the SCENE, and a gizmo that changed colour because the artist
+        // hung a grade on the project would be a bug. `outlinePost` already treats its border colour
+        // the same way.
+        //
+        // The node touches no chain resource, exactly like the `exposure` anchor, and passes keep the
+        // order they were added in.
+        //
+        // NOT over a debug-view blit. Those channels exist to show one internal buffer as it actually
+        // is, and painting the grid over the `bloom` channel would assert the exact thing this feature
+        // removed — that the grid is in the bloom buffer. The selection outline is a present variant
+        // rather than a channel, so it still gets the overlay.
+        //
+        // Gated on the flag rather than on being in the editor: `_overlayDrawn` is set by the scene
+        // render, which has already finished by the time this graph is built, and a published build
+        // leaves it false because a build has no editor nodes to draw.
+        //
+        // NOT on `_passEnabled['overlay']`, deliberately. That switch turns off the helper DRAWS; the
+        // composite is the only way anything already in the buffer reaches the screen, so gating it
+        // there would make one profiler toggle silently hide the grid and the gizmos too.
+        if (this._overlayDrawn && this._debugView === 'final')
+            graph.addPass({ id: 'overlay', scope: 'overlay',
+                            execute: () => this._overlayCompositePass() });
+
         return graph.compile(this._renderWidth, this._renderHeight);
     }
 
@@ -7314,6 +7393,29 @@ export class Renderer {
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
             source.colors[0], this._sceneFBO.depth, lut,
         ]));
+        this._drawFullscreen(pass);
+        this._endFullscreenPass(pass);
+    }
+
+    /**
+     * Put the editor overlay layer onto the resolved image.
+     *
+     * A SECOND pass on the surface target, with `clear: false` — the one genuinely new capability
+     * here, and legal on both backends. WebGL2's surface target is a single reusable handle onto
+     * framebuffer 0. WebGPU's `getCurrentTexture()` hands back the same texture for the rest of the
+     * frame, the renderer holds one encoder for the whole frame, and two sequential render passes on
+     * one colour attachment is ordinary. The surface has no depth view, so this is depth-less — the
+     * same shape `_presentPass` is.
+     *
+     * The shader encodes to sRGB and nothing else. No exposure, no tone curve, no LUT: see the note
+     * at the graph node in `_buildPostGraph`.
+     */
+    private _overlayCompositePass(): void {
+        const pass = this._beginFullscreenPass(this._screenTarget(), 'overlay.composite', false);
+        const pipeline = this._fullscreenPipeline('overlayComposite', OverlayCompositeProgram,
+                                                  OVERLAY_COMPOSITE_BLEND);
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._overlayFBO.colors[0]]));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
     }
@@ -7467,7 +7569,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
 
         for (const node of scene.models) {
-            if (!node.visible || (node as any).isGizmo) continue;
+            if (!node.visible || isEditorOnlyNode(node)) continue;
             if (!node.initialized) node.initializeModel();
             const pipeline = this._pipelineFor('overdraw', OverdrawProgram, {
                 blend: Renderer._OVERDRAW_BLEND, depthStencil: depthAlways,
@@ -8229,6 +8331,38 @@ export class Renderer {
     }
 
     /**
+     * The overlay layer's colour with the SCENE's live depth attached — the same borrowing trick as
+     * `_velocityObjectsTarget`, and for the same reason: helper wireframes and icons must still be
+     * occluded by the geometry in front of them, and that answer already exists.
+     *
+     * `_sceneFBO.depth`, not `_depthSource()`: this draws in the same part of the frame the grid and
+     * transparents do, testing against the live attachment rather than the snapshot taken for the
+     * fullscreen passes. Never cached on the renderer — a resize deletes both textures and the device
+     * evicts every target naming them.
+     */
+    private _overlayTarget(): RenderTarget {
+        return device.createRenderTarget({
+            label: 'overlay+depth',
+            colorViews: [this._overlayFBO.colors[0].attachmentView],
+            depthView: this._sceneFBO.depth.attachmentView,
+        });
+    }
+
+    /**
+     * Open one of the overlay layer's sub-passes, clearing the colour on the first of the frame.
+     *
+     * Lazy so a frame that draws no chrome never touches the buffer at all, which is every frame of a
+     * published build. Depth is emphatically NOT cleared: the attachment is the scene's, and nothing
+     * here may write to it either — game sprites are still depth-tested against it further down
+     * `_renderForwardOverlay`, so an overlay draw that wrote depth would occlude them.
+     */
+    private _beginOverlayPass(label: string): RenderPassEncoder {
+        const clear = !this._overlayDrawn;
+        this._overlayDrawn = true;
+        return this._beginFullscreenPass(this._overlayTarget(), label, clear, [0, 0, 0, 0], false);
+    }
+
+    /**
      * Per-object motion vectors, drawn OVER the camera-reprojection buffer.
      *
      * The base pass answers "where was this world point last frame" under the assumption that the point
@@ -8526,7 +8660,8 @@ export class Renderer {
         if (this._cloudBaseNoise) bytes += this._cloudBaseNoise.byteSize;
         if (this._cloudDetailNoise) bytes += this._cloudDetailNoise.byteSize;
         addFbo(this._ssaoFBO); addFbo(this._ssaoBlurFBO);
-        addFbo(this._brdfFBO); addFbo(this._outlineMaskFBO); addFbo(this._overdrawFBO ?? undefined);
+        addFbo(this._brdfFBO); addFbo(this._outlineMaskFBO); addFbo(this._overlayFBO);
+        addFbo(this._overdrawFBO ?? undefined);
         addFbo(this._velocityFBO); addFbo(this._velocityTileFBO); addFbo(this._velocityNeighborFBO);
         bytes += this._postPool.byteSize;
         for (const tex of TextureManager.Instance.textures.values()) bytes += tex.byteSize;
@@ -9291,6 +9426,10 @@ export class Renderer {
             const modelNodes: any[] = [];
             for (const node of models) this._collectAllChildren(node, modelNodes);
             for (const node of modelNodes) {
+                // Editor chrome parented under the selection is not part of its silhouette. A rigid
+                // body's collider wireframe is a CHILD of the node it follows, so without this the
+                // outline traced the collider instead of the mesh.
+                if (isEditorOnlyNode(node)) continue;
                 if (!node.initialized || !node.model) continue;
                 drawWith(node.model.mesh, node.model.material.type, node.worldTransform);
             }
@@ -9299,6 +9438,7 @@ export class Renderer {
             const spriteNodes: any[] = [];
             for (const node of sprites) this._collectAllChildren(node, spriteNodes);
             for (const node of spriteNodes) {
+                if (isEditorOnlyNode(node)) continue;
                 if (!node.initialized || !node.sprite) continue;
                 drawWith(node.sprite.mesh, node.sprite.material.type, this._spriteBillboardMatrix(node));
             }
@@ -9328,52 +9468,131 @@ export class Renderer {
         return m;
     }
 
-    private _renderGizmos(gizmoNodes: ModelNode[]): void {
-        // Always on top: depth test off, depth writes LEFT ON. WebGPU has no separate 'test off', so
-        // the pipeline says it as compare 'always' plus writes enabled.
-        const pass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'gizmos', false, undefined, false);
-        const depthAlways: DepthStencilState =
-            { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' };
-        
-        // Render each gizmo node
-        for (const node of gizmoNodes) {
-            if (!node.visible) continue;
-            
-            if (!node.initialized)
-                node.initializeModel();
+    /**
+     * One overlay-layer mesh, through its own material program.
+     *
+     * Shared by the gizmo and helper sub-passes, which differ only in depth state — factoring it out
+     * is what stops the "always on top" and "occluded by geometry" halves from drifting apart. Blend
+     * is always `OVERLAY_BLEND`: the overlay buffer's alpha is coverage, and a draw that used the
+     * scene's mask-preserving default would leave it at zero and composite invisibly.
+     */
+    private _drawOverlayNode(pass: RenderPassEncoder, node: ModelNode,
+                             depthStencil: DepthStencilState): void {
+        if (!node.visible) return;
+        if (!node.initialized) node.initializeModel();
 
-            const type = node.model.material.type;
-            const reflection = Renderer._FORWARD_PROGRAMS[type];
-            this._shaderManager.bind(type);
-            const material = node.model.material;
-            const pipeline = reflection ? this._pipelineFor(type, reflection, {
-                cullMode: Renderer._cullFor(material.config.side),
-                depthStencil: depthAlways,
-                topology: material.config.wireframe ? 'line-list' : 'triangle-list',
-                vertex: 'model',
-                builtFor: type,
-            }) : null;
-            if (pipeline) pass.setPipeline(pipeline);
+        const type = node.model.material.type;
+        const reflection = Renderer._FORWARD_PROGRAMS[type];
+        this._shaderManager.bind(type);
+        const material = node.model.material;
+        const pipeline = reflection ? this._pipelineFor(type, reflection, {
+            cullMode: Renderer._cullFor(material.config.side),
+            depthStencil,
+            blend: OVERLAY_BLEND,
+            topology: material.config.wireframe ? 'line-list' : 'triangle-list',
+            vertex: 'model',
+            builtFor: type,
+        }) : null;
+        if (pipeline) pass.setPipeline(pipeline);
 
-            this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-            this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
-            this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
 
-            // Set Transform related uniforms
-            this._shaderManager.setUniform('u_model', node.worldTransform);
+        // Set Transform related uniforms
+        this._shaderManager.setUniform('u_model', node.worldTransform);
 
-            // Set Material related uniforms
-            this._applyMaterialProperties(node.model.material);
+        // Set Material related uniforms
+        this._applyMaterialProperties(node.model.material);
 
-            // Textures: a bind group when the program has build-time reflection, otherwise the hand-
-            // rolled slot table this used to carry — which was a third copy of `_textureSlot`, drifting
-            // independently of the other two.
-            if (pipeline) pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
-            else this._applyMaterial(material);
+        // Textures: a bind group when the program has build-time reflection, otherwise the hand-
+        // rolled slot table this used to carry — which was a third copy of `_textureSlot`, drifting
+        // independently of the other two.
+        if (pipeline) pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
+        else this._applyMaterial(material);
 
-            // Draw the mesh
-            if (!pipeline || !this._recordDraw(pass, node.model.mesh, 0, 0)) node.model.mesh.draw();
+        // Draw the mesh
+        if (!pipeline || !this._recordDraw(pass, node.model.mesh, 0, 0)) node.model.mesh.draw();
+    }
+
+    /**
+     * The editor overlay layer: the grid, helper wireframes, helper icons, gizmos and the skeleton
+     * overlay, all drawn into `_overlayFBO` instead of the scene buffer.
+     *
+     * This is the whole feature. None of it may reach the post chain — chrome that blooms, throws
+     * lens-flare ghosts, blurs into depth of field or moves the auto-exposure meter is chrome that
+     * lies about the image the artist is grading. Separating the buffer is the only way to say that
+     * once, for every effect, rather than teaching each effect to recognise a gizmo.
+     *
+     * Three sub-passes on one target. Functionally one would do — depth state rides on the pipeline,
+     * not the pass — but a GPU timestamp attaches to a pass, so collapsing them would erase the
+     * `grid` and `gizmos` rows from the profiler.
+     *
+     * Order inside the buffer is back-to-front: grid, then helpers and icons over it, then gizmos on
+     * top of everything.
+     */
+    private _renderEditorOverlay(scene: Scene, helperNodes: ModelNode[], gizmoNodes: ModelNode[]): void {
+        // A capture wants the asset and nothing else. `_applyPostProcessing` also returns before the
+        // composite node is ever built, so this is belt and braces — but it is the cheap half.
+        if (this._thumbnailMode) return;
+
+        // Editor infinite grid, composited over the scene/skybox and occluded by geometry.
+        if (this._beginPass('grid')) this._renderGrid();
+
+        const icons: SpriteNode[] = [];
+        for (const node of scene.sprites) if (node.visible && isEditorOnlyNode(node)) icons.push(node);
+
+        if ((helperNodes.length > 0 || icons.length > 0) && this._beginPass('overlay')) {
+            // Occluded by real geometry, exactly as these drew when they went through the G-buffer.
+            // No depth writes: the attachment is the scene's own.
+            const depthTested: DepthStencilState =
+                { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' };
+            const pass = this._beginOverlayPass('overlay.helpers');
+            GLState.blend(true);
+            this._setOverlayBlend();
+            GLState.depthMask(false);
+            for (const node of helperNodes) this._drawOverlayNode(pass, node, depthTested);
+            // Re-asserted: a helper on the legacy path goes through `_applyMaterial`, which sets its
+            // own blend, and an icon that inherited THAT would stop accumulating coverage alpha.
+            this._setOverlayBlend();
+            // Icons are billboards and always transparent; `_renderSprite` handles the constraint.
+            // `false` for manageDepth — this pass owns the depth state for the whole batch.
+            for (const node of icons) this._renderSprite(node, false, pass, OVERLAY_BLEND);
+            this._endFullscreenPass(pass);
+            GLState.depthMask(true);
         }
+
+        // Gizmos on top (also draws the editor skeleton overlay when set).
+        if ((gizmoNodes.length > 0 || this._skeletonOverlay) && this._beginPass('gizmos'))
+            this._renderGizmos(gizmoNodes);
+
+        // Hand the scene buffer back: the selection mask and the legacy WebGL2 paths below assume it.
+        this._sceneFBO.bind();
+        this._restoreDefaultBlend();
+        GLState.depthTest(true);
+        GLState.depthMask(true);
+    }
+
+    /**
+     * `OVERLAY_BLEND` as raw GL state, for the legacy draws in the overlay that still inherit blend
+     * rather than declaring it on a pipeline. Separate factors, never `blendFunc`: the alpha half is
+     * the entire point here, and `tests/cloudTemporal` forbids the collapsed call outright.
+     */
+    private _setOverlayBlend(): void {
+        if (gl) gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    }
+
+    private _renderGizmos(gizmoNodes: ModelNode[]): void {
+        // Always on top: depth test off. Depth WRITES are off too, and that is a change — the pass
+        // used to write into `_sceneFBO.depth`, which it shares with the scene, so a gizmo silently
+        // occluded every game sprite drawn after it. Now that the overlay borrows the same attachment
+        // the bug would be structural rather than incidental, so it goes. WebGPU has no separate
+        // 'test off', hence compare 'always'.
+        const pass = this._beginOverlayPass('gizmos');
+        const depthAlways: DepthStencilState =
+            { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'always' };
+
+        for (const node of gizmoNodes) this._drawOverlayNode(pass, node, depthAlways);
 
         // Editor skeleton overlay (instanced), also always-on-top.
         this._drawSkeletonOverlay(pass, depthAlways);
