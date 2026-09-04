@@ -8,10 +8,12 @@ import { InputSystem } from "../../../input/inputSystem";
 import { applyPlayerReading, clearIntent, createIntent } from "../../control/intent";
 import type { ControlIntent, PlayerReading } from "../../control/intent";
 import {
-    arrive, avoidObstacles, createSteeringState, flee, followTarget, intentFromDesired, seek,
-    steeringTuning, wander,
+    align, arrive, avoidObstacles, blendSteering, cohere, createSteeringState, flee, followTarget,
+    intentFromDesired, seek, separate, steeringTuning, wander,
 } from "../../control/steering";
-import type { ProbeHit, SteeringState, SteeringTuning } from "../../control/steering";
+import type {
+    FlockNeighbour, ProbeHit, SteeringState, SteeringTuning,
+} from "../../control/steering";
 import {
     AI_GOALS, BEHAVIOR_SENSES, createBehaviorRuntime, isDefaultBehaviorMachine, parseBehaviorMachine,
     stepBehavior,
@@ -221,6 +223,20 @@ export class ControllerNode extends Node {
     /** An authored goal graph, or an empty one. Read only while `brain` is `goal`. */
     public goals: GoalGraph = { ...EMPTY_GOAL_GRAPH };
 
+    // ----- flocking ---------------------------------------------------------------------------------
+    /**
+     * How far this agent looks for flock-mates, in world units. 0 disables flocking entirely and is
+     * why the neighbour gather costs nothing for an agent that is not in a group.
+     */
+    public flockRadius: number = 6;
+
+    /** Push away from crowding. Usually the strongest of the three, or a flock merges into a point. */
+    public separationWeight: number = 1.5;
+    /** Match the group's heading. */
+    public alignmentWeight: number = 1;
+    /** Steer toward the group's centre. Usually the weakest, or a flock collapses inward. */
+    public cohesionWeight: number = 0.8;
+
     public steering: SteeringTuning = steeringTuning();
     /** How many rays to fan ahead for obstacle avoidance. Only fired while `steering.avoidDistance > 0`. */
     public whiskerCount: number = 3;
@@ -253,6 +269,13 @@ export class ControllerNode extends Node {
     /** What the goal brain asked for this frame, or null when it asked for nothing. */
     private _goalDrive: { goal: AiGoal; targetKey?: string; speedScale: number } | null = null;
     private _goalContext: GoalContext | null = null;
+    /** Rebuilt each frame a flock steer runs. Two arrays because `separate` reads positions only. */
+    private readonly _neighbours: FlockNeighbour[] = [];
+    private readonly _neighbourPositions: vec3[] = [];
+    private _neighbourCount: number = 0;
+    private readonly _separation: vec3 = vec3.create();
+    private readonly _alignment: vec3 = vec3.create();
+    private readonly _cohesion: vec3 = vec3.create();
     /** Bound once: a fresh closure per frame per agent is the kind of garbage that shows up in a HUD. */
     private readonly _lineOfSight: LineOfSightTest = (from, to, hit) => this._testLineOfSight(from, to, hit);
     private readonly _desired: vec3 = vec3.create();
@@ -686,6 +709,7 @@ export class ControllerNode extends Node {
                 case 'seek': seek(this._desired, this._selfPos, this._targetPos, tuning.maxSpeed, up); break;
                 case 'path': this._steerPath(pawn, tuning, up, delta); break;
                 case 'investigate': this._steerInvestigate(pawn, tuning, up, delta); break;
+                case 'flock': this._steerFlock(pawn, tuning, up); break;
                 case 'patrol': this._steerPatrol(pawn, tuning, up); break;
                 case 'flee': flee(this._desired, this._selfPos, this._targetPos, tuning.maxSpeed, up); break;
                 case 'arrive': arrive(this._desired, this._selfPos, this._targetPos, tuning, up); break;
@@ -757,6 +781,98 @@ export class ControllerNode extends Node {
         aiStats.navAgents++;
         advancePath(this._path, this._selfPos, this.waypointRadius, up);
         followPath(this._desired, this._selfPos, this._path, tuning, up);
+    }
+
+    /**
+     * Move with the group: separation, alignment and cohesion over the agents nearby.
+     *
+     * ## No spatial index, deliberately
+     *
+     * The obvious build is a uniform grid or Yuka's `CellSpacePartitioning`. Neither earns its place:
+     * it would be a THIRD spatial structure after cannon's broadphase and every Geometry's BVH, its
+     * only consumer would be this, and AI agents number in the tens rather than the thousands — a
+     * linear scan over them is cheaper than maintaining an index of them.
+     *
+     * Yuka's own partitioning also has a trap that argues against reaching for it later: its `query`
+     * returns everything in the overlapping CELLS rather than within the radius. Measured, that was 95
+     * entities returned for a true 16 — fine for `separate`, which re-tests distance anyway, and badly
+     * wrong for a `neighborCount` sense reading the raw result.
+     *
+     * ## Why three passes rather than one
+     *
+     * Each urge filters by radius itself, so this walks the neighbour list three times. Over tens of
+     * agents that is noise, and the alternative — one fused loop — makes three simple pure functions
+     * into one that cannot be tested apart.
+     */
+    private _steerFlock(pawn: CharacterNode, tuning: SteeringTuning, up: vec3): void {
+        this._gatherNeighbours(pawn);
+        if (this._neighbourCount === 0) {
+            // Alone. Holding still is the honest answer: a flock of one has no group to move with, and
+            // wandering instead would make "flock" quietly mean two different things.
+            vec3.set(this._desired, 0, 0, 0);
+            return;
+        }
+
+        const radius = Math.max(0, this.flockRadius);
+        separate(this._separation, this._selfPos, this._neighbourPositions, radius, tuning.maxSpeed, up);
+        align(this._alignment, this._selfPos, this._neighbours, radius, tuning.maxSpeed, up);
+        cohere(this._cohesion, this._selfPos, this._neighbours, radius, tuning.maxSpeed, up);
+
+        blendSteering(this._desired, [
+            { force: this._separation, weight: this.separationWeight },
+            { force: this._alignment, weight: this.alignmentWeight },
+            { force: this._cohesion, weight: this.cohesionWeight },
+        ], tuning.maxSpeed);
+    }
+
+    /**
+     * Collect the other pawns within the flock radius.
+     *
+     * Velocity is the MEASURED one, not the commanded one: an agent jammed against a wall is being
+     * told to run and is not moving, and letting that vote would turn the whole flock into the wall.
+     */
+    private _gatherNeighbours(pawn: CharacterNode): void {
+        this._neighbourCount = 0;
+        const radius = Math.max(0, this.flockRadius);
+        const characters = this._scene?.characters;
+        if (radius <= 0 || !characters) return;
+
+        const here = pawn.worldPosition;
+        for (const other of characters) {
+            if (other === pawn) continue;
+            const there = other.worldPosition;
+            // Cheap reject before the planar projection: a full 3D distance is never smaller than the
+            // planar one, so anything failing this cannot pass.
+            if (vec3.squaredDistance(here as vec3, there as vec3) > radius * radius) continue;
+
+            const index = this._neighbourCount++;
+            let entry = this._neighbours[index];
+            if (!entry) {
+                // Grown once and reused: the arrays are per-controller and per-frame otherwise.
+                entry = { position: vec3.create(), velocity: vec3.create() };
+                this._neighbours[index] = entry;
+                this._neighbourPositions[index] = entry.position;
+            }
+            vec3.set(entry.position, there[0], there[1], there[2]);
+            const velocity = other.currentVelocity;
+            vec3.set(entry.velocity, velocity[0], velocity[1], velocity[2]);
+        }
+        // The reused arrays are longer than the count; trim the VIEWS the steers read.
+        this._neighbours.length = this._neighbourCount;
+        this._neighbourPositions.length = this._neighbourCount;
+    }
+
+    /**
+     * How many agents are inside the flock radius. Backs the `neighborCount` sense.
+     *
+     * Gathers on read, like {@link pathRemaining}: a script asking "am I alone" while the controller
+     * is doing something else entirely would otherwise get whatever the last flock steer left behind,
+     * which for a controller that has never flocked is 0 forever.
+     */
+    public get neighborCount(): number {
+        const pawn = this._resolvePossessed();
+        if (pawn) this._gatherNeighbours(pawn);
+        return this._neighbourCount;
     }
 
     /**
@@ -993,6 +1109,8 @@ export class ControllerNode extends Node {
         if (name === 'stateTime') return this._behaviorRuntime.stateTime;
         if (name === 'hasPath') return hasPath(this._path);
         if (name === 'pathRemaining') return this.pathRemaining;
+        // The getter gathers on read, so a machine can ask without a flock goal ever running.
+        if (name === 'neighborCount') return this.neighborCount;
 
         // Perception senses read the CURRENT target, so they answer about whoever the blackboard
         // names rather than about whatever happens to be visible.
@@ -1174,6 +1292,10 @@ export class ControllerNode extends Node {
             goalPoint: [...this.goalPoint],
             steering: { ...this.steering },
             routeName: this.routeName,
+            flockRadius: this.flockRadius,
+            separationWeight: this.separationWeight,
+            alignmentWeight: this.alignmentWeight,
+            cohesionWeight: this.cohesionWeight,
             perception: { ...this.perception },
             eyeHeight: this.eyeHeight,
             autoAcquire: this.autoAcquire,
@@ -1223,6 +1345,12 @@ export class ControllerNode extends Node {
         // The tolerant reader defaults and clamps every field, so a partial or stale block passes.
         node.steering = steeringTuning(json.steering);
         node.routeName = str(json.routeName, node.routeName);
+        const weight = (value: any, fallback: number) =>
+            typeof value === 'number' && isFinite(value) ? Math.max(0, value) : fallback;
+        node.flockRadius = weight(json.flockRadius, node.flockRadius);
+        node.separationWeight = weight(json.separationWeight, node.separationWeight);
+        node.alignmentWeight = weight(json.alignmentWeight, node.alignmentWeight);
+        node.cohesionWeight = weight(json.cohesionWeight, node.cohesionWeight);
         node.perception = perceptionTuning(json.perception);
         node.eyeHeight = typeof json.eyeHeight === 'number' && isFinite(json.eyeHeight)
             ? Math.max(0, json.eyeHeight) : node.eyeHeight;

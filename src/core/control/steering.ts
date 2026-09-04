@@ -241,6 +241,84 @@ export function separate(
 }
 
 /**
+ * A neighbour, as the caller measured it.
+ *
+ * Both halves are needed because the three flocking urges want different things: separation and
+ * cohesion are about where everyone IS, alignment is about where everyone is GOING. Gathering them
+ * together is the caller's job — it needs a scene to know who the neighbours are, and this module
+ * deliberately has none.
+ */
+export interface FlockNeighbour {
+    position: vec3;
+    /** MEASURED velocity, not commanded: an agent jammed against a wall should not steer the flock. */
+    velocity: vec3;
+}
+
+/**
+ * Match the average heading of the neighbours.
+ *
+ * The urge that turns a crowd into a shoal. Averaging VELOCITY rather than facing is deliberate: a
+ * stationary agent that happens to be pointing somewhere has no opinion about where the group is
+ * going, and letting its facing vote makes a stopped flock drift.
+ *
+ * Returns nothing when the average cancels out — a group moving in opposite directions genuinely has
+ * no shared heading, and inventing one would pick an arbitrary winner.
+ */
+export function align(
+    out: vec3, from: vec3, neighbours: readonly FlockNeighbour[], radius: number, maxSpeed: number,
+    up: vec3,
+): vec3 {
+    vec3.set(out, 0, 0, 0);
+    if (radius <= 1e-6) return out;
+
+    let count = 0;
+    for (const other of neighbours) {
+        vec3.subtract(_tmp, other.position, from);
+        planar(_tmp, _tmp, up);
+        const distance = vec3.length(_tmp);
+        if (distance > radius) continue;
+        planar(_tmp, other.velocity, up);
+        vec3.add(out, out, _tmp);
+        count++;
+    }
+    if (count === 0) return vec3.set(out, 0, 0, 0);
+    // Unweighted by distance, unlike separation: a neighbour at the edge of the group is heading
+    // somewhere just as definitely as one beside you.
+    return withLength(out, out, maxSpeed);
+}
+
+/**
+ * Steer toward the middle of the neighbours.
+ *
+ * The urge that stops a flock dissolving. Unweighted, because the centre of a group is the plain mean
+ * of its members — weighting by closeness would pull toward whichever side happens to be crowded, and
+ * that is separation's job, in the opposite direction.
+ *
+ * Returns nothing when the agent is already at the centre, rather than a NaN from normalizing zero.
+ */
+export function cohere(
+    out: vec3, from: vec3, neighbours: readonly FlockNeighbour[], radius: number, maxSpeed: number,
+    up: vec3,
+): vec3 {
+    vec3.set(out, 0, 0, 0);
+    if (radius <= 1e-6) return out;
+
+    let count = 0;
+    for (const other of neighbours) {
+        vec3.subtract(_tmp, other.position, from);
+        planar(_tmp, _tmp, up);
+        if (vec3.length(_tmp) > radius) continue;
+        // Accumulate the OFFSET from here, so the result is already the direction to the centre and
+        // no second subtraction is needed.
+        vec3.add(out, out, _tmp);
+        count++;
+    }
+    if (count === 0) return vec3.set(out, 0, 0, 0);
+    vec3.scale(out, out, 1 / count);
+    return withLength(out, out, maxSpeed);
+}
+
+/**
  * One whisker, as the CALLER measured it. The physics query stays outside this module — see the header.
  * `distance` is how far along `direction` the hit was; a negative distance means that whisker is clear.
  */

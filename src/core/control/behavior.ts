@@ -47,6 +47,9 @@ export const AI_GOALS = [
     // memory system exists to enable, and the difference between an agent that loses you and one that
     // comes looking.
     'investigate',
+    // Group movement. Separation, alignment and cohesion over the other agents nearby -- the three
+    // urges that turn a crowd into a shoal.
+    'flock',
     'script',
 ] as const;
 export type AiGoal = typeof AI_GOALS[number];
@@ -109,6 +112,9 @@ export const BEHAVIOR_SENSES = [
     // Perception. `targetVisible` (above) is a bare line-of-sight test kept for compatibility;
     // `targetInSight` is the one with a cone, a range and a reaction delay behind it.
     'targetInSight', 'timeSinceSeen', 'lastKnownDistance',
+    // How many other agents are inside the flock radius. "Am I alone" is a question a machine wants
+    // to ask, and it is the one thing about a group only the controller can answer.
+    'neighborCount',
 ] as const;
 export type BehaviorSense = typeof BEHAVIOR_SENSES[number];
 
