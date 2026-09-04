@@ -19,6 +19,7 @@ import { UINode } from "./nodes/ui/uiNode";
 import { UIRootNode } from "./nodes/ui/uiRoot";
 import { parseNodeJson } from "./nodes/parseNodeJson";
 import { InputSystem } from "../../input/inputSystem";
+import { CharacterNode } from "./nodes/characterNode";
 import { ControllerNode } from "./nodes/controllerNode";
 import { NavMeshNode } from './nodes/navMeshNode';
 import type { ActionChange } from "../../input/resolveActions";
@@ -89,6 +90,7 @@ export class Scene {
     private _tilemaps: Set<TilemapNode> = new Set();
     private _lodGroups: Set<LodGroupNode> = new Set();
     private _cameraRigs: Set<CameraRigNode> = new Set();
+    private _characters: Set<CharacterNode> = new Set();
     private _controllers: Set<ControllerNode> = new Set();
     private _navMeshes: Set<NavMeshNode> = new Set();
     private _sounds: Set<SoundNode> = new Set();
@@ -352,6 +354,23 @@ export class Scene {
                 const timerStart = performance.now();
                 this._updateTimers(delta);
                 sceneStats.timerMs = performance.now() - timerStart;
+            }
+
+            // THE PERCEPTION PASS. Runs before the control pass so every brain reads THIS frame's
+            // senses, for the same reason the control pass runs before the node loop.
+            //
+            // Gated on authoring as well as on paused, which the control pass is not: an editing scene
+            // is started AND unpaused (the free-fly camera needs both), so `think` already runs while
+            // you are laying out a level. Perception costs a raycast per candidate in the cone, and
+            // paying that on every frame of every open tab -- for senses nothing is reading while
+            // nothing moves -- is the one part of this that would be felt.
+            if (this._hasStarted && !paused && !CleoEngine.authoringMode) {
+                const perceptionStart = performance.now();
+                for (const controller of this.controllers) {
+                    try { controller.perceive(delta); }
+                    catch (error) { Logger.error(`Error in perceive for controller ${controller.name}: ${error}`, 'Script'); }
+                }
+                sceneStats.scriptMs += performance.now() - perceptionStart;
             }
 
             // THE CONTROL PASS. Every driver writes its pawn's intent BEFORE the node loop, so a pawn
@@ -628,6 +647,7 @@ export class Scene {
         this._tilemaps = new Set();
         this._lodGroups = new Set();
         this._cameraRigs = new Set();
+        this._characters = new Set();
         this._controllers = new Set();
         this._navMeshes = new Set();
         this._sounds = new Set();
@@ -653,6 +673,8 @@ export class Scene {
                 this._lodGroups.add(node);
             if (node instanceof CameraRigNode)
                 this._cameraRigs.add(node);
+            if (node instanceof CharacterNode)
+                this._characters.add(node);
             if (node instanceof ControllerNode)
                 this._controllers.add(node);
             if (node instanceof NavMeshNode)
@@ -873,6 +895,19 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._cameraRigs;
+    }
+
+    /**
+     * Every pawn in the scene. Holds only SPAWNED nodes, so a despawned character stops being a thing
+     * other agents can see for free.
+     *
+     * This is what perception offers as candidates: a player and every NPC is a Character, so it is
+     * both the set an agent cares about and a bounded one.
+     */
+    public get characters(): Set<CharacterNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._characters;
     }
 
     /** Every driver in the scene. Holds only SPAWNED nodes, so a despawn stops one for free. */

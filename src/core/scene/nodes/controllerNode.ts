@@ -21,6 +21,9 @@ import {
     markRepathed, remainingDistance, repathPolicy, setNavPath, shouldRepath,
 } from "../../../ai/navPath";
 import type { NavPath, RepathPolicy, RepathState } from "../../../ai/navPath";
+import { Perception, perceptionTuning } from "../../../ai/perception";
+import { yawFromDirection } from "../../../ai/interop";
+import type { LineOfSightTest, PerceptionCandidate, PerceptionTuning } from "../../../ai/perception";
 import { aiStats } from "../../../ai/aiStats";
 import { vec3 } from "gl-matrix";
 
@@ -152,6 +155,30 @@ export class ControllerNode extends Node {
     /** How often a route is recomputed, and how far the destination may drift before it is. */
     public repath: RepathPolicy = repathPolicy();
 
+    // ----- perception -------------------------------------------------------------------------------
+    /** Cone, range, memory span and reaction delay. */
+    public perception: PerceptionTuning = perceptionTuning();
+
+    /**
+     * Height above the pawn's origin that the agent looks FROM, in world units.
+     *
+     * A pawn's origin is at its feet, and a ray cast from there runs along the floor — which counts as
+     * an obstacle, so an agent with no eye height is blind in exactly the situations it most needs to
+     * see. Also what a ray is cast TOWARD is the other pawn's origin, i.e. its feet, so crouching
+     * behind low cover works without anything extra.
+     */
+    public eyeHeight: number = 1.6;
+
+    /**
+     * Write the nearest NOTICED character's id into the blackboard under {@link targetKey}, every
+     * frame it can see one.
+     *
+     * On by default, because it is what makes a guard work with nothing but a goal set: without it
+     * perception fills in the senses but nobody ever becomes the target, and every chase has to be
+     * wired by a script. A brain that picks its own targets turns this off.
+     */
+    public autoAcquire: boolean = true;
+
     /**
      * How close counts as having reached an intermediate waypoint. Too small and an agent circles a
      * corner it has already rounded; too large and it cuts across geometry the route went around.
@@ -174,6 +201,14 @@ export class ControllerNode extends Node {
     private readonly _repathState: RepathState = createRepathState();
     private _routeIndex: number = 0;
     private readonly _pathScratch: vec3[] = [];
+    private readonly _perception = new Perception();
+    private readonly _candidates: PerceptionCandidate[] = [];
+    private readonly _rayHit: vec3 = vec3.create();
+    private readonly _eye: vec3 = vec3.create();
+    /** Ids offered to perception this frame, so a hit ON a candidate is not read as a wall. */
+    private readonly _candidateIds = new Set<string>();
+    /** Bound once: a fresh closure per frame per agent is the kind of garbage that shows up in a HUD. */
+    private readonly _lineOfSight: LineOfSightTest = (from, to, hit) => this._testLineOfSight(from, to, hit);
     private readonly _desired: vec3 = vec3.create();
     private readonly _selfPos: vec3 = vec3.create();
     private readonly _targetPos: vec3 = vec3.create();
@@ -403,6 +438,111 @@ export class ControllerNode extends Node {
         this._reading.crouch = this.crouchAction ? input.pressed(this.crouchAction) : false;
     }
 
+    // ----- perception -------------------------------------------------------------------------------
+
+    /**
+     * Look around, remember what was seen, and optionally pick a target.
+     *
+     * Called by the scene's PERCEPTION PASS, before any controller thinks — so a brain reads this
+     * frame's senses rather than the previous one's. Not called while authoring: the editor's scene is
+     * started and unpaused, and paying a raycast per candidate on every frame of every open tab, for
+     * senses nothing is reading while nothing moves, is the one part of this that would be felt.
+     */
+    public perceive(delta: number): void {
+        const pawn = this._resolvePossessed();
+        if (!pawn || this.controlSource !== 'ai') return;
+
+        // Every other pawn in the scene. A player and every NPC is a Character, so this is both the
+        // set an agent cares about and a bounded one — as opposed to "every node", which is neither.
+        this._candidates.length = 0;
+        this._candidateIds.clear();
+        const characters = this._scene?.characters;
+        if (characters) {
+            for (const character of characters) {
+                if (character === pawn) continue;
+                this._candidates.push({ id: character.id, position: character.worldPosition });
+                this._candidateIds.add(character.id);
+            }
+        }
+
+        // Eyes at the pawn's origin would look out of its feet, and a floor counts as an obstacle.
+        const eye = pawn.worldPosition;
+        vec3.set(this._eye, eye[0], eye[1] + this.eyeHeight, eye[2]);
+
+        // The pawn's FACING, from worldForward. Not `planarAngle`, which is the direction of TRAVEL
+        // relative to the body and reads 0 while standing still -- a guard's cone would then be pinned
+        // to world +Z no matter which way it was turned.
+        const forward = pawn.worldForward;
+        this._perception.step(
+            this._eye, yawFromDirection(forward[0], forward[2]),
+            this._candidates, this.perception, delta,
+            this._scene?.physics ? this._lineOfSight : null);
+
+        if (this.autoAcquire) this._acquire(pawn);
+    }
+
+    /**
+     * Adopt the nearest NOTICED character as this controller's target.
+     *
+     * Nearest rather than first, because "first" is traversal order and would make a guard prefer
+     * whichever enemy happens to sit earlier in the tree. Clears the blackboard entry when nothing is
+     * in sight AND nothing is still remembered, so a lost target survives long enough to be chased —
+     * that is what memory span is for.
+     */
+    private _acquire(pawn: CharacterNode): void {
+        let bestId: string | null = null;
+        let bestDistance = Infinity;
+        for (const sighting of this._perception.sightings) {
+            if (!sighting.noticed) continue;
+            const target = this._scene?.getNodeById(sighting.id);
+            if (!target) continue;
+            const distance = vec3.distance(this._eye, target.worldPosition as vec3);
+            if (distance < bestDistance) { bestDistance = distance; bestId = sighting.id; }
+        }
+
+        if (bestId) { this.setBlackboard(this.targetKey, bestId); return; }
+
+        const current = this._blackboard.get(this.targetKey);
+        if (typeof current === 'string' && current && !this._perception.remembers(current, this.perception)) {
+            this.setBlackboard(this.targetKey, undefined);
+        }
+    }
+
+    /**
+     * The line-of-sight query, backed by the physics world.
+     *
+     * Yuka would otherwise brute-force triangles through `MeshGeometry`; cannon already has a
+     * broadphase and already knows which bodies are solid. The pawn's own body is ignored, or an agent
+     * finds itself blocking its own view.
+     */
+    private _testLineOfSight(from: vec3, to: vec3, hit: vec3): boolean {
+        const physics = this._scene?.physics;
+        if (!physics) return false;
+        const pawn = this._possessed;
+        try {
+            const result = physics.raycast(from, to, { ignore: pawn?.body ? [pawn.body] : undefined });
+            if (!result) return false;
+            // A hit ON the target is not an obstruction. Characters carry bodies, so without this an
+            // agent can never see another agent.
+            if (result.node && this._candidateIds.has(result.node.id)) return false;
+            vec3.set(hit, result.point[0], result.point[1], result.point[2]);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    /** What this controller can see right now, for `onThink` and the editor readout. */
+    public get sightings() { return this._perception.sightings; }
+
+    /** Where the current target was last seen, or null. Backs the `investigate` goal. */
+    public get lastKnownPosition(): vec3 | null {
+        const id = this._blackboard.get(this.targetKey);
+        if (typeof id !== 'string' || !id) return null;
+        const sighting = this._perception.sightingOf(id);
+        return sighting && Number.isFinite(sighting.timeSinceSeen) ? sighting.lastKnownPosition : null;
+    }
+
     // ----- the AI source ----------------------------------------------------------------------------
 
     /** A blackboard entry, or undefined. Public, so `onThink` and any other script can read one. */
@@ -479,6 +619,7 @@ export class ControllerNode extends Node {
             switch (goal) {
                 case 'seek': seek(this._desired, this._selfPos, this._targetPos, tuning.maxSpeed, up); break;
                 case 'path': this._steerPath(pawn, tuning, up, delta); break;
+                case 'investigate': this._steerInvestigate(pawn, tuning, up, delta); break;
                 case 'patrol': this._steerPatrol(pawn, tuning, up); break;
                 case 'flee': flee(this._desired, this._selfPos, this._targetPos, tuning.maxSpeed, up); break;
                 case 'arrive': arrive(this._desired, this._selfPos, this._targetPos, tuning, up); break;
@@ -550,6 +691,24 @@ export class ControllerNode extends Node {
         aiStats.navAgents++;
         advancePath(this._path, this._selfPos, this.waypointRadius, up);
         followPath(this._desired, this._selfPos, this._path, tuning, up);
+    }
+
+    /**
+     * Walk to where the target was last seen.
+     *
+     * The behaviour the whole memory system exists for: an agent that loses sight of you goes to the
+     * last place it saw you instead of forgetting you on the frame you break the line. Routed through
+     * the navmesh exactly as `path` is, so it goes around the corner you went around.
+     *
+     * With nothing remembered it holds still rather than walking to the world origin -- the same rule
+     * every other goal that names a thing follows.
+     */
+    private _steerInvestigate(pawn: CharacterNode, tuning: SteeringTuning, up: vec3, delta: number): void {
+        const remembered = this.lastKnownPosition;
+        if (!remembered) { vec3.set(this._desired, 0, 0, 0); return; }
+        vec3.copy(this._targetPos, remembered);
+        vec3.set(this._targetVel, 0, 0, 0);
+        this._steerPath(pawn, tuning, up, delta);
     }
 
     /**
@@ -661,6 +820,20 @@ export class ControllerNode extends Node {
         if (name === 'stateTime') return this._behaviorRuntime.stateTime;
         if (name === 'hasPath') return hasPath(this._path);
         if (name === 'pathRemaining') return this.pathRemaining;
+
+        // Perception senses read the CURRENT target, so they answer about whoever the blackboard
+        // names rather than about whatever happens to be visible.
+        const seenId = this._blackboard.get(this.targetKey);
+        const sighting = typeof seenId === 'string' && seenId
+            ? this._perception.sightingOf(seenId) : null;
+        if (name === 'targetInSight') return sighting?.noticed === true;
+        if (name === 'timeSinceSeen') return sighting ? sighting.timeSinceSeen : Infinity;
+        if (name === 'lastKnownDistance') {
+            if (!sighting || !Number.isFinite(sighting.timeSinceSeen)) return 0;
+            const here = pawn.worldPosition;
+            return vec3.distance(
+                vec3.set(this._selfPos, here[0], here[1], here[2]), sighting.lastKnownPosition);
+        }
 
         const target = this._resolveTarget(this.targetKey);
         if (name === 'hasTarget') return target !== null;
@@ -792,8 +965,11 @@ export class ControllerNode extends Node {
         // Without this the pawn keeps a back-pointer to a controller that no longer runs, and its
         // `driveWhenUnpossessed` gate never re-opens — the character freezes with nothing to explain it.
         this._detach();
-        // A respawned brain starts from its entry state rather than resuming mid-chase.
+        // A respawned brain starts from its entry state rather than resuming mid-chase -- and must not
+        // remember where it last saw you either.
         this._behaviorRuntime = createBehaviorRuntime();
+        this._perception.clear();
+        clearNavPath(this._path);
     }
 
     // ----- serialization ---------------------------------------------------------------------------
@@ -824,6 +1000,9 @@ export class ControllerNode extends Node {
             goalPoint: [...this.goalPoint],
             steering: { ...this.steering },
             routeName: this.routeName,
+            perception: { ...this.perception },
+            eyeHeight: this.eyeHeight,
+            autoAcquire: this.autoAcquire,
             repath: { ...this.repath },
             waypointRadius: this.waypointRadius,
             whiskerCount: this.whiskerCount,
@@ -866,6 +1045,11 @@ export class ControllerNode extends Node {
         // The tolerant reader defaults and clamps every field, so a partial or stale block passes.
         node.steering = steeringTuning(json.steering);
         node.routeName = str(json.routeName, node.routeName);
+        node.perception = perceptionTuning(json.perception);
+        node.eyeHeight = typeof json.eyeHeight === 'number' && isFinite(json.eyeHeight)
+            ? Math.max(0, json.eyeHeight) : node.eyeHeight;
+        // Absent means true, so a controller written before perception existed still acquires.
+        node.autoAcquire = json.autoAcquire !== false;
         // Tolerant readers throughout, so a controller saved before navigation existed reads as one
         // with the defaults rather than failing the whole scene.
         node.repath = repathPolicy(json.repath);

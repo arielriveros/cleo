@@ -10,6 +10,7 @@ export { parseNodeJson } from "./core/scene/nodes/parseNodeJson";
 export { cloneNodeJson, collectNodeIds, remapNodeRefs, regenerateNodeIds } from "./core/scene/nodeJson";
 export { Node } from "./core/scene/nodes/node";
 export type { MotionBlurMode } from "./core/scene/nodes/node";
+export { isEditorOnlyNode, markEditorOnly } from "./core/scene/editorNodes";
 export type { NodeType } from "./core/scene/nodes/nodeType";
 export { ModelNode, disposeModelSubtree } from "./core/scene/nodes/modelNode";
 // Device entry points. Exported so an embedder — or a test that has to construct a Model, which
@@ -126,6 +127,10 @@ export {
     SoupBuilder, heightfieldSoup, mergeSoups, tessellateSource, tessellateSources,
 } from "./ai/navSources";
 export type { HeightfieldSource, NavPrimitive, NavSource } from "./ai/navSources";
+export { PERCEPTION_DEFAULTS, Perception, perceptionTuning } from "./ai/perception";
+export type {
+    LineOfSightTest, PerceptionCandidate, PerceptionTuning, Sighting,
+} from "./ai/perception";
 export { AISystem } from "./ai/aiSystem";
 export type { AISceneLike, NavMeshSource } from "./ai/aiSystem";
 export { aiStats, resetAIStats } from "./ai/aiStats";

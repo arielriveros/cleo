@@ -50,6 +50,13 @@ export {
     AStar,
     Dijkstra,
 
+    // Perception. Vision rejects on range, then the cone, then obstacles -- so the raycast budget is
+    // proportional to what is actually in front of an agent, not to how many candidates exist.
+    Vision,
+    MemorySystem,
+    MemoryRecord,
+    GameEntity,
+
     // Math. Only ever crossed at the `interop.ts` boundary; nothing else should hold one of these.
     Vector3,
     Quaternion,

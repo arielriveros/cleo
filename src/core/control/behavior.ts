@@ -43,6 +43,10 @@ export const AI_GOALS = [
     // straight-line equivalent when the scene has no baked navmesh, so adding one is never a
     // regression on a scene that has not baked yet.
     'path', 'patrol',
+    // Perception. `investigate` walks to where a target was LAST SEEN -- the behaviour the whole
+    // memory system exists to enable, and the difference between an agent that loses you and one that
+    // comes looking.
+    'investigate',
     'script',
 ] as const;
 export type AiGoal = typeof AI_GOALS[number];
@@ -95,6 +99,9 @@ export const BEHAVIOR_SENSES = [
     // actually wants to ask -- `distanceToTarget` is a straight line and says a wall is one metre away
     // when the way round it is thirty.
     'hasPath', 'pathRemaining',
+    // Perception. `targetVisible` (above) is a bare line-of-sight test kept for compatibility;
+    // `targetInSight` is the one with a cone, a range and a reaction delay behind it.
+    'targetInSight', 'timeSinceSeen', 'lastKnownDistance',
 ] as const;
 export type BehaviorSense = typeof BEHAVIOR_SENSES[number];
 
