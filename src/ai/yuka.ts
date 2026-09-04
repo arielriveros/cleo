@@ -57,6 +57,13 @@ export {
     MemoryRecord,
     GameEntity,
 
+    // Goal-driven agent design. The status lifecycle, the subgoal stack and the arbitration -- the
+    // fiddly part being exactly when a finished subgoal is popped and how failure reaches its parent.
+    Think,
+    Goal,
+    CompositeGoal,
+    GoalEvaluator,
+
     // Fuzzy logic. The seven set shapes, the four hedges, and the module that combines them -- the
     // machinery behind "how much do I want this, given several things that are each a matter of
     // degree", which a threshold answers badly.

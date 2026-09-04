@@ -40,6 +40,7 @@ export default mergeConfig(engineConfig, defineConfig({
                 'src/ai/aiStats.ts',
                 'src/ai/aiSystem.ts',
                 'src/ai/fuzzy.ts',
+                'src/ai/goals.ts',
                 'src/ai/interop.ts',
                 'src/ai/navBake.ts',
                 'src/ai/navMesh.ts',

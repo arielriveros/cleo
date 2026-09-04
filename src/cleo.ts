@@ -136,6 +136,13 @@ export type {
     Defuzzification, FuzzyModel, FuzzyRuleDefinition, FuzzySetDefinition, FuzzySetShape,
     FuzzyTermNode, FuzzyVariableDefinition,
 } from "./ai/fuzzy";
+export {
+    EMPTY_GOAL_GRAPH, GoalBrain, buildGoalBrain, isDefaultGoalGraph, parseDesirability,
+    parseGoalDefinition, parseGoalGraph,
+} from "./ai/goals";
+export type {
+    DesirabilityDefinition, GoalContext, GoalDefinition, GoalGraph,
+} from "./ai/goals";
 export { PERCEPTION_DEFAULTS, Perception, perceptionTuning } from "./ai/perception";
 export type {
     LineOfSightTest, PerceptionCandidate, PerceptionTuning, Sighting,

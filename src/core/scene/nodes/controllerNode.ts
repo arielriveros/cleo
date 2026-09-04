@@ -16,7 +16,9 @@ import {
     AI_GOALS, BEHAVIOR_SENSES, createBehaviorRuntime, isDefaultBehaviorMachine, parseBehaviorMachine,
     stepBehavior,
 } from "../../control/behavior";
-import type { AiGoal, BehaviorMachine, BehaviorRuntime, BehaviorState } from "../../control/behavior";
+import type {
+    AiGoal, BehaviorMachine, BehaviorParameterSource, BehaviorRuntime, BehaviorState,
+} from "../../control/behavior";
 import {
     advancePath, clearNavPath, createNavPath, createRepathState, followPath, hasPath, insetCorners,
     markRepathed, remainingDistance, repathPolicy, setNavPath, shouldRepath,
@@ -26,6 +28,9 @@ import { Perception, perceptionTuning } from "../../../ai/perception";
 import { yawFromDirection } from "../../../ai/interop";
 import type { LineOfSightTest, PerceptionCandidate, PerceptionTuning } from "../../../ai/perception";
 import { EMPTY_FUZZY_MODEL, FuzzyBrain, isDefaultFuzzyModel, parseFuzzyModel } from "../../../ai/fuzzy";
+import { EMPTY_GOAL_GRAPH, GoalBrain, isDefaultGoalGraph, parseGoalGraph } from "../../../ai/goals";
+import type { GoalContext, GoalGraph } from "../../../ai/goals";
+import { conditionNodeMet } from "../../conditions";
 import type { FuzzyModel } from "../../../ai/fuzzy";
 import { aiStats } from "../../../ai/aiStats";
 import { vec3 } from "gl-matrix";
@@ -64,6 +69,10 @@ export const CONTROL_SOURCES = ['player', 'ai', 'none'] as const;
 export type ControlSource = typeof CONTROL_SOURCES[number];
 
 /** Where the "forward" of a movement intent points. */
+/** Which brain decides the goal. `machine` is the default, so no existing scene changes. */
+export const BRAIN_KINDS = ['machine', 'goal', 'none'] as const;
+export type BrainKind = typeof BRAIN_KINDS[number];
+
 export const AIM_SOURCES = ['possessed', 'node', 'world'] as const;
 export type AimSource = typeof AIM_SOURCES[number];
 
@@ -200,6 +209,18 @@ export class ControllerNode extends Node {
      */
     public fuzzy: FuzzyModel = { ...EMPTY_FUZZY_MODEL };
 
+    /**
+     * Which brain decides the goal.
+     *
+     * `machine` is the behaviour state machine and the DEFAULT, so no existing scene changes. `goal`
+     * runs the goal graph instead. `none` leaves the goal field alone, which is what a controller
+     * driven entirely from `onThink` wants.
+     */
+    public brain: BrainKind = 'machine';
+
+    /** An authored goal graph, or an empty one. Read only while `brain` is `goal`. */
+    public goals: GoalGraph = { ...EMPTY_GOAL_GRAPH };
+
     public steering: SteeringTuning = steeringTuning();
     /** How many rays to fan ahead for obstacle avoidance. Only fired while `steering.avoidDistance > 0`. */
     public whiskerCount: number = 3;
@@ -227,6 +248,11 @@ export class ControllerNode extends Node {
     private _fuzzySource: FuzzyModel | null = null;
     private readonly _fuzzyInputs: Record<string, number> = {};
     private _fuzzyOutputs: Record<string, number> = {};
+    private _goalBrain: GoalBrain | null = null;
+    private _goalSource: GoalGraph | null = null;
+    /** What the goal brain asked for this frame, or null when it asked for nothing. */
+    private _goalDrive: { goal: AiGoal; targetKey?: string; speedScale: number } | null = null;
+    private _goalContext: GoalContext | null = null;
     /** Bound once: a fresh closure per frame per agent is the kind of garbage that shows up in a HUD. */
     private readonly _lineOfSight: LineOfSightTest = (from, to, hit) => this._testLineOfSight(from, to, hit);
     private readonly _desired: vec3 = vec3.create();
@@ -605,13 +631,28 @@ export class ControllerNode extends Node {
         // refresh: a model with no machine is a legitimate setup, and it would never run.
         this._refreshFuzzy(pawn);
 
-        // A machine, when there is one, decides the goal; otherwise the node's own fields do. One state
-        // with one goal is exactly equivalent to setting that goal by hand, so adding a machine is never
-        // a behaviour change on its own.
-        const state = this._stepBehavior(pawn, delta);
-        const goal: AiGoal = state ? state.goal : this.goal;
-        const targetKey = state?.targetKey || this.targetKey;
-        const stateScale = state?.speedScale ?? 1;
+        // Whichever brain is selected decides the goal; otherwise the node's own fields do. A machine
+        // with one state naming one goal is exactly equivalent to setting that goal by hand, so
+        // adding either brain is never a behaviour change on its own.
+        let goal: AiGoal = this.goal;
+        let targetKey = this.targetKey;
+        let stateScale = 1;
+
+        if (this.brain === 'goal') {
+            const drive = this._stepGoals(pawn, delta);
+            if (drive) {
+                goal = drive.goal;
+                targetKey = drive.targetKey || this.targetKey;
+                stateScale = drive.speedScale;
+            }
+        } else if (this.brain === 'machine') {
+            const state = this._stepBehavior(pawn, delta);
+            if (state) {
+                goal = state.goal;
+                targetKey = state.targetKey || this.targetKey;
+                stateScale = state.speedScale ?? 1;
+            }
+        }
 
         if (goal === 'script') {
             // The escape hatch: write nothing and leave the frame to onThink, which still gets possession,
@@ -786,6 +827,47 @@ export class ControllerNode extends Node {
     }
 
     /**
+     * Advance the goal brain and return what it asked for this frame, or null.
+     *
+     * The context is built once and reused: it closes over the pawn, and a fresh object per frame per
+     * agent is the kind of garbage that shows up in a frame-time HUD rather than in a profile.
+     */
+    private _stepGoals(pawn: CharacterNode, delta: number): {
+        goal: AiGoal; targetKey?: string; speedScale: number;
+    } | null {
+        if (this.goals !== this._goalSource) {
+            this._goalSource = this.goals;
+            this._goalBrain = isDefaultGoalGraph(this.goals) ? null : GoalBrain.from(this.goals);
+        }
+        const brain = this._goalBrain;
+        if (!brain) return null;
+
+        if (!this._goalContext) {
+            this._goalContext = {
+                read: (source) => this._readSource(source, this._possessed ?? pawn),
+                met: (condition) => !!condition
+                    && conditionNodeMet(this._behaviorRuntime.ctx, condition),
+                drive: (goal, targetKey, speedScale) => {
+                    this._goalDrive = { goal, targetKey, speedScale };
+                },
+            };
+        }
+
+        // A goal's `until`/`failWhen` read the SAME parameter table the machine uses, so the values
+        // have to be current before the brain steps -- otherwise a condition tests last frame's world.
+        this._refreshBehaviorParams(pawn);
+        this._goalDrive = null;
+        brain.step(this._goalContext, delta);
+        return this._goalDrive;
+    }
+
+    /** The name of the goal currently being pursued, or ''. For the editor readout and `onThink`. */
+    public get goalState(): string { return this._goalBrain?.current ?? ''; }
+
+    /** The active plan, outermost first. */
+    public get goalPlan(): string[] { return this._goalBrain?.plan ?? []; }
+
+    /**
      * Advance the behaviour machine, if there is one, and return the state now held.
      *
      * Parameters are refreshed first, modelled on `Animator._refreshVariableParams`: a machine reading a
@@ -844,43 +926,61 @@ export class ControllerNode extends Node {
         return typeof value === 'number' && Number.isFinite(value) ? value : 0;
     }
 
+    /**
+     * Read one parameter source.
+     *
+     * ONE reader for both brains. The behaviour machine's parameters and a goal evaluator's
+     * desirability draw on the same vocabulary, and two copies of this switch would be two places for
+     * `blackboard` or `sense` to mean subtly different things.
+     *
+     * Returns `undefined` when the source has nothing to say, so a caller can keep its own default
+     * rather than being handed a 0 it cannot distinguish from a real one.
+     */
+    private _readSourceOrUndefined(
+        source: BehaviorParameterSource, pawn: CharacterNode,
+    ): number | boolean | undefined {
+        switch (source.kind) {
+            case 'const':
+                return source.value;
+            case 'builtin': {
+                // The pawn's MEASURED motion — planarSpeed, isGrounded, slopeAngle and the rest —
+                // read straight off the node rather than through a second surface of our own.
+                const read = (pawn as unknown as Record<string, unknown>)[source.name];
+                return typeof read === 'number' || typeof read === 'boolean' ? read : undefined;
+            }
+            case 'variable': {
+                const read = pawn.getVariable(source.varName);
+                return typeof read === 'number' || typeof read === 'boolean' ? read : undefined;
+            }
+            case 'blackboard': {
+                const read = this._blackboard.get(source.key);
+                if (typeof read === 'number' || typeof read === 'boolean') return read;
+                // A string entry (a node id) reads as "is it set", which is what a hasTarget-style
+                // condition on a blackboard key actually wants to ask.
+                if (typeof read === 'string') return read.length > 0;
+                return undefined;
+            }
+            case 'sense':
+                return this._sense(source.name, pawn);
+            case 'fuzzy':
+                return this.fuzzyValue(source.name);
+            default:
+                return undefined;
+        }
+    }
+
+    /** The same read, with 0 for "nothing to say" — what a desirability curve wants. */
+    private _readSource(source: BehaviorParameterSource, pawn: CharacterNode): number | boolean {
+        return this._readSourceOrUndefined(source, pawn) ?? 0;
+    }
+
     /** Fill the machine's parameter table for this frame. */
     private _refreshBehaviorParams(pawn: CharacterNode): void {
         const values = this._behaviorRuntime.ctx.values;
         for (const p of this.behavior.parameters) {
-            let value: number | boolean = p.default;
+            const read = this._readSourceOrUndefined(p.source, pawn);
+            const value: number | boolean = read ?? p.default;
             const source = p.source;
-            switch (source.kind) {
-                case 'const':
-                    value = source.value;
-                    break;
-                case 'builtin': {
-                    // The pawn's MEASURED motion — planarSpeed, isGrounded, slopeAngle and the rest —
-                    // read straight off the node rather than through a second surface of our own.
-                    const read = (pawn as unknown as Record<string, unknown>)[source.name];
-                    if (typeof read === 'number' || typeof read === 'boolean') value = read;
-                    break;
-                }
-                case 'variable': {
-                    const read = pawn.getVariable(source.varName);
-                    if (typeof read === 'number' || typeof read === 'boolean') value = read;
-                    break;
-                }
-                case 'blackboard': {
-                    const read = this._blackboard.get(source.key);
-                    if (typeof read === 'number' || typeof read === 'boolean') value = read;
-                    // A string entry (a node id) reads as "is it set", which is what a hasTarget-style
-                    // condition on a blackboard key actually wants to ask.
-                    else if (typeof read === 'string') value = read.length > 0;
-                    break;
-                }
-                case 'sense':
-                    value = this._sense(source.name, pawn);
-                    break;
-                case 'fuzzy':
-                    value = this.fuzzyValue(source.name);
-                    break;
-            }
             // A trigger a script raised this frame stays raised until a transition consumes it; anything
             // else is overwritten from its source.
             if (p.type === 'trigger' && values.get(p.name) === true && source.kind !== 'blackboard') continue;
@@ -1042,6 +1142,7 @@ export class ControllerNode extends Node {
         // remember where it last saw you either.
         this._behaviorRuntime = createBehaviorRuntime();
         this._perception.clear();
+        this._goalBrain?.clear();
         clearNavPath(this._path);
     }
 
@@ -1085,6 +1186,8 @@ export class ControllerNode extends Node {
             ...(isDefaultBehaviorMachine(this.behavior) ? {} : { behavior: this.behavior }),
             // Same rule: a controller that never opened the Fuzzy section adds nothing to the scene.
             ...(isDefaultFuzzyModel(this.fuzzy) ? {} : { fuzzy: this.fuzzy }),
+            brain: this.brain,
+            ...(isDefaultGoalGraph(this.goals) ? {} : { goals: this.goals }),
             // The blackboard is RUNTIME state — a brain writes into it every frame — so only the entries
             // an author typed are carried, and those live in the node's own `variables` instead.
         };
@@ -1137,6 +1240,10 @@ export class ControllerNode extends Node {
             ? Math.max(0, Math.min(360, json.whiskerSpread)) : node.whiskerSpread;
         node.behavior = parseBehaviorMachine(json.behavior);
         node.fuzzy = parseFuzzyModel(json.fuzzy);
+        // Absent means `machine`, so every controller written before goal brains existed keeps its
+        // state machine rather than silently switching to a graph it does not have.
+        if ((BRAIN_KINDS as readonly string[]).includes(json.brain)) node.brain = json.brain;
+        node.goals = parseGoalGraph(json.goals);
 
         // _commonParse adds the node to its parent — do not addChild again.
         Node.finishParse(node, parent, json);
