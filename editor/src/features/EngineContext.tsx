@@ -181,6 +181,15 @@ const EngineContext = createContext<{
   animationSourceId: string | null; // original node in the main scene (state-machine write-back target)
   animationSourceScene: Scene | null; // scene the source node lives in (for Variable parameter pickers)
   commitAnimationStateMachine: (sm: any) => void;
+  /**
+   * The ControllerNode whose behaviour graph is open over the viewport, or null.
+   *
+   * A node id rather than a boolean: the graph edits ONE controller's machine, and holding the id
+   * means a deleted or deselected controller closes it for free rather than leaving a canvas editing
+   * something that no longer exists.
+   */
+  behaviorGraphId: string | null;
+  setBehaviorGraphId: (id: string | null) => void;
   terrainBrush: React.MutableRefObject<TerrainBrushState>;
   tilemapBrush: React.MutableRefObject<TilemapBrushState>;
   loadingProgress: LoadingProgress;
@@ -411,6 +420,8 @@ const EngineContext = createContext<{
     mainScene: new Scene(),
     eventEmitter: new EventEmitter(),
     selectedNode: null,
+    behaviorGraphId: null,
+    setBehaviorGraphId: () => {},
     isGizmoDragging: false,
     isPlayMode: false,
     isSceneReady: false,
@@ -613,6 +624,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const editorSceneRef = useRef<Scene>(createEditorScene());
   const eventEmitter = useRef(new EventEmitter());
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [behaviorGraphId, setBehaviorGraphId] = useState<string | null>(null);
   const [isGizmoDragging, setIsGizmoDragging] = useState(false);
   const [isPlayMode, setIsPlayMode] = useState(false);
   const [isSceneReady, setIsSceneReady] = useState(false);
@@ -4905,6 +4917,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       mainScene: editorSceneRef.current,
       eventEmitter: eventEmitter.current,
       selectedNode,
+      behaviorGraphId,
+      setBehaviorGraphId,
       isGizmoDragging,
       isPlayMode,
       isSceneReady,

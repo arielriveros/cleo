@@ -63,7 +63,7 @@ function readNode(node: ControllerNode): ControllerState {
 }
 
 export default function ControllerEditor(props: { node: ControllerNode }) {
-  const { eventEmitter, editorScene, selectedNode } = useCleoEngine()
+  const { eventEmitter, editorScene, selectedNode, setBehaviorGraphId } = useCleoEngine()
   const [state, setState] = useState<ControllerState>(() => readNode(props.node))
 
   useEffect(() => { setState(readNode(props.node)) }, [props.node])
@@ -259,7 +259,19 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
                 not have their other graph disappear, and each says whether it is the live one. */}
             {state.brain === 'machine' ? (
               <>
-                {header('Behaviour')}
+                <div className='flex items-center justify-between mt-3 mb-1'>
+                  <div className={sectionTitleClass}>Behaviour</div>
+                  {/* The graph edits STRUCTURE; the list below edits detail. Both are live on the same
+                      machine, so an author can lay states out spatially and still tune one here. */}
+                  <Button size='sm' variant='ghost'
+                    disabled={props.node.behavior.states.length === 0}
+                    title={props.node.behavior.states.length === 0
+                      ? 'Add a machine first — an empty graph has nothing to lay out'
+                      : 'Lay this machine out on the node graph, over the viewport'}
+                    onClick={() => setBehaviorGraphId(props.node.id)}>
+                    Open graph
+                  </Button>
+                </div>
                 {/* A machine, when there is one, decides the goal above. An empty one leaves the Goal
                     field in charge, so this section is purely additive. */}
                 <BehaviorEditor node={props.node} onChange={changed} />

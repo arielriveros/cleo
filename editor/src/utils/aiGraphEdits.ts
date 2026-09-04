@@ -1,4 +1,4 @@
-import type { FuzzyModel, FuzzyTermNode, GoalGraph } from 'cleo'
+import type { BehaviorMachine, BehaviorTransition, FuzzyModel, FuzzyTermNode, GoalGraph } from 'cleo'
 
 /**
  * Renames inside the AI graphs, as pure functions.
@@ -119,4 +119,54 @@ export function flattenAndTerm(
         out.push(child)
     }
     return out
+}
+
+/**
+ * A pair of states and whichever directions exist between them.
+ *
+ * The graph draws one line per PAIR, not per transition: A to B and B to A are the same line, doubled.
+ * That matches how an author thinks about two states and is what lets one edge carry both gates.
+ *
+ * Ordered so the pair key is stable regardless of which transition was authored first — otherwise the
+ * same link would produce two different edge ids depending on insertion order, and selection would
+ * stop matching after a reload.
+ */
+export interface BehaviorLink {
+    a: string
+    b: string
+    forward?: BehaviorTransition
+    backward?: BehaviorTransition
+}
+
+/** Sorted pair key, so a link has one identity whichever direction is asked about. */
+export function behaviorLinkKey(x: string, y: string): [string, string] {
+    return x <= y ? [x, y] : [y, x]
+}
+
+/**
+ * Collapse a machine's transitions into links.
+ *
+ * A wildcard transition (`from: '*'`) has no source node to draw from, so it is skipped rather than
+ * given a phantom endpoint — it still runs, and the list editor is where it is visible.
+ */
+export function behaviorLinks(machine: BehaviorMachine): BehaviorLink[] {
+    const byKey = new Map<string, BehaviorLink>()
+    for (const t of machine.transitions) {
+        if (t.from === '*') continue
+        const [a, b] = behaviorLinkKey(t.from, t.to)
+        const key = a + '|' + b
+        let link = byKey.get(key)
+        if (!link) {
+            link = { a, b }
+            byKey.set(key, link)
+        }
+        if (t.from === a) link.forward = t
+        else link.backward = t
+    }
+    return [...byKey.values()]
+}
+
+/** Whether a machine has any transition that the graph cannot draw. */
+export function hasWildcardTransitions(machine: BehaviorMachine): boolean {
+    return machine.transitions.some(t => t.from === '*')
 }

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { parseFuzzyModel, parseGoalGraph } from 'cleo'
+import { parseBehaviorMachine, parseFuzzyModel, parseGoalGraph } from 'cleo'
 import {
-  flattenAndTerm, renameFuzzySet, renameFuzzyVariable, renameGoal, termUsesVariable,
+  behaviorLinkKey, behaviorLinks, flattenAndTerm, hasWildcardTransitions, renameFuzzySet,
+  renameFuzzyVariable, renameGoal, termUsesVariable,
 } from '../src/utils/aiGraphEdits'
 
 // Both AI graphs address things BY NAME on more than one side, and both are read back through a
@@ -175,5 +176,54 @@ describe('flattenAndTerm', () => {
       ],
     })).toBeNull()
     expect(flattenAndTerm({ op: 'very', child: { op: 'is', variable: 'a', set: 's' } })).toBeNull()
+  })
+})
+
+// The graph draws one line per PAIR of states, not one per transition, so the collapse has to be
+// order-independent: the same two states must produce the same link identity whichever transition was
+// authored first, or selection stops matching after a reload.
+describe('behaviorLinks', () => {
+  const machine = (transitions: unknown[]) => parseBehaviorMachine({
+    parameters: [],
+    states: [{ name: 'A', goal: 'idle', isEntry: true }, { name: 'B', goal: 'seek' }],
+    transitions,
+  })
+
+  it('collapses both directions onto one link', () => {
+    const links = behaviorLinks(machine([{ from: 'A', to: 'B' }, { from: 'B', to: 'A' }]))
+    expect(links).toHaveLength(1)
+    expect(links[0].forward).toBeTruthy()
+    expect(links[0].backward).toBeTruthy()
+  })
+
+  it('gives the same link identity whichever direction was authored first', () => {
+    const forwardFirst = behaviorLinks(machine([{ from: 'A', to: 'B' }, { from: 'B', to: 'A' }]))
+    const backwardFirst = behaviorLinks(machine([{ from: 'B', to: 'A' }, { from: 'A', to: 'B' }]))
+    expect(forwardFirst[0].a).toBe(backwardFirst[0].a)
+    expect(forwardFirst[0].b).toBe(backwardFirst[0].b)
+  })
+
+  it('keeps a one-way link one-way', () => {
+    const links = behaviorLinks(machine([{ from: 'A', to: 'B' }]))
+    expect(links).toHaveLength(1)
+    expect(!!links[0].forward !== !!links[0].backward).toBe(true)
+  })
+
+  // A wildcard has no source node to draw from. Skipping it is right; skipping it SILENTLY is not,
+  // which is why the toolbar counts them.
+  it('skips a wildcard transition and reports that there is one', () => {
+    const m = machine([{ from: '*', to: 'B' }, { from: 'A', to: 'B' }])
+    expect(behaviorLinks(m)).toHaveLength(1)
+    expect(hasWildcardTransitions(m)).toBe(true)
+    expect(hasWildcardTransitions(machine([{ from: 'A', to: 'B' }]))).toBe(false)
+  })
+
+  it('sorts a pair key regardless of argument order', () => {
+    expect(behaviorLinkKey('B', 'A')).toEqual(['A', 'B'])
+    expect(behaviorLinkKey('A', 'B')).toEqual(['A', 'B'])
+  })
+
+  it('has nothing to draw for a machine with no transitions', () => {
+    expect(behaviorLinks(machine([]))).toHaveLength(0)
   })
 })
