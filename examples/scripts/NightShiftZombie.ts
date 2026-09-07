@@ -41,6 +41,20 @@ export default class NightShiftZombieNode extends CharacterNode {
   public corpseSeconds: number = 6
   /** Set by the director at dawn, and by the AoE powerup. The behaviour machine reads it as a builtin. */
   public burning: boolean = false
+  /**
+   * Degrees per second the body turns while WANDERING, and while doing anything else.
+   *
+   * They have to differ, because wander and "face where you are going" form a feedback loop. `wander`
+   * aims at a point offset from the agent's CURRENT forward; the character then turns to face that, which
+   * moves forward, which moves the point. The faster it turns, the tighter it closes the loop — at 220
+   * deg/s a zombie covers 0.9 m in thirty seconds and reads as spinning on the spot. At 30 it covers 12
+   * and reads as a shamble.
+   *
+   * Chasing has no such loop: the target is a place in the world, not an offset from the agent, so it can
+   * turn as sharply as it likes.
+   */
+  public wanderTurnSpeed: number = 30
+  public chaseTurnSpeed: number = 140
 
   private _cooldown: number = 0
   private _burnedFor: number = 0
@@ -69,7 +83,12 @@ export default class NightShiftZombieNode extends CharacterNode {
 
     this._cooldown = Math.max(0, this._cooldown - delta)
     const brain = this._brain as any
-    if (!brain || brain.behaviorState !== 'Attack') return
+    if (!brain) return
+
+    // Slow while drifting, sharp while hunting. See the note on `wanderTurnSpeed`.
+    this.turnSpeed = brain.behaviorState === 'Idle' ? this.wanderTurnSpeed : this.chaseTurnSpeed
+
+    if (brain.behaviorState !== 'Attack') return
     if (this._cooldown > 0) return
 
     const player = this._player as any

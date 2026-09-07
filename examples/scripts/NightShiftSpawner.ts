@@ -1,25 +1,27 @@
 import { Logger, Node, clamp, lerp } from 'cleo'
 
 /**
- * Night Shift — the zombie spawner. Attach to an empty node named `ZombieSpawner` at the scene root.
+ * Night Shift — the zombie spawner. ONE node at the scene root; there are no authored spawn points.
  *
- * It sits on its own node deliberately. Timers are cancelled when their node despawns, so a spawner that
- * lived on a zombie would stop scheduling the moment that zombie died.
+ * It sits on its own node deliberately. Timers are cancelled when their node despawns, so a spawner
+ * that lived on a zombie would stop scheduling the moment that zombie died.
+ *
+ * ## Where they appear
+ *
+ * A random point on the disc the director describes, dropped onto the terrain by a downward raycast and
+ * rejected unless it landed on walkable ground — see `NightShiftDirector.groundAt`. That is what keeps
+ * a zombie off the roof of the house, where it would only walk off the edge.
+ *
+ * A candidate closer to the player than `minPlayerDistance` is thrown away too, so nothing ever
+ * materialises in your face.
  *
  * ## The curve
  *
  *   interval = baseInterval / (1 + levelRamp * (level - 1))    harder every level
  *   interval *= lerp(nightStart, nightEnd, t)                  and harder as the night wears on
  *
- * `every()` cannot express that, because the period would be fixed at the moment it was scheduled. A
- * self-rescheduling `after()` re-reads the curve on each tick, which is the whole point.
- *
- * ## Placement
- *
- * Spawn points come from the navmesh when one is baked — `randomPoint` only ever returns somewhere
- * genuinely walkable — and fall back to authored `Spawn Point` child nodes otherwise, so the level works
- * on a scene nobody has baked yet. Either way a candidate closer to the player than `minPlayerDistance`
- * is rejected, so nothing ever materialises in your face.
+ * `every()` cannot express that: its period is fixed when it is scheduled. A self-rescheduling
+ * `after()` re-reads the curve on each tick, which is the whole point.
  */
 export default class NightShiftSpawnerNode extends Node {
   /** Template name to instantiate. */
@@ -34,24 +36,20 @@ export default class NightShiftSpawnerNode extends Node {
   public nightEnd: number = 0.6
   /** Never spawn faster than this, whatever the level. */
   public minInterval: number = 0.8
-  /** Hard cap on live zombies. Each one costs a think, a perception step and a few raycasts a frame. */
+  /** Hard cap on live zombies. Each costs a think, a perception step and a few raycasts a frame. */
   public maxAlive: number = 14
   /** Metres. A candidate closer than this to the player is rejected. */
   public minPlayerDistance: number = 18
-  /** How many placements to try before giving up for this tick. */
-  public placementTries: number = 12
-  /** Radius of the authored-spawn-point fallback scatter, in metres. */
-  public fallbackRadius: number = 45
 
   private _director: Node = null
-  private _player: Node = null
-  private _points: Node[] = []
   private _live: Node[] = []
 
   onStart() {
     this._director = this.findNode('GameManager')
-    this._player = this.findNode('Playable')
-    this._points = this.getChildByName('Spawn Point')
+    if (!this._director) {
+      Logger.warn('Night Shift: the spawner found no GameManager, so it cannot place anything.', 'Script')
+      return
+    }
     this.after(this.intervalSeconds(), () => this._tick())
   }
 
@@ -79,7 +77,9 @@ export default class NightShiftSpawnerNode extends Node {
   }
 
   private _spawnOne(): void {
-    const at = this._pickPoint()
+    const director = this._director as any
+    const at = director.findGroundSpot(this.minPlayerDistance)
+    // No walkable spot this tick is not an error — the next tick tries again from scratch.
     if (!at) return
 
     const zombie = this.scene?.instantiate(this.templateName, {
@@ -88,50 +88,9 @@ export default class NightShiftSpawnerNode extends Node {
     })
     if (!zombie) {
       // instantiate already logged the available template names; say why we are giving up.
-      Logger.warn('Night Shift: spawner found no "' + this.templateName + '" template; stopping.', 'Script')
+      Logger.warn('Night Shift: no "' + this.templateName + '" template, so no zombies.', 'Script')
       return
     }
     this._live.push(zombie)
-  }
-
-  /** A walkable point far enough from the player, or null if we could not find one this tick. */
-  private _pickPoint(): number[] {
-    const player = this._player ? this._player.worldPosition : null
-    const far = (p: number[]) => !player
-      || Math.hypot(p[0] - player[0], p[2] - player[2]) >= this.minPlayerDistance
-
-    const mesh = this._navMesh()
-    for (let i = 0; i < this.placementTries; i++) {
-      const candidate = mesh ? this._randomOnMesh(mesh) : this._randomFallback()
-      if (candidate && far(candidate)) return candidate
-    }
-    return null
-  }
-
-  private _navMesh(): any {
-    for (const node of this.scene?.navMeshes ?? []) {
-      const mesh = (node as any).mesh
-      if (mesh && mesh.randomPoint) return mesh
-    }
-    return null
-  }
-
-  private _randomOnMesh(mesh: any): number[] {
-    const out: number[] = [0, 0, 0]
-    return mesh.randomPoint(out) ? [out[0], out[1], out[2]] : null
-  }
-
-  /**
-   * No navmesh: scatter around an authored spawn point, else around the spawner itself. The Y is left
-   * at the reference point's height and the capsule drops onto the ground, which is why `isGrounded`
-   * reads false for the first fraction of a second — that is not a bug.
-   */
-  private _randomFallback(): number[] {
-    const origin = this._points.length > 0
-      ? this._points[Math.floor(Math.random() * this._points.length)].worldPosition
-      : this.worldPosition
-    const angle = Math.random() * Math.PI * 2
-    const radius = this.fallbackRadius * Math.sqrt(Math.random())
-    return [origin[0] + Math.sin(angle) * radius, origin[1], origin[2] + Math.cos(angle) * radius]
   }
 }

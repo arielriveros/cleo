@@ -35,6 +35,11 @@ function allNodes(root: any): any[] {
 
 describe.skipIf(!present)('the Night Shift example project', () => {
     const manifest = () => read('manifest.json');
+    /** Every node the project ships, scene and templates alike. */
+    const everyNode = (): any[] => [
+        ...allNodes(read('scenes', `${read('manifest.json').mainSceneId}.json`).scene),
+        ...read('libraries', 'templates.json').flatMap((t: any) => allNodes(t.nodeJson)),
+    ];
     const scene = () => read('scenes', `${manifest().mainSceneId}.json`);
     const library = (name: string) => read('libraries', `${name}.json`);
 
@@ -99,6 +104,20 @@ describe.skipIf(!present)('the Night Shift example project', () => {
             // `ambientLight` reaches it. Wrong tool for a level whose light sweeps night to day.
             const probes = allNodes(scene().scene).filter(n => n.type === 'lightProbe');
             expect(probes.map(p => p.name)).toEqual([]);
+        });
+
+        it('authors a metering band that cannot blow the level out', () => {
+            // The editor viewport renders the AUTHORED settings — the director only runs in Play — so a
+            // band left at the engine default (`exposureMinEV: 2`, an exposure of 16384) turns the
+            // viewport white before you press anything. EV and brightness run in opposite directions, so
+            // the MIN EV is the brightness ceiling.
+            const r = scene().config.render;
+            const exposureAt = (ev: number) => 78643.2 / (1.2 * Math.pow(2, ev));
+            expect(r.autoExposureEnabled).toBe(true);
+            expect(exposureAt(r.exposureMinEV)).toBeLessThan(r.exposure * 4);
+            expect(exposureAt(r.exposureMaxEV)).toBeGreaterThan(r.exposure / 8);
+            // Negative: the renderer subtracts it, so a night wants to sit under the metered value.
+            expect(r.exposureCompensation).toBeLessThanOrEqual(0);
         });
 
         it('authors an exposure in a sane range', () => {
@@ -179,7 +198,8 @@ describe.skipIf(!present)('the Night Shift example project', () => {
             // `Sprite.serialize` writes the whole tileset alongside the id, because the published player
             // parses a scene with no library to resolve against. Id-only renders as nothing.
             const byId = new Map(library('tilesets').map((t: any) => [t.id, t]));
-            const sprites = allNodes(scene().scene).filter(n => n.type === 'animatedSprite');
+            // Scene AND templates: the pickups are templates now, and the zombie's flame always was.
+            const sprites = everyNode().filter(n => n.type === 'animatedSprite');
             expect(sprites.length).toBeGreaterThan(0);
 
             for (const s of sprites) {
@@ -197,7 +217,7 @@ describe.skipIf(!present)('the Night Shift example project', () => {
         });
 
         it('cycles frames that exist in the atlas', () => {
-            for (const s of allNodes(scene().scene).filter(n => n.type === 'animatedSprite')) {
+            for (const s of everyNode().filter(n => n.type === 'animatedSprite')) {
                 const tiles = s.sprite.tileset.columns * s.sprite.tileset.rows;
                 for (const frame of s.animation.frames)
                     expect(frame, s.name).toBeLessThan(tiles);
@@ -254,6 +274,32 @@ describe.skipIf(!present)('the Night Shift example project', () => {
             expect(ids.has(brain.possessedId)).toBe(true);
         });
 
+        it('is not the only template that carries its own driver', () => {
+            // The Playable is built the same way, so both actors are one node you can instantiate.
+            const playable = library('templates').find((t: any) => t.name === 'Playable');
+            const controllers = allNodes(playable.nodeJson).filter((n: any) => n.type === 'controller');
+            expect(controllers).toHaveLength(1);
+            expect(controllers[0].possessedId).toBe(playable.nodeJson.id);
+        });
+
+        it('orders every actor so the camera rig is found before the controller', () => {
+            // `ControllerNode._findRig` walks the pawn's children depth-first and takes the first
+            // CameraRigNode. With `aimSource: 'possessed'` that walk now includes the controller itself.
+            // Keeping the rig ahead of it means the walk returns before ever visiting the controller —
+            // and a rig lost here is a character that walks off in one fixed world direction.
+            const roots = [
+                ...library('templates').map((t: any) => t.nodeJson),
+                allNodes(scene().scene).find(n => n.name === 'Playable'),
+            ];
+            for (const root of roots) {
+                const kinds = (root.children ?? []).map((c: any) => c.type);
+                const rig = kinds.indexOf('cameraRig');
+                const controller = kinds.indexOf('controller');
+                if (rig < 0 || controller < 0) continue;
+                expect(rig, `${root.name}: the camera rig must come first`).toBeLessThan(controller);
+            }
+        });
+
         it('leaves auto-acquire off', () => {
             // On, the engine takes the nearest noticed Character — and a zombie is a Character, so the
             // horde hunts itself. NightShiftZombieBrain replaces it.
@@ -306,12 +352,59 @@ describe.skipIf(!present)('the Night Shift example project', () => {
         it('never puts a trigger on a node that also has a body', () => {
             // The physics world registers `body || trigger` — one or the other, and the body wins. Both
             // on one node is a pickup that silently never fires.
-            for (const n of allNodes(scene().scene))
+            for (const n of everyNode())
                 expect(!!(n.body && n.trigger), n.name).toBe(false);
         });
 
+        it('keeps no controller at the scene root', () => {
+            // The player is a self-contained template, like the zombie. A controller left outside the
+            // instance points at the id the character USED to have the moment a template resync rebuilds
+            // it — and the player silently stops moving.
+            const roots = scene().scene.children.filter((n: any) => n.type === 'controller');
+            expect(roots.map((n: any) => n.name)).toEqual([]);
+        });
+
+        it('puts the player controller inside the Playable, possessing it', () => {
+            const playable = allNodes(scene().scene).find(n => n.name === 'Playable');
+            const controllers = playable.children.filter((c: any) => c.type === 'controller');
+            expect(controllers).toHaveLength(1);
+            expect(controllers[0].possessedId).toBe(playable.id);
+            expect(controllers[0].aimSource).toBe('possessed');
+            expect(controllers[0].controlSource).toBe('player');
+        });
+
+        it('ships one spawner each, with no authored spawn points', () => {
+            // Both spawners ask the director for a random spot on walkable terrain, so a hand-placed
+            // point is not just redundant — it is a position nobody checked the ground under.
+            const names = allNodes(scene().scene).map(n => n.name);
+            expect(names.filter(n => n === 'ZombieSpawner')).toHaveLength(1);
+            expect(names.filter(n => n === 'PickupSpawner')).toHaveLength(1);
+            expect(names.filter(n => n === 'Spawn Point')).toHaveLength(0);
+        });
+
+        it('places no pickup in the scene — they are scattered at runtime', () => {
+            const sprites = allNodes(scene().scene).filter(n => n.type === 'animatedSprite');
+            expect(sprites.map(n => n.name)).toEqual([]);
+        });
+
+        it('ships a template for every pickup the spawner names', () => {
+            const templates = new Set(library('templates').map((t: any) => t.name));
+            for (const required of ['Score Pickup', 'Speed Powerup', 'Invincibility Powerup', 'Fire Powerup'])
+                expect(templates.has(required), required).toBe(true);
+        });
+
+        it('carries every pickup trigger in the template side map', () => {
+            // A template's triggers live beside it keyed by node id, the same way its bodies do. Left in
+            // the tree alone, the trigger is stripped on load and the pickup never fires.
+            for (const t of library('templates').filter((t: any) => t.name.match(/Pickup|Powerup/))) {
+                const trigger = allNodes(t.nodeJson).find((n: any) => n.name === 'Trigger');
+                expect(trigger, t.name).toBeTruthy();
+                expect(t.triggers[trigger.id], t.name).toBeTruthy();
+            }
+        });
+
         it('puts the trigger on a child of the visual', () => {
-            const pickups = allNodes(scene().scene).filter(n => n.type === 'animatedSprite' && n.children.length);
+            const pickups = everyNode().filter(n => n.type === 'animatedSprite' && n.children.length);
             expect(pickups.length).toBeGreaterThan(0);
             for (const p of pickups) {
                 const trigger = p.children.find((c: any) => c.trigger);
@@ -326,7 +419,7 @@ describe.skipIf(!present)('the Night Shift example project', () => {
         });
 
         it('scripts both halves, so the visual spins and the trigger collects', () => {
-            const pickups = allNodes(scene().scene).filter(n => n.type === 'animatedSprite' && n.children.length);
+            const pickups = everyNode().filter(n => n.type === 'animatedSprite' && n.children.length);
             for (const p of pickups) {
                 expect(p.variables.__scriptId, p.name).toBeTruthy();
                 expect(p.children[0].variables.__scriptId, p.name).toBeTruthy();
@@ -335,7 +428,7 @@ describe.skipIf(!present)('the Night Shift example project', () => {
         });
 
         it('gives every powerup a kind the script understands', () => {
-            const kinds = allNodes(scene().scene)
+            const kinds = everyNode()
                 .filter(n => n.scriptVars && 'kind' in n.scriptVars)
                 .map(n => n.scriptVars.kind);
             expect(kinds.length).toBeGreaterThan(0);

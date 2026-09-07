@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { vec3 } from 'gl-matrix';
+import { shortestAngle } from '../src/core/control/intent';
 import {
     STEERING_DEFAULTS, arrive, avoidObstacles, blendSteering, createSteeringState, flee, followTarget,
     intentFromDesired, pursue, seek, separate, steeringTuning, wander,
@@ -176,6 +177,65 @@ describe('wander', () => {
         const v = wander(out(), vec3.create(), state, t, 1 / 60, UP);
         expect(v.every(Number.isFinite)).toBe(true);
         expect(vec3.length(v)).toBeCloseTo(3, 5);
+    });
+});
+
+describe('wander, with the agent facing where it is going', () => {
+    // Every test above holds `forward` still, which is the one thing a real agent never does.
+    // `intentFromDesired` sets `aimYaw` to the heading of the desired velocity — "face where you are
+    // going" — and `wander` aims at a point offset from the agent's CURRENT forward. So turning moves
+    // the target, which provokes more turning: a feedback loop that closes tighter the faster the body
+    // can turn, until the agent is spinning on the spot instead of drifting.
+    //
+    // Nothing here is wrong with `wander` on its own. What is worth pinning is the RELATIONSHIP, because
+    // it is invisible in an open-loop test and presents as "my NPCs spin in circles".
+
+    /** Net displacement over path length: 1 is a straight line, ~0 is a spinner. */
+    function straightness(turnSpeed: number, over: Partial<SteeringTuning> = {}) {
+        const t = tuning({ maxSpeed: 3, ...over });
+        const state = createSteeringState(4242);
+        const dt = 1 / 60, speed = 0.7, seconds = 30;
+        let yaw = 0, x = 0, z = 0, path = 0;
+        const v = out();
+        for (let i = 0; i < seconds / dt; i++) {
+            const rad = yaw * Math.PI / 180;
+            wander(v, vec3.fromValues(Math.sin(rad), 0, Math.cos(rad)), state, t, dt, UP);
+            const target = Math.atan2(v[0], v[2]) * 180 / Math.PI;
+            const step = shortestAngle(target - yaw);
+            yaw += Math.max(-turnSpeed * dt, Math.min(turnSpeed * dt, step));
+            x += Math.sin(yaw * Math.PI / 180) * speed * dt;
+            z += Math.cos(yaw * Math.PI / 180) * speed * dt;
+            path += speed * dt;
+        }
+        return Math.hypot(x, z) / path;
+    }
+
+    const LAZY = { wanderDistance: 4, wanderRadius: 1, wanderJitter: 200 };
+
+    it('drifts somewhere when the body turns slowly', () => {
+        // A shambler's rate. Measured 0.57 — twelve metres of ground in thirty seconds.
+        expect(straightness(30, LAZY)).toBeGreaterThan(0.4);
+    });
+
+    it('spins on the spot when the body turns fast', () => {
+        // Not an aspiration — a record of the trap, so the relationship above stays visible. At 220
+        // deg/s the agent covers under a metre in thirty seconds whatever the jitter is set to.
+        expect(straightness(220, LAZY)).toBeLessThan(0.2);
+        expect(straightness(220, { ...LAZY, wanderJitter: 900 })).toBeLessThan(0.3);
+    });
+
+    it('is governed by the turn rate far more than by the jitter', () => {
+        // The intuitive fix is to jitter harder. It barely moves the needle; the turn rate is the dial.
+        const jitterHarder = straightness(220, { ...LAZY, wanderJitter: 3600 });
+        const turnSlower = straightness(30, LAZY);
+        expect(turnSlower).toBeGreaterThan(jitterHarder * 1.5);
+    });
+
+    it('widens the circle as the wander circle moves further ahead', () => {
+        // distance/radius sets the offset ANGLE, which is the other half of the loop.
+        const tight = straightness(60, { wanderDistance: 2, wanderRadius: 1.5, wanderJitter: 200 });
+        const wide = straightness(60, { wanderDistance: 8, wanderRadius: 0.6, wanderJitter: 200 });
+        expect(wide).toBeGreaterThan(tight);
     });
 });
 

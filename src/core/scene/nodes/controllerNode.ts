@@ -344,10 +344,20 @@ export class ControllerNode extends Node {
         return this;
     }
 
-    /** Drop the back-pointer, but only if the pawn still thinks WE are its driver. */
+    /**
+     * Drop the back-pointer, but only if the pawn still thinks WE are its driver.
+     *
+     * The cache is dropped with it, and that matters on exactly one path. A controller that lives INSIDE
+     * its pawn's subtree — which is how a self-contained actor template is built — despawns with the pawn
+     * and detaches here. Left cached, `_possessed` still passes the fast path in `_resolvePossessed` on
+     * the way back in (same id, still in a scene, not marked), so `_setController` never runs again and
+     * the pawn reports `controller === null` for the rest of its life while being driven perfectly
+     * normally. The other three callers overwrite `_possessed` on the next line, so only despawn changes.
+     */
     private _detach(): void {
         const current = this._resolvePossessed();
         if (current && current.controller === this) current._setController(null);
+        this._possessed = null;
     }
 
     private _resolvePossessed(): CharacterNode | null {

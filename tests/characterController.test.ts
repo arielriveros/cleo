@@ -5,6 +5,7 @@ import { Scene } from '../src/core/scene/scene';
 import { Node } from '../src/core/scene/nodes/node';
 import { CharacterNode } from '../src/core/scene/nodes/characterNode';
 import { ControllerNode } from '../src/core/scene/nodes/controllerNode';
+import { CameraRigNode } from '../src/core/scene/nodes/cameraRigNode';
 import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 import { regenerateNodeIds } from '../src/core/scene/nodeJson';
 import { SCRIPT_HANDLERS } from '../src/core/scripting/scriptRuntime';
@@ -402,5 +403,72 @@ describe('intent publication', () => {
         character.drive().requests.jump = 0.15;
         scene.update(1 / 60, 0, false);
         expect(character.intent.requests.jump).toBeGreaterThan(0);
+    });
+});
+
+// A controller can live INSIDE the pawn it drives, which is how a self-contained actor template is built
+// — one node you can hand to `Scene.instantiate` and get a working character out of. Nothing about the
+// control pass cares where a controller sits, but two things quietly do, and neither had a test.
+
+describe('a controller parented under its own pawn', () => {
+    /** The template shape: a character whose children are a camera rig and then its own driver. */
+    function actor(controllerLast = true) {
+        const scene = new Scene();
+        const character = new CharacterNode('Playable');
+        const rig = new CameraRigNode('camera rig');
+        const controller = new ControllerNode('Player Controller');
+        scene.addNode(character);
+        if (controllerLast) { character.addChild(rig); character.addChild(controller); }
+        else { character.addChild(controller); character.addChild(rig); }
+        controller.possess(character);
+        controller.aimSource = 'possessed';
+        scene.start();
+        return { scene, character, rig, controller };
+    }
+
+    it('still finds the camera rig under the pawn', () => {
+        // `_findRig` walks the pawn's children, which now includes the controller itself. This is the
+        // path that makes movement camera-relative; lose the rig and the character walks off in one
+        // fixed world direction, warning once and then looking merely wrong.
+        const { rig, controller } = actor();
+        expect(controller.aimRig).toBe(rig);
+    });
+
+    it('finds it whichever order the children are in', () => {
+        // A ControllerNode is not a CameraRigNode and has no children, so the walk falls through it.
+        // Ordering is a belt-and-braces convention, not a correctness requirement.
+        const { rig, controller } = actor(false);
+        expect(controller.aimRig).toBe(rig);
+    });
+
+    it('drives the pawn it is a child of', () => {
+        const { scene, character, controller } = actor();
+        expect(controller.possessed).toBe(character);
+        controller.controlSource = 'none';
+        scene.update(1 / 60, 0, false);
+        expect(character.isControlled).toBe(true);
+    });
+
+    it('still reports its controller after a respawn', () => {
+        // Despawning the pawn despawns the controller with it, which detaches. The possession cache used
+        // to survive that, so the fast path in `_resolvePossessed` skipped re-establishing the
+        // back-pointer and the pawn read `controller === null` forever — while being driven normally, so
+        // nothing looked wrong until a script asked.
+        const { character, controller } = actor();
+        expect(character.controller).toBe(controller);
+
+        character.despawn();
+        character.spawn({ subtree: true });
+
+        expect(controller.possessed).toBe(character);
+        expect(character.controller).toBe(controller);
+        expect(character.isControlled).toBe(true);
+    });
+
+    it('leaves nothing dangling when the whole actor is removed', () => {
+        const { scene, character, controller } = actor();
+        character.remove();
+        scene.update(1 / 60, 0, false);
+        expect(controller.possessed).toBeNull();
     });
 });

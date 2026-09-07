@@ -61,6 +61,7 @@ const SCRIPT_FILES = [
   ['Zombie', 'NightShiftZombie', 'character'],
   ['Zombie Brain', 'NightShiftZombieBrain', 'controller'],
   ['Zombie Spawner', 'NightShiftSpawner', 'node'],
+  ['Pickup Spawner', 'NightShiftPickupSpawner', 'node'],
   ['Pickup', 'NightShiftPickup', 'node'],
   ['Powerup', 'NightShiftPowerup', 'node'],
   ['HUD', 'NightShiftHud', 'uiRoot'],
@@ -223,6 +224,46 @@ const playableTemplate = JSON.parse(JSON.stringify(
   sourceTemplates.find(t => t.name === 'Playable')))
 
 /**
+ * The player's driver, as a CHILD of the character it possesses — the same shape the Zombie's `Brain`
+ * has, and for the same reason.
+ *
+ * A placed template instance is rebuilt with fresh ids whenever the template changes underneath it
+ * (`syncTemplateInstances`, `sceneResync.reinstantiate`). A controller sitting outside the instance keeps
+ * pointing at the id the character USED to have, and the player silently stops moving with nothing but a
+ * per-frame warning to say why. Inside, it is remapped by the same pass that renumbers everything else —
+ * `possessedId` is in `NODE_REF_KEYS`, and `regenerateNodeIds` remaps in a second pass once the whole
+ * subtree's ids are known.
+ *
+ * ## It has to be the LAST child
+ *
+ * `ControllerNode._findRig` walks the pawn's children depth-first and takes the first `CameraRigNode` it
+ * meets. With `aimSource: 'possessed'` — which is what makes the character move relative to the camera —
+ * that walk now includes the controller itself. Keeping the camera rig ahead of it means the rig is found
+ * at index 0 and the controller is never even visited. The Zombie orders its `Brain` last for symmetry,
+ * though it never exercises this: it aims in world space.
+ */
+function playerController(pawnId, id) {
+  return node('Player Controller', 'controller', {
+    id,
+    possessedId: pawnId,
+    aimSourceId: null,
+    controlSource: 'player',
+    // ACTION names, not keys, so the whole scheme is rebindable in the Input panel without touching this.
+    moveAction: 'Move',
+    lookAction: 'Look',
+    jumpAction: 'Jump',
+    sprintAction: 'Sprint',
+    crouchAction: '',
+    aimSource: 'possessed',
+    driveAimTarget: true,
+  })
+}
+
+// The player is one self-contained thing, exactly as the zombie is.
+playableTemplate.nodeJson.children.push(
+  playerController(playableTemplate.nodeJson.id, stableId('template:player:controller')))
+
+/**
  * The zombie: the same mannequin, driven by a brain instead of a player.
  *
  * The Character and its Controller go in ONE template so the controller's `possessedId` — a registered
@@ -259,7 +300,12 @@ function zombieTemplate() {
     goal: 'idle',
     perception: { fieldOfView: 120, range: 18, memorySpan: 6, reactionTime: 0.4 },
     eyeHeight: 1.6,
-    steering: { maxSpeed: 2.2, arriveRadius: 1.2, slowRadius: 3, standoff: 1.4, avoidDistance: 0 },
+    // A wide, lazy wander circle. `wander` aims at a point offset from the agent's own forward, so a
+    // small circle far ahead keeps the offset angle — and therefore the turning it provokes — small.
+    steering: {
+      maxSpeed: 2.2, arriveRadius: 1.2, slowRadius: 3, standoff: 1.4, avoidDistance: 0,
+      wanderDistance: 4, wanderRadius: 1, wanderJitter: 200,
+    },
     waypointRadius: 0.6,
     behavior: zombieBehaviour(),
   }), 'NightShiftZombieBrain')
@@ -293,7 +339,9 @@ function zombieTemplate() {
     id: characterId,
     walkSpeed: 1.1,
     runSpeed: 2.4,
-    turnSpeed: 220,
+    // The WANDER rate, which is the entry state. NightShiftZombie raises it the moment the brain starts
+    // hunting — a shambler that turned this slowly in a chase would be trivially circle-strafed.
+    turnSpeed: 30,
     acceleration: 6,
     facingMode: 'velocity',
     directionSmoothing: 0.2,
@@ -385,37 +433,36 @@ function zombieStateMachine() {
 // Pickups
 // ---------------------------------------------------------------------------------------------------
 
-/** Ring of score pickups plus the three powerups, scattered deterministically around the map. */
-function pickupField() {
-  const children = []
-
-  const ITEMS = 12
-  for (let i = 0; i < ITEMS; i++) {
-    const angle = (i / ITEMS) * Math.PI * 2
-    const radius = 26 + (i % 4) * 11
-    children.push(pickup(`Score ${String(i + 1).padStart(2, '0')}`, 'pickup-score', {
-      position: [Math.sin(angle) * radius, 2.2, Math.cos(angle) * radius],
-      scale: [1.2, 1.2, 1.2],
-      script: 'NightShiftPickup',
-      scriptVars: { points: 100 },
-      tint: [1, 0.85, 0.25],
-    }))
-  }
-
-  const POWERUPS = [
-    ['Speed Boost', 'pickup-speed', 'speed', [18, 2.2, -30], [0.35, 0.9, 1]],
-    ['Invincibility', 'pickup-speed', 'invincible', [-34, 2.2, 12], [1, 1, 1]],
-    ['Cleansing Fire', 'pickup-powerup', 'aoe', [6, 2.2, 40], [1, 0.4, 0.15]],
+/**
+ * The four pickup templates.
+ *
+ * Authored as TEMPLATES rather than placed in the scene, because a level that puts the same twelve items
+ * in the same twelve places every night is not much of a scavenge — and because every one of them had to
+ * be floated above the terrain by hand. `NightShiftPickupSpawner` scatters them onto walkable ground at
+ * runtime instead.
+ */
+function pickupTemplates() {
+  const kinds = [
+    ['Score Pickup', 'pickup-score', 'NightShiftPickup', { points: 100 }, [1, 0.85, 0.25], 1.2],
+    ['Speed Powerup', 'pickup-speed', 'NightShiftPowerup', { kind: 'speed', radius: 16 }, [0.35, 0.9, 1], 1.4],
+    ['Invincibility Powerup', 'pickup-speed', 'NightShiftPowerup', { kind: 'invincible', radius: 16 }, [1, 1, 1], 1.4],
+    ['Fire Powerup', 'pickup-powerup', 'NightShiftPowerup', { kind: 'aoe', radius: 16 }, [1, 0.4, 0.15], 1.4],
   ]
-  for (const [name, sprite, kind, position, tint] of POWERUPS) {
-    children.push(pickup(name, sprite, {
-      position, scale: [1.4, 1.4, 1.4], tint,
-      script: 'NightShiftPowerup',
-      scriptVars: { kind, radius: 16 },
-    }))
-  }
 
-  return node('Pickups', 'node', { id: stableId('pickups'), children })
+  return kinds.map(([name, sprite, script, scriptVars, tint, scale]) => {
+    const root = pickup(name, sprite, { scale: [scale, scale, scale], script, scriptVars, tint })
+    const trigger = root.children[0]
+    return {
+      id: stableId(`template:${name}`),
+      name,
+      nodeJson: root,
+      textureIds: [sprite],
+      scripts: {},
+      bodies: {},
+      // A template carries its triggers in a side map keyed by node id, exactly as it carries bodies.
+      triggers: { [trigger.id]: trigger.trigger },
+    }
+  })
 }
 
 /**
@@ -433,7 +480,7 @@ function pickup(name, sprite, options) {
 
   const visual = node(name, 'animatedSprite', {
     id: stableId(`pickup:${name}`),
-    position: options.position,
+    position: [0, 0, 0],
     scale: options.scale,
     children: [trigger],
     ...spritePayload(sprite, 'spherical', options.tint),
@@ -592,8 +639,6 @@ function nightScene() {
   //
   // A statically baked probe is the wrong tool for a level whose lighting sweeps from night to day: its
   // premise is that indirect light does not change. Bake one per level state, or leave it out.
-  const controller = sourceNode('Player Controller')
-
   // The director rotates this, so it must be findable by name.
   const sun = sourceNode('light')
   sun.name = 'Sun'
@@ -603,6 +648,9 @@ function nightScene() {
   withScript(playable, 'NightShiftPlayer')
   const pivot = playable.children.find(c => c.name === 'camera rig')
   if (pivot) withScript(pivot, 'ThirdPersonCameraPivot')
+  // The placed instance carries its own inline copy of the subtree — it does not read the template at
+  // load — so the controller has to be added here as well as to the template.
+  playable.children.push(playerController(playable.id, stableId('scene:player:controller')))
 
   for (const id of ['0694051b-2680-4e7f-a583-e761ed33fc1c', 'd41ce5bf-28e5-4a58-969a-40cd73a6f44f',
     '3fa150eb-400f-4ead-8ce1-7c1459f2c60d', 'Null', '__editor__light_icon',
@@ -617,15 +665,13 @@ function nightScene() {
   const director = withScript(node('GameManager', 'node', { id: stableId('director') }),
     'NightShiftDirector', { itemsTotal: 12, levelSeconds: 180 })
 
-  const spawner = withScript(node('ZombieSpawner', 'node', {
-    id: stableId('spawner'),
-    children: [
-      node('Spawn Point', 'node', { id: stableId('spawn:n'), position: [0, 3, 60] }),
-      node('Spawn Point', 'node', { id: stableId('spawn:e'), position: [58, 3, -6] }),
-      node('Spawn Point', 'node', { id: stableId('spawn:s'), position: [-10, 3, -58] }),
-      node('Spawn Point', 'node', { id: stableId('spawn:w'), position: [-60, 3, 8] }),
-    ],
-  }), 'NightShiftSpawner')
+  // One spawner each, and no authored spawn points on either. Both ask the director for a random spot
+  // on walkable terrain instead, which is what keeps them off the roof of the house.
+  const spawner = withScript(node('ZombieSpawner', 'node', { id: stableId('spawner') }),
+    'NightShiftSpawner')
+
+  const pickupSpawner = withScript(node('PickupSpawner', 'node', { id: stableId('pickup-spawner') }),
+    'NightShiftPickupSpawner', { scoreCount: 12 })
 
   // Authored but unbaked: `path` and `patrol` fall back to a straight-line seek until someone presses
   // Bake, so the level is playable either way and gets better the moment it is baked.
@@ -637,8 +683,8 @@ function nightScene() {
   const root = node('root', 'node', {
     id: stableId('root'),
     children: [
-      director, spawner, controller, playable, sun, sky, clouds, landscape, house,
-      navMesh, pickupField(), hud(), endScreen(),
+      director, spawner, playable, sun, sky, clouds, landscape, house,
+      navMesh, pickupSpawner, hud(), endScreen(),
     ],
     // LUX, not a 0..1 colour: REFERENCE_ILLUMINANCE is 78643 and the engine's own default ambient is
     // a tenth of it. This is the director's night value, so the editor viewport matches frame one.
@@ -654,6 +700,20 @@ function nightScene() {
   config.render.exposure = 1.6
   config.render.vignetteStrength = 0.4
   config.render.saturation = 0.55
+
+  // Metering, on a short leash. The band is a CEILING on brightness as much as a floor on EV: the
+  // engine's default `exposureMinEV` of 2 is an exposure of 16384, so a scene merely meant to LOOK dark
+  // gets normalised into a white screen. 14.5 brackets the authored 1.6, and the night compensation
+  // keeps the picture a stop under whatever was metered.
+  //
+  // Authored here as well as set by the director, because the director only runs in Play — the editor
+  // viewport renders these, and a viewport that blows out is just as broken.
+  config.render.autoExposureEnabled = true
+  config.render.exposureMinEV = 14.5
+  config.render.exposureMaxEV = 16.5
+  config.render.exposureCompensation = -1
+  config.render.exposureSpeedUp = 0.6
+  config.render.exposureSpeedDown = 0.6
 
   return sceneFile(root, config)
 }
@@ -737,7 +797,7 @@ function main() {
     animationFields: sourceFields.filter(f => f.id === LOCOMOTION_FIELD),
     tilesets,
     scripts: scripts.assets,
-    templates: [playableTemplate, zombie],
+    templates: [playableTemplate, zombie, ...pickupTemplates()],
   }
   for (const [name, value] of Object.entries(libraries))
     writeJson(path.join(OUT, 'libraries', `${name}.json`), value)

@@ -82,6 +82,71 @@ export default class NightShiftDirectorNode extends Node {
   public menuScene: string = 'Main Menu'
   /** Report the lighting state once on start. Cheap, and the first thing to read if the level is dark. */
   public logLighting: boolean = true
+  /**
+   * Meter the frame and adapt the exposure, instead of holding the hand-set value.
+   *
+   * On, but on a SHORT LEASH. Auto-exposure normalises whatever it is shown toward middle grey — that
+   * is its job — so left free it makes a night as bright as a dawn and the whole lighting ramp becomes
+   * cosmetic. The band below is what keeps it a trim rather than the lighting.
+   */
+  public useAutoExposure: boolean = true
+  /**
+   * How far metering may move the picture, as EV100 clamps.
+   *
+   * READ THE UNITS BEFORE TOUCHING THESE. `exposure = REFERENCE_ILLUMINANCE / (1.2 * 2^EV)`, so EV and
+   * brightness run in OPPOSITE directions and the numbers are not gentle:
+   *
+   *   EV 14.5 -> exposure 2.8      EV 15.3 -> 1.6 (this level's night)
+   *   EV 16.5 -> exposure 0.7      EV  9   -> 128  <- eighty times the night, a white screen
+   *
+   * `exposureMinEV` is therefore a CEILING on brightness, and it is the one that matters here: metering
+   * a dark night wants a low EV, so it sits on this floor all night. The engine's own default is 2.0 —
+   * an exposure of 16384 — which is fine for a scene that really is that dark and catastrophic for one
+   * that is merely meant to look it.
+   *
+   * The band brackets the authored exposures below, so the picture can never stray more than about a
+   * stop either side of the look the level was tuned at. `tests/nightShift.test.ts` pins that.
+   */
+  public autoExposureMinEV: number = 14.5
+  public autoExposureMaxEV: number = 16.5
+  /**
+   * Stops of artist trim on the metered result, ramped across the night — and this is what carries the
+   * time of day now.
+   *
+   * With metering on, the manual exposure is ignored outright, so the dusk-to-dawn ramp cannot come from
+   * it. Compensation can: the renderer SUBTRACTS it after the clamp, so a negative value raises the EV,
+   * darkens the picture, and reaches past the band. Night sits a stop under whatever was metered; dawn
+   * is neutral. The engine default is +1, which is a stop the wrong way for a night.
+   */
+  public nightExposureCompensation: number = -1
+  public dayExposureCompensation: number = 0
+  /** Adaptation rate. The engine defaults (3 up, 1 down) chase hard enough to be visible as a pump. */
+  public autoExposureSpeed: number = 0.6
+  /**
+   * The hand-set exposure ramp. Only in force while `useAutoExposure` is off — the renderer applies the
+   * manual value only then — but kept as the authored reference the EV band above is checked against.
+   */
+  public nightExposure: number = 1.6
+  public dayExposure: number = 1.3
+
+  // ----- shared placement service ---------------------------------------------------------------
+  //
+  // Both spawners need the same question answered — "give me a spot on walkable ground" — and one
+  // script cannot import another, so the choice is one copy here or two copies there. It lives on the
+  // director because that is already the node everything else looks up.
+
+  /** Radius of the disc, centred on `spawnCenter`, that spawns are scattered over. */
+  public spawnRadius: number = 70
+  public spawnCenter: [number, number, number] = [0, 0, 0]
+  /** Degrees. A surface steeper than this is a cliff, not somewhere to stand. */
+  public maxSlope: number = 35
+  /** The downward probe. `rayTop` must clear the highest ground in the level. */
+  public rayTop: number = 200
+  public rayBottom: number = -100
+  /** Metres above the surface to drop the spawn, so it settles onto the ground rather than through it. */
+  public spawnLift: number = 1.2
+  /** How many random points to try before giving up for one call. */
+  public placementTries: number = 24
 
   /** Points banked so far. */
   public score: number = 0
@@ -93,6 +158,7 @@ export default class NightShiftDirectorNode extends Node {
   private _elapsed: number = 0
   private _sun: Node = null
   private _end: Node = null
+  private _player: Node = null
   private _restoreRender: any = null
 
   onStart() {
@@ -105,6 +171,7 @@ export default class NightShiftDirectorNode extends Node {
 
     this._sun = this.findNode('Sun')
     this._end = this.findNode('EndScreen')
+    this._player = this.findNode('Playable')
     if (!this._sun) Logger.warn('Night Shift: no node named "Sun" — the sky will not move.', 'Script')
 
     // Render settings live on the RENDERER, not the scene — one global the editor viewport shares with
@@ -116,8 +183,24 @@ export default class NightShiftDirectorNode extends Node {
         exposure: current.exposure,
         saturation: current.saturation,
         vignetteStrength: current.vignetteStrength,
+        autoExposureEnabled: current.autoExposureEnabled,
+        exposureCompensation: current.exposureCompensation,
+        exposureMinEV: current.exposureMinEV,
+        exposureMaxEV: current.exposureMaxEV,
+        exposureSpeedUp: current.exposureSpeedUp,
+        exposureSpeedDown: current.exposureSpeedDown,
       }
     }
+
+    // Set ONCE, not per frame: the `autoExposureEnabled` setter re-seeds the adaptation from the
+    // current picture as it flips on, so writing it every frame would keep nudging that seed.
+    Game.updateRenderSettings({
+      autoExposureEnabled: this.useAutoExposure,
+      exposureMinEV: this.autoExposureMinEV,
+      exposureMaxEV: this.autoExposureMaxEV,
+      exposureSpeedUp: this.autoExposureSpeed,
+      exposureSpeedDown: this.autoExposureSpeed,
+    })
 
     this._applySun()
     if (this.logLighting) this._reportLighting()
@@ -133,12 +216,17 @@ export default class NightShiftDirectorNode extends Node {
 
     // Free every frame: none of these touch the sky node, so none of them can trigger a re-bake.
     //
-    // Exposure OPENS at night and stops down toward dawn, the way a camera would — but only slightly.
     // Exposure is a correction, not the lighting: leaning on it to carry a night flattens the contrast
     // between the lit and unlit parts of the scene and washes the whole frame out. The darkness comes
-    // from `nightAmbient` and a sun under the horizon; this just keeps it readable.
+    // from `nightAmbient` and a sun under the horizon; these only keep it readable.
+    //
+    // Both exposure levers are written every frame because only one of them is live at a time and which
+    // one depends on `useAutoExposure`: the renderer ignores the manual value while metering, and
+    // ignores the compensation while not. Writing both means toggling that field mid-level does not
+    // leave a stale trim behind.
     Game.updateRenderSettings({
-      exposure: lerp(1.6, 1.3, t),
+      exposure: lerp(this.nightExposure, this.dayExposure, t),
+      exposureCompensation: lerp(this.nightExposureCompensation, this.dayExposureCompensation, t),
       saturation: lerp(0.55, 1.0, t),
       vignetteStrength: lerp(0.4, 0.15, t),
     })
@@ -201,6 +289,62 @@ export default class NightShiftDirectorNode extends Node {
   onDespawn() {
     // Play has stopped. Hand the viewport back the look it had before this level started.
     if (this._restoreRender) Game.updateRenderSettings(this._restoreRender)
+  }
+
+  // ----- placement -------------------------------------------------------------------------------
+
+  /**
+   * A random spot on walkable ground, or null if none of `placementTries` attempts found one.
+   *
+   * Uniform over the disc: the radius is `R * sqrt(u)`, not `R * u`, which would pile two thirds of the
+   * spawns into the middle third of the map.
+   */
+  public findGroundSpot(minPlayerDistance: number): number[] {
+    const player = this._player ? this._player.worldPosition : null
+
+    for (let i = 0; i < this.placementTries; i++) {
+      const angle = Math.random() * Math.PI * 2
+      const radius = this.spawnRadius * Math.sqrt(Math.random())
+      const x = this.spawnCenter[0] + Math.sin(angle) * radius
+      const z = this.spawnCenter[2] + Math.cos(angle) * radius
+
+      const spot = this.groundAt(x, z)
+      if (!spot) continue
+      if (player && minPlayerDistance > 0
+        && Math.hypot(spot[0] - player[0], spot[2] - player[2]) < minPlayerDistance) continue
+      return spot
+    }
+    return null
+  }
+
+  /**
+   * Drop a ray down the given column and return a standable point on the terrain, or null.
+   *
+   * Two rejections, and both matter:
+   *
+   * **Not the terrain.** The landscape registers its heightfield with the physics world directly, with
+   * no owning node, so a hit that HAS a node came off something else — the house, a prop, another
+   * spawn. A pickup on a roof you cannot climb is unreachable, and a zombie on one walks off the edge.
+   * `hit.node === null` is the whole test.
+   *
+   * **Too steep.** The terrain has cliffs. `maxSlope` keeps spawns off the parts of it a character
+   * would only slide down.
+   */
+  public groundAt(x: number, z: number): number[] {
+    const physics = this.scene?.physics as any
+    if (!physics || !physics.raycast) return null
+
+    let hit = null
+    try { hit = physics.raycast([x, this.rayTop, z], [x, this.rayBottom, z]) }
+    catch { return null }
+    if (!hit) return null
+    if (hit.node) return null
+
+    const up = physics.up ?? [0, 1, 0]
+    const cos = clamp(hit.normal[0] * up[0] + hit.normal[1] * up[1] + hit.normal[2] * up[2], -1, 1)
+    if (Math.acos(cos) * 180 / Math.PI > this.maxSlope) return null
+
+    return [hit.point[0], hit.point[1] + this.spawnLift, hit.point[2]]
   }
 
   public addScore(points: number): void {

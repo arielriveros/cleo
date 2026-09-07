@@ -18,6 +18,7 @@ import NightShiftPlayerNode from '../examples/scripts/NightShiftPlayer';
 import NightShiftZombieNode from '../examples/scripts/NightShiftZombie';
 import NightShiftZombieBrainNode from '../examples/scripts/NightShiftZombieBrain';
 import NightShiftSpawnerNode from '../examples/scripts/NightShiftSpawner';
+import NightShiftPickupSpawnerNode from '../examples/scripts/NightShiftPickupSpawner';
 import NightShiftPickupNode from '../examples/scripts/NightShiftPickup';
 import NightShiftPowerupNode from '../examples/scripts/NightShiftPowerup';
 
@@ -195,6 +196,60 @@ describe('the sun, in the units the renderer actually reads', () => {
         }
     });
 
+    it('turns metering on, and hands it a band', () => {
+        const applied: any[] = [];
+        const original = Game.updateRenderSettings;
+        Game.updateRenderSettings = (settings: any) => { applied.push(settings); };
+        try { lit(); } finally { Game.updateRenderSettings = original; }
+
+        const set = applied.find(s => 'autoExposureEnabled' in s);
+        expect(set, 'nothing ever set autoExposureEnabled').toBeTruthy();
+        expect(set.autoExposureEnabled).toBe(true);
+        expect(set.exposureMinEV).toBeDefined();
+        expect(set.exposureMaxEV).toBeDefined();
+    });
+
+    it('keeps the metering band around the exposure the level was tuned at', () => {
+        // THE one that matters, and the one whose absence shipped a white screen. EV and brightness run
+        // in opposite directions — `exposure = REFERENCE / (1.2 * 2^EV)` — so `exposureMinEV` is a
+        // CEILING on brightness. Set at 9 it permits an exposure of 128 against an authored 1.6: eighty
+        // times too bright, and every lit surface blows out. The band has to bracket the authored look.
+        const { node } = lit();
+        const exposureAt = (ev: number) => REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, ev));
+
+        const brightest = exposureAt(node.autoExposureMinEV);
+        const darkest = exposureAt(node.autoExposureMaxEV);
+        expect(brightest).toBeGreaterThan(darkest);
+
+        // At most ~2 stops either side of the authored night, which is a trim rather than a re-light.
+        expect(brightest).toBeLessThan(node.nightExposure * 4);
+        expect(darkest).toBeGreaterThan(node.dayExposure / 4);
+    });
+
+    it('ramps the compensation from a darker night to a neutral dawn', () => {
+        // With metering on the manual exposure is ignored, so compensation is what carries the time of
+        // day. The renderer SUBTRACTS it, so negative is darker.
+        const seen: number[] = [];
+        const original = Game.updateRenderSettings;
+        Game.updateRenderSettings = (settings: any) => {
+            if (typeof settings.exposureCompensation === 'number') seen.push(settings.exposureCompensation);
+        };
+        try {
+            const { scene } = lit(4);
+            run(scene, 5);
+        } finally {
+            Game.updateRenderSettings = original;
+        }
+        expect(seen.length).toBeGreaterThan(2);
+        expect(seen[0]).toBeLessThan(0);                       // night sits under the metered value
+        expect(seen[seen.length - 1]).toBeGreaterThan(seen[0]); // and rises toward neutral by dawn
+    });
+
+    it('still writes the manual exposure, so switching metering off keeps the ramp', () => {
+        const { node } = lit();
+        expect(node.nightExposure).toBeGreaterThan(node.dayExposure);
+    });
+
     it('does not lean on exposure to carry the night', () => {
         // Exposure is a correction, not the lighting. Pushed far enough to light a scene on its own it
         // flattens the contrast between the lit and unlit parts and washes the frame out — which is
@@ -307,8 +362,11 @@ describe('the director as the EDITOR runs it', () => {
         const bad: string[] = [];
         const original = Game.updateRenderSettings;
         Game.updateRenderSettings = (settings: any) => {
-            for (const [key, value] of Object.entries(settings))
+            for (const [key, value] of Object.entries(settings)) {
+                // Booleans are legitimate settings (autoExposureEnabled); a non-finite NUMBER is not.
+                if (typeof value === 'boolean') continue;
                 if (typeof value !== 'number' || !Number.isFinite(value)) bad.push(`${key}=${value}`);
+            }
         };
         try {
             const { scene, node } = attached();
@@ -339,6 +397,244 @@ describe('the director as the EDITOR runs it', () => {
         Logger.error = (m: unknown) => { errors.push(String(m)); };
         try { attached(); } finally { Logger.error = originalError; }
         expect(errors).toEqual([]);
+    });
+});
+
+describe('placing something on the ground', () => {
+    // The rule that matters: a spawn goes on the TERRAIN, on a slope you could stand on. A pickup on the
+    // roof of the house can be seen and never collected; a zombie up there walks off the edge. The
+    // landscape registers its heightfield with no owning node, so `hit.node === null` IS the test for
+    // "this is ground" — which is easy to write the wrong way round and impossible to see until someone
+    // finds loot on a roof.
+
+    /** A director in a scene whose physics answers raycasts however the test says. */
+    function withGround(answer: (x: number, z: number) => any) {
+        const scene = new Scene();
+        const node = new NightShiftDirectorNode('GameManager');
+        scene.addNode(node);
+        scene.start();
+        (scene as any).physics = {
+            up: [0, 1, 0],
+            raycast: (from: number[]) => answer(from[0], from[2]),
+        };
+        return { scene, node };
+    }
+
+    // A real raycast reports the point under the column it was fired down, so the mock must too —
+    // returning a fixed point would make every placement look like it landed at the origin.
+    const flatTerrain = (y = 4) => (x: number, z: number) =>
+        ({ node: null, point: [x, y, z], normal: [0, 1, 0] });
+
+    it('accepts flat terrain', () => {
+        const { node } = withGround(flatTerrain(4));
+        const spot = node.groundAt(10, 10);
+        expect(spot).not.toBeNull();
+        expect(spot[1]).toBeCloseTo(4 + node.spawnLift, 5);
+    });
+
+    it('refuses anything that is not the terrain', () => {
+        // A hit that HAS a node came off the house, a prop, or another spawn.
+        const roof = new Node('Wood_house');
+        const { node } = withGround(() => ({ node: roof, point: [0, 9, 0], normal: [0, 1, 0] }));
+        expect(node.groundAt(0, 0)).toBeNull();
+    });
+
+    it('refuses a cliff', () => {
+        // 60 degrees off vertical, well past the 35 degree default.
+        const steep = Math.cos(60 * Math.PI / 180);
+        const { node } = withGround(() => ({
+            node: null, point: [0, 4, 0], normal: [Math.sin(60 * Math.PI / 180), steep, 0],
+        }));
+        expect(node.groundAt(0, 0)).toBeNull();
+    });
+
+    it('accepts a slope inside the limit', () => {
+        const gentle = 20 * Math.PI / 180;
+        const { node } = withGround(() => ({
+            node: null, point: [0, 4, 0], normal: [Math.sin(gentle), Math.cos(gentle), 0],
+        }));
+        expect(node.groundAt(0, 0)).not.toBeNull();
+    });
+
+    it('refuses a column the ray missed entirely', () => {
+        const { node } = withGround(() => null);
+        expect(node.groundAt(0, 0)).toBeNull();
+    });
+
+    it('survives a scene with no physics at all', () => {
+        const scene = new Scene();
+        const node = new NightShiftDirectorNode('GameManager');
+        scene.addNode(node);
+        scene.start();
+        (scene as any).physics = null;
+        expect(node.groundAt(0, 0)).toBeNull();
+        expect(node.findGroundSpot(0)).toBeNull();
+    });
+
+    it('scatters inside the radius it was given', () => {
+        const { node } = withGround(flatTerrain(2));
+        node.spawnRadius = 40;
+        node.spawnCenter = [100, 0, -50];
+        for (let i = 0; i < 40; i++) {
+            const spot = node.findGroundSpot(0);
+            expect(spot).not.toBeNull();
+            expect(Math.hypot(spot[0] - 100, spot[2] + 50)).toBeLessThanOrEqual(40.001);
+        }
+    });
+
+    it('keeps its distance from the player', () => {
+        const scene = new Scene();
+        const player = new NightShiftPlayerNode('Playable');
+        const node = new NightShiftDirectorNode('GameManager');
+        scene.addNode(player);
+        scene.addNode(node);
+        scene.start();
+        (scene as any).physics = {
+            up: [0, 1, 0],
+            raycast: (from: number[]) => ({ node: null, point: [from[0], 2, from[2]], normal: [0, 1, 0] }),
+        };
+        player.setPosition([0, 2, 0]);
+        node.spawnRadius = 60;
+
+        for (let i = 0; i < 40; i++) {
+            const spot = node.findGroundSpot(25);
+            if (!spot) continue;   // a run of unlucky draws is allowed; a close spawn is not
+            expect(Math.hypot(spot[0], spot[2])).toBeGreaterThanOrEqual(25);
+        }
+    });
+
+    it('gives up rather than returning a bad spot', () => {
+        // Every column is a roof. The answer is null, not "somewhere anyway".
+        const roof = new Node('Wood_house');
+        const { node } = withGround(() => ({ node: roof, point: [0, 9, 0], normal: [0, 1, 0] }));
+        expect(node.findGroundSpot(0)).toBeNull();
+    });
+});
+
+describe('the pickup spawner', () => {
+    /** A scene whose physics only grows terrain after `liveAfter` steps, as the real one does. */
+    function world(liveAfter: number) {
+        const scene = new Scene();
+        const director = new NightShiftDirectorNode('GameManager');
+        const spawner = new NightShiftPickupSpawnerNode('PickupSpawner');
+        scene.addNode(director);
+        scene.addNode(spawner);
+
+        let steps = 0;
+        const made: { name: string; at: number[] }[] = [];
+        (scene as any).physics = {
+            up: [0, 1, 0],
+            raycast: (from: number[]) => steps++ < liveAfter
+                ? null                                    // terrain not registered yet
+                : { node: null, point: [from[0], 3, from[2]], normal: [0, 1, 0] },
+        };
+        (scene as any).instantiate = (name: string, options: any) => {
+            made.push({ name, at: options?.position });
+            return new Node(name);
+        };
+        scene.start();
+        return { scene, director, spawner, made };
+    }
+
+    it('waits for the terrain instead of scattering into a void', () => {
+        // The heightfield is registered inside physics.update, which first runs AFTER scene.start has
+        // called every onStart. Placing in onStart puts every ray through an empty world, rejects the
+        // lot as "not ground", and comes up with a level holding no loot and an itemsTotal of 0.
+        const { scene, spawner, made } = world(40);
+        spawner.placeDelay = 0.1;
+        run(scene, 0.15);
+        expect(made).toEqual([]);            // nothing placed while the ground is missing
+        run(scene, 2);
+        expect(made.length).toBeGreaterThan(0);
+    });
+
+    it('places the score pickups and one of each powerup', () => {
+        const { scene, spawner, made } = world(0);
+        spawner.placeDelay = 0.05;
+        spawner.scoreCount = 5;
+        spawner.minSpacing = 0;
+        run(scene, 1);
+        const names = made.map(m => m.name);
+        expect(names.filter(n => n === 'Score Pickup')).toHaveLength(5);
+        expect(names.filter(n => n === 'Speed Powerup')).toHaveLength(1);
+        expect(names.filter(n => n === 'Invincibility Powerup')).toHaveLength(1);
+        expect(names.filter(n => n === 'Fire Powerup')).toHaveLength(1);
+    });
+
+    it('tells the HUD how many it actually placed', () => {
+        // The count the HUD counts against has to be what exists, or the level cannot be completed and
+        // nothing says why.
+        const { scene, director, spawner } = world(0);
+        spawner.placeDelay = 0.05;
+        spawner.scoreCount = 4;
+        spawner.minSpacing = 0;
+        run(scene, 1);
+        expect(director.itemsTotal).toBe(4);
+    });
+
+    it('never drops two on the same spot', () => {
+        const { scene, director, spawner, made } = world(0);
+        spawner.placeDelay = 0.05;
+        spawner.scoreCount = 20;
+        spawner.minSpacing = 10;
+        director.spawnRadius = 60;
+        run(scene, 1);
+
+        expect(made.length).toBeGreaterThan(1);
+        for (let i = 0; i < made.length; i++) {
+            for (let j = i + 1; j < made.length; j++) {
+                const a = made[i].at, b = made[j].at;
+                expect(Math.hypot(a[0] - b[0], a[2] - b[2]),
+                    `${made[i].name} and ${made[j].name}`).toBeGreaterThanOrEqual(spawner.minSpacing);
+            }
+        }
+    });
+
+    it('drops each pickup onto the surface the ray found', () => {
+        const { scene, director, spawner, made } = world(0);
+        spawner.placeDelay = 0.05;
+        spawner.scoreCount = 3;
+        spawner.minSpacing = 0;
+        run(scene, 1);
+        // The mock's ground sits at y = 3; every spawn should be lifted clear of it, not buried in it.
+        for (const m of made) expect(m.at[1]).toBeCloseTo(3 + director.spawnLift, 5);
+    });
+});
+
+describe('a zombie turning', () => {
+    // `wander` aims at a point offset from the agent's own forward, and the character faces where it is
+    // going — so the faster it turns, the tighter that loop closes, until it spins on the spot rather
+    // than drifting. Chasing has no such loop (the target is a place in the world), so the two states
+    // want different rates. `tests/steering.test.ts` pins the underlying relationship.
+
+    function zombieWith(state: string) {
+        const scene = new Scene();
+        const zombie = new NightShiftZombieNode('Zombie');
+        const brain = new Node('Brain');
+        (brain as any).behaviorState = state;
+        zombie.addChild(brain);
+        scene.addNode(zombie);
+        scene.start();
+        scene.update(1 / 60, 0, false);
+        return zombie;
+    }
+
+    it('shambles slowly while wandering', () => {
+        const zombie = zombieWith('Idle');
+        expect(zombie.turnSpeed).toBe(zombie.wanderTurnSpeed);
+        expect(zombie.turnSpeed).toBeLessThan(60);
+    });
+
+    it('turns sharply once it is hunting', () => {
+        for (const state of ['Chase', 'Attack', 'Investigate']) {
+            const zombie = zombieWith(state);
+            expect(zombie.turnSpeed, state).toBe(zombie.chaseTurnSpeed);
+        }
+    });
+
+    it('keeps the chase rate well above the wander rate', () => {
+        const zombie = zombieWith('Idle');
+        expect(zombie.chaseTurnSpeed).toBeGreaterThan(zombie.wanderTurnSpeed * 2);
     });
 });
 
