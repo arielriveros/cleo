@@ -1,5 +1,9 @@
 # Example scripts — third-person strafe character
 
+> **Building a whole game on this?** [NIGHT_SHIFT.md](NIGHT_SHIFT.md) documents *Night Shift*, a complete
+> example game assembled on top of this character — a night-to-dawn clock, zombie AI with real sight
+> cones, pickups, powerups and a HUD. Its nine scripts are the `NightShift*.ts` files beside this one.
+
 A third-person **strafe** character: move relative to the camera, sprint, jump, look. "Forward" is always where
 the camera looks — while moving, the character turns to face the camera and side-steps for left/right (the
 strafe locomotion set). While idle, the camera orbits freely around a still character, and swinging it far

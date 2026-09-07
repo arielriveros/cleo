@@ -59,6 +59,11 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
   const [busy, setBusy] = useState(false)
   const [naming, setNaming] = useState(false)
   const [newName, setNewName] = useState('')
+  // The selected card's path. Deleting used to depend entirely on reading the right-clicked card's
+  // `data-id` back out of the DOM, which leaves no way to delete anything if that read misses. Tracking
+  // the selection gives the toolbar button something real to act on, and the menu a fallback.
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const selectedPathRef = useRef<string | null>(null)
 
   // Built once: re-passing `data` makes SVAR re-run store.init() and rebuild the whole tree. The
   // component is remounted on every open instead.
@@ -168,6 +173,13 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
       if (id) void open(id)
     })
 
+    api.on('select-file', (cfg: any) => {
+      // `id` is the card's path, and is absent when the selection is cleared.
+      const path = cfg?.id ? String(cfg.id) : null
+      selectedPathRef.current = path
+      setSelectedPath(path)
+    })
+
     api.on('set-mode', (cfg: any) => {
       try { localStorage.setItem(MODE_KEY, cfg.mode) } catch { /* ignore */ }
     })
@@ -201,9 +213,16 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
     }
     const onClick = (e: MouseEvent) => {
       if (!(e.target as HTMLElement).closest?.('[data-id=":cleo-delete-project"]')) return
-      const path = menuTargetRef.current
+      // The right-clicked card when the DOM read found one, else whatever is selected — right-clicking
+      // a card selects it, so the fallback covers the case where the attribute read misses.
+      const path = menuTargetRef.current ?? selectedPathRef.current
       const id = path ? byPathRef.current.get(path) : null
-      if (id) void remove(id)
+      if (id) { void remove(id); return }
+      // Both reads missed. Silence here is what "clicking delete does nothing" looks like from the
+      // outside, so say so and point at the control that does not depend on either read.
+      Logger.warn(
+        'Could not tell which project that menu belonged to. Select the project and use the Delete '
+        + 'button in the toolbar.', 'Editor')
     }
     document.addEventListener('contextmenu', onContextMenu, true)
     document.addEventListener('click', onClick, true)
@@ -242,17 +261,29 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
             </button>
           </>
         ) : (
-          <button
-            className='shrink-0 inline-flex items-center h-[20px] px-2 rounded text-[11px] font-semibold leading-none whitespace-nowrap cursor-pointer bg-success hover:bg-success-hover disabled:opacity-40'
-            disabled={busy}
-            onClick={() => { setNaming(true); setNewName('') }}
-            title='Create an empty project with its own scenes, assets and layout'>
-            + New Project
-          </button>
+          <>
+            <button
+              className='shrink-0 inline-flex items-center h-[20px] px-2 rounded text-[11px] font-semibold leading-none whitespace-nowrap cursor-pointer bg-success hover:bg-success-hover disabled:opacity-40'
+              disabled={busy}
+              onClick={() => { setNaming(true); setNewName('') }}
+              title='Create an empty project with its own scenes, assets and layout'>
+              + New Project
+            </button>
+            <button
+              className='shrink-0 inline-flex items-center h-[20px] px-2 rounded text-[11px] leading-none whitespace-nowrap cursor-pointer text-muted hover:bg-danger hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted'
+              disabled={busy || !selectedPath || !byPathRef.current.has(selectedPath)}
+              onClick={() => {
+                const id = selectedPath ? byPathRef.current.get(selectedPath) : null
+                if (id) void remove(id)
+              }}
+              title={selectedPath ? 'Delete the selected project and everything in it' : 'Select a project first'}>
+              Delete
+            </button>
+          </>
         )}
 
         <span className='ml-auto min-w-0 truncate text-[11px] text-dim'>
-          {busy ? 'Working…' : 'Double-click to open · right-click to rename or delete'}
+          {busy ? 'Working…' : 'Double-click to open · select and Delete, or right-click'}
         </span>
       </div>
 

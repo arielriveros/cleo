@@ -261,7 +261,20 @@ function attachClassScript(node: Node, Ctor: new (...args: any[]) => any): void 
     for (const name of Object.getOwnPropertyNames(proto)) {
         if (name === 'constructor' || name.startsWith('__')) continue;
         const desc = Object.getOwnPropertyDescriptor(proto, name);
-        if (!desc || typeof desc.value !== 'function') continue;
+        if (!desc) continue;
+
+        // ACCESSORS are copied as accessors. A getter's descriptor has no `value`, so the function test
+        // below skipped it and the property simply never arrived on the node — `this.progress` read
+        // `undefined`, and a script that fed that into arithmetic spread NaN through everything
+        // downstream with no error at the point of failure. Defining the descriptor keeps `this` bound
+        // to the node, exactly as a copied method is.
+        //
+        // It also makes a script getter an OWN property, which is what `Animator._refreshVariableParams`
+        // requires before it will read a bound node property — so a computed value can now back an
+        // animation parameter, where before it silently reported its default forever.
+        if (desc.get || desc.set) { Object.defineProperty(n, name, desc); continue; }
+
+        if (typeof desc.value !== 'function') continue;
         if ((SCRIPT_HANDLERS as readonly string[]).includes(name)) n[name] = guard(name, desc.value);
         else n[name] = desc.value; // helper method, runs on the node
     }
