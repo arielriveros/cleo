@@ -4,30 +4,30 @@ import { useEditorSessions } from '../EditorSessionsContext'
 import { cn, TextInput, Hint } from '../../components/ui'
 import { useAssetDrop } from '../../utils/useAssetDrop'
 
-// Links shared `.anim` assets to a model. The link lives on the MODEL asset, not the node, so one stored
-// clip plays on every placement of a character.
+// Links shared `.anim` assets to a RIG. The link lives on the rig, not on a model or a node, so one stored
+// clip plays on every character built on that armature — and on every placement of each of them.
 
 export default function AnimationAssetPicker(props: {
-  /** The model asset to link to, or null when the node has no asset yet. */
-  modelId: string | null
-  /** Called before linking when `modelId` is null — adopts the node into the library. See adoptModelAsset. */
-  onNeedModel?: () => Promise<string | null>
+  /** The rig asset to link to, or null when the node has no rig yet. */
+  rigId: string | null
+  /** Called before linking when `rigId` is null — adopts the node into the library. See adoptModelAsset. */
+  onNeedRig?: () => Promise<string | null>
   className?: string
 }) {
-  const { models, animations } = useAssetLibrary()
-  const { linkAnimationToModel, unlinkAnimationFromModel } = useEditorSessions()
+  const { rigs, animations } = useAssetLibrary()
+  const { linkAnimationToRig, unlinkAnimationFromRig } = useEditorSessions()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
 
-  const asset = props.modelId ? models.find(m => m.id === props.modelId) : undefined
+  const asset = props.rigId ? rigs.find(r => r.id === props.rigId) : undefined
   const linkedIds = asset?.animationIds ?? []
 
   const link = async (animationId: string) => {
     setOpen(false)
     setQuery('')
-    // A node that never came from the library has nothing to hang the link on, so adopt it first.
-    const modelId = props.modelId ?? (await props.onNeedModel?.()) ?? null
-    if (modelId) linkAnimationToModel(modelId, animationId)
+    // A node with no rig has nothing to hang the link on, so resolve one first.
+    const rigId = props.rigId ?? (await props.onNeedRig?.()) ?? null
+    if (rigId) linkAnimationToRig(rigId, animationId)
   }
 
   const { dragOver, dropProps } = useAssetDrop('text/cleo-animation', id => void link(id),
@@ -58,7 +58,7 @@ export default function AnimationAssetPicker(props: {
             <button
               className='text-danger px-1 shrink-0'
               title='Unlink this animation — its clips are removed from every placement of this model'
-              onClick={() => props.modelId && unlinkAnimationFromModel(props.modelId, id)}
+              onClick={() => props.rigId && unlinkAnimationFromRig(props.rigId, id)}
             >✕</button>
           </div>
         )

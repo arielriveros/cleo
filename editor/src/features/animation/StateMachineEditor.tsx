@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
+import { useEditorSessions } from '../EditorSessionsContext'
+import { useAssetLibrary } from '../AssetLibraryContext'
 import type { Animator, AnimationVariableBinding, AnimationParameterType, AnimationParameter } from 'cleo'
 import { NODE_BUILTINS, isConditionGroup } from 'cleo'
 import { AccessibleVariable, UNSIGNED_BUILTINS } from './skeleton'
@@ -45,6 +47,10 @@ export function ClipsPanel() {
     target, clips, clipAssetId, modelId, adoptModel, hasBoneNames,
     renameClip, deleteClip, rootMotionOf, toggleClipRootMotion, importAnimationFiles, importSkeletonNames,
   } = useStateMachine()
+  // Above the early return: every hook must run on every render (see hookOrder.test.ts).
+  const { ensureRigForModel } = useEditorSessions()
+  const { models } = useAssetLibrary()
+  const rigOfModel = modelId ? models.find(m => m.id === modelId)?.rigId : undefined
   if (!target) return <NoModel />
 
   // A shared clip is one stored copy retargeted onto this rig, so removing it means unlinking its ASSET;
@@ -90,7 +96,15 @@ export function ClipsPanel() {
 
         {/* Clips already in the library, linked rather than re-imported — the same affordance a texture
             slot gives: pick one, or drag it in from Assets. */}
-        <AnimationAssetPicker className='mt-1' modelId={modelId} onNeedModel={adoptModel} />
+        {/* Read-only here; minting happens in onNeedRig — see AnimationSlot. */}
+        <AnimationAssetPicker
+          className='mt-1'
+          rigId={rigOfModel ?? null}
+          onNeedRig={async () => {
+            const id = modelId ?? await adoptModel()
+            return id ? ensureRigForModel(id) : null
+          }}
+        />
 
         <div className='mt-1 flex flex-col gap-1'>
           {clips.length === 0 && <p className='text-[11px] text-gray-400'>No clips. Import or link one above.</p>}

@@ -287,9 +287,25 @@ describe('edgesOfAsset', () => {
   })
 
   describe('animationField', () => {
+    // A blend space is a skeleton plus clip NAMES, which is exactly a rig — so one locomotion field now
+    // serves every character on the armature instead of one field per character.
     it('points at the rig it blends', () => {
-      expect(shape(edgesOfAsset('animationField', { id: 'f', name: 'f', modelId: 'hero' })))
-        .toEqual(['model:hero@modelId'])
+      expect(shape(edgesOfAsset('animationField', { id: 'f', name: 'f', rigId: 'mannequin-rig' })))
+        .toEqual(['rig:mannequin-rig@rigId'])
+    })
+  })
+
+  describe('rig', () => {
+    it('points at the clips it owns', () => {
+      const asset = { id: 'r', name: 'mannequin', skin: {}, animationIds: ['idle', 'run'] }
+      expect(shape(edgesOfAsset('rig', asset))).toEqual([
+        'animation:idle@animationIds[0]',
+        'animation:run@animationIds[1]',
+      ])
+    })
+
+    it('references nothing else — a skeleton is what others point AT', () => {
+      expect(edgesOfAsset('rig', { id: 'r', name: 'r', skin: { joints: [] } })).toEqual([])
     })
   })
 

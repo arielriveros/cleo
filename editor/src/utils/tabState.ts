@@ -39,6 +39,7 @@ const ID_FIELD: Partial<Record<TabKind, keyof EditorTab>> = {
   animationField: 'animationFieldId',
   tileset: 'tilesetId',
   aiBrain: 'aiBrainId',
+  rig: 'rigId',
   texture: 'textureId',
   soundSample: 'soundId',
 };

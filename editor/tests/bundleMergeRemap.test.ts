@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { remapDeep, type Remaps } from '../src/utils/bundleMerge';
 
 // Importing a bundle into a project that already owns some of its asset ids re-mints the collisions and
@@ -98,3 +100,20 @@ describe('remapDeep — the JSON-string id LISTS', () => {
     expect(node.variables.__materialIds).toBeUndefined();
   });
 });
+
+// `remapDeep` rewrites VALUES. `RigAsset.retargets` is keyed BY SOURCE RIG ID, so a merged bundle would
+// keep every correction under a key naming a rig that no longer exists — silently losing them.
+describe('rig references on merge', () => {
+  const src = readFileSync(join(__dirname, '..', 'src', 'utils', 'bundleMerge.ts'), 'utf-8')
+    .replace(/\r\n/g, '\n')
+
+  it('runs remapDeep over the rig library', () => {
+    expect(src).toMatch(/for \(const g of rigs\) \{/)
+    expect(src).toContain('remapDeep(g, r)')
+  })
+
+  it('re-keys retargets by the remapped SOURCE rig id', () => {
+    expect(src).toContain('g.retargets')
+    expect(src).toContain('sub(r.rig, sourceRigId)')
+  })
+})

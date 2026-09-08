@@ -3,7 +3,7 @@
 // (`data.modelAnimations`), and are retargeted onto each character at scene load, memoised per model.
 
 import {
-  AnimatedModel, ModelNode, buildBoneMapping, retargetAnimation, Logger,
+  AnimatedModel, ModelNode, buildBoneMapping, applyManualMapping, retargetAnimation, Logger,
   type Animation, type Node, type Scene, type Skin,
 } from 'cleo';
 import { mat4 } from 'gl-matrix';
@@ -17,7 +17,23 @@ export type PublishedAnimations = {
   animations?: { id: string; name: string; clips: Animation[]; sourceSkin: any }[];
   /** model asset id -> the animation asset ids it plays. */
   modelAnimations?: Record<string, string[]>;
+  /**
+   * Manual bone re-points, resolved at pack time: model asset id -> animation asset id -> the corrections
+   * to apply after the automatic match.
+   *
+   * The editor stores these on the target RIG keyed by source rig (see `RigAsset.retargets`); publish
+   * flattens that to the pair the player can actually index, the same way it flattens a rig's skeleton into
+   * each animation's `sourceSkin`. Optional and additive — an older player simply retargets automatically,
+   * which is what it did before corrections could be saved at all.
+   */
+  retargets?: Record<string, Record<string, { sourceName: string; targetName: string | null }[]>>;
 };
+
+/** A skin's node index for a bone name. Overrides are stored by NAME — see RigAsset.retargets. */
+function nodeNamed(skin: Skin, name: string): number | undefined {
+  for (const [node, n] of skin.nodeNames ?? new Map<number, string>()) if (n === name) return node;
+  return undefined;
+}
 
 function toMat4(a: number[]): any {
   const m = mat4.create();
@@ -86,7 +102,17 @@ export function attachSharedAnimations(scene: Scene, data: PublishedAnimations):
         if (!sourceSkin) { clips.push(...asset.clips.map(c => ({ ...c }))); continue; }
         try {
           // One mapping per asset — every clip in it shares the source skeleton.
-          const mapping = buildBoneMapping(asset.clips, sourceSkin, model.skin as Skin);
+          let mapping = buildBoneMapping(asset.clips, sourceSkin, model.skin as Skin);
+          // ...then the corrections the author made in the rig editor. Without this a published game
+          // animates with the automatic match the user explicitly fixed — visibly different from the
+          // editor, with nothing logged.
+          for (const o of data.retargets?.[modelId]?.[id] ?? []) {
+            const sn = nodeNamed(sourceSkin, o.sourceName);
+            if (sn === undefined) continue;
+            const tn = o.targetName === null ? null : nodeNamed(model.skin as Skin, o.targetName);
+            if (tn === undefined) continue;
+            mapping = applyManualMapping(mapping, sn, tn);
+          }
           for (const c of asset.clips) clips.push(retargetAnimation(c, sourceSkin, model.skin as Skin, mapping));
         } catch (e) {
           Logger.warn(`Could not retarget "${asset.name}" onto model ${modelId}: ${e}`, 'Player');

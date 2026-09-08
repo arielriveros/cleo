@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractRigs } from '../src/utils/rigMigration'
+import { extractRigs, moveClipsToRigs } from '../src/utils/rigMigration'
 import { skinnedModelJsonsOf } from '../src/utils/modelClips'
 import { buildRigAsset, skeletonFingerprint } from '../src/utils/rigAssets'
 import type { AnimationAsset, StoredSkin } from '../src/utils/animationAssets'
@@ -209,6 +209,121 @@ describe('extractRigs', () => {
       const rich = buildRigAsset('rich', skin(), undefined, 'rig-1')
       const out = run([model('m1', 'bare', skin({ nodeTransforms: [] }))], [], [rich])
       expect(out.rigs[0].skin.nodeTransforms).toHaveLength(2)
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------
+// v4 — clip ownership and blend spaces move up to the rig.
+// ---------------------------------------------------------------------------------------------------
+
+describe('moveClipsToRigs', () => {
+  const rig = (id: string, name = id) => buildRigAsset(name, skin(), undefined, id)
+  /** Clip names per animation asset, which is what clash detection compares. */
+  const names = (map: Record<string, string[]>) => (id: string) => map[id] ?? []
+
+  it('moves a model\'s clip links onto its rig', () => {
+    const out = moveClipsToRigs(
+      [{ id: 'm1', name: 'player', nodeJson: {}, rigId: 'r1', animationIds: ['idle'] }],
+      [rig('r1')], [], names({ idle: ['Idle'] }),
+    )
+    expect(out.rigs[0].animationIds).toEqual(['idle'])
+    expect(out.models[0].animationIds).toBeUndefined()
+    expect(out.moved).toBe(1)
+  })
+
+  // The point of rig ownership: link once, every character on the armature plays it.
+  it('unions two characters that share a rig', () => {
+    const out = moveClipsToRigs(
+      [
+        { id: 'm1', name: 'player', nodeJson: {}, rigId: 'r1', animationIds: ['idle'] },
+        { id: 'm2', name: 'zombie', nodeJson: {}, rigId: 'r1', animationIds: ['shamble'] },
+      ],
+      [rig('r1')], [], names({ idle: ['Idle'], shamble: ['Shamble'] }),
+    )
+    expect(out.rigs[0].animationIds).toEqual(['idle', 'shamble'])
+    expect(out.moved).toBe(2)
+  })
+
+  /**
+   * The hazard this migration is most careful about. `addAnimation` de-dupes a repeat to "walk (2)", and
+   * every state machine names its clip as a STRING — so a rename breaks them with no error at all.
+   */
+  it('reports a clip-name clash and skips the loser, never renaming', () => {
+    const out = moveClipsToRigs(
+      [
+        { id: 'm1', name: 'player', nodeJson: {}, rigId: 'r1', animationIds: ['walkA'] },
+        { id: 'm2', name: 'zombie', nodeJson: {}, rigId: 'r1', animationIds: ['walkB'] },
+      ],
+      [rig('r1', 'mannequin')], [], names({ walkA: ['Walk'], walkB: ['Walk'] }),
+    )
+    expect(out.rigs[0].animationIds).toEqual(['walkA'])
+    expect(out.clashes).toEqual([{ rig: 'mannequin', clip: 'Walk', kept: 'walkA', skipped: 'walkB' }])
+    // The skipped link is NOT dropped from its model — nothing is lost, it just did not move.
+    expect(out.models[1].animationIds).toEqual(['walkB'])
+  })
+
+  it('does not clash a clip with itself when two models share the same asset', () => {
+    const out = moveClipsToRigs(
+      [
+        { id: 'm1', name: 'player', nodeJson: {}, rigId: 'r1', animationIds: ['idle'] },
+        { id: 'm2', name: 'zombie', nodeJson: {}, rigId: 'r1', animationIds: ['idle'] },
+      ],
+      [rig('r1')], [], names({ idle: ['Idle'] }),
+    )
+    expect(out.rigs[0].animationIds).toEqual(['idle'])
+    expect(out.clashes).toEqual([])
+  })
+
+  it('re-points an animation field from its model to that model\'s rig', () => {
+    const out = moveClipsToRigs(
+      [{ id: 'm1', name: 'player', nodeJson: {}, rigId: 'r1' }],
+      [rig('r1')],
+      [{ id: 'f1', name: 'Locomotion', modelId: 'm1' }],
+      names({}),
+    )
+    expect(out.fields[0]).toMatchObject({ id: 'f1', rigId: 'r1' })
+    expect('modelId' in out.fields[0]).toBe(false)
+    expect(out.repointed).toBe(1)
+  })
+
+  it('leaves a field alone when its model has no rig', () => {
+    const field = { id: 'f1', name: 'Locomotion', modelId: 'm1' }
+    const out = moveClipsToRigs([{ id: 'm1', name: 'p', nodeJson: {} }], [], [field], names({}))
+    expect(out.fields[0]).toBe(field)
+    expect(out.repointed).toBe(0)
+  })
+
+  describe('idempotence', () => {
+    it('a second run moves nothing and is deep-equal', () => {
+      const models = [{ id: 'm1', name: 'player', nodeJson: {}, rigId: 'r1', animationIds: ['idle'] }]
+      const fields = [{ id: 'f1', name: 'Loco', modelId: 'm1' }]
+      const clip = names({ idle: ['Idle'] })
+
+      const first = moveClipsToRigs(models, [rig('r1')], fields, clip)
+      const second = moveClipsToRigs(first.models, first.rigs, first.fields, clip)
+
+      expect(second.moved).toBe(0)
+      expect(second.repointed).toBe(0)
+      expect(second.rigs).toEqual(first.rigs)
+      expect(second.models).toEqual(first.models)
+      expect(second.fields).toEqual(first.fields)
+    })
+
+    // writeModelLibrary diffs by identity; rewriting every model would churn megabytes of IndexedDB.
+    it('returns untouched records by IDENTITY', () => {
+      const model = { id: 'm1', name: 'rock', nodeJson: {} }
+      const r = rig('r1')
+      const out = moveClipsToRigs([model], [r], [], names({}))
+      expect(out.models[0]).toBe(model)
+      expect(out.rigs[0]).toBe(r)
+    })
+
+    it('leaves a model whose rig is gone alone', () => {
+      const model = { id: 'm1', name: 'p', nodeJson: {}, rigId: 'missing', animationIds: ['idle'] }
+      const out = moveClipsToRigs([model], [], [], names({ idle: ['Idle'] }))
+      expect(out.models[0]).toBe(model)
+      expect(out.moved).toBe(0)
     })
   })
 })

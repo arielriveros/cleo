@@ -71,7 +71,7 @@ function JointRowView({ node }: NodeRendererProps<JointRow>) {
 }
 
 export default function SkeletonTree() {
-  const { editorScene, animationTargetId, eventEmitter } = useCleoEngine()
+  const { editorScene, skeletonTargetId, eventEmitter } = useCleoEngine()
   const [selectedJoint, setSelectedJoint] = useState<number | null>(null)
   const [filter, setFilter] = useState('')
   const treeRef = useRef<TreeApi<JointRow> | undefined>(undefined)
@@ -80,7 +80,7 @@ export default function SkeletonTree() {
   const { ref: viewportRef, element: viewportEl, size } = useElementSize<HTMLDivElement>()
   const dndManager = useScopedDndManager(viewportEl)
 
-  const target = getAnimationTarget(editorScene, animationTargetId)
+  const target = getAnimationTarget(editorScene, skeletonTargetId)
   const rows = useMemo(() => (target ? toRows(buildJointTree(target.skin), target.skin) : []), [target?.node.id])
 
   // Keep the tree highlight in sync with joint selections coming from the viewport.

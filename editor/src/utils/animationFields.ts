@@ -5,7 +5,7 @@ import type { ModelAsset } from './models'
 
 // A reusable, named Animation Field asset — the editor's blend space. A field places clips from ONE
 // animated model at coordinates in a 1D or 2D parameter space; sampling it produces a weighted mix of the
-// surrounding clips. Its `modelId` names the Model asset whose skeleton and clips it blends.
+// surrounding clips. Its `rigId` names the RIG whose skeleton and clips it blends.
 //
 // An AnimationState stores `fieldId` AND an embedded copy of the field, written by the state machine's
 // Apply. The EMBEDDED copy is what plays, so a field travels with the serialized machine. See toRuntimeField.
@@ -15,8 +15,14 @@ export type { AnimationField, AnimationFieldMode, AnimationFieldAxis, AnimationF
 export type AnimationFieldAsset = {
   id: string
   name: string
-  /** The ModelAsset whose skeleton + clips this field blends. */
-  modelId: string
+  /**
+   * The RIG whose skeleton + clips this field blends.
+   *
+   * A blend space is defined by a skeleton and a set of clip NAMES — which is exactly what a rig is now.
+   * It used to name a MODEL, which meant one field per character even when three characters shared one
+   * armature and one clip set.
+   */
+  rigId: string
   mode: AnimationFieldMode
   xAxis: AnimationFieldAxis
   /** Authored even in 1D mode so switching to 2D and back does not lose the axis the user set up. */
@@ -31,11 +37,11 @@ export const DEFAULT_X_AXIS: AnimationFieldAxis = { name: 'Speed', min: 0, max: 
 // turning through the seam otherwise swings the probe across the whole range in one frame.
 export const DEFAULT_Y_AXIS: AnimationFieldAxis = { name: 'Direction', min: -180, max: 180, wrap: true }
 
-export function buildAnimationFieldAsset(name: string, modelId: string, id?: string): AnimationFieldAsset {
+export function buildAnimationFieldAsset(name: string, rigId: string, id?: string): AnimationFieldAsset {
   return {
     id: id ?? cryptoRandomId(),
     name,
-    modelId,
+    rigId,
     mode: '1d',
     xAxis: { ...DEFAULT_X_AXIS },
     yAxis: { ...DEFAULT_Y_AXIS },

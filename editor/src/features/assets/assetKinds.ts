@@ -104,6 +104,7 @@ export type AssetDeps = {
   enterAnimationFieldEditor: (id?: string) => void
   enterTilesetEditor: (id?: string) => void
   enterAiBrainEditor: (id?: string) => void
+  enterRigEditor: (id?: string) => void
   enterTextureEditor: (id?: string) => void
   enterSoundEditor: (id?: string) => void
 
@@ -536,7 +537,8 @@ export async function regenerateThumbnail(
     case 'animationField':
     // Clips in source-rig space, with no character attached — there is nothing to pose for a picture.
     case 'animation':
-    // A skeleton with no mesh on it. Drawing one would be a diagram, not a preview.
+    // A skeleton with no mesh on it. Its editor previews it through a character, but there is no single
+    // model a rig could claim for a card — several may use it, and none may.
     case 'rig':
     // Both halves of the image split show the decoded image itself — there is nothing to render.
     case 'image':
@@ -570,9 +572,7 @@ export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean
     case 'image': return false
     // An animation has no editor: source-space clip data, meaningful only against a rig.
     case 'animation': return false
-    // Nor does a rig: a skeleton is authored by the model it came from, and its IK setup is edited in the
-    // Animation Editor's skeleton tree, against a live character.
-    case 'rig': return false
+    case 'rig': deps.enterRigEditor(id); return true
     // Raw audio, same reasoning as an image: what makes a file usable — volume, loop points, effects,
     // the bus — belongs to the sound sample, and that is what has an editor.
     case 'audioSource': return false

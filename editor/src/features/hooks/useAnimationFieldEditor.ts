@@ -40,12 +40,13 @@ export function useAnimationFieldEditor(deps: {
   liveScenes: (exceptTabId?: string) => Scene[];
   markTabDirty: (id: string, reason?: string) => void;
   addAnimationField: (f: AnimationFieldAsset) => void;
+  ensureRigForModel: (modelId: string) => string | null;
   updateAnimationField: (id: string, f: AnimationFieldAsset) => void;
 }) {
   const {
     instanceRef, animationFieldsRef, modelsRef, materialsRef, animationsRef, tabRuntimeRef,
     dirtyArmedRef, eventEmitter, tabs, setActiveTab, commitTab, withoutDirty, liveScenes,
-    markTabDirty, addAnimationField, updateAnimationField,
+    markTabDirty, addAnimationField, updateAnimationField, ensureRigForModel,
   } = deps;
 
   // ---- Animation Field editor ------------------------------------------------------------------------
@@ -63,9 +64,15 @@ export function useAnimationFieldEditor(deps: {
       if (existing) { setActiveTab(existing.id); return; }
     }
 
-    const model = modelsRef.current.find(m => m.id === field.modelId);
+    // A field belongs to a RIG, but a blend space has to be watched on a character — so it previews through
+    // a model built on that rig, the same way the rig editor does.
+    // `field.rigId` must be truthy first: an unmigrated field has none, and `undefined === undefined`
+    // would match the first model that has no rig either.
+    const model = field.rigId ? modelsRef.current.find(m => m.rigId === field.rigId) : undefined;
     if (!model) {
-      Logger.error(`"${field.name}" blends a model that no longer exists — the field cannot be opened`, 'Editor');
+      Logger.error(
+        `"${field.name}" blends a rig that no character uses — link the rig to a model to edit the field`,
+        'Editor');
       return;
     }
 
@@ -102,11 +109,15 @@ export function useAnimationFieldEditor(deps: {
   const createAnimationFieldForModel = (modelId: string): string | null => {
     const model = modelsRef.current.find(m => m.id === modelId);
     if (!model) { Logger.error('Model not found', 'Editor'); return null; }
+    // Created FROM a model (that is where the button lives) but owned by its RIG, so every character on
+    // that armature shares the blend space instead of each needing its own.
+    const rigId = ensureRigForModel(modelId);
+    if (!rigId) { Logger.warn(`"${model.name}" has no rig, so it cannot have a blend space`, 'Editor'); return null; }
     if (!modelAssetIsSkinned(model)) {
       Logger.warn(`"${model.name}" has no skeleton — only skinned models can be blended in an animation field`, 'Editor');
       return null;
     }
-    const asset = buildAnimationFieldAsset(`${model.name} Field`, modelId);
+    const asset = buildAnimationFieldAsset(`${model.name} Field`, rigId);
     addAnimationField(asset);
     // The library update lands in the next commit, so the open has to read the asset we just built rather
     // than the (still stale) state — hence seeding the ref directly.

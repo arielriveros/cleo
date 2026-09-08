@@ -21,12 +21,14 @@ const OLD_LAYOUT_KEY = 'cleo_project_layout';
 const OLD_DOCK_LAYOUT_KEYS = [
   'cleo_dock_layout_v1', 'cleo_dock_layout_v2', 'cleo_dock_layout_v3', 'cleo_dock_layout_v4',
   'cleo_dock_layout_v5', 'cleo_dock_layout_v6', 'cleo_dock_layout_v7', 'cleo_dock_layout_v8',
-  'cleo_dock_layout_v9', 'cleo_dock_layout_v10',
+  'cleo_dock_layout_v9', 'cleo_dock_layout_v10', 'cleo_dock_layout_v14',
 ];
 // 13: the AI modes came and went; a tree stored at 12 still references panels that no longer exist,
 // and one from 11 predates them. A stored tree cannot gain or lose a panel on its own, so every saved
 // arrangement is discarded.
-const LAYOUT_VERSION = 14;
+// 15: the rig mode arrived, and it reuses the Scene panel as a skeleton tree the way animation does — a
+// tree stored at 14 has no arrangement for it.
+const LAYOUT_VERSION = 15;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -102,7 +104,7 @@ const PANEL_TITLES: Record<string, string> = {
 };
 
 function panelTitle(id: string, mode: EditorMode): string {
-  if (id === 'scene' && mode === 'animation') return 'Skeleton';
+  if (id === 'scene' && (mode === 'animation' || mode === 'rig')) return 'Skeleton';
   if (id === 'properties') {
     if (mode === 'material') return 'Material';
     if (mode === 'terrainMaterial') return 'Terrain Material';
@@ -110,6 +112,7 @@ function panelTitle(id: string, mode: EditorMode): string {
     if (mode === 'aiBrain') return 'Brain';
     if (mode === 'texture') return 'Texture';
     if (mode === 'soundSample') return 'Sound';
+    if (mode === 'rig') return 'Rig';
   }
   return PANEL_TITLES[id];
 }
@@ -292,6 +295,12 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
     // SELECT_NODE coercion in EngineContext) and Properties hosts both its inspector and its transform.
     case 'model':
       hide(...ADD_PANELS, 'scene', 'scripts', 'physics');
+      break;
+    // A rig is authored the way a skeleton is: the Scene panel becomes its bone tree (see panelTitle) and
+    // Properties hosts the rig's own inspector. Unlike `animation` it keeps Properties, which is where its
+    // clips, retarget table and IK live.
+    case 'rig':
+      hide(...ADD_PANELS, 'scripts', 'physics');
       break;
     // Animation brings its own three panels; the Scene panel becomes the skeleton tree (see panelTitle).
     case 'animation':

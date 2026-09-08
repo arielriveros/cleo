@@ -23,7 +23,7 @@ export type EditorSessionsContextValue = Pick<EngineValue,
   | 'importAnimationFiles' | 'importSkeletonNames' | 'renameAnimationClip' | 'removeAnimationClip'
   | 'pendingAnimationImport' | 'resolveAnimationImport'
   | 'pendingRigPick' | 'resolveRigPick'
-  | 'linkAnimationToModel' | 'unlinkAnimationFromModel' | 'editSharedClip'
+  | 'linkAnimationToRig' | 'unlinkAnimationFromRig' | 'ensureRigForModel' | 'editSharedClip'
   // Model
   | 'enterModelEditor' | 'adoptModelAsset' | 'resolveModelAssetId' | 'modelSession' | 'modelEditTargetId' | 'setActiveModelName'
   | 'addModelLodFromAsset' | 'generateModelLods' | 'removeModelLod' | 'setModelLodDistance' | 'setModelCullDistance'
@@ -40,6 +40,9 @@ export type EditorSessionsContextValue = Pick<EngineValue,
   // AI brain (a behaviour machine or a goal graph, plus the fuzzy model it reads)
   | 'enterAiBrainEditor' | 'saveAiBrain' | 'editingAiBrainId'
   | 'extractBrainFromController' | 'linkBrainToController' | 'registerAiBrainApply'
+  // Rig (a shared skeleton: its clips, its retarget corrections and its IK setup)
+  | 'enterRigEditor' | 'setRigPreviewModel' | 'rigPreviewModelId' | 'saveRig' | 'modelsOnRig'
+  | 'editingRigId' | 'registerRigApply'
 >;
 
 export const EditorSessionsContext = createContext<EditorSessionsContextValue | null>(null);

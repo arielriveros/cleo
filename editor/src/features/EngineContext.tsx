@@ -36,7 +36,7 @@ import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScri
 import { pushExternalSource } from "./scriptWorkspace/externalSourceStore";
 import { AnimationAsset, buildAnimationAsset, storeSkin, findEquivalentAnimation, withAnimationRef, withoutAnimationRef, extractEmbeddedClips } from "../utils/animationAssets";
 import type { StoredSkin } from "../utils/animationAssets";
-import { modelAssetSkin, applyModelAnimations, invalidateAnimationCache, resolveAnimationAsset, registerRigResolver } from "../utils/animationResolve";
+import { modelAssetSkin, applyModelAnimations, modelAnimationIds, invalidateAnimationCache, resolveAnimationAsset, registerRigResolver } from "../utils/animationResolve";
 import { AnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
 import { TilesetAsset, reembedTilesets, detachTileset } from "../utils/tilesets";
 import { AiBrainAsset, AiBrainKind, buildAiBrainAsset, reembedBrains, detachBrain } from "../utils/aiBrains";
@@ -57,7 +57,7 @@ import { readModelLibrary, writeModelLibrary } from "../utils/modelStore";
 import { generateLodLevel, hasSkinnedPart, subtreeTriangles } from "../utils/lodGenerate";
 import { registerFoliageSourceResolver } from "../utils/foliageRules";
 import { findEquivalentRig, buildRigAsset, type RigAsset } from "../utils/rigAssets";
-import { extractRigs } from "../utils/rigMigration";
+import { extractRigs, moveClipsToRigs } from "../utils/rigMigration";
 import { decimateGeometry } from "../workers/workerClient";
 import { cancelAllImports, ImportCancelled, parseAnimationFiles } from "../workers/importClient";
 import { detectMissingTextures } from "../utils/textureRefs";
@@ -103,6 +103,7 @@ import { useAiBrainEditor } from './hooks/useAiBrainEditor';
 import { useTextureEditor } from './hooks/useTextureEditor';
 import { useSoundEditor } from './hooks/useSoundEditor';
 import { useAnimationFieldEditor } from './hooks/useAnimationFieldEditor';
+import { useRigEditor } from './hooks/useRigEditor';
 import { getShellBridge } from './desktopShell';
 import { confirmDiscard, setUnsavedWork, unloadGuardSuppressed } from './unloadGuard';
 import {
@@ -174,6 +175,17 @@ const EngineContext = createContext<{
   /** SoundProvider hands its save back here, so Ctrl+S and Save All can reach a sound tab by id. */
   registerSoundApply: (reg: { tabId: string; apply: () => void } | null) => void;
   registerAiBrainApply: (reg: { tabId: string; apply: () => void } | null) => void;
+  registerRigApply: (reg: { tabId: string; apply: () => void } | null) => void;
+  /** Open (or focus) a rig's edit tab. */
+  enterRigEditor: (rigId?: string, adoptTabId?: string) => void;
+  /** Show a different character on the open rig tab. */
+  setRigPreviewModel: (tabId: string, modelId: string) => void;
+  /** Which character the open rig tab is previewing. */
+  rigPreviewModelId: (tabId: string) => string | undefined;
+  saveRig: (rig: RigAsset) => void;
+  /** The models built on a rig — the candidates its preview can show. */
+  modelsOnRig: (rigId: string) => ModelAsset[];
+  editingRigId: string | null;
   enterTemplateEditor: (templateId?: string) => void;
   editingTemplateName: string | null;
   templateRootId: string | null;
@@ -192,6 +204,7 @@ const EngineContext = createContext<{
   setActiveTerrainMaterialName: (name: string) => void;
   enterAnimationEditor: (nodeId: string) => void;
   animationTargetId: string | null; // cloned skinned model in the active animation tab's scene
+  skeletonTargetId: string | null;  // the skinned node whose skeleton is on screen (animation OR rig)
   animationSourceId: string | null; // original node in the main scene (state-machine write-back target)
   animationSourceScene: Scene | null; // scene the source node lives in (for Variable parameter pickers)
   commitAnimationStateMachine: (sm: any) => void;
@@ -359,8 +372,11 @@ const EngineContext = createContext<{
   /** The model asset a node belongs to — its back-link, or the asset the current tab is editing. */
   resolveModelAssetId: (node: Node | null | undefined) => string | undefined;
   /** Link an existing `.anim` asset to a model asset; its clips appear on every placement immediately. */
-  linkAnimationToModel: (modelId: string, animationId: string) => void;
-  unlinkAnimationFromModel: (modelId: string, animationId: string) => void;
+  /** The rig a model uses, minting one from its skeleton if it has none. */
+  ensureRigForModel: (modelId: string) => string | null;
+  /** Link a shared `.anim` to a RIG — every model on that rig plays it. */
+  linkAnimationToRig: (rigId: string, animationId: string) => void;
+  unlinkAnimationFromRig: (rigId: string, animationId: string) => void;
   /** Rename a clip inside a shared `.anim` asset, or toggle its root motion. */
   editSharedClip: (animationId: string, clipName: string, patch: { name?: string; rootMotion?: boolean }) => void;
   modelSession: ModelEditSession | null;
@@ -470,6 +486,13 @@ const EngineContext = createContext<{
     registerTextureApply: () => {},
     registerSoundApply: () => {},
     registerAiBrainApply: () => {},
+    registerRigApply: () => {},
+    enterRigEditor: () => {},
+    setRigPreviewModel: () => {},
+    rigPreviewModelId: () => undefined,
+    saveRig: () => {},
+    modelsOnRig: () => [],
+    editingRigId: null,
     enterTemplateEditor: () => {},
     editingTemplateName: null,
     templateRootId: null,
@@ -486,6 +509,7 @@ const EngineContext = createContext<{
     setActiveTerrainMaterialName: () => {},
     enterAnimationEditor: () => {},
     animationTargetId: null,
+    skeletonTargetId: null,
     animationSourceId: null,
     animationSourceScene: null,
     commitAnimationStateMachine: () => {},
@@ -591,8 +615,9 @@ const EngineContext = createContext<{
     enterModelEditor: () => {},
     adoptModelAsset: async () => null,
     resolveModelAssetId: () => undefined,
-    linkAnimationToModel: () => {},
-    unlinkAnimationFromModel: () => {},
+    ensureRigForModel: () => null,
+    linkAnimationToRig: () => {},
+    unlinkAnimationFromRig: () => {},
     editSharedClip: () => {},
     modelSession: null,
     modelEditTargetId: null,
@@ -745,7 +770,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
   // Per-tab runtime scene + root. Animation tabs also record where the SOURCE node lives (its scene may
   // be the main scene OR a template tab's scene) so authored state machines are written back correctly.
-  const tabRuntimeRef = useRef<Map<string, { scene: Scene; rootId: string; sourceScene?: Scene; sourceNodeId?: string; sourceTabId?: string; tm?: TerrainMaterial; helperTerrain?: Terrain; editNode?: ModelNode }>>(new Map());
+  const tabRuntimeRef = useRef<Map<string, { scene: Scene; rootId: string; sourceScene?: Scene; sourceNodeId?: string; sourceTabId?: string; tm?: TerrainMaterial; helperTerrain?: Terrain; editNode?: ModelNode; previewModelId?: string; skinnedId?: string }>>(new Map());
   const activeTabIdRef = useRef<string>(SCENE_TAB_ID);
   const activeTabKindRef = useRef<TabKind>('scene');
   const dirtyArmedRef = useRef(false); // suppress false-dirty from the helper reconciler right after open
@@ -1022,8 +1047,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    *   v2 — lift clips embedded in a model's subtree into shared `.anim` assets.
    *   v3 — lift each model's SKELETON into a shared `.rig`, and point every `.anim` at the rig it was
    *        authored against (utils/rigMigration.ts).
+   *   v4 — move clip OWNERSHIP from the model to its rig, and re-point every animation field the same way,
+   *        so one link serves every character built on an armature.
    */
-  const ANIMATION_ASSET_MIGRATION = 3;
+  const ANIMATION_ASSET_MIGRATION = 4;
   const animationsLoadedRef = useRef(false);
   useEffect(() => {
     (async () => {
@@ -1051,19 +1078,24 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           // clips already lifted. `extractRigs` returns unchanged models by identity, so a library that
           // gains nothing here is not rewritten.
           const g = extractRigs(r.models, r.animations, storedRigs, skinnedModelJsonsOf);
-          const modelsChanged = r.extracted || r.shared || g.linkedModels;
+          // v4, over v3's output: clips and blend spaces move up to the rig now that every model has one.
+          const storedFields = (await idbGet<AnimationFieldAsset[]>(libKey('animationFields'))) ?? [];
+          const clipNames = new Map(g.animations.map(a => [a.id, a.clips.map(c => c.name)]));
+          const v4 = moveClipsToRigs(g.models, g.rigs, storedFields, id => clipNames.get(id) ?? []);
+          const modelsChanged = r.extracted || r.shared || g.linkedModels || v4.moved;
 
           if (modelsChanged || g.created || g.linkedAnimations) {
             // No `preAnimationAssets` backup any more. It was a second full copy of a library big enough
             // to be the problem, and the extraction only ever REMOVES clips that were just written to the
             // animation library — so the data still exists, addressed differently.
             if (modelsChanged) {
-              await writeModelLibrary(g.models, models);
-              persistedModelsRef.current = g.models; // storage now holds these; don't re-write them
-              setModels(prev => (prev.length ? g.models.map(flattenModelAsset) : prev));
+              await writeModelLibrary(v4.models, models);
+              persistedModelsRef.current = v4.models; // storage now holds these; don't re-write them
+              setModels(prev => (prev.length ? v4.models.map(flattenModelAsset) : prev));
             }
             await idbSet(libKey('animations'), g.animations);
-            if (g.rigs.length) await idbSet(libKey('rigs'), g.rigs);
+            if (v4.rigs.length) await idbSet(libKey('rigs'), v4.rigs);
+            if (v4.repointed) await idbSet(libKey('animationFields'), v4.fields);
             if (r.extracted || r.shared) {
               Logger.info(`Animation library: extracted ${r.extracted} clip${r.extracted === 1 ? '' : 's'}` +
                 (r.shared ? `, ${r.shared} already shared with another model` : ''), 'Editor');
@@ -1073,10 +1105,31 @@ export function EngineProvider(props: { children: React.ReactNode }) {
                 `linked to ${g.linkedModels} model${g.linkedModels === 1 ? '' : 's'} and ` +
                 `${g.linkedAnimations} animation${g.linkedAnimations === 1 ? '' : 's'}`, 'Editor');
             }
-            setAnimations(prev => prev.length ? prev : g.animations);
-            // The rig load effect uses the same `prev.length ? prev : list` guard, so whichever of the two
-            // supplies a non-empty list first wins and the other is a no-op.
-            setRigs(prev => prev.length ? prev : g.rigs);
+            if (v4.moved || v4.repointed) {
+              Logger.info(
+                `Rig library: ${v4.moved} clip link${v4.moved === 1 ? '' : 's'} moved onto rigs` +
+                (v4.repointed ? `, ${v4.repointed} blend space${v4.repointed === 1 ? '' : 's'} re-pointed` : ''),
+                'Editor');
+            }
+            // Reported, never renamed: a de-duped "walk (2)" would break every state machine naming it,
+            // with nothing but a play-time warning to show for it.
+            for (const c of v4.clashes) {
+              Logger.warn(
+                `Rig "${c.rig}": two animations both provide a clip named "${c.clip}". Kept the first and ` +
+                'skipped the second — link it to a different rig, or rename its clip.', 'Editor');
+            }
+            // UNCONDITIONAL, and that is load-bearing. These libraries have their own plain load effects
+            // racing this one, and a `prev.length ? prev : …` guard here loses that race the moment the
+            // pre-migration list is non-empty: the stale list would stay in state and `usePersistedLibrary`
+            // would write it straight back over what was just persisted above — while the MODELS have
+            // already been written with their links stripped and the version stamped. Net effect: every
+            // shared clip link lost on the next reload.
+            //
+            // Safe in the other order too: those effects use the `prev.length ? prev : list` guard, so a
+            // late read finds state already populated and no-ops.
+            setAnimations(g.animations);
+            setRigs(v4.rigs);
+            if (v4.repointed) setAnimationFields(v4.fields);
           } else if (list.length) setAnimations(prev => prev.length ? prev : list);
           await idbSet(libKey('animations') + ':migrated', ANIMATION_ASSET_MIGRATION);
         } else if (list.length) setAnimations(prev => prev.length ? prev : list);
@@ -1095,8 +1148,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setAnimations(prev => prev.map(x => x.id === id ? a : x));
   const removeAnimation = (id: string) => {
     setAnimations(prev => prev.filter(x => x.id !== id));
-    // Drop the reference from every model that used it. Clips already instantiated on live nodes are left
-    // alone — a copy the user can still see and delete.
+    // Drop the reference from every RIG that used it, and from any model still carrying a pre-migration
+    // link. Clips already instantiated on live nodes are left alone — a copy the user can still see.
+    for (const r of rigsRef.current) {
+      const next = withoutAnimationRef(r, id);
+      if (next !== r) updateRig(r.id, next);
+    }
     for (const m of modelsRef.current) {
       const next = withoutAnimationRef(m, id);
       if (next !== m) updateModel(m.id, next);
@@ -1134,6 +1191,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
   };
   const removeRig = (id: string) => {
+    // Close its tab first: a rig tab holds a preview scene keyed on an asset that is about to vanish.
+    const open = tabsRef.current.find(t => t.kind === 'rig' && t.rigId === id);
+    if (open) removeTabById(open.id);
     setRigs(prev => prev.filter(x => x.id !== id));
     // Unlink, never leave dangling: an animation whose rigId names nothing and which has no `sourceSkin`
     // would retarget against nothing and silently play in the wrong space.
@@ -1663,10 +1723,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         case 'aiBrain': return libs.aiBrains.some(b => b.id === id);
         case 'texture': return texturesRef.current.some(t => t.id === id);
         case 'soundSample': return soundSamplesRef.current.some(x => x.id === id);
+        case 'rig': return rigsRef.current.some(r => r.id === id);
         // A field also needs the model it blends — enterAnimationFieldEditor refuses to open without it.
         case 'animationField': {
           const field = fields.find(f => f.id === id);
-          return !!field && libs.models.some(m => m.id === field.modelId);
+          // Restorable while SOME model uses the field's rig — that is what its preview needs. The
+          // `field.rigId` guard matters: without it an unmigrated field (no rigId) matches the first
+          // rig-less model, because `undefined === undefined`.
+          return !!field?.rigId && libs.models.some(m => m.rigId === field.rigId);
         }
         default: return false;
       }
@@ -1785,6 +1849,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Animation editor: the cloned skinned model in the tab's scene (target to preview/edit) and the
   // original node in the main scene (where authored state machines are written back).
   const animationTargetId = activeTab.kind === 'animation' && activeRuntime ? activeRuntime.rootId : null;
+  /**
+   * The skinned node whose SKELETON is on screen — the animation editor's clone, or the rig editor's
+   * preview character. Separate from `animationTargetId`, which additionally means "the model whose
+   * clips and state machine are being edited" and drives write paths a rig tab must not trigger.
+   */
+  const skeletonTargetId = activeTab.kind === 'animation' ? animationTargetId
+    : activeTab.kind === 'rig' ? (activeRuntime?.skinnedId ?? null) : null;
   const animationSourceId = activeTab.kind === 'animation' ? (activeTab.animationSourceId ?? null) : null;
   // The scene the source node lives in (main or a template tab) — used to enumerate accessible
   // node variables for the state machine's Variable parameters (the clone's scene is isolated).
@@ -1796,6 +1867,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const animationFieldTargetId = activeTab.kind === 'animationField' && activeRuntime
     ? (firstSkinnedModelNode(activeRuntime.scene.getNodeById(activeRuntime.rootId) ?? null)?.id ?? null)
     : null;
+  const editingRigId = activeTab.kind === 'rig' ? (activeTab.rigId ?? null) : null;
   const editingTilesetId = activeTab.kind === 'tileset' ? (activeTab.tilesetId ?? null) : null;
   const editingTextureId = activeTab.kind === 'texture' ? (activeTab.textureId ?? null) : null;
   const editingSoundId = activeTab.kind === 'soundSample' ? (activeTab.soundId ?? null) : null;
@@ -1832,7 +1904,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Same shape and the same reason as the foliage resolver above: `animationResolve` needs to turn a
   // `rigId` into a skeleton, and threading the rig library through resolveAnimationAsset ->
   // resolveModelAnimations -> applyModelAnimations -> refreshModelClips would touch every call site of each.
-  registerRigResolver((rigId: string) => rigsRef.current.find(r => r.id === rigId)?.skin ?? null);
+  registerRigResolver((rigId: string) => rigsRef.current.find(r => r.id === rigId) ?? null);
 
   const engineMaps = () => ({ scripts: scriptsRef.current, bodies: bodiesRef.current, triggers: triggersRef.current });
 
@@ -2114,35 +2186,71 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /** Link an existing `.anim` asset to a model, so every placement of that model plays its clips. */
-  const linkAnimationToModel = (modelId: string, animationId: string) => {
-    const asset = modelsRef.current.find(m => m.id === modelId);
-    const anim = animationsRef.current.find(a => a.id === animationId);
-    // Logged, not silent: this used to return here whenever the model had just been adopted (see
-    // adoptModelAsset), and a drag that did nothing at all left no way to tell why.
-    if (!asset) { Logger.warn(`Cannot link an animation: model ${modelId} is not in the library`, 'Editor'); return; }
-    if (!anim) { Logger.warn(`Cannot link animation ${animationId}: it is not in the library`, 'Editor'); return; }
-    const linked = withAnimationRef(asset, animationId);
-    if (linked === asset) return; // already linked
+  /**
+   * Re-resolve every model built on `rigId`, after its clip list changed.
+   *
+   * The rig owns the clips, so ONE link fans out to every character on that armature — which is the whole
+   * point of the rig owning them, and also why this cannot just patch the model that happened to be open.
+   */
+  const applyRigLinks = (rigId: string) => {
+    for (const model of modelsRef.current) {
+      if (model.rigId === rigId) applyAnimationLinks(model);
+    }
+  };
+
+  /**
+   * The rig a model uses, minting one from its skeleton if it has none.
+   *
+   * The bridge for every "link a clip to this character" path: those start from a MODEL (a selected node,
+   * an open model tab) while clips now hang off a RIG. A model imported before rigs existed, or adopted
+   * from a raw node, has no `rigId` until something asks for one.
+   */
+  const ensureRigForModel = (modelId: string): string | null => {
+    const model = modelsRef.current.find(m => m.id === modelId);
+    if (!model) return null;
+    if (model.rigId && rigsRef.current.some(r => r.id === model.rigId)) return model.rigId;
+
+    const skin = storeSkin(skinnedModelJsonsOf(model.nodeJson)[0]?.skin);
+    const rig = ensureRig(skin, model.name);
+    if (!rig) { Logger.warn(`"${model.name}" has no skeleton, so it cannot have a rig`, 'Editor'); return null; }
+    const linked = { ...model, rigId: rig.id };
+    // Mirror eagerly: callers await this and immediately link a clip to the returned id, and `modelsRef`
+    // is a render mirror (the trap `adoptModelAsset` hit).
+    modelsRef.current = modelsRef.current.map(m => (m.id === modelId ? linked : m));
     updateModel(modelId, linked);
+    return rig.id;
+  };
+
+  /** Link a shared `.anim` to a RIG. Every model on that rig gains its clips. */
+  const linkAnimationToRig = (rigId: string, animationId: string) => {
+    const rig = rigsRef.current.find(r => r.id === rigId);
+    const anim = animationsRef.current.find(a => a.id === animationId);
+    // Logged, not silent: the model equivalent used to return here whenever the model had just been
+    // adopted, and a drag that did nothing at all left no way to tell why.
+    if (!rig) { Logger.warn(`Cannot link an animation: rig ${rigId} is not in the library`, 'Editor'); return; }
+    if (!anim) { Logger.warn(`Cannot link animation ${animationId}: it is not in the library`, 'Editor'); return; }
+    const linked = withAnimationRef(rig, animationId);
+    if (linked === rig) return; // already linked
+    updateRig(rigId, linked);
     invalidateAnimationCache(animationId);
-    applyAnimationLinks(linked);
+    applyRigLinks(rigId);
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
-    Logger.info(`Linked "${anim.name}" to "${asset.name}"`, 'Editor');
+    Logger.info(`Linked "${anim.name}" to rig "${rig.name}"`, 'Editor');
   };
 
   /** Drop a `.anim` link. Its clips disappear from every placement — applyModelAnimations removes them. */
-  const unlinkAnimationFromModel = (modelId: string, animationId: string) => {
-    const asset = modelsRef.current.find(m => m.id === modelId);
-    if (!asset) return;
-    const unlinked = withoutAnimationRef(asset, animationId);
-    if (unlinked === asset) return;
-    updateModel(modelId, unlinked);
+  const unlinkAnimationFromRig = (rigId: string, animationId: string) => {
+    const rig = rigsRef.current.find(r => r.id === rigId);
+    if (!rig) return;
+    const unlinked = withoutAnimationRef(rig, animationId);
+    if (unlinked === rig) return;
+    updateRig(rigId, unlinked);
     invalidateAnimationCache(animationId);
-    applyAnimationLinks(unlinked);
+    applyRigLinks(rigId);
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
-    Logger.info(`Unlinked "${animationsRef.current.find(a => a.id === animationId)?.name ?? animationId}" from "${asset.name}"`, 'Editor');
+    Logger.info(`Unlinked "${animationsRef.current.find(a => a.id === animationId)?.name ?? animationId}" from rig "${rig.name}"`, 'Editor');
   };
 
   /**
@@ -2161,7 +2269,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // `updated` is handed through explicitly: updateAnimation is a state write, so animationsRef still
     // holds the PREVIOUS clips during this call and re-resolving from it would put the old name back.
     for (const model of modelsRef.current) {
-      if (model.animationIds?.includes(animationId)) applyAnimationLinks(model, null, updated);
+      // The rig owns the link now, so ask the model's rig rather than the model.
+      if (modelAnimationIds(model).includes(animationId)) applyAnimationLinks(model, null, updated);
     }
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
   };
@@ -2439,7 +2548,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    */
   const commitIkRig = (rig: any | null) => {
     const rt = tabRuntimeRef.current.get(activeTabId);
-    const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
+    // `skeletonTargetId`, not `animationTargetId`: the IK panel sits under the bone tree, which the RIG
+    // tab shows too. Keyed on the animation target it wrote nowhere at all from a rig tab.
+    const cloneNode = skeletonTargetId ? activeScene.getNodeById(skeletonTargetId) : null;
     const applyTo = (n: Node | null | undefined) => {
       if (n instanceof ModelNode && n.model instanceof AnimatedModel && n.model.skin) {
         n.model.skin.ikRig = rig ?? undefined;
@@ -2463,7 +2574,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   /** The IK rig currently on the Animation Editor's model, or null. */
   const currentIkRig = (): any | null => {
-    const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
+    const cloneNode = skeletonTargetId ? activeScene.getNodeById(skeletonTargetId) : null;
     if (cloneNode instanceof ModelNode && cloneNode.model instanceof AnimatedModel) {
       return cloneNode.model.skin?.ikRig ?? null;
     }
@@ -2544,6 +2655,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       case 'terrainMaterial': enterTerrainMaterialEditor(assetId, tab.id); break;
       case 'model': enterModelEditor(assetId, tab.id); break;
       case 'animationField': enterAnimationFieldEditor(assetId, tab.id); break;
+      case 'rig': enterRigEditor(assetId, tab.id); break;
       case 'script': enterScriptEditor(assetId, tab.id); break;
       // A tileset tab is a pure 2D editor over the library record — nothing to build, so it is live already.
       case 'tileset': return !!tab.tilesetId && tilesetsRef.current.some(t => t.id === tab.tilesetId);
@@ -3614,7 +3726,20 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const { enterAnimationFieldEditor, createAnimationFieldForModel, saveAnimationField } = useAnimationFieldEditor({
     instanceRef, animationFieldsRef, modelsRef, materialsRef, animationsRef, tabRuntimeRef,
     dirtyArmedRef, eventEmitter, tabs, setActiveTab, commitTab, withoutDirty, liveScenes,
-    markTabDirty, addAnimationField, updateAnimationField,
+    markTabDirty, addAnimationField, updateAnimationField, ensureRigForModel,
+  });
+
+  /** Late binding for `applyActiveTab`, which is declared below the sessions that need it. */
+  const applyActiveTabRef = useRef<((tab: EditorTab) => void) | null>(null);
+
+  // ---- Rig editor ------------------------------------------------------------------------------------
+  const { enterRigEditor, setRigPreviewModel, rigPreviewModelId, saveRig, modelsOnRig } = useRigEditor({
+    instanceRef, rigsRef, modelsRef, materialsRef, animationsRef, tabRuntimeRef,
+    dirtyArmedRef, eventEmitter, tabs, setActiveTab, commitTab, withoutDirty, updateRig,
+    clearTabDirty, activeTabId,
+    // Through a ref: `applyActiveTab` is declared far below this call, and a rig only ever reaches it
+    // from a click, never during render.
+    applyActiveTab: (tab) => applyActiveTabRef.current?.(tab),
   });
 
   // ---- Tileset editor --------------------------------------------------------------------------------
@@ -4124,6 +4249,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Animation tabs select via the skeleton tree (SELECT_JOINT), not the mesh, so start with none.
     eventEmitter.current.emit('SELECT_NODE', (runtime && tab.kind !== 'animation') ? runtime.rootId : null);
   };
+  applyActiveTabRef.current = applyActiveTab;
+
 
   // Switch the engine to the active tab's scene whenever the active tab changes.
   useEffect(() => {
@@ -4224,7 +4351,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       const scriptSet = collectReferencedScriptIds(scene);
       const tilesetSet = collectReferencedTilesetIds(scene);
       const refs: SceneRefs = buildSceneRefs(
-        scene, instanceRef.current?.renderer.getRenderSettings(), soundSamples, models,
+        scene, instanceRef.current?.renderer.getRenderSettings(), soundSamples, models, rigs,
       );
       // Per-asset content hashes let a *closed* scene tell, when reopened, which referenced assets
       // changed while it was closed — so unchanged models/templates aren't needlessly re-instantiated.
@@ -4262,7 +4389,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // ---- Saving: one action per tab, plus Save All ------------------------------------------------
   const {
     registerAnimationApply, registerTilesetApply, registerTextureApply, registerSoundApply,
-    registerAiBrainApply, saveTabById, runSave,
+    registerAiBrainApply, registerRigApply, saveTabById, runSave,
     saveActiveTab, saveAll, saveProjectToStorage,
   } = useSaving({
     tabsRef, dirtyTabsRef, activeTabIdRef, setSavingState,
@@ -5281,7 +5408,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     enterTerrainMaterialEditor, refreshTerrainMaterialPreview, setActiveTerrainMaterialName,
     enterAnimationEditor, commitAnimationStateMachine, registerAnimationApply, registerTilesetApply,
     importAnimationFiles, importSkeletonNames, commitIkRig, currentIkRig, renameAnimationClip, removeAnimationClip, resolveAnimationImport, resolveRigPick,
-    enterModelEditor, adoptModelAsset, resolveModelAssetId, linkAnimationToModel, unlinkAnimationFromModel, editSharedClip,
+    enterModelEditor, adoptModelAsset, resolveModelAssetId, linkAnimationToRig, unlinkAnimationFromRig, ensureRigForModel, editSharedClip,
     setActiveModelName, addModelLodFromAsset, generateModelLods, removeModelLod,
     setModelLodDistance, setModelCullDistance, setActiveModelLevel, importModelFiles, resolveModelImport,
     enterScriptEditor, setScriptTabSource, getScriptTabSource, saveScriptSource,
@@ -5290,6 +5417,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     enterAnimationFieldEditor, createAnimationFieldForModel, saveAnimationField,
     enterSoundEditor, saveSoundSample, previewSoundSettings, registerSoundApply,
     enterAiBrainEditor, saveAiBrain, extractBrainFromController, linkBrainToController, registerAiBrainApply,
+    enterRigEditor, setRigPreviewModel, rigPreviewModelId, saveRig, modelsOnRig, registerRigApply,
   });
   const editorSessionsValue = useMemo<EditorSessionsContextValue>(() => ({
     editingTemplateName, templateRootId,
@@ -5299,6 +5427,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editingAnimationFieldId, animationFieldTargetId,
     editingSoundId,
     editingAiBrainId,
+    editingRigId,
     modelSession: activeTab.kind === 'model' ? (modelSessions[activeTab.id] ?? null) : null,
     modelEditTargetId: activeTab.kind === 'model' && modelSessions[activeTab.id]
       ? modelSessions[activeTab.id].levelIds[modelSessions[activeTab.id].activeLevel] ?? null
@@ -5309,7 +5438,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editingTemplateName, templateRootId, editingMaterialName,
     editingTerrainMaterialName, editingTerrainMaterialNode,
     animationTargetId, animationSourceId, animationSourceScene, pendingAnimationImport, pendingRigPick,
-    editingAnimationFieldId, animationFieldTargetId, editingSoundId, editingAiBrainId,
+    editingAnimationFieldId, animationFieldTargetId, editingSoundId, editingAiBrainId, editingRigId,
     activeTab, modelSessions, pendingModelImport, sessionActions,
   ]);
 
@@ -5317,6 +5446,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   <EngineContext.Provider value={{
       instance: instanceRef.current,
       editorScene: activeScene,
+      skeletonTargetId,
       mainScene: editorSceneRef.current,
       eventEmitter: eventEmitter.current,
       selectedNode,
@@ -5459,6 +5589,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       registerTextureApply,
       registerSoundApply,
       registerAiBrainApply,
+      registerRigApply,
+      enterRigEditor,
+      setRigPreviewModel,
+      rigPreviewModelId,
+      saveRig,
+      modelsOnRig,
+      editingRigId,
       saveTileset,
       enterScriptEditor,
       setScriptTabSource,
@@ -5470,8 +5607,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       enterModelEditor,
       adoptModelAsset,
       resolveModelAssetId,
-      linkAnimationToModel,
-      unlinkAnimationFromModel,
+      linkAnimationToRig,
+      ensureRigForModel,
+      unlinkAnimationFromRig,
       editSharedClip,
       modelSession: activeTab.kind === 'model' ? (modelSessions[activeTab.id] ?? null) : null,
       modelEditTargetId: activeTab.kind === 'model' && modelSessions[activeTab.id]

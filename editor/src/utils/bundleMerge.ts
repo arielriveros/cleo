@@ -272,6 +272,17 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   for (const m of models) remapDeep(m, r)
   for (const f of animationFields) remapDeep(f, r) // its modelId follows the model library's re-mints
   for (const a of animations) remapDeep(a, r)     // its rigId follows the rig library's re-mints
+  // Rigs carry references two ways. `animationIds` is a value list, which `remapDeep` handles; but
+  // `retargets` is keyed BY SOURCE RIG ID, and remapDeep only ever rewrites values — so a merged bundle
+  // would keep every correction under a key naming a rig that no longer exists, silently losing them.
+  for (const g of rigs) {
+    remapDeep(g, r)
+    if (g.retargets) {
+      g.retargets = Object.fromEntries(
+        Object.entries(g.retargets).map(([sourceRigId, overrides]) => [sub(r.rig, sourceRigId), overrides]),
+      )
+    }
+  }
   // A tileset's atlas follows the texture re-mints, through both textureId and the textureIds mirror.
   for (const t of tilesets) {
     remapDeep(t, r)

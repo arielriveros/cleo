@@ -16,7 +16,7 @@ const JOINT_SCREEN_SIZE = 0.02 // sphere radius as a fraction of the distance me
 interface Props { viewportRef: React.RefObject<HTMLDivElement> }
 
 export default function AnimationSkeletonTool({ viewportRef }: Props) {
-  const { instance, editorScene, animationTargetId, eventEmitter } = useCleoEngine()
+  const { instance, editorScene, skeletonTargetId, eventEmitter } = useCleoEngine()
 
   const jointMatricesRef = useRef<Float32Array>(new Float32Array(0))
   const boneMatricesRef = useRef<Float32Array>(new Float32Array(0))
@@ -43,7 +43,7 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
 
   // Allocate the flat instance buffers when the target skeleton changes.
   useEffect(() => {
-    const target = getAnimationTarget(editorScene, animationTargetId)
+    const target = getAnimationTarget(editorScene, skeletonTargetId)
     if (!instance || !editorScene || !target) return
     const { skin } = target
     const n = skin.joints.length
@@ -59,7 +59,7 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
     selectedRef.current = null
 
     return () => { instance.renderer.setSkeletonOverlay(null) }
-  }, [instance, editorScene, animationTargetId])
+  }, [instance, editorScene, skeletonTargetId])
 
   // Per-frame: repack instance matrices from the live posed skeleton and submit the overlay.
   useEffect(() => {
@@ -73,7 +73,7 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
     const posv: [number, number, number] = [0, 0, 0]
 
     const tick = () => {
-      const target = getAnimationTarget(editorScene, animationTargetId)
+      const target = getAnimationTarget(editorScene, skeletonTargetId)
       const jointMats = jointMatricesRef.current
       if (target && jointMats.length) {
         const n = target.skin.joints.length
@@ -148,7 +148,7 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [instance, editorScene, animationTargetId])
+  }, [instance, editorScene, skeletonTargetId])
 
   // Sync highlight with joint selections (from the tree or a previous viewport click).
   useEffect(() => {
@@ -160,7 +160,7 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
   // Which joints the IK rig names. Recomputed on rig or target change only, never per frame.
   useEffect(() => {
     const refresh = () => {
-      const target = getAnimationTarget(editorScene, animationTargetId)
+      const target = getAnimationTarget(editorScene, skeletonTargetId)
       const rig = target?.skin?.ikRig
       if (!target || !rig) { ikJointsRef.current = []; return }
       // Must be the shared topology's map, not a local copy: a copy drifts from the hierarchy the
@@ -179,7 +179,7 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
     refresh()
     eventEmitter.on('ANIM_IK_CHANGED', refresh)
     return () => { eventEmitter.off('ANIM_IK_CHANGED', refresh) }
-  }, [eventEmitter, editorScene, animationTargetId])
+  }, [eventEmitter, editorScene, skeletonTargetId])
 
   // Click a joint: CPU ray-sphere test against the joint world positions; nearest along the ray wins.
   useEffect(() => {

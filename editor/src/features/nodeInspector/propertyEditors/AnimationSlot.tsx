@@ -11,8 +11,8 @@ import { ownSkinnedModelNodeOf } from '../../../utils/models'
 // plays, its blend spaces, and the way into the Animation Editor. Shows for a node that IS a skinned model,
 // or is the root of an instance holding one; the actions that need an asset adopt the subtree on the way.
 export default function AnimationSlot(props: { node: Node }) {
-  const { enterAnimationEditor, createAnimationFieldForModel, enterAnimationFieldEditor, adoptModelAsset, resolveModelAssetId } = useEditorSessions()
-  const { animationFields } = useAssetLibrary()
+  const { enterAnimationEditor, createAnimationFieldForModel, enterAnimationFieldEditor, adoptModelAsset, resolveModelAssetId, ensureRigForModel } = useEditorSessions()
+  const { animationFields, models } = useAssetLibrary()
 
   const modelNode = ownSkinnedModelNodeOf(props.node)
   if (!modelNode) return null
@@ -22,7 +22,9 @@ export default function AnimationSlot(props: { node: Node }) {
   // Walks UP from the skinned node: an imported model is a holder with the ModelNode beneath it, so the
   // asset reference sits on the holder.
   const modelId = resolveModelAssetId(modelNode)
-  const fields = modelId ? animationFields.filter(f => f.modelId === modelId) : []
+  // Fields belong to the RIG, so a character shows every blend space authored on its skeleton.
+  const rigId = modelId ? models.find(m => m.id === modelId)?.rigId : undefined
+  const fields = rigId ? animationFields.filter(f => f.rigId === rigId) : []
 
   const newField = async () => {
     const id = await adoptModelAsset(props.node)
@@ -52,7 +54,15 @@ export default function AnimationSlot(props: { node: Node }) {
 
         <div>
           <div className='text-[11px] text-muted mb-1'>Animations</div>
-          <AnimationAssetPicker modelId={modelId ?? null} onNeedModel={() => adoptModelAsset(props.node)} />
+          {/* READ the rig here; MINTING one is deferred to onNeedRig — `ensureRigForModel` writes the
+              model library, and calling it from a render body is a setState-during-render. */}
+          <AnimationAssetPicker
+            rigId={rigId ?? null}
+            onNeedRig={async () => {
+              const id = modelId ?? await adoptModelAsset(props.node)
+              return id ? ensureRigForModel(id) : null
+            }}
+          />
         </div>
 
         <div className='flex flex-col gap-1'>

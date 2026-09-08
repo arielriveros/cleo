@@ -147,10 +147,16 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   // none; the player resolves and retargets at load. Narrowed to what a shipped model references.
   const modelAnimations: Record<string, string[]> = {}
   const wantedAnims = new Set<string>()
+  // EXPANDED from rig -> models at pack time. Clips are owned by the rig now, but the player looks them up
+  // per MODEL (`byModel[modelIdOf(node)]`), so flattening here keeps the pack format and the player
+  // untouched — the same trick used just below for `sourceSkin`.
+  const rigClips = new Map((src.libs.rigs ?? []).map(r => [r.id, r.animationIds ?? []]))
   for (const m of src.libs.models ?? []) {
-    if (!m.animationIds?.length) continue
-    modelAnimations[m.id] = [...m.animationIds]
-    for (const id of m.animationIds) wantedAnims.add(id)
+    const ids = [...(m.rigId ? rigClips.get(m.rigId) ?? [] : []), ...(m.animationIds ?? [])]
+    const unique = [...new Set(ids)]
+    if (!unique.length) continue
+    modelAnimations[m.id] = unique
+    for (const id of unique) wantedAnims.add(id)
   }
   // FLATTEN the rig back into each shipped animation.
   //
@@ -170,6 +176,22 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     templates,
     textureBytes,
   }
+  // Flatten the rig-level retarget corrections into the (model, animation) pair the player can index.
+  // Stored on the target rig keyed by SOURCE rig; the player has a model and an animation, so publish
+  // resolves the two hops here rather than shipping a rig table.
+  const retargets: Record<string, Record<string, unknown[]>> = {}
+  for (const m of src.libs.models ?? []) {
+    const rig = m.rigId ? (src.libs.rigs ?? []).find(r => r.id === m.rigId) : undefined
+    if (!rig?.retargets) continue
+    for (const id of modelAnimations[m.id] ?? []) {
+      const sourceRigId = animations.find(a => a.id === id)?.rigId
+      const overrides = sourceRigId ? rig.retargets[sourceRigId] : undefined
+      if (!overrides?.length) continue
+      ;(retargets[m.id] ??= {})[id] = overrides
+    }
+  }
+  if (Object.keys(retargets).length) out.retargets = retargets
+
   if (soundBytes.length) out.soundBytes = soundBytes
   if (animations.length) { out.animations = animations; out.modelAnimations = modelAnimations }
   // One config for the whole game. `render` is per-project here even though a scene blob carries its

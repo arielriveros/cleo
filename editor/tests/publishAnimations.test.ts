@@ -105,3 +105,80 @@ describe('the publish/player contract', () => {
     expect(libs).toContain('animations')
   })
 })
+
+// The clip list moved from the model to the rig, but the player still looks clips up per MODEL
+// (`byModel[modelIdOf(node)]`). Publish therefore expands rig -> models at pack time, which is what keeps
+// the pack format and the player unchanged.
+describe('publishing a rig-owned clip list', () => {
+  /** What `buildMultiSceneGameData` does to build `modelAnimations`. */
+  const expand = (models: any[], rigs: any[]) => {
+    const rigClips = new Map(rigs.map(r => [r.id, r.animationIds ?? []]))
+    const out: Record<string, string[]> = {}
+    for (const m of models) {
+      const ids = [...(m.rigId ? rigClips.get(m.rigId) ?? [] : []), ...(m.animationIds ?? [])]
+      const unique = [...new Set(ids)]
+      if (unique.length) out[m.id] = unique
+    }
+    return out
+  }
+
+  it('gives every model on a rig that rig\'s clips', () => {
+    const rigs = [{ id: 'r1', animationIds: ['idle', 'run'] }]
+    const models = [{ id: 'player', rigId: 'r1' }, { id: 'zombie', rigId: 'r1' }]
+    expect(expand(models, rigs)).toEqual({ player: ['idle', 'run'], zombie: ['idle', 'run'] })
+  })
+
+  // A project that has not run the v4 migration still ships.
+  it('unions a pre-migration list still on the model', () => {
+    const rigs = [{ id: 'r1', animationIds: ['idle'] }]
+    expect(expand([{ id: 'm', rigId: 'r1', animationIds: ['legacy'] }], rigs))
+      .toEqual({ m: ['idle', 'legacy'] })
+  })
+
+  it('does not duplicate an id present on both', () => {
+    const rigs = [{ id: 'r1', animationIds: ['idle'] }]
+    expect(expand([{ id: 'm', rigId: 'r1', animationIds: ['idle'] }], rigs)).toEqual({ m: ['idle'] })
+  })
+
+  it('omits a model with no clips at all', () => {
+    expect(expand([{ id: 'm' }], [])).toEqual({})
+  })
+
+  it('the publish path actually expands from the rig', () => {
+    const publish = readFileSync(
+      join(__dirname, '..', 'src', 'features', 'publish', 'buildMultiSceneGameData.ts'), 'utf-8',
+    ).replace(/\r\n/g, '\n')
+    expect(publish).toContain('rigClips')
+    expect(publish).toContain('src.libs.rigs')
+  })
+})
+
+// The corrections the author made in the rig editor must reach the exported game. Without them a published
+// build retargets with the automatic match the user explicitly fixed — visibly different from the editor,
+// with nothing logged. There is no unit test downstream of this that could notice.
+describe('publishing retarget corrections', () => {
+  const src = () => readFileSync(
+    join(__dirname, '..', 'src', 'features', 'publish', 'buildMultiSceneGameData.ts'), 'utf-8',
+  ).replace(/\r\n/g, '\n')
+
+  it('publish flattens rig.retargets into a (model, animation) table', () => {
+    const publish = src()
+    expect(publish).toContain('rig.retargets')
+    expect(publish).toContain('out.retargets')
+  })
+
+  it('the player applies them between the automatic match and the retarget', () => {
+    const player = readFileSync(
+      join(__dirname, '..', 'src', 'player', 'animations.ts'), 'utf-8',
+    ).replace(/\r\n/g, '\n')
+    expect(player).toContain('applyManualMapping')
+    expect(player).toContain('data.retargets')
+    // Resolved by NAME on the player side too — node indices are not stable across exports.
+    expect(player).toContain('nodeNamed')
+  })
+
+  // Additive and optional: a build with no corrections must not grow the field at all.
+  it('omits the table entirely when nothing was corrected', () => {
+    expect(src()).toContain('if (Object.keys(retargets).length) out.retargets = retargets')
+  })
+})

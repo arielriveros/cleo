@@ -272,9 +272,18 @@ export function collectReferencedAnimationFieldIds(scene: Scene | null | undefin
  * The link is `animationIds` on the model asset, never on a node or a scene, so this takes the library
  * rather than a Scene.
  */
-export function collectReferencedAnimationIds(models: { animationIds?: string[] }[]): Set<string> {
+export function collectReferencedAnimationIds(
+  models: { rigId?: string; animationIds?: string[] }[],
+  rigs: { id: string; animationIds?: string[] }[] = [],
+): Set<string> {
   const set = new Set<string>()
-  for (const m of models) for (const id of m.animationIds ?? []) set.add(id)
+  const byRig = new Map(rigs.map(r => [r.id, r.animationIds ?? []]))
+  for (const m of models) {
+    // TWO hops: a scene places a MODEL, the model names a RIG, and the rig owns the clips. The model's own
+    // list is the pre-migration shape, unioned in so a project that has not run the v4 pass still reports.
+    if (m.rigId) for (const id of byRig.get(m.rigId) ?? []) set.add(id)
+    for (const id of m.animationIds ?? []) set.add(id)
+  }
   return set
 }
 
@@ -387,7 +396,8 @@ export function buildSceneRefs(
   scene: Scene | null | undefined,
   settings?: { colorGradingLut?: string | null; lensDirtTexture?: string | null } | null,
   soundSamples: { id: string; source: { kind: string; audioId?: string } }[] = [],
-  models: { id: string; animationIds?: string[] }[] = [],
+  models: { id: string; rigId?: string; animationIds?: string[] }[] = [],
+  rigs: { id: string; animationIds?: string[] }[] = [],
 ): SceneRefsShape {
   const modelIds = collectReferencedModelIds(scene)
   const soundSampleIds = collectReferencedSoundIds(scene)
@@ -412,7 +422,7 @@ export function buildSceneRefs(
     audioSourceIds: [...collectReferencedAudioIds(soundSamples, soundSampleIds)],
     // One hop, for the same reason: a scene places a MODEL, and the model is what lists its clips. Kept
     // because a scene's animations are otherwise invisible until you walk out through every model.
-    animationIds: [...collectReferencedAnimationIds(models.filter(m => modelIds.has(m.id)))],
+    animationIds: [...collectReferencedAnimationIds(models.filter(m => modelIds.has(m.id)), rigs)],
   }
 }
 

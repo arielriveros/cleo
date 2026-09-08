@@ -20,6 +20,16 @@ export type RigBearingModel = {
   name: string
   nodeJson: any
   rigId?: string
+  animationIds?: string[]
+}
+
+/** The shape this needs from an animation field. Structural, so `AnimationFieldAsset` satisfies it. */
+export type RigBearingField = {
+  id: string
+  name: string
+  rigId?: string
+  /** Pre-v4 shape: the field named a MODEL. Read only by the migration. */
+  modelId?: string
 }
 
 export type ExtractRigsResult<M> = {
@@ -146,4 +156,113 @@ export function extractRigs<M extends RigBearingModel>(
     linkedModels,
     linkedAnimations,
   }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// v4 — move clip ownership and blend spaces up to the rig.
+// ---------------------------------------------------------------------------------------------------
+
+export type MoveClipsResult<M, F> = {
+  models: M[]
+  rigs: RigAsset[]
+  fields: F[]
+  /** Clips moved model -> rig. */
+  moved: number
+  /** Fields re-pointed model -> rig. */
+  repointed: number
+  /**
+   * Clip NAMES that two distinct animation assets both wanted to contribute to one rig.
+   *
+   * Reported, never resolved by renaming: `AnimatedModel.addAnimation` de-dupes a repeat to `"walk (2)"`,
+   * and every state machine and blend-space sample names its clip as a STRING — so a silent rename breaks
+   * them with no error, only a "model does not have clip X" warning at play time. The loser is skipped and
+   * named here so the conflict can be resolved deliberately.
+   */
+  clashes: { rig: string; clip: string; kept: string; skipped: string }[]
+}
+
+/**
+ * Move each model's `animationIds` onto its rig, and re-point each animation field from its model to that
+ * model's rig.
+ *
+ * The union is the point: two characters exported from one armature share a rig, so they end up sharing a
+ * clip set. That is the behaviour rig-owned clips exist to provide — link a walk cycle once and every
+ * character on the armature plays it.
+ *
+ * Pure and idempotent; unchanged records come back by IDENTITY so the library's diff writes nothing.
+ */
+export function moveClipsToRigs<
+  M extends RigBearingModel,
+  F extends RigBearingField,
+>(
+  models: M[],
+  rigs: RigAsset[],
+  fields: F[],
+  /** Clip names an animation asset contributes, for clash detection. */
+  clipNamesOf: (animationId: string) => string[],
+): MoveClipsResult<M, F> {
+  const byId = new Map(rigs.map(r => [r.id, r]))
+  // rigId -> clip name -> the animation asset that claimed it.
+  const claimed = new Map<string, Map<string, string>>()
+  const clashes: MoveClipsResult<M, F>['clashes'] = []
+  const additions = new Map<string, string[]>()
+  let moved = 0
+
+  for (const model of models) {
+    const own = model.animationIds ?? []
+    if (!own.length || !model.rigId) continue
+    const rig = byId.get(model.rigId)
+    if (!rig) continue
+
+    const names = claimed.get(rig.id) ?? new Map<string, string>()
+    claimed.set(rig.id, names)
+    // Seed from what the rig already holds, so a re-run and a second model are judged the same way.
+    for (const id of rig.animationIds ?? []) for (const n of clipNamesOf(id)) if (!names.has(n)) names.set(n, id)
+
+    const add = additions.get(rig.id) ?? []
+    for (const id of own) {
+      if ((rig.animationIds ?? []).includes(id) || add.includes(id)) continue
+      const clash = clipNamesOf(id).find(n => names.has(n) && names.get(n) !== id)
+      if (clash) {
+        clashes.push({ rig: rig.name, clip: clash, kept: names.get(clash)!, skipped: id })
+        continue
+      }
+      for (const n of clipNamesOf(id)) names.set(n, id)
+      add.push(id)
+      moved++
+    }
+    additions.set(rig.id, add)
+  }
+
+  const outRigs = rigs.map(r => {
+    const add = additions.get(r.id)
+    if (!add?.length) return r
+    return { ...r, animationIds: [...(r.animationIds ?? []), ...add] }
+  })
+
+  // The model's own list is emptied only where its clips actually reached a rig — a model whose links were
+  // all skipped as clashes keeps them, so nothing is silently lost.
+  const outModels = models.map(model => {
+    const own = model.animationIds ?? []
+    if (!own.length) return model
+    const rig = model.rigId ? outRigs.find(r => r.id === model.rigId) : undefined
+    if (!rig) return model
+    const remaining = own.filter(id => !(rig.animationIds ?? []).includes(id))
+    if (remaining.length === own.length) return model
+    return { ...model, animationIds: remaining.length ? remaining : undefined }
+  })
+
+  let repointed = 0
+  const rigOfModel = new Map(models.map(m => [m.id, m.rigId]))
+  const outFields = fields.map(field => {
+    if (field.rigId || !field.modelId) return field
+    const rigId = rigOfModel.get(field.modelId)
+    if (!rigId) return field
+    repointed++
+    // `modelId` is dropped: keeping both would leave two answers to "what does this field blend".
+    const { modelId, ...rest } = field
+    return { ...rest, rigId } as F
+  })
+
+  return { models: outModels, rigs: outRigs, fields: outFields, moved, repointed, clashes }
 }

@@ -192,7 +192,7 @@ export default function EngineViewport() {
             // hides the tree and Properties, so a selection there has nowhere to show. In material mode the
             // preview sphere stays selected (it drives the material inspector), so clicks must not change it.
             // Animation mode picks joints (see AnimationSkeletonTool), not the mesh, so mesh selection is off.
-            if (editorMode === 'landscape' || editorMode === 'tilemap' || editorMode === 'ui' || editorMode === 'renderer' || editorMode === 'input' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'animation' || editorMode === 'animationField') return;
+            if (editorMode === 'landscape' || editorMode === 'tilemap' || editorMode === 'ui' || editorMode === 'renderer' || editorMode === 'input' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'animation' || editorMode === 'rig' || editorMode === 'animationField') return;
             
             if (wasDraggingRef.current || isGizmoDraggingRef.current || justFinishedGizmoDragRef.current) {
                 setIsDragging(false);
@@ -509,6 +509,14 @@ export default function EngineViewport() {
                         value='3d'
                         onChange={v => setGraphView(v === 'graph')} />
                 </div>
+                <AnimationSkeletonTool viewportRef={viewportRef} />
+                <AnimationPlayer />
+            </>}
+
+            {/* The rig editor draws the same bone overlay and drives the same transport, over a preview
+                character rather than the model a node happened to select. No graph toggle: a rig has no
+                state machine. */}
+            {editorMode === 'rig' && <>
                 <AnimationSkeletonTool viewportRef={viewportRef} />
                 <AnimationPlayer />
             </>}

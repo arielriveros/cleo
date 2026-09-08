@@ -4,7 +4,7 @@ import { parseByType, stripDebug, collectTextureIds, regenerateIds } from './nod
 import { resolveMaterialRefs, applyMaterialAsset, applyMaterialAssets, serializedVar, getMaterialIdsOf, MATERIAL_ID_VAR, MaterialAsset } from './materials'
 import { skinnedModelJsonOf as skinnedJson, flattenModelAsset, nodeJsonTrs, modelTransformDelta, carryModelAssetFields } from './modelClips'
 import type { AnimationAsset } from './animationAssets'
-import { applyModelAnimations } from './animationResolve'
+import { applyModelAnimations, modelAnimationIds } from './animationResolve'
 import { deepClone } from './deepClone'
 
 // MODEL assets: a named, thumbnailed subtree of ModelNodes sharing a material, with optional LOD levels
@@ -316,7 +316,9 @@ export function refreshModelClips(root: Node, models: ModelAsset[], animations?:
         for (const name of model.animations.map((a: any) => a.name)) model.removeAnimation(name)
         for (const clip of json.animations ?? []) model.addAnimation(clip)
         // Shared clips are not in `json` (serialize drops them), so re-resolve them from the library.
-        if (animations?.length && asset.animationIds?.length) applyModelAnimations(node, asset, animations)
+        // Guarded on the RESOLVED ids, not the model's own list: clips live on the rig now, so the
+        // model's `animationIds` is empty for any project that has run the v4 migration.
+        if (animations?.length && modelAnimationIds(asset).length) applyModelAnimations(node, asset, animations)
 
         const names = json.skin?.nodeNames
         if (Array.isArray(names) && names.length && model.skin) {
@@ -728,7 +730,7 @@ export function instantiateModelAsset(asset: ModelAsset, parent: Node, materials
 
   // Shared animation clips must be applied to the LIVE node, never spliced into `clone`: a resolved clip
   // carries an `assetId` and AnimatedModel.serialize drops those.
-  if (animations?.length && asset.animationIds?.length) {
+  if (animations?.length && modelAnimationIds(asset).length) {
     const placed = parent.children.find(c => c.id === clone.id)
     if (placed) applyModelAnimations(placed, asset, animations)
   }

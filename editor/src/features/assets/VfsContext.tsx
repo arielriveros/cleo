@@ -198,6 +198,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     addAnimationField: engine.addAnimationField,
     updateAnimationField: engine.updateAnimationField,
     removeAnimationField: engine.removeAnimationField,
+    enterRigEditor: engine.enterRigEditor,
     addRig: engine.addRig,
     updateRig: engine.updateRig,
     removeRig: engine.removeRig,

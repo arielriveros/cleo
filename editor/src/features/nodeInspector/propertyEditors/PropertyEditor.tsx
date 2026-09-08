@@ -1,6 +1,7 @@
 import { Node, ModelNode, SkyboxNode, LightNode, LightProbeNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
+import RigSlot from './RigSlot';
 import ModelSlot from './ModelSlot'
 import SkyboxEditor from './SkyboxEditor'
 import TransformEditor from './TransformEditor'
@@ -58,6 +59,7 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'model' && <MaterialSlot node={props.node as ModelNode} /> }
           {/* Any node that IS or CONTAINS a skinned model — AnimationSlot finds it in the subtree and renders
               away otherwise, so selecting a character's holder root (e.g. inside a template) shows it too. */}
+          { !root && <RigSlot node={props.node} /> }
           { !root && <AnimationSlot node={props.node} /> }
           { props.node.nodeType === 'sprite' && <SpriteEditor node={props.node as SpriteNode} /> }
           { props.node.nodeType === 'animatedSprite' && <AnimatedSpriteEditor /> }

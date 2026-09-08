@@ -32,7 +32,10 @@ export default function ModelInspector() {
 
   if (!modelSession) return null
 
-  const fields = animationFields.filter(f => f.modelId === activeTab.modelId)
+  // Fields belong to the RIG this model is built on, so they are shared with every other character
+  // using the same skeleton.
+  const modelRigId = models.find(m => m.id === activeTab.modelId)?.rigId
+  const fields = modelRigId ? animationFields.filter(f => f.rigId === modelRigId) : []
 
   // A model may not be its own LOD level, nor appear twice.
   const candidates = models.filter(m =>

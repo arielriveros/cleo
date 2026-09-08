@@ -7,6 +7,7 @@ import VirtualControlsLayer from '../gameUi/VirtualControlsLayer';
 import StateGraph from '../animation/StateGraph';
 import AiBrainTabView from '../ai/AiBrainTabView';
 import AiBrainInspector from '../ai/AiBrainInspector';
+import RigInspector from '../rig/RigInspector';
 import LoadingScreen from '../../components/LoadingScreen';
 import SceneInspector from '../sceneInspector/SceneInspector';
 import AddNew from '../sceneInspector/AddNew';
@@ -88,7 +89,9 @@ function SidePanel({ children, scroll = true }: { children: React.ReactNode; scr
 // The Scene panel doubles as the Animation editor's skeleton tree (DockLayout retitles the tab).
 function ScenePanel(_: IDockviewPanelProps) {
   const { editorMode } = useCleoEngine();
-  return <SidePanel scroll={false}>{editorMode === 'animation' ? <SkeletonTree /> : <SceneInspector />}</SidePanel>;
+  // A rig tab is authored the same way an animation tab is: the Scene panel becomes the bone tree.
+  const skeleton = editorMode === 'animation' || editorMode === 'rig';
+  return <SidePanel scroll={false}>{skeleton ? <SkeletonTree /> : <SceneInspector />}</SidePanel>;
 }
 
 // The two Add palettes: the same `AddNew` grid over the same catalog and drop handlers, with `scope`
@@ -136,6 +139,7 @@ function PropertiesPanel(_: IDockviewPanelProps) {
   if (editorMode === 'texture') return <SidePanel><TextureSettingsPanel /></SidePanel>;
   if (editorMode === 'soundSample') return <SidePanel><SoundSettingsPanel /></SidePanel>;
   if (editorMode === 'aiBrain') return <SidePanel><AiBrainInspector /></SidePanel>;
+  if (editorMode === 'rig') return <SidePanel><RigInspector /></SidePanel>;
   // Mesh mode keeps the normal node inspector below the mesh-level controls (LOD levels + cull).
   if (editorMode === 'model') return (
     <SidePanel>

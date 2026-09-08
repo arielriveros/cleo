@@ -10,7 +10,7 @@ import { clamp } from '../../utils/math';
 // via requestAnimationFrame.
 
 export default function AnimationPlayer() {
-  const { editorScene, animationTargetId, closeTab, activeTabId, eventEmitter } = useCleoEngine()
+  const { editorScene, skeletonTargetId, closeTab, activeTabId, eventEmitter } = useCleoEngine()
   const { sm, simulate, setSimulate, addEvent, setEvent } = useStateMachine()
 
   const [clip, setClip] = useState<string>('')
@@ -29,7 +29,7 @@ export default function AnimationPlayer() {
   const dragRef = useRef(-1)
   const [, force] = useState(0)
 
-  const target = getAnimationTarget(editorScene, animationTargetId)
+  const target = getAnimationTarget(editorScene, skeletonTargetId)
   const clips = target ? target.model.animations.map(a => a.name) : []
   const hasStateMachine = !!target?.animator.hasStateMachine
 
@@ -60,13 +60,13 @@ export default function AnimationPlayer() {
     lastRef.current = performance.now()
     // Leave the model in bind pose when exiting the Animation Editor.
     return () => { target.animator.showBindPose() }
-  }, [animationTargetId])
+  }, [skeletonTargetId])
 
   // Per-frame drive loop.
   useEffect(() => {
     let raf = 0
     const tick = () => {
-      const t = getAnimationTarget(editorScene, animationTargetId)
+      const t = getAnimationTarget(editorScene, skeletonTargetId)
       if (t) {
         const now = performance.now()
         const dt = Math.min((now - lastRef.current) / 1000, 0.1)
@@ -82,7 +82,7 @@ export default function AnimationPlayer() {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [editorScene, animationTargetId])
+  }, [editorScene, skeletonTargetId])
 
   if (!target) {
     return (

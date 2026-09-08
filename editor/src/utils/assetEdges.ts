@@ -183,9 +183,12 @@ export function edgesOfAsset(kind: AssetKind, asset: any): EdgeSpec[] {
     // records `brainId` as the back-link, so the reference runs the other way.
     case 'aiBrain':
       break
-    // A skeleton. It is the thing others point AT — a model names it, and so does every clip authored
-    // against it — and it references nothing itself.
+    // A skeleton, plus the clips authored against it. Its `animationIds` are pushed explicitly rather than
+    // through `walkRefs`, which would also walk the whole `skin` payload — thousands of matrix elements
+    // with no ids in them — on every library change.
     case 'rig':
+      for (const [i, id] of (asset.animationIds ?? []).entries())
+        push(out, 'animation', id, `animationIds[${i}]`)
       break
 
     // --- the two byte splits -------------------------------------------------------------------------
@@ -241,7 +244,9 @@ export function edgesOfAsset(kind: AssetKind, asset: any): EdgeSpec[] {
       push(out, 'texture', asset.textureId, 'textureId')
       break
     case 'animationField':
-      push(out, 'model', asset.modelId, 'modelId')
+      // A blend space is defined by a skeleton and clip names, so it points at the RIG, not at one of the
+      // characters built on it.
+      push(out, 'rig', asset.rigId, 'rigId')
       break
     case 'script':
       // A class-based script's fields are typed values, not asset links. A node's `__scriptId` points AT

@@ -49,6 +49,9 @@ export function useSaving(deps: {
   const registerSoundApply = (reg: { tabId: string; apply: () => void } | null) => { soundApplyRef.current = reg; };
   const aiBrainApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
   const registerAiBrainApply = (reg: { tabId: string; apply: () => void } | null) => { aiBrainApplyRef.current = reg; };
+  // ...and the rig session, whose working copy lives in RigProvider.
+  const rigApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
+  const registerRigApply = (reg: { tabId: string; apply: () => void } | null) => { rigApplyRef.current = reg; };
 
   /**
    * Save one tab, whichever kind it is. Returns whether the tab came out clean — each save path clears the
@@ -78,6 +81,12 @@ export function useSaving(deps: {
       }
       case 'aiBrain': {
         const session = aiBrainApplyRef.current;
+        if (!session || session.tabId !== tabId) return false;
+        session.apply();
+        break;
+      }
+      case 'rig': {
+        const session = rigApplyRef.current;
         if (!session || session.tabId !== tabId) return false;
         session.apply();
         break;
@@ -167,6 +176,9 @@ export function useSaving(deps: {
     if (live && dirtyTabsRef.current[live.tabId]) live.apply();
 
     const ORDER: Record<TabKind, number> = {
+      // A rig saves FIRST: models and animations reference it, so a rig written after them would leave
+      // one pass reading a skeleton the other has already replaced.
+      rig: 0,
       material: 0, terrainMaterial: 0, script: 0, animation: 0, animationField: 0, tileset: 0, texture: 0,
       soundSample: 0, aiBrain: 0,
       model: 1, template: 2, scene: 3,
@@ -183,7 +195,7 @@ export function useSaving(deps: {
 
   return {
     registerAnimationApply, registerTilesetApply, registerTextureApply, registerSoundApply,
-    registerAiBrainApply, saveTabById, runSave,
+    registerAiBrainApply, registerRigApply, saveTabById, runSave,
     saveActiveTab, saveAll, saveProjectToStorage,
   };
 }

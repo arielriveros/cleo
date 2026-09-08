@@ -34,9 +34,39 @@ export type RigAsset = {
    * why it could never really live on one model.
    */
   ikRig?: any
+  /**
+   * The shared `.anim` assets authored against this skeleton. Every model with this `rigId` plays them —
+   * which is the point: linking a walk cycle once serves every character built on the armature, instead of
+   * three separate links that then drift apart.
+   */
+  animationIds?: string[]
+  /**
+   * Manual bone re-points onto THIS skeleton, keyed by the SOURCE rig each one corrects.
+   *
+   * A retarget is a relationship between two skeletons, so a correction belongs to the pair rather than to
+   * one clip — fix `mixamorig:Spine -> chest` once and every clip authored on that source rig retargets
+   * correctly onto this one, forever. Before this, a re-point made in the import modal was thrown away
+   * (see `importAnimationFiles`).
+   *
+   * BY BONE NAME, never node index. Node indices are stable only within one export, and
+   * `skeletonFingerprint` deliberately ignores `nodeNames` so a name backfill upgrades a rig in place
+   * rather than forking it — an index-keyed override would silently point at the wrong bone afterwards.
+   *
+   * Sparse OVERRIDES, never a stored `BoneMapping`: everything else in a mapping (`kind`, `sameRig`,
+   * `canRetarget`, `matchMode`) is derived from the two skins and would go stale, and `mapping.entries`
+   * only covers bones the clips animate — so a whole-mapping snapshot could not express a re-point for a
+   * bone no clip drives.
+   */
+  retargets?: Record<string, RetargetOverride[]>
   /** The file this came from, so a re-import can offer the existing rig instead of a second copy. */
   sourceFile?: string
   thumbnail?: string
+}
+
+/** One hand-made bone re-point. `targetName: null` means "drop this bone's curve". */
+export type RetargetOverride = {
+  sourceName: string
+  targetName: string | null
 }
 
 export function buildRigAsset(name: string, skin: StoredSkin, sourceFile?: string, id?: string): RigAsset {
@@ -127,4 +157,59 @@ export function sourceSkinFor(
   rigs: RigAsset[],
 ): StoredSkin | null {
   return rigOf(asset, rigs)?.skin ?? asset?.sourceSkin ?? null
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Retarget overrides
+// ---------------------------------------------------------------------------------------------------
+
+/** The corrections stored for retargeting `sourceRigId`'s clips onto `rig`. Never undefined. */
+export function overridesFor(rig: RigAsset | null | undefined, sourceRigId: string | undefined): RetargetOverride[] {
+  if (!rig || !sourceRigId) return []
+  return rig.retargets?.[sourceRigId] ?? []
+}
+
+/**
+ * A copy of `rig` with one source bone re-pointed. `targetName: null` records a deliberate "drop this
+ * bone"; passing `undefined` REMOVES the override, restoring the automatic match.
+ *
+ * Immutable, because the rig library is React state and `updateRig` diffs by identity.
+ */
+export function withOverride(
+  rig: RigAsset,
+  sourceRigId: string,
+  sourceName: string,
+  targetName: string | null | undefined,
+): RigAsset {
+  const current = overridesFor(rig, sourceRigId)
+  const without = current.filter(o => o.sourceName !== sourceName)
+  const next = targetName === undefined ? without : [...without, { sourceName, targetName }]
+
+  const retargets = { ...(rig.retargets ?? {}) }
+  // Drop the key entirely rather than storing an empty array: an empty override set and no override set
+  // mean the same thing, and keeping both shapes would make every equality check ambiguous.
+  if (next.length) retargets[sourceRigId] = next
+  else delete retargets[sourceRigId]
+
+  return { ...rig, retargets: Object.keys(retargets).length ? retargets : undefined }
+}
+
+/** Every override on `rig` cleared for one source rig — the "back to automatic" button. */
+export function withoutOverrides(rig: RigAsset, sourceRigId: string): RigAsset {
+  if (!rig.retargets?.[sourceRigId]) return rig
+  const retargets = { ...rig.retargets }
+  delete retargets[sourceRigId]
+  return { ...rig, retargets: Object.keys(retargets).length ? retargets : undefined }
+}
+
+/**
+ * name -> node index, for resolving a name-keyed override back to a node.
+ *
+ * Takes the name table rather than a whole skin so it serves both shapes: a `StoredSkin`'s entry PAIRS and
+ * a live `Skin`'s `Map`, which is what the retarget path actually holds.
+ */
+export function nodeByName(nodeNames: Iterable<[number, string]> | null | undefined): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const [node, name] of nodeNames ?? []) if (name && !out.has(name)) out.set(name, node)
+  return out
 }

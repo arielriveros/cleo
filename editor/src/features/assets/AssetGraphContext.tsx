@@ -68,8 +68,8 @@ export function AssetGraphProvider({ children }: { children: React.ReactNode }) 
 
   // Read through a ref: the SCENE_CHANGED listener registers once per open scene and must not capture
   // the libraries as they were on that render.
-  const libsRef = useRef({ soundSamples, models })
-  libsRef.current = { soundSamples, models }
+  const libsRef = useRef({ soundSamples, models, rigs })
+  libsRef.current = { soundSamples, models, rigs }
 
   /** The asset object last indexed, per key. The other half of the identity diff. */
   const indexed = useRef(new Map<string, any>())
@@ -163,7 +163,7 @@ export function AssetGraphProvider({ children }: { children: React.ReactNode }) 
       if (!scene) return
       assetGraph.setEdges(
         { kind: 'scene', id: openSceneId },
-        edgesOfScene(buildSceneRefs(scene, engine?.renderer?.getRenderSettings?.(), libsRef.current.soundSamples, libsRef.current.models) as any),
+        edgesOfScene(buildSceneRefs(scene, engine?.renderer?.getRenderSettings?.(), libsRef.current.soundSamples, libsRef.current.models, libsRef.current.rigs) as any),
       )
       setVersion(v => v + 1)
     }
