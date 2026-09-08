@@ -223,6 +223,20 @@ export class ControllerNode extends Node {
     /** An authored goal graph, or an empty one. Read only while `brain` is `goal`. */
     public goals: GoalGraph = { ...EMPTY_GOAL_GRAPH };
 
+    /**
+     * The AI Brain asset {@link behavior}, {@link goals} and {@link fuzzy} were copied from, or null
+     * when they were authored inline on this node.
+     *
+     * A LINK, not a lookup. The three fields above stay the runtime source of truth and are what the
+     * control pass reads, so nothing here needs a registry and a published game ships no brain
+     * library — the copy travels inside the serialized scene. This id exists so the editor can carry
+     * an edited asset back out to every controller holding a stale copy, and so a duplicated agent
+     * still says where its brain came from.
+     *
+     * Deliberately NOT in NODE_REF_KEYS: those remap NODE ids on duplication, and this names an asset.
+     */
+    public brainId: string | null = null;
+
     // ----- flocking ---------------------------------------------------------------------------------
     /**
      * How far this agent looks for flock-mates, in world units. 0 disables flocking entirely and is
@@ -1320,6 +1334,8 @@ export class ControllerNode extends Node {
             ...(isDefaultFuzzyModel(this.fuzzy) ? {} : { fuzzy: this.fuzzy }),
             brain: this.brain,
             ...(isDefaultGoalGraph(this.goals) ? {} : { goals: this.goals }),
+            // Only when linked, so a controller with an inline brain is byte-identical to before.
+            ...(this.brainId ? { brainId: this.brainId } : {}),
             // The blackboard is RUNTIME state — a brain writes into it every frame — so only the entries
             // an author typed are carried, and those live in the node's own `variables` instead.
         };
@@ -1382,6 +1398,7 @@ export class ControllerNode extends Node {
         // state machine rather than silently switching to a graph it does not have.
         if ((BRAIN_KINDS as readonly string[]).includes(json.brain)) node.brain = json.brain;
         node.goals = parseGoalGraph(json.goals);
+        node.brainId = typeof json.brainId === 'string' && json.brainId ? json.brainId : null;
 
         // _commonParse adds the node to its parent — do not addChild again.
         Node.finishParse(node, parent, json);

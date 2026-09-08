@@ -5,16 +5,16 @@ import Collapsable from '../../../components/Collapsable'
 import { Button, Hint } from '../../../components/ui'
 import { AnimationIcon } from '../sectionIcons'
 import AnimationAssetPicker from '../../animation/AnimationAssetPicker'
-import { skinnedModelNodeOf } from '../../../utils/models'
+import { ownSkinnedModelNodeOf } from '../../../utils/models'
 
 // Everything about the selected model's animation, in the inspector — clips, the shared `.anim` assets it
-// plays, its blend spaces, and the way into the Animation Editor. Shows for any node that IS or CONTAINS a
-// skinned model; the actions that need an asset adopt the subtree into the library on the way.
+// plays, its blend spaces, and the way into the Animation Editor. Shows for a node that IS a skinned model,
+// or is the root of an instance holding one; the actions that need an asset adopt the subtree on the way.
 export default function AnimationSlot(props: { node: Node }) {
   const { enterAnimationEditor, createAnimationFieldForModel, enterAnimationFieldEditor, adoptModelAsset, resolveModelAssetId } = useEditorSessions()
   const { animationFields } = useAssetLibrary()
 
-  const modelNode = skinnedModelNodeOf(props.node)
+  const modelNode = ownSkinnedModelNodeOf(props.node)
   if (!modelNode) return null
 
   const model = modelNode.model as AnimatedModel

@@ -51,12 +51,15 @@ one of its children**.
 
 ```
 Playable <character>                Zombie <character>
-├── camera rig <cameraRig>          ├── Ch36 <model>
+├── camera rig <cameraRig>          ├── Ch10 <model>
 │   └── camera <camera>             ├── Flame <animatedSprite>
 ├── Ch36 <model>                    ├── Fire Light <light>
 └── Player Controller <controller>  └── Brain <controller>
         possesses Playable                  possesses Zombie
 ```
+
+`Ch36` is the player's mannequin and `Ch10` the zombie's own character; they are different models on the
+same Mixamo skeleton, which is why one set of animations retargets cleanly onto the other.
 
 `possessedId` is in `NODE_REF_KEYS`, so `regenerateNodeIds` remaps it in a second pass once the whole
 subtree has been renumbered — an instantiated copy possesses **its own** character, never the template's.

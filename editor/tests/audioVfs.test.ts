@@ -12,7 +12,7 @@ import { buildSoundSampleAsset } from '../src/utils/soundSamples';
 
 const libs = (over: Partial<LibSnapshot> = {}): LibSnapshot => ({
   materials: [], terrainMaterials: [], templates: [], models: [],
-  scripts: [], animationFields: [], animations: [], tilesets: [], scenes: [],
+  scripts: [], animationFields: [], animations: [], tilesets: [], aiBrains: [], scenes: [],
   images: [], textures: [], audioSources: [], soundSamples: [], textureIds: [],
   ...over,
 });

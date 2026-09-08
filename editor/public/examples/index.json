@@ -5,7 +5,7 @@
       "slug": "3d-example",
       "name": "3D Example",
       "order": 0,
-      "bytes": 215527447,
+      "bytes": 215527442,
       "sceneCount": 1,
       "textureCount": 29,
       "createdAt": 1787013290557
@@ -15,9 +15,9 @@
       "name": "Night Shift",
       "description": "A third-person survival night: collect before dawn, and stay ahead of what the dark brings.",
       "order": 1,
-      "bytes": 163765801,
+      "bytes": 179377297,
       "sceneCount": 2,
-      "textureCount": 26,
+      "textureCount": 30,
       "createdAt": 1788000000000
     }
   ]

@@ -21,6 +21,7 @@ import {
   collectReferencedAudioIds, collectReferencedScriptIds,
   collectReferencedAnimationFieldIds,
   collectReferencedTilesetIds,
+  collectReferencedAiBrainIds,
 } from '../../utils/references'
 
 export const FM_MODE_KEY = 'cleo_assets_view_mode'
@@ -108,6 +109,7 @@ export function useFileManagerBridge() {
       case 'script': return collectReferencedScriptIds(scene).has(entry.assetId)
       case 'animationField': return collectReferencedAnimationFieldIds(scene).has(entry.assetId)
       case 'tileset': return collectReferencedTilesetIds(scene).has(entry.assetId)
+      case 'aiBrain': return collectReferencedAiBrainIds(scene).has(entry.assetId)
       case 'texture':
         return collectReferencedTextureIds(scene, l.materials, l.models, l.templates, l.terrainMaterials,
                                            l.tilesets, [engineRef.current?.renderer?.colorGradingLut,

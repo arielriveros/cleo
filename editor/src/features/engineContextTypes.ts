@@ -169,7 +169,7 @@ export type LoadingProgress = { loaded: number; total: number; label: string };
 export const EDITOR_CLEAR_COLOR: [number, number, number, number] = [0.68, 0.80, 0.90, 1.0];
 export const LEGACY_CLEAR_COLOR = [0.65, 0.65, 0.71];
 
-export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'renderer' | 'input' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample';
+export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'renderer' | 'input' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain';
 
 /**
  * Whether a mode paints the 3D viewport, or replaces it with a full-panel editor of its own; the
@@ -193,6 +193,7 @@ export const MODE_RENDERS_VIEWPORT: Record<EditorMode, boolean> = {
   model: true,
   script: false,         // ScriptTabView fills the panel
   tileset: false,        // TilesetTabView fills the panel
+  aiBrain: false,        // the brain's graph canvas fills the panel, like the script and tileset editors
   texture: false,        // TextureTabView fills the panel
   soundSample: false,    // SoundTabView fills the panel
 };
@@ -202,7 +203,7 @@ export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 // Browser-style editor tabs. `editorMode` is derived from the active tab (see EngineProvider). The scene
 // tab hosts the open scene asset; the library tabs each own a live edit session (a throwaway Scene in
 // tabRuntimeRef), except 'script' and 'tileset', which own no 3D scene and get no tabRuntimeRef entry.
-export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample';
+export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain';
 
 /**
  * The editor mode a library tab puts the editor into. Exhaustive, like `MODE_RENDERS_VIEWPORT` above — a
@@ -221,6 +222,7 @@ export const TAB_EDITOR_MODE: Record<Exclude<TabKind, 'scene'>, EditorMode> = {
   model: 'model',
   script: 'script',
   tileset: 'tileset',
+  aiBrain: 'aiBrain',
   texture: 'texture',
   soundSample: 'soundSample',
 };
@@ -248,6 +250,7 @@ export const TAB_METERS_EXPOSURE: Record<TabKind, boolean> = {
   model: false,
   script: false,         // no viewport at all
   tileset: false,        // no viewport at all
+  aiBrain: false,        // no viewport at all
   texture: false,        // no viewport at all
   soundSample: false,    // no viewport at all
 };
@@ -278,6 +281,7 @@ export const TAB_RUNS_POST_PROCESSING: Record<TabKind, boolean> = {
   model: false,
   script: false,         // no viewport at all
   tileset: false,        // no viewport at all
+  aiBrain: false,        // no viewport at all
   texture: false,        // no viewport at all
   soundSample: false,    // no viewport at all
 };
@@ -300,6 +304,7 @@ export const KIND_LABEL: Record<TabKind, string> = {
   model: 'Model',
   script: 'Script',
   tileset: 'Tileset',
+  aiBrain: 'AI Brain',
   texture: 'Texture',
   soundSample: 'Sound',
 };
@@ -332,6 +337,7 @@ export interface EditorTab {
   scriptId?: string | null; // script tabs: the edited script asset id
   animationFieldId?: string | null; // animation-field tabs: the edited field asset id
   tilesetId?: string | null; // tileset tabs: the edited tileset asset id
+  aiBrainId?: string | null; // aiBrain tabs: the edited AI brain asset id
   textureId?: string | null; // texture tabs: the edited texture asset id (also its TextureManager id)
   soundId?: string | null; // sound tabs: the edited sample asset id (also its AudioManager id)
 }

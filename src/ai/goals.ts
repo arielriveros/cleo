@@ -59,6 +59,15 @@ export interface GoalDefinition {
     until?: ConditionGroup;
     /** Failed once this is met — which pops it and lets its parent replan. */
     failWhen?: ConditionGroup;
+    /**
+     * Canvas position in the Goals editor. Authoring only — nothing at runtime reads these.
+     *
+     * Stored on the goal rather than in a side table so a duplicated controller keeps its layout, the
+     * same arrangement `BehaviorState` already uses. Absent means "never placed", and the editor
+     * auto-lays-out from the goal's index instead.
+     */
+    x?: number;
+    y?: number;
 }
 
 /**
@@ -140,6 +149,14 @@ export function parseGoalDefinition(raw: unknown): GoalDefinition | null {
 
     if (g.until && typeof g.until === 'object') out.until = g.until as ConditionGroup;
     if (g.failWhen && typeof g.failWhen === 'object') out.failWhen = g.failWhen as ConditionGroup;
+
+    // Kept only when both are present and finite: half a coordinate is not a position, and writing a
+    // partial one back would pin the goal to x = 0 forever.
+    if (typeof g.x === 'number' && Number.isFinite(g.x) &&
+        typeof g.y === 'number' && Number.isFinite(g.y)) {
+        out.x = g.x;
+        out.y = g.y;
+    }
     return out;
 }
 

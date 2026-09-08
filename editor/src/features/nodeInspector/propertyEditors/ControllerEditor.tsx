@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AIM_SOURCES, AI_GOALS, BRAIN_KINDS, CONTROL_SOURCES, CharacterNode, ControllerNode, Node } from 'cleo'
+import { AIM_SOURCES, AI_GOALS, CONTROL_SOURCES, CharacterNode, ControllerNode, Node } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
 import NodeRefInput from '../NodeRefInput'
 import ActionSelect from '../../input/ActionSelect'
@@ -7,11 +7,9 @@ import { useCleoEngine } from '../../EngineContext'
 import AxisInput from '../../../components/AxisInput'
 import { Button, SegmentedControl, Select, Slider, TextInput, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
 import { hintAffordance } from '../../../components/ui/Field'
-import BehaviorEditor from './BehaviorEditor'
 import PerceptionEditor from './PerceptionEditor'
 import FlockingEditor from './FlockingEditor'
-import GoalsEditor from './GoalsEditor'
-import FuzzyEditor from './FuzzyEditor'
+import AiBrainSlot from './AiBrainSlot'
 import { ControllerIcon } from '../sectionIcons'
 
 const CONTROLLER_HINT = 'The driver. It possesses a Character and decides, each frame, what that character should try to do — from player actions or from a brain. Swapping a player for an AI is switching Source; the character does not change.'
@@ -24,7 +22,6 @@ const DRIVE_AIM_HINT = 'Push the look intent into that Camera Rig. Leave this on
 const GOAL_HINT = 'The verb. The blackboard supplies the noun — a script writes setBlackboard("target", node.id). "Script" writes no intent at all and leaves the frame to onThink.'
 const TARGET_KEY_HINT = 'Which blackboard key holds the target node id. A key rather than a node field, so "chase whoever is called target" is authored once and works for every copy of an NPC — with no id to dangle.'
 const AVOID_HINT = 'Fans this many rays ahead and steers around what they hit. A look-ahead of 0 switches it off entirely and fires no rays at all. cannon has no sphere cast, so a fan is the approximation available.'
-const BRAIN_HINT = 'Which brain picks the goal. Machine runs the behaviour state machine and is the default, so nothing changes by upgrading. Goal runs the goal graph and scores its options instead. None leaves the Goal field above in charge, which is what a controller driven entirely from onThink wants.'
 const NAV_HINT = 'Route around geometry using a baked Nav Mesh instead of walking in a straight line. With no navmesh in the scene the path and patrol goals fall back to seek, so turning this on is never a regression.'
 
 interface ControllerState {
@@ -33,7 +30,6 @@ interface ControllerState {
   moveAction: string; lookAction: string; jumpAction: string; sprintAction: string; crouchAction: string
   aimSource: string; aimSourceId: string | null; driveAimTarget: boolean
   goal: string; targetKey: string; goalPoint: [number, number, number]
-  brain: string
   maxSpeed: number; arriveRadius: number; slowRadius: number; standoff: number
   wanderRadius: number; wanderDistance: number; wanderJitter: number
   avoidDistance: number; avoidStrength: number
@@ -51,7 +47,7 @@ function readNode(node: ControllerNode): ControllerState {
     moveAction: node.moveAction, lookAction: node.lookAction, jumpAction: node.jumpAction,
     sprintAction: node.sprintAction, crouchAction: node.crouchAction,
     aimSource: node.aimSource, aimSourceId: node.aimSourceId, driveAimTarget: node.driveAimTarget,
-    goal: node.goal, targetKey: node.targetKey, brain: node.brain,
+    goal: node.goal, targetKey: node.targetKey,
     goalPoint: [node.goalPoint[0], node.goalPoint[1], node.goalPoint[2]],
     maxSpeed: node.steering.maxSpeed, arriveRadius: node.steering.arriveRadius,
     slowRadius: node.steering.slowRadius, standoff: node.steering.standoff,
@@ -63,7 +59,7 @@ function readNode(node: ControllerNode): ControllerState {
 }
 
 export default function ControllerEditor(props: { node: ControllerNode }) {
-  const { eventEmitter, editorScene, selectedNode, setBehaviorGraphId } = useCleoEngine()
+  const { eventEmitter, editorScene, selectedNode } = useCleoEngine()
   const [state, setState] = useState<ControllerState>(() => readNode(props.node))
 
   useEffect(() => { setState(readNode(props.node)) }, [props.node])
@@ -245,51 +241,12 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
 
             <FlockingEditor node={props.node} onChange={changed} />
 
-            {header('Brain', BRAIN_HINT)}
-            <SegmentedControl
-              value={state.brain}
-              options={BRAIN_KINDS.map(b => ({
-                value: b,
-                label: b === 'machine' ? 'Machine' : b === 'goal' ? 'Goal' : 'None',
-              }))}
-              onChange={(v) => apply({ brain: v })}
-            />
-
-            {/* Both brains are shown whichever is selected: an author switching between them should
-                not have their other graph disappear, and each says whether it is the live one. */}
-            {state.brain === 'machine' ? (
-              <>
-                <div className='flex items-center justify-between mt-3 mb-1'>
-                  <div className={sectionTitleClass}>Behaviour</div>
-                  {/* The graph edits STRUCTURE; the list below edits detail. Both are live on the same
-                      machine, so an author can lay states out spatially and still tune one here. */}
-                  <Button size='sm' variant='ghost'
-                    disabled={props.node.behavior.states.length === 0}
-                    title={props.node.behavior.states.length === 0
-                      ? 'Add a machine first — an empty graph has nothing to lay out'
-                      : 'Lay this machine out on the node graph, over the viewport'}
-                    onClick={() => setBehaviorGraphId(props.node.id)}>
-                    Open graph
-                  </Button>
-                </div>
-                {/* A machine, when there is one, decides the goal above. An empty one leaves the Goal
-                    field in charge, so this section is purely additive. */}
-                <BehaviorEditor node={props.node} onChange={changed} />
-              </>
-            ) : (
-              <>
-                {header('Goals')}
-                {state.brain === 'none' && (
-                  <p className='text-[11px] text-muted mb-1'>
-                    Not running: Brain is set to None, so the Goal field above is in charge.
-                  </p>
-                )}
-                <GoalsEditor node={props.node} onChange={changed} />
-              </>
-            )}
-
-            {header('Fuzzy')}
-            <FuzzyEditor node={props.node} onChange={changed} />
+            {/* The brain is an ASSET now: a named, reusable behaviour machine or goal graph, authored
+                in its own tab and shared between agents. What used to be a Machine/Goal/None switch is
+                the slot itself — a brain declares its own kind, and an empty slot is what "None" meant.
+                Perception, flocking and steering stay here, because they describe the AGENT rather
+                than what it decides with. */}
+            <AiBrainSlot node={props.node} onChange={changed} />
           </>
         )}
       </div>

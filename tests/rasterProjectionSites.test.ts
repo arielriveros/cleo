@@ -72,9 +72,12 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             // --- After the resolve: the flag is already false, and these must stay put. ---
             '_drawSkeletonOverlay',
             '_drawTileBand',
-            // The overlay layer's per-mesh draw, shared by the gizmo and helper sub-passes. It is
-            // composited after the post chain, so it is further from the jitter than anything else here.
-            '_drawOverlayNode',
+            // The overlay layer's per-mesh draw reaches `_rasterProjection` through this thin wrapper,
+            // which adds a coplanar depth nudge and delegates for everything else. Listing the wrapper
+            // rather than `_drawOverlayNode` is the honest reading of the call graph, and the jitter
+            // semantics are unchanged: the overlay is composited after the post chain, so it is further
+            // from the jitter than anything else here.
+            '_nudgedProjection',
             '_overdrawPass',
             '_renderSelectionMask',
             '_renderSprite',

@@ -62,6 +62,9 @@ export interface FuzzySetDefinition {
 export interface FuzzyVariableDefinition {
     name: string;
     sets: FuzzySetDefinition[];
+    /** Canvas position in the Fuzzy editor. Authoring only; see `GoalDefinition.x`. */
+    x?: number;
+    y?: number;
 }
 
 /**
@@ -80,6 +83,15 @@ export interface FuzzyRuleDefinition {
     /** The consequent: this variable takes this set, to the degree the antecedent fired. */
     variable: string;
     set: string;
+    /**
+     * Canvas position in the Fuzzy editor.
+     *
+     * A rule is a NODE on that canvas, not an edge, because it is a hyper-edge: several antecedent
+     * variables feed one consequent, and a pairwise link cannot say that. So it needs a position of
+     * its own like any other node.
+     */
+    x?: number;
+    y?: number;
 }
 
 export const DEFUZZIFICATIONS = ['maxav', 'centroid'] as const;
@@ -131,6 +143,18 @@ export function parseFuzzySet(raw: unknown): FuzzySetDefinition | null {
     };
 }
 
+/**
+ * Canvas coordinates, kept only when BOTH are present and finite.
+ *
+ * Half a coordinate is not a position: writing one back would pin the node to x = 0 forever, which
+ * looks like the editor losing a layout rather than like a malformed field being ignored.
+ */
+function coords(raw: Record<string, unknown>): { x: number; y: number } | null {
+    return typeof raw.x === 'number' && Number.isFinite(raw.x) &&
+           typeof raw.y === 'number' && Number.isFinite(raw.y)
+        ? { x: raw.x, y: raw.y } : null;
+}
+
 export function parseFuzzyVariable(raw: unknown): FuzzyVariableDefinition | null {
     if (!raw || typeof raw !== 'object') return null;
     const v = raw as Record<string, unknown>;
@@ -147,7 +171,7 @@ export function parseFuzzyVariable(raw: unknown): FuzzyVariableDefinition | null
         sets.push(set);
     }
     // A variable with no sets has an empty range, so every fuzzify against it is out of range.
-    return sets.length > 0 ? { name, sets } : null;
+    return sets.length > 0 ? { name, sets, ...(coords(v) ?? {}) } : null;
 }
 
 export function parseFuzzyTerm(raw: unknown): FuzzyTermNode | null {
@@ -185,7 +209,8 @@ export function parseFuzzyRule(raw: unknown): FuzzyRuleDefinition | null {
     const antecedent = parseFuzzyTerm(r.antecedent);
     const variable = str(r.variable);
     const set = str(r.set);
-    return antecedent && variable && set ? { antecedent, variable, set } : null;
+    return antecedent && variable && set
+        ? { antecedent, variable, set, ...(coords(r) ?? {}) } : null;
 }
 
 /** Read a whole model from anything. Unreadable entries are dropped; siblings keep their order. */

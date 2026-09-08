@@ -108,19 +108,6 @@ function ibmWorldBindRotation(skin: Skin, node: number): quat | null {
     return w ? quat.normalize(quat.create(), mat4.getRotation(quat.create(), w)) : null;
 }
 
-/** WORLD bind translation of a node (full transforms, scale included — this is a real position). */
-function worldBindTranslation(skin: Skin, node: number): vec3 {
-    const chain: number[] = [];
-    let n: number | undefined = node;
-    for (let guard = 0; n !== undefined && guard < 256; guard++) { chain.push(n); n = parentOf(skin, n); }
-    const m = mat4.create();
-    for (let i = chain.length - 1; i >= 0; i--) {
-        const nt = skin.nodeTransforms?.get(chain[i]);
-        if (nt) mat4.multiply(m, m, nt as any);
-    }
-    return mat4.getTranslation(vec3.create(), m);
-}
-
 /** Local rest translation of a node, or [0,0,0]. */
 function localRestTranslation(skin: Skin, node: number): vec3 {
     const nt = skin.nodeTransforms?.get(node);
@@ -414,18 +401,30 @@ export function retargetAnimation(
         if (cached) return cached;
         const corr = boneCorrection(sourceSkin, srcNode, targetSkin, tgtNode);
         const isHips = tgtNode === hipsTarget;
+        const tsRest = localRestTranslation(sourceSkin, srcNode);
+        const ttRest = localRestTranslation(targetSkin, tgtNode);
+
+        // The hips ratio is measured in the SAME SPACE the motion it scales lives in — the rest
+        // translations below, which are LOCAL. It used to read the WORLD bind translation, and that is
+        // wrong twice over:
+        //
+        //  - **Space.** The scaled offset is added back onto `ttRest`, which is local. A world figure
+        //    carries the armature's scale, so the moment two rigs disagree about units the offset lands
+        //    in one space and the rest it is added to is in another. Measured: a Mixamo clip in
+        //    centimetres retargeted onto a rig whose armature carries the 0.01 cm->m conversion gave a
+        //    ratio of 0.0093, and an 86 cm death-collapse arrived as 0.8 — the character died standing
+        //    up. Local/local cancels the armature on both sides and leaves only the height difference,
+        //    which is the whole point of the ratio.
+        //  - **Axis.** It took component [1], assuming hips height is world Y. A rig stored Z-up reads
+        //    its height as whatever small lateral value happens to sit in Y. The magnitude is the
+        //    honest measure of "how far the hips sit from their parent" and needs no such assumption.
         let heightRatio = 1;
         if (isHips) {
-            const sy = Math.abs(worldBindTranslation(sourceSkin, srcNode)[1]);
-            const ty = Math.abs(worldBindTranslation(targetSkin, tgtNode)[1]);
-            if (sy > 1e-4 && ty > 1e-4) heightRatio = ty / sy;
+            const sh = vec3.length(tsRest);
+            const th = vec3.length(ttRest);
+            if (sh > 1e-4 && th > 1e-4) heightRatio = th / sh;
         }
-        const c: Correction = {
-            corr, isHips,
-            tsRest: localRestTranslation(sourceSkin, srcNode),
-            ttRest: localRestTranslation(targetSkin, tgtNode),
-            heightRatio,
-        };
+        const c: Correction = { corr, isHips, tsRest, ttRest, heightRatio };
         corrections.set(tgtNode, c);
         return c;
     };

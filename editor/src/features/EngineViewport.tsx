@@ -61,7 +61,9 @@ export default function EngineViewport() {
     const { isPlayMode } = usePlayback();
     const { graphView, setGraphView } = useStateMachine();
 
-    // The node graph covers the canvas, so viewport chrome (gizmo modes, 2D/3D) has nothing to act on.
+    // The animation state machine's graph covers the canvas, so viewport chrome (gizmo modes, 2D/3D,
+    // the eye menu) has nothing to act on. The AI graphs need no equivalent: they live in their own
+    // tab, whose mode is already MODE_RENDERS_VIEWPORT: false.
     const hideForGraph = editorMode === 'animation' && graphView;
     // Viewport chrome only means something over a render: modes that replace the canvas with their own
     // full-panel editor (script, tileset) get none of it, and neither does the loading splash.

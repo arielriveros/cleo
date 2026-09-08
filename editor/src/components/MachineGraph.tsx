@@ -50,7 +50,17 @@ export interface GraphNodeModel {
   badge?: string
   badgeTitle?: string
   badgeTone?: BadgeTone
+  /**
+   * What KIND of thing this node is, for styling only.
+   *
+   * The fuzzy canvas needs it: a variable and a rule are both nodes there, and telling them apart by
+   * reading the title is exactly the work a graph is supposed to save. Nothing here interprets the
+   * value beyond looking it up in {@link KIND_CLASS}.
+   */
+  kind?: GraphNodeKind
 }
+
+export type GraphNodeKind = 'default' | 'accent' | 'muted'
 
 export interface GraphLinkModel {
   a: string
@@ -79,6 +89,17 @@ export interface MachineGraphProps {
   onSetEntry(id: string): void
   onRemoveNode(id: string): void
 
+  /**
+   * Whether this machine HAS an entry node.
+   *
+   * False for the goal and fuzzy canvases, which have no such concept — a goal graph arbitrates by
+   * score and a fuzzy model fires every rule at once, so neither has a "starts here". The right-click
+   * item and the entry badge are hidden rather than shown doing nothing.
+   */
+  allowEntry?: boolean
+  /** What a node is called, for the menu and the hint. "state" unless a caller says otherwise. */
+  nodeNoun?: string
+
   /** Buttons for the toolbar's left end — the caller's own actions. */
   toolbar?: React.ReactNode
   /** Trailing hint text. Defaults to the interactions this canvas provides. */
@@ -96,6 +117,14 @@ interface NodeData extends Record<string, unknown> {
   badgeTone: BadgeTone
   isEntry: boolean
   active: boolean
+  kind: GraphNodeKind
+}
+
+/** Body tint per node kind. Border colour still comes from selection/active/entry, which outrank it. */
+const KIND_CLASS: Record<GraphNodeKind, string> = {
+  default: 'bg-control',
+  accent: 'bg-primary/25',
+  muted: 'bg-surface-raised',
 }
 
 const TONE_CLASS: Record<BadgeTone, string> = {
@@ -111,7 +140,7 @@ function GraphNode({ data, selected }: NodeProps) {
     : d.isEntry ? 'border-success'
     : 'border-control-hover'
   return (
-    <div className={`rounded border-2 ${border} bg-control text-white shadow-panel`} style={{ width: NODE_W }}>
+    <div className={`rounded border-2 ${border} ${KIND_CLASS[d.kind]} text-white shadow-panel`} style={{ width: NODE_W }}>
       <Handle type='target' position={Position.Left} className='!bg-primary !w-2 !h-2' />
       <div className='px-2 py-1 border-b border-border flex items-center gap-1'>
         {d.isEntry && <span className='text-[9px] px-1 rounded bg-success text-white' title='Entry state'>▶</span>}
@@ -138,7 +167,7 @@ function Flow(props: MachineGraphProps) {
   const {
     nodes: model, links, activeId = null, selectedNode = null, selectedLink = null,
     onMoveNode, onConnect, onDelete, onSelectNode, onSelectLink, onAddNode, onSetEntry, onRemoveNode,
-    toolbar, hint,
+    toolbar, hint, allowEntry = true, nodeNoun = 'state',
   } = props
 
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([])
@@ -163,6 +192,7 @@ function Flow(props: MachineGraphProps) {
         badgeTone: n.badgeTone ?? 'dim',
         isEntry: !!n.isEntry,
         active: n.id === activeId,
+        kind: n.kind ?? 'default',
       } as NodeData,
     })))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -268,13 +298,14 @@ function Flow(props: MachineGraphProps) {
         onMouseDown={e => e.stopPropagation()}>
         {toolbar}
         <span className='text-[10px] text-dim ml-1'>
-          {hint ?? 'drag handle → handle to connect · right-click a state · Del to remove'}
+          {hint ?? `drag handle → handle to connect · right-click a ${nodeNoun} · Del to remove`}
         </span>
       </div>
 
       {menu && entry && (
         <NodeMenu
           id={menu.id} x={menu.x} y={menu.y} isEntry={!!entry.isEntry}
+          allowEntry={allowEntry} noun={nodeNoun}
           onSetEntry={() => { onSetEntry(menu.id); setMenu(null) }}
           onRemove={() => { onRemoveNode(menu.id); setMenu(null) }}
           onClose={() => setMenu(null)} />
@@ -285,8 +316,8 @@ function Flow(props: MachineGraphProps) {
 
 /** Right-click menu on a node. Positioned in client space, so it is a sibling of the graph, not a child. */
 function NodeMenu(
-  { id, x, y, isEntry, onSetEntry, onRemove, onClose }: {
-    id: string; x: number; y: number; isEntry: boolean
+  { id, x, y, isEntry, allowEntry, noun, onSetEntry, onRemove, onClose }: {
+    id: string; x: number; y: number; isEntry: boolean; allowEntry: boolean; noun: string
     onSetEntry(): void; onRemove(): void; onClose(): void
   },
 ) {
@@ -301,12 +332,14 @@ function NodeMenu(
         style={{ left: x, top: y }}
         onMouseDown={e => e.stopPropagation()}>
         <div className='px-2 py-1 text-[10px] uppercase tracking-wide text-dim truncate'>{id}</div>
-        <button className={item} disabled={isEntry}
-          title={isEntry ? 'Already the entry state' : 'The machine starts here'}
-          onClick={onSetEntry}>
-          {isEntry ? '▶ Entry state' : 'Set as entry'}
-        </button>
-        <button className={item + ' text-red-400'} onClick={onRemove}>Delete state</button>
+        {allowEntry && (
+          <button className={item} disabled={isEntry}
+            title={isEntry ? 'Already the entry state' : 'The machine starts here'}
+            onClick={onSetEntry}>
+            {isEntry ? '▶ Entry state' : 'Set as entry'}
+          </button>
+        )}
+        <button className={item + ' text-red-400'} onClick={onRemove}>Delete {noun}</button>
       </div>
     </>
   )

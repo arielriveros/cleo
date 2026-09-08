@@ -305,3 +305,49 @@ describe('the tolerant reader', () => {
         expect(parsed.evaluators[0].bias).toBe(0);
     });
 });
+
+// ---------------------------------------------------------------------------------------------------
+// Canvas coordinates
+//
+// Layout is authoring data, and losing it is the kind of bug nobody files: the graph still works, it
+// just re-scatters every goal into a grid whenever the scene is reopened, and the author quietly
+// concludes the editor is not worth arranging.
+// ---------------------------------------------------------------------------------------------------
+
+describe('goal layout coordinates', () => {
+    const withGoals = (goals: unknown[]) => parseGoalGraph({ goals, evaluators: [] });
+
+    it('round-trips a position', () => {
+        const graph = withGoals([{ name: 'patrol', goal: 'patrol', x: 120, y: -40 }]);
+        expect(graph.goals[0].x).toBe(120);
+        expect(graph.goals[0].y).toBe(-40);
+    });
+
+    it('leaves an unplaced goal without coordinates, so the editor lays it out', () => {
+        const graph = withGoals([{ name: 'patrol', goal: 'patrol' }]);
+        expect(graph.goals[0].x).toBeUndefined();
+        expect(graph.goals[0].y).toBeUndefined();
+    });
+
+    it('drops HALF a coordinate rather than pinning the goal to x = 0', () => {
+        for (const partial of [{ x: 10 }, { y: 10 }, { x: 10, y: NaN }, { x: 'a', y: 2 }]) {
+            const graph = withGoals([{ name: 'patrol', goal: 'patrol', ...partial }]);
+            expect(graph.goals[0].x).toBeUndefined();
+            expect(graph.goals[0].y).toBeUndefined();
+        }
+    });
+
+    it('survives the cycle and dangling-subgoal filters that run after parsing', () => {
+        const graph = parseGoalGraph({
+            goals: [
+                { name: 'attack', goal: 'seek', subgoals: ['close', 'ghost'], x: 1, y: 2 },
+                { name: 'close', goal: 'seek', x: 3, y: 4 },
+            ],
+            evaluators: [],
+        });
+        // 'ghost' names nothing and is dropped; the positions of what remains must be untouched.
+        expect(graph.goals[0].subgoals).toEqual(['close']);
+        expect([graph.goals[0].x, graph.goals[0].y]).toEqual([1, 2]);
+        expect([graph.goals[1].x, graph.goals[1].y]).toEqual([3, 4]);
+    });
+});

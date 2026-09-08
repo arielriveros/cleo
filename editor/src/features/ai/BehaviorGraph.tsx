@@ -5,22 +5,22 @@ import { useCleoEngine } from '../EngineContext'
 import MachineGraph from '../../components/MachineGraph'
 import type { GraphLinkModel, GraphNodeModel } from '../../components/MachineGraph'
 import { behaviorLinkKey, behaviorLinks, hasWildcardTransitions } from '../../utils/aiGraphEdits'
+import { useAiEditor } from './AiEditorContext'
+import AiGraphToolbar, { AiEmptyState } from './AiGraphToolbar'
 
 /**
  * The AI behaviour machine on the same canvas the animation state machine uses.
  *
- * Opened from the Controller inspector and drawn over the viewport, the way the animation graph is.
- * It edits STRUCTURE — add a state, connect two, set the entry, move things, delete — while the
- * inspector's list keeps editing DETAIL. That split is deliberate rather than an omission: the list
- * already shows every state and every transition at once, so there is nothing for a graph selection
- * to reveal, and duplicating the condition tree into a floating panel would mean two places to edit
- * one gate.
+ * Opened from the Behaviour section of a Controller's inspector and drawn over the viewport. It edits
+ * STRUCTURE — add a state, connect two, set the entry, move things, delete — while the inspector list
+ * behind it keeps editing DETAIL. That split is deliberate rather than an omission: the list already
+ * shows every state and transition at once, so there is nothing for a graph selection to reveal, and
+ * duplicating the condition tree onto the canvas would mean two places to edit one gate.
  *
- * ## Why it holds a node id
+ * ## Why it reads a session rather than owning one
  *
- * A machine belongs to one controller. Holding the id rather than a boolean means a controller that
- * is deleted, or a scene that is swapped, closes the graph for free instead of leaving a canvas
- * editing something that is no longer there.
+ * Which controller is open lives in `AiEditorContext`, shared with the Goals and Fuzzy canvases. That
+ * is also what closes this for free when the controller is deleted.
  *
  * ## Wildcard transitions
  *
@@ -56,20 +56,14 @@ function transitionLabel(t: BehaviorTransition): string {
 }
 
 export default function BehaviorGraph() {
-  const { behaviorGraphId, setBehaviorGraphId, editorScene, eventEmitter, isPlayMode, instance } = useCleoEngine()
-  const [version, setVersion] = useState(0)
+  const { isPlayMode, instance } = useCleoEngine()
+  const { target: controller, selection, setSelection, version, commit } = useAiEditor()
   const [activeState, setActiveState] = useState<string | null>(null)
-  const [selected, setSelected] = useState<string | null>(null)
-  const [selectedLink, setSelectedLink] = useState<{ a: string; b: string } | null>(null)
 
-  // Resolved from the id every render: a controller deleted while its graph is open closes it rather
-  // than leaving a canvas bound to a dead node.
-  const node = behaviorGraphId ? editorScene.getNodeById(behaviorGraphId) : null
-  const controller = node instanceof ControllerNode ? node : null
-
-  useEffect(() => {
-    if (behaviorGraphId && !controller) setBehaviorGraphId(null)
-  }, [behaviorGraphId, controller, setBehaviorGraphId])
+  // The canvas selection IS the session selection, so the inspector on the right rail details whatever
+  // is clicked here. Derived rather than duplicated: two copies would drift the moment either changed.
+  const selected = selection?.kind === 'state' ? selection.name : null
+  const selectedLink = selection?.kind === 'transition' ? { a: selection.a, b: selection.b } : null
 
   // Highlight the state the machine is actually in, but only while playing — the control pass does not
   // run a behaviour machine while authoring, so the readout would be a permanent blank otherwise.
@@ -93,8 +87,7 @@ export default function BehaviorGraph() {
   const apply = (next: BehaviorMachine) => {
     if (!controller) return
     controller.behavior = parseBehaviorMachine(next)
-    setVersion(v => v + 1)
-    eventEmitter.emit('SCENE_CHANGED')
+    commit()
   }
 
   const posOf = (s: BehaviorState, i: number) => (
@@ -129,7 +122,8 @@ export default function BehaviorGraph() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [machine, version])
 
-  if (!controller || !machine) return null
+  // No mode gate: `AiBrainTabView` mounts this only for a brain whose kind is 'behavior'.
+  if (!controller || !machine) return <AiEmptyState what='behaviour machine' />
 
   const uniqueName = (base: string) => {
     const taken = machine.states.map(s => s.name)
@@ -176,6 +170,9 @@ export default function BehaviorGraph() {
       }}
       onDelete={(ids, removed) => {
         const gone = new Set(ids)
+        // Clear first: an inspector still pointed at a deleted state would detail a ghost, and the
+        // tolerant reader that re-parses the machine drops the state without telling anyone.
+        setSelection(null)
         const pairs = removed.map(([a, b]) => behaviorLinkKey(a, b).join('|'))
         apply({
           ...machine,
@@ -187,37 +184,35 @@ export default function BehaviorGraph() {
           }),
         })
       }}
-      onSelectNode={(id) => { setSelected(id); setSelectedLink(null) }}
-      onSelectLink={(a, b) => { setSelectedLink({ a, b }); setSelected(null) }}
+      onSelectNode={(id) => setSelection(id ? { kind: 'state', name: id } : null)}
+      onSelectLink={(a, b) => setSelection({ kind: 'transition', a, b })}
       onAddNode={addState}
       onSetEntry={(id) => apply({
         ...machine,
         // Exactly one entry: flagging a new one clears the old.
         states: machine.states.map(s => ({ ...s, isEntry: s.name === id })),
       })}
-      onRemoveNode={(id) => apply({
-        ...machine,
-        states: machine.states.filter(s => s.name !== id),
-        transitions: machine.transitions.filter(t => t.from !== id && t.to !== id),
-      })}
+      onRemoveNode={(id) => {
+        setSelection(null)
+        apply({
+          ...machine,
+          states: machine.states.filter(s => s.name !== id),
+          transitions: machine.transitions.filter(t => t.from !== id && t.to !== id),
+        })
+      }}
       hint={
         (skipped > 0 ? `${skipped} “any state” transition${skipped > 1 ? 's' : ''} not drawn · ` : '')
         + 'drag handle → handle to connect · right-click a state · Del to remove · edit details in the inspector'
       }
       toolbar={
         <>
-          <span className='px-2 py-1 rounded bg-surface-raised border border-border text-xs text-white'
-            title='The controller this machine belongs to'>
-            {controller.name}
-          </span>
+          <AiGraphToolbar />
           <button className='px-2 py-1 rounded bg-primary hover:bg-primary-hover text-white border border-primary-active text-xs'
             onClick={() => {
               const n = machine.states.length
               addState((n % AUTO_COLS) * AUTO_DX + 40, Math.floor(n / AUTO_COLS) * AUTO_DY + 40)
             }}
             title='Add a new state (or double-click the canvas)'>+ State</button>
-          <button className='px-2 py-1 rounded bg-control hover:bg-control-hover text-white border border-border text-xs'
-            onClick={() => setBehaviorGraphId(null)} title='Back to the viewport'>Close</button>
         </>
       }
     />

@@ -9,6 +9,7 @@ import type { ScriptAsset } from './scripts'
 import type { AnimationAsset } from './animationAssets'
 import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
+import type { AiBrainAsset } from './aiBrains'
 import type { AudioSourceAsset } from './audioSources'
 import type { SoundSampleAsset } from './soundSamples'
 import type { ChunkRef } from './chunkBlob'
@@ -52,6 +53,8 @@ export interface BundleLibraries {
   animationFields: AnimationFieldAsset[]
   animations: AnimationAsset[]
   tilesets: TilesetAsset[]
+  /** Optional, so a bundle written before AI brains existed still reads. */
+  aiBrains?: AiBrainAsset[]
   /**
    * The audio split's two record halves.
    *

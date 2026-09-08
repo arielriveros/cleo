@@ -15,8 +15,13 @@ import {
   Vec,
   hullFromPositions,
   markEditorOnly,
+  NavMeshNode,
 } from 'cleo';
+import type { TriangleSoup } from 'cleo';
 import { CameraGeometry } from './EditorModels';
+import { gatherNavSoup } from './navBakeSources';
+import { boundedBox, navPreviewSignature, planNavOverlays } from './navOverlayPlan';
+import type { NavOverlayBox, NavOverlayPlan } from './navOverlayPlan';
 import type { BodyDescription, ShapeDescription } from '../features/EngineContext';
 import type { DebugVisibility, DebugChannel, DebugCategory } from '../features/DebugVisibilityContext';
 
@@ -45,7 +50,19 @@ const TRIGGER_PREFIX = '__debug__trigger_';
 const SHAPE_PREFIX = '__debug__shape_';
 const AABB_PREFIX = '__debug__aabb_';
 const TERRAIN_PREFIX = '__debug__terrain_';
+/**
+ * How far a coplanar overlay is pulled toward the camera, in NDC depth.
+ *
+ * Replaces the world-space lifts these used to carry. A fixed lift cannot work: depth resolution
+ * falls off as z-squared, so 2 cm stopped separating anything past roughly 180 metres on a
+ * `far: 10000` editor scene, and TAA jitter made the boundary shimmer well before that. This is
+ * constant in NDC, so it holds at 5 metres and at 5 kilometres alike. See `MaterialConfig.depthNudge`.
+ */
+const COPLANAR_NUDGE = 1e-4;
+
 const NAVMESH_PREFIX = '__debug__navmesh_';
+const NAVVOLUME_PREFIX = '__debug__navvolume_';
+const NAVPREVIEW_PREFIX = '__debug__navpreview_';
 
 // Per-scene cache of the last-built shapes signature for each body/trigger id.
 const shapeSignatures = new WeakMap<Scene, Map<string, string>>();
@@ -447,7 +464,10 @@ function buildTerrainDebugMesh(terrain: any): ModelNode | null {
     }
 
   const geometry = new Geometry(positions, normals, uvs, undefined, undefined, indices);
-  return chrome(new ModelNode(TERRAIN_PREFIX, new Model(geometry, Material.Basic({ color: [1, 0, 0] }, { wireframe: true, castShadow: false }))));
+  // Coplanar with the heightfield it traces, so it needs the same nudge the navmesh overlays take.
+  // This one never had any separation at all and stippled from the first frame.
+  return chrome(new ModelNode(TERRAIN_PREFIX, new Model(geometry, Material.Basic({ color: [1, 0, 0] },
+    { wireframe: true, castShadow: false, depthNudge: COPLANAR_NUDGE }))));
 }
 
 // Cheap identity of a terrain's heights, so the wireframe rebuilds only when the surface is sculpted.
@@ -521,12 +541,11 @@ function buildNavMeshDebugMesh(navMesh: any): ModelNode | null {
   if (indices.length === 0) return null;
 
   const geometry = new Geometry(positions, normals, uvs, undefined, undefined, indices);
-  // Lifted a little so it does not z-fight the floor it was baked from -- the surface and the mesh are
-  // the same plane by construction, so without this the overlay stipples.
-  const node = chrome(new ModelNode(NAVMESH_PREFIX, new Model(
-    geometry, Material.Basic({ color: [0.1, 0.85, 0.75] }, { wireframe: true, castShadow: false }))));
-  node.setPosition(Vec.vec3.fromValues(0, 0.02, 0));
-  return node;
+  // `depthNudge` instead of a world-space lift: this mesh and the floor it was baked from are the same
+  // plane by construction, and a fixed lift only separates them near the camera.
+  return chrome(new ModelNode(NAVMESH_PREFIX, new Model(
+    geometry, Material.Basic({ color: [0.1, 0.85, 0.75] },
+      { wireframe: true, castShadow: false, depthNudge: COPLANAR_NUDGE }))));
 }
 
 /** Cheap identity of a bake, so the wireframe is rebuilt only when the mesh actually changes. */
@@ -558,12 +577,188 @@ function ensureNavMeshDebug(scene: Scene, navMesh: any) {
   cache.set(name, sig);
 }
 
+/**
+ * The navmesh bake VOLUME, and a live preview of what it currently captures.
+ *
+ * Two overlays for one node, because they answer two different questions. The wireframe box says
+ * "here is what I am asking to be navigable"; the cyan surface says "here is what you would actually
+ * get". An author moving the box needs both at once — the whole reason a bake volume is hard to place
+ * blind is that a box is a claim about geometry you cannot see inside it.
+ *
+ * Both are drawn ONLY for the selected navmesh node. A level with a small-agent bake and an ogre bake
+ * would otherwise paint two overlapping translucent sheets, and the sum of two 35%-opacity surfaces is
+ * not a reading of either.
+ */
+
+/**
+ * The level's collider + terrain soup, cached per scene.
+ *
+ * Gathering walks every body and triangulates every heightfield, which is far too much to redo while
+ * someone drags a gizmo. The volume clip and the slope filter run against this on every reconcile;
+ * only {@link invalidateNavSoup} forces the walk again.
+ */
+const navSoupCache = new WeakMap<Scene, TriangleSoup>();
+
+/**
+ * Drop the cached soup, so the next preview re-walks the scene.
+ *
+ * Called for the three things that actually change the level's walkable geometry: a collider edit, a
+ * structural scene change, and the end of a transform drag. Deliberately NOT called for a payload-less
+ * `SCENE_CHANGED`, which is what an inspector slider emits — re-gathering the whole level on every
+ * frame of a "max slope" drag would be a lot of work to produce the same soup.
+ */
+export function invalidateNavSoup(scene: Scene | null | undefined) {
+  if (scene) navSoupCache.delete(scene);
+}
+
+function navSoupFor(scene: Scene, bodies: Map<string, BodyDescription>): TriangleSoup {
+  let soup = navSoupCache.get(scene);
+  if (!soup) {
+    soup = gatherNavSoup(scene.root, { bodies }).soup;
+    navSoupCache.set(scene, soup);
+  }
+  return soup;
+}
+
+/**
+ * Wireframe of the bake box, following the plan's transform every frame.
+ *
+ * `onUpdate` rather than a one-shot placement is what makes the box track the transform gizmo with no
+ * further wiring: the gizmo writes the node's position and never emits an event this reconciler
+ * listens to, exactly as the collider wireframes at `ensureShapeGroup` already rely on. It re-reads
+ * the PLAN each frame rather than closing over one, so a resize in the inspector lands immediately
+ * and an unbounded box keeps tracking the level's extent.
+ *
+ * Top-level, so it inherits nothing and can carry a world transform directly.
+ */
+function ensureNavVolumeBox(scene: Scene, navMesh: NavMeshNode, box: NavOverlayBox) {
+  const name = `${NAVVOLUME_PREFIX}${navMesh.id}`;
+  let existing = scene.getNodesByName(name)[0] as ModelNode | undefined;
+  if (!existing) {
+    existing = chrome(new ModelNode(name, new Model(
+      Geometry.Cube(1, 1, 1, true),
+      Material.Basic({ color: [0, 0.9, 1] }, { wireframe: true, castShadow: false }))));
+    scene.addNode(existing);
+  }
+  const node = existing;
+
+  // Dimmed means "this box is the whole level, not a volume anyone authored" — see `unboundedBox`.
+  // Set every pass rather than at creation: the same node survives its owner being given a size.
+  node.model.material.properties.set('color', box.dimmed ? [0, 0.45, 0.55] : [0, 0.9, 1]);
+
+  const place = (b: NavOverlayBox) => {
+    node.setPosition(b.center)
+        .setQuaternion(b.quaternion)
+        .setScale(Vec.vec3.fromValues(b.half[0] * 2, b.half[1] * 2, b.half[2] * 2));
+  };
+
+  if (box.dimmed) {
+    // An unbounded box is the level's axis-aligned extent, which does NOT follow the node — moving an
+    // unbounded navmesh changes nothing about what it covers, and a box that tracked it would say
+    // otherwise. So it is placed once per reconcile, and any stale `onUpdate` is cleared.
+    node.onUpdate = () => {};
+    place(box);
+    return;
+  }
+
+  // Bounded: re-read the node every frame so the box tracks the transform gizmo, which writes the
+  // transform directly and emits nothing this reconciler listens for. Recomputed from the node alone
+  // rather than by re-running the plan — the plan walks the level's triangle soup, which is not
+  // something to do once a frame.
+  node.onUpdate = () => place(boundedBox(navMesh));
+}
+
+/**
+ * The cyan surface: every triangle the plan says is walkable inside the volume.
+ *
+ * The triangles come from `walkableSoup`, the SAME predicate `bakeNavMesh` filters with — that
+ * sharing is the point of the whole overlay. A preview computed from its own copy of the slope
+ * arithmetic could disagree with the bake, and the disagreement would only ever show up as an agent
+ * refusing to walk somewhere painted walkable.
+ *
+ * Double-sided: a surface the author is looking at from below is still one they need to see.
+ * `_cullFor` maps `side: 'double'` to `cullMode: 'none'` on the overlay pipeline, so this is honoured.
+ */
+function buildNavPreviewMesh(walkable: TriangleSoup): ModelNode | null {
+  const count = walkable.positions.length / 3;
+  if (count < 3) return null;
+
+  const positions: [number, number, number][] = [];
+  const normals: [number, number, number][] = [];
+  const uvs: [number, number][] = [];
+  const indices: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const b = i * 3;
+    positions.push([walkable.positions[b], walkable.positions[b + 1], walkable.positions[b + 2]]);
+    // Flat up, like the baked wireframe: this is an unlit overlay, so a real normal buys nothing and
+    // computing one per triangle would only slow the rebuild down.
+    normals.push([0, 1, 0]);
+    uvs.push([0, 0]);
+    indices.push(i);
+  }
+
+  // `calculateTangents: false` — the last argument, and not an oversight. It defaults to true, and
+  // with every UV at [0,0] the tangent solve is both wasted work on every rebuild and a source of
+  // NaNs. The basic program declares only position and texCoord, so it never reads them.
+  const geometry = new Geometry(positions, normals, uvs, undefined, undefined, indices, false);
+
+  const node = chrome(new ModelNode(NAVPREVIEW_PREFIX, new Model(
+    geometry,
+    // No `transparent: true`. The alpha comes from the OVERLAY PASS, which declares `OVERLAY_BLEND`
+    // on every helper pipeline regardless; and an `editorOnly` node is diverted into `helperNodes`
+    // before the renderer's transparent/opaque split ever runs, so the flag could not route it
+    // anywhere different even if it wanted to. Setting it would only send the next reader looking
+    // for a transparent queue this never enters.
+    Material.Basic({ color: [0, 0.9, 1], opacity: 0.35 },
+      { castShadow: false, side: 'double', depthNudge: COPLANAR_NUDGE }))));
+  return node;
+}
+
+/**
+ * Why the last plan declined to paint a preview, per navmesh id, or absent when it did paint one.
+ *
+ * Read by the Nav Mesh inspector so a level too big to fill says so. The reconciler already computes
+ * the plan every pass, and this is a single number — cheaper and more honest than having the panel
+ * re-walk the level to answer the same question, and far better than a cyan sheet that silently does
+ * not appear on exactly the levels most likely to need it.
+ */
+const navPreviewSkipped = new Map<string, number>();
+
+/** Triangles the preview refused to draw for this navmesh, or null when it drew (or drew nothing). */
+export function navPreviewSkippedFor(id: string): number | null {
+  return navPreviewSkipped.get(id) ?? null;
+}
+
+function ensureNavPreview(scene: Scene, navMesh: NavMeshNode, plan: NavOverlayPlan) {
+  if (plan.previewSkipped) navPreviewSkipped.set(navMesh.id, plan.previewSkipped);
+  else navPreviewSkipped.delete(navMesh.id);
+
+  const name = `${NAVPREVIEW_PREFIX}${navMesh.id}`;
+  const sig = navPreviewSignature(plan);
+  const cache = sigMapFor(scene);
+
+  const existing = scene.getNodesByName(name)[0];
+  if (existing && cache.get(name) === sig) return;
+  if (existing) scene.removeNode(existing);
+
+  const mesh = plan.preview ? buildNavPreviewMesh(plan.preview) : null;
+  if (!mesh) { cache.delete(name); return; }
+  mesh.name = name;
+  scene.addNode(mesh);
+  cache.set(name, sig);
+}
+
 export function reconcileEditorHelpers(
   scene: Scene,
   bodies: Map<string, BodyDescription>,
   triggers: Map<string, { shapes: ShapeDescription[] }>,
   visibility?: DebugVisibility,
   channel: DebugChannel = 'editor',
+  /**
+   * The selected node's id. Only the navmesh overlays read it — a bake volume and its cyan preview
+   * are authoring aids for the node you are placing, not permanent scene furniture.
+   */
+  selectedId: string | null = null,
 ) {
   // With no settings supplied (or a category missing): everything on in the editor, off at runtime.
   const show = (cat: DebugCategory): boolean =>
@@ -623,10 +818,23 @@ export function reconcileEditorHelpers(
     }
   }
 
-  // 4b. Navigation meshes. Independently toggled from colliders: a navmesh is DERIVED from them, and
-  // the interesting question is usually where the two disagree.
+  // 4b. Navigation meshes. The BAKED wireframe is independently toggled from colliders: a navmesh is
+  // DERIVED from them, and the interesting question is usually where the two disagree.
   if (show('navMesh')) {
     for (const navMesh of scene.navMeshes) ensureNavMeshDebug(scene, navMesh);
+  }
+
+  // 4c. The bake volume and its cyan preview, for the SELECTED navmesh only.
+  //
+  // Deliberately NOT behind `show('navMesh')`, unlike the wireframe above. These are authoring aids
+  // for the node being placed — the same category as the selection outline and the transform gizmo,
+  // neither of which is in the eye menu either. Selecting the node IS the request to see them, and
+  // the first version of this shipped invisible precisely because it hid a feature's only feedback
+  // behind a toggle that is off by default and that an author has to already know exists.
+  for (const navMesh of scene.navMeshes) {
+    const plan = planNavOverlays(navMesh, navSoupFor(scene, bodies), navMesh.id === selectedId);
+    if (plan.box) ensureNavVolumeBox(scene, navMesh, plan.box);
+    ensureNavPreview(scene, navMesh, plan);
   }
 
   // 5. Trigger wireframes (green), following the target's world transform.
@@ -665,6 +873,13 @@ export function reconcileEditorHelpers(
     } else if (node.name.startsWith(TERRAIN_PREFIX)) {
       const id = node.name.slice(TERRAIN_PREFIX.length);
       if (!show('colliders') || !landscapeIds.has(id)) drop();
+    } else if (node.name.startsWith(NAVVOLUME_PREFIX) || node.name.startsWith(NAVPREVIEW_PREFIX)) {
+      const prefix = node.name.startsWith(NAVVOLUME_PREFIX) ? NAVVOLUME_PREFIX : NAVPREVIEW_PREFIX;
+      const id = node.name.slice(prefix.length);
+      // Selection is the only gate, matching 4c — NOT `show('navMesh')`, which governs the baked
+      // wireframe. Dropped the moment the selection moves on or the node goes away; a box left behind
+      // reads as a second volume that is quietly baking nothing.
+      if (id !== selectedId || !(scene.getNodeById(id) instanceof NavMeshNode)) drop();
     } else if (node.name.startsWith(NAVMESH_PREFIX)) {
       const id = node.name.slice(NAVMESH_PREFIX.length);
       const owner = scene.getNodeById(id);

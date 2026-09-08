@@ -181,6 +181,21 @@ export function collectReferencedScriptIds(scene: Scene | null | undefined): Set
 }
 
 /**
+ * AI BRAIN asset ids a scene references.
+ *
+ * Like the animation field below, the link is engine data rather than a node variable — `brainId` on
+ * the ControllerNode. The controller also holds a full embedded copy of the brain, which is what
+ * actually runs; this set is only about which library entries the scene still points at.
+ */
+export function collectReferencedAiBrainIds(scene: Scene | null | undefined): Set<string> {
+  const set = new Set<string>()
+  for (const controller of scene?.controllers ?? []) {
+    if (controller.brainId) set.add(controller.brainId)
+  }
+  return set
+}
+
+/**
  * Animation Field asset ids referenced by any node's animation state machine.
  * The link is NOT a node variable: it is `state.fieldId` inside the machine, which lives on the animator.
  */

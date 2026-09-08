@@ -263,6 +263,7 @@ describe.skipIf(!present)('the Night Shift example project', () => {
 
     describe('the zombie template', () => {
         const zombie = () => library('templates').find((t: any) => t.name === 'Zombie');
+        const playable = () => library('templates').find((t: any) => t.name === 'Playable');
 
         it('carries its own controller, so a spawned copy drives itself', () => {
             // possessedId is a registered node reference and is remapped per instance. Split the pair
@@ -332,10 +333,49 @@ describe.skipIf(!present)('the Night Shift example project', () => {
                 expect(parseConditionNode(t.condition), `${t.from} -> ${t.to}`).toBeTruthy();
         });
 
-        it('drops the clips a shambler never plays', () => {
+        // The enemies used to BE the player's mannequin with its clip list trimmed, which is why they
+        // read as grey debug people walking normally. This is that regression.
+        it('is its own character, not a copy of the player mannequin', () => {
+            const model = allNodes(zombie().nodeJson).find((n: any) => n.type === 'model');
+            expect(model.name).toBe('Ch10');
+
+            const player = allNodes(playable().nodeJson).find((n: any) => n.type === 'model');
+            expect(player.name).toBe('Ch36');
+            // Different geometry, not the same buffer with a different name on it.
+            expect(model.model.geometry.positions.length)
+                .not.toBe(player.model.geometry.positions.length);
+        });
+
+        it('carries exactly the three clips it was authored with', () => {
             const model = allNodes(zombie().nodeJson).find((n: any) => n.type === 'model');
             const names = model.model.animations.map((a: any) => a.name).sort();
-            expect(names).toEqual(['Idle', 'Walk']);
+            expect(names).toEqual(['Dying', 'Idle', 'Walk']);
+        });
+
+        // Root motion on the wrong clip is the loud failure here: Idle and Walk are driven by steering,
+        // so a travelling Walk would fight the controller and slide the horde across the map.
+        it('travels with the death clip and only the death clip', () => {
+            const model = allNodes(zombie().nodeJson).find((n: any) => n.type === 'model');
+            const rooted = model.model.animations.filter((a: any) => a.rootMotion).map((a: any) => a.name);
+            expect(rooted).toEqual(['Dying']);
+        });
+
+        it('paints both material tiles, over index ranges that cover the mesh', () => {
+            const model = allNodes(zombie().nodeJson).find((n: any) => n.type === 'model');
+            expect(model.model.materials).toHaveLength(2);
+            expect(model.model.submeshes).toHaveLength(2);
+
+            // Every submesh range must land inside the index buffer and, together, account for all of
+            // it — a short range renders part of the zombie invisible and nothing reports it.
+            const total = model.model.indices?.length ?? model.model.geometry.indices.length;
+            const covered = model.model.submeshes.reduce((n: number, s: any) => n + s.count, 0);
+            expect(covered).toBe(total);
+            for (const s of model.model.submeshes) expect(s.start + s.count).toBeLessThanOrEqual(total);
+
+            // Each tile has its own maps; sharing one would mean a UDIM tile went missing on import.
+            const maps = model.model.materials.map((m: any) => m.textures.baseColorTexture);
+            expect(new Set(maps).size).toBe(2);
+            for (const m of model.model.materials) expect(m.textures.normalMap).toBeTruthy();
         });
 
         it('drives its animation from measured speed, banded', () => {
@@ -343,8 +383,27 @@ describe.skipIf(!present)('the Night Shift example project', () => {
             const sm = model.stateMachine;
             expect(sm.parameters[0].variable.varName).toBe('planarSpeed');
             expect(sm.parameters[0].variable.source).toBe('builtin');
-            for (const t of sm.transitions)
+
+            // Only the speed-driven pair. A trigger has no threshold to band, so requiring hysteresis
+            // of every transition would have made the death edge un-authorable.
+            const banded = sm.transitions.filter((t: any) => t.condition.children[0].param === 'Speed');
+            expect(banded.length).toBe(2);
+            for (const t of banded)
                 expect(t.condition.children[0].hysteresis, `${t.from} -> ${t.to}`).toBeGreaterThan(0);
+        });
+
+        it('can reach Dying from every state it can be alive in, and never leaves it', () => {
+            const model = allNodes(zombie().nodeJson).find((n: any) => n.type === 'model');
+            const sm = model.stateMachine;
+            expect(sm.parameters.some((p: any) => p.name === 'Died' && p.type === 'trigger')).toBe(true);
+
+            const dying = sm.states.find((s: any) => s.name === 'Dying');
+            expect(dying.loop).toBe(false); // it holds the last pose until the ragdoll takes over
+
+            const alive = sm.states.filter((s: any) => s.name !== 'Dying').map((s: any) => s.name).sort();
+            const into = sm.transitions.filter((t: any) => t.to === 'Dying').map((t: any) => t.from).sort();
+            expect(into).toEqual(alive);
+            expect(sm.transitions.some((t: any) => t.from === 'Dying')).toBe(false);
         });
     });
 

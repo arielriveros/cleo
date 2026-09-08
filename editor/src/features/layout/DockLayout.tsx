@@ -23,7 +23,10 @@ const OLD_DOCK_LAYOUT_KEYS = [
   'cleo_dock_layout_v5', 'cleo_dock_layout_v6', 'cleo_dock_layout_v7', 'cleo_dock_layout_v8',
   'cleo_dock_layout_v9', 'cleo_dock_layout_v10',
 ];
-const LAYOUT_VERSION = 11;
+// 13: the AI modes came and went; a tree stored at 12 still references panels that no longer exist,
+// and one from 11 predates them. A stored tree cannot gain or lose a panel on its own, so every saved
+// arrangement is discarded.
+const LAYOUT_VERSION = 14;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -81,6 +84,7 @@ const RENDERER_PANELS = ['performance', 'rendererSettings'] as const;
 /** Input-mode panel: the action map editor. Shown only there, the same way RENDERER_PANELS are. */
 const INPUT_PANELS = ['inputMap'] as const;
 
+
 const CHROME_PANELS = [
   'scene', 'properties', 'scripts', 'physics', 'logger', 'assets',
   ...ANIMATION_PANELS, ...ANIMATION_FIELD_PANELS, ...TILEMAP_PANELS, ...ADD_PANELS,
@@ -103,6 +107,7 @@ function panelTitle(id: string, mode: EditorMode): string {
     if (mode === 'material') return 'Material';
     if (mode === 'terrainMaterial') return 'Terrain Material';
     if (mode === 'tileset') return 'Tileset';
+    if (mode === 'aiBrain') return 'Brain';
     if (mode === 'texture') return 'Texture';
     if (mode === 'soundSample') return 'Sound';
   }
@@ -302,6 +307,7 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
     case 'tileset':
     case 'texture':
     case 'soundSample':
+    case 'aiBrain':
       hide(...ADD_PANELS, 'scene', 'scripts', 'physics');
       break;
     // A script tab is a pure code editor rendered over the viewport.

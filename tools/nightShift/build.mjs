@@ -39,9 +39,20 @@ const MENU_SCENE = stableId('scene:menu')
 const MANNEQUIN_MODEL = '93cbfa0b91ad0e985b9993b34e60ad7a'
 const LOCOMOTION_FIELD = 'b7a7c98632e7754373bb3b23941a15bf'
 
-// Clips a shambling zombie needs. The mannequin carries 17, and the other 15 are 10 MB of strafe and
-// turn animation a zombie never plays — see `zombieTemplate`.
-const ZOMBIE_CLIPS = ['Idle', 'Walk']
+// The zombie's own model and clips, converted offline from `build/zombie/*.fbx` by
+// `importZombie.mjs` and committed. `build/` is gitignored, so the .fbx files cannot be a build input:
+// the example has to regenerate byte-identically on a clean checkout.
+const ZOMBIE_MODEL = path.join(HERE, 'zombieModel.json')
+const ZOMBIE_CLIPS = path.join(HERE, 'zombieClips.json')
+const ZOMBIE_TEXTURES = path.join(HERE, 'zombie')
+
+/** Texture id -> the committed file and how it is encoded. Diffuse is JPEG, normals stay PNG. */
+const ZOMBIE_MAPS = [
+  ['zombie-1001-diffuse', 'Ch10_1001_Diffuse.jpg', 'image/jpeg'],
+  ['zombie-1001-normal', 'Ch10_1001_Normal.png', 'image/png'],
+  ['zombie-1002-diffuse', 'Ch10_1002_Diffuse.jpg', 'image/jpeg'],
+  ['zombie-1002-normal', 'Ch10_1002_Normal.png', 'image/png'],
+]
 
 const reflect = loadScriptReflector(ROOT)
 
@@ -264,27 +275,50 @@ playableTemplate.nodeJson.children.push(
   playerController(playableTemplate.nodeJson.id, stableId('template:player:controller')))
 
 /**
- * The zombie: the same mannequin, driven by a brain instead of a player.
+ * The zombie: its own Mixamo character, driven by a brain instead of a player.
  *
  * The Character and its Controller go in ONE template so the controller's `possessedId` — a registered
  * node reference — is remapped per instance. Split across two, every spawned brain would drive the
  * template's original character and the whole horde would move as one body.
  *
- * Its clips are trimmed to the two a shambler uses. The other fifteen are 10 MB of strafe, turn and jump
- * animation that nothing here would ever play.
+ * The model used to be a copy of the player's mannequin with its clip list trimmed, which is why the
+ * enemies were grey debug people walking normally. It is now the real thing: a 49,593-triangle
+ * character in two material tiles, with Idle, Walk and Dying authored for it. The mannequin stays
+ * where it belongs, on the player.
  */
 function zombieTemplate() {
-  const source = playableTemplate.nodeJson
-  const model = JSON.parse(JSON.stringify(source.children.find(c => c.name === 'Ch36')))
-
-  const before = model.model.animations.length
-  model.model.animations = model.model.animations.filter(a => ZOMBIE_CLIPS.includes(a.name))
-  if (model.model.animations.length !== ZOMBIE_CLIPS.length) {
-    throw new Error(`the mannequin is missing one of ${ZOMBIE_CLIPS.join(', ')}`)
+  for (const file of [ZOMBIE_MODEL, ZOMBIE_CLIPS]) {
+    if (!fs.existsSync(file)) {
+      throw new Error(`missing ${path.relative(ROOT, file)} — run: `
+        + 'node --max-old-space-size=8192 tools/nightShift/importZombie.mjs')
+    }
   }
-  model.id = stableId('zombie:model')
-  model.stateMachine = zombieStateMachine()
-  model.ragdoll = source.children.find(c => c.name === 'Ch36').ragdoll ?? null
+
+  const payload = readJson(ZOMBIE_MODEL)
+  payload.animations = readJson(ZOMBIE_CLIPS)
+
+  for (const [id, file, mime] of ZOMBIE_MAPS) {
+    const full = path.join(ZOMBIE_TEXTURES, file)
+    if (!fs.existsSync(full)) {
+      throw new Error(`missing ${path.relative(ROOT, full)} — run: `
+        + 'python tools/nightShift/packZombieTextures.py')
+    }
+    // `usage: 'color'` for the diffuse and 'data' for the normals: a normal map read through sRGB is
+    // the classic washed-out-lighting bug, and the mannequin's own normal map is declared the same way.
+    textures.add(id, full, {
+      wrapping: 'repeat', mipMap: true, usage: id.endsWith('normal') ? 'data' : 'color',
+    }, mime)
+  }
+
+  const model = node('Ch10', 'model', {
+    id: stableId('zombie:model'),
+    model: payload,
+    stateMachine: zombieStateMachine(),
+    // The ragdoll block is pure scalar tuning — joint limits, masses, radii — with no per-bone list,
+    // so the player's settings transfer to this skeleton unchanged.
+    ragdoll: JSON.parse(JSON.stringify(
+      playableTemplate.nodeJson.children.find(c => c.name === 'Ch36').ragdoll ?? null)),
+  })
 
   const characterId = stableId('zombie:root')
   const brain = withScript(node('Brain', 'controller', {
@@ -353,12 +387,13 @@ function zombieTemplate() {
       id: stableId('template:zombie'),
       name: 'Zombie',
       nodeJson: root,
-      textureIds: [...playableTemplate.textureIds, 'fire.png'],
+      // Its own maps plus the flame sprite. The mannequin's three are NOT listed: the zombie no
+      // longer borrows its mesh, so referencing them would ship the player's textures twice.
+      textureIds: [...ZOMBIE_MAPS.map(([id]) => id), 'fire.png'],
       scripts: {},
       bodies: { [characterId]: zombieBody() },
       triggers: {},
     },
-    trimmed: before - model.model.animations.length,
   }
 }
 
@@ -407,13 +442,23 @@ function zombieBehaviour() {
 /** Two states on measured speed. A zombie has one gait, so it needs no blend space. */
 function zombieStateMachine() {
   return {
-    parameters: [{
-      name: 'Speed', type: 'variable', default: 0,
-      variable: { nodeRef: 'parent', varName: 'planarSpeed', varType: 'number', source: 'builtin' },
-    }],
+    parameters: [
+      {
+        name: 'Speed', type: 'variable', default: 0,
+        variable: { nodeRef: 'parent', varName: 'planarSpeed', varType: 'number', source: 'builtin' },
+      },
+      // Fired once by NightShiftZombie._die(). A trigger rather than a variable because death is an
+      // EVENT: a bool would have to be cleared by whatever set it, and there is nothing left alive to
+      // clear it.
+      { name: 'Died', type: 'trigger', default: false },
+    ],
     states: [
       { name: 'Idle', clipName: 'Idle', loop: true, speed: 1, isEntry: true, x: 40, y: 40 },
       { name: 'Walk', clipName: 'Walk', loop: true, speed: 1, isEntry: false, x: 260, y: 40 },
+      // No loop and no way out: the collapse plays once and the pose holds until the ragdoll takes the
+      // skeleton over. `minDwell: 0` on the way in, because a zombie that finished burning should not
+      // keep shambling for another sixth of a second.
+      { name: 'Dying', clipName: 'Dying', loop: false, speed: 1, isEntry: false, x: 150, y: 200 },
     ],
     transitions: [
       {
@@ -423,6 +468,16 @@ function zombieStateMachine() {
       {
         from: 'Walk', to: 'Idle', conditions: [], minDwell: 0.15, hasExitTime: false, exitTime: 1,
         condition: { op: 'and', children: [{ param: 'Speed', op: 'lt', value: 0.35, hysteresis: 0.2 }] },
+      },
+      // Written out per source state rather than as one `from: '*'`: the funnel is only two states
+      // wide, and a wildcard would also fire Dying -> Dying on a machine that has no way back.
+      {
+        from: 'Idle', to: 'Dying', conditions: [], minDwell: 0, hasExitTime: false, exitTime: 1,
+        condition: { op: 'and', children: [{ param: 'Died', op: 'trigger' }] },
+      },
+      {
+        from: 'Walk', to: 'Dying', conditions: [], minDwell: 0, hasExitTime: false, exitTime: 1,
+        condition: { op: 'and', children: [{ param: 'Died', op: 'trigger' }] },
       },
     ],
     events: [],
@@ -783,7 +838,7 @@ function main() {
   fs.mkdirSync(path.join(OUT, 'libraries'), { recursive: true })
   fs.mkdirSync(path.join(OUT, 'scenes'), { recursive: true })
 
-  const { template: zombie, trimmed } = zombieTemplate()
+  const { template: zombie } = zombieTemplate()
   const night = nightScene()
   const menu = menuScene()
 
@@ -843,7 +898,7 @@ function main() {
     order: 1,
   })
 
-  report({ zombie, trimmed, libraries, textureCount })
+  report({ zombie, libraries, textureCount })
 }
 
 function vfs(libraries) {
@@ -870,7 +925,14 @@ function vfs(libraries) {
   }
 }
 
-function report({ zombie, trimmed, libraries, textureCount }) {
+/** The Zombie template's own model, for the summary. */
+function zombieModelNode(zombie) {
+  return zombie.nodeJson.children.find(c => c.type === 'model')
+}
+const zombieClipCount = (z) => zombieModelNode(z).model.animations.length
+const zombieMaterialCount = (z) => (zombieModelNode(z).model.materials ?? [1]).length
+
+function report({ zombie, libraries, textureCount }) {
   const size = (file) => fs.statSync(path.join(OUT, file)).size
   const total = walkSize(OUT)
 
@@ -884,7 +946,8 @@ function report({ zombie, trimmed, libraries, textureCount }) {
   console.log('              tilesets     %d', libraries.tilesets.length)
   console.log('  textures    %d payloads   %s', textureCount, mb(textures.bytes))
   console.log('')
-  console.log('  the Zombie template drops %d unused clips from its copy of the mannequin', trimmed)
+  console.log('  the Zombie carries its own model: %d clips, %d material tiles',
+    zombieClipCount(zombie), zombieMaterialCount(zombie))
   console.log('  TOTAL %s', mb(total))
   console.log('')
   console.log('Next:  npm --prefix editor run examples:list')

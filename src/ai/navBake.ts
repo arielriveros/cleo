@@ -153,6 +153,73 @@ interface WeldedTriangles {
 }
 
 /**
+ * Twice a triangle's area, and how far its face leans from up.
+ *
+ * Split out of {@link filterAndWeld} so the editor's live preview can paint exactly the triangles a
+ * bake would keep. That sharing is the whole point: a preview computed from its own copy of this
+ * arithmetic is a preview that can be subtly wrong about the thing it exists to show, and nobody
+ * would notice until an agent refused to walk somewhere cyan.
+ *
+ * `cosSlope` is NOT an absolute value. A downward-facing triangle is a ceiling, and flipping it would
+ * turn the underside of every box collider into a floor buried inside the box.
+ */
+export function triangleSlope(
+    ax: number, ay: number, az: number,
+    bx: number, by: number, bz: number,
+    cx: number, cy: number, cz: number,
+): { cosSlope: number; twiceArea: number } {
+    // Newell-free normal: (b - a) x (c - a). Its magnitude is twice the triangle's area, so the
+    // degenerate test comes free with the slope test.
+    const abx = bx - ax, aby = by - ay, abz = bz - az;
+    const acx = cx - ax, acy = cy - ay, acz = cz - az;
+    const nx = aby * acz - abz * acy;
+    const ny = abz * acx - abx * acz;
+    const nz = abx * acy - aby * acx;
+    const twiceArea = Math.hypot(nx, ny, nz);
+    // A degenerate triangle has no direction to report; 0 reads as vertical, which every slope limit
+    // rejects. Returning NaN here would pass `<` comparisons in the wrong direction.
+    if (twiceArea === 0) return { cosSlope: 0, twiceArea: 0 };
+    return { cosSlope: (nx * UP_X + ny * UP_Y + nz * UP_Z) / twiceArea, twiceArea };
+}
+
+/**
+ * The triangles of `soup` that pass the slope and area filters, in world space.
+ *
+ * For DISPLAY ONLY, and deliberately stops before the weld: welding rewrites coordinates onto the
+ * quantisation grid, and a preview that showed snapped geometry would disagree with the surface an
+ * author is looking at by up to the weld tolerance. What survives here is what {@link bakeNavMesh}
+ * would carry into its weld, which is the question the preview is answering.
+ *
+ * Non-indexed, matching `SoupBuilder.build`.
+ */
+export function walkableSoup(soup: TriangleSoup, over?: Partial<NavBakeSettings> | null): TriangleSoup {
+    const settings = navBakeSettings(over);
+    const { positions, indices } = soup;
+    const count = indices.length > 0 ? indices.length : positions.length / 3;
+    if (count < 3) return { positions: new Float32Array(0), indices: new Uint32Array(0) };
+
+    const cosLimit = Math.cos(settings.maxSlope * Math.PI / 180);
+    const at = (i: number) => (indices.length > 0 ? indices[i] : i) * 3;
+    const out: number[] = [];
+
+    for (let t = 0; t + 2 < count; t += 3) {
+        const ia = at(t), ib = at(t + 1), ic = at(t + 2);
+        if (ia + 2 >= positions.length || ib + 2 >= positions.length || ic + 2 >= positions.length) break;
+
+        const ax = positions[ia], ay = positions[ia + 1], az = positions[ia + 2];
+        const bx = positions[ib], by = positions[ib + 1], bz = positions[ib + 2];
+        const cx = positions[ic], cy = positions[ic + 1], cz = positions[ic + 2];
+
+        const { cosSlope, twiceArea } = triangleSlope(ax, ay, az, bx, by, bz, cx, cy, cz);
+        if (twiceArea * 0.5 < settings.minTriangleArea) continue;
+        if (cosSlope < cosLimit) continue;
+
+        out.push(ax, ay, az, bx, by, bz, cx, cy, cz);
+    }
+    return { positions: new Float32Array(out), indices: new Uint32Array(0) };
+}
+
+/**
  * Slope-filter and weld in one pass.
  *
  * Welding SECOND would be wrong in a subtle way: quantising first can turn a barely-walkable sliver
@@ -180,20 +247,11 @@ function filterAndWeld(soup: TriangleSoup, settings: NavBakeSettings): WeldedTri
         const bx = positions[ib], by = positions[ib + 1], bz = positions[ib + 2];
         const cx = positions[ic], cy = positions[ic + 1], cz = positions[ic + 2];
 
-        // Newell-free normal: (b - a) x (c - a). Its magnitude is twice the triangle's area, so the
-        // degenerate test comes free with the slope test.
-        const abx = bx - ax, aby = by - ay, abz = bz - az;
-        const acx = cx - ax, acy = cy - ay, acz = cz - az;
-        const nx = aby * acz - abz * acy;
-        const ny = abz * acx - abx * acz;
-        const nz = abx * acy - aby * acx;
-        const length = Math.hypot(nx, ny, nz);
+        // Shared with `walkableSoup`, which is what lets the editor's cyan preview paint exactly the
+        // triangles this loop keeps rather than its own copy of that arithmetic.
+        const { cosSlope, twiceArea } = triangleSlope(ax, ay, az, bx, by, bz, cx, cy, cz);
 
-        if (length * 0.5 < settings.minTriangleArea) { out.rejected++; continue; }
-
-        // NOT abs(): a downward-facing triangle is a ceiling, and flipping it would turn the underside
-        // of every box collider into a floor buried inside the box.
-        const cosSlope = (nx * UP_X + ny * UP_Y + nz * UP_Z) / length;
+        if (twiceArea * 0.5 < settings.minTriangleArea) { out.rejected++; continue; }
         if (cosSlope < cosLimit) { out.rejected++; continue; }
 
         const va = weld(out.vertices, lookup, ax, ay, az, grid);

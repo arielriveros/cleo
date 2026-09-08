@@ -18,6 +18,7 @@ export type AssetLibraryContextValue = Pick<EngineValue,
   | 'animationFields' | 'addAnimationField' | 'removeAnimationField' | 'updateAnimationField'
   | 'animations' | 'addAnimation' | 'removeAnimation' | 'updateAnimation'
   | 'tilesets' | 'addTileset' | 'removeTileset' | 'updateTileset'
+  | 'aiBrains' | 'addAiBrain' | 'removeAiBrain' | 'updateAiBrain'
   | 'images' | 'addImage' | 'removeImage' | 'updateImage'
   | 'textures' | 'addTextureAsset' | 'removeTextureAsset' | 'updateTextureAsset'
   | 'audioSources' | 'addAudioSource' | 'removeAudioSource' | 'updateAudioSource'

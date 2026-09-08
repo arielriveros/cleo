@@ -5,6 +5,7 @@ import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { ScriptAsset } from './scripts'
 import type { AnimationAsset } from './animationAssets'
 import type { TilesetAsset } from './tilesets'
+import type { AiBrainAsset } from './aiBrains'
 import { isTupleBuffer } from './binaryPayload'
 
 // Content hashes let a closed scene decide, on its next open, whether each asset it references actually
@@ -143,6 +144,7 @@ export interface AssetLibs {
   terrainMaterials: TerrainMaterialAsset[]
   scripts: ScriptAsset[]
   tilesets: TilesetAsset[]
+  aiBrains: AiBrainAsset[]
   /**
    * Shared animation assets. Present so a resync can re-resolve a model's clips, but NOT hashed: changing
    * one changes what plays, never the node tree.
@@ -151,7 +153,7 @@ export interface AssetLibs {
 }
 
 /** The hash-map key for an asset of a given kind. Kept in one place so save and resync agree. */
-export function assetHashKey(kind: 'material' | 'model' | 'template' | 'terrainMaterial' | 'script' | 'tileset', id: string): string {
+export function assetHashKey(kind: 'material' | 'model' | 'template' | 'terrainMaterial' | 'script' | 'tileset' | 'aiBrain', id: string): string {
   return `${kind}:${id}`
 }
 
@@ -160,7 +162,7 @@ export function assetHashKey(kind: 'material' | 'model' | 'template' | 'terrainM
  * collectReferenced* run on the live scene), so only assets the scene uses are hashed and stored.
  */
 export function buildAssetHashes(
-  refs: { materialIds: Set<string>; modelIds: Set<string>; templateIds: Set<string>; terrainMaterialIds: Set<string>; scriptIds?: Set<string>; tilesetIds?: Set<string> },
+  refs: { materialIds: Set<string>; modelIds: Set<string>; templateIds: Set<string>; terrainMaterialIds: Set<string>; scriptIds?: Set<string>; tilesetIds?: Set<string>; aiBrainIds?: Set<string> },
   libs: AssetLibs,
 ): Record<string, string> {
   const out: Record<string, string> = {}
@@ -170,5 +172,6 @@ export function buildAssetHashes(
   for (const t of libs.terrainMaterials) if (refs.terrainMaterialIds.has(t.id)) out[assetHashKey('terrainMaterial', t.id)] = hashAsset(t)
   for (const s of libs.scripts) if (refs.scriptIds?.has(s.id)) out[assetHashKey('script', s.id)] = hashAsset(s)
   for (const t of libs.tilesets ?? []) if (refs.tilesetIds?.has(t.id)) out[assetHashKey('tileset', t.id)] = hashAsset(t)
+  for (const b of libs.aiBrains ?? []) if (refs.aiBrainIds?.has(b.id)) out[assetHashKey('aiBrain', b.id)] = hashAsset(b)
   return out
 }

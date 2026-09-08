@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-    NAV_BAKE_DEFAULTS, bakeNavMesh, navBakeSettings, simplifyContour,
+    NAV_BAKE_DEFAULTS, bakeNavMesh, navBakeSettings, simplifyContour, triangleSlope, walkableSoup,
 } from '../src/ai/navBake';
 import type { TriangleSoup } from '../src/ai/navBake';
 import { buildNavMesh } from '../src/ai/navMesh';
@@ -249,5 +249,97 @@ describe('bakeNavMesh end to end', () => {
         const positions = new Float32Array([0, 0, 0, 0, 0, 4, 4, 0, 4]);
         const indices = new Uint32Array([0, 1, 2, 0, 2, 99]);
         expect(bakeNavMesh({ positions, indices }, undefined).walkableTriangles).toBe(1);
+    });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// The preview predicate
+//
+// `walkableSoup` exists so the editor can paint, in cyan, the triangles a bake would keep -- BEFORE
+// committing to a bake. That is only worth anything if the two can never disagree, so the tests below
+// are less about walkableSoup's own behaviour than about pinning it to bakeNavMesh's.
+// ---------------------------------------------------------------------------------------------------
+
+/** A ramp of `count` quads climbing at `rise` per unit run, wound to face up. */
+function ramp(count: number, rise: number): TriangleSoup {
+    const out: number[] = [];
+    for (let i = 0; i < count; i++) {
+        const y0 = i * rise, y1 = (i + 1) * rise;
+        out.push(i, y0, 0, i, y0, 1, i + 1, y1, 1);
+        out.push(i, y0, 0, i + 1, y1, 1, i + 1, y1, 0);
+    }
+    return { positions: new Float32Array(out), indices: new Uint32Array(0) };
+}
+
+describe('triangleSlope', () => {
+    it('reads a flat upward triangle as level and reports twice its area', () => {
+        const { cosSlope, twiceArea } = triangleSlope(0, 0, 0, 0, 0, 2, 2, 0, 0);
+        expect(cosSlope).toBeCloseTo(1, 6);
+        expect(twiceArea / 2).toBeCloseTo(2, 6); // a 2x2 right triangle
+    });
+
+    it('does NOT take an absolute value, so a ceiling reads as the opposite of a floor', () => {
+        const floor = triangleSlope(0, 0, 0, 0, 0, 2, 2, 0, 0);
+        const ceiling = triangleSlope(0, 0, 0, 2, 0, 0, 0, 0, 2); // the same triangle, reversed
+        expect(floor.cosSlope).toBeCloseTo(1, 6);
+        expect(ceiling.cosSlope).toBeCloseTo(-1, 6);
+    });
+
+    it('reports a degenerate triangle as vertical rather than NaN', () => {
+        // NaN would pass `<` comparisons in the wrong direction and quietly admit a sliver.
+        const { cosSlope, twiceArea } = triangleSlope(0, 0, 0, 1, 0, 0, 2, 0, 0);
+        expect(twiceArea).toBe(0);
+        expect(cosSlope).toBe(0);
+    });
+});
+
+describe('walkableSoup', () => {
+    it('keeps exactly the triangles bakeNavMesh counts as walkable', () => {
+        // The assertion the whole preview rests on. A ramp is the right subject because its triangles
+        // sit either side of the slope limit rather than all passing.
+        const soup = ramp(8, 0.6); // ~31 degrees
+        for (const maxSlope of [0, 20, 31, 45, 89]) {
+            const preview = walkableSoup(soup, { maxSlope });
+            const baked = bakeNavMesh(soup, { maxSlope });
+            expect(preview.positions.length / 9).toBe(baked.walkableTriangles);
+        }
+    });
+
+    it('stops before the weld, so the preview shows the surface as authored', () => {
+        // A coordinate deliberately off the 0.01 weld grid. The bake would snap it; the preview must
+        // not, or the cyan sits up to a weld tolerance away from the ground it describes.
+        const soup: TriangleSoup = {
+            positions: new Float32Array([0, 0, 0, 0, 0, 2, 2.003_7, 0, 0]),
+            indices: new Uint32Array(0),
+        };
+        expect(walkableSoup(soup).positions[6]).toBeCloseTo(2.003_7, 6);
+    });
+
+    it('drops a ceiling and keeps the identical floor, because winding is the only difference', () => {
+        const soup = ramp(1, 0);
+        // Swap the last two VERTICES of each triangle (not the raw components), which reverses the
+        // winding and nothing else. The two soups describe the same plane at the same height.
+        const flat = Array.from(soup.positions);
+        const flipped: number[] = [];
+        for (let t = 0; t < flat.length; t += 9) {
+            flipped.push(...flat.slice(t, t + 3), ...flat.slice(t + 6, t + 9), ...flat.slice(t + 3, t + 6));
+        }
+        expect(walkableSoup(soup).positions.length).toBeGreaterThan(0);
+        expect(walkableSoup({
+            positions: new Float32Array(flipped), indices: new Uint32Array(0),
+        }).positions.length).toBe(0);
+    });
+
+    it('returns an empty soup for fewer than three vertices', () => {
+        expect(walkableSoup({ positions: new Float32Array([0, 0, 0]), indices: new Uint32Array(0) })
+            .positions.length).toBe(0);
+    });
+
+    it('follows the index buffer when there is one', () => {
+        const indexed: TriangleSoup = {
+            positions: new Float32Array([0, 0, 0, 0, 0, 2, 2, 0, 0]),
+            indices: new Uint32Array([0, 1, 2]),
+        };
+        expect(walkableSoup(indexed).positions.length).toBe(9);
     });
 });

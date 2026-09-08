@@ -4,6 +4,20 @@ interface MaterialConfig {
     castShadow?: boolean;
     probeable?: boolean;
     wireframe?: boolean;
+    /**
+     * Pull this surface toward the camera in CLIP space, for geometry that is coplanar with what it
+     * describes. 0 (the default) is off.
+     *
+     * The odd one out in this struct: every other field ends up on a pipeline or in a uniform, while
+     * this one is consumed by the renderer, which folds it into the projection matrix it hands the
+     * draw. See `Renderer._nudgedProjection`.
+     *
+     * Units are NDC depth, so ~1e-4 is a sensible starting point and the same value works at 5 metres
+     * and at 5 kilometres. That distance-independence is the whole point: an editor overlay lifted by
+     * a constant in WORLD space cannot work, because one depth ULP grows as z-squared and overtakes
+     * any fixed lift — measured, at about 180 units on a `far: 10000` scene.
+     */
+    depthNudge?: number;
 }
 
 interface BasicProperties extends HeightConfig {
@@ -371,7 +385,8 @@ export class Material {
             transparent: config?.transparent || false,
             castShadow: config?.castShadow === undefined ? true : config.castShadow,
             probeable: config?.probeable === undefined ? true : config.probeable,
-            wireframe: config?.wireframe || false
+            wireframe: config?.wireframe || false,
+            depthNudge: config?.depthNudge || 0
         };
     }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { mat4 } from 'gl-matrix';
 import {
-    SoupBuilder, heightfieldSoup, mergeSoups, tessellateSource, tessellateSources,
+    SoupBuilder, clipSoupToVolume, heightfieldSoup, mergeSoups, tessellateSource, tessellateSources,
 } from '../src/ai/navSources';
 import type { NavSource } from '../src/ai/navSources';
 import { bakeNavMesh } from '../src/ai/navBake';
@@ -220,5 +220,95 @@ describe('mergeSoups', () => {
 
     it('handles an empty list', () => {
         expect(mergeSoups([]).positions.length).toBe(0);
+    });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Bounds volumes
+//
+// A bake volume is the only thing standing between "navigate this room" and "navigate the level", so
+// the interesting cases are all about the BORDER: a triangle that straddles it must be cut exactly on
+// the box face, because both cheaper alternatives (centroid, any-vertex) put the border metres away
+// from where the author drew it once terrain triangles get large.
+// ---------------------------------------------------------------------------------------------------
+
+/** world -> unit cube for an axis-aligned box of `size` centred at `center`. */
+function volume(size: [number, number, number], center: [number, number, number] = [0, 0, 0]): mat4 {
+    const world = mat4.fromTranslation(mat4.create(), center);
+    mat4.scale(world, world, size);
+    return mat4.invert(mat4.create(), world)!;
+}
+
+/** One horizontal triangle at y = 0, wound so it faces up. */
+function groundTriangle(ax: number, az: number, bx: number, bz: number, cx: number, cz: number) {
+    return {
+        positions: new Float32Array([ax, 0, az, bx, 0, bz, cx, 0, cz]),
+        indices: new Uint32Array(0),
+    };
+}
+
+describe('clipSoupToVolume', () => {
+    it('returns the soup untouched when unbounded, which is the pre-volume path', () => {
+        const soup = tessellateSources([box([2, 2, 2])]);
+        expect(clipSoupToVolume(soup, null)).toBe(soup);
+    });
+
+    it('keeps a triangle wholly inside', () => {
+        const soup = groundTriangle(-1, -1, 1, -1, 0, 1);
+        const clipped = clipSoupToVolume(soup, volume([10, 10, 10]));
+        expect(clipped.positions.length).toBe(9);
+    });
+
+    it('drops a triangle wholly outside', () => {
+        const soup = groundTriangle(20, 20, 22, 20, 21, 22);
+        expect(clipSoupToVolume(soup, volume([10, 10, 10])).positions.length).toBe(0);
+    });
+
+    it('cuts a straddling triangle exactly on the box face', () => {
+        // Spans x = -1..9 through a box whose +X face sits at x = 5. Nothing may survive past it, and
+        // the cut edge must land ON the plane rather than at the nearest original vertex.
+        const soup = groundTriangle(-1, -1, 9, -1, 9, 1);
+        const clipped = clipSoupToVolume(soup, volume([10, 10, 10]));
+
+        const xs = [];
+        for (let i = 0; i < clipped.positions.length; i += 3) xs.push(clipped.positions[i]);
+        expect(xs.length).toBeGreaterThan(0);
+        for (const x of xs) expect(x).toBeLessThanOrEqual(5 + 1e-6);
+        // At least one vertex was manufactured on the plane; without the clip the max would be 9.
+        expect(Math.max(...xs)).toBeCloseTo(5, 6);
+    });
+
+    it('honours a rotated volume, since the box is oriented rather than axis-aligned', () => {
+        // A box rotated 45 degrees about Y. A point at (3.4, 0, 0) is inside the AABB of the rotated
+        // box but OUTSIDE the box itself, so an AABB test would keep this triangle and a real one
+        // must not.
+        const world = mat4.fromYRotation(mat4.create(), Math.PI / 4);
+        mat4.scale(world, world, [4, 4, 4]);
+        const inv = mat4.invert(mat4.create(), world)!;
+
+        const outside = groundTriangle(3.4, 0, 3.6, 0, 3.5, 0.1);
+        expect(clipSoupToVolume(outside, inv).positions.length).toBe(0);
+
+        const inside = groundTriangle(0, 0, 0.4, 0, 0.2, 0.4);
+        expect(clipSoupToVolume(inside, inv).positions.length).toBe(9);
+    });
+
+    it('treats a zero-extent volume as containing nothing, not as unbounded', () => {
+        const degenerate = mat4.create();
+        degenerate[0] = NaN; // an inverse that does not exist
+        const soup = groundTriangle(-1, -1, 1, -1, 0, 1);
+        expect(clipSoupToVolume(soup, degenerate).positions.length).toBe(0);
+    });
+
+    it('leaves the clipped surface walkable, so the box never changes what a bake decides', () => {
+        // The whole point: clipping must only remove area, never rotate or re-wind what is left.
+        const resolution = 5;
+        const heights = new Float32Array(resolution * resolution);
+        const soup = heightfieldSoup({ heights, resolution, elementSize: 1, origin: [0, 0, 0] });
+        const clipped = clipSoupToVolume(soup, volume([2, 10, 2]));
+
+        const baked = bakeNavMesh(clipped);
+        expect(baked.walkableTriangles).toBeGreaterThan(0);
+        expect(baked.rejectedTriangles).toBe(0);
     });
 });

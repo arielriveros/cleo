@@ -1,5 +1,7 @@
 import { mat4, quat, vec3 } from 'gl-matrix'
-import { LandscapeNode, Node, heightfieldSoup, mergeSoups, tessellateSources } from 'cleo'
+import {
+  LandscapeNode, Node, clipSoupToVolume, heightfieldSoup, mergeSoups, tessellateSources,
+} from 'cleo'
 import type { NavSource, TriangleSoup } from 'cleo'
 import type { BodyDescription, ShapeDescription } from '../features/engineContextTypes'
 
@@ -101,6 +103,11 @@ export interface NavBakeGatherOptions {
   terrainStep?: number
   /** Include terrain heightfields. */
   includeTerrain?: boolean
+  /**
+   * The navmesh node's bake volume as a world -> unit-cube matrix, or null/absent for the whole
+   * scene. Comes straight off `NavMeshNode.invVolumeMatrix`.
+   */
+  volume?: mat4 | null
 }
 
 export interface NavBakeGatherResult {
@@ -109,6 +116,8 @@ export interface NavBakeGatherResult {
   colliders: number
   /** Terrain nodes sampled. */
   terrains: number
+  /** Triangles left after the bake volume clipped the gathered soup. */
+  clippedTriangles: number
 }
 
 /**
@@ -119,7 +128,7 @@ export interface NavBakeGatherResult {
  * without it routes straight through the doorway it will later block.
  */
 export function gatherNavSoup(root: Node, options: NavBakeGatherOptions): NavBakeGatherResult {
-  const { bodies, includeTerrain = true, terrainStep = 2 } = options
+  const { bodies, includeTerrain = true, terrainStep = 2, volume = null } = options
   const sources: NavSource[] = []
   const soups: TriangleSoup[] = []
   let colliders = 0
@@ -157,5 +166,11 @@ export function gatherNavSoup(root: Node, options: NavBakeGatherOptions): NavBak
   visit(root)
 
   if (sources.length > 0) soups.push(tessellateSources(sources))
-  return { soup: mergeSoups(soups), colliders, terrains }
+
+  // Clipped AFTER gathering rather than during it. The obvious optimisation is to hand the volume's
+  // AABB to `heightfieldSoup` so it never triangulates rows outside the box, and it is worth doing if
+  // terrain gathering ever shows up in a profile -- but the bake is a one-shot button and the live
+  // preview re-clips a cached soup, so today it would buy nothing and split the clipping logic in two.
+  const soup = clipSoupToVolume(mergeSoups(soups), volume)
+  return { soup, colliders, terrains, clippedTriangles: soup.positions.length / 9 }
 }

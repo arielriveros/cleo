@@ -267,3 +267,98 @@ export function mergeSoups(soups: readonly TriangleSoup[]): TriangleSoup {
     }
     return { positions: positions.subarray(0, offset), indices: new Uint32Array(0) };
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Bounds volumes
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * Clip a world-space soup to an oriented box.
+ *
+ * `invMatrix` maps world space into the box's UNIT CUBE, so the six clip planes are just `+-0.5` on
+ * each axis and no plane equations need deriving. `NavMeshNode.invVolumeMatrix` produces exactly this,
+ * the same way `LightProbeNode` expresses its influence volume. A `null` matrix means "unbounded" and
+ * returns the soup untouched, which is the path every scene authored before volumes existed takes.
+ *
+ * ## Why an exact clip rather than a centroid or any-vertex test
+ *
+ * Both cheaper tests were tried on real terrain and both look broken. A heightfield triangle at the
+ * default sample step is several metres across, so an all-or-nothing decision leaves a border that
+ * wanders metres either side of the box the author drew -- over-reaching into a room they excluded, or
+ * biting a chunk out of the one they meant to include. Clipping makes the navmesh stop ON the box
+ * face, which is what sizing a box to a room means.
+ *
+ * A triangle clipped by a convex box is always a convex polygon, so `SoupBuilder.polygon`'s fan is a
+ * valid triangulation -- the same property every primitive in this file already relies on.
+ */
+export function clipSoupToVolume(soup: TriangleSoup, invMatrix: mat4 | null): TriangleSoup {
+    if (!invMatrix) return soup;
+
+    const { positions, indices } = soup;
+    const count = indices.length > 0 ? indices.length : positions.length / 3;
+    if (count < 3) return { positions: new Float32Array(0), indices: new Uint32Array(0) };
+
+    // Back to world afterwards. An inverse that does not exist means a volume with a zero extent on
+    // some axis, which contains nothing -- so the honest answer is an empty soup, not the whole level.
+    const toWorld = mat4.invert(mat4.create(), invMatrix);
+    if (!toWorld) return { positions: new Float32Array(0), indices: new Uint32Array(0) };
+
+    const at = (i: number) => (indices.length > 0 ? indices[i] : i) * 3;
+    const builder = new SoupBuilder();
+    const scratch = vec3.create();
+
+    for (let t = 0; t + 2 < count; t += 3) {
+        const ia = at(t), ib = at(t + 1), ic = at(t + 2);
+        if (ia + 2 >= positions.length || ib + 2 >= positions.length || ic + 2 >= positions.length) break;
+
+        // Into unit-cube space, where clipping is six axis-aligned comparisons.
+        let poly: number[][] = [];
+        for (const base of [ia, ib, ic]) {
+            vec3.set(scratch, positions[base], positions[base + 1], positions[base + 2]);
+            vec3.transformMat4(scratch, scratch, invMatrix);
+            poly.push([scratch[0], scratch[1], scratch[2]]);
+        }
+
+        for (let axis = 0; axis < 3 && poly.length >= 3; axis++) {
+            poly = clipToHalfSpace(poly, axis, 1);   // keep <= +0.5
+            if (poly.length < 3) break;
+            poly = clipToHalfSpace(poly, axis, -1);  // keep >= -0.5
+        }
+        if (poly.length < 3) continue;
+
+        builder.polygon(poly, toWorld);
+    }
+    return builder.build();
+}
+
+/**
+ * Sutherland-Hodgman against one face of the unit cube.
+ *
+ * `sign` +1 keeps points with `p[axis] <= 0.5`, -1 keeps `p[axis] >= -0.5`. Expressed as a signed
+ * distance so both faces share one crossing calculation; a point exactly on the plane counts as
+ * inside, which is what stops a triangle that merely touches the box face from being dropped.
+ */
+function clipToHalfSpace(poly: readonly number[][], axis: number, sign: number): number[][] {
+    const out: number[][] = [];
+    const distance = (p: readonly number[]) => 0.5 - sign * p[axis];
+
+    for (let i = 0; i < poly.length; i++) {
+        const current = poly[i];
+        const next = poly[(i + 1) % poly.length];
+        const dc = distance(current);
+        const dn = distance(next);
+
+        if (dc >= 0) out.push([current[0], current[1], current[2]]);
+        // Strictly opposite signs only: two points both ON the plane must not manufacture a crossing,
+        // which would emit a duplicate vertex and, with enough of them, a zero-area sliver.
+        if ((dc > 0 && dn < 0) || (dc < 0 && dn > 0)) {
+            const t = dc / (dc - dn);
+            out.push([
+                current[0] + (next[0] - current[0]) * t,
+                current[1] + (next[1] - current[1]) * t,
+                current[2] + (next[2] - current[2]) * t,
+            ]);
+        }
+    }
+    return out;
+}

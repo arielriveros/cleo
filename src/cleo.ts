@@ -125,9 +125,11 @@ export type {
 // ours, and no Yuka TYPE is re-exported here on purpose -- `cleoTypes.ts` feeds dist's declarations to
 // Monaco alongside a hand-listed set of `?raw` dependency types, and a dependency it has not been told
 // about degrades to `any` silently, because skipLibCheck swallows it.
-export { NavMeshNode, parseRoutes, parseLinks, isDefaultNavMeshSettings } from "./core/scene/nodes/navMeshNode";
 export {
-    SoupBuilder, heightfieldSoup, mergeSoups, tessellateSource, tessellateSources,
+    NavMeshNode, parseRoutes, parseLinks, parseSize, parseBakedVolume, isDefaultNavMeshSettings,
+} from "./core/scene/nodes/navMeshNode";
+export {
+    SoupBuilder, clipSoupToVolume, heightfieldSoup, mergeSoups, tessellateSource, tessellateSources,
 } from "./ai/navSources";
 export type { HeightfieldSource, NavPrimitive, NavSource } from "./ai/navSources";
 export {
@@ -161,6 +163,7 @@ export {
 export type { NavMeshData, NavMeshJson, NavMeshBuildOptions, NavRoute, OffMeshLink } from "./ai/navMesh";
 export {
     NAV_BAKE_DEFAULTS, EMPTY_BAKE_RESULT, bakeNavMesh, navBakeSettings, simplifyContour,
+    triangleSlope, walkableSoup,
 } from "./ai/navBake";
 export type { NavBakeSettings, NavBakeResult, TriangleSoup } from "./ai/navBake";
 export {

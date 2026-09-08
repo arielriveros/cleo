@@ -249,3 +249,52 @@ describe('the tolerant reader', () => {
         expect(parseFuzzyModel({ defuzzification: 'nonsense' }).defuzzification).toBe('maxav');
     });
 });
+
+// ---------------------------------------------------------------------------------------------------
+// Canvas coordinates
+//
+// Rules carry a position as well as variables, because on the Fuzzy canvas a rule is a NODE, not an
+// edge: it reads several antecedent variables and writes one consequent, which is a hyper-edge no
+// pairwise link can express.
+// ---------------------------------------------------------------------------------------------------
+
+const SETS = [{ name: 'low', shape: 'triangular', left: 0, mid: 25, right: 50 }];
+
+describe('fuzzy layout coordinates', () => {
+    it('round-trips a variable position', () => {
+        const model = parseFuzzyModel({ variables: [{ name: 'distance', sets: SETS, x: 8, y: 9 }] });
+        expect([model.variables[0].x, model.variables[0].y]).toEqual([8, 9]);
+    });
+
+    it('round-trips a rule position', () => {
+        const model = parseFuzzyModel({
+            variables: [{ name: 'distance', sets: SETS }],
+            rules: [{
+                antecedent: { op: 'is', variable: 'distance', set: 'low' },
+                variable: 'distance', set: 'low', x: 300, y: 40,
+            }],
+        });
+        expect([model.rules[0].x, model.rules[0].y]).toEqual([300, 40]);
+    });
+
+    it('leaves unplaced entries without coordinates', () => {
+        const model = parseFuzzyModel({ variables: [{ name: 'distance', sets: SETS }] });
+        expect(model.variables[0].x).toBeUndefined();
+        expect(model.variables[0].y).toBeUndefined();
+    });
+
+    it('drops HALF a coordinate rather than pinning the node to x = 0', () => {
+        for (const partial of [{ x: 5 }, { y: 5 }, { x: Infinity, y: 5 }]) {
+            const model = parseFuzzyModel({ variables: [{ name: 'd', sets: SETS, ...partial }] });
+            expect(model.variables[0].x).toBeUndefined();
+            expect(model.variables[0].y).toBeUndefined();
+        }
+    });
+
+    it('does not let a coordinate rescue an entry the reader would otherwise drop', () => {
+        // A variable with no sets has an empty range, so every fuzzify against it is out of range --
+        // and out-of-range input silently returns the PREVIOUS answer. It must still be dropped.
+        const model = parseFuzzyModel({ variables: [{ name: 'distance', sets: [], x: 1, y: 2 }] });
+        expect(model.variables).toEqual([]);
+    });
+});

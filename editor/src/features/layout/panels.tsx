@@ -4,7 +4,8 @@ import EngineViewport from '../EngineViewport';
 import UIEditorLayer from '../gameUi/UIEditorLayer';
 import VirtualControlsLayer from '../gameUi/VirtualControlsLayer';
 import StateGraph from '../animation/StateGraph';
-import BehaviorGraph from '../ai/BehaviorGraph';
+import AiBrainTabView from '../ai/AiBrainTabView';
+import AiBrainInspector from '../ai/AiBrainInspector';
 import LoadingScreen from '../../components/LoadingScreen';
 import SceneInspector from '../sceneInspector/SceneInspector';
 import AddNew from '../sceneInspector/AddNew';
@@ -56,10 +57,9 @@ function ViewportPanel(_: IDockviewPanelProps) {
       {MODE_RENDERS_VIEWPORT[editorMode] && <UIEditorLayer />}
       {/* Animation-mode node graph overlays the viewport when Graph view is active */}
       <StateGraph />
-      {/* The AI behaviour machine on the same canvas, opened from a Controller's inspector. Gated on
-          its own node id rather than an editor mode: it edits ONE controller, and a scene tab is
-          where you were when you opened it. */}
-      <BehaviorGraph />
+      {/* AI Brain mode: the brain's graph (or its fuzzy model) fills the main area, like the script
+          and tileset editors. Which graph is the asset's own kind, not a mode. */}
+      <AiBrainTabView />
       {/* Script mode: the dedicated code editor fills the main area (no 3D preview) */}
       {editorMode === 'script' && <ScriptTabView />}
       {/* Tileset mode: the atlas + slicing grid fills the main area (also no 3D preview) */}
@@ -134,6 +134,7 @@ function PropertiesPanel(_: IDockviewPanelProps) {
   if (editorMode === 'tileset') return <SidePanel><TilesetInspector /></SidePanel>;
   if (editorMode === 'texture') return <SidePanel><TextureSettingsPanel /></SidePanel>;
   if (editorMode === 'soundSample') return <SidePanel><SoundSettingsPanel /></SidePanel>;
+  if (editorMode === 'aiBrain') return <SidePanel><AiBrainInspector /></SidePanel>;
   // Mesh mode keeps the normal node inspector below the mesh-level controls (LOD levels + cull).
   if (editorMode === 'model') return (
     <SidePanel>

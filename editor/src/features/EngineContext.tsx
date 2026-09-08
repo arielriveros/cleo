@@ -38,6 +38,8 @@ import { AnimationAsset, buildAnimationAsset, storeSkin, findEquivalentAnimation
 import { modelAssetSkin, applyModelAnimations, invalidateAnimationCache, resolveAnimationAsset } from "../utils/animationResolve";
 import { AnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
 import { TilesetAsset, reembedTilesets, detachTileset } from "../utils/tilesets";
+import { AiBrainAsset, AiBrainKind, buildAiBrainAsset, reembedBrains, detachBrain } from "../utils/aiBrains";
+import type { ControllerNode } from "cleo";
 import type { ImageAsset } from "../utils/images";
 import type { AudioSourceAsset } from "../utils/audioSources";
 import type { SoundSampleAsset } from "../utils/soundSamples";
@@ -71,6 +73,7 @@ import {
   collectReferencedMaterialIds, collectReferencedModelIds, collectReferencedTemplateIds,
   collectReferencedTerrainMaterialIds, collectReferencedTextureIds, collectReferencedScriptIds,
   collectReferencedTilesetIds,
+  collectReferencedAiBrainIds,
 } from "../utils/references";
 import { idbGet, idbSet } from "../utils/idb";
 import { EDITOR_CAMERA_MAP } from "./input/editorInputMap";
@@ -81,7 +84,7 @@ import { activeProjectId } from "../utils/projectScope";
 import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextureIds, legacyTexturesOf, deleteTextures } from "../utils/textureStore";
 import { preloadAudio, persistAudio } from "../utils/audioStore";
 import { startTask, StepStatus } from "./progress/progressStore";
-import { reconcileEditorHelpers } from "../utils/editorHelpers";
+import { invalidateNavSoup, reconcileEditorHelpers } from "../utils/editorHelpers";
 import { readBackendPreference } from './renderer/backendPreference';
 import { deepClone } from '../utils/deepClone';
 import { buildProbeIconDataURL, buildLightIconDataURL, buildSoundIconDataURL } from './editorIcons';
@@ -91,6 +94,7 @@ import { useAssetThumbnails } from './hooks/useAssetThumbnails';
 import { useSaving } from './hooks/useSaving';
 import { usePendingDecisions } from './hooks/usePendingDecisions';
 import { useTilesetEditor } from './hooks/useTilesetEditor';
+import { useAiBrainEditor } from './hooks/useAiBrainEditor';
 import { useTextureEditor } from './hooks/useTextureEditor';
 import { useSoundEditor } from './hooks/useSoundEditor';
 import { useAnimationFieldEditor } from './hooks/useAnimationFieldEditor';
@@ -160,6 +164,7 @@ const EngineContext = createContext<{
   registerTextureApply: (reg: { tabId: string; apply: () => void } | null) => void;
   /** SoundProvider hands its save back here, so Ctrl+S and Save All can reach a sound tab by id. */
   registerSoundApply: (reg: { tabId: string; apply: () => void } | null) => void;
+  registerAiBrainApply: (reg: { tabId: string; apply: () => void } | null) => void;
   enterTemplateEditor: (templateId?: string) => void;
   editingTemplateName: string | null;
   templateRootId: string | null;
@@ -181,15 +186,6 @@ const EngineContext = createContext<{
   animationSourceId: string | null; // original node in the main scene (state-machine write-back target)
   animationSourceScene: Scene | null; // scene the source node lives in (for Variable parameter pickers)
   commitAnimationStateMachine: (sm: any) => void;
-  /**
-   * The ControllerNode whose behaviour graph is open over the viewport, or null.
-   *
-   * A node id rather than a boolean: the graph edits ONE controller's machine, and holding the id
-   * means a deleted or deselected controller closes it for free rather than leaving a canvas editing
-   * something that no longer exists.
-   */
-  behaviorGraphId: string | null;
-  setBehaviorGraphId: (id: string | null) => void;
   terrainBrush: React.MutableRefObject<TerrainBrushState>;
   tilemapBrush: React.MutableRefObject<TilemapBrushState>;
   loadingProgress: LoadingProgress;
@@ -290,6 +286,8 @@ const EngineContext = createContext<{
   updateSoundSample: (id: string, s: SoundSampleAsset) => void;
   /** The sample asset the active sound tab edits, or null. */
   editingSoundId: string | null;
+  /** The AI brain the active tab edits, or null when the active tab is not one. */
+  editingAiBrainId: string | null;
   /** Open (or focus) a Sound Sample asset's edit tab. */
   enterSoundEditor: (sampleId?: string) => void;
   /** Write an edited sample back to the library and retune the live Sound. */
@@ -301,8 +299,20 @@ const EngineContext = createContext<{
   addTileset: (t: TilesetAsset) => void;
   removeTileset: (id: string) => void;
   updateTileset: (id: string, t: TilesetAsset) => void;
+  // AI Brain assets (a behaviour machine or a goal graph, plus the fuzzy model it reads)
+  aiBrains: AiBrainAsset[];
+  addAiBrain: (b: AiBrainAsset) => void;
+  removeAiBrain: (id: string) => void;
+  updateAiBrain: (id: string, b: AiBrainAsset) => void;
 /** Open (or focus) a Tileset asset's edit tab. Creates a fresh, atlas-less one when given no id. */
   enterTilesetEditor: (tilesetId?: string) => void;
+  /** Open an AI brain's tab, minting one of `kind` when called with no id. */
+  enterAiBrainEditor: (brainId?: string, kind?: AiBrainKind, adoptTabId?: string) => void;
+  /** Copy a controller's inline brain into a new library asset and link it. */
+  extractBrainFromController: (controller: ControllerNode, name?: string) => AiBrainAsset;
+  /** Copy a library brain onto a controller, or pass null to unlink without changing behaviour. */
+  linkBrainToController: (controller: ControllerNode, brainId: string | null) => void;
+  saveAiBrain: (asset: AiBrainAsset) => void;
   /** Import an image file as an atlas, build a tileset sliced around it, and open it. */
   createTilesetFromImage: (file: File) => Promise<TilesetAsset | null>;
   /** The tileset asset the active tileset tab edits, or null. */
@@ -420,8 +430,6 @@ const EngineContext = createContext<{
     mainScene: new Scene(),
     eventEmitter: new EventEmitter(),
     selectedNode: null,
-    behaviorGraphId: null,
-    setBehaviorGraphId: () => {},
     isGizmoDragging: false,
     isPlayMode: false,
     isSceneReady: false,
@@ -444,6 +452,7 @@ const EngineContext = createContext<{
     registerTilesetApply: () => {},
     registerTextureApply: () => {},
     registerSoundApply: () => {},
+    registerAiBrainApply: () => {},
     enterTemplateEditor: () => {},
     editingTemplateName: null,
     templateRootId: null,
@@ -526,6 +535,7 @@ const EngineContext = createContext<{
     removeSoundSample: () => {},
     updateSoundSample: () => {},
     editingSoundId: null,
+    editingAiBrainId: null,
     enterSoundEditor: () => {},
     saveSoundSample: () => {},
     previewSoundSettings: () => {},
@@ -533,8 +543,16 @@ const EngineContext = createContext<{
     tilesets: [],
     addTileset: () => {},
     removeTileset: () => {},
+    aiBrains: [],
+    addAiBrain: () => {},
+    removeAiBrain: () => {},
+    updateAiBrain: () => {},
     updateTileset: () => {},
     enterTilesetEditor: () => {},
+    enterAiBrainEditor: () => {},
+    extractBrainFromController: () => buildAiBrainAsset('', 'behavior'),
+    linkBrainToController: () => {},
+    saveAiBrain: () => {},
     createTilesetFromImage: async () => null,
     editingTilesetId: null,
     editingTextureId: null,
@@ -624,7 +642,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const editorSceneRef = useRef<Scene>(createEditorScene());
   const eventEmitter = useRef(new EventEmitter());
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [behaviorGraphId, setBehaviorGraphId] = useState<string | null>(null);
+  // Read by the helper reconciler, which runs off an rAF rather than a render and so cannot close
+  // over the state. Only the navmesh bake-volume overlays care.
+  const selectedNodeRef = useRef<string | null>(null);
+  selectedNodeRef.current = selectedNode;
   const [isGizmoDragging, setIsGizmoDragging] = useState(false);
   const [isPlayMode, setIsPlayMode] = useState(false);
   const [isSceneReady, setIsSceneReady] = useState(false);
@@ -1112,6 +1133,46 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (open) removeTabById(open.id);
   };
 
+  // AI BRAINS. Same arrangement as tilesets, and for the same reason: a ControllerNode keeps a full copy
+  // of the machine/goals/fuzzy it runs, so this library is the authoring source of truth and the embedded
+  // copies are refreshed from it on save (see reembedBrains).
+  const [aiBrains, setAiBrains] = useState<AiBrainAsset[]>([]);
+  const aiBrainsLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<AiBrainAsset[]>(libKey('aiBrains'));
+        if (list && list.length) setAiBrains(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load AI brains:', e); }
+      finally { aiBrainsLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary(libKey('aiBrains'), aiBrains, aiBrainsLoadedRef);
+
+  const aiBrainsRef = useRef<AiBrainAsset[]>([]);
+  aiBrainsRef.current = aiBrains;
+
+  const addAiBrain = (b: AiBrainAsset) => setAiBrains(prev => [...prev, b]);
+  const updateAiBrain = (id: string, b: AiBrainAsset) => {
+    setAiBrains(prev => prev.map(x => x.id === id ? b : x));
+    // Push the edit into every controller holding an older copy, across every live scene — otherwise an
+    // edited brain would only reach agents linked after the edit.
+    const next = aiBrainsRef.current.map(x => x.id === id ? b : x);
+    let changed = false;
+    for (const scene of liveScenes()) if (reembedBrains(scene, next)) changed = true;
+    if (changed) eventEmitter.current.emit('SCENE_CHANGED');
+  };
+  const removeAiBrain = (id: string) => {
+    setAiBrains(prev => prev.filter(x => x.id !== id));
+    // Drop the LINK only. Every controller keeps the brain it copied and goes on behaving identically —
+    // deleting a library entry should not lobotomise the agents that used it.
+    let changed = false;
+    for (const scene of liveScenes()) if (detachBrain(scene, id)) changed = true;
+    if (changed) eventEmitter.current.emit('SCENE_CHANGED');
+    const open = tabsRef.current.find(t => t.kind === 'aiBrain' && t.aiBrainId === id);
+    if (open) removeTabById(open.id);
+  };
+
   // The two halves of the image/texture split. An ImageAsset is metadata over the bytes that already live
   // in the `textures` IndexedDB store; a TextureAsset is a byte source plus every sampling decision, and
   // its id IS the TextureManager id every serialized material already references.
@@ -1346,7 +1407,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     if (assetsLoaded) return;
     const timer = window.setInterval(() => {
-      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && animationsLoadedRef.current && scenesLoadedRef.current && imagesLoadedRef.current && texturesLoadedRef.current && audioSourcesLoadedRef.current && soundSamplesLoadedRef.current) {
+      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && animationsLoadedRef.current && scenesLoadedRef.current && imagesLoadedRef.current && texturesLoadedRef.current && audioSourcesLoadedRef.current && soundSamplesLoadedRef.current && aiBrainsLoadedRef.current) {
         setAssetsLoaded(true);
         window.clearInterval(timer);
       }
@@ -1382,6 +1443,55 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     Logger.info(`Migrated ${fresh.length} sprite sheet${fresh.length === 1 ? '' : 's'} to tileset assets`, 'Editor');
     eventEmitter.current.emit('SCENE_CHANGED');
   };
+  /**
+   * One-shot upgrade of controllers that carry a brain authored inline, from before AI Brain assets
+   * existed: the machine (or goal graph) plus its fuzzy model becomes a library asset, and the
+   * controller is linked to it.
+   *
+   * COPIED, never moved. The controller keeps the brain it was already running, so behaviour is
+   * identical either side of this — it simply starts saying where that brain came from, which is what
+   * makes it reusable and editable in its own tab.
+   *
+   * Self-limiting by construction: once `brainId` is set the condition is false, so this cannot run
+   * twice on the same controller and needs no migration flag of its own. It DOES leave the scene dirty,
+   * which the toast says out loud — a scene that reports unsaved changes the moment it opens is
+   * otherwise alarming.
+   */
+  const brainMigrationDoneRef = useRef(false);
+  const migrateInlineBrains = (): void => {
+    if (brainMigrationDoneRef.current) return;
+    brainMigrationDoneRef.current = true;
+
+    const fresh: AiBrainAsset[] = [];
+    for (const scene of liveScenes()) {
+      for (const controller of scene.controllers) {
+        if (controller.brainId) continue;
+        // Nothing authored means nothing to extract: a controller that never had a brain must not
+        // acquire an empty asset it will never use.
+        const authored = controller.behavior.states.length > 0
+          || controller.goals.goals.length > 0
+          || controller.fuzzy.variables.length > 0;
+        if (!authored) continue;
+
+        const asset = buildAiBrainAsset(`${controller.name} brain`,
+          controller.brain === 'goal' ? 'goals' : 'behavior');
+        asset.machine = controller.behavior;
+        asset.graph = controller.goals;
+        asset.fuzzy = controller.fuzzy;
+        controller.brainId = asset.id;
+        fresh.push(asset);
+      }
+    }
+    if (!fresh.length) return;
+
+    aiBrainsRef.current = [...aiBrainsRef.current, ...fresh];
+    setAiBrains(prev => [...prev, ...fresh]);
+    Logger.info(
+      `Moved ${fresh.length} inline AI brain${fresh.length === 1 ? '' : 's'} into the asset library. ` +
+      `Behaviour is unchanged; save the scene to keep the links.`, 'Editor');
+    eventEmitter.current.emit('SCENE_CHANGED');
+  };
+
   useEffect(() => {
     if (initialResyncDoneRef.current || !assetsLoaded || !isSceneReady) return;
     const stashed = initialAssetHashesRef.current;
@@ -1411,6 +1521,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Promotes inline-tileset sprites to real library assets so they can be edited. Async (it waits on
     // atlas decodes) and deliberately not awaited: an upgrade, not a precondition for showing the scene.
     void migrateSprites();
+    migrateInlineBrains();
     // The libraries are deps so the skip-when-empty branch above retries; initialResyncDoneRef keeps it to
     // one real pass.
   }, [assetsLoaded, isSceneReady, materials, models, templates, terrainMaterials, scriptAssets]);
@@ -1437,6 +1548,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         case 'model': return libs.models.some(m => m.id === id);
         case 'script': return libs.scripts.some(s => s.id === id);
         case 'tileset': return libs.tilesets.some(t => t.id === id);
+        case 'aiBrain': return libs.aiBrains.some(b => b.id === id);
         case 'texture': return texturesRef.current.some(t => t.id === id);
         case 'soundSample': return soundSamplesRef.current.some(x => x.id === id);
         // A field also needs the model it blends — enterAnimationFieldEditor refuses to open without it.
@@ -1575,6 +1687,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const editingTilesetId = activeTab.kind === 'tileset' ? (activeTab.tilesetId ?? null) : null;
   const editingTextureId = activeTab.kind === 'texture' ? (activeTab.textureId ?? null) : null;
   const editingSoundId = activeTab.kind === 'soundSample' ? (activeTab.soundId ?? null) : null;
+  const editingAiBrainId = activeTab.kind === 'aiBrain' ? (activeTab.aiBrainId ?? null) : null;
 
   // Non-reactive mirrors of the tab list, the mesh sessions and the asset libraries. The save + propagation
   // paths read these rather than the render-scoped state: Save All walks tabs sequentially with an await
@@ -1621,7 +1734,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const currentLibs = (): AssetLibs => ({
     materials: materialsRef.current, models: modelsRef.current, templates: templatesRef.current,
     terrainMaterials: terrainMaterialsRef.current, scripts: scriptAssetsRef.current,
-    tilesets: tilesetsRef.current, animations: animationsRef.current,
+    tilesets: tilesetsRef.current, aiBrains: aiBrainsRef.current, animations: animationsRef.current,
   });
 
   // Open (or focus) a template editor tab. Each template tab owns its own throwaway edit scene.
@@ -2262,6 +2375,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       case 'script': enterScriptEditor(assetId, tab.id); break;
       // A tileset tab is a pure 2D editor over the library record — nothing to build, so it is live already.
       case 'tileset': return !!tab.tilesetId && tilesetsRef.current.some(t => t.id === tab.tilesetId);
+      case 'aiBrain': return !!tab.aiBrainId && aiBrainsRef.current.some(b => b.id === tab.aiBrainId);
       // Same for a texture tab: a 2D viewer over the record, with no scene behind it.
       case 'texture': return !!tab.textureId && texturesRef.current.some(t => t.id === tab.textureId);
       // And for a sound tab: a waveform and a settings panel over the record.
@@ -3266,6 +3380,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     addTileset, updateTileset, setActiveTab, commitTab, clearTabDirty,
   });
 
+  // ---- AI Brain editor -------------------------------------------------------------------------------
+  const {
+    enterAiBrainEditor, extractBrainFromController, linkBrainToController, saveAiBrain,
+  } = useAiBrainEditor({
+    aiBrainsRef, tabsRef, setTabs,
+    addAiBrain, updateAiBrain, setActiveTab, commitTab, clearTabDirty,
+  });
+
   // ---- Texture editor --------------------------------------------------------------------------------
   const { enterSoundEditor, saveSoundSample, previewSoundSettings } = useSoundEditor({
     soundSamplesRef, tabsRef, setTabs, updateSoundSample, setActiveTab, commitTab, clearTabDirty,
@@ -3843,12 +3965,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       const tmSet = collectReferencedTerrainMaterialIds(scene);
       const scriptSet = collectReferencedScriptIds(scene);
       const tilesetSet = collectReferencedTilesetIds(scene);
+      const brainSet = collectReferencedAiBrainIds(scene);
       const refs: SceneRefs = {
         materialIds: Array.from(matSet),
         modelIds: Array.from(modelSet),
         templateIds: Array.from(tplSet),
         terrainMaterialIds: Array.from(tmSet),
         tilesetIds: Array.from(tilesetSet),
+        aiBrainIds: Array.from(brainSet),
         textureIds: Array.from(referencedTextureIds(materials, terrainMaterials, templates, models, tilesets)),
       };
       // Per-asset content hashes let a *closed* scene tell, when reopened, which referenced assets
@@ -3886,7 +4010,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // ---- Saving: one action per tab, plus Save All ------------------------------------------------
   const {
-    registerAnimationApply, registerTilesetApply, registerTextureApply, registerSoundApply, saveTabById, runSave,
+    registerAnimationApply, registerTilesetApply, registerTextureApply, registerSoundApply,
+    registerAiBrainApply, saveTabById, runSave,
     saveActiveTab, saveAll, saveProjectToStorage,
   } = useSaving({
     tabsRef, dirtyTabsRef, activeTabIdRef, setSavingState,
@@ -4273,26 +4398,42 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           // the editor scene, so the bodies/triggers maps still resolve). Still __debug__-named, so still
           // stripped from any real publish. No withoutDirty — play mode never marks the tab dirty.
           const playScene = instanceRef.current?.scene;
-          if (playScene) reconcileEditorHelpers(playScene, bodiesRef.current, triggersRef.current, vis, 'runtime');
+          if (playScene) reconcileEditorHelpers(playScene, bodiesRef.current, triggersRef.current, vis, 'runtime', selectedNodeRef.current);
         } else if (activeScene) {
           // withoutDirty as well as suppressReconcileRef: the latter only stops the reconciler re-triggering
           // ITSELF, while the helpers it splices in emit SCENE_CHANGED like any other node edit.
-          withoutDirty(() => reconcileEditorHelpers(activeScene, bodiesRef.current, triggersRef.current, vis, 'editor'));
+          withoutDirty(() => reconcileEditorHelpers(activeScene, bodiesRef.current, triggersRef.current, vis, 'editor', selectedNodeRef.current));
         }
       } finally { suppressReconcileRef.current = false; }
     };
-    const schedule = (e?: SceneChange) => {
-      // Structural/visibility/name changes affect which helper icons + wireframes are needed; the per-setter
-      // transform/material/... events do not, so skip them (PHYSICS_CHANGED passes no payload and still runs).
-      if (e && e.kind !== 'structure' && e.kind !== 'visibility' && e.kind !== 'name') return;
+    // Queue a reconcile without touching the cached nav soup. For everything that changes which
+    // helpers are NEEDED but not what the level's walkable geometry IS.
+    const scheduleOnly = () => {
       if (suppressReconcileRef.current || reconcileScheduledRef.current) return;
       reconcileScheduledRef.current = true;
       reconcileRafRef.current = requestAnimationFrame(runReconcile);
     };
+    // ...and one that also drops the soup, for the three things that genuinely move geometry: a
+    // collider edit, a structural change, and the end of a transform drag. A payload-less
+    // SCENE_CHANGED (what an inspector slider emits) deliberately does not, or dragging "max slope"
+    // would re-walk the whole level once a frame to rebuild the identical soup.
+    const scheduleFresh = () => { invalidateNavSoup(activeScene); scheduleOnly(); };
+
+    const schedule = (e?: SceneChange) => {
+      // Structural/visibility/name changes affect which helper icons + wireframes are needed; the per-setter
+      // transform/material/... events do not, so skip them (PHYSICS_CHANGED passes no payload and still runs).
+      if (e && e.kind !== 'structure' && e.kind !== 'visibility' && e.kind !== 'name') return;
+      if (e?.kind === 'structure') invalidateNavSoup(activeScene);
+      scheduleOnly();
+    };
     const emitter = eventEmitter.current;
     emitter.on('SCENE_CHANGED', schedule);
-    emitter.on('PHYSICS_CHANGED', schedule);
+    emitter.on('PHYSICS_CHANGED', scheduleFresh);
     emitter.on('DEBUG_VISIBILITY_CHANGED', schedule);
+    // The navmesh bake volume and its preview are drawn for the SELECTED node only, and a drag moves
+    // geometry without emitting anything the filter above lets through.
+    emitter.on('SELECT_NODE', scheduleOnly);
+    emitter.on('GIZMO_DRAG_END', scheduleFresh);
     schedule(); // initial reconcile for the current scene / mode
     return () => {
       // Drop any reconcile this closure queued: entering Play parses a whole scene and those structural
@@ -4301,8 +4442,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       cancelAnimationFrame(reconcileRafRef.current);
       reconcileScheduledRef.current = false;
       emitter.off('SCENE_CHANGED', schedule);
-      emitter.off('PHYSICS_CHANGED', schedule);
+      emitter.off('PHYSICS_CHANGED', scheduleFresh);
       emitter.off('DEBUG_VISIBILITY_CHANGED', schedule);
+      emitter.off('SELECT_NODE', scheduleOnly);
+      emitter.off('GIZMO_DRAG_END', scheduleFresh);
     };
   }, [activeScene, isPlayMode, editorMode]);
 
@@ -4517,6 +4660,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         if (pinned) node = pinned;
       }
       setSelectedNode(node);
+      // Written here as well as during render. The helper reconciler reads this ref from an rAF that
+      // this same event schedules, and the render that would otherwise update it has to land first.
+      // React 18 does flush before the frame, but "usually first" is not a thing to depend on when
+      // the failure mode is a selection overlay that intermittently does not appear.
+      selectedNodeRef.current = node;
 
       // Use stencil-based outlining instead of creating outline nodes. In a material tab the preview
       // sphere is the (logical) selection so the inspector targets it, but it must not show the outline.
@@ -4833,15 +4981,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     addAnimationField, removeAnimationField, updateAnimationField,
     addAnimation, removeAnimation, updateAnimation,
     addTileset, removeTileset, updateTileset,
+    addAiBrain, removeAiBrain, updateAiBrain,
     addImage, removeImage, updateImage,
     addTextureAsset, removeTextureAsset, updateTextureAsset,
     addAudioSource, removeAudioSource, updateAudioSource,
     addSoundSample, removeSoundSample, updateSoundSample,
   });
   const assetLibraryValue = useMemo<AssetLibraryContextValue>(() => ({
-    templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, tilesets,
+    templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, tilesets, aiBrains,
     images, textures, audioSources, soundSamples, assetsLoaded, ...libraryActions,
-  }), [templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, tilesets,
+  }), [templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, tilesets, aiBrains,
        images, textures, audioSources, soundSamples, assetsLoaded, libraryActions]);
 
   const documentActions = useStableActions({
@@ -4888,6 +5037,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     scriptAssetOf, createScriptForNode, attachScriptToNode, detachScriptFromNode,
     enterAnimationFieldEditor, createAnimationFieldForModel, saveAnimationField,
     enterSoundEditor, saveSoundSample, previewSoundSettings, registerSoundApply,
+    enterAiBrainEditor, saveAiBrain, extractBrainFromController, linkBrainToController, registerAiBrainApply,
   });
   const editorSessionsValue = useMemo<EditorSessionsContextValue>(() => ({
     editingTemplateName, templateRootId,
@@ -4896,6 +5046,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     animationTargetId, animationSourceId, animationSourceScene, pendingAnimationImport, pendingRigPick,
     editingAnimationFieldId, animationFieldTargetId,
     editingSoundId,
+    editingAiBrainId,
     modelSession: activeTab.kind === 'model' ? (modelSessions[activeTab.id] ?? null) : null,
     modelEditTargetId: activeTab.kind === 'model' && modelSessions[activeTab.id]
       ? modelSessions[activeTab.id].levelIds[modelSessions[activeTab.id].activeLevel] ?? null
@@ -4906,7 +5057,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editingTemplateName, templateRootId, editingMaterialName,
     editingTerrainMaterialName, editingTerrainMaterialNode,
     animationTargetId, animationSourceId, animationSourceScene, pendingAnimationImport, pendingRigPick,
-    editingAnimationFieldId, animationFieldTargetId, editingSoundId,
+    editingAnimationFieldId, animationFieldTargetId, editingSoundId, editingAiBrainId,
     activeTab, modelSessions, pendingModelImport, sessionActions,
   ]);
 
@@ -4917,8 +5068,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       mainScene: editorSceneRef.current,
       eventEmitter: eventEmitter.current,
       selectedNode,
-      behaviorGraphId,
-      setBehaviorGraphId,
       isGizmoDragging,
       isPlayMode,
       isSceneReady,
@@ -5026,13 +5175,22 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       updateSoundSample,
       editingSoundId,
       enterSoundEditor,
+      editingAiBrainId,
       saveSoundSample,
       previewSoundSettings,
       tilesets,
+      aiBrains,
+      addAiBrain,
+      removeAiBrain,
+      updateAiBrain,
       addTileset,
       removeTileset,
       updateTileset,
       enterTilesetEditor,
+      enterAiBrainEditor,
+      extractBrainFromController,
+      linkBrainToController,
+      saveAiBrain,
       createTilesetFromImage,
       editingTilesetId,
       editingTextureId,
@@ -5041,6 +5199,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       previewTextureSettings,
       registerTextureApply,
       registerSoundApply,
+      registerAiBrainApply,
       saveTileset,
       enterScriptEditor,
       setScriptTabSource,

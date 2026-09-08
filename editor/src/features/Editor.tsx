@@ -12,6 +12,7 @@ import { AnimationFieldProvider } from "./animationField/AnimationFieldContext";
 import { TilesetProvider } from "./tileset/TilesetContext";
 import { TextureProvider } from "./texture/TextureContext";
 import { SoundProvider } from "./sound/SoundContext";
+import { AiEditorProvider } from './ai/AiEditorContext';
 import { HistoryProvider, useHistory } from "./HistoryContext";
 import DimensionSwitchModal from "./dialogs/DimensionSwitchModal";
 import { useDocument } from "./DocumentContext";
@@ -75,8 +76,10 @@ function Shell() {
           <TilesetProvider>
             <TextureProvider>
               <SoundProvider>
-                <TabBar />
-                <DockLayout />
+                <AiEditorProvider>
+                  <TabBar />
+                  <DockLayout />
+                </AiEditorProvider>
               </SoundProvider>
             </TextureProvider>
           </TilesetProvider>

@@ -73,6 +73,17 @@ export function modelIdOf(node: Node | null | undefined): string | undefined {
 }
 
 /**
+ * Editor chrome, which is a real engine child of whatever it annotates and must never be mistaken for
+ * user content. Mirrors `SceneInspector`'s `isHiddenInTree` and `nodeSubtree`'s `stripDebug`.
+ *
+ * The walks below forgot this and it mattered: a camera's frustum gizmo and a sound's falloff sphere
+ * are both `ModelNode` children, so every Camera and every spatial Sound reported that it "contained
+ * geometry" and grew a Model section in the inspector.
+ */
+const isHelper = (node: Node): boolean =>
+  node.name.includes('__debug__') || node.name.includes('__editor__')
+
+/**
  * The first skinned ModelNode AT or BENEATH `node` (depth-first, self first), or null.
  * Matches what the animation UI needs: an AnimatedModel with a skin AND a live animator. First match on
  * purpose for a multi-part model, as skinnedModelJsonOf also does.
@@ -82,6 +93,7 @@ export function skinnedModelNodeOf(node: Node | null | undefined): ModelNode | n
   if (node instanceof ModelNode && node.model instanceof AnimatedModel && node.model.hasSkin && !!node.animator)
     return node
   for (const child of node.children) {
+    if (isHelper(child)) continue
     const found = skinnedModelNodeOf(child)
     if (found) return found
   }
@@ -96,10 +108,36 @@ export function modelNodeOf(node: Node | null | undefined): ModelNode | null {
   if (!node) return null
   if (node instanceof ModelNode) return node
   for (const child of node.children) {
+    if (isHelper(child)) continue
     const found = modelNodeOf(child)
     if (found) return found
   }
   return null
+}
+
+/**
+ * The model a node's INSPECTOR should speak for: itself, or the one it holds as a model-instance root.
+ *
+ * The distinction the plain `modelNodeOf` walk lost. A section is about the SELECTED node, and
+ * "contains a model somewhere below" is far too generous a reading of that — it lit up every holder,
+ * Character, Controller and LodGroup standing above a mesh, and (because a template instance draws as
+ * a leaf row) made the panel look like it was keying off the scene rather than the selection.
+ *
+ * The holder case is still honoured, because it is not incidental: a model asset instantiates as a
+ * plain `Node` carrying `__modelId` with one `ModelNode` per sub-mesh, and that holder is what an
+ * author clicks. But only the ROOT of such an instance stands in for what is beneath it.
+ */
+export function ownModelNodeOf(node: Node | null | undefined): ModelNode | null {
+  if (!node) return null
+  if (node instanceof ModelNode) return node
+  return modelInstanceRootOf(node) === node ? modelNodeOf(node) : null
+}
+
+/** {@link ownModelNodeOf} for skinned models — what the Animation section applies to. */
+export function ownSkinnedModelNodeOf(node: Node | null | undefined): ModelNode | null {
+  if (!node) return null
+  if (node instanceof ModelNode) return skinnedModelNodeOf(node)
+  return modelInstanceRootOf(node) === node ? skinnedModelNodeOf(node) : null
 }
 
 /**

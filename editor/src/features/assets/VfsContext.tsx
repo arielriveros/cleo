@@ -59,7 +59,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   // The five libraries come from the split-out slice, so reconciliation re-runs on library changes only.
   const {
     assetsLoaded,
-    materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, tilesets,
+    materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, tilesets, aiBrains,
     images, textures, addImage, addTextureAsset,
     audioSources, soundSamples, addAudioSource, addSoundSample,
   } = useAssetLibrary()
@@ -158,13 +158,13 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   }, [assetsLoaded, audioPreloaded, isSceneReady, soundIds, audioSources, soundSamples, addAudioSource, addSoundSample])
 
   const libs: LibSnapshot = useMemo(
-    () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, tilesets, scenes: sceneList, images, textures, audioSources, soundSamples, textureIds }),
-    [materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, tilesets, sceneList, images, textures, audioSources, soundSamples, textureIds],
+    () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, tilesets, aiBrains, scenes: sceneList, images, textures, audioSources, soundSamples, textureIds }),
+    [materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, tilesets, aiBrains, sceneList, images, textures, audioSources, soundSamples, textureIds],
   )
 
   const depsRef = useRef<AssetDeps>(null as any)
   depsRef.current = {
-    materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, tilesets,
+    materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, tilesets, aiBrains,
     images, textures, audioSources, soundSamples,
     scenes: sceneList,
     addImage: engine.addImage,
@@ -201,6 +201,9 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     addAnimation: engine.addAnimation,
     updateAnimation: engine.updateAnimation,
     removeAnimation: engine.removeAnimation,
+    addAiBrain: engine.addAiBrain,
+    updateAiBrain: engine.updateAiBrain,
+    removeAiBrain: engine.removeAiBrain,
     addTileset: engine.addTileset,
     updateTileset: engine.updateTileset,
     removeTileset: engine.removeTileset,
@@ -217,6 +220,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     enterModelEditor: engine.enterModelEditor,
     enterAnimationFieldEditor: engine.enterAnimationFieldEditor,
     enterTilesetEditor: engine.enterTilesetEditor,
+    enterAiBrainEditor: engine.enterAiBrainEditor,
     enterTextureEditor: engine.enterTextureEditor,
     emit: (event, payload) => eventEmitter.emit(event as any, payload),
   }
@@ -248,7 +252,8 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   // can flip a commit BEFORE the library values reach this component; pruning against libraries that
   // merely look empty deletes the whole folder layout, so require at least one asset to be present.
   const librariesPopulated = !!(materials.length || terrainMaterials.length || templates.length
-    || models.length || scriptAssets.length || animationFields.length || animations.length || tilesets.length)
+    || models.length || scriptAssets.length || animationFields.length || animations.length || tilesets.length
+    || aiBrains.length)
 
   useEffect(() => {
     if (!vfsLoaded) return

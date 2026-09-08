@@ -2676,6 +2676,42 @@ export class Renderer {
     private readonly _rasterProjScratch: mat4 = mat4.create();
 
     /**
+     * A raster projection that pulls whatever it draws `nudge` toward the camera, in NDC depth.
+     *
+     * For geometry that is COPLANAR with what it describes — a navmesh overlay on the floor it was
+     * baked from, a heightfield wireframe on its own terrain. Those cannot be separated by lifting
+     * them in world space: depth resolution falls off as z-squared, so any fixed lift is eventually
+     * smaller than one ULP and the surfaces start trading pixels. Measured on a `far: 10000` editor
+     * scene, a 2 cm lift stops working at about 180 metres, and TAA jitter makes the boundary shimmer
+     * before that.
+     *
+     * A constant in NDC has no such falloff, and the identity that produces one is cheap:
+     *
+     *     clip.z = (m[10] + nudge) * z_view + m[14]   ==   clip.z - nudge * clip.w
+     *
+     * because `clip.w` is `-z_view` under perspective. So the whole fix is one added constant, with
+     * no shader, no pipeline state and no backend-specific code.
+     *
+     * Three things this must get right:
+     *  - **Copy first.** `_rasterProjection` may hand back the camera's own matrix or a shared
+     *    scratch; writing into either would bias every later draw in the frame.
+     *  - **Nudge AFTER `_clipProjection`.** WebGPU's [-1,1] -> [0,1] remap would otherwise halve the
+     *    constant, and the two backends would disagree about how far to push.
+     *  - **Orthographic uses a different element.** There `clip.w` is 1 and NDC depth is already
+     *    linear in view depth, so the constant belongs in the translation term rather than the scale.
+     *    `m[11] === 0` is what actually distinguishes the two, rather than asking the camera.
+     */
+    private _nudgedProjection(projection: mat4, nudge: number): mat4 {
+        const raster = this._rasterProjection(projection);
+        if (!nudge) return raster;
+        const out = mat4.copy(this._nudgeProjScratch, raster);
+        if (out[11] === 0) out[14] -= nudge; // orthographic
+        else out[10] += nudge;               // perspective
+        return out;
+    }
+    private readonly _nudgeProjScratch: mat4 = mat4.create();
+
+    /**
      * The screen-space Y flip for matrices crossing between a fullscreen pass's UV and clip space,
      * which are MIRRORED between backends. A matrix that CONSUMES a clip vector built from `uv` is
      * post-multiplied; one that PRODUCES a clip vector read back as a uv is pre-multiplied.
@@ -9496,7 +9532,12 @@ export class Renderer {
         if (pipeline) pass.setPipeline(pipeline);
 
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+        // `depthNudge` is folded into the projection rather than set as its own uniform: a helper that
+        // is coplanar with the surface it describes needs pulling toward the camera in NDC, and doing
+        // it here costs one added constant instead of a shader variant. Zero for every other helper,
+        // which then gets the raster projection untouched.
+        this._shaderManager.setUniform('u_projection',
+            this._nudgedProjection(this._activeCamera.projectionMatrix, material.config.depthNudge ?? 0));
         this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
 
         // Set Transform related uniforms

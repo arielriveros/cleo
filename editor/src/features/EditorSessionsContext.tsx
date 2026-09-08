@@ -37,6 +37,9 @@ export type EditorSessionsContextValue = Pick<EngineValue,
   // Sound sample
   | 'enterSoundEditor' | 'saveSoundSample' | 'previewSoundSettings' | 'editingSoundId'
   | 'registerSoundApply'
+  // AI brain (a behaviour machine or a goal graph, plus the fuzzy model it reads)
+  | 'enterAiBrainEditor' | 'saveAiBrain' | 'editingAiBrainId'
+  | 'extractBrainFromController' | 'linkBrainToController' | 'registerAiBrainApply'
 >;
 
 export const EditorSessionsContext = createContext<EditorSessionsContextValue | null>(null);

@@ -175,10 +175,18 @@ export const ADD_ITEMS: AddItem[] = [
     create: async () => new ControllerNode('controller'),
   },
   {
-    // Not placeable: the bake is in WORLD space and ignores this node's transform, so dropping it at a
-    // point in the viewport would imply a relationship that does not exist.
-    id: 'navMesh', label: 'Nav Mesh', icon: NavMeshIcon, category: 'gameplay', placeable: false,
-    create: async () => new NavMeshNode('navigation'),
+    // Placeable, because the transform now means something: it positions the BOX that decides which
+    // surfaces get baked. (The baked contours themselves are still world-space, so moving the node
+    // afterwards cannot invalidate a path — it just makes the bake stale.)
+    id: 'navMesh', label: 'Nav Mesh', icon: NavMeshIcon, category: 'gameplay',
+    create: async () => {
+      const node = new NavMeshNode('navigation');
+      // A default box rather than the class default of unbounded. Parsing keeps unbounded so old
+      // scenes are untouched, but a node you just added should show its volume and its cyan preview
+      // immediately -- an "unbounded" default would make the whole feature a field nobody finds.
+      node.size = [20, 10, 20];
+      return node;
+    },
   },
 
   // Lights/probes get their editor icon (__editor__LightSprite / __editor__ProbeHelper) added

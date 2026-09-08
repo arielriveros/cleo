@@ -352,6 +352,83 @@ describe('retargetAnimation — translation handling', () => {
         expect(out0[1]).toBeCloseTo(3.0, 5);
     });
 
+    /**
+     * The armature-scale case, with the numbers it was actually found on.
+     *
+     * A Mixamo clip is authored in CENTIMETRES (hips 105.5 from an unscaled parent). The mannequin it
+     * retargets onto stores the same skeleton with the cm->m conversion on its ARMATURE, so its hips sit
+     * at local [0.09, 3.63, -97.70] under a 0.01-scaled parent.
+     *
+     * The ratio that rescales the motion has to be measured in the same space the motion is written back
+     * into, and that space is LOCAL — the scaled offset is added onto the target's local rest. Reading
+     * the WORLD bind instead folds the armature's 0.01 into the numerator only: the ratio came out at
+     * 0.00034 rather than 0.93, and an 86 cm death-collapse arrived as 0.03. The character died standing
+     * upright.
+     */
+    it('measures the hips ratio in LOCAL space, so an armature scale cannot leak into it', () => {
+        const centimetres = skinOf([
+            { name: 'Armature', parent: -1, t: [0, 0, 0] },
+            { name: 'Hips', parent: 0, t: [0, 105.5, 0] },
+            { name: 'Spine', parent: 1, t: [0, 20, 0] },
+        ]);
+        const metres = (() => {
+            const skin = skinOf([
+                { name: 'Armature', parent: -1, t: [0, 0, 0] },
+                // The mannequin's real rest: same height, stored down -Z.
+                { name: 'Hips', parent: 0, t: [0.09, 3.63, -97.7] },
+                { name: 'Spine', parent: 1, t: [0, 20, 0] },
+            ]);
+            const armature = mat4.create();
+            mat4.scale(armature, armature, [0.01, 0.01, 0.01]);
+            skin.nodeTransforms!.set(0, armature);
+            return skin;
+        })();
+
+        const clip: Animation = {
+            name: 'die',
+            samplers: [{ input: [0, 1], output: [0, 105.5, 0, 0, 19.5, 0], interpolation: 'LINEAR' }],
+            channels: [{ samplerIndex: 0, targetNodeIndex: 1, targetPath: 'translation' }],
+        };
+        const m = buildBoneMapping([clip], centimetres, metres);
+        // Different proportions, so this is genuinely the cross-rig path and not a raw copy.
+        expect(m.sameRig).toBe(false);
+
+        const out = retargetAnimation(clip, centimetres, metres, m);
+        const ch = out.channels.find(c => c.targetPath === 'translation')!;
+        const v = out.samplers[ch.samplerIndex].output;
+
+        // 86 cm of fall, scaled by 97.77/105.5 = 0.927 for the slightly shorter target.
+        const fall = Math.hypot(v[3] - v[0], v[4] - v[1], v[5] - v[2]);
+        expect(fall).toBeCloseTo(86 * 97.77 / 105.5, 1);
+        // Reading the world bind would have folded the armature's 0.01 in and collapsed this to ~0.03.
+        expect(fall).toBeGreaterThan(10);
+    });
+
+    /**
+     * The axis case. A rig stored Z-up has its hips height in Z, and reading component [1] finds
+     * whatever small lateral value happens to sit in Y — which was the other half of the same bug.
+     */
+    it('measures the hips ratio by magnitude, so a Z-up rest pose is not read as zero height', () => {
+        const yUp = skinOf([{ name: 'Hips', parent: -1, t: [0, 1, 0] }, { name: 'Spine', parent: 0, t: [0, 0.2, 0] }]);
+        // Same height, stored down -Z with a small Y lateral — the shape a converted FBX rig has.
+        const zUp = skinOf([{ name: 'Hips', parent: -1, t: [0, 0.04, -2] }, { name: 'Spine', parent: 0, t: [0, 0.2, 0] }]);
+
+        const clip: Animation = {
+            name: 'bob',
+            samplers: [{ input: [0, 1], output: [0, 1, 0, 0, 2, 0], interpolation: 'LINEAR' }],
+            channels: [{ samplerIndex: 0, targetNodeIndex: 0, targetPath: 'translation' }],
+        };
+        const m = buildBoneMapping([clip], yUp, zUp);
+        const out = retargetAnimation(clip, yUp, zUp, m);
+        const ch = out.channels.find(c => c.targetPath === 'translation')!;
+        const values = out.samplers[ch.samplerIndex].output;
+
+        // Target hips are |[0, 0.04, -2]| = 2.0004 from their parent against the source's 1, so a
+        // 1-unit rise becomes ~2. Reading component [1] would have measured 0.04 and given ~0.04.
+        const rise = Math.hypot(values[3] - values[0], values[4] - values[1], values[5] - values[2]);
+        expect(rise).toBeCloseTo(2.0004, 3);
+    });
+
     it('drops scale channels entirely', () => {
         // The clip must animate the bone that DIFFERS (the hips) for the rig to read as cross-rig — sameRig
         // is judged over the animated set, and a clip touching only identical bones is legitimately same-rig

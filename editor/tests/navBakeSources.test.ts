@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { Node, bakeNavMesh } from 'cleo'
+import { NavMeshNode, Node, bakeNavMesh } from 'cleo'
 import { gatherNavSoup } from '../src/utils/navBakeSources'
 import type { BodyDescription } from '../src/features/engineContextTypes'
 
@@ -161,5 +161,94 @@ describe('gatherNavSoup', () => {
     const result = bakeNavMesh(gathered.soup)
     expect(result.regions).toBeGreaterThan(0)
     expect(gathered.colliders).toBe(2)
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------
+// Baking through a bounds volume
+//
+// The volume is what turns "navigate the level" into "navigate this room", so what matters is that the
+// clip happens on the way OUT of the gatherer -- the bake, the editor's cyan preview and the "fit to
+// scene" button all read the same soup, and only one of them may be restricted.
+// ---------------------------------------------------------------------------------------------------
+
+/** A floor of `size` centred at the origin, plus a second one far away on +X. */
+function twoFloors() {
+  const root = new Node('root')
+  const near = new Node('near')
+  const far = new Node('far')
+  root.addChild(near)
+  root.addChild(far)
+  far.setPosition([50, 0, 0])
+  root.updateTransforms()
+  return { root, bodies: new Map([[near.id, box(4, 1, 4)], [far.id, box(4, 1, 4)]]) }
+}
+
+describe('gatherNavSoup with a bake volume', () => {
+  it('gathers the whole scene when the volume is absent', () => {
+    const { root, bodies } = twoFloors()
+    const gathered = gatherNavSoup(root, { bodies, includeTerrain: false })
+    expect(gathered.colliders).toBe(2)
+    expect(gathered.clippedTriangles).toBe(gathered.soup.positions.length / 9)
+  })
+
+  it('keeps only the geometry inside the volume', () => {
+    const { root, bodies } = twoFloors()
+    const nav = new NavMeshNode('nav')
+    nav.size = [20, 20, 20]
+    nav.updateTransforms()
+
+    const gathered = gatherNavSoup(root, { bodies, includeTerrain: false, volume: nav.invVolumeMatrix })
+    // Both colliders were VISITED -- the count reports what was gathered, not what survived -- but the
+    // far floor at x = 50 must contribute no triangles.
+    expect(gathered.colliders).toBe(2)
+    for (let i = 0; i < gathered.soup.positions.length; i += 3)
+      expect(gathered.soup.positions[i]).toBeLessThan(11)
+    expect(gathered.clippedTriangles).toBeGreaterThan(0)
+  })
+
+  it('moves what gets baked when the volume moves, which is the whole point of placing one', () => {
+    const { root, bodies } = twoFloors()
+    const nav = new NavMeshNode('nav')
+    nav.size = [20, 20, 20]
+
+    nav.updateTransforms()
+    const atOrigin = bakeNavMesh(
+      gatherNavSoup(root, { bodies, includeTerrain: false, volume: nav.invVolumeMatrix }).soup)
+
+    nav.setPosition([50, 0, 0])
+    nav.updateTransforms()
+    const atFarFloor = bakeNavMesh(
+      gatherNavSoup(root, { bodies, includeTerrain: false, volume: nav.invVolumeMatrix }).soup)
+
+    expect(atOrigin.regions).toBeGreaterThan(0)
+    expect(atFarFloor.regions).toBeGreaterThan(0)
+    // Same shape of surface, in two different places.
+    expect(atOrigin.data.vertices[0]).toBeLessThan(11)
+    expect(atFarFloor.data.vertices[0]).toBeGreaterThan(39)
+  })
+
+  it('bakes nothing when the volume encloses no walkable surface', () => {
+    const { root, bodies } = twoFloors()
+    const nav = new NavMeshNode('nav')
+    nav.size = [4, 4, 4]
+    nav.setPosition([0, 40, 0]) // up in the air
+    nav.updateTransforms()
+
+    const gathered = gatherNavSoup(root, { bodies, includeTerrain: false, volume: nav.invVolumeMatrix })
+    expect(gathered.clippedTriangles).toBe(0)
+    expect(bakeNavMesh(gathered.soup).regions).toBe(0)
+  })
+
+  it('clips terrain as well as colliders', () => {
+    const { root, bodies } = twoFloors()
+    const nav = new NavMeshNode('nav')
+    nav.size = [2, 20, 2]
+    nav.updateTransforms()
+
+    const whole = gatherNavSoup(root, { bodies, includeTerrain: false })
+    const clipped = gatherNavSoup(root, { bodies, includeTerrain: false, volume: nav.invVolumeMatrix })
+    expect(clipped.clippedTriangles).toBeLessThan(whole.clippedTriangles)
+    expect(clipped.clippedTriangles).toBeGreaterThan(0)
   })
 })

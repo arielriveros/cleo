@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { NavMeshNode, parseLinks, parseRoutes } from '../src/core/scene/nodes/navMeshNode';
+import {
+    NavMeshNode, parseBakedVolume, parseLinks, parseRoutes, parseSize,
+} from '../src/core/scene/nodes/navMeshNode';
 import { Node } from '../src/core/scene/nodes/node';
 import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 import { bakeNavMesh } from '../src/ai/navBake';
@@ -129,5 +131,103 @@ describe('route and link readers', () => {
         ]);
         expect(parseLinks([{ from: [0, 0, 0] }, { to: [1, 0, 0] }, 7])).toEqual([]);
         expect(parseLinks(undefined)).toEqual([]);
+    });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// The bake volume
+//
+// The volume decides WHICH surfaces get baked, but the contours stay in world space. Both halves need
+// pinning: a volume that failed to round-trip would silently re-bake the whole level, and a transform
+// that started moving the DATA would invalidate every path the moment someone nudged the node.
+// ---------------------------------------------------------------------------------------------------
+
+describe('NavMeshNode bake volume', () => {
+    it('is unbounded by default, so a scene authored before volumes is unchanged', () => {
+        const node = new NavMeshNode('nav');
+        expect(node.bounded).toBe(false);
+        expect(node.invVolumeMatrix).toBeNull();
+        expect(node.volumeBounds()).toBeNull();
+    });
+
+    it('writes nothing when unbounded', async () => {
+        const json = JSON.parse(JSON.stringify(await new NavMeshNode('nav').serialize()));
+        expect(json.size).toBeUndefined();
+        expect(json.bakedVolume).toBeUndefined();
+    });
+
+    it('round-trips a size and a baked volume', async () => {
+        const node = bakedNode();
+        node.size = [10, 4, 6];
+        node.setPosition([2, 0, -3]);
+        node.updateTransforms();
+        node.bakedVolume = node.volumeBounds();
+
+        const back = await roundTrip(node);
+        expect(back.size).toEqual([10, 4, 6]);
+        expect(back.bounded).toBe(true);
+        expect(back.bakedVolume).toEqual(node.bakedVolume);
+    });
+
+    it('parses an absent size as unbounded rather than as a zero-volume box', () => {
+        expect(parseSize(undefined)).toEqual([0, 0, 0]);
+        expect(parseSize([4, 'x', 2])).toEqual([0, 0, 0]);
+        expect(parseSize([4, -2, 2])).toEqual([4, 0, 2]);
+    });
+
+    it('reads a malformed bakedVolume as never-baked, not as a stale bake', () => {
+        expect(parseBakedVolume([1, 2, 3])).toBeNull();
+        expect(parseBakedVolume([1, 2, 3, 4, 5, 'x'])).toBeNull();
+        expect(parseBakedVolume([1, 2, 3, 4, 5, 6])).toEqual([1, 2, 3, 4, 5, 6]);
+    });
+
+    it('reports the world AABB of an ORIENTED box, which is wider than the box itself', () => {
+        const node = new NavMeshNode('nav');
+        node.size = [4, 2, 4];
+        node.setRotation([0, 45, 0]);
+        // Outside a scene nothing walks the graph, so the world matrix has to be asked for by hand.
+        node.updateTransforms();
+        const { min, max } = node.getBoundingBox();
+        // A 4x4 square spun 45 degrees needs 4*sqrt(2) of AABB to hold it.
+        expect(max[0] - min[0]).toBeCloseTo(4 * Math.SQRT2, 4);
+        expect(max[1] - min[1]).toBeCloseTo(2, 4);
+    });
+
+    it('follows the node position, so the gizmo moves what gets baked', () => {
+        const node = new NavMeshNode('nav');
+        node.size = [2, 2, 2];
+        node.setPosition([10, 0, 0]);
+        node.updateTransforms();
+        const { min, max } = node.getBoundingBox();
+        expect(min[0]).toBeCloseTo(9, 6);
+        expect(max[0]).toBeCloseTo(11, 6);
+    });
+
+    it('reports staleness only once the volume actually moves', () => {
+        const node = bakedNode();
+        node.size = [8, 4, 8];
+        node.updateTransforms();
+        node.bakedVolume = node.volumeBounds();
+        expect(node.bakeIsStale).toBe(false);
+
+        node.setPosition([5, 0, 0]);
+        node.updateTransforms();
+        expect(node.bakeIsStale).toBe(true);
+    });
+
+    it('never calls an unbaked node stale, however the volume is placed', () => {
+        const node = new NavMeshNode('nav');
+        node.size = [8, 4, 8];
+        node.setPosition([100, 0, 0]);
+        node.updateTransforms();
+        expect(node.bakeIsStale).toBe(false);
+    });
+
+    it('leaves the baked contours in WORLD space when the node moves', () => {
+        // The invariant the class comment promises: moving the node must not move an existing path.
+        const node = bakedNode();
+        const before = Array.from(node.data.vertices);
+        node.setPosition([25, 9, -13]);
+        expect(Array.from(node.data.vertices)).toEqual(before);
     });
 });

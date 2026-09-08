@@ -107,12 +107,17 @@ export class TextureSet {
     return id
   }
 
-  /** Add a texture from a file on disk. `config` follows the source project's shape. */
-  add(id, file, config) {
+  /**
+   * Add a texture from a file on disk. `config` follows the source project's shape.
+   *
+   * `mime` is explicit rather than inferred from the extension: a texture's declared type is what the
+   * loader decodes by, and guessing it from a filename is how a JPEG ends up announced as a PNG.
+   */
+  add(id, file, config, mime = 'image/png') {
     if (this._entries.has(id)) return id
     this._entries.set(id, {
       id,
-      mime: 'image/png',
+      mime,
       config: {
         flipY: false, usage: 'color', wrapping: 'clamp',
         mipMap: false, mipMapFilter: 'linear', precision: 'low', target: 'texture2D',

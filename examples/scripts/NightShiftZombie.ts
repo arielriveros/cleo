@@ -22,11 +22,16 @@ import { CharacterNode, Logger, ModelNode, Node, clamp, lerp } from 'cleo'
  * other instances. Every submesh material is walked, not just `materials[0]`, or a multi-material
  * zombie would burn in patches.
  *
- * ## Dying without a death clip
+ * ## Dying, in two stages
  *
- * There is no death animation either, so death is a RAGDOLL — the mannequin already carries a full
- * ragdoll configuration. `startRagdoll` puts the animator into ragdoll mode and hands the skeleton to
- * physics, which is a better corpse than any single clip anyway.
+ * The `Died` trigger sends the animator into its `Dying` state, and the ragdoll takes over when that
+ * clip finishes. Both halves earn their place: the authored collapse is the part that reads as a
+ * zombie going down, and the ragdoll is what makes the corpse settle onto whatever it landed on rather
+ * than intersecting a slope in a fixed pose.
+ *
+ * The clip carries root motion — about 1.4 m of forward fall — so the character travels with it and
+ * its collider stays under the body. That is why the handover is timed off the animator's own
+ * `duration` rather than a hardcoded number: the clip is free to change without this drifting.
  */
 export default class NightShiftZombieNode extends CharacterNode {
   /** Damage per successful hit. */
@@ -39,6 +44,13 @@ export default class NightShiftZombieNode extends CharacterNode {
   public burnSeconds: number = 3.5
   /** Seconds the ragdoll is left lying before the node is removed. */
   public corpseSeconds: number = 6
+  /**
+   * How long to wait for the death clip before ragdolling, when the animator cannot say.
+   *
+   * Only reached if the `Dying` state is missing or has no clip — the real length comes from
+   * `animator.duration`. The authored clip is 3.33 s.
+   */
+  public deathClipSeconds: number = 3.4
   /** Set by the director at dawn, and by the AoE powerup. The behaviour machine reads it as a builtin. */
   public burning: boolean = false
   /**
@@ -68,7 +80,8 @@ export default class NightShiftZombieNode extends CharacterNode {
   onStart() {
     this._player = this.findNode('Playable')
     this._brain = this.getChildByName('Brain')[0]
-    this._model = this.getChildByName('Ch36')[0] as ModelNode
+    // The zombie's own character, not the player's mannequin — see the Zombie template.
+    this._model = this.getChildByName('Ch10')[0] as ModelNode
     this._flame = this.getChildByName('Flame')[0]
     this._fireLight = this.getChildByName('Fire Light')[0]
 
@@ -144,18 +157,38 @@ export default class NightShiftZombieNode extends CharacterNode {
     if (brain && brain.release) brain.release()
     this.velocity = [0, 0, 0]
 
+    if (this._flame) this._flame.visible = false
+    if (this._fireLight) this._fireLight.visible = false
+
+    const animator = this._model?.animator as any
+    if (animator?.setTrigger) {
+      animator.setTrigger('Died')
+      // Read AFTER the trigger so `duration` reports the Dying clip rather than whatever was playing.
+      // The transition itself takes a frame, so the fallback covers the case where the state machine
+      // never arrives — a missing clip should still produce a corpse, not a zombie frozen upright.
+      const seconds = animator.duration > 0 ? animator.duration : this.deathClipSeconds
+      this.after(seconds, () => this._collapse())
+    } else {
+      this._collapse()
+    }
+
+    // Scheduled on this node, which is the thing being removed — that is fine, because `remove()` is
+    // what the timer DOES. A restore timer would have to live elsewhere; see NightShiftPowerup.
+    this.after(this.corpseSeconds, () => this.remove())
+  }
+
+  /**
+   * Hand the skeleton to physics, once the death clip has played it into a heap.
+   *
+   * Deliberately AFTER the clip rather than instead of it: starting the ragdoll upright makes the body
+   * fold from a standing pose every time, which reads as a dropped puppet rather than a death.
+   */
+  private _collapse(): void {
     const physics = this.scene?.physics as any
     if (physics && physics.startRagdoll && this._model) {
       try { physics.startRagdoll(this._model) }
       catch (e) { Logger.warn('Night Shift: ragdoll failed, falling back to a still corpse: ' + e, 'Script') }
     }
-
-    if (this._flame) this._flame.visible = false
-    if (this._fireLight) this._fireLight.visible = false
-
-    // Scheduled on this node, which is the thing being removed — that is fine, because `remove()` is
-    // what the timer DOES. A restore timer would have to live elsewhere; see NightShiftPowerup.
-    this.after(this.corpseSeconds, () => this.remove())
   }
 
   private _planarDistanceTo(other: Node): number {

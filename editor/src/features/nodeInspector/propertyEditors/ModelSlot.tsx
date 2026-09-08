@@ -5,10 +5,10 @@ import { useDocument } from '../../DocumentContext'
 import Collapsable from '../../../components/Collapsable'
 import { Button, valueClass } from '../../../components/ui'
 import { ShapeIcon } from '../sectionIcons'
-import { modelIdOf, modelNodeOf } from '../../../utils/models'
+import { modelIdOf, ownModelNodeOf } from '../../../utils/models'
 
-// The way into the model editor from a node that has geometry. Renders for anything with geometry, adopting
-// the subtree into the library on the way in when it has no asset yet.
+// The way into the model editor from the selected model. Adopts the subtree into the library on the way
+// in when it has no asset yet.
 export default function ModelSlot(props: { node: Node }) {
   const { models } = useAssetLibrary()
   const { enterModelEditor, adoptModelAsset } = useEditorSessions()
@@ -17,9 +17,10 @@ export default function ModelSlot(props: { node: Node }) {
   // Inside a model tab this is the thing being edited, so a button that opens it is noise.
   if (activeTab.kind === 'model') return null
 
-  // Walks down: an imported model is a holder Node with its ModelNodes beneath it, so the selected node
-  // alone cannot answer whether the selection contains geometry.
-  if (!modelNodeOf(props.node)) return null
+  // The node ITSELF, or the holder it is the root of — not any ancestor that happens to have a mesh
+  // somewhere beneath it. That looser reading is what put a Model section on cameras (their frustum
+  // gizmo is a ModelNode child), on spatial sounds, and on every Character above a rigged model.
+  if (!ownModelNodeOf(props.node)) return null
 
   const asset = models.find(m => m.id === modelIdOf(props.node))
 

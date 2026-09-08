@@ -7,6 +7,7 @@ import type { ScriptAsset } from '../../utils/scripts'
 import type { AnimationAsset } from '../../utils/animationAssets'
 import type { AnimationFieldAsset } from '../../utils/animationFields'
 import type { TilesetAsset } from '../../utils/tilesets'
+import type { AiBrainAsset } from '../../utils/aiBrains'
 import type { SceneMeta } from '../../utils/sceneStorage'
 import {
   renderMaterialAssetThumbnail, renderModelAssetThumbnail, renderTerrainMaterialAssetThumbnail,
@@ -37,6 +38,7 @@ export type AssetDeps = {
   animationFields: AnimationFieldAsset[]
   animations: AnimationAsset[]
   tilesets: TilesetAsset[]
+  aiBrains: AiBrainAsset[]
   images: ImageAsset[]
   textures: TextureAsset[]
   audioSources: AudioSourceAsset[]
@@ -64,6 +66,9 @@ export type AssetDeps = {
   addAnimation: (a: AnimationAsset) => void
   updateAnimation: (id: string, a: AnimationAsset) => void
   removeAnimation: (id: string) => void
+  addAiBrain: (b: AiBrainAsset) => void
+  updateAiBrain: (id: string, b: AiBrainAsset) => void
+  removeAiBrain: (id: string) => void
   addTileset: (t: TilesetAsset) => void
   updateTileset: (id: string, t: TilesetAsset) => void
   removeTileset: (id: string) => void
@@ -93,13 +98,14 @@ export type AssetDeps = {
   enterScriptEditor: (id?: string) => void
   enterAnimationFieldEditor: (id?: string) => void
   enterTilesetEditor: (id?: string) => void
+  enterAiBrainEditor: (id?: string) => void
   enterTextureEditor: (id?: string) => void
   enterSoundEditor: (id?: string) => void
 
   emit: (event: string, payload?: any) => void
 }
 
-type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | AnimationAsset | TilesetAsset | SceneMeta | ImageAsset | TextureAsset | AudioSourceAsset | SoundSampleAsset
+type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | AnimationAsset | TilesetAsset | AiBrainAsset | SceneMeta | ImageAsset | TextureAsset | AudioSourceAsset | SoundSampleAsset
 
 /** The asset record behind an entry, or undefined. Every kind has one now, textures included. */
 export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsset | undefined {
@@ -112,6 +118,7 @@ export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsse
     case 'animationField': return deps.animationFields.find(f => f.id === id)
     case 'animation': return deps.animations.find(a => a.id === id)
     case 'tileset': return deps.tilesets.find(t => t.id === id)
+    case 'aiBrain': return deps.aiBrains.find(b => b.id === id)
     case 'scene': return deps.scenes.find(s => s.id === id)
     case 'image': return deps.images.find(i => i.id === id)
     case 'texture': return deps.textures.find(t => t.id === id)
@@ -220,6 +227,11 @@ export function renameAsset(kind: AssetKind, id: string, stem: string, deps: Ass
       if (a) deps.updateTileset(id, { ...a, name: stem })
       break
     }
+    case 'aiBrain': {
+      const a = deps.aiBrains.find(b => b.id === id)
+      if (a) deps.updateAiBrain(id, { ...a, name: stem })
+      break
+    }
     case 'scene': {
       const a = deps.scenes.find(s => s.id === id)
       if (a) deps.renameScene(id, stem)
@@ -259,6 +271,7 @@ export function deleteAsset(kind: AssetKind, id: string, deps: AssetDeps): void 
     case 'animationField': deps.removeAnimationField(id); break
     case 'animation': deps.removeAnimation(id); break
     case 'tileset': deps.removeTileset(id); break
+    case 'aiBrain': deps.removeAiBrain(id); break
     case 'scene': {
       void deps.deleteScene(id)
       break
@@ -380,6 +393,13 @@ export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: 
       deps.addTileset({ ...deepClone(a), id: newId, name: stem })
       return newId
     }
+    case 'aiBrain': {
+      const a = deps.aiBrains.find(b => b.id === id)
+      if (!a) return null
+      // The copy keeps the original's kind, so it opens on the same canvas.
+      deps.addAiBrain({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
     case 'scene': {
       const a = deps.scenes.find(s => s.id === id)
       if (!a) return null
@@ -490,6 +510,8 @@ export async function regenerateThumbnail(
     case 'script':
     // A tileset's card shows its atlas image, downscaled on save rather than rendered here.
     case 'tileset':
+    // A brain is a graph. There is no scene to point a camera at, so its card shows the kind icon.
+    case 'aiBrain':
     // A field's card shows its kind icon: its content is a 2D plot, not a posed model.
     case 'animationField':
     // Clips in source-rig space, with no character attached — there is nothing to pose for a picture.
@@ -517,6 +539,7 @@ export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean
     case 'script': deps.enterScriptEditor(id); return true
     case 'animationField': deps.enterAnimationFieldEditor(id); return true
     case 'tileset': deps.enterTilesetEditor(id); return true
+    case 'aiBrain': deps.enterAiBrainEditor(id); return true
     case 'scene': void deps.openScene(id); return true
     case 'texture': deps.enterTextureEditor(id); return true
     case 'soundSample': deps.enterSoundEditor(id); return true
@@ -542,6 +565,8 @@ export function deleteConsequence(kind: AssetKind): string {
     case 'animationField': return 'animation states playing it fall back to no clip'
     case 'animation': return 'models using it lose those clips'
     case 'tileset': return 'tilemap layers painted with it, and sprites drawing from it, are cleared'
+    // The embedded copy stays put — see detachBrain. Only the link goes.
+    case 'aiBrain': return 'controllers keep the brain they copied, but stop tracking this asset'
     case 'scene': return 'the project switches to another scene'
     case 'texture': return 'materials and tilesets using it show no texture'
     case 'image': return 'textures sourcing it lose their pixels'
@@ -561,6 +586,7 @@ export function dragPayload(kind: AssetKind, assetId: string): [string, string][
     case 'animationField': return [['text/cleo-animation-field', assetId]]
     case 'animation': return [['text/cleo-animation', assetId]]
     case 'tileset': return [['text/cleo-tileset', assetId]]
+    case 'aiBrain': return [['text/cleo-ai-brain', assetId]]
     case 'scene': return [['text/cleo-scene', assetId], ['text/plain', assetId]]
     // Deliberately NOT the texture payload: dropping raw bytes into a material slot must not appear to
     // work, because a slot needs a texture's sampling, not just an image.
@@ -623,6 +649,11 @@ const ICONS: Record<AssetKind | 'folder', string> = {
     `<rect x="3.5" y="6" width="17" height="12" rx="2" fill="#8f7018" fill-opacity=".18"/><path d="M3.5 12h17" stroke-opacity=".5"/><path d="M7 12V8.5M12 12v-2M17 12v-4" stroke-opacity=".7"/><circle cx="7" cy="8.5" r="1.4"/><circle cx="12" cy="10" r="1.4"/><circle cx="17" cy="8.5" r="1.4"/>`,
   ),
   // A sliced atlas: the grid, with one cell picked out.
+  // Two linked nodes with a decision branching out of them: a state machine and a goal tree read as the
+  // same shape at 24px, which is right — one asset holds either.
+  aiBrain: svg('#c89ae0',
+    `<circle cx="6" cy="6.5" r="3" fill="#8a5bb0" fill-opacity=".25"/><circle cx="18" cy="6.5" r="3" fill="#8a5bb0" fill-opacity=".25"/><circle cx="12" cy="18" r="3" fill="#c89ae0" fill-opacity=".45"/><path d="M8.2 8.6 10.6 15.6M15.8 8.6 13.4 15.6M9 6.5h6" stroke-opacity=".75"/>`,
+  ),
   tileset: svg('#7ec8a9',
     `<rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="#2f7a63" fill-opacity=".2"/><path d="M9 3.5v17M14.5 3.5v17M3.5 9h17M3.5 14.5h17" stroke-opacity=".55"/><rect x="9" y="9" width="5.5" height="5.5" fill="#7ec8a9" fill-opacity=".45" stroke="none"/>`,
   ),
