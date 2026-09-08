@@ -1,329 +1,100 @@
 import { Geometry } from "cleo";
 
+/**
+ * Geometry for the transform gizmo's handles.
+ *
+ * Every shape is built along **+Y** and the caller orients it with a single quaternion
+ * (`quat.rotationTo([0,1,0], axis)`), which is why there is one arrow here rather than the three
+ * near-identical hand-written copies this file used to hold — and why the ring can simply delegate to
+ * the engine's own `Geometry.Torus`, which already lies in the XZ plane with a +Y normal.
+ */
 export class GizmoGeometry {
     /**
-     * Torus (ring) in the plane perpendicular to `axis` — the rotation-gizmo handle for that axis.
-     * `radius` is the major radius (matches the arrow length); `tube` is the tube thickness, kept thin
-     * enough to read as a ring but thick enough to give a pickable bounding box.
+     * Concatenate parts, each shifted along Y. The engine's primitives are all centred on the origin, so
+     * this is what lets a shaft and a head be assembled into one arrow without a per-part scene node.
      */
-    private static torus(axis: 'x' | 'y' | 'z', radius: number, tube: number, majorSeg = 32, minorSeg = 6): Geometry {
-        const positions: [number, number, number][] = [];
-        const normals: [number, number, number][] = [];
-        const uvs: [number, number][] = [];
-        const indices: number[] = [];
-
-        for (let i = 0; i <= majorSeg; i++) {
-            const u = (i / majorSeg) * Math.PI * 2;
-            const cu = Math.cos(u), su = Math.sin(u);
-            for (let j = 0; j <= minorSeg; j++) {
-                const v = (j / minorSeg) * Math.PI * 2;
-                const cv = Math.cos(v), sv = Math.sin(v);
-                const rr = radius + tube * cv;
-                let p: [number, number, number];
-                let n: [number, number, number];
-                if (axis === 'z') { p = [rr * cu, rr * su, tube * sv]; n = [cv * cu, cv * su, sv]; }
-                else if (axis === 'y') { p = [rr * cu, tube * sv, rr * su]; n = [cv * cu, sv, cv * su]; }
-                else { p = [tube * sv, rr * cu, rr * su]; n = [sv, cv * cu, cv * su]; }
-                positions.push(p);
-                normals.push(n);
-                uvs.push([i / majorSeg, j / minorSeg]);
-            }
+    private static join(parts: { geometry: Geometry; offsetY: number }[]): Geometry {
+        let vertexCount = 0;
+        let indexCount = 0;
+        for (const part of parts) {
+            vertexCount += part.geometry.positions.length / 3;
+            indexCount += part.geometry.indices.length;
         }
 
-        const stride = minorSeg + 1;
-        for (let i = 0; i < majorSeg; i++) {
-            for (let j = 0; j < minorSeg; j++) {
-                const a = i * stride + j;
-                const b = (i + 1) * stride + j;
-                const c = (i + 1) * stride + (j + 1);
-                const d = i * stride + (j + 1);
-                indices.push(a, b, d);
-                indices.push(b, c, d);
+        const positions = new Float32Array(vertexCount * 3);
+        const normals = new Float32Array(vertexCount * 3);
+        const uvs = new Float32Array(vertexCount * 2);
+        const indices = new Uint32Array(indexCount);
+
+        let vertex = 0;
+        let index = 0;
+        for (const { geometry, offsetY } of parts) {
+            const count = geometry.positions.length / 3;
+            for (let i = 0; i < count; i++) {
+                positions[(vertex + i) * 3] = geometry.positions[i * 3];
+                positions[(vertex + i) * 3 + 1] = geometry.positions[i * 3 + 1] + offsetY;
+                positions[(vertex + i) * 3 + 2] = geometry.positions[i * 3 + 2];
             }
+            normals.set(geometry.normals, vertex * 3);
+            uvs.set(geometry.uvs, vertex * 2);
+            for (let i = 0; i < geometry.indices.length; i++) indices[index + i] = geometry.indices[i] + vertex;
+
+            vertex += count;
+            index += geometry.indices.length;
         }
-        return new Geometry(positions, normals, uvs, [], [], indices);
+
+        // Tangents are meaningless for an unlit handle and cost a full pass over the buffer, so skip them.
+        return new Geometry(positions, normals, uvs, [], [], indices, false);
     }
 
-    /** Rotation ring in the YZ plane (rotates about the X axis). */
-    public static RingX(radius: number = 1, tube: number = 0.04): Geometry { return this.torus('x', radius, tube); }
-    /** Rotation ring in the XZ plane (rotates about the Y axis). */
-    public static RingY(radius: number = 1, tube: number = 0.04): Geometry { return this.torus('y', radius, tube); }
-    /** Rotation ring in the XY plane (rotates about the Z axis). */
-    public static RingZ(radius: number = 1, tube: number = 0.04): Geometry { return this.torus('z', radius, tube); }
-
-    /** Geometry for a 3D arrow pointing along the X axis. */
-    public static ArrowX(length: number = 1, headSize: number = 0.2): Geometry {
-        const positions: [number, number, number][] = [];
-        const normals: [number, number, number][] = [];
-        const uvs: [number, number][] = [];
-        const indices: number[] = [];
-
-        const shaftLength = length - headSize;
-        const shaftRadius = 0.05;
-        const headRadius = 0.15;
-        const segments = 8;
-
-        for (let i = 0; i <= segments; i++) {
-            const theta = (i / segments) * 2 * Math.PI;
-            const sinTheta = Math.sin(theta);
-            const cosTheta = Math.cos(theta);
-
-            for (let j = 0; j <= 1; j++) {
-                const sign = j === 0 ? 0 : 1; // Switch between start and end
-                const x = sign * shaftLength;
-                const y = cosTheta * shaftRadius;
-                const z = sinTheta * shaftRadius;
-
-                const u = i / segments;
-                const v = sign; // Map start to 0 and end to 1
-
-                const normal: [number, number, number] = [0, cosTheta, sinTheta];
-
-                positions.push([x, y, z]);
-                normals.push(normal);
-                uvs.push([u, v]);
-            }
-        }
-
-        const headStart = shaftLength;
-        const headEnd = length;
-        
-        positions.push([headStart, 0, 0]);
-        normals.push([1, 0, 0]);
-        uvs.push([0.5, 0.8]);
-
-        for (let i = 0; i <= segments; i++) {
-            const angle = (i / segments) * Math.PI * 2;
-            const y = Math.cos(angle) * headRadius;
-            const z = Math.sin(angle) * headRadius;
-
-            positions.push([headStart, y, z]);
-            normals.push([1, 0, 0]);
-            uvs.push([0.5 + Math.cos(angle) * 0.2, 0.8 + Math.sin(angle) * 0.2]);
-        }
-
-        positions.push([headEnd, 0, 0]);
-        normals.push([1, 0, 0]);
-        uvs.push([0.5, 1]);
-
-        for (let i = 0; i < segments; i++) {
-            for (let j = 0; j < 1; j++) {
-                const k1 = i * 2 + j;
-                const k2 = k1 + 2;
-
-                indices.push(k1);
-                indices.push(k1 + 1);
-                indices.push(k2);
-
-                indices.push(k2);
-                indices.push(k1 + 1);
-                indices.push(k2 + 1);
-            }
-        }
-
-        const coneBaseStart = (segments + 1) * 2;
-        const coneBaseCenter = coneBaseStart;
-        
-        for (let i = 0; i < segments; i++) {
-            const base = coneBaseStart + 1 + i;
-            const next = coneBaseStart + 1 + ((i + 1) % (segments + 1));
-            
-            indices.push(coneBaseCenter, base, next);
-        }
-
-        const coneTip = positions.length - 1;
-        for (let i = 0; i < segments; i++) {
-            const base = coneBaseStart + 1 + i;
-            const next = coneBaseStart + 1 + ((i + 1) % (segments + 1));
-            
-            indices.push(base, coneTip, next);
-        }
-
-        return new Geometry(positions, normals, uvs, [], [], indices);
+    /**
+     * Arrow along +Y with its tail at the origin: the move handle.
+     *
+     * @param length     Tip distance from the origin.
+     * @param headLength Length of the cone, measured back from the tip.
+     */
+    public static Arrow(length = 1, headLength = 0.25, shaftRadius = 0.015, headRadius = 0.055): Geometry {
+        const shaft = Math.max(length - headLength, 1e-4);
+        return this.join([
+            { geometry: Geometry.Cylinder(12, shaftRadius, shaft), offsetY: shaft / 2 },
+            { geometry: Geometry.Cone(16, headRadius, headLength), offsetY: length - headLength / 2 },
+        ]);
     }
 
-    /** Geometry for a 3D arrow pointing along the Y axis. */
-    public static ArrowY(length: number = 1, headSize: number = 0.2): Geometry {
-        const positions: [number, number, number][] = [];
-        const normals: [number, number, number][] = [];
-        const uvs: [number, number][] = [];
-        const indices: number[] = [];
-
-        const shaftLength = length - headSize;
-        const shaftRadius = 0.05;
-        const headRadius = 0.15;
-        const segments = 8;
-
-        for (let i = 0; i <= segments; i++) {
-            const theta = (i / segments) * 2 * Math.PI;
-            const sinTheta = Math.sin(theta);
-            const cosTheta = Math.cos(theta);
-
-            for (let j = 0; j <= 1; j++) {
-                const sign = j === 0 ? 0 : 1; // Switch between start and end
-                const x = cosTheta * shaftRadius;
-                const y = sign * shaftLength;
-                const z = sinTheta * shaftRadius;
-
-                const u = i / segments;
-                const v = sign; // Map start to 0 and end to 1
-
-                const normal: [number, number, number] = [cosTheta, 0, sinTheta];
-
-                positions.push([x, y, z]);
-                normals.push(normal);
-                uvs.push([u, v]);
-            }
-        }
-
-        const headStart = shaftLength;
-        const headEnd = length;
-        
-        positions.push([0, headStart, 0]);
-        normals.push([0, 1, 0]);
-        uvs.push([0.5, 0.8]);
-
-        for (let i = 0; i <= segments; i++) {
-            const angle = (i / segments) * Math.PI * 2;
-            const x = Math.cos(angle) * headRadius;
-            const y = headStart;
-            const z = Math.sin(angle) * headRadius;
-
-            positions.push([x, y, z]);
-            normals.push([0, 1, 0]);
-            uvs.push([0.5 + Math.cos(angle) * 0.2, 0.8 + Math.sin(angle) * 0.2]);
-        }
-
-        positions.push([0, headEnd, 0]);
-        normals.push([0, 1, 0]);
-        uvs.push([0.5, 1]);
-
-        for (let i = 0; i < segments; i++) {
-            for (let j = 0; j < 1; j++) {
-                const k1 = i * 2 + j;
-                const k2 = k1 + 2;
-
-                indices.push(k1);
-                indices.push(k1 + 1);
-                indices.push(k2);
-
-                indices.push(k2);
-                indices.push(k1 + 1);
-                indices.push(k2 + 1);
-            }
-        }
-
-        const coneBaseStart = (segments + 1) * 2;
-        const coneBaseCenter = coneBaseStart;
-        
-        for (let i = 0; i < segments; i++) {
-            const base = coneBaseStart + 1 + i;
-            const next = coneBaseStart + 1 + ((i + 1) % (segments + 1));
-            
-            indices.push(coneBaseCenter, base, next);
-        }
-
-        const coneTip = positions.length - 1;
-        for (let i = 0; i < segments; i++) {
-            const base = coneBaseStart + 1 + i;
-            const next = coneBaseStart + 1 + ((i + 1) % (segments + 1));
-            
-            indices.push(base, coneTip, next);
-        }
-
-        return new Geometry(positions, normals, uvs, [], [], indices);
+    /**
+     * Shaft along +Y capped with a cube: the scale handle. Same proportions as {@link Arrow}, so the two
+     * modes read as the same gizmo with a different grip.
+     */
+    public static ScaleArm(length = 1, boxSize = 0.09, shaftRadius = 0.015): Geometry {
+        const shaft = Math.max(length - boxSize, 1e-4);
+        return this.join([
+            { geometry: Geometry.Cylinder(12, shaftRadius, shaft), offsetY: shaft / 2 },
+            { geometry: Geometry.Cube(boxSize, boxSize, boxSize), offsetY: length - boxSize / 2 },
+        ]);
     }
 
-    /** Geometry for a 3D arrow pointing along the Z axis. */
-    public static ArrowZ(length: number = 1, headSize: number = 0.2): Geometry {
-        const positions: [number, number, number][] = [];
-        const normals: [number, number, number][] = [];
-        const uvs: [number, number][] = [];
-        const indices: number[] = [];
-
-        const shaftLength = length - headSize;
-        const shaftRadius = 0.05;
-        const headRadius = 0.15;
-        const segments = 8;
-
-        for (let i = 0; i <= segments; i++) {
-            const theta = (i / segments) * 2 * Math.PI;
-            const sinTheta = Math.sin(theta);
-            const cosTheta = Math.cos(theta);
-
-            for (let j = 0; j <= 1; j++) {
-                const sign = j === 0 ? 0 : 1; // Switch between start and end
-                const x = cosTheta * shaftRadius;
-                const y = sinTheta * shaftRadius;
-                const z = sign * shaftLength;
-
-                const u = i / segments;
-                const v = sign; // Map start to 0 and end to 1
-
-                const normal: [number, number, number] = [cosTheta, sinTheta, 0];
-
-                positions.push([x, y, z]);
-                normals.push(normal);
-                uvs.push([u, v]);
-            }
-        }
-
-        const headStart = shaftLength;
-        const headEnd = length;
-        
-        positions.push([0, 0, headStart]);
-        normals.push([0, 0, 1]);
-        uvs.push([0.5, 0.8]);
-
-        for (let i = 0; i <= segments; i++) {
-            const angle = (i / segments) * Math.PI * 2;
-            const x = Math.cos(angle) * headRadius;
-            const y = Math.sin(angle) * headRadius;
-            const z = headStart;
-
-            positions.push([x, y, z]);
-            normals.push([0, 0, 1]);
-            uvs.push([0.5 + Math.cos(angle) * 0.2, 0.8 + Math.sin(angle) * 0.2]);
-        }
-
-        positions.push([0, 0, headEnd]);
-        normals.push([0, 0, 1]);
-        uvs.push([0.5, 1]);
-
-        for (let i = 0; i < segments; i++) {
-            for (let j = 0; j < 1; j++) {
-                const k1 = i * 2 + j;
-                const k2 = k1 + 2;
-
-                indices.push(k1);
-                indices.push(k1 + 1);
-                indices.push(k2);
-
-                indices.push(k2);
-                indices.push(k1 + 1);
-                indices.push(k2 + 1);
-            }
-        }
-
-        const coneBaseStart = (segments + 1) * 2;
-        const coneBaseCenter = coneBaseStart;
-        
-        for (let i = 0; i < segments; i++) {
-            const base = coneBaseStart + 1 + i;
-            const next = coneBaseStart + 1 + ((i + 1) % (segments + 1));
-            
-            indices.push(coneBaseCenter, base, next);
-        }
-
-        const coneTip = positions.length - 1;
-        for (let i = 0; i < segments; i++) {
-            const base = coneBaseStart + 1 + i;
-            const next = coneBaseStart + 1 + ((i + 1) % (segments + 1));
-            
-            indices.push(base, coneTip, next);
-        }
-
-        return new Geometry(positions, normals, uvs, [], [], indices);
+    /** Rotation ring in the XZ plane, i.e. turning about +Y. */
+    public static Ring(radius = 1, tube = 0.012): Geometry {
+        return Geometry.Torus(64, 8, radius, tube);
     }
 
+    /**
+     * Square in the XZ plane (normal +Y) with one corner at the origin, extending along +X and +Z: the
+     * two-axis plane handle. Cornered rather than centred so the caller places it by pushing the corner
+     * out along both axes, which is also how {@link import('../features/gizmo/gizmoPick').planeQuadGeometry}
+     * describes it for picking.
+     */
+    public static PlaneQuad(size = 0.36): Geometry {
+        const positions = [0, 0, 0, size, 0, 0, size, 0, size, 0, 0, size];
+        const normals = [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0];
+        const uvs = [0, 0, 1, 0, 1, 1, 0, 1];
+        // Both windings, so the quad reads the same from either side — it is chrome, not shaded geometry.
+        const indices = [0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2];
+        return new Geometry(positions, normals, uvs, [], [], indices, false);
+    }
+
+    /** Centre handle: uniform scale in scale mode, screen-space drag in move mode. */
+    public static Centre(radius = 0.09): Geometry {
+        return Geometry.Sphere(16, radius);
+    }
 }

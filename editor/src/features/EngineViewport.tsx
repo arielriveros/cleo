@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useCleoEngine } from "./EngineContext";
 import { Raycaster, Node, Vec, Logger } from "cleo";
-import PositionGizmo from "./PositionGizmo";
+import TransformGizmo from "./gizmo/TransformGizmo";
+import useGizmoShortcuts from "./gizmo/useGizmoShortcuts";
+import type { TransformPatch } from "./gizmo/gizmoDrag";
+import { effectiveGizmoSpace } from "../utils/gizmoMath";
 import LandscapeBrush from "./landscape/LandscapeBrush";
 import LandscapeInspector from "./landscape/LandscapeInspector";
 import TilemapBrush from "./tilemap/TilemapBrush";
@@ -18,24 +21,9 @@ import { instantiateTemplate, templateInstanceRootOf } from "../utils/templates"
 import { instantiateModelAsset, adoptModelMaterial } from "../utils/models";
 import { NEW_NODE_MIME, addItemTo, findAddItem } from "./sceneInspector/addCatalog";
 import { captureViewport, releaseViewport } from "../utils/pointerCapture";
-import { GizmoMode, MODE_RENDERS_VIEWPORT } from "./EngineContext";
+import { GizmoMode, GizmoSpace, MODE_RENDERS_VIEWPORT, EditorMode } from "./EngineContext";
 import { useSelection } from "./SelectionContext";
 import { usePlayback } from "./PlaybackContext";
-
-// One segment of the Move/Rotate/Scale toggle, styled to match the top-toolbar ModeSelector.
-function GizmoSeg({ active, title, onClick, children }: { active: boolean; title: string; onClick: () => void; children: React.ReactNode }) {
-    return (
-        <button
-            data-cleo-overlay
-            className={`flex items-center justify-center w-[26px] h-[25px] border-r border-control-hover last:border-r-0 transition-colors cursor-pointer
-                ${active ? 'bg-selected text-white' : 'bg-control text-muted hover:bg-control-hover'}`}
-            title={title}
-            onClick={onClick}
-        >
-            {children}
-        </button>
-    );
-}
 
 // Compact glyphs (stroke currentColor) for the gizmo-mode toggle.
 const MoveIcon = () => (
@@ -54,10 +42,12 @@ const ScaleIcon = () => (
     </svg>
 );
 
+const GIZMO_HIDDEN_MODES: EditorMode[] = ['landscape', 'tilemap', 'renderer', 'input', 'material', 'terrainMaterial'];
+
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, editorMode, viewDimension, setViewDimension, isSceneReady,
             templateRootId, modelEditTargetId, templates, models, materials, animations, scripts, bodies, triggers } = useCleoEngine();
-    const { selectedNode, isGizmoDragging, gizmoMode, setGizmoMode } = useSelection();
+    const { selectedNode, isGizmoDragging, gizmoMode, setGizmoMode, gizmoSpace, setGizmoSpace } = useSelection();
     const { isPlayMode } = usePlayback();
     const { graphView, setGraphView } = useStateMachine();
 
@@ -68,6 +58,14 @@ export default function EngineViewport() {
     // Viewport chrome only means something over a render: modes that replace the canvas with their own
     // full-panel editor (script, tileset) get none of it, and neither does the loading splash.
     const overRender = MODE_RENDERS_VIEWPORT[editorMode] && isSceneReady && !hideForGraph;
+    // Modes whose viewport is a brush surface or a settings preview rather than a scene to arrange.
+    const gizmoIrrelevant = GIZMO_HIDDEN_MODES.includes(editorMode);
+    const showGizmoTools = overRender && !isPlayMode && !gizmoIrrelevant;
+    // The gizmo itself is absent from two further modes, where the viewport picks something that is not a
+    // transform: the UI editor drags DOM boxes, and animation mode picks joints (AnimationSkeletonTool).
+    const showGizmo = overRender && !gizmoIrrelevant && editorMode !== 'ui' && editorMode !== 'animation';
+    // Keyed to the toolbar, not the gizmo: the letters must not fire where the buttons are not shown.
+    useGizmoShortcuts(showGizmoTools);
     const viewportRef = useRef<HTMLDivElement>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
@@ -157,7 +155,10 @@ export default function EngineViewport() {
         };
 
         const handleMouseMove = (event: MouseEvent) => {
-            if (dragStartPos && !isGizmoDragging) {
+            // The ref as well as the state: `isGizmoDragging` only arrives on the next render, but the
+            // gizmo's grab and this move can land in the same frame, and a camera orbit that starts under
+            // a gizmo drag steals the pointer lock from it.
+            if (dragStartPos && !isGizmoDragging && !isGizmoDraggingRef.current) {
                 const rect = viewportRef.current!.getBoundingClientRect();
                 const x = event.clientX - rect.left;
                 const y = event.clientY - rect.top;
@@ -283,14 +284,19 @@ export default function EngineViewport() {
         };
     }, [eventEmitter]);
 
-    const handleTransformChange = (nodeId: string, mode: GizmoMode, value: [number, number, number]) => {
+    const handleTransformChange = (nodeId: string, patch: TransformPatch) => {
         if (!editorScene) return;
 
         const node = editorScene.getNodeById(nodeId);
         if (!node) return;
-        if (mode === 'rotation') node.setRotation(value);
-        else if (mode === 'scale') node.setScale(value);
-        else node.setPosition(value);
+        if (patch.kind === 'position') node.setPosition(patch.local);
+        else if (patch.kind === 'scale') node.setScale(patch.local);
+        else {
+            // Quaternions, not euler, so a drag can pass through the yaw +/-90 singularity. `setQuaternion`
+            // deliberately skips the physics body that `setRotation` writes to, so push it explicitly.
+            node.setQuaternion(patch.localQuat);
+            node.body?.setQuaternion(patch.localQuat);
+        }
     };
 
     // The world-space point under the cursor, used to place anything dropped into the viewport:
@@ -443,13 +449,28 @@ export default function EngineViewport() {
                 {editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && (
                     <DebugVisibilityMenu />
                 )}
-                {editorMode !== 'landscape' && editorMode !== 'tilemap' && editorMode !== 'renderer' && editorMode !== 'input' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && !isPlayMode && (
-                    <div className='flex items-center rounded overflow-hidden border border-control-hover'>
-                        <GizmoSeg active={gizmoMode === 'position'} title='Move (position)' onClick={() => setGizmoMode('position')}><MoveIcon /></GizmoSeg>
-                        <GizmoSeg active={gizmoMode === 'rotation'} title='Rotate' onClick={() => setGizmoMode('rotation')}><RotateIcon /></GizmoSeg>
-                        <GizmoSeg active={gizmoMode === 'scale'} title='Scale' onClick={() => setGizmoMode('scale')}><ScaleIcon /></GizmoSeg>
-                    </div>
-                )}
+                {showGizmoTools && <>
+                    <SegmentedControl<GizmoMode>
+                        size='sm'
+                        options={[
+                            { value: 'position', label: <MoveIcon />, title: 'Move (W)' },
+                            { value: 'rotation', label: <RotateIcon />, title: 'Rotate (E)' },
+                            { value: 'scale', label: <ScaleIcon />, title: 'Scale (R)' },
+                        ]}
+                        value={gizmoMode}
+                        onChange={setGizmoMode} />
+                    {/* Scale has no world frame to offer — scaling a rotated node along a world axis is a
+                        shear, which no TRS transform can hold — so the toggle greys out rather than lying.
+                        The stored preference is untouched and comes back with move or rotate. */}
+                    <SegmentedControl<GizmoSpace>
+                        size='sm'
+                        options={[
+                            { value: 'world', label: 'W', title: 'World axes (X)', disabled: gizmoMode === 'scale' },
+                            { value: 'local', label: 'L', title: "The node's own axes (X)", disabled: gizmoMode === 'scale' },
+                        ]}
+                        value={effectiveGizmoSpace(gizmoMode, gizmoSpace)}
+                        onChange={setGizmoSpace} />
+                </>}
                 {editorMode !== 'template' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'renderer' && !isPlayMode && (
                     <select
                         data-cleo-overlay
@@ -463,7 +484,7 @@ export default function EngineViewport() {
                     </select>
                 )}
             </div>}
-            {overRender && editorMode !== 'landscape' && editorMode !== 'tilemap' && editorMode !== 'ui' && editorMode !== 'renderer' && editorMode !== 'input' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'animation' && <PositionGizmo
+            {showGizmo && <TransformGizmo
                 selectedNodeId={selectedNode}
                 onTransformChange={handleTransformChange}
                 viewportRef={viewportRef}

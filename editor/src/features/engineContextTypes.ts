@@ -198,6 +198,12 @@ export const MODE_RENDERS_VIEWPORT: Record<EditorMode, boolean> = {
   soundSample: false,    // SoundTabView fills the panel
 };
 export type GizmoMode = 'position' | 'rotation' | 'scale';
+/**
+ * Which frame the transform gizmo's handles point along: the selected node's own orientation, or the
+ * world axes however deep in the hierarchy it sits. Scale ignores this and is always local — see
+ * `effectiveGizmoSpace` in `utils/gizmoMath`.
+ */
+export type GizmoSpace = 'local' | 'world';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 
 // Browser-style editor tabs. `editorMode` is derived from the active tab (see EngineProvider). The scene

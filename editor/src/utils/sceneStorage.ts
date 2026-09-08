@@ -27,6 +27,16 @@ export interface SceneRefs {
   tilesetIds: string[];
   aiBrainIds: string[];
   textureIds: string[];
+  /**
+   * Added with the asset reference graph. OPTIONAL, so every scene meta written before it still parses —
+   * and so `sceneRefsComplete` (utils/assetEdges) can tell "this build did not record scripts" apart from
+   * "this scene uses no scripts". One save of the scene fills them in.
+   */
+  scriptIds?: string[];
+  animationFieldIds?: string[];
+  animationIds?: string[];
+  soundSampleIds?: string[];
+  audioSourceIds?: string[];
 }
 
 export interface SceneMeta {

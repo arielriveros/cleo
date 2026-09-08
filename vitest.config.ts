@@ -36,6 +36,7 @@ export default mergeConfig(engineConfig, defineConfig({
             //     npx vitest run --coverage --coverage.include='src/**/*.ts'
             include: [
                 'src/audio/soundSettings.ts',
+                'src/core/assets/assetGraph.ts',
                 'src/core/base64.ts',
                 'src/ai/aiStats.ts',
                 'src/ai/aiSystem.ts',

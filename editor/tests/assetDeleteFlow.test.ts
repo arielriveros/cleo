@@ -68,6 +68,16 @@ describe('planDelete', () => {
   });
 
   // Invariant 2 — the phase-one/phase-two contract, stated as a test.
+  // Deleting a texture takes its private image with it. Without the batch the image reports the very
+  // texture being deleted alongside it as a user, and every image delete warns.
+  it('does not count a referrer that is being deleted in the same batch', () => {
+    const seen: ReadonlySet<string>[] = [];
+    const plan = planDelete(vfs, ['/Rocks'], allResolve, (_e, batch) => { seen.push(batch); return false; });
+    expect(plan.entries.length).toBeGreaterThan(0);
+    for (const batch of seen)
+      for (const entry of plan.entries) expect(batch.has(`${entry.kind}:${entry.assetId}`)).toBe(true);
+  });
+
   it('is a fixed point: re-planning its own ids changes nothing', () => {
     const first = planDelete(vfs, ['/Rocks', '/Rocks/Granite.mat', '/Loose.mat'], allResolve, noneReferenced);
     const second = planDelete(vfs, first.ids, allResolve, noneReferenced);

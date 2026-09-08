@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { GizmoMode } from './EngineContext';
+import type { GizmoMode, GizmoSpace } from './EngineContext';
 
 /**
  * The viewport selection + transform-gizmo slice. Selection changes fire on every click in the
@@ -15,6 +15,12 @@ export interface SelectionContextValue {
   /** Active transform-gizmo mode (move/rotate/scale). */
   gizmoMode: GizmoMode;
   setGizmoMode: (mode: GizmoMode) => void;
+  /**
+   * Whether the handles follow the node's own axes or the world's. Stored as the user's preference even
+   * in scale mode, where it has no effect — so switching back to move or rotate restores their choice.
+   */
+  gizmoSpace: GizmoSpace;
+  setGizmoSpace: (space: GizmoSpace) => void;
 }
 
 export const SelectionContext = createContext<SelectionContextValue | null>(null);

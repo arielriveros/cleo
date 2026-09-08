@@ -29,12 +29,16 @@ export function planDelete(
   vfs: VfsIndex,
   rawIds: unknown,
   resolves: (id: string) => boolean,
-  isReferenced: (entry: VfsEntry) => boolean,
+  isReferenced: (entry: VfsEntry, batch: ReadonlySet<string>) => boolean,
 ): DeletePlan {
   const ids = topMostIds(Array.isArray(rawIds) ? rawIds : []).filter(resolves)
   if (!ids.length) return { ids, entries: [], inUse: [] }
   const { entries } = subtreeOf(vfs, ids)
-  return { ids, entries, inUse: entries.filter(isReferenced) }
+  // Everything going away in THIS delete, as reference-graph keys. A referrer inside the batch is not a
+  // reason to warn: deleting a texture takes its private image with it, and without this the image would
+  // report the very texture being deleted alongside it as a user, warning on every image delete.
+  const batch = new Set(entries.map(e => `${e.kind}:${e.assetId}`))
+  return { ids, entries, inUse: entries.filter(e => isReferenced(e, batch)) }
 }
 
 /**

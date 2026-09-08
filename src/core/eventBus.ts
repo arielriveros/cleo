@@ -2,6 +2,7 @@
 import type { LogEntry } from './logger';
 import type { Node } from './scene/nodes/node';
 import type { ActionState } from '../input/actionMap';
+import type { AssetRef } from './assets/assetGraph';
 
 /**
  * What kind of mutation a `SCENE_CHANGED` event describes. The first three are *structural* — they
@@ -78,6 +79,19 @@ export interface EngineEventMap {
   INPUT_ACTION: { map: string; action: string; state: ActionState };
   /** The active input map was replaced — a project load, or an edit in the Input panel. */
   INPUT_MAP_CHANGED: void;
+  /**
+   * An asset changed, together with every asset that transitively references it — see `AssetGraph.touch`.
+   * One event per cascade, not one per affected asset: a listener watching a single asset can filter, and
+   * a listener that repaints wants to do it once.
+   *
+   * A NEW EVENT rather than a `ChangeKind`, because `SceneChange` carries a `Node` and has nowhere to put
+   * an asset identity — an asset that no scene has placed still has to be able to announce itself.
+   *
+   * Deliberately NOT gated on `authoring.enabled`, unlike the property-level SCENE_CHANGED kinds: the gate
+   * exists for per-frame setter noise, and an asset edit is neither per-frame nor possible outside the
+   * editor. A published game never populates the graph, so it pays nothing either way.
+   */
+  ASSET_CHANGED: { origin: AssetRef; affected: AssetRef[] };
 }
 
 type Listener<T> = (payload: T) => void;

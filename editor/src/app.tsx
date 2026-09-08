@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Editor from './features/Editor'
 import { EngineProvider } from './features/EngineContext'
 import { VfsProvider } from './features/assets/VfsContext'
+import { AssetGraphProvider } from './features/assets/AssetGraphContext'
 import { ScriptWorkspaceProvider } from './features/scriptWorkspace/ScriptWorkspaceContext'
 import LoadingScreen from './components/LoadingScreen'
 import ProjectLauncher from './features/projects/ProjectLauncher'
@@ -65,6 +66,10 @@ export default function App() {
   return (
     <div className="h-screen w-screen overflow-hidden">
         <EngineProvider>
+            {/* The cross-asset reference graph. Above <Editor> and above the VFS: it is fed by the asset
+                LIBRARIES, not by the folder index, and every open tab asks it whether its dependencies
+                moved. */}
+            <AssetGraphProvider>
             {/* The asset explorer's folder index sits above <Editor> so it keeps indexing new assets even
                 while the Assets tab is hidden (renderer mode collapses the whole bottom bar). */}
             <VfsProvider>
@@ -74,6 +79,7 @@ export default function App() {
                     <Editor />
                 </ScriptWorkspaceProvider>
             </VfsProvider>
+            </AssetGraphProvider>
         </EngineProvider>
     </div>
   )

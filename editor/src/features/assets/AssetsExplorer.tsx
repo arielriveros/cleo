@@ -14,6 +14,8 @@ import { useDragOutPatch } from './useDragOutPatch'
 import { runUpload } from './uploadRouter'
 import { badgeStyles, folderIconFor, iconFor, thumbnailOf } from './assetKinds'
 import MissingAssetsPopover from './MissingAssetsPopover'
+import AssetGraphModal from './AssetGraphModal'
+import { useAssetGraph } from './AssetGraphContext'
 import { baseOf, buildFileManagerData, extOf, kindOfExt, findMissingFromExplorer, findOrphanEntries } from '../../utils/vfs'
 import { readDroppedEntries } from '../../utils/importGrouping'
 import { buildTemplateFromNode } from '../../utils/templates'
@@ -27,7 +29,11 @@ import { hoveredScriptStore } from '../sceneInspector/hoveredScriptStore'
 // filemanager.css, so they cannot drift from the icons they mirror — see `badgeStyles`.
 installBadgeStyles()
 
-export default function AssetsExplorer() {
+/**
+ * `active` is false while the Logger tab is selected: both bottom panels are `renderer: 'always'`, so this
+ * stays mounted either way. It only matters for the reference graph, which draws OUTSIDE the panel.
+ */
+export default function AssetsExplorer({ active = true }: { active?: boolean }) {
   const { ready } = useVfs()
   if (!ready) {
     return (
@@ -37,10 +43,10 @@ export default function AssetsExplorer() {
     )
   }
   // Mounted only once the index and every library have loaded, so its `data` is complete and stays frozen.
-  return <AssetsExplorerHost />
+  return <AssetsExplorerHost active={active} />
 }
 
-function AssetsExplorerHost() {
+function AssetsExplorerHost({ active }: { active: boolean }) {
   const {
     enterMaterialEditor, enterTerrainMaterialEditor, enterTemplateEditor, enterScriptEditor, createTilesetFromImage, importAnimationFiles,
     enterAiBrainEditor,
@@ -57,6 +63,17 @@ function AssetsExplorerHost() {
 
   const [importing, setImporting] = useState(false)
   const importingRef = useRef(false)
+
+  // The reference graph. Its badge counts BROKEN references — an edge whose target no longer exists —
+  // which is the opposite audit to the missing-assets button beside it: that one finds assets the explorer
+  // is not showing, this one finds assets something still points at and that are not there.
+  const [graphOpen, setGraphOpen] = useState(false)
+  const { dangling } = useAssetGraph()
+
+  // Selecting the Logger tab does not unmount this panel, so a full-screen overlay it owns would go on
+  // covering the editor. Closed rather than hidden: the graph is a full-screen investigative view, and
+  // having one reappear over everything on the way BACK to this tab is worse than reopening it.
+  useEffect(() => { if (!active) setGraphOpen(false) }, [active])
 
   // Audit: assets a library holds but the explorer is not showing. Checked against BOTH the index and the
   // file manager's live store — the two can disagree, and which one dropped the asset is the useful part.
@@ -446,6 +463,30 @@ function AssetsExplorerHost() {
           )}
         </div>
 
+        {/* The reference graph: what uses this asset, and what it uses. Sits beside the explorer audit
+            because the two answer neighbouring questions about the same libraries. */}
+        <button
+          id='asset-reference-graph'
+          className={`shrink-0 relative w-[24px] h-[20px] inline-flex items-center justify-center rounded ${
+            graphOpen ? 'bg-selected text-white'
+              : dangling.length ? 'text-warning hover:bg-control-hover'
+              : 'text-muted hover:bg-control-hover hover:text-fg'
+          }`}
+          onClick={() => setGraphOpen(true)}
+          title={dangling.length
+            ? `${dangling.length} reference${dangling.length === 1 ? '' : 's'} point at an asset that no longer exists`
+            : 'Open the asset reference graph'}>
+          <svg className='w-3.5 h-3.5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+            <circle cx='5' cy='6' r='2.5' /><circle cx='5' cy='18' r='2.5' /><circle cx='19' cy='12' r='2.5' />
+            <path d='M7.3 7.3 16.7 11M7.3 16.7 16.7 13' />
+          </svg>
+          {dangling.length > 0 && !graphOpen && (
+            <span className='absolute -top-[2px] -right-[2px] min-w-[12px] h-[12px] px-[3px] inline-flex items-center justify-center rounded-full bg-warning text-[9px] font-bold leading-none text-black pointer-events-none'>
+              {dangling.length > 99 ? '99+' : dangling.length}
+            </span>
+          )}
+        </button>
+
         <button
           id='asset-preview-toggle'
           className={`shrink-0 w-[24px] h-[20px] inline-flex items-center justify-center rounded ${previewOpen ? 'bg-selected text-white' : 'text-muted hover:bg-control-hover hover:text-fg'}`}
@@ -468,6 +509,8 @@ function AssetsExplorerHost() {
           ))}
         </div>
       </div>
+
+      {graphOpen && <AssetGraphModal onClose={() => setGraphOpen(false)} />}
 
       <div ref={wrapperRef} className='cleo-fm relative flex-1 min-h-0'>
         <WillowDark fonts={false}>

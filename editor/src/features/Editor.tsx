@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import MenuBar from "./MenuBar";
 import TabBar from "./TabBar";
+import StaleDependencyBanner from './StaleDependencyBanner';
 import DockLayout from "./layout/DockLayout";
 import ModelImportModal from "./models/ModelImportModal";
 import ProgressWindow from "./progress/ProgressWindow";
@@ -78,6 +79,9 @@ function Shell() {
               <SoundProvider>
                 <AiEditorProvider>
                   <TabBar />
+                  {/* "An asset you depend on changed" — one mount for every tab kind, so a full-panel
+                      editor cannot go silently stale the way a per-view banner would let it. */}
+                  <StaleDependencyBanner />
                   <DockLayout />
                 </AiEditorProvider>
               </SoundProvider>

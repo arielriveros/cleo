@@ -10,9 +10,11 @@ import {
   withAncestors, VfsEntry, VfsIndex,
 } from '../../utils/vfs'
 import {
-  deleteAsset, deleteConsequence, duplicateAsset, openAsset, regenerateThumbnail, renameAsset, thumbnailOf,
+  deleteAsset, deleteConsequence, duplicateAsset, findAsset, openAsset, regenerateThumbnail, renameAsset,
+  thumbnailOf,
 } from './assetKinds'
 import { inUseDialogOptions, planDelete } from './deleteFlow'
+import { assetGraph, assetKey } from 'cleo'
 import { confirmDialog } from '../dialogs/dialogStore'
 import {
   collectReferencedMaterialIds, collectReferencedModelIds, collectReferencedTemplateIds,
@@ -97,8 +99,22 @@ export function useFileManagerBridge() {
     }
   }, [depsRef])
 
-  /** Is this asset still used by the scene (or by a mesh asset)? Drives the extra delete confirmation. */
-  const isReferenced = useCallback((entry: VfsEntry): boolean => {
+  /**
+   * Is this asset still used by anything? Drives the extra delete confirmation.
+   *
+   * TWO SOURCES, unioned, because neither alone is complete:
+   *  - the reference graph knows the whole project, including CLOSED scenes and asset-to-asset links a
+   *    scene walk cannot see (a model listing a material, a texture packed from two others);
+   *  - the live-scene walk below knows what has been placed but NOT YET SAVED, which the graph cannot —
+   *    a scene enters the graph through its save-time `refs` snapshot, so a model dragged in a moment ago
+   *    is invisible to it until the scene is saved.
+   * Dropping either half would make a delete stop warning about a real use.
+   */
+  const isReferenced = useCallback((entry: VfsEntry, batch?: ReadonlySet<string>): boolean => {
+    for (const edge of assetGraph.incoming(assetKey(entry.kind, entry.assetId))) {
+      // A referrer being deleted in the same batch is not a use. See planDelete.
+      if (!batch?.has(edge.from)) return true
+    }
     const scene = sceneRef.current
     const l = libsRef.current
     switch (entry.kind) {
@@ -122,6 +138,30 @@ export function useFileManagerBridge() {
       default: return false
     }
   }, [])
+
+  /**
+   * " (used by Rock.model, Level1.scene)" — who actually points at this asset, for the delete dialog.
+   *
+   * The reference graph is what makes this sayable at all: the flat `collectReferenced*Ids` sets could
+   * only ever answer "something does", which tells the user nothing about what they are about to break.
+   * Capped, because a widely-shared texture has dozens of referrers and the dialog lists every deleted
+   * asset already.
+   */
+  const referrerSuffix = useCallback((entry: VfsEntry, batch?: ReadonlySet<string>): string => {
+    const names: string[] = []
+    for (const edge of assetGraph.incoming(assetKey(entry.kind, entry.assetId))) {
+      if (batch?.has(edge.from)) continue // going away with it; not something the user is breaking
+      const from = assetGraph.refOf(edge.from)
+      if (!from) continue
+      const asset = findAsset(from.kind as any, from.id, depsRef.current) as { name?: string } | undefined
+      const name = asset?.name
+      if (name && !names.includes(name)) names.push(name)
+    }
+    if (!names.length) return ''
+    const shown = names.slice(0, 3).join(', ')
+    const rest = names.length - 3
+    return rest > 0 ? ` (used by ${shown} and ${rest} more)` : ` (used by ${shown})`
+  }, [depsRef])
 
   /**
    * Phase two of a delete the user had to confirm: do what the interceptor would have done, then
@@ -217,8 +257,9 @@ export function useFileManagerBridge() {
         // the delete is re-issued from commitDelete once the user answers — with skipProvider, so we do
         // not come back through here and ask a second time.
         deleteConfirmRef.current = true
+        const batch = new Set(entries.map(e => `${e.kind}:${e.assetId}`))
         void confirmDialog(inUseDialogOptions(inUse,
-          e => `${baseOf(e.path)} — ${deleteConsequence(e.kind)}`))
+          e => `${baseOf(e.path)} — ${deleteConsequence(e.kind)}${referrerSuffix(e, batch)}`))
           .then(ok => { if (ok) commitDelete(api, ids) })
           .finally(() => { deleteConfirmRef.current = false })
         return false

@@ -175,3 +175,42 @@ export function buildAssetHashes(
   for (const b of libs.aiBrains ?? []) if (refs.aiBrainIds?.has(b.id)) out[assetHashKey('aiBrain', b.id)] = hashAsset(b)
   return out
 }
+
+/**
+ * Keys that must not make an asset's DEPENDENTS stale.
+ *
+ * A superset of {@link NON_STRUCTURAL_KEYS}, and deliberately not the same set. `name` IS hashed by
+ * {@link hashAsset} — a rename genuinely changes what a scene should re-resolve on open — but it changes
+ * nothing about what instantiating the asset PRODUCES, so raising a "this changed, reload?" banner over a
+ * rename offers the user a destructive rebuild for a cosmetic edit.
+ *
+ * Adding `name` to NON_STRUCTURAL_KEYS instead would change what `hashAsset` hashes, which is a stored
+ * format: every saved scene's hashes would stop matching and would need an ASSET_HASH_VERSION bump.
+ */
+const NON_CASCADING_KEYS = new Set([...NON_STRUCTURAL_KEYS, 'name'])
+
+/**
+ * Whether two versions of an asset differ in anything other than {@link NON_CASCADING_KEYS}.
+ *
+ * The reference graph detects "this asset changed" by OBJECT IDENTITY — every library update action is
+ * immutable (`updateMaterial(id, { ...a, name })`), so a new object is an exact change signal and needs no
+ * hashing. But identity alone over-triggers on one specific flow: saving a material or a model kicks off
+ * an async thumbnail render that writes the asset back a second time. Without this gate every save
+ * cascades twice, and the second cascade re-marks every dependent tab stale moments after the user
+ * dismissed the first.
+ *
+ * A SHALLOW key-by-key identity compare, deliberately not {@link hashAsset}: hashing a model walks its
+ * vertex buffers, and this runs on every library change rather than once per scene save. Shallow is
+ * sufficient because the update actions never mutate a nested object in place — they spread a new record.
+ */
+export function structurallyChanged(prev: any, next: any): boolean {
+  if (prev === next) return false
+  if (!prev || !next || typeof prev !== 'object' || typeof next !== 'object') return true
+
+  const keys = new Set([...Object.keys(prev), ...Object.keys(next)])
+  for (const key of keys) {
+    if (NON_CASCADING_KEYS.has(key)) continue
+    if (prev[key] !== next[key]) return true
+  }
+  return false
+}

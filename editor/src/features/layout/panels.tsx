@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { IDockviewPanelProps, IDockviewPanelHeaderProps } from 'dockview-react';
 import { ModelNode } from 'cleo';
 import EngineViewport from '../EngineViewport';
@@ -177,10 +178,41 @@ function LoggerPanel(_: IDockviewPanelProps) {
   );
 }
 
-function AssetsPanel(_: IDockviewPanelProps) {
+/**
+ * Is this panel the SELECTED tab of its group?
+ *
+ * Read off the group's `activePanel`, exactly as DockLayout's `activeBottomTab` does and for the same
+ * reason. Neither flag on the panel api answers this question on its own: `api.isActive` is
+ * `group.isActive && selected`, so it goes false the moment the user clicks the viewport — a panel that is
+ * plainly still on screen — and `api.isVisible` does not track tab selection for a `renderer: 'always'`
+ * panel. The two events are used only as triggers; the answer is recomputed from the group either way,
+ * which also covers the case where the selection changes inside a group that is not focused (only the
+ * visibility event fires then).
+ */
+function useIsSelectedTab(api: IDockviewPanelProps['api']): boolean {
+  const read = () => api.group?.activePanel?.id === api.id;
+  const [selected, setSelected] = useState(read);
+  useEffect(() => {
+    const sync = () => setSelected(api.group?.activePanel?.id === api.id);
+    sync();
+    const subscriptions = [api.onDidActiveChange(sync), api.onDidVisibilityChange(sync)];
+    return () => subscriptions.forEach(s => s.dispose());
+  }, [api]);
+  return selected;
+}
+
+/**
+ * The asset explorer.
+ *
+ * Selection is threaded in because this panel renders something OUTSIDE its own box: the reference
+ * graph's full-screen modal. Both bottom panels are `renderer: 'always'` (see assertRenderers), so picking
+ * the Logger tab does not unmount this one, and a `fixed` overlay it owns would go on covering the editor.
+ */
+function AssetsPanel(props: IDockviewPanelProps) {
+  const active = useIsSelectedTab(props.api);
   return (
     <div className="flex flex-col h-full w-full text-white bg-surface-raised overflow-hidden">
-      <AssetsExplorer />
+      <AssetsExplorer active={active} />
     </div>
   );
 }

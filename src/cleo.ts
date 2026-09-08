@@ -82,6 +82,10 @@ export { Logger } from "./core/logger";
 export type { LogEntry, LogMethod, LogOptions } from "./core/logger";
 export { TypedEmitter, engineEventBus } from "./core/eventBus";
 export type { EngineEventMap, SceneChange, ChangeKind, StructureOp, NodePlacement } from "./core/eventBus";
+// The cross-asset reference graph. Kind-agnostic on purpose: the editor owns the per-kind readers that
+// turn an asset record into edges, and feeds them in through `setEdges`.
+export { AssetGraph, assetGraph, assetKey, refKey } from "./core/assets/assetGraph";
+export type { AssetRef, AssetKey, AssetEdge, EdgeTarget } from "./core/assets/assetGraph";
 // The condition model and evaluator, shared by the animation state machine and the behavior one. The
 // animator re-exports the same types under their historical `Animation*` names.
 export {

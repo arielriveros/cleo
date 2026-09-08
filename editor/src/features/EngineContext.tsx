@@ -13,7 +13,7 @@ import { ProjectContext, type ProjectContextValue } from "./ProjectContext";
 import { EditorSessionsContext, type EditorSessionsContextValue } from "./EditorSessionsContext";
 import { useStableActions } from "../utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
-import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey } from "cleo";
+import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey } from "cleo";
 import type { SceneChange, TerrainFoliageRule, InputMap } from "cleo";
 import NullImage from '../images/null.png';
 import EventEmitter from "../utils/eventEmitter";
@@ -74,6 +74,8 @@ import {
   collectReferencedTerrainMaterialIds, collectReferencedTextureIds, collectReferencedScriptIds,
   collectReferencedTilesetIds,
   collectReferencedAiBrainIds,
+  collectReferencedAnimationFieldIds, collectReferencedSoundIds, collectReferencedAudioIds,
+  collectReferencedAnimationIds,
 } from "../utils/references";
 import { idbGet, idbSet } from "../utils/idb";
 import { EDITOR_CAMERA_MAP } from "./input/editorInputMap";
@@ -106,7 +108,7 @@ import {
 } from './engineContextTypes';
 import type {
   PendingModelImportView, ModelImportDecision, PendingAnimationImportView, PendingRigPickView,
-  AnimationImportDecision, BodyDescription, ShapeDescription, LoadingProgress, EditorMode, GizmoMode,
+  AnimationImportDecision, BodyDescription, ShapeDescription, LoadingProgress, EditorMode, GizmoMode, GizmoSpace,
   SavingState, TabKind, ModelEditSession, EditorTab, TerrainBrushState, TilemapBrushState,
 } from './engineContextTypes';
 
@@ -119,7 +121,7 @@ export {
 export type {
   PendingModelImportView, ModelImportDecision, RetargetBoneOption, PendingAnimationImportView,
   PendingRigPickView, AnimationImportDecision, BodyDescription, ShapeDescription, LoadingProgress,
-  EditorMode, GizmoMode, SavingState, TabKind, ModelEditSession, EditorTab, TerrainTool,
+  EditorMode, GizmoMode, GizmoSpace, SavingState, TabKind, ModelEditSession, EditorTab, TerrainTool,
   TerrainBrushMode, TerrainBrushState, TilemapTool, TilemapBrushState,
 } from './engineContextTypes';
 
@@ -147,11 +149,15 @@ const EngineContext = createContext<{
   setEditorMode: (mode: EditorMode) => void;
   gizmoMode: GizmoMode;
   setGizmoMode: (mode: GizmoMode) => void;
+  gizmoSpace: GizmoSpace;
+  setGizmoSpace: (space: GizmoSpace) => void;
   tabs: EditorTab[];
   activeTabId: string;
   activeTab: EditorTab;
   dirtyTabs: Record<string, boolean>;
   setActiveTab: (id: string) => void;
+  /** Rebuild a tab from the saved assets, discarding its working copy. See the stale-dependency banner. */
+  reloadTab: (tabId: string) => void;
   closeTab: (id: string) => void;
   reorderTabs: (fromId: string, toId: string) => void;
   /** Save whatever the active tab edits (the scene, or the asset). Resolves to whether it came out clean. */
@@ -439,11 +445,14 @@ const EngineContext = createContext<{
     setEditorMode: () => {},
     gizmoMode: 'position',
     setGizmoMode: () => {},
+    gizmoSpace: 'world',
+    setGizmoSpace: () => {},
     tabs: [{ id: SCENE_TAB_ID, kind: 'scene', title: 'Scene' }],
     activeTabId: SCENE_TAB_ID,
     activeTab: { id: SCENE_TAB_ID, kind: 'scene', title: 'Scene' },
     dirtyTabs: {},
     setActiveTab: () => {},
+    reloadTab: () => {},
     closeTab: () => {},
     reorderTabs: () => {},
     saveActiveTab: async () => false,
@@ -660,6 +669,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // from the active tab — 'template' when a template tab is active, else this.
   const [mainMode, setMainMode] = useState<MainMode>(restoredSession.mainMode);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>('position');
+  // Defaults to world, which is what the move gizmo already did before the toggle existed. Not persisted,
+  // for the same reason gizmoMode is not: a half-restored toolbar is worse than one that always starts fresh.
+  const [gizmoSpace, setGizmoSpace] = useState<GizmoSpace>('world');
   /** Where Play was pressed from, so Stop can put the user back. Null while play started on the scene tab. */
   const playReturnRef = useRef<{ tabId: string; mainMode: MainMode } | null>(null);
   /** Play is waiting for the forced switch to the scene tab to commit (see startPlay). */
@@ -2445,6 +2457,63 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setActiveTabId(id);
   };
 
+  /**
+   * Rebuild a tab from the SAVED assets, discarding whatever working copy it holds.
+   *
+   * The escape hatch behind the stale-dependency banner. The session contexts deliberately refuse to
+   * re-seed on every library change — guarded on asset id, so a save cannot clobber an edit in progress —
+   * which is right, but left no way to say "yes, take the new version". This is that way, and it is
+   * user-initiated, which is the whole difference.
+   *
+   * The scene tab resyncs in place; every other stale-able kind (model, template, terrain material,
+   * animation field) rebuilds through its own `enter*Editor`, which adopts this tab id rather than opening
+   * a second one. Re-arming `pendingHydrationRef` is what re-opens that door: `hydrateTab` is a one-shot
+   * per tab by design.
+   */
+  const reloadTab = (tabId: string) => {
+    const tab = tabsRef.current.find(t => t.id === tabId);
+    if (!tab) return;
+
+    if (tab.kind === 'scene') {
+      // No saved hashes passed on purpose: `changedSince` then reads every asset as changed, which is
+      // exactly what an explicit Reload means. The hash gate exists to keep an AUTOMATIC pass cheap.
+      withoutDirty(() => {
+        const changed = resyncScene(editorSceneRef.current, engineMaps(), currentLibs(), undefined);
+        if (changed) {
+          eventEmitter.current.emit('TEXTURES_CHANGED');
+          eventEmitter.current.emit('SCENE_CHANGED');
+          // A re-instantiated subtree invalidates the selection: the node it named no longer exists.
+          eventEmitter.current.emit('SELECT_NODE', null);
+        }
+      });
+      Logger.info('Scene reloaded from the current assets', 'Editor');
+      return;
+    }
+
+    // Drop the outgoing session BEFORE rebuilding, for two reasons:
+    //  - a preview terrain owns a splat texture and a cannon body nothing else frees, so replacing the
+    //    runtime entry in place would leak one set per reload (mirrors removeTabById);
+    //  - `hydrateTab` reports success by whether a runtime entry EXISTS, and the stale one would satisfy
+    //    that even when the rebuild bailed because the asset had been deleted.
+    tabRuntimeRef.current.get(tab.id)?.helperTerrain?.dispose();
+    tabRuntimeRef.current.delete(tab.id);
+    setModelSessions(prev => { if (!(tab.id in prev)) return prev; const next = { ...prev }; delete next[tab.id]; return next; });
+
+    pendingHydrationRef.current.add(tab.id);
+    if (!hydrateTab(tab)) {
+      Logger.error(`"${tab.title}" could not be reloaded — the asset it edits is gone`, 'Editor');
+      removeTabById(tab.id);
+      return;
+    }
+    clearTabDirty(tab.id);
+    // The tab id is unchanged, so the activate effect — which is keyed on `activeTabId` — never fires.
+    // Without this the engine keeps rendering the scene we just discarded while the inspector edits the
+    // new one, and `dirtyArmedRef`, which every `enter*Editor` clears on its way through, is never
+    // re-armed: no edit anywhere would mark a tab dirty again for the rest of the session.
+    if (tab.id === activeTabIdRef.current) applyActiveTab(tab);
+    Logger.info(`"${tab.title}" reloaded from the current assets`, 'Editor');
+  };
+
   // Save a template tab back to the library and propagate the change to placed instances.
   const saveTemplateTab = async (tabId: string) => {
     const tab = tabsRef.current.find(t => t.id === tabId);
@@ -3029,11 +3098,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         syncModelInstances(tab.modelId!, asset, tab.id);
         syncFoliageRulesForModel(asset, tab.id);
         // Levels are references, so this mesh may be a LOD of others whose placed instances embed a copy of
-        // what was just edited. Refresh those too. One hop only: a level renders the referenced mesh's own
-        // subtree, never its levels, so this cannot cascade.
-        for (const dependent of modelsRef.current) {
-          if (dependent.id === tab.modelId) continue;
-          if (!dependent.lods?.some(l => l.modelId === tab.modelId)) continue;
+        // what was just edited. Refresh those too.
+        //
+        // Asked of the REFERENCE GRAPH rather than by re-scanning `lods[]` here: this used to be the one
+        // place in the project that hand-wrote a dependency hop, and it only ever knew about the one edge
+        // its author was thinking of. Depth 1 is deliberate and unchanged — a level renders the referenced
+        // mesh's own subtree, never its levels, so this must not cascade.
+        for (const key of assetGraph.dependents(assetKey('model', tab.modelId!), 1)) {
+          const dependencyRef = assetGraph.refOf(key);
+          if (dependencyRef?.kind !== 'model' || dependencyRef.id === tab.modelId) continue;
+          const dependent = modelsRef.current.find(m => m.id === dependencyRef.id);
+          if (!dependent) continue;
           syncModelInstances(dependent.id, dependent, tab.id);
           syncFoliageRulesForModel(dependent, tab.id);
         }
@@ -4007,6 +4082,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       const scriptSet = collectReferencedScriptIds(scene);
       const tilesetSet = collectReferencedTilesetIds(scene);
       const brainSet = collectReferencedAiBrainIds(scene);
+      // The five below were added with the asset reference graph. `refs` is how a CLOSED scene appears in
+      // it — the graph reads this snapshot rather than walking a stored blob, which embeds full vertex
+      // data — so a kind missing here is a kind the graph cannot see the scene using.
+      const fieldSet = collectReferencedAnimationFieldIds(scene);
+      const soundSet = collectReferencedSoundIds(scene);
+      const audioSet = collectReferencedAudioIds(soundSamples, soundSet);
+      const animSet = collectReferencedAnimationIds(models.filter(m => modelSet.has(m.id)));
       const refs: SceneRefs = {
         materialIds: Array.from(matSet),
         modelIds: Array.from(modelSet),
@@ -4015,6 +4097,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         tilesetIds: Array.from(tilesetSet),
         aiBrainIds: Array.from(brainSet),
         textureIds: Array.from(referencedTextureIds(materials, terrainMaterials, templates, models, tilesets)),
+        scriptIds: Array.from(scriptSet),
+        animationFieldIds: Array.from(fieldSet),
+        // The clips a scene plays belong to the MODELS it places, not to its nodes — so this is the
+        // model hop, restricted to the models actually in the scene.
+        animationIds: Array.from(animSet),
+        soundSampleIds: Array.from(soundSet),
+        // Two hops: a Sound node names a SAMPLE, and the sample is what names the file.
+        audioSourceIds: Array.from(audioSet),
       };
       // Per-asset content hashes let a *closed* scene tell, when reopened, which referenced assets
       // changed while it was closed — so unchanged models/templates aren't needlessly re-instantiated.
@@ -5001,8 +5091,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // each exposes a narrow, memoized value so a consumer of one slice needn't re-render on every unrelated
   // EngineContext change. Actions go through useStableActions, so only real state changes bust each memo.
   const selectionValue = useMemo<SelectionContextValue>(() => ({
-    selectedNode, isGizmoDragging, gizmoMode, setGizmoMode,
-  }), [selectedNode, isGizmoDragging, gizmoMode]);
+    selectedNode, isGizmoDragging, gizmoMode, setGizmoMode, gizmoSpace, setGizmoSpace,
+  }), [selectedNode, isGizmoDragging, gizmoMode, gizmoSpace]);
 
   const playActions = useStableActions({ startPlay, stopPlay, pausePlay });
   const playbackValue = useMemo<PlaybackContextValue>(() => ({
@@ -5118,11 +5208,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       setEditorMode,
       gizmoMode,
       setGizmoMode,
+      gizmoSpace,
+      setGizmoSpace,
       tabs,
       activeTabId,
       activeTab,
       dirtyTabs,
       setActiveTab,
+      reloadTab,
       closeTab,
       reorderTabs,
       saveActiveTab,
