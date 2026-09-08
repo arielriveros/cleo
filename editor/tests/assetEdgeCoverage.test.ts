@@ -41,6 +41,16 @@ function variableKeys(source: string): Set<string> {
  */
 const NOT_REFERENCES = new Set(['audioIds', 'soundIds'])
 
+/**
+ * Keys `assetEdges` reads that `remapDeep` deliberately does not rewrite.
+ *
+ * Empty, and it should stay that way. The reverse direction is the WORSE drift: a reference the graph knows
+ * about but the merge leaves pointing at a pre-remint id is silent data corruption on import, not merely
+ * under-reporting in a viewer. `animationIds` sat in exactly this gap — the graph read it, the merge did
+ * not rewrite it — and a one-directional guard could not see it.
+ */
+const NOT_REMAPPED = new Set<string>([])
+
 describe('asset edge coverage', () => {
   const merge = read('utils', 'bundleMerge.ts')
   const edges = read('utils', 'assetEdges.ts')
@@ -62,6 +72,16 @@ describe('asset edge coverage', () => {
       .toEqual([])
   })
 
+  it('rewrites every reference key the graph reads', () => {
+    const covered = branchKeys(edges)
+    expect(covered.size).toBeGreaterThan(10)
+
+    const canonical = branchKeys(merge)
+    const unremapped = [...covered].filter(k => !canonical.has(k) && !NOT_REMAPPED.has(k))
+    expect(unremapped, `bundleMerge's remapDeep must rewrite these keys that assetEdges reads, or a merged ` +
+      `bundle keeps pre-remint ids: ${unremapped.join(', ')}`).toEqual([])
+  })
+
   it('handles every asset-link node variable the bundle merge rewrites', () => {
     const canonical = variableKeys(merge)
     expect(canonical.size).toBeGreaterThan(5)
@@ -71,6 +91,10 @@ describe('asset edge coverage', () => {
     const covered = variableKeys(edges)
     const missing = [...canonical].filter(k => !covered.has(k))
     expect(missing, `assetEdges.ts must read these node variables: ${missing.join(', ')}`).toEqual([])
+
+    // And the reverse, for the same reason as the key table above.
+    const unremapped = [...covered].filter(k => !canonical.has(k))
+    expect(unremapped, `bundleMerge must rewrite these node variables: ${unremapped.join(', ')}`).toEqual([])
   })
 
   // The exclusions are load-bearing: without them the graph reports permanent dangling edges for ids that

@@ -37,6 +37,13 @@ export interface SceneRefs {
   animationIds?: string[];
   soundSampleIds?: string[];
   audioSourceIds?: string[];
+  /** Models scattered as terrain FOLIAGE, kept apart from `modelIds` so the two reasons stay tellable. */
+  foliageModelIds?: string[];
+  /**
+   * Which `buildSceneRefs` produced this. Absent means a build that recorded whole-library closures rather
+   * than the scene's own references; the reference viewer marks those partial. See SCENE_REFS_VERSION.
+   */
+  version?: number;
 }
 
 export interface SceneMeta {

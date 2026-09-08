@@ -16,17 +16,32 @@ import { deepClone } from './deepClone'
 export type ClipBearingAsset = { nodeJson: any }
 
 /**
+ * EVERY serialized skinned model inside a nodeJson subtree, depth-first, outermost first.
+ *
+ * A character is usually one skinned mesh, but a model assembled from parts (a body plus separate hair or
+ * armour, each exported with its own copy of the skeleton) has several — and the single-match helper below
+ * silently ignored all but the first, so their clips and skeletons were invisible to every pass built on
+ * it. The root IS considered: a model saved from a single collapsed node has its skin there.
+ */
+export function skinnedModelJsonsOf(nodeJson: any): any[] {
+  const out: any[] = []
+  const walk = (n: any) => {
+    if (!n || typeof n !== 'object') return
+    if (n.model?.skin) out.push(n.model)
+    for (const child of n.children ?? []) walk(child)
+  }
+  walk(nodeJson)
+  return out
+}
+
+/**
  * The first serialized SKINNED model inside a nodeJson subtree, or null.
- * Never the root: an imported model's root is a plain holder Node and the skinned model hangs off a child.
+ *
+ * Defined in terms of {@link skinnedModelJsonsOf} so the two cannot disagree about what "skinned" means.
+ * Prefer the plural form for anything that must not miss a sub-mesh.
  */
 export function skinnedModelJsonOf(nodeJson: any): any | null {
-  if (!nodeJson || typeof nodeJson !== 'object') return null
-  if (nodeJson.model?.skin) return nodeJson.model
-  for (const child of nodeJson.children ?? []) {
-    const found = skinnedModelJsonOf(child)
-    if (found) return found
-  }
-  return null
+  return skinnedModelJsonsOf(nodeJson)[0] ?? null
 }
 
 /** A name not already in `taken`, suffixing ' (2)', ' (3)', … exactly as AnimatedModel.addAnimation does. */
@@ -237,4 +252,35 @@ export function modelTransformDelta(
     rotation: [r[0] + (next[3] - base[3]), r[1] + (next[4] - base[4]), r[2] + (next[5] - base[5])],
     scale: [s[0] * ratio(0), s[1] * ratio(1), s[2] * ratio(2)],
   }
+}
+
+/**
+ * Fields on a model asset that {@link buildModelAsset} cannot derive from a live subtree, and so must be
+ * carried over from the previous record when one is re-saved.
+ *
+ * The bar for this list: the value exists NOWHERE in the serialized node tree, so rebuilding from the tree
+ * loses it silently.
+ *  - `animationIds` — `AnimatedModel.serialize` filters out every clip carrying an `assetId`, so a linked
+ *    animation leaves no trace at all in `nodeJson`. This is the one that bit: every Model Editor save
+ *    dropped the model's `.anim` links and the clips simply stopped appearing.
+ *  - `rigId`        — a library link, same category.
+ *  - `lodSource`    — provenance the node never carried (see ModelAsset).
+ */
+export const MODEL_ASSET_PRESERVED_KEYS = ['animationIds', 'rigId', 'lodSource'] as const
+
+/**
+ * Copy the preserved fields from `prev` onto `next`, for a record being rebuilt from a live subtree.
+ *
+ * Only where `next` has no value: a caller that deliberately writes `animationIds: []` — unlinking the last
+ * animation — must not have the old list restored underneath it. `undefined` means "did not derive this",
+ * which is exactly what `buildModelAsset` leaves behind.
+ */
+export function carryModelAssetFields<T extends object>(next: T, prev: T | undefined | null): T {
+  if (!prev) return next
+  const out = next as Record<string, unknown>
+  const from = prev as Record<string, unknown>
+  for (const key of MODEL_ASSET_PRESERVED_KEYS) {
+    if (out[key] === undefined && from[key] !== undefined) out[key] = from[key]
+  }
+  return next
 }

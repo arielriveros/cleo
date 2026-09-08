@@ -25,6 +25,7 @@ export const KEYS = {
   scripts: 'cleo_scripts',
   animationFields: 'cleo_animation_fields',
   animations: 'cleo_animations',
+  rigs: 'cleo_rigs',
   tilesets: 'cleo_tilesets',
   aiBrains: 'cleo_ai_brains',
   /**
@@ -48,10 +49,10 @@ export const KEYS = {
 } as const;
 
 /** The asset libraries, as `usePersistedLibrary` and the bundle importer address them. */
-export type LibName = 'materials' | 'terrainMaterials' | 'templates' | 'models' | 'scripts' | 'animationFields' | 'animations' | 'tilesets' | 'aiBrains' | 'images' | 'textures' | 'audioSources' | 'soundSamples';
+export type LibName = 'materials' | 'terrainMaterials' | 'templates' | 'models' | 'scripts' | 'animationFields' | 'animations' | 'rigs' | 'tilesets' | 'aiBrains' | 'images' | 'textures' | 'audioSources' | 'soundSamples';
 
 export const LIB_NAMES: readonly LibName[] = [
-  'materials', 'terrainMaterials', 'templates', 'models', 'scripts', 'animationFields', 'animations', 'tilesets',
+  'materials', 'terrainMaterials', 'templates', 'models', 'scripts', 'animationFields', 'animations', 'rigs', 'tilesets',
   'aiBrains', 'images', 'textures', 'audioSources', 'soundSamples',
 ];
 

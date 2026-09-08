@@ -4,7 +4,8 @@ import type { AssetEdge, AssetRef } from 'cleo'
 import { useCleoEngine, SCENE_TAB_ID } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { useDocument } from '../DocumentContext'
-import { edgesOfAsset } from '../../utils/assetEdges'
+import { edgesOfAsset, edgesOfScene } from '../../utils/assetEdges'
+import { buildSceneRefs } from '../../utils/references'
 import { structurallyChanged } from '../../utils/assetHash'
 import { assetIdOfTab } from '../../utils/tabState'
 import type { AssetKind } from '../../utils/vfs'
@@ -54,16 +55,21 @@ export function useAssetGraph(): AssetGraphContextValue {
 }
 
 export function AssetGraphProvider({ children }: { children: React.ReactNode }) {
-  const { sceneList, openSceneId } = useCleoEngine()
+  const { sceneList, openSceneId, editorScene, eventEmitter, instance: engine } = useCleoEngine()
   const { tabs } = useDocument()
   const {
     assetsLoaded,
     materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations,
-    tilesets, aiBrains, images, textures, audioSources, soundSamples,
+    tilesets, aiBrains, images, textures, audioSources, soundSamples, rigs,
   } = useAssetLibrary()
 
   const [version, setVersion] = useState(0)
   const [staleTabs, setStaleTabs] = useState<Map<string, AssetRef[]>>(() => new Map())
+
+  // Read through a ref: the SCENE_CHANGED listener registers once per open scene and must not capture
+  // the libraries as they were on that render.
+  const libsRef = useRef({ soundSamples, models })
+  libsRef.current = { soundSamples, models }
 
   /** The asset object last indexed, per key. The other half of the identity diff. */
   const indexed = useRef(new Map<string, any>())
@@ -111,14 +117,20 @@ export function AssetGraphProvider({ children }: { children: React.ReactNode }) 
     for (const s of scriptAssets) visit('script', s)
     for (const f of animationFields) visit('animationField', f)
     for (const a of animations) visit('animation', a)
+    for (const r of rigs) visit('rig', r)
     for (const t of tilesets) visit('tileset', t)
     for (const b of aiBrains) visit('aiBrain', b)
     for (const i of images) visit('image', i)
     for (const t of textures) visit('texture', t)
     for (const a of audioSources) visit('audioSource', a)
     for (const s of soundSamples) visit('soundSample', s)
-    // Scenes read their save-time `refs` snapshot — see edgesOfScene. No stored blob is ever walked.
-    for (const s of sceneList) visit('scene', s)
+    // Closed scenes read their save-time `refs` snapshot — see edgesOfScene. No stored blob is ever walked.
+    // The OPEN scene is skipped: its edges are re-derived live below, from the scene itself, so it is
+    // correct without a save. Letting this pass run for it too would overwrite that with the stored list.
+    for (const s of sceneList) {
+      if (s.id === openSceneId) continue
+      visit('scene', s)
+    }
 
     for (const key of [...indexed.current.keys()]) {
       if (seen.has(key)) continue
@@ -136,8 +148,43 @@ export function AssetGraphProvider({ children }: { children: React.ReactNode }) 
     if (changed) setVersion(v => v + 1)
   }, [
     assetsLoaded, materials, terrainMaterials, templates, models, scriptAssets, animationFields,
-    animations, tilesets, aiBrains, images, textures, audioSources, soundSamples, sceneList,
+    animations, rigs, tilesets, aiBrains, images, textures, audioSources, soundSamples, sceneList, openSceneId,
   ])
+
+  // --- the open scene, live ---------------------------------------------------------------------------
+  // A scene enters the graph through the `refs` snapshot written when it was SAVED, which means the scene
+  // being edited right now would show a stale — and, for anything saved by an older build, a wrong —
+  // reference list until the user saved it. Re-derive it from the live scene instead.
+  useEffect(() => {
+    if (!assetsLoaded || !openSceneId) return
+
+    const rederive = () => {
+      const scene = editorScene
+      if (!scene) return
+      assetGraph.setEdges(
+        { kind: 'scene', id: openSceneId },
+        edgesOfScene(buildSceneRefs(scene, engine?.renderer?.getRenderSettings?.(), libsRef.current.soundSamples, libsRef.current.models) as any),
+      )
+      setVersion(v => v + 1)
+    }
+
+    rederive()
+    // Trailing-edge debounce, and it is mandatory rather than tidiness: SCENE_CHANGED has ~80 emit sites
+    // and fires on every frame of a gizmo drag. 300 ms is the cadence VfsContext already uses for the same
+    // kind of work on the same event.
+    let timer = 0
+    const onChange = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(rederive, 300)
+    }
+    eventEmitter.on('SCENE_CHANGED', onChange)
+    return () => {
+      window.clearTimeout(timer)
+      eventEmitter.off('SCENE_CHANGED', onChange)
+    }
+    // Deliberately NOT `touch()`ing the scene: that would cascade staleness to the scene tab on every
+    // edit, and the scene is the thing being edited.
+  }, [assetsLoaded, openSceneId, editorScene, eventEmitter, engine])
 
   // --- route the cascade ------------------------------------------------------------------------------
   useEffect(() => {

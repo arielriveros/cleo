@@ -36,7 +36,17 @@ export type AnimationAsset = {
   name: string
   /** Every clip the source file contained, in SOURCE-rig space. Untouched by any retarget. */
   clips: StoredClip[]
-  /** The skeleton `clips` were authored against. Null only for a file that carried no skin at all. */
+  /**
+   * The `.rig` asset holding the skeleton `clips` were authored against — what `buildBoneMapping` needs to
+   * retarget them onto a character. Preferred over `sourceSkin`; see `sourceSkinFor` in utils/rigAssets.ts.
+   */
+  rigId?: string
+  /**
+   * The skeleton `clips` were authored against, embedded. Null only for a file that carried no skin at all.
+   *
+   * LEGACY, READ-ONLY. New assets carry `rigId` instead, but this is never deleted: it is the fallback when
+   * a rig has been removed, and the only thing a build predating rigs can read out of a newer bundle.
+   */
   sourceSkin: StoredSkin | null
   /** The file this came from, so a re-import can offer the existing asset instead of a second copy. */
   sourceFile?: string

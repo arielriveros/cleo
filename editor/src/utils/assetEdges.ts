@@ -3,6 +3,7 @@ import type { AssetRef } from 'cleo'
 import { isBinaryPayload } from './binaryPayload'
 import type { AssetKind } from './vfs'
 import type { SceneRefs } from './sceneStorage'
+import { SCENE_REFS_VERSION } from './references'
 
 // The editor half of the asset reference graph: what each asset kind REFERENCES, with attribution.
 //
@@ -88,8 +89,16 @@ export function walkRefs(obj: any, out: EdgeSpec[]): void {
     // are the embedded copy.
     if (key === 'brainId') { push(out, 'aiBrain', val, key); continue }
     if (key === 'tilesetId') { push(out, 'tileset', val, key); continue }
+    // A model's or animation's link to the shared skeleton it uses (utils/rigAssets.ts).
+    if (key === 'rigId') { push(out, 'rig', val, key); continue }
     if (key === 'sampleId') { push(out, 'soundSample', val, key); continue }
     if (key === 'audioId') { push(out, 'audioSource', val, key); continue }
+    // A model's links to the shared `.anim` assets it plays. Lives here rather than in the `model` arm so
+    // it stays paired with `remapDeep`'s branch — the drift guard compares the two branch tables.
+    if (key === 'animationIds' && Array.isArray(val)) {
+      val.forEach((x, i) => push(out, 'animation', x, `animationIds[${i}]`))
+      continue
+    }
     if (key === 'tilesets' && Array.isArray(val)) {
       for (const ts of val) {
         if (ts && typeof ts === 'object') { push(out, 'tileset', ts.id, 'tilesets[].id'); walkRefs(ts, out) }
@@ -166,10 +175,17 @@ export function edgesOfAsset(kind: AssetKind, asset: any): EdgeSpec[] {
     // Clips in source-rig space plus the skeleton they were authored against. `sourceSkin` is embedded
     // data, and `sourceFile` is a filename, not an asset.
     case 'animation':
+      // Pushed explicitly, not via walkRefs: this arm never calls it, because an animation's `clips` are a
+      // large keyframe payload with no ids in it and walking them would be pure cost.
+      push(out, 'rig', asset.rigId, 'rigId')
       break
     // A brain is a machine or a goal graph over its own fuzzy model. A controller EMBEDS a copy and
     // records `brainId` as the back-link, so the reference runs the other way.
     case 'aiBrain':
+      break
+    // A skeleton. It is the thing others point AT — a model names it, and so does every clip authored
+    // against it — and it references nothing itself.
+    case 'rig':
       break
 
     // --- the two byte splits -------------------------------------------------------------------------
@@ -209,12 +225,10 @@ export function edgesOfAsset(kind: AssetKind, asset: any): EdgeSpec[] {
 
     // --- composites ----------------------------------------------------------------------------------
     case 'model':
-      // The subtree carries the real links: embedded materials with `__materialId`, texture slot maps,
-      // and each LOD level's `modelId`.
+      // The subtree carries every link: embedded materials with `__materialId`, texture slot maps, each LOD
+      // level's `modelId`, and `animationIds` — all of them through `walkRefs`, so there is one branch
+      // table rather than two that can disagree.
       walkRefs(asset, out)
-      // Not in remapDeep's table, so walkRefs cannot see it: the shared clips a model plays.
-      for (const [i, id] of (asset.animationIds ?? []).entries())
-        push(out, 'animation', id, `animationIds[${i}]`)
       break
     case 'template':
       // A captured subtree: node variables (`__materialId`, `__modelId`, `__scriptId`, `__templateId`),
@@ -263,33 +277,63 @@ export function edgesOfScene(refs: SceneRefs | null | undefined): EdgeSpec[] {
     for (const id of ids ?? []) push(out, kind, id, field)
   }
 
-  each(refs.materialIds, 'material', 'refs.materialIds')
-  each(refs.modelIds, 'model', 'refs.modelIds')
+  each(refs.materialIds, 'material', SCENE_LINK_FIELD.material)
+  each(refs.modelIds, 'model', SCENE_LINK_FIELD.model)
   // The pre-rename spelling, present in metas written before the mesh->model rename.
-  each(refs.meshIds, 'model', 'refs.meshIds')
-  each(refs.templateIds, 'template', 'refs.templateIds')
-  each(refs.terrainMaterialIds, 'terrainMaterial', 'refs.terrainMaterialIds')
-  each(refs.tilesetIds, 'tileset', 'refs.tilesetIds')
-  each(refs.aiBrainIds, 'aiBrain', 'refs.aiBrainIds')
-  each(refs.textureIds, 'texture', 'refs.textureIds')
-  each(refs.scriptIds, 'script', 'refs.scriptIds')
-  each(refs.animationFieldIds, 'animationField', 'refs.animationFieldIds')
-  each(refs.animationIds, 'animation', 'refs.animationIds')
-  each(refs.soundSampleIds, 'soundSample', 'refs.soundSampleIds')
-  each(refs.audioSourceIds, 'audioSource', 'refs.audioSourceIds')
+  each(refs.meshIds, 'model', '__meshId')
+  each(refs.foliageModelIds, 'model', 'foliageInclude[].modelId')
+  each(refs.templateIds, 'template', SCENE_LINK_FIELD.template)
+  each(refs.terrainMaterialIds, 'terrainMaterial', SCENE_LINK_FIELD.terrainMaterial)
+  each(refs.tilesetIds, 'tileset', SCENE_LINK_FIELD.tileset)
+  each(refs.aiBrainIds, 'aiBrain', SCENE_LINK_FIELD.aiBrain)
+  each(refs.textureIds, 'texture', SCENE_LINK_FIELD.texture)
+  each(refs.scriptIds, 'script', SCENE_LINK_FIELD.script)
+  each(refs.animationFieldIds, 'animationField', SCENE_LINK_FIELD.animationField)
+  each(refs.animationIds, 'animation', SCENE_LINK_FIELD.animation)
+  each(refs.soundSampleIds, 'soundSample', SCENE_LINK_FIELD.soundSample)
+  each(refs.audioSourceIds, 'audioSource', SCENE_LINK_FIELD.audioSource)
 
   return out
 }
 
 /**
- * Whether a scene's `refs` were written by a build that records every reference kind.
+ * The field a scene's reference to each kind actually lives in.
  *
- * The five fields below were added with the reference graph. Their absence is indistinguishable from
- * "this scene genuinely uses none", so the viewer reports the scene as partial instead of asserting a
- * completeness it cannot know. One save fixes it.
+ * These used to read `refs.materialIds` — the name of the array they were stored in, which tells the user
+ * nothing. A scene's edges now say the same thing every other edge in the graph says: the field the pointer
+ * sits in.
+ *
+ * `texture` is the honest exception. A scene names textures from many places at once — a node's material,
+ * a terrain layer, a foliage billboard, a tilemap atlas, a sprite atlas, a UI image, the grading LUT — and
+ * `refs` stores them as one flat list, so the per-id origin is not recoverable. The label names the kind of
+ * relationship rather than the exact field. Recovering exactness would mean storing a field per id.
+ */
+const SCENE_LINK_FIELD: Record<AssetKind, string> = {
+  model: '__modelId',
+  template: '__templateId',
+  material: '__materialId',
+  script: '__scriptId',
+  terrainMaterial: 'layer.materialId',
+  tileset: 'tilesetId',
+  aiBrain: 'brainId',
+  animationField: 'state.fieldId',
+  soundSample: 'sound.sampleId',
+  audioSource: 'source.audioId',
+  animation: 'animationIds',
+  rig: 'rigId',
+  texture: 'scene texture',
+  image: 'source.imageId',
+  scene: '',
+}
+
+/**
+ * Whether a scene's `refs` were written by the CURRENT `buildSceneRefs`.
+ *
+ * A version check rather than a field-presence one: an older build recorded whole-library closures, so its
+ * `refs` are not merely missing fields, they are wrong in kind — that scene will keep producing the old
+ * over-connected graph until it is saved once. The viewer says "partial" rather than implying the list is
+ * the scene's own. Absent version means a pre-versioning build.
  */
 export function sceneRefsComplete(refs: SceneRefs | null | undefined): boolean {
-  if (!refs) return false
-  return !!refs.scriptIds && !!refs.animationFieldIds && !!refs.animationIds
-    && !!refs.soundSampleIds && !!refs.audioSourceIds
+  return (refs?.version ?? 0) >= SCENE_REFS_VERSION
 }

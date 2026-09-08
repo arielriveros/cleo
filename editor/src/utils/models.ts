@@ -2,7 +2,7 @@ import { Node, ModelNode, AnimatedModel, Logger, TextureManager, mergeBlocker, m
 import { cryptoRandomId } from './ids'
 import { parseByType, stripDebug, collectTextureIds, regenerateIds } from './nodeSubtree'
 import { resolveMaterialRefs, applyMaterialAsset, applyMaterialAssets, serializedVar, getMaterialIdsOf, MATERIAL_ID_VAR, MaterialAsset } from './materials'
-import { skinnedModelJsonOf as skinnedJson, flattenModelAsset, nodeJsonTrs, modelTransformDelta } from './modelClips'
+import { skinnedModelJsonOf as skinnedJson, flattenModelAsset, nodeJsonTrs, modelTransformDelta, carryModelAssetFields } from './modelClips'
 import type { AnimationAsset } from './animationAssets'
 import { applyModelAnimations } from './animationResolve'
 import { deepClone } from './deepClone'
@@ -195,6 +195,14 @@ export type ModelAsset = {
    */
   animationIds?: string[]
   /**
+   * The `.rig` asset holding this character's skeleton (utils/rigAssets.ts).
+   *
+   * The subtree still embeds its own `skin` — the renderer needs it at parse time — but that copy is found
+   * by taking the FIRST sub-mesh carrying one, which silently misses. `rigId` is the DECLARED identity, and
+   * it is what decides which `.anim` assets retarget onto this model cleanly.
+   */
+  rigId?: string
+  /**
    * Present only on a GENERATED LOD level: which model it was decimated from, and which level it is.
    *
    * Provenance, not a reference — `lods` on the source is what actually wires the levels together. This
@@ -207,6 +215,11 @@ export type ModelAsset = {
 /**
  * Snapshot a live node subtree into a saveable model asset.
  * Records only the texture IDS the subtree uses; the payloads live once in the texture store.
+ *
+ * `previous` is the record being REPLACED, when there is one. Everything this function cannot read out of
+ * the live subtree is carried over from it — see MODEL_ASSET_PRESERVED_KEYS. Without it, re-saving a model
+ * silently dropped its animation links, because a linked clip is filtered out of `serialize` and so exists
+ * nowhere in `nodeJson`.
  */
 export async function buildModelAsset(
   root: Node,
@@ -215,6 +228,7 @@ export async function buildModelAsset(
   id?: string,
   lods?: ModelLodDef[],
   cullDistance?: number,
+  previous?: ModelAsset | null,
 ): Promise<ModelAsset> {
   const nodeJson = await root.serialize()
   stripDebug(nodeJson)
@@ -247,7 +261,7 @@ export async function buildModelAsset(
   }
   if (cullDistance && cullDistance > 0) asset.cullDistance = cullDistance
 
-  return asset
+  return carryModelAssetFields(asset, previous)
 }
 
 /** True if a serialized subtree contains a skinned/animated model (LOD + foliage baking are static-only). */
@@ -276,9 +290,10 @@ export function modelAssetHasLodBehavior(asset: ModelAsset): boolean {
 // Skeleton + animation clips belong to the MODEL ASSET; the engine-free serialized half lives in
 // modelClips.ts and is re-exported here so call sites have one import.
 export {
-  skinnedModelJsonOf, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved,
+  skinnedModelJsonOf, skinnedModelJsonsOf, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved,
   assetWithClipRootMotion, assetWithBoneNames, assetClipNames, assetWithIkRig, assetIkRig,
   flattenModelJson, flattenModelAsset, assetWithoutEmbeddedClips,
+  carryModelAssetFields, MODEL_ASSET_PRESERVED_KEYS,
 } from './modelClips'
 
 /**

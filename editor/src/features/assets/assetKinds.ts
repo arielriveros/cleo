@@ -5,6 +5,7 @@ import type { Template } from '../../utils/templates'
 import type { ModelAsset } from '../../utils/models'
 import type { ScriptAsset } from '../../utils/scripts'
 import type { AnimationAsset } from '../../utils/animationAssets'
+import type { RigAsset } from '../../utils/rigAssets'
 import type { AnimationFieldAsset } from '../../utils/animationFields'
 import type { TilesetAsset } from '../../utils/tilesets'
 import type { AiBrainAsset } from '../../utils/aiBrains'
@@ -37,6 +38,7 @@ export type AssetDeps = {
   scripts: ScriptAsset[]
   animationFields: AnimationFieldAsset[]
   animations: AnimationAsset[]
+  rigs: RigAsset[]
   tilesets: TilesetAsset[]
   aiBrains: AiBrainAsset[]
   images: ImageAsset[]
@@ -66,6 +68,9 @@ export type AssetDeps = {
   addAnimation: (a: AnimationAsset) => void
   updateAnimation: (id: string, a: AnimationAsset) => void
   removeAnimation: (id: string) => void
+  addRig: (r: RigAsset) => void
+  updateRig: (id: string, r: RigAsset) => void
+  removeRig: (id: string) => void
   addAiBrain: (b: AiBrainAsset) => void
   updateAiBrain: (id: string, b: AiBrainAsset) => void
   removeAiBrain: (id: string) => void
@@ -105,7 +110,7 @@ export type AssetDeps = {
   emit: (event: string, payload?: any) => void
 }
 
-type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | AnimationAsset | TilesetAsset | AiBrainAsset | SceneMeta | ImageAsset | TextureAsset | AudioSourceAsset | SoundSampleAsset
+type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | AnimationAsset | RigAsset | TilesetAsset | AiBrainAsset | SceneMeta | ImageAsset | TextureAsset | AudioSourceAsset | SoundSampleAsset
 
 /** The asset record behind an entry, or undefined. Every kind has one now, textures included. */
 export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsset | undefined {
@@ -117,6 +122,7 @@ export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsse
     case 'script': return deps.scripts.find(s => s.id === id)
     case 'animationField': return deps.animationFields.find(f => f.id === id)
     case 'animation': return deps.animations.find(a => a.id === id)
+    case 'rig': return deps.rigs.find(r => r.id === id)
     case 'tileset': return deps.tilesets.find(t => t.id === id)
     case 'aiBrain': return deps.aiBrains.find(b => b.id === id)
     case 'scene': return deps.scenes.find(s => s.id === id)
@@ -222,6 +228,11 @@ export function renameAsset(kind: AssetKind, id: string, stem: string, deps: Ass
       if (a) deps.updateAnimation(id, { ...a, name: stem })
       break
     }
+    case 'rig': {
+      const a = deps.rigs.find(x => x.id === id)
+      if (a) deps.updateRig(id, { ...a, name: stem })
+      break
+    }
     case 'tileset': {
       const a = deps.tilesets.find(t => t.id === id)
       if (a) deps.updateTileset(id, { ...a, name: stem })
@@ -270,6 +281,7 @@ export function deleteAsset(kind: AssetKind, id: string, deps: AssetDeps): void 
     case 'script': deps.removeScriptAsset(id); break
     case 'animationField': deps.removeAnimationField(id); break
     case 'animation': deps.removeAnimation(id); break
+    case 'rig': deps.removeRig(id); break
     case 'tileset': deps.removeTileset(id); break
     case 'aiBrain': deps.removeAiBrain(id); break
     case 'scene': {
@@ -384,6 +396,14 @@ export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: 
       if (!a) return null
       // The copy keeps the same source skin and clips, so it retargets exactly like the original.
       deps.addAnimation({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'rig': {
+      const a = deps.rigs.find(x => x.id === id)
+      if (!a) return null
+      // A real copy of the skeleton. Nothing is re-pointed at it: the original's models and animations keep
+      // naming the original, which is what makes this a safe way to fork a rig before editing it.
+      deps.addRig({ ...deepClone(a), id: newId, name: stem })
       return newId
     }
     case 'tileset': {
@@ -516,6 +536,8 @@ export async function regenerateThumbnail(
     case 'animationField':
     // Clips in source-rig space, with no character attached — there is nothing to pose for a picture.
     case 'animation':
+    // A skeleton with no mesh on it. Drawing one would be a diagram, not a preview.
+    case 'rig':
     // Both halves of the image split show the decoded image itself — there is nothing to render.
     case 'image':
     case 'texture':
@@ -548,6 +570,9 @@ export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean
     case 'image': return false
     // An animation has no editor: source-space clip data, meaningful only against a rig.
     case 'animation': return false
+    // Nor does a rig: a skeleton is authored by the model it came from, and its IK setup is edited in the
+    // Animation Editor's skeleton tree, against a live character.
+    case 'rig': return false
     // Raw audio, same reasoning as an image: what makes a file usable — volume, loop points, effects,
     // the bus — belongs to the sound sample, and that is what has an editor.
     case 'audioSource': return false
@@ -564,6 +589,7 @@ export function deleteConsequence(kind: AssetKind): string {
     case 'script': return 'nodes using it lose their script and its variables'
     case 'animationField': return 'animation states playing it fall back to no clip'
     case 'animation': return 'models using it lose those clips'
+    case 'rig': return 'models and animations using it fall back to their embedded skeleton'
     case 'tileset': return 'tilemap layers painted with it, and sprites drawing from it, are cleared'
     // The embedded copy stays put — see detachBrain. Only the link goes.
     case 'aiBrain': return 'controllers keep the brain they copied, but stop tracking this asset'
@@ -585,6 +611,7 @@ export function dragPayload(kind: AssetKind, assetId: string): [string, string][
     case 'script': return [['text/cleo-script', assetId]]
     case 'animationField': return [['text/cleo-animation-field', assetId]]
     case 'animation': return [['text/cleo-animation', assetId]]
+    case 'rig': return [['text/cleo-rig', assetId]]
     case 'tileset': return [['text/cleo-tileset', assetId]]
     case 'aiBrain': return [['text/cleo-ai-brain', assetId]]
     case 'scene': return [['text/cleo-scene', assetId], ['text/plain', assetId]]
@@ -640,6 +667,9 @@ const GLYPHS: Record<AssetKind | 'folder', Glyph> = {
   animationField: { stroke: '#d47ab8', body: `<rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="#8f3a70" fill-opacity=".18"/><path d="M3.5 16.5h17M8 20.5v-17" stroke-opacity=".5"/><circle cx="8" cy="16.5" r="1.5"/><circle cx="13" cy="10" r="1.5"/><circle cx="18" cy="7" r="1.5"/>` },
   // A clip: a keyframe track, with its keys marked on it.
   animation: { stroke: '#e8c14f', body: `<rect x="3.5" y="6" width="17" height="12" rx="2" fill="#8f7018" fill-opacity=".18"/><path d="M3.5 12h17" stroke-opacity=".5"/><path d="M7 12V8.5M12 12v-2M17 12v-4" stroke-opacity=".7"/><circle cx="7" cy="8.5" r="1.4"/><circle cx="12" cy="10" r="1.4"/><circle cx="17" cy="8.5" r="1.4"/>` },
+  // A skeleton: two bones meeting at a joint, with the joints picked out. Deliberately a different hue
+  // from `animation`'s amber — a rig and the clips that play on it sit side by side in the explorer.
+  rig: { stroke: '#c9b28a', body: `<path d="M7 4.5 12 11l5-6.5" stroke-opacity=".85"/><path d="M12 11v5.5" stroke-opacity=".85"/><circle cx="7" cy="4.5" r="1.8" fill="#8a7350" fill-opacity=".5"/><circle cx="17" cy="4.5" r="1.8" fill="#8a7350" fill-opacity=".5"/><circle cx="12" cy="11" r="2.2" fill="#c9b28a" fill-opacity=".45"/><circle cx="12" cy="18.5" r="1.8" fill="#8a7350" fill-opacity=".5"/>` },
   // A sliced atlas: the grid, with one cell picked out.
   // Two linked nodes with a decision branching out of them: a state machine and a goal tree read as the
   // same shape at 24px, which is right — one asset holds either.

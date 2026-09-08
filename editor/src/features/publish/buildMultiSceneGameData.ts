@@ -1,4 +1,5 @@
 import { Scene, TextureManager, AudioManager } from 'cleo'
+import { sourceSkinFor } from '../../utils/rigAssets'
 import type { RenderSettings, InputMap } from 'cleo'
 import { isDefaultInputMap } from 'cleo'
 import { buildGameData, bakeTemplates } from './buildGameData'
@@ -151,7 +152,16 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     modelAnimations[m.id] = [...m.animationIds]
     for (const id of m.animationIds) wantedAnims.add(id)
   }
-  const animations = (src.libs.animations ?? []).filter(a => wantedAnims.has(a.id))
+  // FLATTEN the rig back into each shipped animation.
+  //
+  // `player/animations.ts` retargets using `asset.sourceSkin`; with no skeleton on the asset it falls
+  // through to playing the clips UNRETARGETED — silently wrong animation in the published game, with
+  // nothing logged. New assets carry `rigId` instead of an embedded skin, so publish resolves it here.
+  // Deliberately not a `rigs` table in the pack: that would be a runtime format change (and a player
+  // rebuild) for a bundle that is a flattened artifact anyway.
+  const animations = (src.libs.animations ?? [])
+    .filter(a => wantedAnims.has(a.id))
+    .map(a => ({ ...a, sourceSkin: sourceSkinFor(a, src.libs.rigs ?? []) }))
 
   const out: any = {
     version: 2,

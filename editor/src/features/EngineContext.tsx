@@ -31,11 +31,12 @@ import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf,
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
-import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, flattenModelAsset, skinnedModelJsonOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE } from "../utils/models";
+import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE } from "../utils/models";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, seedScriptFields } from "../utils/scripts";
 import { pushExternalSource } from "./scriptWorkspace/externalSourceStore";
 import { AnimationAsset, buildAnimationAsset, storeSkin, findEquivalentAnimation, withAnimationRef, withoutAnimationRef, extractEmbeddedClips } from "../utils/animationAssets";
-import { modelAssetSkin, applyModelAnimations, invalidateAnimationCache, resolveAnimationAsset } from "../utils/animationResolve";
+import type { StoredSkin } from "../utils/animationAssets";
+import { modelAssetSkin, applyModelAnimations, invalidateAnimationCache, resolveAnimationAsset, registerRigResolver } from "../utils/animationResolve";
 import { AnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
 import { TilesetAsset, reembedTilesets, detachTileset } from "../utils/tilesets";
 import { AiBrainAsset, AiBrainKind, buildAiBrainAsset, reembedBrains, detachBrain } from "../utils/aiBrains";
@@ -55,6 +56,8 @@ import { isValidGrouping, compactGroups, type PartInfo } from "../utils/submeshG
 import { readModelLibrary, writeModelLibrary } from "../utils/modelStore";
 import { generateLodLevel, hasSkinnedPart, subtreeTriangles } from "../utils/lodGenerate";
 import { registerFoliageSourceResolver } from "../utils/foliageRules";
+import { findEquivalentRig, buildRigAsset, type RigAsset } from "../utils/rigAssets";
+import { extractRigs } from "../utils/rigMigration";
 import { decimateGeometry } from "../workers/workerClient";
 import { cancelAllImports, ImportCancelled, parseAnimationFiles } from "../workers/importClient";
 import { detectMissingTextures } from "../utils/textureRefs";
@@ -75,7 +78,7 @@ import {
   collectReferencedTilesetIds,
   collectReferencedAiBrainIds,
   collectReferencedAnimationFieldIds, collectReferencedSoundIds, collectReferencedAudioIds,
-  collectReferencedAnimationIds,
+  collectReferencedAnimationIds, buildSceneRefs,
 } from "../utils/references";
 import { idbGet, idbSet } from "../utils/idb";
 import { EDITOR_CAMERA_MAP } from "./input/editorInputMap";
@@ -252,6 +255,11 @@ const EngineContext = createContext<{
   addAnimation: (a: AnimationAsset) => void;
   removeAnimation: (id: string) => void;
   updateAnimation: (id: string, a: AnimationAsset) => void;
+  /** Rig assets: shared skeletons. See utils/rigAssets.ts. */
+  rigs: RigAsset[];
+  addRig: (r: RigAsset) => void;
+  removeRig: (id: string) => void;
+  updateRig: (id: string, r: RigAsset) => void;
   /** Open (or focus) an Animation Field asset's edit tab. */
   enterAnimationFieldEditor: (fieldId?: string) => void;
   /** Create a field for a skinned model asset and open it. Returns the new field's id, or null. */
@@ -523,6 +531,10 @@ const EngineContext = createContext<{
     addAnimation: () => {},
     removeAnimation: () => {},
     updateAnimation: () => {},
+    rigs: [],
+    addRig: () => {},
+    removeRig: () => {},
+    updateRig: () => {},
     enterAnimationFieldEditor: () => {},
     createAnimationFieldForModel: () => null,
     editingAnimationFieldId: null,
@@ -1005,8 +1017,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Animation assets: shared clips, stored in their SOURCE rig's space and retargeted per model at use.
   // A model asset names the animations it uses by id (`animationIds`) — see utils/animationAssets.ts.
   const [animations, setAnimations] = useState<AnimationAsset[]>([]);
-  /** Bump to re-sweep model assets for embedded clips on next load. See the migration below. */
-  const ANIMATION_ASSET_MIGRATION = 2;
+  /**
+   * Bump to re-sweep model assets on next load. See the migration below.
+   *   v2 — lift clips embedded in a model's subtree into shared `.anim` assets.
+   *   v3 — lift each model's SKELETON into a shared `.rig`, and point every `.anim` at the rig it was
+   *        authored against (utils/rigMigration.ts).
+   */
+  const ANIMATION_ASSET_MIGRATION = 3;
   const animationsLoadedRef = useRef(false);
   useEffect(() => {
     (async () => {
@@ -1024,19 +1041,42 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         const done = (await idbGet<number>(libKey('animations') + ':migrated')) ?? 0;
         if (done < ANIMATION_ASSET_MIGRATION) {
           // Through the store, not the raw key: by this point the library may already be sharded.
+          // ONE read, one combined pass, one write. The rig sweep must not be a second effect: two
+          // passes each doing readModelLibrary -> mutate -> writeModelLibrary would lose one of the two
+          // writes and double-seed persistedModelsRef.
           const models = await readModelLibrary();
+          const storedRigs = (await idbGet<RigAsset[]>(libKey('rigs'))) ?? [];
           const r = extractEmbeddedClips(models, list, skinnedModelJsonOf, assetWithoutEmbeddedClips);
-          if (r.extracted || r.shared) {
+          // v3. Runs over the OUTPUT of v2, so a project migrating both versions in one boot sees the
+          // clips already lifted. `extractRigs` returns unchanged models by identity, so a library that
+          // gains nothing here is not rewritten.
+          const g = extractRigs(r.models, r.animations, storedRigs, skinnedModelJsonsOf);
+          const modelsChanged = r.extracted || r.shared || g.linkedModels;
+
+          if (modelsChanged || g.created || g.linkedAnimations) {
             // No `preAnimationAssets` backup any more. It was a second full copy of a library big enough
             // to be the problem, and the extraction only ever REMOVES clips that were just written to the
             // animation library — so the data still exists, addressed differently.
-            await writeModelLibrary(r.models, models);
-            persistedModelsRef.current = r.models; // storage now holds these; don't re-write them
-            await idbSet(libKey('animations'), r.animations);
-            setModels(prev => (prev.length ? r.models.map(flattenModelAsset) : prev));
-            Logger.info(`Animation library: extracted ${r.extracted} clip${r.extracted === 1 ? '' : 's'}` +
-              (r.shared ? `, ${r.shared} already shared with another model` : ''), 'Editor');
-            setAnimations(prev => prev.length ? prev : r.animations);
+            if (modelsChanged) {
+              await writeModelLibrary(g.models, models);
+              persistedModelsRef.current = g.models; // storage now holds these; don't re-write them
+              setModels(prev => (prev.length ? g.models.map(flattenModelAsset) : prev));
+            }
+            await idbSet(libKey('animations'), g.animations);
+            if (g.rigs.length) await idbSet(libKey('rigs'), g.rigs);
+            if (r.extracted || r.shared) {
+              Logger.info(`Animation library: extracted ${r.extracted} clip${r.extracted === 1 ? '' : 's'}` +
+                (r.shared ? `, ${r.shared} already shared with another model` : ''), 'Editor');
+            }
+            if (g.created || g.linkedModels || g.linkedAnimations) {
+              Logger.info(`Rig library: ${g.created} skeleton${g.created === 1 ? '' : 's'} extracted, ` +
+                `linked to ${g.linkedModels} model${g.linkedModels === 1 ? '' : 's'} and ` +
+                `${g.linkedAnimations} animation${g.linkedAnimations === 1 ? '' : 's'}`, 'Editor');
+            }
+            setAnimations(prev => prev.length ? prev : g.animations);
+            // The rig load effect uses the same `prev.length ? prev : list` guard, so whichever of the two
+            // supplies a non-empty list first wins and the other is a no-op.
+            setRigs(prev => prev.length ? prev : g.rigs);
           } else if (list.length) setAnimations(prev => prev.length ? prev : list);
           await idbSet(libKey('animations') + ':migrated', ANIMATION_ASSET_MIGRATION);
         } else if (list.length) setAnimations(prev => prev.length ? prev : list);
@@ -1062,6 +1102,66 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (next !== m) updateModel(m.id, next);
     }
   };
+
+  // Rig assets: a character's SKELETON, named and shared (utils/rigAssets.ts). A model points at one via
+  // `rigId`, and so does an `.anim`, naming the skeleton its clips were authored against. Before this, both
+  // dug the skeleton out of a model's serialized subtree by taking the first sub-mesh that had one — which
+  // silently missed, and took the IK rig and bone names down with it.
+  const [rigs, setRigs] = useState<RigAsset[]>([]);
+  const rigsLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<RigAsset[]>(libKey('rigs'));
+        if (list && list.length) setRigs(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load rigs:', e); }
+      finally { rigsLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary(libKey('rigs'), rigs, rigsLoadedRef);
+
+  const rigsRef = useRef<RigAsset[]>([]);
+  rigsRef.current = rigs;
+
+  const addRig = (r: RigAsset) => setRigs(prev => [...prev, r]);
+  const updateRig = (id: string, r: RigAsset) => {
+    setRigs(prev => prev.map(x => x.id === id ? r : x));
+    // The retarget cache is keyed by (animation, model) and reads the rig's skeleton, so a rig edit — a
+    // bone-name backfill, an IK change — invalidates every mapping built from it. Without this the old
+    // index-matched mapping survives and the character animates subtly wrongly, with nothing logged.
+    rigsRef.current = rigs.map(x => x.id === id ? r : x);
+    invalidateAnimationCache();
+    eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
+  };
+  const removeRig = (id: string) => {
+    setRigs(prev => prev.filter(x => x.id !== id));
+    // Unlink, never leave dangling: an animation whose rigId names nothing and which has no `sourceSkin`
+    // would retarget against nothing and silently play in the wrong space.
+    for (const m of modelsRef.current) if (m.rigId === id) updateModel(m.id, { ...m, rigId: undefined });
+    for (const a of animationsRef.current) if (a.rigId === id) updateAnimation(a.id, { ...a, rigId: undefined });
+    invalidateAnimationCache();
+  };
+
+  /**
+   * The rig for a skeleton, reusing an equivalent one or minting it. The import-time twin of what
+   * `extractRigs` does for a whole library — so a character and the clips imported for it land on ONE rig
+   * rather than two copies of the same skeleton that then have to be retargeted between.
+   *
+   * Writes through the ref as well as state: an import links the returned rig immediately, and `rigs` is a
+   * render mirror that would still be the pre-add array (the same trap `adoptModelAsset` hit).
+   */
+  const ensureRig = (skin: StoredSkin | null | undefined, name: string): RigAsset | null => {
+    if (!skin) return null;
+    const found = findEquivalentRig(rigsRef.current, skin);
+    if (found) return found;
+    const rig = buildRigAsset(name || 'Rig', skin);
+    rigsRef.current = [...rigsRef.current, rig];
+    addRig(rig);
+    return rig;
+  };
+
+  /** A readable rig name from an imported file: "mannequin.fbx" -> "mannequin". */
+  const animationTargetName = (fileName: string) => fileName.replace(/\.[^.]+$/, '') || 'Rig';
 
   // Animation Field assets (blend spaces). A field blends clips from ONE model asset by 1D/2D parameters;
   // the animation state machine consumes it as a state. Persisted to IndexedDB like every other library.
@@ -1419,7 +1519,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     if (assetsLoaded) return;
     const timer = window.setInterval(() => {
-      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && animationsLoadedRef.current && scenesLoadedRef.current && imagesLoadedRef.current && texturesLoadedRef.current && audioSourcesLoadedRef.current && soundSamplesLoadedRef.current && aiBrainsLoadedRef.current) {
+      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && animationsLoadedRef.current && rigsLoadedRef.current && scenesLoadedRef.current && imagesLoadedRef.current && texturesLoadedRef.current && audioSourcesLoadedRef.current && soundSamplesLoadedRef.current && aiBrainsLoadedRef.current) {
         setAssetsLoaded(true);
         window.clearInterval(timer);
       }
@@ -1729,6 +1829,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     return model ? { model, library: modelsRef.current, materials: materialsRef.current } : null;
   });
 
+  // Same shape and the same reason as the foliage resolver above: `animationResolve` needs to turn a
+  // `rigId` into a skeleton, and threading the rig library through resolveAnimationAsset ->
+  // resolveModelAnimations -> applyModelAnimations -> refreshModelClips would touch every call site of each.
+  registerRigResolver((rigId: string) => rigsRef.current.find(r => r.id === rigId)?.skin ?? null);
+
   const engineMaps = () => ({ scripts: scriptsRef.current, bodies: bodiesRef.current, triggers: triggersRef.current });
 
   /**
@@ -1747,6 +1852,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     materials: materialsRef.current, models: modelsRef.current, templates: templatesRef.current,
     terrainMaterials: terrainMaterialsRef.current, scripts: scriptAssetsRef.current,
     tilesets: tilesetsRef.current, aiBrains: aiBrainsRef.current, animations: animationsRef.current,
+    rigs: rigsRef.current,
   });
 
   // Open (or focus) a template editor tab. Each template tab owns its own throwaway edit scene.
@@ -2011,7 +2117,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const linkAnimationToModel = (modelId: string, animationId: string) => {
     const asset = modelsRef.current.find(m => m.id === modelId);
     const anim = animationsRef.current.find(a => a.id === animationId);
-    if (!asset || !anim) return;
+    // Logged, not silent: this used to return here whenever the model had just been adopted (see
+    // adoptModelAsset), and a drag that did nothing at all left no way to tell why.
+    if (!asset) { Logger.warn(`Cannot link an animation: model ${modelId} is not in the library`, 'Editor'); return; }
+    if (!anim) { Logger.warn(`Cannot link animation ${animationId}: it is not in the library`, 'Editor'); return; }
     const linked = withAnimationRef(asset, animationId);
     if (linked === asset) return; // already linked
     updateModel(modelId, linked);
@@ -2083,26 +2192,28 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Which rig to retarget onto: the Animation Editor's open character when there is one, otherwise the
     // user picks from the skinned models in the library. Asked ONCE for the whole selection — every file
     // in one action is going onto the same character, and four identical dialogs would be a tax.
-    const rigChoices = modelsRef.current.filter(m => modelAssetIsSkinned(m));
-    const openRigId = cloneNode ? modelIdOf(cloneNode) : undefined;
-    let rigId = openRigId;
-    if (!rigId) {
-      if (!rigChoices.length) {
+    // NOTE the naming: these are MODEL asset ids. `rigId` now means a `.rig` asset (utils/rigAssets.ts),
+    // and the two must never be confused — which is why these locals say `targetModel`.
+    const skinnedModels = modelsRef.current.filter(m => modelAssetIsSkinned(m));
+    const openTargetModelId = cloneNode ? modelIdOf(cloneNode) : undefined;
+    let targetModelId = openTargetModelId;
+    if (!targetModelId) {
+      if (!skinnedModels.length) {
         Logger.error('Import a skinned model first — an animation needs a rig to retarget onto', 'Editor');
         return;
       }
-      rigId = await new Promise<string | null>(resolve => {
+      targetModelId = await new Promise<string | null>(resolve => {
         pendingRigResolverRef.current = resolve;
         setPendingRigPick({
           fileName: bundles.length === 1 ? bundles[0].name : `${bundles.length} animation files`,
-          models: rigChoices.map(m => ({ id: m.id, name: m.name })),
+          models: skinnedModels.map(m => ({ id: m.id, name: m.name })),
         });
       }) ?? undefined;
-      if (!rigId) { Logger.info('Animation import cancelled', 'Editor'); return; }
+      if (!targetModelId) { Logger.info('Animation import cancelled', 'Editor'); return; }
     }
-    const rigAsset = modelsRef.current.find(m => m.id === rigId);
-    const targetSkin = cloneModel?.skin ?? modelAssetSkin(rigAsset);
-    if (!rigAsset || !targetSkin) {
+    const targetModel = modelsRef.current.find(m => m.id === targetModelId);
+    const targetSkin = cloneModel?.skin ?? modelAssetSkin(targetModel);
+    if (!targetModel || !targetSkin) {
       Logger.error('That model has no skeleton to retarget onto', 'Editor');
       return;
     }
@@ -2134,7 +2245,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // The model asset is threaded through a local: updateModel is a state write, so modelsRef still
       // holds the previous animationIds during the next iteration and re-reading it would drop the link
       // the file before just made.
-      let linkedModel = rigAsset;
+      let linkedModel = targetModel;
       let imported = 0;
 
       for (let i = 0; i < bundles.length; i++) {
@@ -2226,22 +2337,30 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // A second import of the same file should link the existing asset, not make a byte-identical twin —
         // matched on clip CONTENT, since the same Mixamo download is routinely renamed between imports.
         const existing = findEquivalentAnimation(animationsRef.current, namedClips as any);
-        const animAsset = existing ?? buildAnimationAsset(
-          namedClips[0]?.name || fileName.replace(/\.[^.]+$/, ''),
-          namedClips as any, storeSkin(sourceSkin), fileName,
-        );
+        // Give the source skeleton an identity at IMPORT, not only in the migration. The v1->v2 lesson is
+        // written into the comment above: a one-shot pass while the importer keeps producing the old shape
+        // just means another migration a release later.
+        // Only when a NEW asset is actually stored: re-importing a file whose clips are already in the
+        // library must not leave a freshly-minted rig behind that nothing references.
+        const animAsset = existing ?? {
+          ...buildAnimationAsset(
+            namedClips[0]?.name || fileName.replace(/\.[^.]+$/, ''),
+            namedClips as any, storeSkin(sourceSkin), fileName,
+          ),
+          rigId: ensureRig(storeSkin(sourceSkin), animationTargetName(fileName))?.id,
+        };
         if (existing) Logger.info(`"${existing.name}" already holds these clips — linked it instead of storing a copy`, 'Editor');
         else addAnimation(animAsset);
 
         setStage(i, 'saving', 'Linking to the model');
         // The link lives on the MODEL asset, so every placement of that character picks the clips up.
         const nextModel = withAnimationRef(linkedModel, animAsset.id);
-        if (nextModel !== linkedModel) { linkedModel = nextModel; updateModel(rigAsset.id, linkedModel); }
+        if (nextModel !== linkedModel) { linkedModel = nextModel; updateModel(targetModel.id, linkedModel); }
         invalidateAnimationCache(animAsset.id);
 
         // Show it immediately on whatever is on screen: the Animation Editor's preview clone, the node it was
         // opened from, and every other placement of this character across every live scene.
-        const resolved = resolveAnimationAsset(animAsset, targetSkin, rigAsset.id);
+        const resolved = resolveAnimationAsset(animAsset, targetSkin, targetModel.id);
         if (cloneModel) for (const clip of resolved) cloneModel.addAnimation({ ...clip });
         if (src instanceof ModelNode && src.model instanceof AnimatedModel)
           for (const clip of resolved) src.model.addAnimation({ ...clip });
@@ -2249,7 +2368,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
         const added = namedClips.length;
         imported += added;
-        Logger.info(`Imported ${added} animation clip${added === 1 ? '' : 's'} from ${fileName} into "${rigAsset.name}"`, 'Editor');
+        Logger.info(`Imported ${added} animation clip${added === 1 ? '' : 's'} from ${fileName} into "${targetModel.name}"`, 'Editor');
         setStage(i, 'done', `Imported ${added} clip${added === 1 ? '' : 's'}`);
       }
 
@@ -3073,7 +3192,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       try {
         asset = await buildModelAsset(
           baseRoot, [...materialIdSet], prev?.thumbnail ?? '', tab.modelId,
-          lodDefs, session.cullDistance,
+          // `prev` carries what a live subtree cannot express — above all `animationIds`, which
+          // `AnimatedModel.serialize` filters out, so without this every save silently unlinked the
+          // model's animations and its clips stopped appearing.
+          lodDefs, session.cullDistance, prev,
         );
       } finally {
         // Put any wrapped nodes back where the user had them. The wrapper existed only to give
@@ -3462,6 +3584,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // kept: those are the model's authored orientation and size (same rule as separateSubModels).
     if (asset.nodeJson) asset.nodeJson.position = [0, 0, 0];
     addModel(asset);
+    // `modelsRef` is a RENDER mirror, so it still holds the pre-adoption array until the next commit.
+    // Callers await this function and immediately look the new model up — `AnimationAssetPicker` does
+    // exactly that — and would find nothing, making the drop a silent no-op. Mirroring eagerly is the
+    // idiom already used for `persistedModelsRef`; the next render reassigns from state either way.
+    modelsRef.current = [...modelsRef.current, asset];
     node.setVariable(MODEL_ID_VAR, asset.id, 'string');
     eventEmitter.current.emit('SCENE_CHANGED');
     Logger.info(`Added "${asset.name}" to the model library`, 'Editor');
@@ -3551,7 +3678,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         Logger.info(`Stored ${r.extracted} clip${r.extracted === 1 ? '' : 's'} as animation assets` +
           (r.shared ? `, ${r.shared} shared with a model already in the library` : ''), 'Import');
       }
-      for (const asset of r.models) addModel(asset);
+      // Give each character's skeleton an identity at import, so a model and the clips imported for it
+      // land on ONE rig. Without this the migration would have to sweep up after every import — which is
+      // exactly the v1->v2 mistake the comment above records.
+      for (const asset of r.models) {
+        const skin = skinnedModelJsonsOf(asset.nodeJson)[0]?.skin;
+        const rig = ensureRig(storeSkin(skin), asset.name);
+        addModel(rig ? { ...asset, rigId: rig.id } : asset);
+      }
     };
 
     // Map an import stage onto the store's generic step. One place, so the labels and the bar can't drift.
@@ -4075,41 +4209,27 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       });
       const now = Date.now();
       const scene = editorSceneRef.current;
-      const matSet = collectReferencedMaterialIds(scene, models);
+      // TWO material sets, and they must not be merged.
+      //
+      // `matSetWide` folds in every library model's materials, placed or not. That is what the SAVE-TIME
+      // HASHES want: a closed scene must be able to tell that a material changed while it was closed, and
+      // it reaches that material only through a model it places.
+      //
+      // `refs` is the scene's OWN reference list — only what its nodes literally name. Using the wide set
+      // there is what made every scene edge directly to almost every asset in the project.
+      const matSetWide = collectReferencedMaterialIds(scene, models);
       const modelSet = collectReferencedModelIds(scene);
       const tplSet = collectReferencedTemplateIds(scene);
       const tmSet = collectReferencedTerrainMaterialIds(scene);
       const scriptSet = collectReferencedScriptIds(scene);
       const tilesetSet = collectReferencedTilesetIds(scene);
-      const brainSet = collectReferencedAiBrainIds(scene);
-      // The five below were added with the asset reference graph. `refs` is how a CLOSED scene appears in
-      // it — the graph reads this snapshot rather than walking a stored blob, which embeds full vertex
-      // data — so a kind missing here is a kind the graph cannot see the scene using.
-      const fieldSet = collectReferencedAnimationFieldIds(scene);
-      const soundSet = collectReferencedSoundIds(scene);
-      const audioSet = collectReferencedAudioIds(soundSamples, soundSet);
-      const animSet = collectReferencedAnimationIds(models.filter(m => modelSet.has(m.id)));
-      const refs: SceneRefs = {
-        materialIds: Array.from(matSet),
-        modelIds: Array.from(modelSet),
-        templateIds: Array.from(tplSet),
-        terrainMaterialIds: Array.from(tmSet),
-        tilesetIds: Array.from(tilesetSet),
-        aiBrainIds: Array.from(brainSet),
-        textureIds: Array.from(referencedTextureIds(materials, terrainMaterials, templates, models, tilesets)),
-        scriptIds: Array.from(scriptSet),
-        animationFieldIds: Array.from(fieldSet),
-        // The clips a scene plays belong to the MODELS it places, not to its nodes — so this is the
-        // model hop, restricted to the models actually in the scene.
-        animationIds: Array.from(animSet),
-        soundSampleIds: Array.from(soundSet),
-        // Two hops: a Sound node names a SAMPLE, and the sample is what names the file.
-        audioSourceIds: Array.from(audioSet),
-      };
+      const refs: SceneRefs = buildSceneRefs(
+        scene, instanceRef.current?.renderer.getRenderSettings(), soundSamples, models,
+      );
       // Per-asset content hashes let a *closed* scene tell, when reopened, which referenced assets
       // changed while it was closed — so unchanged models/templates aren't needlessly re-instantiated.
       const assetHashes = buildAssetHashes(
-        { materialIds: matSet, modelIds: modelSet, templateIds: tplSet, terrainMaterialIds: tmSet, scriptIds: scriptSet, tilesetIds: tilesetSet },
+        { materialIds: matSetWide, modelIds: modelSet, templateIds: tplSet, terrainMaterialIds: tmSet, scriptIds: scriptSet, tilesetIds: tilesetSet },
         currentLibs(),
       );
       await saveSceneData(sceneId, { ...gameData, assetHashes, assetHashVersion: ASSET_HASH_VERSION, savedAt: now });
@@ -5111,6 +5231,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     addScriptAsset, removeScriptAsset, updateScriptAsset,
     addAnimationField, removeAnimationField, updateAnimationField,
     addAnimation, removeAnimation, updateAnimation,
+    addRig, removeRig, updateRig,
     addTileset, removeTileset, updateTileset,
     addAiBrain, removeAiBrain, updateAiBrain,
     addImage, removeImage, updateImage,
@@ -5119,9 +5240,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     addSoundSample, removeSoundSample, updateSoundSample,
   });
   const assetLibraryValue = useMemo<AssetLibraryContextValue>(() => ({
-    templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, tilesets, aiBrains,
+    templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, rigs, tilesets, aiBrains,
     images, textures, audioSources, soundSamples, assetsLoaded, ...libraryActions,
-  }), [templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, tilesets, aiBrains,
+  }), [templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, rigs, tilesets, aiBrains,
        images, textures, audioSources, soundSamples, assetsLoaded, libraryActions]);
 
   const documentActions = useStableActions({
@@ -5286,6 +5407,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       addAnimation,
       removeAnimation,
       updateAnimation,
+      rigs,
+      addRig,
+      removeRig,
+      updateRig,
       enterAnimationFieldEditor,
       createAnimationFieldForModel,
       editingAnimationFieldId,

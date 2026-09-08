@@ -4,6 +4,7 @@ import type { Template } from './templates'
 import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { ScriptAsset } from './scripts'
 import type { AnimationAsset } from './animationAssets'
+import type { RigAsset } from './rigAssets'
 import type { TilesetAsset } from './tilesets'
 import type { AiBrainAsset } from './aiBrains'
 import { isTupleBuffer } from './binaryPayload'
@@ -150,6 +151,11 @@ export interface AssetLibs {
    * one changes what plays, never the node tree.
    */
   animations?: AnimationAsset[]
+  /**
+   * Shared skeletons. Carried for the same reason as `animations` and hashed for the same non-reason: a
+   * rig change alters what an animation retargets ONTO, never the node tree a resync rebuilds.
+   */
+  rigs?: RigAsset[]
 }
 
 /** The hash-map key for an asset of a given kind. Kept in one place so save and resync agree. */

@@ -8,8 +8,8 @@
 // leave the storage half unit-testable without a GL context.
 
 import { mat4 } from 'gl-matrix'
-import { AnimatedModel, buildBoneMapping, retargetAnimation, type Animation, type Node, type Skin } from 'cleo'
-import { loadSkin, type AnimationAsset, type StoredClip } from './animationAssets'
+import { AnimatedModel, buildBoneMapping, retargetAnimation, Logger, type Animation, type Node, type Skin } from 'cleo'
+import { loadSkin, type AnimationAsset, type StoredClip, type StoredSkin } from './animationAssets'
 import { skinnedModelJsonOf } from './modelClips'
 
 const toMat4 = (a: number[]) => {
@@ -28,12 +28,44 @@ export function modelAssetSkin(asset: { nodeJson: any } | null | undefined): Ski
   return model?.skin ? (loadSkin(model.skin, toMat4) as Skin) : null
 }
 
+/**
+ * How to look up a rig's skeleton by id.
+ *
+ * A module-level registration rather than a `rigs: RigAsset[]` parameter threaded through
+ * `resolveAnimationAsset` -> `resolveModelAnimations` -> `applyModelAnimations` -> `refreshModelClips` ->
+ * `instantiateModelAsset` and their call sites — the same shape `registerFoliageSourceResolver` and
+ * `registerTemplates` already use for a cross-cutting dependency this module cannot own.
+ */
+let rigResolver: ((rigId: string) => StoredSkin | null) | null = null
+
+export function registerRigResolver(fn: ((rigId: string) => StoredSkin | null) | null): void {
+  // Registered from a RENDER body (as `registerFoliageSourceResolver` is), so this runs on every render of
+  // the provider. It must therefore be idempotent and cheap — in particular it must NOT clear the retarget
+  // cache, which would leave the cache permanently empty and re-run `buildBoneMapping` for every clip on
+  // every play. Rig CONTENT changes invalidate the cache at their source, in `updateRig`.
+  if (rigResolver === fn) return
+  rigResolver = fn
+}
+
+/**
+ * The skeleton to retarget `asset` FROM: its rig, else the copy it embedded before rigs existed.
+ *
+ * Returning null is meaningful — it means "cannot retarget", and the caller plays the clips untouched.
+ */
+export function sourceSkinOf(asset: Pick<AnimationAsset, 'rigId' | 'sourceSkin'>): Skin | null {
+  const stored = (asset.rigId ? rigResolver?.(asset.rigId) : null) ?? asset.sourceSkin ?? null
+  return stored ? (loadSkin(stored, toMat4) as Skin) : null
+}
+
 /** A per-session cache: the retarget is deterministic, so the same pair never needs computing twice. */
 const cache = new Map<string, Animation[]>()
 
+/** Models already reported as having no skeleton — see resolveModelAnimations. Cleared with the cache. */
+const warnedNoSkin = new Set<string>()
+
 /** Drop everything cached for one animation asset — call when its clips change or it is deleted. */
 export function invalidateAnimationCache(animationId?: string): void {
-  if (!animationId) { cache.clear(); return }
+  if (!animationId) { cache.clear(); warnedNoSkin.clear(); return }
   for (const key of [...cache.keys()]) if (key.startsWith(`${animationId}:`)) cache.delete(key)
 }
 
@@ -48,7 +80,7 @@ export function resolveAnimationAsset(asset: AnimationAsset, targetSkin: Skin, c
   if (key) { const hit = cache.get(key); if (hit) return hit }
 
   const clips = asset.clips as unknown as Animation[]
-  const sourceSkin = asset.sourceSkin ? (loadSkin(asset.sourceSkin, toMat4) as Skin) : null
+  const sourceSkin = sourceSkinOf(asset)
 
   let out: Animation[]
   if (!sourceSkin) {
@@ -76,7 +108,21 @@ export function resolveModelAnimations(
   const ids = modelAsset.animationIds
   if (!ids?.length) return []
   const skin = modelAssetSkin(modelAsset)
-  if (!skin) return []
+  // A model that names animations but exposes no skeleton is a real defect, not a normal state: the links
+  // are listed in the inspector while nothing ever plays. `modelAssetSkin` finds the skeleton by taking the
+  // FIRST sub-mesh carrying one, so a model whose skin sits elsewhere — or was lost on a re-save — lands
+  // here. Reported rather than swallowed; it is otherwise invisible.
+  if (!skin) {
+    // Once per model, not once per placement: this is reached from `instantiateModelAsset`, so a scene with
+    // fifty copies of the character would otherwise log fifty identical lines on every open and resync.
+    if (!warnedNoSkin.has(modelAsset.id)) {
+      warnedNoSkin.add(modelAsset.id)
+      Logger.warn(
+        `"${modelAsset.id}" links ${ids.length} animation${ids.length === 1 ? '' : 's'} but has no skeleton ` +
+        'to retarget onto, so none of them will play.', 'Editor')
+    }
+    return []
+  }
 
   const out: StoredClip[] = []
   for (const id of ids) {

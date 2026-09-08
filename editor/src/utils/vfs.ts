@@ -4,6 +4,7 @@ import type { Template } from './templates'
 import type { ModelAsset } from './models'
 import type { ScriptAsset } from './scripts'
 import type { AnimationAsset } from './animationAssets'
+import type { RigAsset } from './rigAssets'
 import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
 import type { AiBrainAsset } from './aiBrains'
@@ -18,7 +19,7 @@ import type { SoundSampleAsset } from './soundSamples'
 // a virtual extension (.mat/.tmat/.tpl/.model); textures keep their real image extension. As in SVAR's
 // FileTree.normalizeFile, the extension is everything after the LAST dot.
 
-export type AssetKind = 'image' | 'texture' | 'audioSource' | 'soundSample' | 'material' | 'terrainMaterial' | 'template' | 'model' | 'scene' | 'script' | 'animationField' | 'animation' | 'tileset' | 'aiBrain'
+export type AssetKind = 'image' | 'texture' | 'audioSource' | 'soundSample' | 'material' | 'terrainMaterial' | 'template' | 'model' | 'scene' | 'script' | 'animationField' | 'animation' | 'rig' | 'tileset' | 'aiBrain'
 
 /**
  * The BYTE kinds — image and audioSource — keep their real file extensions; every other kind carries a
@@ -40,6 +41,7 @@ export const KIND_EXT: Record<Exclude<AssetKind, RawByteKind>, string> = {
   script: '.script',
   animationField: '.afield',
   animation: '.anim',
+  rig: '.rig',
   tileset: '.tileset',
   aiBrain: '.brain',
 }
@@ -71,6 +73,7 @@ export const KIND_LABEL: Record<AssetKind, string> = {
   script: 'script',
   animationField: 'animation field',
   animation: 'animation',
+  rig: 'rig',
   tileset: 'tileset',
   aiBrain: 'AI brain',
 }
@@ -105,6 +108,7 @@ export type LibSnapshot = {
   scripts: ScriptAsset[]
   animationFields: AnimationFieldAsset[]
   animations: AnimationAsset[]
+  rigs: RigAsset[]
   tilesets: TilesetAsset[]
   aiBrains: AiBrainAsset[]
   scenes: { id: string; name: string; updatedAt: number; thumbnail?: string }[]
@@ -175,6 +179,7 @@ export function kindOfExt(ext: string): AssetKind {
     case '.script': return 'script'
     case '.afield': return 'animationField'
     case '.anim': return 'animation'
+    case '.rig': return 'rig'
     case '.tileset': return 'tileset'
     case '.brain': return 'aiBrain'
     default: return 'image'
@@ -525,6 +530,7 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   for (const s of libs.scripts) visit('script', s.id, s.name)
   for (const f of libs.animationFields) visit('animationField', f.id, f.name)
   for (const a of libs.animations) visit('animation', a.id, a.name)
+  for (const r of libs.rigs) visit('rig', r.id, r.name)
   for (const t of libs.tilesets) visit('tileset', t.id, t.name)
   for (const b of libs.aiBrains) visit('aiBrain', b.id, b.name)
   for (const s of libs.scenes) visit('scene', s.id, s.name)
@@ -607,6 +613,7 @@ export function findMissingFromExplorer(vfs: VfsIndex, libs: LibSnapshot, treeId
   for (const s of libs.scripts) check('script', s.id, s.name)
   for (const f of libs.animationFields) check('animationField', f.id, f.name)
   for (const a of libs.animations) check('animation', a.id, a.name)
+  for (const r of libs.rigs) check('rig', r.id, r.name)
   for (const t of libs.tilesets) check('tileset', t.id, t.name)
   for (const b of libs.aiBrains) check('aiBrain', b.id, b.name)
   for (const s of libs.scenes) check('scene', s.id, s.name)
@@ -655,6 +662,7 @@ function aliveIds(libs: LibSnapshot): Record<AssetKind, Set<string>> {
     script: new Set(libs.scripts.map(s => s.id)),
     animationField: new Set(libs.animationFields.map(f => f.id)),
     animation: new Set(libs.animations.map(a => a.id)),
+    rig: new Set(libs.rigs.map(r => r.id)),
     tileset: new Set(libs.tilesets.map(t => t.id)),
     aiBrain: new Set(libs.aiBrains.map(b => b.id)),
     scene: new Set(libs.scenes.map(s => s.id)),

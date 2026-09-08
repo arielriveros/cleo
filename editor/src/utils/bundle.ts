@@ -7,6 +7,7 @@ import type { Template } from './templates'
 import type { ModelAsset } from './models'
 import type { ScriptAsset } from './scripts'
 import type { AnimationAsset } from './animationAssets'
+import type { RigAsset } from './rigAssets'
 import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
 import type { AiBrainAsset } from './aiBrains'
@@ -52,6 +53,8 @@ export interface BundleLibraries {
   scripts: ScriptAsset[]
   animationFields: AnimationFieldAsset[]
   animations: AnimationAsset[]
+  /** Shared skeletons. Optional so a bundle written before rigs existed still reads. */
+  rigs?: RigAsset[]
   tilesets: TilesetAsset[]
   /** Optional, so a bundle written before AI brains existed still reads. */
   aiBrains?: AiBrainAsset[]

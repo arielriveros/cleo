@@ -296,9 +296,10 @@ describe('edgesOfAsset', () => {
   describe('scene', () => {
     it('reads the refs snapshot rather than the stored blob', () => {
       const asset = { id: 's', name: 's', refs: { materialIds: ['stone'], modelIds: ['boulder'] } }
+      // Labelled by the LINK FIELD, not the storage array they were read out of — see SCENE_LINK_FIELD.
       expect(shape(edgesOfAsset('scene', asset))).toEqual([
-        'material:stone@refs.materialIds',
-        'model:boulder@refs.modelIds',
+        'material:stone@__materialId',
+        'model:boulder@__modelId',
       ])
     })
 
@@ -335,7 +336,7 @@ describe('edgesOfScene', () => {
 
   it('reads the pre-rename meshIds as models', () => {
     expect(shape(edgesOfScene({ ...full, modelIds: [], meshIds: ['old'] })))
-      .toContain('model:old@refs.meshIds')
+      .toContain('model:old@__meshId')
   })
 
   it('handles a scene saved before the new fields existed', () => {
@@ -361,12 +362,17 @@ describe('sceneRefsComplete', () => {
     expect(sceneRefsComplete(legacy)).toBe(false)
   })
 
-  // Empty arrays are a real answer; absent fields are not.
-  it('is true once every field is present, even when empty', () => {
+  // A VERSION check now, not field presence: an older build's refs are not merely missing fields, they
+  // hold a whole-library closure, which is wrong in kind. Presence cannot tell those apart.
+  it('is still false when the fields are present but unversioned', () => {
     expect(sceneRefsComplete({
       ...legacy,
       scriptIds: [], animationFieldIds: [], animationIds: [], soundSampleIds: [], audioSourceIds: [],
-    })).toBe(true)
+    })).toBe(false)
+  })
+
+  it('is true once the current builder has stamped its version', () => {
+    expect(sceneRefsComplete({ ...legacy, version: 1 })).toBe(true)
   })
 
   it('is false for no refs at all', () => {

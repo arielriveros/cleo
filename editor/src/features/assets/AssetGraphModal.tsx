@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { assetGraph, assetKey } from 'cleo'
 import type { AssetRef } from 'cleo'
 import { useVfs } from './VfsContext'
+import { useCleoEngine } from '../EngineContext'
 import { useAssetGraph } from './AssetGraphContext'
 import { findAsset, iconFor, openAsset } from './assetKinds'
 import { sceneRefsComplete } from '../../utils/assetEdges'
@@ -27,6 +28,7 @@ const DEPTHS: { label: string; value: number }[] = [
 
 export default function AssetGraphModal({ onClose }: { onClose: () => void }) {
   const { vfs, libs, depsRef } = useVfs()
+  const { openSceneId } = useCleoEngine()
   // Not read for its value — subscribing is what redraws the graph after a library edit.
   const { version, dangling } = useAssetGraph()
 
@@ -53,9 +55,13 @@ export default function AssetGraphModal({ onClose }: { onClose: () => void }) {
 
   const isPartial = useMemo(() => (ref: AssetRef): boolean => {
     if (ref.kind !== 'scene') return false
+    // The OPEN scene's edges are re-derived live from the scene itself, so they are complete regardless of
+    // what its last save recorded. Judging it by its stored `refs` would mark the one scene we know most
+    // about as partial.
+    if (ref.id === openSceneId) return false
     const meta = libs.scenes.find(s => s.id === ref.id) as { refs?: any } | undefined
     return !sceneRefsComplete(meta?.refs)
-  }, [libs])
+  }, [libs, openSceneId])
 
   // Seed on the first asset with references, so the view opens on something rather than an empty canvas.
   useEffect(() => {

@@ -50,6 +50,7 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     scripts: (await src.json(`${BUNDLE_PATHS.librariesDir}scripts.json`)) ?? [],
     animationFields: (await src.json(`${BUNDLE_PATHS.librariesDir}animationFields.json`)) ?? [],
     animations: (await src.json(`${BUNDLE_PATHS.librariesDir}animations.json`)) ?? [],
+    rigs: (await src.json(`${BUNDLE_PATHS.librariesDir}rigs.json`)) ?? [],
     tilesets: (await src.json(`${BUNDLE_PATHS.librariesDir}tilesets.json`)) ?? [],
     aiBrains: (await src.json(`${BUNDLE_PATHS.librariesDir}aiBrains.json`)) ?? [],
     // Absent in a bundle written before audio existed, which reads back as a project with no sounds.
@@ -137,6 +138,7 @@ export async function bundleEntries(bundle: BundleData): Promise<BundleEntry[]> 
     json(`${BUNDLE_PATHS.librariesDir}models.json`, libraries.models),
     json(`${BUNDLE_PATHS.librariesDir}scripts.json`, libraries.scripts ?? []),
     json(`${BUNDLE_PATHS.librariesDir}animations.json`, libraries.animations ?? []),
+    json(`${BUNDLE_PATHS.librariesDir}rigs.json`, libraries.rigs ?? []),
     json(`${BUNDLE_PATHS.librariesDir}animationFields.json`, libraries.animationFields ?? []),
     json(`${BUNDLE_PATHS.librariesDir}tilesets.json`, libraries.tilesets ?? []),
     json(`${BUNDLE_PATHS.librariesDir}aiBrains.json`, libraries.aiBrains ?? []),

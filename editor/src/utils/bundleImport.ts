@@ -51,6 +51,7 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
   await idbSet(libKey('scripts', pid), bundle.libraries.scripts ?? [])
   await idbSet(libKey('animationFields', pid), bundle.libraries.animationFields ?? [])
   await idbSet(libKey('animations', pid), bundle.libraries.animations ?? [])
+  await idbSet(libKey('rigs', pid), bundle.libraries.rigs ?? [])
   await idbSet(libKey('tilesets', pid), bundle.libraries.tilesets ?? [])
   await idbSet(libKey('aiBrains', pid), bundle.libraries.aiBrains ?? [])
   // Both audio halves travel as RECORDS, unlike images/textures — a sample's settings cannot be
@@ -126,7 +127,7 @@ export async function applyBundleAsNewProject(
 
 /** Read the local state a merge needs to detect id/path/name collisions. */
 async function readLocalState(): Promise<LocalState> {
-  const [materials, terrainMaterials, templates, models, scripts, animationFields, animations, tilesets, aiBrains, vfs, meta, storedTex, audioSources, soundSamples, storedAudio] = await Promise.all([
+  const [materials, terrainMaterials, templates, models, scripts, animationFields, animations, rigs, tilesets, aiBrains, vfs, meta, storedTex, audioSources, soundSamples, storedAudio] = await Promise.all([
     idbGet<any[]>(libKey('materials')),
     idbGet<any[]>(libKey('terrainMaterials')),
     idbGet<any[]>(libKey('templates')),
@@ -134,6 +135,7 @@ async function readLocalState(): Promise<LocalState> {
     idbGet<any[]>(libKey('scripts')),
     idbGet<any[]>(libKey('animationFields')),
     idbGet<any[]>(libKey('animations')),
+    idbGet<any[]>(libKey('rigs')),
     idbGet<any[]>(libKey('tilesets')),
     idbGet<any[]>(libKey('aiBrains')),
     idbGet<VfsIndex>(vfsKey()),
@@ -155,6 +157,7 @@ async function readLocalState(): Promise<LocalState> {
     scriptIds: new Set((scripts ?? []).map(s => s.id)),
     animationFieldIds: new Set((animationFields ?? []).map(f => f.id)),
     animationIds: new Set((animations ?? []).map(a => a.id)),
+    rigIds: new Set((rigs ?? []).map(r => r.id)),
     tilesetIds: new Set((tilesets ?? []).map(t => t.id)),
     aiBrainIds: new Set((aiBrains ?? []).map(b => b.id)),
     sceneIds: new Set((meta?.scenes ?? []).map(s => s.id)),
@@ -190,6 +193,7 @@ export async function applyBundleMerge(bundle: BundleData): Promise<boolean> {
   await append(libKey('scripts'), plan.scripts)
   await append(libKey('animationFields'), plan.animationFields)
   await append(libKey('animations'), plan.animations)
+  await append(libKey('rigs'), plan.rigs)
   await append(libKey('tilesets'), plan.tilesets)
   await append(libKey('aiBrains'), plan.aiBrains)
   await append(libKey('audioSources'), plan.audioSources)

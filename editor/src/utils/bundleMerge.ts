@@ -9,6 +9,7 @@ import type { TerrainMaterialAsset } from './terrainMaterials'
 import type { Template } from './templates'
 import type { ModelAsset } from './models'
 import type { AnimationAsset } from './animationAssets'
+import type { RigAsset } from './rigAssets'
 import type { AnimationFieldAsset } from './animationFields'
 import type { AudioSourceAsset } from './audioSources'
 import type { SoundSampleAsset } from './soundSamples'
@@ -31,6 +32,7 @@ export interface LocalState {
   scriptIds: Set<string>
   animationFieldIds: Set<string>
   animationIds: Set<string>
+  rigIds: Set<string>
   tilesetIds: Set<string>
   aiBrainIds: Set<string>
   sceneIds: Set<string>
@@ -53,6 +55,7 @@ export interface MergeResult {
   scripts: ScriptAsset[]
   animationFields: AnimationFieldAsset[]
   animations: AnimationAsset[]
+  rigs: RigAsset[]
   tilesets: TilesetAsset[]
   aiBrains: AiBrainAsset[]
   /** New scene entries + their blobs (project bundles only). */
@@ -77,6 +80,7 @@ export type Remaps = {
   script: Map<string, string>
   afield: Map<string, string>
   anim: Map<string, string>
+  rig: Map<string, string>
   tileset: Map<string, string>
   brain: Map<string, string>
   audio: Map<string, string>
@@ -119,11 +123,17 @@ export function remapDeep(obj: any, r: Remaps): void {
     // A tilemap layer's tileset link and the id on the embedded tileset copy must move together: the layer
     // looks its tileset up by id in the map's own embedded table.
     if (key === 'tilesetId') { obj[key] = sub(r.tileset, val); continue }
+    // A model's or animation's link to the shared skeleton it uses.
+    if (key === 'rigId') { obj[key] = sub(r.rig, val); continue }
     // A SoundNode's link to the sample it plays, and a SoundSampleAsset's link to its audio file. Both
     // are plain string references, so one branch each is all they need.
     if (key === 'sampleId') { obj[key] = sub(r.sound, val); continue }
     if (key === 'audioId') { obj[key] = sub(r.audio, val); continue }
     if (key === 'audioIds' && Array.isArray(val)) { obj[key] = val.map((x: any) => sub(r.audio, x)); continue }
+    // A model's links to the shared `.anim` assets it plays. Missing here meant a merged bundle re-minted
+    // every animation id and left each model pointing at the OLD ones — the clips silently stopped
+    // resolving, and the reference graph reported them as broken.
+    if (key === 'animationIds' && Array.isArray(val)) { obj[key] = val.map((x: any) => sub(r.anim, x)); continue }
     if (key === 'soundIds' && Array.isArray(val)) { obj[key] = val.map((x: any) => sub(r.sound, x)); continue }
     if (key === 'tilesets' && Array.isArray(val)) {
       for (const ts of val) if (ts && typeof ts === 'object') { ts.id = sub(r.tileset, ts.id); remapDeep(ts, r) }
@@ -202,7 +212,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     manifest: bundle.manifest, scenes: bundle.scenes, libraries: bundle.libraries, vfs: bundle.vfs,
   }) as Omit<BundleData, 'textures'>
   // Textures are deliberately left out of that clone; keep the originals and remap their ids apart.
-  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), model: new Map(), script: new Map(), afield: new Map(), anim: new Map(), tileset: new Map(), brain: new Map(), audio: new Map(), sound: new Map() }
+  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), model: new Map(), script: new Map(), afield: new Map(), anim: new Map(), rig: new Map(), tileset: new Map(), brain: new Map(), audio: new Map(), sound: new Map() }
 
   // 1) Textures first, so their remaps are known before rewriting references.
   const textures: BundleTexture[] = []
@@ -231,6 +241,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   for (const s of data.libraries.scripts ?? []) if (local.scriptIds.has(s.id)) r.script.set(s.id, cryptoRandomId())
   for (const f of data.libraries.animationFields ?? []) if (local.animationFieldIds.has(f.id)) r.afield.set(f.id, cryptoRandomId())
   for (const a of data.libraries.animations ?? []) if (local.animationIds.has(a.id)) r.anim.set(a.id, cryptoRandomId())
+  for (const g of data.libraries.rigs ?? []) if (local.rigIds.has(g.id)) r.rig.set(g.id, cryptoRandomId())
   for (const t of data.libraries.tilesets ?? []) if (local.tilesetIds.has(t.id)) r.tileset.set(t.id, cryptoRandomId())
   for (const b of data.libraries.aiBrains ?? []) if (local.aiBrainIds.has(b.id)) r.brain.set(b.id, cryptoRandomId())
   // An audio source's record id must follow its PAYLOAD's re-mint, not get an independent one, or the
@@ -250,6 +261,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   const scripts = (data.libraries.scripts ?? []).map(s => ({ ...s, id: sub(r.script, s.id) }))
   const animationFields = (data.libraries.animationFields ?? []).map(f => ({ ...f, id: sub(r.afield, f.id) }))
   const animations = (data.libraries.animations ?? []).map(a => ({ ...a, id: sub(r.anim, a.id) }))
+  const rigs = (data.libraries.rigs ?? []).map(g => ({ ...g, id: sub(r.rig, g.id) }))
   const tilesets = (data.libraries.tilesets ?? []).map(t => ({ ...t, id: sub(r.tileset, t.id) }))
   const aiBrains = (data.libraries.aiBrains ?? []).map(b => ({ ...b, id: sub(r.brain, b.id) }))
   const audioSources = (data.libraries.audioSources ?? []).map(a => ({ ...a, id: sub(r.audio, a.id) }))
@@ -259,6 +271,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   for (const t of templates) remapDeep(t, r)
   for (const m of models) remapDeep(m, r)
   for (const f of animationFields) remapDeep(f, r) // its modelId follows the model library's re-mints
+  for (const a of animations) remapDeep(a, r)     // its rigId follows the rig library's re-mints
   // A tileset's atlas follows the texture re-mints, through both textureId and the textureIds mirror.
   for (const t of tilesets) {
     remapDeep(t, r)
@@ -309,6 +322,10 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
       : e.kind === 'aiBrain' ? r.brain
       : e.kind === 'audioSource' ? r.audio
       : e.kind === 'soundSample' ? r.sound
+      // Was absent, so an animation entry fell through to the TEXTURE table and kept its pre-remint id.
+      : e.kind === 'animation' ? r.anim
+      : e.kind === 'rig' ? r.rig
+      // `image` and `texture` genuinely share one table — an image id IS a texture id (see images.ts).
       : r.tex
     const assetId = sub(remap, e.assetId)
     let path = e.path
@@ -317,5 +334,5 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     vfsEntries.push({ ...e, path, assetId })
   }
 
-  return { materials, terrainMaterials, templates, models, scripts, animationFields, animations, tilesets, aiBrains, scenes, textures, audio, audioSources, soundSamples, vfsFolders, vfsEntries }
+  return { materials, terrainMaterials, templates, models, scripts, animationFields, animations, rigs, tilesets, aiBrains, scenes, textures, audio, audioSources, soundSamples, vfsFolders, vfsEntries }
 }

@@ -59,7 +59,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   // The five libraries come from the split-out slice, so reconciliation re-runs on library changes only.
   const {
     assetsLoaded,
-    materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, tilesets, aiBrains,
+    materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, rigs, tilesets, aiBrains,
     images, textures, addImage, addTextureAsset,
     audioSources, soundSamples, addAudioSource, addSoundSample,
   } = useAssetLibrary()
@@ -158,13 +158,13 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   }, [assetsLoaded, audioPreloaded, isSceneReady, soundIds, audioSources, soundSamples, addAudioSource, addSoundSample])
 
   const libs: LibSnapshot = useMemo(
-    () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, tilesets, aiBrains, scenes: sceneList, images, textures, audioSources, soundSamples, textureIds }),
-    [materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, tilesets, aiBrains, sceneList, images, textures, audioSources, soundSamples, textureIds],
+    () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, scenes: sceneList, images, textures, audioSources, soundSamples, textureIds }),
+    [materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, sceneList, images, textures, audioSources, soundSamples, textureIds],
   )
 
   const depsRef = useRef<AssetDeps>(null as any)
   depsRef.current = {
-    materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, tilesets, aiBrains,
+    materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, rigs, tilesets, aiBrains,
     images, textures, audioSources, soundSamples,
     scenes: sceneList,
     addImage: engine.addImage,
@@ -198,6 +198,9 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     addAnimationField: engine.addAnimationField,
     updateAnimationField: engine.updateAnimationField,
     removeAnimationField: engine.removeAnimationField,
+    addRig: engine.addRig,
+    updateRig: engine.updateRig,
+    removeRig: engine.removeRig,
     addAnimation: engine.addAnimation,
     updateAnimation: engine.updateAnimation,
     removeAnimation: engine.removeAnimation,

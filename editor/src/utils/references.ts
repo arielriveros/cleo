@@ -32,6 +32,30 @@ export function collectReferencedTextureIds(
    */
   extraIds: (string | null | undefined)[] = [],
 ): Set<string> {
+  const set = collectSceneTextureIds(scene, extraIds)
+  for (const m of materials) collectTextureIds(m.material, set)
+  for (const m of models) collectTextureIds(m.nodeJson, set)
+  for (const t of templates) collectTextureIds(t.nodeJson, set)
+  for (const t of terrainMaterials)
+    for (const id of collectTerrainMaterialTextureIds(t.material)) set.add(id)
+  for (const t of tilesets) if (t.textureId) set.add(t.textureId)
+  return set
+}
+
+/**
+ * Texture ids the SCENE ITSELF names — node materials, live terrain layers and foliage, tilemap and sprite
+ * atlases, UI images, plus `extraIds` for the render settings.
+ *
+ * The scene half of {@link collectReferencedTextureIds}, split out because the two answer different
+ * questions. "Which textures does this project use anywhere" is right for an orphan badge and for deciding
+ * what a bundle ships. "Which textures does THIS SCENE name" is what the reference graph needs — with the
+ * whole-library answer a scene edged directly to almost every texture in the project, and the graph read
+ * as a flat star instead of scene -> model -> material -> texture.
+ */
+export function collectSceneTextureIds(
+  scene: Scene | null | undefined,
+  extraIds: (string | null | undefined)[] = [],
+): Set<string> {
   const set = new Set<string>()
   for (const id of extraIds) if (id) set.add(id)
   if (scene) {
@@ -69,12 +93,6 @@ export function collectReferencedTextureIds(
       if (typeof id === 'string' && id) set.add(id)
     }
   }
-  for (const m of materials) collectTextureIds(m.material, set)
-  for (const m of models) collectTextureIds(m.nodeJson, set)
-  for (const t of templates) collectTextureIds(t.nodeJson, set)
-  for (const t of terrainMaterials)
-    for (const id of collectTerrainMaterialTextureIds(t.material)) set.add(id)
-  for (const t of tilesets) if (t.textureId) set.add(t.textureId)
   return set
 }
 
@@ -128,6 +146,21 @@ export function collectPublishedTextureIds(node: any, set: Set<string>): void {
 /** Material asset ids referenced by any placed node (__materialId), a camera's screen-space pass
  *  list (__screenMaterialIds), or listed by a mesh asset. */
 export function collectReferencedMaterialIds(scene: Scene | null | undefined, models: ModelAsset[]): Set<string> {
+  const set = collectSceneMaterialIds(scene)
+  // Every library model's materials, placed or not. Deliberately wide — an orphan badge and the save-time
+  // asset hashes both want "used anywhere". NOT what a scene's own reference list should contain.
+  for (const m of models) for (const id of (m.materialIds || [])) set.add(id)
+  return set
+}
+
+/**
+ * Material asset ids the SCENE ITSELF names, through its placed nodes.
+ *
+ * The scene half of {@link collectReferencedMaterialIds}. A scene's reference list must use THIS one: with
+ * the library tail included, a project with 200 imported models had every one of their materials recorded
+ * as referenced by every scene, whether or not anything was placed.
+ */
+export function collectSceneMaterialIds(scene: Scene | null | undefined): Set<string> {
   const set = new Set<string>()
   if (scene) {
     for (const node of scene.nodes) {
@@ -138,7 +171,29 @@ export function collectReferencedMaterialIds(scene: Scene | null | undefined, mo
         for (const sid of getScreenMaterialIds(node as CameraNode)) set.add(sid)
     }
   }
-  for (const m of models) for (const id of (m.materialIds || [])) set.add(id)
+  return set
+}
+
+/**
+ * Model asset ids named by a terrain's FOLIAGE rules — the scatter prototypes a landscape plants.
+ *
+ * Nothing collected this before: `collectFoliageRuleTextureIds` harvests a rule's billboard and impostor
+ * textures, but the `modelId` naming the mesh it scatters had no scene-side collector at all, so a model
+ * used only as foliage looked unreferenced.
+ */
+export function collectSceneFoliageModelIds(scene: Scene | null | undefined): Set<string> {
+  const set = new Set<string>()
+  const addRules = (rules: any) => {
+    if (!Array.isArray(rules)) return
+    // Both spellings are live: `meshId` is the pre-rename form and still present in stored terrains.
+    for (const r of rules) { const id = r?.modelId ?? r?.meshId; if (id) set.add(id) }
+  }
+  for (const ln of scene?.landscapes ?? []) {
+    const terrain: any = (ln as any).terrain
+    if (!terrain) continue
+    for (const layer of terrain.layers ?? []) addRules(layer?.material?.foliageInclude)
+    addRules(terrain.foliage)
+  }
   return set
 }
 
@@ -302,4 +357,79 @@ export function collectReferencedTerrainMaterialIds(scene: Scene | null | undefi
     }
   }
   return set
+}
+
+// ---------------------------------------------------------------------------------------------------
+// A scene's own reference list.
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * Bump when {@link buildSceneRefs} changes what it records. A stored `refs` from an older version is still
+ * READ — it is all a closed scene has — but the reference viewer marks it partial rather than implying the
+ * scene genuinely uses none of whatever the old build did not collect.
+ */
+export const SCENE_REFS_VERSION = 1
+
+/**
+ * Everything a scene DIRECTLY references: what its placed nodes, terrain layers, tilemaps, sounds and
+ * render settings literally name.
+ *
+ * Direct, not transitive, and that is the whole point. The textures a scene shows are reached through the
+ * materials its nodes wear, and those materials name them — so recording them here as well made every
+ * scene edge to almost every asset in the project, and the reference graph read as a flat star.
+ * Transitive reachability is the graph's job; this is the scene's own list.
+ *
+ * ONE function for both callers: the save path writes it to `SceneMeta.refs`, and the graph re-derives it
+ * live for the open scene. Two implementations would let one scene disagree with itself depending on
+ * whether it happened to be open.
+ */
+export function buildSceneRefs(
+  scene: Scene | null | undefined,
+  settings?: { colorGradingLut?: string | null; lensDirtTexture?: string | null } | null,
+  soundSamples: { id: string; source: { kind: string; audioId?: string } }[] = [],
+  models: { id: string; animationIds?: string[] }[] = [],
+): SceneRefsShape {
+  const modelIds = collectReferencedModelIds(scene)
+  const soundSampleIds = collectReferencedSoundIds(scene)
+  return {
+    version: SCENE_REFS_VERSION,
+    materialIds: [...collectSceneMaterialIds(scene)],
+    modelIds: [...modelIds],
+    templateIds: [...collectReferencedTemplateIds(scene)],
+    terrainMaterialIds: [...collectReferencedTerrainMaterialIds(scene)],
+    tilesetIds: [...collectReferencedTilesetIds(scene)],
+    aiBrainIds: [...collectReferencedAiBrainIds(scene)],
+    scriptIds: [...collectReferencedScriptIds(scene)],
+    animationFieldIds: [...collectReferencedAnimationFieldIds(scene)],
+    // The LUT and the lens-dirt mask live in RenderSettings, where no node walk can reach them. They were
+    // never recorded at save time before, so a scene's grading LUT looked orphaned once the scene closed.
+    textureIds: [...collectSceneTextureIds(scene, [settings?.colorGradingLut, settings?.lensDirtTexture])],
+    // Kept separate from `modelIds` so the viewer can say WHY a model is referenced — placed as a node, or
+    // scattered as foliage. They are genuinely different relationships.
+    foliageModelIds: [...collectSceneFoliageModelIds(scene)],
+    soundSampleIds: [...soundSampleIds],
+    // Two hops, and unavoidable: a Sound node names a SAMPLE, and only the sample names the file.
+    audioSourceIds: [...collectReferencedAudioIds(soundSamples, soundSampleIds)],
+    // One hop, for the same reason: a scene places a MODEL, and the model is what lists its clips. Kept
+    // because a scene's animations are otherwise invisible until you walk out through every model.
+    animationIds: [...collectReferencedAnimationIds(models.filter(m => modelIds.has(m.id)))],
+  }
+}
+
+/** The shape {@link buildSceneRefs} produces. `SceneRefs` in sceneStorage.ts satisfies it. */
+export type SceneRefsShape = {
+  version: number
+  materialIds: string[]
+  modelIds: string[]
+  templateIds: string[]
+  terrainMaterialIds: string[]
+  tilesetIds: string[]
+  aiBrainIds: string[]
+  textureIds: string[]
+  scriptIds: string[]
+  animationFieldIds: string[]
+  animationIds: string[]
+  soundSampleIds: string[]
+  audioSourceIds: string[]
+  foliageModelIds: string[]
 }
