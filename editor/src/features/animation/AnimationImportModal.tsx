@@ -3,6 +3,9 @@ import { applyManualMapping } from 'cleo'
 import type { BoneMapping, BoneMatchKind } from 'cleo'
 import { useEditorSessions } from '../EditorSessionsContext'
 import { Modal, ModalHeader, ModalFooter, Toggle } from '../../components/ui'
+// Shared with the model-import route: a placeholder clip name is renamed after its file in BOTH
+// places, so the same download names its clip the same way whichever door it came in through.
+import { clipNameFromFile } from '../../utils/clipNaming'
 
 // Review modal for importing animation clips: a SKELETON mapping (which source bone drives which target
 // joint) and the CLIP list. Clip counts are recomputed from the live mapping, so a mapping fix shows its
@@ -21,18 +24,6 @@ const KIND_STYLE: Record<BoneMatchKind, string> = {
   none: 'bg-red-900 text-red-300',
 }
 
-/**
- * The name to seed the rename box with. Mixamo clips are all called `mixamo.com` and nameless glTF
- * animations parse as `Animation`; for those two the file name is used instead.
- */
-function defaultClipName(clipName: string, fileName: string): string {
-  const generic = clipName === 'mixamo.com' || clipName === 'Animation' || !clipName.trim()
-  if (!generic) return clipName
-  // `fileName` is a File.name — a bare basename — so only the extension needs stripping.
-  const base = fileName.replace(/\.[^.]+$/, '').trim()
-  return base || clipName
-}
-
 export default function AnimationImportModal() {
   const { pendingAnimationImport, resolveAnimationImport } = useEditorSessions()
   const [include, setInclude] = useState<boolean[]>([])
@@ -45,7 +36,7 @@ export default function AnimationImportModal() {
 
   useEffect(() => {
     setInclude(pendingAnimationImport ? pendingAnimationImport.clips.map(c => c.report.compatible) : [])
-    setNames(pendingAnimationImport ? pendingAnimationImport.clips.map(c => defaultClipName(c.name, pendingAnimationImport.fileName)) : [])
+    setNames(pendingAnimationImport ? pendingAnimationImport.clips.map(c => clipNameFromFile(c.name, pendingAnimationImport.fileName)) : [])
     setMapping(pendingAnimationImport?.mapping ?? null)
     setShowMap(false)
   }, [pendingAnimationImport])

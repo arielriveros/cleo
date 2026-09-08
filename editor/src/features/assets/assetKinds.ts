@@ -612,74 +612,95 @@ export function labelOf(kind: AssetKind): string {
 // ---------------------------------------------------------------------------------------------------
 
 // Line icons in the stroke style of filemanager.css's chrome glyphs, tinted per kind.
-function svg(stroke: string, body: string): string {
-  return `data:image/svg+xml;utf8,${encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`,
-  )}`
+//
+// Kept as PARTS rather than finished data URIs because the glyph body is reused at two sizes: whole, as
+// the icon, and shrunk into the corner of a folder (see `folderIconFor`).
+type Glyph = { stroke: string; body: string }
+
+const SVG_HEAD = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
+const SVG_STROKE = 'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"'
+
+function dataUri(inner: string): string {
+  return `data:image/svg+xml;utf8,${encodeURIComponent(inner)}`
 }
 
-const ICONS: Record<AssetKind | 'folder', string> = {
-  folder: svg('#8f8fff',
-    `<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="#8f8fff" fill-opacity=".16"/>`,
-  ),
-  material: svg('#6f9fe8',
-    `<circle cx="12" cy="12" r="8.5" fill="#326acc" fill-opacity=".2"/><path d="M7.5 9.5a5 5 0 0 1 4-2.9"/>`,
-  ),
-  terrainMaterial: svg('#5cbf5c',
-    `<path d="M2 19 8.5 8l4 5.6L15 10l7 9z" fill="#2c7a2c" fill-opacity=".2"/>`,
-  ),
-  template: svg('#b08fef',
-    `<rect x="4" y="4" width="16" height="16" rx="2.5" fill="#7a4fd4" fill-opacity=".18"/><path d="M8 10.5h8M8 14.5h5"/>`,
-  ),
-  model: svg('#4fc3d5',
-    `<path d="M12 2.5 20.5 7v10L12 21.5 3.5 17V7z" fill="#1f7f8f" fill-opacity=".18"/><path d="M3.5 7 12 11.5 20.5 7M12 11.5v10"/>`,
-  ),
-  scene: svg('#f2b84b',
-    `<path d="M4 19V5h16v14z" fill="#7f5a10" fill-opacity=".18"/><path d="M7 15l3-3 2 2 3-4 2 2"/>`,
-  ),
-  script: svg('#e0794b',
-    `<rect x="4" y="3" width="16" height="18" rx="2" fill="#8f4a26" fill-opacity=".18"/><path d="M10 9 8 12l2 3M14 9l2 3-2 3"/>`,
-  ),
+function svg({ stroke, body }: Glyph): string {
+  return dataUri(`${SVG_HEAD} stroke="${stroke}" ${SVG_STROKE}>${body}</svg>`)
+}
+
+const GLYPHS: Record<AssetKind | 'folder', Glyph> = {
+  folder: { stroke: '#8f8fff', body: `<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="#8f8fff" fill-opacity=".16"/>` },
+  material: { stroke: '#6f9fe8', body: `<circle cx="12" cy="12" r="8.5" fill="#326acc" fill-opacity=".2"/><path d="M7.5 9.5a5 5 0 0 1 4-2.9"/>` },
+  terrainMaterial: { stroke: '#5cbf5c', body: `<path d="M2 19 8.5 8l4 5.6L15 10l7 9z" fill="#2c7a2c" fill-opacity=".2"/>` },
+  template: { stroke: '#b08fef', body: `<rect x="4" y="4" width="16" height="16" rx="2.5" fill="#7a4fd4" fill-opacity=".18"/><path d="M8 10.5h8M8 14.5h5"/>` },
+  model: { stroke: '#4fc3d5', body: `<path d="M12 2.5 20.5 7v10L12 21.5 3.5 17V7z" fill="#1f7f8f" fill-opacity=".18"/><path d="M3.5 7 12 11.5 20.5 7M12 11.5v10"/>` },
+  scene: { stroke: '#f2b84b', body: `<path d="M4 19V5h16v14z" fill="#7f5a10" fill-opacity=".18"/><path d="M7 15l3-3 2 2 3-4 2 2"/>` },
+  script: { stroke: '#e0794b', body: `<rect x="4" y="3" width="16" height="18" rx="2" fill="#8f4a26" fill-opacity=".18"/><path d="M10 9 8 12l2 3M14 9l2 3-2 3"/>` },
   // A blend space: two axes with sample points scattered across them.
-  animationField: svg('#d47ab8',
-    `<rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="#8f3a70" fill-opacity=".18"/><path d="M3.5 16.5h17M8 20.5v-17" stroke-opacity=".5"/><circle cx="8" cy="16.5" r="1.5"/><circle cx="13" cy="10" r="1.5"/><circle cx="18" cy="7" r="1.5"/>`,
-  ),
+  animationField: { stroke: '#d47ab8', body: `<rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="#8f3a70" fill-opacity=".18"/><path d="M3.5 16.5h17M8 20.5v-17" stroke-opacity=".5"/><circle cx="8" cy="16.5" r="1.5"/><circle cx="13" cy="10" r="1.5"/><circle cx="18" cy="7" r="1.5"/>` },
   // A clip: a keyframe track, with its keys marked on it.
-  animation: svg('#e8c14f',
-    `<rect x="3.5" y="6" width="17" height="12" rx="2" fill="#8f7018" fill-opacity=".18"/><path d="M3.5 12h17" stroke-opacity=".5"/><path d="M7 12V8.5M12 12v-2M17 12v-4" stroke-opacity=".7"/><circle cx="7" cy="8.5" r="1.4"/><circle cx="12" cy="10" r="1.4"/><circle cx="17" cy="8.5" r="1.4"/>`,
-  ),
+  animation: { stroke: '#e8c14f', body: `<rect x="3.5" y="6" width="17" height="12" rx="2" fill="#8f7018" fill-opacity=".18"/><path d="M3.5 12h17" stroke-opacity=".5"/><path d="M7 12V8.5M12 12v-2M17 12v-4" stroke-opacity=".7"/><circle cx="7" cy="8.5" r="1.4"/><circle cx="12" cy="10" r="1.4"/><circle cx="17" cy="8.5" r="1.4"/>` },
   // A sliced atlas: the grid, with one cell picked out.
   // Two linked nodes with a decision branching out of them: a state machine and a goal tree read as the
   // same shape at 24px, which is right — one asset holds either.
-  aiBrain: svg('#c89ae0',
-    `<circle cx="6" cy="6.5" r="3" fill="#8a5bb0" fill-opacity=".25"/><circle cx="18" cy="6.5" r="3" fill="#8a5bb0" fill-opacity=".25"/><circle cx="12" cy="18" r="3" fill="#c89ae0" fill-opacity=".45"/><path d="M8.2 8.6 10.6 15.6M15.8 8.6 13.4 15.6M9 6.5h6" stroke-opacity=".75"/>`,
-  ),
-  tileset: svg('#7ec8a9',
-    `<rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="#2f7a63" fill-opacity=".2"/><path d="M9 3.5v17M14.5 3.5v17M3.5 9h17M3.5 14.5h17" stroke-opacity=".55"/><rect x="9" y="9" width="5.5" height="5.5" fill="#7ec8a9" fill-opacity=".45" stroke="none"/>`,
-  ),
+  aiBrain: { stroke: '#c89ae0', body: `<circle cx="6" cy="6.5" r="3" fill="#8a5bb0" fill-opacity=".25"/><circle cx="18" cy="6.5" r="3" fill="#8a5bb0" fill-opacity=".25"/><circle cx="12" cy="18" r="3" fill="#c89ae0" fill-opacity=".45"/><path d="M8.2 8.6 10.6 15.6M15.8 8.6 13.4 15.6M9 6.5h6" stroke-opacity=".75"/>` },
+  tileset: { stroke: '#7ec8a9', body: `<rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="#2f7a63" fill-opacity=".2"/><path d="M9 3.5v17M14.5 3.5v17M3.5 9h17M3.5 14.5h17" stroke-opacity=".55"/><rect x="9" y="9" width="5.5" height="5.5" fill="#7ec8a9" fill-opacity=".45" stroke="none"/>` },
   // A raw picture: the photo frame, unadorned. Kept as the old texture glyph so an existing project's
   // image cards look like the texture cards they were.
-  image: svg('#9aa4b2',
-    `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#4a4a55" fill-opacity=".3"/><circle cx="8.5" cy="9.5" r="1.6" stroke="#ffd27a"/><path d="M4 17.5l5-5.5 3.5 4 3-2.5 4.5 4"/>`,
-  ),
+  image: { stroke: '#9aa4b2', body: `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#4a4a55" fill-opacity=".3"/><circle cx="8.5" cy="9.5" r="1.6" stroke="#ffd27a"/><path d="M4 17.5l5-5.5 3.5 4 3-2.5 4.5 4"/>` },
   // A raw waveform: the file itself, with nothing authored about it. The audio twin of `image`.
-  audioSource: svg('#9aa4b2',
-    `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#4a4a55" fill-opacity=".3"/><path d="M3.5 12h1.5M7 8.5v7M10 6v12M13 9v6M16 7v10M19 10.5v3M20.5 12H21" stroke-opacity=".95"/>`,
-  ),
+  audioSource: { stroke: '#9aa4b2', body: `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#4a4a55" fill-opacity=".3"/><path d="M3.5 12h1.5M7 8.5v7M10 6v12M13 9v6M16 7v10M19 10.5v3M20.5 12H21" stroke-opacity=".95"/>` },
   // The same waveform with a speaker in front of it — a sample is audio plus how it is played. The audio
   // twin of `texture`, tinted to match it.
-  soundSample: svg('#7fb2d9',
-    `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#2f5d80" fill-opacity=".35"/><path d="M6 10v4M9 7.5v9M15 8.5v7M18 10.5v3" stroke-opacity=".55"/><path d="M11.5 9.5 13.6 7.8v8.4l-2.1-1.7h-1.2v-5z" fill="#7fb2d9" fill-opacity=".45"/><path d="M16.2 9.6a3.4 3.4 0 0 1 0 4.8" stroke="#ffd27a"/>`,
-  ),
+  soundSample: { stroke: '#7fb2d9', body: `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#2f5d80" fill-opacity=".35"/><path d="M6 10v4M9 7.5v9M15 8.5v7M18 10.5v3" stroke-opacity=".55"/><path d="M11.5 9.5 13.6 7.8v8.4l-2.1-1.7h-1.2v-5z" fill="#7fb2d9" fill-opacity=".45"/><path d="M16.2 9.6a3.4 3.4 0 0 1 0 4.8" stroke="#ffd27a"/>` },
   // The same frame with a sampling grid over it — a texture is an image plus how it is read.
-  texture: svg('#7fb2d9',
-    `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#2f5d80" fill-opacity=".35"/><path d="M9 4.5v15M15 4.5v15M3 9.5h18M3 14.5h18" stroke-opacity=".45"/><circle cx="7" cy="8" r="1.2" stroke="#ffd27a"/><path d="M3.5 17l4-4 3 3.2 2.5-2 4.5 4" stroke-opacity=".9"/>`,
-  ),
+  texture: { stroke: '#7fb2d9', body: `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#2f5d80" fill-opacity=".35"/><path d="M9 4.5v15M15 4.5v15M3 9.5h18M3 14.5h18" stroke-opacity=".45"/><circle cx="7" cy="8" r="1.2" stroke="#ffd27a"/><path d="M3.5 17l4-4 3 3.2 2.5-2 4.5 4" stroke-opacity=".9"/>` },
 }
+
+const ICONS = Object.fromEntries(
+  (Object.entries(GLYPHS) as [AssetKind | 'folder', Glyph][]).map(([kind, g]) => [kind, svg(g)]),
+) as Record<AssetKind | 'folder', string>
 
 /** Icon URL for a file-manager entry, by kind (or 'folder'). */
 export function iconFor(kind: AssetKind | 'folder'): string {
   return ICONS[kind]
+}
+
+/**
+ * The folder icon with `kind`'s glyph badged into its bottom-right corner — for a folder whose direct
+ * children are all one kind (see `folderKinds` in VfsContext).
+ *
+ * It is a badge rather than a REPLACEMENT because the two readings are both wanted at once: a folder
+ * full of images should still look like a folder, or the only thing distinguishing it from an image is
+ * a name the card ellipsizes at 80px.
+ *
+ * The corner is cut out of the folder with a mask instead of being covered by an opaque chip. A data
+ * URI cannot read a CSS variable, so any chip colour would have to be hard-coded — and this icon is
+ * drawn over three different backgrounds (the card's sunken preview tile, the sidebar, the Add menu)
+ * and must survive a theme change. A hole is the same in every one of them.
+ */
+const FOLDER_BADGES = new Map<AssetKind, string>()
+
+export function folderIconFor(kind: AssetKind): string {
+  const cached = FOLDER_BADGES.get(kind)
+  if (cached) return cached
+
+  const folder = GLYPHS.folder
+  const badge = GLYPHS[kind]
+  // The hole and the glyph share a box so the notch always fits what sits in it. `stroke-width` is
+  // pre-divided by the scale: inherited stroke scales with the group, and at 0.44 the 1.6 line the rest
+  // of the set uses would come out at 0.7 and disappear at 30px.
+  const HOLE = '<rect x="12" y="12" width="12.6" height="12.6" rx="2.6" fill="#000"/>'
+  const inner =
+    `${SVG_HEAD} stroke="${folder.stroke}" ${SVG_STROKE}>` +
+    `<mask id="b"><rect width="24" height="24" fill="#fff"/>${HOLE}</mask>` +
+    `<g mask="url(#b)">${folder.body}</g>` +
+    `<g transform="translate(13.4 13.4) scale(0.425)" stroke="${badge.stroke}" stroke-width="3.5">${badge.body}</g>` +
+    `</svg>`
+
+  const uri = dataUri(inner)
+  FOLDER_BADGES.set(kind, uri)
+  return uri
 }
 
 /**
@@ -720,5 +741,6 @@ export function badgeStyles(): string {
       'z-index:1;pointer-events:none}',
     ...kinds,
     ...images,
+    ...audio,
   ].join('\n')
 }

@@ -12,7 +12,7 @@ import { useVfs } from './VfsContext'
 import { useFileManagerBridge, FM_MODE_KEY } from './useFileManagerBridge'
 import { useDragOutPatch } from './useDragOutPatch'
 import { runUpload } from './uploadRouter'
-import { badgeStyles, iconFor, thumbnailOf } from './assetKinds'
+import { badgeStyles, folderIconFor, iconFor, thumbnailOf } from './assetKinds'
 import MissingAssetsPopover from './MissingAssetsPopover'
 import { baseOf, buildFileManagerData, extOf, kindOfExt, findMissingFromExplorer, findOrphanEntries } from '../../utils/vfs'
 import { readDroppedEntries } from '../../utils/importGrouping'
@@ -282,11 +282,12 @@ function AssetsExplorerHost() {
 
   const icons = useCallback((file: Partial<IParsedEntity>): string => {
     if (!file?.id) return iconFor('folder')
-    // A folder holding exactly one kind wears that kind's icon — which is what makes the `Source`
-    // subfolder full of images read as images at a glance, and its parent read as textures.
+    // A folder holding exactly one kind wears that kind's glyph BADGED into its corner — which is what
+    // makes the `Source` subfolder full of images read as images at a glance, and its parent read as
+    // textures, without either of them ceasing to look like a folder.
     if (file.type === 'folder') {
       const only = folderKindsRef.current.get(file.id)
-      return iconFor(only ?? 'folder')
+      return only ? folderIconFor(only) : iconFor('folder')
     }
     const entry = pathIndexRef.current.get(file.id)
     return iconFor(entry ? entry.kind : kindOfExt(extOf(file.id)))

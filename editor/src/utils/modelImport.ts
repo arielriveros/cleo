@@ -1,6 +1,7 @@
 import { Logger, Node, ModelNode, Model, AnimatedModel, Loader } from 'cleo'
 import { parseModelFiles, parseGltfFiles, parseModelAsGltfFiles, ImportCancelled } from '../workers/importClient'
 import { clamp } from './math';
+import { clipNameFromFile } from './clipNaming';
 
 /** Reports parse progress (0..1) and the current stage. See importClient for why this exists. */
 export type ImportProgress = (fraction: number, stage: string) => void
@@ -126,6 +127,21 @@ export async function parseBundleToRoot(
     parsed = assembled.map(a => ({ name: a.name, model: new Model(a.geometry, a.material) }))
   }
   if (!parsed.length) throw new Error(`No models parsed from "${name}"`)
+
+  // A character FBX carries its own clip, and exporters name it after themselves rather than after the
+  // motion: every Mixamo download, character included, calls it `mixamo.com`. Left alone that clip is
+  // indistinguishable by name from every animation later imported onto the same rig — and it is usually
+  // a two-keyframe bind-pose stub, so whatever resolves to it plays as a frozen character. Renaming it
+  // after the file makes it identifiable; the animation-import route applies the same rule via its
+  // review modal, so both doors agree.
+  for (const p of parsed) {
+    const model = p.model
+    if (!(model instanceof AnimatedModel)) continue
+    for (const clip of [...model.animations]) {
+      const wanted = clipNameFromFile(clip.name, name)
+      if (wanted !== clip.name) model.renameAnimation(clip.name, wanted)
+    }
+  }
 
   const root = new Node(name)
   const children: ModelNode[] = []

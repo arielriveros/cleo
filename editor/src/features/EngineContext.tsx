@@ -2045,18 +2045,32 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
   };
 
-  // Import animation clips from a file (gltf/glb/fbx) into the model being edited in the Animation Editor:
-  // parse, build a bone MAPPING onto the model's skeleton, review it in the modal, then RETARGET each
-  // accepted clip and add it to the preview clone, the source node, the model asset and every placement.
+  // Import animation clips into the model being edited in the Animation Editor: parse, build a bone
+  // MAPPING onto the model's skeleton, review it in the modal, then store the accepted clips as a shared
+  // asset and show them on the preview clone, the source node, the model asset and every placement.
+  //
+  // ONE IMPORT PER FILE, via the same splitter the model importer uses. This is not a nicety: assimp's
+  // `ConvertFileList` treats the first file as the scene and every file after it as a sidecar to resolve
+  // references against, so handing it four independent .fbx converts the FIRST and silently discards the
+  // other three. Selecting a character's idle, walk, dying and running therefore used to import one clip,
+  // with no warning that three files had been dropped. `groupImportFiles` gives one bundle per model file,
+  // each still carrying the .bin/textures that belong to it — and each with its own name, which is what
+  // the review modal renames a placeholder clip after (see clipNaming.ts).
   const importAnimationFiles = async (files: File[]) => {
+    const bundles = groupImportFiles(files);
+    if (bundles.length === 0) {
+      Logger.warn('No animation files (.gltf/.glb/.fbx) found in the selection', 'Editor');
+      return;
+    }
+
     const rt = tabRuntimeRef.current.get(activeTabId);
     const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
     const cloneModel = (cloneNode instanceof ModelNode && cloneNode.model instanceof AnimatedModel && cloneNode.model.skin)
       ? cloneNode.model : null;
-    const fileName = files.find(f => /\.(gltf|glb|fbx)$/i.test(f.name))?.name ?? files[0]?.name ?? 'animation';
 
     // Which rig to retarget onto: the Animation Editor's open character when there is one, otherwise the
-    // user picks from the skinned models in the library.
+    // user picks from the skinned models in the library. Asked ONCE for the whole selection — every file
+    // in one action is going onto the same character, and four identical dialogs would be a tax.
     const rigChoices = modelsRef.current.filter(m => modelAssetIsSkinned(m));
     const openRigId = cloneNode ? modelIdOf(cloneNode) : undefined;
     let rigId = openRigId;
@@ -2067,7 +2081,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       }
       rigId = await new Promise<string | null>(resolve => {
         pendingRigResolverRef.current = resolve;
-        setPendingRigPick({ fileName, models: rigChoices.map(m => ({ id: m.id, name: m.name })) });
+        setPendingRigPick({
+          fileName: bundles.length === 1 ? bundles[0].name : `${bundles.length} animation files`,
+          models: rigChoices.map(m => ({ id: m.id, name: m.name })),
+        });
       }) ?? undefined;
       if (!rigId) { Logger.info('Animation import cancelled', 'Editor'); return; }
     }
@@ -2078,11 +2095,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       return;
     }
 
-    // One task for the whole import, ending in a `finally` so no early return leaves a spinning card.
-    // Single-step on purpose: ProgressWindow renders a lone step as header + detail, not a row list.
+    // One step per file, so a four-file import reports four outcomes rather than one.
     const task = startTask({
-      title: 'Importing animation',
-      steps: [{ name: fileName, status: 'pending' as StepStatus, detail: 'Queued' }],
+      title: bundles.length === 1 ? 'Importing animation' : `Importing ${bundles.length} animations`,
+      steps: bundles.map(b => ({ name: b.name, status: 'pending' as StepStatus, detail: 'Queued' })),
       cancellable: true,
       // Two things to unblock: a parse running in the worker, and a flow parked on the review modal.
       onCancel: () => {
@@ -2090,9 +2106,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         if (pendingAnimResolverRef.current) resolveAnimationImport(null);
       },
     });
-    const setStage = (stage: AnimImportStage, detail?: string, error?: string) => {
+    const setStage = (index: number, stage: AnimImportStage, detail?: string, error?: string) => {
       const s = ANIM_IMPORT_STAGES[stage];
-      task.setStep(0, {
+      task.setStep(index, {
         status: s.status,
         progress: s.progress,
         detail: detail ?? (s.status === 'running' || s.status === 'paused' ? s.label : undefined),
@@ -2100,110 +2116,135 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       });
     };
 
-    try {
-    // Parsed in the import worker: for an .fbx this is an uninterruptible assimp WASM call.
-    let parsed: { animations: any[]; skin: any };
-    setStage('parsing', `Reading ${fileName}`);
-    try { parsed = await parseAnimationFiles(files, (_fraction, stage) => setStage('parsing', stage || undefined)); }
-    catch (e) {
-      if (e instanceof ImportCancelled || task.cancelled) {
-        setStage('skipped', 'Cancelled');
-        Logger.info('Animation import cancelled', 'Editor'); return;
-      }
-      setStage('failed', undefined, String(e));
-      Logger.error('Failed to parse animation file: ' + e, 'Editor'); return;
-    }
-    if (!parsed.animations.length) {
-      setStage('failed', 'No animation clips in the file');
-      Logger.warn('No animation clips found in the file', 'Editor'); return;
-    }
-    if (!parsed.skin) {
-      setStage('failed', 'No skeleton to match against');
-      Logger.warn('The imported file has no skeleton to match against', 'Editor'); return;
-    }
-    const sourceSkin = parsed.skin;
-
-    // ONE mapping for the whole file — every clip in it shares the source skeleton, so matching is done once
-    // and each clip's report is derived cheaply from it (and re-derived as the user edits rows in the modal).
-    const mapping = buildBoneMapping(parsed.animations, sourceSkin, targetSkin);
-
-    // Diagnostic (scope 'Retarget'): one structured snapshot per import. Includes each key bone's bind
-    // rotation from both the inverse bind matrix and the node transforms — their disagreement is the
-    // tell-tale for an animated glTF whose node transforms are its frame-0 pose, not its bind pose.
-    try { Logger.print('debug', [describeRetarget(parsed.animations, sourceSkin, targetSkin, mapping)], 'Retarget'); }
-    catch (e) { Logger.warn('Retarget diagnostics failed: ' + e, 'Retarget'); }
-
-    // Bone lists for the mapping table: the source bones the clips actually animate (mapping order), and
-    // every target joint for the dropdowns.
-    const nameOf = (skin: any, node: number): string => skin.nodeNames?.get(node) ?? `node ${node}`;
-    const sourceBones = mapping.entries.map(e => ({ node: e.sourceNode, name: e.sourceName ?? `node ${e.sourceNode}` }));
-    const targetBones = targetSkin.joints.map((j: any) => ({ node: j.nodeIndex, name: nameOf(targetSkin, j.nodeIndex) }));
-
-    setStage('review', `${parsed.animations.length} clip${parsed.animations.length === 1 ? '' : 's'} — awaiting review`);
-    const decision = await new Promise<AnimationImportDecision | null>(resolve => {
-      pendingAnimResolverRef.current = resolve;
-      setPendingAnimationImport({
-        fileName,
-        clips: parsed.animations.map(clip => ({
-          name: clip.name,
-          report: mappingReport(clip, sourceSkin, targetSkin, mapping),
-          animatedNodes: [...new Set(clip.channels.map((ch: any) => ch.targetNodeIndex))] as number[],
-        })),
-        mapping, sourceBones, targetBones,
-      });
-    });
-    if (!decision) {
-      setStage('skipped', 'Cancelled at review');
-      Logger.info('Animation import cancelled', 'Editor'); return;
-    }
-    const finalMapping = decision.mapping; // the user may have re-pointed bones
-
     const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
 
-    // The clips are stored in the file's OWN rig space, exactly as parsed — no retarget is baked in. That
-    // is what lets one stored walk serve every character sharing the rig, and it is why the source skin is
-    // stored beside them: `buildBoneMapping` needs both sides, at every later use.
-    setStage('retargeting', 'Storing clips');
-    const kept = parsed.animations.filter((_: any, i: number) => decision.include[i]);
-    if (!kept.length) {
-      setStage('skipped', 'Nothing selected');
-      Logger.info('No animation clips selected', 'Editor'); return;
-    }
-    const namedClips = kept.map((clip: any) => {
-      const i = parsed.animations.indexOf(clip);
-      const typed = (decision.names?.[i] ?? '').trim();
-      return typed && typed !== clip.name ? { ...clip, name: typed } : clip;
-    });
+    try {
+      // The model asset is threaded through a local: updateModel is a state write, so modelsRef still
+      // holds the previous animationIds during the next iteration and re-reading it would drop the link
+      // the file before just made.
+      let linkedModel = rigAsset;
+      let imported = 0;
 
-    // A second import of the same file should link the existing asset, not make a byte-identical twin —
-    // matched on clip CONTENT, since the same Mixamo download is routinely renamed between imports.
-    const existing = findEquivalentAnimation(animationsRef.current, namedClips as any);
-    const animAsset = existing ?? buildAnimationAsset(
-      namedClips[0]?.name || fileName.replace(/\.[^.]+$/, ''),
-      namedClips as any, storeSkin(sourceSkin), fileName,
-    );
-    if (existing) Logger.info(`"${existing.name}" already holds these clips — linked it instead of storing a copy`, 'Editor');
-    else addAnimation(animAsset);
+      for (let i = 0; i < bundles.length; i++) {
+        const bundle = bundles[i];
+        const fileName = bundle.files.find(f => /\.(gltf|glb|fbx)$/i.test(f.name))?.name ?? bundle.files[0]?.name ?? bundle.name;
 
-    setStage('saving', 'Linking to the model');
-    // The link lives on the MODEL asset, so every placement of that character picks the clips up.
-    const linkedModel = withAnimationRef(rigAsset, animAsset.id);
-    if (linkedModel !== rigAsset) updateModel(rigAsset.id, linkedModel);
-    invalidateAnimationCache(animAsset.id);
+        // Checked between files: a parse is one long JS task and cannot be interrupted mid-flight, so
+        // "Cancel" honestly means "stop after the current file".
+        if (task.cancelled) { setStage(i, 'skipped', 'Cancelled before it started'); continue; }
 
-    // Show it immediately on whatever is on screen: the Animation Editor's preview clone, the node it was
-    // opened from, and every other placement of this character across every live scene.
-    const resolved = resolveAnimationAsset(animAsset, targetSkin, rigAsset.id);
-    if (cloneModel) for (const clip of resolved) cloneModel.addAnimation({ ...clip });
-    if (src instanceof ModelNode && src.model instanceof AnimatedModel)
-      for (const clip of resolved) src.model.addAnimation({ ...clip });
-    applyAnimationLinks(linkedModel, src, animAsset);
+        // Parsed in the import worker: for an .fbx this is an uninterruptible assimp WASM call.
+        let parsed: { animations: any[]; skin: any };
+        setStage(i, 'parsing', `Reading ${fileName}`);
+        try { parsed = await parseAnimationFiles(bundle.files, (_fraction, stage) => setStage(i, 'parsing', stage || undefined)); }
+        catch (e) {
+          if (e instanceof ImportCancelled || task.cancelled) {
+            setStage(i, 'skipped', 'Cancelled');
+            Logger.info('Animation import cancelled', 'Editor'); continue;
+          }
+          setStage(i, 'failed', undefined, String(e));
+          Logger.error(`Failed to parse ${fileName}: ${e}`, 'Editor'); continue;
+        }
+        if (!parsed.animations.length) {
+          setStage(i, 'failed', 'No animation clips in the file');
+          Logger.warn(`No animation clips found in ${fileName}`, 'Editor'); continue;
+        }
+        if (!parsed.skin) {
+          setStage(i, 'failed', 'No skeleton to match against');
+          Logger.warn(`${fileName} has no skeleton to match against`, 'Editor'); continue;
+        }
+        const sourceSkin = parsed.skin;
 
-    const added = namedClips.length;
-    if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-import');
-    eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
-    Logger.info(`Imported ${added} animation clip${added === 1 ? '' : 's'} from ${fileName} into "${rigAsset.name}"`, 'Editor');
-    setStage('done', `Imported ${added} clip${added === 1 ? '' : 's'}`);
+        // ONE mapping for the whole file — every clip in it shares the source skeleton, so matching is done
+        // once and each clip's report is derived cheaply from it (and re-derived as the user edits rows in
+        // the modal).
+        const mapping = buildBoneMapping(parsed.animations, sourceSkin, targetSkin);
+
+        // Diagnostic (scope 'Retarget'): one structured snapshot per import. Includes each key bone's bind
+        // rotation from both the inverse bind matrix and the node transforms — their disagreement is the
+        // tell-tale for an animated glTF whose node transforms are its frame-0 pose, not its bind pose.
+        try { Logger.print('debug', [describeRetarget(parsed.animations, sourceSkin, targetSkin, mapping)], 'Retarget'); }
+        catch (e) { Logger.warn('Retarget diagnostics failed: ' + e, 'Retarget'); }
+
+        // Bone lists for the mapping table: the source bones the clips actually animate (mapping order), and
+        // every target joint for the dropdowns.
+        const nameOf = (skin: any, node: number): string => skin.nodeNames?.get(node) ?? `node ${node}`;
+        const sourceBones = mapping.entries.map(e => ({ node: e.sourceNode, name: e.sourceName ?? `node ${e.sourceNode}` }));
+        const targetBones = targetSkin.joints.map((j: any) => ({ node: j.nodeIndex, name: nameOf(targetSkin, j.nodeIndex) }));
+
+        setStage(i, 'review', `${parsed.animations.length} clip${parsed.animations.length === 1 ? '' : 's'} — awaiting review`);
+        const decision = await new Promise<AnimationImportDecision | null>(resolve => {
+          pendingAnimResolverRef.current = resolve;
+          setPendingAnimationImport({
+            fileName,
+            clips: parsed.animations.map(clip => ({
+              name: clip.name,
+              report: mappingReport(clip, sourceSkin, targetSkin, mapping),
+              animatedNodes: [...new Set(clip.channels.map((ch: any) => ch.targetNodeIndex))] as number[],
+            })),
+            mapping, sourceBones, targetBones,
+          });
+        });
+        if (!decision) {
+          setStage(i, 'skipped', 'Cancelled at review');
+          Logger.info(`Import of ${fileName} cancelled`, 'Editor'); continue;
+        }
+        // NOTE: `decision.mapping` — which the user may have re-pointed in the modal — is deliberately
+        // not read here, and is currently LOST: clips are stored in source-rig space and
+        // `resolveAnimationAsset` rebuilds the mapping with `buildBoneMapping` every time it retargets.
+        // Honouring a manual re-point needs the mapping persisted on the asset; it is not today.
+
+        // The clips are stored in the file's OWN rig space, exactly as parsed — no retarget is baked in. That
+        // is what lets one stored walk serve every character sharing the rig, and it is why the source skin is
+        // stored beside them: `buildBoneMapping` needs both sides, at every later use.
+        setStage(i, 'retargeting', 'Storing clips');
+        const kept = parsed.animations.filter((_: any, n: number) => decision.include[n]);
+        if (!kept.length) {
+          setStage(i, 'skipped', 'Nothing selected');
+          Logger.info(`No animation clips selected from ${fileName}`, 'Editor'); continue;
+        }
+        // The modal seeds each box with `clipNameFromFile`, so a placeholder name arrives here already
+        // replaced by the file's; this only applies whatever the user left in the box.
+        const namedClips = kept.map((clip: any) => {
+          const n = parsed.animations.indexOf(clip);
+          const typed = (decision.names?.[n] ?? '').trim();
+          return typed && typed !== clip.name ? { ...clip, name: typed } : clip;
+        });
+
+        // A second import of the same file should link the existing asset, not make a byte-identical twin —
+        // matched on clip CONTENT, since the same Mixamo download is routinely renamed between imports.
+        const existing = findEquivalentAnimation(animationsRef.current, namedClips as any);
+        const animAsset = existing ?? buildAnimationAsset(
+          namedClips[0]?.name || fileName.replace(/\.[^.]+$/, ''),
+          namedClips as any, storeSkin(sourceSkin), fileName,
+        );
+        if (existing) Logger.info(`"${existing.name}" already holds these clips — linked it instead of storing a copy`, 'Editor');
+        else addAnimation(animAsset);
+
+        setStage(i, 'saving', 'Linking to the model');
+        // The link lives on the MODEL asset, so every placement of that character picks the clips up.
+        const nextModel = withAnimationRef(linkedModel, animAsset.id);
+        if (nextModel !== linkedModel) { linkedModel = nextModel; updateModel(rigAsset.id, linkedModel); }
+        invalidateAnimationCache(animAsset.id);
+
+        // Show it immediately on whatever is on screen: the Animation Editor's preview clone, the node it was
+        // opened from, and every other placement of this character across every live scene.
+        const resolved = resolveAnimationAsset(animAsset, targetSkin, rigAsset.id);
+        if (cloneModel) for (const clip of resolved) cloneModel.addAnimation({ ...clip });
+        if (src instanceof ModelNode && src.model instanceof AnimatedModel)
+          for (const clip of resolved) src.model.addAnimation({ ...clip });
+        applyAnimationLinks(linkedModel, src, animAsset);
+
+        const added = namedClips.length;
+        imported += added;
+        Logger.info(`Imported ${added} animation clip${added === 1 ? '' : 's'} from ${fileName} into "${rigAsset.name}"`, 'Editor');
+        setStage(i, 'done', `Imported ${added} clip${added === 1 ? '' : 's'}`);
+      }
+
+      if (imported > 0) {
+        if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-import');
+        eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
+      }
     } finally { task.finish(); }
   };
 
