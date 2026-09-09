@@ -636,6 +636,19 @@ describe('a zombie turning', () => {
         const zombie = zombieWith('Idle');
         expect(zombie.chaseTurnSpeed).toBeGreaterThan(zombie.wanderTurnSpeed * 2);
     });
+
+    // Speed follows the same split as the turn rate, but it has to be asked for explicitly: a behaviour
+    // state's `speedScale` is clamped to 0..1 and can only throttle DOWN from `walkSpeed`, and nothing on
+    // the AI path ever raises `sprint`. Without the script setting it, `runSpeed` is unreachable and a
+    // chasing zombie can never outpace its own shamble.
+    //
+    // Asserted on the INTENT, not on the resulting velocity: this fixture's zombie has no rigid body, so
+    // `_stepLocomotion` returns early and never turns the intent into motion.
+    it('walks while wandering and sprints once it is hunting', () => {
+        expect(zombieWith('Idle').drive().sprint, 'wander').toBe(false);
+        for (const state of ['Chase', 'Attack', 'Investigate'])
+            expect(zombieWith(state).drive().sprint, state).toBe(true);
+    });
 });
 
 describe('the difficulty curve', () => {
@@ -940,15 +953,46 @@ describe('a burning zombie', () => {
         return { scene, node };
     }
 
-    it('is removed once it has burned and lain there', () => {
+    it('starts dying the moment it catches fire, not when the fire goes out', () => {
+        // The whole point of the re-order. Burning is the only way a zombie dies, so it collapses while it
+        // burns rather than shambling around alight for `burnSeconds` and only then noticing.
+        const { scene, node } = zombie();
+        node.ignite();
+        expect(node.burning).toBe(true);
+        expect((node as any)._dying, 'dying should begin at ignition').toBe(true);
+    });
+
+    it('keeps burning while it collapses', () => {
+        // `_burn` runs ABOVE the dying guard in onUpdate. Below it, the emissive ramp and the light
+        // flicker would stop on the frame they should start — a zombie that dies without ever visibly
+        // catching fire, which reads as a broken material rather than a broken sequence.
+        const { scene, node } = zombie();
+        // The fire has to outlive nothing here but itself: the fixture removes the corpse at
+        // corpseSeconds, and an update that never runs cannot burn out.
+        node.burnSeconds = 0.4;
+        node.ignite();
+        run(scene, 0.2);
+        expect(node.burning, 'still alight halfway through the burn').toBe(true);
+
+        run(scene, 0.3);
+        expect(node.burning, 'the fire burns out on its own clock').toBe(false);
+    });
+
+    it('is removed once it has collapsed and lain there', () => {
+        // The corpse timer now starts at the COLLAPSE, so `corpseSeconds` measures how long the body lies
+        // there rather than quietly starting while it is still falling.
+        //
+        // This fixture has no Ch10 child, so there is no animator: `_die()` takes its `else` branch and
+        // `_collapse()` runs synchronously at ignition. That is deliberate — it is also the path a scene
+        // with a missing model takes, and it must still produce a corpse rather than a standing zombie.
         const { scene, node } = zombie();
         node.ignite();
         expect(node.markForRemoval).toBe(false);
 
-        run(scene, node.burnSeconds + 0.1);
-        expect(node.markForRemoval).toBe(false);   // dead, but still a corpse
+        run(scene, node.corpseSeconds - 0.2);
+        expect(node.markForRemoval, 'still lying there').toBe(false);
 
-        run(scene, node.corpseSeconds + 0.1);
+        run(scene, 0.4);
         expect(node.markForRemoval).toBe(true);
     });
 
@@ -959,7 +1003,7 @@ describe('a burning zombie', () => {
         run(scene, 0.5);
         node.ignite();
         run(scene, 0.6);
-        // Still on the first burn's schedule: it died on time rather than restarting the countdown.
+        // Still on the first ignition's schedule: the second call did not restart anything.
         run(scene, node.corpseSeconds + 0.1);
         expect(node.markForRemoval).toBe(true);
     });

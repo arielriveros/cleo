@@ -86,7 +86,7 @@ menu, Delete to remove. Edges are labelled with a summary of their conditions. O
 There is also a **Preview**: it simulates the machine and lets you drive parameters by hand, which
 is far quicker than pressing Play to find out whether a transition can fire.
 
-**Apply to Model** commits the machine (Ctrl+S on the tab does the same).
+**Apply State Machine** commits the machine onto the node it was opened from (Ctrl+S on the tab does the same).
 
 ### The `±` band is not optional
 

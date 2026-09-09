@@ -33,9 +33,14 @@ function ApplyBar() {
   const { apply } = useStateMachine()
   return (
     <div className='p-2 border-b border-border'>
+      {/* NOT "Apply to Model", which it was called and which is wrong twice over: it writes nothing to
+          the model ASSET, and nothing about clips — those belong to the rig. What it commits is the
+          state machine, onto the node's animator. That is genuinely node-owned data (ModelNode
+          serializes `stateMachine`), and this is its only commit path: the working copy lives in
+          per-tab React state and is lost on close without it. */}
       <button className={btn + ' w-full'} onClick={apply}
-        title='Save the machine onto the original model (used at runtime and by Simulate)'>
-        Apply to Model
+        title='Save the state machine onto the node it was opened from (used at runtime and by Simulate)'>
+        Apply State Machine
       </button>
     </div>
   )
@@ -267,7 +272,7 @@ function SelectedState() {
         ? <p className='text-[10px] text-warning'>No animation fields yet — create one from a model in the Assets explorer.</p>
         : <>
           <select className={input + ' flex-1 min-w-0'} value={s.fieldId ?? ''}
-            title='Animation field. Fields are re-embedded on Apply to Model.'
+            title='Animation field. Fields are re-embedded when the machine is applied.'
             onChange={e => setState(i, { fieldId: e.target.value })}>
             <option value=''>(no field)</option>
             {!field && s.fieldId && <option value={s.fieldId}>{s.fieldId} — missing</option>}
@@ -616,7 +621,7 @@ function PreviewSection() {
             className='text-xs' />
           {simulate && hasMachine && <span className='text-highlight text-xs'>state: {target.animator.currentStateName ?? '—'}</span>}
         </div>
-        {!hasMachine && <p className='text-[10px] text-gray-500'>Press <b>Apply to Model</b> first.</p>}
+        {!hasMachine && <p className='text-[10px] text-gray-500'>Press <b>Apply State Machine</b> first.</p>}
 
         {sm.parameters.map((p, i) => (
           <div key={i} className='flex items-center gap-2 text-xs'>

@@ -70,7 +70,7 @@ export default function MenuBar() {
   const saveIcon = savingState === 'saving' ? <SpinnerIcon /> : savingState === 'saved' ? <CheckIcon /> : savingState === 'error' ? <AlertIcon /> : <SaveIcon />;
   const saveVariant = savingState === 'saved' ? 'success' : savingState === 'error' ? 'danger' : 'default';
   // Save targets whatever the active tab edits; Save All sweeps the rest. An animation tab has no asset —
-  // "saving" it applies the machine onto the source model, which is what its own Apply to Model button does.
+  // "saving" it applies the machine onto the source node, which is what its own Apply State Machine button does.
   const activeDirty = !!dirtyTabs[activeTab.id];
   const dirtyCount = Object.values(dirtyTabs).filter(Boolean).length;
   const saveTitle = activeTab.kind === 'animation'

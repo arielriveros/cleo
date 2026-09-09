@@ -9,6 +9,8 @@ import { LightNode } from '../src/core/scene/nodes/lightNode';
 import { PointLight } from '../src/graphics/lighting';
 import { parseBehaviorMachine } from '../src/core/control/behavior';
 import { parseConditionNode } from '../src/core/conditions';
+import { KIND_EXT } from '../editor/src/utils/vfs';
+import { SCENE_REFS_VERSION } from '../editor/src/utils/references';
 
 // The Night Shift example project is AUTHORED BY CODE (tools/nightShift/build.mjs), and that is a
 // standing risk: a hand-written scene writer drifts from the parser the editor actually uses, and the
@@ -22,6 +24,10 @@ import { parseConditionNode } from '../src/core/conditions';
 
 const PROJECT = join(__dirname, '..', 'editor', 'public', 'examples', 'night-shift');
 const present = existsSync(join(PROJECT, 'manifest.json'));
+
+/** Every library the project ships. Named once, because three separate checks iterate all of them. */
+const LIBRARIES = ['scripts', 'templates', 'models', 'materials', 'terrainMaterials', 'tilesets',
+    'animationFields', 'animations', 'rigs'];
 
 const read = (...parts: string[]) => JSON.parse(readFileSync(join(PROJECT, ...parts), 'utf8'));
 
@@ -60,11 +66,30 @@ describe.skipIf(!present)('the Night Shift example project', () => {
         it('points every vfs entry at an asset that exists', () => {
             const ids = new Set<string>([
                 ...manifest().sceneMetas.map((s: any) => s.id),
-                ...['scripts', 'templates', 'models', 'materials', 'terrainMaterials', 'tilesets',
-                    'animationFields'].flatMap(n => library(n).map((a: any) => a.id)),
+                ...LIBRARIES.flatMap(n => library(n).map((a: any) => a.id)),
             ]);
             for (const entry of read('vfs.json').entries)
                 expect(ids.has(entry.assetId), entry.path).toBe(true);
+        });
+
+        it('gives every vfs entry the virtual extension its kind is classified by', () => {
+            // The path is also the SVAR file-manager id, and `kindOfExt` reads the part after the LAST
+            // dot to decide what an entry IS. The generator used to interpolate the kind name — writing
+            // `.material` and `.animationField`, which classify as nothing — so the asset explorer could
+            // not place a single row it wrote. Nothing reported it.
+            for (const entry of read('vfs.json').entries) {
+                const ext = KIND_EXT[entry.kind as keyof typeof KIND_EXT];
+                expect(ext, `no virtual extension for kind ${entry.kind}`).toBeTruthy();
+                expect(entry.path.endsWith(ext), entry.path).toBe(true);
+            }
+        });
+
+        it('records each scene reference list at the version the reader expects', () => {
+            // `hasFullRefs` compares this; an older or missing version marks the scene PARTIAL in the
+            // reference viewer, which reads as "this scene uses almost nothing" rather than as a stamp
+            // the generator forgot.
+            for (const meta of manifest().sceneMetas)
+                expect(meta.refs.version, meta.name).toBe(SCENE_REFS_VERSION);
         });
 
         it('ships a payload for every texture the index names', () => {
@@ -346,18 +371,43 @@ describe.skipIf(!present)('the Night Shift example project', () => {
                 .not.toBe(player.model.geometry.positions.length);
         });
 
-        it('carries exactly the three clips it was authored with', () => {
+        it('is a real model asset, not an orphaned subtree', () => {
+            // The enemies had no model asset at all: the Ch10 subtree lived only inside this template,
+            // with `__modelId: null`. Nothing propagated a mesh or material edit to them, they appeared
+            // in no library — and since the RIG is reached through the model, the clip set they play had
+            // no owner to come from.
             const model = allNodes(zombie().nodeJson).find((n: any) => n.type === 'model');
-            const names = model.model.animations.map((a: any) => a.name).sort();
-            expect(names).toEqual(['Dying', 'Idle', 'Walk']);
+            const id = model.variables?.__modelId?.value;
+            expect(id, 'the Ch10 node must name a model asset').toBeTruthy();
+
+            const asset = library('models').find((m: any) => m.id === id);
+            expect(asset, `no model asset ${id}`).toBeTruthy();
+            expect(asset.rigId, 'the model asset must name a rig').toBeTruthy();
+        });
+
+        it('carries exactly the five clips it was authored with, on its own rig', () => {
+            const asset = library('models').find((m: any) => m.name === 'Zombie');
+            const rig = library('rigs').find((r: any) => r.id === asset.rigId);
+            const byId = new Map(library('animations').map((a: any) => [a.id, a]));
+
+            // Its OWN clips: the ones authored against this rig. Its `animationIds` list is wider —
+            // both rigs own every clip in the project, which is what sharing a rig is for.
+            const own = library('animations')
+                .filter((a: any) => a.rigId === rig.id).map((a: any) => a.name).sort();
+            expect(own).toEqual(
+                ['Zombie Attack', 'Zombie Dying', 'Zombie Idle', 'Zombie Running', 'Zombie Walk']);
+            for (const id of rig.animationIds) expect(byId.has(id), id).toBe(true);
         });
 
         // Root motion on the wrong clip is the loud failure here: Idle and Walk are driven by steering,
         // so a travelling Walk would fight the controller and slide the horde across the map.
         it('travels with the death clip and only the death clip', () => {
-            const model = allNodes(zombie().nodeJson).find((n: any) => n.type === 'model');
-            const rooted = model.model.animations.filter((a: any) => a.rootMotion).map((a: any) => a.name);
-            expect(rooted).toEqual(['Dying']);
+            const asset = library('models').find((m: any) => m.name === 'Zombie');
+            const rooted = library('animations')
+                .filter((a: any) => a.rigId === asset.rigId)
+                .filter((a: any) => a.clips.some((c: any) => c.rootMotion))
+                .map((a: any) => a.name);
+            expect(rooted).toEqual(['Zombie Dying']);
         });
 
         it('paints both material tiles, over index ranges that cover the mesh', () => {
@@ -378,18 +428,56 @@ describe.skipIf(!present)('the Night Shift example project', () => {
             for (const m of model.model.materials) expect(m.textures.normalMap).toBeTruthy();
         });
 
-        it('drives its animation from measured speed, banded', () => {
+        it('blends its gait by measured speed rather than switching on a threshold', () => {
             const model = allNodes(zombie().nodeJson).find((n: any) => n.type === 'model');
             const sm = model.stateMachine;
             expect(sm.parameters[0].variable.varName).toBe('planarSpeed');
             expect(sm.parameters[0].variable.source).toBe('builtin');
 
-            // Only the speed-driven pair. A trigger has no threshold to band, so requiring hysteresis
-            // of every transition would have made the death edge un-authorable.
-            const banded = sm.transitions.filter((t: any) => t.condition.children[0].param === 'Speed');
-            expect(banded.length).toBe(2);
-            for (const t of banded)
-                expect(t.condition.children[0].hysteresis, `${t.from} -> ${t.to}`).toBeGreaterThan(0);
+            const loco = sm.states.find((s: any) => s.isEntry);
+            // The state plays a FIELD, and the axis it samples is fed by the speed parameter. Both halves
+            // matter: a field with no `fieldInputs` entry samples a constant and the character freezes in
+            // one gait, which looks like a broken clip rather than a broken binding.
+            expect(loco.fieldId, 'the entry state must play a blend space').toBeTruthy();
+            expect(loco.field, 'the field must be EMBEDDED — fieldId cannot be resolved at runtime').toBeTruthy();
+            expect(loco.fieldInputs.x).toBe(sm.parameters[0].name);
+
+            // `toRuntimeField` drops yAxis in 1D mode, so a copy carrying one was not written through it.
+            expect(loco.field.mode).toBe('1d');
+            expect(loco.field.yAxis).toBeUndefined();
+        });
+
+        it('places every gait sample at a speed the character can actually reach', () => {
+            // The idiom the player's field established: a sample coordinate is the speed at which that
+            // clip is the whole answer, so it has to be a speed the character can hit. A run sample above
+            // `runSpeed` is a gait that never fully arrives — the blend stays permanently mid-stride.
+            const character = allNodes(zombie().nodeJson).find((n: any) => n.type === 'character');
+            const model = allNodes(zombie().nodeJson).find((n: any) => n.type === 'model');
+            const field = model.stateMachine.states.find((s: any) => s.isEntry).field;
+
+            const top = Math.max(...field.samples.map((s: any) => s.x));
+            expect(top).toBe(character.runSpeed);
+            expect(field.xAxis.max).toBe(character.runSpeed);
+            expect(field.samples.some((s: any) => s.x === character.walkSpeed)).toBe(true);
+            // Standing still has to be IN the field, or the lowest gait plays at zero speed and slides.
+            expect(field.samples.some((s: any) => s.x === 0)).toBe(true);
+        });
+
+        it('wanders fast enough to reach its own walk sample', () => {
+            // The bug this pins: wander used to run at `walkSpeed * 0.3` = 0.33 m/s while the Idle->Walk
+            // threshold engaged at 0.45 (hysteresis is CENTRED), so a wandering zombie never left the idle
+            // clip and slid across the ground. Nothing reported it.
+            const character = allNodes(zombie().nodeJson).find((n: any) => n.type === 'character');
+            const brain = allNodes(zombie().nodeJson).find((n: any) => n.type === 'controller');
+            const wander = brain.behavior.states.find((s: any) => s.goal === 'wander');
+
+            // Sprint is what selects runSpeed, and NightShiftZombie only sets it while hunting.
+            const wanderSpeed = character.walkSpeed * (wander.speedScale ?? 1);
+            const model = allNodes(zombie().nodeJson).find((n: any) => n.type === 'model');
+            const field = model.stateMachine.states.find((s: any) => s.isEntry).field;
+            const walkSample = Math.min(...field.samples.filter((s: any) => s.x > 0).map((s: any) => s.x));
+
+            expect(wanderSpeed).toBeGreaterThanOrEqual(walkSample);
         });
 
         it('can reach Dying from every state it can be alive in, and never leaves it', () => {
@@ -404,6 +492,324 @@ describe.skipIf(!present)('the Night Shift example project', () => {
             const into = sm.transitions.filter((t: any) => t.to === 'Dying').map((t: any) => t.from).sort();
             expect(into).toEqual(alive);
             expect(sm.transitions.some((t: any) => t.from === 'Dying')).toBe(false);
+        });
+    });
+
+    // The two characters are different Mixamo exports of different bodies, so they are two rigs — but
+    // `normalizeBoneName` strips the `mixamorigN:` namespace, so a curve authored on either matches the
+    // other by bone name. That is what lets both rigs own the whole clip set, and it is the thing this
+    // example exists to demonstrate. Every check below guards a failure mode that is otherwise silent.
+    describe('rigs and shared clips', () => {
+        const rigs = () => library('rigs');
+        const animations = () => library('animations');
+
+        /** Every skeleton the project ships: each rig's, and the copy every model subtree embeds. */
+        const everySkin = (): any[] => {
+            const out: any[] = [];
+            const walk = (value: any) => {
+                if (!value || typeof value !== 'object') return;
+                if (Array.isArray(value)) { for (const v of value) walk(v); return; }
+                if (value.model?.skin) out.push(value.model.skin);
+                for (const v of Object.values(value)) walk(v);
+            };
+            for (const rig of rigs()) out.push(rig.skin);
+            walk(library('models'));
+            walk(library('templates'));
+            return out;
+        };
+
+        it('embeds no clip anywhere — the library is the only copy', () => {
+            // THE invariant. `refreshModelClips` re-pushes `nodeJson.animations` and THEN layers the
+            // rig's clips on top, so a clip left in both places comes back from `addAnimation`'s de-dupe
+            // as `Idle (2)` — a name no state machine and no blend-space sample says. The character
+            // stops animating and the only trace is a per-frame "model does not have clip Idle".
+            //
+            // The mannequin's clips lived in THREE places at once (its model asset, the Playable
+            // template, and the placed scene node), so a check that looks at one of them is not enough.
+            const leaks: string[] = [];
+            const scan = (label: string, value: any) => {
+                if (!value || typeof value !== 'object') return;
+                if (Array.isArray(value)) { for (const v of value) scan(label, v); return; }
+                if (value.model?.skin && value.model.animations?.length)
+                    leaks.push(`${label}:${value.name} (${value.model.animations.length})`);
+                for (const v of Object.values(value)) scan(label, v);
+            };
+            for (const meta of manifest().sceneMetas) scan(meta.name, read('scenes', `${meta.id}.json`));
+            for (const name of LIBRARIES) scan(name, library(name));
+            expect(leaks).toEqual([]);
+        });
+
+        it('gives every skinned character a rig that exists', () => {
+            const ids = new Set(rigs().map((r: any) => r.id));
+            for (const model of library('models')) {
+                expect(model.rigId, `${model.name} names no rig`).toBeTruthy();
+                expect(ids.has(model.rigId), `${model.name} -> ${model.rigId}`).toBe(true);
+            }
+            // Two bodies, two rigs. Collapsing them onto one would play every clip at one character's
+            // proportions; `skeletonFingerprint` separates them because the bind poses genuinely differ.
+            expect(new Set(library('models').map((m: any) => m.rigId)).size).toBe(2);
+        });
+
+        it('folds assimp’s pivots out of every skeleton it ships', () => {
+            // Assimp wraps each FBX bone in synthetic `$AssimpFbx$` nodes carrying its pre-rotation.
+            // `GltfLoader` folds them away for every character the EDITOR imports, because a character
+            // and its clips must BOTH be collapsed or their chains disagree — and the offline tool
+            // `importZombie.mjs` did not, for a long time.
+            //
+            // The result was silent and severe: the zombie's whole rest orientation sat in the pivots
+            // (`LeftUpLeg` alone is 175.8°), its clips were stored folded, and `_recomputePose`
+            // applied the pre-rotation twice. Nothing logged it — and the cross-rig retarget path
+            // actively hid it, because its `Bt·Bs⁻¹` correction cancels a pivot present
+            // in both terms. The clips looked perfect on every OTHER character.
+            for (const skin of everySkin())
+                for (const [, name] of skin.nodeNames ?? [])
+                    expect(String(name).includes('$AssimpFbx$'), `${skin.name}: ${name}`).toBe(false);
+        });
+
+        it('parents every joint onto another joint or the single armature root', () => {
+            // The same invariant from the other side, and the one that actually bites: an unfolded
+            // skeleton parents most of its bones onto synthetic nodes — 49 of the zombie's 65, where
+            // the mannequin has 1.
+            for (const skin of everySkin()) {
+                const jointNodes = new Set(skin.joints.map((j: any) => j.nodeIndex));
+                const orphans = skin.joints
+                    .filter((j: any) => j.parentIndex !== undefined && !jointNodes.has(j.parentIndex));
+                // Exactly one is right: the root bone hangs off the armature node carrying the
+                // centimetre-to-metre scale. More than one means a pivot chain survived.
+                expect(orphans.length, `${skin.name}: ${orphans.length} joints parent onto a non-joint`)
+                    .toBeLessThanOrEqual(1);
+            }
+        });
+
+        it('lets only a turn-in-place clip travel', () => {
+            // THE invariant behind the sliding player. A Mixamo download carries its real authored travel
+            // — a run covers 2.9 m per cycle — and through the ROOT MOTION path that is exactly right:
+            // the engine extracts the delta and moves the character with it. But the player's gait plays
+            // through a blend FIELD, and a field disarms that path outright ("A field has no single root
+            // to extract"), then weight-averages the hips translation into the pose. The mesh rides
+            // metres off its own capsule and snaps back at the loop point.
+            //
+            // So: a clip may DISPLACE its root horizontally only if it is flagged `rootMotion`.
+            //
+            // Measured as net first-to-last, not as maximum deviation, and that distinction matters: a
+            // real walk cycle sways its hips about 6 cm side to side as the weight transfers, and ends
+            // where it started. Sway is animation; displacement is travel. The vertical axis is left
+            // alone entirely — that is the gait's bob, and flattening it makes every walk a glide.
+            const bad: string[] = [];
+            for (const rig of rigs()) {
+                const names = new Map<number, string>(rig.skin.nodeNames);
+                const hips = [...names.entries()].find(([, n]) => n.endsWith(':Hips'))?.[0];
+                expect(hips, `${rig.name} has no Hips bone`).toBeDefined();
+
+                const joint = rig.skin.joints.find((j: any) => j.nodeIndex === hips);
+                const rest = (rig.skin.nodeTransforms as [number, number[]][])
+                    .find(([n]) => n === hips)![1];
+                expect(joint, 'Hips must be a joint').toBeTruthy();
+                // Derive the vertical the same way the importer does: the root sits about a metre up one
+                // axis and near zero on the other two, whether the skeleton was authored Y-up or Z-up.
+                const up = [12, 13, 14].reduce((b, i) => (Math.abs(rest[i]) > Math.abs(rest[b]) ? i : b), 12) - 12;
+
+                for (const asset of animations().filter((a: any) => a.rigId === rig.id)) {
+                    for (const clip of asset.clips) {
+                        const ch = clip.channels.find((c: any) =>
+                            c.targetNodeIndex === hips && c.targetPath === 'translation');
+                        if (!ch) continue;
+                        const out = clip.samplers[ch.samplerIndex].output;
+                        const last = out.length - 3;
+                        let moved = 0;
+                        for (let a = 0; a < 3; a++)
+                            if (a !== up) moved = Math.hypot(moved, out[last + a] - out[a]);
+                        // Centimetres. A travelling gait covers 160-290 of them; an in-place one ends
+                        // within 3 of where it began, so 20 separates the two with room to spare.
+                        if (moved > 20 && !clip.rootMotion) bad.push(`${clip.name} (${moved.toFixed(0)})`);
+                    }
+                }
+            }
+            expect(bad, 'clips that travel without root motion').toEqual([]);
+        });
+
+        it('gives every one-shot state a way back', () => {
+            // A non-looping state with no way out is a character frozen mid-action, and nothing else in
+            // the machine can rescue it. `Dying` is the ONE state allowed to be a dead end — the ragdoll
+            // takes the skeleton over from there.
+            //
+            // Note this does NOT require an EXIT-TIME edge specifically. A one-shot may legitimately
+            // return on a condition instead — an in-air state ending on landing rather than on its clip,
+            // say — so what is checked is that something leads out at all.
+            for (const node of everyNode()) {
+                const sm = (node as any).stateMachine;
+                if (!sm) continue;
+                for (const state of sm.states) {
+                    if (state.loop !== false || state.name === 'Dying') continue;
+                    const out = sm.transitions.filter((t: any) =>
+                        (t.from === state.name || t.from === '*') && t.to !== state.name);
+                    expect(out.length, `${node.name}/${state.name} is a dead end`).toBeGreaterThan(0);
+                }
+            }
+        });
+
+        it('never leaves a state on an unconditional edge that is not gated on the clip', () => {
+            // An edge with neither a condition nor `hasExitTime` is vacuously true — `gateMet` on an empty
+            // list returns true — so it fires on the state's first frame and the state is skipped
+            // entirely. Every unconditional edge here is a "when the clip finishes" return, and must say so.
+            for (const node of everyNode()) {
+                const sm = (node as any).stateMachine;
+                if (!sm) continue;
+                for (const t of sm.transitions) {
+                    const gated = t.condition?.children?.length || t.conditions?.length;
+                    if (gated) continue;
+                    expect(t.hasExitTime, `${node.name}: ${t.from} -> ${t.to} fires immediately`).toBe(true);
+                }
+            }
+        });
+
+        it('selects each turn-in-place clip on its own turnRequest code', () => {
+            // `turnRequest` is a CLIP SELECTOR, not an angle: +1/+2 right, -1/-2 left, 2 past 135 degrees.
+            // The sign is the trap — inverted, the turn clip's root motion drives the body AWAY from the
+            // aim, the release angle is never reached and the machine ping-pongs on one side of centre.
+            const tpl = library('templates').find((t: any) => t.name === 'Playable');
+            const player = allNodes(tpl.nodeJson).find((n: any) => n.name === 'Ch36');
+            const sm = player.stateMachine;
+
+            const turnParam = sm.parameters.find((p: any) => p.variable?.varName === 'turnRequest');
+            expect(turnParam, 'no parameter bound to turnRequest').toBeTruthy();
+            // A native CharacterNode field, so it must NOT claim to be a builtin — that path reads a
+            // different table and would silently return the default forever.
+            expect(turnParam.variable.source).toBe('variable');
+
+            const codeOf = (state: string) => sm.transitions
+                .filter((t: any) => t.to === state)
+                .flatMap((t: any) => t.condition?.children ?? [])
+                .filter((c: any) => c.param === turnParam.name && c.op === 'eq')
+                .map((c: any) => c.value);
+
+            expect(codeOf('Turn90Right')).toEqual([1]);
+            expect(codeOf('Turn90Left')).toEqual([-1]);
+            expect(codeOf('Turn180Right')).toEqual([2]);
+            expect(codeOf('Turn180Left')).toEqual([-2]);
+        });
+
+        it('lands the zombie’s hit from a marker inside the swing it plays', () => {
+            // The damage is fired by a clip event marker, not a timer, so it moves with the animation.
+            // Two numbers on the `Attack` state bound where the marker may sit, and BOTH can silently
+            // break it: the state cuts the clip at `exitTime`, so a later marker is never reached, and it
+            // plays at `speed`, which only shifts when the hit arrives in wall-clock terms. A marker past
+            // the cut is a zombie that swings and never damages anyone.
+            const tpl = library('templates').find((t: any) => t.name === 'Zombie');
+            const model = allNodes(tpl.nodeJson).find((n: any) => n.type === 'model');
+            const sm = model.stateMachine;
+
+            const marker = sm.events.find((e: any) => e.eventName === 'hit');
+            expect(marker, 'the attack needs a hit marker').toBeTruthy();
+
+            const state = sm.states.find((s: any) => s.clipName === marker.clipName);
+            expect(state, `no state plays ${marker.clipName}`).toBeTruthy();
+
+            const clip = animations()
+                .flatMap((a: any) => a.clips)
+                .find((c: any) => c.name === marker.clipName);
+            expect(clip, `${marker.clipName} is not in the library`).toBeTruthy();
+            const duration = Math.max(...clip.samplers.map((x: any) => x.input[x.input.length - 1] ?? 0));
+
+            const cut = sm.transitions
+                .filter((t: any) => t.from === state.name && t.hasExitTime)
+                .map((t: any) => (t.exitTime ?? 1) * duration);
+            expect(cut.length, 'the attack state must return on exit time').toBeGreaterThan(0);
+            expect(marker.time, 'the marker is past the point the state cuts away')
+                .toBeLessThan(Math.min(...cut));
+            expect(marker.time).toBeGreaterThan(0); // t=0 never fires: the window is half-open
+        });
+
+        it('drives the player gait from planar speed, not total speed', () => {
+            // `currentSpeed` is the full 3D magnitude, so a jump or a fall inflates it and the character
+            // reads as sprinting in mid-air — which is exactly what the copied machine did.
+            const tpl = library('templates').find((t: any) => t.name === 'Playable');
+            const player = allNodes(tpl.nodeJson).find((n: any) => n.name === 'Ch36');
+            const speed = player.stateMachine.parameters.find((p: any) => p.name === 'Speed');
+            expect(speed.variable.varName).toBe('planarSpeed');
+        });
+
+        it('shares one clip set between both rigs, and resolves all of it', () => {
+            const ids = new Set(animations().map((a: any) => a.id));
+            const lists = rigs().map((r: any) => r.animationIds);
+            expect(lists.length).toBe(2);
+            expect([...lists[0]].sort()).toEqual([...lists[1]].sort());
+            for (const list of lists)
+                for (const id of list) expect(ids.has(id), id).toBe(true);
+        });
+
+        it('leaves the clip list to the rig, not to the model', () => {
+            // `modelAnimationIds` unions both, so a leftover list on the model is not an error — it is a
+            // second place the answer lives, which is what `moveClipsToRigs` exists to collapse.
+            for (const model of library('models'))
+                expect(model.animationIds ?? [], model.name).toEqual([]);
+        });
+
+        it('gives every animation a source skeleton to retarget from', () => {
+            const ids = new Set(rigs().map((r: any) => r.id));
+            for (const a of animations()) {
+                expect(ids.has(a.rigId), `${a.name} -> ${a.rigId}`).toBe(true);
+                // `player/animations.ts` reads `sourceSkin` DIRECTLY and falls through to playing the
+                // clips unretargeted when it is missing — a subtly wrong character, not an absent one.
+                expect(a.sourceSkin?.joints?.length, `${a.name} has no source skin`).toBeGreaterThan(0);
+            }
+        });
+
+        it('resolves every clip name any state machine or blend space asks for', () => {
+            // `AnimationState.clipName` and every Animation Field sample name their clip as a STRING,
+            // looked up on the live model. Nothing type-checks that, and a miss reports only at play
+            // time — which is exactly why the two characters' clips had to stop both being called Idle.
+            const known = new Set(animations().flatMap((a: any) => a.clips.map((c: any) => c.name)));
+            const wanted = new Map<string, string>();
+            const collect = (label: string, value: any) => {
+                if (!value || typeof value !== 'object') return;
+                if (Array.isArray(value)) { for (const v of value) collect(label, v); return; }
+                if (typeof value.clipName === 'string' && value.clipName) wanted.set(value.clipName, label);
+                for (const v of Object.values(value)) collect(label, v);
+            };
+            for (const meta of manifest().sceneMetas) collect(meta.name, read('scenes', `${meta.id}.json`));
+            for (const name of ['templates', 'animationFields']) collect(name, library(name));
+
+            expect(wanted.size).toBeGreaterThan(0);
+            for (const [clip, where] of wanted) expect(known.has(clip), `${where} wants "${clip}"`).toBe(true);
+        });
+
+        it('points the blend space at a rig, and at nothing else', () => {
+            for (const field of library('animationFields')) {
+                expect(field.rigId, `${field.name}`).toBeTruthy();
+                expect(rigs().some((r: any) => r.id === field.rigId), field.name).toBe(true);
+                // Both keys would leave two answers to "what does this field blend"; the v4 migration
+                // drops `modelId` for the same reason.
+                expect(field.modelId, `${field.name} still names a model`).toBeUndefined();
+            }
+        });
+
+        it('keeps every sample of the blend space in agreement across all three copies', () => {
+            // The ten samples exist standalone, inline on the scene's state, and inline on the
+            // template's — and a state machine reads the INLINE one. A fix applied to the library alone
+            // changes nothing at play time.
+            const byId = new Map(library('animationFields').map((f: any) => [f.id, f]));
+            const key = (f: any) => f.samples
+                .map((s: any) => `${s.clipName}@${s.x},${s.y}`).sort().join('|');
+
+            // Paired by `fieldId`: the project ships more than one blend space now, so an embedded copy
+            // has to be checked against the library asset it actually names.
+            const inline: { id: string; field: any }[] = [];
+            const collect = (value: any) => {
+                if (!value || typeof value !== 'object') return;
+                if (Array.isArray(value)) { for (const v of value) collect(v); return; }
+                if (value.fieldId && value.field?.samples) inline.push({ id: value.fieldId, field: value.field });
+                for (const v of Object.values(value)) collect(v);
+            };
+            for (const meta of manifest().sceneMetas) collect(read('scenes', `${meta.id}.json`));
+            collect(library('templates'));
+
+            expect(inline.length).toBeGreaterThan(0);
+            for (const { id, field } of inline) {
+                const asset = byId.get(id);
+                expect(asset, `embedded field names no asset: ${id}`).toBeTruthy();
+                expect(key(field), (asset as any).name).toBe(key(asset));
+            }
         });
     });
 

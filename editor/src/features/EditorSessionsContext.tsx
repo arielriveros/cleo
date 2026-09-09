@@ -23,7 +23,7 @@ export type EditorSessionsContextValue = Pick<EngineValue,
   | 'importAnimationFiles' | 'importSkeletonNames' | 'renameAnimationClip' | 'removeAnimationClip'
   | 'pendingAnimationImport' | 'resolveAnimationImport'
   | 'pendingRigPick' | 'resolveRigPick'
-  | 'linkAnimationToRig' | 'unlinkAnimationFromRig' | 'ensureRigForModel' | 'editSharedClip'
+  | 'linkAnimationToRig' | 'unlinkAnimationFromRig' | 'ensureRigForModel' | 'editSharedClip' | 'setModelRig'
   // Model
   | 'enterModelEditor' | 'adoptModelAsset' | 'resolveModelAssetId' | 'modelSession' | 'modelEditTargetId' | 'setActiveModelName'
   | 'addModelLodFromAsset' | 'generateModelLods' | 'removeModelLod' | 'setModelLodDistance' | 'setModelCullDistance'

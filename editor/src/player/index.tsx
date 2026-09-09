@@ -4,7 +4,7 @@ import { CleoEngine, Scene, TextureManager, AudioManager, parseSoundSettings, se
 import UILayer from '../features/gameUi/UILayer';
 import VirtualControlsLayer from '../features/gameUi/VirtualControlsLayer';
 import { unpackGameBin, inflateSceneGeometry, inflateTerrainData, inflateTilemapData } from './unpack';
-import { attachSharedAnimations } from './animations';
+import { attachSharedAnimations, attachTemplateAnimations } from './animations';
 import { PLAYER_CONTRACT } from '../features/publish/pack';
 
 // Standalone, data-driven runtime for a published Cleo game: loads game.bin (every scene, mesh and
@@ -118,6 +118,9 @@ async function boot(): Promise<void> {
   // Templates once, globally: the registry backs scene.instantiate and must survive a Game.loadScene
   // switch. Geometry is inflated eagerly — a script may instantiate one at any moment.
   for (const t of (data.templates ?? [])) inflateSceneGeometry(t.node, pack);
+  // Shared clips are baked into the template subtrees BEFORE they are registered: the registry entry is
+  // the master `Scene.instantiate` deep-copies, and nothing revisits it after a spawn.
+  attachTemplateAnimations(data.templates, data);
   registerTemplates(data.templates);
 
   // How the engine finds a node's precompiled script: consulted whenever a node has no `script`

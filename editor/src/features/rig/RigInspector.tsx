@@ -26,8 +26,8 @@ const toMat4 = (a: number[]) => {
 export default function RigInspector() {
   // Every hook above any early return — a rig tab can be active before its working copy has been adopted.
   const { editorScene, skeletonTargetId, activeTab, setRigPreviewModel, modelsOnRig } = useCleoEngine()
-  const { rigs, animations } = useAssetLibrary()
-  const { enterModelEditor } = useEditorSessions()
+  const { rigs, animations, animationFields } = useAssetLibrary()
+  const { enterModelEditor, enterAnimationFieldEditor, createAnimationFieldForModel } = useEditorSessions()
   const { asset, setOverride, clearOverrides } = useRig()
   const [sourceRigId, setSourceRigId] = useState<string>('')
 
@@ -77,6 +77,9 @@ export default function RigInspector() {
   }, [asset, sourceRigId, target, rigs, animations])
 
   if (!asset) return <div className={cn(hintClass, 'p-3')}>No rig open.</div>
+
+  /** The blend spaces authored on this skeleton. Keyed by rig, so every character on it shares them. */
+  const fields = animationFields.filter(f => f.rigId === asset.id)
 
   /** Other rigs whose clips could be retargeted onto this one. */
   const sourceRigs = rigs.filter(r => r.id !== asset.id && animations.some(a => a.rigId === r.id))
@@ -139,6 +142,36 @@ export default function RigInspector() {
         <Hint className='mb-1'>Linked here, so every character on this rig plays them.</Hint>
         <AnimationAssetPicker rigId={asset.id} />
         {linked.length === 0 && <Hint className='mt-1'>No clips yet — link or drag one in.</Hint>}
+      </div>
+
+      {/* ---- Blend spaces ----------------------------------------------------------------------- */}
+      {/* Moved here from the model node's inspector. A field is keyed by `rigId`, blends clips the RIG
+          owns by name, and is shared by every character on the armature — so the model was only ever a
+          way of reaching it. Creating one still goes through a model (`createAnimationFieldForModel`
+          mints the rig if there is none), which is why this needs a preview character. */}
+      <div>
+        <div className={cn(sectionTitleClass, 'mb-1')}>Blend Spaces</div>
+        {fields.length === 0 && (
+          <Hint className='mb-1'>None yet — a field mixes this rig’s clips by speed, direction or any parameter.</Hint>
+        )}
+        <div className='flex flex-col gap-1'>
+          {fields.map(f => (
+            <Button
+              key={f.id} variant='subtle' className='w-full py-1.5'
+              onClick={() => enterAnimationFieldEditor(f.id)}
+              title={`Open the “${f.name}” blend space`}
+            >⊞ {f.name}</Button>
+          ))}
+          {runtimeModelId ? (
+            <Button
+              variant='subtle' className='w-full py-1.5'
+              onClick={() => createAnimationFieldForModel(runtimeModelId)}
+              title='Create a blend space that mixes this rig’s clips by 1D or 2D parameters'
+            >+ New Blend Space</Button>
+          ) : (
+            <Hint>A character on this rig is needed to author one against.</Hint>
+          )}
+        </div>
       </div>
 
       {/* ---- Retargeting ------------------------------------------------------------------------ */}

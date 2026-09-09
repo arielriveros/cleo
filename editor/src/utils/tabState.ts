@@ -28,7 +28,7 @@ export type TabState = {
  * Which field on `EditorTab` names the asset each restorable kind edits.
  * `animation` must stay absent: its builder is asynchronous and captures the source scene and source TAB
  * from whatever is active when called, so restoring it at boot records the wrong write-back target for
- * "Apply to Model".
+ * "Apply State Machine".
  */
 const ID_FIELD: Partial<Record<TabKind, keyof EditorTab>> = {
   template: 'templateId',

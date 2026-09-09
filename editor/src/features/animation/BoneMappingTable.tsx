@@ -1,12 +1,16 @@
 import type { BoneMapping, BoneMatchKind } from 'cleo'
 import type { RetargetBoneOption } from '../engineContextTypes'
 
-// The source-bone → target-joint table, shared by the animation IMPORT modal and the RIG editor.
+// The source-bone → target-joint table, used by the RIG editor.
 //
-// One component rather than two, because the two are the same question asked at different moments: "which
-// bone drives which" for a file being imported, and "which bone drives which" for every clip that will
-// ever come from that source rig. Forking it would let the vocabulary — the kind chips, the unmapped-first
-// ordering, the "— none —" sentinel — drift between the place a fix is made and the place it is kept.
+// It was written to be shared with the animation IMPORT modal, because the two are the same question
+// asked at different moments: "which bone drives which" for a file being imported, and "which bone drives
+// which" for every clip that will ever come from that source rig. Forking it lets the vocabulary — the
+// kind chips, the unmapped-first ordering, the "— none —" sentinel — drift between the place a fix is
+// made and the place it is kept.
+//
+// TODO: that fork already exists. `AnimationImportModal` still renders its own inlined copy of this
+// table; point it here instead. The comment claimed the sharing before the second caller arrived.
 
 const KIND_LABEL: Record<BoneMatchKind, string> = {
   exact: 'exact', normalized: 'name', humanoid: 'auto', spine: 'spine', index: 'index', manual: 'manual', none: '—',

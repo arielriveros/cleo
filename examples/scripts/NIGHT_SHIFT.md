@@ -200,18 +200,26 @@ seconds" timer scheduled on the pickup that just removed itself never runs, and 
 for the rest of the level. Powerup countdowns therefore live on the **player**, ticked in its `onUpdate` —
 which also gives the HUD pips something to draw.
 
-## Built differently from the design, and why
+## The three compromises that are no longer compromises
 
-There is exactly one skinned humanoid in the repo and **no attack or death clip anywhere**. Three
-consequences:
+This section used to record what the level could not have, because there was one skinned humanoid in the
+repo and no attack or death clip anywhere. All three have since been built:
 
-| designed | built |
+| once | now |
 |---|---|
-| A distinct zombie model | The player mannequin, tinted and emissive, shambling at `speedScale 0.3` |
-| An attack clip with a `hit` event marker | Damage on a cooldown while the brain holds `Attack`; the pose stays Idle |
-| `playAnimationByName('Death')` | `physics.startRagdoll(model)` — the mannequin's ragdoll is already configured |
+| The player mannequin, tinted and emissive, shambling at `speedScale 0.3` | Its own 49,593-triangle Mixamo character in two material tiles, a `Zombie` model asset on its own rig |
+| Damage on a cooldown while the brain holds `Attack`; the pose stayed Idle | `Zombie Attack` plays on an `Attacked` trigger, and a `hit` event marker ON THE CLIP lands the damage at the contact frame — so it follows the animation instead of a constant |
+| `physics.startRagdoll(model)` alone | `Zombie Dying` plays from the moment the zombie catches fire — the one clip that keeps its root motion — and the ragdoll takes the skeleton over when it finishes |
 
-Burning is unchanged, because all three layers already existed: an emissive ramp on the per-instance
+The gait is a 1D blend space (`Zombie Gait`) sampling `Zombie Idle`, `Zombie Walk` and `Zombie Running` at
+the character's own `walkSpeed`/`runSpeed`, so it blends rather than switching at a threshold. The clips
+are prefixed because both characters share a rig and both were authored with an `Idle` and a `Walk`.
+
+Burning is now the death rather than a countdown to one: `ignite()` fires the `Died` trigger straight
+away, so the body collapses while it burns instead of shambling around alight and only then falling over.
+`burnSeconds` is how long the fire lasts; the ragdoll waits for the collapse clip.
+
+The fire itself is unchanged, because all three layers already existed: an emissive ramp on the per-instance
 material, the `fire.png` billboard reused from the Torch, and a flickering point light with shadows off.
 
 The zombie's copy of the mannequin **drops 15 of its 17 clips**. A shambler plays Idle and Walk; the

@@ -15,15 +15,27 @@
 // ## What it does NOT do
 //
 // It imports nothing. The deleted `tools/harness` existed to pull models through a real GPU process;
-// none of that is needed, because every mesh, skeleton and texture here is copied from a project that
-// already imported them. The only new art is three tiny sprite atlases, packed offline by
-// `packSprites.py` and committed under `sprites/`.
+// none of that is needed, because every mesh, skeleton and texture here is either copied from a project
+// that already imported them or read out of a committed intermediate. The .fbx conversions live in
+// `importZombie.mjs` (the character) and `importClips.mjs` (both characters' clips), which are run BY
+// HAND when the art changes and whose output is committed — `build/` is gitignored, so it cannot be a
+// build input. The only other new art is three sprite atlases, packed offline by `packSprites.py`.
+//
+// ## Where the shapes come from
+//
+// The editor's own modules are loaded and run rather than restated: `storeSkin` for the skeleton the
+// rigs store, and `KIND_EXT` / `ASSET_HASH_VERSION` / `SCENE_REFS_VERSION` for the three stamps a
+// generated project carries. Copying those is how this file came to write `.animationField` — an
+// extension the asset explorer cannot classify — and an `assetHashVersion` four versions stale.
 
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { TextureSet, loadScriptReflector, mb, node, readJson, stableId, uiNode, vars, writeJson }
   from './bundle.mjs'
+import { editorModules } from './fbxImport.mjs'
+import { moduleRegistry } from './tsLoader.mjs'
+import { ASSET_HASH_VERSION, KIND_EXT, SCENE_REFS_VERSION } from './editorConstants.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
@@ -39,12 +51,40 @@ const MENU_SCENE = stableId('scene:menu')
 const MANNEQUIN_MODEL = '93cbfa0b91ad0e985b9993b34e60ad7a'
 const LOCOMOTION_FIELD = 'b7a7c98632e7754373bb3b23941a15bf'
 
-// The zombie's own model and clips, converted offline from `build/zombie/*.fbx` by
-// `importZombie.mjs` and committed. `build/` is gitignored, so the .fbx files cannot be a build input:
-// the example has to regenerate byte-identically on a clean checkout.
+// The zombie's own model, converted offline from `build/Zombie/Zombie.fbx` by `importZombie.mjs`, and
+// its clips by `importClips.mjs`. Both are committed: `build/` is gitignored, so the .fbx files cannot be
+// a build input — the example has to regenerate byte-identically on a clean checkout.
+//
+// The PLAYER imports nothing. Its 17 clips are the ones already baked into the 3d-example mannequin,
+// read straight off that model asset — see `buildRigsAndAnimations`.
 const ZOMBIE_MODEL = path.join(HERE, 'zombieModel.json')
 const ZOMBIE_CLIPS = path.join(HERE, 'zombieClips.json')
 const ZOMBIE_TEXTURES = path.join(HERE, 'zombie')
+
+// `storeSkin` out of the editor's own sources — see fbxImport.mjs for why this is loaded rather than
+// restated. It is also what strips `ikRig` from the copy a rig keeps; see `buildRigsAndAnimations`.
+const { storeSkin } = editorModules(ROOT)
+
+// The blend-space helpers, likewise run rather than restated — `toRuntimeField` decides what an
+// AnimationState embeds, and its one subtlety (drop `yAxis` in 1D mode, or an untouched hidden axis makes
+// every embedded copy look changed) is exactly the kind of rule a second implementation loses.
+// animationFields.ts names three engine classes, but only as `instanceof` targets inside a helper this
+// never calls, so stubs satisfy the module graph without dragging a renderer into Node.
+const { buildAnimationFieldAsset, toRuntimeField } = moduleRegistry({
+  cleo: { Node: class {}, ModelNode: class {}, AnimatedModel: class {} },
+  './ids': { cryptoRandomId: () => { throw new Error('ids must be stable in a generator') } },
+})(path.join(ROOT, 'editor', 'src', 'utils', 'animationFields.ts'))
+
+/**
+ * The zombie's two gaits, in metres per second.
+ *
+ * Named once because THREE things have to agree on them: the character node's `walkSpeed`/`runSpeed`, the
+ * blend space's sample coordinates, and its axis maximum. That agreement is the whole idiom — the player's
+ * field does the same, placing `Walk` at 1.5 and `Run` at 4 to match its character. Let them drift and the
+ * character reaches a speed the field has no sample for, which reads as a gait that never fully arrives.
+ */
+const ZOMBIE_WALK_SPEED = 1.1
+const ZOMBIE_RUN_SPEED = 2.4
 
 /** Texture id -> the committed file and how it is encoded. Diffuse is JPEG, normals stay PNG. */
 const ZOMBIE_MAPS = [
@@ -116,6 +156,48 @@ const sourceFields = readJson(path.join(SRC, 'libraries', 'animationFields.json'
 const sourceTemplates = readJson(path.join(SRC, 'libraries', 'templates.json'))
 
 const textures = new TextureSet(SRC)
+
+/** The player's character, and the only model this project copies out of 3d-example. */
+const mannequin = sourceModels.find(m => m.id === MANNEQUIN_MODEL)
+if (!mannequin) throw new Error('the mannequin model is not in the 3d-example library')
+
+/**
+ * Every sub-mesh in a serialized subtree that carries a skeleton — `skinnedModelJsonsOf` in
+ * editor/src/utils/modelClips.ts, which is what the editor's own migrations walk with.
+ */
+function skinnedModelJsons(nodeJson) {
+  const out = []
+  const walk = (n) => {
+    if (!n || typeof n !== 'object') return
+    if (n.model?.skin) out.push(n.model)
+    for (const child of n.children ?? []) walk(child)
+  }
+  walk(nodeJson)
+  return out
+}
+
+/**
+ * Remove every clip embedded in a subtree, in place, and report how many went.
+ *
+ * `null` rather than `[]`, because that is what `AnimatedModel.serialize` writes for a model with no
+ * clips and `assetWithClipRemoved` already normalises to.
+ *
+ * This is what makes rig-owned clips work at all. `refreshModelClips` re-pushes whatever is in
+ * `nodeJson.animations` and THEN layers the rig's on top, so a clip left in both places comes back from
+ * `addAnimation`'s de-dupe as `Idle (2)` — a name no state machine and no blend-space sample says. The
+ * character silently stops animating, and the only trace is a per-frame "model does not have clip Idle".
+ *
+ * The `skin` stays: `Model.parse` needs it at parse time, and the mannequin's carries the hand-authored
+ * foot-IK rig.
+ */
+function stripEmbeddedClips(nodeJson) {
+  let removed = 0
+  for (const model of skinnedModelJsons(nodeJson)) {
+    removed += model.animations?.length ?? 0
+    model.animations = null
+  }
+  return removed
+}
 
 function sourceNode(name) {
   const walk = (n) => n.name === name ? n : (n.children ?? []).reduce((a, c) => a ?? walk(c), null)
@@ -228,11 +310,325 @@ function spritePayload(textureId, constraints, tint) {
 }
 
 // ---------------------------------------------------------------------------------------------------
+// Rigs, clips and models
+// ---------------------------------------------------------------------------------------------------
+
+/** The zombie's mesh, skeleton and materials as `importZombie.mjs` baked them. Clips are NOT included. */
+function zombieModelPayload() {
+  if (!fs.existsSync(ZOMBIE_MODEL)) {
+    throw new Error(`missing ${path.relative(ROOT, ZOMBIE_MODEL)} — run: `
+      + 'node --max-old-space-size=8192 tools/nightShift/importZombie.mjs')
+  }
+  const payload = readJson(ZOMBIE_MODEL)
+  // Explicitly EMPTY, not absent. `AnimatedModel.serialize` writes `null` for a model with no clips, and
+  // the importer simply omits the key — so without this one character in the project answers "does this
+  // model embed clips?" with `undefined` while every other answers `null`. Both parse the same; only one
+  // of them is what a reader checking the invariant sees.
+  payload.animations = null
+  return payload
+}
+
+/** A committed clip set, with the tool that produces it named in the failure. */
+function clipSet(file) {
+  if (!fs.existsSync(file)) {
+    throw new Error(`missing ${path.relative(ROOT, file)} — run: `
+      + 'node tools/nightShift/importClips.mjs')
+  }
+  return readJson(file)
+}
+
+/**
+ * The two skeletons, and the clip library they own between them.
+ *
+ * ## Why there are two rigs and not one
+ *
+ * Both characters are standard 66-bone Mixamo humanoids, but they are different exports of different
+ * bodies: the mannequin's bones are namespaced `mixamorig1:` and the zombie's `mixamorig5:`, and the two
+ * bind poses genuinely differ — the zombie is the shorter of the two. `skeletonFingerprint` is a
+ * function of the bind matrices, so it separates them, and it is right to: collapsing them onto one rig
+ * would make every clip play at one character's proportions.
+ *
+ * ## Why both rigs then own EVERY clip
+ *
+ * Because a rig's clip list is what `normalizeBoneName` makes portable. It strips the `mixamorigN:`
+ * namespace, so a curve authored on either skeleton matches the other by bone name, and the retarget
+ * between them is a proportion rebase rather than a translation. Linking both lists to every clip is
+ * therefore the whole point of the rig work: the zombie can play the player's locomotion and the player
+ * can play the zombie's, without either file being duplicated or re-imported.
+ *
+ * ## Why the zombie's five clips are PREFIXED
+ *
+ * `AnimationState.clipName` is a string resolved against the live model, and both characters were
+ * authored with an `Idle` and a `Walk`. Sharing one clip set makes those collide, and the collision does
+ * not raise: `AnimatedModel.addAnimation` de-dupes the loser to `Idle (2)`, which no state machine names.
+ * So the zombie's are `Zombie Idle`, `Zombie Walk`, `Zombie Running`, `Zombie Attack` and
+ * `Zombie Dying` — the names of the .fbx files they came from — and its state machine says those. The
+ * mannequin's 17 keep the names the Playable machine and the `Playable Field` blend space already use.
+ */
+function buildRigsAndAnimations() {
+  const mannequinSkin = skinnedModelJsons(mannequin.nodeJson)[0]?.skin
+  if (!mannequinSkin) throw new Error('the mannequin model asset carries no skeleton')
+
+  /**
+   * The player's clips, exactly as 3d-example baked them: 17, covering every `Playable Field` sample plus
+   * `Idle`, `Jump`, `T-Pose` and the four root-motion turns.
+   *
+   * They were briefly re-imported from `build/Locomotion Pack/` instead. That import was more faithful —
+   * it kept the authored travel a Mixamo download carries, where these had theirs destroyed by an old
+   * retarget bug — but faithful is the wrong thing here: the player's gait plays through a blend FIELD,
+   * and a field never reaches the root-motion path, so authored travel goes straight into the pose and
+   * drags the mesh off its own capsule. These are in-place already, which is what the field wants.
+   */
+  const baked = skinnedModelJsons(mannequin.nodeJson)[0].animations ?? []
+  if (!baked.length) throw new Error('the mannequin model asset carries no clips')
+
+  // `storeSkin` normalises and, in doing so, drops `ikRig`. That is deliberate: the foot-IK setup stays
+  // on the model's own embedded skin, which is where `commitIkRig` reads and writes it. A second copy on
+  // the rig would be written by nothing and read by nothing, and would go stale the first time anyone
+  // moved a bone.
+  const rigs = [
+    { id: stableId('rig:mannequin'), name: 'Mannequin', skin: storeSkin(mannequinSkin) },
+    { id: stableId('rig:zombie'), name: 'Zombie', skin: storeSkin(zombieModelPayload().skin) },
+  ]
+  const [mannequinRig, zombieRig] = rigs
+
+  const animations = []
+  const addClips = (clips, rig) => clips.map(clip => {
+    const asset = {
+      id: stableId(`anim:${clip.name}`),
+      name: clip.name,
+      clips: [clip],
+      rigId: rig.id,
+      // Kept alongside `rigId`, never instead of it. `sourceSkinFor` prefers the rig, but this is the
+      // fallback if the rig is ever deleted, and `player/animations.ts` reads it directly — an asset
+      // with neither plays UNRETARGETED, which looks like a broken character rather than a missing one.
+      sourceSkin: rig.skin,
+    }
+    animations.push(asset)
+    return asset.id
+  })
+
+  const mannequinIds = addClips(baked, mannequinRig)
+  const zombieIds = addClips(clipSet(ZOMBIE_CLIPS), zombieRig)
+
+  const names = animations.map(a => a.name)
+  const clash = names.find((n, i) => names.indexOf(n) !== i)
+  if (clash) throw new Error(`two animation assets are both called "${clash}" — see addAnimation's de-dupe`)
+
+  const everyClip = [...mannequinIds, ...zombieIds]
+  for (const rig of rigs) rig.animationIds = everyClip
+
+  return { rigs, animations, mannequinRig, zombieRig }
+}
+
+const { rigs, animations, mannequinRig, zombieRig } = buildRigsAndAnimations()
+
+/**
+ * The zombie's gait as a 1D blend space, replacing the Idle/Walk state ladder it used to have.
+ *
+ * ## Why a field rather than more states
+ *
+ * A ladder switches; a field BLENDS. With discrete states the zombie snapped between a 4-second shamble
+ * and a 0.8-second run at whatever threshold was authored, and every speed in between looked like one or
+ * the other. Sampling by measured speed instead means the gait is continuous, and the thresholds — the
+ * part that was actually wrong, see the `Idle` behaviour state — stop existing at all.
+ *
+ * ## Why the samples sit on the character's own speeds
+ *
+ * This is the player's idiom: its `Playable Field` places `Walk` at 1.5 and `Run` at 4, which are exactly
+ * its `walkSpeed` and `runSpeed`. A sample coordinate is the speed at which that clip is the whole answer,
+ * so it has to be a speed the character can actually reach — hence the shared constants.
+ *
+ * Owned by the RIG, like every field now, so any character on this skeleton can play it.
+ */
+const zombieGait = (() => {
+  const asset = buildAnimationFieldAsset('Zombie Gait', zombieRig.id, stableId('afield:zombie-gait'))
+  asset.xAxis = { name: 'Speed', min: 0, max: ZOMBIE_RUN_SPEED, smoothing: 0.04 }
+  asset.samples = [
+    // Idle is IN the field at zero rather than a separate state, so standing still is the same blend as
+    // everything else and there is no entry threshold to cross.
+    { clipName: 'Zombie Idle', x: 0 },
+    { clipName: 'Zombie Walk', x: ZOMBIE_WALK_SPEED },
+    { clipName: 'Zombie Running', x: ZOMBIE_RUN_SPEED },
+  ]
+  asset.weightSmoothing = 0.06
+  return asset
+})()
+
+/**
+ * The player's blend space, carried over from 3d-example and re-pointed at the mannequin's rig.
+ *
+ * Hoisted to module scope because it is needed TWICE and the two copies must agree: the library ships the
+ * asset, and `playableStateMachine` embeds a runtime copy of it inside the state that plays it. A state
+ * resolves `fieldId` against nothing at runtime — the embedded `field` is what actually plays — so an
+ * asset edit that did not reach the embedded copy would change the editor's view and nothing else.
+ */
+const playableField = (() => {
+  const source = sourceFields.find(f => f.id === LOCOMOTION_FIELD)
+  if (!source) throw new Error('the Playable Field is not in the 3d-example library')
+  // `modelId` is dropped rather than kept alongside `rigId`: two keys would leave two answers to "what
+  // does this field blend", and the v4 migration drops it for the same reason.
+  const { modelId, ...field } = source
+  return { ...field, rigId: mannequinRig.id }
+})()
+
+/**
+ * The two model assets.
+ *
+ * Both come back with their embedded clips stripped and a `rigId` in their place. The zombie is a model
+ * asset here for the first time — it used to exist only as a subtree inside its own template, with
+ * `__modelId: null` — which is what lets the enemies appear in the asset explorer, pick up a material or
+ * mesh edit, and reach a rig at all.
+ */
+function buildModels() {
+  const player = JSON.parse(JSON.stringify(mannequin))
+  stripEmbeddedClips(player.nodeJson)
+  player.rigId = mannequinRig.id
+
+  const payload = zombieModelPayload()
+  const zombie = {
+    id: stableId('model:zombie'),
+    name: 'Zombie',
+    // The holder-plus-sub-mesh shape every model asset has: a plain `node` carrying one `model` child.
+    // One child, not two, even though the character is two material tiles — they are two SUBMESH ranges
+    // over one buffer, which is what `model.materials` and `model.submeshes` describe.
+    nodeJson: node('Zombie', 'node', {
+      id: stableId('model:zombie:root'),
+      children: [node('Ch10', 'model', { id: stableId('model:zombie:mesh'), model: payload })],
+    }),
+    // The two UDIM tiles' maps. Its materials are INLINE — they are not library assets, so there is no
+    // `materialIds` to list and no `__materialId` on the node.
+    materialIds: [],
+    textureIds: ZOMBIE_MAPS.map(([id]) => id),
+    // No thumbnail: the generator has no GL context to render one, and the explorer falls back to the
+    // kind's icon. Minting a placeholder would only look like a broken render.
+    thumbnail: '',
+    rigId: zombieRig.id,
+  }
+
+  return [player, zombie]
+}
+
+const models = buildModels()
+const zombieModelAsset = models[1]
+
+// ---------------------------------------------------------------------------------------------------
 // Templates
 // ---------------------------------------------------------------------------------------------------
 
 const playableTemplate = JSON.parse(JSON.stringify(
   sourceTemplates.find(t => t.name === 'Playable')))
+// The template embeds its own copy of the subtree, so its clips have to go too — see stripEmbeddedClips.
+// It keeps its `__modelId`, which is how the character finds the model asset that names the rig.
+stripEmbeddedClips(playableTemplate.nodeJson)
+
+/**
+ * The player's animation machine, authored here rather than inherited from 3d-example.
+ *
+ * What it replaces was two states — an idle and the blend space — on one speed threshold, which is why
+ * the mannequin owned four turn clips that nothing ever played.
+ *
+ * ## Everything below is already computed every frame; none of it needed a script
+ *
+ * `CharacterNode` publishes `turnRequest` as a plain field, and `_refreshVariableParams`
+ * reads the `variables` map first and then a native own property — so a `variable` parameter binds
+ * straight to them. `ThirdPersonPlayable`'s header has documented this exact wiring all along.
+ *
+ * ## The turn contract, which is easy to get backwards
+ *
+ * While the character is idle and facing its AIM, `stepLocomotion` latches a turn once the camera swings
+ * `turnThreshold` (90 deg) off the body, and releases it under `turnReleaseAngle` (10 deg). It publishes
+ * a CLIP SELECTOR, not an angle: +1/+2 right, -1/-2 left, 2 past 135 deg. The body does not rotate on its
+ * own here at all — the turn clip's ROOT MOTION rotates it, which is why those four are the only clips
+ * that keep their travel. Wire the sign backwards and the root motion drives the body AWAY from the aim,
+ * the release angle is never reached, and the machine ping-pongs on one side of centre forever.
+ */
+function playableStateMachine() {
+  const speed = (op, value) => ({ op: 'and', children: [{ param: 'Speed', op, value, hysteresis: 0.1 }] })
+  /** A one-shot: plays once, then hands back on exit time alone. */
+  const oneShot = (name, clipName, x, y) =>
+    ({ name, clipName, loop: false, speed: 1, isEntry: false, x, y })
+  /** The return edge. No condition at all — an empty flat list is vacuously true, so exit time is the rule. */
+  const whenFinished = (from, to) =>
+    ({ from, to, conditions: [], minDwell: 0, hasExitTime: true, exitTime: 1 })
+
+  return {
+    parameters: [
+      // planarSpeed, NOT currentSpeed. `currentSpeed` is the full 3D magnitude and a jump inflates it, so
+      // the copied machine read a fall as a sprint and flipped its own locomotion gate in mid-air.
+      {
+        name: 'Speed', type: 'variable', default: 0,
+        variable: { nodeRef: 'parent', varName: 'planarSpeed', varType: 'number', source: 'builtin' },
+      },
+      {
+        name: 'Direction', type: 'variable', default: 0,
+        variable: { nodeRef: 'parent', varName: 'planarAngle', varType: 'number', source: 'builtin' },
+      },
+      // A native CharacterNode field rather than a builtin — see the header. `source: 'variable'` is what
+      // takes the own-property path.
+      {
+        name: 'Turn', type: 'variable', default: 0,
+        variable: { nodeRef: 'parent', varName: 'turnRequest', varType: 'number', source: 'variable' },
+      },
+    ],
+    states: [
+      { name: 'Idle', clipName: 'Idle', loop: true, speed: 1, isEntry: true, x: 40, y: 40 },
+      {
+        name: 'Locomotion', clipName: '', fieldId: LOCOMOTION_FIELD,
+        field: toRuntimeField(playableField), fieldInputs: { x: 'Direction', y: 'Speed' },
+        loop: true, speed: 1, isEntry: false, x: 300, y: 40,
+      },
+      oneShot('Turn90Right', 'Turn90Right', -190, -60),
+      oneShot('Turn90Left', 'Turn90Left', -190, 20),
+      oneShot('Turn180Right', 'Turn180Right', -190, 100),
+      oneShot('Turn180Left', 'Turn180Left', -190, 180),
+    ],
+    // ORDER MATTERS: the scan takes the first satisfied edge and stops.
+    transitions: [
+      {
+        from: 'Idle', to: 'Locomotion', conditions: [], minDwell: 0.1, hasExitTime: false, exitTime: 1,
+        condition: speed('gt', 1.2),
+      },
+      {
+        from: 'Locomotion', to: 'Idle', conditions: [], minDwell: 0.1, hasExitTime: false, exitTime: 1,
+        condition: speed('lt', 1.2),
+      },
+
+      // The four turns. `eq` is exact equality and takes no hysteresis, which is right — locomotion has
+      // already latched the code and holds it for the whole turn.
+      ...[['Turn90Right', 1], ['Turn90Left', -1], ['Turn180Right', 2], ['Turn180Left', -2]].flatMap(
+        ([state, code]) => [
+          {
+            from: 'Idle', to: state, conditions: [], minDwell: 0, hasExitTime: false, exitTime: 1,
+            condition: { op: 'and', children: [{ param: 'Turn', op: 'eq', value: code }] },
+          },
+          whenFinished(state, 'Idle'),
+        ]),
+    ],
+    events: [],
+  }
+}
+
+/**
+ * Put the authored machine on a Playable subtree, and give the character the deceleration it needs.
+ *
+ * Applied to the template AND to the placed scene instance, which carry independent inline copies — a
+ * machine written to only one of them leaves the other on whatever 3d-example shipped.
+ *
+ * `acceleration` defaults to 0, meaning the commanded velocity SNAPS to zero the moment a key is
+ * released — the character reaches full sprint and full stop within one frame, so the blend space jumps
+ * between its samples instead of travelling through them. A real ramp is what makes the gait read as
+ * acceleration rather than as a switch.
+ */
+function withPlayerAnimation(playableNode) {
+  playableNode.acceleration = 10
+  const model = playableNode.children.find(c => c.name === 'Ch36')
+  if (!model) throw new Error('the Playable subtree has no Ch36 model node to animate')
+  model.stateMachine = playableStateMachine()
+  return playableNode
+}
+
+withPlayerAnimation(playableTemplate.nodeJson)
 
 /**
  * The player's driver, as a CHILD of the character it possesses — the same shape the Zombie's `Brain`
@@ -283,19 +679,14 @@ playableTemplate.nodeJson.children.push(
  *
  * The model used to be a copy of the player's mannequin with its clip list trimmed, which is why the
  * enemies were grey debug people walking normally. It is now the real thing: a 49,593-triangle
- * character in two material tiles, with Idle, Walk and Dying authored for it. The mannequin stays
- * where it belongs, on the player.
+ * character in two material tiles, with five clips authored for it. The mannequin stays where it
+ * belongs, on the player.
+ *
+ * The subtree here is INLINE, as every template's is — a placed instance does not read the library at
+ * load. What is new is that it also names a model asset, so the two stay linked; see `buildModels`.
  */
 function zombieTemplate() {
-  for (const file of [ZOMBIE_MODEL, ZOMBIE_CLIPS]) {
-    if (!fs.existsSync(file)) {
-      throw new Error(`missing ${path.relative(ROOT, file)} — run: `
-        + 'node --max-old-space-size=8192 tools/nightShift/importZombie.mjs')
-    }
-  }
-
-  const payload = readJson(ZOMBIE_MODEL)
-  payload.animations = readJson(ZOMBIE_CLIPS)
+  const payload = zombieModelPayload()
 
   for (const [id, file, mime] of ZOMBIE_MAPS) {
     const full = path.join(ZOMBIE_TEXTURES, file)
@@ -313,6 +704,11 @@ function zombieTemplate() {
   const model = node('Ch10', 'model', {
     id: stableId('zombie:model'),
     model: payload,
+    // The link back to the `Zombie` model asset. Without it the placed character is an orphaned skinned
+    // subtree: the asset explorer shows no model behind the enemies, nothing propagates a mesh or
+    // material edit to them, and — since the RIG is reached through the model — the clip set they play
+    // has no owner to come from.
+    variables: vars({ __modelId: zombieModelAsset.id }),
     stateMachine: zombieStateMachine(),
     // The ragdoll block is pure scalar tuning — joint limits, masses, radii — with no per-bone list,
     // so the player's settings transfer to this skeleton unchanged.
@@ -371,8 +767,11 @@ function zombieTemplate() {
 
   const root = withScript(node('Zombie', 'character', {
     id: characterId,
-    walkSpeed: 1.1,
-    runSpeed: 2.4,
+    // Both reachable now: `NightShiftZombie` sets `sprint` while hunting, which is what selects runSpeed
+    // over walkSpeed. Before that the AI had no way to ask for it — a behaviour state's `speedScale` is
+    // clamped to 0..1 and can only throttle DOWN — so runSpeed was authored here and never used.
+    walkSpeed: ZOMBIE_WALK_SPEED,
+    runSpeed: ZOMBIE_RUN_SPEED,
     // The WANDER rate, which is the entry state. NightShiftZombie raises it the moment the brain starts
     // hunting — a shambler that turned this slowly in a chase would be trivially circle-strafed.
     turnSpeed: 30,
@@ -414,7 +813,10 @@ function zombieBehaviour() {
       { name: 'Burning', type: 'boolean', default: false, source: { kind: 'builtin', name: 'burning' } },
     ],
     states: [
-      { name: 'Idle', goal: 'wander', speedScale: 0.3, isEntry: true, x: 40, y: 40 },
+      // Full walk pace, not a drift. At the old 0.3 a wandering zombie measured 0.33 m/s while its own
+      // Idle->Walk threshold engaged at 0.45 (hysteresis is CENTRED), so it never left the idle clip and
+      // slid across the ground. Wander now moves at what used to be chase speed; chase sprints past it.
+      { name: 'Idle', goal: 'wander', speedScale: 1, isEntry: true, x: 40, y: 40 },
       { name: 'Chase', goal: 'path', speedScale: 1, x: 260, y: 40 },
       { name: 'Attack', goal: 'idle', speedScale: 0, x: 470, y: 40 },
       { name: 'Investigate', goal: 'investigate', speedScale: 0.6, x: 260, y: 180 },
@@ -451,36 +853,71 @@ function zombieStateMachine() {
       // EVENT: a bool would have to be cleared by whatever set it, and there is nothing left alive to
       // clear it.
       { name: 'Died', type: 'trigger', default: false },
+      // Likewise an event, fired by the script as it starts a swing. NOT derived from the behaviour
+      // machine's `Attack` state: that state is entered and left by distance alone, with no minDwell, so
+      // a player hovering at the 1.6-2.0 m band would re-enter it every few frames and restart the clip.
+      { name: 'Attacked', type: 'trigger', default: false },
     ],
     states: [
-      { name: 'Idle', clipName: 'Idle', loop: true, speed: 1, isEntry: true, x: 40, y: 40 },
-      { name: 'Walk', clipName: 'Walk', loop: true, speed: 1, isEntry: false, x: 260, y: 40 },
+      // ONE locomotion state, blending idle -> shamble -> run by measured speed. The clip names carry the
+      // `Zombie` prefix because the two rigs share a clip set and both characters were authored with an
+      // `Idle` and a `Walk` — see buildRigsAndAnimations for why that collision is silent rather than loud.
+      {
+        name: 'Locomotion',
+        // Empty, and required to be: `clipName` is ignored once `field` is set, but the parser reads it
+        // unguarded. The field is what plays.
+        clipName: '',
+        fieldId: zombieGait.id,
+        // BOTH the link and an embedded copy. `field` is what the runtime reads, and embedding is what
+        // carries the blend space through a save, a template instantiation and the published build —
+        // none of which can resolve `fieldId` against a library.
+        field: toRuntimeField(zombieGait),
+        fieldInputs: { x: 'Speed' },
+        loop: true, speed: 1, isEntry: true, x: 40, y: 40,
+      },
+      // One swing, then back to the gait. The clip is 4.63 s but only its first 2.7 s is animation —
+      // wind-up to 1.0 s, strike through 1.75 s, recovery to ~2.7 s, then two seconds of near-static
+      // settle. `exitTime` cuts the tail and `speed` tightens the whole thing to about 1.8 s, which has
+      // to stay under NightShiftZombie's `attackCooldown` or the next trigger is raised while the machine
+      // is still in this state — where nothing consumes it, and it fires again the instant we leave.
+      { name: 'Attack', clipName: 'Zombie Attack', loop: false, speed: 1.5, isEntry: false, x: 300, y: 130 },
       // No loop and no way out: the collapse plays once and the pose holds until the ragdoll takes the
       // skeleton over. `minDwell: 0` on the way in, because a zombie that finished burning should not
       // keep shambling for another sixth of a second.
-      { name: 'Dying', clipName: 'Dying', loop: false, speed: 1, isEntry: false, x: 150, y: 200 },
+      { name: 'Dying', clipName: 'Zombie Dying', loop: false, speed: 1, isEntry: false, x: 150, y: 200 },
     ],
     transitions: [
       {
-        from: 'Idle', to: 'Walk', conditions: [], minDwell: 0.15, hasExitTime: false, exitTime: 1,
-        condition: { op: 'and', children: [{ param: 'Speed', op: 'gt', value: 0.35, hysteresis: 0.2 }] },
+        from: 'Locomotion', to: 'Attack', conditions: [], minDwell: 0, hasExitTime: false, exitTime: 1,
+        condition: { op: 'and', children: [{ param: 'Attacked', op: 'trigger' }] },
       },
+      // Back to the gait once the swing has played. No condition at all: an empty flat list is vacuously
+      // true, so the exit-time gate is the whole rule. 0.58 of 4.63 s is the end of the recovery.
       {
-        from: 'Walk', to: 'Idle', conditions: [], minDwell: 0.15, hasExitTime: false, exitTime: 1,
-        condition: { op: 'and', children: [{ param: 'Speed', op: 'lt', value: 0.35, hysteresis: 0.2 }] },
+        from: 'Attack', to: 'Locomotion', conditions: [], minDwell: 0, hasExitTime: true, exitTime: 0.58,
       },
-      // Written out per source state rather than as one `from: '*'`: the funnel is only two states
-      // wide, and a wildcard would also fire Dying -> Dying on a machine that has no way back.
+      // Death has to reach the machine from BOTH alive states — a zombie set alight mid-swing must still
+      // collapse, and a wildcard `from` would also match Dying itself, which has no way back.
       {
-        from: 'Idle', to: 'Dying', conditions: [], minDwell: 0, hasExitTime: false, exitTime: 1,
+        from: 'Locomotion', to: 'Dying', conditions: [], minDwell: 0, hasExitTime: false, exitTime: 1,
         condition: { op: 'and', children: [{ param: 'Died', op: 'trigger' }] },
       },
       {
-        from: 'Walk', to: 'Dying', conditions: [], minDwell: 0, hasExitTime: false, exitTime: 1,
+        from: 'Attack', to: 'Dying', conditions: [], minDwell: 0, hasExitTime: false, exitTime: 1,
         condition: { op: 'and', children: [{ param: 'Died', op: 'trigger' }] },
       },
     ],
-    events: [],
+    // The swing's contact frame, as a marker ON THE CLIP rather than a delay in the script.
+    //
+    // `Zombie Attack` runs 4.63 s: wind-up to 1.0 s, strike through 1.75 s, recovery to ~2.7 s. 1.25 s is
+    // mid-strike. Two numbers constrain it and both are on the `Attack` state above — it cuts at
+    // `exitTime: 0.58` (2.68 clip-seconds), so a later marker would never be reached and the zombie would
+    // silently stop dealing damage; and it plays at `speed: 1.5`, so this lands ~0.83 s after the swing
+    // starts. Marker times are CLIP seconds, never wall-clock.
+    //
+    // The point of attaching it to the clip: re-import a longer swing and the hit moves with it. The
+    // constant it replaces could only drift.
+    events: [{ clipName: 'Zombie Attack', time: 1.25, eventName: 'hit' }],
   }
 }
 
@@ -699,6 +1136,10 @@ function nightScene() {
   sun.name = 'Sun'
 
   const playable = sourceNode('Playable')
+  // The placed instance carries its own inline copy of the subtree, so this is the THIRD place the
+  // mannequin's clips lived. All three had to go, or the ones left behind come back as `Idle (2)`.
+  stripEmbeddedClips(playable)
+  withPlayerAnimation(playable)
   playable.position = [0, 3.2, 0]
   withScript(playable, 'NightShiftPlayer')
   const pivot = playable.children.find(c => c.name === 'camera rig')
@@ -824,7 +1265,9 @@ function sceneFile(root, config) {
     ui: { version: 1, elements: [] },
     config,
     assetHashes: {},
-    assetHashVersion: 2,
+    // Empty hashes either way, so this only decides whether the editor treats them as comparable at all
+    // rather than as written by a build that hashed differently. Read from assetHash.ts, not copied.
+    assetHashVersion: ASSET_HASH_VERSION,
     savedAt: CREATED_AT,
   }
 }
@@ -842,14 +1285,16 @@ function main() {
   const night = nightScene()
   const menu = menuScene()
 
-  const models = sourceModels.filter(m => m.id === MANNEQUIN_MODEL)
-  if (models.length !== 1) throw new Error('the mannequin model is not in the 3d-example library')
-
   const libraries = {
     models,
     materials: sourceMaterials.filter(m => m.name !== 'torch blinn_phong'),
     terrainMaterials: sourceTerrainMats,
-    animationFields: sourceFields.filter(f => f.id === LOCOMOTION_FIELD),
+    // Re-pointed from the model it used to name to the RIG that owns the clips it blends. Both keys
+    // together would leave two answers to "what does this field blend", so `modelId` is dropped —
+    // `moveClipsToRigs` does exactly this to an existing project.
+    animationFields: [playableField, zombieGait],
+    animations,
+    rigs,
     tilesets,
     scripts: scripts.assets,
     templates: [playableTemplate, zombie, ...pickupTemplates()],
@@ -872,21 +1317,24 @@ function main() {
     sceneMetas: [
       {
         id: NIGHT_SCENE, name: 'Night Shift', updatedAt: CREATED_AT, dimension: '3D',
-        refs: {
+        refs: sceneRefs({
           materialIds: libraries.materials.map(m => m.id),
           modelIds: [MANNEQUIN_MODEL],
           templateIds: libraries.templates.map(t => t.id),
           terrainMaterialIds: sourceTerrainMats.map(m => m.id),
           tilesetIds: tilesets.map(t => t.id),
           textureIds: textures.included,
-        },
+          scriptIds: libraries.scripts.map(s => s.id),
+          animationFieldIds: libraries.animationFields.map(f => f.id),
+          // Two hops, which is why `buildSceneRefs` collects them at all: the scene places a MODEL, the
+          // model names a RIG, and the rig owns the clips. Only the mannequin is placed directly — the
+          // zombie arrives through its template, which the graph reaches via `templateIds`.
+          animationIds: mannequinRig.animationIds,
+        }),
       },
       {
         id: MENU_SCENE, name: 'Main Menu', updatedAt: CREATED_AT, dimension: '3D',
-        refs: {
-          materialIds: [], modelIds: [], templateIds: [], terrainMaterialIds: [],
-          tilesetIds: [], textureIds: [],
-        },
+        refs: sceneRefs({}),
       },
     ],
   })
@@ -901,22 +1349,53 @@ function main() {
   report({ zombie, libraries, textureCount })
 }
 
-function vfs(libraries) {
-  const entries = [
-    { path: '/Night Shift.scene', kind: 'scene', assetId: NIGHT_SCENE, created: CREATED_AT },
-    { path: '/Main Menu.scene', kind: 'scene', assetId: MENU_SCENE, created: CREATED_AT },
-  ]
-  const add = (folder, kind, items) => {
-    for (const item of items)
-      entries.push({ path: `${folder}/${item.name}.${kind}`, kind, assetId: item.id, created: CREATED_AT })
+/**
+ * A scene's own reference list, in the shape `buildSceneRefs` writes.
+ *
+ * Every key is spelled out and defaulted to empty, and `version` is stamped from the editor's own
+ * constant. Both matter: `hasFullRefs` compares that version, and a scene whose stored refs predate it
+ * is marked PARTIAL in the reference viewer — which is what the shipped example did, because it wrote
+ * six of the fourteen keys and no version at all.
+ */
+function sceneRefs(refs) {
+  return {
+    version: SCENE_REFS_VERSION,
+    materialIds: [], modelIds: [], templateIds: [], terrainMaterialIds: [], tilesetIds: [],
+    aiBrainIds: [], textureIds: [], scriptIds: [], animationFieldIds: [], foliageModelIds: [],
+    soundSampleIds: [], audioSourceIds: [], animationIds: [],
+    ...refs,
   }
-  add('/Scripts', 'script', libraries.scripts)
-  add('/Templates', 'template', libraries.templates)
-  add('/Models', 'model', libraries.models)
-  add('/Materials', 'material', libraries.materials)
-  add('/Materials', 'terrainMaterial', libraries.terrainMaterials)
-  add('/Sprites', 'tileset', libraries.tilesets)
-  add('/Animation', 'animationField', libraries.animationFields)
+}
+
+function vfs(libraries) {
+  const entries = []
+  // Virtual extensions come from the editor's own `KIND_EXT`, never from the kind name. They are what
+  // `kindOfExt` classifies an entry by, so the `.material`/`.template`/`.animationField` this used to
+  // write were unreadable to the asset explorer — a mistake nothing reported.
+  const add = (folder, kind, items) => {
+    const ext = KIND_EXT[kind]
+    if (!ext) throw new Error(`no virtual extension for kind "${kind}"`)
+    for (const item of items)
+      entries.push({ path: `${folder}${item.name}${ext}`, kind, assetId: item.id, created: CREATED_AT })
+  }
+  add('/', 'scene', [{ name: 'Night Shift', id: NIGHT_SCENE }, { name: 'Main Menu', id: MENU_SCENE }])
+  add('/Scripts/', 'script', libraries.scripts)
+  add('/Templates/', 'template', libraries.templates)
+  add('/Models/', 'model', libraries.models)
+  add('/Materials/', 'material', libraries.materials)
+  add('/Materials/', 'terrainMaterial', libraries.terrainMaterials)
+  add('/Sprites/', 'tileset', libraries.tilesets)
+  add('/Animation/', 'animationField', libraries.animationFields)
+  add('/Animation/', 'animation', libraries.animations)
+  // Beside the clips they own, not under /Models: a rig is a skeleton shared BY models, and both
+  // characters' clip sets are reached through it.
+  add('/Animation/', 'rig', libraries.rigs)
+
+  const paths = entries.map(e => e.path)
+  const clash = paths.find((p, i) => paths.indexOf(p) !== i)
+  // A path is also the SVAR file-manager id, so a duplicate is not a cosmetic problem — two rows
+  // collapse into one and one of the assets becomes unreachable in the explorer.
+  if (clash) throw new Error(`two assets both want the vfs path "${clash}"`)
 
   return {
     version: 1,
@@ -929,7 +1408,6 @@ function vfs(libraries) {
 function zombieModelNode(zombie) {
   return zombie.nodeJson.children.find(c => c.type === 'model')
 }
-const zombieClipCount = (z) => zombieModelNode(z).model.animations.length
 const zombieMaterialCount = (z) => (zombieModelNode(z).model.materials ?? [1]).length
 
 function report({ zombie, libraries, textureCount }) {
@@ -940,14 +1418,22 @@ function report({ zombie, libraries, textureCount }) {
   console.log('')
   console.log('  scenes      Night Shift  %s', mb(size(`scenes/${NIGHT_SCENE}.json`)))
   console.log('              Main Menu    %s', mb(size(`scenes/${MENU_SCENE}.json`)))
-  console.log('  libraries   models       %s', mb(size('libraries/models.json')))
+  console.log('  libraries   models       %s  (%s)',
+    mb(size('libraries/models.json')), libraries.models.map(m => m.name).join(' + '))
   console.log('              templates    %s  (Playable + Zombie)', mb(size('libraries/templates.json')))
+  console.log('              animations   %s  %d clips', mb(size('libraries/animations.json')),
+    libraries.animations.length)
+  console.log('              rigs         %s  %d', mb(size('libraries/rigs.json')), libraries.rigs.length)
   console.log('              scripts      %d assets', libraries.scripts.length)
   console.log('              tilesets     %d', libraries.tilesets.length)
   console.log('  textures    %d payloads   %s', textureCount, mb(textures.bytes))
   console.log('')
-  console.log('  the Zombie carries its own model: %d clips, %d material tiles',
-    zombieClipCount(zombie), zombieMaterialCount(zombie))
+  for (const rig of libraries.rigs) {
+    console.log('  rig "%s": %d bones, %d clips, worn by %s', rig.name, rig.skin.joints.length,
+      rig.animationIds.length,
+      libraries.models.filter(m => m.rigId === rig.id).map(m => m.name).join(', ') || 'nothing')
+  }
+  console.log('  the Zombie is its own model asset now: %d material tiles', zombieMaterialCount(zombie))
   console.log('  TOTAL %s', mb(total))
   console.log('')
   console.log('Next:  npm --prefix editor run examples:list')

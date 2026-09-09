@@ -377,6 +377,8 @@ const EngineContext = createContext<{
   /** Link a shared `.anim` to a RIG — every model on that rig plays it. */
   linkAnimationToRig: (rigId: string, animationId: string) => void;
   unlinkAnimationFromRig: (rigId: string, animationId: string) => void;
+  /** Point a model at a different rig, re-resolving every clip it plays. `undefined` unlinks. */
+  setModelRig: (modelId: string, rigId: string | undefined) => void;
   /** Rename a clip inside a shared `.anim` asset, or toggle its root motion. */
   editSharedClip: (animationId: string, clipName: string, patch: { name?: string; rootMotion?: boolean }) => void;
   modelSession: ModelEditSession | null;
@@ -618,6 +620,7 @@ const EngineContext = createContext<{
     ensureRigForModel: () => null,
     linkAnimationToRig: () => {},
     unlinkAnimationFromRig: () => {},
+    setModelRig: () => {},
     editSharedClip: () => {},
     modelSession: null,
     modelEditTargetId: null,
@@ -2218,7 +2221,40 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // is a render mirror (the trap `adoptModelAsset` hit).
     modelsRef.current = modelsRef.current.map(m => (m.id === modelId ? linked : m));
     updateModel(modelId, linked);
+    // Gaining a rig changes which clips this model resolves, for the same reasons setModelRig documents.
+    invalidateAnimationCache();
+    applyAnimationLinks(linked);
     return rig.id;
+  };
+
+  /**
+   * Point a model at a different rig (or at none), and make every consequence of that actually happen.
+   *
+   * A bare `updateModel` is not enough, and the two ways it falls short are both silent:
+   *
+   *  - **The retarget cache does not key on the rig.** `resolveAnimationAsset` keys on
+   *    `${animationId}:${modelAssetId}`; `targetRigId` is passed but only used to look up the rig's manual
+   *    bone corrections. So a swap on the same model returns clips built with the OLD rig's `retargets`
+   *    and ignores the new rig's, until something unrelated clears the cache. Cleared wholesale here —
+   *    a rig swap is a rare, deliberate act, and a partial clear cannot express "every asset, this model".
+   *  - **Nothing re-applies the clips.** The clip set belongs to the rig, so a swap changes which clips
+   *    every placement should be playing; without this they keep the previous rig's until something
+   *    re-instantiates them.
+   *
+   * `modelsRef` is mirrored eagerly because it is a render mirror and `applyAnimationLinks` reads it —
+   * the same trap `ensureRigForModel` documents.
+   */
+  const setModelRig = (modelId: string, rigId: string | undefined) => {
+    const model = modelsRef.current.find(m => m.id === modelId);
+    if (!model || model.rigId === rigId) return;
+
+    const updated: ModelAsset = { ...model, rigId };
+    modelsRef.current = modelsRef.current.map(m => (m.id === modelId ? updated : m));
+    updateModel(modelId, updated);
+    invalidateAnimationCache();
+    applyAnimationLinks(updated);
+    eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
+    eventEmitter.current.emit('SCENE_CHANGED');
   };
 
   /** Link a shared `.anim` to a RIG. Every model on that rig gains its clips. */
@@ -5107,6 +5143,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       triggers: triggersRef.current,
       templates: templatesRef.current,
       materials: materialsRef.current,
+      // Play mode has no top-level animation table for a player to resolve, so the shared clips are
+      // baked straight into the JSON — into the templates too, or a spawned enemy T-poses.
+      models: modelsRef.current,
+      animations: animationsRef.current,
       useCache: true,
     });
     const newScene = new Scene();
@@ -5133,7 +5173,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const tmp = new Scene();
     tmp.parse({ scene: clone.scene, textures: [] }, true);
     resyncScene(tmp, maps, currentLibs(), data.assetHashes, data.assetHashVersion);
-    const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, bodies: maps.bodies, triggers: maps.triggers, scriptAssets: scriptAssetsRef.current, templates: templatesRef.current, materials: materialsRef.current, useCache: true });
+    const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, bodies: maps.bodies, triggers: maps.triggers, scriptAssets: scriptAssetsRef.current, templates: templatesRef.current, materials: materialsRef.current, models: modelsRef.current, animations: animationsRef.current, useCache: true });
     // `tmp` existed only to be resynced and serialized; `gd` is plain JSON, so its GPU meshes and bus
     // subscription can go now.
     tmp.dispose();
@@ -5408,7 +5448,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     enterTerrainMaterialEditor, refreshTerrainMaterialPreview, setActiveTerrainMaterialName,
     enterAnimationEditor, commitAnimationStateMachine, registerAnimationApply, registerTilesetApply,
     importAnimationFiles, importSkeletonNames, commitIkRig, currentIkRig, renameAnimationClip, removeAnimationClip, resolveAnimationImport, resolveRigPick,
-    enterModelEditor, adoptModelAsset, resolveModelAssetId, linkAnimationToRig, unlinkAnimationFromRig, ensureRigForModel, editSharedClip,
+    enterModelEditor, adoptModelAsset, resolveModelAssetId, linkAnimationToRig, unlinkAnimationFromRig, ensureRigForModel, editSharedClip, setModelRig,
     setActiveModelName, addModelLodFromAsset, generateModelLods, removeModelLod,
     setModelLodDistance, setModelCullDistance, setActiveModelLevel, importModelFiles, resolveModelImport,
     enterScriptEditor, setScriptTabSource, getScriptTabSource, saveScriptSource,
@@ -5611,6 +5651,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       ensureRigForModel,
       unlinkAnimationFromRig,
       editSharedClip,
+      setModelRig,
       modelSession: activeTab.kind === 'model' ? (modelSessions[activeTab.id] ?? null) : null,
       modelEditTargetId: activeTab.kind === 'model' && modelSessions[activeTab.id]
         ? modelSessions[activeTab.id].levelIds[modelSessions[activeTab.id].activeLevel] ?? null

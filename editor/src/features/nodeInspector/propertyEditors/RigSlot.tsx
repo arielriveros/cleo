@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { Node } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
 import { useAssetLibrary } from '../../AssetLibraryContext'
 import { useEditorSessions } from '../../EditorSessionsContext'
 import { useAssetDrop } from '../../../utils/useAssetDrop'
 import { ownSkinnedModelNodeOf } from '../../../utils/models'
+import { skeletonFingerprint } from '../../../utils/rigAssets'
 import { Button, Hint, Select, cn, hintClass, sectionTitleClass, valueClass } from '../../../components/ui'
 
 // The skeleton a character uses, as an inspector slot — shaped like MaterialSlot and AiBrainSlot.
@@ -13,8 +15,12 @@ import { Button, Hint, Select, cn, hintClass, sectionTitleClass, valueClass } fr
 
 export default function RigSlot(props: { node: Node }) {
   const { rigs } = useAssetLibrary()
-  const { enterRigEditor, resolveModelAssetId } = useEditorSessions()
-  const { models, updateModel, eventEmitter } = useCleoEngine()
+  const { enterRigEditor, resolveModelAssetId, setModelRig } = useEditorSessions()
+  const { models } = useCleoEngine()
+  // Raised when the incoming skeleton is a different SHAPE, and cleared by the next assignment. State, not
+  // a modal: the swap itself is valid and reversible, and the corrections it may need are edited in
+  // another tab — blocking here would only make the user dismiss something before they could act on it.
+  const [retargetNeeded, setRetargetNeeded] = useState<string | null>(null)
 
   const modelNode = ownSkinnedModelNodeOf(props.node)
   const modelId = modelNode ? resolveModelAssetId(modelNode) : null
@@ -22,10 +28,19 @@ export default function RigSlot(props: { node: Node }) {
 
   const assign = (rigId: string | undefined) => {
     if (!model) return
-    updateModel(model.id, { ...model, rigId })
-    // A rig change swaps the clip set this character plays, so the tree and the inspector must re-read.
-    eventEmitter.emit('ANIM_CLIPS_CHANGED')
-    eventEmitter.emit('SCENE_CHANGED')
+    // Everything a rig change implies — clearing the retarget cache and re-resolving every placement —
+    // happens in setModelRig. Doing it here with a bare updateModel is what left the old rig's bone
+    // corrections in force, silently. See its doc comment.
+    const before = model.rigId ? rigs.find(r => r.id === model.rigId) : undefined
+    const after = rigId ? rigs.find(r => r.id === rigId) : undefined
+    setModelRig(model.id, rigId)
+    // Fingerprints compare the SHAPE of a skeleton — same armature, same answer — so this fires only when
+    // the clips genuinely have to be remapped rather than merely re-resolved.
+    setRetargetNeeded(
+      before && after && skeletonFingerprint(before.skin) !== skeletonFingerprint(after.skin)
+        ? after.id
+        : null,
+    )
   }
 
   const { dragOver, dropProps } = useAssetDrop('text/cleo-rig', id => assign(id))
@@ -39,6 +54,21 @@ export default function RigSlot(props: { node: Node }) {
   return (
     <div className='px-2'>
       <div className={cn(sectionTitleClass, 'mt-3 mb-1')}>Rig</div>
+
+      {retargetNeeded && (
+        <div className='mb-1 flex flex-col gap-1 rounded border border-warning/40 bg-warning/10 p-2'>
+          <Hint className='text-warning'>
+            That is a different skeleton, so the clips are being remapped automatically. Check the bone
+            mapping if anything looks wrong.
+          </Hint>
+          <Button
+            variant='subtle' className='py-1'
+            onClick={() => { enterRigEditor(retargetNeeded); setRetargetNeeded(null) }}
+          >
+            Review retargeting
+          </Button>
+        </div>
+      )}
 
       {rig ? (
         <div

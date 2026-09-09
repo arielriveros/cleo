@@ -445,3 +445,176 @@ describe('hysteresis — both bands must not latch at once', () => {
         expect(a.currentStateName).toBe('Locomotion');
     });
 });
+
+
+// ---------------------------------------------------------------------------------------------------
+
+// `hasExitTime` — the gate a ONE-SHOT state returns on.
+//
+// Night Shift's player and zombie now lean on this for six states (a jump, a run-to-stop, four turns and
+// an attack swing): each plays a clip once and hands back when it finishes. Nothing in the engine used it
+// before them, so it had no test at all — and the failure it guards against is a character frozen
+// mid-action, which no amount of inspecting the authored JSON would reveal.
+
+describe('AnimationTransition.hasExitTime', () => {
+    /** Idle plays once, then an unconditional edge returns to Run when the clip reaches `exitTime`. */
+    const machine = (exitTime?: number, hasExitTime = true): AnimationStateMachine => ({
+        parameters: [],
+        states: [
+            { name: 'Idle', clipName: 'idle', loop: false, speed: 1, isEntry: true },
+            { name: 'Run', clipName: 'run', loop: true, speed: 1 },
+        ],
+        // No condition at all: an empty flat list is vacuously true, so the exit-time gate is the whole
+        // rule. That is exactly the shape every one-shot return in the example uses.
+        transitions: [{ from: 'Idle', to: 'Run', conditions: [], hasExitTime, exitTime }],
+        events: [],
+    });
+
+    it('holds the state until the clip finishes', () => {
+        const a = makeAnimator();
+        a.setStateMachine(machine(1));
+        // The clip runs 0..1s. Well before the end, the edge must not have fired despite passing gates.
+        step(a, 0.5);
+        expect(a.currentStateName).toBe('Idle');
+        step(a, 0.7);
+        expect(a.currentStateName).toBe('Run');
+    });
+
+    it('reads exitTime as a FRACTION of the clip, not seconds', () => {
+        // The trap: authoring 0.5 meaning "half a second" and getting "halfway" is invisible on a 1s clip
+        // and wrong on every other length.
+        const a = makeAnimator();
+        a.setStateMachine(machine(0.5));
+        step(a, 0.4);
+        expect(a.currentStateName).toBe('Idle');
+        step(a, 0.2);
+        expect(a.currentStateName).toBe('Run');
+    });
+
+    it('defaults to the end of the clip when exitTime is absent', () => {
+        const a = makeAnimator();
+        a.setStateMachine(machine(undefined));
+        step(a, 0.9);
+        expect(a.currentStateName).toBe('Idle');
+        step(a, 0.3);
+        expect(a.currentStateName).toBe('Run');
+    });
+
+    it('fires immediately without the gate, which is why an unconditional edge must set it', () => {
+        // The same machine with `hasExitTime: false` skips the state entirely on its first frame. This is
+        // the mistake the example's "no unconditional edge without exit time" check exists to catch.
+        const a = makeAnimator();
+        a.setStateMachine(machine(1, false));
+        step(a, 1 / 60);
+        expect(a.currentStateName).toBe('Run');
+    });
+
+    it('still returns after playback has stopped', () => {
+        // A non-looping clip pins `_currentTime` at its duration and sets `_playing` false. The state
+        // machine must keep being evaluated anyway — `checkTriggers` is not gated on playback — or a
+        // one-shot that finished during a hitch would never hand back.
+        const a = makeAnimator();
+        a.setStateMachine(machine(1));
+        step(a, 2);
+        expect(a.currentStateName).toBe('Run');
+    });
+});
+
+
+// ---------------------------------------------------------------------------------------------------
+
+// Clip event markers — how an animation tells a script that something happened AT a moment in it.
+//
+// Night Shift's zombie now lands its attack damage from one of these instead of a timer started beside
+// the swing, so the hit moves with the clip rather than drifting from a hand-tuned constant. Nothing in
+// the repo used the feature before that, so the emission path had no test — and its failure mode is a
+// marker that silently never fires, which looks like a weapon that stopped working.
+
+describe('animation event markers', () => {
+    /** A marker partway through `idle` (a 1 s clip), which loops or not depending on the state. */
+    const machine = (time: number, loop = false, clipName = 'idle'): AnimationStateMachine => ({
+        parameters: [],
+        states: [{ name: 'Idle', clipName: 'idle', loop, speed: 1, isEntry: true }],
+        transitions: [],
+        events: [{ clipName, time, eventName: 'hit' }],
+    });
+
+    function listen(a: Animator) {
+        const fired: string[] = [];
+        a.onAnimationEvent(name => fired.push(name));
+        return fired;
+    }
+
+    it('fires once when the playhead crosses the marker', () => {
+        const a = makeAnimator();
+        a.setStateMachine(machine(0.5));
+        const fired = listen(a);
+
+        step(a, 0.4);
+        expect(fired, 'not reached yet').toEqual([]);
+        step(a, 0.2);
+        expect(fired).toEqual(['hit']);
+        // The clip is not looping, so the playhead pins at the end and must not re-fire.
+        step(a, 2);
+        expect(fired).toEqual(['hit']);
+    });
+
+    it('fires once per loop, including across the seam', () => {
+        // The wrap is handled as two windows — (prev, duration] then (0, cur] — precisely so a marker
+        // near the end is not skipped by the frame that crosses it.
+        const a = makeAnimator();
+        a.setStateMachine(machine(0.95, true));
+        const fired = listen(a);
+
+        step(a, 1.05);
+        expect(fired.length, 'one crossing in the first loop').toBe(1);
+        step(a, 1);
+        expect(fired.length, 'and one in the second').toBe(2);
+    });
+
+    it('ignores markers belonging to a clip that is not playing', () => {
+        // Markers are matched by clip NAME, not by state: a machine carries every clip's markers at once.
+        const a = makeAnimator();
+        a.setStateMachine(machine(0.5, false, 'run'));
+        const fired = listen(a);
+
+        step(a, 1.2);
+        expect(fired).toEqual([]);
+    });
+
+    it('reports the clip the marker fired on', () => {
+        const a = makeAnimator();
+        a.setStateMachine(machine(0.5));
+        const seen: { name: string; clip: string }[] = [];
+        a.onAnimationEvent((name, clip) => seen.push({ name, clip }));
+
+        step(a, 0.7);
+        expect(seen).toEqual([{ name: 'hit', clip: 'idle' }]);
+    });
+
+    it('stops delivering after unsubscribe', () => {
+        // The subscription has no auto-cleanup, unlike a node timer — a listener that outlives its owner
+        // is how a pooled character ends up dealing damage twice.
+        const a = makeAnimator();
+        a.setStateMachine(machine(0.5));
+        const fired: string[] = [];
+        const off = a.onAnimationEvent(name => fired.push(name));
+        off();
+
+        step(a, 0.7);
+        expect(fired).toEqual([]);
+    });
+
+    it('survives a listener that throws', () => {
+        // Fired from the update loop, outside the per-hook guards a script handler normally gets. One bad
+        // listener must not take playback or the other listeners down with it.
+        const a = makeAnimator();
+        a.setStateMachine(machine(0.5));
+        const fired: string[] = [];
+        a.onAnimationEvent(() => { throw new Error('boom'); });
+        a.onAnimationEvent(name => fired.push(name));
+
+        expect(() => step(a, 0.7)).not.toThrow();
+        expect(fired).toEqual(['hit']);
+    });
+});

@@ -77,7 +77,14 @@ const stop = animator.onAnimationEvent((eventName: string, clipName: string) => 
 stop()      // unsubscribe
 ```
 
-Nodes can also receive events through an `onAnimationEvent` handler.
+`onAnimationEvent` is a method on the ANIMATOR, not a node lifecycle hook — there is no
+`onAnimationEvent()` alongside `onStart`/`onUpdate`. It also has no automatic cleanup, unlike
+`this.after`: keep the returned function and call it from `onDespawn`, or a node that respawns will
+hold two listeners and do everything twice.
+
+Marker times are in CLIP seconds, so a state playing at `speed: 1.5` fires the marker at
+`time / 1.5` wall-clock seconds. A marker beyond a state's `exitTime` is never reached at all.
+`examples/scripts/NightShiftZombie.ts` lands its attack damage this way.
 
 ## Blend spaces
 

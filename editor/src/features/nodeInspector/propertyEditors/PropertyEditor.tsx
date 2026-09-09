@@ -57,8 +57,10 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
         {/* Everything else is disabled in one shot for a template instance. */}
         <fieldset disabled={ro} className={`${ro ? 'opacity-60' : ''} border-0 m-0 p-0 min-w-0`}>
           { props.node.nodeType === 'model' && <MaterialSlot node={props.node as ModelNode} /> }
-          {/* Any node that IS or CONTAINS a skinned model — AnimationSlot finds it in the subtree and renders
-              away otherwise, so selecting a character's holder root (e.g. inside a template) shows it too. */}
+          {/* A node that IS a skinned model, or is the ROOT of an instance holding one — `ownSkinnedModelNodeOf`,
+              never a subtree search, so a section is about the selected node rather than anything below it.
+              Both render away otherwise. Between them these are the only animation-related sections on a
+              model node: the rig owns the clips, the node owns the machine that names them. */}
           { !root && <RigSlot node={props.node} /> }
           { !root && <AnimationSlot node={props.node} /> }
           { props.node.nodeType === 'sprite' && <SpriteEditor node={props.node as SpriteNode} /> }
