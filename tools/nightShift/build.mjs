@@ -619,16 +619,40 @@ function playableStateMachine() {
  * released — the character reaches full sprint and full stop within one frame, so the blend space jumps
  * between its samples instead of travelling through them. A real ramp is what makes the gait read as
  * acceleration rather than as a switch.
+ *
+ * The body it inherits from 3d-example is also de-bounced here; see `deadenBounce`.
  */
 function withPlayerAnimation(playableNode) {
   playableNode.acceleration = 10
+  deadenBounce(playableNode.body)
   const model = playableNode.children.find(c => c.name === 'Ch36')
   if (!model) throw new Error('the Playable subtree has no Ch36 model node to animate')
   model.stateMachine = playableStateMachine()
   return playableNode
 }
 
+/**
+ * Take the bounce out of a character capsule.
+ *
+ * Both characters inherit `restitution: 0.35` from the 3d-example Playable, and nothing sanctions it: the
+ * engine default is 0 and the docs' own character recipe omits it. Restitution combines with MAX
+ * (`physicsSystem._materialFor`), so 0.35 wins against the terrain's 0 and every residual into-surface
+ * component of the character's velocity is reflected back at 35% rather than absorbed — on a slope, where
+ * the controller is pushing along a surface the solver keeps correcting against, that is a permanent low
+ * chatter under the feet. A person is not a rubber ball.
+ *
+ * Written both to a placed node's inline `body` and to a template's `bodies` side-map, which is why this
+ * takes the body object rather than the node.
+ */
+function deadenBounce(body) {
+  if (body) body.restitution = 0
+  return body
+}
+
 withPlayerAnimation(playableTemplate.nodeJson)
+// The template keeps its body in a side map keyed by node id rather than inline on the node, so
+// `withPlayerAnimation` cannot reach it and it is done here. The zombie copies whatever this leaves.
+for (const body of Object.values(playableTemplate.bodies ?? {})) deadenBounce(body)
 
 /**
  * The player's driver, as a CHILD of the character it possesses — the same shape the Zombie's `Brain`
@@ -775,7 +799,13 @@ function zombieTemplate() {
     // The WANDER rate, which is the entry state. NightShiftZombie raises it the moment the brain starts
     // hunting — a shambler that turned this slowly in a chase would be trivially circle-strafed.
     turnSpeed: 30,
-    acceleration: 6,
+    // Raised from 6 after measuring the horde against the real terrain. A character carries `friction: 0`
+    // — it owns its own speed — so nothing but this ramp resists gravity pulling it back down a hill, and
+    // 6 is not enough: a zombie stalled at 25 degrees and slid backwards above 30. That is 4% of this
+    // map, and it looked exactly like the bug the ramp fix had just removed. At 12 it climbs everything
+    // walkable here (the terrain tops out at 56 degrees), and it is still a ramp — 0 to its 2.4 m/s run in
+    // 0.2 s rather than 0.4 — so the gait blend still travels through its samples instead of switching.
+    acceleration: 12,
     facingMode: 'velocity',
     directionSmoothing: 0.2,
     children: [model, flame, fireLight, brain],

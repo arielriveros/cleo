@@ -5,6 +5,7 @@ import {
     placementFor,
     placeHandles,
     tintHandles,
+    thickenHandles,
     AXIS_CSS_COLORS,
     CENTRE_CSS_COLOR,
     type GizmoHandle,
@@ -37,7 +38,14 @@ function stubHandle(spec: HandleSpec): GizmoHandle {
         setQuaternion(q: quat) { quat.copy(this.quaternion, q); return this; },
         setScale(s: vec3) { vec3.copy(this.scale, s); return this; },
     };
-    return { spec, node, material: { properties: new Map<string, unknown>() } } as unknown as GizmoHandle;
+    // Stand-ins for the two prebuilt Geometry objects; `thickenHandles` only ever compares identity.
+    const shapes = { rest: { id: 'rest' }, hover: spec.shape === 'quad' || spec.shape === 'sphere' ? null : { id: 'hover' } };
+    const model = {
+        geometry: shapes.rest,
+        uploads: 0,
+        setGeometry(g: unknown) { this.geometry = g; this.uploads++; },
+    };
+    return { spec, node, model, material: { properties: new Map<string, unknown>() }, shapes } as unknown as GizmoHandle;
 }
 
 const stubHandles = (mode: 'position' | 'rotation' | 'scale') => handleSpecs(mode).map(stubHandle);
@@ -98,6 +106,34 @@ describe('placementFor', () => {
         expect(place.scale).toBe(f.scale);
     });
 
+    it('rolls a rotation ring so its thick arc faces the viewer', () => {
+        // `GizmoGeometry.Ring` swells its tube toward local +X, and only the near half of a ring is
+        // pickable. If the roll ever stops tracking the camera the two disagree, and the rim that looks
+        // heaviest is one you cannot grab.
+        for (const axis of [0, 1, 2]) {
+            const spec = handleSpecs('rotation')[axis];
+            const f = frame({ toCamera: unit(0.3, 0.9, -0.4) });
+            const place = placementFor(spec, f);
+
+            const thick = vec3.transformQuat(vec3.create(), [1, 0, 0], place.quaternion);
+            // In the ring's own plane, and pointing the same way as the viewer does.
+            expect(vec3.dot(thick, f.axes[axis]), `axis ${axis} in plane`).toBeCloseTo(0, 4);
+            const inPlane = vec3.scaleAndAdd(vec3.create(), f.toCamera, f.axes[axis], -vec3.dot(f.toCamera, f.axes[axis]));
+            vec3.normalize(inPlane, inPlane);
+            expect(vec3.dot(thick, inPlane), `axis ${axis} toward camera`).toBeCloseTo(1, 4);
+        }
+    });
+
+    it('still gives a ring a usable roll when the camera looks straight down its axis', () => {
+        const spec = handleSpecs('rotation')[1];
+        const f = frame({ toCamera: vec3.fromValues(0, 1, 0) });
+        const place = placementFor(spec, f);
+        // No in-plane direction exists, so any perpendicular will do — but it must stay a unit rotation.
+        expect(quat.length(place.quaternion)).toBeCloseTo(1, 4);
+        const thick = vec3.transformQuat(vec3.create(), [1, 0, 0], place.quaternion);
+        expect(vec3.dot(thick, f.axes[1])).toBeCloseTo(0, 4);
+    });
+
     it('leaves the centre handle unrotated on the origin', () => {
         const f = frame();
         const spec = handleSpecs('scale').find(s => s.id === 'screen')!;
@@ -151,6 +187,55 @@ describe('tintHandles', () => {
     });
 });
 
+describe('thickenHandles', () => {
+    it('swaps only the active handle onto its hover shape', () => {
+        const handles = stubHandles('position');
+        thickenHandles(handles, 'x', null);
+
+        for (const h of handles)
+            expect(shapeOf(h), h.spec.id).toBe(h.spec.id === 'x' ? h.shapes.hover : h.shapes.rest);
+    });
+
+    it('keeps the dragged handle thick and outranks the hover', () => {
+        const handles = stubHandles('rotation');
+        thickenHandles(handles, 'x', 'z');
+
+        expect(shapeOf(handles.find(h => h.spec.id === 'z')!)).toBe(handles.find(h => h.spec.id === 'z')!.shapes.hover);
+        expect(shapeOf(handles.find(h => h.spec.id === 'x')!)).toBe(handles.find(h => h.spec.id === 'x')!.shapes.rest);
+    });
+
+    it('leaves the plane quads and the centre at their pickable size', () => {
+        // Both are drawn at exactly what `buildPickShapes` tests, so they have no hover shape to swap to.
+        const handles = stubHandles('position');
+        for (const id of ['xy', 'yz', 'zx', 'screen'] as const) {
+            thickenHandles(handles, id, null);
+            const h = handles.find(x => x.spec.id === id)!;
+            expect(h.shapes.hover, id).toBeNull();
+            expect(shapeOf(h), id).toBe(h.shapes.rest);
+        }
+    });
+
+    it('re-uploads nothing while the hover holds still', () => {
+        // A geometry swap costs a vertex re-upload and this runs once per animation frame, so an
+        // ungated version would rebuild three meshes a frame for a cursor that never moved.
+        const handles = stubHandles('position');
+        thickenHandles(handles, 'y', null);
+        const before = handles.map(uploadsOf);
+        thickenHandles(handles, 'y', null);
+        expect(handles.map(uploadsOf)).toEqual(before);
+
+        thickenHandles(handles, 'z', null);
+        expect(handles.map(uploadsOf).reduce((a, b) => a + b, 0)).toBeGreaterThan(before.reduce((a, b) => a + b, 0));
+    });
+
+    it('restores every handle once the cursor leaves', () => {
+        const handles = stubHandles('scale');
+        thickenHandles(handles, 'y', null);
+        thickenHandles(handles, null, null);
+        expect(handles.every(h => shapeOf(h) === h.shapes.rest)).toBe(true);
+    });
+});
+
 describe('the shared palette', () => {
     it('gives the SVG readout the same colours as the 3D handles', () => {
         // One source of truth, so a recoloured axis cannot leave the readout showing the old hue.
@@ -164,6 +249,8 @@ describe('the shared palette', () => {
 });
 
 const colorOf = (h: GizmoHandle): number[] => h.material.properties.get('color');
+const shapeOf = (h: GizmoHandle): unknown => h.model.geometry;
+const uploadsOf = (h: GizmoHandle): number => (h.model as unknown as { uploads: number }).uploads;
 
 /** How many handle nodes `run` actually moves, resizes, re-aims or toggles. */
 function countWrites(handles: GizmoHandle[], run: () => void): number {

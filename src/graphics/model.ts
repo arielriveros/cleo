@@ -138,16 +138,18 @@ export class Model {
 
 
     /**
-     * Replace this model's geometry. **Terrain chunks only** — see
-     * `Terrain._rebuildChunksIfDensityChanged`, which is its one caller.
+     * Replace this model's geometry. Two callers, both of which own their mesh outright and never
+     * serialize it: `Terrain._rebuildChunksIfDensityChanged`, and the editor's transform gizmo, which
+     * swaps a handle between a resting and a thicker hover shape (`gizmoHandles.thickenHandles`).
      *
      * Chunks are built in the terrain's constructor, before any layer exists, so the first `setLayer` is
      * when the real vertex density becomes knowable and every chunk has to be rebuilt at it. That
      * changes the vertex COUNT, and `Mesh.updateVertexData` is a fixed-size write. Bumping the version
      * makes
      * `ModelNode.initialized` go false, which re-runs `initializeModel` and therefore `Mesh.create`,
-     * which reallocates. Nothing else should call this: an ordinary model's geometry is the authored
-     * asset, and `serialize()` writes it.
+     * which reallocates. Nothing beyond those two should call it: an ordinary model's geometry is the
+     * authored asset, and `serialize()` writes it. The bar is ownership — a model whose geometry is a
+     * shared asset, or that anything else may serialize, must not be swapped under its users.
      */
     public setGeometry(geometry: Geometry): void {
         if (this._geometry === geometry) return;

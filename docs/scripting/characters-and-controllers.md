@@ -83,13 +83,28 @@ onUpdate() {
 | `turnThreshold` | `90` | Aim-vs-body angle that triggers a turn-in-place. |
 | `turnReleaseAngle` | `10` | Deadzone at which the turn is considered done. |
 | `directionSmoothing` | `0.12` | Seconds the blend-space direction axis takes to glide. |
-| `acceleration` | `0` | `0` reaches commanded speed immediately. |
+| `acceleration` | `0` | Units/s^2, measured **along the ground**. `0` reaches commanded speed immediately. See below. |
 | `airControl` | `1` | |
 | `coyoteSeconds` | `0.12` | |
 | `jumpBufferSeconds` | `0.15` | |
 | `jumpLockoutSeconds` | `0.15` | |
 | `facingMode` | `'aim'` | `'aim' \| 'velocity' \| 'none'`. |
 | `driveWhenUnpossessed` | `false` | |
+
+### `acceleration` on slopes
+
+The ramp is measured along the ground plane and against the body's **real** velocity, not a remembered
+command. Two consequences worth knowing before you tune it:
+
+- **Anything that resists the body throttles the ramp**, because the gap it closes each frame is measured
+  from what the body is actually doing. That is what lets knockback, a conveyor or a moving platform
+  compose with locomotion instead of fighting it, and it is why a character in a crowd accelerates only as
+  fast as the crowd allows.
+- **On a slope it is the only thing holding the character up the hill**, if the body is authored
+  `friction: 0` — which is the usual choice, since a character owns its own speed. Gravity pulls it back
+  down at `g*sin(slope)`, so an `acceleration` below roughly that cannot climb: the character stalls, and
+  below it slides back down. At `10` that limit is around 40 degrees in practice. Budget for the steepest
+  ground the character has to walk on, not for the feel on the flat.
 
 ## The three animator outputs
 

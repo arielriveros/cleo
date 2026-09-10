@@ -6,7 +6,7 @@ import { useSelection } from '../SelectionContext';
 import { captureViewport, releaseViewport, isViewportCaptured } from '../../utils/pointerCapture';
 import { gizmoWorldScale, effectiveGizmoSpace } from '../../utils/gizmoMath';
 import { buildPickShapes, pickHandle, type GizmoFrame, type HandleId } from './gizmoPick';
-import { buildHandles, placeHandles, tintHandles, type GizmoHandle } from './gizmoHandles';
+import { buildHandles, placeHandles, tintHandles, thickenHandles, type GizmoHandle } from './gizmoHandles';
 import {
     beginDrag,
     solveDrag,
@@ -46,7 +46,7 @@ interface TransformGizmoProps {
 }
 
 /** Fraction of the viewport's height the gizmo spans, whatever the camera or the distance. */
-const GIZMO_SCREEN_SIZE = 0.15;
+const GIZMO_SCREEN_SIZE = 0.18;
 
 export default function TransformGizmo({ selectedNodeId, onTransformChange, viewportRef }: TransformGizmoProps) {
     const { instance, editorScene, eventEmitter, withoutDirty } = useCleoEngine();
@@ -199,6 +199,7 @@ export default function TransformGizmo({ selectedNodeId, onTransformChange, view
 
             withoutDirty(() => placeHandles(handles, placement, false));
             tintHandles(handles, hoverRef.current, drag?.handle ?? null);
+            thickenHandles(handles, hoverRef.current, drag?.handle ?? null);
 
             const rect = viewportRef.current?.getBoundingClientRect();
             const cam = instance.scene?.activeCamera?.camera;

@@ -59,7 +59,19 @@ export interface LocomotionTuning {
     turnReleaseAngle: number;
     /** Time constant, seconds, smoothing `moveDir` so a blend probe glides between strafes. */
     directionSmoothing: number;
-    /** Units/s² the planar speed ramps at. **0 snaps**, reproducing the original script exactly. */
+    /**
+     * Units/s^2 the speed ramps at. **0 snaps**, reproducing the original script exactly.
+     *
+     * Measured ALONG THE GROUND, not horizontally — on a slope the two differ by cos(slope), and taking
+     * the gap in the wrong one of them is what used to cap a climbing character at `a*dt / (1 - cos)`.
+     * And measured CLOSED-LOOP, against the body's real post-solver velocity rather than a remembered
+     * command, so an impulse, a conveyor or a moving platform composes with it instead of being fought.
+     * The cost of that choice is real and deliberate: sustained external resistance throttles the ramp
+     * too, and a character wedged in a crowd accelerates only as fast as the crowd lets it.
+     *
+     * It is also the only thing resisting gravity on a slope for a body with `friction: 0`, which is how
+     * characters are normally authored. A value below about `g * sin(slope)` cannot climb that slope.
+     */
     acceleration: number;
     /** 0..1 of steering authority while airborne. 1 is full control, matching the original script. */
     airControl: number;
@@ -244,62 +256,126 @@ export function stepLocomotion(
         targetZ = planarZ + (targetZ - planarZ) * t;
     }
 
-    // Acceleration ramp. 0 snaps, which reproduces the original exactly; above 0 it makes the engine's
-    // existing `planarAcceleration` / `isAccelerating` builtins mean something for start/stop states.
-    if (tuning.acceleration > 0 && dt > 0) {
-        const maxStep = tuning.acceleration * dt;
-        const dx = targetX - planarX;
-        const dy = targetY - planarY;
-        const dz = targetZ - planarZ;
-        const gap = Math.hypot(dx, dy, dz);
-        if (gap > maxStep && gap > 1e-9) {
-            const t = maxStep / gap;
-            targetX = planarX + dx * t;
-            targetY = planarY + dy * t;
-            targetZ = planarZ + dz * t;
-        }
-    }
-
-    // ----- slope projection ----------------------------------------------------------------------
+    // ----- the frame the steering lives in ---------------------------------------------------------
     // Travel ALONG the ground rather than horizontally through it. Suppressed for `jumpLockoutSeconds`
     // after a take-off: on the launch frame the projection would flatten the vertical velocity that was
     // just written. In the script this replaces, one `_jumpCooldown` field did this job AND gated the
     // `isJumping` animator flag, which is why its 0.2 was load-bearing in two unrelated places.
     const projecting = sense.grounded && next.jumpLockout <= 0;
-    // Whether the projection actually RAN and produced something. Not the same as `projecting`: a
-    // grounded character standing still has no direction to project, and must keep its vertical velocity
-    // (gravity is not the controller's to cancel). A grounded character that IS moving deliberately
-    // replaces the whole vector, which is what glues it to a downhill slope.
-    let projected = false;
+    // The unit ground normal, and whether the SURFACE frame is usable at all this frame. `up . n` is
+    // cos(slope) - guarded because the lift below divides by it, and because a "ground" normal at right
+    // angles to gravity is a wall, not a floor. `PhysicsSystem.isGrounded` only reports true up to
+    // `maxSlopeDegrees` (60 by default, cos = 0.5), so this can only fire on a hand-fed sense.
+    let inx = 0, iny = 0, inz = 0, upDotN = 0;
+    let surface = false;
     if (projecting) {
         const [nx, ny, nz] = sense.groundNormal;
         const nLen = Math.hypot(nx, ny, nz);
+        if (nLen > 1e-6) {
+            inx = nx / nLen; iny = ny / nLen; inz = nz / nLen;
+            upDotN = ux * inx + uy * iny + uz * inz;
+            surface = upDotN > 1e-3;
+        }
+    }
+
+    // Both ends of the acceleration ramp have to be measured in ONE frame, and putting them there is what
+    // this block is for - which is why it now runs BEFORE the ramp rather than after it.
+    //
+    // ## The bug this order fixes
+    //
+    // A body travelling along a theta slope at speed `s` casts a horizontal shadow of only `s cos(theta)`.
+    // The ramp used to difference a horizontal target of magnitude `S` against that shadow, so it read the
+    // projection's own foreshortening as a shortfall and never stopped pushing:
+    //
+    //     s' = s cos(theta) + a dt          ->          s* = a dt / (1 - cos(theta))
+    //
+    // 1.24 m/s of a commanded 4 on a 30 degree slope at 60fps with `acceleration: 10`, and WORSE on a
+    // faster machine, a smaller dt lowering the fixed point - 0.52 at 144fps. `cos(theta)` being even, it
+    // crippled descending exactly as hard as climbing, which is what made it read as sticky ground rather
+    // than as gravity. Reported as "hard to move around slopes and not very responsive".
+    let curX = planarX;
+    let curY = planarY;
+    let curZ = planarZ;
+    if (surface) {
         const targetSpeed = Math.hypot(targetX, targetY, targetZ);
-        if (nLen > 1e-6 && targetSpeed > 1e-9) {
-            const inx = nx / nLen;
-            const iny = ny / nLen;
-            const inz = nz / nLen;
+        if (targetSpeed > 1e-9) {
             const into = targetX * inx + targetY * iny + targetZ * inz;
-            let px = targetX - inx * into;
-            let py = targetY - iny * into;
-            let pz = targetZ - inz * into;
+            const px = targetX - inx * into;
+            const py = targetY - iny * into;
+            const pz = targetZ - inz * into;
             const pLen = Math.hypot(px, py, pz);
-            // Renormalized to the commanded speed, so walking up a slope is not slower than walking on
-            // the flat — the projection changes DIRECTION, not pace.
             if (pLen > 1e-9) {
+                // Renormalized to the commanded speed, so walking up a slope is not slower than walking on
+                // the flat - the projection changes DIRECTION, not pace. Renormalizing AFTER the ramp would
+                // undo the ramp, which is the other half of why this moved.
                 const s = targetSpeed / pLen;
-                px *= s; py *= s; pz *= s;
-                targetX = px; targetY = py; targetZ = pz;
-                projected = true;
+                targetX = px * s; targetY = py * s; targetZ = pz * s;
+            } else {
+                // The command points straight into the surface - a wall reported as ground. No direction
+                // survives the projection, so this frame has no usable surface frame at all: fall back to
+                // the horizontal target and the horizontal shadow together. Mixing the two is the failure
+                // this whole block exists to prevent, so both ends drop back, not one.
+                surface = false;
             }
+        }
+        // A zero command has nothing to project, which is not a failure - the zero vector IS the zero
+        // surface vector, and the ramp below still has to decelerate ALONG the surface toward it.
+        if (surface) {
+            // The current velocity in the same frame - LIFTED along `up` onto the surface, not projected
+            // onto it. `planar*` is the SHADOW of the steering velocity, so undoing the shadow is what
+            // recovers it: the unique surface vector `planar + up k` whose up-orthogonal part is `planar`
+            // again. A genuine `s` along the surface casts the shadow `s cos(theta)` and comes back as
+            // `s`, so the foreshortening is gone.
+            //
+            // Projecting orthogonally instead (`v - n (v . n)`) also kills the cos(theta) error and looks
+            // equivalent, but it does not separate steering from gravity: a 9 m/s vertical fall projects
+            // onto a 30 degree plane as 4.5 m/s of DOWNHILL travel, which the ramp would then think the
+            // character owns, so the frame you land on a hill holding a key throws away three quarters of
+            // your gravity and shoots you down it. A vertical fall casts no shadow, so the lift cannot see
+            // it at all - that is structural, not a threshold.
+            const k = -(planarX * inx + planarY * iny + planarZ * inz) / upDotN;
+            curX = planarX + ux * k;
+            curY = planarY + uy * k;
+            curZ = planarZ + uz * k;
+        }
+    }
+
+    // ----- acceleration ramp ----------------------------------------------------------------------
+    // 0 snaps, which reproduces the original exactly; above 0 it makes the engine's existing
+    // `planarAcceleration` / `isAccelerating` builtins mean something for start/stop states.
+    //
+    // Both endpoints now live in the frame chosen above, so the gap is a real shortfall rather than a
+    // change of basis, and the fixed point is the commanded speed at every slope and every framerate. A
+    // point between two vectors in the ground plane is still in the ground plane, so nothing needs
+    // renormalizing afterwards. It is a CLOSED loop - the gap is measured against the body's real
+    // post-solver velocity, so sustained external resistance throttles the ramp too, by design: that is
+    // what lets an impulse, a conveyor or a wall compose with it instead of being fought by it.
+    if (tuning.acceleration > 0 && dt > 0) {
+        const maxStep = tuning.acceleration * dt;
+        const dx = targetX - curX;
+        const dy = targetY - curY;
+        const dz = targetZ - curZ;
+        const gap = Math.hypot(dx, dy, dz);
+        if (gap > maxStep && gap > 1e-9) {
+            const t = maxStep / gap;
+            targetX = curX + dx * t;
+            targetY = curY + dy * t;
+            targetZ = curZ + dz * t;
         }
     }
 
     // ----- the vertical channel ------------------------------------------------------------------
     // Preserved through everything above: gravity, falling and a jump in flight all live here. A frame
-    // that actually projected already carries its own slope component in target*, so `up` is re-added
-    // everywhere else — including a grounded character standing still, which would otherwise have its
+    // that steered in the SURFACE frame and came out with something already carries its own slope
+    // component in target*, so `up` is re-added everywhere else - airborne, during the jump lockout, on a
+    // degenerate normal, and for a grounded character at a standstill, which would otherwise have its
     // gravity silently zeroed.
+    //
+    // The test is the OUTPUT, not whether the projection ran. A character whose ramp has just brought it
+    // to a dead stop on a slope is standing still and keeps its gravity like anything else; one still
+    // coasting down to that stop is moving, and stays glued to the slope. Under `acceleration: 0` the two
+    // predicates coincide exactly, which is what keeps that path byte-identical.
+    const projected = surface && Math.hypot(targetX, targetY, targetZ) > 1e-9;
     let outX = targetX;
     let outY = targetY;
     let outZ = targetZ;

@@ -65,6 +65,14 @@ export interface PhysicsRaycastOptions {
  */
 const GROUND_GRACE = 0.1;
 
+/**
+ * Ground-likeness at or above which a contact counts as a surface you could stand on, and so as a candidate
+ * to REPLACE the current stamp rather than merely compete with it. cos(60 deg), matching the default
+ * `maxSlopeDegrees` of {@link PhysicsSystem.isGrounded} - every caller in the engine uses that default.
+ * See _record for why the two rules differ either side of this line.
+ */
+const WALKABLE_DOT = Math.cos(60 * Math.PI / 180);
+
 export class PhysicsSystem {
   private _scene!: Scene;
   private _world!: World;
@@ -381,10 +389,22 @@ export class PhysicsSystem {
     if (body.isTrigger) return;
     const prev = this._ground.get(body);
 
-    // A worse (less ground-like) contact may not overwrite a better one still inside the grace window; past
-    // that window anything may take over. An EQUAL dot MUST refresh the stamp: a body resting still reports
-    // the same dot every frame, and skipping those would let the grace expire under a body that never moved.
-    if (prev && this._time - prev.time <= GROUND_GRACE && dot < prev.dot) return;
+    // Two rules, split at WALKABLE_DOT.
+    //
+    // A contact you could STAND on always takes the stamp. The max-dot rule below used to apply to these too,
+    // which quietly made the ground normal "the flattest thing touched in the last GROUND_GRACE" rather than
+    // the facet actually bearing the body - fine for a step, wrong for terrain, where a character straddles
+    // several facets continuously (the shipped landscape's are 1.0 m across against a 0.2 m capsule radius, so
+    // the cap never sits inside one). Whatever the controller then projected onto was flatter than the hill it
+    // was climbing. Last writer wins among walkable surfaces, and since _stampGroundContacts runs the contact
+    // loop first and the ground probe last, that makes the probe authoritative for the bodies that enable it.
+    //
+    // A contact you could NOT stand on still may not displace a better one inside the grace window: that is
+    // the step-edge case the rule was written for, where a wall face (dot near 0) is contacted alongside the
+    // floor and must not be mistaken for it. An EQUAL dot MUST refresh the stamp - a body resting still
+    // reports the same dot every frame, and skipping those would let the grace expire under a body that
+    // never moved.
+    if (dot < WALKABLE_DOT && prev && this._time - prev.time <= GROUND_GRACE && dot < prev.dot) return;
 
     this._ground.set(body, { time: this._time, dot, normal, gap });
   }

@@ -1,6 +1,6 @@
 import { vec3, quat, mat3 } from 'gl-matrix';
 import type { ReadonlyVec3 } from 'gl-matrix';
-import { Model, ModelNode, Material } from 'cleo';
+import { Model, ModelNode, Material, Geometry } from 'cleo';
 import { GizmoGeometry } from '../../utils/GizmoGeometry';
 import type { GizmoMode } from '../engineContextTypes';
 import {
@@ -58,6 +58,16 @@ export const CENTRE_CSS_COLOR = css(CENTRE_COLOR);
 const HOVER_GAIN = 1.6;
 const IDLE_DIM = 0.35;
 
+/**
+ * How much fatter the active handle's cross-section gets.
+ *
+ * The resting gizmo badly understates its own targets: a move arrow is drawn with a 0.016 shaft against
+ * an `AXIS_PICK_RADIUS` of 0.05, and a rotation ring with a 0.014 tube against a `RING_TOLERANCE` of
+ * 0.06. Swelling the one under the cursor toward what is actually grabbable is what makes an axis easy
+ * to hit — brightness alone said "this is selected" without saying "and it is this wide".
+ */
+const HOVER_THICKNESS = 2.6;
+
 export type HandleShape = 'arrow' | 'arm' | 'ring' | 'quad' | 'sphere';
 
 export interface HandleSpec {
@@ -106,16 +116,32 @@ export function handleSpecs(mode: GizmoMode): HandleSpec[] {
 export interface GizmoHandle {
     spec: HandleSpec;
     node: ModelNode;
+    /** The node's own model. Held directly because `ModelNode.model` widens to `Model | AnimatedModel`,
+     *  and a handle is never animated. */
+    model: Model;
     material: Material;
+    /**
+     * The two shapes this handle swaps between, both built once up front — `thickenHandles` only ever
+     * points the model at one of them. `hover` is null where the shape must not change size.
+     */
+    shapes: { rest: Geometry; hover: Geometry | null };
 }
 
-function geometryFor(shape: HandleShape) {
+/**
+ * One handle's shape at a given cross-section gain.
+ *
+ * Null for a shape that has no hover variant. The plane quads and the centre sphere are drawn at exactly
+ * their pickable extent — `placementFor` and `buildPickShapes` derive both from the same numbers, and a
+ * test pins that they agree — so swelling either would put paint outside what a click can reach. They
+ * are also the two easiest handles to hit already; it is the thin ones that needed the help.
+ */
+function geometryFor(shape: HandleShape, thickness = 1): Geometry | null {
     switch (shape) {
-        case 'arrow': return GizmoGeometry.Arrow(HANDLE_LENGTH);
-        case 'arm': return GizmoGeometry.ScaleArm(HANDLE_LENGTH);
-        case 'ring': return GizmoGeometry.Ring(RING_RADIUS);
-        case 'quad': return GizmoGeometry.PlaneQuad(1);
-        case 'sphere': return GizmoGeometry.Centre(CENTRE_RADIUS);
+        case 'arrow': return GizmoGeometry.Arrow(HANDLE_LENGTH, thickness);
+        case 'arm': return GizmoGeometry.ScaleArm(HANDLE_LENGTH, thickness);
+        case 'ring': return GizmoGeometry.Ring(RING_RADIUS, thickness);
+        case 'quad': return thickness === 1 ? GizmoGeometry.PlaneQuad(1) : null;
+        case 'sphere': return thickness === 1 ? GizmoGeometry.Centre(CENTRE_RADIUS) : null;
     }
 }
 
@@ -132,9 +158,11 @@ export function buildHandles(mode: GizmoMode): GizmoHandle[] {
             { color: [...spec.color] },
             { wireframe: false, transparent: false, castShadow: false, side: 'double' },
         );
-        const node = new ModelNode(spec.name, new Model(geometryFor(spec.shape), material));
+        const rest = geometryFor(spec.shape)!;
+        const model = new Model(rest, material);
+        const node = new ModelNode(spec.name, model);
         (node as any).isGizmo = true;
-        return { spec, node, material };
+        return { spec, node, model, material, shapes: { rest, hover: geometryFor(spec.shape, HOVER_THICKNESS) } };
     });
 }
 
@@ -185,7 +213,18 @@ export function placementFor(spec: HandleSpec, frame: GizmoFrame): HandlePlaceme
     }
 
     const axis = frame.axes[spec.axis ?? 0];
-    const x = anyPerpendicular(axis);
+    // An arrow or arm is round, so its roll about its own axis is arbitrary. A ring is NOT: its tube
+    // swells toward local +X (see `GizmoGeometry.Ring`), so rolling +X onto the in-plane direction of
+    // the viewer is what keeps the thick arc on the near rim — the half `gizmoPick` will actually grab —
+    // as the camera orbits. Near enough to edge-on that the projection has no direction, the ring is a
+    // line on screen and any roll will do.
+    let x: vec3;
+    if (spec.shape === 'ring') {
+        const inPlane = vec3.scaleAndAdd(vec3.create(), frame.toCamera, axis, -vec3.dot(frame.toCamera, axis));
+        x = vec3.length(inPlane) > 1e-3 ? vec3.normalize(inPlane, inPlane) : anyPerpendicular(axis);
+    } else {
+        x = anyPerpendicular(axis);
+    }
     const z = vec3.cross(vec3.create(), x, axis);
     return {
         position: vec3.clone(frame.origin as vec3),
@@ -238,6 +277,26 @@ export function tintHandles(handles: GizmoHandle[], hovered: HandleId | null, dr
         const isActive = handle.spec.id === active;
         const gain = isActive ? HOVER_GAIN : dragging ? IDLE_DIM : 1;
         handle.material.properties.set('color', handle.spec.color.map(c => Math.min(1, c * gain)));
+    }
+}
+
+/**
+ * Swap the active handle onto its hover shape and every other one back to resting.
+ *
+ * Separate from `tintHandles` because it writes a different thing at a different cost. A tint is a Map
+ * write; this bumps the model's geometry version, which makes `ModelNode.initialized` go false and the
+ * renderer re-upload one small vertex buffer on the next frame (`_drawOverlayNode`). That is why the
+ * identity check below is not optional: this runs once per animation frame over every handle, and
+ * without it a still cursor would re-upload three meshes a frame forever.
+ *
+ * Like the tint, it stays off the scene-change path — `Model` emits no events, so a hover cannot mark
+ * the project unsaved.
+ */
+export function thickenHandles(handles: GizmoHandle[], hovered: HandleId | null, dragging: HandleId | null): void {
+    const active = dragging ?? hovered;
+    for (const handle of handles) {
+        const want = (handle.spec.id === active ? handle.shapes.hover : null) ?? handle.shapes.rest;
+        if (handle.model.geometry !== want) handle.model.setGeometry(want);
     }
 }
 
