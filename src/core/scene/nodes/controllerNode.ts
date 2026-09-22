@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Logger } from "../../logger";
 import { Node } from "./node";
+import { isEditorOwnedName } from "../editorOwnership";
 import { CharacterNode } from "./characterNode";
 import { CameraRigNode } from "./cameraRigNode";
 import { unwrapScriptNode } from "./nodeScripting";
@@ -445,8 +446,8 @@ export class ControllerNode extends Node {
 
     private static _findRig(node: Node): CameraRigNode | null {
         for (const child of node.children) {
-            // Editor-only helpers are not part of the actor.
-            if (child.name.includes('__editor__') || child.name.includes('__debug__')) continue;
+            // Editor-only helpers are not part of the actor. The name test the publish strip uses too.
+            if (isEditorOwnedName(child.name)) continue;
             if (child instanceof CameraRigNode) return child;
             const found = ControllerNode._findRig(child);
             if (found) return found;

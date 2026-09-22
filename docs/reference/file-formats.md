@@ -43,7 +43,7 @@ What **Export** writes and **Import** reads: every scene, all asset libraries, t
 layout, project preferences and all texture and audio payloads.
 
 `BUNDLE_FORMAT_VERSION = 2`. Format 2 moves every bulk payload into a single **`assets.bin`** —
-texture bytes, mesh geometry, joint attributes, skins, animation samplers, terrain height and splat
+texture bytes, mesh geometry, joint attributes, skins, animation samplers, terrain height and mask
 data, foliage instances, tilemap cell grids, skybox faces and thumbnails — leaving the JSON entries
 otherwise unchanged, so an inflated v2 bundle reads like a v1.
 
@@ -90,7 +90,8 @@ manifest contract is newer than itself.
 | 4 | UI nodes in the scene tree |
 | 5 | Game-level shared animation clips |
 | 6 | Skinned joint indices and weights moved to blob chunks |
-| **7** | `NavMeshNode` *(unreleased — a v6 player has no such class, so `scene.navMeshes` comes back empty and path/patrol agents walk into geometry)* |
+| 7 | `NavMeshNode` *(unreleased — a v6 player has no such class, so `scene.navMeshes` comes back empty and path/patrol agents walk into geometry)* |
+| **8** | `DecalNode` *(unreleased — a v7 player has no such class, so every decal loads as a plain node and the game draws none of them)* |
 
 ### What a build strips
 

@@ -18,17 +18,27 @@ const terrain = (this.findNode('Landscape') as LandscapeNode).terrain
 ```ts
 heightAt(localX: number, localZ: number): number
 raycast(origin: vec3, dir: vec3, maxDistance = 10000): vec3 | null
-sampleSplat(x: number, z: number, out: number[]): number[]
+layerWeightsAt(x: number, z: number): TerrainLayerWeights
+normalAt(x: number, z: number): [number, number, number]
 layerCoverage(index: number): number
+heightRange(): { min: number; max: number }
 
 get config / chunks / heights / resolution / size / elementSize / origin
-get splatResolution / layers / splatId / foliage
+get layerStack / maskResolution / layers / foliage
 get/set material
 ```
 
 `heightAt` is the cheap way to sit something on the ground when you already know the column.
-`sampleSplat` tells you which paint layers are present at a point — useful for surface-dependent
-footstep sounds.
+`layerWeightsAt` tells you which layers cover a point — useful for surface-dependent footstep
+sounds:
+
+```ts
+const w = terrain.layerWeightsAt(x, z)   // { base, paint: number[], noFoliage }
+const onRoad = w.paint[roadLayerIndex] > 0.5
+```
+
+`sampleSplat(x, z, out)` still works, filling the first four weights of the stack; it is the
+compatibility form of the same query.
 
 > For finding ground **under physics**, prefer a downward raycast through
 > `scene.physics.raycast` — a terrain hit has `hit.node === null`, because the landscape registers
@@ -49,15 +59,35 @@ interface PaintBrush { radius: number; strength: number; falloff: number; layer:
 terrain.sculpt(hit.point, { mode: 'lower', radius: 3, strength: 4, falloff: 0.5 }, delta)
 ```
 
-There are four splat layers (0–3).
+The editor's tools go through the fuller form, which takes a brush SHAPE and any of the eleven
+sculpt tools, and returns the grid rectangle it changed (or null):
+
+```ts
+sculptWith(worldPoint, shape: BrushSpec, params: SculptParams): GridRegion | null
+
+type SculptTool = 'raise' | 'lower' | 'smooth' | 'flatten' | 'setHeight' | 'ramp'
+                | 'noise' | 'terrace' | 'erode' | 'hydro' | 'stamp'
+```
 
 ### Layers
 
+A landscape is one BASE landscape material covering everything, plus an ordered stack of PAINT
+layers over it, each with its own 0..1 mask. Painting a layer no longer takes weight from the
+others: erasing a road reveals whatever is under it.
+
 ```ts
-setLayer(index: number, source?, opts?): void
-clearLayer(index: number): void
-syncPackedLayers(frame: number): void
+get layerStack: TerrainLayerStack        // base, paintLayers, masks
+paintLayerMask(layerId, worldPoint, shape, amount, target): MaskRegion | null
+clearLayersAt(worldPoint, shape, amount): MaskRegion | null
+refreshLayers(): void                    // a material was edited in place
 ```
+
+`setLayer(index, source?, opts?)` and `clearLayer(index)` remain: index 0 is the base and index
+`i` is the `i-1`-th paint layer, which is what the old four-layer code meant.
+
+Each landscape material contributes one or more SURFACES — its own, plus a slot per extra surface,
+each with a blend rule in metres above the landscape's origin and degrees of slope. Sixteen
+surfaces can be composited at once (`MAX_TERRAIN_SURFACES`).
 
 ### Foliage
 
@@ -99,7 +129,8 @@ of them would be neither useful nor affordable.
 ```ts
 importHeightmap(path: string, amplitude: number): void
 exportHeightmap()
-resampleHeightsFrom(other) ; resampleSplatFrom(other) ; resampleFoliageFrom(other)
+resampleHeightsFrom(other) ; resampleLayersFrom(other) ; resampleFoliageFrom(other)
+readHeights(region) ; writeHeights(region, data) ; setHeights(heights)
 ```
 
 ### Housekeeping
@@ -110,8 +141,8 @@ dispose(world?): void
 serialize() ; Terrain.deserialize(json, material?)
 ```
 
-> `TERRAIN_RELIEF_ENABLED` is `false`: per-layer terrain relief is off, and the editor hides its
-> controls behind the same flag. It is a flag rather than a deletion so the code can come back.
+> The per-layer terrain parallax march has been retired. Height maps still earn their place: they
+> drive a rule's **height blend**, which is what lets gravel poke through the surface painted over it.
 
 ---
 

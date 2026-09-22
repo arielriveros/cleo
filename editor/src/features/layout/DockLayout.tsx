@@ -31,7 +31,11 @@ const OLD_DOCK_LAYOUT_KEYS = [
 // 16: the clip editor arrived with two panels of its own, and the old `animation` mode was renamed
 // `stateMachine` — so a tree stored at 15 is keyed by a mode name that no longer exists AND has no
 // arrangement for the new panels. Both halves make a stored layout unreadable rather than merely stale.
-const LAYOUT_VERSION = 16;
+// 17: landscape mode gained its Tools and Layers panels; a tree stored at 16 has nowhere for them.
+// 18: those two panels moved apart — Layers into a group of its own under the right rail, because
+// painting needs the tool AND the layer it paints into on screen at the same time, and a tree stored at
+// 17 has them tabbed behind Properties where the material slots could not be found.
+const LAYOUT_VERSION = 18;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -87,6 +91,9 @@ const ANIMATION_FIELD_PANELS = ['animField', 'animFieldPlot'] as const;
 /** Tilemap-editor panels: the tile palette and the layer stack. Shown only in tilemap mode. */
 const TILEMAP_PANELS = ['tilePalette', 'tilemapLayers'] as const;
 
+/** Landscape-mode panels: the brush and its tools, and the base + paint layer stack. Shown only there. */
+const LANDSCAPE_PANELS = ['landscapeTools', 'landscapeLayers'] as const;
+
 /** The two Add palettes, stacked as tabs above the Scene tree. Ordinary chrome, shown wherever the tree is. */
 const ADD_PANELS = ['sceneAdd', 'uiAdd'] as const;
 
@@ -99,7 +106,8 @@ const INPUT_PANELS = ['inputMap'] as const;
 
 const CHROME_PANELS = [
   'scene', 'properties', 'scripts', 'physics', 'logger', 'assets',
-  ...STATE_MACHINE_PANELS, ...ANIMATION_FIELD_PANELS, ...CLIP_PANELS, ...TILEMAP_PANELS, ...ADD_PANELS,
+  ...STATE_MACHINE_PANELS, ...ANIMATION_FIELD_PANELS, ...CLIP_PANELS, ...TILEMAP_PANELS, ...LANDSCAPE_PANELS,
+  ...ADD_PANELS,
 ] as const;
 
 // The Scene panel hosts the mode-specific tree, so its tab label follows the mode.
@@ -110,6 +118,7 @@ const PANEL_TITLES: Record<string, string> = {
   animField: 'Field Settings', animFieldPlot: 'Blend Space',
   clipTracks: 'Clip', clipTimeline: 'Timeline',
   tilePalette: 'Tiles', tilemapLayers: 'Layers',
+  landscapeTools: 'Landscape Tools', landscapeLayers: 'Landscape Layers',
   performance: 'Performance', rendererSettings: 'Renderer Settings',
   inputMap: 'Input',
 };
@@ -118,7 +127,7 @@ function panelTitle(id: string, mode: EditorMode): string {
   if (id === 'scene' && (mode === 'stateMachine' || mode === 'rig' || mode === 'animation')) return 'Skeleton';
   if (id === 'properties') {
     if (mode === 'material') return 'Material';
-    if (mode === 'terrainMaterial') return 'Terrain Material';
+    if (mode === 'terrainMaterial') return 'Landscape Material';
     if (mode === 'tileset') return 'Tileset';
     if (mode === 'aiBrain') return 'Brain';
     if (mode === 'texture') return 'Texture';
@@ -178,12 +187,20 @@ function buildDefaultLayout(api: DockviewApi) {
   });
   // The animation panels share the Properties tab strip; they are hidden everywhere but the one mode that
   // owns them, where Properties itself is hidden. `clipTracks` joins them; `clipTimeline` goes below.
-  for (const id of [...STATE_MACHINE_PANELS, 'animField', 'clipTracks', ...TILEMAP_PANELS]) {
+  for (const id of [...STATE_MACHINE_PANELS, 'animField', 'clipTracks', ...TILEMAP_PANELS, 'landscapeTools']) {
     api.addPanel({
       id, component: id, title: PANEL_TITLES[id],
       position: { referencePanel: 'properties', direction: 'within' },
     });
   }
+  // The landscape layer stack gets a group of its OWN under the right rail rather than a tab beside the
+  // tools: painting is a two-handed job — the brush in one panel, the layer it paints into (and that
+  // layer's material) in the other — and behind a tab the material slots simply were not found.
+  api.addPanel({
+    id: 'landscapeLayers', component: 'landscapeLayers', title: PANEL_TITLES['landscapeLayers'],
+    position: { referencePanel: 'properties', direction: 'below' },
+    initialHeight: Math.round(height * 0.45),
+  });
   // Docked with Properties on the right rail. None of these is in CHROME_PANELS, so they survive into
   // the mode that owns them, where the rest of that tab strip is hidden.
   for (const id of [...RENDERER_PANELS, ...INPUT_PANELS]) {
@@ -291,6 +308,7 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
   if (mode !== 'stateMachine') for (const id of STATE_MACHINE_PANELS) hidden.add(id);
   if (mode !== 'animationField') for (const id of ANIMATION_FIELD_PANELS) hidden.add(id);
   if (mode !== 'tilemap') for (const id of TILEMAP_PANELS) hidden.add(id);
+  if (mode !== 'landscape') for (const id of LANDSCAPE_PANELS) hidden.add(id);
   if (mode !== 'animation') for (const id of CLIP_PANELS) hidden.add(id);
 
   const hide = (...ids: readonly string[]) => { for (const id of ids) hidden.add(id); };
@@ -455,6 +473,12 @@ export default function DockLayout() {
       applyRestriction(api);
       // fromJSON restores the tab selected when the tree was saved; put the user's choice back.
       restoreBottomTab(api);
+      // Landscape mode opens on its tools, not on Properties: the tools and the layer stack under them
+      // ARE the mode. Skipped when they are already up, because setActive also takes global focus.
+      if (editorMode === 'landscape') {
+        const tools = api.getPanel('landscapeTools');
+        if (tools && tools.group?.activePanel?.id !== 'landscapeTools') tools.api.setActive();
+      }
       relayout(api); // opening/closing panels moves the always-rendered viewport and logger
     });
     keyRef.current = editorMode;

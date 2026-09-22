@@ -1,4 +1,4 @@
-import { Node, Material, TextureManager } from 'cleo'
+import { Node, Material, TextureManager, Logger } from 'cleo'
 import { cryptoRandomId } from './ids'
 
 // Node variable linking a node's mesh material to a shared material asset.
@@ -43,22 +43,73 @@ export function getMaterialIdsOf(node: Node | null | undefined): (string | undef
 
 // Sprites must stay absent from all three. A sprite's image comes from its tileset and its
 // tint/opacity/blending are plain node fields; its internal Material may never be linked to an asset.
+//
+// A DECAL is the one other node type in them. It projects its material rather than wearing it, but the
+// material is linked, saved, propagated and deleted exactly like a model's: one slot, `decal.material`,
+// with the same `__materialId` link. Every test here is by `nodeType` rather than `instanceof DecalNode`,
+// for the reason the model checks already were: this module runs against a mocked `cleo` in tests, and an
+// `instanceof` against a class the mock does not export throws.
 
-/** The live Material carried by a node's mesh, or null for non-material nodes. */
+/** The one shading model a decal can project. `DecalNode` refuses anything else and projects white. */
+const DECAL_MATERIAL_TYPE = 'pbr'
+
+/**
+ * Whether a SERIALIZED material (an asset's `material`, a node payload's) is one a decal can project.
+ * Mirrors `DecalNode`'s own rule, which parses and then tests `type === 'pbr'`: a Basic, Blinn-Phong, Cel or
+ * custom material serializes under its own type and is refused.
+ */
+export function isProjectableMaterial(serialized: any): boolean {
+  return !!serialized && typeof serialized === 'object' && serialized.type === DECAL_MATERIAL_TYPE
+}
+
+/**
+ * Whether `asset` may be linked to `node`. Always true, except for a decal and a material that is not PBR:
+ * the decal would store null and project plain white, which reads as the link having silently failed.
+ */
+export function canLinkMaterial(node: Node, asset: Pick<MaterialAsset, 'material'>): boolean {
+  return node.nodeType !== 'decal' || isProjectableMaterial(asset.material)
+}
+
+/**
+ * The material a freshly added decal starts with, and the one it falls back to when its link is removed.
+ * A mid grey at partial coverage: visible on light and dark ground alike, and plainly a placeholder rather
+ * than an authored look. PBR, or the decal would refuse it.
+ */
+export function defaultDecalMaterial(): Material {
+  return Material.PBR({ baseColor: [0.5, 0.5, 0.5], roughness: 0.9, opacity: 0.8 })
+}
+
+/**
+ * Give a decal with NO material the default one, so there is something to build an asset from. A decal
+ * parsed from a payload whose material was not PBR comes back with null, and `createMaterialForNode` does
+ * nothing at all for a node whose material is null. A no-op for everything else.
+ */
+export function seedDecalMaterial(node: Node): void {
+  if (node.nodeType === 'decal' && !getNodeMaterial(node)) setNodeMaterial(node, defaultDecalMaterial())
+}
+
+/** The live Material carried by a node's mesh (or projected by a decal), or null for non-material nodes. */
 export function getNodeMaterial(node: Node): Material | null {
   const n = node as any
   if (node.nodeType === 'model') return n.model?.material ?? null
+  if (node.nodeType === 'decal') return n.material ?? null
   return null
 }
 
 /** True if this node type carries an editable material. */
 export function nodeSupportsMaterial(node: Node | null | undefined): boolean {
-  return !!node && node.nodeType === 'model'
+  return !!node && (node.nodeType === 'model' || node.nodeType === 'decal')
 }
 
 /** Replace the live Material on a node's mesh. No-op for non-material nodes. */
 function setNodeMaterial(node: Node, material: Material, submesh = 0): void {
   const n = node as any
+  // A decal has exactly one slot. Callers have already refused a non-PBR material (see canLinkMaterial);
+  // the setter would otherwise store null and warn.
+  if (node.nodeType === 'decal') {
+    if (submesh === 0) n.material = material
+    return
+  }
   if (node.nodeType !== 'model' || !n.model) return
   // `material` is the alias for materials[0], so the default case is unchanged.
   if (submesh === 0) n.model.material = material
@@ -91,8 +142,19 @@ export function materialAssetTextureIds(asset: MaterialAsset): string[] {
   return (asset.textures ?? []).map((t: any) => t?.id).filter(Boolean)
 }
 
-/** Apply a material asset to a node's `submesh`-th material: rebuild the Material and tag the link. */
-export function applyMaterialAsset(node: Node, asset: MaterialAsset, submesh = 0): void {
+/**
+ * Apply a material asset to a node's `submesh`-th material: rebuild the Material and tag the link.
+ *
+ * Returns false, changing nothing, when the node cannot take it (a decal and a non-PBR asset — see
+ * {@link canLinkMaterial}). User-facing link paths test `canLinkMaterial` first and say why; this is the
+ * backstop for the ones that cannot, such as a linked asset re-saved as another shading model, where the
+ * decal keeps its last good material and link rather than silently projecting white.
+ */
+export function applyMaterialAsset(node: Node, asset: MaterialAsset, submesh = 0): boolean {
+  if (!canLinkMaterial(node, asset)) {
+    Logger.warn(`'${node.name}' is a decal and can only project PBR materials; '${asset.name}' is ${asset.material?.type ?? 'unknown'}.`, 'Editor')
+    return false
+  }
   // Only legacy assets carry embedded base64; a current asset's textures are preloaded at boot.
   for (const t of asset.textures || []) {
     if (t?.id && !TextureManager.Instance.getTexture(t.id))
@@ -108,6 +170,7 @@ export function applyMaterialAsset(node: Node, asset: MaterialAsset, submesh = 0
     ids[submesh] = asset.id
     node.setVariable(MATERIAL_IDS_VAR, JSON.stringify(ids), 'string')
   }
+  return true
 }
 
 /**
@@ -126,11 +189,19 @@ export function fallbackMaterial(): Material {
   return Material.Basic({ color: [1, 1, 1], opacity: 1, texture: 'Null' })
 }
 
+/**
+ * What `node` falls back to when its link goes. The Basic fallback for everything but a decal, which would
+ * refuse it and project plain white; a decal gets its placeholder instead.
+ */
+function fallbackMaterialFor(node: Node): Material {
+  return node.nodeType === 'decal' ? defaultDecalMaterial() : fallbackMaterial()
+}
+
 /** Reset a node to the fallback material and drop its material-asset link (every submesh's). */
 export function unlinkToFallback(node: Node): void {
   const n = node as any
   const count = n.model?.materials?.length ?? 1
-  for (let i = 0; i < count; i++) setNodeMaterial(node, fallbackMaterial(), i)
+  for (let i = 0; i < count; i++) setNodeMaterial(node, fallbackMaterialFor(node), i)
   node.removeVariable(MATERIAL_ID_VAR)
   node.removeVariable(MATERIAL_IDS_VAR)
 }
@@ -157,7 +228,7 @@ export function unlinkMaterialAt(node: Node, submesh: number): void {
   const count: number = n.model?.materials?.length ?? 1
   if (count <= 1) { unlinkToFallback(node); return }   // nothing to keep: the single-slot case is unchanged
 
-  setNodeMaterial(node, fallbackMaterial(), submesh)
+  setNodeMaterial(node, fallbackMaterialFor(node), submesh)
 
   const ids = getMaterialIdsOf(node)
   while (ids.length < count) ids.push(undefined)
@@ -200,6 +271,12 @@ export function resolveMaterialRefs(json: any, materials: MaterialAsset[]): void
     // `Model.parse` PREFERS `materials` over `material` whenever the array is present, so the singular
     // alone is not enough. Slot 0 and the scalar link are the same thing and must be written together.
     if (Array.isArray(json.model.materials) && json.model.materials.length) json.model.materials[0] = single
+  }
+  // A decal's one slot is `decal.material`, linked by the same scalar. An asset that has since become a
+  // non-PBR material is not written: the decal would parse it to null and project white, so the embedded
+  // copy — the last PBR material it was given — stands, exactly as `applyMaterialAsset` leaves a live one.
+  if (single && json.decal && typeof json.decal === 'object' && isProjectableMaterial(single)) {
+    json.decal.material = single
   }
 
   // A merged model links one asset per submesh; `materials` on the serialized model is parallel to them.

@@ -288,6 +288,8 @@ export async function packBundleAssets(bundle: BundleData): Promise<PackBundleRe
     if (terrain && typeof terrain === 'object') {
       packBase64(terrain, 'heights', true)
       packBase64(terrain, 'splat', true)
+      // The layer stack's paint masks (see TerrainLayerStack.serialize), the successor to `splat`.
+      if (terrain.layerStack && typeof terrain.layerStack === 'object') packBase64(terrain.layerStack, 'masks', true)
     }
 
     // A scattered foliage layer's instance buffer: stride-5 float32 `[x,y,z,yaw,scale]`, base64'd by

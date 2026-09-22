@@ -1,4 +1,4 @@
-import { Node, ModelNode, SkyboxNode, LightNode, LightProbeNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode } from 'cleo'
+import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
 import RigSlot from './RigSlot';
@@ -7,6 +7,8 @@ import SkyboxEditor from './SkyboxEditor'
 import TransformEditor from './TransformEditor'
 import LightEditor from './LightEditor'
 import LightProbeEditor from './LightProbeEditor'
+import DecalEditor from './DecalEditor'
+import { nodeSupportsMaterial } from '../../../utils/materials'
 import NodeInfo from './NodeInfo'
 import CameraEditor from './CameraEditor'
 import SpriteEditor from './SpriteEditor'
@@ -56,7 +58,9 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
 
         {/* Everything else is disabled in one shot for a template instance. */}
         <fieldset disabled={ro} className={`${ro ? 'opacity-60' : ''} border-0 m-0 p-0 min-w-0`}>
-          { props.node.nodeType === 'model' && <MaterialSlot node={props.node as ModelNode} /> }
+          {/* Models and decals: the one predicate every material helper uses, so the slot shows exactly
+              where linking, save propagation and deletion work. */}
+          { nodeSupportsMaterial(props.node) && <MaterialSlot node={props.node} /> }
           {/* A node that IS a skinned model, or is the ROOT of an instance holding one — `ownSkinnedModelNodeOf`,
               never a subtree search, so a section is about the selected node rather than anything below it.
               Both render away otherwise. Between them these are the only animation-related sections on a
@@ -67,6 +71,9 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'animatedSprite' && <AnimatedSpriteEditor /> }
           { props.node.nodeType === 'light' && <LightEditor node={props.node as LightNode} /> }
           { props.node.nodeType === 'lightProbe' && <LightProbeEditor node={props.node as LightProbeNode} /> }
+          {/* Keyed by id so selecting another decal starts from ITS values rather than writing this one's
+              state into it for a frame. */}
+          { props.node.nodeType === 'decal' && <DecalEditor key={props.node.id} node={props.node as DecalNode} /> }
           { props.node.nodeType === 'skybox' && <SkyboxEditor node={props.node as SkyboxNode} /> }
           { props.node.nodeType === 'camera' && <CameraEditor node={props.node as CameraNode} /> }
           { props.node.nodeType === 'cameraRig' && <CameraRigEditor node={props.node as CameraRigNode} /> }

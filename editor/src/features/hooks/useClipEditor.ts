@@ -1,5 +1,5 @@
 import EventEmitter from '../../utils/eventEmitter';
-import { Logger, Node, Scene, CleoEngine } from 'cleo';
+import { Logger, Node, Scene, CleoEngine, markEditorOwned } from 'cleo';
 import { cryptoRandomId } from '../../utils/ids';
 import { MaterialAsset } from '../../utils/materials';
 import { AnimationAsset } from '../../utils/animationAssets';
@@ -10,6 +10,7 @@ import { combineBounds } from '../../utils/modelThumbnails';
 import { invalidateAnimationCache } from '../../utils/animationResolve';
 import { createAssetEditScene } from '../demoScene/createAssetEditScene';
 import { createAnimationEditorScene } from '../demoScene/createAnimationEditorScene';
+import { buildSkeletonProxy } from '../demoScene/skeletonProxy';
 import type { EditorTab } from '../engineContextTypes';
 
 type TabRuntime = { scene: Scene; rootId: string; previewModelId?: string; skinnedId?: string };
@@ -80,7 +81,12 @@ export function useClipEditor(deps: {
     scene.spawnRulesEnabled = false;
     void createAssetEditScene(scene, withoutDirty);
 
-    const holder = new Node(asset.name);
+    // Editor-OWNED (see `Node.isEditorOwned`), and so is the character instantiated under it. This tab saves
+    // ClipProvider's working copy, never scene content, so no event from this subtree can be an edit — yet
+    // the preview's root-motion playback writes its transform every frame, which marked the tab unsaved and
+    // fed the undo recorder. The flag rather than a name marker: the holder is named after the asset.
+    // Nothing serializes this scene; if something ever does, `Node.serialize` leaves the holder out.
+    const holder = markEditorOwned(new Node(asset.name));
     scene.addNode(holder);
 
     const candidates = modelsForClip(asset);
@@ -88,7 +94,10 @@ export function useClipEditor(deps: {
     let skinned: ReturnType<typeof firstSkinnedModelNode> = null;
 
     if (model) {
-      instantiateModelAsset(model, holder, materialsRef.current, modelsRef.current, animationsRef.current);
+      // Bracketed as well: the flag reaches only the character root's own attach. The parser attaches
+      // bottom-up, so every nested add fires while its parent is still detached and owned by nothing.
+      withoutDirty(() =>
+        instantiateModelAsset(model, holder, materialsRef.current, modelsRef.current, animationsRef.current));
       scene.root.updateTransforms();
       skinned = firstSkinnedModelNode(holder);
       if (!skinned) {
@@ -98,14 +107,22 @@ export function useClipEditor(deps: {
 
     if (skinned) {
       const bounds = combineBounds(skinned);
-      createAnimationEditorScene(scene, bounds.center, bounds.radius);
+      createAnimationEditorScene(scene, bounds.center, bounds.radius, { silently: withoutDirty });
     } else {
-      // Nothing to frame. A unit-ish box keeps the camera somewhere sensible so the bone overlay, which
-      // draws in world space, still lands on screen.
-      createAnimationEditorScene(scene, [0, 1, 0], 1.5);
+      // No character: stand a proxy up over the rig's own skin (or the one this asset embedded before
+      // rigs existed), so the bone overlay, the joint tree and the transport have a skinned node to read.
+      // Framed from its bind pose, since skeletons are often authored in centimetres.
+      const rig = asset.rigId ? rigsRef.current.find(r => r.id === asset.rigId) : undefined;
+      const proxy = buildSkeletonProxy(rig?.skin ?? asset.sourceSkin);
+      if (proxy) {
+        withoutDirty(() => holder.addChild(proxy.node));
+        scene.root.updateTransforms();
+        skinned = proxy.node;
+      }
+      createAnimationEditorScene(scene, proxy?.center ?? [0, 1, 0], proxy?.radius ?? 1.5, { silently: withoutDirty });
       if (!model) {
         Logger.info(
-          asset.rigId
+          proxy
             ? `No character uses "${asset.name}"'s rig yet — showing its skeleton on its own`
             : `"${asset.name}" is not linked to a rig, so there is no skeleton to play it on`, 'Editor');
       }

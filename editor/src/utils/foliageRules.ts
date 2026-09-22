@@ -1,6 +1,6 @@
 import {
   Node, ModelNode, AnimatedModel, TerrainFoliageRule, Vec, disposeModelSubtree,
-  DEFAULT_FOLIAGE_DENSITY, FOLIAGE_DENSITY_UNIT,
+  DEFAULT_FOLIAGE_DENSITY, FOLIAGE_DENSITY_UNIT, markEditorOwned,
 } from 'cleo'
 import { ModelAsset, resolvedLods } from './models'
 import { MaterialAsset, resolveMaterialRefs } from './materials'
@@ -14,13 +14,26 @@ import { deepClone } from './deepClone'
 // (foliage instancing has a single mat4 per instance — there is no room for per-sub-mesh transforms).
 
 /**
+ * The editor's dirty/history suppressor (`withoutDirty`), around {@link flattenLevel}'s throwaway parse. A
+ * pass-through until the editor installs it, which keeps this module usable headless and in tests.
+ */
+let suppress: <T>(fn: () => T) => T = fn => fn()
+
+/** Install the editor's dirty-suppressor. `setThumbnailDirtySuppressor` forwards it here. */
+export function setFoliageFlattenSuppressor(fn: <T>(f: () => T) => T): void { suppress = fn }
+
+/**
  * Flatten one LOD level's serialized subtree into a list of Model JSON payloads. The subtree is
  * re-instantiated through the engine's own parser (so transforms/eulers are interpreted exactly as the
  * renderer would), then each ModelNode's world transform — relative to the level root — is baked into a
  * cloned geometry. Skinned models are rejected: their vertices are bound to a skeleton.
  */
 function flattenLevel(nodeJson: any, materials?: MaterialAsset[]): any[] {
-  const holder = new Node('__foliage_flatten')
+  // Editor-owned: nothing parsed here is the user's work. It runs from terrain-material loads and the
+  // foliage inspector, most of which have no bracket of their own, and every event it emits carries the
+  // model's own node names. Nothing serializes the holder or its subtree — only each ModelNode's geometry
+  // and material are read out — so the flag changes no output.
+  const holder = markEditorOwned(new Node('__foliage_flatten'))
   const clone = deepClone(nodeJson)
   regenerateIds(clone, new Map())
   // Re-resolve `__materialId` against the CURRENT library before baking, exactly as openMeshTab and
@@ -28,7 +41,10 @@ function flattenLevel(nodeJson: any, materials?: MaterialAsset[]): any[] {
   // and baking it verbatim is what left foliage showing an old material until the model happened to be
   // re-opened and re-saved. Resolving here covers every LOD level, since each one flattens through this.
   if (materials) resolveMaterialRefs(clone, materials)
-  parseByType(holder, clone)
+  // Suppressed as well as owned, because the flag reaches only the holder's own attach. The parser attaches
+  // bottom-up (`Node.finishParse` adds a node to its parent after its children), so every nested add, and
+  // every transform the parse writes, fires while its parent is still detached and owned by nothing.
+  suppress(() => parseByType(holder, clone))
   holder.updateTransforms()
 
   const models: any[] = []

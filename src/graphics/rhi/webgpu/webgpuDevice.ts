@@ -332,6 +332,14 @@ class WebGPUTexture implements Texture {
         this.setCompareMode(compare);
     }
 
+    /** `setSize` already created the array at this size, layer count and level count; assert it did. */
+    public allocateArray(width: number, height: number, layers: number, levels: number): void {
+        this._requireSize(width, height, 'allocateArray');
+        if (this.depthOrArrayLayers !== Math.max(1, layers) || this.mipLevelCount !== Math.max(1, levels))
+            throw new Error(`${this.label}: allocateArray expects ${layers} layers x ${levels} mips, but ` +
+                            `this texture has ${this.depthOrArrayLayers} x ${this.mipLevelCount} - call setSize first`);
+    }
+
     // Assert that `setSize` already allocated what this call assumes. An empty body is what a caller
     // that FORGOT to sync would also see, and that surfaces as an empty texture several passes later.
     private _requireSize(width: number, height: number, operation: string): void {
@@ -1162,7 +1170,11 @@ export class WebGPUDevice implements Device {
 
         // A view onto ONE layer is `2d`, never `2d-array`/`cube` — that is how a cascade or a cube face
         // becomes an attachment. A whole-texture view keeps the texture's own dimension.
-        const wholeTexture = tex.depthOrArrayLayers === 1;
+        //
+        // An ARRAY is always narrowed, even with a single layer: this is an attachment view, and a
+        // one-layer `2d-array` view is not one every implementation accepts as a render target. A
+        // landscape with exactly one surface has exactly that texture.
+        const wholeTexture = tex.depthOrArrayLayers === 1 && tex.dimension !== '2d-array';
         const dimension = wholeTexture ? gpuViewDimension(tex.dimension) : '2d';
         const arrayLayerCount = wholeTexture ? tex.depthOrArrayLayers : 1;
 
@@ -1526,11 +1538,11 @@ export class WebGPUDevice implements Device {
     }
 
     public writeTexture(texture: Texture, data: ArrayBufferView, width: number, height: number,
-                        mipLevel: number = 0, arrayLayer: number = 0): void {
+                        mipLevel: number = 0, arrayLayer: number = 0, x: number = 0, y: number = 0): void {
         const tex = texture as WebGPUTexture;
         const bytesPerTexel = TEXTURE_FORMAT_INFO[tex.format].bytesPerTexel;
         this._device.queue.writeTexture(
-            { texture: tex.handle, mipLevel, origin: { x: 0, y: 0, z: arrayLayer } },
+            { texture: tex.handle, mipLevel, origin: { x, y, z: arrayLayer } },
             data.buffer as ArrayBuffer,
             // No 256-byte rule here: the alignment requirement applies to buffer COPIES, not to
             // `writeTexture`, which takes the tightly packed rows a caller naturally has.

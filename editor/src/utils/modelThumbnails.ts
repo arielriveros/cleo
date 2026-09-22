@@ -1,12 +1,14 @@
-import { Scene, Node, ModelNode, Model, Geometry, Material, TextureManager, CleoEngine, AnimatedModel, Terrain, Camera, CameraNode, Logger } from 'cleo';
+import { Scene, Node, ModelNode, Model, Geometry, Material, TextureManager, CleoEngine, AnimatedModel, Terrain, Camera, CameraNode, Logger, markEditorOwned } from 'cleo';
 import { createModelPreviewScene, addPreviewLights } from '../features/demoScene/createModelPreviewScene';
 import { createMaterialPreviewScene } from '../features/demoScene/createMaterialPreviewScene';
-import { fitDistance, MATERIAL_SPHERE_RADIUS, previewSphereGeometry, PREVIEW_TERRAIN_RADIUS } from '../features/demoScene/previewFraming';
+import { fitDistance, MATERIAL_SPHERE_RADIUS, previewSphereGeometry, REFERENCE_LANDSCAPE } from '../features/demoScene/previewFraming';
 import { buildTerrainPreviewSubject } from '../features/demoScene/previewTerrainSubject';
+import { terrainPreviewSphere, applyTerrainPreviewShape, TERRAIN_SPHERE_RADIUS } from '../features/demoScene/previewShapes';
 import type { MaterialAsset } from './materials';
 import { ModelAsset } from './models';
 import { parseByType, regenerateIds } from './nodeSubtree';
 import { TerrainMaterialAsset, parseTerrainMaterialAsset } from './terrainMaterials';
+import { setFoliageFlattenSuppressor } from './foliageRules';
 import { awaitTexturesReady } from './textureReady';
 import { deepClone } from './deepClone';
 
@@ -207,8 +209,16 @@ export async function awaitSubtreeTexturesReady(root: Node): Promise<void> {
  */
 let silently: <T>(fn: () => T) => T = fn => fn();
 
-/** Install the editor's dirty-suppressor. Called once by EngineContext. */
-export function setThumbnailDirtySuppressor(fn: <T>(f: () => T) => T): void { silently = fn; }
+/**
+ * Install the editor's dirty-suppressor. Called once by EngineContext.
+ *
+ * Also handed to foliageRules, whose prototype flatten parses a throwaway model subtree the same way the
+ * builders here do, but from paths (terrain-material loads, the foliage inspector) with no bracket.
+ */
+export function setThumbnailDirtySuppressor(fn: <T>(f: () => T) => T): void {
+  silently = fn;
+  setFoliageFlattenSuppressor(fn);
+}
 
 /**
  * Render a base64 PNG thumbnail of an imported mesh subtree: a throwaway scene auto-framed to the model's
@@ -283,7 +293,10 @@ export async function renderMaterialAssetThumbnail(engine: CleoEngine, asset: Ma
 export async function renderModelAssetThumbnail(engine: CleoEngine, asset: ModelAsset): Promise<string> {
   restoreEmbeddedTextures(asset.textures); // legacy embedded-texture assets
   const root = silently(() => {
-    const holder = new Node('__thumb');
+    // Editor-owned, so the parse's structural adds under it say so on the event itself. `silently` alone
+    // covers only this synchronous block, and only when the editor has installed a suppressor. The holder
+    // is never serialized: its one child is lifted out into the preview scene below.
+    const holder = markEditorOwned(new Node('__thumb'));
     const clone = deepClone(asset.nodeJson);
     regenerateIds(clone, new Map());
     parseByType(holder, clone);
@@ -447,7 +460,9 @@ export async function bakeModelImpostor(engine: CleoEngine, asset: ModelAsset): 
   restoreEmbeddedTextures(asset.textures);
 
   const root = silently(() => {
-    const holder = new Node('__impostor');
+    // Editor-owned for the same reason as renderModelAssetThumbnail's '__thumb', and likewise never
+    // serialized: its one child is lifted out into the capture scene below.
+    const holder = markEditorOwned(new Node('__impostor'));
     const clone = deepClone(asset.nodeJson);
     regenerateIds(clone, new Map());
     parseByType(holder, clone);
@@ -462,11 +477,12 @@ export async function bakeModelImpostor(engine: CleoEngine, asset: ModelAsset): 
 
     const f = impostorFraming(combineBox(root));
 
-    const cam = new CameraNode('__impostor__Camera', new Camera({
+    // Owned by the flag: `__impostor__` is not one of the `__editor__`/`__debug__` markers.
+    const cam = markEditorOwned(new CameraNode('__impostor__Camera', new Camera({
       type: 'orthographic',
       left: f.left, right: f.right, bottom: f.bottom, top: f.top,
       near: f.near, far: f.far,
-    }));
+    })));
     cam.active = true;
     // A front elevation, level with the subject: the view a distant instance is almost always seen
     // from. Both halves come from `impostorFraming` — see the note there on why the rotation is not
@@ -511,12 +527,19 @@ export async function bakeModelImpostor(engine: CleoEngine, asset: ModelAsset): 
 }
 
 /**
- * Re-render a saved TerrainMaterialAsset's preview sphere. The material is layer 0 of a tiny helper
- * terrain, so the sphere renders through the terrain shader rather than as a plain PBR surface.
+ * Re-render a saved TerrainMaterialAsset's thumbnail on the CANONICAL SPHERE — the same shape every
+ * other material's thumbnail uses, so a library of mixed materials reads as one set.
+ *
+ * The patch still exists and still carries the layer stack: it is what the renderer syncs (only nodes in
+ * `scene.landscapes` reach `syncPackedLayers`), and the sphere draws with its composite material. The
+ * patch is simply hidden, which is exactly what the editor tab's shape switch does.
  */
 export async function renderTerrainMaterialAssetThumbnail(engine: CleoEngine, asset: TerrainMaterialAsset): Promise<string> {
   const texIds = restoreEmbeddedTextures(asset.textures);
-  const tm = parseTerrainMaterialAsset(asset);
+  // Inside the suppressor: the parse re-derives each mesh foliage rule's prototypes by flattening its
+  // model through a throwaway subtree (foliageRules' flattenLevel), and those structural adds carry the
+  // model's own, user-chosen node names. Unwrapped, they marked whichever tab was active unsaved.
+  const tm = silently(() => parseTerrainMaterialAsset(asset));
 
   // The textures are awaited BEFORE the layer is assigned, and that ordering is a fix rather than a
   // tidy-up: `setLayer` resolves the normal+height pack synchronously, and against undecoded images it
@@ -527,11 +550,16 @@ export async function renderTerrainMaterialAssetThumbnail(engine: CleoEngine, as
   const { scene, node, envReady } = silently(() => {
     const s = new Scene();
     const ready = createMaterialPreviewScene(s, {
-      skybox: false, silently, subjectRadius: PREVIEW_TERRAIN_RADIUS,   // see renderMaterialThumbnail
+      skybox: false, silently, subjectRadius: TERRAIN_SPHERE_RADIUS,   // see renderMaterialThumbnail
     });
     // A real terrain patch, the same subject the editor tab previews — see buildTerrainPreviewSubject.
     const landscape = buildTerrainPreviewSubject(s, tm);
+    const sphere = terrainPreviewSphere(landscape.terrain);
+    s.addNode(sphere);
     s.start();
+    // Fixed framing, from the shape's own rig: a capture used to inherit whatever view the tab had been
+    // left on, so two thumbnails of the same material could disagree.
+    applyTerrainPreviewShape(s, { landscape, sphere, material: tm, referenceSize: REFERENCE_LANDSCAPE.size }, 'sphere');
     return { scene: s, node: landscape, envReady: ready };
   });
 

@@ -68,6 +68,13 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             // every mover's velocity is rejected or smeared by half a pixel at its own silhouette.
             '_objectVelocityPass',
             '_renderModel',           // forward opaque (jitters) AND transparents (does not)
+            // The landscape-only depth decals with `receivers: 'terrain'` compare against. It must jitter
+            // exactly like the G-buffer and scene depth it is compared with, or the two disagree by a
+            // TAA offset at every slope and the brush frays.
+            '_decalReceiverPass',
+            // Every decal box: the DBuffer and emissive passes (before the resolve, jittered) AND the
+            // editor overlay (after it, not) — the `_renderModel` situation, decided by the flag.
+            '_setDecalUniforms',
 
             // --- After the resolve: the flag is already false, and these must stay put. ---
             '_drawSkeletonOverlay',

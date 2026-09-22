@@ -9,6 +9,7 @@ import { LandscapeNode } from "./nodes/landscapeNode";
 import { TilemapNode } from "./nodes/tilemapNode";
 import { LightNode } from "./nodes/lightNode";
 import { LightProbeNode } from "./nodes/lightProbeNode";
+import { DecalNode } from "./nodes/decalNode";
 import { SkyboxNode } from "./nodes/skyboxNode";
 import { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
 import { SkyAtmosphereNode } from "./nodes/skyAtmosphereNode";
@@ -93,6 +94,7 @@ export class Scene {
     private _characters: Set<CharacterNode> = new Set();
     private _controllers: Set<ControllerNode> = new Set();
     private _navMeshes: Set<NavMeshNode> = new Set();
+    private _decals: Set<DecalNode> = new Set();
     private _sounds: Set<SoundNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
     private _uiRoots: Set<UIRootNode> = new Set();
@@ -650,6 +652,7 @@ export class Scene {
         this._characters = new Set();
         this._controllers = new Set();
         this._navMeshes = new Set();
+        this._decals = new Set();
         this._sounds = new Set();
         this._lightProbes = new Set();
         this._skybox = null;
@@ -679,6 +682,8 @@ export class Scene {
                 this._controllers.add(node);
             if (node instanceof NavMeshNode)
                 this._navMeshes.add(node);
+            if (node instanceof DecalNode)
+                this._decals.add(node);
             if (node instanceof SoundNode)
                 this._sounds.add(node);
             if (node instanceof LightProbeNode)
@@ -925,6 +930,16 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._navMeshes;
+    }
+
+    /**
+     * Every decal volume in the scene, editor-only ones (the landscape brush) included — the renderer
+     * routes those to the overlay layer. Holds only SPAWNED nodes, like every other set here.
+     */
+    public get decals(): Set<DecalNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._decals;
     }
 
     /** Every sound emitter in the scene. Holds only SPAWNED nodes, so a despawn silences one for free. */

@@ -1,12 +1,13 @@
 import { Terrain, LandscapeNode } from 'cleo'
 import type { TerrainConfig } from 'cleo'
 
-// Re-create a landscape's terrain at a different size / resolution / chunk size / render density,
+// Re-create a landscape's terrain at a different size / resolution / chunk size / mask resolution,
 // carrying everything the author made across onto it. The order of the carry-over steps is load-bearing.
 
 /**
- * Swap `node`'s terrain for one built to `cfg`, resampling the sculpted shape, the painted splat, the
- * layer materials and the scattered foliage onto it. The node keeps its identity and transform.
+ * Swap `node`'s terrain for one built to `cfg`, resampling the sculpted shape, the layer stack (base,
+ * paint layers and their masks) and the scattered foliage onto it. The node keeps its identity and
+ * transform.
  */
 export function rebuildTerrain(node: LandscapeNode, cfg: Required<TerrainConfig>): void {
   const old = node.terrain
@@ -17,19 +18,9 @@ export function rebuildTerrain(node: LandscapeNode, cfg: Required<TerrainConfig>
   next.setOrigin(node.worldPosition)
 
   next.resampleHeightsFrom(old)
-  next.resampleSplatFrom(old)
-  for (let i = 0; i < old.layers.length && i < 4; i++) {
-    const layer = old.layers[i]
-    const blend = { tiling: layer.tiling, auto: layer.auto, hRange: layer.hRange, sRange: layer.sRange }
-    if (layer.material) {
-      next.setLayer(i, layer.material, { ...blend, materialId: layer.materialId ?? null })
-    } else if (layer.albedoId) {
-      // A legacy plain-albedo layer, from an old scene or a bare texture pick. It has no
-      // `TerrainMaterial`, and skipping it — which this used to do — silently erased the layer on
-      // rebuild, taking its paint with it while reporting that nothing authored was lost.
-      next.setLayer(i, { textureId: layer.albedoId, ...blend })
-    }
-  }
+  // The whole stack, masks resampled by position. It used to be the four splat channels plus a per-slot
+  // material copy loop, which dropped a legacy plain-albedo layer until it was special-cased.
+  next.resampleLayersFrom(old)
   next.foliageColliders = { ...old.foliageColliders }
   next.resampleFoliageFrom(old)
 

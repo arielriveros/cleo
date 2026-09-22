@@ -5,8 +5,8 @@ import { join } from 'path';
 /**
  * How the march SAMPLES, which is where nearly all of its cost lives and which nothing else can see.
  *
- * The terrain march issues up to 136 texture fetches per fragment (34 positions x 4 layers) plus 32 more
- * for the self-shadow. Every one of them used to be a gradient fetch, and `textureSampleGrad` forces the
+ * A march issues dozens of texture fetches per fragment — the retired terrain march issued up to 136.
+ * Every one of them used to be a gradient fetch, and `textureSampleGrad` forces the
  * anisotropic path on each — a measured 6x penalty by itself, and a measured 4.04ms -> 0.65ms at 2048^2
  * when replaced by an explicit level, with "visual result almost identical" (BTH 2015).
  *
@@ -34,8 +34,6 @@ describe('search loops fetch at an explicit level', () => {
     it.each([
         ['parallax.wgsl', 'parallaxOcclusion'],
         ['parallax.wgsl', 'parallaxShadow'],
-        ['terrainLayers.wgsl', 'marchTerrain'],
-        ['terrainLayers.wgsl', 'terrainSelfShadow'],
     ])('%s / %s takes no gradient inside the march', (file, name) => {
         const body = fn(read(file), name);
         // The loop BODY only. Slicing to the end of the function would sweep up the refinement and the
@@ -48,15 +46,6 @@ describe('search loops fetch at an explicit level', () => {
             .not.toMatch(/parallaxHeight\(/);
     });
 
-    it('layerHeights — the terrain fetch primitive — is explicit-level throughout', () => {
-        const body = fn(read('terrainLayers.wgsl'), 'layerHeights');
-        expect(body).not.toMatch(/textureSampleGrad/);
-        // Back to one per layer: the band split that added a second, low-band fetch is gone, because
-        // terrain relief is geometry now and the march no longer subtracts anything. What this guards is
-        // unchanged either way — every fetch names its level, so none of them is an implicit-derivative
-        // sample inside a loop, which is undefined under non-uniform control flow.
-        expect((body.match(/textureSampleLevel/g) ?? []).length, 'one per layer').toBe(4);
-    });
 });
 
 describe('shading fetches keep their gradients', () => {
@@ -68,9 +57,11 @@ describe('shading fetches keep their gradients', () => {
         expect(tail).toMatch(/parallaxHeight\(/);
     });
 
-    it('addLayer samples albedo and normal with gradients', () => {
-        const body = fn(read('terrainLayers.wgsl'), 'addLayer');
-        expect((body.match(/textureSampleGrad/g) ?? []).length, 'albedo + normal').toBe(2);
+    it('the landscape stack samples masks, albedo and normal with gradients', () => {
+        // The stack searches nothing — no march — so every fetch it makes is SEEN, and every one is a
+        // gradient fetch taken from derivatives captured once above its loop.
+        const body = fn(read('terrainStack.wgsl'), 'resolveTerrainSurface');
+        expect((body.match(/textureSampleGrad/g) ?? []).length, 'mask + albedo + normal').toBe(3);
         expect(body).not.toMatch(/textureSampleLevel/);
     });
 });
@@ -94,14 +85,11 @@ describe('the LOD is computed once, and everything agrees on it', () => {
         expect((src.match(/parallaxLod\(/g) ?? []).length, 'exactly one derivation').toBe(1);
     });
 
-    it('terrain derives one LOD in base uv and shifts it per layer by the tiling', () => {
-        const src = code(read('terrainLayers.wgsl'));
-        // The RAW form: terrain has four uv spaces, so the level it derives is not yet a mip index of
-        // any of them and must not be floored until `log2(tiling)` has been added. `parallaxLod` — the
-        // floored one — stays correct for the single-uv callers asserted above.
-        expect(src).toMatch(/let\s+lod\s*=\s*parallaxLodRaw\(/);
-        // log2(tiling) is the level shift a layer's own tiling implies. Without it four differently
-        // tiled layers read four unrelated footprints from one number.
-        expect(fn(src, 'layerHeights'), 'per-layer tiling shift').toMatch(/lod\s*\+\s*log2\(t\)/);
+    it('the landscape stack derives no LOD of its own', () => {
+        // With no march there is nothing to search at an explicit level; the hardware picks the mip
+        // from the gradients, scaled per surface by its tiling.
+        const src = code(read('terrainStack.wgsl'));
+        expect(src).not.toMatch(/parallaxLod/);
+        expect(src, 'per-surface gradient scale').toMatch(/ddxUv \* tiling/);
     });
 });

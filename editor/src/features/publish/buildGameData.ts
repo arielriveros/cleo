@@ -1,5 +1,5 @@
 import type { Scene, RenderSettings, NodeTemplate, InputMap } from 'cleo';
-import { Logger, isDefaultInputMap } from 'cleo';
+import { Logger, isDefaultInputMap, isEditorOwnedName } from 'cleo';
 import type { BodyDescription, ShapeDescription } from '../EngineContext';
 import { fanOutScripts, SCRIPT_ID_VAR, type ScriptAsset } from '../../utils/scripts';
 import type { Template } from '../../utils/templates';
@@ -44,14 +44,13 @@ export interface GameDataSources {
 }
 
 // Remove editor-only and debug helper nodes so they never ship in a play scene or published game.
+// Serialized JSON, so the test is the NAME contract (`isEditorOwnedName`); the `editorOwned` flag is
+// never serialized, and `Node.serialize` has already dropped self-owned children by flag.
 export function clearDebuggingNodes(scene: any): void {
   const iterate = (children: any[]): any[] => children.filter((child: any) => {
-    if (child.name?.includes('__debug__')) {
-      Logger.info(`Removing debugging node ${child.name}`, 'Publish');
-      return false;
-    }
-    if (child.name?.includes('__editor__')) {
-      Logger.info(`Removing editor node ${child.name}`, 'Publish');
+    if (isEditorOwnedName(child.name)) {
+      const kind = child.name.includes('__debug__') ? 'debugging' : 'editor';
+      Logger.info(`Removing ${kind} node ${child.name}`, 'Publish');
       return false;
     }
     child.children = iterate(child.children ?? []);

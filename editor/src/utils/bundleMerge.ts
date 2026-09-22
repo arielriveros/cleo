@@ -111,6 +111,9 @@ export function remapDeep(obj: any, r: Remaps): void {
     }
     if (key === 'textureId' || key === 'displacementMap') { obj[key] = sub(r.tex, val); continue }
     if (key === 'materialId') { obj[key] = sub(r.tmat, val); continue } // terrain layer → terrain material
+    // A landscape-material SLOT's link to the plain Material asset its surface came from. A key of its
+    // own precisely because `materialId` above means a TERRAIN material.
+    if (key === 'surfaceMaterialId') { obj[key] = sub(r.mat, val); continue }
     if (key === 'materialIds' && Array.isArray(val)) { obj[key] = val.map((x: any) => sub(r.mat, x)); continue }
     // 'meshId' is the legacy spelling of 'modelId'; both point at a model asset.
     if (key === 'modelId' || key === 'meshId') { obj[key] = sub(r.model, val); continue }

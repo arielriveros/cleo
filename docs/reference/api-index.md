@@ -35,7 +35,10 @@ the same API your scripts are.
 `ModelNode`, `disposeModelSubtree`, `LodGroupNode`, `CameraNode`, `CameraRigNode`
 (+ `FollowSpace` / `AimMode` *(types)*), `CharacterNode`, `ControllerNode`
 (+ `CONTROL_SOURCES`, `AIM_SOURCES`, `BRAIN_KINDS`, and `BrainKind` / `ControlSource` / `AimSource`
-/ `BlackboardValue` *(types)*), `NavMeshNode`, `LightNode`, `LightProbeNode`, `SkyboxNode`,
+/ `BlackboardValue` *(types)*), `NavMeshNode`, `LightNode`, `LightProbeNode`, `DecalNode`
+(+ `decalLocalToUV`, `radialDecalT`, `radialDecalWeight`, `DECAL_RADIAL_CURVES`, and `DecalOptions` /
+`DecalAffects` / `DecalRadialPattern` / `DecalRadialCurve` / `DecalRadialShape` / `DecalReceivers` /
+`DecalPattern` / `DecalColor` *(types)*), `SkyboxNode`,
 `SkyLightNode` (+ `SkyLightOptions`), `SkyAtmosphereNode` (+ `SkyAtmosphereOptions`),
 `VolumetricCloudsNode` (+ `VolumetricCloudsOptions`), `LandscapeNode`, `TilemapNode`, `SpriteNode`,
 `AnimatedSpriteNode` (+ `SpriteFrameSource`), `SoundNode` (+ `SoundMode` / `SoundNodeOptions` /
@@ -229,6 +232,23 @@ types under their historical `Animation*` names.
 
 `Terrain`, `TERRAIN_RELIEF_ENABLED`, and the types `TerrainConfig`, `SculptBrush`, `SculptMode`,
 `TerrainLayer`, `PaintBrush`, `TerrainChunk`, `TerrainLodSettings`, `FoliageGenerateResult`.
+
+The layer stack: `TerrainLayerStack`, `MaskGrid`, `defaultMaskResolution`, `materialSlots`, and the
+types `TerrainPaintLayer`, `TerrainBaseLayer`, `TerrainLayerWeights`, `MaskPaint`, `MaskRegion`,
+`MaskPatch`. Rules and compositing: `TerrainBlendRule`, `TerrainRuleRange`, `TerrainNoiseRule`,
+`defaultBlendRule`, `parseBlendRule`, `cloneBlendRule`, `rangeCoverage`, `surfaceAlpha`,
+`compositeWeights`, `ruleNoise`, `slopeDegreesFromNormalY`, `MAX_TERRAIN_SURFACES`, `MAX_PAINT_LAYERS`,
+`TERRAIN_LAYER_TEXTURE_SIZES`, and `TerrainMaterialSlot` / `newTerrainSlotId` on the material side.
+
+Sculpting: `applySculpt`, `brushWeight`, `curveWeight`, `readRegion`, `writeRegion`, `unionRegion`,
+`terraceHeight`, and the types `SculptTool`, `SculptParams`, `BrushSpec`, `BrushShape`,
+`FalloffCurve`, `GridRegion`.
+
+Heightmaps: `decodeHeightmap`, `decodePng`, `encodePng16`, `decodeRaw16`, `encodeRaw16`,
+`heightsFromImage`, `imageFromHeights`, `sampleHeight`.
+
+Brush falloff: `brushFalloffWeight(t, falloff)` and `brushFalloffExponent(falloff)`. This is the one
+curve that `sculpt`, `paint` and the editor's brush cursor all use.
 
 Foliage: `FoliageLayer`, `crossQuadGeometry`, `MAX_INSTANCES`, `FOLIAGE_DRAW_TRIANGLE_BUDGET`,
 `FoliageColliderField`, `DEFAULT_FOLIAGE_COLLIDERS`, and `FoliageKind`, `FoliageParams`,

@@ -1,4 +1,4 @@
-import { Node, ModelNode, AnimatedModel, Logger, TextureManager, mergeBlocker, mergeModels } from 'cleo'
+import { Node, ModelNode, AnimatedModel, Logger, TextureManager, mergeBlocker, mergeModels, isEditorOwnedName } from 'cleo'
 import { cryptoRandomId } from './ids'
 import { parseByType, stripDebug, collectTextureIds, regenerateIds } from './nodeSubtree'
 import { resolveMaterialRefs, applyMaterialAsset, applyMaterialAssets, serializedVar, getMaterialIdsOf, MATERIAL_ID_VAR, MaterialAsset } from './materials'
@@ -74,14 +74,15 @@ export function modelIdOf(node: Node | null | undefined): string | undefined {
 
 /**
  * Editor chrome, which is a real engine child of whatever it annotates and must never be mistaken for
- * user content. Mirrors `SceneInspector`'s `isHiddenInTree` and `nodeSubtree`'s `stripDebug`.
+ * user content. Tests the name contract, `isEditorOwnedName`, as `SceneInspector`'s `isHiddenInTree` and
+ * `nodeSubtree`'s `stripDebug` do. Deliberately not `Node.isEditorOwned`: its flag covers a preview tab's
+ * holder and, inherited, the very model under it that these walks are looking for.
  *
  * The walks below forgot this and it mattered: a camera's frustum gizmo and a sound's falloff sphere
  * are both `ModelNode` children, so every Camera and every spatial Sound reported that it "contained
  * geometry" and grew a Model section in the inspector.
  */
-const isHelper = (node: Node): boolean =>
-  node.name.includes('__debug__') || node.name.includes('__editor__')
+const isHelper = (node: Node): boolean => isEditorOwnedName(node.name)
 
 /**
  * The first skinned ModelNode AT or BENEATH `node` (depth-first, self first), or null.

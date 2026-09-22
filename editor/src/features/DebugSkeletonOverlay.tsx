@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useCleoEngine } from './EngineContext'
 import { usePlayback } from './PlaybackContext'
 import { useDebugVisibility } from './DebugVisibilityContext'
+import { MODE_SKELETON_OWNER } from './engineContextTypes'
 import { ModelNode, AnimatedModel, Vec } from 'cleo'
 import type { Skin } from 'cleo'
 import { bonePairsOf, computeBindMatrices, computeJointWorldMatrices, worldPositionOf } from './animation/skeleton'
@@ -21,9 +22,10 @@ export default function DebugSkeletonOverlay() {
   const { isPlayMode } = usePlayback()
   const { visibility } = useDebugVisibility()
 
-  // Both the animation and the rig editor own the overlay while they are up. `setSkeletonOverlay` is a
-  // single global slot, so two writers would overwrite each other every frame.
-  const active = editorMode !== 'stateMachine' && editorMode !== 'animation' && editorMode !== 'rig' &&
+  // The skeleton-editing modes own the overlay while they are up (AnimationSkeletonTool draws it there
+  // regardless of the toggle). `setSkeletonOverlay` is a single global slot, so two writers would
+  // overwrite each other every frame.
+  const active = !MODE_SKELETON_OWNER[editorMode] &&
     (isPlayMode ? visibility.skeleton.runtime : visibility.skeleton.editor)
 
   useEffect(() => {

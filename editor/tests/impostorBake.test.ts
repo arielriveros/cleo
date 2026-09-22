@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Camera, CameraNode, Node } from 'cleo';
 import { mat4, vec3, vec4 } from 'gl-matrix';
 import { impostorFraming, impostorTextureId } from '../src/utils/modelThumbnails';
-import { addPreviewLights } from '../src/features/demoScene/createModelPreviewScene';
+import { addPreviewLights, PREVIEW_KEY_LIGHT_NAME, PREVIEW_FILL_LIGHT_NAME } from '../src/features/demoScene/createModelPreviewScene';
 
 /**
  * The impostor bake, in the parts that do not need a GPU.
@@ -179,7 +179,17 @@ describe('addPreviewLights', () => {
     const added: any[] = [];
     const scene = { addNode: (n: any) => added.push(n) } as any;
     addPreviewLights(scene);
-    expect(added.map(n => n.name).sort()).toEqual(['fill', 'key']);
+    // Key first, then fill: the order is what the thumbnails have always been lit by.
+    expect(added.map(n => n.name)).toEqual([PREVIEW_KEY_LIGHT_NAME, PREVIEW_FILL_LIGHT_NAME]);
+  });
+
+  it('names both lights as editor chrome', () => {
+    // They were plain 'key'/'fill', a user-content name: in a preview tab they showed in the tree, got
+    // light icons from the helper reconciler, and any event on them dirtied the tab.
+    const added: any[] = [];
+    addPreviewLights({ addNode: (n: any) => added.push(n) } as any);
+    expect(added.map(n => n.name)).toEqual(['__editor__keyLight', '__editor__fillLight']);
+    for (const light of added) expect(light.isEditorOwned).toBe(true);
   });
 
   it('leaves both lights out of the shadow cascades', () => {

@@ -10,6 +10,8 @@ import TextureInspector from '../nodeInspector/propertyEditors/TextureInspector'
 import { buildFoliageRuleFromModelAsset } from '../../utils/foliageRules'
 import { cryptoRandomId } from '../../utils/ids'
 import { Hint, Slider, Toggle } from '../../components/ui'
+import BlendRuleEditor from './BlendRuleEditor'
+import TerrainSlots from './TerrainSlots'
 import { toast } from '../toasts/toastStore'
 
 /** Terrain side length the density estimate is quoted against (matches the Landscape panel's default). */
@@ -80,7 +82,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
   const num = 'w-16 bg-control text-white border border-border rounded px-1 py-[2px] text-xs'
 
   if (!isTerrain) {
-    return <div className='p-3 text-xs text-gray-400'>Open a terrain material to edit it.</div>
+    return <div className='p-3 text-xs text-gray-400'>Open a landscape material to edit it.</div>
   }
   const mat = tm!
 
@@ -185,6 +187,12 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
   }
 
   const landscapeSize = landscape?.size ?? ESTIMATE_SIZE
+  // What an elevation rule is judged against on the landscape being authored: metres above ITS origin,
+  // which is the one thing a number typed in this panel cannot be guessed from.
+  const heights = landscape?.heightRange?.()
+  const elevationHint = heights
+    ? `This landscape runs ${heights.min.toFixed(1)}–${heights.max.toFixed(1)} m above its origin`
+    : 'Metres above the landscape’s origin'
   const repeatMetres = landscapeSize / Math.max(mat.tiling, 0.01)
   // The depth half of this readout is gone with `TERRAIN_RELIEF_ENABLED`: quoting a relief depth for a
   // march that is switched off is exactly the kind of number that sends someone hunting for a bug. The
@@ -194,7 +202,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
   return (
     <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-y-auto'>
       <div className='p-2 border-b border-success'>
-        <label className='text-xs text-slate-300 block mb-1'>Terrain material name</label>
+        <label className='text-xs text-slate-300 block mb-1'>Landscape material name</label>
         <input
           className='bg-control text-white border border-success rounded px-2 py-1 w-full text-sm'
           value={editingTerrainMaterialName ?? ''}
@@ -209,9 +217,11 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
           <MaterialEditor node={node as ModelNode} />
         </div>}
 
-      {/* Derived here rather than in the JSX so the arithmetic is readable: a repeat is
-          `size / tiling` metres, and depth is a fraction of that repeat. */}
-      <Collapsable title='Terrain blend'>
+      {/* Tiling, then WHERE this material's own surface shows within the layer that paints it, then the
+          extra surfaces blended over it. The old `auto` height/slope toggle with its two raw bands lives on
+          in `TerrainMaterial.auto/hRange/sRange` for migration only — `parse` converts it into `rule`
+          (legacyAutoRule), which is what the shader and the CPU compositor both read. */}
+      <Collapsable title='Landscape blend'>
         <div className='p-2 space-y-2'>
           <div className='flex items-center justify-between'>
             <span className={label}>Tiling</span>
@@ -226,46 +236,20 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
           <Hint>
             One repeat = <b>{repeatMetres.toFixed(2)} m</b> across a {landscapeSize} m terrain
           </Hint>
-          <div className='flex items-center justify-between'>
-            <span className={label}>Auto height/slope</span>
-            <Toggle checked={mat.auto} onChange={c => { mat.auto = c; changed() }} />
-          </div>
-          {mat.auto && <>
+          <div className='pt-1 border-t border-control space-y-2'>
             <div className='flex items-center justify-between'>
-              <span className={label}>Height min/max</span>
-              <span className='flex gap-1'>
-                <input type='number' className={num} value={mat.hRange[0]} onChange={e => { mat.hRange = [Number(e.target.value), mat.hRange[1]]; changed() }} />
-                <input type='number' className={num} value={mat.hRange[1]} onChange={e => { mat.hRange = [mat.hRange[0], Number(e.target.value)]; changed() }} />
-              </span>
+              <span className={label} title='Foliage may scatter where this surface dominates'>Allow foliage</span>
+              <Toggle checked={mat.allowFoliage} onChange={c => { mat.allowFoliage = c; changed() }} />
             </div>
-            <div className='flex items-center justify-between'>
-              <span className={label}>Slope min/max</span>
-              <span className='flex gap-1'>
-                <input type='number' step={0.05} className={num} value={mat.sRange[0]} onChange={e => { mat.sRange = [Number(e.target.value), mat.sRange[1]]; changed() }} />
-                <input type='number' step={0.05} className={num} value={mat.sRange[1]} onChange={e => { mat.sRange = [mat.sRange[0], Number(e.target.value)]; changed() }} />
-              </span>
-            </div>
-          </>}
-
-          {/* The SECOND thing terrain does with a height map. The map itself, its Depth and its Invert
-              live in the material editor above, in the same Parallax section every material type has —
-              terrain marches its height field exactly as a normal material does.
-
-              This one has no equivalent on a normal material, which is why it is here: where two layers
-              overlap, it decides how hard the one standing higher pushes through the one painted over
-              it. A slider rather than a number box because 0 means "off" and that is the default, so
-              the range is the only thing that makes the control legible. */}
-          <div className='pt-1 border-t border-control space-y-1'>
-            <div className='flex items-center justify-between gap-2'>
-              <span className={label}>Height blend</span>
-              <div className='flex-1'>
-                <Slider min={0} max={8} step={0.25} value={mat.heightBlend}
-                        onChange={(v: number) => { mat.heightBlend = v; changed() }} />
-              </div>
-            </div>
+            {/* Opacity is hidden: as a landscape's BASE this surface covers everything under it by
+                definition, and as a paint layer the layer's own opacity already scales it. */}
+            <BlendRuleEditor rule={mat.rule} onChange={changed} elevationHint={elevationHint} showOpacity={false} />
+            <Hint>Where this material’s own surface shows. As a landscape’s base it always fills whatever the slots below leave.</Hint>
           </div>
         </div>
       </Collapsable>
+
+      <TerrainSlots material={mat} onChange={changed} elevationHint={elevationHint} />
 
       <Collapsable title='Foliage'>
         <div className='p-2 space-y-2' title='Foliage the landscape brush scatters where this material is painted.'>

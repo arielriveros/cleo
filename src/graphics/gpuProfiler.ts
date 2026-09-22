@@ -33,6 +33,9 @@ export const RENDER_PASSES = [
     'shadows.point',
     'geometry',
     'foliage',
+    // Decal volumes: the landscape-only receiver depth, then the DBuffer write + its G-buffer resolve.
+    'decals.receivers',
+    'decals',
     'ssao',
     'ssao.blur',
     'lighting',
@@ -40,6 +43,8 @@ export const RENDER_PASSES = [
     'clouds',
     'clouds.resolve',
     'forwardOpaque',
+    // Decal emissive, added to the lit image after the opaque depth snapshot.
+    'decals.emissive',
     'skyFog',
     'taa',
     'grid',
@@ -75,7 +80,7 @@ export type RenderPass = typeof RENDER_PASSES[number];
 
 /** Passes the profiler panel offers as on/off switches. Excludes any pass the image cannot do without. */
 export const TOGGLEABLE_PASSES: RenderPass[] = [
-    'shadows.cascades', 'shadows.spot', 'shadows.point', 'foliage', 'ssao', 'ssao.blur', 'sky', 'clouds', 'skyFog', 'taa', 'grid',
+    'shadows.cascades', 'shadows.spot', 'shadows.point', 'foliage', 'decals', 'decals.emissive', 'ssao', 'ssao.blur', 'sky', 'clouds', 'skyFog', 'taa', 'grid',
     'transparent', '2d', 'gizmos', 'overlay', 'velocity', 'motionBlur', 'godRays', 'bloom.bright',
     'bloom.blur', 'bloom.composite', 'chromatic', 'screenMaterials',
     // `dof.coc` switches depth of field as a whole. Its other two passes report their own timings
@@ -92,6 +97,9 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     // Exact: the label and the scope are the same span of work.
     geometry: 'geometry',
     foliage: 'foliage',
+    decals: 'decals',
+    'decals.emissive': 'decals.emissive',
+    decalReceivers: 'decals.receivers',
     ssao: 'ssao',
     'ssao.blur': 'ssao.blur',
     sky: 'sky',
@@ -131,6 +139,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     skyAtmosphereBake: 'sky.bake',
 
     // Unambiguous sums: each runs inside the named scope on WebGL2.
+    'decals.resolve': 'decals',
     iblConvolve: 'ibl.bake',
     probeCapture: 'ibl.bake',
     godRaysUpsample: 'godRays',

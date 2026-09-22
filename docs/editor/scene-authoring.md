@@ -80,8 +80,16 @@ level layout.
 | **Sky Light** | Not placeable. |
 | **Clouds (volumetric)** | Not placeable. |
 | **Landscape** | Not placeable. `size 200`, `resolution 129`, `chunkQuads 32`. |
+| **Decal** | A `2 × 1 × 2` box that projects straight down, with a default PBR material. *(unreleased)* |
 
 Skybox and Sky Atmosphere are mutually exclusive: they are two answers to the same question.
+
+> **A freshly added primitive does not take a decal's colour.** Every primitive and complex geometry
+> starts with the Blinn-Phong default material, which is shaded forward. A decal's colour, normal
+> and roughness only reach deferred-shaded surfaces: PBR meshes, landscapes, foliage and deferred
+> custom materials. Give the mesh a PBR material and the decal appears on it. The full list of
+> limits is in
+> [Node types](../reference/node-types.md#decalnode--decal-unreleased).
 
 ### UI — Layout
 
@@ -169,6 +177,7 @@ off in Play, or turn navmesh display on *during* Play to see what an agent is wa
 | Light icons | on |
 | Camera frustums | on |
 | Light probes | on |
+| Decals | on |
 | Sound emitters | on |
 | Reference grid | on |
 | Bounding boxes | off |

@@ -6,6 +6,7 @@ import {
   ModelNode,
   LightNode,
   LightProbeNode,
+  DecalNode,
   DirectionalLight,
   PointLight,
   SkyboxNode,
@@ -59,8 +60,9 @@ import {
   DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon,
-  SoundIcon, AmbientSoundIcon,
+  SoundIcon, AmbientSoundIcon, DecalIcon,
 } from './nodeIcons'
+import { defaultDecalMaterial } from '../../utils/materials'
 
 // The catalog of addable node types, as data rather than closures inside AddNew: the same item is created
 // from the Add grid's click, a drop on the scene tree and a drop into the viewport, and the last two
@@ -110,12 +112,16 @@ export interface AddItem {
 
 // Only one sky at a time: adding a Skybox removes any existing Sky Atmosphere, and vice-versa.
 // Use the synchronous removeNode (not the deferred Node.remove) per the EngineContext caveat.
-function removeExistingSky(ctx: AddContext, kind: 'skybox' | 'skyAtmosphere') {
-  const other = kind === 'skybox' ? ctx.editorScene.skyAtmosphere : ctx.editorScene.skybox;
-  if (other) {
-    ctx.editorScene.removeNode(other);
-    ctx.eventEmitter.emit('SCENE_CHANGED');
-  }
+//
+// Only the USER's skies. The asset tabs (template, model, rig, clip...) draw their preview background with
+// an editor-owned `__editor__skybox`, and `scene.skybox` is simply the last SkyboxNode the traversal met —
+// so reading it here deleted the preview sky, and recorded that as an undo step. Exported for tests.
+export function removeExistingSky(ctx: Pick<AddContext, 'editorScene' | 'eventEmitter'>, kind: 'skybox' | 'skyAtmosphere') {
+  const Other = kind === 'skybox' ? SkyAtmosphereNode : SkyboxNode;
+  const doomed = [...ctx.editorScene.nodes].filter(n => n instanceof Other && !n.isEditorOwned);
+  if (doomed.length === 0) return;
+  for (const sky of doomed) ctx.editorScene.removeNode(sky);
+  ctx.eventEmitter.emit('SCENE_CHANGED');
 }
 
 export const ADD_ITEMS: AddItem[] = [
@@ -334,6 +340,16 @@ export const ADD_ITEMS: AddItem[] = [
     // New probes get a bounded influence volume out of the box; probes from legacy scenes
     // deserialize size [0,0,0] = unbounded (whole scene).
     create: async () => new LightProbeNode('light probe', { size: [10, 10, 10] }),
+  },
+  {
+    // Placeable, like the probe: the box is centred on the node, so a viewport drop puts the surface under
+    // the cursor half-way up the box — inside it, facing the projector, which is exactly where a decal has
+    // to be to land on anything. It projects straight down (local -Y) with no rotation.
+    //
+    // Starts with a placeholder PBR material rather than none: a decal with no material projects plain
+    // white, which reads as broken, and MaterialSlot's "Create Material" builds the asset from this one.
+    id: 'decal', label: 'Decal', icon: DecalIcon, category: 'environment',
+    create: async () => new DecalNode('decal', { size: [2, 1, 2], material: defaultDecalMaterial() }),
   },
   // Two menu entries, ONE node class, exactly like the three lights above: ambient and spatial differ in
   // how a sound is heard, not in what it is, so the mode lives in the node's payload.

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { NodeRendererProps, Tree, TreeApi } from 'react-arborist'
 import { useCleoEngine } from '../EngineContext'
-import { Logger, Node, isUINodeType } from 'cleo';
+import { Logger, Node, isEditorOwnedName, isUINodeType } from 'cleo';
 import type { SceneChange } from 'cleo';
 import { SkyIcon } from '../nodeInspector/sectionIcons'
 import {
   CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon, NavMeshIcon, ModelIcon, LightIcon, LightProbeIcon, SkyboxIcon, SkyLightIcon, CloudsIcon,
-  SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon,
+  SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon, DecalIcon,
 } from './nodeIcons'
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
 import { TEMPLATE_ID_VAR, isWithinTemplateInstance } from '../../utils/templates';
@@ -25,7 +25,7 @@ const TYPE_ICONS: Record<string, () => JSX.Element> = {
   camera: CameraIcon, cameraRig: CameraRigIcon, model: ModelIcon,
   character: CharacterAddIcon, controller: ControllerAddIcon, navMesh: NavMeshIcon,
   sprite: SpriteIcon, animatedSprite: AnimatedSpriteIcon, tilemap: TilemapIcon,
-  light: LightIcon, lightProbe: LightProbeIcon,
+  light: LightIcon, lightProbe: LightProbeIcon, decal: DecalIcon,
   skybox: SkyboxIcon, volumetricClouds: CloudsIcon, skyAtmosphere: SkyIcon, skyLight: SkyLightIcon,
   landscape: LandscapeIcon,
   // One glyph for both modes: the tree shows what a node IS, and ambient vs spatial is a property of it.
@@ -76,11 +76,13 @@ const ScriptIcon = () => (
 
 /**
  * Nodes the tree never shows: debug/editor helpers and the chunks a landscape subdivides itself into.
- * The names are load-bearing elsewhere — the publish pass strips every node whose name contains
- * '__editor__' or '__debug__' — so this only mirrors them.
+ * The helper test is `isEditorOwnedName` — the same name contract the publish pass strips by — and
+ * deliberately NAME-based, not `Node.isEditorOwned`: a flag-owned preview holder (the animation-field
+ * subject, say) must stay visible in its tab's tree. Terrain chunks are engine content, not editor-owned,
+ * so they are hidden separately.
  */
 const isHiddenInTree = (node: Node): boolean =>
-  node.name.includes('__debug__') || node.name.includes('__editor__') || node.name.startsWith('__terrain_chunk__');
+  isEditorOwnedName(node.name) || node.name.startsWith('__terrain_chunk__');
 
 /** A parent's children as the tree shows them — the index space react-arborist reports drops in. */
 const shownChildren = (node: Node): Node[] => node.children.filter(child => !isHiddenInTree(child));

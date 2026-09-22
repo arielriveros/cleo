@@ -127,7 +127,7 @@ Editor-only. Never in a published game.
 |---|---|
 | Displacement, tessellation, parallax | On the **material** — [Height](models-and-materials.md#height-displacement-tessellation-and-parallax) |
 | Post-processing chain order | On the **camera** |
-| Sky, clouds, light probes, sky light | On their **nodes** |
+| Sky, clouds, light probes, sky light, decals | On their **nodes** |
 | Scene ambient, clear colour, reflections | In [Scene settings](scene-authoring.md#scene-settings) |
 
 ## Performance HUD

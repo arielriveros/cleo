@@ -39,6 +39,17 @@ export async function compressTerrainData(node: any): Promise<void> {
           delete terrain.splat
         }
       }
+      // The layer stack's paint masks: RGBA bytes, four layers per slice, the same treatment as the
+      // splat they replaced — and for the same reason never through a canvas, since channel 3 is a
+      // layer's mask and not transparency.
+      const stack = terrain.layerStack
+      if (stack && typeof stack.masks === 'string') {
+        const raw = base64ToBytes(stack.masks)
+        if (raw.byteLength >= MIN_COMPRESS_BYTES) {
+          stack.masksBytes = await deflate(raw)
+          delete stack.masks
+        }
+      }
     } catch (e) {
       // Leave whatever survived: a half-converted terrain still has one field in each pair.
       console.warn('[publish] terrain data compression failed, keeping base64', e)

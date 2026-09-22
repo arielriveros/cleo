@@ -14,6 +14,35 @@ export function buildProbeIconDataURL(): string {
   return canvas.toDataURL('image/png');
 }
 
+// Rasterise the decal glyph (a dashed projector box, a down arrow and the filled print it leaves, matching
+// the scene tree's DecalIcon) to a white-on-transparent PNG data URL for a decal's billboard.
+export function buildDecalIconDataURL(): string {
+  const size = 64, c = size / 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+  ctx.strokeStyle = 'white';
+  ctx.fillStyle = 'white';
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 4;
+
+  ctx.setLineDash([6, 5]);
+  ctx.strokeRect(10, 8, 44, 28);
+  ctx.setLineDash([]);
+
+  ctx.beginPath();
+  ctx.moveTo(c, 14); ctx.lineTo(c, 38);
+  ctx.moveTo(c - 7, 31); ctx.lineTo(c, 38); ctx.lineTo(c + 7, 31);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.ellipse(c, 51, 22, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  return canvas.toDataURL('image/png');
+}
+
 // Rasterise the light glyph (a filled core with eight rays, matching the inspector's LightIcon) to a
 // white-on-transparent PNG data URL for the light's billboard; a sprite Material.Basic tints it.
 export function buildLightIconDataURL(): string {

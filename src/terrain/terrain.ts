@@ -6,13 +6,15 @@ import { Geometry } from '../core/geometry';
 import { bytesToBase64, base64ToBytes } from '../core/base64';
 import { Model } from '../graphics/model';
 import { Material, TerrainMaterial, TerrainFoliageRule, foliageRuleKey } from '../graphics/material';
-import { Texture } from '../graphics/texture';
-import { TextureManager } from '../graphics/systems/textureManager';
-import { TexturePacker } from '../graphics/systems/texturePacker';
 import { Loader } from '../graphics/loader';
 import { Logger } from '../core/logger';
 import { authoring } from '../core/eventBus';
 import { FoliageLayer } from './foliage';
+import { TerrainLayerStack, defaultMaskResolution, legacyAlbedoMaterial, type TerrainLayerWeights } from './terrainLayerStack';
+import { deriveSurface, legacyAutoRule } from './terrainLayers';
+import { DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from './terrainSurfaceArrays';
+import { applySculpt, readRegion, writeRegion, type BrushSpec, type SculptParams, type GridRegion } from './sculpt';
+import type { MaskRegion } from './terrainMasks';
 import { DEFAULT_FOLIAGE_DENSITY } from '../graphics/material';
 import { FoliageColliderField, FoliageColliderSettings, DEFAULT_FOLIAGE_COLLIDERS } from './foliageColliders';
 
@@ -102,6 +104,11 @@ export interface TerrainConfig {
     resolution?: number;
     /** Quads per side of each render chunk (keeps each chunk under the 65k Uint16 index limit). */
     chunkQuads?: number;
+    /**
+     * Texels per side of the paint masks. Independent of `resolution`: a road wants a finer mask than
+     * the ground wants vertices. Defaults to twice the height grid, capped at 1024.
+     */
+    maskResolution?: number;
 }
 
 /**
@@ -145,6 +152,17 @@ export function band(range: readonly number[], v: number, edge: number): number 
     return Math.min(Math.max((v - lo) / e, 0), 1) * Math.min(Math.max((hi - v) / e, 0), 1);
 }
 
+/**
+ * A copy of a landscape material that SHARES its foliage rules. `parse(serialize())` alone would drop the
+ * rules' baked prototype geometry (serialize strips what a model id can rebuild), and nothing on this
+ * side can rebuild it.
+ */
+function copyTerrainMaterial(tm: TerrainMaterial): TerrainMaterial {
+    const copy = TerrainMaterial.parse(tm.serialize());
+    copy.foliageInclude = tm.foliageInclude;
+    return copy;
+}
+
 /** One render tile of the terrain: a Model whose geometry Y is driven by the shared height field. */
 export interface TerrainChunk {
     model: Model;
@@ -174,10 +192,12 @@ export interface TerrainLodSettings {
 const ATTRIBUTES = ['position', 'normal', 'uv', 'tangent', 'bitangent'];
 
 function resolveConfig(c: TerrainConfig): Required<TerrainConfig> {
+    const resolution = Math.max(2, Math.floor(c.resolution ?? 129));
     return {
         size: c.size ?? 200,
-        resolution: Math.max(2, Math.floor(c.resolution ?? 129)),
+        resolution,
         chunkQuads: Math.max(4, Math.floor(c.chunkQuads ?? 32)),
+        maskResolution: Math.max(16, Math.min(4096, Math.floor(c.maskResolution ?? defaultMaskResolution(resolution)))),
     };
 }
 
@@ -210,12 +230,8 @@ export class Terrain {
     /** Activation policy for {@link _colliders}. Serialized with the terrain. */
     public foliageColliders: FoliageColliderSettings = { ...DEFAULT_FOLIAGE_COLLIDERS };
 
-    // Texture painting (splat map + up to 4 layers).
-    private _splatRes: number;
-    private _splat: Uint8Array;       // RGBA per texel, row-major
-    private _splatTex: Texture;
-    private _splatId: string;
-    private _layers: TerrainLayer[] = [];
+    // The layer stack: a base material and paint layers over it, with their masks and GPU arrays.
+    private _stack: TerrainLayerStack;
     private _foliage: FoliageLayer[] = [];
     // Runtime foliage layers created on demand for material-driven scatter, keyed by the rule's STABLE
     // key (see foliageRuleKey) — not its name, which the user can change at any time.
@@ -227,16 +243,9 @@ export class Terrain {
         this._element = this._cfg.size / (this._R - 1);
         this._heights = new Float32Array(this._R * this._R);
         this._material = material ?? Material.Terrain({ baseColor: [0.38, 0.5, 0.28] }, { side: 'front' });
-
-        // Splat map: same resolution as the height grid. Default: full weight in layer 0 (R channel).
-        this._splatRes = this._R;
-        this._splat = new Uint8Array(this._splatRes * this._splatRes * 4);
-        for (let i = 0; i < this._splatRes * this._splatRes; i++) this._splat[i * 4] = 255;
-        this._splatTex = new Texture({ mipMap: false, wrapping: 'clamp' });
-        this._splatTex.createFromData(this._splat, this._splatRes, this._splatRes);
-        this._splatId = `__editor__terrain_splat_${uuidv4()}`;
-        TextureManager.Instance.addTexture(this._splatTex, this._splatId);
-        this._material.textures.set('u_splat', this._splatId);
+        // CPU only until the renderer's first sync: the mask texture and the layer arrays are allocated
+        // there, so a Terrain built headless (tests, the publish pipeline) never touches the device.
+        this._stack = new TerrainLayerStack(this._cfg.size, this._cfg.maskResolution);
 
         this._buildChunks();
     }
@@ -254,7 +263,9 @@ export class Terrain {
     public get material(): Material { return this._material; }
     /** World position of the terrain centre (the owning LandscapeNode's world position). */
     public get origin(): vec3 { return this._origin; }
-    public get splatResolution(): number { return this._splatRes; }
+    /** @deprecated There is no splat any more; the paint masks have a resolution of their own. */
+    public get splatResolution(): number { return this._stack.maskResolution; }
+    public get maskResolution(): number { return this._stack.maskResolution; }
     public setOrigin(worldPos: vec3): void { vec3.copy(this._origin, worldPos); }
 
     // --- the vertex grid ------------------------------------------------------------------------
@@ -307,37 +318,6 @@ export class Terrain {
         const b = h[r1 * R + c0] + (h[r1 * R + c1] - h[r1 * R + c0]) * fx;
         return a + (b - a) * fz;
     }
-
-    /**
-     * Bilinear splat weights at a fractional grid coordinate, into `out`.
-     *
-     * `sampleSplat` is nearest-texel and stays that way — it answers gameplay queries where a texel is
-     * the unit. A dense vertex needs weights BETWEEN texels, or every layer boundary stair-steps at
-     * exactly the scale the extra vertices were added to resolve. The splat is one RGBA texel per grid
-     * cell (`_splatRes === _R`), so this is the same interpolation as `_baseAt` over four channels.
-     */
-    private _splatAt(gx: number, gz: number, out: [number, number, number, number]): void {
-        const S = this._splatRes;
-        const x = Math.min(Math.max(gx, 0), S - 1), z = Math.min(Math.max(gz, 0), S - 1);
-        const c0 = Math.floor(x), r0 = Math.floor(z);
-        const c1 = Math.min(c0 + 1, S - 1), r1 = Math.min(r0 + 1, S - 1);
-        const fx = x - c0, fz = z - r0;
-        const sp = this._splat;
-        for (let k = 0; k < 4; k++) {
-            const a = sp[(r0 * S + c0) * 4 + k] + (sp[(r0 * S + c1) * 4 + k] - sp[(r0 * S + c0) * 4 + k]) * fx;
-            const b = sp[(r1 * S + c0) * 4 + k] + (sp[(r1 * S + c1) * 4 + k] - sp[(r1 * S + c0) * 4 + k]) * fx;
-            out[k] = (a + (b - a) * fz) / 255;
-        }
-    }
-
-
-
-
-
-
-
-
-
 
     /**
      * Surface normal at a fractional grid coordinate, from central differences over the DISPLACED
@@ -624,53 +604,62 @@ export class Terrain {
     /**
      * Apply a sculpt brush at a world-space point (dt-scaled). Returns true if any height changed.
      * Marks affected chunks dirty (the node re-uploads them) and the physics body for rebuild.
+     *
+     * The four original tools, kept with their original signature; {@link sculptWith} is the full set.
      */
     public sculpt(worldPoint: vec3, brush: SculptBrush, dt: number): boolean {
-        const half = this._cfg.size / 2, e = this._element, R = this._R;
-        const lx = worldPoint[0] - this._origin[0];
-        const lz = worldPoint[2] - this._origin[2];
-        const rad = brush.radius;
-        const cMin = Math.max(0, Math.floor((lx - rad + half) / e));
-        const cMax = Math.min(R - 1, Math.ceil((lx + rad + half) / e));
-        const rMin = Math.max(0, Math.floor((lz - rad + half) / e));
-        const rMax = Math.min(R - 1, Math.ceil((lz + rad + half) / e));
-        if (cMin > cMax || rMin > rMax) return false;
+        const lx = worldPoint[0] - this._origin[0], lz = worldPoint[2] - this._origin[2];
+        return !!this.sculptWith(worldPoint, { radius: brush.radius, falloff: brush.falloff }, {
+            tool: brush.mode,
+            amount: brush.strength * dt,
+            target: brush.flattenHeight ?? this.heightAt(lx, lz),
+        });
+    }
 
-        const amount = brush.strength * dt;
-        const flatten = brush.flattenHeight ?? this.heightAt(lx, lz);
-        let changed = false;
+    /**
+     * Apply any sculpt tool (see terrain/sculpt.ts) at a WORLD point. Returns the height-grid rectangle
+     * that changed — the region an undo step saves — or null when nothing did.
+     */
+    public sculptWith(worldPoint: ArrayLike<number>, shape: Omit<BrushSpec, 'x' | 'z'>, params: SculptParams): GridRegion | null {
+        const brush: BrushSpec = { ...shape, x: worldPoint[0] - this._origin[0], z: worldPoint[2] - this._origin[2] };
+        const region = applySculpt({ heights: this._heights, resolution: this._R, size: this._cfg.size }, brush, params);
+        if (region) this._refreshRegion(region);
+        return region;
+    }
 
-        // For smoothing, snapshot the region so neighbour averaging is order-independent.
-        const snapshot = brush.mode === 'smooth' ? this._heights.slice() : null;
+    /** A copy of a rectangle of the height grid, for an undo step. */
+    public readHeights(region: GridRegion): Float32Array {
+        return readRegion({ heights: this._heights, resolution: this._R, size: this._cfg.size }, region);
+    }
 
-        for (let r = rMin; r <= rMax; r++) {
-            for (let c = cMin; c <= cMax; c++) {
-                const vx = -half + c * e, vz = -half + r * e;
-                const d = Math.hypot(vx - lx, vz - lz);
-                if (d > rad) continue;
-                // Smooth falloff: 1 at centre, ->0 at edge (falloff controls softness).
-                const t = d / rad;
-                const w = brush.falloff <= 0 ? 1 : Math.pow(1 - t, brush.falloff * 3);
-                const idx = r * R + c;
-                let h = this._heights[idx];
-                switch (brush.mode) {
-                    case 'raise': h += amount * w; break;
-                    case 'lower': h -= amount * w; break;
-                    case 'flatten': h += (flatten - h) * Math.min(1, Math.abs(amount) * w); break;
-                    case 'smooth': {
-                        const s = snapshot!;
-                        const cl = Math.max(0, c - 1), cr = Math.min(R - 1, c + 1);
-                        const rd = Math.max(0, r - 1), ru = Math.min(R - 1, r + 1);
-                        const avg = (s[r * R + cl] + s[r * R + cr] + s[rd * R + c] + s[ru * R + c] + s[idx]) / 5;
-                        h += (avg - h) * Math.min(1, Math.abs(amount) * w);
-                        break;
-                    }
-                }
-                if (h !== this._heights[idx]) { this._heights[idx] = h; changed = true; }
-            }
-        }
-        if (changed) this._markRegionDirty(cMin, rMin, cMax, rMax);
-        return changed;
+    /** Write a rectangle saved by {@link readHeights} back. */
+    public writeHeights(region: GridRegion, data: Float32Array): void {
+        writeRegion({ heights: this._heights, resolution: this._R, size: this._cfg.size }, region, data);
+        this._refreshRegion(region);
+    }
+
+    /** Replace the whole height field (terrain-local metres, row-major, resolution²). */
+    public setHeights(heights: ArrayLike<number>): void {
+        const n = Math.min(heights.length, this._heights.length);
+        for (let i = 0; i < n; i++) this._heights[i] = heights[i];
+        for (const ch of this._chunks) this._refreshChunkGeometry(ch);
+        this._bodyDirty = true;
+    }
+
+    /** Lowest and highest sculpted height, terrain-local. */
+    public heightRange(): { min: number; max: number } {
+        let min = Infinity, max = -Infinity;
+        for (const h of this._heights) { if (h < min) min = h; if (h > max) max = h; }
+        return isFinite(min) ? { min, max } : { min: 0, max: 0 };
+    }
+
+    /**
+     * Refresh the chunks a changed rectangle touches, padded by one sample: a vertex's normal reads its
+     * neighbours, so the ring just outside the edit shades differently too.
+     */
+    private _refreshRegion(r: GridRegion): void {
+        const R = this._R;
+        this._markRegionDirty(Math.max(0, r.c0 - 1), Math.max(0, r.r0 - 1), Math.min(R - 1, r.c1 + 1), Math.min(R - 1, r.r1 + 1));
     }
 
     /** Fill this terrain's height field by resampling another terrain's surface (bilinear), stretching its
@@ -689,37 +678,16 @@ export class Terrain {
     }
 
     /**
-     * Fill this terrain's splat map by resampling another terrain's (bilinear on RGBA, renormalized),
-     * stretching the painted pattern to this grid. The companion to {@link resampleHeightsFrom}.
+     * Take over another terrain's layers and paint masks, resampling the masks by position so the painting
+     * stretches with the landscape across a size or resolution change. The companion to
+     * {@link resampleHeightsFrom}.
      */
-    public resampleSplatFrom(other: Terrain): void {
-        const S = this._splatRes, oS = other._splatRes, oSplat = other._splat;
-        for (let r = 0; r < S; r++) {
-            const fz = (S > 1 ? r / (S - 1) : 0) * (oS - 1);
-            const z0 = Math.min(oS - 1, Math.floor(fz)), z1 = Math.min(oS - 1, z0 + 1), tz = fz - z0;
-            for (let c = 0; c < S; c++) {
-                const fx = (S > 1 ? c / (S - 1) : 0) * (oS - 1);
-                const x0 = Math.min(oS - 1, Math.floor(fx)), x1 = Math.min(oS - 1, x0 + 1), tx = fx - x0;
-                const i00 = (z0 * oS + x0) * 4, i10 = (z0 * oS + x1) * 4;
-                const i01 = (z1 * oS + x0) * 4, i11 = (z1 * oS + x1) * 4;
-                const out = (r * S + c) * 4;
-                let sum = 0;
-                for (let k = 0; k < 4; k++) {
-                    const top = oSplat[i00 + k] + (oSplat[i10 + k] - oSplat[i00 + k]) * tx;
-                    const bot = oSplat[i01 + k] + (oSplat[i11 + k] - oSplat[i01 + k]) * tx;
-                    const v = top + (bot - top) * tz;
-                    this._splat[out + k] = v;
-                    sum += v;
-                }
-                // Renormalize to 255 so the shader's weight sum stays 1 after the interpolation.
-                if (sum > 0) {
-                    const s = 255 / sum;
-                    for (let k = 0; k < 4; k++) this._splat[out + k] = Math.round(this._splat[out + k] * s);
-                } else this._splat[out] = 255;
-            }
-        }
-        this._splatTex.updateRegion(0, 0, S, S, this._splat);
+    public resampleLayersFrom(other: Terrain): void {
+        this._stack.copyFrom(other._stack);
     }
+
+    /** @deprecated Renamed: the splat is now the layer stack's masks. */
+    public resampleSplatFrom(other: Terrain): void { this.resampleLayersFrom(other); }
 
     /**
      * Re-place another terrain's scattered foliage onto this one, re-sampling Y from the new heights, so
@@ -790,320 +758,145 @@ export class Terrain {
     }
 
     // --- texture layers & painting ------------------------------------------------------------
+    //
+    // The landscape's layers are a STACK: a base material covering everything and paint layers over it
+    // (terrainLayerStack.ts). Below is its face on Terrain: the stack itself, world-space brush entry
+    // points, and the four-slot API the splat had, kept as a shim — index 0 is the base, i >= 1 the i-th
+    // paint layer — so callers written against it keep working.
 
-    public get layers(): TerrainLayer[] { return this._layers; }
-    public get splatId(): string { return this._splatId; }
+    public get layerStack(): TerrainLayerStack { return this._stack; }
 
-    private _defaultLayer(): TerrainLayer {
-        return {
-            albedoId: null, aoId: null, normalId: null, heightId: null, dispScale: 0.05, invertHeight: false, displace: false, heightBlend: 0,
-            color: [1, 1, 1], metallic: 0, roughness: 1,
-            tiling: 20, auto: false, hRange: [0, 100], sRange: [0, 1],
-            material: null, materialId: null,
-        };
-    }
-
-    /** Read the per-layer surface (albedo/normal/height + scalar factors) out of a paint-layer
-     *  material. The height map is terrain-specific and lives under `displacementMap` — the authoring
-     *  key, kept for compatibility — for every base type. */
-    private _deriveLayerSurface(tm: TerrainMaterial): {
-        albedoId: string | null; aoId: string | null; normalId: string | null; heightId: string | null;
-        dispScale: number; invertHeight: boolean; displace: boolean;
-        heightBlend: number; color: number[]; metallic: number; roughness: number;
-    } {
-        const p = tm.properties, t = tm.textures, bt = tm.type as unknown as string;
-        const heightId = t.get('displacementMap') ?? null;
-        // The same key a standard PBR material uses, so a terrain layer picks up an occlusion map
-        // through the material editor's existing Occlusion slot with nothing new to author.
-        const aoId = t.get('occlusionMap') ?? null;
-        const dispScale = tm.displacementScale;
-        // CARRIED THROUGH UNCHANGED, and this used to be a negation.
-        //
-        // Terrain read the slot as a DEPTH map (white = deep) while every standard material read it as a
-        // HEIGHT map, so `invertHeight` meant opposite things on the two paths and the same texture came
-        // out inside-out depending on what it was applied to. That divergence was recorded as deliberate
-        // "until that path is revisited" — it existed because terrain's relief was geometry, which only
-        // ADDS, while a parallax march only CARVES, so the two needed opposite reference planes.
-        //
-        // Terrain marches now, like everything else, so there is one reference plane and one meaning.
-        // Existing terrain materials flip on load, which is the point: the old appearance was the bug.
-        const invertHeight = tm.invertHeight;
-        // A layer has relief exactly when it has a height map. No mode to read.
-        const displace = !!heightId;
-        const heightBlend = tm.heightBlend;
-        if (bt === 'basic') {
-            return {
-                albedoId: t.get('texture') ?? null, aoId, normalId: null, heightId, dispScale, invertHeight, displace, heightBlend,
-                color: p.get('color') ?? [1, 1, 1], metallic: 0, roughness: 1,
-            };
-        }
-        if (bt === 'pbr') {
-            return {
-                albedoId: t.get('baseColorTexture') ?? null,
-                aoId,
-                normalId: t.get('normalMap') ?? null,
-                heightId, dispScale, invertHeight, displace, heightBlend,
-                color: p.get('baseColor') ?? [1, 1, 1],
-                metallic: p.get('metallic') ?? 0,
-                roughness: p.get('roughness') ?? 1,
-            };
-        }
-        // blinn_phong
-        return {
-            albedoId: t.get('baseTexture') ?? null,
-            aoId,
-            normalId: t.get('normalMap') ?? null,
-            heightId, dispScale, invertHeight, displace, heightBlend,
-            color: p.get('diffuse') ?? [1, 1, 1],
-            metallic: 0, roughness: 0.7,
-        };
-    }
+    /** @deprecated No single splat texture exists; the masks are one array texture inside the stack. */
+    public get splatId(): string { return ''; }
 
     /**
-     * Combine a layer's normal map and height map into the single packed texture bound at
-     * `u_normal{index}`: rgb = tangent-space normal, a = height. Source textures decode asynchronously,
-     * so a pack that cannot resolve yet leaves the layer without normal/height this frame and is retried
-     * by {@link syncPackedLayers}; `Renderer._applyTerrainMaterial` binds a fallback to every layer
-     * sampler, so an empty slot cannot leave one unbound.
+     * Preview override for the elevation rule: the material editor maps its small subject onto a rule's
+     * span with this. Null on a real landscape, which measures metres above its own origin.
      */
-    private _syncLayerPack(index: number, L: TerrainLayer, frame: number): void {
-        const m = this._material;
-        const clear = () => {
-            m.textures.delete(`u_normal${index}`);
-            m.properties.set(`u_hasNormal${index}`, 0);
-            m.properties.set(`u_hasHeight${index}`, 0);
-        };
-        if (!L.normalId && !L.heightId) { clear(); return; }
-
-        const id = TexturePacker.Instance.resolve({
-            // A flat tangent-space normal where there is no normal map. `ignored` so a layer with only a
-            // normal map takes the packer's identity path and reuses that texture untouched.
-            r: L.normalId ? { textureId: L.normalId, channel: 0 } : { constant: 0.5, ignored: true },
-            g: L.normalId ? { textureId: L.normalId, channel: 1 } : { constant: 0.5, ignored: true },
-            b: L.normalId ? { textureId: L.normalId, channel: 2 } : { constant: 1.0, ignored: true },
-            a: L.heightId ? { textureId: L.heightId, channel: 0 } : { constant: 0.0, ignored: true },
-            // REPEAT, stated rather than inherited. A layer is sampled at `baseUv * u_tiling{i}` with
-            // tiling typically 20-50; a clamped pack would show one instance in the first tile and a
-            // stretched edge texel over the whole rest of the terrain, so the normal and height would
-            // appear tens of times larger than the albedo beside them, which repeats.
-            wrapping: 'repeat',
-        }, frame);
-
-        if (!id) { clear(); return; }
-        m.textures.set(`u_normal${index}`, id);
-        m.properties.set(`u_hasNormal${index}`, L.normalId ? 1 : 0);
-        // `u_hasHeight{i}` gates BOTH the march and the height-aware layer blend, so it tracks whether
-        // the layer has a height map and nothing else. Clearing it to change what the march does is the
-        // obvious move and silently switches a separate feature off.
-        m.properties.set(`u_hasHeight${index}`, L.heightId ? 1 : 0);
-    }
-
-    /** Re-resolve every layer's packed normal+height texture. Called once per frame by the renderer, to
-     *  pick up layers whose maps had not finished decoding when they were assigned. */
-    public syncPackedLayers(frame: number): void {
-        for (let i = 0; i < this._layers.length && i < 4; i++) {
-            this._syncAlbedoPack(i, this._layers[i], frame);
-            this._syncLayerPack(i, this._layers[i], frame);
-        }
-    }
+    public elevationRemap: [number, number] | null = null;
 
     /**
-     * Albedo (rgb) + ambient occlusion (a), packed into `u_albedo{i}`.
-     *
-     * The twin of {@link _syncLayerPack}, and it exists for the same reason: terrain's layer samplers
-     * occupy units 0-8, so a fifth per-layer texture is not available at any price. Folding height
-     * into the normal map's unused alpha is what took terrain from 13 units to 9; folding occlusion
-     * into the albedo's unused alpha is the same move, and it is why terrain AO turned out not to
-     * need a G-buffer change at all — `gEmissiveAO.a` was always there, terrain simply had nothing
-     * to put in it.
+     * Multiplies every surface's tiling. 1 on a real landscape; the material preview rescales its small
+     * patch with it so one repeat covers the same metres as on the landscape the material is for.
      */
-    private _syncAlbedoPack(index: number, L: TerrainLayer, frame: number): void {
-        const m = this._material;
-        const clear = () => {
-            m.textures.delete(`u_albedo${index}`);
-            m.properties.set(`u_hasAlbedo${index}`, 0);
-            m.properties.set(`u_hasAO${index}`, 0);
-        };
-        if (!L.albedoId && !L.aoId) { clear(); return; }
+    public tilingScale = 1;
 
-        const id = TexturePacker.Instance.resolve({
-            // White where there is no albedo map: the layer tint is applied on top either way, so a
-            // layer with only an occlusion map still reads as its authored colour.
-            r: L.albedoId ? { textureId: L.albedoId, channel: 0 } : { constant: 1.0, ignored: true },
-            g: L.albedoId ? { textureId: L.albedoId, channel: 1 } : { constant: 1.0, ignored: true },
-            b: L.albedoId ? { textureId: L.albedoId, channel: 2 } : { constant: 1.0, ignored: true },
-            a: L.aoId ? { textureId: L.aoId, channel: 0 } : { constant: 1.0, ignored: true },
-            // REPEAT for the same reason the normal pack states it — see there.
-            wrapping: 'repeat',
-        }, frame);
+    /** Authoring view: -1 off, -2 every surface coloured, >= 0 one surface's weight. */
+    public get debugSurface(): number { return this._stack.debugSurface; }
+    public set debugSurface(v: number) { this._stack.debugSurface = v; }
 
-        if (!id) { clear(); return; }
-        m.textures.set(`u_albedo${index}`, id);
-        m.properties.set(`u_hasAlbedo${index}`, L.albedoId ? 1 : 0);
-        m.properties.set(`u_hasAO${index}`, L.aoId ? 1 : 0);
+    /** The base and each paint layer, in the old per-slot shape. Read-only view; edit through the stack. */
+    public get layers(): TerrainLayer[] {
+        const out: TerrainLayer[] = [this._compatLayer(this._stack.base.material, this._stack.base.materialId)];
+        for (const L of this._stack.paintLayers) out.push(this._compatLayer(L.material, L.materialId));
+        return out;
     }
 
-    /** Push a resolved layer's surface + blend uniforms into the composite terrain material. */
-    private _writeLayerUniforms(index: number, L: TerrainLayer): void {
-        const m = this._material;
-        const setTex = (key: string, id: string | null, hasKey: string) => {
-            if (id) { m.textures.set(key, id); m.properties.set(hasKey, 1); }
-            else { m.textures.delete(key); m.properties.set(hasKey, 0); }
+    private _compatLayer(tm: TerrainMaterial | null, materialId: string | null): TerrainLayer {
+        const s = tm ? deriveSurface(tm, tm.tiling, tm.invertHeight) : null;
+        return {
+            albedoId: s?.albedoId ?? null, aoId: s?.aoId ?? null, normalId: s?.normalId ?? null, heightId: s?.heightId ?? null,
+            dispScale: tm?.displacementScale ?? 0.05, invertHeight: tm?.invertHeight ?? false, displace: !!s?.heightId,
+            heightBlend: tm?.heightBlend ?? 0, color: s?.color ?? [1, 1, 1], metallic: s?.metallic ?? 0,
+            roughness: s?.roughness ?? 1, tiling: tm?.tiling ?? 20, auto: tm?.auto ?? false,
+            hRange: tm ? [tm.hRange[0], tm.hRange[1]] : [0, 100], sRange: tm ? [tm.sRange[0], tm.sRange[1]] : [0, 1],
+            material: tm, materialId,
         };
-        // Albedo and AO share one packed texture, exactly as normal and height do below. The alpha
-        // channel was free — `addLayer` only ever sampled `.rgb` — so terrain gains an occlusion map
-        // for ZERO extra texture units, which is the constraint that made this look blocked. With no
-        // AO map the packer takes its identity path and reuses the albedo texture untouched.
-        this._syncAlbedoPack(index, L, 0);
-        // Normal and height share one packed texture; it may not be bakeable yet (its sources decode
-        // asynchronously), so syncPackedLayers owns both slots and retries per frame.
-        this._syncLayerPack(index, L, 0);
-        m.properties.set(`u_color${index}`, [L.color[0], L.color[1], L.color[2]]);
-        m.properties.set(`u_metallic${index}`, L.metallic);
-        m.properties.set(`u_roughness${index}`, L.roughness);
-        // THE SWITCH. Zero here is what turns terrain relief off: `marchTerrain` early-returns on a
-        // zero blended depth, so the ray, its self-shadow and every per-step fetch stop with it. The
-        // height map itself is untouched — it still packs, and `u_hasHeight{i}` still drives the
-        // height-aware blend, which is a separate feature that must not go with it.
-        //
-        // The authored value's unit, for when this comes back: the layer's own TILED uv, exactly as a
-        // standard material's `dispScale` is authored in its own uv. `blendedDepth` divides by the
-        // tiling to reach the base uv the ray travels in.
-        m.properties.set(`u_dispScale${index}`, TERRAIN_RELIEF_ENABLED ? L.dispScale : 0);
-        m.properties.set(`u_invertHeight${index}`, L.invertHeight ? 1 : 0);
-        m.properties.set(`u_heightBlend${index}`, L.heightBlend);
-        m.properties.set(`u_tiling${index}`, L.tiling);
-        m.properties.set(`u_auto${index}`, L.auto ? 1 : 0);
-        m.properties.set(`u_hRange${index}`, [L.hRange[0], L.hRange[1]]);
-        m.properties.set(`u_sRange${index}`, [L.sRange[0], L.sRange[1]]);
     }
 
-
-
-    /** A layer contributes vertex relief exactly when it has a height map and a non-zero depth. */
-    private _layerDisplaces(L: TerrainLayer): boolean {
-        return !!(L.displace && L.heightId && L.dispScale !== 0);
+    /** The paint layer at shim index `index` (>= 1), creating empty ones up to it. */
+    private _ensurePaintLayer(index: number) {
+        while (this._stack.paintLayers.length < index) if (!this._stack.addPaintLayer(null)) break;
+        return this._stack.paintLayers[index - 1];
     }
 
     /**
-     * Configure a layer slot (0..3) and push its uniforms/textures into the composite terrain material.
-     * @param source A {@link TerrainMaterial}, or a legacy `{ textureId, tiling, auto, ... }` object read
-     *               as a plain Basic albedo. Null/undefined keeps the current surface.
-     * @param opts Overrides for the blend params (tiling/auto/hRange/sRange) and the linked `materialId`.
+     * SHIM over the stack: configure slot `index` (0 = base, i >= 1 = the i-th paint layer).
+     * @param source A {@link TerrainMaterial}, or a legacy `{ textureId, ... }` read as a Basic albedo.
+     *               Null/undefined keeps the current material.
+     * @param opts   `tiling`/`auto`/`hRange`/`sRange` are written onto that slot's (embedded) material,
+     *               where the per-layer override used to live; `materialId` relinks it.
      */
     public setLayer(index: number, source?: TerrainMaterial | Partial<TerrainLayer> | null, opts: Partial<TerrainLayer> = {}): void {
-        if (index < 0 || index > 3) return;
-        while (this._layers.length <= index) this._layers.push(this._defaultLayer());
-        const L = this._layers[index];
-
-        if (source instanceof TerrainMaterial) {
-            const s = this._deriveLayerSurface(source);
-            L.material = source; L.materialId = null;
-            L.albedoId = s.albedoId; L.aoId = s.aoId; L.normalId = s.normalId; L.heightId = s.heightId;
-            L.dispScale = s.dispScale; L.invertHeight = s.invertHeight; L.heightBlend = s.heightBlend;
-            L.displace = s.displace;
-            L.color = s.color; L.metallic = s.metallic; L.roughness = s.roughness;
-            L.tiling = source.tiling; L.auto = source.auto;
-            L.hRange = [source.hRange[0], source.hRange[1]];
-            L.sRange = [source.sRange[0], source.sRange[1]];
-        } else if (source && 'textureId' in source) {
-            // Legacy plain-albedo layer (old scenes / basic texture pick).
-            L.material = null; L.materialId = null;
-            L.albedoId = source.textureId ?? null;
-            L.aoId = null;
-            L.normalId = null; L.heightId = null;
-            L.dispScale = 0.05; L.invertHeight = false; L.heightBlend = 0; L.displace = false;
-            L.color = [1, 1, 1]; L.metallic = 0; L.roughness = 1;
-            if (source.tiling !== undefined) L.tiling = source.tiling;
-            if (source.auto !== undefined) L.auto = source.auto;
-            if (source.hRange) L.hRange = [source.hRange[0], source.hRange[1]];
-            if (source.sRange) L.sRange = [source.sRange[0], source.sRange[1]];
+        if (index < 0) return;
+        const layer = index === 0 ? null : this._ensurePaintLayer(index);
+        if (index > 0 && !layer) return;
+        let tm: TerrainMaterial | null = index === 0 ? this._stack.base.material : layer!.material;
+        if (source instanceof TerrainMaterial) tm = source;
+        else if (source && 'textureId' in source && source.textureId) tm = legacyAlbedoMaterial(source.textureId, source.tiling ?? opts.tiling ?? 20);
+        const overrides = opts.tiling !== undefined || opts.auto !== undefined || !!opts.hRange || !!opts.sRange;
+        // A per-layer override used to live on the LAYER, leaving the material alone. The stack keeps it
+        // on the material, so a material handed in from outside is COPIED first: the caller may be
+        // editing it (the landscape-material preview does), and writing a preview-scaled tiling into it
+        // would get saved.
+        if (tm && overrides && source instanceof TerrainMaterial) tm = copyTerrainMaterial(tm);
+        if (tm && overrides) {
+            if (opts.tiling !== undefined) tm.tiling = opts.tiling;
+            if (opts.auto !== undefined || opts.hRange || opts.sRange) {
+                if (opts.auto !== undefined) tm.auto = opts.auto;
+                if (opts.hRange) tm.hRange = [opts.hRange[0], opts.hRange[1]];
+                if (opts.sRange) tm.sRange = [opts.sRange[0], opts.sRange[1]];
+                const heightBlend = tm.rule.heightBlend;
+                tm.rule = legacyAutoRule(tm.auto, tm.hRange, tm.sRange);
+                tm.rule.heightBlend = heightBlend;
+            }
         }
-        // else: keep existing surface/material; only opts below take effect.
-
-        if (opts.tiling !== undefined) L.tiling = opts.tiling;
-        if (opts.auto !== undefined) L.auto = opts.auto;
-        if (opts.hRange) L.hRange = [opts.hRange[0], opts.hRange[1]];
-        if (opts.sRange) L.sRange = [opts.sRange[0], opts.sRange[1]];
-        if (opts.materialId !== undefined) L.materialId = opts.materialId;
-
-        this._writeLayerUniforms(index, L);
-        this._syncLayerUniforms();
+        const materialId = opts.materialId !== undefined ? opts.materialId
+            : index === 0 ? this._stack.base.materialId : layer!.materialId;
+        if (index === 0) this._stack.setBase(tm, materialId ?? null);
+        else this._stack.updatePaintLayer(layer!.id, { material: tm, materialId: materialId ?? null });
     }
 
-    /** Clear a layer slot (0..3): drop its material/surface and its composite uniforms. */
+    /** SHIM: clear slot `index`'s material. A paint layer keeps its mask and place in the stack. */
     public clearLayer(index: number): void {
-        if (index < 0 || index > 3 || index >= this._layers.length) return;
-        this._layers[index] = this._defaultLayer();
-        this._writeLayerUniforms(index, this._layers[index]);
-        this._syncLayerUniforms();
-    }
-
-    private _layerActive(L: TerrainLayer | undefined): boolean {
-        return !!L && (!!L.material || !!L.albedoId);
-    }
-
-    private _syncLayerUniforms(): void {
-        let count = 0;
-        for (let i = 0; i < this._layers.length; i++) if (this._layerActive(this._layers[i])) count = i + 1;
-        this._material.properties.set('u_layerCount', count);
-        let useAuto = 0;
-        for (const L of this._layers) if (L?.auto) useAuto = 1;
-        this._material.properties.set('u_useAuto', useAuto);
+        if (index === 0) { this._stack.setBase(null, null); return; }
+        const layer = this._stack.paintLayers[index - 1];
+        if (layer) this._stack.updatePaintLayer(layer.id, { material: null, materialId: null });
     }
 
     /**
-     * Paint the active layer's weight into the splat map at a world point (dt-scaled), renormalizing the
-     * four channel weights to sum to 1, then upload the dirty sub-rectangle. Returns true if anything changed.
+     * Re-derive what the layers draw after a material was edited in place, and re-derive foliage
+     * prototypes from it. Cheap; call after any edit the stack cannot see.
+     */
+    public refreshLayers(): void {
+        this._stack.materialsChanged();
+    }
+
+    /**
+     * Bring the layer stack's GPU copies up to date and write its uniforms. Called once per frame by the
+     * renderer, where no pass is open; a surface whose maps are still decoding is retried next frame.
+     */
+    public syncPackedLayers(_frame: number, layerTextureSize: number = DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE): void {
+        this._stack.setOriginY(this._origin[1]);
+        this._stack.sync(this._material, layerTextureSize, this.elevationRemap ?? undefined, this.tilingScale);
+    }
+
+    /** A brush at a WORLD point as the landscape-local spec the stack and the sculpt tools take. */
+    private _localBrush(worldPoint: ArrayLike<number>, shape: Omit<BrushSpec, 'x' | 'z'>): BrushSpec {
+        return { ...shape, x: worldPoint[0] - this._origin[0], z: worldPoint[2] - this._origin[2] };
+    }
+
+    /** Paint a paint layer's mask toward `target` (0..1) at a world point. Returns the changed mask region. */
+    public paintLayerMask(layerId: string, worldPoint: ArrayLike<number>, shape: Omit<BrushSpec, 'x' | 'z'>,
+                          amount: number, target: number): MaskRegion | null {
+        return this._stack.paint(layerId, { brush: this._localBrush(worldPoint, shape), amount, target });
+    }
+
+    /** Erase every paint layer under a brush, back to the base. Returns the changed mask region. */
+    public clearLayersAt(worldPoint: ArrayLike<number>, shape: Omit<BrushSpec, 'x' | 'z'>, amount: number): MaskRegion | null {
+        return this._stack.paintAllToZero({ brush: this._localBrush(worldPoint, shape), amount });
+    }
+
+    /**
+     * SHIM: paint slot `brush.layer` at a world point (dt-scaled). Slot 0 — the old base — erases every
+     * paint layer, which is what raising layer 0's weight used to amount to.
      */
     public paint(worldPoint: vec3, brush: PaintBrush, dt: number): boolean {
-        const layer = brush.layer;
-        if (layer < 0 || layer > 3) return false;
-        const S = this._splatRes, half = this._cfg.size / 2, e = this._cfg.size / (S - 1);
-        const lx = worldPoint[0] - this._origin[0], lz = worldPoint[2] - this._origin[2];
-        const rad = brush.radius;
-        const cMin = Math.max(0, Math.floor((lx - rad + half) / e));
-        const cMax = Math.min(S - 1, Math.ceil((lx + rad + half) / e));
-        const rMin = Math.max(0, Math.floor((lz - rad + half) / e));
-        const rMax = Math.min(S - 1, Math.ceil((lz + rad + half) / e));
-        if (cMin > cMax || rMin > rMax) return false;
-
-        const gain = Math.min(1, brush.strength * dt);
-        const ch = [0, 0, 0, 0];
-        let changed = false;
-        for (let r = rMin; r <= rMax; r++) {
-            for (let c = cMin; c <= cMax; c++) {
-                const vx = -half + c * e, vz = -half + r * e;
-                const d = Math.hypot(vx - lx, vz - lz);
-                if (d > rad) continue;
-                const t = d / rad;
-                const w = brush.falloff <= 0 ? 1 : Math.pow(1 - t, brush.falloff * 3);
-                const add = gain * w;
-                const idx = (r * S + c) * 4;
-                ch[0] = this._splat[idx] / 255; ch[1] = this._splat[idx + 1] / 255;
-                ch[2] = this._splat[idx + 2] / 255; ch[3] = this._splat[idx + 3] / 255;
-                ch[layer] = ch[layer] + (1 - ch[layer]) * add;
-                const remaining = 1 - ch[layer];
-                const othersSum = ch[0] + ch[1] + ch[2] + ch[3] - ch[layer];
-                if (othersSum > 1e-5) {
-                    const scale = remaining / othersSum;
-                    for (let k = 0; k < 4; k++) if (k !== layer) ch[k] *= scale;
-                }
-                this._splat[idx] = Math.round(ch[0] * 255); this._splat[idx + 1] = Math.round(ch[1] * 255);
-                this._splat[idx + 2] = Math.round(ch[2] * 255); this._splat[idx + 3] = Math.round(ch[3] * 255);
-                changed = true;
-            }
-        }
-        if (changed) {
-            const w = cMax - cMin + 1, h = rMax - rMin + 1;
-            const sub = new Uint8Array(w * h * 4);
-            for (let r = 0; r < h; r++) {
-                const srcStart = ((rMin + r) * S + cMin) * 4;
-                sub.set(this._splat.subarray(srcStart, srcStart + w * 4), r * w * 4);
-            }
-                this._splatTex.updateRegion(cMin, rMin, w, h, sub);
-        }
-        return changed;
+        const amount = Math.min(1, brush.strength * dt);
+        const shape = { radius: brush.radius, falloff: brush.falloff };
+        if (brush.layer <= 0) return !!this.clearLayersAt(worldPoint, shape, amount);
+        const layer = this._ensurePaintLayer(brush.layer);
+        return !!layer && !!this.paintLayerMask(layer.id, worldPoint, shape, amount, 1);
     }
 
     // --- foliage ------------------------------------------------------------------------------
@@ -1152,37 +945,70 @@ export class Terrain {
         return layer.erase(worldPoint[0], worldPoint[2], radius);
     }
 
-    /** Nearest-texel RGBA splat weights (0..1) at a terrain-local point, matching paint()'s mapping. */
+    /** Unit surface normal of the sculpted ground at a terrain-local point. */
+    public normalAt(localX: number, localZ: number): [number, number, number] {
+        const half = this._cfg.size / 2;
+        const out: [number, number, number] = [0, 1, 0];
+        this._normalAtGrid((localX + half) / this._element, (localZ + half) / this._element,
+            (gx, gz) => this._baseAt(gx, gz), out, 1);
+        return out;
+    }
+
+    /** What each layer contributes at a terrain-local point: the CPU twin of the shader's compositing. */
+    public layerWeightsAt(localX: number, localZ: number): TerrainLayerWeights {
+        const n = this.normalAt(localX, localZ);
+        return this._stack.layerWeightsAt(localX, localZ, this.heightAt(localX, localZ), n[1],
+            this._origin[0] + localX, this._origin[2] + localZ);
+    }
+
+    /**
+     * SHIM: the old four splat channels — the base's weight, then the first three paint layers' — at a
+     * terrain-local point.
+     */
     public sampleSplat(localX: number, localZ: number, out: [number, number, number, number]): void {
-        const S = this._splatRes, half = this._cfg.size / 2, e = this._cfg.size / (S - 1);
-        let c = Math.round((localX + half) / e);
-        let r = Math.round((localZ + half) / e);
-        c = Math.max(0, Math.min(S - 1, c));
-        r = Math.max(0, Math.min(S - 1, r));
-        const idx = (r * S + c) * 4;
-        out[0] = this._splat[idx] / 255; out[1] = this._splat[idx + 1] / 255;
-        out[2] = this._splat[idx + 2] / 255; out[3] = this._splat[idx + 3] / 255;
+        const w = this.layerWeightsAt(localX, localZ);
+        out[0] = w.base; out[1] = w.paint[0] ?? 0; out[2] = w.paint[1] ?? 0; out[3] = w.paint[2] ?? 0;
+    }
+
+    /** Layer materials in shim order: 0 = the base, i = the i-th paint layer. Null where a slot is empty. */
+    private _layerMaterials(): (TerrainMaterial | null)[] {
+        return [this._stack.base.material, ...this._stack.paintLayers.map(L => (L.visible ? L.material : null))];
     }
 
     /** Every foliage prototype contributed by an assigned layer material, tagged with its layer index. */
     private _activeFoliageRules(): { rule: TerrainFoliageRule; layerIndex: number }[] {
         const out: { rule: TerrainFoliageRule; layerIndex: number }[] = [];
-        for (let i = 0; i < this._layers.length; i++) {
-            const m = this._layers[i]?.material;
+        const materials = this._layerMaterials();
+        for (let i = 0; i < materials.length; i++) {
+            const m = materials[i];
             if (!m) continue;
             for (const rule of m.foliageInclude) out.push({ rule, layerIndex: i });
         }
         return out;
     }
 
-    /** True if any layer present (weight above threshold) at this point excludes the named foliage. */
-    private _foliageExcludedAt(name: string, splat: [number, number, number, number]): boolean {
-        for (let k = 0; k < 4; k++) {
-            if (splat[k] < 0.15) continue;
-            const m = this._layers[k]?.material;
-            if (m && m.foliageExclude.includes(name)) return true;
+    /** The dominant layer (shim index) at a point, and its weight. */
+    private _dominantLayer(w: TerrainLayerWeights): { index: number; weight: number } {
+        let index = 0, weight = w.base;
+        for (let i = 0; i < w.paint.length; i++) if (w.paint[i] > weight) { weight = w.paint[i]; index = i + 1; }
+        return { index, weight };
+    }
+
+    /**
+     * Whether a foliage rule may place an instance at a point: its own layer must dominate there, no
+     * surface that forbids foliage (a rock slot) may, and no layer present excludes it by name.
+     */
+    private _foliageAllowedAt(name: string, layerIndex: number, w: TerrainLayerWeights): boolean {
+        const dom = this._dominantLayer(w);
+        if (dom.index !== layerIndex || dom.weight < 1e-3) return false;
+        if (w.noFoliage >= 0.5) return false;
+        const materials = this._layerMaterials();
+        const weights = [w.base, ...w.paint];
+        for (let k = 0; k < weights.length; k++) {
+            if (weights[k] < 0.15) continue;
+            if (materials[k]?.foliageExclude.includes(name)) return false;
         }
-        return false;
+        return true;
     }
 
     /**
@@ -1255,7 +1081,6 @@ export class Terrain {
         const rules = this._activeFoliageRules();
         if (rules.length === 0) return false;
         const wx = worldPoint[0], wz = worldPoint[2];
-        const splat: [number, number, number, number] = [0, 0, 0, 0];
         const touched = new Set<FoliageLayer>();
         const area = Math.PI * radius * radius;
         for (const { rule, layerIndex } of rules) {
@@ -1268,12 +1093,9 @@ export class Terrain {
                 const rr = Math.sqrt(Math.random()) * radius;
                 const px = wx + Math.cos(a) * rr;
                 const pz = wz + Math.sin(a) * rr;
-                this.sampleSplat(px - this._origin[0], pz - this._origin[2], splat);
-                // Place only where this rule's own layer dominates, and nowhere a present material excludes it.
-                let dom = -1, best = 0;
-                for (let k = 0; k < 4; k++) if (splat[k] > best) { best = splat[k]; dom = k; }
-                if (dom !== layerIndex || best < 1e-3) continue;
-                if (this._foliageExcludedAt(rule.name, splat)) continue;
+                // Place only where this rule's own layer dominates, on a surface that allows foliage, and
+                // nowhere a present material excludes it.
+                if (!this._foliageAllowedAt(rule.name, layerIndex, this.layerWeightsAt(px - this._origin[0], pz - this._origin[2]))) continue;
                 const y = this._origin[1] + this.heightAt(px - this._origin[0], pz - this._origin[2]);
                 const layer = this._resolveFoliageLayer(rule);
                 layer.pushInstance(px, y, pz);
@@ -1301,19 +1123,17 @@ export class Terrain {
         return any;
     }
 
-    /** Fraction (0..1) of splat texels where layer `index` is the dominant channel. */
+    /**
+     * Fraction (0..1) of the landscape where shim layer `index` (0 = base) is the dominant one, measured
+     * on a 64x64 grid of samples — enough to answer "is this layer used", which is all its callers ask.
+     */
     public layerCoverage(index: number): number {
-        if (index < 0 || index > 3) return 0;
-        const S = this._splatRes;
-        let count = 0;
-        const total = S * S;
-        for (let i = 0; i < total; i++) {
-            const b = i * 4;
-            let dom = 0, best = this._splat[b];
-            for (let k = 1; k < 4; k++) if (this._splat[b + k] > best) { best = this._splat[b + k]; dom = k; }
-            if (dom === index) count++;
-        }
-        return total > 0 ? count / total : 0;
+        const n = 64, half = this._cfg.size / 2, step = this._cfg.size / n;
+        let hits = 0;
+        for (let r = 0; r < n; r++)
+            for (let c = 0; c < n; c++)
+                if (this._dominantLayer(this.layerWeightsAt(-half + (c + 0.5) * step, -half + (r + 0.5) * step)).index === index) hits++;
+        return hits / (n * n);
     }
 
     /**
@@ -1330,12 +1150,10 @@ export class Terrain {
         let cleared = 0;
         for (const layer of this._foliage) { cleared += layer.count; layer.clear(); }
 
-        const half = this._cfg.size / 2, size = this._cfg.size;
-        const splat: [number, number, number, number] = [0, 0, 0, 0];
         const touched = new Set<FoliageLayer>();
         let placed = 0, clipped = false;
         for (const { rule, layerIndex } of rules) {
-            const r = this._scatterRule(rule, layerIndex, splat);
+            const r = this._scatterRule(rule, layerIndex);
             placed += r.placed;
             if (r.clipped) clipped = true;
             if (r.layer) touched.add(r.layer);
@@ -1357,8 +1175,7 @@ export class Terrain {
      * Extracted so a single rule can be re-scattered on its own (see regenerateFoliageForRule); the
      * body is what generateFoliageEverywhere always ran per rule.
      */
-    private _scatterRule(rule: TerrainFoliageRule, layerIndex: number,
-                         splat: [number, number, number, number]): { placed: number; clipped: boolean; layer: FoliageLayer | null } {
+    private _scatterRule(rule: TerrainFoliageRule, layerIndex: number): { placed: number; clipped: boolean; layer: FoliageLayer | null } {
         const half = this._cfg.size / 2, size = this._cfg.size;
         // density is instances per m² — the same unit the brush uses.
         const count = Math.max(1, Math.round((rule.density ?? DEFAULT_FOLIAGE_DENSITY.mesh) * size * size));
@@ -1366,11 +1183,7 @@ export class Terrain {
         for (let i = 0; i < count; i++) {
             const lx = -half + Math.random() * size;
             const lz = -half + Math.random() * size;
-            this.sampleSplat(lx, lz, splat);
-            let dom = -1, best = 0;
-            for (let k = 0; k < 4; k++) if (splat[k] > best) { best = splat[k]; dom = k; }
-            if (dom !== layerIndex || best < 1e-3) continue;
-            if (this._foliageExcludedAt(rule.name, splat)) continue;
+            if (!this._foliageAllowedAt(rule.name, layerIndex, this.layerWeightsAt(lx, lz))) continue;
             const y = this._origin[1] + this.heightAt(lx, lz);
             layer = this._resolveFoliageLayer(rule);
             if (!layer.pushInstance(this._origin[0] + lx, y, this._origin[2] + lz)) { clipped = true; break; }
@@ -1394,8 +1207,7 @@ export class Terrain {
         const layer = this._findFoliageLayer(entry.rule);
         if (!layer) return 0;
         layer.clear();
-        const splat: [number, number, number, number] = [0, 0, 0, 0];
-        const r = this._scatterRule(entry.rule, entry.layerIndex, splat);
+        const r = this._scatterRule(entry.rule, entry.layerIndex);
         layer.commit();
         return r.placed;
     }
@@ -1544,10 +1356,8 @@ export class Terrain {
         this._foliageByKey.clear();
         for (const ch of this._chunks) ch.model.mesh.dispose();
         this._chunks = [];
-        // The splat texture is exclusively ours (built in the constructor under a synthetic id), so it is
-        // safe to free the GL object too; removeTexture alone only drops the registry entry.
-        this._splatTex.delete();
-        TextureManager.Instance.removeTexture(this._splatId);
+        // The stack's mask texture and layer arrays are exclusively ours, so their GPU objects go too.
+        this._stack.dispose();
         this._world = null;
     }
 
@@ -1576,17 +1386,9 @@ export class Terrain {
             heightMin: min,
             heightMax: max,
             heights: bytesToBase64(new Uint8Array(u16.buffer)),
-            splatRes: this._splatRes,
-            splat: bytesToBase64(this._splat),
-            layers: this._layers.map(L => ({
-                materialId: L.materialId,
-                material: L.material ? L.material.serialize() : null,
-                textureId: L.material ? null : L.albedoId, // legacy plain-albedo layers
-                tiling: L.tiling,
-                auto: L.auto,
-                hRange: [L.hRange[0], L.hRange[1]],
-                sRange: [L.sRange[0], L.sRange[1]],
-            })),
+            // The layer stack (base, paint layers, masks). Replaces `splat` + `layers`, which
+            // `deserialize` still reads — see TerrainLayerStack.loadLegacy.
+            layerStack: this._stack.serialize(),
             foliage: this._foliage.map(f => f.serialize()),
             foliageColliders: { ...this.foliageColliders },
         };
@@ -1619,59 +1421,30 @@ export class Terrain {
             }
             for (const ch of terrain._chunks) terrain._refreshChunkGeometry(ch);
         }
-        const splatBytes: Uint8Array | null =
-            json.splatData ? new Uint8Array(json.splatData.buffer ?? json.splatData)
-                : json.splat ? base64ToBytes(json.splat) : null;
-        if (splatBytes) {
-            const srcRes = json.splatRes ?? terrain._splatRes;
-            if (srcRes === terrain._splatRes) terrain._splat.set(splatBytes.subarray(0, terrain._splat.length));
-            else {
-                // Nearest-neighbour resample across a resolution change; approximate beats erased.
-                const S = terrain._splatRes;
-                for (let r = 0; r < S; r++) {
-                    const sr = Math.min(srcRes - 1, Math.round((S > 1 ? r / (S - 1) : 0) * (srcRes - 1)));
-                    for (let c = 0; c < S; c++) {
-                        const sc = Math.min(srcRes - 1, Math.round((S > 1 ? c / (S - 1) : 0) * (srcRes - 1)));
-                        const si = (sr * srcRes + sc) * 4, di = (r * S + c) * 4;
-                        for (let k = 0; k < 4; k++) terrain._splat[di + k] = splatBytes[si + k] ?? 0;
-                    }
-                }
-                Logger.warn(
-                    `Terrain splat map was saved at ${srcRes}x${srcRes} but this terrain is ` +
-                    `${terrain._splatRes}x${terrain._splatRes} — resampled.`, 'Terrain');
-            }
-            terrain._splatTex.updateRegion(0, 0, terrain._splatRes, terrain._splatRes, terrain._splat);
-        }
         if (json.foliageColliders)
             terrain.foliageColliders = { ...DEFAULT_FOLIAGE_COLLIDERS, ...json.foliageColliders };
-        if (Array.isArray(json.layers)) {
-            for (let i = 0; i < json.layers.length && i < 4; i++) {
-                const lj = json.layers[i];
-                if (!lj) continue;
-                if (lj.material) {
-                    const tm = TerrainMaterial.parse(lj.material);
-                    // MIGRATION. Relief depth used to be authored in the layer's tiled uv and converted
-                    // to metres with `size / tiling`; it is now metres outright. Scaling by the factor
-                    // that used to be applied means the terrain draws exactly what it drew before — only
-                     // UN-MIGRATED, not migrated. There was a conversion here that multiplied
-                    // `displacementScale` by `size / tiling` to turn a tiled-uv depth into world
-                    // metres, because relief was geometry and geometry works in metres. Relief is a
-                    // parallax march again and the authored number is a fraction of one texture repeat,
-                    // exactly as on a mesh — the unit these blobs used before the bake existed.
-                    //
-                    // So a blob WITHOUT the stamp is already correct as stored and is left alone; one
-                    // WITH it was mechanically converted and gets that exact factor divided back out.
-                    // This is the only place both the marker and the terrain size are in hand.
-                    if (json.depthUnit === 'metres')
-                        tm.displacementScale *= Math.max(lj.tiling ?? tm.tiling, TILING_EPSILON)
-                            / Math.max(json.size ?? 200, 1e-6);
-                    terrain.setLayer(i, tm, {
-                        tiling: lj.tiling, auto: lj.auto, hRange: lj.hRange, sRange: lj.sRange,
-                        materialId: lj.materialId ?? null,
-                    });
-                } else {
-                    terrain.setLayer(i, lj); // legacy plain-albedo (lj.textureId)
-                }
+        if (json.layerStack) {
+            // `masksData` is the pre-decoded form the published-game loader supplies.
+            const masks: Uint8Array | null = json.layerStack.masksData
+                ? new Uint8Array(json.layerStack.masksData.buffer ?? json.layerStack.masksData) : null;
+            terrain._stack.load(json.layerStack, masks);
+        } else {
+            // MIGRATION, permanent: every landscape saved before the stack is four slots over a
+            // normalized splat. Converted exactly; see TerrainLayerStack.loadLegacy.
+            const splatBytes: Uint8Array | null =
+                json.splatData ? new Uint8Array(json.splatData.buffer ?? json.splatData)
+                    : json.splat ? base64ToBytes(json.splat) : null;
+            const legacy: any[] = Array.isArray(json.layers) ? json.layers.slice(0, 4) : [];
+            terrain._stack.loadLegacy(legacy, splatBytes, json.splatRes ?? terrain._R);
+            // UN-MIGRATED depth, exactly as before the stack: a `depthUnit: 'metres'` stamp means the value
+            // was multiplied by `size / tiling` while relief was geometry; divide it back out. Only the
+            // terrain has both the stamp and the size, so it happens here.
+            if (json.depthUnit === 'metres') {
+                const byIndex = [terrain._stack.base.material, ...terrain._stack.paintLayers.map(L => L.material)];
+                legacy.forEach((lj, i) => {
+                    const tm = byIndex[i];
+                    if (lj?.material && tm) tm.displacementScale *= Math.max(lj.tiling ?? tm.tiling, TILING_EPSILON) / Math.max(json.size ?? 200, 1e-6);
+                });
             }
         }
         if (Array.isArray(json.foliage)) {

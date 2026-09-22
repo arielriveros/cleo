@@ -6,6 +6,16 @@ import { PREVIEW_FOV, fitDistance, previewClipPlanes } from './previewFraming';
 const DIAG = 1 / Math.sqrt(3);
 
 /**
+ * Names of the preview key + fill lights, shared by every preview builder (model, material, animation).
+ *
+ * The `__editor__` marker is what makes them editor-OWNED (`Node.isEditorOwned`). They used to be plain
+ * 'key'/'fill', which is a user-content name: they showed in the scene tree, the helper reconciler hung a
+ * light icon on each, and any event on them marked the tab unsaved or became an undo step.
+ */
+export const PREVIEW_KEY_LIGHT_NAME = '__editor__keyLight';
+export const PREVIEW_FILL_LIGHT_NAME = '__editor__fillLight';
+
+/**
  * The key + fill pair every model preview is lit by, without the camera.
  *
  * Shared so the impostor bake lights its subject EXACTLY as the library thumbnail does. A card baked
@@ -14,12 +24,12 @@ const DIAG = 1 / Math.sqrt(3);
  * been visually verified over time.
  */
 export function addPreviewLights(scene: Scene): void {
-  const key = new LightNode('key', new DirectionalLight({ ambient: [0.18, 0.18, 0.20] }));
+  const key = new LightNode(PREVIEW_KEY_LIGHT_NAME, new DirectionalLight({ ambient: [0.18, 0.18, 0.20] }));
   key.setPosition([0, 5, 0]).setRotation([120, -35, 0]);
   key.castShadows = false;
   scene.addNode(key);
 
-  const fill = new LightNode('fill', new DirectionalLight({ diffuse: [0.30, 0.32, 0.38], ambient: [0, 0, 0] }));
+  const fill = new LightNode(PREVIEW_FILL_LIGHT_NAME, new DirectionalLight({ diffuse: [0.30, 0.32, 0.38], ambient: [0, 0, 0] }));
   fill.setPosition([0, 5, 0]).setRotation([55, 150, 0]);
   fill.castShadows = false;
   scene.addNode(fill);

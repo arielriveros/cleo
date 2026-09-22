@@ -1,6 +1,8 @@
-import { TerrainMaterial, Terrain, TextureManager } from 'cleo'
+import { Material, TerrainMaterial, Terrain, TextureManager } from 'cleo'
 import { cryptoRandomId } from './ids'
+import { deepClone } from './deepClone'
 import { resolveFoliageRuleGeometry } from './foliageRules'
+import { layerStackOf, layersChanged, stackMaterials } from './terrainAccess'
 
 // A reusable, named terrain material saved to the global terrain-material library, with a rendered
 // preview thumbnail. Mirrors MaterialAsset, but its serialized `material` is a TerrainMaterial (a base
@@ -53,16 +55,30 @@ export function collectFoliageLayerTextureIds(layers: any, set: Set<string>): vo
   }
 }
 
-// All texture ids a serialized terrain material references: base-surface textures + foliage-rule
-// billboard/impostor textures + foliage-rule mesh model textures (every LOD level).
+// All texture ids a serialized terrain material references: base-surface textures + every further
+// SLOT's surface textures + foliage-rule billboard/impostor textures + foliage-rule mesh model textures
+// (every LOD level).
 export function collectTerrainMaterialTextureIds(serialized: any): Set<string> {
   const set = new Set<string>()
-  const textures = serialized?.textures
-  if (textures && typeof textures === 'object')
-    for (const v of Object.values(textures)) if (typeof v === 'string' && v) set.add(v)
+  const addTextures = (textures: any) => {
+    if (textures && typeof textures === 'object')
+      for (const v of Object.values(textures)) if (typeof v === 'string' && v) set.add(v)
+  }
+  addTextures(serialized?.textures)
   // Displacement map is a terrain-specific top-level field, not in the base `textures` map.
   if (serialized?.displacementMap) set.add(serialized.displacementMap)
+  // Slots 1..n are materials of their own, each with its own `textures` map.
+  if (Array.isArray(serialized?.slots))
+    for (const slot of serialized.slots) addTextures(slot?.material?.textures)
   collectFoliageRuleTextureIds(serialized?.foliageInclude, set)
+  return set
+}
+
+/** The plain Material asset ids a serialized landscape material's slots were taken from. */
+export function collectTerrainMaterialSurfaceIds(serialized: any): Set<string> {
+  const set = new Set<string>()
+  if (Array.isArray(serialized?.slots))
+    for (const slot of serialized.slots) if (typeof slot?.surfaceMaterialId === 'string' && slot.surfaceMaterialId) set.add(slot.surfaceMaterialId)
   return set
 }
 
@@ -152,4 +168,100 @@ export function applyTerrainMaterialToLayer(
   const alreadyScattered = terrain.foliage.some(f => f.count > 0)
   if (tm.foliageInclude.length > 0 && !alreadyScattered && terrain.layerCoverage(index) > 0.05)
     terrain.generateFoliageEverywhere()
+}
+
+/**
+ * Assign a landscape-material asset to a terrain's BASE layer or to one of its PAINT layers (by id).
+ *
+ * The layer-stack counterpart of {@link applyTerrainMaterialToLayer}, and the same three steps: parse
+ * (restoring textures and foliage prototypes), un-migrate the depth against this terrain, link by id.
+ * Layer-level choices — name, visibility, opacity, the painted mask — are the LAYER's and are kept; only
+ * the material is replaced. Returns false when the terrain has no stack or no such layer.
+ *
+ * A base with foliage on a terrain nothing has been scattered on yet populates the whole terrain, as
+ * assigning a full-coverage layer always has: the emptiness check keeps hand-placed foliage safe.
+ */
+export function assignLandscapeMaterial(
+  terrain: Terrain, target: 'base' | string, asset: TerrainMaterialAsset,
+  opts?: { skipAutoGenerate?: boolean; rescatterOnDensityChange?: boolean },
+): boolean {
+  const stack = layerStackOf(terrain)
+  if (!stack) return false
+  const tm = parseTerrainMaterialAsset(asset)
+  unmigrateTerrainMaterialDepth(tm, asset, terrain.size)
+  if (target === 'base') stack.setBase(tm, asset.id)
+  else if (!stack.updatePaintLayer(target, { material: tm, materialId: asset.id })) return false
+  layersChanged(terrain)
+  terrain.refreshFoliagePrototypes({ rescatterOnDensityChange: opts?.rescatterOnDensityChange })
+  if (opts?.skipAutoGenerate) return true
+  const alreadyScattered = terrain.foliage.some(f => f.count > 0)
+  if (target === 'base' && tm.foliageInclude.length > 0 && !alreadyScattered) terrain.generateFoliageEverywhere()
+  return true
+}
+
+/** Add a paint layer carrying `asset` on top of the stack, named after it. Returns its id, or null when full. */
+export function addLandscapeMaterialLayer(terrain: Terrain, asset: TerrainMaterialAsset | null): string | null {
+  const stack = layerStackOf(terrain)
+  if (!stack) return null
+  const layer = stack.addPaintLayer(null, { name: asset?.name })
+  if (!layer) return null
+  if (asset) assignLandscapeMaterial(terrain, layer.id, asset, { skipAutoGenerate: true })
+  else layersChanged(terrain)
+  return layer.id
+}
+
+/**
+ * Re-apply an EDITED landscape material to every stack layer that links it, keeping each layer's own
+ * name, visibility, opacity and mask. The stack counterpart of the per-index sync the editor runs on save.
+ */
+export function syncLandscapeMaterialLayers(terrain: Terrain, asset: TerrainMaterialAsset): number {
+  const stack = layerStackOf(terrain)
+  if (!stack) return 0
+  let n = 0
+  if (stack.base.materialId === asset.id) { assignLandscapeMaterial(terrain, 'base', asset, { skipAutoGenerate: true, rescatterOnDensityChange: true }); n++ }
+  for (const L of stack.paintLayers)
+    if (L.materialId === asset.id) { assignLandscapeMaterial(terrain, L.id, asset, { skipAutoGenerate: true, rescatterOnDensityChange: true }); n++ }
+  return n
+}
+
+/**
+ * Push a saved Material asset into every landscape-material SLOT that links it, on one live terrain.
+ *
+ * A slot holds a COPY of the material (the engine must not depend on the editor's library), with
+ * `surfaceMaterialId` recording where it came from — so nothing about a slot updates on its own when the
+ * source material is edited. This is the path that makes editing "Rock" change every landscape material
+ * using rock as its slope slot. Returns how many slots were refreshed.
+ */
+export function syncSlotMaterialInTerrain(terrain: Terrain, materialId: string, serializedMaterial: any): number {
+  let n = 0
+  for (const { material } of stackMaterials(terrain)) {
+    for (const slot of material.slots) {
+      if (slot.surfaceMaterialId !== materialId) continue
+      // A fresh parse per slot: two slots must never share one Material instance, or a later tiling or
+      // texture change on one would silently move the other.
+      slot.material = Material.parse(serializedMaterial)
+      n++
+    }
+  }
+  if (n) layersChanged(terrain)
+  return n
+}
+
+/**
+ * The same propagation for a STORED landscape material: an updated asset when one of its slots links
+ * `materialId`, else null. The live copies above are what draws; this is what keeps the library from
+ * handing out a stale surface the next time the asset is applied to a layer.
+ */
+export function withSyncedSlotMaterial(asset: TerrainMaterialAsset, materialId: string,
+                                       serializedMaterial: any): TerrainMaterialAsset | null {
+  const slots = (asset.material as any)?.slots
+  if (!Array.isArray(slots) || !slots.some((s: any) => s?.surfaceMaterialId === materialId)) return null
+  return {
+    ...asset,
+    material: {
+      ...asset.material,
+      slots: slots.map((s: any) => s?.surfaceMaterialId === materialId
+        ? { ...s, material: deepClone(serializedMaterial) } : s),
+    },
+  }
 }

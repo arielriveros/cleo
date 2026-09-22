@@ -5,6 +5,7 @@ import type { Scene } from "../scene";
 import { sceneStats, sceneStatsDetail } from "../sceneStats";
 import { v4 as uuidv4 } from 'uuid';
 import { engineEventBus, authoring } from "../../eventBus";
+import { isEditorOwnedName } from "../editorOwnership";
 import { Shape } from "../../../physics/shape";
 import { Logger } from "../../logger";
 import { compileScript, resolveNodeScript } from "../../scripting/scriptRuntime";
@@ -131,6 +132,17 @@ export class Node {
    * Never serialized: nothing that carries it survives a save.
    */
   public editorOnly: boolean = false;
+
+  /**
+   * Explicitly marks this node, and everything under it, as EDITOR-OWNED — see {@link isEditorOwned}.
+   *
+   * Most editor-owned nodes do not need it: an `__editor__`/`__debug__` name, {@link editorOnly} or the
+   * gizmo flag already qualify. It exists for the ones whose NAME has to stay as it is: a preview tab's
+   * holder is named after the asset it previews, and a throwaway thumbnail holder parses a whole model.
+   *
+   * Never serialized, like {@link editorOnly}.
+   */
+  public editorOwned: boolean = false;
 
   // Custom user-defined variables editable in the inspector, serialized with the node, and
   // readable from scripts via getData(node) and writable via setData(node, name, value).
@@ -298,6 +310,10 @@ export class Node {
       prev: from,
       // The real landing slot, not `length - 1`: an indexed insert must report where it actually went.
       next: { parentId: this._id, index: this._children.indexOf(node) },
+      // Evaluated after the attach, so a plain child added under an owned helper group inherits the group's
+      // ownership. Lazy, like every stamp except a removal's: see the note on _notifyChange.
+      get editorOwned() { return this.node!.isEditorOwned; },
+      scene: node._scene,
     });
   }
 
@@ -310,6 +326,11 @@ export class Node {
    *                 treats the detach as a despawn.
    */
   public removeChild(node: Node, reparent: boolean = false): void {
+    // Not a child of this node. Carrying on would `splice(-1, 1)` — silently detaching this node's LAST
+    // child, with no event and a dangling parent pointer left behind. A stale undo entry replaying against
+    // a tree that has moved on is how that happens, and the victim is usually an editor helper, since the
+    // editor appends those last.
+    if (!this._children.includes(node)) return;
     // A node that is already dormant has had all of this done by despawn(); firing onDespawn again here
     // would deliver it twice.
     if (!reparent && node._spawned) {
@@ -318,7 +339,14 @@ export class Node {
       node.scene?.cancelTimers(node);
       try { node.onDespawn(); } catch (e) { Logger.error(`Error in onDespawn for node ${node.name}: ${e}`); }
     }
+    // Looked up AFTER onDespawn, never before it: a handler may remove or insert a sibling, and a slot read
+    // earlier would then splice out whichever node now sits there. It may even detach this node itself.
     const index = this._children.indexOf(node);
+    if (index < 0) return;
+    // Both captured BEFORE the detach: ownership is inherited from ancestors and the scene is cleared below,
+    // so after it the removed node can no longer say either.
+    const editorOwned = node.isEditorOwned;
+    const scene = node._scene;
     node.parent = null;
     node.scene = null;
     this._children.splice(index, 1);
@@ -329,6 +357,8 @@ export class Node {
       prop: reparent ? 'reparent-detach' : 'remove',
       prev: { parentId: this._id, index },
       next: null,
+      editorOwned,
+      scene,
     });
   }
 
@@ -491,7 +521,7 @@ export class Node {
       }
     }
 
-    engineEventBus.emit('SCENE_CHANGED', { kind: 'structure', node: this, prop: 'spawn' });
+    engineEventBus.emit('SCENE_CHANGED', { kind: 'structure', node: this, prop: 'spawn', get editorOwned() { return this.node!.isEditorOwned; }, scene: this._scene });
   }
 
   /**
@@ -527,7 +557,7 @@ export class Node {
       n._spawnNotified = false;   // next spawn is a new life, and gets its own onSpawn
     });
 
-    engineEventBus.emit('SCENE_CHANGED', { kind: 'structure', node: this, prop: 'despawn' });
+    engineEventBus.emit('SCENE_CHANGED', { kind: 'structure', node: this, prop: 'despawn', get editorOwned() { return this.node!.isEditorOwned; }, scene: this._scene });
   }
 
   /**
@@ -554,7 +584,7 @@ export class Node {
     // Scene rebuilds its cached node lists only on a structural change, so a flag flipped without one leaves
     // a dormant node in scene.models, still rendering.
     if (slept)
-      engineEventBus.emit('SCENE_CHANGED', { kind: 'structure', node: this, prop: 'sleep' });
+      engineEventBus.emit('SCENE_CHANGED', { kind: 'structure', node: this, prop: 'sleep', get editorOwned() { return this.node!.isEditorOwned; }, scene: this._scene });
   }
 
   /**
@@ -612,7 +642,7 @@ export class Node {
       this._forEachInSubtree(n => { n._spawned = false; });
       // The emit is not optional: Scene caches its node lists and rebuilds them only on a structural
       // change, so without it this node stays in scene.models and keeps drawing.
-      engineEventBus.emit('SCENE_CHANGED', { kind: 'structure', node: this, prop: 'sleep' });
+      engineEventBus.emit('SCENE_CHANGED', { kind: 'structure', node: this, prop: 'sleep', get editorOwned() { return this.node!.isEditorOwned; }, scene: this._scene });
       return;
     }
 
@@ -659,9 +689,19 @@ export class Node {
 
   /**
    * Serialize this node and its subtree. Treat as final — override {@link _serializePayload} instead.
+   *
+   * Editor-owned children ({@link isEditorOwned}) are left out, whoever the caller is. A light's icon, a
+   * camera's frustum gizmo and the free-fly camera are not content. The alternative, stripping them
+   * afterwards, has to be remembered by every caller. The undo history's snapshots forgot, and every undo
+   * resurrected the helpers as plain, un-flagged nodes.
+   *
+   * The test is on the child alone: serializing an owned node directly still includes its own plain
+   * children.
    */
   public async serialize(): Promise<any> {
-    const children = await Promise.all(this._serializableChildren().map(child => child.serialize()));
+    const children = await Promise.all(this._serializableChildren()
+      .filter(child => !child._isSelfEditorOwned())
+      .map(child => child.serialize()));
     return {
       id: this._id,
       name: this._name,
@@ -848,7 +888,7 @@ export class Node {
   public set name(name: string) {
     this._name = name;
     // The scene indexes nodes by name for getNodesByName/findNode; a rename must invalidate that index.
-    engineEventBus.emit('SCENE_CHANGED', { kind: 'name', node: this });
+    engineEventBus.emit('SCENE_CHANGED', { kind: 'name', node: this, get editorOwned() { return this.node!.isEditorOwned; }, scene: this._scene });
   }
   /**
    * Sets the parent pointer *only* — it does not move the node in the tree. Use {@link addChild} to
@@ -857,6 +897,41 @@ export class Node {
   public set parent(node: Node | null) { this._parent = node; }
   /** This node's parent, or `null` if it is a scene root or detached. */
   public get parent(): Node | null { return this._parent; }
+
+  /**
+   * Whether this node is EDITOR-OWNED: put into the scene by the editor for its own purposes, rather than
+   * authored. That covers the free-fly camera, gizmo handles, helper icons, collider and nav wireframes,
+   * brush cursors, and preview-tab lights, skyboxes and holders.
+   *
+   * The contract is that an editor-owned node is never the user's work:
+   * - it never marks a document unsaved, and never becomes an undo step. Its structural events carry
+   *   `editorOwned` for listeners to skip, and its property events are not emitted at all
+   *   (see {@link _notifyChange});
+   * - it never reaches a save: {@link serialize} leaves it out.
+   *
+   * A node qualifies when it, or ANY ANCESTOR, has:
+   * - an `__editor__`/`__debug__` name,
+   * - the explicit {@link editorOwned} flag,
+   * - {@link editorOnly}, or
+   * - the gizmo flag.
+   *
+   * Ancestry only flows downward. Helpers are children of user nodes, never parents of them, so a wireframe
+   * group's plain children are owned while the light carrying an icon is not.
+   *
+   * A strict SUPERSET of {@link editorOnly}. That flag is renderer routing ("draw me in the overlay"), and
+   * several owned nodes must stay lit scene content: the preview ground, the preview skybox, the editor
+   * camera.
+   */
+  public get isEditorOwned(): boolean {
+    for (let n: Node | null = this; n; n = n._parent)
+      if (n._isSelfEditorOwned()) return true;
+    return false;
+  }
+
+  /** {@link isEditorOwned} for this node alone, ignoring its ancestors. */
+  protected _isSelfEditorOwned(): boolean {
+    return this.editorOwned || this.editorOnly || (this as any).isGizmo === true || isEditorOwnedName(this._name);
+  }
   /**
    * This node's direct children.
    *
@@ -1143,10 +1218,21 @@ export class Node {
    * them to re-filter its node lists.
    *
    * `prop`/`prev`/`next` are optional detail — a variable name and its old/new value, say.
+   *
+   * Never fires for an {@link isEditorOwned} node. The editor moves its own camera, gizmo handles and
+   * helper wireframes every frame, and none of that is a user edit. Nothing needs to hear about it either:
+   * Scene re-filters only on structural kinds, so this is the one place the whole flood can be stopped.
+   *
+   * The structural emits elsewhere in this class stamp `editorOwned` as a GETTER, evaluated only when a
+   * listener reads it. They are not gated on authoring, nothing in a published game reads the stamp, and a
+   * recursive `visible` write emits once per descendant, so an eager ancestor walk per event made toggling
+   * a big subtree several times slower for a value nobody looks at. A getter is safe because every listener
+   * runs inside the synchronous dispatch, before the tree can change. A removal is the exception and stamps
+   * eagerly: by the time it emits, its node has left the ancestors its ownership came from.
    */
   protected _notifyChange(kind: ChangeKind, prop?: string, prev?: unknown, next?: unknown): void {
-    if (authoring.enabled)
-      engineEventBus.emit('SCENE_CHANGED', { kind, node: this, prop, prev, next });
+    if (authoring.enabled && !this.isEditorOwned)
+      engineEventBus.emit('SCENE_CHANGED', { kind, node: this, prop, prev, next, editorOwned: false, scene: this._scene });
   }
 
   private _updateTranslationMatrix(): void {
@@ -1735,7 +1821,7 @@ export class Node {
     this._visible = value;
     for (const child of this._children)
       child.visible = value;
-    engineEventBus.emit('SCENE_CHANGED', { kind: 'visibility', node: this });
+    engineEventBus.emit('SCENE_CHANGED', { kind: 'visibility', node: this, get editorOwned() { return this.node!.isEditorOwned; }, scene: this._scene });
   }
 
   /** Event-less recursive visibility used by LOD switching/culling; does not touch _visible. */

@@ -32,6 +32,8 @@ import SoundSettingsPanel from '../sound/SoundSettingsPanel';
 import TilesetInspector from '../tileset/TilesetInspector';
 import TilePalette from '../tilemap/TilePalette';
 import TilemapLayersPanel from '../tilemap/TilemapLayersPanel';
+import LandscapeToolsPanel from '../landscape/LandscapeToolsPanel';
+import LandscapeLayersPanel from '../landscape/LandscapeLayersPanel';
 import PhysicsEditor from '../nodeInspector/physicsEditors/PhysicsEditor';
 import TemplateInstanceNotice from '../nodeInspector/TemplateInstanceNotice';
 import { useSelectedNode } from '../nodeInspector/useSelectedNode';
@@ -146,14 +148,17 @@ function PropertiesPanel(_: IDockviewPanelProps) {
   if (editorMode === 'model') return (
     <SidePanel>
       <ModelInspector />
-      {node && <PropertyEditor node={node} readOnly={readOnly} />}
+      {/* A LOD level other than 0 is an editor-owned PREVIEW of another asset (only level 0 is saved), so
+          it is shown read-only: an edit to it would mark the tab unsaved and then be thrown away. */}
+      {node && <PropertyEditor node={node} readOnly={readOnly || node.isEditorOwned} />}
     </SidePanel>
   );
 
   return (
     <SidePanel>
       {readOnly && <TemplateInstanceNotice />}
-      {node && <PropertyEditor node={node} readOnly={readOnly} />}
+      {/* An editor-owned node (a preview tab's holder) is not the user's content: shown, never edited. */}
+      {node && <PropertyEditor node={node} readOnly={readOnly || node.isEditorOwned} />}
     </SidePanel>
   );
 }
@@ -257,6 +262,9 @@ function AnimStateMachinePanel(_: IDockviewPanelProps) { return <AnimStateMachin
 // The tilemap editor's two panels. Shown only in tilemap mode — see hiddenPanelIds.
 function TilePalettePanel(_: IDockviewPanelProps) { return <TilePalette />; }
 function TilemapLayersDockPanel(_: IDockviewPanelProps) { return <SidePanel><TilemapLayersPanel /></SidePanel>; }
+// Landscape mode's two panels, the same arrangement. The viewport keeps a slim toolbar for the essentials.
+function LandscapeToolsDockPanel(_: IDockviewPanelProps) { return <SidePanel><LandscapeToolsPanel /></SidePanel>; }
+function LandscapeLayersDockPanel(_: IDockviewPanelProps) { return <SidePanel><LandscapeLayersPanel /></SidePanel>; }
 // The two renderer-mode panels. Both own their scrolling, so neither takes a SidePanel wrapper.
 function PerformanceDockPanel(_: IDockviewPanelProps) {
   return (
@@ -311,6 +319,8 @@ export const dockComponents = {
   clipTimeline: ClipTimelinePanel,
   tilePalette: TilePalettePanel,
   tilemapLayers: TilemapLayersDockPanel,
+  landscapeTools: LandscapeToolsDockPanel,
+  landscapeLayers: LandscapeLayersDockPanel,
   performance: PerformanceDockPanel,
   rendererSettings: RendererSettingsDockPanel,
   inputMap: InputMapDockPanel,

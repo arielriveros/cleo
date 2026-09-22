@@ -9,9 +9,9 @@ publishing the result as a self-contained web page or desktop application.
 
 > These pages describe the **current source**, which is ahead of the v1.1.2.4 tag. Features that
 > landed after it are marked *unreleased* where they appear: the `Character` / `Controller` node
-> pair, the `NavMesh` node with its bake-bounds volume, and the **AI Brain** asset with the
-> Behaviour / Goals / Fuzzy graph editors. The published-game player contract is at **7** on this
-> branch; the last tagged release shipped 6.
+> pair, the `NavMesh` node with its bake-bounds volume, the **AI Brain** asset with the
+> Behaviour / Goals / Fuzzy graph editors, and the `Decal` node. The published-game player contract
+> is at **8** on this branch; the last tagged release shipped 6.
 
 ---
 

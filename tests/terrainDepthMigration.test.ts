@@ -42,7 +42,7 @@ const blob = (size: number, tiling: number, dispScale: number) => {
     return t.serialize();
 };
 
-const depthOf = (t: Terrain) => (t as any)._layers[0].dispScale;
+const depthOf = (t: Terrain) => t.layers[0].dispScale;
 
 /**
  * A blob as a project saved before the unit changed actually looks: NEITHER marker.
@@ -73,7 +73,7 @@ describe('a terrain saved under the METRES unit is converted back', () => {
 
     const parsed = (json: any) => {
         const t = Terrain.deserialize(json);
-        return (t as any)._layers[0].dispScale as number;
+        return t.layers[0].dispScale;
     };
     const blob = (over: any = {}) => ({
         size: 200, resolution: 5, chunkQuads: 4,

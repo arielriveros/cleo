@@ -27,7 +27,7 @@ Folders are yours to arrange; nothing depends on where an asset sits.
 | **Image** | real | Import / drop / model import | *no editor* — raw bytes, filed under `Source/` | backs Textures |
 | **Texture** | `.tex` | Derived automatically from whatever registers as a texture | [Texture mode](#textures) | material slots, tileset atlases, LUTs, lens dirt |
 | **Material** | `.mat` | **+ Add**, or model import | [Material mode](models-and-materials.md#the-material-editor) | model nodes |
-| **Terrain Material** | `.tmat` | **+ Add** | Terrain Material mode | terrain paint layers 0–3 |
+| **Landscape Material** | `.tmat` | **+ Add** | Landscape Material mode | a landscape's base layer or any paint layer |
 | **Template** | `.tpl` | **+ Add**, or dragging a scene node onto this panel | Template mode | placed instances, runtime spawning |
 | **Model** | `.model` | Model import, or adopting a node subtree | Model mode | placed in scenes |
 | **Scene** | `.scene` | **+ Add** | The scene tab | one is the main scene |

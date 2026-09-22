@@ -5,6 +5,7 @@
 import { PACK_MAGIC, PACK_HEADER_BYTES, ATTRS } from '../features/publish/pack';
 import type { PackManifest, PackedTexture, PackedSound } from '../features/publish/pack';
 import { ChunkReader, align4 } from '../utils/chunkBlob';
+import { serializedTerrainFoliageRules } from '../utils/terrainJson';
 
 /** The shape Model.parse reads out of `model.geometry`. */
 export interface GeometryArrays {
@@ -154,8 +155,7 @@ export function inflateSceneGeometry(node: any, game: UnpackedGame): void {
   const terrain = node.terrain;
   if (terrain) {
     for (const f of (terrain.foliage ?? [])) inflateFoliageSource(f, game);
-    for (const layer of (terrain.layers ?? []))
-      for (const rule of (layer?.material?.foliageInclude ?? [])) inflateFoliageSource(rule, game);
+    for (const rule of serializedTerrainFoliageRules(terrain)) inflateFoliageSource(rule, game);
   }
 
   for (const child of (node.children ?? [])) inflateSceneGeometry(child, game);
@@ -183,6 +183,13 @@ export async function inflateTerrainData(node: any, game: UnpackedGame): Promise
       const raw = await inflateBytes(heights);
       terrain.heightsU16 = new Uint16Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / 2));
       delete terrain.heightChunk;
+    }
+    // The layer stack's paint masks, handed to TerrainLayerStack.load pre-decoded as `masksData`.
+    const stack = terrain.layerStack;
+    const masks = stack ? game.chunkBytes(stack.masksChunk) : null;
+    if (masks) {
+      stack.masksData = await inflateBytes(masks);
+      delete stack.masksChunk;
     }
   }
 

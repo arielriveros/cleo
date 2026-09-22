@@ -200,6 +200,65 @@ export const MODE_RENDERS_VIEWPORT: Record<EditorMode, boolean> = {
   texture: false,        // TextureTabView fills the panel
   soundSample: false,    // SoundTabView fills the panel
 };
+
+/**
+ * Whether a mode's scene gets the editor's helper overlays — light / camera / probe / sound icons, collider
+ * wireframes. True where the scene is AUTHORED; false where it is a STAGING scene the editor builds to
+ * preview one asset (its key/fill lights are the editor's, not the user's), and for modes that draw no
+ * scene at all. Exhaustive, like MODE_RENDERS_VIEWPORT: a new mode without an entry is a compile error,
+ * which is the point — the light icons in the animation editors were a mode nobody had asked this about.
+ */
+export const MODE_SHOWS_SCENE_HELPERS: Record<EditorMode, boolean> = {
+  scene: true,
+  landscape: true,
+  tilemap: true,
+  ui: true,
+  template: true,
+  renderer: true,
+  input: true,
+  model: true,           // a model asset can carry its own lights and colliders
+  material: false,
+  terrainMaterial: false,
+  stateMachine: false,
+  animation: false,
+  animationField: false,
+  rig: false,
+  script: false,
+  tileset: false,
+  aiBrain: false,
+  texture: false,
+  soundSample: false,
+};
+
+/**
+ * Modes whose whole subject is a SKELETON, so its bone overlay is always drawn — by
+ * `AnimationSkeletonTool` — whatever the viewport's Skeletons debug toggle says. The toggle (and
+ * `DebugSkeletonOverlay`, which it drives) belongs to every other mode, where bones are a debugging aid
+ * rather than the thing being edited. `renderer.setSkeletonOverlay` is one global slot, so exactly one of
+ * the two may write it in any mode, and this table is what decides which. Exhaustive, like
+ * MODE_RENDERS_VIEWPORT: a new mode must say which it is.
+ */
+export const MODE_SKELETON_OWNER: Record<EditorMode, boolean> = {
+  scene: false,
+  landscape: false,
+  tilemap: false,
+  ui: false,
+  template: false,
+  renderer: false,
+  input: false,
+  material: false,
+  terrainMaterial: false,
+  stateMachine: true,
+  animation: true,
+  animationField: true,
+  rig: true,
+  model: false,
+  script: false,
+  tileset: false,
+  aiBrain: false,
+  texture: false,
+  soundSample: false,
+};
 export type GizmoMode = 'position' | 'rotation' | 'scale';
 /**
  * Which frame the transform gizmo's handles point along: the selected node's own orientation, or the
@@ -344,7 +403,7 @@ export const KIND_LABEL: Record<TabKind, string> = {
   scene: 'Scene',
   template: 'Template',
   material: 'Material',
-  terrainMaterial: 'Terrain material',
+  terrainMaterial: 'Landscape material',
   stateMachine: 'State machine',
   animation: 'Animation',
   animationField: 'Animation field',
@@ -391,20 +450,12 @@ export interface EditorTab {
   textureId?: string | null; // texture tabs: the edited texture asset id (also its TextureManager id)
   soundId?: string | null; // sound tabs: the edited sample asset id (also its AudioManager id)
 }
-export type TerrainTool = 'raise' | 'lower' | 'smooth' | 'flatten';
-// No 'move': landscape mode is brushes only; a landscape is positioned with the scene-mode gizmo.
-export type TerrainBrushMode = 'sculpt' | 'paint' | 'foliage';
+/**
+ * Which landscape the landscape-mode tools act on. Every brush setting lives in the landscape brush store
+ * (features/landscape/landscapeBrushStore.ts), which persists them; this ref only names the target.
+ */
 export type TerrainBrushState = {
-  mode: TerrainBrushMode;
-  tool: TerrainTool;
-  radius: number;
-  strength: number;
-  falloff: number;
-  /** Active splat layer (0..3) for the paint tool. */
-  paintLayer: number;
-  /** When true the foliage tool erases instead of scatters. */
-  foliageErase: boolean;
-  /** Id of the landscape node currently being edited (set by the inspector). */
+  /** Id of the landscape node being edited, or null for the scene's first. */
   activeLandscapeId: string | null;
 };
 

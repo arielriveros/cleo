@@ -337,7 +337,7 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
   // a 30vh bottom bar has only ~130px for a full card row.
   const addItems: { label: string; icon: React.ReactNode; run: () => void; title: string }[] = [
     { label: 'Material', icon: <img src={iconFor('material')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterMaterialEditor(), title: 'Create a new material asset' },
-    { label: 'Terrain Material', icon: <img src={iconFor('terrainMaterial')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTerrainMaterialEditor(), title: 'Create a new terrain material asset' },
+    { label: 'Landscape Material', icon: <img src={iconFor('terrainMaterial')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTerrainMaterialEditor(), title: 'Create a new landscape material asset: a surface for a landscape’s base or paint layers' },
     { label: 'Template', icon: <img src={iconFor('template')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTemplateEditor(), title: 'Author a new template in a dedicated empty scene' },
     { label: 'Script', icon: <img src={iconFor('script')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterScriptEditor(), title: 'Create a new class-based script asset' },
     { label: 'Tileset', icon: <img src={iconFor('tileset')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => document.getElementById('tileset-atlas-import')?.click(), title: 'Pick an atlas image and slice it into a tileset for tilemap layers' },

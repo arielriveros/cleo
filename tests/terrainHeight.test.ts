@@ -59,34 +59,68 @@ describe('a terrain material carries the same height controls a PBR material doe
 });
 
 describe('the layer uniforms actually reach the material', () => {
-    it('writes u_dispScale{i} and u_invertHeight{i} per layer', () => {
+    it("writes each surface's height flag and depth-map invert into the stack's arrays", () => {
         const terrain = new Terrain({ size: 32, resolution: 9 });
         const tm = TerrainMaterial.Create('pbr', {});
         tm.textures.set('displacementMap', 'height-id');
         tm.displacementScale = 0.11;
         tm.invertHeight = true;
-        terrain.setLayer(1, tm);
+        terrain.setLayer(1, tm);                       // shim index 1 = the first paint layer
+        const material = (terrain as any)._material;
+        terrain.layerStack.writeUniforms(material);
+        const p = material.properties as Map<string, any>;
 
-        const p = (terrain as any)._material.properties as Map<string, any>;
-        // ZERO WHILE TERRAIN RELIEF IS OFF, and that is the assertion — `TERRAIN_RELIEF_ENABLED` is the
-        // switch, and writing the authored depth anyway would leave a march running that the flag says
-        // is off. The layer still HOLDS what was authored, so nothing is lost and re-enabling is one
-        // constant.
-        expect(p.get('u_dispScale1')).toBe(TERRAIN_RELIEF_ENABLED ? 0.11 : 0);
-        expect((terrain as any)._layers[1].dispScale, 'the layer keeps what was authored').toBe(0.11);
-        // CARRIED THROUGH, not negated. Terrain used to read this slot as a DEPTH map while every
-        // other material read it as a HEIGHT map, so `_deriveLayerSurface` flipped it on the way to the
-        // layer; that divergence existed only because terrain relief was geometry, which adds, against
-        // a march, which carves. Terrain marches now and the flag means one thing everywhere.
-        expect(p.get('u_invertHeight1')).toBe(tm.invertHeight ? 1 : 0);
+        // No base material, so the paint layer's one slot is the whole stack.
+        expect(p.get('u_surfCount')).toBe(1);
+        // CARRIED THROUGH, not negated: the invert flag means what it means on a mesh.
+        expect(p.get('u_surfColor')[3], 'invert rides in the colour alpha').toBe(1);
+        expect(p.get('u_surfFlags')[3], 'the height map is present').toBe(1);
+        expect(p.get('u_surfMaterial')[3], 'painted through mask channel 0').toBe(0);
+        // Relief is not marched on terrain, but the authored number is kept on the material.
+        expect(terrain.layers[1].dispScale, 'the layer keeps what was authored').toBe(0.11);
     });
 
-    it('an untouched layer keeps inert defaults rather than undefined', () => {
+    it('an untouched terrain draws its flat base colour, every surface slot zeroed', () => {
         const terrain = new Terrain({ size: 32, resolution: 9 });
         const p = (terrain as any)._material.properties as Map<string, any>;
-        for (let i = 0; i < 4; i++) {
-            expect(Number.isFinite(p.get(`u_dispScale${i}`)), `u_dispScale${i}`).toBe(true);
-            expect(p.get(`u_invertHeight${i}`), `u_invertHeight${i}`).toBe(0);
+        expect(p.get('u_surfCount')).toBe(0);
+        for (const name of ['u_surfColor', 'u_surfMaterial', 'u_surfFlags', 'u_surfElevation', 'u_surfSlope', 'u_surfNoise', 'u_surfBlend']) {
+            const v = p.get(name);
+            expect(v.length, `${name} is written whole`).toBe(64);
+            expect(Array.from(v).every((x: number) => x === 0), name).toBe(true);
         }
+    });
+
+    it('the base slot 0 is a fill, and the elevation rule is measured from the landscape origin', () => {
+        const terrain = new Terrain({ size: 32, resolution: 9 });
+        terrain.setLayer(0, TerrainMaterial.Create('basic', {}));
+        terrain.setOrigin([0, 12, 0] as any);
+        const material = (terrain as any)._material;
+        terrain.layerStack.setOriginY(12);
+        terrain.layerStack.writeUniforms(material);
+        const p = material.properties as Map<string, any>;
+        expect(p.get('u_surfMaterial')[3]).toBe(-2);
+        expect(p.get('u_elevRemap')).toEqual([1, -12]);
+    });
+});
+
+describe('the four-slot shim over the layer stack', () => {
+    it('never writes a per-layer override into the material it was handed', () => {
+        // The landscape-material preview passes the material being EDITED with a preview-scaled tiling;
+        // writing that into the material would get it saved.
+        const terrain = new Terrain({ size: 32, resolution: 9 });
+        const tm = TerrainMaterial.Create('basic', {});
+        tm.tiling = 20;
+        terrain.setLayer(0, tm, { tiling: 0.8, auto: false });
+        expect(tm.tiling, 'the caller keeps its value').toBe(20);
+        expect(terrain.layers[0].tiling, 'the layer gets the override').toBe(0.8);
+    });
+
+    it('maps index 0 to the base and i >= 1 to the i-th paint layer, creating layers on demand', () => {
+        const terrain = new Terrain({ size: 32, resolution: 9 });
+        terrain.setLayer(2, TerrainMaterial.Create('basic', {}), { materialId: 'm2' });
+        expect(terrain.layerStack.paintLayers.length).toBe(2);
+        expect(terrain.layerStack.paintLayers[1].materialId).toBe('m2');
+        expect(terrain.layers.map(l => l.materialId)).toEqual([null, null, 'm2']);
     });
 });

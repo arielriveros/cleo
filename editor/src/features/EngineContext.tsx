@@ -13,7 +13,8 @@ import { ProjectContext, type ProjectContextValue } from "./ProjectContext";
 import { EditorSessionsContext, type EditorSessionsContextValue } from "./EditorSessionsContext";
 import { useStableActions } from "../utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
-import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey } from "cleo";
+import { isEditorOwnedChange } from "../utils/editorOwned";
+import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
 import type { SceneChange, TerrainFoliageRule, InputMap } from "cleo";
 import NullImage from '../images/null.png';
 import EventEmitter from "../utils/eventEmitter";
@@ -22,6 +23,11 @@ import { createMaterialPreviewScene } from './demoScene/createMaterialPreviewSce
 import { previewSphereGeometry, PREVIEW_TERRAIN_RADIUS, PREVIEW_TERRAIN_SIZE, REFERENCE_LANDSCAPE }
   from './demoScene/previewFraming';
 import { buildTerrainPreviewSubject } from './demoScene/previewTerrainSubject';
+import {
+  loadPreviewShape, savePreviewShape, applyMaterialPreviewShape, applyTerrainPreviewShape,
+  updateTerrainPreviewMapping, terrainPreviewSphere, elevationLegend,
+  type PreviewShape, type TerrainPreview,
+} from './demoScene/previewShapes';
 import { createAnimationEditorScene } from './demoScene/createAnimationEditorScene';
 import { createAssetEditScene } from './demoScene/createAssetEditScene';
 import { parseByType, regenerateIds, stripDebug } from "../utils/nodeSubtree";
@@ -29,7 +35,7 @@ import { cryptoRandomId } from "../utils/ids";
 import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR } from "../utils/templates";
 import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getMaterialIdsOf, getNodeMaterial, unlinkToFallback, unlinkMaterialAt, materialSlotsReferencing, resolveMaterialRefs, serializedVar, MATERIAL_ID_VAR, MATERIAL_IDS_VAR } from "../utils/materials";
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
-import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds } from "../utils/terrainMaterials";
+import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds, syncSlotMaterialInTerrain, withSyncedSlotMaterial } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
 import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE } from "../utils/models";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, seedScriptFields } from "../utils/scripts";
@@ -92,7 +98,7 @@ import { startTask, StepStatus } from "./progress/progressStore";
 import { invalidateNavSoup, reconcileEditorHelpers } from "../utils/editorHelpers";
 import { readBackendPreference } from './renderer/backendPreference';
 import { deepClone } from '../utils/deepClone';
-import { buildProbeIconDataURL, buildLightIconDataURL, buildSoundIconDataURL } from './editorIcons';
+import { buildProbeIconDataURL, buildLightIconDataURL, buildSoundIconDataURL, buildDecalIconDataURL } from './editorIcons';
 import { ImportStage, IMPORT_STAGES, AnimImportStage, ANIM_IMPORT_STAGES } from './importStages';
 import { usePersistedLibrary, usePersistedModelLibrary } from './persistLibrary';
 import { useAssetThumbnails } from './hooks/useAssetThumbnails';
@@ -109,7 +115,7 @@ import { getShellBridge } from './desktopShell';
 import { confirmDiscard, setUnsavedWork, unloadGuardSuppressed } from './unloadGuard';
 import {
   EDITOR_CLEAR_COLOR, LEGACY_CLEAR_COLOR, TAB_METERS_EXPOSURE, TAB_RUNS_POST_PROCESSING, SCENE_TAB_ID,
-  KIND_LABEL, TAB_EDITOR_MODE,
+  KIND_LABEL, TAB_EDITOR_MODE, MODE_SHOWS_SCENE_HELPERS,
 } from './engineContextTypes';
 import type {
   PendingModelImportView, ModelImportDecision, PendingAnimationImportView, PendingRigPickView,
@@ -120,14 +126,14 @@ import type {
 // The types, constant tables and standalone helpers this file used to declare inline now live in sibling
 // modules. They are re-exported here verbatim so every consumer keeps importing them from EngineContext.
 export {
-  EDITOR_CLEAR_COLOR, MODE_RENDERS_VIEWPORT, TAB_METERS_EXPOSURE, TAB_RUNS_POST_PROCESSING,
+  EDITOR_CLEAR_COLOR, MODE_RENDERS_VIEWPORT, MODE_SHOWS_SCENE_HELPERS, TAB_METERS_EXPOSURE, TAB_RUNS_POST_PROCESSING,
   SCENE_TAB_ID, KIND_LABEL,
 } from './engineContextTypes';
 export type {
   PendingModelImportView, ModelImportDecision, RetargetBoneOption, PendingAnimationImportView,
   PendingRigPickView, AnimationImportDecision, BodyDescription, ShapeDescription, LoadingProgress,
-  EditorMode, GizmoMode, GizmoSpace, SavingState, TabKind, ModelEditSession, EditorTab, TerrainTool,
-  TerrainBrushMode, TerrainBrushState, TilemapTool, TilemapBrushState,
+  EditorMode, GizmoMode, GizmoSpace, SavingState, TabKind, ModelEditSession, EditorTab,
+  TerrainBrushState, TilemapTool, TilemapBrushState,
 } from './engineContextTypes';
 
 const EngineContext = createContext<{
@@ -211,6 +217,10 @@ const EngineContext = createContext<{
   editingTerrainMaterialName: string | null;
   editingTerrainMaterialNode: Node | null;
   refreshTerrainMaterialPreview: () => void;
+  /** Put the active material / landscape-material preview on a sphere, a plane or (landscape only) a hill. */
+  setPreviewShape: (shape: PreviewShape) => void;
+  /** What the active landscape-material preview's height stands for, or null. */
+  previewElevationLegend: () => string | null;
   /** Delete the runtime foliage layer a rule scattered, across every live scene. See the impl. */
   dropFoliageLayer: (rule: TerrainFoliageRule) => void;
   /** Bake a flat card for a foliage rule's model and point the rule's impostor at it. */
@@ -527,6 +537,8 @@ const EngineContext = createContext<{
     editingTerrainMaterialName: null,
     editingTerrainMaterialNode: null,
     refreshTerrainMaterialPreview: () => {},
+    setPreviewShape: () => {},
+    previewElevationLegend: () => null,
     dropFoliageLayer: () => {},
     bakeFoliageImpostor: async () => null,
     setActiveTerrainMaterialName: () => {},
@@ -536,7 +548,7 @@ const EngineContext = createContext<{
     stateMachineSourceId: null,
     stateMachineSourceScene: null,
     commitAnimationStateMachine: () => {},
-    terrainBrush: { current: { mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageErase: false, activeLandscapeId: null } },
+    terrainBrush: { current: { activeLandscapeId: null } },
     tilemapBrush: { current: { tool: 'brush', activeTilemapId: null, activeLayer: 0, stamp: { w: 1, h: 1, tiles: [0] }, orient: { flipX: false, flipY: false, rot90: false }, variantSetId: null, terrainId: null } },
     loadingProgress: { loaded: 0, total: 6, label: 'Starting…' },
     scripts: new Map(),
@@ -793,7 +805,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
   // Per-tab runtime scene + root. Animation tabs also record where the SOURCE node lives (its scene may
   // be the main scene OR a template tab's scene) so authored state machines are written back correctly.
-  const tabRuntimeRef = useRef<Map<string, { scene: Scene; rootId: string; sourceScene?: Scene; sourceNodeId?: string; sourceTabId?: string; tm?: TerrainMaterial; helperTerrain?: Terrain; editNode?: ModelNode; previewModelId?: string; skinnedId?: string }>>(new Map());
+  const tabRuntimeRef = useRef<Map<string, { scene: Scene; rootId: string; sourceScene?: Scene; sourceNodeId?: string; sourceTabId?: string; tm?: TerrainMaterial; helperTerrain?: Terrain; editNode?: ModelNode; previewSphere?: ModelNode; previewModelId?: string; skinnedId?: string }>>(new Map());
   const activeTabIdRef = useRef<string>(SCENE_TAB_ID);
   const activeTabKindRef = useRef<TabKind>('scene');
   const dirtyArmedRef = useRef(false); // suppress false-dirty from the helper reconciler right after open
@@ -845,7 +857,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // edits must not mark the scene unsaved) and never before load. Structural changes always emit.
     CleoEngine.authoringMode = isSceneReady && !isPlayMode;
   }, [isPlayMode, isSceneReady]);
-  const terrainBrush = useRef<TerrainBrushState>({ mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageErase: false, activeLandscapeId: null });
+  const terrainBrush = useRef<TerrainBrushState>({ activeLandscapeId: null });
   const tilemapBrush = useRef<TilemapBrushState>({
     tool: 'brush', activeTilemapId: null, activeLayer: 0,
     stamp: { w: 1, h: 1, tiles: [0] },
@@ -1972,6 +1984,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
     // Disarm before constructing — see openMaterialTab. Must come after the focus-only early return above:
     // that path builds no scene and would not re-run the activate effect that re-arms.
+    const wasArmed = dirtyArmedRef.current;
     dirtyArmedRef.current = false;
     const scene = new Scene();
     scene.animationsEnabled = false; // editing scene: skinned models hold bind pose (no playback)
@@ -1989,6 +2002,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       const t = templatesRef.current.find(x => x.id === templateId);
       if (!t) {
         Logger.error(`Template not found (id ${templateId})`, 'Editor');
+        dirtyArmedRef.current = wasArmed; // no tab opens, so nothing else would re-arm the one still showing
         return;
       }
       rootId = instantiateTemplate(t, scene.root, engineMaps(), materialsRef.current);
@@ -2105,8 +2119,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       return;
     }
 
-    // Disarm before constructing the clone's scene — see openMaterialTab.
-    dirtyArmedRef.current = false;
     // Clone the source node (with its skin, animations, mappings and state machine) into a fresh scene.
     const scene = new Scene();
     scene.animationsEnabled = false; // the AnimationPlayer drives the clone directly, not scene.update
@@ -2115,22 +2127,36 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     stripDebug(json);
     regenerateIds(json, new Map()); // distinct ids so the clone never collides with the original
 
+    // Disarm before constructing the clone's scene — see openMaterialTab. After the await, not before it:
+    // the source tab is still on screen while the serialize runs, and its edits must still count.
+    const wasArmed = dirtyArmedRef.current;
+    dirtyArmedRef.current = false;
+
     // Clone under a HOLDER carrying the source's accumulated world scale/rotation, not straight under
     // scene.root: a skinned import cannot bake its fit-to-size factor into vertices, so normalizeRootScale
     // puts that factor entirely on the holder ABOVE the ModelNode.
-    const holder = new Node(`${source.name} (holder)`);
+    // Editor-owned: this tab saves the state machine's working copy, never the preview, so nothing the clone
+    // does is a user edit — and root-motion playback moves it every frame.
+    const holder = markEditorOwned(new Node(`${source.name} (holder)`));
     scene.addNode(holder);
     const worldScale = source.parent ? source.parent.worldScale : [1, 1, 1];
     holder.setScale([worldScale[0], worldScale[1], worldScale[2]]);
-    parseByType(holder, json);
+    // Bracketed as well: the holder's flag covers only the holder's own attach. The parse attaches every
+    // node before its parent, so the clone's bones and meshes emit while still detached, under their
+    // users' own names.
+    withoutDirty(() => parseByType(holder, json));
     const cloneRootId = json.id;
     const clone = scene.getNodeById(cloneRootId) as ModelNode | null;
-    if (!clone) { Logger.error('Failed to clone model for the Animation Editor', 'Editor'); return; }
+    if (!clone) {
+      Logger.error('Failed to clone model for the Animation Editor', 'Editor');
+      dirtyArmedRef.current = wasArmed; // no tab opens, so nothing else would re-arm the one still showing
+      return;
+    }
 
     // Frame the camera + build the shadow-catching ground around the clone's bounds.
     scene.root.updateTransforms();
     const bounds = combineBounds(clone);
-    createAnimationEditorScene(scene, bounds.center, bounds.radius);
+    createAnimationEditorScene(scene, bounds.center, bounds.radius, { silently: withoutDirty });
     scene.start();
     clone.animator?.showBindPose(); // start from the rest pose
 
@@ -2785,6 +2811,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       return;
     }
     clearTabDirty(tab.id);
+    eventEmitter.current.emit('HISTORY_RESET', tab.id); // a new document behind the same tab id
     // The tab id is unchanged, so the activate effect — which is keyed on `activeTabId` — never fires.
     // Without this the engine keeps rendering the scene we just discarded while the inspector edits the
     // new one, and `dirtyArmedRef`, which every `enter*Editor` clears on its way through, is never
@@ -2926,7 +2953,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // can only blame the ACTIVE tab. The tab-activate effect re-arms once the new tab is showing.
     dirtyArmedRef.current = false;
     const scene = new Scene();
-    void createMaterialPreviewScene(scene); // env map + skybox attach once the cubemap images load
+    // The env map + skybox attach once the cubemap images load — usually after this tab has activated, where
+    // an unsilenced insert is recorded as an undo step.
+    void createMaterialPreviewScene(scene, { silently: withoutDirty });
 
     if (asset) {
       for (const t of asset.textures || []) {
@@ -2936,6 +2965,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const material: Material = asset ? Material.parse(asset.material) : Material.PBR({});
     const sphere = new ModelNode('preview', new Model(previewSphereGeometry(), material));
     scene.addNode(sphere);
+    // On the shape last chosen for material previews. The node is the same either way — the tab saves
+    // and selects by its id — only its geometry and the framing change.
+    applyMaterialPreviewShape(scene, sphere, loadPreviewShape('material'));
     // Screen-mode custom materials are camera post passes, not mesh surfaces: run the SAME instance on the
     // preview camera so it previews live. The sphere still carries it for the inspector; the renderer skips
     // drawing models with a screen material.
@@ -2992,11 +3024,25 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Show exactly one LOD level's subtree in a mesh tab. Plain `visible` writes are fine here: this is a
   // user-facing edit-session toggle, not the renderer's per-frame LOD switch.
-  const applyActiveModelLevel = (scene: Scene, levelIds: string[], active: number) => {
+  // Which level is SHOWN is view state, not an edit of the model. Every caller that really changes the
+  // session (add, generate, remove a level) marks the tab dirty itself.
+  const applyActiveModelLevel = (scene: Scene, levelIds: string[], active: number) => withoutDirty(() => {
     for (let i = 0; i < levelIds.length; i++) {
       const root = scene.getNodeById(levelIds[i]);
       if (root) root.visible = i === active;
     }
+  });
+
+  /**
+   * Levels 1..N of a model tab are read-only PREVIEWS of other model assets: a save serializes level 0 only.
+   * So they are editor-owned. Showing, moving or dropping one is never an edit of this model, and never an
+   * undo step. An undo that detached one would also desync the level session. Parsed under the bracket
+   * because the flag can only be set once the parse has produced the root, after its attach has emitted.
+   */
+  const parseLodPreview = (scene: Scene, clone: any): void => {
+    withoutDirty(() => parseByType(scene.root, clone));
+    const root = scene.getNodeById(clone.id);
+    if (root) markEditorOwned(root);
   };
 
   // Build an edit session for a mesh asset: a throwaway scene holding one subtree per LOD level,
@@ -3045,7 +3091,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // placement: the embedded material is a fallback for a deleted asset, never the source of truth, and
       // saving the model would otherwise write the stale copy back over it.
       resolveMaterialRefs(clone, materialsRef.current);
-      parseByType(scene.root, clone);
+      if (levelIds.length === 0) parseByType(scene.root, clone); // level 0: the model being edited
+      else parseLodPreview(scene, clone);
       levelIds.push(clone.id);
     }
     scene.start();
@@ -3188,6 +3235,32 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     eventEmitter.current.emit('SCENE_CHANGED');
   };
 
+  /**
+   * The third place a saved Material asset has to reach: the SLOTS of landscape materials.
+   *
+   * A landscape material's extra surfaces (rock on the steep parts, snow up high) each embed a copy of an
+   * ordinary Material asset, linked by `surfaceMaterialId`. Neither `syncMaterialInstances` (which walks
+   * scene nodes) nor `syncFoliageRulesForMaterial` (which walks models) can see one, so without this an
+   * edit to "Rock" left every landscape using it drawing the old rock until the project was reloaded.
+   * Both copies are refreshed: the live stacks, and the stored `.tmat` assets they were applied from.
+   */
+  const syncTerrainMaterialSlots = (materialId: string, asset: MaterialAsset, exceptTabId?: string) => {
+    let changed = false;
+    for (const scene of liveScenes(exceptTabId)) {
+      for (const landscape of Array.from(scene.landscapes) as any[]) {
+        if (landscape.terrain && syncSlotMaterialInTerrain(landscape.terrain, materialId, asset.material)) changed = true;
+      }
+    }
+    for (const tmAsset of terrainMaterialsRef.current) {
+      const updated = withSyncedSlotMaterial(tmAsset, materialId, asset.material);
+      if (updated) { updateTerrainMaterial(tmAsset.id, updated); changed = true; }
+    }
+    if (changed) {
+      eventEmitter.current.emit('TEXTURES_CHANGED');
+      eventEmitter.current.emit('SCENE_CHANGED');
+    }
+  };
+
   // The other half of "the model changed": a foliage prototype bakes its material INLINE, so editing a
   // shared Material asset never reached scattered foliage at all — syncMaterialInstances only walks
   // scene nodes, and a prototype is reachable from none. Re-derive through the model path for every
@@ -3301,7 +3374,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (!baseRoot) {
         const previewIds = new Set(session.levelIds.slice(1));
         const isContent = (n: Node) =>
-          alive(n) && !previewIds.has(n.id) && !n.name.includes('__editor__') && !n.name.includes('__debug__');
+          alive(n) && !previewIds.has(n.id) && !isEditorOwnedName(n.name);
         // Everything the user left at the scene root, minus the read-only LOD previews and the editor's
         // own camera/light. This is the only place content can be.
         const candidates = runtime.scene.root.children.filter(isContent);
@@ -3446,7 +3519,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       regenerateIds(clone, new Map());
       resolveMaterialRefs(clone, materialsRef.current);
       clone.name = source.name;
-      parseByType(runtime.scene.root, clone);
+      parseLodPreview(runtime.scene, clone);
 
       // Match LOD0's size so the levels line up with the near model.
       const preview = runtime.scene.getNodeById(clone.id);
@@ -3584,7 +3657,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         regenerateIds(clone, new Map());
         resolveMaterialRefs(clone, materialsRef.current);
         clone.name = built.asset.name;
-        parseByType(runtime.scene.root, clone);
+        parseLodPreview(runtime.scene, clone);
 
         // The subtree just parsed into the tab scene IS the next level's source.
         previousLevelRoot = runtime.scene.getNodeById(clone.id) ?? previousLevelRoot;
@@ -4097,6 +4170,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           // Foliage prototypes bake their material inline and hang off no node, so the walk above
           // cannot reach them; this re-derives every scattered rule whose model links this material.
           syncFoliageRulesForMaterial(tab.materialId!, tab.id);
+          // …and the landscape-material slots that embed a copy of it.
+          syncTerrainMaterialSlots(tab.materialId!, asset, tab.id);
         });
       } else {
         const asset = buildMaterialAsset(sphere.model.material, tab.title, thumbnail);
@@ -4164,7 +4239,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     dirtyArmedRef.current = false;
     const scene = new Scene();
     // Framed for a terrain PATCH, not the unit sphere the ordinary material editor previews.
-    void createMaterialPreviewScene(scene, { subjectRadius: PREVIEW_TERRAIN_RADIUS });
+    void createMaterialPreviewScene(scene, { subjectRadius: PREVIEW_TERRAIN_RADIUS, silently: withoutDirty });
     const tm = asset ? parseTerrainMaterialAsset(asset) : TerrainMaterial.Create('pbr', { baseColor: [0.38, 0.5, 0.28] });
     // A REAL landscape, not a sphere borrowing the composite material. Terrain relief is geometry now —
     // the layer displaces the terrain's own vertices and the march is off for it — so a sphere shows the
@@ -4174,14 +4249,22 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // metres-per-vertex match and the preview resolves the same geometry/march split the ground does.
     const previewNode = buildTerrainPreviewSubject(scene, tm, activeLandscapeTerrain());
     const helperTerrain = previewNode.terrain;
+    // The sphere shape draws with the patch's own composite material, so the patch stays in the scene
+    // (hidden) whichever shape is showing: its layer stack is what the renderer syncs.
+    const previewSphere = terrainPreviewSphere(helperTerrain);
+    scene.addNode(previewSphere);
     scene.start();
+    applyTerrainPreviewShape(scene, {
+      landscape: previewNode, sphere: previewSphere, material: tm,
+      referenceSize: activeLandscapeTerrain()?.size ?? REFERENCE_LANDSCAPE.size,
+    }, loadPreviewShape('terrainMaterial'));
     // Unrendered node whose material IS the TerrainMaterial — the MaterialEditor/inspector edit target.
     const editNode = new ModelNode('__tmedit', new Model(Geometry.Sphere(8), tm));
 
     const tabId = adoptTabId ?? cryptoRandomId();
-    tabRuntimeRef.current.set(tabId, { scene, rootId: previewNode.id, tm, helperTerrain, editNode });
+    tabRuntimeRef.current.set(tabId, { scene, rootId: previewNode.id, tm, helperTerrain, editNode, previewSphere });
     commitTab(
-      { id: tabId, kind: 'terrainMaterial', title: asset?.name ?? 'New Terrain Material', terrainMaterialId: asset?.id ?? null },
+      { id: tabId, kind: 'terrainMaterial', title: asset?.name ?? 'New Landscape Material', terrainMaterialId: asset?.id ?? null },
       adoptTabId,
     );
   };
@@ -4199,18 +4282,44 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     return null;
   };
 
-  // Re-derive the composite preview from the edited TerrainMaterial after any inspector change.
+  /** The active tab's landscape-material preview, or null when it is not one. */
+  const terrainPreviewOf = (tabId: string): TerrainPreview | null => {
+    const runtime = tabRuntimeRef.current.get(tabId);
+    if (!runtime?.helperTerrain || !runtime.tm || !runtime.previewSphere) return null;
+    const landscape = runtime.scene.getNodeById(runtime.rootId);
+    if (!(landscape instanceof LandscapeNode)) return null;
+    return {
+      landscape, sphere: runtime.previewSphere, material: runtime.tm,
+      referenceSize: activeLandscapeTerrain()?.size ?? REFERENCE_LANDSCAPE.size,
+    };
+  };
+
+  // Re-derive the composite preview from the edited TerrainMaterial after any inspector change. The
+  // material IS the preview's base (not a copy), so only the stack's flattening and the preview's
+  // tiling scale and elevation mapping need refreshing — a rule edit can move the span the preview shows.
   const refreshTerrainMaterialPreview = () => {
+    const preview = terrainPreviewOf(activeTabId);
+    if (preview) updateTerrainPreviewMapping(preview, loadPreviewShape('terrainMaterial'));
+  };
+
+  // The preview-shape switch. View state, so none of it is an edit: the swap runs inside withoutDirty.
+  const setPreviewShape = (shape: PreviewShape) => {
     const runtime = tabRuntimeRef.current.get(activeTabId);
-    if (!runtime?.helperTerrain || !runtime.tm) return;
-    // The layer's tiling REBASED to the preview patch, never 1. Pinning it to 1 contradicted
-    // `buildTerrainPreviewSubject` — which sets the scaled tiling when the tab opens — so the first
-    // inspector edit silently rescaled the preview to something no landscape will ever show, and took
-    // the derived density down to 1 with it. See previewTerrainSubject.ts for what the scale is for.
-    const size = activeLandscapeTerrain()?.size ?? REFERENCE_LANDSCAPE.size;
-    runtime.helperTerrain.setLayer(0, runtime.tm, {
-        auto: false, tiling: runtime.tm.tiling * PREVIEW_TERRAIN_SIZE / Math.max(size, 1e-6),
-    });
+    if (!runtime) return;
+    if (activeTab.kind === 'material') {
+      savePreviewShape('material', shape);
+      const subject = runtime.scene.getNodeById(runtime.rootId);
+      if (subject instanceof ModelNode) withoutDirty(() => applyMaterialPreviewShape(runtime.scene, subject, shape));
+    } else if (activeTab.kind === 'terrainMaterial') {
+      savePreviewShape('terrainMaterial', shape);
+      const preview = terrainPreviewOf(activeTabId);
+      if (preview) withoutDirty(() => applyTerrainPreviewShape(runtime.scene, preview, shape));
+    }
+  };
+
+  const previewElevationLegend = (): string | null => {
+    const preview = terrainPreviewOf(activeTabId);
+    return preview ? elevationLegend(preview, loadPreviewShape('terrainMaterial')) : null;
   };
 
   const enterTerrainMaterialEditor = (terrainMaterialId?: string, adoptTabId?: string) => {
@@ -4339,11 +4448,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (!dirtyArmedRef.current) return logDirtySkip('not-armed', e);
       if (isPlayModeRef.current) return logDirtySkip('play-mode', e);
       if (dirtySuppressRef.current) return logDirtySkip('suppressed', e);
-      // Ignore mutations to editor-owned nodes — the free-fly viewport camera (an __editor__Camera Node,
-      // moved every frame during navigation) and the __editor__/__debug__ helper icons + physics wireframes
-      // the reconciler splices in. None are user edits.
-      if (e?.node && (e.node.name.includes('__editor__') || e.node.name.includes('__debug__')))
-        return logDirtySkip('editor-owned', e);
+      // Ignore mutations to editor-owned nodes (Node.isEditorOwned): the free-fly camera, gizmo handles, helper
+      // icons and wireframes, brush cursors, preview props. None is a user edit. The engine stamps the answer
+      // on the payload at emit time, which is the only correct source for a removal and for a plain child of
+      // an owned group. Their property events never get this far, because the engine does not emit them.
+      if (isEditorOwnedChange(e)) return logDirtySkip('editor-owned', e);
+      // An engine event names the scene its node was in, and only a change to the scene on screen can be
+      // an edit of the active tab. `null` is a subtree still being built. A parse attaches every node
+      // before its parent, so a preview character, a thumbnail or a foliage prototype emits a burst of
+      // unowned adds whose flag only its topmost holder carries. Any OTHER scene is another document: the
+      // play scene, a background tab, a throwaway thumbnail scene. An event the editor emits itself carries
+      // no `scene` at all, so this never touches the payload-less "something changed" that most panels send.
+      if (e?.scene !== undefined && e.scene !== instanceRef.current?.scene) return logDirtySkip('other-scene', e);
       markTabDirty(activeTabIdRef.current, describeChange(e));
     };
     const emitter = eventEmitter.current;
@@ -4637,8 +4753,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Cross-scene propagation: re-resolve the freshly-parsed scene's asset links against the current
     // libraries, so edits/deletes made to assets while this scene was closed take effect on open. Gated
     // by the hashes captured at the scene's last save (data.assetHashes) — unchanged assets are skipped.
-    resyncScene(scene, engineMaps(), currentLibs(), data.assetHashes, data.assetHashVersion);
+    // withoutDirty, as the boot resync and reloadTab do: re-instantiating a changed asset is not the user's
+    // edit, and unbracketed it became a 'Delete X' + 'Add X' pair on the undo stack of the scene just opened.
+    withoutDirty(() => resyncScene(scene, engineMaps(), currentLibs(), data.assetHashes, data.assetHashVersion));
     showBindPoseForSkinnedModels(scene);
+    // Same tab id, different document: every undo step and baseline refers to the tree just replaced.
+    eventEmitter.current.emit('HISTORY_RESET', SCENE_TAB_ID);
 
     await updateProjectMeta(m => ({ ...m, openSceneId: sceneId }));
     clearTabDirty(SCENE_TAB_ID);
@@ -4687,7 +4807,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!meta) {
       meta = createFreshProjectMeta();
       try { await saveProjectMeta(meta); } catch (e) { console.warn('Failed to persist fresh project meta:', e); }
-      createEmptyScene(editorSceneRef.current);
+      // Bracketed: the default light is part of the starting document, not an undo step.
+      withoutDirty(() => createEmptyScene(editorSceneRef.current));
       pendingPrefsRef.current = null;
     } else {
       // Prefer the last-open scene; fall back to main, then to any scene that still has a blob.
@@ -4712,7 +4833,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         initialAssetHashesRef.current = { hashes: data.assetHashes };
       } else {
         // No scene has a saved blob yet (fresh meta, or blobs lost) — open the target empty.
-        createEmptyScene(editorSceneRef.current);
+        withoutDirty(() => createEmptyScene(editorSceneRef.current));
       }
       if (targetId !== meta.openSceneId) meta = { ...meta, openSceneId: targetId };
       try { await saveProjectMeta(meta); } catch { /* meta re-persists on next save */ }
@@ -4770,6 +4891,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           TextureManager.Instance.addTextureFromBase64(buildSoundIconDataURL(), {
             mipMap: false
           }, '__editor__sound_icon');
+          // Decal viewport billboard icon (editorHelpers' ensureDecalIcon).
+          TextureManager.Instance.addTextureFromBase64(buildDecalIconDataURL(), {
+            mipMap: false
+          }, '__editor__decal_icon');
           eventEmitter.current.emit('TEXTURES_CHANGED');
 
           engine.setScene(editorSceneRef.current);
@@ -4830,6 +4955,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // is in force. Skipped in renderer mode, where the Renderer panel owns its own grid switch.
       if (editorMode !== 'renderer')
         instanceRef.current?.renderer.setGridVisible(isPlayMode ? vis.grid.runtime : vis.grid.editor);
+      // A STAGING scene — the animation editors' preview stage — is lit and framed by the editor, not
+      // authored, so it gets no helper icons at all: an exhaustive table, so a new mode has to decide
+      // (see MODE_SHOWS_SCENE_HELPERS). Play is always the game's own scene.
+      if (!isPlayMode && !MODE_SHOWS_SCENE_HELPERS[editorMode]) return;
       suppressReconcileRef.current = true;
       try {
         if (isPlayMode) {
@@ -4862,6 +4991,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // Structural/visibility/name changes affect which helper icons + wireframes are needed; the per-setter
       // transform/material/... events do not, so skip them (PHYSICS_CHANGED passes no payload and still runs).
       if (e && e.kind !== 'structure' && e.kind !== 'visibility' && e.kind !== 'name') return;
+      // Nor does a change to an editor-owned node: helpers are derived FROM content, so a helper, cursor or
+      // gizmo handle coming or going changes nothing a reconcile reads. The walkable soup excludes helpers
+      // too, so dropping it for one only forces the next reconcile to re-walk the whole level.
+      if (isEditorOwnedChange(e)) return;
       if (e?.kind === 'structure') invalidateNavSoup(activeScene);
       scheduleOnly();
     };
@@ -5471,6 +5604,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     enterTemplateEditor,
     enterMaterialEditor, createMaterialForNode, setActiveMaterialName,
     enterTerrainMaterialEditor, refreshTerrainMaterialPreview, setActiveTerrainMaterialName,
+    setPreviewShape, previewElevationLegend,
     enterStateMachineEditor, commitAnimationStateMachine, registerAnimationApply, registerTilesetApply,
     importAnimationFiles, importSkeletonNames, commitIkRig, currentIkRig, renameAnimationClip, removeAnimationClip, resolveAnimationImport, resolveRigPick,
     enterModelEditor, adoptModelAsset, resolveModelAssetId, linkAnimationToRig, unlinkAnimationFromRig, ensureRigForModel, editSharedClip, setModelRig,
@@ -5553,6 +5687,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       editingTerrainMaterialName,
       editingTerrainMaterialNode,
       refreshTerrainMaterialPreview,
+      setPreviewShape,
+      previewElevationLegend,
       dropFoliageLayer,
       bakeFoliageImpostor,
       setActiveTerrainMaterialName,

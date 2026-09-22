@@ -484,22 +484,29 @@ export class Loader {
             const image = new Image();
             image.src = path;
             image.onload = () => {
-                const data = new Uint8Array(image.width * image.height * 4);
-                const canvas = document.createElement('canvas');
-                canvas.width = image.width;
-                canvas.height = image.height;
-                const context = canvas.getContext('2d');
-                if (!context) throw new Error('Failed to create canvas context');
-                context.drawImage(image, 0, 0);
-                const imageData = context.getImageData(0, 0, image.width, image.height);
-                data.set(imageData.data);
-                resolve({
-                    data: data,
-                    width: image.width,
-                    height: image.height
-                });
+                // Everything in here REJECTS rather than throws: an exception inside an event handler
+                // never reaches the promise, so a failed decode (no 2D context, a canvas too large to
+                // allocate) used to leave the caller awaiting forever with nothing reported.
+                try {
+                    const data = new Uint8Array(image.width * image.height * 4);
+                    const canvas = document.createElement('canvas');
+                    canvas.width = image.width;
+                    canvas.height = image.height;
+                    const context = canvas.getContext('2d');
+                    if (!context) throw new Error('Failed to create canvas context');
+                    context.drawImage(image, 0, 0);
+                    const imageData = context.getImageData(0, 0, image.width, image.height);
+                    data.set(imageData.data);
+                    resolve({
+                        data: data,
+                        width: image.width,
+                        height: image.height
+                    });
+                } catch (err) {
+                    reject(err);
+                }
             };
-            image.onerror = (err) => reject(err);
+            image.onerror = () => reject(new Error('The image could not be decoded'));
         });
     }
 

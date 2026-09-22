@@ -1,7 +1,7 @@
 import { device } from '../rhi/deviceHandle';
 import { Texture } from "../texture";
 import type { ShaderProgram } from "../rhi/shaderProgram";
-import type { ShaderModule, RenderPipeline } from '../rhi/resources';
+import type { ShaderModule, RenderPipeline, TextureView as RhiTextureView } from '../rhi/resources';
 import type { TextureFormat } from '../rhi/types';
 import { ShaderStage } from '../rhi/types';
 import { screenQuadLayout } from '../rhi/vertexLayouts';
@@ -331,6 +331,50 @@ export class TexturePacker {
         const output = new Texture({ mipMap: true, precision: 'low', wrapping });
         output.create(null, width, height);
 
+        this._renderPack(spec, textures, sources, output.attachmentView, output.rhiTexture.format,
+                         width, height, shader, quad);
+        output.generateMipmaps();
+
+        const id = PACKED_ID_PREFIX + cyrb53(key);
+        TextureManager.Instance.addTexture(output, id);
+        this._cache.set(key, { id, texture: output, lastFrame: frame });
+        return id;
+    }
+
+    /**
+     * Render `spec` into ONE LAYER of an existing 2D array, resampled to the array's size. Returns false
+     * while a source is still decoding — the caller retries, exactly as it does for {@link resolve}.
+     *
+     * Always a real bake, never the identity path: an array layer is its own storage, so even a spec
+     * that `resolve` would hand back verbatim has to be copied in. An all-constant spec is fine here
+     * (a surface with no maps still needs its tint-neutral layer), unlike in `resolve`.
+     *
+     * Mips are the CALLER's job: an array bakes several layers and regenerates its chain once.
+     */
+    public bakeInto(spec: PackSpec, target: Texture, layer: number): boolean {
+        const channels = [spec.r, spec.g, spec.b, spec.a];
+        const sources: string[] = [];
+        for (const source of channels) {
+            if ('constant' in source) continue;
+            const texture = TextureManager.Instance.getTexture(source.textureId);
+            if (!texture || texture.width === 0 || texture.height === 0) return false;
+            if (!sources.includes(source.textureId)) sources.push(source.textureId);
+        }
+        const shader = this._ensureShader();
+        const quad = this._ensureQuad(shader);
+        const textures = sources.map(id => TextureManager.Instance.getTexture(id)!);
+        // A bind group may not have a hole, and an all-constant spec has no source to alias: bind the
+        // placeholder, which the shader never reads because every channel is a constant.
+        if (textures.length === 0) textures.push(TextureManager.Instance.getTexture(this._placeholderId())!);
+        this._renderPack(spec, textures, sources, target.layerView(layer), target.rhiTexture.format,
+                         target.width, target.height, shader, quad);
+        return true;
+    }
+
+    /** The draw half of a bake: one fullscreen pass of the pack shader into `view`. */
+    private _renderPack(spec: PackSpec, textures: Texture[], sources: string[], view: RhiTextureView,
+                        format: TextureFormat, width: number, height: number,
+                        shader: ShaderProgram, quad: Mesh): void {
         const channels = [spec.r, spec.g, spec.b, spec.a];
         const srcIndex = channels.map(source => 'constant' in source ? -1 : sources.indexOf(source.textureId));
         const srcChannel = channels.map(source => 'constant' in source ? 0 : source.channel);
@@ -340,9 +384,9 @@ export class TexturePacker {
         // WebGL2 framebuffer now surfaces the way every other target does rather than through a check
         // only this bake had.
         const target = device.createRenderTarget({
-            label: 'channelPack', colorViews: [output.attachmentView],
+            label: 'channelPack', colorViews: [view],
         });
-        const pipeline = this._packPipeline(shader, output.rhiTexture.format);
+        const pipeline = this._packPipeline(shader, format);
 
         // The viewport is the OUTPUT's size, and `setViewportSize` must be told — `renderStats`
         // charges shaded area by it.
@@ -377,13 +421,6 @@ export class TexturePacker {
         pass.drawIndexed(quad.indexCount, 1, 0);   // not a counted pass: a one-off bake is not a frame
         pass.end();
         encoder.finish();
-
-        output.generateMipmaps();
-
-        const id = PACKED_ID_PREFIX + cyrb53(key);
-        TextureManager.Instance.addTexture(output, id);
-        this._cache.set(key, { id, texture: output, lastFrame: frame });
-        return id;
     }
 
     // The pack pipeline, cached per output format: a WebGPU pipeline is a real object and would

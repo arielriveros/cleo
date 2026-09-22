@@ -42,13 +42,16 @@ export function buildTerrainPreviewSubject(scene: Scene, tm: TerrainMaterial,
         size: PREVIEW_TERRAIN_SIZE, resolution: quads + 1, chunkQuads: quads,
     });
 
-    // The tiling that puts one repeat at the same number of METRES it would cover on the landscape.
-    // Not the material's own number, which is a count across a terrain of a different size, and not 1,
-    // which an earlier preview pinned and which hid every tiling-dependent bug there is.
+    // The material is the patch's BASE — its own object, not a copy, so an inspector edit shows as soon
+    // as the stack re-flattens. Its tiling is left alone and the TERRAIN scales it instead: one repeat
+    // must cover the same number of METRES here as on the landscape (`tilingScale = tm.tiling *
+    // PREVIEW_TERRAIN_SIZE / size` in effect), and writing that into the material would get it saved.
     //
-    // `auto` stays off: the height/slope mask depends on where the layer sits in a real landscape, and a
-    // preview that masked itself out would look broken rather than informative.
-    terrain.setLayer(0, tm, { auto: false, tiling: tm.tiling * PREVIEW_TERRAIN_SIZE / Math.max(size, 1e-6) });
+    // Rules stay ON. They used to be forced off because a mask only made sense on a real landscape; the
+    // preview now maps its own height onto the rules' span (see previewShapes.ts), which is how a slope
+    // or snow line gets judged before it is painted anywhere.
+    terrain.setLayer(0, tm);
+    terrain.tilingScale = PREVIEW_TERRAIN_SIZE / Math.max(size, 1e-6);
     const node = new LandscapeNode('preview', terrain);
     scene.addNode(node);
     return node;

@@ -67,6 +67,14 @@ export interface Texture extends GpuResource {
     /** Allocate an empty depth array — the shadow cascades. `compare` selects a comparison sampler. */
     allocateDepthArray(size: number, layers: number, compare: boolean): void;
 
+    /**
+     * Allocate an empty COLOUR array: `layers` slices of `width` x `height`, `levels` mips each, sampled
+     * with the state {@link configure} settled. Immutable storage, so a change of size, layer count or
+     * level count needs a NEW texture — how `LayeredDepthFramebuffer` handles the depth arrays too.
+     * Filled per layer by rendering into a one-layer view, or by {@link Device.writeTexture}.
+     */
+    allocateArray(width: number, height: number, layers: number, levels: number): void;
+
     /** Turn the comparison sampler on or off. Reading a shadow texture without it is undefined. */
     setCompareMode(enabled: boolean): void;
 

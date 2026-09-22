@@ -22,7 +22,7 @@ Selecting the scene **root** shows [Scene settings](scene-authoring.md#scene-set
 | Section | Appears on | What it does |
 |---|---|---|
 | **Model** | Nodes with geometry | Which model asset it came from, and a jump into the model editor. |
-| **Material** | Model nodes | Linked material thumbnail, edit / unlink / create. **One slot per submesh** on a merged import. |
+| **Material** | Model nodes, decals | Linked material thumbnail, edit / unlink / create. **One slot per submesh** on a merged import. A decal takes **PBR materials only**: linking any other kind is refused with a message. |
 | **Animation** | Nodes that are, or contain, a skinned model | Clips, linked `.anim` assets, animation fields, and the button into the Animation Editor. |
 | **Scripts** | Any node | The script slot, plus that script's per-node variables. |
 | **Physics** | Any node | See [Physics](physics.md). |
@@ -61,6 +61,12 @@ per-kind parameters, shadow casting.
 has not landed yet" from "the sky really is that dim".
 
 **Volumetric Clouds** — shape, lighting, animation, quality and render parameters.
+
+**Decal** — size, opacity, sort order, angle and depth fade, which attributes it affects, receivers
+(every surface or terrain only), and the pattern: the linked material, or the radial gradient's
+colours, curve and ring. A notice repeats the limit that surprises people most: surface decals do
+not show on Blinn-Phong or Cel materials. See
+[Node types](../reference/node-types.md#decalnode--decal-unreleased).
 
 ### Gameplay
 

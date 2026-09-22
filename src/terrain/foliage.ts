@@ -724,6 +724,23 @@ export class FoliageLayer {
         return true;
     }
 
+    /**
+     * Re-sample every instance's Y from `sampleHeight`, keeping x/z, yaw and scale.
+     *
+     * Instance Y is baked at scatter time, so anything that replaces the ground wholesale — a heightmap
+     * import — leaves the foliage floating or buried until it is re-seated. Returns whether any instance
+     * moved.
+     */
+    public reseat(sampleHeight: (x: number, z: number) => number): boolean {
+        let moved = false;
+        for (let i = 0; i < this._instances.length; i += 5) {
+            const y = sampleHeight(this._instances[i], this._instances[i + 2]);
+            if (y !== this._instances[i + 1]) { this._instances[i + 1] = y; moved = true; }
+        }
+        if (moved) this._rebuild();
+        return moved;
+    }
+
     /** Change the spatial-grid cell size (world units) and re-bucket the instances. No-op if unchanged. */
     public setCellSize(size: number): void {
         if (size > 0 && size !== this.cellSize) {

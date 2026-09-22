@@ -1,4 +1,4 @@
-import { parseNodeJson, collectNodeIds, regenerateNodeIds, remapNodeRefs as engineRemapNodeRefs } from 'cleo'
+import { parseNodeJson, collectNodeIds, regenerateNodeIds, remapNodeRefs as engineRemapNodeRefs, isEditorOwnedName } from 'cleo'
 import { cryptoRandomId } from './ids'
 import { isBinaryPayload } from './binaryPayload'
 
@@ -14,11 +14,14 @@ export const parseByType = parseNodeJson
 /** @see remapNodeRefs — rewrites node-reference fields (camera rig pins) through an id map. */
 export const remapNodeRefs = engineRemapNodeRefs
 
-/** Remove editor/debug helper children so an asset only contains user content. */
+/**
+ * Remove editor/debug helper children so an asset only contains user content. Works on JSON, so it can
+ * only go by name (`isEditorOwnedName`): the `editorOwned` flag is never serialized. `Node.serialize`
+ * already drops self-owned children; this still catches marked names in older saved JSON.
+ */
 export function stripDebug(nodeJson: any): void {
   if (Array.isArray(nodeJson.children)) {
-    nodeJson.children = nodeJson.children.filter((c: any) =>
-      !(String(c.name).includes('__debug__') || String(c.name).includes('__editor__')))
+    nodeJson.children = nodeJson.children.filter((c: any) => !isEditorOwnedName(String(c.name)))
     nodeJson.children.forEach(stripDebug)
   }
 }

@@ -1,6 +1,7 @@
 // Imports must stay type-only: this module has to be dependency-free at runtime (see engineEventBus).
 import type { LogEntry } from './logger';
 import type { Node } from './scene/nodes/node';
+import type { Scene } from './scene/scene';
 import type { ActionState } from '../input/actionMap';
 import type { AssetRef } from './assets/assetGraph';
 
@@ -46,6 +47,9 @@ export type StructureOp = 'add' | 'remove' | 'reparent' | 'reparent-detach' | 's
  *   * `transform` carries which of position/rotation/scale changed, but NO values.
  *   * The rest carry at most `{ kind, node }`.
  * Anything without an explicit inverse is undone from a subtree snapshot instead.
+ *
+ * Every event the engine emits also carries `editorOwned` and `scene`, both captured at emit time. Events
+ * the editor emits itself on its own bus carry neither.
  */
 export interface SceneChange {
   kind: ChangeKind;
@@ -53,6 +57,30 @@ export interface SceneChange {
   prop?: string;
   prev?: unknown;
   next?: unknown;
+  /**
+   * `node` is EDITOR-OWNED (see `Node.isEditorOwned`): editor chrome or a preview prop, not authored
+   * content. Anything that tracks user edits — the editor's unsaved flag, its undo history — must ignore
+   * the event.
+   *
+   * It rides on the payload rather than being left to listeners because ownership is inherited from
+   * ancestors, and a `remove` event is emitted after the node has been detached from them. It is therefore
+   * computed BEFORE the detach. A listener cannot recompute it afterwards.
+   *
+   * Property kinds are never emitted for an owned node at all (see `Node._notifyChange`), so in practice
+   * this is set on structure, visibility and name events.
+   *
+   * Except on a removal, the engine supplies it as a getter that walks the node's ancestors when read. So
+   * read it during the dispatch, not later from a stored payload.
+   */
+  editorOwned?: boolean;
+  /**
+   * The scene `node` belonged to when the event was emitted: captured before the detach for a removal, and
+   * `null` for a node that is not in any scene, such as a subtree still being built. The bus is
+   * process-global, so every scene's changes arrive on it. A listener that tracks one document uses this to
+   * tell its own scene's changes apart from those of another tab, a throwaway thumbnail scene, or the play
+   * scene, which deliberately reuses the editor's node ids.
+   */
+  scene?: Scene | null;
 }
 
 /** Engine bus event catalog: event name -> payload type. `void` means "emitted with no argument". */

@@ -189,6 +189,7 @@ Per-object motion blur can be suppressed on a node with `node.motionBlur = 'obje
 | `terrainLodDistance2` | `number` | `300` | Where it drops to the second. |
 | `terrainLodStep1` | `number` | `2` | Detail divisor at LOD 1 (½). |
 | `terrainLodStep2` | `number` | `4` | Detail divisor at LOD 2 (¼). |
+| `terrainLayerTextureSize` | `512 \| 1024 \| 2048` | `1024` | Size every landscape surface is resampled to. They share one texture array, so they share one size. |
 
 ## See also
 

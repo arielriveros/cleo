@@ -22,6 +22,8 @@ import { UIPanelNode, UIStackNode, UISpacerNode } from '../src/core/scene/nodes/
 import { UITextNode, UIImageNode } from '../src/core/scene/nodes/ui/uiContent';
 import { UIButtonNode, UIProgressBarNode, UISliderNode, UIToggleNode, UITextInputNode } from '../src/core/scene/nodes/ui/uiWidgets';
 import { NavMeshNode } from '../src/core/scene/nodes/navMeshNode';
+import { DecalNode } from '../src/core/scene/nodes/decalNode';
+import { Material } from '../src/graphics/material';
 import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 
 /**
@@ -65,6 +67,10 @@ const CASES: { label: string, make: () => Node, cls: Function }[] = [
     { label: 'sound-ambient', make: () => new SoundNode('music', { mode: 'ambient' }), cls: SoundNode },
     { label: 'sound-spatial', make: () => new SoundNode('emitter', { mode: 'spatial', sampleId: 'sample-1' }), cls: SoundNode },
     { label: 'navMesh', make: () => new NavMeshNode('navigation'), cls: NavMeshNode },
+    // With an embedded material, so the second-trip check also covers the one nested object it carries.
+    { label: 'decal', make: () => new DecalNode('decal', {
+        size: [4, 1, 2], material: Material.PBR({ textures: { baseColorTexture: 'tex-1' } }),
+    }), cls: DecalNode },
     { label: 'uiRoot', make: () => new UIRootNode('UI'), cls: UIRootNode },
     { label: 'uiPanel', make: () => new UIPanelNode('panel'), cls: UIPanelNode },
     { label: 'uiText', make: () => new UITextNode('text'), cls: UITextNode },

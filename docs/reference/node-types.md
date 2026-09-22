@@ -10,7 +10,7 @@ existing saves — which is why some names look dated.
 type NodeType =
   | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite'
   | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'lodGroup'
-  | 'cameraRig' | 'sound' | 'character' | 'controller' | 'navMesh'
+  | 'cameraRig' | 'sound' | 'character' | 'controller' | 'navMesh' | 'decal'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 ```
@@ -289,6 +289,118 @@ Raymarched clouds. Option groups: **shape** (`coverage`, `density`, `cloudType`,
 `powderStrength`, `absorption`), **animation** (`windDirection`, `windSpeed`, `detailWindFactor`),
 **quality** (`steps`, `lightSteps`, `maxDistance`, `jitter`, `resolutionScale`, `temporalUpscale`),
 **render** (`enabled`, `opacity`).
+
+### DecalNode — `'decal'` *(unreleased)*
+
+A decal volume, the way Unreal's DecalActor and HDRP's Decal Projector work: an oriented box that
+projects a material onto every surface inside it. A decal has no geometry of its own. It takes the
+shape of whatever it overlaps, so a scorch mark wraps over a kerb and a painted line follows the
+terrain.
+
+**The box.** `size` is the full extent at scale 1, so the volume is `worldTransform × scale(size)`
+over the unit cube `|xyz| ≤ 0.5`, the same convention as the [light probe](#lightprobenode--lightprobe)'s
+box. The decal projects along local **−Y**, so an unrotated decal lands on the ground beneath it.
+The image lies in local XZ, with `u = 0.5 + x` and `v = 0.5 − z`. Seen from above, +X runs right and
+−Z runs up the image, so a texture reads the right way round on a floor. A surface is touched only
+where it lies inside the box **and** faces the projector.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `size` | `[1, 1, 1]` | Full extents. Each axis is made positive and kept at `0.001` or more, since a flat box has no inverse. To mirror a decal, use the node's scale. |
+| `material` | `null` | The projected material. **PBR only**: anything else logs a warning and is stored as `null`. `null` projects plain white. |
+| `opacity` | `1` | Coverage multiplier, `0..1`. |
+| `sortOrder` | `0` | Integer. Where decals overlap, higher lands on top. Ties break by id, never by distance. |
+| `angleFade` | `0.3` | Fade on surfaces turned away from the projector: the weight is `smoothstep(0, angleFade, dot(N, boxY))`, where `boxY` is the box's own +Y axis. `0` disables the test, and the decal then lands on walls and back faces inside the box too. |
+| `depthFade` | `0.2` | Feather toward the box's top and bottom faces, as a fraction of its half-height. `0` is a hard cut. |
+| `affects` | all `true` | `{ albedo, normal, surface, emissive }`. `surface` is roughness, metallic and AO under **one** coverage, as in Unreal's DBufferC. |
+| `receivers` | `'all'` | `'terrain'` keeps the decal off everything but landscapes. See below. |
+| `pattern` | `'material'` | `'radial'` draws the procedural gradient in `radial` instead of the material. |
+| `radial` | see below | The gradient's parameters. The setter accepts a `Partial`. |
+
+`affects` and `radial` return live objects, so you can mutate them in place. From the material, a
+decal reads the base colour, whose alpha times the material's `opacity` is the coverage. It also
+reads the normal map, the ORM maps or the roughness/metallic scalars, the emissive colour and map,
+and the mask map's red channel, which scales coverage. Height, parallax and cutout settings do not
+apply.
+
+```ts
+get volumeMatrix: mat4 ; get invVolumeMatrix: mat4   // unit cube <-> world; live scratch, copy to keep
+get mirrored: boolean        // det(worldTransform) < 0: the renderer culls the other face set
+get writesSurface: boolean   // albedo, surface, or a normal map to write
+get emits: boolean           // affects.emissive, and something non-zero to emit
+```
+
+`getBoundingBox()` and `getBoundingSphere()` are overridden to use the box's eight corners, so
+changing `size` moves the bounds and frustum culling follows. `scene.decals` is the scene's typed
+set. A decal serializes under one nested `decal` key, material included, and a missing or malformed
+key reads back as its default. `decalLocalToUV(local)`, `radialDecalT(local, shape)` and
+`radialDecalWeight(t, exponent, curve, falloff)` are the shader's projection and gradient maths as pure
+functions.
+
+**How it renders.** Every route draws the box's back faces with no depth test and rebuilds the
+surface position from the depth buffer. That is what lets the camera stand inside the box.
+
+| Route | When | Lands on |
+|---|---|---|
+| **Surface**: albedo, normal, roughness/metallic/AO | After the geometry pass, before SSAO and lighting. Written into a three-target DBuffer, then resolved into the G-buffer, so the decal is **lit** like the surface underneath. | **Deferred receivers only**: PBR meshes, landscapes, foliage and deferred custom materials. |
+| **Emissive** | After lighting, added to the image before fog. As bright as a mesh wearing the same material. It blooms wherever the surface underneath would, because the bloom mask is left untouched. | **Every opaque surface**, including forward-shaded ones. |
+| **Overlay** | Used **instead of** the other two routes for an editor-only decal (`markEditorOnly`). Drawn as unlit chrome in the editor overlay layer after the post chain, using the un-jittered camera so it does not shimmer under TAA. The landscape brush is drawn this way. | Every opaque surface. Never in a build. |
+
+The passes are labelled `decals.receivers`, `decals` and `decals.resolve`, `decals.emissive`, and
+`overlay.decals`. You can switch `decals` and `decals.emissive` off from the profiler.
+
+**`receivers: 'terrain'`** keeps a rock or a grass blade standing inside the box clean, on every
+route. It costs one depth-only pass over the landscape chunks in any frame where such a decal is
+visible. A pixel counts as terrain when its depth matches the terrain-only depth to within
+`0.02 + 0.002·d` world units, where `d` is the distance from the camera. That is 4 cm at 10 m and
+22 cm at 100 m. Anything within that margin of the ground, like the foot of a rock, still takes the
+decal.
+
+**The radial pattern** is a procedural gradient for ground indicators: an area-of-effect ring, a
+selection circle, the editor's terrain brush. `t` is the distance from the box's vertical axis as a
+fraction of its half-width, which makes an ellipse when the box is not square; with `shape: 'square'`
+it is the Chebyshev distance instead, and the pattern fills the box's footprint. Nothing lands past
+`t = 1`:
+
+```ts
+w     = radialDecalWeight(t, exponent, curve, falloff)   // 'power': exponent <= 0 ? 1 : pow(1 - t, exponent)
+color = mix(outerColor, innerColor, w)
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `innerColor` | `[1, 1, 1, 1]` | Colour and coverage at the centre (`w = 1`). |
+| `outerColor` | `[1, 1, 1, 0]` | Colour and coverage at the rim (`w = 0`). |
+| `curve` | `'power'` | `'power'` is `pow(1 − t, exponent)`. `'smooth'`, `'linear'`, `'sphere'` and `'tip'` hold full weight over the inner `1 − falloff` of the radius, then fall to `0` at the rim with that profile. |
+| `exponent` | `1` | The `power` curve's exponent. `0` is a flat, uniform disc. |
+| `falloff` | `0.5` | The other curves' falloff: the fraction of the radius the weight falls over. `0` is a hard edge. |
+| `shape` | `'circle'` | `'circle'` or `'square'`. Rotate the node to turn a square. |
+| `ringColor` | `[1, 1, 1, 0]` | An outline just inside `t = 1`. Alpha `0` disables it. |
+| `ringWidthPx` | `1.5` | Ring width in screen **pixels**, so it stays crisp at any distance. |
+| `emissive` | `0` | Multiplier on the pattern colour for the emissive route. `0` means not emissive. |
+
+Colours are RGBA `0..1` and **sRGB-authored**, like every picker colour. The curves are the terrain
+brush's own: `radialDecalWeight(t, brushFalloffExponent(f))` equals `curveWeight(t, f, 'soft')`, and each
+band curve equals `curveWeight` of the same name, so the brush cursor shows exactly what the next stroke
+will do.
+
+> **Known limits.**
+>
+> - **No surface decals on forward-shaded surfaces.** Blinn-Phong (`Material.Default`, which every
+>   Add-catalog primitive starts with), Cel and forward custom materials are lit straight into the
+>   image after the G-buffer is resolved, so there is nothing for the decal to write into. They
+>   still receive the emissive route. Unlit Basic surfaces are skipped by the surface route as
+>   well: zero albedo is how the G-buffer marks a pixel unlit, and a decal giving it albedo would
+>   light it. A PBR surface whose base colour is exactly black shares that marker and is skipped too.
+> - **Transparent surfaces receive nothing.** The decal lands on the opaque surface behind them.
+> - **No surface decals in the forward pipeline** (`graphics.deferred: false`), which has no
+>   G-buffer. Emissive and overlay decals still work there. **No decals at all in light-probe
+>   captures**, so a decal never shows up in a probe's reflections.
+> - **No per-object opt-out.** There is no stencil buffer to carry a "receives decals" flag, so
+>   `receivers: 'terrain'` is the only filter.
+> - **The image is shown once, never tiled.** Decal textures are sampled at least half a texel inside
+>   their edges, so a repeat-wrapped texture cannot bleed its opposite edge in along the box border.
+>   A texture's wrap mode has no effect on a decal.
 
 ---
 

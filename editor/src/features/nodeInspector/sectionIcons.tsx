@@ -21,6 +21,8 @@ export const UniformsIcon = () => (<S><path d='M4 7h10M18 7h2M4 12h4M12 12h8M4 1
 export const SkyIcon = () => (<S><circle cx='7' cy='8' r='3' /><path d='M4 18h13a3 3 0 0 0 0-6 4.5 4.5 0 0 0-8.7-1.3' /></S>);
 export const CloudsIcon = () => (<S><path d='M6 16a4 4 0 0 1 .6-7.9A5 5 0 0 1 16 8a3.5 3.5 0 0 1-.5 8Z' /></S>);
 export const ProbeIcon = () => (<S><circle cx='12' cy='12' r='4' /><circle cx='12' cy='12' r='9' strokeDasharray='2 3' /></S>);
+// A dashed projector box pressing a mark onto the ground: the decal volume, its direction and its print.
+export const DecalIcon = () => (<S><path d='M4 3.5h16v10H4Z' strokeDasharray='2.6 2.2' /><path d='M12 6v8.8M9.3 12.1 12 14.8l2.7-2.7' /><ellipse cx='12' cy='19' rx='8' ry='2.4' /></S>);
 export const SkyboxIcon = () => (<S><rect x='4' y='4' width='16' height='16' rx='1.5' /><path d='M4 9h16M9 4v16' /></S>);
 export const AnimationIcon = () => (<S><path d='M5 12a7 7 0 1 1 2 5' /><path d='M5 21v-4h4' /></S>);
 export const ScriptIcon = () => (<S><path d='M8 6 3 12l5 6' /><path d='M16 6l5 6-5 6' /></S>);

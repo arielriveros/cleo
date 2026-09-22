@@ -1,5 +1,7 @@
 import { Popover, Toggle } from '../components/ui';
 import { useDebugVisibility, DEBUG_CATEGORIES } from './DebugVisibilityContext';
+import { useCleoEngine } from './EngineContext';
+import { MODE_SKELETON_OWNER } from './engineContextTypes';
 
 // Eye glyph matching the inline-SVG style of the viewport's gizmo icons (stroke currentColor).
 const EyeIcon = () => (
@@ -16,6 +18,10 @@ const EyeIcon = () => (
  */
 export default function DebugVisibilityMenu() {
     const { visibility, setCategory } = useDebugVisibility();
+    const { editorMode } = useCleoEngine();
+    // In a skeleton editor the bones are the subject, not a debug aid: they draw whatever this menu says,
+    // so their row reads as locked on rather than offering a switch that would do nothing.
+    const skeletonLocked = MODE_SKELETON_OWNER[editorMode];
 
     return (
         <Popover
@@ -30,11 +36,19 @@ export default function DebugVisibilityMenu() {
                     <div className='text-[10px] uppercase tracking-wide text-muted px-1'>Overlay</div>
                     <div className='text-[10px] uppercase tracking-wide text-muted text-center'>Editor</div>
                     <div className='text-[10px] uppercase tracking-wide text-muted text-center'>Runtime</div>
-                    {DEBUG_CATEGORIES.map(cat => (
+                    {DEBUG_CATEGORIES.map(cat => {
+                        const locked = skeletonLocked && cat.key === 'skeleton';
+                        return (
                         <div key={cat.key} className='contents'>
-                            <div className='text-xs text-white px-1 py-0.5'>{cat.label}</div>
+                            <div className='text-xs text-white px-1 py-0.5' title={locked ? 'Always shown in this editor' : undefined}>
+                                {cat.label}{locked && <span className='text-muted'> · always on here</span>}
+                            </div>
                             <div className='flex justify-center'>
-                                <Toggle checked={visibility[cat.key].editor} onChange={v => setCategory(cat.key, 'editor', v)} />
+                                <Toggle
+                                    checked={locked || visibility[cat.key].editor}
+                                    disabled={locked}
+                                    onChange={v => setCategory(cat.key, 'editor', v)}
+                                />
                             </div>
                             <div className='flex justify-center'>
                                 <Toggle
@@ -44,7 +58,8 @@ export default function DebugVisibilityMenu() {
                                 />
                             </div>
                         </div>
-                    ))}
+                        );
+                    })}
                 </div>
             </div>
         </Popover>

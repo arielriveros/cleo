@@ -371,50 +371,26 @@ describe('the two PBR chunks declare the same parallax state', () => {
 });
 
 /**
- * Terrain treats a height map exactly as a standard material does: a parallax march AND the
- * height-aware blend. The march was removed once and restored; these pin both halves, because the two
- * read the same packed alpha and it is easy to keep one while quietly losing the other.
+ * The landscape layer stack does NOT march. The terrain march was switched off (TERRAIN_RELIEF_ENABLED)
+ * and then retired when the stack replaced the four-layer splat: a march over a front-to-back composite
+ * of up to sixteen surfaces would multiply its fetches by the stack depth. A height map still does its
+ * other job — sharpening a surface's transition — and these pin that the stack keeps that and keeps
+ * nothing of the march, so the PBR chunks above are the only callers of the machinery.
  */
-describe('the terrain layer stack marches its height field', () => {
-    const src = () => code(readFileSync(join(CHUNKS, 'terrainLayers.wgsl'), 'utf-8'));
+describe('the terrain layer stack keeps its height maps and no march', () => {
+    const src = () => code(readFileSync(join(CHUNKS, 'terrainStack.wgsl'), 'utf-8'));
 
-    it('carries a per-layer depth and marches one shared ray', () => {
-        // ONE ray through the blended field, not four independent ones: four offsets cannot stay
-        // registered against each other or against the splat mask, which is read un-offset.
-        expect(src()).toMatch(/u_dispScale0/);
-        expect(src()).toMatch(/fn\s+marchTerrain/);
-        expect(src(), 'depth is authored in TILED uv and converted to base uv').toMatch(/fn\s+blendedDepth/);
-    });
-
-    it('shares the standard material machinery rather than reimplementing it', () => {
+    it('calls none of the parallax machinery', () => {
         const s = src();
-        for (const fn of ['parallaxFrame', 'parallaxToTangent', 'parallaxRay', 'parallaxFade'])
-            expect(s, `terrain must use ${fn} from chunks/parallax.wgsl`).toMatch(new RegExp(fn));
+        for (const fn of ['parallaxFrame', 'parallaxToTangent', 'parallaxRay', 'parallaxSteps', 'parallaxFade', 'marchTerrain'])
+            expect(s, `terrain must not call ${fn}`).not.toMatch(new RegExp(`\\b${fn}\\(`));
     });
 
-    it('drives the step count by the texel path, never by the fade', () => {
-        // The fade divides the DEPTH, never the sampling density: multiplied into the step count it
-        // reached 1 inside the band, and a one-step march is a single offset tap with no intersection.
-        //
-        // The count is the ray's uv path measured in TEXELS at the sampled mip, which is the quantity
-        // that actually decides whether the march steps over features. `cos(view)` did not know the
-        // depth scale, the tiling or the mip, which is why it undersampled at the horizon: 175 texels
-        // of path walked in 32 steps is five and a half texels a step.
-        const call = src().match(/parallaxSteps\(([^)]*)\)/);
-        expect(call, 'parallaxSteps call not found').not.toBeNull();
-        expect(call![1], 'no fade in the step count').not.toMatch(/fade/);
-        expect(call![1], 'texels at the sampled mip').toMatch(/pMax[\s\S]*dims[\s\S]*lod/);
-    });
-
-    it('still reads the packed height for the height-aware blend', () => {
+    it('still reads the packed height, and honours the depth-map invert per surface', () => {
         const s = src();
-        expect(s).toMatch(/fn\s+layerHeights/);
-        expect(s).toMatch(/exp\(u_terrain\.u_heightBlend0/);
-        expect(s, 'biased by the heights AT THE HIT, which is the point of marching').toMatch(/hit\.h/);
-    });
-
-    it('honours the depth-map invert per layer, as a standard material does', () => {
-        expect(src()).toMatch(/u_invertHeight0/);
+        expect(s, "the height is the normal array's alpha").toMatch(/texel\.a/);
+        expect(s, "invert rides in the colour array's alpha").toMatch(/color\.a\s*>\s*0\.5/);
+        expect(s, 'and it moves the transition').toMatch(/transitionShift\(a,\s*height/);
     });
 });
 

@@ -116,6 +116,8 @@ export async function prepareNodeTypeChange(
   // The __editor__ light sprite / __debug__ camera gizmo the helper reconciler splices in are real children
   // and would be re-parsed as ordinary content — and then never removed again, because every prune branch
   // in reconcileEditorHelpers is guarded by `instanceof <the owning class>`, which no longer holds.
+  // `serialize()` already leaves editor-owned children out (`Node.isEditorOwned`); stripDebug's name test
+  // (`isEditorOwnedName`) stays as a backstop.
   stripDebug(before)
   const payload = makeDefault ? payloadOf(await (await makeDefault()).serialize()) : {}
   return { before, after: rebaseNodeJson(before, target, payload) }

@@ -76,6 +76,8 @@ export function walkRefs(obj: any, out: EdgeSpec[]): void {
     // A terrain paint layer's `materialId` names a TERRAIN material, not a material. The two libraries are
     // separate and the ids are not interchangeable.
     if (key === 'materialId') { push(out, 'terrainMaterial', val, key); continue }
+    // A landscape-material slot's surface, linked to a plain Material asset — hence a key of its own.
+    if (key === 'surfaceMaterialId') { push(out, 'material', val, key); continue }
     if (key === 'materialIds' && Array.isArray(val)) {
       val.forEach((x, i) => push(out, 'material', x, `materialIds[${i}]`))
       continue

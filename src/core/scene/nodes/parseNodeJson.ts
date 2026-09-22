@@ -18,6 +18,7 @@ import { CameraNode } from "./cameraNode";
 import { SpriteNode } from "./spriteNode";
 import { AnimatedSpriteNode } from "./animatedSpriteNode";
 import { SoundNode } from "./soundNode";
+import { DecalNode } from "./decalNode";
 import { UIRootNode } from "./ui/uiRoot";
 import { UIPanelNode, UIStackNode, UISpacerNode } from "./ui/uiContainers";
 import { UITextNode, UIImageNode } from "./ui/uiContent";
@@ -50,6 +51,7 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'character': CharacterNode.parse(parent, json); break;
     case 'controller': ControllerNode.parse(parent, json); break;
     case 'navMesh': NavMeshNode.parse(parent, json); break;
+    case 'decal': DecalNode.parse(parent, json); break;
     case 'uiRoot': UIRootNode.parse(parent, json); break;
     case 'uiPanel': UIPanelNode.parse(parent, json); break;
     case 'uiText': UITextNode.parse(parent, json); break;

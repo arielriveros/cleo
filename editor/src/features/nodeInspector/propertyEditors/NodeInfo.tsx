@@ -1,4 +1,4 @@
-import { Logger, Node } from 'cleo'
+import { Logger, Node, isEditorOwnedName } from 'cleo'
 import type { MotionBlurMode } from 'cleo'
 import { useState, useEffect } from 'react';
 import { useCleoEngine } from '../../EngineContext';
@@ -142,7 +142,7 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
     eventEmitter.emit('SELECT_NODE', props.node.id);
   }
 
-  const childCount = props.node.children.filter((child) => !(child.name.includes('__debug__') || child.name.includes('__editor__'))).length;
+  const childCount = props.node.children.filter((child) => !isEditorOwnedName(child.name)).length;
 
   // Only nodes that put geometry on screen. The flag lives on Node so a holder can set it for its whole
   // subtree, but offering it on a light or an audio node would be noise.
@@ -202,7 +202,9 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
             <Hint className='mt-1 text-warning'>A node below this one is also set to not spawn on start, and will stay dormant when this one spawns. Use <code>spawn(&#123; subtree: true &#125;)</code> to wake the whole group.</Hint>
           }
         </>}
-        {props.node.name !== 'root' &&
+        {/* Not for an editor-owned node (a LOD preview, a preview tab's holder): the editor built it and
+            tracks it, deleting it records nothing and marks nothing, and the tab would stop working. */}
+        {props.node.name !== 'root' && !props.node.isEditorOwned &&
           <div className='mt-2'>
             {/* Synchronous removal, not Node.remove(): that only sets markForRemoval and leaves the node
                 in the tree until a later Scene.update sweep. Anything reading the tree in between — the

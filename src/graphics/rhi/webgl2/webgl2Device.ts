@@ -317,9 +317,9 @@ export class WebGL2Device implements Device {
      * image-upload paths — raw texel data must land identically on both backends.
      */
     public writeTexture(texture: WebGL2Texture, data: ArrayBufferView, width: number, height: number,
-                        mipLevel: number = 0, arrayLayer: number = 0): void {
+                        mipLevel: number = 0, arrayLayer: number = 0, x: number = 0, y: number = 0): void {
         texture.bindForUpload();
-        texture.write(data, width, height, mipLevel, arrayLayer);
+        texture.write(data, width, height, mipLevel, arrayLayer, x, y);
         texture.unbind();
     }
 
@@ -739,23 +739,24 @@ export class WebGL2Texture implements Texture {
 
     /**
      * Write tightly packed texels into one mip level and one layer or cube face of EXISTING storage —
-     * a sub-image, never an allocation, and never flipped. `arrayLayer` selects a cube face or a layer.
+     * a sub-image at (`x`, `y`), never an allocation, and never flipped. `arrayLayer` selects a cube
+     * face or a layer.
      */
     public write(data: ArrayBufferView, width: number, height: number,
-                 mipLevel: number, arrayLayer: number): void {
+                 mipLevel: number, arrayLayer: number, x: number = 0, y: number = 0): void {
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
         switch (this.dimension) {
             case 'cube':
-                gl.texSubImage2D(WebGL2Texture.cubeFaces()[arrayLayer], mipLevel, 0, 0, width, height,
+                gl.texSubImage2D(WebGL2Texture.cubeFaces()[arrayLayer], mipLevel, x, y, width, height,
                                  this._glFormat, this._type, data);
                 break;
             case '2d-array':
             case '3d':
-                gl.texSubImage3D(this.target, mipLevel, 0, 0, arrayLayer, width, height, 1,
+                gl.texSubImage3D(this.target, mipLevel, x, y, arrayLayer, width, height, 1,
                                  this._glFormat, this._type, data);
                 break;
             default:
-                gl.texSubImage2D(this.target, mipLevel, 0, 0, width, height,
+                gl.texSubImage2D(this.target, mipLevel, x, y, width, height,
                                  this._glFormat, this._type, data);
         }
     }
@@ -817,6 +818,22 @@ export class WebGL2Texture implements Texture {
             gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE);
             gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_COMPARE_FUNC, gl.LESS);
         }
+        this.checkForErrors();
+    }
+
+    /**
+     * Immutable storage for a COLOUR array — the landscape's layer textures and paint masks. Sampled
+     * with the configured state (repeat wrapping, trilinear, anisotropy), unlike the depth array above,
+     * which forces its own. `texStorage3D` rather than `texImage3D`, for the reason `allocateVolume`
+     * gives: only immutable storage makes a layer a valid `framebufferTextureLayer` attachment.
+     */
+    public allocateArray(width: number, height: number, layers: number, levels: number): void {
+        this._requireDimension('2d-array', 'allocateArray');
+        this.bindForUpload();
+        this._clearPendingErrors();
+        gl.texStorage3D(gl.TEXTURE_2D_ARRAY, Math.max(1, levels), this._internalFormat,
+                        width, height, Math.max(1, layers));
+        this._applySamplerState();
         this.checkForErrors();
     }
 

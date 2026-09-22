@@ -423,6 +423,54 @@ export class Texture {
         this._finishUpload();
     }
 
+    /**
+     * Allocate an empty COLOUR texture array with immutable storage: `layers` slices of `width` x
+     * `height`, with a full mip chain when `mipMap`. Requires `target: 'texture2DArray'` and colour
+     * usage. Storage is immutable on both backends, so a different size or layer count needs a new
+     * Texture — call this once per texture.
+     *
+     * Filled by rendering into {@link layerView} (then {@link generateMipmaps}), or by {@link writeLayer}.
+     */
+    public createColorArray(width: number, height: number, layers: number, mipMap: boolean): void {
+        if (this._gpu.dimension !== '2d-array') {
+            Logger.error('createColorArray requires a texture created with target: "texture2DArray"', 'Texture');
+            return;
+        }
+        this._width = Math.max(1, width);
+        this._height = Math.max(1, height);
+        this._depth = Math.max(1, layers);
+        this._mipMap = mipMap;
+        this._syncGpuSize();   // allocate before uploading - see _syncGpuSize
+        this._gpu.allocateArray(this._width, this._height, this._depth, this._levelCount());
+        // The mip filter is a SAMPLER property the constructor settled from its own `mipMap`; re-state
+        // it now that the chain's existence is known.
+        this._gpu.configure(this._samplingDescriptor());
+        this._finishUpload();
+    }
+
+    /**
+     * Write RGBA8 bytes (tightly packed rows) into a rectangle of ONE layer, mip 0, unflipped — the
+     * paint-mask upload, which sends only the rectangle a brush dab touched.
+     */
+    public writeLayer(layer: number, x: number, y: number, width: number, height: number, data: Uint8Array): void {
+        device.writeTexture(this._gpu, data, width, height, 0, layer, x, y);
+        this.unbind();
+    }
+
+    /** ONE layer of mip 0 as a render attachment — what a bake draws a layer into. */
+    public layerView(layer: number): RhiTextureView {
+        const generation = this._gpu.generation;
+        if (!this._layerViews || this._layerViews.generation !== generation)
+            this._layerViews = { generation, views: new Map() };
+        let view = this._layerViews.views.get(layer);
+        if (!view) {
+            view = device.createTextureView(this._gpu, 0, layer);
+            this._layerViews.views.set(layer, view);
+        }
+        return view;
+    }
+    private _layerViews: { generation: number; views: Map<number, RhiTextureView> } | null = null;
+
     /** Toggle hardware depth comparison on a depth array/2D target. */
     public setDepthCompare(enabled: boolean): void {
         this._gpu.setCompareMode(enabled);
@@ -441,6 +489,7 @@ export class Texture {
     public delete(): void {
         // Before the destroy: a memoised view outlives the storage it names.
         this._views = null;
+        this._layerViews = null;
         this._gpu.destroy();
         if (this._objectUrl) { URL.revokeObjectURL(this._objectUrl); this._objectUrl = null; }
     }
@@ -604,10 +653,11 @@ export class Texture {
     private _syncGpuSize(): void {
         const slices = (this._gpu.dimension === '3d' || this._gpu.dimension === '2d-array')
             ? Math.max(1, this._depth) : 1;
-        // Levels of a full chain over the larger dimension, which is what generateMipmap produces.
-        const levels = this._mipMap
-            ? Math.floor(Math.log2(Math.max(1, this._width, this._height))) + 1
-            : 1;
-        this._gpu.setSize(this._width, this._height, slices, levels);
+        this._gpu.setSize(this._width, this._height, slices, this._levelCount());
+    }
+
+    /** Levels of a full chain over the larger dimension, which is what generateMipmap produces. */
+    private _levelCount(): number {
+        return this._mipMap ? Math.floor(Math.log2(Math.max(1, this._width, this._height))) + 1 : 1;
     }
 }

@@ -32,7 +32,7 @@ empty pivot. Every node has
 - children,
 - optionally a rigid body, a trigger volume, an animator, a script.
 
-Node types are a fixed set of 30 classes — see [Node types](reference/node-types.md). A plain
+Node types are a fixed set of 31 classes — see [Node types](reference/node-types.md). A plain
 `Node` (called **Empty** in the editor) is a perfectly good thing to build with: it has a
 transform, it can carry a script, and it can parent other nodes.
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Node, Scene } from 'cleo'
+import { Node, Scene, isEditorOwnedName } from 'cleo'
 import { useEventBus } from '../EventBusContext'
 import { Select, cn } from '../../components/ui'
 
@@ -34,7 +34,8 @@ export default function NodeRefInput(props: NodeRefInputProps) {
     const nodes: Node[] = []
     for (const node of props.scene.nodes) {
       if (node.name === 'root' || !node.parent) continue
-      if (node.name.startsWith('__editor__') || node.name.startsWith('__debug__')) continue
+      // Editor helpers are never a meaningful reference target. The same name test the tree hides by.
+      if (isEditorOwnedName(node.name)) continue
       if (props.filter && !props.filter(node)) continue
       nodes.push(node)
     }

@@ -55,13 +55,14 @@ describe('the cache key', () => {
 });
 
 describe('terrain states its wrap mode rather than inheriting it', () => {
-    it('asks for repeat', async () => {
-        // The layer pack is built in Terrain._syncLayerPack; the spec it passes is what decides whether
-        // a tiled terrain shows its height map at the albedo's scale or twenty times too large.
-        const src = await import('fs').then(fs =>
-            fs.readFileSync(new URL('../src/terrain/terrain.ts', import.meta.url), 'utf-8'));
-        const spec = src.match(/TexturePacker\.Instance\.resolve\(\{[\s\S]*?\}, frame\)/);
-        expect(spec, 'the layer pack call site').not.toBeNull();
-        expect(spec![0], 'a terrain layer is tiled, so its pack must repeat').toMatch(/wrapping:\s*'repeat'/);
+    it("asks for repeat, for both of a surface's packs", async () => {
+        // A landscape surface is tiled across the whole terrain, so its packs must repeat; inheriting a
+        // source's clamp would show one tile and a stretched edge over the rest. The specs are built in
+        // terrain/terrainSurfaceArrays.ts and baked into array layers.
+        const { albedoPackSpec, normalPackSpec } = await import('../src/terrain/terrainSurfaceArrays');
+        const surface = { albedoId: 'a', aoId: null, normalId: 'n', heightId: 'h', invertHeight: false,
+                          color: [1, 1, 1], metallic: 0, roughness: 1, tiling: 20 };
+        expect(albedoPackSpec(surface).wrapping).toBe('repeat');
+        expect(normalPackSpec(surface).wrapping).toBe('repeat');
     });
 });

@@ -1,5 +1,5 @@
 import EventEmitter from '../../utils/eventEmitter';
-import { Logger, Node, Scene, ModelNode, CleoEngine } from 'cleo';
+import { Logger, Node, Scene, ModelNode, CleoEngine, markEditorOwned } from 'cleo';
 import { cryptoRandomId } from '../../utils/ids';
 import { MaterialAsset } from '../../utils/materials';
 import { AnimationAsset } from '../../utils/animationAssets';
@@ -77,25 +77,36 @@ export function useAnimationFieldEditor(deps: {
     }
 
     // Disarm before constructing the preview scene — see openMeshTab for why this is not optional.
+    const wasArmed = dirtyArmedRef.current;
     dirtyArmedRef.current = false;
     const scene = new Scene();
     scene.animationsEnabled = false; // the field transport drives the animator itself, not scene.update
     scene.spawnRulesEnabled = false;
     void createAssetEditScene(scene, withoutDirty);
 
-    const holder = new Node(field.name);
+    // Editor-OWNED (see `Node.isEditorOwned`), and so is the character instantiated under it. This tab saves
+    // AnimationFieldProvider's working copy, never scene content, so no event from this subtree can be an
+    // edit — yet the preview's root-motion playback writes its transform every frame, which marked the tab
+    // unsaved and fed the undo recorder. The flag rather than a name marker: the holder is named after the
+    // asset, and the Scene panel (name-based) keeps showing it. Nothing serializes this scene; if something
+    // ever does, `Node.serialize` leaves the holder out.
+    const holder = markEditorOwned(new Node(field.name));
     scene.addNode(holder);
-    instantiateModelAsset(model, holder, materialsRef.current, modelsRef.current, animationsRef.current);
+    // Bracketed as well: the flag reaches only the character root's own attach. The parser attaches
+    // bottom-up, so every nested add fires while its parent is still detached and owned by nothing.
+    withoutDirty(() =>
+      instantiateModelAsset(model, holder, materialsRef.current, modelsRef.current, animationsRef.current));
     scene.root.updateTransforms();
 
     const skinned = firstSkinnedModelNode(holder);
     if (!skinned) {
       Logger.error(`"${model.name}" has no skeleton — an animation field needs a skinned model`, 'Editor');
+      dirtyArmedRef.current = wasArmed; // no tab opens, so nothing else would re-arm the one still showing
       return;
     }
     // Frame the camera + shadow-catching ground around the model, exactly as the Animation Editor does.
     const bounds = combineBounds(skinned);
-    createAnimationEditorScene(scene, bounds.center, bounds.radius);
+    createAnimationEditorScene(scene, bounds.center, bounds.radius, { silently: withoutDirty });
     scene.start();
     skinned.animator?.showBindPose();
 

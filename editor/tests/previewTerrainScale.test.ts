@@ -50,8 +50,11 @@ const material = (tiling = 20) => {
     return tm;
 };
 
-/** World metres covered by one repeat of the layer's height map. */
-const metresPerRepeat = (t: Terrain) => t.size / (t as any)._layers[0].tiling;
+/**
+ * World metres covered by one repeat of the base layer. The preview scales tiling on the TERRAIN
+ * (`tilingScale`), never on the material — writing it into the material would get it saved.
+ */
+const metresPerRepeat = (t: Terrain) => t.size / (t.layers[0].tiling * t.tilingScale);
 /** World metres between adjacent render vertices. */
 const spacing = (t: Terrain) => t.size / ((t.resolution - 1) * t.densityFor());
 
@@ -156,14 +159,16 @@ describe('nothing re-pins the preview tiling to 1', () => {
         const src = readFileSync(join(__dirname, '..', 'src', 'features', 'EngineContext.tsx'), 'utf-8')
             .replace(/\/\/[^\n]*/g, '');
         expect(src).not.toMatch(/setLayer\([^)]*tiling:\s*1\s*[,}]/);
-        expect(src, 'it must rebase against the landscape instead').toMatch(/PREVIEW_TERRAIN_SIZE/);
+        expect(src, 'it must rebase against the landscape instead').toMatch(/updateTerrainPreviewMapping/);
     });
 
     it('and the builder scales rather than pinning', () => {
         const src = readFileSync(
             join(__dirname, '..', 'src', 'features', 'demoScene', 'previewTerrainSubject.ts'), 'utf-8')
             .replace(/\/\/[^\n]*/g, '');
-        expect(src).toMatch(/tiling:\s*tm\.tiling\s*\*\s*PREVIEW_TERRAIN_SIZE/);
+        expect(src).toMatch(/tilingScale\s*=\s*PREVIEW_TERRAIN_SIZE\s*\//);
+        // And never by rewriting the material's own number.
+        expect(src).not.toMatch(/tm\.tiling\s*=/);
         expect(PREVIEW_TERRAIN_SIZE).toBeLessThan(REFERENCE_LANDSCAPE.size);
     });
 });

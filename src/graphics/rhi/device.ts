@@ -246,8 +246,13 @@ export interface Device {
      * now on, which may not be the one passed in. Callers that never resize want {@link writeBuffer}.
      */
     reallocateBuffer(buffer: Buffer, data: ArrayBufferView): Buffer;
+    /**
+     * Write tightly packed texels into existing storage: a `width` x `height` rectangle at (`x`, `y`) of
+     * one mip level and one array layer (or cube face). Never flipped. The origin lets a brush stroke
+     * upload only the rectangle it touched instead of the whole layer.
+     */
     writeTexture(texture: Texture, data: ArrayBufferView, width: number, height: number,
-                 mipLevel?: number, arrayLayer?: number): void;
+                 mipLevel?: number, arrayLayer?: number, x?: number, y?: number): void;
 
     createCommandEncoder(label?: string): CommandEncoder;
 

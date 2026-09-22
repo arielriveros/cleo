@@ -44,7 +44,7 @@ describe('the clip editor mode is fully wired', () => {
     // A stored v15 tree is keyed by a mode name that no longer exists AND knows nothing of the new
     // panels. Leaving the version alone would restore an unreadable arrangement rather than rebuilding.
     const dock = DOCK()
-    expect(dock).toContain('const LAYOUT_VERSION = 16')
+    expect(dock).toMatch(/const LAYOUT_VERSION = (1[6-9]|[2-9]\d)/)
     expect(dock).toContain("'cleo_dock_layout_v15'")
   })
 
@@ -101,9 +101,13 @@ describe('the state machine mode kept its behaviour under its new name', () => {
   it('the skeleton tree and bone overlay serve all three skeleton modes', () => {
     expect(PANELS()).toContain("editorMode === 'stateMachine' || editorMode === 'rig' || editorMode === 'animation'")
     // `setSkeletonOverlay` is a single global slot, so the scene-wide debug overlay must stand down
-    // wherever a dedicated bone overlay is up — now three modes, not two.
-    expect(read('features', 'DebugSkeletonOverlay.tsx'))
-      .toContain("editorMode !== 'stateMachine' && editorMode !== 'animation' && editorMode !== 'rig'")
+    // wherever a dedicated bone overlay is up. Which modes those are is one exhaustive table now, and the
+    // animation FIELD joined it: its skeleton used to depend on the debug toggle, which is off by default.
+    expect(read('features', 'DebugSkeletonOverlay.tsx')).toContain('!MODE_SKELETON_OWNER[editorMode]')
+    const types = read('features', 'engineContextTypes.ts')
+    const table = types.slice(types.indexOf('MODE_SKELETON_OWNER'), types.indexOf('};', types.indexOf('MODE_SKELETON_OWNER')))
+    for (const mode of ['stateMachine', 'animation', 'animationField', 'rig'])
+      expect(table).toContain(`${mode}: true`)
   })
 })
 

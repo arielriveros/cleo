@@ -13,10 +13,20 @@ const IK_MARKER_COLOR: [number, number, number] = [0.2, 0.95, 0.45]
 const BONE_COLOR: [number, number, number] = [0.85, 0.85, 0.9]
 const JOINT_SCREEN_SIZE = 0.02 // sphere radius as a fraction of the distance metric (constant on screen)
 
-interface Props { viewportRef: React.RefObject<HTMLDivElement> }
+interface Props {
+  viewportRef: React.RefObject<HTMLDivElement>
+  /**
+   * The skinned node to draw. Defaults to the context's `skeletonTargetId` (state machine, rig, clip);
+   * the animation-field editor passes its own preview model, which that id does not cover.
+   */
+  targetId?: string | null
+  /** Whether clicking a joint selects it. Off where no panel shows a bone selection. Default true. */
+  pickable?: boolean
+}
 
-export default function AnimationSkeletonTool({ viewportRef }: Props) {
-  const { instance, editorScene, skeletonTargetId, eventEmitter } = useCleoEngine()
+export default function AnimationSkeletonTool({ viewportRef, targetId, pickable = true }: Props) {
+  const { instance, editorScene, skeletonTargetId: contextTargetId, eventEmitter } = useCleoEngine()
+  const skeletonTargetId = targetId !== undefined ? targetId : contextTargetId
 
   const jointMatricesRef = useRef<Float32Array>(new Float32Array(0))
   const boneMatricesRef = useRef<Float32Array>(new Float32Array(0))
@@ -184,7 +194,7 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
   // Click a joint: CPU ray-sphere test against the joint world positions; nearest along the ray wins.
   useEffect(() => {
     const viewport = viewportRef.current
-    if (!viewport) return
+    if (!viewport || !pickable) return
 
     const onMouseDown = (event: MouseEvent) => {
       if (event.button !== 0 || !instance?.scene) return
@@ -221,7 +231,7 @@ export default function AnimationSkeletonTool({ viewportRef }: Props) {
 
     viewport.addEventListener('mousedown', onMouseDown)
     return () => { viewport.removeEventListener('mousedown', onMouseDown) }
-  }, [instance, viewportRef, eventEmitter])
+  }, [instance, viewportRef, eventEmitter, pickable])
 
   return null
 }

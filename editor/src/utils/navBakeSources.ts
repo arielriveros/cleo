@@ -1,6 +1,6 @@
 import { mat4, quat, vec3 } from 'gl-matrix'
 import {
-  LandscapeNode, Node, clipSoupToVolume, heightfieldSoup, mergeSoups, tessellateSources,
+  LandscapeNode, Node, clipSoupToVolume, heightfieldSoup, isEditorOwnedName, mergeSoups, tessellateSources,
 } from 'cleo'
 import type { NavSource, TriangleSoup } from 'cleo'
 import type { BodyDescription, ShapeDescription } from '../features/engineContextTypes'
@@ -137,7 +137,9 @@ export function gatherNavSoup(root: Node, options: NavBakeGatherOptions): NavBak
   const visit = (node: Node) => {
     // Editor-only helpers are not level geometry. They are also the wireframe meshes whose GL_LINES
     // indices would read as garbage triangles if anything ever walked geometry instead of colliders.
-    if (!node.name.includes('__editor__') && !node.name.includes('__debug__')) {
+    // By NAME (`isEditorOwnedName`), not `Node.isEditorOwned`: that also honours an explicit flag and
+    // inherits it, and a flag-owned preview holder must not take the terrain and meshes under it along.
+    if (!isEditorOwnedName(node.name)) {
       const body = bodies.get(node.id)
       if (body && body.shapes.length > 0) {
         const world = rigidWorldMatrix(node)

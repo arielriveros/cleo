@@ -10,6 +10,7 @@ import {
   collectFoliageRuleTextureIds, collectFoliageLayerTextureIds,
 } from './terrainMaterials'
 import type { TilesetAsset } from './tilesets'
+import { serializedTerrainLayers } from './terrainJson'
 
 // Which texture / material asset ids are actually used anywhere — the main scene plus the asset libraries.
 // Used by the Textures and Materials explorers to flag orphaned (unreferenced) assets with a warning badge,
@@ -74,6 +75,9 @@ export function collectSceneTextureIds(
       for (const layer of terrain.layers ?? []) {
         const lm = layer?.material
         if (lm?.textures) for (const id of lm.textures.values()) if (!isDerivedTextureId(id as string)) set.add(id) // base + displacementMap
+        // A landscape material's further slots are materials of their own.
+        for (const slot of lm?.slots ?? [])
+          for (const id of slot?.material?.textures?.values?.() ?? []) if (!isDerivedTextureId(id as string)) set.add(id)
         collectFoliageRuleTextureIds(lm?.foliageInclude, set)
       }
       collectFoliageLayerTextureIds(terrain.foliage, set)
@@ -129,8 +133,9 @@ export function collectPublishedTextureIds(node: any, set: Set<string>): void {
   const walkTerrain = (n: any): void => {
     const terrain = n?.terrain
     if (terrain) {
-      for (const layer of terrain.layers ?? []) {
-        if (!layer) continue
+      // Both layer formats: the legacy four slots and the stack's base + paint layers.
+      for (const layer of serializedTerrainLayers(terrain)) {
+        // Slot surfaces included — collectTerrainMaterialTextureIds walks `slots[]`.
         if (layer.material) for (const id of collectTerrainMaterialTextureIds(layer.material)) set.add(id)
         if (layer.textureId) set.add(layer.textureId) // legacy plain-albedo layers
         collectFoliageRuleTextureIds(layer.material?.foliageInclude, set)
@@ -169,6 +174,14 @@ export function collectSceneMaterialIds(scene: Scene | null | undefined): Set<st
       for (const id of getMaterialIdsOf(node)) if (id) set.add(id)
       if (node.nodeType === 'camera')
         for (const sid of getScreenMaterialIds(node as CameraNode)) set.add(sid)
+    }
+    // A landscape material's slots take their surfaces from Material assets, and the landscape embeds
+    // those landscape materials: a material used only as a rock slot is still used by this scene.
+    for (const ln of scene.landscapes) {
+      const terrain: any = (ln as any).terrain
+      for (const layer of terrain?.layers ?? [])
+        for (const slot of layer?.material?.slots ?? [])
+          if (typeof slot?.surfaceMaterialId === 'string' && slot.surfaceMaterialId) set.add(slot.surfaceMaterialId)
     }
   }
   return set

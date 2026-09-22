@@ -13,7 +13,7 @@ import {
     glTopology, glIndexType, indexByteSize,
 } from './glEnums';
 import { frameStats, setViewportSize } from '../../renderStats';
-import { isTriangleTopology } from '../types';
+import { isTriangleTopology, uniformTargetBlend } from '../types';
 import { glDevice } from './webgl2Device';
 import type { WebGL2Texture, WebGL2Buffer, WebGL2Framebuffer } from './webgl2Device';
 import type {
@@ -131,12 +131,9 @@ export class WebGL2RenderPipeline implements RenderPipeline {
         else { GLState.cull(true); GLState.cullFace(cull); }
         gl.frontFace(glFrontFace(this.primitive.frontFace));
 
-        // WebGL2 blends globally, so target 0 decides; a multi-target blend must fail loudly here.
-        const blending = this.colorTargets.filter(t => t.blend);
-        if (blending.length > 1)
-            throw new Error(`${this.label}: WebGL2 cannot blend colour targets independently`);
-
-        const blend = this.colorTargets[0]?.blend;
+        // WebGL2 blends globally: several targets may blend only if they all blend identically, and
+        // anything it cannot express throws here rather than blending under the wrong state.
+        const blend = uniformTargetBlend(this.colorTargets, this.label);
         if (blend) {
             GLState.blend(true);
             gl.blendFuncSeparate(

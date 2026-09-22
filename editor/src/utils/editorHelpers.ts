@@ -11,10 +11,12 @@ import {
   LightNode,
   CameraNode,
   LightProbeNode,
+  DecalNode,
   SoundNode,
   Vec,
   hullFromPositions,
   markEditorOnly,
+  isEditorOwnedName,
   NavMeshNode,
 } from 'cleo';
 import type { TriangleSoup } from 'cleo';
@@ -22,13 +24,17 @@ import { CameraGeometry } from './EditorModels';
 import { gatherNavSoup } from './navBakeSources';
 import { boundedBox, navPreviewSignature, planNavOverlays } from './navOverlayPlan';
 import type { NavOverlayBox, NavOverlayPlan } from './navOverlayPlan';
+import { decalBoxFrame, decalBoxLines, planDecalBox } from './decalOverlayPlan';
+import type { DecalOverlayFrame } from './decalOverlayPlan';
 import type { BodyDescription, ShapeDescription } from '../features/EngineContext';
 import type { DebugVisibility, DebugChannel, DebugCategory } from '../features/DebugVisibilityContext';
 
 /**
  * Editor-only visual helpers (light/probe icons, camera frustum gizmos, physics debug wireframes),
  * derived from the objects themselves. Every helper node's name must carry the `__editor__`/`__debug__`
- * prefix — that is what excludes it from selection, serialization, play and published builds.
+ * marker ({@link isEditorOwnedName}) — that is what excludes it from selection, serialization, play and
+ * published builds, and it makes the node `Node.isEditorOwned`, so its churn stays off the tab's dirty
+ * flag and out of the undo history.
  *
  * Every node built here is also marked `editorOnly` through {@link chrome}. That flag, not the name,
  * is what routes it into the renderer's overlay layer — composited AFTER the post chain, so a light
@@ -64,6 +70,9 @@ const NAVMESH_PREFIX = '__debug__navmesh_';
 const NAVVOLUME_PREFIX = '__debug__navvolume_';
 const NAVPREVIEW_PREFIX = '__debug__navpreview_';
 
+const DECAL_ICON = '__editor__DecalHelper';
+const DECALBOX_PREFIX = '__debug__decalbox_';
+
 // Per-scene cache of the last-built shapes signature for each body/trigger id.
 const shapeSignatures = new WeakMap<Scene, Map<string, string>>();
 const sigMapFor = (scene: Scene): Map<string, string> => {
@@ -71,8 +80,6 @@ const sigMapFor = (scene: Scene): Map<string, string> => {
   if (!m) { m = new Map(); shapeSignatures.set(scene, m); }
   return m;
 };
-
-const isHelperName = (name: string) => name.startsWith('__editor__') || name.startsWith('__debug__');
 
 /**
  * Every mesh vertex of `root` *and its descendants*, in root-local space — the space collider shapes
@@ -85,7 +92,7 @@ function collectMeshPositions(root: Node, includeSkinned: boolean): number[][] {
   if (!rootInv) return out;
 
   const visit = (node: Node) => {
-    if (isHelperName(node.name) || (node as any).isGizmo) return;
+    if (isEditorOwnedName(node.name) || (node as any).isGizmo) return;
     if (node instanceof ModelNode) {
       const model = node.model;
       const skinned = model instanceof AnimatedModel && model.hasSkin;
@@ -334,6 +341,29 @@ function ensureProbeHelper(probe: LightProbeNode) {
   })));
   icon.setUniformScale(0.5);
   probe.addChild(icon);
+}
+
+// Attach a billboard icon under a decal, so a decal that projects nothing visible yet (no material, or
+// nothing inside its box) still shows where it is. Tinted amber, like its selection box. It is also what
+// a click selects the decal BY: the raycaster skips `__editor__` children, and picks a decal through
+// `DecalNode.pickBox` — a small box at exactly this spot — never through its volume, which encloses the
+// ground and meshes the decal lands on and would swallow every click and drop aimed at them.
+//
+// It sits on the box's TOP face rather than at the node like a probe's: a decal's centre is normally ON
+// the surface it projects onto, and helpers are depth-tested, so an icon there is half buried. Followed
+// per frame because a Size edit in the inspector does not trigger a reconcile.
+function ensureDecalIcon(decal: DecalNode) {
+  if (decal.getChildByName(DECAL_ICON).length) return;
+  const icon = chrome(new SpriteNode(DECAL_ICON, Sprite.fromTexture('__editor__decal_icon', {
+    tint: [1, 0.68, 0.25],
+  })));
+  icon.setUniformScale(0.5);
+  icon.onUpdate = () => {
+    const top = decal.size[1] * 0.5;
+    // A tolerance, not `!==`: the position is float32, so most heights never compare equal to the double.
+    if (Math.abs(icon.position[1] - top) > 1e-5) icon.setPosition([0, top, 0]);
+  };
+  decal.addChild(icon);
 }
 
 /**
@@ -669,6 +699,33 @@ function ensureNavVolumeBox(scene: Scene, navMesh: NavMeshNode, box: NavOverlayB
 }
 
 /**
+ * The selected decal's volume as an amber wireframe box, with an arrow down its local -Y axis — the
+ * direction it projects in. The shape is `decalBoxLines` (unit-box space), placed by `decalBoxFrame`.
+ *
+ * Top-level and re-placed from the decal every frame, for the reason `ensureNavVolumeBox` is: the
+ * transform gizmo and the inspector's Size fields change the volume without emitting anything the
+ * reconciler listens to. The closure is re-bound on every reconcile so it always reads the live node.
+ */
+function ensureDecalBox(scene: Scene, decal: DecalNode, frame: DecalOverlayFrame) {
+  const name = `${DECALBOX_PREFIX}${decal.id}`;
+  let existing = scene.getNodesByName(name)[0] as ModelNode | undefined;
+  if (!existing) {
+    const lines = decalBoxLines();
+    // Every vertex needs a normal and a uv even though the basic program reads neither: the VAO is
+    // strided by the program's attribute list, and `getData()` skips empty arrays.
+    const geometry = new Geometry(lines.positions, lines.positions.map(() => [0, 1, 0] as [number, number, number]),
+      lines.positions.map(() => [0, 0] as [number, number]), undefined, undefined, lines.indices, false);
+    existing = chrome(new ModelNode(name, new Model(geometry,
+      Material.Basic({ color: [1, 0.68, 0.25] }, { wireframe: true, castShadow: false }))));
+    scene.addNode(existing);
+  }
+  const node = existing;
+  const place = (f: DecalOverlayFrame) => { node.setPosition(f.center).setQuaternion(f.quaternion).setScale(f.scale); };
+  place(frame);
+  node.onUpdate = () => place(decalBoxFrame(decal.volumeMatrix));
+}
+
+/**
  * The cyan surface: every triangle the plan says is walkable inside the volume.
  *
  * The triangles come from `walkableSoup`, the SAME predicate `bakeNavMesh` filters with — that
@@ -755,8 +812,9 @@ export function reconcileEditorHelpers(
   visibility?: DebugVisibility,
   channel: DebugChannel = 'editor',
   /**
-   * The selected node's id. Only the navmesh overlays read it — a bake volume and its cyan preview
-   * are authoring aids for the node you are placing, not permanent scene furniture.
+   * The selected node's id. Only the navmesh overlays and the decal box read it — a bake volume, its
+   * cyan preview and a decal's projection box are authoring aids for the node you are placing, not
+   * permanent scene furniture.
    */
   selectedId: string | null = null,
 ) {
@@ -773,7 +831,7 @@ export function reconcileEditorHelpers(
 
   // 1-3 + spawn markers. Type-driven child icons/gizmos, added or removed to match the toggle.
   for (const node of nodes) {
-    if (isHelperName(node.name)) continue;
+    if (isEditorOwnedName(node.name)) continue;
 
     if (node instanceof LightNode) {
       const existing = node.getChildByName(LIGHT_ICON)[0];
@@ -783,6 +841,10 @@ export function reconcileEditorHelpers(
       const existing = node.getChildByName(PROBE_HELPER)[0];
       if (show('probes') && !existing) ensureProbeHelper(node);
       else if (!show('probes') && existing) node.removeChild(existing);
+    } else if (node instanceof DecalNode) {
+      const existing = node.getChildByName(DECAL_ICON)[0];
+      if (show('decals') && !existing) ensureDecalIcon(node);
+      else if (!show('decals') && existing) node.removeChild(existing);
     } else if (node instanceof SoundNode) {
       // Reconciled every pass rather than only on absence: the falloff sphere follows `maxDistance`,
       // which the inspector changes while the helper already exists.
@@ -837,6 +899,13 @@ export function reconcileEditorHelpers(
     ensureNavPreview(scene, navMesh, plan);
   }
 
+  // 4d. The SELECTED decal's volume and projection arrow. Selection-scoped and outside the eye menu for
+  // the reason 4c is: the box is the only way to see what a decal covers, and selecting the node is the
+  // request to see it. The menu's `decals` switch governs the icon billboards above.
+  const selected = selectedId ? scene.getNodeById(selectedId) : null;
+  const decalFrame = planDecalBox(selected);
+  if (decalFrame) ensureDecalBox(scene, selected as DecalNode, decalFrame);
+
   // 5. Trigger wireframes (green), following the target's world transform.
   if (show('triggers')) {
     for (const [id, trigger] of triggers) {
@@ -852,7 +921,7 @@ export function reconcileEditorHelpers(
   // 6. Per-node world AABB boxes.
   if (show('boundingBoxes')) {
     for (const node of nodes) {
-      if (node instanceof ModelNode && !isHelperName(node.name) && !(node as any).isGizmo)
+      if (node instanceof ModelNode && !isEditorOwnedName(node.name) && !(node as any).isGizmo)
         ensureAabbBox(scene, node);
     }
   }
@@ -880,6 +949,10 @@ export function reconcileEditorHelpers(
       // wireframe. Dropped the moment the selection moves on or the node goes away; a box left behind
       // reads as a second volume that is quietly baking nothing.
       if (id !== selectedId || !(scene.getNodeById(id) instanceof NavMeshNode)) drop();
+    } else if (node.name.startsWith(DECALBOX_PREFIX)) {
+      // Selection-gated like 4d: gone the moment the decal is deselected, deleted or converted.
+      const id = node.name.slice(DECALBOX_PREFIX.length);
+      if (id !== selectedId || !planDecalBox(scene.getNodeById(id))) drop();
     } else if (node.name.startsWith(NAVMESH_PREFIX)) {
       const id = node.name.slice(NAVMESH_PREFIX.length);
       const owner = scene.getNodeById(id);
@@ -889,7 +962,7 @@ export function reconcileEditorHelpers(
     } else if (node.name.startsWith(AABB_PREFIX)) {
       const id = node.name.slice(AABB_PREFIX.length);
       const owner = scene.getNodeById(id);
-      if (!show('boundingBoxes') || !(owner instanceof ModelNode) || isHelperName(owner.name)) drop();
+      if (!show('boundingBoxes') || !(owner instanceof ModelNode) || isEditorOwnedName(owner.name)) drop();
     }
   }
 }

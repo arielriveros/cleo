@@ -63,8 +63,8 @@ ai?: AISystem                              // OPTIONAL — always guard
 
 The scene keeps lists per node kind, rebuilt lazily when the tree changes: `lights`, `models`,
 `sprites`, `landscapes`, `tilemaps`, `lodGroups`, `cameraRigs`, `characters`, `controllers`,
-`navMeshes`, `sounds`, `lightProbes`, `uiRoots`, `uiNodes`, `skybox`, `volumetricClouds`,
-`skyAtmosphere`, `skyLight`.
+`navMeshes`, `sounds`, `lightProbes`, `decals`, `uiRoots`, `uiNodes`, `skybox`,
+`volumetricClouds`, `skyAtmosphere`, `skyLight`.
 
 ```ts
 for (const light of this.scene.lights) light.castShadows = false

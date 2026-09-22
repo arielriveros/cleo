@@ -21,6 +21,8 @@ Terms used throughout the documentation and in the editor's own labels.
 | **Control pass** | The stage of the frame where controllers think — after perception, before any `onUpdate`. |
 | **Coyote time** | A short grace after walking off a ledge during which a jump still works. Falls out of `isGrounded`'s grace period. |
 | **Cutout** | Alpha-tested transparency: a pixel is drawn or discarded, never blended. Casts correct shadows. |
+| **DBuffer** | The decal buffer: three textures that overlapping decals composite into before the result is folded into the G-buffer, so a decal is lit like the surface under it. |
+| **Decal** | A box that projects a material onto whatever surface lies inside it, such as a scorch mark, a painted line or an area-of-effect ring. See [Node types](node-types.md#decalnode--decal-unreleased). |
 | **Deferred** | The rendering path that writes surface properties to a G-buffer and lights them in a second pass. |
 | **Dormant** | A node that has despawned: not drawn, not updated, still findable by name or id. |
 | **Editor-only node** | A helper node (grid, gizmo, wireframe) that is never serialized and is structurally absent from a build. |
@@ -55,14 +57,15 @@ Terms used throughout the documentation and in the editor's own labels.
 | **Screen material** | A custom material used as a fullscreen post-processing pass, ordered within a camera's chain. |
 | **Sighting** | One perception record: whether a candidate is visible, whether it has been *noticed*, and how long since. |
 | **Soup** | An untidy pile of triangles, in world space, with no shared structure — what a navmesh bake starts from. |
-| **Splat** | The per-texel weights that blend terrain paint layers. Four layers. |
+| **Mask** | The per-texel 0..1 coverage of one landscape paint layer. Four masks share an RGBA slice of the mask array. |
 | **Spring arm** | See *camera rig*. |
 | **State machine** | Animation: states play clips or fields, transitions blend between them. AI: states name goals. |
 | **Steering** | The library of movement urges — seek, flee, arrive, wander, separate, align, cohere, avoid. |
 | **Submesh** | One material's slice of a model's index range. |
 | **TAA** | Temporal antialiasing: resolving jitter across frames. |
 | **Template** | A prefab. A saved node subtree, instanced into scenes and spawned at runtime. |
-| **Terrain material** | A material authored as a terrain paint layer, carrying blend settings and foliage rules. |
+| **Landscape material** | A material authored as a landscape surface (`.tmat`), carrying its slots, their blend rules and its foliage rules. "Terrain material" in older text. |
+| **Slot** | One surface of a landscape material beyond its own: a Material plus a blend rule (elevation, slope, noise, height blend, opacity). |
 | **Tileset** | A sliced atlas plus per-tile metadata: solidity, animation, variant sets, auto-tile terrain sets. |
 | **Trigger** | A body that detects overlap without responding to collision. |
 | **Whisker** | One of the rays an agent casts ahead of itself to avoid obstacles. |

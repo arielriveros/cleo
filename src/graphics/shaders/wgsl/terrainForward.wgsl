@@ -5,17 +5,16 @@
 // terrain layers AND lights them in one draw. The blend is the shared chunk; the lighting below mirrors
 // pbrForward's, minus the parts this pass deliberately cannot afford.
 //
-// NO shadow cascades and NO environment cube here, and that is a hard constraint rather than an
-// omission: the terrain layer samplers occupy texture units 0..8, which collide with the shared shadow
-// unit (6) and the env cube (7) — and two sampler TYPES on one unit is a GLES draw error. This shader
-// only runs during probe capture, where shadows are suppressed anyway, so it costs nothing. If shadows
-// are ever wanted here, drop u_normal3 rather than renumbering the shared reservation.
+// NO shadow cascades and NO environment cube here. They were impossible while the terrain layer samplers
+// took texture units 0..8 (colliding with the shared shadow unit 6 and env cube 7); the layer stack binds
+// three, so that constraint is gone — but this shader only runs during probe capture, where shadows are
+// suppressed anyway, so nothing has been added back.
 
 #include "./chunks/modelVertex.wgsl"
 #include "./chunks/tonemap.wgsl"
 #include "./chunks/pbrLighting.wgsl"
 #include "./chunks/clusteredLights.wgsl"
-#include "./chunks/terrainLayers.wgsl"
+#include "./chunks/terrainStack.wgsl"
 
 struct TerrainLightingUniforms {
     u_dirLight: DirectionalLight,
@@ -28,7 +27,7 @@ struct TerrainLightingUniforms {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // The sun comes from the light list here, not from u_transform: this pass HAS the light list, and
     // taking it from the same place it lights with keeps the two from ever disagreeing.
-    let surface = resolveTerrainSurface(in.fragPos, in.uv, tbnOf(in), u_lighting.u_dirLight.direction);
+    let surface = resolveTerrainSurface(in.fragPos, in.uv, tbnOf(in));
 
     // Filtered here rather than inside resolveTerrainSurface, because a derivative belongs at the top
     // level of a fragment stage where control flow is still uniform, and the blend runs branches.
@@ -36,7 +35,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let v = normalize(u_terrain.u_viewPos - in.fragPos);
     // Terrain is the reason the sky light is nine uniforms rather than a cube: this shader's layer
-    // samplers occupy units 0-8, so it can never bind one.
+    // samplers used to occupy units 0-8, so it could never bind one.
     // This pass has no environment map and no probe, so its indirect term is purely diffuse — which
     // is why occlusion is one multiply here and a split into two lobes in the deferred twin.
     let ambient = (u_lighting.u_sceneAmbient
@@ -44,10 +43,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var lo = vec3<f32>(0.0);
 
-    // Self-shadowing applied to the SUN's visibility, which is what it actually describes. The
-    // deferred twin has to fold it into albedo instead; see geometryTerrain.
     lo += evaluateDirectionalLight(u_lighting.u_dirLight, surface.normal, v, surface.albedo,
-                                   surface.metallic, roughness, surface.shadow);
+                                   surface.metallic, roughness, 1.0);
 
     // Visibility is a flat 1.0: this pass has no shadow maps bound at all (see the header), so there
     // is nothing to ask. That is also why it can skip `cleoPunctualVisibility`, which lives in

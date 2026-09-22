@@ -1,6 +1,7 @@
 import { Scene, Node, Camera, CameraNode, LightNode, DirectionalLight, InputSystem } from 'cleo';
 import { PREVIEW_FOV, fitDistance, previewClipPlanes } from './previewFraming';
 import { applyPreviewEnvironment } from './previewEnvironment';
+import { PREVIEW_KEY_LIGHT_NAME, PREVIEW_FILL_LIGHT_NAME } from './createModelPreviewScene';
 import { clamp } from '../../utils/math';
 
 const RADIUS = 3.2;       // camera distance from the sphere (at the origin)
@@ -25,6 +26,35 @@ const TERRAIN_PITCH = 42;
 const INIT_YAW = 28;      // degrees
 const ROT_SPEED = 10;     // matches the editor's free-fly look sensitivity
 const ZOOM_SPEED = 0.005; // wheel delta -> radius
+
+/**
+ * How a preview's orbit rig frames its subject. `distance`/`minDistance`/`maxDistance` override the
+ * ones derived from `subjectRadius`; `minPitch` keeps the camera above a flat subject, whose underside is
+ * a culled face.
+ */
+export interface PreviewFraming {
+  subjectRadius: number;
+  pitch: number;
+  target?: [number, number, number];
+  distance?: number;
+  minDistance?: number;
+  maxDistance?: number;
+  minPitch?: number;
+}
+
+/** The orbit rig of a material preview, for re-framing when the subject changes shape. */
+export interface PreviewRig {
+  frame(f: PreviewFraming): void;
+}
+
+// Keyed by scene rather than returned: every caller `void`s the environment promise this function
+// returns, and a rig is only wanted by the shape switch.
+const rigs = new WeakMap<Scene, PreviewRig>();
+
+/** The orbit rig `createMaterialPreviewScene` built into `scene`, or null. */
+export function previewRigOf(scene: Scene): PreviewRig | null {
+  return rigs.get(scene) ?? null;
+}
 
 /**
  * Preview scene for the Material editor: an orbit rig (pivot Node at the origin with the camera as a
@@ -64,6 +94,22 @@ export function createMaterialPreviewScene(
 
   // CameraNode runs onUpdate before it re-derives the view from the node transform.
   let pitch = startPitch, yaw = INIT_YAW, radius = startRadius;
+  let minR = minRadius, maxR = maxRadius, minPitch = -85;
+  rigs.set(scene, {
+    frame(f: PreviewFraming) {
+      radius = f.distance ?? fitDistance(f.subjectRadius);
+      minR = f.minDistance ?? radius * 0.5;
+      maxR = f.maxDistance ?? radius * 4;
+      minPitch = f.minPitch ?? -85;
+      pitch = clamp(f.pitch, minPitch, 85);
+      pivot.setPosition(f.target ?? [0, 0, 0]);
+      pivot.setRotation([pitch, yaw, 0]);
+      cam.setPosition([0, 0, -radius]);
+      const planes = previewClipPlanes(radius, f.subjectRadius);
+      cam.camera.near = planes.near;
+      cam.camera.far = Math.max(planes.far, 100);
+    },
+  });
   cam.onUpdate = (delta) => {
     const input = InputSystem.instance;
     // `Look` carries its own left-button gate as a binding modifier, so there is no `if (buttons.Left)`
@@ -73,24 +119,24 @@ export function createMaterialPreviewScene(
     if (look[0] !== 0 || look[1] !== 0) {
       yaw -= look[0] * delta * ROT_SPEED;
       pitch += look[1] * delta * ROT_SPEED;
-      pitch = clamp(pitch, -85, 85); // don't roll over the poles
+      pitch = clamp(pitch, minPitch, 85); // don't roll over the poles (or under a flat subject)
       pivot.setRotation([pitch, yaw, 0]);
     }
     const wheel = input.value('EditorCamera/Zoom');
     if (Math.abs(wheel) > 0) {
-      radius = clamp(radius + wheel * ZOOM_SPEED, minRadius, maxRadius);
+      radius = clamp(radius + wheel * ZOOM_SPEED, minR, maxR);
       cam.setPosition([0, 0, -radius]);
     }
   };
 
   // Added FIRST: the deferred pipeline keeps only the last directional light uploaded, so the key light
   // below must be the one that lights the sphere.
-  const fill = new LightNode('fill', new DirectionalLight({ diffuse: [0.30, 0.32, 0.38], ambient: [0, 0, 0] }));
+  const fill = new LightNode(PREVIEW_FILL_LIGHT_NAME, new DirectionalLight({ diffuse: [0.30, 0.32, 0.38], ambient: [0, 0, 0] }));
   fill.setPosition([0, 5, 0]).setRotation([55, 150, 0]);
   fill.castShadows = false;
   scene.addNode(fill);
 
-  const key = new LightNode('key', new DirectionalLight({ ambient: [0.18, 0.18, 0.20] }));
+  const key = new LightNode(PREVIEW_KEY_LIGHT_NAME, new DirectionalLight({ ambient: [0.18, 0.18, 0.20] }));
   key.setPosition([0, 5, 0]).setRotation([120, -35, 0]);
   key.castShadows = false;
   scene.addNode(key);

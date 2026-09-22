@@ -1,6 +1,6 @@
 # Terrain
 
-Landscapes are heightfields with four paint layers and scattered foliage. Add one from
+Landscapes are heightfields with a layered surface and scattered foliage. Add one from
 **Environment ▸ Landscape**, then switch to **Landscape mode** to shape it.
 
 Landscape mode is only available in **3D scenes**.
@@ -10,55 +10,138 @@ Landscape mode is only available in **3D scenes**.
 Two different places, and the split matters:
 
 - The **Landscape node inspector** (Scene mode) holds the terrain's **structure**: size,
-  resolution, chunk quads, and heightmap import/export. Positioning uses the normal gizmo.
+  resolution, chunk quads, paint resolution, and heightmap import/export. Positioning uses the
+  normal gizmo.
 - **Landscape mode** holds the **brushes**. Nothing structural.
 
 A new landscape defaults to `size 200`, `resolution 129`, `chunkQuads 32`.
 
-## The brush card
+## The layout
 
-A floating card in the viewport, with a landscape picker when the scene has more than one.
+Landscape mode brings up two panels plus a slim toolbar:
 
-Shared sliders for all three modes:
+- **Landscape Tools** — the mode, the tool, the brush, and whatever that tool needs.
+- **Landscape Layers** — the base material and the paint-layer stack.
+- A **toolbar** floating over the viewport with the mode, the tools and the two settings that
+  change mid-stroke: size and strength.
 
-| Slider | Range |
+### Brush
+
+| Setting | What it does |
 |---|---|
-| **Radius** | 1 – 100 |
-| **Strength** | 0.5 – 50 |
-| **Falloff** | 0 – 1 |
+| **Size** | Radius in metres, 0.5 – 250, on a logarithmic slider. `[` / `]`, or Ctrl+wheel. |
+| **Strength** | Per tool, and remembered per tool. Metres per second for Raise/Lower, a 0–1 blend for the rest. Shift+`[` / `]`. |
+| **Falloff** | 0 is a hard edge, 1 feathers all the way from the centre. |
+| **Curve** | Soft, Smooth, Linear, Sphere, Tip. |
+| **Shape** | Circle or square, with a rotation. |
+| **Hold to apply** | Keep applying while the mouse is held still, rather than only while it moves. |
 
-### Sculpt
+The cursor is a decal projected onto the ground: a gradient of the brush's own weight curve,
+coloured per tool and as opaque as the strength.
 
-Tools: **Raise**, **Lower**, **Smooth**, **Flatten**.
+### Modifiers and hotkeys
+
+| Key | Action |
+|---|---|
+| **Q / W / E** | Sculpt / Paint / Foliage |
+| **1 … 0** | Pick a tool within the mode |
+| **Shift + drag** | Invert: Lower instead of Raise, erase instead of paint |
+| **Ctrl + drag** | Smooth, whatever the tool |
+| **Ctrl + click** | Flatten and Set Height: pick the height under the cursor |
+| **Esc** | Cancel a ramp |
+
+Every stroke is **one undo step**, and so is a fill, an invert or a heightmap import.
+
+## Sculpt
+
+| Tool | What it does |
+|---|---|
+| **Raise / Lower** | Build up or dig down, in metres per second. |
+| **Smooth** | Average away bumps, region-local. |
+| **Flatten** | Level to the height where the stroke started. Fill only / cut only / both. |
+| **Set Height** | Move ground toward an exact height, typed or picked. |
+| **Ramp** | Press at one end, release at the other. Brush size is the half-width; falloff softens the sides. |
+| **Noise** | Fractal noise with a scale and a seed. |
+| **Terrace** | Cut slopes into flat steps: step height and sharpness. |
+| **Erode** | Thermal erosion — anything steeper than the talus angle slumps into scree. |
+| **Hydro** | Rain erosion — droplets carve gullies and deposit in hollows. |
+| **Stamp** | A grayscale image as the brush alpha, with rotation. White raises. |
 
 > Flatten approaches its target asymptotically, and saving quantizes heights — so "flat" terrain
 > still has micro-slopes. This is not a defect, but it is why a character with friction behaves
 > differently in different directions on ground that looks level. See
 > [Physics](physics.md#character-setup).
 
-### Paint
+## Paint
 
-Choose the active layer (**0–3**) and paint. Each layer holds a **terrain material**.
+The **Landscape Layers** panel holds the stack:
 
-Four layers is the limit, because the blend weights are four channels of one splat texture.
+- The **base** — one landscape material covering the whole terrain. No painting needed, and
+  nothing can erase it; it is what shows through everything else.
+- **Paint layers** above it, topmost first, each a landscape material with its own painted mask,
+  an opacity, a visibility toggle, and Fill / Clear / Invert.
 
-### Foliage
+Paint, Erase and **Clear to base** work toward a target opacity — paint a dirt road at 60% and it
+stops there. Because each layer is its own mask rather than a share of one normalized splat,
+erasing a road reveals what is under it, automatic rules included.
 
-Scatter the foliage defined by the painted materials, or switch to **Erase** mode to remove it.
+Fifteen paint layers, and sixteen surfaces on screen at once counting the slots each material
+contributes. Masks are their own resolution (**Paint resolution** in the node inspector, 256–2048),
+independent of the height grid, because a road needs finer texels than a hill does.
 
-- **Generate Foliage (whole terrain)** fills everything at once, and confirms first when doing so
-  would discard instances you placed by hand.
+**Show weights** in the Layers panel tints the ground by which surface is winning, which is the
+quickest way to see what a rule is actually doing.
+
+## Foliage
+
+Scatter the foliage defined by the layer that dominates under the brush, or switch to **Erase**.
+
+- **Generate foliage everywhere** fills the whole landscape at once, and confirms first when doing
+  so would discard instances placed by hand.
 - A status line reports instances placed, layers involved, and how close you are to the
   **200,000-instance ceiling**.
+- A slot with **Allow foliage** off rejects candidates — no grass on the rock slot.
 
-## Terrain materials
+## Landscape materials
 
-A terrain material (`.tmat`) is a paint layer. Open one to get:
+A landscape material (`.tmat`) is a surface for the base or for a paint layer. Open one to get:
 
 - **Base surface** — the full material editor, on any of Basic, Blinn-Phong or PBR.
-- **Terrain blend settings** — tiling, automatic placement by height and slope, height-based
-  blending between layers.
+- **Landscape blend** — tiling (with what one repeat measures in metres), whether foliage may
+  scatter here, and the **blend rule** for this surface.
+- **Slots** — extra surfaces blended over it, each an ordinary Material asset with its own tiling
+  and rule.
 - **Foliage rules** — what this surface scatters.
+
+### Blend rules
+
+A rule says **where** a surface appears. Every test multiplies, and a disabled test passes
+everywhere:
+
+| Test | Unit |
+|---|---|
+| **Elevation** | Metres **above the landscape's origin** — so moving a landscape does not move its snow line. Min, max and a falloff either side. |
+| **Slope** | Degrees: 0 flat, 90 vertical. |
+| **Noise** | Breaks the transition into an irregular edge: amount, feature size in metres, seed. |
+| **Height blend** | 0–1. Lets the surface's height map decide the transition, so gravel and cobbles poke through first. |
+| **Opacity** | Scales the whole rule. |
+
+This is how one material becomes grass that turns to rock on the steep parts and snow above a
+height, without painting any of it.
+
+### Preview
+
+The material preview switches between **Sphere**, **Plane** and — for a landscape material — a
+**Hill**, from the control at the top right of the viewport.
+
+- The sphere shows every angle a surface can face, which is why it is also the thumbnail.
+- The plane shows how the material tiles on flat ground.
+- The hill has real slopes and real elevation, so elevation and slope rules show as bands exactly
+  where they will land on a landscape.
+
+Because a preview is a few metres across and a rule is authored in landscape metres, the preview
+remaps its height onto the span the rules actually use, and the legend under the switch says what
+its height stands for.
 
 ### Foliage rules
 
@@ -85,6 +168,9 @@ instance — 200,000 colliders would be neither useful nor affordable. Configure
 Terrain LOD is in [Renderer settings](../reference/render-settings.md#foliage-and-terrain-lod),
 not here: two distances and two detail steps (½ and ¼). Foliage has its own cull distance, cell size and density falloff.
 
+The size the surface textures are resampled to — they share one texture array, so they share one
+size — is **Landscape texture size** in renderer settings: 512, 1024 (the default) or 2048.
+
 > The foliage cull distance and cell size interact with performance in a way worth knowing: foliage
 > cost spikes while the **camera moves**, because that is when cells are admitted and the cull
 > boundary is crossed. A steady frame rate standing still and spikes while walking is this, not a
@@ -92,8 +178,15 @@ not here: two distances and two detail steps (½ and ¼). Foliage has its own cu
 
 ## Heightmaps
 
-Import a heightmap with an amplitude, or export the current heights, from the node inspector. This
-is the way to bring terrain in from an external tool.
+Import and export from the node inspector.
+
+Import opens a dialog: **8- and 16-bit PNG** or **RAW / R16**, with the minimum and maximum height
+the image maps onto, plus rotate and flip, previewed live and applied as one undo step. Export
+writes 16-bit PNG or RAW R16 and records the range in the file name, so a round trip through an
+external tool keeps absolute heights.
+
+> A 16-bit import is worth insisting on for large landscapes: 8 bits over a 300 m range quantizes
+> to about 1.2 m, which reads as terracing on any gentle slope.
 
 ## Physics
 
@@ -106,8 +199,8 @@ consequences:
 
 ## Runtime
 
-Terrain can be queried and edited at runtime — `heightAt`, `raycast`, `sculpt`, `paint`, foliage
-scattering. See [Terrain and tilemaps (scripting)](../scripting/terrain-tilemap.md).
+Terrain can be queried and edited at runtime — `heightAt`, `raycast`, `sculpt`, `paintLayerMask`,
+foliage scattering. See [Terrain and tilemaps (scripting)](../scripting/terrain-tilemap.md).
 
 ## See also
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { mat4, quat, vec3 } from 'gl-matrix'
-import { Node, skeletonTopology, type SkeletonTopology } from 'cleo'
+import { Node, markEditorOwned, skeletonTopology, type SkeletonTopology } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { getAnimationTarget, computeBindMatrices, computeJointWorldMatrices } from '../animation/skeleton'
 import TransformGizmo from '../gizmo/TransformGizmo'
@@ -18,6 +18,11 @@ import type { TransformPatch } from '../gizmo/gizmoDrag'
  * library asset. It is parented to the scene root, which is identity, so its local transform IS its world
  * transform — that is what lets the gizmo's patch be read as a world pose directly.
  *
+ * It is editor chrome, and its name says so: `__editor__` is what makes it editor-owned, so parking it on
+ * a joint every frame neither marks the clip tab unsaved nor becomes an undo step. The capital G is
+ * deliberate — `Raycaster.raycast` skips `__editor__` nodes UNLESS the name contains lowercase `gizmo`
+ * (the handles' exception), and an invisible proxy must stay unpickable.
+ *
  * The conversion back is the only real maths here, and it is the accumulation `_recomputePose` performs,
  * run backwards:
  *
@@ -28,8 +33,10 @@ import type { TransformPatch } from '../gizmo/gizmoDrag'
  * the rigs that are hardest to debug. A root joint has no parent joint, so its base is the MODEL NODE's
  * world transform, which `computeJointWorldMatrices` has already multiplied in.
  */
+const BONE_GIZMO_PROXY_NAME = '__editor__boneGizmoProxy'
+
 export default function BoneGizmo({ viewportRef }: { viewportRef: React.RefObject<HTMLDivElement> }) {
-  const { editorScene, skeletonTargetId, eventEmitter } = useCleoEngine()
+  const { editorScene, mainScene, skeletonTargetId, eventEmitter, withoutDirty } = useCleoEngine()
   const [jointIndex, setJointIndex] = useState(-1)
   const proxyRef = useRef<Node | null>(null)
   const [proxyId, setProxyId] = useState<string | null>(null)
@@ -51,18 +58,27 @@ export default function BoneGizmo({ viewportRef }: { viewportRef: React.RefObjec
   }, [eventEmitter])
 
   // One proxy per scene, created on demand and torn down with the tab.
+  //
+  // Both halves run under withoutDirty. On a tab switch this mount and this cleanup run BEFORE
+  // EngineContext has re-pointed at the incoming tab, so an unsuppressed add or remove is blamed on the
+  // tab being left — marked unsaved there, and recorded onto its undo stack. And `removeNode`, never
+  // `proxy.remove()`: remove() only despawns and marks the node, and the scene's update sweep detaches it
+  // frames later, outside any bracket, as a 'Delete' step.
   useEffect(() => {
-    if (!editorScene) return
-    const proxy = new Node('__boneGizmoProxy')
-    editorScene.addNode(proxy)
+    // Never the game scene. A restored clip tab can mount this while its preview scene is still being
+    // built, and until then `editorScene` falls back to the main scene — a proxy parked there would sit
+    // in the user's scene. The clip tab always has a scene of its own, and this re-runs once it arrives.
+    if (!editorScene || editorScene === mainScene) return
+    const proxy = markEditorOwned(new Node(BONE_GIZMO_PROXY_NAME))
+    withoutDirty(() => editorScene.addNode(proxy))
     proxyRef.current = proxy
     setProxyId(proxy.id)
     return () => {
       proxyRef.current = null
       setProxyId(null)
-      try { proxy.remove() } catch { /* the scene may already be gone with the tab */ }
+      try { withoutDirty(() => editorScene.removeNode(proxy)) } catch { /* the scene may already be gone with the tab */ }
     }
-  }, [editorScene])
+  }, [editorScene, mainScene])
 
   const cacheOf = (skin: any) => {
     const hit = cacheRef.current

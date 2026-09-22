@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { engineEventBus, TextureManager, isDerivedTextureId } from 'cleo';
+import { engineEventBus, TextureManager, isDerivedTextureId, TERRAIN_LAYER_TEXTURE_SIZES } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
 import { Section, Slider, Toggle, Field, NumberInput, SegmentedControl, Select, Hint } from '../../components/ui';
 import BackendSelector from './BackendSelector';
@@ -180,6 +180,7 @@ export default function RendererSettingsPanel() {
   const [foliageCellSize, setFoliageCellSize] = useState<number>(() => renderer?.foliageCellSize ?? 13);
   const [foliageDensity, setFoliageDensity] = useState<number>(() => renderer?.foliageDensityFalloff ?? 0.75);
   const [terrainLod, setTerrainLod] = useState<boolean>(() => renderer?.terrainLodEnabled ?? true);
+  const [layerTexSize, setLayerTexSize] = useState<number>(() => renderer?.terrainLayerTextureSize ?? 1024);
   const [terrainLodDist1, setTerrainLodDist1] = useState<number>(() => renderer?.terrainLodDistance1 ?? 120);
   const [terrainLodDist2, setTerrainLodDist2] = useState<number>(() => renderer?.terrainLodDistance2 ?? 300);
   const [terrainLodStep1, setTerrainLodStep1] = useState<number>(() => renderer?.terrainLodStep1 ?? 2);
@@ -273,6 +274,7 @@ export default function RendererSettingsPanel() {
     setFoliageCellSize(renderer.foliageCellSize);
     setFoliageDensity(renderer.foliageDensityFalloff);
     setTerrainLod(renderer.terrainLodEnabled);
+    setLayerTexSize(renderer.terrainLayerTextureSize);
     setTerrainLodDist1(renderer.terrainLodDistance1);
     setTerrainLodDist2(renderer.terrainLodDistance2);
     setTerrainLodStep1(renderer.terrainLodStep1);
@@ -413,6 +415,18 @@ export default function RendererSettingsPanel() {
             options={LOD_DETAIL.map((d) => ({ value: d.step, label: d.label, title: d.title }))}
           />
         </div>
+        {/* Every landscape surface is resampled into ONE texture array, and an array has ONE size — so
+            this is the size they all get, not a per-material choice. Changing it re-bakes them. */}
+        <Field label='Surface Tex'>
+          <SegmentedControl
+            value={layerTexSize}
+            onChange={(size) => { renderer.terrainLayerTextureSize = size; setLayerTexSize(renderer.terrainLayerTextureSize); touch(); }}
+            options={TERRAIN_LAYER_TEXTURE_SIZES.map((n) => ({
+              value: n, label: `${n}`,
+              title: `Resample every landscape surface to ${n}x${n}. They share one texture array, so they share one size.`,
+            }))}
+          />
+        </Field>
       </Section>
 
       <Section title='Tone / Post' hint={'Exposure is written as a photographic EV100 — the same setting a light meter reads. '

@@ -3,12 +3,18 @@ import {
   Geometry, Material, Model, ModelNode, Raycaster, TilemapNode, cellCorners, cellTile, packCell,
   markEditorOnly,
 } from 'cleo'
-import type { TileEdit } from 'cleo'
+import type { Node, TileEdit } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { useHistory } from '../HistoryContext'
 
 interface Props {
   viewportRef: React.RefObject<HTMLDivElement>
+}
+
+/** Whether `root` is among `node`'s ancestors — false for a node stranded under a root a parse swapped out. */
+function isUnder(node: Node, root: Node): boolean {
+  for (let n = node.parent; n; n = n.parent) if (n === root) return true
+  return false
 }
 
 /**
@@ -18,7 +24,7 @@ interface Props {
  * which is exact under the 2D orthographic camera.
  */
 export default function TilemapBrush({ viewportRef }: Props) {
-  const { instance, editorScene, eventEmitter, editorMode, tilemapBrush } = useCleoEngine()
+  const { instance, editorScene, eventEmitter, editorMode, tilemapBrush, withoutDirty } = useCleoEngine()
   const { push } = useHistory()
   const paintingRef = useRef(false)
   const cursorRef = useRef<ModelNode | null>(null)
@@ -43,21 +49,39 @@ export default function TilemapBrush({ viewportRef }: Props) {
   }
 
   // The cursor is a scene node named with the __editor__ prefix, which is what keeps it out of selection,
-  // out of the scene tree and out of every serialization.
+  // out of the scene tree and out of every serialization, and what stops it marking the scene unsaved.
+  //
+  // Built, swapped, shown, hidden and removed under withoutDirty, so none of it becomes an undo step
+  // either: those would interleave with the stroke entries below and clear the redo stack. Swapped with
+  // the synchronous `removeNode`, never `remove()` — that despawns now and leaves the detach to the scene's
+  // update sweep a frame later, outside any bracket.
   const ensureCursor = (points: number): ModelNode | null => {
     if (!editorScene) return null
-    if (cursorRef.current && cursorRef.current.model.geometry.vertexCount === points) return cursorRef.current
-    cursorRef.current?.remove()
-    const node = new ModelNode(
-      '__editor__tilemapCursor',
-      new Model(buildOutline(points), Material.Basic({ color: [1, 0.9, 0.2] }, { wireframe: true, castShadow: false })),
-    )
-    // Chrome: drawn in the overlay layer the post chain never sees. See LandscapeBrush.
-    markEditorOnly(node)
-    node.visible = false
-    editorScene.addNode(node)
-    cursorRef.current = node
-    return node
+    const current = cursorRef.current
+    // Rebuilt when the outline's point count changes, and when the cursor is no longer in the live tree:
+    // openScene parses INTO this same Scene object and swaps its root, stranding it under the old one.
+    if (current && current.model.geometry.vertexCount === points && isUnder(current, editorScene.root)) return current
+    return withoutDirty(() => {
+      if (current) editorScene.removeNode(current)
+      const node = new ModelNode(
+        '__editor__tilemapCursor',
+        new Model(buildOutline(points), Material.Basic({ color: [1, 0.9, 0.2] }, { wireframe: true, castShadow: false })),
+      )
+      // Chrome: drawn in the overlay layer the post chain never sees. See LandscapeBrush.
+      markEditorOnly(node)
+      node.visible = false
+      editorScene.addNode(node)
+      cursorRef.current = node
+      return node
+    })
+  }
+
+  /**
+   * Show or hide the cursor, writing only on a change. `visible` is an unconditional structural emit: each
+   * write re-traverses every live Scene, reschedules the helper reconciler and rebuilds the scene tree.
+   */
+  const setCursorShown = (cursor: ModelNode, shown: boolean) => {
+    if (cursor.visible !== shown) withoutDirty(() => { cursor.visible = shown })
   }
 
   useEffect(() => {
@@ -124,9 +148,9 @@ export default function TilemapBrush({ viewportRef }: Props) {
       }
       if (cursor.initialized) cursor.model.mesh.updateVertexData(geometry.getData(['position', 'normal', 'uv']))
       cursor.setPosition([origin[0], origin[1], origin[2] + 0.02])
-      cursor.visible = true
+      setCursorShown(cursor, true)
     }
-    const hideCursor = () => { if (cursorRef.current) cursorRef.current.visible = false }
+    const hideCursor = () => { if (cursorRef.current) setCursorShown(cursorRef.current, false) }
 
     /** Every cell the current stamp covers, anchored at (col,row). */
     const stampCells = (col: number, row: number): { col: number; row: number; tile: number }[] => {
@@ -294,8 +318,16 @@ export default function TilemapBrush({ viewportRef }: Props) {
     }
   }, [instance, editorScene, eventEmitter, editorMode, tilemapBrush, viewportRef, push])
 
-  // Drop the cursor when the mode is left, so it cannot linger over the scene view.
-  useEffect(() => () => { cursorRef.current?.remove(); cursorRef.current = null }, [])
+  // Drop the cursor when the mode is left, so it cannot linger over the scene view — and from the old
+  // scene if the scene changes under it.
+  useEffect(() => {
+    if (!editorScene) return
+    return () => {
+      const cursor = cursorRef.current
+      cursorRef.current = null
+      if (cursor) withoutDirty(() => editorScene.removeNode(cursor))
+    }
+  }, [editorScene])
 
   return null
 }

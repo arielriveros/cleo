@@ -1,119 +1,97 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { TerrainMaterial, Material } from '../src/graphics/material';
+import { deriveSurface } from '../src/terrain/terrainLayers';
+import { TerrainLayerStack } from '../src/terrain/terrainLayerStack';
+import { albedoPackSpec, normalPackSpec, packKey } from '../src/terrain/terrainSurfaceArrays';
 
 /**
- * Everything `_deriveLayerSurface` returns has to actually reach the layer.
+ * Everything a surface is derived from has to reach the shader.
  *
- * Terrain layers are DERIVED state: a `TerrainMaterial` goes into `setLayer`, `_deriveLayerSurface`
- * reduces it to the flat ids and scalars the composite terrain material can bind, and `setLayer`
- * copies those onto the `TerrainLayer` field by field. Nothing checks that the copy is complete —
- * the derived object is structurally typed, the layer is a separate interface, and a field present
- * in one and forgotten in the other type-checks perfectly.
- *
- * That is not hypothetical. Terrain ambient occlusion shipped with `aoId` threaded through the whole
- * chain — the layer field, the derive, the packer spec, the `u_hasAO{i}` uniform, the shader blend,
- * the G-buffer alpha, both the deferred and forward composites — and one missing line in `setLayer`.
- * `aoId` stayed null forever, `u_hasAO0` stayed 0, the packer took its identity path, and the whole
- * feature was inert while every gate stayed green: an unused code path renders exactly like no code
- * path. Only a fixture built to carry an occlusion map found it, and only because the shader was
- * force-broken first to prove the pixels could move at all.
- *
- * So the invariant is checked structurally, once, for every field: whatever the derive returns, the
- * material branch of `setLayer` must assign. A new surface field added to one and not the other
- * fails here rather than shipping inert.
+ * This file used to check, as source text, that the four-layer `setLayer` copied every field
+ * `_deriveLayerSurface` returned — because terrain ambient occlusion once shipped threaded through the
+ * whole chain except ONE assignment, and stayed inert while every gate was green. The layer stack has no
+ * field-by-field copy any more (a surface is the derived object itself), so the same guard is now
+ * functional: derive, pack, write uniforms, and assert each map arrives where the shader reads it.
  */
 
-const SRC = readFileSync(join(__dirname, '..', 'src', 'terrain', 'terrain.ts'), 'utf-8');
-
-/** The field names in `_deriveLayerSurface`'s inline return type. */
-const derivedFields = (): string[] => {
-    const start = SRC.indexOf('private _deriveLayerSurface(');
-    expect(start).toBeGreaterThan(-1);
-    const open = SRC.indexOf('{', SRC.indexOf('): ', start));
-    const close = SRC.indexOf('} {', open);
-    expect(close).toBeGreaterThan(open);
-    return SRC.slice(open + 1, close)
-        .split(';').map(s => s.trim().split(':')[0].trim()).filter(Boolean);
-};
-
-/** The body of `setLayer`'s `source instanceof TerrainMaterial` branch. */
-const materialBranch = (): string => {
-    const start = SRC.indexOf('if (source instanceof TerrainMaterial) {');
-    expect(start).toBeGreaterThan(-1);
-    const end = SRC.indexOf('} else if', start);
-    expect(end).toBeGreaterThan(start);
-    return SRC.slice(start, end);
-};
-
-describe('terrain layer surface derivation', () => {
-    it('derives the fields the layer is known to need', () => {
-        // A floor, so a derive that loses a field cannot pass by shrinking both sides at once.
-        expect(derivedFields()).toEqual(expect.arrayContaining(
-            ['albedoId', 'aoId', 'normalId', 'heightId', 'color', 'metallic', 'roughness']));
+describe('surface derivation reads every base type', () => {
+    it('pbr', () => {
+        const m = Material.PBR({ baseColor: [0.2, 0.3, 0.4], metallic: 0.5, roughness: 0.6 });
+        m.textures.set('baseColorTexture', 'alb'); m.textures.set('normalMap', 'nrm');
+        m.textures.set('occlusionMap', 'ao'); m.textures.set('displacementMap', 'h');
+        const s = deriveSurface(m, 12);
+        expect([s.albedoId, s.normalId, s.aoId, s.heightId]).toEqual(['alb', 'nrm', 'ao', 'h']);
+        expect([s.metallic, s.roughness, s.tiling]).toEqual([0.5, 0.6, 12]);
+        expect(s.color).toEqual([0.2, 0.3, 0.4]);
     });
 
-    it('assigns every derived field onto the layer', () => {
-        const branch = materialBranch();
-        for (const field of derivedFields())
-            expect(branch, `setLayer never assigns L.${field}`).toContain(`L.${field} = `);
-    });
-
-    it('clears the derived ids on the legacy plain-albedo branch', () => {
-        // The legacy branch replaces a material with a bare texture id, so every OTHER derived id has
-        // to be cleared or the previous material's maps stay bound to the layer.
-        const start = SRC.indexOf("} else if (source && 'textureId' in source) {");
-        const branch = SRC.slice(start, SRC.indexOf('// else: keep existing', start));
-        for (const field of ['aoId', 'normalId', 'heightId'])
-            expect(branch, `legacy branch leaves L.${field} stale`).toContain(`L.${field} = null`);
+    it('basic and blinn-phong', () => {
+        const b = Material.Basic({ texture: 'tex', color: [1, 0, 0] });
+        expect(deriveSurface(b, 1).albedoId).toBe('tex');
+        const d = Material.Default({});
+        d.textures.set('baseTexture', 'bt');
+        d.textures.set('normalMap', 'n');
+        const s = deriveSurface(d, 1);
+        expect([s.albedoId, s.normalId]).toEqual(['bt', 'n']);
     });
 });
 
-describe('terrain occlusion packing', () => {
-    const packFn = () => {
-        const start = SRC.indexOf('private _syncAlbedoPack(');
-        return SRC.slice(start, SRC.indexOf('\n    }', start));
-    };
-
-    it('packs occlusion into alpha and albedo into rgb', () => {
-        const body = packFn();
-        for (const ch of ['r', 'g', 'b'])
-            expect(body).toContain(`${ch}: L.albedoId ?`);
-        expect(body).toMatch(/a: L\.aoId \?/);
+describe('surface packing', () => {
+    const surface = (over: any = {}) => ({
+        albedoId: null, aoId: null, normalId: null, heightId: null, invertHeight: false,
+        color: [1, 1, 1], metallic: 0, roughness: 1, tiling: 20, ...over,
     });
 
-    it('keeps the layer when it has occlusion but no albedo', () => {
-        // An occlusion-only layer is legitimate — the tint is applied on top — so the early-out must
-        // test BOTH ids. Testing albedo alone would throw the occlusion map away.
-        expect(packFn()).toMatch(/if \(!L\.albedoId && !L\.aoId\)/);
+    it('packs occlusion into the albedo alpha, albedo into rgb, and REPEATS', () => {
+        const spec = albedoPackSpec(surface({ albedoId: 'alb', aoId: 'ao' }));
+        expect(spec.r).toEqual({ textureId: 'alb', channel: 0 });
+        expect(spec.b).toEqual({ textureId: 'alb', channel: 2 });
+        expect(spec.a).toEqual({ textureId: 'ao', channel: 0 });
+        expect(spec.wrapping).toBe('repeat');
     });
 
-    it('reports occlusion presence separately from albedo presence', () => {
-        // One packed texture, two independent flags: `u_hasAlbedo{i}` must not be reused for AO, or an
-        // occlusion-only layer would multiply in the packer's white rgb as if it were an albedo map.
-        const body = packFn();
-        expect(body).toMatch(/u_hasAlbedo\$\{index\}`, L\.albedoId \? 1 : 0/);
-        expect(body).toMatch(/u_hasAO\$\{index\}`, L\.aoId \? 1 : 0/);
+    it('an occlusion-only surface keeps white albedo, so the tint alone shows', () => {
+        const spec = albedoPackSpec(surface({ aoId: 'ao' }));
+        expect(spec.r).toEqual({ constant: 1 });
+        expect(spec.a).toEqual({ textureId: 'ao', channel: 0 });
+    });
+
+    it('packs height into the normal alpha, with a flat normal where there is none', () => {
+        const spec = normalPackSpec(surface({ heightId: 'h' }));
+        expect([spec.r, spec.g, spec.b]).toEqual([{ constant: 0.5 }, { constant: 0.5 }, { constant: 1 }]);
+        expect(spec.a).toEqual({ textureId: 'h', channel: 0 });
+        expect(spec.wrapping).toBe('repeat');
+    });
+
+    it('re-bakes exactly when an input changes', () => {
+        expect(packKey(albedoPackSpec(surface({ albedoId: 'a' })))).toBe(packKey(albedoPackSpec(surface({ albedoId: 'a' }))));
+        expect(packKey(albedoPackSpec(surface({ albedoId: 'a' })))).not.toBe(packKey(albedoPackSpec(surface({ albedoId: 'b' }))));
     });
 });
 
-describe('terrain occlusion in the shader', () => {
-    const CHUNK = readFileSync(
-        join(__dirname, '..', 'src', 'graphics', 'shaders', 'wgsl', 'chunks', 'terrainLayers.wgsl'), 'utf-8');
-
-    it('reads occlusion from the albedo alpha, linear', () => {
-        // Albedo is sRGB and occlusion is not. One fetch serves both, so only the rgb may go through
-        // `toLinear` — decoding occlusion as sRGB would read it far too dark.
-        expect(CHUNK).toMatch(/if \(hasAlbedo == 1\) \{ alb \*= toLinear\(texel\.rgb\); \}/);
-        expect(CHUNK).toMatch(/if \(hasAO == 1\) \{ ao = texel\.a; \}/);
+describe('what the shader is told', () => {
+    it('reports albedo and occlusion presence SEPARATELY', () => {
+        // One packed texture, two flags: reusing the albedo flag for occlusion would multiply the
+        // packer's white rgb in as if it were an albedo map.
+        const stack = new TerrainLayerStack(16, 16);
+        const tm = TerrainMaterial.Create('pbr', {});
+        tm.textures.set('occlusionMap', 'ao');
+        stack.setBase(tm);
+        const m = Material.Terrain();
+        stack.writeUniforms(m);
+        const flags = m.properties.get('u_surfFlags');
+        expect([flags[0], flags[1]]).toEqual([0, 1]);
     });
 
-    it('defaults to unoccluded on the zero-weight fallback', () => {
-        const fallback = CHUNK.slice(CHUNK.indexOf('if (wSum < 1e-4) {'));
-        expect(fallback.slice(0, fallback.indexOf('return out;'))).toMatch(/out\.ao = 1\.0;/);
-    });
-
-    it('blends occlusion by the same weights as everything else', () => {
-        expect(CHUNK).toMatch(/out\.ao = \(l0\.ao \+ l1\.ao \+ l2\.ao \+ l3\.ao\) \/ sum;/);
+    it('reads occlusion from the albedo alpha, linear, and blends it by the same weights', () => {
+        const chunk = readFileSync(join(__dirname, '..', 'src', 'graphics', 'shaders', 'wgsl', 'chunks', 'terrainStack.wgsl'), 'utf-8');
+        // Albedo is sRGB, occlusion is not: one fetch serves both, and only the rgb goes through toLinear.
+        expect(chunk).toMatch(/if \(flags\.x > 0\.5\) \{ alb \*= toLinear\(texel\.rgb\); \}/);
+        expect(chunk).toMatch(/if \(flags\.y > 0\.5\) \{ occlusion = texel\.a; \}/);
+        expect(chunk).toMatch(/ao \+= w \* occlusion;/);
+        // Uncovered ground is unoccluded.
+        expect(chunk).toMatch(/ao \+= remaining;/);
     });
 });

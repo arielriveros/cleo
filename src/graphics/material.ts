@@ -1,3 +1,6 @@
+import { defaultBlendRule, parseBlendRule, cloneBlendRule, legacyAutoRule } from '../terrain/terrainLayers';
+import type { TerrainBlendRule } from '../terrain/terrainLayers';
+
 interface MaterialConfig {
     side?: 'front' | 'back' | 'double';
     transparent?: boolean;
@@ -567,31 +570,22 @@ export class Material {
     }
 
     /**
-     * Terrain splat material: up to 4 tiled layers blended by an RGBA splat map, with optional per-layer
-     * height/slope masking. Seeds defaults only — `Terrain` owns the splat and layer textures.
+     * The landscape's composite material: its layer stack (a base and paint layers, up to
+     * MAX_TERRAIN_SURFACES surfaces) composited by chunks/terrainStack.wgsl. Seeds an EMPTY stack — every
+     * surface uniform zero, so the flat base colour shows — and `TerrainLayerStack.sync` writes the rest
+     * each frame. Owns no textures of its own; the stack binds its masks and layer arrays.
      */
     public static Terrain(properties: { baseColor?: number[] } = {}, config?: MaterialConfig): Material {
         const material = new Material(config);
         material.type = MaterialType.Terrain;
         material.properties.set('u_baseColor', properties.baseColor || [0.38, 0.5, 0.28]);
-        material.properties.set('u_layerCount', 0);
-        material.properties.set('u_useAuto', 0);
-        for (let i = 0; i < 4; i++) {
-            material.properties.set(`u_tiling${i}`, 20);
-            material.properties.set(`u_auto${i}`, 0);
-            material.properties.set(`u_hRange${i}`, [0, 100]);
-            material.properties.set(`u_sRange${i}`, [0, 1]);
-            // Per-layer PBR-blend surface factors (Terrain.setLayer overwrites these from the layer material).
-            material.properties.set(`u_color${i}`, [1, 1, 1]);
-            material.properties.set(`u_metallic${i}`, 0);
-            material.properties.set(`u_roughness${i}`, 1);
-            material.properties.set(`u_hasAlbedo${i}`, 0);
-            material.properties.set(`u_hasNormal${i}`, 0);
-            material.properties.set(`u_hasHeight${i}`, 0);
-            material.properties.set(`u_invertHeight${i}`, 0);
-            material.properties.set(`u_dispScale${i}`, 0.05);
-            material.properties.set(`u_heightBlend${i}`, 0);
-        }
+        material.properties.set('u_surfCount', 0);
+        material.properties.set('u_debugSurface', -1);
+        material.properties.set('u_elevRemap', [1, 0]);
+        // Whole arrays, always: the uniform writer stops at the input's length, so a short array would
+        // leave the tail of the block holding whatever the previous material wrote there.
+        for (const name of ['u_surfColor', 'u_surfMaterial', 'u_surfFlags', 'u_surfElevation', 'u_surfSlope', 'u_surfNoise', 'u_surfBlend'])
+            material.properties.set(name, new Float32Array(16 * 4));
         return material;
     }
 
@@ -970,6 +964,42 @@ export interface TerrainFoliageRule {
 }
 
 /**
+ * One further surface of a landscape material, blended over the material's own surface (slot 0) by its
+ * own rule — rock on steep ground, snow above a height, scree at the foot of a cliff.
+ */
+export interface TerrainMaterialSlot {
+    /** Stable identity, for the editor's list keys and asset links. Never shown. */
+    id: string;
+    name: string;
+    /** The surface: a Basic, Blinn-Phong or PBR material. Never a TerrainMaterial. */
+    material: Material;
+    /**
+     * Editor-side link to the Material library asset this surface was taken from, so an edit to that
+     * asset can propagate. The engine ignores it. Deliberately NOT `materialId`: every walker that
+     * treats `materialId` as a TERRAIN-material reference would misfile it.
+     */
+    surfaceMaterialId: string | null;
+    /** UV repeats across the whole landscape. */
+    tiling: number;
+    rule: TerrainBlendRule;
+    /** Whether foliage may scatter where this surface dominates. Off for rock, scree, water. */
+    allowFoliage: boolean;
+}
+
+/** A new slot's id. Unique enough for a list key; the engine never compares it. */
+export function newTerrainSlotId(): string {
+    return `slot_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
+}
+
+/**
+ * Old height blend (an `exp(k * h)` weight exponent, authored 0..8) as the new rule's 0..1 transition
+ * sharpness. Not an exact equivalence — the two operators differ — but monotone, with 0 still meaning off.
+ */
+export function legacyHeightBlendToRule(heightBlend: number): number {
+    return Math.max(0, Math.min(1, (heightBlend || 0) / 8));
+}
+
+/**
  * A reusable paint-layer material for terrains: a {@link Material} of a base type plus terrain blend
  * fields and foliage rules. Never rendered on its own — `Terrain` reads it into a paint layer.
  */
@@ -1021,6 +1051,19 @@ export class TerrainMaterial extends Material {
     public foliageInclude: TerrainFoliageRule[] = [];
     /** Foliage names kept off this material even when a neighbouring material would place them. */
     public foliageExclude: string[] = [];
+    /**
+     * Where this material's OWN surface (slot 0) appears within the layer that paints it. Ignored when
+     * the material is a landscape's BASE: the base's first surface covers everything, rules or not,
+     * because there is nothing under it to show through.
+     *
+     * Supersedes `auto` / `hRange` / `sRange` / `heightBlend`, which it is migrated from on parse (see
+     * `legacyAutoRule`) and which remain only for the paths that still read them.
+     */
+    public rule: TerrainBlendRule = defaultBlendRule();
+    /** Whether foliage may scatter where slot 0 dominates. */
+    public allowFoliage: boolean = true;
+    /** Surfaces 1..n, each blended over the ones before it by its own rule. See {@link TerrainMaterialSlot}. */
+    public slots: TerrainMaterialSlot[] = [];
 
     /** Build a terrain paint-layer material whose surface is the given base shading model. */
     public static Create(baseType: TerrainBaseType, properties: any = {}, config?: MaterialConfig): TerrainMaterial {
@@ -1065,6 +1108,17 @@ export class TerrainMaterial extends Material {
             // keeps carrying its geometry.
             foliageInclude: this.foliageInclude.map(r => stripDerivedFoliageGeometry(r)),
             foliageExclude: [...this.foliageExclude],
+            rule: cloneBlendRule(this.rule),
+            allowFoliage: this.allowFoliage,
+            slots: this.slots.map(s => ({
+                id: s.id,
+                name: s.name,
+                material: s.material.serialize(),
+                surfaceMaterialId: s.surfaceMaterialId,
+                tiling: s.tiling,
+                rule: cloneBlendRule(s.rule),
+                allowFoliage: s.allowFoliage,
+            })),
         };
     }
 
@@ -1109,7 +1163,33 @@ export class TerrainMaterial extends Material {
         tm.foliageInclude = Array.isArray(m.foliageInclude)
             ? m.foliageInclude.map((r: any) => migrateFoliageRule({ ...r })) : [];
         tm.foliageExclude = Array.isArray(m.foliageExclude) ? [...m.foliageExclude] : [];
+        // MIGRATION, permanent like the height-slot read above: every material saved before rules
+        // existed carries its mask as `auto` / `hRange` / `sRange` and its blend as `heightBlend`.
+        // `hRange` was WORLD Y; a material cannot know which landscape it will sit on, so it is read as
+        // metres above the origin — the same number for every landscape at y = 0, which is all of them
+        // in practice. `Terrain.deserialize` re-bases the embedded copy for a landscape that was moved.
+        if (m.rule) tm.rule = parseBlendRule(m.rule);
+        else {
+            tm.rule = legacyAutoRule(!!m.auto, m.hRange, m.sRange);
+            tm.rule.heightBlend = legacyHeightBlendToRule(m.heightBlend ?? 0);
+        }
+        tm.allowFoliage = m.allowFoliage !== false;
+        tm.slots = Array.isArray(m.slots) ? m.slots.map((s: any) => TerrainMaterial.parseSlot(s)) : [];
         return tm;
+    }
+
+    /** Read one slot. Its surface is parsed as a PLAIN material even if it was saved as a terrain one. */
+    public static parseSlot(s: any): TerrainMaterialSlot {
+        s = s || {};
+        return {
+            id: typeof s.id === 'string' && s.id ? s.id : newTerrainSlotId(),
+            name: typeof s.name === 'string' ? s.name : 'Slot',
+            material: Material.parse({ ...(s.material ?? {}), terrainMaterial: undefined }),
+            surfaceMaterialId: typeof s.surfaceMaterialId === 'string' ? s.surfaceMaterialId : null,
+            tiling: typeof s.tiling === 'number' && isFinite(s.tiling) ? s.tiling : 20,
+            rule: parseBlendRule(s.rule),
+            allowFoliage: s.allowFoliage !== false,
+        };
     }
 }
 

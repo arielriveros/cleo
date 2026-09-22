@@ -328,6 +328,35 @@ export interface ColorTargetState {
     writeMask?: [boolean, boolean, boolean, boolean];
 }
 
+function sameComponent(a: BlendComponent, b: BlendComponent): boolean {
+    return a.srcFactor === b.srcFactor && a.dstFactor === b.dstFactor && a.operation === b.operation;
+}
+
+/** Field-by-field equality of two blend states. */
+export function blendStatesEqual(a: BlendState, b: BlendState): boolean {
+    return sameComponent(a.color, b.color) && sameComponent(a.alpha, b.alpha);
+}
+
+/**
+ * The single blend state a backend that blends EVERY colour target alike can apply for `targets` —
+ * WebGL2 without `OES_draw_buffers_indexed`, which is the only kind this engine drives.
+ *
+ * Several blending targets are fine exactly when they all blend, and all blend the same way: GL then
+ * does precisely what WebGPU does per target. The decal buffer relies on this — three attachments,
+ * one premultiplied "over" each. Anything else cannot be expressed and must fail loudly rather than
+ * blend one attachment under another's state.
+ *
+ * At most one blending target keeps the historical rule: target 0 decides.
+ */
+export function uniformTargetBlend(targets: readonly ColorTargetState[], label = 'pipeline'): BlendState | undefined {
+    const blending = targets.filter(t => t.blend);
+    if (blending.length <= 1) return targets[0]?.blend;
+    const first = blending[0].blend!;
+    if (blending.length !== targets.length || !blending.every(t => blendStatesEqual(t.blend!, first)))
+        throw new Error(`${label}: WebGL2 cannot blend colour targets independently`);
+    return first;
+}
+
 export interface DepthStencilState {
     format: TextureFormat;
     depthWriteEnabled: boolean;

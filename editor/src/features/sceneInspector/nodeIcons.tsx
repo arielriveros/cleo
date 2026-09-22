@@ -119,6 +119,13 @@ export const SkyLightIcon = () => (
 export const CloudsIcon = () => (
   <S><path d="M7 18.5h10a4 4 0 0 0 .6-7.95 5.5 5.5 0 0 0-10.5-1.2A3.9 3.9 0 0 0 7 18.5Z" /></S>
 );
+/**
+ * Decal: a dashed projector box pressing a mark down onto the ground under it — the volume, the direction
+ * it projects in, and the print it leaves. Matches the viewport billboard (`buildDecalIconDataURL`).
+ */
+export const DecalIcon = () => (
+  <S><path d="M4 3.5h16v10H4Z" strokeDasharray="2.6 2.2" /><path d="M12 6v8.8M9.3 12.1 12 14.8l2.7-2.7" /><ellipse cx="12" cy="19" rx="8" ry="2.4" fill="currentColor" fillOpacity="0.35" /></S>
+);
 /** Landscape: a hill and peak under a sun — matching the Landscape mode button. */
 export const LandscapeIcon = () => (
   <S><path d="M3 19 9 8l4 6 2-3 6 8Z" /><circle cx="17" cy="6" r="2" /></S>

@@ -7,13 +7,14 @@ import useGizmoShortcuts from "./gizmo/useGizmoShortcuts";
 import type { TransformPatch } from "./gizmo/gizmoDrag";
 import { effectiveGizmoSpace } from "../utils/gizmoMath";
 import LandscapeBrush from "./landscape/LandscapeBrush";
-import LandscapeInspector from "./landscape/LandscapeInspector";
+import LandscapeToolbar from "./landscape/LandscapeToolbar";
 import TilemapBrush from "./tilemap/TilemapBrush";
 import TilemapInspector from "./tilemap/TilemapInspector";
 import DebugOverlay from "./logger/DebugOverlay";
 import AnimationSkeletonTool from "./animation/AnimationSkeletonTool";
 import AnimationPlayer from "./animation/AnimationPlayer";
 import DebugVisibilityMenu from "./DebugVisibilityMenu";
+import PreviewShapeSwitch from './PreviewShapeSwitch';
 import DebugSkeletonOverlay from "./DebugSkeletonOverlay";
 import DebugAnimationOverlay from "./DebugAnimationOverlay";
 import { useStateMachine } from "./animation/StateMachineContext";
@@ -47,7 +48,8 @@ const GIZMO_HIDDEN_MODES: EditorMode[] = ['landscape', 'tilemap', 'renderer', 'i
 
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, editorMode, viewDimension, setViewDimension, isSceneReady,
-            templateRootId, modelEditTargetId, templates, models, materials, animations, scripts, bodies, triggers } = useCleoEngine();
+            templateRootId, modelEditTargetId, templates, models, materials, animations, scripts, bodies, triggers,
+            animationFieldTargetId } = useCleoEngine();
     const { selectedNode, isGizmoDragging, gizmoMode, setGizmoMode, gizmoSpace, setGizmoSpace } = useSelection();
     const { isPlayMode } = usePlayback();
     const { graphView, setGraphView } = useStateMachine();
@@ -358,12 +360,20 @@ export default function EngineViewport() {
 
         // In a template tab the editable subtree is rooted at the template root (a child of the scene
         // root); drops must parent there so they show in the hierarchy and save with the template. A
-        // model tab likewise parents drops under the ACTIVE LOD level's root, so they save with that level.
+        // model tab likewise parents drops under the ACTIVE LOD level's root, which is refused below unless
+        // that is level 0, the only one a save writes.
         const dropParent = (editorMode === 'template' && templateRootId)
             ? (editorScene.getNodeById(templateRootId) ?? editorScene.root)
             : (editorMode === 'model' && modelEditTargetId)
                 ? (editorScene.getNodeById(modelEditTargetId) ?? editorScene.root)
                 : editorScene.root;
+        // A model tab's LOD levels 1..N are read-only previews of other assets: a save writes level 0 only,
+        // and a drop under an editor-owned preview would be neither undoable nor saved.
+        if (dropParent.isEditorOwned) {
+            e.preventDefault();
+            Logger.warn('LOD previews are read-only: switch to LOD 0 to add to this model', 'Editor');
+            return;
+        }
         const point = dropPointAt(e.clientX, e.clientY);
 
         const newNodeId = e.dataTransfer.getData(NEW_NODE_MIME);
@@ -447,6 +457,10 @@ export default function EngineViewport() {
                 The container is gated on `overRender`, so a mode that owns the whole panel shows none of
                 it — each control below only states what is true of IT beyond that. */}
             {overRender && <div data-cleo-overlay className='absolute top-2 right-2 z-20 flex items-center gap-2'>
+                {/* The material previews' own control: what the material is drawn on. */}
+                {(editorMode === 'material' || editorMode === 'terrainMaterial') && !isPlayMode && (
+                    <PreviewShapeSwitch kind={editorMode} />
+                )}
                 {/* The debug menu stays available during play so Runtime toggles can be flipped live. */}
                 {editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && (
                     <DebugVisibilityMenu />
@@ -497,7 +511,7 @@ export default function EngineViewport() {
             </>}
             {editorMode === 'landscape' && <>
                 <LandscapeBrush viewportRef={viewportRef} />
-                <LandscapeInspector />
+                <LandscapeToolbar />
             </>}
             {/* The state graph is a full-canvas view, so everything that belongs to the 3D preview steps
                 aside for it — including the transport, which sits at z-20 against the graph's z-10 and would
@@ -526,6 +540,13 @@ export default function EngineViewport() {
             {/* The clip editor draws the same bone overlay, but NOT `AnimationPlayer`: its transport is a
                 dock panel (`clipTimeline`), because the timeline is the work surface here rather than a
                 control floating over one. Two transports would also fight over the same animator. */}
+            {/* The animation field previews a character too, and its bones are what the blend is posing —
+                so they are drawn here unconditionally, like the three modes above, rather than only when the
+                Skeletons debug toggle happens to be on. Not pickable: no panel in this mode shows a bone
+                selection. */}
+            {editorMode === 'animationField' &&
+                <AnimationSkeletonTool viewportRef={viewportRef} targetId={animationFieldTargetId} pickable={false} />}
+
             {editorMode === 'animation' && <>
                 <AnimationSkeletonTool viewportRef={viewportRef} />
                 {/* The scene gizmo is off in this mode (`showGizmo`), because the thing being posed is a

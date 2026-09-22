@@ -7,6 +7,7 @@ import { ModelNode } from '../core/scene/nodes/modelNode';
 import { TilemapNode } from '../core/scene/nodes/tilemapNode';
 import { LightNode } from '../core/scene/nodes/lightNode';
 import { LightProbeNode } from '../core/scene/nodes/lightProbeNode';
+import { DecalNode, DECAL_RADIAL_CURVES } from '../core/scene/nodes/decalNode';
 import { SkyboxNode } from '../core/scene/nodes/skyboxNode';
 import { VolumetricCloudsNode } from '../core/scene/nodes/volumetricCloudsNode';
 import { SkyAtmosphereNode } from '../core/scene/nodes/skyAtmosphereNode';
@@ -71,6 +72,10 @@ import SkyAtmosphereProgram from './shaders/wgsl/skyAtmosphere.wgsl'
 import ProbePreviewProgram from './shaders/wgsl/probePreview.wgsl'
 import SkyProjectProgram from './shaders/wgsl/skyProject.wgsl'
 import SkyFogProgram from './shaders/wgsl/skyFog.wgsl'
+// Decal volumes: the DBuffer write, its resolve into the G-buffer, and the emissive/overlay colour pass.
+import DecalSurfaceProgram from './shaders/wgsl/decalSurface.wgsl'
+import DecalResolveProgram from './shaders/wgsl/decalResolve.wgsl'
+import DecalColorProgram from './shaders/wgsl/decalColor.wgsl'
 
 // A `.wgsl` import is a whole PROGRAM: the loader translates both stages to GLSL ES 300 at build time
 // and carries the WGSL through for WebGPU. The `.vs`/`.fs` imports above are the unconverted ones.
@@ -143,6 +148,7 @@ import { gpuProfiler, initializeGpuProfiler, RENDER_PASSES, RenderPass } from '.
 import { cpuProfiler } from './cpuProfiler';
 import { buildSSAOKernel } from './ssaoKernel';
 import { TerrainLodSettings } from '../terrain/terrain';
+import { TERRAIN_LAYER_TEXTURE_SIZES, DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from '../terrain/terrainSurfaceArrays';
 import type { FoliageCell } from '../terrain/foliage';
 import {
     collectOrphanedFoliageBuffers, collectOrphanedFoliageMeshes, foliageCullLimitSq,
@@ -417,6 +423,11 @@ export interface RenderSettings {
     terrainLodDistance2: number;
     terrainLodStep1: number;
     terrainLodStep2: number;
+    /**
+     * Side of the landscape layer arrays every surface is resampled into (512 / 1024 / 2048). The one
+     * size is what makes the arrays possible; the memory is `2 * size² * 4 B * 1.33` per surface.
+     */
+    terrainLayerTextureSize: number;
     ssaoSamples: number;
     ssaoResolutionScale: number;
     shadowMapResolution: number;
@@ -695,6 +706,30 @@ export class Renderer {
     // Snapshot of _sceneFBO's depth, taken after the opaque forward draw so fullscreen passes can
     // sample full opaque depth without a read/write feedback on the bound _sceneFBO.
     private _sceneDepthFBO!: Framebuffer;
+    /**
+     * Decal targets, all LAZY: a scene without decals never allocates them. The DBuffer (three RGBA8
+     * attachments: albedo, normal, roughness/metallic/AO), a copy of the G-buffer's colour for the resolve
+     * to read while it writes the original, and the landscape-only depth `receivers: 'terrain'` compares
+     * against. See `_surfaceDecalPass` and `_decalReceiverPass`.
+     */
+    private _dBufferFBO: Framebuffer | null = null;
+    private _gBufferCopyFBO: Framebuffer | null = null;
+    private _decalReceiverFBO: Framebuffer | null = null;
+    /** This frame's decals by route, sorted; see `_collectDecals`. */
+    private readonly _surfaceDecals: DecalNode[] = [];
+    private readonly _emissiveDecals: DecalNode[] = [];
+    private readonly _overlayDecals: DecalNode[] = [];
+    /** Whether a collected decal filters to terrain, and whether the receiver depth exists this frame. */
+    private _decalReceiversWanted = false;
+    private _decalReceiversReady = false;
+    /** What a decal with no material projects: plain white, full coverage. */
+    private readonly _defaultDecalMaterial: Material = Material.PBR();
+    private readonly _decalReceiverViewProj: mat4 = mat4.create();
+    private readonly _decalAxisX: vec3 = vec3.create();
+    private readonly _decalAxisY: vec3 = vec3.create();
+    private readonly _decalInner: number[] = [0, 0, 0, 0];
+    private readonly _decalOuter: number[] = [0, 0, 0, 0];
+    private readonly _decalRing: number[] = [0, 0, 0, 0];
     private _gBufferFBO!: Framebuffer;
 
     // The sun's world direction, refreshed at the top of the geometry pass — that pass writes a
@@ -711,6 +746,12 @@ export class Renderer {
     private _fallbackCube!: Texture;
     /** 1x1 white 2D texture, bound wherever a material declares a map it does not have. */
     private _fallbackTexture!: Texture;
+    /**
+     * The same, as a one-layer 2D ARRAY: a `texture_2d_array` binding cannot take the plain fallback —
+     * WebGPU rejects the view dimension outright, and on WebGL2 a sampler2DArray reading a TEXTURE_2D
+     * unit is a draw error. Built on first need; the landscape's layer stack is its only user.
+     */
+    private _fallbackArray: Texture | null = null;
     /**
      * The built-in lens-dirt overlay, decoded once on first use.
      *
@@ -1219,6 +1260,7 @@ export class Renderer {
     private _terrainLodDistance2: number = 300;
     private _terrainLodStep1: number = 2;
     private _terrainLodStep2: number = 4;
+    private _terrainLayerTextureSize: number = DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE;
 
     // Editor infinite grid overlay (off in published builds; toggled by the editor)
     private _gridEnabled: boolean = false;
@@ -1601,6 +1643,10 @@ export class Renderer {
             // forward-only, so there is no geometry twin to sit beside the other material pairs.
             ['cel',                          CelProgram],
             ['celSkinned',                   CelSkinnedProgram],
+            // Decal volumes. APPENDED, per the note at the top of this table.
+            ['decalSurface',                 DecalSurfaceProgram],
+            ['decalResolve',                 DecalResolveProgram],
+            ['decalColor',                   DecalColorProgram],
         ];
 
         // One program can carry two names, and they must be the SAME object: uniform state lives on
@@ -1832,6 +1878,11 @@ export class Renderer {
         this._buildLightGrid(scene);
         this._endScope();
 
+        // Decals, once per frame for both pipelines: which ones draw where, and — inside the jittered
+        // phase, so it matches the depth it is compared against — the landscape-only receiver depth.
+        this._collectDecals(scene);
+        this._decalReceiverPass(scene);
+
         if (this._deferred) this._renderDeferred(scene, shadowLight);
         else this._renderForward(scene, shadowLight);
         this._checkGLErrors('scene');
@@ -2048,7 +2099,9 @@ export class Renderer {
         const packer = TexturePacker.Instance;
         // Per submesh material — a merged model's second range has its own maps to channel-pack.
         for (const node of scene.models) for (const mat of node.model.materials) packer.sync(mat, this._frameIndex);
-        for (const node of scene.landscapes) node.terrain.syncPackedLayers(this._frameIndex);
+        for (const node of scene.landscapes) node.terrain.syncPackedLayers(this._frameIndex, this._terrainLayerTextureSize);
+        // Decals sample the same packed ORM map a mesh wearing their material would.
+        for (const decal of scene.decals) if (decal.material) packer.sync(decal.material, this._frameIndex);
         packer.sweep(this._frameIndex);
     }
 
@@ -2061,10 +2114,16 @@ export class Renderer {
         this._scope('geometry');
         this._geometryPass(scene);
         this._checkGLErrors('geometry');
-        // 1b. Screen-space ambient occlusion from the G-buffer depth and normals.
         // BOTH counters, not just `objects`: instanced foliage bumps only `instances`, and a landscape
         // whose only deferred geometry is grass would otherwise lose its AO.
         const gBufferHasGeometry = frameStats.objects > 0 || frameStats.instances > 0;
+        // 1a. Surface decals, resolved into the G-buffer before anything reads it — SSAO occludes the
+        // decal's normal and the lighting pass shades its albedo like the surface's own.
+        if (this._surfaceDecals.length > 0 && gBufferHasGeometry && this._beginPass('decals')) {
+            this._surfaceDecalPass();
+            this._checkGLErrors('decals');
+        }
+        // 1b. Screen-space ambient occlusion from the G-buffer depth and normals.
         this._ssaoProducedThisFrame = false;
         if (this._ssaoEnabled && gBufferHasGeometry && this._beginPass('ssao')) {
             this._ssaoPass();
@@ -2078,6 +2137,317 @@ export class Renderer {
         this._renderForwardOverlay(scene, shadowLight);
         this._checkGLErrors('forwardOverlay');
         this._endScope();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Decals
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Sort this frame's visible decals into the three routes that draw them.
+     *
+     * - SURFACE: written into the DBuffer before lighting and resolved into the G-buffer, so a decal is
+     *   lit exactly like the surface under it. Deferred pipeline only: the forward one has no G-buffer.
+     * - EMISSIVE: added to the lit image after the opaque depth snapshot, which is what lets it reach
+     *   forward-shaded receivers (the Default material among them) as well as deferred ones.
+     * - OVERLAY: editor-only decals — the landscape brush — as unlit chrome in the overlay layer.
+     *
+     * Each list is ordered by `sortOrder`, then id. Premultiplied "over" does not commute, so the order
+     * is part of the image; distance is deliberately NOT a key, or two overlapping decals would trade
+     * places as the camera moved.
+     */
+    private _collectDecals(scene: Scene): void {
+        this._surfaceDecals.length = 0;
+        this._emissiveDecals.length = 0;
+        this._overlayDecals.length = 0;
+        this._decalReceiversWanted = false;
+        this._decalReceiversReady = false;
+        for (const decal of scene.decals) {
+            if (!decal.visible) continue;
+            if (this._frustumCulling) {
+                const s = decal.getBoundingSphere();
+                if (!this._frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) continue;
+            }
+            let drawn = false;
+            if (isEditorOnlyNode(decal)) {
+                // A capture wants the asset and nothing else, exactly as `_renderEditorOverlay` says.
+                if (this._thumbnailMode) continue;
+                this._overlayDecals.push(decal);
+                drawn = true;
+            } else {
+                if (this._deferred && decal.writesSurface) { this._surfaceDecals.push(decal); drawn = true; }
+                // The emissive pass reads the opaque depth snapshot, which a thumbnail never takes.
+                if (!this._thumbnailMode && decal.emits) { this._emissiveDecals.push(decal); drawn = true; }
+            }
+            if (drawn && decal.receivers === 'terrain') this._decalReceiversWanted = true;
+        }
+        const order = (a: DecalNode, b: DecalNode) =>
+            a.sortOrder - b.sortOrder || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+        this._surfaceDecals.sort(order);
+        this._emissiveDecals.sort(order);
+        this._overlayDecals.sort(order);
+    }
+
+    /**
+     * A lazily created screen-sized decal target, matched to the render resolution. The decal buffers
+     * cost ~75 MB at 1080p between them, so a scene without decals never allocates them at all.
+     */
+    private _decalTarget(existing: Framebuffer | null, make: () => Framebuffer): Framebuffer {
+        const fbo = existing ?? make();
+        if (fbo.width !== this._renderWidth || fbo.height !== this._renderHeight)
+            fbo.create(this._renderWidth, this._renderHeight);
+        return fbo;
+    }
+
+    /**
+     * Depth of the landscape ALONE, for decals with `receivers: 'terrain'` — the landscape brush.
+     *
+     * The engine has no stencil, so "which surface is this" has to be answered by depth: a pixel belongs
+     * to the terrain exactly when the scene's depth there matches the depth of the terrain drawn on its
+     * own. A rock or a grass blade standing in front of the ground differs by its own thickness and is
+     * left alone.
+     *
+     * Drawn inside the jittered phase, through the same raster projection as the G-buffer, so the two
+     * depths agree to float noise rather than by a TAA offset. It always clears: a terrain-only decal in
+     * a scene with no landscape then draws nothing, instead of everywhere.
+     */
+    private _decalReceiverPass(scene: Scene): void {
+        if (!this._decalReceiversWanted || !this._beginPass('decals.receivers')) return;
+        this._decalReceiverFBO = this._decalTarget(this._decalReceiverFBO, () => new Framebuffer({ usage: 'depth' }));
+        const pass = this._beginFullscreenPass(this._decalReceiverFBO.renderTarget, 'decalReceivers', true);
+        const cam = this._activeCamera;
+        // `_rasterProjection` already carries this frame's jitter and WebGPU's clip-z remap, so nothing
+        // else is applied on top — `_renderShadowCasters` runs its light matrix through `_clipProjection`
+        // because a light matrix has neither.
+        mat4.multiply(this._decalReceiverViewProj, this._rasterProjection(cam.projectionMatrix), cam.viewMatrix);
+        let bound: RenderPipeline | null = null;
+        for (const landscape of scene.landscapes) {
+            if (!landscape.visible) continue;
+            // The chunks are the landscape's ModelNode children; the terrain draws nothing else.
+            for (const chunk of landscape.children) {
+                if (!(chunk instanceof ModelNode) || !chunk.visible || !chunk.initialized) continue;
+                if (this._outsideFrustum(chunk)) continue;
+                this._shaderManager.bind('shadowMap');
+                const pipeline = this._pipelineFor('shadowMap', ShadowMapProgram, {
+                    cullMode: Renderer._cullFor(chunk.model.material.config.side),
+                    depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+                    targets: 0,
+                    vertex: 'model',
+                    // Written for the terrain program, whatever draws it — see `_renderShadowCasters`.
+                    builtFor: chunk.model.material.type,
+                });
+                if (pipeline !== bound) { pass.setPipeline(pipeline); bound = pipeline; }
+                this._shaderManager.setUniform('u_lightSpace', this._decalReceiverViewProj);
+                this._shaderManager.setUniform('u_model', chunk.worldTransform);
+                if (!this._recordDraw(pass, chunk.model.mesh, 0, 0)) chunk.model.mesh.draw('triangle-list');
+            }
+        }
+        this._endFullscreenPass(pass);
+        this._decalReceiversReady = true;
+        GLState.depthTest(true);
+        GLState.depthMask(true);
+    }
+
+    /**
+     * What a decal binds in its receiver slot: `fallback` (the depth it projects onto, with the filter
+     * off) for an unfiltered decal, the landscape-only depth for a terrain one — or null when that depth
+     * does not exist this frame, and the decal must then not draw at all rather than land on everything.
+     */
+    private _decalReceiverDepth(decal: DecalNode, fallback: Texture): Texture | null {
+        if (decal.receivers !== 'terrain') return fallback;
+        return this._decalReceiversReady && this._decalReceiverFBO ? this._decalReceiverFBO.depth : null;
+    }
+
+    /**
+     * Surface decals: Unreal's DBuffer path, and the reason there is one.
+     *
+     * The G-buffer cannot be blended into directly. Its normal is octahedral-packed — a lerp of two
+     * encodings is not the encoding of a lerp — and metallic, roughness and AO live in ALPHA channels,
+     * so there is no alpha left to blend by; WebGL2 would in any case blend all three attachments by one
+     * state. So each decal box writes premultiplied values into three RGBA8 targets cleared to
+     * (0, 0, 0, 1), all under `_DECAL_DBUFFER_BLEND` — after any number of overlapping decals each holds
+     * the composited decal in rgb and the surviving fraction of the surface in alpha — and one
+     * fullscreen resolve folds that into the G-buffer, reading a copy of it taken just before.
+     *
+     * Before SSAO and lighting, so both see the decal: its normal is shaded and occluded like any other.
+     * Deferred receivers only; see `_inGBuffer` for which materials those are.
+     */
+    private _surfaceDecalPass(): void {
+        const w = this._renderWidth, h = this._renderHeight;
+        const gBuffer = this._gBufferFBO;
+        // RGBA8 — Unreal's DBuffer precision. Every value written is a premultiplied 0..1 quantity.
+        const dbuffer = this._dBufferFBO = this._decalTarget(this._dBufferFBO, () => new Framebuffer({
+            colorAttachments: 3, colorTextureOptions: { mipMap: false }, depth: false }));
+        // The G-buffer's OWN options, so the copy takes the same format and the same rgba8 fallback.
+        const copy = this._gBufferCopyFBO = this._decalTarget(this._gBufferCopyFBO, () => new Framebuffer({
+            colorAttachments: 3, colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false }));
+
+        const pass = this._beginFullscreenPass(dbuffer.renderTarget, 'decals', true, [0, 0, 0, 1], false, true);
+        for (const decal of this._surfaceDecals) {
+            const receivers = this._decalReceiverDepth(decal, gBuffer.depth);
+            if (!receivers) continue;
+            const material = decal.material ?? this._defaultDecalMaterial;
+            this._shaderManager.bind('decalSurface');
+            const pipeline = this._pipelineFor('decalSurface', DecalSurfaceProgram, {
+                cullMode: Renderer._decalCull(decal),
+                targets: 3,
+                blend: Renderer._DECAL_DBUFFER_BLEND,
+                vertex: 'model',
+                builtFor: 'irradiance',
+            });
+            // PER DECAL, not hoisted: WebGL2 hands texture units out in bind order and resets them only
+            // on `setPipeline`, so a hoisted one runs past the 16 guaranteed units within three decals.
+            pass.setPipeline(pipeline);
+            this._setDecalUniforms(decal, material, this._invViewProj, 0);
+            pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
+            // Bindings 0, 2, 4: the depth projected onto, the receiver depth, the G-buffer normal. None
+            // of them is attached to this pass — the DBuffer has no depth attachment at all.
+            pass.setBindGroup(2, this._textureBindGroup(pipeline, 2, [gBuffer.depth, receivers, gBuffer.colors[1]]));
+            if (!this._recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
+        }
+        this._endFullscreenPass(pass);
+
+        // A pass cannot sample what it writes, and the resolve writes the G-buffer.
+        this._copyColors(gBuffer.colors, copy.colors, w, h);
+
+        // Never binds `_gBufferFBO.depth`: it is attached to this pass. The shader tells untouched pixels
+        // apart by the DBuffer's alphas instead, and discards them.
+        const resolve = this._beginFullscreenPass(gBuffer.renderTarget, 'decals.resolve', false, undefined, false);
+        this._shaderManager.bind('decalResolve');
+        // `_fullscreenPipeline`'s vertex setup, with three targets.
+        const resolvePipeline = this._pipelineFor('decalResolve', DecalResolveProgram,
+                                                  { vertex: 'model', builtFor: 'decalResolve', targets: 3 });
+        resolve.setPipeline(resolvePipeline);
+        resolve.setBindGroup(0, this._textureBindGroup(resolvePipeline, 0, [
+            copy.colors[0], copy.colors[1], copy.colors[2],
+            dbuffer.colors[0], dbuffer.colors[1], dbuffer.colors[2],
+        ]));
+        this._drawFullscreen(resolve);
+        this._endFullscreenPass(resolve);
+
+        GLState.depthTest(true);
+        GLState.depthMask(true);
+    }
+
+    /**
+     * Emissive decals: additive light on the lit image, after the opaque depth snapshot — Unreal draws
+     * decal emissive in its own post-lighting pass the same way. The snapshot holds forward opaques
+     * too, so this is the one decal output that reaches the Default and Cel materials.
+     */
+    private _emissiveDecalPass(): void {
+        const pass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'decals.emissive', false, undefined, false);
+        this._drawColorDecals(pass, this._emissiveDecals, Renderer._DECAL_EMISSIVE_BLEND, this._invViewProj, 0);
+        this._endFullscreenPass(pass);
+        // The passes that follow are partly on the legacy path and inherit blend state.
+        this._restoreDefaultBlend();
+        GLState.blend(false);
+        GLState.depthTest(true);
+        GLState.depthMask(true);
+    }
+
+    /**
+     * Draw decal boxes through `decalColor`, projecting onto the opaque depth snapshot. Shared by the
+     * emissive pass (mode 0) and the editor overlay (mode 1); they differ in target, blend and which
+     * inverse view-projection reconstructs the depth.
+     */
+    private _drawColorDecals(pass: RenderPassEncoder, decals: readonly DecalNode[], blend: BlendState,
+                             invViewProj: mat4, mode: 0 | 1): void {
+        const depth = this._sceneDepthFBO.depth;
+        for (const decal of decals) {
+            const receivers = this._decalReceiverDepth(decal, depth);
+            if (!receivers) continue;
+            const material = decal.material ?? this._defaultDecalMaterial;
+            this._shaderManager.bind('decalColor');
+            // No depth state named: both targets carry the scene's depth, and the synthesised default is
+            // "test nothing, write nothing" — the overlay in particular must never write that attachment.
+            const pipeline = this._pipelineFor('decalColor', DecalColorProgram, {
+                cullMode: Renderer._decalCull(decal),
+                blend,
+                vertex: 'model',
+                builtFor: 'irradiance',
+            });
+            pass.setPipeline(pipeline);
+            this._setDecalUniforms(decal, material, invViewProj, mode);
+            pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
+            pass.setBindGroup(2, this._textureBindGroup(pipeline, 2, [depth, receivers]));
+            if (!this._recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
+        }
+    }
+
+    /**
+     * The decal box is drawn as its BACK faces with no depth test: exactly one fragment per pixel the
+     * volume covers, with the camera outside the box or inside it. `Geometry.Cube` winds its faces
+     * counter-clockwise from outside, so that is `front` culling — until a mirroring transform reverses
+     * the winding, and the other set is the back one.
+     */
+    private static _decalCull(decal: DecalNode): CullMode {
+        return decal.mirrored ? 'back' : 'front';
+    }
+
+    /**
+     * Every uniform a decal draw reads, for whichever decal program is bound. `invViewProj` is the pass's
+     * reconstruction matrix: the jittered one before the TAA resolve, the stable one in the overlay.
+     */
+    private _setDecalUniforms(decal: DecalNode, material: Material, invViewProj: mat4, mode: 0 | 1): void {
+        const sm = this._shaderManager;
+        const cam = this._activeCamera;
+        sm.setUniform('u_model', decal.volumeMatrix);
+        sm.setUniform('u_view', cam.viewMatrix);
+        sm.setUniform('u_projection', this._rasterProjection(cam.projectionMatrix));
+        sm.setUniform('u_decalInvModel', decal.invVolumeMatrix);
+        sm.setUniform('u_invViewProj', invViewProj);
+        const world = decal.worldTransform;
+        sm.setUniform('u_decalAxisX', Renderer._unitColumn(this._decalAxisX, world, 0));
+        sm.setUniform('u_decalAxisY', Renderer._unitColumn(this._decalAxisY, world, 1));
+        sm.setUniform('u_viewPos', cam.position);
+        // Authored in sRGB like every picker colour; the pattern is blended in linear.
+        const r = decal.radial;
+        sm.setUniform('u_radialInner', Renderer._linearRgba(this._decalInner, r.innerColor));
+        sm.setUniform('u_radialOuter', Renderer._linearRgba(this._decalOuter, r.outerColor));
+        sm.setUniform('u_ringColor', Renderer._linearRgba(this._decalRing, r.ringColor));
+        sm.setUniform('u_decalOpacity', decal.opacity);
+        sm.setUniform('u_angleFade', decal.angleFade);
+        sm.setUniform('u_depthFade', decal.depthFade);
+        sm.setUniform('u_radialExponent', r.exponent);
+        sm.setUniform('u_radialFalloff', r.falloff);
+        sm.setUniform('u_radialCurve', Math.max(0, DECAL_RADIAL_CURVES.indexOf(r.curve)));
+        sm.setUniform('u_radialShape', r.shape === 'square' ? 1 : 0);
+        sm.setUniform('u_ringWidthPx', r.ringWidthPx);
+        sm.setUniform('u_radialEmissive', r.emissive);
+        sm.setUniform('u_pattern', decal.pattern === 'radial' ? 1 : 0);
+        // Only reached with the receiver depth bound; see `_decalReceiverDepth`.
+        sm.setUniform('u_receiverFilter', decal.receivers === 'terrain' ? 1 : 0);
+        sm.setUniform('u_affectAlbedo', decal.affects.albedo);
+        sm.setUniform('u_affectNormal', decal.affects.normal);
+        sm.setUniform('u_affectSurface', decal.affects.surface);
+        sm.setUniform('u_decalMode', mode);
+        this._applyMaterialProperties(material);
+    }
+
+    /** Column `index` of `m`'s rotation-scale part, normalised: a world-space axis of the box. */
+    private static _unitColumn(out: vec3, m: mat4, index: number): vec3 {
+        vec3.set(out, m[index * 4], m[index * 4 + 1], m[index * 4 + 2]);
+        return vec3.normalize(out, out);
+    }
+
+    /** An sRGB-authored RGBA with its colour decoded to linear (the engine's 2.2 approximation). */
+    private static _linearRgba(out: number[], c: readonly number[]): number[] {
+        out[0] = Math.pow(c[0], 2.2); out[1] = Math.pow(c[1], 2.2); out[2] = Math.pow(c[2], 2.2);
+        out[3] = c[3];
+        return out;
+    }
+
+    /**
+     * Copy colour attachments, recorded into the frame's encoder exactly as {@link _copyDepth} records
+     * a depth copy and for the same reason: on WebGPU a copy on its own encoder is submitted BEFORE the
+     * frame's unsubmitted passes, and would read the previous frame's G-buffer.
+     */
+    private _copyColors(sources: readonly Texture[], destinations: readonly Texture[],
+                        width: number, height: number): void {
+        const encoder = this._acquireEncoder('copyColor');
+        for (let i = 0; i < sources.length; i++)
+            encoder.copyTextureToTexture(sources[i].attachmentView, destinations[i].attachmentView, width, height);
+        if (encoder !== this._frameEncoder) encoder.finish();
     }
 
     // True when `node` is fully outside the camera frustum. PURE — no stat side effect, so use it only
@@ -2744,6 +3114,26 @@ export class Renderer {
         alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
     };
 
+    /**
+     * The decal buffer's blend, identical on all three of its targets (the only multi-target blend
+     * WebGL2 can express — see `uniformTargetBlend`). Premultiplied "over" in colour; the alpha half
+     * multiplies by (1 - a) and adds nothing, so each target's alpha ends as the product of (1 - a)
+     * over every decal: the fraction of the SURFACE that survives, which is what the resolve needs.
+     */
+    private static readonly _DECAL_DBUFFER_BLEND: BlendState = {
+        color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+        alpha: { srcFactor: 'zero', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+    };
+
+    /**
+     * Decal emissive: additive colour, and an alpha half of `zero`/`one`, because the scene buffer's alpha
+     * is the bloom mask (see DEFAULT_BLEND). `ADDITIVE_BLEND` would add into the mask as well.
+     */
+    private static readonly _DECAL_EMISSIVE_BLEND: BlendState = {
+        color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
+        alpha: { srcFactor: 'zero', dstFactor: 'one', operation: 'add' },
+    };
+
     private static readonly _SHADOW_PROGRAMS: Record<string, { resources: readonly ShaderResource[] }> = {
         shadowMap: ShadowMapProgram,
         shadowMapSkinned: ShadowMapSkinnedProgram,
@@ -2923,9 +3313,24 @@ export class Renderer {
             if (resource.group !== 0 || resource.kind !== 'texture') continue;
             const id = material.textures.get(resource.glslName);
             const texture = id ? TextureManager.Instance.getTexture(id) : null;
-            textures.push(texture ?? this._fallbackTexture);
+            textures.push(texture ?? this._fallbackFor(resource.type));
         }
         return this._textureBindGroup(pipeline, 0, textures);
+    }
+
+    /**
+     * The fallback that matches a binding's WGSL TYPE. The dimension has to agree with the declaration
+     * on both backends, so a missing array layer stack binds a one-layer white array, never the 2D white.
+     */
+    private _fallbackFor(wgslType: string): Texture {
+        if (!wgslType.includes('2d_array')) return this._fallbackTexture;
+        if (!this._fallbackArray) {
+            const array = new Texture({ target: 'texture2DArray', mipMap: false });
+            array.createColorArray(1, 1, 1, false);
+            array.writeLayer(0, 0, 0, 1, 1, new Uint8Array([255, 255, 255, 255]));
+            this._fallbackArray = array;
+        }
+        return this._fallbackArray;
     }
 
     private _geometryShaderFor(node: ModelNode): string {
@@ -4688,6 +5093,10 @@ export class Renderer {
         // and the later post-processing passes (god rays, screen-space materials).
         if (!this._thumbnailMode) this._copySceneDepth();
 
+        // Decal emissive, onto every opaque surface in that snapshot. Before the fog, which should veil
+        // a glowing decal exactly as it veils the surface under it.
+        if (this._emissiveDecals.length > 0 && this._beginPass('decals.emissive')) this._emissiveDecalPass();
+
         // Atmospheric fog over the opaque scene (aerial perspective from the SkyAtmosphere node).
         // Drawn before the grid/transparents so editor overlays stay crisp.
         if (!this._thumbnailMode && this._beginPass('skyFog')) this._renderSkyFog(scene);
@@ -5571,22 +5980,20 @@ export class Renderer {
     }
 
     private _applyTerrainMaterial(material: Material): void {
-        // Fixed slot layout, 9 units: 0 = splat, then albedo/normal per layer. A shared fallback fills
-        // unassigned slots so every terrain sampler references a valid texture. Each layer's height is
-        // packed into its normal map's alpha. The scalar blend uniforms already match by name.
-        const fallback = TextureManager.Instance.getTexture('Null');
+        // Fixed slot layout, 3 units: the paint masks and the two surface arrays (see
+        // chunks/terrainStack.wgsl). Every binding is a 2D ARRAY, so a missing one takes the one-layer
+        // array fallback — a 2D texture on a sampler2DArray unit is a draw error. The scalar and array
+        // uniforms already match by name.
+        const fallback = this._fallbackFor('texture_2d_array<f32>');
         const bindAt = (name: string, slot: number) => {
             const texId = material.textures.get(name);
             const tex = (texId && TextureManager.Instance.getTexture(texId)) || fallback;
-            if (tex) tex.bind(slot);
+            tex.bind(slot);
             this._shaderManager.setUniform(name, slot);
         };
-        bindAt('u_splat', 0);
-        for (let i = 0; i < 4; i++) {
-            const base = 1 + i * 2;
-            bindAt(`u_albedo${i}`, base);
-            bindAt(`u_normal${i}`, base + 1);
-        }
+        bindAt('u_masks', 0);
+        bindAt('u_surfAlbedo', 1);
+        bindAt('u_surfNormal', 2);
         for (const [name, value] of material.properties)
             this._shaderManager.setUniform(name, value);
     }
@@ -5770,7 +6177,9 @@ export class Renderer {
      */
     private _beginFullscreenPass(target: RenderTarget, label: string, clear: boolean,
                                  clearValue?: [number, number, number, number],
-                                 clearDepth: boolean = clear): RenderPassEncoder {
+                                 clearDepth: boolean = clear,
+                                 /** Clear EVERY colour attachment to `clearValue`, not attachment 0 alone. */
+                                 clearAll: boolean = false): RenderPassEncoder {
         this._passEncoder = this._acquireEncoder(label);
         // So `_pipelineFor` can read the formats it has to agree with. Same lifetime as the encoder.
         this._passTarget = target;
@@ -5780,10 +6189,10 @@ export class Renderer {
         const standing = this.clearColor;
         const standingValue: [number, number, number, number] =
             [standing[0], standing[1], standing[2], standing[3] ?? 1];
-        const colorAttachments = (clear && !clearValue)
+        const colorAttachments = (clear && (!clearValue || clearAll))
             ? target.colorViews.map((_view, index) => ({
                 target: index, loadOp: 'clear' as const, storeOp: 'store' as const,
-                clearValue: standingValue,
+                clearValue: clearValue ?? standingValue,
             }))
             : [{
                 target: 0,
@@ -6178,6 +6587,10 @@ export class Renderer {
         this._createBloomMips(width, height);
         this._outlineMaskFBO.resize(width, height);
         this._overlayFBO.resize(width, height);   // in lockstep with _sceneFBO; see _overlayTarget
+        // Only once allocated; `_decalTarget` sizes them on first use.
+        this._dBufferFBO?.resize(width, height);
+        this._gBufferCopyFBO?.resize(width, height);
+        this._decalReceiverFBO?.resize(width, height);
         const mbK = Renderer.MOTION_BLUR_TILE;
         this._velocityFBO.resize(width, height);
         this._velocityTileFBO.resize(Math.ceil(width / mbK), Math.ceil(height / mbK));
@@ -6294,6 +6707,10 @@ export class Renderer {
         // Snapshot the opaque depth for the post-processing passes (god rays, screen materials)
         // that sample it after this pipeline finishes.
         if (!this._thumbnailMode) this._copySceneDepth();
+
+        // Decal emissive over that snapshot. The only decal output this pipeline has: with no G-buffer
+        // there is nothing for a surface decal to write into.
+        if (this._emissiveDecals.length > 0 && this._beginPass('decals.emissive')) this._emissiveDecalPass();
 
         // The temporal boundary — see the matching block in `_renderForwardOverlay`. This pipeline has
         // no clouds, no fog and no grid, so the opaque snapshot above is the whole scene and the
@@ -8699,6 +9116,8 @@ export class Renderer {
         addFbo(this._brdfFBO); addFbo(this._outlineMaskFBO); addFbo(this._overlayFBO);
         addFbo(this._overdrawFBO ?? undefined);
         addFbo(this._velocityFBO); addFbo(this._velocityTileFBO); addFbo(this._velocityNeighborFBO);
+        addFbo(this._dBufferFBO ?? undefined); addFbo(this._gBufferCopyFBO ?? undefined);
+        addFbo(this._decalReceiverFBO ?? undefined);
         bytes += this._postPool.byteSize;
         for (const tex of TextureManager.Instance.textures.values()) bytes += tex.byteSize;
         return bytes;
@@ -8941,6 +9360,13 @@ export class Renderer {
     public set terrainLodStep1(s: number) { this._terrainLodStep1 = Renderer._clampLodStep(s); }
     public get terrainLodStep2(): number { return this._terrainLodStep2; }
     public set terrainLodStep2(s: number) { this._terrainLodStep2 = Renderer._clampLodStep(s); }
+
+    /** Side of the landscape layer arrays; snapped to a supported size. Changing it re-bakes every surface. */
+    public get terrainLayerTextureSize(): number { return this._terrainLayerTextureSize; }
+    public set terrainLayerTextureSize(size: number) {
+        const sizes: readonly number[] = TERRAIN_LAYER_TEXTURE_SIZES;
+        this._terrainLayerTextureSize = sizes.includes(size) ? size : DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE;
+    }
 
     private static _clampLodStep(s: number): number {
         return [2, 4, 8].includes(Math.round(s)) ? Math.round(s) : 2;
@@ -9303,6 +9729,7 @@ export class Renderer {
             terrainLodDistance2: this._terrainLodDistance2,
             terrainLodStep1: this._terrainLodStep1,
             terrainLodStep2: this._terrainLodStep2,
+            terrainLayerTextureSize: this._terrainLayerTextureSize,
         };
     }
 
@@ -9404,6 +9831,7 @@ export class Renderer {
         if (s.terrainLodDistance2 !== undefined) this.terrainLodDistance2 = s.terrainLodDistance2;
         if (s.terrainLodStep1 !== undefined) this.terrainLodStep1 = s.terrainLodStep1;
         if (s.terrainLodStep2 !== undefined) this.terrainLodStep2 = s.terrainLodStep2;
+        if (s.terrainLayerTextureSize !== undefined) this.terrainLayerTextureSize = s.terrainLayerTextureSize;
     }
 
     // Editor "Renderer" debug channel currently blitted to screen ('final' = normal image).
@@ -9583,7 +10011,16 @@ export class Renderer {
         const icons: SpriteNode[] = [];
         for (const node of scene.sprites) if (node.visible && isEditorOnlyNode(node)) icons.push(node);
 
-        if ((helperNodes.length > 0 || icons.length > 0) && this._beginPass('overlay')) {
+        const overlayDecals = this._overlayDecals.length > 0;
+        if ((helperNodes.length > 0 || icons.length > 0 || overlayDecals) && this._beginPass('overlay')) {
+            // Editor-only decals (the landscape brush) first, so helper wireframes draw over them.
+            // Reconstructed with the STABLE inverse: this layer sits after the TAA resolve, and the
+            // jittered one would make a projected cursor shimmer by a sub-pixel every frame.
+            if (overlayDecals) {
+                const decalPass = this._beginOverlayPass('overlay.decals');
+                this._drawColorDecals(decalPass, this._overlayDecals, OVERLAY_BLEND, this._invViewProjStable, 1);
+                this._endFullscreenPass(decalPass);
+            }
             // Occluded by real geometry, exactly as these drew when they went through the G-buffer.
             // No depth writes: the attachment is the scene's own.
             const depthTested: DepthStencilState =

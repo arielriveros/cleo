@@ -8,6 +8,7 @@ import { mat4, quat, vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { CameraNode } from "./cameraNode";
 import { Node } from "./node";
+import { isEditorOwnedName } from "../editorOwnership";
 
 /**
  * The follow/aim/spring-arm camera rig, driven from the scene late pass.
@@ -249,11 +250,12 @@ export class CameraRigNode extends Node {
         }
 
         // Depth-first so a plain offset node may sit between the rig and its camera, but stopping at
-        // the first camera on each branch so a camera nested under a camera does not confuse it.
+        // the first camera on each branch so a camera nested under a camera does not confuse it. Editor
+        // helpers are skipped by name (`isEditorOwnedName`), so an editor camera is never the one driven.
         const found: CameraNode[] = [];
         const visit = (node: Node) => {
             for (const child of node.children) {
-                if (child.name.startsWith('__editor__') || child.name.startsWith('__debug__')) continue;
+                if (isEditorOwnedName(child.name)) continue;
                 if (child instanceof CameraNode) { found.push(child); continue; }
                 visit(child);
             }

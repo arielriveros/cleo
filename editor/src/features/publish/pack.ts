@@ -9,6 +9,7 @@ import playerContract from './playerContract.json';
 // The container primitives (alignment, chunk refs, byte hashing) are shared with the project export's
 // assets.bin — see utils/chunkBlob.ts.
 import { ChunkWriter, align4, asBytes, hashBytes, FNV_OFFSET, type ChunkRef } from '../../utils/chunkBlob';
+import { serializedTerrainFoliageRules } from '../../utils/terrainJson';
 
 /** File layout, version 1:
  *
@@ -266,12 +267,14 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
       const terrain = node.terrain;
       if (terrain) {
         for (const f of (terrain.foliage ?? [])) internFoliageSource(f);
-        for (const layer of (terrain.layers ?? []))
-          for (const rule of (layer?.material?.foliageInclude ?? [])) internFoliageSource(rule);
+        // Both layer formats, through the one walker unpack uses too — see utils/terrainJson.
+        for (const rule of serializedTerrainFoliageRules(terrain)) internFoliageSource(rule);
         // Compressed heights/splat (publish/terrainImages.ts) move out of the JSON manifest into the
         // blob, referenced exactly like a geometry chunk.
         if (terrain.splatBytes) { terrain.splatChunk = addChunk(asBytes(terrain.splatBytes)); delete terrain.splatBytes; }
         if (terrain.heightBytes) { terrain.heightChunk = addChunk(asBytes(terrain.heightBytes)); delete terrain.heightBytes; }
+        const stack = terrain.layerStack;
+        if (stack?.masksBytes) { stack.masksChunk = addChunk(asBytes(stack.masksBytes)); delete stack.masksBytes; }
       }
 
       // Tilemap chunks, symmetric to terrain's: the deflated cell grids move into the blob, referenced
