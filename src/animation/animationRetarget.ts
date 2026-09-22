@@ -78,7 +78,10 @@ function isIdentityMatrix(m: mat4, eps = 1e-6): boolean {
 // LOCAL bind rotation of a bone — its rest orientation relative to its parent, so a difference stays
 // confined to that bone rather than accumulating down the chain. From the IBMs when present
 // (`IBM_parent · inverse(IBM_bone)`), else the node's own local transform.
-function localBindRotation(skin: Skin, node: number): quat {
+// Exported because `clipEdit.ts` mirrors and bakes clips in the same bind-relative terms, and it must use
+// THIS definition — the IBM-first rule and the `$AssimpFbx$` pivot climb below are not reproducible by
+// eye, and a second copy that got either wrong would disagree with the retarget only on FBX rigs.
+export function localBindRotation(skin: Skin, node: number): quat {
     const joint = skin.joints.find(j => j.nodeIndex === node);
     if (joint && !isIdentityMatrix(joint.inverseBindMatrix as any)) {
         const worldBone = mat4.invert(mat4.create(), joint.inverseBindMatrix as any);
@@ -109,7 +112,7 @@ function ibmWorldBindRotation(skin: Skin, node: number): quat | null {
 }
 
 /** Local rest translation of a node, or [0,0,0]. */
-function localRestTranslation(skin: Skin, node: number): vec3 {
+export function localRestTranslation(skin: Skin, node: number): vec3 {
     const nt = skin.nodeTransforms?.get(node);
     return nt ? mat4.getTranslation(vec3.create(), nt as any) : vec3.create();
 }
@@ -472,7 +475,12 @@ export function retargetAnimation(
         outChannels.push({ samplerIndex: addSampler(src.input.slice(), out, src.interpolation), targetNodeIndex: tgt, targetPath: 'rotation' });
     }
 
-    return { name: clip.name, samplers: outSamplers, channels: outChannels };
+    // `rootMotion` is a property of the CLIP, not of the skeleton it is playing on, so it must survive the
+    // retarget. It used to be dropped here, which silently disabled root motion on every shared `.anim`
+    // clip that had a source skin — the flag was set in the editor, written to the asset, and then thrown
+    // away on the way to the character. `assetId` is deliberately NOT carried: the resolve layer stamps it
+    // (see animationResolve.ts), and only a clip that came from an asset should have one.
+    return { name: clip.name, samplers: outSamplers, channels: outChannels, rootMotion: clip.rootMotion };
 }
 
 /** Match, retarget and report in one call, for callers that do not review the mapping. */

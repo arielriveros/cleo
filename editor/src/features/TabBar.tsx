@@ -1,24 +1,17 @@
 import { useState } from 'react';
 import { type TabKind } from './EngineContext';
+import { TAB_ASSET_KIND } from './engineContextTypes';
 import { useDocument } from './DocumentContext';
 import { usePlayback } from './PlaybackContext';
 import { iconFor } from './assets/assetKinds';
 import type { AssetKind } from '../utils/vfs';
 
-// The asset-type icon shown on a tab. Most tab kinds map 1:1 to an AssetKind; an animation tab (a skinned
-// mesh) reuses the mesh glyph.
+// The asset-type icon shown on a tab. `TAB_ASSET_KIND` names the asset each kind edits; the two that edit
+// none fall back to a glyph that describes what is on screen — an animation tab is a skinned mesh, and the
+// scene tab is a scene.
 function tabAssetKind(kind: TabKind): AssetKind {
-  switch (kind) {
-    case 'material': return 'material';
-    case 'terrainMaterial': return 'terrainMaterial';
-    case 'template': return 'template';
-    case 'model': return 'model';
-    case 'script': return 'script';
-    case 'animation': return 'model';
-    case 'animationField': return 'animationField';
-    case 'rig': return 'rig';
-    default: return 'scene';
-  }
+  if (kind === 'stateMachine') return 'model';
+  return TAB_ASSET_KIND[kind] ?? 'scene';
 }
 
 // Browser-style tab strip below the top bar: the scene tab (titled with the open scene asset) plus one tab

@@ -26,9 +26,11 @@ export type TabState = {
 
 /**
  * Which field on `EditorTab` names the asset each restorable kind edits.
- * `animation` must stay absent: its builder is asynchronous and captures the source scene and source TAB
- * from whatever is active when called, so restoring it at boot records the wrong write-back target for
- * "Apply State Machine".
+ *
+ * `stateMachine` must stay absent: its builder is asynchronous and captures the source scene and source
+ * TAB from whatever is active when called, so restoring it at boot records the wrong write-back target for
+ * "Apply State Machine". The `animation` (clip) tab has neither problem — it edits a library asset by id
+ * and its builder is synchronous — so it restores like every other asset tab.
  */
 const ID_FIELD: Partial<Record<TabKind, keyof EditorTab>> = {
   template: 'templateId',
@@ -40,6 +42,7 @@ const ID_FIELD: Partial<Record<TabKind, keyof EditorTab>> = {
   tileset: 'tilesetId',
   aiBrain: 'aiBrainId',
   rig: 'rigId',
+  animation: 'animationId',
   texture: 'textureId',
   soundSample: 'soundId',
 };

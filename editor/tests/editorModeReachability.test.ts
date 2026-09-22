@@ -80,3 +80,49 @@ describe('TAB_EDITOR_MODE', () => {
     expect(Object.fromEntries(tabEditorModeEntries()).soundSample).toBe('soundSample');
   });
 });
+
+/**
+ * The third way a tab can be built, wired and still silently broken: the STALE-DEPENDENCY CASCADE.
+ *
+ * `AssetGraphContext` asks two questions about every open tab — which asset id it names (`ID_FIELD` in
+ * utils/tabState.ts) and what KIND that id is (`TAB_ASSET_KIND`) — and joins them into an asset key. It
+ * used to answer the second by casting `tab.kind as AssetKind`, which is right only because most kinds
+ * happen to be spelled as their asset kind. A kind that is not builds a key matching nothing, so the tab
+ * never goes stale: the user keeps editing against data something else has already replaced, and there is
+ * no error anywhere — the banner simply never appears.
+ *
+ * The two tables must therefore agree. A kind with an id field but no asset kind is invisible to the
+ * cascade; a kind with an asset kind but no id field can never be found by it.
+ */
+function tabAssetKindEntries(): [string, string][] {
+  const m = CONTEXT_TYPES.match(/export const TAB_ASSET_KIND:[^=]*= \{([\s\S]*?)\n\};/);
+  expect(m, 'TAB_ASSET_KIND not found in features/engineContextTypes.ts').toBeTruthy();
+  return [...m![1].matchAll(/^\s*(\w+): (?:'([^']+)'|null),/gm)].map(x => [x[1], x[2] ?? ''] as [string, string]);
+}
+
+/** The tab kinds that name an asset id, from tabState's ID_FIELD. */
+function idFieldKinds(): string[] {
+  const m = TAB_STATE.match(/const ID_FIELD: Partial<Record<TabKind, keyof EditorTab>> = \{([\s\S]*?)\n\};/);
+  expect(m, 'ID_FIELD not found in utils/tabState.ts').toBeTruthy();
+  return [...m![1].matchAll(/^\s*(\w+): '[^']+',/gm)].map(x => x[1]);
+}
+
+describe('every tab that edits an asset takes part in the stale-dependency cascade', () => {
+  it('TAB_ASSET_KIND covers every tab kind', () => {
+    const kinds = [...CONTEXT_TYPES.match(/export type TabKind = ([^;]+);/)![1].matchAll(/'([^']+)'/g)].map(m => m[1]);
+    expect(tabAssetKindEntries().map(([k]) => k).sort()).toEqual(kinds.slice().sort());
+  });
+
+  it('every kind with an asset id also declares what kind that id is', () => {
+    const assetKindOf = new Map(tabAssetKindEntries());
+    const missing = idFieldKinds().filter(kind => !assetKindOf.get(kind));
+    expect(missing, `${missing.join(', ')} name an asset id but map to null in TAB_ASSET_KIND — the tab can never go stale`).toEqual([]);
+  });
+
+  it('every kind that declares an asset kind can be found by id', () => {
+    const withId = new Set(idFieldKinds());
+    // 'scene' is exempt: it is keyed on the OPEN scene, which AssetGraphContext handles before this join.
+    const orphaned = tabAssetKindEntries().filter(([kind, asset]) => asset && kind !== 'scene' && !withId.has(kind));
+    expect(orphaned.map(([k]) => k), 'declared an asset kind but no ID_FIELD entry — nothing can look the tab up').toEqual([]);
+  });
+});

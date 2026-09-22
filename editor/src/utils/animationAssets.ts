@@ -9,12 +9,42 @@
 
 import { cryptoRandomId } from './ids'
 
+/** {@link PoseBone}, restated structurally. Bone names, never node indices — see `RigAsset.retargets`. */
+export type StoredPoseBone = { name: string; rotation?: number[]; translation?: number[] }
+
+/**
+ * {@link ClipEdit}, restated structurally. One entry of a clip's NON-DESTRUCTIVE edit stack, re-applied by
+ * `applyClipEdits` on every resolve rather than written into the keyframes.
+ *
+ * Non-destructive is what makes a cross-clip change practical: a `poseOffset` naming a shared pose on the
+ * rig is authored once and referenced by thirty clips, so moving the arm two degrees is one edit rather
+ * than thirty re-bakes from a backup. Removing an entry restores the original curves exactly, because they
+ * were never touched.
+ */
+export type StoredClipEdit =
+  | { kind: 'trim'; start: number; end: number; rebase?: boolean; enabled?: boolean }
+  | { kind: 'mirror'; axis?: 'x' | 'y' | 'z'; enabled?: boolean }
+  | { kind: 'poseOffset'; poseId?: string; bones?: StoredPoseBone[]; mask?: string[]; weight?: number; enabled?: boolean }
+  | { kind: 'inPlace'; strip?: 'xz' | 'all' | 'y'; keepYaw?: boolean; upAxis?: 'x' | 'y' | 'z'; enabled?: boolean }
+  | { kind: 'timeScale'; scale?: number; duration?: number; enabled?: boolean }
+
 /** {@link Animation}, restated structurally so this module stays engine-free. */
 export type StoredClip = {
   name: string
   samplers: { input: number[]; output: number[]; interpolation: string }[]
   channels: { samplerIndex: number; targetNodeIndex: number; targetPath: string }[]
+  /**
+   * Drive the character from this clip's root motion at RUNTIME. Mutually exclusive with an `inPlace`
+   * edit, which removes the same motion from the curves instead; `applyClipEdits` clears this when it
+   * applies one, so a clip carrying both cannot have its travel taken away twice.
+   */
   rootMotion?: boolean
+  /**
+   * The edit stack, applied in `applyClipEdits`'s canonical order (not this array's order — see there).
+   * Absent or empty means the clip resolves exactly as it did before edits existed, and `applyClipEdits`
+   * returns the very same object in that case.
+   */
+  edits?: StoredClipEdit[]
 }
 
 /**
@@ -103,9 +133,15 @@ export function buildAnimationAsset(name: string, clips: StoredClip[], sourceSki
 }
 
 /**
- * A content fingerprint for a clip: everything that affects playback, and nothing else.
+ * A content fingerprint for a clip: the IMPORTED SOURCE DATA, and nothing else.
  * The name is EXCLUDED — the same download is routinely renamed per character. Keyframe numbers are
  * rounded before hashing so a float32 round trip in one asset and not the other still matches.
+ *
+ * `edits` is excluded too, and for the same reason as the name: it is an authored decision layered on top
+ * of the import, not part of what was imported. Its only callers ask "did this file already come in?"
+ * (`findEquivalentAnimation` on re-import, `extractEmbeddedClips` on migration) — folding edits in would
+ * fork the asset the moment anyone mirrored a clip, and hand the artist a silent duplicate. Save/dirty
+ * tracking does see edits: `assetHash.ts` hashes the whole record.
  */
 export function clipFingerprint(clip: StoredClip): string {
   const q = (n: number) => (Math.abs(n) < 1e-6 ? 0 : Math.round(n * 1e5) / 1e5)

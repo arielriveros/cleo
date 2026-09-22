@@ -49,6 +49,10 @@ export function useSaving(deps: {
   const registerSoundApply = (reg: { tabId: string; apply: () => void } | null) => { soundApplyRef.current = reg; };
   const aiBrainApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
   const registerAiBrainApply = (reg: { tabId: string; apply: () => void } | null) => { aiBrainApplyRef.current = reg; };
+  // ...and the clip session, whose working copy lives in ClipProvider.
+  const clipApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
+  const registerClipApply = (reg: { tabId: string; apply: () => void } | null) => { clipApplyRef.current = reg; };
+
   // ...and the rig session, whose working copy lives in RigProvider.
   const rigApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
   const registerRigApply = (reg: { tabId: string; apply: () => void } | null) => { rigApplyRef.current = reg; };
@@ -97,13 +101,19 @@ export function useSaving(deps: {
         session.apply();
         break;
       }
-      case 'animation':
+      case 'stateMachine':
       case 'animationField': {
         const reg = animationApplyRef.current;
         if (!reg || reg.tabId !== tabId) return false;
-        // Animation: writes the machine onto the source model, dirtying ITS tab.
+        // State machine: writes the machine onto the source model, dirtying ITS tab.
         // Animation field: writes the field asset to the library and re-embeds it where it is played.
         reg.apply();
+        break;
+      }
+      case 'animation': {
+        const session = clipApplyRef.current;
+        if (!session || session.tabId !== tabId) return false;
+        session.apply();
         break;
       }
     }
@@ -179,7 +189,11 @@ export function useSaving(deps: {
       // A rig saves FIRST: models and animations reference it, so a rig written after them would leave
       // one pass reading a skeleton the other has already replaced.
       rig: 0,
-      material: 0, terrainMaterial: 0, script: 0, animation: 0, animationField: 0, tileset: 0, texture: 0,
+      // ...and a clip after it, but still before anything that plays one: an `.anim` names its source rig,
+      // and a clip resolved against a skeleton the other pass has already replaced retargets off the wrong
+      // bind pose. Same tier is fine — the sort is stable, and `rig` is listed first.
+      animation: 0,
+      material: 0, terrainMaterial: 0, script: 0, stateMachine: 0, animationField: 0, tileset: 0, texture: 0,
       soundSample: 0, aiBrain: 0,
       model: 1, template: 2, scene: 3,
     };
@@ -195,7 +209,7 @@ export function useSaving(deps: {
 
   return {
     registerAnimationApply, registerTilesetApply, registerTextureApply, registerSoundApply,
-    registerAiBrainApply, registerRigApply, saveTabById, runSave,
+    registerAiBrainApply, registerRigApply, registerClipApply, saveTabById, runSave,
     saveActiveTab, saveAll, saveProjectToStorage,
   };
 }

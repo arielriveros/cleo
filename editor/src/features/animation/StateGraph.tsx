@@ -122,7 +122,7 @@ export default function StateGraph() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [links, sm.parameters])
 
-  if (editorMode !== 'animation' || !graphView) return null
+  if (editorMode !== 'stateMachine' || !graphView) return null
 
   const addAtCenter = () => {
     // Spread new states so they don't stack; offset by current count.

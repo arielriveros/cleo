@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useCleoEngine } from "./EngineContext";
 import { Raycaster, Node, Vec, Logger } from "cleo";
 import TransformGizmo from "./gizmo/TransformGizmo";
+import BoneGizmo from "./clip/BoneGizmo";
 import useGizmoShortcuts from "./gizmo/useGizmoShortcuts";
 import type { TransformPatch } from "./gizmo/gizmoDrag";
 import { effectiveGizmoSpace } from "../utils/gizmoMath";
@@ -54,7 +55,7 @@ export default function EngineViewport() {
     // The animation state machine's graph covers the canvas, so viewport chrome (gizmo modes, 2D/3D,
     // the eye menu) has nothing to act on. The AI graphs need no equivalent: they live in their own
     // tab, whose mode is already MODE_RENDERS_VIEWPORT: false.
-    const hideForGraph = editorMode === 'animation' && graphView;
+    const hideForGraph = editorMode === 'stateMachine' && graphView;
     // Viewport chrome only means something over a render: modes that replace the canvas with their own
     // full-panel editor (script, tileset) get none of it, and neither does the loading splash.
     const overRender = MODE_RENDERS_VIEWPORT[editorMode] && isSceneReady && !hideForGraph;
@@ -63,7 +64,8 @@ export default function EngineViewport() {
     const showGizmoTools = overRender && !isPlayMode && !gizmoIrrelevant;
     // The gizmo itself is absent from two further modes, where the viewport picks something that is not a
     // transform: the UI editor drags DOM boxes, and animation mode picks joints (AnimationSkeletonTool).
-    const showGizmo = overRender && !gizmoIrrelevant && editorMode !== 'ui' && editorMode !== 'animation';
+    const showGizmo = overRender && !gizmoIrrelevant && editorMode !== 'ui'
+      && editorMode !== 'stateMachine' && editorMode !== 'animation';
     // Keyed to the toolbar, not the gizmo: the letters must not fire where the buttons are not shown.
     useGizmoShortcuts(showGizmoTools);
     const viewportRef = useRef<HTMLDivElement>(null);
@@ -192,7 +194,7 @@ export default function EngineViewport() {
             // hides the tree and Properties, so a selection there has nowhere to show. In material mode the
             // preview sphere stays selected (it drives the material inspector), so clicks must not change it.
             // Animation mode picks joints (see AnimationSkeletonTool), not the mesh, so mesh selection is off.
-            if (editorMode === 'landscape' || editorMode === 'tilemap' || editorMode === 'ui' || editorMode === 'renderer' || editorMode === 'input' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'animation' || editorMode === 'rig' || editorMode === 'animationField') return;
+            if (editorMode === 'landscape' || editorMode === 'tilemap' || editorMode === 'ui' || editorMode === 'renderer' || editorMode === 'input' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'stateMachine' || editorMode === 'animation' || editorMode === 'rig' || editorMode === 'animationField') return;
             
             if (wasDraggingRef.current || isGizmoDraggingRef.current || justFinishedGizmoDragRef.current) {
                 setIsDragging(false);
@@ -502,7 +504,7 @@ export default function EngineViewport() {
                 otherwise float on top of it. The Animations|Graph switch is the way back and lives on the
                 graph's own toolbar while it is up. This is the only mode left with that conflict: the
                 Animation Field editor is a bottom-panel tab, so it floats nothing over the viewport. */}
-            {editorMode === 'animation' && !graphView && <>
+            {editorMode === 'stateMachine' && !graphView && <>
                 <div data-cleo-overlay className='absolute top-2 left-2 z-20' onMouseDown={e => e.stopPropagation()}>
                     <SegmentedControl<'3d' | 'graph'>
                         options={[{ value: '3d', label: 'Animations' }, { value: 'graph', label: 'Graph' }]}
@@ -519,6 +521,17 @@ export default function EngineViewport() {
             {editorMode === 'rig' && <>
                 <AnimationSkeletonTool viewportRef={viewportRef} />
                 <AnimationPlayer />
+            </>}
+
+            {/* The clip editor draws the same bone overlay, but NOT `AnimationPlayer`: its transport is a
+                dock panel (`clipTimeline`), because the timeline is the work surface here rather than a
+                control floating over one. Two transports would also fight over the same animator. */}
+            {editorMode === 'animation' && <>
+                <AnimationSkeletonTool viewportRef={viewportRef} />
+                {/* The scene gizmo is off in this mode (`showGizmo`), because the thing being posed is a
+                    BONE and not a node. This one drives the same gizmo through a proxy node parked on the
+                    selected joint. */}
+                <BoneGizmo viewportRef={viewportRef} />
             </>}
         </div>
     );

@@ -269,6 +269,15 @@ export { solveTwoBone, applyTwoBone, ikTuning, validateIkRig, IK_DEFAULTS, DEFAU
 export type { IkRig, IkFootChain, IkRigTuning, IkRigProblem, IkRigValidation, TwoBoneSolve, TwoBoneResult } from "./animation/ik";
 export type { AnimationCompatibility, HierarchyMismatch, BoneMapping, BoneMappingEntry, BoneMatchKind } from "./animation/animationRetarget";
 export { normalizeBoneName, humanoidSlotOf } from "./animation/boneNames";
+export { mirrorBoneName } from "./animation/boneNames";
+// Non-destructive clip edits. Exported in full because three separate consumers need them: the editor's
+// resolve, the published player's resolve, and the clip editor's Bake command — and the individual ops
+// are what the unit tests pin.
+export {
+    applyClipEdits, mirrorClip, bakeInPlace, applyPoseOffset, trimClip, timeScaleClip,
+    mirrorPairs, mirrorAxisOf, rootMotionNodeOf, rootParentRotation, clipDuration, resetClipEditWarnings,
+} from "./animation/clipEdit";
+export type { ClipEdit, ClipEditContext, PoseBone, MirrorAxis } from "./animation/clipEdit";
 export { swingReleaseWeight } from "./animation/ik";
 export { Animator, isConditionGroup, NODE_BUILTINS } from "./animation/animator";
 export type { NodeBuiltinName } from "./animation/animator";
@@ -364,7 +373,7 @@ export { Game, setGameHost } from "./core/game";
 export type { GameHost } from "./core/game";
 export * as Vec from "gl-matrix";
 export * as MathUtils from "./core/math";
-export { clamp, lerp, damp, dampTime } from "./core/math";
+export { clamp, lerp, damp, dampTime, eulerFromQuatDeg } from "./core/math";
 export { aimFromDirection } from "./core/cameraRigMath";
 
 // What a user script's `import { ... } from 'cleo'` resolves to: the barrel's own namespace. Must stay

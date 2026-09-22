@@ -24,7 +24,7 @@ import { ownSkinnedModelNodeOf } from '../../../utils/models'
 // deliberately not restorable (see `tabState.ts`) and `openAsset` has no route to it, so this button is
 // the only door.
 export default function AnimationSlot(props: { node: Node }) {
-  const { enterAnimationEditor } = useEditorSessions()
+  const { enterStateMachineEditor } = useEditorSessions()
 
   const modelNode = ownSkinnedModelNodeOf(props.node)
   if (!modelNode) return null
@@ -32,7 +32,7 @@ export default function AnimationSlot(props: { node: Node }) {
   return (
     <Collapsable title='State Machine' icon={<AnimationIcon />} persistKey='animation'>
       <div className='w-full p-2 flex flex-col gap-2'>
-        <Button variant='primary' className='w-full py-2' onClick={() => enterAnimationEditor(modelNode.id)}
+        <Button variant='primary' className='w-full py-2' onClick={() => enterStateMachineEditor(modelNode.id)}
           title='Edit which clip this character plays when — its states, transitions and parameters'>
           ▶ Open State Machine
         </Button>

@@ -12,6 +12,7 @@ import { ModelNode } from '../core/scene/nodes/modelNode';
 import { canAccessVariable } from '../core/scene/nodes/nodeVariables';
 import { InputSystem } from '../input/inputSystem';
 import { Logger } from '../core/logger';
+import { rootMotionNodeOf, rootParentRotation } from './clipEdit';
 // The condition model and evaluator live in core/conditions.ts — they read a table of named values and
 // answer yes or no, which has nothing to do with animation, and the behavior state machine needs the
 // same latching. See that module for why the band is centred and why latches refresh machine-wide.
@@ -591,6 +592,12 @@ export class Animator {
     // is locked to its clip-start pose. Single-clip playback only — a field has no single root.
     private _rootMotionActive: boolean = false;
     private _rootBoneName: string | null = null;
+    /**
+     * Editor-only per-bone local overrides, or null when there are none. Null rather than an empty Map so
+     * the check in `resolveLocal` — which runs per bone per frame for every character in the scene — is a
+     * single null test in the overwhelmingly common case.
+     */
+    private _boneOverrides: Map<number, mat4> | null = null;
     private _rootRefT: vec3 = vec3.create();
     private _rootRefR: quat = quat.create();
     private _rootRefS: vec3 = vec3.fromValues(1, 1, 1);
@@ -1456,47 +1463,84 @@ export class Animator {
 
     // Accumulated rotation of the joints ABOVE `rootNodeIndex`, in the model node's local space — the
     // axis basis the root bone's channels are expressed in. Those joints are static, so bind is live.
+    //
+    // Delegated to `clipEdit.ts` so the runtime and the editor's in-place BAKE share one definition. They
+    // have to: the bake strips exactly the motion this term describes, and a disagreement would leave
+    // residual travel that the editor cannot show — it drives the animator directly, so a baked clip would
+    // look correct there and drift only in the published game.
     private _rootParentRotation(rootNodeIndex: number): quat {
-        const out = quat.create();
-        if (!this._skin) return out;
-        const parentOf = this._topology().parentNodeOfNode;
+        if (!this._skin) return quat.create();
+        return rootParentRotation(this._skin, rootNodeIndex, this._topology());
+    }
 
-        const chain: number[] = []; // immediate parent first, up to the skeleton root
-        let p = parentOf.get(rootNodeIndex);
-        while (p !== undefined) { chain.push(p); p = parentOf.get(p); }
-
-        const acc = mat4.create(); // identity
-        for (let i = chain.length - 1; i >= 0; i--) {
-            const local = this._skin.nodeTransforms?.get(chain[i]);
-            if (local) mat4.multiply(acc, acc, local);
+    /**
+     * Pin one bone's LOCAL transform, overriding whatever is posing it. `null` releases it.
+     *
+     * For the clip editor's gizmo. The honest way to show a posed bone would be to write the key and re-bind
+     * the clip, but `playAnimation` re-transcodes every channel into fresh `Bone` objects — `O(bones × keys)`
+     * plus a log line — which is far too much for a 60 Hz drag. An override is read straight out of
+     * `_recomputePose`, so a drag costs one map lookup per bone per frame.
+     *
+     * Survives a `seek`, deliberately: scrubbing while holding a bone in place is how you check a pose
+     * against the frames around it. `showBindPose` clears them, since nothing should still be pinned once
+     * the character is back at rest.
+     */
+    public setBoneLocalOverride(nodeIndex: number, local: mat4 | null): void {
+        if (!local) {
+            this._boneOverrides?.delete(nodeIndex);
+            if (this._boneOverrides?.size === 0) this._boneOverrides = null;
+        } else {
+            (this._boneOverrides ??= new Map()).set(nodeIndex, mat4.clone(local));
         }
-        mat4.getRotation(out, acc);
-        return quat.normalize(out, out);
+        this._recomputePose();
+    }
+
+    /** Release every pinned bone. */
+    public clearBoneLocalOverrides(): void {
+        if (!this._boneOverrides) return;
+        this._boneOverrides = null;
+        this._recomputePose();
+    }
+
+    /** The transform pinned on a bone, or null. */
+    public boneLocalOverride(nodeIndex: number): mat4 | null {
+        return this._boneOverrides?.get(nodeIndex) ?? null;
+    }
+
+    /**
+     * The LOCAL transform posing one bone right now — an editor override, the clip or field under the
+     * playhead, or the bone's rest when nothing drives it.
+     *
+     * The same answer `_recomputePose` uses, minus the cross-fade: a blend is a transient between two
+     * clips, and an editor reading a bone in order to key it wants the pose the CURRENT clip holds, not a
+     * frame of the transition into it.
+     */
+    public boneLocalTransform(nodeIndex: number): mat4 | null {
+        if (!this._skin) return null;
+        const override = this._boneOverrides?.get(nodeIndex);
+        if (override) return mat4.clone(override);
+        const current = this._currentLocal(`bone_${nodeIndex}`);
+        if (current) return mat4.clone(current);
+        const rest = this._skin.nodeTransforms?.get(nodeIndex);
+        return rest ? mat4.clone(rest) : mat4.create();
+    }
+
+    /** A bone's REST transform, for an editor that needs to express a pose as a delta from it. */
+    public boneRestTransform(nodeIndex: number): mat4 | null {
+        if (!this._skin) return null;
+        const rest = this._skin.nodeTransforms?.get(nodeIndex);
+        return rest ? mat4.clone(rest) : mat4.create();
     }
 
     // The clip's root-motion bone: the HIGHEST joint it actually animates, so a static-armature rig works
     // as well as one whose root bone carries the motion. Null when the clip animates no joints.
+    //
+    // The rule itself lives in `clipEdit.ts` — see `_rootParentRotation` above for why there is exactly one
+    // of it. This wrapper only turns the node index into the `bone_N` key `_bones` is filled with.
     private _findRootMotionBone(animation: Animation): string | null {
         if (!this._skin) return null;
-        const animated = new Set(animation.channels.map(c => c.targetNodeIndex));
-        const parentOf = this._topology().parentNodeOfNode;
-
-        const isHighestAnimated = (nodeIndex: number): boolean => {
-            let p = parentOf.get(nodeIndex);
-            while (p !== undefined) {
-                if (animated.has(p)) return false;
-                p = parentOf.get(p);
-            }
-            return true;
-        };
-
-        // Prefer the declared skeleton root when the clip animates it directly.
-        const skel = this._skin.skeleton;
-        if (skel !== undefined && animated.has(skel) && isHighestAnimated(skel)) return `bone_${skel}`;
-        for (const j of this._skin.joints) {
-            if (animated.has(j.nodeIndex) && isHighestAnimated(j.nodeIndex)) return `bone_${j.nodeIndex}`;
-        }
-        return null;
+        const node = rootMotionNodeOf(animation, this._skin, this._topology());
+        return node === null ? null : `bone_${node}`;
     }
 
     // Apply this frame's root-bone delta to the character, then pin the bone to its clip-start reference.
@@ -1592,6 +1636,11 @@ export class Animator {
 
         /** Whatever is posing this node right now — a clip, a weighted field blend, or its rest transform. */
         const resolveLocal = (nodeIndex: number): mat4 => {
+            // An editor override outranks every pose source. Checked FIRST so a bone being dragged holds
+            // still while the clip underneath keeps playing on every other bone — which is what makes it
+            // possible to pose an arm against the walk cycle it will be keyed into.
+            const override = this._boneOverrides?.get(nodeIndex);
+            if (override) return override;
             const boneName = `bone_${nodeIndex}`;
             const current = this._currentLocal(boneName);
             if (current) {
@@ -2651,6 +2700,9 @@ export class Animator {
     
     // Reset the bone matrices to the bind pose from the skin's initial node transforms.
     private _setTPose(): void {
+        // Drop editor pins first: `showBindPose` means "show me the rest pose", and a bone still held by a
+        // gizmo drag would sit visibly out of place in it.
+        this._boneOverrides = null;
         if (!this._skin) return;
 
         // The bind pose is un-IK'd, and this writes bone matrices without going through _recomputePose.

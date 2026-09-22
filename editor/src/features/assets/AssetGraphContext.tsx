@@ -8,6 +8,7 @@ import { edgesOfAsset, edgesOfScene } from '../../utils/assetEdges'
 import { buildSceneRefs } from '../../utils/references'
 import { structurallyChanged } from '../../utils/assetHash'
 import { assetIdOfTab } from '../../utils/tabState'
+import { TAB_ASSET_KIND } from '../engineContextTypes'
 import type { AssetKind } from '../../utils/vfs'
 
 // Keeps the engine's `assetGraph` in step with the asset libraries, and turns a change into the two things
@@ -204,10 +205,12 @@ export function AssetGraphProvider({ children }: { children: React.ReactNode }) 
         }
         const assetId = assetIdOfTab(tab)
         if (!assetId) continue
-        // Every TabKind that owns an asset is spelled exactly as its AssetKind ('material', 'model',
-        // 'soundSample', …), so the tab kind IS the asset kind. The two that are not — 'scene' (handled
-        // above) and 'animation' (no id field, so `assetIdOfTab` already returned null) — never reach here.
-        const tabKey = assetKey(tab.kind as AssetKind, assetId)
+        // Looked up, never cast. Most tab kinds are spelled exactly as their AssetKind, but not all, and a
+        // cast on a kind that is not one builds a key matching nothing — so the tab silently never goes
+        // stale. TAB_ASSET_KIND is exhaustive, so a new kind is a compile error rather than a quiet gap.
+        const tabKind = TAB_ASSET_KIND[tab.kind]
+        if (!tabKind) continue
+        const tabKey = assetKey(tabKind, assetId)
         // The tab that made the change is not stale because of it — it IS the change. Mirrors the
         // `exceptTabId` argument the sync* functions already take. Compared on the whole KEY, not the id:
         // an image and the texture reading it deliberately share one id (see images.ts).

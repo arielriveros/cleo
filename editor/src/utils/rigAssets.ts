@@ -15,7 +15,7 @@
 // animationAssets.ts.
 
 import { cryptoRandomId } from './ids'
-import type { StoredSkin } from './animationAssets'
+import type { StoredPoseBone, StoredSkin } from './animationAssets'
 
 export type RigAsset = {
   id: string
@@ -58,12 +58,38 @@ export type RigAsset = {
    * bone no clip drives.
    */
   retargets?: Record<string, RetargetOverride[]>
+  /**
+   * Named poses on THIS skeleton, referenced from a clip's `poseOffset` edit by id.
+   *
+   * A pose is skeleton-specific in exactly the way `ikRig` and `retargets` above are — its fields are bone
+   * names on this skin — so it belongs here, and deliberately NOT as its own `AssetKind`. Promoting it to
+   * one would mean an entry in `vfs.ts`, `assetEdges.ts`, `bundleMerge.ts`, `persistLibrary.ts`, the
+   * thumbnail table and the publish graph, plus a migration, to buy nothing: a `.anim` already names its
+   * rig, so `assetEdges` records the dependency either way and `assetEdgeCoverage.test.ts` stays green
+   * with no change at all.
+   *
+   * What this buys is the cross-clip edit. Author "Torch grip" once, reference it from thirty clips, and
+   * moving the arm two degrees is one edit rather than thirty. Ids are `cryptoRandomId()`, so merging two
+   * projects' rigs can simply union these arrays.
+   */
+  poses?: RigPose[]
+  /**
+   * Which axis the mirror plane is normal to, i.e. this rig's left/right axis.
+   *
+   * Auto-detected from the bind pose when absent ({@link mirrorAxisOf} measures where the legs actually
+   * are, rather than assuming X). Stored once the user mirrors something, so a later change to the
+   * skeleton cannot silently flip the answer for clips already authored against it.
+   */
+  mirrorAxis?: 'x' | 'y' | 'z'
   /** The file this came from, so a re-import can offer the existing rig instead of a second copy. */
   sourceFile?: string
   thumbnail?: string
 }
 
 /** One hand-made bone re-point. `targetName: null` means "drop this bone's curve". */
+/** One bone's contribution to a shared pose, as a delta from its rest. Mirrors {@link StoredPoseBone}. */
+export type RigPose = { id: string; name: string; bones: StoredPoseBone[] }
+
 export type RetargetOverride = {
   sourceName: string
   targetName: string | null

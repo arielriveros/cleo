@@ -3,8 +3,8 @@
 // (`data.modelAnimations`), and are retargeted onto each character at scene load, memoised per model.
 
 import {
-  AnimatedModel, ModelNode, buildBoneMapping, applyManualMapping, retargetAnimation, Logger,
-  type Animation, type Node, type Scene, type Skin,
+  AnimatedModel, ModelNode, buildBoneMapping, applyManualMapping, retargetAnimation, applyClipEdits, Logger,
+  type Animation, type ClipEdit, type Node, type PoseBone, type Scene, type Skin,
 } from 'cleo';
 import { mat4 } from 'gl-matrix';
 
@@ -13,8 +13,15 @@ const MODEL_ID_VAR = '__modelId';
 const LEGACY_MODEL_ID_VAR = '__meshId';
 
 export type PublishedAnimations = {
-  /** Shared clips, in SOURCE-rig space, with the skeleton they were authored against. */
-  animations?: { id: string; name: string; clips: Animation[]; sourceSkin: any }[];
+  /**
+   * Shared clips, in SOURCE-rig space, with the skeleton they were authored against.
+   *
+   * `poses` are the source rig's named poses, flattened in at pack time the same way `sourceSkin` is: a
+   * clip's `poseOffset` edit names one by id, the rig itself is not shipped, and a missing pose means the
+   * published game plays the clip with the offset silently absent. Optional and additive — an older bundle
+   * simply has no posed clips.
+   */
+  animations?: { id: string; name: string; clips: Animation[]; sourceSkin: any; poses?: { id: string; bones: PoseBone[] }[] }[];
   /** model asset id -> the animation asset ids it plays. */
   modelAnimations?: Record<string, string[]>;
   /**
@@ -83,10 +90,17 @@ function resolveFor(
     const asset = assetById.get(id);
     if (!asset) continue;
     const sourceSkin = loadSkin(asset.sourceSkin);
-    if (!sourceSkin) { clips.push(...asset.clips.map(c => ({ ...c }))); continue; }
+    // The clip edit stack, in source-rig space, BEFORE anything reads the clips. Mirrors
+    // `animationResolve.ts` exactly — see there for why it cannot run after `buildBoneMapping`, which
+    // collects its source bones by scanning the clips. The two must agree: this is the same asset the
+    // artist previewed, and a difference here is only ever discovered by playing the exported game.
+    const poses = asset.poses?.length ? new Map(asset.poses.map(p => [p.id, p.bones])) : undefined;
+    const editCtx = { skin: sourceSkin ?? ({ joints: [] } as Skin), poses };
+    const edited = asset.clips.map(c => applyClipEdits(c, (c as { edits?: ClipEdit[] }).edits, editCtx));
+    if (!sourceSkin) { clips.push(...edited.map(c => ({ ...c }))); continue; }
     try {
       // One mapping per asset — every clip in it shares the source skeleton.
-      let mapping = buildBoneMapping(asset.clips, sourceSkin, targetSkin);
+      let mapping = buildBoneMapping(edited, sourceSkin, targetSkin);
       // ...then the corrections the author made in the rig editor. Without this a published game
       // animates with the automatic match the user explicitly fixed — visibly different from the
       // editor, with nothing logged.
@@ -97,7 +111,7 @@ function resolveFor(
         if (tn === undefined) continue;
         mapping = applyManualMapping(mapping, sn, tn);
       }
-      for (const c of asset.clips) clips.push(retargetAnimation(c, sourceSkin, targetSkin, mapping));
+      for (const c of edited) clips.push(retargetAnimation(c, sourceSkin, targetSkin, mapping));
     } catch (e) {
       Logger.warn(`Could not retarget "${asset.name}" onto model ${modelId}: ${e}`, 'Player');
     }

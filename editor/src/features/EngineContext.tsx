@@ -104,6 +104,7 @@ import { useTextureEditor } from './hooks/useTextureEditor';
 import { useSoundEditor } from './hooks/useSoundEditor';
 import { useAnimationFieldEditor } from './hooks/useAnimationFieldEditor';
 import { useRigEditor } from './hooks/useRigEditor';
+import { useClipEditor } from './hooks/useClipEditor';
 import { getShellBridge } from './desktopShell';
 import { confirmDiscard, setUnsavedWork, unloadGuardSuppressed } from './unloadGuard';
 import {
@@ -186,6 +187,19 @@ const EngineContext = createContext<{
   /** The models built on a rig — the candidates its preview can show. */
   modelsOnRig: (rigId: string) => ModelAsset[];
   editingRigId: string | null;
+  registerClipApply: (reg: { tabId: string; apply: () => void } | null) => void;
+  /** Open (or focus) a `.anim` asset's clip editor tab. */
+  enterClipEditor: (animationId?: string, adoptTabId?: string) => void;
+  /** Show a different character on the open clip tab. */
+  setClipPreviewModel: (tabId: string, modelId: string) => void;
+  /** Which character the open clip tab is previewing. */
+  clipPreviewModelId: (tabId: string) => string | undefined;
+  saveClip: (asset: AnimationAsset) => void;
+  /** Save the working copy as a NEW `.anim` asset and re-point the tab at it. Returns the new id. */
+  saveClipAs: (asset: AnimationAsset, name: string) => string | null;
+  /** The characters a clip asset can preview on: the models built on its SOURCE rig. */
+  modelsForClip: (asset: AnimationAsset) => ModelAsset[];
+  editingAnimationId: string | null;
   enterTemplateEditor: (templateId?: string) => void;
   editingTemplateName: string | null;
   templateRootId: string | null;
@@ -202,11 +216,11 @@ const EngineContext = createContext<{
   /** Bake a flat card for a foliage rule's model and point the rule's impostor at it. */
   bakeFoliageImpostor: (rule: TerrainFoliageRule) => Promise<string | null>;
   setActiveTerrainMaterialName: (name: string) => void;
-  enterAnimationEditor: (nodeId: string) => void;
-  animationTargetId: string | null; // cloned skinned model in the active animation tab's scene
+  enterStateMachineEditor: (nodeId: string) => void;
+  stateMachineTargetId: string | null; // cloned skinned model in the active animation tab's scene
   skeletonTargetId: string | null;  // the skinned node whose skeleton is on screen (animation OR rig)
-  animationSourceId: string | null; // original node in the main scene (state-machine write-back target)
-  animationSourceScene: Scene | null; // scene the source node lives in (for Variable parameter pickers)
+  stateMachineSourceId: string | null; // original node in the main scene (state-machine write-back target)
+  stateMachineSourceScene: Scene | null; // scene the source node lives in (for Variable parameter pickers)
   commitAnimationStateMachine: (sm: any) => void;
   terrainBrush: React.MutableRefObject<TerrainBrushState>;
   tilemapBrush: React.MutableRefObject<TilemapBrushState>;
@@ -407,7 +421,6 @@ const EngineContext = createContext<{
   currentIkRig: () => any | null;
   renameAnimationClip: (oldName: string, newName: string) => string;
   removeAnimationClip: (name: string) => void;
-  setClipRootMotion: (name: string, on: boolean) => void;
   pendingAnimationImport: PendingAnimationImportView | null;
   pendingRigPick: PendingRigPickView | null;
   resolveRigPick: (modelId: string | null) => void;
@@ -495,6 +508,14 @@ const EngineContext = createContext<{
     saveRig: () => {},
     modelsOnRig: () => [],
     editingRigId: null,
+    registerClipApply: () => {},
+    enterClipEditor: () => {},
+    setClipPreviewModel: () => {},
+    clipPreviewModelId: () => undefined,
+    saveClip: () => {},
+    saveClipAs: () => null,
+    modelsForClip: () => [],
+    editingAnimationId: null,
     enterTemplateEditor: () => {},
     editingTemplateName: null,
     templateRootId: null,
@@ -509,11 +530,11 @@ const EngineContext = createContext<{
     dropFoliageLayer: () => {},
     bakeFoliageImpostor: async () => null,
     setActiveTerrainMaterialName: () => {},
-    enterAnimationEditor: () => {},
-    animationTargetId: null,
+    enterStateMachineEditor: () => {},
+    stateMachineTargetId: null,
     skeletonTargetId: null,
-    animationSourceId: null,
-    animationSourceScene: null,
+    stateMachineSourceId: null,
+    stateMachineSourceScene: null,
     commitAnimationStateMachine: () => {},
     terrainBrush: { current: { mode: 'sculpt', tool: 'raise', radius: 10, strength: 8, falloff: 0.5, paintLayer: 0, foliageErase: false, activeLandscapeId: null } },
     tilemapBrush: { current: { tool: 'brush', activeTilemapId: null, activeLayer: 0, stamp: { w: 1, h: 1, tiles: [0] }, orient: { flipX: false, flipY: false, rot90: false }, variantSetId: null, terrainId: null } },
@@ -641,7 +662,6 @@ const EngineContext = createContext<{
     currentIkRig: () => null,
     renameAnimationClip: (o) => o,
     removeAnimationClip: () => {},
-    setClipRootMotion: () => {},
     pendingAnimationImport: null,
     pendingRigPick: null,
     resolveRigPick: () => {},
@@ -1151,6 +1171,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setAnimations(prev => prev.map(x => x.id === id ? a : x));
   const removeAnimation = (id: string) => {
     setAnimations(prev => prev.filter(x => x.id !== id));
+    // Close its editor tab. Without this the tab stays open over a library record that no longer exists,
+    // and its session keeps a working copy that Save would happily re-add — resurrecting the asset the
+    // user just deleted. Mirrors `removeRig`.
+    const open = tabsRef.current.find(t => t.kind === 'animation' && t.animationId === id);
+    if (open) removeTabById(open.id);
     // Drop the reference from every RIG that used it, and from any model still carrying a pre-migration
     // link. Clips already instantiated on live nodes are left alone — a copy the user can still see.
     for (const r of rigsRef.current) {
@@ -1727,6 +1752,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         case 'texture': return texturesRef.current.some(t => t.id === id);
         case 'soundSample': return soundSamplesRef.current.some(x => x.id === id);
         case 'rig': return rigsRef.current.some(r => r.id === id);
+        case 'animation': return animationsRef.current.some(a => a.id === id);
         // A field also needs the model it blends — enterAnimationFieldEditor refuses to open without it.
         case 'animationField': {
           const field = fields.find(f => f.id === id);
@@ -1851,18 +1877,19 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const editingTerrainMaterialNode = activeTab.kind === 'terrainMaterial' ? (activeRuntime?.editNode ?? null) : null;
   // Animation editor: the cloned skinned model in the tab's scene (target to preview/edit) and the
   // original node in the main scene (where authored state machines are written back).
-  const animationTargetId = activeTab.kind === 'animation' && activeRuntime ? activeRuntime.rootId : null;
+  const stateMachineTargetId = activeTab.kind === 'stateMachine' && activeRuntime ? activeRuntime.rootId : null;
   /**
    * The skinned node whose SKELETON is on screen — the animation editor's clone, or the rig editor's
-   * preview character. Separate from `animationTargetId`, which additionally means "the model whose
+   * preview character. Separate from `stateMachineTargetId`, which additionally means "the model whose
    * clips and state machine are being edited" and drives write paths a rig tab must not trigger.
    */
-  const skeletonTargetId = activeTab.kind === 'animation' ? animationTargetId
+  const skeletonTargetId = activeTab.kind === 'stateMachine' ? stateMachineTargetId
+    : activeTab.kind === 'animation' ? (activeRuntime?.skinnedId ?? null)
     : activeTab.kind === 'rig' ? (activeRuntime?.skinnedId ?? null) : null;
-  const animationSourceId = activeTab.kind === 'animation' ? (activeTab.animationSourceId ?? null) : null;
+  const stateMachineSourceId = activeTab.kind === 'stateMachine' ? (activeTab.stateMachineSourceId ?? null) : null;
   // The scene the source node lives in (main or a template tab) — used to enumerate accessible
   // node variables for the state machine's Variable parameters (the clone's scene is isolated).
-  const animationSourceScene = activeTab.kind === 'animation' ? (activeRuntime?.sourceScene ?? null) : null;
+  const stateMachineSourceScene = activeTab.kind === 'stateMachine' ? (activeRuntime?.sourceScene ?? null) : null;
   // Animation Field editor: the asset being edited and the skinned model previewing it. The tab's runtime
   // root is the holder Node the model asset instantiated under, so the ModelNode carrying the skin is found
   // beneath it rather than being the root itself.
@@ -1871,6 +1898,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     ? (firstSkinnedModelNode(activeRuntime.scene.getNodeById(activeRuntime.rootId) ?? null)?.id ?? null)
     : null;
   const editingRigId = activeTab.kind === 'rig' ? (activeTab.rigId ?? null) : null;
+  const editingAnimationId = activeTab.kind === 'animation' ? (activeTab.animationId ?? null) : null;
   const editingTilesetId = activeTab.kind === 'tileset' ? (activeTab.tilesetId ?? null) : null;
   const editingTextureId = activeTab.kind === 'texture' ? (activeTab.textureId ?? null) : null;
   const editingSoundId = activeTab.kind === 'soundSample' ? (activeTab.soundId ?? null) : null;
@@ -2060,12 +2088,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Open (or focus) the Animation Editor for a specific skinned ModelNode. Like the template/material
   // editors it opens a tab with its own throwaway scene: a CLONE of the source model (framed camera +
   // shadow light + ground). Authored state machines are written back to the original node on Apply.
-  const enterAnimationEditor = async (nodeId: string) => {
+  const enterStateMachineEditor = async (nodeId: string) => {
     const instance = instanceRef.current;
     if (!instance) return;
 
     // Focus an already-open animation tab for this node instead of duplicating it.
-    const existing = tabs.find(t => t.kind === 'animation' && t.animationSourceId === nodeId);
+    const existing = tabs.find(t => t.kind === 'stateMachine' && t.stateMachineSourceId === nodeId);
     if (existing) { setActiveTab(existing.id); return; }
 
     // The source lives in whatever scene is currently active (main scene OR a template tab's scene).
@@ -2108,7 +2136,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
     const tabId = cryptoRandomId();
     tabRuntimeRef.current.set(tabId, { scene, rootId: cloneRootId, sourceScene, sourceNodeId: nodeId, sourceTabId });
-    setTabs(prev => [...prev, { id: tabId, kind: 'animation', title: `${source.name} (Anim)`, animationSourceId: nodeId }]);
+    setTabs(prev => [...prev, { id: tabId, kind: 'stateMachine', title: `${source.name} (Anim)`, stateMachineSourceId: nodeId }]);
     setActiveTabId(tabId); // the activate effect swaps the engine scene + camera
   };
 
@@ -2330,7 +2358,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
 
     const rt = tabRuntimeRef.current.get(activeTabId);
-    const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
+    const cloneNode = stateMachineTargetId ? activeScene.getNodeById(stateMachineTargetId) : null;
     const cloneModel = (cloneNode instanceof ModelNode && cloneNode.model instanceof AnimatedModel && cloneNode.model.skin)
       ? cloneNode.model : null;
 
@@ -2529,7 +2557,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // copied onto the model's skin joints by node index, which is identical for the same file.
   const importSkeletonNames = async (files: File[]) => {
     const rt = tabRuntimeRef.current.get(activeTabId);
-    const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
+    const cloneNode = stateMachineTargetId ? activeScene.getNodeById(stateMachineTargetId) : null;
     if (!(cloneNode instanceof ModelNode) || !(cloneNode.model instanceof AnimatedModel) || !cloneNode.model.skin) {
       Logger.error('Open the Animation Editor for a skinned model first', 'Editor');
       return;
@@ -2584,7 +2612,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    */
   const commitIkRig = (rig: any | null) => {
     const rt = tabRuntimeRef.current.get(activeTabId);
-    // `skeletonTargetId`, not `animationTargetId`: the IK panel sits under the bone tree, which the RIG
+    // `skeletonTargetId`, not `stateMachineTargetId`: the IK panel sits under the bone tree, which the RIG
     // tab shows too. Keyed on the animation target it wrote nowhere at all from a rig tab.
     const cloneNode = skeletonTargetId ? activeScene.getNodeById(skeletonTargetId) : null;
     const applyTo = (n: Node | null | undefined) => {
@@ -2621,7 +2649,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Returns the final applied name (may be de-duped). Callers update state-machine references to it.
   const renameAnimationClip = (oldName: string, newName: string): string => {
     const rt = tabRuntimeRef.current.get(activeTabId);
-    const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
+    const cloneNode = stateMachineTargetId ? activeScene.getNodeById(stateMachineTargetId) : null;
     if (!(cloneNode instanceof ModelNode) || !(cloneNode.model instanceof AnimatedModel)) return oldName;
     const finalName = cloneNode.model.renameAnimation(oldName, newName) ?? oldName;
     const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
@@ -2643,7 +2671,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Delete an animation clip from the model (preview clone + source node).
   const removeAnimationClip = (name: string) => {
     const rt = tabRuntimeRef.current.get(activeTabId);
-    const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
+    const cloneNode = stateMachineTargetId ? activeScene.getNodeById(stateMachineTargetId) : null;
     if (cloneNode instanceof ModelNode && cloneNode.model instanceof AnimatedModel) cloneNode.model.removeAnimation(name);
     const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
     if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.removeAnimation(name);
@@ -2658,23 +2686,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
   };
 
-  // Toggle root motion on an animation clip (preview clone + source node + asset + placed instances).
-  const setClipRootMotion = (name: string, on: boolean) => {
-    const rt = tabRuntimeRef.current.get(activeTabId);
-    const cloneNode = animationTargetId ? activeScene.getNodeById(animationTargetId) : null;
-    if (cloneNode instanceof ModelNode && cloneNode.model instanceof AnimatedModel) cloneNode.model.setAnimationRootMotion(name, on);
-    const src = rt?.sourceScene && rt.sourceNodeId ? rt.sourceScene.getNodeById(rt.sourceNodeId) : null;
-    if (src instanceof ModelNode && src.model instanceof AnimatedModel) src.model.setAnimationRootMotion(name, on);
-
-    const link = animationSourceAsset(src);
-    if (link) {
-      updateModel(link.id, assetWithClipRootMotion(link.asset, name, on));
-      propagateModelClips(link.id, m => { m.setAnimationRootMotion(name, on); }, src);
-    }
-
-    if (rt?.sourceTabId) markTabDirty(rt.sourceTabId, 'animation-clip-root-motion');
-    eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
-  };
 
   /**
    * Rebuild a restored tab's edit session, if it hasn't been built yet. Returns false when it can't be.
@@ -2692,6 +2703,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       case 'model': enterModelEditor(assetId, tab.id); break;
       case 'animationField': enterAnimationFieldEditor(assetId, tab.id); break;
       case 'rig': enterRigEditor(assetId, tab.id); break;
+      case 'animation': enterClipEditor(assetId, tab.id); break;
       case 'script': enterScriptEditor(assetId, tab.id); break;
       // A tileset tab is a pure 2D editor over the library record — nothing to build, so it is live already.
       case 'tileset': return !!tab.tilesetId && tilesetsRef.current.some(t => t.id === tab.tilesetId);
@@ -3778,6 +3790,19 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     applyActiveTab: (tab) => applyActiveTabRef.current?.(tab),
   });
 
+  // ---- Clip editor -----------------------------------------------------------------------------------
+  const {
+    enterClipEditor, setClipPreviewModel, clipPreviewModelId, saveClip, saveClipAs, modelsForClip,
+  } = useClipEditor({
+    instanceRef, animationsRef, rigsRef, modelsRef, materialsRef, tabRuntimeRef,
+    dirtyArmedRef, eventEmitter, tabs, setActiveTab, commitTab, setTabs, withoutDirty,
+    updateAnimation, addAnimation, linkAnimationToRig, applyAnimationLinks,
+    modelAnimationIdsOf: modelAnimationIds,
+    clearTabDirty, activeTabId,
+    // Through a ref, for the same reason the rig editor does it.
+    applyActiveTab: (tab) => applyActiveTabRef.current?.(tab),
+  });
+
   // ---- Tileset editor --------------------------------------------------------------------------------
   const { enterTilesetEditor, createTilesetFromImage, saveTileset } = useTilesetEditor({
     tilesetsRef, tabsRef, setTabs, eventEmitter,
@@ -4283,7 +4308,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     eventEmitter.current.emit('TEXTURES_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
     // Animation tabs select via the skeleton tree (SELECT_JOINT), not the mesh, so start with none.
-    eventEmitter.current.emit('SELECT_NODE', (runtime && tab.kind !== 'animation') ? runtime.rootId : null);
+    eventEmitter.current.emit('SELECT_NODE', (runtime && tab.kind !== 'stateMachine' && tab.kind !== 'animation') ? runtime.rootId : null);
   };
   applyActiveTabRef.current = applyActiveTab;
 
@@ -4425,7 +4450,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // ---- Saving: one action per tab, plus Save All ------------------------------------------------
   const {
     registerAnimationApply, registerTilesetApply, registerTextureApply, registerSoundApply,
-    registerAiBrainApply, registerRigApply, saveTabById, runSave,
+    registerAiBrainApply, registerRigApply, registerClipApply, saveTabById, runSave,
     saveActiveTab, saveAll, saveProjectToStorage,
   } = useSaving({
     tabsRef, dirtyTabsRef, activeTabIdRef, setSavingState,
@@ -4584,7 +4609,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setActiveTabId(SCENE_TAB_ID);
     // Animation tabs cloned their model out of the outgoing scene; their write-back target is about
     // to disappear, so close them (batched — repeated removeTabById calls would each see stale tabs).
-    const staleTabs = tabs.filter(t => t.kind === 'animation' && tabRuntimeRef.current.get(t.id)?.sourceScene === editorSceneRef.current);
+    const staleTabs = tabs.filter(t => t.kind === 'stateMachine' && tabRuntimeRef.current.get(t.id)?.sourceScene === editorSceneRef.current);
     if (staleTabs.length) {
       for (const t of staleTabs) {
         tabRuntimeRef.current.get(t.id)?.helperTerrain?.dispose();
@@ -5446,7 +5471,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     enterTemplateEditor,
     enterMaterialEditor, createMaterialForNode, setActiveMaterialName,
     enterTerrainMaterialEditor, refreshTerrainMaterialPreview, setActiveTerrainMaterialName,
-    enterAnimationEditor, commitAnimationStateMachine, registerAnimationApply, registerTilesetApply,
+    enterStateMachineEditor, commitAnimationStateMachine, registerAnimationApply, registerTilesetApply,
     importAnimationFiles, importSkeletonNames, commitIkRig, currentIkRig, renameAnimationClip, removeAnimationClip, resolveAnimationImport, resolveRigPick,
     enterModelEditor, adoptModelAsset, resolveModelAssetId, linkAnimationToRig, unlinkAnimationFromRig, ensureRigForModel, editSharedClip, setModelRig,
     setActiveModelName, addModelLodFromAsset, generateModelLods, removeModelLod,
@@ -5458,16 +5483,19 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     enterSoundEditor, saveSoundSample, previewSoundSettings, registerSoundApply,
     enterAiBrainEditor, saveAiBrain, extractBrainFromController, linkBrainToController, registerAiBrainApply,
     enterRigEditor, setRigPreviewModel, rigPreviewModelId, saveRig, modelsOnRig, registerRigApply,
+    enterClipEditor, setClipPreviewModel, clipPreviewModelId, saveClip, saveClipAs, modelsForClip,
+    registerClipApply,
   });
   const editorSessionsValue = useMemo<EditorSessionsContextValue>(() => ({
     editingTemplateName, templateRootId,
     editingMaterialName,
     editingTerrainMaterialName, editingTerrainMaterialNode,
-    animationTargetId, animationSourceId, animationSourceScene, pendingAnimationImport, pendingRigPick,
+    stateMachineTargetId, stateMachineSourceId, stateMachineSourceScene, pendingAnimationImport, pendingRigPick,
     editingAnimationFieldId, animationFieldTargetId,
     editingSoundId,
     editingAiBrainId,
     editingRigId,
+    editingAnimationId,
     modelSession: activeTab.kind === 'model' ? (modelSessions[activeTab.id] ?? null) : null,
     modelEditTargetId: activeTab.kind === 'model' && modelSessions[activeTab.id]
       ? modelSessions[activeTab.id].levelIds[modelSessions[activeTab.id].activeLevel] ?? null
@@ -5477,8 +5505,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   }), [
     editingTemplateName, templateRootId, editingMaterialName,
     editingTerrainMaterialName, editingTerrainMaterialNode,
-    animationTargetId, animationSourceId, animationSourceScene, pendingAnimationImport, pendingRigPick,
+    stateMachineTargetId, stateMachineSourceId, stateMachineSourceScene, pendingAnimationImport, pendingRigPick,
     editingAnimationFieldId, animationFieldTargetId, editingSoundId, editingAiBrainId, editingRigId,
+    editingAnimationId,
     activeTab, modelSessions, pendingModelImport, sessionActions,
   ]);
 
@@ -5527,10 +5556,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       dropFoliageLayer,
       bakeFoliageImpostor,
       setActiveTerrainMaterialName,
-      enterAnimationEditor,
-      animationTargetId,
-      animationSourceId,
-      animationSourceScene,
+      enterStateMachineEditor,
+      stateMachineTargetId,
+      stateMachineSourceId,
+      stateMachineSourceScene,
       commitAnimationStateMachine,
       terrainBrush,
       tilemapBrush,
@@ -5636,6 +5665,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       saveRig,
       modelsOnRig,
       editingRigId,
+      registerClipApply,
+      enterClipEditor,
+      setClipPreviewModel,
+      clipPreviewModelId,
+      saveClip,
+      saveClipAs,
+      modelsForClip,
+      editingAnimationId,
       saveTileset,
       enterScriptEditor,
       setScriptTabSource,
@@ -5673,7 +5710,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       currentIkRig,
       renameAnimationClip,
       removeAnimationClip,
-      setClipRootMotion,
       pendingAnimationImport,
       resolveAnimationImport,
       pendingRigPick,

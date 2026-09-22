@@ -23,7 +23,7 @@ export default function DebugSkeletonOverlay() {
 
   // Both the animation and the rig editor own the overlay while they are up. `setSkeletonOverlay` is a
   // single global slot, so two writers would overwrite each other every frame.
-  const active = editorMode !== 'animation' && editorMode !== 'rig' &&
+  const active = editorMode !== 'stateMachine' && editorMode !== 'animation' && editorMode !== 'rig' &&
     (isPlayMode ? visibility.skeleton.runtime : visibility.skeleton.editor)
 
   useEffect(() => {

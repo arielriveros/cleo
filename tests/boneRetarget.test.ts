@@ -668,3 +668,45 @@ describe('retarget from a SKINLESS animation source (Mixamo "Without Skin")', ()
         expect(m.sameRig).toBe(true);
     });
 });
+
+// `rootMotion` says something about the CLIP — "drive the character from this clip's root delta" — not
+// about the skeleton it happens to be playing on, so it has to survive being re-pointed at another rig.
+// It used not to: `retargetAnimation` rebuilt the clip as `{name, samplers, channels}` and dropped it. The
+// editor's toggle wrote it to the `.anim` asset, the asset resolved onto every character, and the flag was
+// thrown away on the way — root motion silently off, with nothing logged and the toggle still showing on.
+describe('retargetAnimation — clip flags survive', () => {
+    it('carries rootMotion through the verbatim same-rig path', () => {
+        const s = skinOf(rig(''));
+        const clip: Animation = { ...clipOf('walk', [{ node: 0, rot: qy(10) }]), rootMotion: true };
+        const m = buildBoneMapping([clip], s, s);
+        expect(m.sameRig).toBe(true);                       // ...so this exercises the raw branch
+        expect(retargetAnimation(clip, s, s, m).rootMotion).toBe(true);
+    });
+
+    it('carries rootMotion through the cross-rig delta path', () => {
+        // Source forearm rests rotated vs the target's, so the correction is non-identity and the clip
+        // takes the delta branch rather than the verbatim copy.
+        const source = rig('');
+        source[4] = { name: 'LeftForeArm', parent: 3, t: [0.2, 0, 0], r: qy(90) as any };
+        const ss = skinWithIBM(source);
+        const ts = skinWithIBM(rig(''));
+        const clip: Animation = { ...clipOf('walk', [{ node: 4, rot: qy(90) }]), rootMotion: true };
+        const m = buildBoneMapping([clip], ss, ts);
+        expect(m.sameRig).toBe(false);                      // ...so this exercises the delta branch
+        expect(retargetAnimation(clip, ss, ts, m).rootMotion).toBe(true);
+    });
+
+    it('leaves rootMotion absent when the source clip never set it', () => {
+        const s = skinOf(rig(''));
+        const clip = clipOf('walk', [{ node: 0, rot: qy(10) }]);
+        expect(retargetAnimation(clip, s, s, buildBoneMapping([clip], s, s)).rootMotion).toBeUndefined();
+    });
+
+    it('does NOT carry assetId — the resolve layer owns that stamp', () => {
+        // `AnimatedModel.serialize` drops any clip carrying an assetId, so inventing one here would make a
+        // hand-built clip silently unsaveable. animationResolve.ts stamps it after the retarget instead.
+        const s = skinOf(rig(''));
+        const clip: Animation = { ...clipOf('walk', [{ node: 0, rot: qy(10) }]), assetId: 'anim-1' };
+        expect(retargetAnimation(clip, s, s, buildBoneMapping([clip], s, s)).assetId).toBeUndefined();
+    });
+});

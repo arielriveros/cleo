@@ -18,7 +18,7 @@ export type EditorSessionsContextValue = Pick<EngineValue,
   | 'enterTerrainMaterialEditor' | 'editingTerrainMaterialName' | 'editingTerrainMaterialNode'
   | 'refreshTerrainMaterialPreview' | 'setActiveTerrainMaterialName'
   // Animation
-  | 'enterAnimationEditor' | 'animationTargetId' | 'animationSourceId' | 'animationSourceScene'
+  | 'enterStateMachineEditor' | 'stateMachineTargetId' | 'stateMachineSourceId' | 'stateMachineSourceScene'
   | 'commitAnimationStateMachine' | 'registerAnimationApply'
   | 'importAnimationFiles' | 'importSkeletonNames' | 'renameAnimationClip' | 'removeAnimationClip'
   | 'pendingAnimationImport' | 'resolveAnimationImport'
@@ -43,6 +43,9 @@ export type EditorSessionsContextValue = Pick<EngineValue,
   // Rig (a shared skeleton: its clips, its retarget corrections and its IK setup)
   | 'enterRigEditor' | 'setRigPreviewModel' | 'rigPreviewModelId' | 'saveRig' | 'modelsOnRig'
   | 'editingRigId' | 'registerRigApply'
+  // Clips (one `.anim` asset: its clips, their edit stacks and its preview character)
+  | 'enterClipEditor' | 'setClipPreviewModel' | 'clipPreviewModelId' | 'saveClip' | 'saveClipAs'
+  | 'modelsForClip' | 'editingAnimationId' | 'registerClipApply'
 >;
 
 export const EditorSessionsContext = createContext<EditorSessionsContextValue | null>(null);

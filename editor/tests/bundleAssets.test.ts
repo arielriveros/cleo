@@ -543,3 +543,55 @@ describe('assets.bin round-trip — typed arrays', () => {
     expect(records[0].positions!.o).toBe(records[1].positions!.o);
   });
 });
+
+/**
+ * A clip's non-destructive edit stack and a rig's shared poses are small JSON structures riding alongside
+ * the big float payloads `packClip`/`packSkin` chunk into `assets.bin`. Neither should be touched — but
+ * `visit()` recurses into every array of objects it finds, and a shape it half-recognized would be
+ * rewritten into a binary marker and come back as something the editor cannot read.
+ *
+ * The pack is also the reason poses live on the RIG rather than as their own asset kind: `bundleAssets`
+ * already chunks a bare `value.skin`, so a rig carrying poses needs no new packing rule at all.
+ */
+describe('clip edits and rig poses survive the round trip', () => {
+  const edits = () => [
+    { kind: 'mirror', axis: 'x' },
+    { kind: 'poseOffset', poseId: 'torch', weight: 0.75, mask: ['RightArm'] },
+    { kind: 'inPlace', strip: 'xz', keepYaw: false },
+    { kind: 'trim', start: 0.25, end: 1.5, rebase: true },
+    { kind: 'timeScale', scale: 1.5, enabled: false },
+  ];
+  const poses = () => [{
+    id: 'torch', name: 'Torch grip',
+    bones: [{ name: 'RightArm', rotation: [0, 0.3826834, 0, 0.9238795], translation: [0.01, -0.02, 0.03] }],
+  }];
+
+  it('keeps a clip edit stack byte-for-byte', async () => {
+    const anim = { id: 'a1', name: 'Walk', clips: [{ ...clip(), edits: edits() }], sourceSkin: null, rigId: 'r1' };
+    const bundle = bundleWith({
+      libraries: { materials: [], terrainMaterials: [], templates: [], models: [], scripts: [], animationFields: [], animations: [structuredClone(anim)], tilesets: [] },
+    });
+    const out = await roundTrip(bundle);
+    expect((out.libraries.animations![0] as any).clips[0].edits).toEqual(edits());
+  });
+
+  it('keeps a rig\'s poses, and still chunks the skeleton beside them', async () => {
+    const rig = { id: 'r1', name: 'mannequin', skin: skin(), poses: poses(), mirrorAxis: 'x' };
+    const bundle = bundleWith({ libraries: { materials: [], terrainMaterials: [], templates: [], models: [], scripts: [], animationFields: [], animations: [], tilesets: [], rigs: [structuredClone(rig)] } as any });
+    const out = await roundTrip(bundle);
+    const got = (out.libraries as any).rigs[0];
+    expect(got.poses).toEqual(poses());
+    expect(got.mirrorAxis).toBe('x');
+    // The float payload beside them still round-trips as plain number[], not a marker or a typed array.
+    expect(got.skin.joints[1].inverseBindMatrix).toEqual(skin().joints[1].inverseBindMatrix);
+  });
+
+  it('leaves a clip with no edits exactly as it was', async () => {
+    const anim = { id: 'a1', name: 'Walk', clips: [clip()], sourceSkin: null, rigId: 'r1' };
+    const bundle = bundleWith({
+      libraries: { materials: [], terrainMaterials: [], templates: [], models: [], scripts: [], animationFields: [], animations: [structuredClone(anim)], tilesets: [] },
+    });
+    const out = await roundTrip(bundle);
+    expect('edits' in (out.libraries.animations![0] as any).clips[0]).toBe(false);
+  });
+});

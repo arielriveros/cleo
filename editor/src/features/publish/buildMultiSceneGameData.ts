@@ -165,9 +165,18 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   // nothing logged. New assets carry `rigId` instead of an embedded skin, so publish resolves it here.
   // Deliberately not a `rigs` table in the pack: that would be a runtime format change (and a player
   // rebuild) for a bundle that is a flattened artifact anyway.
+  //
+  // The rig's shared POSES ride along for the same reason. A clip's `poseOffset` edit names one by id and
+  // `applyClipEdits` resolves it against the SOURCE rig — which is not shipped — so without this the
+  // published game plays every posed clip with its offset silently missing. Same failure mode as the
+  // skeleton above, and just as invisible: the clip still plays, it is simply not the clip the artist saw.
   const animations = (src.libs.animations ?? [])
     .filter(a => wantedAnims.has(a.id))
-    .map(a => ({ ...a, sourceSkin: sourceSkinFor(a, src.libs.rigs ?? []) }))
+    .map(a => {
+      const rig = a.rigId ? (src.libs.rigs ?? []).find(r => r.id === a.rigId) : undefined
+      const withSkin = { ...a, sourceSkin: sourceSkinFor(a, src.libs.rigs ?? []) }
+      return rig?.poses?.length ? { ...withSkin, poses: rig.poses } : withSkin
+    })
 
   const out: any = {
     version: 2,

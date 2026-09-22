@@ -50,7 +50,7 @@ function ApplyBar() {
 export function ClipsPanel() {
   const {
     target, clips, clipAssetId, modelId, adoptModel, hasBoneNames,
-    renameClip, deleteClip, rootMotionOf, toggleClipRootMotion, importAnimationFiles, importSkeletonNames,
+    renameClip, deleteClip, importAnimationFiles, importSkeletonNames,
   } = useStateMachine()
   // Above the early return: every hook must run on every render (see hookOrder.test.ts).
   const { ensureRigForModel } = useEditorSessions()
@@ -60,6 +60,10 @@ export function ClipsPanel() {
 
   // A shared clip is one stored copy retargeted onto this rig, so removing it means unlinking its ASSET;
   // deleting it off this model alone is undone by the next resolve.
+  //
+  // Root motion used to be a toggle on this row. It moved to the CLIP EDITOR, where it sits beside the
+  // in-place bake it is the opposite of — the two together are one three-way choice, and this panel could
+  // only ever show half of it. This panel is about which clips a machine can name, not what they contain.
   const clipRow = (name: string) => {
     const sharedId = clipAssetId(name)
     return (
@@ -68,9 +72,6 @@ export function ClipsPanel() {
           title={sharedId ? 'Rename this clip in its animation asset (Enter to apply) — every model using it follows' : 'Rename clip (Enter to apply)'}
           onBlur={e => renameClip(name, e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
-        <span className='shrink-0' title='Root motion — apply this clip&#39;s root bone translation/rotation to the character (body if it has one) instead of playing it in place'>
-          <Toggle checked={rootMotionOf(name)} onChange={on => toggleClipRootMotion(name, on)} />
-        </span>
         {sharedId
           ? <span className='text-[10px] text-muted shrink-0 w-[52px] text-center' title='From a linked animation asset — unlink it above to remove'>linked</span>
           : <button className={danger} title='Delete clip' onClick={() => deleteClip(name)}>✕</button>}

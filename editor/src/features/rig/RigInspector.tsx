@@ -11,7 +11,7 @@ import AnimationAssetPicker from '../animation/AnimationAssetPicker'
 import BoneMappingTable, { mappingCounts } from '../animation/BoneMappingTable'
 import { loadSkin, type StoredSkin } from '../../utils/animationAssets'
 import { nodeByName, overridesFor } from '../../utils/rigAssets'
-import { Button, Hint, Select, cn, hintClass, sectionTitleClass, valueClass } from '../../components/ui'
+import { Button, Hint, Select, TextInput, cn, hintClass, sectionTitleClass, valueClass } from '../../components/ui'
 import type { RetargetBoneOption } from '../engineContextTypes'
 
 // The rig editor's Properties panel: the clips this skeleton owns, the retarget corrections onto it, and
@@ -28,7 +28,7 @@ export default function RigInspector() {
   const { editorScene, skeletonTargetId, activeTab, setRigPreviewModel, modelsOnRig } = useCleoEngine()
   const { rigs, animations, animationFields } = useAssetLibrary()
   const { enterModelEditor, enterAnimationFieldEditor, createAnimationFieldForModel } = useEditorSessions()
-  const { asset, setOverride, clearOverrides } = useRig()
+  const { asset, patch, setOverride, clearOverrides } = useRig()
   const [sourceRigId, setSourceRigId] = useState<string>('')
 
   const target = getAnimationTarget(editorScene, skeletonTargetId)
@@ -80,6 +80,7 @@ export default function RigInspector() {
 
   /** The blend spaces authored on this skeleton. Keyed by rig, so every character on it shares them. */
   const fields = animationFields.filter(f => f.rigId === asset.id)
+  const poses = asset.poses ?? []
 
   /** Other rigs whose clips could be retargeted onto this one. */
   const sourceRigs = rigs.filter(r => r.id !== asset.id && animations.some(a => a.rigId === r.id))
@@ -172,6 +173,40 @@ export default function RigInspector() {
             <Hint>A character on this rig is needed to author one against.</Hint>
           )}
         </div>
+      </div>
+
+      {/* ---- Poses ------------------------------------------------------------------------------ */}
+      {/* Named poses on this skeleton, referenced from a clip's `poseOffset` edit. Authored in the CLIP
+          editor (that is where a character is posed) and merely managed here — a pose is a property of
+          the armature, like the IK rig and the retarget corrections beside it, so this is where it lives
+          and where deleting one belongs. Editing a pose updates every clip that references it, which is
+          the whole reason it is shared rather than copied into each. */}
+      <div>
+        <div className={cn(sectionTitleClass, 'mb-1')}>Poses</div>
+        {poses.length === 0 ? (
+          <Hint>None yet — pose some bones in a clip’s editor and save them as a shared pose.</Hint>
+        ) : (
+          <div className='flex flex-col gap-1'>
+            {poses.map(pose => (
+              <div key={pose.id} className='flex items-center gap-1'>
+                <TextInput
+                  className='flex-1'
+                  value={pose.name}
+                  title='Rename this pose. Clips reference it by id, so a rename cannot break them.'
+                  onChange={v => patch({ ...asset, poses: poses.map(p => (p.id === pose.id ? { ...p, name: v } : p)) })}
+                />
+                <span className='text-[10px] text-muted shrink-0' title={pose.bones.map(b => b.name).join(', ')}>
+                  {pose.bones.length} bone{pose.bones.length === 1 ? '' : 's'}
+                </span>
+                <button
+                  className='text-danger px-1 shrink-0'
+                  title='Delete this pose. Any clip offset referencing it is skipped and reported, not silently ignored.'
+                  onClick={() => patch({ ...asset, poses: poses.filter(p => p.id !== pose.id) })}
+                >✕</button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ---- Retargeting ------------------------------------------------------------------------ */}

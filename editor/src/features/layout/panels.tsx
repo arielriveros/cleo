@@ -8,6 +8,8 @@ import StateGraph from '../animation/StateGraph';
 import AiBrainTabView from '../ai/AiBrainTabView';
 import AiBrainInspector from '../ai/AiBrainInspector';
 import RigInspector from '../rig/RigInspector';
+import ClipInspector from '../clip/ClipInspector';
+import ClipTimeline from '../clip/ClipTimeline';
 import LoadingScreen from '../../components/LoadingScreen';
 import SceneInspector from '../sceneInspector/SceneInspector';
 import AddNew from '../sceneInspector/AddNew';
@@ -90,7 +92,7 @@ function SidePanel({ children, scroll = true }: { children: React.ReactNode; scr
 function ScenePanel(_: IDockviewPanelProps) {
   const { editorMode } = useCleoEngine();
   // A rig tab is authored the same way an animation tab is: the Scene panel becomes the bone tree.
-  const skeleton = editorMode === 'animation' || editorMode === 'rig';
+  const skeleton = editorMode === 'stateMachine' || editorMode === 'rig' || editorMode === 'animation';
   return <SidePanel scroll={false}>{skeleton ? <SkeletonTree /> : <SceneInspector />}</SidePanel>;
 }
 
@@ -229,6 +231,19 @@ function AnimFieldPanel(_: IDockviewPanelProps) { return <AnimationFieldPanel />
 // That editor's work surface, docked in the bottom strip beside Logger and Assets rather than floating
 // over the viewport: the blend-space plot with its transport under it. Both read the same provider, so
 // this panel can be dragged anywhere without re-plumbing.
+/** The clip editor's inspector: the clip list, root motion, and the edit stack. */
+function ClipTracksPanel(_: IDockviewPanelProps) {
+  return <SidePanel><ClipInspector /></SidePanel>;
+}
+
+/**
+ * The clip editor's transport. `renderer: 'always'` in the dock — its rAF loop is what poses the preview
+ * character, so unmounting it when another bottom tab is selected would freeze the model mid-clip.
+ */
+function ClipTimelinePanel(_: IDockviewPanelProps) {
+  return <div className="flex flex-col h-full w-full overflow-hidden bg-surface-raised"><ClipTimeline /></div>;
+}
+
 function AnimFieldPlotPanel(_: IDockviewPanelProps) {
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-surface-raised">
@@ -292,6 +307,8 @@ export const dockComponents = {
   animStateMachine: AnimStateMachinePanel,
   animField: AnimFieldPanel,
   animFieldPlot: AnimFieldPlotPanel,
+  clipTracks: ClipTracksPanel,
+  clipTimeline: ClipTimelinePanel,
   tilePalette: TilePalettePanel,
   tilemapLayers: TilemapLayersDockPanel,
   performance: PerformanceDockPanel,

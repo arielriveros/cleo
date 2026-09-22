@@ -15,6 +15,7 @@ import { TextureProvider } from "./texture/TextureContext";
 import { SoundProvider } from "./sound/SoundContext";
 import { AiEditorProvider } from './ai/AiEditorContext';
 import { RigProvider } from './rig/RigContext';
+import { ClipProvider } from './clip/ClipContext';
 import { HistoryProvider, useHistory } from "./HistoryContext";
 import DimensionSwitchModal from "./dialogs/DimensionSwitchModal";
 import { useDocument } from "./DocumentContext";
@@ -79,13 +80,13 @@ function Shell() {
             <TextureProvider>
               <SoundProvider>
                 <AiEditorProvider>
-                  <RigProvider>
+                  <RigProvider><ClipProvider>
                   <TabBar />
                   {/* "An asset you depend on changed" — one mount for every tab kind, so a full-panel
                       editor cannot go silently stale the way a per-view banner would let it. */}
                   <StaleDependencyBanner />
                   <DockLayout />
-                  </RigProvider>
+                  </ClipProvider></RigProvider>
                 </AiEditorProvider>
               </SoundProvider>
             </TextureProvider>

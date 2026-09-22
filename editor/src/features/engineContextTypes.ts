@@ -2,6 +2,7 @@ import type { AnimationCompatibility, BoneMapping, HullQuality } from "cleo";
 import type { UnresolvedTexture } from "../utils/modelImport";
 import type { PartInfo, PartGroup } from "../utils/submeshGroups";
 import type { ModelLodDef } from "../utils/models";
+import type { AssetKind } from "../utils/vfs";
 
 // A mesh awaiting user review in the import modal (parsed but not yet committed to the library).
 export type PendingModelImportView = {
@@ -169,7 +170,7 @@ export type LoadingProgress = { loaded: number; total: number; label: string };
 export const EDITOR_CLEAR_COLOR: [number, number, number, number] = [0.68, 0.80, 0.90, 1.0];
 export const LEGACY_CLEAR_COLOR = [0.65, 0.65, 0.71];
 
-export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'renderer' | 'input' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain' | 'rig';
+export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'renderer' | 'input' | 'material' | 'terrainMaterial' | 'stateMachine' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain' | 'rig';
 
 /**
  * Whether a mode paints the 3D viewport, or replaces it with a full-panel editor of its own; the
@@ -188,7 +189,8 @@ export const MODE_RENDERS_VIEWPORT: Record<EditorMode, boolean> = {
   input: true,
   material: true,        // preview sphere
   terrainMaterial: true, // preview sphere
-  animation: true,       // except in Graph view — see `hideForGraph`
+  stateMachine: true,    // except in Graph view — see `hideForGraph`
+  animation: true,       // the clip editor poses a character on the clip's rig
   animationField: true,  // the blend-space plot is translucent over the 3D preview
   model: true,
   script: false,         // ScriptTabView fills the panel
@@ -210,7 +212,7 @@ export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 // Browser-style editor tabs. `editorMode` is derived from the active tab (see EngineProvider). The scene
 // tab hosts the open scene asset; the library tabs each own a live edit session (a throwaway Scene in
 // tabRuntimeRef), except 'script' and 'tileset', which own no 3D scene and get no tabRuntimeRef entry.
-export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain' | 'rig';
+export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'stateMachine' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain' | 'rig';
 
 /**
  * The editor mode a library tab puts the editor into. Exhaustive, like `MODE_RENDERS_VIEWPORT` above — a
@@ -224,6 +226,7 @@ export const TAB_EDITOR_MODE: Record<Exclude<TabKind, 'scene'>, EditorMode> = {
   template: 'template',
   material: 'material',
   terrainMaterial: 'terrainMaterial',
+  stateMachine: 'stateMachine',
   animation: 'animation',
   animationField: 'animationField',
   model: 'model',
@@ -253,6 +256,7 @@ export const TAB_METERS_EXPOSURE: Record<TabKind, boolean> = {
   template: false,
   material: false,       // preview sphere
   terrainMaterial: false,// preview sphere
+  stateMachine: false,
   animation: false,
   animationField: false,
   model: false,
@@ -285,6 +289,7 @@ export const TAB_RUNS_POST_PROCESSING: Record<TabKind, boolean> = {
   template: false,
   material: false,       // preview sphere
   terrainMaterial: false,// preview sphere
+  stateMachine: false,
   animation: false,
   animationField: false,
   model: false,
@@ -294,6 +299,37 @@ export const TAB_RUNS_POST_PROCESSING: Record<TabKind, boolean> = {
   texture: false,        // no viewport at all
   soundSample: false,    // no viewport at all
   rig: false,            // a preview character under a fixed studio rig, like every other asset preview
+};
+
+/**
+ * The library asset a tab kind edits, or null when it edits no asset of its own. Exhaustive, like the
+ * tables above — a new tab kind with no entry is a compile error.
+ *
+ * Most kinds are spelled exactly as their `AssetKind`, and code has repeatedly leaned on that by casting
+ * `tab.kind as AssetKind`. Two are not: `'scene'` edits the OPEN scene rather than an asset the tab names,
+ * and `'animation'` edits a skinned NODE's state machine — a model, and one addressed by node id at that.
+ * An unchecked cast silently builds a key that matches nothing, so the tab never goes stale and the user
+ * keeps editing against superseded data with nothing shown. Look the kind up here instead.
+ *
+ * Distinct from `KIND_LABEL` (prose) and from `assetIdOfTab` in `utils/tabState.ts` (which field holds the
+ * id): this answers what KIND that id names, and the two must agree for a tab to take part in the
+ * stale-dependency cascade.
+ */
+export const TAB_ASSET_KIND: Record<TabKind, AssetKind | null> = {
+  scene: null,           // edits the open scene, which the tab does not name; handled separately
+  template: 'template',
+  material: 'material',
+  terrainMaterial: 'terrainMaterial',
+  stateMachine: null,    // a NODE's state machine, addressed by node id — not a library asset
+  animation: 'animation',
+  animationField: 'animationField',
+  model: 'model',
+  script: 'script',
+  tileset: 'tileset',
+  aiBrain: 'aiBrain',
+  texture: 'texture',
+  soundSample: 'soundSample',
+  rig: 'rig',
 };
 
 /**
@@ -309,6 +345,7 @@ export const KIND_LABEL: Record<TabKind, string> = {
   template: 'Template',
   material: 'Material',
   terrainMaterial: 'Terrain material',
+  stateMachine: 'State machine',
   animation: 'Animation',
   animationField: 'Animation field',
   model: 'Model',
@@ -343,7 +380,8 @@ export interface EditorTab {
   templateId?: string | null; // template tabs: source template id, null = unsaved new template
   materialId?: string | null; // material tabs: source material asset id, null = unsaved new material
   terrainMaterialId?: string | null; // terrain-material tabs: source terrain-material asset id
-  animationSourceId?: string | null; // animation tabs: id of the original skinned node in the main scene
+  stateMachineSourceId?: string | null; // state-machine tabs: id of the original skinned node in the main scene
+  animationId?: string | null; // clip tabs: the edited `.anim` asset id
   modelId?: string | null; // mesh tabs: the previewed mesh asset id
   scriptId?: string | null; // script tabs: the edited script asset id
   animationFieldId?: string | null; // animation-field tabs: the edited field asset id

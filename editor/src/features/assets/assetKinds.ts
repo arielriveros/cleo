@@ -105,6 +105,7 @@ export type AssetDeps = {
   enterTilesetEditor: (id?: string) => void
   enterAiBrainEditor: (id?: string) => void
   enterRigEditor: (id?: string) => void
+  enterClipEditor: (id?: string) => void
   enterTextureEditor: (id?: string) => void
   enterSoundEditor: (id?: string) => void
 
@@ -570,8 +571,7 @@ export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean
     // Raw bytes have nothing to author, so an image opens the preview pane instead. What makes an image
     // usable — wrap, filters, mipmaps — belongs to a texture, and that is what has an editor.
     case 'image': return false
-    // An animation has no editor: source-space clip data, meaningful only against a rig.
-    case 'animation': return false
+    case 'animation': deps.enterClipEditor(id); return true
     case 'rig': deps.enterRigEditor(id); return true
     // Raw audio, same reasoning as an image: what makes a file usable — volume, loop points, effects,
     // the bus — belongs to the sound sample, and that is what has an editor.

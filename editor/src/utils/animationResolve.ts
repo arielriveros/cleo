@@ -9,8 +9,8 @@
 
 import { mat4 } from 'gl-matrix'
 import {
-  AnimatedModel, buildBoneMapping, retargetAnimation, applyManualMapping, Logger,
-  type Animation, type BoneMapping, type Node, type Skin,
+  AnimatedModel, buildBoneMapping, retargetAnimation, applyManualMapping, applyClipEdits, Logger,
+  type Animation, type BoneMapping, type ClipEdit, type Node, type PoseBone, type Skin,
 } from 'cleo'
 import { loadSkin, type AnimationAsset, type StoredClip } from './animationAssets'
 import { nodeByName, overridesFor, type RetargetOverride, type RigAsset } from './rigAssets'
@@ -110,6 +110,18 @@ export function applyRetargetOverrides(
 }
 
 
+/**
+ * Stand-in skeleton for an asset that has none. Every skin-dependent edit no-ops against it and says so,
+ * rather than the whole stack being skipped — see `resolveAnimationAsset`.
+ */
+const EMPTY_SKIN: Skin = { joints: [] }
+
+/** A rig's shared poses, by id, for `applyClipEdits`. Undefined when the rig has none — the common case. */
+function posesOfRig(rig: RigAsset | null): Map<string, PoseBone[]> | undefined {
+  if (!rig?.poses?.length) return undefined
+  return new Map(rig.poses.map(p => [p.id, p.bones as PoseBone[]]))
+}
+
 /** A per-session cache: the retarget is deterministic, so the same pair never needs computing twice. */
 const cache = new Map<string, Animation[]>()
 
@@ -140,12 +152,29 @@ export function resolveAnimationAsset(
   const clips = asset.clips as unknown as Animation[]
   const sourceSkin = sourceSkinOf(asset)
 
+  // The edit stack runs FIRST, in source-rig space, before anything looks at the clips.
+  //
+  // Source space is where the edits were authored, so one stack serves every character on the rig — and
+  // mirroring can use the source skeleton's own bone names, which is the only place left and right are
+  // spelled out. Ordering against `buildBoneMapping` is not a preference: that function collects its
+  // source bones by SCANNING the clips, so a `poseOffset` adding a channel for a bone the clip never drove
+  // has to exist before the scan, or the mapping has no entry for it and `retargetAnimation` drops the new
+  // curve without a word. `applyClipEdits` returns the same object for a clip with no stack, so an
+  // unedited project is untouched down to object identity.
+  //
+  // An asset with no source skin at all (pre-rig, no embedded skin) gets an empty one rather than being
+  // skipped: `trim` and `timeScale` need no skeleton and still apply, while mirror, in-place and pose
+  // offsets each report that they cannot run. Skipping the stack wholesale would apply a retime silently
+  // and inconsistently with every other asset.
+  const editCtx = { skin: sourceSkin ?? EMPTY_SKIN, poses: posesOfRig(rigById(asset.rigId)) }
+  const edited = clips.map(c => applyClipEdits(c, (c as { edits?: ClipEdit[] }).edits, editCtx))
+
   let out: Animation[]
   if (!sourceSkin) {
-    out = clips.map(c => ({ ...c }))
+    out = edited.map(c => ({ ...c }))
   } else {
     // ONE mapping for the whole asset: every clip in it shares the source skeleton.
-    let mapping = buildBoneMapping(clips, sourceSkin, targetSkin)
+    let mapping = buildBoneMapping(edited, sourceSkin, targetSkin)
     // ...then the human's corrections on top. This is what the import modal's re-points used to be thrown
     // away for: the automatic match is rebuilt on every retarget, so a fix only survives if it is stored
     // and replayed. They live on the TARGET rig, keyed by the source rig — see RigAsset.retargets.
@@ -153,7 +182,7 @@ export function resolveAnimationAsset(
     if (overrides.length) {
       mapping = applyRetargetOverrides(mapping, overrides, sourceSkin, targetSkin, `${asset.id}:${targetRigId}`)
     }
-    out = clips.map(c => retargetAnimation(c, sourceSkin, targetSkin, mapping))
+    out = edited.map(c => retargetAnimation(c, sourceSkin, targetSkin, mapping))
   }
   // Stamp the origin: AnimatedModel.serialize drops a clip carrying one, so a resolved clip plays but is
   // never written into a scene, a template or the published game.

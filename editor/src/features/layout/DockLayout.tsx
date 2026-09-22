@@ -21,14 +21,17 @@ const OLD_LAYOUT_KEY = 'cleo_project_layout';
 const OLD_DOCK_LAYOUT_KEYS = [
   'cleo_dock_layout_v1', 'cleo_dock_layout_v2', 'cleo_dock_layout_v3', 'cleo_dock_layout_v4',
   'cleo_dock_layout_v5', 'cleo_dock_layout_v6', 'cleo_dock_layout_v7', 'cleo_dock_layout_v8',
-  'cleo_dock_layout_v9', 'cleo_dock_layout_v10', 'cleo_dock_layout_v14',
+  'cleo_dock_layout_v9', 'cleo_dock_layout_v10', 'cleo_dock_layout_v14', 'cleo_dock_layout_v15',
 ];
 // 13: the AI modes came and went; a tree stored at 12 still references panels that no longer exist,
 // and one from 11 predates them. A stored tree cannot gain or lose a panel on its own, so every saved
 // arrangement is discarded.
 // 15: the rig mode arrived, and it reuses the Scene panel as a skeleton tree the way animation does — a
 // tree stored at 14 has no arrangement for it.
-const LAYOUT_VERSION = 15;
+// 16: the clip editor arrived with two panels of its own, and the old `animation` mode was renamed
+// `stateMachine` — so a tree stored at 15 is keyed by a mode name that no longer exists AND has no
+// arrangement for the new panels. Both halves make a stored layout unreadable rather than merely stale.
+const LAYOUT_VERSION = 16;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -65,12 +68,19 @@ function activeBottomTab(dock: DockviewApi): BottomPanel | null {
   return null;
 }
 
-/** Animation-editor panels. Present in every layout, shown only in animation mode — see hiddenPanelIds. */
-const ANIMATION_PANELS = ['animClips', 'animVariables', 'animStateMachine'] as const;
+/** State-machine panels. Present in every layout, shown only in that mode — see hiddenPanelIds. */
+const STATE_MACHINE_PANELS = ['animClips', 'animVariables', 'animStateMachine'] as const;
+
+/**
+ * Clip-editor panels: the track list on the right rail, and the timeline down in the bottom strip beside
+ * Logger and Assets. Same arrangement as ANIMATION_FIELD_PANELS, and for the same reason — a timeline is
+ * a wide, short thing that wants the full width of the window.
+ */
+const CLIP_PANELS = ['clipTracks', 'clipTimeline'] as const;
 
 /**
  * Animation-field panels: the settings sidebar on the right rail, and the blend-space plot down in the
- * bottom strip with Logger and Assets. Same visibility arrangement as ANIMATION_PANELS.
+ * bottom strip with Logger and Assets. Same visibility arrangement as STATE_MACHINE_PANELS.
  */
 const ANIMATION_FIELD_PANELS = ['animField', 'animFieldPlot'] as const;
 
@@ -89,7 +99,7 @@ const INPUT_PANELS = ['inputMap'] as const;
 
 const CHROME_PANELS = [
   'scene', 'properties', 'scripts', 'physics', 'logger', 'assets',
-  ...ANIMATION_PANELS, ...ANIMATION_FIELD_PANELS, ...TILEMAP_PANELS, ...ADD_PANELS,
+  ...STATE_MACHINE_PANELS, ...ANIMATION_FIELD_PANELS, ...CLIP_PANELS, ...TILEMAP_PANELS, ...ADD_PANELS,
 ] as const;
 
 // The Scene panel hosts the mode-specific tree, so its tab label follows the mode.
@@ -98,13 +108,14 @@ const PANEL_TITLES: Record<string, string> = {
   scripts: 'Scripts', physics: 'Physics', logger: 'Logger', assets: 'Assets',
   animClips: 'Clips', animVariables: 'Variables', animStateMachine: 'State Machine',
   animField: 'Field Settings', animFieldPlot: 'Blend Space',
+  clipTracks: 'Clip', clipTimeline: 'Timeline',
   tilePalette: 'Tiles', tilemapLayers: 'Layers',
   performance: 'Performance', rendererSettings: 'Renderer Settings',
   inputMap: 'Input',
 };
 
 function panelTitle(id: string, mode: EditorMode): string {
-  if (id === 'scene' && (mode === 'animation' || mode === 'rig')) return 'Skeleton';
+  if (id === 'scene' && (mode === 'stateMachine' || mode === 'rig' || mode === 'animation')) return 'Skeleton';
   if (id === 'properties') {
     if (mode === 'material') return 'Material';
     if (mode === 'terrainMaterial') return 'Terrain Material';
@@ -165,9 +176,9 @@ function buildDefaultLayout(api: DockviewApi) {
     id: 'physics', component: 'physics', title: 'Physics',
     position: { referencePanel: 'properties', direction: 'within' },
   });
-  // The animation panels share the Properties tab strip; they are hidden everywhere but animation mode,
-  // where Properties itself is hidden.
-  for (const id of [...ANIMATION_PANELS, 'animField', ...TILEMAP_PANELS]) {
+  // The animation panels share the Properties tab strip; they are hidden everywhere but the one mode that
+  // owns them, where Properties itself is hidden. `clipTracks` joins them; `clipTimeline` goes below.
+  for (const id of [...STATE_MACHINE_PANELS, 'animField', 'clipTracks', ...TILEMAP_PANELS]) {
     api.addPanel({
       id, component: id, title: PANEL_TITLES[id],
       position: { referencePanel: 'properties', direction: 'within' },
@@ -200,6 +211,12 @@ function buildDefaultLayout(api: DockviewApi) {
     id: 'animFieldPlot', component: 'animFieldPlot', title: PANEL_TITLES['animFieldPlot'], renderer: 'always',
     position: { referencePanel: 'logger', direction: 'within' },
   });
+  // The clip timeline, for exactly the same reasons: a work surface that wants the window's full width,
+  // and a transport that must keep driving the animator when another bottom tab is showing.
+  api.addPanel({
+    id: 'clipTimeline', component: 'clipTimeline', title: PANEL_TITLES['clipTimeline'], renderer: 'always',
+    position: { referencePanel: 'logger', direction: 'within' },
+  });
   // Honour the remembered bottom tab; this is also the fallback when restoring a stashed layout fails.
   // animationField mode overrides this in restoreBottomTab, which runs after every layout build.
   (loadBottomTab() === 'assets' ? assets : logger).api.setActive();
@@ -210,10 +227,10 @@ function buildDefaultLayout(api: DockviewApi) {
  * Re-assert `renderer: 'always'` on the panels that cannot survive being unmounted; a restored blob is not
  * guaranteed to carry it. The default 'onlyWhenVisible' unmounts an unselected panel, tearing down the SVAR
  * store and drag patch for `assets`, the WebGL canvas host for `viewport`, and the rAF loop that poses the
- * model for `animFieldPlot`.
+ * model for `animFieldPlot` and `clipTimeline`.
  */
 function assertRenderers(api: DockviewApi) {
-  for (const id of ['viewport', 'logger', 'assets', 'animFieldPlot']) {
+  for (const id of ['viewport', 'logger', 'assets', 'animFieldPlot', 'clipTimeline']) {
     const panel = api.getPanel(id);
     if (panel && panel.api.renderer !== 'always') panel.api.setRenderer('always');
   }
@@ -271,9 +288,10 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
   const hidden = new Set<string>([...RENDERER_PANELS, ...INPUT_PANELS]);
 
   // Mode-specific panels: hidden everywhere, revealed by the single mode that owns them.
-  if (mode !== 'animation') for (const id of ANIMATION_PANELS) hidden.add(id);
+  if (mode !== 'stateMachine') for (const id of STATE_MACHINE_PANELS) hidden.add(id);
   if (mode !== 'animationField') for (const id of ANIMATION_FIELD_PANELS) hidden.add(id);
   if (mode !== 'tilemap') for (const id of TILEMAP_PANELS) hidden.add(id);
+  if (mode !== 'animation') for (const id of CLIP_PANELS) hidden.add(id);
 
   const hide = (...ids: readonly string[]) => { for (const id of ids) hidden.add(id); };
 
@@ -302,7 +320,13 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
     case 'rig':
       hide(...ADD_PANELS, 'scripts', 'physics');
       break;
-    // Animation brings its own three panels; the Scene panel becomes the skeleton tree (see panelTitle).
+    // The state machine brings its own three panels; the Scene panel becomes the skeleton tree.
+    case 'stateMachine':
+      hide(...ADD_PANELS, 'scripts', 'physics', 'properties');
+      break;
+    // The clip editor: the Scene panel is the bone tree, `clipTracks` is the inspector for whatever is
+    // selected in it, and `clipTimeline` runs along the bottom. Properties would show the preview
+    // character's node, which is not what is being edited.
     case 'animation':
       hide(...ADD_PANELS, 'scripts', 'physics', 'properties');
       break;
@@ -358,7 +382,9 @@ export default function DockLayout() {
    * when the mode is left — which is also why animFieldPlot is not one of BOTTOM_PANELS.
    */
   const restoreBottomTab = useCallback((dock: DockviewApi) => {
-    const want = editorMode === 'animationField' ? 'animFieldPlot' : bottomTabRef.current;
+    const want = editorMode === 'animationField' ? 'animFieldPlot'
+      : editorMode === 'animation' ? 'clipTimeline'
+      : bottomTabRef.current;
     const panel = dock.getPanel(want);
     // Read the group directly rather than activeBottomTab(), which only knows the two persisted ids.
     if (panel && panel.group?.activePanel?.id !== want) panel.api.setActive();

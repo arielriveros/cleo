@@ -182,3 +182,45 @@ describe('publishing retarget corrections', () => {
     expect(src()).toContain('if (Object.keys(retargets).length) out.retargets = retargets')
   })
 })
+
+// A clip's `poseOffset` edit names a shared pose by id, and `applyClipEdits` resolves it against the
+// SOURCE RIG — which publish does not ship. So the rig's poses have to be flattened onto each animation
+// exactly the way its skeleton already is. Miss it and every posed clip plays in the exported game with
+// its offset silently absent: the clip still plays, it is simply not the clip the artist approved.
+describe('publishing shared poses', () => {
+  const read = (...p: string[]) => readFileSync(join(__dirname, '..', ...p), 'utf-8').replace(/\r\n/g, '\n')
+
+  const poses = [{ id: 'torch', name: 'Torch grip', bones: [{ name: 'RightArm', rotation: [0, 0, 0, 1] }] }]
+
+  /** What `buildMultiSceneGameData` does to each shipped animation, poses included. */
+  const shippedWithPoses = (animations: any[], rigs: any[]) =>
+    animations.map(a => {
+      const rig = a.rigId ? rigs.find(r => r.id === a.rigId) : undefined
+      const withSkin = { ...a, sourceSkin: sourceSkinFor(a, rigs) }
+      return rig?.poses?.length ? { ...withSkin, poses: rig.poses } : withSkin
+    })
+
+  it('attaches the source rig\'s poses to the animation', () => {
+    const rig = { ...buildRigAsset('mannequin', skin('Armature'), undefined, 'rig-1'), poses }
+    const anim = { id: 'idle', name: 'Idle', clips: [], sourceSkin: null, rigId: 'rig-1' }
+    expect(shippedWithPoses([anim], [rig])[0].poses).toEqual(poses)
+  })
+
+  // Additive and optional, like `retargets`: a project with no poses must not grow the field.
+  it('omits the field entirely when the rig has none', () => {
+    const rig = buildRigAsset('mannequin', skin('Armature'), undefined, 'rig-1')
+    const anim = { id: 'idle', name: 'Idle', clips: [], sourceSkin: null, rigId: 'rig-1' }
+    expect('poses' in shippedWithPoses([anim], [rig])[0]).toBe(false)
+  })
+
+  it('omits it for a legacy asset with no rig', () => {
+    const rig = { ...buildRigAsset('mannequin', skin('Armature'), undefined, 'rig-1'), poses }
+    const anim = { id: 'walk', name: 'Walk', clips: [], sourceSkin: skin('Legacy') }
+    expect('poses' in shippedWithPoses([anim], [rig])[0]).toBe(false)
+  })
+
+  it('publish really does it, and the player really reads it', () => {
+    expect(read('src', 'features', 'publish', 'buildMultiSceneGameData.ts')).toContain('rig?.poses?.length')
+    expect(read('src', 'player', 'animations.ts')).toContain('asset.poses')
+  })
+})

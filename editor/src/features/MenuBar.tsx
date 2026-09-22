@@ -73,7 +73,7 @@ export default function MenuBar() {
   // "saving" it applies the machine onto the source node, which is what its own Apply State Machine button does.
   const activeDirty = !!dirtyTabs[activeTab.id];
   const dirtyCount = Object.values(dirtyTabs).filter(Boolean).length;
-  const saveTitle = activeTab.kind === 'animation'
+  const saveTitle = activeTab.kind === 'stateMachine'
     ? 'Apply the state machine to the source model (Ctrl+S)'
     : `Save this ${KIND_LABEL[activeTab.kind].toLowerCase()} (Ctrl+S)`;
   const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');

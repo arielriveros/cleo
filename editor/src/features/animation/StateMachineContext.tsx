@@ -96,11 +96,6 @@ interface StateMachineContextValue {
 
   renameClip: (oldName: string, typed: string) => void
   deleteClip: (name: string) => void
-  /** Whether a clip has root motion enabled (read live off the model). */
-  rootMotionOf: (name: string) => boolean
-  /** Toggle root motion on a clip — patches the model asset and every placed instance. */
-  toggleClipRootMotion: (name: string, on: boolean) => void
-
   importAnimationFiles: (files: File[]) => void
   importSkeletonNames: (files: File[]) => void
   closeTab: (id: string) => void
@@ -191,15 +186,15 @@ export function useStateMachine(): StateMachineContextValue {
 
 export function StateMachineProvider({ children }: { children: ReactNode }) {
   const {
-    editorScene, animationTargetId, animationSourceScene, animationSourceId,
+    editorScene, stateMachineTargetId, stateMachineSourceScene, stateMachineSourceId,
     commitAnimationStateMachine, importAnimationFiles, importSkeletonNames,
-    renameAnimationClip, removeAnimationClip, setClipRootMotion, closeTab, activeTabId, eventEmitter,
+    renameAnimationClip, removeAnimationClip, closeTab, activeTabId, eventEmitter,
     scriptAssets, markTabDirty, clearTabDirty, registerAnimationApply, bodies, editSharedClip,
     adoptModelAsset, resolveModelAssetId,
   } = useCleoEngine()
   const { animationFields } = useAssetLibrary()
 
-  const target = getAnimationTarget(editorScene, animationTargetId)
+  const target = getAnimationTarget(editorScene, stateMachineTargetId)
   const hasBoneNames = !!(target && target.skin.nodeNames && target.skin.nodeNames.size > 0)
 
   const [sm, setSm] = useState<AnimationStateMachine>(EMPTY)
@@ -221,9 +216,9 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   // rigid body, so it is the only record of which node is the thing that moves.
   const accessVars = useMemo<AccessibleVariable[]>(
     () => accessibleNodeVariables(
-      animationSourceScene?.getNodeById(animationSourceId ?? '') ?? null, animationSourceScene, scriptAssets,
+      stateMachineSourceScene?.getNodeById(stateMachineSourceId ?? '') ?? null, stateMachineSourceScene, scriptAssets,
       new Set(bodies.keys())),
-    [animationSourceScene, animationSourceId, animationTargetId, scriptAssets, bodies, bodiesRev])
+    [stateMachineSourceScene, stateMachineSourceId, stateMachineTargetId, scriptAssets, bodies, bodiesRev])
 
   // Un-applied working copies, per animation tab. Only ONE session is live at a time, so this cache is what
   // keeps un-applied edits alive across a tab switch.
@@ -238,7 +233,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     const entry = existing?.states.find((s: AnimationState) => s.isEntry)?.name ?? existing?.states[0]?.name ?? null
     setSelection(entry ? { kind: 'state', name: entry } : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [animationTargetId])
+  }, [stateMachineTargetId])
 
   // Re-render when clips are imported so new clips appear in the pickers.
   useEffect(() => {
@@ -505,10 +500,6 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     }))
   }
 
-  // The root-motion flag lives on the clip, not in the state machine, so it is read straight off the live
-  // model and a toggle is reflected by the ANIM_CLIPS_CHANGED force-render above.
-  const rootMotionOf = (name: string) => !!target?.model.animations.find(a => a.name === name)?.rootMotion
-
   /**
    * Which shared `.anim` asset a clip came from, or undefined for a clip embedded in the model. Decides
    * where an edit lands: AnimatedModel.serialize drops `assetId`, so the embedded-clip helpers would patch
@@ -516,17 +507,11 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
    */
   const clipAssetId = (name: string) => target?.model.animations.find(a => a.name === name)?.assetId
 
-  const toggleClipRootMotion = (name: string, on: boolean) => {
-    const assetId = clipAssetId(name)
-    if (assetId) { editSharedClip(assetId, name, { rootMotion: on }); return }
-    setClipRootMotion(name, on)
-  }
-
   const fieldOf = (id: string | undefined) => (id ? animationFields.find(f => f.id === id) : undefined)
 
-  // Must read the SOURCE node, not the preview clone: enterAnimationEditor clones the character into a
+  // Must read the SOURCE node, not the preview clone: enterStateMachineEditor clones the character into a
   // throwaway scene, and adopting from the clone would put that copy in the library.
-  const sourceNode = animationSourceScene?.getNodeById(animationSourceId ?? '') ?? null
+  const sourceNode = stateMachineSourceScene?.getNodeById(stateMachineSourceId ?? '') ?? null
   const modelId = resolveModelAssetId(sourceNode) ?? resolveModelAssetId(target?.node) ?? null
   const adoptModel = () => adoptModelAsset(sourceNode ?? target?.node ?? null)
 
@@ -539,7 +524,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     links, linkOf, addTransition, setTransition, removeTransition, removeLink,
     addCondition, addGroup, setCondition, setGroupOp, removeNode, setTransitionCondition,
     addEvent, setEvent, removeEvent,
-    renameClip, deleteClip, rootMotionOf, toggleClipRootMotion,
+    renameClip, deleteClip,
     importAnimationFiles, importSkeletonNames, closeTab, activeTabId,
   }
 

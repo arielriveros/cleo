@@ -113,3 +113,52 @@ export function humanoidSlotOf(name: string): string | null {
     }
     return null;
 }
+
+/**
+ * The name of a bone's mirror partner, or null when the name carries no side marker.
+ *
+ * Works on the RAW name, not the normalized one, because the answer has to be a name that exists on the
+ * skeleton: `normalizeBoneName` throws away the namespace, the case and the separators that the partner
+ * is spelled with. So `mixamorig:LeftArm` -> `mixamorig:RightArm` and `upper_arm.L` -> `upper_arm.R`.
+ *
+ * The case of the matched token is preserved (`Left`->`Right`, `left`->`right`, `LEFT`->`RIGHT`), and a
+ * single-letter marker must be DELIMITED — by a separator, or by the start or end of the name. That
+ * restriction is the whole point: an undelimited `l` would read `Pelvis` as a sided bone and mirror it
+ * onto a `Pelvis` that does not exist, or worse, onto the wrong one. {@link humanoidSlotOf} is allowed to
+ * be loose about this because a wrong reading there simply fails to match a slot; here a wrong reading
+ * moves a curve onto another bone.
+ *
+ * Only the FIRST marker is swapped. `LeftHandThumb1_L` is pathological, and swapping both would map a
+ * bone onto itself.
+ */
+export function mirrorBoneName(name: string): string | null {
+    // Whole words first: `Left`/`Right` cannot be confused with anything, so they win over a stray `l`.
+    const word = name.match(/(left|right)/i);
+    // ...but reject a token buried inside a longer word. A lowercase `right` preceded by a letter is
+    // `Bright`, not a side; a capitalized `Right` preceded by a letter is camelCase (`ShoulderRight`) and
+    // is real. Without this a bone could be renamed onto a DIFFERENT existing bone, which silently moves
+    // a curve rather than merely failing to find a partner.
+    const buried = !!word && word.index! > 0
+        && /[a-zA-Z]/.test(name[word.index! - 1]) && word[1][0] === word[1][0].toLowerCase();
+    if (word && !buried) {
+        const matched = word[1];
+        const isLeft = matched[0] === 'l' || matched[0] === 'L';
+        const to = isLeft ? 'right' : 'left';
+        // Preserve case: ALL CAPS, Capitalized, or lower.
+        const cased = matched === matched.toUpperCase() ? to.toUpperCase()
+            : matched[0] === matched[0].toUpperCase() ? to[0].toUpperCase() + to.slice(1)
+            : to;
+        return name.slice(0, word.index!) + cased + name.slice(word.index! + matched.length);
+    }
+
+    // A delimited single letter. `(^|[\s._-])` and `([\s._-]|$)` are what make this safe.
+    const single = name.match(/(^|[\s._:|-])([lr])([\s._-]|$)/i);
+    if (single) {
+        const ch = single[2];
+        const swapped = ch === 'l' ? 'r' : ch === 'L' ? 'R' : ch === 'r' ? 'l' : 'L';
+        const at = single.index! + single[1].length;
+        return name.slice(0, at) + swapped + name.slice(at + 1);
+    }
+
+    return null;
+}
