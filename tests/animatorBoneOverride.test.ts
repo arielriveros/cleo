@@ -169,4 +169,16 @@ describe('Animator — reading a bone to key it', () => {
         const q = quat.normalize(quat.create(), mat4.getRotation(quat.create(), a.boneRestTransform(1)!));
         expect(Math.abs(quat.dot(q, quat.create()))).toBeCloseTo(1, 5);
     });
+
+    it('ignores a non-finite pin rather than poisoning the bone and everything under it', () => {
+        const a = makeAnimator();
+        a.playAnimationByName('wave', true, false);
+        a.play();
+        a.update(0.5);
+        const bad = mat4.create();
+        bad[0] = NaN;
+        a.setBoneLocalOverride(0, bad);
+        expect(a.boneLocalOverride(0)).toBeNull();
+        for (const m of a.getFinalBoneMatrices()) for (const v of m) expect(Number.isFinite(v)).toBe(true);
+    });
 });

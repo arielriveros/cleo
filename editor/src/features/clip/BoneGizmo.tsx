@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { mat4, quat, vec3 } from 'gl-matrix'
-import { Node, markEditorOwned, skeletonTopology, type SkeletonTopology } from 'cleo'
+import { Node, decomposeTRS, markEditorOwned, skeletonTopology, type SkeletonTopology } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { getAnimationTarget, computeBindMatrices, computeJointWorldMatrices } from '../animation/skeleton'
+import { boneLocalFromWorld, boneRotation } from './boneTrs'
 import TransformGizmo from '../gizmo/TransformGizmo'
 import type { TransformPatch } from '../gizmo/gizmoDrag'
 
@@ -28,7 +29,8 @@ import type { TransformPatch } from '../gizmo/gizmoDrag'
  *
  *     jointWorld[j] = jointWorld[parent] x (non-joint chain) x local[j]
  *
- * so `local[j] = inverse(jointWorld[parent] x chain) x desiredWorld`. The chain is the `$AssimpFbx$` pivot
+ * so `local[j] = inverse(jointWorld[parent] x chain) x desiredWorld` — solved per component by
+ * `boneLocalFromWorld`, because the desired world pose carries no meaningful scale. The chain is the `$AssimpFbx$` pivot
  * nodes an FBX import leaves between two bones; skipping them lands the pose in the wrong frame on exactly
  * the rigs that are hardest to debug. A root joint has no parent joint, so its base is the MODEL NODE's
  * world transform, which `computeJointWorldMatrices` has already multiplied in.
@@ -42,6 +44,8 @@ export default function BoneGizmo({ viewportRef }: { viewportRef: React.RefObjec
   const [proxyId, setProxyId] = useState<string | null>(null)
   /** Set between the gizmo's first patch and the pointer coming up, so the sync loop stands down. */
   const draggingRef = useRef(false)
+  /** The bone's local scale when the current drag began. A scale drag multiplies it; the others keep it. */
+  const dragStartScaleRef = useRef(vec3.fromValues(1, 1, 1))
   /**
    * Topology and inverted bind matrices, cached on the SKIN.
    *
@@ -116,7 +120,9 @@ export default function BoneGizmo({ viewportRef }: { viewportRef: React.RefObjec
         const worlds = computeJointWorldMatrices(target.node, target.animator, target.skin, cacheOf(target.skin).bind)
         const w = worlds[jointIndex]
         proxy.setPosition(mat4.getTranslation(vec3.create(), w) as any)
-        proxy.setQuaternion(quat.normalize(quat.create(), mat4.getRotation(quat.create(), w)) as any)
+        proxy.setQuaternion(boneRotation(w) as any)
+        // Scale 1, so a scale drag's result is a FACTOR on the bone's own scale, not an absolute value.
+        proxy.setScale([1, 1, 1] as any)
       }
       raf = requestAnimationFrame(tick)
     }
@@ -136,6 +142,13 @@ export default function BoneGizmo({ viewportRef }: { viewportRef: React.RefObjec
     const proxy = proxyRef.current
     const target = getAnimationTarget(editorScene, skeletonTargetId)
     if (!proxy || !target || jointIndex < 0) return
+    const nodeIndex = target.skin.joints[jointIndex].nodeIndex
+    if (!draggingRef.current) {
+      // First patch of a drag. Scale comes from the bone's LOCAL, never the proxy: the proxy sits in world
+      // space, and folding a world scale into the local would drift the bone's size on every drag.
+      const current = target.animator.boneLocalTransform(nodeIndex) ?? mat4.create()
+      decomposeTRS(current, vec3.create(), quat.create(), dragStartScaleRef.current)
+    }
     draggingRef.current = true
 
     if (patch.kind === 'position') proxy.setPosition(patch.local as any)
@@ -143,25 +156,16 @@ export default function BoneGizmo({ viewportRef }: { viewportRef: React.RefObjec
     else proxy.setQuaternion(patch.localQuat as any)
     proxy.updateTransforms?.()
 
-    const nodeIndex = target.skin.joints[jointIndex].nodeIndex
-    // Scale is taken from the bone's CURRENT local, not the proxy: the proxy carries whatever scale the
-    // joint's world matrix had, and round-tripping that through a move or rotate drag would slowly drift
-    // the bone's size. Only an explicit scale drag should change it.
-    const current = target.animator.boneLocalTransform(nodeIndex) ?? mat4.create()
     const scale = patch.kind === 'scale'
-      ? (patch.local as vec3)
-      : mat4.getScaling(vec3.create(), current)
+      ? vec3.multiply(vec3.create(), dragStartScaleRef.current, patch.local as vec3)
+      : vec3.clone(dragStartScaleRef.current)
 
-    const desired = mat4.fromRotationTranslationScale(
-      mat4.create(),
-      quat.normalize(quat.create(), proxy.quaternion as any),
+    const local = boneLocalFromWorld(
+      parentWorldOf(jointIndex),
       proxy.position as any,
+      quat.normalize(quat.create(), proxy.quaternion as any),
       scale)
-
-    const parentWorld = parentWorldOf(jointIndex)
-    const inv = mat4.invert(mat4.create(), parentWorld)
-    if (!inv) return   // a degenerate parent (zero scale somewhere up the chain) — leave the bone alone
-    const local = mat4.multiply(mat4.create(), inv, desired)
+    if (!local) return   // a degenerate parent (zero scale somewhere up the chain) — leave the bone alone
     target.animator.setBoneLocalOverride(nodeIndex, local)
   }
 

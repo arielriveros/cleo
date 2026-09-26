@@ -568,12 +568,12 @@ describe('facing and turn-in-place', () => {
         // clip's root motion drives the body AWAY from the aim and the release angle is never reached.
         const intent = createIntent();
         intent.aimYaw = 100;
-        const out = stepLocomotion(intent, sense(), tuning({ turnThreshold: 90 }), createLocomotionState());
+        const out = stepLocomotion(intent, sense(), tuning({ turnThreshold: 90, turnSettleSeconds: 0 }), createLocomotionState());
         expect(out.turnRequest).toBeLessThan(0);
     });
 
     it('picks the 180 clip past 135 degrees and the 90 clip below it', () => {
-        const t = tuning({ turnThreshold: 90 });
+        const t = tuning({ turnThreshold: 90, turnSettleSeconds: 0 });
         const near = createIntent(); near.aimYaw = -100;
         const far = createIntent(); far.aimYaw = -170;
         expect(stepLocomotion(near, sense(), t, createLocomotionState()).turnRequest).toBe(1);
@@ -589,7 +589,7 @@ describe('facing and turn-in-place', () => {
 
     it('holds the turn until the release angle, not until the threshold', () => {
         // The hysteresis pair. With one number the turn would chatter whenever the camera hovered at it.
-        const t = tuning({ turnThreshold: 90, turnReleaseAngle: 10 });
+        const t = tuning({ turnThreshold: 90, turnReleaseAngle: 10, turnSettleSeconds: 0 });
         const intent = createIntent();
         intent.aimYaw = 120;
         const engaged = stepLocomotion(intent, sense(), t, createLocomotionState());
@@ -612,6 +612,62 @@ describe('facing and turn-in-place', () => {
         expect(Math.abs(engaged.turnRequest)).toBe(2);
         const midway = stepLocomotion(intent, sense({ bodyYaw: 80 }), t, engaged.next);
         expect(midway.turnRequest).toBe(engaged.turnRequest);
+    });
+
+    it('plays the 180 when the aim is SWEPT round to the back, not just flicked', () => {
+        // The camera crosses 90 long before it reaches 180. Choosing the clip at that crossing picked the
+        // 90 every time, so a 180 never played for anyone turning with a mouse.
+        const t = tuning({ turnThreshold: 90, turnSettleSeconds: 0.12 });
+        let state = createLocomotionState();
+        let request = 0;
+        for (let i = 0; i <= 20 && request === 0; i++) {
+            const intent = createIntent();
+            intent.aimYaw = -Math.min(175, i * 12);   // ~0.25 s sweep, 12 degrees a frame
+            const out = stepLocomotion(intent, sense(), t, state);
+            state = out.next;
+            request = out.turnRequest;
+        }
+        expect(request).toBe(2);
+    });
+
+    it('still plays the 90 when the aim settles short of 135', () => {
+        const t = tuning({ turnThreshold: 90, turnSettleSeconds: 0.12 });
+        let state = createLocomotionState();
+        const requests: number[] = [];
+        for (let i = 0; i < 30; i++) {
+            const intent = createIntent();
+            intent.aimYaw = -Math.min(100, i * 12);
+            const out = stepLocomotion(intent, sense(), t, state);
+            state = out.next;
+            requests.push(out.turnRequest);
+        }
+        // Waits out the settle window, then engages.
+        expect(requests[8]).toBe(0);
+        expect(requests[requests.length - 1]).toBe(1);
+    });
+
+    it('forgets a pending turn when the aim comes back inside the threshold', () => {
+        const t = tuning({ turnThreshold: 90, turnSettleSeconds: 0.12 });
+        const out = createIntent(); out.aimYaw = -100;
+        const back = createIntent(); back.aimYaw = -40;
+        let state = stepLocomotion(out, sense(), t, createLocomotionState()).next;
+        expect(state.turnPending).toBeGreaterThan(0);
+        state = stepLocomotion(back, sense(), t, state).next;
+        expect(state.turnPending).toBe(0);
+        expect(state.turning).toBe(false);
+    });
+
+    it('releases a turn that has OVERSHOT the aim instead of turning further away', () => {
+        // Aim at 130: two 90s land the body at 180, 50 degrees past it. Holding the latched side would
+        // replay the same turn again and rotate the body AWAY from the aim.
+        const t = tuning({ turnThreshold: 90, turnReleaseAngle: 10, turnSettleSeconds: 0 });
+        const intent = createIntent();
+        intent.aimYaw = -130;
+        const engaged = stepLocomotion(intent, sense(), t, createLocomotionState());
+        expect(engaged.turnRequest).toBe(1);
+        const overshot = stepLocomotion(intent, sense({ bodyYaw: -180 }), t, engaged.next);
+        expect(overshot.turnRequest).toBe(0);
+        expect(overshot.next.turning).toBe(false);
     });
 
     it('cancels a turn the moment the character starts moving', () => {

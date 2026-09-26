@@ -542,6 +542,10 @@ stripEmbeddedClips(playableTemplate.nodeJson)
  * own here at all — the turn clip's ROOT MOTION rotates it, which is why those four are the only clips
  * that keep their travel. Wire the sign backwards and the root motion drives the body AWAY from the aim,
  * the release angle is never reached, and the machine ping-pongs on one side of centre forever.
+ *
+ * Moving cancels a turn: each turn state leaves for Locomotion on the same speed gate Idle uses, ahead
+ * of its exit-time return. The cross-fade keeps the outgoing root pinned, so a turn cut part-way does
+ * not swing the mesh back.
  */
 function playableStateMachine() {
   const speed = (op, value) => ({ op: 'and', children: [{ param: 'Speed', op, value, hysteresis: 0.1 }] })
@@ -601,6 +605,12 @@ function playableStateMachine() {
           {
             from: 'Idle', to: state, conditions: [], minDwell: 0, hasExitTime: false, exitTime: 1,
             condition: { op: 'and', children: [{ param: 'Turn', op: 'eq', value: code }] },
+          },
+          // Moving cancels the turn, BEFORE the exit-time return. Without it the clip plays out under the
+          // walk, and its root motion keeps rotating a body that locomotion is already steering.
+          {
+            from: state, to: 'Locomotion', conditions: [], minDwell: 0, hasExitTime: false, exitTime: 1,
+            condition: speed('gt', 1.2),
           },
           whenFinished(state, 'Idle'),
         ]),

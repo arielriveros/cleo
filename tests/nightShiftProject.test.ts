@@ -689,6 +689,23 @@ describe.skipIf(!present)('the Night Shift example project', () => {
             expect(codeOf('Turn180Left')).toEqual([-2]);
         });
 
+        it('cancels a turn-in-place as soon as the character moves', () => {
+            // Played out under the walk, a turn clip's root motion keeps rotating a body that locomotion is
+            // already steering. The speed edge must come FIRST: the scan takes the first satisfied edge.
+            const tpl = library('templates').find((t: any) => t.name === 'Playable');
+            const player = allNodes(tpl.nodeJson).find((n: any) => n.name === 'Ch36');
+            const sm = player.stateMachine;
+            for (const state of ['Turn90Right', 'Turn90Left', 'Turn180Right', 'Turn180Left']) {
+                const out = sm.transitions.filter((t: any) => t.from === state);
+                const cancel = out.findIndex((t: any) => t.to === 'Locomotion'
+                    && (t.condition?.children ?? []).some((c: any) => c.param === 'Speed' && c.op === 'gt'));
+                const finish = out.findIndex((t: any) => t.hasExitTime);
+                expect(cancel, `${state} has no move-cancel edge`).toBeGreaterThanOrEqual(0);
+                expect(cancel, `${state}: the cancel edge must precede the exit-time return`).toBeLessThan(finish);
+                expect(out[cancel].hasExitTime).toBe(false);
+            }
+        });
+
         it('lands the zombie’s hit from a marker inside the swing it plays', () => {
             // The damage is fired by a clip event marker, not a timer, so it moves with the animation.
             // Two numbers on the `Attack` state bound where the marker may sit, and BOTH can silently

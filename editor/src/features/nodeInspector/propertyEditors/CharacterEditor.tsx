@@ -9,6 +9,7 @@ import { CharacterIcon } from '../sectionIcons'
 const CHARACTER_HINT = 'The pawn. It turns a ControlIntent into velocity and facing, and never asks where the intent came from — so the same character walks under a player, an AI or a script. Possess it with a Controller node.'
 const FACING_HINT = 'Aim turns the body toward where the Controller is looking (a strafe character). Velocity turns it toward travel (a face-your-movement character). None leaves rotation alone.'
 const TURN_HINT = 'Turn-in-place fires once the aim swings past the threshold and holds until it is back within the release angle. Two numbers, not one: with a single threshold the turn chatters whenever the camera hovers on it.'
+const SETTLE_HINT = 'Seconds the aim must stay past the threshold before a 90-degree turn engages, so a camera swept round to the back plays the 180 instead of a 90. Past 135 degrees the turn starts at once.'
 const JUMP_HINT = 'Coyote time keeps a jump working just after walking off an edge; the buffer keeps one pressed just before landing. Lockout suppresses the ground projection right after take-off, so it cannot flatten the jump.'
 const ACCEL_HINT = 'Units per second squared. 0 snaps to full speed, which is what a keyboard character usually wants; above 0 makes the engine’s isAccelerating / isDecelerating animation builtins meaningful.'
 const OUTPUT_HINT = 'What this character publishes to its Animator each frame. Bind these from a state machine parameter of type Variable, with the node reference set to this character.'
@@ -16,7 +17,7 @@ const DRIVE_HINT = 'Run locomotion with nothing possessing this character. Off b
 
 interface CharacterState {
   walkSpeed: number; runSpeed: number; jumpSpeed: number
-  turnSpeed: number; turnThreshold: number; turnReleaseAngle: number
+  turnSpeed: number; turnThreshold: number; turnReleaseAngle: number; turnSettleSeconds: number
   directionSmoothing: number; acceleration: number; airControl: number
   coyoteSeconds: number; jumpBufferSeconds: number; jumpLockoutSeconds: number
   facingMode: string; driveWhenUnpossessed: boolean
@@ -26,6 +27,7 @@ function readNode(node: CharacterNode): CharacterState {
   return {
     walkSpeed: node.walkSpeed, runSpeed: node.runSpeed, jumpSpeed: node.jumpSpeed,
     turnSpeed: node.turnSpeed, turnThreshold: node.turnThreshold, turnReleaseAngle: node.turnReleaseAngle,
+    turnSettleSeconds: node.turnSettleSeconds,
     directionSmoothing: node.directionSmoothing, acceleration: node.acceleration, airControl: node.airControl,
     coyoteSeconds: node.coyoteSeconds, jumpBufferSeconds: node.jumpBufferSeconds,
     jumpLockoutSeconds: node.jumpLockoutSeconds,
@@ -79,6 +81,7 @@ export default function CharacterEditor(props: { node: CharacterNode }) {
         {header('Turn in place', TURN_HINT)}
         {slider('Threshold', 'turnThreshold', 1, 180, 1, 0)}
         {slider('Release', 'turnReleaseAngle', 0, Math.max(1, state.turnThreshold - 1), 1, 0)}
+        {slider('Settle', 'turnSettleSeconds', 0, 0.5, 0.01, 2, SETTLE_HINT)}
 
         {header('Jump', JUMP_HINT)}
         {slider('Speed', 'jumpSpeed', 0, 20, 0.1)}

@@ -85,6 +85,8 @@ export class CharacterNode extends Node {
     public turnThreshold: number = 90;
     /** Degrees at which an in-progress turn-in-place clears. The release half of a hysteresis pair. */
     public turnReleaseAngle: number = 10;
+    /** Seconds the aim must hold past the threshold before a 90 turn engages, so a sweep to 180 plays the 180. */
+    public turnSettleSeconds: number = 0.12;
     /** Seconds of smoothing on {@link moveDir}, so a blend probe glides between strafes. */
     public directionSmoothing: number = 0.12;
     /** Units/s² the planar speed ramps at. 0 snaps, which is what a keyboard controller usually wants. */
@@ -163,6 +165,7 @@ export class CharacterNode extends Node {
             turnSpeed: this.turnSpeed,
             turnThreshold: this.turnThreshold,
             turnReleaseAngle: this.turnReleaseAngle,
+            turnSettleSeconds: this.turnSettleSeconds,
             directionSmoothing: this.directionSmoothing,
             acceleration: this.acceleration,
             airControl: this.airControl,
@@ -292,6 +295,7 @@ export class CharacterNode extends Node {
             turnSpeed: this.turnSpeed,
             turnThreshold: this.turnThreshold,
             turnReleaseAngle: this.turnReleaseAngle,
+            turnSettleSeconds: this.turnSettleSeconds,
             directionSmoothing: this.directionSmoothing,
             acceleration: this.acceleration,
             airControl: this.airControl,
@@ -315,6 +319,7 @@ export class CharacterNode extends Node {
         node.turnSpeed = num(json.turnSpeed, node.turnSpeed);
         node.turnThreshold = num(json.turnThreshold, node.turnThreshold);
         node.turnReleaseAngle = num(json.turnReleaseAngle, node.turnReleaseAngle);
+        node.turnSettleSeconds = num(json.turnSettleSeconds, node.turnSettleSeconds);
         node.directionSmoothing = num(json.directionSmoothing, node.directionSmoothing);
         node.acceleration = num(json.acceleration, node.acceleration);
         node.airControl = num(json.airControl, node.airControl);

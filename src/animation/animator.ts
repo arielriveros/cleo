@@ -601,6 +601,14 @@ export class Animator {
     private _rootRefT: vec3 = vec3.create();
     private _rootRefR: quat = quat.create();
     private _rootRefS: vec3 = vec3.fromValues(1, 1, 1);
+    // The OUTGOING clip's root pin, held for the length of a cross-fade out of a root-motion clip. The
+    // character already carries that clip's motion, so the fading-out pose must keep its root bone at
+    // the reference too — sampled raw, a 90-degree turn clip would show its hips at +90 ON TOP of the
+    // +90 the node now has, and the blend would swing the mesh in from the wrong side.
+    private _prevRootBoneName: string | null = null;
+    private _prevRootRefT: vec3 = vec3.create();
+    private _prevRootRefR: quat = quat.create();
+    private _prevRootRefS: vec3 = vec3.fromValues(1, 1, 1);
     // Rotation of the root bone's parent chain (the static armature), which carries the rig's
     // authoring-to-engine axis conversion. The root delta must be brought through it, or an authored yaw
     // comes out as roll or pitch in world space.
@@ -665,6 +673,7 @@ export class Animator {
             this._previousAnimation = this._currentAnimation;
             this._previousBones = new Map(this._bones);
             this._capturePreviousField();
+            this._capturePreviousRootPin();
             this._previousTime = this._currentTime;
             // Read BEFORE _playing/_loop are overwritten: a finished clip must hold its final pose under
             // the cross-fade, not restart.
@@ -821,6 +830,7 @@ export class Animator {
             this._previousAnimation = this._currentAnimation;
             this._previousBones = new Map(this._bones);
             this._capturePreviousField();
+            this._capturePreviousRootPin();
             this._previousTime = this._currentTime;
             this._previousAdvancing = this._playing;
             this._previousLoop = this._loop;
@@ -1429,6 +1439,8 @@ export class Animator {
             for (const bone of this._previousBones.values()) {
                 bone.update(this._previousTime);
             }
+            // The re-sample above overwrote the outgoing clip's root pin; put it back.
+            this._pinPreviousRoot();
         }
 
         // Turn the current bone local transforms into final skinning matrices.
@@ -1490,6 +1502,13 @@ export class Animator {
             this._boneOverrides?.delete(nodeIndex);
             if (this._boneOverrides?.size === 0) this._boneOverrides = null;
         } else {
+            // A NaN pin would poison this bone and every descendant for as long as it is held.
+            for (let i = 0; i < 16; i++) {
+                if (!Number.isFinite(local[i])) {
+                    Logger.warn(`Ignored a non-finite pose for bone node ${nodeIndex}`, 'Animation');
+                    return;
+                }
+            }
             (this._boneOverrides ??= new Map()).set(nodeIndex, mat4.clone(local));
         }
         this._recomputePose();
@@ -1600,6 +1619,26 @@ export class Animator {
         // Pin the root bone to its start pose: the character carries the motion, the mesh renders in place.
         const locked = mat4.create();
         mat4.fromRotationTranslationScale(locked, this._rootRefR, this._rootRefT, this._rootRefS);
+        bone.setLocalTransform(locked);
+    }
+
+    // Remember the current clip's root pin as the outgoing one. Called as a cross-fade starts, BEFORE the
+    // incoming clip re-arms (and overwrites) the root-motion reference.
+    private _capturePreviousRootPin(): void {
+        if (!this._rootMotionActive || !this._rootBoneName) { this._prevRootBoneName = null; return; }
+        this._prevRootBoneName = this._rootBoneName;
+        vec3.copy(this._prevRootRefT, this._rootRefT);
+        quat.copy(this._prevRootRefR, this._rootRefR);
+        vec3.copy(this._prevRootRefS, this._rootRefS);
+    }
+
+    // Lock the outgoing clip's root bone to its reference, exactly as `_applyRootMotion` does for the
+    // current clip.
+    private _pinPreviousRoot(): void {
+        const bone = this._prevRootBoneName ? this._previousBones.get(this._prevRootBoneName) : null;
+        if (!bone) return;
+        const locked = mat4.create();
+        mat4.fromRotationTranslationScale(locked, this._prevRootRefR, this._prevRootRefT, this._prevRootRefS);
         bone.setLocalTransform(locked);
     }
 

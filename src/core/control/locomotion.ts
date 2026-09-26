@@ -57,6 +57,13 @@ export interface LocomotionTuning {
     turnThreshold: number;
     /** Degrees at which an in-progress turn-in-place clears. The release half of the hysteresis pair. */
     turnReleaseAngle: number;
+    /**
+     * Seconds the aim must stay past the threshold before a 90-degree turn engages, so the clip is chosen
+     * from where the aim SETTLES rather than from the frame it first crossed. A camera swept round to the
+     * back crosses 90 long before it reaches 180; picking the clip at that crossing meant the 180 never
+     * played. Past 135 the turn engages at once — the choice can no longer get bigger. 0 disables.
+     */
+    turnSettleSeconds: number;
     /** Time constant, seconds, smoothing `moveDir` so a blend probe glides between strafes. */
     directionSmoothing: number;
     /**
@@ -92,6 +99,7 @@ export const LOCOMOTION_DEFAULTS: LocomotionTuning = {
     turnSpeed: 540,
     turnThreshold: 90,
     turnReleaseAngle: 10,
+    turnSettleSeconds: 0.12,
     directionSmoothing: 0.12,
     acceleration: 0,
     airControl: 1,
@@ -121,6 +129,7 @@ export function locomotionTuning(over?: Partial<LocomotionTuning> | null): Locom
         turnThreshold,
         // Strictly below the threshold, or a turn releases on the frame it engages and nothing ever turns.
         turnReleaseAngle: clamp(num(o.turnReleaseAngle, d.turnReleaseAngle), 0, turnThreshold - 0.5),
+        turnSettleSeconds: clamp(num(o.turnSettleSeconds, d.turnSettleSeconds), 0, 1),
         directionSmoothing: Math.max(0, num(o.directionSmoothing, d.directionSmoothing)),
         acceleration: Math.max(0, num(o.acceleration, d.acceleration)),
         airControl: clamp(num(o.airControl, d.airControl), 0, 1),
@@ -157,17 +166,19 @@ export interface LocomotionState {
     /**
      * The clip code the in-progress turn is holding (+1/+2 right, -1/-2 left; 0 when not turning).
      *
-     * Carried rather than recomputed: it is chosen ONCE, at the moment the turn engages, from the angle
-     * as it was then. Re-deriving it each frame from the current angle would let a clip flip from a 180
-     * to a 90 halfway through, mid-animation.
+     * Carried rather than recomputed: it is chosen ONCE, at the moment the turn engages — after the
+     * `turnSettleSeconds` window — from the angle as it was then. Re-deriving it each frame from the
+     * current angle would let a clip flip from a 180 to a 90 halfway through, mid-animation.
      */
     turnCode: number;
+    /** Seconds the aim has been past the threshold without a turn engaged yet (the settle window). */
+    turnPending: number;
     /** Airborne from a jump, as opposed to having walked off something. */
     jumping: boolean;
 }
 
 export function createLocomotionState(): LocomotionState {
-    return { smoothDir: 0, coyote: 0, jumpLockout: 0, turning: false, turnCode: 0, jumping: false };
+    return { smoothDir: 0, coyote: 0, jumpLockout: 0, turning: false, turnCode: 0, turnPending: 0, jumping: false };
 }
 
 export interface LocomotionOutput {
@@ -433,6 +444,7 @@ export function stepLocomotion(
         // Moving cancels any turn-in-place: the body is about to face the aim under the moving turn.
         next.turning = false;
         next.turnCode = 0;
+        next.turnPending = 0;
         turnRequest = 0;
         if (tuning.facingMode !== 'none') {
             const targetYaw = tuning.facingMode === 'velocity'
@@ -447,16 +459,29 @@ export function stepLocomotion(
         // Idle: the body does not rotate here at all. A turn-in-place CLIP's root motion rotates it, and
         // this only decides which clip and holds its code until the body has caught up.
         const diff = shortestAngle(intent.aimYaw - sense.bodyYaw);
+        // A POSITIVE diff needs a LEFT turn — see the module header for why. `turnRequest` is a clip
+        // selector (+right / -left), not an angle, so its sign is the opposite of moveDir's.
+        const side = diff > 0 ? -1 : 1;
         if (!next.turning) {
+            const far = Math.abs(diff) >= 135;
             if (Math.abs(diff) >= tuning.turnThreshold) {
-                next.turning = true;
-                // A POSITIVE diff needs a LEFT turn — see the module header for why. `turnRequest` is a
-                // clip selector (+right / -left), not an angle, so its sign is the opposite of moveDir's.
-                const side = diff > 0 ? -1 : 1;
-                next.turnCode = side * (Math.abs(diff) >= 135 ? 2 : 1);
-                turnRequest = next.turnCode;
+                // Wait for the aim to settle before choosing 90 vs 180 — unless it is already past 135.
+                next.turnPending = state.turnPending + dt;
+                if (far || next.turnPending >= tuning.turnSettleSeconds) {
+                    next.turning = true;
+                    next.turnPending = 0;
+                    next.turnCode = side * (far ? 2 : 1);
+                    turnRequest = next.turnCode;
+                }
+            } else {
+                next.turnPending = 0;
             }
-        } else if (Math.abs(diff) < tuning.turnReleaseAngle) {
+        } else if (Math.abs(diff) < tuning.turnReleaseAngle
+            || (side !== Math.sign(next.turnCode) && Math.abs(diff) < 135)) {
+            // Released when caught up — or when the body has OVERSHOT the aim: holding the latched side
+            // would keep replaying the same turn, rotating the body further away each time. The next
+            // frame re-engages fresh, toward the aim, if it is still past the threshold. (Not past 135:
+            // an aim straight behind flips sign on noise, and either side is right there.)
             next.turning = false;
             next.turnCode = 0;
             turnRequest = 0;
@@ -464,6 +489,7 @@ export function stepLocomotion(
     } else {
         next.turning = false;
         next.turnCode = 0;
+        next.turnPending = 0;
         turnRequest = 0;
     }
 

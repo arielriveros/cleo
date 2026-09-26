@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { quat, vec3 } from 'gl-matrix';
+import { mat4, quat, vec3 } from 'gl-matrix';
 import {
     clamp, damp, dampTime, dampVec3Time, dampAngleDeg, deltaAngleDeg,
-    eulerFromQuatDeg, noise1, fbm1, wrapDegrees, wrapSpan, deltaWrapped, dampWrapped,
+    eulerFromQuatDeg, decomposeTRS, noise1, fbm1, wrapDegrees, wrapSpan, deltaWrapped, dampWrapped,
 } from '../src/core/math';
 
 describe('damp', () => {
@@ -243,5 +243,39 @@ describe('clamp', () => {
         expect(clamp(-5, 0, 1)).toBe(0);
         expect(clamp(5, 0, 1)).toBe(1);
         expect(clamp(0.25, 0, 1)).toBe(0.25);
+    });
+});
+
+describe('decomposeTRS', () => {
+    const split = (m: mat4) => {
+        const t = vec3.create(), r = quat.create(), s = vec3.create();
+        decomposeTRS(m, t, r, s);
+        return { t, r, s };
+    };
+    const recompose = ({ t, r, s }: { t: vec3; r: quat; s: vec3 }) => mat4.fromRotationTranslationScale(mat4.create(), r, t, s);
+    const expectMatClose = (a: mat4, b: mat4) => { for (let i = 0; i < 16; i++) expect(a[i]).toBeCloseTo(b[i], 5); };
+
+    it('round-trips a non-uniformly scaled matrix (gl-matrix getRotation does not)', () => {
+        const q = quat.fromEuler(quat.create(), 30, 50, -20);
+        const m = mat4.fromRotationTranslationScale(mat4.create(), q, [1, 2, 3], [0.5, 2, 3]);
+        const d = split(m);
+        expect(Math.abs(quat.dot(d.r, q))).toBeCloseTo(1, 5);
+        expectMatClose(recompose(d), m);
+    });
+
+    it('stays finite with a zero-scale axis, where gl-matrix returns NaN', () => {
+        const q = quat.fromEuler(quat.create(), 0, 40, 0);
+        const m = mat4.fromRotationTranslationScale(mat4.create(), q, [0, 0, 0], [0, 1, 1]);
+        const d = split(m);
+        for (const v of [...d.t, ...d.r, ...d.s]) expect(Number.isFinite(v)).toBe(true);
+        expect(quat.length(d.r)).toBeCloseTo(1, 6);
+    });
+
+    it('recomposes a mirrored matrix exactly', () => {
+        const q = quat.fromEuler(quat.create(), 10, 20, 30);
+        const m = mat4.fromRotationTranslationScale(mat4.create(), q, [0, 1, 0], [-1, 1, 1]);
+        const d = split(m);
+        expect(d.s[0]).toBeLessThan(0);
+        expectMatClose(recompose(d), m);
     });
 });

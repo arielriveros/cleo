@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { mat4, quat, vec3 } from 'gl-matrix'
-import { eulerFromQuatDeg } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { useClip } from './ClipContext'
 import { getAnimationTarget, jointLabel } from '../animation/skeleton'
@@ -9,6 +8,7 @@ import { promptDialog } from '../dialogs/dialogStore'
 import { cryptoRandomId } from '../../utils/ids'
 import Collapsable from '../../components/Collapsable'
 import type { StoredPoseBone } from '../../utils/animationAssets'
+import { boneRotation, composeBone, decomposeBone, safeScale, type Trs } from './boneTrs'
 
 // Posing one bone and writing it into the clip.
 //
@@ -22,29 +22,14 @@ import type { StoredPoseBone } from '../../utils/animationAssets'
 
 const PATHS: TrackPath[] = ['translation', 'rotation', 'scale']
 
-/** A local matrix split into the numbers a person edits: metres, degrees, and a scale factor. */
-type Trs = { t: [number, number, number]; r: [number, number, number]; s: [number, number, number] }
-
-function decompose(m: mat4): Trs {
-  const t = mat4.getTranslation(vec3.create(), m)
-  const q = quat.normalize(quat.create(), mat4.getRotation(quat.create(), m))
-  const s = mat4.getScaling(vec3.create(), m)
-  const e = eulerFromQuatDeg(vec3.create(), q)
-  return { t: [t[0], t[1], t[2]], r: [e[0], e[1], e[2]], s: [s[0], s[1], s[2]] }
-}
-
-function compose(trs: Trs): mat4 {
-  const q = quat.fromEuler(quat.create(), trs.r[0], trs.r[1], trs.r[2])
-  return mat4.fromRotationTranslationScale(mat4.create(), q, trs.t as any, trs.s as any)
-}
-
 /** The raw channel values for a path, straight off a local matrix. What a keyframe actually stores. */
 function channelValues(m: mat4, path: TrackPath): number[] {
   if (path === 'rotation') {
-    const q = quat.normalize(quat.create(), mat4.getRotation(quat.create(), m))
+    const q = boneRotation(m)
     return [q[0], q[1], q[2], q[3]]
   }
-  const v = path === 'translation' ? mat4.getTranslation(vec3.create(), m) : mat4.getScaling(vec3.create(), m)
+  // Scale from the same decomposition as the rotation, so a mirrored bone keys a pair that recomposes.
+  const v = path === 'translation' ? mat4.getTranslation(vec3.create(), m) : decomposeBone(m).s
   return [v[0], v[1], v[2]]
 }
 
@@ -107,12 +92,12 @@ export default function BonePose() {
 
   const animator = target.animator
   const posed = !!animator.boneLocalOverride(nodeIndex)
-  const trs = decompose(local)
+  const trs = decomposeBone(local)
   const label = jointLabel(skin, jointIndex)
 
   /** Pin the bone to an edited transform. Live — the character moves as the number changes. */
   const setTrs = (next: Trs) => {
-    animator.setBoneLocalOverride(nodeIndex, compose(next))
+    animator.setBoneLocalOverride(nodeIndex, composeBone(next))
     force(x => x + 1)
   }
   const release = () => { animator.setBoneLocalOverride(nodeIndex, null); force(x => x + 1) }
@@ -170,8 +155,8 @@ export default function BonePose() {
       if (!override) continue
       const restM = animator.boneRestTransform(j.nodeIndex) ?? mat4.create()
       // delta = local . rest^-1, in the PARENT frame — the same form `applyPoseOffset` re-applies.
-      const restRot = quat.normalize(quat.create(), mat4.getRotation(quat.create(), restM))
-      const rot = quat.normalize(quat.create(), mat4.getRotation(quat.create(), override))
+      const restRot = boneRotation(restM)
+      const rot = boneRotation(override)
       const delta = quat.normalize(quat.create(), quat.multiply(quat.create(), rot, quat.invert(quat.create(), restRot)))
       const dt = vec3.subtract(vec3.create(),
         mat4.getTranslation(vec3.create(), override), mat4.getTranslation(vec3.create(), restM))
@@ -208,10 +193,10 @@ export default function BonePose() {
           {title}{atKey && <span className='text-highlight' title='There is a key here'> ◆</span>}
         </span>
         {[0, 1, 2].map(i => (
-          <input key={i} className={num} type='number' step={step} value={round(trs[key][i])}
-            onChange={e => {
+          <NumberField key={i} className={num} step={step} value={trs[key][i]}
+            onCommit={v => {
               const next: Trs = { t: [...trs.t], r: [...trs.r], s: [...trs.s] }
-              next[key][i] = parseFloat(e.target.value) || 0
+              next[key][i] = key === 's' ? safeScale(v) : v
               setTrs(next)
             }} />
         ))}
@@ -255,4 +240,23 @@ export default function BonePose() {
   )
 }
 
-const round = (n: number) => Math.round(n * 1e4) / 1e4
+const round = (n: number) => Number.isFinite(n) ? Math.round(n * 1e4) / 1e4 : 0
+
+/**
+ * A number input that tolerates the half-typed states on the way to a number — empty, "-", "1." — by
+ * holding them as a local draft and only committing text that parses. Committing `parseFloat(v) || 0`
+ * on every keystroke is what used to zero a scale the moment its field was cleared.
+ */
+function NumberField(props: { value: number; step: number; className: string; onCommit: (v: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  return (
+    <input className={props.className} type='number' step={props.step}
+      value={draft ?? String(round(props.value))}
+      onChange={e => {
+        setDraft(e.target.value)
+        const v = parseFloat(e.target.value)
+        if (Number.isFinite(v)) props.onCommit(v)
+      }}
+      onBlur={() => setDraft(null)} />
+  )
+}

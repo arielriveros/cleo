@@ -1,4 +1,4 @@
-import { quat, vec3 } from "gl-matrix";
+import { mat3, mat4, quat, vec3 } from "gl-matrix";
 
 /**
  * Scalar/vector helpers shared by gameplay code and the camera rig. A leaf module: it must keep
@@ -157,4 +157,43 @@ export function eulerFromQuatDeg(out: vec3, q: quat): vec3 {
         out[2] = Math.atan2(2 * (x * y + w * z), 1 - 2 * (y * y + z * z)) * RAD2DEG;  // atan2(R10, R00)
     }
     return out;
+}
+
+// --- matrix -> TRS -------------------------------------------------------------------------------
+
+/**
+ * Split an affine matrix into translation, rotation and scale, never producing NaN.
+ *
+ * Not `mat4.getRotation`: gl-matrix 3.4 divides by the scale unguarded — a zero-scale axis gives
+ * `0 * Infinity = NaN` and poisons the whole quaternion — and it divides each column by the wrong
+ * axis's scale, so a non-uniformly scaled matrix decomposes to the wrong rotation.
+ *
+ * A mirrored matrix (negative determinant) reports its X scale negative, so compose(decompose(m)) is m.
+ * A zero-scale axis keeps scale 0; the rotation is then only as good as the remaining axes allow, but
+ * it is always a finite unit quaternion.
+ */
+export function decomposeTRS(m: mat4, outT: vec3, outR: quat, outS: vec3): void {
+    outT[0] = m[12]; outT[1] = m[13]; outT[2] = m[14];
+
+    let sx = Math.hypot(m[0], m[1], m[2]);
+    const sy = Math.hypot(m[4], m[5], m[6]);
+    const sz = Math.hypot(m[8], m[9], m[10]);
+    const det = m[0] * (m[5] * m[10] - m[6] * m[9])
+        - m[4] * (m[1] * m[10] - m[2] * m[9])
+        + m[8] * (m[1] * m[6] - m[2] * m[5]);
+    if (det < 0) sx = -sx;
+    outS[0] = sx; outS[1] = sy; outS[2] = sz;
+
+    const EPS = 1e-8;
+    const ix = Math.abs(sx) > EPS ? 1 / sx : 0;
+    const iy = Math.abs(sy) > EPS ? 1 / sy : 0;
+    const iz = Math.abs(sz) > EPS ? 1 / sz : 0;
+    const r = mat3.fromValues(
+        m[0] * ix, m[1] * ix, m[2] * ix,
+        m[4] * iy, m[5] * iy, m[6] * iy,
+        m[8] * iz, m[9] * iz, m[10] * iz);
+    quat.fromMat3(outR, r);
+    const len = quat.length(outR);
+    if (!Number.isFinite(len) || len < EPS) quat.identity(outR);
+    else quat.scale(outR, outR, 1 / len);
 }

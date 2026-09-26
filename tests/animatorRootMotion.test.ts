@@ -184,6 +184,32 @@ describe('Animator — root motion', () => {
         expect(Math.abs(axis[2])).toBeLessThan(0.05);
     });
 
+    // The regression for "a turn-in-place swings in from the opposite direction when it ends": the node
+    // already holds the clip's +90, so the FADING-OUT pose must keep its root pinned too. Re-sampled raw,
+    // it showed the hips at +90 on top of the node's +90 and the blend slerped the mesh back from +180.
+    it('keeps the outgoing root bone pinned while cross-fading out of a finished root-motion clip', () => {
+        const node = makeNode();
+        const idle: Animation = {
+            name: 'idle',
+            samplers: [{ input: [0, 1], output: [0, 0, 0, 1, 0, 0, 0, 1], interpolation: 'LINEAR' }],
+            channels: [{ samplerIndex: 0, targetNodeIndex: 0, targetPath: 'rotation' }],
+        };
+        const a = makeAnimator([rmRotateY('turn', 1), idle], node);
+        a.blendTime = 0.3;
+        a.playAnimationByName('turn', false, false);
+        a.play();
+        a.update(0.5);
+        a.update(0.6); // past the end: the clip finishes and holds
+        expect(quat.getAxisAngle(vec3.create(), node.quaternion)).toBeCloseTo(Math.PI / 2, 2);
+
+        a.playAnimationByName('idle', true, true);
+        a.update(0.05); // early in the fade: the outgoing pose dominates
+
+        const r = quat.create();
+        mat4.getRotation(r, a.getFinalBoneMatrices()[0]);
+        expect(quat.getAxisAngle(vec3.create(), r)).toBeCloseTo(0, 3);
+    });
+
     it('stops driving the node once a field takes over', () => {
         const node = makeNode();
         const a = makeAnimator([rmTranslate('walk', 2, 1)], node);

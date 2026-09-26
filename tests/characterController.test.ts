@@ -209,7 +209,7 @@ describe('serialization', () => {
         const character = new CharacterNode('pawn');
         Object.assign(character, {
             walkSpeed: 2.5, runSpeed: 7, jumpSpeed: 6, turnSpeed: 300, turnThreshold: 75,
-            turnReleaseAngle: 5, directionSmoothing: 0.2, acceleration: 30, airControl: 0.4,
+            turnReleaseAngle: 5, turnSettleSeconds: 0.2, directionSmoothing: 0.2, acceleration: 30, airControl: 0.4,
             coyoteSeconds: 0.2, jumpBufferSeconds: 0.25, jumpLockoutSeconds: 0.1,
             facingMode: 'velocity', driveWhenUnpossessed: true,
         });

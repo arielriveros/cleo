@@ -392,7 +392,7 @@ export { Game, setGameHost } from "./core/game";
 export type { GameHost } from "./core/game";
 export * as Vec from "gl-matrix";
 export * as MathUtils from "./core/math";
-export { clamp, lerp, damp, dampTime, eulerFromQuatDeg } from "./core/math";
+export { clamp, lerp, damp, dampTime, eulerFromQuatDeg, decomposeTRS } from "./core/math";
 export { aimFromDirection } from "./core/cameraRigMath";
 
 // What a user script's `import { ... } from 'cleo'` resolves to: the barrel's own namespace. Must stay
