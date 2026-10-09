@@ -418,10 +418,42 @@ function buildRigsAndAnimations() {
   const everyClip = [...mannequinIds, ...zombieIds]
   for (const rig of rigs) rig.animationIds = everyClip
 
+  // Hand sockets on both skeletons, so a weapon or a torch can be dropped under either character and
+  // attached with "Attach to socket" straight away. Named without the namespace, so a script asks for
+  // `RightHand` on the player and the zombie alike.
+  mannequinRig.sockets = handSockets('mannequin', 'mixamorig1')
+  zombieRig.sockets = handSockets('zombie', 'mixamorig5')
+
   return { rigs, animations, mannequinRig, zombieRig }
 }
 
+function handSockets(key, prefix) {
+  return ['RightHand', 'LeftHand'].map(side => ({ id: stableId(`socket:${key}:${side}`), name: side, bone: `${prefix}:${side}` }))
+}
+
 const { rigs, animations, mannequinRig, zombieRig } = buildRigsAndAnimations()
+
+/**
+ * The runtime half of a rig's sockets: every embedded skin on that skeleton carries them, because the
+ * skin is what ships — models, template copies and scene copies alike. Matched by bone-name namespace,
+ * which is what tells the two rigs' skins apart here.
+ */
+function embedSockets(json) {
+  const walk = n => {
+    if (!n || typeof n !== 'object') return
+    if (Array.isArray(n)) { n.forEach(walk); return }
+    const skin = n.model?.skin
+    if (skin) {
+      const names = (skin.nodeNames ?? []).map(e => e[1])
+      const rig = names.some(x => x.startsWith('mixamorig1:')) ? mannequinRig
+        : names.some(x => x.startsWith('mixamorig5:')) ? zombieRig : null
+      if (rig) skin.sockets = rig.sockets.map(({ name, bone }) => ({ name, bone }))
+    }
+    for (const v of Object.values(n)) if (v && typeof v === 'object') walk(v)
+  }
+  walk(json)
+  return json
+}
 
 /**
  * The zombie's gait as a 1D blend space, replacing the Idle/Walk state ladder it used to have.
@@ -1339,6 +1371,7 @@ function main() {
     scripts: scripts.assets,
     templates: [playableTemplate, zombie, ...pickupTemplates()],
   }
+  embedSockets([libraries.models, libraries.templates, night, menu])
   for (const [name, value] of Object.entries(libraries))
     writeJson(path.join(OUT, 'libraries', `${name}.json`), value)
 

@@ -24,7 +24,9 @@ get/set loop / speed / blendTime
 ```
 
 Direct playback is fine for one-offs — an emote, a door opening. For anything a character does
-continuously, use a state machine: it handles blending, exit times and hysteresis for you.
+continuously, use a state machine: it handles blending, exit times and hysteresis for you. On a
+character that already runs a state machine, play a one-off as an [action](#actions) instead — the
+machine decides what plays, and an action is the way to put something on top of it.
 
 ## Driving a state machine
 
@@ -63,12 +65,94 @@ onUpdate() {
 ```
 
 A `trigger` parameter is consumed by the first transition that reads it, so it cannot fire twice.
+That holds across [layers](#layers) too: they share the parameter table, and whichever layer fires on
+a trigger first consumes it.
+
+A character running an [Animation Controller](../editor/animation.md#animation-controllers) holds a
+resolved copy of it, so all of the above works the same either way. `getStateMachine()` returns that
+copy; its `controllerId` says which controller it came from.
+
+## Layers
+
+A machine's layers above the base each run their own states over the shared parameters. They are
+authored in the editor ([Layers and bone masks](../editor/animation.md#layers-and-bone-masks)); a
+script mostly just reads them, or fades one in and out:
+
+```ts
+setLayerWeight(layer: string, weight: number): void   // 0..1
+layerStateName(layer: string): string | null          // the base layer's is currentStateName
+get layerNames: string[]                              // in order, base excluded
+```
+
+```ts
+onUpdate() {
+  // Raise the upper-body aim layer while the weapon is drawn.
+  animator.setLayerWeight('Aim', this.weaponDrawn ? 1 : 0)
+}
+```
+
+A layer whose weight is driven by a parameter ignores `setLayerWeight` — the parameter wins. Set the
+parameter instead.
+
+## Actions
+
+An action is a clip played **once over whatever the machine is doing**, with no state or transition
+for it in the graph — an attack, a reload, a wave. It fades in, plays, and fades out on its own.
+
+```ts
+playAction(clipName: string, options?: AnimationActionOptions): AnimationActionHandle
+stopAction(slot?: string, blendOut?: number): void     // every slot when omitted
+isActionPlaying(slot?: string): boolean                // any slot when omitted
+
+interface AnimationActionOptions {
+  slot?: string        // default: the machine's first declared slot, else an implicit full-body one
+  blendIn?: number     // seconds, default 0.15
+  blendOut?: number    // seconds, default 0.2
+  speed?: number       // default 1
+  loop?: boolean       // default false: loops until stopped
+}
+
+interface AnimationActionHandle {
+  readonly slot: string
+  readonly clipName: string
+  readonly done: boolean
+  readonly finished: Promise<void>   // resolves once it has faded fully out, however it ended
+  stop(blendOut?: number): void
+}
+```
+
+```ts
+async onAction(action: string, state: ActionState) {
+  if (action === 'Reload' && state.started && !animator.isActionPlaying('UpperBody')) {
+    await animator.playAction('Reload', { slot: 'UpperBody' }).finished
+    this.ammo = this.magazineSize
+  }
+}
+```
+
+A slot is declared on the machine — name, which layer it sits above, a bone mask, override or
+additive — in the editor's [Action slots](../editor/animation.md#action-slots) section. An
+`UpperBody` slot with an upper-body mask is what keeps the legs on locomotion while the arms reload.
+
+- **With no slots declared**, `playAction` plays full-body over everything, in an implicit slot
+  called `FullBody`. Asking for an undeclared slot name does the same.
+- **A second action in the same slot cross-fades** from the first, and the first one's `finished`
+  resolves at that moment.
+- **The fade-out ends with the clip**, not after it: a non-looping action starts fading `blendOut`
+  seconds before its last frame.
+- **An unknown clip name** logs a warning and returns a handle that is already `done`.
 
 ## Events
 
-An event marker on a clip fires a named event at a time you scrub on the timeline. That is how a
-footstep sound, a hit frame or a particle burst stays in sync with the animation rather than with a
-timer.
+An event marker fires a named event at a time you scrub on the timeline. That is how a footstep
+sound, a hit frame or a particle burst stays in sync with the animation rather than with a timer.
+
+Markers come from two places, and both arrive through the same callback:
+
+- **On the clip** (`Animation.events`, authored on the clip editor's timeline). These fire wherever
+  the clip plays — a base state, a layer or an action slot.
+- **On the state machine** (`AnimationStateMachine.events`, the Variables panel), keyed by clip name.
+  The older form; it still works.
 
 ```ts
 const stop = animator.onAnimationEvent((eventName: string, clipName: string) => {
@@ -155,7 +239,8 @@ node — instead of snapping back to where it started. Enable it per clip in the
 
 Use it on turn-in-place and other clips whose *animation* is authoritative. Leave it **off** on
 locomotion clips driven by physics velocity, or the character double-moves. A field state ignores
-root motion entirely.
+root motion entirely, and so does everything above the base layer: a layer or an action never moves
+the character.
 
 ## Ragdolls
 
@@ -173,14 +258,53 @@ this.scene.physics.startRagdoll(modelNode, { impulse: [0, 1.5, -2] })
 
 This is the usual substitute for a death animation.
 
+## Sockets
+
+A socket is a named attach point on a bone, authored on the rig
+([Sockets](../editor/animation.md#sockets)). To hold something in a hand, attach the item **node** to
+it — the scene then moves the node onto the socket every frame:
+
+```ts
+const sword = this.findNode('Sword')!
+sword.attachToSocket('parent', 'RightHand')    // nearest character above the sword
+sword.attachToSocket(this, 'RightHand')        // or a specific character node
+sword.detachFromSocket()                       // drops it where it is
+```
+
+See [Node API](node-api.md#sockets) for the attachment itself. To *read* where a socket is — to aim a
+ray from a muzzle, say — ask the skinned model:
+
+```ts
+get socketNames: string[]                               // ModelNode
+getSocketWorldMatrix(name: string, out?: mat4): mat4 | null
+```
+
+```ts
+const model = this.findNode('Ch36') as ModelNode
+const m = model.getSocketWorldMatrix('RightHand')
+if (m) {
+  const muzzle = Vec.mat4.getTranslation(Vec.vec3.create(), m)
+}
+```
+
+`getSocketWorldMatrix` returns `null` when the model has no such socket. The socket ignores its bone's
+scale, so an FBX armature's `0.01` does not shrink what it holds; scale comes from the socket's own
+offset.
+
+Followers are moved in the scene's late pass — after every animator has posed, before camera rigs —
+so a held item never trails the hand by a frame.
+
 ## Bone matrices
 
 ```ts
 getFinalBoneMatrices(): mat4[]
 getFinalBoneMatricesFlat(): number[]
+getJointModelMatrix(jointIndex: number): mat4 | null    // a joint relative to the model node
 ```
 
-For attaching things to bones, or drawing your own overlay.
+For drawing your own overlay, or for a bone that has no socket. `getJointModelMatrix` is in
+**model** space — multiply by the model node's `worldTransform` for a world matrix — and is indexed
+like `Skin.joints`. It is a live matrix, overwritten by the next pose: clone it to keep it.
 
 ## Retargeting
 

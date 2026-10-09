@@ -34,6 +34,9 @@ export interface SceneRefs {
    */
   scriptIds?: string[];
   animationFieldIds?: string[];
+  animControllerIds?: string[];
+  boneMaskIds?: string[];
+  poseAssetIds?: string[];
   animationIds?: string[];
   soundSampleIds?: string[];
   audioSourceIds?: string[];

@@ -15,6 +15,7 @@ import type { BodyDescription, ShapeDescription } from '../EngineContext'
 import { migrateLegacyUI } from '../../utils/uiMigration'
 import type { ScriptAsset } from '../../utils/scripts'
 import { deepClone } from '../../utils/deepClone'
+import { posesForRig } from '../../utils/poseAssets'
 
 // game.json v2: a multi-scene published game. The entry (main) scene runs first; scripts call
 // Game.loadScene(name|id) to switch at runtime. Textures are serialized ONCE at the top level (they are
@@ -175,7 +176,9 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     .map(a => {
       const rig = a.rigId ? (src.libs.rigs ?? []).find(r => r.id === a.rigId) : undefined
       const withSkin = { ...a, sourceSkin: sourceSkinFor(a, src.libs.rigs ?? []) }
-      return rig?.poses?.length ? { ...withSkin, poses: rig.poses } : withSkin
+      // Pose ASSETS on the rig resolve the same pose ids as its legacy list, so both ship.
+      const poses = posesForRig(rig, src.libs.poseAssets ?? [])
+      return poses.length ? { ...withSkin, poses } : withSkin
     })
 
   const out: any = {

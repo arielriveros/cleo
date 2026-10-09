@@ -45,7 +45,7 @@ scene: a model, a material, a texture, a script, a tileset, an animation clip, a
 live in a virtual folder tree you browse in the **Assets** panel, and several nodes can reference
 the same asset — editing a material updates every node that uses it.
 
-There are 14 asset kinds; see [Assets](editor/assets.md) for what each one is and how it is created.
+There are 18 asset kinds; see [Assets](editor/assets.md) for what each one is and how it is created.
 
 ## Template
 

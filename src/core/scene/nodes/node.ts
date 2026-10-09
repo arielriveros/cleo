@@ -53,6 +53,22 @@ const FALLING_SPEED = -0.5;
  */
 export type MotionBlurMode = 'full' | 'objectOnly' | 'none';
 
+/**
+ * Pins a node to a skeleton socket — a sword in a hand, a torch, a hat. The scene rewrites the node's
+ * transform every frame, after animation, so the authored position/rotation/scale are overridden while
+ * this is set.
+ */
+export interface SocketAttachment {
+  /**
+   * Whose skeleton: `'parent'` finds the nearest skinned model above this node (or inside the nearest
+   * ancestor that holds one — a character is usually a holder with its meshes beneath it), which is the
+   * normal case of dropping a weapon under a character. Anything else is a node id.
+   */
+  target: 'parent' | string;
+  /** Socket name, as authored on the rig. */
+  socket: string;
+}
+
 export class Node {
   protected readonly _id: string;
   protected _name: string;
@@ -113,6 +129,9 @@ export class Node {
   // How much of the frame's motion may blur this node — see MotionBlurMode. Authored (inspector +
   // serialized) and read by the renderer's object-velocity pass, never by anything else.
   protected _motionBlur: MotionBlurMode = 'full';
+
+  // See SocketAttachment. Read by the scene's late socket pass.
+  protected _socketAttachment: SocketAttachment | null = null;
 
   // Renderer-driven visibility for LOD level switching and distance culling (see LodGroupNode). Must stay
   // separate from _visible: that setter emits SCENE_CHANGED and, on ModelNode, writes castShadow.
@@ -713,6 +732,7 @@ export class Node {
       variables: this._serializeVariables(),
       spawnOnStart: this._spawnOnStart,
       ...(this._motionBlur !== 'full' ? { motionBlur: this._motionBlur } : {}),
+      ...(this._socketAttachment ? { socketAttachment: { ...this._socketAttachment } } : {}),
       ...(await this._serializePayload()),
     };
   }
@@ -750,6 +770,13 @@ export class Node {
     // Absent in older saves, which is exactly the 'full' default. Assigned to the field rather than
     // through the setter: the setter fans out to children, and this node has none yet.
     if (json.motionBlur === 'objectOnly' || json.motionBlur === 'none') node._motionBlur = json.motionBlur;
+
+    if (json.socketAttachment && typeof json.socketAttachment.socket === 'string') {
+      node._socketAttachment = {
+        target: typeof json.socketAttachment.target === 'string' ? json.socketAttachment.target : 'parent',
+        socket: json.socketAttachment.socket,
+      };
+    }
 
     // Restore custom variables before scripts so onStart can read them.
     Node._parseVariables(node, json.variables);
@@ -1071,6 +1098,29 @@ export class Node {
     this._motionBlur = value;
     for (const child of this._children) child.motionBlur = value;
     this._notifyChange('component', 'motionBlur', prev, value);
+  }
+
+  /** The socket this node is pinned to, or null. See {@link SocketAttachment}. */
+  public get socketAttachment(): SocketAttachment | null { return this._socketAttachment; }
+  public set socketAttachment(value: SocketAttachment | null) {
+    const prev = this._socketAttachment;
+    this._socketAttachment = value && value.socket ? { target: value.target || 'parent', socket: value.socket } : null;
+    // The scene keeps the list of socket followers with its other derived node lists.
+    this._scene?.invalidateNodeLists();
+    this._notifyChange('component', 'socketAttachment', prev, this._socketAttachment);
+  }
+
+  /**
+   * Pin this node to `socket` on `target`'s skeleton (a character node, or `'parent'` for the nearest one
+   * above). The node stays where it is in the hierarchy; the scene drives its transform from then on.
+   */
+  public attachToSocket(target: Node | 'parent', socket: string): void {
+    this.socketAttachment = { target: target === 'parent' ? 'parent' : target.id, socket };
+  }
+
+  /** Stop following a socket. The node keeps the transform it had on the last frame. */
+  public detachFromSocket(): void {
+    this.socketAttachment = null;
   }
 
   /**

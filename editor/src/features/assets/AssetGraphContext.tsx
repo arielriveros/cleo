@@ -62,6 +62,7 @@ export function AssetGraphProvider({ children }: { children: React.ReactNode }) 
     assetsLoaded,
     materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations,
     tilesets, aiBrains, images, textures, audioSources, soundSamples, rigs,
+    animControllers, boneMasks, poseAssets,
   } = useAssetLibrary()
 
   const [version, setVersion] = useState(0)
@@ -121,6 +122,9 @@ export function AssetGraphProvider({ children }: { children: React.ReactNode }) 
     for (const r of rigs) visit('rig', r)
     for (const t of tilesets) visit('tileset', t)
     for (const b of aiBrains) visit('aiBrain', b)
+    for (const c of animControllers) visit('animController', c)
+    for (const m of boneMasks) visit('boneMask', m)
+    for (const p of poseAssets) visit('pose', p)
     for (const i of images) visit('image', i)
     for (const t of textures) visit('texture', t)
     for (const a of audioSources) visit('audioSource', a)
@@ -149,7 +153,8 @@ export function AssetGraphProvider({ children }: { children: React.ReactNode }) 
     if (changed) setVersion(v => v + 1)
   }, [
     assetsLoaded, materials, terrainMaterials, templates, models, scriptAssets, animationFields,
-    animations, rigs, tilesets, aiBrains, images, textures, audioSources, soundSamples, sceneList, openSceneId,
+    animations, rigs, tilesets, aiBrains, animControllers, boneMasks, poseAssets, images, textures, audioSources,
+    soundSamples, sceneList, openSceneId,
   ])
 
   // --- the open scene, live ---------------------------------------------------------------------------

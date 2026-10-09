@@ -82,6 +82,7 @@ onUpdate() {
 | `turnSpeed` | `540` | Degrees/s the body swings to the aim **while moving**. |
 | `turnThreshold` | `90` | Aim-vs-body angle that triggers a turn-in-place. |
 | `turnReleaseAngle` | `10` | Deadzone at which the turn is considered done. |
+| `turnSettleSeconds` | `0.12` | **Settle** in the inspector. How long the aim must stay past the threshold before a 90° turn engages. See below. |
 | `directionSmoothing` | `0.12` | Seconds the blend-space direction axis takes to glide. |
 | `acceleration` | `0` | Units/s^2, measured **along the ground**. `0` reaches commanded speed immediately. See below. |
 | `airControl` | `1` | |
@@ -90,6 +91,25 @@ onUpdate() {
 | `jumpLockoutSeconds` | `0.15` | |
 | `facingMode` | `'aim'` | `'aim' \| 'velocity' \| 'none'`. |
 | `driveWhenUnpossessed` | `false` | |
+
+### Turn-in-place
+
+A standing character with `facingMode: 'aim'` does not rotate itself. When the aim gets more than
+`turnThreshold` away from the body it raises a `turnRequest`, and the turn clip's **root motion**
+rotates the body.
+
+- **The choice of clip waits for the aim to settle.** A camera swept round to the back crosses 90°
+  long before it reaches 180°; picking the clip at that crossing would always play the 90. So a turn
+  engages only once the aim has stayed past the threshold for `turnSettleSeconds` — or at once, past
+  135°, where it can only be the 180. `0` disables the wait.
+- **The clip is chosen once**, when the turn engages, and held until it releases.
+- **A turn releases** when the body is within `turnReleaseAngle` of the aim — or when it has
+  **overshot** it, so a latched turn cannot keep rotating the body further away. If the aim is still
+  past the threshold, a fresh turn engages towards it.
+- **Moving cancels a turn.** The moment the character moves, `turnRequest` drops to `0` and the body
+  swings to the aim at `turnSpeed`. Give each turn state a transition back to locomotion on the same
+  speed gate Idle uses, ahead of its exit-time return, or the clip plays out under the walk and its
+  root motion keeps rotating a body locomotion is already steering.
 
 ### `acceleration` on slopes
 

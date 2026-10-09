@@ -23,13 +23,19 @@ Selecting the scene **root** shows [Scene settings](scene-authoring.md#scene-set
 |---|---|---|
 | **Model** | Nodes with geometry | Which model asset it came from, and a jump into the model editor. |
 | **Material** | Model nodes, decals | Linked material thumbnail, edit / unlink / create. **One slot per submesh** on a merged import. A decal takes **PBR materials only**: linking any other kind is refused with a message. |
-| **Animation** | Nodes that are, or contain, a skinned model | Clips, linked `.anim` assets, animation fields, and the button into the Animation Editor. |
+| **Rig** | Nodes that are, or contain, a skinned model | The skeleton the character's clips come from, with a ✎ into the rig editor. |
+| **Animation** | Nodes that are, or contain, a skinned model | Which machine the character runs — its **own state machine** or an [Animation Controller](animation.md#animation-controllers) — the button into the state machine editor (**Open State Machine** / **Edit Controller**), and, on a controller, **Clip overrides (this character only)**. |
+| **Attach to socket** | Any non-UI node, when a character with sockets is in reach or the node is already attached | Pins the node to a bone [socket](animation.md#sockets): a target (**Nearest character above**, or a specific character) and a socket. |
 | **Scripts** | Any node | The script slot, plus that script's per-node variables. |
 | **Physics** | Any node | See [Physics](physics.md). |
 
 > The Model and Animation sections appear only on the node that actually has the mesh, or on the
 > root of a placed model instance. They no longer appear on cameras, spatial sounds or any ancestor
 > above a mesh — those were showing because a debug helper counted as a child.
+
+> A node **attached to a socket** has its transform rewritten every frame, so editing its Transform
+> while attached does nothing visible. Move the socket's offset in the rig editor instead, or set the
+> socket back to **Not attached**.
 
 ## By node type
 
@@ -70,8 +76,10 @@ not show on Blinn-Phong or Cel materials. See
 
 ### Gameplay
 
-**Character** — the pawn's movement capabilities: walk and run speeds, jump, turn speed and
-threshold, direction smoothing, acceleration, air control, coyote time, jump buffering, facing mode.
+**Character** — the pawn's movement capabilities: walk and run speeds, jump, turn speed, direction
+smoothing, acceleration, air control, coyote time, jump buffering, facing mode, and turn-in-place
+**Threshold**, **Release** and **Settle**. See
+[Characters and controllers](../scripting/characters-and-controllers.md#character-tuning).
 
 **Controller** — the agent hub. See [AI agents](ai-agents.md).
 

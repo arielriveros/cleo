@@ -3,12 +3,17 @@ import { useCleoEngine } from '../EngineContext'
 import type {
   AnimationStateMachine, AnimationParameter, AnimationState,
   AnimationTransition, AnimationCondition, AnimationConditionGroup, AnimationConditionNode,
-  AnimationEventMarker, AnimationParameterType,
+  AnimationEventMarker, AnimationParameterType, AnimationLayer, AnimationSlotDef,
 } from 'cleo'
 import { isConditionGroup } from 'cleo'
 import { getAnimationTarget, accessibleNodeVariables, AccessibleVariable, AnimationTarget } from './skeleton'
 import { useAssetLibrary } from '../AssetLibraryContext'
-import { AnimationFieldAsset, reembedFields } from '../../utils/animationFields'
+import { AnimationFieldAsset } from '../../utils/animationFields'
+import {
+  resolveMachineLinks, instantiateController, controllerMachineOf, buildControllerAsset, type AnimControllerAsset,
+} from '../../utils/animationControllers'
+import type { BoneMaskAsset } from '../../utils/boneMasks'
+import type { PoseAsset } from '../../utils/poseAssets'
 
 // Shared editing session for the Animation State Machine: the node-graph and the sidebar inspector edit the
 // SAME machine, so the working copy `sm`, the selection, the view toggle and every mutator live here.
@@ -46,7 +51,31 @@ interface StateMachineContextValue {
   animationFields: AnimationFieldAsset[]
   fieldOf: (id: string | undefined) => AnimationFieldAsset | undefined
 
+  /**
+   * The ACTIVE LAYER's view of the machine: `states`/`transitions` are that layer's, everything else
+   * (parameters, events, slots) is the machine's. The graph and the state/transition inspectors read and
+   * write only this, which is what lets every one of them work on any layer unchanged.
+   */
   sm: AnimationStateMachine
+  /** The whole machine, every layer. */
+  fullSm: AnimationStateMachine
+  /** 0 = the base layer; n = `fullSm.layers[n - 1]`. */
+  activeLayer: number
+  setActiveLayer: (i: number) => void
+  addLayer: () => void
+  setLayer: (i: number, patch: Partial<AnimationLayer>) => void
+  removeLayer: (i: number) => void
+  addSlot: () => void
+  setSlot: (i: number, patch: Partial<AnimationSlotDef>) => void
+  removeSlot: (i: number) => void
+  boneMasks: BoneMaskAsset[]
+  poseAssets: PoseAsset[]
+  /** The controller asset this session edits, when the machine follows one. Apply then writes the ASSET. */
+  controller: AnimControllerAsset | undefined
+  /** Turn the working copy into a new controller asset and link this character to it. */
+  saveAsController: (name: string) => void
+  /** Stop following the controller: the machine becomes this character's own. */
+  detachController: () => void
   selection: SMSelection
   setSelection: (s: SMSelection) => void
   graphView: boolean
@@ -192,13 +221,17 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     scriptAssets, markTabDirty, clearTabDirty, registerAnimationApply, bodies, editSharedClip,
     adoptModelAsset, resolveModelAssetId,
   } = useCleoEngine()
-  const { animationFields } = useAssetLibrary()
+  const { animationFields, boneMasks, poseAssets, animControllers, addAnimController, updateAnimController, models } = useAssetLibrary()
 
   const target = getAnimationTarget(editorScene, stateMachineTargetId)
   const hasBoneNames = !!(target && target.skin.nodeNames && target.skin.nodeNames.size > 0)
 
-  const [sm, setSm] = useState<AnimationStateMachine>(EMPTY)
+  const [fullSm, setSm] = useState<AnimationStateMachine>(EMPTY)
+  const [activeLayer, setActiveLayerState] = useState(0)
   const [selection, setSelection] = useState<SMSelection>(null)
+  // The active layer's view. A layer index past the end (one just removed) falls back to the base.
+  const layerIdx = activeLayer > 0 && activeLayer <= (fullSm.layers?.length ?? 0) ? activeLayer : 0
+  const sm = layerView(fullSm, layerIdx)
   const [graphView, setGraphView] = useState(true)
   const [simulate, setSimulate] = useState(false)
   const [, force] = useState(0)
@@ -227,9 +260,14 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   // Load the tab's un-applied working copy if it has one, else the model's.
   useEffect(() => {
     if (!target) { setSm(EMPTY); setSelection(null); return }
-    const existing: AnimationStateMachine | null =
-      smCacheRef.current.get(activeTabId) ?? target.animator.getStateMachine() ?? null
+    const live = target.animator.getStateMachine() ?? null
+    // A node following a controller holds a copy with ITS clip overrides applied; editing that would bake
+    // them into the shared asset. So the session edits the controller's own machine.
+    const linked = live?.controllerId ? animControllers.find(c => c.id === live.controllerId) : undefined
+    const fromNode: AnimationStateMachine | null = linked ? { ...clone(linked.machine), controllerId: linked.id } : live
+    const existing: AnimationStateMachine | null = smCacheRef.current.get(activeTabId) ?? fromNode
     setSm(existing ? migrateConditions(clone(existing)) : clone(EMPTY))
+    setActiveLayerState(0)
     const entry = existing?.states.find((s: AnimationState) => s.isEntry)?.name ?? existing?.states[0]?.name ?? null
     setSelection(entry ? { kind: 'state', name: entry } : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -253,12 +291,65 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     })
     if (!opts?.silent) markTabDirty(activeTabId, 'anim-sm-edit')
   }
+  // The same, for the states and transitions of the ACTIVE layer: `fn` sees and returns that layer's view.
+  const updateLayer = (fn: (prev: AnimationStateMachine) => AnimationStateMachine, opts?: { silent?: boolean }) =>
+    update(prev => writeLayer(prev, layerIdx, fn(layerView(prev, layerIdx))), opts)
+
+  const setActiveLayer = (i: number) => {
+    setActiveLayerState(i)
+    setSelection(null)
+  }
+  const addLayer = () => {
+    const names = (fullSm.layers ?? []).map(l => l.name)
+    const name = uniqueName('Layer', names)
+    update(prev => ({
+      ...prev,
+      layers: [...(prev.layers ?? []), { name, states: [{ name: 'Empty', clipName: '', loop: true, speed: 1, isEntry: true, x: 40, y: 40 }], transitions: [], weight: 1, blend: 'override' }],
+    }))
+    setActiveLayer((fullSm.layers?.length ?? 0) + 1)
+  }
+  const setLayer = (i: number, patch: Partial<AnimationLayer>) =>
+    update(prev => ({ ...prev, layers: (prev.layers ?? []).map((l, idx) => (idx === i - 1 ? { ...l, ...patch } : l)) }))
+  const removeLayer = (i: number) => {
+    update(prev => {
+      const layers = (prev.layers ?? []).filter((_, idx) => idx !== i - 1)
+      // Slots are placed by layer INDEX: one above the removed layer moves down with it.
+      const slots = prev.slots?.map(sl => (sl.afterLayer !== undefined && sl.afterLayer >= i ? { ...sl, afterLayer: Math.max(0, sl.afterLayer - 1) } : sl))
+      const next: AnimationStateMachine = { ...prev, layers: layers.length ? layers : undefined, ...(slots ? { slots } : {}) }
+      if (!layers.length) delete next.layers
+      return next
+    })
+    setActiveLayer(0)
+  }
+  const addSlot = () => update(prev => ({
+    ...prev,
+    slots: [...(prev.slots ?? []), { name: uniqueName('Slot', (prev.slots ?? []).map(sl => sl.name)) }],
+  }))
+  const setSlot = (i: number, patch: Partial<AnimationSlotDef>) =>
+    update(prev => ({ ...prev, slots: (prev.slots ?? []).map((sl, idx) => (idx === i ? { ...sl, ...patch } : sl)) }))
+  const removeSlot = (i: number) => update(prev => {
+    const slots = (prev.slots ?? []).filter((_, idx) => idx !== i)
+    const next: AnimationStateMachine = { ...prev, slots }
+    if (!slots.length) delete next.slots
+    return next
+  })
+
   const apply = () => {
     if (!target) return
     // The one place a field-playing state's `fieldId` is resolved into an EMBEDDED copy, which is what makes
     // the machine self-contained through scene saves, templates, bundles and publish. A state whose field
     // asset is gone has its copy cleared, degrading to "no clip".
-    const applied = reembedFields(clone(sm), animationFields)
+    // Masks and poses are resolved here too, on every layer and slot — see `resolveMachineLinks`.
+    const libs = { animationFields, boneMasks, poses: poseAssets }
+    let applied = resolveMachineLinks(clone(fullSm), libs)
+    const linked = fullSm.controllerId ? animControllers.find(c => c.id === fullSm.controllerId) : undefined
+    if (linked) {
+      // Write the CONTROLLER, then give this character its copy with its own overrides re-applied. Every
+      // other character on the controller is re-embedded by the library change (`reembedLiveMachines`).
+      const updated = { ...linked, machine: controllerMachineOf(fullSm) }
+      updateAnimController(linked.id, updated)
+      applied = instantiateController(updated, libs, target.animator.getStateMachine()?.clipOverrides)
+    }
     target.animator.setStateMachine(clone(applied))
     commitAnimationStateMachine(clone(applied)) // marks the SOURCE model's tab dirty — that's where the edit landed
     smCacheRef.current.delete(activeTabId) // in sync with the model again; nothing un-applied to preserve
@@ -294,14 +385,25 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
       const renameNode = (n: AnimationConditionNode): AnimationConditionNode =>
         isConditionGroup(n) ? { ...n, children: n.children.map(renameNode) }
           : n.param === oldName ? { ...n, param: patch.name! } : n
+      // Every LAYER's transitions read the same parameters, and a layer's weight can be bound to one.
+      const renameIn = (list: AnimationTransition[]) => list.map(t => ({
+        ...t,
+        conditions: t.conditions.map(c => c.param === oldName ? { ...c, param: patch.name! } : c),
+        condition: t.condition ? renameNode(t.condition) as AnimationConditionGroup : undefined,
+      }))
+      const renameState = (st: AnimationState) => st.speedParam === oldName ? { ...st, speedParam: patch.name! } : st
       return {
         ...prev,
         parameters,
-        transitions: prev.transitions.map(t => ({
-          ...t,
-          conditions: t.conditions.map(c => c.param === oldName ? { ...c, param: patch.name! } : c),
-          condition: t.condition ? renameNode(t.condition) as AnimationConditionGroup : undefined,
-        })),
+        transitions: renameIn(prev.transitions),
+        ...(prev.layers ? {
+          layers: prev.layers.map(l => ({
+            ...l,
+            transitions: renameIn(l.transitions),
+            states: l.states.map(renameState),
+            weightParam: l.weightParam === oldName ? patch.name! : l.weightParam,
+          })),
+        } : {}),
       }
     })
   }
@@ -310,7 +412,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   // ---- States ----
   const addState = (pos?: { x: number; y: number }) => {
     const name = uniqueName('State', sm.states.map(s => s.name))
-    update(prev => ({
+    updateLayer(prev => ({
       ...prev,
       states: [...prev.states, { name, clipName: clips[0] ?? '', loop: true, speed: 1, isEntry: prev.states.length === 0, x: pos?.x, y: pos?.y }],
     }))
@@ -318,7 +420,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   }
   const setState = (i: number, patch: Partial<AnimationState>) => {
     const oldName = sm.states[i]?.name
-    update(prev => {
+    updateLayer(prev => {
       let states = prev.states.map((s, idx) => idx === i ? { ...s, ...patch } : s)
       if (patch.isEntry) states = states.map((s, idx) => ({ ...s, isEntry: idx === i })) // single entry
       if (!patch.name || patch.name === oldName) return { ...prev, states }
@@ -343,7 +445,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   }
   const removeState = (i: number) => {
     const name = sm.states[i].name
-    update(prev => ({
+    updateLayer(prev => ({
       ...prev,
       states: prev.states.filter((_, idx) => idx !== i),
       transitions: prev.transitions.filter(t => t.from !== name && t.to !== name),
@@ -354,11 +456,11 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   // Silent: the graph's one-time auto-layout runs from an effect on open, so marking dirty here would make
   // merely LOOKING at a coordinate-less machine claim unsaved edits.
   const commitLayout = (coords: Record<string, { x: number; y: number }>) =>
-    update(prev => ({ ...prev, states: prev.states.map(s => coords[s.name] ? { ...s, x: coords[s.name].x, y: coords[s.name].y } : s) }), { silent: true })
+    updateLayer(prev => ({ ...prev, states: prev.states.map(s => coords[s.name] ? { ...s, x: coords[s.name].x, y: coords[s.name].y } : s) }), { silent: true })
   const deleteElements = (stateNames: string[], removedLinks: [string, string][]) => {
     const names = new Set(stateNames)
     const keys = new Set(removedLinks.map(([a, b]) => linkKey(a, b).join('|')))
-    update(prev => ({
+    updateLayer(prev => ({
       ...prev,
       states: prev.states.filter(s => !names.has(s.name)),
       transitions: prev.transitions.filter(t =>
@@ -389,7 +491,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   const addTransition = (from: string, to: string) => {
     // A duplicate would draw as a second edge exactly on top of the first: invisible and unclickable.
     if (!from || !to || findT(sm.transitions, from, to) >= 0) return
-    update(prev => findT(prev.transitions, from, to) >= 0 ? prev : {
+    updateLayer(prev => findT(prev.transitions, from, to) >= 0 ? prev : {
       ...prev,
       transitions: [...prev.transitions, { from, to, conditions: [], condition: emptyGroup(), hasExitTime: false, exitTime: 1 }],
     })
@@ -397,13 +499,13 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     setSelection({ kind: 'transition', a, b })
   }
   const setTransition = (from: string, to: string, patch: Partial<AnimationTransition>) =>
-    update(prev => {
+    updateLayer(prev => {
       const i = findT(prev.transitions, from, to)
       if (i < 0) return prev
       return { ...prev, transitions: prev.transitions.map((t, idx) => idx === i ? { ...t, ...patch } : t) }
     })
   const removeTransition = (from: string, to: string) => {
-    update(prev => ({ ...prev, transitions: prev.transitions.filter(t => !(t.from === from && t.to === to)) }))
+    updateLayer(prev => ({ ...prev, transitions: prev.transitions.filter(t => !(t.from === from && t.to === to)) }))
     // Only drop the selection when the whole link is gone; the other direction may still be there to edit.
     const link = linkOf(from, to)
     const remaining = link && ((link.forward && !(link.forward.from === from && link.forward.to === to)) ||
@@ -412,13 +514,13 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   }
   const removeLink = (x: string, y: string) => {
     const [a, b] = linkKey(x, y)
-    update(prev => ({ ...prev, transitions: prev.transitions.filter(t => linkKey(t.from, t.to).join('|') !== `${a}|${b}`) }))
+    updateLayer(prev => ({ ...prev, transitions: prev.transitions.filter(t => linkKey(t.from, t.to).join('|') !== `${a}|${b}`) }))
     if (sameLink(selection, a, b)) setSelection(null)
   }
 
   // ---- Conditions (a tree per direction, addressed by path) ----
   const editCondition = (from: string, to: string, path: CondPath, fn: (n: AnimationConditionNode) => AnimationConditionNode | null) =>
-    update(prev => {
+    updateLayer(prev => {
       const i = findT(prev.transitions, from, to)
       if (i < 0) return prev
       const t = prev.transitions[i]
@@ -438,7 +540,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
    * carry both, and the tree is what the evaluator consults when it is present.
    */
   const setTransitionCondition = (from: string, to: string, next: AnimationConditionGroup) =>
-    update(prev => {
+    updateLayer(prev => {
       const i = findT(prev.transitions, from, to)
       if (i < 0) return prev
       return {
@@ -485,17 +587,21 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     const finalName = sharedId
       ? (editSharedClip(sharedId, oldName, { name: next }), next)
       : renameAnimationClip(oldName, next)
+    const swap = (list: AnimationState[]) => list.map(s => s.clipName === oldName ? { ...s, clipName: finalName } : s)
     update(prev => ({
       ...prev,
-      states: prev.states.map(s => s.clipName === oldName ? { ...s, clipName: finalName } : s),
+      states: swap(prev.states),
+      ...(prev.layers ? { layers: prev.layers.map(l => ({ ...l, states: swap(l.states) })) } : {}),
       events: prev.events.map(ev => ev.clipName === oldName ? { ...ev, clipName: finalName } : ev),
     }))
   }
   const deleteClip = (name: string) => {
     removeAnimationClip(name)
+    const clear = (list: AnimationState[]) => list.map(s => s.clipName === name ? { ...s, clipName: '' } : s)
     update(prev => ({
       ...prev,
-      states: prev.states.map(s => s.clipName === name ? { ...s, clipName: '' } : s),
+      states: clear(prev.states),
+      ...(prev.layers ? { layers: prev.layers.map(l => ({ ...l, states: clear(l.states) })) } : {}),
       events: prev.events.filter(ev => ev.clipName !== name),
     }))
   }
@@ -509,6 +615,18 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
 
   const fieldOf = (id: string | undefined) => (id ? animationFields.find(f => f.id === id) : undefined)
 
+  const controller = fullSm.controllerId ? animControllers.find(c => c.id === fullSm.controllerId) : undefined
+  const saveAsController = (name: string) => {
+    const rigId = modelId ? models.find(m => m.id === modelId)?.rigId : undefined
+    const asset = buildControllerAsset(name, fullSm, rigId)
+    addAnimController(asset)
+    update(prev => ({ ...prev, controllerId: asset.id }))
+  }
+  const detachController = () => update(prev => {
+    const { controllerId: _c, clipOverrides: _o, ...own } = prev
+    return own as AnimationStateMachine
+  })
+
   // Must read the SOURCE node, not the preview clone: enterStateMachineEditor clones the character into a
   // throwaway scene, and adopting from the clone would put that copy in the library.
   const sourceNode = stateMachineSourceScene?.getNodeById(stateMachineSourceId ?? '') ?? null
@@ -517,7 +635,9 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
 
   const value: StateMachineContextValue = {
     target, hasBoneNames, clips, clipAssetId, modelId, adoptModel, accessVars, animationFields, fieldOf,
-    sm, selection, setSelection, graphView, setGraphView, simulate, setSimulate,
+    sm, fullSm, activeLayer: layerIdx, setActiveLayer, addLayer, setLayer, removeLayer, addSlot, setSlot, removeSlot,
+    boneMasks, poseAssets, controller, saveAsController, detachController,
+    selection, setSelection, graphView, setGraphView, simulate, setSimulate,
     apply, paramOf,
     addParam, setParam, removeParam,
     addState, setState, removeState, stateIndex, commitLayout, deleteElements,
@@ -529,6 +649,22 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+}
+
+/** Layer `i`'s view of a machine: its states and transitions over the machine's shared everything-else. */
+export function layerView(sm: AnimationStateMachine, i: number): AnimationStateMachine {
+  if (i <= 0) return sm
+  const layer = sm.layers?.[i - 1]
+  if (!layer) return sm
+  return { ...sm, states: layer.states, transitions: layer.transitions }
+}
+
+/** Write a layer view back into the machine. The inverse of {@link layerView}. */
+export function writeLayer(sm: AnimationStateMachine, i: number, view: AnimationStateMachine): AnimationStateMachine {
+  if (i <= 0) return { ...view, layers: sm.layers, slots: view.slots ?? sm.slots }
+  const layers = (sm.layers ?? []).map((l, idx) => (idx === i - 1 ? { ...l, states: view.states, transitions: view.transitions } : l))
+  // Everything that is not the layer's own states/transitions stays the machine's.
+  return { ...sm, parameters: view.parameters, events: view.events, layers }
 }
 
 export function uniqueName(base: string, existing: string[]): string {

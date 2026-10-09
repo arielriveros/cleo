@@ -57,7 +57,9 @@ fn fs_main(in: VertexOutput) -> DBuffer {
     let coverage = s.weight * decalAngleWeight(surfaceN) * u_decal.u_decalOpacity;
 
     // Colour and coverage: the material's base colour and alpha, or the radial gradient.
-    var albedo = u_material.baseColor;
+    // Not `albedo`: naga's GLSL backend names the fragment OUTPUT after the struct field below, and a
+    // local of the same name then shadows it — `albedo = out.albedo` fails as a vec4 -> vec3 assignment.
+    var surfaceAlbedo = u_material.baseColor;
     var alpha = u_material.opacity;
     if (u_decal.u_pattern == 0) {
         if (u_material.hasBaseColorTexture != 0) {
@@ -65,7 +67,7 @@ fn fs_main(in: VertexOutput) -> DBuffer {
                                           u_material_baseColorTexture_sampler,
                                           insetUv(s.uv, textureDimensions(u_material_baseColorTexture_texture, 0)),
                                           s.ddx, s.ddy);
-            albedo *= pow(texel.rgb, vec3<f32>(2.2));   // sRGB -> linear, as pbrGBuffer.wgsl
+            surfaceAlbedo *= pow(texel.rgb, vec3<f32>(2.2));   // sRGB -> linear, as pbrGBuffer.wgsl
             alpha *= texel.a;
         }
         if (u_material.hasMaskMap != 0) {
@@ -75,7 +77,7 @@ fn fs_main(in: VertexOutput) -> DBuffer {
         }
     } else {
         let p = radialPattern(s.t, s.tPerPixel);
-        albedo = p.rgb;
+        surfaceAlbedo = p.rgb;
         alpha = p.a;
     }
     let a = clamp(alpha * coverage, 0.0, 1.0);
@@ -116,7 +118,7 @@ fn fs_main(in: VertexOutput) -> DBuffer {
     }
 
     var out: DBuffer;
-    out.albedo = select(vec4<f32>(0.0), vec4<f32>(albedo * a, a), u_decal.u_affectAlbedo != 0);
+    out.albedo = select(vec4<f32>(0.0), vec4<f32>(surfaceAlbedo * a, a), u_decal.u_affectAlbedo != 0);
     out.normal = vec4<f32>((n * 0.5 + 0.5) * normalA, normalA);
     out.surface = select(vec4<f32>(0.0), vec4<f32>(vec3<f32>(roughness, metallic, ao) * a, a),
                          u_decal.u_affectSurface != 0);

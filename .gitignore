@@ -14,3 +14,7 @@ coverage/
 # Rust build output for the vendored naga WASM artifact. The artifact itself
 # (src/graphics/rhi/webgpu/naga/) IS committed — see tools/naga-wasm/README.md.
 tools/naga-wasm/target/
+
+CLAUDE.md
+.claude
+graphify-out

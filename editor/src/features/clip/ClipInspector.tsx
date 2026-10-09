@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
+import { useAssetLibrary } from '../AssetLibraryContext'
+import { posesForRig } from '../../utils/poseAssets'
 import { useClip } from './ClipContext'
 import Collapsable from '../../components/Collapsable'
 import BonePose from './BonePose'
@@ -46,8 +48,10 @@ export default function ClipInspector() {
   const [batchOpen, setBatchOpen] = useState(false)
   const [batchPicked, setBatchPicked] = useState<Set<string>>(new Set())
 
+  const { poseAssets } = useAssetLibrary()
   const rig = useMemo(() => (asset?.rigId ? rigs.find(r => r.id === asset.rigId) : undefined), [asset?.rigId, rigs])
-  const poses = rig?.poses ?? []
+  // The rig's own (legacy) poses plus every pose asset on it — the same union a clip resolves against.
+  const poses = useMemo(() => posesForRig(rig, poseAssets), [rig, poseAssets])
 
   if (!asset) return <div className='p-3 text-xs text-gray-400'>No animation open.</div>
 

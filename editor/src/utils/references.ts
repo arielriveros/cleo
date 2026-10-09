@@ -280,6 +280,47 @@ export function collectReferencedAnimationFieldIds(scene: Scene | null | undefin
   return set
 }
 
+/** Every node's live animation state machine in a scene, for the machine-link collectors below. */
+function sceneMachines(scene: Scene | null | undefined): any[] {
+  const out: any[] = []
+  for (const node of scene?.nodes ?? []) {
+    const sm = (node as any).animator?.getStateMachine?.()
+    if (sm) out.push(sm)
+  }
+  return out
+}
+
+/**
+ * Animation CONTROLLER asset ids a scene references: `controllerId` on a node's machine, which is the
+ * resolved embedded copy that actually plays (see animationControllers.ts).
+ */
+export function collectReferencedAnimControllerIds(scene: Scene | null | undefined): Set<string> {
+  const set = new Set<string>()
+  for (const sm of sceneMachines(scene)) if (sm.controllerId) set.add(sm.controllerId)
+  return set
+}
+
+/** BONE MASK asset ids a scene references: `maskId` on any machine layer or slot. */
+export function collectReferencedBoneMaskIds(scene: Scene | null | undefined): Set<string> {
+  const set = new Set<string>()
+  for (const sm of sceneMachines(scene)) {
+    for (const layer of sm.layers ?? []) if (layer?.maskId) set.add(layer.maskId)
+    for (const slot of sm.slots ?? []) if (slot?.maskId) set.add(slot.maskId)
+  }
+  return set
+}
+
+/** POSE asset ids a scene references: `poseRef.assetId` on any state, base machine and layers alike. */
+export function collectReferencedPoseAssetIds(scene: Scene | null | undefined): Set<string> {
+  const set = new Set<string>()
+  for (const sm of sceneMachines(scene)) {
+    for (const layer of [sm, ...(sm.layers ?? [])]) {
+      for (const state of layer?.states ?? []) if (state?.poseRef?.assetId) set.add(state.poseRef.assetId)
+    }
+  }
+  return set
+}
+
 /**
  * Shared animation asset ids referenced by any MODEL asset in the library.
  * The link is `animationIds` on the model asset, never on a node or a scene, so this takes the library
@@ -424,6 +465,9 @@ export function buildSceneRefs(
     aiBrainIds: [...collectReferencedAiBrainIds(scene)],
     scriptIds: [...collectReferencedScriptIds(scene)],
     animationFieldIds: [...collectReferencedAnimationFieldIds(scene)],
+    animControllerIds: [...collectReferencedAnimControllerIds(scene)],
+    boneMaskIds: [...collectReferencedBoneMaskIds(scene)],
+    poseAssetIds: [...collectReferencedPoseAssetIds(scene)],
     // The LUT and the lens-dirt mask live in RenderSettings, where no node walk can reach them. They were
     // never recorded at save time before, so a scene's grading LUT looked orphaned once the scene closed.
     textureIds: [...collectSceneTextureIds(scene, [settings?.colorGradingLut, settings?.lensDirtTexture])],
@@ -451,6 +495,9 @@ export type SceneRefsShape = {
   textureIds: string[]
   scriptIds: string[]
   animationFieldIds: string[]
+  animControllerIds: string[]
+  boneMaskIds: string[]
+  poseAssetIds: string[]
   animationIds: string[]
   soundSampleIds: string[]
   audioSourceIds: string[]

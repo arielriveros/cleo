@@ -1,4 +1,4 @@
-import { TextureManager, AudioManager, CleoEngine } from 'cleo'
+import { TextureManager, AudioManager, CleoEngine, Logger } from 'cleo'
 import type { MaterialAsset } from '../../utils/materials'
 import type { TerrainMaterialAsset } from '../../utils/terrainMaterials'
 import type { Template } from '../../utils/templates'
@@ -9,6 +9,9 @@ import type { RigAsset } from '../../utils/rigAssets'
 import type { AnimationFieldAsset } from '../../utils/animationFields'
 import type { TilesetAsset } from '../../utils/tilesets'
 import type { AiBrainAsset } from '../../utils/aiBrains'
+import type { AnimControllerAsset } from '../../utils/animationControllers'
+import type { BoneMaskAsset } from '../../utils/boneMasks'
+import type { PoseAsset } from '../../utils/poseAssets'
 import type { SceneMeta } from '../../utils/sceneStorage'
 import {
   renderMaterialAssetThumbnail, renderModelAssetThumbnail, renderTerrainMaterialAssetThumbnail,
@@ -41,6 +44,9 @@ export type AssetDeps = {
   rigs: RigAsset[]
   tilesets: TilesetAsset[]
   aiBrains: AiBrainAsset[]
+  animControllers: AnimControllerAsset[]
+  boneMasks: BoneMaskAsset[]
+  poseAssets: PoseAsset[]
   images: ImageAsset[]
   textures: TextureAsset[]
   audioSources: AudioSourceAsset[]
@@ -74,6 +80,15 @@ export type AssetDeps = {
   addAiBrain: (b: AiBrainAsset) => void
   updateAiBrain: (id: string, b: AiBrainAsset) => void
   removeAiBrain: (id: string) => void
+  addAnimController: (c: AnimControllerAsset) => void
+  updateAnimController: (id: string, c: AnimControllerAsset) => void
+  removeAnimController: (id: string) => void
+  addBoneMask: (m: BoneMaskAsset) => void
+  updateBoneMask: (id: string, m: BoneMaskAsset) => void
+  removeBoneMask: (id: string) => void
+  addPoseAsset: (p: PoseAsset) => void
+  updatePoseAsset: (id: string, p: PoseAsset) => void
+  removePoseAsset: (id: string) => void
   addTileset: (t: TilesetAsset) => void
   updateTileset: (id: string, t: TilesetAsset) => void
   removeTileset: (id: string) => void
@@ -105,6 +120,7 @@ export type AssetDeps = {
   enterTilesetEditor: (id?: string) => void
   enterAiBrainEditor: (id?: string) => void
   enterRigEditor: (id?: string) => void
+  openAnimController: (id: string) => void
   enterClipEditor: (id?: string) => void
   enterTextureEditor: (id?: string) => void
   enterSoundEditor: (id?: string) => void
@@ -112,7 +128,7 @@ export type AssetDeps = {
   emit: (event: string, payload?: any) => void
 }
 
-type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | AnimationAsset | RigAsset | TilesetAsset | AiBrainAsset | SceneMeta | ImageAsset | TextureAsset | AudioSourceAsset | SoundSampleAsset
+type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | AnimationAsset | RigAsset | TilesetAsset | AiBrainAsset | AnimControllerAsset | BoneMaskAsset | PoseAsset | SceneMeta | ImageAsset | TextureAsset | AudioSourceAsset | SoundSampleAsset
 
 /** The asset record behind an entry, or undefined. Every kind has one now, textures included. */
 export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsset | undefined {
@@ -127,6 +143,9 @@ export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsse
     case 'rig': return deps.rigs.find(r => r.id === id)
     case 'tileset': return deps.tilesets.find(t => t.id === id)
     case 'aiBrain': return deps.aiBrains.find(b => b.id === id)
+    case 'animController': return deps.animControllers.find(c => c.id === id)
+    case 'boneMask': return deps.boneMasks.find(m => m.id === id)
+    case 'pose': return deps.poseAssets.find(p => p.id === id)
     case 'scene': return deps.scenes.find(s => s.id === id)
     case 'image': return deps.images.find(i => i.id === id)
     case 'texture': return deps.textures.find(t => t.id === id)
@@ -245,6 +264,21 @@ export function renameAsset(kind: AssetKind, id: string, stem: string, deps: Ass
       if (a) deps.updateAiBrain(id, { ...a, name: stem })
       break
     }
+    case 'animController': {
+      const a = deps.animControllers.find(c => c.id === id)
+      if (a) deps.updateAnimController(id, { ...a, name: stem })
+      break
+    }
+    case 'boneMask': {
+      const a = deps.boneMasks.find(m => m.id === id)
+      if (a) deps.updateBoneMask(id, { ...a, name: stem })
+      break
+    }
+    case 'pose': {
+      const a = deps.poseAssets.find(p => p.id === id)
+      if (a) deps.updatePoseAsset(id, { ...a, name: stem })
+      break
+    }
     case 'scene': {
       const a = deps.scenes.find(s => s.id === id)
       if (a) deps.renameScene(id, stem)
@@ -286,6 +320,9 @@ export function deleteAsset(kind: AssetKind, id: string, deps: AssetDeps): void 
     case 'rig': deps.removeRig(id); break
     case 'tileset': deps.removeTileset(id); break
     case 'aiBrain': deps.removeAiBrain(id); break
+    case 'animController': deps.removeAnimController(id); break
+    case 'boneMask': deps.removeBoneMask(id); break
+    case 'pose': deps.removePoseAsset(id); break
     case 'scene': {
       void deps.deleteScene(id)
       break
@@ -422,6 +459,26 @@ export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: 
       deps.addAiBrain({ ...deepClone(a), id: newId, name: stem })
       return newId
     }
+    // The three animation-authoring records: plain JSON, so a deep clone is a complete copy. rigId carries
+    // over — the copy is authored against the same skeleton.
+    case 'animController': {
+      const a = deps.animControllers.find(c => c.id === id)
+      if (!a) return null
+      deps.addAnimController({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'boneMask': {
+      const a = deps.boneMasks.find(m => m.id === id)
+      if (!a) return null
+      deps.addBoneMask({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'pose': {
+      const a = deps.poseAssets.find(p => p.id === id)
+      if (!a) return null
+      deps.addPoseAsset({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
     case 'scene': {
       const a = deps.scenes.find(s => s.id === id)
       if (!a) return null
@@ -534,6 +591,11 @@ export async function regenerateThumbnail(
     case 'tileset':
     // A brain is a graph. There is no scene to point a camera at, so its card shows the kind icon.
     case 'aiBrain':
+    // A controller is a graph too; a mask is per-bone weights and a pose asset a list of poses — none
+    // has a single character to render, so their cards show the kind icon.
+    case 'animController':
+    case 'boneMask':
+    case 'pose':
     // A field's card shows its kind icon: its content is a 2D plot, not a posed model.
     case 'animationField':
     // Clips in source-rig space, with no character attached — there is nothing to pose for a picture.
@@ -573,6 +635,22 @@ export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean
     case 'image': return false
     case 'animation': deps.enterClipEditor(id); return true
     case 'rig': deps.enterRigEditor(id); return true
+    case 'animController': deps.openAnimController(id); return true
+    // A mask and a pose asset are edited inside the RIG editor of the skeleton they are authored against;
+    // the rig editor picks up which one to focus from FOCUS_RIG_ASSET.
+    case 'boneMask':
+    case 'pose': {
+      const asset = kind === 'boneMask'
+        ? deps.boneMasks.find(m => m.id === id)
+        : deps.poseAssets.find(p => p.id === id)
+      if (!asset?.rigId) {
+        Logger.warn(`${KIND_LABEL[kind]} "${asset?.name ?? id}" has no rig to open it in`, 'Editor')
+        return false
+      }
+      deps.enterRigEditor(asset.rigId)
+      deps.emit('FOCUS_RIG_ASSET', { kind, id })
+      return true
+    }
     // Raw audio, same reasoning as an image: what makes a file usable — volume, loop points, effects,
     // the bus — belongs to the sound sample, and that is what has an editor.
     case 'audioSource': return false
@@ -593,6 +671,10 @@ export function deleteConsequence(kind: AssetKind): string {
     case 'tileset': return 'tilemap layers painted with it, and sprites drawing from it, are cleared'
     // The embedded copy stays put — see detachBrain. Only the link goes.
     case 'aiBrain': return 'controllers keep the brain they copied, but stop tracking this asset'
+    // Characters embed a resolved copy of what they use, so deleting only drops the link.
+    case 'animController': return 'characters keep the state machine they copied, but stop tracking this asset'
+    case 'boneMask': return 'layers and action slots using it stop affecting any bones until another mask is picked'
+    case 'pose': return 'states holding its poses hold nothing, and clip pose offsets using them are skipped'
     case 'scene': return 'the project switches to another scene'
     case 'texture': return 'materials and tilesets using it show no texture'
     case 'image': return 'textures sourcing it lose their pixels'
@@ -614,6 +696,9 @@ export function dragPayload(kind: AssetKind, assetId: string): [string, string][
     case 'rig': return [['text/cleo-rig', assetId]]
     case 'tileset': return [['text/cleo-tileset', assetId]]
     case 'aiBrain': return [['text/cleo-ai-brain', assetId]]
+    case 'animController': return [['text/cleo-anim-controller', assetId]]
+    case 'boneMask': return [['text/cleo-bone-mask', assetId]]
+    case 'pose': return [['text/cleo-pose', assetId]]
     case 'scene': return [['text/cleo-scene', assetId], ['text/plain', assetId]]
     // Deliberately NOT the texture payload: dropping raw bytes into a material slot must not appear to
     // work, because a slot needs a texture's sampling, not just an image.
@@ -674,6 +759,12 @@ const GLYPHS: Record<AssetKind | 'folder', Glyph> = {
   // Two linked nodes with a decision branching out of them: a state machine and a goal tree read as the
   // same shape at 24px, which is right — one asset holds either.
   aiBrain: { stroke: '#c89ae0', body: `<circle cx="6" cy="6.5" r="3" fill="#8a5bb0" fill-opacity=".25"/><circle cx="18" cy="6.5" r="3" fill="#8a5bb0" fill-opacity=".25"/><circle cx="12" cy="18" r="3" fill="#c89ae0" fill-opacity=".45"/><path d="M8.2 8.6 10.6 15.6M15.8 8.6 13.4 15.6M9 6.5h6" stroke-opacity=".75"/>` },
+  // A state machine: three states and the transitions between them, in the animation family's pink.
+  animController: { stroke: '#e08fb8', body: `<rect x="2.5" y="4" width="7" height="5" rx="1.5" fill="#8f3a70" fill-opacity=".25"/><rect x="14.5" y="4" width="7" height="5" rx="1.5" fill="#8f3a70" fill-opacity=".25"/><rect x="8.5" y="15" width="7" height="5" rx="1.5" fill="#e08fb8" fill-opacity=".4"/><path d="M9.5 6.5h5M7 9l3.5 6M17 9l-3.5 6" stroke-opacity=".75"/>` },
+  // A bone over a half-weighted body: the mask's weights, in the rig family's tan.
+  boneMask: { stroke: '#c9b28a', body: `<circle cx="12" cy="12" r="8.5" stroke-opacity=".5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="#c9b28a" fill-opacity=".4" stroke="none"/><path d="M8 8l8 8" stroke-opacity=".9"/><circle cx="8" cy="8" r="1.6"/><circle cx="16" cy="16" r="1.6"/>` },
+  // A posed figure: a joint chain frozen mid-gesture.
+  pose: { stroke: '#c9b28a', body: `<circle cx="12" cy="4.5" r="2" fill="#8a7350" fill-opacity=".5"/><path d="M12 6.5v7M12 9l-5-2.5M12 9l4.5 3.5M12 13.5l-4 6.5M12 13.5l4 6" stroke-opacity=".85"/>` },
   tileset: { stroke: '#7ec8a9', body: `<rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="#2f7a63" fill-opacity=".2"/><path d="M9 3.5v17M14.5 3.5v17M3.5 9h17M3.5 14.5h17" stroke-opacity=".55"/><rect x="9" y="9" width="5.5" height="5.5" fill="#7ec8a9" fill-opacity=".45" stroke="none"/>` },
   // A raw picture: the photo frame, unadorned. Kept as the old texture glyph so an existing project's
   // image cards look like the texture cards they were.

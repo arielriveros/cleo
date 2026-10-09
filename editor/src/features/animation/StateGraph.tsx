@@ -3,6 +3,7 @@ import { useCleoEngine } from '../EngineContext'
 import { useStateMachine, OP_LABEL, effectiveType } from './StateMachineContext'
 import { SegmentedControl } from '../../components/ui'
 import MachineGraph from '../../components/MachineGraph'
+import { LayerTabs } from './LayerPanels'
 import type { GraphLinkModel, GraphNodeModel } from '../../components/MachineGraph'
 import { isConditionGroup } from 'cleo'
 import type { AnimationTransition, AnimationCondition, AnimationConditionNode } from 'cleo'
@@ -46,8 +47,10 @@ export default function StateGraph() {
   const {
     target, sm, links, selection, setSelection, graphView, setGraphView,
     addState, setState, addTransition, apply, stateIndex, commitLayout, deleteElements, paramOf,
-    removeState, animationFields, fieldOf,
+    removeState, animationFields, fieldOf, fullSm, activeLayer,
   } = useStateMachine()
+  // The highlighted state is the ACTIVE layer's: the base reads `currentStateName`, a layer its own.
+  const layerName = activeLayer > 0 ? fullSm.layers?.[activeLayer - 1]?.name ?? null : null
 
   const [activeState, setActiveState] = useState<string | null>(null)
 
@@ -74,19 +77,22 @@ export default function StateGraph() {
     if (!target || !graphView) { setActiveState(null); return }
     let raf = 0
     const tick = () => {
-      const name = target.animator.currentStateName ?? null
+      const name = (layerName ? target.animator.layerStateName(layerName) : target.animator.currentStateName) ?? null
       setActiveState(prev => (prev === name ? prev : name))
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [target, graphView])
+  }, [target, graphView, layerName])
 
   const nodes: GraphNodeModel[] = useMemo(() => sm.states.map((s, i) => {
     const field = s.fieldId ? fieldOf(s.fieldId) : undefined
     const playsField = !!s.fieldId
+    const playsPose = !playsField && !!(s.poseRef || s.pose)
     // The ⊞ badge is what distinguishes a blend state from a clip state; the name alone does not.
-    const what = playsField ? (field?.name || '(missing field)') : (s.clipName || '(no clip)')
+    const what = playsField ? (field?.name || '(missing field)')
+      : playsPose ? `pose: ${s.pose?.name ?? 'pose'}`
+      : (s.clipName || (activeLayer > 0 ? '(empty — adds nothing)' : '(no clip)'))
     return {
       id: s.name,
       ...posOf(i),
@@ -160,6 +166,7 @@ export default function StateGraph() {
             options={[{ value: '3d', label: 'Animations' }, { value: 'graph', label: 'Graph' }]}
             value='graph'
             onChange={v => setGraphView(v === 'graph')} />
+          <LayerTabs />
           <button className='px-2 py-1 rounded bg-primary hover:bg-primary-hover text-white border border-primary-active text-xs'
             onClick={addAtCenter} title='Add a new state (or double-click the canvas)'>+ State</button>
           <button className='px-2 py-1 rounded bg-success hover:bg-success-hover text-white text-xs'

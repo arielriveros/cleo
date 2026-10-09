@@ -8,10 +8,12 @@ import FieldDebugReadout from './FieldDebugReadout'
 import type { AnimationFieldAsset } from '../../utils/animationFields'
 import { useStateMachine } from './StateMachineContext'
 import ConditionTree from './ConditionTree'
+import { LayerSection, SlotsSection } from './LayerPanels'
 import AnimationAssetPicker from './AnimationAssetPicker'
 import Collapsable from '../../components/Collapsable'
 import { SegmentedControl, Toggle } from '../../components/ui'
 import { clamp } from '../../utils/math';
+import { promptDialog } from '../dialogs/dialogStore'
 
 // The Animation State Machine inspector, as three DOCK PANELS (Clips / Variables / State Machine) sharing
 // one working copy from StateMachineContext, which wraps the whole dock. Adding, moving and connecting
@@ -30,9 +32,35 @@ function NoModel() {
  * Apply is machine-wide and every panel mutates the machine, Clips included, so it sits on all three.
  */
 function ApplyBar() {
-  const { apply } = useStateMachine()
+  const { apply, controller, fullSm, saveAsController, detachController } = useStateMachine()
+  const saveAs = async () => {
+    const name = await promptDialog({
+      title: 'Save as Animation Controller',
+      message: 'A controller can be shared by any number of characters. Each can swap clips with its own overrides.',
+      defaultValue: 'Controller', validate: v => (v.trim() ? null : 'Give the controller a name.'),
+    })
+    if (name?.trim()) saveAsController(name.trim())
+  }
   return (
-    <div className='p-2 border-b border-border'>
+    <div className='p-2 border-b border-border flex flex-col gap-1'>
+      {/* Where Apply lands: the shared CONTROLLER asset, or this character's own machine. */}
+      {controller ? (
+        <div className='flex items-center gap-1 text-[11px]'>
+          <span className='flex-1 truncate text-highlight' title='Apply writes this controller; every character using it updates'>
+            Controller: {controller.name}
+          </span>
+          <button className={ghost} onClick={detachController}
+            title='Stop following the controller — this character keeps the machine as its own'>Detach</button>
+        </div>
+      ) : (
+        <div className='flex items-center gap-1 text-[11px]'>
+          <span className='flex-1 truncate text-muted'>
+            {fullSm.controllerId ? 'Its controller was deleted — own machine' : 'This character’s own machine'}
+          </span>
+          <button className={ghost} onClick={() => void saveAs()}
+            title='Turn this machine into a shared Animation Controller asset'>Save as Controller…</button>
+        </div>
+      )}
       {/* NOT "Apply to Model", which it was called and which is wrong twice over: it writes nothing to
           the model ASSET, and nothing about clips — those belong to the rig. What it commits is the
           state machine, onto the node's animator. That is genuinely node-owned data (ModelNode
@@ -40,7 +68,7 @@ function ApplyBar() {
           per-tab React state and is lost on close without it. */}
       <button className={btn + ' w-full'} onClick={apply}
         title='Save the state machine onto the node it was opened from (used at runtime and by Simulate)'>
-        Apply State Machine
+        {controller ? 'Apply to Controller' : 'Apply State Machine'}
       </button>
     </div>
   )
@@ -178,6 +206,7 @@ export function VariablesPanel() {
           ))}
         </div>
       </Collapsable>
+      <SlotsSection />
     </div>
   )
 }
@@ -190,6 +219,7 @@ export function StateMachinePanel() {
   return (
     <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-y-auto'>
       <ApplyBar />
+      <LayerSection />
       <Collapsable title='Selected' defaultOpen>
         <div className='p-2 flex flex-col gap-2'>
           {!selection && <p className='text-[11px] text-gray-400'>Select a state or transition in the graph.</p>}
@@ -204,7 +234,7 @@ export function StateMachinePanel() {
 
 // ---- Selected state details -----------------------------------------------------------------------
 function SelectedState() {
-  const { sm, selection, clips, setState, removeState, stateIndex, links, animationFields, fieldOf } = useStateMachine()
+  const { sm, selection, clips, setState, removeState, stateIndex, links, animationFields, fieldOf, poseAssets, activeLayer } = useStateMachine()
   if (selection?.kind !== 'state') return null
   const i = stateIndex(selection.name)
   if (i < 0) return null
@@ -219,12 +249,22 @@ function SelectedState() {
   // `fieldId` is the clip-vs-blend-space discriminator and the runtime prefers it over clipName, so
   // switching to Clip must clear it and the embedded copy riding with it.
   const playsField = !!s.fieldId
+  const playsPose = !playsField && !!(s.poseRef || s.pose)
   const field = fieldOf(s.fieldId)
-  const setPlays = (kind: 'clip' | 'field') => {
-    if (kind === 'clip') setState(i, { fieldId: undefined, field: undefined, fieldInputs: undefined })
+  const allPoses = poseAssets.flatMap(a => a.poses.map(p => ({ asset: a, pose: p })))
+  const setPlays = (kind: 'clip' | 'field' | 'pose') => {
+    if (kind === 'clip') setState(i, { fieldId: undefined, field: undefined, fieldInputs: undefined, poseRef: undefined, pose: undefined })
     // Switching to a field drops any speed PARAMETER: the blend already matches speed, so keeping the
     // binding applies it twice. The fixed `speed` is kept.
-    else setState(i, { clipName: '', fieldId: animationFields[0]?.id ?? '', fieldInputs: {}, speedParam: undefined })
+    else if (kind === 'field') setState(i, { clipName: '', fieldId: animationFields[0]?.id ?? '', fieldInputs: {}, speedParam: undefined, poseRef: undefined, pose: undefined })
+    // A pose is held, not played: no clip, no field. It is embedded from its asset on Apply.
+    else {
+      const first = allPoses[0]
+      setState(i, {
+        clipName: '', fieldId: undefined, field: undefined, fieldInputs: undefined, speedParam: undefined,
+        poseRef: first ? { assetId: first.asset.id, poseId: first.pose.id } : undefined, pose: undefined,
+      })
+    }
   }
 
   // A field matches speed by choosing clips, so a playback-rate parameter multiplies on top of a correct
@@ -254,15 +294,34 @@ function SelectedState() {
 
       <div className='flex items-center gap-1'>
         <span className='text-[10px] text-gray-400 w-[42px] shrink-0'>Plays</span>
-        <SegmentedControl<'clip' | 'field'>
-          size='sm' value={playsField ? 'field' : 'clip'} onChange={setPlays}
+        <SegmentedControl<'clip' | 'field' | 'pose'>
+          size='sm' value={playsField ? 'field' : playsPose ? 'pose' : 'clip'} onChange={setPlays}
           options={[
             { value: 'clip', label: 'Clip', title: 'Play a single animation clip' },
             { value: 'field', label: 'Field', title: 'Blend several clips through an Animation Field' },
+            { value: 'pose', label: 'Pose', title: 'Hold a static pose from a Pose asset — on a masked layer, a hand grip over locomotion' },
           ]} />
       </div>
 
-      {!playsField && (
+      {playsPose && (allPoses.length === 0
+        ? <p className='text-[10px] text-warning'>No poses yet — pose bones in a clip’s editor and save them as a pose.</p>
+        : <select className={input + ' flex-1 min-w-0'} title='The pose this state holds. Re-embedded on Apply.'
+            value={s.poseRef ? `${s.poseRef.assetId}/${s.poseRef.poseId}` : ''}
+            onChange={e => {
+              const [assetId, poseId] = e.target.value.split('/')
+              setState(i, { poseRef: assetId && poseId ? { assetId, poseId } : undefined, pose: undefined })
+            }}>
+            <option value=''>(no pose)</option>
+            {allPoses.map(({ asset, pose }) => (
+              <option key={`${asset.id}/${pose.id}`} value={`${asset.id}/${pose.id}`}>{asset.name} / {pose.name}</option>
+            ))}
+          </select>)}
+
+      {activeLayer > 0 && !playsField && !playsPose && !s.clipName && (
+        <p className='text-[10px] text-gray-500'>No clip on a layer means this state adds nothing — the layer fades out while it is here.</p>
+      )}
+
+      {!playsField && !playsPose && (
         <select className={input + ' flex-1 min-w-0'} title='Animation clip' value={s.clipName} onChange={e => setState(i, { clipName: e.target.value })}>
           <option value=''>(no clip)</option>
           {clips.map(c => <option key={c} value={c}>{c}</option>)}

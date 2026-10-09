@@ -150,6 +150,29 @@ export function assetWithIkRig<T extends ClipBearingAsset>(asset: T, rig: any | 
   return { ...asset, nodeJson }
 }
 
+/**
+ * Write a rig's sockets into EVERY skinned model of an asset — a body plus separately exported armour each
+ * carry a copy of the skeleton, and a socket must resolve on whichever mesh a weapon ends up looking for.
+ * Hands the original back on a no-op, like {@link assetWithIkRig}. An empty list clears them.
+ */
+export function assetWithSockets<T extends ClipBearingAsset>(asset: T, sockets: any[] | null | undefined): T {
+  const next = sockets && sockets.length ? sockets : null
+  if (JSON.stringify(assetSockets(asset) ?? null) === JSON.stringify(next)) return asset
+  const nodeJson = deepClone(asset.nodeJson)
+  const models = skinnedModelJsonsOf(nodeJson)
+  if (!models.length) return asset
+  for (const model of models) {
+    if (next) model.skin.sockets = next
+    else delete model.skin.sockets
+  }
+  return { ...asset, nodeJson }
+}
+
+/** The sockets an asset's skeleton carries, or null. */
+export function assetSockets(asset: ClipBearingAsset | undefined): any[] | null {
+  return skinnedModelJsonOf(asset?.nodeJson)?.skin?.sockets ?? null
+}
+
 /** The IK rig an asset carries, or null. */
 export function assetIkRig(asset: ClipBearingAsset | undefined): any | null {
   return skinnedModelJsonOf(asset?.nodeJson)?.skin?.ikRig ?? null

@@ -737,6 +737,24 @@ describe.skipIf(!present)('the Night Shift example project', () => {
             expect(marker.time).toBeGreaterThan(0); // t=0 never fires: the window is half-open
         });
 
+        it('gives both skeletons hand sockets, embedded in every skin that ships', () => {
+            // Authored on the rig, but the runtime only ever sees a SKIN — models, template copies and
+            // scene copies — so a socket missing from any of them is a held item that never follows.
+            for (const rig of library('rigs')) {
+                expect(rig.sockets.map((s: any) => s.name).sort(), rig.name).toEqual(['LeftHand', 'RightHand']);
+            }
+            const skins: any[] = [];
+            for (const asset of [...library('models'), ...library('templates')]) {
+                for (const n of allNodes(asset.nodeJson)) if (n.model?.skin) skins.push(n.model.skin);
+            }
+            expect(skins.length).toBeGreaterThan(0);
+            for (const skin of skins) {
+                const names = new Set((skin.nodeNames ?? []).map((e: any) => e[1]));
+                for (const socket of skin.sockets ?? []) expect(names.has(socket.bone), socket.bone).toBe(true);
+                expect(skin.sockets?.length).toBe(2);
+            }
+        });
+
         it('drives the player gait from planar speed, not total speed', () => {
             // `currentSpeed` is the full 3D magnitude, so a jump or a fall inflates it and the character
             // reads as sprinting in mid-air — which is exactly what the copied machine did.

@@ -8,6 +8,9 @@ import type { RigAsset } from './rigAssets'
 import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
 import type { AiBrainAsset } from './aiBrains'
+import type { AnimControllerAsset } from './animationControllers'
+import type { BoneMaskAsset } from './boneMasks'
+import type { PoseAsset } from './poseAssets'
 import type { ImageAsset } from './images'
 import type { TextureAsset } from './textureAssets'
 import type { AudioSourceAsset } from './audioSources'
@@ -20,6 +23,7 @@ import type { SoundSampleAsset } from './soundSamples'
 // FileTree.normalizeFile, the extension is everything after the LAST dot.
 
 export type AssetKind = 'image' | 'texture' | 'audioSource' | 'soundSample' | 'material' | 'terrainMaterial' | 'template' | 'model' | 'scene' | 'script' | 'animationField' | 'animation' | 'rig' | 'tileset' | 'aiBrain'
+  | 'animController' | 'boneMask' | 'pose'
 
 /**
  * The BYTE kinds — image and audioSource — keep their real file extensions; every other kind carries a
@@ -44,6 +48,9 @@ export const KIND_EXT: Record<Exclude<AssetKind, RawByteKind>, string> = {
   rig: '.rig',
   tileset: '.tileset',
   aiBrain: '.brain',
+  animController: '.controller',
+  boneMask: '.mask',
+  pose: '.pose',
 }
 
 /**
@@ -76,6 +83,9 @@ export const KIND_LABEL: Record<AssetKind, string> = {
   rig: 'rig',
   tileset: 'tileset',
   aiBrain: 'AI brain',
+  animController: 'animation controller',
+  boneMask: 'bone mask',
+  pose: 'pose asset',
 }
 
 export type VfsEntry = {
@@ -111,6 +121,9 @@ export type LibSnapshot = {
   rigs: RigAsset[]
   tilesets: TilesetAsset[]
   aiBrains: AiBrainAsset[]
+  animControllers: AnimControllerAsset[]
+  boneMasks: BoneMaskAsset[]
+  poseAssets: PoseAsset[]
   scenes: { id: string; name: string; updatedAt: number; thumbnail?: string }[]
   images: ImageAsset[]
   textures: TextureAsset[]
@@ -182,6 +195,9 @@ export function kindOfExt(ext: string): AssetKind {
     case '.rig': return 'rig'
     case '.tileset': return 'tileset'
     case '.brain': return 'aiBrain'
+    case '.controller': return 'animController'
+    case '.mask': return 'boneMask'
+    case '.pose': return 'pose'
     default: return 'image'
   }
 }
@@ -533,6 +549,9 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   for (const r of libs.rigs) visit('rig', r.id, r.name)
   for (const t of libs.tilesets) visit('tileset', t.id, t.name)
   for (const b of libs.aiBrains) visit('aiBrain', b.id, b.name)
+  for (const c of libs.animControllers) visit('animController', c.id, c.name)
+  for (const m of libs.boneMasks) visit('boneMask', m.id, m.name)
+  for (const p of libs.poseAssets) visit('pose', p.id, p.name)
   for (const s of libs.scenes) visit('scene', s.id, s.name)
   // Both halves of the image/texture split are ordinary libraries now — the entries no longer come from
   // whatever happens to be registered in the TextureManager.
@@ -616,6 +635,9 @@ export function findMissingFromExplorer(vfs: VfsIndex, libs: LibSnapshot, treeId
   for (const r of libs.rigs) check('rig', r.id, r.name)
   for (const t of libs.tilesets) check('tileset', t.id, t.name)
   for (const b of libs.aiBrains) check('aiBrain', b.id, b.name)
+  for (const c of libs.animControllers) check('animController', c.id, c.name)
+  for (const m of libs.boneMasks) check('boneMask', m.id, m.name)
+  for (const p of libs.poseAssets) check('pose', p.id, p.name)
   for (const s of libs.scenes) check('scene', s.id, s.name)
   for (const i of libs.images) check('image', i.id, i.name)
   for (const t of libs.textures) check('texture', t.id, t.name)
@@ -665,6 +687,9 @@ function aliveIds(libs: LibSnapshot): Record<AssetKind, Set<string>> {
     rig: new Set(libs.rigs.map(r => r.id)),
     tileset: new Set(libs.tilesets.map(t => t.id)),
     aiBrain: new Set(libs.aiBrains.map(b => b.id)),
+    animController: new Set(libs.animControllers.map(c => c.id)),
+    boneMask: new Set(libs.boneMasks.map(m => m.id)),
+    pose: new Set(libs.poseAssets.map(p => p.id)),
     scene: new Set(libs.scenes.map(s => s.id)),
     image: new Set(libs.images.map(i => i.id)),
     // The RECORD, not the live registration: a texture whose image failed to decode is still an asset the

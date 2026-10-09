@@ -17,7 +17,7 @@ Read [Getting started](getting-started.md) first — it is short and everything 
 | [Input](input.md) | Reading actions |
 | [Characters and controllers](characters-and-controllers.md) | The pawn/driver split, locomotion, camera rigs |
 | [AI](ai.md) | Goals, behaviour machines, fuzzy logic, perception, pathfinding |
-| [Animation](animation.md) | Driving the animator, parameters, events, blend spaces, IK |
+| [Animation](animation.md) | Driving the animator, parameters, layers, actions, events, sockets, blend spaces, IK |
 | [UI](ui.md) | Building and updating interfaces from code |
 | [Scene and game](scene-and-game.md) | Spawning, templates, switching scenes, the event bus |
 | [Audio](audio.md) | Playing sound |

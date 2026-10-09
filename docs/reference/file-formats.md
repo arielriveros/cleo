@@ -25,8 +25,12 @@ Two kinds keep the real extension of the file their bytes arrived as; every othe
 | `script` | `.script` | |
 | `animationField` | `.afield` | A blend space. |
 | `animation` | `.anim` | A shared clip, in its source rig's space. |
+| `rig` | `.rig` | A shared skeleton: its clips, retarget corrections, IK, sockets. |
 | `tileset` | `.tileset` | |
 | `aiBrain` | `.brain` | *(unreleased)* |
+| `animController` | `.controller` | A shareable state machine: parameters, layers, action slots. *(unreleased)* |
+| `boneMask` | `.mask` | Per-bone weights, by bone name, on one rig. *(unreleased)* |
+| `pose` | `.pose` | Named static poses of one rig. *(unreleased)* |
 
 The extension is everything after the **last** dot. Renaming an asset keeps its kind — the
 extension is re-applied, not re-read.
@@ -53,12 +57,35 @@ old exports and the shipped example projects importable.
 Two bundle kinds exist: `'project'` (carries `mainSceneId`, `openSceneId`, `sceneMetas`, `prefs`,
 `projectName`) and `'assetpack'`.
 
+Each asset library is one JSON file under `libraries/`. Three are new *(unreleased)*:
+`animControllers.json`, `boneMasks.json` and `poseAssets.json`. All three are optional on read, so a
+bundle written before they existed imports as a project with none.
+
 Audio sources and sound samples are carried **explicitly** rather than re-derived, because loop
 points, fades, bus assignment and effect racks cannot be recovered from a `.wav`. Images and
 textures *are* re-derived on import.
 
 Importing offers three outcomes: **New project**, **Replace**, or **Merge**. Merge re-mints
 colliding ids and remaps the references that point at them.
+
+### Animation data in node JSON *(unreleased)*
+
+Characters hold **resolved copies** of what they link — a controller's machine, a mask's weights, a
+pose's bones — so a scene, a template or a published game plays without any of the libraries above.
+The link ids ride alongside for the editor, and are ignored at runtime.
+
+| Where | Field | Holds |
+|---|---|---|
+| Any node | `socketAttachment` | `{ target: 'parent' \| <node id>, socket }`. Omitted when not attached. |
+| A model's `skin` | `sockets` | `[{ name, bone, offset?: { t?, r?, s? } }]` — `bone` is a bone **name**; the offset is in the bone's frame. Omitted when empty. |
+| A clip | `events` | `[{ time, name }]`, in clip seconds. |
+| `stateMachine` | `layers` | `[{ name, states, transitions, weight?, weightParam?, blend?, maskId?, mask? }]`. `mask` maps bone name to weight; absent means whole body. |
+| `stateMachine` | `slots` | `[{ name, afterLayer?, blend?, maskId?, mask? }]`. |
+| `stateMachine` | `controllerId`, `clipOverrides` | The controller it was resolved from, and this character's clip swaps (name → name). |
+| A state | `poseRef`, `pose` | The linked pose (`{ assetId, poseId }`), and its embedded copy `{ name?, bones: [{ name, rotation?, translation? }] }` — deltas from rest. |
+
+A machine without `layers` or `slots` — anything authored before they existed — is a one-layer
+machine and reads unchanged.
 
 ---
 

@@ -440,6 +440,7 @@ export interface EditorTab {
   materialId?: string | null; // material tabs: source material asset id, null = unsaved new material
   terrainMaterialId?: string | null; // terrain-material tabs: source terrain-material asset id
   stateMachineSourceId?: string | null; // state-machine tabs: id of the original skinned node in the main scene
+  controllerId?: string | null; // state-machine tabs opened on a controller ASSET (no source node)
   animationId?: string | null; // clip tabs: the edited `.anim` asset id
   modelId?: string | null; // mesh tabs: the previewed mesh asset id
   scriptId?: string | null; // script tabs: the edited script asset id

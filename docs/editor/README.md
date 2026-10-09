@@ -15,7 +15,7 @@ If you are new, read [Core concepts](../concepts.md) first, then
 | [Interface](interface.md) | Menu bar, document tabs, the dockable panel layout, keyboard shortcuts, the console |
 | [Editor modes](modes.md) | All 17 modes, how each is entered, which panels it shows |
 | [Projects](projects.md) | Multiple projects, the examples gallery, importing and exporting |
-| [Assets](assets.md) | The asset explorer and all 14 asset kinds |
+| [Assets](assets.md) | The asset explorer and all 18 asset kinds |
 
 ### Building a scene
 
@@ -34,7 +34,7 @@ If you are new, read [Core concepts](../concepts.md) first, then
 
 | Page | Covers |
 |---|---|
-| [Animation](animation.md) | Clips, state machines, blend spaces, foot IK, events, root motion |
+| [Animation](animation.md) | Clips, state machines and controllers, layers and bone masks, poses, action slots, blend spaces, foot IK, sockets, events, root motion |
 | [AI brains](ai-brains.md) | The `.brain` asset and the Behaviour / Goals / Fuzzy canvases |
 | [AI agents](ai-agents.md) | The Controller node, perception, steering, navmesh baking |
 | [Input](input.md) | Action maps, bindings, processors, rebinding |

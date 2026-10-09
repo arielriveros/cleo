@@ -5,9 +5,10 @@ import { useClip } from './ClipContext'
 import { getAnimationTarget, jointLabel } from '../animation/skeleton'
 import { withKey, withoutKey, channelOf, keyIndexAt, type TrackPath } from '../../utils/clipTracks'
 import { promptDialog } from '../dialogs/dialogStore'
-import { cryptoRandomId } from '../../utils/ids'
 import Collapsable from '../../components/Collapsable'
 import type { StoredPoseBone } from '../../utils/animationAssets'
+import { useAssetLibrary } from '../AssetLibraryContext'
+import { buildPoseAsset, newPose } from '../../utils/poseAssets'
 import { boneRotation, composeBone, decomposeBone, safeScale, type Trs } from './boneTrs'
 
 // Posing one bone and writing it into the clip.
@@ -37,8 +38,9 @@ const EPS = 1e-5
 const nearlyEqual = (a: number[], b: number[]) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < EPS)
 
 export default function BonePose() {
-  const { editorScene, skeletonTargetId, eventEmitter, rigs, updateRig } = useCleoEngine()
+  const { editorScene, skeletonTargetId, eventEmitter, rigs } = useCleoEngine()
   const { asset, clip, clipName, patchClip } = useClip()
+  const { poseAssets, addPoseAsset, updatePoseAsset } = useAssetLibrary()
 
   const [jointIndex, setJointIndex] = useState<number>(-1)
   const [time, setTime] = useState(0)
@@ -169,14 +171,19 @@ export default function BonePose() {
     }
     if (!bones.length) return
 
+    // Into the rig's pose ASSET — the first one on this rig, or a new "<Rig> Poses". The rig's own `poses`
+    // list is the pre-asset form and is no longer written.
+    const into = poseAssets.find(p => p.rigId === rig.id)
     const name = await promptDialog({
       title: 'Save as a shared pose',
-      message: `${bones.length} posed bone${bones.length === 1 ? '' : 's'} will be stored on the rig "${rig.name}". Any clip can then reference it, and editing the pose updates all of them.`,
+      message: `${bones.length} posed bone${bones.length === 1 ? '' : 's'} will be saved into the pose asset "${into?.name ?? `${rig.name} Poses`}". Any clip can then layer it, any controller state can hold it, and editing the pose updates all of them.`,
       defaultValue: 'Torch grip',
       validate: v => (v.trim() ? null : 'Give the pose a name.'),
     })
     if (!name?.trim()) return
-    updateRig(rig.id, { ...rig, poses: [...(rig.poses ?? []), { id: cryptoRandomId(), name: name.trim(), bones }] })
+    const pose = newPose(name.trim(), bones)
+    if (into) updatePoseAsset(into.id, { ...into, poses: [...into.poses, pose] })
+    else addPoseAsset(buildPoseAsset(`${rig.name} Poses`, rig.id, [pose]))
     release()
   }
 

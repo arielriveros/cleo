@@ -78,6 +78,24 @@ One consequence worth knowing: anything inside a placed template instance is **r
 Scene mode**. To change `moveAction`, `jumpAction` or `aimSource`, open the **Playable template** tab
 rather than editing in the scene. Transform stays editable in place.
 
+### Hand sockets
+
+Both skeletons ship two [sockets](../../docs/editor/animation.md#sockets), `RightHand` and `LeftHand`, on
+the mannequin's `mixamorig1:` hand bones and the zombie's `mixamorig5:` ones. They are named without the
+namespace, so a script asks for `RightHand` on the player and the zombie alike:
+
+```ts
+torch.attachToSocket('parent', 'RightHand')
+```
+
+or, in the editor, drop the item under either character and pick the socket in its **Attach to socket**
+section. The offsets are zero — the item sits on the wrist joint — so tune them on the rig, where the
+viewport gizmo drags them, rather than on the item.
+
+The generator embeds the sockets into every skin that ships: the model assets, the template copies and the
+scene copies. A socket missing from any of them is a held item that never follows, which is what
+`tests/nightShiftProject.test.ts` pins.
+
 ## Spawning
 
 There is **one** spawner node for zombies and **one** for pickups, and neither has an authored spawn
@@ -229,7 +247,10 @@ strafe, turn and jump clips are 10 MB of animation nothing here would ever reach
 
 Each stage is playable on its own. Do not skip ahead.
 
-1. **Character.** `W → 0`, `D → −90`, `A → +90`, `S → ±180`; turn-in-place at 90° and 135°.
+1. **Character.** `W → 0`, `D → −90`, `A → +90`, `S → ±180`; turn-in-place at 90° and 135°. Swing the
+   camera round to the back and the 180 plays, not a 90 (the **Settle** window). Start walking mid-turn
+   and the turn cuts to Locomotion at once: each turn state exits on `Speed > 1.2`, ahead of its
+   exit-time return, so the clip's root motion does not keep rotating a body that is already walking.
 2. **Clock.** The sun sweeps and the HUD reads 22:00 → 06:00 over 180 s. Watch the frame time — periodic
    spikes are the sky re-bake doing its job; a *constant* stall means a per-frame setter is forcing it.
 3. **Pickups.** Score rises, and walking back and forth over one does not double-count.

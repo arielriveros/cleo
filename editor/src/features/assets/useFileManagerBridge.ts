@@ -24,6 +24,7 @@ import {
   collectReferencedAnimationFieldIds,
   collectReferencedTilesetIds,
   collectReferencedAiBrainIds,
+  collectReferencedAnimControllerIds, collectReferencedBoneMaskIds, collectReferencedPoseAssetIds,
 } from '../../utils/references'
 
 export const FM_MODE_KEY = 'cleo_assets_view_mode'
@@ -126,6 +127,9 @@ export function useFileManagerBridge() {
       case 'animationField': return collectReferencedAnimationFieldIds(scene).has(entry.assetId)
       case 'tileset': return collectReferencedTilesetIds(scene).has(entry.assetId)
       case 'aiBrain': return collectReferencedAiBrainIds(scene).has(entry.assetId)
+      case 'animController': return collectReferencedAnimControllerIds(scene).has(entry.assetId)
+      case 'boneMask': return collectReferencedBoneMaskIds(scene).has(entry.assetId)
+      case 'pose': return collectReferencedPoseAssetIds(scene).has(entry.assetId)
       case 'texture':
         return collectReferencedTextureIds(scene, l.materials, l.models, l.templates, l.terrainMaterials,
                                            l.tilesets, [engineRef.current?.renderer?.colorGradingLut,

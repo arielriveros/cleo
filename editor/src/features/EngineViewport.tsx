@@ -3,6 +3,8 @@ import { useCleoEngine } from "./EngineContext";
 import { Raycaster, Node, Vec, Logger } from "cleo";
 import TransformGizmo from "./gizmo/TransformGizmo";
 import BoneGizmo from "./clip/BoneGizmo";
+import SocketPreviews from "./sockets/SocketPreviews";
+import SocketGizmo from "./sockets/SocketGizmo";
 import useGizmoShortcuts from "./gizmo/useGizmoShortcuts";
 import type { TransformPatch } from "./gizmo/gizmoDrag";
 import { effectiveGizmoSpace } from "../utils/gizmoMath";
@@ -527,6 +529,7 @@ export default function EngineViewport() {
                 </div>
                 <AnimationSkeletonTool viewportRef={viewportRef} />
                 <AnimationPlayer />
+                <SocketPreviews />
             </>}
 
             {/* The rig editor draws the same bone overlay and drives the same transport, over a preview
@@ -535,6 +538,10 @@ export default function EngineViewport() {
             {editorMode === 'rig' && <>
                 <AnimationSkeletonTool viewportRef={viewportRef} />
                 <AnimationPlayer />
+                {/* Sockets are authored here: their preview models ride on them, and the gizmo drags
+                    the one selected in the Sockets panel. */}
+                <SocketPreviews />
+                <SocketGizmo viewportRef={viewportRef} />
             </>}
 
             {/* The clip editor draws the same bone overlay, but NOT `AnimationPlayer`: its transport is a
@@ -544,8 +551,10 @@ export default function EngineViewport() {
                 so they are drawn here unconditionally, like the three modes above, rather than only when the
                 Skeletons debug toggle happens to be on. Not pickable: no panel in this mode shows a bone
                 selection. */}
-            {editorMode === 'animationField' &&
-                <AnimationSkeletonTool viewportRef={viewportRef} targetId={animationFieldTargetId} pickable={false} />}
+            {editorMode === 'animationField' && <>
+                <AnimationSkeletonTool viewportRef={viewportRef} targetId={animationFieldTargetId} pickable={false} />
+                <SocketPreviews targetId={animationFieldTargetId} />
+            </>}
 
             {editorMode === 'animation' && <>
                 <AnimationSkeletonTool viewportRef={viewportRef} />
@@ -553,6 +562,7 @@ export default function EngineViewport() {
                     BONE and not a node. This one drives the same gizmo through a proxy node parked on the
                     selected joint. */}
                 <BoneGizmo viewportRef={viewportRef} />
+                <SocketPreviews />
             </>}
         </div>
     );

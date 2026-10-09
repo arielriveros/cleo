@@ -1,42 +1,108 @@
+import { useState } from 'react'
 import { Node } from 'cleo'
+import type { AnimationStateMachine } from 'cleo'
 import { useEditorSessions } from '../../EditorSessionsContext'
+import { useAssetLibrary } from '../../AssetLibraryContext'
+import { useCleoEngine } from '../../EngineContext'
+import { useDocument } from '../../DocumentContext'
 import Collapsable from '../../../components/Collapsable'
-import { Button, Hint } from '../../../components/ui'
+import { Button, Hint, Select } from '../../../components/ui'
 import { AnimationIcon } from '../sectionIcons'
-import { ownSkinnedModelNodeOf } from '../../../utils/models'
+import { ownSkinnedModelNodeOf, modelIdOf } from '../../../utils/models'
+import { instantiateController, machineClipNames } from '../../../utils/animationControllers'
 
-// The one animation-related thing a model NODE owns: its state machine.
+// The one animation-related thing a model NODE owns: which machine it runs.
 //
-// ## Why this is all that is left here
+// That is either its OWN state machine, or an Animation Controller asset — Unity's Animator Controller,
+// Unreal's Anim Blueprint — shared by every character that uses it, with this node's CLIP OVERRIDES on
+// top: one zombie controller, a crawler whose Walk is a crawl. Either way the node holds a resolved copy
+// (that is what plays and what ships); `controllerId` on the copy is where it came from.
 //
-// Clips belong to the `.rig` asset (`RigAsset.animationIds`), and so do blend spaces
-// (`AnimationFieldAsset.rigId`). This section used to show both — a clip list, an `AnimationAssetPicker`
-// and the field buttons — but all three read the rig THROUGH the model, which is the same data reached
-// the long way round and a second place to reason about who owns a clip. They live in the rig editor now
-// (`RigInspector`), which is where the ✎ on the Rig slot above leads.
-//
-// ## Why the machine does NOT move with them
-//
-// A state machine is per-NODE, not per-rig: `ModelNode._serializePayload` writes `payload.stateMachine`
-// (src/core/scene/nodes/modelNode.ts), and two characters built on one armature legitimately run
-// different machines over the same clips — a shambling zombie and a sprinting one share every clip and
-// agree on nothing else. It also cannot be reached from anywhere but here: the animation tab is
-// deliberately not restorable (see `tabState.ts`) and `openAsset` has no route to it, so this button is
-// the only door.
+// Clips and blend spaces belong to the `.rig` asset, and are edited through the Rig slot above.
 export default function AnimationSlot(props: { node: Node }) {
   const { enterStateMachineEditor } = useEditorSessions()
+  const { animControllers, animationFields, boneMasks, poseAssets, models } = useAssetLibrary()
+  const { activeTab } = useCleoEngine()
+  const { markTabDirty } = useDocument()
+  const [, force] = useState(0)
 
   const modelNode = ownSkinnedModelNodeOf(props.node)
-  if (!modelNode) return null
+  if (!modelNode?.animator) return null
+  const animator = modelNode.animator
+  const sm = animator.getStateMachine()
+  const controller = sm?.controllerId ? animControllers.find(c => c.id === sm.controllerId) : undefined
+  const rigId = models.find(m => m.id === modelIdOf(modelNode))?.rigId
+  // Controllers authored on this rig first; generic ones (no rig) are offered too.
+  const offered = animControllers.filter(c => !c.rigId || !rigId || c.rigId === rigId)
+  const libs = { animationFields, boneMasks, poses: poseAssets }
+
+  const write = (next: AnimationStateMachine | null) => {
+    animator.setStateMachine(next)
+    markTabDirty(activeTab.id, 'anim-controller')
+    force(x => x + 1)
+  }
+
+  const pick = (id: string) => {
+    if (!id) {
+      // Back to an own machine: keep what it is running, just stop following the controller.
+      if (!sm) return
+      const { controllerId: _c, clipOverrides: _o, ...own } = sm
+      write(own as AnimationStateMachine)
+      return
+    }
+    const asset = animControllers.find(c => c.id === id)
+    if (asset) write(instantiateController(asset, libs, sm?.controllerId === id ? sm.clipOverrides : undefined))
+  }
+
+  const setOverride = (from: string, to: string) => {
+    if (!controller) return
+    const overrides = { ...(sm?.clipOverrides ?? {}) }
+    if (to && to !== from) overrides[from] = to
+    else delete overrides[from]
+    write(instantiateController(controller, libs, overrides))
+  }
+
+  const clips = (modelNode.model as any).animations?.map((a: { name: string }) => a.name) ?? []
+  const controllerClips = controller ? machineClipNames(controller.machine) : []
 
   return (
-    <Collapsable title='State Machine' icon={<AnimationIcon />} persistKey='animation'>
+    <Collapsable title='Animation' icon={<AnimationIcon />} persistKey='animation'>
       <div className='w-full p-2 flex flex-col gap-2'>
+        <Select value={controller?.id ?? ''} onChange={e => pick(e.target.value)}
+          title='Run a shared Animation Controller, or this character’s own state machine'>
+          <option value=''>{sm?.controllerId && !controller ? 'Missing controller — own machine' : 'Own state machine'}</option>
+          {offered.map(c => <option key={c.id} value={c.id}>Controller: {c.name}</option>)}
+        </Select>
+
         <Button variant='primary' className='w-full py-2' onClick={() => enterStateMachineEditor(modelNode.id)}
-          title='Edit which clip this character plays when — its states, transitions and parameters'>
-          ▶ Open State Machine
+          title={controller
+            ? `Edit the “${controller.name}” controller. Applying updates every character that uses it.`
+            : 'Edit which clip this character plays when — its states, layers, transitions and parameters'}>
+          ▶ {controller ? 'Edit Controller' : 'Open State Machine'}
         </Button>
-        <Hint>Which clip plays when. The clips themselves belong to the <b>rig</b> above.</Hint>
+
+        {controller && controllerClips.length > 0 && (
+          <div className='flex flex-col gap-1'>
+            <div className='text-[11px] text-muted'>Clip overrides (this character only)</div>
+            {controllerClips.map(from => (
+              <div key={from} className='flex items-center gap-1 text-[11px]'>
+                <span className='w-[96px] truncate text-gray-300' title={from}>{from}</span>
+                <span className='text-muted'>→</span>
+                <Select className='flex-1 min-w-0' value={sm?.clipOverrides?.[from] ?? ''}
+                  onChange={e => setOverride(from, e.target.value)}>
+                  <option value=''>(same)</option>
+                  {clips.filter((c: string) => c !== from).map((c: string) => <option key={c} value={c}>{c}</option>)}
+                </Select>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <Hint>
+          {controller
+            ? 'Shared by every character using it. Overrides swap clips for this one only.'
+            : 'Which clip plays when. Save it as a Controller from the editor to share it between characters.'}
+        </Hint>
       </div>
     </Collapsable>
   )

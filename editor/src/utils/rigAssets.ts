@@ -74,6 +74,14 @@ export type RigAsset = {
    */
   poses?: RigPose[]
   /**
+   * Named attach points on this skeleton's bones — where a weapon, a torch or a hat is held. By bone NAME,
+   * like `retargets`, so a name backfill or a re-export cannot repoint one.
+   *
+   * Authored here and EMBEDDED into the skin of every model on the rig (`syncRigSockets`), because that
+   * skin is what travels into templates, bundles and the published game; the runtime never sees a rig.
+   */
+  sockets?: RigSocket[]
+  /**
    * Which axis the mirror plane is normal to, i.e. this rig's left/right axis.
    *
    * Auto-detected from the bind pose when absent ({@link mirrorAxisOf} measures where the legs actually
@@ -89,6 +97,26 @@ export type RigAsset = {
 /** One hand-made bone re-point. `targetName: null` means "drop this bone's curve". */
 /** One bone's contribution to a shared pose, as a delta from its rest. Mirrors {@link StoredPoseBone}. */
 export type RigPose = { id: string; name: string; bones: StoredPoseBone[] }
+
+/**
+ * One attach point. `offset` is in the bone's frame with the bone's own scale removed, so its units are
+ * the model's (metres) whatever the armature scale — see `socketModelMatrix`.
+ */
+export type RigSocket = {
+  id: string
+  name: string
+  bone: string
+  offset?: { t?: number[]; r?: number[]; s?: number[] }
+  /** A model shown on the socket in the animation editors only. Never placed in a scene. */
+  previewModelId?: string
+}
+
+/** The runtime shape of a rig's sockets, as embedded in a model's skin. Authoring-only fields dropped. */
+export function runtimeSockets(sockets: RigSocket[] | undefined): { name: string; bone: string; offset?: RigSocket['offset'] }[] {
+  return (sockets ?? [])
+    .filter(s => s.name && s.bone)
+    .map(s => ({ name: s.name, bone: s.bone, ...(s.offset ? { offset: s.offset } : {}) }))
+}
 
 export type RetargetOverride = {
   sourceName: string

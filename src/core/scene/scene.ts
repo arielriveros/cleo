@@ -34,6 +34,7 @@ import type { AISystem } from "../../ai/aiSystem";
 import type { SceneChange } from "../eventBus";
 import { cloneNodeJson, regenerateNodeIds } from "./nodeJson";
 import { getTemplate, templateNames } from "./templates";
+import { followSocket, resolveSocketOwner } from "./socketFollow";
 
 /** Object-space up, rotated by the camera's world orientation to give the audio listener its up axis. */
 const UP_AXIS: vec3 = vec3.fromValues(0, 1, 0);
@@ -91,6 +92,9 @@ export class Scene {
     private _tilemaps: Set<TilemapNode> = new Set();
     private _lodGroups: Set<LodGroupNode> = new Set();
     private _cameraRigs: Set<CameraRigNode> = new Set();
+    // Nodes pinned to a skeleton socket, in traversal order (a follower under a follower comes after it),
+    // with the model each one resolved to. Rebuilt with the other derived lists; null owner = unresolved.
+    private _socketFollowers: Map<Node, ModelNode | null> = new Map();
     private _characters: Set<CharacterNode> = new Set();
     private _controllers: Set<ControllerNode> = new Set();
     private _navMeshes: Set<NavMeshNode> = new Set();
@@ -427,12 +431,20 @@ export class Scene {
             // Camera rigs must run LAST, after every onUpdate: a follow target sorting later in the
             // traversal would not have moved yet, and the rig would trail it by a frame. The extra
             // full-tree transform pass is what makes the targets' world positions current.
+            //
+            // Socket followers share that pass and run BEFORE the rigs: a camera that follows a held
+            // item must see the item where the hand put it this frame.
             const rigs = this.cameraRigs;
-            if (rigs.size > 0) {
+            const followers = this._socketFollowers;
+            if (rigs.size > 0 || followers.size > 0) {
                 // Counted as transform cost, not rig cost: it is a second full-tree pass.
                 const rigTransformStart = performance.now();
                 this._root.updateTransforms();
                 sceneStats.transformMs += performance.now() - rigTransformStart;
+
+                if (followers.size > 0) this._followSockets();
+            }
+            if (rigs.size > 0) {
 
                 // Not gated on _hasStarted/!paused: an editing scene is started AND unpaused (the free-fly
                 // viewport camera needs both), so AUTHORING is what "not playing" means here. It previews
@@ -461,6 +473,42 @@ export class Scene {
         } catch (e) {
             Logger.error(e);
         }
+    }
+
+    /**
+     * Move every socket follower onto its socket. The writes are DERIVED from animation, so — like the
+     * camera rigs' — they must not reach the editor as authoring changes.
+     */
+    private _followSockets(): void {
+        const authoring = CleoEngine.authoringMode;
+        CleoEngine.authoringMode = false;
+        try {
+            for (const [node, cached] of this._socketFollowers) {
+                const attachment = node.socketAttachment;
+                if (!attachment) continue;
+                let owner = cached;
+                // Resolved lazily and cached until the node lists rebuild: the owner search walks the tree.
+                if (!owner || !owner.scene) {
+                    owner = resolveSocketOwner(node, attachment, id => this.getNodeById(id) ?? null);
+                    this._socketFollowers.set(node, owner);
+                }
+                if (owner) followSocket(node, owner);
+            }
+        } finally {
+            CleoEngine.authoringMode = authoring;
+        }
+    }
+
+    /** Nodes currently pinned to a socket. */
+    public get socketFollowers(): Node[] {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return Array.from(this._socketFollowers.keys());
+    }
+
+    /** Rebuild the derived node lists on next access — for a property change that moves a node between them. */
+    public invalidateNodeLists(): void {
+        this._dirty = true;
     }
 
     /**
@@ -649,6 +697,7 @@ export class Scene {
         this._tilemaps = new Set();
         this._lodGroups = new Set();
         this._cameraRigs = new Set();
+        this._socketFollowers = new Map();
         this._characters = new Set();
         this._controllers = new Set();
         this._navMeshes = new Set();
@@ -676,6 +725,8 @@ export class Scene {
                 this._lodGroups.add(node);
             if (node instanceof CameraRigNode)
                 this._cameraRigs.add(node);
+            if (node.socketAttachment)
+                this._socketFollowers.set(node, null);
             if (node instanceof CharacterNode)
                 this._characters.add(node);
             if (node instanceof ControllerNode)

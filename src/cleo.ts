@@ -9,7 +9,7 @@ export type { NodeTemplate } from "./core/scene/templates";
 export { parseNodeJson } from "./core/scene/nodes/parseNodeJson";
 export { cloneNodeJson, collectNodeIds, remapNodeRefs, regenerateNodeIds } from "./core/scene/nodeJson";
 export { Node } from "./core/scene/nodes/node";
-export type { MotionBlurMode } from "./core/scene/nodes/node";
+export type { MotionBlurMode, SocketAttachment } from "./core/scene/nodes/node";
 export { isEditorOnlyNode, markEditorOnly, isEditorOwnedNode, markEditorOwned, isEditorOwnedName, EDITOR_NODE_MARKERS } from "./core/scene/editorNodes";
 export type { NodeType } from "./core/scene/nodes/nodeType";
 export { ModelNode, disposeModelSubtree } from "./core/scene/nodes/modelNode";
@@ -263,7 +263,9 @@ export type { RagdollOptions } from "./physics/ragdoll";
 export { Model } from "./graphics/model";
 export type { Submesh } from "./graphics/model";
 export { AnimatedModel } from "./animation/animatedModel";
-export type { Skin, Joint, Animation, AnimationSampler, AnimationChannel } from "./animation/animatedModel";
+export type { Skin, SkinSocket, Joint, Animation, AnimationSampler, AnimationChannel } from "./animation/animatedModel";
+export { socketNames, socketJoint, socketModelMatrix, socketOffsetMatrix } from "./animation/sockets";
+export { resolveSocketOwner } from "./core/scene/socketFollow";
 export { remapAnimationToSkin, buildBoneMapping, applyManualMapping, mappingReport, retargetAnimation, describeRetarget, humanoidRigOf } from "./animation/animationRetarget";
 export { skeletonTopology, isAncestorJoint, nearestCommonAncestor } from "./animation/skeletonTopology";
 export type { SkeletonTopology } from "./animation/skeletonTopology";
@@ -313,6 +315,13 @@ export type {
     AnimationParameterType,
     AnimationVariableBinding,
     AnimationEventMarker,
+    AnimationLayer,
+    AnimationSlotDef,
+    AnimationBlendMode,
+    AnimationPose,
+    AnimationPoseBone,
+    AnimationActionOptions,
+    AnimationActionHandle,
 } from "./animation/animator";
 export { Sprite, gridTileset, legacySheetTileset, remapLegacyFrame, isInlineTilesetId, INLINE_TILESET_PREFIX } from "./graphics/sprite";
 export type { SpriteOptions, SpriteSide } from "./graphics/sprite";

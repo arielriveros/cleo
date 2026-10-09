@@ -15,6 +15,9 @@ import type { AudioSourceAsset } from './audioSources'
 import type { SoundSampleAsset } from './soundSamples'
 import type { TilesetAsset } from './tilesets'
 import type { AiBrainAsset } from './aiBrains'
+import type { AnimControllerAsset } from './animationControllers'
+import type { BoneMaskAsset } from './boneMasks'
+import type { PoseAsset } from './poseAssets'
 import { deepClone } from './deepClone'
 import { isBinaryPayload } from './binaryPayload'
 
@@ -35,6 +38,9 @@ export interface LocalState {
   rigIds: Set<string>
   tilesetIds: Set<string>
   aiBrainIds: Set<string>
+  animControllerIds: Set<string>
+  boneMaskIds: Set<string>
+  poseAssetIds: Set<string>
   sceneIds: Set<string>
   sceneNames: Set<string>
   /** Local stored textures, id -> {size,mime}, for reuse-vs-remint decisions. */
@@ -58,6 +64,9 @@ export interface MergeResult {
   rigs: RigAsset[]
   tilesets: TilesetAsset[]
   aiBrains: AiBrainAsset[]
+  animControllers: AnimControllerAsset[]
+  boneMasks: BoneMaskAsset[]
+  poseAssets: PoseAsset[]
   /** New scene entries + their blobs (project bundles only). */
   scenes: { meta: SceneMeta; data: SceneAssetData }[]
   /** Imported textures to add (ids possibly re-minted); reused-identical textures are omitted. */
@@ -83,6 +92,9 @@ export type Remaps = {
   rig: Map<string, string>
   tileset: Map<string, string>
   brain: Map<string, string>
+  ctrl: Map<string, string>
+  mask: Map<string, string>
+  pose: Map<string, string>
   audio: Map<string, string>
   sound: Map<string, string>
 }
@@ -123,6 +135,18 @@ export function remapDeep(obj: any, r: Remaps): void {
     // A controller's link to the AI brain asset it copied. Only the LINK moves: the machine, goals and
     // fuzzy model beside it are the embedded copy, which is inline data and must not be remapped.
     if (key === 'brainId') { obj[key] = sub(r.brain, val); continue }
+    // A node machine's link to the animation controller it was instantiated from — the machine beside it
+    // is the embedded copy and is remapped only for the references inside it.
+    if (key === 'controllerId') { obj[key] = sub(r.ctrl, val); continue }
+    // A machine layer's or slot's bone mask asset.
+    if (key === 'maskId') { obj[key] = sub(r.mask, val); continue }
+    // A state's stored pose: `{ assetId, poseId }`. Only `assetId` names an asset (the pose asset);
+    // `poseId` is local to it. Handled as a pair because a bare `assetId` key means something else
+    // elsewhere (an animation clip's shared `.anim` link) and must not be remapped as a pose.
+    if (key === 'poseRef' && val && typeof val === 'object') {
+      ;(val as any).assetId = sub(r.pose, (val as any).assetId)
+      continue
+    }
     // A tilemap layer's tileset link and the id on the embedded tileset copy must move together: the layer
     // looks its tileset up by id in the map's own embedded table.
     if (key === 'tilesetId') { obj[key] = sub(r.tileset, val); continue }
@@ -215,7 +239,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     manifest: bundle.manifest, scenes: bundle.scenes, libraries: bundle.libraries, vfs: bundle.vfs,
   }) as Omit<BundleData, 'textures'>
   // Textures are deliberately left out of that clone; keep the originals and remap their ids apart.
-  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), model: new Map(), script: new Map(), afield: new Map(), anim: new Map(), rig: new Map(), tileset: new Map(), brain: new Map(), audio: new Map(), sound: new Map() }
+  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), model: new Map(), script: new Map(), afield: new Map(), anim: new Map(), rig: new Map(), tileset: new Map(), brain: new Map(), ctrl: new Map(), mask: new Map(), pose: new Map(), audio: new Map(), sound: new Map() }
 
   // 1) Textures first, so their remaps are known before rewriting references.
   const textures: BundleTexture[] = []
@@ -247,6 +271,9 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   for (const g of data.libraries.rigs ?? []) if (local.rigIds.has(g.id)) r.rig.set(g.id, cryptoRandomId())
   for (const t of data.libraries.tilesets ?? []) if (local.tilesetIds.has(t.id)) r.tileset.set(t.id, cryptoRandomId())
   for (const b of data.libraries.aiBrains ?? []) if (local.aiBrainIds.has(b.id)) r.brain.set(b.id, cryptoRandomId())
+  for (const c of data.libraries.animControllers ?? []) if (local.animControllerIds.has(c.id)) r.ctrl.set(c.id, cryptoRandomId())
+  for (const m of data.libraries.boneMasks ?? []) if (local.boneMaskIds.has(m.id)) r.mask.set(m.id, cryptoRandomId())
+  for (const p of data.libraries.poseAssets ?? []) if (local.poseAssetIds.has(p.id)) r.pose.set(p.id, cryptoRandomId())
   // An audio source's record id must follow its PAYLOAD's re-mint, not get an independent one, or the
   // record would point at a file that is not there. Only a record with no payload (its bytes reused
   // above, or missing) falls through to the collision check.
@@ -267,6 +294,9 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   const rigs = (data.libraries.rigs ?? []).map(g => ({ ...g, id: sub(r.rig, g.id) }))
   const tilesets = (data.libraries.tilesets ?? []).map(t => ({ ...t, id: sub(r.tileset, t.id) }))
   const aiBrains = (data.libraries.aiBrains ?? []).map(b => ({ ...b, id: sub(r.brain, b.id) }))
+  const animControllers = (data.libraries.animControllers ?? []).map(c => ({ ...c, id: sub(r.ctrl, c.id) }))
+  const boneMasks = (data.libraries.boneMasks ?? []).map(m => ({ ...m, id: sub(r.mask, m.id) }))
+  const poseAssets = (data.libraries.poseAssets ?? []).map(p => ({ ...p, id: sub(r.pose, p.id) }))
   const audioSources = (data.libraries.audioSources ?? []).map(a => ({ ...a, id: sub(r.audio, a.id) }))
   const soundSamples = (data.libraries.soundSamples ?? []).map(x => ({ ...x, id: sub(r.sound, x.id) }))
   for (const m of materials) remapDeep(m, r)
@@ -275,6 +305,11 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   for (const m of models) remapDeep(m, r)
   for (const f of animationFields) remapDeep(f, r) // its modelId follows the model library's re-mints
   for (const a of animations) remapDeep(a, r)     // its rigId follows the rig library's re-mints
+  // A controller's rigId, and inside its machine every state's fieldId and poseRef plus every layer's and
+  // slot's maskId. A mask's and a pose asset's only link is their rigId.
+  for (const c of animControllers) remapDeep(c, r)
+  for (const m of boneMasks) remapDeep(m, r)
+  for (const p of poseAssets) remapDeep(p, r)
   // Rigs carry references two ways. `animationIds` is a value list, which `remapDeep` handles; but
   // `retargets` is keyed BY SOURCE RIG ID, and remapDeep only ever rewrites values — so a merged bundle
   // would keep every correction under a key naming a rig that no longer exists, silently losing them.
@@ -334,6 +369,9 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
       : e.kind === 'animationField' ? r.afield
       : e.kind === 'tileset' ? r.tileset
       : e.kind === 'aiBrain' ? r.brain
+      : e.kind === 'animController' ? r.ctrl
+      : e.kind === 'boneMask' ? r.mask
+      : e.kind === 'pose' ? r.pose
       : e.kind === 'audioSource' ? r.audio
       : e.kind === 'soundSample' ? r.sound
       // Was absent, so an animation entry fell through to the TEXTURE table and kept its pre-remint id.
@@ -348,5 +386,5 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     vfsEntries.push({ ...e, path, assetId })
   }
 
-  return { materials, terrainMaterials, templates, models, scripts, animationFields, animations, rigs, tilesets, aiBrains, scenes, textures, audio, audioSources, soundSamples, vfsFolders, vfsEntries }
+  return { materials, terrainMaterials, templates, models, scripts, animationFields, animations, rigs, tilesets, aiBrains, animControllers, boneMasks, poseAssets, scenes, textures, audio, audioSources, soundSamples, vfsFolders, vfsEntries }
 }

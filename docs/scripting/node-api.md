@@ -200,6 +200,43 @@ get motionBlur: MotionBlurMode ; set motionBlur(v)   // 'full' | 'objectOnly' | 
 The setter fans out to children. Use `'none'` on things that should not smear — a first-person
 weapon model, a UI-adjacent prop.
 
+## Sockets
+
+Any node can be pinned to a **socket** — a named attach point on a character's bone, authored on the
+rig ([Sockets](../editor/animation.md#sockets)). The node stays where it is in the hierarchy; the
+scene drives its transform from then on.
+
+```ts
+attachToSocket(target: Node | 'parent', socket: string): void
+detachFromSocket(): void                      // keeps the transform it had on the last frame
+get socketAttachment: SocketAttachment | null ; set socketAttachment(v)
+
+interface SocketAttachment {
+  target: 'parent' | string     // 'parent', or a node id
+  socket: string                // as named on the rig
+}
+```
+
+```ts
+onStart() {
+  // A torch dropped under the player: follow the nearest character above it.
+  this.attachToSocket('parent', 'LeftHand')
+}
+```
+
+`'parent'` finds the nearest skinned model **above** the node, and at each ancestor also looks
+**inside** it — a character is usually a holder with its mesh beneath, so the torch is the mesh's
+sibling, not its child. A specific `target` is for an item held by a character it is not parented
+to; it searches that node and its subtree. A node never follows a socket on itself or its own
+children.
+
+> **While attached, the node's position, rotation and scale are overwritten every frame.** Writes
+> from a script are lost. When the socket cannot be found — a typo, or a character without it — the
+> node is simply left where it is.
+
+The follow runs in the scene's late pass, after every animator and before camera rigs, so the item
+is where the hand is this frame. `socketAttachment` is serialized with the node.
+
 ## Serialization
 
 ```ts

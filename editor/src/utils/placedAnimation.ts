@@ -23,7 +23,7 @@ export interface NodeLike {
   animator?: AnimatorLike | null
   ragdollConfig?: any
   /** ModelNodes only; `skin` exists only on an AnimatedModel. */
-  model?: { skin?: { ikRig?: any } | null } | null
+  model?: { skin?: { ikRig?: any; sockets?: any[] } | null } | null
   children: NodeLike[]
 }
 
@@ -36,6 +36,18 @@ export function applyIkRig(inst: NodeLike, rig: any | null): void {
   for (const node of animationNodesOf(inst)) {
     const skin = node.model?.skin
     if (skin) skin.ikRig = rig ?? undefined
+  }
+}
+
+/**
+ * Push a model asset's sockets onto every skinned model in a placed subtree — the {@link applyIkRig} of
+ * sockets, for the same reason: a template bakes its own copy of the skin.
+ */
+export function applySockets(inst: NodeLike, sockets: any[] | null): void {
+  for (const node of animationNodesOf(inst)) {
+    const skin = node.model?.skin
+    // A fresh array each time: the runtime resolver caches on the array's identity.
+    if (skin) skin.sockets = sockets?.length ? sockets.map(s => ({ ...s })) : undefined
   }
 }
 

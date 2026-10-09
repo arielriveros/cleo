@@ -38,13 +38,17 @@ export function RigProvider({ children }: { children: React.ReactNode }) {
 
   const [asset, setAsset] = useState<RigAsset | null>(null)
   const loadedIdRef = useRef<string | null>(null)
+  // Unsaved working copies, by rig id. Only ONE rig session is live at a time, so without this switching
+  // to another tab and back re-adopted the LIBRARY copy and silently dropped every unsaved edit — while
+  // the tab still showed itself dirty.
+  const unsavedRef = useRef(new Map<string, RigAsset>())
 
   // Adopt the tab's rig when it CHANGES. Guarded on the id rather than the library array, so a save —
   // which rewrites the library — does not throw away the working copy that produced it.
   useEffect(() => {
     if (!editingRigId) { loadedIdRef.current = null; setAsset(null); return }
     if (loadedIdRef.current === editingRigId) return
-    const found = rigs.find(r => r.id === editingRigId)
+    const found = unsavedRef.current.get(editingRigId) ?? rigs.find(r => r.id === editingRigId)
     if (!found) return
     loadedIdRef.current = editingRigId
     // Deep copy: the working copy must be detached from the library record it came from.
@@ -70,6 +74,7 @@ export function RigProvider({ children }: { children: React.ReactNode }) {
   )
 
   const patch = useCallback((next: RigAsset) => {
+    unsavedRef.current.set(next.id, next)
     setAsset(next)
     if (tabId) markTabDirty(tabId, 'rig-edit')
   }, [tabId, markTabDirty])
@@ -78,7 +83,9 @@ export function RigProvider({ children }: { children: React.ReactNode }) {
     setAsset(prev => {
       if (!prev) return prev
       if (tabId) markTabDirty(tabId, 'rig-retarget')
-      return withOverride(prev, sourceRigId, sourceName, targetName)
+      const next = withOverride(prev, sourceRigId, sourceName, targetName)
+      unsavedRef.current.set(next.id, next)
+      return next
     })
   }, [tabId, markTabDirty])
 
@@ -86,12 +93,17 @@ export function RigProvider({ children }: { children: React.ReactNode }) {
     setAsset(prev => {
       if (!prev) return prev
       const next = withoutOverrides(prev, sourceRigId)
+      if (next !== prev) unsavedRef.current.set(next.id, next)
       if (next !== prev && tabId) markTabDirty(tabId, 'rig-retarget')
       return next
     })
   }, [tabId, markTabDirty])
 
-  const save = useCallback(() => { if (merged) saveRig(merged) }, [merged, saveRig])
+  const save = useCallback(() => {
+    if (!merged) return
+    unsavedRef.current.delete(merged.id)
+    saveRig(merged)
+  }, [merged, saveRig])
 
   // Register with the save orchestrator, so Ctrl+S and Save All reach this session.
   useEffect(() => {

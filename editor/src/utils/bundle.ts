@@ -11,6 +11,9 @@ import type { RigAsset } from './rigAssets'
 import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
 import type { AiBrainAsset } from './aiBrains'
+import type { AnimControllerAsset } from './animationControllers'
+import type { BoneMaskAsset } from './boneMasks'
+import type { PoseAsset } from './poseAssets'
 import type { AudioSourceAsset } from './audioSources'
 import type { SoundSampleAsset } from './soundSamples'
 import type { ChunkRef } from './chunkBlob'
@@ -58,6 +61,10 @@ export interface BundleLibraries {
   tilesets: TilesetAsset[]
   /** Optional, so a bundle written before AI brains existed still reads. */
   aiBrains?: AiBrainAsset[]
+  /** Optional, so a bundle written before controllers, bone masks and pose assets existed still reads. */
+  animControllers?: AnimControllerAsset[]
+  boneMasks?: BoneMaskAsset[]
+  poseAssets?: PoseAsset[]
   /**
    * The audio split's two record halves.
    *

@@ -1,7 +1,7 @@
 # Assets
 
 The **Assets** panel is one file manager over every library in the project, with real folders. All
-14 asset kinds live in it.
+18 asset kinds live in it.
 
 ## The panel
 
@@ -9,7 +9,7 @@ A single toolbar row:
 
 | Control | Does |
 |---|---|
-| **+ Add ▾** | Material, Terrain Material, Template, Script, Tileset, Sound, Animation, **AI Brain (Machine)**, **AI Brain (Goals)**, Scene, Folder, Import Files… |
+| **+ Add ▾** | Material, Landscape Material, Template, Script, Tileset, **AI Brain (Machine)**, **AI Brain (Goals)**, **Animation Controller**, Sound, Animation, Scene, Folder, Import Files… |
 | **Search** | Filters by name. |
 | **Audit** | Flags assets a library holds but the explorer is not showing, and orphan entries pointing at deleted assets. Carries a warning badge when either exists. |
 | **Details** | Toggles the details pane. |
@@ -20,7 +20,7 @@ template. Right-click empty space for **New folder**.
 
 Folders are yours to arrange; nothing depends on where an asset sits.
 
-## The 14 kinds
+## The 18 kinds
 
 | Kind | Ext | Created by | Edited in | Used by |
 |---|---|---|---|---|
@@ -32,7 +32,11 @@ Folders are yours to arrange; nothing depends on where an asset sits.
 | **Model** | `.model` | Model import, or adopting a node subtree | Model mode | placed in scenes |
 | **Scene** | `.scene` | **+ Add** | The scene tab | one is the main scene |
 | **Script** | `.script` | **+ Add** | [Script mode](scripting-workflow.md) | attached to nodes |
-| **Animation** | `.anim` | **+ Add** (pick a `.fbx`/`.glb`/`.gltf`) | *no editor* — clips stay in source-rig space | model clip lists, state machines |
+| **Animation** | `.anim` | **+ Add** (pick a `.fbx`/`.glb`/`.gltf`) | [Clip mode](animation.md) — clips stay in source-rig space | rig clip lists, state machines |
+| **Rig** | `.rig` | Model or animation import — one per distinct skeleton | [Rig mode](animation.md): clips, retargeting, IK, sockets, bone masks, poses | models built on that skeleton |
+| **Animation Controller** | `.controller` | **+ Add**, or **Save as Controller…** in the state machine editor | [State machine editor](animation.md#animation-controllers), previewed on a character on its rig | characters' **Animation** section |
+| **Bone Mask** | `.mask` | The rig editor's **Bone Masks** section | Rig mode, **Bone Masks** section | controller layers and action slots |
+| **Pose Asset** | `.pose` | Saving a pose in the clip editor, or **+ New pose asset** in the rig editor's **Poses** section | Rig mode, **Poses** section | clip pose offsets, controller pose states |
 | **Animation Field** | `.afield` | Model inspector, or **+ Add** | Animation Field mode | a state in a state machine |
 | **AI Brain** | `.brain` | **+ Add ▸ AI Brain (Machine \| Goals)** | [AI Brain mode](ai-brains.md) | linked from a Controller |
 | **Tileset** | `.tileset` | **+ Add** (pick an atlas) | Tileset mode | tilemap layers, sprites |
@@ -40,6 +44,10 @@ Folders are yours to arrange; nothing depends on where an asset sits.
 | **Sound sample** | `.sound` | **+ Add**, or derived | [Sound mode](audio.md) | sound nodes |
 
 Extensions in full are in [File formats](../reference/file-formats.md).
+
+> **Make bone masks and pose assets from the rig editor.** Both are edited inside the rig editor of
+> the skeleton they belong to, and double-clicking one opens that rig. One created from **+ Add**
+> starts with no rig, so it has nowhere to open — the log says so.
 
 ## Operations
 
@@ -49,7 +57,10 @@ Every kind supports rename, delete and duplicate; the details differ.
 asset.
 
 **Delete** confirms with a consequence line saying what will actually happen — for example, deleting
-a brain says *"controllers keep the brain they copied, but stop tracking this asset"*.
+a brain says *"controllers keep the brain they copied, but stop tracking this asset"*. An animation
+controller works the same way: characters keep the machine they copied. A bone mask or a pose does
+not — a layer whose mask is deleted stops affecting anything, and a state holding a deleted pose
+holds nothing.
 
 **Duplicate** copies the record. Textures and sound samples share the underlying bytes with their
 original (two textures with different sampling over one image); images and audio sources copy the

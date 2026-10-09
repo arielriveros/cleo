@@ -5,7 +5,7 @@ type EngineValue = ReturnType<typeof useCleoEngine>;
 
 /**
  * The asset libraries (templates, materials, terrain materials, models, script assets, animation fields,
- * images/textures and audio sources/sound samples)
+ * animation controllers, bone masks, pose assets, images/textures and audio sources/sound samples)
  * plus their CRUD. The state lives in EngineProvider, persisted to IndexedDB by `usePersistedLibrary`;
  * this context re-exposes it as a narrow, memoized value, derived via `Pick` to stay in lockstep with it.
  */
@@ -20,6 +20,9 @@ export type AssetLibraryContextValue = Pick<EngineValue,
   | 'rigs' | 'addRig' | 'removeRig' | 'updateRig'
   | 'tilesets' | 'addTileset' | 'removeTileset' | 'updateTileset'
   | 'aiBrains' | 'addAiBrain' | 'removeAiBrain' | 'updateAiBrain'
+  | 'animControllers' | 'addAnimController' | 'removeAnimController' | 'updateAnimController'
+  | 'boneMasks' | 'addBoneMask' | 'removeBoneMask' | 'updateBoneMask'
+  | 'poseAssets' | 'addPoseAsset' | 'removePoseAsset' | 'updatePoseAsset'
   | 'images' | 'addImage' | 'removeImage' | 'updateImage'
   | 'textures' | 'addTextureAsset' | 'removeTextureAsset' | 'updateTextureAsset'
   | 'audioSources' | 'addAudioSource' | 'removeAudioSource' | 'updateAudioSource'

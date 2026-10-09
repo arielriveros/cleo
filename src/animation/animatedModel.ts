@@ -33,6 +33,12 @@ export interface Animation {
      * Such a clip is not serialized — {@link AnimatedModel.serialize} filters it out and `parse` re-resolves it.
      */
     assetId?: string;
+    /**
+     * Event markers that belong to the CLIP, so they fire wherever it plays — a state, a layer, or an
+     * action slot. Times in seconds. (A state machine's own `events` list is the older form, keyed by clip
+     * name; both fire.)
+     */
+    events?: { time: number; name: string }[];
 }
 
 // Skinning data structures
@@ -54,6 +60,21 @@ export interface Skin {
      * tuned. Lives on the skin because its fields are joint indices into this skeleton.
      */
     ikRig?: IkRig;
+    /**
+     * Named attach points on bones — where a held weapon, a torch or a hat goes. Authored on the rig and
+     * carried here, like {@link ikRig}, so they travel with the model into templates, bundles and the
+     * published game. Bones are named, never indexed: see `sockets.ts`.
+     */
+    sockets?: SkinSocket[];
+}
+
+/** One attach point: a bone (by NAME) plus a local offset from it. */
+export interface SkinSocket {
+    name: string;
+    /** The bone's name in `Skin.nodeNames`. */
+    bone: string;
+    /** Offset in the BONE's local space. Each part optional: identity when absent. */
+    offset?: { t?: number[]; r?: number[]; s?: number[] };
 }
 
 // Options for loading animated models
@@ -296,7 +317,8 @@ export class AnimatedModel {
                 nodeTransforms,
                 nodeNames,
                 // Plain JSON — joint indices and numbers — so it needs no reconstruction, only carrying.
-                ikRig: data.skin.ikRig ?? undefined
+                ikRig: data.skin.ikRig ?? undefined,
+                sockets: Array.isArray(data.skin.sockets) ? data.skin.sockets : undefined
             };
         }
         
@@ -473,7 +495,8 @@ export class AnimatedModel {
                 nodeParents,
                 nodeTransforms,
                 nodeNames,
-                ikRig: this._skin.ikRig ?? null
+                ikRig: this._skin.ikRig ?? null,
+                ...(this._skin.sockets?.length ? { sockets: this._skin.sockets } : {})
             };
         }
         

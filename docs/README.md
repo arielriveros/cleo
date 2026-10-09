@@ -10,7 +10,9 @@ publishing the result as a self-contained web page or desktop application.
 > These pages describe the **current source**, which is ahead of the v1.1.2.4 tag. Features that
 > landed after it are marked *unreleased* where they appear: the `Character` / `Controller` node
 > pair, the `NavMesh` node with its bake-bounds volume, the **AI Brain** asset with the
-> Behaviour / Goals / Fuzzy graph editors, and the `Decal` node. The published-game player contract
+> Behaviour / Goals / Fuzzy graph editors, the `Decal` node, and the animation additions —
+> **Animation Controller**, **Bone Mask** and **Pose** assets, controller layers, action slots, clip
+> events and bone sockets. The published-game player contract
 > is at **8** on this branch; the last tagged release shipped 6.
 
 ---
@@ -36,12 +38,12 @@ After that the two halves are independent, and you can read either first:
 | [Interface](editor/interface.md) | Menu bar, tabs, the dockable panel layout, keyboard shortcuts |
 | [Editor modes](editor/modes.md) | All 17 modes, how each is entered and what it shows |
 | [Projects](editor/projects.md) | Multiple projects, examples gallery, importing and exporting a project |
-| [Assets](editor/assets.md) | The asset explorer and all 14 asset kinds |
+| [Assets](editor/assets.md) | The asset explorer and all 18 asset kinds |
 | [Scene authoring](editor/scene-authoring.md) | The hierarchy, the Add catalog, gizmos, templates, undo, debug overlays |
 | [Node inspector](editor/node-inspector.md) | Every property editor, by node type |
 | [Models and materials](editor/models-and-materials.md) | Importing meshes, retargeting animation, LODs, the material editor, textures |
 | [Physics](editor/physics.md) | Rigid bodies, triggers, colliders, convex hulls, ragdolls |
-| [Animation](editor/animation.md) | Clips, state machines, blend spaces, foot IK, events, root motion |
+| [Animation](editor/animation.md) | Clips, state machines and controllers, layers and bone masks, poses, action slots, blend spaces, foot IK, sockets, events, root motion |
 | [AI brains](editor/ai-brains.md) | The `.brain` asset and the Behaviour / Goals / Fuzzy canvases |
 | [AI agents](editor/ai-agents.md) | The Controller node, perception, steering, navmesh baking |
 | [Terrain](editor/terrain.md) | Landscapes, sculpting, painting, foliage |
@@ -64,7 +66,7 @@ After that the two halves are independent, and you can read either first:
 | [Input](scripting/input.md) | Reading actions |
 | [Characters and controllers](scripting/characters-and-controllers.md) | The pawn/driver split, locomotion, camera rigs |
 | [AI](scripting/ai.md) | Goals, behaviour machines, fuzzy logic, perception, pathfinding |
-| [Animation](scripting/animation.md) | Driving the animator from code |
+| [Animation](scripting/animation.md) | Driving the animator from code: parameters, layers, actions, sockets |
 | [UI](scripting/ui.md) | Building and updating interfaces |
 | [Scene and game](scripting/scene-and-game.md) | Spawning, templates, switching scenes, the event bus |
 | [Audio](scripting/audio.md) | Playing sound |

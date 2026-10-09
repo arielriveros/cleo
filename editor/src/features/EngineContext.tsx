@@ -37,15 +37,19 @@ import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf,
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds, syncSlotMaterialInTerrain, withSyncedSlotMaterial } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
-import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE } from "../utils/models";
+import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE } from "../utils/models";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, seedScriptFields } from "../utils/scripts";
 import { pushExternalSource } from "./scriptWorkspace/externalSourceStore";
 import { AnimationAsset, buildAnimationAsset, storeSkin, findEquivalentAnimation, withAnimationRef, withoutAnimationRef, extractEmbeddedClips } from "../utils/animationAssets";
 import type { StoredSkin } from "../utils/animationAssets";
-import { modelAssetSkin, applyModelAnimations, modelAnimationIds, invalidateAnimationCache, resolveAnimationAsset, registerRigResolver } from "../utils/animationResolve";
+import { modelAssetSkin, applyModelAnimations, modelAnimationIds, invalidateAnimationCache, resolveAnimationAsset, registerRigResolver, registerPoseAssetResolver } from "../utils/animationResolve";
 import { AnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
 import { TilesetAsset, reembedTilesets, detachTileset } from "../utils/tilesets";
 import { AiBrainAsset, AiBrainKind, buildAiBrainAsset, reembedBrains, detachBrain } from "../utils/aiBrains";
+import type { AnimControllerAsset } from "../utils/animationControllers";
+import { instantiateController, reembedMachine } from "../utils/animationControllers";
+import type { BoneMaskAsset } from "../utils/boneMasks";
+import type { PoseAsset } from "../utils/poseAssets";
 import type { ControllerNode } from "cleo";
 import type { ImageAsset } from "../utils/images";
 import type { AudioSourceAsset } from "../utils/audioSources";
@@ -62,7 +66,7 @@ import { isValidGrouping, compactGroups, type PartInfo } from "../utils/submeshG
 import { readModelLibrary, writeModelLibrary } from "../utils/modelStore";
 import { generateLodLevel, hasSkinnedPart, subtreeTriangles } from "../utils/lodGenerate";
 import { registerFoliageSourceResolver } from "../utils/foliageRules";
-import { findEquivalentRig, buildRigAsset, type RigAsset } from "../utils/rigAssets";
+import { findEquivalentRig, buildRigAsset, runtimeSockets, type RigAsset } from "../utils/rigAssets";
 import { extractRigs, moveClipsToRigs } from "../utils/rigMigration";
 import { decimateGeometry } from "../workers/workerClient";
 import { cancelAllImports, ImportCancelled, parseAnimationFiles } from "../workers/importClient";
@@ -185,6 +189,8 @@ const EngineContext = createContext<{
   registerRigApply: (reg: { tabId: string; apply: () => void } | null) => void;
   /** Open (or focus) a rig's edit tab. */
   enterRigEditor: (rigId?: string, adoptTabId?: string) => void;
+  /** Open an animation controller asset for editing. */
+  openAnimController: (id: string) => void;
   /** Show a different character on the open rig tab. */
   setRigPreviewModel: (tabId: string, modelId: string) => void;
   /** Which character the open rig tab is previewing. */
@@ -355,6 +361,21 @@ const EngineContext = createContext<{
   addAiBrain: (b: AiBrainAsset) => void;
   removeAiBrain: (id: string) => void;
   updateAiBrain: (id: string, b: AiBrainAsset) => void;
+  // Animation controller assets (a shared state machine: parameters, layers, slots)
+  animControllers: AnimControllerAsset[];
+  addAnimController: (c: AnimControllerAsset) => void;
+  removeAnimController: (id: string) => void;
+  updateAnimController: (id: string, c: AnimControllerAsset) => void;
+  // Bone mask assets (per-bone layer weights, authored against a rig)
+  boneMasks: BoneMaskAsset[];
+  addBoneMask: (m: BoneMaskAsset) => void;
+  removeBoneMask: (id: string) => void;
+  updateBoneMask: (id: string, m: BoneMaskAsset) => void;
+  // Pose assets (named stored poses, authored against a rig)
+  poseAssets: PoseAsset[];
+  addPoseAsset: (p: PoseAsset) => void;
+  removePoseAsset: (id: string) => void;
+  updatePoseAsset: (id: string, p: PoseAsset) => void;
 /** Open (or focus) a Tileset asset's edit tab. Creates a fresh, atlas-less one when given no id. */
   enterTilesetEditor: (tilesetId?: string) => void;
   /** Open an AI brain's tab, minting one of `kind` when called with no id. */
@@ -513,6 +534,7 @@ const EngineContext = createContext<{
     registerAiBrainApply: () => {},
     registerRigApply: () => {},
     enterRigEditor: () => {},
+    openAnimController: () => {},
     setRigPreviewModel: () => {},
     rigPreviewModelId: () => undefined,
     saveRig: () => {},
@@ -627,6 +649,18 @@ const EngineContext = createContext<{
     addAiBrain: () => {},
     removeAiBrain: () => {},
     updateAiBrain: () => {},
+    animControllers: [],
+    addAnimController: () => {},
+    removeAnimController: () => {},
+    updateAnimController: () => {},
+    boneMasks: [],
+    addBoneMask: () => {},
+    removeBoneMask: () => {},
+    updateBoneMask: () => {},
+    poseAssets: [],
+    addPoseAsset: () => {},
+    removePoseAsset: () => {},
+    updatePoseAsset: () => {},
     updateTileset: () => {},
     enterTilesetEditor: () => {},
     enterAiBrainEditor: () => {},
@@ -1228,6 +1262,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // index-matched mapping survives and the character animates subtly wrongly, with nothing logged.
     rigsRef.current = rigs.map(x => x.id === id ? r : x);
     invalidateAnimationCache();
+    syncRigSockets(r);
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
   };
   const removeRig = (id: string) => {
@@ -1383,6 +1418,164 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (changed) eventEmitter.current.emit('SCENE_CHANGED');
     const open = tabsRef.current.find(t => t.kind === 'aiBrain' && t.aiBrainId === id);
     if (open) removeTabById(open.id);
+  };
+
+  // Animation controllers, bone masks and pose assets: plain JSON records, persisted like the brains. A
+  // ModelNode embeds a resolved copy of what it uses (controllerId / maskId / poseRef record the source),
+  // so deleting a library entry leaves every character playing what it already copied.
+  const [animControllers, setAnimControllers] = useState<AnimControllerAsset[]>([]);
+  const animControllersLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<AnimControllerAsset[]>(libKey('animControllers'));
+        if (list && list.length) setAnimControllers(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load animation controllers:', e); }
+      finally { animControllersLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary(libKey('animControllers'), animControllers, animControllersLoadedRef);
+
+  const animControllersRef = useRef<AnimControllerAsset[]>([]);
+  animControllersRef.current = animControllers;
+
+  const addAnimController = (c: AnimControllerAsset) => setAnimControllers(prev => [...prev, c]);
+  const updateAnimController = (id: string, c: AnimControllerAsset) => setAnimControllers(prev => prev.map(x => x.id === id ? c : x));
+  const removeAnimController = (id: string) => setAnimControllers(prev => prev.filter(x => x.id !== id));
+
+  const [boneMasks, setBoneMasks] = useState<BoneMaskAsset[]>([]);
+  const boneMasksLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<BoneMaskAsset[]>(libKey('boneMasks'));
+        if (list && list.length) setBoneMasks(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load bone masks:', e); }
+      finally { boneMasksLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary(libKey('boneMasks'), boneMasks, boneMasksLoadedRef);
+
+  const boneMasksRef = useRef<BoneMaskAsset[]>([]);
+  boneMasksRef.current = boneMasks;
+
+  const addBoneMask = (m: BoneMaskAsset) => setBoneMasks(prev => [...prev, m]);
+  const updateBoneMask = (id: string, m: BoneMaskAsset) => setBoneMasks(prev => prev.map(x => x.id === id ? m : x));
+  const removeBoneMask = (id: string) => setBoneMasks(prev => prev.filter(x => x.id !== id));
+
+  const [poseAssets, setPoseAssets] = useState<PoseAsset[]>([]);
+  const poseAssetsLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<PoseAsset[]>(libKey('poseAssets'));
+        if (list && list.length) setPoseAssets(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load pose assets:', e); }
+      finally { poseAssetsLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary(libKey('poseAssets'), poseAssets, poseAssetsLoadedRef);
+
+  const poseAssetsRef = useRef<PoseAsset[]>([]);
+  poseAssetsRef.current = poseAssets;
+
+  const addPoseAsset = (p: PoseAsset) => setPoseAssets(prev => [...prev, p]);
+  const updatePoseAsset = (id: string, p: PoseAsset) => setPoseAssets(prev => prev.map(x => x.id === id ? p : x));
+  const removePoseAsset = (id: string) => setPoseAssets(prev => prev.filter(x => x.id !== id));
+
+  /** The libraries a state machine's links (fields, masks, poses) resolve against, as of now. */
+  const machineLibs = () => ({
+    animationFields: animationFieldsRef.current, boneMasks: boneMasksRef.current, poses: poseAssetsRef.current,
+  });
+
+  /**
+   * Re-embed every live machine that links a controller, mask or pose, after one of those libraries
+   * changed. Nodes hold RESOLVED copies (that is what plays and what ships), so an edit to the asset only
+   * reaches them through here — the controller twin of `reembedFields`. Stored scenes are reached by
+   * `resyncScene` when they are next opened.
+   *
+   * Waits for all three libraries to load: a mask that has not loaded yet would read as DELETED, and a
+   * deleted mask switches its layer off.
+   */
+  const reembedLiveMachines = () => {
+    if (!animControllersLoadedRef.current || !boneMasksLoadedRef.current || !poseAssetsLoadedRef.current) return;
+    const libs = { ...machineLibs(), controllers: animControllersRef.current };
+    for (const scene of liveScenes()) {
+      for (const n of Array.from(scene.nodes)) {
+        if (!(n instanceof ModelNode) || !n.animator) continue;
+        const next = reembedMachine(n.animator.getStateMachine(), libs);
+        // Derived from the asset, not an edit of this node: nothing to mark unsaved.
+        if (next) withoutDirty(() => n.animator!.setStateMachine(next));
+      }
+    }
+  };
+  useEffect(() => { reembedLiveMachines(); }, [animControllers, boneMasks, poseAssets]);
+
+  // Clips resolve `poseOffset` edits against pose assets too, so a pose edit must re-resolve every model
+  // on the rig it belongs to — exactly what a rig edit does.
+  const lastPoseAssetsRef = useRef<PoseAsset[]>([]);
+  useEffect(() => {
+    const before = lastPoseAssetsRef.current;
+    lastPoseAssetsRef.current = poseAssets;
+    if (!poseAssetsLoadedRef.current || before === poseAssets) return;
+    const rigIds = new Set<string>();
+    for (const p of [...before, ...poseAssets]) {
+      const prev = before.find(x => x.id === p.id);
+      const now = poseAssets.find(x => x.id === p.id);
+      if (JSON.stringify(prev?.poses ?? null) !== JSON.stringify(now?.poses ?? null) && p.rigId) rigIds.add(p.rigId);
+    }
+    if (!rigIds.size) return;
+    invalidateAnimationCache();
+    for (const rigId of rigIds) applyRigLinks(rigId);
+    eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
+  }, [poseAssets]);
+
+  /**
+   * Open a controller asset in the state-machine editor, previewed on a character built on its rig.
+   *
+   * Unlike `enterStateMachineEditor` there is no source node: Apply writes the CONTROLLER, and every
+   * character using it picks the change up through `reembedLiveMachines`.
+   */
+  const openAnimController = (id: string) => {
+    const asset = animControllersRef.current.find(c => c.id === id);
+    if (!asset) { Logger.error('Controller not found', 'Editor'); return; }
+    const existing = tabs.find(t => t.kind === 'stateMachine' && t.controllerId === id && !t.stateMachineSourceId);
+    if (existing) { setActiveTab(existing.id); return; }
+
+    const model = modelsRef.current.find(m => !!asset.rigId && m.rigId === asset.rigId)
+      ?? (!asset.rigId ? modelsRef.current.find(m => modelAssetIsSkinned(m)) : undefined);
+    if (!model) {
+      Logger.warn(`"${asset.name}" needs a character to preview on — link a model to ${asset.rigId ? 'its rig' : 'a rig'} first.`, 'Editor');
+      return;
+    }
+
+    const wasArmed = dirtyArmedRef.current;
+    dirtyArmedRef.current = false;
+    const scene = new Scene();
+    scene.animationsEnabled = false;
+    scene.spawnRulesEnabled = false;
+    // Editor-owned for the same reason the node path's holder is: this tab saves the controller, never
+    // the preview.
+    const holder = markEditorOwned(new Node(`${asset.name} (preview)`));
+    scene.addNode(holder);
+    withoutDirty(() => instantiateModelAsset(model, holder, materialsRef.current, modelsRef.current, animationsRef.current));
+    scene.root.updateTransforms();
+    const skinned = firstSkinnedModelNode(holder);
+    if (!skinned?.animator) {
+      Logger.error(`"${model.name}" has no skinned mesh to preview the controller on`, 'Editor');
+      dirtyArmedRef.current = wasArmed;
+      return;
+    }
+    const bounds = combineBounds(skinned);
+    createAnimationEditorScene(scene, bounds.center, bounds.radius, { silently: withoutDirty });
+    scene.start();
+    withoutDirty(() => skinned.animator!.setStateMachine(instantiateController(asset, machineLibs())));
+    skinned.animator.showBindPose();
+
+    const tabId = cryptoRandomId();
+    tabRuntimeRef.current.set(tabId, { scene, rootId: skinned.id });
+    setTabs(prev => [...prev, { id: tabId, kind: 'stateMachine', title: `${asset.name} (Controller)`, controllerId: id }]);
+    setActiveTabId(tabId);
   };
 
   // The two halves of the image/texture split. An ImageAsset is metadata over the bytes that already live
@@ -1619,7 +1812,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     if (assetsLoaded) return;
     const timer = window.setInterval(() => {
-      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && animationsLoadedRef.current && rigsLoadedRef.current && scenesLoadedRef.current && imagesLoadedRef.current && texturesLoadedRef.current && audioSourcesLoadedRef.current && soundSamplesLoadedRef.current && aiBrainsLoadedRef.current) {
+      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && animationsLoadedRef.current && rigsLoadedRef.current && scenesLoadedRef.current && imagesLoadedRef.current && texturesLoadedRef.current && audioSourcesLoadedRef.current && soundSamplesLoadedRef.current && aiBrainsLoadedRef.current && animControllersLoadedRef.current && boneMasksLoadedRef.current && poseAssetsLoadedRef.current) {
         setAssetsLoaded(true);
         window.clearInterval(timer);
       }
@@ -1948,6 +2141,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // `rigId` into a skeleton, and threading the rig library through resolveAnimationAsset ->
   // resolveModelAnimations -> applyModelAnimations -> refreshModelClips would touch every call site of each.
   registerRigResolver((rigId: string) => rigsRef.current.find(r => r.id === rigId) ?? null);
+  registerPoseAssetResolver(() => poseAssetsRef.current);
 
   const engineMaps = () => ({ scripts: scriptsRef.current, bodies: bodiesRef.current, triggers: triggersRef.current });
 
@@ -1968,6 +2162,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     terrainMaterials: terrainMaterialsRef.current, scripts: scriptAssetsRef.current,
     tilesets: tilesetsRef.current, aiBrains: aiBrainsRef.current, animations: animationsRef.current,
     rigs: rigsRef.current,
+    animControllers: animControllersRef.current, boneMasks: boneMasksRef.current, poseAssets: poseAssetsRef.current,
+    animationFields: animationFieldsRef.current,
   });
 
   // Open (or focus) a template editor tab. Each template tab owns its own throwaway edit scene.
@@ -2307,8 +2503,32 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     updateModel(modelId, updated);
     invalidateAnimationCache();
     applyAnimationLinks(updated);
+    const rig = rigId ? rigsRef.current.find(r => r.id === rigId) : undefined;
+    syncRigSockets(rig ?? { id: '', sockets: [] } as any, [modelId]);
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
+  };
+
+  /**
+   * Embed a rig's sockets into every model built on it, and push them onto everything showing those
+   * models. The rig is where sockets are AUTHORED; the model's skin is what the runtime reads, and what
+   * carries them into templates, bundles and the published game. Stored-scene copies are reached later by
+   * `resyncScene`, the same way the IK rig is. `onlyModels` limits it to a model whose link just changed.
+   */
+  const syncRigSockets = (rig: RigAsset, onlyModels?: string[]) => {
+    const sockets = runtimeSockets(rig.sockets);
+    const targets = onlyModels
+      ? modelsRef.current.filter(m => onlyModels.includes(m.id))
+      : modelsRef.current.filter(m => m.rigId === rig.id);
+    for (const model of targets) {
+      const updated = assetWithSockets(model, sockets);
+      if (updated !== model) {
+        modelsRef.current = modelsRef.current.map(m => (m.id === model.id ? updated : m));
+        updateModel(model.id, updated);
+      }
+      // Fresh arrays per skin: the runtime caches socket resolution on the array's identity.
+      propagateModelClips(model.id, m => { if (m.skin) m.skin.sockets = sockets.length ? sockets.map(s => ({ ...s })) : undefined; });
+    }
   };
 
   /** Link a shared `.anim` to a RIG. Every model on that rig gains its clips. */
@@ -5559,6 +5779,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     addRig, removeRig, updateRig,
     addTileset, removeTileset, updateTileset,
     addAiBrain, removeAiBrain, updateAiBrain,
+    addAnimController, removeAnimController, updateAnimController,
+    addBoneMask, removeBoneMask, updateBoneMask,
+    addPoseAsset, removePoseAsset, updatePoseAsset,
     addImage, removeImage, updateImage,
     addTextureAsset, removeTextureAsset, updateTextureAsset,
     addAudioSource, removeAudioSource, updateAudioSource,
@@ -5566,8 +5789,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   });
   const assetLibraryValue = useMemo<AssetLibraryContextValue>(() => ({
     templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, rigs, tilesets, aiBrains,
+    animControllers, boneMasks, poseAssets,
     images, textures, audioSources, soundSamples, assetsLoaded, ...libraryActions,
   }), [templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, rigs, tilesets, aiBrains,
+       animControllers, boneMasks, poseAssets,
        images, textures, audioSources, soundSamples, assetsLoaded, libraryActions]);
 
   const documentActions = useStableActions({
@@ -5617,6 +5842,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     enterSoundEditor, saveSoundSample, previewSoundSettings, registerSoundApply,
     enterAiBrainEditor, saveAiBrain, extractBrainFromController, linkBrainToController, registerAiBrainApply,
     enterRigEditor, setRigPreviewModel, rigPreviewModelId, saveRig, modelsOnRig, registerRigApply,
+    openAnimController,
     enterClipEditor, setClipPreviewModel, clipPreviewModelId, saveClip, saveClipAs, modelsForClip,
     registerClipApply,
   });
@@ -5777,6 +6003,18 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       addAiBrain,
       removeAiBrain,
       updateAiBrain,
+      animControllers,
+      addAnimController,
+      removeAnimController,
+      updateAnimController,
+      boneMasks,
+      addBoneMask,
+      removeBoneMask,
+      updateBoneMask,
+      poseAssets,
+      addPoseAsset,
+      removePoseAsset,
+      updatePoseAsset,
       addTileset,
       removeTileset,
       updateTileset,
@@ -5796,6 +6034,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       registerAiBrainApply,
       registerRigApply,
       enterRigEditor,
+      openAnimController,
       setRigPreviewModel,
       rigPreviewModelId,
       saveRig,

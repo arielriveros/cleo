@@ -14,6 +14,7 @@ import {
 } from 'cleo'
 import { loadSkin, type AnimationAsset, type StoredClip } from './animationAssets'
 import { nodeByName, overridesFor, type RetargetOverride, type RigAsset } from './rigAssets'
+import { posesForRig, type PoseAsset } from './poseAssets'
 import { skinnedModelJsonOf } from './modelClips'
 
 const toMat4 = (a: number[]) => {
@@ -116,10 +117,22 @@ export function applyRetargetOverrides(
  */
 const EMPTY_SKIN: Skin = { joints: [] }
 
+/**
+ * The pose ASSETS in the project, looked up the same way rigs are — see {@link registerRigResolver}.
+ * A clip's `poseOffset { poseId }` resolves against its rig's own poses AND every pose asset on that rig.
+ */
+let poseAssetResolver: (() => PoseAsset[]) | null = null
+
+export function registerPoseAssetResolver(fn: (() => PoseAsset[]) | null): void {
+  if (poseAssetResolver === fn) return
+  poseAssetResolver = fn
+}
+
 /** A rig's shared poses, by id, for `applyClipEdits`. Undefined when the rig has none — the common case. */
 function posesOfRig(rig: RigAsset | null): Map<string, PoseBone[]> | undefined {
-  if (!rig?.poses?.length) return undefined
-  return new Map(rig.poses.map(p => [p.id, p.bones as PoseBone[]]))
+  const all = posesForRig(rig, poseAssetResolver?.() ?? [])
+  if (!all.length) return undefined
+  return new Map(all.map(p => [p.id, p.bones as PoseBone[]]))
 }
 
 /** A per-session cache: the retarget is deterministic, so the same pair never needs computing twice. */

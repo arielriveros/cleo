@@ -54,6 +54,9 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
   await idbSet(libKey('rigs', pid), bundle.libraries.rigs ?? [])
   await idbSet(libKey('tilesets', pid), bundle.libraries.tilesets ?? [])
   await idbSet(libKey('aiBrains', pid), bundle.libraries.aiBrains ?? [])
+  await idbSet(libKey('animControllers', pid), bundle.libraries.animControllers ?? [])
+  await idbSet(libKey('boneMasks', pid), bundle.libraries.boneMasks ?? [])
+  await idbSet(libKey('poseAssets', pid), bundle.libraries.poseAssets ?? [])
   // Both audio halves travel as RECORDS, unlike images/textures — a sample's settings cannot be
   // re-derived from a .wav, so without these a round trip would reset every sound to defaults.
   await idbSet(libKey('audioSources', pid), bundle.libraries.audioSources ?? [])
@@ -127,7 +130,7 @@ export async function applyBundleAsNewProject(
 
 /** Read the local state a merge needs to detect id/path/name collisions. */
 async function readLocalState(): Promise<LocalState> {
-  const [materials, terrainMaterials, templates, models, scripts, animationFields, animations, rigs, tilesets, aiBrains, vfs, meta, storedTex, audioSources, soundSamples, storedAudio] = await Promise.all([
+  const [materials, terrainMaterials, templates, models, scripts, animationFields, animations, rigs, tilesets, aiBrains, animControllers, boneMasks, poseAssets, vfs, meta, storedTex, audioSources, soundSamples, storedAudio] = await Promise.all([
     idbGet<any[]>(libKey('materials')),
     idbGet<any[]>(libKey('terrainMaterials')),
     idbGet<any[]>(libKey('templates')),
@@ -138,6 +141,9 @@ async function readLocalState(): Promise<LocalState> {
     idbGet<any[]>(libKey('rigs')),
     idbGet<any[]>(libKey('tilesets')),
     idbGet<any[]>(libKey('aiBrains')),
+    idbGet<any[]>(libKey('animControllers')),
+    idbGet<any[]>(libKey('boneMasks')),
+    idbGet<any[]>(libKey('poseAssets')),
     idbGet<VfsIndex>(vfsKey()),
     idbGet<ProjectMeta>(metaKey()),
     getAllTextures(),
@@ -160,6 +166,9 @@ async function readLocalState(): Promise<LocalState> {
     rigIds: new Set((rigs ?? []).map(r => r.id)),
     tilesetIds: new Set((tilesets ?? []).map(t => t.id)),
     aiBrainIds: new Set((aiBrains ?? []).map(b => b.id)),
+    animControllerIds: new Set((animControllers ?? []).map(c => c.id)),
+    boneMaskIds: new Set((boneMasks ?? []).map(m => m.id)),
+    poseAssetIds: new Set((poseAssets ?? []).map(p => p.id)),
     sceneIds: new Set((meta?.scenes ?? []).map(s => s.id)),
     sceneNames: new Set((meta?.scenes ?? []).map(s => s.name)),
     textures,
@@ -196,6 +205,9 @@ export async function applyBundleMerge(bundle: BundleData): Promise<boolean> {
   await append(libKey('rigs'), plan.rigs)
   await append(libKey('tilesets'), plan.tilesets)
   await append(libKey('aiBrains'), plan.aiBrains)
+  await append(libKey('animControllers'), plan.animControllers)
+  await append(libKey('boneMasks'), plan.boneMasks)
+  await append(libKey('poseAssets'), plan.poseAssets)
   await append(libKey('audioSources'), plan.audioSources)
   await append(libKey('soundSamples'), plan.soundSamples)
 

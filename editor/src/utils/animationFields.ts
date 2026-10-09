@@ -121,10 +121,10 @@ export function sampleRate(s: AnimationFieldSample): number {
  * `fields` is the whole library, so a machine referencing several refreshes them all in one pass. A state
  * whose field asset was deleted has its copy CLEARED, degrading it to "no clip".
  */
-export function reembedFields<T extends { states: any[] }>(sm: T, fields: AnimationFieldAsset[]): T {
-  if (!sm?.states?.length) return sm
+export function reembedFields<T extends { states: any[]; layers?: { states: any[] }[] }>(sm: T, fields: AnimationFieldAsset[]): T {
+  if (!sm?.states) return sm
   let changed = false
-  const states = sm.states.map(s => {
+  const embed = (list: any[]) => list.map(s => {
     if (!s.fieldId) return s
     const asset = fields.find(f => f.id === s.fieldId)
     const next = asset ? toRuntimeField(asset) : undefined
@@ -132,10 +132,14 @@ export function reembedFields<T extends { states: any[] }>(sm: T, fields: Animat
     changed = true
     return { ...s, field: next }
   })
-  return changed ? { ...sm, states } : sm
+  const states = embed(sm.states)
+  // Controller layers play fields too, and are re-embedded by exactly the same rule.
+  const layers = sm.layers?.map(l => ({ ...l, states: embed(l.states) }))
+  return changed ? { ...sm, states, ...(layers ? { layers } : {}) } : sm
 }
 
-/** True when any state of a machine plays the given field. Used to decide who needs re-embedding. */
-export function machineUsesField(sm: { states?: any[] } | null | undefined, fieldId: string): boolean {
+/** True when any state of a machine, on any layer, plays the given field. Decides who needs re-embedding. */
+export function machineUsesField(sm: { states?: any[]; layers?: { states?: any[] }[] } | null | undefined, fieldId: string): boolean {
   return !!sm?.states?.some(s => s.fieldId === fieldId)
+    || !!sm?.layers?.some(l => l.states?.some(s => s.fieldId === fieldId))
 }

@@ -7,6 +7,10 @@ import type { AnimationAsset } from './animationAssets'
 import type { RigAsset } from './rigAssets'
 import type { TilesetAsset } from './tilesets'
 import type { AiBrainAsset } from './aiBrains'
+import type { AnimControllerAsset } from './animationControllers'
+import type { BoneMaskAsset } from './boneMasks'
+import type { PoseAsset } from './poseAssets'
+import type { AnimationFieldAsset } from './animationFields'
 import { isTupleBuffer } from './binaryPayload'
 
 // Content hashes let a closed scene decide, on its next open, whether each asset it references actually
@@ -25,13 +29,13 @@ function fnv1a(str: string): string {
 }
 
 /**
- * Fields that must NOT count as a content change. `ikRig`/`nodeNames` are metadata ABOUT a skeleton,
+ * Fields that must NOT count as a content change. `ikRig`/`nodeNames`/`sockets` are metadata ABOUT a skeleton,
  * pushed to live instances in place by propagateModelClips, so a rebuild gains nothing and costs the
  * per-node state a placement carries.
  * The bar for this list: changing the field cannot alter what instantiating the asset produces
  * STRUCTURALLY. Geometry, materials, hierarchy and clip lists all fail it and must stay hashed.
  */
-const NON_STRUCTURAL_KEYS = new Set(['thumbnail', 'ikRig', 'nodeNames'])
+const NON_STRUCTURAL_KEYS = new Set(['thumbnail', 'ikRig', 'nodeNames', 'sockets'])
 
 /**
  * Bump this whenever {@link hashAsset} changes what it hashes — including anything that changes the
@@ -156,6 +160,15 @@ export interface AssetLibs {
    * rig change alters what an animation retargets ONTO, never the node tree a resync rebuilds.
    */
   rigs?: RigAsset[]
+  /**
+   * Controllers, bone masks and poses — and fields, which they embed alongside. Carried so a resync can
+   * re-embed a node's state machine (see `reembedMachine`); never hashed, since a machine is not part of
+   * the node tree a resync rebuilds.
+   */
+  animControllers?: AnimControllerAsset[]
+  boneMasks?: BoneMaskAsset[]
+  poseAssets?: PoseAsset[]
+  animationFields?: AnimationFieldAsset[]
 }
 
 /** The hash-map key for an asset of a given kind. Kept in one place so save and resync agree. */

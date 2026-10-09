@@ -45,6 +45,11 @@ export type StoredClip = {
    * returns the very same object in that case.
    */
   edits?: StoredClipEdit[]
+  /**
+   * Event markers owned by the CLIP — they fire wherever it plays: a state, a controller layer or an
+   * action slot. Seconds on the clip as it plays (after its edits). `onAnimationEvent(name, clip)`.
+   */
+  events?: { time: number; name: string }[]
 }
 
 /**

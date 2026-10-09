@@ -19,6 +19,7 @@ import { useAssetGraph } from './AssetGraphContext'
 import { baseOf, buildFileManagerData, extOf, kindOfExt, findMissingFromExplorer, findOrphanEntries } from '../../utils/vfs'
 import { readDroppedEntries } from '../../utils/importGrouping'
 import { buildTemplateFromNode } from '../../utils/templates'
+import { buildControllerAsset } from '../../utils/animationControllers'
 import { hoveredScriptStore } from '../sceneInspector/hoveredScriptStore'
 
 // The bottom bar's single "Assets" tab: one file-manager view over all five asset libraries, with real
@@ -49,7 +50,7 @@ export default function AssetsExplorer({ active = true }: { active?: boolean }) 
 function AssetsExplorerHost({ active }: { active: boolean }) {
   const {
     enterMaterialEditor, enterTerrainMaterialEditor, enterTemplateEditor, enterScriptEditor, createTilesetFromImage, importAnimationFiles,
-    enterAiBrainEditor,
+    enterAiBrainEditor, addAnimController,
     importModelFiles, addTemplate, createScene, editorScene, scripts, bodies, triggers, eventEmitter,
   } = useCleoEngine()
   const { vfs, libs, pathIndexRef, folderKindsRef, landingFolderRef, depsRef } = useVfs()
@@ -345,6 +346,11 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
     // creation because it decides which canvas the asset opens on. Asking afterwards would mean a modal.
     { label: 'AI Brain (Machine)', icon: <img src={iconFor('aiBrain')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterAiBrainEditor(undefined, 'behavior'), title: 'Create a behaviour state machine an AI controller can run' },
     { label: 'AI Brain (Goals)', icon: <img src={iconFor('aiBrain')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterAiBrainEditor(undefined, 'goals'), title: 'Create a goal graph an AI controller can arbitrate over' },
+    // The three animation-authoring kinds are created empty and rig-less, straight into the library; the
+    // reconcile files them under the landing folder like any asset created outside the explorer.
+    { label: 'Animation Controller', icon: <img src={iconFor('animController')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => addAnimController(buildControllerAsset('New Controller')), title: 'Create a shareable animation state machine: parameters, layers and slots' },
+    // No Bone Mask / Pose Asset entries: both are subsets of ONE skeleton, so they are created in that
+    // rig's editor (Bone Masks / Poses sections), where they get their rig and a bone tree to edit against.
     { label: 'Sound', icon: <img src={iconFor('soundSample')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => document.getElementById('sound-import')?.click(), title: 'Import an audio file as a sound sample' },
     { label: 'Animation', icon: <img src={iconFor('animation')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => document.getElementById('animation-clip-import')?.click(), title: 'Import animation clips from a .fbx/.glb/.gltf and pick the rig they belong to' },
     { label: 'Scene', icon: <img src={iconFor('scene')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => { void createScene() }, title: 'Create a new scene asset' },

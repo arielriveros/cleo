@@ -3,6 +3,7 @@ import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
 import RigSlot from './RigSlot';
 import ModelSlot from './ModelSlot'
+import SocketAttachSlot from './SocketAttachSlot'
 import SkyboxEditor from './SkyboxEditor'
 import TransformEditor from './TransformEditor'
 import LightEditor from './LightEditor'
@@ -67,6 +68,9 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
               model node: the rig owns the clips, the node owns the machine that names them. */}
           { !root && <RigSlot node={props.node} /> }
           { !root && <AnimationSlot node={props.node} /> }
+          {/* Any node can ride a skeleton socket. Renders itself away when no character with sockets is
+              in reach and the node is not already attached. */}
+          { !root && !isUI && <SocketAttachSlot node={props.node} /> }
           { props.node.nodeType === 'sprite' && <SpriteEditor node={props.node as SpriteNode} /> }
           { props.node.nodeType === 'animatedSprite' && <AnimatedSpriteEditor /> }
           { props.node.nodeType === 'light' && <LightEditor node={props.node as LightNode} /> }

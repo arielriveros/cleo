@@ -8,7 +8,8 @@ import type { RagdollOptions } from "../../../physics/ragdoll";
 import type { BVH } from "../../bvh";
 import { Logger } from "../../logger";
 import { sceneStats, sceneStatsDetail } from "../sceneStats";
-import { vec3 } from "gl-matrix";
+import { mat4, vec3 } from "gl-matrix";
+import { socketModelMatrix, socketNames } from "../../../animation/sockets";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 
@@ -108,6 +109,22 @@ export class ModelNode extends Node {
             && this._initializedGeometry === this._model.geometryVersion;
     }
     public get animator(): Animator | null { return this._animator; }
+
+    /** Sockets this model's skeleton can resolve. Empty for a static mesh or a skin without any. */
+    public get socketNames(): string[] {
+        return this._model instanceof AnimatedModel ? socketNames(this._model.skin) : [];
+    }
+
+    /**
+     * A socket's WORLD transform in the current pose — `worldTransform x jointModel x offset` — or null
+     * when this model has no such socket. Written into `out` when given.
+     */
+    public getSocketWorldMatrix(name: string, out: mat4 = mat4.create()): mat4 | null {
+        const animator = this._animator;
+        if (!animator || !(this._model instanceof AnimatedModel) || !this._model.skin) return null;
+        const model = socketModelMatrix(out, this._model.skin, name, j => animator.getJointModelMatrix(j));
+        return model ? mat4.multiply(out, this.worldTransform, model) : null;
+    }
     public get ragdollConfig(): RagdollOptions | null { return this._ragdollConfig; }
     public set ragdollConfig(config: RagdollOptions | null) { this._ragdollConfig = config; }
     public get movementDirection(): vec3 { return this._movementDirection; }

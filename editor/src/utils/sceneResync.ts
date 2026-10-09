@@ -1,15 +1,16 @@
 import { Scene, Node, CameraNode, isInlineTilesetId } from 'cleo'
 import { getMaterialIdsOf, applyMaterialAsset, unlinkMaterialAt, MaterialAsset } from './materials'
 import { getScreenMaterialIds, setScreenMaterialIds, applyScreenMaterials } from './screenMaterials'
-import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig, applyModelTransformDelta, readModelBaseTrs, modelAssetHasLodBehavior } from './models'
+import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig, assetSockets, applyModelTransformDelta, readModelBaseTrs, modelAssetHasLodBehavior } from './models'
 import { TEMPLATE_ID_VAR, instantiateTemplate } from './templates'
 import { applyTerrainMaterialToLayer } from './terrainMaterials'
 
 import { toRuntimeTileset } from './tilesets'
 import { getScriptIdOf, seedScriptFields, unlinkScript } from './scripts'
 import { hashAsset, assetHashKey, AssetLibs, hashesComparable } from './assetHash'
-import { captureAnimationState, restoreAnimationState, applyIkRig } from './placedAnimation'
-import { disposeModelSubtree } from 'cleo'
+import { captureAnimationState, restoreAnimationState, applyIkRig, applySockets } from './placedAnimation'
+import { disposeModelSubtree, ModelNode } from 'cleo'
+import { reembedMachine } from './animationControllers'
 
 // Pull-based cross-scene propagation: re-resolves every asset link a stored scene carries (__materialId /
 // __modelId / __templateId, terrain layer.materialId, foliage rule.modelId) against the CURRENT libraries,
@@ -168,6 +169,23 @@ export function resyncScene(
     // skipped, or a rig the asset no longer has can never be cleared.
     // Applied to `live`, not `node`: after a rebuild `node` is a detached subtree that nothing renders.
     applyIkRig(live, assetIkRig(asset))
+    applySockets(live, assetSockets(asset))
+  }
+
+  // --- Animation controllers, bone masks and poses ---
+  // Nodes hold RESOLVED copies of their machines, so an edit to a controller (or a mask or pose one
+  // links) made while this scene was closed reaches it here. Only when the libraries came along: a
+  // missing mask list would read as every mask deleted, which switches layers off.
+  if (libs.animControllers && libs.boneMasks && libs.poseAssets) {
+    const machineLibs = {
+      controllers: libs.animControllers, boneMasks: libs.boneMasks, poses: libs.poseAssets,
+      animationFields: libs.animationFields ?? [],
+    }
+    for (const node of Array.from(scene.nodes)) {
+      if (!(node instanceof ModelNode) || !node.animator) continue
+      const next = reembedMachine(node.animator.getStateMachine(), machineLibs)
+      if (next) { node.animator.setStateMachine(next); changed = true }
+    }
   }
 
   // --- Class scripts on placed nodes ---

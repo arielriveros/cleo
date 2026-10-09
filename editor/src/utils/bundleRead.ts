@@ -53,6 +53,10 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     rigs: (await src.json(`${BUNDLE_PATHS.librariesDir}rigs.json`)) ?? [],
     tilesets: (await src.json(`${BUNDLE_PATHS.librariesDir}tilesets.json`)) ?? [],
     aiBrains: (await src.json(`${BUNDLE_PATHS.librariesDir}aiBrains.json`)) ?? [],
+    // Absent in a bundle written before controllers, bone masks and pose assets existed.
+    animControllers: (await src.json(`${BUNDLE_PATHS.librariesDir}animControllers.json`)) ?? [],
+    boneMasks: (await src.json(`${BUNDLE_PATHS.librariesDir}boneMasks.json`)) ?? [],
+    poseAssets: (await src.json(`${BUNDLE_PATHS.librariesDir}poseAssets.json`)) ?? [],
     // Absent in a bundle written before audio existed, which reads back as a project with no sounds.
     audioSources: (await src.json(`${BUNDLE_PATHS.librariesDir}audioSources.json`)) ?? [],
     soundSamples: (await src.json(`${BUNDLE_PATHS.librariesDir}soundSamples.json`)) ?? [],
@@ -66,10 +70,11 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     ? (((await src.json(BUNDLE_PATHS.texturesIndex)) ?? []) as BundleTextureIndexRow[])
     : [];
 
-  // 11 fixed JSON entries are already read by the time the total is known (9, plus the two audio
-  // libraries); report against the full set or the progress bar jumps backwards.
-  const total = 11 + scenePaths.length + (format === 2 ? 2 : texIndex.length);
-  let done = 11;
+  // 14 fixed JSON entries are already read by the time the total is known (9, plus the two audio
+  // libraries and the three animation-authoring ones); report against the full set or the progress bar
+  // jumps backwards.
+  const total = 14 + scenePaths.length + (format === 2 ? 2 : texIndex.length);
+  let done = 14;
   src.onEntry?.(done, total);
 
   const scenes: Record<string, any> = {};
@@ -142,6 +147,9 @@ export async function bundleEntries(bundle: BundleData): Promise<BundleEntry[]> 
     json(`${BUNDLE_PATHS.librariesDir}animationFields.json`, libraries.animationFields ?? []),
     json(`${BUNDLE_PATHS.librariesDir}tilesets.json`, libraries.tilesets ?? []),
     json(`${BUNDLE_PATHS.librariesDir}aiBrains.json`, libraries.aiBrains ?? []),
+    json(`${BUNDLE_PATHS.librariesDir}animControllers.json`, libraries.animControllers ?? []),
+    json(`${BUNDLE_PATHS.librariesDir}boneMasks.json`, libraries.boneMasks ?? []),
+    json(`${BUNDLE_PATHS.librariesDir}poseAssets.json`, libraries.poseAssets ?? []),
     json(`${BUNDLE_PATHS.librariesDir}audioSources.json`, libraries.audioSources ?? []),
     json(`${BUNDLE_PATHS.librariesDir}soundSamples.json`, libraries.soundSamples ?? []),
   ];

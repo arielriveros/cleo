@@ -20,7 +20,7 @@ the same API your scripts are.
 | `Game`, `setGameHost`, `GameHost` *(type)* | The script-facing session facade: load a scene, pause, read time and gravity, read and update render settings. |
 | `Camera` | The projection/view pair a `CameraNode` owns. |
 | `Geometry` | Mesh data and the primitive factories. |
-| `Node`, `NodeType` *(type)*, `MotionBlurMode` *(type)* | The base node. |
+| `Node`, `NodeType` *(type)*, `MotionBlurMode` *(type)*, `SocketAttachment` *(type)* | The base node. `SocketAttachment` is what `node.attachToSocket` sets. |
 | `parseNodeJson` | Materialize a node subtree from JSON, dispatching to the right subclass. |
 | `cloneNodeJson`, `collectNodeIds`, `remapNodeRefs`, `regenerateNodeIds` | Node-JSON surgery, typed-array aware. |
 | `registerTemplates`, `clearTemplates`, `getTemplate`, `templateNames`, `NodeTemplate` *(type)* | The template (prefab) registry. |
@@ -182,11 +182,13 @@ types under their historical `Animation*` names.
 
 | Export | What it is |
 |---|---|
-| `Animator` | Playback, state machine, blend spaces, events, IK, ragdoll handover. |
+| `Animator` | Playback, state machine, layers, actions, blend spaces, events, IK, ragdoll handover. |
 | `NODE_BUILTINS`, `NodeBuiltinName` *(type)* | Values a parameter can bind to. |
 | `isConditionGroup` | |
-| `AnimatedModel`, `Skin` / `Joint` / `Animation` / `AnimationSampler` / `AnimationChannel` *(types)* | |
+| `AnimatedModel`, `Skin` / `SkinSocket` / `Joint` / `Animation` / `AnimationSampler` / `AnimationChannel` *(types)* | |
 | State-machine types | `AnimationStateMachine`, `AnimationState`, `AnimationTransition`, `AnimationParameter`, `AnimationParameterType`, `AnimationVariableBinding`, `AnimationEventMarker`, `AnimationCondition`, `AnimationConditionOp`, `AnimationConditionGroup`, `AnimationConditionNode`, `AnimationMapping`. |
+| Layers, poses and actions | `AnimationLayer`, `AnimationSlotDef`, `AnimationBlendMode`, `AnimationPose`, `AnimationPoseBone`, `AnimationActionOptions`, `AnimationActionHandle` *(types)*. See [Animation](../scripting/animation.md#actions). |
+| Sockets | `socketNames`, `socketJoint`, `socketModelMatrix`, `socketOffsetMatrix`, `resolveSocketOwner`. The script-facing side is `node.attachToSocket` and `modelNode.getSocketWorldMatrix`. |
 | Blend spaces | `fieldWeights`, `rateScaleOf`, `phaseOffsetOf`, `coincidentSamples`, `axisSmoothing`, `axisDeadzone`, `axisWrapSpan`, `weightSmoothing`, `DEFAULT_AXIS_SMOOTHING`, `DEFAULT_WEIGHT_SMOOTHING`, and the types `AnimationField`, `AnimationFieldMode`, `AnimationFieldAxis`, `AnimationFieldSample`, `FieldWeight`. |
 | Retargeting | `remapAnimationToSkin`, `buildBoneMapping`, `applyManualMapping`, `mappingReport`, `retargetAnimation`, `describeRetarget`, `humanoidRigOf`, `normalizeBoneName`, `humanoidSlotOf`, plus `AnimationCompatibility`, `HierarchyMismatch`, `BoneMapping`, `BoneMappingEntry`, `BoneMatchKind`. |
 | Skeleton | `skeletonTopology`, `isAncestorJoint`, `nearestCommonAncestor`, `SkeletonTopology` *(type)*. |

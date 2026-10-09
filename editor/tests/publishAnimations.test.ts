@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { buildRigAsset, sourceSkinFor } from '../src/utils/rigAssets'
+import { buildPoseAsset, posesForRig } from '../src/utils/poseAssets'
 import type { StoredSkin } from '../src/utils/animationAssets'
 
 // The published game retargets shared clips using `asset.sourceSkin` (player/animations.ts). Once an
@@ -193,11 +194,12 @@ describe('publishing shared poses', () => {
   const poses = [{ id: 'torch', name: 'Torch grip', bones: [{ name: 'RightArm', rotation: [0, 0, 0, 1] }] }]
 
   /** What `buildMultiSceneGameData` does to each shipped animation, poses included. */
-  const shippedWithPoses = (animations: any[], rigs: any[]) =>
+  const shippedWithPoses = (animations: any[], rigs: any[], poseAssets: any[] = []) =>
     animations.map(a => {
       const rig = a.rigId ? rigs.find(r => r.id === a.rigId) : undefined
       const withSkin = { ...a, sourceSkin: sourceSkinFor(a, rigs) }
-      return rig?.poses?.length ? { ...withSkin, poses: rig.poses } : withSkin
+      const shipped = posesForRig(rig, poseAssets)
+      return shipped.length ? { ...withSkin, poses: shipped } : withSkin
     })
 
   it('attaches the source rig\'s poses to the animation', () => {
@@ -219,8 +221,16 @@ describe('publishing shared poses', () => {
     expect('poses' in shippedWithPoses([anim], [rig])[0]).toBe(false)
   })
 
+  // Pose ASSETS resolve the same ids as the rig's own list, so they ship the same way.
+  it('ships the poses of pose assets on the rig too', () => {
+    const rig = buildRigAsset('mannequin', skin('Armature'), undefined, 'rig-1')
+    const anim = { id: 'idle', name: 'Idle', clips: [], sourceSkin: null, rigId: 'rig-1' }
+    const asset = buildPoseAsset('Hands', 'rig-1', poses)
+    expect(shippedWithPoses([anim], [rig], [asset])[0].poses).toEqual(poses)
+  })
+
   it('publish really does it, and the player really reads it', () => {
-    expect(read('src', 'features', 'publish', 'buildMultiSceneGameData.ts')).toContain('rig?.poses?.length')
+    expect(read('src', 'features', 'publish', 'buildMultiSceneGameData.ts')).toContain('posesForRig(rig, src.libs.poseAssets')
     expect(read('src', 'player', 'animations.ts')).toContain('asset.poses')
   })
 })

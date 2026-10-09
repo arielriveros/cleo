@@ -480,7 +480,11 @@ export function retargetAnimation(
     // clip that had a source skin — the flag was set in the editor, written to the asset, and then thrown
     // away on the way to the character. `assetId` is deliberately NOT carried: the resolve layer stamps it
     // (see animationResolve.ts), and only a clip that came from an asset should have one.
-    return { name: clip.name, samplers: outSamplers, channels: outChannels, rootMotion: clip.rootMotion };
+    // Clip-owned event markers are timing, not bones: carried untouched for the same reason.
+    return {
+        name: clip.name, samplers: outSamplers, channels: outChannels, rootMotion: clip.rootMotion,
+        ...(clip.events?.length ? { events: clip.events.map(e => ({ ...e })) } : {}),
+    };
 }
 
 /** Match, retarget and report in one call, for callers that do not review the mapping. */

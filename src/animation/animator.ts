@@ -4,7 +4,7 @@ import {
     AnimationField, AnimationFieldAxis, FieldWeight, fieldWeights, rateScaleOf, phaseOffsetOf,
     axisSmoothing, axisDeadzone, axisWrapSpan, weightSmoothing,
 } from './animationField';
-import { clamp, dampTime, dampWrapped, wrapSpan } from '../core/math';
+import { clamp, dampTime, dampWrapped, decomposeTRS, wrapSpan } from '../core/math';
 import { skeletonTopology, SkeletonTopology, isAncestorJoint } from './skeletonTopology';
 import { solveTwoBone, ikTuning, validateIkRig, swingReleaseWeight, IkFootChain, IkRig, IkRigValidation } from './ik';
 import { Node } from '../core/scene/nodes/node';
@@ -146,6 +146,13 @@ export interface AnimationState {
      * parameter keeps the static weight rather than reading 0.
      */
     ikWeightParam?: string;
+    /** Link to the Pose asset (and pose within it) this state holds. Authoring-side only, like `fieldId`. */
+    poseRef?: { assetId: string; poseId: string };
+    /**
+     * A static POSE to hold instead of a clip, embedded by the editor on Apply. Bones not listed are left
+     * to whatever is beneath — in a masked layer that is how a hand grip sits on top of locomotion.
+     */
+    pose?: AnimationPose;
     /** The state the machine starts in. Exactly one state should be the entry. */
     isEntry?: boolean;
     /** Graph-editor layout coordinates (authoring only — ignored at runtime). */
@@ -195,9 +202,131 @@ export interface AnimationEventMarker {
 
 export interface AnimationStateMachine {
     parameters: AnimationParameter[];
+    /** The BASE layer's states. */
     states: AnimationState[];
+    /** The BASE layer's transitions. */
     transitions: AnimationTransition[];
     events: AnimationEventMarker[];
+    /**
+     * Layers ABOVE the base, applied in order. Each runs its own states and transitions over the shared
+     * parameters, and is blended onto everything beneath it through an optional bone mask — the upper body
+     * aiming while the legs keep walking. Absent on every machine authored before layers existed, which
+     * is exactly a one-layer controller.
+     */
+    layers?: AnimationLayer[];
+    /** Action slots a script plays one-shots into — see {@link Animator.playAction}. */
+    slots?: AnimationSlotDef[];
+    /** The Animation Controller asset this machine was resolved from. Authoring-side only. */
+    controllerId?: string;
+    /**
+     * This character's clip swaps over its controller (clip name -> clip name), already applied to the
+     * states above. Kept so a re-embed after a controller edit can apply them again. Authoring-side only.
+     */
+    clipOverrides?: Record<string, string>;
+}
+
+/** How a layer or slot combines with the pose beneath it. */
+export type AnimationBlendMode = 'override' | 'additive';
+
+/**
+ * One layer of a controller. `override` replaces the pose beneath (by `weight` x mask); `additive` adds
+ * the layer's motion RELATIVE TO ITS CLIP'S FIRST FRAME, which is what lets one breathing or recoil clip
+ * sit on top of any pose.
+ */
+export interface AnimationLayer {
+    name: string;
+    states: AnimationState[];
+    transitions: AnimationTransition[];
+    /** 0..1, default 1. */
+    weight?: number;
+    /** Parameter to read the weight from each frame. Overrides `weight`. */
+    weightParam?: string;
+    blend?: AnimationBlendMode;
+    /** Link to the Bone Mask asset. Authoring-side only; the runtime reads `mask`. */
+    maskId?: string;
+    /** Bone NAME -> weight 0..1, embedded on Apply. Absent = the whole body; a bone not listed = 0. */
+    mask?: Record<string, number>;
+}
+
+/** A named slot actions play into. Placed after layer `afterLayer` (0 = right above the base). */
+export interface AnimationSlotDef {
+    name: string;
+    /** Index into [base, ...layers] the slot sits above. Default: above every layer. */
+    afterLayer?: number;
+    blend?: AnimationBlendMode;
+    maskId?: string;
+    mask?: Record<string, number>;
+}
+
+/** One bone of a pose, as a delta from its REST — the same form a rig pose stores. */
+export interface AnimationPoseBone {
+    name: string;
+    /** Rotation delta, quaternion [x,y,z,w], applied as `delta x rest`. */
+    rotation?: number[];
+    /** Translation delta added to the rest translation. */
+    translation?: number[];
+}
+
+export interface AnimationPose {
+    name?: string;
+    bones: AnimationPoseBone[];
+}
+
+/** Options for {@link Animator.playAction}. */
+export interface AnimationActionOptions {
+    /** Slot to play in. Default: the controller's first slot, else an implicit full-body one. */
+    slot?: string;
+    /** Seconds to fade in. Default 0.15. */
+    blendIn?: number;
+    /** Seconds to fade out at the end (or on stop). Default 0.2. */
+    blendOut?: number;
+    /** Playback rate. Default 1. */
+    speed?: number;
+    /** Loop until stopped. Default false. */
+    loop?: boolean;
+}
+
+/** A playing action. `finished` resolves once it has faded fully out, however it ended. */
+export interface AnimationActionHandle {
+    readonly slot: string;
+    readonly clipName: string;
+    readonly done: boolean;
+    readonly finished: Promise<void>;
+    /** Fade the action out now. */
+    stop(blendOut?: number): void;
+}
+
+// A layer or slot: a child Animator that plays into a pose the parent blends in. Reusing a whole Animator
+// rather than extracting a playback core means layers get clips, fields, cross-fades, exit times, events
+// and every fix ever made to them, for free.
+interface Overlay {
+    kind: 'layer' | 'slot';
+    name: string;
+    animator: Animator;
+    blend: AnimationBlendMode;
+    /** Bone name -> weight as authored; resolved lazily into `mask` against this skin. */
+    maskSpec: Record<string, number> | null;
+    /** Node index -> weight. Null = the whole body at 1. */
+    mask: Map<number, number> | null;
+    weight: number;
+    weightParam?: string;
+    /** Where it sits: layers at their own index (1..n), slots at afterLayer + 0.5. */
+    order: number;
+    /** How present the overlay's pose is, 0..1: a layer fading in and out of its empty states, an action in and out of its slot. */
+    presence: number;
+    presenceTarget: number;
+    /** Seconds the presence takes to cross the full 0..1 range. */
+    fadeSeconds: number;
+    action: ActionState | null;
+}
+
+interface ActionState {
+    clipName: string;
+    loop: boolean;
+    blendOut: number;
+    stopping: boolean;
+    done: boolean;
+    resolve: () => void;
 }
 
 /** A single position keyframe. */
@@ -472,6 +601,25 @@ export class Animator {
     // Assigned in lockstep with `_deltaTime` so both go stale together on an early return.
     private _frameDelta: number = 0;
     private _finalBoneMatrices: mat4[] = [];
+    /**
+     * Each joint's MODEL-space transform from the last pose (parent-accumulated, before the inverse bind),
+     * indexed like `skin.joints`. Kept because sockets need exactly this, and recovering it from the
+     * final matrices costs an inverse-bind inversion per joint per query.
+     */
+    private _jointModelMatrices: mat4[] = [];
+    // ---- Layers and action slots ----
+    /** True for a layer's or slot's child animator: it produces a pose, never skinning matrices. */
+    private _isOverlay: boolean = false;
+    /** A layer's child is in a state with nothing to play: its pose fades out rather than snapping to rest. */
+    private _overlayEmpty: boolean = false;
+    /** Event markers a slot's child fires — the parent machine's list, since a slot has no machine. */
+    private _externalEvents: AnimationEventMarker[] | null = null;
+    /** Layers and slots, in the order they apply over the base. */
+    private _overlays: Overlay[] = [];
+    /** Set by `_recomputePose`, so `update` can tell whether the overlays still need a pose this frame. */
+    private _posedThisFrame: boolean = false;
+    /** Pose states turned into clips, keyed by the state object. */
+    private _poseClips: WeakMap<AnimationState, Animation> = new WeakMap();
     private _bones: Map<string, Bone> = new Map();
     private _skin: Skin | null = null;
     private _playing: boolean = false;
@@ -614,9 +762,10 @@ export class Animator {
     // comes out as roll or pitch in world space.
     private _rootParentRot: quat = quat.create();
 
-    constructor(animatedModel: AnimatedModel, node?: Node) {
+    constructor(animatedModel: AnimatedModel, node?: Node, options?: { overlay?: boolean }) {
         this._animatedModel = animatedModel;
         this._node = node || null;
+        this._isOverlay = !!options?.overlay;
         
         // Initialize last position if node is provided
         if (this._node) {
@@ -637,6 +786,10 @@ export class Animator {
                 const nodeIndex = this._skin.joints[jointIndex].nodeIndex;
                 this._nodeIndexToJointIndex.set(nodeIndex, jointIndex);
             }
+        }
+        // A layer's animator starts empty and silent: it plays only what its own states tell it to.
+        if (this._isOverlay) return;
+        if (this._skin) {
             Logger.info(`Animator initialized with ${this._skin.joints.length} joints`, 'Animation');
             Logger.print('info', ['Joint node indices:', Array.from(this._nodeIndexToJointIndex.keys())], 'Animation');
         }
@@ -660,8 +813,12 @@ export class Animator {
             return;
         }
         
-        const animation = this._animatedModel.animations[animationIndex];
-        
+        this._playClip(this._animatedModel.animations[animationIndex], loop, blend);
+    }
+
+    // Play a clip object — one of the model's, or a synthesized one such as a pose state's.
+    private _playClip(animation: Animation, loop: boolean, blend: boolean): void {
+        this._overlayEmpty = false;
         // Must NOT test `_playing`: a finished non-looping clip holds its last frame with _playing false,
         // and that is exactly when a machine wants to cross-fade away from it. `_currentAnimation` being
         // null already covers the first play, the only case that must not blend.
@@ -1303,6 +1460,14 @@ export class Animator {
             this._updateRagdollMatrices();
             return;
         }
+        if (this._overlays.length) this._updateOverlays(deltaTime);
+        this._posedThisFrame = false;
+        this._advance(deltaTime);
+        // The base can be idle (a finished one-shot, a bind pose) while a layer or an action still moves.
+        if (!this._posedThisFrame && this._overlays.some(o => o.presence > 0)) this._recomputePose();
+    }
+
+    private _advance(deltaTime: number): void {
 
         // Above every early return: a finished clip sets _playing false, and freezing the clock a
         // minDwell gate waits on would lock the machine in that state permanently.
@@ -1454,7 +1619,8 @@ export class Animator {
     private _setupRootMotion(animation: Animation): void {
         this._rootMotionActive = false;
         this._rootBoneName = null;
-        if (!animation.rootMotion) return;
+        // Only the base layer moves the character: two layers both driving it would double the motion.
+        if (!animation.rootMotion || this._isOverlay) return;
 
         const rootName = this._findRootMotionBone(animation);
         const bone = rootName ? this._bones.get(rootName) : null;
@@ -1667,7 +1833,27 @@ export class Animator {
 
     // Recompute _finalBoneMatrices from the bones' current local transforms. Separate from update() so
     // seek() can pose at an arbitrary time without advancing the clock or running triggers.
+    /**
+     * This animator's own local pose for one bone — the clip or field, cross-faded with the outgoing one —
+     * or null when nothing it plays drives that bone. No editor override, no rest fallback, no overlays.
+     */
+    private _sourceLocal(nodeIndex: number): mat4 | null {
+        const boneName = `bone_${nodeIndex}`;
+        const current = this._currentLocal(boneName);
+        if (!current) return null;
+        const previous = this._isBlending ? this._previousLocal(boneName) : null;
+        if (!previous) return current;
+        // A zero blend duration is legal and means "instant"; dividing by it would give NaN.
+        const blendFactor = this._activeBlendTime > 0
+            ? Math.min(this._currentBlendTime / this._activeBlendTime, 1.0)
+            : 1.0;
+        return this._blendTransforms(previous, current, blendFactor);
+    }
+
     private _recomputePose(): void {
+        // A layer's animator hands its pose to the parent; skinning matrices are the parent's job.
+        if (this._isOverlay) return;
+        this._posedThisFrame = true;
         if (!this._skin) return;
 
         // Build local transforms map for all joints
@@ -1680,22 +1866,9 @@ export class Animator {
             // possible to pose an arm against the walk cycle it will be keyed into.
             const override = this._boneOverrides?.get(nodeIndex);
             if (override) return override;
-            const boneName = `bone_${nodeIndex}`;
-            const current = this._currentLocal(boneName);
-            if (current) {
-                const previous = this._isBlending ? this._previousLocal(boneName) : null;
-                if (previous) {
-                    // A zero blend duration is legal and means "instant"; dividing by it would give NaN.
-                    const blendFactor = this._activeBlendTime > 0
-                        ? Math.min(this._currentBlendTime / this._activeBlendTime, 1.0)
-                        : 1.0;
-                    return this._blendTransforms(previous, current, blendFactor);
-                }
-                return current;
-            }
-            // Use initial node transform from GLTF, or identity if not available
-            const initialTransform = this._skin!.nodeTransforms?.get(nodeIndex);
-            return initialTransform ? initialTransform : mat4.create();
+            // Nothing playing drives the bone: use the initial node transform from GLTF, or identity.
+            const base = this._sourceLocal(nodeIndex) ?? this._skin!.nodeTransforms?.get(nodeIndex) ?? mat4.create();
+            return this._overlays.length ? this._applyOverlays(nodeIndex, base) : base;
         };
 
         for (let jointIndex = 0; jointIndex < this._skin.joints.length; jointIndex++)
@@ -1759,6 +1932,7 @@ export class Animator {
             const joint = this._skin.joints[jointIndex];
             const globalTransform = globalTransforms.get(joint.nodeIndex) ?? mat4.create();
             mat4.multiply(this._finalBoneMatrices[jointIndex], globalTransform, joint.inverseBindMatrix);
+            mat4.copy(this._jointModelMatrices[jointIndex] ??= mat4.create(), globalTransform);
         }
     }
 
@@ -2162,6 +2336,17 @@ export class Animator {
         return maxTime;
     }
     
+    /**
+     * A joint's MODEL-space transform in the current pose — relative to the model node, so a world
+     * matrix is `modelNode.worldTransform x this`. Null for an out-of-range joint or a skinless animator.
+     * Live: the returned matrix is overwritten by the next pose, so clone it to keep it.
+     */
+    public getJointModelMatrix(jointIndex: number): mat4 | null {
+        if (!this._skin || jointIndex < 0 || jointIndex >= this._skin.joints.length) return null;
+        if (!this._jointModelMatrices[jointIndex]) this._recomputePose();
+        return this._jointModelMatrices[jointIndex] ?? null;
+    }
+
     /** The final bone matrices for rendering. */
     public getFinalBoneMatrices(): mat4[] {
         return this._finalBoneMatrices;
@@ -2219,8 +2404,10 @@ export class Animator {
         // And the ping-pong report, for the same reason.
         this._stateFlips.length = 0;
         this._warnedPingPong = false;
+        this._overlays = [];
         if (!sm) return;
         for (const p of sm.parameters) this._paramValues.set(p.name, p.default);
+        this._buildOverlays(sm);
         this.resetStateMachine();
     }
 
@@ -2233,7 +2420,9 @@ export class Animator {
         }
         const entry = this._stateMachine.states.find(s => s.isEntry) ?? this._stateMachine.states[0];
         if (entry) this._enterState(entry.name);
+        else if (this._isOverlay) { this._currentStateName = null; this._overlayEmpty = true; }
         else { this._currentStateName = null; this._setTPose(); }
+        for (const o of this._overlays) if (o.kind === 'layer') o.animator.resetStateMachine();
     }
 
     // Parameter setters/getters used by scripts to drive the machine.
@@ -2328,6 +2517,7 @@ export class Animator {
     private _enterState(name: string, blendOverride?: number): void {
         if (!this._stateMachine) return;
         const state = this._stateMachine.states.find(s => s.name === name);
+        const wasEmpty = this._overlayEmpty || !this._currentAnimation;
         this._noteStateChange(this._currentStateName, name);
         this._currentStateName = name;
         this._prevEventTime = 0;
@@ -2343,6 +2533,21 @@ export class Animator {
             return;
         }
 
+        if (state?.pose) {
+            this._playClip(this._poseClip(state), true, !(this._isOverlay && wasEmpty));
+            if (blendOverride !== undefined) this._activeBlendTime = Math.max(0, blendOverride);
+            this._speed = 1;
+            return;
+        }
+
+        if (this._isOverlay && (!state || !state.clipName)) {
+            // An empty state on a LAYER means "add nothing": fade the layer out, holding its last pose
+            // while it goes, rather than snapping the bones to rest.
+            this._overlayEmpty = true;
+            if (blendOverride !== undefined) this._activeBlendTime = Math.max(0, blendOverride);
+            return;
+        }
+
         if (!state || !state.clipName) {
             // Nothing to play: hold the bind pose. Legitimate for an empty state, but also where a field
             // state lands when `reembedFields` dropped a field whose asset id no longer resolves.
@@ -2355,7 +2560,9 @@ export class Animator {
             this._setTPose();
             return;
         }
-        this.playAnimationByName(state.clipName, state.loop, true);
+        // A layer coming out of an empty state fades in through its presence; cross-fading from whatever
+        // stale clip it last held would replay that clip first.
+        this.playAnimationByName(state.clipName, state.loop, !(this._isOverlay && wasEmpty));
         // playAnimation just armed the blend with the animator-wide default; the transition gets the last word.
         if (blendOverride !== undefined) this._activeBlendTime = Math.max(0, blendOverride);
         this._loopLimit = Math.max(0, Math.floor(state.loopCount ?? 0));
@@ -2541,22 +2748,26 @@ export class Animator {
 
     /** Fire event markers on the current clip whose time was crossed in (prev, cur]. */
     private _fireDueEvents(prevTime: number, curTime: number, duration: number, looped: boolean): void {
-        const sm = this._stateMachine;
-        if (!sm || sm.events.length === 0 || !this._currentAnimation || this._eventCallbacks.length === 0) {
+        const machineEvents = this._stateMachine?.events ?? this._externalEvents ?? [];
+        const clipEvents = this._currentAnimation?.events ?? [];
+        if ((machineEvents.length === 0 && clipEvents.length === 0) || !this._currentAnimation || this._eventCallbacks.length === 0) {
             this._prevEventTime = curTime;
             return;
         }
         const clip = this._currentAnimation.name;
+        const emit = (eventName: string) => {
+            // Fired from the update loop, outside attachScriptFactory's handler guards.
+            for (const cb of this._eventCallbacks) {
+                try { cb(eventName, clip); }
+                catch (e) { Logger.error(`Error in onAnimationEvent('${eventName}') for node ${this._node?.name}: ${e}`, 'Script'); }
+            }
+        };
         const fire = (from: number, to: number) => {
-            for (const ev of sm.events) {
-                if (ev.clipName !== clip) continue;
-                if (ev.time > from && ev.time <= to) {
-                    // Fired from the update loop, outside attachScriptFactory's handler guards.
-                    for (const cb of this._eventCallbacks) {
-                        try { cb(ev.eventName, clip); }
-                        catch (e) { Logger.error(`Error in onAnimationEvent('${ev.eventName}') for node ${this._node?.name}: ${e}`, 'Script'); }
-                    }
-                }
+            for (const ev of machineEvents) {
+                if (ev.clipName === clip && ev.time > from && ev.time <= to) emit(ev.eventName);
+            }
+            for (const ev of clipEvents) {
+                if (ev.time > from && ev.time <= to) emit(ev.name);
             }
         };
         if (looped) {
@@ -2567,6 +2778,285 @@ export class Animator {
             fire(prevTime, curTime);
         }
         this._prevEventTime = curTime;
+    }
+
+    // ---- Layers and action slots --------------------------------------------------------------------
+
+    // Build one child animator per layer, plus the declared slots. Children SHARE the parameter table, so
+    // a parameter set on the character drives every layer, and a trigger is consumed once whichever layer
+    // fires on it.
+    private _buildOverlays(sm: AnimationStateMachine): void {
+        if (!this._animatedModel) return;
+        (sm.layers ?? []).forEach((layer, i) => {
+            const child = this._createOverlayAnimator();
+            child.setStateMachine({ parameters: [], states: layer.states, transitions: layer.transitions, events: sm.events });
+            child._paramValues = this._paramValues;
+            // A layer that starts on a clip is simply there from the first frame; fading it in would show
+            // the base for a beat on every scene load.
+            const present = child._overlayEmpty || !child._currentAnimation ? 0 : 1;
+            this._overlays.push({
+                kind: 'layer', name: layer.name, animator: child,
+                blend: layer.blend ?? 'override',
+                maskSpec: layer.mask ?? null, mask: null,
+                weight: clamp(layer.weight ?? 1, 0, 1), weightParam: layer.weightParam,
+                order: i + 1,
+                presence: present, presenceTarget: present, fadeSeconds: this._blendTime,
+                action: null,
+            });
+        });
+        for (const slot of sm.slots ?? []) this._addSlot(slot, sm.layers?.length ?? 0);
+        this._overlays.sort((a, b) => a.order - b.order);
+    }
+
+    private _createOverlayAnimator(): Animator {
+        const child = new Animator(this._animatedModel!, undefined, { overlay: true });
+        child._blendTime = this._blendTime;
+        // A layer's or slot's events are the character's events.
+        child.onAnimationEvent((eventName, clipName) => {
+            for (const cb of this._eventCallbacks) {
+                try { cb(eventName, clipName); }
+                catch (e) { Logger.error(`Error in onAnimationEvent('${eventName}') for node ${this._node?.name}: ${e}`, 'Script'); }
+            }
+        });
+        return child;
+    }
+
+    private _addSlot(def: AnimationSlotDef, layerCount: number): Overlay {
+        const child = this._createOverlayAnimator();
+        child._externalEvents = this._stateMachine?.events ?? null;
+        const after = def.afterLayer === undefined ? layerCount : clamp(Math.floor(def.afterLayer), 0, layerCount);
+        const overlay: Overlay = {
+            kind: 'slot', name: def.name, animator: child,
+            blend: def.blend ?? 'override',
+            maskSpec: def.mask ?? null, mask: null,
+            weight: 1, order: after + 0.5,
+            presence: 0, presenceTarget: 0, fadeSeconds: 0.15,
+            action: null,
+        };
+        this._overlays.push(overlay);
+        return overlay;
+    }
+
+    // Advance every overlay one frame: its own clip, its presence fade, and an action's lifecycle.
+    private _updateOverlays(deltaTime: number): void {
+        for (const o of this._overlays) {
+            const child = o.animator;
+            if (o.kind === 'layer') {
+                o.presenceTarget = child._overlayEmpty || (!child._currentAnimation && !child._fieldEntries) ? 0 : 1;
+                o.fadeSeconds = child._activeBlendTime;
+            }
+            child.update(deltaTime);
+
+            const action = o.action;
+            if (action && !action.stopping && !action.loop) {
+                // Start fading out so the fade ENDS with the clip, not after it.
+                const remaining = child._getAnimationDuration() - child._currentTime;
+                if (remaining <= action.blendOut || !child._playing) {
+                    action.stopping = true;
+                    o.presenceTarget = 0;
+                    o.fadeSeconds = Math.max(remaining, 1e-3);
+                }
+            }
+
+            // Move presence towards its target at a constant rate: the full range takes `fadeSeconds`.
+            if (o.presence !== o.presenceTarget) {
+                const step = o.fadeSeconds > 1e-4 ? deltaTime / o.fadeSeconds : 1;
+                o.presence = o.presenceTarget > o.presence
+                    ? Math.min(o.presenceTarget, o.presence + step)
+                    : Math.max(o.presenceTarget, o.presence - step);
+            }
+
+            if (action && action.stopping && o.presence <= 0) {
+                action.done = true;
+                o.action = null;
+                action.resolve();
+            }
+        }
+    }
+
+    // Node index -> weight for an overlay's mask, resolved by bone NAME against this skin once.
+    private _overlayMask(o: Overlay): Map<number, number> | null {
+        if (!o.maskSpec) return null;
+        if (o.mask) return o.mask;
+        const byName = new Map<string, number>();
+        for (const [nodeIndex, name] of this._skin?.nodeNames ?? []) byName.set(name, nodeIndex);
+        const mask = new Map<number, number>();
+        for (const [name, w] of Object.entries(o.maskSpec)) {
+            const nodeIndex = byName.get(name);
+            if (nodeIndex !== undefined && w > 0) mask.set(nodeIndex, clamp(w, 0, 1));
+        }
+        o.mask = mask;
+        return mask;
+    }
+
+    // Blend every overlay onto a bone's base local, in order.
+    private _applyOverlays(nodeIndex: number, base: mat4): mat4 {
+        let local = base;
+        for (const o of this._overlays) {
+            if (o.presence <= 0) continue;
+            const mask = this._overlayMask(o);
+            const maskWeight = mask ? (mask.get(nodeIndex) ?? 0) : 1;
+            if (maskWeight <= 0) continue;
+            let weight = o.weight;
+            if (o.weightParam) {
+                const v = this._paramValues.get(o.weightParam);
+                if (typeof v === 'number') weight = clamp(v, 0, 1);
+                else if (typeof v === 'boolean') weight = v ? 1 : 0;
+            }
+            const w = weight * maskWeight * o.presence;
+            if (w <= 0) continue;
+            const layer = o.animator._sourceLocal(nodeIndex);
+            // A layer that does not animate this bone leaves it to the layers beneath.
+            if (!layer) continue;
+            local = o.blend === 'additive'
+                ? this._addTransform(local, layer, o.animator._additiveReference(nodeIndex), w)
+                : this._blendTransforms(local, layer, w);
+        }
+        return local;
+    }
+
+    // The additive reference for a bone: the current clip's first frame.
+    private _additiveReference(nodeIndex: number): { t: vec3; r: quat } | null {
+        const bone = this._bones.get(`bone_${nodeIndex}`);
+        return bone ? bone.sampleTR(0) : null;
+    }
+
+    // base + w x (layer - reference), per component: the rotation delta `inverse(ref) x layer` goes on the
+    // right of base (local-space additive), the translation delta is added.
+    private _addTransform(base: mat4, layer: mat4, ref: { t: vec3; r: quat } | null, w: number): mat4 {
+        if (!ref) return base;
+        const bt = vec3.create(), br = quat.create(), bs = vec3.create();
+        decomposeTRS(base, bt, br, bs);
+        const lt = vec3.create(), lr = quat.create();
+        decomposeTRS(layer, lt, lr, vec3.create());
+
+        const deltaR = quat.multiply(quat.create(), quat.invert(quat.create(), ref.r), lr);
+        quat.slerp(deltaR, quat.create(), deltaR, w);
+        const r = quat.normalize(quat.create(), quat.multiply(quat.create(), br, deltaR));
+        const t = vec3.scaleAndAdd(vec3.create(), bt, vec3.sub(vec3.create(), lt, ref.t), w);
+        return mat4.fromRotationTranslationScale(mat4.create(), r, t, bs);
+    }
+
+    // A pose state as a clip: every listed bone held at `delta x rest` across one second. Two identical
+    // keys, because a zero-length clip would wrap by `% 0`.
+    private _poseClip(state: AnimationState): Animation {
+        const cached = this._poseClips.get(state);
+        if (cached) return cached;
+        const nodeOfName = new Map<string, number>();
+        for (const [nodeIndex, name] of this._skin?.nodeNames ?? []) nodeOfName.set(name, nodeIndex);
+
+        const samplers: AnimationSampler[] = [];
+        const channels: AnimationChannel[] = [];
+        for (const bone of state.pose?.bones ?? []) {
+            const nodeIndex = nodeOfName.get(bone.name);
+            if (nodeIndex === undefined) continue;
+            const rest = this._skin?.nodeTransforms?.get(nodeIndex) ?? mat4.create();
+            const restT = vec3.create(), restR = quat.create();
+            decomposeTRS(rest, restT, restR, vec3.create());
+
+            const r = bone.rotation
+                ? quat.normalize(quat.create(), quat.multiply(quat.create(),
+                    quat.fromValues(bone.rotation[0], bone.rotation[1], bone.rotation[2], bone.rotation[3]), restR))
+                : restR;
+            samplers.push({ input: [0, 1], output: [r[0], r[1], r[2], r[3], r[0], r[1], r[2], r[3]], interpolation: 'LINEAR' } as AnimationSampler);
+            channels.push({ samplerIndex: samplers.length - 1, targetNodeIndex: nodeIndex, targetPath: 'rotation' } as AnimationChannel);
+
+            if (bone.translation) {
+                const t = vec3.add(vec3.create(), restT, vec3.fromValues(bone.translation[0], bone.translation[1], bone.translation[2]));
+                samplers.push({ input: [0, 1], output: [t[0], t[1], t[2], t[0], t[1], t[2]], interpolation: 'LINEAR' } as AnimationSampler);
+                channels.push({ samplerIndex: samplers.length - 1, targetNodeIndex: nodeIndex, targetPath: 'translation' } as AnimationChannel);
+            }
+        }
+        const clip: Animation = { name: `pose:${state.pose?.name ?? state.name}`, samplers, channels };
+        this._poseClips.set(state, clip);
+        return clip;
+    }
+
+    /**
+     * Play a clip as a one-shot ACTION over whatever the controller is doing — an attack, a reload, a wave
+     * — without wiring it into the graph. It fades in, plays, and fades out on its own; a masked slot
+     * (say an "UpperBody" one declared on the controller) keeps the legs on locomotion meanwhile.
+     *
+     * A second action in the same slot cross-fades from the first, whose handle then resolves.
+     */
+    public playAction(clipName: string, options: AnimationActionOptions = {}): AnimationActionHandle {
+        const slotName = options.slot ?? this._stateMachine?.slots?.[0]?.name ?? 'FullBody';
+        let slot = this._overlays.find(o => o.kind === 'slot' && o.name === slotName);
+        if (!slot) {
+            // An undeclared slot is a full-body override above everything — what a bare playAction wants.
+            slot = this._addSlot({ name: slotName }, this._stateMachine?.layers?.length ?? 0);
+            this._overlays.sort((a, b) => a.order - b.order);
+        }
+
+        const exists = !!this._animatedModel?.animations.some(a => a.name === clipName);
+        let resolve!: () => void;
+        const finished = new Promise<void>(r => { resolve = r; });
+        const action: ActionState = {
+            clipName, loop: !!options.loop, blendOut: Math.max(0, options.blendOut ?? 0.2),
+            stopping: false, done: false, resolve,
+        };
+        const target = slot;
+        const handle: AnimationActionHandle = {
+            slot: slotName, clipName, finished,
+            get done() { return action.done; },
+            stop: (blendOut?: number) => {
+                if (action.done || target.action !== action) return;
+                action.stopping = true;
+                target.presenceTarget = 0;
+                target.fadeSeconds = Math.max(1e-3, blendOut ?? action.blendOut);
+            },
+        };
+        if (!exists) {
+            Logger.warn(`playAction: no clip named "${clipName}"`, 'Animation');
+            action.done = true;
+            resolve();
+            return handle;
+        }
+
+        // The one being replaced is over as far as its caller is concerned.
+        const previous = slot.action;
+        if (previous && !previous.done) { previous.done = true; previous.resolve(); }
+
+        const child = slot.animator;
+        child._speed = Math.max(0, options.speed ?? 1);
+        const crossFade = !!previous && slot.presence > 0;
+        child.playAnimationByName(clipName, action.loop, crossFade);
+        slot.action = action;
+        slot.presenceTarget = 1;
+        slot.fadeSeconds = Math.max(1e-3, options.blendIn ?? 0.15);
+        if (crossFade) child._activeBlendTime = slot.fadeSeconds;
+        return handle;
+    }
+
+    /** Fade out whatever action is playing in `slot` (every slot when omitted). */
+    public stopAction(slot?: string, blendOut?: number): void {
+        for (const o of this._overlays) {
+            if (o.kind !== 'slot' || (slot && o.name !== slot) || !o.action) continue;
+            o.action.stopping = true;
+            o.presenceTarget = 0;
+            o.fadeSeconds = Math.max(1e-3, blendOut ?? o.action.blendOut);
+        }
+    }
+
+    /** True while an action is playing (or fading) in `slot`, or in any slot when omitted. */
+    public isActionPlaying(slot?: string): boolean {
+        return this._overlays.some(o => o.kind === 'slot' && (!slot || o.name === slot) && !!o.action);
+    }
+
+    /** Set a layer's weight (0..1) from a script. A weight parameter, when the layer has one, wins. */
+    public setLayerWeight(layer: string, weight: number): void {
+        const o = this._overlays.find(x => x.kind === 'layer' && x.name === layer);
+        if (o) o.weight = clamp(weight, 0, 1);
+    }
+
+    /** The state a layer is in, or null. The base layer's is {@link currentStateName}. */
+    public layerStateName(layer: string): string | null {
+        return this._overlays.find(x => x.kind === 'layer' && x.name === layer)?.animator.currentStateName ?? null;
+    }
+
+    /** Names of the layers above the base, in order. */
+    public get layerNames(): string[] {
+        return this._overlays.filter(o => o.kind === 'layer').map(o => o.name);
     }
 
     // ---- Ragdoll drive mode ----
@@ -2669,6 +3159,8 @@ export class Animator {
         // The state machine, when present, is the source of truth for what plays.
         if (this._stateMachine) {
             this._evaluateStateMachine();
+            // Layers after the base, so they read parameters the base's variable bindings just refreshed.
+            for (const o of this._overlays) if (o.kind === 'layer') o.animator._evaluateStateMachine();
             return;
         }
 
@@ -2784,6 +3276,7 @@ export class Animator {
             const joint = this._skin.joints[jointIndex];
             const globalTransform = globalTransforms.get(joint.nodeIndex) ?? mat4.create();
             mat4.multiply(this._finalBoneMatrices[jointIndex], globalTransform, joint.inverseBindMatrix);
+            mat4.copy(this._jointModelMatrices[jointIndex] ??= mat4.create(), globalTransform);
         }
     }
     

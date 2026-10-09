@@ -7,6 +7,7 @@ import { getAnimationTarget } from '../animation/skeleton'
 import { applyPreviewClips } from './clipPreview'
 import { tracksOf, withMovedKey, withoutKey, type BoneTrack, type TrackPath } from '../../utils/clipTracks'
 import { Toggle } from '../../components/ui'
+import { promptDialog } from '../dialogs/dialogStore'
 import { clamp } from '../../utils/math'
 
 // The clip editor's transport, in the bottom strip beside Logger and Assets.
@@ -45,6 +46,8 @@ export default function ClipTimeline() {
   clipRef.current = clip
   /** The key being dragged, so the scrub handler on the row underneath stands down. */
   const dragRef = useRef<{ node: number; path: TrackPath; index: number } | null>(null)
+  /** Whether the event marker under the pointer was dragged, so its trailing click does not rename it. */
+  const eventDraggedRef = useRef(false)
 
   const target = getAnimationTarget(editorScene, skeletonTargetId)
 
@@ -235,6 +238,45 @@ export default function ClipTimeline() {
     window.addEventListener('pointerup', up)
   }
 
+  // ---- Clip events ----
+  // Markers owned by the clip, so they fire from any state, layer or action slot that plays it.
+  const events = clip?.events ?? []
+  const setEvents = (next: { time: number; name: string }[], label: string) => {
+    if (!clipName || !clipRef.current) return
+    patchClip(clipName, { ...clipRef.current, events: next.length ? next : undefined }, label)
+  }
+  const addEvent = async () => {
+    const name = await promptDialog({
+      title: 'Add an event', message: `Fires at ${time.toFixed(2)}s every time this clip plays. Scripts receive it in onAnimationEvent(name, clip).`,
+      defaultValue: 'footstep', validate: v => (v.trim() ? null : 'Give the event a name.'),
+    })
+    if (!name?.trim()) return
+    setEvents([...events, { time: Math.max(0, time), name: name.trim() }].sort((a, b) => a.time - b.time), 'Add event')
+  }
+  const renameEvent = async (i: number) => {
+    const name = await promptDialog({ title: 'Rename event', defaultValue: events[i].name, validate: v => (v.trim() ? null : 'Give the event a name.') })
+    if (!name?.trim()) return
+    setEvents(events.map((e, idx) => (idx === i ? { ...e, name: name.trim() } : e)), 'Rename event')
+  }
+  const onEventDown = (e: React.PointerEvent, index: number) => {
+    e.stopPropagation()
+    eventDraggedRef.current = false
+    beginBatch('Move event')
+    const move = (ev: PointerEvent) => {
+      eventDraggedRef.current = true
+      const at = timeAt(ev.clientX)
+      const list = clipRef.current?.events ?? []
+      setEvents(list.map((x, idx) => (idx === index ? { ...x, time: at } : x)), 'Move event')
+    }
+    const up = () => {
+      endBatch()
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
   const deleteKey = (t: BoneTrack, path: TrackPath, index: number) => {
     if (!clipName || !clip) return
     const next = withoutKey(clip, t.nodeIndex, path, index)
@@ -276,6 +318,30 @@ export default function ClipTimeline() {
             style={{ left: pct(time) }} />
         </div>
         <span className='tabular-nums w-[46px]'>{fmt(duration)}</span>
+      </div>
+
+      {/* Clip events: drag to move, click to rename, double-click to delete. */}
+      <div className='flex items-center gap-2 text-[11px]'>
+        <button className='w-[130px] shrink-0 text-left text-highlight hover:text-white' onClick={() => void addEvent()}
+          title='Add an event marker at the playhead'>+ Event at playhead</button>
+        <div className='relative flex-1 h-5 cursor-pointer select-none' onPointerDown={onTrackDown}>
+          <div className='absolute inset-x-0 top-1/2 -translate-y-1/2 h-px bg-control-hover' />
+          {events.map((ev, i) => (
+            <div key={i}
+              className='absolute top-0 -translate-x-1/2 flex flex-col items-center cursor-grab active:cursor-grabbing'
+              style={{ left: pct(ev.time) }}
+              title={`“${ev.name}” @ ${ev.time.toFixed(3)}s — drag to move, click to rename, double-click to delete`}
+              onPointerDown={e => onEventDown(e, i)}
+              // A drag ends in a click on the same marker; only a click that did not move renames.
+              onClick={() => { if (!eventDraggedRef.current) void renameEvent(i) }}
+              onDoubleClick={() => setEvents(events.filter((_, idx) => idx !== i), 'Delete event')}>
+              <div className='w-0 h-0 border-l-[5px] border-r-[5px] border-t-[8px] border-l-transparent border-r-transparent border-t-highlight' />
+              <span className='text-[9px] text-highlight whitespace-nowrap leading-none'>{ev.name}</span>
+            </div>
+          ))}
+          <div className='absolute top-0 bottom-0 w-px bg-white/40 pointer-events-none' style={{ left: pct(time) }} />
+        </div>
+        <span className='w-[46px]' />
       </div>
 
       {/* Per-bone key rows. Only the bones this clip drives — a full skeleton would be a hundred empty

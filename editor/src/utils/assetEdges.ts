@@ -90,6 +90,17 @@ export function walkRefs(obj: any, out: EdgeSpec[]): void {
     // A controller's link to the brain asset it copied. Only the link: the machine/goals/fuzzy beside it
     // are the embedded copy.
     if (key === 'brainId') { push(out, 'aiBrain', val, key); continue }
+    // A node machine's link to the animation controller it was instantiated from. The machine around it
+    // is the embedded copy, walked on for the references it holds itself.
+    if (key === 'controllerId') { push(out, 'animController', val, key); continue }
+    // A machine layer's or slot's bone mask.
+    if (key === 'maskId') { push(out, 'boneMask', val, key); continue }
+    // A state's stored pose, `{ assetId, poseId }`. Matched on the PAIR: a bare `assetId` key elsewhere is
+    // an animation clip's `.anim` link, not a pose asset.
+    if (key === 'poseRef' && val && typeof val === 'object') {
+      push(out, 'pose', (val as any).assetId, 'poseRef.assetId')
+      continue
+    }
     if (key === 'tilesetId') { push(out, 'tileset', val, key); continue }
     // A model's or animation's link to the shared skeleton it uses (utils/rigAssets.ts).
     if (key === 'rigId') { push(out, 'rig', val, key); continue }
@@ -185,12 +196,27 @@ export function edgesOfAsset(kind: AssetKind, asset: any): EdgeSpec[] {
     // records `brainId` as the back-link, so the reference runs the other way.
     case 'aiBrain':
       break
+    // A controller's skeleton, plus what its machine names: blend spaces and poses on any state (base and
+    // layers alike) and masks on layers and slots. walkRefs reaches all of it — a machine carries no
+    // keyframe payload, so the generic walk is cheap here.
+    case 'animController':
+      push(out, 'rig', asset.rigId, 'rigId')
+      walkRefs(asset.machine, out)
+      break
+    // Per-bone weights and stored poses: keyed by bone name, so the rig is their only link.
+    case 'boneMask':
+    case 'pose':
+      push(out, 'rig', asset.rigId, 'rigId')
+      break
     // A skeleton, plus the clips authored against it. Its `animationIds` are pushed explicitly rather than
     // through `walkRefs`, which would also walk the whole `skin` payload — thousands of matrix elements
     // with no ids in them — on every library change.
     case 'rig':
       for (const [i, id] of (asset.animationIds ?? []).entries())
         push(out, 'animation', id, `animationIds[${i}]`)
+      // A socket's preview model: editor-only, but deleting it should still show up as a dependent.
+      for (const [i, socket] of (asset.sockets ?? []).entries())
+        push(out, 'model', socket?.previewModelId, `sockets[${i}].previewModelId`)
       break
 
     // --- the two byte splits -------------------------------------------------------------------------
@@ -296,6 +322,9 @@ export function edgesOfScene(refs: SceneRefs | null | undefined): EdgeSpec[] {
   each(refs.textureIds, 'texture', SCENE_LINK_FIELD.texture)
   each(refs.scriptIds, 'script', SCENE_LINK_FIELD.script)
   each(refs.animationFieldIds, 'animationField', SCENE_LINK_FIELD.animationField)
+  each(refs.animControllerIds, 'animController', SCENE_LINK_FIELD.animController)
+  each(refs.boneMaskIds, 'boneMask', SCENE_LINK_FIELD.boneMask)
+  each(refs.poseAssetIds, 'pose', SCENE_LINK_FIELD.pose)
   each(refs.animationIds, 'animation', SCENE_LINK_FIELD.animation)
   each(refs.soundSampleIds, 'soundSample', SCENE_LINK_FIELD.soundSample)
   each(refs.audioSourceIds, 'audioSource', SCENE_LINK_FIELD.audioSource)
@@ -324,6 +353,9 @@ const SCENE_LINK_FIELD: Record<AssetKind, string> = {
   tileset: 'tilesetId',
   aiBrain: 'brainId',
   animationField: 'state.fieldId',
+  animController: 'stateMachine.controllerId',
+  boneMask: 'layer.maskId',
+  pose: 'state.poseRef.assetId',
   soundSample: 'sound.sampleId',
   audioSource: 'source.audioId',
   animation: 'animationIds',
