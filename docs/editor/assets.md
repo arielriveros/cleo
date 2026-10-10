@@ -108,6 +108,9 @@ to acquire either.
 | A script | A node in the tree | Attaches it |
 | A tileset | A sprite node's slot | Assigns it |
 | A brain | A Controller's Brain slot | Links it |
+| An animation controller | A character's **Animation** section | Runs it on that character |
+| A bone mask | A controller layer's or action slot's **Mask** row | Sets the mask |
+| A pose asset | A state's **Plays** row | Makes the state hold that asset's first pose |
 | A scene node | The Assets panel | Saves it as a template |
 
 Hovering a script card highlights every node using it, which is the quickest way to answer "what is

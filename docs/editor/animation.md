@@ -198,8 +198,16 @@ using the mask without a re-Apply.
 A **pose asset** (`.pose`) holds named static poses of one skeleton, each a set of per-bone changes
 from rest — a hand grip, a pointing finger, an injured stance. It is Unreal's Pose Asset.
 
-**Authoring.** In the clip editor's Bone panel, pose some bones and use **Save N posed bones as a
-shared pose…**. The pose goes into the rig's pose asset, which is created for you if the rig has none.
+**Authoring.** Two ways:
+
+- In the clip editor's Bone panel, pose some bones and use **Save N posed bones as a shared pose…**.
+- In the rig editor, pause a clip on the frame you want and press **Capture pose** in the **Poses**
+  section. Every bone that differs from rest is kept.
+
+Either way the pose goes into the rig's pose asset, which is created for you if the rig has none.
+
+**Previewing.** Press **◉** on a pose row in the rig editor to show it on the preview character.
+Press it again, or **Clear pose preview**, to let the clip drive the bones again.
 
 **Managing.** The rig editor's **Poses** section lists the rig's pose assets: rename them, rename or
 delete individual poses, or **+ New pose asset**. Clips and states refer to a pose by id, so a rename
@@ -350,7 +358,9 @@ the mesh's sibling, not its child.
 > editing the socket's offset, not the node.
 
 The follow runs after animation and before camera rigs, so a held item never trails the hand by a
-frame, and a camera following it sees it where the hand put it.
+frame, and a camera following it sees it where the hand put it. The flip side is that a camera rig
+(or a node under one) cannot itself be attached: the rig places it afterwards and wins. Attach the
+rig's follow target instead.
 
 ## Debugging
 

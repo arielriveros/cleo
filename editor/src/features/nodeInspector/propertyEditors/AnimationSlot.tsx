@@ -6,7 +6,8 @@ import { useAssetLibrary } from '../../AssetLibraryContext'
 import { useCleoEngine } from '../../EngineContext'
 import { useDocument } from '../../DocumentContext'
 import Collapsable from '../../../components/Collapsable'
-import { Button, Hint, Select } from '../../../components/ui'
+import { Button, Hint, Select, cn } from '../../../components/ui'
+import { useAssetDrop } from '../../../utils/useAssetDrop'
 import { AnimationIcon } from '../sectionIcons'
 import { ownSkinnedModelNodeOf, modelIdOf } from '../../../utils/models'
 import { instantiateController, machineClipNames } from '../../../utils/animationControllers'
@@ -25,6 +26,8 @@ export default function AnimationSlot(props: { node: Node }) {
   const { activeTab } = useCleoEngine()
   const { markTabDirty } = useDocument()
   const [, force] = useState(0)
+  // Above the early return (hooks). `pick` is only reached from a drop, i.e. after a render that got past it.
+  const { dragOver, dropProps } = useAssetDrop('text/cleo-anim-controller', id => pick(id))
 
   const modelNode = ownSkinnedModelNodeOf(props.node)
   if (!modelNode?.animator) return null
@@ -67,7 +70,8 @@ export default function AnimationSlot(props: { node: Node }) {
 
   return (
     <Collapsable title='Animation' icon={<AnimationIcon />} persistKey='animation'>
-      <div className='w-full p-2 flex flex-col gap-2'>
+      <div className={cn('w-full p-2 flex flex-col gap-2 rounded border', dragOver ? 'border-selected' : 'border-transparent')}
+        title='Drop an Animation Controller here to use it' {...dropProps}>
         <Select value={controller?.id ?? ''} onChange={e => pick(e.target.value)}
           title='Run a shared Animation Controller, or this character’s own state machine'>
           <option value=''>{sm?.controllerId && !controller ? 'Missing controller — own machine' : 'Own state machine'}</option>

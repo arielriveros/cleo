@@ -47,8 +47,16 @@ const ID_FIELD: Partial<Record<TabKind, keyof EditorTab>> = {
   soundSample: 'soundId',
 };
 
+/**
+ * A state-machine tab opened on a controller ASSET rather than on a node. Unlike the node kind it has no
+ * write-back target to capture — Apply writes the controller — so it restores like any asset tab.
+ */
+const isControllerTab = (tab: EditorTab) =>
+  tab.kind === 'stateMachine' && !tab.stateMachineSourceId && typeof tab.controllerId === 'string' && !!tab.controllerId
+
 /** The asset a tab edits, or null for the scene tab and for unsaved "New Material"-style tabs. */
 export function assetIdOfTab(tab: EditorTab): string | null {
+  if (isControllerTab(tab)) return tab.controllerId!
   const field = ID_FIELD[tab.kind];
   if (!field) return null;
   const value = tab[field];
@@ -62,6 +70,7 @@ export function assetIdOfTab(tab: EditorTab): string | null {
  */
 export function isRestorableTab(tab: EditorTab): boolean {
   if (tab.kind === 'scene') return true;
+  if (isControllerTab(tab)) return true;
   return !!ID_FIELD[tab.kind] && !!assetIdOfTab(tab);
 }
 

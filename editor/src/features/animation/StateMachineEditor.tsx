@@ -8,7 +8,7 @@ import FieldDebugReadout from './FieldDebugReadout'
 import type { AnimationFieldAsset } from '../../utils/animationFields'
 import { useStateMachine } from './StateMachineContext'
 import ConditionTree from './ConditionTree'
-import { LayerSection, SlotsSection } from './LayerPanels'
+import { AssetDropRow, LayerSection, SlotsSection } from './LayerPanels'
 import AnimationAssetPicker from './AnimationAssetPicker'
 import Collapsable from '../../components/Collapsable'
 import { SegmentedControl, Toggle } from '../../components/ui'
@@ -292,7 +292,16 @@ function SelectedState() {
         ? <p className='text-[10px] text-success'>▶ Entry state — the machine starts here.</p>
         : <p className='text-[10px] text-gray-500'>Right-click this state in the graph to make it the entry.</p>}
 
-      <div className='flex items-center gap-1'>
+      {/* Dropping a pose asset here makes the state hold that asset's first pose. */}
+      <AssetDropRow mime='text/cleo-pose' title='Drop a Pose asset here to hold its first pose'
+        onDrop={id => {
+          const asset = poseAssets.find(a => a.id === id)
+          if (!asset?.poses.length) return
+          setState(i, {
+            clipName: '', fieldId: undefined, field: undefined, fieldInputs: undefined, speedParam: undefined,
+            poseRef: { assetId: asset.id, poseId: asset.poses[0].id }, pose: undefined,
+          })
+        }}>
         <span className='text-[10px] text-gray-400 w-[42px] shrink-0'>Plays</span>
         <SegmentedControl<'clip' | 'field' | 'pose'>
           size='sm' value={playsField ? 'field' : playsPose ? 'pose' : 'clip'} onChange={setPlays}
@@ -301,7 +310,7 @@ function SelectedState() {
             { value: 'field', label: 'Field', title: 'Blend several clips through an Animation Field' },
             { value: 'pose', label: 'Pose', title: 'Hold a static pose from a Pose asset — on a masked layer, a hand grip over locomotion' },
           ]} />
-      </div>
+      </AssetDropRow>
 
       {playsPose && (allPoses.length === 0
         ? <p className='text-[10px] text-warning'>No poses yet — pose bones in a clip’s editor and save them as a pose.</p>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ModelNode, type Node } from 'cleo'
+import { CameraRigNode, ModelNode, type Node } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
 import { Hint, Select, cn, sectionTitleClass } from '../../../components/ui'
 
@@ -70,6 +70,11 @@ export default function SocketAttachSlot({ node }: { node: Node }) {
         </Select>
         {attachment && !missing && (
           <Hint>Follows the bone every frame, so this node’s own transform is overwritten while attached.</Hint>
+        )}
+        {attachment && (node instanceof CameraRigNode || node.parent instanceof CameraRigNode) && (
+          <Hint className='text-warning'>
+            A camera rig places this node after sockets do, so the rig wins. Attach the rig's follow target instead.
+          </Hint>
         )}
         {missing && (
           <Hint className='text-warning'>

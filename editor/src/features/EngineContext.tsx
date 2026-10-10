@@ -1536,11 +1536,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    * Unlike `enterStateMachineEditor` there is no source node: Apply writes the CONTROLLER, and every
    * character using it picks the change up through `reembedLiveMachines`.
    */
-  const openAnimController = (id: string) => {
+  const openAnimController = (id: string, adoptTabId?: string) => {
     const asset = animControllersRef.current.find(c => c.id === id);
     if (!asset) { Logger.error('Controller not found', 'Editor'); return; }
-    const existing = tabs.find(t => t.kind === 'stateMachine' && t.controllerId === id && !t.stateMachineSourceId);
-    if (existing) { setActiveTab(existing.id); return; }
+    // Focus-existing is an OPEN-time concern: on hydration it would find the restored placeholder itself.
+    if (!adoptTabId) {
+      const existing = tabs.find(t => t.kind === 'stateMachine' && t.controllerId === id && !t.stateMachineSourceId);
+      if (existing) { setActiveTab(existing.id); return; }
+    }
 
     const model = modelsRef.current.find(m => !!asset.rigId && m.rigId === asset.rigId)
       ?? (!asset.rigId ? modelsRef.current.find(m => modelAssetIsSkinned(m)) : undefined);
@@ -1572,10 +1575,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     withoutDirty(() => skinned.animator!.setStateMachine(instantiateController(asset, machineLibs())));
     skinned.animator.showBindPose();
 
-    const tabId = cryptoRandomId();
+    const tabId = adoptTabId ?? cryptoRandomId();
     tabRuntimeRef.current.set(tabId, { scene, rootId: skinned.id });
-    setTabs(prev => [...prev, { id: tabId, kind: 'stateMachine', title: `${asset.name} (Controller)`, controllerId: id }]);
-    setActiveTabId(tabId);
+    commitTab({ id: tabId, kind: 'stateMachine', title: `${asset.name} (Controller)`, controllerId: id }, adoptTabId);
   };
 
   // The two halves of the image/texture split. An ImageAsset is metadata over the bytes that already live
@@ -1958,6 +1960,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         case 'soundSample': return soundSamplesRef.current.some(x => x.id === id);
         case 'rig': return rigsRef.current.some(r => r.id === id);
         case 'animation': return animationsRef.current.some(a => a.id === id);
+        // Only a controller tab is ever restored for this kind (see `isRestorableTab`).
+        case 'stateMachine': return !!id && animControllersRef.current.some(c => c.id === id);
         // A field also needs the model it blends — enterAnimationFieldEditor refuses to open without it.
         case 'animationField': {
           const field = fields.find(f => f.id === id);
@@ -2950,6 +2954,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       case 'animationField': enterAnimationFieldEditor(assetId, tab.id); break;
       case 'rig': enterRigEditor(assetId, tab.id); break;
       case 'animation': enterClipEditor(assetId, tab.id); break;
+      case 'stateMachine': if (assetId) openAnimController(assetId, tab.id); break;
       case 'script': enterScriptEditor(assetId, tab.id); break;
       // A tileset tab is a pure 2D editor over the library record — nothing to build, so it is live already.
       case 'tileset': return !!tab.tilesetId && tilesetsRef.current.some(t => t.id === tab.tilesetId);

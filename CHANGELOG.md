@@ -60,6 +60,10 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   so publishing refuses a stale player — rebuild it with `npm --prefix editor run build:player`.
 - **Fixed: the renderer failed to start** (`dimension mismatch` in the decal surface shader). A local
   variable named like a fragment output field collided in naga's GLSL translation.
+- **Controller tabs survive a reload**, and controllers, bone masks and pose assets can be dragged
+  from Assets onto the Animation section, a Mask row and a state's Plays row.
+- **Pose capture and preview in the rig editor.** **Capture pose** saves the frame the preview shows;
+  **◉** on a pose shows it on the character.
 - **Fixed: unsaved rig edits were lost on a tab switch** — the rig editor re-read the saved rig when
   you came back to its tab.
 - **Turn-in-place waits for the aim to settle.** A camera swept round to the back crosses 90 degrees

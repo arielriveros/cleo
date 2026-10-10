@@ -2,6 +2,23 @@ import { useStateMachine } from './StateMachineContext'
 import Collapsable from '../../components/Collapsable'
 import { SegmentedControl } from '../../components/ui'
 import type { AnimationBlendMode } from 'cleo'
+import type { ReactNode } from 'react'
+import { useAssetDrop } from '../../utils/useAssetDrop'
+
+/**
+ * A row that accepts one kind of asset dragged from the explorer — a bone mask onto a Mask row, a pose
+ * onto a state. A component rather than a hook call per row, because slots are a list.
+ */
+export function AssetDropRow({ mime, onDrop, title, children }: { mime: string; onDrop: (id: string) => void; title?: string; children: ReactNode }) {
+  const { dragOver, dropProps } = useAssetDrop(mime, onDrop)
+  return (
+    <div className={`flex items-center gap-1 rounded border ${dragOver ? 'border-selected' : 'border-transparent'}`} title={title} {...dropProps}>
+      {children}
+    </div>
+  )
+}
+
+const MASK_MIME = 'text/cleo-bone-mask'
 
 // Controller LAYERS and action SLOTS, as inspector sections beside the state machine.
 //
@@ -87,7 +104,8 @@ export function LayerSection() {
               </>}
         </div>
 
-        <div className='flex items-center gap-1'>
+        <AssetDropRow mime={MASK_MIME} onDrop={id => setLayer(activeLayer, { maskId: id, mask: undefined })}
+          title='Drop a Bone Mask here'>
           <span className='text-[10px] text-gray-400 w-[46px] shrink-0'>Mask</span>
           <select className={input + ' flex-1 min-w-0'} value={layer.maskId ?? ''}
             title='Which bones this layer affects. Masks are edited in the rig editor.'
@@ -96,7 +114,7 @@ export function LayerSection() {
             {maskMissing && <option value={layer.maskId}>missing mask</option>}
             {boneMasks.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
-        </div>
+        </AssetDropRow>
         {maskMissing && <p className='text-[10px] text-warning'>That mask was deleted, so this layer affects nothing until another is picked.</p>}
         <p className='text-[10px] text-gray-500'>
           An empty state (no clip) on a layer means “add nothing”: the layer fades out while it is there.
@@ -133,14 +151,14 @@ export function SlotsSection() {
                 {layers.map((l, li) => <option key={li} value={li + 1}>{l.name}</option>)}
               </select>
             </div>
-            <div className='flex items-center gap-1'>
+            <AssetDropRow mime={MASK_MIME} onDrop={id => setSlot(i, { maskId: id, mask: undefined })} title='Drop a Bone Mask here'>
               <span className='text-[10px] text-gray-400 w-[46px] shrink-0'>Mask</span>
               <select className={input + ' flex-1 min-w-0'} value={slot.maskId ?? ''}
                 onChange={e => setSlot(i, { maskId: e.target.value || undefined, mask: undefined })}>
                 <option value=''>Whole body</option>
                 {boneMasks.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
-            </div>
+            </AssetDropRow>
             <div className='flex items-center gap-1'>
               <span className='text-[10px] text-gray-400 w-[46px] shrink-0'>Blend</span>
               <SegmentedControl<AnimationBlendMode> size='sm' value={slot.blend ?? 'override'}

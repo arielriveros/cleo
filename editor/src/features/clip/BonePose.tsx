@@ -9,7 +9,7 @@ import Collapsable from '../../components/Collapsable'
 import type { StoredPoseBone } from '../../utils/animationAssets'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { buildPoseAsset, newPose } from '../../utils/poseAssets'
-import { boneRotation, composeBone, decomposeBone, safeScale, type Trs } from './boneTrs'
+import { boneRotation, composeBone, decomposeBone, poseDeltaOf, safeScale, type Trs } from './boneTrs'
 
 // Posing one bone and writing it into the clip.
 //
@@ -156,18 +156,11 @@ export default function BonePose() {
       const override = animator.boneLocalOverride(j.nodeIndex)
       if (!override) continue
       const restM = animator.boneRestTransform(j.nodeIndex) ?? mat4.create()
-      // delta = local . rest^-1, in the PARENT frame — the same form `applyPoseOffset` re-applies.
-      const restRot = boneRotation(restM)
-      const rot = boneRotation(override)
-      const delta = quat.normalize(quat.create(), quat.multiply(quat.create(), rot, quat.invert(quat.create(), restRot)))
-      const dt = vec3.subtract(vec3.create(),
-        mat4.getTranslation(vec3.create(), override), mat4.getTranslation(vec3.create(), restM))
       const name = skin.nodeNames?.get(j.nodeIndex)
       if (!name) continue // a pose is stored BY NAME; a nameless bone cannot be replayed on another rig
-      const entry: StoredPoseBone = { name }
-      if (Math.abs(quat.getAxisAngle(vec3.create(), delta)) > 1e-4) entry.rotation = [delta[0], delta[1], delta[2], delta[3]]
-      if (vec3.length(dt) > 1e-5) entry.translation = [dt[0], dt[1], dt[2]]
-      if (entry.rotation || entry.translation) bones.push(entry)
+      // delta = local . rest^-1, in the PARENT frame — the same form `applyPoseOffset` re-applies.
+      const delta = poseDeltaOf(override, restM)
+      if (delta) bones.push({ name, ...delta })
     }
     if (!bones.length) return
 
