@@ -50,7 +50,7 @@ export default function AssetsExplorer({ active = true }: { active?: boolean }) 
 function AssetsExplorerHost({ active }: { active: boolean }) {
   const {
     enterMaterialEditor, enterTerrainMaterialEditor, enterTemplateEditor, enterScriptEditor, createTilesetFromImage, importAnimationFiles,
-    enterAiBrainEditor, addAnimController,
+    enterAiBrainEditor, enterParticleSystemEditor, addAnimController,
     importModelFiles, addTemplate, createScene, editorScene, scripts, bodies, triggers, eventEmitter,
   } = useCleoEngine()
   const { vfs, libs, pathIndexRef, folderKindsRef, landingFolderRef, depsRef } = useVfs()
@@ -346,6 +346,9 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
     // creation because it decides which canvas the asset opens on. Asking afterwards would mean a modal.
     { label: 'AI Brain (Machine)', icon: <img src={iconFor('aiBrain')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterAiBrainEditor(undefined, 'behavior'), title: 'Create a behaviour state machine an AI controller can run' },
     { label: 'AI Brain (Goals)', icon: <img src={iconFor('aiBrain')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterAiBrainEditor(undefined, 'goals'), title: 'Create a goal graph an AI controller can arbitrate over' },
+    // Minted from `buildParticleSystemAsset`'s default effect (one soft rising emitter) and opened at once,
+    // so there is something on screen to start shaping rather than an empty stack.
+    { label: 'Particle System', icon: <img src={iconFor('particleSystem')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterParticleSystemEditor(), title: 'Create a GPU particle effect: emitters, their module stacks and renderers' },
     // The three animation-authoring kinds are created empty and rig-less, straight into the library; the
     // reconcile files them under the landing folder like any asset created outside the explorer.
     { label: 'Animation Controller', icon: <img src={iconFor('animController')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => addAnimController(buildControllerAsset('New Controller')), title: 'Create a shareable animation state machine: parameters, layers and slots' },

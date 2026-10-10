@@ -170,7 +170,7 @@ export type LoadingProgress = { loaded: number; total: number; label: string };
 export const EDITOR_CLEAR_COLOR: [number, number, number, number] = [0.68, 0.80, 0.90, 1.0];
 export const LEGACY_CLEAR_COLOR = [0.65, 0.65, 0.71];
 
-export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'renderer' | 'input' | 'material' | 'terrainMaterial' | 'stateMachine' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain' | 'rig';
+export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'renderer' | 'input' | 'material' | 'terrainMaterial' | 'stateMachine' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain' | 'rig' | 'particleSystem';
 
 /**
  * Whether a mode paints the 3D viewport, or replaces it with a full-panel editor of its own; the
@@ -199,6 +199,7 @@ export const MODE_RENDERS_VIEWPORT: Record<EditorMode, boolean> = {
   rig: true,             // a skeleton has no mesh, so the viewport shows a model built on it
   texture: false,        // TextureTabView fills the panel
   soundSample: false,    // SoundTabView fills the panel
+  particleSystem: true,  // the effect plays in a staging scene over a ground plane
 };
 
 /**
@@ -228,6 +229,7 @@ export const MODE_SHOWS_SCENE_HELPERS: Record<EditorMode, boolean> = {
   aiBrain: false,
   texture: false,
   soundSample: false,
+  particleSystem: false, // a staging scene: its lights and ground are the editor's
 };
 
 /**
@@ -258,6 +260,7 @@ export const MODE_SKELETON_OWNER: Record<EditorMode, boolean> = {
   aiBrain: false,
   texture: false,
   soundSample: false,
+  particleSystem: false,
 };
 export type GizmoMode = 'position' | 'rotation' | 'scale';
 /**
@@ -271,7 +274,7 @@ export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 // Browser-style editor tabs. `editorMode` is derived from the active tab (see EngineProvider). The scene
 // tab hosts the open scene asset; the library tabs each own a live edit session (a throwaway Scene in
 // tabRuntimeRef), except 'script' and 'tileset', which own no 3D scene and get no tabRuntimeRef entry.
-export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'stateMachine' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain' | 'rig';
+export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'stateMachine' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain' | 'rig' | 'particleSystem';
 
 /**
  * The editor mode a library tab puts the editor into. Exhaustive, like `MODE_RENDERS_VIEWPORT` above — a
@@ -295,6 +298,7 @@ export const TAB_EDITOR_MODE: Record<Exclude<TabKind, 'scene'>, EditorMode> = {
   rig: 'rig',
   texture: 'texture',
   soundSample: 'soundSample',
+  particleSystem: 'particleSystem',
 };
 
 /**
@@ -325,20 +329,22 @@ export const TAB_METERS_EXPOSURE: Record<TabKind, boolean> = {
   texture: false,        // no viewport at all
   soundSample: false,    // no viewport at all
   rig: false,            // a preview character under a fixed studio rig, like every other asset preview
+  particleSystem: false, // a staging scene under the preview rig, like the material and field previews
 };
 
 /**
  * Whether a tab's contents run the POST-PROCESS CHAIN. Exhaustive, like the tables above — a new tab
  * kind with no entry is a compile error.
  *
- * Only the scene tab, and for the same underlying reason `TAB_METERS_EXPOSURE` is: every other tab
+ * The scene tab, and for the same underlying reason `TAB_METERS_EXPOSURE` is: almost every other tab
  * renders a throwaway preview session, and a preview is a picture of the ASSET rather than of the
  * project's look. Someone judging a roughness value wants to see the material, not the material behind
- * whatever bloom, depth of field, vignette and grain the scene happens to be authored with.
+ * whatever bloom, depth of field, vignette and grain the scene happens to be authored with. The
+ * particle tab is the exception: bloom is half of what an emissive effect looks like.
  *
- * Kept as its own table rather than folded into `TAB_METERS_EXPOSURE`, which it currently matches
- * entry for entry: the two answer different questions (may this drive exposure adaptation / should
- * this wear the project's look), and a future tab kind could easily want one without the other.
+ * Kept as its own table rather than folded into `TAB_METERS_EXPOSURE`: the two answer different
+ * questions (may this drive exposure adaptation / should this wear the project's look), and the
+ * particle tab is exactly a kind that wants one without the other.
  *
  * Antialiasing is not covered here. TAA resolves inside the scene render rather than in the chain, so
  * it keeps running everywhere and previews stay free of crawling edges.
@@ -358,6 +364,9 @@ export const TAB_RUNS_POST_PROCESSING: Record<TabKind, boolean> = {
   texture: false,        // no viewport at all
   soundSample: false,    // no viewport at all
   rig: false,            // a preview character under a fixed studio rig, like every other asset preview
+  // The one asset preview that DOES wear the chain: an additive effect's look is mostly its bloom, and an
+  // HDR spark judged without it reads as a flat dot. Exposure stays authored (see TAB_METERS_EXPOSURE).
+  particleSystem: true,
 };
 
 /**
@@ -389,6 +398,7 @@ export const TAB_ASSET_KIND: Record<TabKind, AssetKind | null> = {
   texture: 'texture',
   soundSample: 'soundSample',
   rig: 'rig',
+  particleSystem: 'particleSystem',
 };
 
 /**
@@ -414,6 +424,7 @@ export const KIND_LABEL: Record<TabKind, string> = {
   rig: 'Rig',
   texture: 'Texture',
   soundSample: 'Sound',
+  particleSystem: 'Particle System',
 };
 
 // Reactive per-mesh-tab edit state (the tab's Scene itself lives in tabRuntimeRef). levelIds[i] is the
@@ -450,6 +461,7 @@ export interface EditorTab {
   rigId?: string | null;     // rig tabs: the edited rig asset id
   textureId?: string | null; // texture tabs: the edited texture asset id (also its TextureManager id)
   soundId?: string | null; // sound tabs: the edited sample asset id (also its AudioManager id)
+  particleSystemId?: string | null; // particle tabs: the edited `.vfx` asset id
 }
 /**
  * Which landscape the landscape-mode tools act on. Every brush setting lives in the landscape brush store

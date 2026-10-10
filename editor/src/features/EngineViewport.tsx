@@ -46,7 +46,7 @@ const ScaleIcon = () => (
     </svg>
 );
 
-const GIZMO_HIDDEN_MODES: EditorMode[] = ['landscape', 'tilemap', 'renderer', 'input', 'material', 'terrainMaterial'];
+const GIZMO_HIDDEN_MODES: EditorMode[] = ['landscape', 'tilemap', 'renderer', 'input', 'material', 'terrainMaterial', 'particleSystem'];
 
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, editorMode, viewDimension, setViewDimension, isSceneReady,
@@ -198,7 +198,8 @@ export default function EngineViewport() {
             // hides the tree and Properties, so a selection there has nowhere to show. In material mode the
             // preview sphere stays selected (it drives the material inspector), so clicks must not change it.
             // Animation mode picks joints (see AnimationSkeletonTool), not the mesh, so mesh selection is off.
-            if (editorMode === 'landscape' || editorMode === 'tilemap' || editorMode === 'ui' || editorMode === 'renderer' || editorMode === 'input' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'stateMachine' || editorMode === 'animation' || editorMode === 'rig' || editorMode === 'animationField') return;
+            // The particle tab's Properties is the effect stack, not a node inspector, so a pick would show nothing.
+            if (editorMode === 'landscape' || editorMode === 'tilemap' || editorMode === 'ui' || editorMode === 'renderer' || editorMode === 'input' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'stateMachine' || editorMode === 'animation' || editorMode === 'rig' || editorMode === 'animationField' || editorMode === 'particleSystem') return;
             
             if (wasDraggingRef.current || isGizmoDraggingRef.current || justFinishedGizmoDragRef.current) {
                 setIsDragging(false);

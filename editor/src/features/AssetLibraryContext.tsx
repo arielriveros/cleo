@@ -20,6 +20,7 @@ export type AssetLibraryContextValue = Pick<EngineValue,
   | 'rigs' | 'addRig' | 'removeRig' | 'updateRig'
   | 'tilesets' | 'addTileset' | 'removeTileset' | 'updateTileset'
   | 'aiBrains' | 'addAiBrain' | 'removeAiBrain' | 'updateAiBrain'
+  | 'particleSystems' | 'addParticleSystem' | 'removeParticleSystem' | 'updateParticleSystem'
   | 'animControllers' | 'addAnimController' | 'removeAnimController' | 'updateAnimController'
   | 'boneMasks' | 'addBoneMask' | 'removeBoneMask' | 'updateBoneMask'
   | 'poseAssets' | 'addPoseAsset' | 'removePoseAsset' | 'updatePoseAsset'

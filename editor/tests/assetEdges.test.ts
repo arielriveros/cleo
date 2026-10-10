@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { edgesOfAsset, edgesOfScene, sceneRefsComplete, walkRefs } from '../src/utils/assetEdges'
 import type { EdgeSpec } from '../src/utils/assetEdges'
 import type { SceneRefs } from '../src/utils/sceneStorage'
+import { SCENE_REFS_VERSION } from '../src/utils/references'
 
 // One fixture per kind, asserting the documented edge table. Pure data, no GL.
 
@@ -279,6 +280,50 @@ describe('edgesOfAsset', () => {
     })
   })
 
+  describe('particleSystem', () => {
+    // Each emitter's renderer names at most one sprite texture and one mesh model. Deduplicated: two
+    // emitters drawing the same flipbook are one dependency, not two.
+    it('points at every texture and model its emitters draw', () => {
+      const asset = {
+        id: 'fire', name: 'fire',
+        system: {
+          version: 1, bounds: { center: [0, 0, 0], extents: [1, 1, 1] },
+          emitters: [
+            { render: { textureId: 'flame', modelId: null } },
+            { render: { textureId: 'flame', modelId: 'ember' } },
+            { render: { textureId: null, modelId: null } },
+          ],
+        },
+      }
+      expect(shape(edgesOfAsset('particleSystem', asset))).toEqual([
+        'model:ember@render.modelId',
+        'texture:flame@render.textureId',
+      ])
+    })
+
+    it('references nothing when no emitter names an asset', () => {
+      expect(edgesOfAsset('particleSystem', { id: 'p', name: 'p', system: { emitters: [] } })).toEqual([])
+    })
+
+    // A placed node keeps the LINK beside an embedded copy of the effect; the copy's renderer links are
+    // still real uses, so they are walked too.
+    it('reads a node particleSystemId and the embedded emitters it carries', () => {
+      const asset = {
+        id: 't', name: 't',
+        nodeJson: {
+          particleSystem: {
+            particleSystemId: 'fire',
+            system: { emitters: [{ render: { textureId: 'flame', modelId: null } }] },
+          },
+        },
+      }
+      expect(shape(edgesOfAsset('template', asset))).toEqual([
+        'particleSystem:fire@particleSystemId',
+        'texture:flame@textureId',
+      ])
+    })
+  })
+
   describe('tileset', () => {
     it('points at its atlas once, not twice through the mirror', () => {
       const asset = { id: 'ts', name: 'ts', textureId: 'atlas', textureIds: ['atlas'] }
@@ -334,6 +379,7 @@ describe('edgesOfScene', () => {
     terrainMaterialIds: ['grass'],
     tilesetIds: ['dungeon'],
     aiBrainIds: ['guard'],
+    particleSystemIds: ['torch'],
     textureIds: ['rock'],
     scriptIds: ['patrol'],
     animationFieldIds: ['locomotion'],
@@ -345,7 +391,7 @@ describe('edgesOfScene', () => {
   it('emits one edge per referenced asset, across every kind', () => {
     expect(targets(edgesOfScene(full))).toEqual([
       'aiBrain:guard', 'animation:idle', 'animationField:locomotion', 'audioSource:hit.wav',
-      'material:stone', 'model:boulder', 'model:legacyRock', 'script:patrol',
+      'material:stone', 'model:boulder', 'model:legacyRock', 'particleSystem:torch', 'script:patrol',
       'soundSample:hit', 'template:crate', 'terrainMaterial:grass', 'texture:rock', 'tileset:dungeon',
     ])
   })
@@ -388,7 +434,12 @@ describe('sceneRefsComplete', () => {
   })
 
   it('is true once the current builder has stamped its version', () => {
-    expect(sceneRefsComplete({ ...legacy, version: 1 })).toBe(true)
+    expect(sceneRefsComplete({ ...legacy, version: SCENE_REFS_VERSION })).toBe(true)
+  })
+
+  // Version 1 predates particle-system links: a scene saved then may place effects its refs never named.
+  it('is false for a version-1 stamp, which recorded no particle links', () => {
+    expect(sceneRefsComplete({ ...legacy, version: 1 })).toBe(false)
   })
 
   it('is false for no refs at all', () => {

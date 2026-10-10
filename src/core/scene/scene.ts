@@ -12,6 +12,8 @@ import { TilemapNode } from "./nodes/tilemapNode";
 import { LightNode } from "./nodes/lightNode";
 import { LightProbeNode } from "./nodes/lightProbeNode";
 import { DecalNode } from "./nodes/decalNode";
+import { ParticleSystemNode } from "./nodes/particleSystemNode";
+import { ForceFieldNode } from "./nodes/forceFieldNode";
 import { SkyboxNode } from "./nodes/skyboxNode";
 import { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
 import { SkyAtmosphereNode } from "./nodes/skyAtmosphereNode";
@@ -101,6 +103,8 @@ export class Scene {
     private _controllers: Set<ControllerNode> = new Set();
     private _navMeshes: Set<NavMeshNode> = new Set();
     private _decals: Set<DecalNode> = new Set();
+    private _particleSystems: Set<ParticleSystemNode> = new Set();
+    private _forceFields: Set<ForceFieldNode> = new Set();
     private _sounds: Set<SoundNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
     private _uiRoots: Set<UIRootNode> = new Set();
@@ -146,6 +150,13 @@ export class Scene {
     /** The physics system driving this scene (set by PhysicsSystem.set scene). Reachable from a script
      *  as `scene.physics`. */
     public physics!: PhysicsSystem;
+
+    /**
+     * Whether particle systems simulate while the editor is AUTHORING this scene (play mode and a
+     * published game always simulate). The viewport's "Preview particles" toggle; on by default, like
+     * Niagara's realtime viewport.
+     */
+    public particlePreview: boolean = true;
 
     /**
      * The navigation system serving this scene (set by `CleoEngine.setScene`). Reachable from a script
@@ -704,6 +715,8 @@ export class Scene {
         this._controllers = new Set();
         this._navMeshes = new Set();
         this._decals = new Set();
+        this._particleSystems = new Set();
+        this._forceFields = new Set();
         this._sounds = new Set();
         this._lightProbes = new Set();
         this._skybox = null;
@@ -737,6 +750,10 @@ export class Scene {
                 this._navMeshes.add(node);
             if (node instanceof DecalNode)
                 this._decals.add(node);
+            if (node instanceof ParticleSystemNode)
+                this._particleSystems.add(node);
+            if (node instanceof ForceFieldNode)
+                this._forceFields.add(node);
             if (node instanceof SoundNode)
                 this._sounds.add(node);
             if (node instanceof LightProbeNode)
@@ -993,6 +1010,20 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._decals;
+    }
+
+    /** Every particle system in the scene. Holds only SPAWNED nodes — a despawned effect stops drawing. */
+    public get particleSystems(): Set<ParticleSystemNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._particleSystems;
+    }
+
+    /** Every force field in the scene, which particle emitters with the Force Fields module respond to. */
+    public get forceFields(): Set<ForceFieldNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._forceFields;
     }
 
     /** Every sound emitter in the scene. Holds only SPAWNED nodes, so a despawn silences one for free. */

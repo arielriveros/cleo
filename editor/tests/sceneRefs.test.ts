@@ -117,6 +117,22 @@ describe('buildSceneRefs', () => {
     expect(buildSceneRefs(s, null, [], models).animationIds).toEqual(['idle'])
   })
 
+  // A particle node keeps the LINK beside an embedded copy; its emitters' sprite textures are direct
+  // texture references of the scene too. The particle tab's editor-owned preview node counts for neither.
+  it('records particle-system links and their sprite textures, skipping editor-owned nodes', () => {
+    const emitters = (textureId: string) => ({ emitters: [{ render: { textureId, modelId: null } }] })
+    const s = scene({
+      particleSystems: [
+        { particleSystemId: 'torch', isEditorOwned: false, system: emitters('flame') },
+        { particleSystemId: null, isEditorOwned: false, system: emitters('smoke') },
+        { particleSystemId: 'preview', isEditorOwned: true, system: emitters('staged') },
+      ],
+    })
+    const refs = buildSceneRefs(s)
+    expect(refs.particleSystemIds).toEqual(['torch'])
+    expect([...refs.textureIds].sort()).toEqual(['flame', 'smoke'])
+  })
+
   it('is empty, not undefined, for an empty scene', () => {
     const refs = buildSceneRefs(scene())
     expect(refs.materialIds).toEqual([])
@@ -133,6 +149,7 @@ describe('edgesOfScene labels', () => {
       terrainMaterialIds: ['grass'], tilesetIds: ['dungeon'], aiBrainIds: ['guard'],
       scriptIds: ['patrol'], animationFieldIds: ['locomotion'], soundSampleIds: ['hit'],
       textureIds: [], animationIds: [], audioSourceIds: [], foliageModelIds: ['fern'],
+      particleSystemIds: ['torch'],
     }
     const byTarget = Object.fromEntries(edgesOfScene(refs).map(e => [`${e.to.kind}:${e.to.id}`, e.field]))
     expect(byTarget['material:stone']).toBe('__materialId')
@@ -144,6 +161,7 @@ describe('edgesOfScene labels', () => {
     expect(byTarget['aiBrain:guard']).toBe('brainId')
     expect(byTarget['animationField:locomotion']).toBe('state.fieldId')
     expect(byTarget['model:fern']).toBe('foliageInclude[].modelId')
+    expect(byTarget['particleSystem:torch']).toBe('particleSystemId')
   })
 
   // No label anywhere may still say `refs.*` — that was the storage field name leaking into the viewer.

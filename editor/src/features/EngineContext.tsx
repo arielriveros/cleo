@@ -46,11 +46,12 @@ import { modelAssetSkin, applyModelAnimations, modelAnimationIds, invalidateAnim
 import { AnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
 import { TilesetAsset, reembedTilesets, detachTileset } from "../utils/tilesets";
 import { AiBrainAsset, AiBrainKind, buildAiBrainAsset, reembedBrains, detachBrain } from "../utils/aiBrains";
+import { ParticleSystemAsset, buildParticleSystemAsset, reembedParticleSystems, detachParticleSystem } from "../utils/particleSystems";
 import type { AnimControllerAsset } from "../utils/animationControllers";
 import { instantiateController, reembedMachine } from "../utils/animationControllers";
 import type { BoneMaskAsset } from "../utils/boneMasks";
 import type { PoseAsset } from "../utils/poseAssets";
-import type { ControllerNode } from "cleo";
+import type { ControllerNode, ParticleSystemNode } from "cleo";
 import type { ImageAsset } from "../utils/images";
 import type { AudioSourceAsset } from "../utils/audioSources";
 import type { SoundSampleAsset } from "../utils/soundSamples";
@@ -102,7 +103,7 @@ import { startTask, StepStatus } from "./progress/progressStore";
 import { invalidateNavSoup, reconcileEditorHelpers } from "../utils/editorHelpers";
 import { readBackendPreference } from './renderer/backendPreference';
 import { deepClone } from '../utils/deepClone';
-import { buildProbeIconDataURL, buildLightIconDataURL, buildSoundIconDataURL, buildDecalIconDataURL } from './editorIcons';
+import { buildProbeIconDataURL, buildLightIconDataURL, buildSoundIconDataURL, buildDecalIconDataURL, buildParticleIconDataURL, buildForceFieldIconDataURL } from './editorIcons';
 import { ImportStage, IMPORT_STAGES, AnimImportStage, ANIM_IMPORT_STAGES } from './importStages';
 import { usePersistedLibrary, usePersistedModelLibrary } from './persistLibrary';
 import { useAssetThumbnails } from './hooks/useAssetThumbnails';
@@ -110,6 +111,7 @@ import { useSaving } from './hooks/useSaving';
 import { usePendingDecisions } from './hooks/usePendingDecisions';
 import { useTilesetEditor } from './hooks/useTilesetEditor';
 import { useAiBrainEditor } from './hooks/useAiBrainEditor';
+import { useParticleSystemEditor } from './hooks/useParticleSystemEditor';
 import { useTextureEditor } from './hooks/useTextureEditor';
 import { useSoundEditor } from './hooks/useSoundEditor';
 import { useAnimationFieldEditor } from './hooks/useAnimationFieldEditor';
@@ -187,6 +189,8 @@ const EngineContext = createContext<{
   registerSoundApply: (reg: { tabId: string; apply: () => void } | null) => void;
   registerAiBrainApply: (reg: { tabId: string; apply: () => void } | null) => void;
   registerRigApply: (reg: { tabId: string; apply: () => void } | null) => void;
+  /** ParticleEditorProvider hands its save back here, so Ctrl+S and Save All can reach a particle tab by id. */
+  registerParticleSystemApply: (reg: { tabId: string; apply: () => void } | null) => void;
   /** Open (or focus) a rig's edit tab. */
   enterRigEditor: (rigId?: string, adoptTabId?: string) => void;
   /** Open an animation controller asset for editing. */
@@ -361,6 +365,22 @@ const EngineContext = createContext<{
   addAiBrain: (b: AiBrainAsset) => void;
   removeAiBrain: (id: string) => void;
   updateAiBrain: (id: string, b: AiBrainAsset) => void;
+  // Particle system assets (`.vfx`: emitters and their module stacks, embedded into ParticleSystemNodes)
+  particleSystems: ParticleSystemAsset[];
+  addParticleSystem: (p: ParticleSystemAsset) => void;
+  /** Drops the library entry, unlinks every node in every live scene (they keep their copy) and closes its tab. */
+  removeParticleSystem: (id: string) => void;
+  updateParticleSystem: (id: string, p: ParticleSystemAsset) => void;
+  /** The particle system the active tab edits, or null when the active tab is not one. */
+  editingParticleSystemId: string | null;
+  /** Open (or focus) a particle system's tab, minting a new asset when called with no id. */
+  enterParticleSystemEditor: (id?: string | null, adoptTabId?: string) => void;
+  /** Persist an edited particle system and push it into every node in every live scene that links it. */
+  saveParticleSystem: (asset: ParticleSystemAsset) => void;
+  /** Copy a library effect onto a node and record the link, or pass null to unlink keeping the copy. */
+  linkParticleSystemToNode: (node: ParticleSystemNode, id: string | null) => void;
+  /** Copy a node's embedded effect into a new library asset and link it. */
+  extractParticleSystemFromNode: (node: ParticleSystemNode, name?: string) => ParticleSystemAsset;
   // Animation controller assets (a shared state machine: parameters, layers, slots)
   animControllers: AnimControllerAsset[];
   addAnimController: (c: AnimControllerAsset) => void;
@@ -533,6 +553,7 @@ const EngineContext = createContext<{
     registerSoundApply: () => {},
     registerAiBrainApply: () => {},
     registerRigApply: () => {},
+    registerParticleSystemApply: () => {},
     enterRigEditor: () => {},
     openAnimController: () => {},
     setRigPreviewModel: () => {},
@@ -649,6 +670,15 @@ const EngineContext = createContext<{
     addAiBrain: () => {},
     removeAiBrain: () => {},
     updateAiBrain: () => {},
+    particleSystems: [],
+    addParticleSystem: () => {},
+    removeParticleSystem: () => {},
+    updateParticleSystem: () => {},
+    editingParticleSystemId: null,
+    enterParticleSystemEditor: () => {},
+    saveParticleSystem: () => {},
+    linkParticleSystemToNode: () => {},
+    extractParticleSystemFromNode: () => buildParticleSystemAsset(),
     animControllers: [],
     addAnimController: () => {},
     removeAnimController: () => {},
@@ -1420,6 +1450,40 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (open) removeTabById(open.id);
   };
 
+  // PARTICLE SYSTEMS. The brain arrangement again: a ParticleSystemNode keeps a full copy of the effect it
+  // plays, so this library is the authoring source of truth and the embedded copies are refreshed from it
+  // on SAVE (see saveParticleSystem / reembedParticleSystems) — not on every update, because `setSystem`
+  // restarts the effect and the particle editor writes its working copy far more often than it saves.
+  const [particleSystems, setParticleSystems] = useState<ParticleSystemAsset[]>([]);
+  const particleSystemsLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<ParticleSystemAsset[]>(libKey('particleSystems'));
+        if (list && list.length) setParticleSystems(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load particle systems:', e); }
+      finally { particleSystemsLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary(libKey('particleSystems'), particleSystems, particleSystemsLoadedRef);
+
+  const particleSystemsRef = useRef<ParticleSystemAsset[]>([]);
+  particleSystemsRef.current = particleSystems;
+
+  const addParticleSystem = (p: ParticleSystemAsset) => setParticleSystems(prev => [...prev, p]);
+  const updateParticleSystem = (id: string, p: ParticleSystemAsset) =>
+    setParticleSystems(prev => prev.map(x => x.id === id ? p : x));
+  const removeParticleSystem = (id: string) => {
+    setParticleSystems(prev => prev.filter(x => x.id !== id));
+    // Drop the LINK only. Every node keeps the effect it copied and goes on playing it — deleting a
+    // library entry should not blank the fires and sparks that used it.
+    let changed = false;
+    for (const scene of liveScenes()) if (detachParticleSystem(scene, id)) changed = true;
+    if (changed) eventEmitter.current.emit('SCENE_CHANGED');
+    const open = tabsRef.current.find(t => t.kind === 'particleSystem' && t.particleSystemId === id);
+    if (open) removeTabById(open.id);
+  };
+
   // Animation controllers, bone masks and pose assets: plain JSON records, persisted like the brains. A
   // ModelNode embeds a resolved copy of what it uses (controllerId / maskId / poseRef record the source),
   // so deleting a library entry leaves every character playing what it already copied.
@@ -1814,7 +1878,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     if (assetsLoaded) return;
     const timer = window.setInterval(() => {
-      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && animationsLoadedRef.current && rigsLoadedRef.current && scenesLoadedRef.current && imagesLoadedRef.current && texturesLoadedRef.current && audioSourcesLoadedRef.current && soundSamplesLoadedRef.current && aiBrainsLoadedRef.current && animControllersLoadedRef.current && boneMasksLoadedRef.current && poseAssetsLoadedRef.current) {
+      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && animationsLoadedRef.current && rigsLoadedRef.current && scenesLoadedRef.current && imagesLoadedRef.current && texturesLoadedRef.current && audioSourcesLoadedRef.current && soundSamplesLoadedRef.current && aiBrainsLoadedRef.current && particleSystemsLoadedRef.current && animControllersLoadedRef.current && boneMasksLoadedRef.current && poseAssetsLoadedRef.current) {
         setAssetsLoaded(true);
         window.clearInterval(timer);
       }
@@ -1956,6 +2020,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         case 'script': return libs.scripts.some(s => s.id === id);
         case 'tileset': return libs.tilesets.some(t => t.id === id);
         case 'aiBrain': return libs.aiBrains.some(b => b.id === id);
+        case 'particleSystem': return particleSystemsRef.current.some(p => p.id === id);
         case 'texture': return texturesRef.current.some(t => t.id === id);
         case 'soundSample': return soundSamplesRef.current.some(x => x.id === id);
         case 'rig': return rigsRef.current.some(r => r.id === id);
@@ -2112,6 +2177,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const editingTextureId = activeTab.kind === 'texture' ? (activeTab.textureId ?? null) : null;
   const editingSoundId = activeTab.kind === 'soundSample' ? (activeTab.soundId ?? null) : null;
   const editingAiBrainId = activeTab.kind === 'aiBrain' ? (activeTab.aiBrainId ?? null) : null;
+  const editingParticleSystemId = activeTab.kind === 'particleSystem' ? (activeTab.particleSystemId ?? null) : null;
 
   // Non-reactive mirrors of the tab list, the mesh sessions and the asset libraries. The save + propagation
   // paths read these rather than the render-scoped state: Save All walks tabs sequentially with an await
@@ -2165,6 +2231,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     materials: materialsRef.current, models: modelsRef.current, templates: templatesRef.current,
     terrainMaterials: terrainMaterialsRef.current, scripts: scriptAssetsRef.current,
     tilesets: tilesetsRef.current, aiBrains: aiBrainsRef.current, animations: animationsRef.current,
+    particleSystems: particleSystemsRef.current,
     rigs: rigsRef.current,
     animControllers: animControllersRef.current, boneMasks: boneMasksRef.current, poseAssets: poseAssetsRef.current,
     animationFields: animationFieldsRef.current,
@@ -2956,6 +3023,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       case 'animation': enterClipEditor(assetId, tab.id); break;
       case 'stateMachine': if (assetId) openAnimController(assetId, tab.id); break;
       case 'script': enterScriptEditor(assetId, tab.id); break;
+      case 'particleSystem': if (assetId) enterParticleSystemEditor(assetId, tab.id); break;
       // A tileset tab is a pure 2D editor over the library record — nothing to build, so it is live already.
       case 'tileset': return !!tab.tilesetId && tilesetsRef.current.some(t => t.id === tab.tilesetId);
       case 'aiBrain': return !!tab.aiBrainId && aiBrainsRef.current.some(b => b.id === tab.aiBrainId);
@@ -4115,6 +4183,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     addAiBrain, updateAiBrain, setActiveTab, commitTab, clearTabDirty,
   });
 
+  // ---- Particle system editor ------------------------------------------------------------------------
+  const {
+    enterParticleSystemEditor, linkParticleSystemToNode, extractParticleSystemFromNode, saveParticleSystem,
+  } = useParticleSystemEditor({
+    instanceRef, particleSystemsRef, tabRuntimeRef, editorSceneRef, dirtyArmedRef, eventEmitter,
+    tabsRef, setTabs, setActiveTab, commitTab, withoutDirty, markTabDirty, clearTabDirty,
+    addParticleSystem, updateParticleSystem,
+  });
+
   // ---- Texture editor --------------------------------------------------------------------------------
   const { enterSoundEditor, saveSoundSample, previewSoundSettings } = useSoundEditor({
     soundSamplesRef, tabsRef, setTabs, updateSoundSample, setActiveTab, commitTab, clearTabDirty,
@@ -4791,7 +4868,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // ---- Saving: one action per tab, plus Save All ------------------------------------------------
   const {
     registerAnimationApply, registerTilesetApply, registerTextureApply, registerSoundApply,
-    registerAiBrainApply, registerRigApply, registerClipApply, saveTabById, runSave,
+    registerAiBrainApply, registerParticleSystemApply, registerRigApply, registerClipApply, saveTabById, runSave,
     saveActiveTab, saveAll, saveProjectToStorage,
   } = useSaving({
     tabsRef, dirtyTabsRef, activeTabIdRef, setSavingState,
@@ -5120,6 +5197,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           TextureManager.Instance.addTextureFromBase64(buildDecalIconDataURL(), {
             mipMap: false
           }, '__editor__decal_icon');
+          // Particle system and force field billboards (editorHelpers' ensureEffectIcon).
+          TextureManager.Instance.addTextureFromBase64(buildParticleIconDataURL(), {
+            mipMap: false
+          }, '__editor__particle_icon');
+          TextureManager.Instance.addTextureFromBase64(buildForceFieldIconDataURL(), {
+            mipMap: false
+          }, '__editor__forcefield_icon');
           eventEmitter.current.emit('TEXTURES_CHANGED');
 
           engine.setScene(editorSceneRef.current);
@@ -5180,6 +5264,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // is in force. Skipped in renderer mode, where the Renderer panel owns its own grid switch.
       if (editorMode !== 'renderer')
         instanceRef.current?.renderer.setGridVisible(isPlayMode ? vis.grid.runtime : vis.grid.editor);
+      // Particle preview is a property of the authored scene; the particle editor's own stage always
+      // previews (that is its whole job), and play mode always simulates regardless of the flag.
+      const liveScene = instanceRef.current?.scene;
+      if (liveScene && !isPlayMode && editorMode !== 'particleSystem') liveScene.particlePreview = vis.particles.editor;
       // A STAGING scene — the animation editors' preview stage — is lit and framed by the editor, not
       // authored, so it gets no helper icons at all: an exhaustive table, so a new mode has to decide
       // (see MODE_SHOWS_SCENE_HELPERS). Play is always the game's own scene.
@@ -5784,6 +5872,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     addRig, removeRig, updateRig,
     addTileset, removeTileset, updateTileset,
     addAiBrain, removeAiBrain, updateAiBrain,
+    addParticleSystem, removeParticleSystem, updateParticleSystem,
     addAnimController, removeAnimController, updateAnimController,
     addBoneMask, removeBoneMask, updateBoneMask,
     addPoseAsset, removePoseAsset, updatePoseAsset,
@@ -5794,10 +5883,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   });
   const assetLibraryValue = useMemo<AssetLibraryContextValue>(() => ({
     templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, rigs, tilesets, aiBrains,
-    animControllers, boneMasks, poseAssets,
+    particleSystems, animControllers, boneMasks, poseAssets,
     images, textures, audioSources, soundSamples, assetsLoaded, ...libraryActions,
   }), [templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, rigs, tilesets, aiBrains,
-       animControllers, boneMasks, poseAssets,
+       particleSystems, animControllers, boneMasks, poseAssets,
        images, textures, audioSources, soundSamples, assetsLoaded, libraryActions]);
 
   const documentActions = useStableActions({
@@ -5846,6 +5935,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     enterAnimationFieldEditor, createAnimationFieldForModel, saveAnimationField,
     enterSoundEditor, saveSoundSample, previewSoundSettings, registerSoundApply,
     enterAiBrainEditor, saveAiBrain, extractBrainFromController, linkBrainToController, registerAiBrainApply,
+    enterParticleSystemEditor, saveParticleSystem, linkParticleSystemToNode, extractParticleSystemFromNode,
+    registerParticleSystemApply,
     enterRigEditor, setRigPreviewModel, rigPreviewModelId, saveRig, modelsOnRig, registerRigApply,
     openAnimController,
     enterClipEditor, setClipPreviewModel, clipPreviewModelId, saveClip, saveClipAs, modelsForClip,
@@ -5859,6 +5950,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editingAnimationFieldId, animationFieldTargetId,
     editingSoundId,
     editingAiBrainId,
+    editingParticleSystemId,
     editingRigId,
     editingAnimationId,
     modelSession: activeTab.kind === 'model' ? (modelSessions[activeTab.id] ?? null) : null,
@@ -5871,7 +5963,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editingTemplateName, templateRootId, editingMaterialName,
     editingTerrainMaterialName, editingTerrainMaterialNode,
     stateMachineTargetId, stateMachineSourceId, stateMachineSourceScene, pendingAnimationImport, pendingRigPick,
-    editingAnimationFieldId, animationFieldTargetId, editingSoundId, editingAiBrainId, editingRigId,
+    editingAnimationFieldId, animationFieldTargetId, editingSoundId, editingAiBrainId, editingParticleSystemId, editingRigId,
     editingAnimationId,
     activeTab, modelSessions, pendingModelImport, sessionActions,
   ]);
@@ -6008,6 +6100,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       addAiBrain,
       removeAiBrain,
       updateAiBrain,
+      particleSystems,
+      addParticleSystem,
+      removeParticleSystem,
+      updateParticleSystem,
+      editingParticleSystemId,
+      enterParticleSystemEditor,
+      saveParticleSystem,
+      linkParticleSystemToNode,
+      extractParticleSystemFromNode,
+      registerParticleSystemApply,
       animControllers,
       addAnimController,
       removeAnimController,

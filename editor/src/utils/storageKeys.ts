@@ -31,6 +31,7 @@ export const KEYS = {
   animControllers: 'cleo_anim_controllers',
   boneMasks: 'cleo_bone_masks',
   poseAssets: 'cleo_pose_assets',
+  particleSystems: 'cleo_particle_systems',
   /**
    * The two halves of the image/texture split. Metadata only — image BYTES stay in the `textures`
    * IndexedDB object store, keyed by image id (see textureStore.ts), never in these arrays.
@@ -52,11 +53,12 @@ export const KEYS = {
 } as const;
 
 /** The asset libraries, as `usePersistedLibrary` and the bundle importer address them. */
-export type LibName = 'materials' | 'terrainMaterials' | 'templates' | 'models' | 'scripts' | 'animationFields' | 'animations' | 'rigs' | 'tilesets' | 'aiBrains' | 'animControllers' | 'boneMasks' | 'poseAssets' | 'images' | 'textures' | 'audioSources' | 'soundSamples';
+export type LibName = 'materials' | 'terrainMaterials' | 'templates' | 'models' | 'scripts' | 'animationFields' | 'animations' | 'rigs' | 'tilesets' | 'aiBrains' | 'animControllers' | 'boneMasks' | 'poseAssets' | 'images' | 'textures' | 'audioSources' | 'soundSamples' | 'particleSystems';
 
 export const LIB_NAMES: readonly LibName[] = [
   'materials', 'terrainMaterials', 'templates', 'models', 'scripts', 'animationFields', 'animations', 'rigs', 'tilesets',
   'aiBrains', 'animControllers', 'boneMasks', 'poseAssets', 'images', 'textures', 'audioSources', 'soundSamples',
+  'particleSystems',
 ];
 
 /**

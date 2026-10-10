@@ -28,6 +28,7 @@ Two kinds keep the real extension of the file their bytes arrived as; every othe
 | `rig` | `.rig` | A shared skeleton: its clips, retarget corrections, IK, sockets. |
 | `tileset` | `.tileset` | |
 | `aiBrain` | `.brain` | *(unreleased)* |
+| `particleSystem` | `.vfx` | Emitters, each a module stack plus a renderer. Embedded by value into Particle System nodes. *(unreleased)* |
 | `animController` | `.controller` | A shareable state machine: parameters, layers, action slots. *(unreleased)* |
 | `boneMask` | `.mask` | Per-bone weights, by bone name, on one rig. *(unreleased)* |
 | `pose` | `.pose` | Named static poses of one rig. *(unreleased)* |
@@ -57,9 +58,9 @@ old exports and the shipped example projects importable.
 Two bundle kinds exist: `'project'` (carries `mainSceneId`, `openSceneId`, `sceneMetas`, `prefs`,
 `projectName`) and `'assetpack'`.
 
-Each asset library is one JSON file under `libraries/`. Three are new *(unreleased)*:
-`animControllers.json`, `boneMasks.json` and `poseAssets.json`. All three are optional on read, so a
-bundle written before they existed imports as a project with none.
+Each asset library is one JSON file under `libraries/`. Four are new *(unreleased)*:
+`animControllers.json`, `boneMasks.json`, `poseAssets.json` and `particleSystems.json`. All four are
+optional on read, so a bundle written before they existed imports as a project with none.
 
 Audio sources and sound samples are carried **explicitly** rather than re-derived, because loop
 points, fades, bus assignment and effect racks cannot be recovered from a `.wav`. Images and
@@ -118,7 +119,10 @@ manifest contract is newer than itself.
 | 5 | Game-level shared animation clips |
 | 6 | Skinned joint indices and weights moved to blob chunks |
 | 7 | `NavMeshNode` *(unreleased — a v6 player has no such class, so `scene.navMeshes` comes back empty and path/patrol agents walk into geometry)* |
-| **8** | `DecalNode` *(unreleased — a v7 player has no such class, so every decal loads as a plain node and the game draws none of them)* |
+| 8 | `DecalNode` *(unreleased — a v7 player has no such class, so every decal loads as a plain node and the game draws none of them)* |
+| 9 | The landscape layer stack (`masksChunk`, base + paint layers, slot rules) |
+| 10 | Controller layers and action slots, pose states, clip events, skeleton sockets |
+| **11** | `ParticleSystemNode` and `ForceFieldNode` *(unreleased — a v10 player has no such classes, so every effect and force field loads as a plain node and the game draws and applies none of them)* |
 
 ### What a build strips
 
@@ -129,6 +133,8 @@ manifest contract is newer than itself.
 - **Unreferenced textures.** Only textures something actually points at are shipped.
 - **The AI brain library.** Brains are embedded on their controllers, so a published game contains
   no brain assets — see [AI brains](../editor/ai-brains.md).
+- **The particle system library.** Effects are embedded on their Particle System nodes in the same
+  way; only the sprite textures their emitters draw are shipped.
 
 Scripts are extracted and obfuscated, and terrain data is DEFLATE-compressed.
 

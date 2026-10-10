@@ -1435,7 +1435,7 @@ function sceneRefs(refs) {
     version: SCENE_REFS_VERSION,
     materialIds: [], modelIds: [], templateIds: [], terrainMaterialIds: [], tilesetIds: [],
     aiBrainIds: [], textureIds: [], scriptIds: [], animationFieldIds: [], foliageModelIds: [],
-    soundSampleIds: [], audioSourceIds: [], animationIds: [],
+    soundSampleIds: [], audioSourceIds: [], animationIds: [], particleSystemIds: [],
     ...refs,
   }
 }

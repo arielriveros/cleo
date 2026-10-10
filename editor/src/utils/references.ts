@@ -1,4 +1,4 @@
-import { Scene, CameraNode, isDerivedTextureId, isInlineTilesetId } from 'cleo'
+import { Scene, CameraNode, isDerivedTextureId, isInlineTilesetId, particleSystemReferences } from 'cleo'
 import { getNodeMaterial, getMaterialIdsOf, MaterialAsset } from './materials'
 import { getScreenMaterialIds } from './screenMaterials'
 import { collectTextureIds } from './nodeSubtree'
@@ -96,6 +96,12 @@ export function collectSceneTextureIds(
       const id = (un as any).textureId
       if (typeof id === 'string' && id) set.add(id)
     }
+    // Particle sprites: each emitter's renderer names its texture directly. Editor-owned nodes (the
+    // particle tab's preview) are skipped — what the editor stages is not the scene using a texture.
+    for (const pn of scene.particleSystems ?? []) {
+      if (pn.isEditorOwned) continue
+      for (const id of particleSystemReferences(pn.system).textures) set.add(id)
+    }
   }
   return set
 }
@@ -126,6 +132,12 @@ export function collectPublishedTextureIds(node: any, set: Set<string>): void {
     // A uiImage's texture id sits on its `ui` payload, not in a `textures` map. Missing it packs no
     // texture and the published game's UI images come back blank with nothing logged.
     if (typeof n?.ui?.textureId === 'string' && n.ui.textureId) set.add(n.ui.textureId)
+    // A particle node's sprite textures sit on each embedded emitter's renderer, not in a `textures` map.
+    // Missing them ships an effect whose billboards sample nothing — silently, in the published game only.
+    for (const e of n?.particleSystem?.system?.emitters ?? []) {
+      const id = e?.render?.textureId
+      if (typeof id === 'string' && id) set.add(id)
+    }
     for (const child of n?.children ?? []) walkTilesets(child)
   }
   walkTilesets(node)
@@ -259,6 +271,22 @@ export function collectReferencedAiBrainIds(scene: Scene | null | undefined): Se
   const set = new Set<string>()
   for (const controller of scene?.controllers ?? []) {
     if (controller.brainId) set.add(controller.brainId)
+  }
+  return set
+}
+
+/**
+ * PARTICLE SYSTEM asset ids a scene references.
+ *
+ * The brain arrangement exactly: the link is `particleSystemId` on the ParticleSystemNode, beside a full
+ * embedded copy of the effect, which is what actually plays. This set is only about which library
+ * entries the scene still points at. Editor-owned nodes are skipped — the particle tab's preview node is
+ * never linked, but nothing an editor put in a scene may count as the scene using an asset.
+ */
+export function collectReferencedParticleSystemIds(scene: Scene | null | undefined): Set<string> {
+  const set = new Set<string>()
+  for (const node of scene?.particleSystems ?? []) {
+    if (node.particleSystemId && !node.isEditorOwned) set.add(node.particleSystemId)
   }
   return set
 }
@@ -431,7 +459,8 @@ export function collectReferencedTerrainMaterialIds(scene: Scene | null | undefi
  * READ — it is all a closed scene has — but the reference viewer marks it partial rather than implying the
  * scene genuinely uses none of whatever the old build did not collect.
  */
-export const SCENE_REFS_VERSION = 1
+// 2: particle system links (`particleSystemIds`).
+export const SCENE_REFS_VERSION = 2
 
 /**
  * Everything a scene DIRECTLY references: what its placed nodes, terrain layers, tilemaps, sounds and
@@ -463,6 +492,7 @@ export function buildSceneRefs(
     terrainMaterialIds: [...collectReferencedTerrainMaterialIds(scene)],
     tilesetIds: [...collectReferencedTilesetIds(scene)],
     aiBrainIds: [...collectReferencedAiBrainIds(scene)],
+    particleSystemIds: [...collectReferencedParticleSystemIds(scene)],
     scriptIds: [...collectReferencedScriptIds(scene)],
     animationFieldIds: [...collectReferencedAnimationFieldIds(scene)],
     animControllerIds: [...collectReferencedAnimControllerIds(scene)],
@@ -492,6 +522,7 @@ export type SceneRefsShape = {
   terrainMaterialIds: string[]
   tilesetIds: string[]
   aiBrainIds: string[]
+  particleSystemIds: string[]
   textureIds: string[]
   scriptIds: string[]
   animationFieldIds: string[]

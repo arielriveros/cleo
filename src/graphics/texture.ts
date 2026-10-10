@@ -97,6 +97,8 @@ export interface TextureConfig {
      * constrains by dimension.
      */
     loadOnly?: boolean;
+    /** Rendered into or storage-written, never filtered. See `TextureFormatRequest.unfiltered`. */
+    unfiltered?: boolean;
 }
 
 /** The six images of a cubemap, in GL face order. Every face is required. */
@@ -176,7 +178,8 @@ export class Texture {
         // Format policy, including the float-to-RGBA8 fallback, lives in rhi/textureFormat.ts.
         const resolved = resolveTextureFormat(
             { usage: this._usage, precision: this._precision, channels: options?.channels,
-              format: options?.format, loadOnly: options?.loadOnly },
+              format: options?.format, loadOnly: options?.loadOnly,
+              unfiltered: options?.unfiltered },
             floatSupport(),
         );
         this._resolvedFormat = resolved.format;

@@ -43,6 +43,8 @@ import {
   CharacterNode,
   ControllerNode,
   NavMeshNode,
+  ParticleSystemNode,
+  ForceFieldNode,
 } from 'cleo'
 import type EventEmitter from '../../utils/eventEmitter'
 import type { ShapeDescription } from '../EngineContext'
@@ -60,7 +62,7 @@ import {
   DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon,
-  SoundIcon, AmbientSoundIcon, DecalIcon,
+  SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon,
 } from './nodeIcons'
 import { defaultDecalMaterial } from '../../utils/materials'
 
@@ -70,7 +72,7 @@ import { defaultDecalMaterial } from '../../utils/materials'
 export const NEW_NODE_MIME = 'text/cleo-new-node';
 
 export type AddCategory = 'common' | 'gameplay' | 'cameras' | 'lights' | 'audio' | 'sprites' | 'primitives' | 'complex'
-  | 'environment' | 'uiLayout' | 'uiCore' | 'uiWidgets';
+  | 'environment' | 'effects' | 'uiLayout' | 'uiCore' | 'uiWidgets';
 
 export const ADD_CATEGORIES: { value: AddCategory, label: string }[] = [
   { value: 'common', label: 'Common' },
@@ -83,6 +85,7 @@ export const ADD_CATEGORIES: { value: AddCategory, label: string }[] = [
   { value: 'primitives', label: 'Primitive Geometries' },
   { value: 'complex', label: 'Complex Geometries' },
   { value: 'environment', label: 'Environment' },
+  { value: 'effects', label: 'Effects' },
   // UI categories. Shown only in `ui` mode (see AddNew).
   { value: 'uiLayout', label: 'Layout' },
   { value: 'uiCore', label: 'Elements' },
@@ -350,6 +353,17 @@ export const ADD_ITEMS: AddItem[] = [
     // white, which reads as broken, and MaterialSlot's "Create Material" builds the asset from this one.
     id: 'decal', label: 'Decal', icon: DecalIcon, category: 'environment',
     create: async () => new DecalNode('decal', { size: [2, 1, 2], material: defaultDecalMaterial() }),
+  },
+  {
+    // Placeable: an effect plays where it is dropped. Starts with the default system (soft rising puffs)
+    // so it is visibly doing something the moment it lands; "Create asset" on its slot turns that into a
+    // reusable .vfx.
+    id: 'particleSystem', label: 'Particle System', icon: ParticlesIcon, category: 'effects',
+    create: async () => new ParticleSystemNode('particles'),
+  },
+  {
+    id: 'forceField', label: 'Force Field', icon: ForceFieldIcon, category: 'effects',
+    create: async () => new ForceFieldNode('force field', { kind: 'vortex', shape: 'sphere' }),
   },
   // Two menu entries, ONE node class, exactly like the three lights above: ambient and spatial differ in
   // how a sound is heard, not in what it is, so the mode lives in the node's payload.

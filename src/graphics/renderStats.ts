@@ -46,6 +46,10 @@ export interface RenderStats {
     stateChanges: number;
     /** Redundant GL state changes the GLState cache absorbed (a hit — the state already matched). */
     stateChangesSaved: number;
+    /** Particle pool slots drawn (capacity, live or not — the GPU alone knows how many are alive). */
+    particlesDrawn: number;
+    /** Particle simulation steps run (one dispatch or ping-pong draw per emitter per step). */
+    particleSteps: number;
     /** CPU time spent inside render() (ms), excluding occasional IBL bakes. */
     frameMs: number;
 }
@@ -71,6 +75,8 @@ export const frameStats: RenderStats = {
     shadedMpx: 0,
     stateChanges: 0,
     stateChangesSaved: 0,
+    particlesDrawn: 0,
+    particleSteps: 0,
     frameMs: 0,
 };
 
@@ -108,6 +114,8 @@ export function resetFrameStats(): void {
     frameStats.triangles = 0;
     frameStats.vertices = 0;
     frameStats.tilemapChunks = 0;
+    frameStats.particlesDrawn = 0;
+    frameStats.particleSteps = 0;
     frameStats.tilemapDraws = 0;
     frameStats.fullscreenPasses = 0;
     frameStats.shadedMpx = 0;

@@ -13,9 +13,9 @@ If you are new, read [Core concepts](../concepts.md) first, then
 | Page | Covers |
 |---|---|
 | [Interface](interface.md) | Menu bar, document tabs, the dockable panel layout, keyboard shortcuts, the console |
-| [Editor modes](modes.md) | All 17 modes, how each is entered, which panels it shows |
+| [Editor modes](modes.md) | All 18 modes, how each is entered, which panels it shows |
 | [Projects](projects.md) | Multiple projects, the examples gallery, importing and exporting |
-| [Assets](assets.md) | The asset explorer and all 18 asset kinds |
+| [Assets](assets.md) | The asset explorer and all 19 asset kinds |
 
 ### Building a scene
 
@@ -29,6 +29,7 @@ If you are new, read [Core concepts](../concepts.md) first, then
 | [Tilemaps and 2D](tilemap-2d.md) | 2D scenes, tilesets, tile painting, sprites |
 | [UI](ui.md) | Screen and world canvases, anchors, widgets, touch controls |
 | [Audio](audio.md) | Sound samples, emitters, buses, effects |
+| [Particles](particles.md) | `.vfx` effects, the module stack, collision, force fields, sub-emitters, custom code |
 
 ### Behaviour
 

@@ -23,7 +23,7 @@ import {
   collectReferencedAudioIds, collectReferencedScriptIds,
   collectReferencedAnimationFieldIds,
   collectReferencedTilesetIds,
-  collectReferencedAiBrainIds,
+  collectReferencedAiBrainIds, collectReferencedParticleSystemIds,
   collectReferencedAnimControllerIds, collectReferencedBoneMaskIds, collectReferencedPoseAssetIds,
 } from '../../utils/references'
 
@@ -127,6 +127,7 @@ export function useFileManagerBridge() {
       case 'animationField': return collectReferencedAnimationFieldIds(scene).has(entry.assetId)
       case 'tileset': return collectReferencedTilesetIds(scene).has(entry.assetId)
       case 'aiBrain': return collectReferencedAiBrainIds(scene).has(entry.assetId)
+      case 'particleSystem': return collectReferencedParticleSystemIds(scene).has(entry.assetId)
       case 'animController': return collectReferencedAnimControllerIds(scene).has(entry.assetId)
       case 'boneMask': return collectReferencedBoneMaskIds(scene).has(entry.assetId)
       case 'pose': return collectReferencedPoseAssetIds(scene).has(entry.assetId)

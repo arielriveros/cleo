@@ -3,7 +3,7 @@
 The editor is always in exactly one mode. The mode decides what the viewport is for and which panels
 are visible.
 
-There are **17**. Five are chosen from the top bar; the rest you enter by **opening an asset**, which
+There are **18**. Five are chosen from the top bar; the rest you enter by **opening an asset**, which
 also opens a document tab for it.
 
 ## Modes you choose
@@ -34,6 +34,7 @@ Landscape and Tilemap share one slot, chosen by the scene's authored dimension â
 | **Animation** | The Animation Editor button on a skinned model | Clips, state graph, blend spaces, IK, events. |
 | **Animation Field** | Opening an `.afield` | Authoring a 1D or 2D blend space. |
 | **AI Brain** | Opening a `.brain` | Behaviour, goal and fuzzy graphs. *(unreleased)* |
+| **Particle System** | Opening a `.vfx` | Emitters and their module stacks, previewed live. *(unreleased)* |
 | **Script** | Opening a `.script` | The code editor. |
 | **Tileset** | Opening a `.tileset` | Atlas slicing and per-tile metadata. |
 | **Texture** | Opening a `.tex` | Sampling settings, drawn as they apply. |
@@ -56,6 +57,7 @@ Landscape and Tilemap share one slot, chosen by the scene's authored dimension â
 | `animation` | Character + skeleton | Scene panel becomes **Skeleton**, plus **Clips**, **Variables**, **State Machine**. *Properties hidden* |
 | `animationField` | Character preview | **Field Settings** on the right, **Blend Space** plot at the bottom |
 | `aiBrain` | *(full-panel graph)* | The graph canvas fills the viewport area. Properties (titled *Brain*), Logger, Assets |
+| `particleSystem` | The effect over a ground plane | Properties (titled *Particle System*) holds the emitter stack; **Particle Preview** transport at the bottom. No tree, no gizmo |
 | `script` | *(full-panel editor)* | The code editor. Logger and Assets only |
 | `tileset` | *(full-panel editor)* | The slicing grid. Properties, titled *Tileset* |
 | `texture` | *(full-panel editor)* | The image as its settings say. Properties, titled *Texture* |
@@ -73,6 +75,9 @@ preview is therefore shown on its own terms rather than through your scene's blo
 and colour grading â€” which is what makes a material you tuned in a bright scene still readable when
 you open it.
 
+The particle tab is the one exception to the second half: it runs the post-processing chain, because
+an emissive effect's look is mostly its bloom. It still does not meter exposure.
+
 ## Notes on particular modes
 
 **Template mode** opens the prefab in a scene of its own. This is where to change anything inside a
@@ -84,6 +89,11 @@ three animation panels are the inspector there.
 **AI Brain mode** *(unreleased)* is new: the Behaviour, Goals and Fuzzy graphs used to be an overlay
 opened from a Controller's inspector, and are now a proper tab-backed editor over a reusable asset.
 See [AI brains](ai-brains.md).
+
+**Particle System mode** *(unreleased)* plays the effect on an editor-owned node at the origin, over a
+20 m ground plane that writes depth â€” so emitters using depth collision have a floor to bounce off.
+Nothing in that staging scene is saved; the tab saves the asset, and saving pushes the new effect into
+every open scene whose Particle System nodes link it.
 
 **Renderer and Input modes** deliberately show almost nothing. They are for judging a change against
 a live scene, so the scene gets the space.

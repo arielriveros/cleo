@@ -15,6 +15,7 @@ import type { AudioSourceAsset } from './audioSources'
 import type { SoundSampleAsset } from './soundSamples'
 import type { TilesetAsset } from './tilesets'
 import type { AiBrainAsset } from './aiBrains'
+import type { ParticleSystemAsset } from './particleSystems'
 import type { AnimControllerAsset } from './animationControllers'
 import type { BoneMaskAsset } from './boneMasks'
 import type { PoseAsset } from './poseAssets'
@@ -38,6 +39,7 @@ export interface LocalState {
   rigIds: Set<string>
   tilesetIds: Set<string>
   aiBrainIds: Set<string>
+  particleSystemIds: Set<string>
   animControllerIds: Set<string>
   boneMaskIds: Set<string>
   poseAssetIds: Set<string>
@@ -64,6 +66,7 @@ export interface MergeResult {
   rigs: RigAsset[]
   tilesets: TilesetAsset[]
   aiBrains: AiBrainAsset[]
+  particleSystems: ParticleSystemAsset[]
   animControllers: AnimControllerAsset[]
   boneMasks: BoneMaskAsset[]
   poseAssets: PoseAsset[]
@@ -92,6 +95,7 @@ export type Remaps = {
   rig: Map<string, string>
   tileset: Map<string, string>
   brain: Map<string, string>
+  vfx: Map<string, string>
   ctrl: Map<string, string>
   mask: Map<string, string>
   pose: Map<string, string>
@@ -135,6 +139,9 @@ export function remapDeep(obj: any, r: Remaps): void {
     // A controller's link to the AI brain asset it copied. Only the LINK moves: the machine, goals and
     // fuzzy model beside it are the embedded copy, which is inline data and must not be remapped.
     if (key === 'brainId') { obj[key] = sub(r.brain, val); continue }
+    // A particle node's link to the `.vfx` asset it copied. Same split as `brainId`: the `system` beside
+    // it is the embedded copy, walked on only so its emitters' texture and model links follow re-mints.
+    if (key === 'particleSystemId') { obj[key] = sub(r.vfx, val); continue }
     // A node machine's link to the animation controller it was instantiated from — the machine beside it
     // is the embedded copy and is remapped only for the references inside it.
     if (key === 'controllerId') { obj[key] = sub(r.ctrl, val); continue }
@@ -239,7 +246,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     manifest: bundle.manifest, scenes: bundle.scenes, libraries: bundle.libraries, vfs: bundle.vfs,
   }) as Omit<BundleData, 'textures'>
   // Textures are deliberately left out of that clone; keep the originals and remap their ids apart.
-  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), model: new Map(), script: new Map(), afield: new Map(), anim: new Map(), rig: new Map(), tileset: new Map(), brain: new Map(), ctrl: new Map(), mask: new Map(), pose: new Map(), audio: new Map(), sound: new Map() }
+  const r: Remaps = { tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(), model: new Map(), script: new Map(), afield: new Map(), anim: new Map(), rig: new Map(), tileset: new Map(), brain: new Map(), vfx: new Map(), ctrl: new Map(), mask: new Map(), pose: new Map(), audio: new Map(), sound: new Map() }
 
   // 1) Textures first, so their remaps are known before rewriting references.
   const textures: BundleTexture[] = []
@@ -271,6 +278,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   for (const g of data.libraries.rigs ?? []) if (local.rigIds.has(g.id)) r.rig.set(g.id, cryptoRandomId())
   for (const t of data.libraries.tilesets ?? []) if (local.tilesetIds.has(t.id)) r.tileset.set(t.id, cryptoRandomId())
   for (const b of data.libraries.aiBrains ?? []) if (local.aiBrainIds.has(b.id)) r.brain.set(b.id, cryptoRandomId())
+  for (const p of data.libraries.particleSystems ?? []) if (local.particleSystemIds.has(p.id)) r.vfx.set(p.id, cryptoRandomId())
   for (const c of data.libraries.animControllers ?? []) if (local.animControllerIds.has(c.id)) r.ctrl.set(c.id, cryptoRandomId())
   for (const m of data.libraries.boneMasks ?? []) if (local.boneMaskIds.has(m.id)) r.mask.set(m.id, cryptoRandomId())
   for (const p of data.libraries.poseAssets ?? []) if (local.poseAssetIds.has(p.id)) r.pose.set(p.id, cryptoRandomId())
@@ -294,6 +302,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   const rigs = (data.libraries.rigs ?? []).map(g => ({ ...g, id: sub(r.rig, g.id) }))
   const tilesets = (data.libraries.tilesets ?? []).map(t => ({ ...t, id: sub(r.tileset, t.id) }))
   const aiBrains = (data.libraries.aiBrains ?? []).map(b => ({ ...b, id: sub(r.brain, b.id) }))
+  const particleSystems = (data.libraries.particleSystems ?? []).map(p => ({ ...p, id: sub(r.vfx, p.id) }))
   const animControllers = (data.libraries.animControllers ?? []).map(c => ({ ...c, id: sub(r.ctrl, c.id) }))
   const boneMasks = (data.libraries.boneMasks ?? []).map(m => ({ ...m, id: sub(r.mask, m.id) }))
   const poseAssets = (data.libraries.poseAssets ?? []).map(p => ({ ...p, id: sub(r.pose, p.id) }))
@@ -310,6 +319,8 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
   for (const c of animControllers) remapDeep(c, r)
   for (const m of boneMasks) remapDeep(m, r)
   for (const p of poseAssets) remapDeep(p, r)
+  // Each emitter's renderer names a sprite texture and a mesh model; both follow their libraries' re-mints.
+  for (const p of particleSystems) remapDeep(p, r)
   // Rigs carry references two ways. `animationIds` is a value list, which `remapDeep` handles; but
   // `retargets` is keyed BY SOURCE RIG ID, and remapDeep only ever rewrites values — so a merged bundle
   // would keep every correction under a key naming a rig that no longer exists, silently losing them.
@@ -369,6 +380,7 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
       : e.kind === 'animationField' ? r.afield
       : e.kind === 'tileset' ? r.tileset
       : e.kind === 'aiBrain' ? r.brain
+      : e.kind === 'particleSystem' ? r.vfx
       : e.kind === 'animController' ? r.ctrl
       : e.kind === 'boneMask' ? r.mask
       : e.kind === 'pose' ? r.pose
@@ -386,5 +398,5 @@ export function planMerge(bundle: BundleData, local: LocalState): MergeResult {
     vfsEntries.push({ ...e, path, assetId })
   }
 
-  return { materials, terrainMaterials, templates, models, scripts, animationFields, animations, rigs, tilesets, aiBrains, animControllers, boneMasks, poseAssets, scenes, textures, audio, audioSources, soundSamples, vfsFolders, vfsEntries }
+  return { materials, terrainMaterials, templates, models, scripts, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, scenes, textures, audio, audioSources, soundSamples, vfsFolders, vfsEntries }
 }

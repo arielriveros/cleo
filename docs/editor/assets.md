@@ -1,7 +1,7 @@
 # Assets
 
 The **Assets** panel is one file manager over every library in the project, with real folders. All
-18 asset kinds live in it.
+19 asset kinds live in it.
 
 ## The panel
 
@@ -9,7 +9,7 @@ A single toolbar row:
 
 | Control | Does |
 |---|---|
-| **+ Add ▾** | Material, Landscape Material, Template, Script, Tileset, **AI Brain (Machine)**, **AI Brain (Goals)**, **Animation Controller**, Sound, Animation, Scene, Folder, Import Files… |
+| **+ Add ▾** | Material, Landscape Material, Template, Script, Tileset, **AI Brain (Machine)**, **AI Brain (Goals)**, **Particle System**, **Animation Controller**, Sound, Animation, Scene, Folder, Import Files… |
 | **Search** | Filters by name. |
 | **Audit** | Flags assets a library holds but the explorer is not showing, and orphan entries pointing at deleted assets. Carries a warning badge when either exists. |
 | **Details** | Toggles the details pane. |
@@ -20,7 +20,7 @@ template. Right-click empty space for **New folder**.
 
 Folders are yours to arrange; nothing depends on where an asset sits.
 
-## The 18 kinds
+## The 19 kinds
 
 | Kind | Ext | Created by | Edited in | Used by |
 |---|---|---|---|---|
@@ -39,6 +39,7 @@ Folders are yours to arrange; nothing depends on where an asset sits.
 | **Pose Asset** | `.pose` | Saving a pose in the clip editor, or **+ New pose asset** in the rig editor's **Poses** section | Rig mode, **Poses** section | clip pose offsets, controller pose states |
 | **Animation Field** | `.afield` | Model inspector, or **+ Add** | Animation Field mode | a state in a state machine |
 | **AI Brain** | `.brain` | **+ Add ▸ AI Brain (Machine \| Goals)** | [AI Brain mode](ai-brains.md) | linked from a Controller |
+| **Particle System** | `.vfx` | **+ Add ▸ Particle System**, or **Create asset from this effect** on a Particle System node | [Particle System mode](modes.md) | linked from a Particle System node, which embeds a copy |
 | **Tileset** | `.tileset` | **+ Add** (pick an atlas) | Tileset mode | tilemap layers, sprites |
 | **Audio source** | real | Import / drop | *no editor* | backs Sound samples |
 | **Sound sample** | `.sound` | **+ Add**, or derived | [Sound mode](audio.md) | sound nodes |
@@ -58,7 +59,8 @@ asset.
 
 **Delete** confirms with a consequence line saying what will actually happen — for example, deleting
 a brain says *"controllers keep the brain they copied, but stop tracking this asset"*. An animation
-controller works the same way: characters keep the machine they copied. A bone mask or a pose does
+controller works the same way: characters keep the machine they copied, and so does a particle
+system: nodes keep playing the effect they copied. A bone mask or a pose does
 not — a layer whose mask is deleted stops affecting anything, and a state holding a deleted pose
 holds nothing.
 
@@ -67,7 +69,8 @@ original (two textures with different sampling over one image); images and audio
 bytes.
 
 **Thumbnails** are generated for materials, terrain materials and models — the kinds that have
-something to point a camera at. A brain, a script or a tileset shows its kind icon instead.
+something to point a camera at. A brain, a particle system, a script or a tileset shows its kind icon
+instead.
 
 ## Textures
 
@@ -108,6 +111,7 @@ to acquire either.
 | A script | A node in the tree | Attaches it |
 | A tileset | A sprite node's slot | Assigns it |
 | A brain | A Controller's Brain slot | Links it |
+| A particle system | A Particle System node's **Effect** slot | Copies the effect onto the node and links it |
 | An animation controller | A character's **Animation** section | Runs it on that character |
 | A bone mask | A controller layer's or action slot's **Mask** row | Sets the mask |
 | A pose asset | A state's **Plays** row | Makes the state hold that asset's first pose |

@@ -99,3 +99,49 @@ export function buildSoundIconDataURL(): string {
   }
   return canvas.toDataURL('image/png');
 }
+
+// Rasterise the particle glyph (dots fanning up out of an emitter point, matching the scene tree's
+// ParticlesIcon) for a particle system's billboard.
+export function buildParticleIconDataURL(): string {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+  ctx.strokeStyle = 'white';
+  ctx.fillStyle = 'white';
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  const dot = (x: number, y: number, r: number, fill: boolean) => {
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+    if (fill) ctx.fill(); else ctx.stroke();
+  };
+  dot(32, 54, 5, true);
+  dot(16, 28, 5, false); dot(32, 18, 6, false); dot(48, 27, 4.5, false);
+  dot(24, 8, 3, true); dot(44, 9, 3, true);
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(32, 48); ctx.lineTo(19, 33);
+  ctx.moveTo(32, 48); ctx.lineTo(32, 25);
+  ctx.moveTo(32, 48); ctx.lineTo(45, 32);
+  ctx.stroke();
+  return canvas.toDataURL('image/png');
+}
+
+// Rasterise the force-field glyph (wind lines curling round a centre, matching ForceFieldIcon).
+export function buildForceFieldIconDataURL(): string {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = 5;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(6, 20); ctx.lineTo(36, 20); ctx.arc(36, 13, 7, Math.PI / 2, -Math.PI, true);
+  ctx.moveTo(6, 32); ctx.lineTo(48, 32); ctx.arc(48, 41, 9, -Math.PI / 2, Math.PI, false);
+  ctx.moveTo(6, 44); ctx.lineTo(24, 44);
+  ctx.stroke();
+  return canvas.toDataURL('image/png');
+}

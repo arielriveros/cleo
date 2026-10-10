@@ -40,6 +40,9 @@ export type EditorSessionsContextValue = Pick<EngineValue,
   // AI brain (a behaviour machine or a goal graph, plus the fuzzy model it reads)
   | 'enterAiBrainEditor' | 'saveAiBrain' | 'editingAiBrainId'
   | 'extractBrainFromController' | 'linkBrainToController' | 'registerAiBrainApply'
+  // Particle system (a `.vfx` effect: emitters and their module stacks, previewed on a ground plane)
+  | 'enterParticleSystemEditor' | 'saveParticleSystem' | 'editingParticleSystemId'
+  | 'linkParticleSystemToNode' | 'extractParticleSystemFromNode' | 'registerParticleSystemApply'
   // Rig (a shared skeleton: its clips, its retarget corrections and its IK setup)
   | 'enterRigEditor' | 'setRigPreviewModel' | 'rigPreviewModelId' | 'saveRig' | 'modelsOnRig'
   | 'editingRigId' | 'registerRigApply'

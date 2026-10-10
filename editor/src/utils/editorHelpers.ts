@@ -18,6 +18,8 @@ import {
   markEditorOnly,
   isEditorOwnedName,
   NavMeshNode,
+  ParticleSystemNode,
+  ForceFieldNode,
 } from 'cleo';
 import type { TriangleSoup } from 'cleo';
 import { CameraGeometry } from './EditorModels';
@@ -72,6 +74,8 @@ const NAVPREVIEW_PREFIX = '__debug__navpreview_';
 
 const DECAL_ICON = '__editor__DecalHelper';
 const DECALBOX_PREFIX = '__debug__decalbox_';
+const EFFECT_ICON = '__editor__EffectIcon';
+const EFFECTSHAPE_PREFIX = '__debug__effectshape_';
 
 // Per-scene cache of the last-built shapes signature for each body/trigger id.
 const shapeSignatures = new WeakMap<Scene, Map<string, string>>();
@@ -364,6 +368,84 @@ function ensureDecalIcon(decal: DecalNode) {
     if (Math.abs(icon.position[1] - top) > 1e-5) icon.setPosition([0, top, 0]);
   };
   decal.addChild(icon);
+}
+
+// A billboard under a particle system or force field: neither draws anything of its own while idle (or
+// ever, for a field), so this is how you see — and click — where one is. Picked through the node's
+// `pickBox`, a small box at exactly this spot, never through its bounds.
+function ensureEffectIcon(node: ParticleSystemNode | ForceFieldNode) {
+  if (node.getChildByName(EFFECT_ICON).length) return;
+  const particle = node instanceof ParticleSystemNode;
+  const icon = chrome(new SpriteNode(EFFECT_ICON, Sprite.fromTexture(
+    particle ? '__editor__particle_icon' : '__editor__forcefield_icon',
+    { tint: particle ? [1, 0.55, 0.3] : [0.45, 0.85, 1] })));
+  icon.setUniformScale(0.5);
+  node.addChild(icon);
+}
+
+/** Line pairs for a unit box (half extent 0.5) and for three unit-radius great circles. */
+function unitBoxLines(): { positions: [number, number, number][]; indices: number[] } {
+  const positions: [number, number, number][] = [];
+  for (let i = 0; i < 8; i++) positions.push([(i & 1) ? 0.5 : -0.5, (i & 2) ? 0.5 : -0.5, (i & 4) ? 0.5 : -0.5]);
+  const indices: number[] = [];
+  for (let i = 0; i < 8; i++) for (const bit of [1, 2, 4]) if (!(i & bit)) indices.push(i, i | bit);
+  return { positions, indices };
+}
+
+function unitSphereLines(segments = 48): { positions: [number, number, number][]; indices: number[] } {
+  const positions: [number, number, number][] = [];
+  const indices: number[] = [];
+  for (let axis = 0; axis < 3; axis++) {
+    const base = positions.length;
+    for (let i = 0; i < segments; i++) {
+      const a = (i / segments) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+      positions.push(axis === 0 ? [0, c, s] : axis === 1 ? [c, 0, s] : [c, s, 0]);
+      indices.push(base + i, base + (i + 1) % segments);
+    }
+  }
+  return { positions, indices };
+}
+
+function wireModel(name: string, lines: { positions: [number, number, number][]; indices: number[] },
+                   color: [number, number, number]): ModelNode {
+  // Normals and uvs only to satisfy the VAO stride — see ensureDecalBox.
+  const geometry = new Geometry(lines.positions, lines.positions.map(() => [0, 1, 0] as [number, number, number]),
+    lines.positions.map(() => [0, 0] as [number, number]), undefined, undefined, lines.indices, false);
+  return chrome(new ModelNode(name, new Model(geometry, Material.Basic({ color }, { wireframe: true, castShadow: false }))));
+}
+
+/**
+ * The SELECTED effect's extent: a particle system's fixed bounds (what culling and selection use — the
+ * one thing an author must size by eye), or a force field's sphere or box. Top-level and re-placed every
+ * frame, like the decal box, so the transform gizmo and inspector edits are followed.
+ */
+function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNode) {
+  const sphere = node instanceof ForceFieldNode && node.shape === 'sphere';
+  const name = `${EFFECTSHAPE_PREFIX}${node.id}:${sphere ? 's' : 'b'}`;
+  let existing = scene.getNodesByName(name)[0] as ModelNode | undefined;
+  if (!existing) {
+    existing = wireModel(name, sphere ? unitSphereLines() : unitBoxLines(),
+      node instanceof ParticleSystemNode ? [1, 0.55, 0.3] : [0.45, 0.85, 1]);
+    scene.addNode(existing);
+  }
+  const helper = existing;
+  const place = () => {
+    if (node instanceof ParticleSystemNode) {
+      const { min, max } = node.getBoundingBox();
+      helper.setPosition([(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2])
+            .setScale([max[0] - min[0], max[1] - min[1], max[2] - min[2]]);
+      return;
+    }
+    const m = node.worldTransform;
+    const scale = Math.max(Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10]));
+    helper.setPosition(node.worldPosition);
+    if (sphere) helper.setUniformScale(node.radius * scale);
+    else helper.setScale([node.extents[0] * 2 * Math.hypot(m[0], m[1], m[2]),
+                          node.extents[1] * 2 * Math.hypot(m[4], m[5], m[6]),
+                          node.extents[2] * 2 * Math.hypot(m[8], m[9], m[10])]);
+  };
+  place();
+  helper.onUpdate = place;
 }
 
 /**
@@ -845,6 +927,10 @@ export function reconcileEditorHelpers(
       const existing = node.getChildByName(DECAL_ICON)[0];
       if (show('decals') && !existing) ensureDecalIcon(node);
       else if (!show('decals') && existing) node.removeChild(existing);
+    } else if (node instanceof ParticleSystemNode || node instanceof ForceFieldNode) {
+      const existing = node.getChildByName(EFFECT_ICON)[0];
+      if (show('effects') && !existing) ensureEffectIcon(node);
+      else if (!show('effects') && existing) node.removeChild(existing);
     } else if (node instanceof SoundNode) {
       // Reconciled every pass rather than only on absence: the falloff sphere follows `maxDistance`,
       // which the inspector changes while the helper already exists.
@@ -906,6 +992,11 @@ export function reconcileEditorHelpers(
   const decalFrame = planDecalBox(selected);
   if (decalFrame) ensureDecalBox(scene, selected as DecalNode, decalFrame);
 
+  // 4e. The SELECTED particle system's bounds, or force field's shape — selection-scoped like 4d. A
+  // global field has no extent to draw.
+  if (selected instanceof ParticleSystemNode || (selected instanceof ForceFieldNode && selected.shape !== 'global'))
+    ensureEffectShape(scene, selected);
+
   // 5. Trigger wireframes (green), following the target's world transform.
   if (show('triggers')) {
     for (const [id, trigger] of triggers) {
@@ -953,6 +1044,14 @@ export function reconcileEditorHelpers(
       // Selection-gated like 4d: gone the moment the decal is deselected, deleted or converted.
       const id = node.name.slice(DECALBOX_PREFIX.length);
       if (id !== selectedId || !planDecalBox(scene.getNodeById(id))) drop();
+    } else if (node.name.startsWith(EFFECTSHAPE_PREFIX)) {
+      // Selection-gated like 4e. The suffix records which shape was built, so a field switched between
+      // sphere and box drops its old wireframe instead of rescaling the wrong one.
+      const [id, kind] = node.name.slice(EFFECTSHAPE_PREFIX.length).split(':');
+      const owner = scene.getNodeById(id);
+      const want = owner instanceof ParticleSystemNode ? 'b'
+        : owner instanceof ForceFieldNode && owner.shape !== 'global' ? (owner.shape === 'sphere' ? 's' : 'b') : null;
+      if (id !== selectedId || want !== kind) drop();
     } else if (node.name.startsWith(NAVMESH_PREFIX)) {
       const id = node.name.slice(NAVMESH_PREFIX.length);
       const owner = scene.getNodeById(id);

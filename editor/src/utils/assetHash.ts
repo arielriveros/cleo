@@ -7,6 +7,7 @@ import type { AnimationAsset } from './animationAssets'
 import type { RigAsset } from './rigAssets'
 import type { TilesetAsset } from './tilesets'
 import type { AiBrainAsset } from './aiBrains'
+import type { ParticleSystemAsset } from './particleSystems'
 import type { AnimControllerAsset } from './animationControllers'
 import type { BoneMaskAsset } from './boneMasks'
 import type { PoseAsset } from './poseAssets'
@@ -169,6 +170,12 @@ export interface AssetLibs {
   boneMasks?: BoneMaskAsset[]
   poseAssets?: PoseAsset[]
   animationFields?: AnimationFieldAsset[]
+  /**
+   * Particle systems, embedded by value into ParticleSystemNodes. Carried so a resync can refresh a closed
+   * scene's stale copies; not hashed — the embedded copy is compared by value instead, and an effect is
+   * not part of the node tree a resync rebuilds.
+   */
+  particleSystems?: ParticleSystemAsset[]
 }
 
 /** The hash-map key for an asset of a given kind. Kept in one place so save and resync agree. */

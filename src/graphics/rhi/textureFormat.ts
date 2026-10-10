@@ -22,6 +22,13 @@ export interface TextureFormatRequest {
      * it would quantise every light position in the scene to 256 levels.
      */
     loadOnly?: boolean;
+    /**
+     * RENDERED INTO or storage-written, but never FILTERED — read back with `textureLoad` only. Such a
+     * texture needs float rendering and nothing else, so it falls back only when the device cannot
+     * render floats at all. The particle state textures are this shape: WebGPU's `float32-filterable`
+     * is optional and routinely absent, and demanding it would turn every particle position into 8 bits.
+     */
+    unfiltered?: boolean;
 }
 
 /** The device's float-texture capabilities, from {@link DeviceCapabilities}. */
@@ -62,7 +69,8 @@ export function resolveTextureFormat(
 
     const requested: TextureFormat = request.format ?? inferFormat(request);
     const fallback = FLOAT_FALLBACK[requested];
-    if (fallback && !request.loadOnly && !floatUsable(support))
+    const usable = request.unfiltered ? support.floatRenderable : floatUsable(support);
+    if (fallback && !request.loadOnly && !usable)
         return { format: fallback, requested, downgraded: true };
 
     return { format: requested, requested, downgraded: false };

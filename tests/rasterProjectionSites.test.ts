@@ -86,6 +86,8 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             // from the jitter than anything else here.
             '_nudgedProjection',
             '_overdrawPass',
+            // GPU particles: drawn after the transparents, in both pipelines and in the 2D pass.
+            '_particleDrawFrame',
             '_renderSelectionMask',
             '_renderSprite',
         ].sort());

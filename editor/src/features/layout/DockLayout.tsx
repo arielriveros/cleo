@@ -22,6 +22,7 @@ const OLD_DOCK_LAYOUT_KEYS = [
   'cleo_dock_layout_v1', 'cleo_dock_layout_v2', 'cleo_dock_layout_v3', 'cleo_dock_layout_v4',
   'cleo_dock_layout_v5', 'cleo_dock_layout_v6', 'cleo_dock_layout_v7', 'cleo_dock_layout_v8',
   'cleo_dock_layout_v9', 'cleo_dock_layout_v10', 'cleo_dock_layout_v14', 'cleo_dock_layout_v15',
+  'cleo_dock_layout_v18',
 ];
 // 13: the AI modes came and went; a tree stored at 12 still references panels that no longer exist,
 // and one from 11 predates them. A stored tree cannot gain or lose a panel on its own, so every saved
@@ -35,7 +36,9 @@ const OLD_DOCK_LAYOUT_KEYS = [
 // 18: those two panels moved apart — Layers into a group of its own under the right rail, because
 // painting needs the tool AND the layer it paints into on screen at the same time, and a tree stored at
 // 17 has them tabbed behind Properties where the material slots could not be found.
-const LAYOUT_VERSION = 18;
+// 19: the particle-system mode arrived with a transport panel of its own in the bottom strip; a tree
+// stored at 18 has no `particleTransport` and no arrangement for the mode.
+const LAYOUT_VERSION = 19;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -88,6 +91,12 @@ const CLIP_PANELS = ['clipTracks', 'clipTimeline'] as const;
  */
 const ANIMATION_FIELD_PANELS = ['animField', 'animFieldPlot'] as const;
 
+/**
+ * Particle-editor panels: the preview transport, down in the bottom strip with Logger and Assets — a work
+ * surface, like the clip timeline. Its emitter stack needs no panel of its own: it lives in Properties.
+ */
+const PARTICLE_PANELS = ['particleTransport'] as const;
+
 /** Tilemap-editor panels: the tile palette and the layer stack. Shown only in tilemap mode. */
 const TILEMAP_PANELS = ['tilePalette', 'tilemapLayers'] as const;
 
@@ -106,7 +115,7 @@ const INPUT_PANELS = ['inputMap'] as const;
 
 const CHROME_PANELS = [
   'scene', 'properties', 'scripts', 'physics', 'logger', 'assets',
-  ...STATE_MACHINE_PANELS, ...ANIMATION_FIELD_PANELS, ...CLIP_PANELS, ...TILEMAP_PANELS, ...LANDSCAPE_PANELS,
+  ...STATE_MACHINE_PANELS, ...ANIMATION_FIELD_PANELS, ...CLIP_PANELS, ...PARTICLE_PANELS, ...TILEMAP_PANELS, ...LANDSCAPE_PANELS,
   ...ADD_PANELS,
 ] as const;
 
@@ -117,6 +126,7 @@ const PANEL_TITLES: Record<string, string> = {
   animClips: 'Clips', animVariables: 'Variables', animStateMachine: 'State Machine',
   animField: 'Field Settings', animFieldPlot: 'Blend Space',
   clipTracks: 'Clip', clipTimeline: 'Timeline',
+  particleTransport: 'Particle Preview',
   tilePalette: 'Tiles', tilemapLayers: 'Layers',
   landscapeTools: 'Landscape Tools', landscapeLayers: 'Landscape Layers',
   performance: 'Performance', rendererSettings: 'Renderer Settings',
@@ -130,6 +140,7 @@ function panelTitle(id: string, mode: EditorMode): string {
     if (mode === 'terrainMaterial') return 'Landscape Material';
     if (mode === 'tileset') return 'Tileset';
     if (mode === 'aiBrain') return 'Brain';
+    if (mode === 'particleSystem') return 'Particle System';
     if (mode === 'texture') return 'Texture';
     if (mode === 'soundSample') return 'Sound';
     if (mode === 'rig') return 'Rig';
@@ -234,6 +245,12 @@ function buildDefaultLayout(api: DockviewApi) {
     id: 'clipTimeline', component: 'clipTimeline', title: PANEL_TITLES['clipTimeline'], renderer: 'always',
     position: { referencePanel: 'logger', direction: 'within' },
   });
+  // The particle transport joins them. Not `renderer: 'always'`: the preview scene plays on the engine's
+  // own clock, so nothing stops if the panel unmounts behind another bottom tab.
+  api.addPanel({
+    id: 'particleTransport', component: 'particleTransport', title: PANEL_TITLES['particleTransport'],
+    position: { referencePanel: 'logger', direction: 'within' },
+  });
   // Honour the remembered bottom tab; this is also the fallback when restoring a stashed layout fails.
   // animationField mode overrides this in restoreBottomTab, which runs after every layout build.
   (loadBottomTab() === 'assets' ? assets : logger).api.setActive();
@@ -310,6 +327,7 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
   if (mode !== 'tilemap') for (const id of TILEMAP_PANELS) hidden.add(id);
   if (mode !== 'landscape') for (const id of LANDSCAPE_PANELS) hidden.add(id);
   if (mode !== 'animation') for (const id of CLIP_PANELS) hidden.add(id);
+  if (mode !== 'particleSystem') for (const id of PARTICLE_PANELS) hidden.add(id);
 
   const hide = (...ids: readonly string[]) => { for (const id of ids) hidden.add(id); };
 
@@ -361,6 +379,11 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
     case 'aiBrain':
       hide(...ADD_PANELS, 'scene', 'scripts', 'physics');
       break;
+    // A particle tab previews ONE editor-owned node: there is no tree worth browsing, and Properties hosts
+    // the emitter/module stack (see PropertiesPanel) rather than a node inspector.
+    case 'particleSystem':
+      hide(...ADD_PANELS, 'scene', 'scripts', 'physics');
+      break;
     // A script tab is a pure code editor rendered over the viewport.
     case 'script':
       hide(...ADD_PANELS, 'scene', 'properties', 'scripts', 'physics');
@@ -402,6 +425,7 @@ export default function DockLayout() {
   const restoreBottomTab = useCallback((dock: DockviewApi) => {
     const want = editorMode === 'animationField' ? 'animFieldPlot'
       : editorMode === 'animation' ? 'clipTimeline'
+      : editorMode === 'particleSystem' ? 'particleTransport'
       : bottomTabRef.current;
     const panel = dock.getPanel(want);
     // Read the group directly rather than activeBottomTab(), which only knows the two persisted ids.

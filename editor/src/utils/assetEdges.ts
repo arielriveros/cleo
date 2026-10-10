@@ -1,4 +1,4 @@
-import { isDerivedTextureId, isInlineTilesetId } from 'cleo'
+import { isDerivedTextureId, isInlineTilesetId, particleSystemReferences } from 'cleo'
 import type { AssetRef } from 'cleo'
 import { isBinaryPayload } from './binaryPayload'
 import type { AssetKind } from './vfs'
@@ -16,8 +16,8 @@ import { SCENE_REFS_VERSION } from './references'
 // branch. `assetEdgeCoverage.test.ts` asserts the two never drift apart: a reference field added there and
 // missed here would make the graph silently under-report, which is worse than not having it.
 //
-// Engine-light on purpose: the only `cleo` values imported are two pure string predicates, so this module
-// unit-tests with no GL context (as animationAssets.ts does).
+// Engine-light on purpose: the only `cleo` values imported are two pure string predicates and the pure
+// particle-reference reader, so this module unit-tests with no GL context (as animationAssets.ts does).
 
 /** One outgoing reference: the asset pointed at, and the field the pointer sits in. */
 export type EdgeSpec = { to: AssetRef; field: string }
@@ -90,6 +90,9 @@ export function walkRefs(obj: any, out: EdgeSpec[]): void {
     // A controller's link to the brain asset it copied. Only the link: the machine/goals/fuzzy beside it
     // are the embedded copy.
     if (key === 'brainId') { push(out, 'aiBrain', val, key); continue }
+    // A particle node's link to the `.vfx` asset it copied. Same shape as `brainId`: the `system` beside
+    // it is the embedded copy, walked on for the sprite textures and mesh models its emitters draw.
+    if (key === 'particleSystemId') { push(out, 'particleSystem', val, key); continue }
     // A node machine's link to the animation controller it was instantiated from. The machine around it
     // is the embedded copy, walked on for the references it holds itself.
     if (key === 'controllerId') { push(out, 'animController', val, key); continue }
@@ -196,6 +199,15 @@ export function edgesOfAsset(kind: AssetKind, asset: any): EdgeSpec[] {
     // records `brainId` as the back-link, so the reference runs the other way.
     case 'aiBrain':
       break
+    // An effect draws sprites and meshes: each emitter's renderer names at most one texture and one model.
+    // Read through the engine's own reader rather than walkRefs, so the graph and the engine agree on what
+    // an emitter actually uses (a disabled emitter still counts — it is one toggle from drawing).
+    case 'particleSystem': {
+      const refs = particleSystemReferences(asset.system ?? { emitters: [] })
+      for (const id of refs.textures) push(out, 'texture', id, 'render.textureId')
+      for (const id of refs.models) push(out, 'model', id, 'render.modelId')
+      break
+    }
     // A controller's skeleton, plus what its machine names: blend spaces and poses on any state (base and
     // layers alike) and masks on layers and slots. walkRefs reaches all of it — a machine carries no
     // keyframe payload, so the generic walk is cheap here.
@@ -319,6 +331,7 @@ export function edgesOfScene(refs: SceneRefs | null | undefined): EdgeSpec[] {
   each(refs.terrainMaterialIds, 'terrainMaterial', SCENE_LINK_FIELD.terrainMaterial)
   each(refs.tilesetIds, 'tileset', SCENE_LINK_FIELD.tileset)
   each(refs.aiBrainIds, 'aiBrain', SCENE_LINK_FIELD.aiBrain)
+  each(refs.particleSystemIds, 'particleSystem', SCENE_LINK_FIELD.particleSystem)
   each(refs.textureIds, 'texture', SCENE_LINK_FIELD.texture)
   each(refs.scriptIds, 'script', SCENE_LINK_FIELD.script)
   each(refs.animationFieldIds, 'animationField', SCENE_LINK_FIELD.animationField)
@@ -352,6 +365,7 @@ const SCENE_LINK_FIELD: Record<AssetKind, string> = {
   terrainMaterial: 'layer.materialId',
   tileset: 'tilesetId',
   aiBrain: 'brainId',
+  particleSystem: 'particleSystemId',
   animationField: 'state.fieldId',
   animController: 'stateMachine.controllerId',
   boneMask: 'layer.maskId',

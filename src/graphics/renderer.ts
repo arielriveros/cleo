@@ -141,6 +141,9 @@ import { Material, CustomMaterial } from './material';
 import { ensureCustomShader, customShaderReady, customShaderModules, customForwardTypes, screenShaderResources, screenUserSamplerNames, customShaderResources } from './systems/customShaders';
 import { TexturePacker } from './systems/texturePacker';
 import { MeshDisplacer } from './systems/meshDisplacer';
+import { ParticleRenderer, PARTICLE_PROGRAMS, type ParticleSimFrame, type ParticleDrawFrame } from './particles/particleRenderer';
+import { MAX_FORCE_FIELDS } from '../core/scene/nodes/forceFieldNode';
+import type { ParticleSystemNode } from '../core/scene/nodes/particleSystemNode';
 import { Model } from './model';
 import { TextureManager } from './systems/textureManager';
 import { Logger } from '../core/logger';
@@ -1217,6 +1220,19 @@ export class Renderer {
     private _prevViewProj: mat4 = mat4.create();
     private _hasPrevViewProj: boolean = false;
 
+    /** The GPU particle system: state textures, simulation steps, billboard draws. */
+    private readonly _particles = new ParticleRenderer();
+    /**
+     * The camera that produced the opaque depth the particle simulation collides against — LAST frame's,
+     * since the simulation runs before this frame draws anything. Its own copy rather than
+     * `_prevViewProj`, because a thumbnail capture must not overwrite it.
+     */
+    private readonly _particleCollideViewProj: mat4 = mat4.create();
+    private readonly _particleCollideCamPos: vec3 = vec3.create();
+    private _particleCollideOrtho = false;
+    private _particleCollideValid = false;
+    private readonly _forceFieldScratch = new Float32Array(MAX_FORCE_FIELDS * 16);
+
     // Per-object camera frustum culling for the main color passes. Rebuilt each frame from _viewProj.
     private _frustum: Frustum = new Frustum();
     private _frustumCulling: boolean = true;
@@ -1648,6 +1664,11 @@ export class Renderer {
             ['decalSurface',                 DecalSurfaceProgram],
             ['decalResolve',                 DecalResolveProgram],
             ['decalColor',                   DecalColorProgram],
+            // GPU particles: the WebGL2 ping-pong simulation step and the billboard draw. APPENDED.
+            [PARTICLE_PROGRAMS.sim[0],       PARTICLE_PROGRAMS.sim[1]],
+            [PARTICLE_PROGRAMS.billboard[0], PARTICLE_PROGRAMS.billboard[1]],
+            [PARTICLE_PROGRAMS.mesh[0],      PARTICLE_PROGRAMS.mesh[1]],
+            [PARTICLE_PROGRAMS.sort[0],      PARTICLE_PROGRAMS.sort[1]],
         ];
 
         // One program can carry two names, and they must be the SAME object: uniform state lives on
@@ -1835,6 +1856,10 @@ export class Renderer {
         resetFrameStats();
         const _statsT0 = performance.now();
 
+        // Particle simulation steps. Here because no pass is open and every pass that READS the state
+        // textures comes later; on WebGPU the dispatches go into the frame encoder ahead of those draws.
+        this._simulateParticles(scene);
+
         // Shadow map depth pass, shared by both pipelines. The caster is the FIRST directional light
         // flagged to cast, in traversal order — not whichever the light Set happens to yield last.
         let shadowLight: LightNode | null = null;
@@ -1895,6 +1920,15 @@ export class Renderer {
         // Remember this frame's camera transform so next frame's motion blur can reproject against it.
         mat4.copy(this._prevViewProj, this._viewProj);
         this._hasPrevViewProj = true;
+
+        // And the camera behind this frame's depth snapshot, for next frame's particle collision. Not
+        // from an offscreen capture: those resize the depth buffer and render from somewhere else.
+        if (!this._thumbnailMode && !this._capturing) {
+            mat4.copy(this._particleCollideViewProj, this._viewProj);
+            vec3.copy(this._particleCollideCamPos, this._activeCamera.position);
+            this._particleCollideOrtho = this._activeCamera.type === 'orthographic';
+            this._particleCollideValid = true;
+        }
 
         // Same for every model's world matrix and bone pose. Here rather than in `updateTransforms`:
         // `Scene.update` runs that pass TWICE on frames with camera rigs, and the second run would
@@ -2083,6 +2117,99 @@ export class Renderer {
      * otherwise. Models that stop asking for displacement are released here too, which is what puts
      * their Mesh back on the authored buffers.
      */
+    /** Run the particle systems' queued simulation steps. See {@link ParticleRenderer.simulate}. */
+    private _simulateParticles(scene: Scene): void {
+        const frame = this._particleSimFrame(scene);
+        if (scene.particleSystems.size === 0) { this._particles.simulate(scene, frame); return; }
+        this._scope('particles.sim');
+        this._particles.simulate(scene, frame);
+        this._endScope();
+        // The WebGL2 ping-pong went through pipelines that leave blend and depth off; put back what the
+        // legacy draws that follow expect, as the cloud pass does.
+        this._restoreDefaultBlend();
+        GLState.blend(false);
+        GLState.depthTest(true);
+        GLState.depthMask(true);
+    }
+
+    private _particleSimFrame(scene: Scene): ParticleSimFrame {
+        // Force fields, packed once for every emitter this frame.
+        let fieldCount = 0;
+        for (const field of scene.forceFields) {
+            if (!field.enabled || !field.visible || fieldCount >= MAX_FORCE_FIELDS) continue;
+            field.packInto(this._forceFieldScratch, fieldCount * 16);
+            fieldCount++;
+        }
+        const live = this._particleCollideValid && !this._thumbnailMode && !this._capturing;
+        return {
+            encoder: this._acquireEncoder('particles.sim'),
+            gravity: scene.physics?.gravity ?? [0, -9.81, 0],
+            depth: live ? this._depthSource() : null,
+            viewProj: live ? this._particleCollideViewProj : null,
+            cameraPosition: this._particleCollideCamPos,
+            orthographic: this._particleCollideOrtho,
+            fields: this._forceFieldScratch,
+            fieldCount,
+        };
+    }
+
+    /** Draw every particle system of a 3D scene into the scene buffer. 2D scenes draw theirs in the 2D pass. */
+    private _renderParticles(scene: Scene): void {
+        if (scene.particleSystems.size === 0 || this._isFlatParticleScene(scene)) return;
+        this._drawParticleNodes(scene, scene.particleSystems, this._sceneFBO.renderTarget);
+    }
+
+    /** A 2D scene: an orthographic camera over tilemaps. Its particles join the Y-sorted 2D pass. */
+    private _isFlatParticleScene(scene: Scene): boolean {
+        return this._activeCamera.type === 'orthographic' && scene.tilemaps.size > 0;
+    }
+
+    private _drawParticleNodes(scene: Scene, nodes: Iterable<ParticleSystemNode>, target: RenderTarget): void {
+        // The sort runs passes of its own, so it goes before the particle pass opens.
+        this._particles.sort(nodes, this._acquireEncoder('particles.sort'), this._activeCamera.position);
+        const pass = this._beginFullscreenPass(target, 'particles', false, undefined, false);
+        this._particles.draw(nodes, this._particleDrawFrame(scene, pass, target));
+        this._endFullscreenPass(pass);
+        this._restoreDefaultBlend();
+        GLState.blend(false);
+        GLState.depthTest(true);
+        GLState.depthMask(true);
+    }
+
+    /** What a particle draw needs from this frame: camera, depth snapshot, and a sun for lit particles. */
+    private _particleDrawFrame(scene: Scene, pass: RenderPassEncoder, target: RenderTarget): ParticleDrawFrame {
+        const camera = this._activeCamera;
+        let sun: LightNode | null = null;
+        for (const light of scene.lights) if (light.type === 'directional') { sun = light; break; }
+        const sunColor = [0, 0, 0];
+        const sunDirection = [0, 1, 0];
+        if (sun) {
+            const light = sun.light as DirectionalLight;
+            const k = light.internalIntensity;
+            sunColor[0] = light.color[0] * k; sunColor[1] = light.color[1] * k; sunColor[2] = light.color[2] * k;
+            const f = sun.worldForward;
+            sunDirection[0] = -f[0]; sunDirection[1] = -f[1]; sunDirection[2] = -f[2];
+        }
+        // A quarter of the sun as sky fill: lit particles are a cheap approximation, and an unlit
+        // underside reads as a hole in the effect.
+        const ambient = [sunColor[0] * 0.25 + 0.03, sunColor[1] * 0.25 + 0.03, sunColor[2] * 0.25 + 0.035];
+
+        return {
+            pass, target,
+            viewProj: mat4.multiply(this._particleViewProj, this._rasterProjection(camera.projectionMatrix),
+                                    camera.viewMatrix),
+            view: camera.viewMatrix,
+            cameraPosition: camera.position,
+            near: camera.near, far: camera.far,
+            orthographic: camera.type === 'orthographic',
+            depth: this._thumbnailMode ? null : this._depthSource(),
+            width: this._renderWidth, height: this._renderHeight,
+            ambient, sunDirection, sunColor,
+            visible: this._frustumCulling ? (min, max) => this._frustum.intersectsAABB(min, max) : undefined,
+        };
+    }
+    private readonly _particleViewProj: mat4 = mat4.create();
+
     private _ensureDisplacedMeshes(scene: Scene): void {
         const displacer = MeshDisplacer.Instance;
         if (!displacer.canDisplace) return;
@@ -5127,6 +5254,10 @@ export class Renderer {
         this._forwardDepthWrite = true;
         GLState.depthMask(true);
 
+        // GPU particles: after the transparents (and so after TAA — they never enter history), depth
+        // tested against the opaque scene, soft-faded against its depth snapshot.
+        if (this._beginPass('particles')) this._renderParticles(scene);
+
         // Tiles + sprites, depth-sorted together (always transparent, forward). Scene content only —
         // the editor's icon billboards are filtered out and drawn in the overlay below.
         if (this._beginPass('2d')) this._render2DPass(scene);
@@ -5720,6 +5851,7 @@ export class Renderer {
 
         type Draw2D =
             | { band: number; depth: number; sprite: SpriteNode }
+            | { band: number; depth: number; particles: ParticleSystemNode }
             | { band: number; depth: number; node: TilemapNode; layer: TilemapLayer; chunk: TileChunk;
                 indexOffset: number; indexCount: number };
         const list: Draw2D[] = [];
@@ -5733,6 +5865,15 @@ export class Renderer {
             // The sprite's BASE, not its centre: a character's feet are what sorts against a trunk row.
             const base = sprite.worldPosition[1] - sprite.worldScale[1] * 0.5;
             list.push({ band: entityBand, depth: -base, sprite });
+        }
+        // Particle systems sort as one item by their emitter's Y, like a sprite's base, in the entity
+        // band offset by the highest emitter sorting order — so "in front of the player" is authored,
+        // not an accident of traversal.
+        for (const particles of scene.particleSystems) {
+            if (!particles.visible) continue;
+            let order = 0;
+            for (const e of particles.system.emitters) order = Math.max(order, e.render.sortingOrder);
+            list.push({ band: entityBand + order, depth: -particles.worldPosition[1], particles });
         }
 
         for (const node of tilemaps) {
@@ -5777,6 +5918,13 @@ export class Renderer {
         const pass = this._begin2DPass();
         for (const item of list) {
             if ('sprite' in item) this._renderSprite(item.sprite, false, pass);
+            else if ('particles' in item) {
+                this._particles.draw([item.particles], this._particleDrawFrame(scene, pass, this._sceneFBO.renderTarget));
+                // Particle pipelines leave their own blend behind; the sprites after them expect the pass's.
+                this._restoreDefaultBlend();
+                GLState.blend(true);
+                GLState.depthMask(false);
+            }
             else this._drawTileBand(item.node, item.layer, item.chunk, item.indexOffset, item.indexCount, pass);
         }
         this._endFullscreenPass(pass);
@@ -6731,6 +6879,9 @@ export class Renderer {
         // Depth writes stay ON here, unlike the deferred overlay's transparent queue: leaving
         // `_forwardDepthWrite` alone is deliberate, not an omission.
         this._runForwardQueue('transparent', transparentDrawQueue);
+
+        // GPU particles, as in the deferred overlay.
+        if (this._beginPass('particles')) this._renderParticles(scene);
 
         // Tiles + sprites, depth-sorted together. A selected sprite draws in its own depth order — its
         // outline comes from the mask pass below.

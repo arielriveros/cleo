@@ -41,6 +41,15 @@ export type { FieldProps } from './Field';
 export { ColorInput } from './ColorInput';
 export type { ColorInputProps } from './ColorInput';
 
+export { CurveInput } from './CurveInput';
+export type { CurveInputProps } from './CurveInput';
+
+export { GradientInput } from './GradientInput';
+export type { GradientInputProps } from './GradientInput';
+
+export { RangeInput } from './RangeInput';
+export type { RangeInputProps } from './RangeInput';
+
 export { PropertyTable, PropertyRow } from './PropertyTable';
 export type { PropertyTableProps, PropertyRowProps } from './PropertyTable';
 

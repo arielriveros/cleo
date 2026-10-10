@@ -79,6 +79,10 @@ describe('TAB_EDITOR_MODE', () => {
   it('gives the sound tab its own mode, not the template fallback', () => {
     expect(Object.fromEntries(tabEditorModeEntries()).soundSample).toBe('soundSample');
   });
+
+  it('gives the particle tab its own mode, not the template fallback', () => {
+    expect(Object.fromEntries(tabEditorModeEntries()).particleSystem).toBe('particleSystem');
+  });
 });
 
 /**

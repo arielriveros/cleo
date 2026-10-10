@@ -215,6 +215,9 @@ let silently: <T>(fn: () => T) => T = fn => fn();
  * Also handed to foliageRules, whose prototype flatten parses a throwaway model subtree the same way the
  * builders here do, but from paths (terrain-material loads, the foliage inspector) with no bracket.
  */
+/** Run `f` with the editor's dirty tracking suppressed — for other modules building throwaway scenes. */
+export function thumbnailSilently<T>(f: () => T): T { return silently(f); }
+
 export function setThumbnailDirtySuppressor(fn: <T>(f: () => T) => T): void {
   silently = fn;
   setFoliageFlattenSuppressor(fn);

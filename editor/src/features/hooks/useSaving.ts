@@ -49,6 +49,9 @@ export function useSaving(deps: {
   const registerSoundApply = (reg: { tabId: string; apply: () => void } | null) => { soundApplyRef.current = reg; };
   const aiBrainApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
   const registerAiBrainApply = (reg: { tabId: string; apply: () => void } | null) => { aiBrainApplyRef.current = reg; };
+  // ...and the particle session, whose working copy lives in ParticleEditorProvider.
+  const particleSystemApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
+  const registerParticleSystemApply = (reg: { tabId: string; apply: () => void } | null) => { particleSystemApplyRef.current = reg; };
   // ...and the clip session, whose working copy lives in ClipProvider.
   const clipApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
   const registerClipApply = (reg: { tabId: string; apply: () => void } | null) => { clipApplyRef.current = reg; };
@@ -85,6 +88,12 @@ export function useSaving(deps: {
       }
       case 'aiBrain': {
         const session = aiBrainApplyRef.current;
+        if (!session || session.tabId !== tabId) return false;
+        session.apply();
+        break;
+      }
+      case 'particleSystem': {
+        const session = particleSystemApplyRef.current;
         if (!session || session.tabId !== tabId) return false;
         session.apply();
         break;
@@ -195,6 +204,9 @@ export function useSaving(deps: {
       animation: 0,
       material: 0, terrainMaterial: 0, script: 0, stateMachine: 0, animationField: 0, tileset: 0, texture: 0,
       soundSample: 0, aiBrain: 0,
+      // A leaf asset: an effect only names textures and models, never the other way round, and the scene
+      // that embeds it saves last anyway — so the re-embed lands before the scene is hashed and written.
+      particleSystem: 0,
       model: 1, template: 2, scene: 3,
     };
     // Snapshot taken up front, so the loop is finite by construction.
@@ -209,7 +221,7 @@ export function useSaving(deps: {
 
   return {
     registerAnimationApply, registerTilesetApply, registerTextureApply, registerSoundApply,
-    registerAiBrainApply, registerRigApply, registerClipApply, saveTabById, runSave,
+    registerAiBrainApply, registerParticleSystemApply, registerRigApply, registerClipApply, saveTabById, runSave,
     saveActiveTab, saveAll, saveProjectToStorage,
   };
 }

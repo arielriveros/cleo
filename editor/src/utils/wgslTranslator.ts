@@ -1,4 +1,4 @@
-import { setWgslTranslator, hasWgslTranslator } from 'cleo'
+import { setWgslTranslator, hasWgslTranslator, setParticleGlslTranslator, hasParticleGlslTranslator } from 'cleo'
 
 /**
  * Loads the vendored naga WASM and installs it as the engine's GLSL -> WGSL translator. Custom materials
@@ -23,6 +23,8 @@ async function load(): Promise<boolean> {
     // naga's errors carry its diagnostic, which names the GLSL construct at fault; pass them through
     // untouched so the material editor can show that text.
     setWgslTranslator((glsl: string) => mod.glsl_to_wgsl(glsl, 'fragment'))
+    // The other direction, for particle custom code: WGSL the author wrote, GLSL for WebGL2.
+    setParticleGlslTranslator((wgsl: string, stage: 'vertex' | 'fragment', entry: string) => mod.wgsl_to_glsl(wgsl, stage, entry))
     return true
   } catch (e) {
     // Not fatal: without a translator the Compile button still compiles and applies the shader, it just
@@ -34,7 +36,7 @@ async function load(): Promise<boolean> {
 
 /** Install the translator if it is not already installed. Safe and cheap to call repeatedly. */
 export function ensureWgslTranslator(): Promise<boolean> {
-  if (hasWgslTranslator()) return Promise.resolve(true)
+  if (hasWgslTranslator() && hasParticleGlslTranslator()) return Promise.resolve(true)
   if (!loading) loading = load()
   return loading
 }

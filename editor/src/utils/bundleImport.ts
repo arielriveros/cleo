@@ -54,6 +54,7 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
   await idbSet(libKey('rigs', pid), bundle.libraries.rigs ?? [])
   await idbSet(libKey('tilesets', pid), bundle.libraries.tilesets ?? [])
   await idbSet(libKey('aiBrains', pid), bundle.libraries.aiBrains ?? [])
+  await idbSet(libKey('particleSystems', pid), bundle.libraries.particleSystems ?? [])
   await idbSet(libKey('animControllers', pid), bundle.libraries.animControllers ?? [])
   await idbSet(libKey('boneMasks', pid), bundle.libraries.boneMasks ?? [])
   await idbSet(libKey('poseAssets', pid), bundle.libraries.poseAssets ?? [])
@@ -130,7 +131,7 @@ export async function applyBundleAsNewProject(
 
 /** Read the local state a merge needs to detect id/path/name collisions. */
 async function readLocalState(): Promise<LocalState> {
-  const [materials, terrainMaterials, templates, models, scripts, animationFields, animations, rigs, tilesets, aiBrains, animControllers, boneMasks, poseAssets, vfs, meta, storedTex, audioSources, soundSamples, storedAudio] = await Promise.all([
+  const [materials, terrainMaterials, templates, models, scripts, animationFields, animations, rigs, tilesets, aiBrains, animControllers, boneMasks, poseAssets, vfs, meta, storedTex, audioSources, soundSamples, storedAudio, particleSystems] = await Promise.all([
     idbGet<any[]>(libKey('materials')),
     idbGet<any[]>(libKey('terrainMaterials')),
     idbGet<any[]>(libKey('templates')),
@@ -150,6 +151,7 @@ async function readLocalState(): Promise<LocalState> {
     idbGet<any[]>(libKey('audioSources')),
     idbGet<any[]>(libKey('soundSamples')),
     getAllAudio(),
+    idbGet<any[]>(libKey('particleSystems')),
   ])
   const textures = new Map<string, { size: number; mime: string }>()
   for (const t of storedTex) textures.set(t.id, { size: t.blob.size, mime: t.mime })
@@ -166,6 +168,7 @@ async function readLocalState(): Promise<LocalState> {
     rigIds: new Set((rigs ?? []).map(r => r.id)),
     tilesetIds: new Set((tilesets ?? []).map(t => t.id)),
     aiBrainIds: new Set((aiBrains ?? []).map(b => b.id)),
+    particleSystemIds: new Set((particleSystems ?? []).map(p => p.id)),
     animControllerIds: new Set((animControllers ?? []).map(c => c.id)),
     boneMaskIds: new Set((boneMasks ?? []).map(m => m.id)),
     poseAssetIds: new Set((poseAssets ?? []).map(p => p.id)),
@@ -205,6 +208,7 @@ export async function applyBundleMerge(bundle: BundleData): Promise<boolean> {
   await append(libKey('rigs'), plan.rigs)
   await append(libKey('tilesets'), plan.tilesets)
   await append(libKey('aiBrains'), plan.aiBrains)
+  await append(libKey('particleSystems'), plan.particleSystems)
   await append(libKey('animControllers'), plan.animControllers)
   await append(libKey('boneMasks'), plan.boneMasks)
   await append(libKey('poseAssets'), plan.poseAssets)

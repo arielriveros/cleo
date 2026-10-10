@@ -10,6 +10,7 @@ import { remapDeep, type Remaps } from '../src/utils/bundleMerge';
 const remaps = (over: Partial<Remaps> = {}): Remaps => ({
   tex: new Map(), mat: new Map(), tmat: new Map(), tpl: new Map(),
   model: new Map(), script: new Map(), afield: new Map(), anim: new Map(), tileset: new Map(),
+  vfx: new Map(),
   ...over,
 });
 
@@ -47,6 +48,35 @@ describe('remapDeep — tileset references', () => {
     remapDeep(node, remaps({ tileset: tileset() }));
     expect(node.sprite.tilesetId).toBe('keep');
     expect(node.sprite.tileset.id).toBe('keep');
+  });
+});
+
+describe('remapDeep — particle system references', () => {
+  // The brain arrangement: the node carries the LINK and a full embedded copy beside it. The link follows
+  // the `.vfx` re-mint; the copy's emitters follow the texture and model re-mints they draw with.
+  it("moves a particle node's link, and its embedded emitters' texture and model", () => {
+    const node = {
+      particleSystem: {
+        particleSystemId: 'old-fx',
+        system: { emitters: [{ id: 'e1', render: { textureId: 'spark.png', modelId: 'rock' } }] },
+      },
+    };
+    remapDeep(node, remaps({
+      vfx: new Map([['old-fx', 'new-fx']]),
+      tex: new Map([['spark.png', 'spark_1.png']]),
+      model: new Map([['rock', 'rock_1']]),
+    }));
+    expect(node.particleSystem.particleSystemId).toBe('new-fx');
+    expect(node.particleSystem.system.emitters[0].render.textureId).toBe('spark_1.png');
+    expect(node.particleSystem.system.emitters[0].render.modelId).toBe('rock_1');
+    // Emitter ids are scoped to their own system and are not asset references.
+    expect(node.particleSystem.system.emitters[0].id).toBe('e1');
+  });
+
+  it("remaps a library asset's emitters the same way", () => {
+    const asset = { id: 'fx', name: 'fx', system: { emitters: [{ render: { textureId: 'a.png', modelId: null } }] } };
+    remapDeep(asset, remaps({ tex: new Map([['a.png', 'b.png']]) }));
+    expect(asset.system.emitters[0].render.textureId).toBe('b.png');
   });
 });
 

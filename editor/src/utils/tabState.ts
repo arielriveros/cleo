@@ -45,6 +45,7 @@ const ID_FIELD: Partial<Record<TabKind, keyof EditorTab>> = {
   animation: 'animationId',
   texture: 'textureId',
   soundSample: 'soundId',
+  particleSystem: 'particleSystemId',
 };
 
 /**

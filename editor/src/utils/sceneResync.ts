@@ -11,6 +11,7 @@ import { hashAsset, assetHashKey, AssetLibs, hashesComparable } from './assetHas
 import { captureAnimationState, restoreAnimationState, applyIkRig, applySockets } from './placedAnimation'
 import { disposeModelSubtree, ModelNode } from 'cleo'
 import { reembedMachine } from './animationControllers'
+import { reembedParticleSystems } from './particleSystems'
 
 // Pull-based cross-scene propagation: re-resolves every asset link a stored scene carries (__materialId /
 // __modelId / __templateId, terrain layer.materialId, foliage rule.modelId) against the CURRENT libraries,
@@ -268,6 +269,20 @@ export function resyncScene(
         changed = true
       }
     }
+  }
+
+  // --- Particle systems: refresh the embedded effect each linked node plays ---
+  // Pull-side twin of saveParticleSystem's re-embed, which only reaches LIVE scenes: a scene closed while
+  // its effect was edited would otherwise reopen playing the old copy. Not hash-gated — the reembed
+  // compares by value, and an identical copy is left alone (re-assigning restarts the effect). A link to a
+  // deleted asset is dropped, keeping the copy, as removeParticleSystem does for live scenes. Skipped
+  // entirely when the caller has no particle library to offer: "not passed" is not "all deleted".
+  if (libs.particleSystems) {
+    const known = new Set(libs.particleSystems.map(p => p.id))
+    for (const node of Array.from(scene.particleSystems ?? [])) {
+      if (node.particleSystemId && !known.has(node.particleSystemId)) { node.particleSystemId = null; changed = true }
+    }
+    if (reembedParticleSystems(scene, libs.particleSystems)) changed = true
   }
 
   // --- Sprites: the same refresh, one embedded tileset each ---

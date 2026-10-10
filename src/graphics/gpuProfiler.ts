@@ -31,6 +31,8 @@ export const RENDER_PASSES = [
     'shadows.cascades',
     'shadows.spot',
     'shadows.point',
+    // Particle simulation steps: compute dispatches on WebGPU, ping-pong draws on WebGL2.
+    'particles.sim',
     'geometry',
     'foliage',
     // Decal volumes: the landscape-only receiver depth, then the DBuffer write + its G-buffer resolve.
@@ -49,6 +51,7 @@ export const RENDER_PASSES = [
     'taa',
     'grid',
     'transparent',
+    'particles',
     '2d',
     'gizmos',
     // Editor chrome that is neither the grid nor a gizmo: helper wireframes and icon billboards,
@@ -81,7 +84,7 @@ export type RenderPass = typeof RENDER_PASSES[number];
 /** Passes the profiler panel offers as on/off switches. Excludes any pass the image cannot do without. */
 export const TOGGLEABLE_PASSES: RenderPass[] = [
     'shadows.cascades', 'shadows.spot', 'shadows.point', 'foliage', 'decals', 'decals.emissive', 'ssao', 'ssao.blur', 'sky', 'clouds', 'skyFog', 'taa', 'grid',
-    'transparent', '2d', 'gizmos', 'overlay', 'velocity', 'motionBlur', 'godRays', 'bloom.bright',
+    'transparent', 'particles', '2d', 'gizmos', 'overlay', 'velocity', 'motionBlur', 'godRays', 'bloom.bright',
     'bloom.blur', 'bloom.composite', 'chromatic', 'screenMaterials',
     // `dof.coc` switches depth of field as a whole. Its other two passes report their own timings
     // but are deliberately NOT switchable: the gather and the composite are halves of one effect,
@@ -129,6 +132,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     present: 'present',
     forwardOpaque: 'forwardOpaque',
     transparent: 'transparent',
+    particles: 'particles',
 
     // Renamed but still one-to-one: the pass label and the scope name simply differ.
     cascade: 'shadows.cascades',

@@ -126,6 +126,14 @@ export const CloudsIcon = () => (
 export const DecalIcon = () => (
   <S><path d="M4 3.5h16v10H4Z" strokeDasharray="2.6 2.2" /><path d="M12 6v8.8M9.3 12.1 12 14.8l2.7-2.7" /><ellipse cx="12" cy="19" rx="8" ry="2.4" fill="currentColor" fillOpacity="0.35" /></S>
 );
+/** Particle system: a burst of dots fanning up out of an emitter point. */
+export const ParticlesIcon = () => (
+  <S><circle cx="12" cy="19.5" r="1.6" fill="currentColor" stroke="none" /><circle cx="7" cy="11" r="1.5" /><circle cx="12" cy="7" r="1.9" /><circle cx="17" cy="10.5" r="1.4" /><circle cx="9.5" cy="4" r="0.9" fill="currentColor" stroke="none" /><circle cx="15.5" cy="4.5" r="1" fill="currentColor" stroke="none" /><path d="M12 17.5 7.8 12.6M12 17.5V9.2M12 17.5l4.3-5.5" strokeDasharray="1.6 1.6" /></S>
+);
+/** Force field: wind lines bending around a centre. */
+export const ForceFieldIcon = () => (
+  <S><path d="M3 8h10.5a2.5 2.5 0 1 0-2.5-2.5" /><path d="M3 12h15a3 3 0 1 1-3 3" /><path d="M3 16h6" /></S>
+);
 /** Landscape: a hill and peak under a sun — matching the Landscape mode button. */
 export const LandscapeIcon = () => (
   <S><path d="M3 19 9 8l4 6 2-3 6 8Z" /><circle cx="17" cy="6" r="2" /></S>

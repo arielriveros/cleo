@@ -155,6 +155,13 @@ export class Shader implements ShaderProgram {
                 if (size > 1) gl.uniform1iv(location, value);
                 else gl.uniform1i(location, value);
                 break;
+
+            // naga declares `uniform uint naga_vs_first_instance` in any vertex stage reading
+            // `@builtin(instance_index)` (WebGL2 has no base-instance draw). It is never set — zero is
+            // right for every draw this engine issues — but the program must still reflect it.
+            case 'uint':
+                gl.uniform1ui(location, value);
+                break;
     
             case 'ivec2':
                 gl.uniform2iv(location, value);
@@ -273,6 +280,7 @@ export class Shader implements ShaderProgram {
 
             switch (type) {
                 case 'int':
+                case 'uint':
                 case 'float':
                     defaultValue = 0;
                     break;
@@ -365,6 +373,7 @@ export class Shader implements ShaderProgram {
             case gl.FLOAT_MAT3: return 'mat3';
             case gl.FLOAT_MAT4: return 'mat4';
             case gl.INT: return 'int';
+            case gl.UNSIGNED_INT: return 'uint';
             case gl.INT_VEC2: return 'ivec2';
             case gl.INT_VEC3: return 'ivec3';
             case gl.INT_VEC4: return 'ivec4';

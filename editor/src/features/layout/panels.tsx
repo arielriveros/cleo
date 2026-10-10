@@ -10,6 +10,8 @@ import AiBrainInspector from '../ai/AiBrainInspector';
 import RigInspector from '../rig/RigInspector';
 import ClipInspector from '../clip/ClipInspector';
 import ClipTimeline from '../clip/ClipTimeline';
+import ParticleStackPanel from '../particles/ParticleStackPanel';
+import ParticleTransportPanel from '../particles/ParticleTransportPanel';
 import LoadingScreen from '../../components/LoadingScreen';
 import SceneInspector from '../sceneInspector/SceneInspector';
 import AddNew from '../sceneInspector/AddNew';
@@ -144,6 +146,9 @@ function PropertiesPanel(_: IDockviewPanelProps) {
   if (editorMode === 'soundSample') return <SidePanel><SoundSettingsPanel /></SidePanel>;
   if (editorMode === 'aiBrain') return <SidePanel><AiBrainInspector /></SidePanel>;
   if (editorMode === 'rig') return <SidePanel><RigInspector /></SidePanel>;
+  // The particle tab's Properties is the effect itself — its emitters and module stacks — never the
+  // editor-owned preview node, which carries nothing the author should edit.
+  if (editorMode === 'particleSystem') return <SidePanel><ParticleStackPanel /></SidePanel>;
   // Mesh mode keeps the normal node inspector below the mesh-level controls (LOD levels + cull).
   if (editorMode === 'model') return (
     <SidePanel>
@@ -249,6 +254,11 @@ function ClipTimelinePanel(_: IDockviewPanelProps) {
   return <div className="flex flex-col h-full w-full overflow-hidden bg-surface-raised"><ClipTimeline /></div>;
 }
 
+/** The particle editor's transport: play / pause / restart over the preview, in the bottom strip. */
+function ParticleTransportDockPanel(_: IDockviewPanelProps) {
+  return <div className="flex flex-col h-full w-full overflow-hidden bg-surface-raised"><ParticleTransportPanel /></div>;
+}
+
 function AnimFieldPlotPanel(_: IDockviewPanelProps) {
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-surface-raised">
@@ -317,6 +327,7 @@ export const dockComponents = {
   animFieldPlot: AnimFieldPlotPanel,
   clipTracks: ClipTracksPanel,
   clipTimeline: ClipTimelinePanel,
+  particleTransport: ParticleTransportDockPanel,
   tilePalette: TilePalettePanel,
   tilemapLayers: TilemapLayersDockPanel,
   landscapeTools: LandscapeToolsDockPanel,

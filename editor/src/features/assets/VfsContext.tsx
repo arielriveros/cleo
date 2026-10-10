@@ -60,7 +60,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   const {
     assetsLoaded,
     materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, rigs, tilesets, aiBrains,
-    animControllers, boneMasks, poseAssets,
+    particleSystems, animControllers, boneMasks, poseAssets,
     images, textures, addImage, addTextureAsset,
     audioSources, soundSamples, addAudioSource, addSoundSample,
   } = useAssetLibrary()
@@ -159,14 +159,14 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   }, [assetsLoaded, audioPreloaded, isSceneReady, soundIds, audioSources, soundSamples, addAudioSource, addSoundSample])
 
   const libs: LibSnapshot = useMemo(
-    () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, animControllers, boneMasks, poseAssets, scenes: sceneList, images, textures, audioSources, soundSamples, textureIds }),
-    [materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, animControllers, boneMasks, poseAssets, sceneList, images, textures, audioSources, soundSamples, textureIds],
+    () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, scenes: sceneList, images, textures, audioSources, soundSamples, textureIds }),
+    [materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, sceneList, images, textures, audioSources, soundSamples, textureIds],
   )
 
   const depsRef = useRef<AssetDeps>(null as any)
   depsRef.current = {
     materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, rigs, tilesets, aiBrains,
-    animControllers, boneMasks, poseAssets,
+    particleSystems, animControllers, boneMasks, poseAssets,
     images, textures, audioSources, soundSamples,
     scenes: sceneList,
     addImage: engine.addImage,
@@ -211,6 +211,9 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     addAiBrain: engine.addAiBrain,
     updateAiBrain: engine.updateAiBrain,
     removeAiBrain: engine.removeAiBrain,
+    addParticleSystem: engine.addParticleSystem,
+    updateParticleSystem: engine.updateParticleSystem,
+    removeParticleSystem: engine.removeParticleSystem,
     addAnimController: engine.addAnimController,
     updateAnimController: engine.updateAnimController,
     removeAnimController: engine.removeAnimController,
@@ -238,6 +241,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     enterAnimationFieldEditor: engine.enterAnimationFieldEditor,
     enterTilesetEditor: engine.enterTilesetEditor,
     enterAiBrainEditor: engine.enterAiBrainEditor,
+    enterParticleSystemEditor: engine.enterParticleSystemEditor,
     enterTextureEditor: engine.enterTextureEditor,
     emit: (event, payload) => eventEmitter.emit(event as any, payload),
   }
@@ -270,7 +274,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   // merely look empty deletes the whole folder layout, so require at least one asset to be present.
   const librariesPopulated = !!(materials.length || terrainMaterials.length || templates.length
     || models.length || scriptAssets.length || animationFields.length || animations.length || tilesets.length
-    || aiBrains.length || animControllers.length || boneMasks.length || poseAssets.length)
+    || aiBrains.length || particleSystems.length || animControllers.length || boneMasks.length || poseAssets.length)
 
   useEffect(() => {
     if (!vfsLoaded) return

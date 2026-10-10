@@ -53,6 +53,8 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     rigs: (await src.json(`${BUNDLE_PATHS.librariesDir}rigs.json`)) ?? [],
     tilesets: (await src.json(`${BUNDLE_PATHS.librariesDir}tilesets.json`)) ?? [],
     aiBrains: (await src.json(`${BUNDLE_PATHS.librariesDir}aiBrains.json`)) ?? [],
+    // Absent in a bundle written before particle systems existed.
+    particleSystems: (await src.json(`${BUNDLE_PATHS.librariesDir}particleSystems.json`)) ?? [],
     // Absent in a bundle written before controllers, bone masks and pose assets existed.
     animControllers: (await src.json(`${BUNDLE_PATHS.librariesDir}animControllers.json`)) ?? [],
     boneMasks: (await src.json(`${BUNDLE_PATHS.librariesDir}boneMasks.json`)) ?? [],
@@ -147,6 +149,7 @@ export async function bundleEntries(bundle: BundleData): Promise<BundleEntry[]> 
     json(`${BUNDLE_PATHS.librariesDir}animationFields.json`, libraries.animationFields ?? []),
     json(`${BUNDLE_PATHS.librariesDir}tilesets.json`, libraries.tilesets ?? []),
     json(`${BUNDLE_PATHS.librariesDir}aiBrains.json`, libraries.aiBrains ?? []),
+    json(`${BUNDLE_PATHS.librariesDir}particleSystems.json`, libraries.particleSystems ?? []),
     json(`${BUNDLE_PATHS.librariesDir}animControllers.json`, libraries.animControllers ?? []),
     json(`${BUNDLE_PATHS.librariesDir}boneMasks.json`, libraries.boneMasks ?? []),
     json(`${BUNDLE_PATHS.librariesDir}poseAssets.json`, libraries.poseAssets ?? []),

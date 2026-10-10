@@ -11,6 +11,7 @@ type NodeType =
   | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite'
   | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'lodGroup'
   | 'cameraRig' | 'sound' | 'character' | 'controller' | 'navMesh' | 'decal'
+  | 'particleSystem' | 'forceField'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 ```
@@ -463,6 +464,35 @@ Properties: `mode` (`'ambient' | 'spatial'`), `sampleId`, `volume`, `loopMode`
 `refDistance`, `maxDistance`, `rolloffFactor`.
 
 > `play()` is a silent no-op when `scene.soundsEnabled === false`.
+
+### ParticleSystemNode — `'particleSystem'` *(unreleased)*
+
+Plays an embedded particle system definition (see [Particles](../editor/particles.md)). The node owns
+the clock and spawn ring; the renderer owns the GPU state and drains the node's queued steps each
+frame. Nothing is read back, so `isAlive` comes from the clock, not a particle count.
+
+```ts
+play(): void ; pause(): void ; resume(): void ; restart(): void
+stop(clear?: boolean): void          // clear: remove every particle at once
+burst(count: number, emitterName?: string): void
+setSystem(def: ParticleSystemDef, restart?: boolean): void
+get isPlaying: boolean ; get isPaused: boolean ; get isAlive: boolean
+```
+
+Properties: `system` (read-only; replace through `setSystem`), `particleSystemId` (the `.vfx` it
+mirrors, or null), `playOnStart`, `simulationSpeed`, `spawnRateScale`, `tint` (linear RGBA).
+`setSystem` keeps live particles when every pool keeps its shape and rebuilds otherwise.
+
+> While the editor is authoring, a system neither simulates nor draws when
+> `scene.particlePreview === false`.
+
+### ForceFieldNode — `'forceField'` *(unreleased)*
+
+A volume that pushes particles of emitters with the Force Fields module. Up to 16 act at once.
+
+Properties: `kind` (`'directional' | 'radial' | 'vortex' | 'turbulence' | 'drag'`), `shape`
+(`'global' | 'sphere' | 'box'`), `strength`, `radius`, `extents` (box half extents), `falloff`
+(0..1), `frequency` (turbulence), `enabled`. Direction and vortex axis are the node's local +Y.
 
 ---
 
