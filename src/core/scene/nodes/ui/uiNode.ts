@@ -2,9 +2,8 @@ import { clamp } from "../../../math";
 import { StackItem, UIRect, copyRect, intersectRect, rectsEqual, setRect, solveRect } from "../../../uiLayout";
 import { NodeType } from "../nodeType";
 import { Node } from "../node";
-import { SpriteNode } from "../spriteNode";
-import { UIStackNode } from "./uiContainers";
-import { UIRootNode } from "./uiRoot";
+import type { UIStackNode } from "./uiContainers";
+import type { UIRootNode } from "./uiRoot";
 
 /**
  * The UI element base class and the types every UI node shares.

@@ -3,7 +3,6 @@ import type { Scene } from "../scene";
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
-import { SkyboxNode } from "./skyboxNode";
 
 /**
  * Nishita atmospheric scattering baked to a cubemap. Scene singleton.

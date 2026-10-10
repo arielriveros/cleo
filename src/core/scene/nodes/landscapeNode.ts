@@ -1,4 +1,3 @@
-import { Tilemap } from "../../../graphics/tilemap/tilemap";
 import { Terrain, TerrainLodSettings } from "../../../terrain/terrain";
 import type { Scene } from "../scene";
 import { vec3 } from "gl-matrix";

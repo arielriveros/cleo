@@ -1,4 +1,6 @@
-import { CleoEngine, Texture, TextureManager } from "../../cleo";
+import { CleoEngine } from "../engine";
+import { Texture } from "../../graphics/texture";
+import { TextureManager } from "../../graphics/systems/textureManager";
 import { Node } from "./nodes/node";
 import { ModelNode, disposeModelSubtree } from "./nodes/modelNode";
 import { LodGroupNode } from "./nodes/lodGroupNode";

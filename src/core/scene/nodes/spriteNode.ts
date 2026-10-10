@@ -1,11 +1,9 @@
 import { Sprite, remapLegacyFrame } from "../../../graphics/sprite";
 import { ShaderManager } from "../../../graphics/systems/shaderManager";
-import { Texture } from "../../../graphics/texture";
 import { Tileset } from "../../../graphics/tilemap/tileset";
 import { Logger } from "../../logger";
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
-import { AnimatedSpriteNode } from "./animatedSpriteNode";
 import { Node } from "./node";
 
 /**

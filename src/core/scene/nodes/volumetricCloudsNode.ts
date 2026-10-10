@@ -1,9 +1,7 @@
-import { Shape } from "../../../physics/shape";
 import type { Scene } from "../scene";
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
-import { SkyAtmosphereNode } from "./skyAtmosphereNode";
 
 /**
  * Raymarched volumetric clouds. Scene singleton.

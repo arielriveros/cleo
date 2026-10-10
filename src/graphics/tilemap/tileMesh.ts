@@ -7,7 +7,7 @@
 
 // The last raw GL here is the two draw calls. They stay for the same reason Mesh's do: a draw belongs
 // on a render-pass encoder, and moving the 2D pass onto one is its own migration.
-import { gl } from '../../graphics/renderer';
+import { gl } from '../glContext';
 import { GLState } from '../../graphics/systems/glState';
 import { glTopology, glIndexType, indexByteSize } from '../rhi/webgl2/glEnums';
 import { frameStats } from '../../graphics/renderStats';

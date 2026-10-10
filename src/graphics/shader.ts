@@ -1,6 +1,5 @@
 import { mat4, vec2, vec3, vec4 } from 'gl-matrix';
 import { gl } from './glContext';
-import { Loader } from './loader';
 import { GLState } from './systems/glState';
 import { UniformBlockSet } from './systems/uniformBlocks';
 

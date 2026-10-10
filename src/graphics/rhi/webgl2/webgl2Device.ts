@@ -1,7 +1,6 @@
 import { gl } from '../../glContext';
 import { GLState } from '../../systems/glState';
 import { Logger } from '../../../core/logger';
-import { setViewportSize } from '../../renderStats';
 import { glBufferTarget, glBufferUsageHint, glTextureTarget, glTextureFormat, glAddressMode, glMinFilter, glMagFilter } from './glEnums';
 import { detectWebGL2Capabilities, anisotropyExtension } from './capabilities';
 import { applyVertexLayout } from './vertexArray';

@@ -1,4 +1,4 @@
-import { Logger } from "../cleo";
+import { Logger } from "../core/logger";
 import { Scene } from "../core/scene/scene";
 import { Node } from "../core/scene/nodes/node";
 import { ModelNode } from "../core/scene/nodes/modelNode";

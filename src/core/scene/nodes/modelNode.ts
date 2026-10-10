@@ -1,12 +1,10 @@
 import { AnimatedModel } from "../../../animation/animatedModel";
 import { AnimationMapping, AnimationStateMachine, Animator } from "../../../animation/animator";
-import { Material } from "../../../graphics/material";
 import { Model } from "../../../graphics/model";
 import { ShaderManager } from "../../../graphics/systems/shaderManager";
 import { geometryAttributesFor } from '../../../graphics/rhi/vertexLayouts';
 import type { RagdollOptions } from "../../../physics/ragdoll";
 import type { BVH } from "../../bvh";
-import { Logger } from "../../logger";
 import { sceneStats, sceneStatsDetail } from "../sceneStats";
 import { mat4, vec3 } from "gl-matrix";
 import { socketModelMatrix, socketNames } from "../../../animation/sockets";

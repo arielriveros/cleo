@@ -1,4 +1,3 @@
-import { GLState } from "./systems/glState";
 import { bytesToDataUrl } from "../core/base64";
 import { Logger } from "../core/logger";
 import { resolveTextureFormat } from "./rhi/textureFormat";
@@ -8,7 +7,6 @@ import type { TextureView as RhiTextureView } from './rhi/resources';
 import type { CommandEncoder } from './rhi/device';
 import { WebGL2Texture } from "./rhi/webgl2/webgl2Device";
 import type { Texture as RhiTexture } from "./rhi/resources";
-import { WebGL2TextureView } from "./rhi/webgl2/webgl2Commands";
 import { TextureUsage } from "./rhi/types";
 import type { TextureFormat, TextureDimension, AddressMode, TextureConfigureDescriptor } from "./rhi/types";
 

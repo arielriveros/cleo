@@ -1,4 +1,3 @@
-import { Terrain } from "../../../terrain/terrain";
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { ModelNode } from "./modelNode";

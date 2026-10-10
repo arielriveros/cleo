@@ -1,6 +1,5 @@
 import { clamp, dampTime } from "../../../math";
 import { Node } from "../node";
-import { UISpacerNode } from "./uiContainers";
 import { UINode, numTuple, rgba } from "./uiNode";
 import type { UIColor, UIFillDirection } from "./uiNode";
 

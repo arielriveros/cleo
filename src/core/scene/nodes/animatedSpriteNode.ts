@@ -1,8 +1,6 @@
 import { Sprite, legacySheetTileset, remapLegacyFrame } from "../../../graphics/sprite";
-import { Tileset } from "../../../graphics/tilemap/tileset";
 import type { Scene } from "../scene";
 import { v4 as uuidv4 } from 'uuid';
-import { ModelNode } from "./modelNode";
 import { Node } from "./node";
 import { SpriteNode, spritePayload } from "./spriteNode";
 

@@ -3,7 +3,6 @@ import { ShaderManager } from "../../../graphics/systems/shaderManager";
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
-import { VolumetricCloudsNode } from "./volumetricCloudsNode";
 
 /**
  * Cubemap sky. Scene singleton.

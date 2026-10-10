@@ -2,7 +2,7 @@ import { Mesh } from './mesh';
 import { Geometry } from '../core/geometry';
 import { Loader } from './loader';
 import { CubemapFaces, Texture } from './texture';
-import { TextureManager } from '../cleo';
+import { TextureManager } from './systems/textureManager';
 
 export class Skybox {
     private readonly _boxMesh: Mesh = new Mesh();
