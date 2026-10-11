@@ -2,7 +2,7 @@ import { Scene, TextureManager, AudioManager } from 'cleo'
 import { sourceSkinFor } from '../../utils/rigAssets'
 import type { RenderSettings, InputMap } from 'cleo'
 import { isDefaultInputMap } from 'cleo'
-import { buildGameData, bakeTemplates } from './buildGameData'
+import { buildGameData, bakeTemplates, attachScriptModules } from './buildGameData'
 import { compressTerrainData, compressTilemapData } from './terrainImages'
 import { stripDimensionData } from './stripDimensionData'
 import { collectPublishedTextureIds, collectPublishedSoundIds } from '../../utils/references'
@@ -33,6 +33,8 @@ export interface MultiSceneSources {
   liveTriggers: Map<string, { shapes: ShapeDescription[] }>
   libs: AssetLibs
   scriptAssets?: ScriptAsset[]
+  /** Script asset id -> VFS path: turns on script modules (see GameDataSources.scriptPaths). */
+  scriptPaths?: ReadonlyMap<string, string>
   settings?: RenderSettings
   /** The project's input action map. Written ONCE at the top level, never inside a scene's blob. */
   input?: InputMap
@@ -187,6 +189,14 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     scenes,
     templates,
     textureBytes,
+  }
+  // Script modules ONCE for the whole game, like templates: a module's state lives across Game.loadScene,
+  // and two scenes importing the same helper must get the same instance. Every scene and template is
+  // stamped with its scripts' paths in place, and the union of their import closures ships here.
+  if (src.scriptPaths && src.scriptAssets) {
+    const all = { scene: { children: Object.values(scenes).map(e => e.scene) }, templates } as any
+    attachScriptModules(all, src.scriptAssets, src.scriptPaths)
+    if (all.modules) out.modules = all.modules
   }
   // Flatten the rig-level retarget corrections into the (model, animation) pair the player can index.
   // Stored on the target rig keyed by SOURCE rig; the player has a model and an animation, so publish

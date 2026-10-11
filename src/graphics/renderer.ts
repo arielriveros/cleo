@@ -1513,7 +1513,31 @@ export class Renderer {
         if (!this._deviceReady)
             throw new Error('Renderer.preInitialize() called before initialize() — await the device first');
         this._configureDefaultState();
-        this._createPrograms();
+        const programs = this._programTable();
+        const built = new Map<Omit<ShaderProgramDescriptor, 'label'>, ShaderProgram>();
+        for (const entry of programs) this._buildProgram(entry, built);
+        this._createTargets();
+    }
+
+    /**
+     * {@link preInitialize}, reporting each program as it is built and yielding to the browser every few,
+     * so a loading screen can show the compile. The same programs, in the same order: on WebGL2 each one
+     * compiles and links synchronously, and without the yields the page cannot repaint until all ~80 are
+     * done.
+     */
+    public async preInitializeAsync(onProgress?: (done: number, total: number) => void): Promise<void> {
+        if (!this._deviceReady)
+            throw new Error('Renderer.preInitializeAsync() called before initialize() — await the device first');
+        this._configureDefaultState();
+        const programs = this._programTable();
+        const built = new Map<Omit<ShaderProgramDescriptor, 'label'>, ShaderProgram>();
+        onProgress?.(0, programs.length);
+        for (let i = 0; i < programs.length; i++) {
+            this._buildProgram(programs[i], built);
+            onProgress?.(i + 1, programs.length);
+            if ((i + 1) % 6 === 0) await new Promise<void>(resolve => setTimeout(resolve, 0));
+        }
+        this._createTargets();
     }
 
     // The default GL state, deliberately still raw `gl.*`: under WebGPU this throws on the first
@@ -1540,13 +1564,11 @@ export class Renderer {
         gl.drawingBufferColorSpace = 'srgb';
     }
 
-    // Every program, then the allocations and one-shot bakes that depend on them. Separate from
-    // `preInitialize` so the boot probe can name the two halves.
-    private _createPrograms(): void {
-        // Every program the renderer registers, by the name `ShaderManager` knows it as. Built through
-        // `createShaderProgram`, so this is the list either backend builds.
-        // Do not REORDER: the driver assigns attribute locations per program.
-        const programs: ReadonlyArray<readonly [string, Omit<ShaderProgramDescriptor, 'label'>]> = [
+    // Every program the renderer registers, by the name `ShaderManager` knows it as. Built through
+    // `createShaderProgram`, so this is the list either backend builds.
+    // Do not REORDER: the driver assigns attribute locations per program.
+    private _programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgramDescriptor, 'label'>]> {
+        return [
             ['basic',                        BasicProgram],
             // Forward unlit instanced shader for the editor skeleton overlay (many spheres/bones in one draw).
             ['basicInstanced',               BasicInstancedProgram],
@@ -1670,19 +1692,24 @@ export class Renderer {
             [PARTICLE_PROGRAMS.mesh[0],      PARTICLE_PROGRAMS.mesh[1]],
             [PARTICLE_PROGRAMS.sort[0],      PARTICLE_PROGRAMS.sort[1]],
         ];
+    }
 
-        // One program can carry two names, and they must be the SAME object: uniform state lives on
-        // the program, so linking the source twice gives two that drift apart silently.
-        const built = new Map<Omit<ShaderProgramDescriptor, 'label'>, ShaderProgram>();
-        for (const [name, descriptor] of programs) {
-            let program = built.get(descriptor);
-            if (!program) {
-                program = this.device.createShaderProgram({ ...descriptor, label: name });
-                built.set(descriptor, program);
-            }
-            this._shaderManager.addShader(name, program);
+    // One program can carry two names, and they must be the SAME object: uniform state lives on the
+    // program, so linking the source twice gives two that drift apart silently. `built` remembers them.
+    private _buildProgram(entry: readonly [string, Omit<ShaderProgramDescriptor, 'label'>],
+                          built: Map<Omit<ShaderProgramDescriptor, 'label'>, ShaderProgram>): void {
+        const [name, descriptor] = entry;
+        let program = built.get(descriptor);
+        if (!program) {
+            program = this.device.createShaderProgram({ ...descriptor, label: name });
+            built.set(descriptor, program);
         }
+        this._shaderManager.addShader(name, program);
+    }
 
+    // The allocations and one-shot bakes that depend on the programs. Separate from `preInitialize` so
+    // the boot probe can name the two halves.
+    private _createTargets(): void {
         // Create framebuffers at the internal render size (canvas x renderScale), not the canvas size.
         const rw = this._renderWidth, rh = this._renderHeight;
         this._sceneFBO.create(rw, rh);
@@ -3377,7 +3404,9 @@ export class Renderer {
      */
     private _materialBindGroup(pipeline: RenderPipeline, material: Material,
                                envCube?: Texture | null): BindGroup {
-        const textures: Texture[] = [];
+        // A scratch list, not a new array per draw: _textureBindGroup only reads it.
+        const textures = this._materialTextureScratch;
+        textures.length = 0;
         for (const field of this._materialTextureFields(pipeline)) {
             // The environment cube rides in group 0 alongside the material maps but must NOT be looked
             // up as one: the miss falls back to a 2D texture, a sampler-type mismatch at draw time.
@@ -3411,6 +3440,7 @@ export class Renderer {
         return fields;
     }
     private readonly _materialFields = new WeakMap<RenderPipeline, (string | null)[]>();
+    private readonly _materialTextureScratch: Texture[] = [];
 
     /**
      * A terrain material's nine layer samplers as a bind group. Separate from
@@ -6446,14 +6476,44 @@ export class Renderer {
      * appear: a state that differs only in a field left out here would silently reuse the wrong
      * pipeline.
      */
+    // _pipelineFor runs for every draw, and its key used to be rebuilt from scratch each time: the
+    // formats array sliced and joined, the blend and depth states stringified. Most callers pass the same
+    // state OBJECTS frame after frame, so each piece is memoised on its object — the strings are made once.
+    private static readonly _depthKeys = new WeakMap<DepthStencilState, string>();
+    private static readonly _blendKeys = new WeakMap<BlendState, string>();
+    private readonly _formatKeys = new WeakMap<RenderTarget, string[]>();
+
     private static _depthKey(d: DepthStencilState): string {
-        return d.format + (d.depthWriteEnabled ? 'w' : '-') + d.depthCompare
-            + ':' + (d.depthBias ?? 0) + ':' + (d.depthBiasSlopeScale ?? 0);
+        let k = Renderer._depthKeys.get(d);
+        if (k === undefined) {
+            k = d.format + (d.depthWriteEnabled ? 'w' : '-') + d.depthCompare
+                + ':' + (d.depthBias ?? 0) + ':' + (d.depthBiasSlopeScale ?? 0);
+            Renderer._depthKeys.set(d, k);
+        }
+        return k;
     }
 
     private static _blendKey(b: BlendState): string {
-        return b.color.srcFactor + b.color.dstFactor + b.color.operation
-            + '/' + b.alpha.srcFactor + b.alpha.dstFactor + b.alpha.operation;
+        let k = Renderer._blendKeys.get(b);
+        if (k === undefined) {
+            k = b.color.srcFactor + b.color.dstFactor + b.color.operation
+                + '/' + b.alpha.srcFactor + b.alpha.dstFactor + b.alpha.operation;
+            Renderer._blendKeys.set(b, k);
+        }
+        return k;
+    }
+
+    /** The first `targets` colour formats of `target`, joined — memoised per target and count. */
+    private _formatKey(target: RenderTarget | null | undefined, targets: number): string {
+        if (!target) return '';
+        let byCount = this._formatKeys.get(target);
+        if (!byCount) { byCount = []; this._formatKeys.set(target, byCount); }
+        let k = byCount[targets];
+        if (k === undefined) {
+            k = target.colorViews.slice(0, targets).map(v => v.texture.format).join(',');
+            byCount[targets] = k;
+        }
+        return k;
     }
 
     private _pipelineFor(program: string,
@@ -6482,9 +6542,6 @@ export class Renderer {
         // The ATTACHMENT FORMATS are part of the pipeline and WebGPU rejects a mismatch with its pass,
         // so they are derived from the target the caller is about to draw into.
         const target = options.target ?? this._passTarget;
-        const colorFormats = target
-            ? target.colorViews.slice(0, targets).map(v => v.texture.format)
-            : [];
         // A caller that named its own depth state keeps it; otherwise it comes from the target, because
         // `_beginFullscreenPass` always declares a depth attachment and WebGPU requires the pipeline to
         // match one that exists.
@@ -6502,11 +6559,12 @@ export class Renderer {
         const key = program + '|' + cullMode + '|' + targets + '|' + topology + '|' + vertex
                             + '|' + (builtFor ?? '') + (cubeFace ? '|cw' : '')
                             + (reflection.vertexWgsl ? '|vs' : '')
-                            + '|' + colorFormats.join(',')
+                            + '|' + this._formatKey(target, targets)
                             + (blend ? '|' + Renderer._blendKey(blend) : '')
                             + (resolvedDepth ? '|' + Renderer._depthKey(resolvedDepth) : '');
         let pipeline = this._fullscreenPipelines.get(key);
         if (!pipeline) {
+            const colorFormats = target ? target.colorViews.slice(0, targets).map(v => v.texture.format) : [];
             const module = device.createShaderModule({
                 label: program,
                 program,
@@ -9182,6 +9240,13 @@ export class Renderer {
             shadedMpx: frameStats.shadedMpx,
             stateChanges: frameStats.stateChanges,
             stateChangesSaved: frameStats.stateChangesSaved,
+            particlesDrawn: frameStats.particlesDrawn,
+            particleSteps: frameStats.particleSteps,
+            particleSystems: frameStats.particleSystems,
+            particleSystemsCulled: frameStats.particleSystemsCulled,
+            particleDraws: frameStats.particleDraws,
+            particleGpuCreates: frameStats.particleGpuCreates,
+            particleGpuReuses: frameStats.particleGpuReuses,
             frameMs: frameStats.frameMs,
             pipeline: this._deferred ? 'deferred' as const : 'forward' as const,
             glErrors: this._glErrorCount,

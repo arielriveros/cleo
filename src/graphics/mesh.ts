@@ -86,6 +86,23 @@ export class Mesh {
         GLState.bindVAO(this._vao());
     }
 
+    /**
+     * A fresh index buffer for `data`, destroying the one it replaces. `create` can run twice on one Mesh
+     * (a model re-uploaded in place), and the old index buffer used to be dropped without a destroy — the
+     * device keeps it alive until then, so every respawned enemy leaked one for the rest of the session.
+     * LOD index sets alias `_lodBuffers[0]` to the base buffer; they are rebuilt by setLodIndices.
+     */
+    private _replaceIndexBuffer(data: Uint16Array | Uint32Array): void {
+        for (let i = 1; i < this._lodBuffers.length; i++) this._lodBuffers[i].destroy();
+        this._lodBuffers = [];
+        this._lodCounts = [];
+        this._lodFormats = [];
+        this._lod = 0;
+        this._indexBuffer?.destroy();
+        this._indexBuffer = device.createBuffer({ label: 'mesh.indices', size: 0, usage: BufferUsage.INDEX | BufferUsage.COPY_DST });
+        this._indexBuffer = device.reallocateBuffer(this._indexBuffer, data);
+    }
+
     public create(vertices: VertexData, vertex_count: number, indices: IndexData | null = null): Mesh {
         this._bindOwnVAO();
 
@@ -98,8 +115,7 @@ export class Mesh {
         if (indices && indices.length > 0) {
             const data = createIndexArray(indices);
             this._indexFormat = indexFormatFor(data);
-            this._indexBuffer = device.createBuffer({ label: 'mesh.indices', size: 0, usage: BufferUsage.INDEX | BufferUsage.COPY_DST });
-            this._indexBuffer = device.reallocateBuffer(this._indexBuffer, data);
+            this._replaceIndexBuffer(data);
             this._indexCount = indices.length;
         }
 
@@ -131,11 +147,15 @@ export class Mesh {
 
         // Create and bind bone indices buffer
         const boneIndexData = new Int32Array(boneIndices);
+        // A re-upload into the same Mesh (a model rebuilt in place) must not orphan the previous buffers:
+        // the device keeps every buffer alive until it is destroyed, so each one leaked for the session.
+        this._boneIndicesBuffer?.destroy();
         this._boneIndicesBuffer = device.createBuffer({ label: 'mesh.boneIndices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
         this._boneIndicesBuffer = device.reallocateBuffer(this._boneIndicesBuffer, boneIndexData);
 
         // Create and bind bone weights buffer
         const boneWeightData = new Float32Array(boneWeights);
+        this._boneWeightsBuffer?.destroy();
         this._boneWeightsBuffer = device.createBuffer({ label: 'mesh.boneWeights', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
         this._boneWeightsBuffer = device.reallocateBuffer(this._boneWeightsBuffer, boneWeightData);
 
@@ -144,8 +164,7 @@ export class Mesh {
         if (indices && indices.length > 0) {
             const data = createIndexArray(indices);
             this._indexFormat = indexFormatFor(data);
-            this._indexBuffer = device.createBuffer({ label: 'mesh.indices', size: 0, usage: BufferUsage.INDEX | BufferUsage.COPY_DST });
-            this._indexBuffer = device.reallocateBuffer(this._indexBuffer, data);
+            this._replaceIndexBuffer(data);
             this._indexCount = indices.length;
         }
 

@@ -43,11 +43,15 @@ const TSCONFIG = `{
     "noImplicitThis": false,
     "skipLibCheck": true,
     "noEmit": true,
-    "baseUrl": "."
+    "forceConsistentCasingInFileNames": true,
+    // Scripts import each other by project path: '@/Shared/Math' is Shared/Math.ts in this folder (and
+    // Shared/Math in the editor's Assets panel). Relative './Util' imports work too. There is deliberately no baseUrl: it
+    // would also let a bare 'Shared/Math' type-check here, which the game itself would not accept.
+    "paths": { "@/*": ["./*"] }
   },
   // The ambient declarations are named explicitly: a "**/*" glob does not match a dot-directory.
   "include": ["**/*.ts", ".cleo/types/*.d.ts"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "**/*.test.ts", "**/*.spec.ts"]
 }
 `
 

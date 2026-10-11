@@ -126,3 +126,33 @@ describe('bundle layout round trip', () => {
     await expect(readBundle(sourceOver(archive))).rejects.toThrow(/assets\.bin/);
   });
 });
+
+describe('bundle input map', () => {
+  const custom = {
+    version: 1,
+    maps: [{
+      name: 'Gameplay', enabled: true,
+      actions: [{ name: 'LightAttack', kind: 'button', bindings: [{ id: 'la:mouse', source: { device: 'mouse', button: 'left' } }] }],
+    }],
+    virtualControls: [],
+    touch: { tapMaxSeconds: 0.25, tapMaxPixels: 12, doubleTapMaxSeconds: 0.3, longPressSeconds: 0.5, dragMinPixels: 8, pinchMinPixels: 12 },
+  };
+
+  it('carries a custom input map through export and import', async () => {
+    const bundle = makeBundle();
+    bundle.libraries.inputMap = custom as any;
+    const archive = archiveOf(await bundleEntries(bundle));
+    expect([...archive.keys()]).toContain(`${BUNDLE_PATHS.librariesDir}inputMap.json`);
+
+    const { bundle: back } = await readBundle(sourceOver(archive));
+    expect(back.libraries.inputMap).toEqual(custom);
+  });
+
+  it('writes no entry for the default map, and reads its absence back as null', async () => {
+    const archive = archiveOf(await bundleEntries(makeBundle()));
+    expect([...archive.keys()]).not.toContain(`${BUNDLE_PATHS.librariesDir}inputMap.json`);
+
+    const { bundle: back } = await readBundle(sourceOver(archive));
+    expect(back.libraries.inputMap).toBeNull();
+  });
+});

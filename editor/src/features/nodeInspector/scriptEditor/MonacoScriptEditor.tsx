@@ -4,6 +4,8 @@ import { ensureMonaco } from './monacoSetup'
 import { useCodeTheme } from './codeThemeStore'
 import CodeEditorHeader from './CodeEditorHeader'
 import { subscribe, getRevision, externalSourceOf } from '../../scriptWorkspace/externalSourceStore'
+import { syncScriptModels, scriptModelFor } from './scriptModels'
+import type { ScriptAsset } from '../../../utils/scripts'
 
 // The Monaco code editor for a Script asset (the dedicated Script tab). A class-based script is a normal TS
 // module, so Monaco's TypeScript worker types it against the engine's real declarations (monacoSetup /
@@ -13,6 +15,11 @@ export default function MonacoScriptEditor(props: {
   initialSource: string
   onChange: (src: string) => void
   readOnly?: boolean
+  /** The script library and each script's module id, so imports between scripts type-check. */
+  assets?: readonly ScriptAsset[]
+  pathOf?: (assetId: string) => string | undefined
+  /** The saved source, restored into the shared model when this tab closes with unsaved edits. */
+  savedSource?: string
 }) {
   const theme = useCodeTheme()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -22,6 +29,8 @@ export default function MonacoScriptEditor(props: {
   onChangeRef.current = props.onChange
   const readOnlyRef = useRef(!!props.readOnly)
   readOnlyRef.current = !!props.readOnly
+  const savedSourceRef = useRef(props.savedSource)
+  savedSourceRef.current = props.savedSource
   // Bumped when the script workspace (VSCode) reports an edit to this script from disk.
   const externalRevision = useSyncExternalStore(subscribe, getRevision, getRevision)
   // While an external edit is being written into the model the content listener must not report it back
@@ -33,10 +42,14 @@ export default function MonacoScriptEditor(props: {
     if (!containerRef.current) return
     const monaco = ensureMonaco()
     monacoRef.current = monaco
-    // A file:/// URI (not inmemory://) so `import … from 'cleo'` resolves against the engine types under
-    // file:///node_modules/cleo (see cleoTypes.ts).
-    const uri = monaco.Uri.parse(`file:///cleo/${props.scriptId}.ts`)
-    const model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(props.initialSource, 'typescript', uri)
+    // Every script gets a model at its project path (scriptModels.ts), so `import … from './Util'` or
+    // '@/Shared/Math' resolves against the scripts it names. This tab BORROWS the one for its script. A
+    // script the explorer has not indexed yet falls back to a private model; either way a file:/// URI
+    // (not inmemory://), so `import … from 'cleo'` resolves against the engine types (cleoTypes.ts).
+    if (props.assets && props.pathOf) syncScriptModels(monaco, props.assets, props.pathOf)
+    const shared = scriptModelFor(monaco, props.scriptId)
+    const uri = shared?.uri ?? monaco.Uri.parse(`file:///cleo/${props.scriptId}.ts`)
+    const model = shared ?? monaco.editor.getModel(uri) ?? monaco.editor.createModel(props.initialSource, 'typescript', uri)
     if (model.getValue() !== props.initialSource) model.setValue(props.initialSource)
 
     const editor = monaco.editor.create(containerRef.current, {
@@ -56,9 +69,23 @@ export default function MonacoScriptEditor(props: {
       if (!readOnlyRef.current && !applyingExternalRef.current) onChangeRef.current(model.getValue())
     })
 
-    return () => { sub.dispose(); editor.dispose(); editorRef.current = null; model.dispose() }
+    return () => {
+      sub.dispose()
+      editor.dispose()
+      editorRef.current = null
+      // A shared model stays for the other scripts that import this one, holding the SAVED source.
+      if (shared) { if (savedSourceRef.current !== undefined && model.getValue() !== savedSourceRef.current) model.setValue(savedSourceRef.current) }
+      else model.dispose()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Keep the other scripts' models current while this tab is open: a module saved elsewhere, or a
+  // script moved in the explorer, changes what this one's imports resolve to.
+  useEffect(() => {
+    const monaco = monacoRef.current
+    if (monaco && props.assets && props.pathOf) syncScriptModels(monaco, props.assets, props.pathOf)
+  }, [props.assets, props.pathOf])
 
   // External-workspace edits are applied as an edit operation rather than setValue, so the undo stack
   // and (roughly) the cursor survive.

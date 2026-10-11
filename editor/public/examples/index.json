@@ -15,10 +15,20 @@
       "name": "Night Shift",
       "description": "A third-person survival night: collect before dawn, and stay ahead of what the dark brings.",
       "order": 1,
-      "bytes": 167952920,
+      "bytes": 167953128,
       "sceneCount": 2,
       "textureCount": 30,
       "createdAt": 1788000000000
+    },
+    {
+      "slug": "souls-demo",
+      "name": "Hollow Keep",
+      "description": "A one-level souls-like: stamina combat, rolls, lock-on, bonfires, a fog gate and a two-phase boss. Placeholder art, real mechanics — see SOULS_DEMO.md to swap in your own.",
+      "order": 2,
+      "bytes": 93286658,
+      "sceneCount": 1,
+      "textureCount": 5,
+      "createdAt": 1790000000000
     }
   ]
 }

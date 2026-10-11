@@ -2,12 +2,16 @@ import { Node } from 'cleo'
 import type { NodeVariableType, NodeVariableAccess } from 'cleo'
 import { cryptoRandomId } from './ids'
 
-// A reusable, class-based Script asset, referenced by many nodes via the SCRIPT_ID_VAR node variable.
+// A reusable Script asset. Two kinds:
 //
-// The source is a single class (`export default class XNode extends Node { ... }`): handler methods are
-// overrides, and class FIELDS are the node's variables, held as NATIVE per-node properties at runtime.
-// Access modifiers are enforced by the editor's type-checker at author time; a leading underscore marks a
-// field internal and hides it from the inspector's reflection view.
+//   class   (the usual) a node script — `export default class XNode extends Node { ... }`, referenced by
+//           many nodes via the SCRIPT_ID_VAR node variable. Handler methods are overrides, and class
+//           FIELDS are the node's variables, held as NATIVE per-node properties at runtime. Access
+//           modifiers are enforced by the editor's type-checker at author time; a leading underscore marks
+//           a field internal and hides it from the inspector's reflection view. A class script may extend
+//           another class script (a shared base class) — see scriptGraph.ts.
+//   module  shared code other scripts import — functions, constants, enums, types — with no default class.
+//           Never attached to a node. Imported by project path: `import { x } from '@/Shared/Math'`.
 
 // Node variable linking a node to a shared script asset. A link marker, not a script variable, but it
 // still lives in the node's variable Map.
@@ -74,12 +78,38 @@ export type ScriptVarSchema = {
   hidden: boolean                 // underscore-prefixed: internal state, not shown in the inspector
 }
 
+export type ScriptKind = 'class' | 'module'
+
 export type ScriptAsset = {
   id: string
   name: string
+  /** For a class script, the engine class it (ultimately) extends. A module stores 'node' and ignores it. */
   baseType: ScriptBaseType
-  source: string                  // the class source
-  variables: ScriptVarSchema[]    // derived cache, parsed from the class field declarations
+  source: string
+  /** Derived cache: the class's field declarations, INCLUDING inherited ones from a base-class script. */
+  variables: ScriptVarSchema[]
+  /** Derived cache, recomputed from the source on every save. Absent on assets saved before modules: 'class'. */
+  kind?: ScriptKind
+}
+
+/** The kind of an asset, defaulting the field older assets do not carry. */
+export function scriptKindOfAsset(asset: Pick<ScriptAsset, 'kind'> | null | undefined): ScriptKind {
+  return asset?.kind === 'module' ? 'module' : 'class'
+}
+
+/**
+ * What a source IS: a node script (it has a default-exported class, or no exports at all — which keeps
+ * every legacy `this.onX = …` script and an empty new file attachable), or a shared module (it exports
+ * something, but no default class). A file whose only export is one named class is a node script too:
+ * that is how scripts were written before default exports were the convention.
+ */
+export function scriptKindOf(source: string): ScriptKind {
+  const src = stripComments(source)
+  if (/^\s*export\s+default\s+(abstract\s+)?class\b/m.test(src)) return 'class'
+  const onlyClassExports = /^\s*export\s+(abstract\s+)?class\b/m.test(src)
+    && !/^\s*export\s+(const|let|var|function|async|enum|default|\{|\*)/m.test(src)
+  if (onlyClassExports) return 'class'
+  return /^\s*export\b/m.test(src) ? 'module' : 'class'
 }
 
 /** The script asset id a node references, or undefined. */
@@ -92,6 +122,11 @@ export function baseTypeMatchesNode(baseType: ScriptBaseType, nodeType: string):
   return baseType === 'node' || baseType === nodeType
 }
 
+/** True if `asset` can be a node's script: a class script whose base type fits. A module never attaches. */
+export function isAttachable(asset: ScriptAsset, nodeType: string): boolean {
+  return scriptKindOfAsset(asset) === 'class' && baseTypeMatchesNode(asset.baseType, nodeType)
+}
+
 /* -------------------------------------------------------------------------- */
 /* Field-declaration parser — the reflection system, moved from UI into script */
 /* -------------------------------------------------------------------------- */
@@ -101,9 +136,12 @@ function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, '')
 }
 
-/** Extract the top-level class body `{ ... }` of the first class in the source, or '' if none. */
+/**
+ * Extract the top-level class body `{ ... }` of the script's class: the DEFAULT-exported one when there
+ * is one (a script may declare helper classes above it), else the first class. '' if none.
+ */
 function classBody(src: string): string {
-  const m = /\bclass\b[^{]*\{/.exec(src)
+  const m = /\bexport\s+default\s+(?:abstract\s+)?class\b[^{]*\{/.exec(src) ?? /\bclass\b[^{]*\{/.exec(src)
   if (!m) return ''
   let i = m.index + m[0].length
   let depth = 1
@@ -414,9 +452,55 @@ export default class ${className} extends ${base} {
 `
 }
 
-/** Snapshot a class source into a saveable Script asset, parsing its field declarations into the schema. */
-export function buildScriptAsset(name: string, baseType: ScriptBaseType, source: string, id?: string): ScriptAsset {
-  return { id: id ?? cryptoRandomId(), name, baseType, source, variables: parseScriptVariables(source) }
+/**
+ * The starter source for a new script MODULE: shared code other scripts import by project path. `path`
+ * is the module id it will live at ('/Shared/Math'), shown in the comment so the import is copy-ready.
+ */
+export function defaultScriptModule(name: string, path?: string): string {
+  const where = path ?? `/${(name || 'Module').replace(/[^A-Za-z0-9_ -]/g, '')}`
+  const file = where.split('/').pop()
+  return `import { Logger } from 'cleo'
+
+// ${name} is a script MODULE: shared code that other scripts import, never attached to a node itself.
+// It is evaluated once per game, so state kept here is shared by every script that imports it.
+//
+// Import it from any script by its project path:
+//   import { clamp01, TAU } from '@${where}'
+// or relative to the importing script:
+//   import { clamp01 } from './${file}'
+//
+// Export functions, constants, enums, types and classes. An exported class can be a shared BASE class:
+// another script's \`export default class Hollow extends EnemyBase\` inherits its methods and fields.
+
+export const TAU = Math.PI * 2
+
+export function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value))
+}
+
+const seen = new Set<string>()
+
+export function logOnce(message: string): void {
+  if (seen.has(message)) return
+  seen.add(message)
+  Logger.log(message, 'Script')
+}
+`
+}
+
+/**
+ * Snapshot a source into a saveable Script asset: its kind, and its field declarations as the schema.
+ * `variables` overrides the reflection — scriptGraph.resolveScriptVariables passes the merged schema of a
+ * class that inherits from another script.
+ */
+export function buildScriptAsset(
+  name: string, baseType: ScriptBaseType, source: string, id?: string, variables?: ScriptVarSchema[],
+): ScriptAsset {
+  const kind = scriptKindOf(source)
+  return {
+    id: id ?? cryptoRandomId(), name, baseType, source, kind,
+    variables: kind === 'module' ? [] : (variables ?? parseScriptVariables(source)),
+  }
 }
 
 /**
@@ -425,7 +509,7 @@ export function buildScriptAsset(name: string, baseType: ScriptBaseType, source:
  * Returns false and does nothing if the script's base type is incompatible with the node.
  */
 export function applyScriptAsset(node: Node, asset: ScriptAsset, scripts: Map<string, string>): boolean {
-  if (!baseTypeMatchesNode(asset.baseType, node.nodeType)) return false
+  if (!isAttachable(asset, node.nodeType)) return false
   node.setVariable(SCRIPT_ID_VAR, asset.id, 'string')
   seedScriptFields(node, asset, false)
   scripts.set(node.id, asset.source)
@@ -440,6 +524,10 @@ export function seedScriptFields(node: Node, asset: ScriptAsset, overwrite: bool
   const n = node as any
   const wanted = new Set(asset.variables.map(v => v.name))
   for (const v of asset.variables) {
+    // Internal (`_`) fields are the class's own business: its initializer sets them when the script
+    // attaches. Their reflected default is only a guess (`_w: any = {}` reflects as the number 0), and a
+    // seeded guess would be saved as `scriptVars` and override the real initial value.
+    if (v.hidden) continue
     if (overwrite || !(v.name in n) || n[v.name] === undefined) n[v.name] = cloneDefault(v.default)
   }
   // Prune native fields the schema no longer declares.
@@ -474,7 +562,8 @@ export function unlinkScript(node: Node, asset: ScriptAsset | undefined, scripts
 export function collectScriptVars(node: Node, asset: ScriptAsset): Record<string, any> {
   const n = node as any
   const out: Record<string, any> = {}
-  for (const v of asset.variables) if (v.name in n) out[v.name] = n[v.name]
+  // Never internal fields (see seedScriptFields): a node may still carry one seeded by an older editor.
+  for (const v of asset.variables) if (!v.hidden && v.name in n) out[v.name] = n[v.name]
   return out
 }
 
@@ -494,7 +583,7 @@ export function fanOutScripts(
     const sid = getScriptIdOf(node)
     if (!sid) continue
     const asset = byId.get(sid)
-    if (!asset) continue
+    if (!asset || scriptKindOfAsset(asset) === 'module') continue
     scripts.set(node.id, asset.source)
     scriptVars.set(node.id, collectScriptVars(node, asset))
   }

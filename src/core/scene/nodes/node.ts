@@ -739,9 +739,12 @@ export class Node {
 
   // Editor-play path: the script is a source string in the scene JSON, compiled here. Published games ship
   // pre-compiled factories instead. A script that fails to compile is reported and skipped.
-  private static _parseScript(node: Node, script: string): void {
+  //
+  // `path` is the script asset's project path ('/Enemies/Hollow'), stamped by the editor's play build as
+  // `json.scriptPath` (never serialized back) — what `./` and `../` imports resolve against.
+  private static _parseScript(node: Node, script: string, path?: string): void {
     try {
-      attachScriptFactory(node, compileScript(script));
+      attachScriptFactory(node, compileScript(script, { path }));
     } catch (error) {
       Logger.error(`Error parsing script for node ${node.name}: ${error}`, 'Script');
     }
@@ -786,7 +789,7 @@ export class Node {
     Node._parseScriptVars(node, json.scriptVars);
 
     if (json.script)
-      Node._parseScript(node, json.script);
+      Node._parseScript(node, json.script, typeof json.scriptPath === 'string' ? json.scriptPath : undefined);
     else {
       // No-eval (published) path: the source was stripped at publish time and lives as a real function in
       // game.scripts.js. `__sourceId` is the template's original id, the key those factories use.

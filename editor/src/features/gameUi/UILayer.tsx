@@ -189,12 +189,15 @@ export default function UILayer({ getScene, interactive, onSelect, forceVisibleI
     // Structure only: a transform or component change must not re-render here, or the imperative sync
     // is pointless.
     useEffect(() => {
+        // One re-render per frame at most, however many nodes a frame adds or removes.
+        let frame = 0;
         const onChanged = (e?: SceneChange) => {
             if (e && e.kind !== 'structure' && e.kind !== 'visibility' && e.kind !== 'name') return;
-            setStructureTick(t => t + 1);
+            if (frame) return;
+            frame = requestAnimationFrame(() => { frame = 0; setStructureTick(t => t + 1); });
         };
         CleoEngine.eventEmitter.on('SCENE_CHANGED', onChanged);
-        return () => { CleoEngine.eventEmitter.off('SCENE_CHANGED', onChanged); };
+        return () => { cancelAnimationFrame(frame); CleoEngine.eventEmitter.off('SCENE_CHANGED', onChanged); };
     }, []);
 
     // Top-level roots only: a nested root is already rendered by its parent's subtree walk.

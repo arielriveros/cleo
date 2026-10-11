@@ -506,7 +506,7 @@ export class ControllerNode extends Node {
 
         // Steer the camera BEFORE the pawn consumes the intent, so the strafe matches this frame's look
         // rather than the previous one's.
-        if (this.driveAimTarget && this.controlSource !== 'none') this._driveAim();
+        if (this.driveAimTarget && this.controlSource !== 'none') this._driveAim(delta);
 
         this._publish(pawn);
 
@@ -1235,15 +1235,19 @@ export class ControllerNode extends Node {
         }
     }
 
-    private _driveAim(): void {
+    private _driveAim(delta: number): void {
         const rig = this.aimRig;
         if (!rig) return;
         const [x, y] = this._intent.look;
         if (x === 0 && y === 0) return;
-        // RAW per-frame deltas, not scaled by delta: addYaw/addPitch apply the rig's own sensitivity,
-        // inversion and clamping, and a mouse delta is already a per-frame quantity.
-        rig.addYaw(-x);
-        rig.addPitch(y);
+        // A mouse delta is already per FRAME (the distance moved since the last one), so it goes in raw;
+        // addYaw/addPitch apply the rig's sensitivity, inversion and clamping. A STICK is a held rate, so it
+        // is scaled by time — per frame it turned the camera twice as fast at 120 fps as at 60. Scaled to
+        // match 60 fps exactly, so existing tuning keeps its feel.
+        const k = this.controlSource === 'player' && InputSystem.instance.device(this.lookAction) === 'gamepadAxis'
+            ? delta * 60 : 1;
+        rig.addYaw(-x * k);
+        rig.addPitch(y * k);
     }
 
     /**

@@ -90,7 +90,20 @@ export interface SimStep {
     velocity: vec3;
     /** Kill every particle before anything else this step. */
     reset: boolean;
+    /**
+     * The slots that can hold a live particle after this step: `liveCount` slots ending at the cursor,
+     * wrapping. The GPU simulates and draws only these. See {@link EmitterRuntime.liveWindow}.
+     */
+    liveStart: number;
+    liveCount: number;
 }
+
+/**
+ * Seconds a slot stays in the live window past the longest lifetime. Covers the step a particle is born
+ * partway through, and keeps BOTH ping-pong copies of a slot dead before it drops out of the window —
+ * a slot outside it is never touched again, so whatever it last held must already be a corpse.
+ */
+export const LIVE_WINDOW_MARGIN = 0.25;
 
 /** Deterministic 0..1 stream for burst probabilities. mulberry32. */
 function rng(seed: number): () => number {
@@ -129,6 +142,14 @@ export class EmitterRuntime {
     private _hasMatrix = false;
     private _maxLife: number;
     private _def: EmitterDef;
+    /** Emitter time that never restarts (`_time` does, on play), for the spawn log. */
+    private _clock = 0;
+    // The spawn log: when (on `_clock`) and how many slots each recent step handed out, oldest first
+    // from `_logHead`. `_logSum` is the total still inside the live window.
+    private readonly _logT: number[] = [];
+    private readonly _logN: number[] = [];
+    private _logHead = 0;
+    private _logSum = 0;
 
     constructor(def: EmitterDef) {
         this._def = def;
@@ -156,10 +177,48 @@ export class EmitterRuntime {
     public get time(): number { return this._time; }
     public get cursor(): number { return this._cursor; }
     public get serial(): number { return this._serial; }
+    /** The longest lifetime a particle of this emitter can be born with. */
+    public get maxLife(): number { return this._maxLife; }
+    /** Seconds since this emitter last spawned anything (Infinity before it ever has, or after a clear). */
+    public get sinceSpawning(): number { return this._sinceSpawning; }
+
+    /**
+     * The ring slots that can still hold a live particle: the `count` slots most recently handed out,
+     * ending at the cursor. Everything older was born more than a lifetime (plus margin) ago and is dead.
+     * Exact from the CPU's own spawn log, no readback, because the ring hands slots out in order.
+     */
+    public liveWindow(): { start: number; count: number } {
+        const count = Math.min(this.capacity, this._logSum);
+        return { start: (this._cursor - count + this.capacity) % this.capacity, count };
+    }
+
+    private _log(count: number, reset: boolean): void {
+        if (reset) {
+            this._logT.length = 0;
+            this._logN.length = 0;
+            this._logHead = 0;
+            this._logSum = 0;
+        }
+        if (count > 0) {
+            this._logT.push(this._clock);
+            this._logN.push(count);
+            this._logSum += count;
+        }
+        const horizon = this._clock - this._maxLife - LIVE_WINDOW_MARGIN;
+        while (this._logHead < this._logT.length && this._logT[this._logHead] < horizon) {
+            this._logSum -= this._logN[this._logHead];
+            this._logHead++;
+        }
+        if (this._logHead > 64 && this._logHead * 2 > this._logT.length) {
+            this._logT.splice(0, this._logHead);
+            this._logN.splice(0, this._logHead);
+            this._logHead = 0;
+        }
+    }
 
     /** Spawning, or still holding particles that have not yet reached the end of their life. */
     public get isAlive(): boolean {
-        return this._state === 'playing' || this._sinceSpawning <= this._maxLife;
+        return this._state === 'playing' || this._sinceSpawning <= this._maxLife || this._pendingBurst > 0;
     }
 
     public play(): void {
@@ -218,8 +277,12 @@ export class EmitterRuntime {
 
         const reset = this._pendingReset;
         this._pendingReset = false;
+        this._clock += dt;
+        this._log(count, reset);
+        // A reset kills every slot, so that one step must reach every slot.
+        const live = reset ? { start: 0, count: this.capacity } : this.liveWindow();
         return { dt, time: this._time, spawnStart, spawnCount: count, serial, prevMatrix: prev,
-                 matrix: mat4.clone(matrix), velocity, reset };
+                 matrix: mat4.clone(matrix), velocity, reset, liveStart: live.start, liveCount: live.count };
     }
 
     /** Particles born in the interval [t0, t1) of emitter time, delay and cycles accounted for. */
@@ -313,15 +376,53 @@ export class ParticleSystemRuntime {
 
     /** Steps kept per emitter when nothing drains them (a hidden tab). Older ones are discarded. */
     private static readonly MAX_PENDING = 32;
+    /** Steps one frame's {@link advance} may queue per emitter. */
+    public static readonly MAX_STEPS_PER_FRAME = 2;
+    /** Prewarm steps one frame may run per emitter; the rest wait for the frames after it. */
+    public static readonly PREWARM_STEPS_PER_FRAME = 16;
+    /** The prewarm's step length. Coarser than a frame step: nobody watches a prewarm integrate. */
+    public static readonly PREWARM_STEP = 1 / 20;
+
+    /** Per emitter: prewarm seconds still owed. */
+    private readonly _prewarmLeft: number[];
+    /** The longest step every emitter stays stable at: tighter when any of them collides. */
+    private _maxStep: number;
 
     constructor(defs: readonly EmitterDef[]) {
         const resolved = resolveSubEmitters(defs);
         this.emitters = resolved.defs.map(d => new EmitterRuntime(d));
         this.links = resolved.links;
         this.pending = this.emitters.map(() => []);
+        this._prewarmLeft = this.emitters.map(() => 0);
+        this._maxStep = ParticleSystemRuntime._stableStep(resolved.defs);
     }
 
-    public get isAlive(): boolean { return this.emitters.some(e => e.isAlive); }
+    private static _stableStep(defs: readonly EmitterDef[]): number {
+        // Past 1/30 s a step tunnels through what depth or plane collision is meant to stop. Everything
+        // else (drag, noise, forces) stays well-behaved to 1/20 s, which keeps a game running just under
+        // 30 fps at one step a frame instead of two.
+        return defs.some(d => activeModule(d, 'collision')) ? 1 / 30 : 1 / 20;
+    }
+
+    /**
+     * Still emitting, or still holding a particle that may be alive. A sub-emitter's particles outlive
+     * its own clock: they are born from parent events up to a parent lifetime after the parent stops
+     * spawning, and then live their own.
+     */
+    public get isAlive(): boolean {
+        return this.emitters.some((e, i) => {
+            if (e.isAlive) return true;
+            const link = this.links[i];
+            if (!link) return false;
+            const parent = this.emitters[link.parent];
+            return parent.sinceSpawning <= parent.maxLife + e.maxLife;
+        });
+    }
+
+    /** Steps queued and not yet run on the GPU, or prewarm still owed. */
+    public get hasPendingWork(): boolean {
+        return this.pending.some(q => q.length > 0) || this._prewarmLeft.some(t => t > 0);
+    }
 
     /**
      * Whether `defs` can replace the current definitions in place: the same enabled emitters, in the
@@ -345,31 +446,58 @@ export class ParticleSystemRuntime {
             this.emitters[i].setDef(d);
             this.links[i] = resolved.links[i];
         });
+        this._maxStep = ParticleSystemRuntime._stableStep(resolved.defs);
     }
 
     /**
-     * Advance every emitter. `dt` is split into steps of at most `maxStep` seconds, each its own GPU
-     * step: a large frame time integrated in one go tunnels through colliders and overshoots drag.
+     * Advance every emitter by one frame. `dt` is split into steps no longer than the stable step, each
+     * its own GPU step: a large frame time integrated in one go tunnels through colliders and overshoots
+     * drag.
+     *
+     * THE FRAME IS CLAMPED to {@link MAX_STEPS_PER_FRAME} steps, and time past them is dropped: the
+     * effect runs slow through a hitch instead of catching up. Catching up is what turned one slow frame
+     * into a stagger. Every step is a GPU pass per emitter, so a 100 ms frame queued three times the
+     * work for the next frame, which was slow in turn. Engines cap their particle clocks the same way.
+     *
+     * Prewarm still owed (see {@link prewarm}) runs first, a bounded slice per frame.
      */
-    public advance(dt: number, matrix: mat4, rateScale = 1, maxStep = 1 / 30): void {
+    public advance(dt: number, matrix: mat4, rateScale = 1, maxStep = this._maxStep): void {
+        this._runPrewarm(matrix);
         if (!(dt > 0)) return;
-        const steps = Math.min(8, Math.max(1, Math.ceil(dt / maxStep)));
-        const h = dt / steps;
+        const limit = ParticleSystemRuntime.MAX_STEPS_PER_FRAME;
+        const span = Math.min(dt, maxStep * limit);
+        const steps = Math.min(limit, Math.max(1, Math.ceil(span / maxStep - 1e-9)));
+        const h = span / steps;
         for (let s = 0; s < steps; s++)
-            this.emitters.forEach((emitter, i) => this._push(i, emitter.advance(h, matrix, rateScale)));
+            for (let i = 0; i < this.emitters.length; i++) this._push(i, this.emitters[i].advance(h, matrix, rateScale));
     }
 
     /**
-     * Run a looping emitter through a whole cycle immediately, so it starts "already going". Bounded:
-     * the steps are real GPU work, and a 30 s cycle at 30 Hz is 900 dispatches in one frame.
+     * Run each looping emitter through a cycle so it starts "already going". OWED rather than run here:
+     * the steps are real GPU work, and a whole cycle in one frame (96 passes for a 5 s fog) hitched every
+     * time an effect started. {@link advance} pays it off over the following frames.
      */
-    public prewarm(matrix: mat4): void {
+    public prewarm(_matrix?: mat4): void {
         this.emitters.forEach((emitter, i) => {
             if (!emitter.def.prewarm || !emitter.def.looping) return;
-            const span = Math.min(emitter.def.duration, maxLifetime(emitter.def) * 1.5, 10);
-            const steps = Math.min(120, Math.max(1, Math.ceil(span * 20)));
-            for (let s = 0; s < steps; s++) this._push(i, emitter.advance(span / steps, matrix));
+            this._prewarmLeft[i] = Math.min(emitter.def.duration, maxLifetime(emitter.def) * 1.5, 10);
         });
+    }
+
+    /** Forget prewarm still owed. */
+    public cancelPrewarm(): void { this._prewarmLeft.fill(0); }
+
+    private _runPrewarm(matrix: mat4): void {
+        for (let i = 0; i < this.emitters.length; i++) {
+            let left = this._prewarmLeft[i];
+            if (!(left > 0)) continue;
+            for (let s = 0; s < ParticleSystemRuntime.PREWARM_STEPS_PER_FRAME && left > 1e-6; s++) {
+                const h = Math.min(ParticleSystemRuntime.PREWARM_STEP, left);
+                this._push(i, this.emitters[i].advance(h, matrix));
+                left -= h;
+            }
+            this._prewarmLeft[i] = left > 1e-6 ? left : 0;
+        }
     }
 
     /** Take every pending step for emitter `index`. */

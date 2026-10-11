@@ -49,7 +49,7 @@ import { useCleoEngine, MODE_RENDERS_VIEWPORT } from '../EngineContext';
 // The wrapper must stay `relative` so UIOverlay/StateGraph/LoadingScreen (absolute inset-0) and the
 // data-cleo-overlay HUD anchor to the viewport, not the dock. Its group is locked and headerless.
 function ViewportPanel(_: IDockviewPanelProps) {
-  const { isSceneReady, loadingProgress, editorMode, inputMap, isPlayMode } = useCleoEngine();
+  const { editorMode, inputMap, isPlayMode } = useCleoEngine();
   return (
     <div className="relative h-full w-full overflow-hidden">
       <EngineViewport />
@@ -77,7 +77,8 @@ function ViewportPanel(_: IDockviewPanelProps) {
       {/* Sound mode: the waveform, transport and loop region fill the main area. No 3D preview. */}
       {editorMode === 'soundSample' && <SoundTabView />}
       {/* Loading splash covers only the viewport; the rest of the editor stays visible */}
-      {!isSceneReady && <LoadingScreen progress={loadingProgress} />}
+      {/* Loads that cover only the viewport (opening a scene). The startup splash is full-window, in app.tsx. */}
+      <LoadingScreen variant='overlay' />
     </div>
   );
 }
@@ -161,7 +162,7 @@ function PropertiesPanel(_: IDockviewPanelProps) {
 
   return (
     <SidePanel>
-      {readOnly && <TemplateInstanceNotice />}
+      {readOnly && <TemplateInstanceNotice revert />}
       {/* An editor-owned node (a preview tab's holder) is not the user's content: shown, never edited. */}
       {node && <PropertyEditor node={node} readOnly={readOnly || node.isEditorOwned} />}
     </SidePanel>

@@ -723,6 +723,9 @@ export function invalidateNavSoup(scene: Scene | null | undefined) {
   if (scene) navSoupCache.delete(scene);
 }
 
+/** What an unselected navmesh's plan is given: planNavOverlays returns before reading it. */
+const EMPTY_SOUP = { positions: new Float32Array(0) } as unknown as TriangleSoup;
+
 function navSoupFor(scene: Scene, bodies: Map<string, BodyDescription>): TriangleSoup {
   let soup = navSoupCache.get(scene);
   if (!soup) {
@@ -980,7 +983,10 @@ export function reconcileEditorHelpers(
   // the first version of this shipped invisible precisely because it hid a feature's only feedback
   // behind a toggle that is off by default and that an author has to already know exists.
   for (const navMesh of scene.navMeshes) {
-    const plan = planNavOverlays(navMesh, navSoupFor(scene, bodies), navMesh.id === selectedId);
+    // The soup only when the plan will use it: re-gathering the whole level's colliders for an UNSELECTED
+    // navmesh — on every structural change, which in play mode is every spawned effect — was pure waste.
+    const selected = navMesh.id === selectedId;
+    const plan = planNavOverlays(navMesh, selected ? navSoupFor(scene, bodies) : EMPTY_SOUP, selected);
     if (plan.box) ensureNavVolumeBox(scene, navMesh, plan.box);
     ensureNavPreview(scene, navMesh, plan);
   }

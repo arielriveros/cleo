@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { CleoEngine, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, registerTemplates, Logger, InputSystem } from 'cleo';
+import { CleoEngine, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, registerTemplates, Logger, InputSystem } from 'cleo';
 import UILayer from '../features/gameUi/UILayer';
 import VirtualControlsLayer from '../features/gameUi/VirtualControlsLayer';
 import { unpackGameBin, inflateSceneGeometry, inflateTerrainData, inflateTilemapData } from './unpack';
@@ -126,6 +126,9 @@ async function boot(): Promise<void> {
   // How the engine finds a node's precompiled script: consulted whenever a node has no `script`
   // source, including nodes created later by scene.instantiate (matched through their __sourceId).
   setScriptProvider(id => ((window as any).CLEO_GAME_SCRIPTS ?? {})[id]);
+  // Script modules (shared code scripts import), keyed by module id. Evaluated lazily on first import
+  // and kept for the whole session, so a module's state survives Game.loadScene.
+  setScriptModuleProvider(id => ((window as any).CLEO_GAME_MODULES ?? {})[id]);
 
   const table = data.scenes ?? {};
   let currentId = data.entry in table ? data.entry : Object.keys(table)[0];

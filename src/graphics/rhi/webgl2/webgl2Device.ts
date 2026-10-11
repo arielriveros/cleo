@@ -38,6 +38,8 @@ export class WebGL2Device implements Device {
     private readonly _pipelines = new Map<string, WebGL2RenderPipeline>();
     /** VAOs by pipeline and buffer set. See vertexArrayFor. */
     private readonly _vertexArrays = new Map<WebGL2RenderPipeline, Map<string, WebGLVertexArrayObject>>();
+    /** Which VAO entries each buffer appears in, so destroying the buffer evicts them. */
+    private readonly _vaosByBuffer = new Map<number, { byBuffers: Map<string, WebGLVertexArrayObject>; key: string }[]>();
     /** VAOs a caller owns and binds itself — Mesh and TileMesh. See createVertexArray. */
     private readonly _ownedVertexArrays = new Set<WebGLVertexArrayObject>();
     /** Deduped render targets, keyed by their attachment set. See createRenderTarget. */
@@ -61,7 +63,10 @@ export class WebGL2Device implements Device {
 
     /** Returns the concrete backend buffer, since callers inside the WebGL2 half need its `handle`. */
     public createBuffer(descriptor: BufferDescriptor): WebGL2Buffer {
-        const buffer = new WebGL2Buffer(descriptor, () => this._buffers.delete(buffer));
+        const buffer = new WebGL2Buffer(descriptor, () => {
+            this._buffers.delete(buffer);
+            this._evictVertexArrays(buffer.id);
+        });
         this._buffers.add(buffer);
         return buffer;
     }
@@ -285,7 +290,6 @@ export class WebGL2Device implements Device {
      * The VAO binding `buffers` through `pipeline`'s vertex layouts, built once per combination and
      * keyed by both. Survives `reallocateBuffer`, which keeps a buffer's handle.
      */
-    // TODO: destroying a buffer does not evict its entries, so the cache grows with mesh churn.
     public vertexArrayFor(pipeline: WebGL2RenderPipeline,
                           buffers: readonly (WebGL2Buffer | null)[],
                           indexBuffer: WebGL2Buffer | null): WebGLVertexArrayObject {
@@ -306,7 +310,28 @@ export class WebGL2Device implements Device {
         if (indexBuffer) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer.handle);
         GLState.bindVAO(null);
         byBuffers.set(key, vao);
+        // Remember it under every buffer it binds: a destroyed buffer takes its VAOs with it. Without
+        // this the cache grew by every mesh ever drawn — each spawned enemy, each projectile.
+        for (const b of [...buffers, indexBuffer]) {
+            if (!b) continue;
+            let entries = this._vaosByBuffer.get(b.id);
+            if (!entries) { entries = []; this._vaosByBuffer.set(b.id, entries); }
+            entries.push({ byBuffers, key });
+        }
         return vao;
+    }
+
+    private _evictVertexArrays(bufferId: number): void {
+        const entries = this._vaosByBuffer.get(bufferId);
+        if (!entries) return;
+        this._vaosByBuffer.delete(bufferId);
+        for (const { byBuffers, key } of entries) {
+            const vao = byBuffers.get(key);
+            if (!vao) continue;
+            byBuffers.delete(key);
+            if (GLState.currentVAO === vao) GLState.bindVAO(null);
+            gl.deleteVertexArray(vao);
+        }
     }
 
     // -- uploads and readback ---------------------------------------------------------------------
@@ -343,13 +368,15 @@ export class WebGL2Device implements Device {
 
         // ATTACH FIRST, one framebuffer bound at a time: `framebufferTexture2D` writes to the DRAW
         // binding, so attaching with both bound lands both attachments on the draw framebuffer.
+        // And drop the OTHER kind of attachment a previous copy left behind: a stale one of another size
+        // makes the scratch framebuffer incomplete.
         this._copyRead.bind();
-        if (depth) { this._copyRead.attachDepth(source); this._copyRead.setDrawBuffers(0); }
-        else { this._copyRead.attachColor(0, source); this._copyRead.setDrawBuffers(1); }
+        if (depth) { this._copyRead.detachColor(0); this._copyRead.attachDepth(source); this._copyRead.setDrawBuffers(0); }
+        else { this._copyRead.detachDepth(); this._copyRead.attachColor(0, source); this._copyRead.setDrawBuffers(1); }
 
         this._copyDraw.bind();
-        if (depth) { this._copyDraw.attachDepth(destination); this._copyDraw.setDrawBuffers(0); }
-        else { this._copyDraw.attachColor(0, destination); this._copyDraw.setDrawBuffers(1); }
+        if (depth) { this._copyDraw.detachColor(0); this._copyDraw.attachDepth(destination); this._copyDraw.setDrawBuffers(0); }
+        else { this._copyDraw.detachDepth(); this._copyDraw.attachColor(0, destination); this._copyDraw.setDrawBuffers(1); }
 
         gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this._copyRead.handle);
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this._copyDraw.handle);
@@ -963,6 +990,11 @@ export class WebGL2Framebuffer {
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + index, gl.TEXTURE_2D, null, 0);
     }
 
+    /** Release the depth attachment. */
+    public detachDepth(): void {
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, null, 0);
+    }
+
     public attachDepth2D(texture: WebGLTexture, mip: number = 0): void {
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, texture, mip);
     }
@@ -974,6 +1006,11 @@ export class WebGL2Framebuffer {
     /**
      * Declare which colour attachments this framebuffer writes. A `count` of 0 is depth-only and needs
      * BOTH `drawBuffers([NONE])` and `readBuffer(NONE)`, or the framebuffer is incomplete.
+     *
+     * The read buffer is framebuffer STATE, so a colour count has to put it back: a scratch framebuffer
+     * that once copied depth kept `readBuffer(NONE)`, and its next colour copy failed with "attempt to
+     * read from a missing color attachment" — every frame, once a surface decal made the renderer copy
+     * the G-buffer after the scene depth.
      */
     public setDrawBuffers(count: number): void {
         if (count <= 0) {
@@ -984,6 +1021,7 @@ export class WebGL2Framebuffer {
         const attachments: number[] = [];
         for (let i = 0; i < count; i++) attachments.push(gl.COLOR_ATTACHMENT0 + i);
         gl.drawBuffers(attachments);
+        gl.readBuffer(gl.COLOR_ATTACHMENT0);
     }
 
     /** Log and return false when the attachment set is incomplete. An incomplete framebuffer drops

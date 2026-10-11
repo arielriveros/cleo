@@ -18,6 +18,7 @@ import type { PoseAsset } from './poseAssets'
 import type { AudioSourceAsset } from './audioSources'
 import type { SoundSampleAsset } from './soundSamples'
 import type { ChunkRef } from './chunkBlob'
+import type { InputMap } from 'cleo'
 
 // The portable project/asset-pack bundle format (a .zip). A "project" bundle carries every scene, all
 // asset libraries, the folder layout (VFS) and the texture payloads; an "assetpack" is the same minus the
@@ -80,6 +81,15 @@ export interface BundleLibraries {
    */
   audioSources?: AudioSourceAsset[]
   soundSamples?: SoundSampleAsset[]
+  /**
+   * The project's input bindings, or null/absent for the engine default map.
+   *
+   * Written only when the bindings differ from `DEFAULT_INPUT_MAP`, so a project that never opened the
+   * Input panel exports exactly what it did before this existed. Without it a game whose scripts read
+   * custom actions (an attack, a lock-on) imported with none of them bound — the actions read idle
+   * and nothing said why.
+   */
+  inputMap?: InputMap | null
 }
 
 /** One texture payload as it crosses the worker boundary and lives inside the zip (bytes, not base64). */

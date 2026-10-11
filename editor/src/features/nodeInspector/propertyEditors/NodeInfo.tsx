@@ -11,7 +11,10 @@ import { useHistory } from '../../HistoryContext'
 import { CONVERTIBLE_NODE_TYPES, findNodeTypeOption, nodeTypeLabel } from '../../sceneInspector/nodeTypeCatalog'
 import { findAddItem } from '../../sceneInspector/addCatalog'
 import { prepareNodeTypeChange, rebuildNodeInPlace } from '../../../utils/nodeTypeConversion'
-import { baseTypeMatchesNode } from '../../../utils/scripts'
+import { isAttachable } from '../../../utils/scripts'
+import { TEMPLATE_ID_VAR } from '../../../utils/templates'
+import { isOverridden, setNameOverride } from '../../../utils/templateOverrides'
+import OverrideMark from '../OverrideMark'
 
 const MOTION_BLUR_OPTIONS: { value: MotionBlurMode; label: string; title: string }[] = [
   { value: 'full', label: 'Full', title: 'The true screen-space motion. A node travelling with the camera does not move on screen, so it already stays sharp.' },
@@ -20,7 +23,11 @@ const MOTION_BLUR_OPTIONS: { value: MotionBlurMode; label: string; title: string
 ]
 
 export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTypeChange?: boolean}) {
-  const { eventEmitter: eventEmitter, editorScene, scriptAssetOf, attachScriptToNode, detachScriptFromNode } = useCleoEngine();
+  const { eventEmitter: eventEmitter, editorScene, scriptAssetOf, attachScriptToNode, detachScriptFromNode, editorMode, revertTemplateOverride } = useCleoEngine();
+  // A placed template instance's ROOT keeps its own name (a per-instance override); everything inside it
+  // keeps the template's names, which is what its children are found by.
+  const instanceRoot = editorMode === 'scene' && !!props.node.getVariable(TEMPLATE_ID_VAR);
+  const nameLocked = !!props.readOnly && !instanceRoot;
   const { push, silently } = useHistory();
   const [nodeName, setNodeName] = useState(props.node.name);
   const [spawnOnStart, setSpawnOnStart] = useState(props.node.spawnOnStart);
@@ -92,7 +99,7 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
       // to be re-applied on the next save. Decided BEFORE the rebuild so the undo can put it back; scripts
       // based on plain `node` attach to anything and are never touched.
       const script = scriptAssetOf(props.node);
-      const strandedScript = script && !baseTypeMatchesNode(script.baseType, option.nodeType) ? script : null;
+      const strandedScript = script && !isAttachable(script, option.nodeType) ? script : null;
 
       // The rebuild fires a `remove` and an `add` structural event, which the recorder would file as two
       // unrelated undo steps, neither of which reverses the conversion. One hand-built entry replaces both.
@@ -138,6 +145,7 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
       return;
     }
     props.node.name = nodeName
+    if (instanceRoot) setNameOverride(props.node, nodeName);
     eventEmitter.emit('SCENE_CHANGED');
     eventEmitter.emit('SELECT_NODE', props.node.id);
   }
@@ -159,7 +167,11 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
         <PropertyTable columns={['28%', '72%']}>
           <PropertyRow label='Name'>
             {props.node.name !== 'root'
-              ? <TextInput disabled={props.readOnly} className={props.readOnly ? 'opacity-60' : ''} value={nodeName} onChange={setNodeName} onBlur={handleNodeNameChange} />
+              ? <div className='flex items-center gap-1'>
+                  <TextInput disabled={nameLocked} className={nameLocked ? 'opacity-60 flex-1' : 'flex-1'} value={nodeName} onChange={setNodeName} onBlur={handleNodeNameChange} />
+                  {instanceRoot && isOverridden(props.node, 'name') &&
+                    <OverrideMark onRevert={() => revertTemplateOverride(props.node, 'name')} />}
+                </div>
               : <span className='text-muted'>{props.node.name}</span>}
           </PropertyRow>
           <PropertyRow label='ID'><span className='text-muted'>{props.node.id}</span></PropertyRow>

@@ -2,7 +2,7 @@ import { Node } from "./node";
 import type { Scene } from "../scene";
 import { Logger } from "../../logger";
 import { bindDataAccessors, canAccessVariable } from "./nodeVariables";
-import { createScriptImporter, ScriptFactory, SCRIPT_HANDLERS } from "../../scripting/scriptRuntime";
+import { createScriptImporter, resolveScriptModule, ScriptFactory, SCRIPT_HANDLERS } from "../../scripting/scriptRuntime";
 
 /**
  * The bridge between a user script and a live node: the `this` proxy, and the two ways a compiled script
@@ -254,13 +254,21 @@ function attachClassScript(node: Node, Ctor: new (...args: any[]) => any): void 
         catch (e) { Logger.error(`Error in ${name} for node ${node.name}: ${e}`, 'Script'); }
     };
 
-    applyFieldDefaults(node, proto);
+    // The script's own class AND every script class it inherits from (`class Hollow extends EnemyBase`,
+    // where EnemyBase is another script), most-derived first. The walk stops at the first ENGINE class:
+    // its methods are already on the node, and copying them as own properties would freeze them there.
+    const levels = scriptPrototypeChain(node, proto);
+    applyFieldDefaults(node, levels);
 
-    // Only the class's OWN prototype: inherited Node methods are the engine's, already on the node, and
-    // `__`-prefixed names are Sucrase's field-initializer helpers rather than author methods.
-    for (const name of Object.getOwnPropertyNames(proto)) {
-        if (name === 'constructor' || name.startsWith('__')) continue;
-        const desc = Object.getOwnPropertyDescriptor(proto, name);
+    // `__`-prefixed names are Sucrase's field-initializer helpers rather than author methods. The
+    // most-derived definition of a name wins; `super.x()` inside it still reaches the base's version,
+    // because a copied method keeps the home object it was defined on.
+    const seen = new Set<string>();
+    for (const level of levels)
+    for (const name of Object.getOwnPropertyNames(level)) {
+        if (name === 'constructor' || name.startsWith('__') || seen.has(name)) continue;
+        seen.add(name);
+        const desc = Object.getOwnPropertyDescriptor(level, name);
         if (!desc) continue;
 
         // ACCESSORS are copied as accessors. A getter's descriptor has no `value`, so the function test
@@ -287,15 +295,43 @@ function attachClassScript(node: Node, Ctor: new (...args: any[]) => any): void 
  * against a bare object to harvest the defaults. Only fields the node does not already have are filled
  * in, so per-node `scriptVars` win. An initializer that reads `this` is skipped rather than thrown.
  */
-function applyFieldDefaults(node: Node, proto: any): void {
+function applyFieldDefaults(node: Node, levels: any[]): void {
     const n = node as any;
     const defaults: Record<string, any> = {};
-    for (const name of Object.getOwnPropertyNames(proto)) {
-        if (!/^__init\d*$/.test(name)) continue;
-        const fn = proto[name];
-        if (typeof fn !== 'function') continue;
-        try { fn.call(defaults); } catch { /* initializer depends on `this`: leave that field to scriptVars */ }
+    // Base-first, so a derived class's default for a field overrides its base's.
+    for (const proto of [...levels].reverse()) {
+        for (const name of Object.getOwnPropertyNames(proto)) {
+            if (!/^__init\d*$/.test(name)) continue;
+            const fn = proto[name];
+            if (typeof fn !== 'function') continue;
+            try { fn.call(defaults); } catch { /* initializer depends on `this`: leave that field to scriptVars */ }
+        }
     }
     for (const key of Object.keys(defaults))
         if (n[key] === undefined) n[key] = defaults[key];
+}
+
+/** Prototypes of every class the engine exports — where a script's prototype chain ends. */
+let engineProtos: WeakSet<object> | null = null;
+function isEngineProto(proto: any, node: Node): boolean {
+    if (proto === Node.prototype || proto === Object.prototype || proto.isPrototypeOf(node)) return true;
+    if (!engineProtos) {
+        engineProtos = new WeakSet();
+        try {
+            for (const value of Object.values(resolveScriptModule('cleo')))
+                if (typeof value === 'function' && value.prototype) engineProtos.add(value.prototype);
+        } catch { /* 'cleo' not registered (a bare unit test): the node's own chain is the only stop */ }
+    }
+    return engineProtos.has(proto);
+}
+
+/**
+ * The script-defined prototypes from `proto` up to (not including) the first engine class, most-derived
+ * first. A script extending `CharacterNode` attached to a plain Node stops at `CharacterNode` too, so no
+ * engine method is ever copied onto a node of the wrong type.
+ */
+function scriptPrototypeChain(node: Node, proto: any): any[] {
+    const levels: any[] = [];
+    for (let p = proto; p && !isEngineProto(p, node); p = Object.getPrototypeOf(p)) levels.push(p);
+    return levels;
 }

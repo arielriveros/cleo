@@ -51,7 +51,12 @@ function relOf(root, abs) {
 }
 
 function isSource(rel) {
-  return typeof rel === 'string' && rel.toLowerCase().endsWith(SOURCE_EXT);
+  if (typeof rel !== 'string') return false;
+  const lower = rel.toLowerCase();
+  // Declaration files and tests sit beside scripts in a TypeScript folder but are not scripts: importing
+  // a `types.d.ts` as an attachable node script would be wrong in every way.
+  if (lower.endsWith('.d.ts') || lower.endsWith('.test.ts') || lower.endsWith('.spec.ts')) return false;
+  return lower.endsWith(SOURCE_EXT);
 }
 
 function hash(source) {

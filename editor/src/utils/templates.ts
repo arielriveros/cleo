@@ -3,6 +3,7 @@ import { cryptoRandomId } from './ids'
 import { parseByType, stripDebug, collectIds, collectTextureIds, regenerateIds } from './nodeSubtree'
 import { resolveMaterialRefs, MaterialAsset } from './materials'
 import { deepClone } from './deepClone'
+import { getScriptIdOf, collectScriptVars, scriptKindOfAsset, type ScriptAsset } from './scripts'
 
 // A reusable node template: a serialized node subtree plus every asset/script it depends on.
 export type Template = {
@@ -42,10 +43,17 @@ export function isWithinTemplateInstance(node: Node | null | undefined): boolean
   return !!templateInstanceRootOf(node)
 }
 
-/** Build a Template capturing a node's subtree + its assets and out-of-band script/body/trigger data. */
-export async function buildTemplateFromNode(node: Node, maps: EngineMaps): Promise<Template> {
+/**
+ * Build a Template capturing a node's subtree + its assets and out-of-band script/body/trigger data.
+ *
+ * `scriptAssets` lets it capture class-script FIELD VALUES too. They live as native properties on the
+ * nodes and `serialize()` does not see them, so without the library a template saved from the editor
+ * reverted every field to its class default — undoing whatever the template was configured with.
+ */
+export async function buildTemplateFromNode(node: Node, maps: EngineMaps, scriptAssets?: ScriptAsset[]): Promise<Template> {
   const nodeJson = await node.serialize()
   stripDebug(nodeJson)
+  if (scriptAssets) attachScriptVars(node, nodeJson, new Map(scriptAssets.map(a => [a.id, a])))
   // A template definition must never carry an instance back-link; strip the __templateId the editing
   // scene stamped onto the root.
   if (nodeJson.variables) delete nodeJson.variables[TEMPLATE_ID_VAR]
@@ -65,6 +73,22 @@ export async function buildTemplateFromNode(node: Node, maps: EngineMaps): Promi
   collectTextureIds(nodeJson, texIds)
 
   return { id: cryptoRandomId(), name: node.name, nodeJson, textureIds: [...texIds], scripts, bodies, triggers }
+}
+
+// Walk the live subtree and its serialized twin together (serialize keeps child order), writing each
+// scripted node's field values as the `scriptVars` the engine restores on parse.
+function attachScriptVars(live: Node, json: any, assets: Map<string, ScriptAsset>): void {
+  const sid = getScriptIdOf(live)
+  const asset = sid ? assets.get(sid) : undefined
+  if (asset && scriptKindOfAsset(asset) !== 'module') {
+    const vars = collectScriptVars(live, asset)
+    if (Object.keys(vars).length) json.scriptVars = deepClone(vars)
+  }
+  const kids = (json.children ?? []) as any[]
+  for (const child of live.children as Node[]) {
+    const twin = kids.find(k => k.id === child.id)
+    if (twin) attachScriptVars(child, twin, assets)
+  }
 }
 
 /**

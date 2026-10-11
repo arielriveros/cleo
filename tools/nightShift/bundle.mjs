@@ -128,6 +128,22 @@ export class TextureSet {
     return id
   }
 
+  /** Add a texture from bytes made in memory (a generated image). Same entry shape as {@link add}. */
+  addBytes(id, bytes, config, mime = 'image/png') {
+    if (this._entries.has(id)) return id
+    this._entries.set(id, {
+      id,
+      mime,
+      config: {
+        flipY: false, usage: 'color', wrapping: 'clamp',
+        mipMap: false, mipMapFilter: 'linear', precision: 'low', target: 'texture2D',
+        ...config,
+      },
+      bytes: Buffer.from(bytes),
+    })
+    return id
+  }
+
   get size() { return this._entries.size }
 
   get bytes() {

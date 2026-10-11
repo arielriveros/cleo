@@ -50,8 +50,10 @@ There are 18 asset kinds; see [Assets](editor/assets.md) for what each one is an
 ## Template
 
 A **template** (a prefab) is a saved node subtree. Drag it into a scene to place an instance;
-change the template and every placed instance is rebuilt. Anything inside a placed instance is
-**read-only in the scene** except its transform — to change it, open the template itself.
+change the template and every placed instance is rebuilt. A placed instance's structure is
+**read-only in the scene**; what each instance keeps of its own is its transform, its root's name and
+its script field values (**overrides**), which survive every rebuild. To change anything else, open
+the template itself.
 
 Templates are also how you spawn things at runtime: `scene.instantiate('Zombie', { position })`.
 
@@ -121,12 +123,15 @@ Understanding this order resolves most "why is my camera a frame behind" questio
 9. **UI layout.** Screen rectangles are solved. A value your script wrote in `onUpdate` is on
    screen the same frame, not the next one.
 
-Physics steps separately, driven by the engine, and writes results back into node transforms.
+Physics steps separately, driven by the engine, and writes results back into node transforms. It
+advances by exactly the frame's delta, split into equal substeps of at most 1/60 s, so bodies, scripts
+and animation share one clock and movement covers the same ground at 20 fps as at 144.
 
-> **Game time is not wall-clock time.** The per-frame delta is clamped to `0.333s`, so a tab left
+> **Game time is not wall-clock time.** The per-frame delta is clamped to `0.1s`, so a tab left
 > in the background does not resume with a single enormous step that tunnels every body through the
-> floor. The two clocks diverge permanently after that; use `Game.time` when you need "how long has
-> this game been running".
+> floor. A frame slower than that slows the whole game evenly rather than only the bodies. The two
+> clocks diverge permanently after that; use `Game.time` when you need "how long has this game been
+> running".
 
 ## Coordinate and sign conventions
 

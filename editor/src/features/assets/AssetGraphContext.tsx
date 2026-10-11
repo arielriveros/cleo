@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { assetGraph, assetKey, engineEventBus } from 'cleo'
+import { CleoEngine, assetGraph, assetKey, engineEventBus } from 'cleo'
 import type { AssetEdge, AssetRef } from 'cleo'
 import { useCleoEngine, SCENE_TAB_ID } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
@@ -181,6 +181,9 @@ export function AssetGraphProvider({ children }: { children: React.ReactNode }) 
     // kind of work on the same event.
     let timer = 0
     const onChange = () => {
+      // A running game's scene churn is not an asset reference change: what references what is read
+      // from the AUTHORING scene, which play does not touch (it runs a copy).
+      if (!CleoEngine.authoringMode) return
       window.clearTimeout(timer)
       timer = window.setTimeout(rederive, 300)
     }

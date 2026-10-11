@@ -73,6 +73,12 @@ const GROUND_GRACE = 0.1;
  */
 const WALKABLE_DOT = Math.cos(60 * Math.PI / 180);
 
+/** Whether `node` and every ancestor are spawned: a despawned subtree stops simulating. */
+function isSpawnedInScene(node: { spawned: boolean; parent: any }): boolean {
+  for (let n: any = node; n; n = n.parent) if (n.spawned === false) return false;
+  return true;
+}
+
 export class PhysicsSystem {
   private _scene!: Scene;
   private _world!: World;
@@ -112,6 +118,17 @@ export class PhysicsSystem {
     this._gravity = config?.gravity ? config.gravity: [0, -9.82, 0]; // y = up
   }
 
+  /** The longest physics substep: what keeps stiff joints and fast contacts stable. */
+  public static readonly MAX_SUBSTEP = 1 / 60;
+  /** Substeps one frame may take. Frames are clamped (engine MAX_DELTA) so this is never the limit. */
+  public static readonly MAX_SUBSTEPS = 8;
+
+  /** How many equal substeps advance the world by `dt`. 0 for a frame with no time in it. */
+  public static substepsFor(dt: number): number {
+    if (!(dt > 0)) return 0;
+    return Math.min(PhysicsSystem.MAX_SUBSTEPS, Math.max(1, Math.ceil(dt / PhysicsSystem.MAX_SUBSTEP - 1e-6)));
+  }
+
   public initialize(): void {
     try {
       this._world = new World();
@@ -134,11 +151,24 @@ export class PhysicsSystem {
       const frameStart = performance.now();
       resetPhysicsStats();
 
-      // Fixed 1/60 internal timestep with up to 5 catch-up substeps: keeps stiff constraints stable and
-      // deterministic across frame-delta spikes.
+      // The world advances by EXACTLY this frame's delta, in equal substeps no longer than 1/60 s — the
+      // same time scripts, locomotion and the animator are about to advance by. It used to be cannon's
+      // accumulator, `step(1/60, dt, 5)`, which kept its own clock: it stopped at 5 substeps (0.083 s)
+      // while scripts got up to 0.333 s, it abandoned the loop once the substeps took 16.7 ms of wall
+      // time, and it threw the leftover away. So below 60 fps — or whenever physics got heavy — bodies
+      // covered less ground than the game believed, and a speed-driven locomotion blend slid from
+      // sprint to walk; above 60 fps the body moved in 1/60 s jumps that read as 0 and 2x speed on
+      // alternate frames. Equal substeps that sum to the frame have none of that, and stay at or under
+      // the 1/60 s that keeps ragdoll joints and contacts stable.
       const stepStart = performance.now();
-      this._world?.step(1 / 60, deltaTime, 5);
+      const substeps = PhysicsSystem.substepsFor(deltaTime);
+      if (substeps > 0) {
+        const h = deltaTime / substeps;
+        for (let i = 0; i < substeps; i++) this._world?.step(h);
+      }
       physicsStats.stepMs = performance.now() - stepStart;
+
+      this._updateRagdolls(deltaTime);
 
       // update() runs only while unpaused, so the grace window cannot expire behind a paused game.
       this._time += deltaTime;
@@ -594,6 +624,39 @@ export class PhysicsSystem {
     const ragdoll = new Ragdoll(unwrapScriptNode(modelNode), this, options);
     this._ragdolls.push(ragdoll);
     return ragdoll;
+  }
+
+  /**
+   * End the ragdolls whose model has left the scene (removed, or despawned with its subtree), and
+   * freeze the ones that have come to rest. Without this every kill left ~20 bodies and joints in the
+   * world for the rest of the session: physics and every raycast slowed down kill by kill.
+   */
+  private _updateRagdolls(dt: number): void {
+    if (this._ragdolls.length === 0) return;
+    let kept = 0;
+    for (const ragdoll of this._ragdolls) {
+      const node = ragdoll.node;
+      if (ragdoll.destroyed || !node.scene || node.markForRemoval || !isSpawnedInScene(node)) {
+        ragdoll.destroy();
+        continue;
+      }
+      ragdoll.updateSettle(dt);
+      this._ragdolls[kept++] = ragdoll;
+    }
+    this._ragdolls.length = kept;
+  }
+
+  /** Ragdolls still alive (frozen ones included), for the stats panel and tests. */
+  public get ragdollCount(): number { return this._ragdolls.length; }
+
+  /** End the ragdoll driving `modelNode`, if any: its bodies leave the world, the skeleton animates again. */
+  public stopRagdoll(modelNode: ModelNode): void {
+    const node = unwrapScriptNode(modelNode);
+    this._ragdolls = this._ragdolls.filter(r => {
+      if (r.node !== node) return true;
+      r.destroy();
+      return false;
+    });
   }
 
   public clear(): void {

@@ -27,7 +27,7 @@ struct VertexOutput {
      * reason — see PBRMaterial in chunks/pbrGBuffer.wgsl and TerrainUniforms in chunks/terrainLayers
      * .wgsl, both of which carry per-frame values purely to stay out of the vertex block.
      *
-     * These three programs did not, so all three failed to link, and `_createPrograms` builds every
+     * These three programs did not, so all three failed to link, and `preInitialize` builds every
      * program at boot: the renderer came up on NO backend at all. Passing the two flags as a flat
      * varying keeps the block vertex-only and costs one interpolant, with no second binding for the
      * bind-group layouts to grow by.

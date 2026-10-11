@@ -8,7 +8,7 @@ import { resolveIncludes } from '../tools/shaderIncludes.mjs';
 
 /**
  * Two ways the WGSL -> GLSL step produces a program that cannot be built, and one shared consequence:
- * `Renderer._createPrograms` builds EVERY program at boot, in one unguarded loop, so a single bad
+ * `Renderer.preInitialize` builds EVERY program at boot, in one unguarded loop, so a single bad
  * program is not a broken effect — it is an engine that comes up on no backend at all. Both of these
  * shipped at once and the whole renderer was dead.
  *

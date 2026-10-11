@@ -53,7 +53,7 @@ interface ParticleProgram {
     readonly uniformBlocks: readonly unknown[];
 }
 
-/** Program names in `ShaderManager`, with their imports. Registered by `Renderer._createPrograms`. */
+/** Program names in `ShaderManager`, with their imports. Registered by `Renderer._programTable`. */
 export const PARTICLE_PROGRAMS: {
     readonly sim: readonly [string, ParticleProgram];
     readonly billboard: readonly [string, ParticleProgram];
@@ -76,6 +76,10 @@ const PREMULTIPLIED_KEEP_ALPHA: BlendState = {
     color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
     alpha: { srcFactor: 'zero', dstFactor: 'one', operation: 'add' },
 };
+
+/** A sub-emitter link as uniforms, for an emitter with none: event 0, "no parent". */
+const NO_SUB = [0, 1, 0, 1];
+const NO_SUB2 = [0, 0, 0, 0];
 
 /** The largest pool the sort runs on. Beyond it, `log2(N)^2 / 2` passes a frame stops being cheap. */
 export const MAX_SORTED_PARTICLES = 65536;
@@ -141,33 +145,61 @@ class SortGpu {
     public destroy(): void { for (const t of this.textures) t.delete(); }
 }
 
+/**
+ * One emitter's GPU state. POOLED: a removed system hands its emitters back to the renderer, and the next
+ * system with the same pool shape takes them over (see `ParticleRenderer._acquire`). An effect spawned
+ * per hit used to build eight state textures, a LUT and its bind groups on its first frame and drop them
+ * all 240 frames after it died, a burst of allocation on every hit and of destruction four seconds later.
+ */
 class EmitterGpu {
     public readonly sets: Texture[][];
     public current = 0;
     public readonly lut: Texture;
-    public packed: PackedEmitter;
+    public packed!: PackedEmitter;
     public sort: SortGpu | null = null;
-    /** Whether `sort.result` holds this frame's order. Cleared every frame before sorting. */
+    /** Whether `sort.result` holds the order of the current state. Cleared whenever the state steps. */
     public sorted = false;
+    /** Set when taken from the pool: the first step must kill whatever the previous owner left behind. */
+    public needsReset = false;
+    /** The live window after the last step, which is all the draw covers. See `SimStep.liveStart`. */
+    public liveStart = 0;
+    public liveCount = 0;
+    /** `forceFields` influence, from the definition. */
+    public fieldInfluence = 0;
+    public runtime!: EmitterRuntime;
+    public readonly width: number;
+    public readonly height: number;
     private readonly _groups = new Map<string, BindGroup>();
 
-    constructor(public readonly runtime: EmitterRuntime, flat2D: boolean) {
+    constructor(runtime: EmitterRuntime, flat2D: boolean) {
         const { width, height } = runtime;
+        this.width = width;
+        this.height = height;
         this.sets = [0, 1].map(() => [0, 1, 2, 3].map(() => stateTexture(width, height)));
-
-        this.packed = packEmitter(runtime.def, flat2D);
         this.lut = new Texture({
             format: 'rgba32float', loadOnly: true, mipMap: false,
             minFilter: 'nearest', magFilter: 'nearest', mipMapFilter: 'nearest', wrapping: 'clamp',
         });
         this.lut.create(null, LUT_WIDTH, LUT_ROWS);
-        device.writeTexture(this.lut.rhiTexture, this.packed.lut, LUT_WIDTH, LUT_ROWS);
+        this.adopt(runtime, flat2D);
+    }
+
+    /** Take over this state for `runtime`, whose pool has the same shape. The bind groups stay valid. */
+    public adopt(runtime: EmitterRuntime, flat2D: boolean): void {
+        this.runtime = runtime;
+        this.sorted = false;
+        this.liveStart = 0;
+        this.liveCount = 0;
+        this.repack(flat2D);
     }
 
     /** Re-read the emitter's (edited) definition into uniforms and the LUT. The particles stay. */
     public repack(flat2D: boolean): void {
         this.packed = packEmitter(this.runtime.def, flat2D);
         device.writeTexture(this.lut.rhiTexture, this.packed.lut, LUT_WIDTH, LUT_ROWS);
+        const module = this.runtime.def.update.find(m => m.type === 'forceFields' && m.enabled);
+        const influence = module ? Number(module.params.influence ?? 1) : 0;
+        this.fieldInfluence = Number.isFinite(influence) ? influence : 1;
     }
 
     public get read(): Texture[] { return this.sets[this.current]; }
@@ -199,9 +231,25 @@ class EmitterGpu {
 
 class SystemGpu {
     public lastSeen = 0;
+    /** The emitters in draw order (`render.sortingOrder`), rebuilt when the definition changes. */
+    public drawOrder: EmitterGpu[] = [];
+    /**
+     * Per emitter: simulate and draw the WHOLE pool, because ring windows do not describe it — a
+     * sub-emitter's slots belong to its parent's slots, a parent's dead slots are read for death
+     * events, and custom code may rewrite a particle's age.
+     */
+    public wholePool: boolean[] = [];
     constructor(public readonly version: number, public paramsVersion: number,
-                public flat2D: boolean, public readonly emitters: EmitterGpu[]) {}
-    public destroy(): void { for (const e of this.emitters) e.destroy(); }
+                public flat2D: boolean, public readonly emitters: EmitterGpu[],
+                private readonly _links: readonly (SubEmitterLink | null)[]) {
+        this.refresh();
+    }
+    public refresh(): void {
+        this.drawOrder = this.emitters.slice().sort((a, b) =>
+            a.runtime.def.render.sortingOrder - b.runtime.def.render.sortingOrder);
+        this.wholePool = this.emitters.map((e, i) =>
+            !!this._links[i] || this._links.some(l => l?.parent === i) || !!e.packed.custom);
+    }
 }
 
 interface MeshGpu {
@@ -245,6 +293,23 @@ export class ParticleRenderer {
     private _depthFallback: Texture | null = null;
     private _failed = false;
     private _warnedNoFloat = false;
+    /** Released emitter state by pool shape (`width x height`), waiting for the next system to take it. */
+    private readonly _pool = new Map<string, EmitterGpu[]>();
+    /** Slots held in the pool, so a huge emitter's state is not kept "just in case". */
+    private _pooledSlots = 0;
+    /** Compute uniform bind groups, by pipeline, arena generation and slot. See {@link _uniformGroup}. */
+    private readonly _uniformGroups = new Map<string, BindGroup>();
+    // The per-frame half of the simulation uniforms, computed once per frame instead of once per step.
+    private readonly _frameViewProj = mat4.create();
+    private readonly _frameInvViewProj = mat4.create();
+    private readonly _frameScreen = [1, 1, 0, 0];
+    private readonly _frameCam = [0, 0, 0, 0];
+    /** WebGL2 programs that already hold this frame's per-frame uniforms. */
+    private readonly _framePrograms = new Set<string>();
+    private readonly _queues: SimStep[][] = [];
+
+    /** Pooled slots kept at most: 64k slots is 8 MB of state textures. */
+    private static readonly POOL_SLOTS = 65536;
 
     /** Steps run last frame, for the stats panel. */
     public stepsLastFrame = 0;
@@ -261,28 +326,68 @@ export class ParticleRenderer {
     private _gpuFor(node: ParticleSystemNode, flat2D: boolean): SystemGpu {
         let gpu = this._systems.get(node);
         if (!gpu || gpu.version !== node.version) {
-            gpu?.destroy();
+            if (gpu) this._release(gpu);
             gpu = new SystemGpu(node.version, node.paramsVersion, flat2D,
-                                node.runtime.emitters.map(e => new EmitterGpu(e, flat2D)));
+                                node.runtime.emitters.map(e => this._acquire(e, flat2D)), node.runtime.links);
             this._systems.set(node, gpu);
         } else if (gpu.paramsVersion !== node.paramsVersion || gpu.flat2D !== flat2D) {
             for (const emitter of gpu.emitters) emitter.repack(flat2D);
             gpu.paramsVersion = node.paramsVersion;
             gpu.flat2D = flat2D;
+            gpu.refresh();
         }
         gpu.lastSeen = this._frame;
         return gpu;
     }
 
-    /** Drop GPU state for systems that have not been seen for a while (removed, or in another tab). */
+    /** Emitter state for `runtime`: from the pool when one of the same shape is free, else built. */
+    private _acquire(runtime: EmitterRuntime, flat2D: boolean): EmitterGpu {
+        const free = this._pool.get(runtime.width + 'x' + runtime.height);
+        const reused = free?.pop();
+        if (reused) {
+            this._pooledSlots -= reused.width * reused.height;
+            reused.adopt(runtime, flat2D);
+            reused.needsReset = true;
+            frameStats.particleGpuReuses++;
+            return reused;
+        }
+        frameStats.particleGpuCreates++;
+        return new EmitterGpu(runtime, flat2D);
+    }
+
+    /** Hand a system's emitter state back to the pool, or destroy what the pool has no room for. */
+    private _release(gpu: SystemGpu): void {
+        for (const emitter of gpu.emitters) {
+            const slots = emitter.width * emitter.height;
+            if (this._pooledSlots + slots > ParticleRenderer.POOL_SLOTS) { emitter.destroy(); continue; }
+            const key = emitter.width + 'x' + emitter.height;
+            let free = this._pool.get(key);
+            if (!free) { free = []; this._pool.set(key, free); }
+            free.push(emitter);
+            this._pooledSlots += slots;
+        }
+    }
+
+    /**
+     * Release the state of systems that are gone: removed from their scene at once (so the very next
+     * spawn of the same effect reuses it), and anything unseen for a while (another tab's scene).
+     */
     private _sweep(): void {
-        for (const [node, gpu] of this._systems)
-            if (this._frame - gpu.lastSeen > 240) { gpu.destroy(); this._systems.delete(node); }
+        for (const [node, gpu] of this._systems) {
+            if (!node.scene || this._frame - gpu.lastSeen > 240) {
+                this._release(gpu);
+                this._systems.delete(node);
+            }
+        }
     }
 
     public releaseAll(): void {
-        for (const gpu of this._systems.values()) gpu.destroy();
+        for (const gpu of this._systems.values()) for (const e of gpu.emitters) e.destroy();
         this._systems.clear();
+        for (const free of this._pool.values()) for (const e of free) e.destroy();
+        this._pool.clear();
+        this._pooledSlots = 0;
+        this._uniformGroups.clear();
         for (const mesh of this._meshes.values()) { mesh.vertices.destroy(); mesh.indices.destroy(); }
         this._meshes.clear();
     }
@@ -338,32 +443,37 @@ export class ParticleRenderer {
         const compute = device.capabilities.hasCompute;
 
         const flat2D = scene.activeCamera?.camera.type === 'orthographic' && scene.tilemaps.size > 0;
+        this._prepareFrameUniforms(frame);
         try {
             for (const node of systems) {
                 if (!ParticleRenderer._active(node)) continue;
+                const runtime = node.runtime;
+                if (node.offscreen && node.pausesOffscreen && node.isPlaying) frameStats.particleSystemsCulled++;
+                // Nothing queued (stopped, paused, culled, never played): no work, and above all no state
+                // BUILT for it. A system that never plays never gets textures at all.
+                if (!ParticleRenderer._hasQueued(runtime)) {
+                    const idle = this._systems.get(node);
+                    if (idle && idle.version === node.version) this._gpuFor(node, flat2D);
+                    continue;
+                }
                 const gpu = this._gpuFor(node, flat2D);
+                frameStats.particleSystems++;
                 // INTERLEAVED by step, not emitter by emitter: a sub-emitter reads its parent's state
                 // before and after the SAME step, so the parent must not run ahead of it.
-                const queues: SimStep[][] = gpu.emitters.map((emitter, i) => {
-                    emitter.sorted = false;
-                    return node.runtime.drain(i);
-                });
-                const longest = Math.max(0, ...queues.map(q => q.length));
+                const emitters = gpu.emitters;
+                const queues = this._queues;
+                queues.length = 0;
+                let longest = 0;
+                for (let i = 0; i < emitters.length; i++) {
+                    const queue = runtime.drain(i);
+                    queues.push(queue);
+                    if (queue.length > longest) longest = queue.length;
+                }
                 for (let s = 0; s < longest; s++) {
-                    gpu.emitters.forEach((emitter, i) => {
+                    for (let i = 0; i < emitters.length; i++) {
                         const step = queues[i][s];
-                        if (!step) return;
-                        const link = node.runtime.links[i];
-                        const parent = link ? gpu.emitters[link.parent] ?? null : null;
-                        const values = stepUniforms(emitter.packed, step, emitter.runtime.capacity,
-                                                    emitter.runtime.width, frame.gravity, emitter.runtime.def.seed);
-                        Object.assign(values, this._subUniforms(link, parent));
-                        if (compute) this._stepCompute(emitter, values, frame, parent);
-                        else this._stepRaster(emitter, values, frame, parent);
-                        emitter.current ^= 1;
-                        this.stepsLastFrame++;
-                        frameStats.particleSteps++;
-                    });
+                        if (step) this._step(gpu, i, step, runtime.links[i], frame, compute);
+                    }
                 }
             }
         } catch (error) {
@@ -375,13 +485,63 @@ export class ParticleRenderer {
         this._sweep();
     }
 
-    /** A sub-emitter's link, as uniforms. All zero — "no parent" — for an ordinary emitter. */
-    private _subUniforms(link: SubEmitterLink | null, parent: EmitterGpu | null): Record<string, number[]> {
-        if (!link || !parent) return { u_sub: [0, 1, 0, 1], u_sub2: [0, 0, 0, 0] };
-        return {
-            u_sub: [link.event === 'collision' ? 2 : 1, link.count, link.inherit, parent.runtime.width],
-            u_sub2: [parent.runtime.capacity, 0, 0, 0],
-        };
+    private static _hasQueued(runtime: ParticleSystemNode['runtime']): boolean {
+        for (const queue of runtime.pending) if (queue.length > 0) return true;
+        return false;
+    }
+
+    /**
+     * Run one step of emitter `i`. Only the slots of its LIVE WINDOW are simulated (every other slot is
+     * known dead), and a step with no live slot and nothing to reset is skipped outright.
+     */
+    private _step(gpu: SystemGpu, i: number, step: SimStep, link: SubEmitterLink | null,
+                  frame: ParticleSimFrame, compute: boolean): void {
+        const emitter = gpu.emitters[i];
+        const runtime = emitter.runtime;
+        const reset = step.reset || emitter.needsReset;
+        emitter.needsReset = false;
+        const whole = reset || gpu.wholePool[i];
+        const start = whole ? 0 : step.liveStart;
+        const count = whole ? runtime.capacity : step.liveCount;
+        emitter.liveStart = start;
+        emitter.liveCount = count;
+        if (count === 0) return;
+
+        const parent = link ? gpu.emitters[link.parent] ?? null : null;
+        const values = stepUniforms(emitter.packed, step, runtime.capacity, runtime.width, frame.gravity, runtime.def.seed);
+        values.u_mask = [emitter.packed.simMask, reset ? 1 : 0, start, count];
+        if (link && parent) {
+            values.u_sub = [link.event === 'collision' ? 2 : 1, link.count, link.inherit, parent.runtime.width];
+            values.u_sub2 = [parent.runtime.capacity, 0, 0, 0];
+        } else {
+            values.u_sub = NO_SUB;
+            values.u_sub2 = NO_SUB2;
+        }
+        if (compute) this._stepCompute(emitter, values, frame, parent, start, count);
+        else this._stepRaster(emitter, values, frame, parent, start, count);
+        emitter.current ^= 1;
+        emitter.sorted = false;
+        this.stepsLastFrame++;
+        frameStats.particleSteps++;
+    }
+
+    /** The per-frame uniforms every step shares, worked out once per frame. */
+    private _prepareFrameUniforms(frame: ParticleSimFrame): void {
+        const depth = frame.depth;
+        const valid = !!(depth && frame.viewProj);
+        if (valid) {
+            mat4.copy(this._frameViewProj, frame.viewProj!);
+            if (!mat4.invert(this._frameInvViewProj, frame.viewProj!)) mat4.identity(this._frameInvViewProj);
+        } else {
+            mat4.identity(this._frameViewProj);
+            mat4.identity(this._frameInvViewProj);
+        }
+        const s = this._frameScreen;
+        s[0] = depth?.width ?? 1; s[1] = depth?.height ?? 1; s[2] = device.backend === 'webgpu' ? 1 : 0; s[3] = valid ? 1 : 0;
+        const c = this._frameCam;
+        c[0] = frame.cameraPosition[0]; c[1] = frame.cameraPosition[1]; c[2] = frame.cameraPosition[2];
+        c[3] = frame.orthographic ? 1 : 0;
+        this._framePrograms.clear();
     }
 
     /**
@@ -405,36 +565,39 @@ export class ParticleRenderer {
         ];
     }
 
-    /** The per-frame uniforms common to every step: collision camera and depth, force fields. */
-    private _frameUniforms(frame: ParticleSimFrame, set: (name: string, value: unknown) => void): void {
-        const depth = frame.depth;
-        const valid = !!(depth && frame.viewProj);
-        set('u_collideViewProj', valid ? frame.viewProj! : mat4.create());
-        set('u_collideInvViewProj', valid ? (mat4.invert(mat4.create(), frame.viewProj!) ?? mat4.create()) : mat4.create());
-        set('u_collideScreen', [depth?.width ?? 1, depth?.height ?? 1, device.backend === 'webgpu' ? 1 : 0, valid ? 1 : 0]);
-        set('u_collideCam', [frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2], frame.orthographic ? 1 : 0]);
+    /**
+     * The per-frame uniforms: collision camera and depth, force fields. `once` is the program (WebGL2)
+     * or arena (WebGPU) they go into: each holds its values between steps, so they are written once per
+     * frame per destination, not once per step.
+     */
+    private _frameUniforms(frame: ParticleSimFrame, once: string, set: (name: string, value: unknown) => void): void {
+        if (this._framePrograms.has(once)) return;
+        this._framePrograms.add(once);
+        set('u_collideViewProj', this._frameViewProj);
+        set('u_collideInvViewProj', this._frameInvViewProj);
+        set('u_collideScreen', this._frameScreen);
+        set('u_collideCam', this._frameCam);
         set('u_fields', frame.fields);
     }
 
     /** Everything one step writes: the emitter's static uniforms, the step's, and the frame's. */
-    private _writeStep(emitter: EmitterGpu, values: Record<string, unknown>, frame: ParticleSimFrame,
+    private _writeStep(emitter: EmitterGpu, values: Record<string, unknown>, frame: ParticleSimFrame, once: string,
                        set: (name: string, value: unknown) => void): void {
-        this._frameUniforms(frame, set);
-        for (const [name, value] of Object.entries(emitter.packed.sim)) set(name, value);
-        for (const [name, value] of Object.entries(values)) set(name, value);
+        this._frameUniforms(frame, once, set);
+        const sim = emitter.packed.sim as Record<string, unknown>;
+        for (const name in sim) set(name, sim[name]);
+        for (const name in values) set(name, values[name]);
         // Field influence is per emitter; the field list itself is per frame.
-        const module = emitter.runtime.def.update.find(m => m.type === 'forceFields' && m.enabled);
-        const influence = module ? Number(module.params.influence ?? 1) : 0;
-        set('u_fieldInfo', [frame.fieldCount, Number.isFinite(influence) ? influence : 1, 0, 0]);
+        set('u_fieldInfo', [frame.fieldCount, emitter.fieldInfluence, 0, 0]);
     }
 
     private _stepCompute(emitter: EmitterGpu, values: Record<string, unknown>, frame: ParticleSimFrame,
-                         parent: EmitterGpu | null): void {
+                         parent: EmitterGpu | null, _start: number, count: number): void {
         const base = this._ensureComputePipeline();
         const pipeline = emitter.packed.custom ? this._customComputePipeline(emitter.packed.custom) : base;
         const pid = pipelineId(pipeline);
         const uniforms = this._simUniforms!;
-        this._writeStep(emitter, values, frame, (name, value) => { uniforms.set(name, value); });
+        this._writeStep(emitter, values, frame, 'arena', (name, value) => { uniforms.set(name, value); });
         uniforms.flush(device);
 
         const write = emitter.write;
@@ -456,12 +619,13 @@ export class ParticleRenderer {
         pass.setBindGroup(0, inputs);
         pass.setBindGroup(1, this._uniformGroup(pipeline, uniforms, 'particleSim.uniforms'));
         pass.setBindGroup(2, outputs);
-        pass.dispatchWorkgroups(Math.ceil(emitter.runtime.width / 8), Math.ceil(emitter.runtime.height / 8));
+        // One invocation per live slot (see particleSimCompute.wgsl), not one per pool slot.
+        pass.dispatchWorkgroups(Math.ceil(count / 64));
         pass.end();
     }
 
     private _stepRaster(emitter: EmitterGpu, values: Record<string, unknown>, frame: ParticleSimFrame,
-                        parent: EmitterGpu | null): void {
+                        parent: EmitterGpu | null, start: number, count: number): void {
         const custom = emitter.packed.custom;
         const program = custom ? this._customRasterProgram(custom) : PARTICLE_PROGRAMS.sim[0];
         const pipeline = custom ? this._customRasterPipeline(program) : this._ensureRasterPipeline('sim', 4);
@@ -484,8 +648,17 @@ export class ParticleRenderer {
                 entries: this._simInputs(emitter, depth, parent),
             })));
         shaders.bind(program);
-        this._writeStep(emitter, values, frame, (name, value) => shaders.setUniform(name, value));
-        pass.setViewport(0, 0, emitter.runtime.width, emitter.runtime.height);
+        this._writeStep(emitter, values, frame, program, (name, value) => shaders.setUniform(name, value));
+        // Only the rows the live window touches. A fragment is a slot by its own coordinate, and the
+        // attachments load, so rows outside keep what they hold: slots known dead. A window wrapping
+        // round the end of the pool is two bands; the whole texture is the simple cover for it.
+        const { width, height, capacity } = emitter.runtime;
+        let first = 0, rows = height;
+        if (start + count <= capacity) {
+            first = Math.floor(start / width);
+            rows = Math.ceil((start + count) / width) - first;
+        }
+        pass.setViewport(0, first, width, rows);
         pass.draw(3);
         pass.end();
     }
@@ -540,13 +713,25 @@ export class ParticleRenderer {
         return pipeline;
     }
 
-    /** A bind group over a compute uniform arena AT ITS CURRENT SLOT. Not cached: the slot moves per step. */
+    /**
+     * A bind group over a compute uniform arena AT ITS CURRENT SLOT. Cached by slot: the arena's cursor
+     * restarts every frame, so frame after frame the same slots come round and every step after the
+     * first frames binds a group it already has, instead of creating one per step. A grown arena is a
+     * new buffer (a new generation), and its groups are new keys.
+     */
     private _uniformGroup(pipeline: ComputePipeline, uniforms: UniformSet, label: string): BindGroup {
-        return device.createBindGroup({
-            label,
-            layout: pipeline.bindGroupLayouts.find(l => l.group === 1)!,
-            entries: [{ binding: 0, buffer: uniforms.buffer, offset: uniforms.byteOffset, size: uniforms.layout.size }],
-        });
+        const key = pipelineId(pipeline) + ':' + label + ':' + uniforms.generation + ':' + uniforms.slot;
+        let group = this._uniformGroups.get(key);
+        if (!group) {
+            if (this._uniformGroups.size > 4096) this._uniformGroups.clear();
+            group = device.createBindGroup({
+                label,
+                layout: pipeline.bindGroupLayouts.find(l => l.group === 1)!,
+                entries: [{ binding: 0, buffer: uniforms.buffer, offset: uniforms.byteOffset, size: uniforms.layout.size }],
+            });
+            this._uniformGroups.set(key, group);
+        }
+        return group;
     }
 
     private _ensureComputePipeline(): ComputePipeline {
@@ -601,6 +786,9 @@ export class ParticleRenderer {
             for (const node of nodes) {
                 const gpu = this._systems.get(node);
                 if (!gpu || gpu.version !== node.version || !node.visible || !ParticleRenderer._active(node)) continue;
+                // Out of view last frame, or nothing alive: the draw will skip it, so the sort's dozens of
+                // passes would order particles nobody sees.
+                if (node.offscreen || !node.isAlive) continue;
                 for (const emitter of gpu.emitters) {
                     const r = emitter.runtime.def.render;
                     if (!r.sort || r.blend !== 'alpha' || emitter.runtime.capacity > MAX_SORTED_PARTICLES) continue;
@@ -698,13 +886,18 @@ export class ParticleRenderer {
 
         const list: { node: ParticleSystemNode; gpu: SystemGpu; distance: number }[] = [];
         for (const node of nodes) {
-            if (!node.visible || !ParticleRenderer._active(node)) continue;
+            if (!ParticleRenderer._active(node)) continue;
+            // The view test runs for every system, drawn or not: it is also what tells an off-screen
+            // system to pause (ParticleSystemNode.offscreen), and that system has nothing to draw.
+            let inView = node.visible;
+            if (inView && frame.visible) {
+                const box = node.getBoundingBox();
+                inView = frame.visible(box.min, box.max);
+            }
+            node.offscreen = !inView;
+            if (!inView || !node.isAlive) continue;
             const gpu = this._systems.get(node);
             if (!gpu || gpu.version !== node.version) continue;
-            if (frame.visible) {
-                const box = node.getBoundingBox();
-                if (!frame.visible(box.min, box.max)) continue;
-            }
             list.push({ node, gpu, distance: vec3.squaredDistance(node.worldPosition, frame.cameraPosition) });
         }
         if (list.length === 0) return;
@@ -714,17 +907,18 @@ export class ParticleRenderer {
         const depth = this._depthOr(frame.depth);
         try {
             for (const { node, gpu } of list) {
-                const order = gpu.emitters.slice().sort((a, b) =>
-                    a.runtime.def.render.sortingOrder - b.runtime.def.render.sortingOrder);
-                for (const emitter of order) {
+                for (const emitter of gpu.drawOrder) {
                     const render = emitter.runtime.def.render;
+                    const sorted = emitter.sorted && emitter.sort ? emitter.sort.textures[emitter.sort.result] : null;
+                    // Only the live window — unless sorted, when the order texture indexes the whole pool.
+                    const instances = sorted ? emitter.runtime.capacity : emitter.liveCount;
+                    if (instances === 0) continue;
                     const mesh = render.mode === 'mesh' ? this._meshFor(render) : null;
                     const pipeline = this._drawPipeline(frame.target, render, !!mesh);
                     frame.pass.setPipeline(pipeline);
 
                     const sprite = (render.textureId && TextureManager.Instance.getTexture(render.textureId)) || null;
                     const spriteTex = sprite && sprite.sampledView ? sprite : this._whiteTexture;
-                    const sorted = emitter.sorted && emitter.sort ? emitter.sort.textures[emitter.sort.result] : null;
                     const orderTex = sorted ?? this._whiteTexture;
                     frame.pass.setBindGroup(0, emitter.group(
                         `d0:${pipelineId(pipeline)}:${emitter.current}:${idOf(spriteTex)}:${idOf(depth)}:${idOf(orderTex)}`,
@@ -752,7 +946,7 @@ export class ParticleRenderer {
                     shaders.setUniform('u_camPos', [frame.cameraPosition[0], frame.cameraPosition[1],
                                                      frame.cameraPosition[2], packed.draw.alignment[0]]);
                     shaders.setUniform('u_camForward', [forward[0], forward[1], forward[2], packed.draw.stretch[0]]);
-                    shaders.setUniform('u_drawMask', [mask, scale, 0, 0]);
+                    shaders.setUniform('u_drawMask', [mask, scale, sorted ? 0 : emitter.liveStart, emitter.runtime.capacity]);
                     shaders.setUniform('u_tint', node.tint);
                     shaders.setUniform('u_flipbook', packed.draw.u_flipbook);
                     shaders.setUniform('u_flipbook2', packed.draw.u_flipbook2);
@@ -766,11 +960,12 @@ export class ParticleRenderer {
                     if (mesh) {
                         frame.pass.setVertexBuffer(0, mesh.vertices);
                         frame.pass.setIndexBuffer(mesh.indices, 'uint32');
-                        frame.pass.drawIndexed(mesh.indexCount, emitter.runtime.capacity);
+                        frame.pass.drawIndexed(mesh.indexCount, instances);
                     } else {
-                        frame.pass.draw(6, emitter.runtime.capacity);
+                        frame.pass.draw(6, instances);
                     }
-                    frameStats.particlesDrawn += emitter.runtime.capacity;
+                    frameStats.particlesDrawn += instances;
+                    frameStats.particleDraws++;
                 }
             }
         } catch (error) {
@@ -864,6 +1059,7 @@ export class ParticleRenderer {
         this._sortPipelineGL = null;
         this._drawPipelines.clear();
         this._customPipelines.clear();
+        this._uniformGroups.clear();
         this._failed = false;
         textureIds = new WeakMap();
         nextTextureId = 1;

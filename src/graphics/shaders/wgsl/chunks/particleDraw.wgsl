@@ -22,7 +22,7 @@ struct ParticleDrawVertex {
     u_camUp: vec4<f32>,           // xyz, sort texture width
     u_camPos: vec4<f32>,          // xyz, alignment (0 camera, 1 velocity, 2 vertical, 3 horizontal)
     u_camForward: vec4<f32>,      // xyz, velocity stretch
-    u_drawMask: vec4<f32>,        // feature bits, size scale, 0, 0
+    u_drawMask: vec4<f32>,        // feature bits, size scale, first live slot, capacity
     u_tint: vec4<f32>,
     u_flipbook: vec4<f32>,        // columns, rows, frames, mode (0 over life, 1 fps)
     u_flipbook2: vec4<f32>,       // fps, cycles, random start, frame blend
@@ -92,7 +92,9 @@ fn deadVaryings() -> ParticleVaryings {
 fn particleLook(instanceIndex: u32) -> ParticleLook {
     var look: ParticleLook;
     let mask = u_draw.u_drawMask.x;
-    var slot = instanceIndex;
+    // Instances cover only the live window, which starts at slot `u_drawMask.z` and wraps round the
+    // ring. A sorted emitter draws its whole pool through the order texture instead (z is 0 then).
+    var slot = (instanceIndex + u32(u_draw.u_drawMask.z)) % max(1u, u32(u_draw.u_drawMask.w));
     if (hasFeature(mask, DRAW_SORTED)) {
         let order = textureLoad(u_order_texture, particleTexel(instanceIndex, u32(u_draw.u_camUp.w)), 0);
         slot = u32(order.y);
@@ -180,6 +182,9 @@ fn shadeParticle(in: ParticleVaryings) -> vec4<f32> {
 
     let blend = i32(u_frag.u_fragParams.x);
     if (blend == 2 && color.a < u_frag.u_fragParams.y) { discard; }
+    // Fully transparent texels — a round puff's corners, a sprite's empty border — would blend nothing but
+    // still pay the soft-particle depth fetch and the blend. Fill rate is the whole cost of big particles.
+    if (blend != 2 && color.a < 1.0 / 512.0) { discard; }
 
     // Soft particles: fade out as the surface nears the opaque geometry behind it, instead of clipping
     // into it along a hard line.

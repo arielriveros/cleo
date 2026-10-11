@@ -262,6 +262,14 @@ export class Perception {
         for (const [id, sighting] of this._sightings) {
             if (seen.has(id)) continue;
             const entity = this._entities.get(id);
+            // Long gone from the candidates AND past what memory keeps: forget it entirely. Otherwise
+            // every character that ever existed — each respawned enemy, each killed one — stayed in
+            // these maps and was walked every frame for the rest of the session.
+            if (sighting.timeSinceSeen > tuning.memorySpan * 2 + 1) {
+                if (entity) { this._memory.deleteRecord(entity); this._entities.delete(id); }
+                this._sightings.delete(id);
+                continue;
+            }
             const record = entity ? this._memory.getRecord(entity) : undefined;
             if (record) {
                 record.visible = false;

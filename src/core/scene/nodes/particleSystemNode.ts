@@ -19,7 +19,19 @@ export interface ParticleSystemNodeOptions {
     spawnRateScale?: number;
     /** Multiplies every particle's colour. */
     tint?: [number, number, number, number];
+    /** What the system does while its bounds are out of view. See {@link ParticleCullingMode}. */
+    cullingMode?: ParticleCullingMode;
 }
+
+/**
+ * What a system does while its bounds are outside the camera's view.
+ * - `auto`: pause a system whose emitters all loop (a torch, a waterfall); keep simulating one that
+ *   does not, so a one-shot fired just off screen has still played out when the camera turns to it.
+ * - `pause`: stop the clock off screen and resume where it left off. Costs nothing while unseen.
+ * - `simulate`: always simulate, like every system did before culling existed.
+ */
+export type ParticleCullingMode = 'auto' | 'pause' | 'simulate';
+const CULLING_MODES: readonly ParticleCullingMode[] = ['auto', 'pause', 'simulate'];
 
 const num = (x: unknown, fallback: number): number => (typeof x === 'number' && Number.isFinite(x) ? x : fallback);
 
@@ -55,6 +67,13 @@ export class ParticleSystemNode extends Node {
     private _paramsVersion = 0;
     private _playing = false;
     private _paused = false;
+    private _cullingMode: ParticleCullingMode;
+
+    /**
+     * Written by the renderer each frame it draws particles: whether this system's bounds were outside
+     * the view (or the node hidden). Read back by {@link update} to pause off-screen systems.
+     */
+    public offscreen = false;
 
     constructor(name: string, options: ParticleSystemNodeOptions = {}, id: string = uuidv4()) {
         super(name, 'particleSystem', id);
@@ -65,6 +84,8 @@ export class ParticleSystemNode extends Node {
         this._spawnRateScale = Math.max(0, num(options.spawnRateScale, 1));
         const t = options.tint;
         this._tint = Array.isArray(t) ? [num(t[0], 1), num(t[1], 1), num(t[2], 1), num(t[3], 1)] : [1, 1, 1, 1];
+        this._cullingMode = CULLING_MODES.includes(options.cullingMode as ParticleCullingMode)
+            ? options.cullingMode as ParticleCullingMode : 'auto';
         this._runtime = new ParticleSystemRuntime(this._system.emitters);
     }
 
@@ -144,6 +165,21 @@ export class ParticleSystemNode extends Node {
         this._notifyChange('component', 'tint');
     }
 
+    public get cullingMode(): ParticleCullingMode { return this._cullingMode; }
+    public set cullingMode(value: ParticleCullingMode) {
+        const next = CULLING_MODES.includes(value) ? value : 'auto';
+        if (next === this._cullingMode) return;
+        this._cullingMode = next;
+        this._notifyChange('component', 'cullingMode');
+    }
+
+    /** Whether the clock stops while off screen: the mode, with `auto` resolved against the emitters. */
+    public get pausesOffscreen(): boolean {
+        if (this._cullingMode !== 'auto') return this._cullingMode === 'pause';
+        const enabled = this._system.emitters.filter(e => e.enabled);
+        return enabled.length > 0 && enabled.every(e => e.looping);
+    }
+
     // -----------------------------------------------------------------------------------------------
     // Playback — the script API
     // -----------------------------------------------------------------------------------------------
@@ -168,6 +204,7 @@ export class ParticleSystemNode extends Node {
             if (clear) emitter.clear();
         }
         if (clear) {
+            this._runtime.cancelPrewarm();
             // The clear has to reach the GPU as a step, so push one even though no time passes.
             this._runtime.advance(1e-6, this.worldTransform, 0);
         }
@@ -225,6 +262,13 @@ export class ParticleSystemNode extends Node {
     public update(delta: number, time: number): void {
         super.update(delta, time);
         if (!this.simulating) return;
+        // Finished: stopped (or a one-shot run out) and every particle dead. Going quiet here is what lets
+        // the renderer skip the system entirely, instead of stepping and drawing an empty pool forever.
+        if (!this._runtime.isAlive && !this._runtime.hasPendingWork) {
+            this._playing = false;
+            return;
+        }
+        if (this.offscreen && this.pausesOffscreen) return;
         this._runtime.advance(delta * this._simulationSpeed, this.worldTransform, this._spawnRateScale);
     }
 
@@ -241,6 +285,7 @@ export class ParticleSystemNode extends Node {
                 simulationSpeed: this._simulationSpeed,
                 spawnRateScale: this._spawnRateScale,
                 tint: [...this._tint],
+                cullingMode: this._cullingMode,
             },
         };
     }

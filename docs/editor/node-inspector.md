@@ -12,8 +12,10 @@ Every selection is composed the same way:
 
 Selecting the scene **root** shows [Scene settings](scene-authoring.md#scene-settings) instead.
 
-> Everything except Transform is **disabled** on a node inside a placed template instance. Open the
-> template to change it. A notice in the panel says so and offers to unlink.
+> On a node inside a placed template instance, only the Transform, the instance root's **name** and
+> **script field values** are editable; they become that instance's overrides, each with a **revert**
+> marker. Everything else is disabled: open the template to change it. A notice in the panel says so
+> and offers **Revert all**.
 >
 > The node **type** can only be changed on a template root.
 

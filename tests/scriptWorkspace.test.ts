@@ -79,6 +79,19 @@ describe('openWorkspace', () => {
     expect(res.files.map(f => f.rel)).toEqual(['Real.ts']);
   });
 
+  it('does not take declaration files or tests for scripts', async () => {
+    // A TypeScript folder grows these beside real scripts; imported, each would become an attachable
+    // node script in the editor. Script MODULES (plain .ts helpers) are still picked up.
+    await mkdir(path.join(root, 'Shared'), { recursive: true });
+    await writeFile(path.join(root, 'Shared', 'types.d.ts'), 'declare const x: number', 'utf-8');
+    await writeFile(path.join(root, 'Shared', 'Math.test.ts'), 'test', 'utf-8');
+    await writeFile(path.join(root, 'Shared', 'Math.spec.ts'), 'spec', 'utf-8');
+    await writeFile(path.join(root, 'Shared', 'Math.ts'), 'export const TAU = 6.28', 'utf-8');
+
+    const res = await workspace.openWorkspace(root, send);
+    expect(res.files.map(f => f.rel)).toEqual(['Shared/Math.ts']);
+  });
+
   it('returns the manifest it last wrote', async () => {
     await mkdir(path.join(root, '.cleo'), { recursive: true });
     await writeFile(path.join(root, '.cleo', 'manifest.json'), JSON.stringify({ files: { s1: 'A.ts' } }), 'utf-8');

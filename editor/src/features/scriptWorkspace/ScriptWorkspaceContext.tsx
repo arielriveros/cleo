@@ -5,7 +5,8 @@ import { useVfs } from '../assets/VfsContext'
 import { deleteAsset } from '../assets/assetKinds'
 import { activeProjectId } from '../../utils/projectScope'
 import { scriptWorkspaceOf, setScriptWorkspace } from '../../utils/projects'
-import { buildScriptAsset, defaultScriptClass, type ScriptAsset } from '../../utils/scripts'
+import { buildScriptAsset, type ScriptAsset, type ScriptVarSchema } from '../../utils/scripts'
+import { buildScriptGraphCtx, deriveBaseType, moduleIdOfVfsPath, resolveScriptVariables } from '../../utils/scriptGraph'
 import {
   advanceState, buildDesiredMirror, planPull, planPush, vfsPathOfRel,
   type ExternalChange, type MirrorState, type PullPlan,
@@ -152,11 +153,18 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
   /**
    * Place a file that appeared on disk into the VFS at the folder it lives in, minting the asset.
    * Returns the new script id so the agreed state can adopt it.
+   *
+   * The asset's KIND comes from the source (buildScriptAsset): a file of helpers becomes a script
+   * module, a file with a default class a node script. An EMPTY file stays empty — VS Code's "New File"
+   * creates it before the user types, and writing a template class into it would race their typing
+   * through auto-save. Its kind is re-derived on the first real save.
    */
-  const createFromFile = useCallback((rel: string, source: string, baseType: ScriptAsset['baseType']): string => {
+  const createFromFile = useCallback((
+    rel: string, source: string, baseType: ScriptAsset['baseType'], variables?: ScriptVarSchema[],
+  ): string => {
     const path = vfsPathOfRel(rel)
     const name = stemOf(path) || 'Script'
-    const asset = buildScriptAsset(name, baseType, source || defaultScriptClass(name, baseType), cryptoRandomId())
+    const asset = buildScriptAsset(name, baseType, source, cryptoRandomId(), variables)
     addScriptAsset(asset)
     setVfs(v => {
       // The folders the file sits in may not exist in the index yet: an IDE can create a directory the
@@ -191,7 +199,23 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
       if (res.replacedUnsaved) raised.push(conflictFor(u.scriptId, u.source))
     }
 
-    for (const c of plan.creates) createdIds.set(c.rel, createFromFile(c.rel, c.source, c.baseType))
+    // Base types and inherited fields resolve through imports — `Hollow extends EnemyBase` is a Character
+    // because EnemyBase is. Resolved against the library PLUS everything created in this same changeset:
+    // a base class and its subclass often arrive together (a `git pull`, a folder copied in).
+    if (plan.creates.length) {
+      const pending: ScriptAsset[] = plan.creates.map(c => ({
+        id: `pending:${c.rel}`, name: stemOf(vfsPathOfRel(c.rel)), baseType: c.baseType, source: c.source, variables: [],
+      }))
+      const paths = new Map<string, string>(vfsRef.current.entries.filter(e => e.kind === 'script').map(e => [e.assetId, e.path]))
+      for (const c of plan.creates) paths.set(`pending:${c.rel}`, vfsPathOfRel(c.rel))
+      const ctx = buildScriptGraphCtx(paths, [...scriptsRef.current, ...pending])
+      for (const c of plan.creates) {
+        const moduleId = moduleIdOfVfsPath(vfsPathOfRel(c.rel))
+        const derived = deriveBaseType(c.source, moduleId, ctx)
+        const baseType = derived !== 'node' ? derived : c.baseType
+        createdIds.set(c.rel, createFromFile(c.rel, c.source, baseType, resolveScriptVariables(c.source, moduleId, ctx)))
+      }
+    }
 
     for (const d of plan.deletes) {
       // The explorer's own delete path, so node unlinking and history match deleting the card in the

@@ -29,14 +29,26 @@ interface CleoConfig {
 }
 
 /**
- * Longest frame delta, in seconds, the loop will report (matches Unity's `maximumDeltaTime` default).
+ * Longest frame delta, in seconds, the loop will report. Below 10 fps the whole game slows down rather
+ * than taking bigger steps.
  *
- * Two consequences to respect: game time and wall-clock time diverge permanently across a tab-out, GC
- * pause or breakpoint — a `this.after(5, ...)` spanning a 30s tab-out fires ~5s AFTER the tab returns;
- * and PhysicsSystem absorbs at most 5 * 1/60 = 0.083s per frame, so on a recovery frame scripts advance
- * further than the simulation does.
+ * Game time and wall-clock time diverge across a tab-out, GC pause or breakpoint — a `this.after(5, ...)`
+ * spanning a 30s tab-out fires ~5s AFTER the tab returns. Physics advances by exactly this delta as well
+ * (PhysicsSystem.update, in substeps of at most 1/60 s), so the simulation and the scripts never
+ * disagree about how much time passed; that is why the cap is 0.1 s and not Unity's 0.333 s — a third
+ * of a second in one frame is twenty physics substeps of work.
  */
-const MAX_DELTA = 0.333;
+const MAX_DELTA = 0.1;
+
+/** Options for {@link CleoEngine.initialize}. */
+export interface EngineInitializeOptions {
+  /**
+   * Called as initialization advances, for a loading screen: `device` (acquiring the GPU), `shaders`
+   * (each program built, ~80 of them) and `physics`. With it, shader compilation yields to the browser
+   * every few programs so the page can repaint; without it nothing changes.
+   */
+  onProgress?: (phase: 'device' | 'shaders' | 'physics', done: number, total: number) => void;
+}
 
 export class CleoEngine {
   private _lastTimestamp: number = performance.now();
@@ -96,22 +108,30 @@ export class CleoEngine {
    *
    * REJECTS on failure, and stores the error on {@link initializeError}.
    */
-  public async initialize(): Promise<void> {
+  public async initialize(options: EngineInitializeOptions = {}): Promise<void> {
     try {
       if (this._ready) return;
+      const report = options.onProgress;
 
       // Before InputSystem, which binds its listeners to the canvas, and before anything else touches
       // the GPU.
+      report?.('device', 0, 1);
       await this._renderer.initialize();
+      report?.('device', 1, 1);
 
       InputSystem.initialize(this._renderer.canvas);
       window.addEventListener('resize', this.onResize.bind(this));
-      
-      this._renderer.preInitialize();
+
+      // With someone watching, compile in slices so the page can repaint between them; without, the
+      // plain synchronous path every embedder has always taken.
+      if (report) await this._renderer.preInitializeAsync((done, total) => report('shaders', done, total));
+      else this._renderer.preInitialize();
       await this.onPreInitialize();
 
+      report?.('physics', 0, 1);
       this._physicsSystem.initialize();
       this.onPostInitialize();
+      report?.('physics', 1, 1);
 
       this._ready = true;
       Logger.info('Engine Ready')

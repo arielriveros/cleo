@@ -5,6 +5,8 @@ import { VfsProvider } from './features/assets/VfsContext'
 import { AssetGraphProvider } from './features/assets/AssetGraphContext'
 import { ScriptWorkspaceProvider } from './features/scriptWorkspace/ScriptWorkspaceContext'
 import LoadingScreen from './components/LoadingScreen'
+import { BOOT_TITLE, beginBootLoad } from './features/loading/bootLoad'
+import { currentLoad } from './features/loading/loadingStore'
 import ProjectLauncher from './features/projects/ProjectLauncher'
 import { ProjectRecord, initProjects } from './utils/projects'
 
@@ -26,12 +28,25 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false
+    // The startup load: begun here, before any project is open, and carried on by EngineContext. A
+    // reload that ends another flow (installing an example, switching project) hands its title and
+    // finished steps over, and they show first.
+    const load = beginBootLoad()
+    const step = load.step('project').start()
     void initProjects()
       .then(({ projects, activeId }) => {
         if (cancelled) return
+        const active = projects.find(p => p.id === activeId)
+        step.done(active?.name)
+        // Named after the project — unless a hand-off already titled it ("Installing Hollow Keep").
+        if (active && currentLoad()?.title === BOOT_TITLE) load.setTitle(`Opening ${active.name}`)
+        // No project to open: the launcher takes over, and there is nothing left to load.
+        if (!activeId) load.finish()
         setState(activeId ? { phase: 'ready' } : { phase: 'launcher', projects })
       })
       .catch((e: unknown) => {
+        step.fail(String((e as Error)?.message ?? e))
+        load.finish()
         if (!cancelled) setState({ phase: 'error', message: String((e as Error)?.message ?? e) })
       })
     return () => { cancelled = true }
@@ -52,19 +67,15 @@ export default function App() {
     )
   }
 
-  if (state.phase === 'launcher') return <ProjectLauncher projects={state.projects} />
+  // The full-window loading screen is mounted once, out here, so every flow can show it: the startup,
+  // and an example install or project switch started from the launcher as much as from the editor.
+  if (state.phase === 'launcher') return <><ProjectLauncher projects={state.projects} /><LoadingScreen /></>
 
-  if (state.phase === 'loading') {
-    // LoadingScreen is `absolute inset-0`, so it needs a positioned host of its own out here.
-    return (
-      <div className='relative h-screen w-screen overflow-hidden'>
-        <LoadingScreen progress={{ loaded: 0, total: 1, label: 'Opening project…' }} />
-      </div>
-    )
-  }
+  if (state.phase === 'loading') return <div className='h-screen w-screen bg-bg'><LoadingScreen /></div>
 
   return (
     <div className="h-screen w-screen overflow-hidden">
+        <LoadingScreen />
         <EngineProvider>
             {/* The cross-asset reference graph. Above <Editor> and above the VFS: it is fed by the asset
                 LIBRARIES, not by the folder index, and every open tab asks it whether its dependencies

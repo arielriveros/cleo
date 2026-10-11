@@ -1,5 +1,6 @@
 export { VERSION } from "./version";
 export { CleoEngine } from "./core/engine";
+export type { EngineInitializeOptions } from "./core/engine";
 export { Camera } from "./core/camera";
 export { Geometry } from "./core/geometry";
 export { Scene } from "./core/scene/scene";
@@ -33,7 +34,7 @@ export { LightNode } from "./core/scene/nodes/lightNode";
 export { LightProbeNode } from "./core/scene/nodes/lightProbeNode";
 export { DecalNode, decalLocalToUV, radialDecalWeight, radialDecalT, DECAL_RADIAL_CURVES } from "./core/scene/nodes/decalNode";
 export { ParticleSystemNode } from "./core/scene/nodes/particleSystemNode";
-export type { ParticleSystemNodeOptions } from "./core/scene/nodes/particleSystemNode";
+export type { ParticleSystemNodeOptions, ParticleCullingMode } from "./core/scene/nodes/particleSystemNode";
 export { ForceFieldNode, MAX_FORCE_FIELDS } from "./core/scene/nodes/forceFieldNode";
 export type { ForceFieldOptions, ForceFieldKind, ForceFieldShape } from "./core/scene/nodes/forceFieldNode";
 export * from "./particles/particleSystemAsset";
@@ -412,7 +413,13 @@ export { BVH, rayTriangleIntersection } from "./core/bvh";
 export type { BVHHit } from "./core/bvh";
 export { Frustum } from "./core/frustum";
 export { bytesToBase64, base64ToBytes, bytesToDataUrl, parseBase64DataUri } from "./core/base64";
-export { registerScriptModule, resolveScriptModule, createScriptImporter, compileScript, buildFactoryBody, setScriptProvider, resolveNodeScript, SCRIPT_HANDLERS } from "./core/scripting/scriptRuntime";
+export { registerScriptModule, resolveScriptModule, createScriptImporter, compileScript, scriptCompileCount, clearScriptCompileCache, buildFactoryBody, setScriptProvider, resolveNodeScript, SCRIPT_HANDLERS } from "./core/scripting/scriptRuntime";
+// User script modules: one script importing another ('@/Shared/Math', './Util').
+export {
+    normalizeScriptSpecifier, listScriptImports, compileScriptModule, createModuleImporter, setScriptModuleSources,
+    addScriptModuleSources, setScriptModuleProvider, resetScriptModules, knownScriptModules,
+} from "./core/scripting/scriptRuntime";
+export type { ScriptCompileOptions, ScriptModuleFactory } from "./core/scripting/scriptRuntime";
 export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime";
 export { Game, setGameHost } from "./core/game";
 export type { GameHost } from "./core/game";

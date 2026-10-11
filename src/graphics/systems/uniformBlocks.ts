@@ -33,6 +33,8 @@ interface Block {
     bindingPoint: number;
     buffer: WebGL2Buffer;
     cpu: ArrayBuffer;
+    /** The block as bytes for the upload: one view for its life, not one per flush. */
+    bytes: Uint8Array;
     floats: Float32Array;
     ints: Int32Array;
     dirty: boolean;
@@ -74,6 +76,7 @@ export class UniformBlockSet {
         const cpu = new ArrayBuffer(dataSize);
         const block: Block = {
             name, index, bindingPoint, buffer, cpu,
+            bytes: new Uint8Array(cpu),
             floats: new Float32Array(cpu),
             ints: new Int32Array(cpu),
             dirty: true,
@@ -152,7 +155,8 @@ export class UniformBlockSet {
     public set(name: string, value: any): boolean {
         const targets = this._members.get(name);
         if (!targets) return false;
-        for (const entry of targets) {
+        for (let i = 0; i < targets.length; i++) {
+            const entry = targets[i];
             writeMember(entry.block, entry.member, value, name);
             entry.block.dirty = true;
         }
@@ -172,7 +176,7 @@ export class UniformBlockSet {
     public flush(): void {
         for (const block of this._blocks) {
             if (!block.dirty) continue;
-            glDevice().writeBuffer(block.buffer, 0, new Uint8Array(block.cpu));
+            glDevice().writeBuffer(block.buffer, 0, block.bytes);
             block.dirty = false;
         }
     }
@@ -185,19 +189,30 @@ export class UniformBlockSet {
 }
 
 /** Number of components a GL type carries, and whether it is integer-flavoured. */
-function describe(type: number): { components: number; columns: number; integer: boolean } | null {
+type Shape = { readonly components: number; readonly columns: number; readonly integer: boolean };
+const shape = (components: number, columns: number, integer: boolean): Shape => Object.freeze({ components, columns, integer });
+// SHARED shapes, one per kind. describe() runs on every uniform write — tens of thousands a frame — and
+// returning a fresh object literal each time was the largest allocation source in the whole engine:
+// about 100 MB/s of garbage in a running game, and a GC several times a second.
+const SHAPES = {
+    float: shape(1, 1, false), vec2: shape(2, 1, false), vec3: shape(3, 1, false), vec4: shape(4, 1, false),
+    int: shape(1, 1, true), ivec2: shape(2, 1, true), ivec3: shape(3, 1, true), ivec4: shape(4, 1, true),
+    mat2: shape(2, 2, false), mat3: shape(3, 3, false), mat4: shape(4, 4, false),
+};
+
+function describe(type: number): Shape | null {
     switch (type) {
-        case gl.FLOAT: return { components: 1, columns: 1, integer: false };
-        case gl.FLOAT_VEC2: return { components: 2, columns: 1, integer: false };
-        case gl.FLOAT_VEC3: return { components: 3, columns: 1, integer: false };
-        case gl.FLOAT_VEC4: return { components: 4, columns: 1, integer: false };
-        case gl.INT: case gl.BOOL: return { components: 1, columns: 1, integer: true };
-        case gl.INT_VEC2: case gl.BOOL_VEC2: return { components: 2, columns: 1, integer: true };
-        case gl.INT_VEC3: case gl.BOOL_VEC3: return { components: 3, columns: 1, integer: true };
-        case gl.INT_VEC4: case gl.BOOL_VEC4: return { components: 4, columns: 1, integer: true };
-        case gl.FLOAT_MAT2: return { components: 2, columns: 2, integer: false };
-        case gl.FLOAT_MAT3: return { components: 3, columns: 3, integer: false };
-        case gl.FLOAT_MAT4: return { components: 4, columns: 4, integer: false };
+        case gl.FLOAT: return SHAPES.float;
+        case gl.FLOAT_VEC2: return SHAPES.vec2;
+        case gl.FLOAT_VEC3: return SHAPES.vec3;
+        case gl.FLOAT_VEC4: return SHAPES.vec4;
+        case gl.INT: case gl.BOOL: return SHAPES.int;
+        case gl.INT_VEC2: case gl.BOOL_VEC2: return SHAPES.ivec2;
+        case gl.INT_VEC3: case gl.BOOL_VEC3: return SHAPES.ivec3;
+        case gl.INT_VEC4: case gl.BOOL_VEC4: return SHAPES.ivec4;
+        case gl.FLOAT_MAT2: return SHAPES.mat2;
+        case gl.FLOAT_MAT3: return SHAPES.mat3;
+        case gl.FLOAT_MAT4: return SHAPES.mat4;
         default: return null;
     }
 }
@@ -226,6 +241,10 @@ function writeMember(block: Block, member: BlockMember, value: any, name: string
 
     const elements = Math.max(1, member.size);
     const perElement = shape.components * shape.columns;
+    // The copy loops are split by SOURCE kind so each stays monomorphic. One loop reading a Float32Array
+    // on one call and a number[] on the next goes polymorphic, and V8 then boxes every element it reads:
+    // that boxing was most of the uniform writer's remaining garbage, at tens of thousands of writes a frame.
+    const typed = flat instanceof Float32Array;
 
     for (let element = 0; element < elements; element++) {
         const source = element * perElement;
@@ -235,9 +254,18 @@ function writeMember(block: Block, member: BlockMember, value: any, name: string
         for (let column = 0; column < shape.columns; column++) {
             // A non-matrix has matrixStride 0; the single "column" then starts at the member offset.
             const byteOffset = elementOffset + column * (member.matrixStride || 0);
-            const base = byteOffset / 4;
-            for (let component = 0; component < shape.components; component++)
-                target[base + component] = flat[source + column * shape.components + component];
+            const base = byteOffset >> 2;
+            const from = source + column * shape.components;
+            if (typed) copyTyped(target, base, flat as Float32Array, from, shape.components);
+            else copyGeneric(target, base, flat, from, shape.components);
         }
     }
+}
+
+function copyTyped(target: Float32Array | Int32Array, base: number, src: Float32Array, from: number, n: number): void {
+    for (let i = 0; i < n; i++) target[base + i] = src[from + i];
+}
+
+function copyGeneric(target: Float32Array | Int32Array, base: number, src: ArrayLike<number>, from: number, n: number): void {
+    for (let i = 0; i < n; i++) target[base + i] = src[from + i];
 }

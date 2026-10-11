@@ -5,13 +5,19 @@ import Collapsable from '../../../components/Collapsable'
 import { NumberInput, TextInput, Toggle, VectorInput, cn, labelClass, ACCESS_META } from '../../../components/ui'
 import { VariablesIcon } from '../sectionIcons'
 import type { ScriptVarSchema } from '../../../utils/scripts'
+import { isOverridden, setFieldOverride } from '../../../utils/templateOverrides'
+import OverrideMark from '../OverrideMark'
 
 // The reflection view for a class-based script asset. Variables are not created here: they are declared in
 // the script as class fields, so name, type and access are read-only. Only each node's own VALUE is editable,
 // and it lives as a native own-property on the node. Underscore-prefixed fields are omitted.
 
-export default function ScriptVariablesEditor(props: { node: Node }) {
-  const { eventEmitter, scriptAssetOf } = useCleoEngine()
+/**
+ * `overridable`: the node is inside a placed template instance, so an edited value is recorded as that
+ * placement's override (templateOverrides.ts) and survives the instance being rebuilt from its template.
+ */
+export default function ScriptVariablesEditor(props: { node: Node; overridable?: boolean }) {
+  const { eventEmitter, scriptAssetOf, revertTemplateOverride } = useCleoEngine()
   const asset = scriptAssetOf(props.node)
   const [values, setValues] = useState<Record<string, any>>({})
 
@@ -20,7 +26,9 @@ export default function ScriptVariablesEditor(props: { node: Node }) {
   const sync = () => {
     const n = props.node as any
     const next: Record<string, any> = {}
-    for (const v of visible) next[v.name] = n[v.name]
+    // A field the node holds no value for runs with the script's own default, so show that default rather
+    // than 0 / empty. A node rebuilt from a template carries only the fields the template set.
+    for (const v of visible) next[v.name] = n[v.name] === undefined ? v.default : n[v.name]
     setValues(next)
   }
   useEffect(() => { sync() }, [props.node, asset?.id, asset?.variables])
@@ -29,6 +37,7 @@ export default function ScriptVariablesEditor(props: { node: Node }) {
 
   const setValue = (name: string, value: any) => {
     (props.node as any)[name] = value
+    if (props.overridable) setFieldOverride(props.node, name, value)
     setValues(prev => ({ ...prev, [name]: value }))
     // Mark the scene dirty so the value persists (fan-out reads native fields at save/play time).
     eventEmitter.emit('SCENE_CHANGED')
@@ -65,6 +74,8 @@ export default function ScriptVariablesEditor(props: { node: Node }) {
                 </span>
               )}
               <div className='flex-1 min-w-0'>{renderValue(v)}</div>
+              {props.overridable && isOverridden(props.node, v.name) &&
+                <OverrideMark onRevert={() => revertTemplateOverride(props.node, v.name)} />}
             </div>
           )
         })}

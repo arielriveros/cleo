@@ -70,8 +70,8 @@ async function loadPlayerTemplates(): Promise<PlayerTemplates> {
  */
 async function assemble(data: any, zip: boolean) {
   const templates = await loadPlayerTemplates();
-  const { scripts } = extractScripts(data); // strips node scripts out of `data`
-  const scriptsSource = buildScriptsSource(scripts);
+  const { scripts, paths, modules } = extractScripts(data); // strips node scripts and modules out of `data`
+  const scriptsSource = buildScriptsSource(scripts, paths, modules);
 
   const output = await runPublishJob({ data, scriptsSource, templates, zip });
   for (const warning of output.warnings) Logger.warn(warning, 'Publish');

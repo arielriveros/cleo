@@ -6,7 +6,7 @@ import Collapsable from '../../../components/Collapsable'
 import { Select, Button, Hint, cn, valueClass } from '../../../components/ui'
 import { ScriptIcon } from '../sectionIcons'
 import { useAssetDrop } from '../../../utils/useAssetDrop'
-import { getScriptIdOf, baseTypeMatchesNode, BASE_TYPE_LABEL } from '../../../utils/scripts'
+import { getScriptIdOf, isAttachable, BASE_TYPE_LABEL } from '../../../utils/scripts'
 import { templateInstanceRootOf, TEMPLATE_ID_VAR } from '../../../utils/templates'
 import { applyAdd, uniquePath, dirOf, KIND_EXT } from '../../../utils/vfs'
 
@@ -21,8 +21,8 @@ export default function ScriptSlot(props: { node: Node; onChanged: () => void })
   const linkedId = getScriptIdOf(props.node)
   const asset = linkedId ? scriptAssets.find(a => a.id === linkedId) : undefined
   const missing = !!linkedId && !asset
-  // Only scripts whose base type can attach to this node are offered.
-  const compatible = scriptAssets.filter(a => baseTypeMatchesNode(a.baseType, props.node.nodeType))
+  // Only class scripts whose base type can attach to this node are offered — never a script module.
+  const compatible = scriptAssets.filter(a => isAttachable(a, props.node.nodeType))
 
   // A template instance's new script lands in the template's folder; every other node's lands at the root.
   const targetFolder = (): string => {

@@ -11,15 +11,20 @@ export default function ScriptEditor() {
   const { node, readOnly } = useSelectedNode()
   if (!node || isRootNode(node)) return null
 
+  // Inside a placed template instance the script itself is the template's, but each FIELD VALUE may be
+  // overridden per placement, so the values stay editable while the slot and legacy variables lock.
+  const locked = `${readOnly ? 'opacity-60' : ''} border-0 m-0 p-0 min-w-0`
   return (
-    <fieldset disabled={readOnly} className={`${readOnly ? 'opacity-60' : ''} border-0 m-0 p-0 min-w-0`}>
+    <>
       {readOnly && <TemplateInstanceNotice />}
-      <ScriptSlot node={node} onChanged={() => {}} />
+      <fieldset disabled={readOnly} className={locked}>
+        <ScriptSlot node={node} onChanged={() => {}} />
+      </fieldset>
       {/* Class-based scripts declare their variables as fields (schema view with per-node values); legacy
           inline-variable nodes keep the old add/remove editor until they're migrated. */}
       {getScriptIdOf(node)
-        ? <ScriptVariablesEditor node={node} />
-        : <CustomVariablesEditor node={node} />}
-    </fieldset>
+        ? <ScriptVariablesEditor node={node} overridable={readOnly} />
+        : <fieldset disabled={readOnly} className={locked}><CustomVariablesEditor node={node} /></fieldset>}
+    </>
   )
 }

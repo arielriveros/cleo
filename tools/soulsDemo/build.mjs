@@ -1,0 +1,1632 @@
+#!/usr/bin/env node
+// Authors the "Hollow Keep" souls-like example into editor/public/examples/souls-demo/.
+//
+//     node tools/soulsDemo/build.mjs
+//     npm --prefix editor run examples:list      # regenerates the gallery index
+//
+// Everything visible here is a PLACEHOLDER — the mannequin in tinted materials for every character,
+// boxes and cylinders for the level, procedural stub animations — and every mechanic is real. The point
+// is that the final art can be dropped in from the editor without touching a script: examples/scripts/
+// SOULS_DEMO.md walks through every swap, and this file is where each placeholder's name and contract
+// comes from.
+//
+// The shape follows tools/nightShift/build.mjs, whose helpers it reuses: deterministic ids (re-runs are
+// byte-identical), the editor's own reflector for script variables, the editor's own constants for the
+// stamps a project carries. It copies the mannequin, its material and textures out of the 3d-example and
+// generates everything else.
+
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+import { mat3, mat4, quat, vec3 } from 'gl-matrix'
+import { TextureSet, loadScriptReflector, mb, node, readJson, stableId as nsId, uiNode, vars, writeJson }
+  from '../nightShift/bundle.mjs'
+import { editorModules } from '../nightShift/fbxImport.mjs'
+import { moduleRegistry } from '../nightShift/tsLoader.mjs'
+import { ASSET_HASH_VERSION, KIND_EXT, SCENE_REFS_VERSION } from '../nightShift/editorConstants.mjs'
+import { buildPlaceholderClips } from './placeholderClips.mjs'
+import { bloodDrops, bloodSplat } from './png.mjs'
+import { SOULS_INPUT_MAP } from './inputMap.mjs'
+
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const ROOT = path.resolve(HERE, '..', '..')
+const SRC = path.join(ROOT, 'editor', 'public', 'examples', '3d-example')
+const OUT = path.join(ROOT, 'editor', 'public', 'examples', 'souls-demo')
+const SCRIPTS = path.join(ROOT, 'examples', 'scripts')
+
+const CREATED_AT = 1790000000000
+const PROJECT_NAME = 'Hollow Keep'
+const MANNEQUIN_MODEL = '93cbfa0b91ad0e985b9993b34e60ad7a'
+const MANNEQUIN_MATERIAL = '1e1a53dedc33875a6126b809d5cd9809'
+const LOCOMOTION_FIELD = 'b7a7c98632e7754373bb3b23941a15bf'
+
+/** Every id this example mints, namespaced so nothing can collide with Night Shift's. */
+const stableId = (key) => nsId('souls:' + key)
+const SCENE_ID = stableId('scene:keep')
+
+const reflect = loadScriptReflector(ROOT)
+const { storeSkin } = editorModules(ROOT)
+const { buildAnimationFieldAsset, toRuntimeField } = moduleRegistry({
+  cleo: { Node: class {}, ModelNode: class {}, AnimatedModel: class {} },
+  './ids': { cryptoRandomId: () => { throw new Error('ids must be stable in a generator') } },
+})(path.join(ROOT, 'editor', 'src', 'utils', 'animationFields.ts'))
+const engine = moduleRegistry({ uuid: { v4: () => 'unused' }, '/bvh': { BVH: class {} } })
+const { Geometry } = engine(path.join(ROOT, 'src', 'core', 'geometry.ts'))
+const { makeModule, parseParticleSystem } = engine(path.join(ROOT, 'src', 'particles', 'particleSystemAsset.ts'))
+const { defaultRenderSettings } = engine(path.join(ROOT, 'src', 'particles', 'particleModules.ts'))
+
+// =====================================================================================================
+// Scripts
+// =====================================================================================================
+
+const SCRIPT_FILES = [
+  ['Game Manager', 'SoulsGameManager', 'node'],
+  ['Player', 'SoulsPlayer', 'character'],
+  ['Lock-On Camera', 'SoulsLockOn', 'cameraRig'],
+  ['Weapon', 'SoulsWeapon', 'node'],
+  ['Weapon Move', 'SoulsMove', 'node'],
+  ['Enemy', 'SoulsEnemy', 'character'],
+  ['Enemy Attack', 'SoulsEnemyAttack', 'node'],
+  ['Enemy Brain', 'SoulsEnemyBrain', 'controller'],
+  ['Enemy Spawn', 'SoulsEnemySpawn', 'node'],
+  ['Projectile', 'SoulsProjectile', 'node'],
+  ['Effect', 'SoulsFx', 'node'],
+  ['Bonfire', 'SoulsBonfire', 'node'],
+  ['Pickup', 'SoulsPickup', 'node'],
+  ['Bloodstain', 'SoulsBloodstain', 'node'],
+  ['Blood Splat', 'SoulsBloodSplat', 'node'],
+  ['Message', 'SoulsMessage', 'node'],
+  ['Lever', 'SoulsLever', 'node'],
+  ['Door', 'SoulsDoor', 'node'],
+  ['Fog Gate', 'SoulsFogGate', 'node'],
+  ['HUD', 'SoulsHud', 'uiRoot'],
+  ['Banner', 'SoulsBanner', 'uiRoot'],
+  ['Bonfire Menu', 'SoulsBonfireMenu', 'uiRoot'],
+  // A script MODULE (shared helpers, no class). Named after its FILE: the explorer path is the import
+  // path, so the scripts' `import … from './SoulsMath'` resolves to /Scripts/SoulsMath.script.
+  ['SoulsMath', 'SoulsMath', 'node'],
+]
+
+const scripts = (() => {
+  const assets = []
+  const byFile = new Map()
+  for (const [name, file, baseType] of SCRIPT_FILES) {
+    const source = fs.readFileSync(path.join(SCRIPTS, `${file}.ts`), 'utf8')
+    // `kind` is the editor's derived cache (scripts.ts scriptKindOf): no default class means a module.
+    const kind = /^\s*export\s+default\s+class\b/m.test(source) ? 'class' : 'module'
+    const asset = { id: stableId(`script:${file}`), name, baseType, source, kind, variables: kind === 'module' ? [] : reflect(source) }
+    assets.push(asset)
+    byFile.set(file, asset)
+  }
+  return { assets, byFile }
+})()
+
+/** Attach a script: the library link AND the inline source, exactly as the editor writes it. */
+function withScript(target, file, scriptVars = {}) {
+  const asset = scripts.byFile.get(file)
+  if (!asset) throw new Error(`no script asset for ${file}`)
+  const known = new Set(asset.variables.map(v => v.name))
+  for (const key of Object.keys(scriptVars))
+    if (!known.has(key)) throw new Error(`${file} has no field "${key}" (setting it on ${target.name})`)
+  target.variables = { ...(target.variables ?? {}), ...vars({ __scriptId: asset.id }) }
+  target.script = asset.source
+  target.scriptVars = scriptVars
+  return target
+}
+
+// =====================================================================================================
+// Source project: the mannequin
+// =====================================================================================================
+
+const sourceScene = readJson(path.join(SRC, 'scenes', 'afe4727c54de62f1bafbf6ac25c32b74.json'))
+const sourceModels = readJson(path.join(SRC, 'libraries', 'models.json'))
+const sourceMaterials = readJson(path.join(SRC, 'libraries', 'materials.json'))
+const sourceFields = readJson(path.join(SRC, 'libraries', 'animationFields.json'))
+const textures = new TextureSet(SRC)
+
+const mannequin = sourceModels.find(m => m.id === MANNEQUIN_MODEL)
+if (!mannequin) throw new Error('the mannequin model is not in the 3d-example library')
+const mannequinModelJson = mannequin.nodeJson.children[0].model
+const mannequinMaterial = sourceMaterials.find(m => m.id === MANNEQUIN_MATERIAL)
+for (const id of mannequinMaterial.textureIds) textures.copy(id)
+
+const clone = (x) => JSON.parse(JSON.stringify(x))
+
+function sourceNode(name) {
+  const walk = (n) => n.name === name ? n : (n.children ?? []).reduce((a, c) => a ?? walk(c), null)
+  const found = walk(sourceScene.scene)
+  if (!found) throw new Error(`the 3d-example scene has no node named "${name}"`)
+  return clone(found)
+}
+
+/** Clips live on the rig, never embedded — see Night Shift's stripEmbeddedClips for why. */
+function stripClips(json) {
+  const walk = (n) => {
+    if (!n || typeof n !== 'object') return
+    if (n.model?.skin) n.model.animations = null
+    for (const c of n.children ?? []) walk(c)
+  }
+  walk(json)
+  return json
+}
+
+// =====================================================================================================
+// Rig, clips, field
+// =====================================================================================================
+
+const SOCKETS = ['RightHand', 'LeftHand']
+
+const rig = {
+  id: stableId('rig:mannequin'),
+  name: 'Mannequin',
+  skin: storeSkin(mannequinModelJson.skin),
+  sockets: SOCKETS.map(side => ({ id: stableId(`socket:${side}`), name: side, bone: `mixamorig1:${side}` })),
+}
+
+const idleClip = mannequinModelJson.animations.find(a => a.name === 'Idle')
+const placeholderClips = buildPlaceholderClips(mannequinModelJson.skin, idleClip)
+
+const animations = []
+for (const clip of [...mannequinModelJson.animations, ...placeholderClips]) {
+  animations.push({ id: stableId(`anim:${clip.name}`), name: clip.name, clips: [clip], rigId: rig.id, sourceSkin: rig.skin })
+}
+rig.animationIds = animations.map(a => a.id)
+{
+  const names = animations.map(a => a.name)
+  const clash = names.find((n, i) => names.indexOf(n) !== i)
+  if (clash) throw new Error(`two clips are both called "${clash}"`)
+}
+
+/**
+ * The locomotion blend space: the 3d-example's Playable Field, extended to the player's SPRINT. Its run
+ * samples sit at 4 m/s; the player jogs at 3.8 and sprints at 5.8, so a sprint sample (the run clip,
+ * played faster) is added at 5.8 rather than leaving the feet sliding past the field's edge.
+ */
+const locomotionField = (() => {
+  const source = sourceFields.find(f => f.id === LOCOMOTION_FIELD)
+  const { modelId, thumbnail, ...field } = clone(source)
+  field.id = stableId('afield:locomotion')
+  field.name = 'Souls Locomotion'
+  field.rigId = rig.id
+  field.yAxis = { ...field.yAxis, max: 5.8 }
+  field.samples = [...field.samples, { clipName: 'Run', x: 0, y: 5.8, rateScale: 1.4 }]
+  return field
+})()
+
+/**
+ * Every character's animation machine: Idle, the locomotion field, and Dead. Attacks and reactions are
+ * ACTIONS played over it by script, so the machine needs only the two death triggers.
+ */
+function characterStateMachine() {
+  const speed = (op, value) => ({ op: 'and', children: [{ param: 'Speed', op, value, hysteresis: 0.15 }] })
+  const trigger = (param) => ({ op: 'and', children: [{ param, op: 'trigger' }] })
+  const edge = (from, to, condition) => ({ from, to, conditions: [], minDwell: 0, hasExitTime: false, exitTime: 1, condition })
+  return {
+    parameters: [
+      { name: 'Speed', type: 'variable', default: 0, variable: { nodeRef: 'parent', varName: 'planarSpeed', varType: 'number', source: 'builtin' } },
+      { name: 'Direction', type: 'variable', default: 0, variable: { nodeRef: 'parent', varName: 'planarAngle', varType: 'number', source: 'builtin' } },
+      { name: 'Died', type: 'trigger', default: false },
+      { name: 'Revive', type: 'trigger', default: false },
+    ],
+    states: [
+      { name: 'Idle', clipName: 'Idle', loop: true, speed: 1, isEntry: true, x: 40, y: 40 },
+      {
+        name: 'Locomotion', clipName: '', fieldId: locomotionField.id, field: toRuntimeField(locomotionField),
+        fieldInputs: { x: 'Direction', y: 'Speed' }, loop: true, speed: 1, isEntry: false, x: 300, y: 40,
+      },
+      { name: 'Dead', clipName: 'Souls_Death', loop: false, speed: 1, isEntry: false, x: 170, y: 200 },
+    ],
+    transitions: [
+      edge('Idle', 'Dead', trigger('Died')),
+      edge('Locomotion', 'Dead', trigger('Died')),
+      edge('Dead', 'Idle', trigger('Revive')),
+      { ...edge('Idle', 'Locomotion', speed('gt', 0.5)), minDwell: 0.05 },
+      { ...edge('Locomotion', 'Idle', speed('lt', 0.5)), minDwell: 0.1 },
+    ],
+    events: [],
+  }
+}
+
+/** Sockets ride on every embedded skin — the rig is an authoring asset; the skin is what ships. */
+function embedSockets(json) {
+  const walk = (n) => {
+    if (!n || typeof n !== 'object') return
+    if (Array.isArray(n)) { n.forEach(walk); return }
+    if (n.model?.skin) n.model.skin.sockets = rig.sockets.map(({ name, bone }) => ({ name, bone }))
+    for (const v of Object.values(n)) if (v && typeof v === 'object') walk(v)
+  }
+  walk(json)
+  return json
+}
+
+// =====================================================================================================
+// Grip transforms — where a held weapon's Mesh sits relative to the hand socket
+// =====================================================================================================
+
+/**
+ * The hand bone's rotation in MODEL space at Idle frame 0, from the same chain the clip solver uses. A
+ * socket follows the bone's rotation (not its scale), so a Mesh child under the attached node is posed
+ * in hand space — this converts a grip described in the character's model space into it.
+ */
+const handWorld = (() => {
+  const skin = mannequinModelJson.skin
+  const parents = new Map(skin.nodeParents)
+  const names = new Map(skin.nodeNames)
+  const local = new Map(skin.nodeTransforms.map(([i, m]) => [i, mat4.clone(m)]))
+  for (const ch of idleClip.channels) {
+    const o = idleClip.samplers[ch.samplerIndex].output
+    const m = local.get(ch.targetNodeIndex)
+    if (!m) continue
+    const t = vec3.create(), s = vec3.create()
+    mat4.getTranslation(t, m); mat4.getScaling(s, m)
+    const pure = mat4.clone(m)
+    for (let c = 0; c < 3; c++) for (let k = 0; k < 3; k++) pure[c * 4 + k] /= s[c]
+    const r = quat.normalize(quat.create(), mat4.getRotation(quat.create(), pure))
+    if (ch.targetPath === 'rotation') quat.set(r, o[0], o[1], o[2], o[3])
+    else if (ch.targetPath === 'translation') vec3.set(t, o[0], o[1], o[2])
+    else continue
+    local.set(ch.targetNodeIndex, mat4.fromRotationTranslationScale(mat4.create(), r, t, s))
+  }
+  const world = (i) => {
+    const p = parents.get(i)
+    return p === undefined ? local.get(i) : mat4.multiply(mat4.create(), world(p), local.get(i))
+  }
+  const out = {}
+  for (const [i, name] of names) if (name.endsWith(':RightHand') || name.endsWith(':LeftHand')) {
+    const m = world(i)
+    const s = vec3.create(); mat4.getScaling(s, m)
+    const pure = mat4.clone(m)
+    for (let c = 0; c < 3; c++) for (let k = 0; k < 3; k++) pure[c * 4 + k] /= s[c]
+    out[name.split(':')[1]] = quat.normalize(quat.create(), mat4.getRotation(quat.create(), pure))
+  }
+  return out
+})()
+
+/** Euler degrees for the engine's Rz·Ry·Rx composition, from a quaternion. */
+function eulerFromQuat(q) {
+  const m = mat3.fromQuat(mat3.create(), q)        // column-major: m[c*3 + r]
+  const r = (row, col) => m[col * 3 + row]
+  const y = Math.asin(Math.max(-1, Math.min(1, -r(2, 0))))
+  let x, z
+  if (Math.abs(r(2, 0)) < 0.9999) {
+    x = Math.atan2(r(2, 1), r(2, 2))
+    z = Math.atan2(r(1, 0), r(0, 0))
+  } else {
+    x = Math.atan2(-r(1, 2), r(1, 1))
+    z = 0
+  }
+  const deg = (v) => Math.round(v * 180 / Math.PI * 1000) / 1000
+  return [deg(x), deg(y), deg(z)]
+}
+
+/**
+ * A Mesh child's local transform so that its +Y (the blade/shaft axis of every weapon mesh here) points
+ * along `bladeDir` in model space at Idle, with its origin `palm` metres from the wrist (model space).
+ */
+function grip(hand, bladeDir, palm) {
+  const handRot = handWorld[hand]
+  const inv = quat.invert(quat.create(), handRot)
+  const dirLocal = vec3.transformQuat(vec3.create(), vec3.normalize(vec3.create(), vec3.fromValues(...bladeDir)), inv)
+  const rot = quat.rotationTo(quat.create(), vec3.fromValues(0, 1, 0), dirLocal)
+  const off = vec3.transformQuat(vec3.create(), vec3.fromValues(...palm), inv)
+  return { position: Array.from(off, v => Math.round(v * 1e4) / 1e4), rotation: eulerFromQuat(rot) }
+}
+
+// =====================================================================================================
+// Materials
+// =====================================================================================================
+
+const materials = [clone(mannequinMaterial)]
+
+function pbr(baseColor, extra = {}) {
+  return {
+    type: 'pbr', baseColor, metallic: extra.metallic ?? 0, roughness: extra.roughness ?? 0.85, opacity: extra.opacity ?? 1,
+    emissiveFactor: extra.emissive ?? [0, 0, 0], emissiveIntensity: extra.emissiveIntensity ?? 1,
+    textures: extra.textures ?? {},
+    config: { side: 'front', wireframe: false, transparent: !!extra.transparent, castShadow: extra.castShadow ?? true, probeable: true },
+  }
+}
+
+/** Register a material asset and return its id. */
+function material(key, name, mat, textureIds = []) {
+  const id = stableId(`material:${key}`)
+  materials.push({ id, name, material: mat, textureIds })
+  return id
+}
+
+const characterMaterial = (key, name, tint, extra = {}) => material(key, name, {
+  ...clone(mannequinMaterial.material), baseColor: tint, metallic: extra.metallic ?? 0.4, roughness: extra.roughness ?? 0.9,
+  emissiveFactor: extra.emissive ?? [0, 0, 0],
+}, mannequinMaterial.textureIds)
+
+const MAT = {
+  hollow: characterMaterial('hollow', 'Hollow (placeholder)', [0.36, 0.42, 0.3]),
+  caster: characterMaterial('caster', 'Caster (placeholder)', [0.3, 0.38, 0.85]),
+  knight: characterMaterial('knight', 'Elite Knight (placeholder)', [0.5, 0.15, 0.13], { metallic: 0.7, roughness: 0.6 }),
+  warden: characterMaterial('warden', 'Hollow Warden (placeholder)', [0.16, 0.14, 0.1], { metallic: 0.9, roughness: 0.45 }),
+  stone: material('stone', 'Stone (placeholder)', pbr([0.42, 0.41, 0.4], { roughness: 0.95 })),
+  darkStone: material('dark-stone', 'Dark Stone (placeholder)', pbr([0.24, 0.23, 0.23], { roughness: 0.95 })),
+  floor: material('floor', 'Flagstones (placeholder)', pbr([0.33, 0.31, 0.28], { roughness: 1 })),
+  wood: material('wood', 'Wood (placeholder)', pbr([0.36, 0.24, 0.14], { roughness: 0.9 })),
+  metal: material('metal', 'Iron (placeholder)', pbr([0.38, 0.38, 0.4], { metallic: 0.9, roughness: 0.45 })),
+  blade: material('blade', 'Blade (placeholder)', pbr([0.78, 0.8, 0.84], { metallic: 1, roughness: 0.25 })),
+  leather: material('leather', 'Grip Leather (placeholder)', pbr([0.2, 0.12, 0.07], { roughness: 0.9 })),
+  ash: material('ash', 'Bonfire Ash (placeholder)', pbr([0.12, 0.11, 0.1], { roughness: 1, emissive: [0.6, 0.18, 0.04], emissiveIntensity: 0.6 })),
+  glyph: material('glyph', 'Message Glyph (placeholder)', pbr([0.9, 0.55, 0.2], { emissive: [1, 0.55, 0.15], emissiveIntensity: 3, castShadow: false })),
+  item: material('item', 'Item Glow (placeholder)', pbr([0.95, 0.9, 0.75], { emissive: [1, 0.92, 0.7], emissiveIntensity: 4, castShadow: false })),
+  bolt: material('bolt', 'Magic Bolt (placeholder)', pbr([0.5, 0.7, 1], { emissive: [0.45, 0.65, 1], emissiveIntensity: 12, castShadow: false })),
+  fog: material('fog', 'Fog Wall (placeholder)', pbr([0.95, 0.95, 1], { opacity: 0.28, transparent: true, emissive: [0.6, 0.62, 0.7], emissiveIntensity: 0.6, castShadow: false })),
+  marker: material('marker', 'Lock Reticle', pbr([1, 1, 1], { emissive: [1, 1, 1], castShadow: false })),
+}
+const matJson = (id) => clone(materials.find(m => m.id === id).material)
+
+// Blood decals: generated splat images (png.mjs) on wet, dark-red materials. A decal shows its texture
+// ONCE, so the images are clamp-wrapped and keep a clear margin; coverage is the alpha channel.
+const BLOOD_TEX = {
+  splat: textures.addBytes(stableId('texture:blood-splat'), bloodSplat(0x5011), { wrapping: 'clamp', mipMap: true }),
+  drops: textures.addBytes(stableId('texture:blood-drops'), bloodDrops(0x5012), { wrapping: 'clamp', mipMap: true }),
+}
+const bloodMaterial = (key, name, tex, extra = {}) =>
+  material(key, name, pbr([0.32, 0.015, 0.015], { roughness: 0.22, castShadow: false, textures: { baseColorTexture: tex }, ...extra }), [tex])
+/** Materials filed under /Materials/Effects in the Assets panel rather than with the characters. */
+const EFFECT_MATERIALS = new Set()
+const BLOOD = {
+  splat: bloodMaterial('blood-splat', 'Blood Splat (placeholder)', BLOOD_TEX.splat),
+  drops: bloodMaterial('blood-drops', 'Blood Drops (placeholder)', BLOOD_TEX.drops),
+  // The bloodstain the player drops on death: the same splat, glowing so it can be found in the dark.
+  stain: bloodMaterial('bloodstain-decal', 'Bloodstain Decal (placeholder)', BLOOD_TEX.splat, { emissive: [0.8, 0.05, 0.03], emissiveIntensity: 2 }),
+}
+for (const id of Object.values(BLOOD)) EFFECT_MATERIALS.add(id)
+
+/**
+ * A decal node: projects its material DOWN its local -Y onto whatever deferred PBR surface lies inside
+ * its box (`size`, full extents). Linked to the library material like a model, inline copy included.
+ */
+function decalNode(key, name, materialId, { size = [1, 0.6, 1], position = [0, 0, 0], angleFade = 0.35, depthFade = 0.25, sortOrder = 0, emissive = false } = {}) {
+  return node(name, 'decal', {
+    id: stableId(`decal:${key}`), position,
+    variables: vars({ __materialId: materialId }),
+    decal: {
+      size, opacity: 1, sortOrder, angleFade, depthFade,
+      affects: { albedo: true, normal: false, surface: true, emissive },
+      receivers: 'all', pattern: 'material', material: matJson(materialId),
+    },
+  })
+}
+
+// =====================================================================================================
+// Primitive props
+// =====================================================================================================
+
+const geometryCache = new Map()
+function geometryOf(shape) {
+  if (geometryCache.has(shape)) return geometryCache.get(shape)
+  const g = shape === 'box' ? Geometry.Cube(1, 1, 1)
+    : shape === 'cylinder' ? Geometry.Cylinder(16, 0.5, 1)
+      : shape === 'sphere' ? Geometry.Sphere(16, 0.5)
+        : shape === 'ramp' ? Geometry.Ramp(1, 1, 1)
+          : null
+  if (!g) throw new Error(`no primitive "${shape}"`)
+  const json = {
+    positions: Array.from(g.positions), normals: Array.from(g.normals), tangents: Array.from(g.tangents),
+    bitangents: Array.from(g.bitangents), texCoords: Array.from(g.uvs), indices: Array.from(g.indices),
+  }
+  geometryCache.set(shape, json)
+  return json
+}
+
+function staticBody(shape) {
+  const shapes = shape === 'cylinder'
+    ? [{ type: 'cylinder', radius: 0.5, height: 1, numSegments: 12, offset: [0, 0, 0], rotation: [0, 0, 0] }]
+    : [{ type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] }]
+  return {
+    mass: 0, linearDamping: 0, angularDamping: 0, linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1],
+    friction: 0.3, restitution: 0, simulatePhysics: true, cameraCollision: true, groundProbeDistance: 0,
+    motionSmoothing: 0, shapes,
+  }
+}
+
+/**
+ * A primitive model node. Unit-sized geometry scaled by the node, so the collider (also unit-sized) is
+ * scaled with it — shape dimensions are authored in node-local units.
+ */
+function prop(key, name, shape, materialId, { position = [0, 0, 0], scale = [1, 1, 1], rotation = [0, 0, 0], solid = false, children = [] } = {}) {
+  const n = node(name, 'model', {
+    id: stableId(`prop:${key}`), position, rotation, scale, children,
+    variables: vars({ __materialId: materialId }),
+    model: { geometry: geometryOf(shape), material: matJson(materialId) },
+  })
+  if (solid) n.body = staticBody(shape)
+  return n
+}
+
+const group = (key, name, children, extra = {}) => node(name, 'node', { id: stableId(`group:${key}`), children, ...extra })
+
+// =====================================================================================================
+// Particle systems (.vfx)
+// =====================================================================================================
+
+const particleSystems = []
+const seedOf = (key) => parseInt(stableId('seed:' + key).slice(0, 6), 16)
+const mod = (type, params = {}) => { const m = makeModule(type); Object.assign(m.params, params); return m }
+function emitter(key, name, fields) {
+  const base = {
+    id: stableId(`emitter:${key}`), name, enabled: true, capacity: 512, simSpace: 'world',
+    duration: 5, looping: true, prewarm: false, startDelay: 0, seed: seedOf(key),
+    spawn: [], init: [], update: [], render: defaultRenderSettings(),
+  }
+  return { ...base, ...fields, render: { ...base.render, ...(fields.render ?? {}) } }
+}
+function vfx(key, name, emitters, bounds = { center: [0, 1, 0], extents: [2, 2, 2] }) {
+  const system = parseParticleSystem({ version: 1, emitters, bounds })
+  const asset = { id: stableId(`vfx:${key}`), name, system }
+  particleSystems.push(asset)
+  return asset
+}
+const fade = (peak = 1) => ({ color: [{ t: 0, c: [1, 1, 1] }, { t: 1, c: [1, 1, 1] }], alpha: [{ t: 0, a: 0 }, { t: 0.15, a: peak }, { t: 0.7, a: peak }, { t: 1, a: 0 }] })
+const burst = (count) => mod('spawnBurst', { bursts: [{ time: 0, count, cycles: 1, interval: 1, probability: 1 }] })
+
+const VFX = {
+  fire: vfx('bonfire-fire', 'Bonfire Fire', [
+    emitter('fire-flames', 'Flames', {
+      capacity: 1024,
+      spawn: [mod('spawnRate', { rate: 70 })],
+      init: [mod('shape', { shape: 'cone', radius: 0.3, angle: 8, thickness: 1 }), mod('lifetime', { range: [0.5, 1.1] }),
+        mod('velocity', { mode: 'shape', speed: [1.1, 2] }), mod('size', { range: [0.35, 0.6] }), mod('rotation', { angle: [0, 360], spin: [-90, 90] }),
+        mod('color', { mode: 'constant', colorA: [1, 1, 1, 1], intensity: 4 })],
+      update: [mod('curlNoise', { strength: 2, frequency: 1.2, scroll: 1 }), mod('drag', { coefficient: 1 }), mod('gravity', { scale: -0.15 }),
+        mod('colorOverLife', { gradient: { color: [{ t: 0, c: [1, 0.85, 0.45] }, { t: 0.4, c: [1, 0.35, 0.05] }, { t: 1, c: [0.3, 0.03, 0.01] }], alpha: [{ t: 0, a: 0 }, { t: 0.1, a: 1 }, { t: 0.6, a: 0.6 }, { t: 1, a: 0 }] } }),
+        mod('sizeOverLife', { curve: { keys: [{ t: 0, v: 0.7 }, { t: 0.3, v: 1 }, { t: 1, v: 0.2 }] } })],
+      render: { blend: 'additive', softness: 0.3 },
+    }),
+    emitter('fire-embers', 'Embers', {
+      capacity: 256,
+      spawn: [mod('spawnRate', { rate: 12 })],
+      init: [mod('shape', { shape: 'sphere', radius: 0.3, thickness: 1 }), mod('lifetime', { range: [1.5, 3] }),
+        mod('velocity', { mode: 'direction', direction: [0, 1, 0], spread: 30, speed: [0.6, 1.4] }), mod('size', { range: [0.02, 0.04] }),
+        mod('color', { mode: 'constant', colorA: [1, 0.6, 0.2, 1], intensity: 8 })],
+      update: [mod('curlNoise', { strength: 1, frequency: 0.8 }), mod('colorOverLife', { gradient: fade(1) })],
+      render: { blend: 'additive', softness: 0 },
+    }),
+  ], { center: [0, 1, 0], extents: [1, 1.5, 1] }),
+  torch: vfx('torch-fire', 'Torch Fire', [
+    emitter('torch-flames', 'Flames', {
+      capacity: 256,
+      spawn: [mod('spawnRate', { rate: 30 })],
+      init: [mod('shape', { shape: 'cone', radius: 0.08, angle: 6, thickness: 1 }), mod('lifetime', { range: [0.35, 0.7] }),
+        mod('velocity', { mode: 'shape', speed: [0.8, 1.4] }), mod('size', { range: [0.15, 0.28] }), mod('rotation', { angle: [0, 360], spin: [-90, 90] }),
+        mod('color', { mode: 'constant', colorA: [1, 1, 1, 1], intensity: 4 })],
+      update: [mod('curlNoise', { strength: 1.5, frequency: 1.5, scroll: 1 }), mod('drag', { coefficient: 1 }),
+        mod('colorOverLife', { gradient: { color: [{ t: 0, c: [1, 0.85, 0.45] }, { t: 0.5, c: [1, 0.35, 0.05] }, { t: 1, c: [0.3, 0.03, 0.01] }], alpha: [{ t: 0, a: 0 }, { t: 0.1, a: 1 }, { t: 1, a: 0 }] } }),
+        mod('sizeOverLife', { curve: { keys: [{ t: 0, v: 0.8 }, { t: 0.3, v: 1 }, { t: 1, v: 0.2 }] } })],
+      render: { blend: 'additive', softness: 0.2 },
+    }),
+  ], { center: [0, 0.4, 0], extents: [0.4, 0.6, 0.4] }),
+  fog: vfx('fog-wall', 'Fog Wall', [
+    emitter('fog-sheet', 'Fog', {
+      capacity: 1024, prewarm: true,
+      spawn: [mod('spawnRate', { rate: 90 })],
+      init: [mod('shape', { shape: 'box', box: [5.6, 3.6, 0.3], offset: [0, 1.8, 0] }), mod('lifetime', { range: [2, 3.2] }),
+        mod('velocity', { mode: 'direction', direction: [0, 1, 0], spread: 60, speed: [0.05, 0.3] }), mod('size', { range: [0.9, 1.6] }),
+        mod('rotation', { angle: [0, 360], spin: [-15, 15] }), mod('color', { mode: 'constant', colorA: [0.92, 0.94, 1, 0.22], intensity: 1.2 })],
+      update: [mod('curlNoise', { strength: 0.4, frequency: 0.6, scroll: 0.2 }), mod('colorOverLife', { gradient: fade(0.9) })],
+      render: { softness: 0.8 },
+    }),
+  ], { center: [0, 1.8, 0], extents: [3.5, 2.5, 1] }),
+  boltTrail: vfx('bolt-trail', 'Magic Bolt Trail', [
+    emitter('bolt-motes', 'Trail', {
+      capacity: 512,
+      spawn: [mod('spawnRate', { rate: 140 })],
+      init: [mod('shape', { shape: 'sphere', radius: 0.08, thickness: 1 }), mod('lifetime', { range: [0.25, 0.5] }),
+        mod('velocity', { mode: 'radial', speed: [0, 0.3] }), mod('size', { range: [0.08, 0.16] }),
+        mod('color', { mode: 'constant', colorA: [0.5, 0.75, 1, 1], intensity: 6 })],
+      update: [mod('colorOverLife', { gradient: fade(1) }), mod('sizeOverLife', { curve: { keys: [{ t: 0, v: 1 }, { t: 1, v: 0 }] } })],
+      render: { blend: 'additive', softness: 0 },
+    }),
+  ], { center: [0, 0, 0], extents: [1.5, 1.5, 1.5] }),
+  boltImpact: vfx('bolt-impact', 'Magic Bolt Impact', [
+    emitter('impact-burst', 'Burst', {
+      capacity: 128, looping: false, duration: 1,
+      spawn: [mod('spawnRate', { rate: 0 }), burst(48)],
+      init: [mod('shape', { shape: 'sphere', radius: 0.1, thickness: 1 }), mod('lifetime', { range: [0.3, 0.7] }),
+        mod('velocity', { mode: 'radial', speed: [2, 5] }), mod('size', { range: [0.05, 0.12] }),
+        mod('color', { mode: 'constant', colorA: [0.55, 0.75, 1, 1], intensity: 8 })],
+      update: [mod('drag', { coefficient: 2 }), mod('colorOverLife', { gradient: fade(1) })],
+      render: { blend: 'additive', softness: 0 },
+    }),
+  ], { center: [0, 0, 0], extents: [2, 2, 2] }),
+  hitSpark: vfx('hit-spark', 'Hit Spark', [
+    emitter('spark-burst', 'Sparks', {
+      capacity: 64, looping: false, duration: 1,
+      spawn: [mod('spawnRate', { rate: 0 }), burst(24)],
+      init: [mod('shape', { shape: 'sphere', radius: 0.05, thickness: 1 }), mod('lifetime', { range: [0.2, 0.5] }),
+        mod('velocity', { mode: 'radial', speed: [2, 6] }), mod('size', { range: [0.02, 0.05] }),
+        mod('color', { mode: 'constant', colorA: [1, 0.55, 0.15, 1], intensity: 8 })],
+      update: [mod('gravity', { scale: 1 }), mod('drag', { coefficient: 0.5 }), mod('colorOverLife', { gradient: fade(1) })],
+      render: { blend: 'additive', alignment: 'velocity', stretch: 0.8, softness: 0 },
+    }),
+  ], { center: [0, 0, 0], extents: [1.5, 1.5, 1.5] }),
+  // Droplets thrown off a wound. Dark and alpha-blended — blood does not glow — and short-lived: the
+  // stain it leaves is the decal, not the particles.
+  bloodSpray: vfx('blood-spray', 'Blood Spray', [
+    emitter('blood-droplets', 'Droplets', {
+      capacity: 64, looping: false, duration: 1,
+      spawn: [mod('spawnRate', { rate: 0 }), burst(28)],
+      init: [mod('shape', { shape: 'sphere', radius: 0.08, thickness: 1 }), mod('lifetime', { range: [0.35, 0.8] }),
+        mod('velocity', { mode: 'direction', direction: [0, 1, 0], spread: 70, speed: [1.5, 4.5] }), mod('size', { range: [0.025, 0.06] }),
+        mod('color', { mode: 'constant', colorA: [0.28, 0.01, 0.01, 1], intensity: 1 })],
+      update: [mod('gravity', { scale: 1.6 }), mod('drag', { coefficient: 0.4 }), mod('colorOverLife', { gradient: fade(1) })],
+      render: { blend: 'alpha', alignment: 'velocity', stretch: 0.5, softness: 0 },
+    }),
+  ], { center: [0, 0, 0], extents: [1.5, 1.5, 1.5] }),
+  slamDust: vfx('slam-dust', 'Slam Dust', [
+    emitter('dust-ring', 'Dust', {
+      capacity: 128, looping: false, duration: 1.5,
+      spawn: [mod('spawnRate', { rate: 0 }), burst(70)],
+      init: [mod('shape', { shape: 'circle', radius: 1.2, thickness: 0.3 }), mod('lifetime', { range: [0.8, 1.4] }),
+        mod('velocity', { mode: 'radial', speed: [2, 4] }), mod('size', { range: [0.5, 1] }),
+        mod('rotation', { angle: [0, 360], spin: [-30, 30] }), mod('color', { mode: 'constant', colorA: [0.5, 0.47, 0.42, 0.5] })],
+      update: [mod('drag', { coefficient: 1.5 }), mod('colorOverLife', { gradient: fade(0.7) }),
+        mod('sizeOverLife', { curve: { keys: [{ t: 0, v: 0.6 }, { t: 1, v: 2 }] } })],
+      render: { lit: true, softness: 0.5 },
+    }),
+  ], { center: [0, 0.5, 0], extents: [5, 2, 5] }),
+  souls: vfx('item-glow', 'Item Glow', [
+    emitter('item-motes', 'Motes', {
+      capacity: 128,
+      spawn: [mod('spawnRate', { rate: 18 })],
+      init: [mod('shape', { shape: 'sphere', radius: 0.15, thickness: 1 }), mod('lifetime', { range: [1, 1.8] }),
+        mod('velocity', { mode: 'direction', direction: [0, 1, 0], spread: 20, speed: [0.2, 0.5] }), mod('size', { range: [0.03, 0.07] }),
+        mod('color', { mode: 'constant', colorA: [1, 0.95, 0.8, 1], intensity: 6 })],
+      update: [mod('colorOverLife', { gradient: fade(1) })],
+      render: { blend: 'additive', softness: 0 },
+    }),
+  ], { center: [0, 0.5, 0], extents: [0.6, 1, 0.6] }),
+  glyph: vfx('message-glow', 'Message Glow', [
+    emitter('glyph-motes', 'Motes', {
+      capacity: 64,
+      spawn: [mod('spawnRate', { rate: 6 })],
+      init: [mod('shape', { shape: 'circle', radius: 0.3, thickness: 1 }), mod('lifetime', { range: [1, 2] }),
+        mod('velocity', { mode: 'direction', direction: [0, 1, 0], spread: 10, speed: [0.1, 0.3] }), mod('size', { range: [0.02, 0.05] }),
+        mod('color', { mode: 'constant', colorA: [1, 0.6, 0.2, 1], intensity: 6 })],
+      update: [mod('colorOverLife', { gradient: fade(1) })],
+      render: { blend: 'additive', softness: 0 },
+    }),
+  ], { center: [0, 0.4, 0], extents: [0.6, 0.6, 0.6] }),
+  bloodstain: vfx('bloodstain-glow', 'Bloodstain Glow', [
+    emitter('blood-motes', 'Motes', {
+      capacity: 64,
+      spawn: [mod('spawnRate', { rate: 14 })],
+      init: [mod('shape', { shape: 'circle', radius: 0.35, thickness: 1 }), mod('lifetime', { range: [0.8, 1.6] }),
+        mod('velocity', { mode: 'direction', direction: [0, 1, 0], spread: 15, speed: [0.2, 0.6] }), mod('size', { range: [0.04, 0.08] }),
+        mod('color', { mode: 'constant', colorA: [1, 0.1, 0.06, 1], intensity: 6 })],
+      update: [mod('colorOverLife', { gradient: fade(1) })],
+      render: { blend: 'additive', softness: 0 },
+    }),
+  ], { center: [0, 0.5, 0], extents: [0.8, 1, 0.8] }),
+  aura: vfx('phase-aura', 'Phase Two Aura', [
+    emitter('aura-embers', 'Embers', {
+      capacity: 1024,
+      spawn: [mod('spawnRate', { rate: 90 })],
+      init: [mod('shape', { shape: 'sphere', radius: 1.2, thickness: 0.4, offset: [0, 1.6, 0] }), mod('lifetime', { range: [0.8, 1.6] }),
+        mod('velocity', { mode: 'direction', direction: [0, 1, 0], spread: 40, speed: [0.5, 1.5] }), mod('size', { range: [0.04, 0.1] }),
+        mod('color', { mode: 'constant', colorA: [1, 0.35, 0.1, 1], intensity: 7 })],
+      update: [mod('curlNoise', { strength: 1.2, frequency: 0.8 }), mod('colorOverLife', { gradient: fade(1) })],
+      render: { blend: 'additive', softness: 0 },
+    }),
+  ], { center: [0, 1.6, 0], extents: [2, 2.5, 2] }),
+}
+
+function particles(key, name, asset, { position = [0, 0, 0], playOnStart = true, scale = [1, 1, 1] } = {}) {
+  return node(name, 'particleSystem', {
+    id: stableId(`particles:${key}`), position, scale,
+    particleSystem: { system: clone(asset.system), particleSystemId: asset.id, playOnStart, simulationSpeed: 1, spawnRateScale: 1, tint: [1, 1, 1, 1] },
+  })
+}
+
+function pointLight(key, name, color, lumens, range, position = [0, 0, 0]) {
+  return node(name, 'light', {
+    id: stableId(`light:${key}`), position, lightType: 'point', castShadows: false,
+    light: { unit: 'photometric', color, intensity: lumens, range, sourceRadius: 0.1, legacyFalloff: false },
+  })
+}
+
+// =====================================================================================================
+// Characters
+// =====================================================================================================
+
+const playableSource = sourceNode('Playable')
+const sourceModelNode = playableSource.children.find(c => c.name === 'Ch36')
+const sourceBody = playableSource.body
+const ragdoll = clone(sourceModelNode.ragdoll ?? null)
+
+/** The skinned mannequin, tinted, scaled, carrying the shared machine. */
+function characterModel(key, materialId, scale) {
+  const model = clone(sourceModelNode)
+  stripClips(model)
+  model.id = stableId(`${key}:model`)
+  model.scale = [scale, scale, scale]
+  model.variables = vars({ __modelId: MANNEQUIN_MODEL, __materialId: materialId })
+  model.model.material = matJson(materialId)
+  model.stateMachine = characterStateMachine()
+  model.ragdoll = clone(ragdoll)
+  model.children = []
+  return model
+}
+
+function capsuleBody(radius, height, mass = 60) {
+  return {
+    // No linear damping: locomotion sets the velocity every frame, and damping only made the body fall
+    // short of the speed the locomotion asked for (and the run/sprint blend that reads it).
+    ...clone(sourceBody), mass, restitution: 0, friction: 0, linearDamping: 0,
+    angularConstraints: [0, 0, 0], linearConstraints: [1, 1, 1], groundProbeDistance: 0.12,
+    shapes: [{ type: 'capsule', radius, height, numSegments: 16, offset: [0, height / 2, 0], rotation: [0, 0, 0] }],
+  }
+}
+
+/** A weapon visual: a group whose local transform is the grip, holding boxes along +Y. */
+function weaponMesh(key, hand, bladeDir, parts) {
+  const g = grip(hand, bladeDir, [hand === 'RightHand' ? -0.02 : 0.02, -0.07, 0.03])
+  return node('Mesh', 'node', {
+    id: stableId(`${key}:mesh`), position: g.position, rotation: g.rotation,
+    children: parts.map(([name, shape, mat, size, at]) => prop(`${key}:${name}`, name, shape, mat, { position: at, scale: size })),
+  })
+}
+
+const BLADE_DOWN_FORWARD = [0, -0.45, 1]
+
+const SWORD_PARTS = [
+  ['Blade', 'box', MAT.blade, [0.06, 0.85, 0.012], [0, 0.55, 0]],
+  ['Guard', 'box', MAT.metal, [0.22, 0.03, 0.04], [0, 0.11, 0]],
+  ['Grip', 'cylinder', MAT.leather, [0.035, 0.2, 0.035], [0, 0, 0]],
+]
+const GREATSWORD_PARTS = [
+  ['Blade', 'box', MAT.blade, [0.11, 1.35, 0.02], [0, 0.85, 0]],
+  ['Guard', 'box', MAT.metal, [0.34, 0.05, 0.06], [0, 0.15, 0]],
+  ['Grip', 'cylinder', MAT.leather, [0.04, 0.32, 0.04], [0, 0, 0]],
+]
+
+/** One SoulsMove data node. */
+function move(key, name, fields) {
+  return withScript(node(name, 'node', { id: stableId(`move:${key}:${name}`) }), 'SoulsMove', fields)
+}
+
+function playerWeapons() {
+  const sword = withScript(node('Weapon_StraightSword', 'node', {
+    id: stableId('weapon:sword'),
+    socketAttachment: { target: 'parent', socket: 'RightHand' },
+    children: [
+      weaponMesh('weapon:sword', 'RightHand', BLADE_DOWN_FORWARD, SWORD_PARTS),
+      move('sword', 'Light1', { clip: 'Souls_Sword_L1', damageMul: 1, staminaCost: 16, range: 2.3, arcDeg: 110, lungeStart: 0.1, lungeSeconds: 0.15, lungeSpeed: 2.5, hitTime: 0.38, comboTime: 0.45, recoverTime: 0.62, next: 'Light2' }),
+      move('sword', 'Light2', { clip: 'Souls_Sword_L2', damageMul: 1, staminaCost: 16, range: 2.3, arcDeg: 110, lungeStart: 0.1, lungeSeconds: 0.15, lungeSpeed: 2.5, hitTime: 0.36, comboTime: 0.45, recoverTime: 0.62, next: 'Light3' }),
+      move('sword', 'Light3', { clip: 'Souls_Sword_L3', damageMul: 1.15, staminaCost: 20, range: 2.5, arcDeg: 60, lungeStart: 0.3, lungeSeconds: 0.2, lungeSpeed: 3, hitTime: 0.52, comboTime: 0.6, recoverTime: 0.8, next: 'Light1' }),
+      move('sword', 'Heavy', { clip: 'Souls_Sword_Heavy', damageMul: 1.6, poiseMul: 2, staminaCost: 30, range: 2.6, arcDeg: 50, lungeStart: 0.62, lungeSeconds: 0.2, lungeSpeed: 4, trackSeconds: 0.35, hitTime: 0.78, comboTime: 1, recoverTime: 1.05, next: '' }),
+    ],
+  }), 'SoulsWeapon', { displayName: 'Straight Sword', baseDamage: 100, strScaling: 0.2, dexScaling: 0.8, strRequirement: 8, dexRequirement: 10, poiseDamage: 15 })
+
+  const greatsword = withScript(node('Weapon_Greatsword', 'node', {
+    id: stableId('weapon:greatsword'),
+    socketAttachment: { target: 'parent', socket: 'RightHand' },
+    children: [
+      weaponMesh('weapon:greatsword', 'RightHand', BLADE_DOWN_FORWARD, GREATSWORD_PARTS),
+      move('greatsword', 'Light1', { clip: 'Souls_GS_L1', damageMul: 1, staminaCost: 26, range: 3, arcDeg: 140, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light2' }),
+      move('greatsword', 'Light2', { clip: 'Souls_GS_L2', damageMul: 1.05, staminaCost: 26, range: 3, arcDeg: 140, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light1' }),
+      move('greatsword', 'Heavy', { clip: 'Souls_GS_Heavy', damageMul: 1.7, poiseMul: 2, staminaCost: 42, range: 3.2, arcDeg: 70, lungeStart: 0.95, lungeSeconds: 0.2, lungeSpeed: 3, trackSeconds: 0.5, hitTime: 1.15, comboTime: 1.5, recoverTime: 1.55, next: '' }),
+    ],
+  }), 'SoulsWeapon', { displayName: 'Greatsword', baseDamage: 165, strScaling: 1, dexScaling: 0.15, strRequirement: 16, dexRequirement: 0, poiseDamage: 32 })
+
+  return group('player:weapons', 'Weapons', [sword, greatsword])
+}
+
+function playerNode() {
+  // A copy: the template and the placed player are both built from it.
+  const player = clone(playableSource)
+  stripClips(player)
+  player.name = 'Player'
+  player.id = stableId('player')
+  player.position = [0, 0.05, -3]
+  player.rotation = [0, 0, 0]
+  player.variables = {}
+  delete player.script
+  player.body = capsuleBody(0.3, 1.78, 70)
+  Object.assign(player, {
+    walkSpeed: 3.8, runSpeed: 5.8, turnSpeed: 720, turnThreshold: 170, acceleration: 24,
+    facingMode: 'velocity', directionSmoothing: 0.1, jumpSpeed: 0, coyoteSeconds: 0.1,
+  })
+  withScript(player, 'SoulsPlayer')
+
+  const rigNode = player.children.find(c => c.name === 'camera rig')
+  rigNode.id = stableId('player:rig')
+  rigNode.variables = {}
+  delete rigNode.script
+  Object.assign(rigNode, {
+    position: [0, 1.5, 0], followId: null, lookAtId: null, aimMode: 'orbit', armLength: 4.4,
+    socketOffset: [0, 0.35, 0], pitchMin: -40, pitchMax: 65, followOffset: [0, 1.5, 0], lookAtOffset: [0, 0, 0],
+    collisionEnabled: true, aimDamping: 0.08,
+  })
+  rigNode.children = rigNode.children.map(c => ({ ...c, id: stableId('player:camera') }))
+  withScript(rigNode, 'SoulsLockOn')
+
+  const model = characterModel('player', MANNEQUIN_MATERIAL, 1)
+  model.variables = vars({ __modelId: MANNEQUIN_MODEL, __materialId: MANNEQUIN_MATERIAL })
+  model.model.material = clone(mannequinMaterial.material)
+
+  const controller = node('Player Controller', 'controller', {
+    id: stableId('player:controller'),
+    possessedId: player.id, aimSourceId: null, controlSource: 'player',
+    moveAction: 'Move', lookAction: 'Look', jumpAction: '', sprintAction: '', crouchAction: '',
+    aimSource: 'possessed', driveAimTarget: true,
+  })
+  // ORDER: the camera rig before the controller (the controller finds the first rig in the subtree).
+  player.children = [rigNode, model, playerWeapons(), controller]
+  return player
+}
+
+// ----- enemies ---------------------------------------------------------------------------------------
+
+function attack(key, name, fields) {
+  return withScript(node(name, 'node', { id: stableId(`attack:${key}:${name}`) }), 'SoulsEnemyAttack', fields)
+}
+
+/**
+ * The behaviour machine every enemy brain runs. It only switches; the thresholds live in SoulsEnemy and
+ * SoulsEnemyBrain fields, which write the blackboard flags this reads.
+ */
+function enemyBehaviour() {
+  const is = (param, truth = true) => ({ op: 'and', children: [{ param, op: truth ? 'true' : 'false' }] })
+  const both = (...c) => ({ op: 'and', children: c.map(x => x.children[0]) })
+  const bb = (name, key) => ({ name, type: 'boolean', default: false, source: { kind: 'blackboard', key } })
+  return {
+    parameters: [bb('Engage', 'engage'), bb('Leash', 'leash'), bb('Dead', 'dead'), bb('Awake', 'awake'), bb('Target', 'target'), bb('AtHome', 'atHome')],
+    states: [
+      { name: 'Idle', goal: 'idle', speedScale: 0.5, isEntry: true, x: 40, y: 40 },
+      { name: 'Chase', goal: 'path', speedScale: 1, x: 260, y: 40 },
+      { name: 'Engage', goal: 'script', speedScale: 1, x: 480, y: 40 },
+      { name: 'Return', goal: 'path', targetKey: 'point', speedScale: 0.7, x: 260, y: 200 },
+      { name: 'Dead', goal: 'idle', speedScale: 0, x: 480, y: 200 },
+    ],
+    transitions: [
+      { from: '*', to: 'Dead', condition: is('Dead') },
+      { from: 'Idle', to: 'Chase', condition: both(is('Awake'), is('Target')) },
+      { from: 'Chase', to: 'Engage', condition: is('Engage') },
+      { from: 'Engage', to: 'Chase', condition: is('Engage', false), minDwell: 0.3 },
+      { from: 'Chase', to: 'Return', condition: is('Leash') },
+      { from: 'Engage', to: 'Return', condition: is('Leash') },
+      { from: 'Chase', to: 'Idle', condition: both(is('Target', false), is('AtHome')) },
+      { from: 'Return', to: 'Idle', condition: is('AtHome') },
+    ],
+  }
+}
+
+function enemyTemplate(spec) {
+  const key = `enemy:${spec.key}`
+  const rootId = stableId(`${key}:root`)
+  const s = spec.scale
+  const model = characterModel(key, spec.material, s)
+
+  const lockPoint = node('LockPoint', 'node', { id: stableId(`${key}:lock`), position: [0, 1.25 * s, 0] })
+  const anchor = node('HealthAnchor', 'node', { id: stableId(`${key}:anchor`), position: [0, 1.95 * s, 0] })
+  const weapon = node('Weapon', 'node', {
+    id: stableId(`${key}:weapon`), socketAttachment: { target: 'parent', socket: 'RightHand' },
+    children: [weaponMesh(`${key}:weapon`, 'RightHand', spec.weaponDir ?? BLADE_DOWN_FORWARD, spec.weaponParts)],
+  })
+  const attacks = group(`${key}:attacks`, 'Attacks', spec.attacks.map(([name, fields]) => attack(spec.key, name, fields)))
+
+  const children = [model, lockPoint, anchor, weapon, attacks]
+  if (!spec.boss) children.push(enemyHealthBar(key, anchor.id))
+  if (spec.aura) children.push(particles(`${key}:aura`, 'PhaseAura', VFX.aura, { playOnStart: false }))
+
+  const brain = withScript(node('Brain', 'controller', {
+    id: stableId(`${key}:brain`), possessedId: rootId, controlSource: 'ai', brain: 'machine',
+    aimSource: 'world', driveAimTarget: false, autoAcquire: false, targetKey: 'target', goal: 'idle',
+    perception: { fieldOfView: spec.fov ?? 140, range: spec.sight ?? 15, memorySpan: 8, reactionTime: 0.35 },
+    eyeHeight: 1.6 * s,
+    steering: { maxSpeed: 3, arriveRadius: 0.8, slowRadius: 2.5, standoff: 1.5, avoidDistance: 1.5 },
+    waypointRadius: 0.6,
+    behavior: enemyBehaviour(),
+  }), 'SoulsEnemyBrain')
+  children.push(brain)
+
+  const root = withScript(node(spec.name, 'character', {
+    id: rootId, children,
+    walkSpeed: spec.fields.moveSpeed ?? 3, runSpeed: spec.fields.moveSpeed ?? 3, turnSpeed: 300, turnThreshold: 170,
+    acceleration: 12, facingMode: 'velocity', directionSmoothing: 0.15, jumpSpeed: 0,
+  }), 'SoulsEnemy', { displayName: spec.name, bodyHeight: 1.8 * s, ...spec.fields })
+
+  return {
+    id: stableId(`template:${spec.key}`), name: spec.name, nodeJson: root,
+    textureIds: [...mannequinMaterial.textureIds], scripts: {},
+    bodies: { [rootId]: capsuleBody(spec.radius ?? 0.3 * s, 1.78 * s, spec.mass ?? 70) }, triggers: {},
+  }
+}
+
+function enemyHealthBar(key, anchorId) {
+  const fill = uiNode('Fill', 'uiProgressBar', {
+    anchorMin: [0, 0], anchorMax: [1, 1], offsetMin: [0, 0], offsetMax: [0, 0],
+    min: 0, max: 1, value: 1, fillTint: [0.75, 0.12, 0.1, 1], tint: [0, 0, 0, 0.6], direction: 'ltr', smoothing: 0.25, borderRadius: 2,
+  }, { id: stableId(`${key}:bar:fill`) })
+  return uiNode('HealthBar', 'uiRoot', {
+    space: 'world', referenceResolution: [110, 8], scaleMode: 'constantPixel', pivot: [0.5, 0.5],
+    uiTargetId: anchorId, referenceDistance: 10, minScale: 0.1, maxScale: 4, billboard: true,
+    clampToScreen: false, hideBehindCamera: true, offsetMax: [110, 8],
+  }, { id: stableId(`${key}:bar`), visible: false, children: [fill] })
+}
+
+const CLUB = [['Club', 'cylinder', MAT.wood, [0.07, 0.75, 0.07], [0, 0.35, 0]]]
+const STAFF = [['Staff', 'cylinder', MAT.wood, [0.05, 1.6, 0.05], [0, 0.25, 0]], ['Orb', 'sphere', MAT.bolt, [0.12, 0.12, 0.12], [0, 1.08, 0]]]
+const HALBERD = [['Shaft', 'cylinder', MAT.wood, [0.06, 2.2, 0.06], [0, 0.6, 0]], ['Head', 'box', MAT.blade, [0.4, 0.5, 0.03], [0.12, 1.65, 0]]]
+
+const ENEMIES = [
+  {
+    key: 'hollow', name: 'Hollow', material: MAT.hollow, scale: 1, weaponParts: CLUB,
+    fields: { maxHp: 160, defense: 0, maxPoise: 25, soulsReward: 120, moveSpeed: 2.6, engageRange: 4, leashRange: 18, preferredMin: 0, preferredMax: 1.8 },
+    sight: 14,
+    attacks: [
+      ['Swing', { clip: 'Souls_Enemy_Swing', damage: 70, poiseDamage: 20, minRange: 0, maxRange: 2.4, hitRange: 2.3, arcDeg: 100, trackSeconds: 0.45, lungeStart: 0.45, lungeSeconds: 0.15, lungeSpeed: 2.5, hitTime: 0.62 }],
+      ['Sweep', { clip: 'Souls_Enemy_Sweep', damage: 60, poiseDamage: 20, minRange: 0, maxRange: 2.6, hitRange: 2.5, arcDeg: 150, weight: 0.6, cooldown: 3, trackSeconds: 0.4, hitTime: 0.7 }],
+    ],
+  },
+  {
+    key: 'caster', name: 'Hollow Sorcerer', material: MAT.caster, scale: 1, weaponParts: STAFF, weaponDir: [0, 1, 0.2],
+    fields: { maxHp: 110, defense: 0, maxPoise: 15, soulsReward: 160, moveSpeed: 2.2, engageRange: 18, leashRange: 22, preferredMin: 7, preferredMax: 14, strafeSpeedScale: 0.5, attackGapMin: 1, attackGapMax: 2 },
+    sight: 22, fov: 160,
+    attacks: [
+      ['Bolt', { clip: 'Souls_Cast', damage: 90, poiseDamage: 30, minRange: 3, maxRange: 20, hitRange: 20, arcDeg: 360, cooldown: 3.5, trackSeconds: 0.65, hitTime: 0.7, projectileTemplate: 'Magic Bolt', projectileSpeed: 12, sound: 'Cast' }],
+      ['Shove', { clip: 'Souls_Enemy_Swing', damage: 40, poiseDamage: 15, minRange: 0, maxRange: 2.2, hitRange: 2.2, arcDeg: 100, hitTime: 0.62 }],
+    ],
+  },
+  {
+    key: 'knight', name: 'Elite Knight', material: MAT.knight, scale: 1.2, weaponParts: GREATSWORD_PARTS,
+    fields: { maxHp: 650, defense: 0.15, maxPoise: 70, soulsReward: 900, moveSpeed: 2.8, engageRange: 9, leashRange: 14, preferredMin: 0, preferredMax: 2.6, attackGapMin: 0.8, attackGapMax: 1.4, bodyRadius: 0.45 },
+    sight: 16,
+    attacks: [
+      ['Sweep', { clip: 'Souls_Enemy_Sweep', damage: 140, poiseDamage: 35, minRange: 0, maxRange: 3, hitRange: 3.1, arcDeg: 150, trackSeconds: 0.45, hitTime: 0.7 }],
+      ['Overhead', { clip: 'Souls_Enemy_Overhead', damage: 190, poiseDamage: 50, minRange: 0, maxRange: 2.8, hitRange: 3, arcDeg: 60, hyperArmor: true, trackSeconds: 0.8, lungeStart: 0.95, lungeSeconds: 0.15, lungeSpeed: 3, hitTime: 1.05, weight: 0.8 }],
+      ['Thrust', { clip: 'Souls_Enemy_Thrust', damage: 150, poiseDamage: 40, minRange: 4, maxRange: 9, hitRange: 2.4, arcDeg: 50, cooldown: 4, trackSeconds: 0.3, lungeStart: 0.3, lungeSeconds: 0.3, lungeSpeed: 14, lungeToTarget: true, hitTime: 0.55 }],
+    ],
+  },
+  {
+    key: 'warden', name: 'Hollow Warden', material: MAT.warden, scale: 1.8, weaponParts: HALBERD, boss: true, aura: true,
+    radius: 0.45, mass: 300, sight: 60, fov: 360,
+    fields: {
+      maxHp: 2600, defense: 0.2, maxPoise: 150, soulsReward: 6000, moveSpeed: 3, engageRange: 12, leashRange: 999,
+      preferredMin: 0, preferredMax: 3.6, attackGapMin: 0.6, attackGapMax: 1.2, isBoss: true, flinchOnHit: false,
+      bodyRadius: 0.7, healthBarSeconds: 0, deathSeconds: 2.2, corpseSeconds: 20,
+    },
+    attacks: [
+      ['Sweep', { clip: 'Souls_Enemy_Sweep', playSpeed: 0.9, damage: 150, poiseDamage: 40, minRange: 0, maxRange: 4.2, hitRange: 4.4, arcDeg: 160, trackSeconds: 0.5, hitTime: 0.7, comboNext: 'Backsweep' }],
+      ['Backsweep', { clip: 'Souls_GS_L2', playSpeed: 1, damage: 140, poiseDamage: 40, minRange: 0, maxRange: 4.2, hitRange: 4.4, arcDeg: 160, phase: 9, trackSeconds: 0.4, hitTime: 0.7 }],
+      ['Slam', { clip: 'Souls_Enemy_Overhead', playSpeed: 0.85, damage: 220, poiseDamage: 60, minRange: 0, maxRange: 3.8, hitRange: 4, arcDeg: 70, hyperArmor: true, trackSeconds: 0.8, lungeStart: 0.95, lungeSeconds: 0.2, lungeSpeed: 3, hitTime: 1.05, impactTemplate: 'Slam Dust' }],
+      ['Lunge', { clip: 'Souls_Enemy_Thrust', damage: 160, poiseDamage: 45, minRange: 5, maxRange: 12, hitRange: 3, arcDeg: 60, cooldown: 4, trackSeconds: 0.3, lungeStart: 0.3, lungeSeconds: 0.35, lungeSpeed: 16, lungeToTarget: true, hitTime: 0.55 }],
+      ['Leap', { clip: 'Souls_Leap', damage: 200, poiseDamage: 80, minRange: 6, maxRange: 16, hitRange: 3.8, aoeRadius: 3.8, phase: 2, cooldown: 6, hyperArmor: true, trackSeconds: 0.55, lungeStart: 0.6, lungeSeconds: 0.6, lungeSpeed: 18, lungeToTarget: true, hitTime: 1.25, impactTemplate: 'Slam Dust', sound: 'Boss Leap' }],
+      ['Bolt Fan', { clip: 'Souls_Cast', playSpeed: 1.1, damage: 110, poiseDamage: 30, minRange: 6, maxRange: 22, hitRange: 22, arcDeg: 360, phase: 2, cooldown: 7, trackSeconds: 0.6, hitTime: 0.7, projectileTemplate: 'Magic Bolt', projectileSpeed: 13, projectileCount: 3, spreadDeg: 14, sound: 'Cast' }],
+    ],
+  },
+]
+
+// ----- effect / projectile / loot templates ----------------------------------------------------------
+
+function fxTemplate(key, name, asset, lifetime, extra = []) {
+  const id = stableId(`template:${key}:root`)
+  const root = withScript(node(name, 'node', { id, children: [particles(`${key}:p`, 'Particles', asset), ...extra] }), 'SoulsFx', { lifetime })
+  return { id: stableId(`template:${key}`), name, nodeJson: root, textureIds: [], scripts: {}, bodies: {}, triggers: {} }
+}
+
+function boltTemplate() {
+  const id = stableId('template:bolt:root')
+  const root = withScript(node('Magic Bolt', 'node', {
+    id, children: [
+      prop('bolt:core', 'Core', 'sphere', MAT.bolt, { scale: [0.22, 0.22, 0.22] }),
+      particles('bolt:trail', 'Trail', VFX.boltTrail),
+      pointLight('bolt:light', 'Glow', [0.5, 0.7, 1], 600, 6),
+    ],
+  }), 'SoulsProjectile', { impactTemplate: 'Bolt Impact' })
+  return { id: stableId('template:bolt'), name: 'Magic Bolt', nodeJson: root, textureIds: [], scripts: {}, bodies: {}, triggers: {} }
+}
+
+function bloodstainTemplate() {
+  const id = stableId('template:bloodstain:root')
+  const root = withScript(node('Bloodstain', 'node', {
+    id, children: [
+      // A decal, so the stain follows the floor (ramps included) instead of floating as a disc.
+      decalNode('bloodstain:pool', 'Pool', BLOOD.stain, { size: [1.8, 0.8, 1.8], position: [0, 0.2, 0], emissive: true, sortOrder: 1 }),
+      particles('bloodstain:glow', 'Glow', VFX.bloodstain),
+    ],
+  }), 'SoulsBloodstain')
+  return { id: stableId('template:bloodstain'), name: 'Bloodstain', nodeJson: root, textureIds: [BLOOD_TEX.splat], scripts: {}, bodies: {}, triggers: {} }
+}
+
+/**
+ * A blood decal on the ground: SoulsBloodSplat snaps it to the floor under where it was spawned, sizes
+ * and turns it, then fades it out. `Blood Splat` is the pool under a wounded body, `Blood Drops` the
+ * spatter thrown along the blow.
+ */
+function bloodDecalTemplate(key, name, materialId, texId, size, fields) {
+  const id = stableId(`template:${key}:root`)
+  const root = withScript(node(name, 'node', {
+    id, children: [decalNode(`${key}:decal`, 'Decal', materialId, { size })],
+  }), 'SoulsBloodSplat', fields)
+  return { id: stableId(`template:${key}`), name, nodeJson: root, textureIds: [texId], scripts: {}, bodies: {}, triggers: {} }
+}
+
+// =====================================================================================================
+// The level
+// =====================================================================================================
+
+const level = []          // static geometry, under the "Level" group
+const lights = []         // torches
+const add = (n) => { level.push(n); return n }
+let pieceCount = 0
+const piece = (prefix) => `${prefix}:${pieceCount++}`
+
+/** A floor slab whose top is at `top`. */
+function floor(name, cx, cz, w, d, top = 0, mat = MAT.floor) {
+  return add(prop(piece('floor'), name, 'box', mat, { position: [cx, top - 0.25, cz], scale: [w, 0.5, d], solid: true }))
+}
+/** A wall segment from (x0,z0) to (x1,z1), axis-aligned, `h` tall, standing on `base`. */
+function wall(name, x0, z0, x1, z1, h = 4, base = 0, t = 0.6, mat = MAT.stone) {
+  const alongX = Math.abs(x1 - x0) >= Math.abs(z1 - z0)
+  const w = alongX ? Math.abs(x1 - x0) + t : t
+  const d = alongX ? t : Math.abs(z1 - z0) + t
+  return add(prop(piece('wall'), name, 'box', mat, { position: [(x0 + x1) / 2, base + h / 2, (z0 + z1) / 2], scale: [w, h, d], solid: true }))
+}
+function pillar(name, x, z, r = 0.8, h = 3.5, base = 0) {
+  return add(prop(piece('pillar'), name, 'cylinder', MAT.darkStone, { position: [x, base + h / 2, z], scale: [r * 2, h, r * 2], solid: true }))
+}
+function block(name, x, y, z, sx, sy, sz, mat = MAT.darkStone, rotation = [0, 0, 0]) {
+  return add(prop(piece('block'), name, 'box', mat, { position: [x, y, z], scale: [sx, sy, sz], rotation, solid: true }))
+}
+function torch(x, z, y = 2.2) {
+  lights.push(linkInstance(LEVEL.torch, torchNode(piece('torch'), [x, y, z])))
+}
+
+function buildLevel() {
+  // A — Bonfire yard: 20 × 20 around the origin.
+  floor('Yard Floor', 0, 0, 20, 20)
+  wall('Yard Wall W', -10, -10, -10, 10)
+  wall('Yard Wall S', -10, -10, 10, -10)
+  wall('Yard Wall E (south)', 10, -10, 10, -1.6)
+  wall('Yard Wall E (north)', 10, 1.6, 10, 10)
+  block('Gate Lintel', 10, 4.6, 0, 0.6, 1.2, 3.8, MAT.stone)
+  wall('Yard Wall N (west)', -10, 10, -3, 10)
+  wall('Yard Wall N (east)', 3, 10, 10, 10)
+  block('Ruin', -6, 0.6, 5, 2.4, 1.2, 1.2)
+  block('Ruin', 6.5, 0.4, -6, 1.6, 0.8, 3)
+  torch(-2.6, 9.4); torch(2.6, 9.4); torch(9.4, 2.4)
+
+  // B — Corridor, 6 wide, z 10 → 43.
+  floor('Corridor Floor', 0, 26.5, 6, 33)
+  wall('Corridor Wall W', -3, 10, -3, 43)
+  wall('Corridor Wall E', 3, 10, 3, 43)
+  block('Rubble', -1.8, 0.35, 22, 1.2, 0.7, 1)
+  block('Rubble', 2, 0.25, 35, 1, 0.5, 1.4)
+  torch(-2.4, 18); torch(2.4, 30)
+
+  // C — Courtyard, x -15..15, z 43..67.
+  floor('Courtyard Floor', 0, 55, 30, 24)
+  wall('Courtyard Wall S (west)', -15, 43, -3, 43)
+  wall('Courtyard Wall S (east)', 3, 43, 15, 43)
+  wall('Courtyard Wall W', -15, 43, -15, 67)
+  wall('Courtyard Wall E (south)', 15, 43, 15, 51)
+  wall('Courtyard Wall E (north)', 15, 59, 15, 67)
+  wall('Courtyard Wall N (west)', -15, 67, -3, 67)
+  wall('Courtyard Wall N (east)', 3, 67, 15, 67)
+  for (const [x, z] of [[-8, 48], [8, 47.5], [-8, 62], [-3.5, 55.5], [4.5, 57], [-11, 55]]) pillar('Broken Pillar', x, z, 0.75, 2 + ((x * 7 + z) % 3 + 3) % 3)
+  // The sorcerer's ledge in the north-east corner, and a ramp up to it.
+  block('Ledge', 10.5, 0.75, 63, 9, 1.5, 8, MAT.stone)
+  block('Ledge Ramp', 10.5, 0.55, 56.6, 3, 0.4, 5.3, MAT.stone, [-16.5, 0, 0])
+  torch(-14.4, 50); torch(-14.4, 60); torch(14.4, 47); torch(0, 66.4)
+
+  // D — Elite room, x 15..37, z 45..65 (west opening shared with the courtyard's east gap).
+  floor('Elite Hall Floor', 26, 55, 22, 20)
+  wall('Elite Hall Wall N', 15, 65, 37, 65)
+  wall('Elite Hall Wall E', 37, 45, 37, 65)
+  wall('Elite Hall Wall S (west)', 15, 45, 29, 45)
+  wall('Elite Hall Wall S (east)', 33, 45, 37, 45)
+  wall('Elite Hall Wall W (south)', 15, 45, 15, 51)
+  wall('Elite Hall Wall W (north)', 15, 59, 15, 65)
+  pillar('Hall Pillar', 22, 49, 0.6, 4.5); pillar('Hall Pillar', 22, 61, 0.6, 4.5); pillar('Hall Pillar', 32, 49, 0.6, 4.5); pillar('Hall Pillar', 32, 61, 0.6, 4.5)
+  torch(36.4, 50); torch(36.4, 60)
+
+  // E — Shortcut: south from the elite hall, then west to the gate in the yard's east wall.
+  floor('Shortcut Floor (south)', 31, 20.5, 4, 49)
+  wall('Shortcut Wall W', 29, 3, 29, 45)
+  wall('Shortcut Wall E', 33, -3, 33, 45)
+  floor('Shortcut Floor (west)', 20, 0, 22, 6)
+  wall('Shortcut Wall N', 10, 3, 29, 3)
+  wall('Shortcut Wall S', 10, -3, 33, -3)
+  torch(30, 30); torch(20, 2.4)
+
+  // F — Boss approach, z 67 → 88.
+  floor('Approach Floor', 0, 77.5, 6, 21)
+  wall('Approach Wall W', -3, 67, -3, 88)
+  wall('Approach Wall E', 3, 67, 3, 88)
+  torch(-2.4, 72); torch(2.4, 82)
+
+  // G — Boss arena, x -18..18, z 88..124.
+  floor('Arena Floor', 0, 106, 36, 36, 0, MAT.darkStone)
+  wall('Arena Wall S (west)', -18, 88, -3, 88, 5)
+  wall('Arena Wall S (east)', 3, 88, 18, 88, 5)
+  wall('Arena Wall W', -18, 88, -18, 124, 5)
+  wall('Arena Wall E', 18, 88, 18, 124, 5)
+  wall('Arena Wall N', -18, 124, 18, 124, 5)
+  for (const [x, z] of [[-11, 97], [11, 97], [-11, 115], [11, 115]]) pillar('Arena Pillar', x, z, 0.9, 6)
+  torch(-17.4, 100); torch(17.4, 100); torch(-17.4, 112); torch(17.4, 112)
+}
+
+// ----- interactables -----------------------------------------------------------------------------
+
+function messageNode(key, title, text, at, yaw = 0, extra = {}) {
+  return withScript(node(`Message: ${title}`, 'node', {
+    id: stableId(`message:${key}`), position: at, rotation: [0, yaw, 0],
+    children: [
+      prop(`message:${key}:glyph`, 'Glyph', 'box', MAT.glyph, { position: [0, 0.02, 0], scale: [0.7, 0.02, 0.45] }),
+      particles(`message:${key}:glow`, 'Glow', VFX.glyph),
+    ],
+    ...extra,
+  }), 'SoulsMessage', { title, text })
+}
+
+function pickupNode(key, name, at, fields) {
+  return withScript(node(name, 'node', {
+    id: stableId(`pickup:${key}`), position: at,
+    children: [
+      prop(`pickup:${key}:item`, 'Item', 'sphere', MAT.item, { position: [0, 0.25, 0], scale: [0.18, 0.18, 0.18] }),
+      particles(`pickup:${key}:glow`, 'Glow', VFX.souls),
+      pointLight(`pickup:${key}:light`, 'Light', [1, 0.9, 0.7], 150, 4, [0, 0.4, 0]),
+    ],
+  }), 'SoulsPickup', fields)
+}
+
+function spawnNode(key, name, template, at, yaw, extra = {}) {
+  return withScript(node(name, 'node', { id: stableId(`spawn:${key}`), position: at, rotation: [0, yaw, 0] }), 'SoulsEnemySpawn', { templateName: template, ...extra })
+}
+
+function bonfireNode() {
+  return withScript(node('Bonfire', 'node', {
+    id: stableId('bonfire'), position: [0, 0, 2],
+    children: [
+      group('bonfire:model', 'Model', [
+        prop('bonfire:ash', 'Ash', 'cylinder', MAT.ash, { position: [0, 0.1, 0], scale: [1.1, 0.2, 1.1] }),
+        prop('bonfire:stones', 'Stones', 'cylinder', MAT.darkStone, { position: [0, 0.06, 0], scale: [1.5, 0.12, 1.5] }),
+        prop('bonfire:sword', 'Coiled Sword', 'box', MAT.metal, { position: [0, 0.65, 0], rotation: [6, 20, 4], scale: [0.06, 1.1, 0.015] }),
+        prop('bonfire:hilt', 'Hilt', 'box', MAT.metal, { position: [0.05, 1.2, 0.03], rotation: [6, 20, 4], scale: [0.24, 0.04, 0.05] }),
+      ]),
+      particles('bonfire:fire', 'Fire', VFX.fire, { playOnStart: false }),
+      pointLight('bonfire:light', 'Fire Light', [1, 0.55, 0.22], 0, 12, [0, 1, 0]),
+      node('RespawnPoint', 'node', { id: stableId('bonfire:respawn'), position: [0, 0.05, -1.6] }),
+    ],
+  }), 'SoulsBonfire', { lightIntensity: 1800 })
+}
+
+function shortcutGate() {
+  const g = node('Shortcut Gate', 'node', {
+    id: stableId('door:shortcut'), position: [10, 2, 0], rotation: [0, 90, 0],
+    children: [
+      prop('door:shortcut:bars', 'Bars', 'box', MAT.metal, { scale: [3.2, 4, 0.25] }),
+    ],
+  })
+  g.body = { ...staticBody('box'), shapes: [{ type: 'box', width: 3.2, height: 4, depth: 0.4, offset: [0, 0, 0], rotation: [0, 0, 0] }] }
+  return withScript(g, 'SoulsDoor', { openOffset: [0, 4.2, 0], lockedText: 'Opens from the other side', lockedFromFront: false })
+}
+
+function leverNode() {
+  return withScript(node('Shortcut Lever', 'node', {
+    id: stableId('lever'), position: [12.6, 0, -2.3], rotation: [0, -90, 0],
+    children: [
+      prop('lever:base', 'Base', 'box', MAT.darkStone, { position: [0, 0.45, 0], scale: [0.5, 0.9, 0.35], solid: false }),
+      node('Handle', 'node', {
+        id: stableId('lever:handle'), position: [0, 0.9, 0], rotation: [-35, 0, 0],
+        children: [prop('lever:stick', 'Stick', 'cylinder', MAT.metal, { position: [0, 0.35, 0], scale: [0.06, 0.7, 0.06] })],
+      }),
+    ],
+  }), 'SoulsLever', { doorName: 'Shortcut Gate', swingDegrees: 70 })
+}
+
+function fogGateNode() {
+  const g = node('Fog Gate', 'node', {
+    id: stableId('fog-gate'), position: [0, 0, 87.6],
+    children: [
+      prop('fog:wall', 'FogWall', 'box', MAT.fog, { position: [0, 2, 0], scale: [5.9, 4, 0.08] }),
+      particles('fog:particles', 'Fog', VFX.fog),
+    ],
+  })
+  g.body = { ...staticBody('box'), shapes: [{ type: 'box', width: 6, height: 4, depth: 0.5, offset: [0, 2, 0], rotation: [0, 0, 0] }] }
+  return withScript(g, 'SoulsFogGate', { arenaCenter: [0, 0, 106], arenaRadius: 18 })
+}
+
+// =====================================================================================================
+// Level templates — placed in the scene as LINKED instances
+// =====================================================================================================
+//
+// Everything placed more than once, or that a final asset replaces as a unit (the player, a torch, a
+// message, the bonfire), is a template, and the scene holds linked copies of it: each copy's root carries
+// `__templateId`, so editing the template in the editor updates every copy.
+//
+// A copy is built by the SAME builder as its template and then checked against it: the editor rebuilds
+// copies from the template, so a copy whose content differed would silently change on the first rebuild.
+// What a copy may legitimately differ in is exactly what the editor keeps across a rebuild — the root's
+// transform, and its OVERRIDES (templateOverrides.ts): the root's name and any script field values. Those
+// are computed here by diffing the copy against the template and recorded in `__overrides`.
+
+const { regenerateNodeIds, cloneNodeJson } = engine(path.join(ROOT, 'src', 'core', 'scene', 'nodeJson.ts'))
+const { hashAsset, assetHashKey } = moduleRegistry()(path.join(ROOT, 'editor', 'src', 'utils', 'assetHash.ts'))
+
+/** Which folder of the Assets panel each level template lives in. */
+const TEMPLATE_FOLDER = new Map()
+/** A template's source json (builder output, before re-keying), for checking copies against it. */
+const TEMPLATE_SOURCE = new Map()
+// Mirrors NODE_REF_KEYS in src/core/scene/nodeJson.ts: ids of OTHER nodes, which differ per copy.
+const REF_KEYS = new Set(['followId', 'lookAtId', 'cameraNodeId', 'uiTargetId', 'focusTargetId', 'possessedId', 'aimSourceId', 'navMeshId', 'collisionIgnoreIds'])
+
+function walkJson(n, fn, pathTo = '') {
+  fn(n, pathTo)
+  const seen = new Map()
+  for (const c of n.children ?? []) {
+    const k = seen.get(c.name) ?? 0
+    seen.set(c.name, k + 1)
+    walkJson(c, fn, (pathTo ? pathTo + '/' : '') + (k === 0 ? c.name : `${c.name}#${k}`))
+  }
+}
+
+/** A template from a builder's node: re-keyed to ids of its own, bodies moved to the template's map. */
+function asTemplate(key, nodeJson, folder, textureIds = []) {
+  const source = cloneNodeJson(nodeJson)
+  const root = cloneNodeJson(nodeJson)
+  let i = 0
+  regenerateNodeIds(root, new Map(), () => stableId(`template:${key}:${i++}`))
+  root.position = [0, 0, 0]
+  root.rotation = [0, 0, 0]
+  const bodies = {}
+  walkJson(root, n => {
+    delete n.__sourceId
+    if (n.body) { bodies[n.id] = n.body; delete n.body }
+  })
+  const template = { id: stableId(`template:${key}`), name: root.name, nodeJson: root, textureIds, scripts: {}, bodies, triggers: {} }
+  TEMPLATE_FOLDER.set(template.id, folder)
+  TEMPLATE_SOURCE.set(template.id, source)
+  return template
+}
+
+// One node's content with everything a copy may differ in taken out, for the comparison below.
+function comparable(n, isRoot) {
+  const out = {}
+  for (const [k, v] of Object.entries(n)) {
+    if (k === 'children' || k === 'id' || k === '__sourceId' || k === 'scriptVars' || REF_KEYS.has(k)) continue
+    if (isRoot && (k === 'position' || k === 'rotation' || k === 'scale' || k === 'name')) continue
+    out[k] = v
+  }
+  return JSON.stringify(out)
+}
+
+/**
+ * Link a builder's node to `template`: verify it is the template's content, stamp `__templateId`, and
+ * record how it differs (root name, script values) as `__overrides`, the record the editor replays after
+ * every rebuild from the template.
+ */
+function linkInstance(template, copy) {
+  const source = TEMPLATE_SOURCE.get(template.id)
+  const want = new Map(), got = new Map()
+  walkJson(source, (n, p) => want.set(p, n))
+  walkJson(copy, (n, p) => got.set(p, n))
+  const overrides = {}
+  for (const [p, n] of got) {
+    const t = want.get(p)
+    if (!t) throw new Error(`${copy.name}: "${p}" is not in template "${template.name}"`)
+    if (comparable(n, p === '') !== comparable(t, p === ''))
+      throw new Error(`${copy.name}: "${p || '(root)'}" differs from template "${template.name}" in more than its script values`)
+    const entry = {}
+    if (p === '' && n.name !== t.name) entry.name = n.name
+    for (const [field, value] of Object.entries(n.scriptVars ?? {}))
+      if (JSON.stringify(value) !== JSON.stringify(t.scriptVars?.[field])) (entry.fields ??= {})[field] = value
+    if (entry.name !== undefined || entry.fields) overrides[p] = entry
+  }
+  for (const p of want.keys()) if (!got.has(p)) throw new Error(`${copy.name}: template "${template.name}" has "${p}", the copy does not`)
+  copy.variables = { ...(copy.variables ?? {}), ...vars({ __templateId: template.id }) }
+  if (Object.keys(overrides).length)
+    copy.variables.__overrides = { type: 'string', value: JSON.stringify(overrides), access: 'private' }
+  return copy
+}
+
+/** The torch: a bracket, its fire and its light. */
+function torchNode(k, position = [0, 0, 0]) {
+  return group(k, 'Torch', [
+    prop(`${k}:post`, 'Bracket', 'cylinder', MAT.wood, { position: [0, -0.3, 0], scale: [0.08, 0.6, 0.08] }),
+    particles(`${k}:fire`, 'Fire', VFX.torch),
+    pointLight(`${k}:light`, 'Light', [1, 0.6, 0.3], 1400, 9, [0, 0.3, 0]),
+  ], { position })
+}
+
+const MESSAGE_DEFAULT = ['A message', 'Write the message here.']
+const PICKUP_DEFAULT = { kind: 'souls', amount: 100, itemName: 'Souls' }
+
+/** The level templates, built once. Names are what the Assets panel shows and what copies are named. */
+const LEVEL = (() => {
+  const message = messageNode('template', ...MESSAGE_DEFAULT, [0, 0, 0])
+  message.name = 'Message'
+  const pickup = pickupNode('template', 'Pickup', [0, 0, 0], PICKUP_DEFAULT)
+  const lever = leverNode()
+  lever.name = 'Lever'
+  const gate = shortcutGate()
+  gate.name = 'Gate'
+  return {
+    player: asTemplate('level:player', playerNode(), 'Level', [...mannequinMaterial.textureIds]),
+    torch: asTemplate('level:torch', torchNode('template'), 'Level'),
+    bonfire: asTemplate('level:bonfire', bonfireNode(), 'Level'),
+    fogGate: asTemplate('level:fog-gate', fogGateNode(), 'Level'),
+    lever: asTemplate('level:lever', lever, 'Level'),
+    gate: asTemplate('level:gate', gate, 'Level'),
+    message: asTemplate('level:message', message, 'Interactables'),
+    pickup: asTemplate('level:pickup', pickup, 'Interactables'),
+  }
+})()
+
+/** A placed message: the Message template, its text and name overridden. */
+function placedMessage(key, title, text, at, yaw = 0) {
+  return linkInstance(LEVEL.message, messageNode(key, title, text, at, yaw))
+}
+
+/** The last message: starts hidden, and the manager reveals it (by this name) with the boss reward. */
+function epilogueMessage() {
+  const m = messageNode('epilogue', 'The Warden rests', 'The keep falls silent.\nThank you for playing Hollow Keep.', [2, 0, 116], 0)
+  m.name = 'Epilogue Message'
+  m.scriptVars.hiddenUntilRevealed = true
+  return linkInstance(LEVEL.message, m)
+}
+
+/** A placed pickup: the Pickup template, what it gives (and its name) overridden. */
+function placedPickup(key, name, at, fields) {
+  return linkInstance(LEVEL.pickup, pickupNode(key, name, at, { ...PICKUP_DEFAULT, ...fields }))
+}
+
+// =====================================================================================================
+// UI
+// =====================================================================================================
+
+const INK = [0.93, 0.9, 0.84, 1]
+const DIM = [0.7, 0.67, 0.6, 1]
+const GOLD = [0.92, 0.78, 0.46, 1]
+const SERIF = 'Georgia, "Times New Roman", serif'
+
+const screenRoot = (name, key, children, extra = {}, ui = {}) => uiNode(name, 'uiRoot', {
+  space: 'screen', referenceResolution: [1920, 1080], scaleMode: 'scaleWithScreen', matchWidthOrHeight: 0.5, referenceDpr: 1,
+  uiTargetId: null, referenceDistance: 10, minScale: 0.1, maxScale: 4, billboard: true, clampToScreen: false, hideBehindCamera: true,
+  anchorMin: [0, 0], anchorMax: [1, 1], offsetMin: [0, 0], offsetMax: [0, 0], ...ui,
+}, { id: stableId(`ui:${key}`), children, ...extra })
+
+const text = (key, name, value, rect, style = {}) => uiNode(name, 'uiText', {
+  ...rect, text: value, fontSize: style.size ?? 22, fontFamily: style.font ?? SERIF, fontWeight: style.weight ?? 400,
+  align: style.align ?? 'left', vAlign: style.vAlign ?? 'middle', wrap: true, lineHeight: style.lineHeight ?? 1.25, tint: style.tint ?? INK,
+}, { id: stableId(`ui:${key}`) })
+
+const bar = (key, name, rect, fill, back, smoothing, z = 0) => uiNode(name, 'uiProgressBar', {
+  ...rect, min: 0, max: 100, value: 100, fillTint: fill, tint: back, direction: 'ltr', smoothing, borderRadius: 2, zOrder: z,
+}, { id: stableId(`ui:${key}`) })
+
+const panel = (key, name, rect, tint, children = [], extra = {}) => uiNode(name, 'uiPanel', { ...rect, tint, borderRadius: extra.radius ?? 4, interactive: !!extra.interactive }, { id: stableId(`ui:${key}`), children, visible: extra.visible ?? true })
+
+const rect = (anchor, min, max) => ({ anchorMin: anchor, anchorMax: anchor, offsetMin: min, offsetMax: max })
+const stretch = (inset = 0) => ({ anchorMin: [0, 0], anchorMax: [1, 1], offsetMin: [inset, inset], offsetMax: [-inset, -inset] })
+
+function hud() {
+  const TL = [0, 0], BL = [0, 1], BR = [1, 1], BC = [0.5, 1], C = [0.5, 0.5]
+  return withScript(screenRoot('HUD', 'hud', [
+    panel('hud:health-back', 'HealthBack', rect(TL, [48, 40], [348, 60]), [0, 0, 0, 0.55]),
+    bar('hud:health-lag', 'HealthLag', rect(TL, [48, 40], [348, 60]), [0.85, 0.7, 0.25, 1], [0, 0, 0, 0], 1.2, 1),
+    bar('hud:health', 'Health', rect(TL, [48, 40], [348, 60]), [0.62, 0.08, 0.06, 1], [0, 0, 0, 0], 0.05, 2),
+    panel('hud:stamina-back', 'StaminaBack', rect(TL, [48, 68], [264, 80]), [0, 0, 0, 0.55]),
+    bar('hud:stamina', 'Stamina', rect(TL, [48, 68], [264, 80]), [0.2, 0.55, 0.22, 1], [0, 0, 0, 0], 0.05, 2),
+    text('hud:estus', 'Estus', 'Estus Flask  3 / 3', rect(BL, [48, -118], [520, -84]), { size: 24, tint: GOLD }),
+    text('hud:weapon', 'Weapon', 'Straight Sword', rect(BL, [48, -78], [520, -44]), { size: 22, tint: DIM }),
+    text('hud:souls-gain', 'SoulsGain', '', rect(BR, [-380, -120], [-56, -88]), { size: 22, align: 'right', tint: DIM }),
+    text('hud:souls', 'Souls', '0', rect(BR, [-380, -84], [-56, -40]), { size: 34, align: 'right', tint: INK }),
+    panel('hud:prompt', 'Prompt', rect(BC, [-280, -232], [280, -186]), [0, 0, 0, 0.62], [
+      text('hud:prompt-text', 'PromptText', 'E   Interact', stretch(6), { size: 24, align: 'center' }),
+    ]),
+    text('hud:notice', 'Notice', '', rect(BC, [-500, -290], [500, -246]), { size: 24, align: 'center', tint: GOLD }),
+    panel('hud:message', 'Message', rect(C, [-430, -150], [430, 150]), [0.04, 0.035, 0.03, 0.86], [
+      text('hud:message-title', 'MessageTitle', 'Title', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [32, 24], offsetMax: [-32, 70] }, { size: 32, align: 'center', tint: GOLD }),
+      text('hud:message-body', 'MessageBody', 'Body', { anchorMin: [0, 0], anchorMax: [1, 1], offsetMin: [40, 84], offsetMax: [-40, -24] }, { size: 24, align: 'center', vAlign: 'top', lineHeight: 1.45 }),
+    ], { radius: 6 }),
+    panel('hud:boss', 'Boss', rect(BC, [-560, -170], [560, -110]), [0, 0, 0, 0], [
+      text('hud:boss-name', 'BossName', 'Hollow Warden', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [0, 0], offsetMax: [0, 34] }, { size: 26 }),
+      bar('hud:boss-lag', 'BossLag', { anchorMin: [0, 1], anchorMax: [1, 1], offsetMin: [0, -20], offsetMax: [0, 0] }, [0.85, 0.7, 0.25, 1], [0, 0, 0, 0.6], 1.2, 1),
+      bar('hud:boss-health', 'BossHealth', { anchorMin: [0, 1], anchorMax: [1, 1], offsetMin: [0, -20], offsetMax: [0, 0] }, [0.62, 0.08, 0.06, 1], [0, 0, 0, 0], 0.05, 2),
+    ]),
+    text('hud:controls', 'Controls', 'LMB light · RMB heavy · Space roll/sprint · Q lock · R drink · F swap · E interact',
+      rect([1, 0], [-760, 28], [-40, 56]), { size: 16, align: 'right', tint: [0.75, 0.72, 0.66, 0.7] }),
+  ]), 'SoulsHud')
+}
+
+function banner() {
+  return withScript(screenRoot('Banner', 'banner', [
+    panel('banner:band', 'Band', { anchorMin: [0, 0.5], anchorMax: [1, 0.5], offsetMin: [0, -80], offsetMax: [0, 80] }, [0, 0, 0, 0.6]),
+    text('banner:text', 'BannerText', 'YOU DIED', { anchorMin: [0, 0.5], anchorMax: [1, 0.5], offsetMin: [0, -70], offsetMax: [0, 70] }, { size: 96, align: 'center', weight: 400 }),
+  ], { visible: false }, { zOrder: 50 }), 'SoulsBanner')
+}
+
+function bonfireMenu() {
+  const button = (key, name, label, r) => uiNode(name, 'uiButton', {
+    ...r, label, disabled: false, tint: [0.18, 0.15, 0.12, 1], hoverTint: [1, 1, 1, 0.16], pressedTint: [0, 0, 0, 0.22],
+    disabledTint: [0.5, 0.5, 0.5, 0.4], interactive: true, borderRadius: 4,
+  }, { id: stableId(`ui:${key}`) })
+  const row = (stat, i) => uiNode(`Row_${stat}`, 'uiPanel', {
+    anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [40, 210 + i * 58], offsetMax: [-40, 260 + i * 58], tint: [1, 1, 1, 0.04], borderRadius: 4,
+  }, {
+    id: stableId(`ui:menu:row:${stat}`),
+    children: [
+      text(`menu:${stat}:label`, 'Label', stat, { anchorMin: [0, 0], anchorMax: [0, 1], offsetMin: [18, 0], offsetMax: [300, 0] }, { size: 26 }),
+      button(`menu:${stat}:minus`, 'Minus', '-', { anchorMin: [1, 0.5], anchorMax: [1, 0.5], offsetMin: [-230, -18], offsetMax: [-186, 18] }),
+      text(`menu:${stat}:value`, 'Value', '10', { anchorMin: [1, 0], anchorMax: [1, 1], offsetMin: [-176, 0], offsetMax: [-70, 0] }, { size: 26, align: 'center', tint: GOLD }),
+      button(`menu:${stat}:plus`, 'Plus', '+', { anchorMin: [1, 0.5], anchorMax: [1, 0.5], offsetMin: [-62, -18], offsetMax: [-18, 18] }),
+    ],
+  })
+  const card = panel('menu:card', 'Card', rect([0.5, 0.5], [-420, -330], [420, 330]), [0.05, 0.045, 0.04, 0.94], [
+    text('menu:title', 'Title', 'LEVEL UP', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [0, 22], offsetMax: [0, 76] }, { size: 40, align: 'center', tint: GOLD }),
+    text('menu:level', 'LevelText', 'Level 1', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [44, 90], offsetMax: [-44, 124] }, { size: 24 }),
+    text('menu:souls', 'SoulsText', 'Souls 0', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [44, 124], offsetMax: [-44, 158] }, { size: 24 }),
+    text('menu:cost', 'CostText', 'Next level', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [44, 158], offsetMax: [-44, 192] }, { size: 22, tint: DIM }),
+    ...['Vigor', 'Endurance', 'Strength', 'Dexterity'].map(row),
+    text('menu:derived', 'Derived', '', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [44, 452], offsetMax: [-44, 520] }, { size: 20, tint: DIM, vAlign: 'top' }),
+    button('menu:confirm', 'Confirm', 'Confirm', { anchorMin: [0.5, 1], anchorMax: [0.5, 1], offsetMin: [-230, -96], offsetMax: [-20, -48] }),
+    button('menu:leave', 'Leave', 'Leave', { anchorMin: [0.5, 1], anchorMax: [0.5, 1], offsetMin: [20, -96], offsetMax: [230, -48] }),
+    text('menu:help', 'Help', 'Up/Down select · Left/Right adjust · Enter confirm · Esc leave', { anchorMin: [0, 1], anchorMax: [1, 1], offsetMin: [0, -40], offsetMax: [0, -12] }, { size: 16, align: 'center', tint: DIM }),
+  ], { radius: 8 })
+  const backdrop = panel('menu:backdrop', 'Backdrop', stretch(0), [0, 0, 0, 0.45], [card], { interactive: true })
+  return withScript(screenRoot('BonfireMenu', 'menu', [backdrop], { visible: false }, { zOrder: 40 }), 'SoulsBonfireMenu')
+}
+
+function lockReticle() {
+  const dot = panel('reticle:dot', 'Dot', stretch(0), [1, 1, 1, 0.9], [], { radius: 7 })
+  return uiNode('LockReticle', 'uiRoot', {
+    space: 'world', referenceResolution: [14, 14], scaleMode: 'constantPixel', pivot: [0.5, 0.5],
+    uiTargetId: null, referenceDistance: 10, minScale: 0.1, maxScale: 4, billboard: true, clampToScreen: false,
+    hideBehindCamera: true, offsetMax: [14, 14],
+  }, { id: stableId('ui:reticle'), visible: false, children: [dot] })
+}
+
+// =====================================================================================================
+// Sounds
+// =====================================================================================================
+
+/** Every cue a script plays, as an EMPTY SoundNode: assign a sample to each to hear it. */
+const SOUND_CUES = [
+  ['Swing', 'player light swing'], ['Swing Heavy', 'player heavy swing'], ['Hit', 'player hits an enemy'],
+  ['Roll', 'roll / backstep'], ['Drink', 'Estus drink'], ['Player Hurt', 'player takes damage'],
+  ['Player Hit', 'an enemy swing connects'], ['Death', 'YOU DIED'], ['Souls', 'souls gained'],
+  ['Pickup', 'item picked up'], ['Bonfire Lit', 'bonfire lit'], ['Rest', 'sit at bonfire'],
+  ['Level Up', 'level confirmed'], ['Menu Tick', 'menu adjust'], ['Menu Deny', 'menu: not enough souls'],
+  ['Lock On', 'target locked'], ['Enemy Swing', 'enemy attack starts'], ['Stagger', 'enemy poise broken'],
+  ['Enemy Death', 'enemy dies'], ['Cast', 'sorcery cast'], ['Bolt Impact', 'bolt hits'], ['Door', 'gate opens'],
+  ['Lever', 'lever pulled'], ['Fog', 'walking through fog'], ['Boss Roar', 'boss phase two'],
+  ['Boss Leap', 'boss leap attack'], ['Victory', 'boss defeated'],
+]
+const MUSIC_CUES = [['Ambience', 'level ambience (loop, plays on start)', true], ['Boss Music', 'boss fight (loop)', false]]
+
+function soundsGroup() {
+  const sound = (name, playOnStart, loop) => node(name, 'sound', {
+    id: stableId(`sound:${name}`),
+    sound: { mode: 'ambient', sampleId: null, volume: 1, loopMode: loop ? 'on' : 'inherit', playOnStart, distanceModel: 'inverse', refDistance: 1, maxDistance: 100, rolloffFactor: 1 },
+  })
+  return group('sounds', 'Sounds', [
+    ...SOUND_CUES.map(([name]) => sound(name, false, false)),
+    ...MUSIC_CUES.map(([name, , onStart]) => sound(name, onStart, true)),
+  ])
+}
+
+// =====================================================================================================
+// The scene
+// =====================================================================================================
+
+function keepScene() {
+  buildLevel()
+
+  // Dusk: a low, warm, photometric sun (the 3d-example's is a legacy unitless light, which migrates to a
+  // full 100 000 lux noon) and no height fog — on enclosed grey blockout the haze washed every surface to
+  // white. Torches and the bonfire then read as light sources.
+  const sun = sourceNode('light')
+  sun.name = 'Sun'
+  sun.id = stableId('sun')
+  sun.rotation = [158, -120, 0]
+  sun.light = { unit: 'photometric', color: [1, 0.78, 0.58], intensity: 28000, angularRadius: 0.27 }
+  sun.castShadows = true
+  const sky = sourceNode('sky atmosphere')
+  sky.id = stableId('sky')
+  Object.assign(sky.atmosphere, {
+    groundColor: [0.18, 0.17, 0.16], fogEnabled: false, godRaysEnabled: false, exposure: 0.6,
+  })
+
+  const interactables = group('interactables', 'Interactables', [
+    linkInstance(LEVEL.bonfire, bonfireNode()),
+    placedMessage('welcome', 'Hollow Keep', 'Rest at the bonfire to level up and refill your Estus.\nEnemies return whenever you rest.\nLock on with Q / R3. Tap Space / B to roll.', [2.6, 0, 0.5], 0),
+    placedMessage('roll', 'Try rolling', 'Tap Space (B) to roll through an attack.\nHold it to sprint. Rolling costs stamina.', [1.4, 0, 13.5]),
+    placedMessage('lock', 'Lock on', 'Q (R3) holds the camera on a foe.\nZ / C or a flick of the stick switches targets.', [-1.6, 0, 25]),
+    placedMessage('sorcerer', "Beware the sorcerer's light", 'Bolts fly true but slow.\nRoll toward them, not away.', [0, 0, 45]),
+    placedMessage('knight', 'A knight guards the hall', 'Its overhead blow cannot be interrupted.\nA greatsword breaks its stance.', [17.5, 0, 52.5]),
+    placedMessage('warden', 'The Hollow Warden', 'Beyond the fog waits the keeper of this place.\nWhen it bleeds, it rages.', [1.4, 0, 78]),
+    epilogueMessage(),
+    placedPickup('souls-corridor', 'Souls Pickup', [-2, 0, 34], { kind: 'souls', amount: 300, itemName: 'Soul of a Lost Undead' }),
+    placedPickup('estus-shard', 'Estus Shard', [-12.5, 0, 64.5], { kind: 'flaskShard', amount: 1, itemName: 'Estus Shard' }),
+    placedPickup('souls-hall', 'Hall Souls', [34.5, 0, 62.5], { kind: 'souls', amount: 800, itemName: 'Soul of a Nameless Soldier' }),
+    placedPickup('boss-reward', 'Boss Reward', [0, 0, 118], { kind: 'souls', amount: 3000, itemName: 'Soul of the Hollow Warden', hiddenUntilRevealed: true }),
+    // The lever and gate templates are generic; these copies are THE shortcut, by name — which is how
+    // the lever finds its door (doorName) and how the docs refer to them.
+    linkInstance(LEVEL.lever, leverNode()),
+    linkInstance(LEVEL.gate, shortcutGate()),
+    linkInstance(LEVEL.fogGate, fogGateNode()),
+  ])
+
+  const spawns = group('spawns', 'Enemy Spawns', [
+    spawnNode('hollow-a', 'Spawn Hollow A', 'Hollow', [0, 0, 19], 180),
+    spawnNode('hollow-b', 'Spawn Hollow B', 'Hollow', [1.5, 0, 30], 180),
+    spawnNode('hollow-c', 'Spawn Hollow C', 'Hollow', [-6, 0, 50], 170),
+    spawnNode('hollow-d', 'Spawn Hollow D', 'Hollow', [7, 0, 52], 200),
+    spawnNode('caster', 'Spawn Sorcerer', 'Hollow Sorcerer', [11, 1.55, 63.5], 180),
+    spawnNode('knight', 'Spawn Elite Knight', 'Elite Knight', [28, 0, 55], -90),
+    spawnNode('hollow-e', 'Spawn Hollow E', 'Hollow', [31, 0, 18], 0),
+    spawnNode('warden', 'Spawn Hollow Warden', 'Hollow Warden', [0, 0, 112], 180, { isBossSpawn: true }),
+  ])
+
+  const navMesh = node('Nav Mesh', 'navMesh', { id: stableId('navmesh'), bake: {}, agentRadius: 0.45 })
+
+  const root = node('root', 'node', {
+    id: stableId('root'),
+    children: [
+      withScript(node('GameManager', 'node', { id: stableId('manager') }), 'SoulsGameManager'),
+      soundsGroup(),
+      linkInstance(LEVEL.player, playerNode()),
+      sun, sky,
+      group('level', 'Level', level),
+      group('torches', 'Torches', lights),
+      interactables,
+      spawns,
+      navMesh,
+      hud(), banner(), bonfireMenu(), lockReticle(),
+    ],
+    ambientLight: [2300, 2350, 2700],
+  })
+
+  const config = clone(sourceScene.config)
+  config.graphics.clearColor = [0.05, 0.05, 0.06, 1]
+  config.render.clearColor = [0.05, 0.05, 0.06, 1]
+  config.render.exposure = 1.1
+  // Held, not metered: auto-exposure would lift a dusk scene right back to noon.
+  config.render.autoExposureEnabled = false
+  config.render.saturation = 0.78
+  config.render.vignetteStrength = 0.35
+  config.render.motionBlurEnabled = false
+  return { scene: root, textures: [], ui: { version: 1, elements: [] }, config, assetHashes: {}, assetHashVersion: ASSET_HASH_VERSION, savedAt: CREATED_AT }
+}
+
+// =====================================================================================================
+// Write
+// =====================================================================================================
+
+function sceneRefs(refs) {
+  return {
+    version: SCENE_REFS_VERSION,
+    materialIds: [], modelIds: [], templateIds: [], terrainMaterialIds: [], tilesetIds: [],
+    aiBrainIds: [], textureIds: [], scriptIds: [], animationFieldIds: [], foliageModelIds: [],
+    soundSampleIds: [], audioSourceIds: [], animationIds: [], particleSystemIds: [],
+    ...refs,
+  }
+}
+
+function vfs(libraries) {
+  const entries = []
+  const add = (folder, kind, items) => {
+    const ext = KIND_EXT[kind]
+    if (!ext) throw new Error(`no virtual extension for kind "${kind}"`)
+    for (const item of items) entries.push({ path: `${folder}${item.name}${ext}`, kind, assetId: item.id, created: CREATED_AT })
+  }
+  add('/', 'scene', [{ name: PROJECT_NAME, id: SCENE_ID }])
+  add('/Scripts/', 'script', libraries.scripts)
+  const folderOf = (t) => TEMPLATE_FOLDER.get(t.id) ?? (ENEMIES.some(e => e.name === t.name) ? 'Enemies' : 'Effects')
+  for (const folder of ['Level', 'Interactables', 'Enemies', 'Effects'])
+    add(`/Templates/${folder}/`, 'template', libraries.templates.filter(t => folderOf(t) === folder))
+  add('/Models/', 'model', libraries.models)
+  const isEffect = (m) => EFFECT_MATERIALS.has(m.id)
+  add('/Materials/Characters/', 'material', libraries.materials.filter(m => !isEffect(m) && m.material.textures?.baseColorTexture))
+  add('/Materials/Props/', 'material', libraries.materials.filter(m => !isEffect(m) && !m.material.textures?.baseColorTexture))
+  add('/Materials/Effects/', 'material', libraries.materials.filter(isEffect))
+  add('/Animation/', 'rig', libraries.rigs)
+  add('/Animation/', 'animationField', libraries.animationFields)
+  add('/Animation/Locomotion/', 'animation', libraries.animations.filter(a => !a.name.startsWith('Souls_')))
+  add('/Animation/Placeholders/', 'animation', libraries.animations.filter(a => a.name.startsWith('Souls_')))
+  add('/Effects/', 'particleSystem', libraries.particleSystems)
+
+  const paths = entries.map(e => e.path)
+  const clash = paths.find((p, i) => paths.indexOf(p) !== i)
+  if (clash) throw new Error(`two assets both want the vfs path "${clash}"`)
+  const folders = [...new Set(entries.map(e => e.path.slice(0, e.path.lastIndexOf('/'))).filter(Boolean))]
+  const withParents = new Set()
+  for (const f of folders) { const parts = f.split('/').filter(Boolean); for (let i = 1; i <= parts.length; i++) withParents.add('/' + parts.slice(0, i).join('/')) }
+  return { version: 1, folders: [...withParents].sort(), entries }
+}
+
+function main() {
+  fs.rmSync(OUT, { recursive: true, force: true })
+  fs.mkdirSync(path.join(OUT, 'libraries'), { recursive: true })
+  fs.mkdirSync(path.join(OUT, 'scenes'), { recursive: true })
+
+  const templates = [
+    ...ENEMIES.map(enemyTemplate),
+    boltTemplate(),
+    fxTemplate('bolt-impact', 'Bolt Impact', VFX.boltImpact, 1.2, [pointLight('impact:light', 'Flash', [0.5, 0.7, 1], 900, 6)]),
+    fxTemplate('hit-spark', 'Hit Spark', VFX.hitSpark, 0.8),
+    fxTemplate('slam-dust', 'Slam Dust', VFX.slamDust, 1.8),
+    fxTemplate('blood-spray', 'Blood Spray', VFX.bloodSpray, 1),
+    bloodDecalTemplate('blood-splat', 'Blood Splat', BLOOD.splat, BLOOD_TEX.splat, [1.1, 0.4, 1.1], {}),
+    bloodDecalTemplate('blood-drops', 'Blood Drops', BLOOD.drops, BLOOD_TEX.drops, [1, 0.4, 1.6], { minSize: 0.8, maxSize: 1.2 }),
+    bloodstainTemplate(),
+    ...Object.values(LEVEL),
+  ]
+  const scene = keepScene()
+
+  const model = clone(mannequin)
+  stripClips(model.nodeJson)
+  model.rigId = rig.id
+
+  const libraries = {
+    models: [model],
+    materials,
+    terrainMaterials: [],
+    animationFields: [locomotionField],
+    animations,
+    rigs: [rig],
+    tilesets: [],
+    scripts: scripts.assets,
+    templates,
+    particleSystems,
+  }
+  embedSockets([libraries.models, libraries.templates, scene])
+  for (const [name, value] of Object.entries(libraries)) writeJson(path.join(OUT, 'libraries', `${name}.json`), value)
+  writeJson(path.join(OUT, 'libraries', 'inputMap.json'), SOULS_INPUT_MAP)
+  // The scene's asset hashes, as the editor records them on save: without them every template reads as
+  // changed when the scene opens and every placed copy is rebuilt (fresh ids, for nothing). Hashed off
+  // what was WRITTEN, read back, since that is what the editor will hash.
+  const written = (name) => readJson(path.join(OUT, 'libraries', `${name}.json`))
+  scene.assetHashes = {}
+  for (const [kind, lib] of [['template', 'templates'], ['material', 'materials'], ['model', 'models'], ['script', 'scripts']])
+    for (const asset of written(lib)) scene.assetHashes[assetHashKey(kind, asset.id)] = hashAsset(asset)
+  writeJson(path.join(OUT, 'scenes', `${SCENE_ID}.json`), scene)
+  const textureCount = textures.write(OUT)
+
+  writeJson(path.join(OUT, 'manifest.json'), {
+    formatVersion: 1, kind: 'project', createdAt: CREATED_AT, projectName: PROJECT_NAME,
+    mainSceneId: SCENE_ID, openSceneId: SCENE_ID,
+    sceneMetas: [{
+      id: SCENE_ID, name: PROJECT_NAME, updatedAt: CREATED_AT, dimension: '3D',
+      refs: sceneRefs({
+        materialIds: materials.map(m => m.id), modelIds: [MANNEQUIN_MODEL], templateIds: templates.map(t => t.id),
+        textureIds: textures.included, scriptIds: scripts.assets.map(s => s.id),
+        animationFieldIds: [locomotionField.id], animationIds: rig.animationIds,
+        particleSystemIds: particleSystems.map(p => p.id),
+      }),
+    }],
+  })
+  writeJson(path.join(OUT, 'vfs.json'), vfs(libraries))
+  writeJson(path.join(OUT, 'example.json'), {
+    name: PROJECT_NAME,
+    description: 'A one-level souls-like: stamina combat, rolls, lock-on, bonfires, a fog gate and a two-phase boss. Placeholder art, real mechanics — see SOULS_DEMO.md to swap in your own.',
+    order: 2,
+  })
+
+  const total = walkSize(OUT)
+  console.log('Hollow Keep written to editor/public/examples/souls-demo/')
+  console.log('  scripts %d · templates %d · clips %d (%d placeholders) · materials %d · effects %d · textures %d',
+    scripts.assets.length, templates.length, animations.length, placeholderClips.length, materials.length, particleSystems.length, textureCount)
+  console.log('  level pieces %d · torches %d · TOTAL %s', level.length, lights.length, mb(total))
+  console.log('\nNext:  npm --prefix editor run examples:list')
+}
+
+function walkSize(dir) {
+  let total = 0
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    total += entry.isDirectory() ? walkSize(full) : fs.statSync(full).size
+  }
+  return total
+}
+
+main()

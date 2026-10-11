@@ -35,8 +35,9 @@ export default class DoorNode extends Node {
 character extends `CharacterNode`; a script on a UI root extends `UIRootNode`. The base class is
 resolved **by class name**, which is why every node class is exported individually from `cleo`.
 
-**`import … from 'cleo'` is the only import.** It resolves to the engine's public API — see the
-[API index](../reference/api-index.md).
+**Import the engine from `'cleo'`, and other scripts by their path.** `'cleo'` is the engine's public
+API — see the [API index](../reference/api-index.md). Another script is imported by where it sits in
+the Assets panel; see [Script modules](#script-modules) below.
 
 **Public fields become node values.** A declared class field with a default shows up in the node's
 inspector, so one script can drive many nodes at different settings. Prefix a field with `_` to
@@ -44,22 +45,54 @@ keep it internal.
 
 **Anything else is ordinary TypeScript.** Helper methods, getters, private state, `async` — all fine.
 
-## What you may not write
+## Script modules
 
-Only the class may be exported. A second top-level `export` throws at compile time:
+Shared code lives in its own script and is imported by **project path** — the folder path in the
+Assets panel without the `.script` extension. That path is also the file's path in the
+[VS Code workspace](../editor/scripting-workflow.md), so the same import works in all three places:
+the in-editor editor, VS Code and the running game.
 
 ```ts
-export const SPEED = 5          // ✗ not allowed
-export function helper() {}     // ✗ not allowed
-export default class …          // ✓ this is the one
+// Assets: /Shared/Math.script            a MODULE: exports, but no default class
+export const TAU = Math.PI * 2
+export function clamp01(v: number) { return Math.max(0, Math.min(1, v)) }
+export enum Team { Player, Enemy }
 ```
 
-Put constants and helpers inside the class, or as non-exported module-level declarations.
+```ts
+// Assets: /Enemies/Hollow.script
+import { CharacterNode } from 'cleo'
+import { clamp01, Team } from '@/Shared/Math'     // from the project root
+import { lerp } from './Util'                     // relative to this script's folder
+import EnemyBase from '../Shared/EnemyBase'       // another script's class
 
-> **Why:** scripts are ES-module-*shaped* but are never loaded as modules. `import … from 'cleo'`
-> is rewritten to a lookup in the engine's module table, and `export default class` is rewritten to
-> `return ` **on the same line**, so reported line numbers still match your source. There is no
-> second slot for a named export to land in.
+export default class Hollow extends EnemyBase { … }
+```
+
+- **`@/` is the project root.** A bare leading `/` is not accepted: TypeScript reads it as a path on
+  your disk, so VS Code could never resolve it. `./` and `../` are relative to the importing script.
+- **A script with exports but no default class is a module.** Create one with **+ Add ▸ Script
+  Module**, or just write one. A module is never attached to a node; the node script picker does
+  not list it.
+- **A module runs once and is shared.** Every script importing it gets the same instance, and its
+  top-level state lives for the whole game session, across `Game.loadScene`. A node's own script
+  still runs once per node.
+- **Base classes are inherited for real.** A class script extending another script's class gets its
+  methods, getters and field defaults, and its fields appear in the inspector. A derived field's
+  default wins over the base's; `super.onUpdate()` reaches the base. The node type the script can
+  attach to follows the chain down to the engine class.
+- **Exports:** functions, classes, `const`/`let`/`var`, enums, `export { a as b }`, re-exports, and
+  a default. Types and interfaces are fine too. A destructured `export const { a } = …` is not.
+- **Circular imports** work when the cycle only shares functions. A value read before its module has
+  finished loading throws, and the error names the cycle.
+- **Shared modules see public variables only.** `getData(node)` inside a module returns a node's
+  public variables; pass a requester (`getData(node, this)` from a base-class method) for more.
+- Only modules something imports are shipped in a published game.
+
+> **How:** scripts are ES-module-*shaped* but are never loaded as modules. Imports are rewritten to
+> lookups in the engine's module table, and each export becomes a getter on the script's exports
+> object — all on the lines they were written on, so reported line numbers still match your
+> source.
 
 ## Fields, and how they reach the inspector
 

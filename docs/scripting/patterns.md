@@ -247,7 +247,7 @@ Every trap in these docs, in one place.
 - **A trigger fires while overlapping, not once.** Latch it.
 - **Dormant nodes leave every typed scene list** but stay findable by name and id.
 - **`Scene.dispose()` frees GPU and physics resources.** Never call it on a scene you are keeping.
-- **Game time is not wall-clock time** — the frame delta is clamped at `0.333 s`.
+- **Game time is not wall-clock time** — the frame delta is clamped at `0.1 s`. Multiply every per-frame rate by `delta`; physics already runs on the same clock.
 
 ### Input and control
 

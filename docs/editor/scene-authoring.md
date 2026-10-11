@@ -141,9 +141,20 @@ A template is a saved node subtree — a prefab.
 **Editing one:** open the template asset, which opens [Template mode](modes.md) — a throwaway scene
 rooted at the template's root.
 
-> Anything inside a placed instance is **read-only in the scene**, except its transform. To change a
-> field on something inside a template, open the template. This is what keeps every instance
-> consistent when the template changes.
+> The **structure** of a placed instance is read-only in the scene: its children, meshes, materials,
+> colliders and attached scripts all come from the template, so open the template to change them.
+> This is what keeps every instance consistent when the template changes.
+
+**Overrides — what each instance keeps of its own.** Besides its transform, an instance may differ
+from its template in:
+- the **name of its root** (rename it in the tree or the inspector; the children keep the template's names);
+- the **value of any script field**, on its root or on any node inside it (edit it in the Scripts section).
+
+These are recorded on the instance as **overrides** and replayed whenever the instance is rebuilt from
+its template, so editing the template never wipes them. An overridden value shows a **revert** marker
+that puts the template's value back; **Revert all** in the template-instance banner drops them all. A
+field you have not overridden follows the template: change its default in the template and every
+instance that kept the default changes too.
 
 Placed instances are rebuilt when the template changes, with fresh node ids and internal references
 remapped so each copy points at its own parts. This is why anything that references a node inside a

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { NodeRendererProps, Tree, TreeApi } from 'react-arborist'
 import { useCleoEngine } from '../EngineContext'
-import { Logger, Node, isEditorOwnedName, isUINodeType } from 'cleo';
+import { CleoEngine, Logger, Node, isEditorOwnedName, isUINodeType } from 'cleo';
 import type { SceneChange } from 'cleo';
 import { SkyIcon } from '../nodeInspector/sectionIcons'
 import {
@@ -10,6 +10,7 @@ import {
 } from './nodeIcons'
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
 import { TEMPLATE_ID_VAR, isWithinTemplateInstance } from '../../utils/templates';
+import { setNameOverride } from '../../utils/templateOverrides';
 import { getScriptIdOf } from '../../utils/scripts';
 import { validateNodeName } from '../../utils/nodeNames';
 import { useElementSize } from '../../utils/useElementSize';
@@ -289,12 +290,18 @@ export default function SceneInspector() {
     rebuild(); // also rebuild immediately when the mode / template root / scene name changes
     // Only structural changes (add/remove/rename/visibility) alter the tree; ignore the per-setter
     // transform/material events, or a gizmo drag rebuilds the tree 60x/sec.
+    //
+    // Coalesced: one rebuild per burst, not per event. A running game adds and removes nodes all the
+    // time (every hit spawns several effects), and each event used to walk the whole tree and re-render
+    // it synchronously. While playing the tree only needs to keep up loosely, so it waits longer.
+    let pending = 0;
     const onSceneChanged = (e?: SceneChange) => {
       if (e && e.kind !== 'structure' && e.kind !== 'visibility' && e.kind !== 'name') return;
-      rebuild();
+      if (pending) return;
+      pending = window.setTimeout(() => { pending = 0; rebuild(); }, CleoEngine.authoringMode ? 0 : 250);
     };
     eventEmitter.on('SCENE_CHANGED', onSceneChanged);
-    return () => { eventEmitter.off("SCENE_CHANGED", onSceneChanged) }; // Remove the listener on component unmount
+    return () => { window.clearTimeout(pending); eventEmitter.off("SCENE_CHANGED", onSceneChanged) }; // Remove the listener on component unmount
   }, [eventEmitter, generateNodeList, treeRoot, sceneName]);
 
   const rootId = nodes?.id;
@@ -384,6 +391,13 @@ export default function SceneInspector() {
     if (!node || name === node.name) return;
     const problem = validateNodeName(name);
     if (problem) { Logger.warn(problem, 'Editor'); return; }
+    // Inside a placed template instance only the ROOT's name is the placement's own (an override that a
+    // rebuild from the template restores). A child keeps the template's name, which is how it is found.
+    if (editorMode === 'scene' && isWithinTemplateInstance(node.parent)) {
+      Logger.warn('Cannot rename a node inside a template instance; rename it in the template', 'Editor');
+      return;
+    }
+    if (editorMode === 'scene' && node.getVariable(TEMPLATE_ID_VAR)) setNameOverride(node, name);
     // No event of our own: the engine's name setter emits SCENE_CHANGED { kind: 'name' }, which rebuilds
     // this tree, refreshes the Properties panel and marks the tab unsaved.
     node.name = name;

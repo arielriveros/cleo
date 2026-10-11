@@ -28,13 +28,15 @@ async function shardKeys(pid?: string): Promise<string[]> {
  * peak cost is one asset above the array that was read, never a second whole copy. The shards are the
  * backup; keeping the array as well would double the storage of the thing that was already too big.
  */
-export async function readModelLibrary(pid?: string): Promise<ModelAsset[]> {
+export async function readModelLibrary(pid?: string, onProgress?: (done: number, total: number) => void): Promise<ModelAsset[]> {
   const keys = await shardKeys(pid)
   if (keys.length) {
     const out: ModelAsset[] = []
-    for (const key of keys) {
-      const asset = await idbGet<ModelAsset>(key)
+    onProgress?.(0, keys.length)
+    for (let i = 0; i < keys.length; i++) {
+      const asset = await idbGet<ModelAsset>(keys[i])
       if (asset) out.push(asset)
+      onProgress?.(i + 1, keys.length)
     }
     out.sort(byOrder)
     reportSize(out)
@@ -53,13 +55,14 @@ export async function readModelLibrary(pid?: string): Promise<ModelAsset[]> {
       'Editor')
     return []
   }
-  if (!legacy?.length) return legacy ?? []
+  if (!legacy?.length) { onProgress?.(0, 0); return legacy ?? [] }
 
   reportSize(legacy)
   Logger.info(`Migrating ${legacy.length} model asset${legacy.length === 1 ? '' : 's'} to one record each`, 'Editor')
   for (let i = 0; i < legacy.length; i++) {
     const asset = { ...legacy[i], order: i } as ModelAsset & { order: number }
     await idbSet(modelKey(asset.id, pid), asset)
+    onProgress?.(i + 1, legacy.length)
   }
   await idbDelete(libKey('models', pid))
   return legacy
@@ -72,7 +75,8 @@ export async function readModelLibrary(pid?: string): Promise<ModelAsset[]> {
  * it touched and reuses the others, so `!==` is exactly "this one was edited" — and a deep compare of a
  * mesh would cost more than the write it saves.
  */
-export async function writeModelLibrary(next: ModelAsset[], prev: ModelAsset[], pid?: string): Promise<void> {
+export async function writeModelLibrary(next: ModelAsset[], prev: ModelAsset[], pid?: string,
+                                        onProgress?: (done: number, total: number) => void): Promise<void> {
   const before = new Map(prev.map(a => [a.id, a]))
   // Where each asset sat last time. Position is part of the library's state — `order` is what
   // readModelLibrary sorts by, a prefix scan having none of its own — so a reorder is a write even when
@@ -84,8 +88,9 @@ export async function writeModelLibrary(next: ModelAsset[], prev: ModelAsset[], 
     const asset = next[i]
     const was = before.get(asset.id)
     before.delete(asset.id)
-    if (was === asset && wasAt.get(asset.id) === i) continue
+    if (was === asset && wasAt.get(asset.id) === i) { onProgress?.(i + 1, next.length); continue }
     await idbSet(modelKey(asset.id, pid), { ...asset, order: i })
+    onProgress?.(i + 1, next.length)
   }
 
   for (const id of before.keys()) await idbDelete(modelKey(id, pid))
@@ -98,16 +103,20 @@ export async function deleteModelLibrary(pid?: string): Promise<void> {
 }
 
 /** Write a whole library, replacing whatever is there. Used by bundle import, which has no `prev`. */
-export async function replaceModelLibrary(assets: ModelAsset[], pid?: string): Promise<void> {
+export async function replaceModelLibrary(assets: ModelAsset[], pid?: string,
+                                          onProgress?: (done: number, total: number) => void): Promise<void> {
   await deleteModelLibrary(pid)
-  await writeModelLibrary(assets, [], pid)
+  await writeModelLibrary(assets, [], pid, onProgress)
 }
 
 /** Append assets to a project's library without reading the existing ones back. */
-export async function appendModelLibrary(assets: ModelAsset[], pid?: string): Promise<void> {
+export async function appendModelLibrary(assets: ModelAsset[], pid?: string,
+                                         onProgress?: (done: number, total: number) => void): Promise<void> {
   const base = (await shardKeys(pid)).length
-  for (let i = 0; i < assets.length; i++)
+  for (let i = 0; i < assets.length; i++) {
     await idbSet(modelKey(assets[i].id, pid), { ...assets[i], order: base + i })
+    onProgress?.(i + 1, assets.length)
+  }
 }
 
 /** Library order, for assets read back out of an unordered prefix scan. */

@@ -177,7 +177,7 @@ export function referencedAudioIds(...libraries: AnyAsset[][]): Set<string> {
  *  2. Every row no sample claimed: the first-boot-after-import path, where the library is still empty
  *     and each row is registered under its own id so the reconciler can mint records from it.
  */
-export async function preloadAudio(): Promise<number> {
+export async function preloadAudio(onProgress?: (done: number, total: number) => void): Promise<number> {
   const records = await getAllAudio()
   const byId = new Map(records.map(r => [r.id, r]))
   let loaded = 0
@@ -185,32 +185,43 @@ export async function preloadAudio(): Promise<number> {
   const samples = (await idbGet<SoundSampleAsset[]>(libKey('soundSamples'))) ?? []
   const consumed = new Set<string>()
 
-  for (const asset of samples) {
-    if (!asset?.id || AudioManager.Instance.getSound(asset.id)) continue
-    const audioId = asset.source?.kind === 'audio' ? asset.source.audioId : undefined
-    // A `runtime` source has no bytes by definition, and a missing file is reported by the asset audit
-    // rather than faked here.
-    if (!audioId) continue
-    const row = byId.get(audioId)
-    if (!row?.blob) continue
+  // Decided up front, so a loading screen knows the total before the first decode.
+  const audioOf = (asset: SoundSampleAsset): string | undefined =>
+    asset.source?.kind === 'audio' ? asset.source.audioId : undefined
+  // A `runtime` source has no bytes by definition, and a missing file is reported by the asset audit
+  // rather than faked here.
+  const fromAssets = samples.filter(a => {
+    if (!a?.id || AudioManager.Instance.getSound(a.id)) return false
+    const audioId = audioOf(a)
+    return !!audioId && !!byId.get(audioId)?.blob
+  })
+  const claimed = new Set(fromAssets.map(a => audioOf(a)!))
+  const fromRows = records.filter(r => !!r?.id && !!r.blob && !claimed.has(r.id) && !AudioManager.Instance.getSound(r.id))
+  const total = fromAssets.length + fromRows.length
+  onProgress?.(0, total)
 
-    const bytes = new Uint8Array(await row.blob.arrayBuffer())
+  for (const asset of fromAssets) {
+    const audioId = audioOf(asset)!
+    const row = byId.get(audioId)!
+
+    const bytes = new Uint8Array(await row.blob!.arrayBuffer())
     const mime = row.mime || row.blob.type || 'audio/mpeg'
     AudioManager.Instance.addSoundFromBytes(bytes, mime, parseSoundSettings(asset.settings), asset.id)
     // Only the ROW is consumed, not the id: several samples may share one file, and each still needs its
     // own registration under its own id.
     consumed.add(audioId)
     loaded++
+    onProgress?.(loaded, total)
   }
 
-  for (const r of records) {
-    if (!r?.id || !r.blob) continue
+  for (const r of fromRows) {
     if (consumed.has(r.id)) continue
-    if (AudioManager.Instance.getSound(r.id)) continue
-    const bytes = new Uint8Array(await r.blob.arrayBuffer())
-    AudioManager.Instance.addSoundFromBytes(bytes, r.mime || r.blob.type || 'audio/mpeg', undefined, r.id)
+    const bytes = new Uint8Array(await r.blob!.arrayBuffer())
+    AudioManager.Instance.addSoundFromBytes(bytes, r.mime || r.blob!.type || 'audio/mpeg', undefined, r.id)
     loaded++
+    onProgress?.(loaded, total)
   }
 
+  onProgress?.(total, total)
   return loaded
 }

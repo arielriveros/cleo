@@ -205,4 +205,60 @@ export default class OkNode extends Node {}
     expect(res.out).not.toMatch(/node_modules/);
     expect(res.ok).toBe(true);
   }, 180000);
+
+  it('resolves one script importing another, by project root and relative path', async () => {
+    if (skip) return;
+    // Script modules: '@/Shared/Math' is Shared/Math.ts in the workspace (paths: "@/*" -> "./*"), and a
+    // base class in another script is extended with its members fully typed — so a wrong call through
+    // the import is REJECTED, proving the alias resolved rather than degrading to `any`.
+    await writeScript('Shared/Math.ts', `
+export const TAU = Math.PI * 2
+export function clamp01(v: number): number { return Math.max(0, Math.min(1, v)) }
+export enum Team { Player, Enemy }
+`);
+    await writeScript('Shared/EnemyBase.ts', `
+import { CharacterNode } from 'cleo'
+import { clamp01 } from './Math'
+export default class EnemyBase extends CharacterNode {
+  public maxHp: number = 100
+  public hp: number = 100
+  ratio(): number { return clamp01(this.hp / this.maxHp) }
+}
+`);
+    await writeScript('Player/Hero.ts', `
+import EnemyBase from '../Shared/EnemyBase'
+import { TAU, Team } from '@/Shared/Math'
+export default class Hollow extends EnemyBase {
+  public team: Team = Team.Enemy
+  onUpdate(delta: number) {
+    const turn = TAU * delta * this.ratio()
+    this.walkSpeed = turn
+  }
+}
+`);
+    const ok = await typecheck();
+    expect(ok.out).toBe('');
+    expect(ok.ok).toBe(true);
+
+    await writeScript('Player/Hero.ts', `
+import { clamp01 } from '@/Shared/Math'
+import { Node } from 'cleo'
+export default class Bad extends Node { onStart() { clamp01('not a number') } }
+`);
+    const bad = await typecheck();
+    expect(bad.ok).toBe(false);
+    expect(bad.out).toMatch(/Player[\\/]Hero\.ts/);
+  }, 180000);
+
+  it('does not let a bare project path type-check, since the game would reject it', async () => {
+    if (skip) return;
+    await writeScript('Player/Hero.ts', `
+import { clamp01 } from 'Shared/Math'
+import { Node } from 'cleo'
+export default class Bare extends Node { onStart() { clamp01(1) } }
+`);
+    const res = await typecheck();
+    expect(res.ok).toBe(false);
+    expect(res.out).toMatch(/Shared\/Math/);
+  }, 180000);
 });

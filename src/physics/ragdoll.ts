@@ -68,9 +68,21 @@ export class Ragdoll {
     private _animator: Animator | null = null;
     private _bodies: Map<number, Body> = new Map();   // GLTF nodeIndex -> body
     private _constraints: PointToPointConstraint[] = [];
+    /** The model this ragdoll drives. Its removal from the scene is what ends the ragdoll. */
+    public readonly node: ModelNode;
+    /** Seconds every bone has stayed below the settle speed; see {@link updateSettle}. */
+    private _stillFor = 0;
+    private _frozen = false;
+    private _destroyed = false;
+
+    /** Bone speed (m/s, linear and angular) under which a ragdoll counts as at rest. */
+    public static readonly SETTLE_SPEED = 0.15;
+    /** Seconds at rest before a ragdoll is frozen. */
+    public static readonly SETTLE_SECONDS = 1.5;
 
     constructor(modelNode: ModelNode, physics: PhysicsSystem, options: RagdollOptions = {}) {
         this._physics = physics;
+        this.node = modelNode;
 
         const model = modelNode.model;
         const animator = modelNode.animator;
@@ -304,8 +316,50 @@ export class Ragdoll {
     /** Underlying bone bodies keyed by GLTF node index. */
     public get bodies(): Map<number, Body> { return this._bodies; }
 
+    /** Frozen: at rest, its bodies out of the world (see {@link updateSettle}). */
+    public get frozen(): boolean { return this._frozen; }
+    public get destroyed(): boolean { return this._destroyed; }
+
+    /**
+     * Freeze the ragdoll once it has come to rest. A corpse lying still costs the solver nothing to
+     * look at, but a live ragdoll is ~20 bodies and joints stepped every substep and tested by every
+     * raycast, and a game that kills things keeps adding them. Frozen, the bodies and joints leave the
+     * world while the Body objects stay — the animator keeps reading their last transforms, so the
+     * pose holds exactly where it fell.
+     *
+     * Returns true when this call froze it.
+     */
+    public updateSettle(dt: number): boolean {
+        if (this._frozen || this._destroyed || this._bodies.size === 0) return false;
+        const limit = Ragdoll.SETTLE_SPEED;
+        for (const body of this._bodies.values()) {
+            if (body.velocity.length() > limit || body.angularVelocity.length() > limit * 4) {
+                this._stillFor = 0;
+                return false;
+            }
+        }
+        this._stillFor += dt;
+        if (this._stillFor < Ragdoll.SETTLE_SECONDS) return false;
+        this.freeze();
+        return true;
+    }
+
+    /** Take the bodies and joints out of the world, keeping the pose. */
+    public freeze(): void {
+        if (this._frozen || this._destroyed) return;
+        this._frozen = true;
+        for (const constraint of this._constraints) this._physics.removeConstraint(constraint);
+        for (const body of this._bodies.values()) {
+            body.velocity.set(0, 0, 0);
+            body.angularVelocity.set(0, 0, 0);
+            this._physics.removeBody(body);
+        }
+    }
+
     /** Remove all bodies + constraints from physics and return the skeleton to animation. */
     public destroy(): void {
+        if (this._destroyed) return;
+        this._destroyed = true;
         for (const constraint of this._constraints) this._physics.removeConstraint(constraint);
         this._constraints = [];
         for (const body of this._bodies.values()) this._physics.removeBody(body);

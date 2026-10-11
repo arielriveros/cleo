@@ -148,7 +148,7 @@ describe('the decal box', () => {
 
 describe('the programs', () => {
     it('are appended at the end of the program table', () => {
-        const table = methodBody('_createPrograms');
+        const table = methodBody('_programTable');
         const entries = [...table.matchAll(/\['(\w+)',\s+\w+Program\]/g)].map(m => m[1]);
         expect(entries.slice(-3)).toEqual(['decalSurface', 'decalResolve', 'decalColor']);
     });

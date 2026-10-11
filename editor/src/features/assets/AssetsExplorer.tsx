@@ -49,9 +49,9 @@ export default function AssetsExplorer({ active = true }: { active?: boolean }) 
 
 function AssetsExplorerHost({ active }: { active: boolean }) {
   const {
-    enterMaterialEditor, enterTerrainMaterialEditor, enterTemplateEditor, enterScriptEditor, createTilesetFromImage, importAnimationFiles,
+    enterMaterialEditor, enterTerrainMaterialEditor, enterTemplateEditor, enterScriptEditor, createScriptModule, createTilesetFromImage, importAnimationFiles,
     enterAiBrainEditor, enterParticleSystemEditor, addAnimController,
-    importModelFiles, addTemplate, createScene, editorScene, scripts, bodies, triggers, eventEmitter,
+    importModelFiles, addTemplate, createScene, editorScene, scripts, bodies, triggers, eventEmitter, scriptAssets,
   } = useCleoEngine()
   const { vfs, libs, pathIndexRef, folderKindsRef, landingFolderRef, depsRef } = useVfs()
 
@@ -233,7 +233,7 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
       })
       if (!proceed) return
       try {
-        const template = await buildTemplateFromNode(node, { scripts, bodies, triggers })
+        const template = await buildTemplateFromNode(node, { scripts, bodies, triggers }, scriptAssets)
         addTemplate(template)
         Logger.info(`Template "${template.name}" created`, 'Editor')
       } catch (err) {
@@ -249,7 +249,7 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
       el.removeEventListener('dragleave', onDragLeave, true)
       el.removeEventListener('drop', onDrop, true)
     }
-  }, [runImport, editorScene, scripts, bodies, triggers, addTemplate])
+  }, [runImport, editorScene, scripts, bodies, triggers, addTemplate, scriptAssets])
 
   // Hovering a script card highlights every node icon in the scene tree that references it. Delegated over
   // the SVAR DOM: cards are `.wx-item[data-id]` / `.wx-row[data-id]` and data-id is the VFS path
@@ -341,6 +341,9 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
     { label: 'Landscape Material', icon: <img src={iconFor('terrainMaterial')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTerrainMaterialEditor(), title: 'Create a new landscape material asset: a surface for a landscape’s base or paint layers' },
     { label: 'Template', icon: <img src={iconFor('template')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTemplateEditor(), title: 'Author a new template in a dedicated empty scene' },
     { label: 'Script', icon: <img src={iconFor('script')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterScriptEditor(), title: 'Create a new class-based script asset' },
+    // Shared code — functions, constants, enums, a base class — that other scripts import by its path
+    // ('@/Folder/Name'). It lands in the current folder like any new asset; the path IS its import name.
+    { label: 'Script Module', icon: <img src={iconFor('script')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => createScriptModule(), title: 'Create shared code other scripts import, e.g. import { clamp01 } from \'@/Shared/Math\'' },
     { label: 'Tileset', icon: <img src={iconFor('tileset')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => document.getElementById('tileset-atlas-import')?.click(), title: 'Pick an atlas image and slice it into a tileset for tilemap layers' },
     // Two entries for ONE kind: a brain is either a machine or a goal graph, and the choice is made at
     // creation because it decides which canvas the asset opens on. Asking afterwards would mean a modal.

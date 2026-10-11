@@ -14,6 +14,7 @@ import { createFreshProjectMeta } from './sceneStorage';
 import { EMPTY_VFS } from './vfs';
 import { cryptoRandomId } from './ids';
 import { confirmDiscard, reloadDiscarding } from '../features/unloadGuard';
+import { hasHandoff, saveHandoff } from '../features/loading/loadingStore';
 
 export type ProjectRecord = {
   id: string;
@@ -275,6 +276,12 @@ export async function openProject(id: string): Promise<boolean> {
  * either way, so a second question, in the browser's voice, would only be noise.
  */
 export async function switchToProject(id: string): Promise<void> {
+  // The startup splash after the reload is titled for the project being opened — unless a flow that
+  // ends here (installing an example, importing) already handed over a title and its finished steps.
+  if (!hasHandoff()) {
+    const name = (await loadProjects()).find(p => p.id === id)?.name;
+    if (name) saveHandoff({ title: `Opening ${name}`, steps: [] });
+  }
   await writeActiveId(id);
   Logger.info('Opening project — reloading', 'Editor');
   reloadDiscarding();

@@ -164,7 +164,6 @@ export type BodyDescription = {
 }
 export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | CylinderShapeDescription | CapsuleShapeDescription | PlaneShapeDescription | ConvexShapeDescription;
 
-export type LoadingProgress = { loaded: number; total: number; label: string };
 
 // Soft pastel-blue editor viewport background, used across every editor mode.
 export const EDITOR_CLEAR_COLOR: [number, number, number, number] = [0.68, 0.80, 0.90, 1.0];

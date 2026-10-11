@@ -305,6 +305,18 @@ export class Scene {
     }
 
     /**
+     * The `remove()` sweep: detach, and — in a running game — free the GPU buffers of every model in the
+     * subtree. A removed node is gone for good there (an effect that ran out, a corpse, a projectile), and
+     * every instantiate builds fresh buffers, so nothing else can be drawing them. Without this each one
+     * stayed allocated for the rest of the session: every respawned enemy left its whole skinned mesh
+     * behind. Not in authoring, where removing goes through undo and the node may come back.
+     */
+    private _removeForGood(node: Node): void {
+        this.removeNode(node);
+        if (!CleoEngine.authoringMode) disposeModelSubtree(node);
+    }
+
+    /**
      * Create a brand-new node subtree from a template asset, live, and add it to the scene.
      *
      * The copy is complete — children, materials, colliders and scripts, with fresh ids throughout, so
@@ -340,8 +352,11 @@ export class Scene {
         const parent = options.parent ?? this._root;
         parseNodeJson(parent, json);
 
-        // The parse above emitted the structural change, so this lookup's traversal already sees the node.
-        return this.getNodeById(json.id) ?? null;
+        // Found under its parent, not through getNodeById: that lookup forces the full-tree rebuild the
+        // structural change just scheduled, once per spawn — a hit spawning four effects rebuilt every
+        // node list four times. Left alone, the rebuild runs once, when the next frame reads the lists.
+        const made = parent.children.find(c => c.id === json.id);
+        return made ?? this.getNodeById(json.id) ?? null;
     }
 
     public removeNodesByName(name: string): void {
@@ -425,7 +440,7 @@ export class Scene {
                 }
 
                 if (node.markForRemoval) {
-                    this.removeNode(node);
+                    this._removeForGood(node);
                     continue;
                 }
 
@@ -437,7 +452,7 @@ export class Scene {
             // Dormant nodes are not in _nodes, so the sweep above never sees one — but `despawn()` then
             // `remove()` is ordinary, and the node would otherwise stay in the tree forever.
             for (const node of this._dormant)
-                if (node.markForRemoval) this.removeNode(node);
+                if (node.markForRemoval) this._removeForGood(node);
 
             sceneStats.nodeLoopMs = performance.now() - loopStart;
 
@@ -673,8 +688,10 @@ export class Scene {
         active.add(this._root);
         queue.push(this._root);
 
-        while (queue.length > 0) {
-            const current = queue.shift() as Node;
+        // A read index, not queue.shift(): shift moves every remaining element, which made this walk
+        // quadratic in the node count, and it reruns on every structural change (each spawned effect).
+        for (let head = 0; head < queue.length; head++) {
+            const current = queue[head];
 
             for (const child of current.children) {
                 if (!visited.has(child)) {

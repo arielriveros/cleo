@@ -1,0 +1,155 @@
+import { Node, UIProgressBarNode, UIRootNode, UITextNode } from 'cleo'
+
+/**
+ * Hollow Keep — the HUD. Attach to the `HUD` node, a screen-space UI Root.
+ *
+ * One script for the whole HUD. It finds its widgets by NAME once (missing ones are skipped, so you can
+ * restyle or rebuild the HUD freely as long as the names stay) and writes them every frame from the
+ * player's and the manager's public fields:
+ *
+ *   Health, HealthLag        uiProgressBar   HP, and the yellow "damage taken" bar that drains behind it
+ *   Stamina                  uiProgressBar
+ *   Estus                    uiText          flask count
+ *   Weapon                   uiText          weapon in hand
+ *   Souls, SoulsGain         uiText          souls held, and the +N popup
+ *   Prompt / PromptText      uiPanel/uiText  "E  Rest at bonfire" — hidden when there is nothing to do
+ *   Notice                   uiText          one-line messages ("Picked up ..."), fading
+ *   Message / MessageTitle / MessageBody     the readable-message panel
+ *   Boss / BossName / BossHealth / BossLag   the boss bar, shown while the fight is on
+ *
+ * Bars grow with their maximum (`pxPerHp`, `pxPerStamina`), so levelling Vigor visibly lengthens the bar.
+ */
+export default class SoulsHudNode extends UIRootNode {
+  public pxPerHp: number = 0.75
+  public pxPerStamina: number = 2.4
+  public minBarWidth: number = 160
+  public maxBarWidth: number = 900
+  public noticeSeconds: number = 2.6
+  /** Key shown in front of the interaction prompt. */
+  public interactKey: string = 'E'
+
+  private _player: Node = null
+  private _gm: Node = null
+  private _w: any = {}
+  private _barLeft: number = 48
+  private _noticeAge: number = 99
+  private _message: Node = null
+  private _messageAge: number = 0
+
+  onStart() {
+    this._player = this.findNode('Player')
+    this._gm = this.findNode('GameManager')
+    for (const name of ['Health', 'HealthLag', 'HealthBack', 'Stamina', 'StaminaBack', 'Estus', 'Weapon', 'Souls',
+      'SoulsGain', 'Prompt', 'PromptText', 'Notice', 'Message', 'MessageTitle', 'MessageBody', 'Boss', 'BossName',
+      'BossHealth', 'BossLag']) {
+      this._w[name] = this._find(name)
+    }
+    const health = this._w.Health as any
+    if (health) this._barLeft = health.offsetMin[0]
+    this._show('Message', false)
+    this._show('Boss', false)
+    this._show('Prompt', false)
+    this._text('Notice', '')
+    this._text('SoulsGain', '')
+  }
+
+  onUpdate(delta: number) {
+    const p = this._player as any
+    const gm = this._gm as any
+    this._noticeAge += delta
+    this._messageAge += delta
+
+    if (p) {
+      this._bar('Health', p.hp, p.maxHp)
+      this._bar('HealthLag', p.hp, p.maxHp)
+      this._width(['Health', 'HealthLag', 'HealthBack'], p.maxHp * this.pxPerHp)
+      this._bar('Stamina', p.stamina, p.maxStamina)
+      this._width(['Stamina', 'StaminaBack'], p.maxStamina * this.pxPerStamina)
+      this._text('Estus', 'Estus Flask  ' + (p.estus ?? 0) + ' / ' + (p.estusMax ?? 0))
+      this._text('Weapon', p.weaponName ?? '')
+      this._text('Souls', String(Math.round(p.souls ?? 0)))
+      this._text('SoulsGain', p.soulsGainAge < 2 && p.lastSoulsGain > 0 ? '+' + p.lastSoulsGain : '')
+
+      const prompt = p.interactPrompt ?? ''
+      this._show('Prompt', !!prompt && !this._message)
+      if (prompt) this._text('PromptText', this.interactKey + '   ' + prompt)
+    }
+
+    if (this._noticeAge > this.noticeSeconds) this._text('Notice', '')
+
+    // A message closes when the player walks away from its source.
+    if (this._message && p) {
+      const a = this._message.worldPosition
+      const b = this._player.worldPosition
+      const r = ((this._message as any).interactRadius ?? 1.6) + 1.2
+      if (Math.hypot(a[0] - b[0], a[2] - b[2]) > r || p.isDead) this._closeMessage()
+    }
+
+    const bossOn = !!gm?.bossActive
+    this._show('Boss', bossOn)
+    if (bossOn) {
+      this._text('BossName', gm.bossName ?? '')
+      this._bar('BossHealth', gm.bossHp, gm.bossMaxHp)
+      this._bar('BossLag', gm.bossHp, gm.bossMaxHp)
+    }
+  }
+
+  public showNotice(text: string): void {
+    this._text('Notice', text)
+    this._noticeAge = 0
+  }
+
+  /** Show a message; showing the SAME source again closes it (Interact toggles). */
+  public showMessage(title: string, body: string, source: Node): void {
+    if (this._message && this._message === source && this._messageAge > 0.15) { this._closeMessage(); return }
+    this._message = source
+    this._messageAge = 0
+    this._text('MessageTitle', title)
+    this._text('MessageBody', body)
+    this._show('Message', true)
+  }
+
+  private _closeMessage(): void {
+    this._message = null
+    this._show('Message', false)
+  }
+
+  private _bar(name: string, value: number, max: number): void {
+    const bar = this._w[name] as UIProgressBarNode
+    if (!bar) return
+    if (bar.max !== max) bar.max = Math.max(1, max)
+    bar.value = Math.max(0, value)
+  }
+
+  private _width(names: string[], px: number): void {
+    const width = Math.max(this.minBarWidth, Math.min(this.maxBarWidth, px))
+    for (const name of names) {
+      const node = this._w[name] as any
+      if (!node) continue
+      const right = node.offsetMin[0] + width
+      if (Math.abs(node.offsetMax[0] - right) > 0.5) node.offsetMax = [right, node.offsetMax[1]]
+    }
+  }
+
+  private _text(name: string, value: string): void {
+    const node = this._w[name] as UITextNode
+    if (node && node.text !== value) node.text = value
+  }
+
+  private _show(name: string, on: boolean): void {
+    const node = this._w[name] as any
+    if (node && node.visible !== on) node.visible = on
+  }
+
+  private _find(name: string): Node {
+    const walk = (node: Node): Node => {
+      for (const child of node.children) {
+        if (child.name === name) return child
+        const found = walk(child)
+        if (found) return found
+      }
+      return null
+    }
+    return walk(this)
+  }
+}

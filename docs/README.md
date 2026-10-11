@@ -98,6 +98,10 @@ something moving. They are written against real, working scenes:
 - [Night Shift](../examples/scripts/NIGHT_SHIFT.md) — a complete small game assembled from those
   parts: a day/night clock, zombie AI with real sight cones, pickups, powerups, a HUD and an end
   screen.
+- [Hollow Keep](../examples/scripts/SOULS_DEMO.md) — a souls-like demo on placeholder art: stamina
+  combat, lock-on, bonfires, a fog gate and a two-phase boss, plus a guide to swapping in final assets.
+  Its [feature matrix](../examples/scripts/SOULS_FEATURE_MATRIX.md) maps which engine and souls-like
+  features it uses and which are missing.
 
 ## A note on what these docs are
 

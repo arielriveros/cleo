@@ -1,6 +1,7 @@
-import React, { Suspense } from 'react'
+import React, { Suspense, useMemo } from 'react'
 import { useCleoEngine } from '../../EngineContext'
-import { BASE_TYPE_LABEL } from '../../../utils/scripts'
+import { BASE_TYPE_LABEL, scriptKindOfAsset } from '../../../utils/scripts'
+import { buildScriptGraphCtx, importSpecifierOf, scriptRoleLabel } from '../../../utils/scriptGraph'
 import { useScriptWorkspace } from '../../scriptWorkspace/ScriptWorkspaceContext'
 import { NOT_DESKTOP_REASON } from '../../scriptWorkspace/desktopScripts'
 import { Button } from '../../../components/ui/Button'
@@ -11,11 +12,16 @@ const MonacoScriptEditor = React.lazy(() => import('./MonacoScriptEditor'))
 // The dedicated Script editor tab body. Edits go to the tab's working buffer (setScriptTabSource marks it
 // dirty); the MenuBar's Save Script commits them to the asset. Rendered when editorMode === 'script'.
 export default function ScriptTabView() {
-  const { activeTab, scriptAssets, getScriptTabSource, setScriptTabSource } = useCleoEngine()
+  const { activeTab, scriptAssets, scriptPaths, getScriptTabSource, setScriptTabSource } = useCleoEngine()
   const workspace = useScriptWorkspace()
+  const ctx = useMemo(() => buildScriptGraphCtx(scriptPaths, scriptAssets), [scriptPaths, scriptAssets])
   if (activeTab.kind !== 'script' || !activeTab.scriptId) return null
   const scriptId = activeTab.scriptId
   const asset = scriptAssets.find(a => a.id === scriptId)
+  const moduleId = ctx.pathOf(scriptId)
+  const role = asset ? scriptRoleLabel(asset, ctx) : null
+  // How another script imports this one — shown so the project-path syntax is discoverable.
+  const importAs = moduleId ? importSpecifierOf(moduleId) : null
   // Neither revealing a file nor setting the workspace up is possible in the browser, which has no
   // filesystem to mirror into.
   const connected = workspace.status !== 'off'
@@ -25,9 +31,25 @@ export default function ScriptTabView() {
       <div className='shrink-0 flex items-center gap-2 px-3 h-[30px] border-b border-border'>
         <span className='text-[12px] font-semibold truncate' title={asset?.name}>
           {asset?.name ?? 'Script'}
-          {asset && <span className='ml-1 text-dim font-normal'>· extends {BASE_TYPE_LABEL[asset.baseType]}</span>}
+          {asset && scriptKindOfAsset(asset) === 'module'
+            ? <span className='ml-1 text-dim font-normal'>· Module</span>
+            : asset && <span className='ml-1 text-dim font-normal'>· {role ?? `extends ${BASE_TYPE_LABEL[asset.baseType]}`}</span>}
         </span>
-        <span className='ml-auto text-[11px] text-dim'>Save Script (top bar) applies changes to every node using it</span>
+        {importAs && (
+          <button
+            type='button'
+            className='text-[11px] text-dim hover:text-white font-mono truncate'
+            title={`Other scripts import this one with: import … from '${importAs}' — click to copy`}
+            onClick={() => void navigator.clipboard?.writeText(`'${importAs}'`)}
+          >
+            import from '{importAs}'
+          </button>
+        )}
+        <span className='ml-auto text-[11px] text-dim truncate'>
+          {asset && scriptKindOfAsset(asset) === 'module'
+            ? 'Save Script (top bar) applies changes to every script importing it'
+            : 'Save Script (top bar) applies changes to every node using it'}
+        </span>
         <Button
           size='sm' variant='ghost' className='h-[20px] shrink-0'
           disabled={!workspace.available}
@@ -46,6 +68,9 @@ export default function ScriptTabView() {
             scriptId={scriptId}
             initialSource={getScriptTabSource(scriptId) ?? asset?.source ?? ''}
             onChange={(src) => setScriptTabSource(activeTab.id, scriptId, src)}
+            assets={scriptAssets}
+            pathOf={ctx.pathOf}
+            savedSource={asset?.source}
           />
         </Suspense>
       </div>

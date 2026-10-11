@@ -2,6 +2,7 @@ import type { Scene, RenderSettings, NodeTemplate, InputMap } from 'cleo';
 import { Logger, isDefaultInputMap, isEditorOwnedName } from 'cleo';
 import type { BodyDescription, ShapeDescription } from '../EngineContext';
 import { fanOutScripts, SCRIPT_ID_VAR, type ScriptAsset } from '../../utils/scripts';
+import { buildScriptGraphCtx, importClosure } from '../../utils/scriptGraph';
 import type { Template } from '../../utils/templates';
 import { resolveMaterialRefs, type MaterialAsset } from '../../utils/materials';
 import { deepClone } from '../../utils/deepClone';
@@ -18,6 +19,12 @@ export interface GameDataSources {
   // The shared script asset library: resolves each node's __scriptId link to the asset's source (into
   // `scripts`) and injects the node's native script-field values as `scriptVars`.
   scriptAssets?: ScriptAsset[];
+  // Script asset id -> VFS path. Turns on SCRIPT MODULES: each scripted node is stamped with its script's
+  // project path (`scriptPath`, what `./` imports resolve against) and every script module the shipped
+  // scripts import — helpers and base classes, transitively — is written to `json.modules`. Passed by
+  // the RUNTIME builders (play + publish) only; saving a scene leaves it out, so neither field is ever
+  // persisted.
+  scriptPaths?: ReadonlyMap<string, string>;
   // Baked into `json.templates` so scripts can `scene.instantiate('Name')` at runtime. Passed only by the
   // RUNTIME builders (play + publish); saving a scene leaves it out.
   templates?: Template[];
@@ -199,6 +206,41 @@ export function attachSharedClips(
   return attached;
 }
 
+/**
+ * Stamp `scriptPath` on every scripted node of a serialized tree (from its `__scriptId` link) and collect
+ * `{ source, path }` roots for the import closure. Inline scripts with no asset get no path: they can use
+ * `@/` imports but not relative ones.
+ */
+function stampScriptPaths(tree: any, pathOf: (assetId: string) => string | undefined, roots: { source: string, path?: string }[]): void {
+  const visit = (node: any) => {
+    if (!node || typeof node !== 'object') return;
+    if (typeof node.script === 'string' && node.script) {
+      const id = node.variables?.[SCRIPT_ID_VAR]?.value;
+      const path = typeof id === 'string' ? pathOf(id) : undefined;
+      if (path) node.scriptPath = path;
+      roots.push({ source: node.script, path });
+    }
+    for (const child of node.children ?? []) visit(child);
+  };
+  visit(tree);
+}
+
+/**
+ * Ship the script modules a game needs: the transitive import closure of every script in the scene and
+ * in the baked templates, keyed by module id. A module nothing imports is not shipped. An import that
+ * resolves to no script is reported here, before Play, as well as at runtime with the exact message.
+ */
+export function attachScriptModules(json: any, scriptAssets: ScriptAsset[], scriptPaths: ReadonlyMap<string, string>): void {
+  const ctx = buildScriptGraphCtx(scriptPaths, scriptAssets);
+  const roots: { source: string, path?: string }[] = [];
+  stampScriptPaths(json.scene, ctx.pathOf, roots);
+  for (const template of json.templates ?? []) stampScriptPaths((template as any).node, ctx.pathOf, roots);
+  const { modules, missing } = importClosure(roots, ctx);
+  if (modules.size) json.modules = Object.fromEntries([...modules].map(([id, asset]) => [id, asset.source]));
+  for (const id of missing)
+    Logger.warn(`A script imports '@${id}', but no script lives at ${id}.script — check the path in the Assets panel.`, 'Script');
+}
+
 // Single source of truth for the runtime scene JSON, shared by editor play mode and publishing.
 // Produces the exact object shape Scene.parse consumes: { scene, textures?, ui }.
 export async function buildGameData(sources: GameDataSources): Promise<any> {
@@ -225,6 +267,8 @@ export async function buildGameData(sources: GameDataSources): Promise<any> {
     for (const template of json.templates ?? [])
       attachSharedClips((template as any).node, sources.models, sources.animations);
   }
+  if (sources.scriptPaths && sources.scriptAssets)
+    attachScriptModules(json, sources.scriptAssets, sources.scriptPaths);
   // `graphics` seeds the engine constructor (clear color from frame one); `render` is the full snapshot
   // the player re-applies to its renderer after boot; `input` is the action map the player installs
   // before the first frame. Scene.parse ignores `config`.

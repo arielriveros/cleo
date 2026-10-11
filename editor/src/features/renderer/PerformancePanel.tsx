@@ -53,7 +53,9 @@ type PassRow = { name: string; avgMs: number; maxMs: number; cpuMs: number };
 const RANGED = ['drawCalls', 'instancedDrawCalls', 'objects', 'instances', 'triangles',
                 'culledObjects', 'culledInstances', 'fullscreenPasses', 'shadedMpx',
                 'stateChanges', 'stateChangesSaved',
-                'foliageDraws', 'foliageShadowDraws', 'foliageCells', 'foliageCellsScanned'] as const;
+                'foliageDraws', 'foliageShadowDraws', 'foliageCells', 'foliageCellsScanned',
+                'particleSystems', 'particleSystemsCulled', 'particleSteps', 'particleDraws', 'particlesDrawn',
+                'particleGpuCreates', 'particleGpuReuses'] as const;
 type RangedKey = typeof RANGED[number];
 type Range = { min: number; max: number; mean: number };
 
@@ -283,6 +285,9 @@ export default function PerformancePanel() {
       `triangles ${fmt(r.triangles.mean, 0)} (${r.triangles.min}-${r.triangles.max})`
         + ` - culled ${fmt(r.culledObjects.mean, 0)} obj / ${fmt(r.culledInstances.mean, 0)} inst`,
       `physics ${fmt(d.physicsMs)}ms - scene ${fmt(d.sceneMs)}ms`,
+      `particles ${fmt(r.particleSystems.mean, 0)} systems (${fmt(r.particleSystemsCulled.mean, 0)} paused off screen)`
+        + ` - steps ${fmt(r.particleSteps.mean, 0)} (max ${r.particleSteps.max}) - draws ${fmt(r.particleDraws.mean, 0)}`
+        + ` - instances ${fmt(r.particlesDrawn.mean, 0)} - gpu builds ${r.particleGpuCreates.max} max/frame`,
       `quality ${quality} - renderScale ${renderScale} - ${d.backend}/${d.pipeline}`,
       '',
       ...rows.map(r => `${r.name.padEnd(20)} gpu ${fmt(r.avgMs).padStart(8)} ms`
@@ -461,6 +466,26 @@ export default function PerformancePanel() {
             the scan is a linear walk of every cell in every layer, repeated per cascade. */}
         <RangeRow label='· scanned' r={r.foliageCellsScanned}
                   title='Cell culling tests run this frame, colour and shadow together. Far above "Foliage cells" means the linear scan itself is the cost, not the draws.' />
+      </Section>
+
+      <Section
+        title='Particles'
+        hint={'Steps are the simulation cost: one GPU pass per emitter per step. Builds are emitters whose '
+            + 'GPU state was created this frame (textures, LUT, bind groups); a spawned effect normally '
+            + 'reuses a pooled one instead, so builds above zero during play are the allocation spikes.'}
+      >
+        <RangeRow label='Systems' r={r.particleSystems}
+                  title='Particle systems that ran at least one simulation step this frame.' />
+        <RangeRow label='· paused off screen' r={r.particleSystemsCulled}
+                  title='Looping systems whose bounds were out of view: their clock stops and they cost nothing.' />
+        <RangeRow label='Steps' r={r.particleSteps} hl={r.particleSteps.max > 2 * Math.max(1, r.particleSystems.mean) + 16}
+                  title='Simulation passes run (one per emitter per step). At most two steps per emitter per frame, plus a bounded prewarm slice.' />
+        <RangeRow label='Draws' r={r.particleDraws} title='Emitter draws issued: visible emitters with live particles.' />
+        <RangeRow label='Instances' r={r.particlesDrawn}
+                  title='Particle quads (or meshes) submitted: the live windows of the drawn emitters.' />
+        <RangeRow label='GPU builds' r={r.particleGpuCreates} hl={r.particleGpuCreates.max > 0}
+                  title='Emitters whose GPU state was built this frame. Pooled reuse is the next row.' />
+        <RangeRow label='· reused' r={r.particleGpuReuses} title='Emitters handed pooled GPU state instead of building it.' />
       </Section>
 
       <Section

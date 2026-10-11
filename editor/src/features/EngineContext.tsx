@@ -14,6 +14,7 @@ import { EditorSessionsContext, type EditorSessionsContextValue } from "./Editor
 import { useStableActions } from "../utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
 import { isEditorOwnedChange } from "../utils/editorOwned";
+import { resetScriptModules, addScriptModuleSources } from "cleo";
 import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
 import type { SceneChange, TerrainFoliageRule, InputMap } from "cleo";
 import NullImage from '../images/null.png';
@@ -32,13 +33,15 @@ import { createAnimationEditorScene } from './demoScene/createAnimationEditorSce
 import { createAssetEditScene } from './demoScene/createAssetEditScene';
 import { parseByType, regenerateIds, stripDebug } from "../utils/nodeSubtree";
 import { cryptoRandomId } from "../utils/ids";
-import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR } from "../utils/templates";
+import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR, templateInstanceRootOf } from "../utils/templates";
+import { clearOverride, writeOverrides, pathOf, nodeAtPath } from "../utils/templateOverrides";
 import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getMaterialIdsOf, getNodeMaterial, unlinkToFallback, unlinkMaterialAt, materialSlotsReferencing, resolveMaterialRefs, serializedVar, MATERIAL_ID_VAR, MATERIAL_IDS_VAR } from "../utils/materials";
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds, syncSlotMaterialInTerrain, withSyncedSlotMaterial } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
 import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE } from "../utils/models";
-import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, seedScriptFields } from "../utils/scripts";
+import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, defaultScriptModule, seedScriptFields, scriptKindOfAsset } from "../utils/scripts";
+import { buildScriptGraphCtx, deriveBaseType, resolveScriptVariables, dependentsOf } from "../utils/scriptGraph";
 import { pushExternalSource } from "./scriptWorkspace/externalSourceStore";
 import { AnimationAsset, buildAnimationAsset, storeSkin, findEquivalentAnimation, withAnimationRef, withoutAnimationRef, extractEmbeddedClips } from "../utils/animationAssets";
 import type { StoredSkin } from "../utils/animationAssets";
@@ -79,7 +82,7 @@ import {
   ProjectMeta, SceneMeta, SceneRefs, SceneAssetData, loadProjectMeta, saveProjectMeta, loadSceneData, saveSceneData,
   deleteSceneData, migrateLegacyProject, createFreshProjectMeta,
 } from "../utils/sceneStorage";
-import { resyncScene } from "../utils/sceneResync";
+import { resyncScene, reinstantiate } from "../utils/sceneResync";
 import { migrateSceneSprites } from "../utils/spriteMigration";
 import { captureAnimationState, restoreAnimationState } from "../utils/placedAnimation";
 import { buildAssetHashes, hashAsset, AssetLibs, ASSET_HASH_VERSION } from "../utils/assetHash";
@@ -125,9 +128,11 @@ import {
 } from './engineContextTypes';
 import type {
   PendingModelImportView, ModelImportDecision, PendingAnimationImportView, PendingRigPickView,
-  AnimationImportDecision, BodyDescription, ShapeDescription, LoadingProgress, EditorMode, GizmoMode, GizmoSpace,
+  AnimationImportDecision, BodyDescription, ShapeDescription, EditorMode, GizmoMode, GizmoSpace,
   SavingState, TabKind, ModelEditSession, EditorTab, TerrainBrushState, TilemapBrushState,
 } from './engineContextTypes';
+import { currentOrNoop } from './loading/bootLoad';
+import { beginLoad, currentLoad, subscribeLoad, yieldToPaint, type LoadHandle } from './loading/loadingStore';
 
 // The types, constant tables and standalone helpers this file used to declare inline now live in sibling
 // modules. They are re-exported here verbatim so every consumer keeps importing them from EngineContext.
@@ -137,7 +142,7 @@ export {
 } from './engineContextTypes';
 export type {
   PendingModelImportView, ModelImportDecision, RetargetBoneOption, PendingAnimationImportView,
-  PendingRigPickView, AnimationImportDecision, BodyDescription, ShapeDescription, LoadingProgress,
+  PendingRigPickView, AnimationImportDecision, BodyDescription, ShapeDescription,
   EditorMode, GizmoMode, GizmoSpace, SavingState, TabKind, ModelEditSession, EditorTab,
   TerrainBrushState, TilemapTool, TilemapBrushState,
 } from './engineContextTypes';
@@ -244,7 +249,6 @@ const EngineContext = createContext<{
   commitAnimationStateMachine: (sm: any) => void;
   terrainBrush: React.MutableRefObject<TerrainBrushState>;
   tilemapBrush: React.MutableRefObject<TilemapBrushState>;
-  loadingProgress: LoadingProgress;
   scripts: Map<string, string>;
   bodies: Map<string, BodyDescription>;
   triggers: Map<string, { shapes: ShapeDescription[]; }>;
@@ -285,6 +289,18 @@ const EngineContext = createContext<{
   detachScriptFromNode: (node: Node) => void;
   /** Persist an edited script asset's source and propagate the change to every linked node. */
   saveScriptSource: (id: string, source: string) => void;
+  /** Called by the VFS provider whenever the asset index changes: asset id -> VFS path, for script modules. */
+  syncScriptPaths: (paths: ReadonlyMap<string, string>) => void;
+  /** The VFS path of every script asset (see syncScriptPaths). Read-only. */
+  scriptPaths: ReadonlyMap<string, string>;
+  /** Mint a new script MODULE (shared code other scripts import) and open it. */
+  createScriptModule: () => void;
+  /**
+   * Drop a placed template instance's override and rebuild the instance from its template, so the value
+   * goes back to the template's. `field` names one script field ('name' for the root's name); omitted,
+   * every override of `node` goes; `node` being the instance root with `all` drops the instance's every one.
+   */
+  revertTemplateOverride: (node: Node, field?: string, all?: boolean) => void;
   /**
    * Take a source edited outside the editor (the script workspace folder) as the new truth for a script:
    * saves it, refreshes any open Script tab's buffer and clears that tab's dirty flag. Returns whether the
@@ -593,7 +609,6 @@ const EngineContext = createContext<{
     commitAnimationStateMachine: () => {},
     terrainBrush: { current: { activeLandscapeId: null } },
     tilemapBrush: { current: { tool: 'brush', activeTilemapId: null, activeLayer: 0, stamp: { w: 1, h: 1, tiles: [0] }, orient: { flipX: false, flipY: false, rot90: false }, variantSetId: null, terrainId: null } },
-    loadingProgress: { loaded: 0, total: 6, label: 'Starting…' },
     scripts: new Map(),
     bodies: new Map(),
     triggers: new Map(),
@@ -623,6 +638,10 @@ const EngineContext = createContext<{
     attachScriptToNode: () => false,
     detachScriptFromNode: () => {},
     saveScriptSource: () => {},
+    syncScriptPaths: () => {},
+    scriptPaths: new Map(),
+    createScriptModule: () => {},
+    revertTemplateOverride: () => {},
     adoptExternalScriptSource: () => ({ replacedUnsaved: false }),
     renameScriptAsset: () => {},
     animationFields: [],
@@ -784,6 +803,12 @@ function createEditorScene(): Scene {
 
 export function EngineProvider(props: { children: React.ReactNode }) {
   const instanceRef = useRef<CleoEngine | null>(null);
+  /**
+   * The startup load app.tsx began (features/loading). Every boot step reports into it — the library
+   * reads below, the engine, the scene, the resync — and it closes the splash once they have all
+   * settled. Captured once: a later load (opening a scene) must not receive the boot's reports.
+   */
+  const bootLoadRef = useRef<LoadHandle>(currentOrNoop());
   const editorSceneRef = useRef<Scene>(createEditorScene());
   const eventEmitter = useRef(new EventEmitter());
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -928,7 +953,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     orient: { flipX: false, flipY: false, rot90: false },
     variantSetId: null, terrainId: null,
   });
-  const [loadingProgress, setLoadingProgress] = useState<LoadingProgress>({ loaded: 0, total: 6, label: 'Starting…' });
   const isGizmoDraggingRef = useRef(false);
   /** Cancels the Play-mode Escape subscription. Null while not playing. */
   const escapeSubRef = useRef<(() => void) | null>(null);
@@ -1075,7 +1099,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       try {
         // One record per asset; readModelLibrary migrates a project still on the single `cleo_models`
         // array and reports the library's size. See utils/modelStore for why it is sharded.
-        const list = await readModelLibrary();
+        const step = bootLoadRef.current.step('models').start();
+        const list = await readModelLibrary(undefined, (done, total) => step.progress(done, total));
+        if (!list.length) step.skip('none');
         // The baseline is the RAW list, before the flatten below: an asset flattenModelAsset actually
         // changed comes back as a NEW object and so gets written, while one it left alone is the same
         // object and is skipped. Seeding with the flattened list instead would lose that migration.
@@ -1083,8 +1109,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // One-shot flatten of legacy assets that still carry a holder node. flattenModelAsset returns the
         // same object when there is nothing to do, and node ids are preserved.
         if (list.length) setModels(prev => prev.length ? prev : list.map(flattenModelAsset));
-      } catch (e) { Logger.error(`Failed to load the model library: ${e}`, 'Editor'); }
-      finally { modelsLoadedRef.current = true; }
+      } catch (e) {
+        Logger.error(`Failed to load the model library: ${e}`, 'Editor');
+        bootLoadRef.current.step('models').fail(String(e));
+      }
+      finally {
+        modelsLoadedRef.current = true;
+        bootLoadRef.current.step('models').done();
+      }
     })();
   }, []);
   usePersistedModelLibrary(models, modelsLoadedRef, persistedModelsRef);
@@ -1122,6 +1154,19 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const scriptAssetsRef = useRef<ScriptAsset[]>([]);
   // Mirrored during RENDER, not in an effect — see the library-mirror block below for why.
   scriptAssetsRef.current = scriptAssets;
+
+  // Where each script lives in the asset explorer (asset id -> VFS path). Scripts import each other BY
+  // THAT PATH ('@/Shared/Math'), and the VFS provider is nested INSIDE this one, so it pushes the index
+  // down here rather than this reading it. A ref plus a version: the play build reads the ref, and the
+  // version re-renders the few views that label scripts by their role.
+  const scriptPathsRef = useRef<Map<string, string>>(new Map());
+  const [scriptPaths, setScriptPathsState] = useState<ReadonlyMap<string, string>>(new Map());
+  const syncScriptPaths = (paths: ReadonlyMap<string, string>) => {
+    const prev = scriptPathsRef.current;
+    if (prev.size === paths.size && [...paths].every(([id, path]) => prev.get(id) === path)) return;
+    scriptPathsRef.current = new Map(paths);
+    setScriptPathsState(scriptPathsRef.current);
+  };
 
   const addScriptAsset = (s: ScriptAsset) => setScriptAssets(prev => [...prev, s]);
   const updateScriptAsset = (id: string, s: ScriptAsset) => setScriptAssets(prev => prev.map(x => x.id === id ? s : x));
@@ -1769,7 +1814,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const asset = scriptAssets.find(a => a.id === scriptId);
     if (!asset) return false;
     if (!applyScriptAsset(node, asset, scriptsRef.current)) {
-      Logger.warn(`Script "${asset.name}" extends ${asset.baseType}; it cannot attach to a ${node.nodeType} node`, 'Editor');
+      if (scriptKindOfAsset(asset) === 'module')
+        Logger.warn(`"${asset.name}" is a script module — shared code other scripts import. Only a class script can attach to a node.`, 'Editor');
+      else
+        Logger.warn(`Script "${asset.name}" extends ${asset.baseType}; it cannot attach to a ${node.nodeType} node`, 'Editor');
       return false;
     }
     eventEmitter.current.emit('SCENE_CHANGED');
@@ -1783,19 +1831,39 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Persist an edited script's source and propagate to every linked node: re-cache the source, and add
   // any new fields / prune removed ones while keeping each node's authored values.
+  //
+  // Scripts can import each other, so a save re-derives more than its own asset: a class that extends
+  // this one (`Hollow extends EnemyBase`) inherits its fields, and may only now resolve to a specific
+  // engine base type. Every dependent is rebuilt and its nodes re-seeded in the same pass.
   const saveScriptSource = (id: string, source: string) => {
     const existing = scriptAssetsRef.current.find(a => a.id === id);
     if (!existing) return;
-    const next = buildScriptAsset(existing.name, existing.baseType, source, id);
-    updateScriptAsset(id, next);
+    // Re-derive against a library that already holds the NEW source.
+    let library = scriptAssetsRef.current.map(a => a.id === id ? { ...a, source } : a);
+    const rebuild = (asset: ScriptAsset, src: string): ScriptAsset => {
+      const ctx = buildScriptGraphCtx(scriptPathsRef.current, library);
+      const path = ctx.pathOf(asset.id);
+      // Only ever UPGRADE from 'node' (attaches anywhere): an explicit base type the user chose stays.
+      const derived = deriveBaseType(src, path, ctx);
+      const baseType = asset.baseType === 'node' && derived !== 'node' ? derived : asset.baseType;
+      const next = buildScriptAsset(asset.name, baseType, src, asset.id, resolveScriptVariables(src, path, ctx));
+      library = library.map(a => a.id === asset.id ? next : a);
+      return next;
+    };
+    const next = rebuild(existing, source);
+    const dependents = dependentsOf(id, library, buildScriptGraphCtx(scriptPathsRef.current, library))
+      .map(dep => rebuild(dep, dep.source));
+    const changed = new Map([next, ...dependents].map(a => [a.id, a]));
+    setScriptAssets(prev => prev.map(x => changed.get(x.id) ?? x));
     // Propagation only — the nodes store __scriptId and the source is fanned out at serialize time, so
     // this must not mark the scene dirty (see the note in saveMaterialTab).
     withoutDirty(() => {
       for (const scene of liveScenes()) {
         for (const n of Array.from(scene.nodes)) {
-          if (getScriptIdOf(n) !== id) continue;
-          scriptsRef.current.set(n.id, source);
-          seedScriptFields(n, next, false);
+          const asset = changed.get(getScriptIdOf(n) ?? '');
+          if (!asset) continue;
+          scriptsRef.current.set(n.id, asset.source);
+          seedScriptFields(n, asset, false);
         }
       }
       eventEmitter.current.emit('SCENE_CHANGED');
@@ -1805,14 +1873,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Dedicated Script editor tab: opens a script asset in a full-panel code editor (its own mode + Save
   // Script button). Working source buffers per-tab (scriptTabSourceRef) until Save.
   const scriptTabSourceRef = useRef(new Map<string, string>());
-  const enterScriptEditor = (scriptId?: string, adoptTabId?: string) => {
+  const enterScriptEditor = (scriptId?: string, adoptTabId?: string, mint?: ScriptAsset) => {
     let id = scriptId;
     // Held across the mint because scriptAssetsRef is mirrored during RENDER: a just-added asset is not in
     // it yet, so looking the new script up below would miss it.
     let created: ScriptAsset | null = null;
     if (!id) {
-      // No id: mint a new 'node'-based script and open it.
-      created = buildScriptAsset('New Script', 'node', defaultScriptClass('New Script', 'node'));
+      // No id: mint a new 'node'-based script (or the module handed in) and open it.
+      created = mint ?? buildScriptAsset('New Script', 'node', defaultScriptClass('New Script', 'node'));
       addScriptAsset(created);
       id = created.id;
       scriptTabSourceRef.current.set(id, created.source);
@@ -1827,6 +1895,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const tabId = adoptTabId ?? cryptoRandomId();
     scriptTabSourceRef.current.set(id, asset?.source ?? scriptTabSourceRef.current.get(id) ?? '');
     commitTab({ id: tabId, kind: 'script', title: asset?.name ?? 'Script', scriptId: id }, adoptTabId);
+  };
+
+  /** A new script MODULE — shared code other scripts import, never attached to a node — opened at once. */
+  const createScriptModule = () => {
+    enterScriptEditor(undefined, undefined, buildScriptAsset('New Module', 'node', defaultScriptModule('New Module')));
   };
 
   // Save a script tab: commit its buffered source to the asset (persists + propagates to linked nodes) and
@@ -1877,8 +1950,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [assetsLoaded, setAssetsLoaded] = useState(false);
   useEffect(() => {
     if (assetsLoaded) return;
+    const flags = [templatesLoadedRef, materialsLoadedRef, terrainMaterialsLoadedRef, modelsLoadedRef, scriptAssetsLoadedRef,
+      animationFieldsLoadedRef, animationsLoadedRef, rigsLoadedRef, scenesLoadedRef, imagesLoadedRef, texturesLoadedRef,
+      audioSourcesLoadedRef, soundSamplesLoadedRef, aiBrainsLoadedRef, particleSystemsLoadedRef, animControllersLoadedRef,
+      boneMasksLoadedRef, poseAssetsLoadedRef];
+    const step = bootLoadRef.current.step('libraries').start();
     const timer = window.setInterval(() => {
-      if (templatesLoadedRef.current && materialsLoadedRef.current && terrainMaterialsLoadedRef.current && modelsLoadedRef.current && scriptAssetsLoadedRef.current && animationFieldsLoadedRef.current && animationsLoadedRef.current && rigsLoadedRef.current && scenesLoadedRef.current && imagesLoadedRef.current && texturesLoadedRef.current && audioSourcesLoadedRef.current && soundSamplesLoadedRef.current && aiBrainsLoadedRef.current && particleSystemsLoadedRef.current && animControllersLoadedRef.current && boneMasksLoadedRef.current && poseAssetsLoadedRef.current) {
+      const ready = flags.filter(f => f.current).length;
+      step.progress(ready, flags.length);
+      if (ready === flags.length) {
+        step.done();
         setAssetsLoaded(true);
         window.clearInterval(timer);
       }
@@ -1966,7 +2047,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
     if (initialResyncDoneRef.current || !assetsLoaded || !isSceneReady) return;
     const stashed = initialAssetHashesRef.current;
-    if (!stashed) return; // no blob was parsed (fresh/empty project) — nothing to re-resolve
+    if (!stashed) {
+      // No blob was parsed (fresh/empty project): nothing to re-resolve.
+      bootLoadRef.current.step('resync').skip('nothing to link');
+      return;
+    }
     // Never resync against libraries that are entirely empty: resyncScene reads "asset not in library" as
     // "asset was deleted" and unlinks, stripping every template link, class script and material.
     // Leave initialResyncDoneRef false so a later commit, once the libraries are there, still gets a pass.
@@ -1979,9 +2064,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       return;
     }
     initialResyncDoneRef.current = true;
+    const resyncStep = bootLoadRef.current.step('resync').start();
     // Propagation, not the user's work — resyncing must not make a freshly-opened scene look unsaved.
     withoutDirty(() => {
       const changed = resyncScene(editorSceneRef.current, engineMaps(), libs, stashed.hashes);
+      resyncStep.done(changed ? 'updated' : 'up to date');
       if (changed) {
         showBindPoseForSkinnedModels(editorSceneRef.current);
         eventEmitter.current.emit('TEXTURES_CHANGED');
@@ -2006,6 +2093,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (bootTabsDoneRef.current) return;
     if (!assetsLoaded || !isSceneReady || !instanceRef.current) return;
     bootTabsDoneRef.current = true;
+    // The resync above defers while the libraries read as empty, and for a project whose libraries
+    // really ARE empty it never runs. The splash must not wait on it: that case links nothing.
+    if (!initialResyncDoneRef.current && initialAssetHashesRef.current) bootLoadRef.current.step('resync').skip('no library assets');
+    const tabsStep = bootLoadRef.current.step('tabs').start();
 
     const libs = currentLibs();
     const fields = animationFieldsRef.current;
@@ -2056,7 +2147,33 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (active.id !== activeTabIdRef.current) setActiveTabId(active.id);
     applyActiveTab(active);
     tabsRestoreDoneRef.current = true;
+    tabsStep.done(`${kept.length} tab${kept.length === 1 ? '' : 's'}`);
   }, [assetsLoaded, isSceneReady]);
+
+  /**
+   * Close the startup splash once every boot step has settled (done, failed or skipped) — not at
+   * `isSceneReady`, which comes before the libraries, the resync and the tab restore. A watchdog
+   * closes it regardless after a minute, naming what never finished, so the editor cannot be stuck.
+   */
+  useEffect(() => {
+    const boot = bootLoadRef.current;
+    const settled = () => {
+      const load = currentLoad();
+      if (!load || load.id !== boot.id) return false;
+      return load.steps.every(s => s.status === 'done' || s.status === 'failed' || s.status === 'skipped');
+    };
+    const check = () => { if (settled()) boot.finish(); };
+    const unsubscribe = subscribeLoad(check);
+    check();
+    const watchdog = window.setTimeout(() => {
+      const load = currentLoad();
+      if (!load || load.id !== boot.id) return;
+      const stuck = load.steps.filter(s => s.status === 'pending' || s.status === 'running').map(s => s.label);
+      if (stuck.length) Logger.warn(`Startup splash closed after 60 s; still loading: ${stuck.join(', ')}`, 'Editor');
+      boot.finish();
+    }, 60_000);
+    return () => { unsubscribe(); window.clearTimeout(watchdog); };
+  }, []);
 
   // Remember the open documents for the next visit. Debounced because a tab rename or a drag-reorder fires
   // several commits, and gated on the boot restore so the pre-prune list is never written back over the
@@ -2313,32 +2430,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     for (const scene of liveScenes(exceptTabId)) {
       const instances = Array.from(scene.nodes).filter(n => n.getVariable(TEMPLATE_ID_VAR) === templateId);
       for (const inst of instances) {
-        const parent = inst.parent;
-        if (!parent) continue;
-        const pos = Array.from(inst.position) as [number, number, number];
-        const rot = Array.from(inst.rotation) as [number, number, number];
-        const scl = Array.from(inst.scale) as [number, number, number];
-        // Per-instance node state the rebuild would otherwise drop — the subtree is reconstructed from the
-        // ASSET, which knows nothing about how this particular placement was configured.
-        const spawnOnStart = inst.spawnOnStart;
         const wasSelected = inst.id === selectedNode;
-        // Animation state, restored only where the TEMPLATE has none of its own (see restoreAnimationState):
-        // a template with no machine must not wipe one the instance was configured with directly.
-        const animation = captureAnimationState(inst as any);
-        // Drop the old subtree's out-of-band data so map entries don't leak.
-        for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
-        // Detach synchronously: Node.remove() only marks for removal, and the deferred sweep calls
-        // root.removeChild on each marked descendant, which mis-splices and deletes unrelated root
-        // children (including the node we're about to re-instantiate). removeChild cleanly drops the subtree.
-        parent.removeChild(inst);
-        const newId = instantiateTemplate(template, parent, maps, materialsRef.current); // re-tags __templateId
-        const newNode = scene.getNodeById(newId);
-        if (newNode) {
-          newNode.setPosition(pos).setRotation(rot).setScale(scl);
-          newNode.spawnOnStart = spawnOnStart;
-          restoreAnimationState(newNode as any, animation);
-        }
-        if (wasSelected) reselectId = newId;
+        // The shared rebuild: transform, spawn flag, variables, animation state and the placement's
+        // overrides (its own name and script values) all survive, exactly as on a resync.
+        const rebuilt = reinstantiate(scene, inst, maps,
+          parent => instantiateTemplate(template, parent, maps, materialsRef.current)); // re-tags __templateId
+        if (!rebuilt) continue;
+        if (wasSelected) reselectId = rebuilt.id;
         count++;
       }
     }
@@ -2346,6 +2444,28 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       eventEmitter.current.emit('TEXTURES_CHANGED');
       eventEmitter.current.emit('SCENE_CHANGED');
       if (reselectId) eventEmitter.current.emit('SELECT_NODE', reselectId);
+    }
+  };
+
+  const revertTemplateOverride = (node: Node, field?: string, all?: boolean) => {
+    const root = templateInstanceRootOf(node);
+    const scene = root?.scene;
+    const templateId = root?.getVariable(TEMPLATE_ID_VAR);
+    const template = templateId ? templatesRef.current.find(t => t.id === templateId) : undefined;
+    if (!root || !scene || !template) return;
+    if (all) writeOverrides(root, {});
+    else clearOverride(node, field);
+    const wasSelected = selectedNode;
+    // A rebuild is the one way back to the template's value: the instance does not keep it anywhere.
+    const maps = engineMaps();
+    const rebuilt = reinstantiate(scene, root, maps, parent => instantiateTemplate(template, parent, maps, materialsRef.current));
+    if (!rebuilt) return;
+    eventEmitter.current.emit('SCENE_CHANGED');
+    // Ids are regenerated by the rebuild; keep the same node selected by its path.
+    if (wasSelected && (wasSelected === root.id || collectSubtreeIds(root).includes(wasSelected))) {
+      const path = pathOf(root, node);
+      const again = path !== null ? nodeAtPath(rebuilt, path) : null;
+      eventEmitter.current.emit('SELECT_NODE', (again ?? rebuilt).id);
     }
   };
 
@@ -3122,7 +3242,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const rootNode = runtime.scene.getNodeById(runtime.rootId);
     if (!rootNode) return;
     try {
-      const t = await buildTemplateFromNode(rootNode, engineMaps());
+      const t = await buildTemplateFromNode(rootNode, engineMaps(), scriptAssetsRef.current);
       if (tab.templateId) {
         const updated = { ...t, id: tab.templateId };
         updateTemplate(tab.templateId, updated);
@@ -3450,7 +3570,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         const wasSelected = inst.id === selectedNode;
         // Drop the old subtree's out-of-band data so map entries don't leak.
         for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
-        // Detach synchronously with removeChild, not remove() — see syncTemplateInstances for why.
+        // Detach synchronously with removeChild, not remove(): remove() only marks, and its deferred sweep
+        // mis-splices unrelated root children (see reinstantiate in sceneResync.ts).
         parent.removeChild(inst);
         // …and free its GPU buffers. removeChild only detaches, and a LOD-bearing asset instantiates as
         // one subtree PER LEVEL, so without this a save orphaned four mesh sets per placed copy — the
@@ -5002,6 +5123,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    * (scripts/bodies/triggers/UI/selection) is torn down and the target's blob is parsed into the same
    * live Scene object.
    */
+  const openingSceneRef = useRef(false);
   const openScene = async (sceneId: string): Promise<boolean> => {
     const meta = projectMetaRef.current;
     if (!meta) return false;
@@ -5020,58 +5142,88 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (decision === 'save' && !(await saveProjectToStorage())) return false;
     }
 
-    // Load the target before tearing anything down, so a failed read aborts cleanly. A scene whose blob
-    // was never written (e.g. a fresh "Main" before its first save) opens empty.
-    const data = (await loadSceneData(sceneId)) ?? { ...(await buildEmptySceneData()), savedAt: Date.now() };
+    // One open at a time: the steps below yield to let the loading screen paint, and a second click on
+    // another scene in that gap would interleave two parses into one live scene.
+    if (openingSceneRef.current) return false;
+    openingSceneRef.current = true;
+    // Over the viewport only, and only if it takes long enough to be seen at all.
+    const load = beginLoad(`Opening "${entry.name}"`, [
+      { id: 'read', label: 'Reading scene', weight: 1 },
+      { id: 'teardown', label: 'Closing the current scene', weight: 1 },
+      { id: 'parse', label: 'Building nodes', weight: 4 },
+      { id: 'resync', label: 'Linking assets', weight: 3 },
+      { id: 'finish', label: 'Finishing', weight: 1 },
+    ], 'overlay', { showAfterMs: 150 });
+    try {
+      // Load the target before tearing anything down, so a failed read aborts cleanly. A scene whose blob
+      // was never written (e.g. a fresh "Main" before its first save) opens empty.
+      load.step('read').start();
+      const data = (await loadSceneData(sceneId)) ?? { ...(await buildEmptySceneData()), savedAt: Date.now() };
+      load.step('read').done();
+      load.step('teardown').start();
 
-    setActiveTabId(SCENE_TAB_ID);
-    // Animation tabs cloned their model out of the outgoing scene; their write-back target is about
-    // to disappear, so close them (batched — repeated removeTabById calls would each see stale tabs).
-    const staleTabs = tabs.filter(t => t.kind === 'stateMachine' && tabRuntimeRef.current.get(t.id)?.sourceScene === editorSceneRef.current);
-    if (staleTabs.length) {
-      for (const t of staleTabs) {
-        tabRuntimeRef.current.get(t.id)?.helperTerrain?.dispose();
-        tabRuntimeRef.current.delete(t.id);
+      setActiveTabId(SCENE_TAB_ID);
+      // Animation tabs cloned their model out of the outgoing scene; their write-back target is about
+      // to disappear, so close them (batched — repeated removeTabById calls would each see stale tabs).
+      const staleTabs = tabs.filter(t => t.kind === 'stateMachine' && tabRuntimeRef.current.get(t.id)?.sourceScene === editorSceneRef.current);
+      if (staleTabs.length) {
+        for (const t of staleTabs) {
+          tabRuntimeRef.current.get(t.id)?.helperTerrain?.dispose();
+          tabRuntimeRef.current.delete(t.id);
+        }
+        const staleIds = new Set(staleTabs.map(t => t.id));
+        setTabs(prev => prev.filter(t => !staleIds.has(t.id)));
+        for (const id of staleIds) clearTabDirty(id);
       }
-      const staleIds = new Set(staleTabs.map(t => t.id));
-      setTabs(prev => prev.filter(t => !staleIds.has(t.id)));
-      for (const id of staleIds) clearTabDirty(id);
+
+      // Tear down per-scene editor state.
+      scriptsRef.current.clear();
+      bodiesRef.current.clear();
+      triggersRef.current.clear();
+      setSelectedNode(null);
+      eventEmitter.current.emit('SELECT_NODE', null);
+      load.step('teardown').done();
+
+      // Parse the target into the live scene. Suppress dirty marking for the flurry of SCENE_CHANGED
+      // this emits; re-armed below once the helper reconciler settles. The parse and the resync are
+      // synchronous, so each is preceded by a yield that lets the loading screen show it.
+      dirtyArmedRef.current = false;
+      const scene = editorSceneRef.current;
+      load.step('parse').start();
+      await yieldToPaint();
+      scene.environmentMap = null; // parse only sets it when the JSON has one — don't leak the old scene's
+      applyGameData(data, { ...engineMaps(), scene, renderer: instanceRef.current?.renderer });
+      ensureEditorCamera(scene);
+      load.step('parse').done(`${scene.nodes.size.toLocaleString()} nodes`);
+      load.step('resync').start();
+      await yieldToPaint();
+      // Cross-scene propagation: re-resolve the freshly-parsed scene's asset links against the current
+      // libraries, so edits/deletes made to assets while this scene was closed take effect on open. Gated
+      // by the hashes captured at the scene's last save (data.assetHashes) — unchanged assets are skipped.
+      // withoutDirty, as the boot resync and reloadTab do: re-instantiating a changed asset is not the user's
+      // edit, and unbracketed it became a 'Delete X' + 'Add X' pair on the undo stack of the scene just opened.
+      const relinked = withoutDirty(() => resyncScene(scene, engineMaps(), currentLibs(), data.assetHashes, data.assetHashVersion));
+      load.step('resync').done(relinked ? 'updated' : 'up to date');
+      load.step('finish').start();
+      showBindPoseForSkinnedModels(scene);
+      // Same tab id, different document: every undo step and baseline refers to the tree just replaced.
+      eventEmitter.current.emit('HISTORY_RESET', SCENE_TAB_ID);
+
+      await updateProjectMeta(m => ({ ...m, openSceneId: sceneId }));
+      clearTabDirty(SCENE_TAB_ID);
+      eventEmitter.current.emit('TEXTURES_CHANGED');
+      eventEmitter.current.emit('SCENE_CHANGED');
+      // Parsing a scene can replace camera settings/onUpdate handlers; re-apply editor camera controls — with
+      // the INCOMING scene's rig, not the outgoing one's. This is what makes the view follow the scene.
+      setViewDimension(dimensionOfScene(sceneId));
+      requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = true; }));
+      load.step('finish').done();
+      Logger.info(`Opened scene "${entry.name}"`, 'Editor');
+      return true;
+    } finally {
+      openingSceneRef.current = false;
+      load.finish();
     }
-
-    // Tear down per-scene editor state.
-    scriptsRef.current.clear();
-    bodiesRef.current.clear();
-    triggersRef.current.clear();
-    setSelectedNode(null);
-    eventEmitter.current.emit('SELECT_NODE', null);
-
-    // Parse the target into the live scene. Suppress dirty marking for the flurry of SCENE_CHANGED
-    // this emits; re-armed below once the helper reconciler settles.
-    dirtyArmedRef.current = false;
-    const scene = editorSceneRef.current;
-    scene.environmentMap = null; // parse only sets it when the JSON has one — don't leak the old scene's
-    applyGameData(data, { ...engineMaps(), scene, renderer: instanceRef.current?.renderer });
-    ensureEditorCamera(scene);
-    // Cross-scene propagation: re-resolve the freshly-parsed scene's asset links against the current
-    // libraries, so edits/deletes made to assets while this scene was closed take effect on open. Gated
-    // by the hashes captured at the scene's last save (data.assetHashes) — unchanged assets are skipped.
-    // withoutDirty, as the boot resync and reloadTab do: re-instantiating a changed asset is not the user's
-    // edit, and unbracketed it became a 'Delete X' + 'Add X' pair on the undo stack of the scene just opened.
-    withoutDirty(() => resyncScene(scene, engineMaps(), currentLibs(), data.assetHashes, data.assetHashVersion));
-    showBindPoseForSkinnedModels(scene);
-    // Same tab id, different document: every undo step and baseline refers to the tree just replaced.
-    eventEmitter.current.emit('HISTORY_RESET', SCENE_TAB_ID);
-
-    await updateProjectMeta(m => ({ ...m, openSceneId: sceneId }));
-    clearTabDirty(SCENE_TAB_ID);
-    eventEmitter.current.emit('TEXTURES_CHANGED');
-    eventEmitter.current.emit('SCENE_CHANGED');
-    // Parsing a scene can replace camera settings/onUpdate handlers; re-apply editor camera controls — with
-    // the INCOMING scene's rig, not the outgoing one's. This is what makes the view follow the scene.
-    setViewDimension(dimensionOfScene(sceneId));
-    requestAnimationFrame(() => requestAnimationFrame(() => { dirtyArmedRef.current = true; }));
-    Logger.info(`Opened scene "${entry.name}"`, 'Editor');
-    return true;
   };
 
   // Startup: restore the saved project if present, otherwise open a blank scene.
@@ -5079,11 +5231,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Textures first. Payloads live once in the texture store, not embedded in the project blob or in the
     // assets that reference them, so they have to be registered in the TextureManager BEFORE anything is
     // parsed against them — that is what lets every asset restore path stay synchronous.
+    const boot = bootLoadRef.current;
     try {
-      const loaded = await preloadTextures();
+      const step = boot.step('textures').start();
+      const loaded = await preloadTextures((done, total) => step.progress(done, total));
       if (loaded) Logger.info(`Loaded ${loaded} texture${loaded === 1 ? '' : 's'}`, 'Editor');
+      if (loaded) step.done(); else step.skip('none');
     } catch (e) {
       Logger.error(`Failed to load textures: ${e}`, 'Editor');
+      boot.step('textures').fail(String(e));
     } finally {
       // Settled either way: a failed preload is not going to fill the registry later, and leaving this
       // false forever would keep the asset index's texture GC permanently disarmed.
@@ -5093,10 +5249,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Then audio, for the same reason and with the same guarantee: a SoundNode resolving `sampleId`
     // during a scene parse must find its sample already registered.
     try {
-      const loaded = await preloadAudio();
+      const step = boot.step('audio').start();
+      const loaded = await preloadAudio((done, total) => step.progress(done, total));
       if (loaded) Logger.info(`Loaded ${loaded} sound${loaded === 1 ? '' : 's'}`, 'Editor');
+      if (loaded) step.done(); else step.skip('none');
     } catch (e) {
       Logger.error(`Failed to load audio: ${e}`, 'Editor');
+      boot.step('audio').fail(String(e));
     } finally {
       setAudioPreloaded(true);
     }
@@ -5104,6 +5263,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Multi-scene project: load the meta (migrating a legacy single-scene 'cleo_project' blob once), then
     // parse the last-open scene's blob. A fresh install gets a meta with one empty "Main" scene — the
     // "a project always has ≥1 scene" invariant. The legacy import is gated per PROJECT.
+    const sceneStep = boot.step('scene').start();
     let meta = await loadProjectMeta();
     if (!meta && activeProjectAllowsLegacyImport()) meta = await migrateLegacyProject();
     if (!meta) {
@@ -5128,6 +5288,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         }
       }
       if (data) {
+        // The parse is synchronous: let the splash show this step before it starts.
+        sceneStep.start(meta.scenes.find(s => s.id === targetId)?.name ?? '');
+        await yieldToPaint();
         applyGameData(data, { ...engineMaps(), scene: editorSceneRef.current, renderer: instanceRef.current?.renderer });
         ensureEditorCamera(editorSceneRef.current);
         // Stash the hashes for the deferred initial resync — the libraries have not been read yet, so it
@@ -5147,6 +5310,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setOpenSceneIdState(meta.openSceneId);
     openSceneIdRef.current = meta.openSceneId;
     scenesLoadedRef.current = true;
+    sceneStep.done(meta.scenes.find(s => s.id === meta!.openSceneId)?.name ?? '');
   };
 
   useEffect(() => {
@@ -5163,8 +5327,20 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           });
 
           // Before setupInitialScene() and the texture registrations below: both build GPU resources,
-          // and device acquisition is asynchronous.
-          await engine.initialize();
+          // and device acquisition is asynchronous. Reported step by step: shader compilation is the
+          // longest part of a cold start, and with a listener it yields so the splash can show it.
+          const boot = bootLoadRef.current;
+          try {
+            await engine.initialize({
+              onProgress: (phase, done, total) => {
+                if (phase === 'device') { if (done < total) boot.step('device').start(); else boot.step('device').done(engine.renderer.backend ?? ''); }
+                else if (phase === 'shaders') { if (done < total) boot.step('shaders').progress(done, total); else boot.step('shaders').done(); }
+              },
+            });
+          } catch (e) {
+            boot.step('device').fail(String((e as Error)?.message ?? e));
+            throw e;
+          }
 
           instanceRef.current = engine;
           instanceRef.current.isPaused = false;
@@ -5234,7 +5410,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           // falling back to the legacy project-wide pref, else 3D).
           setViewDimension(dimensionOfScene(openSceneIdRef.current));
 
-          setLoadingProgress({ loaded: 6, total: 6, label: 'Ready' });
+          // The first frame: two rAFs after run(), so one has actually been drawn.
+          boot.step('frame').start();
+          requestAnimationFrame(() => requestAnimationFrame(() => boot.step('frame').done()));
+        } catch (e) {
+          // Everything still waiting will not come now; settle it so the splash closes on the error.
+          const load = currentLoad();
+          if (load && load.id === bootLoadRef.current.id)
+            for (const s of load.steps) if (s.status === 'pending' || s.status === 'running') bootLoadRef.current.step(s.id).skip('not reached');
+          throw e;
         } finally {
           // Always dismiss the splash, even if an asset failed to load,
           // so the editor never gets stuck behind the loading screen.
@@ -5610,6 +5794,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       scene: editorSceneRef.current,
       scripts: scriptsRef.current,
       scriptAssets: scriptAssetsRef.current,
+      // Script modules: stamps each node's script path and ships every module the scripts import.
+      scriptPaths: scriptPathsRef.current,
       bodies: bodiesRef.current,
       triggers: triggersRef.current,
       templates: templatesRef.current,
@@ -5624,6 +5810,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Templates are global and shared by every scene in the session, so they are registered here rather
     // than per-parse — a runtime Game.loadScene must not drop what a script can still instantiate.
     registerTemplates(json.templates);
+    // Before parse: a node's script imports its modules while it is being attached.
+    addScriptModuleSources(json.modules);
     newScene.parse(json, true);
     return newScene;
   };
@@ -5644,12 +5832,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const tmp = new Scene();
     tmp.parse({ scene: clone.scene, textures: [] }, true);
     resyncScene(tmp, maps, currentLibs(), data.assetHashes, data.assetHashVersion);
-    const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, bodies: maps.bodies, triggers: maps.triggers, scriptAssets: scriptAssetsRef.current, templates: templatesRef.current, materials: materialsRef.current, models: modelsRef.current, animations: animationsRef.current, useCache: true });
+    const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, bodies: maps.bodies, triggers: maps.triggers, scriptAssets: scriptAssetsRef.current, scriptPaths: scriptPathsRef.current, templates: templatesRef.current, materials: materialsRef.current, models: modelsRef.current, animations: animationsRef.current, useCache: true });
     // `tmp` existed only to be resynced and serialized; `gd` is plain JSON, so its GPU meshes and bus
     // subscription can go now.
     tmp.dispose();
     const scene = new Scene();
     registerTemplates(gd.templates);
+    addScriptModuleSources(gd.modules); // adds what is new; an already-evaluated module keeps its state
     scene.parse(gd, true); // gd injects scripts into nodes → compiled here
     return scene;
   };
@@ -5729,6 +5918,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     reembedSceneFields(editorSceneRef.current);
     playEntrySceneIdRef.current = openSceneIdRef.current;
     currentPlaySceneIdRef.current = openSceneIdRef.current;
+    // A fresh session evaluates every script module afresh: edits made since the last Play apply, and no
+    // module state leaks from one session into the next.
+    resetScriptModules();
     const newScene = await buildPlayScene();
     instance.setScene(newScene);
     playSceneRef.current = newScene;
@@ -5752,6 +5944,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     instance.input.resetState();
     instance.physics.clear();
     releasePlayScene();
+    resetScriptModules();
     showBindPoseForSkinnedModels(editorSceneRef.current); // back to the default pose in the editor
     eventEmitter.current.emit('SET_PLAY_STATE', 'stop');
   };
@@ -5766,6 +5959,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     instance.physics.clear();
     // Reset returns to the play-session entry scene (where Play was pressed), not the last-loaded one.
     currentPlaySceneIdRef.current = playEntrySceneIdRef.current;
+    resetScriptModules();
     const newScene = await buildPlayScene();
     instance.setScene(newScene);
     releasePlayScene();
@@ -5929,7 +6123,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     enterModelEditor, adoptModelAsset, resolveModelAssetId, linkAnimationToRig, unlinkAnimationFromRig, ensureRigForModel, editSharedClip, setModelRig,
     setActiveModelName, addModelLodFromAsset, generateModelLods, removeModelLod,
     setModelLodDistance, setModelCullDistance, setActiveModelLevel, importModelFiles, resolveModelImport,
-    enterScriptEditor, setScriptTabSource, getScriptTabSource, saveScriptSource,
+    enterScriptEditor, setScriptTabSource, getScriptTabSource, saveScriptSource, syncScriptPaths, createScriptModule,
+    revertTemplateOverride,
     adoptExternalScriptSource, renameScriptAsset,
     scriptAssetOf, createScriptForNode, attachScriptToNode, detachScriptFromNode,
     enterAnimationFieldEditor, createAnimationFieldForModel, saveAnimationField,
@@ -5958,8 +6153,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       ? modelSessions[activeTab.id].levelIds[modelSessions[activeTab.id].activeLevel] ?? null
       : null,
     pendingModelImport,
+    scriptPaths,
     ...sessionActions,
-  }), [
+  }), [scriptPaths, 
     editingTemplateName, templateRootId, editingMaterialName,
     editingTerrainMaterialName, editingTerrainMaterialNode,
     stateMachineTargetId, stateMachineSourceId, stateMachineSourceScene, pendingAnimationImport, pendingRigPick,
@@ -6023,7 +6219,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       terrainBrush,
       tilemapBrush,
       isDirtySuppressed,
-      loadingProgress,
       scripts: scriptsRef.current,
       bodies: bodiesRef.current,
       triggers: triggersRef.current,
@@ -6055,6 +6250,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       attachScriptToNode,
       detachScriptFromNode,
       saveScriptSource,
+      syncScriptPaths,
+      scriptPaths,
+      createScriptModule,
+      revertTemplateOverride,
       adoptExternalScriptSource,
       renameScriptAsset,
       animationFields,

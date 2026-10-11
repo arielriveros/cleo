@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { Logger, TextureManager, AudioManager, isDerivedTextureId } from 'cleo'
+import { CleoEngine, Logger, TextureManager, AudioManager, isDerivedTextureId } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { idbGet, idbSet } from '../../utils/idb'
@@ -78,9 +78,11 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
       setTextureIds(prev => (prev.length === ids.length && prev.every((id, i) => id === ids[i]) ? prev : ids))
     }
     refresh()
+    // A running game changes its scene constantly and never registers a texture: skip the walk then.
+    const onScene = () => { if (CleoEngine.authoringMode) refresh() }
     eventEmitter.on('TEXTURES_CHANGED', refresh)
-    eventEmitter.on('SCENE_CHANGED', refresh)
-    return () => { eventEmitter.off('TEXTURES_CHANGED', refresh); eventEmitter.off('SCENE_CHANGED', refresh) }
+    eventEmitter.on('SCENE_CHANGED', onScene)
+    return () => { eventEmitter.off('TEXTURES_CHANGED', refresh); eventEmitter.off('SCENE_CHANGED', onScene) }
   }, [eventEmitter])
 
   /**
@@ -334,6 +336,13 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!ready && vfsLoaded && assetsLoaded && isSceneReady) setReady(true)
   }, [ready, vfsLoaded, assetsLoaded, isSceneReady])
+
+  // Scripts import each other by their path in this tree ('@/Shared/Math'), and the engine context — which
+  // builds Play and re-derives inherited script fields — sits ABOVE this provider. Push it the index.
+  const { syncScriptPaths } = engine
+  useEffect(() => {
+    syncScriptPaths(new Map(vfs.entries.filter(e => e.kind === 'script').map(e => [e.assetId, e.path] as const)))
+  }, [vfs.entries, syncScriptPaths])
 
   const value: VfsContextValue = {
     vfs, setVfs, libs, pathIndex, pathIndexRef, folderKindsRef, landingFolderRef, depsRef, ready,

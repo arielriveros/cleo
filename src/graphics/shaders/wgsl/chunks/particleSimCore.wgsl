@@ -46,7 +46,7 @@ struct ParticleSimUniforms {
     u_collideInvViewProj: mat4x4<f32>,
     u_step: vec4<f32>,                // dt, emitter time, capacity, texture width
     u_spawn: vec4<f32>,               // spawn start, spawn count, serial, seed
-    u_mask: vec4<f32>,                // feature bits, reset, 0, 0
+    u_mask: vec4<f32>,                // feature bits, reset, live window start, live window count
     u_shape0: vec4<f32>,              // shape kind, radius, volume (0 shell .. 1 solid), arc (rad)
     u_shape1: vec4<f32>,              // box half extents xyz, cone angle (rad)
     u_shapeOffset: vec4<f32>,         // offset xyz (emitter space), 0
@@ -392,7 +392,12 @@ fn resolveContact(pos: vec3<f32>, vel: vec3<f32>, point: vec3<f32>, normal: vec3
 fn depthWorldPos(texel: vec2<i32>) -> vec3<f32> {
     let size = u_sim.u_collideScreen.xy;
     let t = clamp(texel, vec2<i32>(0), vec2<i32>(size) - 1);
-    let d = sceneDepthAt(t);
+    return depthWorldPosAt(t, sceneDepthAt(t));
+}
+
+// The world position behind an in-range `texel` whose depth `d` has already been sampled.
+fn depthWorldPosAt(t: vec2<i32>, d: f32) -> vec3<f32> {
+    let size = u_sim.u_collideScreen.xy;
     var uv = (vec2<f32>(t) + 0.5) / size;
     // Texture rows run the other way on WebGPU; undo that to get GL's bottom-up NDC.
     if (u_sim.u_collideScreen.z > 0.5) { uv.y = 1.0 - uv.y; }
@@ -421,7 +426,8 @@ fn collideDepth(pos: vec3<f32>, vel: vec3<f32>, radius: f32) -> Contact {
     let d = sceneDepthAt(texel);
     if (d >= 0.999999) { return miss; }         // sky
 
-    let surface = depthWorldPos(texel);
+    // `texel` is already clamped in range, and `d` is its depth: no second fetch.
+    let surface = depthWorldPosAt(texel, d);
     let cam = u_sim.u_collideCam.xyz;
     // Along the view ray: how far the particle is past the visible surface. Orthographic views share
     // one direction, so compare along the camera axis there instead.

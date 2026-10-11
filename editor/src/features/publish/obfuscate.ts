@@ -1,7 +1,7 @@
 // Script obfuscation for publish. Free of any `cleo` import so it can run inside the project worker.
 
 // transformObjectKeys/renameGlobals must stay OFF: the returned { onStart, onUpdate, ... } keys are read
-// by the engine when it binds a factory, and `window.CLEO_GAME_SCRIPTS` must keep its name
+// by the engine when it binds a factory, and `window.CLEO_GAME_SCRIPTS` / `window.CLEO_GAME_MODULES` must keep their names
 // (player/index.tsx). No debugProtection/selfDefending — they reintroduce the Function constructor.
 const OBFUSCATOR_OPTIONS = {
   compact: true,

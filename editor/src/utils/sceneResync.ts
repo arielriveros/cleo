@@ -3,6 +3,7 @@ import { getMaterialIdsOf, applyMaterialAsset, unlinkMaterialAt, MaterialAsset }
 import { getScreenMaterialIds, setScreenMaterialIds, applyScreenMaterials } from './screenMaterials'
 import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig, assetSockets, applyModelTransformDelta, readModelBaseTrs, modelAssetHasLodBehavior } from './models'
 import { TEMPLATE_ID_VAR, instantiateTemplate } from './templates'
+import { applyOverrides } from './templateOverrides'
 import { applyTerrainMaterialToLayer } from './terrainMaterials'
 
 import { toRuntimeTileset } from './tilesets'
@@ -40,8 +41,12 @@ function collectSubtreeIds(node: Node, out: string[] = []): string[] {
 /**
  * Re-instantiate a placed instance subtree in place, preserving its transform (mesh/template shared).
  * Returns the rebuilt node, so callers keep working on the live one rather than the detached original.
+ *
+ * THE one rebuild: the template-save propagation in EngineContext goes through it as well, so what a
+ * placement keeps (transform, spawn flag, variables, animation state, template overrides) cannot differ
+ * between "the template was edited while the scene was open" and "the scene was opened later".
  */
-function reinstantiate(
+export function reinstantiate(
   scene: Scene,
   inst: Node,
   maps: ResyncMaps,
@@ -80,6 +85,9 @@ function reinstantiate(
       newNode.setVariable(name, v.value, v.type, v.access)
     }
     restoreAnimationState(newNode, animation)
+    // The placement's own name and script values, recorded as overrides (templateOverrides.ts). The
+    // variable restore above has just put the record back; this puts the values back.
+    applyOverrides(newNode)
     onRebuilt?.(newNode, inst)
   }
   return newNode ?? null
@@ -201,10 +209,14 @@ export function resyncScene(
       maps.scripts.set(node.id, asset.source)
       seedScriptFields(node, asset, false)
       changed = true
-    } else if (!maps.scripts.has(node.id)) {
+    } else {
       // The per-node source cache is empty on a fresh open even when nothing changed; populate it so the
       // scene serializes and plays with the correct source.
-      maps.scripts.set(node.id, asset.source)
+      if (!maps.scripts.has(node.id)) maps.scripts.set(node.id, asset.source)
+      // A saved node only carries the fields it was given (`scriptVars`); any other field has no native
+      // value until seeded, and the inspector showed it as 0 / empty instead of the script's default. Fill
+      // just the missing ones: nothing a node holds is touched, so this is not a change to record.
+      seedScriptFields(node, asset, false)
     }
   }
 

@@ -46,6 +46,11 @@ export function ensureMonaco(): typeof monaco {
     moduleResolution: ts.ModuleResolutionKind.NodeJs,
     allowNonTsExtensions: true,
     baseUrl: 'file:///',
+    // Script modules: `@/Shared/Math` is the script at /Shared/Math.script, whose model lives at
+    // file:///project/Shared/Math.ts (scriptModels.ts). The VS Code workspace declares the same alias
+    // as `"@/*": ["./*"]`, so one import type-checks identically in both.
+    paths: { '@/*': ['project/*'] },
+    forceConsistentCasingInFileNames: true,
     lib: ['es2020', 'dom'],
     // Node scripts are casual game logic: `strict` floods the default template with implicit-any and
     // possibly-undefined noise. A class script's declared fields are still type-checked either way.

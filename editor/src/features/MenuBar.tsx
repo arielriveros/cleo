@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Logger } from "cleo";
+import { Logger, isDefaultInputMap } from "cleo";
 import { useCleoEngine, KIND_LABEL } from "./EngineContext";
 import { useVfs } from "./assets/VfsContext";
 import { buildMultiSceneGameData } from "./publish/buildMultiSceneGameData";
@@ -9,7 +9,9 @@ import { useScriptWorkspace } from "./scriptWorkspace/ScriptWorkspaceContext";
 import { NOT_DESKTOP_REASON } from "./scriptWorkspace/desktopScripts";
 import { importBundleJob } from "../workers/workerClient";
 import { exportBundle } from "../utils/bundleExport";
-import { applyBundleReplace, applyBundleMerge, applyBundleAsNewProject } from "../utils/bundleImport";
+import { applyBundleReplace, applyBundleMerge, applyBundleAsNewProject, IMPORT_WRITE_STEPS } from "../utils/bundleImport";
+import { beginLoad, type LoadStepSpec } from "./loading/loadingStore";
+import { confirmDiscard } from "./unloadGuard";
 import type { BundleData } from "../utils/bundle";
 import ImportBundleModal from "./dialogs/ImportBundleModal";
 import { startTask } from "./progress/progressStore";
@@ -53,7 +55,7 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, chil
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths } = useCleoEngine();
   const { vfs } = useVfs();
   // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
   const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
@@ -101,7 +103,9 @@ export default function MenuBar() {
   
   // The two project-I/O buttons both operate on the whole workspace as one portable .zip.
   const projectMeta = () => ({ version: 2 as const, mainSceneId, openSceneId, scenes: sceneList });
-  const libraries = () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, audioSources, soundSamples });
+  // The input map travels only when it differs from the default — see BundleLibraries.inputMap.
+  const libraries = () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, audioSources, soundSamples,
+    inputMap: isDefaultInputMap(inputMap) ? null : inputMap });
 
   // Export the entire project — every scene, all asset libraries, the folder layout (VFS) and texture
   // payloads — as project.cleoproj.zip: a full, portable replica of the workspace. Assembled off-thread.
@@ -121,13 +125,42 @@ export default function MenuBar() {
   // (ImportBundleModal). Reads both project bundles and legacy asset packs.
   const onImport = async (filelist: FileList | null) => {
     if (!filelist || !filelist.length) return;
+    const file = filelist[0];
+    // Reading is its own short load: it ends at the Replace/Merge question, and the writes the answer
+    // starts are a second one (`applyImport`).
+    const load = beginLoad(`Reading ${file.name}`, [
+      { id: 'unpack', label: `Unpacking (${(file.size / (1024 * 1024)).toFixed(1)} MB)`, weight: 1 },
+    ], 'fullscreen', { showAfterMs: 150 });
     try {
-      const bundle = await importBundleJob(filelist[0]);
+      load.step('unpack').start('off-thread');
+      const bundle = await importBundleJob(file);
+      load.step('unpack').done();
       setPendingBundle(bundle);
     } catch (err) {
       Logger.error('Failed to read project bundle: ' + err, 'Editor');
+    } finally {
+      load.finish();
     }
   };
+
+  // Run the chosen import under the full loading screen. Every mode ends in a reload, after which the
+  // startup splash carries the finished steps on; a declined confirm or a failure closes it again.
+  const applyImport = async (title: string, steps: LoadStepSpec[], confirm: string | null,
+                             apply: () => Promise<boolean>) => {
+    // The unsaved-work question first: the loading screen would sit on top of its dialog.
+    if (confirm && !(await confirmDiscard(confirm))) return;
+    const load = beginLoad(title, steps);
+    let leaving = false;
+    try {
+      leaving = await apply();
+      if (leaving) setPendingBundle(null);
+    } catch (err) {
+      Logger.error(`Import failed: ${err}`, 'Editor');
+    } finally {
+      if (!leaving) load.finish();
+    }
+  };
+  const bundleName = (b: NonNullable<typeof pendingBundle>) => b.manifest.projectName || 'project';
 
   // Close the Publish dropdown when clicking outside it.
   useEffect(() => {
@@ -170,6 +203,8 @@ export default function MenuBar() {
           libs: { materials, models, templates, terrainMaterials, scripts: scriptAssets, tilesets, aiBrains, animations, rigs,
             animControllers, boneMasks, poseAssets, animationFields, particleSystems },
           scriptAssets,
+          // Script modules: each script's project path, so the build ships what the scripts import.
+          scriptPaths,
           liveDimension: sceneDimension,
           settings: renderSettings(),
           // Written once at the top level of the build, never inside a scene: bindings are project-wide.
@@ -274,9 +309,13 @@ export default function MenuBar() {
           <ImportBundleModal
             bundle={pendingBundle}
             onCancel={() => setPendingBundle(null)}
-            onNewProject={() => { void applyBundleAsNewProject(pendingBundle).then(ok => ok && setPendingBundle(null)); }}
-            onReplace={() => { void applyBundleReplace(pendingBundle).then(ok => ok && setPendingBundle(null)); }}
-            onMerge={() => { void applyBundleMerge(pendingBundle).then(ok => ok && setPendingBundle(null)); }}
+            onNewProject={() => { void applyImport(`Importing ${bundleName(pendingBundle)}`,
+              [{ id: 'project', label: 'Creating project', weight: 1 }, ...IMPORT_WRITE_STEPS],
+              'Switching to the imported project', () => applyBundleAsNewProject(pendingBundle, undefined, true)); }}
+            onReplace={() => { void applyImport(`Importing ${bundleName(pendingBundle)}`, IMPORT_WRITE_STEPS,
+              null, () => applyBundleReplace(pendingBundle)); }}
+            onMerge={() => { void applyImport(`Merging ${bundleName(pendingBundle)}`, IMPORT_WRITE_STEPS,
+              'Merging into this project', () => applyBundleMerge(pendingBundle, true)); }}
           />
         )}
         <div className='relative inline-block' ref={publishRef}>

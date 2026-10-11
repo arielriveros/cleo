@@ -113,6 +113,8 @@ function shapeOf(member: UniformMember): WriteShape {
  */
 export class UniformSet {
     private readonly _cpu: ArrayBuffer;
+    /** The block as bytes, for the upload — one view for the set's life, not one per flush. */
+    private readonly _bytes: Uint8Array;
     private readonly _floats: Float32Array;
     private readonly _ints: Int32Array;
     private readonly _shapes = new Map<string, WriteShape>();
@@ -127,10 +129,13 @@ export class UniformSet {
     private _cursor = -1;
     /** Bumped whenever {@link buffer} becomes a different object, so bind groups over it get rebuilt. */
     private _generation = 0;
+    /** Arenas outgrown this frame, destroyed at the next {@link resetCursor} (after their draws submitted). */
+    private readonly _retired: Buffer[] = [];
 
     constructor(public readonly layout: UniformBlockLayout, device: Device,
                 alignment: number = DEFAULT_UNIFORM_OFFSET_ALIGNMENT, label = 'program') {
         this._cpu = new ArrayBuffer(layout.size);
+        this._bytes = new Uint8Array(this._cpu);
         this._floats = new Float32Array(this._cpu);
         this._ints = new Int32Array(this._cpu);
 
@@ -200,13 +205,14 @@ export class UniformSet {
         this._dirty = false;
         if (this._cursor + 1 >= this._slots) this._grow(device);
         else this._cursor++;
-        device.writeBuffer(this._buffer, this._cursor * this.slotSize, new Uint8Array(this._cpu));
+        device.writeBuffer(this._buffer, this._cursor * this.slotSize, this._bytes);
     }
 
-    // Double the arena and start again at its first slot. The OLD buffer must NOT be destroyed: draws
-    // already recorded hold bind groups over it. Dropping the reference is enough.
+    // Double the arena and start again at its first slot. The OLD buffer must NOT be destroyed yet: draws
+    // already recorded hold bind groups over it. It is retired, and destroyed once they have been submitted.
     private _grow(device: Device): void {
         this._slots *= 2;
+        this._retired.push(this._buffer);
         this._buffer = this._allocate(device);
         this._generation++;
         this._cursor = 0;
@@ -219,9 +225,17 @@ export class UniformSet {
     public resetCursor(): void {
         this._cursor = -1;
         this._dirty = true;
+        // Submitted by now, so nothing still to run reads them. WebGPU keeps a destroyed buffer alive until
+        // the work already queued against it completes.
+        for (const old of this._retired) old.destroy();
+        this._retired.length = 0;
     }
 
-    public destroy(): void { this._buffer.destroy(); }
+    public destroy(): void {
+        this._buffer.destroy();
+        for (const old of this._retired) old.destroy();
+        this._retired.length = 0;
+    }
 }
 
 /**

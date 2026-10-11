@@ -260,7 +260,7 @@ export function legacyTexturesOf(...libraries: AnyAsset[][]): LegacyTexture[] {
  * so asset restore paths find their textures present and stay synchronous.
  * Returns the number registered; textures already live (e.g. built-ins) are left alone.
  */
-export async function preloadTextures(): Promise<number> {
+export async function preloadTextures(onProgress?: (done: number, total: number) => void): Promise<number> {
   const records = await getAllTextures()
   const byId = new Map(records.map(r => [r.id, r]))
   let loaded = 0
@@ -276,37 +276,48 @@ export async function preloadTextures(): Promise<number> {
   const textures = (await idbGet<TextureAsset[]>(libKey('textures'))) ?? []
   const consumed = new Set<string>()
 
-  for (const asset of textures) {
-    if (!asset?.id || TextureManager.Instance.getTexture(asset.id)) continue
-    const imageId = asset.source?.kind === 'image' ? asset.source.imageId
-                  : asset.source?.kind === 'pack' ? asset.source.bakedImageId
-                  : undefined
-    // A `runtime` source has no bytes by definition, and a missing image is reported by the asset audit
-    // rather than faked here — either way there is nothing to upload.
-    if (!imageId) continue
-    const row = byId.get(imageId)
-    if (!row?.blob) continue
+  // Decided up front, so a loading screen knows the total before the first upload.
+  const imageOf = (asset: TextureAsset): string | undefined =>
+    asset.source?.kind === 'image' ? asset.source.imageId
+      : asset.source?.kind === 'pack' ? asset.source.bakedImageId
+      : undefined
+  // A `runtime` source has no bytes by definition, and a missing image is reported by the asset audit
+  // rather than faked here — either way there is nothing to upload.
+  const fromAssets = textures.filter(a => {
+    if (!a?.id || TextureManager.Instance.getTexture(a.id)) return false
+    const imageId = imageOf(a)
+    return !!imageId && !!byId.get(imageId)?.blob
+  })
+  const claimed = new Set(fromAssets.map(a => imageOf(a)!))
+  const fromRows = records.filter(r => !!r?.id && !!r.blob && !claimed.has(r.id) && !TextureManager.Instance.getTexture(r.id))
+  const total = fromAssets.length + fromRows.length
+  onProgress?.(0, total)
 
-    const bytes = new Uint8Array(await row.blob.arrayBuffer())
+  for (const asset of fromAssets) {
+    const imageId = imageOf(asset)!
+    const row = byId.get(imageId)!
+
+    const bytes = new Uint8Array(await row.blob!.arrayBuffer())
     const mime = row.mime || row.blob.type || 'image/png'
     TextureManager.Instance.addTextureFromBytes(bytes, mime, toTextureConfig(asset.settings), asset.id)
     // Only the ROW is consumed, not the id: several textures may share one image, and each still needs
     // its own registration under its own id.
     consumed.add(imageId)
     loaded++
+    onProgress?.(loaded, total)
   }
 
   // Pass 2: every row no texture asset claimed. This is the legacy path AND the first-boot-after-upgrade
   // path — before the reconciler has minted anything, the library is empty and every row lands here,
   // registered under its own id exactly as it always was.
-  for (const r of records) {
-    if (!r?.id || !r.blob) continue
+  for (const r of fromRows) {
     if (consumed.has(r.id)) continue
-    if (TextureManager.Instance.getTexture(r.id)) continue
-    const bytes = new Uint8Array(await r.blob.arrayBuffer())
-    TextureManager.Instance.addTextureFromBytes(bytes, r.mime || r.blob.type || 'image/png', r.config, r.id)
+    const bytes = new Uint8Array(await r.blob!.arrayBuffer())
+    TextureManager.Instance.addTextureFromBytes(bytes, r.mime || r.blob!.type || 'image/png', r.config, r.id)
     loaded++
+    onProgress?.(loaded, total)
   }
 
+  onProgress?.(total, total)
   return loaded
 }

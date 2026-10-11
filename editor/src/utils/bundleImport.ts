@@ -1,19 +1,40 @@
-import { Logger } from 'cleo'
+import { Logger, parseInputMap } from 'cleo'
 import { idbGet, idbSet, idbDelete, idbKeysByPrefix } from './idb'
 import { readModelLibrary, replaceModelLibrary, appendModelLibrary } from './modelStore'
 import { VfsIndex, EMPTY_VFS, withAncestors, repairVfs } from './vfs'
 import { ProjectMeta } from './sceneStorage'
-import { libKey, metaKey, sceneKey, scenePrefix, vfsKey } from './storageKeys'
+import { inputMapKey, libKey, metaKey, sceneKey, scenePrefix, vfsKey } from './storageKeys'
 import { getAllTextures, putTextures, deleteTextures, StoredTexture } from './textureStore'
 import { getAllAudio, putAudio, deleteAudio, StoredAudio } from './audioStore'
 import { planMerge, LocalState } from './bundleMerge'
 import { createProject, switchToProject } from './projects'
 import { confirmDiscard, reloadDiscarding } from '../features/unloadGuard'
 import type { BundleData } from './bundle'
+import { currentOrNoop } from '../features/loading/bootLoad'
+import { handoffFromCurrent, saveHandoff } from '../features/loading/loadingStore'
 
 // Applies an imported bundle to local storage, then reloads. Both modes must write straight to IndexedDB
 // and let the boot path rebuild React/engine state: reconciling live state instead lets the debounced
 // library-persistence resurrect pre-import data.
+//
+// Progress goes to the load on screen (features/loading), into the steps listed in IMPORT_WRITE_STEPS
+// when the caller declared them; with no load, it goes nowhere. Before the reload, what was done is
+// handed over so the startup splash carries on from it.
+
+/** The write steps a caller adds to its load before applying a bundle. */
+export const IMPORT_WRITE_STEPS = [
+  { id: 'libraries', label: 'Writing asset libraries', weight: 2 },
+  { id: 'models', label: 'Writing models', weight: 3 },
+  { id: 'scenes', label: 'Writing scenes', weight: 2 },
+  { id: 'textures', label: 'Writing textures', weight: 3 },
+  { id: 'audio', label: 'Writing audio', weight: 1 },
+]
+
+/** Save the load's finished steps for the startup splash, which shows them first after the reload. */
+function handOff(): void {
+  const handoff = handoffFromCurrent()
+  if (handoff) saveHandoff(handoff)
+}
 
 function audioToRecords(audio: BundleData['audio']): StoredAudio[] {
   return (audio ?? []).map(a => ({
@@ -42,33 +63,43 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
   // `targetProjectId` writes into a project that is NOT open. The id must be threaded through the key
   // helpers; repointing the active project would send in-flight debounced writes into the new project.
   const pid = targetProjectId
+  const load = currentOrNoop()
 
-  // Libraries + VFS.
-  await idbSet(libKey('materials', pid), bundle.libraries.materials)
-  await idbSet(libKey('terrainMaterials', pid), bundle.libraries.terrainMaterials)
-  await idbSet(libKey('templates', pid), bundle.libraries.templates)
-  await replaceModelLibrary(bundle.libraries.models, pid) // one record per asset — see modelStore
-  await idbSet(libKey('scripts', pid), bundle.libraries.scripts ?? [])
-  await idbSet(libKey('animationFields', pid), bundle.libraries.animationFields ?? [])
-  await idbSet(libKey('animations', pid), bundle.libraries.animations ?? [])
-  await idbSet(libKey('rigs', pid), bundle.libraries.rigs ?? [])
-  await idbSet(libKey('tilesets', pid), bundle.libraries.tilesets ?? [])
-  await idbSet(libKey('aiBrains', pid), bundle.libraries.aiBrains ?? [])
-  await idbSet(libKey('particleSystems', pid), bundle.libraries.particleSystems ?? [])
-  await idbSet(libKey('animControllers', pid), bundle.libraries.animControllers ?? [])
-  await idbSet(libKey('boneMasks', pid), bundle.libraries.boneMasks ?? [])
-  await idbSet(libKey('poseAssets', pid), bundle.libraries.poseAssets ?? [])
-  // Both audio halves travel as RECORDS, unlike images/textures — a sample's settings cannot be
-  // re-derived from a .wav, so without these a round trip would reset every sound to defaults.
-  await idbSet(libKey('audioSources', pid), bundle.libraries.audioSources ?? [])
-  await idbSet(libKey('soundSamples', pid), bundle.libraries.soundSamples ?? [])
+  // Libraries + VFS. Both audio halves travel as RECORDS, unlike images/textures — a sample's settings
+  // cannot be re-derived from a .wav, so without these a round trip would reset every sound to defaults.
+  const libs = bundle.libraries
+  const libraryWrites: [string, unknown][] = [
+    ['materials', libs.materials], ['terrainMaterials', libs.terrainMaterials], ['templates', libs.templates],
+    ['scripts', libs.scripts ?? []], ['animationFields', libs.animationFields ?? []], ['animations', libs.animations ?? []],
+    ['rigs', libs.rigs ?? []], ['tilesets', libs.tilesets ?? []], ['aiBrains', libs.aiBrains ?? []],
+    ['particleSystems', libs.particleSystems ?? []], ['animControllers', libs.animControllers ?? []],
+    ['boneMasks', libs.boneMasks ?? []], ['poseAssets', libs.poseAssets ?? []],
+    ['audioSources', libs.audioSources ?? []], ['soundSamples', libs.soundSamples ?? []],
+  ]
+  const libStep = load.step('libraries').start()
+  for (let i = 0; i < libraryWrites.length; i++) {
+    const [name, value] = libraryWrites[i]
+    await idbSet(libKey(name as any, pid), value)
+    libStep.progress(i + 1, libraryWrites.length)
+  }
+  libStep.done()
+  const modelStep = load.step('models').start()
+  // One record per asset — see modelStore.
+  await replaceModelLibrary(libs.models, pid, (done, total) => modelStep.progress(done, total))
+  if (libs.models.length) modelStep.done(); else modelStep.skip('none')
 
   if (isProject) {
     // Drop every existing scene blob, then write the bundle's. Must stay scoped: an unscoped scan wipes
     // every other project's scenes too.
     const stale = await idbKeysByPrefix(scenePrefix(pid))
     for (const key of stale) await idbDelete(key)
-    for (const [id, data] of Object.entries(bundle.scenes)) await idbSet(sceneKey(id, pid), data)
+    const scenes = Object.entries(bundle.scenes)
+    const sceneStep = load.step('scenes').start()
+    for (let i = 0; i < scenes.length; i++) {
+      await idbSet(sceneKey(scenes[i][0], pid), scenes[i][1])
+      sceneStep.progress(i + 1, scenes.length)
+    }
+    sceneStep.done()
 
     const metas = bundle.manifest.sceneMetas ?? Object.keys(bundle.scenes).map(id => ({ id, name: id, updatedAt: Date.now() }))
     const meta: ProjectMeta = {
@@ -81,6 +112,12 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
     await idbSet(metaKey(pid), meta)
     // A bundle is untrusted input; repairVfs guarantees the index the editor boots into is well-formed.
     await idbSet(vfsKey(pid), repairVfs(bundle.vfs).next)
+    // Bindings are project-wide, so only a PROJECT bundle carries them. Absent means the exporting
+    // project ran on the default map — and a replace must not leave the previous project's custom
+    // bindings behind, so the stored map is cleared rather than kept. Through the tolerant reader: a
+    // bundle is untrusted input.
+    if (bundle.libraries.inputMap) await idbSet(inputMapKey(pid), parseInputMap(bundle.libraries.inputMap))
+    else await idbDelete(inputMapKey(pid))
   } else {
     // Asset pack: keep local scenes/meta; swap the asset entries of the VFS, keep local scene entries.
     const localVfs = (await idbGet<VfsIndex>(vfsKey(pid))) ?? EMPTY_VFS
@@ -90,19 +127,25 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
       entries: [...localVfs.entries.filter(e => e.kind === 'scene'), ...bundle.vfs.entries.filter(e => e.kind !== 'scene')],
     }
     await idbSet(vfsKey(pid), repairVfs(merged).next)
+    load.step('scenes').skip('asset pack')
   }
 
   // Textures: wipe and rewrite from the bundle (within this project only).
+  const texStep = load.step('textures').start(`${bundle.textures.length}`)
   const existing = (await getAllTextures(pid)).map(t => t.id)
   await deleteTextures(existing, pid)
   await putTextures(texturesToRecords(bundle.textures), pid)
+  texStep.done(`${bundle.textures.length} written`)
 
   // Audio: same wipe-and-rewrite, scoped to this project.
+  const audioStep = load.step('audio').start()
   const existingAudio = (await getAllAudio(pid)).map(a => a.id)
   await deleteAudio(existingAudio, pid)
   await putAudio(audioToRecords(bundle.audio), pid)
+  if (bundle.audio?.length) audioStep.done(`${bundle.audio.length} written`); else audioStep.skip('none')
 
   Logger.info(`Imported ${isProject ? 'project' : 'asset pack'} (replace) — reloading`, 'Editor')
+  handOff()
   // No unsaved-work question here: ImportBundleModal already asked the one that matters (Replace
   // discards the project), and the stored data has been rewritten by the time this runs -- so the
   // browser's "Leave site?" box would be a second dialog with no answer that changes anything.
@@ -125,7 +168,9 @@ export async function applyBundleAsNewProject(
   // `alreadyConfirmed` is for a caller that asked EARLIER for a better reason: the examples gallery
   // asks before it downloads, so a decline does not cost a multi-megabyte fetch first.
   if (!alreadyConfirmed && !(await confirmDiscard('Switching to the imported project'))) return false
+  const projectStep = currentOrNoop().step('project').start()
   const record = await createProject(name || bundle.manifest.projectName || 'Imported Project')
+  projectStep.done(record.name)
   return applyBundleReplace(bundle, record.id)
 }
 
@@ -187,10 +232,12 @@ async function readLocalState(): Promise<LocalState> {
  * Merge mode. Colliding ids are re-minted (bundleMerge), imported assets/scenes/textures are appended to
  * the local ones, and the VFS gains the imported folders/entries. Writes to IndexedDB then reloads.
  */
-export async function applyBundleMerge(bundle: BundleData): Promise<boolean> {
+export async function applyBundleMerge(bundle: BundleData, alreadyConfirmed = false): Promise<boolean> {
   // Merge keeps the open project and reloads into it, so unsaved edits are lost and the merged result
   // will not contain them. Asked before the first write: a declined merge must leave nothing behind.
-  if (!(await confirmDiscard('Merging into this project'))) return false
+  // `alreadyConfirmed`: the caller asked first, before putting its loading screen over the dialog.
+  if (!alreadyConfirmed && !(await confirmDiscard('Merging into this project'))) return false
+  const load = currentOrNoop()
   const local = await readLocalState()
   const plan = planMerge(bundle, local)
 
@@ -198,26 +245,33 @@ export async function applyBundleMerge(bundle: BundleData): Promise<boolean> {
     const existing = (await idbGet<any[]>(key)) ?? []
     await idbSet(key, [...existing, ...incoming])
   }
-  await append(libKey('materials'), plan.materials)
-  await append(libKey('terrainMaterials'), plan.terrainMaterials)
-  await append(libKey('templates'), plan.templates)
-  await appendModelLibrary(plan.models)
-  await append(libKey('scripts'), plan.scripts)
-  await append(libKey('animationFields'), plan.animationFields)
-  await append(libKey('animations'), plan.animations)
-  await append(libKey('rigs'), plan.rigs)
-  await append(libKey('tilesets'), plan.tilesets)
-  await append(libKey('aiBrains'), plan.aiBrains)
-  await append(libKey('particleSystems'), plan.particleSystems)
-  await append(libKey('animControllers'), plan.animControllers)
-  await append(libKey('boneMasks'), plan.boneMasks)
-  await append(libKey('poseAssets'), plan.poseAssets)
-  await append(libKey('audioSources'), plan.audioSources)
-  await append(libKey('soundSamples'), plan.soundSamples)
+  const appends: [string, any[]][] = [
+    ['materials', plan.materials], ['terrainMaterials', plan.terrainMaterials], ['templates', plan.templates],
+    ['scripts', plan.scripts], ['animationFields', plan.animationFields], ['animations', plan.animations],
+    ['rigs', plan.rigs], ['tilesets', plan.tilesets], ['aiBrains', plan.aiBrains],
+    ['particleSystems', plan.particleSystems], ['animControllers', plan.animControllers],
+    ['boneMasks', plan.boneMasks], ['poseAssets', plan.poseAssets],
+    ['audioSources', plan.audioSources], ['soundSamples', plan.soundSamples],
+  ]
+  const libStep = load.step('libraries').start()
+  for (let i = 0; i < appends.length; i++) {
+    await append(libKey(appends[i][0] as any), appends[i][1])
+    libStep.progress(i + 1, appends.length)
+  }
+  libStep.done()
+  const modelStep = load.step('models').start()
+  await appendModelLibrary(plan.models, undefined, (done, total) => modelStep.progress(done, total))
+  if (plan.models.length) modelStep.done(); else modelStep.skip('none')
 
   // Scenes (project bundles): write each blob, append its meta.
+  const sceneStep = load.step('scenes').start()
+  if (!plan.scenes.length) sceneStep.skip('none')
   if (plan.scenes.length) {
-    for (const s of plan.scenes) await idbSet(sceneKey(s.meta.id), s.data)
+    for (let i = 0; i < plan.scenes.length; i++) {
+      await idbSet(sceneKey(plan.scenes[i].meta.id), plan.scenes[i].data)
+      sceneStep.progress(i + 1, plan.scenes.length)
+    }
+    sceneStep.done()
     const meta = (await idbGet<ProjectMeta>(metaKey()))
     if (meta) {
       meta.scenes = [...meta.scenes, ...plan.scenes.map(s => s.meta)]
@@ -226,9 +280,13 @@ export async function applyBundleMerge(bundle: BundleData): Promise<boolean> {
   }
 
   // Textures: add the imported payloads (reused-identical ones were dropped by the plan).
+  const texStep = load.step('textures').start()
   await putTextures(texturesToRecords(plan.textures))
+  texStep.done(`${plan.textures.length} written`)
   // Audio payloads: same rule — reused-identical ones were dropped by the plan.
+  const audioStep = load.step('audio').start()
   await putAudio(audioToRecords(plan.audio))
+  audioStep.done(`${plan.audio.length} written`)
 
   // VFS: union folders, append remapped entries.
   const vfs = (await idbGet<VfsIndex>(vfsKey())) ?? EMPTY_VFS
@@ -240,6 +298,7 @@ export async function applyBundleMerge(bundle: BundleData): Promise<boolean> {
   await idbSet(vfsKey(), repairVfs(merged).next)
 
   Logger.info(`Imported ${bundle.manifest.kind} (merge) — reloading`, 'Editor')
+  handOff()
   reloadDiscarding()
   return true
 }

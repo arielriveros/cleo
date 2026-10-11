@@ -50,6 +50,16 @@ export interface RenderStats {
     particlesDrawn: number;
     /** Particle simulation steps run (one dispatch or ping-pong draw per emitter per step). */
     particleSteps: number;
+    /** Particle systems that ran at least one step this frame. */
+    particleSystems: number;
+    /** Particle systems paused this frame because their bounds were out of view. */
+    particleSystemsCulled: number;
+    /** Particle emitter draws issued (one per visible, live emitter). */
+    particleDraws: number;
+    /** Particle emitters whose GPU state was BUILT this frame: textures, LUT, bind groups. A spike source. */
+    particleGpuCreates: number;
+    /** Particle emitters handed GPU state from the pool instead of building it. */
+    particleGpuReuses: number;
     /** CPU time spent inside render() (ms), excluding occasional IBL bakes. */
     frameMs: number;
 }
@@ -77,6 +87,11 @@ export const frameStats: RenderStats = {
     stateChangesSaved: 0,
     particlesDrawn: 0,
     particleSteps: 0,
+    particleSystems: 0,
+    particleSystemsCulled: 0,
+    particleDraws: 0,
+    particleGpuCreates: 0,
+    particleGpuReuses: 0,
     frameMs: 0,
 };
 
@@ -116,6 +131,11 @@ export function resetFrameStats(): void {
     frameStats.tilemapChunks = 0;
     frameStats.particlesDrawn = 0;
     frameStats.particleSteps = 0;
+    frameStats.particleSystems = 0;
+    frameStats.particleSystemsCulled = 0;
+    frameStats.particleDraws = 0;
+    frameStats.particleGpuCreates = 0;
+    frameStats.particleGpuReuses = 0;
     frameStats.tilemapDraws = 0;
     frameStats.fullscreenPasses = 0;
     frameStats.shadedMpx = 0;

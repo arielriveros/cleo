@@ -30,6 +30,7 @@ export type EditorSessionsContextValue = Pick<EngineValue,
   | 'setActiveModelLevel' | 'importModelFiles' | 'pendingModelImport' | 'resolveModelImport'
   // Script
   | 'enterScriptEditor' | 'setScriptTabSource' | 'getScriptTabSource' | 'saveScriptSource'
+  | 'syncScriptPaths' | 'scriptPaths' | 'createScriptModule' | 'revertTemplateOverride'
   | 'scriptAssetOf' | 'createScriptForNode' | 'attachScriptToNode' | 'detachScriptFromNode'
   // Animation field (blend space)
   | 'enterAnimationFieldEditor' | 'createAnimationFieldForModel' | 'saveAnimationField'

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Logger } from 'cleo'
 import { iconFor } from '../assets/assetKinds'
-import { startTask } from '../progress/progressStore'
+import { beginLoad } from '../loading/loadingStore'
+import { confirmDiscard } from '../unloadGuard'
+import { IMPORT_WRITE_STEPS } from '../../utils/bundleImport'
 import { confirmDialog } from '../dialogs/dialogStore'
 import {
   ExampleEntry, exampleThumbnailUrl, formatBytes, importExample, loadExampleIndex,
@@ -59,28 +61,35 @@ export default function ExamplesGallery({ examples, className = '' }: {
       if (!ok) return
     }
 
+    // Asked here, before the loading screen goes up: it would cover the dialog.
+    if (!await confirmDiscard('Opening an example')) return
     setBusySlug(entry.slug)
-    const task = startTask({
-      title: `Opening "${entry.name}"`,
-      steps: ['Downloading', 'Creating project'],
-    })
+    // The full loading screen, continued after the reload by the startup splash: it shows these steps
+    // done, then opens the new project. bundleImport reports the write steps into it.
+    const load = beginLoad(`Installing ${entry.name}`, [
+      { id: 'download', label: `Downloading (${formatBytes(entry.bytes)})`, weight: 4 },
+      { id: 'project', label: 'Creating project', weight: 1 },
+      ...IMPORT_WRITE_STEPS,
+    ])
+    let leaving = false
     try {
-      task.setStep(0, { status: 'running', detail: formatBytes(entry.bytes), progress: 0 })
+      const download = load.step('download').start()
       // False means the unsaved-work confirm was declined, before anything was downloaded: put the
-      // gallery back rather than leaving a progress task parked on a switch that is not coming.
-      if (!await importExample(entry, fraction => task.setStep(0, { progress: fraction }))) {
+      // gallery back rather than leaving a loading screen up for a switch that is not coming.
+      if (!await importExample(entry, (done, total) => {
+        download.progress(done, total, 'files')
+        if (total > 0 && done >= total) download.done()
+      }, true)) {
         setBusySlug(null)
         return
       }
-      // importExample ends in switchToProject's reload, so this only shows if navigation is slow.
-      task.setStep(0, { status: 'done' })
-      task.setStep(1, { status: 'done', detail: 'Opening' })
+      // importExample ends in switchToProject's reload: keep the screen up until the page goes.
+      leaving = true
     } catch (e: any) {
-      task.setStep(0, { status: 'failed', error: String(e?.message ?? e) })
       Logger.error(`Could not open the example "${entry.name}": ${e?.message ?? e}`, 'Editor')
       setBusySlug(null)
     } finally {
-      task.finish()
+      if (!leaving) load.finish()
     }
   }, [busySlug])
 

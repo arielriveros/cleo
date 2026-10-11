@@ -158,3 +158,15 @@ describe('the bundle-import helpers', () => {
     expect(shardKeys('other')).toEqual(['p:other:cleo_model:theirs']);
   });
 });
+
+describe('progress', () => {
+  it('reports each model as it is read, written and appended', async () => {
+    const reads: number[][] = [], writes: number[][] = [], appends: number[][] = []
+    await replaceModelLibrary([{ id: 'a' } as any, { id: 'b' } as any], undefined, (d, t) => writes.push([d, t]))
+    await readModelLibrary(undefined, (d, t) => reads.push([d, t]))
+    await appendModelLibrary([{ id: 'c' } as any], undefined, (d, t) => appends.push([d, t]))
+    expect(writes).toEqual([[1, 2], [2, 2]])
+    expect(reads).toEqual([[0, 2], [1, 2], [2, 2]])
+    expect(appends).toEqual([[1, 1]])
+  })
+})

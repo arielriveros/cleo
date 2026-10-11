@@ -124,14 +124,17 @@ function fetchSource(slug: string, onEntry?: (done: number, total: number) => vo
  */
 export async function importExample(
   entry: ExampleEntry,
-  onProgress?: (fraction: number) => void,
+  /** Files fetched out of the bundle's total, as the download proceeds. */
+  onProgress?: (done: number, total: number) => void,
+  /** The caller already asked about unsaved work (before showing a loading screen over the dialog). */
+  alreadyConfirmed = false,
 ): Promise<boolean> {
   // Asked BEFORE the download: this ends in a reload into the new project, so anything unsaved in the
   // open one is lost, and finding that out after fetching several megabytes is the wrong order. On the
   // boot launcher there is no open project, so there is nothing unsaved and no dialog appears — which
   // matters, because DialogHost is mounted by the editor shell and not by the launcher.
-  if (!(await confirmDiscard('Opening an example'))) return false;
-  const source = fetchSource(entry.slug, (done, total) => onProgress?.(total ? done / total : 0));
+  if (!alreadyConfirmed && !(await confirmDiscard('Opening an example'))) return false;
+  const source = fetchSource(entry.slug, (done, total) => onProgress?.(done, total));
   const { bundle } = await readBundle(source);
   if (bundle.manifest.kind !== 'project') {
     throw new Error(`Example "${entry.slug}" is not a project bundle`);

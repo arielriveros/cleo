@@ -8,7 +8,10 @@ import {
     defaultParticleSystem, parseParticleSystem, makeModule, defaultEmitter, maxLifetime,
     MAX_EMITTER_CAPACITY, particleSystemReferences,
 } from '../src/particles/particleSystemAsset';
-import { EmitterRuntime, ParticleSystemRuntime, particleTextureLayout, resolveSubEmitters } from '../src/particles/particleRuntime';
+import {
+    EmitterRuntime, ParticleSystemRuntime, particleTextureLayout, resolveSubEmitters, LIVE_WINDOW_MARGIN,
+} from '../src/particles/particleRuntime';
+import { ParticleSystemNode } from '../src/core/scene/nodes/particleSystemNode';
 import { builtinParticleMesh, particleMeshFromNodeJson, parseParticleMesh } from '../src/particles/particleMesh';
 import { composeCustomSim, customCodeKey, validatedCustomCode } from '../src/particles/particleCustomCode';
 import { compileParticleCustomCode, setParticleGlslTranslator } from '../src/graphics/particles/particleCustom';
@@ -224,9 +227,233 @@ describe('emitter runtime', () => {
         rt.emitters[0].play();
         rt.advance(0.1, I);
         const steps = rt.drain(0);
-        expect(steps.length).toBe(3);
+        expect(steps.length).toBe(2);
         expect(steps.reduce((a, s) => a + s.dt, 0)).toBeCloseTo(0.1);
         expect(rt.drain(0)).toEqual([]);
+    });
+
+    it('runs a frame of up to 1/20 s as one step', () => {
+        const rt = new ParticleSystemRuntime([defaultEmitter()]);
+        rt.emitters[0].play();
+        rt.advance(0.04, I);
+        expect(rt.drain(0).length).toBe(1);
+    });
+
+    it('drops time past two steps instead of catching up on a hitch', () => {
+        const rt = new ParticleSystemRuntime([defaultEmitter()]);
+        rt.emitters[0].play();
+        rt.advance(0.5, I);
+        const steps = rt.drain(0);
+        expect(steps.length).toBe(ParticleSystemRuntime.MAX_STEPS_PER_FRAME);
+        expect(steps.reduce((a, s) => a + s.dt, 0)).toBeCloseTo(0.1);
+    });
+
+    it('steps at 1/30 s when an emitter collides', () => {
+        const rt = new ParticleSystemRuntime([emitterWith(d => { d.update = [makeModule('collision')]; })]);
+        rt.emitters[0].play();
+        rt.advance(0.1, I);
+        const steps = rt.drain(0);
+        expect(steps.length).toBe(2);
+        expect(steps.reduce((a, s) => a + s.dt, 0)).toBeCloseTo(1 / 15);
+    });
+
+    it('pays a prewarm off over several frames, all of its time included', () => {
+        const e = emitterWith(d => {
+            d.prewarm = true;
+            d.duration = 5;
+            d.init = [makeModule('lifetime')];
+            d.init[0].params.range = [2, 3.2];
+        });
+        const rt = new ParticleSystemRuntime([e]);
+        rt.emitters[0].play();
+        rt.prewarm();
+        expect(rt.pending[0].length).toBe(0);
+        expect(rt.hasPendingWork).toBe(true);
+        let steps = 0, time = 0, frames = 0;
+        while (rt.hasPendingWork && frames < 100) {
+            rt.advance(0, I);
+            const drained = rt.drain(0);
+            expect(drained.length).toBeLessThanOrEqual(ParticleSystemRuntime.PREWARM_STEPS_PER_FRAME);
+            steps += drained.length;
+            time += drained.reduce((a, s) => a + s.dt, 0);
+            frames++;
+        }
+        expect(time).toBeCloseTo(4.8);   // min(duration, 1.5 x the longest lifetime)
+        expect(steps).toBe(96);
+        expect(frames).toBe(6);
+    });
+
+    it('cancels a prewarm still owed', () => {
+        const rt = new ParticleSystemRuntime([emitterWith(d => { d.prewarm = true; })]);
+        rt.emitters[0].play();
+        rt.prewarm();
+        rt.cancelPrewarm();
+        expect(rt.hasPendingWork).toBe(false);
+    });
+});
+
+describe('live window', () => {
+    const steady = (capacity: number, rate: number, life: number) => emitterWith(d => {
+        d.capacity = capacity;
+        d.spawn = [makeModule('spawnRate')];
+        d.spawn[0].params.rate = rate;
+        d.init = [makeModule('lifetime')];
+        d.init[0].params.range = [life, life];
+    });
+
+    it('covers what was born within a lifetime plus the margin, ending at the cursor', () => {
+        const rt = new EmitterRuntime(steady(256, 10, 1));
+        rt.play();
+        let step = rt.advance(0.1, I);
+        for (let i = 0; i < 40; i++) step = rt.advance(0.1, I);
+        // One particle a step; steps logged within 1 + LIVE_WINDOW_MARGIN seconds of now.
+        const expected = Math.floor((1 + LIVE_WINDOW_MARGIN) / 0.1) + 1;
+        expect(step.liveCount).toBe(expected);
+        expect((step.liveStart + step.liveCount) % rt.capacity).toBe(rt.cursor);
+        expect(rt.liveWindow()).toEqual({ start: step.liveStart, count: step.liveCount });
+    });
+
+    it('wraps round the ring and never exceeds the pool', () => {
+        const rt = new EmitterRuntime(steady(64, 400, 2));
+        rt.play();
+        let step = rt.advance(0.1, I);
+        for (let i = 0; i < 10; i++) step = rt.advance(0.1, I);
+        expect(step.liveCount).toBe(rt.capacity);
+        const small = new EmitterRuntime(steady(256, 30, 1));
+        small.play();
+        // Run until the cursor has just wrapped, so the window straddles the end of the pool.
+        for (let i = 0; i < 200; i++) {
+            step = small.advance(0.1, I);
+            if (i > 20 && small.cursor > 0 && small.cursor < step.liveCount) break;
+        }
+        expect(step.liveStart + step.liveCount).toBeGreaterThan(small.capacity);
+        expect((step.liveStart + step.liveCount) % small.capacity).toBe(small.cursor);
+    });
+
+    it('empties once spawning stops and every particle has died', () => {
+        const rt = new EmitterRuntime(steady(256, 10, 0.5));
+        rt.play();
+        for (let i = 0; i < 10; i++) rt.advance(0.1, I);
+        rt.stop();
+        let step = rt.advance(0.1, I);
+        for (let i = 0; i < 10; i++) step = rt.advance(0.1, I);
+        expect(step.liveCount).toBe(0);
+    });
+
+    it('reaches every slot on a reset step', () => {
+        const rt = new EmitterRuntime(steady(256, 10, 1));
+        rt.play();
+        rt.advance(0.1, I);
+        rt.clear();
+        const step = rt.advance(0.1, I);
+        expect(step.reset).toBe(true);
+        expect(step).toMatchObject({ liveStart: 0, liveCount: rt.capacity });
+        // ... and starts counting afresh after it.
+        expect(rt.advance(0.1, I).liveCount).toBe(2);
+    });
+});
+
+describe('system liveness', () => {
+    it('keeps a death sub-emitter alive past its parent for both lifetimes', () => {
+        const parent = emitterWith(d => {
+            d.spawn = [makeModule('spawnRate')];
+            d.spawn[0].params.rate = 10;
+            d.init = [makeModule('lifetime')];
+            d.init[0].params.range = [1, 1];
+        });
+        const child = emitterWith(d => {
+            d.init = [makeModule('lifetime')];
+            d.init[0].params.range = [2, 2];
+            d.spawn = [makeModule('subEmitter')];
+            d.spawn[0].params.parent = parent.id;
+        });
+        const rt = new ParticleSystemRuntime([parent, child]);
+        rt.emitters.forEach(e => e.play());
+        for (let i = 0; i < 5; i++) rt.advance(0.1, I);
+        rt.emitters.forEach(e => e.stop());
+        // Past the parent's lifetime, inside parent + child.
+        for (let t = 0; t < 2; t += 0.1) rt.advance(0.1, I);
+        expect(rt.emitters[0].isAlive).toBe(false);
+        expect(rt.isAlive).toBe(true);
+        for (let t = 0; t < 1.5; t += 0.1) rt.advance(0.1, I);
+        expect(rt.isAlive).toBe(false);
+    });
+
+    it('counts a pending burst as alive, so a burst on a stopped system still fires', () => {
+        const rt = new EmitterRuntime(defaultEmitter());
+        expect(rt.isAlive).toBe(false);
+        rt.burst(10);
+        expect(rt.isAlive).toBe(true);
+        expect(rt.advance(0.01, I).spawnCount).toBe(10);
+    });
+});
+
+describe('particle system node', () => {
+    const drainAll = (node: ParticleSystemNode) => node.runtime.emitters.forEach((_e, i) => node.runtime.drain(i));
+    const oneShot = () => {
+        const system = defaultParticleSystem();
+        const e = system.emitters[0];
+        e.looping = false;
+        e.duration = 0.2;
+        e.spawn = [makeModule('spawnRate')];
+        e.spawn[0].params.rate = 50;
+        e.init = [makeModule('lifetime')];
+        e.init[0].params.range = [0.3, 0.3];
+        return system;
+    };
+
+    it('goes quiet once a one-shot has played out', () => {
+        const node = new ParticleSystemNode('fx', { system: oneShot() });
+        node.play();
+        for (let i = 0; i < 6; i++) { node.update(0.1, 0); drainAll(node); }
+        expect(node.isPlaying).toBe(true);
+        for (let i = 0; i < 6; i++) { node.update(0.1, 0); drainAll(node); }
+        expect(node.isPlaying).toBe(false);
+        expect(node.isAlive).toBe(false);
+        node.update(0.1, 0);
+        expect(node.runtime.hasPendingWork).toBe(false);
+    });
+
+    it('waits for a queued clear to reach the GPU before going quiet', () => {
+        const node = new ParticleSystemNode('fx', { system: oneShot() });
+        node.play();
+        node.update(0.1, 0);
+        drainAll(node);
+        node.stop(true);
+        node.update(0.1, 0);
+        expect(node.isPlaying).toBe(true);    // the reset step is still queued
+        drainAll(node);
+        node.update(0.1, 0);
+        expect(node.isPlaying).toBe(false);
+    });
+
+    it('pauses a looping system off screen, but not a one-shot', () => {
+        const looping = new ParticleSystemNode('torch', {});
+        looping.play();
+        looping.offscreen = true;
+        looping.update(0.1, 0);
+        expect(looping.pausesOffscreen).toBe(true);
+        expect(looping.runtime.hasPendingWork).toBe(false);
+        looping.offscreen = false;
+        looping.update(0.1, 0);
+        expect(looping.runtime.hasPendingWork).toBe(true);
+
+        const shot = new ParticleSystemNode('fx', { system: oneShot() });
+        shot.play();
+        shot.offscreen = true;
+        shot.update(0.1, 0);
+        expect(shot.pausesOffscreen).toBe(false);
+        expect(shot.runtime.hasPendingWork).toBe(true);
+    });
+
+    it('lets the culling mode override auto, and round-trips it', () => {
+        const node = new ParticleSystemNode('fx', { system: oneShot(), cullingMode: 'pause' });
+        expect(node.pausesOffscreen).toBe(true);
+        node.cullingMode = 'simulate';
+        expect(node.pausesOffscreen).toBe(false);
+        const json = (node as any)._serializePayload().particleSystem;
+        expect(new ParticleSystemNode('copy', json).cullingMode).toBe('simulate');
+        expect(new ParticleSystemNode('bad', { cullingMode: 'sometimes' as any }).cullingMode).toBe('auto');
     });
 });
 

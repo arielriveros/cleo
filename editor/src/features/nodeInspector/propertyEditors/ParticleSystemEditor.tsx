@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { ParticleSystemNode } from 'cleo'
+import { ParticleSystemNode, type ParticleCullingMode } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
-import { Button, ColorInput, Hint, NumberInput, PropertyRow, PropertyTable, Slider, Toggle } from '../../../components/ui'
+import { Button, ColorInput, Hint, NumberInput, PropertyRow, PropertyTable, Select, Slider, Toggle } from '../../../components/ui'
 import { ParticlesIcon } from '../sectionIcons'
 import { useEventBus } from '../../EventBusContext'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
@@ -21,6 +21,7 @@ export default function ParticleSystemEditor(props: { node: ParticleSystemNode }
     simulationSpeed: props.node.simulationSpeed,
     spawnRateScale: props.node.spawnRateScale,
     tint: [...props.node.tint] as [number, number, number, number],
+    cullingMode: props.node.cullingMode,
   })
   const [values, setValues] = useState(read)
   useEffect(() => { setValues(read()) }, [props.node])
@@ -31,6 +32,7 @@ export default function ParticleSystemEditor(props: { node: ParticleSystemNode }
     if (patch.simulationSpeed !== undefined) n.simulationSpeed = patch.simulationSpeed
     if (patch.spawnRateScale !== undefined) n.spawnRateScale = patch.spawnRateScale
     if (patch.tint !== undefined) n.tint = patch.tint
+    if (patch.cullingMode !== undefined) n.cullingMode = patch.cullingMode
     setValues(read())
     eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
   }
@@ -56,6 +58,15 @@ export default function ParticleSystemEditor(props: { node: ParticleSystemNode }
           </PropertyRow>
           <PropertyRow label='Spawn rate' hint="Multiplies every emitter's continuous spawn rate. Bursts are not scaled." divider>
             <Slider min={0} max={4} step={0.05} value={values.spawnRateScale} onChange={spawnRateScale => set({ spawnRateScale })} />
+          </PropertyRow>
+          <PropertyRow label='Off screen' hint={'What the system does while its bounds are out of view. Auto pauses a system '
+            + 'whose emitters all loop and keeps simulating a one-shot, so an effect fired just off screen has '
+            + 'still played out when the camera turns to it.'} divider>
+            <Select value={values.cullingMode} onChange={e => set({ cullingMode: e.target.value as ParticleCullingMode })}>
+              <option value='auto'>Auto</option>
+              <option value='pause'>Pause</option>
+              <option value='simulate'>Keep simulating</option>
+            </Select>
           </PropertyRow>
           <PropertyRow label='Tint' hint="Multiplies every particle's colour, alpha included.">
             <div className='flex items-center gap-2'>

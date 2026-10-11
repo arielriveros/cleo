@@ -58,3 +58,40 @@ describe('Renderer.initialize concurrency', () => {
         expect(renderer.backendFallbackReason).toBe('this browser does not expose navigator.gpu');
     });
 });
+
+describe('Renderer.preInitializeAsync', () => {
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    /** A renderer past device acquisition, with the GPU halves of program building stubbed out. */
+    function stubbed() {
+        stubCanvas(() => null);
+        const renderer = new Renderer({}) as any;
+        renderer._deviceReady = true;
+        renderer._configureDefaultState = () => {};
+        renderer._createTargets = vi.fn();
+        const built: string[] = [];
+        renderer._buildProgram = (entry: readonly [string, unknown]) => { built.push(entry[0]); };
+        return { renderer, built };
+    }
+
+    it('builds the same programs, in the same order, as the synchronous path', async () => {
+        const sync = stubbed();
+        sync.renderer.preInitialize();
+        const async_ = stubbed();
+        await async_.renderer.preInitializeAsync();
+        expect(async_.built).toEqual(sync.built);
+        expect(async_.built.length).toBeGreaterThan(40);
+        expect(async_.renderer._createTargets).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports every program, ending at total / total', async () => {
+        const { renderer, built } = stubbed();
+        const reports: [number, number][] = [];
+        await renderer.preInitializeAsync((done: number, total: number) => reports.push([done, total]));
+        const total = built.length;
+        expect(reports[0]).toEqual([0, total]);
+        expect(reports.at(-1)).toEqual([total, total]);
+        expect(reports).toHaveLength(total + 1);
+        for (let i = 1; i < reports.length; i++) expect(reports[i][0]).toBe(reports[i - 1][0] + 1);
+    });
+});

@@ -427,6 +427,12 @@ class Bone {
         }
     }
     
+    // Per-bone scratch for the sampled T/R/S. update() runs for every bone of every clip of every
+    // animated model each frame; a fresh vec3/quat/vec3 per bone was a large share of the engine's garbage.
+    private readonly _tScratch = vec3.create();
+    private readonly _rScratch = quat.create();
+    private readonly _sScratch = vec3.create();
+
     /** Recompute the bone's local transform at `animationTime`. */
     public update(animationTime: number): void {
         const translation = this._interpolatePosition(animationTime);
@@ -479,7 +485,7 @@ class Bone {
     // Position at `animationTime`.
     private _interpolatePosition(animationTime: number): vec3 {
         if (this._positions.length === 0) {
-            return vec3.clone(this._restT); // no channel: hold the bind offset, not the origin
+            return this._restT; // no channel: hold the bind offset, not the origin (only read)
         }
         
         if (this._positions.length === 1) {
@@ -494,21 +500,17 @@ class Bone {
             animationTime
         );
         
-        const finalPosition = vec3.create();
-        vec3.lerp(finalPosition, this._positions[p0Index].position, this._positions[p1Index].position, scaleFactor);
-        return finalPosition;
+        return vec3.lerp(this._tScratch, this._positions[p0Index].position, this._positions[p1Index].position, scaleFactor);
     }
     
     // Rotation at `animationTime`, slerped.
     private _interpolateRotation(animationTime: number): quat {
         if (this._rotations.length === 0) {
-            return quat.clone(this._restR); // no channel: hold the bind rotation
+            return this._restR; // no channel: hold the bind rotation (only read)
         }
         
         if (this._rotations.length === 1) {
-            const rotation = quat.create();
-            quat.normalize(rotation, this._rotations[0].orientation);
-            return rotation;
+            return quat.normalize(this._rScratch, this._rotations[0].orientation);
         }
         
         const p0Index = this._getRotationIndex(animationTime);
@@ -519,7 +521,7 @@ class Bone {
             animationTime
         );
         
-        const finalRotation = quat.create();
+        const finalRotation = this._rScratch;
         quat.slerp(finalRotation, this._rotations[p0Index].orientation, this._rotations[p1Index].orientation, scaleFactor);
         quat.normalize(finalRotation, finalRotation);
         return finalRotation;
@@ -528,7 +530,7 @@ class Bone {
     // Scale at `animationTime`.
     private _interpolateScale(animationTime: number): vec3 {
         if (this._scales.length === 0) {
-            return vec3.clone(this._restS); // no channel: hold the bind scale
+            return this._restS; // no channel: hold the bind scale (only read)
         }
         
         if (this._scales.length === 1) {
@@ -543,9 +545,7 @@ class Bone {
             animationTime
         );
         
-        const finalScale = vec3.create();
-        vec3.lerp(finalScale, this._scales[p0Index].scale, this._scales[p1Index].scale, scaleFactor);
-        return finalScale;
+        return vec3.lerp(this._sScratch, this._scales[p0Index].scale, this._scales[p1Index].scale, scaleFactor);
     }
     
     /**
@@ -1850,6 +1850,12 @@ export class Animator {
         return this._blendTransforms(previous, current, blendFactor);
     }
 
+    // Reused by _recomputePose every frame, so posing a skeleton allocates nothing: it used to build two
+    // Maps and a fresh mat4 per joint per frame for every animated model.
+    private readonly _poseLocals = new Map<number, mat4>();
+    private readonly _poseGlobals = new Map<number, mat4>();
+    private readonly _globalPool = new Map<number, mat4>();
+
     private _recomputePose(): void {
         // A layer's animator hands its pose to the parent; skinning matrices are the parent's job.
         if (this._isOverlay) return;
@@ -1857,7 +1863,8 @@ export class Animator {
         if (!this._skin) return;
 
         // Build local transforms map for all joints
-        const localTransforms = new Map<number, mat4>();
+        const localTransforms = this._poseLocals;
+        localTransforms.clear();
 
         /** Whatever is posing this node right now — a clip, a weighted field blend, or its rest transform. */
         const resolveLocal = (nodeIndex: number): mat4 => {
@@ -1884,7 +1891,8 @@ export class Animator {
         // Accumulate global transforms down the hierarchy. A flat loop, because `topo.order` guarantees a
         // parent is finished before any child asks for it.
         const topo = this._topology();
-        const globalTransforms = new Map<number, mat4>();
+        const globalTransforms = this._poseGlobals;
+        globalTransforms.clear();
 
         // Fold in the non-joint nodes between this joint and its parent joint. Never cache the skin's own
         // rest matrix by reference: `globalTransforms` is written in place and would corrupt the bind pose.
@@ -1909,7 +1917,8 @@ export class Animator {
             const nodeIndex = joint.nodeIndex;
             const local = localTransforms.get(nodeIndex) ?? this._skin.nodeTransforms?.get(nodeIndex) ?? mat4.create();
 
-            const global = mat4.create();
+            let global = this._globalPool.get(nodeIndex);
+            if (!global) { global = mat4.create(); this._globalPool.set(nodeIndex, global); }
             accumulate(global, jointIndex, local);
             globalTransforms.set(nodeIndex, global);
         }
