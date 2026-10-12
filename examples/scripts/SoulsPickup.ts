@@ -18,7 +18,6 @@ export default class SoulsPickupNode extends Node {
   public kind: string = 'souls'
   public amount: number = 200
   public itemName: string = 'Soul of a Lost Undead'
-  public interactRadius: number = 1.4
   public hiddenUntilRevealed: boolean = false
   public pickupClip: string = 'Souls_Pickup'
   public taken: boolean = false

@@ -221,6 +221,8 @@ export function attachScriptFactory(node: Node, factory: ScriptFactory): void {
     node.onUpdate = guard('onUpdate');
     node.onCollision = guard('onCollision');
     node.onTrigger = guard('onTrigger');
+    node.onTriggerEnter = guard('onTriggerEnter');
+    node.onTriggerExit = guard('onTriggerExit');
     node.onDespawn = guard('onDespawn');
     node.onAction = guard('onAction');
     node.onThink = guard('onThink');

@@ -192,6 +192,61 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
         }
     });
 
+    it('gives every melee clip an active window: hit, then hitEnd, before recovery', () => {
+        const have = clips();
+        for (const n of [...withScript('SoulsMove'), ...withScript('SoulsEnemyAttack')]) {
+            if (n.scriptVars.projectileTemplate || n.scriptVars.aoeRadius) continue;
+            const events = have.get(n.scriptVars.clip).events ?? [];
+            const at = (name: string) => events.find((e: any) => e.name === name)?.time;
+            expect(at('hitEnd'), `${n.scriptVars.clip} has no hitEnd`).toBeGreaterThan(at('hit'));
+            if (at('recover') !== undefined) expect(at('hitEnd')).toBeLessThan(at('recover'));
+            // The fallback fields agree with the clip, so a marker-less replacement behaves the same.
+            expect(n.scriptVars.hitTime).toBeCloseTo(at('hit'), 3);
+            expect(n.scriptVars.hitTime + n.scriptVars.activeSeconds).toBeCloseTo(at('hitEnd'), 3);
+        }
+    });
+
+    it('gives every weapon a blade hitbox: script fields on the player, variables on enemies', () => {
+        const weapons = withScript('SoulsWeapon');
+        expect(weapons.length).toBeGreaterThanOrEqual(2);       // the placed Player's and its template's
+        for (const w of weapons) {
+            expect(w.scriptVars.bladeEnd[1], w.name).toBeGreaterThan(w.scriptVars.bladeStart[1]);
+            expect(w.scriptVars.bladeRadius).toBeGreaterThan(0);
+        }
+        const enemies = withScript('SoulsEnemy');
+        expect(enemies.length).toBe(4);
+        for (const e of enemies) {
+            const weapon = e.children.find((n: any) => n.name === 'Weapon');
+            expect(weapon?.variables?.bladeEnd?.value, `${e.name}'s Weapon has no blade`).toHaveLength(3);
+        }
+    });
+
+    it('gives every interactable a trigger zone (inline in the scene, side-mapped in templates)', () => {
+        const interactable = /public (interact|canInteract)\(/;
+        const files = ['SoulsBonfire', 'SoulsPickup', 'SoulsMessage', 'SoulsLever', 'SoulsDoor', 'SoulsFogGate', 'SoulsBloodstain'];
+        for (const f of files) expect(readFileSync(join(SCRIPTS, `${f}.ts`), 'utf8')).toMatch(interactable);
+        const inScene = allNodes(scene().scene);
+        for (const f of files) {
+            for (const n of withScript(f)) {
+                const template = templates().find((t: any) => allNodes(t.nodeJson).includes(n));
+                const trigger = template ? template.triggers?.[n.id] : n.trigger;
+                if (!template && !inScene.includes(n)) continue;
+                expect(trigger?.shapes?.length, `${n.name} (${f}) has no trigger zone`).toBeGreaterThan(0);
+            }
+        }
+        const arena = inScene.find(n => n.name === 'Boss Arena');
+        expect(arena.variables.isBossArena.value).toBe(true);
+        expect(arena.trigger.shapes[0].type).toBe('box');
+    });
+
+    it('marks walls, pillars and gates as swing blockers, and no floor', () => {
+        const inScene = allNodes(scene().scene);
+        const blocks = (n: any) => n.variables?.blocksSwings?.value === true;
+        expect(inScene.filter(n => /Wall/.test(n.name) && n.body).every(blocks)).toBe(true);
+        expect(inScene.filter(n => /Pillar/.test(n.name)).every(blocks)).toBe(true);
+        expect(inScene.filter(n => /Floor/.test(n.name)).some(blocks)).toBe(false);
+    });
+
     it('owns every clip on the rig, and embeds none', () => {
         const rig = library('rigs')[0];
         expect(new Set(rig.animationIds)).toEqual(new Set(library('animations').map((a: any) => a.id)));

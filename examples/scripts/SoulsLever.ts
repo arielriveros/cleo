@@ -8,7 +8,6 @@ import { Node } from 'cleo'
  */
 export default class SoulsLeverNode extends Node {
   public doorName: string = 'Shortcut Gate'
-  public interactRadius: number = 1.5
   public swingDegrees: number = 70
   public swingSeconds: number = 0.6
   public pulled: boolean = false

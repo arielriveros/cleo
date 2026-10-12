@@ -180,13 +180,6 @@ export default class SoulsGameManagerNode extends Node {
     return Math.max(1, Math.round(raw * (1 - clamp(defense, 0, 0.9))))
   }
 
-  /** True when `to` is within `arcDeg` (the FULL cone) of a body at `from` facing `yawDeg`. */
-  public inArc(from: ArrayLike<number>, yawDeg: number, to: ArrayLike<number>, arcDeg: number): boolean {
-    if (arcDeg >= 360) return true
-    const yaw = yawTo(from, to)
-    return Math.abs(angleDiff(yaw, yawDeg)) <= arcDeg / 2
-  }
-
   /**
    * Choose an enemy's next attack.
    *
@@ -256,51 +249,51 @@ export default class SoulsGameManagerNode extends Node {
   // =================================================================================================
 
   /**
-   * The player's swing connecting, at the move's `hit` event. Every live enemy inside the move's range
-   * and arc takes the hit. Returns how many were hit.
+   * The player's blade reached `target` (an enemy's hurtbox) at `point`. WHO is hit is decided by the
+   * blade sweep (SoulsHitbox.stepSwing); this applies the damage: attack rating × the move's multiplier,
+   * the weapon's poise damage × the move's, and a spark where the blade met the body. Returns true if
+   * the hit landed.
    */
-  public resolvePlayerHit(player: Node, move: any, weapon: any): number {
-    if (!player || !move) return 0
+  public applyPlayerHit(player: Node, move: any, weapon: any, target: Node, point: ArrayLike<number>): boolean {
+    const e = target as any
+    if (!player || !e?.receiveHit) return false
     const p = player as any
-    const from = player.worldPosition
-    const yaw = forwardYaw(player)
     const ar = this.attackRating(weapon, num(p.strength, 10), num(p.dexterity, 10))
-    const range = num(move.range, 2.2)
-    const arc = num(move.arcDeg, 120)
-    let hits = 0
-    for (const enemy of this.liveEnemies()) {
-      const e = enemy as any
-      const to = enemy.worldPosition
-      const reach = range + num(e.bodyRadius, 0.4)
-      if (planarDistance(from, to) > reach || Math.abs(to[1] - from[1]) > 2.5 + num(e.bodyHeight, 1.8)) continue
-      if (!this.inArc(from, yaw, to, arc)) continue
-      const damage = Math.round(ar * num(move.damageMul, 1))
-      const poise = num(weapon?.poiseDamage, 15) * num(move.poiseMul, 1)
-      if (e.receiveHit && e.receiveHit(damage, poise, player)) {
-        hits++
-        this.fx(this.hitSparkTemplate, [to[0], to[1] + num(e.bodyHeight, 1.8) * 0.6, to[2]])
-      }
-    }
-    if (hits) this.sfx('Hit')
-    return hits
+    const damage = Math.round(ar * num(move?.damageMul, 1))
+    const poise = num(weapon?.poiseDamage, 15) * num(move?.poiseMul, 1)
+    if (!e.receiveHit(damage, poise, player)) return false
+    if (point) this.fx(this.hitSparkTemplate, point)
+    this.sfx('Hit')
+    return true
   }
 
   /**
-   * An enemy's swing connecting. Range and arc are re-checked at the contact frame, so a roll or a step
-   * back during the wind-up genuinely avoids it. `aoeRadius > 0` makes it a ground slam: everything
-   * inside the radius is hit regardless of facing. Returns true if the player took damage.
+   * An enemy's weapon (or slam) reached the player's hurtbox. A rolling player's hurtbox is off, so the
+   * sweep never gets here during i-frames. Returns true if the player took damage.
    */
-  public resolveEnemyHit(enemy: Node, attack: any): boolean {
-    const player = this._player as any
+  public applyEnemyHit(enemy: Node, attack: any, target: Node): boolean {
+    const player = (target ?? this._player) as any
     if (!enemy || !attack || !player || player.isDead) return false
-    const from = enemy.worldPosition
-    const to = this._player.worldPosition
-    const aoe = num(attack.aoeRadius, 0)
-    const reach = aoe > 0 ? aoe : num(attack.hitRange, 2.2) + 0.3
-    if (planarDistance(from, to) > reach) return false
-    if (Math.abs(to[1] - from[1]) > 3) return false
-    if (aoe <= 0 && !this.inArc(from, forwardYaw(enemy), to, num(attack.arcDeg, 100))) return false
-    return !!player.receiveDamage?.(num(attack.damage, 50), num(attack.poiseDamage, 20), enemy)
+    const landed = !!player.receiveDamage?.(num(attack.damage, 50), num(attack.poiseDamage, 20), enemy)
+    if (landed) this.sfx('Player Hit')
+    return landed
+  }
+
+  // =================================================================================================
+  // Zones (the player's trigger overlaps, forwarded by SoulsPlayer)
+  // =================================================================================================
+
+  /** The player walked into a trigger zone. The boss arena's zone starts the fight. */
+  public onPlayerEnteredZone(zone: Node): void {
+    if (!zone || !(zone as any).getVariable?.('isBossArena')) return
+    const player = this._player as any
+    if (!this.bossActive && !this.bossDefeated && player && !player.isDead) this.startBossFight(this._fogGate)
+  }
+
+  /** The player left a trigger zone. Leaving a message's zone closes the message it opened. */
+  public onPlayerLeftZone(zone: Node): void {
+    const hud = this._hud as any
+    hud?.closeMessageFrom?.(zone)
   }
 
   public awardSouls(amount: number): void {
@@ -473,14 +466,8 @@ export default class SoulsGameManagerNode extends Node {
       this.bossHp = Math.max(0, num(boss.hp, 0))
       this.bossMaxHp = Math.max(1, num(boss.maxHp, 1))
     }
-    // Fallback: a player who reaches the arena without passing the fog (a physics push, an editor
-    // teleport) still starts the fight rather than finding a boss asleep.
-    const gate = this._fogGate as any
-    const player = this._player as any
-    if (!this.bossActive && !this.bossDefeated && gate?.isInsideArena && player && !player.isDead
-      && gate.isInsideArena(this._player.worldPosition)) {
-      this.startBossFight(this._fogGate)
-    }
+    // A player who reaches the arena without passing the fog (a physics push, an editor teleport) still
+    // starts the fight: the arena's trigger zone does that, through onPlayerEnteredZone.
   }
 
   // =================================================================================================

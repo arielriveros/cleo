@@ -16,6 +16,12 @@ import { Node } from 'cleo'
  * booleans and vectors only. Selecting a move in the hierarchy shows its inspector; duplicating one adds
  * an attack. The chain is `lightMove` → each move's `next` → ... and `heavyMove` on its own.
  *
+ * ## Hitbox
+ *
+ * `bladeStart`/`bladeEnd`/`bladeRadius` is a capsule along the blade, in the `Mesh` child's space (the
+ * space the blade's boxes are modelled in). During an attack's active window it is swept every frame
+ * against enemy hurtboxes. Generous is normal: a hitbox a little fatter than the steel reads as fair.
+ *
  * Attack rating (see SoulsGameManager.attackRating):
  *
  *   AR = baseDamage × (1 + strScaling·bonus(STR) + dexScaling·bonus(DEX)),  ×0.6 if a requirement is unmet
@@ -35,6 +41,10 @@ export default class SoulsWeaponNode extends Node {
   /** First move of the light chain, and the heavy attack. Names of child SoulsMove nodes. */
   public lightMove: string = 'Light1'
   public heavyMove: string = 'Heavy'
+  /** The blade hitbox, in the Mesh child's space. See "Hitbox" above. */
+  public bladeStart: number[] = [0, 0.12, 0]
+  public bladeEnd: number[] = [0, 1, 0]
+  public bladeRadius: number = 0.12
   /** Marker the player looks for among its Weapons group. */
   public isWeapon: boolean = true
 

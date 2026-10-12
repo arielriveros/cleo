@@ -150,9 +150,30 @@ get slopeAngle: number        // degrees
 ## Collisions and triggers
 
 ```ts
-onCollision(other: Node): void    // requires a body on BOTH nodes
-onTrigger(other: Node): void      // requires a trigger on THIS node
+onCollision(other: Node): void      // requires a body on BOTH nodes
+onTrigger(other: Node): void        // first contact with THIS node's trigger
+onTriggerEnter(other: Node): void   // a trigger overlap began — called on BOTH nodes
+onTriggerExit(other: Node): void    // ...and ended (also when either side is removed or despawned)
 ```
+
+`onTrigger` fires once when something first touches the trigger; it does not repeat while the
+overlap lasts and has no exit. For presence — "is the player standing in this zone?" — use
+`onTriggerEnter` / `onTriggerExit`. They are reported once per frame after physics, always come in
+pairs, and are called on **both** nodes of the overlap: the zone's node hears about the body that came
+in, and the body's node hears about the zone it walked into. So a player can keep a list of the zones it
+is standing in without any zone having a script:
+
+```ts
+export default class PlayerNode extends CharacterNode {
+  private _nearby: Node[] = []
+  onTriggerEnter(other: Node) { if ((other as any).interact) this._nearby.push(other) }
+  onTriggerExit(other: Node)  { this._nearby = this._nearby.filter(n => n !== other) }
+}
+```
+
+A trigger is a static volume: it detects bodies with mass (characters, props that move), never another
+static body, the terrain, or another trigger. A node may carry a body AND a trigger — a solid door with
+an interaction zone around it.
 
 ```ts
 export default class PickupNode extends Node {
@@ -170,7 +191,7 @@ export default class PickupNode extends Node {
 }
 ```
 
-The `_taken` latch is not optional: a trigger fires while the overlap persists, not once.
+The `_taken` latch is not optional: `onTrigger` fires again every time the player walks back in.
 
 ## Raycasting
 
@@ -221,6 +242,51 @@ of the samples into the middle third of the area.
 
 For picking against render geometry rather than colliders, use `Raycaster` and a node's BVH — see
 [Math and utilities](math-and-utils.md#raycasting).
+
+
+## Shape queries
+
+A ray is a line with no thickness. To ask "what does this VOLUME touch" — a sword, an explosion, a
+melee lunge — use the overlap and sweep queries:
+
+```ts
+scene.physics.overlapSphere(center, radius, options?): OverlapHit[]
+scene.physics.overlapCapsule(a, b, radius, options?): OverlapHit[]        // a, b: the end centres
+scene.physics.overlapBox(center, halfExtents, rotation?, options?): OverlapHit[]   // rotation: quaternion
+scene.physics.sweepCapsule(a0, b0, a1, b1, radius, options?): OverlapHit[] // from one pose to another
+scene.physics.sweepSphere(from, to, radius, options?): OverlapHit[]        // a thick ray
+
+interface OverlapHit {
+  node: Node | null ; body: Body
+  point: vec3        // closest point on the body
+  fraction: number   // 0..1, how far into a sweep it was first touched (0 for an overlap)
+}
+
+interface OverlapOptions {
+  ignore?: Node | Node[]        // nearly always the caster
+  includeTriggers?: boolean     // default false
+  includeGhosts?: boolean       // default false
+  includeRagdolls?: boolean     // default false — a corpse's limbs are not a target
+  filter?: (node: Node | null, body: Body) => boolean   // return true to KEEP
+}
+```
+
+One hit per node (a capsule collider's three internal parts are one character), ordered by `fraction`
+and then by depth. Spheres, boxes, capsules and cylinders are tested exactly; convex hulls, trimeshes,
+heightfields and planes are not tested at all — these queries are for hitting things, not terrain.
+
+A **sweep** is what makes fast things reliable. A sword swung through 90° in one frame at 30 fps never
+overlaps the enemy at either end pose; `sweepCapsule` from last frame's blade to this frame's samples
+the poses in between (no further apart than the radius) and catches it. The Hollow Keep example's
+combat is built exactly this way — see `examples/scripts/SoulsHitbox.ts`:
+
+```ts
+const hits = this.scene.physics.sweepCapsule(prev.a, prev.b, blade.a, blade.b, blade.radius, {
+  ignore: this,
+  filter: (node) => !!node && (node as any).hurtboxActive !== false && typeof (node as any).receiveHit === 'function',
+})
+for (const h of hits) if (!this._alreadyHit.includes(h.node)) { this._alreadyHit.push(h.node); /* damage */ }
+```
 
 ## Physics system
 

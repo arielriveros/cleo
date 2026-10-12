@@ -1,5 +1,6 @@
 import { CharacterNode, Input, Logger, ModelNode, Node, moveWorldDirection, setMoveWorld } from 'cleo'
 import { num } from './SoulsMath'
+import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing } from './SoulsHitbox'
 
 /**
  * Hollow Keep — the player. Attach to the `Player` root, which must be a Character node.
@@ -99,6 +100,8 @@ export default class SoulsPlayerNode extends CharacterNode {
   /** A hit at or above this much damage is a heavy stagger with knockback; below, a flinch. */
   public heavyHitThreshold: number = 150
   public hitLightSeconds: number = 0.45
+  /** A swing that meets a wall (a `blocksSwings` body) before any enemy bounces off it for this long. */
+  public recoilSeconds: number = 0.45
   public hitHeavySeconds: number = 0.9
   public knockbackSpeed: number = 4
   public knockbackSeconds: number = 0.15
@@ -113,6 +116,8 @@ export default class SoulsPlayerNode extends CharacterNode {
   public drinkTime: number = 0.85
   public hitLightClip: string = 'Souls_HitLight'
   public hitHeavyClip: string = 'Souls_HitHeavy'
+  /** Played when a swing bounces off a wall. */
+  public recoilClip: string = 'Souls_HitLight'
   public swapClip: string = 'Souls_Swap'
   public restClip: string = 'Souls_Rest'
   public fogWalkClip: string = 'Souls_FogWalk'
@@ -123,6 +128,11 @@ export default class SoulsPlayerNode extends CharacterNode {
   public level: number = 1
   public isDead: boolean = false
   public invulnerable: boolean = false
+  /**
+   * Whether attacks can see this character at all. False during i-frames (roll, backstep, fog, rest,
+   * death): every hitbox sweep and bolt passes straight through. See SoulsHitbox.
+   */
+  public hurtboxActive: boolean = true
   public actionState: string = 'free'
   public isSprinting: boolean = false
   public weaponName: string = ''
@@ -156,7 +166,9 @@ export default class SoulsPlayerNode extends CharacterNode {
   private _clip: string = ''
   private _clipLength: number = 0
   private _playSpeed: number = 1
-  private _hitDone: boolean = false
+  /** The active window has opened this attack (the swing has started connecting). */
+  private _windowOpened: boolean = false
+  private _swing: Swing = newSwing()
   private _comboOpen: boolean = false
   private _recovered: boolean = false
   private _usesEvents: boolean = false
@@ -169,6 +181,8 @@ export default class SoulsPlayerNode extends CharacterNode {
   private _gestureSeconds: number = 0
   private _fogSpeed: number = 0
   private _interactTarget: Node = null
+  /** Interactables whose trigger zone the player is standing in. See onTriggerEnter. */
+  private _nearby: Node[] = []
 
   onStart() {
     this.setVariable('isPlayer', true, 'boolean', 'public')
@@ -368,6 +382,7 @@ export default class SoulsPlayerNode extends CharacterNode {
       case 'drink': this._drink(intent); break
       case 'swap': this._swap(intent); break
       case 'hit': this._hit(intent); break
+      case 'recoil': this._hit(intent); break
       case 'rest': this._holdStill(intent); break
       case 'gesture':
         this._holdStill(intent)
@@ -381,6 +396,7 @@ export default class SoulsPlayerNode extends CharacterNode {
     }
 
     this.invulnerable = this._computeInvulnerable()
+    this.hurtboxActive = !this.invulnerable
     this._tickStamina(delta)
   }
 
@@ -432,10 +448,13 @@ export default class SoulsPlayerNode extends CharacterNode {
 
     // Fallback timing for clips that carry no events.
     if (!this._usesEvents && move) {
-      if (!this._hitDone && t >= num(move.hitTime, 0.4)) this._landHit()
+      const hitTime = num(move.hitTime, 0.4)
+      if (!this._windowOpened && t >= hitTime) this._openWindow()
+      if (this._swing.open && t >= hitTime + num(move.activeSeconds, 0.15)) closeSwing(this._swing)
       if (!this._comboOpen && t >= num(move.comboTime, 0.5)) this._comboOpen = true
       if (!this._recovered && t >= num(move.recoverTime, 0.7)) this._recovered = true
     }
+    if (this._swing.open && this._stepSwing()) return
 
     // Track toward the target (or the stick) only during the wind-up.
     if (this._stateTime < num(move?.trackSeconds, 0.2)) {
@@ -455,7 +474,7 @@ export default class SoulsPlayerNode extends CharacterNode {
 
     // Chain: inside the combo window, a buffered attack goes straight to the next move.
     const buffered = this._bufferAge <= this.inputBufferSeconds ? this._bufferAction : ''
-    if (this._comboOpen && this._hitDone && (buffered === 'light' || buffered === 'heavy')) {
+    if (this._comboOpen && this._windowOpened && (buffered === 'light' || buffered === 'heavy')) {
       const next = buffered === 'light' ? (move?.next || '') : ''
       this._startAttack(buffered, next)
       return
@@ -517,7 +536,8 @@ export default class SoulsPlayerNode extends CharacterNode {
     this._spend(num(move.staminaCost, 20) * num(weapon.staminaMul, 1))
 
     this._move = move
-    this._hitDone = false
+    this._windowOpened = false
+    closeSwing(this._swing)
     this._comboOpen = false
     this._recovered = false
     this._enter('attack')
@@ -594,7 +614,8 @@ export default class SoulsPlayerNode extends CharacterNode {
   private _onAnimEvent(name: string, clip: string): void {
     if (clip && this._clip && clip !== this._clip) return
     if (this.actionState === 'attack') {
-      if (name === 'hit' && !this._hitDone) this._landHit()
+      if (name === 'hit' && !this._windowOpened) this._openWindow()
+      else if (name === 'hitEnd') closeSwing(this._swing)
       else if (name === 'combo') this._comboOpen = true
       else if (name === 'recover') this._recovered = true
     } else if (this.actionState === 'drink' && name === 'drink' && !this._drank) {
@@ -602,10 +623,44 @@ export default class SoulsPlayerNode extends CharacterNode {
     }
   }
 
-  private _landHit(): void {
-    this._hitDone = true
+  /** The `hit` event: the blade starts connecting. It stays live until `hitEnd`. */
+  private _openWindow(): void {
+    this._windowOpened = true
+    openSwing(this._swing)
+  }
+
+  /**
+   * One frame of the active window: sweep the blade, damage what it reached, and bounce off a wall it
+   * reached first. Returns true when the swing ended in a recoil (the state has changed).
+   */
+  private _stepSwing(): boolean {
+    const weapon = this._weapon()
+    const blade = bladeCapsule(weapon)
+    if (!blade) return false
+    const move = this._move as any
+    const contact = stepSwing(this.scene?.physics, this._swing, blade, this, 'enemy', move?.bounceOff !== false)
     const gm = this._gm as any
-    gm?.resolvePlayerHit?.(this, this._move, this._weapon())
+    for (const t of contact.targets) gm?.applyPlayerHit?.(this, move, weapon, t.node, t.point)
+    if (contact.blockedAt && !contact.targets.length) {
+      this._recoil(contact.blockedAt)
+      return true
+    }
+    if (contact.blockedAt) closeSwing(this._swing)
+    return false
+  }
+
+  /** The blade met a wall: sparks, a jolt, and a short stagger with the swing cancelled. */
+  private _recoil(at: number[]): void {
+    closeSwing(this._swing)
+    const gm = this._gm as any
+    gm?.fx?.(gm.hitSparkTemplate, at)
+    gm?.sfx?.('Recoil')
+    gm?.shake?.(0.2)
+    this._stopAction()
+    this._motionDir = this._forward(-1)
+    this._enter('recoil')
+    this._actionSeconds = this.recoilSeconds
+    this._play(this.recoilClip, 1.4)
   }
 
   private _doDrink(): void {
@@ -676,22 +731,37 @@ export default class SoulsPlayerNode extends CharacterNode {
     }
   }
 
+  /**
+   * Entering an interactable's trigger zone makes it a candidate; leaving takes it off. The zones are
+   * authored as each interactable's `trigger` volume — no distance is measured in script.
+   */
+  onTriggerEnter(other: Node) {
+    if (other && (other as any).interact && !this._nearby.includes(other)) this._nearby.push(other)
+    ;(this._gm as any)?.onPlayerEnteredZone?.(other)
+  }
+
+  onTriggerExit(other: Node) {
+    this._nearby = this._nearby.filter(n => n !== other)
+    ;(this._gm as any)?.onPlayerLeftZone?.(other)
+  }
+
+  /** The interactables in range right now, nearest first (for tests and the HUD). */
+  public nearbyInteractables(): Node[] { return this._nearby.slice() }
+
   private _findInteractable(): void {
     this._interactTarget = null
     this.interactPrompt = ''
-    if (this.actionState !== 'free') return
-    const gm = this._gm as any
-    const list: Node[] = gm?.interactables?.() ?? []
+    if (this.actionState !== 'free' || !this._nearby.length) return
     const me = this.worldPosition
     let best: Node = null
     let bestDistance = Infinity
-    for (const node of list) {
+    for (const node of this._nearby) {
       const n = node as any
       if (!node || node.spawned === false || !n.interact) continue
       if (n.canInteract && !n.canInteract(this)) continue
+      // Inside several zones at once (a lever beside a door): the nearest wins.
       const p = node.worldPosition
       const d = Math.hypot(p[0] - me[0], p[2] - me[2])
-      if (d > num(n.interactRadius, 1.6) || Math.abs(p[1] - me[1]) > 2.5) continue
       if (d < bestDistance) { best = node; bestDistance = d }
     }
     if (!best) return
@@ -760,6 +830,7 @@ export default class SoulsPlayerNode extends CharacterNode {
   }
 
   private _enter(state: string): void {
+    if (state !== 'attack') closeSwing(this._swing)
     this.actionState = state
     this._stateTime = 0
     if (state === 'free') {

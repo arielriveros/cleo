@@ -12,10 +12,11 @@ import { Node } from 'cleo'
  * ## The interactable protocol
  *
  * Every interactable in Hollow Keep — this, pickups, bloodstains, messages, the lever, the door and the
- * fog gate — implements the same four members and registers with the GameManager. The player scans the
- * registered ones each frame, prompts for the nearest in range, and calls `interact` on Interact:
+ * fog gate — carries a TRIGGER volume (its interaction zone, authored on the node like a collider) and
+ * implements the same three members. Walking into the zone makes it a candidate (the player's
+ * onTriggerEnter); walking out removes it. Of the candidates whose `canInteract` passes, the player
+ * prompts for the nearest and calls `interact` on Interact. No distance is measured in script:
  *
- *   interactRadius                  metres (planar) the player must be within
  *   canInteract(player): boolean    whether to offer it at all right now
  *   promptText(player): string      what the HUD prompt says
  *   interact(player): void          do it
@@ -25,7 +26,6 @@ import { Node } from 'cleo'
  */
 export default class SoulsBonfireNode extends Node {
   public startLit: boolean = false
-  public interactRadius: number = 1.8
   public lightIntensity: number = 900
   public isBonfire: boolean = true
   public lit: boolean = false

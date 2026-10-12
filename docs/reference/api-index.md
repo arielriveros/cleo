@@ -169,10 +169,11 @@ types under their historical `Animation*` names.
 
 | Export | What it is |
 |---|---|
-| `PhysicsSystem` | The world: step, raycast, ground queries, ragdolls, gravity, stats. |
+| `PhysicsSystem` | The world: step, raycast, shape queries (`overlapSphere`/`Capsule`/`Box`, `sweepCapsule`/`Sphere`), ground queries, ragdolls, gravity, stats. |
 | `Body` (`RigidBody`), `Trigger` | Bodies. `Body` is the exported name. |
 | `Shape` | Collider factories: `Box`, `Sphere`, `Capsule`, `Cylinder`, `Plane`, `ConvexHull`, `TriMesh`, `Heightfield`. |
 | `PhysicsRaycastHit` / `PhysicsRaycastOptions` *(types)* | |
+| `OverlapHit` / `OverlapOptions` *(types)* | Results and filters of the shape queries. |
 | `Ragdoll`, `RAGDOLL_DEFAULTS`, `RagdollOptions` *(type)* | |
 | `convexHull`, `hullFromPositions`, `HULL_BUDGETS`, `Hull` / `HullQuality` *(types)* | Hull fitting. |
 | `physicsStats`, `PhysicsStats` *(type)* | |

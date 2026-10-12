@@ -40,12 +40,13 @@ still push the camera out of itself.
 ## Triggers
 
 A trigger detects overlap without responding to collision. Add one, give it shapes, and the node's
-`onTrigger(other)` fires while something is inside.
+`onTriggerEnter(other)` / `onTriggerExit(other)` fire as things come and go (on both nodes of the
+overlap), and `onTrigger(other)` on first contact. A node can have a body and a trigger at once.
 
 Trigger volumes are drawn in the viewport when the debug eye menu has them on.
 
-> A trigger fires **while** overlapping, not once. Latch it if the thing it does should happen once —
-> see [the pickup pattern](../scripting/patterns.md#a-pickup).
+> `onTrigger` fires on every new contact — walk out and back in and it fires again. Latch it if the
+> thing it does should happen once — see [the pickup pattern](../scripting/patterns.md#a-pickup).
 
 ## Shapes
 

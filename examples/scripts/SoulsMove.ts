@@ -8,7 +8,9 @@ import { Node } from 'cleo'
  *
  * Three moments drive an attack, and they come from EVENT MARKERS on the clip when it has them:
  *
- *   hit       the blade connects — damage is dealt to everything in `range` and `arcDeg`
+   *   hit       the blade becomes ACTIVE: from here until `hitEnd` it is swept every frame and damages
+ *             each enemy hurtbox it touches, once per swing (SoulsHitbox)
+ *   hitEnd    the blade stops being active
  *   combo     from here a buffered attack chains into `next`
  *   recover   from here a buffered roll or drink may cancel the rest of the swing
  *
@@ -26,9 +28,11 @@ export default class SoulsMoveNode extends Node {
   public damageMul: number = 1
   public poiseMul: number = 1
   public staminaCost: number = 16
-  /** Metres in front of the player the hit reaches, and the FULL width of the swing in degrees. */
-  public range: number = 2.3
-  public arcDeg: number = 110
+  /**
+   * The swing bounces off walls (`blocksSwings` bodies) it reaches before any enemy: sparks, a recoil, no
+   * damage. Heavy slams turn it off and plough through.
+   */
+  public bounceOff: boolean = true
   /** Forward drive: from `lungeStart` (clip seconds) for `lungeSeconds`, at `lungeSpeed` m/s. */
   public lungeStart: number = 0.1
   public lungeSeconds: number = 0.15
@@ -37,6 +41,7 @@ export default class SoulsMoveNode extends Node {
   public trackSeconds: number = 0.2
   /** Fallback timings, used only when the clip carries no `hit` event. Clip seconds. */
   public hitTime: number = 0.38
+  public activeSeconds: number = 0.15
   public comboTime: number = 0.45
   public recoverTime: number = 0.62
   /** Name of the move a buffered light attack chains into. Empty restarts the chain. */

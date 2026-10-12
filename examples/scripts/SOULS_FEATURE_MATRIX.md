@@ -88,9 +88,9 @@ souls-like game features it has or lacks. It is a map for two jobs:
 | Dynamic capsule characters | ✅ | Player and enemies. |
 | Raycast | ✅ | Lock-on line of sight, projectile flight, blood decals finding the floor. |
 | Ragdoll | ◐ | Enemies on death; the player does not ragdoll. |
-| Triggers (`onTrigger`), collision callbacks (`onCollision`) | ✗ | Interactables use distance checks instead. |
+| Triggers (`onTriggerEnter`/`onTriggerExit`) | ✅ | Every interactable's zone, and the boss arena. Collision callbacks (`onCollision`) are unused. |
 | Convex hulls | ✗ | |
-| Overlap and shape queries | ✗ (not in engine) | Melee uses a range-plus-arc check (§2). |
+| Overlap and shape queries (`sweepCapsule`, `sweepSphere`, `overlapSphere`) | ✅ | Blade hitboxes, the bolt, slams (`SoulsHitbox`). |
 
 ### Control and AI
 
@@ -166,13 +166,14 @@ souls-like game features it has or lacks. It is a map for two jobs:
 |---|---|---|---|---|
 | Combat | Light combo chain, heavy attack per weapon | ✅ | `SoulsMove` `next` chain, `SoulsWeapon` | |
 | | Stamina costs and regeneration delay | ✅ | `SoulsPlayer` | |
-| | Roll and backstep with i-frames | ✅ | `SoulsPlayer._computeInvulnerable` | |
+| | Roll and backstep with i-frames | ✅ | `SoulsPlayer._computeInvulnerable` → `hurtboxActive` off: blades and bolts pass through | |
 | | Sprint (hold roll), input buffering | ✅ | `SoulsPlayer` | |
 | | Jump | ✗ | `jumpSpeed: 0` | Ready: `CharacterNode` jump. |
 | | Block / guard / shield | ✗ | | Ready: a state plus a stamina-on-block rule in scripts. |
 | | Parry and riposte | ✗ | | Ready: animation events for the parry window, `playAction` for the riposte. |
 | | Backstab | ✗ | | Ready: the angle test exists (`forwardYaw`, `angleDiff`). |
-| | Blade hitboxes (instead of range plus arc) | ✗ | Hits are range and arc checks | **Engine gap:** no overlap or shape queries (`onTrigger` only fires on physics steps). |
+| | Blade hitboxes | ✅ | `SoulsHitbox.stepSwing`: the blade capsule swept between frames against the hurtbox capsules | Whole-body hurtboxes; no limb multipliers. |
+| | Wall bounce | ✅ | `blocksSwings` bodies stop a light swing: sparks, recoil | Heavies plough through. |
 | Poise and damage | Enemy poise, stagger, hyper armour | ✅ | `SoulsEnemy.receiveHit` | |
 | | Player flinch, heavy stagger with knockback | ✅ | `SoulsPlayer.receiveDamage` | |
 | | Player poise | ✗ | SOULS_DEMO §13 | Ready: script only. |
@@ -224,8 +225,8 @@ Ranked by what they add against what they cost.
    animator plus physics).
 5. **Keys and keyed doors.** Trivial with `SoulsDoor` and a new pickup `kind`.
 6. **Bake the navmesh, assign audio samples.** No code: these make two wired features actually work.
-7. **Blade hitboxes.** Better melee accuracy. Needs **engine overlap queries** (sphere/capsule casts),
-   or per-step triggers.
+7. **Per-bone hurtboxes.** Head and limb hits, with multipliers. The shape queries already support it;
+   it needs small capsules that follow the skeleton.
 8. **Ladders and NPCs.** Larger script work: a climb state, a dialogue UI.
 
 The engine features the demo does not exercise yet, and that could be shown with little change:

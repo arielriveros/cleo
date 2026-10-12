@@ -172,7 +172,8 @@ class sits on the node you just looked up.
 | `onStart()` | Once per node lifetime, after variables are restored. May be `async`. |
 | `onUpdate(delta, time)` | Every frame while running and unpaused. |
 | `onCollision(other)` | Needs a body on **both** nodes. |
-| `onTrigger(other)` | Needs a trigger on this node. |
+| `onTrigger(other)` | Needs a trigger on this node. Fires on first contact. |
+| `onTriggerEnter(other)` / `onTriggerExit(other)` | A trigger overlap began / ended. Called on both nodes, once per frame after physics. |
 | `onAction(action, state)` | Just before this frame's `onUpdate`. |
 | `onThink(delta)` | Controllers only. Runs last in the control pass. |
 | `onDespawn()` | On `despawn()`, `remove()`, or a parent going away. |

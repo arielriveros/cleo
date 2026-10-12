@@ -16,17 +16,16 @@ import { Node } from 'cleo'
  *
  * A death mid-fight resets it to `closed` (the manager calls `resetGate`).
  *
- * The arena is a circle (`arenaCenter`, `arenaRadius`); the manager uses `isInsideArena` to start the
- * fight anyway if the player ever ends up inside without walking through.
+ * The prompt comes from the gate's TRIGGER volume (a box spanning both sides of the wall): standing in it
+ * offers "Traverse", and `canInteract` only allows it from outside. A separate `Boss Arena` zone (a
+ * trigger with the `isBossArena` variable) starts the fight if the player ever gets inside without
+ * walking through.
  */
 export default class SoulsFogGateNode extends Node {
-  public interactRadius: number = 2.2
   /** Metres in front of the gate (outside) the player is lined up at before walking. */
   public entryDistance: number = 1.1
   public walkDistance: number = 2.8
   public walkSeconds: number = 1.5
-  public arenaCenter: [number, number, number] = [0, 0, 0]
-  public arenaRadius: number = 15
   public isFogGate: boolean = true
   /** 'closed' | 'fight' | 'gone' */
   public gateState: string = 'closed'
@@ -85,11 +84,6 @@ export default class SoulsFogGateNode extends Node {
     if (this.gateState === 'gone') return
     this.gateState = 'closed'
     this._solid(true)
-  }
-
-  public isInsideArena(point: ArrayLike<number>): boolean {
-    const c = this.arenaCenter
-    return Math.hypot(point[0] - c[0], point[2] - c[2]) < this.arenaRadius && this._side(point) > 1
   }
 
   onUpdate(delta: number) {

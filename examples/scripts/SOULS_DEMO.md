@@ -106,18 +106,43 @@ others import with `import { yawTo } from './SoulsMath'`. Game state flows throu
 | `SoulsEnemyAttack` | `<enemy>/Attacks/*` | One enemy attack per node. |
 | `SoulsEnemyBrain` | `<enemy>/Brain` (last child) | Player-only targeting (the engine has no factions), plus blackboard flags for the behaviour machine. |
 | `SoulsEnemySpawn` | `Enemy Spawns/*` | Instantiates a template, and re-creates it on rest or death. |
-| `SoulsProjectile` | `Magic Bolt` template | Swept-raycast flight; a roll's i-frames let you pass through. |
+| `SoulsProjectile` | `Magic Bolt` template | Swept-sphere flight against hurtboxes, plus a ray against the world; a roll's i-frames let you pass through. |
+| `SoulsHitbox` | script module | Blade hitboxes, hurtboxes and swing blockers, shared by the player, the enemies and the bolt. See **Combat** below. |
 | `SoulsFx` | effect templates | Bursts its particles, fades its lights, then removes itself. |
 | `SoulsBonfire`, `SoulsPickup`, `SoulsBloodstain`, `SoulsMessage`, `SoulsLever`, `SoulsDoor`, `SoulsFogGate` | interactables | Each one follows the **interactable protocol** below. |
 | `SoulsHud`, `SoulsBanner`, `SoulsBonfireMenu` | UI roots | The HUD, the big banners, and the level-up menu. |
 
-**Interactable protocol.** An interactable registers with the GameManager and exposes these members:
-- `interactRadius`
+**Interactable protocol.** An interactable carries a **trigger volume** (its interaction zone, set in
+the node's **Physics** section like a collider) and exposes these members:
 - `canInteract(player)`
 - `promptText(player)`
 - `interact(player)`
 
-The player prompts for the nearest interactable in range. To make a new kind, copy `SoulsMessage.ts`.
+Walking into the zone makes it a candidate (the player's `onTriggerEnter`); walking out removes it
+(`onTriggerExit`). The player prompts for the nearest candidate whose `canInteract` passes. No distance is
+measured in script, so to make the prompt appear from further away, **resize the trigger**. The build
+uses a cylinder whose radius is the reach minus the player's 0.3 m capsule radius; the door and the fog
+gate use a box spanning both sides of the wall, and their `canInteract` picks the side. To make a new
+kind, copy `SoulsMessage.ts` and give the node a trigger.
+
+The `Boss Arena` node (under `Interactables`) is a zone too: a trigger box with the `isBossArena`
+variable. Entering it starts the boss fight even if the player got in without walking through the fog.
+
+**Combat.** Hits are decided by shapes, not distances (`SoulsHitbox`):
+- **Hurtboxes** are the characters' own capsule colliders. A character whose `hurtboxActive` is false is
+  invisible to every attack. That is what i-frames are: during a roll, backstep, fog walk, rest or death
+  the player's hurtbox is off, and during its phase-two roar the boss's is.
+- **Hitboxes** are capsules along the weapon blades: `bladeStart`, `bladeEnd` and `bladeRadius`, in the
+  weapon's `Mesh` space. On the player's weapons they are `SoulsWeapon` fields; on an enemy's `Weapon`
+  node they are plain variables. An enemy `Weapon` without them cannot land melee hits.
+- **Active window.** From a clip's `hit` event to its `hitEnd` event, the blade is swept every frame from
+  where it was last frame to where it is now, so a fast swing cannot pass through a target between
+  frames. Each target is hit once per swing, at the point the blade touched it.
+- **Swing blockers.** Walls, pillars and the gates carry the variable `blocksSwings`. A player swing whose
+  blade reaches one before any enemy bounces off it: sparks, a recoil (`recoilSeconds`, `recoilClip`), no
+  damage. Heavies (`bounceOff: false` on the move) plough through. Floors never block. Enemy attacks
+  ignore blockers unless the attack sets `bounceOff`.
+- **Slams** (`aoeRadius`) hit every hurtbox inside the radius at the `hit` event.
 
 **Editing behaviour.** Every number in the tables below is a **public field**, so it appears in the
 node's **Scripts** section in the inspector. A field edited on a node overrides the code default. Fields
@@ -246,27 +271,36 @@ If you build a new machine for a new model, keep the two trigger names. The scri
 
 | Clip | Length | Required event | Referenced by |
 |---|---|---|---|
-| `Souls_Enemy_Swing` | 1.2 s | `hit` | Hollow `Swing`, Sorcerer `Shove` |
-| `Souls_Enemy_Sweep` | 1.3 s | `hit` | Hollow `Sweep`, Knight `Sweep`, Warden `Sweep` |
-| `Souls_Enemy_Overhead` | 1.7 s | `hit` | Knight `Overhead`, Warden `Slam` |
-| `Souls_Enemy_Thrust` | 1.2 s | `hit` | Knight `Thrust`, Warden `Lunge` |
+| `Souls_Enemy_Swing` | 1.2 s | `hit`, `hitEnd` | Hollow `Swing`, Sorcerer `Shove` |
+| `Souls_Enemy_Sweep` | 1.3 s | `hit`, `hitEnd` | Hollow `Sweep` (and the source of the Tall/Giant variants) |
+| `Souls_Tall_Sweep` | 1.3 s | `hit`, `hitEnd` | Knight `Sweep` |
+| `Souls_Giant_Sweep` / `Souls_Giant_Backsweep` | 1.3 / 1.4 s | `hit`, `hitEnd` | Warden `Sweep` / `Backsweep` |
+| `Souls_Enemy_Overhead` | 1.7 s | `hit`, `hitEnd` | Knight `Overhead`, Warden `Slam` |
+| `Souls_Enemy_Thrust` | 1.2 s | `hit`, `hitEnd` | Knight `Thrust` |
+| `Souls_Giant_Thrust` | 1.2 s | `hit`, `hitEnd` | Warden `Lunge` |
 | `Souls_Cast` | 1.2 s | `cast` (the bolt leaves) | Sorcerer `Bolt`, Warden `Bolt Fan` |
 | `Souls_Leap` | 1.8 s | `hit` (landing) | Warden `Leap` |
 | `Souls_Roar` | 2.0 s | — | Warden → `roarClip` (phase two) |
-| `Souls_GS_L2` | 1.4 s | `hit` | Warden `Backsweep` (follows `Sweep`) |
 
 ### What the events mean
 
 | Event | Meaning |
 |---|---|
-| `hit` | The contact frame. Damage is dealt to everything in range and in the arc at that instant, so a roll during the wind-up genuinely avoids it. A clip may carry several `hit`s for multi-hit swings. |
+| `hit` | The blade becomes ACTIVE: from here it is swept every frame against enemy (or player) hurtboxes. For a slam, the moment of impact. |
+| `hitEnd` | The blade stops being active. Each target is hit at most once between `hit` and `hitEnd`. |
 | `combo` | From here, a buffered attack chains into the move named in `next`. |
 | `recover` | From here, a buffered roll or drink may cancel the rest of the swing. |
 | `drink` | The flask is consumed and the heal begins. |
 | `cast` | Projectiles spawn at the cast socket. |
 
-**No events yet?** A clip without a `hit` event still works. The move's `hitTime`, `comboTime` and
-`recoverTime` fields (clip seconds) are used instead. Import first, add markers later.
+**No events yet?** A clip without a `hit` event still works. The move's `hitTime` + `activeSeconds`,
+`comboTime` and `recoverTime` fields (clip seconds) are used instead. Import first, add markers later.
+
+**The placeholder windows** run from halfway through the swing into the striking key to halfway through
+the follow-through after it (`placeholderClips.mjs`). The 1.2x knight and the 1.8x Warden swing
+`Souls_Tall_Sweep`, `Souls_Giant_Sweep`, `Souls_Giant_Backsweep` and `Souls_Giant_Thrust`: the same
+motions, crouched with the arms dropped, because a man-sized swing scaled up passes over the player's
+head — and now a swing over the head misses.
 
 **In place.** Actions ignore root motion, so a lunge or roll forward is driven by script: `lungeStart`,
 `lungeSeconds` and `lungeSpeed` on moves and attacks, and `roll*` on the player. Bake root motion out on
@@ -410,7 +444,8 @@ stay. A missing widget is simply skipped.
 ### 11.3 Point a move or attack at a new clip
 
 - **Player attack:** select `Player ▸ Weapons ▸ Weapon_… ▸ Light1` (or `Heavy`, …). In **Scripts**, set
-  `clip`. Tune `playSpeed`, `range`, `arcDeg`, `staminaCost` and the `lunge*` fields to suit the motion.
+  `clip`. Tune `playSpeed`, `staminaCost` and the `lunge*` fields to suit the motion. Reach comes from
+  the blade itself: if the new swing misses, lengthen the lunge or the weapon's `bladeEnd`/`bladeRadius`.
 - **Player one-shots:** select `Player` and set `rollClip`, `drinkClip`, `hitLightClip` and the other
   clip fields.
 - **Enemy attack:** open the enemy's template (**Assets ▸ Templates ▸ Enemies**, double-click it), then
@@ -469,8 +504,9 @@ The scripts find the model automatically: it is the first **Model** child that h
 2. For every walkable or blocking surface, keep a collider: either an existing `Level` box (hide its
    mesh) or a new body in the **Physics** section.
 3. Move the **Enemy Spawns** nodes. Each one's position and facing is where its enemy stands.
-4. Move the `Fog Gate` so local +Z points into the arena. Set its `arenaCenter` and `arenaRadius` to cover
-   the arena, on the placed copy (they become its overrides).
+4. Move the `Fog Gate` so local +Z points into the arena, and resize the `Boss Arena` node's trigger box
+   to cover the arena past the fog.
+   Mark new walls and pillars with the `blocksSwings` variable (boolean, true) so swings bounce off them.
 5. **Torches, messages, pickups:** place more by dragging the template from Assets into the viewport.
    Give a new message its text, and a new pickup what it gives, in the copy's Scripts section.
 6. Re-bake the navmesh (§11.11).
@@ -586,8 +622,10 @@ npx vitest run tests/soulsDemo        # rules + generated-project checks
 - **Placeholder clips are crude.** They exist for timing and events. The roll is an in-place somersault.
 - **No root motion in actions.** One-shot clips must be in place; travel is scripted.
 - **The navmesh ships unbaked** (§11.11).
-- **Hits are arcs, not hitboxes.** Melee is resolved as range plus arc at the `hit` event, not by blade
-  collision, because the engine has no overlap queries.
+- **Hurtboxes are whole-body capsules.** A blade that grazes an outstretched arm outside the capsule
+  does not count, and there are no head or limb multipliers.
+- **Enemy reach comes from the placeholder swings.** The attacks' `maxRange` values were measured against
+  where each blade actually lands; a replacement clip needs them re-checked.
 - **The player has no poise.** Every hit outside i-frames interrupts.
 - **No blocking or parrying, and no inventory beyond the two weapons and the flask** — by design for this demo.
 - **The level-up menu is keyboard/gamepad first.** The +/- and Confirm/Leave buttons also accept mouse clicks.

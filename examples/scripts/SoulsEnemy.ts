@@ -1,5 +1,6 @@
 import { CharacterNode, Logger, ModelNode, Node, setMoveWorld } from 'cleo'
 import { num, planarDistance } from './SoulsMath'
+import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing } from './SoulsHitbox'
 
 /**
  * Hollow Keep — every enemy: the Hollow, the Caster, the Elite Knight and the boss. Attach to the
@@ -9,7 +10,9 @@ import { num, planarDistance } from './SoulsMath'
  *   Hollow                Character (this script) — capsule body, friction 0
  *   ├── <model>           skinned model with a state machine that has `Died` and `Revive` triggers
  *   ├── LockPoint *       empty node at chest height: where the lock-on camera and reticle aim
- *   ├── Weapon            any held prop, attached to the RightHand socket (optional, visual only)
+ *   ├── Weapon            the held weapon, attached to the RightHand socket. Its `bladeStart`/`bladeEnd`/
+ *   │                     `bladeRadius` variables are the HITBOX (see SoulsHitbox); without them it is
+ *   │                     visual only and the enemy cannot land melee hits
  *   ├── Attacks *         group of SoulsEnemyAttack data nodes — the moveset
  *   ├── HealthBar         world-space UI Root with a `Fill` progress bar (optional; not on the boss)
  *   ├── PhaseAura         particle system started when the boss turns (optional)
@@ -95,6 +98,8 @@ export default class SoulsEnemyNode extends CharacterNode {
   public phase: number = 1
   public poise: number = 25
   public fightState: string = 'ai'
+  /** Whether attacks can see this enemy. Off while dead and during the boss's phase-two roar. */
+  public hurtboxActive: boolean = true
   /** Where the enemy was spawned; the brain walks back here. */
   public home: number[] = [0, 0, 0]
 
@@ -119,7 +124,10 @@ export default class SoulsEnemyNode extends CharacterNode {
   private _clipLength: number = 0
   private _playSpeed: number = 1
   private _usesEvents: boolean = false
-  private _hitDone: boolean = false
+  /** The attack's active window has opened (its `hit` event, or the fallback `hitTime`). */
+  private _windowOpened: boolean = false
+  private _swing: Swing = newSwing()
+  private _weapon: Node = null
   private _actionSeconds: number = 0
   private _lungeSpeedNow: number = 0
   private _strafeDir: number = 1
@@ -137,6 +145,7 @@ export default class SoulsEnemyNode extends CharacterNode {
     this._healthBar = this.getChildByName('HealthBar')[0] ?? null
     this._healthFill = this._healthBar ? this._find(this._healthBar, 'Fill') : null
     this._aura = this.getChildByName('PhaseAura')[0] ?? null
+    this._weapon = this.getChildByName('Weapon')[0] ?? null
     const group = this.getChildByName('Attacks')[0]
     this._attacks = group ? group.children.filter(c => (c as any).isEnemyAttack) : []
     if (!this._attacks.length) Logger.warn('Hollow Keep: enemy "' + this.name + '" has no Attacks.', 'Script')
@@ -320,7 +329,8 @@ export default class SoulsEnemyNode extends CharacterNode {
     this._attack = attack
     this._lastAttack = attack.name
     this._cooldowns[attack.name] = num(attack.cooldown, 0)
-    this._hitDone = false
+    this._windowOpened = false
+    closeSwing(this._swing)
     this._enter('attack')
     this._playSpeed = Math.max(0.05, num(attack.playSpeed, 1) * this._speedMul)
     this._play(attack.clip, this._playSpeed)
@@ -340,7 +350,12 @@ export default class SoulsEnemyNode extends CharacterNode {
   private _attacking(intent: any, delta: number): void {
     const attack = this._attack
     const t = this._stateTime * this._playSpeed
-    if (!this._usesEvents && !this._hitDone && t >= num(attack?.hitTime, 0.6)) this._land()
+    if (!this._usesEvents) {
+      const hitTime = num(attack?.hitTime, 0.6)
+      if (!this._windowOpened && t >= hitTime) this._land()
+      if (this._swing.open && t >= hitTime + num(attack?.activeSeconds, 0.15)) closeSwing(this._swing)
+    }
+    if (this._swing.open) this._stepSwing()
 
     if (this._player && this._stateTime < num(attack?.trackSeconds, 0.4))
       this._turnToward(this._player.worldPosition, this.engageTurnRate * 1.5 * delta)
@@ -373,21 +388,48 @@ export default class SoulsEnemyNode extends CharacterNode {
 
   private _onAnimEvent(name: string, clip: string): void {
     if (this.fightState !== 'attack' || (clip && clip !== this._clip)) return
-    if (name === 'hit' || name === 'cast') this._land()
+    if ((name === 'hit' || name === 'cast') && !this._windowOpened) this._land()
+    else if (name === 'hitEnd') closeSwing(this._swing)
   }
 
-  /** The contact frame: a melee check, or the projectile(s) leaving the hand. */
+  /**
+   * The contact frame. A projectile attack fires; a slam (`aoeRadius`) hits every player hurtbox inside
+   * the radius at once; a melee attack opens its active window, and the weapon is swept every frame
+   * until `hitEnd` (see _stepSwing).
+   */
   private _land(): void {
-    this._hitDone = true
+    this._windowOpened = true
     const attack = this._attack
     if (!attack) return
     const gm = this._gm as any
     if (attack.projectileTemplate) { this._fire(attack); return }
-    if (num(attack.aoeRadius, 0) > 0) {
+    const aoe = num(attack.aoeRadius, 0)
+    if (aoe > 0) {
       gm?.shake?.(0.5)
       gm?.fx?.(attack.impactTemplate || '', this.worldPosition)
+      const p = this.worldPosition
+      const hits = (this.scene?.physics as any)?.overlapSphere?.([p[0], p[1] + 0.5, p[2]], aoe, {
+        ignore: this, filter: (node: Node) => !!node && node !== this && typeof (node as any).receiveDamage === 'function'
+          && (node as any).hurtboxActive !== false && !(node as any).isDead,
+      }) ?? []
+      for (const h of hits) gm?.applyEnemyHit?.(this, attack, h.node)
+      return
     }
-    if (gm?.resolveEnemyHit?.(this, attack)) gm?.sfx?.('Player Hit')
+    openSwing(this._swing)
+  }
+
+  /** One frame of the active window: sweep the weapon's blade; the player is hit at most once. */
+  private _stepSwing(): void {
+    const blade = bladeCapsule(this._weapon)
+    if (!blade) return
+    const attack = this._attack as any
+    const contact = stepSwing(this.scene?.physics, this._swing, blade, this, 'player', !!attack?.bounceOff)
+    const gm = this._gm as any
+    for (const t of contact.targets) gm?.applyEnemyHit?.(this, attack, t.node)
+    if (contact.blockedAt) {
+      closeSwing(this._swing)
+      gm?.fx?.(gm.hitSparkTemplate, contact.blockedAt)
+    }
   }
 
   private _fire(attack: any): void {
@@ -468,7 +510,8 @@ export default class SoulsEnemyNode extends CharacterNode {
   private _enter(state: string): void {
     this.fightState = state
     this._stateTime = 0
-    if (state !== 'attack') this._attack = null
+    if (state !== 'attack') { this._attack = null; closeSwing(this._swing) }
+    this.hurtboxActive = state !== 'dead' && state !== 'phase'
   }
 
   private _still(intent: any): void {

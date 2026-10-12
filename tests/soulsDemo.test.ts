@@ -464,11 +464,20 @@ describe('the fog gate', () => {
         expect(g.gateState).toBe('gone');
     });
 
-    it('counts a point as inside the arena only past the gate', () => {
-        const g = gate();
-        expect(g.isInsideArena([0, 0, 10])).toBe(true);
-        expect(g.isInsideArena([0, 0, 0.5])).toBe(false);
-        expect(g.isInsideArena([0, 0, 30])).toBe(false);
+    it('starts the boss fight when the player walks into the arena zone, and only that zone', () => {
+        const m = gm() as any;
+        const started: any[] = [];
+        m.startBossFight = (g: any) => started.push(g);
+        m._player = { isDead: false };
+        const arena = new Node('Boss Arena');
+        arena.setVariable('isBossArena', true, 'boolean', 'public');
+        m.onPlayerEnteredZone(new Node('Some Message'));
+        expect(started.length).toBe(0);
+        m.onPlayerEnteredZone(arena);
+        expect(started.length).toBe(1);
+        m.bossDefeated = true;
+        m.onPlayerEnteredZone(arena);
+        expect(started.length).toBe(1);
     });
 });
 

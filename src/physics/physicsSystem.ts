@@ -11,6 +11,7 @@ import { skipCameraHit, CameraProbeBody, skipRayHit, RayHitBody, RayFilter } fro
 import { physicsStats, resetPhysicsStats, PhysicsStats } from "./physicsStats";
 import { clearWorld, broadphaseBodyCount } from "./worldTeardown";
 import { MotionRecord, MotionConfig, createMotionRecord, sampleMotion, motionConfig } from "./motion";
+import { OverlapHit, OverlapOptions, OverlapBody, QueryShape, queryPoses, sweepPoses } from "./overlap";
 
 /**
  * A body's forward axis in world space: its local +Z rotated by its orientation, written into `out`.
@@ -73,6 +74,8 @@ const GROUND_GRACE = 0.1;
  */
 const WALKABLE_DOT = Math.cos(60 * Math.PI / 180);
 
+const v3 = (v: ArrayLike<number>): [number, number, number] => [v[0], v[1], v[2]];
+
 /** Whether `node` and every ancestor are spawned: a despawned subtree stops simulating. */
 function isSpawnedInScene(node: { spawned: boolean; parent: any }): boolean {
   for (let n: any = node; n; n = n.parent) if (n.spawned === false) return false;
@@ -113,6 +116,13 @@ export class PhysicsSystem {
    * constraints talk to the world directly and manage their own membership.
    */
   private _inWorld = new Set<Body>();
+  /**
+   * Trigger overlaps as cannon reports them, by body pair — updated by the world's begin/endContact
+   * events during the substeps — and the same set as last REPORTED to scripts. Enter/exit hooks fire from
+   * the difference once per frame, so a pair that flickers across substeps never reaches a script.
+   */
+  private _triggerPairs = new Map<number, { a: Body; b: Body }>();
+  private _reportedPairs = new Map<number, { a: Body; b: Body }>();
 
   constructor(config?: PhysicsSystemConfig) {
     this._gravity = config?.gravity ? config.gravity: [0, -9.82, 0]; // y = up
@@ -140,6 +150,11 @@ export class PhysicsSystem {
       this._world.quatNormalizeSkip = 0;
       // Accurate quaternion normalization: the fast approximation blows cone-twist ragdoll joints up to NaN.
       this._world.quatNormalizeFast = false;
+      // Trigger enter/exit. cannon records trigger overlaps in its bodyOverlapKeeper (the `justTest` path of
+      // the narrowphase) and diffs them every step into these two events; the per-body 'collide' event that
+      // onTrigger uses fires on first contact only and has no exit at all.
+      this._world.addEventListener('beginContact', (e: any) => this._onContact(e.bodyA, e.bodyB, true));
+      this._world.addEventListener('endContact', (e: any) => this._onContact(e.bodyA, e.bodyB, false));
     } catch (e) {
       Logger.error(e.toString());
     }
@@ -169,6 +184,7 @@ export class PhysicsSystem {
       physicsStats.stepMs = performance.now() - stepStart;
 
       this._updateRagdolls(deltaTime);
+      this._reportTriggerPairs();
 
       // update() runs only while unpaused, so the grace window cannot expire behind a paused game.
       this._time += deltaTime;
@@ -179,20 +195,21 @@ export class PhysicsSystem {
       const writeBackStart = performance.now();
       const nodes = this._scene.nodes;
       for (const node of nodes) {
-        const bodyToAdd = node.body || node.trigger;
-        if (!bodyToAdd || !node.hasStarted) continue;
+        if ((!node.body && !node.trigger) || !node.hasStarted) continue;
 
-        if (!this._inWorld.has(bodyToAdd)) {
-          this._assignMaterial(bodyToAdd);
-          this._world.addBody(bodyToAdd);
-          this._inWorld.add(bodyToAdd);
-        }
-
-        if (node.markForRemoval) {
-          // Removing the body is what stops the callbacks: the 'collide' listener registered in
-          // Node.setBody/setTrigger is an anonymous arrow, so removeEventListener can never match it.
-          this._world.removeBody(bodyToAdd);
-          this._inWorld.delete(bodyToAdd);
+        // BOTH, when a node has both: a solid door or gate with an interaction zone around it. This used to
+        // be `node.body || node.trigger`, which silently left such a node's trigger out of the world.
+        for (const bodyToAdd of [node.body, node.trigger]) {
+          if (!bodyToAdd) continue;
+          if (node.markForRemoval) {
+            // Removing the body is what stops the callbacks: the 'collide' listener registered in
+            // Node.setBody/setTrigger is an anonymous arrow, so removeEventListener can never match it.
+            this.removeBody(bodyToAdd);
+          } else if (!this._inWorld.has(bodyToAdd)) {
+            this._assignMaterial(bodyToAdd);
+            this._world.addBody(bodyToAdd);
+            this._inWorld.add(bodyToAdd);
+          }
         }
 
         if (node.body) {
@@ -287,11 +304,115 @@ export class PhysicsSystem {
     }
   }
 
-  /** Remove a standalone body from the world if present. */
+  /**
+   * Remove a body from the world if present. A trigger overlap it was part of ends with it — the exit is
+   * reported at the end of the next step — because cannon reports a removed body's pairs with `null`.
+   */
   public removeBody(body: Body): void {
     if (!this._world) return;
     if (this._inWorld.delete(body))
       this._world.removeBody(body);
+    if (this._triggerPairs.size > 0)
+      for (const [key, pair] of this._triggerPairs)
+        if (pair.a === body || pair.b === body) this._triggerPairs.delete(key);
+  }
+
+  // ---- Trigger enter / exit ----
+
+  private static _pairKey(a: Body, b: Body): number {
+    return a.id < b.id ? a.id * 1048576 + b.id : b.id * 1048576 + a.id;
+  }
+
+  private _onContact(a: Body | null, b: Body | null, begin: boolean): void {
+    // A removed body comes back as null: removeBody has already dropped its pairs.
+    if (!a || !b || !(a.isTrigger || b.isTrigger)) return;
+    const key = PhysicsSystem._pairKey(a, b);
+    if (begin) {
+      if (this._inWorld.has(a) && this._inWorld.has(b)) this._triggerPairs.set(key, { a, b });
+    } else this._triggerPairs.delete(key);
+  }
+
+  /** Fire onTriggerEnter / onTriggerExit for what changed since the last frame, on BOTH nodes of a pair. */
+  private _reportTriggerPairs(): void {
+    if (this._triggerPairs.size === 0 && this._reportedPairs.size === 0) return;
+    for (const [key, pair] of this._reportedPairs) {
+      if (this._triggerPairs.has(key)) continue;
+      this._reportedPairs.delete(key);
+      PhysicsSystem._dispatchTrigger(pair, 'onTriggerExit');
+    }
+    for (const [key, pair] of this._triggerPairs) {
+      if (this._reportedPairs.has(key)) continue;
+      this._reportedPairs.set(key, pair);
+      PhysicsSystem._dispatchTrigger(pair, 'onTriggerEnter');
+    }
+  }
+
+  private static _dispatchTrigger(pair: { a: Body; b: Body }, hook: 'onTriggerEnter' | 'onTriggerExit'): void {
+    const na = (pair.a as any).owner, nb = (pair.b as any).owner;
+    if (!(na instanceof Node) || !(nb instanceof Node) || na === nb) return;
+    for (const [self, other] of [[na, nb], [nb, na]] as [Node, Node][]) {
+      try { self[hook](other); }
+      catch (e) { Logger.error(`Error in ${hook} for node ${self.name}: ${e}`, 'Script'); }
+    }
+  }
+
+  /** How many trigger overlaps are currently reported to scripts. For tests and the stats panel. */
+  public get triggerOverlapCount(): number { return this._reportedPairs.size; }
+
+  // ---- Shape queries ----
+
+  /**
+   * Bodies touching a sphere. One hit per node, nearest first. Triggers, ghosts and ragdoll bones are
+   * skipped unless asked for. Spheres, boxes and capsules are tested exactly; convex hulls, trimeshes,
+   * heightfields and planes are not tested at all: these queries are for hitting things, not terrain.
+   */
+  public overlapSphere(center: ArrayLike<number>, radius: number, options?: OverlapOptions<Body>): OverlapHit<Body>[] {
+    const c = v3(center);
+    return this._query([{ kind: 'capsule', a: c, b: c, radius }], options);
+  }
+
+  /** Bodies touching the capsule from `a` to `b` (its two end centres) with `radius`. See {@link overlapSphere}. */
+  public overlapCapsule(a: ArrayLike<number>, b: ArrayLike<number>, radius: number, options?: OverlapOptions<Body>): OverlapHit<Body>[] {
+    return this._query([{ kind: 'capsule', a: v3(a), b: v3(b), radius }], options);
+  }
+
+  /**
+   * Bodies touching an oriented box. `rotation` is a unit quaternion [x, y, z, w] (a node's
+   * `worldQuaternion`) and defaults to none. See {@link overlapSphere}.
+   */
+  public overlapBox(center: ArrayLike<number>, halfExtents: ArrayLike<number>, rotation?: ArrayLike<number> | null, options?: OverlapOptions<Body>): OverlapHit<Body>[] {
+    const q: [number, number, number, number] = rotation ? [rotation[0], rotation[1], rotation[2], rotation[3]] : [0, 0, 0, 1];
+    return this._query([{ kind: 'box', center: v3(center), half: v3(halfExtents), rotation: q }], options);
+  }
+
+  /**
+   * Bodies a capsule touches on its way from one pose (`a0`-`b0`) to another (`a1`-`b1`): a swinging blade
+   * from last frame's grip to this frame's. Sampled so consecutive poses are at most `radius` apart, so a
+   * fast swing cannot pass through a target between frames. Each hit's `fraction` (0-1) says how far into
+   * the sweep it was first touched: compare two to learn which one the swing reached first.
+   */
+  public sweepCapsule(a0: ArrayLike<number>, b0: ArrayLike<number>, a1: ArrayLike<number>, b1: ArrayLike<number>,
+                      radius: number, options?: OverlapOptions<Body>): OverlapHit<Body>[] {
+    return this._query(sweepPoses(v3(a0), v3(b0), v3(a1), v3(b1), radius), options);
+  }
+
+  /** Bodies a sphere touches moving from `from` to `to`: a thick ray. See {@link sweepCapsule}. */
+  public sweepSphere(from: ArrayLike<number>, to: ArrayLike<number>, radius: number, options?: OverlapOptions<Body>): OverlapHit<Body>[] {
+    const f = v3(from), t = v3(to);
+    return this._query(sweepPoses(f, f, t, t, radius), options);
+  }
+
+  private _query(poses: QueryShape[], options?: OverlapOptions<Body>): OverlapHit<Body>[] {
+    if (!this._world) return [];
+    const start = performance.now();
+    // Scripts hand over script proxies; owners are compared by identity, so unwrap to the real nodes.
+    const opts = options?.ignore
+      ? { ...options, ignore: (Array.isArray(options.ignore) ? options.ignore : [options.ignore]).map(n => unwrapScriptNode(n)) }
+      : options;
+    const hits = queryPoses(this._world.bodies as unknown as OverlapBody[], poses, opts as OverlapOptions<OverlapBody>);
+    physicsStats.rayMs += performance.now() - start;
+    physicsStats.rayCount++;
+    return hits as unknown as OverlapHit<Body>[];
   }
 
   public addConstraint(constraint: Constraint): void {
@@ -674,6 +795,9 @@ export class PhysicsSystem {
     // strand half of every play session's bodies in the SAPBroadphase for the lifetime of the page.
     clearWorld(this._world);
     this._inWorld.clear();
+    // The scene is going away: no exits are reported for it.
+    this._triggerPairs.clear();
+    this._reportedPairs.clear();
   }
 
   public set scene(scene: Scene) {

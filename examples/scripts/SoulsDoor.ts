@@ -17,7 +17,6 @@ export default class SoulsDoorNode extends Node {
   public isOpen: boolean = false
   public lockedText: string = 'Opens from the other side'
   public lockedFromFront: boolean = false
-  public interactRadius: number = 2.4
 
   private _gm: Node = null
   private _closed: number[] = [0, 0, 0]

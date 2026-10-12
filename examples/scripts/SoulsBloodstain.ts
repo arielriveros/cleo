@@ -9,7 +9,6 @@ import { Node } from 'cleo'
  */
 export default class SoulsBloodstainNode extends Node {
   public souls: number = 0
-  public interactRadius: number = 1.5
 
   private _gm: Node = null
   private _taken: boolean = false

@@ -10,7 +10,6 @@ import { Node } from 'cleo'
 export default class SoulsMessageNode extends Node {
   public title: string = 'A message'
   public text: string = 'Try rolling.'
-  public interactRadius: number = 1.6
   public hiddenUntilRevealed: boolean = false
 
   private _gm: Node = null

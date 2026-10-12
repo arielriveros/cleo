@@ -24,7 +24,7 @@ import { TextureSet, loadScriptReflector, mb, node, readJson, stableId as nsId, 
 import { editorModules } from '../nightShift/fbxImport.mjs'
 import { moduleRegistry } from '../nightShift/tsLoader.mjs'
 import { ASSET_HASH_VERSION, KIND_EXT, SCENE_REFS_VERSION } from '../nightShift/editorConstants.mjs'
-import { buildPlaceholderClips } from './placeholderClips.mjs'
+import { buildPlaceholderClips, clipEventTime } from './placeholderClips.mjs'
 import { bloodDrops, bloodSplat } from './png.mjs'
 import { SOULS_INPUT_MAP } from './inputMap.mjs'
 
@@ -85,6 +85,7 @@ const SCRIPT_FILES = [
   // A script MODULE (shared helpers, no class). Named after its FILE: the explorer path is the import
   // path, so the scripts' `import … from './SoulsMath'` resolves to /Scripts/SoulsMath.script.
   ['SoulsMath', 'SoulsMath', 'node'],
+  ['SoulsHitbox', 'SoulsHitbox', 'node'],
 ]
 
 const scripts = (() => {
@@ -430,10 +431,11 @@ function staticBody(shape) {
  * A primitive model node. Unit-sized geometry scaled by the node, so the collider (also unit-sized) is
  * scaled with it — shape dimensions are authored in node-local units.
  */
-function prop(key, name, shape, materialId, { position = [0, 0, 0], scale = [1, 1, 1], rotation = [0, 0, 0], solid = false, children = [] } = {}) {
+function prop(key, name, shape, materialId, { position = [0, 0, 0], scale = [1, 1, 1], rotation = [0, 0, 0], solid = false, blocksSwings = false, children = [] } = {}) {
   const n = node(name, 'model', {
     id: stableId(`prop:${key}`), position, rotation, scale, children,
-    variables: vars({ __materialId: materialId }),
+    // `blocksSwings`: a swing that reaches this body before any enemy bounces off it (SoulsHitbox).
+    variables: vars({ __materialId: materialId, ...(blocksSwings ? { blocksSwings: true } : {}) }),
     model: { geometry: geometryOf(shape), material: matJson(materialId) },
   })
   if (solid) n.body = staticBody(shape)
@@ -686,9 +688,30 @@ const GREATSWORD_PARTS = [
   ['Grip', 'cylinder', MAT.leather, [0.04, 0.32, 0.04], [0, 0, 0]],
 ]
 
+/**
+ * The fallback active window for a clip, read off its own `hit`/`hitEnd` markers, so the fields shown in
+ * the inspector agree with the clip (they are only used when a replacement clip has no markers).
+ */
+function swingWindow(clip) {
+  const hit = clipEventTime(clip, 'hit'), end = clipEventTime(clip, 'hitEnd')
+  return hit == null || end == null ? {} : { hitTime: hit, activeSeconds: Math.round((end - hit) * 1000) / 1000 }
+}
+
 /** One SoulsMove data node. */
 function move(key, name, fields) {
-  return withScript(node(name, 'node', { id: stableId(`move:${key}:${name}`) }), 'SoulsMove', fields)
+  return withScript(node(name, 'node', { id: stableId(`move:${key}:${name}`) }), 'SoulsMove', { ...fields, ...swingWindow(fields.clip) })
+}
+
+/**
+ * Blade hitboxes, in the weapon Mesh's space (the parts below are modelled along +Y from the grip).
+ * Deliberately a little fatter than the steel: a hitbox that matches the visual exactly reads as unfair.
+ */
+const BLADE = {
+  sword: { bladeStart: [0, 0.12, 0], bladeEnd: [0, 0.98, 0], bladeRadius: 0.12 },
+  greatsword: { bladeStart: [0, 0.17, 0], bladeEnd: [0, 1.52, 0], bladeRadius: 0.15 },
+  club: { bladeStart: [0, 0.05, 0], bladeEnd: [0, 0.72, 0], bladeRadius: 0.13 },
+  staff: { bladeStart: [0, 0.05, 0], bladeEnd: [0, 1.12, 0], bladeRadius: 0.11 },
+  halberd: { bladeStart: [0, 0.4, 0], bladeEnd: [0.06, 1.9, 0], bladeRadius: 0.2 },
 }
 
 function playerWeapons() {
@@ -697,23 +720,23 @@ function playerWeapons() {
     socketAttachment: { target: 'parent', socket: 'RightHand' },
     children: [
       weaponMesh('weapon:sword', 'RightHand', BLADE_DOWN_FORWARD, SWORD_PARTS),
-      move('sword', 'Light1', { clip: 'Souls_Sword_L1', damageMul: 1, staminaCost: 16, range: 2.3, arcDeg: 110, lungeStart: 0.1, lungeSeconds: 0.15, lungeSpeed: 2.5, hitTime: 0.38, comboTime: 0.45, recoverTime: 0.62, next: 'Light2' }),
-      move('sword', 'Light2', { clip: 'Souls_Sword_L2', damageMul: 1, staminaCost: 16, range: 2.3, arcDeg: 110, lungeStart: 0.1, lungeSeconds: 0.15, lungeSpeed: 2.5, hitTime: 0.36, comboTime: 0.45, recoverTime: 0.62, next: 'Light3' }),
-      move('sword', 'Light3', { clip: 'Souls_Sword_L3', damageMul: 1.15, staminaCost: 20, range: 2.5, arcDeg: 60, lungeStart: 0.3, lungeSeconds: 0.2, lungeSpeed: 3, hitTime: 0.52, comboTime: 0.6, recoverTime: 0.8, next: 'Light1' }),
-      move('sword', 'Heavy', { clip: 'Souls_Sword_Heavy', damageMul: 1.6, poiseMul: 2, staminaCost: 30, range: 2.6, arcDeg: 50, lungeStart: 0.62, lungeSeconds: 0.2, lungeSpeed: 4, trackSeconds: 0.35, hitTime: 0.78, comboTime: 1, recoverTime: 1.05, next: '' }),
+      move('sword', 'Light1', { clip: 'Souls_Sword_L1', damageMul: 1, staminaCost: 16, lungeStart: 0.1, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.38, comboTime: 0.45, recoverTime: 0.62, next: 'Light2' }),
+      move('sword', 'Light2', { clip: 'Souls_Sword_L2', damageMul: 1, staminaCost: 16, lungeStart: 0.1, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.36, comboTime: 0.45, recoverTime: 0.62, next: 'Light3' }),
+      move('sword', 'Light3', { clip: 'Souls_Sword_L3', damageMul: 1.15, staminaCost: 20, lungeStart: 0.3, lungeSeconds: 0.2, lungeSpeed: 3, hitTime: 0.52, comboTime: 0.6, recoverTime: 0.8, next: 'Light1' }),
+      move('sword', 'Heavy', { clip: 'Souls_Sword_Heavy', bounceOff: false, damageMul: 1.6, poiseMul: 2, staminaCost: 30, lungeStart: 0.62, lungeSeconds: 0.2, lungeSpeed: 4, trackSeconds: 0.35, hitTime: 0.78, comboTime: 1, recoverTime: 1.05, next: '' }),
     ],
-  }), 'SoulsWeapon', { displayName: 'Straight Sword', baseDamage: 100, strScaling: 0.2, dexScaling: 0.8, strRequirement: 8, dexRequirement: 10, poiseDamage: 15 })
+  }), 'SoulsWeapon', { ...BLADE.sword, displayName: 'Straight Sword', baseDamage: 100, strScaling: 0.2, dexScaling: 0.8, strRequirement: 8, dexRequirement: 10, poiseDamage: 15 })
 
   const greatsword = withScript(node('Weapon_Greatsword', 'node', {
     id: stableId('weapon:greatsword'),
     socketAttachment: { target: 'parent', socket: 'RightHand' },
     children: [
       weaponMesh('weapon:greatsword', 'RightHand', BLADE_DOWN_FORWARD, GREATSWORD_PARTS),
-      move('greatsword', 'Light1', { clip: 'Souls_GS_L1', damageMul: 1, staminaCost: 26, range: 3, arcDeg: 140, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light2' }),
-      move('greatsword', 'Light2', { clip: 'Souls_GS_L2', damageMul: 1.05, staminaCost: 26, range: 3, arcDeg: 140, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light1' }),
-      move('greatsword', 'Heavy', { clip: 'Souls_GS_Heavy', damageMul: 1.7, poiseMul: 2, staminaCost: 42, range: 3.2, arcDeg: 70, lungeStart: 0.95, lungeSeconds: 0.2, lungeSpeed: 3, trackSeconds: 0.5, hitTime: 1.15, comboTime: 1.5, recoverTime: 1.55, next: '' }),
+      move('greatsword', 'Light1', { clip: 'Souls_GS_L1', damageMul: 1, staminaCost: 26, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light2' }),
+      move('greatsword', 'Light2', { clip: 'Souls_GS_L2', damageMul: 1.05, staminaCost: 26, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light1' }),
+      move('greatsword', 'Heavy', { clip: 'Souls_GS_Heavy', bounceOff: false, damageMul: 1.7, poiseMul: 2, staminaCost: 42, lungeStart: 0.95, lungeSeconds: 0.2, lungeSpeed: 3, trackSeconds: 0.5, hitTime: 1.15, comboTime: 1.5, recoverTime: 1.55, next: '' }),
     ],
-  }), 'SoulsWeapon', { displayName: 'Greatsword', baseDamage: 165, strScaling: 1, dexScaling: 0.15, strRequirement: 16, dexRequirement: 0, poiseDamage: 32 })
+  }), 'SoulsWeapon', { ...BLADE.greatsword, displayName: 'Greatsword', baseDamage: 165, strScaling: 1, dexScaling: 0.15, strRequirement: 16, dexRequirement: 0, poiseDamage: 32 })
 
   return group('player:weapons', 'Weapons', [sword, greatsword])
 }
@@ -765,7 +788,7 @@ function playerNode() {
 // ----- enemies ---------------------------------------------------------------------------------------
 
 function attack(key, name, fields) {
-  return withScript(node(name, 'node', { id: stableId(`attack:${key}:${name}`) }), 'SoulsEnemyAttack', fields)
+  return withScript(node(name, 'node', { id: stableId(`attack:${key}:${name}`) }), 'SoulsEnemyAttack', { ...fields, ...swingWindow(fields.clip) })
 }
 
 /**
@@ -806,8 +829,10 @@ function enemyTemplate(spec) {
 
   const lockPoint = node('LockPoint', 'node', { id: stableId(`${key}:lock`), position: [0, 1.25 * s, 0] })
   const anchor = node('HealthAnchor', 'node', { id: stableId(`${key}:anchor`), position: [0, 1.95 * s, 0] })
+  // The blade hitbox rides on the Weapon node as plain variables (it has no script of its own).
   const weapon = node('Weapon', 'node', {
     id: stableId(`${key}:weapon`), socketAttachment: { target: 'parent', socket: 'RightHand' },
+    variables: vars(spec.blade),
     children: [weaponMesh(`${key}:weapon`, 'RightHand', spec.weaponDir ?? BLADE_DOWN_FORWARD, spec.weaponParts)],
   })
   const attacks = group(`${key}:attacks`, 'Attacks', spec.attacks.map(([name, fields]) => attack(spec.key, name, fields)))
@@ -858,35 +883,35 @@ const HALBERD = [['Shaft', 'cylinder', MAT.wood, [0.06, 2.2, 0.06], [0, 0.6, 0]]
 
 const ENEMIES = [
   {
-    key: 'hollow', name: 'Hollow', material: MAT.hollow, scale: 1, weaponParts: CLUB,
-    fields: { maxHp: 160, defense: 0, maxPoise: 25, soulsReward: 120, moveSpeed: 2.6, engageRange: 4, leashRange: 18, preferredMin: 0, preferredMax: 1.8 },
+    key: 'hollow', name: 'Hollow', material: MAT.hollow, scale: 1, weaponParts: CLUB, blade: BLADE.club,
+    fields: { maxHp: 160, defense: 0, maxPoise: 25, soulsReward: 120, moveSpeed: 2.6, engageRange: 4, leashRange: 18, preferredMin: 0, preferredMax: 1.5 },
     sight: 14,
     attacks: [
-      ['Swing', { clip: 'Souls_Enemy_Swing', damage: 70, poiseDamage: 20, minRange: 0, maxRange: 2.4, hitRange: 2.3, arcDeg: 100, trackSeconds: 0.45, lungeStart: 0.45, lungeSeconds: 0.15, lungeSpeed: 2.5, hitTime: 0.62 }],
-      ['Sweep', { clip: 'Souls_Enemy_Sweep', damage: 60, poiseDamage: 20, minRange: 0, maxRange: 2.6, hitRange: 2.5, arcDeg: 150, weight: 0.6, cooldown: 3, trackSeconds: 0.4, hitTime: 0.7 }],
+      ['Swing', { clip: 'Souls_Enemy_Swing', damage: 70, poiseDamage: 20, minRange: 0, maxRange: 1.8, trackSeconds: 0.45, lungeStart: 0.45, lungeSeconds: 0.15, lungeSpeed: 2.5, hitTime: 0.62 }],
+      ['Sweep', { clip: 'Souls_Enemy_Sweep', damage: 60, poiseDamage: 20, minRange: 0, maxRange: 1.4, weight: 0.6, cooldown: 3, trackSeconds: 0.4, hitTime: 0.7 }],
     ],
   },
   {
-    key: 'caster', name: 'Hollow Sorcerer', material: MAT.caster, scale: 1, weaponParts: STAFF, weaponDir: [0, 1, 0.2],
+    key: 'caster', name: 'Hollow Sorcerer', material: MAT.caster, scale: 1, weaponParts: STAFF, blade: BLADE.staff, weaponDir: [0, 1, 0.2],
     fields: { maxHp: 110, defense: 0, maxPoise: 15, soulsReward: 160, moveSpeed: 2.2, engageRange: 18, leashRange: 22, preferredMin: 7, preferredMax: 14, strafeSpeedScale: 0.5, attackGapMin: 1, attackGapMax: 2 },
     sight: 22, fov: 160,
     attacks: [
-      ['Bolt', { clip: 'Souls_Cast', damage: 90, poiseDamage: 30, minRange: 3, maxRange: 20, hitRange: 20, arcDeg: 360, cooldown: 3.5, trackSeconds: 0.65, hitTime: 0.7, projectileTemplate: 'Magic Bolt', projectileSpeed: 12, sound: 'Cast' }],
-      ['Shove', { clip: 'Souls_Enemy_Swing', damage: 40, poiseDamage: 15, minRange: 0, maxRange: 2.2, hitRange: 2.2, arcDeg: 100, hitTime: 0.62 }],
+      ['Bolt', { clip: 'Souls_Cast', damage: 90, poiseDamage: 30, minRange: 3, maxRange: 20, cooldown: 3.5, trackSeconds: 0.65, hitTime: 0.7, projectileTemplate: 'Magic Bolt', projectileSpeed: 12, sound: 'Cast' }],
+      ['Shove', { clip: 'Souls_Enemy_Swing', damage: 40, poiseDamage: 15, minRange: 0, maxRange: 0.7, hitTime: 0.62 }],
     ],
   },
   {
-    key: 'knight', name: 'Elite Knight', material: MAT.knight, scale: 1.2, weaponParts: GREATSWORD_PARTS,
+    key: 'knight', name: 'Elite Knight', material: MAT.knight, scale: 1.2, weaponParts: GREATSWORD_PARTS, blade: BLADE.greatsword,
     fields: { maxHp: 650, defense: 0.15, maxPoise: 70, soulsReward: 900, moveSpeed: 2.8, engageRange: 9, leashRange: 14, preferredMin: 0, preferredMax: 2.6, attackGapMin: 0.8, attackGapMax: 1.4, bodyRadius: 0.45 },
     sight: 16,
     attacks: [
-      ['Sweep', { clip: 'Souls_Enemy_Sweep', damage: 140, poiseDamage: 35, minRange: 0, maxRange: 3, hitRange: 3.1, arcDeg: 150, trackSeconds: 0.45, hitTime: 0.7 }],
-      ['Overhead', { clip: 'Souls_Enemy_Overhead', damage: 190, poiseDamage: 50, minRange: 0, maxRange: 2.8, hitRange: 3, arcDeg: 60, hyperArmor: true, trackSeconds: 0.8, lungeStart: 0.95, lungeSeconds: 0.15, lungeSpeed: 3, hitTime: 1.05, weight: 0.8 }],
-      ['Thrust', { clip: 'Souls_Enemy_Thrust', damage: 150, poiseDamage: 40, minRange: 4, maxRange: 9, hitRange: 2.4, arcDeg: 50, cooldown: 4, trackSeconds: 0.3, lungeStart: 0.3, lungeSeconds: 0.3, lungeSpeed: 14, lungeToTarget: true, hitTime: 0.55 }],
+      ['Sweep', { clip: 'Souls_Tall_Sweep', damage: 140, poiseDamage: 35, minRange: 0, maxRange: 2.6, trackSeconds: 0.45, hitTime: 0.7 }],
+      ['Overhead', { clip: 'Souls_Enemy_Overhead', damage: 190, poiseDamage: 50, minRange: 0, maxRange: 2.8, hyperArmor: true, trackSeconds: 0.8, lungeStart: 0.95, lungeSeconds: 0.15, lungeSpeed: 3, hitTime: 1.05, weight: 0.8 }],
+      ['Thrust', { clip: 'Souls_Enemy_Thrust', damage: 150, poiseDamage: 40, minRange: 4, maxRange: 9, cooldown: 4, trackSeconds: 0.3, lungeStart: 0.3, lungeSeconds: 0.3, lungeSpeed: 14, lungeToTarget: true, hitTime: 0.55 }],
     ],
   },
   {
-    key: 'warden', name: 'Hollow Warden', material: MAT.warden, scale: 1.8, weaponParts: HALBERD, boss: true, aura: true,
+    key: 'warden', name: 'Hollow Warden', material: MAT.warden, scale: 1.8, weaponParts: HALBERD, blade: BLADE.halberd, boss: true, aura: true,
     radius: 0.45, mass: 300, sight: 60, fov: 360,
     fields: {
       maxHp: 2600, defense: 0.2, maxPoise: 150, soulsReward: 6000, moveSpeed: 3, engageRange: 12, leashRange: 999,
@@ -894,12 +919,12 @@ const ENEMIES = [
       bodyRadius: 0.7, healthBarSeconds: 0, deathSeconds: 2.2, corpseSeconds: 20,
     },
     attacks: [
-      ['Sweep', { clip: 'Souls_Enemy_Sweep', playSpeed: 0.9, damage: 150, poiseDamage: 40, minRange: 0, maxRange: 4.2, hitRange: 4.4, arcDeg: 160, trackSeconds: 0.5, hitTime: 0.7, comboNext: 'Backsweep' }],
-      ['Backsweep', { clip: 'Souls_GS_L2', playSpeed: 1, damage: 140, poiseDamage: 40, minRange: 0, maxRange: 4.2, hitRange: 4.4, arcDeg: 160, phase: 9, trackSeconds: 0.4, hitTime: 0.7 }],
-      ['Slam', { clip: 'Souls_Enemy_Overhead', playSpeed: 0.85, damage: 220, poiseDamage: 60, minRange: 0, maxRange: 3.8, hitRange: 4, arcDeg: 70, hyperArmor: true, trackSeconds: 0.8, lungeStart: 0.95, lungeSeconds: 0.2, lungeSpeed: 3, hitTime: 1.05, impactTemplate: 'Slam Dust' }],
-      ['Lunge', { clip: 'Souls_Enemy_Thrust', damage: 160, poiseDamage: 45, minRange: 5, maxRange: 12, hitRange: 3, arcDeg: 60, cooldown: 4, trackSeconds: 0.3, lungeStart: 0.3, lungeSeconds: 0.35, lungeSpeed: 16, lungeToTarget: true, hitTime: 0.55 }],
-      ['Leap', { clip: 'Souls_Leap', damage: 200, poiseDamage: 80, minRange: 6, maxRange: 16, hitRange: 3.8, aoeRadius: 3.8, phase: 2, cooldown: 6, hyperArmor: true, trackSeconds: 0.55, lungeStart: 0.6, lungeSeconds: 0.6, lungeSpeed: 18, lungeToTarget: true, hitTime: 1.25, impactTemplate: 'Slam Dust', sound: 'Boss Leap' }],
-      ['Bolt Fan', { clip: 'Souls_Cast', playSpeed: 1.1, damage: 110, poiseDamage: 30, minRange: 6, maxRange: 22, hitRange: 22, arcDeg: 360, phase: 2, cooldown: 7, trackSeconds: 0.6, hitTime: 0.7, projectileTemplate: 'Magic Bolt', projectileSpeed: 13, projectileCount: 3, spreadDeg: 14, sound: 'Cast' }],
+      ['Sweep', { clip: 'Souls_Giant_Sweep', playSpeed: 0.9, damage: 150, poiseDamage: 40, minRange: 0, maxRange: 4.2, trackSeconds: 0.5, hitTime: 0.7, comboNext: 'Backsweep' }],
+      ['Backsweep', { clip: 'Souls_Giant_Backsweep', playSpeed: 1, damage: 140, poiseDamage: 40, minRange: 0, maxRange: 4.2, phase: 9, trackSeconds: 0.4, hitTime: 0.7 }],
+      ['Slam', { clip: 'Souls_Enemy_Overhead', playSpeed: 0.85, damage: 220, poiseDamage: 60, minRange: 0, maxRange: 3.8, hyperArmor: true, trackSeconds: 0.8, lungeStart: 0.95, lungeSeconds: 0.2, lungeSpeed: 3, hitTime: 1.05, impactTemplate: 'Slam Dust' }],
+      ['Lunge', { clip: 'Souls_Giant_Thrust', damage: 160, poiseDamage: 45, minRange: 5, maxRange: 12, cooldown: 4, trackSeconds: 0.3, lungeStart: 0.3, lungeSeconds: 0.35, lungeSpeed: 16, lungeToTarget: true, hitTime: 0.55 }],
+      ['Leap', { clip: 'Souls_Leap', damage: 200, poiseDamage: 80, minRange: 6, maxRange: 16, aoeRadius: 3.8, phase: 2, cooldown: 6, hyperArmor: true, trackSeconds: 0.55, lungeStart: 0.6, lungeSeconds: 0.6, lungeSpeed: 18, lungeToTarget: true, hitTime: 1.25, impactTemplate: 'Slam Dust', sound: 'Boss Leap' }],
+      ['Bolt Fan', { clip: 'Souls_Cast', playSpeed: 1.1, damage: 110, poiseDamage: 30, minRange: 6, maxRange: 22, phase: 2, cooldown: 7, trackSeconds: 0.6, hitTime: 0.7, projectileTemplate: 'Magic Bolt', projectileSpeed: 13, projectileCount: 3, spreadDeg: 14, sound: 'Cast' }],
     ],
   },
 ]
@@ -933,7 +958,7 @@ function bloodstainTemplate() {
       particles('bloodstain:glow', 'Glow', VFX.bloodstain),
     ],
   }), 'SoulsBloodstain')
-  return { id: stableId('template:bloodstain'), name: 'Bloodstain', nodeJson: root, textureIds: [BLOOD_TEX.splat], scripts: {}, bodies: {}, triggers: {} }
+  return { id: stableId('template:bloodstain'), name: 'Bloodstain', nodeJson: root, textureIds: [BLOOD_TEX.splat], scripts: {}, bodies: {}, triggers: { [id]: zone(1.5) } }
 }
 
 /**
@@ -968,10 +993,10 @@ function wall(name, x0, z0, x1, z1, h = 4, base = 0, t = 0.6, mat = MAT.stone) {
   const alongX = Math.abs(x1 - x0) >= Math.abs(z1 - z0)
   const w = alongX ? Math.abs(x1 - x0) + t : t
   const d = alongX ? t : Math.abs(z1 - z0) + t
-  return add(prop(piece('wall'), name, 'box', mat, { position: [(x0 + x1) / 2, base + h / 2, (z0 + z1) / 2], scale: [w, h, d], solid: true }))
+  return add(prop(piece('wall'), name, 'box', mat, { position: [(x0 + x1) / 2, base + h / 2, (z0 + z1) / 2], scale: [w, h, d], solid: true, blocksSwings: true }))
 }
 function pillar(name, x, z, r = 0.8, h = 3.5, base = 0) {
-  return add(prop(piece('pillar'), name, 'cylinder', MAT.darkStone, { position: [x, base + h / 2, z], scale: [r * 2, h, r * 2], solid: true }))
+  return add(prop(piece('pillar'), name, 'cylinder', MAT.darkStone, { position: [x, base + h / 2, z], scale: [r * 2, h, r * 2], solid: true, blocksSwings: true }))
 }
 function block(name, x, y, z, sx, sy, sz, mat = MAT.darkStone, rotation = [0, 0, 0]) {
   return add(prop(piece('block'), name, 'box', mat, { position: [x, y, z], scale: [sx, sy, sz], rotation, solid: true }))
@@ -1056,6 +1081,15 @@ function buildLevel() {
 
 // ----- interactables -----------------------------------------------------------------------------
 
+/**
+ * An interactable's zone: a trigger CYLINDER standing on the node's origin. The player is offered the
+ * interaction while its capsule (radius 0.3) overlaps it, so `reach` is the planar distance from the
+ * node at which the prompt appears — what `interactRadius` used to be, now authored as a volume.
+ */
+function zone(reach, height = 3) {
+  return { shapes: [{ type: 'cylinder', radius: Math.max(0.2, reach - 0.3), height, numSegments: 16, offset: [0, height / 2 - 0.5, 0], rotation: [0, 0, 0] }] }
+}
+
 function messageNode(key, title, text, at, yaw = 0, extra = {}) {
   return withScript(node(`Message: ${title}`, 'node', {
     id: stableId(`message:${key}`), position: at, rotation: [0, yaw, 0],
@@ -1063,6 +1097,7 @@ function messageNode(key, title, text, at, yaw = 0, extra = {}) {
       prop(`message:${key}:glyph`, 'Glyph', 'box', MAT.glyph, { position: [0, 0.02, 0], scale: [0.7, 0.02, 0.45] }),
       particles(`message:${key}:glow`, 'Glow', VFX.glyph),
     ],
+    trigger: zone(1.6),
     ...extra,
   }), 'SoulsMessage', { title, text })
 }
@@ -1075,6 +1110,7 @@ function pickupNode(key, name, at, fields) {
       particles(`pickup:${key}:glow`, 'Glow', VFX.souls),
       pointLight(`pickup:${key}:light`, 'Light', [1, 0.9, 0.7], 150, 4, [0, 0.4, 0]),
     ],
+    trigger: zone(1.4),
   }), 'SoulsPickup', fields)
 }
 
@@ -1096,6 +1132,7 @@ function bonfireNode() {
       pointLight('bonfire:light', 'Fire Light', [1, 0.55, 0.22], 0, 12, [0, 1, 0]),
       node('RespawnPoint', 'node', { id: stableId('bonfire:respawn'), position: [0, 0.05, -1.6] }),
     ],
+    trigger: zone(1.8),
   }), 'SoulsBonfire', { lightIntensity: 1800 })
 }
 
@@ -1107,6 +1144,9 @@ function shortcutGate() {
     ],
   })
   g.body = { ...staticBody('box'), shapes: [{ type: 'box', width: 3.2, height: 4, depth: 0.4, offset: [0, 0, 0], rotation: [0, 0, 0] }] }
+  // The zone spans BOTH sides of the bars (2.4 m each way); SoulsDoor.canInteract picks the locked side.
+  g.trigger = { shapes: [{ type: 'box', width: 3.6, height: 4, depth: 4.8, offset: [0, 0, 0], rotation: [0, 0, 0] }] }
+  g.variables = { ...(g.variables ?? {}), ...vars({ blocksSwings: true }) }
   return withScript(g, 'SoulsDoor', { openOffset: [0, 4.2, 0], lockedText: 'Opens from the other side', lockedFromFront: false })
 }
 
@@ -1120,6 +1160,7 @@ function leverNode() {
         children: [prop('lever:stick', 'Stick', 'cylinder', MAT.metal, { position: [0, 0.35, 0], scale: [0.06, 0.7, 0.06] })],
       }),
     ],
+    trigger: zone(1.5),
   }), 'SoulsLever', { doorName: 'Shortcut Gate', swingDegrees: 70 })
 }
 
@@ -1132,7 +1173,9 @@ function fogGateNode() {
     ],
   })
   g.body = { ...staticBody('box'), shapes: [{ type: 'box', width: 6, height: 4, depth: 0.5, offset: [0, 2, 0], rotation: [0, 0, 0] }] }
-  return withScript(g, 'SoulsFogGate', { arenaCenter: [0, 0, 106], arenaRadius: 18 })
+  // The prompt zone straddles the wall; SoulsFogGate.canInteract only offers it from outside.
+  g.trigger = { shapes: [{ type: 'box', width: 6, height: 3, depth: 4.4, offset: [0, 1.5, 0], rotation: [0, 0, 0] }] }
+  return withScript(g, 'SoulsFogGate')
 }
 
 // =====================================================================================================
@@ -1177,12 +1220,13 @@ function asTemplate(key, nodeJson, folder, textureIds = []) {
   regenerateNodeIds(root, new Map(), () => stableId(`template:${key}:${i++}`))
   root.position = [0, 0, 0]
   root.rotation = [0, 0, 0]
-  const bodies = {}
+  const bodies = {}, triggers = {}
   walkJson(root, n => {
     delete n.__sourceId
     if (n.body) { bodies[n.id] = n.body; delete n.body }
+    if (n.trigger) { triggers[n.id] = n.trigger; delete n.trigger }
   })
-  const template = { id: stableId(`template:${key}`), name: root.name, nodeJson: root, textureIds, scripts: {}, bodies, triggers: {} }
+  const template = { id: stableId(`template:${key}`), name: root.name, nodeJson: root, textureIds, scripts: {}, bodies, triggers }
   TEMPLATE_FOLDER.set(template.id, folder)
   TEMPLATE_SOURCE.set(template.id, source)
   return template
@@ -1399,7 +1443,7 @@ const SOUND_CUES = [
   ['Lock On', 'target locked'], ['Enemy Swing', 'enemy attack starts'], ['Stagger', 'enemy poise broken'],
   ['Enemy Death', 'enemy dies'], ['Cast', 'sorcery cast'], ['Bolt Impact', 'bolt hits'], ['Door', 'gate opens'],
   ['Lever', 'lever pulled'], ['Fog', 'walking through fog'], ['Boss Roar', 'boss phase two'],
-  ['Boss Leap', 'boss leap attack'], ['Victory', 'boss defeated'],
+  ['Boss Leap', 'boss leap attack'], ['Victory', 'boss defeated'], ['Recoil', 'a swing bounces off a wall'],
 ]
 const MUSIC_CUES = [['Ambience', 'level ambience (loop, plays on start)', true], ['Boss Music', 'boss fight (loop)', false]]
 
@@ -1454,6 +1498,13 @@ function keepScene() {
     linkInstance(LEVEL.lever, leverNode()),
     linkInstance(LEVEL.gate, shortcutGate()),
     linkInstance(LEVEL.fogGate, fogGateNode()),
+    // Walking into this starts the boss fight even without passing the fog (a push, a teleport). It
+    // starts 3.5 m past the fog so the walk-through itself finishes first. SoulsGameManager.onPlayerEnteredZone.
+    node('Boss Arena', 'node', {
+      id: stableId('zone:arena'), position: [0, 0, 106.8],
+      variables: vars({ isBossArena: true }),
+      trigger: { shapes: [{ type: 'box', width: 35, height: 6, depth: 34.4, offset: [0, 3, 0], rotation: [0, 0, 0] }] },
+    }),
   ])
 
   const spawns = group('spawns', 'Enemy Spawns', [

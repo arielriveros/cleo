@@ -11,6 +11,8 @@ onStart(): void                                   // may be async
 onUpdate(delta: number, time: number): void
 onCollision(other: Node): void
 onTrigger(other: Node): void
+onTriggerEnter(other: Node): void                 // either side of a trigger overlap
+onTriggerExit(other: Node): void
 onAction(action: string, state: ActionState): void
 onThink(delta: number): void                      // ControllerNode only
 onDespawn(): void

@@ -13,11 +13,12 @@ import { Node } from 'cleo'
  *
  * ## Timing
  *
- * The contact frame is a `hit` event on the clip (`cast` for a projectile attack). Without one, `hitTime`
- * (clip seconds) is used. At that moment a melee attack re-checks `hitRange` and `arcDeg` against where
- * the player is NOW, so rolling or stepping away during the wind-up works. With `aoeRadius > 0` it is a
- * slam that hits everything inside the radius regardless of facing. With a `projectileTemplate`, it
- * fires `projectileCount` projectiles fanned over `spreadDeg` instead.
+ * A melee attack is ACTIVE from the clip's `hit` event to its `hitEnd` event (without them: from
+ * `hitTime` for `activeSeconds`, clip seconds). While active, the enemy's weapon blade is swept every
+ * frame against the player's hurtbox (SoulsHitbox), so it lands where the weapon actually is: a roll's
+ * i-frames switch the hurtbox off, and stepping out of the arc works because the blade misses. With
+ * `aoeRadius > 0` it is a slam that hits everything inside the radius at the `hit` event. With a
+ * `projectileTemplate` the `cast` event fires `projectileCount` projectiles fanned over `spreadDeg`.
  *
  * ## Movement
  *
@@ -32,9 +33,6 @@ export default class SoulsEnemyAttackNode extends Node {
   public poiseDamage: number = 20
   public minRange: number = 0
   public maxRange: number = 2.2
-  /** Reach checked at the contact frame, and the FULL width of the swing. */
-  public hitRange: number = 2.2
-  public arcDeg: number = 100
   public weight: number = 1
   public cooldown: number = 0
   public phase: number = 0
@@ -47,8 +45,11 @@ export default class SoulsEnemyAttackNode extends Node {
   public hyperArmor: boolean = false
   /** Attack that follows immediately, without a gap, when the player is still in its range. */
   public comboNext: string = ''
-  /** Fallback contact time (clip seconds) for a clip without a `hit`/`cast` event. */
+  /** Fallback active window (clip seconds) for a clip without `hit`/`hitEnd` events. */
   public hitTime: number = 0.6
+  public activeSeconds: number = 0.15
+  /** The swing bounces off walls (`blocksSwings` bodies). Off by default: AI swings beside walls a lot. */
+  public bounceOff: boolean = false
   /** Ground-slam radius. 0 is an ordinary swing. */
   public aoeRadius: number = 0
   /** Effect template spawned at the enemy's feet on a slam. */

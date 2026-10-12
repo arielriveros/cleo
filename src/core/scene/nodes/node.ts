@@ -214,12 +214,27 @@ export class Node {
   public onCollision(other: Node): void {}
 
   /**
-   * Called while another node's body overlaps this node's {@link trigger} volume. Unlike
-   * {@link onCollision} this fires for a non-solid region and does not impart forces.
+   * Called when another node's body first touches this node's {@link trigger} volume. It fires once per
+   * contact, not every frame while overlapping, and there is no matching exit: for presence ("is the
+   * player standing in this zone?") use {@link onTriggerEnter} / {@link onTriggerExit}.
    *
    * @param other The node that entered the trigger volume.
    */
   public onTrigger(other: Node): void {}
+
+  /**
+   * Called once when a trigger overlap involving this node begins: on the trigger's node with the body
+   * that came in, AND on that body's node with the trigger it walked into. So a player can track which
+   * zones it is standing in without the zones' scripts doing anything. Reported once per frame, after
+   * physics, and always paired with a later {@link onTriggerExit} — including when either side is
+   * removed or despawned.
+   *
+   * @param other The node on the other side of the overlap.
+   */
+  public onTriggerEnter(other: Node): void {}
+
+  /** Called once when a trigger overlap reported by {@link onTriggerEnter} ends. */
+  public onTriggerExit(other: Node): void {}
 
   /**
    * Called when an input action this node cares about changes phase — pressed, held past its hold

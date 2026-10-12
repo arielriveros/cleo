@@ -77,13 +77,8 @@ export default class SoulsHudNode extends UIRootNode {
 
     if (this._noticeAge > this.noticeSeconds) this._text('Notice', '')
 
-    // A message closes when the player walks away from its source.
-    if (this._message && p) {
-      const a = this._message.worldPosition
-      const b = this._player.worldPosition
-      const r = ((this._message as any).interactRadius ?? 1.6) + 1.2
-      if (Math.hypot(a[0] - b[0], a[2] - b[2]) > r || p.isDead) this._closeMessage()
-    }
+    // A message closes when the player walks out of its source's zone (closeMessageFrom), or dies.
+    if (this._message && p?.isDead) this._closeMessage()
 
     const bossOn = !!gm?.bossActive
     this._show('Boss', bossOn)
@@ -100,6 +95,11 @@ export default class SoulsHudNode extends UIRootNode {
   }
 
   /** Show a message; showing the SAME source again closes it (Interact toggles). */
+  /** The player left `source`'s trigger zone: close its message if it is the one showing. */
+  public closeMessageFrom(source: Node): void {
+    if (this._message && this._message === source) this._closeMessage()
+  }
+
   public showMessage(title: string, body: string, source: Node): void {
     if (this._message && this._message === source && this._messageAge > 0.15) { this._closeMessage(); return }
     this._message = source

@@ -12,7 +12,7 @@ export type ScriptModule = Record<string, any>;
 
 /** Handlers a script may export. Anything else it exports is ignored. */
 export const SCRIPT_HANDLERS = [
-    'onConstruct', 'onStart', 'onSpawn', 'onUpdate', 'onCollision', 'onTrigger', 'onDespawn',
+    'onConstruct', 'onStart', 'onSpawn', 'onUpdate', 'onCollision', 'onTrigger', 'onTriggerEnter', 'onTriggerExit', 'onDespawn',
     // UI handlers, listed rather than special-cased so they get onUpdate's throw/rejection guarding.
     'onPress', 'onValueChanged', 'onSubmit',
     // Input actions. Listed here for the same reason: a handler driven by a device event must not be

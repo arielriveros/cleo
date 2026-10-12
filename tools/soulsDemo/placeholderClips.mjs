@@ -345,6 +345,53 @@ export const CLIP_SPECS = [
   },
 ]
 
+// ----- swings for big characters --------------------------------------------------------------------
+//
+// The swings above are aimed at a man's chest by a man. On the 1.2x knight and the 1.8x Warden the same
+// pose sweeps the blade over the player's head — and now that a hit is the weapon's hitbox touching the
+// player's capsule, a swing over the head is a miss. These variants crouch, bend and drop the arms through
+// the striking keys so the big characters' blades pass through a man-sized target. `dip` is how far the
+// arm directions are tilted down (added to their Y before renormalising), `pitch` extra forward bend
+// (degrees), `drop` how far the hips sink (metres, mannequin space).
+function lowered(sourceName, name, { dip, pitch, drop }) {
+  const src = CLIP_SPECS.find(s => s.name === sourceName)
+  const strike = (k) => k.aim && Object.keys(k.aim).some(b => /Arm/.test(b)) && k.t !== src.keys[0].t && k.t !== src.keys[src.keys.length - 1].t
+  const keys = src.keys.map(k => {
+    if (!strike(k)) return { ...k }
+    const aim = { ...k.aim }
+    for (const bone of Object.keys(aim)) if (/Arm/.test(bone)) aim[bone] = n(aim[bone][0], aim[bone][1] - dip, aim[bone][2])
+    const chest = k.chest ?? [0, 0, 0], hips = k.hips ?? [0, 0, 0]
+    return { ...k, aim, chest: [chest[0] + pitch, chest[1], chest[2]], hips: [hips[0], hips[1] - drop, hips[2]] }
+  })
+  CLIP_SPECS.push({ name, length: src.length, events: src.events.map(e => ({ ...e })), keys })
+}
+lowered('Souls_Enemy_Sweep', 'Souls_Tall_Sweep', { dip: 0.45, pitch: 12, drop: 0.12 })
+lowered('Souls_Enemy_Sweep', 'Souls_Giant_Sweep', { dip: 0.8, pitch: 25, drop: 0.3 })
+lowered('Souls_GS_L2', 'Souls_Giant_Backsweep', { dip: 0.8, pitch: 25, drop: 0.3 })
+lowered('Souls_Enemy_Thrust', 'Souls_Giant_Thrust', { dip: 0.9, pitch: 25, drop: 0.3 })
+
+// ----- active windows ----------------------------------------------------------------------------
+//
+// A swing's `hit` marker above is written at the key where the weapon is fully extended. Damage is not
+// an instant, though: the blade is a hitbox swept every frame while the swing is ACTIVE (SoulsHitbox), so
+// each clip gets a window around that key instead — `hit` moves to halfway through the swing INTO the key
+// and `hitEnd` lands halfway through the follow-through after it. The real animations author both.
+for (const spec of CLIP_SPECS) {
+  const hit = spec.events.find(e => e.name === 'hit')
+  if (!hit) continue
+  const i = spec.keys.findIndex(k => k.t === hit.time)
+  if (i <= 0 || i >= spec.keys.length - 1) throw new Error(`${spec.name}: 'hit' must sit on an inner key`)
+  const start = round3((spec.keys[i - 1].t + hit.time) / 2)
+  const end = round3((hit.time + spec.keys[i + 1].t) / 2)
+  spec.events = [...spec.events.filter(e => e !== hit), ev('hit', start), ev('hitEnd', end)].sort((a, b) => a.time - b.time)
+}
+function round3(v) { return Math.round(v * 1000) / 1000 }
+
+/** The time of `event` on clip `name`, or null. The build reads swing timings from here. */
+export function clipEventTime(name, event) {
+  return CLIP_SPECS.find(s => s.name === name)?.events.find(e => e.name === event)?.time ?? null
+}
+
 // =====================================================================================================
 // The solver
 // =====================================================================================================
