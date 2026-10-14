@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Logger, isDefaultInputMap } from "cleo";
+import { isDefaultProjectSettings } from "./options/projectSettings";
 import { useCleoEngine, KIND_LABEL } from "./EngineContext";
 import { useVfs } from "./assets/VfsContext";
 import { buildMultiSceneGameData } from "./publish/buildMultiSceneGameData";
 import { publishWeb, publishDesktop, isDesktop } from "./publish/publishClient";
 import WorkspaceStatusChip from "./scriptWorkspace/WorkspaceStatusChip";
-import { useScriptWorkspace } from "./scriptWorkspace/ScriptWorkspaceContext";
-import { NOT_DESKTOP_REASON } from "./scriptWorkspace/desktopScripts";
 import { importBundleJob } from "../workers/workerClient";
 import { exportBundle } from "../utils/bundleExport";
 import { applyBundleReplace, applyBundleMerge, applyBundleAsNewProject, IMPORT_WRITE_STEPS } from "../utils/bundleImport";
@@ -18,9 +17,9 @@ import { startTask } from "./progress/progressStore";
 import Topbar from "../components/Topbar";
 import ModeSelector from "./ModeSelector";
 import UndoButtons from "./UndoButtons";
-import { Button, buttonVariants, cn } from "../components/ui";
+import { Button, MenuItem, buttonVariants, cn } from "../components/ui";
 import {
-  SaveIcon, ImportIcon, ExportIcon, PublishIcon, ChevronDownIcon, CodeIcon,
+  SaveIcon, ImportIcon, ExportIcon, PublishIcon, ChevronDownIcon,
   SpinnerIcon, CheckIcon, AlertIcon, LayoutIcon, ProjectsIcon,
   PlayGlyph, PauseGlyph, StopGlyph,
 } from "./topbarIcons";
@@ -41,21 +40,22 @@ interface TransportProps {
 }
 function Transport({ title, disabled, active, accent, activeClass, onClick, children }: TransportProps) {
   return (
-    <button
+    <Button
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className={`flex items-center justify-center w-[30px] h-[25px] border-r border-control-hover last:border-r-0 transition-colors
-        ${active ? activeClass : `bg-control text-muted ${accent} hover:bg-control-hover`}
-        ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+      className={cn(
+        'w-[30px] h-[25px] p-0 rounded-none border-0 border-r border-control-hover last:border-r-0 disabled:opacity-40',
+        active ? activeClass : cn('text-muted', accent),
+      )}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings } = useCleoEngine();
   const { vfs } = useVfs();
   // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
   const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
@@ -80,16 +80,21 @@ export default function MenuBar() {
     : `Save this ${KIND_LABEL[activeTab.kind].toLowerCase()} (Ctrl+S)`;
   const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');
   const [showProjects, setShowProjects] = useState(false);
-  // The open project's name, read once — it only ever changes by reloading into another project.
+  // The open project's name: re-read when the projects modal closes, pushed on a rename from Options.
   const [projectName, setProjectName] = useState('');
   useEffect(() => {
     void loadProjects().then(list => setProjectName(list.find(p => p.id === activeProjectId())?.name ?? ''));
   }, [showProjects]);
+  // Options ▸ Project renames the open project in place.
+  useEffect(() => {
+    const onRename = (e: Event) => setProjectName((e as CustomEvent<string>).detail);
+    window.addEventListener('cleo:project-renamed', onRename);
+    return () => window.removeEventListener('cleo:project-renamed', onRename);
+  }, []);
   const [showPublish, setShowPublish] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const publishRef = useRef<HTMLDivElement>(null);
   const desktop = isDesktop();
-  const scriptWs = useScriptWorkspace();
 
   useEffect(() => {
     const handlePlayState = (state: 'play' | 'pause' | 'stop') => {
@@ -105,7 +110,8 @@ export default function MenuBar() {
   const projectMeta = () => ({ version: 2 as const, mainSceneId, openSceneId, scenes: sceneList });
   // The input map travels only when it differs from the default — see BundleLibraries.inputMap.
   const libraries = () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, audioSources, soundSamples,
-    inputMap: isDefaultInputMap(inputMap) ? null : inputMap });
+    inputMap: isDefaultInputMap(inputMap) ? null : inputMap,
+    projectSettings: isDefaultProjectSettings(projectSettings) ? null : projectSettings });
 
   // Export the entire project — every scene, all asset libraries, the folder layout (VFS) and texture
   // payloads — as project.cleoproj.zip: a full, portable replica of the workspace. Assembled off-thread.
@@ -209,6 +215,8 @@ export default function MenuBar() {
           settings: renderSettings(),
           // Written once at the top level of the build, never inside a scene: bindings are project-wide.
           input: inputMap,
+          // Engine runtime + window options (Options ▸ Engine / Project ▸ General), into `config`.
+          projectSettings,
         });
       } catch (e: any) {
         task.setStep(0, { status: 'failed', error: String(e?.message ?? e) });
@@ -234,11 +242,13 @@ export default function MenuBar() {
     }
   };
 
-  const onPublishWeb = () => runPublish('Publishing web build', data => publishWeb(data));
+  const gameTitle = projectSettings.publish.title.trim();
+  const onPublishWeb = () => runPublish('Publishing web build',
+    data => publishWeb(data, gameTitle ? gameTitle.replace(/[^\w.-]+/g, '-').toLowerCase() : undefined));
 
   const onPublishDesktop = (installer: boolean) =>
     runPublish(installer ? 'Publishing desktop installer' : 'Publishing desktop build',
-      data => publishDesktop(data, { installer }));
+      data => publishDesktop(data, { installer, window: projectSettings.publish }));
 
   const onPlay = () => startPlay();
 
@@ -287,20 +297,9 @@ export default function MenuBar() {
         <Button variant='subtle' size='sm' className='h-[25px]' disabled={libEdit} title='Export the whole project (scenes + assets + textures) to a .zip' onClick={onExport}>
           <ExportIcon /> Export
         </Button>
-        {/* The script workspace: connected -> a status chip with its recovery actions; not connected -> the
-            one-time folder picker. Disabled in the browser, which has no filesystem to mirror into. */}
-        {scriptWs.status === 'off' ? (
-          <Button
-            variant='subtle' size='sm' className='h-[25px]'
-            disabled={!scriptWs.available}
-            title={scriptWs.available
-              ? 'Mirror this project’s scripts to a folder you can open in VSCode'
-              : NOT_DESKTOP_REASON}
-            onClick={() => void scriptWs.setup()}
-          >
-            <CodeIcon /> Edit in VSCode
-          </Button>
-        ) : <WorkspaceStatusChip />}
+        {/* The script workspace appears here only when it needs attention (paused sync, error, conflict);
+            setting it up and its everyday status live in Options ▸ Editor ▸ Scripts. */}
+        <WorkspaceStatusChip />
         {/* The bundle is dropped only once the import commits. New project and Merge ask about
             unsaved work first (see bundleImport), and a declined confirm leaves this modal up so the
             choice can be made again rather than dumping the user back into the editor. A successful
@@ -330,23 +329,20 @@ export default function MenuBar() {
             {!publishing && <ChevronDownIcon />}
           </Button>
           {showPublish && (
-            <div className='absolute left-[5px] top-[29px] z-50 w-[240px] bg-surface-raised border border-control-hover rounded shadow-lg py-1 text-white text-sm'>
-              <div className='px-3 py-2 hover:bg-control cursor-pointer' onClick={onPublishWeb}>
-                <div className='font-semibold'>Web (HTML)</div>
-                <div className='text-[11px] text-muted'>{desktop ? 'Write index.html + game.js + game.bin to a folder' : 'Download a .zip of the game'}</div>
-              </div>
-              <div
-                className={`px-3 py-2 ${desktop ? 'hover:bg-control cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}
-                onClick={() => desktop && onPublishDesktop(false)}
-              >
-                <div className='font-semibold'>Desktop (Electron)</div>
-                <div className='text-[11px] text-muted'>{desktop ? 'Runnable Electron game folder' : 'Only available in the desktop app'}</div>
-              </div>
+            <div className='absolute left-[5px] top-[29px] z-50 w-[240px] bg-surface-raised border border-control-hover rounded shadow-lg p-1 text-fg text-ui'>
+              <MenuItem className='py-1.5' onClick={onPublishWeb}
+                hint={desktop ? 'Write index.html + game.js + game.bin to a folder' : 'Download a .zip of the game'}>
+                <span className='font-semibold'>Web (HTML)</span>
+              </MenuItem>
+              <MenuItem className='py-1.5' disabled={!desktop} onClick={() => onPublishDesktop(false)}
+                hint={desktop ? 'Runnable Electron game folder' : 'Only available in the desktop app'}>
+                <span className='font-semibold'>Desktop (Electron)</span>
+              </MenuItem>
               {desktop && (
-                <div className='px-3 py-2 hover:bg-control cursor-pointer' onClick={() => onPublishDesktop(true)}>
-                  <div className='font-semibold'>Desktop installer</div>
-                  <div className='text-[11px] text-muted'>Package a native installer (electron-builder)</div>
-                </div>
+                <MenuItem className='py-1.5' onClick={() => onPublishDesktop(true)}
+                  hint='Package a native installer (electron-builder)'>
+                  <span className='font-semibold'>Desktop installer</span>
+                </MenuItem>
               )}
             </div>
           )}
@@ -358,15 +354,15 @@ export default function MenuBar() {
               the scene tab itself, and Stop returns to the tab you pressed it from. */}
           <Transport
             title='Play' disabled={playState === 'playing'}
-            active={playState === 'playing'} activeClass='bg-success text-white'
+            active={playState === 'playing'} activeClass='bg-success hover:bg-success text-fg'
             accent='hover:text-success' onClick={() => onPlay()}
           >
             <PlayGlyph />
           </Transport>
           <Transport
             title='Pause' disabled={playState === 'paused' || playState === 'stopped'}
-            active={playState === 'paused'} activeClass='bg-selected text-white'
-            accent='hover:text-white' onClick={() => onPause()}
+            active={playState === 'paused'} activeClass='bg-selected hover:bg-selected text-fg'
+            accent='hover:text-fg' onClick={() => onPause()}
           >
             <PauseGlyph />
           </Transport>

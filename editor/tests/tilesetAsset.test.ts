@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_TILE_SIZE, buildTilesetAsset, gridOf, guessTileSize, resliceTileset, toRuntimeTileset,
-  reembedTilesets, detachTileset, tilesetIdsInScene,
+  reembedTilesets, detachTileset, tilesetIdsInScene, fromRuntimeTileset,
+  frameBadges, appendFrames, removeLastFrame, moveFrame,
 } from '../src/utils/tilesets';
 import { Scene, SpriteNode, Sprite } from 'cleo';
 
@@ -138,6 +139,16 @@ describe('toRuntimeTileset', () => {
     expect(ts.frameOf(2, 0.3)).toBe(3);
     expect(ts.terrainSet(1)?.tiles[0]).toEqual([4]);
   });
+
+  it('carries overdrive both ways, and omits it at the default', () => {
+    const asset = { ...buildTilesetAsset('Fire', 'fire.png', 64, 16, { tileWidth: 16, tileHeight: 16 }), overdrive: 3 };
+    asset.tiles[1] = { overdrive: 6 };
+    const ts = toRuntimeTileset(asset);
+    expect(ts.overdrive).toBe(3);
+    expect(ts.overdriveOf(1)).toBe(6);
+    expect(fromRuntimeTileset(ts, 'Fire').overdrive).toBe(3);
+    expect('overdrive' in fromRuntimeTileset(toRuntimeTileset({ ...asset, overdrive: undefined }), 'Fire')).toBe(false);
+  });
 });
 
 // --- Sprites as tileset consumers -----------------------------------------------------------------
@@ -167,6 +178,15 @@ describe('sprites and the tileset library', () => {
     expect(reembedTilesets(scene, [edited])).toBe(false);
   });
 
+  it('reembeds an overdrive change, so a placed sprite starts glowing', () => {
+    const asset = sheet();
+    const sprite = new SpriteNode('s', new Sprite({ tileset: toRuntimeTileset(asset) }));
+    const scene = sceneWith(sprite);
+    expect(sprite.overdrive).toBe(1);
+    expect(reembedTilesets(scene, [{ ...asset, overdrive: 4 }])).toBe(true);
+    expect(sprite.overdrive).toBe(4);
+  });
+
   it('unlinks sprites whose tileset was deleted', () => {
     const asset = sheet();
     const sprite = new SpriteNode('s', new Sprite({ tileset: toRuntimeTileset(asset) }));
@@ -191,5 +211,22 @@ describe('sprites and the tileset library', () => {
     expect(reembedTilesets(scene, [sheet()])).toBe(false);
     expect(detachTileset(scene, icon.tileset!.id)).toBe(true); // an explicit id still detaches
     expect(icon.tileset).toBeNull();
+  });
+});
+
+describe('animation frames picked on the atlas', () => {
+  it('labels each tile with its 1-based position(s) in the sequence', () => {
+    expect([...frameBadges([4, 5, 6, 5])]).toEqual([[4, '1'], [5, '2,4'], [6, '3']]);
+    expect(frameBadges([]).size).toBe(0);
+  });
+  it('appends picks in order, and a right-click undoes the most recent use of a tile', () => {
+    const f = appendFrames([4], [5, 6, 5]);
+    expect(f).toEqual([4, 5, 6, 5]);
+    expect(removeLastFrame(f, 5)).toEqual([4, 5, 6]);
+    expect(removeLastFrame(f, 9)).toEqual(f);
+  });
+  it('reorders without losing or duplicating frames', () => {
+    expect(moveFrame([1, 2, 3], 2, 0)).toEqual([3, 1, 2]);
+    expect(moveFrame([1, 2, 3], 0, 5)).toEqual([1, 2, 3]);
   });
 });

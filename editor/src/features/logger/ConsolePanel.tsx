@@ -52,7 +52,7 @@ const Row: NonNullable<ComponentOverrides['Message']> = ({ log, node, children: 
       className={cn(
         // select-text: the editor is select-none by default (index.css), and log output is the main thing
         // in it anyone copies.
-        'flex items-start gap-2 px-2 py-[3px] border-b border-border-subtle/60 font-mono text-xs leading-4 select-text',
+        'flex items-start gap-2 px-2 py-[3px] border-b border-border-subtle/60 font-mono text-ui leading-4 select-text',
         '[&_*]:font-mono [&_*]:whitespace-pre-wrap',
         ROW_TONE[entry.method]
       )}
@@ -153,12 +153,12 @@ export default function ConsolePanel() {
         <Popover
           align='left'
           title='Filter by scope'
-          triggerClassName='px-2 py-0.5 text-xs rounded border border-transparent text-muted hover:text-white hover:bg-control'
+          triggerClassName='px-2 py-0.5 text-ui rounded border border-transparent text-muted hover:text-fg hover:bg-control'
           trigger={<>Scopes <span className='tabular-nums text-dim'>{visibleScopes}/{scopes.length}</span></>}
           className='min-w-[160px] max-h-64 overflow-y-auto'
         >
           {scopes.length === 0
-            ? <div className='px-2 py-1 text-xs text-dim'>Nothing logged yet</div>
+            ? <div className='px-2 py-1 text-ui text-dim'>Nothing logged yet</div>
             : scopes.map((scope) => (
                 <Toggle
                   key={scope}
@@ -174,7 +174,7 @@ export default function ConsolePanel() {
           value={query}
           onChange={setQuery}
           placeholder='Filter'
-          className='h-6 py-0 text-xs w-40 ml-auto'
+          className='h-6 py-0 text-ui w-40 ml-auto'
         />
         <Button size='sm' variant='ghost' active={following} title='Scroll to the newest entry' onClick={scrollToBottom}>
           Follow
@@ -186,13 +186,13 @@ export default function ConsolePanel() {
 
       <div ref={scrollRef} onScroll={onScroll} className='flex-1 min-h-0 overflow-y-auto overflow-x-hidden'>
         {filtered.length === 0
-          ? <div className='h-full flex items-center justify-center text-xs text-dim select-none'>
+          ? <div className='h-full flex items-center justify-center text-ui text-dim select-none'>
               {entries.length === 0 ? 'No logs yet' : 'No logs match the current filters'}
             </div>
           : <Console logs={filtered as any} variant='dark' styles={getConsoleStyles()} components={COMPONENTS} />}
       </div>
 
-      <div className='shrink-0 flex items-center gap-2 px-2 h-5 border-t border-border bg-surface-sunken text-[10px] text-dim'>
+      <div className='shrink-0 flex items-center gap-2 px-2 h-5 border-t border-border bg-surface-sunken text-ui-xs text-dim'>
         <span className='tabular-nums'>{filtered.length} shown · {entries.length}/{MAX_LOGS} kept</span>
         <span className='ml-auto'>console.flush(...) rewrites its own row</span>
       </div>

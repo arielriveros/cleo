@@ -67,7 +67,7 @@ export default function ParticleSystemSlot(props: { node: ParticleSystemNode; on
           </div>
           <Button variant='ghost' size='icon' className='text-highlight' title='Edit this effect in the particle editor'
             onClick={() => enterParticleSystemEditor(asset.id)}>✎</Button>
-          <Button variant='ghost' size='icon' className='text-danger'
+          <Button variant='remove' size='icon'
             title='Unlink. The node keeps playing exactly what it plays now — only the link goes.'
             onClick={unlink}>✕</Button>
         </div>

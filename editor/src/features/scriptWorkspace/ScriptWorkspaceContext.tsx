@@ -19,6 +19,8 @@ import { cryptoRandomId } from '../../utils/ids'
 import { getScriptsBridge, hasScriptWorkspace } from './desktopScripts'
 import { buildManifest, buildScaffold, readManifest, staticScaffold } from './scaffold'
 import { clearExternalSource } from './externalSourceStore'
+import { getEditorPrefs } from '../options/editorPrefs'
+import { setExternalScriptOpener } from '../options/scriptOpener'
 
 // Keeps the project's script library and a folder on disk in step, so scripts can be edited in VSCode.
 //
@@ -41,12 +43,12 @@ type ScriptWorkspaceValue = {
   rootPath: string | null
   message: string | null
   conflicts: ScriptConflict[]
-  /** Pick a folder, scaffold it and start syncing. */
-  setup: () => Promise<void>
+  /** Pick a folder, scaffold it and start syncing. Resolves true once connected (false if cancelled). */
+  setup: () => Promise<boolean>
   /** Stop syncing and forget the folder (the files on disk are left alone). */
   disconnect: () => Promise<void>
-  /** Open the workspace in the external editor, optionally selecting one script's file. */
-  openInEditor: (scriptId?: string) => Promise<void>
+  /** Open the workspace in the external editor, optionally selecting one script's file. True on success. */
+  openInEditor: (scriptId?: string) => Promise<boolean>
   /** Rewrite every file from the library, discarding whatever is on disk. Resolves a paused workspace. */
   resync: () => Promise<void>
   /** Apply the deletions a paused changeset was holding back. */
@@ -313,13 +315,14 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
     if (announce) Logger.info(`Scripts are mirrored to ${root}`, 'Editor')
   }, [push, setStatusBoth])
 
-  const setup = useCallback(async () => {
+  const setup = useCallback(async (): Promise<boolean> => {
     const bridge = getScriptsBridge()
-    if (!bridge) return
+    if (!bridge) return false
     const picked = await bridge.pickFolder()
-    if (!picked.ok || !picked.path) return
+    if (!picked.ok || !picked.path) return false
     await setScriptWorkspace(activeProjectId(), picked.path)
     await connect(picked.path, true)
+    return rootRef.current === picked.path
   }, [connect])
 
   const disconnect = useCallback(async () => {
@@ -399,17 +402,31 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
     })
   }, [adoptExternalScriptSource])
 
-  const openInEditor = useCallback(async (scriptId?: string) => {
+  const openInEditor = useCallback(async (scriptId?: string): Promise<boolean> => {
     const bridge = getScriptsBridge()
     const root = rootRef.current
-    if (!bridge || !root) return
+    if (!bridge || !root) return false
     // Make sure the file the IDE is about to open is the current one.
     await push()
     const rel = scriptId ? agreedRef.current.get(scriptId)?.rel : undefined
+    // The command from Options ▸ Editor ▸ Scripts; a per-project override on the record still wins.
     const saved = await scriptWorkspaceOf(activeProjectId())
-    const res = await bridge.launch(root, rel, saved.command)
+    const res = await bridge.launch(root, rel, saved.command ?? getEditorPrefs().externalEditorCommand)
     if (!res.ok) Logger.error(`Could not open the script workspace: ${res.error}`, 'Editor')
+    return !!res.ok
   }, [push])
+
+  // "Open scripts with VSCode" (Options ▸ Editor): the engine context's script opener routes through
+  // this. With no workspace yet, the first open asks for a folder — cancelling falls back to the
+  // built-in editor.
+  useEffect(() => {
+    if (!available) { setExternalScriptOpener(null); return }
+    setExternalScriptOpener(async (scriptId) => {
+      if (!rootRef.current && !(await setup())) return false
+      return openInEditor(scriptId)
+    })
+    return () => setExternalScriptOpener(null)
+  }, [available, setup, openInEditor])
 
   const value = useMemo<ScriptWorkspaceValue>(() => ({
     status, rootPath, message, conflicts, available,

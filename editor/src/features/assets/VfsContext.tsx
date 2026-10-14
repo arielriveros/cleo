@@ -238,6 +238,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     enterMaterialEditor: engine.enterMaterialEditor,
     enterTerrainMaterialEditor: engine.enterTerrainMaterialEditor,
     enterTemplateEditor: engine.enterTemplateEditor,
+    createTemplateVariant: engine.createTemplateVariant,
     enterScriptEditor: engine.enterScriptEditor,
     enterModelEditor: engine.enterModelEditor,
     enterAnimationFieldEditor: engine.enterAnimationFieldEditor,

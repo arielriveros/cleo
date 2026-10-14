@@ -107,10 +107,8 @@ export default function BehaviorEditor({ node, onChange }: Props) {
                 onChange={(e) => patchParam(i, { type: e.target.value as BehaviorParameterType })}>
                 {PARAM_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
               </Select>
-              <ButtonWithConfirm
-                onClick={() => apply({ ...machine, parameters: machine.parameters.filter((_, x) => x !== i) })}>
-                ✕
-              </ButtonWithConfirm>
+              <ButtonWithConfirm variant='remove'
+                onClick={() => apply({ ...machine, parameters: machine.parameters.filter((_, x) => x !== i) })}>✕</ButtonWithConfirm>
             </div>
             <ParamSourcePicker source={p.source} fuzzyOutputs={fuzzyOutputs}
               onChange={(source) => patchParam(i, { source })} />
@@ -154,14 +152,12 @@ export default function BehaviorEditor({ node, onChange }: Props) {
                 onChange={(e) => patchState(s.name, { goal: e.target.value as AiGoal })}>
                 {AI_GOALS.map(g => <option key={g} value={g}>{g}</option>)}
               </Select>
-              <ButtonWithConfirm
+              <ButtonWithConfirm variant='remove'
                 onClick={() => apply({
                   ...machine,
                   states: machine.states.filter(x => x.name !== s.name),
                   transitions: machine.transitions.filter(t => t.from !== s.name && t.to !== s.name),
-                })}>
-                ✕
-              </ButtonWithConfirm>
+                })}>✕</ButtonWithConfirm>
             </div>
             <div className='flex items-center gap-2'>
               <Toggle label='Entry' checked={s.isEntry === true} title={ENTRY_HINT}
@@ -205,10 +201,8 @@ export default function BehaviorEditor({ node, onChange }: Props) {
                 onChange={(e) => patchTransition(i, { to: e.target.value })}>
                 {machine.states.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
               </Select>
-              <ButtonWithConfirm
-                onClick={() => apply({ ...machine, transitions: machine.transitions.filter((_, x) => x !== i) })}>
-                ✕
-              </ButtonWithConfirm>
+              <ButtonWithConfirm variant='remove'
+                onClick={() => apply({ ...machine, transitions: machine.transitions.filter((_, x) => x !== i) })}>✕</ButtonWithConfirm>
             </div>
             <Slider label='Min dwell' min={0} max={5} step={0.05} value={t.minDwell ?? 0}
               labelClassName='w-[68px]' title={DWELL_HINT}

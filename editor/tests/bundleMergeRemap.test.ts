@@ -14,6 +14,14 @@ const remaps = (over: Partial<Remaps> = {}): Remaps => ({
   ...over,
 });
 
+describe('remapDeep — template variants', () => {
+  it("moves a variant's link to its base along with the base's re-mint", () => {
+    const variant = { id: 'v', name: 'Sword', variant: { baseTemplateId: 'old-base', diff: { nodes: {} } } };
+    remapDeep(variant, remaps({ tpl: new Map([['old-base', 'new-base']]) }));
+    expect(variant.variant.baseTemplateId).toBe('new-base');
+  });
+});
+
 describe('remapDeep — tileset references', () => {
   const tileset = () => new Map([['old-ts', 'new-ts']]);
 

@@ -91,7 +91,7 @@ export function VectorInput({
           <div key={i} className='flex items-center flex-1 min-w-0 rounded border border-border bg-control overflow-hidden focus-within:border-primary transition-colors'>
             {label !== undefined && (
               <span
-                className='px-1.5 self-stretch flex items-center text-[10px] font-bold select-none cursor-ew-resize'
+                className='px-1.5 self-stretch flex items-center text-ui-xs font-bold select-none cursor-ew-resize'
                 style={{ color, background: axisColors ? axisTint(i) : 'transparent' }}
                 title={`Drag to adjust${reset ? ' · double-click to reset' : ''}`}
                 onMouseDown={(e) => { e.preventDefault(); dragging.current = i; (e.currentTarget as any).requestPointerLock?.(); }}
@@ -115,7 +115,7 @@ export function VectorInput({
                 const n = parseFloat(s);
                 if (Number.isFinite(n)) applyAt(i, clamp(n));
               }}
-              className='w-full min-w-0 bg-transparent px-1.5 py-1 text-xs tabular-nums outline-none'
+              className='w-full min-w-0 bg-transparent px-1.5 py-1 text-ui tabular-nums outline-none'
             />
           </div>
         );

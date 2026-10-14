@@ -64,6 +64,8 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     soundSamples: (await src.json(`${BUNDLE_PATHS.librariesDir}soundSamples.json`)) ?? [],
     // Absent when the project runs on the default bindings — see BundleLibraries.inputMap.
     inputMap: (await src.json(`${BUNDLE_PATHS.librariesDir}inputMap.json`)) ?? null,
+    // Absent when the project runs on the default engine/publish options.
+    projectSettings: (await src.json(`${BUNDLE_PATHS.librariesDir}projectSettings.json`)) ?? null,
   };
   const vfs = (await src.json(BUNDLE_PATHS.vfs)) ?? { version: 1, folders: [], entries: [] };
 
@@ -161,6 +163,7 @@ export async function bundleEntries(bundle: BundleData): Promise<BundleEntry[]> 
   // Only when there is one: an absent entry IS the default map, which keeps a default-bindings export
   // identical to what it was before input maps travelled.
   if (libraries.inputMap) entries.push(json(`${BUNDLE_PATHS.librariesDir}inputMap.json`, libraries.inputMap));
+  if (libraries.projectSettings) entries.push(json(`${BUNDLE_PATHS.librariesDir}projectSettings.json`, libraries.projectSettings));
   for (const [id, data] of Object.entries(scenes)) entries.push(json(`${BUNDLE_PATHS.scenesDir}${id}.json`, data));
 
   entries.push(json(BUNDLE_PATHS.assetsIndex, index));

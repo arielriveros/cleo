@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { CameraRigNode, ModelNode, type Node } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
-import { Hint, Select, cn, sectionTitleClass } from '../../../components/ui'
+import Collapsable from '../../../components/Collapsable'
+import { Hint, Select } from '../../../components/ui'
+import { RigIcon } from '../sectionIcons'
 
 // "Attach to socket": pin any node to a socket on a character's skeleton — the sword in the hand.
 //
@@ -20,6 +22,15 @@ function socketModelsIn(root: Node, exclude: Node, out: ModelNode[]): void {
   }
 }
 
+/**
+ * Node types that are part of the WORLD rather than something a character could hold: a sky, a navmesh or a
+ * landscape riding a hand bone is never what anyone meant, so the section never offers it.
+ */
+const NEVER_HELD = new Set([
+  'navMesh', 'skybox', 'landscape', 'tilemap', 'volumetricClouds', 'skyAtmosphere', 'skyLight', 'lightProbe',
+  'decal', 'character', 'controller',
+])
+
 export default function SocketAttachSlot({ node }: { node: Node }) {
   const { editorScene: activeScene } = useCleoEngine()
   const [, force] = useState(0)
@@ -28,13 +39,19 @@ export default function SocketAttachSlot({ node }: { node: Node }) {
 
   const attachment = node.socketAttachment
 
-  // Candidates above (for 'parent') and everywhere (for an explicit target).
+  // Candidates above (for 'parent') and everywhere (for an explicit target). "Above" stops short of the
+  // scene root: searching the root's subtree is searching the whole scene, which is what made this section
+  // show on every node in any level holding one rigged character.
   const above: ModelNode[] = []
-  for (let a = node.parent; a; a = a.parent) socketModelsIn(a, node, above)
+  const sceneRoot = activeScene?.root
+  for (let a = node.parent; a && a.parent && a !== sceneRoot; a = a.parent) socketModelsIn(a, node, above)
   const everywhere: ModelNode[] = []
   if (activeScene) socketModelsIn(activeScene.root, node, everywhere)
 
-  if (!attachment && !above.length && !everywhere.length) return null
+  // Shown only where it means something: a node already attached, or one that sits inside a character
+  // (the sword dropped under the knight). A socketed body itself, and world-level nodes, never.
+  const isSocketedBody = node instanceof ModelNode && node.socketNames.length > 0
+  if (!attachment && (!above.length || isSocketedBody || NEVER_HELD.has(node.nodeType))) return null
 
   const targetValue = attachment?.target ?? 'parent'
   const owners = targetValue === 'parent'
@@ -49,9 +66,10 @@ export default function SocketAttachSlot({ node }: { node: Node }) {
   }
 
   return (
-    <div className='px-2'>
-      <div className={cn(sectionTitleClass, 'mt-3 mb-1')}>Attach to socket</div>
-      <div className='flex flex-col gap-1'>
+    <Collapsable title='Socket' icon={<RigIcon />} persistKey='socketAttach'
+      badge={attachment ? attachment.socket : undefined}
+      hint='Pin this node to a socket on a character’s skeleton — the sword in the hand.'>
+      <div className='w-full p-2 flex flex-col gap-1'>
         <Select
           value={targetValue}
           title='Whose skeleton to follow'
@@ -85,7 +103,7 @@ export default function SocketAttachSlot({ node }: { node: Node }) {
           <Hint>No sockets on {targetValue === 'parent' ? 'the character above' : 'that character'} yet — add them in its rig.</Hint>
         )}
       </div>
-    </div>
+    </Collapsable>
   )
 }
 

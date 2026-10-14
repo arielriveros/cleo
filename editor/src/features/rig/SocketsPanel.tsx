@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { quat, vec3 } from 'gl-matrix'
-import { eulerFromQuatDeg } from 'cleo'
+import { eulerFromQuatDeg, humanoidSlotOf, IMPLICIT_SOCKETS } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { useRig } from './RigContext'
 import { getAnimationTarget } from '../animation/skeleton'
-import { Button, Hint, Select, TextInput, VectorInput, cn, sectionTitleClass } from '../../components/ui'
+import { Button, Hint, Select, TextInput, VectorInput, cn, labelClass, sectionTitleClass } from '../../components/ui'
 import { cryptoRandomId } from '../../utils/ids'
 import type { RigSocket } from '../../utils/rigAssets'
 
@@ -28,8 +28,18 @@ const fromEuler = (e: number[]) => {
   return [q[0], q[1], q[2], q[3]]
 }
 
-/** A socket name not yet taken on this rig, derived from the bone. */
+/** The socket name scripts ask for, keyed by humanoid slot: the same names IMPLICIT_SOCKETS answers to. */
+const STANDARD_SOCKET_OF_SLOT: Record<string, string> = Object.fromEntries(
+  Object.entries(IMPLICIT_SOCKETS).map(([name, slot]) => [slot, name]))
+
+/**
+ * A socket name not yet taken on this rig, derived from the bone. A hand or head bone gets the STANDARD
+ * name (`RightHand`, `LeftHand`, `Head`) — what weapon and cast scripts look up — so adding a socket there
+ * to give a grip offset just works, instead of producing `hand_rSocket` that nothing asks for.
+ */
 function freshName(bone: string, taken: RigSocket[]): string {
+  const standard = STANDARD_SOCKET_OF_SLOT[humanoidSlotOf(bone) ?? '']
+  if (standard && !taken.some(s => s.name === standard)) return standard
   // Strip a namespace prefix (`mixamorig:RightHand`) so the socket reads as the bone does.
   const base = `${bone.split(':').pop() || 'Socket'}Socket`
   let name = base
@@ -95,7 +105,7 @@ export default function SocketsPanel() {
             <div key={socket.id} className={cn('rounded border', open ? 'border-highlight' : 'border-control')}>
               <div className='flex items-center gap-1 p-1'>
                 <button
-                  className='text-[11px] px-1 shrink-0 text-muted'
+                  className='text-ui-sm px-1 shrink-0 text-muted hover:text-fg'
                   title={open ? 'Collapse' : 'Edit this socket and park the gizmo on it'}
                   onClick={() => select(open ? null : socket.id)}
                 >{open ? '▾' : '▸'}</button>
@@ -105,38 +115,37 @@ export default function SocketsPanel() {
                   title='The name nodes attach by. Renaming detaches anything already using the old name.'
                   onChange={v => update(socket.id, { name: v })}
                 />
-                <button
-                  className='text-danger px-1 shrink-0'
+                <Button variant='remove' size='sm' className='px-1 py-0 shrink-0'
                   title='Delete this socket. Nodes attached to it stop following and stay where they were.'
                   onClick={() => { setSockets(sockets.filter(s => s.id !== socket.id)); if (open) select(null) }}
-                >✕</button>
+                >✕</Button>
               </div>
 
               {open && (
                 <div className='flex flex-col gap-1 p-1 pt-0'>
-                  <label className='text-[11px] text-muted'>Bone</label>
+                  <label className={labelClass}>Bone</label>
                   <Select value={socket.bone} onChange={e => update(socket.id, { bone: e.target.value })}>
                     {missing && <option value={socket.bone}>{socket.bone} (not on this skeleton)</option>}
                     {boneNames.map(n => <option key={n} value={n}>{n}</option>)}
                   </Select>
 
-                  <label className='text-[11px] text-muted'>Position (m)</label>
+                  <label className={labelClass}>Position (m)</label>
                   <VectorInput
                     value={socket.offset?.t ?? [0, 0, 0]} step={0.01} precision={3} reset={[0, 0, 0]}
                     onChange={t => update(socket.id, { offset: { ...socket.offset, t } })}
                   />
-                  <label className='text-[11px] text-muted'>Rotation (°)</label>
+                  <label className={labelClass}>Rotation (°)</label>
                   <VectorInput
                     value={toEuler(socket.offset?.r)} step={1} precision={1} reset={[0, 0, 0]}
                     onChange={e => update(socket.id, { offset: { ...socket.offset, r: fromEuler(e) } })}
                   />
-                  <label className='text-[11px] text-muted'>Scale</label>
+                  <label className={labelClass}>Scale</label>
                   <VectorInput
                     value={socket.offset?.s ?? [1, 1, 1]} step={0.01} precision={3} reset={[1, 1, 1]} uniform
                     onChange={s => update(socket.id, { offset: { ...socket.offset, s } })}
                   />
 
-                  <label className='text-[11px] text-muted'>Preview model</label>
+                  <label className={labelClass}>Preview model</label>
                   <Select
                     value={socket.previewModelId ?? ''}
                     title='Shown on the socket in the animation editors only — never placed in a scene'

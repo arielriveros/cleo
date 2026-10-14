@@ -1,18 +1,19 @@
-import { CharacterNode, Logger, ModelNode, Node, setMoveWorld } from 'cleo'
-import { num, planarDistance } from './SoulsMath'
-import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing } from './SoulsHitbox'
+import { Logger, ModelNode, Node, setMoveWorld } from 'cleo'
+import { clamp, num, planarDistance } from './SoulsMath'
+import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing, wieldedBy } from './SoulsHitbox'
+import SoulsCharacterNode from './SoulsCharacter'
 
 /**
- * Hollow Keep — every enemy: the Hollow, the Caster, the Elite Knight and the boss. Attach to the
- * enemy template's root, a Character node. The archetypes differ only in tuning and in their attack
- * children, so there is one script and four templates.
+ * Hollow Keep — the base ENEMY. Never attached as-is: each enemy type has its own script extending this
+ * one (SoulsHollow, SoulsHollowSorcerer, SoulsEliteKnight, SoulsHollowWarden), whose defaults are that
+ * type's stats, and its own template, a variant of the base "Enemy" template. This class is everything
+ * the types share: how an enemy fights, spaces, reacts and dies.
  *
- *   Hollow                Character (this script) — capsule body, friction 0
+ *   Hollow                Character (SoulsHollow) — capsule body, friction 0
  *   ├── <model>           skinned model with a state machine that has `Died` and `Revive` triggers
  *   ├── LockPoint *       empty node at chest height: where the lock-on camera and reticle aim
- *   ├── Weapon            the held weapon, attached to the RightHand socket. Its `bladeStart`/`bladeEnd`/
- *   │                     `bladeRadius` variables are the HITBOX (see SoulsHitbox); without them it is
- *   │                     visual only and the enemy cannot land melee hits
+ *   ├── Weapons           empty group; `weaponTemplates` (e.g. "Club") is spawned into it on start, into
+ *   │                     the RightHand socket. The weapon's blade is the melee HITBOX (see SoulsHitbox)
  *   ├── Attacks *         group of SoulsEnemyAttack data nodes — the moveset
  *   ├── HealthBar         world-space UI Root with a `Fill` progress bar (optional; not on the boss)
  *   ├── PhaseAura         particle system started when the boss turns (optional)
@@ -32,38 +33,30 @@ import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing } from 
  * additionally FLINCH on every hit unless the attack they are in has `hyperArmor`; a boss never flinches,
  * only staggers.
  *
- * ## The boss
+ * ## Bosses
  *
- * `isBoss` enemies start DORMANT and stand still until the fog gate calls `awaken()`. At `phase2At` of
- * their health they roar (invulnerable for `phase2Seconds`), start `PhaseAura`, speed up by
- * `phase2SpeedMul`, and unlock every attack whose `phase` is 2.
+ * `isBoss` enemies start DORMANT and stand still until the fog gate calls `awaken()`, never flinch, and
+ * have no floating health bar (the HUD reads the boss itself). What a boss does at low health is its own
+ * script's business — see SoulsHollowWarden, which overrides `_onDamaged` for its phase two.
  */
-export default class SoulsEnemyNode extends CharacterNode {
-  public displayName: string = 'Hollow'
-  public maxHp: number = 160
-  public hp: number = 160
-  /** Fraction of incoming damage ignored, 0..0.9. */
-  public defense: number = 0
+export default class SoulsEnemyNode extends SoulsCharacterNode {
+  public displayName: string = 'Enemy'
+  public team: string = 'enemy'
   public maxPoise: number = 25
   public poiseRegenDelay: number = 3
   public soulsReward: number = 120
   public isBoss: boolean = false
-  /** Collision-ish size, used by hit checks and lock-on height. */
-  public bodyRadius: number = 0.4
-  public bodyHeight: number = 1.8
+  /** A dead enemy lets its weapon fall (a physics body); it lies there until the corpse goes. */
+  public dropWeaponOnDeath: boolean = true
 
   // ----- movement --------------------------------------------------------------------------------
+  // WHEN to chase, close in, strafe, back off or give up is the type's AI graph (its `.brain`, linked on
+  // the Brain controller): the engage distance, the spacing band and the leash are numbers in ITS
+  // transitions. This script only carries out the state the graph is in — see `_ai`.
   /** Chase / approach speed. Patrol and return run slower through the brain's speed scales. */
   public moveSpeed: number = 3
   /** Degrees per second the body turns toward the player while engaged. */
   public engageTurnRate: number = 300
-  /** Distance at which the brain hands control to this script. */
-  public engageRange: number = 4.5
-  /** Metres from home past which the enemy gives up and walks back. */
-  public leashRange: number = 25
-  /** Preferred distance band while engaged: approach above max, back off below min, strafe between. */
-  public preferredMin: number = 0
-  public preferredMax: number = 1.8
   public strafeSpeedScale: number = 0.35
   public retreatSpeedScale: number = 0.7
 
@@ -86,31 +79,45 @@ export default class SoulsEnemyNode extends CharacterNode {
   /** Seconds the health bar stays up after the last hit. */
   public healthBarSeconds: number = 4
 
-  // ----- boss ------------------------------------------------------------------------------------
-  public phase2At: number = 0.5
-  public phase2SpeedMul: number = 1.15
-  public phase2Seconds: number = 2
-  public roarClip: string = 'Souls_Roar'
-
   // ----- runtime, read by others -------------------------------------------------------------------
-  public isDead: boolean = false
   public isAwake: boolean = true
+  /** Which attacks are unlocked: an attack's `phase` is the phase it needs (see pickAttack). */
   public phase: number = 1
   public poise: number = 25
   public fightState: string = 'ai'
-  /** Whether attacks can see this enemy. Off while dead and during the boss's phase-two roar. */
-  public hurtboxActive: boolean = true
   /** Where the enemy was spawned; the brain walks back here. */
   public home: number[] = [0, 0, 0]
+  /**
+   * Published for the AI graph's Attack Ready: the breathing gap since the last attack has passed AND the
+   * moveset has something for the current distance. The graph decides to attack; this script picks which.
+   */
+  public attackReady: boolean = false
 
-  private _gm: Node = null
-  private _player: Node = null
-  private _model: ModelNode = null
-  private _brain: Node = null
-  private _lockPoint: Node = null
-  private _healthBar: Node = null
-  private _healthFill: Node = null
-  private _aura: Node = null
+  // ----- what the AI graph reads (builtin parameters) -----------------------------------------------
+  /** The brain's current target has died — the graph walks home. */
+  public get targetDead(): boolean {
+    const id = (this._brain as any)?.getBlackboard?.('target')
+    const target: any = typeof id === 'string' && id ? this.scene?.getNodeById(id) : null
+    return !!target?.isDead
+  }
+  /** Planar metres from where the enemy spawned — the graph's leash and "home again" tests. */
+  public get distanceFromHome(): number {
+    const p = this.worldPosition
+    return Math.hypot(p[0] - this.home[0], p[2] - this.home[2])
+  }
+  public get isAttacking(): boolean { return this.fightState === 'attack' }
+  /** A flinch or a stagger is playing out. */
+  public get isReacting(): boolean { return this.fightState === 'flinch' || this.fightState === 'stagger' }
+  /** A boss's invulnerable phase transition is playing out. */
+  public get isPhaseShifting(): boolean { return this.fightState === 'phase' }
+
+  protected _player: Node = null
+  protected _model: ModelNode = null
+  protected _brain: Node = null
+  protected _lockPoint: Node = null
+  protected _healthBar: Node = null
+  protected _healthFill: Node = null
+  protected _aura: Node = null
   private _attacks: Node[] = []
   private _offEvents: (() => void) | null = null
 
@@ -127,13 +134,15 @@ export default class SoulsEnemyNode extends CharacterNode {
   /** The attack's active window has opened (its `hit` event, or the fallback `hitTime`). */
   private _windowOpened: boolean = false
   private _swing: Swing = newSwing()
-  private _weapon: Node = null
   private _actionSeconds: number = 0
   private _lungeSpeedNow: number = 0
   private _strafeDir: number = 1
   private _strafeTimer: number = 0
-  private _speedMul: number = 1
+  /** Multiplies movement and attack speed (a boss's later phase raises it). */
+  protected _speedMul: number = 1
   private _reactSeconds: number = 0
+  /** How long the current `phase` state (an invulnerable transition) lasts. */
+  protected _phaseSeconds: number = 0
 
   onStart() {
     this.setVariable('isEnemy', true, 'boolean', 'public')
@@ -145,7 +154,7 @@ export default class SoulsEnemyNode extends CharacterNode {
     this._healthBar = this.getChildByName('HealthBar')[0] ?? null
     this._healthFill = this._healthBar ? this._find(this._healthBar, 'Fill') : null
     this._aura = this.getChildByName('PhaseAura')[0] ?? null
-    this._weapon = this.getChildByName('Weapon')[0] ?? null
+    this._spawnWeapons()
     const group = this.getChildByName('Attacks')[0]
     this._attacks = group ? group.children.filter(c => (c as any).isEnemyAttack) : []
     if (!this._attacks.length) Logger.warn('Hollow Keep: enemy "' + this.name + '" has no Attacks.', 'Script')
@@ -164,6 +173,13 @@ export default class SoulsEnemyNode extends CharacterNode {
     ;(this._aura as any)?.stop?.(true)
 
     const animator = this._model?.animator as any
+    // The character's idle/locomotion/death machine is embedded in its model node. A model swapped by
+    // deleting the node and dropping a new one in has none, and would walk around in its bind pose with
+    // nothing to say why. Linking the mannequin rig gives it the "Souls Character" controller.
+    const machine = animator?.getStateMachine?.()
+    if (animator && !machine?.states?.length)
+      Logger.warn('Hollow Keep: "' + this.name + '" has no animation controller on its model, so it will hold its bind pose. '
+        + 'Select the model node and assign "Souls Character" in its Animation section (or link the mannequin rig).', 'Script')
     if (animator?.onAnimationEvent) {
       this._offEvents = animator.onAnimationEvent((name: string, clip: string) => this._onAnimEvent(name, clip))
     }
@@ -174,6 +190,8 @@ export default class SoulsEnemyNode extends CharacterNode {
     this._offEvents?.()
     this._offEvents = null
     ;(this._gm as any)?.unregisterEnemy?.(this)
+    // The weapon it dropped went to the world root, so it does not go with the corpse on its own.
+    this._clearDroppedWeapons()
   }
 
   // =================================================================================================
@@ -191,38 +209,64 @@ export default class SoulsEnemyNode extends CharacterNode {
     ;(this._brain as any)?.setBlackboard?.('target', this._player?.id)
   }
 
-  /**
-   * Take a hit from the player. Returns true when it landed (false while dead or invulnerable).
-   */
-  public receiveHit(damage: number, poiseDamage: number, from: Node): boolean {
-    if (this.isDead || this.fightState === 'phase') return false
-    const gm = this._gm as any
-    const dealt = gm?.applyDefense ? gm.applyDefense(damage, this.defense) : damage
-    this.hp = Math.max(0, this.hp - dealt)
-    this._sinceHit = 0
-    gm?.bleed?.(this, from, dealt)
-    if (!this.isBoss) this._setBar(true)
+  // ----- taking hits (SoulsCharacter.receiveHit calls these) -----------------------------------------
 
-    // Anything that hurts us is now our target, even from behind.
+  /** Nothing lands on the dead, or during an invulnerable phase transition. */
+  protected _canBeHit(damage: number): boolean {
+    return super._canBeHit(damage) && this.fightState !== 'phase'
+  }
+
+  /** Anything that hurts us is now our target, even from behind. */
+  protected _onHurt(dealt: number, from: Node): void {
+    this._sinceHit = 0
+    if (!this.isBoss) this._setBar(true)
     if (!this.isBoss || this.isAwake) {
       this.isAwake = true
       if (this.fightState === 'dormant') this._enter('ai')
       if (from) (this._brain as any)?.setBlackboard?.('target', from.id)
     }
+  }
 
-    if (this.hp <= 0) { this._die(); return true }
-
+  /** Poise: at zero, a stagger; otherwise a flinch, unless armoured. */
+  protected _onDamaged(dealt: number, poiseDamage: number, from: Node): void {
     this.poise -= poiseDamage
     if (this.poise <= 0) {
       this.poise = this.maxPoise
       this._react('stagger', this.staggerClip, this.staggerSeconds)
-      gm?.sfx?.('Stagger')
+      ;(this._gm as any)?.sfx?.('Stagger')
     } else if (this.flinchOnHit && !this.isBoss && !(this.fightState === 'attack' && this._attack?.hyperArmor)) {
       this._react('flinch', this.flinchClip, this.flinchSeconds)
     }
+  }
 
-    if (this.isBoss && this.phase === 1 && this.hp <= this.maxHp * this.phase2At) this._startPhase2()
-    return true
+  /**
+   * Choose the next attack.
+   *
+   * Eligible: off cooldown, `minRange <= distance <= maxRange`, and allowed in this `phase` (an attack's
+   * `phase` is the phase it UNLOCKS at — 0 and 1 mean always, 2 means only once a boss has turned).
+   * The same attack twice in a row is avoided whenever anything else qualifies. Then weighted random.
+   *
+   * `attacks` are plain records (or SoulsEnemyAttack nodes) and `cooldowns` maps name -> seconds left,
+   * so the choice is testable with no scene at all.
+   */
+  public pickAttack(attacks: any[], distance: number, phase: number, lastName: string,
+    cooldowns: any, random: number): any {
+    const ok = (a: any) => (num(a.phase, 0) <= Math.max(1, phase))
+      && distance >= num(a.minRange, 0) && distance <= num(a.maxRange, 3)
+      && !(cooldowns && cooldowns[a.name] > 0)
+    let pool = attacks.filter(ok)
+    if (pool.length > 1) {
+      const fresh = pool.filter(a => a.name !== lastName)
+      if (fresh.length) pool = fresh
+    }
+    if (!pool.length) return null
+    const total = pool.reduce((s, a) => s + Math.max(0.0001, num(a.weight, 1)), 0)
+    let pick = clamp(random, 0, 0.999999) * total
+    for (const a of pool) {
+      pick -= Math.max(0.0001, num(a.weight, 1))
+      if (pick <= 0) return a
+    }
+    return pool[pool.length - 1]
   }
 
   /** Called by the spawn point when re-creating; also usable to reset in place. */
@@ -249,6 +293,8 @@ export default class SoulsEnemyNode extends CharacterNode {
     if (this._healthFill) (this._healthFill as any).value = this.hp / Math.max(1, this.maxHp)
 
     const intent = this.drive()
+    // Re-earned every frame by `_ai`; anything else (an attack, a stagger, death) is not ready.
+    this.attackReady = false
     this.walkSpeed = this.moveSpeed * this._speedMul
     this.runSpeed = this.walkSpeed
     intent.sprint = false
@@ -266,24 +312,33 @@ export default class SoulsEnemyNode extends CharacterNode {
         return
       case 'phase':
         this._still(intent)
-        if (this._stateTime >= this.phase2Seconds) this._enter('ai')
+        if (this._stateTime >= this._phaseSeconds) this._enter('ai')
         return
       default: this._ai(intent, delta)
     }
   }
 
-  /** Brain-driven, unless the brain has reached Engage — then we fight. */
+  /**
+   * Carry out the AI graph's current state. The graph has already decided; this is the doing:
+   *
+   *   Idle, Chase, Approach, Return   the brain steers (idle / path / seek); the body faces where it walks
+   *   Attack                          pick WHICH attack (weighted, cooldowns, range) and start it
+   *   Strafe                          circle the player, facing them
+   *   Retreat                         back-pedal to the spacing band, facing them
+   *   Stagger, Phase Shift, Dead      handled by `fightState` before this runs
+   *
+   * Every engaged frame it also publishes `attackReady`, which is how the graph knows it MAY attack.
+   */
   private _ai(intent: any, delta: number): void {
-    const brain = this._brain as any
-    const engaged = brain?.behaviorState === 'Engage'
+    const state: string = (this._brain as any)?.behaviorState ?? 'Idle'
     this.acceleration = 12
     this.turnSpeed = this.engageTurnRate
-    if (!engaged || !this._player) {
+    const engaged = state === 'Approach' || state === 'Strafe' || state === 'Retreat' || state === 'Attack'
+    const player = this._player as any
+    if (!engaged || !player || player.isDead) {
       this.facingMode = 'velocity'
       return
     }
-    const player = this._player as any
-    if (player.isDead) { this._still(intent); return }
 
     const me = this.worldPosition
     const at = this._player.worldPosition
@@ -292,20 +347,26 @@ export default class SoulsEnemyNode extends CharacterNode {
     const dist = Math.hypot(dx, dz)
     const toward = dist > 1e-4 ? [dx / dist, dz / dist] : [0, 1]
 
-    // Attack when the gap has passed and something fits the distance.
     this._gap -= delta
-    if (this._gap <= 0) {
-      const gm = this._gm as any
-      const attack = gm?.pickEnemyAttack?.(this._attacks, dist, this.phase, this._lastAttack, this._cooldowns, Math.random())
-      if (attack) { this._startAttack(attack); this._still(intent); return }
+    // `random = 0` makes this a pure "is anything eligible" test — the real draw happens on Attack.
+    this.attackReady = this._gap <= 0
+      && !!this.pickAttack(this._attacks, dist, this.phase, this._lastAttack, this._cooldowns, 0)
+
+    if (state === 'Approach') { this.facingMode = 'velocity'; return }
+
+    if (state === 'Attack') {
+      const attack = this.pickAttack(this._attacks, dist, this.phase, this._lastAttack, this._cooldowns, Math.random())
+      this._still(intent)
+      if (attack) this._startAttack(attack)
+      else this._turnToward(at, this.engageTurnRate * delta)
+      return
     }
 
-    // Spacing.
+    // Strafe or Retreat: move relative to the player while facing them.
     this._strafeTimer -= delta
     if (this._strafeTimer <= 0) { this._strafeTimer = this._rand(1.5, 3.5); this._strafeDir = Math.random() < 0.5 ? -1 : 1 }
     let mx = 0, mz = 0, scale = 0
-    if (dist > this.preferredMax) { mx = toward[0]; mz = toward[1]; scale = 1 }
-    else if (dist < this.preferredMin) { mx = -toward[0]; mz = -toward[1]; scale = this.retreatSpeedScale }
+    if (state === 'Retreat') { mx = -toward[0]; mz = -toward[1]; scale = this.retreatSpeedScale }
     else if (this.strafeSpeedScale > 0) {
       // Perpendicular to the line to the player: right of it is (-z, x) rotated by the convention.
       mx = toward[1] * this._strafeDir; mz = -toward[0] * this._strafeDir; scale = this.strafeSpeedScale
@@ -409,10 +470,10 @@ export default class SoulsEnemyNode extends CharacterNode {
       gm?.fx?.(attack.impactTemplate || '', this.worldPosition)
       const p = this.worldPosition
       const hits = (this.scene?.physics as any)?.overlapSphere?.([p[0], p[1] + 0.5, p[2]], aoe, {
-        ignore: this, filter: (node: Node) => !!node && node !== this && typeof (node as any).receiveDamage === 'function'
-          && (node as any).hurtboxActive !== false && !(node as any).isDead,
+        ignore: this, filter: (node: Node) => !!node && node !== this && (node as any).team === 'player'
+          && typeof (node as any).receiveHit === 'function' && (node as any).hurtboxActive !== false && !(node as any).isDead,
       }) ?? []
-      for (const h of hits) gm?.applyEnemyHit?.(this, attack, h.node)
+      for (const h of hits) this._hitPlayer(attack, h.node)
       return
     }
     openSwing(this._swing)
@@ -420,16 +481,30 @@ export default class SoulsEnemyNode extends CharacterNode {
 
   /** One frame of the active window: sweep the weapon's blade; the player is hit at most once. */
   private _stepSwing(): void {
-    const blade = bladeCapsule(this._weapon)
+    const weapon = this.currentWeapon() as any
+    // Not in this enemy's own hand (no hand socket on its model): the blade is elsewhere, hit nothing.
+    if (!wieldedBy(weapon, this)) return
+    const blade = bladeCapsule(weapon)
     if (!blade) return
     const attack = this._attack as any
     const contact = stepSwing(this.scene?.physics, this._swing, blade, this, 'player', !!attack?.bounceOff)
-    const gm = this._gm as any
-    for (const t of contact.targets) gm?.applyEnemyHit?.(this, attack, t.node)
+    for (const t of contact.targets) this._hitPlayer(attack, t.node)
     if (contact.blockedAt) {
       closeSwing(this._swing)
-      gm?.fx?.(gm.hitSparkTemplate, contact.blockedAt)
+      ;(this._gm as any)?.fx?.(weapon?.hitSparkTemplate || 'Hit Spark', contact.blockedAt)
     }
+  }
+
+  /**
+   * An attack reached `target`. The damage is the ATTACK's — an enemy's moveset is tuned per move — and
+   * the target takes it through its own receiveHit (where a rolling player's i-frames let it pass).
+   */
+  private _hitPlayer(attack: any, target: Node): boolean {
+    const t = target as any
+    if (!attack || typeof t?.receiveHit !== 'function') return false
+    const landed = !!t.receiveHit(num(attack.damage, 50), num(attack.poiseDamage, 20), this)
+    if (landed) (this._gm as any)?.sfx?.('Player Hit')
+    return landed
   }
 
   private _fire(attack: any): void {
@@ -461,7 +536,7 @@ export default class SoulsEnemyNode extends CharacterNode {
 
   // ----- reactions -------------------------------------------------------------------------------
 
-  private _react(state: string, clip: string, seconds: number): void {
+  protected _react(state: string, clip: string, seconds: number): void {
     this._stopAction()
     this._enter(state)
     this._reactSeconds = seconds
@@ -469,19 +544,7 @@ export default class SoulsEnemyNode extends CharacterNode {
     this._gap = Math.max(this._gap, 0.4)
   }
 
-  private _startPhase2(): void {
-    this._stopAction()
-    this.phase = 2
-    this._speedMul = this.phase2SpeedMul
-    this._enter('phase')
-    this._play(this.roarClip, 1)
-    const gm = this._gm as any
-    gm?.shake?.(0.6)
-    gm?.sfx?.('Boss Roar')
-    ;(this._aura as any)?.play?.()
-  }
-
-  private _die(): void {
+  protected _die(): void {
     if (this.isDead) return
     this.isDead = true
     this._stopAction()
@@ -490,6 +553,7 @@ export default class SoulsEnemyNode extends CharacterNode {
     const brain = this._brain as any
     brain?.setBlackboard?.('dead', true)
     ;(this._aura as any)?.stop?.()
+    if (this.dropWeaponOnDeath) this.dropWeapon()
     ;(this._model?.animator as any)?.setTrigger?.('Died')
     const gm = this._gm as any
     gm?.sfx?.('Enemy Death')
@@ -507,14 +571,14 @@ export default class SoulsEnemyNode extends CharacterNode {
 
   // ----- helpers ---------------------------------------------------------------------------------
 
-  private _enter(state: string): void {
+  protected _enter(state: string): void {
     this.fightState = state
     this._stateTime = 0
     if (state !== 'attack') { this._attack = null; closeSwing(this._swing) }
     this.hurtboxActive = state !== 'dead' && state !== 'phase'
   }
 
-  private _still(intent: any): void {
+  protected _still(intent: any): void {
     this.acceleration = 0
     this.facingMode = 'none'
     intent.move[0] = 0
@@ -535,14 +599,14 @@ export default class SoulsEnemyNode extends CharacterNode {
     this.setRotation([0, have + Math.max(-maxDegrees, Math.min(maxDegrees, diff)), 0])
   }
 
-  private _play(clip: string, speed: number): void {
+  protected _play(clip: string, speed: number): void {
     this._clip = clip
     this._clipLength = this._clipDuration(clip)
     const animator = this._model?.animator as any
     if (animator?.playAction && clip) animator.playAction(clip, { speed, blendIn: 0.1, blendOut: 0.2 })
   }
 
-  private _stopAction(): void {
+  protected _stopAction(): void {
     ;(this._model?.animator as any)?.stopAction?.(undefined, 0.12)
     this._clip = ''
   }
@@ -578,10 +642,19 @@ export default class SoulsEnemyNode extends CharacterNode {
     return null
   }
 
+  /** The animated model, however deep: a swapped-in model may sit under a holder node. */
   private _findModel(): ModelNode {
-    for (const child of this.children)
-      if (child.nodeType === 'model' && (child as any).animator) return child as ModelNode
-    return null
+    const walk = (node: Node): ModelNode => {
+      for (const child of node.children) {
+        if (child.nodeType === 'model' && (child as any).animator) return child as ModelNode
+        // Not into the weapons, the brain or the UI: none of them is this enemy's body.
+        if (child.nodeType === 'controller' || child.name === 'Weapons' || child.nodeType === 'uiRoot') continue
+        const found = walk(child)
+        if (found) return found
+      }
+      return null
+    }
+    return walk(this)
   }
 
   private _rand(lo: number, hi: number): number {

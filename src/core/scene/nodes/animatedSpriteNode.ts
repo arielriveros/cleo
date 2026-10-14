@@ -15,6 +15,8 @@ export class AnimatedSpriteNode extends SpriteNode {
     private _frameSource: SpriteFrameSource;
     private _fps: number;
     private _loop: boolean;
+    /** The `tile` source's rate: 0 plays at the tile's own fps, above 0 overrides it for this sprite only. */
+    private _tileFps: number;
     /** Index INTO `_frames`, not a tile index. */
     private _currentFrame: number;
     private _accumulator: number;
@@ -29,6 +31,7 @@ export class AnimatedSpriteNode extends SpriteNode {
             frameSource?: SpriteFrameSource,
             fps?: number,
             loop?: boolean,
+            tileFps?: number,
             constraints?: 'free' | 'spherical' | 'cylindrical',
             id?: string
         }
@@ -38,6 +41,7 @@ export class AnimatedSpriteNode extends SpriteNode {
         this._frameSource = options?.frameSource ?? 'node';
         this._fps = Math.max(0.0001, options?.fps ?? 12);
         this._loop = options?.loop ?? true;
+        this._tileFps = Math.max(0, options?.tileFps ?? 0);
         this._currentFrame = 0;
         this._accumulator = 0;
         this._elapsed = 0;
@@ -64,7 +68,7 @@ export class AnimatedSpriteNode extends SpriteNode {
     public get currentTile(): number {
         if (this._frameSource === 'tile') {
             const tileset = this.sprite.tileset;
-            return tileset ? tileset.frameOf(this.tileIndex, this._elapsed) : this.tileIndex;
+            return tileset ? tileset.frameOf(this.tileIndex, this._elapsed, this._tileFps) : this.tileIndex;
         }
         if (this._frames.length === 0) return this.tileIndex;
         const i = Math.max(0, Math.min(this._currentFrame, this._frames.length - 1));
@@ -82,6 +86,8 @@ export class AnimatedSpriteNode extends SpriteNode {
                 frameSource: this._frameSource,
                 fps: this._fps,
                 loop: this._loop,
+                // Only when set, so a sprite that follows its tile serializes as it always did.
+                ...(this._tileFps > 0 ? { tileFps: this._tileFps } : {}),
             },
         };
     }
@@ -96,6 +102,7 @@ export class AnimatedSpriteNode extends SpriteNode {
             frameSource: animation.frameSource,
             fps: animation.fps,
             loop: animation.loop,
+            tileFps: json?.animation?.tileFps,
         });
         Node.finishParse(spriteNode, parent, json);
     }
@@ -111,6 +118,18 @@ export class AnimatedSpriteNode extends SpriteNode {
     public set frameSource(source: SpriteFrameSource) { this._frameSource = source; this.reset(); }
     public get fps(): number { return this._fps; }
     public set fps(v: number) { this._fps = Math.max(0.0001, v); }
+    /** See `_tileFps`: 0 follows the tile's own rate. */
+    public get tileFps(): number { return this._tileFps; }
+    public set tileFps(v: number) { this._tileFps = Math.max(0, Number.isFinite(v) ? v : 0); }
+    /**
+     * The rate this sprite is playing at right now, whichever source it reads: its own `fps`, or for the
+     * `tile` source the override or the tile's authored rate (0 when the tile does not animate).
+     */
+    public get effectiveFps(): number {
+        if (this._frameSource === 'node') return this._fps;
+        if (this._tileFps > 0) return this._tileFps;
+        return this.sprite.tileset?.metaOf(this.tileIndex)?.animation?.fps ?? 0;
+    }
     public get loop(): boolean { return this._loop; }
     public set loop(v: boolean) { this._loop = v; }
     /** Position within `frames`. Clamped, and resets the sub-frame accumulator. */

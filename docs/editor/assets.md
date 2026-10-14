@@ -16,7 +16,8 @@ A single toolbar row:
 | **View** | Table, Cards, or Split. |
 
 Drop OS files on the panel to import them. Drop a **scene node** on it to save that node as a
-template. Right-click empty space for **New folder**.
+template. Right-click empty space for **New folder**, or a template for **Create Variant** (a template
+that inherits it — see [Template variants](scene-authoring.md#template-variants)).
 
 Folders are yours to arrange; nothing depends on where an asset sits.
 

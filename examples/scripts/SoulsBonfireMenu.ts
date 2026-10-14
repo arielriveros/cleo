@@ -11,8 +11,9 @@ import { Input, Node, UIButtonNode, UIRootNode, UITextNode } from 'cleo'
  *     Confirm, Leave                                                uiButton
  *
  * Points are allocated as PENDING and cost nothing until Confirm, so the player can try a build and back
- * out. Each point costs the souls for one more level, priced by SoulsGameManager.levelCost, so the total
- * of several points is the sum of consecutive levels.
+ * out. Each point costs the souls for one more level, priced by the player's own `levelCost`, so the total
+ * of several points is the sum of consecutive levels. Every number shown comes from its owner: HP and
+ * stamina from the player's curves, attack rating from each weapon.
  *
  * Keyboard/gamepad (the UI map): Navigate up/down picks a stat, left/right removes/adds a point, Submit
  * confirms, Cancel leaves. The mouse can click every button. The Gameplay map is disabled while open, so
@@ -114,13 +115,12 @@ export default class SoulsBonfireMenuNode extends UIRootNode {
 
   /** Souls to buy every pending point, from the player's CURRENT level. */
   public pendingCost(): number {
-    const gm = this._gm as any
     const p = this._player as any
-    if (!gm || !p) return 0
+    if (!p?.levelFor) return 0
     const from = p.level
-    const to = gm.levelFor(this._pending[0], this._pending[1], this._pending[2], this._pending[3])
+    const to = p.levelFor(this._pending[0], this._pending[1], this._pending[2], this._pending[3])
     let cost = 0
-    for (let l = from; l < to; l++) cost += gm.levelCost(l)
+    for (let l = from; l < to; l++) cost += p.levelCost(l)
     return cost
   }
 
@@ -161,14 +161,13 @@ export default class SoulsBonfireMenuNode extends UIRootNode {
   }
 
   private _refresh(): void {
-    const gm = this._gm as any
     const p = this._player as any
-    if (!gm || !p) return
-    const level = gm.levelFor(this._pending[0], this._pending[1], this._pending[2], this._pending[3])
+    if (!p?.levelFor) return
+    const level = p.levelFor(this._pending[0], this._pending[1], this._pending[2], this._pending[3])
     const cost = this.pendingCost()
     this._set('LevelText', 'Level  ' + p.level + (level !== p.level ? '  ->  ' + level : ''))
     this._set('SoulsText', 'Souls  ' + p.souls + (cost ? '  ->  ' + (p.souls - cost) : ''))
-    this._set('CostText', 'Next level  ' + gm.levelCost(level) + ' souls')
+    this._set('CostText', 'Next level  ' + p.levelCost(level) + ' souls')
 
     const labels = ['Vigor', 'Endurance', 'Strength', 'Dexterity']
     labels.forEach((label, i) => {
@@ -182,8 +181,8 @@ export default class SoulsBonfireMenuNode extends UIRootNode {
     })
 
     const weapons: Node[] = p.weapons?.() ?? []
-    const ar = weapons.map(w => (w as any).displayName + ' ' + gm.attackRating(w, this._pending[2], this._pending[3]))
-    this._set('Derived', 'HP ' + gm.hpForVigor(this._pending[0]) + '    Stamina ' + gm.staminaForEndurance(this._pending[1])
+    const ar = weapons.map(w => (w as any).displayName + ' ' + ((w as any).attackRating?.(this._pending[2], this._pending[3]) ?? 0))
+    this._set('Derived', 'HP ' + p.hpForVigor(this._pending[0]) + '    Stamina ' + p.staminaForEndurance(this._pending[1])
       + '\nAttack  ' + ar.join('   '))
   }
 

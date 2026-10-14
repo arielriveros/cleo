@@ -20,7 +20,7 @@ import PreviewShapeSwitch from './PreviewShapeSwitch';
 import DebugSkeletonOverlay from "./DebugSkeletonOverlay";
 import DebugAnimationOverlay from "./DebugAnimationOverlay";
 import { useStateMachine } from "./animation/StateMachineContext";
-import { SegmentedControl } from "../components/ui";
+import { SegmentedControl, Select } from "../components/ui";
 import { instantiateTemplate, templateInstanceRootOf } from "../utils/templates";
 import { instantiateModelAsset, adoptModelMaterial } from "../utils/models";
 import { NEW_NODE_MIME, addItemTo, findAddItem } from "./sceneInspector/addCatalog";
@@ -46,12 +46,12 @@ const ScaleIcon = () => (
     </svg>
 );
 
-const GIZMO_HIDDEN_MODES: EditorMode[] = ['landscape', 'tilemap', 'renderer', 'input', 'material', 'terrainMaterial', 'particleSystem'];
+const GIZMO_HIDDEN_MODES: EditorMode[] = ['landscape', 'tilemap', 'options', 'material', 'terrainMaterial', 'particleSystem'];
 
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, editorMode, viewDimension, setViewDimension, isSceneReady,
             templateRootId, modelEditTargetId, templates, models, materials, animations, scripts, bodies, triggers,
-            animationFieldTargetId } = useCleoEngine();
+            animationFieldTargetId, adoptRigController } = useCleoEngine();
     const { selectedNode, isGizmoDragging, gizmoMode, setGizmoMode, gizmoSpace, setGizmoSpace } = useSelection();
     const { isPlayMode } = usePlayback();
     const { graphView, setGraphView } = useStateMachine();
@@ -193,13 +193,13 @@ export default function EngineViewport() {
             // Ignore clicks that land on a floating overlay (2D/3D control, etc.).
             if (inOverlay(event.target)) return;
             if (isPlayMode) return;
-            // In landscape/tilemap/renderer/input modes the viewport is not a selection surface — input mode
+            // In landscape/tilemap/options modes the viewport is not a selection surface — options mode
             // renders live only so bindings and on-screen controls can be judged against the real scene, and it
             // hides the tree and Properties, so a selection there has nowhere to show. In material mode the
             // preview sphere stays selected (it drives the material inspector), so clicks must not change it.
             // Animation mode picks joints (see AnimationSkeletonTool), not the mesh, so mesh selection is off.
             // The particle tab's Properties is the effect stack, not a node inspector, so a pick would show nothing.
-            if (editorMode === 'landscape' || editorMode === 'tilemap' || editorMode === 'ui' || editorMode === 'renderer' || editorMode === 'input' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'stateMachine' || editorMode === 'animation' || editorMode === 'rig' || editorMode === 'animationField' || editorMode === 'particleSystem') return;
+            if (editorMode === 'landscape' || editorMode === 'tilemap' || editorMode === 'ui' || editorMode === 'options' || editorMode === 'material' || editorMode === 'terrainMaterial' || editorMode === 'stateMachine' || editorMode === 'animation' || editorMode === 'rig' || editorMode === 'animationField' || editorMode === 'particleSystem') return;
             
             if (wasDraggingRef.current || isGizmoDraggingRef.current || justFinishedGizmoDragRef.current) {
                 setIsDragging(false);
@@ -408,6 +408,9 @@ export default function EngineViewport() {
                 const newId = instantiateModelAsset(asset, dropParent, materials, models, animations);
                 const node = editorScene.getNodeById(newId);
                 if (node && point) placeAt(node, point, dropParent);
+                // A dropped character has no state machine of its own; give it its rig's controller, or it
+                // stands in its bind pose when it walks.
+                if (node && editorMode !== 'model') adoptRigController(asset.id, node);
                 // A model is one Geometry + one Material, and the renderer draws in material batches — so
                 // every part of a model must share its material for the whole asset to batch as one. In the
                 // model editor the edited model's material therefore wins: the dropped part adopts it.
@@ -456,7 +459,7 @@ export default function EngineViewport() {
                 by measured motion has real inputs. */}
             <DebugAnimationOverlay />
             {/* Floating top-right overlays: the debug-visibility menu + gizmo-mode toggle sit to the
-                left of the 2D/3D switch. Hidden during play; renderer mode holds the perf HUD instead.
+                left of the 2D/3D switch. Hidden during play; options mode holds the perf HUD instead.
                 The container is gated on `overRender`, so a mode that owns the whole panel shows none of
                 it — each control below only states what is true of IT beyond that. */}
             {overRender && <div data-cleo-overlay className='absolute top-2 right-2 z-20 flex items-center gap-2'>
@@ -465,7 +468,7 @@ export default function EngineViewport() {
                     <PreviewShapeSwitch kind={editorMode} />
                 )}
                 {/* The debug menu stays available during play so Runtime toggles can be flipped live. */}
-                {editorMode !== 'renderer' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && (
+                {editorMode !== 'options' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && (
                     <DebugVisibilityMenu />
                 )}
                 {showGizmoTools && <>
@@ -490,17 +493,17 @@ export default function EngineViewport() {
                         value={effectiveGizmoSpace(gizmoMode, gizmoSpace)}
                         onChange={setGizmoSpace} />
                 </>}
-                {editorMode !== 'template' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'renderer' && !isPlayMode && (
-                    <select
+                {editorMode !== 'template' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'options' && !isPlayMode && (
+                    <Select
                         data-cleo-overlay
                         value={dimension}
                         onChange={(e) => setViewDimension(e.target.value as '2D' | '3D')}
                         title='Viewport camera — view only. The scene’s 2D/3D type is in its settings.'
-                        className='bg-surface-raised/80 hover:bg-surface-raised text-white text-xs rounded px-1.5 py-1 border border-white/10 cursor-pointer focus:outline-none'
+                        className='bg-surface-raised/80 hover:bg-surface-raised text-ui px-1.5 border-border-subtle cursor-pointer'
                     >
                         <option value='3D'>3D</option>
                         <option value='2D'>2D</option>
-                    </select>
+                    </Select>
                 )}
             </div>}
             {showGizmo && <TransformGizmo

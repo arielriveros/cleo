@@ -107,6 +107,8 @@ export function walkRefs(obj: any, out: EdgeSpec[]): void {
     if (key === 'tilesetId') { push(out, 'tileset', val, key); continue }
     // A model's or animation's link to the shared skeleton it uses (utils/rigAssets.ts).
     if (key === 'rigId') { push(out, 'rig', val, key); continue }
+    // A template variant's link to the template it is based on.
+    if (key === 'baseTemplateId') { push(out, 'template', val, key); continue }
     if (key === 'sampleId') { push(out, 'soundSample', val, key); continue }
     if (key === 'audioId') { push(out, 'audioSource', val, key); continue }
     // A model's links to the shared `.anim` assets it plays. Lives here rather than in the `model` arm so

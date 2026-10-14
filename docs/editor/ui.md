@@ -49,7 +49,11 @@ section holds anchor min/max, offset min/max and pivot.
 
 ## Editing in the viewport
 
-UI mode draws the real UI over the canvas and lets you manipulate it directly:
+UI mode draws the real UI over the canvas and lets you manipulate it directly. Other authoring modes
+hide it by default, so a HUD does not cover the scene; **Game UI** in the viewport's eye menu shows it
+there too. Play always draws it.
+
+In UI mode:
 
 - **Click selects** instead of activating, so you can select a button without pressing it.
 - **Drag to move**, with **eight resize grips**.
@@ -107,7 +111,7 @@ The **virtual controls** editor lets you drag on-screen sticks and buttons over 
 using the same layout maths the runtime uses. Two ship by default: a movement stick and a jump
 button.
 
-They are previewed in Input mode, live in Play, and drawn only when the device reports a touch
+They are previewed in Options ▸ Project ▸ Input, live in Play, and drawn only when the device reports a touch
 screen — there is no separate "is touch enabled" switch to keep in sync.
 
 Bind them like any other input source; see [Input](input.md).

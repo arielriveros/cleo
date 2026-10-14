@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import {
-  RENDER_PARAMS, PARTICLE_MESH_TRIANGLE_WARNING, moduleDefinition, makeModule, modulesForStage, particleMeshFromNodeJson,
+  RENDER_PARAMS, PARTICLE_MESH_TRIANGLE_WARNING, LOD_ALL_LEVELS, moduleDefinition, makeModule, modulesForStage, particleMeshFromNodeJson,
   type EmitterDef, type ParamSpec, type ParticleModule, type ParticleStage, type ParticleSystemDef,
 } from 'cleo'
 import {
-  Button, Collapsable, Hint, NumberInput, Popover, PropertyRow, PropertyTable, SegmentedControl, Select, TextInput,
+  Button, Collapsable, Hint, MenuItem, NumberInput, Popover, PropertyRow, PropertyTable, SegmentedControl, Select, TextInput,
   Toggle, VectorInput, cn,
 } from '../../components/ui'
 import { useParticleEditor } from './ParticleEditorContext'
@@ -42,7 +42,7 @@ export default function ParticleStackPanel() {
   const { asset, system, name, rename, emitterId, selectEmitter, commit, save, dirty } = useParticleEditor()
 
   if (!asset || !system) {
-    return <div className='p-3 text-xs text-muted'>No particle system is open.</div>
+    return <div className='p-3 text-ui text-muted'>No particle system is open.</div>
   }
 
   const emitter = system.emitters.find(e => e.id === emitterId) ?? null
@@ -72,7 +72,7 @@ export default function ParticleStackPanel() {
 
       {emitter ? (
         <>
-          <EmitterSettings emitter={emitter} editEmitter={editEmitter} />
+          <EmitterSettings emitter={emitter} editEmitter={editEmitter} lodLevels={system.lod?.levels.length ?? 0} />
           {STAGES.map(s => (
             <StageSection key={s.stage} stage={s.stage} title={s.title} hint={s.hint}
                           modules={emitter[s.key]} emitterId={emitter.id} emitters={system.emitters}
@@ -84,6 +84,7 @@ export default function ParticleStackPanel() {
         <Hint className='px-3'>Add an emitter to start.</Hint>
       )}
 
+      <LodSection system={system} edit={edit} />
       <BoundsSection system={system} edit={edit} />
     </div>
   )
@@ -117,15 +118,14 @@ function EmitterList({ system, selected, onSelect, edit }: {
       hint='Every emitter simulates and draws independently; together they are the effect.'
       right={
         <Popover title='Add emitter' align='right' className='p-1 w-[240px]'
-                 trigger={<span className='px-1 text-xs text-muted hover:text-white'>+ Emitter</span>}>
+                 trigger={<span className='px-1 text-ui text-muted hover:text-fg'>+ Emitter</span>}>
           {close => (
             <div className='flex flex-col'>
               {EMITTER_PRESETS.map(p => (
-                <button key={p.id} className='rounded px-2 py-1 text-left hover:bg-control'
-                        onClick={() => { add(p.build); close() }}>
-                  <div className='text-xs text-white'>{p.label}</div>
-                  <div className='text-[10px] text-dim'>{p.description}</div>
-                </button>
+                <MenuItem key={p.id} hint={p.description}
+                          onClick={() => { add(p.build); close() }}>
+                  {p.label}
+                </MenuItem>
               ))}
             </div>
           )}
@@ -143,7 +143,7 @@ function EmitterList({ system, selected, onSelect, edit }: {
                         const t = draft.emitters.find(x => x.id === e.id); if (t) t.enabled = enabled
                       })} />
             </span>
-            <span className={cn('flex-1 truncate text-xs', e.enabled ? 'text-white' : 'text-dim')}>{e.name}</span>
+            <span className={cn('flex-1 truncate text-ui', e.enabled ? 'text-fg' : 'text-dim')}>{e.name}</span>
             <span className='hidden gap-0.5 group-hover:flex' onClick={ev => ev.stopPropagation()}>
               <Button size='icon' variant='ghost' title='Move up' disabled={i === 0} onClick={() => move(i, -1)}>↑</Button>
               <Button size='icon' variant='ghost' title='Move down' disabled={i === system.emitters.length - 1} onClick={() => move(i, 1)}>↓</Button>
@@ -161,10 +161,13 @@ function EmitterList({ system, selected, onSelect, edit }: {
   )
 }
 
-function EmitterSettings({ emitter, editEmitter }: {
+function EmitterSettings({ emitter, editEmitter, lodLevels }: {
   emitter: EmitterDef
   editEmitter: (label: string, mutate: (e: EmitterDef) => void, coalesceKey?: string) => void
+  /** The system's LOD level count, for the Detail select. */
+  lodLevels: number
 }) {
+  const maxLod = emitter.maxLod ?? LOD_ALL_LEVELS
   return (
     <Collapsable title='Emitter' persistKey='particles.emitter'>
       <div className='p-2'>
@@ -194,6 +197,17 @@ function EmitterSettings({ emitter, editEmitter }: {
           <PropertyRow label='Start delay' hint='Seconds before the first particle.' divider>
             <NumberInput value={emitter.startDelay} min={0} step={0.1}
                          onChange={v => editEmitter('Start delay', e => { e.startDelay = Math.max(0, v) }, 'startDelay')} />
+          </PropertyRow>
+          <PropertyRow label='Detail' divider
+                       hint={'The coarsest LOD level this emitter still spawns at. A detail layer (sparks, embers) set to 0 '
+                         + 'drops out as soon as the effect moves to level 1; its live particles finish their lives. See LOD.'}>
+            <Select className='w-full' value={maxLod >= LOD_ALL_LEVELS ? 'all' : String(maxLod)}
+                    onChange={ev => editEmitter('Detail', e => { e.maxLod = ev.target.value === 'all' ? LOD_ALL_LEVELS : Number(ev.target.value) })}>
+              <option value='all'>Every LOD level</option>
+              {Array.from({ length: Math.max(lodLevels, maxLod < LOD_ALL_LEVELS ? maxLod + 1 : 0) }, (_, i) => (
+                <option key={i} value={String(i)}>{i === 0 ? 'Full detail only (level 0)' : `Up to level ${i}`}</option>
+              ))}
+            </Select>
           </PropertyRow>
           <PropertyRow label='Seed' hint='Same seed and stack, same particles.'>
             <div className='flex items-center gap-1'>
@@ -271,16 +285,16 @@ function ModuleCard({ module, emitterId, emitters, onToggle, onParams, onRemove,
   return (
     <div className={cn('rounded border border-border bg-surface', !module.enabled && 'opacity-60')}>
       <div className='group flex items-center gap-1 px-1 py-0.5'>
-        <button className='w-4 text-[10px] text-muted' onClick={() => setOpen(o => !o)} title={open ? 'Collapse' : 'Expand'}>
+        <Button variant='ghost' size='sm' className='w-4 px-0 py-0 text-ui-xs' onClick={() => setOpen(o => !o)} title={open ? 'Collapse' : 'Expand'}>
           {open ? '▼' : '▶'}
-        </button>
+        </Button>
         <Toggle checked={module.enabled} onChange={onToggle} />
-        <span className='flex-1 truncate text-xs text-white' title={def.description}>{def.label}</span>
+        <span className='flex-1 truncate text-ui text-fg' title={def.description}>{def.label}</span>
         <span className='hidden group-hover:flex'>
           <Button size='icon' variant='ghost' title='Move up' onClick={() => onMove(-1)}>↑</Button>
           <Button size='icon' variant='ghost' title='Move down' onClick={() => onMove(1)}>↓</Button>
         </span>
-        <Button size='icon' variant='ghost' title='Remove module' onClick={onRemove}>✕</Button>
+        <Button variant='remove' size='icon' title='Remove module' onClick={onRemove}>✕</Button>
       </div>
       {open && visible.length > 0 && (
         <div className='px-2 pb-1'>
@@ -347,6 +361,101 @@ function RenderSection({ emitter, editEmitter }: {
         )}
       </div>
     </Collapsable>
+  )
+}
+
+// --- LOD --------------------------------------------------------------------------------------------
+
+const STEP_OPTIONS = [
+  { value: 1, label: 'Every frame' }, { value: 2, label: '1/2 (30 Hz)' }, { value: 3, label: '1/3 (20 Hz)' }, { value: 4, label: '1/4 (15 Hz)' },
+]
+
+type LodDef = ParticleSystemDef['lod']
+type LodLevelDef = LodDef['levels'][number]
+const noLod = (): LodDef => ({ enabled: true, levels: [], cullDistance: 0, scaleBursts: false })
+
+/**
+ * Level of detail by camera distance: each level past full detail spawns less and simulates less often,
+ * a detail emitter can drop out (Emitter > Detail), and past the cull distance the effect is not drawn.
+ * Distances run to the surface of the Bounds, times the renderer's Particle LOD distance.
+ */
+function LodSection({ system, edit }: {
+  system: ParticleSystemDef
+  edit: (label: string, mutate: (draft: ParticleSystemDef) => void, coalesceKey?: string) => void
+}) {
+  const lod = system.lod ?? noLod()
+  const editLod = (label: string, mutate: (l: LodDef) => void, key?: string) =>
+    edit(label, d => {
+      d.lod = d.lod ?? noLod()
+      mutate(d.lod)
+      d.lod.levels.sort((a, b) => a.distance - b.distance)
+    }, key && `lod.${key}`)
+  const addLevel = () => editLod('Add LOD level', l => {
+    const last = l.levels[l.levels.length - 1]
+    l.levels.push(last
+      ? { distance: Math.round(last.distance * 2), spawnScale: Math.max(0.05, Math.round(last.spawnScale * 50) / 100), stepScale: Math.min(4, last.stepScale + 1) }
+      : { distance: 15, spawnScale: 0.5, stepScale: 2 })
+  })
+  const beyondCull = lod.cullDistance > 0 ? lod.levels.filter(l => l.distance >= lod.cullDistance) : []
+  const active = lod.enabled && (lod.levels.length > 0 || lod.cullDistance > 0)
+
+  return (
+    <Collapsable title='LOD' persistKey='particles.lod' defaultOpen={false}
+                 badge={active ? lod.levels.length + (lod.cullDistance > 0 ? 1 : 0) : undefined}
+                 hint="Level of detail by distance from the camera: to the surface of the Bounds, times the renderer's Particle LOD distance. Coarser levels spawn less and simulate less often; past the cull distance the effect is not drawn.">
+      <div className='p-2'>
+        <PropertyTable columns={['40%', '60%']}>
+          <PropertyRow label='Enabled' divider>
+            <Toggle checked={lod.enabled} onChange={on => editLod('LOD', l => { l.enabled = on })} />
+          </PropertyRow>
+          <PropertyRow label='Cull distance' divider
+                       hint='Past this many metres the effect is not drawn, and a looping one stops simulating (a one-shot plays out). 0 = never.'>
+            <NumberInput value={lod.cullDistance} min={0} step={5}
+                         onChange={v => editLod('Cull distance', l => { l.cullDistance = Math.max(0, v) }, 'cull')} />
+          </PropertyRow>
+          <PropertyRow label='Scale bursts' hint="Off: a burst is an event and always fires in full. On: bursts thin out with the level's spawn rate too.">
+            <Toggle checked={lod.scaleBursts} onChange={on => editLod('Scale bursts', l => { l.scaleBursts = on })} />
+          </PropertyRow>
+        </PropertyTable>
+
+        <div className='mt-2 grid grid-cols-[2.2rem_1fr_1fr_1.3fr_auto] items-center gap-1 text-ui-sm text-dim'>
+          <span>Level</span><span title='From this many metres'>From (m)</span><span title='Continuous spawn rate'>Spawn %</span><span title='How often it simulates'>Simulate</span><span />
+          <span className='text-fg'>0</span><span>0</span><span>100</span><span>Every frame</span><span />
+          {lod.levels.map((level, i) => (
+            <LodRow key={i} index={i} level={level}
+                    onChange={(label, mutate, key) => editLod(label, l => mutate(l.levels[i]), `${i}.${key}`)}
+                    onRemove={() => editLod('Remove LOD level', l => { l.levels.splice(i, 1) })} />
+          ))}
+        </div>
+        <Button size='sm' variant='subtle' className='mt-2' onClick={addLevel} disabled={lod.levels.length >= 6}>+ Level</Button>
+        {beyondCull.length > 0 && (
+          <Hint className='text-warning'>A level starts beyond the cull distance and will never be seen.</Hint>
+        )}
+        <Hint>Emitter &gt; Detail drops a layer (sparks, embers) past a level. Preview a level with the LOD select in Particle Preview.</Hint>
+      </div>
+    </Collapsable>
+  )
+}
+
+function LodRow({ index, level, onChange, onRemove }: {
+  index: number
+  level: LodLevelDef
+  onChange: (label: string, mutate: (l: LodLevelDef) => void, key: string) => void
+  onRemove: () => void
+}) {
+  return (
+    <>
+      <span className='text-fg'>{index + 1}</span>
+      <NumberInput value={level.distance} min={0} step={5}
+                   onChange={v => onChange('LOD distance', l => { l.distance = Math.max(0, v) }, 'distance')} />
+      <NumberInput value={Math.round(level.spawnScale * 100)} min={0} max={100} step={5}
+                   onChange={v => onChange('LOD spawn rate', l => { l.spawnScale = Math.min(1, Math.max(0, v / 100)) }, 'spawn')} />
+      <Select className='w-full' value={String(level.stepScale)}
+              onChange={ev => onChange('LOD simulation rate', l => { l.stepScale = Number(ev.target.value) }, 'step')}>
+        {STEP_OPTIONS.map(o => <option key={o.value} value={String(o.value)}>{o.label}</option>)}
+      </Select>
+      <Button size='icon' variant='remove' title='Remove this level' onClick={onRemove}>x</Button>
+    </>
   )
 }
 

@@ -2,6 +2,8 @@ import { Scene, TextureManager, AudioManager } from 'cleo'
 import { sourceSkinFor } from '../../utils/rigAssets'
 import type { RenderSettings, InputMap } from 'cleo'
 import { isDefaultInputMap } from 'cleo'
+import { projectSettingsConfig } from '../options/projectSettings'
+import type { ProjectSettings } from '../options/projectSettings'
 import { buildGameData, bakeTemplates, attachScriptModules } from './buildGameData'
 import { compressTerrainData, compressTilemapData } from './terrainImages'
 import { stripDimensionData } from './stripDimensionData'
@@ -38,6 +40,8 @@ export interface MultiSceneSources {
   settings?: RenderSettings
   /** The project's input action map. Written ONCE at the top level, never inside a scene's blob. */
   input?: InputMap
+  /** Engine runtime + publish-window options; merged into `config` (see options/projectSettings). */
+  projectSettings?: ProjectSettings
   /** The OPEN scene's live dimension. Its meta can be one save behind, and the live value is the truth. */
   liveDimension?: '2D' | '3D'
 }
@@ -224,6 +228,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     config.render = src.settings
   }
   if (src.input && !isDefaultInputMap(src.input)) config.input = src.input
+  if (src.projectSettings) Object.assign(config, projectSettingsConfig(src.projectSettings))
   if (Object.keys(config).length > 0) out.config = config
   return out
 }

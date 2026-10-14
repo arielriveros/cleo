@@ -70,9 +70,6 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
               model node: the rig owns the clips, the node owns the machine that names them. */}
           { !root && <RigSlot node={props.node} /> }
           { !root && <AnimationSlot node={props.node} /> }
-          {/* Any node can ride a skeleton socket. Renders itself away when no character with sockets is
-              in reach and the node is not already attached. */}
-          { !root && !isUI && <SocketAttachSlot node={props.node} /> }
           { props.node.nodeType === 'sprite' && <SpriteEditor node={props.node as SpriteNode} /> }
           { props.node.nodeType === 'animatedSprite' && <AnimatedSpriteEditor /> }
           { props.node.nodeType === 'light' && <LightEditor node={props.node as LightNode} /> }
@@ -95,6 +92,9 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'skyAtmosphere' && <SkyAtmosphereEditor node={props.node as SkyAtmosphereNode} /> }
           { props.node.nodeType === 'skyLight' && <SkyLightEditor node={props.node as SkyLightNode} /> }
           { isUI && <UIEditor node={props.node as UINode} /> }
+          {/* Last: a secondary option. Renders itself away unless the node is attached already or sits
+              inside a character with sockets — see SocketAttachSlot. */}
+          { !root && !isUI && <SocketAttachSlot node={props.node} /> }
         </fieldset>
     </>
   )

@@ -38,6 +38,7 @@ export type { ParticleSystemNodeOptions, ParticleCullingMode } from "./core/scen
 export { ForceFieldNode, MAX_FORCE_FIELDS } from "./core/scene/nodes/forceFieldNode";
 export type { ForceFieldOptions, ForceFieldKind, ForceFieldShape } from "./core/scene/nodes/forceFieldNode";
 export * from "./particles/particleSystemAsset";
+export { selectParticleLod, particleLodDistance, particleLodFactors, PARTICLE_LOD_HYSTERESIS, type ParticleLodState } from "./particles/particleLod";
 export * from "./particles/particleModules";
 export * from "./particles/curves";
 export { packEmitter, stepUniforms, SIM as PARTICLE_SIM_FLAGS, DRAW as PARTICLE_DRAW_FLAGS } from "./particles/particlePack";
@@ -199,6 +200,8 @@ export type { NavPath, RepathPolicy, RepathState } from "./ai/navPath";
 export { HistoryManager } from "./core/history";
 export type { HistoryEntry, HistoryOptions } from "./core/history";
 export { Mesh } from "./graphics/mesh";
+export { applyUvMapping, uvConfigOf } from "./graphics/material";
+export type { UvConfig, UvProjection, UvSpace } from "./graphics/material";
 export { Material, TerrainMaterial, CustomMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, migrateFoliageRule, foliageRuleKey, newTerrainSlotId, legacyHeightBlendToRule } from "./graphics/material";
 export type { TerrainBaseType, TerrainFoliageRule, TerrainMaterialSlot, FoliageCollision, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";
 export { customSeedTemplate, customSeedUniforms, tryCompileCustom, assembleCustomFragment,
@@ -216,6 +219,8 @@ export { Loader } from "./graphics/loader";
 // Merging an importer's per-material sub-meshes into one mesh with one submesh per material.
 export { mergeModels, mergeBlocker } from "./graphics/modelMerge";
 export type { MergePart } from "./graphics/modelMerge";
+export { extractSubmesh, withoutSubmesh, compactRanges, drawRanges } from "./graphics/modelSplit";
+export type { CompactedRanges } from "./graphics/modelSplit";
 export type { TextureLoadReport, UnresolvedTexture } from "./graphics/loader";
 // The pure (no DOM, no GL) half of model import, so the editor can run it inside a Web Worker.
 // Pair with Loader.assembleAssimpModels, which does the GL half on the main thread.
@@ -223,6 +228,8 @@ export { parseAssimpFiles, parseResultTransferables, convertToGltf2FromFiles, re
 export { MAX_TESS_LEVEL, tessSegments, tessBudget, tessVertsPerTri, tessTrisPerTri } from "./graphics/systems/meshDisplace";
 export { MeshDisplacer } from "./graphics/systems/meshDisplacer";
 export type { AssimpParseResult, AssimpTextureSlots, ParsedMesh, OutputMaterial } from "./graphics/utils/assimpLoader";
+export { readFbxTextures, isBinaryFbx, fbxBaseName } from "./graphics/utils/fbxEmbedded";
+export type { FbxTextureInfo, FbxEmbeddedImage, FbxMaterialTextures } from "./graphics/utils/fbxEmbedded";
 export { GLTFLoader } from "./graphics/utils/gltfLoader";
 export type { GltfParseResult, GltfMeshDescriptor, GltfMaterialDescriptor, GltfImageSource } from "./graphics/utils/gltfLoader";
 // The action-mapping input system. `inputSources` is the device vocabulary a binding names, `actionMap`
@@ -282,7 +289,7 @@ export { Model } from "./graphics/model";
 export type { Submesh } from "./graphics/model";
 export { AnimatedModel } from "./animation/animatedModel";
 export type { Skin, SkinSocket, Joint, Animation, AnimationSampler, AnimationChannel } from "./animation/animatedModel";
-export { socketNames, socketJoint, socketModelMatrix, socketOffsetMatrix } from "./animation/sockets";
+export { socketNames, socketJoint, socketModelMatrix, socketOffsetMatrix, IMPLICIT_SOCKETS } from "./animation/sockets";
 export { resolveSocketOwner } from "./core/scene/socketFollow";
 export { remapAnimationToSkin, buildBoneMapping, applyManualMapping, mappingReport, retargetAnimation, describeRetarget, humanoidRigOf } from "./animation/animationRetarget";
 export { skeletonTopology, isAncestorJoint, nearestCommonAncestor } from "./animation/skeletonTopology";
@@ -395,7 +402,7 @@ export { Tilemap, DEFAULT_FILL_LIMIT } from "./graphics/tilemap/tilemap";
 export type { TileEdit, TileOrientation } from "./graphics/tilemap/tilemap";
 export { TilemapLayer, defaultLayerConfig } from "./graphics/tilemap/tilemapLayer";
 export type { TilemapLayerConfig, LayerBounds } from "./graphics/tilemap/tilemapLayer";
-export { Tileset } from "./graphics/tilemap/tileset";
+export { Tileset, MAX_TILESET_OVERDRIVE } from "./graphics/tilemap/tileset";
 export type { TilesetConfig, TileMeta, TileAnimation, TerrainSet, VariantSet, WangKind } from "./graphics/tilemap/tileset";
 export {
     cellToWorld, worldToCell, cellCorners, cellSortY, neighbours, neighbourCount, normalizeGrid,

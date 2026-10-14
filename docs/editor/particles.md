@@ -55,12 +55,22 @@ The order is fixed so that one precompiled program serves every emitter.
 | | **Vortex**, **Point Attractor** | Spin around an axis; pull toward (or push from) a point, with a kill radius. |
 | | **Force Fields** | Responds to Force Field nodes in the scene. |
 | | **Limit Velocity** | Caps speed, softly. |
-| | **Collision** | Against the visible scene (its depth buffer) and up to four planes: bounce, friction, lifetime loss, or kill. |
+| | **Collision** | Against physics bodies, the visible scene (its depth buffer) and up to four planes: bounce, friction, lifetime loss, or kill. |
 | | **Color / Size / Spin / Speed over Life** | Curves and gradients over each particle's life. |
 | | **Color / Size by Speed** | The same, over a speed range. |
 | | **Custom Code** | Your own WGSL. See below. |
 
 ### Collision
+
+**Physics bodies** collision bounces particles off the colliders around the effect — the floors, walls,
+props and characters the physics already knows — so sparks ricochet off flagstones and magic skitters
+across the ground, on screen or off. Each frame the 12 colliders nearest the effect's **Bounds** (plus
+2 m) are handed to the simulation. Spheres, boxes, capsules, cylinders, planes and convex hulls (as their
+bounding box) are tested. Collisions are measured relative to a body's velocity, so a moving shield or a
+walking character pushes particles along instead of letting them sink in. Mesh and terrain colliders
+are not included; keep **Scene depth** on as well to cover them. Triggers never collide. The Performance
+panel's **physics colliders** row counts what was handed over. New Collision modules have this on;
+assets authored before it keep their old behaviour until you turn it on.
 
 **Scene depth** collision uses the previous frame's depth buffer, the way Niagara's GPU collision
 does. It is cheap and works against any geometry, but it only knows what the camera sees: a particle off
@@ -101,11 +111,34 @@ needs the shader compiler.
 In a 2D scene (an orthographic camera over a tilemap) particles draw in the 2D pass, sorted with the
 sprites by their emitter's Y, and simulate flat.
 
+## Level of detail
+
+An effect far from the camera does not need its full cost. The **LOD** section of the particle editor
+(system-level, under the emitters) sets what happens with distance:
+
+| Setting | Does |
+|---|---|
+| **Levels** | Each row starts at a distance. Past it, continuous spawning runs at its **Spawn %** and the effect **simulates** every 2nd, 3rd or 4th frame (30, 20 or 15 Hz) instead of every frame; skipped time is simulated in one longer step, so the effect stays in real time. Level 0 is full detail. |
+| **Cull distance** | Past it the effect is not drawn, and a looping one stops simulating; a one-shot plays out, so it is finished rather than frozen when you come back. 0 = never. |
+| **Scale bursts** | Off: a burst is an event and fires in full at every level. On: bursts thin out with the spawn rate. |
+| **Emitter ▸ Detail** | Per emitter: the coarsest level it still spawns at. Set a detail layer (sparks, embers) to *Full detail only* and it drops out at level 1 while the main body stays; its live particles finish their lives. |
+
+Distance is measured from the camera to the surface of the effect's **Bounds**, so standing at the edge
+of a big fog bank counts as close. A level becomes finer again only once the camera is 10% back inside
+its boundary, so hovering at one does not make the effect flicker between levels.
+
+Two global controls: **Options ▸ Engine ▸ Renderer ▸ Particle LOD** multiplies every effect's
+distances (×2 keeps full detail twice as far; the quality tiers set it from ×0.5 on Low to ×1.5 on
+Ultra), and a placed node's **Distance LOD** toggle turns LOD off for that one copy — a hero effect the
+camera watches from afar. Preview each level without moving the camera with the **LOD** select in the
+Particle Preview transport. The Performance panel counts systems that are **LOD reduced** and
+**LOD culled**.
+
 ## In a scene
 
 The **Particle System** node's inspector links an asset and sets **Play on start**, **Simulation
-speed**, **Spawn rate** (a multiplier on continuous spawning) and **Tint**, with play, stop, clear and
-burst buttons. Selecting the node draws its bounds.
+speed**, **Spawn rate** (a multiplier on continuous spawning), **Off screen**, **Distance LOD** and
+**Tint**, with play, stop, clear and burst buttons. Selecting the node draws its bounds.
 
 Effects simulate while you author a scene. **Preview particles** in the viewport's eye menu switches
 that off; play mode always simulates. **Effect icons** in the same menu shows or hides their

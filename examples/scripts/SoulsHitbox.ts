@@ -1,3 +1,4 @@
+import { resolveSocketOwner } from 'cleo'
 import type { Node } from 'cleo'
 import { num } from './SoulsMath'
 
@@ -55,7 +56,7 @@ function transformPoint(m: ArrayLike<number>, p: ArrayLike<number>): number[] {
  */
 export function bladeCapsule(weapon: Node): Capsule | null {
   if (!weapon) return null
-  // A script field (SoulsWeapon), or a plain node VARIABLE (an enemy's script-less Weapon node).
+  // A script field (SoulsWeapon), or a plain node VARIABLE (a script-less weapon in a user's own project).
   const field = (name: string) => (weapon as any)[name] ?? (weapon as any).getVariable?.(name)
   const start = field('bladeStart'), end = field('bladeEnd')
   if (!start || !end || start.length < 3 || end.length < 3) return null
@@ -65,11 +66,37 @@ export function bladeCapsule(weapon: Node): Capsule | null {
   return { a: transformPoint(m, start), b: transformPoint(m, end), radius: num(field('bladeRadius'), 0.1) * scale }
 }
 
-/** Whether `node` is a live hurtbox `attacker` may hit. `kind` picks the side: the player or enemies. */
+function isWithin(node: Node, ancestor: Node): boolean {
+  for (let n: Node = node; n; n = n.parent) if (n === ancestor) return true
+  return false
+}
+
+/**
+ * Whether `weapon` is actually in `wielder`'s hand: pinned to a socket that resolves on a model INSIDE the
+ * wielder. A swing is only swept when it is.
+ *
+ * The safety net under a model swap: a character whose new rig has no hand socket used to have its weapon
+ * ride whichever model in the scene did have one, and its swings were swept there — a sword hurting a
+ * knight across the level, enemy blades never reaching the player. A weapon not in its wielder's hand now
+ * simply hits nothing.
+ */
+export function wieldedBy(weapon: Node, wielder: Node): boolean {
+  if (!weapon || !wielder) return false
+  const attachment = (weapon as any).socketAttachment
+  // Unpinned (a user's own weapon parented straight to a bone node): it is the wielder's if it is under it.
+  if (!attachment) return isWithin(weapon, wielder)
+  const owner: any = resolveSocketOwner(weapon, attachment, (id: string) => weapon.scene?.getNodeById(id) ?? null)
+  return !!owner && isWithin(owner, wielder) && (owner.socketNames ?? []).includes(attachment.socket)
+}
+
+/**
+ * Whether `node` is a live hurtbox `attacker` may hit. `kind` is the TEAM being attacked (a fighter's
+ * `team` field, SoulsCharacter): the player's blade hits 'enemy', an enemy's hits 'player'.
+ */
 export function isHurtbox(node: Node, attacker: Node, kind: 'player' | 'enemy'): boolean {
   const n = node as any
   if (!node || node === attacker || n.isDead || n.hurtboxActive === false || n.spawned === false) return false
-  return kind === 'player' ? typeof n.receiveDamage === 'function' : typeof n.receiveHit === 'function'
+  return n.team === kind && typeof n.receiveHit === 'function'
 }
 
 /** Whether a body stops a swing: solid, and its node opted in with the `blocksSwings` variable. */

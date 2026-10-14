@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Button } from '../../components/ui'
+import { Button, cn } from '../../components/ui'
+import { token } from '../../utils/cssTokens'
 import type { TilesetAsset } from '../../utils/tilesets'
 import { awaitTextureImage, textureImage } from '../../utils/textureReady'
 import { clamp } from '../../utils/math';
@@ -25,15 +26,31 @@ export interface TileGridProps {
   markerOf?: (index: number) => string | null
   /** Shown as a call to action on the empty state, when the tileset has no atlas yet. */
   onImport?: () => void
+  /**
+   * Text drawn in a tile's bottom-left corner — the frame numbers of the animation being edited, so the
+   * atlas shows which tiles play and in what order.
+   */
+  badges?: ReadonlyMap<number, string>
+  /** A tile outlined as the subject of the current operation (the tile whose animation is being picked). */
+  anchor?: number | null
+  /** Right-click on a cell. The browser menu is suppressed only when this is given. */
+  onCellContextMenu?: (index: number) => void
+  /** Cursor over the atlas. Crosshair by default. */
+  cursor?: string
   className?: string
 }
 
-const GRID_COLOR = 'rgba(255,255,255,0.22)'
-const SELECT_FILL = 'rgba(90,160,255,0.28)'
-const SELECT_STROKE = 'rgba(120,190,255,0.95)'
+// Read from the design tokens at draw time, never at module scope (index.css is not applied yet then).
+const gridColor = () => token('--text', 0.22)
+const selectFill = () => token('--highlight', 0.28)
+const selectStroke = () => token('--highlight', 0.95)
+const anchorStroke = () => token('--warning', 0.95)
+const badgeFill = () => token('--surface-sunken', 0.85)
+const badgeText = () => token('--warning')
 
 export default function TileGrid({
-  asset, selection, onSelect, rectSelect = true, zoom: zoomProp, onZoomChange, markerOf, onImport, className,
+  asset, selection, onSelect, rectSelect = true, zoom: zoomProp, onZoomChange, markerOf, onImport,
+  badges, anchor, onCellContextMenu, cursor = 'crosshair', className,
 }: TileGridProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const wrapRef = useRef<HTMLDivElement | null>(null)
@@ -87,7 +104,7 @@ export default function TileGrid({
 
     // Grid. One stroke per line rather than per cell: a 4096-tile atlas is ~130 lines, not 4096 rects.
     ctx.lineWidth = 1
-    ctx.strokeStyle = GRID_COLOR
+    ctx.strokeStyle = gridColor()
     ctx.beginPath()
     for (let c = 0; c <= asset.columns; c++) {
       const x = Math.round(originX + c * stepX) + 0.5
@@ -122,6 +139,8 @@ export default function TileGrid({
       }
     }
 
+    const SELECT_FILL = selectFill()
+    const SELECT_STROKE = selectStroke()
     const paint = (col: number, row: number, w: number, h: number) => {
       const x = originX + col * stepX
       const y = originY + row * stepY
@@ -139,7 +158,37 @@ export default function TileGrid({
       if (i < 0 || i >= asset.columns * asset.rows) continue
       paint(i % asset.columns, Math.floor(i / asset.columns), 1, 1)
     }
-  }, [asset, zoom, width, height, selected, drag, markerOf])
+
+    if (anchor !== null && anchor !== undefined && anchor >= 0 && anchor < asset.columns * asset.rows) {
+      const x = originX + (anchor % asset.columns) * stepX
+      const y = originY + Math.floor(anchor / asset.columns) * stepY
+      ctx.strokeStyle = anchorStroke()
+      ctx.lineWidth = 2
+      ctx.setLineDash([4, 3])
+      ctx.strokeRect(x + 1, y + 1, tw - 2, th - 2)
+      ctx.setLineDash([])
+    }
+
+    if (badges && badges.size > 0) {
+      // Sized to the cell but never unreadable: a 16px tile at 100% still gets a 9px label.
+      const font = clamp(Math.round(th * 0.32), 9, 14)
+      ctx.font = `600 ${font}px ui-sans-serif, system-ui, sans-serif`
+      ctx.textBaseline = 'bottom'
+      for (const [i, text] of badges) {
+        if (i < 0 || i >= asset.columns * asset.rows) continue
+        const x = originX + (i % asset.columns) * stepX
+        const y = originY + Math.floor(i / asset.columns) * stepY
+        const w = Math.min(tw - 2, ctx.measureText(text).width + 6)
+        ctx.fillStyle = badgeFill()
+        ctx.fillRect(x + 1, y + th - font - 3, w, font + 2)
+        ctx.fillStyle = badgeText()
+        ctx.save()
+        ctx.beginPath(); ctx.rect(x + 1, y, tw - 2, th); ctx.clip()
+        ctx.fillText(text, x + 4, y + th - 1)
+        ctx.restore()
+      }
+    }
+  }, [asset, zoom, width, height, selected, drag, markerOf, badges, anchor])
 
   const cellAt = (e: React.MouseEvent): { col: number; row: number } | null => {
     const wrap = wrapRef.current
@@ -208,6 +257,13 @@ export default function TileGrid({
     return () => window.removeEventListener('mouseup', onUp)
   }, [])
 
+  const onContextMenu = (e: React.MouseEvent) => {
+    if (!onCellContextMenu) return
+    e.preventDefault()
+    const cell = cellAt(e)
+    if (cell) onCellContextMenu(cell.row * asset.columns + cell.col)
+  }
+
   const onWheel = (e: React.WheelEvent) => {
     if (!e.ctrlKey && !e.metaKey) return
     e.preventDefault()
@@ -216,7 +272,7 @@ export default function TileGrid({
 
   if (!src) {
     return (
-      <div className={`flex flex-col items-center justify-center gap-2 text-xs text-muted ${className ?? ''}`}>
+      <div className={cn('flex flex-col items-center justify-center gap-2 text-ui text-muted', className)}>
         <p>This tileset has no atlas image.</p>
         {onImport
           ? <Button size='sm' onClick={onImport}>Import image…</Button>
@@ -226,13 +282,14 @@ export default function TileGrid({
   }
 
   return (
-    <div className={`overflow-auto ${className ?? ''}`} onWheel={onWheel}>
+    <div className={cn('overflow-auto', className)} onWheel={onWheel}>
       <div
         ref={wrapRef}
         className='relative select-none'
-        style={{ width, height, cursor: 'crosshair' }}
+        style={{ width, height, cursor }}
         onMouseDown={onDown}
         onMouseMove={onMove}
+        onContextMenu={onContextMenu}
       >
         <img
           src={src}

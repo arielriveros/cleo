@@ -74,7 +74,7 @@ export default function FieldDebugReadout({ animator }: { animator: Animator }) 
   }, [animator])
 
   const d = snap.current
-  if (!d) return <p className='text-[10px] text-gray-500'>Sampling…</p>
+  if (!d) return <p className='text-ui-xs text-dim'>Sampling…</p>
 
   const spread = (key: string): string => {
     const list = history.current.get(key)
@@ -85,8 +85,8 @@ export default function FieldDebugReadout({ animator }: { animator: Animator }) 
   }
 
   const Row = ({ label, value, k, hint }: { label: string; value: number | null; k: string; hint: string }) => (
-    <div className='flex items-center gap-2 text-[10px] tabular-nums' title={hint}>
-      <span className='w-[52px] shrink-0 text-gray-400'>{label}</span>
+    <div className='flex items-center gap-2 text-ui-xs tabular-nums' title={hint}>
+      <span className='w-[52px] shrink-0 text-muted'>{label}</span>
       <span className='w-[64px] text-right'>{value === null ? 'unbound' : value.toFixed(3)}</span>
       <span className='w-[56px] text-right text-dim'>±{value === null ? '—' : spread(k)}</span>
     </div>
@@ -96,7 +96,7 @@ export default function FieldDebugReadout({ animator }: { animator: Animator }) 
 
   return (
     <div className='flex flex-col gap-0.5'>
-      <div className='flex items-center justify-between text-[10px] text-gray-400'>
+      <div className='flex items-center justify-between text-ui-xs text-muted'>
         <span>value / 1s spread</span>
         <span className='text-dim'>{d.stateName ?? '—'} · {d.stateTime.toFixed(2)}s</span>
       </div>
@@ -104,7 +104,7 @@ export default function FieldDebugReadout({ animator }: { animator: Animator }) 
       {/* The one reading that is a verdict rather than a measurement. A locomotion machine should change state
           when the player does something, so anything above a stray flip or two per second is the machine
           fighting itself — and the fix is `hysteresis` on the condition or `minDwell` on the transition. */}
-      <div className={`flex items-center gap-2 text-[10px] tabular-nums ${flipRate > 1 ? 'text-warning' : 'text-dim'}`}
+      <div className={`flex items-center gap-2 text-ui-xs tabular-nums ${flipRate > 1 ? 'text-warning' : 'text-dim'}`}
         title={'State changes in the last second. Sustained non-zero means the machine is ping-ponging: two '
           + 'transitions are both satisfied around one threshold. Give the condition a hysteresis band, or the '
           + 'transition a minimum dwell.'}>
@@ -115,7 +115,7 @@ export default function FieldDebugReadout({ animator }: { animator: Animator }) 
 
       {/* What it is bouncing BETWEEN. Only worth the space while it is actually bouncing. */}
       {flipRate > 1 && recent.current.length > 0 && (
-        <p className='text-[10px] text-warning truncate' title={recent.current.join('\n')}>
+        <p className='text-ui-xs text-warning truncate' title={recent.current.join('\n')}>
           {recent.current[recent.current.length - 1]}
         </p>
       )}
@@ -135,7 +135,7 @@ export default function FieldDebugReadout({ animator }: { animator: Animator }) 
           fault — the field asset went missing, so the state poses the bind pose — and it is worth saying so
           rather than showing the same grey line either way. */}
       {!d.active && (
-        <p className={`text-[10px] mt-0.5 ${d.stateWantsField ? 'text-warning' : 'text-gray-500'}`}>
+        <p className={`text-ui-xs mt-0.5 ${d.stateWantsField ? 'text-warning' : 'text-dim'}`}>
           {d.stateWantsField
             ? '⚠ This state plays a field, but none is loaded — its asset is missing, so the character holds the bind pose. Re-pick the field on the state and Apply.'
             : 'No animation field in the current state.'}
@@ -154,9 +154,9 @@ export default function FieldDebugReadout({ animator }: { animator: Animator }) 
 
       <div className='mt-0.5 border-t border-control pt-0.5'>
         {d.weights.map(w => (
-          <div key={w.clipName} className='flex items-center gap-2 text-[10px] tabular-nums'
+          <div key={w.clipName} className='flex items-center gap-2 text-ui-xs tabular-nums'
             title={w.phaseOffset ? `phase offset ${w.phaseOffset.toFixed(2)}` : undefined}>
-            <span className={`w-[52px] shrink-0 truncate ${w.clipName === d.dominant ? 'text-highlight' : 'text-gray-400'}`}>
+            <span className={`w-[52px] shrink-0 truncate ${w.clipName === d.dominant ? 'text-highlight' : 'text-muted'}`}>
               {w.clipName}
             </span>
             <span className='w-[64px] text-right'>{(w.weight * 100).toFixed(1)}%</span>

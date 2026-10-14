@@ -62,8 +62,15 @@ async function boot(): Promise<void> {
 
   const engine = new CleoEngine({
     graphics: data?.config?.graphics ?? { clearColor: [0, 0, 0, 1] },
+    // Gravity + max substeps, and the frame-delta cap: the project's engine options (Options ▸ Engine).
     physics: data?.config?.physics ?? {},
+    runtime: data?.config?.runtime ?? {},
   });
+  // The project's master volume and window title (Options ▸ Engine / Project). Older builds carry neither.
+  const masterVolume = data?.config?.audio?.masterVolume;
+  if (typeof masterVolume === 'number') AudioManager.Instance.mixer.masterVolume = masterVolume;
+  const title = data?.config?.window?.title;
+  if (typeof title === 'string' && title.trim()) document.title = title.trim();
 
   // Everything below this line constructs or resizes GPU resources, so the device must exist first.
   await engine.initialize();

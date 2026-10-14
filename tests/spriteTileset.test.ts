@@ -239,3 +239,40 @@ describe('round trip', () => {
     expect(copy.uvRect()).toEqual([0, 0, 1, 1]);
   });
 });
+
+describe('animated sprite frame rate', () => {
+    const flame = () => {
+        const tileset = ATLAS();
+        tileset.setMeta(5, { animation: { frames: [5, 6, 7], fps: 10 } });
+        return new AnimatedSpriteNode('a', new Sprite({ tileset, tileIndex: 5 }), { frameSource: 'tile', frames: [], fps: 1 });
+    };
+
+    it('reports the rate it actually plays at, for either source', () => {
+        const node = flame();
+        expect(node.effectiveFps).toBe(10);          // the tile's own
+        node.tileFps = 20;
+        expect(node.effectiveFps).toBe(20);          // this sprite's override
+        node.frameSource = 'node';
+        expect(node.effectiveFps).toBe(1);           // the frame list's fps
+    });
+
+    it('plays the tile’s frames at the override, for this sprite only', () => {
+        const node = flame();
+        node.tileFps = 20;
+        node.update(0.05, 0.05);                     // one frame at 20 fps, half of one at 10
+        expect(node.currentTile).toBe(6);
+        const other = flame();
+        other.update(0.05, 0.05);
+        expect(other.currentTile).toBe(5);
+    });
+
+    it('round-trips the override, and writes nothing while it follows the tile', async () => {
+        const node = flame();
+        expect('tileFps' in ((await node.serialize()) as any).animation).toBe(false);
+        node.tileFps = 24;
+        const holder = new Node('h');
+        parseNodeJson(holder, JSON.parse(JSON.stringify(await node.serialize())));
+        expect((holder.children[0] as AnimatedSpriteNode).tileFps).toBe(24);
+    });
+});
+

@@ -143,8 +143,23 @@ struct PBRMaterial {
      * called in uniform control flow.
      */
     specularAA: i32,
+    /**
+     * Texture mapping — chunks/uvProjection.wgsl. Tiling u/v and offset u/v (every mode); projection
+     * 0 mesh uv / 1 box / 2 triplanar; space 0 object / 1 world; metres per repeat; triplanar sharpness.
+     */
+    uvTransform: vec4<f32>,
+    uvProjection: i32,
+    uvSpace: i32,
+    uvWorldSize: f32,
+    uvBlend: f32,
 };
 @group(1) @binding(1) var<uniform> u_material: PBRMaterial;
+
+/** This material's mapping settings, for chunks/uvProjection.wgsl. */
+fn materialUv() -> UvParams {
+    return UvParams(u_material.uvTransform, u_material.uvProjection, u_material.uvSpace,
+                    u_material.uvWorldSize, u_material.uvBlend);
+}
 
 struct ForwardLighting {
     u_view: mat4x4<f32>,        // only to get the view-space depth that selects a cascade
@@ -164,7 +179,9 @@ struct ForwardLighting {
 @group(1) @binding(3) var<uniform> u_lighting: ForwardLighting;
 
 /** The shading normal, flipped for a BACK face — see chunks/pbrGBuffer.wgsl. */
-fn getNormal(in: VertexOutput, front: bool, uv: vec2<f32>, ddx: vec2<f32>, ddy: vec2<f32>) -> vec3<f32> {
+fn getNormal(in: VertexOutput, front: bool, su: SurfaceUv, uv: vec2<f32>) -> vec3<f32> {
+    let ddx = su.dx0;
+    let ddy = su.dy0;
     // The ORIGINAL tbn, not the parallax frame - this is a normal-map decode, and its bitangent sign
     // is the engine-wide green-channel convention. See chunks/parallax.wgsl.
     let tbn = tbnOf(in);
@@ -175,6 +192,10 @@ fn getNormal(in: VertexOutput, front: bool, uv: vec2<f32>, ddx: vec2<f32>, ddy: 
                                   uv, ddx, ddy).rgb;
         n = normalize(n * 2.0 - 1.0);
         N = normalize(tbn * n);
+        // A projected surface has no vertex tangents for its charts; see chunks/uvProjection.wgsl.
+        if (su.mode != UV_MESH) {
+            N = projectedNormal(u_material_normalMap_texture, u_material_normalMap_sampler, su, uv, tbn[2]);
+        }
     }
     if (!front) { N = -N; }
     return N;
@@ -191,18 +212,22 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
 
     // Gradients and the parallax frame, in UNIFORM control flow - above the discard and every
     // per-fragment branch below. See the twin in chunks/pbrGBuffer.wgsl for why that matters.
-    let ddx = dpdx(in.uv);
-    let ddy = dpdy(in.uv);
+    // The material's mapping (mesh uv / box / triplanar), with its gradients — taken here, in uniform
+    // control flow. `ddx`/`ddy` are chart 0's, which is THE chart in mesh and box modes.
+    let su = surfaceUvOf(in, materialUv());
+    let ddx = su.dx0;
+    let ddy = su.dy0;
     let toEye = normalize(u_lighting.u_viewPos - fragPos);
     let basis = parallaxFrame(fragPos, ddx, ddy, tbnOf(in), toEye);
     let frame = basis.frame;
 
-    var uv = in.uv;
+    var uv = su.uv0;
     var selfShadow = 1.0;
     // `parallax`, not just the map being present: the height map is also what a
     // compute-tessellated displacement reads, and a mesh with real geometry must not ALSO
     // march the same field per fragment.
-    if (u_material.hasDisplacementMap != 0 && u_material.parallax != 0) {
+    // Not on triplanar: three blended charts have no single surface for a ray to march.
+    if (u_material.hasDisplacementMap != 0 && u_material.parallax != 0 && su.mode != UV_TRIPLANAR) {
         let invert = u_material.invertHeight != 0;
         let dims = vec2<f32>(textureDimensions(u_material_displacementMap_texture, 0));
         // One LOD, hoisted: the fade, the step count and every fetch in both marches read it, so they
@@ -222,7 +247,7 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
                            u_material.clipSilhouette != 0);
         let hit = parallaxOcclusion(u_material_displacementMap_texture,
                                     u_material_displacementMap_sampler,
-                                    in.uv, ddx, ddy, vTan, depth, dims, lod, invert);
+                                    su.uv0, ddx, ddy, vTan, depth, dims, lod, invert);
         uv = hit.xy;
         // Safe here: ddx/ddy were taken in uniform control flow at the top of the stage and every fetch
         // below is textureSampleGrad, so this introduces no derivative under a per-fragment branch.
@@ -232,7 +257,7 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
         // is not the "grid of holes" the note above once claimed but near-total erasure of the mesh.
         // `floor(in.uv)` is 0 for a 0..1 chart, so this is identical where the feature is meant to be
         // used and merely local where it is not.
-        let tile = floor(in.uv);
+        let tile = floor(su.uv0);
         if (u_material.clipSilhouette != 0
             && (any(hit.xy < tile) || any(hit.xy > tile + vec2<f32>(1.0)))) { discard; }
         // The sun comes from the light list this pass already shades with, not from u_transform, so
@@ -251,15 +276,13 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     // The mask cutout, before the base-colour fetch: a discarded fragment writes no G-buffer at all.
     // Explicit gradients from the UN-offset uv, like every other fetch below.
     if (u_material.hasMaskMap != 0 && u_material.alphaCutoff > 0.0) {
-        let mask = textureSampleGrad(u_material_maskMap_texture, u_material_maskMap_sampler,
-                                     uv, ddx, ddy).r;
+        let mask = sampleSurface(u_material_maskMap_texture, u_material_maskMap_sampler, su, uv).r;
         if (mask < u_material.alphaCutoff) { discard; }
     }
 
     var albedo = u_material.baseColor;
     if (u_material.hasBaseColorTexture != 0) {
-        let texel = textureSampleGrad(u_material_baseColorTexture_texture,
-                                      u_material_baseColorTexture_sampler, uv, ddx, ddy);
+        let texel = sampleSurface(u_material_baseColorTexture_texture, u_material_baseColorTexture_sampler, su, uv);
         // See chunks/pbrGBuffer.wgsl — the same cutout, applied before the lighting work below.
         // Only when there is no mask texture — that one has already been tested above.
         if (u_material.hasMaskMap == 0 && u_material.alphaCutoff > 0.0
@@ -273,14 +296,13 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     var roughness = u_material.roughness;
     var ao = 1.0;
     if (u_material.hasMetallicMap != 0 || u_material.hasRoughnessMap != 0 || u_material.hasOcclusionMap != 0) {
-        let orm = textureSampleGrad(u_material_ormTexture_texture, u_material_ormTexture_sampler,
-                                    uv, ddx, ddy).rgb;
+        let orm = sampleSurface(u_material_ormTexture_texture, u_material_ormTexture_sampler, su, uv).rgb;
         if (u_material.hasOcclusionMap != 0) { ao = orm.r; }
         if (u_material.hasRoughnessMap != 0) { roughness = orm.g; }
         if (u_material.hasMetallicMap != 0) { metallic = orm.b; }
     }
 
-    let N = getNormal(in, front, uv, ddx, ddy);
+    let N = getNormal(in, front, su, uv);
     // Inline, where the deferred twin bakes it into the G-buffer instead. Same filter, same constants,
     // so a surface still shades identically down both paths.
     roughness = filterSpecularRoughness(roughness, N, u_material.specularAA);
@@ -363,9 +385,7 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
 
     // Emission (sRGB-decoded map). Output stays LINEAR HDR — tonemap and gamma happen at the present.
     if (u_material.hasEmissiveMap != 0) {
-        color += toLinear(textureSampleGrad(u_material_emissiveMap_texture,
-                                            u_material_emissiveMap_sampler,
-                                            uv, ddx, ddy).rgb)
+        color += toLinear(sampleSurface(u_material_emissiveMap_texture, u_material_emissiveMap_sampler, su, uv).rgb)
                  * u_material.emissiveFactor * u_material.emissiveIntensity;
     } else {
         color += u_material.emissiveFactor * u_material.emissiveIntensity;

@@ -11,6 +11,7 @@ import {
 } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'
 import { confirmDialog } from '../dialogs/dialogStore'
+import { Button, TextInput } from '../../components/ui'
 
 // The project browser: the same SVAR file manager the Assets tab uses, over the project registry. A flat
 // list — projects do not nest — so every project is one "file" whose id is its display path.
@@ -233,44 +234,52 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
   }, [remove])
 
   return (
-    <div className={`w-full h-full flex flex-col text-sm ${className}`}>
+    <div className={`w-full h-full flex flex-col text-ui ${className}`}>
       <div className='h-[28px] flex items-center gap-1.5 px-2 border-b border-border-subtle shrink-0 bg-surface-sunken'>
         {naming ? (
           <>
-            <input
+            <TextInput
               autoFocus
-              className='shrink min-w-[120px] w-[220px] h-[20px] px-2 rounded bg-control border border-border text-[11px] text-fg placeholder:text-dim focus:outline-none focus:border-highlight'
+              className='shrink min-w-[120px] w-[220px] h-[20px] py-0 text-ui-sm placeholder:text-dim'
               placeholder='Project name'
               value={newName}
-              onChange={e => setNewName(e.target.value)}
+              onChange={setNewName}
               onKeyDown={e => {
                 if (e.key === 'Enter') void create()
                 if (e.key === 'Escape') { setNaming(false); setNewName('') }
               }}
             />
-            <button
-              className='shrink-0 inline-flex items-center h-[20px] px-2 rounded text-[11px] font-semibold leading-none cursor-pointer bg-success hover:bg-success-hover disabled:opacity-40'
+            <Button
+              variant='success'
+              size='sm'
+              className='shrink-0 h-[20px] text-ui-sm leading-none whitespace-nowrap font-semibold disabled:opacity-40'
               disabled={!newName.trim() || busy}
               onClick={() => void create()}>
               Create
-            </button>
-            <button
-              className='shrink-0 inline-flex items-center h-[20px] px-2 rounded text-[11px] leading-none cursor-pointer text-muted hover:bg-control-hover hover:text-fg'
+            </Button>
+            <Button
+              variant='ghost'
+              size='sm'
+              className='shrink-0 h-[20px] text-ui-sm leading-none whitespace-nowrap font-normal'
               onClick={() => { setNaming(false); setNewName('') }}>
               Cancel
-            </button>
+            </Button>
           </>
         ) : (
           <>
-            <button
-              className='shrink-0 inline-flex items-center h-[20px] px-2 rounded text-[11px] font-semibold leading-none whitespace-nowrap cursor-pointer bg-success hover:bg-success-hover disabled:opacity-40'
+            <Button
+              variant='success'
+              size='sm'
+              className='shrink-0 h-[20px] text-ui-sm leading-none whitespace-nowrap font-semibold disabled:opacity-40'
               disabled={busy}
               onClick={() => { setNaming(true); setNewName('') }}
               title='Create an empty project with its own scenes, assets and layout'>
               + New Project
-            </button>
-            <button
-              className='shrink-0 inline-flex items-center h-[20px] px-2 rounded text-[11px] leading-none whitespace-nowrap cursor-pointer text-muted hover:bg-danger hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted'
+            </Button>
+            <Button
+              variant='ghost'
+              size='sm'
+              className='shrink-0 h-[20px] text-ui-sm leading-none whitespace-nowrap font-normal hover:bg-danger disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted'
               disabled={busy || !selectedPath || !byPathRef.current.has(selectedPath)}
               onClick={() => {
                 const id = selectedPath ? byPathRef.current.get(selectedPath) : null
@@ -278,11 +287,11 @@ export default function ProjectsExplorer({ projects, onChanged, className = '' }
               }}
               title={selectedPath ? 'Delete the selected project and everything in it' : 'Select a project first'}>
               Delete
-            </button>
+            </Button>
           </>
         )}
 
-        <span className='ml-auto min-w-0 truncate text-[11px] text-dim'>
+        <span className='ml-auto min-w-0 truncate text-ui-sm text-dim'>
           {busy ? 'Working…' : 'Double-click to open · select and Delete, or right-click'}
         </span>
       </div>

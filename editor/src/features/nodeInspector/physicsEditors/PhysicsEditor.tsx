@@ -27,7 +27,7 @@ const AxisToggles = ({ label, value, onChange }: { label: string; value: number[
     <div className='flex items-center gap-3'>
       {(['X', 'Y', 'Z'] as const).map((ax, i) => (
         <span key={ax} className='inline-flex items-center gap-1'>
-          <span className='text-[10px] text-muted w-2'>{ax}</span>
+          <span className='text-ui-xs text-muted w-2'>{ax}</span>
           <Toggle checked={value[i] === 1} onChange={(c) => { const n = [...value]; n[i] = c ? 1 : 0; onChange(n); }} />
         </span>
       ))}

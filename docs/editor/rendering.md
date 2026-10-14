@@ -1,7 +1,7 @@
 # Rendering
 
-**Renderer mode** shows two panels over a live render: **Renderer Settings** and **Performance**.
-Everything here is project-wide, saved with the project, and carried into a published build.
+**Options ▸ Engine** has the **Renderer** and **Performance** pages, over a live render (see
+[Options](options.md)). Render settings are saved with the open scene and carried into a published build.
 
 Every field with its type and default is in [Render settings](../reference/render-settings.md); this
 page is about using them.

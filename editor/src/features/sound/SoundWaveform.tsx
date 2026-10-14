@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Peaks } from './waveform'
+import { token } from '../../utils/cssTokens'
 
 // The waveform view: the envelope, the playhead, and the loop region as two draggable handles.
 //
@@ -73,6 +74,9 @@ export default function SoundWaveform(props: Props) {
     const h = size.height
     const mid = h / 2
     const xOf = (seconds: number) => (duration > 0 ? (seconds / duration) * w : 0)
+    // Design tokens, read at paint time (never at module scope: index.css is not applied yet then).
+    const wave = token('--highlight')
+    const active = token('--warning')
 
     // Region shading first, so the waveform draws over it.
     if (hasRegion) {
@@ -80,15 +84,15 @@ export default function SoundWaveform(props: Props) {
       const x1 = xOf(regionEnd)
       // Outside the loop is dimmed rather than the inside being highlighted: what plays is the normal
       // state, and what is skipped is the exception.
-      ctx.fillStyle = 'rgba(0,0,0,0.28)'
+      ctx.fillStyle = token('--scrim', 0.28)
       ctx.fillRect(0, 0, x0, h)
       ctx.fillRect(x1, 0, w - x1, h)
-      ctx.fillStyle = 'rgba(127,178,217,0.10)'
+      ctx.fillStyle = token('--highlight', 0.10)
       ctx.fillRect(x0, 0, x1 - x0, h)
     }
 
     // Zero line.
-    ctx.strokeStyle = 'rgba(255,255,255,0.14)'
+    ctx.strokeStyle = token('--text', 0.14)
     ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(0, mid + 0.5)
@@ -96,7 +100,7 @@ export default function SoundWaveform(props: Props) {
     ctx.stroke()
 
     if (peaks && peaks.buckets > 0) {
-      ctx.strokeStyle = '#7fb2d9'
+      ctx.strokeStyle = wave
       ctx.lineWidth = 1
       ctx.beginPath()
       // One vertical stroke per PIXEL column, folding however many buckets fall in it — drawing per
@@ -122,13 +126,13 @@ export default function SoundWaveform(props: Props) {
     if (hasRegion) {
       for (const [seconds, which] of [[regionStart, 'start'], [regionEnd, 'end']] as const) {
         const x = xOf(seconds)
-        ctx.strokeStyle = hover === which || drag === which ? '#ffd27a' : '#7fb2d9'
+        ctx.strokeStyle = hover === which || drag === which ? active : wave
         ctx.lineWidth = hover === which || drag === which ? 2 : 1.5
         ctx.beginPath()
         ctx.moveTo(x, 0)
         ctx.lineTo(x, h)
         ctx.stroke()
-        ctx.fillStyle = hover === which || drag === which ? '#ffd27a' : '#7fb2d9'
+        ctx.fillStyle = hover === which || drag === which ? active : wave
         ctx.fillRect(which === 'start' ? x : x - 5, 0, 5, 9)
         ctx.fillRect(which === 'start' ? x : x - 5, h - 9, 5, 9)
       }
@@ -137,7 +141,7 @@ export default function SoundWaveform(props: Props) {
     // Playhead last — it must be visible over everything else.
     if (playing || position > 0) {
       const x = xOf(position)
-      ctx.strokeStyle = '#ffffff'
+      ctx.strokeStyle = token('--text')
       ctx.lineWidth = 1
       ctx.beginPath()
       ctx.moveTo(x + 0.5, 0)
@@ -207,7 +211,7 @@ export default function SoundWaveform(props: Props) {
         onPointerLeave={() => setHover(null)}
       />
       {!peaks && (
-        <div className='absolute inset-0 flex items-center justify-center text-xs opacity-60 pointer-events-none'>
+        <div className='absolute inset-0 flex items-center justify-center text-ui text-muted pointer-events-none'>
           {duration > 0 ? 'Waveform unavailable for this format' : 'Decoding…'}
         </div>
       )}

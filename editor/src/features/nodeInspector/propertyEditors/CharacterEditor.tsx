@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { CharacterNode, FACING_MODES } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
 import { useCleoEngine } from '../../EngineContext'
-import { SegmentedControl, Slider, cn, labelClass, sectionTitleClass } from '../../../components/ui'
+import { SegmentedControl, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
 import { hintAffordance } from '../../../components/ui/Field'
 import { CharacterIcon } from '../sectionIcons'
 
@@ -90,13 +90,11 @@ export default function CharacterEditor(props: { node: CharacterNode }) {
         {slider('Lockout', 'jumpLockoutSeconds', 0, 1, 0.01)}
 
         {header('Advanced')}
-        <label className='flex items-center gap-2 mb-2'>
-          <input type='checkbox' checked={state.driveWhenUnpossessed}
-            onChange={e => apply({ driveWhenUnpossessed: e.target.checked })} />
-          <span className={cn(labelClass, hintAffordance(DRIVE_HINT))} title={DRIVE_HINT}>
+        <Toggle className='mb-2' checked={state.driveWhenUnpossessed}
+          onChange={checked => apply({ driveWhenUnpossessed: checked })}
+          label={<span className={cn(labelClass, hintAffordance(DRIVE_HINT))} title={DRIVE_HINT}>
             Drive without a Controller
-          </span>
-        </label>
+          </span>} />
 
         {header('Animator outputs', OUTPUT_HINT)}
         <AnimatorOutputs node={props.node} live={isPlayMode} />
@@ -127,9 +125,9 @@ function AnimatorOutputs({ node, live }: { node: CharacterNode; live: boolean })
   }, [node, live])
 
   const row = (name: string, value: string, note: string) => (
-    <div className='flex items-center gap-2 text-[11px] font-mono'>
+    <div className='flex items-center gap-2 text-ui-sm font-mono'>
       <span className={cn(labelClass, 'w-[92px]')}>{name}</span>
-      <span className='w-16 tabular-nums text-white'>{value}</span>
+      <span className='w-16 tabular-nums text-fg'>{value}</span>
       <span className='text-muted'>{note}</span>
     </div>
   )
@@ -139,7 +137,7 @@ function AnimatorOutputs({ node, live }: { node: CharacterNode; live: boolean })
       {row('moveDir', live ? values.moveDir.toFixed(1) : '—', '0 ahead · -90 right · +90 left')}
       {row('turnRequest', live ? String(values.turnRequest) : '—', '±1 / ±2, + is right')}
       {row('isJumping', live ? String(values.isJumping) : '—', 'take-off until landed')}
-      {!live && <p className='text-[11px] text-muted mt-1'>Press Play to watch these update.</p>}
+      {!live && <p className='text-ui-sm text-muted mt-1'>Press Play to watch these update.</p>}
     </div>
   )
 }

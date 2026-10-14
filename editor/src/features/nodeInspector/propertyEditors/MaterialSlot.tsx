@@ -92,7 +92,7 @@ function Slot(props: {
           </div>
           <span className={cn(valueClass, 'truncate flex-1')} title={asset.name}>{asset.name}</span>
           <Button variant='ghost' size='icon' className='text-highlight' title='Edit this material' onClick={() => enterMaterialEditor(asset.id)}>✎</Button>
-          <Button variant='ghost' size='icon' className='text-danger'
+          <Button variant='remove' size='icon'
             title={isDecal ? 'Unlink (revert to the placeholder decal material)' : 'Unlink (revert to a basic material)'} onClick={unlink}>✕</Button>
         </div>
       ) : (

@@ -3,7 +3,7 @@ import { SkyboxNode } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
 import Collapsable from '../../../components/Collapsable'
 import { PropertyTable, PropertyRow, TextInput, Button, ColorInput, NumberInput, SegmentedControl } from '../../../components/ui'
-import { InfoIcon } from '../sectionIcons'
+import { InfoIcon, SkyIcon } from '../sectionIcons'
 import { clamp } from '../../../utils/math';
 
 // The inspector for the scene ASSET, shown when the scene tab's root node is selected. Everything here
@@ -102,7 +102,7 @@ export default function SceneSettings() {
 
           <div className='mt-2'>
             {isMain
-              ? <div className='text-xs text-muted px-1' title='The main scene is the one a published game starts in.'>This is the main scene.</div>
+              ? <div className='text-ui text-muted px-1' title='The main scene is the one a published game starts in.'>This is the main scene.</div>
               : <Button variant='subtle' size='sm' className='w-full'
                   title='Make this the scene a published game starts in'
                   onClick={() => setMainScene(meta.id)}>
@@ -112,7 +112,7 @@ export default function SceneSettings() {
         </div>
       </Collapsable>
 
-      <Collapsable title='Environment' persistKey='sceneEnvironment'>
+      <Collapsable title='Environment' icon={<SkyIcon />} persistKey='sceneEnvironment'>
         <div className='w-full p-2'>
           <PropertyTable columns={['32%', '68%']}>
             <PropertyRow label='Clear color'>

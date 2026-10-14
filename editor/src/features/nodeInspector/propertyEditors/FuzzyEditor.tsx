@@ -139,17 +139,15 @@ export default function FuzzyEditor({ node, onChange }: Props) {
                     // antecedent terms and the consequent or the tolerant reader drops the rule.
                     apply(renameFuzzyVariable(model, v.name, unique))
                   }} />
-                <span className='text-[10px] uppercase text-muted px-1'>
+                <span className='text-ui-xs uppercase text-muted px-1'>
                   {isOutput ? 'output' : isKnownInput ? 'input' : 'unfed'}
                 </span>
-                <ButtonWithConfirm
+                <ButtonWithConfirm variant='remove'
                   onClick={() => apply({
                     ...model,
                     variables: model.variables.filter(x => x.name !== v.name),
                     rules: model.rules.filter(r => r.variable !== v.name && !termUsesVariable(r.antecedent, v.name)),
-                  })}>
-                  ✕
-                </ButtonWithConfirm>
+                  })}>✕</ButtonWithConfirm>
               </div>
 
               {!isOutput && !isKnownInput && (
@@ -178,10 +176,8 @@ export default function FuzzyEditor({ node, onChange }: Props) {
                     onChange={(mid) => patchSet(v.name, i, { mid })} />
                   <NumberInput className='w-[52px]' value={s.right}
                     onChange={(right) => patchSet(v.name, i, { right })} />
-                  <ButtonWithConfirm
-                    onClick={() => patchVariable(v.name, { sets: v.sets.filter((_, x) => x !== i) })}>
-                    ✕
-                  </ButtonWithConfirm>
+                  <ButtonWithConfirm variant='remove'
+                    onClick={() => patchVariable(v.name, { sets: v.sets.filter((_, x) => x !== i) })}>✕</ButtonWithConfirm>
                 </div>
               ))}
               <Button size='sm' variant='ghost'
@@ -291,7 +287,7 @@ function RuleRow(
             {setsOf(t.variable).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
           </Select>
           {terms.length > 1 && (
-            <ButtonWithConfirm
+            <ButtonWithConfirm variant='remove'
               onClick={() => {
                 const kept = terms.filter((_, x) => x !== i)
                 onChange({ antecedent: kept.length === 1 ? kept[0] : { op: 'and', children: kept } })
@@ -312,7 +308,7 @@ function RuleRow(
           onChange={(e) => onChange({ set: e.target.value })}>
           {setsOf(rule.variable).map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
         </Select>
-        <ButtonWithConfirm onClick={onRemove}>✕</ButtonWithConfirm>
+        <ButtonWithConfirm variant='remove' onClick={onRemove}>✕</ButtonWithConfirm>
       </div>
 
       {editable && (

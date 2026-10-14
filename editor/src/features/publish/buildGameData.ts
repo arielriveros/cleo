@@ -1,5 +1,7 @@
 import type { Scene, RenderSettings, NodeTemplate, InputMap } from 'cleo';
 import { Logger, isDefaultInputMap, isEditorOwnedName } from 'cleo';
+import { projectSettingsConfig } from '../options/projectSettings';
+import type { ProjectSettings } from '../options/projectSettings';
 import type { BodyDescription, ShapeDescription } from '../EngineContext';
 import { fanOutScripts, SCRIPT_ID_VAR, type ScriptAsset } from '../../utils/scripts';
 import { buildScriptGraphCtx, importClosure } from '../../utils/scriptGraph';
@@ -48,6 +50,8 @@ export interface GameDataSources {
   // player. Written only when it differs from the shipped defaults, so an untouched project's build
   // gains no bytes.
   input?: InputMap;
+  /** Engine runtime + publish-window options; merged into `config` (see options/projectSettings). */
+  projectSettings?: ProjectSettings;
 }
 
 // Remove editor-only and debug helper nodes so they never ship in a play scene or published game.
@@ -278,6 +282,7 @@ export async function buildGameData(sources: GameDataSources): Promise<any> {
     config.render = sources.settings;
   }
   if (sources.input && !isDefaultInputMap(sources.input)) config.input = sources.input;
+  if (sources.projectSettings) Object.assign(config, projectSettingsConfig(sources.projectSettings));
   if (Object.keys(config).length > 0) json.config = config;
   return json;
 }

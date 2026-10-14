@@ -11,8 +11,14 @@ export type { ButtonProps, ButtonWithConfirmProps } from './Button';
 export { SegmentedControl } from './SegmentedControl';
 export type { SegmentedControlProps, SegmentedOption } from './SegmentedControl';
 
-export { NumberInput, TextInput, Select } from './inputs';
-export type { NumberInputProps, TextInputProps, SelectProps } from './inputs';
+export { NumberInput, OptionalNumberInput, TextInput, Select, controlClass } from './inputs';
+export type { NumberInputProps, OptionalNumberInputProps, TextInputProps, SelectProps } from './inputs';
+
+export { FileButton } from './FileButton';
+export type { FileButtonProps } from './FileButton';
+
+export { MenuItem } from './MenuItem';
+export type { MenuItemProps } from './MenuItem';
 
 
 export { Toggle } from './Toggle';

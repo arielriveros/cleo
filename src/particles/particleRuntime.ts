@@ -135,6 +135,7 @@ export class EmitterRuntime {
     private _serial = 0;
     private _rateCarry = 0;
     private _distanceCarry = 0;
+    private _burstCarry = 0;
     private _pendingBurst = 0;
     private _pendingReset = false;
     private _random: () => number;
@@ -226,6 +227,7 @@ export class EmitterRuntime {
         this._state = 'playing';
         this._time = 0;
         this._rateCarry = 0;
+        this._burstCarry = 0;
         this._distanceCarry = 0;
         this._random = rng(this.def.seed ^ 0x9E3779B9);
     }
@@ -248,9 +250,10 @@ export class EmitterRuntime {
 
     /**
      * Advance the clock by `dt` and say what the GPU must do for it. `matrix` is the emitter's current
-     * local-to-world; `rateScale` multiplies continuous spawning (LOD, the node's spawn-rate scale).
+     * local-to-world; `rateScale` multiplies continuous spawning (LOD, the node's spawn-rate scale), and
+     * `burstScale` the stack's bursts (1 unless LOD scales bursts too; 0 silences them).
      */
-    public advance(dt: number, matrix: mat4, rateScale = 1): SimStep {
+    public advance(dt: number, matrix: mat4, rateScale = 1, burstScale = 1): SimStep {
         const prev = mat4.clone(this._hasMatrix ? this._lastMatrix : matrix);
         mat4.copy(this._lastMatrix, matrix);
         this._hasMatrix = true;
@@ -265,7 +268,7 @@ export class EmitterRuntime {
 
         let count = this._pendingBurst;
         this._pendingBurst = 0;
-        if (this._state === 'playing') count += this._spawnBetween(this._time, this._time + dt, moved, rateScale);
+        if (this._state === 'playing') count += this._spawnBetween(this._time, this._time + dt, moved, rateScale, burstScale);
         this._time += dt;
 
         count = Math.min(count, this.capacity);
@@ -286,7 +289,7 @@ export class EmitterRuntime {
     }
 
     /** Particles born in the interval [t0, t1) of emitter time, delay and cycles accounted for. */
-    private _spawnBetween(t0: number, t1: number, moved: number, rateScale: number): number {
+    private _spawnBetween(t0: number, t1: number, moved: number, rateScale: number, burstScale: number): number {
         const def = this.def;
         const delay = def.startDelay;
         if (t1 <= delay) return 0;
@@ -313,14 +316,14 @@ export class EmitterRuntime {
             const cycleStart = cycle * duration;
             const end = Math.min(b, (cycle + 1) * duration);
             if (!def.looping && cycle > 0) break;
-            total += this._spawnInCycle(start - cycleStart, end - cycleStart, end - start, rateScale);
+            total += this._spawnInCycle(start - cycleStart, end - cycleStart, end - start, rateScale, burstScale);
             start = end;
         }
         if (!def.looping && b >= duration) this._state = 'stopping';
 
         const rate = activeModule(def, 'spawnRate');
         if (rate) {
-            this._distanceCarry += moved * Math.max(0, num(rate.params.perDistance, 0));
+            this._distanceCarry += moved * Math.max(0, num(rate.params.perDistance, 0)) * rateScale;
             const fromDistance = Math.floor(this._distanceCarry);
             this._distanceCarry -= fromDistance;
             total += fromDistance;
@@ -328,7 +331,7 @@ export class EmitterRuntime {
         return total;
     }
 
-    private _spawnInCycle(c0: number, c1: number, dt: number, rateScale: number): number {
+    private _spawnInCycle(c0: number, c1: number, dt: number, rateScale: number, burstScale: number): number {
         const def = this.def;
         let total = 0;
 
@@ -357,13 +360,26 @@ export class EmitterRuntime {
                     if (at >= def.duration || at >= c1) break;
                     // Half-open [c0, c1), except a burst at exactly t=0 must fire on the very first step.
                     if (at < c0 && !(at === 0 && c0 === 0)) continue;
-                    if (probability >= 1 || this._random() < probability)
-                        total += Math.max(0, Math.floor(num(burst.count, 0)));
+                    if (probability >= 1 || this._random() < probability) {
+                        // Scaled bursts carry their fraction, so ×0.5 of a 3-burst alternates 1 and 2.
+                        this._burstCarry += Math.max(0, Math.floor(num(burst.count, 0))) * burstScale;
+                        const whole = Math.floor(this._burstCarry + 1e-9);
+                        this._burstCarry -= whole;
+                        total += whole;
+                    }
                 }
             }
         }
         return total;
     }
+}
+
+/** What a system's current LOD level asks of {@link ParticleSystemRuntime.advance}. See particleLod.ts. */
+export interface ParticleLodStep {
+    level: number;
+    spawnScale: number;
+    stepScale: number;
+    scaleBursts: boolean;
 }
 
 /** Every emitter of one system instance, plus the steps not yet handed to the GPU. */
@@ -378,6 +394,8 @@ export class ParticleSystemRuntime {
     private static readonly MAX_PENDING = 32;
     /** Steps one frame's {@link advance} may queue per emitter. */
     public static readonly MAX_STEPS_PER_FRAME = 2;
+    /** The simulation rate LOD `stepScale` divides: ×2 = 30 Hz, ×3 = 20 Hz, ×4 = 15 Hz. */
+    public static readonly LOD_BASE_RATE = 60;
     /** Prewarm steps one frame may run per emitter; the rest wait for the frames after it. */
     public static readonly PREWARM_STEPS_PER_FRAME = 16;
     /** The prewarm's step length. Coarser than a frame step: nobody watches a prewarm integrate. */
@@ -387,6 +405,8 @@ export class ParticleSystemRuntime {
     private readonly _prewarmLeft: number[];
     /** The longest step every emitter stays stable at: tighter when any of them collides. */
     private _maxStep: number;
+    /** Frame time held back by a LOD level that simulates less often than every frame. */
+    private _lodCarry = 0;
 
     constructor(defs: readonly EmitterDef[]) {
         const resolved = resolveSubEmitters(defs);
@@ -461,15 +481,39 @@ export class ParticleSystemRuntime {
      *
      * Prewarm still owed (see {@link prewarm}) runs first, a bounded slice per frame.
      */
-    public advance(dt: number, matrix: mat4, rateScale = 1, maxStep = this._maxStep): void {
+    public advance(dt: number, matrix: mat4, rateScale = 1, maxStep = this._maxStep, lod?: ParticleLodStep): void {
         this._runPrewarm(matrix);
         if (!(dt > 0)) return;
+
+        // A coarser LOD level simulates LESS OFTEN, not with a longer step at the same rate: at 60 fps a
+        // frame is one step either way, so only skipping frames saves GPU passes. The skipped time is
+        // carried and simulated in one longer step when it comes due — the effect stays in real time.
+        let span = dt;
+        const stepScale = Math.max(1, lod?.stepScale ?? 1);
+        if (stepScale > 1) {
+            const interval = stepScale / ParticleSystemRuntime.LOD_BASE_RATE;
+            this._lodCarry += dt;
+            if (this._lodCarry < interval - 1e-9) return;
+            span = this._lodCarry;
+            this._lodCarry = 0;
+            maxStep = Math.max(maxStep, interval);
+        } else this._lodCarry = 0;
+
+        const level = lod?.level ?? 0;
+        const spawnScale = lod?.spawnScale ?? 1;
+        const scales = this.emitters.map(e => {
+            // A detail emitter past its last level goes quiet; its live particles finish their lives.
+            if (level > e.def.maxLod) return [0, 0];
+            return [rateScale * spawnScale, lod?.scaleBursts ? spawnScale : 1];
+        });
+
         const limit = ParticleSystemRuntime.MAX_STEPS_PER_FRAME;
-        const span = Math.min(dt, maxStep * limit);
+        span = Math.min(span, maxStep * limit);
         const steps = Math.min(limit, Math.max(1, Math.ceil(span / maxStep - 1e-9)));
         const h = span / steps;
         for (let s = 0; s < steps; s++)
-            for (let i = 0; i < this.emitters.length; i++) this._push(i, this.emitters[i].advance(h, matrix, rateScale));
+            for (let i = 0; i < this.emitters.length; i++)
+                this._push(i, this.emitters[i].advance(h, matrix, scales[i][0], scales[i][1]));
     }
 
     /**

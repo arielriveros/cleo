@@ -6,14 +6,14 @@ import type { IkRig, IkFootChain, Skin } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
 import { jointLabel } from './skeleton'
+import { Button, cn, controlClass } from '../../components/ui'
 
 // Foot-IK rig authoring, under the skeleton tree. Bones are assigned by hand: select a joint (SELECT_JOINT,
 // from the tree or the viewport) and click the role it fills; the ⤓ button offers a name-matched guess.
 // Everything writes through commitIkRig, which lands on the MODEL ASSET, so every placement inherits it.
 
-const input = 'bg-control text-white border border-control-hover rounded px-1 py-0.5 text-xs'
-const ghost = 'px-1.5 py-0.5 rounded border border-control-hover hover:bg-control text-xs'
-const danger = 'px-1.5 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white text-xs'
+/** The tuning inputs stay raw (uncontrolled, commit on blur, blank = default), in the library's control chrome. */
+const input = cn(controlClass, 'px-1 py-0.5')
 
 /** The roles one leg has, in the order they run down it. `toe` is optional — not every rig has one. */
 type Role = 'thigh' | 'shin' | 'foot' | 'toe'
@@ -142,13 +142,13 @@ export default function IkRigPanel({ skin, selectedJoint }: { skin: Skin; select
       write({ ...current, [key]: Number.isFinite(v) && v >= 0 ? v : undefined })
     }
     return (
-      <label className='flex items-center gap-1 text-[10px]' title={hint}>
-        <span className='w-[74px] shrink-0 text-gray-400'>{label}</span>
+      <label className='flex items-center gap-1 text-ui-xs' title={hint}>
+        <span className='w-[74px] shrink-0 text-muted'>{label}</span>
         <input
           // Uncontrolled, so `key` on the committed value is what remounts the input when the rig is
           // replaced from elsewhere (Clear, auto-fill).
           key={`${key}:${(current[key] as number | undefined) ?? ''}`}
-          className={input + ' w-[56px]'} type='number' step={step} min='0'
+          className={cn(input, 'w-[56px]')} type='number' step={step} min='0'
           defaultValue={(current[key] as number | undefined) ?? ''}
           placeholder={String((IK_DEFAULTS as any)[key])}
           onBlur={e => commit(e.target.value)}
@@ -166,14 +166,14 @@ export default function IkRigPanel({ skin, selectedJoint }: { skin: Skin; select
       <div className='flex flex-col gap-2 p-2'
         title='Select a bone, then click the role it fills. Runs in Play only — the editor has no physics to stand on.'>
         <div className='flex items-center gap-1'>
-          <button className={ghost} onClick={autoFill}
+          <Button size='sm' variant='subtle' onClick={autoFill}
             title='Fill both legs from the bone names, where they are recognizable. Whatever it cannot identify is left blank for you to assign.'>
             ⤓ Guess from bone names
-          </button>
+          </Button>
           {rig && (
-            <button className={danger + ' ml-auto'} title='Remove the whole rig' onClick={() => write(null)}>
+            <Button size='sm' variant='danger' className='ml-auto' title='Remove the whole rig' onClick={() => write(null)}>
               Clear
-            </button>
+            </Button>
           )}
         </div>
 
@@ -181,55 +181,55 @@ export default function IkRigPanel({ skin, selectedJoint }: { skin: Skin; select
             the skeleton — bones from the wrong tier of a control rig, or three bones that are not a connected
             leg. Saying so here is the difference between a wrong guess you can see and one you only meet in
             Play as a thrashing character. */}
-        {report && <p className='text-[10px] text-muted'>{report}</p>}
+        {report && <p className='text-ui-xs text-muted'>{report}</p>}
 
         {/* Hips: optional, and the panel says so — without it the legs still solve, they just cannot be
             helped by lowering the pelvis when one is out of reach. */}
         <div className='flex items-center gap-1'>
-          <span className='w-[52px] shrink-0 text-[10px] text-gray-400' title='Pelvis. Lowered when a foot cannot reach the ground.'>Hips</span>
+          <span className='w-[52px] shrink-0 text-ui-xs text-muted' title='Pelvis. Lowered when a foot cannot reach the ground.'>Hips</span>
           <span
-            className={`min-w-0 flex-1 truncate text-[11px] ${hips.missing ? 'text-red-400' : current.hips === undefined ? 'text-dim' : 'cursor-pointer text-muted hover:text-white'}`}
+            className={`min-w-0 flex-1 truncate text-ui-sm ${hips.missing ? 'text-danger-fg' : current.hips === undefined ? 'text-dim' : 'cursor-pointer text-muted hover:text-fg'}`}
             onClick={() => selectNode(current.hips)}>
             {hips.text}
           </span>
-          <button className={ghost} disabled={!assignable}
+          <Button size='sm' variant='subtle' disabled={!assignable}
             title={assignable ? 'Assign the selected bone as the hips' : 'Select a bone first'}
-            onClick={() => write({ ...current, hips: selectedNode! })}>set</button>
+            onClick={() => write({ ...current, hips: selectedNode! })}>set</Button>
           {current.hips !== undefined && (
-            <button className={ghost} title='Unassign' onClick={() => write({ ...current, hips: undefined })}>✕</button>
+            <Button variant='remove' size='sm' title='Unassign' onClick={() => write({ ...current, hips: undefined })}>✕</Button>
           )}
         </div>
 
         {current.feet.map((leg, i) => (
           <div key={i} className='flex flex-col gap-1 rounded border border-control p-1.5'>
             <div className='flex items-center gap-1'>
-              <span className='flex-1 text-[10px] uppercase tracking-wide text-highlight'>Leg {i + 1}</span>
-              <button className={danger} title='Remove this leg' onClick={() => removeLeg(i)}>✕</button>
+              <span className='flex-1 text-ui-xs uppercase tracking-wide text-highlight'>Leg {i + 1}</span>
+              <Button variant='remove' size='sm' title='Remove this leg' onClick={() => removeLeg(i)}>✕</Button>
             </div>
             {LEG_ROLES.map(role => {
               const value = leg[role.key]
               const n = nameOfNode(value !== undefined && value >= 0 ? value : undefined)
               return (
                 <div key={role.key} className='flex items-center gap-1' title={role.hint}>
-                  <span className='w-[52px] shrink-0 text-[10px] text-gray-400'>{role.label}</span>
+                  <span className='w-[52px] shrink-0 text-ui-xs text-muted'>{role.label}</span>
                   <span
-                    className={`min-w-0 flex-1 truncate text-[11px] ${n.missing ? 'text-red-400' : n.text === '—' ? 'text-dim' : 'cursor-pointer text-muted hover:text-white'}`}
+                    className={`min-w-0 flex-1 truncate text-ui-sm ${n.missing ? 'text-danger-fg' : n.text === '—' ? 'text-dim' : 'cursor-pointer text-muted hover:text-fg'}`}
                     onClick={() => selectNode(value !== undefined && value >= 0 ? value : undefined)}>
                     {n.text}
                   </span>
-                  <button className={ghost} disabled={!assignable}
+                  <Button size='sm' variant='subtle' disabled={!assignable}
                     title={assignable ? `Assign the selected bone as ${role.label}` : 'Select a bone first'}
-                    onClick={() => setLeg(i, { [role.key]: selectedNode! } as Partial<IkFootChain>)}>set</button>
+                    onClick={() => setLeg(i, { [role.key]: selectedNode! } as Partial<IkFootChain>)}>set</Button>
                 </div>
               )
             })}
             {(leg.thigh < 0 || leg.shin < 0 || leg.foot < 0) && (
-              <p className='text-[10px] text-warning'>Thigh, shin and foot are all needed — this leg is skipped until then.</p>
+              <p className='text-ui-xs text-warning'>Thigh, shin and foot are all needed — this leg is skipped until then.</p>
             )}
           </div>
         ))}
 
-        <button className={ghost + ' self-start'} onClick={addLeg}>+ Leg</button>
+        <Button size='sm' variant='subtle' className='self-start' onClick={addLeg}>+ Leg</Button>
 
         {current.feet.length > 0 && (
           <div className='mt-1 flex flex-col gap-1 border-t border-control pt-2'>

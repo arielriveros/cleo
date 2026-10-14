@@ -16,6 +16,20 @@ Tileset mode gives you:
 
 **Per-tile flags** — solid (collides), animated, tinted, depth-anchored.
 
+**Animated tiles** — select a tile, turn on **Animated** and the editor goes straight into frame
+picking: click tiles on the atlas in the order they play (drag a rectangle to add a row at once),
+right-click a tile to remove its last use, **Done** to keep the frames, or **Cancel** (or Esc) to put the tile back exactly as it was before picking — including turning Animated off again if picking started from the toggle. The atlas numbers each tile with
+its place in the sequence (a tile used twice shows both, e.g. `2,4`), and the frame chips under
+**Selected tiles** reorder (‹ ›) or remove (×) a frame. The anchor tile is outlined while picking.
+
+**Overdrive** — brightness past white, in linear light (**Atlas ▸ Overdrive**, default 1). A tint
+can only darken a tile; overdrive makes it brighter than its texture, so fire, lava or magic crosses
+the bloom threshold and glows. Every sprite and tilemap tile drawn from the tileset gets it. A tile
+can set its own **Overdrive** under **Selected tiles**, for example a flare frame brighter than the rest
+of the flame or an unlit tile in a glowing set; set it back to the tileset's value to follow the
+tileset again. An animated sprite uses the overdrive of the frame on screen. An animated tilemap
+tile keeps its base tile's value. Around 3–4 is a strong glow at the default bloom settings.
+
 **Variant sets** — several tiles that mean the same thing, picked at random with weights. This is
 what stops a large area of ground looking obviously repeated.
 
@@ -80,7 +94,10 @@ Nothing else is needed; there is no per-tile collider to place.
 
 **Animated sprite** — an ordered list of tiles with fps and loop. The frame list comes either from
 the node itself or from the tile's own animation metadata in the tileset, which is the better choice
-when the same animation is used in several places.
+when the same animation is used in several places. **Playback** shows the **Frames per second** either way: for its
+own frame list it is the sprite's rate (with the loop length under it); for a tile's animation it shows
+the tile's rate from the tileset, and typing another value speeds up or slows down this sprite only (↺
+follows the tile again).
 
 Both support **billboarding** (`free`, `spherical`, `cylindrical`), which matters in 3D scenes where
 sprites are used for effects.

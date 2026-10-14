@@ -2,6 +2,7 @@
 // cancel-by-terminate, and an inline fallback when no worker can be created.
 
 import { runImportJob, ImportJob, ImportJobResult, ProgressSink } from './importJobs';
+import { Logger } from 'cleo';
 
 interface Response {
   id: number;
@@ -18,6 +19,8 @@ interface Pending {
   onProgress: ProgressSink;
   resolve: (r: ImportJobResult) => void;
   reject: (e: Error) => void;
+  /** The worker has reported progress on this job, so it LOADED and was running it. */
+  started: boolean;
 }
 
 /** Thrown into every in-flight parse when `cancelAll()` terminates the worker. */
@@ -53,6 +56,7 @@ function getWorker(): Worker | null {
 
     // Non-terminal: report and keep waiting; deleting the pending entry here strands the request.
     if (progress !== undefined) {
+      entry.started = true;
       try { entry.onProgress(progress, stage ?? ''); } catch { /* a progress sink must never fail a job */ }
       return;
     }
@@ -62,16 +66,29 @@ function getWorker(): Worker | null {
     else entry.reject(new Error(error || 'Import worker job failed'));
   };
 
-  // A worker-level `error` means the script never ran, so stranded jobs are safe to re-run inline.
-  worker.onerror = () => {
+  // A worker-level `error` is one of two things, and they must not be treated alike:
+  //  - the worker never LOADED (a module in its graph threw at import time). Jobs that never started are
+  //    re-run inline so the import still works — but loudly: it used to be silent, and every import of
+  //    a big model then froze the editor with nothing in the log to say why.
+  //  - the worker died MID-JOB (out of memory on a huge file). Re-running that inline would freeze the
+  //    editor on exactly the input that already proved too heavy, so the job fails with an error instead.
+  worker.onerror = (event: ErrorEvent) => {
     const stranded = [...pending.values()];
     pending.clear();
     worker?.terminate();
     worker = null;
-    unavailable = true;
+    const detail = event?.message || 'unknown error';
 
-    for (const entry of stranded)
+    for (const entry of stranded) {
+      if (entry.started) {
+        entry.reject(new Error(`The import worker stopped while reading this model (${detail}). The file may be too large to import.`));
+        continue;
+      }
+      unavailable = true;
       runImportJob(entry.job, entry.onProgress).then(outcome => entry.resolve(outcome.result), entry.reject);
+    }
+    if (unavailable)
+      Logger.warn(`The model-import worker failed to start (${detail}); imports will run on the main thread and may freeze the editor.`, 'Import');
   };
 
   return worker;
@@ -83,7 +100,7 @@ function dispatch(job: ImportJob, onProgress: ProgressSink = () => {}): Promise<
 
   return new Promise<ImportJobResult>((resolve, reject) => {
     const id = nextId++;
-    pending.set(id, { job, onProgress, resolve, reject });
+    pending.set(id, { job, onProgress, resolve, reject, started: false });
     // Inputs must NOT be transferred: detaching them would strand the inline retry in onerror.
     w.postMessage({ id, job });
   });
@@ -135,8 +152,8 @@ export async function parseGltfFiles(files: File[], animated: boolean, onProgres
  *
  * Unlike `parseModelFiles`, this route carries bones. Pair with `Loader.assembleGltfModels`.
  */
-export async function parseModelAsGltfFiles(files: File[], animated: boolean, onProgress?: ProgressSink) {
-  const result = await dispatch({ kind: 'parseModelAsGltf', files, animated }, onProgress);
+export async function parseModelAsGltfFiles(files: File[], animated: boolean, onProgress?: ProgressSink, weldCreaseDeg?: number) {
+  const result = await dispatch({ kind: 'parseModelAsGltf', files, animated, weldCreaseDeg }, onProgress);
   if (result.kind !== 'parseGltf') throw new Error('Unexpected import job result');
   // `recovered` rides along: the maps assimp's glTF2 exporter dropped, for assembleGltfModels to
   // re-attach. Only this route produces it.

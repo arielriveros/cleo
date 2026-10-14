@@ -8,7 +8,7 @@ interface TopbarProps {
 // dock's stacking contexts (dockview overlays use z-index inside their own context).
 export default function Topbar(props: TopbarProps) {
   return (
-    <div className="relative z-30 shrink-0 w-full h-[30px] flex flex-row items-center justify-between text-white bg-gradient-to-r from-menubar via-primary to-menubar">
+    <div className="relative z-30 shrink-0 w-full h-[30px] flex flex-row items-center justify-between text-fg bg-gradient-to-r from-menubar via-primary to-menubar">
         {props.children}
     </div>
   )

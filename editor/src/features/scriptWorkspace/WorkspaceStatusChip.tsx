@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { Button } from '../../components/ui/Button'
+import { cn } from '../../components/ui/cn'
 import { Modal, ModalFooter, ModalHeader } from '../../components/ui/Modal'
 import { useScriptWorkspace } from './ScriptWorkspaceContext'
 
-// Status of the external script workspace, shown in the menu bar whenever it is connected. Loud only
-// for a paused sync or an edit conflict — the states where something is deliberately not applied.
+// The external script workspace in the menu bar — ONLY when it needs attention (a paused sync, an error,
+// an edit conflict): the states where something is deliberately not applied. Setting it up, its folder
+// and its everyday status live in Options ▸ Editor ▸ Scripts.
 
 const DOT: Record<string, string> = {
   live: 'bg-success',
@@ -18,22 +20,22 @@ export default function WorkspaceStatusChip() {
   const [expanded, setExpanded] = useState(false)
   const conflict = ws.conflicts[0]
 
-  if (ws.status === 'off') return null
-
   const needsAttention = ws.status === 'paused' || ws.status === 'error'
+  if (!needsAttention && !conflict) return null
 
   return (
     <>
-      <div className='relative flex items-center'>
-        <button
-          type='button'
+      {needsAttention && <div className='relative flex items-center'>
+        <Button
+          variant='ghost'
+          size='sm'
           onClick={() => setExpanded(v => !v)}
           title={ws.message ?? ws.rootPath ?? ''}
-          className={
-            'flex items-center gap-1.5 px-2 h-[22px] rounded border text-[11px] ' +
-            (needsAttention
-              ? 'border-warning text-white bg-warning/20 hover:bg-warning/30'
-              : 'border-border text-muted hover:text-white hover:bg-control')
+          className={cn(
+            'gap-1.5 px-2 py-0 h-[22px] font-normal text-ui-sm',
+            needsAttention
+              ? 'border-warning text-fg bg-warning/20 hover:bg-warning/30'
+              : 'border-border text-muted hover:text-fg hover:bg-control')
           }
         >
           <span className={`w-1.5 h-1.5 rounded-full ${DOT[ws.status] ?? 'bg-muted'}`} />
@@ -41,12 +43,12 @@ export default function WorkspaceStatusChip() {
           {ws.status === 'connecting' && 'Connecting…'}
           {ws.status === 'paused' && 'Script sync paused'}
           {ws.status === 'error' && 'Script sync error'}
-        </button>
+        </Button>
 
         {expanded && (
           <div className='absolute top-[26px] left-0 z-40 w-[320px] p-3 rounded border border-control bg-surface-raised shadow-lg'>
-            <div className='text-[11px] text-dim break-all mb-2'>{ws.rootPath}</div>
-            {ws.message && <div className='text-[11px] text-white mb-2'>{ws.message}</div>}
+            <div className='text-ui-sm text-dim break-all mb-2'>{ws.rootPath}</div>
+            {ws.message && <div className='text-ui-sm text-fg mb-2'>{ws.message}</div>}
 
             <div className='flex flex-wrap gap-1.5'>
               <Button size='sm' onClick={() => { void ws.openInEditor(); setExpanded(false) }}>
@@ -70,20 +72,20 @@ export default function WorkspaceStatusChip() {
             </div>
 
             {needsAttention && (
-              <p className='mt-2 text-[10px] text-dim leading-snug'>
+              <p className='mt-2 text-ui-xs text-dim leading-snug'>
                 Nothing has been changed in the editor.
               </p>
             )}
           </div>
         )}
-      </div>
+      </div>}
 
       {conflict && (
         <Modal onClose={() => ws.resolveConflict(conflict.scriptId, 'external')} className='w-[440px]'>
           <ModalHeader>
-            <div className='text-sm font-semibold'>“{conflict.name}” was edited in both places</div>
+            <div className='text-ui-lg font-semibold'>“{conflict.name}” was edited in both places</div>
           </ModalHeader>
-          <div className='px-4 py-3 text-[12px] text-muted leading-relaxed'>
+          <div className='px-4 py-3 text-ui text-muted leading-relaxed'>
             This script had unsaved changes in the editor when a new version arrived from the workspace
             folder. The workspace version has been taken — keep it, or put your unsaved editor version
             back (which then overwrites the file on disk).

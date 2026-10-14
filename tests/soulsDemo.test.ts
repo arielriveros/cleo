@@ -7,13 +7,22 @@ import SoulsGameManagerNode from '../examples/scripts/SoulsGameManager';
 import SoulsPlayerNode from '../examples/scripts/SoulsPlayer';
 import SoulsEnemyNode from '../examples/scripts/SoulsEnemy';
 import SoulsWeaponNode from '../examples/scripts/SoulsWeapon';
+import SoulsStraightSwordNode from '../examples/scripts/SoulsStraightSword';
+import SoulsGreatswordNode from '../examples/scripts/SoulsGreatsword';
+import SoulsHollowNode from '../examples/scripts/SoulsHollow';
+import SoulsHollowSorcererNode from '../examples/scripts/SoulsHollowSorcerer';
+import SoulsEliteKnightNode from '../examples/scripts/SoulsEliteKnight';
+import SoulsHollowWardenNode from '../examples/scripts/SoulsHollowWarden';
+import SoulsLockOnNode from '../examples/scripts/SoulsLockOn';
+import { statBonus } from '../examples/scripts/SoulsMath';
 import SoulsMoveNode from '../examples/scripts/SoulsMove';
 import SoulsFogGateNode from '../examples/scripts/SoulsFogGate';
 import SoulsBonfireMenuNode from '../examples/scripts/SoulsBonfireMenu';
 import SoulsBloodSplatNode from '../examples/scripts/SoulsBloodSplat';
 import { DecalNode } from '../src/core/scene/nodes/decalNode';
 
-// The Hollow Keep souls-like example. Its balance lives in SoulsGameManager's rule methods, and its feel
+// The Hollow Keep souls-like example. Its balance lives with the things it describes — the player's stat
+// curves on the player, attack rating on each weapon, defence on each fighter — and its feel
 // in a handful of state machines whose bugs are invisible until someone plays a long session: a roll
 // that is not actually invulnerable, a bloodstain that keeps the souls of the death before, a boss that
 // never turns. These pin the rules and the transitions without a renderer.
@@ -24,68 +33,103 @@ afterEach(() => { CleoEngine.authoringMode = authoring; });
 
 const gm = () => new SoulsGameManagerNode('GameManager');
 
-describe('stat curves', () => {
+/** A player on its own: its curves are its own methods, no manager needed. */
+const pl = () => new SoulsPlayerNode('Player');
+
+describe('stat curves (the player owns them)', () => {
     it('gives 400 HP and 90 stamina at the starting stats', () => {
-        const m = gm();
-        expect(m.hpForVigor(10)).toBe(400);
-        expect(m.staminaForEndurance(10)).toBe(90);
+        const p = pl();
+        expect(p.hpForVigor(10)).toBe(400);
+        expect(p.staminaForEndurance(10)).toBe(90);
     });
 
     it('grows HP steeply to Vigor 30, then soft-caps', () => {
-        const m = gm();
-        const early = m.hpForVigor(20) - m.hpForVigor(19);
-        const late = m.hpForVigor(45) - m.hpForVigor(44);
+        const p = pl();
+        const early = p.hpForVigor(20) - p.hpForVigor(19);
+        const late = p.hpForVigor(45) - p.hpForVigor(44);
         expect(early).toBe(30);
         expect(late).toBeLessThan(early);
-        for (let v = 10; v < 60; v++) expect(m.hpForVigor(v + 1)).toBeGreaterThan(m.hpForVigor(v));
+        for (let v = 10; v < 60; v++) expect(p.hpForVigor(v + 1)).toBeGreaterThan(p.hpForVigor(v));
     });
 
     it('never treats a stat below 10 as lower than 10', () => {
-        expect(gm().hpForVigor(3)).toBe(400);
+        expect(pl().hpForVigor(3)).toBe(400);
     });
 
     it('prices each level higher than the last', () => {
-        const m = gm();
-        expect(m.levelCost(1)).toBe(400);
-        for (let l = 1; l < 40; l++) expect(m.levelCost(l + 1)).toBeGreaterThan(m.levelCost(l));
+        const p = pl();
+        expect(p.levelCost(1)).toBe(400);
+        for (let l = 1; l < 40; l++) expect(p.levelCost(l + 1)).toBeGreaterThan(p.levelCost(l));
     });
 
     it('counts the level from the points spent', () => {
-        expect(gm().levelFor(10, 10, 10, 10)).toBe(1);
-        expect(gm().levelFor(12, 11, 10, 13)).toBe(7);
+        expect(pl().levelFor(10, 10, 10, 10)).toBe(1);
+        expect(pl().levelFor(12, 11, 10, 13)).toBe(7);
     });
 });
 
-describe('attack rating', () => {
-    const sword = { baseDamage: 100, strScaling: 0.2, dexScaling: 0.8, strRequirement: 8, dexRequirement: 10 };
-    const greatsword = { baseDamage: 165, strScaling: 1, dexScaling: 0.15, strRequirement: 16, dexRequirement: 0 };
+describe('attack rating (each weapon owns its own)', () => {
+    const sword = () => new SoulsStraightSwordNode('Straight Sword');
+    const greatsword = () => new SoulsGreatswordNode('Greatsword');
 
     it('is the base damage at stat 10', () => {
-        expect(gm().attackRating(sword, 10, 10)).toBe(100);
+        expect(sword().attackRating(10, 10)).toBe(100);
     });
 
     it('scales with the stat the weapon favours', () => {
-        const m = gm();
-        expect(m.attackRating(sword, 10, 30)).toBeGreaterThan(m.attackRating(sword, 30, 10));
-        expect(m.attackRating(greatsword, 30, 10)).toBeGreaterThan(m.attackRating(greatsword, 10, 30));
+        expect(sword().attackRating(10, 30)).toBeGreaterThan(sword().attackRating(30, 10));
+        expect(greatsword().attackRating(30, 10)).toBeGreaterThan(greatsword().attackRating(10, 30));
     });
 
     it('is penalised while a requirement is unmet', () => {
-        const m = gm();
-        expect(m.attackRating(greatsword, 10, 10)).toBe(Math.round(165 * 0.6));
-        expect(m.attackRating(greatsword, 16, 10)).toBeGreaterThan(165);
+        expect(greatsword().attackRating(10, 10)).toBe(Math.round(165 * 0.6));
+        expect(greatsword().attackRating(16, 10)).toBeGreaterThan(165);
     });
 
     it('hits the soft cap at 30 and 50', () => {
-        const m = gm();
-        expect(m.statBonus(10)).toBe(0);
-        expect(m.statBonus(30)).toBeCloseTo(0.6);
-        expect(m.statBonus(50)).toBeCloseTo(0.9);
+        expect(statBonus(10)).toBe(0);
+        expect(statBonus(30)).toBeCloseTo(0.6);
+        expect(statBonus(50)).toBeCloseTo(0.9);
     });
 
+    it('turns a move into damage from the WIELDER\'s stats', () => {
+        const w = sword();
+        expect(w.hitFor({ strength: 10, dexterity: 10 } as any, { damageMul: 1.5, poiseMul: 2 })).toEqual({ damage: 150, poise: 30 });
+        expect(w.hitFor({ strength: 10, dexterity: 30 } as any, { damageMul: 1 }).damage).toBe(w.attackRating(10, 30));
+    });
+
+    it('the subclass is only defaults: every behaviour is the base weapon\'s', () => {
+        const w = sword();
+        expect(w).toBeInstanceOf(SoulsWeaponNode);
+        expect([w.displayName, w.baseDamage, w.isWeapon]).toEqual(['Straight Sword', 100, true]);
+        expect(new SoulsWeaponNode('Weapon').displayName).toBe('Weapon');
+    });
+});
+
+describe('defence (each fighter owns its own)', () => {
     it('never lets defence reduce a hit to nothing', () => {
-        expect(gm().applyDefense(1, 0.9)).toBe(1);
-        expect(gm().applyDefense(100, 0.2)).toBe(80);
+        const e = new SoulsEnemyNode('e');
+        e.defense = 0.9;
+        expect(e.applyDefense(1)).toBe(1);
+        e.defense = 0.2;
+        expect(e.applyDefense(100)).toBe(80);
+    });
+});
+
+describe('enemy types own their stats', () => {
+    it('carries the per-type numbers as class defaults', () => {
+        const hollow = new SoulsHollowNode('Hollow');
+        expect([hollow.displayName, hollow.maxHp, hollow.defense, hollow.weaponTemplates, hollow.team]).toEqual(['Hollow', 160, 0, 'Club', 'enemy']);
+        const sorcerer = new SoulsHollowSorcererNode('Hollow Sorcerer');
+        expect([sorcerer.maxHp, sorcerer.strafeSpeedScale, sorcerer.weaponTemplates]).toEqual([110, 0.5, 'Sorcerer Staff']);
+        const knight = new SoulsEliteKnightNode('Elite Knight');
+        expect([knight.maxHp, knight.defense, knight.weaponTemplates]).toEqual([650, 0.15, 'Greatsword']);
+        const warden = new SoulsHollowWardenNode('Hollow Warden');
+        expect([warden.maxHp, warden.defense, warden.isBoss, warden.flinchOnHit, warden.weaponTemplates]).toEqual([2600, 0.2, true, false, 'Halberd']);
+    });
+
+    it('the player is on the other team', () => {
+        expect([pl().team, pl().weaponTemplates]).toEqual(['player', 'Straight Sword, Greatsword']);
     });
 });
 
@@ -96,36 +140,37 @@ describe('enemy attack selection', () => {
         { name: 'Leap', minRange: 6, maxRange: 16, weight: 1, phase: 2 },
         { name: 'Combo Only', minRange: 0, maxRange: 99, weight: 1, phase: 9 },
     ];
+    const pick = (...args: Parameters<SoulsEnemyNode['pickAttack']>) => new SoulsEnemyNode('e').pickAttack(...args);
 
     it('only picks attacks whose range fits', () => {
-        expect(gm().pickEnemyAttack(attacks, 1, 1, '', {}, 0.5).name).toBe('Swing');
-        expect(gm().pickEnemyAttack(attacks, 5, 1, '', {}, 0.5).name).toBe('Thrust');
-        expect(gm().pickEnemyAttack(attacks, 3.5, 1, '', {}, 0.5)).toBeNull();
+        expect(pick(attacks, 1, 1, '', {}, 0.5).name).toBe('Swing');
+        expect(pick(attacks, 5, 1, '', {}, 0.5).name).toBe('Thrust');
+        expect(pick(attacks, 3.5, 1, '', {}, 0.5)).toBeNull();
     });
 
     it('holds phase-two attacks back until phase two', () => {
-        expect(gm().pickEnemyAttack(attacks, 8, 1, '', {}, 0.99).name).toBe('Thrust');
-        const picks = new Set([0.1, 0.9].map(r => gm().pickEnemyAttack(attacks, 7, 2, '', {}, r).name));
+        expect(pick(attacks, 8, 1, '', {}, 0.99).name).toBe('Thrust');
+        const picks = new Set([0.1, 0.9].map(r => pick(attacks, 7, 2, '', {}, r).name));
         expect(picks.has('Leap')).toBe(true);
     });
 
     it('never picks a combo-only attack on its own', () => {
-        for (let r = 0; r < 1; r += 0.05) expect(gm().pickEnemyAttack(attacks, 1, 2, '', {}, r).name).not.toBe('Combo Only');
+        for (let r = 0; r < 1; r += 0.05) expect(pick(attacks, 1, 2, '', {}, r).name).not.toBe('Combo Only');
     });
 
     it('skips attacks still on cooldown', () => {
-        expect(gm().pickEnemyAttack(attacks, 1, 1, '', { Swing: 2 }, 0.5)).toBeNull();
+        expect(pick(attacks, 1, 1, '', { Swing: 2 }, 0.5)).toBeNull();
     });
 
     it('avoids repeating the last attack when another fits', () => {
         const both = [{ name: 'A', maxRange: 3 }, { name: 'B', maxRange: 3 }];
-        for (let r = 0; r < 1; r += 0.1) expect(gm().pickEnemyAttack(both, 1, 1, 'A', {}, r).name).toBe('B');
+        for (let r = 0; r < 1; r += 0.1) expect(pick(both, 1, 1, 'A', {}, r).name).toBe('B');
     });
 });
 
 describe('lock-on ranking', () => {
     it('prefers the enemy nearest the camera forward, then the nearer one', () => {
-        const ranked = gm().rankLockTargets([0, 0, 0], 0, [
+        const ranked = new SoulsLockOnNode('rig').rankLockTargets([0, 0, 0], 0, [
             { id: 'side', position: [10, 0, 1] },
             { id: 'far-ahead', position: [0, 0, 15] },
             { id: 'near-ahead', position: [0.3, 0, 5] },
@@ -148,10 +193,10 @@ describe('the player', () => {
     it('ignores damage during the roll i-frames and takes it outside them', () => {
         const { p } = player();
         p.invulnerable = true;
-        expect(p.receiveDamage(100, 10, null)).toBe(false);
+        expect(p.receiveHit(100, 10, null)).toBe(false);
         expect(p.hp).toBe(400);
         p.invulnerable = false;
-        expect(p.receiveDamage(100, 10, null)).toBe(true);
+        expect(p.receiveHit(100, 10, null)).toBe(true);
         expect(p.hp).toBe(300);
         expect(p.actionState).toBe('hit');
     });
@@ -166,21 +211,21 @@ describe('the player', () => {
 
     it('staggers harder from a heavy hit', () => {
         const { p } = player();
-        p.receiveDamage(40, 10, null);
+        p.receiveHit(40, 10, null);
         expect((p as any)._actionSeconds).toBe(p.hitLightSeconds);
-        p.receiveDamage(200, 10, null);
+        p.receiveHit(200, 10, null);
         expect((p as any)._actionSeconds).toBe(p.hitHeavySeconds);
     });
 
     it('spends souls on a level and refuses one it cannot afford', () => {
-        const { m, p } = player();
+        const { p } = player();
         p.souls = 500;
-        expect(p.applyLevelUp(11, 10, 10, 10, m.levelCost(1))).toBe(true);
+        expect(p.applyLevelUp(11, 10, 10, 10, p.levelCost(1))).toBe(true);
         expect(p.souls).toBe(100);
         expect(p.vigor).toBe(11);
         expect(p.maxHp).toBe(430);
         expect(p.hp).toBe(430);
-        expect(p.applyLevelUp(12, 10, 10, 10, m.levelCost(2))).toBe(false);
+        expect(p.applyLevelUp(12, 10, 10, 10, p.levelCost(2))).toBe(false);
     });
 
     it('refills flasks, health and stamina when restored', () => {
@@ -204,9 +249,9 @@ describe('weapons', () => {
 });
 
 describe('enemies', () => {
-    function enemy(fields: Partial<SoulsEnemyNode> = {}) {
+    function enemy(fields: Partial<SoulsHollowWardenNode> = {}, Type: typeof SoulsEnemyNode = SoulsEnemyNode) {
         const m = gm();
-        const e = new SoulsEnemyNode('Hollow');
+        const e = new Type('Hollow') as SoulsHollowWardenNode;
         Object.assign(e, { maxHp: 160, hp: 160, maxPoise: 25, poise: 25, defense: 0, ...fields });
         (e as any)._gm = Object.assign(m, { sfx() {}, shake() {}, onEnemyKilled() { killed++; } });
         let killed = 0;
@@ -238,7 +283,8 @@ describe('enemies', () => {
     });
 
     it('turns to phase two at half health, and is untouchable while it roars', () => {
-        const { e } = enemy({ isBoss: true, maxHp: 1000, hp: 1000, maxPoise: 999, poise: 999, phase2At: 0.5 });
+        // The Warden's own script owns its phase two; a plain enemy has none.
+        const { e } = enemy({ maxHp: 1000, hp: 1000, maxPoise: 999, poise: 999, phase2At: 0.5 }, SoulsHollowWardenNode);
         e.receiveHit(400, 0, null);
         expect(e.phase).toBe(1);
         e.receiveHit(200, 0, null);
@@ -246,6 +292,12 @@ describe('enemies', () => {
         expect(e.fightState).toBe('phase');
         expect(e.receiveHit(100, 0, null)).toBe(false);
         expect(e.hp).toBe(400);
+    });
+
+    it('a plain enemy never turns, however low it gets', () => {
+        const { e } = enemy({ maxHp: 1000, hp: 1000, maxPoise: 999, poise: 999 });
+        e.receiveHit(900, 0, null);
+        expect([e.phase, e.isDead]).toEqual([1, false]);
     });
 
     it('never flinches when it is a boss', () => {
@@ -355,10 +407,10 @@ describe('blood', () => {
         p.recomputeStats();
         p.hp = p.maxHp;
         p.invulnerable = true;
-        p.receiveDamage(100, 10, null);
+        p.receiveHit(100, 10, null);
         expect(bled).toBe(0);
         p.invulnerable = false;
-        p.receiveDamage(100, 10, null);
+        p.receiveHit(100, 10, null);
         expect(bled).toBe(1);
     });
 
@@ -491,6 +543,6 @@ describe('the level-up menu', () => {
         (menu as any)._gm = m;
         (menu as any)._player = p;
         (menu as any)._pending = [12, 10, 11, 10];
-        expect(menu.pendingCost()).toBe(m.levelCost(1) + m.levelCost(2) + m.levelCost(3));
+        expect(menu.pendingCost()).toBe(p.levelCost(1) + p.levelCost(2) + p.levelCost(3));
     });
 });

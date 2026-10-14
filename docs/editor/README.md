@@ -13,7 +13,8 @@ If you are new, read [Core concepts](../concepts.md) first, then
 | Page | Covers |
 |---|---|
 | [Interface](interface.md) | Menu bar, document tabs, the dockable panel layout, keyboard shortcuts, the console |
-| [Editor modes](modes.md) | All 18 modes, how each is entered, which panels it shows |
+| [Editor modes](modes.md) | All 17 modes, how each is entered, which panels it shows |
+| [Options](options.md) | Engine, editor and project settings: renderer, runtime, script opener, viewport, publish window, input |
 | [Projects](projects.md) | Multiple projects, the examples gallery, importing and exporting |
 | [Assets](assets.md) | The asset explorer and all 19 asset kinds |
 

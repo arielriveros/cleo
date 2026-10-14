@@ -7,12 +7,12 @@ const segment = cva(
   {
     variants: {
       size: {
-        sm: 'px-1 py-1 text-[11px]',
-        md: 'px-2 py-1 text-xs',
+        sm: 'px-1 py-1 text-ui-sm',
+        md: 'px-2 py-1 text-ui',
       },
       active: {
-        true: 'bg-selected border-white text-white',
-        false: 'bg-control border-control text-muted hover:bg-control-hover hover:text-white',
+        true: 'bg-selected border-fg text-fg',
+        false: 'bg-control border-control text-muted hover:bg-control-hover hover:text-fg',
       },
       disabled: {
         true: 'opacity-50 pointer-events-none',

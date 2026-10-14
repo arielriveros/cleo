@@ -3,6 +3,7 @@ import { Node, UINode, isUINodeType } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
 import UILayer from './UILayer';
 import UIEditorTools from './UIEditorTools';
+import { useDebugVisibility } from '../DebugVisibilityContext';
 
 /**
  * The editor's wrapper around the shared {@link UILayer}. Everything editor-only must stay here, so the
@@ -12,6 +13,7 @@ import UIEditorTools from './UIEditorTools';
  */
 export default function UIEditorLayer() {
     const { instance, editorScene, eventEmitter, isPlayMode, editorMode, selectedNode } = useCleoEngine();
+    const { visibility } = useDebugVisibility();
     const viewportRef = useRef<HTMLDivElement | null>(null);
 
     /**
@@ -55,16 +57,20 @@ export default function UIEditorLayer() {
 
     // Authoring affordances are `ui` mode only; other modes still render the UI, but inert.
     const picking = authoring && editorMode === 'ui';
+    // Shown always in UI mode and in Play; elsewhere while authoring, only when the eye menu's Game UI
+    // switch is on (off by default, so a HUD does not cover the scene being edited). The overlay box stays
+    // mounted either way, so the UI viewport keeps being measured.
+    const showUi = isPlayMode || editorMode === 'ui' || visibility.gameUi.editor;
 
     return (
         <div ref={viewportRef} className='absolute inset-0 pointer-events-none'>
-            <UILayer
+            {showUi && <UILayer
                 getScene={getScene}
                 interactive={isPlayMode}
                 onSelect={picking ? onSelect : undefined}
                 forceVisibleIds={picking ? forceVisibleIds : undefined}
                 selectedId={picking ? selectedNode : null}
-            />
+            />}
             {/* Above the layer, so a grip wins the pointer over the element underneath it. */}
             {picking && <UIEditorTools />}
         </div>

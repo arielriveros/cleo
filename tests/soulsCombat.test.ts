@@ -9,7 +9,18 @@ import SoulsGameManagerNode from '../examples/scripts/SoulsGameManager';
 import SoulsPlayerNode from '../examples/scripts/SoulsPlayer';
 import SoulsEnemyNode from '../examples/scripts/SoulsEnemy';
 import SoulsProjectileNode from '../examples/scripts/SoulsProjectile';
-import { Capsule, newSwing, openSwing, stepSwing, isHurtbox } from '../examples/scripts/SoulsHitbox';
+import SoulsWeaponNode from '../examples/scripts/SoulsWeapon';
+import SoulsStraightSwordNode from '../examples/scripts/SoulsStraightSword';
+import SoulsGreatswordNode from '../examples/scripts/SoulsGreatsword';
+import SoulsHollowNode from '../examples/scripts/SoulsHollow';
+import SoulsHollowWardenNode from '../examples/scripts/SoulsHollowWarden';
+import SoulsBossBarNode from '../examples/scripts/SoulsBossBar';
+import SoulsHudNode from '../examples/scripts/SoulsHud';
+import { Scene } from '../src/core/scene/scene';
+import { Capsule, newSwing, openSwing, stepSwing, isHurtbox, wieldedBy } from '../examples/scripts/SoulsHitbox';
+import { AnimatedModel } from '../src/animation/animatedModel';
+import { ModelNode } from '../src/core/scene/nodes/modelNode';
+import { mat4 } from 'gl-matrix';
 
 // Hollow Keep's combat is decided by shapes, not distances: a blade capsule swept from last frame's
 // grip to this frame's against the characters' physics capsules (their hurtboxes). I-frames are the
@@ -120,6 +131,14 @@ describe('a swing', () => {
         expect(isHurtbox(foe, player, 'enemy')).toBe(true);
         expect(isHurtbox(player, player, 'enemy')).toBe(false);
     });
+
+    it('decides the side by TEAM, so an enemy blade never cuts another enemy down', () => {
+        const a = new SoulsHollowNode('A'), b = new SoulsHollowNode('B');
+        expect(isHurtbox(b, a, 'player')).toBe(false);
+        expect(isHurtbox(b, attacker(), 'enemy')).toBe(true);
+        const turncoat = new SoulsHollowNode('C'); turncoat.team = 'player';
+        expect(isHurtbox(turncoat, a, 'player')).toBe(true);
+    });
 });
 
 describe('i-frames', () => {
@@ -144,7 +163,7 @@ describe('i-frames', () => {
         const player = attacker() as any;
         capsule(p, player, [0, 0, 2]);
         let damage = 0;
-        player.receiveDamage = (amount: number) => { damage += amount; return true; };
+        player.receiveHit = (amount: number) => { damage += amount; return true; };
         const bolt = new SoulsProjectileNode('Bolt') as any;
         Object.defineProperty(bolt, 'scene', { value: { physics: p }, configurable: true });
         bolt.remove = () => { bolt.removed = true; };
@@ -201,18 +220,98 @@ describe('a swing meeting a wall', () => {
 });
 
 describe('damage from a blade', () => {
-    it('applies the attack rating times the move, and sparks where the blade met the body', () => {
+    /** A Straight Sword wired to a manager stub that records its sparks. */
+    function sword() {
         const m = new SoulsGameManagerNode('GameManager') as any;
         const sparks: any[] = [];
-        m.fx = (_t: string, at: any) => { sparks.push(at); return null; };
+        m.fx = (t: string, at: any) => { sparks.push([t, at]); return null; };
         m.sfx = () => {};
+        const w = new SoulsStraightSwordNode('Straight Sword') as any;
+        w._gm = m;
+        return { w, sparks };
+    }
+
+    it('the weapon applies its attack rating times the move, and sparks where the blade met the body', () => {
+        const { w, sparks } = sword();
         const got: number[] = [];
-        const target = { receiveHit: (d: number, poise: number) => { got.push(d, poise); return true; } };
-        const player = { strength: 10, dexterity: 10 };
-        const weapon = { baseDamage: 100, strScaling: 0.2, dexScaling: 0.8, poiseDamage: 15 };
-        expect(m.applyPlayerHit(player, { damageMul: 1.5, poiseMul: 2 }, weapon, target, [1, 2, 3])).toBe(true);
+        const target = { receiveHit: (d: number, poise: number) => { got.push(d, poise); return true; } } as any;
+        expect(w.strike({ strength: 10, dexterity: 10 }, { damageMul: 1.5, poiseMul: 2 }, target, [1, 2, 3])).toBe(true);
         expect(got).toEqual([150, 30]);
-        expect(sparks).toEqual([[1, 2, 3]]);
+        expect(sparks).toEqual([['Hit Spark', [1, 2, 3]]]);
+    });
+
+    it('the target applies its OWN defence: the Elite Knight turns 15% aside', () => {
+        const { w } = sword();
+        const knight = new SoulsHollowNode('Knight') as any;
+        Object.assign(knight, { defense: 0.15, maxHp: 650, hp: 650, maxPoise: 999, poise: 999 });
+        knight._gm = { sfx() {}, bleed() {}, shake() {} };
+        w.strike({ strength: 10, dexterity: 10 }, { damageMul: 1 }, knight, null);
+        expect(knight.hp).toBe(650 - 85);
+    });
+
+    it('no spark and no damage when the target does not take it (dead, rolling)', () => {
+        const { w, sparks } = sword();
+        const target = { receiveHit: () => false } as any;
+        expect(w.strike({}, { damageMul: 1 }, target, [0, 0, 0])).toBe(false);
+        expect(sparks).toEqual([]);
+    });
+});
+
+describe('weapons spawned from templates', () => {
+    /** A character whose scene "instantiates" by building the named weapon class under the parent. */
+    function wielder(names: string, catalog: Record<string, () => Node>) {
+        const p = new SoulsPlayerNode('Player') as any;
+        const group = new Node('Weapons');
+        p.addChild(group);
+        p.weaponTemplates = names;
+        const made: string[] = [];
+        Object.defineProperty(p, 'scene', {
+            configurable: true,
+            value: {
+                instantiate: (name: string, o: any) => {
+                    const make = catalog[name];
+                    if (!make) return null;
+                    const n = make(); o.parent.addChild(n); made.push(name);
+                    return n;
+                },
+            },
+        });
+        return { p, group, made };
+    }
+    const catalog = {
+        'Straight Sword': () => new SoulsStraightSwordNode('Straight Sword'),
+        'Greatsword': () => new SoulsGreatswordNode('Greatsword'),
+        'Torch': () => new Node('Torch'),
+    };
+
+    it('spawns each named template into the Weapons group, on the hand socket, holding the first', () => {
+        const { p, group, made } = wielder('Straight Sword, Greatsword', catalog);
+        p._spawnWeapons();
+        expect(made).toEqual(['Straight Sword', 'Greatsword']);
+        expect(p.weapons().map((w: Node) => w.parent)).toEqual([group, group]);
+        expect(p.weapons().map((w: any) => w.socketAttachment)).toEqual([
+            { target: 'parent', socket: 'RightHand' }, { target: 'parent', socket: 'RightHand' }]);
+        expect(p.currentWeapon().name).toBe('Straight Sword');
+        expect(p.weapons().map((w: Node) => w.visible)).toEqual([true, false]);
+        expect(p.weaponName).toBe('Straight Sword');
+    });
+
+    it('equipping swaps what is shown and the weapon the stats read', () => {
+        const { p } = wielder('Straight Sword, Greatsword', catalog);
+        p._spawnWeapons();
+        p.equipWeapon(1);
+        expect(p.weapons().map((w: Node) => w.visible)).toEqual([false, true]);
+        p.recomputeStats();
+        expect(p.attackRatingNow).toBe(Math.round(165 * 0.6));        // STR 10 < the greatsword's 16
+    });
+
+    it('skips a missing template and refuses one that is not a weapon', () => {
+        const { p, group } = wielder('Torch, Nothing, Greatsword', catalog);
+        p._spawnWeapons();
+        expect(p.weapons().map((w: Node) => w.name)).toEqual(['Greatsword']);
+        // The torch was removed again (removal is deferred to the scene's next sweep: it is despawned now).
+        expect(group.children.find(c => c.name === 'Torch')?.spawned).toBe(false);
+        expect(p.currentWeapon()).toBeInstanceOf(SoulsWeaponNode);
     });
 });
 
@@ -285,3 +384,129 @@ describe('interactables through trigger zones', () => {
         expect(player.nearbyInteractables()).toEqual([]);
     });
 });
+
+describe('a dead enemy drops its weapon', () => {
+    /** A Hollow in a real scene, holding a Club whose Mesh carries the blade. */
+    function armed() {
+        const scene = new Scene();
+        const e = new SoulsHollowNode('Hollow') as any;
+        const group = new Node('Weapons');
+        e.addChild(group);
+        scene.addNode(e);
+        e.setPosition([3, 0, 4]);
+        const club = new SoulsStraightSwordNode('Club') as any;
+        club.addChild(new Node('Mesh'));
+        group.addChild(club);
+        club.attachToSocket('parent', 'RightHand');
+        club.setPosition([0.2, 1.1, 0.1]);
+        scene.root.updateTransforms?.();
+        e._weapons = [club];
+        e.equipWeapon(0);
+        return { scene, e, club };
+    }
+
+    it('lets go of it: it leaves the hand for the world root, where it stood, as a body of blade spheres', () => {
+        const { scene, e, club } = armed();
+        try {
+            const at = Array.from(club.worldPosition);
+            expect(e.dropWeapon()).toBe(club);
+            expect(club.parent).toBe(scene.root);
+            expect(club.socketAttachment).toBeNull();
+            const now = Array.from(club.worldPosition) as number[];
+            now.forEach((v, i) => expect(v).toBeCloseTo(at[i] as number, 4));
+            expect(club.body).toBeTruthy();
+            expect(club.body.cameraCollision).toBe(false);
+            expect(club.body.shapes.length).toBe(3);
+            expect(e.currentWeapon()).toBeNull();
+            expect(e.droppedWeapons()).toEqual([club]);
+        } finally { scene.dispose?.(); }
+    });
+
+    it('drops it on death, and takes it away when the corpse goes', () => {
+        const { scene, e, club } = armed();
+        try {
+            e._gm = { sfx() {}, bleed() {}, shake() {}, onEnemyKilled() {} };
+            e.maxHp = 10; e.hp = 10;
+            e.receiveHit(50, 0, null);
+            expect(e.isDead).toBe(true);
+            expect(club.parent).toBe(scene.root);
+            e.onDespawn();
+            expect(club.spawned).toBe(false);
+            expect(e.droppedWeapons()).toEqual([]);
+        } finally { scene.dispose?.(); }
+    });
+});
+
+describe('UI belongs to its owner', () => {
+    it('the boss bar shows its OWN boss while that boss is awake and alive', () => {
+        const boss = new SoulsHollowWardenNode('Hollow Warden') as any;
+        const ui = new SoulsBossBarNode('BossBar') as any;
+        const bar = new Node('Bar');
+        const name: any = new Node('BossName'); name.text = '';
+        const health: any = new Node('BossHealth'); health.max = 1; health.value = 0;
+        bar.addChild(name); bar.addChild(health);
+        ui.addChild(bar);
+        boss.addChild(ui);
+        ui.onStart();
+        expect(ui.owner).toBe(boss);
+        boss.fightState = 'dormant'; boss.isAwake = false;
+        ui.onUpdate(0.016);
+        expect(bar.visible).toBe(false);
+        boss.fightState = 'ai'; boss.isAwake = true; boss.hp = 1300;
+        ui.onUpdate(0.016);
+        expect(bar.visible).toBe(true);
+        expect(name.text).toBe('Hollow Warden');
+        expect([health.value, health.max]).toEqual([1300, 2600]);
+        boss.isDead = true;
+        ui.onUpdate(0.016);
+        expect(bar.visible).toBe(false);
+    });
+
+    it('the HUD reads the character it is a child of', () => {
+        const player = new SoulsPlayerNode('Player') as any;
+        const hud = new SoulsHudNode('HUD') as any;
+        player.addChild(hud);
+        hud.onStart();
+        expect(hud.owner).toBe(player);
+    });
+});
+
+describe('a weapon only hits from its own wielder’s hand', () => {
+    const body = (names: string[]) => {
+        const model = Object.create(AnimatedModel.prototype);
+        model._skin = {
+            joints: names.map((_, i) => ({ nodeIndex: i, inverseBindMatrix: mat4.create(), parentIndex: i ? 0 : undefined })),
+            nodeParents: new Map(names.slice(1).map((_, i) => [i + 1, 0])),
+            nodeTransforms: new Map(names.map((_, i) => [i, mat4.create()])),
+            nodeNames: new Map(names.map((n, i) => [i, n])),
+            sockets: [],
+        };
+        model._animations = [];
+        return new ModelNode('Body', model);
+    };
+    const fighter = (scene: Scene, name: string, bones: string[]) => {
+        const c = new Node(name, 'character');
+        c.addChild(body(bones));
+        const weapons = new Node('Weapons');
+        c.addChild(weapons);
+        scene.addNode(c);
+        const sword = new Node('Sword');
+        weapons.addChild(sword);
+        sword.attachToSocket('parent', 'RightHand');
+        return { c, sword };
+    };
+
+    it('is wielded when the character’s own model has the hand — any humanoid rig, unauthored', () => {
+        const scene = new Scene();
+        const { c, sword } = fighter(scene, 'Player', ['pelvis', 'hand_r'])
+        expect(wieldedBy(sword, c)).toBe(true);
+    });
+
+    it('is NOT wielded when the hand is missing, even with another character’s hand in the scene', () => {
+        const scene = new Scene();
+        fighter(scene, 'Knight', ['mixamorig1:Hips', 'mixamorig1:RightHand']);
+        const { c, sword } = fighter(scene, 'Player', ['Root', 'Bone1']);
+        expect(wieldedBy(sword, c)).toBe(false);
+    });
+});
+

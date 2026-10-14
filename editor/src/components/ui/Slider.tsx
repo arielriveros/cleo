@@ -75,11 +75,11 @@ export function Slider({
               if (e.key === 'Enter') commit((e.target as HTMLInputElement).value);
               else if (e.key === 'Escape') setEditing(false);
             }}
-            className='w-[46px] shrink-0 bg-control border border-border rounded px-1 text-right text-[11px] tabular-nums outline-none focus-visible:border-primary'
+            className='w-[46px] shrink-0 bg-control border border-border rounded px-1 text-right text-ui-sm tabular-nums outline-none focus-visible:border-primary'
           />
         ) : (
           <span
-            className={cn('w-[46px] text-right tabular-nums shrink-0', editable && 'cursor-text hover:text-white')}
+            className={cn('w-[46px] text-right tabular-nums shrink-0', editable && 'cursor-text hover:text-fg')}
             title={editable ? 'Click to edit' : undefined}
             onClick={(e) => { if (editable) { e.preventDefault(); setEditing(true); } }}
           >

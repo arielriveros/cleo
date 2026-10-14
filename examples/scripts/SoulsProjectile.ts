@@ -57,11 +57,11 @@ export default class SoulsProjectileNode extends Node {
     // The player's hurtbox, by a swept sphere. Off during i-frames, so a roll passes straight through.
     const physics = this.scene?.physics as any
     const hits = physics?.sweepSphere?.([from[0], from[1], from[2]], to, this.radius, {
-      filter: (node: Node) => !!node && node.id !== this._owner && typeof (node as any).receiveDamage === 'function'
-        && (node as any).hurtboxActive !== false && !(node as any).isDead,
+      filter: (node: Node) => !!node && node.id !== this._owner && (node as any).team === 'player'
+        && typeof (node as any).receiveHit === 'function' && (node as any).hurtboxActive !== false && !(node as any).isDead,
     }) ?? []
     for (const h of hits) {
-      if ((h.node as any).receiveDamage(this.damage, this.poiseDamage, this)) {
+      if ((h.node as any).receiveHit(this.damage, this.poiseDamage, this)) {
         this.setPosition([h.point[0], h.point[1], h.point[2]])
         this._expire(true)
         return

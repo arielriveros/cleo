@@ -31,7 +31,7 @@ export default function ProjectsBrowser({ projects, onChanged, className = '' }:
               type='button'
               onClick={() => setTab(id)}
               className={
-                'px-3 text-[11px] font-semibold leading-none cursor-pointer border-b-2 -mb-px ' +
+                'px-3 text-ui-sm font-semibold leading-none cursor-pointer border-b-2 -mb-px ' +
                 (tab === id
                   ? 'text-fg border-highlight'
                   : 'text-dim border-transparent hover:text-fg')

@@ -31,7 +31,7 @@ The shell: a menu bar, a strip of document tabs, and a dockable workspace of pan
 | **Save All (n)** | Saves every tab with unsaved changes. |
 | **Import** | Imports a project `.zip`. |
 | **Export** | Exports the whole project to a `.zip`. |
-| **Edit in VSCode** | Mirrors scripts to a real folder. Desktop only — see [Scripting workflow](scripting-workflow.md). |
+| **Script sync chip** | Appears only when the VS Code workspace needs attention (sync paused or in error). Its setup lives in [Options ▸ Editor ▸ Scripts](options.md#editor). |
 | **Publish ▾** | Web (HTML), Desktop (Electron), Desktop installer. See [Publishing](publishing.md). |
 
 **Centre** — the **Play / Pause / Stop** transport.
@@ -109,9 +109,9 @@ disturb your layout.
 | **Blend Space** | The blend-space plot and its transport. |
 | **Tiles** | The tile palette (tilemap mode). |
 | **Layers** | The tilemap layer stack. |
-| **Performance** | The frame-cost HUD (renderer mode). |
-| **Renderer Settings** | Every render setting (renderer mode). |
-| **Input** | Action maps and bindings (input mode). |
+| **Engine** | Renderer, Performance and Runtime pages (options mode). |
+| **Editor** | Scripts and Viewport preferences (options mode). |
+| **Project** | General and Input pages (options mode). |
 
 Which panels appear in which mode is in [Editor modes](modes.md).
 

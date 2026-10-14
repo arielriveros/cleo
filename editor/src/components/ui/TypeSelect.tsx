@@ -12,7 +12,7 @@ export interface TypeSelectProps<T extends string> {
 }
 
 const Dot = ({ color }: { color: string }) => (
-  <span className='w-2.5 h-2.5 rounded-full shrink-0 ring-1 ring-black/30' style={{ background: color }} />
+  <span className='w-2.5 h-2.5 rounded-full shrink-0 ring-1 ring-scrim/30' style={{ background: color }} />
 );
 
 /**
@@ -29,7 +29,7 @@ export function TypeSelect<T extends string>({ value, options, onChange, disable
         'inline-flex items-center gap-1 rounded border border-border bg-control px-1.5 py-1 hover:bg-control-hover disabled:opacity-60 transition-colors',
         className
       )}
-      trigger={<><Dot color={cur.color} /><span className='text-[9px] text-muted'>▼</span></>}
+      trigger={<><Dot color={cur.color} /><span className='text-ui-2xs text-muted'>▼</span></>}
     >
       {(close) => (
         <div className='min-w-[132px] flex flex-col'>
@@ -40,7 +40,7 @@ export function TypeSelect<T extends string>({ value, options, onChange, disable
                 key={opt}
                 type='button'
                 onClick={() => { onChange(opt); close(); }}
-                className={cn('flex items-center gap-2 px-2 py-1 rounded text-xs text-left hover:bg-control transition-colors', opt === value && 'bg-control')}
+                className={cn('flex items-center gap-2 px-2 py-1 rounded text-ui text-left hover:bg-control transition-colors', opt === value && 'bg-control')}
               >
                 <Dot color={m.color} />
                 <span className='truncate'>{m.label}</span>

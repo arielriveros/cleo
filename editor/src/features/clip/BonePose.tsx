@@ -6,6 +6,7 @@ import { getAnimationTarget, jointLabel } from '../animation/skeleton'
 import { withKey, withoutKey, channelOf, keyIndexAt, type TrackPath } from '../../utils/clipTracks'
 import { promptDialog } from '../dialogs/dialogStore'
 import Collapsable from '../../components/Collapsable'
+import { Button, cn, controlClass } from '../../components/ui'
 import type { StoredPoseBone } from '../../utils/animationAssets'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { buildPoseAsset, newPose } from '../../utils/poseAssets'
@@ -87,7 +88,7 @@ export default function BonePose() {
   if (nodeIndex === undefined || !local) {
     return (
       <Collapsable title='Bone'>
-        <div className='text-gray-400'>Pick a bone in the Skeleton panel or in the viewport to pose it.</div>
+        <div className='text-muted'>Pick a bone in the Skeleton panel or in the viewport to pose it.</div>
       </Collapsable>
     )
   }
@@ -181,15 +182,17 @@ export default function BonePose() {
   }
 
   const posedCount = skin.joints.filter(j => !!animator.boneLocalOverride(j.nodeIndex)).length
-  const num = 'w-full bg-control text-white border border-control-hover rounded px-1 tabular-nums'
-  const btn = 'px-2 py-0.5 rounded bg-control hover:bg-control-hover border border-control-hover text-white text-xs'
+  // A raw input over the shared chrome rather than NumberInput/OptionalNumberInput: NumberField keeps a
+  // half-typed draft (see below) AND stays type=number, so the per-row step (0.01 / 1°) still nudges with
+  // the arrow keys — OptionalNumberInput is a text box and has no step.
+  const num = cn(controlClass, 'w-full px-1 py-0 tabular-nums')
 
   const row = (title: string, key: 't' | 'r' | 's', step: number, path: TrackPath) => {
     const driven = channelOf(clip, nodeIndex, path) >= 0
     const atKey = driven && keyIndexAt(clip.samplers[clip.channels[channelOf(clip, nodeIndex, path)].samplerIndex].input, time) >= 0
     return (
       <div className='flex items-center gap-1'>
-        <span className='w-[52px] text-gray-400' title={driven ? `${title} — driven by this clip` : `${title} — not driven by this clip`}>
+        <span className='w-[52px] text-muted' title={driven ? `${title} — driven by this clip` : `${title} — not driven by this clip`}>
           {title}{atKey && <span className='text-highlight' title='There is a key here'> ◆</span>}
         </span>
         {[0, 1, 2].map(i => (
@@ -200,8 +203,8 @@ export default function BonePose() {
               setTrs(next)
             }} />
         ))}
-        <button className='text-gray-500 hover:text-red-400 px-1' title='Delete the key at the playhead on this track'
-          disabled={!atKey} onClick={() => deleteKeyOn(path)}>✕</button>
+        <Button variant='remove' size='sm' className='px-1 py-0 text-dim' title='Delete the key at the playhead on this track'
+          disabled={!atKey} onClick={() => deleteKeyOn(path)}>✕</Button>
       </div>
     )
   }
@@ -214,13 +217,13 @@ export default function BonePose() {
         {row('scale', 's', 0.01, 'scale')}
 
         <div className='flex items-center gap-1 flex-wrap pt-1'>
-          <button className={btn} onClick={keyIt} disabled={!posed}
+          <Button size='sm' onClick={keyIt} disabled={!posed}
             title={posed ? 'Write this pose into the clip at the playhead' : 'Change a value above first'}>
             Key at {time.toFixed(2)}s
-          </button>
-          <button className={btn} onClick={release} disabled={!posed} title='Discard the pose and let the clip drive this bone again'>
+          </Button>
+          <Button size='sm' onClick={release} disabled={!posed} title='Discard the pose and let the clip drive this bone again'>
             Reset
-          </button>
+          </Button>
         </div>
 
         {posed && (
@@ -230,10 +233,10 @@ export default function BonePose() {
         )}
 
         {posedCount > 0 && asset.rigId && (
-          <button className={btn} onClick={() => void captureAsPose()}
+          <Button size='sm' onClick={() => void captureAsPose()}
             title='Store the posed bones on the rig as a named pose, so any clip can reference it'>
             Save {posedCount} posed bone{posedCount === 1 ? '' : 's'} as a shared pose…
-          </button>
+          </Button>
         )}
       </div>
     </Collapsable>

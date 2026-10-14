@@ -159,6 +159,8 @@ export function remapDeep(obj: any, r: Remaps): void {
     if (key === 'tilesetId') { obj[key] = sub(r.tileset, val); continue }
     // A model's or animation's link to the shared skeleton it uses.
     if (key === 'rigId') { obj[key] = sub(r.rig, val); continue }
+    // A template variant's link to the template it is based on (utils/templateVariants.ts).
+    if (key === 'baseTemplateId') { obj[key] = sub(r.tpl, val); continue }
     // A SoundNode's link to the sample it plays, and a SoundSampleAsset's link to its audio file. Both
     // are plain string references, so one branch each is all they need.
     if (key === 'sampleId') { obj[key] = sub(r.sound, val); continue }

@@ -199,7 +199,17 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
     // 1) The web files + Electron scaffold. preload injects game.bin so it runs from file://.
     await writeWebFiles(dir, files);
     const electronVersion = require('electron/package.json').version;
+    const win0 = (options && options.window) || {};
+    const title = typeof win0.title === 'string' && win0.title.trim() ? win0.title.trim().slice(0, 120) : '';
     const name = path.basename(dir) || 'cleo-game';
+    // The project's window options (size, fullscreen, title); the game's main.js reads them at launch.
+    await fsp.writeFile(path.join(dir, 'window.json'), JSON.stringify({
+      title,
+      width: Number(win0.width) || 1280,
+      height: Number(win0.height) || 720,
+      fullscreen: !!win0.fullscreen,
+      resizable: win0.resizable !== false,
+    }, null, 2), 'utf-8');
     await fsp.writeFile(path.join(dir, 'main.js'), GAME_MAIN_JS, 'utf-8');
     await fsp.writeFile(path.join(dir, 'preload.js'), GAME_PRELOAD_JS, 'utf-8');
     await fsp.writeFile(path.join(dir, 'package.json'), gamePackageJson(name, electronVersion), 'utf-8');
@@ -217,7 +227,7 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
         projectDir: dir,
         config: {
           appId: 'com.cleo.game.' + name.replace(/[^a-z0-9]/gi, '').toLowerCase(),
-          productName: name,
+          productName: title || name,
           electronVersion,
           npmRebuild: false,
           directories: { output: outDir },

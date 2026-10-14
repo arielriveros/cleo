@@ -59,13 +59,13 @@ export default function HeightmapImportDialog({ node, image, fileName, onClose, 
   return (
     <Modal onClose={cancel} className='w-[520px]'>
       <ModalHeader>
-        <div className='text-sm font-semibold'>Import heightmap</div>
-        <div className='text-xs text-muted'>{fileName} · {image.width}×{image.height} · {image.bitDepth}-bit</div>
+        <div className='text-ui-lg font-semibold'>Import heightmap</div>
+        <div className='text-ui text-muted'>{fileName} · {image.width}×{image.height} · {image.bitDepth}-bit</div>
       </ModalHeader>
       <div className='p-4 flex gap-4'>
         <img src={preview} alt='' className='w-40 h-40 rounded border border-control object-cover shrink-0'
           style={{ transform: `rotate(${opts.rotate ?? 0}deg) scale(${opts.flipX ? -1 : 1}, ${opts.flipY ? -1 : 1})` }} />
-        <div className='flex-1 space-y-2 text-xs'>
+        <div className='flex-1 space-y-2 text-ui'>
           <div className='flex items-center justify-between'>
             <span title='Height of a black pixel, terrain-local metres'>Lowest (black)</span>
             <NumberInput className='w-24' value={opts.min} step={1} onChange={min => set({ min })} />

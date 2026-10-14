@@ -11,7 +11,7 @@ type EngineValue = ReturnType<typeof useCleoEngine>;
  */
 export type EditorSessionsContextValue = Pick<EngineValue,
   // Template
-  | 'enterTemplateEditor' | 'editingTemplateName' | 'templateRootId'
+  | 'enterTemplateEditor' | 'createTemplateVariant' | 'revertVariantChanges' | 'createVariantFromInstance' | 'rebaseTemplateVariant' | 'editingTemplateName' | 'editingTemplateVariant' | 'templateRootId'
   // Material
   | 'enterMaterialEditor' | 'createMaterialForNode' | 'editingMaterialName' | 'setActiveMaterialName'
   // Terrain material
@@ -25,7 +25,7 @@ export type EditorSessionsContextValue = Pick<EngineValue,
   | 'pendingRigPick' | 'resolveRigPick'
   | 'linkAnimationToRig' | 'unlinkAnimationFromRig' | 'ensureRigForModel' | 'editSharedClip' | 'setModelRig'
   // Model
-  | 'enterModelEditor' | 'adoptModelAsset' | 'resolveModelAssetId' | 'modelSession' | 'modelEditTargetId' | 'setActiveModelName'
+  | 'enterModelEditor' | 'adoptModelAsset' | 'resolveModelAssetId' | 'modelSession' | 'modelEditTargetId' | 'setActiveModelName' | 'saveModelPart'
   | 'addModelLodFromAsset' | 'generateModelLods' | 'removeModelLod' | 'setModelLodDistance' | 'setModelCullDistance'
   | 'setActiveModelLevel' | 'importModelFiles' | 'pendingModelImport' | 'resolveModelImport'
   // Script

@@ -7,6 +7,7 @@ import type { GraphLinkModel, GraphNodeModel } from '../../components/MachineGra
 import { behaviorLinkKey, behaviorLinks, hasWildcardTransitions } from '../../utils/aiGraphEdits'
 import { useAiEditor } from './AiEditorContext'
 import AiGraphToolbar, { AiEmptyState } from './AiGraphToolbar'
+import { Button } from '../../components/ui'
 
 /**
  * The AI behaviour machine on the same canvas the animation state machine uses.
@@ -207,12 +208,12 @@ export default function BehaviorGraph() {
       toolbar={
         <>
           <AiGraphToolbar />
-          <button className='px-2 py-1 rounded bg-primary hover:bg-primary-hover text-white border border-primary-active text-xs'
+          <Button variant='primary' className='px-2'
             onClick={() => {
               const n = machine.states.length
               addState((n % AUTO_COLS) * AUTO_DX + 40, Math.floor(n / AUTO_COLS) * AUTO_DY + 40)
             }}
-            title='Add a new state (or double-click the canvas)'>+ State</button>
+            title='Add a new state (or double-click the canvas)'>+ State</Button>
         </>
       }
     />

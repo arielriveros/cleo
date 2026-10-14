@@ -123,7 +123,7 @@ export default function GoalsEditor({ node, onChange }: Props) {
                 onChange={(e) => patchGoal(g.name, { goal: e.target.value as AiGoal })}>
                 {AI_GOALS.map(v => <option key={v} value={v}>{v}</option>)}
               </Select>
-              <ButtonWithConfirm
+              <ButtonWithConfirm variant='remove'
                 onClick={() => apply({
                   ...graph,
                   goals: graph.goals
@@ -179,10 +179,8 @@ export default function GoalsEditor({ node, onChange }: Props) {
                 onChange={(ev) => patchEvaluator(i, { goalName: ev.target.value })}>
                 {goalNames.map(n => <option key={n} value={n}>{n}</option>)}
               </Select>
-              <ButtonWithConfirm
-                onClick={() => apply({ ...graph, evaluators: graph.evaluators.filter((_, x) => x !== i) })}>
-                ✕
-              </ButtonWithConfirm>
+              <ButtonWithConfirm variant='remove'
+                onClick={() => apply({ ...graph, evaluators: graph.evaluators.filter((_, x) => x !== i) })}>✕</ButtonWithConfirm>
             </div>
             <ParamSourcePicker source={e.source} fuzzyOutputs={fuzzyOutputs}
               onChange={(source) => patchEvaluator(i, { source })} />
@@ -243,7 +241,7 @@ function ConditionSlot(
     <div className='rounded border border-border/60 p-1'>
       <div className='flex items-center justify-between mb-1'>
         <span className={cn(labelClass, hintAffordance(hint))} title={hint}>{label}</span>
-        <ButtonWithConfirm onClick={() => onChange(undefined)}>✕</ButtonWithConfirm>
+        <ButtonWithConfirm variant='remove' onClick={() => onChange(undefined)}>✕</ButtonWithConfirm>
       </div>
       {params.length === 0 && (
         <p className={hintClass}>

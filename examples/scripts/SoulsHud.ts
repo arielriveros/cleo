@@ -1,11 +1,13 @@
 import { Node, UIProgressBarNode, UIRootNode, UITextNode } from 'cleo'
 
 /**
- * Hollow Keep — the HUD. Attach to the `HUD` node, a screen-space UI Root.
+ * Hollow Keep — the PLAYER's HUD. Attach to the `HUD` node, a screen-space UI Root that is a CHILD of
+ * the player (in the Player template): the HUD belongs to the character it shows, and reads that
+ * character — its parent — not some node found by name. A second player would bring its own HUD.
  *
  * One script for the whole HUD. It finds its widgets by NAME once (missing ones are skipped, so you can
- * restyle or rebuild the HUD freely as long as the names stay) and writes them every frame from the
- * player's and the manager's public fields:
+ * restyle or rebuild the HUD freely as long as the names stay) and writes them every frame from its
+ * owner's public fields:
  *
  *   Health, HealthLag        uiProgressBar   HP, and the yellow "damage taken" bar that drains behind it
  *   Stamina                  uiProgressBar
@@ -15,7 +17,8 @@ import { Node, UIProgressBarNode, UIRootNode, UITextNode } from 'cleo'
  *   Prompt / PromptText      uiPanel/uiText  "E  Rest at bonfire" — hidden when there is nothing to do
  *   Notice                   uiText          one-line messages ("Picked up ..."), fading
  *   Message / MessageTitle / MessageBody     the readable-message panel
- *   Boss / BossName / BossHealth / BossLag   the boss bar, shown while the fight is on
+ *
+ * The boss bar is not here: it belongs to the boss (SoulsBossBar, inside the Hollow Warden template).
  *
  * Bars grow with their maximum (`pxPerHp`, `pxPerStamina`), so levelling Vigor visibly lengthens the bar.
  */
@@ -29,7 +32,6 @@ export default class SoulsHudNode extends UIRootNode {
   public interactKey: string = 'E'
 
   private _player: Node = null
-  private _gm: Node = null
   private _w: any = {}
   private _barLeft: number = 48
   private _noticeAge: number = 99
@@ -37,17 +39,15 @@ export default class SoulsHudNode extends UIRootNode {
   private _messageAge: number = 0
 
   onStart() {
-    this._player = this.findNode('Player')
-    this._gm = this.findNode('GameManager')
+    // The owner: the nearest ancestor that is a fighter (the Player the HUD is a child of).
+    for (let n = this.parent; n; n = n.parent) if ((n as any).team) { this._player = n; break }
     for (const name of ['Health', 'HealthLag', 'HealthBack', 'Stamina', 'StaminaBack', 'Estus', 'Weapon', 'Souls',
-      'SoulsGain', 'Prompt', 'PromptText', 'Notice', 'Message', 'MessageTitle', 'MessageBody', 'Boss', 'BossName',
-      'BossHealth', 'BossLag']) {
+      'SoulsGain', 'Prompt', 'PromptText', 'Notice', 'Message', 'MessageTitle', 'MessageBody']) {
       this._w[name] = this._find(name)
     }
     const health = this._w.Health as any
     if (health) this._barLeft = health.offsetMin[0]
     this._show('Message', false)
-    this._show('Boss', false)
     this._show('Prompt', false)
     this._text('Notice', '')
     this._text('SoulsGain', '')
@@ -55,7 +55,6 @@ export default class SoulsHudNode extends UIRootNode {
 
   onUpdate(delta: number) {
     const p = this._player as any
-    const gm = this._gm as any
     this._noticeAge += delta
     this._messageAge += delta
 
@@ -79,15 +78,10 @@ export default class SoulsHudNode extends UIRootNode {
 
     // A message closes when the player walks out of its source's zone (closeMessageFrom), or dies.
     if (this._message && p?.isDead) this._closeMessage()
-
-    const bossOn = !!gm?.bossActive
-    this._show('Boss', bossOn)
-    if (bossOn) {
-      this._text('BossName', gm.bossName ?? '')
-      this._bar('BossHealth', gm.bossHp, gm.bossMaxHp)
-      this._bar('BossLag', gm.bossHp, gm.bossMaxHp)
-    }
   }
+
+  /** The character this HUD shows. */
+  public get owner(): Node { return this._player }
 
   public showNotice(text: string): void {
     this._text('Notice', text)

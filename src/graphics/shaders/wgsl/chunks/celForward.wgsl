@@ -62,8 +62,23 @@ struct CelMaterial {
     hasEmissiveMap: i32,
     hasNormalMap: i32,
     hasMaskMap: i32,
+    /**
+     * Texture mapping — chunks/uvProjection.wgsl. Tiling u/v and offset u/v (every mode); projection
+     * 0 mesh uv / 1 box / 2 triplanar; space 0 object / 1 world; metres per repeat; triplanar sharpness.
+     */
+    uvTransform: vec4<f32>,
+    uvProjection: i32,
+    uvSpace: i32,
+    uvWorldSize: f32,
+    uvBlend: f32,
 };
 @group(1) @binding(1) var<uniform> u_material: CelMaterial;
+
+/** This material's mapping settings, for chunks/uvProjection.wgsl. */
+fn materialUv() -> UvParams {
+    return UvParams(u_material.uvTransform, u_material.uvProjection, u_material.uvSpace,
+                    u_material.uvWorldSize, u_material.uvBlend);
+}
 
 struct CelLighting {
     u_view: mat4x4<f32>,        // only to get the view-space depth that selects a cascade
@@ -220,12 +235,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let fragPos = in.fragPos;
     let tbn = tbnOf(in);
+    // The material's mapping, with its gradients, in uniform control flow (chunks/uvProjection.wgsl).
+    let su = surfaceUvOf(in, materialUv());
 
     // `alphaCutoff`, the per-material threshold shared with Basic, Blinn-Phong and PBR. Material.Cel
     // defaults it to 0.5 whenever a mask is present and to 0 when there is none, and `parse` applies the
     // same rule, so a cutout behaves identically across every shading model.
     if (u_material.hasMaskMap != 0 && u_material.alphaCutoff > 0.0) {
-        let mask = textureSample(u_material_maskMap_texture, u_material_maskMap_sampler, in.uv).r;
+        let mask = sampleSurface(u_material_maskMap_texture, u_material_maskMap_sampler, su, su.uv0).r;
         if (mask < u_material.alphaCutoff) { discard; }
     }
 
@@ -233,16 +250,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let viewDir = normalize(u_lighting.u_viewPos - fragPos);
 
     if (u_material.hasNormalMap != 0) {
-        var n = textureSample(u_material_normalMap_texture, u_material_normalMap_sampler, in.uv).rgb;
-        n = normalize(n * 2.0 - 1.0);
-        normal = normalize(tbn * n);
+        if (su.mode == UV_MESH) {
+            var n = sampleSurface(u_material_normalMap_texture, u_material_normalMap_sampler, su, su.uv0).rgb;
+            n = normalize(n * 2.0 - 1.0);
+            normal = normalize(tbn * n);
+        } else {
+            normal = projectedNormal(u_material_normalMap_texture, u_material_normalMap_sampler, su, su.uv0, tbn[2]);
+        }
     }
 
     // Decode the sRGB base colour once to linear; reuse it for both diffuse and ambient tints.
     var baseTex = vec3<f32>(1.0);
     if (u_material.hasBaseTexture != 0) {
-        baseTex = toLinear(textureSample(u_material_baseTexture_texture,
-                                         u_material_baseTexture_sampler, in.uv).rgb);
+        baseTex = toLinear(sampleSurface(u_material_baseTexture_texture, u_material_baseTexture_sampler, su, su.uv0).rgb);
     }
 
     let matAmbient = u_material.ambient * baseTex;
@@ -281,8 +301,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Emissive (sRGB-decoded map). Output stays LINEAR HDR — tonemap and gamma happen at the present.
     if (u_material.hasEmissiveMap != 0) {
-        result += toLinear(textureSample(u_material_emissiveMap_texture, u_material_emissiveMap_sampler,
-                                         in.uv).rgb)
+        result += toLinear(sampleSurface(u_material_emissiveMap_texture, u_material_emissiveMap_sampler, su, su.uv0).rgb)
                   * u_material.emissive * 1.25 * u_material.emissiveIntensity;
     } else {
         result += u_material.emissive * 1.25 * u_material.emissiveIntensity;

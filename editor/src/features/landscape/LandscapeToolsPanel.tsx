@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import type { SculptTool, FalloffCurve, BrushShape } from 'cleo'
-import { Button, Hint, NumberInput, SegmentedControl, Select, Slider, Toggle } from '../../components/ui'
+import { Button, FileButton, Hint, NumberInput, SegmentedControl, Select, Slider, Toggle, cn, labelClass } from '../../components/ui'
 import Collapsable from '../../components/Collapsable'
 import {
   useLandscapeBrush, setBrush, activeStrength, setActiveStrength, strengthSpec, activeToolKey,
@@ -17,7 +17,7 @@ import { confirmDialog } from '../dialogs/dialogStore'
 // Everything writes the brush store, which the viewport brush reads on every dab.
 
 const row = 'flex items-center justify-between gap-2'
-const label = 'text-xs text-gray-300'
+const label = labelClass
 
 /** Brush size runs 0.5..250 m; the slider is logarithmic so both ends are usable. */
 const SIZE_MIN = 0.5, SIZE_MAX = 250
@@ -32,7 +32,7 @@ export default function LandscapeToolsPanel() {
   const strength = activeStrength(brush)
 
   return (
-    <div className='flex flex-col text-white p-2 gap-2'>
+    <div className='flex flex-col text-fg p-2 gap-2'>
       <SegmentedControl<LandscapeMode> grow
         options={MODES.map(m => ({
           value: m.id, title: m.hint,
@@ -69,7 +69,7 @@ export default function LandscapeToolsPanel() {
             onChange={v => setBrush({ falloff: v })} />
           <div className={row}>
             <span className={label}>Curve</span>
-            <Select className='text-xs w-28' value={brush.curve} onChange={e => setBrush({ curve: e.target.value as FalloffCurve })}>
+            <Select className='w-28' value={brush.curve} onChange={e => setBrush({ curve: e.target.value as FalloffCurve })}>
               <option value='soft'>Soft</option>
               <option value='smooth'>Smooth</option>
               <option value='linear'>Linear</option>
@@ -99,24 +99,21 @@ export default function LandscapeToolsPanel() {
         <div className='space-y-1'>
           <div className={row}>
             <span className={label}>Stamp</span>
-            <label className='bg-control hover:bg-control-hover rounded px-2 py-1 text-xs cursor-pointer'>
+            <FileButton className='py-1' accept='.png,.jpg,.jpeg,.raw,.r16'
+              onFiles={async files => {
+                const file = files[0]
+                try { setStamp(await loadStampFile(file)) }
+                catch (err) { Logger.error(`Could not load stamp "${file.name}": ${err instanceof Error ? err.message : err}`, 'Editor') }
+              }}>
               {stamp ? stamp.name : 'Choose image…'}
-              <input type='file' className='hidden' accept='.png,.jpg,.jpeg,.raw,.r16'
-                onChange={async e => {
-                  const file = e.target.files?.[0]
-                  e.target.value = ''
-                  if (!file) return
-                  try { setStamp(await loadStampFile(file)) }
-                  catch (err) { Logger.error(`Could not load stamp "${file.name}": ${err instanceof Error ? err.message : err}`, 'Editor') }
-                }} />
-            </label>
+            </FileButton>
           </div>
           {!stamp && <Hint>A grayscale image: white raises, black leaves the ground alone.</Hint>}
         </div>
       )}
 
       <Collapsable title='Shortcuts' persistKey='landscape.shortcuts'>
-        <div className='p-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]'>
+        <div className='p-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-ui-sm'>
           {[
             ['Q / W / E', 'Sculpt / Paint / Foliage'],
             ['1 … 0', 'Pick a tool'],
@@ -140,14 +137,14 @@ function ToolGrid<T extends string>({ tools, value, onChange }: { tools: Landsca
   return (
     <div className='grid grid-cols-4 gap-1'>
       {tools.map(t => (
-        <button key={t.id} title={`${t.label}${t.hotkey ? ` (${t.hotkey})` : ''}: ${t.hint}`}
-          className={`relative flex flex-col items-center gap-0.5 rounded border px-1 py-1.5 text-[10px] transition-colors ${
-            t.id === value ? 'bg-selected border-white text-white' : 'bg-control border-control text-muted hover:bg-control-hover hover:text-white'}`}
+        <Button key={t.id} title={`${t.label}${t.hotkey ? ` (${t.hotkey})` : ''}: ${t.hint}`}
+          active={t.id === value}
+          className={cn('relative flex-col gap-0.5 px-1 py-1.5 text-ui-xs font-normal', t.id !== value && 'border-control text-muted hover:text-fg')}
           onClick={() => onChange(t.id)}>
           <span className='w-6 h-6'><t.icon /></span>
           <span className='truncate max-w-full'>{t.label}</span>
-          {t.hotkey && <span className='absolute top-0.5 right-1 text-[9px] opacity-60'>{t.hotkey}</span>}
-        </button>
+          {t.hotkey && <span className='absolute top-0.5 right-1 text-ui-2xs opacity-60'>{t.hotkey}</span>}
+        </Button>
       ))}
     </div>
   )

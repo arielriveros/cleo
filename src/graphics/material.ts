@@ -54,7 +54,7 @@ interface BasicProperties extends HeightConfig {
     displacementMap?: string;
 }
 
-interface DefaultProperties extends HeightConfig {
+interface DefaultProperties extends HeightConfig, UvConfig {
     diffuse?: number[];
     specular?: number[];
     ambient?: number[];
@@ -101,7 +101,7 @@ interface DefaultProperties extends HeightConfig {
  * because cel has no environment reflection to author and never packs a texture (which is what leaves
  * texture unit 1 free for the ramp — see `Renderer._textureSlot`).
  */
-interface CelProperties extends HeightConfig {
+interface CelProperties extends HeightConfig, UvConfig {
     diffuse?: number[];
     ambient?: number[];
     /** Tint of the hard highlight. Not a reflectance — nothing in this model conserves energy. */
@@ -149,7 +149,7 @@ interface CelProperties extends HeightConfig {
     }
 }
 
-interface PBRProperties {
+interface PBRProperties extends UvConfig {
     baseColor?: number[];
     metallic?: number;
     roughness?: number;
@@ -336,6 +336,93 @@ export interface HeightConfig {
     parallax?: boolean;
 }
 
+/** How a material maps its textures onto a surface. See {@link UvConfig}. */
+export type UvProjection = 'mesh' | 'box' | 'triplanar';
+export type UvSpace = 'object' | 'world';
+
+/**
+ * Texture mapping for the lit material types (Blinn-Phong, Cel, PBR) — chunks/uvProjection.wgsl.
+ *
+ * `'mesh'` reads the geometry's own uv, tiled and offset — Unity's Tiling & Offset. `'box'` and
+ * `'triplanar'` ignore the uv and PROJECT the texture along the surface's axes in metres instead, which is
+ * what keeps it from stretching on scaled geometry: a primitive's uv runs 0..1 per face whatever its size,
+ * so a 10 m wall built from a unit cube shows one squashed repeat. Box picks each face's dominant axis
+ * (walls, floors, props); triplanar blends all three by the normal (rocks, anything organic). Unreal's
+ * world-aligned textures and Godot's UV1 Triplanar are the same idea.
+ *
+ * Every field is optional and absent means "as before", so an asset written before this existed loads in
+ * mesh mode with tiling 1 — bit-identical.
+ */
+export interface UvConfig {
+    uvProjection?: UvProjection;
+    /** Projection space: `'object'` (default) sticks to the object and follows its scale; `'world'` lines
+     *  adjacent pieces up seamlessly but swims if the object moves. */
+    uvSpace?: UvSpace;
+    /** Repeats per uv unit (mesh) or per `uvWorldSize` (projections). Default [1, 1]. */
+    uvTiling?: [number, number];
+    uvOffset?: [number, number];
+    /** Metres per texture repeat for box and triplanar. Default 1. */
+    uvWorldSize?: number;
+    /** Triplanar blend sharpness (1 = soft, 16 = nearly a box). Default 4. */
+    uvBlend?: number;
+}
+
+const UV_PROJECTION_CODE: Record<UvProjection, number> = { mesh: 0, box: 1, triplanar: 2 };
+const UV_PROJECTION_NAME: UvProjection[] = ['mesh', 'box', 'triplanar'];
+const finiteOr = (v: unknown, d: number): number => typeof v === 'number' && Number.isFinite(v) ? v : d;
+const pairOr = (v: unknown, d: [number, number]): [number, number] =>
+    Array.isArray(v) && v.length >= 2 ? [finiteOr(v[0], d[0]), finiteOr(v[1], d[1])] : d;
+
+/** Write a material's mapping into its properties, defaults included — every lit material carries them. */
+export function applyUvMapping(material: Material, cfg: UvConfig = {}): void {
+    const tiling = pairOr(cfg.uvTiling, [1, 1]);
+    const offset = pairOr(cfg.uvOffset, [0, 0]);
+    material.properties.set('uvTransform', [tiling[0], tiling[1], offset[0], offset[1]]);
+    material.properties.set('uvProjection', UV_PROJECTION_CODE[cfg.uvProjection ?? 'mesh'] ?? 0);
+    material.properties.set('uvSpace', cfg.uvSpace === 'world' ? 1 : 0);
+    material.properties.set('uvWorldSize', Math.max(1e-3, finiteOr(cfg.uvWorldSize, 1)));
+    material.properties.set('uvBlend', Math.max(1, finiteOr(cfg.uvBlend, 4)));
+}
+
+/** The mapping a material holds, as authoring config. */
+export function uvConfigOf(material: Material): Required<UvConfig> {
+    const t = material.properties.get('uvTransform') ?? [1, 1, 0, 0];
+    return {
+        uvProjection: UV_PROJECTION_NAME[material.properties.get('uvProjection') ?? 0] ?? 'mesh',
+        uvSpace: material.properties.get('uvSpace') === 1 ? 'world' : 'object',
+        uvTiling: [t[0], t[1]],
+        uvOffset: [t[2], t[3]],
+        uvWorldSize: material.properties.get('uvWorldSize') ?? 1,
+        uvBlend: material.properties.get('uvBlend') ?? 4,
+    };
+}
+
+/**
+ * The mapping as serialized JSON: ONLY the fields that differ from the defaults, so every material that
+ * never touched them serializes byte-for-byte as before (asset hashes, and the scenes gated on them,
+ * stay put).
+ */
+function uvJson(material: Material): UvConfig {
+    const c = uvConfigOf(material);
+    const out: UvConfig = {};
+    if (c.uvProjection !== 'mesh') out.uvProjection = c.uvProjection;
+    if (c.uvSpace !== 'object') out.uvSpace = c.uvSpace;
+    if (c.uvTiling[0] !== 1 || c.uvTiling[1] !== 1) out.uvTiling = c.uvTiling;
+    if (c.uvOffset[0] !== 0 || c.uvOffset[1] !== 0) out.uvOffset = c.uvOffset;
+    if (c.uvWorldSize !== 1) out.uvWorldSize = c.uvWorldSize;
+    if (c.uvBlend !== 4) out.uvBlend = c.uvBlend;
+    return out;
+}
+
+/** The mapping fields of a serialized material, for the factories. */
+function uvFieldsOf(m: any): UvConfig {
+    return {
+        uvProjection: UV_PROJECTION_NAME.includes(m?.uvProjection) ? m.uvProjection : undefined,
+        uvSpace: m?.uvSpace === 'world' ? 'world' : undefined,
+        uvTiling: m?.uvTiling, uvOffset: m?.uvOffset, uvWorldSize: m?.uvWorldSize, uvBlend: m?.uvBlend,
+    };
+}
+
 /**
  * Assign the height field and its settings, for any material type.
  *
@@ -400,6 +487,9 @@ export class Material {
         material.properties.set('opacity', properties.opacity || 1.0);
 
         material.properties.set('hasTexture', properties.texture ? true : false);
+        // Not serialized: a runtime multiplier the renderer sets per sprite draw from its tileset's overdrive.
+        // Must exist on every Basic material all the same — an unset uniform reads 0 and draws black.
+        material.properties.set('intensity', 1.0);
 
         if (properties.texture) {
             const tex = properties.texture;
@@ -453,6 +543,7 @@ export class Material {
 
         applyMask(material, properties.textures?.mask, properties.alphaCutoff);
         applyHeight(material, properties.textures?.displacementMap, properties);
+        applyUvMapping(material, properties);
 
         material.properties.set('hasReflectivityMap', properties.textures?.reflectivity ? true : false);
 
@@ -515,6 +606,7 @@ export class Material {
 
         applyMask(material, properties.textures?.mask, properties.alphaCutoff);
         applyHeight(material, properties.textures?.displacementMap, properties);
+        applyUvMapping(material, properties);
 
         return material;
     }
@@ -565,6 +657,7 @@ export class Material {
         applyMask(material, tex.mask, properties.alphaCutoff);
 
         applyHeight(material, tex.displacementMap, properties);
+        applyUvMapping(material, properties);
 
         return material;
     }
@@ -642,6 +735,7 @@ export class Material {
                 displaceLevel: this.properties.get('displaceLevel') ?? 0,
                 invertHeight: this.properties.get('invertHeight'),
                 clipSilhouette: this.properties.get('clipSilhouette'),
+                ...uvJson(this),
                 // Fixed keys, not a dump of the map: that keeps the derived `ormTexture` out of assets.
                 textures: {
                     baseColorTexture: this.textures.get('baseColorTexture'),
@@ -675,6 +769,7 @@ export class Material {
                 displacementScale: this.properties.get('dispScale'),
                 invertHeight: this.properties.get('invertHeight'),
                 clipSilhouette: this.properties.get('clipSilhouette'),
+                ...uvJson(this),
                 // The AUTHORING spellings, which differ from the runtime map keys (`base` vs
                 // `baseTexture`, `ramp` vs `rampMap`, `mask` vs `maskMap`) exactly as the Basic and
                 // Blinn-Phong branches do. Anything walking these generically stays correct;
@@ -702,6 +797,7 @@ export class Material {
                 displacementScale: this.properties.get('dispScale'),
                 invertHeight: this.properties.get('invertHeight'),
                 clipSilhouette: this.properties.get('clipSilhouette'),
+                ...uvJson(this),
                 textures: {
                     base: this.textures.get('baseTexture'),
                     specular: this.textures.get('specularMap'),
@@ -750,6 +846,7 @@ export class Material {
             }, config);
         } else if (type === 'pbr') {
             return Material.PBR({
+                ...uvFieldsOf(m),
                 baseColor: m.baseColor || [1, 1, 1],
                 metallic: m.metallic ?? 0.0,
                 roughness: m.roughness ?? 1.0,
@@ -795,6 +892,7 @@ export class Material {
         } else if (type === 'cel') {
             const texData = m.textures || {};
             return Material.Cel({
+                ...uvFieldsOf(m),
                 diffuse: m.diffuse,
                 ambient: m.ambient,
                 specular: m.specular,
@@ -828,6 +926,7 @@ export class Material {
         } else { // 'blinn_phong' (or legacy 'default')
             const texData = m.textures || {};
             return Material.Default({
+                ...uvFieldsOf(m),
                 diffuse: m.diffuse,
                 specular: m.specular,
                 ambient: m.ambient,

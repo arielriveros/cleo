@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { IDockviewPanelProps, IDockviewPanelHeaderProps } from 'dockview-react';
 import { ModelNode } from 'cleo';
 import EngineViewport from '../EngineViewport';
@@ -38,26 +38,30 @@ import LandscapeToolsPanel from '../landscape/LandscapeToolsPanel';
 import LandscapeLayersPanel from '../landscape/LandscapeLayersPanel';
 import PhysicsEditor from '../nodeInspector/physicsEditors/PhysicsEditor';
 import TemplateInstanceNotice from '../nodeInspector/TemplateInstanceNotice';
+import TemplateVariantNotice from '../nodeInspector/TemplateVariantNotice';
 import { useSelectedNode } from '../nodeInspector/useSelectedNode';
 import ConsolePanel from '../logger/ConsolePanel';
-import PerformancePanel from '../renderer/PerformancePanel';
-import RendererSettingsPanel from '../renderer/RendererSettingsPanel';
-import InputMapPanel from '../input/InputMapPanel';
+import EngineOptionsPanel from '../options/EngineOptionsPanel';
+import EditorOptionsPanel from '../options/EditorOptionsPanel';
+import ProjectOptionsPanel, { INPUT_PAGE_ID } from '../options/ProjectOptionsPanel';
+import { useOptionPageShown } from '../options/OptionsShell';
 import AssetsExplorer from '../assets/AssetsExplorer';
 import { useCleoEngine, MODE_RENDERS_VIEWPORT } from '../EngineContext';
+import { TextInput, cn, labelClass } from '../../components/ui';
 
 // The wrapper must stay `relative` so UIOverlay/StateGraph/LoadingScreen (absolute inset-0) and the
 // data-cleo-overlay HUD anchor to the viewport, not the dock. Its group is locked and headerless.
 function ViewportPanel(_: IDockviewPanelProps) {
   const { editorMode, inputMap, isPlayMode } = useCleoEngine();
+  const previewTouch = useOptionPageShown(INPUT_PAGE_ID) && editorMode === 'options';
   return (
     <div className="relative h-full w-full overflow-hidden">
       <EngineViewport />
       {/* On-screen touch controls. Drawn while playing (where they are live) and while authoring them
-          in Input mode (where `alwaysShow` previews them on a desktop, which has no touch screen to
+          in Options > Project > Input (where `alwaysShow` previews them on a desktop, which has no touch screen to
           reveal them otherwise). Draws only — the engine reads the touches off the canvas itself. */}
-      {(isPlayMode || editorMode === 'input') && (
-        <VirtualControlsLayer controls={inputMap.virtualControls} alwaysShow={editorMode === 'input'} />
+      {(isPlayMode || previewTouch) && (
+        <VirtualControlsLayer controls={inputMap.virtualControls} alwaysShow={previewTouch} />
       )}
       {/* Game UI: real scene nodes, laid out by the engine and painted as DOM over the canvas. Gated on
           the same predicate as the viewport chrome — a UI node carrying a z-index would otherwise paint
@@ -115,13 +119,12 @@ function MaterialPanel() {
   const { editingMaterialName, setActiveMaterialName, eventEmitter } = useCleoEngine();
   const { node } = useSelectedNode();
   return (
-    <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-y-auto'>
+    <div className='flex flex-col text-fg bg-surface-raised w-full h-full overflow-y-auto'>
       <div className='p-2 border-b border-border'>
-        <label className='text-xs text-slate-300 block mb-1'>Material name</label>
-        <input
-          className='bg-control text-white border border-border rounded px-2 py-1 w-full text-sm'
+        <label className={cn(labelClass, 'block mb-1')}>Material name</label>
+        <TextInput
           value={editingMaterialName ?? ''}
-          onChange={(e) => setActiveMaterialName(e.target.value)} />
+          onChange={(v) => setActiveMaterialName(v)} />
       </div>
       {/* Any edit inside the material controls marks the tab dirty (drives the unsaved dot / close guard). */}
       {node && node.nodeType === 'model' &&
@@ -163,6 +166,7 @@ function PropertiesPanel(_: IDockviewPanelProps) {
   return (
     <SidePanel>
       {readOnly && <TemplateInstanceNotice revert />}
+      {editorMode === 'template' && <TemplateVariantNotice />}
       {/* An editor-owned node (a preview tab's holder) is not the user's content: shown, never edited. */}
       {node && <PropertyEditor node={node} readOnly={readOnly || node.isEditorOwned} />}
     </SidePanel>
@@ -228,7 +232,7 @@ function useIsSelectedTab(api: IDockviewPanelProps['api']): boolean {
 function AssetsPanel(props: IDockviewPanelProps) {
   const active = useIsSelectedTab(props.api);
   return (
-    <div className="flex flex-col h-full w-full text-white bg-surface-raised overflow-hidden">
+    <div className="flex flex-col h-full w-full text-fg bg-surface-raised overflow-hidden">
       <AssetsExplorer active={active} />
     </div>
   );
@@ -276,36 +280,19 @@ function TilemapLayersDockPanel(_: IDockviewPanelProps) { return <SidePanel><Til
 // Landscape mode's two panels, the same arrangement. The viewport keeps a slim toolbar for the essentials.
 function LandscapeToolsDockPanel(_: IDockviewPanelProps) { return <SidePanel><LandscapeToolsPanel /></SidePanel>; }
 function LandscapeLayersDockPanel(_: IDockviewPanelProps) { return <SidePanel><LandscapeLayersPanel /></SidePanel>; }
-// The two renderer-mode panels. Both own their scrolling, so neither takes a SidePanel wrapper.
-function PerformanceDockPanel(_: IDockviewPanelProps) {
-  return (
-    <div className="flex flex-col h-full w-full bg-surface-raised overflow-hidden">
-      <PerformancePanel />
-    </div>
-  );
+// The three Options-mode panels. Each owns its page switcher and scrolling, so none takes a SidePanel.
+function OptionsDockFrame({ children }: { children: ReactNode }) {
+  return <div className="flex flex-col h-full w-full bg-surface-raised overflow-hidden">{children}</div>;
 }
-
-function InputMapDockPanel(_: IDockviewPanelProps) {
-  return (
-    <div className="flex flex-col h-full w-full bg-surface-raised overflow-hidden">
-      <InputMapPanel />
-    </div>
-  );
-}
-
-function RendererSettingsDockPanel(_: IDockviewPanelProps) {
-  return (
-    <div className="flex flex-col h-full w-full bg-surface-raised overflow-hidden">
-      <RendererSettingsPanel />
-    </div>
-  );
-}
+function EngineOptionsDockPanel(_: IDockviewPanelProps) { return <OptionsDockFrame><EngineOptionsPanel /></OptionsDockFrame>; }
+function EditorOptionsDockPanel(_: IDockviewPanelProps) { return <OptionsDockFrame><EditorOptionsPanel /></OptionsDockFrame>; }
+function ProjectOptionsDockPanel(_: IDockviewPanelProps) { return <OptionsDockFrame><ProjectOptionsPanel /></OptionsDockFrame>; }
 
 // Panels are movable but not closable, so the tab renders the title only; dockview's tab wrapper still
 // owns drag behavior and colors.
 export function PanelTab(props: IDockviewPanelHeaderProps) {
   return (
-    <div className="flex items-center h-full px-2 text-xs whitespace-nowrap select-none">
+    <div className="flex items-center h-full px-2 text-ui whitespace-nowrap select-none">
       {props.api.title}
     </div>
   );
@@ -333,7 +320,7 @@ export const dockComponents = {
   tilemapLayers: TilemapLayersDockPanel,
   landscapeTools: LandscapeToolsDockPanel,
   landscapeLayers: LandscapeLayersDockPanel,
-  performance: PerformanceDockPanel,
-  rendererSettings: RendererSettingsDockPanel,
-  inputMap: InputMapDockPanel,
+  optionsEngine: EngineOptionsDockPanel,
+  optionsEditor: EditorOptionsDockPanel,
+  optionsProject: ProjectOptionsDockPanel,
 };

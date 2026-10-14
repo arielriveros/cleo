@@ -30,6 +30,7 @@ import type { SoundSampleAsset } from '../../utils/soundSamples'
 import { readsAudio } from '../../utils/soundSamples'
 import { deleteAudio, putAudio } from '../../utils/audioStore'
 import { deepClone } from '../../utils/deepClone'
+import { materializeVariant } from '../../utils/templateVariants'
 import { estimateBytes } from '../../utils/assetSize'
 import { IMAGE_EXTS } from './uploadRouter'
 
@@ -120,6 +121,7 @@ export type AssetDeps = {
   enterMaterialEditor: (id?: string) => void
   enterTerrainMaterialEditor: (id?: string) => void
   enterTemplateEditor: (id?: string) => void
+  createTemplateVariant: (baseId: string) => void
   enterModelEditor: (id?: string) => void
   enterScriptEditor: (id?: string) => void
   enterAnimationFieldEditor: (id?: string) => void
@@ -422,6 +424,15 @@ export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: 
     case 'template': {
       const a = deps.templates.find(t => t.id === id)
       if (!a) return null
+      const base = a.variant ? deps.templates.find(t => t.id === a.variant!.baseTemplateId) : undefined
+      if (a.variant && base) {
+        // A variant's node ids are derived from ITS id, so the copy is re-materialized under the new one —
+        // a verbatim copy would share ids with the original, and the published script table keys on them.
+        const diff = deepClone(a.variant.diff)
+        diff.nodes[''] = { ...(diff.nodes[''] ?? {}), merge: { ...(diff.nodes['']?.merge ?? {}), name: stem } }
+        deps.addTemplate({ ...a, id: newId, name: stem, ...materializeVariant(base, newId, diff), variant: { baseTemplateId: base.id, diff } })
+        return newId
+      }
       deps.addTemplate({ ...deepClone(a), id: newId, name: stem })
       return newId
     }
@@ -694,7 +705,7 @@ export function deleteConsequence(kind: AssetKind): string {
   switch (kind) {
     case 'material': return 'nodes using it fall back to a basic material'
     case 'terrainMaterial': return 'terrain layers painted with it are cleared'
-    case 'template': return 'placed instances are unlinked and become normal nodes'
+    case 'template': return 'placed instances are unlinked and become normal nodes; variants based on it keep their content as standalone templates'
     case 'model': return 'placed copies stay in the scene'
     case 'script': return 'nodes using it lose their script and its variables'
     case 'animationField': return 'animation states playing it fall back to no clip'

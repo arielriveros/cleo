@@ -77,7 +77,7 @@ export default function DebugOverlay() {
           <div
             key={t.id}
             style={{ opacity, transition: 'opacity 120ms linear' }}
-            className='self-start rounded bg-black/70 border border-white/10 px-2 py-1 font-mono text-[11px] leading-4 text-emerald-300 shadow-md whitespace-pre-wrap break-words'
+            className='self-start rounded bg-scrim/70 border border-fg/10 px-2 py-1 font-mono text-ui-sm leading-4 text-success-fg shadow-md whitespace-pre-wrap break-words'
           >
             {t.text}
           </div>

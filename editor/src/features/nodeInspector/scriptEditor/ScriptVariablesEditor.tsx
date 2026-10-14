@@ -7,6 +7,8 @@ import { VariablesIcon } from '../sectionIcons'
 import type { ScriptVarSchema } from '../../../utils/scripts'
 import { isOverridden, setFieldOverride } from '../../../utils/templateOverrides'
 import OverrideMark from '../OverrideMark'
+import { useVariantBase } from '../useVariantBase'
+import { deepClone } from '../../../utils/deepClone'
 
 // The reflection view for a class-based script asset. Variables are not created here: they are declared in
 // the script as class fields, so name, type and access are read-only. Only each node's own VALUE is editable,
@@ -20,6 +22,9 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
   const { eventEmitter, scriptAssetOf, revertTemplateOverride } = useCleoEngine()
   const asset = scriptAssetOf(props.node)
   const [values, setValues] = useState<Record<string, any>>({})
+  // In a variant's tab: an inherited node's value differs from what its base holds = this variant's override.
+  const origin = useVariantBase(props.node)
+  const inherited = origin && origin.baseNode !== 'added' ? origin.baseNode : null
 
   const visible: ScriptVarSchema[] = (asset?.variables ?? []).filter(v => !v.hidden)
 
@@ -43,6 +48,14 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
     eventEmitter.emit('SCENE_CHANGED')
   }
 
+  // What the base holds for a field: its stored value, or the script default when it stores none.
+  const baseValue = (v: ScriptVarSchema) => {
+    const stored = inherited?.scriptVars?.[v.name]
+    return stored === undefined ? v.default : stored
+  }
+  const variantOverrides = (v: ScriptVarSchema) =>
+    !!inherited && JSON.stringify(values[v.name]) !== JSON.stringify(baseValue(v))
+
   const renderValue = (v: ScriptVarSchema) => {
     const value = values[v.name]
     if (v.type === 'number') return <NumberInput value={typeof value === 'number' ? value : 0} onChange={n => setValue(v.name, n)} />
@@ -55,12 +68,12 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
   return (
     <Collapsable title='Variables' icon={<VariablesIcon />} badge={visible.length || undefined} persistKey='variables'>
       <div className='w-full p-2'>
-        <p className='mb-2 text-[11px] text-dim'>
+        <p className='mb-2 text-ui-sm text-dim'>
           Declared in <b>{asset.name}</b> as class fields. Type and access come from the script; edit each
           value here. Add a field in the script (<code>public speed: number = 5</code>); a leading{' '}
           <code>_</code> keeps it internal.
         </p>
-        {visible.length === 0 && <p className='mb-2 text-[11px] text-dim'>No exposed variables. Declare a public/protected field in the script.</p>}
+        {visible.length === 0 && <p className='mb-2 text-ui-sm text-dim'>No exposed variables. Declare a public/protected field in the script.</p>}
         {visible.map(v => {
           // Read-only: the access level is declared in the script, not chosen in the inspector.
           const access = ACCESS_META[v.access]
@@ -76,6 +89,9 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
               <div className='flex-1 min-w-0'>{renderValue(v)}</div>
               {props.overridable && isOverridden(props.node, v.name) &&
                 <OverrideMark onRevert={() => revertTemplateOverride(props.node, v.name)} />}
+              {!props.overridable && variantOverrides(v) &&
+                <OverrideMark title={`Overridden in this variant. Click to take ${origin!.baseName}'s value.`}
+                  onRevert={() => setValue(v.name, deepClone(baseValue(v)))} />}
             </div>
           )
         })}

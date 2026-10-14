@@ -19,7 +19,7 @@ import type { SimStep } from './particleRuntime';
 export const SIM = {
     GRAVITY: 1, DRAG: 2, WIND: 4, NOISE: 8, VORTEX: 16, ATTRACTOR: 32, LIMIT: 64, SPEED_LIFE: 128,
     COLLIDE_DEPTH: 256, COLLIDE_PLANES: 512, SPIN_LIFE: 1024, FIELDS: 2048, LOCAL: 4096,
-    KILL_ON_HIT: 8192, CUSTOM: 16384, FLAT: 32768,
+    KILL_ON_HIT: 8192, CUSTOM: 16384, FLAT: 32768, COLLIDE_BODIES: 65536,
 } as const;
 
 /** Bits of `u_drawMask.x` — the DRAW_* constants in chunks/particleDraw.wgsl. SORTED is set per frame. */
@@ -157,6 +157,8 @@ export function packEmitter(def: EmitterDef, flat2D = false): PackedEmitter {
     const planes: CollisionPlane[] = [];
     if (collision) {
         if (collision.depth !== false) simMask |= SIM.COLLIDE_DEPTH;
+        // Opt-in: an asset authored before physics collision existed keeps exactly what it did.
+        if (collision.bodies === true) simMask |= SIM.COLLIDE_BODIES;
         if (Array.isArray(collision.planes))
             for (const p of collision.planes.slice(0, 4))
                 planes.push({ point: triple(p?.point, [0, 0, 0]), normal: triple(p?.normal, [0, 1, 0]) });

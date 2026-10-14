@@ -68,7 +68,7 @@ export default function AiBrainSlot(props: { node: ControllerNode; onChange?: ()
           </div>
           <Button variant='ghost' size='icon' className='text-highlight' title='Edit this brain'
             onClick={() => enterAiBrainEditor(asset.id)}>✎</Button>
-          <Button variant='ghost' size='icon' className='text-danger'
+          <Button variant='remove' size='icon'
             title='Unlink. The agent keeps behaving exactly as it does now — only the link goes.'
             onClick={unlink}>✕</Button>
         </div>

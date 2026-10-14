@@ -282,14 +282,25 @@ export class Loader {
         // (`..\..\ScanForge\foo_Normal.jpg`), so it is matched on BASENAME against the upload — the same
         // rule `findFile` uses for the glTF's own relative URIs. Memoised, because several slots and
         // several materials routinely point at one image and each registration is a GPU texture.
+        //
+        // Images EMBEDDED in the source come first: an .fbx usually carries its maps inside it, and
+        // looking only at the upload reported every one of them as "missing, link it manually".
         const recoveredIds = new Map<string, string | undefined>();
+        const embedded = parsed.embedded ?? [];
         const resolveRecovered = (raw: string | undefined, from: string): string | undefined => {
             if (!raw) return undefined;
             const base = textureBaseName(raw);
             if (recoveredIds.has(base)) return recoveredIds.get(base);
-            const file = files.find(f => f.name.toLowerCase() === base.toLowerCase());
+            const inside = embedded.find(e => e.name.toLowerCase() === base.toLowerCase());
+            const file = inside ? undefined : files.find(f => f.name.toLowerCase() === base.toLowerCase());
             let id: string | undefined;
-            if (!file) report?.missingFiles.push({ name: base, from });
+            if (inside) {
+                try { id = TextureManager.Instance.addTextureFromBytes(inside.bytes, inside.mime, { ...cfg, mipMap: false }); }
+                catch (error) {
+                    Logger.print('warn', ['Failed to load embedded texture:', error], 'Loader');
+                    report?.unloadable.push({ name: base, from });
+                }
+            } else if (!file) report?.missingFiles.push({ name: base, from });
             else {
                 try { id = TextureManager.Instance.addTextureFromFile(file, cfg, uniqueTextureId(file.name)); }
                 catch (error) {
@@ -350,14 +361,27 @@ export class Loader {
             // from its own face) and `_calculateTangents` degenerates to per-face. Both the lighting and
             // the parallax chart come out faceted, and no amount of per-pixel interpolation can fix data
             // that is not smooth. `weldSmooth` is a no-op on an already-shared mesh.
-            const geometry = weldCreaseDeg > 0 ? raw.weldSmooth(weldCreaseDeg) : raw;
+            //
+            // A skinned mesh's joint indices and weights go THROUGH the weld: it renumbers the vertices,
+            // and arrays left in the old order hand every vertex another vertex's bones — invisible in
+            // the bind pose, an explosion of the mesh as soon as a clip moves a bone.
+            const skinned = !!(mesh.jointIndices && mesh.jointWeights);
+            let geometry = raw;
+            let jointIndices = mesh.jointIndices, jointWeights = mesh.jointWeights;
+            if (weldCreaseDeg > 0) {
+                const welded = raw.weldSmoothWith(weldCreaseDeg, skinned
+                    ? [{ data: mesh.jointIndices!, components: 4 }, { data: mesh.jointWeights!, components: 4 }]
+                    : []);
+                geometry = welded.geometry;
+                if (skinned) [jointIndices, jointWeights] = welded.attributes;
+            }
             const material = materials[mesh.materialIndex] ?? Material.PBR({});
 
-            const model = mesh.jointIndices && mesh.jointWeights
+            const model = skinned
                 ? new AnimatedModel(
                     geometry, material,
                     mesh.skinIndex !== undefined ? parsed.skins[mesh.skinIndex] : undefined,
-                    mesh.jointIndices, mesh.jointWeights, parsed.animations)
+                    jointIndices, jointWeights, parsed.animations)
                 : new Model(geometry, material);
 
             return { name: mesh.name, model, transform: mesh.transform };

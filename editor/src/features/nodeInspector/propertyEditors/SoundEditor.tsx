@@ -178,9 +178,9 @@ function FalloffCurve(props: { model: DistanceModel; refDistance: number; maxDis
   return (
     <div>
       <svg viewBox={`0 0 ${width} ${height}`} className='w-full h-[46px]' preserveAspectRatio='none'>
-        <rect x={0} y={0} width={width} height={height} fill='rgb(255 255 255 / 0.03)' />
-        <line x1={refX} y1={0} x2={refX} y2={height} stroke='rgb(255 210 122 / 0.5)' strokeWidth={1} strokeDasharray='2 2' />
-        <polyline points={points.join(' ')} fill='none' stroke='#7fb2d9' strokeWidth={1.5} />
+        <rect x={0} y={0} width={width} height={height} className='fill-fg/[0.03]' />
+        <line x1={refX} y1={0} x2={refX} y2={height} className='stroke-warning/50' strokeWidth={1} strokeDasharray='2 2' />
+        <polyline points={points.join(' ')} fill='none' className='stroke-highlight' strokeWidth={1.5} />
       </svg>
       <Hint>
         Full volume to {refDistance.toFixed(2)}, then falling to {(attenuationAt(maxDistance, model, refDistance, maxDistance, rolloff) * 100).toFixed(0)}% at {maxDistance.toFixed(1)}.

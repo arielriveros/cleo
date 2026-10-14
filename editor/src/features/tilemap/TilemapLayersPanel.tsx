@@ -1,12 +1,12 @@
 import { useCleoEngine } from '../EngineContext'
-import { Button, ButtonWithConfirm, Hint, NumberInput, Select, TextInput, Toggle } from '../../components/ui'
+import { Button, ButtonWithConfirm, Hint, NumberInput, Select, TextInput, Toggle, cn, labelClass } from '../../components/ui'
 import { useActiveTilemap } from './useActiveTilemap'
 import { clamp } from '../../utils/math';
 
 // The tilemap mode's layer stack: order, visibility, opacity, parallax, Y-sorting and which layer is the
 // collision override. Painting always targets the ACTIVE layer, which is selected here.
 
-const label = 'text-[11px] text-gray-300'
+const label = labelClass
 
 export default function TilemapLayersPanel() {
   const { tilemapBrush, eventEmitter, tilesets } = useCleoEngine()
@@ -15,7 +15,7 @@ export default function TilemapLayersPanel() {
   const commit = () => { eventEmitter.emit('SCENE_CHANGED'); refresh() }
 
   if (!node) {
-    return <div className='p-2 text-xs text-muted'>Add a Tilemap node to the scene to start painting.</div>
+    return <div className='p-2 text-ui text-muted'>Add a Tilemap node to the scene to start painting.</div>
   }
 
   const tilemap = node.tilemap
@@ -27,10 +27,9 @@ export default function TilemapLayersPanel() {
   }
 
   return (
-    <div className='flex flex-col text-white p-2 gap-2' key={revision}>
+    <div className='flex flex-col text-fg p-2 gap-2' key={revision}>
       {tilemaps.length > 1 && (
         <Select
-          className='text-xs'
           value={node.id}
           onChange={(e) => select(e.target.value)}
           title='Which tilemap these panels edit'
@@ -40,7 +39,7 @@ export default function TilemapLayersPanel() {
       )}
 
       <div className='flex items-center justify-between'>
-        <span className='text-xs text-gray-300'>Layers</span>
+        <span className={labelClass}>Layers</span>
         <Button size='sm' variant='ghost' onClick={() => { tilemap.addLayer(); commit() }} title='Add a layer above'>
           + Layer
         </Button>
@@ -50,7 +49,7 @@ export default function TilemapLayersPanel() {
       {[...tilemap.layers].map((layer, i) => ({ layer, i })).reverse().map(({ layer, i }) => (
         <div
           key={i}
-          className={`border rounded p-1.5 space-y-1 cursor-pointer ${i === active ? 'border-selected bg-control' : 'border-control'}`}
+          className={cn('border rounded p-1.5 space-y-1 cursor-pointer', i === active ? 'border-selected bg-control' : 'border-control')}
           onClick={() => setActive(i)}
         >
           <div className='flex items-center gap-1'>
@@ -59,27 +58,24 @@ export default function TilemapLayersPanel() {
               onChange={(c) => { layer.cfg.visible = c; commit() }}
             />
             <TextInput
-              className='flex-1 text-xs'
+              className='flex-1'
               value={layer.cfg.name}
               onChange={(name) => { layer.cfg.name = name; commit() }}
             />
-            <span className='text-[10px] text-muted tabular-nums' title='Tiles painted on this layer'>
+            <span className='text-ui-xs text-muted tabular-nums' title='Tiles painted on this layer'>
               {layer.tileCount}
             </span>
-            <ButtonWithConfirm
-              className='px-1 py-0 text-xs'
+            <ButtonWithConfirm variant='remove' className='px-1 py-0 text-ui'
               disabled={tilemap.layers.length <= 1}
               onClick={() => { tilemap.removeLayer(i); if (active >= tilemap.layers.length) setActive(tilemap.layers.length - 1); commit() }}
-            >
-              ✕
-            </ButtonWithConfirm>
+            >✕</ButtonWithConfirm>
           </div>
 
           {i === active && (
             <div className='space-y-1 pt-1'>
               <div className='flex items-center justify-between'>
                 <span className={label}>Tileset</span>
-                <span className='text-[10px] text-muted truncate max-w-[8rem]'>
+                <span className='text-ui-xs text-muted truncate max-w-[8rem]'>
                   {tilesets.find(t => t.id === layer.cfg.tilesetId)?.name ?? 'none'}
                 </span>
               </div>

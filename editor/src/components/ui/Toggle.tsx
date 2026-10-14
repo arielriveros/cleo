@@ -3,7 +3,8 @@ import { cn } from './cn';
 
 export interface ToggleProps {
   checked: boolean;
-  onChange: (checked: boolean) => void;
+  /** The click event rides along for the rare toggle that reads modifiers (Alt-click = whole branch). */
+  onChange: (checked: boolean, event: React.MouseEvent<HTMLButtonElement>) => void;
   label?: React.ReactNode;
   disabled?: boolean;
   className?: string;
@@ -20,8 +21,8 @@ export function Toggle({ checked, onChange, label, disabled, className, title }:
       aria-checked={checked}
       disabled={disabled}
       title={title}
-      onClick={() => onChange(!checked)}
-      className={cn('inline-flex items-center gap-2 text-xs select-none disabled:opacity-60 disabled:cursor-not-allowed', className)}
+      onClick={(e) => onChange(!checked, e)}
+      className={cn('inline-flex items-center gap-2 text-ui select-none disabled:opacity-60 disabled:cursor-not-allowed', className)}
     >
       <span
         className={cn(
@@ -31,7 +32,7 @@ export function Toggle({ checked, onChange, label, disabled, className, title }:
       >
         <span
           className={cn(
-            'inline-block h-[12px] w-[12px] rounded-full bg-white shadow transition-transform',
+            'inline-block h-[12px] w-[12px] rounded-full bg-fg shadow transition-transform',
             checked ? 'translate-x-[13px]' : 'translate-x-[2px]'
           )}
         />

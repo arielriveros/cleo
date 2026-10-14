@@ -78,7 +78,7 @@ export default function NodeRefInput(props: NodeRefInputProps) {
         value={dangling ? '' : (props.value ?? '')}
         disabled={props.disabled}
         onChange={(e) => props.onChange(e.target.value || null)}
-        className={cn('w-full', dragOver && 'border-primary', dangling && 'border-red-500')}
+        className={cn('w-full', dragOver && 'border-primary', dangling && 'border-danger-border')}
       >
         <option value=''>{props.placeholder ?? '— None —'}</option>
         {options.map(option => (
@@ -86,7 +86,7 @@ export default function NodeRefInput(props: NodeRefInputProps) {
         ))}
       </Select>
       {dangling &&
-        <div className='type-hint text-red-400 mt-1'>
+        <div className='type-hint text-danger-fg mt-1'>
           Missing node ({props.value?.slice(0, 8)})
         </div>
       }

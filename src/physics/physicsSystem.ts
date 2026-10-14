@@ -133,11 +133,21 @@ export class PhysicsSystem {
   /** Substeps one frame may take. Frames are clamped (engine MAX_DELTA) so this is never the limit. */
   public static readonly MAX_SUBSTEPS = 8;
 
-  /** How many equal substeps advance the world by `dt`. 0 for a frame with no time in it. */
-  public static substepsFor(dt: number): number {
+  /**
+   * How many equal substeps advance the world by `dt`. 0 for a frame with no time in it. `max` caps the
+   * count: past it each substep simply grows longer than 1/60 s — the world still advances by exactly
+   * `dt`, it just does so in coarser steps.
+   */
+  public static substepsFor(dt: number, max: number = PhysicsSystem.MAX_SUBSTEPS): number {
     if (!(dt > 0)) return 0;
-    return Math.min(PhysicsSystem.MAX_SUBSTEPS, Math.max(1, Math.ceil(dt / PhysicsSystem.MAX_SUBSTEP - 1e-6)));
+    return Math.min(Math.max(1, Math.floor(max)), Math.max(1, Math.ceil(dt / PhysicsSystem.MAX_SUBSTEP - 1e-6)));
   }
+
+  /**
+   * This world's cap on substeps per frame (project option "Max physics substeps"). Lower trades
+   * stability of stiff joints and fast contacts on slow frames for less physics work per frame.
+   */
+  public maxSubsteps: number = PhysicsSystem.MAX_SUBSTEPS;
 
   public initialize(): void {
     try {
@@ -176,7 +186,7 @@ export class PhysicsSystem {
       // alternate frames. Equal substeps that sum to the frame have none of that, and stay at or under
       // the 1/60 s that keeps ragdoll joints and contacts stable.
       const stepStart = performance.now();
-      const substeps = PhysicsSystem.substepsFor(deltaTime);
+      const substeps = PhysicsSystem.substepsFor(deltaTime, this.maxSubsteps);
       if (substeps > 0) {
         const h = deltaTime / substeps;
         for (let i = 0; i < substeps; i++) this._world?.step(h);
@@ -358,6 +368,13 @@ export class PhysicsSystem {
 
   /** How many trigger overlaps are currently reported to scripts. For tests and the stats panel. */
   public get triggerOverlapCount(): number { return this._reportedPairs.size; }
+
+  /**
+   * Every body in the world, read-only — including the foliage collider pool and ragdoll bones, which do
+   * not go through `addBody`. For systems that read the colliders wholesale (particle collision); scripts
+   * want the shape queries below instead.
+   */
+  public get bodies(): readonly Body[] { return this._world ? this._world.bodies : []; }
 
   // ---- Shape queries ----
 

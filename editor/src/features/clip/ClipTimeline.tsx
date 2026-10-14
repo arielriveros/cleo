@@ -6,9 +6,16 @@ import { useClip } from './ClipContext'
 import { getAnimationTarget } from '../animation/skeleton'
 import { applyPreviewClips } from './clipPreview'
 import { tracksOf, withMovedKey, withoutKey, type BoneTrack, type TrackPath } from '../../utils/clipTracks'
-import { Toggle } from '../../components/ui'
+import { Button, NumberInput, Select, Toggle } from '../../components/ui'
 import { promptDialog } from '../dialogs/dialogStore'
 import { clamp } from '../../utils/math'
+
+/** One key colour per property, so a bone driven on more than one reads at a glance. */
+const KEY_CLASS: Record<TrackPath, string> = {
+  rotation: 'bg-highlight',
+  translation: 'bg-success-fg',
+  scale: 'bg-warning',
+}
 
 // The clip editor's transport, in the bottom strip beside Logger and Assets.
 //
@@ -127,10 +134,10 @@ export default function ClipTimeline() {
     return () => cancelAnimationFrame(raf)
   }, [editorScene, skeletonTargetId])
 
-  if (!asset) return <div className='p-3 text-xs text-gray-400'>No animation open.</div>
+  if (!asset) return <div className='p-3 text-ui text-muted'>No animation open.</div>
   if (!target) {
     return (
-      <div className='p-3 text-xs text-gray-400'>
+      <div className='p-3 text-ui text-muted'>
         {asset.rigId
           ? 'No character on this clip’s rig, so there is nothing to play it on. Edits still apply — link a model to the rig to see them.'
           : 'This animation is not linked to a rig, so there is no skeleton to play it on.'}
@@ -189,7 +196,6 @@ export default function ClipTimeline() {
     window.addEventListener('pointerup', up)
   }
 
-  const btn = 'px-2 py-1 rounded bg-control hover:bg-control-hover border border-control-hover text-white'
   const fmt = (s: number) => `${s.toFixed(2)}s`
   const pct = (t: number) => `${duration > 0 ? clamp(t / duration, 0, 1) * 100 : 0}%`
 
@@ -285,45 +291,45 @@ export default function ClipTimeline() {
 
   return (
     <div className='flex flex-col gap-2 p-3 h-full overflow-auto'>
-      <div className='flex items-center gap-2 text-xs text-white flex-wrap'>
-        <select
-          className='bg-control text-white border border-control-hover rounded px-2 py-1 max-w-[200px]'
+      <div className='flex items-center gap-2 text-ui text-fg flex-wrap'>
+        <Select
+          className='max-w-[200px]'
           value={clipName ?? ''}
           onChange={e => { selectClip(e.target.value); bind(e.target.value) }}
           title='Clip'>
           {clips.length === 0 && <option value=''>No clips</option>}
           {clips.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
+        </Select>
 
-        <button className={btn} title='Play' onClick={onPlay} disabled={playing || !clipName}>▶</button>
-        <button className={btn} title='Pause' onClick={onPause} disabled={!playing}>❚❚</button>
-        <button className={btn} title='Stop (bind pose)' onClick={onStop}>■</button>
+        <Button title='Play' onClick={onPlay} disabled={playing || !clipName}>▶</Button>
+        <Button title='Pause' onClick={onPause} disabled={!playing}>❚❚</Button>
+        <Button title='Stop (bind pose)' onClick={onStop}>■</Button>
 
         <Toggle label='loop' className='ml-1' checked={loop} onChange={c => { setLoop(c); animator.loop = c }} />
         <label className='flex items-center gap-1' title='Playback speed — preview only, it does not change the clip'>
           speed
-          <input
-            className='w-[52px] bg-control text-white border border-control-hover rounded px-1'
-            type='number' step='0.1' min='0' value={speed}
-            onChange={e => { const v = Math.max(0, parseFloat(e.target.value) || 0); setSpeed(v); animator.speed = v }} />
+          <NumberInput
+            className='w-[52px] px-1 py-0'
+            step='0.1' min='0' value={speed}
+            onChange={n => { const v = Math.max(0, n); setSpeed(v); animator.speed = v }} />
         </label>
       </div>
 
-      <div className='flex items-center gap-2 text-[11px] text-gray-300'>
+      <div className='flex items-center gap-2 text-ui-sm text-muted'>
         <span className='tabular-nums w-[46px] text-right'>{fmt(time)}</span>
         <div ref={trackRef} className='relative flex-1 h-4 cursor-pointer select-none' onPointerDown={onTrackDown}>
           <div className='absolute inset-x-0 top-1/2 -translate-y-1/2 h-1 rounded bg-control-hover' />
           <div className='absolute left-0 top-1/2 -translate-y-1/2 h-1 rounded bg-primary' style={{ width: pct(time) }} />
-          <div className='absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-white pointer-events-none'
+          <div className='absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-fg pointer-events-none'
             style={{ left: pct(time) }} />
         </div>
         <span className='tabular-nums w-[46px]'>{fmt(duration)}</span>
       </div>
 
       {/* Clip events: drag to move, click to rename, double-click to delete. */}
-      <div className='flex items-center gap-2 text-[11px]'>
-        <button className='w-[130px] shrink-0 text-left text-highlight hover:text-white' onClick={() => void addEvent()}
-          title='Add an event marker at the playhead'>+ Event at playhead</button>
+      <div className='flex items-center gap-2 text-ui-sm'>
+        <Button variant='ghost' size='sm' className='w-[130px] shrink-0 justify-start px-0 py-0 text-ui-sm text-highlight hover:bg-transparent hover:text-fg' onClick={() => void addEvent()}
+          title='Add an event marker at the playhead'>+ Event at playhead</Button>
         <div className='relative flex-1 h-5 cursor-pointer select-none' onPointerDown={onTrackDown}>
           <div className='absolute inset-x-0 top-1/2 -translate-y-1/2 h-px bg-control-hover' />
           {events.map((ev, i) => (
@@ -336,10 +342,10 @@ export default function ClipTimeline() {
               onClick={() => { if (!eventDraggedRef.current) void renameEvent(i) }}
               onDoubleClick={() => setEvents(events.filter((_, idx) => idx !== i), 'Delete event')}>
               <div className='w-0 h-0 border-l-[5px] border-r-[5px] border-t-[8px] border-l-transparent border-r-transparent border-t-highlight' />
-              <span className='text-[9px] text-highlight whitespace-nowrap leading-none'>{ev.name}</span>
+              <span className='text-ui-2xs text-highlight whitespace-nowrap leading-none'>{ev.name}</span>
             </div>
           ))}
-          <div className='absolute top-0 bottom-0 w-px bg-white/40 pointer-events-none' style={{ left: pct(time) }} />
+          <div className='absolute top-0 bottom-0 w-px bg-fg/40 pointer-events-none' style={{ left: pct(time) }} />
         </div>
         <span className='w-[46px]' />
       </div>
@@ -348,9 +354,9 @@ export default function ClipTimeline() {
           rows, and the bone tree is the place to browse those. */}
       <div className='flex flex-col gap-px overflow-auto min-h-0'>
         {tracks.map(t => (
-          <div key={t.nodeIndex} className='flex items-center gap-2 text-[11px]'>
+          <div key={t.nodeIndex} className='flex items-center gap-2 text-ui-sm'>
             <button
-              className='w-[130px] shrink-0 text-left truncate text-gray-300 hover:text-white'
+              className='w-[130px] shrink-0 text-left truncate text-muted hover:text-fg'
               title={`${t.name ?? t.nodeIndex}${t.slot ? ` (${t.slot})` : ''} — select this bone`}
               onClick={() => selectJoint(t.nodeIndex)}>
               {t.name ?? `node ${t.nodeIndex}`}
@@ -361,18 +367,13 @@ export default function ClipTimeline() {
                 (t[path]?.keys ?? []).map((k, i) => (
                   <div
                     key={`${path}-${i}`}
-                    className='absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rotate-45 border cursor-grab active:cursor-grabbing hover:scale-150 transition-transform'
-                    style={{
-                      left: pct(k),
-                      // One colour per property, so a bone driven on more than one reads at a glance.
-                      background: path === 'rotation' ? '#7dd3fc' : path === 'translation' ? '#86efac' : '#fcd34d',
-                      borderColor: '#1e293b',
-                    }}
+                    className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rotate-45 border border-bg cursor-grab active:cursor-grabbing hover:scale-150 transition-transform ${KEY_CLASS[path]}`}
+                    style={{ left: pct(k) }}
                     title={`${path} @ ${k.toFixed(3)}s — drag to move, double-click to delete`}
                     onPointerDown={ev => onKeyDown(ev, t, path, i)}
                     onDoubleClick={() => deleteKey(t, path, i)} />
                 )))}
-              <div className='absolute top-0 bottom-0 w-px bg-white/40 pointer-events-none' style={{ left: pct(time) }} />
+              <div className='absolute top-0 bottom-0 w-px bg-fg/40 pointer-events-none' style={{ left: pct(time) }} />
             </div>
             <span className='w-[46px]' />
           </div>

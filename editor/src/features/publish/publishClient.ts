@@ -3,6 +3,7 @@ import { extractScripts, buildScriptsSource } from './extractScripts';
 import { PLAYER_CONTRACT } from './pack';
 import { runPublishJob } from '../../workers/workerClient';
 import type { PublishFiles, PlayerTemplates } from '../../workers/projectJobs';
+import type { PublishWindowSettings } from '../options/projectSettings';
 
 // Re-exported so callers keep importing the publish types from the publish module.
 export type { PublishFiles } from '../../workers/projectJobs';
@@ -17,7 +18,7 @@ export interface PublishResult {
 // Exposed by the Electron preload (window.cleoDesktop) when running in the desktop app.
 export interface DesktopBridge {
   publishWeb: (files: PublishFiles) => Promise<PublishResult>;
-  publishDesktop: (files: PublishFiles, options: { installer: boolean }) => Promise<PublishResult>;
+  publishDesktop: (files: PublishFiles, options: { installer: boolean; window?: PublishWindowSettings }) => Promise<PublishResult>;
 }
 
 export function getDesktopBridge(): DesktopBridge | undefined {
@@ -115,12 +116,14 @@ export async function publishWeb(data: any, name = 'cleo-game'): Promise<string>
 // a native installer via electron-builder.
 export async function publishDesktop(
   data: any,
-  options: { installer: boolean },
+  options: { installer: boolean; window?: PublishWindowSettings },
 ): Promise<string> {
   const bridge = getDesktopBridge();
   if (!bridge) throw new Error('Desktop publishing is only available in the Cleo desktop app.');
   const files = await assemblePublishFiles(data);
-  const res = await bridge.publishDesktop(files, { installer: options.installer });
+  // The window settings travel to the desktop shell, which writes them next to the game's main.js
+  // (window size, fullscreen, title) and names the installer after the title.
+  const res = await bridge.publishDesktop(files, { installer: options.installer, window: options.window });
   if (res.canceled) return 'Publish canceled';
   if (!res.ok) throw new Error(res.error || 'Publish failed');
   return `Published desktop build to ${res.path}`;

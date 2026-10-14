@@ -289,6 +289,21 @@ describe('regenerateNodeIds', () => {
         regenerateNodeIds(json, new Map());
         expect(json.followId).toBe('the-player');
     });
+
+    // A world-space UI root keeps its anchor INSIDE its `ui` payload. A spawned enemy's health bar must
+    // follow ITS anchor, not the template's (which is in no scene, so the bar sat at the enemy's feet).
+    it("repoints a UI root's anchor, which sits inside its ui payload", () => {
+        const json: any = {
+            id: 'enemy', type: 'character',
+            children: [
+                { id: 'anchor', type: 'node', children: [] },
+                { id: 'bar', type: 'uiRoot', ui: { space: 'world', uiTargetId: 'anchor' }, children: [] },
+            ],
+        };
+        regenerateNodeIds(json, new Map());
+        expect(json.children[1].ui.uiTargetId).toBe(json.children[0].id);
+        expect(json.children[1].ui.uiTargetId).not.toBe('anchor');
+    });
 });
 
 // The end-to-end shape a user actually writes: a class-based script, bound through the real compile ->

@@ -62,7 +62,7 @@ export default function ScriptSlot(props: { node: Node; onChanged: () => void })
               {asset.name} <span className='text-dim'>· {BASE_TYPE_LABEL[asset.baseType]}</span>
             </span>
             <Button variant='ghost' size='icon' className='text-highlight' title='Edit this script' onClick={() => enterScriptEditor(asset.id)}>✎</Button>
-            <Button variant='ghost' size='icon' className='text-danger' title='Remove the script from this node (keeps the asset)' onClick={handleRemove}>✕</Button>
+            <Button variant='remove' size='icon' title='Remove the script from this node (keeps the asset)' onClick={handleRemove}>✕</Button>
           </div>
         ) : (
           <div className={`flex flex-col gap-2 p-2 border-2 border-dashed rounded ${dragOver ? 'border-selected bg-border/30' : 'border-border'}`}>

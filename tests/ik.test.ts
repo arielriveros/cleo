@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { vec3 } from 'gl-matrix';
 import {
-    solveTwoBone, applyTwoBone, ikTuning, validateIkRig, swingReleaseWeight,
+    kneePole, solveTwoBone, applyTwoBone, ikTuning, validateIkRig, swingReleaseWeight,
     IK_DEFAULTS, DEFAULT_MAX_REACH, TwoBoneSolve, IkRig,
 } from '../src/animation/ik';
 import { skeletonTopology, isAncestorJoint } from '../src/animation/skeletonTopology';
@@ -361,6 +361,36 @@ describe('validateIkRig', () => {
     it('handles an absent rig', () => {
         expect(validateIkRig(null, topo, isAncestorJoint).feet).toEqual([]);
         expect(validateIkRig({ feet: [] }, topo, isAncestorJoint).problems).toEqual([]);
+    });
+});
+
+describe('kneePole', () => {
+    const fwd = vec3.fromValues(0, 0, 1);
+    it('sends a straight leg’s knee forward', () => {
+        const pole = kneePole([0, 2, 0], [0, 1, 0], [0, 0, 0], fwd)!;
+        expect(pole[2]).toBeGreaterThan(1);
+        expect(pole[0]).toBeCloseTo(0, 6);
+    });
+    it('keeps the clip’s own bend when the knee is clearly bent forward', () => {
+        const pole = kneePole([0, 2, 0], [0.2, 1, 0.5], [0, 0, 0], fwd)!;
+        // Along the knee's own offset from the hip-ankle line, sideways component included.
+        expect(pole[0]).toBeGreaterThan(0.2);
+        expect(pole[2]).toBeGreaterThan(0.5);
+    });
+    it('overrides a knee animated bending backwards', () => {
+        const pole = kneePole([0, 2, 0], [0, 1, -0.3], [0, 0, 0], fwd)!;
+        expect(pole[2]).toBeGreaterThan(0);
+    });
+    it('makes mirrored near-straight legs bend the same way', () => {
+        // Noise of opposite sign in each leg: the old pose-derived axis bent them opposite ways.
+        const solveKnee = (dx: number) => {
+            const root = vec3.fromValues(0, 2, 0), mid = vec3.fromValues(dx, 1, 0), tip = vec3.fromValues(0, 0, 0);
+            const r = solveTwoBone({ root, mid, tip, target: [0, 0.5, 0], pole: kneePole(root, mid, tip, fwd) });
+            return vec3.transformQuat(vec3.create(), vec3.sub(vec3.create(), mid, root), r.rootDelta);
+        };
+        const left = solveKnee(0.004), right = solveKnee(-0.004);
+        expect(left[2]).toBeGreaterThan(0.3);
+        expect(right[2]).toBeCloseTo(left[2], 2);
     });
 });
 

@@ -66,7 +66,7 @@ export default function TilesetSlot(props: { node: SpriteNode; onChange?: () => 
               <Hint>{asset.columns} × {asset.rows} tiles</Hint>
             </div>
             <Button variant='ghost' size='icon' className='text-highlight' title='Edit this tileset' onClick={() => enterTilesetEditor(asset.id)}>✎</Button>
-            <Button variant='ghost' size='icon' className='text-danger' title='Unlink (the sprite draws nothing)' onClick={unlink}>✕</Button>
+            <Button variant='remove' size='icon' title='Unlink (the sprite draws nothing)' onClick={unlink}>✕</Button>
           </div>
         ) : (
           <div className={`flex flex-col gap-2 p-2 border-2 border-dashed rounded ${dragOver ? 'border-selected bg-border/30' : 'border-border'}`}>

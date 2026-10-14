@@ -4,6 +4,7 @@ import { parseByType, stripDebug, collectIds, collectTextureIds, regenerateIds }
 import { resolveMaterialRefs, MaterialAsset } from './materials'
 import { deepClone } from './deepClone'
 import { getScriptIdOf, collectScriptVars, scriptKindOfAsset, type ScriptAsset } from './scripts'
+import type { TemplateDiff } from './templateVariants'
 
 // A reusable node template: a serialized node subtree plus every asset/script it depends on.
 export type Template = {
@@ -17,6 +18,11 @@ export type Template = {
   scripts: Record<string, string>     // originalNodeId -> script source
   bodies: Record<string, any>         // originalNodeId -> BodyDescription
   triggers: Record<string, any>       // originalNodeId -> { shapes }
+  /**
+   * Present on a VARIANT: the template it is based on and what it changes (templateVariants.ts). The
+   * fields above stay the MATERIALIZED result, so nothing that instantiates or publishes reads this.
+   */
+  variant?: { baseTemplateId: string; diff: TemplateDiff }
 }
 
 type EngineMaps = {
@@ -119,6 +125,17 @@ export function instantiateTemplate(template: Template, parent: Node, maps: Engi
     if (template.bodies[oldId]) maps.bodies.set(newId, template.bodies[oldId])
     if (template.triggers[oldId]) maps.triggers.set(newId, template.triggers[oldId])
   }
+  // A source carried INLINE on a node (a bundle authored by a generator does this) goes to the map too,
+  // exactly as a scene's does on load (extractNodeState). Left on the node, the parse would compile it
+  // with no script path, and any relative import in it (`./SoulsMath`) would fail in the editor.
+  const lift = (n: any) => {
+    if (typeof n?.script === 'string') {
+      if (n.script.trim() && !maps.scripts.has(n.id)) maps.scripts.set(n.id, n.script)
+      delete n.script
+    }
+    for (const c of n?.children ?? []) lift(c)
+  }
+  lift(clone)
 
   parseByType(parent, clone)
   return clone.id

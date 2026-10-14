@@ -45,6 +45,17 @@ import {
 export const TRANSLATE_STEP = 1;
 export const ROTATE_STEP_DEG = 15;
 export const SCALE_STEP = 0.1;
+
+/**
+ * The steps actually used. Defaults to the constants above; the editor overwrites them from Options ▸
+ * Editor ▸ Viewport (setGizmoSnapSteps), so this module stays free of any preference store.
+ */
+export const snapSteps = { translate: TRANSLATE_STEP, rotateDeg: ROTATE_STEP_DEG, scale: SCALE_STEP };
+export function setGizmoSnapSteps(steps: { translate: number; rotateDeg: number; scale: number }): void {
+    if (steps.translate > 0) snapSteps.translate = steps.translate;
+    if (steps.rotateDeg > 0) snapSteps.rotateDeg = steps.rotateDeg;
+    if (steps.scale > 0) snapSteps.scale = steps.scale;
+}
 /** Scale never reaches zero: a zero-scale node has a singular transform and can never be recovered. */
 export const MIN_SCALE = 1e-3;
 
@@ -384,7 +395,7 @@ function solveTranslate(
         const hit = closestPointOnAxisToRay(session.origin, axis, rayOrigin, rayDir);
         if (hit.degenerate) return held();
 
-        const d = snapDelta(hit.s - session.grabS, TRANSLATE_STEP, snap);
+        const d = snapDelta(hit.s - session.grabS, snapSteps.translate, snap);
         const world = vec3.scaleAndAdd(vec3.create(), session.origin, axis, d);
 
         const guide = [
@@ -413,8 +424,8 @@ function solveTranslate(
         if (!hit) return held();
 
         const raw = vec3.subtract(vec3.create(), hit.point, session.grabPoint);
-        const d1 = snapDelta(vec3.dot(raw, a1), TRANSLATE_STEP, snap);
-        const d2 = snapDelta(vec3.dot(raw, a2), TRANSLATE_STEP, snap);
+        const d1 = snapDelta(vec3.dot(raw, a1), snapSteps.translate, snap);
+        const d2 = snapDelta(vec3.dot(raw, a2), snapSteps.translate, snap);
 
         const world = v3(session.origin);
         vec3.scaleAndAdd(world, world, a1, d1);
@@ -476,7 +487,7 @@ function solveRotate(
     session.accumulatedAngle = next;
 
     const deg = snap
-        ? snapValue((next * 180) / Math.PI, ROTATE_STEP_DEG)
+        ? snapValue((next * 180) / Math.PI, snapSteps.rotateDeg)
         : (next * 180) / Math.PI;
     const angle = (deg * Math.PI) / 180;
 
@@ -559,7 +570,7 @@ function solveScale(
         touched.push(0, 1, 2);
     }
 
-    if (snap) factor = snapValue(factor, SCALE_STEP);
+    if (snap) factor = snapValue(factor, snapSteps.scale);
     for (const i of touched) local[i] = Math.max(MIN_SCALE, session.startLocalScale[i] * factor);
 
     return accept(session, { kind: 'scale', local }, buildScaleOverlay(session, factor, touched));

@@ -82,6 +82,10 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | `bloomKnee` | `number` | `0.5` | Softness of the threshold. |
 | `bloomMaskEnabled` | `boolean` | `false` | Restrict bloom to lit surfaces. |
 
+A texel at full white sits on the default threshold, so an unlit surface needs a multiplier above 1 to
+bloom: `emissiveIntensity` on a material, `render.emissive` on a particle renderer, and the tileset's
+**Overdrive** (`TilesetConfig.overdrive`, per tile `TileMeta.overdrive`) for sprites and tilemap tiles.
+
 ## Depth of field
 
 Off by default; the focus fields mean nothing until `dofEnabled` is on. The lens is a thin lens
@@ -182,6 +186,7 @@ Per-object motion blur can be suppressed on a node with `node.motionBlur = 'obje
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `foliageCullDistance` | `number` | `65` | Beyond this, foliage instances are not drawn. |
+| `particleLodDistanceScale` | `number` | `1` | Multiplies every particle effect's LOD and cull distances (0.25–4). Set by the quality tier: Low 0.5, Medium 0.75, High 1, Ultra 1.5. |
 | `foliageDensityFalloff` | `number` | engine constant | How density thins toward the cull distance. |
 | `foliageCellSize` | `number` | `13` | Size of a foliage admission cell, in world units. |
 | `terrainLodEnabled` | `boolean` | `true` | |

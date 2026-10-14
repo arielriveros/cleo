@@ -54,7 +54,7 @@ const RANGED = ['drawCalls', 'instancedDrawCalls', 'objects', 'instances', 'tria
                 'culledObjects', 'culledInstances', 'fullscreenPasses', 'shadedMpx',
                 'stateChanges', 'stateChangesSaved',
                 'foliageDraws', 'foliageShadowDraws', 'foliageCells', 'foliageCellsScanned',
-                'particleSystems', 'particleSystemsCulled', 'particleSteps', 'particleDraws', 'particlesDrawn',
+                'particleSystems', 'particleSystemsCulled', 'particleSystemsLodCulled', 'particleSystemsLodReduced', 'particleColliders', 'particleSteps', 'particleDraws', 'particlesDrawn',
                 'particleGpuCreates', 'particleGpuReuses'] as const;
 type RangedKey = typeof RANGED[number];
 type Range = { min: number; max: number; mean: number };
@@ -66,7 +66,7 @@ function Row(props: { label: string; value: string; hl?: boolean; title?: string
   return (
     <div className='flex justify-between gap-3 leading-5' title={props.title}>
       <span className='text-muted'>{props.label}</span>
-      <span className={`font-mono ${props.hl ? 'text-success font-semibold' : ''}`}>{props.value}</span>
+      <span className={`font-mono ${props.hl ? 'text-success-fg font-semibold' : ''}`}>{props.value}</span>
     </div>
   );
 }
@@ -78,7 +78,7 @@ function RangeRow(props: { label: string; r: Range; dp?: number; unit?: string; 
   return (
     <div className='flex justify-between gap-3 leading-5' title={props.title}>
       <span className='text-muted'>{props.label}</span>
-      <span className={`font-mono tabular-nums ${props.hl ? 'text-success font-semibold' : ''}`}>
+      <span className={`font-mono tabular-nums ${props.hl ? 'text-success-fg font-semibold' : ''}`}>
         {f(r.mean)}{unit}
         {r.max > r.min && <span className='text-muted ml-1.5'>{f(r.min)}–{f(r.max)}{unit}</span>}
       </span>
@@ -169,7 +169,7 @@ export default function PerformancePanel() {
 
       // rAF fires once per display frame, so this interval is the real frame rate. The percentile
       // history must be filled by the engine's game loop, not here: this component unmounts outside
-      // renderer mode, and a history with holes makes the percentiles lie.
+      // the Performance page, and a history with holes makes the percentiles lie.
       if (acc.current >= REFRESH_MS) {
         const stats: any = renderer?.stats ?? null;
         // Physics only steps in Play mode, so these read 0 while stopped.
@@ -296,14 +296,14 @@ export default function PerformancePanel() {
     navigator.clipboard?.writeText(lines.join('\n'));
   };
 
-  if (!renderer) return <div className='p-3 text-muted text-xs'>No renderer.</div>;
+  if (!renderer) return <div className='p-3 text-muted text-ui'>No renderer.</div>;
 
   const unattributed = Math.max(0, d.frameMs - d.cpuMs - d.physicsMs - d.sceneMs);
 
   return (
-    // The content column is capped rather than filling the dock group: renderer mode hides the rest of
+    // The content column is capped rather than filling the dock group: options mode hides the rest of
     // the right rail, so this group can end up 700px+ wide. The panel itself stays resizable.
-    <div className='h-full overflow-y-auto p-3 text-[11px] text-white'>
+    <div className='h-full overflow-y-auto p-3 text-ui-sm text-fg'>
       <div className='w-full max-w-[420px]'>
       <Section
         title='Frame'
@@ -312,7 +312,7 @@ export default function PerformancePanel() {
             + 'the target line on the graph.'}
       >
         <div className='flex items-baseline justify-between'>
-          <span className={`font-mono text-lg ${overBudget ? 'text-danger' : 'text-success'}`}>
+          <span className={`font-mono text-lg ${overBudget ? 'text-danger-fg' : 'text-success-fg'}`}>
             {fmt(d.frameMs, 1)} ms
           </span>
           <span className='text-muted font-mono'>{fmt(d.fps, 0)} fps</span>
@@ -367,13 +367,14 @@ export default function PerformancePanel() {
         </>}
         {/* Off by default: two performance.now() per node per frame inflates Scene/nodeLoop by 50-160%,
             so it would corrupt the totals above if it were always on. */}
-        <button
-          className='w-full text-left text-muted hover:text-white leading-5'
+        <Button
+          variant='ghost'
+          className='w-full justify-start p-0 border-0 rounded-none font-normal text-ui-sm leading-5 hover:bg-transparent'
           onClick={() => { sceneStatsDetail.enabled = !detail; setDetail(!detail); }}
           title="Times each node's onUpdate and animator separately. Costs ~240ns per node per frame, which inflates the Scene total while enabled."
         >
           {detail ? '− hide script/animator split' : '+ script/animator split'}
-        </button>
+        </Button>
         <Row label='Unattributed' value={`${fmt(unattributed)} ms`} />
       </Section>
 
@@ -400,7 +401,7 @@ export default function PerformancePanel() {
         {rows.length === 0 && <div className='text-muted mt-2'>waiting for results…</div>}
         {rows.length > 0 && (
           <div className='mt-2 space-y-[3px]'>
-            <div className='flex justify-between text-[10px] text-muted'>
+            <div className='flex justify-between text-ui-xs text-muted'>
               <span>scope</span><span>cpu / gpu</span>
             </div>
             {rows.map(r => (
@@ -478,6 +479,12 @@ export default function PerformancePanel() {
                   title='Particle systems that ran at least one simulation step this frame.' />
         <RangeRow label='· paused off screen' r={r.particleSystemsCulled}
                   title='Looping systems whose bounds were out of view: their clock stops and they cost nothing.' />
+        <RangeRow label='· LOD culled' r={r.particleSystemsLodCulled}
+                  title="Systems past their effect's LOD cull distance: not drawn, and a looping one paused." />
+        <RangeRow label='· LOD reduced' r={r.particleSystemsLodReduced}
+                  title='Systems running at a coarser LOD level than full detail: fewer spawns, rarer simulation steps.' />
+        <RangeRow label='· physics colliders' r={r.particleColliders}
+                  title='Physics bodies handed to particle collision this frame, summed over the systems that collide with bodies (at most 12 each).' />
         <RangeRow label='Steps' r={r.particleSteps} hl={r.particleSteps.max > 2 * Math.max(1, r.particleSystems.mean) + 16}
                   title='Simulation passes run (one per emitter per step). At most two steps per emitter per frame, plus a bounded prewarm slice.' />
         <RangeRow label='Draws' r={r.particleDraws} title='Emitter draws issued: visible emitters with live particles.' />

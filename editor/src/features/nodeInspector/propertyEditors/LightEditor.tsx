@@ -120,10 +120,10 @@ export default function LightEditor(props: {node: LightNode}) {
       <Section title='Shadows'>
         <Toggle label='Cast Shadows' checked={castShadows} className='my-1'
           title={props.node.type === 'directional'
-            ? 'The FIRST directional light with this on is the scene’s sun: the renderer fits its shadow cascades around the camera for it. Tune them in Renderer mode.'
+            ? 'The FIRST directional light with this on is the scene’s sun: the renderer fits its shadow cascades around the camera for it. Tune them in Options › Engine › Renderer.'
             : props.node.type === 'spotlight'
-              ? 'Spot lights get their own shadow map, sized to the outer cone and reaching as far as the light’s range. A few can cast at once (see Spot Shadows in Renderer mode); any beyond that cap go unshadowed.'
-              : 'Point lights cast in every direction, through a cube map rendered as six depth maps — one per face — reaching as far as the light’s range. A few can cast at once (see Point Shadows in Renderer mode); the nearest to the camera get the maps, and any beyond that cap go unshadowed.'}
+              ? 'Spot lights get their own shadow map, sized to the outer cone and reaching as far as the light’s range. A few can cast at once (see Spot Shadows in Options › Engine › Renderer); any beyond that cap go unshadowed.'
+              : 'Point lights cast in every direction, through a cube map rendered as six depth maps — one per face — reaching as far as the light’s range. A few can cast at once (see Point Shadows in Options › Engine › Renderer); the nearest to the camera get the maps, and any beyond that cap go unshadowed.'}
           onChange={(c) => { props.node.castShadows = c; setCastShadows(c); markLightDirty(); }} />
       </Section>
 

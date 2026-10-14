@@ -1,5 +1,6 @@
 import { Logger, Node, ModelNode, Model, AnimatedModel, Loader } from 'cleo'
 import { parseModelFiles, parseGltfFiles, parseModelAsGltfFiles, ImportCancelled } from '../workers/importClient'
+import { yieldToPaint as nextPaint } from '../features/loading/loadingStore'
 import { clamp } from './math';
 import { clipNameFromFile } from './clipNaming';
 
@@ -106,9 +107,11 @@ export async function parseBundleToRoot(
   } else if (convertible) {
     try {
       // Convert and parse both happen in the worker; only the descriptors come back.
-      const { parsed: descriptors, recovered } = await parseModelAsGltfFiles(files, true, onProgress)
+      // Welded in the worker too: the weld and its tangent rebuild froze the editor when done here.
+      const { parsed: descriptors, recovered } = await parseModelAsGltfFiles(files, true, onProgress, WELD_CREASE_DEG)
       onProgress(0.95, 'Building meshes')
-      parsed = fromGltf(descriptors, recovered, WELD_CREASE_DEG)
+      await nextPaint()   // so the label above is on screen before the synchronous assembly starts
+      parsed = fromGltf(descriptors, recovered, 0)
     } catch (e) {
       if (e instanceof ImportCancelled) throw e
       Logger.warn(`glTF2 conversion of "${name}" failed (${e}); falling back to the direct parse`, 'Import')

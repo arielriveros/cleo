@@ -50,7 +50,7 @@ export default function ShapeEditor(props: {
                 : <Hint>Source mesh unavailable.</Hint> }
             </PropertyRow>
             <PropertyRow label='Geometry'>
-              <span className='text-xs text-muted tabular-nums'>{s.vertices.length} vertices · {s.faces.length} faces</span>
+              <span className='text-ui text-muted tabular-nums'>{s.vertices.length} vertices · {s.faces.length} faces</span>
             </PropertyRow>
           </>}
           <PropertyRow label='Offset'>

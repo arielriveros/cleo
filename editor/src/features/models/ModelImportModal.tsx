@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useEditorSessions } from '../EditorSessionsContext'
-import { Modal, ModalHeader, ModalFooter, Toggle } from '../../components/ui'
+import { Modal, ModalHeader, ModalFooter, Toggle, Button, FileButton, NumberInput, cn, hintClass } from '../../components/ui'
 import SubmeshGroupEditor from './SubmeshGroupEditor'
 import { defaultGroupsByMaterial, compactGroups, type PartGroup } from '../../utils/submeshGroups'
 
@@ -46,14 +46,14 @@ export default function ModelImportModal() {
 
   const baseName = (p: string) => p.split(/[\\/]/).pop() || p
 
-  const onSelectMissing = async (fileList: FileList | null) => {
-    if (!fileList || fileList.length === 0) return
+  const onSelectMissing = async (fileList: File[]) => {
+    if (fileList.length === 0) return
     // Still-unresolved missing names, keyed by lowercased basename — that is the match key.
     const wanted = new Map<string, string>()
     for (const { name } of info.missing) if (!resolved.has(name)) wanted.set(name.toLowerCase(), name)
 
     let ignored = 0
-    for (const file of Array.from(fileList)) {
+    for (const file of fileList) {
       const target = wanted.get(baseName(file.name).toLowerCase())
       if (!target) { ignored++; continue }
       // Copy the bytes before re-wrapping: an <input> File is disk-backed and can lose that backing
@@ -82,13 +82,13 @@ export default function ModelImportModal() {
   return (
     <Modal onClose={cancel} className={grouping ? 'w-[600px]' : 'w-[420px]'}>
         <ModalHeader>
-          <div className='text-sm font-semibold'>Import model</div>
-          <div className='text-lg font-bold truncate' title={info.bundleName}>{info.bundleName}</div>
+          <div className='text-ui font-semibold text-muted'>Import model</div>
+          <div className='text-ui-lg font-semibold truncate' title={info.bundleName}>{info.bundleName}</div>
         </ModalHeader>
 
-        <div className='px-4 py-3 space-y-4 text-sm'>
+        <div className='px-4 py-3 space-y-4 text-ui'>
           {/* Summary */}
-          <div className='flex gap-4 text-xs text-gray-300'>
+          <div className='flex gap-4 text-ui text-muted'>
             <span>{info.subMeshCount} part{info.subMeshCount === 1 ? '' : 's'}</span>
             <span>{info.materialCount} material{info.materialCount === 1 ? '' : 's'}</span>
           </div>
@@ -96,22 +96,20 @@ export default function ModelImportModal() {
           {/* Missing textures */}
           <div>
             <div className='flex items-center justify-between mb-1'>
-              <span className='text-xs font-semibold'>Textures</span>
+              <span className='text-ui font-semibold'>Textures</span>
               {info.missing.length > 0 && (
-                <label className='text-[11px] bg-control hover:bg-control-hover rounded px-2 py-1 cursor-pointer'>
+                <FileButton multiple accept='.png,.jpg,.jpeg,.bmp,.tga,.tiff,.webp' onFiles={(files) => { void onSelectMissing(files) }}>
                   Select missing textures…
-                  <input type='file' multiple className='hidden' accept='.png,.jpg,.jpeg,.bmp,.tga,.tiff,.webp'
-                         onChange={(e) => { onSelectMissing(e.target.files); e.target.value = '' }} />
-                </label>
+                </FileButton>
               )}
             </div>
             {info.missing.length === 0 && info.unloadable.length === 0 ? (
-              <p className='text-xs text-gray-400'>All referenced textures are present.</p>
+              <p className='text-ui text-muted'>All referenced textures are present.</p>
             ) : info.missing.length === 0 ? null : (
               <div className='space-y-1'>
                 {/* Say what the list IS. A bare filename reads as the importer demanding something for
                     no reason; the model is the one asking, and the file simply wasn't in the upload. */}
-                <p className='text-[11px] text-warning'>
+                <p className='text-ui-sm text-warning'>
                   The model references {info.missing.length} image{info.missing.length === 1 ? '' : 's'} that
                   {info.missing.length === 1 ? " wasn't" : " weren't"} in your upload
                   {' '}({resolved.size} linked). Select them, or import the model together with its texture files.
@@ -121,15 +119,15 @@ export default function ModelImportModal() {
                   return (
                     <div key={name} className='flex items-center gap-2 bg-surface-raised border border-control rounded px-2 py-1'>
                       <div className='min-w-0 flex-1'>
-                        <div className={`text-xs truncate ${done ? 'text-green-400 line-through' : ''}`} title={name}>{name}</div>
-                        <div className='text-[10px] text-gray-500 truncate' title={from}>{from}</div>
+                        <div className={cn('text-ui truncate', done && 'text-success-fg line-through')} title={name}>{name}</div>
+                        <div className='text-ui-xs text-dim truncate' title={from}>{from}</div>
                       </div>
-                      <span className={`text-xs shrink-0 ${done ? 'text-green-400' : 'text-gray-500'}`}>{done ? '✓ linked' : 'missing'}</span>
+                      <span className={cn('text-ui shrink-0', done ? 'text-success-fg' : 'text-dim')}>{done ? '✓ linked' : 'missing'}</span>
                     </div>
                   )
                 })}
                 {ignoredCount > 0 && (
-                  <p className='text-[11px] text-gray-500'>{ignoredCount} selected file{ignoredCount === 1 ? '' : 's'} didn’t match a missing name and {ignoredCount === 1 ? 'was' : 'were'} ignored.</p>
+                  <p className={hintClass}>{ignoredCount} selected file{ignoredCount === 1 ? '' : 's'} didn’t match a missing name and {ignoredCount === 1 ? 'was' : 'were'} ignored.</p>
                 )}
               </div>
             )}
@@ -139,7 +137,7 @@ export default function ModelImportModal() {
                 importing a silently untextured model, which is what used to happen. */}
             {info.unloadable.length > 0 && (
               <div className='space-y-1 mt-2'>
-                <p className='text-[11px] text-warning'>
+                <p className='text-ui-sm text-warning'>
                   {info.unloadable.length} texture{info.unloadable.length === 1 ? '' : 's'} embedded in the
                   model could not be read. Re-export it with the textures as separate .png/.jpg files, then
                   import the model and images together.
@@ -147,10 +145,10 @@ export default function ModelImportModal() {
                 {info.unloadable.map(({ name, from }) => (
                   <div key={name} className='flex items-center gap-2 bg-surface-raised border border-control rounded px-2 py-1'>
                     <div className='min-w-0 flex-1'>
-                      <div className='text-xs truncate' title={name}>{name}</div>
-                      <div className='text-[10px] text-gray-500 truncate' title={from}>{from}</div>
+                      <div className='text-ui truncate' title={name}>{name}</div>
+                      <div className='text-ui-xs text-dim truncate' title={from}>{from}</div>
                     </div>
-                    <span className='text-xs text-gray-500 shrink-0'>unreadable</span>
+                    <span className='text-ui text-dim shrink-0'>unreadable</span>
                   </div>
                 ))}
               </div>
@@ -160,11 +158,11 @@ export default function ModelImportModal() {
           {/* Separation — only worth asking about when the file actually holds more than one piece. */}
           {info.subMeshCount > 1 && (
             <div>
-              <div className='text-xs font-semibold mb-1'>Contents</div>
+              <div className='text-ui font-semibold mb-1'>Contents</div>
               <Toggle label='Separate sub-models into individual assets'
                       checked={separate}
                       onChange={(v: boolean) => { setSeparate(v); if (v && merge) seedGroups() }} />
-              <p className='text-[11px] text-gray-400 mt-1'>
+              <p className='text-ui-sm text-muted mt-1'>
                 {grouping
                   ? `Creates ${assetCount} model asset${assetCount === 1 ? '' : 's'}, each a single merged mesh — one per group below.`
                   : separate
@@ -182,7 +180,7 @@ export default function ModelImportModal() {
                 <Toggle label='Merge sub-meshes into a single mesh'
                         checked={merge}
                         onChange={(v: boolean) => { setMerge(v); if (v && separate) seedGroups() }} />
-                <p className='text-[11px] text-gray-400 mt-1'>
+                <p className='text-ui-sm text-muted mt-1'>
                   {grouping
                     ? 'Merges within each group, so a group of several parts imports as one mesh.'
                     : merge
@@ -190,7 +188,7 @@ export default function ModelImportModal() {
                       : 'Keeps the file’s parts as separate nodes under one asset.'}
                 </p>
                 {merge && (
-                  <p className='text-[11px] text-gray-500 mt-1'>
+                  <p className={cn(hintClass, 'mt-1')}>
                     Parts that use different material types, or mix opaque and transparent, stay separate —
                     the reason is logged.
                   </p>
@@ -207,7 +205,7 @@ export default function ModelImportModal() {
               )}
 
               {separate && !merge && (
-                <p className='text-[11px] text-warning mt-1'>
+                <p className='text-ui-sm text-warning mt-1'>
                   A single model split across several materials will import as separate pieces — leave this
                   off for characters and props that are meant to stay together.
                 </p>
@@ -217,24 +215,24 @@ export default function ModelImportModal() {
 
           {/* Scale normalization */}
           <div>
-            <div className='text-xs font-semibold mb-1'>Size</div>
+            <div className='text-ui font-semibold mb-1'>Size</div>
             <Toggle label='Normalize size' checked={normalize} onChange={setNormalize} />
-            <div className={`flex items-center gap-2 mt-2 text-xs ${normalize ? '' : 'opacity-40 pointer-events-none'}`}>
-              <span className='text-gray-300'>Fit to</span>
-              <input type='number' min={0.01} step={0.1} value={targetSize}
-                     onChange={(e) => setTargetSize(parseFloat(e.target.value) || 0)}
-                     className='w-[70px] bg-surface-raised border border-control rounded px-2 py-1 text-white' />
-              <span className='text-gray-300'>units</span>
+            <div className={cn('flex items-center gap-2 mt-2 text-ui', !normalize && 'opacity-40 pointer-events-none')}>
+              <span className='text-muted'>Fit to</span>
+              <NumberInput min={0.01} step={0.1} value={targetSize}
+                           onChange={setTargetSize}
+                           className='w-[70px]' />
+              <span className='text-muted'>units</span>
             </div>
-            <p className='text-[11px] text-gray-400 mt-1'>
+            <p className='text-ui-sm text-muted mt-1'>
               Current size ≈ {currentSize.toFixed(2)} units{normalize && info.sizeRadius > 0 ? ` → scale ×${factor.toFixed(4)}` : ''}
             </p>
           </div>
         </div>
 
         <ModalFooter>
-          <button className='px-3 py-1.5 text-xs rounded bg-control hover:bg-control-hover' onClick={cancel}>Cancel</button>
-          <button className='px-3 py-1.5 text-xs rounded bg-success hover:bg-success-hover font-semibold' onClick={accept}>Accept & Import</button>
+          <Button onClick={cancel}>Cancel</Button>
+          <Button variant='success' className='font-semibold' onClick={accept}>Accept & Import</Button>
         </ModalFooter>
     </Modal>
   )

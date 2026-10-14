@@ -136,7 +136,7 @@ export default function CustomUniformsEditor(props: { material: CustomMaterial, 
             <span className={cn(labelClass, 'w-[26%] truncate')} title={u.name}>{u.name}</span>
             <TypeSelect value={u.type} options={TYPES} onChange={t => changeType(u.name, t)} />
             <div className='flex-1 min-w-0'>{renderValue(u)}</div>
-            <Button variant='ghost' size='icon' className='text-danger' title='Remove' onClick={() => removeUniform(u.name)}>✕</Button>
+            <Button variant='remove' size='icon' title='Remove' onClick={() => removeUniform(u.name)}>✕</Button>
           </div>
         ))}
         <div className='flex items-center gap-1.5 mt-3 border-t border-border pt-2'>

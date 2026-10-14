@@ -10,6 +10,7 @@ import { KIND_LABEL } from '../../utils/vfs'
 import type { AssetKind } from '../../utils/vfs'
 import type { AssetNodeView, ReferenceView } from './assetGraphLayout'
 import { cn } from '../../components/ui'
+import { token } from '../../utils/cssTokens'
 
 // The reference viewer's canvas.
 //
@@ -48,8 +49,8 @@ function AssetGraphNode({ data }: NodeProps) {
       <Handle type='target' position={Position.Left} className='!bg-primary !w-2 !h-2 !border-0' />
       <img src={iconFor(kind)} className='w-4 h-4 shrink-0' alt='' draggable={false} />
       <div className='min-w-0 flex-1'>
-        <div className='truncate text-[11px] text-fg leading-tight'>{view.name}</div>
-        <div className='truncate text-[9px] text-dim leading-tight'>
+        <div className='truncate text-ui-sm text-fg leading-tight'>{view.name}</div>
+        <div className='truncate text-ui-2xs text-dim leading-tight'>
           {view.missing ? 'missing' : KIND_LABEL[kind] ?? kind}
           {view.partial && ' · partial'}
         </div>
@@ -82,6 +83,8 @@ function Canvas({ view, rootKey, onSelect, onOpen }: AssetGraphCanvasProps) {
     draggable: true,
   })), [view.nodes, rootKey, onOpen])
 
+  // Theme colours for the SVG/canvas layers, read from the tokens at render time (never at module scope).
+  const edgeStroke = token('--text-dim', 0.6)
   const nextEdges = useMemo<RFEdge[]>(() => view.edges.map(e => ({
     id: e.id,
     source: e.source,
@@ -89,10 +92,10 @@ function Canvas({ view, rootKey, onSelect, onOpen }: AssetGraphCanvasProps) {
     // The field is the whole diagnostic value: "uses rock.png" vs "uses rock.png AS ITS NORMAL MAP".
     label: e.field,
     labelShowBg: false,
-    labelStyle: { fill: 'rgb(138 138 160)', fontSize: 9 },
-    style: { stroke: 'rgb(90 96 112)', strokeWidth: 1.2 },
-    markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: 'rgb(90 96 112)' },
-  })), [view.edges])
+    labelStyle: { fill: token('--text-dim'), fontSize: 'var(--text-ui-2xs)' },
+    style: { stroke: edgeStroke, strokeWidth: 1.2 },
+    markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: edgeStroke },
+  })), [view.edges, edgeStroke])
 
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>(nextNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>(nextEdges)
@@ -131,13 +134,13 @@ function Canvas({ view, rootKey, onSelect, onOpen }: AssetGraphCanvasProps) {
       minZoom={0.1}
       fitView
     >
-      <Background color='#3a3f4b' gap={18} />
+      <Background color={token('--control')} gap={18} />
       <Controls className='!bg-surface-raised !border-border' showInteractive={false} />
       <MiniMap
         pannable zoomable
         className='!bg-surface-sunken'
-        maskColor='rgba(0,0,0,0.5)'
-        nodeColor={n => (n.id === rootKey ? '#8f8fff' : '#4b5563')}
+        maskColor={token('--scrim', 0.5)}
+        nodeColor={n => (n.id === rootKey ? token('--highlight') : token('--control-hover'))}
       />
     </ReactFlow>
   )

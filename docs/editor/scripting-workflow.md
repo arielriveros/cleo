@@ -75,8 +75,9 @@ blocked read returns nothing.
 
 ## Editing in VS Code
 
-Desktop only. **Edit in VSCode** in the top bar mirrors the project's scripts to a real folder and
-keeps the two in step.
+Desktop only. In **Options ▸ Editor ▸ Scripts**, set *Open scripts with* to **VSCode** (or choose the
+workspace folder there): the project's scripts are mirrored to a real folder, kept in step, and opening
+a script opens its file in your editor. In the browser the option is greyed out.
 
 What it sets up:
 
@@ -90,8 +91,8 @@ updates, creates and deletes.
 **Identity comes from the manifest, not the filename** — so renaming a file in your IDE is
 understood as a rename, not as a delete plus an unrelated create.
 
-**Status** is shown by a chip in the top bar: `off`, `connecting`, `live`, `paused`, `error`. From
-it you can:
+**Status** is shown in Options ▸ Editor ▸ Scripts: `off`, `connecting`, `live`, `paused`, `error`.
+The top bar shows a chip only while the sync is `paused` or in `error`. From either you can:
 
 | Action | Does |
 |---|---|

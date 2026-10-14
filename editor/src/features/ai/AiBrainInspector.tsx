@@ -24,7 +24,7 @@ export default function AiBrainInspector() {
   const { asset, target, view, commit } = useAiEditor()
 
   if (!asset || !target) {
-    return <div className='p-3 text-[11px] text-muted'>No AI brain open.</div>
+    return <div className='p-3 text-ui-sm text-muted'>No AI brain open.</div>
   }
 
   return (

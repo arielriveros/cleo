@@ -17,8 +17,7 @@ an asset tab hides it, because that tab's mode is not a choice. All five are dis
 | **Landscape** | Sculpt, paint and scatter foliage on terrain. | **3D scenes only.** |
 | **Tilemap** | Paint tiles. | **2D scenes only.** |
 | **UI** | Screen-space layout and anchoring. | Always. |
-| **Renderer** | Render settings and debug channels, over a live render. | Always. |
-| **Input** | Action maps and bindings, judged against a live scene. | Always. |
+| **Options** | Engine, editor and project settings — renderer, input map, publishing… — over a live render. See [Options](options.md). | Always. |
 
 Landscape and Tilemap share one slot, chosen by the scene's authored dimension — see
 [Scene settings](scene-authoring.md#scene-settings).
@@ -49,8 +48,7 @@ Landscape and Tilemap share one slot, chosen by the scene's authored dimension �
 | `landscape` | Scene + brush | Tree, Properties, Add palettes, plus a floating brush card. **No Scripts, no Physics** |
 | `tilemap` | Scene + tools | Tree, Properties, **Tiles**, **Layers**, plus a floating tool card. No Scripts, no Physics |
 | `ui` | Scene + DOM overlay | Everything except **Physics** — a screen rectangle has no rigid body |
-| `renderer` | Live render | **Only** Performance and Renderer Settings |
-| `input` | Live scene | **Only** the Input panel |
+| `options` | Live render | **Only** the Engine, Editor and Project panels |
 | `material` | Preview sphere | Properties, titled *Material*. No tree, no Add palettes |
 | `terrainMaterial` | Preview sphere | Properties, titled *Terrain Material* |
 | `model` | Model preview | Model inspector plus the node property editor |
@@ -95,7 +93,7 @@ See [AI brains](ai-brains.md).
 Nothing in that staging scene is saved; the tab saves the asset, and saving pushes the new effect into
 every open scene whose Particle System nodes link it.
 
-**Renderer and Input modes** deliberately show almost nothing. They are for judging a change against
+**Options mode** deliberately shows almost nothing else. They are for judging a change against
 a live scene, so the scene gets the space.
 
 ## See also

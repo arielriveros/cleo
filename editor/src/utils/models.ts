@@ -1,7 +1,8 @@
-import { Node, ModelNode, AnimatedModel, Logger, TextureManager, mergeBlocker, mergeModels, isEditorOwnedName } from 'cleo'
+import { Node, ModelNode, AnimatedModel, Logger, TextureManager, mergeBlocker, mergeModels, isEditorOwnedName, extractSubmesh, withoutSubmesh, decomposeTRS } from 'cleo'
+import { mat4, quat, vec3 } from 'gl-matrix'
 import { cryptoRandomId } from './ids'
 import { parseByType, stripDebug, collectTextureIds, regenerateIds } from './nodeSubtree'
-import { resolveMaterialRefs, applyMaterialAsset, applyMaterialAssets, serializedVar, getMaterialIdsOf, MATERIAL_ID_VAR, MaterialAsset } from './materials'
+import { resolveMaterialRefs, applyMaterialAsset, applyMaterialAssets, serializedVar, getMaterialIdsOf, MATERIAL_ID_VAR, MATERIAL_IDS_VAR, MaterialAsset } from './materials'
 import { skinnedModelJsonOf as skinnedJson, flattenModelAsset, nodeJsonTrs, modelTransformDelta, carryModelAssetFields } from './modelClips'
 import type { AnimationAsset } from './animationAssets'
 import { applyModelAnimations, modelAnimationIds } from './animationResolve'
@@ -284,6 +285,16 @@ export function nodeJsonHasModel(nodeJson: any): boolean {
 }
 
 /** True if the asset carries LOD levels or a cull distance (i.e. it instantiates as a LodGroupNode). */
+/**
+ * The tree `instantiateModelAsset` builds for `asset`, as names and nesting only: the LOD wrapper with the
+ * asset root and each level under it, or the asset root alone. What `detachForeignChildren` compares a
+ * placed copy against to tell the asset's nodes from the ones the user added.
+ */
+export function modelInstanceShape(asset: ModelAsset, models?: ModelAsset[]): { name?: string; children?: any[] } {
+  if (!modelAssetHasLodBehavior(asset)) return asset.nodeJson
+  return { name: asset.name, children: [asset.nodeJson, ...resolvedLods(asset, models).map(l => l.nodeJson)] }
+}
+
 export function modelAssetHasLodBehavior(asset: ModelAsset): boolean {
   return !!asset.lods?.length || (asset.cullDistance ?? 0) > 0
 }
@@ -738,3 +749,87 @@ export function instantiateModelAsset(asset: ModelAsset, parent: Node, materials
   }
   return clone.id
 }
+
+// =====================================================================================================
+// Parts of a model, saved on their own (the model tab's Parts section)
+// =====================================================================================================
+
+/** One piece of a model the Parts section can pick: a mesh node, or one material range of a merged one. */
+export interface ModelPart {
+  nodeId: string
+  /** A material sub-mesh of a merged mesh node; absent = the whole node. */
+  submesh?: number
+}
+
+/**
+ * A mesh node's serialized form with ONE of its material sub-meshes kept (`'only'`) or removed
+ * (`'without'`). The geometry is compacted to what the kept ranges use (engine `extractSubmesh` /
+ * `withoutSubmesh`), and the per-sub-mesh material links follow, so the result is a node like any other.
+ * `'only'` drops the node's children: they hang off the whole mesh, not off one material of it.
+ */
+export async function submeshNodeJson(node: ModelNode, submesh: number, mode: 'only' | 'without'): Promise<any> {
+  const json = await node.serialize()
+  const model = mode === 'only' ? extractSubmesh(node.model, submesh) : withoutSubmesh(node.model, submesh)
+  json.model = model.serialize()
+  const ids = getMaterialIdsOf(node)
+  const kept = mode === 'only' ? [ids[submesh]] : ids.filter((_, i) => i !== submesh)
+  const vars = { ...(json.variables ?? {}) }
+  const access = vars[MATERIAL_ID_VAR]?.access
+  delete vars[MATERIAL_IDS_VAR]
+  delete vars[MATERIAL_ID_VAR]
+  if (kept.length > 1) vars[MATERIAL_IDS_VAR] = { type: 'string', value: JSON.stringify(kept), ...(access ? { access } : {}) }
+  if (kept[0]) vars[MATERIAL_ID_VAR] = { type: 'string', value: kept[0], ...(access ? { access } : {}) }
+  json.variables = vars
+  if (mode === 'only') json.children = []
+  return json
+}
+
+/**
+ * A new model asset made of one part of `source` — a mesh node of the open model, or one material
+ * sub-mesh of it. The part keeps the orientation and size it has IN the model (its transform relative to
+ * `frame`, the model root's parent, so the root's own rotation/scale are baked in) and is re-centred on
+ * its own bounds, so it drops where the user points. A skinned part keeps the source's rig and clips
+ * (`rigId`/`animationIds` carried from `source`); LOD levels and cull distance are the source's and stay.
+ */
+export async function buildPartAsset(source: ModelAsset, part: Node, frame: Node | null, submesh: number | undefined,
+                                     name: string): Promise<ModelAsset> {
+  const json = submesh === undefined ? await part.serialize() : await submeshNodeJson(part as ModelNode, submesh, 'only')
+  // Its links back to the source are not the new asset's.
+  if (json.variables) delete json.variables[MODEL_ID_VAR]
+  const holder = new Node(name)
+  parseByType(holder, json)
+  const child = holder.children[holder.children.length - 1]
+  if (!child) throw new Error('the part produced no node')
+
+  // Where the part sits inside the model, as one transform: everything from the model's frame down.
+  const rel = mat4.create()
+  if (frame) {
+    const inv = mat4.invert(mat4.create(), frame.worldTransform)
+    if (inv) mat4.multiply(rel, inv, part.worldTransform)
+    else mat4.copy(rel, part.worldTransform)
+  } else mat4.copy(rel, part.worldTransform)
+  const t = vec3.create(), r = quat.create(), sc = vec3.create()
+  decomposeTRS(rel, t, r, sc)
+  child.setPosition([t[0], t[1], t[2]])
+  child.setQuaternion(r)
+  child.setScale([sc[0], sc[1], sc[2]])
+  recenterOnBounds(holder, child, [1, 1, 1])
+
+  const materialIds = new Set<string>()
+  const collect = (n: Node) => { for (const id of getMaterialIdsOf(n)) if (id) materialIds.add(id); n.children.forEach(collect) }
+  collect(child)
+  const asset = flattenModelAsset(await buildModelAsset(holder, [...materialIds], '', undefined, undefined, undefined, source))
+  asset.name = name
+  delete (asset as any).lods
+  delete (asset as any).cullDistance
+  delete (asset as any).lodSource
+  return asset
+}
+
+/** `base`, or `base 2`, `base 3`… — the first name no model in `taken` has. */
+export function uniqueModelName(base: string, taken: Iterable<string>): string {
+  const names = new Set(taken)
+  if (!names.has(base)) return base
+  for (let i = 2; ; i++) if (!names.has(`${base} ${i}`)) return `${base} ${i}`
+}
+

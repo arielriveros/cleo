@@ -1,5 +1,5 @@
 import { useProject } from '../ProjectContext'
-import { Modal, ModalHeader, ModalFooter } from '../../components/ui'
+import { Modal, ModalHeader, ModalFooter, Button } from '../../components/ui'
 
 // Shown when a scene is switched between 2D and 3D while it still holds the other dimension's authoring.
 // `setSceneDimension` parks a promise (confirmDimensionSwitch) that this resolves. Nothing is deleted;
@@ -16,12 +16,12 @@ export default function DimensionSwitchModal() {
   return (
     <Modal onClose={() => resolveDimensionConfirm(false)} className='w-[440px]'>
       <ModalHeader>
-        <div className='text-sm font-semibold'>Switch this scene to {to}?</div>
+        <div className='text-ui-lg font-semibold'>Switch this scene to {to}?</div>
       </ModalHeader>
 
-      <div className='px-4 py-3 text-sm text-gray-300 space-y-2'>
+      <div className='px-4 py-3 text-ui text-fg space-y-2'>
         <p>
-          This scene contains <span className='font-semibold text-white'>{count} {noun}</span>, which
+          This scene contains <span className='font-semibold text-fg'>{count} {noun}</span>, which
           a {to} scene does not use. {count === 1 ? 'It' : 'They'} will stop rendering and stop colliding.
         </p>
         <p>
@@ -35,18 +35,16 @@ export default function DimensionSwitchModal() {
       </div>
 
       <ModalFooter>
-        <button
-          className='px-3 py-1.5 text-xs rounded bg-control hover:bg-control-hover'
-          onClick={() => resolveDimensionConfirm(false)}
-        >
+        <Button onClick={() => resolveDimensionConfirm(false)}>
           Cancel
-        </button>
-        <button
-          className='px-3 py-1.5 text-xs rounded bg-primary hover:bg-primary-hover font-semibold'
+        </Button>
+        <Button
+          variant='primary'
+          className='font-semibold'
           onClick={() => resolveDimensionConfirm(true)}
         >
           Switch to {to}
-        </button>
+        </Button>
       </ModalFooter>
     </Modal>
   )

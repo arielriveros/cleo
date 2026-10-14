@@ -37,6 +37,17 @@ describe('buildParticleSystemAsset', () => {
 })
 
 describe('toRuntimeSystem', () => {
+  it('carries the effect LOD and each emitter Detail through to the node', () => {
+    const source = defaultParticleSystem()
+    source.lod = { enabled: true, levels: [{ distance: 20, spawnScale: 0.5, stepScale: 2 }], cullDistance: 80, scaleBursts: false }
+    source.emitters[0].maxLod = 0
+    const runtime = toRuntimeSystem(buildParticleSystemAsset('Fire', source))
+    expect(runtime.lod).toEqual(source.lod)
+    expect(runtime.emitters[0].maxLod).toBe(0)
+    const node = new ParticleSystemNode('fire', { system: runtime })
+    expect(node.system.lod.cullDistance).toBe(80)
+  })
+
   it('returns a parsed copy that shares nothing with the library record', () => {
     const asset = buildParticleSystemAsset('Fire')
     const runtime = toRuntimeSystem(asset)

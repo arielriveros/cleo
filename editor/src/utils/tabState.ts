@@ -14,8 +14,10 @@ const tabStateKey = () => lsKey(LS_KEYS.editorTabs);
 // 'landscape' and 'tilemap' are the dimension-specific sculpting modes; the selector offers whichever
 // matches the scene's 2D/3D setting. A mode missing from MAIN_MODES silently resets to 'scene' on reload
 // AND cannot be entered at all -- setEditorMode only commits a MainMode.
-export type MainMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'renderer' | 'input';
-export const MAIN_MODES: readonly MainMode[] = ['scene', 'landscape', 'tilemap', 'ui', 'renderer', 'input'];
+export type MainMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'options';
+export const MAIN_MODES: readonly MainMode[] = ['scene', 'landscape', 'tilemap', 'ui', 'options'];
+/** Modes a saved session may name that were folded into Options (Renderer, Input). */
+const RETIRED_MODES: Record<string, MainMode> = { renderer: 'options', input: 'options' };
 
 export type TabState = {
   version: 1;
@@ -100,7 +102,7 @@ function sanitize(raw: any, sceneTabId: string): TabState | null {
   if (!sceneTab) tabs.unshift({ id: sceneTabId, kind: 'scene', title: 'Scene' });
 
   const activeTabId = tabs.some(t => t.id === raw.activeTabId) ? raw.activeTabId : sceneTabId;
-  const mainMode: MainMode = MAIN_MODES.includes(raw.mainMode) ? raw.mainMode : 'scene';
+  const mainMode: MainMode = MAIN_MODES.includes(raw.mainMode) ? raw.mainMode : (RETIRED_MODES[raw.mainMode] ?? 'scene');
   return { version: 1, tabs, activeTabId, mainMode };
 }
 

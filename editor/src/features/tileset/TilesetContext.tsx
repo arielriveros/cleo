@@ -28,6 +28,20 @@ type TilesetContextValue = {
   /** Selected tile indices. The atlas grid writes it; the inspector edits whatever is in it. */
   selection: number[]
   setSelection: (indices: number[]) => void
+  /**
+   * The tile whose animation the atlas is currently picking frames for, or null. While set, clicking a
+   * tile in the atlas APPENDS it to this tile's frames instead of selecting it.
+   */
+  framePick: number | null
+  /**
+   * Start picking frames for `tile`. `before` is the tile's metadata to restore on cancel — pass it when the
+   * caller has just changed the tile (turning Animated on seeds a frame); otherwise the current one is kept.
+   */
+  startFramePick: (tile: number, before?: TileMeta | null) => void
+  /** Keep the picked frames and leave picking. */
+  finishFramePick: () => void
+  /** Put the tile back exactly as it was when picking started, and leave picking. */
+  cancelFramePick: () => void
   /** Write the working copy back to the library. */
   save: () => void
   dirty: boolean
@@ -56,6 +70,9 @@ export function TilesetProvider({ children }: { children: React.ReactNode }) {
   const assetRef = useRef<TilesetAsset | null>(null)
   assetRef.current = asset
   const [selection, setSelection] = useState<number[]>([])
+  const [framePick, setFramePick] = useState<number | null>(null)
+  /** The picked tile's metadata as it was before picking — what Cancel restores. `null` = it had none. */
+  const pickBeforeRef = useRef<{ tile: number; meta: TileMeta | null } | null>(null)
   const loadedIdRef = useRef<string | null>(null)
 
   // Adopt the tab's asset when it changes. Guarded on the id rather than the library array, so a save
@@ -65,6 +82,7 @@ export function TilesetProvider({ children }: { children: React.ReactNode }) {
       loadedIdRef.current = null
       setAsset(null)
       setSelection([])
+      setFramePick(null)
       return
     }
     if (loadedIdRef.current === editingTilesetId) return
@@ -73,7 +91,9 @@ export function TilesetProvider({ children }: { children: React.ReactNode }) {
     loadedIdRef.current = editingTilesetId
     setAsset(JSON.parse(JSON.stringify(found)))
     setSelection([])
+    setFramePick(null)
   }, [editingTilesetId, tilesets])
+
 
   const tabId = activeTab.kind === 'tileset' ? activeTab.id : null
 
@@ -116,6 +136,31 @@ export function TilesetProvider({ children }: { children: React.ReactNode }) {
     return true
   }, [eventEmitter, patch])
 
+  const startFramePick = useCallback((tile: number, before?: TileMeta | null) => {
+    const current = assetRef.current?.tiles[tile]
+    const meta = before !== undefined ? before : (current ?? null)
+    pickBeforeRef.current = { tile, meta: meta ? JSON.parse(JSON.stringify(meta)) : null }
+    setFramePick(tile)
+  }, [])
+  const finishFramePick = useCallback(() => {
+    pickBeforeRef.current = null
+    setFramePick(null)
+  }, [])
+  const cancelFramePick = useCallback(() => {
+    const before = pickBeforeRef.current
+    pickBeforeRef.current = null
+    setFramePick(null)
+    if (before) setTileMeta(before.tile, before.meta ?? undefined)
+  }, [setTileMeta])
+
+  // Escape CANCELS picking, wherever focus is — the atlas has no keyboard focus of its own. Done keeps.
+  useEffect(() => {
+    if (framePick === null) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') cancelFramePick() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [framePick, cancelFramePick])
+
   const save = useCallback(() => { if (asset) saveTileset(asset) }, [asset, saveTileset])
 
   // Hand the save back to EngineContext so Ctrl+S, Save All and the close-tab prompt can reach the working
@@ -127,9 +172,11 @@ export function TilesetProvider({ children }: { children: React.ReactNode }) {
   }, [tabId, save, registerTilesetApply])
 
   const value = useMemo<TilesetContextValue>(() => ({
-    asset, patch, importAtlas, setTileMeta, tileMeta, selection, setSelection, save,
+    asset, patch, importAtlas, setTileMeta, tileMeta, selection, setSelection,
+    framePick, startFramePick, finishFramePick, cancelFramePick, save,
     dirty: !!(tabId && dirtyTabs[tabId]),
-  }), [asset, patch, importAtlas, setTileMeta, tileMeta, selection, save, tabId, dirtyTabs])
+  }), [asset, patch, importAtlas, setTileMeta, tileMeta, selection, framePick, startFramePick, finishFramePick,
+       cancelFramePick, save, tabId, dirtyTabs])
 
   return <TilesetContext.Provider value={value}>{children}</TilesetContext.Provider>
 }

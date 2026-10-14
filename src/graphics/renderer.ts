@@ -420,6 +420,11 @@ export interface RenderSettings {
     taaEnabled: boolean;
     frustumCulling: boolean;
     foliageCullDistance: number;
+    /**
+     * Multiplies every particle system's LOD distances and cull distance (each `.vfx` authors its own;
+     * see particles/particleLod.ts). 2 keeps full detail twice as far; 0.5 thins effects sooner.
+     */
+    particleLodDistanceScale: number;
     foliageDensityFalloff: number;
     foliageCellSize: number;
     terrainLodEnabled: boolean;
@@ -477,6 +482,8 @@ interface QualityTier {
     shadowFilterMode: number;
     /** Filter kernel radius in shadow texels; 0 collapses to a single (hard-edged) tap. */
     shadowFilterRadius: number;
+    /** Particle LOD distance multiplier (see RenderSettings.particleLodDistanceScale). */
+    particleLodDistanceScale: number;
     bloomEnabled: boolean;
     motionBlurEnabled: boolean;
     taaEnabled: boolean;
@@ -491,6 +498,7 @@ const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier> = {
         ssaoEnabled: true, ssaoSamples: 64, ssaoResolutionScale: 1.0,
         shadowMapResolution: 4096, shadowCascades: 4, shadowFilterMode: 1, shadowFilterRadius: 2.0,
         bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true,
+        particleLodDistanceScale: 1.5,
     },
     high: {
         renderScale: 1.0,
@@ -498,6 +506,7 @@ const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier> = {
         ssaoEnabled: true, ssaoSamples: 24, ssaoResolutionScale: 0.5,
         shadowMapResolution: 2048, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
         bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true,
+        particleLodDistanceScale: 1,
     },
     medium: {
         renderScale: 1.0,
@@ -507,6 +516,7 @@ const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier> = {
         // Kept at medium: one fullscreen resolve is cheap next to what this tier already spends on
         // clouds and shadows, and aliasing is the most visible artefact left at a reduced tier.
         bloomEnabled: true, motionBlurEnabled: false, taaEnabled: true,
+        particleLodDistanceScale: 0.75,
     },
     low: {
         renderScale: 0.75,
@@ -514,6 +524,7 @@ const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier> = {
         ssaoEnabled: false, ssaoSamples: 16, ssaoResolutionScale: 0.5,
         shadowMapResolution: 1024, shadowCascades: 2, shadowFilterMode: 0, shadowFilterRadius: 0.0,
         bloomEnabled: false, motionBlurEnabled: false, taaEnabled: false,
+        particleLodDistanceScale: 0.5,
     },
 };
 
@@ -1238,6 +1249,8 @@ export class Renderer {
     private _frustumCulling: boolean = true;
     // Foliage cells beyond this camera distance are skipped (world units; 0 = disabled).
     private _foliageCullDistance: number = 65;
+    /** See RenderSettings.particleLodDistanceScale. */
+    private _particleLodDistanceScale: number = 1;
     // Foliage spatial-grid cell size (world units); smaller = tighter culling, more draw calls.
     // MUST match FoliageLayer.cellSize's default, or the first frame after every load rebuilds the grid.
     private _foliageCellSize: number = 13;
@@ -2233,6 +2246,7 @@ export class Renderer {
             width: this._renderWidth, height: this._renderHeight,
             ambient, sunDirection, sunColor,
             visible: this._frustumCulling ? (min, max) => this._frustum.intersectsAABB(min, max) : undefined,
+            lodDistanceScale: this._particleLodDistanceScale,
         };
     }
     private readonly _particleViewProj: mat4 = mat4.create();
@@ -6106,9 +6120,24 @@ export class Renderer {
      * which is what makes it safe on the forward and sprite paths that read the camera from their own
      * lighting block instead.
      */
+    private static readonly _UV_IDENTITY = [1, 1, 0, 0];
+
     private _applyMaterialProperties(material: Material): void {
         for (const [name, value] of material.properties)
             this._shaderManager.setUniform(`u_material.${name}`, value);
+        // Uniforms stick to the program, so a Basic material built without `intensity` (Material.Basic sets
+        // it) would inherit the last sprite's overdrive. Pin it to 1 instead.
+        if (material.type === 'basic' && !material.properties.has('intensity'))
+            this._shaderManager.setUniform('u_material.intensity', 1);
+        // The same sticky-uniform guard for the texture mapping (chunks/uvProjection.wgsl): a lit material
+        // built without the factories would otherwise inherit the last draw's tiling or projection.
+        if (!material.properties.has('uvTransform')) {
+            this._shaderManager.setUniform('u_material.uvTransform', Renderer._UV_IDENTITY);
+            this._shaderManager.setUniform('u_material.uvProjection', 0);
+            this._shaderManager.setUniform('u_material.uvSpace', 0);
+            this._shaderManager.setUniform('u_material.uvWorldSize', 1);
+            this._shaderManager.setUniform('u_material.uvBlend', 4);
+        }
         this._shaderManager.setUniform('u_material.viewPos', this._activeCamera.position);
         this._shaderManager.setUniform('u_material.sunDirection', this._sunDirection);
         // Renderer state in a material block for the third time, and the same reason as the two above:
@@ -7242,6 +7271,10 @@ export class Renderer {
 
 
         this._shaderManager.setUniform('u_model', spriteMatrix);
+
+        // Per draw, from the tile on screen: an animated sprite follows its frame's overdrive, and two
+        // sprites sharing a tileset never fight over one value.
+        material.properties.set('intensity', node.overdrive);
 
         // Set material uniforms + bind textures
         if (pipeline) {
@@ -9244,6 +9277,9 @@ export class Renderer {
             particleSteps: frameStats.particleSteps,
             particleSystems: frameStats.particleSystems,
             particleSystemsCulled: frameStats.particleSystemsCulled,
+            particleSystemsLodCulled: frameStats.particleSystemsLodCulled,
+            particleSystemsLodReduced: frameStats.particleSystemsLodReduced,
+            particleColliders: frameStats.particleColliders,
             particleDraws: frameStats.particleDraws,
             particleGpuCreates: frameStats.particleGpuCreates,
             particleGpuReuses: frameStats.particleGpuReuses,
@@ -9555,6 +9591,11 @@ export class Renderer {
     public set frustumCulling(enabled: boolean) { this._frustumCulling = enabled; }
 
     /** Distance (world units) beyond which foliage cells are culled; 0 disables distance culling. */
+    public get particleLodDistanceScale(): number { return this._particleLodDistanceScale; }
+    public set particleLodDistanceScale(v: number) {
+        this._particleLodDistanceScale = Number.isFinite(v) ? Math.min(4, Math.max(0.25, v)) : 1;
+    }
+
     public get foliageCullDistance(): number { return this._foliageCullDistance; }
     public set foliageCullDistance(d: number) { this._foliageCullDistance = Math.max(0, d); }
 
@@ -9630,6 +9671,7 @@ export class Renderer {
         this._recreateShadowTargets(t.shadowMapResolution, t.shadowCascades);
         this._shadowFilterMode = t.shadowFilterMode;
         this._shadowFilterRadius = t.shadowFilterRadius;
+        this._particleLodDistanceScale = t.particleLodDistanceScale;
         // Re-applying the tier must not leave the label saying "custom" from an earlier manual tweak.
         this._quality = preset;
         // A preset moves a dozen knobs at once; tell any panel mirroring them to re-read.
@@ -9939,6 +9981,7 @@ export class Renderer {
             taaEnabled: this._taaEnabled,
             frustumCulling: this._frustumCulling,
             foliageCullDistance: this._foliageCullDistance,
+            particleLodDistanceScale: this._particleLodDistanceScale,
             foliageDensityFalloff: this._foliageDensityFalloff,
             foliageCellSize: this._foliageCellSize,
             terrainLodEnabled: this._terrainLodEnabled,
@@ -10041,6 +10084,7 @@ export class Renderer {
         if (s.taaEnabled !== undefined) this.taaEnabled = s.taaEnabled;
         if (s.frustumCulling !== undefined) this.frustumCulling = s.frustumCulling;
         if (s.foliageCullDistance !== undefined) this.foliageCullDistance = s.foliageCullDistance;
+        if (s.particleLodDistanceScale !== undefined) this.particleLodDistanceScale = s.particleLodDistanceScale;
         if (s.foliageDensityFalloff !== undefined) this.foliageDensityFalloff = s.foliageDensityFalloff;
         if (s.foliageCellSize !== undefined) this.foliageCellSize = s.foliageCellSize;
         if (s.terrainLodEnabled !== undefined) this.terrainLodEnabled = s.terrainLodEnabled;

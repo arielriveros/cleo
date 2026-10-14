@@ -32,7 +32,7 @@ export default function InputMonitor({ mapName }: { mapName: string }) {
   if (rows.length === 0) return <p className={hintClass}>No actions in this map yet.</p>
 
   return (
-    <div className='flex flex-col gap-0.5 font-mono text-[11px]'>
+    <div className='flex flex-col gap-0.5 font-mono text-ui-sm'>
       {rows.map(({ name, state }) => (
         <div key={name} className='flex items-center gap-2'>
           <span className={`${labelClass} w-24 truncate`} title={name}>{name}</span>
@@ -42,7 +42,7 @@ export default function InputMonitor({ mapName }: { mapName: string }) {
               ? `${state.vector[0].toFixed(2)}, ${state.vector[1].toFixed(2)}`
               : state.value.toFixed(3)}
           </span>
-          <span className={state.pressed ? 'text-white' : 'text-muted'}>{state.phase}</span>
+          <span className={state.pressed ? 'text-fg' : 'text-muted'}>{state.phase}</span>
           {/* Which device won this frame — the same value a HUD would read to swap key prompts for
               pad glyphs, shown here so a binding that never wins is visibly never winning. */}
           <span className='ml-auto text-muted'>{state.device ?? '—'}</span>

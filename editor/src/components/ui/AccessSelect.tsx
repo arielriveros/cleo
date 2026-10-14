@@ -50,7 +50,7 @@ export function AccessSelect({ value, onChange, options = ['public', 'private', 
         'inline-flex items-center gap-1 rounded border border-border bg-control px-1.5 py-1 hover:bg-control-hover disabled:opacity-60 transition-colors',
         className
       )}
-      trigger={<><span style={{ color: cur.color }}>{cur.icon}</span><span className='text-[9px] text-muted'>▼</span></>}
+      trigger={<><span style={{ color: cur.color }}>{cur.icon}</span><span className='text-ui-2xs text-muted'>▼</span></>}
     >
       {(close) => (
         <div className='min-w-[132px] flex flex-col'>
@@ -61,7 +61,7 @@ export function AccessSelect({ value, onChange, options = ['public', 'private', 
                 key={opt}
                 type='button'
                 onClick={() => { onChange(opt); close(); }}
-                className={cn('flex items-center gap-2 px-2 py-1 rounded text-xs text-left hover:bg-control transition-colors', opt === value && 'bg-control')}
+                className={cn('flex items-center gap-2 px-2 py-1 rounded text-ui text-left hover:bg-control transition-colors', opt === value && 'bg-control')}
               >
                 <span style={{ color: m.color }}>{m.icon}</span>
                 <span>{m.label}</span>

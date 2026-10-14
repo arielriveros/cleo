@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { LandscapeNode, Logger, Loader, decodeHeightmap, imageFromHeights, encodePng16, encodeRaw16 } from 'cleo'
 import type { HeightImage } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
-import { Button, Hint, NumberInput, Popover } from '../../../components/ui'
+import { LandscapeIcon } from '../../sceneInspector/nodeIcons'
+import { Button, Field, FileButton, Hint, MenuItem, NumberInput, Popover, Select } from '../../../components/ui'
 import { useCleoEngine } from '../../EngineContext'
 import { useHistory } from '../../HistoryContext'
 import { rebuildTerrain } from '../../landscape/rebuildTerrain'
@@ -13,8 +14,6 @@ import { clamp } from '../../../utils/math';
 
 // Node inspector for a LandscapeNode: the terrain's STRUCTURE — size, sampling, chunking — plus the
 // heightmap import/export that replaces its shape wholesale. Landscape mode holds the brushes that edit it.
-
-const label = 'text-xs text-gray-300'
 
 const RESOLUTION_HINT = 'Height samples per side. More detail, more memory. A layer’s height map is drawn by the parallax march, not by these vertices, so Resolution controls the terrain’s SHAPE and a material’s Depth controls its surface relief.'
 const MASK_HINT = 'Texels per side of the paint masks. Independent of Resolution: a road wants a finer mask than the ground wants vertices. 1024 over 200 m is 20 cm per texel.'
@@ -153,33 +152,27 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
   }
 
   return (
-    <Collapsable title='Landscape' persistKey='node.landscape' defaultOpen>
+    <Collapsable title='Landscape' icon={<LandscapeIcon />} persistKey='node.landscape' defaultOpen>
       <div className='p-2 space-y-2'>
-        <div className='flex items-center justify-between'>
-          <span className={label} title='World size of the terrain, centred on this node'>Size</span>
+        <Field className='my-0' labelClassName='w-auto' label='Size' hint='World size of the terrain, centred on this node'>
           <NumberInput className='w-20' value={size} step={10} min={10}
             onChange={(v) => setSize(Math.max(10, v))} />
-        </div>
-        <div className='flex items-center justify-between'>
-          <span className={label} title={RESOLUTION_HINT}>Resolution</span>
+        </Field>
+        <Field className='my-0' labelClassName='w-auto' label='Resolution' hint={RESOLUTION_HINT}>
           <NumberInput className='w-20' value={resolution} step={1} min={8} max={513}
             onChange={(v) => setResolution(clamp(v, 8, 513))} />
-        </div>
-        <div className='flex items-center justify-between'>
-          <span className={label} title={CHUNK_QUADS_HINT}>
-            Chunk quads
-          </span>
+        </Field>
+        <Field className='my-0' labelClassName='w-auto' label='Chunk quads' hint={CHUNK_QUADS_HINT}>
           <NumberInput className='w-20' value={chunkQuads} step={8} min={8} max={64}
             onChange={(v) => setChunkQuads(clamp(v, 8, 64))} />
-        </div>
-        <div className='flex items-center justify-between'>
-          <span className={label} title={MASK_HINT}>Paint resolution</span>
-          <select className='w-20 bg-surface-raised text-white border border-control-hover rounded px-1 py-[2px] text-xs'
+        </Field>
+        <Field className='my-0' labelClassName='w-auto' label='Paint resolution' hint={MASK_HINT}>
+          <Select className='w-20 px-1 py-[2px]'
             value={maskResolution} onChange={e => setMaskResolution(Number(e.target.value))}>
             {(MASK_SIZES as readonly number[]).includes(maskResolution) ? null : <option value={maskResolution}>{maskResolution}</option>}
             {MASK_SIZES.map(n => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </div>
+          </Select>
+        </Field>
         <Hint>{totalVerts.toLocaleString()} vertices ({totalMB.toFixed(1)} MB) across the whole terrain.</Hint>
 
         {/* Enabled even with no pending config change: a rebuild also re-bakes relief and re-resamples
@@ -192,26 +185,20 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
 
         <div className='pt-2 border-t border-control space-y-2'>
           <div className='flex gap-1'>
-            <label className='flex-1 bg-control hover:bg-control-hover rounded px-2 py-1 text-xs text-center cursor-pointer'
-              title={IMPORT_HINT}>
+            {/* FileButton clears the input after each pick, so picking the SAME file again still fires
+                `change`. Without it a second pick of one file was silently ignored. */}
+            <FileButton className='flex-1 py-1' title={IMPORT_HINT} accept='.png,.jpg,.jpeg,.bmp,.raw,.r16' disabled={importing}
+              onFiles={(files) => { void importHeightmap(files[0]) }}>
               {importing ? 'Importing…' : 'Import heightmap'}
-              <input type='file' className='hidden' accept='.png,.jpg,.jpeg,.bmp,.raw,.r16' disabled={importing}
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  // Cleared so picking the SAME file again still fires `change`. Without it a second pick
-                  // of one file was silently ignored.
-                  e.target.value = ''
-                  void importHeightmap(file)
-                }} />
-            </label>
-            <Popover align='right' title='Download the height field' trigger={<span className='text-xs px-2'>Export ▾</span>}>
-              <div data-cleo-overlay className='flex flex-col p-1 text-xs min-w-[170px]'>
-                <button className='text-left px-2 py-1 rounded hover:bg-control-hover' onClick={() => exportHeightmap('png16')}
-                  title='Full precision; the height range is kept in the file name'>16-bit PNG</button>
-                <button className='text-left px-2 py-1 rounded hover:bg-control-hover' onClick={() => exportHeightmap('raw16')}
-                  title='Headerless little-endian R16, as Unreal, Unity and World Machine read it'>RAW (R16)</button>
-                <button className='text-left px-2 py-1 rounded hover:bg-control-hover text-muted' onClick={() => exportHeightmap('png8')}
-                  title='256 levels, normalised to the terrain’s own range'>8-bit PNG</button>
+            </FileButton>
+            <Popover align='right' title='Download the height field' trigger={<span className='text-ui px-2'>Export ▾</span>}>
+              <div data-cleo-overlay className='flex flex-col p-1 text-ui min-w-[170px]'>
+                <MenuItem onClick={() => exportHeightmap('png16')}
+                  title='Full precision; the height range is kept in the file name'>16-bit PNG</MenuItem>
+                <MenuItem onClick={() => exportHeightmap('raw16')}
+                  title='Headerless little-endian R16, as Unreal, Unity and World Machine read it'>RAW (R16)</MenuItem>
+                <MenuItem onClick={() => exportHeightmap('png8')}
+                  title='256 levels, normalised to the terrain’s own range'>8-bit PNG</MenuItem>
               </div>
             </Popover>
           </div>

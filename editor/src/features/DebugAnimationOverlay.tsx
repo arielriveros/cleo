@@ -5,6 +5,7 @@ import { useCleoEngine } from './EngineContext'
 import { usePlayback } from './PlaybackContext'
 import { useDebugVisibility } from './DebugVisibilityContext'
 import FieldDebugReadout from './animation/FieldDebugReadout'
+import { Select } from '../components/ui'
 
 // The animation blend readout, in the VIEWPORT. The State Machine inspector shows the same numbers, but it
 // runs against the editor's preview scene, which has no physics, so every MEASURED built-in reads 0 there.
@@ -48,27 +49,27 @@ export default function DebugAnimationOverlay() {
 
   return (
     <div data-cleo-overlay
-      className='absolute bottom-2 right-2 z-20 w-64 select-none rounded-md border border-control bg-surface-raised/95 p-2 text-white shadow-lg'>
+      className='absolute bottom-2 right-2 z-20 w-64 select-none rounded-md border border-control bg-surface-raised/95 p-2 text-fg shadow-lg'>
       <div className='mb-1 flex items-center gap-1'>
-        <span className='text-[10px] font-medium text-gray-300'>Animation blend</span>
+        <span className='text-ui-xs font-medium text-muted'>Animation blend</span>
         {targets.length > 1 && (
-          <select
-            className='ml-auto min-w-0 flex-1 rounded border border-control-hover bg-control px-1 py-0.5 text-[10px] text-white'
+          <Select
+            className='ml-auto min-w-0 flex-1 px-1 py-0.5 text-ui-xs'
             value={current?.id ?? ''} onChange={e => setSelectedId(e.target.value)}>
             {targets.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
+          </Select>
         )}
-        {targets.length === 1 && <span className='ml-auto truncate text-[10px] text-dim'>{current?.name}</span>}
+        {targets.length === 1 && <span className='ml-auto truncate text-ui-xs text-dim'>{current?.name}</span>}
       </div>
 
       {!current
-        ? <p className='text-[10px] text-gray-500'>
+        ? <p className='text-ui-xs text-dim'>
             No animated model in the {isPlayMode ? 'play' : 'editor'} scene.
           </p>
         : <FieldDebugReadout animator={current.animator} />}
 
       {!isPlayMode && (
-        <p className='mt-1 border-t border-control pt-1 text-[10px] text-gray-500'>
+        <p className='mt-1 border-t border-control pt-1 text-ui-xs text-dim'>
           Editor has no physics — measured inputs (speed, angle) read 0 here. Enter Play for real values.
         </p>
       )}

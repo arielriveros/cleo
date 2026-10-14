@@ -118,7 +118,7 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
           </Button>
         )}
         {!state.possessedId && (
-          <p className='text-[11px] text-muted mt-1'>
+          <p className='text-ui-sm text-muted mt-1'>
             This controller drives nothing until it possesses a Character.
           </p>
         )}
@@ -189,7 +189,7 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
                   <label className={labelClass}>Fallback point</label>
                   <AxisInput step={0.1} value={state.goalPoint}
                     onChange={(v) => apply({ goalPoint: v as [number, number, number] })} />
-                  <p className='text-[11px] text-muted mt-1'>
+                  <p className='text-ui-sm text-muted mt-1'>
                     Used when the target key is literally <code>point</code>. A goal that names a thing and
                     has none holds still rather than walking to the origin.
                   </p>
@@ -198,7 +198,7 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
             )}
 
             {state.goal === 'script' && (
-              <p className='text-[11px] text-muted mb-2'>
+              <p className='text-ui-sm text-muted mb-2'>
                 This controller writes no intent. Add a script with an <code>onThink(delta)</code> handler
                 and drive the pawn through <code>this.possessed.drive()</code> — possession, the aim basis
                 and obstacle avoidance still work.

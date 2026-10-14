@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { useStateMachine, OP_LABEL, effectiveType } from './StateMachineContext'
-import { SegmentedControl } from '../../components/ui'
+import { Button, SegmentedControl } from '../../components/ui'
 import MachineGraph from '../../components/MachineGraph'
 import { LayerTabs } from './LayerPanels'
 import type { GraphLinkModel, GraphNodeModel } from '../../components/MachineGraph'
@@ -167,10 +167,10 @@ export default function StateGraph() {
             value='graph'
             onChange={v => setGraphView(v === 'graph')} />
           <LayerTabs />
-          <button className='px-2 py-1 rounded bg-primary hover:bg-primary-hover text-white border border-primary-active text-xs'
-            onClick={addAtCenter} title='Add a new state (or double-click the canvas)'>+ State</button>
-          <button className='px-2 py-1 rounded bg-success hover:bg-success-hover text-white text-xs'
-            onClick={apply} title='Save the machine onto the model (used at runtime and by Simulate)'>Apply</button>
+          <Button variant='primary'
+            onClick={addAtCenter} title='Add a new state (or double-click the canvas)'>+ State</Button>
+          <Button variant='success'
+            onClick={apply} title='Save the machine onto the model (used at runtime and by Simulate)'>Apply</Button>
         </>
       }
     />

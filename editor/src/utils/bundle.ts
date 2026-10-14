@@ -90,6 +90,11 @@ export interface BundleLibraries {
    * and nothing said why.
    */
   inputMap?: InputMap | null
+  /**
+   * Engine runtime + publish-window options (options/projectSettings), or null/absent for the defaults.
+   * Same rule as `inputMap`: written only when they differ, so a default project exports as before.
+   */
+  projectSettings?: unknown | null
 }
 
 /** One texture payload as it crosses the worker boundary and lives inside the zip (bytes, not base64). */

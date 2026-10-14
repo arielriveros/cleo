@@ -40,6 +40,11 @@ function findIn(root: Node, socket: string, exclude: Node): ModelNode | null {
  * `'parent'` walks UP, and at each ancestor also looks DOWN into it: a character is usually a holder node
  * with its skinned meshes beneath it, and a weapon dropped under the holder is a sibling of the mesh, not
  * its child. The node's own subtree is never searched — a node cannot follow a socket on itself.
+ *
+ * The climb STOPS at the first character it passes, and never searches from the scene root. Unbounded, a
+ * weapon whose own character had no such socket (a model swapped for a rig with other bone names) found
+ * the first model ANYWHERE in the scene that had one, and rode a stranger's hand: the player's sword on a
+ * distant knight, hurting it from across the level, and every enemy's blade swinging on that same hand.
  */
 export function resolveSocketOwner(node: Node, attachment: SocketAttachment, byId: (id: string) => Node | null): ModelNode | null {
     if (attachment.target !== 'parent') {
@@ -47,9 +52,12 @@ export function resolveSocketOwner(node: Node, attachment: SocketAttachment, byI
         if (!target || isWithin(target, node)) return null;
         return findIn(target, attachment.socket, node);
     }
-    for (let a = node.parent; a; a = a.parent) {
+    const sceneRoot = node.scene?.root ?? null;
+    for (let a = node.parent; a && a !== sceneRoot; a = a.parent) {
         const found = findIn(a, attachment.socket, node);
         if (found) return found;
+        // A character owns everything beneath it; above it are other characters.
+        if (a.nodeType === 'character') break;
     }
     return null;
 }

@@ -97,9 +97,9 @@ souls-like game features it has or lacks. It is a map for two jobs:
 | Feature | | Where / note |
 |---|---|---|
 | Character and player Controller | ✅ | `drive()`, `setMoveWorld`. |
-| AI Controller with a behaviour state machine | ✅ | Idle, Chase, Engage, Return, Dead, driven by blackboard flags. |
+| AI Controller with a behaviour state machine | ✅ | One AI graph asset per enemy type: Idle, Chase, Approach, Strafe, Retreat, Attack, Stagger, Return, Dead (+ Phase Shift on the boss). |
 | Perception (field of view, range, memory) | ✅ | Every enemy brain. |
-| Blackboard | ✅ | `SoulsEnemyBrain` writes the flags. |
+| Blackboard | ✅ | `SoulsEnemyBrain` writes the target; the graph reads senses and builtin enemy fields. |
 | Steering | ✅ | |
 | NavMesh and pathfinding | ◐ | A `Nav Mesh` node exists but ships **unbaked**, so chases fall back to straight lines until you bake it. |
 | AI Brain assets, goal planner, fuzzy logic, flocking | ✗ | The behaviour machine is inline on each brain. |
@@ -175,17 +175,18 @@ souls-like game features it has or lacks. It is a map for two jobs:
 | | Blade hitboxes | ✅ | `SoulsHitbox.stepSwing`: the blade capsule swept between frames against the hurtbox capsules | Whole-body hurtboxes; no limb multipliers. |
 | | Wall bounce | ✅ | `blocksSwings` bodies stop a light swing: sparks, recoil | Heavies plough through. |
 | Poise and damage | Enemy poise, stagger, hyper armour | ✅ | `SoulsEnemy.receiveHit` | |
-| | Player flinch, heavy stagger with knockback | ✅ | `SoulsPlayer.receiveDamage` | |
+| | Player flinch, heavy stagger with knockback | ✅ | `SoulsPlayer._onDamaged` (via `SoulsCharacter.receiveHit`) | |
 | | Player poise | ✗ | SOULS_DEMO §13 | Ready: script only. |
-| | Scaling (STR/DEX), requirements, defence | ✅ | `SoulsGameManager.attackRating` | |
+| | Scaling (STR/DEX), requirements, defence | ✅ | `SoulsWeapon.attackRating`, `SoulsCharacter.applyDefense` | |
 | Progression | Souls and level-up (Vigor, Endurance, Strength, Dexterity) | ✅ | `SoulsBonfireMenu` | |
 | | Bloodstain recovery | ✅ | `SoulsGameManager.dropBloodstain` | |
 | Items | Estus flask, Estus Shard | ✅ | `SoulsPlayer`, `SoulsPickup` | |
-| | Two-weapon swap | ✅ | | |
+| | Two-weapon swap | ✅ | `SoulsCharacter.equipWeapon` | Weapons are templates (variants of `Weapon`), spawned by name from `weaponTemplates`. |
+| | Enemies drop their weapon on death (physics body until the corpse goes) | ✅ | `SoulsCharacter.dropWeapon` | |
 | | Inventory / equipment menu, armour, rings, consumables | ✗ | | Ready: UI widgets plus scripts. Images would help (`uiImage`). |
 | | Keys and keyed doors | ✗ | | Ready: `SoulsDoor` plus a pickup `kind`. |
 | Enemies | Melee, ranged caster, elite with hyper armour | ✅ | 4 enemy templates | |
-| | Spacing, strafing, leash and return, attack weights, cooldowns | ✅ | `SoulsEnemy`, `SoulsEnemyBrain` | |
+| | Spacing, strafing, leash and return, attack weights, cooldowns | ✅ | AI graphs (decisions), `SoulsEnemy` (attack choice, movement) | |
 | | Respawn on rest | ✅ | `SoulsEnemySpawn` | |
 | | Pathfinding around obstacles | ◐ | Navmesh unbaked | Ready: bake it in the editor (SOULS_DEMO §11.11). |
 | Boss | Fog gate, boss bar, two phases (roar, speed-up, new attacks), reset on death, reward | ✅ | `SoulsFogGate`, `SoulsEnemy._startPhase2` | |

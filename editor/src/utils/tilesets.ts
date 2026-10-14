@@ -25,6 +25,8 @@ export type TilesetAsset = {
   /** Derived from the image once at import and then stored — see TilesetConfig for why. */
   columns: number
   rows: number
+  /** Linear brightness multiplier for every tile (TilesetConfig.overdrive). Absent = 1. */
+  overdrive?: number
   /** Sparse: only the tiles that actually carry metadata. */
   tiles: Record<number, TileMeta>
   terrains: TerrainSet[]
@@ -117,6 +119,38 @@ export function resliceTileset(asset: TilesetAsset, patch: Partial<TilesetAsset>
   return next
 }
 
+// --- Animation frames, as picked on the atlas ----------------------------------------------------------
+
+/**
+ * Atlas labels for an animation: each tile that plays gets its 1-based position(s) in the sequence, so a
+ * tile used twice (a ping-pong flame) reads "2,4".
+ */
+export function frameBadges(frames: readonly number[]): Map<number, string> {
+  const at = new Map<number, number[]>()
+  frames.forEach((tile, i) => { const list = at.get(tile); if (list) list.push(i + 1); else at.set(tile, [i + 1]) })
+  return new Map([...at].map(([tile, positions]) => [tile, positions.join(',')]))
+}
+
+/** `frames` with `picked` added at the end, in the order they were picked. */
+export function appendFrames(frames: readonly number[], picked: readonly number[]): number[] {
+  return [...frames, ...picked]
+}
+
+/** `frames` without the LAST occurrence of `tile` — undoing the most recent pick of it. */
+export function removeLastFrame(frames: readonly number[], tile: number): number[] {
+  const i = frames.lastIndexOf(tile)
+  return i < 0 ? [...frames] : [...frames.slice(0, i), ...frames.slice(i + 1)]
+}
+
+/** `frames` with the entry at `from` moved to `to`. */
+export function moveFrame(frames: readonly number[], from: number, to: number): number[] {
+  const next = [...frames]
+  if (from < 0 || from >= next.length || to < 0 || to >= next.length) return next
+  const [tile] = next.splice(from, 1)
+  next.splice(to, 0, tile)
+  return next
+}
+
 /** The engine-facing view: exactly what a Tilemap registers and embeds. */
 export function toRuntimeTileset(asset: TilesetAsset): Tileset {
   const cfg: TilesetConfig = {
@@ -130,6 +164,7 @@ export function toRuntimeTileset(asset: TilesetAsset): Tileset {
     spacing: asset.spacing,
     columns: asset.columns,
     rows: asset.rows,
+    overdrive: asset.overdrive,
   }
   const ts = new Tileset(cfg)
   for (const key of Object.keys(asset.tiles ?? {})) {
@@ -156,6 +191,7 @@ export function fromRuntimeTileset(ts: Tileset, name: string): TilesetAsset {
     spacing: json.spacing,
     columns: json.columns,
     rows: json.rows,
+    ...(json.overdrive !== undefined ? { overdrive: json.overdrive } : {}),
     tiles: json.tiles,
     terrains: json.terrains,
     variantSets: json.variantSets,

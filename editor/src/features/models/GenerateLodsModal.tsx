@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Modal, ModalHeader, ModalFooter, Toggle } from '../../components/ui'
+import { Modal, ModalHeader, ModalFooter, Toggle, Button, NumberInput } from '../../components/ui'
 import { halveTo } from '../../utils/lodTextures'
 import { clamp } from '../../utils/math';
 
@@ -52,7 +52,7 @@ export default function GenerateLodsModal(props: GenerateLodsModalProps) {
         }]
     })
 
-    const num = 'w-[74px] bg-surface-raised border border-control rounded px-2 py-1 text-white text-right'
+    const num = 'w-[74px] text-right'
     const tris = (ratio: number) => Math.max(0, Math.round(props.sourceTriangles * ratio)).toLocaleString()
 
     // Distances must ascend, or LodGroupNode picks a level the user did not intend.
@@ -61,13 +61,13 @@ export default function GenerateLodsModal(props: GenerateLodsModalProps) {
     return (
         <Modal onClose={props.onCancel} className='w-[460px]'>
             <ModalHeader>
-                <div className='text-sm font-semibold'>Generate LOD levels</div>
-                <div className='text-lg font-bold truncate' title={props.modelName}>{props.modelName}</div>
+                <div className='text-ui font-semibold text-muted'>Generate LOD levels</div>
+                <div className='text-ui-lg font-semibold truncate' title={props.modelName}>{props.modelName}</div>
             </ModalHeader>
 
-            <div className='px-4 py-3 space-y-3 text-sm' title={GENERATE_HINT}>
+            <div className='px-4 py-3 space-y-3 text-ui' title={GENERATE_HINT}>
                 <div className='space-y-2'>
-                    <div className='flex items-center gap-2 text-[11px] text-gray-400 px-1'>
+                    <div className='flex items-center gap-2 text-ui-sm text-muted px-1'>
                         <span className='w-[46px]'>Level</span>
                         <span className='flex-1'>Triangles</span>
                         <span className='w-[74px] text-right'>From dist.</span>
@@ -75,29 +75,29 @@ export default function GenerateLodsModal(props: GenerateLodsModalProps) {
                     </div>
                     {specs.map((s, i) => (
                         <div key={i} className='flex items-center gap-2'>
-                            <span className='w-[46px] text-xs'>LOD{i + 1}</span>
+                            <span className='w-[46px] text-ui'>LOD{i + 1}</span>
                             <div className='flex-1 flex items-center gap-2'>
-                                <input type='number' min={1} max={99} className={num}
+                                <NumberInput min={1} max={99} className={num}
                                        value={Math.round(s.ratio * 100)}
-                                       onChange={e => patch(i, { ratio: clamp(Number(e.target.value) / 100, 0.01, 0.99) })} />
-                                <span className='text-[11px] text-gray-400'>% · ~{tris(s.ratio)}</span>
+                                       onChange={v => patch(i, { ratio: clamp(v / 100, 0.01, 0.99) })} />
+                                <span className='text-ui-sm text-muted'>% · ~{tris(s.ratio)}</span>
                             </div>
-                            <input type='number' min={0} className={num}
+                            <NumberInput min={0} className={num}
                                    value={s.distance}
-                                   onChange={e => patch(i, { distance: Math.max(0, Number(e.target.value)) })} />
+                                   onChange={v => patch(i, { distance: Math.max(0, v) })} />
                             {downscale && (
-                                <span className='w-[60px] text-right text-[11px] text-gray-400'>
+                                <span className='w-[60px] text-right text-ui-sm text-muted'>
                                     {props.largestTexture > 0 ? `${halveTo(props.largestTexture, i + 1)}px` : '—'}
                                 </span>
                             )}
                             {specs.length > 1 && (
-                                <button className='text-red-300 text-xs px-1' title='Remove this level'
-                                        onClick={() => setSpecs(prev => prev.filter((_, k) => k !== i))}>✕</button>
+                                <Button variant='remove' size='icon' title='Remove this level'
+                                        onClick={() => setSpecs(prev => prev.filter((_, k) => k !== i))}>✕</Button>
                             )}
                         </div>
                     ))}
-                    <button className='text-[11px] bg-control hover:bg-control-hover rounded px-2 py-1'
-                            onClick={addLevel}>+ Add level</button>
+                    <Button size='sm'
+                            onClick={addLevel}>+ Add level</Button>
                 </div>
 
                 <div className='pt-2 border-t border-control'>
@@ -106,22 +106,22 @@ export default function GenerateLodsModal(props: GenerateLodsModalProps) {
                 </div>
 
                 {outOfOrder && (
-                    <p className='text-[11px] text-warning'>
+                    <p className='text-ui-sm text-warning'>
                         Distances must increase with each level, or the wrong level takes over.
                     </p>
                 )}
                 {props.sourceTriangles === 0 && (
-                    <p className='text-[11px] text-warning'>This model has no geometry to reduce.</p>
+                    <p className='text-ui-sm text-warning'>This model has no geometry to reduce.</p>
                 )}
             </div>
 
             <ModalFooter>
-                <button className='px-3 py-1.5 text-xs rounded bg-control hover:bg-control-hover' onClick={props.onCancel}>Cancel</button>
-                <button className='px-3 py-1.5 text-xs rounded bg-success hover:bg-success-hover font-semibold disabled:opacity-40'
+                <Button onClick={props.onCancel}>Cancel</Button>
+                <Button variant='success' className='font-semibold disabled:opacity-40'
                         disabled={outOfOrder || specs.length === 0 || props.sourceTriangles === 0}
                         onClick={() => props.onGenerate(specs, downscale)}>
                     Generate {specs.length} level{specs.length === 1 ? '' : 's'}
-                </button>
+                </Button>
             </ModalFooter>
         </Modal>
     )

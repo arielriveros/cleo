@@ -212,6 +212,36 @@ export function swingReleaseWeight(lift: number, swingRelease: number): number {
     return 1 - t * t * (3 - 2 * t);
 }
 
+/**
+ * Where a leg's knee should point, as a POLE for {@link solveTwoBone}.
+ *
+ * A knee animated with a clear bend keeps the clip's own bend plane — a walk cycle's knee already knows
+ * where it goes. But a leg animated near-straight (a standing frame, a T-pose bind, the planted leg of a
+ * stride) has no bend plane worth reading: `cross(upper, lower)` is noise, and the two legs of one rig
+ * disagree — one folding forward, the other out sideways or back through the shin. Below
+ * `minBend` (a fraction of the leg's length), or when the clip's knee points BEHIND the character, the
+ * knee is sent along `forward` instead: both legs fold the same way, the way knees do.
+ *
+ * `forward` is the character's facing in the same space as the joints, flattened onto the ground plane.
+ * Returns undefined when there is nothing to go on, so the solver falls back to the pose.
+ */
+export function kneePole(root: vec3, mid: vec3, tip: vec3, forward: vec3, minBend = 0.05): vec3 | undefined {
+    const axis = vec3.sub(vec3.create(), tip, root);
+    const axisLen = vec3.length(axis);
+    const legLen = vec3.distance(root, mid) + vec3.distance(mid, tip);
+    if (axisLen < 1e-8 || legLen < 1e-8) return undefined;
+    vec3.scale(axis, axis, 1 / axisLen);
+    const toMid = vec3.sub(vec3.create(), mid, root);
+    // The knee's offset from the hip-ankle line: the direction the clip bends it.
+    const bend = vec3.scaleAndAdd(vec3.create(), toMid, axis, -vec3.dot(toMid, axis));
+    const bendLen = vec3.length(bend);
+    const hasForward = vec3.length(forward) > 1e-8;
+    if (bendLen > minBend * legLen && (!hasForward || vec3.dot(bend, forward) >= 0))
+        return vec3.scaleAndAdd(vec3.create(), mid, bend, legLen / bendLen);
+    if (!hasForward) return undefined;
+    return vec3.scaleAndAdd(vec3.create(), mid, forward, legLen / vec3.length(forward));
+}
+
 /** Any axis perpendicular to `v`. Used only when a limb is straight and has no bend plane of its own. */
 function anyPerpendicular(out: vec3, v: vec3): vec3 {
     // Cross with whichever cardinal axis `v` is least aligned to, so the cross product is never degenerate.

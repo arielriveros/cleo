@@ -9,7 +9,7 @@ import { Node } from 'cleo'
  * When its attack gap runs out, an engaged enemy picks among the attacks that are off `cooldown`, whose
  * `minRange`..`maxRange` contains the distance to the player, and whose `phase` it has reached (0/1:
  * always; 2: boss phase two only). It avoids repeating the last one when anything else fits, then rolls
- * weighted by `weight`. See SoulsGameManager.pickEnemyAttack.
+ * weighted by `weight`. See SoulsEnemy.pickAttack.
  *
  * ## Timing
  *

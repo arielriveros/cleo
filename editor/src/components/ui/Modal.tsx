@@ -14,12 +14,12 @@ export interface ModalProps {
 export function Modal({ onClose, children, className, overlayClassName }: ModalProps) {
   return (
     <div
-      className={cn('fixed inset-0 z-50 flex items-center justify-center bg-black/50', overlayClassName)}
+      className={cn('fixed inset-0 z-50 flex items-center justify-center bg-scrim/50', overlayClassName)}
       onClick={onClose}
     >
       <div
         className={cn(
-          'max-h-[85vh] overflow-y-auto bg-surface-raised border border-control rounded-md shadow-lg text-white select-none',
+          'max-h-[85vh] overflow-y-auto bg-surface-raised border border-control rounded-md shadow-lg text-fg select-none',
           className
         )}
         onClick={(e) => e.stopPropagation()}

@@ -108,7 +108,7 @@ export default function TextureCanvas(props: Props) {
 
   if (!image) {
     return (
-      <div className='flex-1 flex items-center justify-center text-xs text-muted'>
+      <div className='flex-1 flex items-center justify-center text-ui text-muted'>
         Decoding image…
       </div>
     )
@@ -143,7 +143,7 @@ export default function TextureCanvas(props: Props) {
         }}
       />
       {probe && (
-        <div className='sticky bottom-0 left-0 mt-2 inline-flex items-center gap-2 rounded bg-surface/90 px-2 py-1 text-[11px] text-muted'>
+        <div className='sticky bottom-0 left-0 mt-2 inline-flex items-center gap-2 rounded bg-surface/90 px-2 py-1 text-ui-sm text-muted'>
           <span
             className='inline-block h-3 w-3 rounded-sm border border-border'
             style={{ background: `rgb(${probe.rgba[0]} ${probe.rgba[1]} ${probe.rgba[2]})` }}

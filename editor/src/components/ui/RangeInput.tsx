@@ -21,7 +21,7 @@ export function RangeInput({ value, onChange, min, max, step = 0.1, className }:
     <div className={cn('flex items-center gap-1', className)}>
       <NumberInput value={value[0]} min={min} max={max} step={step} title='Minimum'
                    onChange={v => onChange([clamp(v), Math.max(clamp(v), value[1])])} />
-      <span className='text-dim text-[11px]'>–</span>
+      <span className='text-dim text-ui-sm'>–</span>
       <NumberInput value={value[1]} min={min} max={max} step={step} title='Maximum'
                    onChange={v => onChange([Math.min(value[0], clamp(v)), clamp(v)])} />
     </div>

@@ -66,6 +66,23 @@ describe('physics substeps', () => {
     });
 });
 
+describe('physics substep cap (a project option)', () => {
+    it('caps the substep count, lengthening the steps instead', () => {
+        expect(PhysicsSystem.substepsFor(0.1, 2)).toBe(2);
+        expect(PhysicsSystem.substepsFor(0.1, 32)).toBe(6);
+        expect(PhysicsSystem.substepsFor(1 / 30, 0)).toBe(1);   // never below one
+        expect(PhysicsSystem.substepsFor(1 / 30, 2.9)).toBe(2);
+    });
+
+    it('the world still covers the whole frame under a low cap', () => {
+        const p = physics();
+        p.maxSubsteps = 1;
+        const body = mover(p);
+        for (let i = 0; i < 20; i++) p.update(0.1);
+        expect(body.position.x).toBeCloseTo(8, 1);   // 4 m/s for 2 s
+    });
+});
+
 describe('ragdoll lifetime', () => {
     /** A stand-in ragdoll: its bodies are in the world, the node is whatever the test makes of it. */
     function fakeRagdoll(p: PhysicsSystem, node: any) {

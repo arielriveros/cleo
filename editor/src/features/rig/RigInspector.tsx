@@ -216,14 +216,15 @@ export default function RigInspector() {
             {preview && counts && (
               <>
                 <div className='flex items-center justify-between mt-1'>
-                  <span className='text-[11px] text-gray-300'>
+                  <span className='text-ui-sm text-muted'>
                     {counts.mapped}/{counts.total} mapped
                     {counts.manual ? ` · ${counts.manual} manual` : ''}
                     {counts.unmapped ? ` · ${counts.unmapped} unmapped` : ''}
                   </span>
                   <Button
                     variant='ghost'
-                    className='text-[11px]'
+                    size='sm'
+                    className='text-ui-sm'
                     title='Discard the saved corrections for this source rig'
                     onClick={() => clearOverrides(sourceRigId)}
                   >

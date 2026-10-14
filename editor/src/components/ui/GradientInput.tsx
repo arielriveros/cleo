@@ -127,7 +127,7 @@ function GradientEditor({ value, onChange }: { value: Gradient; onChange: (g: Gr
   const marker = (track: Track, t: number, index: number, fill: string) => (
     <div key={`${track}${index}`}
          className={cn('absolute -translate-x-1/2 h-4 w-3 cursor-grab rounded-sm border',
-                       selected?.track === track && selected.index === index ? 'border-white' : 'border-black/60')}
+                       selected?.track === track && selected.index === index ? 'border-fg' : 'border-scrim/60')}
          style={{ left: `${t * 100}%`, background: fill, top: 1 }}
          onPointerDown={e => drag(track, index, e)}
          onDoubleClick={() => remove(track, index)} />
@@ -146,10 +146,10 @@ function GradientEditor({ value, onChange }: { value: Gradient; onChange: (g: Gr
            onClick={e => add('color', e)}>
         {value.color.map((k, i) => marker('color', k.t, i, hex(k.c)))}
       </div>
-      <div className='text-[10px] text-dim'>Click a track to add a stop · drag to move · double-click to remove</div>
+      <div className='text-ui-xs text-dim'>Click a track to add a stop · drag to move · double-click to remove</div>
 
       {selColor && (
-        <div className='flex items-center gap-1 text-[11px] text-muted'>
+        <div className='flex items-center gap-1 text-ui-sm text-muted'>
           <ColorInput color={hex(selColor.c)} onChange={c => onChange({
             ...value, color: value.color.map((k, i) => (i === selected!.index ? { ...k, c } : k)),
           })} />
@@ -159,7 +159,7 @@ function GradientEditor({ value, onChange }: { value: Gradient; onChange: (g: Gr
         </div>
       )}
       {selAlpha && (
-        <div className='flex items-center gap-1 text-[11px] text-muted'>
+        <div className='flex items-center gap-1 text-ui-sm text-muted'>
           <Slider min={0} max={1} step={0.01} value={selAlpha.a} label='Alpha'
                   onChange={a => onChange({ ...value, alpha: value.alpha.map((k, i) => (i === selected!.index ? { ...k, a } : k)) })} />
           <span>at</span>

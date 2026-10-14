@@ -62,7 +62,7 @@ export default function VirtualControlsEditor(props: Props) {
     <div className='flex flex-col gap-2'>
       <div
         ref={surface}
-        className='relative rounded border border-border bg-black/40 mx-auto'
+        className='relative rounded border border-border bg-scrim/40 mx-auto'
         style={{ width: PREVIEW_W, height: PREVIEW_H }}
         onPointerDown={e => { if (e.target === surface.current) props.onSelect(null) }}
       >
@@ -74,8 +74,8 @@ export default function VirtualControlsEditor(props: Props) {
               key={control.id}
               onPointerDown={startDrag(control)}
               title={`${control.id} — drag to place`}
-              className={`absolute rounded-full cursor-move flex items-center justify-center text-[9px] select-none
-                ${active ? 'border-2 border-selected bg-selected/25 text-white' : 'border border-border bg-white/10 text-muted'}`}
+              className={`absolute rounded-full cursor-move flex items-center justify-center text-ui-2xs select-none
+                ${active ? 'border-2 border-selected bg-selected/25 text-fg' : 'border border-border bg-fg/10 text-muted'}`}
               style={{
                 left: layout.cx - layout.radius,
                 top: layout.cy - layout.radius,

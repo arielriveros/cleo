@@ -45,3 +45,14 @@ export function forwardYaw(node: Node): number {
   const f = node.worldForward
   return Math.atan2(f[0], f[2]) * 180 / Math.PI
 }
+
+/**
+ * How much a stat adds to a weapon that scales with it fully: 0 at 10, 0.6 at 30, 0.9 at 50, then a
+ * quarter of a percent per point. Soft caps are the whole reason a build has to choose.
+ */
+export function statBonus(stat: number): number {
+  if (stat <= 10) return 0
+  if (stat <= 30) return (stat - 10) / 20 * 0.6
+  if (stat <= 50) return 0.6 + (stat - 30) / 20 * 0.3
+  return 0.9 + (stat - 50) * 0.0025
+}

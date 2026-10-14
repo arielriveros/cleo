@@ -184,52 +184,50 @@ export default function TextureInspector(props: { tex: string, material: Materia
         {img ? (
           <img className='h-full w-full object-cover rounded pointer-events-none' src={img.src} />
         ) : (
-          <div className={`h-full w-full rounded border border-dashed ${isDragOver ? 'border-primary' : 'border-border'} grid place-items-center text-xs text-muted`}>
+          <div className={`h-full w-full rounded border border-dashed ${isDragOver ? 'border-primary' : 'border-border'} grid place-items-center text-ui text-muted`}>
             {isDragOver ? 'Release to assign' : 'No texture'}
           </div>
         )}
 
         <div className={`absolute inset-0 transition-opacity ${open ? 'opacity-100 visible' : 'opacity-0 invisible group-hover:opacity-100 group-hover:visible'}`}>
-          <button
-            className='absolute top-1 right-1 h-6 w-6 rounded-full bg-danger hover:bg-danger-hover text-white flex items-center justify-center border border-danger disabled:opacity-50'
+          <Button variant='remove'
+            size='icon' className='absolute top-1 right-1 h-6 w-6 p-0 rounded-full disabled:opacity-50'
             title='Remove texture'
             onClick={deleteTexture}
             disabled={!texture}
-          >
-            ✕
-          </button>
+          >✕</Button>
           <div className='absolute left-1 right-1 bottom-1 flex items-center gap-1'>
-            <button
-              className='flex-1 px-2 py-1 rounded bg-black/60 hover:bg-black/80 text-white text-xs border border-white/20'
+            <Button
+              className='flex-1 px-2 bg-scrim/60 hover:bg-scrim/80 border-fg/20'
               title='Select texture'
               onClick={() => setOpen(v => !v)}
             >
               Select
-            </button>
-            <button
-              className='px-2 py-1 rounded bg-black/60 hover:bg-black/80 text-white text-xs border border-white/20'
+            </Button>
+            <Button
+              className='px-2 bg-scrim/60 hover:bg-scrim/80 border-fg/20'
               title='Upload texture'
               aria-label='Upload texture'
               onClick={() => fileInputRef.current?.click()}
             >
               <span className='inline-flex items-center justify-center w-4 h-4 align-middle'><ImportIcon /></span>
-            </button>
+            </Button>
           </div>
 
           {open && (
             <div className='absolute left-0 top-full mt-2 z-[9999] w-64 rounded-md border border-border bg-surface-raised shadow-lg p-2 flex flex-col gap-2'>
               <TextInput placeholder='Search textures...' value={query} onChange={setQuery} autoFocus />
               <div className='max-h-56 overflow-auto rounded border border-border bg-surface'>
-                <button className={cn('w-full flex items-center gap-2 px-2 py-1 hover:bg-control text-left text-xs', !texture && 'bg-control')} onClick={() => onTextureSelect('None')}>
+                <button className={cn('w-full flex items-center gap-2 px-2 py-1 hover:bg-control text-left text-ui', !texture && 'bg-control')} onClick={() => onTextureSelect('None')}>
                   <span className='w-7 h-7 rounded bg-surface-raised grid place-items-center shrink-0 text-muted'>∅</span>
                   <span className='truncate'>None</span>
                 </button>
                 {filtered.map((key) => {
                   const src = thumbSrc(key);
                   return (
-                    <button key={key} className={cn('w-full flex items-center gap-2 px-2 py-1 hover:bg-control text-left text-xs', key === texture && 'bg-control')} onClick={() => onTextureSelect(key)}>
+                    <button key={key} className={cn('w-full flex items-center gap-2 px-2 py-1 hover:bg-control text-left text-ui', key === texture && 'bg-control')} onClick={() => onTextureSelect(key)}>
                       <span className='w-7 h-7 rounded bg-surface-raised overflow-hidden grid place-items-center shrink-0'>
-                        {src ? <img src={src} className='w-full h-full object-cover' /> : <span className='text-[10px]'>🖼️</span>}
+                        {src ? <img src={src} className='w-full h-full object-cover' /> : <span className='text-ui-xs'>🖼️</span>}
                       </span>
                       <span className='truncate flex-1'>{key}</span>
                       {key === texture && <span className='text-primary'>✓</span>}
@@ -237,7 +235,7 @@ export default function TextureInspector(props: { tex: string, material: Materia
                   );
                 })}
                 {filtered.length === 0 && (
-                  <div className='px-2 py-3 text-xs text-muted'>No matches</div>
+                  <div className='px-2 py-3 text-ui text-muted'>No matches</div>
                 )}
               </div>
               <Button className='w-full' onClick={() => fileInputRef.current?.click()}>Upload…</Button>
@@ -249,7 +247,7 @@ export default function TextureInspector(props: { tex: string, material: Materia
       <input ref={fileInputRef} id={`${props.tex}-upload`} className='hidden' type='file' onChange={ e => onTextureUpload(e)} />
 
       {textureMissing && texture && (
-        <div className='absolute -bottom-2 left-2 translate-y-full bg-warning text-black text-xs px-2 py-1 rounded shadow' title={texture}>
+        <div className='absolute -bottom-2 left-2 translate-y-full bg-warning text-bg text-ui px-2 py-1 rounded shadow' title={texture}>
           <span> Missing </span>
           <span> {texture} </span>
         </div>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import type { TilemapTool } from '../EngineContext'
-import { Button, Hint, Select, Toggle } from '../../components/ui'
+import { Button, Hint, Select, Toggle, labelClass } from '../../components/ui'
 import { useActiveTilemap } from './useActiveTilemap'
 
 // The floating tool card for tilemap mode: a `data-cleo-overlay` panel over the viewport whose controls
@@ -48,7 +48,7 @@ export default function TilemapInspector() {
 
   if (!node) {
     return (
-      <div data-cleo-overlay className='absolute top-2 left-2 z-20 w-56 rounded border border-control bg-surface-raised/95 p-2 text-white shadow-lg'>
+      <div data-cleo-overlay className='absolute top-2 left-2 z-20 w-56 rounded border border-control bg-surface-raised/95 p-2 text-fg shadow-lg'>
         <Hint>No tilemap in this scene. Add one from the scene tree’s Add menu.</Hint>
       </div>
     )
@@ -57,7 +57,7 @@ export default function TilemapInspector() {
   return (
     <div
       data-cleo-overlay
-      className='absolute top-2 left-2 z-20 w-56 max-h-[85%] overflow-y-auto rounded border border-control bg-surface-raised/95 p-2 text-white shadow-lg space-y-2'
+      className='absolute top-2 left-2 z-20 w-56 max-h-[85%] overflow-y-auto rounded border border-control bg-surface-raised/95 p-2 text-fg shadow-lg space-y-2'
     >
       <div className='grid grid-cols-4 gap-1'>
         {TOOLS.map(t => (
@@ -75,7 +75,7 @@ export default function TilemapInspector() {
       </div>
 
       <div className='flex items-center justify-between'>
-        <span className='text-[11px] text-gray-300' title='Keyboard: X, Y and Z'>Flip X / Y / Rot</span>
+        <span className={labelClass} title='Keyboard: X, Y and Z'>Flip X / Y / Rot</span>
         <span className='flex gap-1'>
           <Toggle checked={orient.flipX} onChange={(c) => { const o = { ...orient, flipX: c }; setOrient(o); write({ orient: o }) }} />
           <Toggle checked={orient.flipY} onChange={(c) => { const o = { ...orient, flipY: c }; setOrient(o); write({ orient: o }) }} />
@@ -86,7 +86,6 @@ export default function TilemapInspector() {
       {tool === 'randomize' && (
         <div className='space-y-1'>
           <Select
-            className='text-xs'
             value={variantSetId ?? ''}
             onChange={(e) => {
               const v = e.target.value === '' ? null : Number(e.target.value)
@@ -103,7 +102,6 @@ export default function TilemapInspector() {
       {tool === 'autotile' && (
         <div className='space-y-1'>
           <Select
-            className='text-xs'
             value={terrainId ?? ''}
             onChange={(e) => {
               const v = e.target.value === '' ? null : Number(e.target.value)

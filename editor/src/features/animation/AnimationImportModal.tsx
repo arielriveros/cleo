@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { applyManualMapping } from 'cleo'
-import type { BoneMapping, BoneMatchKind } from 'cleo'
+import type { BoneMapping } from 'cleo'
 import { useEditorSessions } from '../EditorSessionsContext'
-import { Modal, ModalHeader, ModalFooter, Toggle } from '../../components/ui'
+import { Button, cn, hintClass, Modal, ModalHeader, ModalFooter, TextInput, Toggle } from '../../components/ui'
+import BoneMappingTable from './BoneMappingTable'
 // Shared with the model-import route: a placeholder clip name is renamed after its file in BOTH
 // places, so the same download names its clip the same way whichever door it came in through.
 import { clipNameFromFile } from '../../utils/clipNaming'
@@ -10,19 +11,6 @@ import { clipNameFromFile } from '../../utils/clipNaming'
 // Review modal for importing animation clips: a SKELETON mapping (which source bone drives which target
 // joint) and the CLIP list. Clip counts are recomputed from the live mapping, so a mapping fix shows its
 // effect before Accept, which is where EngineContext runs the retarget.
-
-const KIND_LABEL: Record<BoneMatchKind, string> = {
-  exact: 'exact', normalized: 'name', humanoid: 'auto', spine: 'spine', index: 'index', manual: 'manual', none: '—',
-}
-const KIND_STYLE: Record<BoneMatchKind, string> = {
-  exact: 'bg-success/15 text-green-300',
-  normalized: 'bg-success/15 text-green-300',
-  humanoid: 'bg-primary/15 text-primary',
-  spine: 'bg-primary/15 text-primary',
-  index: 'bg-warning/15 text-warning',
-  manual: 'bg-highlight/20 text-highlight',
-  none: 'bg-red-900 text-red-300',
-}
 
 export default function AnimationImportModal() {
   const { pendingAnimationImport, resolveAnimationImport } = useEditorSessions()
@@ -72,20 +60,17 @@ export default function AnimationImportModal() {
   const exactCount = mapping.entries.filter(e => e.kind === 'exact').length
   const unmappedCount = mapping.entries.length - mappedCount
 
-  // Unmapped rows first: those are the ones needing attention.
-  const rows = [...mapping.entries].sort((a, b) => (a.targetNode === null ? 0 : 1) - (b.targetNode === null ? 0 : 1))
-
   return (
     <Modal onClose={cancel} className='w-[640px]'>
       <ModalHeader>
-        <div className='text-sm font-semibold'>Import animation</div>
-        <div className='text-lg font-bold truncate' title={info.fileName}>{info.fileName}</div>
-        <div className='text-xs text-gray-400 mt-0.5'>{info.clips.length} clip{info.clips.length === 1 ? '' : 's'} found</div>
+        <div className='text-ui-lg font-semibold'>Import animation</div>
+        <div className='text-ui-lg font-bold truncate' title={info.fileName}>{info.fileName}</div>
+        <div className={cn(hintClass, 'mt-0.5')}>{info.clips.length} clip{info.clips.length === 1 ? '' : 's'} found</div>
       </ModalHeader>
 
-      <div className='px-4 py-3 space-y-3 text-sm max-h-[60vh] overflow-y-auto'>
+      <div className='px-4 py-3 space-y-3 text-ui max-h-[60vh] overflow-y-auto'>
         {anyIndexMode ? (
-          <p className='text-[11px] text-warning bg-warning/15 rounded px-2 py-1'>
+          <p className='text-ui-sm text-warning bg-warning/15 rounded px-2 py-1'>
             This model has no stored bone names, so clips are matched by node index (only works for the same export).
             Re-import the model to enable name-based matching and retargeting.
           </p>
@@ -93,11 +78,11 @@ export default function AnimationImportModal() {
           <div className='rounded border border-control'>
             <button className='w-full flex items-center gap-2 px-2 py-1.5 text-left hover:bg-control/40'
               onClick={() => setShowMap(!showMap)}>
-              <span className='text-[11px]'>{showMap ? '▾' : '▸'}</span>
-              <span className='font-semibold text-[12px] flex-1'>Skeleton</span>
+              <span className='text-ui-sm'>{showMap ? '▾' : '▸'}</span>
+              <span className='font-semibold text-ui flex-1'>Skeleton</span>
               {mapping.sameRig
-                ? <span className='text-[11px] text-green-300'>same rig — no retargeting needed</span>
-                : <span className='text-[11px] text-gray-300'>
+                ? <span className='text-ui-sm text-success-fg'>same rig — no retargeting needed</span>
+                : <span className='text-ui-sm text-muted'>
                     {mappedCount}/{mapping.entries.length} mapped
                     {exactCount ? ` · ${exactCount} exact` : ''}
                     {autoCount ? ` · ${autoCount} auto` : ''}
@@ -106,22 +91,9 @@ export default function AnimationImportModal() {
             </button>
 
             {showMap && (
-              <div className='border-t border-control max-h-[220px] overflow-y-auto'>
-                {rows.map(e => (
-                  <div key={e.sourceNode} className='flex items-center gap-2 px-2 py-1 text-[11px] border-b border-control/50 last:border-0'>
-                    <span className='flex-1 truncate' title={e.sourceName ?? `node ${e.sourceNode}`}>{e.sourceName ?? `node ${e.sourceNode}`}</span>
-                    <span className={`px-1.5 py-0.5 rounded shrink-0 ${KIND_STYLE[e.kind]}`}>{KIND_LABEL[e.kind]}</span>
-                    <span className='text-dim shrink-0'>→</span>
-                    <select
-                      className='bg-control text-white border border-control-hover rounded px-1 py-0.5 w-[190px] shrink-0'
-                      value={e.targetNode ?? ''}
-                      onChange={ev => remap(e.sourceNode, ev.target.value === '' ? null : Number(ev.target.value))}>
-                      <option value=''>— none —</option>
-                      {info.targetBones.map(b => <option key={b.node} value={b.node}>{b.name}</option>)}
-                    </select>
-                  </div>
-                ))}
-              </div>
+              // The rig editor's table: one vocabulary (kind chips, unmapped first, "— none —") in both places.
+              <BoneMappingTable mapping={mapping} targetBones={info.targetBones} onRemap={remap}
+                className='border-t border-control max-h-[220px] overflow-y-auto' />
             )}
           </div>
         )}
@@ -132,23 +104,23 @@ export default function AnimationImportModal() {
           const matched = c.animatedNodes.filter(n => (targetOf.get(n) ?? null) !== null).length
           const compatible = matched > 0
           return (
-            <div key={i} className={`rounded border p-2 ${compatible ? 'border-control' : 'border-red-700 bg-danger/10'}`}>
+            <div key={i} className={`rounded border p-2 ${compatible ? 'border-control' : 'border-danger-border bg-danger/10'}`}>
               <div className='flex items-center gap-2'>
                 <span title={compatible ? 'Include this clip' : 'No matching bones — cannot import'}>
                   <Toggle checked={!!include[i]} disabled={!compatible} onChange={() => toggle(i)} />
                 </span>
-                <input
-                  className='flex-1 min-w-0 bg-surface-raised border border-control rounded px-2 py-1 text-xs font-semibold text-white disabled:opacity-50'
+                <TextInput
+                  className='flex-1 min-w-0 font-semibold disabled:opacity-50'
                   value={names[i] ?? ''}
                   disabled={!compatible}
-                  onChange={e => rename(i, e.target.value)}
+                  onChange={v => rename(i, v)}
                   title={`Imported as this name. Parsed from the file as "${c.name}".`}
                 />
-                <span className={`text-[11px] px-1.5 py-0.5 rounded ${compatible ? 'bg-success/15 text-green-300' : 'bg-red-900 text-red-300'}`}>
+                <span className={`text-ui-sm px-1.5 py-0.5 rounded ${compatible ? 'bg-success/15 text-success-fg' : 'bg-danger-surface text-danger-fg'}`}>
                   {compatible ? (mapping.sameRig ? '✓ compatible' : '✓ retargeted') : '✗ incompatible'}
                 </span>
               </div>
-              <div className='mt-1 text-[11px] text-gray-300'>
+              <div className='mt-1 text-ui-sm text-muted'>
                 {matched}/{animated} bones mapped
               </div>
               {/* An unmapped bone's curve is DROPPED at commit and the target bone silently keeps its rest
@@ -156,24 +128,24 @@ export default function AnimationImportModal() {
                   Naming them here is the difference between noticing that in the modal and chasing it in
                   the viewport. */}
               {compatible && matched < animated && (
-                <div className='mt-1 text-[11px] text-warning' title={unmappedNames(c.animatedNodes).join(', ')}>
+                <div className='mt-1 text-ui-sm text-warning' title={unmappedNames(c.animatedNodes).join(', ')}>
                   {animated - matched} bone{animated - matched === 1 ? '' : 's'} unmapped — their motion is
                   dropped: {unmappedNames(c.animatedNodes).slice(0, 4).join(', ')}
                   {animated - matched > 4 ? `, +${animated - matched - 4} more` : ''}
                 </div>
               )}
               {compatible && include[i] && !(names[i] ?? '').trim() && (
-                <div className='mt-1 text-[11px] text-warning'>
+                <div className='mt-1 text-ui-sm text-warning'>
                   A blank name imports as “clip”. Type one to keep it findable.
                 </div>
               )}
               {compatible && include[i] && duplicated.has((names[i] ?? '').trim().toLowerCase()) && (
-                <div className='mt-1 text-[11px] text-warning'>
+                <div className='mt-1 text-ui-sm text-warning'>
                   Another selected clip has this name — the second will be imported as “{(names[i] ?? '').trim()} (2)”.
                 </div>
               )}
               {!compatible && (
-                <div className='mt-1 text-[11px] text-red-200'>
+                <div className='mt-1 text-ui-sm text-danger-fg'>
                   No source bone maps to the skeleton. Open <b>Skeleton</b> above and map at least the hips.
                 </div>
               )}
@@ -183,11 +155,11 @@ export default function AnimationImportModal() {
       </div>
 
       <ModalFooter className='justify-between items-center'>
-        <span className='text-[11px] text-gray-400'>{chosen} selected</span>
+        <span className='text-ui-sm text-muted'>{chosen} selected</span>
         <div className='flex gap-2'>
-          <button className='px-3 py-1.5 text-xs rounded bg-control hover:bg-control-hover' onClick={cancel}>Cancel</button>
-          <button className='px-3 py-1.5 text-xs rounded bg-success hover:bg-success-hover font-semibold disabled:opacity-40 disabled:cursor-not-allowed'
-            disabled={chosen === 0} onClick={accept}>Add {chosen > 0 ? `${chosen} ` : ''}clip{chosen === 1 ? '' : 's'}</button>
+          <Button onClick={cancel}>Cancel</Button>
+          <Button variant='success' className='font-semibold'
+            disabled={chosen === 0} onClick={accept}>Add {chosen > 0 ? `${chosen} ` : ''}clip{chosen === 1 ? '' : 's'}</Button>
         </div>
       </ModalFooter>
     </Modal>

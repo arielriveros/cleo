@@ -43,10 +43,10 @@ export default function SoundTabView() {
   const missing = asset.source.kind === 'audio' && !source
 
   return (
-    <div className='absolute inset-0 flex flex-col bg-surface-sunken text-white'>
+    <div className='absolute inset-0 flex flex-col bg-surface-sunken text-fg'>
       <div className='h-[30px] shrink-0 flex items-center gap-2 px-2 border-b border-border bg-surface-raised'>
         <TextInput className='w-44' value={asset.name} onChange={rename} title='Sound name' />
-        <span className='text-[11px] text-muted'>
+        <span className='text-ui-sm text-muted'>
           {formatDuration(duration)}
           {peaks ? ` · ${peaks.sampleRate} Hz · ${peaks.channels === 1 ? 'mono' : `${peaks.channels} ch`}` : ''}
           {source?.mime ? ` · ${source.mime.replace('audio/', '')}` : ''}
@@ -56,7 +56,7 @@ export default function SoundTabView() {
           <Button size='sm' variant='ghost' onClick={play} title='Play from the start'>▶</Button>
           <Button size='sm' variant='ghost' onClick={pause} disabled={!playing} title='Pause'>❚❚</Button>
           <Button size='sm' variant='ghost' onClick={stop} title='Stop'>■</Button>
-          <span className='text-[11px] text-muted w-32 text-center tabular-nums'>
+          <span className='text-ui-sm text-muted w-32 text-center tabular-nums'>
             {timecode(position)} / {timecode(duration)}
           </span>
           <Button size='sm' onClick={save} disabled={!dirty} title='Save this sound (Ctrl+S)'>Save</Button>
@@ -65,7 +65,7 @@ export default function SoundTabView() {
 
       <div className='flex-1 min-h-0 p-2'>
         {missing ? (
-          <div className='w-full h-full flex items-center justify-center text-xs text-muted'>
+          <div className='w-full h-full flex items-center justify-center text-ui text-muted'>
             The audio file this sample reads is missing. Its settings are intact — re-import the file, or
             point the sample at another one.
           </div>
@@ -84,7 +84,7 @@ export default function SoundTabView() {
         )}
       </div>
 
-      <div className='h-[26px] shrink-0 flex items-center gap-3 px-2 text-[11px] text-muted border-t border-border'>
+      <div className='h-[26px] shrink-0 flex items-center gap-3 px-2 text-ui-sm text-muted border-t border-border'>
         <Toggle
           label='Loop'
           checked={settings.loop}

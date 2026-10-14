@@ -22,6 +22,7 @@ export default function ParticleSystemEditor(props: { node: ParticleSystemNode }
     spawnRateScale: props.node.spawnRateScale,
     tint: [...props.node.tint] as [number, number, number, number],
     cullingMode: props.node.cullingMode,
+    lodEnabled: props.node.lodEnabled,
   })
   const [values, setValues] = useState(read)
   useEffect(() => { setValues(read()) }, [props.node])
@@ -33,6 +34,7 @@ export default function ParticleSystemEditor(props: { node: ParticleSystemNode }
     if (patch.spawnRateScale !== undefined) n.spawnRateScale = patch.spawnRateScale
     if (patch.tint !== undefined) n.tint = patch.tint
     if (patch.cullingMode !== undefined) n.cullingMode = patch.cullingMode
+    if (patch.lodEnabled !== undefined) n.lodEnabled = patch.lodEnabled
     setValues(read())
     eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
   }
@@ -67,6 +69,13 @@ export default function ParticleSystemEditor(props: { node: ParticleSystemNode }
               <option value='pause'>Pause</option>
               <option value='simulate'>Keep simulating</option>
             </Select>
+          </PropertyRow>
+          <PropertyRow label='Distance LOD' divider
+            hint={'Follow the effect\'s LOD (set in the particle editor): spawn less and simulate less often with '
+              + 'distance, and stop drawing past its cull distance. Off: full detail at any distance — for a hero '
+              + 'effect the camera looks at from afar.'
+              + ((props.node.system.lod?.levels.length || props.node.system.lod?.cullDistance) ? '' : ' This effect has no LOD levels yet.')}>
+            <Toggle checked={values.lodEnabled} onChange={lodEnabled => set({ lodEnabled })} />
           </PropertyRow>
           <PropertyRow label='Tint' hint="Multiplies every particle's colour, alpha included.">
             <div className='flex items-center gap-2'>

@@ -25,6 +25,12 @@ interface CleoConfig {
   },
   physics?: {
     gravity?: number[];
+    /** Cap on physics substeps per frame. See `PhysicsSystem.maxSubsteps`. */
+    maxSubsteps?: number;
+  }
+  runtime?: {
+    /** Longest frame delta the loop reports, seconds. See `CleoEngine.maxFrameDelta`. */
+    maxFrameDelta?: number;
   }
 }
 
@@ -52,6 +58,7 @@ export interface EngineInitializeOptions {
 
 export class CleoEngine {
   private _lastTimestamp: number = performance.now();
+  private _maxFrameDelta: number = MAX_DELTA;
   private _timeSinceStart: number = 0;
   private _ready: boolean = false;
 
@@ -83,6 +90,16 @@ export class CleoEngine {
   private static _instance: CleoEngine | null = null;
   public static get instance(): CleoEngine | null { return CleoEngine._instance; }
 
+  /**
+   * The longest frame delta, in seconds, the loop reports (default 0.1 — see MAX_DELTA). A project option:
+   * lower keeps the simulation finer on slow machines at the cost of the game running slower than real
+   * time there; higher keeps real time at the cost of larger steps. Clamped to [1/240, 0.5].
+   */
+  public get maxFrameDelta(): number { return this._maxFrameDelta; }
+  public set maxFrameDelta(seconds: number) {
+    if (Number.isFinite(seconds)) this._maxFrameDelta = Math.min(0.5, Math.max(1 / 240, seconds));
+  }
+
   constructor(config?: CleoConfig) {
     this._renderer = new Renderer({ clearColor: config?.graphics?.clearColor,
                                     shadowMapResolution: config?.graphics?.shadowMapSize,
@@ -93,6 +110,8 @@ export class CleoEngine {
     this._physicsSystem = new PhysicsSystem({
       gravity: config?.physics?.gravity || [0, -9.81, 0]
     });
+    if (config?.physics?.maxSubsteps) this._physicsSystem.maxSubsteps = config.physics.maxSubsteps;
+    if (config?.runtime?.maxFrameDelta) this.maxFrameDelta = config.runtime.maxFrameDelta;
 
     this.onUpdate = () => {};
     this.onPreInitialize = async () => {};
@@ -186,7 +205,7 @@ export class CleoEngine {
       const currentTimestamp = performance.now();
       // Clamped at the source, not per-consumer: _timeSinceStart accumulates this same value, so
       // physics, timers, node.update, onUpdate and `time` stay on one clock. See MAX_DELTA.
-      const deltaTime = Math.min((currentTimestamp - this._lastTimestamp) / 1000, MAX_DELTA);
+      const deltaTime = Math.min((currentTimestamp - this._lastTimestamp) / 1000, this._maxFrameDelta);
 
       // FIRST in the frame: poll the pads, step the gestures, resolve every action. Nothing downstream
       // may read a half-built action table, and physics is downstream. Runs even while paused — a

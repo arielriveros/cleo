@@ -76,12 +76,12 @@ export default function GlslCodeEditor(props: {
         <div ref={containerRef} className='w-full h-[320px]' aria-label='Shader source editor' />
       </div>
       {props.error && (
-        <pre className='mt-1 whitespace-pre-wrap text-[11px] text-danger bg-danger/10 border border-danger-border rounded p-2 max-h-[160px] overflow-auto'>{props.error}</pre>
+        <pre className='mt-1 whitespace-pre-wrap text-ui-sm text-danger bg-danger/10 border border-danger-border rounded p-2 max-h-[160px] overflow-auto'>{props.error}</pre>
       )}
       {/* Rendered independently of `error`, and styled as a warning rather than a failure: a shader can
           compile and run perfectly on WebGL2 while still not being portable to WebGPU. */}
       {props.warning && (
-        <pre className='mt-1 whitespace-pre-wrap text-[11px] text-warning bg-warning/10 border border-warning/40 rounded p-2 max-h-[160px] overflow-auto'>{props.warning}</pre>
+        <pre className='mt-1 whitespace-pre-wrap text-ui-sm text-warning bg-warning/10 border border-warning/40 rounded p-2 max-h-[160px] overflow-auto'>{props.warning}</pre>
       )}
     </div>
   )

@@ -92,8 +92,7 @@ export default function SoundSampleSlot(props: { node: SoundNode; onChange?: () 
           >✎</Button>
         )}
         {props.node.sampleId && (
-          <Button
-            variant='ghost' size='icon' className='text-danger'
+          <Button variant='remove' size='icon'
             title='Unlink (the emitter falls silent)' onClick={() => assign(null)}
           >✕</Button>
         )}

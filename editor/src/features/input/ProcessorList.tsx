@@ -51,7 +51,7 @@ export default function ProcessorList({ chain, onAdd, onRemove, onUpdate, onMove
                 onClick={() => onMove(index, -1)}>↑</Button>
               <Button size='sm' variant='ghost' title='Move later' disabled={index === chain.length - 1}
                 onClick={() => onMove(index, 1)}>↓</Button>
-              <Button size='sm' variant='ghost' title='Remove' onClick={() => onRemove(index)}>✕</Button>
+              <Button variant='remove' size='sm' title='Remove' onClick={() => onRemove(index)}>✕</Button>
             </div>
           </div>
           <ProcessorParams processor={processor} onChange={p => onUpdate(index, p)} />

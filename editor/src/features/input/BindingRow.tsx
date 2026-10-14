@@ -101,7 +101,7 @@ export default function BindingRow(props: Props) {
         <div className='ml-auto flex items-center gap-0.5'>
           <Button size='sm' variant='ghost' active={expanded} onClick={() => setExpanded(v => !v)}
             title='Modifiers and processors'>⋯</Button>
-          <Button size='sm' variant='ghost' onClick={props.onRemove} title='Remove this binding'>✕</Button>
+          <Button variant='remove' size='sm' onClick={props.onRemove} title='Remove this binding'>✕</Button>
         </div>
       </div>
 

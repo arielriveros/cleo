@@ -34,6 +34,13 @@ const SIM_LOCAL: u32          = 4096u;
 const SIM_KILL_ON_HIT: u32    = 8192u;
 const SIM_CUSTOM: u32         = 16384u;
 const SIM_FLAT: u32           = 32768u;
+const SIM_COLLIDE_BODIES: u32 = 65536u;
+
+// Collider kinds in `u_colliders` — COLLIDER_KIND in src/particles/particleColliders.ts.
+const COLLIDER_CAPSULE: i32 = 1;
+const COLLIDER_BOX: i32 = 2;
+const COLLIDER_PLANE: i32 = 3;
+const MAX_PARTICLE_COLLIDERS: i32 = 12;
 
 const MAX_PARTICLE_PLANES: i32 = 4;
 const MAX_FORCE_FIELDS: i32 = 16;
@@ -76,6 +83,8 @@ struct ParticleSimUniforms {
     u_custom: vec4<f32>,
     u_sub: vec4<f32>,                 // sub-emitter: event (0 none, 1 death, 2 collision), children per event, inherit velocity, parent texture width
     u_sub2: vec4<f32>,                // parent capacity, 0, 0, 0
+    u_colliderInfo: vec4<f32>,        // physics collider count, 0, 0, 0
+    u_colliders: array<vec4<f32>, 48>,// 12 physics colliders x 4 texels, see `collideBodies`
 };
 @group(1) @binding(0) var<uniform> u_sim: ParticleSimUniforms;
 
@@ -459,6 +468,93 @@ fn collideDepth(pos: vec3<f32>, vel: vec3<f32>, radius: f32) -> Contact {
     return resolveContact(pos, vel, surface, n, radius);
 }
 
+// --- Physics bodies --------------------------------------------------------------------------------
+
+fn quatRotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    let t = 2.0 * cross(q.xyz, v);
+    return v + q.w * t + cross(q.xyz, t);
+}
+
+// Bounce off the physics bodies near this system (src/particles/particleColliders.ts packs them each
+// frame, world space). Each is tested RELATIVE to its body's velocity, so a moving body bats particles
+// away rather than letting them rest on a surface that has left. Applied one after another, so a particle
+// wedged in a corner is pushed out of both walls.
+fn collideBodies(pos: vec3<f32>, vel: vec3<f32>, radius: f32) -> Contact {
+    var out: Contact;
+    out.hit = false;
+    out.position = pos;
+    out.velocity = vel;
+    let count = i32(u_sim.u_colliderInfo.x);
+    for (var i = 0; i < MAX_PARTICLE_COLLIDERS; i++) {
+        if (i >= count) { break; }
+        let c0 = u_sim.u_colliders[i * 4];
+        let c1 = u_sim.u_colliders[i * 4 + 1];
+        let c2 = u_sim.u_colliders[i * 4 + 2];
+        let bodyVel = u_sim.u_colliders[i * 4 + 3].xyz;
+        let kind = i32(c0.w + 0.5);
+        let p = out.position;
+
+        // Every kind reduces to the closest surface point and its outward normal.
+        var point = p;
+        var normal = vec3<f32>(0.0, 1.0, 0.0);
+        var valid = true;
+        if (kind == COLLIDER_CAPSULE) {
+            let ab = c1.xyz - c0.xyz;
+            let len2 = dot(ab, ab);
+            let t = select(0.0, clamp(dot(p - c0.xyz, ab) / max(len2, 1e-12), 0.0, 1.0), len2 > 1e-12);
+            let axis = c0.xyz + ab * t;
+            let d = p - axis;
+            let dl = length(d);
+            normal = select(vec3<f32>(0.0, 1.0, 0.0), d / max(dl, 1e-6), dl > 1e-6);
+            point = axis + normal * c1.w;
+        } else if (kind == COLLIDER_BOX) {
+            let q = c1;
+            let qi = vec4<f32>(-q.xyz, q.w);
+            let half = c2.xyz;
+            let lp = quatRotate(qi, p - c0.xyz);
+            let clamped = clamp(lp, -half, half);
+            let d = lp - clamped;
+            let dl = length(d);
+            var ln: vec3<f32>;
+            var lsurf: vec3<f32>;
+            if (dl > 1e-6) {
+                ln = d / dl;
+                lsurf = clamped;
+            } else {
+                // Inside: out through the nearest face.
+                let room = half - abs(lp);
+                let s = select(vec3<f32>(-1.0), vec3<f32>(1.0), lp >= vec3<f32>(0.0));
+                if (room.x <= room.y && room.x <= room.z) {
+                    ln = vec3<f32>(s.x, 0.0, 0.0);
+                    lsurf = vec3<f32>(s.x * half.x, lp.y, lp.z);
+                } else if (room.y <= room.z) {
+                    ln = vec3<f32>(0.0, s.y, 0.0);
+                    lsurf = vec3<f32>(lp.x, s.y * half.y, lp.z);
+                } else {
+                    ln = vec3<f32>(0.0, 0.0, s.z);
+                    lsurf = vec3<f32>(lp.x, lp.y, s.z * half.z);
+                }
+            }
+            normal = quatRotate(q, ln);
+            point = c0.xyz + quatRotate(q, lsurf);
+        } else if (kind == COLLIDER_PLANE) {
+            normal = c1.xyz;
+            point = c0.xyz;
+        } else {
+            valid = false;
+        }
+        if (valid) {
+            let c = resolveContact(p, out.velocity - bodyVel, point, normal, radius);
+            if (c.hit) {
+                out.hit = true;
+                out.position = c.position;
+                out.velocity = c.velocity + bodyVel;
+            }
+        }
+    }
+    return out;
+}
+
 // --- Custom --------------------------------------------------------------------------------------
 
 // Replaced, between the markers, by an emitter's custom-code module (src/particles/particleCustomCode.ts).
@@ -535,7 +631,8 @@ fn updateParticle(dt: f32) {
     // Collision, in world space.
     let collideDepthOn = hasFeature(mask, SIM_COLLIDE_DEPTH);
     let collidePlanesOn = hasFeature(mask, SIM_COLLIDE_PLANES);
-    if (collideDepthOn || collidePlanesOn) {
+    let collideBodiesOn = hasFeature(mask, SIM_COLLIDE_BODIES);
+    if (collideDepthOn || collidePlanesOn || collideBodiesOn) {
         var wp = select(x, transformPoint(toWorld, x), isLocal);
         var wv = select(v, transformDir(toWorld, v), isLocal);
         let radius = max(0.0, current.size * 0.5 * u_sim.u_collide0.x);
@@ -549,6 +646,10 @@ fn updateParticle(dt: f32) {
                 let c = resolveContact(wp, wv, point, plane.xyz, radius);
                 if (c.hit) { hit = true; wp = c.position; wv = c.velocity; }
             }
+        }
+        if (collideBodiesOn) {
+            let c = collideBodies(wp, wv, radius);
+            if (c.hit) { hit = true; wp = c.position; wv = c.velocity; }
         }
         if (collideDepthOn) {
             let c = collideDepth(wp, wv, radius);

@@ -5,6 +5,7 @@ import { getAnimationTarget, buildJointTree, jointLabel, JointTreeNode } from '.
 import { useElementSize } from '../../utils/useElementSize'
 import { useScopedDndManager } from '../../utils/treeDnd'
 import IkRigPanel from './IkRigPanel'
+import { TextInput } from '../../components/ui'
 
 // Left-sidebar skeleton hierarchy for the Animation Editor: a react-arborist tree that is READ-ONLY, since
 // a skeleton's shape comes from the model. Selection emits SELECT_JOINT, separate from scene SELECT_NODE.
@@ -43,7 +44,7 @@ const Chevron = ({ open }: { open: boolean }) => (
 const IndentGuides = ({ level }: { level: number }) => (
   <>
     {Array.from({ length: level }, (_, i) => (
-      <span key={i} aria-hidden className='absolute inset-y-0 w-px bg-white/[0.08] pointer-events-none'
+      <span key={i} aria-hidden className='absolute inset-y-0 w-px bg-fg/[0.08] pointer-events-none'
             style={{ left: GUTTER + i * INDENT + CHEVRON / 2 }} />
     ))}
   </>
@@ -55,7 +56,7 @@ function JointRowView({ node }: NodeRendererProps<JointRow>) {
     <div
       style={{ paddingLeft: GUTTER + node.level * INDENT }}
       className={`group relative flex items-center h-[20px] pr-[6px] rounded-md text-ellipsis overflow-hidden whitespace-nowrap ${
-        node.isSelected ? 'bg-primary/40 text-white' : 'text-fg hover:bg-white/[0.06] cursor-pointer'}`}
+        node.isSelected ? 'bg-primary/40 text-fg' : 'text-fg hover:bg-fg/[0.06] cursor-pointer'}`}
       title={node.data.label}>
       <IndentGuides level={node.level} />
       <span
@@ -63,9 +64,9 @@ function JointRowView({ node }: NodeRendererProps<JointRow>) {
         onClick={(e) => { e.stopPropagation(); if (node.data.children.length) node.toggle() }}>
         {node.data.children.length > 0
           ? <Chevron open={node.isOpen} />
-          : <span className='w-[3px] h-[3px] rounded-full bg-white/25' />}
+          : <span className='w-[3px] h-[3px] rounded-full bg-fg/25' />}
       </span>
-      <span className='text-xs truncate pl-1'>{node.data.label}</span>
+      <span className='text-ui truncate pl-1'>{node.data.label}</span>
     </div>
   )
 }
@@ -117,24 +118,24 @@ export default function SkeletonTree() {
 
   if (!target) {
     return (
-      <div className='flex flex-col bg-surface-raised w-full h-full p-3 text-sm text-muted'>
+      <div className='flex flex-col bg-surface-raised w-full h-full p-3 text-ui text-muted'>
         No skinned model selected.
       </div>
     )
   }
 
   return (
-    <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-hidden'>
-      <div className='px-3 py-2 border-b border-white/[0.06] shrink-0'>
-        <div className='text-xs uppercase tracking-wide text-highlight'>Skeleton</div>
-        <div className='text-[11px] text-muted truncate' title={target.node.name}>{target.node.name}</div>
-        <div className='text-[11px] text-dim'>{target.skin.joints.length} joints</div>
+    <div className='flex flex-col text-fg bg-surface-raised w-full h-full overflow-hidden'>
+      <div className='px-3 py-2 border-b border-fg/[0.06] shrink-0'>
+        <div className='text-ui uppercase tracking-wide text-highlight'>Skeleton</div>
+        <div className='text-ui-sm text-muted truncate' title={target.node.name}>{target.node.name}</div>
+        <div className='text-ui-sm text-dim'>{target.skin.joints.length} joints</div>
       </div>
       <div className='shrink-0 px-[5px] py-1'>
-        <input
-          type='text' value={filter} placeholder='Filter bones'
-          onChange={(e) => setFilter(e.target.value)}
-          className='type-value w-full bg-white/[0.06] text-white placeholder:text-dim rounded-md px-2 py-[3px] outline-none focus:bg-white/[0.1] transition-colors' />
+        <TextInput
+          value={filter} placeholder='Filter bones'
+          onChange={setFilter}
+          className='bg-fg/[0.06] border-transparent focus-visible:border-transparent placeholder:text-dim rounded-md px-2 py-[3px] focus:bg-fg/[0.1] transition-colors' />
       </div>
       <div ref={viewportRef} className='flex-1 min-h-0'>
         { dndManager && size.height > 0 &&
@@ -162,7 +163,7 @@ export default function SkeletonTree() {
       </div>
       {/* Below the tree rather than in its own panel: assigning a bone to a role is a two-step gesture that
           starts with a click in the tree above, so the two have to be visible at once. */}
-      <div className='shrink-0 border-t border-white/[0.06]'>
+      <div className='shrink-0 border-t border-fg/[0.06]'>
         <IkRigPanel skin={target.skin} selectedJoint={selectedJoint} />
       </div>
     </div>

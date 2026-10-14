@@ -1,9 +1,11 @@
-import { CharacterNode, Input, Logger, ModelNode, Node, moveWorldDirection, setMoveWorld } from 'cleo'
-import { num } from './SoulsMath'
-import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing } from './SoulsHitbox'
+import { Input, Logger, ModelNode, Node, moveWorldDirection, setMoveWorld } from 'cleo'
+import { clamp, num } from './SoulsMath'
+import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing, wieldedBy } from './SoulsHitbox'
+import SoulsCharacterNode from './SoulsCharacter'
 
 /**
- * Hollow Keep — the player. Attach to the `Player` root, which must be a Character node.
+ * Hollow Keep — the player. Attach to the `Player` root, which must be a Character node. Extends
+ * SoulsCharacter, so its health, defence, hit handling and weapons work exactly as an enemy's do.
  *
  * Expected hierarchy (names matter where marked *):
  *
@@ -11,7 +13,7 @@ import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing } from 
  *   ├── camera rig           CameraRigNode + SoulsLockOn — must come BEFORE the controller
  *   │   └── camera
  *   ├── <model>              the skinned model; found automatically (first Model child with an animator)
- *   ├── Weapons *            group; each child is a SoulsWeapon attached to the RightHand socket
+ *   ├── Weapons *            empty group; the weapons in `weaponTemplates` are spawned into it on start
  *   └── Player Controller    ControllerNode, source Player, LAST child; Jump and Sprint actions blank
  *
  * ## What the controller does, and what this does
@@ -31,6 +33,12 @@ import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing } from 
  *   any ──hit outside i-frames─────▶ hit ──▶ free
  *   any ──HP 0─────────────────────▶ dead ──respawn──▶ free
  *
+ * ## Stats belong to the player
+ *
+ * The four attributes, and the curves that turn them into HP, stamina and a level (`hpForVigor`,
+ * `staminaForEndurance`, `levelFor`, `levelCost`), are this script's own. The weapon in hand turns
+ * STR/DEX into damage (SoulsWeapon.attackRating). Nothing about the player lives on the manager.
+ *
  * Presses are BUFFERED for `inputBufferSeconds`, so mashing during an attack queues the next one instead
  * of being lost — the single most important thing for the controls to feel right.
  *
@@ -43,7 +51,12 @@ import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing } from 
  * before anyone has authored its markers. Action slots ignore root motion — clips must be IN PLACE; the
  * travel of a roll or a lunge is driven from here.
  */
-export default class SoulsPlayerNode extends CharacterNode {
+export default class SoulsPlayerNode extends SoulsCharacterNode {
+  public displayName: string = 'Player'
+  public team: string = 'player'
+  /** The weapons the player starts with, by template. F swaps between them. */
+  public weaponTemplates: string = 'Straight Sword, Greatsword'
+
   // ----- stats (level-up spends souls on these four) ---------------------------------------------
   public vigor: number = 10
   public endurance: number = 10
@@ -54,6 +67,7 @@ export default class SoulsPlayerNode extends CharacterNode {
   // ----- resources (runtime; the HUD reads them) --------------------------------------------------
   public hp: number = 400
   public maxHp: number = 400
+  public bodyRadius: number = 0.3
   public stamina: number = 90
   public maxStamina: number = 90
   public estus: number = 3
@@ -61,6 +75,14 @@ export default class SoulsPlayerNode extends CharacterNode {
   /** HP restored per flask, spread over `estusHealSeconds`. */
   public estusHeal: number = 250
   public estusHealSeconds: number = 0.4
+
+  // ----- stat curves (see hpForVigor and friends) -------------------------------------------------
+  /** HP at Vigor 10. Each point to 30 adds `hpPerVigor`, then the curve flattens. */
+  public baseHp: number = 400
+  public hpPerVigor: number = 30
+  /** Stamina at Endurance 10, plus `staminaPerEndurance` per point to 40. */
+  public baseStamina: number = 90
+  public staminaPerEndurance: number = 3
 
   // ----- movement -------------------------------------------------------------------------------
   public jogSpeed: number = 3.8
@@ -121,21 +143,13 @@ export default class SoulsPlayerNode extends CharacterNode {
   public swapClip: string = 'Souls_Swap'
   public restClip: string = 'Souls_Rest'
   public fogWalkClip: string = 'Souls_FogWalk'
-  /** Name of the Weapons group under this node. */
-  public weaponsGroup: string = 'Weapons'
 
   // ----- derived, read by the HUD and other scripts ------------------------------------------------
   public level: number = 1
-  public isDead: boolean = false
+  /** I-frames (roll, backstep, fog, rest, death): `hurtboxActive` is its inverse. */
   public invulnerable: boolean = false
-  /**
-   * Whether attacks can see this character at all. False during i-frames (roll, backstep, fog, rest,
-   * death): every hitbox sweep and bolt passes straight through. See SoulsHitbox.
-   */
-  public hurtboxActive: boolean = true
   public actionState: string = 'free'
   public isSprinting: boolean = false
-  public weaponName: string = ''
   public attackRatingNow: number = 0
   /** What pressing Interact would do right now, or '' — the HUD prompt. */
   public interactPrompt: string = ''
@@ -145,11 +159,8 @@ export default class SoulsPlayerNode extends CharacterNode {
   /** Where the bloodstain goes if the player falls off the world. */
   public lastSafePosition: number[] = null
 
-  private _gm: Node = null
   private _model: ModelNode = null
   private _rig: Node = null
-  private _weapons: Node[] = []
-  private _weaponIndex: number = 0
   private _offEvents: (() => void) | null = null
 
   private _stateTime: number = 0
@@ -189,10 +200,7 @@ export default class SoulsPlayerNode extends CharacterNode {
     this._gm = this.findNode('GameManager')
     this._model = this._findModel()
     this._rig = this.children.find(c => c.nodeType === 'cameraRig') ?? null
-    const group = this.getChildByName(this.weaponsGroup)[0]
-    this._weapons = group ? group.children.filter(c => (c as any).isWeapon) : []
-    if (!this._weapons.length) Logger.warn('Hollow Keep: the Player has no weapons under "' + this.weaponsGroup + '".', 'Script')
-    this._equip(0)
+    this._spawnWeapons()
 
     this.recomputeStats()
     this.hp = this.maxHp
@@ -202,6 +210,13 @@ export default class SoulsPlayerNode extends CharacterNode {
     this.lastSafePosition = [p[0], p[1], p[2]]
 
     const animator = this._model?.animator as any
+    // The character's idle/locomotion/death machine is embedded in its model node. A model swapped by
+    // deleting the node and dropping a new one in has none, and would walk around in its bind pose with
+    // nothing to say why. Linking the mannequin rig gives it the "Souls Character" controller.
+    const machine = animator?.getStateMachine?.()
+    if (animator && !machine?.states?.length)
+      Logger.warn('Hollow Keep: "' + this.name + '" has no animation controller on its model, so it will hold its bind pose. '
+        + 'Select the model node and assign "Souls Character" in its Animation section (or link the mannequin rig).', 'Script')
     if (animator?.onAnimationEvent) {
       this._offEvents = animator.onAnimationEvent((name: string, clip: string) => this._onAnimEvent(name, clip))
     }
@@ -216,42 +231,74 @@ export default class SoulsPlayerNode extends CharacterNode {
   // Public API (called by the manager, enemies, interactables and the menu)
   // =================================================================================================
 
-  /** Max HP / stamina / level from the four stats, through the manager's rules. */
+  // ----- stat curves: pure functions of their arguments and the tuning fields above ------------------
+
+  /** Max HP for a Vigor value. Steep to 30, gentler to 40, then a trickle. */
+  public hpForVigor(vigor: number): number {
+    const v = Math.max(10, vigor)
+    return Math.round(this.baseHp + this.hpPerVigor * Math.min(v - 10, 20)
+      + 12 * clamp(v - 30, 0, 10) + 5 * Math.max(v - 40, 0))
+  }
+
+  /** Max stamina for an Endurance value. */
+  public staminaForEndurance(endurance: number): number {
+    const e = Math.max(10, endurance)
+    return Math.round(this.baseStamina + this.staminaPerEndurance * Math.min(e - 10, 30) + Math.max(e - 40, 0))
+  }
+
+  /** Souls needed to go from `level` to `level + 1`. */
+  public levelCost(level: number): number {
+    const l = Math.max(1, level) - 1
+    return Math.round(400 + 120 * l + 4 * l * l)
+  }
+
+  /** Character level from the four stats: 1 + every point spent above 10. */
+  public levelFor(vigor: number, endurance: number, strength: number, dexterity: number): number {
+    return 1 + (vigor - 10) + (endurance - 10) + (strength - 10) + (dexterity - 10)
+  }
+
+  /** Max HP / stamina / level from the four stats, and the held weapon's attack rating. */
   public recomputeStats(): void {
-    const gm = this._gm as any
-    if (gm?.hpForVigor) {
-      this.maxHp = gm.hpForVigor(this.vigor)
-      this.maxStamina = gm.staminaForEndurance(this.endurance)
-      this.level = gm.levelFor(this.vigor, this.endurance, this.strength, this.dexterity)
-      this.attackRatingNow = gm.attackRating(this._weapon(), this.strength, this.dexterity)
-    }
+    this.maxHp = this.hpForVigor(this.vigor)
+    this.maxStamina = this.staminaForEndurance(this.endurance)
+    this.level = this.levelFor(this.vigor, this.endurance, this.strength, this.dexterity)
+    const weapon = this.currentWeapon() as any
+    this.attackRatingNow = weapon?.attackRating ? weapon.attackRating(this.strength, this.dexterity) : 0
     this.hp = Math.min(this.hp, this.maxHp)
     this.stamina = Math.min(this.stamina, this.maxStamina)
   }
 
-  /**
-   * Take a hit. Returns true if it landed (false inside i-frames, while dead, or for a non-positive
-   * amount), so an enemy's projectile knows whether to keep flying through a roll.
-   */
-  public receiveDamage(amount: number, poiseDamage: number, from: Node): boolean {
-    if (this.isDead || this.invulnerable || amount <= 0) return false
-    this.hp = Math.max(0, this.hp - amount)
-    const gm = this._gm as any
-    gm?.sfx?.('Player Hurt')
-    gm?.bleed?.(this, from, amount)
-    if (this.hp <= 0) { this._die(); return true }
+  // ----- taking hits (SoulsCharacter.receiveHit calls these) -----------------------------------------
 
-    // Interrupt whatever was happening — a drink included, which is the souls tax on greedy healing.
-    const heavy = amount >= this.heavyHitThreshold
+  /** I-frames make a hit pass straight through, so a bolt keeps flying past a rolling player. */
+  protected _canBeHit(damage: number): boolean {
+    return !this.isDead && !this.invulnerable && damage > 0
+  }
+
+  protected _onHurt(dealt: number, from: Node): void {
+    ;(this._gm as any)?.sfx?.('Player Hurt')
+  }
+
+  /** Interrupt whatever was happening — a drink included, which is the souls tax on greedy healing. */
+  protected _onDamaged(dealt: number, poiseDamage: number, from: Node): void {
+    const heavy = dealt >= this.heavyHitThreshold
     this._stopAction()
-    const away = from ? this._dirFrom(from.worldPosition) : this._forward(-1)
-    this._motionDir = away
+    this._motionDir = from ? this._dirFrom(from.worldPosition) : this._forward(-1)
     this._enter('hit')
     this._actionSeconds = heavy ? this.hitHeavySeconds : this.hitLightSeconds
     this._play(heavy ? this.hitHeavyClip : this.hitLightClip, 1)
-    if (heavy) gm?.shake?.(0.35)
-    else gm?.shake?.(0.15)
-    return true
+    ;(this._gm as any)?.shake?.(heavy ? 0.35 : 0.15)
+  }
+
+  /** A flask shard: one more flask, and every flask refilled. */
+  public addEstusFlask(): void {
+    this.estusMax += 1
+    this.estus = this.estusMax
+  }
+
+  /** Refill up to `count` flasks, never past the maximum. */
+  public refillEstus(count: number): void {
+    this.estus = Math.min(this.estusMax, this.estus + Math.max(1, Math.round(count)))
   }
 
   public addSouls(amount: number): void {
@@ -344,10 +391,6 @@ export default class SoulsPlayerNode extends CharacterNode {
   public get lockTarget(): Node {
     return (this._rig as any)?.lockTarget ?? null
   }
-
-  /** The weapon in hand (a SoulsWeapon node). */
-  public currentWeapon(): Node { return this._weapon() }
-  public weapons(): Node[] { return this._weapons }
 
   // =================================================================================================
   // The frame
@@ -511,7 +554,7 @@ export default class SoulsPlayerNode extends CharacterNode {
     this._holdStill(intent)
     if (!this._swapped && this._stateTime >= this._actionSeconds * 0.5) {
       this._swapped = true
-      this._equip((this._weaponIndex + 1) % Math.max(1, this._weapons.length))
+      this.equipWeapon((this._weaponIndex + 1) % Math.max(1, this._weapons.length))
       this.recomputeStats()
     }
     if (this._stateTime >= this._actionSeconds) this._enter('free')
@@ -527,7 +570,7 @@ export default class SoulsPlayerNode extends CharacterNode {
   /** Start an attack. `kind` light/heavy; `named` is the next combo move, or null for the chain's start. */
   private _startAttack(kind: string, named: string): void {
     if (this.stamina <= 0) return
-    const weapon = this._weapon() as any
+    const weapon = this.currentWeapon() as any
     if (!weapon) return
     const name = named || (kind === 'heavy' ? weapon.heavyMove : weapon.lightMove)
     const move = weapon.findMove?.(name) ?? weapon.findMove?.(weapon.lightMove)
@@ -600,7 +643,7 @@ export default class SoulsPlayerNode extends CharacterNode {
     catch (e) { Logger.warn('Hollow Keep: interact failed on ' + (this._interactTarget?.name ?? '?') + ': ' + e, 'Script') }
   }
 
-  private _die(): void {
+  protected _die(): void {
     if (this.isDead) return
     this.isDead = true
     this._stopAction()
@@ -634,13 +677,15 @@ export default class SoulsPlayerNode extends CharacterNode {
    * reached first. Returns true when the swing ended in a recoil (the state has changed).
    */
   private _stepSwing(): boolean {
-    const weapon = this._weapon()
+    const weapon = this.currentWeapon() as any
+    // Not in this character's own hand (no hand socket on its model): the blade is elsewhere, hit nothing.
+    if (!wieldedBy(weapon, this)) return false
     const blade = bladeCapsule(weapon)
     if (!blade) return false
     const move = this._move as any
     const contact = stepSwing(this.scene?.physics, this._swing, blade, this, 'enemy', move?.bounceOff !== false)
-    const gm = this._gm as any
-    for (const t of contact.targets) gm?.applyPlayerHit?.(this, move, weapon, t.node, t.point)
+    // The weapon turns the swing into damage; each target takes it through its own receiveHit.
+    for (const t of contact.targets) weapon?.strike?.(this, move, t.node, t.point)
     if (contact.blockedAt && !contact.targets.length) {
       this._recoil(contact.blockedAt)
       return true
@@ -653,7 +698,7 @@ export default class SoulsPlayerNode extends CharacterNode {
   private _recoil(at: number[]): void {
     closeSwing(this._swing)
     const gm = this._gm as any
-    gm?.fx?.(gm.hitSparkTemplate, at)
+    gm?.fx?.((this.currentWeapon() as any)?.hitSparkTemplate || 'Hit Spark', at)
     gm?.sfx?.('Recoil')
     gm?.shake?.(0.2)
     this._stopAction()
@@ -886,17 +931,6 @@ export default class SoulsPlayerNode extends CharacterNode {
       return null
     }
     return walk(this)
-  }
-
-  private _weapon(): Node {
-    return this._weapons[this._weaponIndex] ?? null
-  }
-
-  private _equip(index: number): void {
-    this._weaponIndex = Math.max(0, Math.min(index, this._weapons.length - 1))
-    this._weapons.forEach((w, i) => { if (w.visible !== (i === this._weaponIndex)) w.visible = i === this._weaponIndex })
-    const weapon = this._weapon() as any
-    this.weaponName = weapon?.displayName ?? ''
   }
 
 }

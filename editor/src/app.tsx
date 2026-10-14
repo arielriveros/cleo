@@ -57,8 +57,8 @@ export default function App() {
       <div className='h-screen w-screen flex items-center justify-center bg-bg text-fg p-8 text-center'>
         <div className='max-w-[520px] flex flex-col gap-3'>
           <h1 className='text-lg font-semibold text-danger'>Cleo could not open your projects</h1>
-          <p className='text-sm text-slate-300'>{state.message}</p>
-          <p className='text-xs text-dim'>
+          <p className='text-ui-lg text-fg'>{state.message}</p>
+          <p className='text-ui text-dim'>
             If the editor is open in another tab or window, close it and reload — a storage upgrade cannot run
             while another tab holds the database.
           </p>
@@ -82,7 +82,7 @@ export default function App() {
                 moved. */}
             <AssetGraphProvider>
             {/* The asset explorer's folder index sits above <Editor> so it keeps indexing new assets even
-                while the Assets tab is hidden (renderer mode collapses the whole bottom bar). */}
+                while the Assets tab is hidden (options mode collapses the whole bottom bar). */}
             <VfsProvider>
                 {/* Mirrors the script library to a folder on disk for editing in an external IDE. Inside
                     VfsProvider because it syncs the VFS layout as well as the sources. */}

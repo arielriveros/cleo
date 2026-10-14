@@ -63,9 +63,22 @@ const SCRIPT_FILES = [
   ['Game Manager', 'SoulsGameManager', 'node'],
   ['Player', 'SoulsPlayer', 'character'],
   ['Lock-On Camera', 'SoulsLockOn', 'cameraRig'],
-  ['Weapon', 'SoulsWeapon', 'node'],
+  // The fighter base, and the two families built on it. A base class is a script asset like any other;
+  // the scripts extending it import it by path (`import SoulsEnemyNode from './SoulsEnemy'`), so — like the
+  // modules below — a base is named after its FILE: the explorer path is the import path.
+  ['SoulsCharacter', 'SoulsCharacter', 'character'],
+  ['SoulsWeapon', 'SoulsWeapon', 'node'],
+  ['Straight Sword', 'SoulsStraightSword', 'node'],
+  ['Greatsword', 'SoulsGreatsword', 'node'],
+  ['Club', 'SoulsClub', 'node'],
+  ['Sorcerer Staff', 'SoulsStaff', 'node'],
+  ['Halberd', 'SoulsHalberd', 'node'],
   ['Weapon Move', 'SoulsMove', 'node'],
-  ['Enemy', 'SoulsEnemy', 'character'],
+  ['SoulsEnemy', 'SoulsEnemy', 'character'],
+  ['Hollow', 'SoulsHollow', 'character'],
+  ['Hollow Sorcerer', 'SoulsHollowSorcerer', 'character'],
+  ['Elite Knight', 'SoulsEliteKnight', 'character'],
+  ['Hollow Warden', 'SoulsHollowWarden', 'character'],
   ['Enemy Attack', 'SoulsEnemyAttack', 'node'],
   ['Enemy Brain', 'SoulsEnemyBrain', 'controller'],
   ['Enemy Spawn', 'SoulsEnemySpawn', 'node'],
@@ -80,6 +93,7 @@ const SCRIPT_FILES = [
   ['Door', 'SoulsDoor', 'node'],
   ['Fog Gate', 'SoulsFogGate', 'node'],
   ['HUD', 'SoulsHud', 'uiRoot'],
+  ['Boss Bar', 'SoulsBossBar', 'uiRoot'],
   ['Banner', 'SoulsBanner', 'uiRoot'],
   ['Bonfire Menu', 'SoulsBonfireMenu', 'uiRoot'],
   // A script MODULE (shared helpers, no class). Named after its FILE: the explorer path is the import
@@ -88,14 +102,33 @@ const SCRIPT_FILES = [
   ['SoulsHitbox', 'SoulsHitbox', 'node'],
 ]
 
+const readScript = (file) => fs.readFileSync(path.join(SCRIPTS, `${file}.ts`), 'utf8')
+
+/**
+ * A class script's fields INCLUDING the ones it inherits from base-class scripts, base first — what the
+ * editor caches on save (scriptGraph.ts resolveScriptVariables), so the inspector of a `SoulsHollow`
+ * shows SoulsEnemy's and SoulsCharacter's fields too. Follows `extends X` through `import X from './F'`.
+ */
+function resolveVariables(file, seen = new Set()) {
+  const source = readScript(file)
+  const own = reflect(source)
+  const ext = /export\s+default\s+class\s+\w+\s+extends\s+(\w+)/.exec(source)
+  const imp = ext && new RegExp(`import\\s+${ext[1]}\\s+from\\s+['"]\\./(\\w+)['"]`).exec(source)
+  if (!imp || seen.has(imp[1])) return own
+  seen.add(file)
+  const merged = new Map()
+  for (const v of [...resolveVariables(imp[1], seen), ...own]) merged.set(v.name, v)
+  return [...merged.values()]
+}
+
 const scripts = (() => {
   const assets = []
   const byFile = new Map()
   for (const [name, file, baseType] of SCRIPT_FILES) {
-    const source = fs.readFileSync(path.join(SCRIPTS, `${file}.ts`), 'utf8')
+    const source = readScript(file)
     // `kind` is the editor's derived cache (scripts.ts scriptKindOf): no default class means a module.
     const kind = /^\s*export\s+default\s+class\b/m.test(source) ? 'class' : 'module'
-    const asset = { id: stableId(`script:${file}`), name, baseType, source, kind, variables: kind === 'module' ? [] : reflect(source) }
+    const asset = { id: stableId(`script:${file}`), name, baseType, source, kind, variables: kind === 'module' ? [] : resolveVariables(file) }
     assets.push(asset)
     byFile.set(file, asset)
   }
@@ -198,6 +231,21 @@ const locomotionField = (() => {
  * Every character's animation machine: Idle, the locomotion field, and Dead. Attacks and reactions are
  * ACTIONS played over it by script, so the machine needs only the two death triggers.
  */
+/**
+ * The character controller: the state machine every character's model node embeds (idle, locomotion,
+ * death), as a `.controller` asset on the mannequin rig. Shipping it as an ASSET is what lets a swapped
+ * model get it back: linking the rig to a new model node with no machine hands it this controller.
+ */
+const CHARACTER_CONTROLLER_ID = stableId('controller:souls-character')
+function characterController() {
+  return { id: CHARACTER_CONTROLLER_ID, name: 'Souls Character', rigId: rig.id, machine: characterStateMachine() }
+}
+
+/** The machine as a node embeds it: the controller's, stamped with where it came from. */
+function embeddedCharacterMachine() {
+  return { ...characterStateMachine(), controllerId: CHARACTER_CONTROLLER_ID }
+}
+
 function characterStateMachine() {
   const speed = (op, value) => ({ op: 'and', children: [{ param: 'Speed', op, value, hysteresis: 0.15 }] })
   const trigger = (param) => ({ op: 'and', children: [{ param, op: 'trigger' }] })
@@ -324,6 +372,7 @@ function pbr(baseColor, extra = {}) {
     type: 'pbr', baseColor, metallic: extra.metallic ?? 0, roughness: extra.roughness ?? 0.85, opacity: extra.opacity ?? 1,
     emissiveFactor: extra.emissive ?? [0, 0, 0], emissiveIntensity: extra.emissiveIntensity ?? 1,
     textures: extra.textures ?? {},
+    ...(extra.uv ?? {}),
     config: { side: 'front', wireframe: false, transparent: !!extra.transparent, castShadow: extra.castShadow ?? true, probeable: true },
   }
 }
@@ -340,14 +389,18 @@ const characterMaterial = (key, name, tint, extra = {}) => material(key, name, {
   emissiveFactor: extra.emissive ?? [0, 0, 0],
 }, mannequinMaterial.textureIds)
 
+const LEVEL_UV = { uvProjection: 'box', uvSpace: 'world', uvWorldSize: 2 }
+
 const MAT = {
   hollow: characterMaterial('hollow', 'Hollow (placeholder)', [0.36, 0.42, 0.3]),
   caster: characterMaterial('caster', 'Caster (placeholder)', [0.3, 0.38, 0.85]),
   knight: characterMaterial('knight', 'Elite Knight (placeholder)', [0.5, 0.15, 0.13], { metallic: 0.7, roughness: 0.6 }),
   warden: characterMaterial('warden', 'Hollow Warden (placeholder)', [0.16, 0.14, 0.1], { metallic: 0.9, roughness: 0.45 }),
-  stone: material('stone', 'Stone (placeholder)', pbr([0.42, 0.41, 0.4], { roughness: 0.95 })),
-  darkStone: material('dark-stone', 'Dark Stone (placeholder)', pbr([0.24, 0.23, 0.23], { roughness: 0.95 })),
-  floor: material('floor', 'Flagstones (placeholder)', pbr([0.33, 0.31, 0.28], { roughness: 1 })),
+  // Level surfaces are unit cubes scaled by their node, so their uvs stretch; a world-space BOX projection
+  // keeps a texture dropped onto these at 2 m per repeat on every wall and floor, continuous across pieces.
+  stone: material('stone', 'Stone (placeholder)', pbr([0.42, 0.41, 0.4], { roughness: 0.95, uv: LEVEL_UV })),
+  darkStone: material('dark-stone', 'Dark Stone (placeholder)', pbr([0.24, 0.23, 0.23], { roughness: 0.95, uv: LEVEL_UV })),
+  floor: material('floor', 'Flagstones (placeholder)', pbr([0.33, 0.31, 0.28], { roughness: 1, uv: LEVEL_UV })),
   wood: material('wood', 'Wood (placeholder)', pbr([0.36, 0.24, 0.14], { roughness: 0.9 })),
   metal: material('metal', 'Iron (placeholder)', pbr([0.38, 0.38, 0.4], { metallic: 0.9, roughness: 0.45 })),
   blade: material('blade', 'Blade (placeholder)', pbr([0.78, 0.8, 0.84], { metallic: 1, roughness: 0.25 })),
@@ -459,14 +512,30 @@ function emitter(key, name, fields) {
   }
   return { ...base, ...fields, render: { ...base.render, ...(fields.render ?? {}) } }
 }
-function vfx(key, name, emitters, bounds = { center: [0, 1, 0], extents: [2, 2, 2] }) {
-  const system = parseParticleSystem({ version: 1, emitters, bounds })
+/**
+ * Distance LOD for an effect (particles/particleLod.ts): `[[from m, spawn ×, simulate every N frames], …]`
+ * and a cull distance. 19 torches line the keep, and most are behind the player at any moment.
+ */
+const lodOf = (levels, cullDistance = 0) => ({
+  enabled: true, cullDistance, scaleBursts: false,
+  levels: levels.map(([distance, spawnScale, stepScale]) => ({ distance, spawnScale, stepScale })),
+})
+
+function vfx(key, name, emitters, bounds = { center: [0, 1, 0], extents: [2, 2, 2] }, lod = undefined) {
+  const system = parseParticleSystem({ version: 1, emitters, bounds, lod })
   const asset = { id: stableId(`vfx:${key}`), name, system }
   particleSystems.push(asset)
   return asset
 }
 const fade = (peak = 1) => ({ color: [{ t: 0, c: [1, 1, 1] }, { t: 1, c: [1, 1, 1] }], alpha: [{ t: 0, a: 0 }, { t: 0.15, a: peak }, { t: 0.7, a: peak }, { t: 1, a: 0 }] })
 const burst = (count) => mod('spawnBurst', { bursts: [{ time: 0, count, cycles: 1, interval: 1, probability: 1 }] })
+/**
+ * Collision against the PHYSICS BODIES around the effect (particles/particleColliders.ts) — the floor
+ * boxes, walls and props of the keep — plus scene depth for anything that has no collider. Sparks
+ * ricochet off the flagstones, a bolt's embers skitter across them, blood lands and stays.
+ */
+const bounceOff = (restitution, friction, extra = {}) =>
+  mod('collision', { bodies: true, depth: true, radius: 1, restitution, friction, lifetimeLoss: 0, ...extra })
 
 const VFX = {
   fire: vfx('bonfire-fire', 'Bonfire Fire', [
@@ -482,7 +551,7 @@ const VFX = {
       render: { blend: 'additive', softness: 0.3 },
     }),
     emitter('fire-embers', 'Embers', {
-      capacity: 256,
+      capacity: 256, maxLod: 0,   // a detail layer: gone as soon as the fire is at level 1
       spawn: [mod('spawnRate', { rate: 12 })],
       init: [mod('shape', { shape: 'sphere', radius: 0.3, thickness: 1 }), mod('lifetime', { range: [1.5, 3] }),
         mod('velocity', { mode: 'direction', direction: [0, 1, 0], spread: 30, speed: [0.6, 1.4] }), mod('size', { range: [0.02, 0.04] }),
@@ -490,7 +559,7 @@ const VFX = {
       update: [mod('curlNoise', { strength: 1, frequency: 0.8 }), mod('colorOverLife', { gradient: fade(1) })],
       render: { blend: 'additive', softness: 0 },
     }),
-  ], { center: [0, 1, 0], extents: [1, 1.5, 1] }),
+  ], { center: [0, 1, 0], extents: [1, 1.5, 1] }, lodOf([[20, 0.6, 2], [40, 0.3, 3]], 90)),
   torch: vfx('torch-fire', 'Torch Fire', [
     emitter('torch-flames', 'Flames', {
       capacity: 256,
@@ -503,7 +572,7 @@ const VFX = {
         mod('sizeOverLife', { curve: { keys: [{ t: 0, v: 0.8 }, { t: 0.3, v: 1 }, { t: 1, v: 0.2 }] } })],
       render: { blend: 'additive', softness: 0.2 },
     }),
-  ], { center: [0, 0.4, 0], extents: [0.4, 0.6, 0.4] }),
+  ], { center: [0, 0.4, 0], extents: [0.4, 0.6, 0.4] }, lodOf([[15, 0.5, 2], [30, 0.25, 3]], 70)),
   fog: vfx('fog-wall', 'Fog Wall', [
     emitter('fog-sheet', 'Fog', {
       capacity: 1024, prewarm: true,
@@ -536,18 +605,31 @@ const VFX = {
       update: [mod('drag', { coefficient: 2 }), mod('colorOverLife', { gradient: fade(1) })],
       render: { blend: 'additive', softness: 0 },
     }),
-  ], { center: [0, 0, 0], extents: [2, 2, 2] }),
+    // Heavier motes that fall out of the flash and bounce across the ground before they fade.
+    emitter('impact-skitter', 'Skitter', {
+      capacity: 64, looping: false, duration: 1.6,
+      spawn: [mod('spawnRate', { rate: 0 }), burst(22)],
+      init: [mod('shape', { shape: 'sphere', radius: 0.1, thickness: 1 }), mod('lifetime', { range: [0.9, 1.6] }),
+        mod('velocity', { mode: 'direction', direction: [0, 1, 0], spread: 75, speed: [2.5, 5] }), mod('size', { range: [0.04, 0.08] }),
+        mod('color', { mode: 'constant', colorA: [0.55, 0.8, 1, 1], intensity: 10 })],
+      update: [mod('gravity', { scale: 1 }), mod('drag', { coefficient: 0.3 }), bounceOff(0.6, 0.25),
+        mod('colorOverLife', { gradient: fade(1) })],
+      render: { blend: 'additive', alignment: 'velocity', stretch: 0.4, softness: 0 },
+    }),
+  ], { center: [0, 0, 0], extents: [2.5, 2, 2.5] }),
   hitSpark: vfx('hit-spark', 'Hit Spark', [
     emitter('spark-burst', 'Sparks', {
       capacity: 64, looping: false, duration: 1,
       spawn: [mod('spawnRate', { rate: 0 }), burst(24)],
-      init: [mod('shape', { shape: 'sphere', radius: 0.05, thickness: 1 }), mod('lifetime', { range: [0.2, 0.5] }),
+      init: [mod('shape', { shape: 'sphere', radius: 0.05, thickness: 1 }), mod('lifetime', { range: [0.5, 1.1] }),
         mod('velocity', { mode: 'radial', speed: [2, 6] }), mod('size', { range: [0.02, 0.05] }),
         mod('color', { mode: 'constant', colorA: [1, 0.55, 0.15, 1], intensity: 8 })],
-      update: [mod('gravity', { scale: 1 }), mod('drag', { coefficient: 0.5 }), mod('colorOverLife', { gradient: fade(1) })],
+      // Long enough to reach the floor from a sword's height and ricochet once or twice.
+      update: [mod('gravity', { scale: 1 }), mod('drag', { coefficient: 0.5 }), bounceOff(0.45, 0.3, { lifetimeLoss: 0.1 }),
+        mod('colorOverLife', { gradient: fade(1) })],
       render: { blend: 'additive', alignment: 'velocity', stretch: 0.8, softness: 0 },
     }),
-  ], { center: [0, 0, 0], extents: [1.5, 1.5, 1.5] }),
+  ], { center: [0, -0.5, 0], extents: [2.5, 2, 2.5] }),
   // Droplets thrown off a wound. Dark and alpha-blended — blood does not glow — and short-lived: the
   // stain it leaves is the decal, not the particles.
   bloodSpray: vfx('blood-spray', 'Blood Spray', [
@@ -557,7 +639,9 @@ const VFX = {
       init: [mod('shape', { shape: 'sphere', radius: 0.08, thickness: 1 }), mod('lifetime', { range: [0.35, 0.8] }),
         mod('velocity', { mode: 'direction', direction: [0, 1, 0], spread: 70, speed: [1.5, 4.5] }), mod('size', { range: [0.025, 0.06] }),
         mod('color', { mode: 'constant', colorA: [0.28, 0.01, 0.01, 1], intensity: 1 })],
-      update: [mod('gravity', { scale: 1.6 }), mod('drag', { coefficient: 0.4 }), mod('colorOverLife', { gradient: fade(1) })],
+      // Lands and stays: almost no bounce, a lot of friction.
+      update: [mod('gravity', { scale: 1.6 }), mod('drag', { coefficient: 0.4 }), bounceOff(0.05, 0.9),
+        mod('colorOverLife', { gradient: fade(1) })],
       render: { blend: 'alpha', alignment: 'velocity', stretch: 0.5, softness: 0 },
     }),
   ], { center: [0, 0, 0], extents: [1.5, 1.5, 1.5] }),
@@ -616,7 +700,7 @@ const VFX = {
       update: [mod('curlNoise', { strength: 1.2, frequency: 0.8 }), mod('colorOverLife', { gradient: fade(1) })],
       render: { blend: 'additive', softness: 0 },
     }),
-  ], { center: [0, 1.6, 0], extents: [2, 2.5, 2] }),
+  ], { center: [0, 1.6, 0], extents: [2, 2.5, 2] }, lodOf([[25, 0.6, 2]])),
 }
 
 function particles(key, name, asset, { position = [0, 0, 0], playOnStart = true, scale = [1, 1, 1] } = {}) {
@@ -650,7 +734,7 @@ function characterModel(key, materialId, scale) {
   model.scale = [scale, scale, scale]
   model.variables = vars({ __modelId: MANNEQUIN_MODEL, __materialId: materialId })
   model.model.material = matJson(materialId)
-  model.stateMachine = characterStateMachine()
+  model.stateMachine = embeddedCharacterMachine()
   model.ragdoll = clone(ragdoll)
   model.children = []
   return model
@@ -702,44 +786,44 @@ function move(key, name, fields) {
   return withScript(node(name, 'node', { id: stableId(`move:${key}:${name}`) }), 'SoulsMove', { ...fields, ...swingWindow(fields.clip) })
 }
 
+// The blade hitboxes are no longer data here: each is the class default of its weapon's script
+// (SoulsStraightSword, SoulsGreatsword, SoulsClub, SoulsStaff, SoulsHalberd), where a designer tunes it.
+
 /**
- * Blade hitboxes, in the weapon Mesh's space (the parts below are modelled along +Y from the grip).
- * Deliberately a little fatter than the steel: a hitbox that matches the visual exactly reads as unfair.
+ * The base WEAPON template: a SoulsWeapon root on the right-hand socket and an empty `Mesh`. Every weapon
+ * is a VARIANT of it (see weaponVariant) that adds its look and its moves and swaps in its own script.
  */
-const BLADE = {
-  sword: { bladeStart: [0, 0.12, 0], bladeEnd: [0, 0.98, 0], bladeRadius: 0.12 },
-  greatsword: { bladeStart: [0, 0.17, 0], bladeEnd: [0, 1.52, 0], bladeRadius: 0.15 },
-  club: { bladeStart: [0, 0.05, 0], bladeEnd: [0, 0.72, 0], bladeRadius: 0.13 },
-  staff: { bladeStart: [0, 0.05, 0], bladeEnd: [0, 1.12, 0], bladeRadius: 0.11 },
-  halberd: { bladeStart: [0, 0.4, 0], bladeEnd: [0.06, 1.9, 0], bladeRadius: 0.2 },
+function baseWeaponNode() {
+  return withScript(node('Weapon', 'node', {
+    id: stableId('weapon:base'),
+    socketAttachment: { target: 'parent', socket: 'RightHand' },
+    children: [node('Mesh', 'node', { id: stableId('weapon:base:mesh') })],
+  }), 'SoulsWeapon')
 }
 
-function playerWeapons() {
-  const sword = withScript(node('Weapon_StraightSword', 'node', {
-    id: stableId('weapon:sword'),
+/** One weapon's full tree — the variant's content, diffed against the base by `variantTemplate`. */
+function weaponNode(key, name, script, parts, moves = [], bladeDir = BLADE_DOWN_FORWARD) {
+  const mesh = weaponMesh(`weapon:${key}`, 'RightHand', bladeDir, parts)
+  return withScript(node(name, 'node', {
+    id: stableId(`weapon:${key}`),
     socketAttachment: { target: 'parent', socket: 'RightHand' },
-    children: [
-      weaponMesh('weapon:sword', 'RightHand', BLADE_DOWN_FORWARD, SWORD_PARTS),
-      move('sword', 'Light1', { clip: 'Souls_Sword_L1', damageMul: 1, staminaCost: 16, lungeStart: 0.1, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.38, comboTime: 0.45, recoverTime: 0.62, next: 'Light2' }),
-      move('sword', 'Light2', { clip: 'Souls_Sword_L2', damageMul: 1, staminaCost: 16, lungeStart: 0.1, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.36, comboTime: 0.45, recoverTime: 0.62, next: 'Light3' }),
-      move('sword', 'Light3', { clip: 'Souls_Sword_L3', damageMul: 1.15, staminaCost: 20, lungeStart: 0.3, lungeSeconds: 0.2, lungeSpeed: 3, hitTime: 0.52, comboTime: 0.6, recoverTime: 0.8, next: 'Light1' }),
-      move('sword', 'Heavy', { clip: 'Souls_Sword_Heavy', bounceOff: false, damageMul: 1.6, poiseMul: 2, staminaCost: 30, lungeStart: 0.62, lungeSeconds: 0.2, lungeSpeed: 4, trackSeconds: 0.35, hitTime: 0.78, comboTime: 1, recoverTime: 1.05, next: '' }),
-    ],
-  }), 'SoulsWeapon', { ...BLADE.sword, displayName: 'Straight Sword', baseDamage: 100, strScaling: 0.2, dexScaling: 0.8, strRequirement: 8, dexRequirement: 10, poiseDamage: 15 })
-
-  const greatsword = withScript(node('Weapon_Greatsword', 'node', {
-    id: stableId('weapon:greatsword'),
-    socketAttachment: { target: 'parent', socket: 'RightHand' },
-    children: [
-      weaponMesh('weapon:greatsword', 'RightHand', BLADE_DOWN_FORWARD, GREATSWORD_PARTS),
-      move('greatsword', 'Light1', { clip: 'Souls_GS_L1', damageMul: 1, staminaCost: 26, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light2' }),
-      move('greatsword', 'Light2', { clip: 'Souls_GS_L2', damageMul: 1.05, staminaCost: 26, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light1' }),
-      move('greatsword', 'Heavy', { clip: 'Souls_GS_Heavy', bounceOff: false, damageMul: 1.7, poiseMul: 2, staminaCost: 42, lungeStart: 0.95, lungeSeconds: 0.2, lungeSpeed: 3, trackSeconds: 0.5, hitTime: 1.15, comboTime: 1.5, recoverTime: 1.55, next: '' }),
-    ],
-  }), 'SoulsWeapon', { ...BLADE.greatsword, displayName: 'Greatsword', baseDamage: 165, strScaling: 1, dexScaling: 0.15, strRequirement: 16, dexRequirement: 0, poiseDamage: 32 })
-
-  return group('player:weapons', 'Weapons', [sword, greatsword])
+    children: [mesh, ...moves.map(([moveName, fields]) => move(key, moveName, fields))],
+  }), script)
 }
+
+const WEAPONS = [
+  ['sword', 'Straight Sword', 'SoulsStraightSword', SWORD_PARTS, [
+    ['Light1', { clip: 'Souls_Sword_L1', damageMul: 1, staminaCost: 16, lungeStart: 0.1, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.38, comboTime: 0.45, recoverTime: 0.62, next: 'Light2' }],
+    ['Light2', { clip: 'Souls_Sword_L2', damageMul: 1, staminaCost: 16, lungeStart: 0.1, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.36, comboTime: 0.45, recoverTime: 0.62, next: 'Light3' }],
+    ['Light3', { clip: 'Souls_Sword_L3', damageMul: 1.15, staminaCost: 20, lungeStart: 0.3, lungeSeconds: 0.2, lungeSpeed: 3, hitTime: 0.52, comboTime: 0.6, recoverTime: 0.8, next: 'Light1' }],
+    ['Heavy', { clip: 'Souls_Sword_Heavy', bounceOff: false, damageMul: 1.6, poiseMul: 2, staminaCost: 30, lungeStart: 0.62, lungeSeconds: 0.2, lungeSpeed: 4, trackSeconds: 0.35, hitTime: 0.78, comboTime: 1, recoverTime: 1.05, next: '' }],
+  ]],
+  ['greatsword', 'Greatsword', 'SoulsGreatsword', GREATSWORD_PARTS, [
+    ['Light1', { clip: 'Souls_GS_L1', damageMul: 1, staminaCost: 26, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light2' }],
+    ['Light2', { clip: 'Souls_GS_L2', damageMul: 1.05, staminaCost: 26, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light1' }],
+    ['Heavy', { clip: 'Souls_GS_Heavy', bounceOff: false, damageMul: 1.7, poiseMul: 2, staminaCost: 42, lungeStart: 0.95, lungeSeconds: 0.2, lungeSpeed: 3, trackSeconds: 0.5, hitTime: 1.15, comboTime: 1.5, recoverTime: 1.55, next: '' }],
+  ]],
+]
 
 function playerNode() {
   // A copy: the template and the placed player are both built from it.
@@ -781,7 +865,9 @@ function playerNode() {
     aimSource: 'possessed', driveAimTarget: true,
   })
   // ORDER: the camera rig before the controller (the controller finds the first rig in the subtree).
-  player.children = [rigNode, model, playerWeapons(), controller]
+  // `Weapons` starts empty: SoulsPlayer spawns its `weaponTemplates` into it on start. The player's UI —
+  // its HUD, its level-up menu, its lock-on reticle — is the PLAYER's: children of it, in its template.
+  player.children = [rigNode, model, group('player:weapons', 'Weapons', []), hud(), bonfireMenu(), lockReticle(), controller]
   return player
 }
 
@@ -792,36 +878,118 @@ function attack(key, name, fields) {
 }
 
 /**
- * The behaviour machine every enemy brain runs. It only switches; the thresholds live in SoulsEnemy and
- * SoulsEnemyBrain fields, which write the blackboard flags this reads.
+ * An enemy type's AI graph: the behaviour machine that DECIDES what the enemy does. Every choice — wake,
+ * chase, close in, hold the spacing band, back off, swing, flinch, give up and walk home — is a state and
+ * a transition here, authored per type (`spec.ai`) and editable in the AI editor as the type's `.brain`.
+ *
+ * The enemy SCRIPT only carries out what the current state asks: it picks WHICH attack (a weighted draw
+ * over its moveset, gated by cooldowns and range) when the graph enters Attack, it strafes and back-pedals
+ * facing the player in Strafe and Retreat (no steering verb keeps the body turned toward a target), and it
+ * plays out a hit reaction. The graph reads the script through `builtin` parameters — plain fields and
+ * getters on the enemy (`isDead`, `attackReady`, `distanceFromHome`…) — and perception through `sense`s.
+ *
+ * Bands use explicit offsets rather than `hysteresis` so each pair reads plainly in the graph: close in
+ * below `engage`, drop back to Chase only past `engage + 0.75`.
  */
-function enemyBehaviour() {
-  const is = (param, truth = true) => ({ op: 'and', children: [{ param, op: truth ? 'true' : 'false' }] })
-  const both = (...c) => ({ op: 'and', children: c.map(x => x.children[0]) })
-  const bb = (name, key) => ({ name, type: 'boolean', default: false, source: { kind: 'blackboard', key } })
+const ENEMY_AI = { engage: 4.5, leash: 25, preferredMin: 0, preferredMax: 1.8 }
+
+function enemyBrainMachine(spec) {
+  const ai = { ...ENEMY_AI, ...(spec.ai ?? {}) }
+  const leaf = (param, op, value) => (value === undefined ? { param, op } : { param, op, value })
+  const all = (...c) => ({ op: 'and', children: c })
+  const any = (...c) => ({ op: 'or', children: c })
+  const builtin = (name, pawnField, type = 'boolean', dflt = false) => ({ name, type, default: dflt, source: { kind: 'builtin', name: pawnField } })
+  const sense = (name, senseName, type, dflt) => ({ name, type, default: dflt, source: { kind: 'sense', name: senseName } })
+
+  // A boss never leashes: it holds its arena. Everyone else gives up past `leash` from home.
+  const giveUp = spec.boss
+    ? leaf('Target Dead', 'true')
+    : any(leaf('Target Dead', 'true'), leaf('From Home', 'gt', ai.leash))
+  const engaged = ['Approach', 'Strafe', 'Retreat']
+  const transitions = [
+    { from: '*', to: 'Dead', condition: all(leaf('Dead', 'true')) },
+  ]
+  if (spec.boss) transitions.push({ from: '*', to: 'Phase Shift', condition: all(leaf('Phase Shifting', 'true')) })
+  // A hit reaction interrupts anything but death (and a boss's phase shift, which is listed above it).
+  for (const from of ['Idle', 'Chase', 'Attack', ...engaged])
+    transitions.push({ from, to: 'Stagger', condition: all(leaf('Reacting', 'true')) })
+  transitions.push(
+    { from: 'Stagger', to: 'Strafe', condition: all(leaf('Reacting', 'false')) },
+    ...(spec.boss ? [{ from: 'Phase Shift', to: 'Strafe', condition: all(leaf('Phase Shifting', 'false')) }] : []),
+
+    { from: 'Idle', to: 'Chase', condition: all(leaf('Awake', 'true'), leaf('Has Target', 'true'), leaf('Target Dead', 'false')) },
+    { from: 'Chase', to: 'Return', condition: giveUp },
+    { from: 'Chase', to: 'Idle', condition: all(leaf('Has Target', 'false')) },
+    { from: 'Chase', to: 'Approach', condition: all(leaf('Distance', 'lt', ai.engage)) },
+  )
+  for (const from of engaged) {
+    transitions.push(
+      { from, to: 'Return', condition: giveUp },
+      { from, to: 'Chase', condition: any(leaf('Has Target', 'false'), leaf('Distance', 'gt', ai.engage + 0.75)), minDwell: 0.3 },
+      { from, to: 'Attack', condition: all(leaf('Attack Ready', 'true')) },
+    )
+  }
+  transitions.push(
+    { from: 'Approach', to: 'Strafe', condition: all(leaf('Distance', 'lt', ai.preferredMax)) },
+    { from: 'Strafe', to: 'Approach', condition: all(leaf('Distance', 'gt', ai.preferredMax + 0.5)) },
+  )
+  if (ai.preferredMin > 0) transitions.push(
+    { from: 'Strafe', to: 'Retreat', condition: all(leaf('Distance', 'lt', ai.preferredMin)) },
+    { from: 'Retreat', to: 'Strafe', condition: all(leaf('Distance', 'gt', ai.preferredMin + 0.5)) },
+  )
+  transitions.push(
+    // The script flips `attacking` the frame it starts the swing; the dwell covers that one frame.
+    { from: 'Attack', to: 'Strafe', condition: all(leaf('Attacking', 'false')), minDwell: 0.2 },
+    // Leashing latches: nothing but reaching home ends Return, so it never dithers at the edge.
+    { from: 'Return', to: 'Idle', condition: all(leaf('From Home', 'lt', 1.2)) },
+  )
+
+  const states = [
+    { name: 'Idle', goal: 'idle', speedScale: 0.5, isEntry: true, x: 40, y: 160 },
+    { name: 'Chase', goal: 'path', speedScale: 1, x: 260, y: 160 },
+    { name: 'Approach', goal: 'seek', speedScale: 1, x: 480, y: 60 },
+    { name: 'Strafe', goal: 'script', speedScale: 1, x: 700, y: 160 },
+    { name: 'Retreat', goal: 'script', speedScale: 1, x: 920, y: 160 },
+    { name: 'Attack', goal: 'script', speedScale: 1, x: 700, y: 20 },
+    { name: 'Stagger', goal: 'script', speedScale: 0, x: 700, y: 320 },
+    { name: 'Return', goal: 'path', targetKey: 'point', speedScale: 0.7, x: 260, y: 340 },
+    { name: 'Dead', goal: 'idle', speedScale: 0, x: 40, y: 340 },
+  ]
+  if (ai.preferredMin <= 0) states.splice(states.findIndex(s => s.name === 'Retreat'), 1)
+  if (spec.boss) states.push({ name: 'Phase Shift', goal: 'script', speedScale: 0, x: 920, y: 320 })
+
   return {
-    parameters: [bb('Engage', 'engage'), bb('Leash', 'leash'), bb('Dead', 'dead'), bb('Awake', 'awake'), bb('Target', 'target'), bb('AtHome', 'atHome')],
-    states: [
-      { name: 'Idle', goal: 'idle', speedScale: 0.5, isEntry: true, x: 40, y: 40 },
-      { name: 'Chase', goal: 'path', speedScale: 1, x: 260, y: 40 },
-      { name: 'Engage', goal: 'script', speedScale: 1, x: 480, y: 40 },
-      { name: 'Return', goal: 'path', targetKey: 'point', speedScale: 0.7, x: 260, y: 200 },
-      { name: 'Dead', goal: 'idle', speedScale: 0, x: 480, y: 200 },
+    parameters: [
+      builtin('Dead', 'isDead'),
+      builtin('Awake', 'isAwake', 'boolean', true),
+      sense('Has Target', 'hasTarget', 'boolean', false),
+      sense('Distance', 'distanceToTarget', 'number', 0),
+      builtin('Target Dead', 'targetDead'),
+      builtin('From Home', 'distanceFromHome', 'number', 0),
+      builtin('Attack Ready', 'attackReady'),
+      builtin('Attacking', 'isAttacking'),
+      builtin('Reacting', 'isReacting'),
+      ...(spec.boss ? [builtin('Phase Shifting', 'isPhaseShifting')] : []),
     ],
-    transitions: [
-      { from: '*', to: 'Dead', condition: is('Dead') },
-      { from: 'Idle', to: 'Chase', condition: both(is('Awake'), is('Target')) },
-      { from: 'Chase', to: 'Engage', condition: is('Engage') },
-      { from: 'Engage', to: 'Chase', condition: is('Engage', false), minDwell: 0.3 },
-      { from: 'Chase', to: 'Return', condition: is('Leash') },
-      { from: 'Engage', to: 'Return', condition: is('Leash') },
-      { from: 'Chase', to: 'Idle', condition: both(is('Target', false), is('AtHome')) },
-      { from: 'Return', to: 'Idle', condition: is('AtHome') },
-    ],
+    states,
+    transitions,
   }
 }
 
-function enemyTemplate(spec) {
+/** The type's AI graph as a library asset — what the controller's `brainId` links and the AI editor opens. */
+function enemyBrainAsset(spec) {
+  return {
+    id: stableId(`brain:enemy:${spec.key}`),
+    name: `${spec.name} Brain`,
+    kind: 'behavior',
+    machine: enemyBrainMachine(spec),
+    graph: { goals: [], evaluators: [], arbitrationInterval: 0.5 },
+    fuzzy: { variables: [], rules: [], defuzzification: 'maxav' },
+  }
+}
+
+/** An enemy type's full tree, as a template candidate — the variant `enemyVariant` diffs against the base. */
+function enemyNode(spec) {
   const key = `enemy:${spec.key}`
   const rootId = stableId(`${key}:root`)
   const s = spec.scale
@@ -829,16 +997,15 @@ function enemyTemplate(spec) {
 
   const lockPoint = node('LockPoint', 'node', { id: stableId(`${key}:lock`), position: [0, 1.25 * s, 0] })
   const anchor = node('HealthAnchor', 'node', { id: stableId(`${key}:anchor`), position: [0, 1.95 * s, 0] })
-  // The blade hitbox rides on the Weapon node as plain variables (it has no script of its own).
-  const weapon = node('Weapon', 'node', {
-    id: stableId(`${key}:weapon`), socketAttachment: { target: 'parent', socket: 'RightHand' },
-    variables: vars(spec.blade),
-    children: [weaponMesh(`${key}:weapon`, 'RightHand', spec.weaponDir ?? BLADE_DOWN_FORWARD, spec.weaponParts)],
-  })
+  // The weapon is not part of the enemy: its type's script names a weapon TEMPLATE (`weaponTemplates`),
+  // spawned into this group, into the right hand, when the enemy starts.
+  const weapons = group(`${key}:weapons`, 'Weapons', [])
   const attacks = group(`${key}:attacks`, 'Attacks', spec.attacks.map(([name, fields]) => attack(spec.key, name, fields)))
 
-  const children = [model, lockPoint, anchor, weapon, attacks]
+  const children = [model, lockPoint, anchor, weapons, attacks]
+  // Each enemy carries its own bar: a floating one over a regular enemy, a screen one for a boss.
   if (!spec.boss) children.push(enemyHealthBar(key, anchor.id))
+  else children.push(bossBar(key))
   if (spec.aura) children.push(particles(`${key}:aura`, 'PhaseAura', VFX.aura, { playOnStart: false }))
 
   const brain = withScript(node('Brain', 'controller', {
@@ -848,21 +1015,20 @@ function enemyTemplate(spec) {
     eyeHeight: 1.6 * s,
     steering: { maxSpeed: 3, arriveRadius: 0.8, slowRadius: 2.5, standoff: 1.5, avoidDistance: 1.5 },
     waypointRadius: 0.6,
-    behavior: enemyBehaviour(),
+    // The linked asset AND its embedded copy: the copy is what runs, the link is what the AI editor and
+    // a later library edit (reembedBrains) follow.
+    brainId: enemyBrainAsset(spec).id,
+    behavior: enemyBrainMachine(spec),
   }), 'SoulsEnemyBrain')
   children.push(brain)
 
-  const root = withScript(node(spec.name, 'character', {
+  // The type's stats are its SCRIPT's defaults (SoulsHollow, SoulsEliteKnight…), not values set here.
+  return withScript(node(spec.name, 'character', {
     id: rootId, children,
-    walkSpeed: spec.fields.moveSpeed ?? 3, runSpeed: spec.fields.moveSpeed ?? 3, turnSpeed: 300, turnThreshold: 170,
+    walkSpeed: spec.moveSpeed, runSpeed: spec.moveSpeed, turnSpeed: 300, turnThreshold: 170,
     acceleration: 12, facingMode: 'velocity', directionSmoothing: 0.15, jumpSpeed: 0,
-  }), 'SoulsEnemy', { displayName: spec.name, bodyHeight: 1.8 * s, ...spec.fields })
-
-  return {
-    id: stableId(`template:${spec.key}`), name: spec.name, nodeJson: root,
-    textureIds: [...mannequinMaterial.textureIds], scripts: {},
-    bodies: { [rootId]: capsuleBody(spec.radius ?? 0.3 * s, 1.78 * s, spec.mass ?? 70) }, triggers: {},
-  }
+    body: capsuleBody(spec.radius ?? 0.3 * s, 1.78 * s, spec.mass ?? 70),
+  }), spec.script)
 }
 
 function enemyHealthBar(key, anchorId) {
@@ -877,14 +1043,22 @@ function enemyHealthBar(key, anchorId) {
   }, { id: stableId(`${key}:bar`), visible: false, children: [fill] })
 }
 
+/**
+ * The base ENEMY template: what every enemy type shares — the mannequin, its anchors, an empty Weapons
+ * group, the Attacks group, a floating health bar and the brain — on the base SoulsEnemy script. Each
+ * type is a variant: its own script, scale and tint, its attacks; the boss drops the bar and adds an aura.
+ */
+const ENEMY_BASE = { key: 'base', name: 'Enemy', script: 'SoulsEnemy', material: MAT.hollow, scale: 1, moveSpeed: 3, attacks: [] }
+
 const CLUB = [['Club', 'cylinder', MAT.wood, [0.07, 0.75, 0.07], [0, 0.35, 0]]]
 const STAFF = [['Staff', 'cylinder', MAT.wood, [0.05, 1.6, 0.05], [0, 0.25, 0]], ['Orb', 'sphere', MAT.bolt, [0.12, 0.12, 0.12], [0, 1.08, 0]]]
 const HALBERD = [['Shaft', 'cylinder', MAT.wood, [0.06, 2.2, 0.06], [0, 0.6, 0]], ['Head', 'box', MAT.blade, [0.4, 0.5, 0.03], [0.12, 1.65, 0]]]
 
 const ENEMIES = [
   {
-    key: 'hollow', name: 'Hollow', material: MAT.hollow, scale: 1, weaponParts: CLUB, blade: BLADE.club,
-    fields: { maxHp: 160, defense: 0, maxPoise: 25, soulsReward: 120, moveSpeed: 2.6, engageRange: 4, leashRange: 18, preferredMin: 0, preferredMax: 1.5 },
+    key: 'hollow', name: 'Hollow', script: 'SoulsHollow', material: MAT.hollow, scale: 1, moveSpeed: 2.6,
+    ai: { engage: 4, leash: 18, preferredMin: 0, preferredMax: 1.5 },
+    weapon: ['club', 'Club', 'SoulsClub', CLUB],
     sight: 14,
     attacks: [
       ['Swing', { clip: 'Souls_Enemy_Swing', damage: 70, poiseDamage: 20, minRange: 0, maxRange: 1.8, trackSeconds: 0.45, lungeStart: 0.45, lungeSeconds: 0.15, lungeSpeed: 2.5, hitTime: 0.62 }],
@@ -892,8 +1066,9 @@ const ENEMIES = [
     ],
   },
   {
-    key: 'caster', name: 'Hollow Sorcerer', material: MAT.caster, scale: 1, weaponParts: STAFF, blade: BLADE.staff, weaponDir: [0, 1, 0.2],
-    fields: { maxHp: 110, defense: 0, maxPoise: 15, soulsReward: 160, moveSpeed: 2.2, engageRange: 18, leashRange: 22, preferredMin: 7, preferredMax: 14, strafeSpeedScale: 0.5, attackGapMin: 1, attackGapMax: 2 },
+    key: 'caster', name: 'Hollow Sorcerer', script: 'SoulsHollowSorcerer', material: MAT.caster, scale: 1, moveSpeed: 2.2,
+    ai: { engage: 18, leash: 22, preferredMin: 7, preferredMax: 14 },
+    weapon: ['staff', 'Sorcerer Staff', 'SoulsStaff', STAFF, [0, 1, 0.2]],
     sight: 22, fov: 160,
     attacks: [
       ['Bolt', { clip: 'Souls_Cast', damage: 90, poiseDamage: 30, minRange: 3, maxRange: 20, cooldown: 3.5, trackSeconds: 0.65, hitTime: 0.7, projectileTemplate: 'Magic Bolt', projectileSpeed: 12, sound: 'Cast' }],
@@ -901,8 +1076,9 @@ const ENEMIES = [
     ],
   },
   {
-    key: 'knight', name: 'Elite Knight', material: MAT.knight, scale: 1.2, weaponParts: GREATSWORD_PARTS, blade: BLADE.greatsword,
-    fields: { maxHp: 650, defense: 0.15, maxPoise: 70, soulsReward: 900, moveSpeed: 2.8, engageRange: 9, leashRange: 14, preferredMin: 0, preferredMax: 2.6, attackGapMin: 0.8, attackGapMax: 1.4, bodyRadius: 0.45 },
+    // Wields the player's own Greatsword template — one weapon, two wielders.
+    key: 'knight', name: 'Elite Knight', script: 'SoulsEliteKnight', material: MAT.knight, scale: 1.2, moveSpeed: 2.8,
+    ai: { engage: 9, leash: 14, preferredMin: 0, preferredMax: 2.6 },
     sight: 16,
     attacks: [
       ['Sweep', { clip: 'Souls_Tall_Sweep', damage: 140, poiseDamage: 35, minRange: 0, maxRange: 2.6, trackSeconds: 0.45, hitTime: 0.7 }],
@@ -911,13 +1087,10 @@ const ENEMIES = [
     ],
   },
   {
-    key: 'warden', name: 'Hollow Warden', material: MAT.warden, scale: 1.8, weaponParts: HALBERD, blade: BLADE.halberd, boss: true, aura: true,
+    key: 'warden', name: 'Hollow Warden', script: 'SoulsHollowWarden', material: MAT.warden, scale: 1.8, moveSpeed: 3, boss: true, aura: true,
+    ai: { engage: 12, leash: 999, preferredMin: 0, preferredMax: 3.6 },
+    weapon: ['halberd', 'Halberd', 'SoulsHalberd', HALBERD],
     radius: 0.45, mass: 300, sight: 60, fov: 360,
-    fields: {
-      maxHp: 2600, defense: 0.2, maxPoise: 150, soulsReward: 6000, moveSpeed: 3, engageRange: 12, leashRange: 999,
-      preferredMin: 0, preferredMax: 3.6, attackGapMin: 0.6, attackGapMax: 1.2, isBoss: true, flinchOnHit: false,
-      bodyRadius: 0.7, healthBarSeconds: 0, deathSeconds: 2.2, corpseSeconds: 20,
-    },
     attacks: [
       ['Sweep', { clip: 'Souls_Giant_Sweep', playSpeed: 0.9, damage: 150, poiseDamage: 40, minRange: 0, maxRange: 4.2, trackSeconds: 0.5, hitTime: 0.7, comboNext: 'Backsweep' }],
       ['Backsweep', { clip: 'Souls_Giant_Backsweep', playSpeed: 1, damage: 140, poiseDamage: 40, minRange: 0, maxRange: 4.2, phase: 9, trackSeconds: 0.4, hitTime: 0.7 }],
@@ -1232,6 +1405,59 @@ function asTemplate(key, nodeJson, folder, textureIds = []) {
   return template
 }
 
+/**
+ * The template VARIANTS: `variantTemplate` diffs a builder's full tree against its base template and
+ * stores what the editor stores — the diff, and the content materialized from base + diff, on ids
+ * derived from the variant — through the editor's own templateVariants.ts, so the scene opens with
+ * nothing to rebuild and the editor's inherited/overridden marks agree with what was authored here.
+ */
+const { diffTemplate, materializeVariant } = moduleRegistry()(path.join(ROOT, 'editor', 'src', 'utils', 'templateVariants.ts'))
+
+/** A builder's node re-keyed and split as a template, sockets embedded — base or variant candidate. */
+function templateShape(key, nodeJson, textureIds) {
+  const root = cloneNodeJson(nodeJson)
+  let i = 0
+  regenerateNodeIds(root, new Map(), () => stableId(`template:${key}:${i++}`))
+  root.position = [0, 0, 0]
+  root.rotation = [0, 0, 0]
+  const bodies = {}, triggers = {}
+  walkJson(root, n => {
+    delete n.__sourceId
+    if (n.body) { bodies[n.id] = n.body; delete n.body }
+    if (n.trigger) { triggers[n.id] = n.trigger; delete n.trigger }
+  })
+  embedSockets(root)
+  return { id: stableId(`template:${key}`), name: root.name, nodeJson: root, textureIds, scripts: {}, bodies, triggers }
+}
+
+/** A variant of `base` whose content is `nodeJson`. */
+function variantTemplate(key, base, nodeJson, folder) {
+  const candidate = templateShape(key, nodeJson, [])
+  const diff = diffTemplate(base, candidate)
+  const t = { id: candidate.id, name: candidate.name, ...materializeVariant(base, candidate.id, diff), variant: { baseTemplateId: base.id, diff } }
+  TEMPLATE_FOLDER.set(t.id, folder)
+  return t
+}
+
+/** The weapon templates: the base, then a variant per weapon (player weapons and enemy weapons alike). */
+function weaponTemplates() {
+  const base = asTemplate('weapon:base', baseWeaponNode(), 'Weapons')
+  const specs = [...WEAPONS, ...ENEMIES.filter(e => e.weapon).map(e => e.weapon)]
+  return [base, ...specs.map(([key, name, script, parts, extra]) => {
+    // A player weapon's 5th entry is its moveset; an enemy weapon's, an optional blade direction.
+    const isMoves = Array.isArray(extra) && Array.isArray(extra[0])
+    const tree = weaponNode(key, name, script, parts, isMoves ? extra : [], isMoves || !extra ? undefined : extra)
+    return variantTemplate(`weapon:${key}`, base, tree, 'Weapons')
+  })]
+}
+
+/** The enemy templates: the base "Enemy", then a variant per type. */
+function enemyTemplates() {
+  const base = asTemplate('enemy:base', enemyNode(ENEMY_BASE), 'Enemies', [...mannequinMaterial.textureIds])
+  embedSockets(base.nodeJson)
+  return [base, ...ENEMIES.map(spec => variantTemplate(`enemy:${spec.key}`, base, enemyNode(spec), 'Enemies'))]
+}
+
 // One node's content with everything a copy may differ in taken out, for the comparison below.
 function comparable(n, isRoot) {
   const out = {}
@@ -1284,45 +1510,6 @@ function torchNode(k, position = [0, 0, 0]) {
 const MESSAGE_DEFAULT = ['A message', 'Write the message here.']
 const PICKUP_DEFAULT = { kind: 'souls', amount: 100, itemName: 'Souls' }
 
-/** The level templates, built once. Names are what the Assets panel shows and what copies are named. */
-const LEVEL = (() => {
-  const message = messageNode('template', ...MESSAGE_DEFAULT, [0, 0, 0])
-  message.name = 'Message'
-  const pickup = pickupNode('template', 'Pickup', [0, 0, 0], PICKUP_DEFAULT)
-  const lever = leverNode()
-  lever.name = 'Lever'
-  const gate = shortcutGate()
-  gate.name = 'Gate'
-  return {
-    player: asTemplate('level:player', playerNode(), 'Level', [...mannequinMaterial.textureIds]),
-    torch: asTemplate('level:torch', torchNode('template'), 'Level'),
-    bonfire: asTemplate('level:bonfire', bonfireNode(), 'Level'),
-    fogGate: asTemplate('level:fog-gate', fogGateNode(), 'Level'),
-    lever: asTemplate('level:lever', lever, 'Level'),
-    gate: asTemplate('level:gate', gate, 'Level'),
-    message: asTemplate('level:message', message, 'Interactables'),
-    pickup: asTemplate('level:pickup', pickup, 'Interactables'),
-  }
-})()
-
-/** A placed message: the Message template, its text and name overridden. */
-function placedMessage(key, title, text, at, yaw = 0) {
-  return linkInstance(LEVEL.message, messageNode(key, title, text, at, yaw))
-}
-
-/** The last message: starts hidden, and the manager reveals it (by this name) with the boss reward. */
-function epilogueMessage() {
-  const m = messageNode('epilogue', 'The Warden rests', 'The keep falls silent.\nThank you for playing Hollow Keep.', [2, 0, 116], 0)
-  m.name = 'Epilogue Message'
-  m.scriptVars.hiddenUntilRevealed = true
-  return linkInstance(LEVEL.message, m)
-}
-
-/** A placed pickup: the Pickup template, what it gives (and its name) overridden. */
-function placedPickup(key, name, at, fields) {
-  return linkInstance(LEVEL.pickup, pickupNode(key, name, at, { ...PICKUP_DEFAULT, ...fields }))
-}
-
 // =====================================================================================================
 // UI
 // =====================================================================================================
@@ -1372,14 +1559,24 @@ function hud() {
       text('hud:message-title', 'MessageTitle', 'Title', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [32, 24], offsetMax: [-32, 70] }, { size: 32, align: 'center', tint: GOLD }),
       text('hud:message-body', 'MessageBody', 'Body', { anchorMin: [0, 0], anchorMax: [1, 1], offsetMin: [40, 84], offsetMax: [-40, -24] }, { size: 24, align: 'center', vAlign: 'top', lineHeight: 1.45 }),
     ], { radius: 6 }),
-    panel('hud:boss', 'Boss', rect(BC, [-560, -170], [560, -110]), [0, 0, 0, 0], [
-      text('hud:boss-name', 'BossName', 'Hollow Warden', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [0, 0], offsetMax: [0, 34] }, { size: 26 }),
-      bar('hud:boss-lag', 'BossLag', { anchorMin: [0, 1], anchorMax: [1, 1], offsetMin: [0, -20], offsetMax: [0, 0] }, [0.85, 0.7, 0.25, 1], [0, 0, 0, 0.6], 1.2, 1),
-      bar('hud:boss-health', 'BossHealth', { anchorMin: [0, 1], anchorMax: [1, 1], offsetMin: [0, -20], offsetMax: [0, 0] }, [0.62, 0.08, 0.06, 1], [0, 0, 0, 0], 0.05, 2),
-    ]),
     text('hud:controls', 'Controls', 'LMB light · RMB heavy · Space roll/sprint · Q lock · R drink · F swap · E interact',
       rect([1, 0], [-760, 28], [-40, 56]), { size: 16, align: 'right', tint: [0.75, 0.72, 0.66, 0.7] }),
   ]), 'SoulsHud')
+}
+
+/**
+ * A boss's health bar: a screen-space UI Root that is a CHILD of the boss, so it belongs to (and reads)
+ * the boss that carries it. SoulsBossBar shows it while its owner is awake and alive.
+ */
+function bossBar(key) {
+  const BC = [0.5, 1]
+  return withScript(screenRoot('BossBar', `${key}:bossbar`, [
+    panel(`${key}:bossbar:bar`, 'Bar', rect(BC, [-560, -170], [560, -110]), [0, 0, 0, 0], [
+      text(`${key}:bossbar:name`, 'BossName', 'Boss', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [0, 0], offsetMax: [0, 34] }, { size: 26 }),
+      bar(`${key}:bossbar:lag`, 'BossLag', { anchorMin: [0, 1], anchorMax: [1, 1], offsetMin: [0, -20], offsetMax: [0, 0] }, [0.85, 0.7, 0.25, 1], [0, 0, 0, 0.6], 1.2, 1),
+      bar(`${key}:bossbar:health`, 'BossHealth', { anchorMin: [0, 1], anchorMax: [1, 1], offsetMin: [0, -20], offsetMax: [0, 0] }, [0.62, 0.08, 0.06, 1], [0, 0, 0, 0], 0.05, 2),
+    ]),
+  ]), 'SoulsBossBar')
 }
 
 function banner() {
@@ -1427,6 +1624,45 @@ function lockReticle() {
     uiTargetId: null, referenceDistance: 10, minScale: 0.1, maxScale: 4, billboard: true, clampToScreen: false,
     hideBehindCamera: true, offsetMax: [14, 14],
   }, { id: stableId('ui:reticle'), visible: false, children: [dot] })
+}
+
+/** The level templates, built once. Names are what the Assets panel shows and what copies are named. */
+const LEVEL = (() => {
+  const message = messageNode('template', ...MESSAGE_DEFAULT, [0, 0, 0])
+  message.name = 'Message'
+  const pickup = pickupNode('template', 'Pickup', [0, 0, 0], PICKUP_DEFAULT)
+  const lever = leverNode()
+  lever.name = 'Lever'
+  const gate = shortcutGate()
+  gate.name = 'Gate'
+  return {
+    player: asTemplate('level:player', playerNode(), 'Level', [...mannequinMaterial.textureIds]),
+    torch: asTemplate('level:torch', torchNode('template'), 'Level'),
+    bonfire: asTemplate('level:bonfire', bonfireNode(), 'Level'),
+    fogGate: asTemplate('level:fog-gate', fogGateNode(), 'Level'),
+    lever: asTemplate('level:lever', lever, 'Level'),
+    gate: asTemplate('level:gate', gate, 'Level'),
+    message: asTemplate('level:message', message, 'Interactables'),
+    pickup: asTemplate('level:pickup', pickup, 'Interactables'),
+  }
+})()
+
+/** A placed message: the Message template, its text and name overridden. */
+function placedMessage(key, title, text, at, yaw = 0) {
+  return linkInstance(LEVEL.message, messageNode(key, title, text, at, yaw))
+}
+
+/** The last message: starts hidden, and the manager reveals it (by this name) with the boss reward. */
+function epilogueMessage() {
+  const m = messageNode('epilogue', 'The Warden rests', 'The keep falls silent.\nThank you for playing Hollow Keep.', [2, 0, 116], 0)
+  m.name = 'Epilogue Message'
+  m.scriptVars.hiddenUntilRevealed = true
+  return linkInstance(LEVEL.message, m)
+}
+
+/** A placed pickup: the Pickup template, what it gives (and its name) overridden. */
+function placedPickup(key, name, at, fields) {
+  return linkInstance(LEVEL.pickup, pickupNode(key, name, at, { ...PICKUP_DEFAULT, ...fields }))
 }
 
 // =====================================================================================================
@@ -1523,7 +1759,8 @@ function keepScene() {
   const root = node('root', 'node', {
     id: stableId('root'),
     children: [
-      withScript(node('GameManager', 'node', { id: stableId('manager') }), 'SoulsGameManager'),
+      // The world banners (YOU DIED, BONFIRE LIT, VICTORY) belong to the game flow, which is the manager's.
+      withScript(node('GameManager', 'node', { id: stableId('manager'), children: [banner()] }), 'SoulsGameManager'),
       soundsGroup(),
       linkInstance(LEVEL.player, playerNode()),
       sun, sky,
@@ -1532,7 +1769,6 @@ function keepScene() {
       interactables,
       spawns,
       navMesh,
-      hud(), banner(), bonfireMenu(), lockReticle(),
     ],
     ambientLight: [2300, 2350, 2700],
   })
@@ -1572,8 +1808,8 @@ function vfs(libraries) {
   }
   add('/', 'scene', [{ name: PROJECT_NAME, id: SCENE_ID }])
   add('/Scripts/', 'script', libraries.scripts)
-  const folderOf = (t) => TEMPLATE_FOLDER.get(t.id) ?? (ENEMIES.some(e => e.name === t.name) ? 'Enemies' : 'Effects')
-  for (const folder of ['Level', 'Interactables', 'Enemies', 'Effects'])
+  const folderOf = (t) => TEMPLATE_FOLDER.get(t.id) ?? 'Effects'
+  for (const folder of ['Level', 'Interactables', 'Weapons', 'Enemies', 'Effects'])
     add(`/Templates/${folder}/`, 'template', libraries.templates.filter(t => folderOf(t) === folder))
   add('/Models/', 'model', libraries.models)
   const isEffect = (m) => EFFECT_MATERIALS.has(m.id)
@@ -1582,9 +1818,11 @@ function vfs(libraries) {
   add('/Materials/Effects/', 'material', libraries.materials.filter(isEffect))
   add('/Animation/', 'rig', libraries.rigs)
   add('/Animation/', 'animationField', libraries.animationFields)
+  add('/Animation/', 'animController', libraries.animControllers)
   add('/Animation/Locomotion/', 'animation', libraries.animations.filter(a => !a.name.startsWith('Souls_')))
   add('/Animation/Placeholders/', 'animation', libraries.animations.filter(a => a.name.startsWith('Souls_')))
   add('/Effects/', 'particleSystem', libraries.particleSystems)
+  add('/AI/', 'aiBrain', libraries.aiBrains)
 
   const paths = entries.map(e => e.path)
   const clash = paths.find((p, i) => paths.indexOf(p) !== i)
@@ -1600,8 +1838,10 @@ function main() {
   fs.mkdirSync(path.join(OUT, 'libraries'), { recursive: true })
   fs.mkdirSync(path.join(OUT, 'scenes'), { recursive: true })
 
+  // Every base before its variants: the editor re-materializes a variant from its base in this order.
   const templates = [
-    ...ENEMIES.map(enemyTemplate),
+    ...weaponTemplates(),
+    ...enemyTemplates(),
     boltTemplate(),
     fxTemplate('bolt-impact', 'Bolt Impact', VFX.boltImpact, 1.2, [pointLight('impact:light', 'Flash', [0.5, 0.7, 1], 900, 6)]),
     fxTemplate('hit-spark', 'Hit Spark', VFX.hitSpark, 0.8),
@@ -1623,12 +1863,14 @@ function main() {
     materials,
     terrainMaterials: [],
     animationFields: [locomotionField],
+    animControllers: [characterController()],
     animations,
     rigs: [rig],
     tilesets: [],
     scripts: scripts.assets,
     templates,
     particleSystems,
+    aiBrains: [ENEMY_BASE, ...ENEMIES].map(enemyBrainAsset),
   }
   embedSockets([libraries.models, libraries.templates, scene])
   for (const [name, value] of Object.entries(libraries)) writeJson(path.join(OUT, 'libraries', `${name}.json`), value)
@@ -1638,7 +1880,7 @@ function main() {
   // what was WRITTEN, read back, since that is what the editor will hash.
   const written = (name) => readJson(path.join(OUT, 'libraries', `${name}.json`))
   scene.assetHashes = {}
-  for (const [kind, lib] of [['template', 'templates'], ['material', 'materials'], ['model', 'models'], ['script', 'scripts']])
+  for (const [kind, lib] of [['template', 'templates'], ['material', 'materials'], ['model', 'models'], ['script', 'scripts'], ['aiBrain', 'aiBrains']])
     for (const asset of written(lib)) scene.assetHashes[assetHashKey(kind, asset.id)] = hashAsset(asset)
   writeJson(path.join(OUT, 'scenes', `${SCENE_ID}.json`), scene)
   const textureCount = textures.write(OUT)
@@ -1653,6 +1895,7 @@ function main() {
         textureIds: textures.included, scriptIds: scripts.assets.map(s => s.id),
         animationFieldIds: [locomotionField.id], animationIds: rig.animationIds,
         particleSystemIds: particleSystems.map(p => p.id),
+        aiBrainIds: libraries.aiBrains.map(b => b.id),
       }),
     }],
   })

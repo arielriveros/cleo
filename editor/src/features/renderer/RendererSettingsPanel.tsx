@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { engineEventBus, TextureManager, isDerivedTextureId, TERRAIN_LAYER_TEXTURE_SIZES } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
-import { Section, Slider, Toggle, Field, NumberInput, SegmentedControl, Select, Hint } from '../../components/ui';
+import { Section, Slider, Toggle, Field, NumberInput, SegmentedControl, Select, Hint, cn, labelClass } from '../../components/ui';
+
+// The renderer's labels ("Foliage Density", "LOD1 Detail") are longer than the inspector's; at the shared
+// 12px they wrap in Field's default 70px column.
+const LABEL_W = 'w-[112px]';
 import BackendSelector from './BackendSelector';
 
 // Debug channels map 1:1 to the renderer's `debugView` setter; the grouping here is display only.
@@ -177,6 +181,7 @@ export default function RendererSettingsPanel() {
   const [gridPlane, setGridPlane] = useState<string>(() => renderer?.gridPlane ?? 'xz');
   const [frustumCulling, setFrustumCulling] = useState<boolean>(() => renderer?.frustumCulling ?? true);
   const [foliageCullDistance, setFoliageCullDistance] = useState<number>(() => renderer?.foliageCullDistance ?? 65);
+  const [particleLodScale, setParticleLodScale] = useState<number>(() => renderer?.particleLodDistanceScale ?? 1);
   const [foliageCellSize, setFoliageCellSize] = useState<number>(() => renderer?.foliageCellSize ?? 13);
   const [foliageDensity, setFoliageDensity] = useState<number>(() => renderer?.foliageDensityFalloff ?? 0.75);
   const [terrainLod, setTerrainLod] = useState<boolean>(() => renderer?.terrainLodEnabled ?? true);
@@ -213,7 +218,7 @@ export default function RendererSettingsPanel() {
   const [pointShadowDist, setPointShadowDist] = useState<number>(() => renderer?.pointShadowDistance ?? 50);
   const [pointShadowBias, setPointShadowBias] = useState<number>(() => renderer?.pointShadowBias ?? 0.0015);
 
-  // Leaving Renderer mode (unmount) must restore the normal composited image for the other modes.
+  // Leaving Options › Engine › Renderer (unmount) must restore the normal composited image for the other modes.
   useEffect(() => () => {
     if (!renderer) return;
     renderer.debugView = 'final';
@@ -271,6 +276,7 @@ export default function RendererSettingsPanel() {
     setGridPlane(renderer.gridPlane);
     setFrustumCulling(renderer.frustumCulling);
     setFoliageCullDistance(renderer.foliageCullDistance);
+    setParticleLodScale(renderer.particleLodDistanceScale);
     setFoliageCellSize(renderer.foliageCellSize);
     setFoliageDensity(renderer.foliageDensityFalloff);
     setTerrainLod(renderer.terrainLodEnabled);
@@ -329,7 +335,7 @@ export default function RendererSettingsPanel() {
     return null;
   })();
 
-  if (!renderer) return <div className='p-3 text-muted text-xs'>Renderer not ready.</div>;
+  if (!renderer) return <div className='p-3 text-muted text-ui'>Renderer not ready.</div>;
 
   const setDebug = (key: string) => { renderer.debugView = key; setDebugViewState(key); };
   // Beside `setDebug`, and NOT marking the scene dirty for the same reason it does not: both are ways
@@ -340,7 +346,7 @@ export default function RendererSettingsPanel() {
   return (
     // The content column is capped rather than filling the dock group (see PerformancePanel); the panel
     // itself stays resizable.
-    <div className='h-full overflow-y-auto p-3 text-[11px] text-white'>
+    <div className='h-full overflow-y-auto p-3 text-ui-sm text-fg'>
       <div className='w-full max-w-[420px]'>
       <Section
         title='Graphics API'
@@ -375,40 +381,45 @@ export default function RendererSettingsPanel() {
       >
         <Toggle label='Frustum Culling' checked={frustumCulling} className='my-1'
           onChange={(c) => { renderer.frustumCulling = c; setFrustumCulling(c); touch(); }} />
-        <Field label='Foliage Dist'>
+        <Field labelClassName={LABEL_W} label='Foliage Dist'>
           <NumberInput value={foliageCullDistance} min={0} step={5} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.foliageCullDistance = v; setFoliageCullDistance(v); touch(); }} />
         </Field>
-        <Field label='Cell Size'>
+        <Field labelClassName={LABEL_W} label='Cell Size'>
           <NumberInput value={foliageCellSize} min={1} step={4} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.foliageCellSize = v; setFoliageCellSize(v); touch(); }} />
         </Field>
         {/* Density scaling. LOD reduces what one instance COSTS; this reduces how many there are, and
             neither bounds a scatter on its own. 1 draws every instance. */}
-        <Field label='Foliage Density'>
+        <Field labelClassName={LABEL_W} label='Foliage Density'>
           <NumberInput value={foliageDensity} min={0.1} max={1} step={0.05} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.foliageDensityFalloff = v; setFoliageDensity(renderer.foliageDensityFalloff); touch(); }} />
         </Field>
+        {/* Each .vfx authors its own LOD distances; this stretches or shrinks all of them at once. */}
+        <Slider label='Particle LOD' labelClassName={LABEL_W} min={0.25} max={4} step={0.05} value={particleLodScale}
+          title="Multiplies every particle effect's LOD and cull distances: 2 keeps full detail twice as far, 0.5 thins effects sooner. Set by the quality tier."
+          readout={v => `×${v.toFixed(2)}`}
+          onChange={(v) => { renderer.particleLodDistanceScale = v; setParticleLodScale(renderer.particleLodDistanceScale); touch(); }} />
         <Toggle label='Terrain LOD' checked={terrainLod} className='my-1'
           onChange={(c) => { renderer.terrainLodEnabled = c; setTerrainLod(c); touch(); }} />
-        <Field label='LOD1 Dist'>
+        <Field labelClassName={LABEL_W} label='LOD1 Dist'>
           <NumberInput value={terrainLodDist1} min={0} step={10} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.terrainLodDistance1 = v; setTerrainLodDist1(renderer.terrainLodDistance1); touch(); }} />
         </Field>
-        <div className='flex items-center gap-1 my-1 text-xs'>
-          <span className='w-[70px] shrink-0'>LOD1 Detail</span>
+        <div className='flex items-center gap-1 my-1 text-ui'>
+          <span className={cn(labelClass, LABEL_W, 'shrink-0')}>LOD1 Detail</span>
           <SegmentedControl
             value={terrainLodStep1}
             onChange={(step) => { renderer.terrainLodStep1 = step; setTerrainLodStep1(step); touch(); }}
             options={LOD_DETAIL.map((d) => ({ value: d.step, label: d.label, title: d.title }))}
           />
         </div>
-        <Field label='LOD2 Dist'>
+        <Field labelClassName={LABEL_W} label='LOD2 Dist'>
           <NumberInput value={terrainLodDist2} min={0} step={10} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.terrainLodDistance2 = v; setTerrainLodDist2(renderer.terrainLodDistance2); touch(); }} />
         </Field>
-        <div className='flex items-center gap-1 my-1 text-xs'>
-          <span className='w-[70px] shrink-0'>LOD2 Detail</span>
+        <div className='flex items-center gap-1 my-1 text-ui'>
+          <span className={cn(labelClass, LABEL_W, 'shrink-0')}>LOD2 Detail</span>
           <SegmentedControl
             value={terrainLodStep2}
             onChange={(step) => { renderer.terrainLodStep2 = step; setTerrainLodStep2(step); touch(); }}
@@ -417,7 +428,7 @@ export default function RendererSettingsPanel() {
         </div>
         {/* Every landscape surface is resampled into ONE texture array, and an array has ONE size — so
             this is the size they all get, not a per-material choice. Changing it re-bakes them. */}
-        <Field label='Surface Tex'>
+        <Field labelClassName={LABEL_W} label='Surface Tex'>
           <SegmentedControl
             value={layerTexSize}
             onChange={(size) => { renderer.terrainLayerTextureSize = size; setLayerTexSize(renderer.terrainLayerTextureSize); touch(); }}
@@ -469,8 +480,8 @@ export default function RendererSettingsPanel() {
           <Hint>Higher adapts faster; 0 snaps with no easing. Eyes adjust to brightening
             faster than to darkening, which is why the two differ by default.</Hint>
         </>}
-        <div className='flex items-center gap-1 my-1 text-xs'>
-          <span className='w-[70px] shrink-0'>Tone Map</span>
+        <div className='flex items-center gap-1 my-1 text-ui'>
+          <span className={cn(labelClass, LABEL_W, 'shrink-0')}>Tone Map</span>
           <SegmentedControl
             value={toneMapper}
             onChange={(m) => { renderer.toneMapper = m; setToneMapper(m); touch(); }}
@@ -481,7 +492,7 @@ export default function RendererSettingsPanel() {
           onChange={(v) => { renderer.saturation = v; setSaturation(v); touch(); }} />
         <Slider label='Chromatic' value={chromatic} min={0} max={2} step={0.01}
           onChange={(v) => { renderer.chromaticAberrationStrength = v; setChromatic(v); touch(); }} />
-        <Field label='Colour LUT'>
+        <Field labelClassName={LABEL_W} label='Colour LUT'>
           <LutPicker value={lutId}
             onChange={(id) => { renderer.colorGradingLut = id; setLutId(id); touch(); }} />
         </Field>
@@ -561,7 +572,7 @@ export default function RendererSettingsPanel() {
       >
         <Slider label='Intensity' value={dirtIntensity} min={0} max={4} step={0.05}
           onChange={(v) => { renderer.lensDirtIntensity = v; setDirtIntensity(v); touch(); }} />
-        {dirtIntensity > 0 && <Field label='Mask'>
+        {dirtIntensity > 0 && <Field labelClassName={LABEL_W} label='Mask'>
           <TexturePicker value={dirtId} emptyLabel='(built-in)'
             onChange={(id) => { renderer.lensDirtTexture = id; setDirtId(id); touch(); }} />
         </Field>}
@@ -621,8 +632,8 @@ export default function RendererSettingsPanel() {
           onChange={(c) => { renderer.motionBlurEnabled = c; setMotionBlur(c); touch(); }} />
         <Slider label='Amount' value={motionBlurIntensity} min={0} max={4} step={0.05}
           onChange={(v) => { renderer.motionBlurIntensity = v; setMotionBlurIntensity(v); touch(); }} />
-        <div className='flex items-center gap-1 my-1 text-xs'>
-          <span className='w-[70px] shrink-0'>Quality</span>
+        <div className='flex items-center gap-1 my-1 text-ui'>
+          <span className={cn(labelClass, LABEL_W, 'shrink-0')}>Quality</span>
           <SegmentedControl
             value={motionBlurSamples}
             onChange={(samples) => { renderer.motionBlurSamples = samples; setMotionBlurSamples(samples); touch(); }}
@@ -647,31 +658,31 @@ export default function RendererSettingsPanel() {
         <Toggle label='Enabled' checked={shadowsEnabled} className='my-1'
           onChange={(c) => { renderer.shadowsEnabled = c; setShadowsEnabled(c); touch(); }} />
 
-        <div className='flex items-center gap-1 my-1 text-xs'>
-          <span className='w-[70px] shrink-0'>Resolution</span>
+        <div className='flex items-center gap-1 my-1 text-ui'>
+          <span className={cn(labelClass, LABEL_W, 'shrink-0')}>Resolution</span>
           <SegmentedControl
             value={shadowRes}
             onChange={(size) => { renderer.shadowMapResolution = size; setShadowRes(renderer.shadowMapResolution); touch(); }}
             options={SHADOW_RES.map((r) => ({ value: r.size, label: r.label, title: r.title }))}
           />
         </div>
-        <div className='flex items-center gap-1 my-1 text-xs'>
-          <span className='w-[70px] shrink-0'>Cascades</span>
+        <div className='flex items-center gap-1 my-1 text-ui'>
+          <span className={cn(labelClass, LABEL_W, 'shrink-0')}>Cascades</span>
           <SegmentedControl
             value={shadowCascades}
             onChange={(n) => { renderer.shadowCascades = n; setShadowCascades(renderer.shadowCascades); touch(); }}
             options={SHADOW_CASCADES}
           />
         </div>
-        <Field label='Distance'>
+        <Field labelClassName={LABEL_W} label='Distance'>
           <NumberInput value={shadowDistance} min={1} step={10} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.shadowDistance = v; setShadowDistance(renderer.shadowDistance); touch(); }} />
         </Field>
         <Slider label='Split &#955;' value={shadowLambda} min={0} max={1} step={0.05}
           onChange={(v) => { renderer.shadowSplitLambda = v; setShadowLambda(v); touch(); }} />
 
-        <div className='flex items-center gap-1 my-1 text-xs'>
-          <span className='w-[70px] shrink-0'>Filter</span>
+        <div className='flex items-center gap-1 my-1 text-ui'>
+          <span className={cn(labelClass, LABEL_W, 'shrink-0')}>Filter</span>
           <SegmentedControl
             value={shadowFilterMode}
             onChange={(m) => { renderer.shadowFilterMode = m; setShadowFilterMode(renderer.shadowFilterMode); touch(); }}
@@ -695,14 +706,14 @@ export default function RendererSettingsPanel() {
           onChange={(c) => { renderer.shadowStabilize = c; setShadowStabilize(c); touch(); }} />
         <Toggle label='Stagger Updates' checked={shadowStagger} className='my-1'
           onChange={(c) => { renderer.shadowStagger = c; setShadowStagger(c); touch(); }} />
-        <Field label='Caster Pad'>
+        <Field labelClassName={LABEL_W} label='Caster Pad'>
           <NumberInput value={shadowCasterPad} min={0} step={5} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.shadowCasterPad = v; setShadowCasterPad(renderer.shadowCasterPad); touch(); }} />
         </Field>
 
         {debugView === 'shadow' && (
-          <div className='flex items-center gap-1 my-1 text-xs'>
-            <span className='w-[70px] shrink-0'>View Layer</span>
+          <div className='flex items-center gap-1 my-1 text-ui'>
+            <span className={cn(labelClass, LABEL_W, 'shrink-0')}>View Layer</span>
             <SegmentedControl
               value={shadowDebugLayer}
               onChange={(n) => { renderer.shadowDebugLayer = n; setShadowDebugLayer(renderer.shadowDebugLayer); touch(); }}
@@ -722,15 +733,15 @@ export default function RendererSettingsPanel() {
       >
         <Toggle label='Enabled' checked={spotShadows} className='my-1'
           onChange={(c) => { renderer.spotShadowsEnabled = c; setSpotShadows(c); touch(); }} />
-        <div className='flex items-center gap-1 my-1 text-xs'>
-          <span className='w-[70px] shrink-0'>Resolution</span>
+        <div className='flex items-center gap-1 my-1 text-ui'>
+          <span className={cn(labelClass, LABEL_W, 'shrink-0')}>Resolution</span>
           <SegmentedControl
             value={spotShadowRes}
             onChange={(size) => { renderer.spotShadowResolution = size; setSpotShadowRes(renderer.spotShadowResolution); touch(); }}
             options={SPOT_RES.map((r) => ({ value: r.size, label: r.label }))}
           />
         </div>
-        <Field label='Max Dist'>
+        <Field labelClassName={LABEL_W} label='Max Dist'>
           <NumberInput value={spotShadowDist} min={1} step={10} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.spotShadowDistance = v; setSpotShadowDist(renderer.spotShadowDistance); touch(); }} />
         </Field>
@@ -752,15 +763,15 @@ export default function RendererSettingsPanel() {
       >
         <Toggle label='Enabled' checked={pointShadows} className='my-1'
           onChange={(c) => { renderer.pointShadowsEnabled = c; setPointShadows(c); touch(); }} />
-        <div className='flex items-center gap-1 my-1 text-xs'>
-          <span className='w-[70px] shrink-0'>Resolution</span>
+        <div className='flex items-center gap-1 my-1 text-ui'>
+          <span className={cn(labelClass, LABEL_W, 'shrink-0')}>Resolution</span>
           <SegmentedControl
             value={pointShadowRes}
             onChange={(size) => { renderer.pointShadowResolution = size; setPointShadowRes(renderer.pointShadowResolution); touch(); }}
             options={POINT_RES.map((r) => ({ value: r.size, label: r.label }))}
           />
         </div>
-        <Field label='Max Dist'>
+        <Field labelClassName={LABEL_W} label='Max Dist'>
           <NumberInput value={pointShadowDist} min={1} step={10} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.pointShadowDistance = v; setPointShadowDist(renderer.pointShadowDistance); touch(); }} />
         </Field>
@@ -803,8 +814,8 @@ export default function RendererSettingsPanel() {
       <Section title='Grid' hint='Editor-only reference grid. Never rendered in a published game.'>
         <Toggle label='Visible' checked={gridVisible} className='my-1'
           onChange={(c) => { renderer.setGridVisible(c); setGridVisible(c); touch(); }} />
-        <div className='flex items-center gap-1 my-1 text-xs'>
-          <span className='w-[70px] shrink-0'>Plane</span>
+        <div className='flex items-center gap-1 my-1 text-ui'>
+          <span className={cn(labelClass, LABEL_W, 'shrink-0')}>Plane</span>
           <SegmentedControl
             value={gridPlane}
             onChange={(p) => { renderer.setGridPlane(p); setGridPlane(p); touch(); }}

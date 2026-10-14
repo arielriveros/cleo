@@ -32,8 +32,23 @@ struct BlinnPhongGeometryMaterial {
     hasMaskMap: i32,
     /** Cutout threshold for the mask above; 0 disables it. See chunks/basicGBuffer.wgsl. */
     alphaCutoff: f32,
+    /**
+     * Texture mapping — chunks/uvProjection.wgsl. Tiling u/v and offset u/v (every mode); projection
+     * 0 mesh uv / 1 box / 2 triplanar; space 0 object / 1 world; metres per repeat; triplanar sharpness.
+     */
+    uvTransform: vec4<f32>,
+    uvProjection: i32,
+    uvSpace: i32,
+    uvWorldSize: f32,
+    uvBlend: f32,
 };
 @group(1) @binding(1) var<uniform> u_material: BlinnPhongGeometryMaterial;
+
+/** This material's mapping settings, for chunks/uvProjection.wgsl. */
+fn materialUv() -> UvParams {
+    return UvParams(u_material.uvTransform, u_material.uvProjection, u_material.uvSpace,
+                    u_material.uvWorldSize, u_material.uvBlend);
+}
 
 struct GBuffer {
     @location(0) gAlbedoMetallic: vec4<f32>,    // rgb = albedo, a = metallic
@@ -44,20 +59,22 @@ struct GBuffer {
 @fragment
 fn fs_main(in: VertexOutput) -> GBuffer {
     let tbn = tbnOf(in);
+    // The material's mapping, with its gradients, in uniform control flow (chunks/uvProjection.wgsl).
+    let su = surfaceUvOf(in, materialUv());
 
     // `alphaCutoff`, not the literal 0.5 this used to hardcode. The threshold is now a per-material
     // property shared with Basic and PBR. Existing content is unaffected: Material.Default defaults it
     // to 0.5 whenever a mask is present, and `parse` applies the same default to anything saved before
     // the property existed — so a project authored against the old constant reloads unchanged.
     if (u_material.hasMaskMap != 0 && u_material.alphaCutoff > 0.0) {
-        let mask = textureSample(u_material_maskMap_texture, u_material_maskMap_sampler, in.uv).r;
+        let mask = sampleSurface(u_material_maskMap_texture, u_material_maskMap_sampler, su, su.uv0).r;
         if (mask < u_material.alphaCutoff) { discard; }
     }
 
     var albedo = u_material.diffuse;
     if (u_material.hasBaseTexture != 0) {
         // sRGB -> linear
-        let t = textureSample(u_material_baseTexture_texture, u_material_baseTexture_sampler, in.uv).rgb;
+        let t = sampleSurface(u_material_baseTexture_texture, u_material_baseTexture_sampler, su, su.uv0).rgb;
         albedo *= pow(t, vec3<f32>(2.2));
     }
 
@@ -69,16 +86,20 @@ fn fs_main(in: VertexOutput) -> GBuffer {
 
     var N = tbn[2];
     if (u_material.hasNormalMap != 0) {
-        var n = textureSample(u_material_normalMap_texture, u_material_normalMap_sampler, in.uv).rgb;
-        n = normalize(n * 2.0 - 1.0);
-        N = normalize(tbn * n);
+        if (su.mode == UV_MESH) {
+            var n = sampleSurface(u_material_normalMap_texture, u_material_normalMap_sampler, su, su.uv0).rgb;
+            n = normalize(n * 2.0 - 1.0);
+            N = normalize(tbn * n);
+        } else {
+            N = projectedNormal(u_material_normalMap_texture, u_material_normalMap_sampler, su, su.uv0, tbn[2]);
+        }
     }
 
     // Match the old forward path's emissive boost of 1.25.
     var emissive = u_material.emissive * 1.25 * u_material.emissiveIntensity;
     if (u_material.hasEmissiveMap != 0) {
         // sRGB -> linear
-        let t = textureSample(u_material_emissiveMap_texture, u_material_emissiveMap_sampler, in.uv).rgb;
+        let t = sampleSurface(u_material_emissiveMap_texture, u_material_emissiveMap_sampler, su, su.uv0).rgb;
         emissive = pow(t, vec3<f32>(2.2)) * u_material.emissive * 1.25 * u_material.emissiveIntensity;
     }
 

@@ -37,6 +37,12 @@ export interface EmitterDef {
     startDelay: number;
     /** Base of every random draw; two emitters with the same seed and stack match particle for particle. */
     seed: number;
+    /**
+     * The coarsest system LOD level this emitter still spawns at. Past it the emitter goes quiet (its
+     * live particles finish their lives), which is how a detail layer — sparks, embers — drops out at a
+     * distance while the main body of the effect stays. {@link LOD_ALL_LEVELS} = every level.
+     */
+    maxLod: number;
     spawn: ParticleModule[];
     init: ParticleModule[];
     update: ParticleModule[];
@@ -51,6 +57,36 @@ export interface ParticleSystemDef {
      * the Niagara model. GPU particles are never read back, so the bounds cannot be measured per frame.
      */
     bounds: { center: [number, number, number]; extents: [number, number, number] };
+    /** Level of detail by camera distance. See {@link ParticleLod}. */
+    lod: ParticleLod;
+}
+
+/** `EmitterDef.maxLod` for an emitter that spawns at every level. */
+export const LOD_ALL_LEVELS = 99;
+
+/**
+ * One LOD level past level 0 (which is implicit: full rate, every frame). From `distance` metres — to the
+ * surface of the system's bounds, scaled by the renderer's particle LOD distance — continuous spawning is
+ * multiplied by `spawnScale`, and the system simulates `stepScale` times less often (×2 = 30 Hz).
+ */
+export interface ParticleLodLevel {
+    distance: number;
+    spawnScale: number;
+    stepScale: number;
+}
+
+export interface ParticleLod {
+    enabled: boolean;
+    /** Coarser and coarser, sorted by distance. Empty = no levels: the system only ever culls. */
+    levels: ParticleLodLevel[];
+    /** Past this the system is not drawn, and a looping one stops simulating. 0 = never. */
+    cullDistance: number;
+    /** Scale bursts by the level's spawn scale too (off: a burst is an event, and fires in full). */
+    scaleBursts: boolean;
+}
+
+export function defaultParticleLod(): ParticleLod {
+    return { enabled: true, levels: [], cullDistance: 0, scaleBursts: false };
 }
 
 export function makeModule(type: string): ParticleModule {
@@ -64,7 +100,7 @@ export function defaultEmitter(name = 'Emitter'): EmitterDef {
     velocity.params.speed = [1, 2];
     return {
         id: uuidv4(), name, enabled: true, capacity: 2048, simSpace: 'world',
-        duration: 5, looping: true, prewarm: false, startDelay: 0, seed: Math.floor(Math.random() * 1e6),
+        duration: 5, looping: true, prewarm: false, startDelay: 0, seed: Math.floor(Math.random() * 1e6), maxLod: LOD_ALL_LEVELS,
         spawn: [makeModule('spawnRate')],
         init: [makeModule('shape'), makeModule('lifetime'), velocity, makeModule('size'), makeModule('rotation'), makeModule('color')],
         update: [makeModule('drag'), makeModule('curlNoise'), makeModule('colorOverLife'), makeModule('sizeOverLife')],
@@ -77,6 +113,7 @@ export function defaultParticleSystem(): ParticleSystemDef {
         version: PARTICLE_SYSTEM_VERSION,
         emitters: [defaultEmitter()],
         bounds: { center: [0, 2, 0], extents: [3, 3, 3] },
+        lod: defaultParticleLod(),
     };
 }
 
@@ -155,6 +192,7 @@ export function parseEmitter(raw: any, index = 0): EmitterDef {
         prewarm: raw.prewarm === true,
         startDelay: Math.max(0, num(raw.startDelay, 0)),
         seed: Math.floor(num(raw.seed, base.seed)) >>> 0,
+        maxLod: Math.min(LOD_ALL_LEVELS, Math.max(0, Math.floor(num(raw.maxLod, LOD_ALL_LEVELS)))),
         // Absent arrays mean an empty stack, NOT the defaults: an author who removed every module meant it.
         spawn: Array.isArray(raw.spawn) ? parseModules(raw.spawn, 'spawn') : base.spawn,
         init: Array.isArray(raw.init) ? parseModules(raw.init, 'init') : base.init,
@@ -175,6 +213,27 @@ export function parseParticleSystem(raw: any): ParticleSystemDef {
             center: vec3Of(b.center, [0, 2, 0]),
             extents: vec3Of(b.extents, [3, 3, 3]).map(v => Math.max(0.01, Math.abs(v))) as [number, number, number],
         },
+        lod: parseParticleLod(raw.lod),
+    };
+}
+
+/** Read any JSON as valid LOD settings: an asset from before LOD gets "on, no levels, no cull" — as it ran. */
+export function parseParticleLod(raw: any): ParticleLod {
+    const base = defaultParticleLod();
+    if (!raw || typeof raw !== 'object') return base;
+    const levels = (Array.isArray(raw.levels) ? raw.levels : [])
+        .filter((l: any) => l && typeof l === 'object')
+        .map((l: any): ParticleLodLevel => ({
+            distance: Math.max(0, num(l.distance, 0)),
+            spawnScale: Math.min(1, Math.max(0, num(l.spawnScale, 1))),
+            stepScale: Math.min(4, Math.max(1, Math.round(num(l.stepScale, 1)))),
+        }))
+        .sort((a: ParticleLodLevel, b: ParticleLodLevel) => a.distance - b.distance);
+    return {
+        enabled: raw.enabled !== false,
+        levels,
+        cullDistance: Math.max(0, num(raw.cullDistance, 0)),
+        scaleBursts: raw.scaleBursts === true,
     };
 }
 

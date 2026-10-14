@@ -3,6 +3,7 @@ import { useAiEditor } from './AiEditorContext'
 import BehaviorGraph from './BehaviorGraph'
 import GoalGraph from './GoalGraph'
 import FuzzyGraph from './FuzzyGraph'
+import { SegmentedControl } from '../../components/ui'
 
 /**
  * The AI Brain tab's work surface: the brain's own graph, or the fuzzy model it reads.
@@ -22,7 +23,7 @@ export default function AiBrainTabView() {
   if (!asset || !target) {
     return (
       <div className='absolute inset-0 z-10 flex items-center justify-center bg-surface'>
-        <p className='text-xs text-muted'>This AI brain is no longer in the library.</p>
+        <p className='text-ui text-muted'>This AI brain is no longer in the library.</p>
       </div>
     )
   }
@@ -30,18 +31,22 @@ export default function AiBrainTabView() {
   return (
     <div className='absolute inset-0 z-10 bg-surface'>
       {/* The view switch sits above the canvases, which each render their own toolbar beside it. */}
-      <div data-cleo-overlay className='absolute top-2 right-2 z-30 flex items-center rounded overflow-hidden border border-control-hover'>
-        {(['graph', 'fuzzy'] as const).map(v => (
-          <button key={v}
-            className={`px-2 h-[25px] text-xs border-r border-control-hover last:border-r-0 transition-colors ${
-              view === v ? 'bg-selected text-white' : 'bg-control text-muted hover:bg-control-hover'}`}
-            title={v === 'graph'
-              ? (asset.kind === 'goals' ? 'The goal graph this brain arbitrates' : 'The state machine this brain runs')
-              : 'Fuzzy variables and rules, which either kind of brain can read through a parameter'}
-            onClick={() => setView(v)}>
-            {v === 'graph' ? (asset.kind === 'goals' ? 'Goals' : 'Behaviour') : 'Fuzzy'}
-          </button>
-        ))}
+      <div data-cleo-overlay className='absolute top-2 right-2 z-30'>
+        <SegmentedControl<'graph' | 'fuzzy'>
+          value={view}
+          onChange={setView}
+          rounded={false}
+          className='gap-0 flex rounded overflow-hidden border border-control-hover'
+          itemClassName='h-[25px] border-0 border-r border-control-hover last:border-r-0'
+          options={[
+            {
+              value: 'graph',
+              label: asset.kind === 'goals' ? 'Goals' : 'Behaviour',
+              title: asset.kind === 'goals' ? 'The goal graph this brain arbitrates' : 'The state machine this brain runs',
+            },
+            { value: 'fuzzy', label: 'Fuzzy', title: 'Fuzzy variables and rules, which either kind of brain can read through a parameter' },
+          ]}
+        />
       </div>
 
       {view === 'fuzzy' ? <FuzzyGraph /> : asset.kind === 'goals' ? <GoalGraph /> : <BehaviorGraph />}

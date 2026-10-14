@@ -6,6 +6,7 @@ import { newCustomMaterial } from '../../../utils/customMaterials';
 import Collapsable from '../../../components/Collapsable';
 import TextureInspector from './TextureInspector';
 import CustomMaterialEditor from './CustomMaterialEditor';
+import UvMappingSection from './UvMappingSection';
 import { PropertyTable, PropertyRow, Field, Select, NumberInput, Slider, Toggle, ColorInput, Section } from '../../../components/ui';
 import { MaterialIcon } from '../sectionIcons';
 
@@ -304,6 +305,11 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   // this returns with it and nothing else here changes.
   const showHeight = !isTerrain || TERRAIN_RELIEF_ENABLED;
 
+  // Texture mapping for the lit types (Blinn-Phong, Cel, PBR). Not on terrain, which has its own tiling.
+  const uvSection = !isTerrain ? (
+    <UvMappingSection key={props.node.id} material={model.material} onChange={markMaterialDirty} />
+  ) : null;
+
   const heightSection = showHeight ? (
     <Section title='Height' hint={isTerrain ? TERRAIN_HEIGHT_HINT : undefined}>
       <PropertyTable columns={['40%', '60%']}>
@@ -331,7 +337,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
             uv unit is worth, and nothing in the editor said. */}
         {!isTerrain && (
           <PropertyRow label='Scale'>
-            <span className='text-xs text-muted'>
+            <span className='text-ui text-muted'>
               1 UV = {worldPerUv.toFixed(2)} units{'  ·  '}
               relief {(depthInWorld ? dispScale : dispScale * worldPerUv).toFixed(3)} units
             </span>
@@ -355,18 +361,18 @@ export default function MaterialEditor(props: {node: ModelNode}) {
               <div className='flex items-center gap-2 w-full'>
                 <Slider min={0} max={MAX_TESS_LEVEL} step={1} value={displaceLevel}
                         onChange={(v) => { setHeightProp('displaceLevel', v); setDisplaceLevel(v); }} />
-                <span className='text-xs text-muted whitespace-nowrap'>
+                <span className='text-ui text-muted whitespace-nowrap'>
                   {displaceLevel === 0 ? 'off' : `x${tessSegments(displaceLevel) ** 2}`}
                 </span>
               </div>
             ) : (
-              <span className='text-xs text-muted'>Needs WebGPU — this device has no compute shader.</span>
+              <span className='text-ui text-muted'>Needs WebGPU — this device has no compute shader.</span>
             )}
           </PropertyRow>
         )}
         {!isTerrain && displaceLevel > 0 && (
           <PropertyRow label='Cost'>
-            <span className='text-xs text-muted'>
+            <span className='text-ui text-muted'>
               {displaceBudget.triangles.toLocaleString()} triangles{'  ·  '}
               {(displaceBudget.vertexBytes / 1e6).toFixed(1)} MB
               {texelsPerEdge > 0 ? `  ·  ~${texelsPerEdge.toFixed(0)} texels/edge` : ''}
@@ -378,7 +384,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
             mesh far coarser than its map carries only the map's lowest frequencies. */}
         {!isTerrain && displaceLevel > 0 && texelsPerEdge > 8 && (
           <PropertyRow label=''>
-            <span className='text-xs text-warning'>
+            <span className='text-ui text-warning'>
               One edge spans {texelsPerEdge.toFixed(0)} texels, so the geometry can only carry the
               lowest frequencies of this map and will look nearly flat. Raise the level, tile the UVs,
               or leave the detail to the normal map.
@@ -423,7 +429,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
 
   const texSlot = (label: string, tex: string) => (
     <div className='flex flex-col items-center gap-1'>
-      <span className='text-[10px] text-muted'>{label}</span>
+      <span className='text-ui-xs text-muted'>{label}</span>
       <TextureInspector tex={tex} material={model.material} />
     </div>
   );
@@ -472,6 +478,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 {showHeight && texSlot('Height', 'displacementMap')}
               </div>
             </Section>
+            {uvSection}
             {heightSection}
             <Section title='Cutout'>
               <PropertyTable columns={['40%', '60%']}>
@@ -505,7 +512,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                   ? 'Ignored while a Ramp texture is assigned — the ramp supplies the light response directly.'
                   : 'How many flat steps the light response is quantized into. 3 is shadow, mid and lit.'}>
                   {hasRamp
-                    ? <span className='text-[11px] text-muted'>From the Ramp texture</span>
+                    ? <span className='text-ui-sm text-muted'>From the Ramp texture</span>
                     : <Slider min={1} max={8} step={1} value={bands} readout={(v) => String(Math.round(v))}                              onChange={(v) => setNum('bands', setBands)(Math.round(v))} />}
                 </PropertyRow>
                 <PropertyRow label='Edge softness' hint='Width of every hard edge in this material — the band boundaries, the highlight and the rim — as a fraction of one band, so it means the same thing at any band count. 0 is aliased; a little antialiases the terminator.'>
@@ -540,6 +547,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 {showHeight && texSlot('Height', 'displacementMap')}
               </div>
             </Section>
+            {uvSection}
             {heightSection}
             <Section title='Cutout'>
               <PropertyTable columns={['40%', '60%']}>
@@ -622,6 +630,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                 {showHeight && texSlot('Height', 'displacementMap')}
               </div>
             </Section>
+            {uvSection}
             {heightSection}
             <Section title='Cutout'>
               <PropertyTable columns={['40%', '60%']}>

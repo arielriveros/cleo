@@ -164,8 +164,23 @@ struct PBRMaterial {
      */
     viewPos: vec3<f32>,
     sunDirection: vec3<f32>,
+    /**
+     * Texture mapping — chunks/uvProjection.wgsl. Tiling u/v and offset u/v (every mode); projection
+     * 0 mesh uv / 1 box / 2 triplanar; space 0 object / 1 world; metres per repeat; triplanar sharpness.
+     */
+    uvTransform: vec4<f32>,
+    uvProjection: i32,
+    uvSpace: i32,
+    uvWorldSize: f32,
+    uvBlend: f32,
 };
 @group(1) @binding(1) var<uniform> u_material: PBRMaterial;
+
+/** This material's mapping settings, for chunks/uvProjection.wgsl. */
+fn materialUv() -> UvParams {
+    return UvParams(u_material.uvTransform, u_material.uvProjection, u_material.uvSpace,
+                    u_material.uvWorldSize, u_material.uvBlend);
+}
 
 struct GBuffer {
     @location(0) gAlbedoMetallic: vec4<f32>,    // rgb = albedo, a = metallic
@@ -184,7 +199,9 @@ struct GBuffer {
  *
  * Single-sided materials are unaffected: their back faces are culled, so `front` is always true.
  */
-fn getNormal(in: VertexOutput, front: bool, uv: vec2<f32>, ddx: vec2<f32>, ddy: vec2<f32>) -> vec3<f32> {
+fn getNormal(in: VertexOutput, front: bool, su: SurfaceUv, uv: vec2<f32>) -> vec3<f32> {
+    let ddx = su.dx0;
+    let ddy = su.dy0;
     // `tbn`, not the parallax frame: this is a normal-map decode, and its bitangent sign is the
     // engine-wide green-channel convention. chunks/parallax.wgsl explains why the two differ.
     let tbn = tbnOf(in);
@@ -198,6 +215,10 @@ fn getNormal(in: VertexOutput, front: bool, uv: vec2<f32>, ddx: vec2<f32>, ddy: 
                                   uv, ddx, ddy).rgb;
         n = normalize(n * 2.0 - 1.0);
         N = normalize(tbn * n);
+        // A projected surface has no vertex tangents for its charts; see chunks/uvProjection.wgsl.
+        if (su.mode != UV_MESH) {
+            N = projectedNormal(u_material_normalMap_texture, u_material_normalMap_sampler, su, uv, tbn[2]);
+        }
     }
     if (!front) { N = -N; }
     return N;
@@ -211,8 +232,11 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     // and above every per-fragment branch. dpdx/dpdy carry the same rule textureSample does, and a
     // derivative reached past a discard is non-uniform: naga waves that through, Dawn rejects the
     // module, and a rejected module takes its pipeline and every bind group built from it down.
-    let ddx = dpdx(in.uv);
-    let ddy = dpdy(in.uv);
+    // The material's mapping (mesh uv / box / triplanar), with its gradients — taken here, in uniform
+    // control flow. `ddx`/`ddy` are chart 0's, which is THE chart in mesh and box modes.
+    let su = surfaceUvOf(in, materialUv());
+    let ddx = su.dx0;
+    let ddy = su.dy0;
     // `select`, not an `if`, so the back-face flip introduces no branch at all ahead of the
     // derivative work. A double-sided material shows its back face with the interpolated normal
     // pointing away; marching against that would push the relief out of the surface, not into it.
@@ -220,12 +244,13 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     let basis = parallaxFrame(in.fragPos, ddx, ddy, tbnOf(in), toEye);
     let frame = basis.frame;
 
-    var uv = in.uv;
+    var uv = su.uv0;
     var selfShadow = 1.0;
     // `parallax`, not just the map being present: the height map is also what a
     // compute-tessellated displacement reads, and a mesh with real geometry must not ALSO
     // march the same field per fragment.
-    if (u_material.hasDisplacementMap != 0 && u_material.parallax != 0) {
+    // Not on triplanar: three blended charts have no single surface for a ray to march.
+    if (u_material.hasDisplacementMap != 0 && u_material.parallax != 0 && su.mode != UV_TRIPLANAR) {
         let invert = u_material.invertHeight != 0;
         let dims = vec2<f32>(textureDimensions(u_material_displacementMap_texture, 0));
         // One LOD, hoisted: the fade, the step count and every fetch in both marches read it, so they
@@ -245,7 +270,7 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
                            u_material.clipSilhouette != 0);
         let hit = parallaxOcclusion(u_material_displacementMap_texture,
                                     u_material_displacementMap_sampler,
-                                    in.uv, ddx, ddy, vTan, depth, dims, lod, invert);
+                                    su.uv0, ddx, ddy, vTan, depth, dims, lod, invert);
         uv = hit.xy;
         // Safe here: ddx/ddy were taken in uniform control flow at the top of the stage and every fetch
         // below is textureSampleGrad, so this introduces no derivative under a per-fragment branch.
@@ -255,7 +280,7 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
         // is not the "grid of holes" the note above once claimed but near-total erasure of the mesh.
         // `floor(in.uv)` is 0 for a 0..1 chart, so this is identical where the feature is meant to be
         // used and merely local where it is not.
-        let tile = floor(in.uv);
+        let tile = floor(su.uv0);
         if (u_material.clipSilhouette != 0
             && (any(hit.xy < tile) || any(hit.xy > tile + vec2<f32>(1.0)))) { discard; }
         let sunDir = u_material.sunDirection;
@@ -272,15 +297,13 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     // The mask cutout, before the base-colour fetch: a discarded fragment writes no G-buffer at all.
     // Explicit gradients from the UN-offset uv, like every other fetch below.
     if (u_material.hasMaskMap != 0 && u_material.alphaCutoff > 0.0) {
-        let mask = textureSampleGrad(u_material_maskMap_texture, u_material_maskMap_sampler,
-                                     uv, ddx, ddy).r;
+        let mask = sampleSurface(u_material_maskMap_texture, u_material_maskMap_sampler, su, uv).r;
         if (mask < u_material.alphaCutoff) { discard; }
     }
 
     var albedo = u_material.baseColor;
     if (u_material.hasBaseColorTexture != 0) {
-        let texel = textureSampleGrad(u_material_baseColorTexture_texture,
-                                      u_material_baseColorTexture_sampler, uv, ddx, ddy);
+        let texel = sampleSurface(u_material_baseColorTexture_texture, u_material_baseColorTexture_sampler, su, uv);
         // The cutout, before any other work: a discarded fragment writes no G-buffer at all, so a leaf
         // card's background never becomes depth, normal or albedo for the lighting pass to shade.
         // Only when there is no mask texture — that one has already been tested above.
@@ -293,8 +316,7 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     var roughness = u_material.roughness;
     var ao = 1.0;
     if (u_material.hasMetallicMap != 0 || u_material.hasRoughnessMap != 0 || u_material.hasOcclusionMap != 0) {
-        let orm = textureSampleGrad(u_material_ormTexture_texture, u_material_ormTexture_sampler,
-                                    uv, ddx, ddy).rgb;
+        let orm = sampleSurface(u_material_ormTexture_texture, u_material_ormTexture_sampler, su, uv).rgb;
         if (u_material.hasOcclusionMap != 0) { ao = orm.r; }
         if (u_material.hasRoughnessMap != 0) { roughness = orm.g; }
         if (u_material.hasMetallicMap != 0) { metallic = orm.b; }
@@ -303,12 +325,11 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     var emissive = u_material.emissiveFactor * u_material.emissiveIntensity;
     if (u_material.hasEmissiveMap != 0) {
         // sRGB -> linear
-        let t = textureSampleGrad(u_material_emissiveMap_texture, u_material_emissiveMap_sampler,
-                                  uv, ddx, ddy).rgb;
+        let t = sampleSurface(u_material_emissiveMap_texture, u_material_emissiveMap_sampler, su, uv).rgb;
         emissive = pow(t, vec3<f32>(2.2)) * u_material.emissiveFactor * u_material.emissiveIntensity;
     }
 
-    let N = normalize(getNormal(in, front, uv, ddx, ddy));
+    let N = normalize(getNormal(in, front, su, uv));
 
     var out: GBuffer;
     // The parallax self-shadow is folded into ALBEDO - an approximation the G-buffer forces. There is

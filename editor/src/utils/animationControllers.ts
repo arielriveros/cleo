@@ -150,6 +150,31 @@ export function instantiateController(
   }
 }
 
+/** Whether a node's machine actually animates anything — no machine, or one with no states, does not. */
+export function machineIsEmpty(sm: AnimationStateMachine | null | undefined): boolean {
+  return !sm || !(sm.states?.length)
+}
+
+/**
+ * The controller a character on `rigId` should get when it has none: the controller authored for that
+ * rig, and of several, the one the most characters on it already use (`usage`: controller id -> count).
+ * Null when no controller names that rig.
+ *
+ * Why this exists: a character's state machine is EMBEDDED in its model node. Replace that node — delete
+ * the model, drag a new one in, link the same rig — and the new node has no machine at all: idle, walk
+ * and run never play and it stands in its bind pose, while one-shot actions (attacks) still play.
+ */
+export function pickControllerForRig(
+  rigId: string | undefined,
+  controllers: readonly AnimControllerAsset[],
+  usage: ReadonlyMap<string, number> = new Map(),
+): AnimControllerAsset | null {
+  if (!rigId) return null
+  const candidates = controllers.filter(c => c.rigId === rigId)
+  if (!candidates.length) return null
+  return candidates.reduce((best, c) => ((usage.get(c.id) ?? 0) > (usage.get(best.id) ?? 0) ? c : best))
+}
+
 /**
  * The machine a node's embedded copy should become after its controller changed, or null when the node
  * is not linked to `asset`. Keeps the node's own overrides.

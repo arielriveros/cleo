@@ -11,8 +11,8 @@ const categoryKey = (scope: AddScope) => `cleo.addnew.category${scope === 'ui' ?
 
 // One grid cell. The grid sizes the cell, so a long label wraps to two lines instead of widening its
 // column.
-const CELL = 'flex flex-col items-center justify-start gap-1 h-[62px] p-1 rounded border border-control bg-control text-white hover:bg-control-hover cursor-pointer';
-const CELL_LABEL = 'text-[10px] leading-tight text-center break-words line-clamp-2 w-full';
+const CELL = 'flex flex-col items-center justify-start gap-1 h-[62px] p-1 rounded border border-control bg-control text-fg hover:bg-control-hover cursor-pointer';
+const CELL_LABEL = 'text-ui-xs leading-tight text-center break-words line-clamp-2 w-full';
 
 function AddCell({ item, locked, onAdd }: { item: AddItem, locked: boolean, onAdd: (item: AddItem) => void }) {
   return (
@@ -81,7 +81,7 @@ export default function AddNew({ scope = 'scene' }: { scope?: AddScope }) {
 
   return (
     <>
-      {locked && <div className='text-[11px] text-warning bg-warning/15 px-2 py-1'>Template instance — edit the template to add nodes.</div>}
+      {locked && <div className='text-ui-sm text-warning bg-warning/15 px-2 py-1'>Template instance — edit the template to add nodes.</div>}
       <fieldset disabled={locked} className={`border-0 m-0 p-0 min-w-0 ${locked ? 'opacity-50' : ''}`}>
         <div className='flex flex-col gap-1.5 p-1.5'>
           {/* Two columns in the scene palette: it has seven categories and two of them are two-word

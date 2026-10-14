@@ -7,6 +7,7 @@ import TileGrid from '../../tileset/TileGrid';
 import { useCleoEngine } from '../../EngineContext';
 import { PropertyTable, PropertyRow, Field, Section, NumberInput, TextInput, Toggle, Select, Hint, Button } from '../../../components/ui';
 import { SpriteIcon } from '../sectionIcons';
+import { token } from '../../../utils/cssTokens';
 
 // An animated sprite is a tileset plus an ordered list of tiles. Dragging a rectangle over the atlas
 // produces that list directly, since TileGrid emits its selection row-major. The alternative source is the
@@ -27,6 +28,7 @@ export default function SpriteSheetEditor() {
   const [framesText, setFramesText] = useState('');
   const [tileIndex, setTileIndex] = useState(0);
   const [fps, setFps] = useState(12);
+  const [tileFps, setTileFps] = useState(0);
   const [loop, setLoop] = useState(true);
   const [zoom, setZoom] = useState(2);
   // The tileset lives on the engine node, which React cannot observe: `revision` is bumped whenever the
@@ -40,10 +42,13 @@ export default function SpriteSheetEditor() {
     setFramesText(node.frames.join(','));
     setTileIndex(node.tileIndex);
     setFps(node.fps);
+    setTileFps(node.tileFps);
     setLoop(node.loop);
   }, [node]);
 
   const asset = useMemo(() => node ? tilesetAssetOf(node, tilesets) : undefined, [node, tilesets, revision]);
+  // Corner badge on animated tiles; the same token the tileset editor uses for one.
+  const animatedMarker = useMemo(() => token('--warning'), []);
   const tileAnimation = asset && frameSource === 'tile' ? asset.tiles[tileIndex]?.animation : undefined;
 
   if (!node) return null;
@@ -95,7 +100,7 @@ export default function SpriteSheetEditor() {
                 zoom={zoom}
                 onZoomChange={setZoom}
                 onSelect={(indices) => applyFrames(indices)}
-                markerOf={(index) => asset.tiles[index]?.animation ? '#f2c14b' : null}
+                markerOf={(index) => asset.tiles[index]?.animation ? animatedMarker : null}
               />
               <Hint className='mt-1'>Order ({frames.length} frame{frames.length === 1 ? '' : 's'}):</Hint>
               <TextInput value={framesText} onChange={applyFramesText} placeholder='e.g. 0,1,2,3,2,1' />
@@ -114,10 +119,10 @@ export default function SpriteSheetEditor() {
                   setTileIndex(node.tileIndex);
                   changed();
                 }}
-                markerOf={(index) => asset.tiles[index]?.animation ? '#f2c14b' : null}
+                markerOf={(index) => asset.tiles[index]?.animation ? animatedMarker : null}
               />
               {tileAnimation ? (
-                <Hint className='mt-1'>Plays {tileAnimation.frames.join(', ')} at {tileAnimation.fps} fps.</Hint>
+                <Hint className='mt-1'>Plays {tileAnimation.frames.join(', ')}.</Hint>
               ) : (
                 <Hint className='mt-1 text-warning'>Tile {tileIndex} has no animation — it will hold still.</Hint>
               )}
@@ -130,8 +135,8 @@ export default function SpriteSheetEditor() {
           {frameSource === 'node' && (
             <Section title='Playback'>
               <PropertyTable columns={['45%', '55%']}>
-                <PropertyRow label='FPS'>
-                  <NumberInput min={0.01} step={0.01} value={fps} onChange={(v) => {
+                <PropertyRow label='Frames per second'>
+                  <NumberInput min={0.01} step={1} value={fps} onChange={(v) => {
                     const f = Math.max(0.01, v); node.fps = f; setFps(f); changed();
                   }} />
                 </PropertyRow>
@@ -139,6 +144,38 @@ export default function SpriteSheetEditor() {
                   <Toggle checked={loop} onChange={(c) => { node.loop = c; setLoop(c); changed() }} />
                 </PropertyRow>
               </PropertyTable>
+              {frames.length > 0 && (
+                <Hint className='mt-1'>
+                  {frames.length} frame{frames.length === 1 ? '' : 's'} at {fps} fps — {(frames.length / Math.max(0.01, fps)).toFixed(2)} s per {loop ? 'loop' : 'play'}.
+                </Hint>
+              )}
+            </Section>
+          )}
+
+          {frameSource === 'tile' && tileAnimation && (
+            // The tile's rate is the TILESET's (shared by every sprite on that tile); a value typed here
+            // overrides it for this sprite only, and typing the tile's own rate back follows it again.
+            <Section title='Playback'>
+              <PropertyTable columns={['45%', '55%']}>
+                <PropertyRow label={tileFps > 0 ? 'Frames per second (own)' : 'Frames per second'}
+                  hint={`The tile plays at ${tileAnimation.fps} fps in the tileset. A different value here applies to this sprite only.`}
+                  divider={false}>
+                  <span className='flex items-center gap-1'>
+                    <NumberInput min={0.01} step={1} value={tileFps > 0 ? tileFps : tileAnimation.fps} onChange={(v) => {
+                      const f = Math.max(0.01, v);
+                      const next = f === tileAnimation.fps ? 0 : f;
+                      node.tileFps = next; setTileFps(next); changed();
+                    }} />
+                    {tileFps > 0 && (
+                      <Button size='sm' variant='ghost' title={`Follow the tile again (${tileAnimation.fps} fps)`}
+                        onClick={() => { node.tileFps = 0; setTileFps(0); changed(); }}>↺</Button>
+                    )}
+                  </span>
+                </PropertyRow>
+              </PropertyTable>
+              <Hint className='mt-1'>
+                {tileAnimation.frames.length} frames at {tileFps > 0 ? tileFps : tileAnimation.fps} fps — {(tileAnimation.frames.length / Math.max(0.01, tileFps > 0 ? tileFps : tileAnimation.fps)).toFixed(2)} s per loop.
+              </Hint>
             </Section>
           )}
 

@@ -1,6 +1,6 @@
 import { useStateMachine } from './StateMachineContext'
 import Collapsable from '../../components/Collapsable'
-import { SegmentedControl } from '../../components/ui'
+import { Button, cn, hintClass, SegmentedControl, Select, Slider, TextInput } from '../../components/ui'
 import type { AnimationBlendMode } from 'cleo'
 import type { ReactNode } from 'react'
 import { useAssetDrop } from '../../utils/useAssetDrop'
@@ -29,9 +29,8 @@ const MASK_MIME = 'text/cleo-bone-mask'
 // A slot is where a script's `animator.playAction('Reload', { slot: 'UpperBody' })` plays — no graph
 // wiring at all. Unity has nothing quite like it; it is Unreal's Montage slot.
 
-const input = 'bg-control text-white border border-control-hover rounded px-1 py-0.5 text-xs'
-const ghost = 'px-1.5 py-0.5 rounded border border-control-hover hover:bg-control text-xs'
-const danger = 'px-1.5 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white text-xs'
+/** Dense-row padding for the library controls (their default is px-2 py-1). */
+const tight = 'px-1 py-0.5'
 
 const BLEND_OPTIONS = [
   { value: 'override' as const, label: 'Override', title: 'Replace the pose beneath, by weight x mask' },
@@ -43,18 +42,17 @@ export function LayerTabs() {
   const { fullSm, activeLayer, setActiveLayer, addLayer } = useStateMachine()
   const layers = fullSm.layers ?? []
   const tab = (i: number, label: string) => (
-    <button key={i}
-      className={`px-2 py-0.5 rounded text-xs border ${i === activeLayer ? 'bg-primary border-primary-active text-white' : 'border-control-hover hover:bg-control'}`}
+    <Button key={i} size='sm' variant='subtle' active={i === activeLayer}
       onClick={() => setActiveLayer(i)}
       title={i === 0 ? 'The base layer: drives the whole body and the character’s root motion' : `Edit the “${label}” layer`}
-    >{label}</button>
+    >{label}</Button>
   )
   return (
     <div className='flex items-center gap-1'>
       {tab(0, 'Base')}
       {layers.map((l, i) => tab(i + 1, l.name))}
-      <button className={ghost} onClick={addLayer}
-        title='Add a layer: its own states over the same parameters, blended on top through a bone mask'>+ Layer</button>
+      <Button size='sm' variant='subtle' onClick={addLayer}
+        title='Add a layer: its own states over the same parameters, blended on top through a bone mask'>+ Layer</Button>
     </div>
   )
 }
@@ -72,51 +70,50 @@ export function LayerSection() {
     <Collapsable title={`Layer — ${layer.name}`} defaultOpen>
       <div className='p-2 flex flex-col gap-2'>
         <div className='flex items-center gap-1'>
-          <input className={input + ' flex-1 min-w-0'} value={layer.name} title='Layer name (scripts address it by this)'
-            onChange={e => setLayer(activeLayer, { name: e.target.value })} />
-          <button className={danger} title='Delete this layer and its states' onClick={() => removeLayer(activeLayer)}>✕</button>
+          <TextInput className={cn(tight, 'flex-1 min-w-0')} value={layer.name} title='Layer name (scripts address it by this)'
+            onChange={v => setLayer(activeLayer, { name: v })} />
+          <Button variant='remove' size='sm' title='Delete this layer and its states' onClick={() => removeLayer(activeLayer)}>✕</Button>
         </div>
 
         <div className='flex items-center gap-1'>
-          <span className='text-[10px] text-gray-400 w-[46px] shrink-0'>Blend</span>
+          <span className='text-ui-xs text-muted w-[46px] shrink-0'>Blend</span>
           <SegmentedControl<AnimationBlendMode> size='sm' value={layer.blend ?? 'override'}
             onChange={v => setLayer(activeLayer, { blend: v })} options={BLEND_OPTIONS} />
         </div>
 
         <div className='flex items-center gap-1'>
-          <span className='text-[10px] text-gray-400 w-[46px] shrink-0'>Weight</span>
+          <span className='text-ui-xs text-muted w-[46px] shrink-0'>Weight</span>
           {layer.weightParam
-            ? <select className={input + ' flex-1 min-w-0'} value={layer.weightParam}
+            ? <Select className={cn(tight, 'flex-1 min-w-0')} value={layer.weightParam}
                 title='Read the layer weight (0..1) from this parameter every frame'
                 onChange={e => setLayer(activeLayer, { weightParam: e.target.value || undefined })}>
                 <option value=''>(fixed)</option>
                 {weightParams.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
-              </select>
+              </Select>
             : <>
-                <input className='flex-1 min-w-0' type='range' min={0} max={1} step={0.01} value={layer.weight ?? 1}
-                  onChange={e => setLayer(activeLayer, { weight: parseFloat(e.target.value) })} />
-                <span className='text-[10px] tabular-nums w-[30px] text-right'>{(layer.weight ?? 1).toFixed(2)}</span>
-                <select className={input + ' w-[64px]'} value='' title='Drive the weight from a parameter instead'
+                <Slider className='flex-1 min-w-0 my-0' editable={false} min={0} max={1} step={0.01} value={layer.weight ?? 1}
+                  onChange={v => setLayer(activeLayer, { weight: v })} />
+                <Select className={cn(tight, 'w-[64px]')} value='' title='Drive the weight from a parameter instead'
                   onChange={e => e.target.value && setLayer(activeLayer, { weightParam: e.target.value })}>
                   <option value=''>param…</option>
                   {weightParams.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
-                </select>
+                </Select>
               </>}
         </div>
 
         <AssetDropRow mime={MASK_MIME} onDrop={id => setLayer(activeLayer, { maskId: id, mask: undefined })}
           title='Drop a Bone Mask here'>
-          <span className='text-[10px] text-gray-400 w-[46px] shrink-0'>Mask</span>
-          <select className={input + ' flex-1 min-w-0'} value={layer.maskId ?? ''}
+          <span className='text-ui-xs text-muted w-[46px] shrink-0'>Mask</span>
+          <Select className={cn(tight, 'flex-1 min-w-0')} value={layer.maskId ?? ''}
             title='Which bones this layer affects. Masks are edited in the rig editor.'
             onChange={e => setLayer(activeLayer, { maskId: e.target.value || undefined, mask: undefined })}>
             <option value=''>Whole body</option>
             {maskMissing && <option value={layer.maskId}>missing mask</option>}
             {boneMasks.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
+          </Select>
         </AssetDropRow>
-        {maskMissing && <p className='text-[10px] text-warning'>That mask was deleted, so this layer affects nothing until another is picked.</p>}
-        <p className='text-[10px] text-gray-500'>
+        {maskMissing && <p className='text-ui-xs text-warning'>That mask was deleted, so this layer affects nothing until another is picked.</p>}
+        <p className={hintClass}>
           An empty state (no clip) on a layer means “add nothing”: the layer fades out while it is there.
         </p>
       </div>
@@ -132,41 +129,41 @@ export function SlotsSection() {
   return (
     <Collapsable title='Action slots' badge={slots.length || undefined}>
       <div className='p-2 flex flex-col gap-2'>
-        <p className='text-[10px] text-gray-500'>
+        <p className={hintClass}>
           Scripts play one-shots here without wiring them into the graph:
-          <code className='text-gray-300'> animator.playAction('Reload', {'{'} slot: 'UpperBody' {'}'})</code>.
+          <code className='text-fg'> animator.playAction('Reload', {'{'} slot: 'UpperBody' {'}'})</code>.
           With none declared, actions play full-body over everything.
         </p>
         {slots.map((slot, i) => (
           <div key={i} className='flex flex-col gap-1 border border-control rounded p-1'>
             <div className='flex items-center gap-1'>
-              <input className={input + ' flex-1 min-w-0'} value={slot.name} onChange={e => setSlot(i, { name: e.target.value })} />
-              <button className={danger} onClick={() => removeSlot(i)}>✕</button>
+              <TextInput className={cn(tight, 'flex-1 min-w-0')} value={slot.name} onChange={v => setSlot(i, { name: v })} />
+              <Button variant='remove' size='sm' onClick={() => removeSlot(i)}>✕</Button>
             </div>
             <div className='flex items-center gap-1'>
-              <span className='text-[10px] text-gray-400 w-[46px] shrink-0'>Above</span>
-              <select className={input + ' flex-1 min-w-0'} value={slot.afterLayer ?? layers.length}
+              <span className='text-ui-xs text-muted w-[46px] shrink-0'>Above</span>
+              <Select className={cn(tight, 'flex-1 min-w-0')} value={slot.afterLayer ?? layers.length}
                 onChange={e => setSlot(i, { afterLayer: parseInt(e.target.value, 10) })}>
                 <option value={0}>Base</option>
                 {layers.map((l, li) => <option key={li} value={li + 1}>{l.name}</option>)}
-              </select>
+              </Select>
             </div>
             <AssetDropRow mime={MASK_MIME} onDrop={id => setSlot(i, { maskId: id, mask: undefined })} title='Drop a Bone Mask here'>
-              <span className='text-[10px] text-gray-400 w-[46px] shrink-0'>Mask</span>
-              <select className={input + ' flex-1 min-w-0'} value={slot.maskId ?? ''}
+              <span className='text-ui-xs text-muted w-[46px] shrink-0'>Mask</span>
+              <Select className={cn(tight, 'flex-1 min-w-0')} value={slot.maskId ?? ''}
                 onChange={e => setSlot(i, { maskId: e.target.value || undefined, mask: undefined })}>
                 <option value=''>Whole body</option>
                 {boneMasks.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
+              </Select>
             </AssetDropRow>
             <div className='flex items-center gap-1'>
-              <span className='text-[10px] text-gray-400 w-[46px] shrink-0'>Blend</span>
+              <span className='text-ui-xs text-muted w-[46px] shrink-0'>Blend</span>
               <SegmentedControl<AnimationBlendMode> size='sm' value={slot.blend ?? 'override'}
                 onChange={v => setSlot(i, { blend: v })} options={BLEND_OPTIONS} />
             </div>
           </div>
         ))}
-        <button className={ghost} onClick={addSlot}>+ Slot</button>
+        <Button size='sm' variant='subtle' onClick={addSlot}>+ Slot</Button>
       </div>
     </Collapsable>
   )

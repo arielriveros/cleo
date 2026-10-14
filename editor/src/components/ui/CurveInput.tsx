@@ -168,13 +168,13 @@ function CurveEditor({ value, onChange, min, max }: { value: Curve; onChange: (c
         <path d={pathOf(value, PW, PH, lo, hi, PAD.left, PAD.top)} fill='none' stroke='currentColor' strokeWidth={2} className='text-primary' />
         {value.keys.map((k, i) => (
           <circle key={i} cx={px(k.t)} cy={py(k.v)} r={selected === i ? 5.5 : 4.5}
-                  className={cn('fill-current cursor-grab', selected === i ? 'text-white' : 'text-primary')}
+                  className={cn('fill-current cursor-grab', selected === i ? 'text-fg' : 'text-primary')}
                   stroke='currentColor' strokeOpacity={0.6} />
         ))}
       </svg>
-      <div className='text-[10px] text-dim'>Drag keys · double-click empty space to add · double-click a key to remove</div>
+      <div className='text-ui-xs text-dim'>Drag keys · double-click empty space to add · double-click a key to remove</div>
       {sel && (
-        <div className='flex items-center gap-1 text-[11px] text-muted'>
+        <div className='flex items-center gap-1 text-ui-sm text-muted'>
           <span>t</span>
           <NumberInput value={sel.t} min={0} max={1} step={0.01} onChange={t => setSel({ t: Math.min(1, Math.max(0, t)) })} />
           <span>v</span>

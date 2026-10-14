@@ -94,6 +94,15 @@ export class SpriteNode extends Node {
     public get opacity(): number { return this._sprite.opacity; }
     public set opacity(opacity: number) { this._sprite.opacity = opacity; }
 
+    /** The tile index on screen this instant. AnimatedSpriteNode overrides it to follow the playing frame. */
+    public get currentTile(): number { return this.tileIndex; }
+
+    /**
+     * The linear colour multiplier this sprite draws with: its current tile's overdrive in the tileset
+     * (Tileset.overdriveOf). Above 1 the sprite is brighter than white, which is what lets it bloom.
+     */
+    public get overdrive(): number { return this._sprite.tileset?.overdriveOf(this.currentTile) ?? 1; }
+
     /**
      * Texture-space rect [u0, v0, u1, v1] the renderer turns into `u_uvOffset`/`u_uvScale`.
      * Overridden by AnimatedSpriteNode to follow the playing frame.

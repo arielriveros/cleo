@@ -4,11 +4,22 @@
 
 const GAME_MAIN_JS = `const { app, BrowserWindow } = require('electron');
 const path = require('path');
+const fs = require('fs');
+
+// Window options from the project (Options ▸ Project ▸ General), written at publish time.
+function windowOptions() {
+  try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'window.json'), 'utf-8')) || {}; }
+  catch { return {}; }
+}
 
 function createWindow() {
+  const opts = windowOptions();
   const win = new BrowserWindow({
-    width: 1280,
-    height: 720,
+    width: opts.width || 1280,
+    height: opts.height || 720,
+    fullscreen: !!opts.fullscreen,
+    resizable: opts.resizable !== false,
+    title: opts.title || undefined,
     backgroundColor: '#000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

@@ -3,7 +3,8 @@ import { idbGet, idbSet, idbDelete, idbKeysByPrefix } from './idb'
 import { readModelLibrary, replaceModelLibrary, appendModelLibrary } from './modelStore'
 import { VfsIndex, EMPTY_VFS, withAncestors, repairVfs } from './vfs'
 import { ProjectMeta } from './sceneStorage'
-import { inputMapKey, libKey, metaKey, sceneKey, scenePrefix, vfsKey } from './storageKeys'
+import { inputMapKey, libKey, metaKey, projectSettingsKey, sceneKey, scenePrefix, vfsKey } from './storageKeys'
+import { parseProjectSettings } from '../features/options/projectSettings'
 import { getAllTextures, putTextures, deleteTextures, StoredTexture } from './textureStore'
 import { getAllAudio, putAudio, deleteAudio, StoredAudio } from './audioStore'
 import { planMerge, LocalState } from './bundleMerge'
@@ -118,6 +119,9 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
     // bundle is untrusted input.
     if (bundle.libraries.inputMap) await idbSet(inputMapKey(pid), parseInputMap(bundle.libraries.inputMap))
     else await idbDelete(inputMapKey(pid))
+    // Engine/publish options: same rule (a replace must not inherit the previous project's options).
+    if (bundle.libraries.projectSettings) await idbSet(projectSettingsKey(pid), parseProjectSettings(bundle.libraries.projectSettings))
+    else await idbDelete(projectSettingsKey(pid))
   } else {
     // Asset pack: keep local scenes/meta; swap the asset entries of the VFS, keep local scene entries.
     const localVfs = (await idbGet<VfsIndex>(vfsKey(pid))) ?? EMPTY_VFS

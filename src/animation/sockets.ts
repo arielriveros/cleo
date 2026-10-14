@@ -1,6 +1,7 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
 import type { Skin, SkinSocket } from './animatedModel';
 import { decomposeTRS } from '../core/math';
+import { humanoidSlotOf } from './boneNames';
 
 // Sockets: named attach points on a skeleton's bones.
 //
@@ -37,8 +38,44 @@ function resolveAll(skin: Skin): Map<string, ResolvedSocket> {
         if (joint === undefined) continue; // a bone this skeleton does not have: the socket is inert
         byName.set(socket.name, { joint, offset: socketOffsetMatrix(socket) });
     }
+    addImplicitSockets(byName, skin, jointOfNode);
     cache.set(skin, { sockets, byName });
     return byName;
+}
+
+/**
+ * The sockets every HUMANOID skeleton has without authoring: its hands and head, named the way scripts
+ * ask for them. Read through the same bone-name recogniser retargeting uses (`humanoidSlotOf`), so a
+ * Mixamo, Unreal (`hand_r`), Unity or Blender (`hand.R`) rig all answer to `RightHand`.
+ *
+ * Without these, a character whose model was swapped for a rig with other bone names lost every socket
+ * the scripts relied on: weapons had no hand to ride, and a caster fired from its chest. An AUTHORED
+ * socket of the same name always wins — that is how a grip offset for a particular rig is given.
+ */
+export const IMPLICIT_SOCKETS: Readonly<Record<string, string>> = {
+    RightHand: 'hand.R',
+    LeftHand: 'hand.L',
+    Head: 'head',
+};
+
+function addImplicitSockets(byName: Map<string, ResolvedSocket>, skin: Skin, jointOfNode: Map<number, number>): void {
+    const wanted = Object.entries(IMPLICIT_SOCKETS).filter(([name]) => !byName.has(name));
+    if (wanted.length === 0 || !skin.nodeNames) return;
+    // The FIRST joint (skeleton order, root first) whose name reads as the slot: a rig with a helper bone
+    // that also reads as a hand (an IK target, a twist bone) keeps the real one, which comes earlier.
+    const slotJoint = new Map<string, number>();
+    const ordered = Array.from(skin.nodeNames)
+        .map(([nodeIndex, name]) => ({ joint: jointOfNode.get(nodeIndex), name }))
+        .filter((e): e is { joint: number; name: string } => e.joint !== undefined)
+        .sort((a, b) => a.joint - b.joint);
+    for (const { joint, name } of ordered) {
+        const slot = humanoidSlotOf(name);
+        if (slot && !slotJoint.has(slot)) slotJoint.set(slot, joint);
+    }
+    for (const [name, slot] of wanted) {
+        const joint = slotJoint.get(slot);
+        if (joint !== undefined) byName.set(name, { joint, offset: mat4.create() });
+    }
 }
 
 /** A socket's offset as a matrix in its bone's local space. */

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { useEditorSessions } from '../EditorSessionsContext'
-import { cn, TextInput, Hint } from '../../components/ui'
+import { Button, cn, TextInput, Hint } from '../../components/ui'
 import { useAssetDrop } from '../../utils/useAssetDrop'
 
 // Links shared `.anim` assets to a RIG. The link lives on the rig, not on a model or a node, so one stored
@@ -42,7 +42,7 @@ export default function AnimationAssetPicker(props: {
   const candidates = animations.filter(a =>
     !linkedIds.includes(a.id) && a.name.toLowerCase().includes(query.trim().toLowerCase()))
 
-  const row = 'w-full flex items-center gap-2 px-2 py-1 text-left text-xs'
+  const row = 'w-full flex items-center gap-2 px-2 py-1 text-left text-ui'
 
   /**
    * Root motion used to be a toggle on every one of these rows, and there was a second copy of it in the
@@ -52,11 +52,11 @@ export default function AnimationAssetPicker(props: {
    * nothing. Open the `.anim` from the asset tree, or with the button on this row.
    */
   const openClip = (animationId: string) => (
-    <button
-      className='text-muted hover:text-white px-1 shrink-0'
+    <Button
+      variant='ghost' size='sm' className='px-1 py-0 shrink-0'
       title='Open this animation in the clip editor — root motion, mirroring, trimming and retiming live there'
       onClick={() => enterClipEditor(animationId)}
-    >✎</button>
+    >✎</Button>
   )
 
   return (
@@ -77,14 +77,13 @@ export default function AnimationAssetPicker(props: {
                 {anim ? anim.name : `${id} — missing`}
               </span>
               {anim && anim.clips.length !== 1 && (
-                <span className='text-[10px] text-muted shrink-0'>{anim.clips.length} clips</span>
+                <span className='text-ui-xs text-muted shrink-0'>{anim.clips.length} clips</span>
               )}
               {anim && openClip(id)}
-              <button
-                className='text-danger px-1 shrink-0'
+              <Button variant='remove' size='sm' className='px-1 py-0 shrink-0'
                 title='Unlink this animation — its clips are removed from every placement of this model'
                 onClick={() => props.rigId && unlinkAnimationFromRig(props.rigId, id)}
-              >✕</button>
+              >✕</Button>
             </div>
             {anim && anim.clips.length > 1 && anim.clips.map(clip => (
               <div key={clip.name} className={cn(row, 'pl-4 opacity-90')}>
@@ -96,13 +95,13 @@ export default function AnimationAssetPicker(props: {
       })}
 
       <div className='relative'>
-        <button
-          className='w-full rounded border border-control-hover px-2 py-1 text-xs hover:bg-control'
+        <Button
+          variant='subtle' className='w-full'
           onClick={() => setOpen(o => !o)}
           title='Play clips from an animation already in the library'
         >
           + Link Animation…
-        </button>
+        </Button>
         {open && (
           <div className='absolute left-0 right-0 top-full mt-1 z-[9999] rounded-md border border-border bg-surface-raised shadow-lg p-2 flex flex-col gap-2'>
             <TextInput placeholder='Search animations…' value={query} onChange={setQuery} autoFocus />
@@ -110,11 +109,11 @@ export default function AnimationAssetPicker(props: {
               {candidates.map(a => (
                 <button key={a.id} className={cn(row, 'hover:bg-control')} onClick={() => void link(a.id)}>
                   <span className='truncate flex-1'>{a.name}</span>
-                  <span className='text-[10px] text-muted shrink-0'>{a.clips.length}</span>
+                  <span className='text-ui-xs text-muted shrink-0'>{a.clips.length}</span>
                 </button>
               ))}
               {candidates.length === 0 && (
-                <div className='px-2 py-3 text-xs text-muted'>
+                <div className='px-2 py-3 text-ui text-muted'>
                   {animations.length === 0 ? 'No animations in the library yet — import one.' : 'No matches'}
                 </div>
               )}

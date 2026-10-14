@@ -3,6 +3,7 @@ import type { ReadonlyMat4 } from 'gl-matrix';
 import { uiProjectToScreen } from 'cleo';
 import type { GizmoOverlayColor, GizmoOverlayModel } from './gizmoDrag';
 import { AXIS_CSS_COLORS, CENTRE_CSS_COLOR } from './gizmoHandles';
+import { token } from '../../utils/cssTokens';
 
 /**
  * The reference lines and numeric readout drawn while a gizmo handle is being dragged.
@@ -30,17 +31,19 @@ export interface GizmoOverlayHandle {
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** Overlay colours come from the same palette as the 3D handles, so the two can never drift apart. */
-const COLORS: Record<GizmoOverlayColor, string> = {
+const COLORS: Record<Exclude<GizmoOverlayColor, 'muted'>, string> = {
     x: AXIS_CSS_COLORS[0],
     y: AXIS_CSS_COLORS[1],
     z: AXIS_CSS_COLORS[2],
     neutral: CENTRE_CSS_COLOR,
-    muted: 'rgb(255 255 255 / 0.35)',
 };
+/** `muted` is editor chrome, so it is the text token at low alpha — read at draw time (tokens are empty at
+ *  module scope, and reading live follows a theme switch). */
+const colorOf = (c: GizmoOverlayColor): string => (c === 'muted' ? token('--text', 0.35) : COLORS[c]);
 
 const LABEL_CLASS =
     'absolute -translate-y-1/2 translate-x-2 whitespace-nowrap rounded border border-control ' +
-    'bg-surface-raised/95 px-1.5 py-0.5 text-[10px] font-medium tabular-nums shadow-lg select-none';
+    'bg-surface-raised/95 px-1.5 py-0.5 text-ui-xs font-medium tabular-nums shadow-lg select-none';
 
 const GizmoDragOverlay = forwardRef<GizmoOverlayHandle>((_props, ref) => {
     const svgRef = useRef<SVGSVGElement>(null);
@@ -69,7 +72,7 @@ const GizmoDragOverlay = forwardRef<GizmoOverlayHandle>((_props, ref) => {
                         if (run.length >= 2) {
                             const el = polylineAt(svg, polylines.current, usedLines++);
                             el.setAttribute('points', run.join(' '));
-                            el.setAttribute('stroke', COLORS[line.color]);
+                            el.setAttribute('stroke', colorOf(line.color));
                             el.setAttribute('stroke-dasharray', line.dashed ? '5 4' : 'none');
                             el.style.display = '';
                         }
@@ -89,7 +92,7 @@ const GizmoDragOverlay = forwardRef<GizmoOverlayHandle>((_props, ref) => {
                     if (!s.inFront) continue;
                     const el = labelAt(labelHost, labelNodes.current, usedLabels++);
                     el.textContent = label.text;
-                    el.style.color = COLORS[label.color];
+                    el.style.color = colorOf(label.color);
                     el.style.transform = `translate(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px)`;
                     el.style.display = '';
                 }

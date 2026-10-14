@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { getAnimationTarget } from './skeleton'
 import { useStateMachine } from './StateMachineContext'
-import { Toggle } from '../../components/ui'
+import { Button, NumberInput, Select, Toggle } from '../../components/ui'
 import { clamp } from '../../utils/math';
 
 // Floating bottom transport for the Animation Editor: play/scrub the target clip and host its event
@@ -86,8 +86,8 @@ export default function AnimationPlayer() {
 
   if (!target) {
     return (
-      <div data-cleo-overlay className='absolute bottom-3 left-1/2 -translate-x-1/2 z-20 bg-surface-raised/95 border border-border rounded px-3 py-2 text-xs text-gray-400'>
-        No skinned model selected — <button className='underline' onClick={() => closeTab(activeTabId)}>close</button>
+      <div data-cleo-overlay className='absolute bottom-3 left-1/2 -translate-x-1/2 z-20 bg-surface-raised/95 border border-border rounded px-3 py-2 text-ui text-muted'>
+        No skinned model selected — <Button variant='ghost' size='sm' className='px-0 py-0 underline' onClick={() => closeTab(activeTabId)}>close</Button>
       </div>
     )
   }
@@ -168,7 +168,6 @@ export default function AnimationPlayer() {
     window.addEventListener('pointerup', up)
   }
 
-  const btn = 'px-2 py-1 rounded bg-control hover:bg-control-hover border border-control-hover text-white'
   const fmt = (s: number) => `${s.toFixed(2)}s`
   const pct = (t: number) => `${duration > 0 ? clamp(t / duration, 0, 1) * 100 : 0}%`
 
@@ -178,42 +177,42 @@ export default function AnimationPlayer() {
       className='absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex flex-col gap-2 bg-surface-raised/95 border border-border rounded px-3 py-2 shadow-lg'
       style={{ minWidth: 520 }}
       onMouseDown={(e) => e.stopPropagation()}>
-      <div className='flex items-center gap-2 text-xs text-white'>
-        <select
-          className='bg-control text-white border border-control-hover rounded px-2 py-1 max-w-[160px]'
+      <div className='flex items-center gap-2 text-ui text-fg'>
+        <Select
+          className='max-w-[160px]'
           value={clip}
           onChange={(e) => selectClip(e.target.value)}
           title='Animation clip'>
           {clips.length === 0 && <option value=''>No clips</option>}
           {clips.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
+        </Select>
 
-        <button className={btn} title='Play' onClick={onPlay} disabled={playing}>▶</button>
-        <button className={btn} title='Pause' onClick={onPause} disabled={!playing}>❚❚</button>
-        <button className={btn} title='Stop (T-pose)' onClick={onStop}>■</button>
+        <Button title='Play' onClick={onPlay} disabled={playing}>▶</Button>
+        <Button title='Pause' onClick={onPause} disabled={!playing}>❚❚</Button>
+        <Button title='Stop (T-pose)' onClick={onStop}>■</Button>
 
         <Toggle label='loop' className='ml-1' checked={loop}
           onChange={(c) => { setLoop(c); animator.loop = c }} />
         <label className='flex items-center gap-1' title='Playback speed'>
           speed
-          <input
-            className='w-[52px] bg-control text-white border border-control-hover rounded px-1'
-            type='number' step='0.1' min='0' value={speed}
-            onChange={(e) => { const v = Math.max(0, parseFloat(e.target.value) || 0); setSpeed(v); animator.speed = v }} />
+          <NumberInput
+            className='w-[52px] px-1 py-0'
+            step='0.1' min='0' value={speed}
+            onChange={(n) => { const v = Math.max(0, n); setSpeed(v); animator.speed = v }} />
         </label>
 
-        <button
-          className={btn + ' ml-1 border-red-700'}
+        <Button
+          className='ml-1 border-danger-border'
           disabled={!clip}
           title={clip ? `Drop an event marker on "${clip}" at the playhead — drag it to move it` : 'Pick a clip first'}
           onClick={() => addEvent({ clipName: clip, time, eventName: 'event' })}>
           + Event
-        </button>
+        </Button>
 
-        <button className={btn + ' ml-auto'} title='Close the Animation Editor tab' onClick={() => closeTab(activeTabId)}>Close</button>
+        <Button className='ml-auto' title='Close the Animation Editor tab' onClick={() => closeTab(activeTabId)}>Close</Button>
       </div>
 
-      <div className='flex items-center gap-2 text-[11px] text-gray-300'>
+      <div className='flex items-center gap-2 text-ui-sm text-muted'>
         <span className='tabular-nums w-[46px] text-right'>{fmt(time)}</span>
 
         {/* Track: click/drag anywhere to seek; red circles are this clip's event markers. */}
@@ -221,12 +220,12 @@ export default function AnimationPlayer() {
           <div className='absolute inset-x-0 top-1/2 -translate-y-1/2 h-1 rounded bg-control-hover' />
           <div className='absolute left-0 top-1/2 -translate-y-1/2 h-1 rounded bg-primary' style={{ width: pct(time) }} />
           {/* Playhead */}
-          <div className='absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-white pointer-events-none'
+          <div className='absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-fg pointer-events-none'
             style={{ left: pct(time) }} />
           {markers.map(({ e, i }) => (
             <div
               key={i}
-              className='absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-red-500 border border-red-300 cursor-grab active:cursor-grabbing hover:scale-125 transition-transform'
+              className='absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-danger border border-danger-fg cursor-grab active:cursor-grabbing hover:scale-125 transition-transform'
               style={{ left: pct(e.time) }}
               title={`${e.eventName} @ ${e.time.toFixed(2)}s — drag to move`}
               onPointerDown={ev => onMarkerDown(ev, i)} />

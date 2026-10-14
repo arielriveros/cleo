@@ -46,6 +46,10 @@ export function remapNodeRefs(json: any, map: Map<string, string>): void {
         const value = json?.[key];
         if (typeof value === 'string' && map.has(value)) json[key] = map.get(value);
     }
+    // A UI root serializes its world anchor INSIDE its `ui` payload. Missed, every spawned enemy's floating
+    // health bar pointed at the template's anchor id, which is in no scene, and sat at the enemy's feet.
+    const ui = json?.ui;
+    if (ui && typeof ui.uiTargetId === 'string' && map.has(ui.uiTargetId)) ui.uiTargetId = map.get(ui.uiTargetId);
     if (Array.isArray(json?.collisionIgnoreIds))
         json.collisionIgnoreIds = json.collisionIgnoreIds.map((id: any) =>
             typeof id === 'string' && map.has(id) ? map.get(id) : id);

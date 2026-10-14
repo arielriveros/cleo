@@ -3,9 +3,8 @@ import { NavMeshNode, bakeNavMesh, navBakeSettings } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
 import { useCleoEngine } from '../../EngineContext'
 import {
-  Button, NumberInput, PropertyRow, PropertyTable, Slider, Toggle, cn, labelClass, sectionTitleClass,
+  Button, NumberInput, PropertyRow, PropertyTable, Slider, Toggle, cn,
 } from '../../../components/ui'
-import { hintAffordance } from '../../../components/ui/Field'
 import { gatherNavSoup } from '../../../utils/navBakeSources'
 import { navPreviewSkippedFor } from '../../../utils/editorHelpers'
 import { NavMeshIcon } from '../../sceneInspector/nodeIcons'
@@ -154,9 +153,11 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
     apply({ sizeX: size[0], sizeY: size[1], sizeZ: size[2] })
   }
 
-  const slider = (label: string, k: keyof NavState, min: number, max: number, step: number, fixed = 2, hint?: string) => (
-    <Slider label={label} min={min} max={max} step={step} value={state[k] as number} title={hint}
-      labelClassName='w-[104px]' readout={(v) => v.toFixed(fixed)}
+  // Label-less: each slider sits in a PropertyRow, so it lines up with every other row in the card.
+  const slider = (k: keyof NavState, min: number, max: number, step: number, fixed = 2,
+                  readout?: (v: number) => string) => (
+    <Slider min={min} max={max} step={step} value={state[k] as number} className='my-0'
+      readout={readout ?? ((v) => v.toFixed(fixed))}
       onChange={(v) => apply({ [k]: v } as Partial<NavState>)} />
   )
 
@@ -166,92 +167,69 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
   // exactly the biggest levels is the failure this whole panel exists to make visible.
   const skipped = navPreviewSkippedFor(props.node.id)
 
-  const header = (label: string, hint?: string) => (
-    <div className={cn(sectionTitleClass, 'mt-3 mb-1', hintAffordance(hint))} title={hint}>{label}</div>
-  )
+  // One status line instead of a stack of paragraphs; the full explanation rides on its tooltip.
+  const status: { text: string; title: string; warn?: boolean } | null =
+    skipped !== null
+      ? { warn: true, text: `Preview off: ${skipped.toLocaleString()} walkable triangles.`,
+          title: 'Too many to paint, so the cyan preview is off for this volume. The box and the bake are unaffected; shrink the volume, or raise the terrain sample step, to get the preview back.' }
+    : bounded && props.node.bakeIsStale
+      ? { warn: true, text: 'The box moved since the last bake — re-bake.',
+          title: 'The wireframe no longer describes the box. Re-bake to make the two agree.' }
+    : !bounded
+      ? { text: 'Unbounded: the whole scene is baked.',
+          title: 'The dimmed box in the viewport is its extent. Give all three sizes a value to restrict it to a box you can place and drag.' }
+    : null
+
+  const reportText = report
+    ? (report.regions === 0
+        ? 'Nothing walkable found — ground needs a collider.'
+        : `${report.regions} regions · ${report.ms.toFixed(0)} ms`)
+    : !props.node.isBaked && !baking ? 'Not baked yet.' : ''
+  const reportTitle = report
+    ? `${report.regions} regions from ${report.walkable} walkable triangles, ${report.rejected} rejected as too steep or degenerate. ` +
+      `Sources: ${report.colliders} colliders, ${report.terrains} terrain${report.bounded ? ', clipped to the box' : ', whole scene'}.`
+    : 'Controllers set to path walk in a straight line until this mesh exists, so nothing breaks — they just stop going around things.'
 
   return (
     <Collapsable title='Nav Mesh' icon={<NavMeshIcon />} persistKey='navMesh' hint={NAV_HINT}>
       <div className='w-full p-2'>
-        {header('Bounds', BOUNDS_HINT)}
-        <PropertyTable>
-          {(['sizeX', 'sizeY', 'sizeZ'] as const).map((k, i) => (
-            <PropertyRow key={k} label={['Size X', 'Size Y', 'Size Z'][i]}>
-              <NumberInput min={0} step={0.5} value={state[k]}
-                onChange={(v) => apply({ [k]: Math.max(0, v) } as Partial<NavState>)} />
-            </PropertyRow>
-          ))}
+        <PropertyTable columns={['32%', '68%']}>
+          <PropertyRow label='Size' hint={BOUNDS_HINT}>
+            <span className='flex gap-1'>
+              {(['sizeX', 'sizeY', 'sizeZ'] as const).map((k, i) => (
+                <NumberInput key={k} className='min-w-0 flex-1' min={0} step={0.5} value={state[k]}
+                  title={['Size X', 'Size Y', 'Size Z'][i] + ' — 0 bakes the whole scene'}
+                  onChange={(v) => apply({ [k]: Math.max(0, v) } as Partial<NavState>)} />
+              ))}
+            </span>
+          </PropertyRow>
+          <PropertyRow label='Bake' hint={SOURCE_HINT}>
+            <span className='flex items-center gap-1'>
+              <Button size='sm' onClick={bake} disabled={baking}>{baking ? 'Baking…' : 'Bake'}</Button>
+              {props.node.isBaked && <Button size='sm' variant='ghost' onClick={clear}>Clear</Button>}
+              <Button size='sm' variant='ghost' className='ml-auto' onClick={fitToScene}
+                title='Resize the box around everything walkable'>Fit</Button>
+            </span>
+          </PropertyRow>
+          <PropertyRow label='Max slope' hint={SLOPE_HINT}>{slider('maxSlope', 0, 89, 1, 0, (v) => v.toFixed(0) + '°')}</PropertyRow>
+          <PropertyRow label='Weld' hint={WELD_HINT}>{slider('weldTolerance', 0.001, 0.5, 0.001, 3)}</PropertyRow>
+          <PropertyRow label='Simplify'>{slider('simplifyTolerance', 0, 0.5, 0.001, 3)}</PropertyRow>
+          <PropertyRow label='Agent radius' hint={RADIUS_HINT}>{slider('agentRadius', 0, 5, 0.05)}</PropertyRow>
+          <PropertyRow label='Terrain' hint={TERRAIN_HINT}>
+            <span className='flex items-center gap-2'>
+              <Toggle checked={state.includeTerrain} onChange={(c) => setState({ ...state, includeTerrain: c })} />
+              {state.includeTerrain && (
+                <Slider min={1} max={8} step={1} value={state.terrainStep} className='my-0 flex-1'
+                  title='Sample step: every Nth terrain vertex' readout={(v) => '1/' + v.toFixed(0)}
+                  onChange={(v) => setState({ ...state, terrainStep: v })} />
+              )}
+            </span>
+          </PropertyRow>
         </PropertyTable>
-        <div className='flex items-center gap-2 my-2'>
-          <Button size='sm' variant='ghost' onClick={fitToScene}>Fit to scene</Button>
-        </div>
-        {!bounded && (
-          <p className='text-[11px] text-muted mb-2'>
-            Unbounded — the whole scene is baked, and the dimmed box in the viewport is its extent.
-            Give all three sizes a value to restrict it to a box you can place and drag.
-          </p>
-        )}
-        {skipped !== null && (
-          <p className='text-[11px] text-warning mb-2'>
-            {skipped.toLocaleString()} walkable triangles — too many to paint, so the cyan preview is
-            off for this volume. The box and the bake are unaffected; shrink the volume, or raise the
-            terrain sample step below, to get the preview back.
-          </p>
-        )}
-        {bounded && props.node.bakeIsStale && (
-          <p className='text-[11px] text-warning mb-2'>
-            The box has moved since the last bake, so the wireframe below no longer describes it.
-            Re-bake to make the two agree.
-          </p>
-        )}
-
-        {header('Bake', SOURCE_HINT)}
-        <div className='flex items-center gap-2 mb-2'>
-          <Button size='sm' onClick={bake} disabled={baking}>{baking ? 'Baking…' : 'Bake'}</Button>
-          {props.node.isBaked && <Button size='sm' variant='ghost' onClick={clear}>Clear</Button>}
-        </div>
-
-        {!props.node.isBaked && !baking && (
-          <p className='text-[11px] text-muted mb-2'>
-            Nothing baked yet. Controllers set to <code>path</code> walk in a straight line until this
-            mesh exists, so nothing breaks — they just stop going around things.
-          </p>
-        )}
-
-        {report && (
-          <div className='text-[11px] text-muted mb-2 leading-relaxed'>
-            <div>{report.regions} regions from {report.walkable} walkable triangles, {report.rejected} rejected as too steep or degenerate.</div>
-            <div>
-              Sources: {report.colliders} colliders, {report.terrains} terrain
-              {report.bounded ? ', clipped to the box' : ', whole scene'}.
-            </div>
-            <div>{report.ms.toFixed(0)} ms.</div>
-            {report.regions === 0 && (
-              <div className='mt-1'>
-                Nothing walkable was found. Ground needs a collider — the bake reads colliders, not
-                meshes.
-              </div>
-            )}
-          </div>
-        )}
-
-        {header('Surface')}
-        {slider('Max slope', 'maxSlope', 0, 89, 1, 0, SLOPE_HINT)}
-        {slider('Weld', 'weldTolerance', 0.001, 0.5, 0.001, 3, WELD_HINT)}
-        {slider('Simplify', 'simplifyTolerance', 0, 0.5, 0.001, 3)}
-
-        {header('Agents', RADIUS_HINT)}
-        {slider('Agent radius', 'agentRadius', 0, 5, 0.05)}
-
-        {header('Terrain', TERRAIN_HINT)}
-        <Toggle label='Include terrain' checked={state.includeTerrain} className='my-1'
-          onChange={(c) => setState({ ...state, includeTerrain: c })} />
-        {state.includeTerrain && (
-          <div className='flex items-center justify-between mt-1'>
-            <span className={labelClass}>Sample step</span>
-            <Slider label='' min={1} max={8} step={1} value={state.terrainStep}
-              labelClassName='w-0' readout={(v) => 'every ' + v.toFixed(0)}
-              onChange={(v) => setState({ ...state, terrainStep: v })} />
+        {(status || reportText) && (
+          <div className='mt-1 space-y-0.5 text-ui-sm'>
+            {status && <div className={cn(status.warn ? 'text-warning' : 'text-muted', 'cursor-help')} title={status.title}>{status.text}</div>}
+            {reportText && <div className='text-muted cursor-help' title={reportTitle}>{reportText}</div>}
           </div>
         )}
       </div>

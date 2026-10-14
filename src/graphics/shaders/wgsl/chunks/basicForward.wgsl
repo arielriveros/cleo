@@ -28,6 +28,12 @@ struct BasicMaterial {
      */
     alphaCutoff: f32,
     hasMaskMap: i32,
+    /**
+     * Linear colour multiplier past what `color` can reach (it stops at white): a sprite's tileset
+     * OVERDRIVE (Tileset.overdriveOf), which lets fire or magic cross the bloom threshold. 1 = as authored;
+     * Material.Basic defaults it, so every other Basic surface is unchanged.
+     */
+    intensity: f32,
 };
 @group(1) @binding(1) var<uniform> u_material: BasicMaterial;
 
@@ -50,5 +56,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         alpha *= texColor.a;
     }
 
-    return vec4<f32>(color, alpha);
+    return vec4<f32>(color * u_material.intensity, alpha);
 }

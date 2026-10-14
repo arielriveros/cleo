@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { useAnimationField } from './AnimationFieldContext'
 import { clamp } from '../../utils/math';
+import { Button } from '../../components/ui'
 
 // The blend-space plot: the Animation Field mode's work surface, docked as the "Blend Space" tab in the
 // bottom strip beside Logger and Assets (see panels.tsx / DockLayout.tsx) so the viewport stays clear for
@@ -42,7 +43,7 @@ export default function FieldGraph() {
 
   if (editorMode !== 'animationField') return null
   // A message rather than null: this is a dock panel now, and an empty tab body reads as a broken panel.
-  if (!field) return <div className='flex h-full w-full flex-col bg-surface-raised p-3 text-sm text-gray-400'>No animation field open.</div>
+  if (!field) return <div className='flex h-full w-full flex-col bg-surface-raised p-3 text-ui text-muted'>No animation field open.</div>
 
   const is2D = field.mode === '2d'
   const plotW = Math.max(1, size.w - PAD.left - PAD.right)
@@ -122,8 +123,8 @@ export default function FieldGraph() {
   return (
     <div className='flex h-full w-full flex-col overflow-hidden bg-surface-raised'>
 
-      <div className='m-3 mb-1 flex items-center gap-2 self-start rounded border border-border bg-surface-raised/95 px-2 py-1 text-[11px] text-muted shadow-panel'>
-        <span className='text-white'>{field.name}</span>
+      <div className='m-3 mb-1 flex items-center gap-2 self-start rounded border border-border bg-surface-raised/95 px-2 py-1 text-ui-sm text-muted shadow-panel'>
+        <span className='text-fg'>{field.name}</span>
         <span className='text-dim'>·</span>
         <span>{is2D ? '2D' : '1D'} blend space</span>
         <span className='text-dim'>·</span>
@@ -143,7 +144,7 @@ export default function FieldGraph() {
               <line x1={px(t)} y1={PAD.top} x2={px(t)} y2={PAD.top + plotH}
                 stroke='currentColor' className='text-border' strokeOpacity={0.5} />
               <text x={px(t)} y={PAD.top + plotH + 16} textAnchor='middle'
-                className='fill-current text-dim' style={{ fontSize: 10 }}>{fmt(t)}</text>
+                className='fill-current text-dim text-ui-xs'>{fmt(t)}</text>
             </g>
           ))}
           {is2D && ticks(field.yAxis.min, field.yAxis.max).map((t, i) => (
@@ -151,7 +152,7 @@ export default function FieldGraph() {
               <line x1={PAD.left} y1={py(t)} x2={PAD.left + plotW} y2={py(t)}
                 stroke='currentColor' className='text-border' strokeOpacity={0.5} />
               <text x={PAD.left - 8} y={py(t) + 3} textAnchor='end'
-                className='fill-current text-dim' style={{ fontSize: 10 }}>{fmt(t)}</text>
+                className='fill-current text-dim text-ui-xs'>{fmt(t)}</text>
             </g>
           ))}
           {!is2D && (
@@ -161,11 +162,11 @@ export default function FieldGraph() {
 
           {/* Axis names */}
           <text x={PAD.left + plotW / 2} y={size.h - 10} textAnchor='middle'
-            className='fill-current text-muted' style={{ fontSize: 11 }}>{field.xAxis.name}</text>
+            className='fill-current text-muted text-ui-sm'>{field.xAxis.name}</text>
           {is2D && (
             <text x={14} y={PAD.top + plotH / 2} textAnchor='middle'
               transform={`rotate(-90 14 ${PAD.top + plotH / 2})`}
-              className='fill-current text-muted' style={{ fontSize: 11 }}>{field.yAxis.name}</text>
+              className='fill-current text-muted text-ui-sm'>{field.yAxis.name}</text>
           )}
 
           {/* Probe: crosshair + the point the field is sampled at. */}
@@ -195,14 +196,13 @@ export default function FieldGraph() {
                 )}
                 <circle
                   cx={px(s.x)} cy={py(s.y ?? 0)} r={r}
-                  className={`fill-current ${missing ? 'text-red-500' : active ? 'text-primary' : 'text-control-hover'}`}
+                  className={`fill-current ${missing ? 'text-danger' : active ? 'text-primary' : 'text-control-hover'}`}
                   stroke='currentColor'
                   strokeWidth={selected === i ? 2.5 : 1}
                   strokeOpacity={selected === i ? 1 : 0.6} />
                 <text
                   x={px(s.x)} y={py(s.y ?? 0) - r - 6} textAnchor='middle' pointerEvents='none'
-                  className={`fill-current ${missing ? 'text-red-400' : active ? 'text-white' : 'text-dim'}`}
-                  style={{ fontSize: 10 }}>
+                  className={`fill-current text-ui-xs ${missing ? 'text-danger-fg' : active ? 'text-fg' : 'text-dim'}`}>
                   {s.clipName || '(no clip)'}{active ? ` ${(w * 100).toFixed(0)}%` : ''}
                 </text>
                 {missing && (
@@ -215,7 +215,7 @@ export default function FieldGraph() {
 
         {field.samples.length === 0 && (
           <div className='pointer-events-none absolute inset-0 flex items-center justify-center'>
-            <p className='rounded border border-border bg-surface-raised px-3 py-2 text-xs text-muted'>
+            <p className='rounded border border-border bg-surface-raised px-3 py-2 text-ui text-muted'>
               {clips.length === 0
                 ? 'This model has no animation clips to blend.'
                 : 'Double-click anywhere to drop the first clip.'}
@@ -225,12 +225,12 @@ export default function FieldGraph() {
 
         {/* Delete the selected sample without hunting for its row in the sidebar. */}
         {selected >= 0 && selected < field.samples.length && (
-          <button
-            className='absolute right-2 top-2 rounded bg-red-700 px-2 py-0.5 text-[11px] text-white hover:bg-red-600'
+          <Button
+            variant='danger' size='sm' className='absolute right-2 top-2 text-ui-sm'
             title='Remove the selected sample'
             onClick={() => removeSample(selected)}>
             ✕ Remove “{field.samples[selected].clipName || 'sample'}”
-          </button>
+          </Button>
         )}
       </div>
     </div>

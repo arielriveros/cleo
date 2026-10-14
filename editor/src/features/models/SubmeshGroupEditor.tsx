@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { TextInput, Select } from '../../components/ui'
+import { TextInput, Select, Button, cn } from '../../components/ui'
 import { addGroup, movePart, removeGroup, renameGroup, groupOfPart, type PartGroup, type PartInfo } from '../../utils/submeshGroups'
 
 /** MIME for a sub-mesh chip dragged between group columns. Scoped to this editor — nothing else reads it. */
@@ -37,14 +37,14 @@ export default function SubmeshGroupEditor({ parts, bundleName, groups, onChange
   return (
     <div>
       <div className='flex items-center justify-between mb-1'>
-        <span className='text-xs font-semibold'
+        <span className='text-ui font-semibold'
               title='Each group becomes one model asset, its parts merged into a single mesh. Drag a part to move it.'>
           Groups
         </span>
-        <button className='text-[11px] bg-control hover:bg-control-hover rounded px-2 py-1'
+        <Button size='sm'
                 onClick={() => onChange(addGroup(groups, bundleName))}>
           + Add group
-        </button>
+        </Button>
       </div>
 
       <div className='flex gap-2 overflow-x-auto pb-1'>
@@ -58,13 +58,13 @@ export default function SubmeshGroupEditor({ parts, bundleName, groups, onChange
                  setDragOver(d => (d === gi ? -1 : d))
                }}
                onDrop={(e) => drop(e, gi)}
-               className={`w-[168px] shrink-0 rounded border p-2 ${dragOver === gi ? 'border-primary bg-control' : 'border-control bg-surface-raised'}`}>
+               className={cn('w-[168px] shrink-0 rounded border p-2', dragOver === gi ? 'border-primary bg-control' : 'border-control bg-surface-raised')}>
             <div className='flex items-center gap-1 mb-2'>
               <TextInput value={group.name} onChange={(v) => onChange(renameGroup(groups, gi, v))}
-                         className='text-[11px] py-0.5' title='Asset name' />
+                         className='text-ui-sm py-0.5' title='Asset name' />
               {groups.length > 1 && (
-                <button className='shrink-0 text-gray-400 hover:text-white px-1' title='Delete group'
-                        onClick={() => onChange(removeGroup(groups, gi))}>×</button>
+                <Button variant='ghost' size='sm' className='shrink-0 px-1' title='Delete group'
+                        onClick={() => onChange(removeGroup(groups, gi))}>×</Button>
               )}
             </div>
 
@@ -77,9 +77,9 @@ export default function SubmeshGroupEditor({ parts, bundleName, groups, onChange
                      }}
                      onDragEnd={() => setDragOver(-1)}
                      className='flex items-center gap-1 bg-control rounded px-1.5 py-1 cursor-grab active:cursor-grabbing'>
-                  <span className='text-[11px] truncate flex-1' title={parts[pi]?.name}>{parts[pi]?.name}</span>
+                  <span className='text-ui-sm truncate flex-1' title={parts[pi]?.name}>{parts[pi]?.name}</span>
                   {groups.length > 1 && (
-                    <Select className='text-[10px] py-0 px-0.5 w-[34px]' value={gi} title='Move to group'
+                    <Select className='text-ui-xs py-0 px-0.5 w-[34px]' value={gi} title='Move to group'
                             draggable={false} onDragStart={(e) => e.stopPropagation()}
                             onChange={(e) => onChange(movePart(groups, pi, parseInt(e.target.value, 10)))}>
                       {groups.map((g, i) => <option key={i} value={i}>{i + 1}</option>)}
@@ -88,7 +88,7 @@ export default function SubmeshGroupEditor({ parts, bundleName, groups, onChange
                 </div>
               ))}
               {group.parts.length === 0 && (
-                <p className='text-[11px] text-gray-500 italic py-2 text-center'>Drop parts here</p>
+                <p className='text-ui-sm text-dim italic py-2 text-center'>Drop parts here</p>
               )}
             </div>
           </div>
@@ -97,7 +97,7 @@ export default function SubmeshGroupEditor({ parts, bundleName, groups, onChange
 
       {/* A part belongs to exactly one group by construction; this only fires if that ever breaks. */}
       {owner.some(g => g < 0) && (
-        <p className='text-[11px] text-warning mt-1'>Some parts are not in a group and would be skipped.</p>
+        <p className='text-ui-sm text-warning mt-1'>Some parts are not in a group and would be skipped.</p>
       )}
     </div>
   )

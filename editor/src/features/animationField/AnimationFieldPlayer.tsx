@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { useAnimationField } from './AnimationFieldContext'
+import { Button, NumberInput, Slider } from '../../components/ui'
 
 // The Animation Field editor's transport, docked under the plot inside the "Blend Space" bottom tab:
 // play/scrub plus axis sliders that move the probe. The field tab's scene is paused
@@ -58,24 +59,22 @@ export default function AnimationFieldPlayer() {
     setPlaying(false)
   }
 
-  const btn = 'px-2 py-1 rounded bg-control hover:bg-control-hover border border-control-hover text-white'
-
   return (
     <div className='flex shrink-0 flex-col gap-2 border-t border-border bg-surface-raised px-3 py-2'>
 
       {/* Wraps rather than holding a minimum width: the bottom strip can be dragged narrow. */}
-      <div className='flex flex-wrap items-center gap-2 text-xs text-white'>
-        <button className={btn} title='Play the blend' onClick={onPlay} disabled={playing || !animator}>▶</button>
-        <button className={btn} title='Pause' onClick={onPause} disabled={!playing}>❚❚</button>
-        <button className={btn} title='Rewind to the start of the cycle' onClick={onStop} disabled={!animator}>■</button>
+      <div className='flex flex-wrap items-center gap-2 text-ui text-fg'>
+        <Button title='Play the blend' onClick={onPlay} disabled={playing || !animator}>▶</Button>
+        <Button title='Pause' onClick={onPause} disabled={!playing}>❚❚</Button>
+        <Button title='Rewind to the start of the cycle' onClick={onStop} disabled={!animator}>■</Button>
 
         <label className='flex items-center gap-1' title='Playback speed'>
           speed
-          <input
-            className='w-[52px] rounded border border-control-hover bg-control px-1 text-white'
-            type='number' step='0.1' min='0' value={speed}
-            onChange={e => {
-              const v = Math.max(0, parseFloat(e.target.value) || 0)
+          <NumberInput
+            className='w-[52px] px-1 py-0'
+            step='0.1' min='0' value={speed}
+            onChange={n => {
+              const v = Math.max(0, n)
               setSpeed(v)
               if (animator) animator.speed = v
             }} />
@@ -84,7 +83,7 @@ export default function AnimationFieldPlayer() {
         {/* The blended cycle length: the weighted average of the contributing clips' own durations. This is
             what the shared phase is paced against, so it is also the number that gives away a clip whose
             authored length is out of line — if it collapses at one end of the axis, that corner runs fast. */}
-        <span className='shrink-0 tabular-nums text-[11px] text-dim'
+        <span className='shrink-0 tabular-nums text-ui-sm text-dim'
           title='Length of one full cycle of the blend at this point — the weighted average of the contributing clips'>
           cycle {animator ? animator.duration.toFixed(2) : '0.00'}s
         </span>
@@ -92,18 +91,18 @@ export default function AnimationFieldPlayer() {
         {/* What is actually mixing right now. */}
         <div className='ml-2 flex min-w-0 flex-1 items-center gap-2 overflow-hidden'>
           {contributing.length === 0
-            ? <span className='text-[11px] text-gray-400'>No clip is contributing here.</span>
+            ? <span className='text-ui-sm text-muted'>No clip is contributing here.</span>
             : contributing.map(w => (
-              <span key={w.clipName} className='shrink-0 rounded bg-control px-1.5 py-0.5 text-[10px]'
+              <span key={w.clipName} className='shrink-0 rounded bg-control px-1.5 py-0.5 text-ui-xs'
                 title={`${w.clipName} — ${(w.weight * 100).toFixed(1)}%`}>
-                <span className='text-white'>{w.clipName}</span>
+                <span className='text-fg'>{w.clipName}</span>
                 <span className='ml-1 tabular-nums text-highlight'>{(w.weight * 100).toFixed(0)}%</span>
               </span>
             ))}
         </div>
 
-        <button className={btn + ' ml-auto shrink-0'} title='Close the Animation Field tab'
-          onClick={() => closeTab(activeTabId)}>Close</button>
+        <Button className='ml-auto shrink-0' title='Close the Animation Field tab'
+          onClick={() => closeTab(activeTabId)}>Close</Button>
       </div>
 
       <AxisSlider
@@ -128,16 +127,15 @@ function AxisSlider({ name, min, max, value, onChange }: {
   // A degenerate range would give the slider a zero step and freeze it.
   const step = Math.abs(max - min) / 100 || 0.01
   return (
-    <div className='flex items-center gap-2 text-[11px] text-gray-300'>
-      <span className='w-[72px] shrink-0 truncate' title={name}>{name}</span>
-      <input
-        className='flex-1 accent-[var(--color-primary)]'
-        type='range' min={min} max={max} step={step} value={value}
-        onChange={e => onChange(parseFloat(e.target.value))} />
-      <input
-        className='w-[64px] shrink-0 rounded border border-control-hover bg-control px-1 text-right tabular-nums text-white'
-        type='number' step={step} value={Number(value.toFixed(3))}
-        onChange={e => onChange(parseFloat(e.target.value) || 0)} />
+    <div className='flex items-center gap-2'>
+      <Slider
+        className='my-0 min-w-0 flex-1' labelClassName='w-[72px]' title={name}
+        label={name} readout={false} min={min} max={max} step={step} value={value}
+        onChange={onChange} />
+      <NumberInput
+        className='w-[64px] shrink-0 px-1 py-0 text-right'
+        step={step} value={Number(value.toFixed(3))}
+        onChange={onChange} />
     </div>
   )
 }

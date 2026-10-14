@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, Handle, Position,
   MarkerType, useNodesState, useEdgesState, useReactFlow,
@@ -6,6 +6,8 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import FloatingEdge from '../features/animation/FloatingEdge'
+import { token } from '../utils/cssTokens'
+import { MenuItem } from './ui'
 
 /**
  * The node-graph canvas, shared by every state machine the editor edits.
@@ -140,14 +142,14 @@ function GraphNode({ data, selected }: NodeProps) {
     : d.isEntry ? 'border-success'
     : 'border-control-hover'
   return (
-    <div className={`rounded border-2 ${border} ${KIND_CLASS[d.kind]} text-white shadow-panel`} style={{ width: NODE_W }}>
+    <div className={`rounded border-2 ${border} ${KIND_CLASS[d.kind]} text-fg shadow-panel`} style={{ width: NODE_W }}>
       <Handle type='target' position={Position.Left} className='!bg-primary !w-2 !h-2' />
       <div className='px-2 py-1 border-b border-border flex items-center gap-1'>
-        {d.isEntry && <span className='text-[9px] px-1 rounded bg-success text-white' title='Entry state'>▶</span>}
-        <span className='text-xs font-semibold truncate flex-1' title={d.label}>{d.label}</span>
+        {d.isEntry && <span className='text-ui-2xs px-1 rounded bg-success text-fg' title='Entry state'>▶</span>}
+        <span className='text-ui font-semibold truncate flex-1' title={d.label}>{d.label}</span>
       </div>
-      <div className='px-2 py-1 text-[10px] text-muted flex items-center justify-between gap-1'>
-        <span className={`truncate ${d.subtitleMissing ? 'text-red-400' : ''}`} title={d.subtitle}>
+      <div className='px-2 py-1 text-ui-xs text-muted flex items-center justify-between gap-1'>
+        <span className={`truncate ${d.subtitleMissing ? 'text-danger-fg' : ''}`} title={d.subtitle}>
           {d.glyph && <span className='mr-1 text-primary' title={d.glyphTitle}>{d.glyph}</span>}
           {d.subtitle}
         </span>
@@ -173,6 +175,12 @@ function Flow(props: MachineGraphProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>([])
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  // xyflow takes these as JS colour strings, so they are read off the design tokens (lazily: on mount).
+  const colors = useMemo(() => ({
+    grid: token('--control'),
+    minimapMask: token('--scrim', 0.5),
+    minimapNode: token('--control-hover'),
+  }), [])
   const { screenToFlowPosition } = useReactFlow()
 
   useEffect(() => {
@@ -201,6 +209,9 @@ function Flow(props: MachineGraphProps) {
   useEffect(() => {
     // Markers must stay on the edge: xyflow resolves them into `url(#…)` strings for the custom edge.
     const arrow = { type: MarkerType.ArrowClosed, width: 14, height: 14 }
+    const selectedStroke = token('--selected')
+    const labelFill = token('--text')
+    const labelBg = token('--bg', 0.85)
     setEdges(links.map(l => {
       const isSelected = !!selectedLink
         && ((selectedLink.a === l.a && selectedLink.b === l.b)
@@ -217,9 +228,9 @@ function Flow(props: MachineGraphProps) {
         data: { a: l.a, b: l.b, forward: l.forward, backward: l.backward },
         // Light up whichever direction could actually fire from where the machine currently is.
         animated: activeId === l.a ? l.forward : activeId === l.b ? l.backward : false,
-        style: { stroke: isSelected ? 'var(--color-selected, #6b8afd)' : undefined },
-        labelStyle: { fontSize: 10, fill: '#cbd5e1' },
-        labelBgStyle: { fill: 'rgba(20,22,28,0.85)' },
+        style: { stroke: isSelected ? selectedStroke : undefined },
+        labelStyle: { fontSize: 10, fill: labelFill },
+        labelBgStyle: { fill: labelBg },
         labelBgPadding: [4, 2] as [number, number],
         labelBgBorderRadius: 3,
       }
@@ -289,15 +300,15 @@ function Flow(props: MachineGraphProps) {
         fitView
         proOptions={{ hideAttribution: true }}
         className='!bg-bg'>
-        <Background color='#3a3f4b' gap={18} />
+        <Background color={colors.grid} gap={18} />
         <Controls className='!bg-surface-raised !border-border' showInteractive={false} />
-        <MiniMap pannable zoomable className='!bg-surface-sunken' maskColor='rgba(0,0,0,0.5)' nodeColor='#4b5563' />
+        <MiniMap pannable zoomable className='!bg-surface-sunken' maskColor={colors.minimapMask} nodeColor={colors.minimapNode} />
       </ReactFlow>
 
       <div data-cleo-overlay className='absolute top-2 left-2 z-20 flex items-center gap-2'
         onMouseDown={e => e.stopPropagation()}>
         {toolbar}
-        <span className='text-[10px] text-dim ml-1'>
+        <span className='text-ui-xs text-dim ml-1'>
           {hint ?? `drag handle → handle to connect · right-click a ${nodeNoun} · Del to remove`}
         </span>
       </div>
@@ -321,25 +332,24 @@ function NodeMenu(
     onSetEntry(): void; onRemove(): void; onClose(): void
   },
 ) {
-  const item = 'w-full text-left px-2 py-1 text-xs hover:bg-control disabled:opacity-40 disabled:hover:bg-transparent'
   return (
     <>
       {/* Catch the next click anywhere so the menu behaves like a menu. */}
       <div className='fixed inset-0 z-30' onMouseDown={onClose}
         onContextMenu={e => { e.preventDefault(); onClose() }} />
       <div data-cleo-overlay
-        className='fixed z-40 min-w-[132px] rounded border border-border bg-surface-raised shadow-panel py-0.5'
+        className='fixed z-40 min-w-[132px] rounded border border-border bg-surface-raised shadow-panel p-0.5'
         style={{ left: x, top: y }}
         onMouseDown={e => e.stopPropagation()}>
-        <div className='px-2 py-1 text-[10px] uppercase tracking-wide text-dim truncate'>{id}</div>
+        <div className='px-2 py-1 text-ui-xs uppercase tracking-wide text-dim truncate'>{id}</div>
         {allowEntry && (
-          <button className={item} disabled={isEntry}
+          <MenuItem className='disabled:hover:bg-transparent' disabled={isEntry}
             title={isEntry ? 'Already the entry state' : 'The machine starts here'}
             onClick={onSetEntry}>
             {isEntry ? '▶ Entry state' : 'Set as entry'}
-          </button>
+          </MenuItem>
         )}
-        <button className={item + ' text-red-400'} onClick={onRemove}>Delete {noun}</button>
+        <MenuItem danger onClick={onRemove}>Delete {noun}</MenuItem>
       </div>
     </>
   )

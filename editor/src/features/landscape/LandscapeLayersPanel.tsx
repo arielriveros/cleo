@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { LandscapeNode, Terrain, MAX_PAINT_LAYERS } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
-import { Button, Hint, SegmentedControl, Select, Slider, TextInput, Toggle, Popover } from '../../components/ui'
+import { Button, Hint, MenuItem, SegmentedControl, Select, Slider, TextInput, Toggle, Popover, cn, sectionTitleClass } from '../../components/ui'
 import { useActiveLandscape } from './useActiveLandscape'
 import { useLandscapeBrush, setBrush, type WeightView } from './landscapeBrushStore'
 import LandscapeMaterialSlot from './LandscapeMaterialSlot'
@@ -13,7 +13,7 @@ import { type TerrainMaterialAsset } from '../../utils/terrainMaterials'
 // layers over it, topmost first — the order a layer stack reads everywhere else. Painting targets the
 // ACTIVE layer, chosen here. Every structural change is one undo step (see stackHistory).
 
-const sectionTitle = 'text-[10px] uppercase tracking-wide text-muted'
+const sectionTitle = sectionTitleClass
 
 export default function LandscapeLayersPanel() {
   const { eventEmitter, editorScene } = useCleoEngine()
@@ -40,7 +40,7 @@ export default function LandscapeLayersPanel() {
 
   if (!node) {
     return (
-      <div className='p-2 space-y-2 text-xs text-muted'>
+      <div className='p-2 space-y-2 text-ui text-muted'>
         <p>This scene has no landscape.</p>
         <Button size='sm' onClick={() => {
           const landscape = new LandscapeNode('landscape', new Terrain({ size: 200, resolution: 129, chunkQuads: 32 }))
@@ -52,14 +52,14 @@ export default function LandscapeLayersPanel() {
       </div>
     )
   }
-  if (!stack) return <div className='p-2 text-xs text-muted'>This landscape predates the layer stack.</div>
+  if (!stack) return <div className='p-2 text-ui text-muted'>This landscape predates the layer stack.</div>
 
   const full = layers.length >= MAX_PAINT_LAYERS
 
   return (
-    <div className='flex flex-col text-white p-2 gap-3' key={revision}>
+    <div className='flex flex-col text-fg p-2 gap-3' key={revision}>
       {landscapes.length > 1 && (
-        <Select className='text-xs' value={node.id} onChange={e => select(e.target.value)} title='Which landscape these panels edit'>
+        <Select value={node.id} onChange={e => select(e.target.value)} title='Which landscape these panels edit'>
           {landscapes.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
         </Select>
       )}
@@ -85,7 +85,7 @@ export default function LandscapeLayersPanel() {
           const active = layer.id === activeId
           return (
             <div key={layer.id}
-              className={`border rounded p-1.5 space-y-1 cursor-pointer ${active ? 'border-selected bg-control' : 'border-control'}`}
+              className={cn('border rounded p-1.5 space-y-1 cursor-pointer', active ? 'border-selected bg-control' : 'border-control')}
               onClick={() => setBrush({ paintLayerId: layer.id })}>
               <div className='flex items-center gap-1'>
                 <span onClick={e => e.stopPropagation()}>
@@ -94,23 +94,23 @@ export default function LandscapeLayersPanel() {
                 </span>
                 <RenameField name={layer.name}
                   onCommit={name => edit('Rename layer', s => s.updatePaintLayer(layer.id, { name }))} />
-                <button className='px-1 text-xs text-muted hover:text-white disabled:opacity-30' title='Move up'
+                <Button variant='ghost' size='sm' className='px-1 disabled:opacity-30' title='Move up'
                   disabled={index === layers.length - 1}
-                  onClick={e => { e.stopPropagation(); edit('Move layer up', s => s.movePaintLayer(layer.id, index + 1)) }}>▲</button>
-                <button className='px-1 text-xs text-muted hover:text-white disabled:opacity-30' title='Move down'
+                  onClick={e => { e.stopPropagation(); edit('Move layer up', s => s.movePaintLayer(layer.id, index + 1)) }}>▲</Button>
+                <Button variant='ghost' size='sm' className='px-1 disabled:opacity-30' title='Move down'
                   disabled={index === 0}
-                  onClick={e => { e.stopPropagation(); edit('Move layer down', s => s.movePaintLayer(layer.id, index - 1)) }}>▼</button>
+                  onClick={e => { e.stopPropagation(); edit('Move layer down', s => s.movePaintLayer(layer.id, index - 1)) }}>▼</Button>
                 <span onClick={e => e.stopPropagation()}>
-                  <Popover align='right' title='Layer actions' trigger={<span className='px-1 text-xs'>⋯</span>}>
-                    <div data-cleo-overlay className='flex flex-col p-1 min-w-[140px] text-xs'>
-                      <MenuItem label='Fill' hint='Cover the whole landscape with this layer'
-                        onClick={() => edit('Fill layer', s => s.fillMask(layer.id, 1), [layer.channel])} />
-                      <MenuItem label='Clear' hint='Erase all of this layer'
-                        onClick={() => edit('Clear layer', s => s.fillMask(layer.id, 0), [layer.channel])} />
-                      <MenuItem label='Invert' hint='Painted becomes unpainted and back'
-                        onClick={() => edit('Invert layer', s => s.invertMask(layer.id), [layer.channel])} />
-                      <MenuItem label='Delete' danger hint='Remove the layer and its painting'
-                        onClick={() => edit('Delete layer', s => s.removePaintLayer(layer.id), [layer.channel])} />
+                  <Popover align='right' title='Layer actions' trigger={<span className='px-1 text-ui'>⋯</span>}>
+                    <div data-cleo-overlay className='flex flex-col p-1 min-w-[140px] text-ui'>
+                      <MenuItem title='Cover the whole landscape with this layer'
+                        onClick={() => edit('Fill layer', s => s.fillMask(layer.id, 1), [layer.channel])}>Fill</MenuItem>
+                      <MenuItem title='Erase all of this layer'
+                        onClick={() => edit('Clear layer', s => s.fillMask(layer.id, 0), [layer.channel])}>Clear</MenuItem>
+                      <MenuItem title='Painted becomes unpainted and back'
+                        onClick={() => edit('Invert layer', s => s.invertMask(layer.id), [layer.channel])}>Invert</MenuItem>
+                      <MenuItem danger title='Remove the layer and its painting'
+                        onClick={() => edit('Delete layer', s => s.removePaintLayer(layer.id), [layer.channel])}>Delete</MenuItem>
                     </div>
                   </Popover>
                 </span>
@@ -150,7 +150,7 @@ function RenameField({ name, onCommit }: { name: string; onCommit: (name: string
   useEffect(() => setValue(name), [name])
   const commit = () => { const v = value.trim(); if (v && v !== name) onCommit(v); else setValue(name) }
   return (
-    <TextInput className='flex-1 min-w-0 text-xs' value={value}
+    <TextInput className='flex-1 min-w-0' value={value}
       onChange={setValue}
       onClick={e => e.stopPropagation()}
       onBlur={commit}
@@ -158,28 +158,23 @@ function RenameField({ name, onCommit }: { name: string; onCommit: (name: string
   )
 }
 
-function MenuItem({ label, hint, onClick, danger }: { label: string; hint: string; onClick: () => void; danger?: boolean }) {
-  return (
-    <button className={`text-left px-2 py-1 rounded hover:bg-control-hover ${danger ? 'text-red-300' : 'text-white'}`}
-      title={hint} onClick={onClick}>{label}</button>
-  )
-}
-
 /** "+ Layer", with a picker of landscape materials so the new layer arrives with one. */
 export function AddLayerButton({ disabled, onAdd }: { disabled: boolean; onAdd: (asset: TerrainMaterialAsset | null) => void }) {
   const { terrainMaterials } = useCleoEngine()
   return (
-    <Popover align='right' disabled={disabled} title='Add a paint layer' trigger={<span className='text-xs px-1'>+ Layer</span>}>
-      <div data-cleo-overlay className='flex flex-col p-1 min-w-[180px] max-h-[260px] overflow-y-auto text-xs'>
+    <Popover align='right' disabled={disabled} title='Add a paint layer' trigger={<span className='text-ui px-1'>+ Layer</span>}>
+      <div data-cleo-overlay className='flex flex-col p-1 min-w-[180px] max-h-[260px] overflow-y-auto text-ui'>
         {terrainMaterials.map(m => (
-          <button key={m.id} className='flex items-center gap-2 text-left px-2 py-1 rounded hover:bg-control-hover' onClick={() => onAdd(m)}>
-            <span className='w-5 h-5 rounded overflow-hidden bg-surface-raised shrink-0'>
-              {m.thumbnail && <img src={m.thumbnail} className='w-full h-full object-cover' alt='' />}
-            </span>
-            <span className='truncate'>{m.name}</span>
-          </button>
+          <MenuItem key={m.id} className='items-center' onClick={() => onAdd(m)}
+            icon={
+              <span className='block w-5 h-5 rounded overflow-hidden bg-surface-raised'>
+                {m.thumbnail && <img src={m.thumbnail} className='w-full h-full object-cover' alt='' />}
+              </span>
+            }>
+            {m.name}
+          </MenuItem>
         ))}
-        <button className='text-left px-2 py-1 rounded hover:bg-control-hover text-muted' onClick={() => onAdd(null)}>Empty layer</button>
+        <MenuItem onClick={() => onAdd(null)}>Empty layer</MenuItem>
       </div>
     </Popover>
   )

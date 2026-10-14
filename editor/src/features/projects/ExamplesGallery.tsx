@@ -94,9 +94,9 @@ export default function ExamplesGallery({ examples, className = '' }: {
   }, [busySlug])
 
   return (
-    <div className={`w-full h-full flex flex-col text-sm ${className}`}>
+    <div className={`w-full h-full flex flex-col text-ui ${className}`}>
       <div className='h-[28px] flex items-center px-2 border-b border-border-subtle shrink-0 bg-surface-sunken'>
-        <span className='min-w-0 truncate text-[11px] text-dim'>
+        <span className='min-w-0 truncate text-ui-sm text-dim'>
           {busySlug ? 'Downloading…' : 'Click an example to add it as a new project'}
         </span>
       </div>
@@ -120,11 +120,11 @@ export default function ExamplesGallery({ examples, className = '' }: {
                 <Thumbnail entry={entry} />
               </div>
               <div className='flex flex-col gap-0.5 p-2 min-w-0'>
-                <span className='truncate text-[12px] font-semibold text-fg'>{entry.name}</span>
+                <span className='truncate text-ui font-semibold text-fg'>{entry.name}</span>
                 {entry.description && (
-                  <span className='line-clamp-2 text-[11px] leading-snug text-muted'>{entry.description}</span>
+                  <span className='line-clamp-2 text-ui-sm leading-snug text-muted'>{entry.description}</span>
                 )}
-                <span className='mt-0.5 text-[10px] text-dim'>
+                <span className='mt-0.5 text-ui-xs text-dim'>
                   {formatBytes(entry.bytes)} · {entry.sceneCount} scene{entry.sceneCount === 1 ? '' : 's'}
                 </span>
               </div>

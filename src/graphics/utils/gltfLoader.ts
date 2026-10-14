@@ -179,6 +179,8 @@ export type GltfImageSource =
 
 /** PBR material parameters plus indices into {@link GltfParseResult.images} — no texture ids, no GL. */
 export interface GltfMaterialDescriptor {
+    /** The glTF material's name. Assimp keeps the source's, so it names the FBX material it came from. */
+    name?: string;
     baseColor: [number, number, number];
     metallic: number;
     roughness: number;
@@ -227,6 +229,13 @@ export interface GltfParseResult {
     images: GltfImageSource[];
     skins: (Skin | undefined)[];
     animations: Animation[];
+    /**
+     * Images EMBEDDED in the source file that the conversion did not wire to any glTF material — an
+     * .fbx's normal and specular maps, say — by their authored file name. The assembler resolves the
+     * recovered texture slots against these before it looks among the uploaded files, so a map that
+     * was inside the model all along is never reported missing. Set by the importer, not this reader.
+     */
+    embedded?: { name: string; bytes: Uint8Array; mime: string }[];
 }
 
 export class GLTFLoader {
@@ -567,6 +576,7 @@ export class GLTFLoader {
             // 0.5 is the glTF default for MASK; 0 disables the cutout for every other alpha mode.
             alphaCutoff: gltfMaterial.alphaMode === 'MASK' ? (gltfMaterial.alphaCutoff ?? 0.5) : 0,
             textures,
+            name: gltfMaterial.name,
         };
     }
 
@@ -732,9 +742,11 @@ export class GLTFLoader {
 
     /** Buffers in `result` that can be transferred rather than copied across a worker boundary. */
     public static parseResultTransferables(result: GltfParseResult): ArrayBuffer[] {
-        const out: ArrayBuffer[] = [];
+        // A Set: one buffer can back several entries (an embedded image both bound to a glTF image and
+        // listed in `embedded`), and a transfer list naming a buffer twice is a DataCloneError.
+        const out = new Set<ArrayBuffer>();
         const add = (a?: { buffer: ArrayBufferLike; byteLength: number }) => {
-            if (a && a.byteLength > 0) out.push(a.buffer as ArrayBuffer);
+            if (a && a.byteLength > 0) out.add(a.buffer as ArrayBuffer);
         };
         for (const m of result.meshes) {
             add(m.geometry.positions); add(m.geometry.normals); add(m.geometry.uvs);
@@ -742,7 +754,8 @@ export class GLTFLoader {
             add(m.jointIndices); add(m.jointWeights);
         }
         for (const img of result.images) if (img.kind === 'bytes') add(img.bytes);
-        return out;
+        for (const img of result.embedded ?? []) add(img.bytes);
+        return [...out];
     }
 
     // Resolve a glTF texture reference to a TextureManager id: bufferView images, data URIs, uploaded

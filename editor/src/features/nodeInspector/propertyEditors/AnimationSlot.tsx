@@ -87,10 +87,10 @@ export default function AnimationSlot(props: { node: Node }) {
 
         {controller && controllerClips.length > 0 && (
           <div className='flex flex-col gap-1'>
-            <div className='text-[11px] text-muted'>Clip overrides (this character only)</div>
+            <div className='text-ui-sm text-muted'>Clip overrides (this character only)</div>
             {controllerClips.map(from => (
-              <div key={from} className='flex items-center gap-1 text-[11px]'>
-                <span className='w-[96px] truncate text-gray-300' title={from}>{from}</span>
+              <div key={from} className='flex items-center gap-1 text-ui-sm'>
+                <span className='w-[96px] truncate text-fg' title={from}>{from}</span>
                 <span className='text-muted'>→</span>
                 <Select className='flex-1 min-w-0' value={sm?.clipOverrides?.[from] ?? ''}
                   onChange={e => setOverride(from, e.target.value)}>

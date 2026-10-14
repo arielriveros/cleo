@@ -1,5 +1,6 @@
 import { isConditionGroup } from 'cleo'
 import type { Condition, ConditionGroup, ConditionNode, ConditionOp } from 'cleo'
+import { Button, cn, labelClass, NumberInput, OptionalNumberInput, SegmentedControl, Select } from './ui'
 
 /**
  * Recursive editor for an AND/OR condition tree — the animation state machine's, the behaviour state
@@ -38,9 +39,8 @@ const HYSTERESIS_HINT =
   + 'release until the value falls back through 0.8. Put the same band on the opposite condition (“< 1”) '
   + 'and the pair stops flipping every frame when the value hovers at 1. 0 or blank = off.'
 
-const input = 'bg-control text-white border border-control-hover rounded px-1 py-0.5 text-xs'
-const ghost = 'px-1.5 py-0.5 rounded border border-control-hover hover:bg-control text-xs'
-const danger = 'px-1.5 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white text-xs'
+/** Dense-row padding for the library controls (their default is px-2 py-1). */
+const tight = 'px-1 py-0.5'
 
 /** Index of the child at each level. The address of a node inside the tree. */
 export type CondPath = number[]
@@ -92,17 +92,12 @@ export default function ConditionTreeView({ params, node, onChange }: ConditionT
 /** The AND/OR gate toggle for one group. */
 function GateToggle({ op, onChange }: { op: 'and' | 'or'; onChange: (op: 'and' | 'or') => void }) {
   return (
-    <div className='flex rounded overflow-hidden border border-control-hover'>
-      {(['and', 'or'] as const).map(o => (
-        <button
-          key={o}
-          className={`px-1.5 py-0.5 text-[10px] uppercase ${o === op ? 'bg-primary text-white' : 'bg-control text-muted hover:bg-control-hover'}`}
-          title={o === 'and' ? 'Every child must match' : 'Any one child may match'}
-          onClick={() => onChange(o)}>
-          {o}
-        </button>
-      ))}
-    </div>
+    <SegmentedControl<'and' | 'or'>
+      size='sm' value={op} onChange={onChange} itemClassName='px-1.5 py-0.5 text-ui-xs uppercase'
+      options={[
+        { value: 'and', label: 'and', title: 'Every child must match' },
+        { value: 'or', label: 'or', title: 'Any one child may match' },
+      ]} />
   )
 }
 
@@ -123,12 +118,12 @@ function GroupBox({ params, root, path, onChange }: NodeProps) {
     <div className={isRoot ? 'flex flex-col gap-1' : 'flex flex-col gap-1 border-l-2 border-control-hover pl-1.5 ml-1 py-1'}>
       <div className='flex items-center gap-1'>
         <GateToggle op={node.op} onChange={op => patch({ ...node, op })} />
-        <span className='text-[10px] text-dim flex-1'>
+        <span className='text-ui-xs text-dim flex-1'>
           {node.children.length === 0
             ? 'empty — always matches'
             : node.op === 'and' ? 'all of:' : 'any of:'}
         </span>
-        {!isRoot && <button className={danger} title='Remove group' onClick={() => patch(null)}>✕</button>}
+        {!isRoot && <Button variant='remove' size='sm' title='Remove group' onClick={() => patch(null)}>✕</Button>}
       </div>
 
       {node.children.map((_, i) => (
@@ -136,19 +131,19 @@ function GroupBox({ params, root, path, onChange }: NodeProps) {
       ))}
 
       <div className='flex items-center gap-1'>
-        <button className={ghost} disabled={params.length === 0}
+        <Button size='sm' variant='subtle' disabled={params.length === 0}
           title={params.length === 0 ? 'Add a parameter first' : 'Add a condition to this group'}
           onClick={() => {
             const first = params[0]
             if (!first) return
             const condition: Condition = { param: first.name, op: OPS_FOR_TYPE[first.type][0] }
             patch({ ...node, children: [...node.children, condition] })
-          }}>+ Condition</button>
-        <button className={ghost} title={`Nest a ${node.op === 'and' ? 'OR' : 'AND'} group inside this one`}
+          }}>+ Condition</Button>
+        <Button size='sm' variant='subtle' title={`Nest a ${node.op === 'and' ? 'OR' : 'AND'} group inside this one`}
           onClick={() => patch({
             ...node,
             children: [...node.children, { op: node.op === 'and' ? 'or' : 'and', children: [] }],
-          })}>+ Group</button>
+          })}>+ Group</Button>
       </div>
     </div>
   )
@@ -165,8 +160,8 @@ function ConditionRow({ params, root, path, onChange }: NodeProps) {
   return (
     <div className='flex items-center gap-1'>
       {/* A condition on a parameter that no longer exists can never match — flag it rather than hide it. */}
-      <select
-        className={input + (param ? '' : ' border-red-500 text-red-300')}
+      <Select
+        className={cn(tight, !param && 'border-danger-border text-danger-fg')}
         value={node.param}
         onChange={e => {
           const next = params.find(p => p.name === e.target.value)
@@ -174,35 +169,32 @@ function ConditionRow({ params, root, path, onChange }: NodeProps) {
         }}>
         {!param && <option value={node.param}>{node.param || '(none)'} — missing</option>}
         {params.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
-      </select>
+      </Select>
 
-      <select className={input} value={node.op} onChange={e => patch({ op: e.target.value as ConditionOp })}>
+      <Select className={tight} value={node.op} onChange={e => patch({ op: e.target.value as ConditionOp })}>
         {OPS_FOR_TYPE[type].map(op => <option key={op} value={op}>{CONDITION_OP_LABEL[op]}</option>)}
-      </select>
+      </Select>
 
       {type === 'float' && (
-        <input className={input + ' w-[52px]'} type='number' step='0.1' value={node.value ?? 0}
+        <NumberInput className={cn(tight, 'w-[52px]')} step='0.1' value={node.value ?? 0}
           title='Threshold'
-          onChange={e => patch({ value: parseFloat(e.target.value) || 0 })} />
+          onChange={v => patch({ value: v })} />
       )}
 
       {/* The band, for the two operators that can chatter. A measured value sitting on a threshold
           satisfies `> x` and `< x` on alternating frames, so a machine with one of each flips state
           every frame. Centring the band is what pushes the two halves of such a pair apart. */}
       {(node.op === 'gt' || node.op === 'lt') && (
-        <label className='flex items-center gap-0.5 text-[10px] text-gray-400' title={HYSTERESIS_HINT}>
+        <label className={cn(labelClass, 'flex items-center gap-0.5 text-ui-xs')} title={HYSTERESIS_HINT}>
           ±
-          <input className={input + ' w-[46px]'} type='number' step='0.05' min='0' placeholder='0'
-            value={node.hysteresis ?? ''}
-            onChange={e => {
-              const raw = e.target.value.trim()
-              patch({ hysteresis: raw === '' ? undefined : Math.max(0, parseFloat(raw) || 0) })
-            }} />
+          <OptionalNumberInput className={cn(tight, 'w-[46px]')} placeholder='0'
+            value={node.hysteresis}
+            onChange={v => patch({ hysteresis: v === undefined ? undefined : Math.max(0, v) })} />
         </label>
       )}
 
-      <button className={danger} title='Remove condition'
-        onClick={() => onChange(patchConditionTree(root, path, null))}>✕</button>
+      <Button variant='remove' size='sm' title='Remove condition'
+        onClick={() => onChange(patchConditionTree(root, path, null))}>✕</Button>
     </div>
   )
 }

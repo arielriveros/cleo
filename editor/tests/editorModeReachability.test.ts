@@ -55,9 +55,13 @@ describe('every editor mode the UI offers is reachable', () => {
     expect(unreachable, `ModeSelector offers ${unreachable.join(', ')}, which MAIN_MODES does not include — the button would do nothing`).toEqual([]);
   });
 
-  it('input is one of them — the mode this test was written for', () => {
-    expect(mainModes()).toContain('input');
-    expect(selectedModes()).toContain('input');
+  // The mode this test was written for was Input; Input and Renderer have since folded into Options,
+  // which inherits the same requirement — and the retired names must stay out of the selector.
+  it('options is one of them, and the retired input/renderer modes are gone', () => {
+    expect(mainModes()).toContain('options');
+    expect(selectedModes()).toContain('options');
+    expect(selectedModes()).not.toContain('input');
+    expect(selectedModes()).not.toContain('renderer');
   });
 });
 

@@ -21,6 +21,7 @@ export type DebugCategory =
   | 'navMesh'
   | 'effects'
   | 'particles'
+  | 'gameUi'
   | 'grid';
 
 export type DebugChannel = 'editor' | 'runtime';
@@ -58,6 +59,9 @@ export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
   // Not an overlay: whether particle systems SIMULATE while authoring, like Niagara's realtime toggle.
   // Editor only — a playing game always simulates them.
   { key: 'particles', label: 'Preview particles', runtimeAvailable: false },
+  // The game's UI nodes over the viewport. Off while authoring the scene, where a HUD only hides the world
+  // being edited; always on in UI mode (the subject there) and in Play (the game draws its own UI).
+  { key: 'gameUi', label: 'Game UI', runtimeAvailable: false },
   // Runtime-capable even though the grid is renderer chrome rather than a scene node: EngineContext's
   // reconcile asserts `setGridVisible` from whichever channel is in force, so Play honours this switch.
   { key: 'grid', label: 'Reference grid', runtimeAvailable: true },

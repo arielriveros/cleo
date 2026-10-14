@@ -38,7 +38,7 @@ export default function TransformEditor(props: {node: Node}) {
 
   return (
     <Collapsable title='Transform' icon={<TransformIcon />} persistKey='transform'>
-      <div className='w-full text-white p-2'>
+      <div className='w-full text-fg p-2'>
         <PropertyTable columns={['28%', '72%']}>
           <PropertyRow label='Position'>
             <VectorInput step={0.01} reset={[0, 0, 0]} value={[position[0], position[1], position[2]]} onChange={(v) => changePosition(v as any)} />

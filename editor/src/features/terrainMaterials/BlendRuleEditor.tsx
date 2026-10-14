@@ -1,5 +1,5 @@
 import type { TerrainBlendRule, TerrainRuleRange } from 'cleo'
-import { Hint, NumberInput, Slider, Toggle } from '../../components/ui'
+import { Hint, NumberInput, Slider, Toggle, labelClass } from '../../components/ui'
 
 // The editor for one blend rule — where a landscape-material surface appears. Four independent tests,
 // multiplied: elevation, slope, the noise that breaks their edges up, and a plain opacity. A disabled test
@@ -9,7 +9,7 @@ import { Hint, NumberInput, Slider, Toggle } from '../../components/ui'
 // ORIGIN (so moving a landscape does not move its snow line) and degrees of slope (0 flat, 90 vertical).
 
 const row = 'flex items-center justify-between gap-2'
-const label = 'text-xs text-slate-300'
+const label = labelClass
 
 export interface BlendRuleEditorProps {
   rule: TerrainBlendRule

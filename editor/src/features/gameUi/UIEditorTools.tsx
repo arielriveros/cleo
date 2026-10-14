@@ -174,13 +174,12 @@ export default function UIEditorTools() {
     return (
         <div data-cleo-overlay className='absolute inset-0 pointer-events-none'>
             <div
-                className='absolute'
+                className='absolute outline outline-1 outline-node-ui'
                 style={{
                     left: rect.x, top: rect.y, width: rect.width, height: rect.height,
                     // Only the frame is hittable, so a click on empty space reaches the UI layer below.
                     pointerEvents: 'auto',
                     cursor: 'move',
-                    outline: '1px solid rgb(var(--node-ui))',
                 }}
                 onPointerDown={e => onPointerDown(e, null)}
                 onPointerMove={onPointerMove}
@@ -193,7 +192,7 @@ export default function UIEditorTools() {
                 return (
                     <div
                         key={grip.key}
-                        className='absolute rounded-[1px] border border-white bg-node-ui'
+                        className='absolute rounded-[1px] border border-fg bg-node-ui'
                         style={{
                             left: gx - half, top: gy - half, width: GRIP_SIZE, height: GRIP_SIZE,
                             pointerEvents: 'auto', cursor: grip.cursor,

@@ -534,6 +534,16 @@ export class AnimatedModel {
             // Bone data needs its own buffers: the indices are integers, not floats.
             const vertices = this._geometry.getData(['position', 'normal', 'uv', 'tangent', 'bitangent']);
 
+            // Joint data must describe exactly these vertices. A mismatch used to be absorbed silently (the
+            // loop below reads whatever is there), and it is what an import that welded the mesh without
+            // carrying the skin through produced: a model that looks right in the bind pose and tears
+            // apart as soon as a clip plays. Warn rather than throw — a project saved before the fix
+            // still has to open — and say what fixes it.
+            const expected = vertexCount * 4;
+            if ((this._jointIndices && this._jointIndices.length !== expected) || (this._jointWeights && this._jointWeights.length !== expected))
+                Logger.warn(`Skinned mesh has joint data for ${(this._jointIndices?.length ?? 0) / 4} vertices but ${vertexCount} vertices: `
+                    + `its skinning will be wrong when animated. Re-import the model.`, 'Animation');
+
             // Create bone indices array (4 per vertex)
             const boneIndices: number[] = [];
             const boneWeights: number[] = [];

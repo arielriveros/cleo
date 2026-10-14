@@ -38,7 +38,9 @@ const OLD_DOCK_LAYOUT_KEYS = [
 // 17 has them tabbed behind Properties where the material slots could not be found.
 // 19: the particle-system mode arrived with a transport panel of its own in the bottom strip; a tree
 // stored at 18 has no `particleTransport` and no arrangement for the mode.
-const LAYOUT_VERSION = 19;
+// 20: Renderer and Input modes folded into one Options mode with Engine / Editor / Project panels; a
+// tree stored at 19 has the retired panels and no arrangement for the new ones.
+const LAYOUT_VERSION = 20;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -106,11 +108,11 @@ const LANDSCAPE_PANELS = ['landscapeTools', 'landscapeLayers'] as const;
 /** The two Add palettes, stacked as tabs above the Scene tree. Ordinary chrome, shown wherever the tree is. */
 const ADD_PANELS = ['sceneAdd', 'uiAdd'] as const;
 
-/** Renderer-mode panels: the performance readout and the render settings. Shown only there. */
-const RENDERER_PANELS = ['performance', 'rendererSettings'] as const;
-
-/** Input-mode panel: the action map editor. Shown only there, the same way RENDERER_PANELS are. */
-const INPUT_PANELS = ['inputMap'] as const;
+/**
+ * Options-mode panels: engine (renderer, performance, runtime), editor (preferences) and project (general,
+ * input map). Shown only there, over the live viewport, with every other panel hidden.
+ */
+const OPTIONS_PANELS = ['optionsEngine', 'optionsEditor', 'optionsProject'] as const;
 
 
 const CHROME_PANELS = [
@@ -129,8 +131,7 @@ const PANEL_TITLES: Record<string, string> = {
   particleTransport: 'Particle Preview',
   tilePalette: 'Tiles', tilemapLayers: 'Layers',
   landscapeTools: 'Landscape Tools', landscapeLayers: 'Landscape Layers',
-  performance: 'Performance', rendererSettings: 'Renderer Settings',
-  inputMap: 'Input',
+  optionsEngine: 'Engine', optionsEditor: 'Editor', optionsProject: 'Project',
 };
 
 function panelTitle(id: string, mode: EditorMode): string {
@@ -214,7 +215,7 @@ function buildDefaultLayout(api: DockviewApi) {
   });
   // Docked with Properties on the right rail. None of these is in CHROME_PANELS, so they survive into
   // the mode that owns them, where the rest of that tab strip is hidden.
-  for (const id of [...RENDERER_PANELS, ...INPUT_PANELS]) {
+  for (const id of OPTIONS_PANELS) {
     api.addPanel({
       id, component: id, title: PANEL_TITLES[id],
       position: { referencePanel: 'properties', direction: 'within' },
@@ -312,14 +313,12 @@ function relayout(api: DockviewApi) {
  * a new mode-specific group cannot leak into unrelated modes.
  */
 function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
-  // Renderer mode is the only branch that keeps the renderer panels.
-  if (mode === 'renderer') return [...CHROME_PANELS, ...INPUT_PANELS];
-  // Input mode likewise keeps only its own panel over the live viewport.
-  if (mode === 'input') return [...CHROME_PANELS, ...RENDERER_PANELS];
+  // Options mode is the only branch that keeps the options panels, alone over the live viewport.
+  if (mode === 'options') return CHROME_PANELS;
   // Play strips the chrome AND every mode-specific panel.
-  if (playing) return [...CHROME_PANELS, ...RENDERER_PANELS, ...INPUT_PANELS];
+  if (playing) return [...CHROME_PANELS, ...OPTIONS_PANELS];
 
-  const hidden = new Set<string>([...RENDERER_PANELS, ...INPUT_PANELS]);
+  const hidden = new Set<string>(OPTIONS_PANELS);
 
   // Mode-specific panels: hidden everywhere, revealed by the single mode that owns them.
   if (mode !== 'stateMachine') for (const id of STATE_MACHINE_PANELS) hidden.add(id);
@@ -503,6 +502,8 @@ export default function DockLayout() {
         const tools = api.getPanel('landscapeTools');
         if (tools && tools.group?.activePanel?.id !== 'landscapeTools') tools.api.setActive();
       }
+      // Options opens on Engine the first time; a saved Options tree remembers the tab that was up.
+      if (editorMode === 'options' && !restored) api.getPanel('optionsEngine')?.api.setActive();
       relayout(api); // opening/closing panels moves the always-rendered viewport and logger
     });
     keyRef.current = editorMode;

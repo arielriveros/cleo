@@ -51,7 +51,8 @@ describe('socket resolution', () => {
         const s = skin();
         expect(socketJoint(s, 'RightHandSocket')).toBe(1);
         expect(socketJoint(s, 'Ghost')).toBe(-1);
-        expect(socketNames(s)).toEqual(['RightHandSocket']);
+        // Plus the implicit humanoid one: a bone named RightHand answers to `RightHand` unauthored.
+        expect(socketNames(s)).toEqual(['RightHandSocket', 'RightHand']);
     });
 
     it('places the socket where the bone is, but without the armature scale', () => {
@@ -75,7 +76,7 @@ describe('ModelNode sockets', () => {
         const node = skinnedModelNode('character');
         node.setPosition([5, 0, 0]);
         node.updateTransforms();
-        expect(node.socketNames).toEqual(['RightHandSocket']);
+        expect(node.socketNames).toEqual(['RightHandSocket', 'RightHand']);
         const world = node.getSocketWorldMatrix('RightHandSocket')!;
         expect(translationOf(world)[0]).toBeCloseTo(5.1, 5);
         expect(translationOf(world)[1]).toBeCloseTo(1, 5);
@@ -131,3 +132,63 @@ describe('socket followers', () => {
         expect(parent.children[0].socketAttachment).toEqual({ target: 'parent', socket: 'RightHandSocket' });
     });
 });
+
+// ----- a model swapped for another rig ------------------------------------------------------------------
+
+/** A humanoid skin with Unreal-style bone names and NO authored sockets. */
+function ueSkin(sockets: Skin['sockets'] = []): Skin {
+    const id = mat4.create();
+    return {
+        joints: [0, 1, 2, 3].map(i => ({ nodeIndex: i, inverseBindMatrix: mat4.create(), parentIndex: i ? 0 : undefined })),
+        nodeParents: new Map([[1, 0], [2, 0], [3, 0]]),
+        nodeTransforms: new Map([[0, id], [1, id], [2, id], [3, id]]),
+        nodeNames: new Map([[0, 'pelvis'], [1, 'hand_r'], [2, 'hand_l'], [3, 'head']]),
+        sockets,
+    };
+}
+
+describe('implicit humanoid sockets', () => {
+    it('gives any humanoid rig RightHand, LeftHand and Head with nothing authored', () => {
+        const s = ueSkin();
+        expect(socketJoint(s, 'RightHand')).toBe(1);
+        expect(socketJoint(s, 'LeftHand')).toBe(2);
+        expect(socketJoint(s, 'Head')).toBe(3);
+    });
+
+    it('lets an authored socket of the same name win — that is how a grip offset is given', () => {
+        const s = ueSkin([{ name: 'RightHand', bone: 'hand_l' }]);
+        expect(socketJoint(s, 'RightHand')).toBe(2);
+    });
+
+    it('invents nothing on a skeleton that is not a humanoid', () => {
+        const s = ueSkin();
+        s.nodeNames = new Map([[0, 'Root'], [1, 'Tail_01'], [2, 'Tail_02'], [3, 'Jaw']]);
+        expect(socketNames(s)).toEqual([]);
+    });
+});
+
+describe('socket owners stay within the character', () => {
+    it('never pins a weapon to ANOTHER character’s hand when its own model has none', () => {
+        const scene = new Scene();
+        // A knight that still has a hand socket, and a player whose model has none.
+        const knight = new Node('Knight', 'character');
+        knight.addChild(skinnedModelNode('KnightBody'));
+        scene.addNode(knight);
+        const player = new Node('Player', 'character');
+        const plain = ueSkin();
+        plain.nodeNames = new Map([[0, 'Root'], [1, 'Bone1'], [2, 'Bone2'], [3, 'Bone3']]);
+        const model = Object.create(AnimatedModel.prototype);
+        model._skin = plain;
+        model._animations = [];
+        player.addChild(new ModelNode('PlayerBody', model));
+        const weapons = new Node('Weapons');
+        player.addChild(weapons);
+        scene.addNode(player);
+        const sword = new Node('Sword');
+        weapons.addChild(sword);
+        sword.attachToSocket('parent', 'RightHand');
+        // Before: the climb reached the scene root and found the knight's RightHand.
+        expect(resolveSocketOwner(sword, sword.socketAttachment!, id => scene.getNodeById(id) ?? null)).toBeNull();
+    });
+});
+

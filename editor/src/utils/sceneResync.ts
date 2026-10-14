@@ -1,7 +1,8 @@
 import { Scene, Node, CameraNode, isInlineTilesetId } from 'cleo'
 import { getMaterialIdsOf, applyMaterialAsset, unlinkMaterialAt, MaterialAsset } from './materials'
 import { getScreenMaterialIds, setScreenMaterialIds, applyScreenMaterials } from './screenMaterials'
-import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig, assetSockets, applyModelTransformDelta, readModelBaseTrs, modelAssetHasLodBehavior } from './models'
+import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig, assetSockets, applyModelTransformDelta, readModelBaseTrs, modelAssetHasLodBehavior, modelInstanceShape } from './models'
+import { detachForeignChildren, reattachForeignChildren, type ShapeNode } from './foreignChildren'
 import { TEMPLATE_ID_VAR, instantiateTemplate } from './templates'
 import { applyOverrides } from './templateOverrides'
 import { applyTerrainMaterialToLayer } from './terrainMaterials'
@@ -54,6 +55,13 @@ export function reinstantiate(
   /** Runs once the rebuilt node has its transform, spawn flag and variables back. `prev` is the detached
    *  original, still readable — where a per-instance baseline like MODEL_BASE_TRS_VAR lives. */
   onRebuilt?: (rebuilt: Node, prev: Node) => void,
+  /**
+   * For a MODEL rebuild: the tree the asset instantiates as (`modelInstanceShape`). Nodes the user added
+   * inside the old copy that the asset does not produce are carried over to the rebuilt one instead of
+   * being discarded with it — see foreignChildren.ts. A template rebuild passes nothing: its instances are
+   * read-only, and everything in them comes from the template.
+   */
+  assetShape?: ShapeNode,
 ): Node | null {
   const parent = inst.parent
   if (!parent) return null
@@ -67,6 +75,8 @@ export function reinstantiate(
   // `instantiateModelAsset` overwrites the clone's `variables` wholesale, taking the placement's
   // `__scriptId`, `__templateId` and every authored variable with it.
   const variables = new Map(inst.variables)
+  // Out of the old tree BEFORE its map entries are dropped and its GPU buffers freed: these survive.
+  const foreign = assetShape ? detachForeignChildren(inst, assetShape) : []
   // Drop the old subtree's out-of-band data so map entries do not leak.
   for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id) }
   // removeChild detaches synchronously; Node.remove() only marks and its deferred sweep mis-splices.
@@ -85,6 +95,7 @@ export function reinstantiate(
       newNode.setVariable(name, v.value, v.type, v.access)
     }
     restoreAnimationState(newNode, animation)
+    reattachForeignChildren(newNode, foreign)
     // The placement's own name and script values, recorded as overrides (templateOverrides.ts). The
     // variable restore above has just put the record back; this puts the values back.
     applyOverrides(newNode)
@@ -170,7 +181,8 @@ export function resyncScene(
         // has to go back on top. A LOD-wrapped asset carries that on the wrapper's child and needs no delta.
         (rebuilt, prev) => {
           if (!modelAssetHasLodBehavior(asset)) applyModelTransformDelta(rebuilt, readModelBaseTrs(prev), asset.nodeJson)
-        }) ?? node
+        },
+        modelInstanceShape(asset, libs.models)) ?? node
       changed = true
     }
     // The ASSET owns the IK rig, so re-apply it whatever the hash says — a template bakes its own copy of

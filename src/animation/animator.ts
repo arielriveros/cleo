@@ -6,7 +6,7 @@ import {
 } from './animationField';
 import { clamp, dampTime, dampWrapped, decomposeTRS, wrapSpan } from '../core/math';
 import { skeletonTopology, SkeletonTopology, isAncestorJoint } from './skeletonTopology';
-import { solveTwoBone, ikTuning, validateIkRig, swingReleaseWeight, IkFootChain, IkRig, IkRigValidation } from './ik';
+import { solveTwoBone, kneePole, ikTuning, validateIkRig, swingReleaseWeight, IkFootChain, IkRig, IkRigValidation } from './ik';
 import { Node } from '../core/scene/nodes/node';
 import { ModelNode } from '../core/scene/nodes/modelNode';
 import { canAccessVariable } from '../core/scene/nodes/nodeVariables';
@@ -2016,6 +2016,12 @@ export class Animator {
         vec3.sub(up, up, originModel);
         if (vec3.length(up) < 1e-8) return false;
         vec3.normalize(up, up);
+        // The character's facing in MODEL space, flattened onto the ground plane: where a knee should point
+        // when the clip itself does not say (a leg animated near-straight has no bend plane of its own).
+        // A node faces its local +Z (Node.worldForward), and model space IS the node's local space.
+        const forward = vec3.fromValues(0, 0, 1);
+        vec3.scaleAndAdd(forward, forward, up, -vec3.dot(forward, up));
+        if (vec3.length(forward) > 1e-8) vec3.normalize(forward, forward);
 
         const ownBody = this._nearestBodiedNode()?.body ?? null;
 
@@ -2116,14 +2122,15 @@ export class Animator {
         const hipsLocal = checked.hips !== undefined ? localTransforms.get(checked.hips) : undefined;
         if (hipsLocal && this._ikHipOffset !== 0) {
             // Applied to the hips' LOCAL translation, so ordinary accumulation carries it down the skeleton.
-            const hipsJoint = topo.jointOfNode.get(checked.hips!);
-            const parentJoint = hipsJoint !== undefined ? topo.parentJoint[hipsJoint] : -1;
             const shift = vec3.scale(vec3.create(), up, this._ikHipOffset);
-            if (parentJoint >= 0) {
-                const parentGlobal = globalTransforms.get(this._skin!.joints[parentJoint].nodeIndex);
-                if (parentGlobal) {
-                    const inv = mat4.create();
-                    mat4.invert(inv, parentGlobal);
+            // Into the frame the hips' LOCAL lives in — the parent joint AND any non-joint wrappers between
+            // (a Mixamo `Armature` at 0.01 scale, rotated Z-up to Y-up). Skipping the wrappers turned a
+            // model-space drop into a hundredth of a step sideways: the pelvis never lowered, so the foot
+            // over the lower ground stayed straight and hovering while the other knee bent.
+            const parentFrame = this._parentFrameOf(checked.hips!, localTransforms, globalTransforms, topo);
+            if (parentFrame) {
+                const inv = mat4.create();
+                if (mat4.invert(inv, parentFrame)) {
                     // A direction, so the parent's translation must not come with it.
                     const o = vec3.transformMat4(vec3.create(), vec3.create(), inv);
                     vec3.transformMat4(shift, shift, inv);
@@ -2140,10 +2147,38 @@ export class Animator {
 
         // ---- Pass 3: solve each leg --------------------------------------------------------------------
         for (const plan of active) {
-            this._solveLeg(plan.chain, plan.target, plan.normal, plan.weight, up, tuning,
+            this._solveLeg(plan.chain, plan.target, plan.normal, plan.weight, up, forward, tuning,
                 localTransforms, globalTransforms, topo);
         }
         return true;
+    }
+
+    /**
+     * The model-space frame a joint's LOCAL transform is expressed in: its parent joint's global times every
+     * non-joint node between them (`parentChain`), exactly as `_reaccumulate` builds it. Null for a joint
+     * with neither — its local IS model space.
+     */
+    private _parentFrameOf(
+        nodeIndex: number,
+        localTransforms: Map<number, mat4>,
+        globalTransforms: Map<number, mat4>,
+        topo: SkeletonTopology,
+    ): mat4 | null {
+        const jointIndex = topo.jointOfNode.get(nodeIndex);
+        if (jointIndex === undefined) return null;
+        const parentJoint = topo.parentJoint[jointIndex];
+        const chain = topo.parentChain[jointIndex] ?? [];
+        if (parentJoint < 0 && chain.length === 0) return null;
+        const frame = mat4.create();
+        if (parentJoint >= 0) {
+            const parentGlobal = globalTransforms.get(this._skin!.joints[parentJoint].nodeIndex);
+            if (parentGlobal) mat4.copy(frame, parentGlobal);
+        }
+        for (const chainNode of chain) {
+            const chainLocal = localTransforms.get(chainNode) ?? this._skin!.nodeTransforms?.get(chainNode);
+            if (chainLocal) mat4.multiply(frame, frame, chainLocal);
+        }
+        return frame;
     }
 
     /** Re-run the parent-to-child accumulation in place. Cheap: one matrix multiply per joint. */
@@ -2179,6 +2214,7 @@ export class Animator {
         normal: vec3,
         weight: number,
         up: vec3,
+        forward: vec3,
         tuning: ReturnType<typeof ikTuning>,
         localTransforms: Map<number, mat4>,
         globalTransforms: Map<number, mat4>,
@@ -2195,7 +2231,8 @@ export class Animator {
         // Ease by the foot's weight rather than snapping: ikWeight = 0 is exactly the animated pose.
         const eased = vec3.lerp(vec3.create(), ankle, target, weight);
 
-        const solve = solveTwoBone({ root: hip, mid: knee, tip: ankle, target: eased });
+        const solve = solveTwoBone({ root: hip, mid: knee, tip: ankle, target: eased,
+                                     pole: kneePole(hip, knee, ankle, forward) });
         this._rotateGlobal(chain.thigh, solve.rootDelta, localTransforms, globalTransforms, topo);
         this._reaccumulate(localTransforms, globalTransforms, topo);
         this._rotateGlobal(chain.shin, solve.midDelta, localTransforms, globalTransforms, topo);
@@ -2242,12 +2279,9 @@ export class Animator {
 
         const newGlobal = mat4.multiply(mat4.create(), around, global);
 
-        const jointIndex = topo.jointOfNode.get(nodeIndex);
-        const parentJoint = jointIndex !== undefined ? topo.parentJoint[jointIndex] : -1;
-        const parentNode = jointIndex !== undefined ? topo.parentNode[jointIndex] : undefined;
-        const parentGlobal = parentJoint >= 0
-            ? globalTransforms.get(this._skin!.joints[parentJoint].nodeIndex)
-            : parentNode !== undefined ? globalTransforms.get(parentNode) : undefined;
+        // The frame the LOCAL lives in, wrappers included — must match `_reaccumulate`, or the rotation is
+        // written in one frame and read back in another.
+        const parentGlobal = this._parentFrameOf(nodeIndex, localTransforms, globalTransforms, topo);
 
         const local = mat4.create();
         if (parentGlobal) {

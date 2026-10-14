@@ -7,7 +7,7 @@ import type { TerrainMaterialSlot } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
 import BlendRuleEditor from './BlendRuleEditor'
-import { Button, Hint, NumberInput, Toggle } from '../../components/ui'
+import { Button, Hint, NumberInput, Select, TextInput, Toggle, cn, hintClass, labelClass } from '../../components/ui'
 import { useAssetDrop } from '../../utils/useAssetDrop'
 import type { MaterialAsset } from '../../utils/materials'
 
@@ -100,37 +100,37 @@ function SlotRow(props: {
   const { dragOver, dropProps } = useAssetDrop('text/cleo-material', link, { stopPropagation: true })
 
   return (
-    <div {...dropProps} className={`rounded border p-2 space-y-2 ${dragOver ? 'border-selected bg-control' : 'border-control'}`}>
+    <div {...dropProps} className={cn('rounded border p-2 space-y-2', dragOver ? 'border-selected bg-control' : 'border-control')}>
       <div className='flex items-center gap-1'>
         {/* Painted in order: a slot lower in the list is covered by the ones under it in the panel. */}
-        <span className='text-[10px] text-muted w-4 text-center' title='Blend order: later slots draw over earlier ones'>{props.index + 1}</span>
-        <input className='flex-1 min-w-0 bg-control text-white border border-border rounded px-1 py-[2px] text-xs'
-          value={slot.name} onChange={e => { slot.name = e.target.value; props.onChange() }} />
+        <span className='text-ui-xs text-muted w-4 text-center' title='Blend order: later slots draw over earlier ones'>{props.index + 1}</span>
+        <TextInput className='flex-1 min-w-0 px-1 py-0.5'
+          value={slot.name} onChange={v => { slot.name = v; props.onChange() }} />
         <Button size='sm' variant='ghost' title='Move up (drawn earlier)' disabled={props.index === 0} onClick={() => props.onMove(-1)}>↑</Button>
         <Button size='sm' variant='ghost' title='Move down (drawn later)' disabled={props.index === props.count - 1} onClick={() => props.onMove(1)}>↓</Button>
         <Button size='sm' variant='ghost' title='Duplicate this slot' onClick={props.onDuplicate}>⧉</Button>
-        <Button size='sm' variant='ghost' title='Remove this slot' onClick={props.onRemove}>✕</Button>
+        <Button variant='remove' size='sm' title='Remove this slot' onClick={props.onRemove}>✕</Button>
       </div>
 
       <div className='flex items-center gap-1'>
-        <select className='flex-1 min-w-0 bg-control text-white border border-border rounded px-1 py-[2px] text-xs'
+        <Select className='flex-1 min-w-0 px-1 py-0.5'
           value={slot.surfaceMaterialId ?? ''} onChange={e => { if (e.target.value) link(e.target.value) }}
           title='The Material asset this surface draws — drop one here too'>
           <option value=''>{asset ? asset.name : slot.surfaceMaterialId ? '(missing material)' : '(unlinked surface)'}</option>
           {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select>
+        </Select>
         {asset && <Button size='sm' variant='ghost' title='Edit that material' onClick={() => enterMaterialEditor(asset.id)}>✎</Button>}
       </div>
       {slot.surfaceMaterialId && !asset &&
-        <p className='text-[10px] text-warning'>The linked material is missing from the library; this slot’s copy still draws.</p>}
+        <p className={cn(hintClass, 'text-warning')}>The linked material is missing from the library; this slot’s copy still draws.</p>}
 
       <div className='flex items-center justify-between gap-2'>
-        <span className='text-xs text-slate-300' title='UV repeats across the whole landscape, like the material’s own tiling'>Tiling</span>
+        <span className={labelClass} title='UV repeats across the whole landscape, like the material’s own tiling'>Tiling</span>
         <NumberInput className='w-16' value={slot.tiling} min={0.01} step={1}
           onChange={v => { slot.tiling = Math.max(0.01, v); props.onChange() }} />
       </div>
       <div className='flex items-center justify-between gap-2'>
-        <span className='text-xs text-slate-300' title='Let the foliage brush scatter where this slot dominates — off for rock and roads'>Allow foliage</span>
+        <span className={labelClass} title='Let the foliage brush scatter where this slot dominates — off for rock and roads'>Allow foliage</span>
         <Toggle checked={slot.allowFoliage} onChange={c => { slot.allowFoliage = c; props.onChange() }} />
       </div>
 
@@ -144,11 +144,11 @@ function AddSlot({ disabled, onAdd }: { disabled: boolean; onAdd: (asset?: Mater
   const [pick, setPick] = useState('')
   return (
     <div className='flex gap-1'>
-      <select className='flex-1 min-w-0 bg-control text-white border border-border rounded px-1 py-[2px] text-xs'
+      <Select className='flex-1 min-w-0 px-1 py-0.5'
         value={pick} disabled={disabled} onChange={e => setPick(e.target.value)}>
         <option value=''>(empty surface)</option>
         {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-      </select>
+      </Select>
       <Button size='sm' variant='success' disabled={disabled}
         title='Add a surface blended over this material by its own rule'
         onClick={() => { onAdd(materials.find(m => m.id === pick)); setPick('') }}>Add slot</Button>

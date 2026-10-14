@@ -92,25 +92,50 @@ The **game loop**:
 ## 4. How the scripts fit together
 
 All scripts live in `examples/scripts/Souls*.ts` and are installed in the project as Script assets.
-Pure helpers (`num`, `yawTo`, `angleDiff`, …) live in the **SoulsMath** script module, which the
-others import with `import { yawTo } from './SoulsMath'`. Game state flows through the
-**GameManager** and through node names:
+Pure helpers (`num`, `yawTo`, `statBonus`, …) live in the **SoulsMath** script module, which the
+others import with `import { yawTo } from './SoulsMath'`.
+
+**Every node owns its own data.** The player owns its attributes, HP, stamina, flasks and the curves
+between them; each enemy type owns its stats; each weapon owns its numbers, its hitbox, its moveset and
+the maths that turns a swing into damage. Damage goes from the weapon straight to the target's
+`receiveHit`, where the target applies its own defence. The GameManager owns no one's data: it is the
+**world** — who is registered, where you respawn, what a death does, the boss fight, sounds and effects.
+
+Shared behaviour is **inherited**, not copied: a base script holds what a family has in common, and each
+member is a script that `extends` it and changes only what differs.
+
+```
+SoulsCharacter            hp, defence, team, receiveHit, weapons spawned from templates
+├── SoulsPlayer           attributes, stamina, flasks, stat curves, the action state machine
+└── SoulsEnemy            poise, spacing, attack choice, reactions, death
+    ├── SoulsHollow             (only its stats)
+    ├── SoulsHollowSorcerer     (only its stats)
+    ├── SoulsEliteKnight        (only its stats)
+    └── SoulsHollowWarden       its stats + its phase two
+
+SoulsWeapon               stats, blade hitbox, moves, attackRating, strike
+├── SoulsStraightSword  ├── SoulsGreatsword  ├── SoulsClub  ├── SoulsStaff  └── SoulsHalberd
+```
 
 | Script | Node | Role |
 |---|---|---|
-| `SoulsGameManager` | `GameManager` | Balance rules: HP and stamina curves, attack rating, level cost, attack choice, lock ranking.<br>Registries of enemies, interactables and spawns.<br>Rest, death and respawn, bloodstains, the boss fight.<br>`sfx()`, `fx()`, banners, notices. |
-| `SoulsPlayer` | `Player` (Character) | Stats, HP, stamina and Estus.<br>The action state machine (free, attack, roll, backstep, drink, swap, hit, rest, fog, dead) with input buffering.<br>Interact prompt. |
-| `SoulsLockOn` | `Player/camera rig` | Orbit camera plus target lock, switching and the reticle. |
-| `SoulsWeapon`, `SoulsMove` | `Player/Weapons/*` | A weapon's stats, plus one child node per attack. |
-| `SoulsEnemy` | every enemy template root | HP, poise, flinch and stagger, spacing and strafing, attack choice, the boss phase, death. |
+| `SoulsGameManager` | `GameManager` | Registries of enemies, interactables and spawns, and which node is the boss.<br>Rest, death and respawn, bloodstains, the boss fight.<br>`sfx()`, `fx()`, `bleed()`, banners, notices. |
+| `SoulsCharacter` | (base class) | HP, `defense`, `team`, the one `receiveHit` every attack goes through, and the weapons: spawned from the templates named in `weaponTemplates`, into the hand. |
+| `SoulsPlayer` | `Player` (Character) | Attributes, stamina and Estus, and the curves `hpForVigor`, `staminaForEndurance`, `levelFor`, `levelCost`.<br>The action state machine (free, attack, roll, backstep, drink, swap, hit, rest, fog, dead) with input buffering.<br>Interact prompt. |
+| `SoulsLockOn` | `Player/camera rig` | Orbit camera plus target lock (`rankLockTargets`), switching and the reticle. |
+| `SoulsWeapon` + one subclass per weapon | each **weapon template**'s root | The weapon's stats (its subclass's defaults), blade hitbox, `attackRating`, `strike`. |
+| `SoulsMove` | weapon template children | One player attack per node: its clip, timing, stamina and damage multiplier. |
+| `SoulsEnemy` + one subclass per type | each **enemy template**'s root | Poise, flinch and stagger, spacing and strafing, attack choice (`pickAttack`), death. The type's stats are its subclass's defaults; the Warden's subclass adds its phase two. |
 | `SoulsEnemyAttack` | `<enemy>/Attacks/*` | One enemy attack per node. |
-| `SoulsEnemyBrain` | `<enemy>/Brain` (last child) | Player-only targeting (the engine has no factions), plus blackboard flags for the behaviour machine. |
+| `SoulsEnemyBrain` | `<enemy>/Brain` (last child) | Player-only targeting (the engine has no factions) and the enemy's home point. Every decision is the type's AI graph — see below. |
 | `SoulsEnemySpawn` | `Enemy Spawns/*` | Instantiates a template, and re-creates it on rest or death. |
 | `SoulsProjectile` | `Magic Bolt` template | Swept-sphere flight against hurtboxes, plus a ray against the world; a roll's i-frames let you pass through. |
 | `SoulsHitbox` | script module | Blade hitboxes, hurtboxes and swing blockers, shared by the player, the enemies and the bolt. See **Combat** below. |
 | `SoulsFx` | effect templates | Bursts its particles, fades its lights, then removes itself. |
 | `SoulsBonfire`, `SoulsPickup`, `SoulsBloodstain`, `SoulsMessage`, `SoulsLever`, `SoulsDoor`, `SoulsFogGate` | interactables | Each one follows the **interactable protocol** below. |
-| `SoulsHud`, `SoulsBanner`, `SoulsBonfireMenu` | UI roots | The HUD, the big banners, and the level-up menu. |
+| `SoulsHud`, `SoulsBonfireMenu` | `Player/HUD`, `Player/BonfireMenu` | The player's HUD and level-up menu — children of the player, reading the player. |
+| `SoulsBossBar` | `Hollow Warden/BossBar` | The boss's health bar — a child of the boss, shown while its owner is awake and alive. |
+| `SoulsBanner` | `GameManager/Banner` | The big banners (YOU DIED, BONFIRE LIT, VICTORY) — the game flow's. |
 
 **Interactable protocol.** An interactable carries a **trigger volume** (its interaction zone, set in
 the node's **Physics** section like a collider) and exposes these members:
@@ -131,10 +156,13 @@ variable. Entering it starts the boss fight even if the player got in without wa
 **Combat.** Hits are decided by shapes, not distances (`SoulsHitbox`):
 - **Hurtboxes** are the characters' own capsule colliders. A character whose `hurtboxActive` is false is
   invisible to every attack. That is what i-frames are: during a roll, backstep, fog walk, rest or death
-  the player's hurtbox is off, and during its phase-two roar the boss's is.
+  the player's hurtbox is off, and during its phase-two roar the boss's is. Which hurtboxes an attack
+  sees is decided by `team`: the player's blade hits `enemy`, an enemy's hits `player`.
 - **Hitboxes** are capsules along the weapon blades: `bladeStart`, `bladeEnd` and `bladeRadius`, in the
-  weapon's `Mesh` space. On the player's weapons they are `SoulsWeapon` fields; on an enemy's `Weapon`
-  node they are plain variables. An enemy `Weapon` without them cannot land melee hits.
+  weapon's `Mesh` space — fields of the weapon's own script, so a subclass sets its blade.
+- **Damage.** A player hit is the weapon's `strike`: its attack rating for the player's STR/DEX × the
+  move's `damageMul`. An enemy hit is the attack's own `damage` (an enemy's moveset is tuned per move).
+  Either way the target takes it through its `receiveHit`, minus its own `defense`.
 - **Active window.** From a clip's `hit` event to its `hitEnd` event, the blade is swept every frame from
   where it was last frame to where it is now, so a fast swing cannot pass through a target between
   frames. Each target is hit once per swing, at the point the blade touched it.
@@ -147,6 +175,29 @@ variable. Entering it starts the boss fight even if the player got in without wa
 **Editing behaviour.** Every number in the tables below is a **public field**, so it appears in the
 node's **Scripts** section in the inspector. A field edited on a node overrides the code default. Fields
 on nodes inside a template are edited in **Template mode**: open the `.tpl` from Assets.
+
+### Weapon and enemy templates: variants
+
+Every weapon is its own template, in `Assets ▸ Templates ▸ Weapons`, and every enemy type in
+`… ▸ Enemies`. Each is a **variant** of a base template (`Weapon`, `Enemy`): it inherits the base's
+nodes and records only what it changes. Edit the base and every variant follows, except where a variant
+changed that value itself.
+
+| Base | Variants | What a variant changes |
+|---|---|---|
+| `Weapons/Weapon` (root + empty `Mesh`) | `Straight Sword`, `Greatsword`, `Club`, `Sorcerer Staff`, `Halberd` | its script (`SoulsStraightSword` …), the grip and parts inside `Mesh`, its moves (`Light1` … `Heavy`) |
+| `Enemies/Enemy` (mannequin, anchors, empty `Weapons`, `Attacks`, health bar, brain) | `Hollow`, `Hollow Sorcerer`, `Elite Knight`, `Hollow Warden` | its script (`SoulsHollow` …), size and tint, anchors, sight, its attacks; the Warden drops the health bar and adds `PhaseAura` |
+
+**When an enemy dies it drops its weapon**: the weapon leaves the hand for the world and becomes a physics
+body (spheres along its blade), so it falls and can be kicked about, until the corpse is removed, which
+takes the weapon with it. `dropWeaponOnDeath` and `droppedWeaponMass` on the enemy; `dropWeapon()` on any
+fighter does it on demand.
+
+Characters do not hold their weapons in their own template. Each names them in `weaponTemplates`
+(`Straight Sword, Greatsword` on the player, `Club` on the Hollow) and **spawns them on start** into its
+`Weapons` group, attached to the right hand. The Elite Knight wields the very `Greatsword` template the
+player does: change it once, both get it. While authoring, the hands are therefore empty; press Play to
+see the weapons held.
 
 ### Templates and placed copies
 
@@ -163,6 +214,7 @@ holds **linked copies** of it:
 | `Interactables/Message` | the 7 `Message: …` nodes and `Epilogue Message` |
 | `Interactables/Pickup` | `Souls Pickup`, `Estus Shard`, `Hall Souls`, `Boss Reward` |
 | `Enemies/*` | none placed: the **Enemy Spawns** instantiate them at runtime, and again on every rest |
+| `Weapons/*` | none placed: each character spawns the weapons it names, at runtime |
 
 **Change the art once, in the template.** Double-click it in Assets, edit, save: every copy updates
 and keeps its own position. Inside a copy, the scene only shows one row; its children belong to the
@@ -196,21 +248,35 @@ Conventions for **all final art**:
 | Placeholder | Where | Replace with | Notes |
 |---|---|---|---|
 | Mannequin, untinted | Template **Player**: `Player/Ch36` | The player character | Keep the `Weapons` group and `Player Controller` as they are. The capsule is on `Player` (r 0.3, h 1.78). |
-| Mannequin, grey-green (`Hollow (placeholder)` material) | Template **Hollow**: `Hollow/Ch36` | Basic undead soldier | Club in `Weapon/Mesh`. |
-| Mannequin, blue (`Caster (placeholder)`) | Template **Hollow Sorcerer** | Robed caster | Staff in `Weapon/Mesh`. Bolts leave from the **LeftHand** socket. |
-| Mannequin ×1.2, red (`Elite Knight (placeholder)`) | Template **Elite Knight** | Armoured knight | Greatsword in `Weapon/Mesh`. |
-| Mannequin ×1.8, dark metal (`Hollow Warden (placeholder)`) | Template **Hollow Warden** | The boss | Halberd in `Weapon/Mesh`. Capsule r 0.45, h 3.2. |
+| Mannequin, grey-green (`Hollow (placeholder)` material) | Template **Hollow**: `Hollow/Ch36` | Basic undead soldier | Wields the **Club** template. |
+| Mannequin, blue (`Caster (placeholder)`) | Template **Hollow Sorcerer** | Robed caster | Wields the **Sorcerer Staff** template. Bolts leave from the **LeftHand** socket. |
+| Mannequin ×1.2, red (`Elite Knight (placeholder)`) | Template **Elite Knight** | Armoured knight | Wields the **Greatsword** template. |
+| Mannequin ×1.8, dark metal (`Hollow Warden (placeholder)`) | Template **Hollow Warden** | The boss | Wields the **Halberd** template. Capsule r 0.45, h 3.2. |
+
+All four are variants of the **Enemy** template, so a model replaced there (`Enemy/Ch36`) reaches every
+type that has not changed it.
 
 Each enemy template also holds a **LockPoint** (chest height, where the lock-on aims) and a
 **HealthAnchor** (above the head, where the floating health bar sits). When you swap in a
 taller or shorter model, move these two nodes to match.
 
-### Weapons (the player)
+**Hands.** Weapons ride the model's `RightHand` socket, and spells leave from `LeftHand`. Any humanoid
+rig has both without authoring: bones the engine reads as hands (`mixamorig:RightHand`, `hand_r`,
+`hand.R`, `RightHand`…) answer to those names automatically. If the sword sits at an odd angle in your
+model's hand, open its rig, select the hand bone, **+ Socket** (it is named `RightHand` for you) and give
+it a rotation/offset — an authored socket overrides the automatic one. A model whose bones are not
+recognisable as a humanoid has no hands: the console says so (`… has no "RightHand" socket`), the
+weapon stays where it is, and its swings hit nothing until you add the socket.
+
+### Weapons
 
 | Placeholder | Where | Replace with |
 |---|---|---|
-| Three boxes: blade, guard and grip | Template **Player**: `Weapons/Weapon_StraightSword/Mesh` | Straight sword mesh |
-| Three boxes | Template **Player**: `Weapons/Weapon_Greatsword/Mesh` | Greatsword mesh |
+| Three boxes: blade, guard and grip | Template **Straight Sword**: `Mesh` | Straight sword mesh |
+| Three boxes | Template **Greatsword**: `Mesh` | Greatsword mesh (the player's and the Elite Knight's) |
+| A cylinder | Template **Club**: `Mesh` | The Hollows' club |
+| A cylinder and an orb | Template **Sorcerer Staff**: `Mesh` | The sorcerer's staff |
+| A shaft and a head | Template **Halberd**: `Mesh` | The Warden's halberd |
 
 ### Level and props
 
@@ -373,10 +439,23 @@ All effects are `.vfx` assets under `Assets ▸ Effects`, embedded in Particle S
 
 The effect templates carry `SoulsFx` with a `lifetime` field. Make it at least as long as the effect.
 
+The torches, the bonfire and the boss aura carry distance **LOD** (particle editor ▸ LOD): a torch
+spawns half as much past 15 m and a quarter past 30 m, simulating less often, and is not drawn past
+70 m; the bonfire's embers drop out past 20 m. With 19 torches along the keep, most are thinned or
+culled at any moment.
+
+To give the torches a sprite flame, open the **Torch** template, add an Animated Sprite on the fire
+tileset (Constraints: Cylindrical, so it faces the camera upright), and set that tileset's **Overdrive** to about 3–4 in tileset mode so
+the flame blooms. All 19 placed torches follow the template.
+
+Hit sparks, the magic bolt's impact and blood spray collide with the **physics bodies** around them
+(their Collision module, **Physics bodies** on): sparks ricochet off the floor, the bolt's motes skitter
+across it, and blood lands and stays.
+
 ### Blood
 
-Every hit that lands, on an enemy (`SoulsEnemy.receiveHit`) or on the player (`SoulsPlayer.receiveDamage`,
-melee and bolts alike), calls `GameManager.bleed`, which spawns three things:
+Every hit that lands, on an enemy or on the player (`SoulsCharacter.receiveHit`, melee and bolts alike),
+calls `GameManager.bleed`, which spawns three things:
 
 | Template | What it is |
 |---|---|
@@ -410,16 +489,23 @@ features this demo uses, and what is missing.
 
 ## 10. UI widgets
 
+**Every UI belongs to the entity it shows**, and lives inside that entity's template: none sits loose at
+the scene root. The player's HUD, level-up menu and lock-on reticle are children of the **Player**; each
+enemy carries its own bar (a floating `HealthBar`, or the boss's on-screen `BossBar`); the banners belong
+to the **GameManager**, whose game flow raises them. A UI script reads its OWNER (the nearest fighter
+above it), so a second player, or a second boss, simply brings its own.
+
 The UI scripts find widgets **by name**, so you can restyle, move or rebuild anything as long as the names
 stay. A missing widget is simply skipped.
 
-| Root | Widgets |
+| Root (owner) | Widgets |
 |---|---|
-| `HUD` | **Bars:** `Health`, `HealthLag` (the yellow drain), `HealthBack`, `Stamina`, `StaminaBack`. Bars grow with max HP and stamina (`pxPerHp`, `pxPerStamina`).<br>**Text:** `Estus`, `Weapon`, `Souls`, `SoulsGain`, `Notice`.<br>**Prompt:** `Prompt` panel holding `PromptText`.<br>**Message panel:** `Message`, `MessageTitle`, `MessageBody`.<br>**Boss bar:** `Boss` group, `BossName`, `BossHealth`, `BossLag`.<br>**Help:** `Controls` (static). |
-| `Banner` | `Band`, `BannerText` (YOU DIED / BONFIRE LIT / VICTORY ACHIEVED; colours in the script fields) |
-| `BonfireMenu` | `Title`, `LevelText`, `SoulsText`, `CostText`, `Derived`, `Help`.<br>`Row_Vigor` / `Row_Endurance` / `Row_Strength` / `Row_Dexterity`, each containing `Label`, `Minus`, `Value` and `Plus`.<br>`Confirm`, `Leave`. |
-| `LockReticle` | A world-space root with a `Dot`. Any widget works; it follows the target's `LockPoint`. |
-| `<enemy>/HealthBar` | A world-space root with a `Fill` progress bar that follows `HealthAnchor`. |
+| `Player/HUD` | **Bars:** `Health`, `HealthLag` (the yellow drain), `HealthBack`, `Stamina`, `StaminaBack`. Bars grow with max HP and stamina (`pxPerHp`, `pxPerStamina`).<br>**Text:** `Estus`, `Weapon`, `Souls`, `SoulsGain`, `Notice`.<br>**Prompt:** `Prompt` panel holding `PromptText`.<br>**Message panel:** `Message`, `MessageTitle`, `MessageBody`.<br>**Help:** `Controls` (static). |
+| `Player/BonfireMenu` | `Title`, `LevelText`, `SoulsText`, `CostText`, `Derived`, `Help`.<br>`Row_Vigor` / `Row_Endurance` / `Row_Strength` / `Row_Dexterity`, each containing `Label`, `Minus`, `Value` and `Plus`.<br>`Confirm`, `Leave`. |
+| `Player/LockReticle` | A world-space root with a `Dot`. Any widget works; it follows the target's `LockPoint`. |
+| `Hollow Warden/BossBar` | `Bar` group holding `BossName`, `BossHealth`, `BossLag`. Edit it in the **Hollow Warden** template. |
+| `<enemy>/HealthBar` | A world-space root with a `Fill` progress bar that follows `HealthAnchor`. In the base **Enemy** template. |
+| `GameManager/Banner` | `Band`, `BannerText` (YOU DIED / BONFIRE LIT / VICTORY ACHIEVED; colours in the script fields) |
 
 ## 11. Step-by-step swap procedures
 
@@ -428,8 +514,18 @@ stay. A missing widget is simply skipped.
 ### 11.1 Import a character model
 
 1. In the Assets panel, choose **+ Add ▸ Import Files…** (or drop the `.fbx` / `.glb` on the panel).
-2. In the review modal, enable **Normalize scale** if the model is not in metres, then confirm.
+2. In the review modal, enable **Normalize scale** if the model is not in metres, then confirm. A Mixamo
+   character comes in several parts (body, clothes, hair): **Merge sub-meshes into a single mesh** makes
+   it one model with one material per part, which is what the character scripts expect.
 3. You get a `.model` asset, its materials, and a `.rig` for its skeleton.
+
+Textures embedded in the `.fbx` (Mixamo embeds them) are found automatically: the review modal says
+"All referenced textures are present". A 120 MB Mixamo character imports in well under a minute, in the
+background; most of that is the converter itself.
+
+**A Mixamo character on the mannequin's animations.** Mixamo rigs name their bones `mixamorig:Hips`,
+the mannequin's are `mixamorig1:Hips`; the prefix is ignored when bones are matched, so a Mixamo model
+plays every mannequin clip once its rig is set to **Mannequin** (§11.6).
 
 ### 11.2 Import and retarget animations
 
@@ -443,15 +539,15 @@ stay. A missing widget is simply skipped.
 
 ### 11.3 Point a move or attack at a new clip
 
-- **Player attack:** select `Player ▸ Weapons ▸ Weapon_… ▸ Light1` (or `Heavy`, …). In **Scripts**, set
-  `clip`. Tune `playSpeed`, `staminaCost` and the `lunge*` fields to suit the motion. Reach comes from
+- **Player attack:** open the weapon's template (**Assets ▸ Templates ▸ Weapons ▸ Straight Sword**) and
+  select `Light1` (or `Heavy`, …). In **Scripts**, set `clip`. Tune `playSpeed`, `staminaCost` and the `lunge*` fields to suit the motion. Reach comes from
   the blade itself: if the new swing misses, lengthen the lunge or the weapon's `bladeEnd`/`bladeRadius`.
 - **Player one-shots:** select `Player` and set `rollClip`, `drinkClip`, `hitLightClip` and the other
   clip fields.
 - **Enemy attack:** open the enemy's template (**Assets ▸ Templates ▸ Enemies**, double-click it), then
   select `Attacks ▸ <attack>` and set `clip`.
 - **Add an attack:** duplicate an existing `Attacks` child and rename it. The enemy picks it up
-  automatically. For the player, duplicate a move, rename it, and point the previous move's `next` at it.
+  automatically. For a weapon, duplicate a move in its template, rename it, and point the previous move's `next` at it.
 
 ### 11.4 Add the event markers
 
@@ -474,9 +570,13 @@ The scripts find the model automatically: it is the first **Model** child that h
 1. Open the character's template: **Player** for the player, the enemy's template for an enemy
    (double-click it under `Assets ▸ Templates`). Drag your `.model` from Assets onto the template's
    root so it becomes a child. Saving the template updates the placed `Player` too.
-2. Give the new model node a state machine that matches §6, using Animation mode on the node. The
-   placeholder's machine on `Ch36` is the reference: three states and two triggers.
-3. Delete the old `Ch36` node.
+2. Select the new model node and, in its **Rig** section, link **Mannequin** to play the placeholder
+   clips (or your own rig, once it has clips). Linking the rig also gives the node the **Souls Character**
+   animation controller — idle, locomotion and death — when it has none: the character's state machine
+   lives on its model node, so a freshly dropped model starts without one, and without one it walks
+   around in its bind pose (attacks still play, which is what makes it confusing). If the Logger says
+   *"has no animation controller"*, pick **Souls Character** in the node's **Animation** section.
+3. Delete the old model node.
 4. Keep the order of children. On the player, `camera rig` comes first and `Player Controller` last.
    On enemies, `Brain` stays last.
 5. Re-fit the capsule in the **Physics** section on the character root if the new body is larger.
@@ -486,17 +586,34 @@ The scripts find the model automatically: it is the first **Model** child that h
 
 **Only re-colouring?** Open the `(placeholder)` material from Assets and edit it. Every node using it updates.
 
-### 11.7 Replace a weapon
+### 11.7 Replace a weapon, or add one
 
+**Replace:**
 1. Import the weapon model (§11.1).
-2. Open the **Player** template. Under `Weapons ▸ Weapon_StraightSword ▸ Mesh`, delete the three placeholder
-   boxes and drag your weapon model in as a child of `Mesh`.
+2. Open the weapon's template (**Assets ▸ Templates ▸ Weapons ▸ Straight Sword**). Under `Mesh`, delete
+   the placeholder boxes and drag your weapon model in as a child of `Mesh`.
 3. Play, and adjust `Mesh`'s rotation and position until the grip sits in the hand. The weapon root
    cannot be moved while it is attached.
-4. Tune the weapon's stats in its **Scripts** section: `displayName`, `baseDamage`, `strScaling`,
-   `dexScaling`, the requirements, and `poiseDamage`.
-5. **A third weapon:** in the Player template, duplicate a `Weapon_…` node. Weapon swap cycles every
-   weapon in the group.
+4. Tune its numbers in its **Scripts** section (`displayName`, `baseDamage`, `strScaling`, `dexScaling`,
+   the requirements, `poiseDamage`, the blade). A changed value shows **revert**, back to the base's.
+
+**Add a new weapon:**
+1. Right-click the **Weapon** template ▸ **Create Variant**. Rename it (e.g. `Battle Axe`).
+2. Give it its look under `Mesh`, and its moves: duplicate the `Light1`/`Heavy` move nodes from the
+   Straight Sword, or add `SoulsMove` nodes, each naming its clip.
+3. For its own stats as code, write `SoulsBattleAxe.ts` extending the base weapon and only setting
+   defaults, and attach it to the variant's root:
+   ```ts
+   import SoulsWeaponNode from './SoulsWeapon'
+   export default class SoulsBattleAxeNode extends SoulsWeaponNode {
+     public displayName: string = 'Battle Axe'
+     public baseDamage: number = 140
+     public strScaling: number = 0.9
+   }
+   ```
+   (Or keep the base script and set the values on the variant's root — both work.)
+4. Hand it to someone: add its name to their `weaponTemplates` (`Straight Sword, Greatsword, Battle Axe`).
+   Weapon swap cycles every weapon the player carries.
 
 ### 11.8 Level art
 
@@ -552,17 +669,18 @@ what the scripts read, so rename an action only together with the script that re
 | `inputBufferSeconds` | 0.3 s | How long a press is remembered. |
 | `killY` | −15 | Falling below this height kills the player. |
 
-### Rules (`GameManager` → Scripts)
+### Rules — each lives with what it describes
 
-| Rule | Formula |
-|---|---|
-| HP | `400 + 30·(Vig−10)` up to Vigor 30, then +12 per point to 40, then +5 per point. |
-| Stamina | `90 + 3·(End−10)` up to Endurance 40, then +1 per point. |
-| Level cost | `400 + 120·(L−1) + 4·(L−1)²`. Level = 1 + every point spent. |
-| Attack rating | `base × (1 + strScaling·bonus(STR) + dexScaling·bonus(DEX))`, ×0.6 if a requirement is unmet.<br>`bonus` is 0 at stat 10, 0.6 at 30 and 0.9 at 50. |
-| Damage dealt | `max(1, AR × move.damageMul × (1 − defense))` |
+| Rule | Owner | Formula |
+|---|---|---|
+| HP | `SoulsPlayer.hpForVigor` (`baseHp`, `hpPerVigor`) | `400 + 30·(Vig−10)` up to Vigor 30, then +12 per point to 40, then +5 per point. |
+| Stamina | `SoulsPlayer.staminaForEndurance` | `90 + 3·(End−10)` up to Endurance 40, then +1 per point. |
+| Level cost | `SoulsPlayer.levelCost` / `levelFor` | `400 + 120·(L−1) + 4·(L−1)²`. Level = 1 + every point spent. |
+| Attack rating | `SoulsWeapon.attackRating` (`unmetRequirementPenalty`) | `base × (1 + strScaling·bonus(STR) + dexScaling·bonus(DEX))`, ×0.6 if a requirement is unmet.<br>`bonus` (`SoulsMath.statBonus`) is 0 at stat 10, 0.6 at 30 and 0.9 at 50. |
+| Damage taken | `SoulsCharacter.applyDefense` (the target's `defense`) | `max(1, damage × (1 − defense))` |
+| Enemy attack choice | `SoulsEnemy.pickAttack` | in range, off cooldown, unlocked by `phase`, not a repeat; then by `weight` |
 
-### Weapons
+### Weapons (each weapon's script → its defaults; override on the template)
 
 | Weapon | Base | Scaling | Requirements | Poise |
 |---|---|---|---|---|
@@ -576,7 +694,7 @@ what the scripts read, so rename an action only together with the script that re
 | Greatsword Light1 / Light2 | 26 | 1.0 / 1.05 |
 | Greatsword Heavy | 42 | 1.7 (poise ×2) |
 
-### Enemies (template root → Scripts; attacks under `Attacks`)
+### Enemies (each type's script → its defaults; attacks under `Attacks` in its template)
 
 | Enemy | HP | Defense | Poise | Souls | Notes |
 |---|---|---|---|---|---|
@@ -589,16 +707,47 @@ what the scripts read, so rename an action only together with the script that re
 
 | Field | Default | Meaning |
 |---|---|---|
-| `engageRange` | — | Distance at which the enemy stops pathing and fights. |
-| `preferredMin` / `preferredMax` | — | The spacing band the enemy holds while engaged. |
+| `strafeSpeedScale` / `retreatSpeedScale` | 0.35 / 0.7 | How fast it circles and backs off in the graph's Strafe and Retreat states. |
 | `attackGapMin` / `attackGapMax` | — | Pause between attacks. |
 | `flinchOnHit` | — | Whether ordinary hits make it flinch. |
 | `poiseRegenDelay` | 3 s | Poise refills after this long without being hit. |
-| `phase2At` | 0.5 | Boss phase-two threshold, as a fraction of HP. |
-| `phase2SpeedMul` | 1.15 | Boss speed multiplier in phase two. |
+| `phase2At` | 0.5 | Warden only (`SoulsHollowWarden`): phase-two threshold, as a fraction of HP. |
+| `phase2SpeedMul` | 1.15 | Warden only: speed multiplier in phase two. |
 
 **Brain fields** (on `Brain`): `perception.range` and `fieldOfView` set how far and how wide the enemy
 can see you.
+
+**AI graphs.** Each enemy type's behaviour is an AI graph asset under **Assets ▸ AI**
+(`Hollow Brain.brain`, `Hollow Sorcerer Brain.brain`, …), linked from its `Brain` controller. Open one to
+see and edit the whole fight as states and transitions:
+
+| State | Goal | Entered when |
+|---|---|---|
+| Idle | idle | start; back home after a Return |
+| Chase | path | awake, a target, and the target alive |
+| Approach | seek | `Distance` under the type's engage range |
+| Strafe | script | inside the spacing band (`Distance` under its far edge) |
+| Retreat | script | Sorcerer only: closer than the band's near edge (7 m) |
+| Attack | script | `Attack Ready` — the script picks which attack |
+| Stagger | script | `Reacting` (a flinch or a stagger) |
+| Phase Shift | script | Warden only: its invulnerable turn into phase two |
+| Return | path to home | past the leash from home, or the target died; holds until home |
+| Dead | idle | `Dead` |
+
+The numbers — engage range, spacing band, leash — are values in the transitions, per type:
+
+| Type | Engage | Band | Leash |
+|---|---|---|---|
+| Hollow | 4 m | 0–1.5 m | 18 m |
+| Hollow Sorcerer | 18 m | 7–14 m | 22 m |
+| Elite Knight | 9 m | 0–2.6 m | 14 m |
+| Hollow Warden | 12 m | 0–3.6 m | never |
+
+The graph reads the enemy through **builtin** parameters (its own fields and getters: `isDead`,
+`isAwake`, `attackReady`, `isAttacking`, `isReacting`, `isPhaseShifting`, `targetDead`,
+`distanceFromHome`) and perception through **senses** (`hasTarget`, `distanceToTarget`). The script only
+carries out the state: it draws the attack in Attack, circles and back-pedals facing you in Strafe and
+Retreat, and plays reactions. Editing a brain asset updates every enemy of that type.
 
 ## 13. Regenerating the example, tests, limitations
 

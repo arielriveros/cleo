@@ -11,7 +11,7 @@ import ConditionTree from './ConditionTree'
 import { AssetDropRow, LayerSection, SlotsSection } from './LayerPanels'
 import AnimationAssetPicker from './AnimationAssetPicker'
 import Collapsable from '../../components/Collapsable'
-import { SegmentedControl, Toggle } from '../../components/ui'
+import { Button, cn, controlClass, FileButton, hintClass, NumberInput, OptionalNumberInput, SegmentedControl, Select, TextInput, Toggle } from '../../components/ui'
 import { clamp } from '../../utils/math';
 import { promptDialog } from '../dialogs/dialogStore'
 
@@ -19,13 +19,13 @@ import { promptDialog } from '../dialogs/dialogStore'
 // one working copy from StateMachineContext, which wraps the whole dock. Adding, moving and connecting
 // states, and setting the entry state, all belong to StateGraph.
 
-const input = 'bg-control text-white border border-control-hover rounded px-1 py-0.5 text-xs'
-const btn = 'px-2 py-1 rounded bg-primary hover:bg-primary-hover text-white border border-primary-active text-xs'
-const ghost = 'px-1.5 py-0.5 rounded border border-control-hover hover:bg-control text-xs'
-const danger = 'px-1.5 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white text-xs'
+/** Dense-row padding for the library controls (their default is px-2 py-1). */
+const tight = 'px-1 py-0.5'
+/** For the raw inputs that must keep uncontrolled semantics NumberInput/TextInput cannot express. */
+const input = cn(controlClass, tight)
 
 function NoModel() {
-  return <div className='flex flex-col bg-surface-raised w-full h-full p-3 text-sm text-gray-400'>No skinned model selected.</div>
+  return <div className='flex flex-col bg-surface-raised w-full h-full p-3 text-ui text-muted'>No skinned model selected.</div>
 }
 
 /**
@@ -45,20 +45,20 @@ function ApplyBar() {
     <div className='p-2 border-b border-border flex flex-col gap-1'>
       {/* Where Apply lands: the shared CONTROLLER asset, or this character's own machine. */}
       {controller ? (
-        <div className='flex items-center gap-1 text-[11px]'>
+        <div className='flex items-center gap-1 text-ui-sm'>
           <span className='flex-1 truncate text-highlight' title='Apply writes this controller; every character using it updates'>
             Controller: {controller.name}
           </span>
-          <button className={ghost} onClick={detachController}
-            title='Stop following the controller — this character keeps the machine as its own'>Detach</button>
+          <Button size='sm' variant='subtle' onClick={detachController}
+            title='Stop following the controller — this character keeps the machine as its own'>Detach</Button>
         </div>
       ) : (
-        <div className='flex items-center gap-1 text-[11px]'>
+        <div className='flex items-center gap-1 text-ui-sm'>
           <span className='flex-1 truncate text-muted'>
             {fullSm.controllerId ? 'Its controller was deleted — own machine' : 'This character’s own machine'}
           </span>
-          <button className={ghost} onClick={() => void saveAs()}
-            title='Turn this machine into a shared Animation Controller asset'>Save as Controller…</button>
+          <Button size='sm' variant='subtle' onClick={() => void saveAs()}
+            title='Turn this machine into a shared Animation Controller asset'>Save as Controller…</Button>
         </div>
       )}
       {/* NOT "Apply to Model", which it was called and which is wrong twice over: it writes nothing to
@@ -66,10 +66,10 @@ function ApplyBar() {
           state machine, onto the node's animator. That is genuinely node-owned data (ModelNode
           serializes `stateMachine`), and this is its only commit path: the working copy lives in
           per-tab React state and is lost on close without it. */}
-      <button className={btn + ' w-full'} onClick={apply}
+      <Button size='sm' variant='primary' className=' w-full' onClick={apply}
         title='Save the state machine onto the node it was opened from (used at runtime and by Simulate)'>
         {controller ? 'Apply to Controller' : 'Apply State Machine'}
-      </button>
+      </Button>
     </div>
   )
 }
@@ -96,13 +96,13 @@ export function ClipsPanel() {
     const sharedId = clipAssetId(name)
     return (
       <div key={name} className='flex items-center gap-1'>
-        <input className={input + ' flex-1'} defaultValue={name}
+        <input className={cn(input, 'flex-1')} defaultValue={name}
           title={sharedId ? 'Rename this clip in its animation asset (Enter to apply) — every model using it follows' : 'Rename clip (Enter to apply)'}
           onBlur={e => renameClip(name, e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
         {sharedId
-          ? <span className='text-[10px] text-muted shrink-0 w-[52px] text-center' title='From a linked animation asset — unlink it above to remove'>linked</span>
-          : <button className={danger} title='Delete clip' onClick={() => deleteClip(name)}>✕</button>}
+          ? <span className='text-ui-xs text-muted shrink-0 w-[52px] text-center' title='From a linked animation asset — unlink it above to remove'>linked</span>
+          : <Button variant='remove' size='sm' title='Delete clip' onClick={() => deleteClip(name)}>✕</Button>}
       </div>
     )
   }
@@ -111,21 +111,20 @@ export function ClipsPanel() {
   const own = clips.filter(c => !clipAssetId(c))
 
   return (
-    <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-y-auto'>
+    <div className='flex flex-col text-fg bg-surface-raised w-full h-full overflow-y-auto'>
       <ApplyBar />
       <div className='p-2 flex flex-col gap-1'>
-        <label className={ghost + ' w-full text-center cursor-pointer'} title='Import animation clips (glTF / GLB / FBX) onto this skeleton'>
+        <FileButton variant='subtle' className='w-full' multiple accept='.gltf,.glb,.fbx,.bin'
+          title='Import animation clips (glTF / GLB / FBX) onto this skeleton'
+          onFiles={importAnimationFiles}>
           Import Animation…
-          <input type='file' multiple className='hidden' accept='.gltf,.glb,.fbx,.bin'
-            onChange={e => { const fs = e.target.files ? Array.from(e.target.files) : []; e.target.value = ''; if (fs.length) importAnimationFiles(fs) }} />
-        </label>
+        </FileButton>
         {!hasBoneNames && (
-          <label className={ghost + ' w-full text-center cursor-pointer border-warning text-warning'}
-            title='This model has no bone names, so imported animations match by node index (wrong bones). Load the ORIGINAL file this character was imported from to add bone names.'>
+          <FileButton variant='subtle' className='w-full border-warning text-warning' multiple accept='.gltf,.glb,.fbx,.bin'
+            title='This model has no bone names, so imported animations match by node index (wrong bones). Load the ORIGINAL file this character was imported from to add bone names.'
+            onFiles={importSkeletonNames}>
             ⚠ Add bone names from file…
-            <input type='file' multiple className='hidden' accept='.gltf,.glb,.fbx,.bin'
-              onChange={e => { const fs = e.target.files ? Array.from(e.target.files) : []; e.target.value = ''; if (fs.length) importSkeletonNames(fs) }} />
-          </label>
+          </FileButton>
         )}
 
         {/* Clips already in the library, linked rather than re-imported — the same affordance a texture
@@ -141,10 +140,10 @@ export function ClipsPanel() {
         />
 
         <div className='mt-1 flex flex-col gap-1'>
-          {clips.length === 0 && <p className='text-[11px] text-gray-400'>No clips. Import or link one above.</p>}
-          {shared.length > 0 && <p className='text-[10px] uppercase tracking-wide text-muted mt-1'>From linked animations</p>}
+          {clips.length === 0 && <p className='text-ui-sm text-muted'>No clips. Import or link one above.</p>}
+          {shared.length > 0 && <p className='text-ui-xs uppercase tracking-wide text-muted mt-1'>From linked animations</p>}
           {shared.map(clipRow)}
-          {own.length > 0 && shared.length > 0 && <p className='text-[10px] uppercase tracking-wide text-muted mt-1'>This model’s own clips</p>}
+          {own.length > 0 && shared.length > 0 && <p className='text-ui-xs uppercase tracking-wide text-muted mt-1'>This model’s own clips</p>}
           {own.map(clipRow)}
         </div>
       </div>
@@ -158,50 +157,50 @@ export function VariablesPanel() {
   if (!target) return <NoModel />
 
   return (
-    <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-y-auto'>
+    <div className='flex flex-col text-fg bg-surface-raised w-full h-full overflow-y-auto'>
       <ApplyBar />
       <Collapsable title='Parameters' defaultOpen>
         <div className='p-2 flex flex-col gap-1'>
           {sm.parameters.map((p, i) => (
             <div key={i} className='flex items-center gap-1'>
-              <input className={input + ' flex-1'} value={p.name} onChange={e => setParam(i, { name: e.target.value })} />
-              <select className={input} value={p.type} onChange={e => setParam(i, { type: e.target.value as AnimationParameterType })}>
+              <TextInput className={cn(tight, 'flex-1')} value={p.name} onChange={v => setParam(i, { name: v })} />
+              <Select className={tight} value={p.type} onChange={e => setParam(i, { type: e.target.value as AnimationParameterType })}>
                 <option value='float'>float</option>
                 <option value='bool'>bool</option>
                 <option value='trigger'>trigger</option>
                 <option value='variable'>variable</option>
-              </select>
+              </Select>
               {p.type === 'float'
-                ? <input className={input + ' w-[56px]'} type='number' step='0.1' value={Number(p.default)} onChange={e => setParam(i, { default: parseFloat(e.target.value) || 0 })} />
+                ? <NumberInput className={cn(tight, 'w-[56px]')} step='0.1' value={Number(p.default)} onChange={v => setParam(i, { default: v })} />
                 : p.type === 'bool'
                   ? <Toggle checked={!!p.default} onChange={c => setParam(i, { default: c })} />
                   : p.type === 'trigger'
-                    ? <span className='text-[10px] text-gray-500 w-[56px] text-center'>—</span>
+                    ? <span className='text-ui-xs text-dim w-[56px] text-center'>—</span>
                     : <VariablePicker vars={accessVars} value={p.variable}
                         onPick={b => setParam(i, { variable: b, default: b?.varType === 'boolean' ? false : 0 })} />}
-              <button className={danger} onClick={() => removeParam(i)}>✕</button>
+              <Button variant='remove' size='sm' onClick={() => removeParam(i)}>✕</Button>
             </div>
           ))}
-          <button className={ghost + ' self-start mt-1'} onClick={addParam}>+ Parameter</button>
+          <Button size='sm' variant='subtle' className='self-start mt-1' onClick={addParam}>+ Parameter</Button>
         </div>
       </Collapsable>
 
       <Collapsable title='Events' badge={sm.events.length || undefined} defaultOpen>
         <div className='p-2 flex flex-col gap-1'>
           {sm.events.length === 0 && (
-            <p className='text-[11px] text-gray-400'>
+            <p className='text-ui-sm text-muted'>
               No events. Pick a clip on the transport, scrub to a moment, and press <b>+ Event</b>.
             </p>
           )}
           {sm.events.map((e, i) => (
             <div key={i} className='flex items-center gap-1'>
-              <input className={input + ' flex-1 min-w-0'} value={e.eventName} title='Event name — what onAnimationEvent receives'
-                onChange={ev => setEvent(i, { eventName: ev.target.value })} />
+              <TextInput className={cn(tight, 'flex-1 min-w-0')} value={e.eventName} title='Event name — what onAnimationEvent receives'
+                onChange={v => setEvent(i, { eventName: v })} />
               {/* Clip and time are the timeline's to set: an event only means anything at a moment in a clip,
                   and you place that by dragging its marker, not by typing seconds. */}
-              <span className='text-[10px] text-muted truncate w-[72px] shrink-0' title={e.clipName || '(no clip)'}>{e.clipName || '(no clip)'}</span>
-              <span className='text-[10px] text-dim tabular-nums w-[38px] shrink-0 text-right' title='Drag the marker on the transport to change'>{e.time.toFixed(2)}s</span>
-              <button className={danger + ' shrink-0'} title='Delete event' onClick={() => removeEvent(i)}>✕</button>
+              <span className='text-ui-xs text-muted truncate w-[72px] shrink-0' title={e.clipName || '(no clip)'}>{e.clipName || '(no clip)'}</span>
+              <span className='text-ui-xs text-dim tabular-nums w-[38px] shrink-0 text-right' title='Drag the marker on the transport to change'>{e.time.toFixed(2)}s</span>
+              <Button variant='remove' size='sm' className='shrink-0' title='Delete event' onClick={() => removeEvent(i)}>✕</Button>
             </div>
           ))}
         </div>
@@ -217,12 +216,12 @@ export function StateMachinePanel() {
   if (!target) return <NoModel />
 
   return (
-    <div className='flex flex-col text-white bg-surface-raised w-full h-full overflow-y-auto'>
+    <div className='flex flex-col text-fg bg-surface-raised w-full h-full overflow-y-auto'>
       <ApplyBar />
       <LayerSection />
       <Collapsable title='Selected' defaultOpen>
         <div className='p-2 flex flex-col gap-2'>
-          {!selection && <p className='text-[11px] text-gray-400'>Select a state or transition in the graph.</p>}
+          {!selection && <p className='text-ui-sm text-muted'>Select a state or transition in the graph.</p>}
           {selection?.kind === 'state' && <SelectedState />}
           {selection?.kind === 'transition' && <SelectedTransition />}
         </div>
@@ -284,13 +283,13 @@ function SelectedState() {
   return (
     <div className='flex flex-col gap-2'>
       <div className='flex items-center gap-1'>
-        <input className={input + ' flex-1 min-w-0'} title='State name' value={s.name} onChange={e => setState(i, { name: e.target.value })} />
-        <button className={danger + ' shrink-0'} title='Delete state' onClick={() => removeState(i)}>✕</button>
+        <TextInput className={cn(tight, 'flex-1 min-w-0')} title='State name' value={s.name} onChange={v => setState(i, { name: v })} />
+        <Button variant='remove' size='sm' className='shrink-0' title='Delete state' onClick={() => removeState(i)}>✕</Button>
       </div>
       {/* Entry is set by right-clicking the node in the graph, where it is also drawn (green border + ▶). */}
       {s.isEntry
-        ? <p className='text-[10px] text-success'>▶ Entry state — the machine starts here.</p>
-        : <p className='text-[10px] text-gray-500'>Right-click this state in the graph to make it the entry.</p>}
+        ? <p className='text-ui-xs text-success'>▶ Entry state — the machine starts here.</p>
+        : <p className={hintClass}>Right-click this state in the graph to make it the entry.</p>}
 
       {/* Dropping a pose asset here makes the state hold that asset's first pose. */}
       <AssetDropRow mime='text/cleo-pose' title='Drop a Pose asset here to hold its first pose'
@@ -302,7 +301,7 @@ function SelectedState() {
             poseRef: { assetId: asset.id, poseId: asset.poses[0].id }, pose: undefined,
           })
         }}>
-        <span className='text-[10px] text-gray-400 w-[42px] shrink-0'>Plays</span>
+        <span className='text-ui-xs text-muted w-[42px] shrink-0'>Plays</span>
         <SegmentedControl<'clip' | 'field' | 'pose'>
           size='sm' value={playsField ? 'field' : playsPose ? 'pose' : 'clip'} onChange={setPlays}
           options={[
@@ -313,8 +312,8 @@ function SelectedState() {
       </AssetDropRow>
 
       {playsPose && (allPoses.length === 0
-        ? <p className='text-[10px] text-warning'>No poses yet — pose bones in a clip’s editor and save them as a pose.</p>
-        : <select className={input + ' flex-1 min-w-0'} title='The pose this state holds. Re-embedded on Apply.'
+        ? <p className='text-ui-xs text-warning'>No poses yet — pose bones in a clip’s editor and save them as a pose.</p>
+        : <Select className={cn(tight, 'flex-1 min-w-0')} title='The pose this state holds. Re-embedded on Apply.'
             value={s.poseRef ? `${s.poseRef.assetId}/${s.poseRef.poseId}` : ''}
             onChange={e => {
               const [assetId, poseId] = e.target.value.split('/')
@@ -324,29 +323,29 @@ function SelectedState() {
             {allPoses.map(({ asset, pose }) => (
               <option key={`${asset.id}/${pose.id}`} value={`${asset.id}/${pose.id}`}>{asset.name} / {pose.name}</option>
             ))}
-          </select>)}
+          </Select>)}
 
       {activeLayer > 0 && !playsField && !playsPose && !s.clipName && (
-        <p className='text-[10px] text-gray-500'>No clip on a layer means this state adds nothing — the layer fades out while it is here.</p>
+        <p className={hintClass}>No clip on a layer means this state adds nothing — the layer fades out while it is here.</p>
       )}
 
       {!playsField && !playsPose && (
-        <select className={input + ' flex-1 min-w-0'} title='Animation clip' value={s.clipName} onChange={e => setState(i, { clipName: e.target.value })}>
+        <Select className={cn(tight, 'flex-1 min-w-0')} title='Animation clip' value={s.clipName} onChange={e => setState(i, { clipName: e.target.value })}>
           <option value=''>(no clip)</option>
           {clips.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
+        </Select>
       )}
 
       {playsField && (animationFields.length === 0
-        ? <p className='text-[10px] text-warning'>No animation fields yet — create one from a model in the Assets explorer.</p>
+        ? <p className='text-ui-xs text-warning'>No animation fields yet — create one from a model in the Assets explorer.</p>
         : <>
-          <select className={input + ' flex-1 min-w-0'} value={s.fieldId ?? ''}
+          <Select className={cn(tight, 'flex-1 min-w-0')} value={s.fieldId ?? ''}
             title='Animation field. Fields are re-embedded when the machine is applied.'
             onChange={e => setState(i, { fieldId: e.target.value })}>
             <option value=''>(no field)</option>
             {!field && s.fieldId && <option value={s.fieldId}>{s.fieldId} — missing</option>}
             {animationFields.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-          </select>
+          </Select>
 
           {/* One parameter per axis: this is where the machine's inputs become the field's inputs. */}
           {field && <>
@@ -362,17 +361,17 @@ function SelectedState() {
             )}
             {/* An unbound axis holds whatever it was last set to, which reads as a blend that never
                 responds — worth calling out, since nothing else in the UI would show it. */}
-            {!s.fieldInputs?.x && <p className='text-[10px] text-warning'>Bind “{field.xAxis.name}” to a parameter or the blend will not move.</p>}
+            {!s.fieldInputs?.x && <p className='text-ui-xs text-warning'>Bind “{field.xAxis.name}” to a parameter or the blend will not move.</p>}
           </>}
         </>)}
 
       <div className='flex items-center gap-2'>
-        <Toggle label='loop' checked={s.loop} onChange={c => setState(i, { loop: c })} className='text-[10px]' />
+        <Toggle label='loop' checked={s.loop} onChange={c => setState(i, { loop: c })} className='text-ui-xs' />
         {s.loop && (
-          <label className='flex items-center gap-1 text-[10px]' title='How many times to play the clip. 0 = forever.'>
-            <span className='text-gray-400'>times</span>
-            <input className={input + ' w-[46px]'} type='number' step='1' min='0' value={s.loopCount ?? 0}
-              onChange={e => setState(i, { loopCount: Math.max(0, Math.floor(parseFloat(e.target.value) || 0)) })} />
+          <label className='flex items-center gap-1 text-ui-xs' title='How many times to play the clip. 0 = forever.'>
+            <span className='text-muted'>times</span>
+            <NumberInput className={cn(tight, 'w-[46px]')} step='1' min='0' value={s.loopCount ?? 0}
+              onChange={v => setState(i, { loopCount: Math.max(0, Math.floor(v)) })} />
             <span className='text-dim'>{(s.loopCount ?? 0) === 0 ? '∞' : ''}</span>
           </label>
         )}
@@ -381,7 +380,7 @@ function SelectedState() {
       {/* Speed: a fixed rate, or read live from a parameter (e.g. run faster the faster you move).
           On a FIELD state this is a multiplier on top of the blend, not the blend's input — see below. */}
       <div className='flex items-center gap-1'>
-        <span className='text-[10px] text-gray-400 w-[42px] shrink-0' title={playsField
+        <span className='text-ui-xs text-muted w-[42px] shrink-0' title={playsField
           ? 'Playback rate MULTIPLIER on top of the blend. The field already matches speed by picking clips — leave it at 1 unless you want slow motion.'
           : 'Playback rate for this clip.'}>Speed</span>
         <SegmentedControl<'number' | 'param'>
@@ -393,18 +392,18 @@ function SelectedState() {
           ]} />
         {byParam
           ? (speedParams.length === 0
-              ? <span className='text-[10px] text-warning flex-1'>No numeric parameter to bind.</span>
-              : <select className={input + ' flex-1 min-w-0'} value={s.speedParam}
+              ? <span className='text-ui-xs text-warning flex-1'>No numeric parameter to bind.</span>
+              : <Select className={cn(tight, 'flex-1 min-w-0')} value={s.speedParam}
                   title='Falls back to the fixed speed if the parameter goes missing.'
                   onChange={e => setState(i, { speedParam: e.target.value })}>
                   {!speedParams.some(p => p.name === s.speedParam) && <option value={s.speedParam}>{s.speedParam} — missing</option>}
                   {speedParams.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
-                </select>)
-          : <input className={input + ' w-[56px]'} type='number' step='0.1' min='0' value={s.speed}
-              onChange={e => setState(i, { speed: Math.max(0, parseFloat(e.target.value) || 0) })} />}
+                </Select>)
+          : <NumberInput className={cn(tight, 'w-[56px]')} step='0.1' min='0' value={s.speed}
+              onChange={v => setState(i, { speed: Math.max(0, v) })} />}
       </div>
       {byParam && signedSpeed && (
-        <p className='text-[10px] text-warning -mt-1'>
+        <p className='text-ui-xs text-warning -mt-1'>
           <b>“{signedSpeed}” goes negative</b> — and there is no reverse playback, so the rate is clamped to 0
           and the clip freezes for that whole half of its range. With a blend field still re-mixing underneath,
           that reads on screen as the pose vibrating rather than as an animation that stopped. Bind Speed to a
@@ -413,7 +412,7 @@ function SelectedState() {
         </p>
       )}
       {speedByParamOnField && (
-        <p className='text-[10px] text-warning -mt-1'>
+        <p className='text-ui-xs text-warning -mt-1'>
           {speedFeedsAxis
             ? <><b>“{s.speedParam}” already drives this field’s axis.</b> Using it as the playback rate too applies it twice — at speed 4 the run clip plays 4× too fast.</>
             : <><b>This state plays a field, and its rate is read from “{s.speedParam}”.</b> If that parameter carries movement speed, it multiplies a blend that is already speed-matched — the same double-apply as binding it to the axis.</>}
@@ -426,10 +425,10 @@ function SelectedState() {
       {/* Foot IK weight. On by default and usually left alone — a foot whose ground ray finds nothing fades
           itself out, so mid-air already looks right with no authoring. This is for the exceptions: a state
           whose animation should be trusted verbatim, or one gated on a grounded/falling parameter. */}
-      <div className='flex items-center gap-1 text-[10px]'
+      <div className='flex items-center gap-1 text-ui-xs'
         title={'How strongly foot IK applies during this state. 1 is fully on, 0 leaves the animation exactly as '
           + 'authored. Feet with no ground under them fade out by themselves, so this is rarely needed.'}>
-        <span className='text-gray-400'>foot IK</span>
+        <span className='text-muted'>foot IK</span>
         <SegmentedControl<'number' | 'param'>
           size='sm'
           value={s.ikWeightParam ? 'param' : 'number'}
@@ -443,30 +442,27 @@ function SelectedState() {
         {s.ikWeightParam
           ? (speedParams.length === 0
             ? <span className='text-warning'>no numeric parameters</span>
-            : <select className={input + ' w-[110px]'} value={s.ikWeightParam}
+            : <Select className={cn(tight, 'w-[110px]')} value={s.ikWeightParam}
                 title='Falls back to fully on if the parameter goes missing.'
                 onChange={e => setState(i, { ikWeightParam: e.target.value })}>
                 {!speedParams.some(p => p.name === s.ikWeightParam) && <option value={s.ikWeightParam}>{s.ikWeightParam} — missing</option>}
                 {speedParams.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
-              </select>)
-          : <input className={input + ' w-[56px]'} type='number' step='0.1' min='0' max='1'
+              </Select>)
+          : <OptionalNumberInput className={cn(tight, 'w-[56px]')}
               value={s.ikWeight ?? 1}
-              onChange={e => {
-                const v = parseFloat(e.target.value)
-                setState(i, { ikWeight: Number.isFinite(v) ? clamp(v, 0, 1) : undefined })
-              }} />}
+              onChange={v => setState(i, { ikWeight: v === undefined ? undefined : clamp(v, 0, 1) })} />}
         <span className='text-dim'>{!s.ikWeightParam && s.ikWeight === undefined ? '(on)' : ''}</span>
       </div>
 
-      <div className='text-[10px] uppercase tracking-wide text-gray-400 mt-1'>Links</div>
+      <div className='text-ui-xs uppercase tracking-wide text-muted mt-1'>Links</div>
       {linked.length === 0
-        ? <p className='text-[11px] text-gray-500'>None. Drag from this node's right handle in the graph to connect it.</p>
+        ? <p className={cn(hintClass, 'text-ui-sm')}>None. Drag from this node's right handle in the graph to connect it.</p>
         : linked.map(l => {
             const other = l.a === s.name ? l.b : l.a
             const out = l.forward?.from === s.name || l.backward?.from === s.name
             const inc = l.forward?.to === s.name || l.backward?.to === s.name
             return (
-              <div key={`${l.a}|${l.b}`} className='flex items-center gap-1 text-[11px] text-muted'>
+              <div key={`${l.a}|${l.b}`} className='flex items-center gap-1 text-ui-sm text-muted'>
                 <span className='text-dim w-[26px] text-center' title={out && inc ? 'Both ways' : out ? 'Outgoing' : 'Incoming'}>
                   {out && inc ? '⇄' : out ? '→' : '←'}
                 </span>
@@ -504,17 +500,17 @@ function FieldAxisBinding({ label, params, value, onPick, minSample }: {
   return (
     <>
       <label className='flex items-center gap-1'>
-        <span className='text-[10px] text-gray-400 w-[42px] shrink-0 truncate' title={label}>{label}</span>
+        <span className='text-ui-xs text-muted w-[42px] shrink-0 truncate' title={label}>{label}</span>
         {params.length === 0
-          ? <span className='text-[10px] text-warning flex-1'>No numeric parameter to bind.</span>
-          : <select className={input + ' flex-1 min-w-0'} value={value ?? ''} onChange={e => onPick(e.target.value)}>
+          ? <span className='text-ui-xs text-warning flex-1'>No numeric parameter to bind.</span>
+          : <Select className={cn(tight, 'flex-1 min-w-0')} value={value ?? ''} onChange={e => onPick(e.target.value)}>
               <option value=''>— pick parameter —</option>
               {missing && <option value={value}>{value} — missing</option>}
               {params.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
-            </select>}
+            </Select>}
       </label>
       {unsigned && minSample < 0 && (
-        <p className='text-[10px] text-warning'>
+        <p className='text-ui-xs text-warning'>
           ⚠ “{label}” has samples at negative values, but <b>{builtin}</b> is never negative — it is a magnitude.
           Those clips can never play.
           {suggestion
@@ -594,14 +590,14 @@ function SelectedTransition() {
   return (
     <div className='flex flex-col gap-2'>
       {unconditional.length > 0 && (
-        <p className='text-[10px] text-warning border border-warning/40 rounded p-1'>
+        <p className='text-ui-xs text-warning border border-warning/40 rounded p-1'>
           <b>{unconditional.map(d => `${d.from} → ${d.to}`).join(' and ')} has no conditions</b>, so it fires
           the instant the machine enters {unconditional.length > 1 ? 'those states' : 'that state'}.
           {link.forward && link.backward && ' With a transition both ways that is an unbreakable loop — the pose restarts every frame, which reads as the character vibrating.'}
         </p>
       )}
       {disjoint && (
-        <p className='text-[10px] text-warning border border-warning/40 rounded p-1'>
+        <p className='text-ui-xs text-warning border border-warning/40 rounded p-1'>
           <b>These two transitions test different parameters</b> — <code>{disjoint.fwd.join(', ')}</code> one
           way and <code>{disjoint.bwd.join(', ')}</code> the other — so nothing stops both being true at once,
           and while they are, the machine flips every frame. A hysteresis band cannot help here: it separates
@@ -610,7 +606,7 @@ function SelectedTransition() {
         </p>
       )}
       {chatter && (
-        <p className='text-[10px] text-warning border border-warning/40 rounded p-1'>
+        <p className='text-ui-xs text-warning border border-warning/40 rounded p-1'>
           <b>These two transitions will flip every frame.</b> “{chatter.param}” crosses <code>&gt;</code> and{' '}
           <code>&lt;</code> with no gap between them, so a value sitting on the threshold satisfies both on
           alternating frames — which shows up as the character vibrating, not as a state problem.
@@ -622,48 +618,42 @@ function SelectedTransition() {
         <div key={`${from}->${to}`} className='border border-control rounded p-1.5 flex flex-col gap-1'>
           <div className='flex items-center gap-1'>
             {/* Both ends are text: rewiring is the graph's job now. */}
-            <span className='text-[11px] flex-1 truncate' title={`${from} → ${to}`}>
+            <span className='text-ui-sm flex-1 truncate' title={`${from} → ${to}`}>
               <span className='text-muted'>{from}</span> <span className='text-dim'>→</span> <span className='text-muted'>{to}</span>
             </span>
             {t
-              ? <button className={danger} title={`Remove ${from} → ${to}`} onClick={() => removeTransition(from, to)}>✕</button>
-              : <button className={ghost} title={`Also transition ${from} → ${to}`} onClick={() => addTransition(from, to)}>+ {from} → {to}</button>}
+              ? <Button variant='remove' size='sm' title={`Remove ${from} → ${to}`} onClick={() => removeTransition(from, to)}>✕</Button>
+              : <Button size='sm' variant='subtle' title={`Also transition ${from} → ${to}`} onClick={() => addTransition(from, to)}>+ {from} → {to}</Button>}
           </div>
 
           {t && <>
             <div className='flex items-center gap-1'>
-              <Toggle label='has exit time' checked={!!t.hasExitTime} onChange={c => setTransition(from, to, { hasExitTime: c })} className='text-[10px]' />
+              <Toggle label='has exit time' checked={!!t.hasExitTime} onChange={c => setTransition(from, to, { hasExitTime: c })} className='text-ui-xs' />
               {t.hasExitTime && (
-                <input className={input + ' w-[52px]'} type='number' step='0.05' min='0' max='1' value={t.exitTime ?? 1}
-                  onChange={e => setTransition(from, to, { exitTime: clamp(parseFloat(e.target.value) || 0, 0, 1) })} />
+                <NumberInput className={cn(tight, 'w-[52px]')} step='0.05' min='0' max='1' value={t.exitTime ?? 1}
+                  onChange={v => setTransition(from, to, { exitTime: clamp(v, 0, 1) })} />
               )}
             </div>
             {/* Per-edge cross-fade. Empty falls back to the animator-wide default, so a landing can snap
                 while a gait change stays lazy. */}
-            <label className='flex items-center gap-1 text-[10px]' title='Cross-fade seconds for this transition. Leave empty to use the animator default.'>
+            <label className='flex items-center gap-1 text-ui-xs' title='Cross-fade seconds for this transition. Leave empty to use the animator default.'>
               blend
-              <input className={input + ' w-[52px]'} type='number' step='0.05' min='0' placeholder='0.3'
-                value={t.blendTime ?? ''}
-                onChange={e => {
-                  const raw = e.target.value.trim()
-                  setTransition(from, to, { blendTime: raw === '' ? undefined : Math.max(0, parseFloat(raw) || 0) })
-                }} />
+              <OptionalNumberInput className={cn(tight, 'w-[52px]')} placeholder='0.3'
+                value={t.blendTime}
+                onChange={v => setTransition(from, to, { blendTime: v === undefined ? undefined : Math.max(0, v) })} />
               <span className='text-dim'>s {t.blendTime === undefined && '(default)'}</span>
             </label>
             {/* The blunt fix for a state pair that ping-pongs. A blend covers a change visually, but the
                 machine can still change its mind mid-blend and re-arm from a pose that barely moved — which
                 reads as a spasm. This stops it changing its mind at all for a while. */}
-            <label className='flex items-center gap-1 text-[10px]'
+            <label className='flex items-center gap-1 text-ui-xs'
               title={'Seconds the machine must already have spent in the source state before this transition may '
                 + 'fire. Use it when two states flip back and forth every frame. Unlike exit time this is real '
                 + 'seconds, so it works for a looping state with no natural end.'}>
               min dwell
-              <input className={input + ' w-[52px]'} type='number' step='0.05' min='0' placeholder='0'
-                value={t.minDwell ?? ''}
-                onChange={e => {
-                  const raw = e.target.value.trim()
-                  setTransition(from, to, { minDwell: raw === '' ? undefined : Math.max(0, parseFloat(raw) || 0) })
-                }} />
+              <OptionalNumberInput className={cn(tight, 'w-[52px]')} placeholder='0'
+                value={t.minDwell}
+                onChange={v => setTransition(from, to, { minDwell: v === undefined ? undefined : Math.max(0, v) })} />
               <span className='text-dim'>s {t.minDwell === undefined && '(off)'}</span>
             </label>
             <ConditionTree from={from} to={to} />
@@ -686,26 +676,25 @@ function PreviewSection() {
     <Collapsable title='Preview' defaultOpen>
       <div className='p-2 flex flex-col gap-1'>
         <div className='flex items-center gap-2'>
-          <Toggle label='simulate' checked={simulate} disabled={!hasMachine} onChange={setSimulate}
-            className='text-xs' />
-          {simulate && hasMachine && <span className='text-highlight text-xs'>state: {target.animator.currentStateName ?? '—'}</span>}
+          <Toggle label='simulate' checked={simulate} disabled={!hasMachine} onChange={setSimulate} />
+          {simulate && hasMachine && <span className='text-highlight'>state: {target.animator.currentStateName ?? '—'}</span>}
         </div>
-        {!hasMachine && <p className='text-[10px] text-gray-500'>Press <b>Apply State Machine</b> first.</p>}
+        {!hasMachine && <p className={hintClass}>Press <b>Apply State Machine</b> first.</p>}
 
         {sm.parameters.map((p, i) => (
-          <div key={i} className='flex items-center gap-2 text-xs'>
+          <div key={i} className='flex items-center gap-2 text-ui'>
             <span className='flex-1 truncate' title={p.name}>{p.name}</span>
-            {p.type === 'float' && <input className={input + ' w-[64px]'} type='number' step='0.1' defaultValue={Number(p.default)} onChange={e => target.animator.setFloat(p.name, parseFloat(e.target.value) || 0)} />}
+            {p.type === 'float' && <input className={cn(input, 'w-[64px]')} type='number' step='0.1' defaultValue={Number(p.default)} onChange={e => target.animator.setFloat(p.name, parseFloat(e.target.value) || 0)} />}
             {p.type === 'bool' && <BoolDriver name={p.name} initial={!!p.default} onSet={(v) => target.animator.setBool(p.name, v)} />}
-            {p.type === 'trigger' && <button className={ghost} onClick={() => target.animator.setTrigger(p.name)}>fire</button>}
+            {p.type === 'trigger' && <Button size='sm' variant='subtle' onClick={() => target.animator.setTrigger(p.name)}>fire</Button>}
             {p.type === 'variable' && (
-              <span className='text-[10px] text-gray-500 truncate' title={p.variable ? `${p.variable.nodeRef}.${p.variable.varName}` : 'unbound'}>
+              <span className='text-ui-xs text-dim truncate' title={p.variable ? `${p.variable.nodeRef}.${p.variable.varName}` : 'unbound'}>
                 {p.variable ? `= ${String(target.animator.getParam(p.name))} (from ${p.variable.nodeRef}.${p.variable.varName})` : 'unbound'}
               </span>
             )}
           </div>
         ))}
-        {sm.parameters.length === 0 && <p className='text-[11px] text-gray-400'>No parameters.</p>}
+        {sm.parameters.length === 0 && <p className='text-ui-sm text-muted'>No parameters.</p>}
         {/* Built-in parameters read MEASURED motion, and the editor has no physics — so in here they are all
             0 and this can only show a hand-driven blend. The same readout is on the viewport's Animation
             blend debug toggle, which does run in Play, where those inputs are real. */}
@@ -743,7 +732,7 @@ function VariablePicker({ vars, value, onPick }: {
   const groups: Record<AccessibleVariable['group'], AccessibleVariable[]> = { 'Built-in': [], Self: [], Parent: [], Scene: [] }
   for (const v of vars) groups[v.group].push(v)
   return (
-    <select className={input + ' w-[160px]'} value={current}
+    <Select className={cn(tight, 'w-[160px]')} value={current}
       title='Bind to a Built-in (engine-measured, e.g. how fast the node is really moving) or to a node variable — Self (own), Parent (protected/public), Scene (public)'
       onChange={e => {
         const found = vars.find(v => key(v.source, v.nodeRef, v.varName) === e.target.value)
@@ -772,6 +761,6 @@ function VariablePicker({ vars, value, onPick }: {
           ))}
         </optgroup>
       ))}
-    </select>
+    </Select>
   )
 }

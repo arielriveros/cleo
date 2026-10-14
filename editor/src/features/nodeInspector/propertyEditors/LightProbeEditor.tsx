@@ -138,11 +138,11 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
           </PropertyRow>
         </PropertyTable>
         <div className='mt-2'>
-          <div className='text-xs text-muted mb-1'>Cubemap Preview</div>
+          <div className='text-ui text-muted mb-1'>Cubemap Preview</div>
           {previewSrc ? (
             <img src={previewSrc} className='w-full rounded border border-border' style={{ aspectRatio: '2 / 1' }} />
           ) : (
-            <div className='w-full rounded border border-dashed border-border grid place-items-center text-xs text-muted' style={{ aspectRatio: '2 / 1' }}>
+            <div className='w-full rounded border border-dashed border-border grid place-items-center text-ui text-muted' style={{ aspectRatio: '2 / 1' }}>
               Probe not baked yet
             </div>
           )}

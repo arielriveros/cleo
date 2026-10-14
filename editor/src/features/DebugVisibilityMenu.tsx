@@ -1,4 +1,4 @@
-import { Popover, Toggle } from '../components/ui';
+import { Popover, Toggle, cn, sectionTitleClass } from '../components/ui';
 import { useDebugVisibility, DEBUG_CATEGORIES } from './DebugVisibilityContext';
 import { useCleoEngine } from './EngineContext';
 import { MODE_SKELETON_OWNER } from './engineContextTypes';
@@ -22,25 +22,27 @@ export default function DebugVisibilityMenu() {
     // In a skeleton editor the bones are the subject, not a debug aid: they draw whatever this menu says,
     // so their row reads as locked on rather than offering a switch that would do nothing.
     const skeletonLocked = MODE_SKELETON_OWNER[editorMode];
+    // Likewise the game UI in UI mode, where it is what is being edited.
+    const isLocked = (key: string) => (skeletonLocked && key === 'skeleton') || (editorMode === 'ui' && key === 'gameUi');
 
     return (
         <Popover
             align='right'
             title='Debug overlays'
-            triggerClassName='flex items-center justify-center w-[26px] h-[25px] rounded border border-control-hover bg-surface-raised/80 hover:bg-surface-raised text-white cursor-pointer'
+            triggerClassName='flex items-center justify-center w-[26px] h-[25px] rounded border border-control-hover bg-surface-raised/80 hover:bg-surface-raised text-fg cursor-pointer'
             trigger={<EyeIcon />}
             className='min-w-[220px]'
         >
             <div data-cleo-overlay className='p-1'>
                 <div className='grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-1'>
-                    <div className='text-[10px] uppercase tracking-wide text-muted px-1'>Overlay</div>
-                    <div className='text-[10px] uppercase tracking-wide text-muted text-center'>Editor</div>
-                    <div className='text-[10px] uppercase tracking-wide text-muted text-center'>Runtime</div>
+                    <div className={cn(sectionTitleClass, 'px-1')}>Overlay</div>
+                    <div className={cn(sectionTitleClass, 'text-center')}>Editor</div>
+                    <div className={cn(sectionTitleClass, 'text-center')}>Runtime</div>
                     {DEBUG_CATEGORIES.map(cat => {
-                        const locked = skeletonLocked && cat.key === 'skeleton';
+                        const locked = isLocked(cat.key);
                         return (
                         <div key={cat.key} className='contents'>
-                            <div className='text-xs text-white px-1 py-0.5' title={locked ? 'Always shown in this editor' : undefined}>
+                            <div className='text-ui text-fg px-1 py-0.5' title={locked ? 'Always shown in this editor' : undefined}>
                                 {cat.label}{locked && <span className='text-muted'> · always on here</span>}
                             </div>
                             <div className='flex justify-center'>

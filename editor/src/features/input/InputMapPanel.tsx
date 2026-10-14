@@ -88,7 +88,7 @@ export default function InputMapPanel() {
                 }}
               />
               <span className={hintClass}>{m.actions.length}</span>
-              <ButtonWithConfirm onClick={() => apply(edits.removeMap(inputMap, m.name))}>✕</ButtonWithConfirm>
+              <ButtonWithConfirm variant='remove' onClick={() => apply(edits.removeMap(inputMap, m.name))}>✕</ButtonWithConfirm>
             </div>
           ))}
           <Button size='sm' variant='ghost' onClick={() => apply(edits.addMap(inputMap))}>+ Map</Button>
@@ -120,9 +120,7 @@ export default function InputMapPanel() {
               >
                 {ACTION_KINDS.map(k => <option key={k} value={k}>{k}</option>)}
               </Select>
-              <ButtonWithConfirm onClick={() => apply(edits.removeAction(inputMap, mapName, a.name))}>
-                ✕
-              </ButtonWithConfirm>
+              <ButtonWithConfirm variant='remove' onClick={() => apply(edits.removeAction(inputMap, mapName, a.name))}>✕</ButtonWithConfirm>
             </div>
           ))}
           <Button size='sm' variant='ghost' onClick={() => apply(edits.addAction(inputMap, mapName))}>

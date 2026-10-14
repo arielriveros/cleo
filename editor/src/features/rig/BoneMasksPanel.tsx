@@ -4,7 +4,7 @@ import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { useRig } from './RigContext'
 import { getAnimationTarget } from '../animation/skeleton'
-import { Button, Hint, Select, TextInput, cn, sectionTitleClass } from '../../components/ui'
+import { Button, Hint, OptionalNumberInput, Select, TextInput, Toggle, cn, sectionTitleClass } from '../../components/ui'
 import { buildBoneMaskAsset, presetMask, withBranch, type BoneTree } from '../../utils/boneMasks'
 
 // The rig's BONE MASKS: which bones a controller layer or an action slot is allowed to move.
@@ -101,12 +101,12 @@ export default function BoneMasksPanel() {
       <div className='flex flex-col gap-1'>
         {masks.map(m => (
           <div key={m.id} className={cn('flex items-center gap-1 rounded border p-1', m.id === selected ? 'border-highlight' : 'border-control')}>
-            <button className='text-[11px] px-1 text-muted' onClick={() => setSelected(m.id === selected ? null : m.id)}
+            <button className='text-ui-sm px-1 text-muted hover:text-fg' onClick={() => setSelected(m.id === selected ? null : m.id)}
               title='Edit which bones this mask includes'>{m.id === selected ? '▾' : '▸'}</button>
             <TextInput className='flex-1' value={m.name} onChange={v => updateBoneMask(m.id, { ...m, name: v })} />
-            <span className='text-[10px] text-muted shrink-0'>{Object.keys(m.weights).length} bones</span>
-            <button className='text-danger px-1 shrink-0' title='Delete this mask. Layers using it stop affecting anything.'
-              onClick={() => { removeBoneMask(m.id); if (selected === m.id) setSelected(null) }}>✕</button>
+            <span className='text-ui-xs text-muted shrink-0'>{Object.keys(m.weights).length} bones</span>
+            <Button variant='remove' size='sm' className='px-1 py-0 shrink-0' title='Delete this mask. Layers using it stop affecting anything.'
+              onClick={() => { removeBoneMask(m.id); if (selected === m.id) setSelected(null) }}>✕</Button>
           </div>
         ))}
       </div>
@@ -125,21 +125,21 @@ export default function BoneMasksPanel() {
           {rows.map(({ name, depth }) => {
             const w = mask.weights[name] ?? 0
             return (
-              <div key={name} className='flex items-center gap-1 text-[11px]' style={{ paddingLeft: depth * 10 }}>
-                <input type='checkbox' checked={w > 0} onChange={() => {}}
-                  onClick={e => toggle(name, !e.altKey)} />
-                <span className={cn('flex-1 truncate', w > 0 ? 'text-white' : 'text-muted')} title={name}>{name.split(':').pop()}</span>
+              <div key={name} className='flex items-center gap-1 text-ui-sm' style={{ paddingLeft: depth * 10 }}>
+                {/* The click's altKey picks one bone vs the whole branch. */}
+                <Toggle checked={w > 0} onChange={(_, e) => toggle(name, !e.altKey)} />
+                <span className={cn('flex-1 truncate', w > 0 ? 'text-fg' : 'text-muted')} title={name}>{name.split(':').pop()}</span>
                 {w > 0 && (
-                  <input className='w-[44px] bg-control border border-control-hover rounded px-1 tabular-nums' type='number'
-                    min={0} max={1} step={0.1} value={w} title='How strongly this bone follows the layer'
-                    onChange={e => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) setWeight(name, v) }} />
+                  <OptionalNumberInput className='w-[44px] px-1 py-0'
+                    value={w} title='How strongly this bone follows the layer'
+                    onChange={v => { if (v !== undefined) setWeight(name, v) }} />
                 )}
               </div>
             )
           })}
           <div className='flex gap-1 mt-1'>
-            <Button variant='ghost' className='text-[11px]' onClick={() => updateBoneMask(mask.id, { ...mask, weights: {} })}>Clear</Button>
-            <Button variant='ghost' className='text-[11px]'
+            <Button variant='ghost' size='sm' className='text-ui-sm' onClick={() => updateBoneMask(mask.id, { ...mask, weights: {} })}>Clear</Button>
+            <Button variant='ghost' size='sm' className='text-ui-sm'
               onClick={() => updateBoneMask(mask.id, { ...mask, weights: Object.fromEntries(rows.map(r => [r.name, 1])) })}>All</Button>
           </div>
         </div>

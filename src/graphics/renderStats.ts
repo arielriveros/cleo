@@ -54,6 +54,12 @@ export interface RenderStats {
     particleSystems: number;
     /** Particle systems paused this frame because their bounds were out of view. */
     particleSystemsCulled: number;
+    /** Particle systems past their LOD cull distance: not drawn (a looping one also paused). */
+    particleSystemsLodCulled: number;
+    /** Physics colliders handed to particle simulation this frame, summed over the systems that collide with bodies. */
+    particleColliders: number;
+    /** Particle systems running at a coarser LOD level than full detail (fewer spawns, rarer steps). */
+    particleSystemsLodReduced: number;
     /** Particle emitter draws issued (one per visible, live emitter). */
     particleDraws: number;
     /** Particle emitters whose GPU state was BUILT this frame: textures, LUT, bind groups. A spike source. */
@@ -89,6 +95,9 @@ export const frameStats: RenderStats = {
     particleSteps: 0,
     particleSystems: 0,
     particleSystemsCulled: 0,
+    particleSystemsLodCulled: 0,
+    particleColliders: 0,
+    particleSystemsLodReduced: 0,
     particleDraws: 0,
     particleGpuCreates: 0,
     particleGpuReuses: 0,
@@ -133,6 +142,9 @@ export function resetFrameStats(): void {
     frameStats.particleSteps = 0;
     frameStats.particleSystems = 0;
     frameStats.particleSystemsCulled = 0;
+    frameStats.particleSystemsLodCulled = 0;
+    frameStats.particleColliders = 0;
+    frameStats.particleSystemsLodReduced = 0;
     frameStats.particleDraws = 0;
     frameStats.particleGpuCreates = 0;
     frameStats.particleGpuReuses = 0;

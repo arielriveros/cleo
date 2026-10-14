@@ -55,6 +55,13 @@ body { font-size: var(--text-ui); }
   --success:             44 122 44;   /* #2c7a2c  create/confirm actions */
   --success-hover:       53 133 53;   /* #358535 */
   --warning:             255 210 122; /* #ffd27a  caution text */
+  /* Readable status TEXT on dark surfaces. The fills above are for buttons and badges; as text on
+     --surface they are too dark to read, which is why stray red-300 / green-300 crept in. */
+  --danger-fg:           252 165 165; /* #fca5a5  error text */
+  --success-fg:          134 239 172; /* #86efac  ok / done text */
+
+  /* Scrim behind modals and overlays, used with an opacity (`bg-scrim/60`). */
+  --scrim:               0 0 0;
 
   /* Scene-tree node accent. Cyan deliberately: the selection accent is indigo (--selected/--highlight),
      so an indigo UI row would read as "selected" at a glance in the one place that must stay unambiguous. */
@@ -76,6 +83,7 @@ body { font-size: var(--text-ui); }
   --text-ui-sm:       11px;  /* section titles */
   --text-ui-xs:       10px;  /* hints, badges, axis letters */
   --text-ui-lg:       13px;  /* Collapsable section headers */
+  --text-ui-2xs:      9px;   /* the tightest badges: type dots, access glyph labels */
   --weight-ui:        400;
   --weight-ui-strong: 600;   /* section headers */
 }
@@ -84,7 +92,7 @@ body { font-size: var(--text-ui); }
   html, body { @apply h-full w-full antialiased; }
   body { background-color: rgb(var(--bg)); color: rgb(var(--text)); }
   a { @apply text-primary hover:brightness-125; }
-  ::selection { background: rgb(var(--primary) / 0.35); color: #fff; }
+  ::selection { background: rgb(var(--primary) / 0.35); color: rgb(var(--text)); }
   /* Editor chrome is not a document. Every drag here is a gesture — moving a graph node, scrubbing a
      slider, sweeping a tree — and the browser's default is to start a text selection under it and leave
      whatever it swept over highlighted in blue. Off by default; text actually worth copying opts back in,
@@ -106,25 +114,25 @@ body { font-size: var(--text-ui); }
   .type-header  { font-family: var(--font-ui); font-size: var(--text-ui-lg); font-weight: var(--weight-ui-strong); }
 
   .panel { @apply rounded-md border border-border bg-surface-raised shadow-md; }
-  .panel-header { @apply px-2 py-1 text-xs uppercase tracking-wide text-muted bg-gradient-to-b from-border/20 to-transparent; }
+  .panel-header { @apply px-2 py-1 text-ui uppercase tracking-wide text-muted bg-gradient-to-b from-border/20 to-transparent; }
 
-  .input { @apply bg-control text-white border border-border rounded px-2 py-1; }
-  .select { @apply bg-control text-white border border-border rounded px-2 py-1; }
+  .input { @apply bg-control text-fg border border-border rounded px-2 py-1; }
+  .select { @apply bg-control text-fg border border-border rounded px-2 py-1; }
 
-  .btn { @apply px-3 py-1 rounded border border-border bg-control hover:bg-control-hover text-white; }
-  .btn-primary { @apply px-3 py-1 rounded text-white border border-primary-active bg-primary hover:bg-primary-hover; }
-  .btn-danger { @apply px-3 py-1 rounded text-white border border-danger bg-danger hover:bg-danger-hover; }
+  .btn { @apply px-3 py-1 rounded border border-border bg-control hover:bg-control-hover text-fg; }
+  .btn-primary { @apply px-3 py-1 rounded text-fg border border-primary-active bg-primary hover:bg-primary-hover; }
+  .btn-danger { @apply px-3 py-1 rounded text-fg border border-danger bg-danger hover:bg-danger-hover; }
   .btn-ghost { @apply px-2 py-1 rounded border border-border hover:bg-control; }
   .icon-button { @apply inline-flex items-center justify-center rounded border border-border bg-control hover:bg-control-hover; width: 28px; height: 28px; }
 
   .resizer-x { @apply w-1 cursor-col-resize bg-border-subtle hover:w-1.5 hover:bg-border transition-all; }
   .resizer-y { @apply h-1 cursor-row-resize bg-border-subtle hover:h-1.5 hover:bg-border transition-all; }
 
-  .tab { @apply px-2 py-1 rounded border border-transparent text-muted hover:text-white hover:border-border; }
-  .tab-active { @apply bg-border-subtle text-white border border-border; }
+  .tab { @apply px-2 py-1 rounded border border-transparent text-muted hover:text-fg hover:border-border; }
+  .tab-active { @apply bg-border-subtle text-fg border border-border; }
 
   .toolbar { @apply h-10 flex items-center gap-2 px-2 bg-surface-sunken border-b border-border shadow; }
-  .status-bar { @apply h-6 flex items-center gap-2 px-2 bg-surface-sunken border-t border-border text-xs text-muted; }
+  .status-bar { @apply h-6 flex items-center gap-2 px-2 bg-surface-sunken border-t border-border text-ui text-muted; }
 }
 
 /* Modern dark scrollbars (overrides) */

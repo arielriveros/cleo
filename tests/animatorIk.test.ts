@@ -597,3 +597,55 @@ describe('Animator — foot IK smoothing is wall-clock, not playback-scaled', ()
         expect(stopped).toBeCloseTo(footAfter(1, 18), 6);
     });
 });
+
+// ----- the asymmetry: one knee bent right, the other did not -----------------------------------------------
+
+describe('Animator — foot IK, both legs alike', () => {
+    it('bends BOTH knees forward when straight legs step up, not one forward and one sideways', () => {
+        // Straight legs have no bend plane of their own; before the knee pole each fell back to an arbitrary
+        // axis, and on a real rig the two legs' near-straight noise disagreed — one knee rose, one folded out.
+        const { animator } = makeAnimator(RIG2, 0.3);
+        animator.playAnimationByName('idle', true, false);
+        step(animator);
+        const kneeL = jointPos(animator, SHIN), kneeR = jointPos(animator, SHIN_R);
+        expect(jointPos(animator, FOOT)[1]).toBeGreaterThan(0.2);
+        expect(jointPos(animator, FOOT_R)[1]).toBeGreaterThan(0.2);
+        // Forward is the node's +Z. Both knees out in front, by the same amount, with no sideways drift.
+        expect(kneeL[2]).toBeGreaterThan(0.1);
+        expect(kneeR[2]).toBeCloseTo(kneeL[2], 5);
+        expect(kneeL[0]).toBeCloseTo(0, 5);
+        expect(kneeR[0]).toBeCloseTo(0.2, 5);
+    });
+
+    it('drops the pelvis through a rotated non-joint wrapper above the hips (a Mixamo Armature)', () => {
+        // Armature: Z-up to Y-up (-90 deg about X). The hips undo the rotation, so the model-space pose is the
+        // same skeleton as every other test. The drop used to be written in the WRAPPER's frame, which turned
+        // "down" into "forward": the pelvis never lowered and the foot over the lower ground hung straight.
+        const WRAP = 9;
+        const skin = makeSkin(RIG2);
+        const wrap = mat4.fromXRotation(mat4.create(), -Math.PI / 2);
+        const hipsLocal = mat4.fromTranslation(mat4.create(), [0, 0, 2]);
+        mat4.rotateX(hipsLocal, hipsLocal, Math.PI / 2);
+        skin.nodeTransforms!.set(WRAP, wrap);
+        skin.nodeTransforms!.set(HIPS, hipsLocal);
+        skin.joints[HIPS].parentIndex = WRAP;
+        (skin as any).nodeParents = new Map([[WRAP, undefined]]);
+        const clip: Animation = {
+            name: 'idle',
+            samplers: [{ input: [0, 1], output: [0, 0, 2, 0, 0, 2], interpolation: 'LINEAR' }],
+            channels: [{ samplerIndex: 0, targetNodeIndex: HIPS, targetPath: 'translation' }],
+        };
+        const model = { skin, animations: [clip] } as unknown as AnimatedModel;
+        const a = new Animator(model);
+        const stub = stubPhysics(-0.3);
+        a.setNode({ worldTransform: mat4.create(), scene: { physics: stub.physics }, body: null, parent: null, position: vec3.create() } as any);
+        a.playAnimationByName('idle', true, false);
+        step(a);
+
+        const hips = jointPos(a, HIPS);
+        expect(hips[1]).toBeCloseTo(1.8, 4);   // dropped straight down…
+        expect(hips[2]).toBeCloseTo(0, 4);     // …not shoved forward
+        expect(jointPos(a, FOOT)[1]).toBeCloseTo(-0.2, 2);
+    });
+});
+

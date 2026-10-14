@@ -69,8 +69,8 @@ export default function EffectRackEditor({ effects, onChange }: Props) {
       {effects.map((effect, index) => (
         <div key={index} className='rounded border border-border bg-surface-raised p-1.5 flex flex-col gap-1'>
           <div className='flex items-center gap-1'>
-            <span className='text-[11px]'>{ICONS[effect.kind]}</span>
-            <span className='text-[11px] flex-1'>{LABELS[effect.kind]}</span>
+            <span className='text-ui-sm'>{ICONS[effect.kind]}</span>
+            <span className='text-ui-sm flex-1'>{LABELS[effect.kind]}</span>
             <Toggle
               checked={effect.enabled}
               onChange={enabled => replace(index, { ...effect, enabled })}

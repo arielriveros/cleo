@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
-import { Button, Hint, Select } from '../../components/ui'
+import { Button, Hint, Select, cn } from '../../components/ui'
 import { toRuntimeTileset } from '../../utils/tilesets'
 import TileGrid from '../tileset/TileGrid'
 import { useActiveTilemap } from './useActiveTilemap'
 import { useAssetDrop } from '../../utils/useAssetDrop'
+import { token } from '../../utils/cssTokens'
 
 // The tilemap mode's palette panel: pick the layer's tileset, then pick what the brush paints. Dragging a
 // rectangle across the atlas builds a multi-tile stamp rather than selecting one tile.
@@ -35,21 +36,23 @@ export default function TilePalette() {
   }
 
   const { dragOver, dropProps } = useAssetDrop('text/cleo-tileset', assign)
+  // Marker colours from the design tokens, read once per mount (not per tile, not at module scope).
+  const markers = useMemo(() => ({ solid: token('--danger'), animated: token('--warning') }), [])
 
   const selection = tilemapBrush.current.stamp.tiles
 
   if (!node) {
-    return <div className='p-2 text-xs text-muted'>Add a Tilemap node to the scene to start painting.</div>
+    return <div className='p-2 text-ui text-muted'>Add a Tilemap node to the scene to start painting.</div>
   }
 
   return (
     <div
-      className={`flex flex-col h-full w-full bg-surface-raised text-white ${dragOver ? 'ring-1 ring-selected' : ''}`}
+      className={cn('flex flex-col h-full w-full bg-surface-raised text-fg', dragOver && 'ring-1 ring-selected')}
       {...dropProps}
     >
       <div className='h-[26px] shrink-0 flex items-center gap-1 px-1.5 border-b border-border'>
         <Select
-          className='flex-1 text-xs'
+          className='flex-1'
           value={layer?.cfg.tilesetId ?? ''}
           onChange={(e) => { if (e.target.value) assign(e.target.value) }}
           title='Tileset this layer paints from'
@@ -82,8 +85,8 @@ export default function TilePalette() {
           markerOf={(index) => {
             const meta = asset.tiles[index]
             if (!meta) return null
-            if (meta.solid) return '#ff6b6b'
-            if (meta.animation && meta.animation.frames.length > 1) return '#f2c14b'
+            if (meta.solid) return markers.solid
+            if (meta.animation && meta.animation.frames.length > 1) return markers.animated
             return null
           }}
         />

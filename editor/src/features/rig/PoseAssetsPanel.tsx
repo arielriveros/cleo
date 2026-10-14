@@ -132,30 +132,31 @@ export default function PoseAssetsPanel() {
         {mine.map(pa => (
           <div key={pa.id} className={cn('rounded border', pa.id === open ? 'border-highlight' : 'border-control')}>
             <div className='flex items-center gap-1 p-1'>
-              <button className='text-[11px] px-1 text-muted' onClick={() => setOpen(pa.id === open ? null : pa.id)}>{pa.id === open ? '▾' : '▸'}</button>
+              <button className='text-ui-sm px-1 text-muted hover:text-fg' onClick={() => setOpen(pa.id === open ? null : pa.id)}>{pa.id === open ? '▾' : '▸'}</button>
               <TextInput className='flex-1' value={pa.name} onChange={v => updatePoseAsset(pa.id, { ...pa, name: v })} />
-              <span className='text-[10px] text-muted shrink-0'>{pa.poses.length}</span>
-              <button className='text-danger px-1 shrink-0'
+              <span className='text-ui-xs text-muted shrink-0'>{pa.poses.length}</span>
+              <Button variant='remove' size='sm' className='px-1 py-0 shrink-0'
                 title='Delete this pose asset. Clips and states using its poses report the missing pose.'
-                onClick={() => removePoseAsset(pa.id)}>✕</button>
+                onClick={() => removePoseAsset(pa.id)}>✕</Button>
             </div>
             {pa.id === open && (
               <div className='flex flex-col gap-1 p-1 pt-0'>
                 {pa.poses.length === 0 && <Hint>Empty — save a pose into it from a clip’s editor.</Hint>}
                 {pa.poses.map(pose => (
                   <div key={pose.id} className='flex items-center gap-1'>
-                    <button className={cn('text-[11px] px-1 shrink-0', previewing === pose.id ? 'text-highlight' : 'text-muted')}
+                    <Button variant='ghost' size='sm' active={previewing === pose.id}
+                      className={cn('text-ui-sm px-1 py-0 shrink-0', previewing === pose.id ? 'text-highlight' : 'text-muted')}
                       disabled={!target}
                       title={previewing === pose.id ? 'Stop previewing this pose' : 'Show this pose on the preview character'}
-                      onClick={() => preview(pose)}>◉</button>
+                      onClick={() => preview(pose)}>◉</Button>
                     <TextInput className='flex-1' value={pose.name}
                       title='Rename. Clips and states reference poses by id, so a rename cannot break them.'
                       onChange={v => updatePoseAsset(pa.id, { ...pa, poses: pa.poses.map(p => (p.id === pose.id ? { ...p, name: v } : p)) })} />
-                    <span className='text-[10px] text-muted shrink-0' title={pose.bones.map(b => b.name).join(', ')}>
+                    <span className='text-ui-xs text-muted shrink-0' title={pose.bones.map(b => b.name).join(', ')}>
                       {pose.bones.length} bone{pose.bones.length === 1 ? '' : 's'}
                     </span>
-                    <button className='text-danger px-1 shrink-0'
-                      onClick={() => updatePoseAsset(pa.id, { ...pa, poses: pa.poses.filter(p => p.id !== pose.id) })}>✕</button>
+                    <Button variant='remove' size='sm' className='px-1 py-0 shrink-0'
+                      onClick={() => updatePoseAsset(pa.id, { ...pa, poses: pa.poses.filter(p => p.id !== pose.id) })}>✕</Button>
                   </div>
                 ))}
               </div>
@@ -173,7 +174,7 @@ export default function PoseAssetsPanel() {
         >+ New pose asset</Button>
       </div>
       {previewing && (
-        <Button variant='ghost' className='w-full text-[11px] mt-1'
+        <Button variant='ghost' size='sm' className='w-full text-ui-sm mt-1'
           onClick={() => { target?.animator.clearBoneLocalOverrides(); setPreviewing(null) }}>Clear pose preview</Button>
       )}
     </div>

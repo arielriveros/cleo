@@ -247,10 +247,11 @@ export const MODULES: readonly ModuleDefinition[] = [
     },
     {
         type: 'collision', stage: 'update', label: 'Collision', unique: true,
-        description: 'Bounces off visible geometry (scene depth) and authored planes.',
-        defaults: () => ({ depth: true, planes: [] as CollisionPlane[], radius: 0.5, restitution: 0.4,
+        description: 'Bounces off physics bodies, visible geometry (scene depth) and authored planes.',
+        defaults: () => ({ bodies: true, depth: true, planes: [] as CollisionPlane[], radius: 0.5, restitution: 0.4,
                            friction: 0.2, lifetimeLoss: 0, kill: false, thickness: 0.5 }),
         params: [
+            { key: 'bodies', label: 'Physics bodies', kind: 'bool', hint: 'Collides with the colliders near the effect — floors, walls, props, characters — on or off screen. Moving bodies push particles along. Spheres, boxes, capsules, planes and convex hulls; terrain and mesh colliders need Scene depth.' },
             { key: 'depth', label: 'Scene depth', kind: 'bool', hint: 'Collides with whatever is on screen. Off-screen particles pass through.' },
             { key: 'thickness', label: 'Surface thickness', kind: 'float', min: 0.01, step: 0.05, unit: 'm', when: p => !!p.depth, hint: 'How far behind a surface still counts as inside it.' },
             { key: 'planes', label: 'Planes', kind: 'planes', hint: 'Work everywhere, including 2D and off-screen.' },

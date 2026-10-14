@@ -27,25 +27,25 @@ export default function ScriptTabView() {
   const connected = workspace.status !== 'off'
 
   return (
-    <div className='absolute inset-0 flex flex-col bg-surface-raised text-white'>
+    <div className='absolute inset-0 flex flex-col bg-surface-raised text-fg'>
       <div className='shrink-0 flex items-center gap-2 px-3 h-[30px] border-b border-border'>
-        <span className='text-[12px] font-semibold truncate' title={asset?.name}>
+        <span className='text-ui font-semibold truncate' title={asset?.name}>
           {asset?.name ?? 'Script'}
           {asset && scriptKindOfAsset(asset) === 'module'
             ? <span className='ml-1 text-dim font-normal'>· Module</span>
             : asset && <span className='ml-1 text-dim font-normal'>· {role ?? `extends ${BASE_TYPE_LABEL[asset.baseType]}`}</span>}
         </span>
         {importAs && (
-          <button
-            type='button'
-            className='text-[11px] text-dim hover:text-white font-mono truncate'
+          <Button
+            variant='ghost' size='sm'
+            className='h-[20px] px-1 font-normal text-ui-sm text-dim hover:text-fg font-mono min-w-0 justify-start'
             title={`Other scripts import this one with: import … from '${importAs}' — click to copy`}
             onClick={() => void navigator.clipboard?.writeText(`'${importAs}'`)}
           >
-            import from '{importAs}'
-          </button>
+            <span className='truncate'>import from '{importAs}'</span>
+          </Button>
         )}
-        <span className='ml-auto text-[11px] text-dim truncate'>
+        <span className='ml-auto text-ui-sm text-dim truncate'>
           {asset && scriptKindOfAsset(asset) === 'module'
             ? 'Save Script (top bar) applies changes to every script importing it'
             : 'Save Script (top bar) applies changes to every node using it'}
@@ -62,7 +62,7 @@ export default function ScriptTabView() {
         </Button>
       </div>
       <div className='flex-1 min-h-0'>
-        <Suspense fallback={<div className='p-3 text-dim text-[11px]'>Loading editor…</div>}>
+        <Suspense fallback={<div className='p-3 text-dim text-ui-sm'>Loading editor…</div>}>
           <MonacoScriptEditor
             key={scriptId}
             scriptId={scriptId}

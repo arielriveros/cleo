@@ -9,7 +9,7 @@ import { getSnapshot, resolveDialog, subscribe } from './dialogStore'
 /** A blank line starts a paragraph; a single \n stays a hard break (whitespace-pre-line). */
 function Message({ text, warn }: { text: string; warn: boolean }) {
   return (
-    <div className='px-4 py-3 text-sm text-gray-300 space-y-2'>
+    <div className='px-4 py-3 text-ui text-fg space-y-2'>
       {text.split('\n\n').map((paragraph, i) => (
         <p key={i} className={cn('whitespace-pre-line select-text', warn && 'text-warning')}>{paragraph}</p>
       ))}
@@ -106,14 +106,14 @@ export default function DialogHost() {
     <Modal onClose={cancel} className='w-[440px] max-w-[92vw]' overlayClassName='z-[60]'>
       <div ref={cardRef} onKeyDown={trapTab}>
         <ModalHeader>
-          <div className='text-sm font-semibold'>{options.title}</div>
+          <div className='text-ui-lg font-semibold'>{options.title}</div>
         </ModalHeader>
 
         {options.message && <Message text={options.message} warn={options.tone === 'warning'} />}
 
         {/* The whole list, scrolled — the alert() strings this replaces had to truncate at six. */}
         {!!options.details?.length && (
-          <ul className='mx-4 mb-3 max-h-[200px] overflow-y-auto rounded border border-border-subtle bg-surface-sunken px-3 py-2 text-xs text-muted space-y-1'>
+          <ul className='mx-4 mb-3 max-h-[200px] overflow-y-auto rounded border border-border-subtle bg-surface-sunken px-3 py-2 text-ui text-muted space-y-1'>
             {options.details.map((detail, i) => <li key={i}>• {detail}</li>)}
           </ul>
         )}
@@ -126,7 +126,7 @@ export default function DialogHost() {
               onChange={setValue}
               placeholder={request.options.placeholder}
             />
-            {error && <div className='mt-1 text-xs text-danger'>{error}</div>}
+            {error && <div className='mt-1 text-ui text-danger-fg'>{error}</div>}
           </div>
         )}
 

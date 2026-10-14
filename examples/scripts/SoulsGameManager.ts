@@ -1,5 +1,5 @@
 import { Input, Logger, Node } from 'cleo'
-import { angleDiff, clamp, forwardYaw, num, planarDistance, yawTo } from './SoulsMath'
+import { clamp, forwardYaw, num } from './SoulsMath'
 
 /**
  * Hollow Keep — the game manager. Attach to an empty node named `GameManager` at the scene root.
@@ -14,13 +14,13 @@ import { angleDiff, clamp, forwardYaw, num, planarDistance, yawTo } from './Soul
  *
  * UI never gets called; it POLLS public fields here and on the player every frame.
  *
- * ## The rules live here too
+ * ## What it does NOT own
  *
- * Every number the game is balanced on — HP per Vigor, the attack-rating formula, the level cost — is a
- * method on this class, so there is exactly one copy and its tuning fields are editable on the node.
- * They are ordinary instance methods that read nothing from `this` except tuning fields: a class script
- * is never constructed and its STATIC members never reach the node. Tests call them on
- * `new SoulsGameManagerNode('GameManager')`.
+ * Nobody's data. Each fighter owns its own: the player its attributes, HP, stamina, flasks and the curves
+ * between them (SoulsPlayer); each enemy type its stats (SoulsHollow, SoulsEliteKnight…); each weapon its
+ * numbers, hitbox, moveset and damage maths (SoulsWeapon and its subclasses). Damage goes from the weapon
+ * straight to the target's `receiveHit` — it never passes through here. The manager is the WORLD: who is
+ * registered, where you respawn, what happens when someone dies, and the shared sounds and effects.
  *
  * ## Game flow it owns
  *
@@ -36,16 +36,6 @@ import { angleDiff, clamp, forwardYaw, num, planarDistance, yawTo } from './Soul
  * level with no audio assigned yet plays exactly the same — just quietly. See SOULS_DEMO.md for the list.
  */
 export default class SoulsGameManagerNode extends Node {
-  // ----- balance: player stats -------------------------------------------------------------------
-  /** HP at Vigor 10. Each point to 30 adds `hpPerVigor`, then the curve flattens (see hpForVigor). */
-  public baseHp: number = 400
-  public hpPerVigor: number = 30
-  /** Stamina at Endurance 10, plus `staminaPerEndurance` per point to 40. */
-  public baseStamina: number = 90
-  public staminaPerEndurance: number = 3
-  /** Attack-rating multiplier applied when a weapon's STR or DEX requirement is not met. */
-  public unmetRequirementPenalty: number = 0.6
-
   // ----- flow -------------------------------------------------------------------------------------
   /** Seconds between the killing blow and the YOU DIED banner. */
   public deathBannerDelay: number = 1.2
@@ -53,8 +43,6 @@ export default class SoulsGameManagerNode extends Node {
   public respawnDelay: number = 5
   /** Template instantiated where the player died, carrying their souls. */
   public bloodstainTemplate: string = 'Bloodstain'
-  /** Effect template spawned on every successful melee hit. */
-  public hitSparkTemplate: string = 'Hit Spark'
 
   // ----- blood (see bleed) -------------------------------------------------------------------------
   /** Off, no blood at all: no spray and no decals. */
@@ -78,12 +66,9 @@ export default class SoulsGameManagerNode extends Node {
   /** Log a one-off warning when the project's input map lacks the souls actions. */
   public checkInputMap: boolean = true
 
-  // ----- runtime state (read by the HUD) -----------------------------------------------------------
+  // ----- runtime state (read by the HUD, which reads the boss's own name and health off `boss`) ----
   public bossActive: boolean = false
   public bossDefeated: boolean = false
-  public bossName: string = ''
-  public bossHp: number = 0
-  public bossMaxHp: number = 1
 
   private _player: Node = null
   private _hud: Node = null
@@ -106,9 +91,11 @@ export default class SoulsGameManagerNode extends Node {
 
   onStart() {
     this._player = this.findNode('Player')
-    this._hud = this.findNode('HUD')
-    this._banner = this.findNode('Banner')
-    this._menu = this.findNode('BonfireMenu')
+    // Every UI belongs to someone: the player's HUD and level-up menu are the PLAYER's children, the
+    // world banners (YOU DIED, BONFIRE LIT, VICTORY) are this manager's own — the game flow it runs.
+    this._hud = this._player?.getChildByName('HUD')[0] ?? null
+    this._menu = this._player?.getChildByName('BonfireMenu')[0] ?? null
+    this._banner = this.getChildByName('Banner')[0] ?? null
     this._sounds = this.findNode(this.soundsGroup)
     if (this._player) {
       const p = this._player.worldPosition
@@ -117,109 +104,6 @@ export default class SoulsGameManagerNode extends Node {
       this._respawnYaw = Math.atan2(f[0], f[2]) * 180 / Math.PI
     }
     if (this.checkInputMap) this._checkInputMap()
-  }
-
-  // =================================================================================================
-  // Rules — pure functions of their arguments and the tuning fields above
-  // =================================================================================================
-
-  /** Max HP for a Vigor value. Steep to 30, gentler to 40, then a trickle. */
-  public hpForVigor(vigor: number): number {
-    const v = Math.max(10, vigor)
-    return Math.round(this.baseHp + this.hpPerVigor * Math.min(v - 10, 20)
-      + 12 * clamp(v - 30, 0, 10) + 5 * Math.max(v - 40, 0))
-  }
-
-  /** Max stamina for an Endurance value. */
-  public staminaForEndurance(endurance: number): number {
-    const e = Math.max(10, endurance)
-    return Math.round(this.baseStamina + this.staminaPerEndurance * Math.min(e - 10, 30) + Math.max(e - 40, 0))
-  }
-
-  /**
-   * How much a stat adds to a weapon that scales with it fully: 0 at 10, 0.6 at 30, 0.9 at 50, then a
-   * quarter of a percent per point. Soft caps are the whole reason a build has to choose.
-   */
-  public statBonus(stat: number): number {
-    if (stat <= 10) return 0
-    if (stat <= 30) return (stat - 10) / 20 * 0.6
-    if (stat <= 50) return 0.6 + (stat - 30) / 20 * 0.3
-    return 0.9 + (stat - 50) * 0.0025
-  }
-
-  /**
-   * A weapon's attack rating for the given stats.
-   *
-   *   AR = baseDamage × (1 + strScaling·bonus(STR) + dexScaling·bonus(DEX))
-   *
-   * times `unmetRequirementPenalty` when either requirement is not met.
-   */
-  public attackRating(weapon: any, strength: number, dexterity: number): number {
-    if (!weapon) return 0
-    const base = num(weapon.baseDamage, 0)
-    let ar = base * (1 + num(weapon.strScaling, 0) * this.statBonus(strength)
-      + num(weapon.dexScaling, 0) * this.statBonus(dexterity))
-    if (strength < num(weapon.strRequirement, 0) || dexterity < num(weapon.dexRequirement, 0))
-      ar *= this.unmetRequirementPenalty
-    return Math.round(ar)
-  }
-
-  /** Souls needed to go from `level` to `level + 1`. */
-  public levelCost(level: number): number {
-    const l = Math.max(1, level) - 1
-    return Math.round(400 + 120 * l + 4 * l * l)
-  }
-
-  /** Character level from the four stats: 1 + every point spent above 10. */
-  public levelFor(vigor: number, endurance: number, strength: number, dexterity: number): number {
-    return 1 + (vigor - 10) + (endurance - 10) + (strength - 10) + (dexterity - 10)
-  }
-
-  /** Damage that survives a defence fraction (0..0.9). Never below 1, so a hit always registers. */
-  public applyDefense(raw: number, defense: number): number {
-    return Math.max(1, Math.round(raw * (1 - clamp(defense, 0, 0.9))))
-  }
-
-  /**
-   * Choose an enemy's next attack.
-   *
-   * Eligible: off cooldown, `minRange <= distance <= maxRange`, and allowed in this `phase` (an attack's
-   * `phase` is the phase it UNLOCKS at — 0 and 1 mean always, 2 means only once the boss has turned).
-   * The same attack twice in a row is avoided whenever anything else qualifies. Then weighted random.
-   *
-   * `attacks` are plain records (or SoulsEnemyAttack nodes) and `cooldowns` maps name -> seconds left,
-   * so the choice is testable with no scene at all.
-   */
-  public pickEnemyAttack(attacks: any[], distance: number, phase: number, lastName: string,
-    cooldowns: any, random: number): any {
-    const ok = (a: any) => (num(a.phase, 0) <= Math.max(1, phase))
-      && distance >= num(a.minRange, 0) && distance <= num(a.maxRange, 3)
-      && !(cooldowns && cooldowns[a.name] > 0)
-    let pool = attacks.filter(ok)
-    if (pool.length > 1) {
-      const fresh = pool.filter(a => a.name !== lastName)
-      if (fresh.length) pool = fresh
-    }
-    if (!pool.length) return null
-    const total = pool.reduce((s, a) => s + Math.max(0.0001, num(a.weight, 1)), 0)
-    let pick = clamp(random, 0, 0.999999) * total
-    for (const a of pool) {
-      pick -= Math.max(0.0001, num(a.weight, 1))
-      if (pick <= 0) return a
-    }
-    return pool[pool.length - 1]
-  }
-
-  /**
-   * Order lock-on candidates: smallest angle off the camera's forward first, distance breaking ties in
-   * 10-degree buckets so two enemies side by side resolve to the nearer.
-   */
-  public rankLockTargets(origin: ArrayLike<number>, yawDeg: number, candidates: any[], maxRange: number): any[] {
-    return candidates
-      .map(c => ({ c, d: planarDistance(origin, c.position), a: Math.abs(angleDiff(yawTo(origin, c.position), yawDeg)) }))
-      .filter(x => x.d <= maxRange)
-      .sort((x, y) => (Math.floor(x.a / 10) - Math.floor(y.a / 10)) || (x.d - y.d))
-      .map(x => x.c)
   }
 
   // =================================================================================================
@@ -243,41 +127,6 @@ export default class SoulsGameManagerNode extends Node {
 
   public get player(): Node { return this._player }
   public get boss(): Node { return this._boss }
-
-  // =================================================================================================
-  // Combat
-  // =================================================================================================
-
-  /**
-   * The player's blade reached `target` (an enemy's hurtbox) at `point`. WHO is hit is decided by the
-   * blade sweep (SoulsHitbox.stepSwing); this applies the damage: attack rating × the move's multiplier,
-   * the weapon's poise damage × the move's, and a spark where the blade met the body. Returns true if
-   * the hit landed.
-   */
-  public applyPlayerHit(player: Node, move: any, weapon: any, target: Node, point: ArrayLike<number>): boolean {
-    const e = target as any
-    if (!player || !e?.receiveHit) return false
-    const p = player as any
-    const ar = this.attackRating(weapon, num(p.strength, 10), num(p.dexterity, 10))
-    const damage = Math.round(ar * num(move?.damageMul, 1))
-    const poise = num(weapon?.poiseDamage, 15) * num(move?.poiseMul, 1)
-    if (!e.receiveHit(damage, poise, player)) return false
-    if (point) this.fx(this.hitSparkTemplate, point)
-    this.sfx('Hit')
-    return true
-  }
-
-  /**
-   * An enemy's weapon (or slam) reached the player's hurtbox. A rolling player's hurtbox is off, so the
-   * sweep never gets here during i-frames. Returns true if the player took damage.
-   */
-  public applyEnemyHit(enemy: Node, attack: any, target: Node): boolean {
-    const player = (target ?? this._player) as any
-    if (!enemy || !attack || !player || player.isDead) return false
-    const landed = !!player.receiveDamage?.(num(attack.damage, 50), num(attack.poiseDamage, 20), enemy)
-    if (landed) this.sfx('Player Hit')
-    return landed
-  }
 
   // =================================================================================================
   // Zones (the player's trigger overlaps, forwarded by SoulsPlayer)
@@ -414,10 +263,6 @@ export default class SoulsGameManagerNode extends Node {
   /** The boss spawn calls this every time it creates a boss, so the manager always holds the live one. */
   public registerBoss(boss: Node): void {
     this._boss = boss
-    const b = boss as any
-    this.bossName = b.displayName ?? boss.name
-    this.bossHp = num(b.hp, 1)
-    this.bossMaxHp = Math.max(1, num(b.maxHp, 1))
   }
 
   public startBossFight(gate: Node): void {
@@ -460,16 +305,6 @@ export default class SoulsGameManagerNode extends Node {
     this.respawnEnemies(true)
   }
 
-  onUpdate(delta: number) {
-    const boss = this._boss as any
-    if (boss) {
-      this.bossHp = Math.max(0, num(boss.hp, 0))
-      this.bossMaxHp = Math.max(1, num(boss.maxHp, 1))
-    }
-    // A player who reaches the arena without passing the fog (a physics push, an editor teleport) still
-    // starts the fight: the arena's trigger zone does that, through onPlayerEnteredZone.
-  }
-
   // =================================================================================================
   // Presentation helpers
   // =================================================================================================
@@ -505,8 +340,7 @@ export default class SoulsGameManagerNode extends Node {
 
   /**
    * A hit drew blood: droplets fly off `target`, a pool lands under it and a spatter along the blow,
-   * from `from` toward `target`. Called by SoulsEnemy.receiveHit and SoulsPlayer.receiveDamage when a hit
-   * lands. `amount` (the damage dealt) sizes the splat.
+   * from `from` toward `target`. Called by SoulsCharacter.receiveHit when a hit lands. `amount` (the damage dealt) sizes the splat.
    */
   public bleed(target: Node, from: Node, amount: number): void {
     if (!this.bloodEnabled || !target || !(amount > 0)) return

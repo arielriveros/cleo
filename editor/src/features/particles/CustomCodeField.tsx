@@ -44,7 +44,7 @@ export default function CustomCodeField(props: {
             {busy ? 'Compiling…' : 'Compile'}
           </Button>
         } />
-      <div className='text-[10px] text-dim'>
+      <div className='text-ui-xs text-dim'>
         {status} Reads and writes <code>(*p).position</code>, <code>velocity</code>, <code>age</code>,{' '}
         <code>lifetime</code>, <code>size</code>, <code>rotation</code>, <code>spin</code>, <code>color</code>,{' '}
         <code>seed</code>; <code>dt</code> and <code>custom</code> are in scope. Set <code>lifetime = 0.0</code> to kill.

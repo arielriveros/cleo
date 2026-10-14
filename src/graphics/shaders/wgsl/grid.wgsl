@@ -111,8 +111,17 @@ fn fs_main(in: VertexOutput) -> GridOut {
     // depthMask is off during this pass, so this value is only used for the LEQUAL test, not written.
     let clip = u_grid.u_viewProj * vec4<f32>(hit, 1.0);
 
+    // Pushed slightly AWAY from the camera, so a surface lying in the grid plane (a floor plane at the
+    // origin) consistently covers the grid, as any other surface does, instead of z-fighting with it.
+    // The grid's analytic depth and the surface's rasterized depth agree only to rounding — and the
+    // scene's depth is TAA-jittered by up to a pixel while this ray is not — so which one won flipped from
+    // pixel to pixel and frame to frame. The push is slope-scaled, like polygon offset: `fwidth` is how
+    // much the depth changes across one pixel, which bounds both the rounding and the jitter however
+    // grazing the view. The constant floor covers a view straight down, where the slope is ~0. Anything
+    // not in the plane is far more than this from it, so the grid shows past everything else as before.
+    let depth = (clip.z / clip.w) * 0.5 + 0.5;
     var out: GridOut;
     out.color = vec4<f32>(col, a);
-    out.depth = (clip.z / clip.w) * 0.5 + 0.5;
+    out.depth = min(depth + fwidth(depth) * 2.0 + 2e-6, 1.0);
     return out;
 }

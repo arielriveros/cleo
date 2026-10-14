@@ -1,7 +1,7 @@
 # Input
 
-**Input mode** authors the project's action map: what verbs the game has, and what drives them. It
-shows only the Input panel over a live scene, so you can judge a change immediately.
+**Options ▸ Project ▸ Input** authors the project's action map: what verbs the game has, and what
+drives them. It sits over a live scene, so you can judge a change immediately. See [Options](options.md).
 
 The vocabulary and the default map are in [Input bindings](../reference/input-bindings.md); reading
 actions from script is in [Input (scripting)](../scripting/input.md).

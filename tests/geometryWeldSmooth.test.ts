@@ -123,3 +123,54 @@ describe('welding is what lets tangents be a field at all', () => {
         expect(g.weldSmooth(45)).toBe(g);
     });
 });
+
+/**
+ * A SKINNED mesh through the weld. The weld renumbers vertices; joint indices and weights indexed by the
+ * old order then give every vertex some other vertex's bones. In the bind pose every bone matrix is ~the
+ * identity, so the model looked right at rest — and exploded the moment a clip moved a bone. A Mixamo
+ * character imported through the .fbx route did exactly that.
+ */
+describe('weldSmoothWith carries skinning through the weld', () => {
+    // The hinge, with its two wings bound to different bones: corners on the flat wing (and on the hinge
+    // edge, which both wings share) to bone 1, the folded wing's free corners to bone 2.
+    const skinnedHinge = () => {
+        const g = hinge(30);
+        const pos = g.positions;
+        const joints: number[] = [], weights: number[] = [];
+        for (let v = 0; v < 12; v++) {
+            const z = pos[v * 3 + 2];
+            joints.push(z > 1e-6 ? 2 : 1, 0, 0, 0);
+            weights.push(1, 0, 0, 0);
+        }
+        return { g, joints: new Float32Array(joints), weights: new Float32Array(weights) };
+    };
+
+    it('returns joint arrays in the welded vertex order, one entry per welded vertex', () => {
+        const { g, joints, weights } = skinnedHinge();
+        const { geometry, attributes: [j, w] } = g.weldSmoothWith(45, [
+            { data: joints, components: 4 }, { data: weights, components: 4 },
+        ]);
+        expect(geometry.vertexCount).toBeLessThan(12);
+        expect(j.length).toBe(geometry.vertexCount * 4);
+        expect(w.length).toBe(geometry.vertexCount * 4);
+        // Every welded vertex keeps ITS OWN bone: lifted corners (z > 0) on bone 2, everything else bone 1.
+        const P = geometry.positions;
+        for (let v = 0; v < geometry.vertexCount; v++)
+            expect(j[v * 4], `vertex ${v} at z=${P[v * 3 + 2]}`).toBe(P[v * 3 + 2] > 1e-6 ? 2 : 1);
+    });
+
+    it('never shares a vertex between corners whose influences differ', () => {
+        const { g, joints, weights } = skinnedHinge();
+        // Rebind one hinge corner (corner 0 sits at A) to bone 3: it must stay its own vertex.
+        joints[0] = 3;
+        const plain = g.weldSmoothWith(45, []).geometry.vertexCount;
+        const { geometry, attributes: [j] } = g.weldSmoothWith(45, [{ data: joints, components: 4 }, { data: weights, components: 4 }]);
+        expect(geometry.vertexCount).toBe(plain + 1);
+        expect([...j].filter((_, i) => i % 4 === 0)).toContain(3);
+    });
+
+    it('weldSmooth itself is unchanged', () => {
+        const g = hinge(30);
+        expect(g.weldSmooth(45).vertexCount).toBe(g.weldSmoothWith(45, []).geometry.vertexCount);
+    });
+});

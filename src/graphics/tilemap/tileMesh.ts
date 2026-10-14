@@ -147,6 +147,14 @@ export class TileMesh {
                 if (meta.tint) { r = meta.tint[0]; g = meta.tint[1]; b = meta.tint[2]; }
                 if (meta.opacity !== undefined) a *= meta.opacity;
             }
+            // Overdrive: tilemap.wgsl linearises the tint (pow 2.2), so ^(1/2.2) here is exactly ×overdrive in
+            // linear light. The vertex buffer is float, so a tint past 1 survives. An animated tile uses its
+            // base tile's overdrive (only UVs are patched per frame).
+            const overdrive = tileset.overdriveOf(tile);
+            if (overdrive !== 1) {
+                const k = Math.pow(overdrive, 1 / 2.2);
+                r *= k; g *= k; b *= k;
+            }
 
             for (const [ux, uy] of CORNERS) {
                 const [s, t] = orientUVFlags(ux, uy, cellRot90(packed), cellFlipX(packed), cellFlipY(packed));

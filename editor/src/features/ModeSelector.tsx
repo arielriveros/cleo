@@ -1,5 +1,6 @@
 import { useCleoEngine, EditorMode } from "./EngineContext";
 import { useProject } from "./ProjectContext";
+import { Button, cn } from "../components/ui";
 
 // Inline SVG glyphs (stroke currentColor) so no binary icon assets are needed.
 const SceneIcon = () => (
@@ -32,22 +33,11 @@ const UIIcon = () => (
     <path d="M17 16.5h1.5V18" />
   </svg>
 );
-const RendererIcon = () => (
+// A gear: the universal "settings" glyph. Options gathers engine, editor and project settings.
+const OptionsIcon = () => (
   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="4" y1="7" x2="20" y2="7" /><circle cx="9" cy="7" r="2" fill="currentColor" stroke="none" />
-    <line x1="4" y1="12" x2="20" y2="12" /><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none" />
-    <line x1="4" y1="17" x2="20" y2="17" /><circle cx="8" cy="17" r="2" fill="currentColor" stroke="none" />
-  </svg>
-);
-
-// A gamepad silhouette: two shoulders, a d-pad and two face buttons. Reads as "controller" at 16px,
-// which "keyboard" does not.
-const InputIcon = () => (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M7.5 8h9a4.5 4.5 0 0 1 4.4 3.6l.7 4A2.6 2.6 0 0 1 19 18.5c-.9 0-1.7-.5-2.2-1.2L15.6 15.5H8.4l-1.2 1.8c-.5.7-1.3 1.2-2.2 1.2a2.6 2.6 0 0 1-2.6-2.9l.7-4A4.5 4.5 0 0 1 7.5 8Z" />
-    <path d="M7 11v2.2M5.9 12.1h2.2" />
-    <circle cx="15.6" cy="11.4" r="1" fill="currentColor" stroke="none" />
-    <circle cx="17.6" cy="13.2" r="1" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
   </svg>
 );
 
@@ -60,15 +50,17 @@ interface SegmentProps {
 }
 function Segment({ active, disabled, title, onClick, children }: SegmentProps) {
   return (
-    <button
-      className={`flex items-center gap-1 px-2 h-[25px] text-xs border-r border-control-hover last:border-r-0 transition-colors
-        ${active ? 'bg-selected text-white' : 'bg-control text-muted hover:bg-control-hover'}
-        ${disabled ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}
+    <Button
+      className={cn(
+        'gap-1 px-2 py-0 h-[25px] rounded-none border-0 border-r border-control-hover last:border-r-0 font-normal',
+        active ? 'bg-selected hover:bg-selected text-fg' : 'text-muted',
+        disabled ? 'opacity-50 pointer-events-none' : 'cursor-pointer',
+      )}
       title={title}
       onClick={onClick}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -108,12 +100,9 @@ export default function ModeSelector() {
         <Segment active={editorMode === 'ui'} disabled={isPlayMode} title='UI layout & anchoring' onClick={() => select('ui')}>
           <UIIcon /> UI
         </Segment>
-        <Segment active={editorMode === 'renderer'} disabled={isPlayMode} title='Renderer options & debug channels' onClick={() => select('renderer')}>
-          <RendererIcon /> Renderer
-        </Segment>
-        {/* Not dimension-gated either: actions are the same on a 2D and a 3D scene. */}
-        <Segment active={editorMode === 'input'} disabled={isPlayMode} title='Input actions & bindings' onClick={() => select('input')}>
-          <InputIcon /> Input
+        {/* Engine, editor and project settings over the live viewport. Not dimension-gated. */}
+        <Segment active={editorMode === 'options'} disabled={isPlayMode} title='Options: engine, editor and project settings (renderer, input map, publishing…)' onClick={() => select('options')}>
+          <OptionsIcon /> Options
         </Segment>
       </div>
     </div>

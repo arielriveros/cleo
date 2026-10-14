@@ -26,6 +26,14 @@ export default defineConfig({
         // across the boundary, and one set of class identities rather than two. dist/ is still built,
         // but only for its .d.ts tree — which scriptEditor/cleoTypes.ts and the editor's `npm run
         // typecheck` are the real consumers of.
-        alias: { cleo: fileURLToPath(new URL('./src/cleo.ts', import.meta.url)) },
+        //
+        // `cleo/<path>` reaches one engine MODULE instead of the whole barrel. The import worker needs
+        // that: the barrel pulls in howler, which dies at import time without a `window`, and a worker
+        // that cannot even load has every model import silently re-run on the main thread. The editor
+        // types those paths from the dist .d.ts tree, which mirrors src/.
+        alias: [
+            { find: /^cleo$/, replacement: fileURLToPath(new URL('./src/cleo.ts', import.meta.url)) },
+            { find: /^cleo\/(.+)$/, replacement: fileURLToPath(new URL('./src/', import.meta.url)) + '$1' },
+        ],
     },
 });

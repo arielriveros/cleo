@@ -43,3 +43,11 @@ export const ToggleIcon = () => (
 export const TextInputIcon = () => (
   <S><rect x="3" y="7" width="18" height="10" rx="1.5" /><path d="M6.5 10v4" /></S>
 );
+
+/** Glyph per UI node type. Shared by the scene tree and the inspector cards. */
+export const UI_ICONS: Record<string, () => JSX.Element> = {
+  uiRoot: CanvasIcon, uiPanel: PanelIcon, uiText: TextIcon, uiImage: ImageIcon,
+  uiButton: ButtonIcon, uiStack: StackIcon, uiSpacer: SpacerIcon,
+  uiProgressBar: ProgressIcon, uiSlider: SliderIcon, uiToggle: ToggleIcon,
+  uiTextInput: TextInputIcon,
+};

@@ -331,6 +331,14 @@ describe('edgesOfAsset', () => {
     })
   })
 
+  describe('template variant', () => {
+    it('points at the template it is based on', () => {
+      const asset = { id: 'v', name: 'Sword', nodeJson: { name: 'Sword' }, scripts: {}, bodies: {}, triggers: {},
+        variant: { baseTemplateId: 'tpl-weapon', diff: { version: 1, nodes: {}, added: [], removed: [], bodies: {}, triggers: {}, scripts: {} } } }
+      expect(shape(edgesOfAsset('template', asset))).toContain('template:tpl-weapon@baseTemplateId')
+    })
+  })
+
   describe('animationField', () => {
     // A blend space is a skeleton plus clip NAMES, which is exactly a rig — so one locomotion field now
     // serves every character on the armature instead of one field per character.

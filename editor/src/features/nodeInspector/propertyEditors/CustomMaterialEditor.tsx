@@ -216,7 +216,7 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
         onSubmit={() => { if (isStale) compileNow(source) }}
         headerRight={
           <>
-            {isStale && <span className='text-[10px] text-warning' title='The preview still shows the last compiled shader'>unapplied edits</span>}
+            {isStale && <span className='text-ui-xs text-warning' title='The preview still shows the last compiled shader'>unapplied edits</span>}
             <Button
               size='sm'
               variant={isStale ? 'primary' : 'default'}

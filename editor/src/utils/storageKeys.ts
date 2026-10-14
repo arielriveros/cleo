@@ -50,6 +50,8 @@ export const KEYS = {
    * import. Being in MIGRATABLE_KEYS is enough for project duplication and workspace migration.
    */
   inputMap: 'cleo_input_map',
+  /** Project options that are not assets (engine runtime, publish window). An object, so not a LibName. */
+  projectSettings: 'cleo_project_settings',
 } as const;
 
 /** The asset libraries, as `usePersistedLibrary` and the bundle importer address them. */
@@ -68,7 +70,7 @@ export const LIB_NAMES: readonly LibName[] = [
  * (idbKeysByPrefix), not enumerated. `legacyProject` is absent because it is workspace-wide legacy state.
  */
 export const MIGRATABLE_KEYS: readonly string[] =
-  [KEYS.projectMeta, KEYS.vfs, KEYS.inputMap, ...LIB_NAMES.map(n => KEYS[n])];
+  [KEYS.projectMeta, KEYS.vfs, KEYS.inputMap, KEYS.projectSettings, ...LIB_NAMES.map(n => KEYS[n])];
 
 // Every accessor takes an optional project id; omitted means "the open project". The two callers that pass
 // one explicitly — importing a bundle into a project that is not open, and deleting one — must do so
@@ -111,4 +113,9 @@ export function libKey(name: LibName, projectId?: string): string {
  */
 export function inputMapKey(projectId?: string): string {
   return scoped(KEYS.inputMap, projectId);
+}
+
+/** Engine runtime + publish-window options — project-wide, like the input map. See options/projectSettings. */
+export function projectSettingsKey(projectId?: string): string {
+  return scoped(KEYS.projectSettings, projectId);
 }

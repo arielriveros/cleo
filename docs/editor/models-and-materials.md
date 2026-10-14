@@ -58,6 +58,19 @@ One walk cycle can therefore drive several different characters.
 > **A model with no bone names cannot be mapped by name**, only by index, and the Clips panel warns
 > about it. Fix the export if you can.
 
+## Splitting a model into parts
+
+Open a model (double-click it in Assets) and use the **Parts** section. It lists every mesh in the model
+and, under a merged mesh, each of its material **sub-meshes**. Each row has two actions:
+
+- **Save as model** copies that piece into a new model, named `<model> – <part>`, beside the original
+  in the asset folder. The original is untouched.
+- **Extract** does the same and removes the piece from the open model. **Save** the model afterwards to
+  keep it; placed copies update as with any model edit. The last mesh can't be extracted.
+
+The new model keeps the piece's orientation and size inside the original, is centred on its own bounds,
+and links the same materials. A piece of a skinned character keeps the rig and its animations.
+
 ## LOD generation
 
 Open a model asset to reach the **Model inspector**: name, LOD levels, cull distance, *Generate
@@ -105,10 +118,34 @@ transparency does not — so prefer it for foliage, fences and grates.
 
 **Toon** — band count and spread, for Cel.
 
+**UV Mapping** — see below (Blinn-Phong, Cel and PBR).
+
 **Height** — see below.
 
 **Options** — side (front / back / double), transparency, shadow casting, probe participation,
 wireframe.
+
+### UV mapping: textures that don't stretch
+
+A primitive's texture coordinates run 0..1 across each face whatever its size, so a texture on a wall
+made from a cube scaled to 10 × 3 m shows one repeat stretched across the whole face. **UV Mapping**
+fixes that the way other engines do: Unreal's world-aligned / triplanar textures, Unity's Tiling &
+Offset plus ProBuilder's world UVs, Godot's UV1 Triplanar.
+
+| Projection | Use it for |
+|---|---|
+| **Mesh UV** | Imported, UV-unwrapped models. **Tiling** repeats the texture, **Offset** slides it. |
+| **Box** | Walls, floors, crates, level blocks. Each face is textured along its own axis at **Size** metres per repeat, so any scale keeps the same texel size. |
+| **Triplanar** | Rocks, cliffs, organic shapes. All three axes, blended by the surface direction (**Blend**: higher = sharper seams, cheaper look). |
+
+**Space** decides what the projection is measured against:
+- **Object** follows the object, including its scale, and keeps the texture still when the object moves.
+- **World** lines neighbouring pieces up into one continuous pattern, which suits modular walls.
+
+Tiling and Offset still apply on top of a projection. Projections ignore the model's UVs entirely, and
+normal maps keep working (their tangent frame is rebuilt per face). Parallax relief runs in Mesh UV and
+Box modes but not Triplanar. Cutout shadows still use the model's UVs. The material preview's **Box**
+shape (a stretched 2 × 1 × 0.5 m block) is the quickest way to compare modes.
 
 ### Height: displacement, tessellation and parallax
 

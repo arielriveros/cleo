@@ -1,5 +1,6 @@
 import type { BoneMapping, BoneMatchKind } from 'cleo'
 import type { RetargetBoneOption } from '../engineContextTypes'
+import { Select } from '../../components/ui'
 
 // The source-bone → target-joint table, used by the RIG editor.
 //
@@ -9,20 +10,19 @@ import type { RetargetBoneOption } from '../engineContextTypes'
 // kind chips, the unmapped-first ordering, the "— none —" sentinel — drift between the place a fix is
 // made and the place it is kept.
 //
-// TODO: that fork already exists. `AnimationImportModal` still renders its own inlined copy of this
-// table; point it here instead. The comment claimed the sharing before the second caller arrived.
+// Both callers now render this one table: the rig editor and `AnimationImportModal`.
 
 const KIND_LABEL: Record<BoneMatchKind, string> = {
   exact: 'exact', normalized: 'name', humanoid: 'auto', spine: 'spine', index: 'index', manual: 'manual', none: '—',
 }
 const KIND_STYLE: Record<BoneMatchKind, string> = {
-  exact: 'bg-success/15 text-green-300',
-  normalized: 'bg-success/15 text-green-300',
+  exact: 'bg-success/15 text-success-fg',
+  normalized: 'bg-success/15 text-success-fg',
   humanoid: 'bg-primary/15 text-primary',
   spine: 'bg-primary/15 text-primary',
   index: 'bg-warning/15 text-warning',
   manual: 'bg-highlight/20 text-highlight',
-  none: 'bg-red-900 text-red-300',
+  none: 'bg-danger-surface text-danger-fg',
 }
 
 /** Counts for the header, derived from the LIVE mapping so a fix updates them at once. */
@@ -55,15 +55,15 @@ export default function BoneMappingTable(props: {
       {rows.map(e => (
         <div
           key={e.sourceNode}
-          className='flex items-center gap-2 px-2 py-1 text-[11px] border-b border-control/50 last:border-0'
+          className='flex items-center gap-2 px-2 py-1 text-ui-sm border-b border-control/50 last:border-0'
         >
           <span className='flex-1 truncate' title={e.sourceName ?? `node ${e.sourceNode}`}>
             {e.sourceName ?? `node ${e.sourceNode}`}
           </span>
           <span className={`px-1.5 py-0.5 rounded shrink-0 ${KIND_STYLE[e.kind]}`}>{KIND_LABEL[e.kind]}</span>
           <span className='text-dim shrink-0'>→</span>
-          <select
-            className='bg-control text-white border border-control-hover rounded px-1 py-0.5 w-[190px] shrink-0'
+          <Select
+            className='px-1 py-0.5 w-[190px] shrink-0'
             value={e.targetNode ?? ''}
             onChange={ev => props.onRemap(e.sourceNode, ev.target.value === '' ? null : Number(ev.target.value))}
           >
@@ -71,11 +71,11 @@ export default function BoneMappingTable(props: {
                 curve, which is why an override can store a null target. */}
             <option value=''>— none —</option>
             {props.targetBones.map(b => <option key={b.node} value={b.node}>{b.name}</option>)}
-          </select>
+          </Select>
         </div>
       ))}
       {!rows.length && (
-        <div className='px-2 py-3 text-[11px] text-dim'>
+        <div className='px-2 py-3 text-ui-sm text-dim'>
           Nothing to map — no clip on this source rig animates a bone.
         </div>
       )}

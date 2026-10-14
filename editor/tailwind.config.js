@@ -44,12 +44,15 @@ module.exports = {
           surface: rgbVar('--danger-surface'),
           'surface-hover': rgbVar('--danger-surface-hover'),
           border: rgbVar('--danger-border'),
+          fg: rgbVar('--danger-fg'),
         },
         success: {
           DEFAULT: rgbVar('--success'),
           hover: rgbVar('--success-hover'),
+          fg: rgbVar('--success-fg'),
         },
         warning: rgbVar('--warning'),
+        scrim: rgbVar('--scrim'),
         node: {
           ui: rgbVar('--node-ui'),
         },
@@ -61,6 +64,19 @@ module.exports = {
       },
       fontFamily: {
         mono: 'var(--font-mono)',
+      },
+      // The editor's type scale as utilities (`text-ui-sm`), so a size is a ROLE rather than a pixel
+      // count — `text-[11px]` scattered through the panels is what let sizes drift. Must stay in step
+      // with the font-size group in components/ui/cn.ts, or tailwind-merge reads `text-ui-sm` as a colour
+      // and silently drops it next to `text-muted`.
+      fontSize: {
+        'ui-2xs': 'var(--text-ui-2xs)',
+        'ui-xs': 'var(--text-ui-xs)',
+        'ui-sm': 'var(--text-ui-sm)',
+        // A line height on the two sizes that replace Tailwind's text-xs / text-sm, so swapping one for the
+        // other moves nothing; the smaller ones replace bare text-[Npx] values, which carry none.
+        'ui': ['var(--text-ui)', '1rem'],
+        'ui-lg': ['var(--text-ui-lg)', '1.25rem'],
       },
       boxShadow: {
         'panel': '0 1px 1px rgba(0,0,0,0.15), 0 6px 12px rgba(0,0,0,0.25)'

@@ -5,6 +5,7 @@ import MachineGraph from '../../components/MachineGraph'
 import type { GraphLinkModel, GraphNodeModel } from '../../components/MachineGraph'
 import { useAiEditor } from './AiEditorContext'
 import AiGraphToolbar, { AiEmptyState } from './AiGraphToolbar'
+import { Button } from '../../components/ui'
 
 /**
  * The fuzzy model as a graph: variables feeding rules, rules feeding a variable.
@@ -328,15 +329,15 @@ export default function FuzzyGraph() {
       toolbar={
         <>
           <AiGraphToolbar />
-          <button className='px-2 py-1 rounded bg-primary hover:bg-primary-hover text-white border border-primary-active text-xs'
+          <Button variant='primary' className='px-2'
             onClick={() => addVariable(0, model.variables.length * AUTO_DY + 40)}
-            title='Add a new variable (or double-click the canvas)'>+ Variable</button>
-          <button className='px-2 py-1 rounded bg-control hover:bg-control-hover text-white border border-border text-xs disabled:opacity-40'
+            title='Add a new variable (or double-click the canvas)'>+ Variable</Button>
+          <Button className='px-2 disabled:opacity-40'
             disabled={model.variables.length === 0}
             onClick={() => addRule(AUTO_DX * 2, model.rules.length * AUTO_DY + 40)}
             title={model.variables.length === 0
               ? 'Add a variable first — a rule needs something to read and something to drive'
-              : 'Add a new rule'}>+ Rule</button>
+              : 'Add a new rule'}>+ Rule</Button>
         </>
       }
     />

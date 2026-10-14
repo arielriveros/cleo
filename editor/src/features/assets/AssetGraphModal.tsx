@@ -11,7 +11,7 @@ import type { AssetKind } from '../../utils/vfs'
 import { buildReferenceView } from './assetGraphLayout'
 import type { AssetNodeView } from './assetGraphLayout'
 import AssetGraphCanvas from './AssetGraphCanvas'
-import { Modal, cn, hintClass, sectionTitleClass } from '../../components/ui'
+import { Modal, ModalHeader, ModalFooter, Button, TextInput, SegmentedControl, cn, hintClass, sectionTitleClass } from '../../components/ui'
 
 // The reference viewer. One asset in the middle, what uses it on the left, what it uses on the right.
 //
@@ -117,33 +117,35 @@ export default function AssetGraphModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal onClose={onClose} className='w-[92vw] h-[86vh] max-h-[86vh] flex flex-col overflow-hidden overflow-y-hidden'>
-      <div className='shrink-0 px-3 py-2 border-b border-border flex items-center gap-2'>
+      <ModalHeader className='shrink-0 px-3 py-2 border-border flex items-center gap-2'>
         <span className={sectionTitleClass}>Reference graph</span>
 
         {/* Root picker */}
         <div className='relative ml-2' ref={pickerRef}>
-          <button
-            className='inline-flex items-center gap-1.5 h-[22px] px-2 rounded bg-control border border-border text-[11px] hover:bg-control-hover'
+          <Button
+            size='sm'
+            className='h-[22px] text-ui-sm font-normal'
+            active={pickerOpen}
             onClick={() => setPickerOpen(v => !v)}
             title='Choose the asset to centre the graph on'>
             {root && <img src={iconFor(root.kind as AssetKind)} className='w-3.5 h-3.5' alt='' draggable={false} />}
             <span className='max-w-[220px] truncate'>{root ? nameOf(root) : 'Pick an asset'}</span>
-            <span className='text-[9px]'>▾</span>
-          </button>
+            <span className='text-ui-2xs'>▾</span>
+          </Button>
           {pickerOpen && (
             <div className='absolute left-0 top-[26px] z-30 w-[300px] bg-surface-raised border border-border rounded shadow-lg'>
-              <input
+              <TextInput
                 autoFocus
-                className='w-full h-[24px] px-2 bg-control border-b border-border text-[11px] text-fg placeholder:text-dim focus:outline-none'
+                className='h-[24px] rounded-none border-0 border-b text-ui-sm placeholder:text-dim'
                 placeholder='Search assets'
                 value={search}
-                onChange={e => setSearch(e.target.value)}
+                onChange={setSearch}
               />
               <div className='max-h-[320px] overflow-y-auto'>
                 {matches.map(m => (
                   <button
                     key={m.path}
-                    className='w-full flex items-center gap-2 px-2 h-[24px] text-[11px] text-left hover:bg-selected/30'
+                    className='w-full flex items-center gap-2 px-2 h-[24px] text-ui-sm text-left hover:bg-selected/30'
                     onClick={() => { setRoot(m.ref); setPickerOpen(false); setSearch('') }}>
                     <img src={iconFor(m.ref.kind as AssetKind)} className='w-3.5 h-3.5 shrink-0' alt='' draggable={false} />
                     <span className='truncate'>{m.name}</span>
@@ -160,7 +162,7 @@ export default function AssetGraphModal({ onClose }: { onClose: () => void }) {
 
         {dangling.length > 0 && (
           <span
-            className='ml-2 shrink-0 inline-flex items-center h-[18px] px-2 rounded bg-danger-surface border border-danger-border text-[10px] text-danger'
+            className='ml-2 shrink-0 inline-flex items-center h-[18px] px-2 rounded bg-danger-surface border border-danger-border text-ui-xs text-danger-fg'
             title='References pointing at an asset that no longer exists'>
             {dangling.length} broken reference{dangling.length === 1 ? '' : 's'}
           </span>
@@ -169,23 +171,24 @@ export default function AssetGraphModal({ onClose }: { onClose: () => void }) {
         <span className={cn(hintClass, 'ml-auto min-w-0 truncate hidden lg:inline')}>
           Click to re-centre · double-click to open
         </span>
-        <button
-          className='shrink-0 ml-auto lg:ml-0 inline-flex items-center gap-1 h-[22px] px-2 rounded bg-control border border-border text-[11px] text-muted hover:bg-control-hover hover:text-fg'
+        <Button
+          size='sm'
+          className='shrink-0 ml-auto lg:ml-0 gap-1 h-[22px] text-ui-sm font-normal text-muted hover:text-fg'
           onClick={onClose}
           title='Close the reference graph (Esc)'>
           <svg className='w-3 h-3' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2.5' strokeLinecap='round'>
             <path d='M6 6l12 12M18 6L6 18' />
           </svg>
           Close
-        </button>
-      </div>
+        </Button>
+      </ModalHeader>
 
       <div className='relative flex-1 min-h-0'>
         {/* Column captions, so the direction is readable before any edge is traced. */}
-        <div className='absolute top-2 left-3 z-10 pointer-events-none text-[10px] text-dim'>
+        <div className='absolute top-2 left-3 z-10 pointer-events-none text-ui-xs text-dim'>
           ← used by
         </div>
-        <div className='absolute top-2 right-3 z-10 pointer-events-none text-[10px] text-dim'>
+        <div className='absolute top-2 right-3 z-10 pointer-events-none text-ui-xs text-dim'>
           uses →
         </div>
         {root
@@ -197,16 +200,16 @@ export default function AssetGraphModal({ onClose }: { onClose: () => void }) {
           )}
       </div>
 
-      <div className='shrink-0 px-3 py-1.5 border-t border-border flex items-center gap-3'>
+      <ModalFooter className='shrink-0 px-3 py-1.5 border-border items-center justify-start gap-3'>
         <span className={hintClass}>
           {root ? `${KIND_LABEL[root.kind as AssetKind] ?? root.kind} · ${referencers} referencing · ${references} referenced` : ''}
         </span>
         {view.missingCount > 0 && (
-          <span className='text-[11px] text-danger'>
+          <span className='text-ui-sm text-danger-fg'>
             {view.missingCount} of these no longer exist
           </span>
         )}
-      </div>
+      </ModalFooter>
     </Modal>
   )
 }
@@ -216,22 +219,16 @@ function DepthPicker(
 ) {
   return (
     <div className='flex items-center gap-1 shrink-0'>
-      <span className='text-[10px] text-dim'>{label}</span>
-      <span className='text-[10px] text-muted tabular-nums'>({count})</span>
-      <div className='flex items-center gap-0.5 p-[2px] rounded bg-surface border border-border-subtle'>
-        {DEPTHS.map(d => (
-          <button
-            key={d.label}
-            className={cn(
-              'h-[16px] min-w-[20px] px-1 inline-flex items-center justify-center rounded-sm text-[10px]',
-              value === d.value ? 'bg-selected text-white' : 'text-muted hover:bg-control-hover hover:text-fg',
-            )}
-            onClick={() => onChange(d.value)}
-            title={`Follow ${d.label === 'All' ? 'every' : d.label} level`}>
-            {d.label}
-          </button>
-        ))}
-      </div>
+      <span className='text-ui-xs text-dim'>{label}</span>
+      <span className='text-ui-xs text-muted tabular-nums'>({count})</span>
+      <SegmentedControl
+        size='sm'
+        className='gap-0.5 p-[2px] rounded bg-surface border border-border-subtle'
+        itemClassName='h-[16px] min-w-[20px] px-1 py-0 rounded-sm text-ui-xs'
+        value={value}
+        onChange={onChange}
+        options={DEPTHS.map(d => ({ value: d.value, label: d.label, title: `Follow ${d.label === 'All' ? 'every' : d.label} level` }))}
+      />
     </div>
   )
 }

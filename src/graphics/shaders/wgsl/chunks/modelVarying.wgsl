@@ -13,6 +13,8 @@
 
 #include "./octNormal.wgsl"
 
+#include "./uvProjection.wgsl"
+
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) fragPos: vec3<f32>,        // world-space position
@@ -22,6 +24,11 @@ struct VertexOutput {
     @location(2) tangent: vec3<f32>,
     @location(3) bitangent: vec3<f32>,
     @location(4) normal: vec3<f32>,
+    // Object space, for a material's box/triplanar projection in Object space (chunks/uvProjection.wgsl):
+    // the position in METRES along the object's own axes (scaled by the node, so a stretched cube is
+    // measured as stretched) and the normal in those axes.
+    @location(5) objPos: vec3<f32>,
+    @location(6) objNormal: vec3<f32>,
 };
 
 /**
@@ -85,4 +92,13 @@ fn fillVarying(out: ptr<function, VertexOutput>, model: mat4x4<f32>,
     (*out).normal = normalize((model * vec4<f32>(normal, 0.0)).xyz);
     // Negated to match the handedness the importers produce; see materials/pbr.vs.
     (*out).bitangent = normalize((model * vec4<f32>(-bitangent, 0.0)).xyz);
+    let scale = vec3<f32>(length(model[0].xyz), length(model[1].xyz), length(model[2].xyz));
+    (*out).objPos = position * scale;
+    // Inverse-scaled, the way a normal transforms under a non-uniform scale.
+    (*out).objNormal = normalize(normal / max(scale, vec3<f32>(1e-6)));
+}
+
+/** The material's projection, resolved for this fragment. See chunks/uvProjection.wgsl. */
+fn surfaceUvOf(in: VertexOutput, params: UvParams) -> SurfaceUv {
+    return surfaceUv(params, in.uv, in.objPos, in.objNormal, in.fragPos, in.normal);
 }

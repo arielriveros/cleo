@@ -1,5 +1,5 @@
 import { MAX_PAINT_LAYERS, type LandscapeNode, type SculptTool } from 'cleo'
-import { Hint, Select, Slider } from '../../components/ui'
+import { Button, Hint, Select, Slider, cn } from '../../components/ui'
 import { useLandscapeBrush, setBrush, activeStrength, setActiveStrength, strengthSpec, activeToolKey, type PaintTool } from './landscapeBrushStore'
 import { MODES, SCULPT_TOOLS, PAINT_TOOLS, type LandscapeToolInfo } from './landscapeTools'
 import { useActiveLandscape } from './useActiveLandscape'
@@ -17,7 +17,7 @@ const toSlider = (r: number) => Math.log(r / SIZE_MIN) / Math.log(SIZE_MAX / SIZ
 const fromSlider = (t: number) => +(SIZE_MIN * Math.pow(SIZE_MAX / SIZE_MIN, t)).toFixed(2)
 
 const bar = 'absolute top-2 left-2 right-2 z-20 flex flex-wrap items-center gap-1 rounded-md border border-control'
-  + ' bg-surface-raised/95 px-1.5 py-1 text-white shadow-lg select-none w-fit max-w-[calc(100%-1rem)]'
+  + ' bg-surface-raised/95 px-1.5 py-1 text-fg shadow-lg select-none w-fit max-w-[calc(100%-1rem)]'
 
 export default function LandscapeToolbar() {
   const brush = useLandscapeBrush()
@@ -42,9 +42,9 @@ export default function LandscapeToolbar() {
       {brush.mode === 'sculpt' && <Tools tools={SCULPT_TOOLS} value={brush.sculptTool} onChange={(t: SculptTool) => setBrush({ sculptTool: t })} />}
       {brush.mode === 'paint' && <Tools tools={PAINT_TOOLS} value={brush.paintTool} onChange={(t: PaintTool) => setBrush({ paintTool: t })} />}
       {brush.mode === 'foliage' && (
-        <button className={`rounded px-2 py-1 text-xs ${brush.foliageErase ? 'bg-danger' : 'bg-control hover:bg-control-hover'}`}
+        <Button size='sm' variant={brush.foliageErase ? 'danger' : 'default'} className='py-1'
           title='Erase every foliage instance under the brush instead of scattering (Shift inverts too)'
-          onClick={() => setBrush({ foliageErase: !brush.foliageErase })}>{brush.foliageErase ? 'Erasing' : 'Scattering'}</button>
+          onClick={() => setBrush({ foliageErase: !brush.foliageErase })}>{brush.foliageErase ? 'Erasing' : 'Scattering'}</Button>
       )}
       {brush.mode === 'paint' && <><Divider /><PaintTarget node={node} revision={revision} refresh={refresh} /></>}
       <Divider />
@@ -76,7 +76,7 @@ function PaintTarget({ node, revision, refresh }: { node: LandscapeNode; revisio
   if (!active) {
     return (
       <span className='flex items-center gap-2' key={revision}>
-        <span className='text-[11px] text-muted'>Nothing to paint into yet.</span>
+        <span className='text-ui-sm text-muted'>Nothing to paint into yet.</span>
         <AddLayerButton disabled={false} onAdd={addLayer} />
       </span>
     )
@@ -84,7 +84,7 @@ function PaintTarget({ node, revision, refresh }: { node: LandscapeNode; revisio
 
   return (
     <span className='flex items-center gap-1' key={revision}>
-      <Select className='text-xs w-28' value={active.id} title='The layer this brush paints into'
+      <Select className='w-28' value={active.id} title='The layer this brush paints into'
         onChange={e => setBrush({ paintLayerId: e.target.value })}>
         {[...layers].reverse().map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
       </Select>
@@ -108,12 +108,11 @@ function Tools<T extends string>({ tools, value, onChange }: { tools: LandscapeT
 
 function IconButton({ active, title, onClick, children }: { active: boolean; title: string; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button title={title} onClick={onClick}
-      className={`w-7 h-7 p-1 rounded border transition-colors ${active
-        ? 'bg-selected border-white text-white' : 'bg-transparent border-transparent text-muted hover:bg-control-hover hover:text-white'}`}>
+    <Button title={title} onClick={onClick} size='icon' variant={active ? 'default' : 'ghost'} active={active}
+      className={cn('w-7 h-7 p-1', !active && 'hover:bg-control-hover')}>
       {children}
-    </button>
+    </Button>
   )
 }
 
-const Divider = () => <span className='mx-0.5 h-5 w-px bg-white/15' />
+const Divider = () => <span className='mx-0.5 h-5 w-px bg-fg/15' />

@@ -21,6 +21,7 @@ import { readDroppedEntries } from '../../utils/importGrouping'
 import { buildTemplateFromNode } from '../../utils/templates'
 import { buildControllerAsset } from '../../utils/animationControllers'
 import { hoveredScriptStore } from '../sceneInspector/hoveredScriptStore'
+import { Button, MenuItem, TextInput } from '../../components/ui'
 
 // The bottom bar's single "Assets" tab: one file-manager view over all five asset libraries, with real
 // folders. Folder layout lives in VfsContext, SVAR's store owns what is on screen, useFileManagerBridge
@@ -38,7 +39,7 @@ export default function AssetsExplorer({ active = true }: { active?: boolean }) 
   const { ready } = useVfs()
   if (!ready) {
     return (
-      <div className='w-full h-full flex items-center justify-center text-xs text-muted'>
+      <div className='w-full h-full flex items-center justify-center text-ui text-muted'>
         Loading assets…
       </div>
     )
@@ -316,23 +317,34 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
     parent: landingFolderRef.current,
   }), [apiRef, landingFolderRef])
 
-  const menuOptions = useCallback((mode: TContextMenuType): IFileMenuOption[] => {
+  // The template a "Create Variant" click applies to: the item the menu was opened on.
+  const menuTemplateRef = useRef<string | null>(null)
+  const menuOptions = useCallback((mode: TContextMenuType, item?: { id: string }): IFileMenuOption[] => {
     const options = getMenuOptions(mode).filter(o => o.id !== 'download') as IFileMenuOption[]
     // Right-clicking empty space offers folder creation. The id is custom, so SVAR's performAction ignores
     // it — the capture-phase click listener below runs it.
     if (mode === 'body') return [{ id: 'cleo-new-folder', icon: 'wxi-folder', text: 'New folder' }, ...options]
+    // A template offers a variant of itself: a new template that inherits it and records only its changes.
+    // Only an item's own menu sets the target: SVAR also asks for the 'add' menu while this one is open,
+    // and clearing the ref then made the click a no-op.
+    if (mode !== 'file' && mode !== 'folder' && mode !== 'multiselect') return options
+    const entry = mode === 'file' && item ? pathIndexRef.current.get(item.id) : undefined
+    menuTemplateRef.current = entry?.kind === 'template' ? entry.assetId : null
+    if (menuTemplateRef.current) return [{ id: 'cleo-create-variant', icon: 'wxi-plus', text: 'Create Variant' }, ...options]
     return options
-  }, [])
+  }, [pathIndexRef])
 
   // SVAR's context menu portals to <body> and its performAction is a closed switch over built-in action
   // ids, so a custom option's click goes nowhere. Catch it at the document level.
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest?.('[data-id=":cleo-new-folder"]')) newFolder()
+      if ((e.target as HTMLElement).closest?.('[data-id=":cleo-create-variant"]') && menuTemplateRef.current)
+        depsRef.current.createTemplateVariant(menuTemplateRef.current)
     }
     document.addEventListener('click', onClick, true)
     return () => document.removeEventListener('click', onClick, true)
-  }, [newFolder])
+  }, [newFolder, depsRef])
 
   // The explorer's entire chrome is ONE 28px row; every saved pixel goes to the card area below, which at
   // a 30vh bottom bar has only ~130px for a full card row.
@@ -378,25 +390,27 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
     { mode: 'panels', title: 'Split view', icon: <svg className='w-3 h-3' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2'><rect x='3' y='4' width='8' height='16' rx='1' /><rect x='13' y='4' width='8' height='16' rx='1' /></svg> },
   ]
   return (
-    <div className='w-full h-full flex flex-col text-sm'>
+    <div className='w-full h-full flex flex-col text-ui'>
       <div className='h-[28px] flex items-center gap-1.5 px-2 border-b border-border-subtle shrink-0 bg-surface-sunken'>
         <div className='relative shrink-0' ref={addMenuRef}>
-          <button
-            className='shrink-0 inline-flex items-center h-[20px] px-2 rounded text-[11px] font-semibold leading-none whitespace-nowrap cursor-pointer bg-success hover:bg-success-hover'
+          <Button
+            variant='success'
+            size='sm'
+            className='shrink-0 gap-0 h-[20px] text-ui-sm font-semibold leading-none whitespace-nowrap'
             onClick={() => setAddOpen(v => !v)}
             title='Add a new asset or folder, or import files'>
-            + Add <span className='ml-1 text-[9px]'>▾</span>
-          </button>
+            + Add <span className='ml-1 text-ui-2xs'>▾</span>
+          </Button>
           {addOpen && (
-            <div className='absolute left-0 top-[22px] z-20 min-w-[160px] py-1 bg-surface-raised border border-border rounded shadow-lg'>
+            <div className='absolute left-0 top-[22px] z-20 min-w-[160px] p-1 bg-surface-raised border border-border rounded shadow-lg'>
               {addItems.map(item => (
-                <button key={item.label}
-                  className='w-full flex items-center gap-2 h-[24px] px-2 text-[11px] text-left whitespace-nowrap hover:bg-selected/30'
+                <MenuItem key={item.label}
+                  className='items-center text-ui-sm whitespace-nowrap'
+                  icon={item.icon}
                   onClick={() => { setAddOpen(false); item.run() }}
                   title={item.title}>
-                  {item.icon}
                   {item.label}
-                </button>
+                </MenuItem>
               ))}
             </div>
           )}
@@ -433,30 +447,29 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
             if (files.length) void importAnimationFiles(files)
           }} />
 
-        <input
+        <TextInput
           id='asset-search'
-          className='shrink min-w-[80px] w-[200px] h-[20px] px-2 rounded bg-control border border-border text-[11px] text-fg placeholder:text-dim focus:outline-none focus:border-highlight'
+          className='shrink min-w-[80px] w-[200px] h-[20px] py-0 text-ui-sm placeholder:text-dim'
           placeholder='Search'
           value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={setSearch}
         />
 
-        {importing && <span className='shrink-0 text-[11px] text-warning whitespace-nowrap'>Importing…</span>}
+        {importing && <span className='shrink-0 text-ui-sm text-warning whitespace-nowrap'>Importing…</span>}
 
-        <span className='ml-auto min-w-0 truncate text-[11px] text-dim hidden xl:inline'>
+        <span className='ml-auto min-w-0 truncate text-ui-sm text-dim hidden xl:inline'>
           Drag assets into the viewport or onto a slot · drop files here to import
         </span>
 
         {/* Assets in a library that the explorer isn't showing. The badge advertises the problem rather
             than waiting to be found — that is the whole reason this exists. */}
         <div className='relative shrink-0' ref={missingMenuRef}>
-          <button
+          <Button
             id='asset-missing-audit'
-            className={`shrink-0 w-[24px] h-[20px] inline-flex items-center justify-center rounded ${
-              missingOpen ? 'bg-selected text-white'
-                : audited ? 'text-warning hover:bg-control-hover'
-                : 'text-muted hover:bg-control-hover hover:text-fg'
-            }`}
+            variant='ghost'
+            size='icon'
+            active={missingOpen}
+            className={`shrink-0 w-[24px] h-[20px] p-0 ${!missingOpen && audited ? 'text-warning' : ''}`}
             onClick={() => setMissingOpen(v => !v)}
             title={audited
               ? `${audited} asset${audited === 1 ? '' : 's'} are out of step between your libraries and the explorer`
@@ -464,9 +477,9 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
             <svg className='w-3.5 h-3.5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
               <circle cx='11' cy='11' r='7' /><path d='M20 20l-3.5-3.5' /><path d='M11 8v3.5M11 14.5h.01' />
             </svg>
-          </button>
+          </Button>
           {audited > 0 && !missingOpen && (
-            <span className='absolute -top-[2px] -right-[2px] min-w-[12px] h-[12px] px-[3px] inline-flex items-center justify-center rounded-full bg-warning text-[9px] font-bold leading-none text-black pointer-events-none'>
+            <span className='absolute -top-[2px] -right-[2px] min-w-[12px] h-[12px] px-[3px] inline-flex items-center justify-center rounded-full bg-warning text-ui-2xs font-bold leading-none text-bg pointer-events-none'>
               {audited > 99 ? '99+' : audited}
             </span>
           )}
@@ -477,13 +490,12 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
 
         {/* The reference graph: what uses this asset, and what it uses. Sits beside the explorer audit
             because the two answer neighbouring questions about the same libraries. */}
-        <button
+        <Button
           id='asset-reference-graph'
-          className={`shrink-0 relative w-[24px] h-[20px] inline-flex items-center justify-center rounded ${
-            graphOpen ? 'bg-selected text-white'
-              : dangling.length ? 'text-warning hover:bg-control-hover'
-              : 'text-muted hover:bg-control-hover hover:text-fg'
-          }`}
+          variant='ghost'
+          size='icon'
+          active={graphOpen}
+          className={`shrink-0 relative w-[24px] h-[20px] p-0 ${!graphOpen && dangling.length ? 'text-warning' : ''}`}
           onClick={() => setGraphOpen(true)}
           title={dangling.length
             ? `${dangling.length} reference${dangling.length === 1 ? '' : 's'} point at an asset that no longer exists`
@@ -493,31 +505,37 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
             <path d='M7.3 7.3 16.7 11M7.3 16.7 16.7 13' />
           </svg>
           {dangling.length > 0 && !graphOpen && (
-            <span className='absolute -top-[2px] -right-[2px] min-w-[12px] h-[12px] px-[3px] inline-flex items-center justify-center rounded-full bg-warning text-[9px] font-bold leading-none text-black pointer-events-none'>
+            <span className='absolute -top-[2px] -right-[2px] min-w-[12px] h-[12px] px-[3px] inline-flex items-center justify-center rounded-full bg-warning text-ui-2xs font-bold leading-none text-bg pointer-events-none'>
               {dangling.length > 99 ? '99+' : dangling.length}
             </span>
           )}
-        </button>
+        </Button>
 
-        <button
+        <Button
           id='asset-preview-toggle'
-          className={`shrink-0 w-[24px] h-[20px] inline-flex items-center justify-center rounded ${previewOpen ? 'bg-selected text-white' : 'text-muted hover:bg-control-hover hover:text-fg'}`}
+          variant='ghost'
+          size='icon'
+          active={previewOpen}
+          className='shrink-0 w-[24px] h-[20px] p-0'
           onClick={togglePreview}
           title='Show the details pane for the selected asset'>
           <svg className='w-3.5 h-3.5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
             <path d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z' /><circle cx='12' cy='12' r='3' />
           </svg>
-        </button>
+        </Button>
 
         <div id='asset-view-modes' className='shrink-0 flex items-center gap-0.5 p-[2px] rounded bg-surface border border-border-subtle'>
           {modeButtons.map(b => (
-            <button key={b.mode}
+            <Button key={b.mode}
               data-mode={b.mode}
-              className={`w-[24px] h-[16px] inline-flex items-center justify-center rounded-sm ${viewMode === b.mode ? 'bg-selected text-white' : 'text-muted hover:bg-control-hover hover:text-fg'}`}
+              variant='ghost'
+              size='icon'
+              active={viewMode === b.mode}
+              className='w-[24px] h-[16px] p-0 rounded-sm'
               onClick={() => setMode(b.mode)}
               title={b.title}>
               {b.icon}
-            </button>
+            </Button>
           ))}
         </div>
       </div>

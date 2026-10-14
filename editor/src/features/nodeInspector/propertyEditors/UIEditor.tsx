@@ -4,6 +4,8 @@ import {
     UIProgressBarNode, UISliderNode, UIToggleNode, UITextInputNode, UIColor,
 } from 'cleo';
 import Collapsable from '../../../components/Collapsable';
+import { UI_ICONS, CanvasIcon } from '../../sceneInspector/uiIcons';
+import { TransformIcon, AppearanceIcon } from '../sectionIcons';
 import { ColorInput, NumberInput, TextInput, Select, Toggle, Slider, PropertyTable, PropertyRow } from '../../../components/ui';
 import { useEventBus } from '../../EventBusContext';
 import { TextureManager, isDerivedTextureId } from 'cleo';
@@ -109,7 +111,7 @@ function AnchorPicker({ node, onChange }: { node: UINode, onChange: () => void }
                     title={preset.title}
                     className={`flex items-center justify-center h-7 rounded border transition-colors ${
                         active?.key === preset.key
-                            ? 'bg-selected border-white text-white'
+                            ? 'bg-selected border-fg text-fg'
                             : 'bg-control border-control text-muted hover:bg-control-hover hover:text-fg'}`}
                     onClick={() => {
                         node.anchorMin = [...preset.min] as [number, number];
@@ -457,22 +459,27 @@ export default function UIEditor({ node }: { node: UINode }) {
 
     // A root's rect comes from the viewport or its projection, so anchor/offset do not apply to it.
     const isRoot = node instanceof UIRootNode;
+    const TypeIcon = UI_ICONS[node.nodeType] ?? CanvasIcon;
 
+    // Same card body as every other inspector section (`w-full p-2`): Collapsable adds no padding itself,
+    // and a bare PropertyTable put the labels flush against the card edge in UI mode only.
     return (
         <>
-            <Collapsable title={isRoot ? 'Canvas' : 'Element'} persistKey='ui-payload'>
-                <PayloadFields node={node} onChange={bump} />
+            <Collapsable title={isRoot ? 'Canvas' : 'Element'} icon={<TypeIcon />} persistKey='ui-payload'>
+                <div className='w-full p-2'><PayloadFields node={node} onChange={bump} /></div>
             </Collapsable>
 
             {!isRoot && (
-                <Collapsable title='Anchor & Rect' persistKey='ui-rect'>
-                    <AnchorPicker node={node} onChange={bump} />
-                    <RectFields node={node} onChange={bump} />
+                <Collapsable title='Anchor & Rect' icon={<TransformIcon />} persistKey='ui-rect'>
+                    <div className='w-full p-2'>
+                        <AnchorPicker node={node} onChange={bump} />
+                        <RectFields node={node} onChange={bump} />
+                    </div>
                 </Collapsable>
             )}
 
-            <Collapsable title='Appearance' persistKey='ui-appearance'>
-                <AppearanceFields node={node} onChange={bump} />
+            <Collapsable title='Appearance' icon={<AppearanceIcon />} persistKey='ui-appearance'>
+                <div className='w-full p-2'><AppearanceFields node={node} onChange={bump} /></div>
             </Collapsable>
         </>
     );

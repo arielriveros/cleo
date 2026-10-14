@@ -34,12 +34,14 @@ import { createAssetEditScene } from './demoScene/createAssetEditScene';
 import { parseByType, regenerateIds, stripDebug } from "../utils/nodeSubtree";
 import { cryptoRandomId } from "../utils/ids";
 import { Template, buildTemplateFromNode, instantiateTemplate, TEMPLATE_ID_VAR, templateInstanceRootOf } from "../utils/templates";
-import { clearOverride, writeOverrides, pathOf, nodeAtPath } from "../utils/templateOverrides";
+import { cascadeFrom, cloneJson, createVariant, flattenVariant, materializeVariant, rebaseVariant, revertInDiff, saveVariant, variantFromContent, type TemplateDiff } from "../utils/templateVariants";
+import { clearOverride, writeOverrides, pathOf, nodeAtPath, OVERRIDES_VAR } from "../utils/templateOverrides";
 import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf, getMaterialIdsOf, getNodeMaterial, unlinkToFallback, unlinkMaterialAt, materialSlotsReferencing, resolveMaterialRefs, serializedVar, MATERIAL_ID_VAR, MATERIAL_IDS_VAR } from "../utils/materials";
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds, syncSlotMaterialInTerrain, withSyncedSlotMaterial } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
-import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE } from "../utils/models";
+import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, modelInstanceShape, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE, buildPartAsset, submeshNodeJson, uniqueModelName, type ModelPart } from "../utils/models";
+import { detachForeignChildren, reattachForeignChildren } from "../utils/foreignChildren";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, defaultScriptModule, seedScriptFields, scriptKindOfAsset } from "../utils/scripts";
 import { buildScriptGraphCtx, deriveBaseType, resolveScriptVariables, dependentsOf } from "../utils/scriptGraph";
 import { pushExternalSource } from "./scriptWorkspace/externalSourceStore";
@@ -51,7 +53,7 @@ import { TilesetAsset, reembedTilesets, detachTileset } from "../utils/tilesets"
 import { AiBrainAsset, AiBrainKind, buildAiBrainAsset, reembedBrains, detachBrain } from "../utils/aiBrains";
 import { ParticleSystemAsset, buildParticleSystemAsset, reembedParticleSystems, detachParticleSystem } from "../utils/particleSystems";
 import type { AnimControllerAsset } from "../utils/animationControllers";
-import { instantiateController, reembedMachine } from "../utils/animationControllers";
+import { instantiateController, reembedMachine, pickControllerForRig, machineIsEmpty } from "../utils/animationControllers";
 import type { BoneMaskAsset } from "../utils/boneMasks";
 import type { PoseAsset } from "../utils/poseAssets";
 import type { ControllerNode, ParticleSystemNode } from "cleo";
@@ -96,7 +98,12 @@ import {
 } from "../utils/references";
 import { idbGet, idbSet } from "../utils/idb";
 import { EDITOR_CAMERA_MAP } from "./input/editorInputMap";
-import { KEYS, libKey, inputMapKey } from "../utils/storageKeys";
+import { KEYS, libKey, inputMapKey, projectSettingsKey } from "../utils/storageKeys";
+import { ProjectSettings, DEFAULT_PROJECT_SETTINGS, parseProjectSettings, applyEngineRuntime } from "./options/projectSettings";
+import { getEditorPrefs, editorPrefsStore } from "./options/editorPrefs";
+import { setGizmoSnapSteps } from "./gizmo/gizmoDrag";
+import { openScriptExternally } from "./options/scriptOpener";
+import { isDesktop } from "./publish/publishClient";
 import { assetIdOfTab, loadTabState, saveTabState, MAIN_MODES, MainMode } from "../utils/tabState";
 import { activeProjectAllowsLegacyImport, touchProject } from "../utils/projects";
 import { activeProjectId } from "../utils/projectScope";
@@ -222,7 +229,17 @@ const EngineContext = createContext<{
   modelsForClip: (asset: AnimationAsset) => ModelAsset[];
   editingAnimationId: string | null;
   enterTemplateEditor: (templateId?: string) => void;
+  /** A new variant of a template (inherits until edited), opened in its own tab. */
+  createTemplateVariant: (baseId: string) => void;
+  /** In the open variant tab: drop its changes to the node at `path` (all nodes when omitted). */
+  revertVariantChanges: (path?: string) => Promise<void>;
+  /** Make a placed copy into a new variant of its template, and relink the copy to it. */
+  createVariantFromInstance: (node: Node) => Promise<void>;
+  /** Base the open variant tab's template on another template, keeping its content. */
+  rebaseTemplateVariant: (newBaseId: string) => Promise<void>;
   editingTemplateName: string | null;
+  /** The open template tab's base, when that template is a VARIANT: what its nodes inherit from. */
+  editingTemplateVariant: { id: string; baseName: string; base: Template; diff: TemplateDiff } | null;
   templateRootId: string | null;
   enterMaterialEditor: (materialId?: string) => void;
   createMaterialForNode: (node: Node, submesh?: number) => void;
@@ -262,6 +279,9 @@ const EngineContext = createContext<{
    */
   inputMap: InputMap;
   setInputMap: React.Dispatch<React.SetStateAction<InputMap>>;
+  /** Engine runtime + publish-window options (Options ▸ Engine / Project). Applied live; published in `config`. */
+  projectSettings: ProjectSettings;
+  setProjectSettings: React.Dispatch<React.SetStateAction<ProjectSettings>>;
   templates: Template[];
   addTemplate: (t: Template) => void;
   removeTemplate: (id: string) => void;
@@ -460,12 +480,20 @@ const EngineContext = createContext<{
   unlinkAnimationFromRig: (rigId: string, animationId: string) => void;
   /** Point a model at a different rig, re-resolving every clip it plays. `undefined` unlinks. */
   setModelRig: (modelId: string, rigId: string | undefined) => void;
+  /** Give the rig's controller to a just-placed character that has no state machine. See adoptRigController. */
+  adoptRigController: (modelId: string, onlyRoot?: Node | null) => number;
   /** Rename a clip inside a shared `.anim` asset, or toggle its root motion. */
   editSharedClip: (animationId: string, clipName: string, patch: { name?: string; rootMotion?: boolean }) => void;
   modelSession: ModelEditSession | null;
   /** Node id of the active LOD level's root in the model tab scene (viewport drop parent), or null. */
   modelEditTargetId: string | null;
   setActiveModelName: (name: string) => void;
+  /**
+   * Save one part of the open model (a mesh node, or one material sub-mesh of a merged one) as a new model
+   * asset. `'extract'` also removes it from the open model; Save then writes the source as usual. Returns
+   * the new asset's id, or null.
+   */
+  saveModelPart: (part: ModelPart, mode: 'copy' | 'extract') => Promise<string | null>;
   /** Add an existing mesh asset as the next LOD level (levels are references, not copies). */
   addModelLodFromAsset: (modelId: string) => void;
   /** Decimate the open model into LOD levels; see generateModelLods. */
@@ -586,7 +614,12 @@ const EngineContext = createContext<{
     modelsForClip: () => [],
     editingAnimationId: null,
     enterTemplateEditor: () => {},
+    createTemplateVariant: () => {},
+    revertVariantChanges: async () => {},
+    createVariantFromInstance: async () => {},
+    rebaseTemplateVariant: async () => {},
     editingTemplateName: null,
+    editingTemplateVariant: null,
     templateRootId: null,
     enterMaterialEditor: () => {},
     createMaterialForNode: () => {},
@@ -618,6 +651,8 @@ const EngineContext = createContext<{
     templates: [],
     inputMap: DEFAULT_INPUT_MAP,
     setInputMap: () => {},
+    projectSettings: DEFAULT_PROJECT_SETTINGS,
+    setProjectSettings: () => {},
     addTemplate: () => {},
     removeTemplate: () => {},
     updateTemplate: () => {},
@@ -737,10 +772,12 @@ const EngineContext = createContext<{
     linkAnimationToRig: () => {},
     unlinkAnimationFromRig: () => {},
     setModelRig: () => {},
+    adoptRigController: () => 0,
     editSharedClip: () => {},
     modelSession: null,
     modelEditTargetId: null,
     setActiveModelName: () => {},
+    saveModelPart: async () => null,
     addModelLodFromAsset: () => {},
     generateModelLods: async () => {},
     removeModelLod: () => {},
@@ -894,7 +931,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
   // Per-tab runtime scene + root. Animation tabs also record where the SOURCE node lives (its scene may
   // be the main scene OR a template tab's scene) so authored state machines are written back correctly.
-  const tabRuntimeRef = useRef<Map<string, { scene: Scene; rootId: string; sourceScene?: Scene; sourceNodeId?: string; sourceTabId?: string; tm?: TerrainMaterial; helperTerrain?: Terrain; editNode?: ModelNode; previewSphere?: ModelNode; previewModelId?: string; skinnedId?: string }>>(new Map());
+  const tabRuntimeRef = useRef<Map<string, { scene: Scene; rootId: string; sourceScene?: Scene; sourceNodeId?: string; sourceTabId?: string; tm?: TerrainMaterial; helperTerrain?: Terrain; baseAtOpen?: Template; editNode?: ModelNode; previewSphere?: ModelNode; previewModelId?: string; skinnedId?: string }>>(new Map());
   const activeTabIdRef = useRef<string>(SCENE_TAB_ID);
   const activeTabKindRef = useRef<TabKind>('scene');
   const dirtyArmedRef = useRef(false); // suppress false-dirty from the helper reconciler right after open
@@ -1017,6 +1054,35 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   }, []);
   usePersistedLibrary(inputMapKey(), inputMap, inputMapLoadedRef);
 
+  // ----- Project settings (engine runtime, publish window) ---------------------------------------
+  // Same lifecycle as the input map: project-wide, its own key, persisted on change.
+  const [projectSettings, setProjectSettings] = useState<ProjectSettings>(() => parseProjectSettings(null));
+  const projectSettingsLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const stored = await idbGet<ProjectSettings>(projectSettingsKey());
+        if (stored) setProjectSettings(parseProjectSettings(stored));
+      } catch (e) { console.warn('Failed to load the project settings:', e); }
+      finally { projectSettingsLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary(projectSettingsKey(), projectSettings, projectSettingsLoadedRef);
+  const projectSettingsRef = useRef(projectSettings);
+  projectSettingsRef.current = projectSettings;
+  // Gizmo snap steps follow Options ▸ Editor ▸ Viewport.
+  useEffect(() => {
+    const sync = () => { const p = getEditorPrefs(); setGizmoSnapSteps({ translate: p.snapTranslate, rotateDeg: p.snapRotateDeg, scale: p.snapScale }); };
+    sync();
+    return editorPrefsStore.subscribe(sync);
+  }, []);
+
+  // Live: a change in Options ▸ Engine takes effect on the next frame, in the editor and in Play alike.
+  useEffect(() => {
+    const engine = instanceRef.current;
+    if (engine) applyEngineRuntime(engine as any, projectSettings.engine, AudioManager.Instance.mixer);
+  }, [projectSettings.engine]);
+
   // Push edits straight into the running system, so Play picks up a rebind with no rebuild — and
   // install the editor's own camera map as an OVERLAY, which is never serialized into a build.
   useEffect(() => {
@@ -1048,7 +1114,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (n.getVariable(TEMPLATE_ID_VAR) === id) { n.removeVariable(TEMPLATE_ID_VAR); changed = true; }
     }
     if (changed) eventEmitter.current.emit('SCENE_CHANGED');
-    setTemplates(prev => prev.filter(x => x.id !== id));
+    // Variants based on it keep their content: it is already materialized, so cutting the link changes
+    // nothing they contain or that their placed copies show.
+    setTemplates(prev => prev.filter(x => x.id !== id).map(x => x.variant?.baseTemplateId === id ? flattenVariant(x) : x));
   };
   const updateTemplate = (id: string, t: Template) => setTemplates(prev => prev.map(x => x.id === id ? t : x));
 
@@ -1874,6 +1942,24 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Script button). Working source buffers per-tab (scriptTabSourceRef) until Save.
   const scriptTabSourceRef = useRef(new Map<string, string>());
   const enterScriptEditor = (scriptId?: string, adoptTabId?: string, mint?: ScriptAsset) => {
+    // Options ▸ Editor ▸ Scripts: "Open scripts with VSCode" (desktop only). A restored tab (adoptTabId)
+    // always stays in the editor; anything the external editor cannot open falls back to the built-in one.
+    if (!adoptTabId && getEditorPrefs().scriptOpenWith === 'vscode' && isDesktop()) {
+      const created = scriptId ? null : (mint ?? buildScriptAsset('New Script', 'node', defaultScriptClass('New Script', 'node')));
+      if (created) addScriptAsset(created);
+      const id = scriptId ?? created!.id;
+      // A just-minted script reaches the workspace mirror on the next render; give that a moment.
+      void (async () => {
+        if (created) await new Promise(resolve => setTimeout(resolve, 120));
+        if (!(await openScriptExternally(id))) openScriptTab(id, undefined, created);
+      })();
+      return;
+    }
+    openScriptTab(scriptId, adoptTabId, mint);
+  };
+
+  /** The built-in script editor tab (see enterScriptEditor). `mintNew` adds `mint` to the library first. */
+  const openScriptTab = (scriptId?: string, adoptTabId?: string, mint?: ScriptAsset | null, mintNew = true) => {
     let id = scriptId;
     // Held across the mint because scriptAssetsRef is mirrored during RENDER: a just-added asset is not in
     // it yet, so looking the new script up below would miss it.
@@ -1881,10 +1967,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!id) {
       // No id: mint a new 'node'-based script (or the module handed in) and open it.
       created = mint ?? buildScriptAsset('New Script', 'node', defaultScriptClass('New Script', 'node'));
-      addScriptAsset(created);
+      if (mintNew) addScriptAsset(created);
       id = created.id;
       scriptTabSourceRef.current.set(id, created.source);
-    }
+    } else if (mint) created = mint;
     // Focus an already-open tab for this script instead of duplicating it. Skipped when adopting: the
     // restored placeholder IS a tab for this script, so this would find it, focus it and build nothing.
     if (!adoptTabId) {
@@ -2262,6 +2348,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const editorMode: EditorMode = activeTab.kind === 'scene' ? mainMode : TAB_EDITOR_MODE[activeTab.kind];
   const templateRootId = activeTab.kind === 'template' && activeRuntime ? activeRuntime.rootId : null;
   const editingTemplateName = activeTab.kind === 'template' ? activeTab.title : null;
+  // Inherited vs overridden is judged against the base the tab DIFFS against — its snapshot from opening.
+  const editingTemplateVariant = useMemo(() => {
+    if (activeTab.kind !== 'template' || !activeTab.templateId) return null;
+    const t = templates.find(x => x.id === activeTab.templateId);
+    if (!t?.variant) return null;
+    const base = activeRuntime?.baseAtOpen ?? templates.find(x => x.id === t.variant!.baseTemplateId);
+    return base ? { id: t.id, baseName: base.name, base, diff: t.variant.diff } : null;
+  }, [activeTab, templates, activeRuntime]);
   const editingMaterialName = activeTab.kind === 'material' ? activeTab.title : null;
   const editingTerrainMaterialName = activeTab.kind === 'terrainMaterial' ? activeTab.title : null;
   // The unrendered edit node (its material is the TerrainMaterial) that the terrain-material inspector edits.
@@ -2410,9 +2504,27 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     scene.start();
 
     const tabId = adoptTabId ?? cryptoRandomId();
-    tabRuntimeRef.current.set(tabId, { scene, rootId });
+    // A variant tab remembers its base as it was on opening: saving diffs against THAT, so a base edit made
+    // while the tab was open is not mistaken for this variant's own change. See saveVariant.
+    const opened = templateId ? templatesRef.current.find(x => x.id === templateId) : undefined;
+    const base = opened?.variant ? templatesRef.current.find(x => x.id === opened.variant!.baseTemplateId) : undefined;
+    tabRuntimeRef.current.set(tabId, { scene, rootId, baseAtOpen: base ? cloneJson(base) : undefined });
     // the activate effect swaps the engine scene + dimension + selection
     commitTab({ id: tabId, kind: 'template', title: name, templateId: templateId ?? null }, adoptTabId);
+  };
+
+  /** A new variant of a template — inherits everything until edited — opened in its own tab. */
+  const createTemplateVariant = (baseId: string) => {
+    const base = templatesRef.current.find(t => t.id === baseId);
+    if (!base) return;
+    const taken = new Set(templatesRef.current.map(t => t.name));
+    let name = `${base.name} Variant`;
+    for (let i = 2; taken.has(name); i++) name = `${base.name} Variant ${i}`;
+    const variant = createVariant(base, name, cryptoRandomId());
+    setTemplates(prev => [...prev, variant]);
+    templatesRef.current = [...templatesRef.current, variant];
+    Logger.info(`Created "${name}", a variant of "${base.name}"`, 'Editor');
+    enterTemplateEditor(variant.id);
   };
 
   const collectSubtreeIds = (node: Node, out: string[] = []): string[] => {
@@ -2685,6 +2797,38 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    * `modelsRef` is mirrored eagerly because it is a render mirror and `applyAnimationLinks` reads it —
    * the same trap `ensureRigForModel` documents.
    */
+  /**
+   * Hand the rig's animation controller to every character showing `modelId` that has NO state machine
+   * (or `onlyRoot`, just that one). A character's machine is embedded in its model node, so replacing the
+   * node — delete the model, drag another in, link the same rig — left it with none: no idle, no
+   * locomotion, a bind pose wherever it went, while one-shot actions still played. Returns how many
+   * characters got one.
+   */
+  const adoptRigController = (modelId: string, onlyRoot?: Node | null): number => {
+    const model = modelsRef.current.find(m => m.id === modelId);
+    if (!model?.rigId) return 0;
+    const usage = new Map<string, number>();
+    const bare: ModelNode[] = [];
+    for (const scene of liveScenes()) {
+      for (const node of Array.from(scene.nodes)) {
+        const sm = (node as any).animator?.getStateMachine?.();
+        if (sm?.controllerId) usage.set(sm.controllerId, (usage.get(sm.controllerId) ?? 0) + 1);
+        if (modelIdOf(node) !== modelId || (onlyRoot && node !== onlyRoot)) continue;
+        const skinned = firstSkinnedModelNode(node);
+        if (skinned?.animator && machineIsEmpty(skinned.animator.getStateMachine()) && !bare.includes(skinned)) bare.push(skinned);
+      }
+    }
+    if (!bare.length) return 0;
+    const controller = pickControllerForRig(model.rigId, animControllersRef.current, usage);
+    if (!controller) {
+      Logger.warn(`"${model.name}" has no animation controller, so it will hold its bind pose. Assign one in its Animation section.`, 'Editor');
+      return 0;
+    }
+    for (const skinned of bare) skinned.animator!.setStateMachine(instantiateController(controller, machineLibs()));
+    Logger.info(`"${model.name}" had no animation controller; it now uses "${controller.name}", the controller for its rig.`, 'Editor');
+    return bare.length;
+  };
+
   const setModelRig = (modelId: string, rigId: string | undefined) => {
     const model = modelsRef.current.find(m => m.id === modelId);
     if (!model || model.rigId === rigId) return;
@@ -2696,6 +2840,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     applyAnimationLinks(updated);
     const rig = rigId ? rigsRef.current.find(r => r.id === rigId) : undefined;
     syncRigSockets(rig ?? { id: '', sockets: [] } as any, [modelId]);
+    adoptRigController(modelId);
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
   };
@@ -3233,6 +3378,96 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     Logger.info(`"${tab.title}" reloaded from the current assets`, 'Editor');
   };
 
+  /**
+   * Put an edited template into the library and let everything that depends on it follow: every variant
+   * descending from it is re-materialized (base before variant), and the placed copies of it and of those
+   * are rebuilt. `editingTabId` is the tab the edit came from, whose own scene is already current. A tab
+   * open on a cascaded VARIANT is left alone — it may hold unsaved edits; it reads as stale and offers a
+   * reload. Returns the variants that followed.
+   */
+  const commitTemplate = (updated: Template, editingTabId?: string): Template[] => {
+    const next = templatesRef.current.map(x => x.id === updated.id ? updated : x);
+    const cascaded = cascadeFrom(next, updated.id, msg => Logger.warn(msg, 'Editor'));
+    const byId = new Map<string, Template>([[updated.id, updated], ...cascaded.map(c => [c.id, c] as const)]);
+    setTemplates(prev => prev.map(x => byId.get(x.id) ?? x));
+    templatesRef.current = next.map(x => byId.get(x.id) ?? x);
+    const tabEditing = (id: string) => tabsRef.current.find(t => t.kind === 'template' && t.templateId === id)?.id;
+    withoutDirty(() => {
+      syncTemplateInstances(updated.id, updated, editingTabId ?? tabEditing(updated.id));
+      for (const c of cascaded) syncTemplateInstances(c.id, c, tabEditing(c.id));
+    });
+    return cascaded;
+  };
+
+  /**
+   * In the open VARIANT tab: drop the variant's own changes to the node at `path` (or, with no path, to
+   * every node — its name stays), so they inherit from the base again. Unsaved edits are saved first, so
+   * the revert starts from what the tab shows; the tab is then reloaded from the result.
+   */
+  const revertVariantChanges = async (path?: string) => {
+    const tab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
+    if (!tab || tab.kind !== 'template' || !tab.templateId) return;
+    if (dirtyTabsRef.current[tab.id]) await saveTemplateTab(tab.id);
+    const v = templatesRef.current.find(x => x.id === tab.templateId);
+    const base = v?.variant ? templatesRef.current.find(x => x.id === v.variant!.baseTemplateId) : undefined;
+    if (!v?.variant || !base) return;
+    const diff = revertInDiff(v.variant.diff, path);
+    const updated: Template = { ...v, ...materializeVariant(base, v.id, diff), variant: { baseTemplateId: base.id, diff } };
+    commitTemplate(updated, tab.id);
+    reloadTab(tab.id);
+    const what = path === undefined ? v.name : (path || v.name);
+    Logger.info(`Reverted "${what}" to "${base.name}"`, 'Editor');
+  };
+
+  /**
+   * Base the open VARIANT tab's template on another template. Its content stays exactly as it is; from
+   * now on it follows the new base. A base that is the variant itself or descends from it is refused.
+   */
+  const rebaseTemplateVariant = async (newBaseId: string) => {
+    const tab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
+    if (!tab || tab.kind !== 'template' || !tab.templateId) return;
+    if (dirtyTabsRef.current[tab.id]) await saveTemplateTab(tab.id);
+    const library = templatesRef.current;
+    const v = library.find(x => x.id === tab.templateId);
+    const base = library.find(x => x.id === newBaseId);
+    if (!v || !base) return;
+    const rebased = rebaseVariant(library, v, base);
+    if (!rebased) { Logger.warn(`"${v.name}" cannot be based on "${base.name}": it is, or comes from, "${v.name}" itself`, 'Editor'); return; }
+    commitTemplate(rebased, tab.id);
+    reloadTab(tab.id);   // the reloaded tab snapshots the NEW base as the one it diffs against
+    Logger.info(`"${v.name}" is now a variant of "${base.name}"`, 'Editor');
+  };
+
+  /**
+   * Turn a placed copy into a new VARIANT of its template: what the copy changed (its overrides) becomes
+   * the variant's own, and the copy is relinked to the variant — so a look tuned on one placement can be
+   * reused as an asset, while the template itself is untouched.
+   */
+  const createVariantFromInstance = async (node: Node) => {
+    const root = templateInstanceRootOf(node);
+    const base = root ? templatesRef.current.find(t => t.id === root.getVariable(TEMPLATE_ID_VAR)) : undefined;
+    if (!root || !base) return;
+    const content = await buildTemplateFromNode(root, engineMaps(), scriptAssetsRef.current);
+    // Where the copy stands is the placement's, not the asset's; the override record is the copy's.
+    delete content.nodeJson.variables?.[OVERRIDES_VAR];
+    for (const key of ['position', 'rotation', 'scale'] as const) {
+      if (base.nodeJson[key] !== undefined) content.nodeJson[key] = cloneJson(base.nodeJson[key]);
+      else delete content.nodeJson[key];
+    }
+    const taken = new Set(templatesRef.current.map(t => t.name));
+    let name = root.name !== base.name && !taken.has(root.name) ? root.name : `${base.name} Variant`;
+    for (let i = 2; taken.has(name); i++) name = `${base.name} Variant ${i}`;
+    const variant = variantFromContent(base, content, cryptoRandomId(), name);
+    setTemplates(prev => [...prev, variant]);
+    templatesRef.current = [...templatesRef.current, variant];
+    // Relink the copy: its changes now live in the variant, so it keeps none of its own.
+    writeOverrides(root, {});
+    root.setVariable(TEMPLATE_ID_VAR, variant.id, 'string');
+    withoutDirty(() => syncTemplateInstances(variant.id, variant));
+    eventEmitter.current.emit('SCENE_CHANGED');
+    Logger.info(`Created "${name}", a variant of "${base.name}", from the placed copy`, 'Editor');
+  };
+
   // Save a template tab back to the library and propagate the change to placed instances.
   const saveTemplateTab = async (tabId: string) => {
     const tab = tabsRef.current.find(t => t.id === tabId);
@@ -3243,17 +3478,27 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!rootNode) return;
     try {
       const t = await buildTemplateFromNode(rootNode, engineMaps(), scriptAssetsRef.current);
+      let cascaded: Template[] = [];
       if (tab.templateId) {
-        const updated = { ...t, id: tab.templateId };
-        updateTemplate(tab.templateId, updated);
-        withoutDirty(() => syncTemplateInstances(tab.templateId!, updated, tab.id)); // propagate to placed instances
+        const library = templatesRef.current;
+        const existing = library.find(x => x.id === tab.templateId);
+        const currentBase = existing?.variant ? library.find(x => x.id === existing.variant!.baseTemplateId) : undefined;
+        // A variant saves as its DIFF against the base (laid over the base as it is now); a plain template
+        // saves its tree as before.
+        const updated: Template = existing?.variant && currentBase
+          ? saveVariant(existing, { ...t, id: tab.templateId }, runtime.baseAtOpen ?? currentBase, currentBase)
+          : { ...t, id: tab.templateId, ...(existing?.variant ? { variant: existing.variant } : {}) };
+        cascaded = commitTemplate(updated, tab.id);
+        // The tab now diffs against the base as saved; a later base edit is again "made meanwhile".
+        if (updated.variant && currentBase) runtime.baseAtOpen = cloneJson(currentBase);
       } else {
         addTemplate(t); // t carries a fresh id
       }
       // Adopt the saved name/id so later saves update (not re-add) and the tab label stays in sync.
       setTabs(prev => prev.map(x => x.id === tab.id ? { ...x, title: t.name, templateId: tab.templateId ?? t.id } : x));
       clearTabDirty(tab.id);
-      Logger.info(`Template "${t.name}" saved`, 'Editor');
+      const followers = cascaded.length ? ` (${cascaded.length} variant${cascaded.length === 1 ? '' : 's'} updated)` : '';
+      Logger.info(`Template "${t.name}" saved${followers}`, 'Editor');
     } catch (e) {
       Logger.error('Failed to save template: ' + e, 'Editor');
     }
@@ -3568,6 +3813,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // transform — the two share one slot — so the difference is re-applied on top afterwards.
         const baseTrs = readModelBaseTrs(inst);
         const wasSelected = inst.id === selectedNode;
+        // What the user added inside this copy (a sprite on the tip, a light) is not the asset's: carried
+        // over to the rebuilt copy rather than thrown away with it. See foreignChildren.ts.
+        const foreign = detachForeignChildren(inst, modelInstanceShape(asset, modelsRef.current));
         // Drop the old subtree's out-of-band data so map entries don't leak.
         for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
         // Detach synchronously with removeChild, not remove(): remove() only marks, and its deferred sweep
@@ -3583,6 +3831,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           newNode.setPosition(pos).setRotation(rot).setScale(scl);
           newNode.spawnOnStart = spawnOnStart;
           restoreAnimationState(newNode, animation);
+          reattachForeignChildren(newNode, foreign);
           // A LOD-wrapped asset keeps its root transform on the wrapper's child 0, so the edit already
           // arrives through the child and applying it here as well would double it.
           if (!modelAssetHasLodBehavior(asset)) applyModelTransformDelta(newNode, baseTrs, asset.nodeJson);
@@ -3893,6 +4142,62 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     } catch (e) {
       Logger.error('Failed to save model: ' + e, 'Editor');
     }
+  };
+
+  // Save one part of the open model as its own model asset — and, for 'extract', take it out of this one.
+  const saveModelPart = async (part: ModelPart, mode: 'copy' | 'extract'): Promise<string | null> => {
+    const tab = tabs.find(t => t.id === activeTabId);
+    if (!tab || tab.kind !== 'model') return null;
+    const runtime = tabRuntimeRef.current.get(tab.id);
+    const session = modelSessions[tab.id];
+    const source = modelsRef.current.find(m => m.id === tab.modelId);
+    if (!runtime || !session || !source) return null;
+    const scene = runtime.scene;
+    const node = scene.getNodeById(part.nodeId);
+    // Only the model's OWN parts: levels 1+ are previews of other assets.
+    const levelRoot = scene.getNodeById(session.levelIds[0]);
+    const inLevel = (n: Node | null | undefined): boolean => { for (let a = n; a; a = a.parent) if (a === levelRoot) return true; return false; };
+    if (!node || !levelRoot || !inLevel(node)) { Logger.warn('That part is not in this model', 'Editor'); return null; }
+
+    const subName = part.submesh !== undefined
+      ? (materialsRef.current.find(m => m.id === getMaterialIdsOf(node)[part.submesh!])?.name ?? `Sub-mesh ${part.submesh + 1}`)
+      : node.name || 'Part';
+    const name = uniqueModelName(`${tab.title || source.name} – ${subName}`, modelsRef.current.map(m => m.name));
+    let asset: ModelAsset;
+    try {
+      asset = await buildPartAsset(source, node, levelRoot.parent, part.submesh, name);
+    } catch (e) {
+      Logger.error(`Could not save the part: ${e}`, 'Editor');
+      return null;
+    }
+    addModel(asset);
+    // Eager mirror, as adoptModelAsset does: the ref only catches up on the next render.
+    modelsRef.current = [...modelsRef.current, asset];
+    captureAssetThumbnail('model', asset.id);
+
+    if (mode === 'extract') {
+      const parent = node.parent;
+      if (part.submesh === undefined) {
+        parent?.removeChild(node);
+        disposeModelSubtree(node);
+      } else if (parent) {
+        // Rebuilt from JSON, in place: keeps the node's id, transform, variables and children.
+        const json = await submeshNodeJson(node as ModelNode, part.submesh, 'without');
+        const index = parent.children.indexOf(node);
+        parent.removeChild(node);
+        disposeModelSubtree(node);
+        parseByType(parent, json);
+        const rebuilt = parent.children[parent.children.length - 1];
+        if (rebuilt && index >= 0 && index < parent.children.length - 1) parent.addChild(rebuilt, index);
+      }
+      markTabDirty(tab.id, 'model-extract-part');
+      eventEmitter.current.emit('SCENE_CHANGED');
+      eventEmitter.current.emit('TEXTURES_CHANGED');
+      Logger.info(`Extracted "${subName}" into the new model "${asset.name}" — save this model to keep the change`, 'Editor');
+    } else {
+      Logger.info(`Saved "${subName}" as the new model "${asset.name}"`, 'Editor');
+    }
+    return asset.id;
   };
 
   // Rename the active mesh tab (the title becomes the asset name on save).
@@ -4371,11 +4676,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     };
 
     // Map an import stage onto the store's generic step. One place, so the labels and the bar can't drift.
-    const setStage = (index: number, stage: ImportStage, detail?: string, error?: string) => {
+    // `within` (0..1) is how far through the stage the worker says it is: the parse is most of an
+    // import's time, and a bar parked at 15% for it read as a hang. It moves between the previous
+    // stage's mark and this one's.
+    const setStage = (index: number, stage: ImportStage, detail?: string, error?: string, within?: number) => {
       const s = IMPORT_STAGES[stage];
+      const progress = within === undefined || stage !== 'parsing'
+        ? s.progress
+        : 0.02 + Math.max(0, Math.min(1, within)) * (IMPORT_STAGES.review.progress - 0.03);
       task.setStep(index, {
         status: s.status,
-        progress: s.progress,
+        progress,
         detail: detail ?? (s.status === 'running' || s.status === 'paused' ? s.label : undefined),
         error,
       });
@@ -4397,7 +4708,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         let parsedResult: Awaited<ReturnType<typeof parseBundleToRoot>>;
         try {
           parsedResult = await parseBundleToRoot(bundle.files, bundle.name,
-            (_fraction, stage) => setStage(i, 'parsing', stage || undefined));
+            (fraction, stage) => setStage(i, 'parsing', stage || undefined, undefined, fraction));
         }
         catch (e) {
           // A cancel terminates the worker, which rejects whatever it was parsing — report that as
@@ -5343,6 +5654,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           }
 
           instanceRef.current = engine;
+          applyEngineRuntime(engine as any, projectSettingsRef.current.engine, AudioManager.Instance.mixer);
           instanceRef.current.isPaused = false;
 
           // Logs bypass this bridge: the console panel's store subscribes to CleoEngine.eventEmitter
@@ -5445,8 +5757,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       const vis = debugVisibilityRef.current;
       // The reference grid is editor CHROME -- global renderer state, not a scene node -- so its visibility
       // survives a scene swap and the last writer wins. Assert it on EVERY reconcile from whichever channel
-      // is in force. Skipped in renderer mode, where the Renderer panel owns its own grid switch.
-      if (editorMode !== 'renderer')
+      // is in force. Skipped in options mode, where Engine > Renderer owns its own grid switch.
+      if (editorMode !== 'options')
         instanceRef.current?.renderer.setGridVisible(isPlayMode ? vis.grid.runtime : vis.grid.editor);
       // Particle preview is a property of the authored scene; the particle editor's own stage always
       // previews (that is its whole job), and play mode always simulates regardless of the flag.
@@ -5568,7 +5880,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         cameraNode.onUpdate = (delta) => {
             const node = cameraNode;
             const input = InputSystem.instance;
-            const movement = delta;
+            const movement = delta * getEditorPrefs().cameraFlySpeed;
             // The EditorCamera map is turned OFF during a gizmo drag and during Play, which is what the
             // `!isGizmoDraggingRef.current` guard used to do at every read site — except that disabling
             // the map also cancels anything held, so the camera stops rather than freezing mid-motion.
@@ -5623,13 +5935,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         cameraNode.onUpdate = (delta) => {
           const node = cameraNode;
           const input = InputSystem.instance;
-          const movement = delta * 2;
+          const prefs = getEditorPrefs();
+          const movement = delta * 2 * prefs.cameraFlySpeed;
+          const lookRate = delta * 2 * prefs.cameraLookSensitivity;
           // Every chord below is a BINDING now (see editorInputMap): the button each one needs held is
           // a modifier on the binding rather than an `if` here, and the whole map goes off during a
           // gizmo drag and during Play.
           const look = input.vector('EditorCamera/Look');
           if (look[0] !== 0 || look[1] !== 0)
-            node.rotateX(look[1] * movement * 5).rotateY(-look[0] * movement * 5);
+            node.rotateX(look[1] * lookRate * 5).rotateY(-look[0] * lookRate * 5);
           const fly = input.vector('EditorCamera/Fly');
           const lift = input.value('EditorCamera/Lift');
           if (fly[1] !== 0) node.addForward(fly[1] * movement);
@@ -5664,7 +5978,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           instanceRef.current.renderer.setSelectedNode(null);
           // The grid follows its Runtime toggle in game mode (off by default).
           instanceRef.current.renderer.setGridVisible(debugVisibilityRef.current.grid.runtime);
-          // Never render a debug channel in the running game (in case Play is pressed in Renderer mode).
+          // Never render a debug channel in the running game (in case Play is pressed in Options mode).
           instanceRef.current.renderer.debugView = 'final';
           // The running game IS the scene, whichever tab Play was pressed from — so it meters, and
           // it wears the project's post-processing, even when Play was pressed from a preview tab.
@@ -6114,14 +6428,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   }), [sceneList, mainSceneId, openSceneId, pendingSceneConfirm, pendingDimensionConfirm, currentDimension, projectActions]);
 
   const sessionActions = useStableActions({
-    enterTemplateEditor,
+    enterTemplateEditor, createTemplateVariant, revertVariantChanges, createVariantFromInstance, rebaseTemplateVariant,
     enterMaterialEditor, createMaterialForNode, setActiveMaterialName,
     enterTerrainMaterialEditor, refreshTerrainMaterialPreview, setActiveTerrainMaterialName,
     setPreviewShape, previewElevationLegend,
     enterStateMachineEditor, commitAnimationStateMachine, registerAnimationApply, registerTilesetApply,
     importAnimationFiles, importSkeletonNames, commitIkRig, currentIkRig, renameAnimationClip, removeAnimationClip, resolveAnimationImport, resolveRigPick,
     enterModelEditor, adoptModelAsset, resolveModelAssetId, linkAnimationToRig, unlinkAnimationFromRig, ensureRigForModel, editSharedClip, setModelRig,
-    setActiveModelName, addModelLodFromAsset, generateModelLods, removeModelLod,
+    setActiveModelName, saveModelPart, addModelLodFromAsset, generateModelLods, removeModelLod,
     setModelLodDistance, setModelCullDistance, setActiveModelLevel, importModelFiles, resolveModelImport,
     enterScriptEditor, setScriptTabSource, getScriptTabSource, saveScriptSource, syncScriptPaths, createScriptModule,
     revertTemplateOverride,
@@ -6138,7 +6452,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     registerClipApply,
   });
   const editorSessionsValue = useMemo<EditorSessionsContextValue>(() => ({
-    editingTemplateName, templateRootId,
+    editingTemplateName, editingTemplateVariant, templateRootId,
     editingMaterialName,
     editingTerrainMaterialName, editingTerrainMaterialNode,
     stateMachineTargetId, stateMachineSourceId, stateMachineSourceScene, pendingAnimationImport, pendingRigPick,
@@ -6156,7 +6470,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     scriptPaths,
     ...sessionActions,
   }), [scriptPaths, 
-    editingTemplateName, templateRootId, editingMaterialName,
+    editingTemplateName, editingTemplateVariant, templateRootId, editingMaterialName,
     editingTerrainMaterialName, editingTerrainMaterialNode,
     stateMachineTargetId, stateMachineSourceId, stateMachineSourceScene, pendingAnimationImport, pendingRigPick,
     editingAnimationFieldId, animationFieldTargetId, editingSoundId, editingAiBrainId, editingParticleSystemId, editingRigId,
@@ -6196,7 +6510,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       registerAnimationApply,
       registerTilesetApply,
       enterTemplateEditor,
+      createTemplateVariant,
+      revertVariantChanges,
+      createVariantFromInstance,
+      rebaseTemplateVariant,
       editingTemplateName,
+      editingTemplateVariant,
       templateRootId,
       enterMaterialEditor,
       createMaterialForNode,
@@ -6230,6 +6549,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // downstream (persistence, the running InputSystem, publish) hangs off this one piece of state.
       inputMap,
       setInputMap,
+      projectSettings,
+      setProjectSettings,
       addTemplate,
       removeTemplate,
       updateTemplate,
@@ -6370,11 +6691,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       unlinkAnimationFromRig,
       editSharedClip,
       setModelRig,
+      adoptRigController,
       modelSession: activeTab.kind === 'model' ? (modelSessions[activeTab.id] ?? null) : null,
       modelEditTargetId: activeTab.kind === 'model' && modelSessions[activeTab.id]
         ? modelSessions[activeTab.id].levelIds[modelSessions[activeTab.id].activeLevel] ?? null
         : null,
       setActiveModelName,
+      saveModelPart,
       addModelLodFromAsset,
       generateModelLods,
       removeModelLod,

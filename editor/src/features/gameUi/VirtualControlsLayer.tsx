@@ -20,7 +20,7 @@ import type { VirtualControl, VirtualLayout } from 'cleo'
 
 export interface VirtualControlsLayerProps {
   controls: readonly VirtualControl[]
-  /** Force them visible regardless of the device — the editor's Input mode uses this to preview. */
+  /** Force them visible regardless of the device — Options > Project > Input uses this to preview. */
   alwaysShow?: boolean
 }
 

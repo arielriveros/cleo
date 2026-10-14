@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { dismissToast, getSnapshot, subscribe, type ToastTone } from './toastStore'
-import { cn, hintClass, sectionTitleClass, valueClass } from '../../components/ui'
+import { Button, cn, hintClass, sectionTitleClass, valueClass } from '../../components/ui'
 
 // The transient-notice surface. Top-right: ProgressWindow owns bottom-right (z-40) and the logger's
 // DebugOverlay owns bottom-left. Mounted in index.tsx alongside DialogHost so every boot phase has it.
@@ -50,9 +50,7 @@ export default function ToastStack() {
             <div className={cn(valueClass, 'whitespace-pre-line break-words')}>{t.message}</div>
           </div>
           {t.count > 1 && <span className={cn(hintClass, 'tabular-nums')}>×{t.count}</span>}
-          <button className='px-1 leading-none text-dim hover:text-fg' title='Dismiss' onClick={() => dismissToast(t.id)}>
-            ✕
-          </button>
+          <Button variant='remove' size='icon' className='leading-none' title='Dismiss' onClick={() => dismissToast(t.id)}>✕</Button>
         </div>
       ))}
     </div>

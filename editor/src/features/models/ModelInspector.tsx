@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { TextureManager } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
+import { Button, Field, NumberInput, Select, TextInput, cn, labelClass, hintClass } from '../../components/ui'
+import ModelPartsSection from './ModelPartsSection'
 import GenerateLodsModal, { defaultSpecs, type GenerateLodsSpec } from './GenerateLodsModal'
 import { modelAssetTextureIds, modelAssetDiameter } from '../../utils/models'
 // The renderer's own `_foliageCullDistance` default. Mirrored rather than imported because the
@@ -62,11 +64,11 @@ export default function ModelInspector() {
   const effectiveCull = modelSession.cullDistance > 0 ? modelSession.cullDistance : GLOBAL_FOLIAGE_CULL
   const deadFrom = modelSession.distances.findIndex((d, i) => i > 0 && d >= effectiveCull)
 
-  const label = 'text-xs text-slate-300'
-  const num = 'w-16 bg-control text-white border border-border rounded px-1 py-[2px] text-xs'
+  const label = labelClass
+  const num = 'w-16'
 
   return (
-    <div className='flex flex-col text-white bg-surface-raised w-full'>
+    <div className='flex flex-col text-fg bg-surface-raised w-full'>
       {generating && (
         <GenerateLodsModal
           modelName={activeTab.title}
@@ -80,12 +82,13 @@ export default function ModelInspector() {
           }} />
       )}
       <div className='p-2 border-b border-border'>
-        <label className='text-xs text-slate-300 block mb-1'>Model name</label>
-        <input
-          className='bg-control text-white border border-border rounded px-2 py-1 w-full text-sm'
+        <label className={cn(labelClass, 'block mb-1')}>Model name</label>
+        <TextInput
           value={activeTab.title}
-          onChange={e => setActiveModelName(e.target.value)} />
+          onChange={setActiveModelName} />
       </div>
+
+      <ModelPartsSection />
 
       {/* Blend spaces belong to a skinned model, which is exactly what this tab has open — so this is the
           natural place to create one. Static models have no clips to blend. */}
@@ -93,19 +96,19 @@ export default function ModelInspector() {
         <Collapsable title='Animation fields' badge={fields.length || undefined} defaultOpen>
           <div className='p-2 space-y-1' title={FIELDS_HINT}>
             {fields.map(f => (
-              <button key={f.id}
-                className='w-full rounded border border-control-hover px-2 py-1 text-left text-xs hover:bg-control'
+              <Button key={f.id} variant='subtle'
+                className='w-full justify-start text-left'
                 onClick={() => enterAnimationFieldEditor(f.id)}
                 title={`Open the "${f.name}" blend space`}>
                 ⊞ {f.name}
-              </button>
+              </Button>
             ))}
-            <button
-              className='w-full rounded border border-control-hover px-2 py-1 text-xs hover:bg-control'
+            <Button variant='subtle'
+              className='w-full'
               onClick={() => createAnimationFieldForModel(activeTab.modelId!)}
               title='Create a new blend space from this model'>
               + New Animation Field
-            </button>
+            </Button>
           </div>
         </Collapsable>
       )}
@@ -113,7 +116,7 @@ export default function ModelInspector() {
       <Collapsable title='LOD levels'>
         <div className='p-2 space-y-2' title={modelSession.skinned ? undefined : LOD_HINT}>
           {modelSession.skinned ? (
-            <p className='text-[11px] text-gray-400'>LOD levels are not available for skinned models.</p>
+            <p className={hintClass}>LOD levels are not available for skinned models.</p>
           ) : (
             <>
               {modelSession.levelIds.map((_, i) => (
@@ -122,32 +125,32 @@ export default function ModelInspector() {
                     <label className='flex items-center gap-1 cursor-pointer flex-1'>
                       <input
                         type='radio'
+                        className='accent-primary'
                         name='activeModelLevel'
                         checked={modelSession.activeLevel === i}
                         onChange={() => setActiveModelLevel(i)} />
                       <span className={label}>{i === 0 ? 'LOD0 (base)' : `LOD${i}`}</span>
                     </label>
                     {i > 0 && (
-                      <button className='text-red-300 text-xs px-1' onClick={() => removeModelLod(i)} title='Remove this level'>✕</button>
+                      <Button variant='remove' size='icon' onClick={() => removeModelLod(i)} title='Remove this level'>✕</Button>
                     )}
                   </div>
                   {i > 0 && (
                     <>
                       <div className='flex items-center justify-between'>
                         <span className={label}>Model</span>
-                        <span className='text-[11px] text-slate-400 truncate max-w-[55%]' title={nameOf(modelSession.lodRefs[i - 1]?.modelId)}>
+                        <span className='text-ui-sm text-muted truncate max-w-[55%]' title={nameOf(modelSession.lodRefs[i - 1]?.modelId)}>
                           {nameOf(modelSession.lodRefs[i - 1]?.modelId)}
                         </span>
                       </div>
-                      <div className='flex items-center justify-between'>
-                        <span className={label}>From distance</span>
-                        <input
-                          type='number' min={0} className={num}
+                      <Field label='From distance' className='my-0' labelClassName='w-auto'>
+                        <NumberInput
+                          min={0} className={num}
                           value={modelSession.distances[i] ?? 0}
-                          onChange={e => setModelLodDistance(i, Number(e.target.value))} />
-                      </div>
+                          onChange={v => setModelLodDistance(i, v)} />
+                      </Field>
                       {deadFrom >= 0 && i >= deadFrom && (
-                        <p className='text-[11px] text-warning'>
+                        <p className='text-ui-sm text-warning'>
                           Never drawn: everything is culled at {Math.round(effectiveCull)} m
                           {modelSession.cullDistance > 0 ? '' : ' (the renderer\'s default)'}.
                           Raise the cull distance below, or bring this band closer.
@@ -157,26 +160,26 @@ export default function ModelInspector() {
                   )}
                 </div>
               ))}
-              <button
-                className='w-full text-xs bg-primary hover:bg-primary-hover rounded px-2 py-1.5 font-semibold disabled:opacity-40'
+              <Button variant='primary'
+                className='w-full font-semibold disabled:opacity-40'
                 disabled={sourceTriangles === 0}
                 title={sourceTriangles === 0
                   ? 'This model has no geometry to reduce'
                   : 'Decimate this model into reduced levels, with half-resolution textures'}
                 onClick={() => setGenerating(true)}>
                 Generate LOD levels…
-              </button>
+              </Button>
 
               {candidates.length > 0 ? (
-                <select
-                  className='w-full bg-control text-white border border-border rounded px-2 py-1 text-xs'
+                <Select
+                  className='w-full'
                   value=''
                   onChange={e => { if (e.target.value) addModelLodFromAsset(e.target.value); e.target.value = '' }}>
                   <option value=''>Add LOD level from model…</option>
                   {candidates.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                </select>
+                </Select>
               ) : (
-                <p className='text-[11px] text-gray-400'>
+                <p className={hintClass}>
                   No other models available — import a lower-poly model into the library to use it as a level.
                 </p>
               )}
@@ -184,15 +187,13 @@ export default function ModelInspector() {
           )}
 
           {!modelSession.skinned && (
-            <div className='flex items-center justify-between pt-1 border-t border-control'>
-              <span className={label} title='Placed copies disappear beyond this camera distance. 0 = never cull.'>
-                Cull distance (0 = never)
-              </span>
-              <input
-                type='number' min={0} className={num}
+            <Field label='Cull distance (0 = never)' hint='Placed copies disappear beyond this camera distance. 0 = never cull.'
+                   className='my-0 pt-1 border-t border-control' labelClassName='w-auto'>
+              <NumberInput
+                min={0} className={num}
                 value={modelSession.cullDistance}
-                onChange={e => setModelCullDistance(Number(e.target.value))} />
-            </div>
+                onChange={setModelCullDistance} />
+            </Field>
           )}
         </div>
       </Collapsable>

@@ -4,7 +4,7 @@ import { useVfs } from './VfsContext'
 import { iconFor } from './assetKinds'
 import { sizeOfAsset } from './assetKinds'
 import { MissingAsset, OrphanEntry, KIND_LABEL, applyDelete, baseOf, restoreMissing } from '../../utils/vfs'
-import { cn, hintClass, sectionTitleClass, valueClass } from '../../components/ui'
+import { Button, Panel, cn, hintClass, sectionTitleClass, valueClass } from '../../components/ui'
 
 // The two-way audit between the asset libraries and the explorer.
 //   no-entry     the VFS index never got an entry for the asset (reconcileVfs didn't index it)
@@ -61,10 +61,10 @@ export default function MissingAssetsPopover(
   }
 
   return (
-    <div className='absolute right-0 top-[22px] z-30 w-[300px] bg-surface-raised border border-border rounded shadow-lg'>
+    <Panel className='absolute right-0 top-[22px] z-30 w-[300px] rounded shadow-lg'>
       <div className='px-3 py-2 border-b border-border flex items-center justify-between gap-2'>
         <span className={sectionTitleClass}>Explorer audit</span>
-        <button className='text-dim hover:text-fg leading-none px-1' title='Close' onClick={onClose}>✕</button>
+        <Button variant='remove' size='sm' className='leading-none px-1' title='Close' onClick={onClose}>✕</Button>
       </div>
 
       {missing.length === 0 && orphans.length === 0 ? (
@@ -87,12 +87,14 @@ export default function MissingAssetsPopover(
 
           <div className='px-3 py-2 border-t border-border flex items-center justify-between gap-2'>
             <span className={hintClass}>Lands in the folder you're browsing</span>
-            <button
-              className='shrink-0 inline-flex items-center h-[20px] px-2 rounded text-[11px] font-semibold bg-primary hover:bg-primary-hover disabled:opacity-50'
+            <Button
+              variant='primary'
+              size='sm'
+              className='shrink-0 h-[20px] text-ui-sm font-semibold disabled:opacity-50'
               onClick={restoreAll}
               disabled={busy}>
               Restore all
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -115,15 +117,17 @@ export default function MissingAssetsPopover(
           </div>
           <div className='px-3 py-2 border-t border-border flex items-center justify-between gap-2'>
             <span className={hintClass}>Frees their names for re-import</span>
-            <button
-              className='shrink-0 inline-flex items-center h-[20px] px-2 rounded text-[11px] font-semibold bg-primary hover:bg-primary-hover disabled:opacity-50'
+            <Button
+              variant='primary'
+              size='sm'
+              className='shrink-0 h-[20px] text-ui-sm font-semibold disabled:opacity-50'
               onClick={cleanOrphans}
               disabled={busy}>
               Clean up
-            </button>
+            </Button>
           </div>
         </>
       )}
-    </div>
+    </Panel>
   )
 }

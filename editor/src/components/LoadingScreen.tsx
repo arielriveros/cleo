@@ -56,14 +56,14 @@ function StepRow({ step, now }: { step: LoadStepState; now: number }) {
   const dim = step.status === 'pending'
   return (
     <li className='flex flex-col gap-1'>
-      <div className={`flex items-center gap-2 text-xs ${dim ? 'text-dim' : 'text-fg'}`}>
+      <div className={`flex items-center gap-2 text-ui ${dim ? 'text-dim' : 'text-fg'}`}>
         <StatusIcon status={step.status} />
         <span className='truncate'>{step.label}</span>
-        <span className={`ml-auto truncate text-[11px] ${step.status === 'failed' ? 'text-danger' : 'text-muted'}`}
+        <span className={`ml-auto truncate text-ui-sm ${step.status === 'failed' ? 'text-danger-fg' : 'text-muted'}`}
               title={step.detail || undefined}>
           {step.status === 'failed' ? step.detail : count || step.detail}
         </span>
-        <span className='w-14 shrink-0 text-right text-[11px] tabular-nums text-dim'>
+        <span className='w-14 shrink-0 text-right text-ui-sm tabular-nums text-dim'>
           {elapsed === null ? '' : seconds(elapsed)}
         </span>
       </div>
@@ -98,14 +98,14 @@ export function LoadingView({ load }: { load: LoadState }) {
       <div className='flex w-[440px] max-w-[90%] flex-col gap-6'>
         <div className='flex flex-col items-center gap-2'>
           <h1 className='text-2xl font-semibold tracking-[0.3em] text-fg'>CLEO ENGINE</h1>
-          <span className='text-[10px] uppercase tracking-[0.3em] text-muted'>Editor</span>
-          <span className='text-[10px] tabular-nums tracking-[0.2em] text-dim'>{VERSION_LABEL}</span>
+          <span className='text-ui-xs uppercase tracking-[0.3em] text-muted'>Editor</span>
+          <span className='text-ui-xs tabular-nums tracking-[0.2em] text-dim'>{VERSION_LABEL}</span>
         </div>
 
         <div className='flex flex-col gap-3 rounded-md border border-border bg-surface/60 p-4'>
           <div className='flex items-baseline justify-between gap-3'>
-            <span className='truncate text-sm font-medium'>{load.title}</span>
-            <span className='shrink-0 text-[11px] tabular-nums text-dim'>{seconds(now - load.startedAt)}</span>
+            <span className='truncate text-ui-lg font-medium'>{load.title}</span>
+            <span className='shrink-0 text-ui-sm tabular-nums text-dim'>{seconds(now - load.startedAt)}</span>
           </div>
           <ul className='flex max-h-[45vh] flex-col gap-1.5 overflow-y-auto pr-1'>
             {load.steps.map(step => <StepRow key={step.id} step={step} now={now} />)}
@@ -117,7 +117,7 @@ export function LoadingView({ load }: { load: LoadState }) {
             <div className='h-full rounded-full bg-gradient-to-r from-border to-primary transition-[width] duration-300 ease-out'
                  style={{ width: `${pct}%` }} />
           </div>
-          <div className='mt-2 flex items-center justify-between text-xs text-muted'>
+          <div className='mt-2 flex items-center justify-between text-ui text-muted'>
             <span className='truncate'>{current ? `${current.label}…` : 'Loading…'}</span>
             <span className='tabular-nums text-fg'>{pct}%</span>
           </div>

@@ -15,7 +15,7 @@ type Props = {
 
 export default function Sparkline({ values, height = 40, budgetMs, maxMs, className }: Props) {
   if (values.length < 2) {
-    return <div className={`text-muted text-[10px] ${className ?? ''}`} style={{ height }}>collecting…</div>;
+    return <div className={`text-muted text-ui-xs ${className ?? ''}`} style={{ height }}>collecting…</div>;
   }
 
   // Autoscale with headroom, but never below the budget line: a fast series would otherwise rescale

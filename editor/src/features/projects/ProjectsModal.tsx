@@ -27,17 +27,17 @@ export default function ProjectsModal({ onClose }: { onClose: () => void }) {
     <Modal onClose={onClose} className='w-[720px] max-w-[92vw]'>
       <ModalHeader>
         <div className='flex items-baseline gap-2'>
-          <span className='font-semibold'>Projects</span>
-          {current && <span className='text-xs text-muted'>Currently open: {current.name}</span>}
+          <span className='text-ui-lg font-semibold'>Projects</span>
+          {current && <span className='text-ui text-muted'>Currently open: {current.name}</span>}
         </div>
-        <div className='mt-1 text-[11px] text-dim'>
+        <div className='mt-1 text-ui-sm text-dim'>
           Each project has its own scenes, assets, scripts and layout. Nothing is shared between them.
         </div>
       </ModalHeader>
       <div className='h-[420px]'>
         {projects
           ? <ProjectsBrowser projects={projects} onChanged={setProjects} />
-          : <div className='w-full h-full flex items-center justify-center text-xs text-muted'>Loading projects…</div>}
+          : <div className='w-full h-full flex items-center justify-center text-ui text-muted'>Loading projects…</div>}
       </div>
     </Modal>
   )

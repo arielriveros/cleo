@@ -129,7 +129,7 @@ export default function TextureSettingsPanel() {
           />
         </Field>
         {mismatches.length > 0 && (
-          <div className='rounded border border-warning/40 bg-warning/10 px-2 py-1 text-[11px] text-warning'>
+          <div className='rounded border border-warning/40 bg-warning/10 px-2 py-1 text-ui-sm text-warning'>
             Marked {s.colorSpace === 'srgb' ? 'Colour' : 'Data'} but bound to a{' '}
             {s.colorSpace === 'srgb' ? 'data' : 'colour'} slot on {mismatches.length}{' '}
             material{mismatches.length === 1 ? '' : 's'}: {mismatches.slice(0, 3).join(', ')}

@@ -11,12 +11,12 @@ import { previewRigOf } from './createMaterialPreviewScene'
 // doing what they will do on a landscape. A landscape material's sphere shows its rules too — slope
 // runs 0° at the top to 90° at the equator — with elevation mapped onto the sphere's height.
 
-export type PreviewShape = 'sphere' | 'plane' | 'hill'
+export type PreviewShape = 'sphere' | 'plane' | 'box' | 'hill'
 export type PreviewKind = 'material' | 'terrainMaterial'
 
 /** The shapes each preview offers, in toolbar order. */
 export const PREVIEW_SHAPES: Record<PreviewKind, readonly PreviewShape[]> = {
-  material: ['sphere', 'plane'],
+  material: ['sphere', 'plane', 'box'],
   terrainMaterial: ['sphere', 'plane', 'hill'],
 }
 
@@ -54,6 +54,16 @@ export function previewPlaneGeometry(): Geometry {
   const uvs = g.uvs
   for (let i = 0; i < uvs.length; i++) uvs[i] *= k
   return g
+}
+
+/**
+ * A stretched box — a wall section, 2 x 1 x 0.5 m — with ordinary 0..1 uvs on every face. Mesh UV
+ * squashes a texture across it exactly the way it squashes onto a scaled wall in a level; a Box or
+ * Triplanar projection keeps the texel size equal on every face. That comparison is what it is for.
+ */
+export const PREVIEW_BOX_SIZE: [number, number, number] = [2, 1, 0.5]
+export function previewBoxGeometry(): Geometry {
+  return Geometry.Cube(PREVIEW_BOX_SIZE[0], PREVIEW_BOX_SIZE[1], PREVIEW_BOX_SIZE[2])
 }
 
 /**
@@ -115,11 +125,15 @@ export function elevationRemapFor(yLo: number, yHi: number, span: [number, numbe
  */
 export function applyMaterialPreviewShape(scene: Scene, subject: ModelNode, shape: PreviewShape): void {
   const plane = shape === 'plane'
+  const box = shape === 'box'
   // The preview subject is always a plain Model; a skinned model has no geometry to swap.
-  if (subject.model instanceof Model) subject.model.setGeometry(plane ? previewPlaneGeometry() : previewSphereGeometry())
+  if (subject.model instanceof Model)
+    subject.model.setGeometry(plane ? previewPlaneGeometry() : box ? previewBoxGeometry() : previewSphereGeometry())
   previewRigOf(scene)?.frame(plane
     ? { subjectRadius: PREVIEW_PLANE_SIZE * 0.72, pitch: 38, minPitch: 5 }
-    : { subjectRadius: 1, pitch: -18, distance: 3.2, minDistance: 1.8, maxDistance: 12 })
+    : box
+      ? { subjectRadius: 1.15, pitch: -22, distance: 3.4, minDistance: 1.8, maxDistance: 12 }
+      : { subjectRadius: 1, pitch: -18, distance: 3.2, minDistance: 1.8, maxDistance: 12 })
 }
 
 /** The radius and centre height of a landscape material's preview sphere. */

@@ -22,10 +22,12 @@ import { ShaderManager } from '../systems/shaderManager';
 import { Logger } from '../../core/logger';
 import { frameStats } from '../renderStats';
 import { LUT_ROWS, LUT_WIDTH } from '../../particles/curves';
-import { DRAW, packEmitter, stepUniforms, type PackedEmitter } from '../../particles/particlePack';
+import { DRAW, SIM, packEmitter, stepUniforms, type PackedEmitter } from '../../particles/particlePack';
+import { COLLIDER_FLOATS, MAX_PARTICLE_COLLIDERS, packParticleColliders, type ColliderBody } from '../../particles/particleColliders';
 import { builtinParticleMesh, interleaveParticleMesh } from '../../particles/particleMesh';
 import { composeCustomSim } from '../../particles/particleCustomCode';
 import type { EmitterRuntime, SimStep, SubEmitterLink } from '../../particles/particleRuntime';
+import { FULL_DETAIL, particleLodDistance, selectParticleLod } from '../../particles/particleLod';
 import type { RenderSettings } from '../../particles/particleModules';
 import type { ParticleSystemNode } from '../../core/scene/nodes/particleSystemNode';
 import type { Scene } from '../../core/scene/scene';
@@ -118,6 +120,8 @@ export interface ParticleDrawFrame {
     sunColor: readonly number[];
     /** Frustum test on a world AABB; a system wholly outside is not drawn (it still simulates). */
     visible?: (min: vec3, max: vec3) => boolean;
+    /** Multiplies every system's LOD distances (the renderer's `particleLodDistanceScale`). Default 1. */
+    lodDistanceScale?: number;
 }
 
 const stateTexture = (width: number, height: number): Texture => {
@@ -458,6 +462,7 @@ export class ParticleRenderer {
                 }
                 const gpu = this._gpuFor(node, flat2D);
                 frameStats.particleSystems++;
+                const colliders = this._collidersFor(scene, node, gpu);
                 // INTERLEAVED by step, not emitter by emitter: a sub-emitter reads its parent's state
                 // before and after the SAME step, so the parent must not run ahead of it.
                 const emitters = gpu.emitters;
@@ -472,7 +477,7 @@ export class ParticleRenderer {
                 for (let s = 0; s < longest; s++) {
                     for (let i = 0; i < emitters.length; i++) {
                         const step = queues[i][s];
-                        if (step) this._step(gpu, i, step, runtime.links[i], frame, compute);
+                        if (step) this._step(gpu, i, step, runtime.links[i], frame, compute, colliders);
                     }
                 }
             }
@@ -485,6 +490,31 @@ export class ParticleRenderer {
         this._sweep();
     }
 
+    /**
+     * The physics bodies around `node`, packed for `u_colliders` — once per system per frame, and only for
+     * a system with an emitter that collides with bodies. Searched around the system's authored bounds
+     * plus a margin, which is where its particles live.
+     */
+    private _collidersFor(scene: Scene, node: ParticleSystemNode, gpu: SystemGpu): number {
+        this._colliderCount = 0;
+        if (!gpu.emitters.some(e => (e.packed.simMask & SIM.COLLIDE_BODIES) !== 0)) return 0;
+        const physics = scene.physics;
+        if (!physics) return 0;
+        const box = node.getBoundingBox();
+        const center = [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2];
+        const radius = Math.hypot(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]) / 2
+            + ParticleRenderer.COLLIDER_MARGIN;
+        this._colliderCount = packParticleColliders(physics.bodies as unknown as ColliderBody[], center, radius, this._colliderData);
+        frameStats.particleColliders += this._colliderCount;
+        return this._colliderCount;
+    }
+
+    /** Metres past a system's bounds that still count as near: a spark flies a little beyond them. */
+    public static readonly COLLIDER_MARGIN = 2;
+    private readonly _colliderData = new Float32Array(MAX_PARTICLE_COLLIDERS * COLLIDER_FLOATS);
+    private _colliderCount = 0;
+    private static readonly _NO_COLLIDERS = [0, 0, 0, 0];
+
     private static _hasQueued(runtime: ParticleSystemNode['runtime']): boolean {
         for (const queue of runtime.pending) if (queue.length > 0) return true;
         return false;
@@ -495,7 +525,7 @@ export class ParticleRenderer {
      * known dead), and a step with no live slot and nothing to reset is skipped outright.
      */
     private _step(gpu: SystemGpu, i: number, step: SimStep, link: SubEmitterLink | null,
-                  frame: ParticleSimFrame, compute: boolean): void {
+                  frame: ParticleSimFrame, compute: boolean, colliders = 0): void {
         const emitter = gpu.emitters[i];
         const runtime = emitter.runtime;
         const reset = step.reset || emitter.needsReset;
@@ -517,6 +547,12 @@ export class ParticleRenderer {
             values.u_sub = NO_SUB;
             values.u_sub2 = NO_SUB2;
         }
+        // Per step, not per frame: only an emitter that collides with bodies reads them, and the last
+        // system's list must not leak into the next one's program.
+        if (colliders > 0 && (emitter.packed.simMask & SIM.COLLIDE_BODIES) !== 0) {
+            values.u_colliderInfo = [colliders, 0, 0, 0];
+            values.u_colliders = this._colliderData;
+        } else values.u_colliderInfo = ParticleRenderer._NO_COLLIDERS;
         if (compute) this._stepCompute(emitter, values, frame, parent, start, count);
         else this._stepRaster(emitter, values, frame, parent, start, count);
         emitter.current ^= 1;
@@ -786,9 +822,9 @@ export class ParticleRenderer {
             for (const node of nodes) {
                 const gpu = this._systems.get(node);
                 if (!gpu || gpu.version !== node.version || !node.visible || !ParticleRenderer._active(node)) continue;
-                // Out of view last frame, or nothing alive: the draw will skip it, so the sort's dozens of
-                // passes would order particles nobody sees.
-                if (node.offscreen || !node.isAlive) continue;
+                // Out of view last frame, culled by distance, or nothing alive: the draw will skip it, so
+                // the sort's dozens of passes would order particles nobody sees.
+                if (node.offscreen || node.lod.culled || !node.isAlive) continue;
                 for (const emitter of gpu.emitters) {
                     const r = emitter.runtime.def.render;
                     if (!r.sort || r.blend !== 'alpha' || emitter.runtime.capacity > MAX_SORTED_PARTICLES) continue;
@@ -874,6 +910,28 @@ export class ParticleRenderer {
     // ---------------------------------------------------------------------------------------------
 
     /**
+     * Measure `node`'s distance to the camera (to the surface of its bounds) and pick its LOD level — the
+     * level its NEXT update spawns and simulates at, as `offscreen` is. A pinned preview level, or LOD
+     * switched off on the node, bypasses the measurement.
+     */
+    private static _updateLod(node: ParticleSystemNode, box: { min: vec3; max: vec3 }, frame: ParticleDrawFrame): void {
+        const lod = node.system.lod;
+        if (node.forcedLod >= 0) {
+            const level = Math.min(node.forcedLod, lod?.levels.length ?? 0);
+            if (node.lod.level !== level || node.lod.culled) node.lod = { level, culled: false };
+            return;
+        }
+        if (!node.lodEnabled || !lod?.enabled || (lod.levels.length === 0 && !(lod.cullDistance > 0))) {
+            if (node.lod.level !== 0 || node.lod.culled) node.lod = FULL_DETAIL;
+            return;
+        }
+        const center = [(box.min[0] + box.max[0]) * 0.5, (box.min[1] + box.max[1]) * 0.5, (box.min[2] + box.max[2]) * 0.5];
+        const radius = 0.5 * Math.hypot(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]);
+        node.lodDistance = particleLodDistance(center, radius, frame.cameraPosition);
+        node.lod = selectParticleLod(lod, node.lodDistance, node.lod, frame.lodDistanceScale ?? 1);
+    }
+
+    /**
      * Draw every particle system in `nodes` into `frame.pass`, back to front by system. Within an
      * emitter, particles draw in slot order unless the emitter is sorted (see {@link sort}).
      */
@@ -889,12 +947,14 @@ export class ParticleRenderer {
             if (!ParticleRenderer._active(node)) continue;
             // The view test runs for every system, drawn or not: it is also what tells an off-screen
             // system to pause (ParticleSystemNode.offscreen), and that system has nothing to draw.
+            const box = node.getBoundingBox();
             let inView = node.visible;
-            if (inView && frame.visible) {
-                const box = node.getBoundingBox();
-                inView = frame.visible(box.min, box.max);
-            }
+            if (inView && frame.visible) inView = frame.visible(box.min, box.max);
             node.offscreen = !inView;
+            // Distance LOD, for every system in or out of view: a culled one must be measured to come back.
+            ParticleRenderer._updateLod(node, box, frame);
+            if (node.lod.culled) { frameStats.particleSystemsLodCulled++; continue; }
+            if (node.lod.level > 0) frameStats.particleSystemsLodReduced++;
             if (!inView || !node.isAlive) continue;
             const gpu = this._systems.get(node);
             if (!gpu || gpu.version !== node.version) continue;

@@ -6,7 +6,9 @@ import { useEditorSessions } from '../../EditorSessionsContext'
 import { useAssetDrop } from '../../../utils/useAssetDrop'
 import { ownSkinnedModelNodeOf } from '../../../utils/models'
 import { skeletonFingerprint } from '../../../utils/rigAssets'
-import { Button, Hint, Select, cn, hintClass, sectionTitleClass, valueClass } from '../../../components/ui'
+import Collapsable from '../../../components/Collapsable'
+import { Button, Hint, Select, cn, hintClass, valueClass } from '../../../components/ui'
+import { RigIcon } from '../sectionIcons'
 
 // The skeleton a character uses, as an inspector slot — shaped like MaterialSlot and AiBrainSlot.
 //
@@ -52,8 +54,8 @@ export default function RigSlot(props: { node: Node }) {
   const rig = model.rigId ? rigs.find(r => r.id === model.rigId) : undefined
 
   return (
-    <div className='px-2'>
-      <div className={cn(sectionTitleClass, 'mt-3 mb-1')}>Rig</div>
+    <Collapsable title='Rig' icon={<RigIcon />} persistKey='rigSlot'>
+    <div className='w-full p-2'>
 
       {retargetNeeded && (
         <div className='mb-1 flex flex-col gap-1 rounded border border-warning/40 bg-warning/10 p-2'>
@@ -90,8 +92,7 @@ export default function RigSlot(props: { node: Node }) {
             title='Edit this rig — its clips, retargeting and IK'
             onClick={() => enterRigEditor(rig.id)}
           >✎</Button>
-          <Button
-            variant='ghost' size='icon' className='text-danger'
+          <Button variant='remove' size='icon'
             title='Unlink this rig — the character stops playing its clips'
             onClick={() => assign(undefined)}
           >✕</Button>
@@ -121,5 +122,6 @@ export default function RigSlot(props: { node: Node }) {
         </div>
       )}
     </div>
+    </Collapsable>
   )
 }

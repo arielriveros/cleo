@@ -50,11 +50,13 @@ export default function Collapsable({ title, children, icon, badge, right, defau
                 tabIndex={0}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } }}
             >
-                <span className={cn('text-[11px] text-muted transition-transform duration-200', open ? '' : '-rotate-90')}>▼</span>
-                {icon && <span className='shrink-0 text-muted group-hover:text-white transition-colors'>{icon}</span>}
+                <span className={cn('text-ui-sm text-muted transition-transform duration-200', open ? '' : '-rotate-90')}>▼</span>
+                {/* Sized HERE, not by the glyph: the node-type and UI-type icons (shared with the scene tree) carry no
+                    width of their own, and one of them filled the whole card — the "huge" Nav Mesh section. */}
+                {icon && <span className='shrink-0 inline-flex w-[15px] h-[15px] text-muted group-hover:text-fg transition-colors [&>svg]:w-full [&>svg]:h-full'>{icon}</span>}
                 <span className={cn(headerClass, 'truncate', hintAffordance(hint))} title={hint}>{title}</span>
                 {badge !== undefined && badge !== null && badge !== false && (
-                    <span className='shrink-0 min-w-[18px] h-[18px] px-1.5 inline-flex items-center justify-center rounded-full bg-border-subtle text-[10px] text-muted tabular-nums'>
+                    <span className='shrink-0 min-w-[18px] h-[18px] px-1.5 inline-flex items-center justify-center rounded-full bg-border-subtle text-ui-xs text-muted tabular-nums'>
                         {badge}
                     </span>
                 )}

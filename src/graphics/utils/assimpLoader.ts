@@ -169,6 +169,8 @@ async function convertToGltf2FromFiles(files: File[]): Promise<File[]> {
  * files it was given.
  */
 export interface AssimpTextureSlots {
+    /** Only used when the glTF material came out with no base colour texture at all. */
+    baseColorTexture?: string;
     normalMap?: string;
     occlusionMap?: string;
     metallicRoughnessTexture?: string;

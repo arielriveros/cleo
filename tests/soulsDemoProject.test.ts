@@ -2,9 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { parseInputMap } from '../src/input/actionMap';
-import { parseBehaviorMachine } from '../src/core/control/behavior';
+import { parseBehaviorMachine, createBehaviorRuntime, stepBehavior } from '../src/core/control/behavior';
 import { KIND_EXT } from '../editor/src/utils/vfs';
 import { hashAsset, assetHashKey } from '../editor/src/utils/assetHash';
+import { materializeVariant } from '../editor/src/utils/templateVariants';
 
 // The Hollow Keep example is AUTHORED BY CODE (tools/soulsDemo/build.mjs) and wired together by NAME:
 // scripts find nodes with findNode('HUD'), moves name their clips, spawns name their templates, sounds
@@ -65,6 +66,25 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
             expect(names.some(f => readFileSync(join(SCRIPTS, f), 'utf8') === asset.source), `${asset.name} is stale — re-run the generator`).toBe(true);
     });
 
+    // A script imports another by its PROJECT PATH (the explorer path without `.script`). A base class or
+    // module whose asset is named differently from its file resolves in VS Code and tsc, and then fails at
+    // Play with "no such module" — every subclass's node loses its script.
+    it('resolves every script import to a script asset at that path', () => {
+        const entries = read('vfs.json').entries.filter((e: any) => e.kind === 'script');
+        const pathOf = new Map(entries.map((e: any) => [e.assetId, e.path.replace(/\.script$/, '')]));
+        const known = new Set(pathOf.values());
+        let imports = 0;
+        for (const asset of library('scripts')) {
+            const from = pathOf.get(asset.id) as string;
+            for (const [, spec] of asset.source.matchAll(/from\s+['"](\.{1,2}\/[^'"]+|@\/[^'"]+)['"]/g)) {
+                const target = spec.startsWith('@/') ? spec.slice(1) : from.slice(0, from.lastIndexOf('/')) + '/' + spec.replace(/^\.\//, '');
+                expect(known.has(target), `${asset.name} imports '${spec}', but no script lives at ${target}.script`).toBe(true);
+                imports++;
+            }
+        }
+        expect(imports).toBeGreaterThan(20);
+    });
+
     it('only sets script fields the script declares', () => {
         for (const n of everyNode().filter(n => n.scriptVars)) {
             const declared = new Set(scriptOf(n).variables.map((v: any) => v.name));
@@ -86,11 +106,32 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
         const under = (root: string) => new Set(allNodes(allNodes(scene().scene).find(n => n.name === root)).map(n => n.name));
         const hud = under('HUD');
         for (const w of ['Health', 'HealthLag', 'Stamina', 'Estus', 'Weapon', 'Souls', 'SoulsGain', 'Prompt', 'PromptText',
-            'Notice', 'Message', 'MessageTitle', 'MessageBody', 'Boss', 'BossName', 'BossHealth', 'BossLag']) expect(hud.has(w), w).toBe(true);
+            'Notice', 'Message', 'MessageTitle', 'MessageBody']) expect(hud.has(w), w).toBe(true);
         expect(under('Banner').has('BannerText')).toBe(true);
         const menu = under('BonfireMenu');
         for (const w of ['Row_Vigor', 'Row_Endurance', 'Row_Strength', 'Row_Dexterity', 'Confirm', 'Leave', 'Derived', 'LevelText', 'SoulsText'])
             expect(menu.has(w), w).toBe(true);
+        const warden = templates().find((t: any) => t.name === 'Hollow Warden');
+        const bossBar = new Set(allNodes(warden.nodeJson.children.find((c: any) => c.name === 'BossBar')).map((n: any) => n.name));
+        for (const w of ['Bar', 'BossName', 'BossHealth', 'BossLag']) expect(bossBar.has(w), w).toBe(true);
+    });
+
+    // Every UI belongs to the entity it shows: the player's HUD, menu and reticle are the player's
+    // children, each enemy carries its own bar (the boss's on screen), the banners are the game flow's.
+    it('keeps every UI under its owner, and none loose at the scene root', () => {
+        const root = scene().scene;
+        const uiAtRoot = root.children.filter((c: any) => c.type?.startsWith('ui'));
+        expect(uiAtRoot.map((c: any) => c.name)).toEqual([]);
+        const player = root.children.find((c: any) => c.name === 'Player');
+        expect(player.children.map((c: any) => c.name)).toEqual(expect.arrayContaining(['HUD', 'BonfireMenu', 'LockReticle']));
+        expect(player.children.at(-1).type).toBe('controller');
+        expect(root.children.find((c: any) => c.name === 'GameManager').children.map((c: any) => c.name)).toContain('Banner');
+        for (const t of templates().filter((t: any) => t.variant && valueOf(t.nodeJson, 'team') === 'enemy')) {
+            const kids = t.nodeJson.children.map((c: any) => c.name);
+            const isBoss = valueOf(t.nodeJson, 'isBoss') === true;
+            expect(kids, t.name).toContain(isBoss ? 'BossBar' : 'HealthBar');
+            expect(kids, t.name).not.toContain(isBoss ? 'HealthBar' : 'BossBar');
+        }
     });
 
     it('has a SoundNode for every cue a script plays', () => {
@@ -159,13 +200,62 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
             expect(t.bodies[t.nodeJson.id]?.shapes[0].type, t.name).toBe('capsule');
     });
 
-    it('turns auto-acquire off on every enemy brain and runs a machine that parses', () => {
+    it('links every enemy brain to its type’s AI graph asset, and runs exactly that graph', () => {
+        const brains = new Map<string, any>(library('aiBrains').map((b: any) => [b.id, b]));
+        expect(brains.size).toBe(5); // the base Enemy + four types
         for (const n of withScript('SoulsEnemyBrain')) {
             expect(n.autoAcquire).toBe(false);
+            const asset = brains.get(n.brainId);
+            expect(asset, n.name).toBeTruthy();
+            expect(asset.kind).toBe('behavior');
+            // The embedded copy is what runs; it must be the asset, or the AI editor shows a different brain.
+            expect(n.behavior).toEqual(asset.machine);
             const machine = parseBehaviorMachine(n.behavior);
-            expect(machine.states.map(s => s.name)).toEqual(['Idle', 'Chase', 'Engage', 'Return', 'Dead']);
-            expect(machine.states.find(s => s.name === 'Engage')!.goal).toBe('script');
+            expect(machine.states.map(s => s.name)).toEqual(expect.arrayContaining(['Idle', 'Chase', 'Approach', 'Strafe', 'Attack', 'Stagger', 'Return', 'Dead']));
         }
+        const named = (name: string) => parseBehaviorMachine([...brains.values()].find(b => b.name === name).machine);
+        expect(named('Hollow Sorcerer Brain').states.some(s => s.name === 'Retreat')).toBe(true);
+        expect(named('Hollow Brain').states.some(s => s.name === 'Retreat')).toBe(false);
+        expect(named('Hollow Warden Brain').states.some(s => s.name === 'Phase Shift')).toBe(true);
+    });
+
+    it('decides the whole fight in the graph: chase, close in, strafe, attack, stagger, leash home', () => {
+        const brain = library('aiBrains').find((b: any) => b.name === 'Hollow Brain');
+        const machine = parseBehaviorMachine(brain.machine);
+        let rt = createBehaviorRuntime();
+        const v = rt.ctx.values;
+        const set = (o: Record<string, number | boolean>) => { for (const [k, x] of Object.entries(o)) v.set(k, x); };
+        set({ Dead: false, Awake: true, 'Has Target': false, Distance: 0, 'Target Dead': false, 'From Home': 0,
+              'Attack Ready': false, Attacking: false, Reacting: false });
+        const step = (dt = 0.5) => { rt = stepBehavior(machine, rt, dt).next; return rt.current; };
+
+        expect(step()).toBe('Idle');
+        set({ 'Has Target': true, Distance: 12 });
+        expect(step()).toBe('Chase');
+        set({ Distance: 3 });                              // inside the Hollow's engage range (4)
+        expect(step()).toBe('Approach');
+        set({ Distance: 1 });                              // inside its spacing band (1.5)
+        expect(step()).toBe('Strafe');
+        set({ 'Attack Ready': true });
+        expect(step()).toBe('Attack');
+        set({ 'Attack Ready': false, Attacking: true });
+        expect(step()).toBe('Attack');                     // held while the swing plays
+        set({ Attacking: false });
+        expect(step()).toBe('Strafe');
+        set({ Reacting: true });
+        expect(step()).toBe('Stagger');
+        set({ Reacting: false });
+        expect(step()).toBe('Strafe');
+        set({ Distance: 4.5 });                            // inside engage + 0.75: still fighting
+        expect(step()).not.toBe('Chase');
+        set({ 'From Home': 30 });                          // past its leash (18)
+        expect(['Return']).toContain(step());
+        set({ Distance: 1, 'From Home': 5 });              // the player is right there, but Return latches
+        expect(step()).toBe('Return');
+        set({ 'From Home': 0.5 });
+        expect(step()).toBe('Idle');
+        set({ Dead: true });
+        expect(step()).toBe('Dead');
     });
 
     // ----- animation ---------------------------------------------------------------------------------
@@ -206,18 +296,89 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
         }
     });
 
-    it('gives every weapon a blade hitbox: script fields on the player, variables on enemies', () => {
-        const weapons = withScript('SoulsWeapon');
-        expect(weapons.length).toBeGreaterThanOrEqual(2);       // the placed Player's and its template's
-        for (const w of weapons) {
-            expect(w.scriptVars.bladeEnd[1], w.name).toBeGreaterThan(w.scriptVars.bladeStart[1]);
-            expect(w.scriptVars.bladeRadius).toBeGreaterThan(0);
+    // ----- weapons and fighters own their data ------------------------------------------------------
+
+    /** A script asset's resolved field (inherited ones included), or undefined. */
+    const field = (asset: any, name: string) => asset?.variables?.find((v: any) => v.name === name);
+    /** A node's value for a script field: its own scriptVars, else the script's (subclass) default. */
+    const valueOf = (n: any, name: string) => n.scriptVars?.[name] ?? field(scriptOf(n), name)?.default;
+    const weaponTemplateList = () => templates().filter((t: any) => valueOf(t.nodeJson, 'isWeapon') === true);
+
+    it('makes every weapon its own template, each with a blade hitbox from its own script', () => {
+        const weapons = weaponTemplateList();
+        expect(weapons.map((t: any) => t.name).sort()).toEqual(['Club', 'Greatsword', 'Halberd', 'Sorcerer Staff', 'Straight Sword', 'Weapon']);
+        for (const t of weapons) {
+            const start = valueOf(t.nodeJson, 'bladeStart'), end = valueOf(t.nodeJson, 'bladeEnd');
+            expect(end[1], t.name).toBeGreaterThan(start[1]);
+            expect(valueOf(t.nodeJson, 'bladeRadius'), t.name).toBeGreaterThan(0);
+            expect(t.nodeJson.socketAttachment, t.name).toEqual({ target: 'parent', socket: 'RightHand' });
+            expect(t.nodeJson.children.some((c: any) => c.name === 'Mesh'), `${t.name} has no Mesh`).toBe(true);
         }
-        const enemies = withScript('SoulsEnemy');
-        expect(enemies.length).toBe(4);
-        for (const e of enemies) {
-            const weapon = e.children.find((n: any) => n.name === 'Weapon');
-            expect(weapon?.variables?.bladeEnd?.value, `${e.name}'s Weapon has no blade`).toHaveLength(3);
+        // Each concrete weapon is a variant of the base, on a script EXTENDING the base weapon script.
+        for (const t of weapons.filter((w: any) => w.name !== 'Weapon')) {
+            expect(templates().find((b: any) => b.id === t.variant?.baseTemplateId)?.name, t.name).toBe('Weapon');
+            expect(scriptOf(t.nodeJson).source, t.name).toMatch(/extends SoulsWeaponNode/);
+        }
+        // The player's weapons carry their movesets; every move names a clip.
+        for (const name of ['Straight Sword', 'Greatsword']) {
+            const moves = weapons.find((t: any) => t.name === name).nodeJson.children.filter((c: any) => valueOf(c, 'isMove'));
+            expect(moves.length, name).toBeGreaterThanOrEqual(3);
+            for (const m of moves) expect(valueOf(m, 'clip'), `${name}/${m.name}`).toMatch(/^Souls_/);
+        }
+    });
+
+    it('lets every fighter name weapon templates that exist, and carries no weapon in its own template', () => {
+        const names = new Set(weaponTemplateList().map((t: any) => t.name));
+        const fighters = everyNode().filter(n => field(scriptOf(n), 'weaponTemplates'));
+        expect(fighters.length).toBeGreaterThanOrEqual(7);   // player (template + copy), the base enemy, 4 types
+        for (const f of fighters) {
+            const list = String(valueOf(f, 'weaponTemplates') ?? '').split(',').map(s => s.trim()).filter(Boolean);
+            for (const w of list) expect(names.has(w), `${f.name} names a missing weapon "${w}"`).toBe(true);
+            const group = f.children.find((c: any) => c.name === 'Weapons');
+            expect(group?.children ?? [], `${f.name} still holds weapons inline`).toEqual([]);
+        }
+        const player = allNodes(scene().scene).find(n => n.name === 'Player');
+        expect(valueOf(player, 'weaponTemplates')).toBe('Straight Sword, Greatsword');
+    });
+
+    it('gives each enemy type its own script extending SoulsEnemy, holding its stats, on its own variant', () => {
+        const types = library('scripts').filter((s: any) => /extends SoulsEnemyNode/.test(s.source));
+        expect(types.map((s: any) => s.name).sort()).toEqual(['Elite Knight', 'Hollow', 'Hollow Sorcerer', 'Hollow Warden']);
+        for (const type of types) {
+            const t = templates().find((x: any) => scriptOf(x.nodeJson)?.id === type.id);
+            expect(t?.name, type.name).toBe(type.name);
+            expect(templates().find((b: any) => b.id === t.variant?.baseTemplateId)?.name).toBe('Enemy');
+            expect(field(type, 'maxHp').default, type.name).toBeGreaterThan(100);
+            expect(t.nodeJson.scriptVars ?? {}, `${type.name} sets stats on the node instead of its script`).toEqual({});
+        }
+        const warden = templates().find((t: any) => t.name === 'Hollow Warden');
+        const kids = warden.nodeJson.children.map((c: any) => c.name);
+        expect(kids).toContain('PhaseAura');
+        expect(kids).not.toContain('HealthBar');
+    });
+
+    it('stores every variant exactly as its base + diff materializes', () => {
+        const variants = templates().filter((t: any) => t.variant);
+        expect(variants.length).toBe(9);
+        for (const v of variants) {
+            const base = templates().find((b: any) => b.id === v.variant.baseTemplateId);
+            expect(base, `${v.name}'s base`).toBeDefined();
+            expect(templates().indexOf(base), `${v.name} listed before its base`).toBeLessThan(templates().indexOf(v));
+            const m = materializeVariant(base, v.id, v.variant.diff);
+            expect(JSON.stringify(m.nodeJson) === JSON.stringify(v.nodeJson), `${v.name} nodeJson`).toBe(true);
+            expect(m.bodies).toEqual(v.bodies);
+            expect(m.triggers).toEqual(v.triggers);
+            // Patches to INHERITED nodes stay small: a tint or a scale, never the mannequin's mesh or skin.
+            // (Nodes the variant adds — a sword's blade boxes — are its own content and carry their own.)
+            expect(JSON.stringify(v.variant.diff.nodes), `${v.name}'s patches copy geometry`).not.toMatch(/"positions"|"skin"/);
+        }
+    });
+
+    it('never shares a node id between two templates (the published script table is keyed by them)', () => {
+        const owner = new Map<string, string>();
+        for (const t of templates()) for (const n of allNodes(t.nodeJson)) {
+            expect(owner.get(n.id), `${n.name} in ${t.name} reuses an id of ${owner.get(n.id)}`).toBeUndefined();
+            owner.set(n.id, t.name);
         }
     });
 
@@ -245,6 +406,15 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
         expect(inScene.filter(n => /Wall/.test(n.name) && n.body).every(blocks)).toBe(true);
         expect(inScene.filter(n => /Pillar/.test(n.name)).every(blocks)).toBe(true);
         expect(inScene.filter(n => /Floor/.test(n.name)).some(blocks)).toBe(false);
+    });
+
+    it('ships the character controller, and every character embeds it (so a swapped model can get it back)', () => {
+        const [controller] = library('animControllers');
+        expect(controller.name).toBe('Souls Character');
+        expect(controller.rigId).toBe(library('rigs')[0].id);
+        const machines = everyNode().filter(n => n.stateMachine?.states?.length).map(n => n.stateMachine);
+        expect(machines.length).toBeGreaterThan(4);
+        for (const sm of machines) expect(sm.controllerId).toBe(controller.id);
     });
 
     it('owns every clip on the rig, and embeds none', () => {
@@ -302,7 +472,7 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
         expect(new Set(paths).size).toBe(paths.length);
         const ids = new Set<string>([
             manifest().mainSceneId,
-            ...['scripts', 'templates', 'models', 'materials', 'animationFields', 'animations', 'rigs', 'particleSystems']
+            ...['scripts', 'templates', 'models', 'materials', 'animationFields', 'animControllers', 'animations', 'rigs', 'particleSystems', 'aiBrains']
                 .flatMap(l => library(l).map((a: any) => a.id)),
         ]);
         for (const e of vfs.entries) {

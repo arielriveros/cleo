@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { AnimationStateMachine } from 'cleo'
 import {
   applyClipOverrides, buildControllerAsset, controllerMachineOf, instantiateController, machineClipNames,
-  machineLinks, reembedController, resolveMachineLinks,
+  machineLinks, reembedController, resolveMachineLinks, pickControllerForRig, machineIsEmpty,
 } from '../src/utils/animationControllers'
 import { branchOf, buildBoneMaskAsset, presetMask, withBranch, type BoneTree } from '../src/utils/boneMasks'
 import { buildPoseAsset, newPose, poseAssetFromRig, posesForRig } from '../src/utils/poseAssets'
@@ -113,5 +113,26 @@ describe('pose assets', () => {
     const moved = poseAssetFromRig(rig)!
     expect(moved.poses[0].id).toBe('old')
     expect(moved.rigId).toBe('rig')
+  })
+})
+
+describe('a character that lost its controller', () => {
+  // Replacing a character's model node (delete it, drag a new model in, link the same rig) leaves the new
+  // node with NO state machine: it never plays idle or locomotion and stands in its bind pose. Linking the
+  // rig hands it the controller authored for that rig.
+  const ctrl = (id: string, rigId?: string) => ({ id, name: id, rigId, machine: { parameters: [], states: [], transitions: [], events: [] } })
+
+  it('picks the controller authored for the rig, and of several the most used', () => {
+    const controllers = [ctrl('other', 'rigB'), ctrl('a', 'rigA'), ctrl('b', 'rigA'), ctrl('generic')]
+    expect(pickControllerForRig('rigA', controllers)?.id).toBe('a')
+    expect(pickControllerForRig('rigA', controllers, new Map([['b', 3], ['a', 1]]))?.id).toBe('b')
+    expect(pickControllerForRig('rigC', controllers)).toBeNull()
+    expect(pickControllerForRig(undefined, controllers)).toBeNull()
+  })
+
+  it('counts a machine with no states as no machine', () => {
+    expect(machineIsEmpty(null)).toBe(true)
+    expect(machineIsEmpty({ parameters: [], states: [], transitions: [], events: [] } as AnimationStateMachine)).toBe(true)
+    expect(machineIsEmpty({ parameters: [], states: [{ name: 'Idle' } as any], transitions: [], events: [] } as AnimationStateMachine)).toBe(false)
   })
 })

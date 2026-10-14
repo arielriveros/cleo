@@ -5,6 +5,7 @@ import { useDocument } from './DocumentContext';
 import { usePlayback } from './PlaybackContext';
 import { iconFor } from './assets/assetKinds';
 import type { AssetKind } from '../utils/vfs';
+import { Button } from '../components/ui';
 
 // The asset-type icon shown on a tab. `TAB_ASSET_KIND` names the asset each kind edits; the two that edit
 // none fall back to a glyph that describes what is on screen — an animation tab is a skinned mesh, and the
@@ -37,17 +38,16 @@ export default function TabBar() {
             onDragEnd={() => setDragId(null)}
             onClick={() => setActiveTab(tab.id)}
             title={tab.title}
-            className={`group flex items-center gap-1 h-[26px] my-[2px] px-2 rounded-t-[6px] cursor-pointer select-none max-w-[180px] border border-b-0 ${active ? 'bg-selected border-white text-white' : 'bg-control border-surface-raised text-muted hover:bg-control-hover'} ${isPlayMode ? 'opacity-60 pointer-events-none' : ''}`}
+            className={`group flex items-center gap-1 h-[26px] my-[2px] px-2 rounded-t-[6px] cursor-pointer select-none max-w-[180px] border border-b-0 ${active ? 'bg-selected border-fg text-fg' : 'bg-control border-surface-raised text-muted hover:bg-control-hover'} ${isPlayMode ? 'opacity-60 pointer-events-none' : ''}`}
           >
             <img src={iconFor(tabAssetKind(tab.kind))} className='w-3.5 h-3.5 shrink-0' alt='' draggable={false} />
-            <span className='truncate text-xs'>{tab.title}</span>
-            {dirty && <span className='ml-auto text-[10px] leading-none text-warning' title='Unsaved changes'>●</span>}
+            <span className='truncate text-ui'>{tab.title}</span>
+            {dirty && <span className='ml-auto text-ui-xs leading-none text-warning' title='Unsaved changes'>●</span>}
             {tab.kind !== 'scene' && (
-              <button
-                className='w-[14px] h-[14px] flex items-center justify-center rounded text-[11px] leading-none text-muted hover:bg-white/20 hover:text-white'
+              <Button variant='remove' size='icon' className='w-[14px] h-[14px] p-0 text-ui-sm leading-none hover:bg-fg/20'
                 title='Close tab'
                 onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
-              >✕</button>
+              >✕</Button>
             )}
           </div>
         );

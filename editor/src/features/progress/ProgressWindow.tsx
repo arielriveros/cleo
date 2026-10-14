@@ -28,7 +28,7 @@ function StepRow({ step }: { step: TaskStep }) {
           {step.name}
         </div>
         {text && (
-          <div className={cn(hintClass, 'truncate', failed && 'text-danger select-text')} title={text}>{text}</div>
+          <div className={cn(hintClass, 'truncate', failed && 'text-danger-fg select-text')} title={text}>{text}</div>
         )}
       </div>
     </div>
@@ -66,8 +66,8 @@ function TaskCard({ task }: { task: Task }) {
         <div className='flex items-center justify-between gap-2'>
           <span className={cn(sectionTitleClass, 'truncate')} title={heading}>{heading}</span>
           {!running && (
-            <button className='text-dim hover:text-fg leading-none px-1' title='Dismiss'
-              onClick={() => dismissTask(task.id)}>✕</button>
+            <Button variant='remove' size='sm' className='leading-none px-1' title='Dismiss'
+              onClick={() => dismissTask(task.id)}>✕</Button>
           )}
         </div>
 

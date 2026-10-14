@@ -50,8 +50,9 @@ export default class SoulsPickupNode extends Node {
     this.taken = true
     p.playGesture?.(this.pickupClip, 0.8)
     if (this.kind === 'souls') p.addSouls?.(this.amount)
-    else if (this.kind === 'flaskShard') { p.estusMax = (p.estusMax ?? 3) + 1; p.estus = p.estusMax }
-    else if (this.kind === 'flaskCharge') p.estus = Math.min(p.estusMax ?? 3, (p.estus ?? 0) + Math.max(1, this.amount))
+    // The flasks are the player's; it is asked to change them, never written to.
+    else if (this.kind === 'flaskShard') p.addEstusFlask?.()
+    else if (this.kind === 'flaskCharge') p.refillEstus?.(this.amount)
     gm?.notice?.('Picked up ' + this.itemName)
     gm?.sfx?.('Pickup')
     this.visible = false

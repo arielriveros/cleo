@@ -6,6 +6,7 @@ import {
     cloneParticleSystem, defaultParticleSystem, parseParticleSystem, type ParticleSystemDef,
 } from "../../../particles/particleSystemAsset";
 import { ParticleSystemRuntime } from "../../../particles/particleRuntime";
+import { FULL_DETAIL, particleLodFactors, type ParticleLodState } from "../../../particles/particleLod";
 
 export interface ParticleSystemNodeOptions {
     /** The system definition. Embedded, so a scene plays without its asset library. */
@@ -21,6 +22,8 @@ export interface ParticleSystemNodeOptions {
     tint?: [number, number, number, number];
     /** What the system does while its bounds are out of view. See {@link ParticleCullingMode}. */
     cullingMode?: ParticleCullingMode;
+    /** Follow the system's distance LOD (its `.vfx` `lod`). Off = full detail at any distance, never culled. */
+    lodEnabled?: boolean;
 }
 
 /**
@@ -75,6 +78,21 @@ export class ParticleSystemNode extends Node {
      */
     public offscreen = false;
 
+    /**
+     * Written by the renderer each frame it draws particles, like {@link offscreen}: the distance LOD this
+     * system runs at (see particles/particleLod.ts). Read back by {@link update}: a coarser level spawns
+     * less and simulates less often; a culled one is not drawn, and pauses as an off-screen one would.
+     */
+    public lod: ParticleLodState = FULL_DETAIL;
+    /** Distance from the camera to this system's bounds, as of the last frame the renderer measured it. */
+    public lodDistance = 0;
+    /**
+     * Pin the LOD level instead of measuring it (the particle editor's preview "LOD" select). -1 = by
+     * distance. Not saved: it is a way of looking at an effect, not part of it.
+     */
+    public forcedLod = -1;
+    private _lodEnabled: boolean;
+
     constructor(name: string, options: ParticleSystemNodeOptions = {}, id: string = uuidv4()) {
         super(name, 'particleSystem', id);
         this._system = options.system ? parseParticleSystem(options.system) : defaultParticleSystem();
@@ -86,6 +104,7 @@ export class ParticleSystemNode extends Node {
         this._tint = Array.isArray(t) ? [num(t[0], 1), num(t[1], 1), num(t[2], 1), num(t[3], 1)] : [1, 1, 1, 1];
         this._cullingMode = CULLING_MODES.includes(options.cullingMode as ParticleCullingMode)
             ? options.cullingMode as ParticleCullingMode : 'auto';
+        this._lodEnabled = options.lodEnabled !== false;
         this._runtime = new ParticleSystemRuntime(this._system.emitters);
     }
 
@@ -174,6 +193,15 @@ export class ParticleSystemNode extends Node {
     }
 
     /** Whether the clock stops while off screen: the mode, with `auto` resolved against the emitters. */
+    /** Follow the system's distance LOD. Off: full detail at every distance, never culled. */
+    public get lodEnabled(): boolean { return this._lodEnabled; }
+    public set lodEnabled(value: boolean) {
+        if (value === this._lodEnabled) return;
+        this._lodEnabled = value;
+        if (!value) this.lod = FULL_DETAIL;
+        this._notifyChange('component', 'lodEnabled');
+    }
+
     public get pausesOffscreen(): boolean {
         if (this._cullingMode !== 'auto') return this._cullingMode === 'pause';
         const enabled = this._system.emitters.filter(e => e.enabled);
@@ -268,8 +296,13 @@ export class ParticleSystemNode extends Node {
             this._playing = false;
             return;
         }
-        if (this.offscreen && this.pausesOffscreen) return;
-        this._runtime.advance(delta * this._simulationSpeed, this.worldTransform, this._spawnRateScale);
+        // Culled by distance pauses exactly as off screen does: a looping system stops, a one-shot fired
+        // over there still plays out, so it is finished (not frozen mid-burst) when the camera gets close.
+        if ((this.offscreen || this.lod.culled) && this.pausesOffscreen) return;
+        const lod = this._system.lod;
+        const { spawnScale, stepScale } = particleLodFactors(lod, this.lod.level);
+        this._runtime.advance(delta * this._simulationSpeed, this.worldTransform, this._spawnRateScale, undefined,
+            { level: this.lod.level, spawnScale, stepScale, scaleBursts: lod?.scaleBursts === true });
     }
 
     // -----------------------------------------------------------------------------------------------
@@ -286,6 +319,7 @@ export class ParticleSystemNode extends Node {
                 spawnRateScale: this._spawnRateScale,
                 tint: [...this._tint],
                 cullingMode: this._cullingMode,
+                lodEnabled: this._lodEnabled,
             },
         };
     }

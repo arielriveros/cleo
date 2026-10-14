@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { webgpuAvailableInBrowser, WEBGPU_IMPLEMENTED } from 'cleo';
 import type { BackendKind } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
-import { cn } from '../../components/ui';
+import { SegmentedControl } from '../../components/ui';
 import { readBackendPreference, writeBackendPreference } from './backendPreference';
 import webglLogo from '../../images/logos/WebGL-logo.svg';
 import webgpuLogo from '../../images/logos/WebGPU-logo.svg';
@@ -46,40 +46,35 @@ export default function BackendSelector() {
 
   return (
     <div>
-      <div className='grid grid-cols-2 gap-2'>
-        {OPTIONS.map(opt => {
+      {/* The mark is the label here, so it carries the alt text and the text below is the caption. Fixed
+          height keeps the two options aligned despite different aspect ratios. */}
+      <SegmentedControl<BackendKind>
+        value={preference}
+        onChange={choose}
+        className='grid grid-cols-2 gap-2'
+        itemClassName='flex-col gap-1 rounded-md px-2 py-2'
+        options={OPTIONS.map(opt => {
           const reason = unavailable(opt.value);
-          const selected = preference === opt.value;
-          return (
-            <button
-              key={opt.value}
-              type='button'
-              disabled={!!reason}
-              onClick={() => choose(opt.value)}
-              title={reason ?? `Use ${opt.label} to drive the renderer. Applies when the editor reloads.`}
-              className={cn(
-                'flex flex-col items-center gap-1 rounded-md border px-2 py-2 transition-colors',
-                selected ? 'border-primary bg-primary/15' : 'border-border bg-control hover:bg-control-hover',
-                reason && 'opacity-40 cursor-not-allowed hover:bg-control',
-              )}
-            >
-              {/* The mark is the label here, so it carries the alt text and the text below is the
-                  caption. Fixed height keeps the two buttons aligned despite different aspect ratios. */}
+          return {
+            value: opt.value,
+            disabled: !!reason,
+            title: reason ?? `Use ${opt.label} to drive the renderer. Applies when the editor reloads.`,
+            label: <>
               <img src={opt.logo} alt={opt.label} className='h-7 object-contain' draggable={false} />
-              <span className='text-[10px] leading-none'>{opt.label}</span>
-              {active === opt.value && <span className='text-[9px] leading-none text-success'>running</span>}
-            </button>
-          );
+              <span className='text-ui-xs leading-none'>{opt.label}</span>
+              {active === opt.value && <span className='text-ui-2xs leading-none text-success-fg'>running</span>}
+            </>,
+          };
         })}
-      </div>
+      />
 
       {pendingReload && (
-        <div className='mt-2 text-[10px] text-warning leading-snug'>
+        <div className='mt-2 text-ui-xs text-warning leading-snug'>
           Reload the editor to switch to {OPTIONS.find(o => o.value === preference)?.label}.
         </div>
       )}
       {fallbackReason && preference === 'webgpu' && (
-        <div className='mt-2 text-[10px] text-warning leading-snug'>
+        <div className='mt-2 text-ui-xs text-warning leading-snug'>
           Running on WebGL 2 — {fallbackReason}.
         </div>
       )}

@@ -15,12 +15,12 @@ export default function ProjectLauncher({ projects }: { projects: ProjectRecord[
     <div className='h-screen w-screen flex flex-col items-center justify-center bg-bg text-fg select-none'>
       <div className='w-[720px] max-w-[92vw] flex flex-col gap-6'>
         <div className='flex flex-col items-center gap-2'>
-          <h1 className='text-2xl font-semibold tracking-[0.3em] text-slate-200'>CLEO ENGINE</h1>
-          <span className='text-[10px] uppercase tracking-[0.3em] text-slate-500'>Editor</span>
-          <span className='text-[10px] tabular-nums tracking-[0.2em] text-dim'>{VERSION_LABEL}</span>
+          <h1 className='text-2xl font-semibold tracking-[0.3em] text-fg'>CLEO ENGINE</h1>
+          <span className='text-ui-xs uppercase tracking-[0.3em] text-dim'>Editor</span>
+          <span className='text-ui-xs tabular-nums tracking-[0.2em] text-dim'>{VERSION_LABEL}</span>
         </div>
         <div className='flex flex-col gap-2'>
-          <div className='text-sm text-slate-300'>
+          <div className='text-ui text-muted'>
             {list.length
               ? 'Open a project to continue.'
               : 'Create your first project, or start from one of the examples.'}
@@ -28,7 +28,7 @@ export default function ProjectLauncher({ projects }: { projects: ProjectRecord[
           <div className='h-[380px] rounded-md border border-control overflow-hidden bg-surface-raised'>
             <ProjectsBrowser projects={list} onChanged={setList} />
           </div>
-          <div className='text-[11px] text-dim'>
+          <div className='text-ui-sm text-dim'>
             A project owns its scenes, models, materials, scripts and textures. Nothing is shared between projects.
           </div>
         </div>

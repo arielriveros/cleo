@@ -16,10 +16,8 @@ import { validateNodeName } from '../../utils/nodeNames';
 import { useElementSize } from '../../utils/useElementSize';
 import { useScopedDndManager } from '../../utils/treeDnd';
 import { hoveredScriptStore, useHoveredScript } from './hoveredScriptStore';
-import {
-  CanvasIcon, PanelIcon, StackIcon, SpacerIcon, TextIcon, ImageIcon,
-  ButtonIcon, ProgressIcon, SliderIcon, ToggleIcon, TextInputIcon,
-} from './uiIcons';
+import { TextInput } from '../../components/ui';
+import { UI_ICONS } from './uiIcons';
 
 /** Glyph per node type, as a table rather than a chain of per-type conditionals in the row. */
 const TYPE_ICONS: Record<string, () => JSX.Element> = {
@@ -34,13 +32,6 @@ const TYPE_ICONS: Record<string, () => JSX.Element> = {
   particleSystem: ParticlesIcon, forceField: ForceFieldIcon,
 };
 
-/** UI node types, kept separate because `isUINodeType` also gates the inspector and picking. */
-const UI_ICONS: Record<string, () => JSX.Element> = {
-  uiRoot: CanvasIcon, uiPanel: PanelIcon, uiText: TextIcon, uiImage: ImageIcon,
-  uiButton: ButtonIcon, uiStack: StackIcon, uiSpacer: SpacerIcon,
-  uiProgressBar: ProgressIcon, uiSlider: SliderIcon, uiToggle: ToggleIcon,
-  uiTextInput: TextInputIcon,
-};
 
 const ROW_HEIGHT = 24;
 const INDENT = 12;
@@ -111,7 +102,7 @@ const Chevron = ({ open }: { open: boolean }) => (
 const IndentGuides = ({ level }: { level: number }) => (
   <>
     {Array.from({ length: level }, (_, i) => (
-      <span key={i} aria-hidden className='absolute inset-y-0 w-px bg-white/[0.08] pointer-events-none'
+      <span key={i} aria-hidden className='absolute inset-y-0 w-px bg-fg/[0.08] pointer-events-none'
             style={{ left: GUTTER + i * INDENT + CHEVRON / 2 }} />
     ))}
   </>
@@ -133,7 +124,7 @@ function RenameInput({ node }: { node: NodeRendererProps<NodeDescription>['node'
         if (e.key === 'Escape') node.reset();
         if (e.key === 'Enter') node.submit(input.current?.value ?? '');
       }}
-      className='type-value bg-black/40 text-white rounded px-1 outline-none ring-1 ring-primary/60 w-full min-w-0' />
+      className='type-value bg-scrim/40 text-fg rounded px-1 outline-none ring-1 ring-primary/60 w-full min-w-0' />
   );
 }
 
@@ -178,9 +169,9 @@ function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) 
       onDragStart={handleDragStart}
       style={{ paddingLeft: GUTTER + node.level * INDENT }}
       className={`scene-item group relative flex items-center h-[22px] mt-[1px] pr-[6px] rounded-md overflow-hidden whitespace-nowrap ${
-        selected ? 'bg-primary/40 text-white cursor-default'
+        selected ? 'bg-primary/40 text-fg cursor-default'
           : node.willReceiveDrop ? 'bg-primary/20 cursor-pointer'
-            : `${isUI ? 'text-node-ui ' : 'text-fg '}hover:bg-white/[0.06] cursor-pointer`}`}>
+            : `${isUI ? 'text-node-ui ' : 'text-fg '}hover:bg-fg/[0.06] cursor-pointer`}`}>
       <IndentGuides level={node.level} />
       {/* Always occupied, so names line up whether or not a row can be opened. */}
       <span className='flex items-center justify-center w-[16px] shrink-0 text-muted hover:text-fg z-[1]'
@@ -204,7 +195,7 @@ function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) 
             onMouseEnter={() => hoveredScriptStore.set(data.scriptId ?? null)}
             onMouseLeave={() => hoveredScriptStore.set(null)}
             className={`inline-flex items-center justify-center w-4 h-4 transition-colors ${
-              scriptHot ? 'text-highlight' : scriptGrey ? 'text-white/35 hover:text-white/70' : 'text-white/70 hover:text-highlight'}`}>
+              scriptHot ? 'text-highlight' : scriptGrey ? 'text-dim hover:text-muted' : 'text-muted hover:text-highlight'}`}>
             <ScriptIcon />
           </button>
         }
@@ -212,7 +203,7 @@ function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) 
           <button
             title='Edit template'
             onClick={(e) => { e.stopPropagation(); enterTemplateEditor(data.templateId); }}
-            className='inline-flex items-center justify-center w-4 h-4 text-white/70 hover:text-highlight transition-colors'>
+            className='inline-flex items-center justify-center w-4 h-4 text-muted hover:text-highlight transition-colors'>
             <PenIcon />
           </button>
         }
@@ -490,13 +481,13 @@ export default function SceneInspector() {
   };
 
   return (
-    <div className='flex flex-col text-white bg-surface-raised w-full h-full min-h-[40px] overflow-hidden'
+    <div className='flex flex-col text-fg bg-surface-raised w-full h-full min-h-[40px] overflow-hidden'
          onDragOverCapture={handleDragOver} onDropCapture={handleDrop} onKeyDownCapture={handleKeyDown}>
       <div className='shrink-0 px-[5px] py-1'>
-        <input
-          type='text' value={filter} placeholder='Filter nodes'
-          onChange={(e) => setFilter(e.target.value)}
-          className='type-value w-full bg-white/[0.06] text-white placeholder:text-dim rounded-md px-2 py-[3px] outline-none focus:bg-white/[0.1] transition-colors' />
+        <TextInput
+          value={filter} placeholder='Filter nodes'
+          onChange={setFilter}
+          className='bg-fg/[0.06] border-transparent focus-visible:border-transparent placeholder:text-dim rounded-md px-2 py-[3px] focus:bg-fg/[0.1] transition-colors' />
       </div>
       <div ref={viewportRef} className='flex-1 min-h-0'>
         { dndManager && size.height > 0 &&

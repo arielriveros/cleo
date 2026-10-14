@@ -3,7 +3,7 @@ import { SpriteNode } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
 import { useEventBus } from '../../EventBusContext'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
-import { PropertyTable, PropertyRow, Select, Slider, Toggle, ColorInput } from '../../../components/ui'
+import { PropertyTable, PropertyRow, Select, Slider, Toggle, ColorInput, Hint } from '../../../components/ui'
 import { AppearanceIcon } from '../sectionIcons'
 
 // Tint / opacity / blending for a sprite, inline. A sprite's image comes from its tileset, not a material.
@@ -58,6 +58,10 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
             <Toggle checked={wireframe} onChange={(c) => { sprite.wireframe = c; setWireframe(c); changed() }} />
           </PropertyRow>
         </PropertyTable>
+        {(props.node.tileset?.overdrive ?? 1) !== 1 && (
+          // Read-only: overdrive belongs to the tileset (Tileset editor > Atlas), so every sprite from it agrees.
+          <Hint>Overdrive ×{props.node.tileset!.overdrive} from the tileset: this sprite glows through bloom.</Hint>
+        )}
       </div>
     </Collapsable>
   )

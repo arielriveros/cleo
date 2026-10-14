@@ -1,16 +1,17 @@
 import React, { useMemo, useRef, useState } from 'react'
-import { TextureManager, Logger } from 'cleo'
+import { TextureManager, Logger, MAX_TILESET_OVERDRIVE } from 'cleo'
 import type { TileMeta, WangKind } from 'cleo'
 import Collapsable from '../../components/Collapsable'
-import { Button, ButtonWithConfirm, NumberInput, Select, TextInput, Toggle, ColorInput, Hint } from '../../components/ui'
+import { Button, ButtonWithConfirm, NumberInput, Select, TextInput, Toggle, ColorInput, Hint, cn, labelClass } from '../../components/ui'
 import { vec3ToHex } from '../../utils/UtilFunctions'
 import { awaitTextureImage, textureImage } from '../../utils/textureReady'
+import { moveFrame } from '../../utils/tilesets'
 import { useTileset } from './TilesetContext'
 
 // The tileset tab's Properties panel: how the atlas is sliced, what the selected tiles mean (solid,
 // animated, tinted, depth-anchored), and the auto-tile / variant sets built out of them.
 
-const label = 'text-xs text-gray-300'
+const label = labelClass
 
 /** Import / drop target / picker for the atlas image. Accepts the same payloads TextureInspector does. */
 function AtlasSlot() {
@@ -68,7 +69,7 @@ function AtlasSlot() {
       onDragLeave={() => setDragOver(false)}
       onDrop={onDrop}
       title='You can also drop an image file, or a texture from the Assets explorer, onto this box.'
-      className={`space-y-1 border rounded p-2 ${dragOver ? 'border-selected' : 'border-control'}`}
+      className={cn('space-y-1 border rounded p-2', dragOver ? 'border-selected' : 'border-control')}
     >
       <div className='flex items-center gap-2'>
         <div className='w-12 h-12 rounded overflow-hidden bg-surface-raised flex items-center justify-center shrink-0'>
@@ -77,8 +78,8 @@ function AtlasSlot() {
             : <span className='text-lg'>🧩</span>}
         </div>
         <div className='min-w-0 flex-1'>
-          <p className='truncate text-xs' title={asset.textureId}>{asset.textureId || 'No atlas'}</p>
-          <p className='text-[10px] text-muted'>{asset.imageWidth} x {asset.imageHeight} px</p>
+          <p className='truncate text-ui' title={asset.textureId}>{asset.textureId || 'No atlas'}</p>
+          <p className='text-ui-xs text-muted'>{asset.imageWidth} x {asset.imageHeight} px</p>
         </div>
       </div>
 
@@ -104,8 +105,63 @@ function AtlasSlot() {
 }
 
 /** Metadata editor for the current selection. Every write applies to every selected tile. */
+/**
+ * The frames of one tile's animation as chips in play order: each shows its position and tile index, can
+ * be nudged earlier/later or removed. Frames are ADDED by picking tiles on the atlas, not typed.
+ */
+function FrameStrip({ tile, frames, fps }: { tile: number; frames: number[]; fps: number }) {
+  const { asset, setTileMeta, framePick, startFramePick, finishFramePick, cancelFramePick } = useTileset()
+  if (!asset) return null
+  const picking = framePick === tile
+  const write = (next: number[]) =>
+    setTileMeta(tile, { ...(asset.tiles[tile] ?? {}), animation: { frames: next, fps } })
+
+  return (
+    <div className='space-y-1.5'>
+      <div className='flex items-center justify-between'>
+        <span className={label}>Frames ({frames.length})</span>
+        <span className='flex gap-1'>
+          <Button size='sm' variant={picking ? 'primary' : 'default'}
+            title='Click tiles on the atlas to add them as frames, in order. Right-click a tile removes its last use.'
+            onClick={() => picking ? finishFramePick() : startFramePick(tile)}>
+            {picking ? 'Done picking' : 'Pick on atlas'}
+          </Button>
+          {picking && (
+            <Button size='sm' variant='ghost' title='Discard the frames picked this time (Esc)' onClick={cancelFramePick}>
+              Cancel
+            </Button>
+          )}
+          <ButtonWithConfirm size='sm' disabled={frames.length === 0} onClick={() => write([])}>Clear</ButtonWithConfirm>
+        </span>
+      </div>
+      {frames.length === 0
+        ? <Hint>No frames yet. Press “Pick on atlas”, then click the tiles in the order they play.</Hint>
+        : (
+          <div className='flex flex-wrap gap-1'>
+            {frames.map((f, i) => (
+              <span key={i}
+                className='inline-flex items-center gap-0.5 rounded border border-border bg-surface-sunken pl-1 text-ui-sm'
+                title={`Frame ${i + 1}: tile ${f}`}>
+                <span className='text-warning font-semibold'>{i + 1}</span>
+                <span className='text-muted'>·</span>
+                <span>{f}</span>
+                <button className='px-0.5 text-muted hover:text-fg disabled:opacity-30' disabled={i === 0}
+                  title='Play earlier' onClick={() => write(moveFrame(frames, i, i - 1))}>‹</button>
+                <button className='px-0.5 text-muted hover:text-fg disabled:opacity-30' disabled={i === frames.length - 1}
+                  title='Play later' onClick={() => write(moveFrame(frames, i, i + 1))}>›</button>
+                <button className='px-1 text-muted hover:text-danger-fg' title='Remove this frame'
+                  onClick={() => write(frames.filter((_, k) => k !== i))}>×</button>
+              </span>
+            ))}
+          </div>
+        )}
+      {frames.length === 1 && <Hint>Add at least one more frame for the tile to animate.</Hint>}
+    </div>
+  )
+}
+
 function TileMetaEditor() {
-  const { asset, selection, setTileMeta } = useTileset()
+  const { asset, selection, setTileMeta, framePick, startFramePick, finishFramePick } = useTileset()
   if (!asset || selection.length === 0) {
     return <Hint>Select one or more tiles in the atlas to edit what they mean.</Hint>
   }
@@ -168,37 +224,45 @@ function TileMetaEditor() {
         <NumberInput className='w-16' value={primary.opacity ?? 1} step={0.05} min={0} max={1}
           onChange={(v) => apply({ opacity: v >= 1 ? undefined : v })} />
       </div>
+      <div className='flex items-center justify-between'>
+        <span className={label}
+          title='This tile’s overdrive. Matching the tileset’s value clears it, so the tile follows the tileset again.'>
+          Overdrive{primary.overdrive === undefined ? '' : ' (own)'}
+        </span>
+        <NumberInput className='w-16' value={primary.overdrive ?? asset.overdrive ?? 1} step={0.5} min={0}
+          max={MAX_TILESET_OVERDRIVE}
+          onChange={(v) => apply({ overdrive: v === (asset.overdrive ?? 1) ? undefined : v })} />
+      </div>
 
       <div className='flex items-center justify-between pt-1'>
         <span className={label}>Animated</span>
         <Toggle
-          checked={frames.length > 1}
-          onChange={(c) => apply({
-            // Seeded with this tile and the one after it so the sequence is immediately meaningful.
-            animation: c ? { frames: [selection[0], Math.min(selection[0] + 1, asset.columns * asset.rows - 1)], fps: 8 } : undefined,
-          })}
+          checked={!!primary.animation}
+          onChange={(c) => {
+            if (!c) { if (framePick !== null) finishFramePick(); apply({ animation: undefined }); return }
+            // An animation belongs to ONE tile: turning it on narrows to the first selected tile, seeds it as
+            // frame 1 and goes straight to picking the rest on the atlas.
+            const tile = selection[0]
+            // Cancel restores the tile from BEFORE the seed, so cancelling also turns Animated back off.
+            const before = asset.tiles[tile] ?? null
+            setTileMeta(tile, { ...(asset.tiles[tile] ?? {}), animation: { frames: [tile], fps: 8 } })
+            startFramePick(tile, before)
+          }}
         />
       </div>
-      {frames.length > 1 && (
-        <>
-          <div className='flex items-center justify-between'>
-            <span className={label}>Frames</span>
-            <TextInput
-              className='w-32'
-              value={frames.join(', ')}
-              onChange={(text) => {
-                const parsed = text.split(',').map(s => Number(s.trim())).filter(n => Number.isFinite(n))
-                apply({ animation: { frames: parsed, fps: primary.animation?.fps ?? 8 } })
-              }}
-              title='Tile indices, in play order'
-            />
-          </div>
-          <div className='flex items-center justify-between'>
-            <span className={label}>FPS</span>
-            <NumberInput className='w-16' value={primary.animation?.fps ?? 8} step={1} min={1}
-              onChange={(v) => apply({ animation: { frames, fps: Math.max(1, v) } })} />
-          </div>
-        </>
+      {primary.animation && (
+        selection.length > 1
+          ? <Hint>Select a single tile to edit its animation frames.</Hint>
+          : (
+            <>
+              <FrameStrip tile={selection[0]} frames={frames} fps={primary.animation.fps ?? 8} />
+              <div className='flex items-center justify-between'>
+                <span className={label}>FPS</span>
+                <NumberInput className='w-16' value={primary.animation.fps ?? 8} step={1} min={1}
+                  onChange={(v) => apply({ animation: { frames, fps: Math.max(1, v) } })} />
+              </div>
+            </>
+          )
       )}
 
       <ButtonWithConfirm
@@ -248,13 +312,11 @@ function TerrainSetsEditor() {
               <option value='corner'>Corner</option>
               <option value='blob'>Blob</option>
             </Select>
-            <ButtonWithConfirm onClick={() => patch({ terrains: asset.terrains.filter(t => t.id !== set.id) })}>
-              ✕
-            </ButtonWithConfirm>
+            <ButtonWithConfirm variant='remove' onClick={() => patch({ terrains: asset.terrains.filter(t => t.id !== set.id) })}>✕</ButtonWithConfirm>
           </div>
           <div className='flex items-center justify-between'>
             <span className={label}>Rules</span>
-            <span className='text-[10px] text-muted'>{Object.keys(set.tiles).length} masks</span>
+            <span className='text-ui-xs text-muted'>{Object.keys(set.tiles).length} masks</span>
           </div>
           <Button
             size='sm' variant='ghost' className='w-full'
@@ -303,9 +365,7 @@ function VariantSetsEditor() {
                 patch({ variantSets: next })
               }}
             />
-            <ButtonWithConfirm onClick={() => patch({ variantSets: asset.variantSets.filter(v => v.id !== set.id) })}>
-              ✕
-            </ButtonWithConfirm>
+            <ButtonWithConfirm variant='remove' onClick={() => patch({ variantSets: asset.variantSets.filter(v => v.id !== set.id) })}>✕</ButtonWithConfirm>
           </div>
           {set.tiles.map((t, k) => (
             <div key={t.index} className='flex items-center justify-between'>
@@ -354,10 +414,10 @@ function VariantSetsEditor() {
 export default function TilesetInspector() {
   const { asset, patch, save, dirty } = useTileset()
 
-  if (!asset) return <div className='p-2 text-xs text-muted'>No tileset open.</div>
+  if (!asset) return <div className='p-2 text-ui text-muted'>No tileset open.</div>
 
   return (
-    <div className='flex flex-col text-white'>
+    <div className='flex flex-col text-fg'>
       <Collapsable title='Atlas' persistKey='tileset.atlas' defaultOpen>
         <div className='p-2 space-y-2'>
           <AtlasSlot />
@@ -380,6 +440,20 @@ export default function TilesetInspector() {
             <NumberInput className='w-16' value={asset.spacing} step={1} min={0}
               onChange={(v) => patch({ spacing: Math.max(0, v) })} />
           </div>
+          <div className='flex items-center justify-between'>
+            <span className={label}
+              title='Brightness past white, in linear light. Above 1 the tiles glow through bloom: fire, lava, magic.'>
+              Overdrive
+            </span>
+            <NumberInput className='w-16' value={asset.overdrive ?? 1} step={0.5} min={0} max={MAX_TILESET_OVERDRIVE}
+              onChange={(v) => {
+                const o = Math.min(MAX_TILESET_OVERDRIVE, Math.max(0, v))
+                patch({ overdrive: o === 1 ? undefined : o })
+              }} />
+          </div>
+          {(asset.overdrive ?? 1) > 1 && (
+            <Hint>Every sprite and tile from this tileset draws ×{asset.overdrive} brighter, enough to bloom.</Hint>
+          )}
           <Hint>{asset.columns} x {asset.rows} = {asset.columns * asset.rows} tiles.</Hint>
         </div>
       </Collapsable>

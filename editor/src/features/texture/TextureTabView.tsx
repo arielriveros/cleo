@@ -28,10 +28,10 @@ export default function TextureTabView() {
   const maxLevel = asset.settings.mipMap ? levels - 1 : 0
 
   return (
-    <div className='absolute inset-0 flex flex-col bg-surface-sunken text-white'>
+    <div className='absolute inset-0 flex flex-col bg-surface-sunken text-fg'>
       <div className='h-[30px] shrink-0 flex items-center gap-2 px-2 border-b border-border bg-surface-raised'>
         <TextInput className='w-44' value={asset.name} onChange={rename} title='Texture name' />
-        <span className='text-[11px] text-muted'>
+        <span className='text-ui-sm text-muted'>
           {image ? `${image.width || '?'} x ${image.height || '?'}` : 'no image'}
           {image?.mime ? ` · ${image.mime.replace('image/', '')}` : ''}
         </span>
@@ -40,7 +40,7 @@ export default function TextureTabView() {
           <SegmentedControl value={channel} onChange={setChannel} options={CHANNELS} size='sm' />
           <SegmentedControl value={tile} onChange={setTile} options={TILES} size='sm' />
           <Button size='sm' variant='ghost' onClick={() => setZoom(z => Math.max(0.05, z / 1.5))} title='Zoom out'>-</Button>
-          <span className='text-[11px] text-muted w-10 text-center'>{Math.round(zoom * 100)}%</span>
+          <span className='text-ui-sm text-muted w-10 text-center'>{Math.round(zoom * 100)}%</span>
           <Button size='sm' variant='ghost' onClick={() => setZoom(z => Math.min(32, z * 1.5))} title='Zoom in'>+</Button>
           <Button size='sm' onClick={save} disabled={!dirty} title='Save this texture (Ctrl+S)'>Save</Button>
         </div>
@@ -57,22 +57,24 @@ export default function TextureTabView() {
         onLevels={onLevels}
       />
 
-      <div className='h-[22px] shrink-0 flex items-center gap-3 px-2 text-[11px] text-muted border-t border-border'>
+      <div className='h-[22px] shrink-0 flex items-center gap-3 px-2 text-ui-sm text-muted border-t border-border'>
         <span>Ctrl+wheel zooms.</span>
         {asset.settings.mipMap ? (
           <span className='flex items-center gap-1'>
             Mip
-            <button
-              className='px-1 disabled:opacity-40'
+            <Button
+              variant='ghost' size='sm'
+              className='px-1 py-0 text-ui-sm disabled:opacity-40'
               disabled={level <= 0}
               onClick={() => setLevel(l => Math.max(0, l - 1))}
-            >&lt;</button>
+            >&lt;</Button>
             <span className='w-16 text-center'>{Math.min(level, maxLevel)} / {maxLevel}</span>
-            <button
-              className='px-1 disabled:opacity-40'
+            <Button
+              variant='ghost' size='sm'
+              className='px-1 py-0 text-ui-sm disabled:opacity-40'
               disabled={level >= maxLevel}
               onClick={() => setLevel(l => Math.min(maxLevel, l + 1))}
-            >&gt;</button>
+            >&gt;</Button>
           </span>
         ) : (
           <span>Mipmaps off — the GPU samples level 0 at every distance.</span>

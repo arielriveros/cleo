@@ -30,6 +30,8 @@ export interface TileMeta {
     /** Multiplied into the tile's colour wherever it is placed, unless a cell overrides it. */
     tint?: [number, number, number];
     opacity?: number;
+    /** This tile's overdrive, overriding the tileset's (see {@link TilesetConfig.overdrive}). */
+    overdrive?: number;
     animation?: TileAnimation;
     /** Auto-tile membership: which terrain set this tile belongs to and which edge/corner mask it fills. */
     terrain?: { id: number; mask: number };
@@ -71,7 +73,19 @@ export interface TilesetConfig {
      */
     columns: number;
     rows: number;
+    /**
+     * Multiplies every tile's colour in LINEAR light, past what a tint can reach (a tint stops at white).
+     * Above 1 a tile is brighter than its texture, which is what lets fire, lava or magic cross the bloom
+     * threshold and glow — the sprite and tilemap counterpart of a material's emissive intensity. 1 = the
+     * texture as authored. A tile's own `overdrive` overrides it.
+     */
+    overdrive?: number;
 }
+
+/** The overdrive range authoring accepts. */
+export const MAX_TILESET_OVERDRIVE = 32;
+const clampOverdrive = (v: unknown, fallback = 1): number =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.min(MAX_TILESET_OVERDRIVE, Math.max(0, v)) : fallback;
 
 export class Tileset {
     private readonly _id: string;
@@ -84,6 +98,7 @@ export class Tileset {
     private readonly _spacing: number;
     private readonly _columns: number;
     private readonly _rows: number;
+    private readonly _overdrive: number;
     private _meta: Map<number, TileMeta> = new Map();
     private _terrains: TerrainSet[] = [];
     private _variants: VariantSet[] = [];
@@ -99,6 +114,7 @@ export class Tileset {
         this._spacing = Math.max(0, cfg.spacing ?? 0);
         this._columns = Math.max(1, cfg.columns);
         this._rows = Math.max(1, cfg.rows);
+        this._overdrive = clampOverdrive(cfg.overdrive);
     }
 
     public get id(): string { return this._id; }
@@ -111,6 +127,14 @@ export class Tileset {
     public get imageHeight(): number { return this._imageHeight; }
     public get margin(): number { return this._margin; }
     public get spacing(): number { return this._spacing; }
+    /** See {@link TilesetConfig.overdrive}. */
+    public get overdrive(): number { return this._overdrive; }
+
+    /** The linear colour multiplier `tileIndex` draws with: its own overdrive, else the tileset's. */
+    public overdriveOf(tileIndex: number): number {
+        const own = this._meta.get(tileIndex)?.overdrive;
+        return own === undefined ? this._overdrive : clampOverdrive(own, this._overdrive);
+    }
     public get tileCount(): number { return this._columns * this._rows; }
     public get terrains(): TerrainSet[] { return this._terrains; }
     public get variantSets(): VariantSet[] { return this._variants; }
@@ -153,15 +177,20 @@ export class Tileset {
         return false;
     }
 
-    /** Which tile's image `tileIndex` shows at `time` seconds. Non-animated tiles return themselves. */
-    public frameOf(tileIndex: number, time: number): number {
+    /**
+     * Which tile's image `tileIndex` shows at `time` seconds. Non-animated tiles return themselves.
+     * `fps`, when given and positive, plays the tile's frames at that rate instead of the tile's own — a
+     * sprite that wants the shared flame faster than the tileset authored it.
+     */
+    public frameOf(tileIndex: number, time: number, fps?: number): number {
         const a = this._meta.get(tileIndex)?.animation;
         if (!a || a.frames.length === 0) return tileIndex;
         if (a.frames.length === 1) return a.frames[0];
-        const fps = a.fps > 0 ? a.fps : 1;
+        const rate = fps !== undefined && fps > 0 ? fps : a.fps;
+        const fps_ = rate > 0 ? rate : 1;
         const n = a.frames.length;
         // Modulo twice: the first can still be negative for a negative time.
-        const step = ((Math.floor(time * fps) % n) + n) % n;
+        const step = ((Math.floor(time * fps_) % n) + n) % n;
         return a.frames[step];
     }
 
@@ -184,6 +213,8 @@ export class Tileset {
             spacing: this._spacing,
             columns: this._columns,
             rows: this._rows,
+            // Only when set, so every tileset authored before overdrive serializes byte-for-byte as it did.
+            ...(this._overdrive !== 1 ? { overdrive: this._overdrive } : {}),
             tiles,
             terrains: this._terrains.map(t => ({ ...t, tiles: { ...t.tiles } })),
             variantSets: this._variants.map(v => ({ ...v, tiles: v.tiles.map(t => ({ ...t })) })),
@@ -202,6 +233,7 @@ export class Tileset {
             spacing: json?.spacing ?? 0,
             columns: json?.columns ?? 1,
             rows: json?.rows ?? 1,
+            overdrive: json?.overdrive,
         });
         for (const key of Object.keys(json?.tiles ?? {})) {
             const idx = Number(key);

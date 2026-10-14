@@ -11,6 +11,7 @@ import { PREVIEW_SHAPES, loadPreviewShape, type PreviewKind, type PreviewShape }
 const LABELS: Record<PreviewShape, { label: string; title: string }> = {
   sphere: { label: 'Sphere', title: 'Every angle a surface can face: flat on top, vertical at the equator' },
   plane: { label: 'Plane', title: 'How the material tiles on flat ground' },
+  box: { label: 'Box', title: 'A stretched 2 x 1 x 0.5 m box: compare Mesh UV with a Box or Triplanar projection' },
   hill: { label: 'Hill', title: 'Real slopes and elevation, so slope and elevation rules show as they will on a landscape' },
 }
 
@@ -35,7 +36,7 @@ export default function PreviewShapeSwitch({ kind }: { kind: PreviewKind }) {
         options={PREVIEW_SHAPES[kind].map(s => ({ value: s, label: LABELS[s].label, title: LABELS[s].title }))}
         value={shape}
         onChange={s => { setShape(s); setPreviewShape(s) }} />
-      {legend && <span className='text-[10px] text-white/80 bg-black/40 rounded px-1.5 py-0.5'>{legend}</span>}
+      {legend && <span className='text-ui-xs text-muted bg-scrim/40 rounded px-1.5 py-0.5'>{legend}</span>}
     </div>
   )
 }

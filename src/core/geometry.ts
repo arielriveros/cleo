@@ -299,9 +299,26 @@ export class Geometry {
      * over are shared, and `_calculateTangents` measures its own handedness, so seams stay split.
      */
     public weldSmooth(creaseDeg: number = 45): Geometry {
+        return this.weldSmoothWith(creaseDeg, []).geometry;
+    }
+
+    /**
+     * {@link weldSmooth}, carrying extra PER-VERTEX attributes through the weld — a skinned mesh's joint
+     * indices and weights. The weld renumbers vertices, so any array indexed by the old vertex order is
+     * wrong afterwards; passing it here returns it in the new order. The attributes also join the weld
+     * key, so two corners are only shared when their influences agree too.
+     *
+     * This is not optional for skinning. Welding a skinned mesh and keeping its old joint arrays gives
+     * every vertex some OTHER vertex's bones: in the bind pose every bone matrix is ~identity, so the
+     * model looks perfect at rest and explodes the moment a clip moves a bone.
+     */
+    public weldSmoothWith<T extends ArrayLike<number>>(
+        creaseDeg: number, attributes: readonly { data: T; components: number }[],
+    ): { geometry: Geometry; attributes: Float32Array[] } {
         const P = this._positions, U = this._uvs, I = this._indices;
         const triCount = Math.floor(I.length / 3);
-        if (triCount === 0 || P.length < 9) return this;
+        if (triCount === 0 || P.length < 9)
+            return { geometry: this, attributes: attributes.map(a => Float32Array.from(a.data as ArrayLike<number>)) };
 
         const cosCrease = Math.cos(Math.max(0, Math.min(180, creaseDeg)) * Math.PI / 180);
         const hasUvs = U.length >= this.vertexCount * 2;
@@ -360,14 +377,20 @@ export class Geometry {
         // positions are uv seams, and averaging a tangent across one would be wrong.
         const remap = new Map<string, number>();
         const positions: number[] = [], normals: number[] = [], uvs: number[] = [];
+        const carried: number[][] = attributes.map(() => []);
         const indices = new Uint32Array(triCount * 3);
         for (let corner = 0; corner < triCount * 3; corner++) {
-            const v = I[corner] * 3, v2 = I[corner] * 2, o3 = corner * 3;
+            const vertex = I[corner];
+            const v = vertex * 3, v2 = vertex * 2, o3 = corner * 3;
             const nx = Math.round(cn[o3] * 1e4) / 1e4;
             const ny = Math.round(cn[o3 + 1] * 1e4) / 1e4;
             const nz = Math.round(cn[o3 + 2] * 1e4) / 1e4;
             const u = hasUvs ? U[v2] : 0, w = hasUvs ? U[v2 + 1] : 0;
-            const key = `${P[v]},${P[v + 1]},${P[v + 2]}|${u},${w}|${nx},${ny},${nz}`;
+            let key = `${P[v]},${P[v + 1]},${P[v + 2]}|${u},${w}|${nx},${ny},${nz}`;
+            for (const a of attributes) {
+                const base = vertex * a.components;
+                for (let c = 0; c < a.components; c++) key += (c ? ',' : '|') + a.data[base + c];
+            }
             let index = remap.get(key);
             if (index === undefined) {
                 index = positions.length / 3;
@@ -375,6 +398,10 @@ export class Geometry {
                 positions.push(P[v], P[v + 1], P[v + 2]);
                 normals.push(cn[o3], cn[o3 + 1], cn[o3 + 2]);
                 if (hasUvs) uvs.push(u, w);
+                for (let k = 0; k < attributes.length; k++) {
+                    const a = attributes[k], base = vertex * a.components;
+                    for (let c = 0; c < a.components; c++) carried[k].push(a.data[base + c]);
+                }
             }
             indices[corner] = index;
         }
@@ -382,8 +409,9 @@ export class Geometry {
         // Empty tangents, so the constructor rebuilds them over the SHARED vertices — which is the
         // second half of the point. Recomputing is not optional: the old ones index a vertex set that
         // no longer exists.
-        return new Geometry(new Float32Array(positions), new Float32Array(normals),
-                            new Float32Array(uvs), EMPTY_F32, EMPTY_F32, indices);
+        const geometry = new Geometry(new Float32Array(positions), new Float32Array(normals),
+                                      new Float32Array(uvs), EMPTY_F32, EMPTY_F32, indices);
+        return { geometry, attributes: carried.map(values => new Float32Array(values)) };
     }
     /**
      * World units spanned by ONE UV UNIT on this mesh — `sqrt(surfaceArea / uvArea)`.

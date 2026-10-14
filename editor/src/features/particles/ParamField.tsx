@@ -93,7 +93,7 @@ function BurstList({ value, onChange }: { value: Burst[]; onChange: (v: unknown,
   return (
     <div className='flex flex-col gap-1'>
       {value.length > 0 && (
-        <div className='grid grid-cols-[1fr_1fr_1fr_1fr_auto] gap-1 text-[10px] text-dim'>
+        <div className='grid grid-cols-[1fr_1fr_1fr_1fr_auto] gap-1 text-ui-xs text-dim'>
           <span title='Seconds into the cycle'>Time</span><span>Count</span>
           <span title='Repetitions; 0 repeats for the rest of the cycle'>Cycles</span>
           <span title='Seconds between repetitions'>Interval</span><span />
@@ -105,7 +105,7 @@ function BurstList({ value, onChange }: { value: Burst[]; onChange: (v: unknown,
           <NumberInput value={b.count} min={0} step={1} onChange={count => set(i, { count: Math.round(count) })} />
           <NumberInput value={b.cycles} min={0} step={1} onChange={cycles => set(i, { cycles: Math.round(cycles) })} />
           <NumberInput value={b.interval} min={0.01} step={0.1} onChange={interval => set(i, { interval })} />
-          <Button size='icon' variant='ghost' title='Remove burst' onClick={() => onChange(value.filter((_, j) => j !== i))}>✕</Button>
+          <Button variant='remove' size='icon' title='Remove burst' onClick={() => onChange(value.filter((_, j) => j !== i))}>✕</Button>
         </div>
       ))}
       <Button size='sm' variant='subtle' className='self-start'
@@ -122,14 +122,14 @@ function PlaneList({ value, onChange }: { value: CollisionPlane[]; onChange: (v:
     <div className='flex flex-col gap-1'>
       {value.map((p, i) => (
         <div key={i} className='flex flex-col gap-1 rounded border border-border p-1'>
-          <div className='flex items-center gap-1 text-[10px] text-dim'>
+          <div className='flex items-center gap-1 text-ui-xs text-dim'>
             <span className='w-10'>Point</span>
             <VectorInput value={p.point} step={0.1} onChange={point => set(i, { point: point as [number, number, number] })} />
           </div>
-          <div className='flex items-center gap-1 text-[10px] text-dim'>
+          <div className='flex items-center gap-1 text-ui-xs text-dim'>
             <span className='w-10'>Normal</span>
             <VectorInput value={p.normal} step={0.1} onChange={normal => set(i, { normal: normal as [number, number, number] })} />
-            <Button size='icon' variant='ghost' title='Remove plane' onClick={() => onChange(value.filter((_, j) => j !== i))}>✕</Button>
+            <Button variant='remove' size='icon' title='Remove plane' onClick={() => onChange(value.filter((_, j) => j !== i))}>✕</Button>
           </div>
         </div>
       ))}

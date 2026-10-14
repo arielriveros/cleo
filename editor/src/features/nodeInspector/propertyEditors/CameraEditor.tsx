@@ -242,7 +242,7 @@ function PostChainList(props: { node: CameraNode }) {
               {materialIndex === null ? (
                 <>
                   <div className='w-[32px] h-[32px] rounded overflow-hidden bg-surface-raised flex items-center justify-center shrink-0'>
-                    <span className='text-sm'>{BUILTIN_ICONS[entry.effect] ?? '✨'}</span>
+                    <span className='text-ui-lg'>{BUILTIN_ICONS[entry.effect] ?? '✨'}</span>
                   </div>
                   <span className={cn(valueClass, 'truncate flex-1')}>{BUILTIN_LABELS[entry.effect] ?? entry.effect}</span>
                 </>
@@ -251,7 +251,7 @@ function PostChainList(props: { node: CameraNode }) {
                   <div className='w-[32px] h-[32px] rounded overflow-hidden bg-surface-raised flex items-center justify-center shrink-0'>
                     {asset.thumbnail
                       ? <img src={asset.thumbnail} className='w-full h-full object-cover' alt={asset.name} draggable={false} />
-                      : <span className='text-sm'>🎨</span>}
+                      : <span className='text-ui-lg'>🎨</span>}
                   </div>
                   <span className={cn(valueClass, 'truncate flex-1')} title={asset.name}>{asset.name}</span>
                   <Button variant='ghost' size='icon' className='text-highlight' title='Edit this material' onClick={() => enterMaterialEditor(asset.id)}>✎</Button>
@@ -265,7 +265,7 @@ function PostChainList(props: { node: CameraNode }) {
               <Button variant='ghost' size='icon' title='Move down (runs later)' disabled={i === chain.length - 1} onClick={() => move(i, 1)}>↓</Button>
               {/* A built-in is switched off, never removed: there would be no row left to switch it back on from. */}
               {materialIndex !== null && (
-                <Button variant='ghost' size='icon' className='text-danger' title='Remove pass' onClick={() => removeMaterial(materialIndex)}>✕</Button>
+                <Button variant='remove' size='icon' title='Remove pass' onClick={() => removeMaterial(materialIndex)}>✕</Button>
               )}
             </div>
           );

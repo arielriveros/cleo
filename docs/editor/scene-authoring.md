@@ -161,6 +161,41 @@ remapped so each copy points at its own parts. This is why anything that referen
 template — a controller's possession, a camera rig's follow target — should live **inside** the
 template too. A reference from outside keeps pointing at the id the original had.
 
+### Template variants
+
+A **variant** is a template based on another template. It inherits the base's whole tree and records
+only what it changes, so when the base is edited every variant follows — except where the variant
+changed that value itself. Typical use: one **Weapon** base, and a variant per weapon; one **Enemy**
+base, and a variant per enemy type.
+
+**Creating one:** right-click a template in Assets ▸ **Create Variant**. It opens in its own tab.
+
+**What a variant can change** — anything, on any node:
+- a value (a field, a script field, a transform, a material, a light) on an inherited node;
+- the **script** attached to a node — typically a script that `extends` the base's script;
+- **added** nodes (a sword's blade, its moves) and **removed** ones (a boss without a health bar).
+
+In a variant's tab a banner names its base, and an overridden **script field** shows a **revert** marker
+that takes the base's value back. Saving records the differences against the base as it was when the
+tab opened, so an edit made to the base meanwhile is not mistaken for the variant's own.
+
+Nodes are matched to the base **by name path**: renaming an inherited child, or reordering children,
+reads as removing it and adding a new one (it stops following the base). A variant can be the base of
+another variant. Placed copies of a variant work like any template's, overrides included.
+
+**Deleting a base** keeps its variants: each becomes a standalone template with the content it had.
+
+**Going back to the base.** In a variant's tab, **Revert node** drops everything the variant changed on
+the selected node — any value, its collider, its script — and **Revert all** does it for every node (the
+variant keeps its name; added and removed nodes stay). Both save first.
+
+**Based on** in the same banner moves the variant onto another template: what it looks like now is kept,
+and from then on it follows the new base. A template based on the variant itself cannot be chosen.
+
+**From a placed copy.** A copy whose overrides you want to keep as an asset: select it, and press **Make
+variant** in the template-instance banner. Its overrides become the new variant's own changes, and the
+copy is relinked to it.
+
 ## Undo and redo
 
 **Ctrl+Z** / **Ctrl+Shift+Z**. There is **one history per tab**: undoing in a material tab cannot
@@ -194,6 +229,7 @@ off in Play, or turn navmesh display on *during* Play to see what an agent is wa
 | Bounding boxes | off |
 | Skeletons | off |
 | Animation blend | off |
+| Game UI | off — always shown in UI mode and in Play |
 | Navigation mesh | off |
 
 Every helper is an editor-only node: never serialized, never lit, and structurally absent from a

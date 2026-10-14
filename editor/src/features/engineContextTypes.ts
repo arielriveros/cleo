@@ -169,7 +169,7 @@ export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | Cy
 export const EDITOR_CLEAR_COLOR: [number, number, number, number] = [0.68, 0.80, 0.90, 1.0];
 export const LEGACY_CLEAR_COLOR = [0.65, 0.65, 0.71];
 
-export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'renderer' | 'input' | 'material' | 'terrainMaterial' | 'stateMachine' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain' | 'rig' | 'particleSystem';
+export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'options' | 'material' | 'terrainMaterial' | 'stateMachine' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain' | 'rig' | 'particleSystem';
 
 /**
  * Whether a mode paints the 3D viewport, or replaces it with a full-panel editor of its own; the
@@ -182,10 +182,9 @@ export const MODE_RENDERS_VIEWPORT: Record<EditorMode, boolean> = {
   tilemap: true,
   ui: true,
   template: true,
-  renderer: true,        // its own perf HUD sits over a live render
-  // Deliberately true: tuning a deadzone against a live scene is the whole point, and the on-screen
-  // control placement is judged against what is actually behind it.
-  input: true,
+  // Deliberately true: renderer options are judged against a live render, and the on-screen touch
+  // controls (Project ▸ Input) against what is actually behind them.
+  options: true,
   material: true,        // preview sphere
   terrainMaterial: true, // preview sphere
   stateMachine: true,    // except in Graph view — see `hideForGraph`
@@ -214,8 +213,7 @@ export const MODE_SHOWS_SCENE_HELPERS: Record<EditorMode, boolean> = {
   tilemap: true,
   ui: true,
   template: true,
-  renderer: true,
-  input: true,
+  options: true,
   model: true,           // a model asset can carry its own lights and colliders
   material: false,
   terrainMaterial: false,
@@ -245,8 +243,7 @@ export const MODE_SKELETON_OWNER: Record<EditorMode, boolean> = {
   tilemap: false,
   ui: false,
   template: false,
-  renderer: false,
-  input: false,
+  options: false,
   material: false,
   terrainMaterial: false,
   stateMachine: true,

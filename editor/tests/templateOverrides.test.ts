@@ -7,6 +7,7 @@ import {
   setFieldOverride, setNameOverride, writeOverrides,
 } from '../src/utils/templateOverrides'
 import { SCRIPT_ID_VAR, type ScriptAsset } from '../src/utils/scripts'
+import { cascadeFrom, createVariant, saveVariant } from '../src/utils/templateVariants'
 
 const maps = () => ({ scripts: new Map<string, string>(), bodies: new Map(), triggers: new Map() })
 const libs = (templates: Template[]) =>
@@ -152,6 +153,36 @@ describe('saving a template', () => {
       expect(without.nodeJson.scriptVars).toBeUndefined()
       const withVars = await buildTemplateFromNode(root, maps(), [asset])
       expect(withVars.nodeJson.scriptVars).toEqual({ title: 'Authored' })
+    } finally { scene.dispose() }
+  })
+})
+
+describe('a placed copy of a template VARIANT', () => {
+  it('follows an edit to the variant\'s base, and keeps its own overrides through it', () => {
+    const scene = new Scene()
+    try {
+      const m = maps()
+      const base = messageTemplate('Default', 1)
+      // The variant changes the Glow's rate; it inherits the title.
+      const v0 = createVariant(base, 'Loud Message', 'tpl-loud')
+      const edited = { ...v0, nodeJson: JSON.parse(JSON.stringify(v0.nodeJson)) }
+      edited.nodeJson.children[0].scriptVars.rate = 5
+      const variant = saveVariant(v0, edited, base, base)
+
+      const copy = place(scene, variant, m)
+      ;(copy as any).title = 'Placed'
+      setFieldOverride(copy, 'title', 'Placed')
+
+      // The BASE is edited: the cascade rebuilds the variant, and the resync rebuilds the copy.
+      const newBase = messageTemplate('New Default', 3)
+      newBase.nodeJson.children.push({ name: 'Spark', nodeType: 'node', id: 't-spark', children: [] })
+      const [cascaded] = cascadeFrom([newBase, variant], base.id)
+      expect(resyncScene(scene, m, libs([newBase, cascaded]), undefined)).toBe(true)
+
+      const [rebuilt] = instancesOf(scene)
+      expect((rebuilt as any).title).toBe('Placed')                       // the placement's override
+      expect((rebuilt.children[0] as any).rate).toBe(5)                   // the variant's override
+      expect(rebuilt.children.map((c: Node) => c.name)).toContain('Spark') // the base's new child
     } finally { scene.dispose() }
   })
 })

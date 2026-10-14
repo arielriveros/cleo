@@ -68,7 +68,7 @@ export default function SkyLightEditor(props: { node: SkyLightNode }) {
                     onChange={(v) => apply({ cloudResponse: v })} />
           </PropertyRow>
         </PropertyTable>
-        <div className='mt-2 text-xs text-muted'>
+        <div className='mt-2 text-ui text-muted'>
           {l0
             ? `Sky colour (L0): ${l0.map(c => c.toFixed(2)).join(', ')}`
             : 'Waiting for the first sky projection…'}

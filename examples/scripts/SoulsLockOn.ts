@@ -1,5 +1,5 @@
 import { CameraRigNode, Input, Node } from 'cleo'
-import { yawTo } from './SoulsMath'
+import { angleDiff, planarDistance, yawTo } from './SoulsMath'
 
 /**
  * Hollow Keep — the third-person camera with target lock. Attach to the Player's `camera rig`, a Camera
@@ -15,11 +15,12 @@ import { yawTo } from './SoulsMath'
  *   SwitchTargetLeft/Right   cycle (keys); a hard flick of the right stick or the mouse does the same
  *
  * Candidates are the manager's live enemies within `lockRange` and in line of sight, ranked by angle off
- * the camera's forward and then by distance (SoulsGameManager.rankLockTargets). The lock breaks past
+ * the camera's forward and then by distance (rankLockTargets, below). The lock breaks past
  * `breakRange`, after `losBreakSeconds` behind a wall, or when the target dies — in which case another
  * enemy within `retargetRange` is picked up, as the games do.
  *
- * The reticle is a world-space UI Root named `LockReticle` whose `uiTargetId` this keeps pointed at the
+ * The reticle is a world-space UI Root named `LockReticle`, a child of the player beside this rig. Its
+ * `uiTargetId` is kept pointed at the
  * target's lock point.
  */
 export default class SoulsLockOnNode extends CameraRigNode {
@@ -57,7 +58,8 @@ export default class SoulsLockOnNode extends CameraRigNode {
   onStart() {
     this._gm = this.findNode('GameManager')
     this._player = this.parent
-    this._reticle = this.findNode(this.reticleName)
+    // The reticle is the player's (a sibling of this rig, inside the Player template).
+    this._reticle = this._player?.getChildByName(this.reticleName)[0] ?? null
     this._freePitchMin = this.pitchMin
     this._freePitchMax = this.pitchMax
     this.aimMode = 'orbit'
@@ -171,7 +173,19 @@ export default class SoulsLockOnNode extends CameraRigNode {
     const list = gm.liveEnemies()
       .filter((e: Node) => this._hasLineOfSight(e))
       .map((e: Node) => ({ node: e, position: e.worldPosition }))
-    return gm.rankLockTargets(this._player.worldPosition, this.yaw, list, this.lockRange)
+    return this.rankLockTargets(this._player.worldPosition, this.yaw, list, this.lockRange)
+  }
+
+  /**
+   * Order lock-on candidates: smallest angle off the camera's forward first, distance breaking ties in
+   * 10-degree buckets so two enemies side by side resolve to the nearer.
+   */
+  public rankLockTargets(origin: ArrayLike<number>, yawDeg: number, candidates: any[], maxRange: number): any[] {
+    return candidates
+      .map(c => ({ c, d: planarDistance(origin, c.position), a: Math.abs(angleDiff(yawTo(origin, c.position), yawDeg)) }))
+      .filter(x => x.d <= maxRange)
+      .sort((x, y) => (Math.floor(x.a / 10) - Math.floor(y.a / 10)) || (x.d - y.d))
+      .map(x => x.c)
   }
 
   /** Line of sight from the camera pivot to the enemy's lock point, ignoring characters. */

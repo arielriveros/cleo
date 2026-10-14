@@ -5,6 +5,7 @@ import MachineGraph from '../../components/MachineGraph'
 import type { GraphLinkModel, GraphNodeModel } from '../../components/MachineGraph'
 import { useAiEditor } from './AiEditorContext'
 import AiGraphToolbar, { AiEmptyState } from './AiGraphToolbar'
+import { Button } from '../../components/ui'
 
 /**
  * The goal graph on a canvas: what an agent is trying to do, and what that breaks down into.
@@ -166,12 +167,12 @@ export default function GoalGraph() {
       toolbar={
         <>
           <AiGraphToolbar />
-          <button className='px-2 py-1 rounded bg-primary hover:bg-primary-hover text-white border border-primary-active text-xs'
+          <Button variant='primary' className='px-2'
             onClick={() => {
               const n = graph.goals.length
               addGoal((n % AUTO_COLS) * AUTO_DX + 40, Math.floor(n / AUTO_COLS) * AUTO_DY + 40)
             }}
-            title='Add a new goal (or double-click the canvas)'>+ Goal</button>
+            title='Add a new goal (or double-click the canvas)'>+ Goal</Button>
         </>
       }
     />

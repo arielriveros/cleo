@@ -89,7 +89,7 @@ export default function CustomVariablesEditor(props: { node: Node }) {
             <TypeSelect value={v.type} options={TYPES} onChange={t => changeType(v.name, t)} />
             <AccessSelect value={v.access} onChange={a => changeAccess(v.name, a as NodeVariableAccess)} />
             <div className='flex-1 min-w-0'>{renderValue(v)}</div>
-            <Button variant='ghost' size='icon' className='text-danger' title='Remove' onClick={() => removeVar(v.name)}>✕</Button>
+            <Button variant='remove' size='icon' title='Remove' onClick={() => removeVar(v.name)}>✕</Button>
           </div>
         ))}
         <div className='flex items-center gap-1.5 mt-3 border-t border-border pt-2'>
