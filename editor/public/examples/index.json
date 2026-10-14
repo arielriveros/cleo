@@ -25,7 +25,7 @@
       "name": "Hollow Keep",
       "description": "A one-level souls-like: stamina combat, rolls, lock-on, bonfires, a fog gate and a two-phase boss. Placeholder art, real mechanics — see SOULS_DEMO.md to swap in your own.",
       "order": 2,
-      "bytes": 99708767,
+      "bytes": 99801142,
       "sceneCount": 1,
       "textureCount": 5,
       "createdAt": 1790000000000

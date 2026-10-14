@@ -1,4 +1,5 @@
 import { Node } from 'cleo'
+import { playSound } from './SoulsAudio'
 
 /**
  * Hollow Keep — a lever that opens a door elsewhere (the shortcut back to the bonfire). Attach to the
@@ -37,7 +38,7 @@ export default class SoulsLeverNode extends Node {
     this._t = 0
     ;(player as any).playGesture?.('Souls_Interact', 0.9)
     const gm = this._gm as any
-    gm?.sfx?.('Lever')
+    playSound(this, 'Lever')
     const door = this.findNode(this.doorName) as any
     if (door?.openDoor) this.after(this.swingSeconds, () => door.openDoor())
     gm?.unregisterInteractable?.(this)

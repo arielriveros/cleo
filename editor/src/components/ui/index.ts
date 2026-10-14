@@ -27,6 +27,9 @@ export type { ToggleProps } from './Toggle';
 export { Slider } from './Slider';
 export type { SliderProps } from './Slider';
 
+export { StringListInput } from './StringListInput';
+export type { StringListInputProps } from './StringListInput';
+
 export { VectorInput } from './VectorInput';
 export type { VectorInputProps } from './VectorInput';
 

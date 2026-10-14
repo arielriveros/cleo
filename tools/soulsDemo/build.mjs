@@ -100,6 +100,7 @@ const SCRIPT_FILES = [
   // path, so the scripts' `import … from './SoulsMath'` resolves to /Scripts/SoulsMath.script.
   ['SoulsMath', 'SoulsMath', 'node'],
   ['SoulsHitbox', 'SoulsHitbox', 'node'],
+  ['SoulsAudio', 'SoulsAudio', 'node'],
 ]
 
 const readScript = (file) => fs.readFileSync(path.join(SCRIPTS, `${file}.ts`), 'utf8')
@@ -497,6 +498,49 @@ function prop(key, name, shape, materialId, { position = [0, 0, 0], scale = [1, 
 
 const group = (key, name, children, extra = {}) => node(name, 'node', { id: stableId(`group:${key}`), children, ...extra })
 
+// ----- sounds ----------------------------------------------------------------------------------------
+//
+// Every cue is OWNED by the template whose script plays it: a `Sounds` group in that template's own tree,
+// found by SoulsAudio.playSound walking up from the playing node. All are EMPTY SoundNodes: assign a
+// sample to each in its template to hear it. World objects are spatial (heard from where they are); the
+// player's and the game flow's cues are ambient.
+
+const SOUNDS = {
+  player: ['Swing', 'Swing Heavy', 'Roll', 'Drink', 'Player Hurt', 'Souls', 'Recoil', 'Lock On', 'Menu Tick', 'Menu Deny', 'Level Up'],
+  // Cast is SoulsEnemy._fire's: any enemy given a projectile attack plays it.
+  enemy: ['Enemy Swing', 'Stagger', 'Player Hit', 'Enemy Death', 'Cast'],
+  weapon: ['Hit'],
+  bolt: ['Bolt Impact'],
+  pickup: ['Pickup'],
+  lever: ['Lever'],
+  gate: ['Door'],
+  fogGate: ['Fog'],
+  manager: ['Bonfire Lit', 'Rest', 'Death', 'Victory'],
+}
+/** The manager's looping cues: [name, playOnStart]. */
+const MUSIC_CUES = [['Ambience', true], ['Boss Music', false]]
+
+/** A `Sounds` group of empty SoundNodes, one per cue name; `music` cues loop. */
+function soundsGroup(key, cues, { spatial = false, music = [] } = {}) {
+  const sound = (name, playOnStart, loop) => node(name, 'sound', {
+    id: stableId(`${key}:sound:${name}`),
+    sound: spatial
+      ? { mode: 'spatial', sampleId: null, volume: 1, loopMode: loop ? 'on' : 'inherit', playOnStart, distanceModel: 'inverse', refDistance: 2, maxDistance: 40, rolloffFactor: 1 }
+      : { mode: 'ambient', sampleId: null, volume: 1, loopMode: loop ? 'on' : 'inherit', playOnStart, distanceModel: 'inverse', refDistance: 1, maxDistance: 100, rolloffFactor: 1 },
+  })
+  return group(`${key}:sounds`, 'Sounds', [
+    ...cues.map(name => sound(name, false, false)),
+    ...music.map(([name, onStart]) => sound(name, onStart, true)),
+  ])
+}
+
+/** An enemy type's cues: the base enemy's, plus its attacks' own and a boss's roar. */
+function enemyCues(spec) {
+  const extra = spec.attacks.map(([, fields]) => fields.sound).filter(Boolean)
+  if (spec.boss) extra.push('Boss Roar')
+  return [...new Set([...SOUNDS.enemy, ...extra])]
+}
+
 // =====================================================================================================
 // Particle systems (.vfx)
 // =====================================================================================================
@@ -797,7 +841,7 @@ function baseWeaponNode() {
   return withScript(node('Weapon', 'node', {
     id: stableId('weapon:base'),
     socketAttachment: { target: 'parent', socket: 'RightHand' },
-    children: [node('Mesh', 'node', { id: stableId('weapon:base:mesh') })],
+    children: [node('Mesh', 'node', { id: stableId('weapon:base:mesh') }), soundsGroup('weapon:base', SOUNDS.weapon, { spatial: true })],
   }), 'SoulsWeapon')
 }
 
@@ -807,7 +851,7 @@ function weaponNode(key, name, script, parts, moves = [], bladeDir = BLADE_DOWN_
   return withScript(node(name, 'node', {
     id: stableId(`weapon:${key}`),
     socketAttachment: { target: 'parent', socket: 'RightHand' },
-    children: [mesh, ...moves.map(([moveName, fields]) => move(key, moveName, fields))],
+    children: [mesh, ...moves.map(([moveName, fields]) => move(key, moveName, fields)), soundsGroup(`weapon:${key}`, SOUNDS.weapon, { spatial: true })],
   }), script)
 }
 
@@ -867,7 +911,7 @@ function playerNode() {
   // ORDER: the camera rig before the controller (the controller finds the first rig in the subtree).
   // `Weapons` starts empty: SoulsPlayer spawns its `weaponTemplates` into it on start. The player's UI —
   // its HUD, its level-up menu, its lock-on reticle — is the PLAYER's: children of it, in its template.
-  player.children = [rigNode, model, group('player:weapons', 'Weapons', []), hud(), bonfireMenu(), lockReticle(), controller]
+  player.children = [rigNode, model, group('player:weapons', 'Weapons', []), hud(), bonfireMenu(), lockReticle(), soundsGroup('player', SOUNDS.player), controller]
   return player
 }
 
@@ -1020,6 +1064,8 @@ function enemyNode(spec) {
     brainId: enemyBrainAsset(spec).id,
     behavior: enemyBrainMachine(spec),
   }), 'SoulsEnemyBrain')
+  // Before the brain: a character's controller stays its LAST child.
+  children.push(soundsGroup(key, enemyCues(spec), { spatial: true }))
   children.push(brain)
 
   // The type's stats are its SCRIPT's defaults (SoulsHollow, SoulsEliteKnight…), not values set here.
@@ -1117,6 +1163,7 @@ function boltTemplate() {
       prop('bolt:core', 'Core', 'sphere', MAT.bolt, { scale: [0.22, 0.22, 0.22] }),
       particles('bolt:trail', 'Trail', VFX.boltTrail),
       pointLight('bolt:light', 'Glow', [0.5, 0.7, 1], 600, 6),
+      soundsGroup('bolt', SOUNDS.bolt, { spatial: true }),
     ],
   }), 'SoulsProjectile', { impactTemplate: 'Bolt Impact' })
   return { id: stableId('template:bolt'), name: 'Magic Bolt', nodeJson: root, textureIds: [], scripts: {}, bodies: {}, triggers: {} }
@@ -1282,13 +1329,18 @@ function pickupNode(key, name, at, fields) {
       prop(`pickup:${key}:item`, 'Item', 'sphere', MAT.item, { position: [0, 0.25, 0], scale: [0.18, 0.18, 0.18] }),
       particles(`pickup:${key}:glow`, 'Glow', VFX.souls),
       pointLight(`pickup:${key}:light`, 'Light', [1, 0.9, 0.7], 150, 4, [0, 0.4, 0]),
+      soundsGroup(`pickup:${key}`, SOUNDS.pickup, { spatial: true }),
     ],
     trigger: zone(1.4),
   }), 'SoulsPickup', fields)
 }
 
-function spawnNode(key, name, template, at, yaw, extra = {}) {
-  return withScript(node(name, 'node', { id: stableId(`spawn:${key}`), position: at, rotation: [0, yaw, 0] }), 'SoulsEnemySpawn', { templateName: template, ...extra })
+/**
+ * An enemy spawn: the "Enemy Spawn" template's content. `fields` are its script values — a placed spawn
+ * picks `templateName` from the script's `spawnables` list (a dropdown in the inspector).
+ */
+function spawnNode(key, name, at, yaw, fields = {}) {
+  return withScript(node(name, 'node', { id: stableId(`spawn:${key}`), position: at, rotation: [0, yaw, 0] }), 'SoulsEnemySpawn', fields)
 }
 
 function bonfireNode() {
@@ -1314,6 +1366,7 @@ function shortcutGate() {
     id: stableId('door:shortcut'), position: [10, 2, 0], rotation: [0, 90, 0],
     children: [
       prop('door:shortcut:bars', 'Bars', 'box', MAT.metal, { scale: [3.2, 4, 0.25] }),
+      soundsGroup('door:shortcut', SOUNDS.gate, { spatial: true }),
     ],
   })
   g.body = { ...staticBody('box'), shapes: [{ type: 'box', width: 3.2, height: 4, depth: 0.4, offset: [0, 0, 0], rotation: [0, 0, 0] }] }
@@ -1332,6 +1385,7 @@ function leverNode() {
         id: stableId('lever:handle'), position: [0, 0.9, 0], rotation: [-35, 0, 0],
         children: [prop('lever:stick', 'Stick', 'cylinder', MAT.metal, { position: [0, 0.35, 0], scale: [0.06, 0.7, 0.06] })],
       }),
+      soundsGroup('lever', SOUNDS.lever, { spatial: true }),
     ],
     trigger: zone(1.5),
   }), 'SoulsLever', { doorName: 'Shortcut Gate', swingDegrees: 70 })
@@ -1343,6 +1397,7 @@ function fogGateNode() {
     children: [
       prop('fog:wall', 'FogWall', 'box', MAT.fog, { position: [0, 2, 0], scale: [5.9, 4, 0.08] }),
       particles('fog:particles', 'Fog', VFX.fog),
+      soundsGroup('fog-gate', SOUNDS.fogGate, { spatial: true }),
     ],
   })
   g.body = { ...staticBody('box'), shapes: [{ type: 'box', width: 6, height: 4, depth: 0.5, offset: [0, 2, 0], rotation: [0, 0, 0] }] }
@@ -1508,6 +1563,8 @@ function torchNode(k, position = [0, 0, 0]) {
 }
 
 const MESSAGE_DEFAULT = ['A message', 'Write the message here.']
+/** The Enemy Spawn template's script values: every enemy type is spawnable, a Hollow by default. */
+const SPAWN_DEFAULT = { spawnables: ENEMIES.map(e => e.name), templateName: 'Hollow' }
 const PICKUP_DEFAULT = { kind: 'souls', amount: 100, itemName: 'Souls' }
 
 // =====================================================================================================
@@ -1644,6 +1701,7 @@ const LEVEL = (() => {
     gate: asTemplate('level:gate', gate, 'Level'),
     message: asTemplate('level:message', message, 'Interactables'),
     pickup: asTemplate('level:pickup', pickup, 'Interactables'),
+    enemySpawn: asTemplate('level:enemy-spawn', spawnNode('template', 'Enemy Spawn', [0, 0, 0], 0, SPAWN_DEFAULT), 'Enemies'),
   }
 })()
 
@@ -1660,38 +1718,14 @@ function epilogueMessage() {
   return linkInstance(LEVEL.message, m)
 }
 
+/** A placed enemy spawn: the Enemy Spawn template, its name and what it spawns overridden. */
+function placedSpawn(key, name, at, yaw, fields) {
+  return linkInstance(LEVEL.enemySpawn, spawnNode(key, name, at, yaw, { ...SPAWN_DEFAULT, ...fields }))
+}
+
 /** A placed pickup: the Pickup template, what it gives (and its name) overridden. */
 function placedPickup(key, name, at, fields) {
   return linkInstance(LEVEL.pickup, pickupNode(key, name, at, { ...PICKUP_DEFAULT, ...fields }))
-}
-
-// =====================================================================================================
-// Sounds
-// =====================================================================================================
-
-/** Every cue a script plays, as an EMPTY SoundNode: assign a sample to each to hear it. */
-const SOUND_CUES = [
-  ['Swing', 'player light swing'], ['Swing Heavy', 'player heavy swing'], ['Hit', 'player hits an enemy'],
-  ['Roll', 'roll / backstep'], ['Drink', 'Estus drink'], ['Player Hurt', 'player takes damage'],
-  ['Player Hit', 'an enemy swing connects'], ['Death', 'YOU DIED'], ['Souls', 'souls gained'],
-  ['Pickup', 'item picked up'], ['Bonfire Lit', 'bonfire lit'], ['Rest', 'sit at bonfire'],
-  ['Level Up', 'level confirmed'], ['Menu Tick', 'menu adjust'], ['Menu Deny', 'menu: not enough souls'],
-  ['Lock On', 'target locked'], ['Enemy Swing', 'enemy attack starts'], ['Stagger', 'enemy poise broken'],
-  ['Enemy Death', 'enemy dies'], ['Cast', 'sorcery cast'], ['Bolt Impact', 'bolt hits'], ['Door', 'gate opens'],
-  ['Lever', 'lever pulled'], ['Fog', 'walking through fog'], ['Boss Roar', 'boss phase two'],
-  ['Boss Leap', 'boss leap attack'], ['Victory', 'boss defeated'], ['Recoil', 'a swing bounces off a wall'],
-]
-const MUSIC_CUES = [['Ambience', 'level ambience (loop, plays on start)', true], ['Boss Music', 'boss fight (loop)', false]]
-
-function soundsGroup() {
-  const sound = (name, playOnStart, loop) => node(name, 'sound', {
-    id: stableId(`sound:${name}`),
-    sound: { mode: 'ambient', sampleId: null, volume: 1, loopMode: loop ? 'on' : 'inherit', playOnStart, distanceModel: 'inverse', refDistance: 1, maxDistance: 100, rolloffFactor: 1 },
-  })
-  return group('sounds', 'Sounds', [
-    ...SOUND_CUES.map(([name]) => sound(name, false, false)),
-    ...MUSIC_CUES.map(([name, , onStart]) => sound(name, onStart, true)),
-  ])
 }
 
 // =====================================================================================================
@@ -1744,14 +1778,14 @@ function keepScene() {
   ])
 
   const spawns = group('spawns', 'Enemy Spawns', [
-    spawnNode('hollow-a', 'Spawn Hollow A', 'Hollow', [0, 0, 19], 180),
-    spawnNode('hollow-b', 'Spawn Hollow B', 'Hollow', [1.5, 0, 30], 180),
-    spawnNode('hollow-c', 'Spawn Hollow C', 'Hollow', [-6, 0, 50], 170),
-    spawnNode('hollow-d', 'Spawn Hollow D', 'Hollow', [7, 0, 52], 200),
-    spawnNode('caster', 'Spawn Sorcerer', 'Hollow Sorcerer', [11, 1.55, 63.5], 180),
-    spawnNode('knight', 'Spawn Elite Knight', 'Elite Knight', [28, 0, 55], -90),
-    spawnNode('hollow-e', 'Spawn Hollow E', 'Hollow', [31, 0, 18], 0),
-    spawnNode('warden', 'Spawn Hollow Warden', 'Hollow Warden', [0, 0, 112], 180, { isBossSpawn: true }),
+    placedSpawn('hollow-a', 'Spawn Hollow A', [0, 0, 19], 180, { templateName: 'Hollow' }),
+    placedSpawn('hollow-b', 'Spawn Hollow B', [1.5, 0, 30], 180, { templateName: 'Hollow' }),
+    placedSpawn('hollow-c', 'Spawn Hollow C', [-6, 0, 50], 170, { templateName: 'Hollow' }),
+    placedSpawn('hollow-d', 'Spawn Hollow D', [7, 0, 52], 200, { templateName: 'Hollow' }),
+    placedSpawn('caster', 'Spawn Sorcerer', [11, 1.55, 63.5], 180, { templateName: 'Hollow Sorcerer' }),
+    placedSpawn('knight', 'Spawn Elite Knight', [28, 0, 55], -90, { templateName: 'Elite Knight' }),
+    placedSpawn('hollow-e', 'Spawn Hollow E', [31, 0, 18], 0, { templateName: 'Hollow' }),
+    placedSpawn('warden', 'Spawn Hollow Warden', [0, 0, 112], 180, { templateName: 'Hollow Warden', isBossSpawn: true }),
   ])
 
   const navMesh = node('Nav Mesh', 'navMesh', { id: stableId('navmesh'), bake: {}, agentRadius: 0.45 })
@@ -1760,8 +1794,10 @@ function keepScene() {
     id: stableId('root'),
     children: [
       // The world banners (YOU DIED, BONFIRE LIT, VICTORY) belong to the game flow, which is the manager's.
-      withScript(node('GameManager', 'node', { id: stableId('manager'), children: [banner()] }), 'SoulsGameManager'),
-      soundsGroup(),
+      // The game-flow cues (and the music) are the manager's too: its own `Sounds`.
+      withScript(node('GameManager', 'node', {
+        id: stableId('manager'), children: [banner(), soundsGroup('manager', SOUNDS.manager, { music: MUSIC_CUES })],
+      }), 'SoulsGameManager'),
       linkInstance(LEVEL.player, playerNode()),
       sun, sky,
       group('level', 'Level', level),

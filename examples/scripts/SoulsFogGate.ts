@@ -1,4 +1,5 @@
 import { Node } from 'cleo'
+import { playSound } from './SoulsAudio'
 
 /**
  * Hollow Keep — the fog wall in front of the boss. Attach to a node at the arena's mouth that carries a
@@ -63,7 +64,7 @@ export default class SoulsFogGateNode extends Node {
     const yaw = Math.atan2(f[0], f[2]) * 180 / Math.PI
     this._solid(false)
     p.walkThroughFog(start, yaw, this.walkDistance, this.walkSeconds)
-    ;(this._gm as any)?.sfx?.('Fog')
+    playSound(this, 'Fog')
     this.after(this.walkSeconds + 0.05, () => {
       this._solid(true)
       this.gateState = 'fight'

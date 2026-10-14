@@ -69,13 +69,24 @@ export const BASE_TYPE_LABEL: Record<ScriptBaseType, string> = {
   uiTextInput: 'UI Text Input',
 }
 
+/**
+ * A reflected field's type: a node variable type, or `stringList` (a `string[]` field). Editor-only: the
+ * engine restores `scriptVars` as plain own properties and never needs to know a field's type.
+ */
+export type ScriptVarType = NodeVariableType | 'stringList'
+
 /** One reflected script variable, parsed from a class field declaration. */
 export type ScriptVarSchema = {
   name: string
-  type: NodeVariableType          // 'number' | 'string' | 'boolean' | 'vec3'
+  type: ScriptVarType             // 'number' | 'string' | 'boolean' | 'vec3' | 'stringList'
   access: NodeVariableAccess      // 'public' | 'private' | 'protected'
   default: any
   hidden: boolean                 // underscore-prefixed: internal state, not shown in the inspector
+  /**
+   * A string field whose value is picked from another field's list: the name of that sibling `string[]`
+   * field. Declared with a `@options <field>` tag in the field's doc comment; the inspector shows a dropdown.
+   */
+  options?: string
 }
 
 export type ScriptKind = 'class' | 'module'
@@ -137,6 +148,17 @@ function stripComments(src: string): string {
 }
 
 /**
+ * Turn a block comment carrying an `@options <field>` tag into the bare token `@options:<field>`, so the tag
+ * survives stripComments and reaches the field declared after it. Every other comment is left as is.
+ */
+function keepOptionsTags(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, c => {
+    const m = /@options\s+([A-Za-z_$][A-Za-z0-9_$]*)/.exec(c)
+    return m ? `@options:${m[1]} ` : c
+  })
+}
+
+/**
  * Extract the top-level class body `{ ... }` of the script's class: the DEFAULT-exported one when there
  * is one (a script may declare helper classes above it), else the first class. '' if none.
  */
@@ -154,18 +176,35 @@ function classBody(src: string): string {
   return src.slice(start, i - 1)
 }
 
-const TS_TO_VAR_TYPE: Record<string, NodeVariableType> = {
+const TS_TO_VAR_TYPE: Record<string, ScriptVarType> = {
   number: 'number', string: 'string', boolean: 'boolean', bool: 'boolean',
   vec3: 'vec3', 'number[]': 'vec3', '[number,number,number]': 'vec3',
+  'string[]': 'stringList', 'array<string>': 'stringList', 'readonlystring[]': 'stringList',
 }
 
-function typeDefault(type: NodeVariableType): any {
+function typeDefault(type: ScriptVarType): any {
   switch (type) {
     case 'number': return 0
     case 'string': return ''
     case 'boolean': return false
     case 'vec3': return [0, 0, 0]
+    case 'stringList': return []
   }
+}
+
+/** The quoted entries of an array literal body (`'a', "b c"`), or undefined unless it is ONLY string literals. */
+function parseStringArray(body: string): string[] | undefined {
+  const out: string[] = []
+  const re = /(['"`])((?:\\.|(?!\1)[^\\])*)\1/g
+  let rest = ''
+  let last = 0
+  for (let m: RegExpExecArray | null; (m = re.exec(body));) {
+    rest += body.slice(last, m.index)
+    last = m.index + m[0].length
+    out.push(m[2].replace(/\\(.)/g, '$1'))
+  }
+  rest += body.slice(last)
+  return /^[\s,]*$/.test(rest) ? out : undefined
 }
 
 /** Parse a literal initializer (`= 5`, `= 'hi'`, `= true`, `= [1,2,3]`) to a value, or undefined if dynamic. */
@@ -179,19 +218,21 @@ function parseDefault(raw: string): any {
   if (str) return str[2]
   const arr = /^\[([^\]]*)\]$/.exec(t)
   if (arr) {
+    if (arr[1].trim() === '') return []
     const nums = arr[1].split(',').map(s => Number(s.trim()))
     if (nums.every(n => Number.isFinite(n))) return nums
+    return parseStringArray(arr[1])
   }
   return undefined
 }
 
 /** Infer the variable type from a TS annotation and/or a default value. */
-function inferType(annotation: string, def: any): NodeVariableType {
+function inferType(annotation: string, def: any): ScriptVarType {
   const key = annotation.replace(/\s+/g, '').toLowerCase()
   if (key && TS_TO_VAR_TYPE[key]) return TS_TO_VAR_TYPE[key]
   if (typeof def === 'number') return 'number'
   if (typeof def === 'boolean') return 'boolean'
-  if (Array.isArray(def)) return 'vec3'
+  if (Array.isArray(def)) return def.length && def.every(v => typeof v === 'string') ? 'stringList' : 'vec3'
   if (typeof def === 'string') return 'string'
   return 'number'
 }
@@ -208,11 +249,13 @@ const MODIFIER_KEYWORDS = new Set(['public', 'private', 'protected', 'readonly',
  * simply not reflected.
  */
 export function parseScriptVariables(source: string): ScriptVarSchema[] {
-  const body = classBody(stripComments(source))
+  const body = classBody(stripComments(keepOptionsTags(source)))
   if (!body) return []
 
   const out: ScriptVarSchema[] = []
   const seen = new Set<string>()
+  // An `@options` tag read from the doc comment above the next field (see keepOptionsTags).
+  let pendingOptions: string | undefined
 
   // Walk statements at class-body depth 0, tracking brace/paren depth so method bodies and
   // object/array initializers are skipped as single units.
@@ -220,9 +263,17 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
   let depth = 0
   let stmtStart = 0
   const flush = (end: number) => {
-    const stmt = body.slice(stmtStart, end).trim()
+    let stmt = body.slice(stmtStart, end).trim()
     stmtStart = end + 1
+    // A comment ending on the field's own line leaves its tag in front of the declaration.
+    const tag = /^@options:([A-Za-z_$][A-Za-z0-9_$]*)\s*/.exec(stmt)
+    if (tag) {
+      pendingOptions = tag[1]
+      stmt = stmt.slice(tag[0].length)
+    }
     if (!stmt) return
+    const options = pendingOptions
+    pendingOptions = undefined
 
     // A call/parameter list before '=' means a method or getter/setter, not a field.
     const eq = stmt.indexOf('=')
@@ -255,6 +306,8 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
       access,
       default: def ?? typeDefault(type),
       hidden: name.startsWith('_'),
+      // Only a string can be picked from a list.
+      ...(options && type === 'string' ? { options } : {}),
     })
   }
 

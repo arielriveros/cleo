@@ -1,5 +1,6 @@
 import { CameraRigNode, Input, Node } from 'cleo'
 import { angleDiff, planarDistance, yawTo } from './SoulsMath'
+import { playSound } from './SoulsAudio'
 
 /**
  * Hollow Keep — the third-person camera with target lock. Attach to the Player's `camera rig`, a Camera
@@ -145,7 +146,7 @@ export default class SoulsLockOnNode extends CameraRigNode {
     const best = this._candidates()[0]
     if (!best) return false
     this.lockOnto(best.node)
-    ;(this._gm as any)?.sfx?.('Lock On')
+    playSound(this, 'Lock On')
     return true
   }
 

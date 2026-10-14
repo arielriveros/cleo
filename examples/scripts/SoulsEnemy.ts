@@ -2,6 +2,7 @@ import { Logger, ModelNode, Node, setMoveWorld } from 'cleo'
 import { clamp, num, planarDistance } from './SoulsMath'
 import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing, wieldedBy } from './SoulsHitbox'
 import SoulsCharacterNode from './SoulsCharacter'
+import { playSound } from './SoulsAudio'
 
 /**
  * Hollow Keep — the base ENEMY. Never attached as-is: each enemy type has its own script extending this
@@ -233,7 +234,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     if (this.poise <= 0) {
       this.poise = this.maxPoise
       this._react('stagger', this.staggerClip, this.staggerSeconds)
-      ;(this._gm as any)?.sfx?.('Stagger')
+      playSound(this, 'Stagger')
     } else if (this.flinchOnHit && !this.isBoss && !(this.fightState === 'attack' && this._attack?.hyperArmor)) {
       this._react('flinch', this.flinchClip, this.flinchSeconds)
     }
@@ -405,7 +406,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
       const d = planarDistance(this.worldPosition, this._player.worldPosition)
       this._lungeSpeedNow = Math.min(num(attack.lungeSpeed, 12), Math.max(0, d - 1) / Math.max(0.05, num(attack.lungeSeconds, 0.5)))
     }
-    ;(this._gm as any)?.sfx?.(attack.sound || 'Enemy Swing')
+    playSound(this, attack.sound || 'Enemy Swing')
   }
 
   private _attacking(intent: any, delta: number): void {
@@ -503,7 +504,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     const t = target as any
     if (!attack || typeof t?.receiveHit !== 'function') return false
     const landed = !!t.receiveHit(num(attack.damage, 50), num(attack.poiseDamage, 20), this)
-    if (landed) (this._gm as any)?.sfx?.('Player Hit')
+    if (landed) playSound(this, 'Player Hit')
     return landed
   }
 
@@ -523,7 +524,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
       const bolt = this.scene?.instantiate(attack.projectileTemplate, { position: [origin[0], origin[1], origin[2]] }) as any
       if (bolt?.launch) bolt.launch(dir, num(attack.projectileSpeed, 12), num(attack.damage, 60), this.id)
     }
-    ;(this._gm as any)?.sfx?.('Cast')
+    playSound(this, 'Cast')
   }
 
   private _castOrigin(): number[] {
@@ -556,7 +557,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     if (this.dropWeaponOnDeath) this.dropWeapon()
     ;(this._model?.animator as any)?.setTrigger?.('Died')
     const gm = this._gm as any
-    gm?.sfx?.('Enemy Death')
+    playSound(this, 'Enemy Death')
     gm?.onEnemyKilled?.(this)
     if (this.useRagdoll && this.deathSeconds > 0) this.after(this.deathSeconds, () => this._ragdoll())
     this.after(this.corpseSeconds, () => this.remove())

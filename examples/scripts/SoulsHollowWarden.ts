@@ -1,5 +1,6 @@
 import { Node } from 'cleo'
 import SoulsEnemyNode from './SoulsEnemy'
+import { playSound } from './SoulsAudio'
 
 /**
  * Hollow Keep — the Hollow Warden, the boss. A giant with a halberd; dormant until the fog gate wakes it,
@@ -51,7 +52,7 @@ export default class SoulsHollowWardenNode extends SoulsEnemyNode {
     this._play(this.roarClip, 1)
     const gm = this._gm as any
     gm?.shake?.(0.6)
-    gm?.sfx?.('Boss Roar')
+    playSound(this, 'Boss Roar')
     ;(this._aura as any)?.play?.()
   }
 }

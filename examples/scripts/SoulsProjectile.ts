@@ -1,4 +1,5 @@
 import { Node } from 'cleo'
+import { playDetached } from './SoulsAudio'
 
 /**
  * Hollow Keep — a magic bolt. Attach to the root of a projectile template (a plain node with the glowing
@@ -86,7 +87,7 @@ export default class SoulsProjectileNode extends Node {
     if (impact) {
       const gm = this._gm as any
       gm?.fx?.(this.impactTemplate, this.worldPosition)
-      gm?.sfx?.('Bolt Impact')
+      playDetached(this, 'Bolt Impact')
     }
     this.remove()
   }

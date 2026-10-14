@@ -128,7 +128,7 @@ SoulsWeapon               stats, blade hitbox, moves, attackRating, strike
 | `SoulsEnemy` + one subclass per type | each **enemy template**'s root | Poise, flinch and stagger, spacing and strafing, attack choice (`pickAttack`), death. The type's stats are its subclass's defaults; the Warden's subclass adds its phase two. |
 | `SoulsEnemyAttack` | `<enemy>/Attacks/*` | One enemy attack per node. |
 | `SoulsEnemyBrain` | `<enemy>/Brain` (last child) | Player-only targeting (the engine has no factions) and the enemy's home point. Every decision is the type's AI graph — see below. |
-| `SoulsEnemySpawn` | `Enemy Spawns/*` | Instantiates a template, and re-creates it on rest or death. |
+| `SoulsEnemySpawn` | `Enemy Spawns/*` (template `Enemy Spawn`) | Instantiates the template picked from its `spawnables`, and re-creates it on rest or death. |
 | `SoulsProjectile` | `Magic Bolt` template | Swept-sphere flight against hurtboxes, plus a ray against the world; a roll's i-frames let you pass through. |
 | `SoulsHitbox` | script module | Blade hitboxes, hurtboxes and swing blockers, shared by the player, the enemies and the bolt. See **Combat** below. |
 | `SoulsFx` | effect templates | Bursts its particles, fades its lights, then removes itself. |
@@ -213,8 +213,14 @@ holds **linked copies** of it:
 | `Level/Fog Gate` | `Interactables/Fog Gate` |
 | `Interactables/Message` | the 7 `Message: …` nodes and `Epilogue Message` |
 | `Interactables/Pickup` | `Souls Pickup`, `Estus Shard`, `Hall Souls`, `Boss Reward` |
+| `Enemies/Enemy Spawn` | the 8 nodes under `Enemy Spawns` (see below) |
 | `Enemies/*` | none placed: the **Enemy Spawns** instantiate them at runtime, and again on every rest |
 | `Weapons/*` | none placed: each character spawns the weapons it names, at runtime |
+
+**Enemy spawns pick from a list.** The `Enemy Spawn` template's script declares
+`spawnables: string[]`, the templates a spawn may make. Each placed spawn picks its `templateName`
+from that list in a dropdown in the inspector, because the field carries an `@options spawnables` tag.
+Edit the list once, in the template, to offer a new enemy type to every spawn.
 
 **Change the art once, in the template.** Double-click it in Assets, edit, save: every copy updates
 and keeps its own position. Inside a copy, the scene only shows one row; its children belong to the
@@ -385,39 +391,44 @@ enemy's weapon is sized in its `Mesh` child rather than inherited from the scale
 
 ## 8. Sound cues
 
-Every cue is an **empty Ambient Sound node** under `Sounds`. Assign a sample to each one to hear it.
-A node with no sample is silent, and nothing breaks.
+Every sound is **owned by the thing that makes it**. Each template that plays audio has a `Sounds` group
+in its own tree, holding one **empty Sound node** per cue. Assign a sample to each one, in the template,
+to hear it. A node with no sample is silent, and nothing breaks.
 
-| Node | Played when |
-|---|---|
-| `Swing`, `Swing Heavy` | the player starts a light or heavy attack |
-| `Hit` | a player attack connects |
-| `Roll` | roll or backstep |
-| `Drink` | an Estus flask is consumed |
-| `Player Hurt` | the player takes damage |
-| `Player Hit` | an enemy swing connects (impact) |
-| `Death` | YOU DIED |
-| `Souls` | souls gained |
-| `Pickup` | an item is picked up |
-| `Bonfire Lit` | a bonfire is lit |
-| `Rest` | sitting at a bonfire |
-| `Level Up` | the level-up is confirmed |
-| `Menu Tick` | a point is adjusted in the menu |
-| `Menu Deny` | not enough souls |
-| `Lock On` | a target is locked |
-| `Enemy Swing` | an enemy attack starts (each attack's `sound` field can name another node) |
-| `Stagger` | an enemy's poise breaks |
-| `Enemy Death` | an enemy dies |
-| `Cast` | a projectile is fired |
-| `Bolt Impact` | a projectile hits |
-| `Door` | the shortcut gate opens |
-| `Lever` | the lever is pulled |
-| `Fog` | walking through the fog |
-| `Boss Roar` | the boss enters phase two |
-| `Boss Leap` | the boss's leap attack (its `sound` field) |
-| `Victory` | the boss is defeated |
-| `Ambience` | loops from the start; stopped during the boss fight |
-| `Boss Music` | loops during the boss fight |
+A script plays a cue by name with `playSound(this, 'Lever')` from the `SoulsAudio` module. The call
+walks up from the playing node to the nearest ancestor that has a `Sounds` group. So the bonfire menu
+and the lock-on camera play the Player's cues, and an enemy's attacks play the enemy's. A bolt that is
+about to vanish uses `playDetached`, which moves the cue to the scene root so the sound isn't cut off.
+
+World objects are **Spatial**, so you hear them from where they are. The player's cues and the game
+flow's cues are **Ambient**.
+
+| Owner (template, or scene node) | Cue | Played when |
+|---|---|---|
+| `Player` | `Swing`, `Swing Heavy` | the player starts a light or heavy attack |
+| | `Roll` | roll or backstep |
+| | `Drink` | an Estus flask is consumed |
+| | `Player Hurt` | the player takes damage |
+| | `Souls` | souls gained |
+| | `Recoil` | a swing bounces off a wall |
+| | `Lock On` | a target is locked |
+| | `Level Up`, `Menu Tick`, `Menu Deny` | level-up confirmed; a point is adjusted; not enough souls |
+| `Weapon` (every weapon variant) | `Hit` | the weapon connects (its `hitSound` field) |
+| `Enemy` (every enemy variant) | `Enemy Swing` | an attack starts (each attack's `sound` field can name another cue) |
+| | `Player Hit` | an enemy swing connects (impact) |
+| | `Stagger` | the enemy's poise breaks |
+| | `Enemy Death` | the enemy dies |
+| | `Cast` | a projectile is fired |
+| `Hollow Warden` (adds) | `Boss Leap`, `Boss Roar` | the leap attack; phase two |
+| `Magic Bolt` | `Bolt Impact` | the bolt hits |
+| `Pickup` | `Pickup` | an item is picked up |
+| `Lever` / `Gate` / `Fog Gate` | `Lever` / `Door` / `Fog` | pulled / opens / walked through |
+| `GameManager` (scene node) | `Bonfire Lit`, `Rest`, `Death`, `Victory` | a bonfire is lit; sitting; YOU DIED; the boss is defeated |
+| | `Ambience` | loops from the start; stopped during the boss fight |
+| | `Boss Music` | loops during the boss fight |
+
+An enemy variant inherits the base `Enemy` cues. A new cue an attack names (`sound`) must be added to
+that variant's `Sounds`.
 
 ## 9. Visual effects
 
@@ -620,7 +631,8 @@ The scripts find the model automatically: it is the first **Model** child that h
 1. Import the level meshes and place them.
 2. For every walkable or blocking surface, keep a collider: either an existing `Level` box (hide its
    mesh) or a new body in the **Physics** section.
-3. Move the **Enemy Spawns** nodes. Each one's position and facing is where its enemy stands.
+3. Move the **Enemy Spawns** nodes. Each one's position and facing is where its enemy stands. To place
+   another one, drag the `Enemy Spawn` template in, then pick what it spawns in its Scripts section.
 4. Move the `Fog Gate` so local +Z points into the arena, and resize the `Boss Arena` node's trigger box
    to cover the arena past the fog.
    Mark new walls and pillars with the `blocksSwings` variable (boolean, true) so swings bounce off them.
@@ -631,7 +643,9 @@ The scripts find the model automatically: it is the first **Model** child that h
 ### 11.9 Sounds
 
 1. Drop the audio files on Assets, or use **+ Add ▸ Sound**. Set loop points on the music in the sample editor.
-2. Select each node under `Sounds` and set **Sample**. Leave **Play on start** off, except on `Ambience`.
+2. Open each template in the §8 table (double-click it in Assets). Select each node under its `Sounds`,
+   set **Sample** and save. For the game-flow cues and the music, use the nodes under
+   `GameManager/Sounds` in the scene. Leave **Play on start** off, except on `Ambience`.
 
 ### 11.10 Effects
 

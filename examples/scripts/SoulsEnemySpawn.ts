@@ -1,8 +1,11 @@
 import { Logger, Node } from 'cleo'
 
 /**
- * Hollow Keep — where an enemy lives. Attach to an empty node placed (and rotated) where the enemy
- * should stand; it instantiates `templateName` there.
+ * Hollow Keep — where an enemy lives. The script of the "Enemy Spawn" template: place a copy of it (and
+ * rotate it) where the enemy should stand, and it instantiates `templateName` there.
+ *
+ * `spawnables` is the list of templates a spawn may make, edited once in the template; each placed copy
+ * picks one of them for `templateName` from a dropdown in the inspector (its `@options` tag).
  *
  * Enemies are TEMPLATES spawned at runtime rather than placed nodes, because resting at a bonfire must
  * bring every one of them back fresh — a placed node would need every field it ever changed restored by
@@ -13,6 +16,12 @@ import { Logger, Node } from 'cleo'
  * can find the live boss.
  */
 export default class SoulsEnemySpawnNode extends Node {
+  /** The templates a spawn may create. Edit the list in the Enemy Spawn template. */
+  public spawnables: string[] = ['Hollow', 'Hollow Sorcerer', 'Elite Knight', 'Hollow Warden']
+  /**
+   * Which of `spawnables` this spawn creates.
+   * @options spawnables
+   */
   public templateName: string = 'Hollow'
   public isBossSpawn: boolean = false
   /** Seconds after the scene starts before the first spawn — lets the level settle first. */
@@ -33,6 +42,8 @@ export default class SoulsEnemySpawnNode extends Node {
       try { this._live.remove() } catch { /* already gone */ }
     }
     this._live = null
+    if (!(this.spawnables ?? []).includes(this.templateName))
+      Logger.warn('Hollow Keep: spawn "' + this.name + '" makes "' + this.templateName + '", which is not in its spawnables.', 'Script')
     const p = this.worldPosition
     const f = this.worldForward
     const yaw = Math.atan2(f[0], f[2]) * 180 / Math.PI

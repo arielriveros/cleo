@@ -1,4 +1,5 @@
 import { Node } from 'cleo'
+import { playSound } from './SoulsAudio'
 
 /**
  * Hollow Keep — an item lying in the world (the glowing corpse loot of the souls games). Attach to the
@@ -54,7 +55,7 @@ export default class SoulsPickupNode extends Node {
     else if (this.kind === 'flaskShard') p.addEstusFlask?.()
     else if (this.kind === 'flaskCharge') p.refillEstus?.(this.amount)
     gm?.notice?.('Picked up ' + this.itemName)
-    gm?.sfx?.('Pickup')
+    playSound(this, 'Pickup')
     this.visible = false
     gm?.unregisterInteractable?.(this)
   }

@@ -134,13 +134,88 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
         }
     });
 
-    it('has a SoundNode for every cue a script plays', () => {
-        const sounds = new Set(allNodes(scene().scene).find(n => n.name === 'Sounds').children.map((c: any) => c.name));
-        const cues = new Set<string>();
-        for (const src of scriptSources()) for (const m of src.matchAll(/sfx\?\.\('([^']+)'\)|sfx\('([^']+)'\)|_music\('([^']+)'/g)) cues.add(m[1] ?? m[2] ?? m[3]);
-        for (const n of everyNode()) if (n.scriptVars?.sound) cues.add(n.scriptVars.sound);
-        expect(cues.size).toBeGreaterThan(15);
-        for (const cue of cues) expect(sounds.has(cue), `no SoundNode "${cue}" under Sounds`).toBe(true);
+    // Every sound is OWNED: SoulsAudio.playSound walks up from the playing node to the nearest `Sounds`
+    // group, so each cue a script plays must sit in the Sounds of the template (or scene node) running it.
+    it('keeps no Sounds group loose at the scene root', () => {
+        expect(scene().scene.children.map((c: any) => c.name)).not.toContain('Sounds');
+    });
+
+    it('has a SoundNode in its owner for every cue a script plays', () => {
+        // The literal cues each script file plays, and the files a class runs (itself and its bases).
+        const cuesOf = new Map<string, string[]>();
+        const baseOf = new Map<string, string>();
+        for (const f of readdirSync(SCRIPTS).filter(f => f.startsWith('Souls') && f.endsWith('.ts'))) {
+            const src = readFileSync(join(SCRIPTS, f), 'utf8');
+            const file = f.replace(/\.ts$/, '');
+            const cues: string[] = [];
+            for (const call of src.matchAll(/(?:playSound|playDetached|stopSound)\(this, ([^)]*)\)|\bsfx\('([^']+)'\)|_music\('([^']+)'/g)) {
+                // Every literal argument, except a ternary's condition operand (`kind === 'heavy' ? …`).
+                if (call[1]) for (const lit of call[1].matchAll(/'([^']+)'(\s*\?)?/g)) { if (!lit[2]) cues.push(lit[1]); }
+                else cues.push(call[2] ?? call[3]);
+            }
+            cuesOf.set(file, cues);
+            const ext = /export\s+default\s+class\s+\w+\s+extends\s+(\w+)/.exec(src);
+            const imp = ext && new RegExp(`import\\s+${ext[1]}\\s+from\\s+['"]\\./(\\w+)['"]`).exec(src);
+            if (imp) baseOf.set(file, imp[1]);
+        }
+        const fileOf = (source: string) => /export\s+default\s+class\s+(\w+)Node\b/.exec(source)?.[1];
+
+        // Walk each tree (the scene, every template) with parents, so a node's owner can be found.
+        let checked = 0;
+        const owners = new Set<string>();
+        const check = (root: any) => {
+            const walk = (n: any, chain: any[]) => {
+                const asset = scriptOf(n);
+                if (asset) {
+                    const owner = [n, ...chain].find(a => a.children?.some((c: any) => c.name === 'Sounds'));
+                    const have = new Set(owner?.children.find((c: any) => c.name === 'Sounds').children
+                        .filter((c: any) => c.type === 'sound').map((c: any) => c.name) ?? []);
+                    const files: string[] = [];
+                    for (let f = fileOf(asset.source); f; f = baseOf.get(f)) files.push(f);
+                    const cues = files.flatMap(f => cuesOf.get(f) ?? []);
+                    // Data-driven cues: an attack's `sound` (played by its enemy), a weapon's `hitSound`.
+                    if (n.scriptVars?.sound) cues.push(n.scriptVars.sound);
+                    if (files.includes('SoulsWeapon')) cues.push(n.scriptVars?.hitSound ?? 'Hit');
+                    for (const cue of cues) {
+                        expect(have.has(cue), `${n.name} plays "${cue}", but ${owner?.name ?? 'nothing above it'} has no such SoundNode in its Sounds`).toBe(true);
+                        checked++;
+                    }
+                    if (cues.length && owner) owners.add(owner.name);
+                }
+                for (const c of n.children ?? []) walk(c, [n, ...chain]);
+            };
+            walk(root, []);
+        };
+        check(scene().scene);
+        for (const t of templates()) check(t.nodeJson);
+        expect(checked).toBeGreaterThan(30);
+        for (const name of ['GameManager', 'Player', 'Hollow', 'Hollow Warden', 'Straight Sword', 'Magic Bolt', 'Lever', 'Gate', 'Fog Gate', 'Pickup'])
+            expect(owners.has(name), `${name} owns no sounds`).toBe(true);
+        // An enemy attack's own cue (Cast, Boss Leap) is played by its enemy, from the enemy's Sounds.
+        const warden = templates().find((t: any) => t.name === 'Hollow Warden').nodeJson;
+        const wardenSounds = warden.children.find((c: any) => c.name === 'Sounds').children.map((c: any) => c.name);
+        expect(wardenSounds).toEqual(expect.arrayContaining(['Boss Leap', 'Cast', 'Boss Roar']));
+    });
+
+    // ----- enemy spawns ------------------------------------------------------------------------------
+
+    it('places every spawn as a copy of the Enemy Spawn template, picking from its spawnables', () => {
+        const spawnTemplate = templates().find((t: any) => t.name === 'Enemy Spawn');
+        expect(spawnTemplate).toBeDefined();
+        const list: string[] = spawnTemplate.nodeJson.scriptVars.spawnables;
+        const names = new Set(templates().map((t: any) => t.name));
+        expect(list.length).toBeGreaterThanOrEqual(4);
+        for (const name of list) expect(names.has(name), name).toBe(true);
+        // The script reflects the list as a string list, and templateName as picked from it.
+        const asset = scriptOf(spawnTemplate.nodeJson);
+        expect(asset.variables.find((v: any) => v.name === 'spawnables')?.type).toBe('stringList');
+        expect(asset.variables.find((v: any) => v.name === 'templateName')?.options).toBe('spawnables');
+        const placed = allNodes(scene().scene).filter(n => scriptOf(n) === asset);
+        expect(placed).toHaveLength(8);
+        for (const n of placed) {
+            expect(n.variables.__templateId?.value, n.name).toBe(spawnTemplate.id);
+            expect(list, n.name).toContain(n.scriptVars.templateName);
+        }
     });
 
     // ----- templates ---------------------------------------------------------------------------------

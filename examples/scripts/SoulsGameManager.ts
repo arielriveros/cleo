@@ -1,5 +1,6 @@
 import { Input, Logger, Node } from 'cleo'
 import { clamp, forwardYaw, num } from './SoulsMath'
+import { playSound, stopSound } from './SoulsAudio'
 
 /**
  * Hollow Keep — the game manager. Attach to an empty node named `GameManager` at the scene root.
@@ -31,9 +32,11 @@ import { clamp, forwardYaw, num } from './SoulsMath'
  *
  * ## Sounds and effects
  *
- * `sfx('Swing')` plays the SoundNode of that name under the scene's `Sounds` group; `fx('Hit Spark', p)`
- * instantiates a template at a point. Both are silent no-ops when the node or template is missing, so a
- * level with no audio assigned yet plays exactly the same — just quietly. See SOULS_DEMO.md for the list.
+ * Every sound is OWNED: the Player's, an enemy's or a lever's cues are SoundNodes in a `Sounds` group of
+ * its own template, played through SoulsAudio. The manager owns only the game-flow cues (Bonfire Lit,
+ * Rest, Death, Victory and the music), in its own `Sounds` child. `fx('Hit Spark', p)` instantiates a
+ * template at a point. Both are silent no-ops when the node or template is missing, so a level with no
+ * audio assigned yet plays exactly the same — just quietly. See SOULS_DEMO.md for the list.
  */
 export default class SoulsGameManagerNode extends Node {
   // ----- flow -------------------------------------------------------------------------------------
@@ -57,8 +60,6 @@ export default class SoulsGameManagerNode extends Node {
   public maxBloodDecals: number = 24
   /** Damage that leaves a full-size splat; less shrinks it, more grows it (0.6x to 1.6x). */
   public bloodReferenceDamage: number = 120
-  /** Name of the group whose SoundNode children `sfx()` plays. */
-  public soundsGroup: string = 'Sounds'
   /** Name of the reward pickup revealed once the boss falls. */
   public bossRewardName: string = 'Boss Reward'
   /** Name of the lore message revealed once the boss falls. */
@@ -75,7 +76,6 @@ export default class SoulsGameManagerNode extends Node {
   private _banner: Node = null
   private _menu: Node = null
   private _lockOn: Node = null
-  private _sounds: Node = null
   private _enemies: Node[] = []
   private _interactables: Node[] = []
   private _spawns: Node[] = []
@@ -96,7 +96,6 @@ export default class SoulsGameManagerNode extends Node {
     this._hud = this._player?.getChildByName('HUD')[0] ?? null
     this._menu = this._player?.getChildByName('BonfireMenu')[0] ?? null
     this._banner = this.getChildByName('Banner')[0] ?? null
-    this._sounds = this.findNode(this.soundsGroup)
     if (this._player) {
       const p = this._player.worldPosition
       this._respawnPoint = [p[0], p[1], p[2]]
@@ -326,10 +325,9 @@ export default class SoulsGameManagerNode extends Node {
     if (hud?.showMessage) hud.showMessage(title, body, source)
   }
 
-  /** Play the SoundNode of this name under the Sounds group. Silent when there is none. */
+  /** Play one of the manager's own cues (its `Sounds` child). Silent when there is none. */
   public sfx(name: string): void {
-    const node = this._soundNamed(name) as any
-    if (node?.play) node.play()
+    playSound(this, name)
   }
 
   /** Instantiate an effect template at a world point. Silent when the template does not exist. */
@@ -386,15 +384,8 @@ export default class SoulsGameManagerNode extends Node {
   }
 
   private _music(name: string, on: boolean): void {
-    const node = this._soundNamed(name) as any
-    if (!node) return
-    if (on) node.play?.()
-    else node.stop?.()
-  }
-
-  private _soundNamed(name: string): Node {
-    if (!this._sounds) return null
-    return this._sounds.getChildByName(name)[0] ?? null
+    if (on) playSound(this, name)
+    else stopSound(this, name)
   }
 
   private _lockOnNode(): any {

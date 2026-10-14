@@ -1,4 +1,5 @@
 import { Node } from 'cleo'
+import { playSound } from './SoulsAudio'
 
 /**
  * Hollow Keep — a door or portcullis that slides open. Attach to a node with a STATIC box body at the
@@ -54,7 +55,7 @@ export default class SoulsDoorNode extends Node {
     if (this.isOpen || this._opening) return
     this._opening = true
     this._t = 0
-    ;(this._gm as any)?.sfx?.('Door')
+    playSound(this, 'Door')
   }
 
   onUpdate(delta: number) {

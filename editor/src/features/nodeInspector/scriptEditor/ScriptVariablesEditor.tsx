@@ -2,7 +2,7 @@ import { Node } from 'cleo'
 import { useState, useEffect } from 'react'
 import { useCleoEngine } from '../../EngineContext'
 import Collapsable from '../../../components/Collapsable'
-import { NumberInput, TextInput, Toggle, VectorInput, cn, labelClass, ACCESS_META } from '../../../components/ui'
+import { NumberInput, TextInput, Toggle, VectorInput, Select, StringListInput, cn, labelClass, ACCESS_META } from '../../../components/ui'
 import { VariablesIcon } from '../sectionIcons'
 import type { ScriptVarSchema } from '../../../utils/scripts'
 import { isOverridden, setFieldOverride } from '../../../utils/templateOverrides'
@@ -56,8 +56,31 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
   const variantOverrides = (v: ScriptVarSchema) =>
     !!inherited && JSON.stringify(values[v.name]) !== JSON.stringify(baseValue(v))
 
+  // The choices of an `@options` field: the node's own list (it may override the template's), else the
+  // list field's script default.
+  const choicesFor = (v: ScriptVarSchema): string[] => {
+    const own = values[v.options!]
+    if (Array.isArray(own)) return own.map(String)
+    const def = asset.variables.find(f => f.name === v.options)?.default
+    return Array.isArray(def) ? def.map(String) : []
+  }
+
   const renderValue = (v: ScriptVarSchema) => {
     const value = values[v.name]
+    if (v.options) {
+      const choices = choicesFor(v)
+      const current = typeof value === 'string' ? value : ''
+      return (
+        <Select className='w-full' value={current} onChange={e => setValue(v.name, e.target.value)}
+          title={`Picked from ${v.options}`}>
+          {!choices.includes(current) && <option value={current}>{current || '(none)'} (not in list)</option>}
+          {choices.map((c, i) => <option key={`${i}:${c}`} value={c}>{c}</option>)}
+        </Select>
+      )
+    }
+    if (v.type === 'stringList') {
+      return <StringListInput value={Array.isArray(value) ? value.map(String) : []} onChange={next => setValue(v.name, next)} />
+    }
     if (v.type === 'number') return <NumberInput value={typeof value === 'number' ? value : 0} onChange={n => setValue(v.name, n)} />
     if (v.type === 'string') return <TextInput value={value ?? ''} onChange={s => setValue(v.name, s)} />
     if (v.type === 'boolean') return <Toggle checked={!!value} onChange={b => setValue(v.name, b)} />
@@ -71,7 +94,8 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
         <p className='mb-2 text-ui-sm text-dim'>
           Declared in <b>{asset.name}</b> as class fields. Type and access come from the script; edit each
           value here. Add a field in the script (<code>public speed: number = 5</code>); a leading{' '}
-          <code>_</code> keeps it internal.
+          <code>_</code> keeps it internal. A <code>string[]</code> field is an editable list, and a string field
+          tagged <code>/** @options listField */</code> is picked from that list.
         </p>
         {visible.length === 0 && <p className='mb-2 text-ui-sm text-dim'>No exposed variables. Declare a public/protected field in the script.</p>}
         {visible.map(v => {

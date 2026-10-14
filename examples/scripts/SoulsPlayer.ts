@@ -2,6 +2,7 @@ import { Input, Logger, ModelNode, Node, moveWorldDirection, setMoveWorld } from
 import { clamp, num } from './SoulsMath'
 import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing, wieldedBy } from './SoulsHitbox'
 import SoulsCharacterNode from './SoulsCharacter'
+import { playSound } from './SoulsAudio'
 
 /**
  * Hollow Keep — the player. Attach to the `Player` root, which must be a Character node. Extends
@@ -276,7 +277,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   }
 
   protected _onHurt(dealt: number, from: Node): void {
-    ;(this._gm as any)?.sfx?.('Player Hurt')
+    playSound(this, 'Player Hurt')
   }
 
   /** Interrupt whatever was happening — a drink included, which is the souls tax on greedy healing. */
@@ -306,7 +307,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this.souls += Math.round(amount)
     this.lastSoulsGain = Math.round(amount)
     this.soulsGainAge = 0
-    ;(this._gm as any)?.sfx?.('Souls')
+    playSound(this, 'Souls')
   }
 
   /** Full heal, full stamina, full flasks. Resting and respawning both do this. */
@@ -589,7 +590,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this._usesEvents = this._clipHasEvent(move.clip, 'hit')
     const length = this._clipLength > 0 ? this._clipLength : num(move.recoverTime, 0.7) + 0.4
     this._actionSeconds = length / this._playSpeed
-    ;(this._gm as any)?.sfx?.(kind === 'heavy' ? 'Swing Heavy' : 'Swing')
+    playSound(this, kind === 'heavy' ? 'Swing Heavy' : 'Swing')
   }
 
   private _startRoll(intent: any): void {
@@ -610,7 +611,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
       this._enter('roll')
       this._play(this.rollClip, 1)
     }
-    ;(this._gm as any)?.sfx?.('Roll')
+    playSound(this, 'Roll')
   }
 
   private _startDrink(): void {
@@ -699,7 +700,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     closeSwing(this._swing)
     const gm = this._gm as any
     gm?.fx?.((this.currentWeapon() as any)?.hitSparkTemplate || 'Hit Spark', at)
-    gm?.sfx?.('Recoil')
+    playSound(this, 'Recoil')
     gm?.shake?.(0.2)
     this._stopAction()
     this._motionDir = this._forward(-1)
@@ -714,7 +715,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this.estus--
     this._healLeft = this.estusHeal
     this._healRate = this.estusHeal / Math.max(0.05, this.estusHealSeconds)
-    ;(this._gm as any)?.sfx?.('Drink')
+    playSound(this, 'Drink')
   }
 
   // ----- per-frame helpers -------------------------------------------------------------------------

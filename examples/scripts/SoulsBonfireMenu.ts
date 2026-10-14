@@ -1,4 +1,5 @@
 import { Input, Node, UIButtonNode, UIRootNode, UITextNode } from 'cleo'
+import { playSound } from './SoulsAudio'
 
 /**
  * Hollow Keep — the level-up menu shown while resting at a bonfire. Attach to the `BonfireMenu` node, a
@@ -135,10 +136,10 @@ export default class SoulsBonfireMenuNode extends UIRootNode {
     this._pending[this._selected] = next
     if (delta > 0 && this.pendingCost() > (p.souls ?? 0)) {
       this._pending[this._selected] = before
-      ;(this._gm as any)?.sfx?.('Menu Deny')
+      playSound(this, 'Menu Deny')
       return
     }
-    ;(this._gm as any)?.sfx?.('Menu Tick')
+    playSound(this, 'Menu Tick')
     this._refresh()
   }
 
@@ -148,7 +149,7 @@ export default class SoulsBonfireMenuNode extends UIRootNode {
     const cost = this.pendingCost()
     if (cost <= 0) return
     if (p.applyLevelUp?.(this._pending[0], this._pending[1], this._pending[2], this._pending[3], cost)) {
-      ;(this._gm as any)?.sfx?.('Level Up')
+      playSound(this, 'Level Up')
       ;(this._gm as any)?.notice?.('Level up!')
     }
     this._resetPending()

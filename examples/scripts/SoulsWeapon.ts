@@ -1,5 +1,6 @@
 import { Node } from 'cleo'
 import { num, statBonus } from './SoulsMath'
+import { playSound } from './SoulsAudio'
 
 /**
  * Hollow Keep — the base WEAPON. Every weapon is its own template, made from the base "Weapon" template
@@ -110,7 +111,7 @@ export default class SoulsWeaponNode extends Node {
     if (!t.receiveHit(damage, poise, wielder)) return false
     const gm = (this._gm ?? this.findNode?.('GameManager')) as any
     if (point) gm?.fx?.(this.hitSparkTemplate, point)
-    gm?.sfx?.(this.hitSound)
+    playSound(this, this.hitSound)
     return true
   }
 }
