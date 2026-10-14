@@ -137,7 +137,7 @@ export async function parseModelFiles(files: File[], onProgress?: ProgressSink) 
 }
 
 /**
- * Parse .gltf files into descriptors, off the main thread when possible.
+ * Parse .gltf/.glb files into descriptors, off the main thread when possible.
  *
  * `animated` also extracts skins/animations/joint bindings. Pair with `Loader.assembleGltfModels`.
  */
@@ -148,7 +148,7 @@ export async function parseGltfFiles(files: File[], animated: boolean, onProgres
 }
 
 /**
- * Parse .fbx/.glb by converting to glTF2 first, off the main thread when possible.
+ * Parse .fbx (or a .glb the native reader refused) by converting to glTF2 first, off the main thread when possible.
  *
  * Unlike `parseModelFiles`, this route carries bones. Pair with `Loader.assembleGltfModels`.
  */

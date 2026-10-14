@@ -15,6 +15,8 @@
     "removeComments": false,
     "preserveConstEnums": true,
     "moduleResolution": "node",
+    // `node` resolution predates package.json "exports", so subpath imports need spelling out here.
+    "paths": { "meshoptimizer/decoder": ["./node_modules/meshoptimizer/meshopt_decoder.d.ts"] },
     // es2020 rather than es6 purely to permit `import()`. For static imports the emit is identical
     // ESM; the only addition is dynamic import (used once, eagerly, in Geometry.Terrain to keep
     // geometry.ts free of a circular dependency on the cleo barrel).

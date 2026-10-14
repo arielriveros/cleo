@@ -48,10 +48,13 @@ function quatToEulerDeg([x, y, z, w]: [number, number, number, number]): [number
 // its texture references in binary, where nothing outside the loader can see them.
 //
 // Three routes, tried in order, each falling through to the next if it yields nothing:
-//   .gltf      the engine's own reader, directly.
-//   .fbx/.glb  assimp converts to glTF2 first, then that same reader. The detour is what gives those
-//              formats SKINNING, node transforms, PBR slots and data-URI embedded textures — the assjson
-//              path has no channel for bones. The trade is that their materials become PBR, not Blinn-Phong.
+//   .gltf/.glb the engine's own reader, directly. A .glb is already glTF2: converting it through assimp
+//              copied the whole file into the 32-bit WASM heap and back out as base64 JSON, which fails
+//              outright (`export_error`) on large scenes.
+//   .fbx       assimp converts to glTF2 first, then that same reader. The detour is what gives FBX
+//              SKINNING, node transforms, PBR slots and data-URI embedded textures — the assjson
+//              path has no channel for bones. The trade is that its materials become PBR, not Blinn-Phong.
+//              Also the second try for a .glb the reader refused (e.g. Draco-compressed).
 //   anything   the assjson path, and the route for .obj, which cannot be rigged.
 export async function parseBundleToRoot(
   files: File[],
@@ -59,8 +62,8 @@ export async function parseBundleToRoot(
   onProgress: ImportProgress = () => {}
 ): Promise<{ root: Node; children: ModelNode[]; textures: TextureLoadReport }> {
   const extOf = (f: File) => f.name.slice(f.name.lastIndexOf('.')).toLowerCase()
-  const isGltf = files.some(f => extOf(f) === '.gltf')
-  const convertible = !isGltf && files.some(f => extOf(f) === '.fbx' || extOf(f) === '.glb')
+  const isGltf = files.some(f => extOf(f) === '.gltf' || extOf(f) === '.glb')
+  const convertible = !files.some(f => extOf(f) === '.gltf') && files.some(f => extOf(f) === '.fbx' || extOf(f) === '.glb')
 
   const textures: TextureLoadReport = { missingFiles: [], unloadable: [] }
   // A discarded route must not leave its findings behind, or the review reports missing textures for a
@@ -101,10 +104,12 @@ export async function parseBundleToRoot(
       parsed = fromGltf(descriptors)
     } catch (e) {
       if (e instanceof ImportCancelled) throw e
+      if (convertible) Logger.warn(`Direct glTF parse of "${name}" failed (${e}); trying the assimp conversion`, 'Import')
       parsed = []
       forget()
     }
-  } else if (convertible) {
+  }
+  if (!parsed.length && convertible) {
     try {
       // Convert and parse both happen in the worker; only the descriptors come back.
       // Welded in the worker too: the weld and its tangent rebuild froze the editor when done here.

@@ -5,6 +5,7 @@ import { AnimatedModel, Skin, Animation, AnimationSampler, AnimationChannel } fr
 import { Logger } from "../../core/logger";
 import { mat4, quat, vec3 } from "gl-matrix";
 import { collapseFbxPivots } from "./fbxPivots";
+import { MeshoptDecoder } from "meshoptimizer/decoder";
 
 // GLTF Types based on the specification
 interface GLTFAsset {
@@ -18,12 +19,33 @@ interface GLTFBuffer {
     byteLength: number;
 }
 
+/** EXT_meshopt_compression on a bufferView: where its compressed bytes are and how to decode them. */
+interface MeshoptCompression {
+    buffer: number;
+    byteOffset?: number;
+    byteLength: number;
+    byteStride: number;
+    count: number;
+    mode: 'ATTRIBUTES' | 'TRIANGLES' | 'INDICES';
+    filter?: 'NONE' | 'OCTAHEDRAL' | 'QUATERNION' | 'EXPONENTIAL' | 'COLOR';
+}
+
+/** KHR_texture_transform: uv' = offset + R(rotation) * (scale * uv). */
+interface TextureTransform {
+    offset?: [number, number];
+    rotation?: number;
+    scale?: [number, number];
+}
+
+type GLTFTextureInfo = { index: number; extensions?: { KHR_texture_transform?: TextureTransform } };
+
 interface GLTFBufferView {
     buffer: number;
     byteOffset?: number;
     byteLength: number;
     byteStride?: number;
     target?: number;
+    extensions?: { EXT_meshopt_compression?: MeshoptCompression };
 }
 
 interface GLTFAccessor {
@@ -41,14 +63,14 @@ interface GLTFMaterial {
     name?: string;
     pbrMetallicRoughness?: {
         baseColorFactor?: number[];
-        baseColorTexture?: { index: number };
+        baseColorTexture?: GLTFTextureInfo;
         metallicFactor?: number;
         roughnessFactor?: number;
-        metallicRoughnessTexture?: { index: number };
+        metallicRoughnessTexture?: GLTFTextureInfo;
     };
-    normalTexture?: { index: number };
-    occlusionTexture?: { index: number };
-    emissiveTexture?: { index: number };
+    normalTexture?: GLTFTextureInfo;
+    occlusionTexture?: GLTFTextureInfo;
+    emissiveTexture?: GLTFTextureInfo;
     emissiveFactor?: number[];
     alphaMode?: string;
     alphaCutoff?: number;
@@ -70,6 +92,8 @@ interface GLTFMaterial {
 interface GLTFTexture {
     sampler?: number;
     source?: number;
+    /** Image formats a browser decodes natively; the core `source` is then an optional fallback. */
+    extensions?: { EXT_texture_webp?: { source: number }; EXT_texture_avif?: { source: number } };
 }
 
 interface GLTFImage {
@@ -136,7 +160,20 @@ interface GLTF {
     buffers?: GLTFBuffer[];
     skins?: GLTFSkin[];
     animations?: GLTFAnimation[];
+    extensionsUsed?: string[];
+    extensionsRequired?: string[];
 }
+
+// Required extensions that change how geometry is STORED, and that this reader cannot decode. The reader has no decoder for any of them, so
+// a file requiring one would parse into garbage vertices — refuse it instead, and let the caller fall back.
+// EXT_meshopt_compression and KHR_mesh_quantization (what gltfpack writes) ARE read: see decodeMeshopt
+// and getFloatAccessor.
+const UNREADABLE_EXTENSIONS = ['KHR_draco_mesh_compression'];
+
+// Binary glTF container: a 12-byte header, then a JSON chunk and an optional BIN chunk.
+const GLB_MAGIC = 0x46546C67;       // 'glTF'
+const GLB_CHUNK_JSON = 0x4E4F534A;  // 'JSON'
+const GLB_CHUNK_BIN = 0x004E4942;   // 'BIN\0'
 
 // Component type constants
 const COMPONENT_TYPE = {
@@ -243,6 +280,8 @@ export class GLTFLoader {
     // before anything reads it; the constructor has no data to assign from.
     private gltf!: GLTF;
     private buffers: ArrayBuffer[] = [];
+    // A .glb's BIN chunk: the bytes of the buffer that declares no `uri`.
+    private glbBin: ArrayBuffer | null = null;
     private basePath: string = '';
     private files: File[] = [];
     // Shared glTF resources are referenced once PER PRIMITIVE, so without these caches a file with N
@@ -270,23 +309,81 @@ export class GLTFLoader {
     }
 
     async loadFromFiles(files: File[]): Promise<{name: string, geometry: Geometry, material: Material, transform?: ImportTransform}[]> {
+        await this.readFromFiles(files);
+        return this.parseMeshes();
+    }
+
+    /**
+     * Read the .gltf (or, failing that, the .glb) among `files` and load its buffers. A .gltf wins when
+     * both are present: the assimp route lists its converted .gltf ahead of the original source file.
+     */
+    private async readFromFiles(files: File[]): Promise<void> {
+        // Keep the uploaded files so external texture URIs can be resolved against them
+        this.files = files;
+        this.glbBin = null;
         const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
-        if (!gltfFile) {
+        const glbFile = gltfFile ? undefined : files.find(f => f.name.toLowerCase().endsWith('.glb'));
+        if (gltfFile) {
+            this.gltf = JSON.parse(await gltfFile.text());
+        } else if (glbFile) {
+            this.readGlb(await glbFile.arrayBuffer(), glbFile.name);
+        } else {
             throw new Error('No GLTF file found in the uploaded files');
         }
 
-        // Keep the uploaded files so external texture URIs can be resolved against them
-        this.files = files;
+        const unreadable = (this.gltf.extensionsRequired ?? []).filter(e => UNREADABLE_EXTENSIONS.includes(e));
+        if (unreadable.length) throw new Error(`glTF requires unsupported extension(s): ${unreadable.join(', ')}`);
 
-        // Load GLTF JSON
-        const gltfText = await gltfFile.text();
-        this.gltf = JSON.parse(gltfText);
-
-        // Load buffers from uploaded files
         await this.loadBuffersFromFiles();
+        await this.decodeMeshopt();
+    }
 
-        // Parse meshes and materials
-        return this.parseMeshes();
+    /**
+     * Inflate every EXT_meshopt_compression bufferView (gltfpack's output) into a buffer of its own and
+     * repoint the view at it, so everything downstream reads plain bytes. Pure WASM — worker-safe.
+     */
+    private async decodeMeshopt(): Promise<void> {
+        const views = (this.gltf.bufferViews ?? []).filter(v => v.extensions?.EXT_meshopt_compression);
+        if (!views.length) return;
+        await MeshoptDecoder.ready;
+        for (const view of views) {
+            const ext = view.extensions!.EXT_meshopt_compression!;
+            const source = new Uint8Array(this.buffers[ext.buffer], ext.byteOffset || 0, ext.byteLength);
+            const target = new Uint8Array(ext.count * ext.byteStride);
+            MeshoptDecoder.decodeGltfBuffer(target, ext.count, ext.byteStride, source, ext.mode, ext.filter);
+            view.buffer = this.buffers.push(target.buffer) - 1;
+            view.byteOffset = 0;
+            view.byteLength = target.byteLength;
+            delete view.extensions;
+        }
+    }
+
+    // The image a texture samples: a browser-decodable extension source first, else the core one.
+    private static textureSource(texture: GLTFTexture): number | undefined {
+        return texture.extensions?.EXT_texture_webp?.source ?? texture.extensions?.EXT_texture_avif?.source ?? texture.source;
+    }
+
+    // Split a binary glTF into its JSON (→ this.gltf) and BIN chunk (→ this.glbBin).
+    private readGlb(bytes: ArrayBuffer, name: string): void {
+        const view = new DataView(bytes);
+        if (bytes.byteLength < 20 || view.getUint32(0, true) !== GLB_MAGIC)
+            throw new Error(`${name} is not a binary glTF file`);
+        const version = view.getUint32(4, true);
+        if (version !== 2) throw new Error(`${name} is glTF ${version}; only glTF 2 is supported`);
+        const total = Math.min(view.getUint32(8, true), bytes.byteLength);
+
+        let json: any;
+        for (let offset = 12; offset + 8 <= total;) {
+            const length = view.getUint32(offset, true);
+            const type = view.getUint32(offset + 4, true);
+            const start = offset + 8;
+            if (type === GLB_CHUNK_JSON) json = JSON.parse(new TextDecoder().decode(new Uint8Array(bytes, start, length)));
+            // Copied to a buffer of its own, so accessor offsets are relative to 0 as for an external .bin.
+            else if (type === GLB_CHUNK_BIN && !this.glbBin) this.glbBin = bytes.slice(start, start + length);
+            offset = start + length;   // chunks are 4-byte padded already, and the length includes it
+        }
+        if (!json) throw new Error(`${name} has no JSON chunk`);
+        this.gltf = json;
     }
 
     /** Load skinned, animated models from a file path. */
@@ -308,21 +405,7 @@ export class GLTFLoader {
 
     /** Load skinned, animated models from uploaded files. */
     async loadAnimatedFromFiles(files: File[]): Promise<{name: string, model: AnimatedModel, transform?: ImportTransform}[]> {
-        const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
-        if (!gltfFile) {
-            throw new Error('No GLTF file found in the uploaded files');
-        }
-
-        // Keep the uploaded files so external texture URIs can be resolved against them
-        this.files = files;
-
-        // Load GLTF JSON
-        const gltfText = await gltfFile.text();
-        this.gltf = JSON.parse(gltfText);
-
-        // Load buffers from uploaded files
-        await this.loadBuffersFromFiles();
-
+        await this.readFromFiles(files);
         // Parse meshes with animation data
         return this.parseAnimatedMeshes();
     }
@@ -332,11 +415,7 @@ export class GLTFLoader {
      * an animation-only file's skeleton is reconstructed from the node hierarchy and animation targets.
      */
     async loadAnimationsFromFiles(files: File[]): Promise<{ animations: Animation[]; skin: Skin }> {
-        const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
-        if (!gltfFile) throw new Error('No GLTF file found in the uploaded files');
-        this.files = files;
-        this.gltf = JSON.parse(await gltfFile.text());
-        await this.loadBuffersFromFiles();
+        await this.readFromFiles(files);
         return this.parseAnimationsAndSkeleton();
     }
 
@@ -415,7 +494,7 @@ export class GLTFLoader {
     private async loadBuffersFromFiles(): Promise<void> {
         if (!this.gltf.buffers) return;
 
-        for (const buffer of this.gltf.buffers) {
+        for (const [index, buffer] of this.gltf.buffers.entries()) {
             if (buffer.uri && !buffer.uri.startsWith('data:')) {
                 // Find the buffer file among the provided files (folder import or multi-select)
                 const bufferFile = this.findFile(buffer.uri);
@@ -428,11 +507,39 @@ export class GLTFLoader {
                 }
             } else if (buffer.uri && buffer.uri.startsWith('data:')) {
                 this.buffers.push(await GLTFLoader.decodeDataUri(buffer.uri));
+            } else if (this.glbBin && index === 0) {
+                // A .glb's own buffer: the spec allows only the first. Any later uri-less buffer is a
+                // placeholder (EXT_meshopt_compression's fallback) that no decoded view reads.
+                this.buffers.push(this.glbBin);
             } else {
-                // Embedded buffer or missing URI
+                // Missing URI
                 this.buffers.push(new ArrayBuffer(0));
             }
         }
+    }
+
+    /**
+     * An accessor as floats, whatever its storage: KHR_mesh_quantization stores positions, normals,
+     * tangents and uvs as (normalized) 8/16-bit integers, and core glTF already allows that for
+     * weights and animation outputs. Normalized values map to [0,1] / [-1,1] per the spec.
+     */
+    private getFloatAccessor(accessorIndex: number): Float32Array {
+        const data = this.getAccessorData(accessorIndex);
+        if (data instanceof Float32Array) return data;
+        const accessor = this.gltf.accessors![accessorIndex];
+        const out = new Float32Array(data.length);
+        if (!accessor.normalized) {
+            for (let i = 0; i < data.length; i++) out[i] = data[i];
+            return out;
+        }
+        switch (accessor.componentType) {
+            case COMPONENT_TYPE.UNSIGNED_BYTE: for (let i = 0; i < data.length; i++) out[i] = data[i] / 255; break;
+            case COMPONENT_TYPE.UNSIGNED_SHORT: for (let i = 0; i < data.length; i++) out[i] = data[i] / 65535; break;
+            case COMPONENT_TYPE.BYTE: for (let i = 0; i < data.length; i++) out[i] = Math.max(data[i] / 127, -1); break;
+            case COMPONENT_TYPE.SHORT: for (let i = 0; i < data.length; i++) out[i] = Math.max(data[i] / 32767, -1); break;
+            default: for (let i = 0; i < data.length; i++) out[i] = data[i];
+        }
+        return out;
     }
 
     private getAccessorData(accessorIndex: number): Float32Array | Uint16Array | Uint32Array {
@@ -445,8 +552,21 @@ export class GLTFLoader {
         const typeSize = TYPE_SIZE[accessor.type as keyof typeof TYPE_SIZE];
         const elementSize = componentSize * typeSize;
         const elementCount = accessor.count;
+        const stride = bufferView.byteStride || elementSize;
 
-        const arrayBuffer = buffer.slice(byteOffset, byteOffset + elementCount * elementSize);
+        let arrayBuffer: ArrayBuffer;
+        if (stride === elementSize) {
+            arrayBuffer = buffer.slice(byteOffset, byteOffset + elementCount * elementSize);
+        } else {
+            // Interleaved view: gather each element out of its stride into a tightly packed copy.
+            const src = new Uint8Array(buffer);
+            const packed = new Uint8Array(elementCount * elementSize);
+            for (let i = 0; i < elementCount; i++) {
+                const from = byteOffset + i * stride;
+                packed.set(src.subarray(from, from + elementSize), i * elementSize);
+            }
+            arrayBuffer = packed.buffer;
+        }
 
         // Return appropriate typed array based on component type
         switch (accessor.componentType) {
@@ -458,6 +578,10 @@ export class GLTFLoader {
                 return new Uint32Array(arrayBuffer);
             case COMPONENT_TYPE.UNSIGNED_BYTE:
                 return new Uint8Array(arrayBuffer) as any;
+            case COMPONENT_TYPE.BYTE:
+                return new Int8Array(arrayBuffer) as any;
+            case COMPONENT_TYPE.SHORT:
+                return new Int16Array(arrayBuffer) as any;
             default:
                 throw new Error(`Unsupported component type: ${accessor.componentType}`);
         }
@@ -531,9 +655,10 @@ export class GLTFLoader {
     private imageIndexFor(textureIndex: number): number | undefined {
         if (!this.gltf.textures || !this.gltf.images) return undefined;
         const texture = this.gltf.textures[textureIndex];
-        if (!texture || texture.source === undefined) return undefined;
+        const source = texture && GLTFLoader.textureSource(texture);
+        if (source === undefined) return undefined;
 
-        const image = this.gltf.images[texture.source];
+        const image = this.gltf.images[source];
         const cacheKey = image.uri !== undefined ? `uri:${image.uri}` : `bv:${image.bufferView}`;
         const cached = this.imageIndexCache.get(cacheKey);
         if (cached !== undefined) return cached;
@@ -581,23 +706,40 @@ export class GLTFLoader {
     }
 
     /** Vertex attributes as flat typed arrays — the shape `Geometry` adopts without copying. */
+    // The first KHR_texture_transform among a material's textures. One per material is all a uv set can
+    // carry; gltfpack writes the same one on every texture of the material.
+    private textureTransformOf(materialIndex?: number): TextureTransform | undefined {
+        const m = materialIndex === undefined ? undefined : this.gltf.materials?.[materialIndex];
+        if (!m) return undefined;
+        const infos = [m.pbrMetallicRoughness?.baseColorTexture, m.normalTexture, m.pbrMetallicRoughness?.metallicRoughnessTexture,
+            m.occlusionTexture, m.emissiveTexture];
+        for (const info of infos) if (info?.extensions?.KHR_texture_transform) return info.extensions.KHR_texture_transform;
+        return undefined;
+    }
+
     private describeGeometry(primitive: GLTFMesh['primitives'][0]): GltfGeometryDescriptor {
         const empty = new Float32Array(0);
         let positions: Float32Array = empty, normals: Float32Array = empty;
         let uvs: Float32Array = empty, tangents: Float32Array = empty, bitangents: Float32Array = empty;
 
         if (primitive.attributes.POSITION !== undefined)
-            positions = this.getAccessorData(primitive.attributes.POSITION) as Float32Array;
+            positions = this.getFloatAccessor(primitive.attributes.POSITION);
         if (primitive.attributes.NORMAL !== undefined)
-            normals = this.getAccessorData(primitive.attributes.NORMAL) as Float32Array;
+            normals = this.getFloatAccessor(primitive.attributes.NORMAL);
         if (primitive.attributes.TEXCOORD_0 !== undefined) {
-            const src = this.getAccessorData(primitive.attributes.TEXCOORD_0) as Float32Array;
+            const src = this.getFloatAccessor(primitive.attributes.TEXCOORD_0);
+            // KHR_texture_transform baked into the uvs: materials here have no per-texture transform,
+            // and gltfpack relies on it to DEQUANTIZE uvs, so dropping it scrambles every texture.
+            const t = this.textureTransformOf(primitive.material);
+            const [ox, oy] = t?.offset ?? [0, 0], [sx, sy] = t?.scale ?? [1, 1];
+            const cos = Math.cos(t?.rotation ?? 0), sin = Math.sin(t?.rotation ?? 0);
             // Flip V: glTF UVs have a bottom-left origin, the engine samples top-left. Copied rather
             // than adopted in place because the accessor data may be a view onto a shared buffer.
             uvs = new Float32Array(src.length);
             for (let i = 0; i < src.length; i += 2) {
-                uvs[i] = src[i];
-                uvs[i + 1] = 1.0 - src[i + 1];
+                const u = src[i] * sx, v = src[i + 1] * sy;
+                uvs[i] = ox + cos * u + sin * v;
+                uvs[i + 1] = 1.0 - (oy - sin * u + cos * v);
             }
         }
 
@@ -614,7 +756,7 @@ export class GLTFLoader {
         // axis, which reverses its handedness — so the authored `w` is negated here to match the uv
         // this loader actually emits, rather than the uv the file was authored against.
         if (primitive.attributes.TANGENT !== undefined) {
-            const src = this.getAccessorData(primitive.attributes.TANGENT) as Float32Array;
+            const src = this.getFloatAccessor(primitive.attributes.TANGENT);
             const count = src.length / 4;
             tangents = new Float32Array(count * 3);
             bitangents = new Float32Array(count * 3);
@@ -648,14 +790,7 @@ export class GLTFLoader {
      * pair with `Loader.assembleGltfModels`. `animated` adds skins, clips and joint bindings.
      */
     public async parseDescriptorsFromFiles(files: File[], animated: boolean): Promise<GltfParseResult> {
-        this.files = files;
-        // .gltf only, matching loadFromFiles: a .glb is binary (JSON.parse of its text would fail) and
-        // is routed through the assimp path instead.
-        const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
-        if (!gltfFile) throw new Error('No GLTF file found in the uploaded files');
-
-        this.gltf = JSON.parse(await gltfFile.text());
-        await this.loadBuffersFromFiles();
+        await this.readFromFiles(files);
         return this.buildDescriptors(animated);
     }
 
@@ -705,7 +840,7 @@ export class GLTFLoader {
                             jointIndices[i] = jointData instanceof Float32Array ? Math.floor(jointData[i]) : jointData[i];
 
                         descriptor.jointIndices = jointIndices;
-                        descriptor.jointWeights = this.getAccessorData(primitive.attributes.WEIGHTS_0) as Float32Array;
+                        descriptor.jointWeights = this.getFloatAccessor(primitive.attributes.WEIGHTS_0);
                         // Skins are referenced by the node that instantiates the mesh; fall back to the
                         // first skin when the node does not say.
                         descriptor.skinIndex = instance.skinIndex !== undefined ? instance.skinIndex : 0;
@@ -764,9 +899,10 @@ export class GLTFLoader {
         if (!this.gltf.textures || !this.gltf.images) return undefined;
 
         const texture = this.gltf.textures[textureIndex];
-        if (!texture || texture.source === undefined) return undefined;
+        const source = texture && GLTFLoader.textureSource(texture);
+        if (source === undefined) return undefined;
 
-        const image = this.gltf.images[texture.source];
+        const image = this.gltf.images[source];
         // Key on the image's SOURCE, so each underlying image is decoded and uploaded exactly once.
         const cacheKey = image.uri !== undefined ? `uri:${image.uri}` : `bv:${image.bufferView}`;
         if (this.textureIdCache.has(cacheKey)) return this.textureIdCache.get(cacheKey);
@@ -999,7 +1135,7 @@ export class GLTFLoader {
                     }
                     
                     // Load joint weights
-                    const weightData = this.getAccessorData(primitive.attributes.WEIGHTS_0) as Float32Array;
+                    const weightData = this.getFloatAccessor(primitive.attributes.WEIGHTS_0);
                     jointWeights = weightData;
                     
                     // Skins are referenced by the glTF node that instantiates the mesh; use that
@@ -1085,7 +1221,7 @@ export class GLTFLoader {
         // Load inverse bind matrices if present
         let inverseBindMatrices: mat4[] = [];
         if (gltfSkin.inverseBindMatrices !== undefined) {
-            const data = this.getAccessorData(gltfSkin.inverseBindMatrices) as Float32Array;
+            const data = this.getFloatAccessor(gltfSkin.inverseBindMatrices);
             
             // Each matrix is 16 floats (4x4 matrix)
             for (let i = 0; i < data.length; i += 16) {
@@ -1129,11 +1265,11 @@ export class GLTFLoader {
         // Parse all samplers
         for (const gltfSampler of gltfAnim.samplers) {
             // Load input times
-            const inputData = this.getAccessorData(gltfSampler.input) as Float32Array;
+            const inputData = this.getFloatAccessor(gltfSampler.input);
             const input = Array.from(inputData);
             
             // Load output values
-            const outputData = this.getAccessorData(gltfSampler.output) as Float32Array;
+            const outputData = this.getFloatAccessor(gltfSampler.output);
             const output = Array.from(outputData);
             
             samplers.push({

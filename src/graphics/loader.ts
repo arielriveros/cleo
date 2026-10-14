@@ -202,7 +202,7 @@ export class Loader {
      */
     public static async loadModelsFromFile(files: File[]): Promise<{name: string, geometry: Geometry, material: Material, transform?: ImportTransform}[]> {
         // Check if this is a GLTF file
-        const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
+        const gltfFile = files.find(f => /\.(gltf|glb)$/i.test(f.name));
         if (gltfFile) {
             const gltfLoader = new GLTFLoader();
             return await gltfLoader.loadFromFiles(files);
@@ -549,7 +549,7 @@ export class Loader {
     /** Load skinned, animated models from uploaded files. glTF only; other formats fall back to {@link loadModelsFromFile}. */
     public static async loadAnimatedModelsFromFile(files: File[]): Promise<{name: string, model: AnimatedModel, transform?: ImportTransform}[]> {
         // Check if this is a GLTF file
-        const gltfFile = files.find(f => f.name.toLowerCase().endsWith('.gltf'));
+        const gltfFile = files.find(f => /\.(gltf|glb)$/i.test(f.name));
         if (gltfFile) {
             const gltfLoader = new GLTFLoader();
             return await gltfLoader.loadAnimatedFromFiles(files);
@@ -561,13 +561,13 @@ export class Loader {
 
     /**
      * Parse animation clips and their source skeleton from an uploaded model file, for retargeting.
-     * glTF natively; glb/fbx/obj convert to glTF2 via assimp first. Returns the first model's clips.
+     * glTF/glb natively; fbx/obj convert to glTF2 via assimp first. Returns the first model's clips.
      */
     public static async loadAnimationsFromFile(files: File[]): Promise<{ animations: Animation[]; skin: Skin | null }> {
-        const hasGltf = files.some(f => f.name.toLowerCase().endsWith('.gltf'));
+        const hasGltf = files.some(f => /\.(gltf|glb)$/i.test(f.name));
         let parseFiles = files;
         if (!hasGltf) {
-            // glb/fbx/obj/… → convert to glTF2 (preserves skeleton + animations + node names).
+            // fbx/obj/… → convert to glTF2 (preserves skeleton + animations + node names).
             parseFiles = await convertToGltf2FromFiles(files);
         }
         const gltfLoader = new GLTFLoader();

@@ -149,7 +149,7 @@ export async function runImportJob(job: ImportJob, onProgress: ProgressSink = ()
       // Mirrors Loader.loadAnimationsFromFile rather than calling it: importing `Loader` would drag in
       // the GL assembly half, which cannot exist in a worker.
       onProgress(0.05, 'Converting model')
-      const hasGltf = job.files.some(f => f.name.toLowerCase().endsWith('.gltf'))
+      const hasGltf = job.files.some(f => /\.(gltf|glb)$/i.test(f.name))
       const parseFiles = hasGltf ? job.files : await convertToGltf2FromFiles(job.files)
       onProgress(0.5, 'Reading animations')
       const parsed = await new GLTFLoader().loadAnimationsFromFiles(parseFiles)
