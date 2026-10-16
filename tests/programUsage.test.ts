@@ -93,6 +93,14 @@ describe('ShaderManager resolver', () => {
             expect(manager.getShader('lazyThing')).toBe(program);
             expect(resolver).toHaveBeenCalledTimes(1);
             expect(() => manager.getShader('nothing')).toThrow(/not found/);
+            // A name the resolver cannot build is not re-resolved on every lookup (a per-frame cost)...
+            expect(manager.bindIfRegistered('nothing')).toBe(false);
+            expect(resolver.mock.calls.filter(c => c[0] === 'nothing')).toHaveLength(1);
+            // ...until the registry changes.
+            manager.addShader('somethingElse', program);
+            expect(manager.bindIfRegistered('nothing')).toBe(false);
+            expect(resolver.mock.calls.filter(c => c[0] === 'nothing')).toHaveLength(2);
+            manager.removeShader('somethingElse');
         } finally {
             manager.setResolver(null);
             manager.removeShader('lazyThing');

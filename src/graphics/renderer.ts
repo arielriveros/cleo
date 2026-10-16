@@ -851,6 +851,10 @@ export class Renderer {
     private _variantFilter: ShadowFilter = 0;
     /** A filter change waiting for its variants to finish compiling. */
     private _pendingFilter: ShadowFilter | null = null;
+    /** `_pipelineFor`'s logical -> variant resolution, valid for `_variantMemoFilter`. */
+    private readonly _variantMemo = new Map<string, { program: string; wgsl?: string;
+                                                      entryPoints?: { vertex?: string; fragment?: string; compute?: string } } | null>();
+    private _variantMemoFilter: ShadowFilter | -1 = -1;
     /** Program-table descriptors by name, for variants and on-demand builds after boot. */
     private readonly _tableDescriptors = new Map<string, Omit<ShaderProgramDescriptor, 'label'>>();
     /** Every program built so far, by descriptor: one source never links twice (terrain has two names). */
@@ -2058,6 +2062,7 @@ export class Renderer {
         // on the other is indistinguishable from real motion.
         mat4.multiply(this._viewProj, proj, view);
         this._frustum.setFromViewProjection(this._viewProj);
+        if (!this._thumbnailMode) this._stampAnimationView(scene);
 
         // The matrix actually RASTERIZED this frame, and its inverse. Every pass that unprojects the
         // depth buffer wants this one: the depth was written through the jittered projection, so the
@@ -2315,9 +2320,33 @@ export class Renderer {
      */
     private _forwardShaders(): string[] {
         const all = allForwardShaders();
-        if (!this._programList) return all;
-        return all.filter(name => this._shaderManager.find(name) !== undefined);
+        const generation = this._shaderManager.generation;
+        if (all === this._forwardSource && generation === this._forwardGeneration) return this._forwardList;
+        // ONE name per program: several names can alias one program (a logical name and its variant,
+        // `pbrPom` and `pbr` when no variant splits them), and every name listed costs a full set of
+        // lighting, shadow and environment uploads per frame — into a program that already has them.
+        const seen = new Set<ShaderProgram>();
+        const out: string[] = [];
+        for (const name of all) {
+            const program = this._shaderManager.find(name);
+            if (program) {
+                if (seen.has(program)) continue;
+                seen.add(program);
+                out.push(name);
+            } else if (!this._programList) {
+                // The editor builds everything: a name not registered yet is one the bind below should
+                // build (or report), as it always did.
+                out.push(name);
+            }
+        }
+        this._forwardSource = all;
+        this._forwardGeneration = generation;
+        this._forwardList = out;
+        return out;
     }
+    private _forwardSource: string[] | null = null;
+    private _forwardGeneration = -1;
+    private _forwardList: string[] = [];
 
     // Zero the forward shaders' directional slot and light counts before this frame's lights are
     // applied. Required every frame, even with none: a removed light's uniforms persist in the program.
@@ -2833,6 +2862,22 @@ export class Renderer {
 
     // True when `node` is fully outside the camera frustum. PURE — no stat side effect, so use it only
     // where a node was already counted this frame; {@link _culled} is the counting variant.
+    /**
+     * Tell every animated model whether the camera can see it and how far away it is, for the animation
+     * LOD next frame's update picks (ModelNode.update -> Animator.setLod). One frame stale by design: the
+     * scene updates before it renders. Uses the same cached bounding sphere the frustum cull does.
+     */
+    private _stampAnimationView(scene: Scene): void {
+        const eye = this._activeCamera.position;
+        for (const node of scene.models) {
+            if (!node.animator) continue;
+            const s = node.getBoundingSphere();
+            node.cameraVisible = !this._frustumCulling
+                || this._frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius);
+            node.cameraDistance = Math.max(0, vec3.distance(eye, s.center) - s.radius);
+        }
+    }
+
     private _outsideFrustum(node: ModelNode): boolean {
         if (!this._frustumCulling) return false;
         const s = node.getBoundingSphere();
@@ -6802,12 +6847,29 @@ export class Renderer {
         // A logical name served by a variant (programVariants.ts): WebGPU compiles the WGSL handed in
         // here, not the program ShaderManager has, so the variant's own source has to replace the base
         // reflection the caller passed — and its name keys the cache, so a filter switch builds anew.
-        if (this._variants) {
-            const physical = this._physicalOf(program);
-            const variant = physical !== program ? this._descriptorFor(physical) : null;
-            if (variant) {
-                program = physical;
-                reflection = { ...reflection, wgsl: variant.wgsl, entryPoints: (variant as { entryPoints?: typeof reflection.entryPoints }).entryPoints };
+        //
+        // NOT only with variants on: the `Pom` names resolve to their parallax variant in the editor too
+        // (the base program has the march compiled out), so gating this on `_variants` left WebGPU
+        // compiling the base WGSL for every height-mapped material — flat, while WebGL2, which binds the
+        // linked program by name, showed the relief.
+        if (this._variants || program in EXTRA_LOGICAL_NAMES) {
+            // Memoized per logical name and filter: this runs for every draw, and resolving builds strings.
+            const filter = this._variants ? this._variantFilter : (this._shadowFilterMode === 1 ? 1 : 0);
+            if (this._variantMemoFilter !== filter) {
+                this._variantMemo.clear();
+                this._variantMemoFilter = filter;
+            }
+            let swap = this._variantMemo.get(program);
+            if (swap === undefined) {
+                const physical = this._physicalOf(program);
+                const variant = physical !== program ? this._descriptorFor(physical) : null;
+                swap = variant ? { program: physical, wgsl: variant.wgsl,
+                                   entryPoints: (variant as { entryPoints?: typeof reflection.entryPoints }).entryPoints } : null;
+                this._variantMemo.set(program, swap);
+            }
+            if (swap) {
+                program = swap.program;
+                reflection = { ...reflection, wgsl: swap.wgsl, entryPoints: swap.entryPoints };
             }
         }
         // `builtFor` is part of the key: one shadow program draws over buffers of several strides.

@@ -5,7 +5,8 @@ import {
     axisSmoothing, axisDeadzone, axisWrapSpan, weightSmoothing,
 } from './animationField';
 import { clamp, dampTime, dampWrapped, decomposeTRS, wrapSpan } from '../core/math';
-import { skeletonTopology, SkeletonTopology, isAncestorJoint } from './skeletonTopology';
+import { skeletonTopology, SkeletonTopology, isAncestorJoint, subtreeOrder } from './skeletonTopology';
+import { findKey, findKeyLinear, isSorted } from './keyframes';
 import { solveTwoBone, kneePole, ikTuning, validateIkRig, swingReleaseWeight, IkFootChain, IkRig, IkRigValidation } from './ik';
 import { Node } from '../core/scene/nodes/node';
 import { ModelNode } from '../core/scene/nodes/modelNode';
@@ -329,22 +330,36 @@ interface ActionState {
     resolve: () => void;
 }
 
-/** A single position keyframe. */
-interface KeyPosition {
-    position: vec3;
-    timeStamp: number;
+/**
+ * One channel's keyframes: the times, and each key's value as a view into ONE packed buffer (a view per
+ * key, so the gl-matrix lerp/slerp read them exactly as they read the per-key vec3/quat objects this
+ * replaced). `cursor` is where the last lookup landed (see keyframes.ts); `constant` marks a channel
+ * whose keys are all equal, which samples as its first key without a lookup.
+ */
+interface Channel {
+    times: number[];
+    keys: Float32Array[];
+    cursor: number;
+    constant: boolean;
+    sorted: boolean;
 }
 
-/** A single rotation keyframe. */
-interface KeyRotation {
-    orientation: quat;
-    timeStamp: number;
-}
+const NO_CHANNEL: Channel = { times: [], keys: [], cursor: 0, constant: false, sorted: true };
 
-/** A single scale keyframe. */
-interface KeyScale {
-    scale: vec3;
-    timeStamp: number;
+function makeChannel(sampler: AnimationSampler, stride: 3 | 4, normalize: boolean): Channel {
+    const count = sampler.input.length;
+    const packed = new Float32Array(count * stride);
+    const keys: Float32Array[] = new Array(count);
+    for (let i = 0; i < count; i++) {
+        const key = packed.subarray(i * stride, i * stride + stride);
+        for (let c = 0; c < stride; c++) key[c] = sampler.output[i * stride + c];
+        if (normalize) quat.normalize(key as unknown as quat, key as unknown as quat);
+        keys[i] = key;
+    }
+    let constant = count > 1;
+    for (let i = stride; constant && i < packed.length; i++) if (packed[i] !== packed[i % stride]) constant = false;
+    const times = Array.from(sampler.input as ArrayLike<number>);
+    return { times, keys, cursor: 0, constant, sorted: isSorted(times) };
 }
 
 /** Keyframe interpolation for a single bone. */
@@ -353,9 +368,9 @@ class Bone {
     private _id: number;
     private _localTransform: mat4;
 
-    private _positions: KeyPosition[] = [];
-    private _rotations: KeyRotation[] = [];
-    private _scales: KeyScale[] = [];
+    private _positions: Channel = NO_CHANNEL;
+    private _rotations: Channel = NO_CHANNEL;
+    private _scales: Channel = NO_CHANNEL;
 
     // The bone's REST pose, used for any channel it has no keyframes for. Rotation-only bones would
     // otherwise fall back to a zero translation and collapse onto their parent's origin.
@@ -379,101 +394,55 @@ class Bone {
 
     /** Add position channel data. */
     public addPositionChannel(sampler: AnimationSampler): void {
-        this._positions = [];
-        for (let i = 0; i < sampler.input.length; i++) {
-            const position = vec3.fromValues(
-                sampler.output[i * 3],
-                sampler.output[i * 3 + 1],
-                sampler.output[i * 3 + 2]
-            );
-            this._positions.push({
-                position,
-                timeStamp: sampler.input[i]
-            });
-        }
+        this._positions = makeChannel(sampler, 3, false);
     }
-    
+
     /** Add rotation channel data. */
     public addRotationChannel(sampler: AnimationSampler): void {
-        this._rotations = [];
-        for (let i = 0; i < sampler.input.length; i++) {
-            const orientation = quat.fromValues(
-                sampler.output[i * 4],
-                sampler.output[i * 4 + 1],
-                sampler.output[i * 4 + 2],
-                sampler.output[i * 4 + 3]
-            );
-            quat.normalize(orientation, orientation);
-            this._rotations.push({
-                orientation,
-                timeStamp: sampler.input[i]
-            });
-        }
+        this._rotations = makeChannel(sampler, 4, true);
     }
-    
+
     /** Add scale channel data. */
     public addScaleChannel(sampler: AnimationSampler): void {
-        this._scales = [];
-        for (let i = 0; i < sampler.input.length; i++) {
-            const scale = vec3.fromValues(
-                sampler.output[i * 3],
-                sampler.output[i * 3 + 1],
-                sampler.output[i * 3 + 2]
-            );
-            this._scales.push({
-                scale,
-                timeStamp: sampler.input[i]
-            });
-        }
+        this._scales = makeChannel(sampler, 3, false);
     }
-    
+
     // Per-bone scratch for the sampled T/R/S. update() runs for every bone of every clip of every
     // animated model each frame; a fresh vec3/quat/vec3 per bone was a large share of the engine's garbage.
     private readonly _tScratch = vec3.create();
     private readonly _rScratch = quat.create();
     private readonly _sScratch = vec3.create();
 
+    // The T/R/S the last update() sampled. Blends read these directly rather than decomposing the
+    // composed matrix back into them.
+    private _t: vec3 = this._restT;
+    private _r: quat = this._restR;
+    private _s: vec3 = this._restS;
+
     /** Recompute the bone's local transform at `animationTime`. */
     public update(animationTime: number): void {
-        const translation = this._interpolatePosition(animationTime);
-        const rotation = this._interpolateRotation(animationTime);
-        const scale = this._interpolateScale(animationTime);
-        
+        this._t = this._interpolatePosition(animationTime, this._tScratch);
+        this._r = this._interpolateRotation(animationTime, this._rScratch);
+        this._s = this._interpolateScale(animationTime, this._sScratch);
+
         // Combine transformations: T * R * S
-        mat4.fromRotationTranslationScale(this._localTransform, rotation, translation, scale);
+        mat4.fromRotationTranslationScale(this._localTransform, this._r, this._t, this._s);
     }
-    
-    // Index of the position keyframe at or before `animationTime`.
-    private _getPositionIndex(animationTime: number): number {
-        for (let i = 0; i < this._positions.length - 1; i++) {
-            if (animationTime < this._positions[i + 1].timeStamp) {
-                return i;
-            }
-        }
-        return this._positions.length - 2;
+
+    /** The translation/rotation/scale the last {@link update} sampled. Read-only views. */
+    public get translation(): vec3 { return this._t; }
+    public get rotation(): quat { return this._r; }
+    public get scale(): vec3 { return this._s; }
+
+    // The segment `animationTime` falls in. See keyframes.ts.
+    private static _index(channel: Channel, animationTime: number): number {
+        const i = channel.sorted ? findKey(channel.times, animationTime, channel.cursor)
+                                 : findKeyLinear(channel.times, animationTime);
+        channel.cursor = i;
+        return i;
     }
-    
-    // Index of the rotation keyframe at or before `animationTime`.
-    private _getRotationIndex(animationTime: number): number {
-        for (let i = 0; i < this._rotations.length - 1; i++) {
-            if (animationTime < this._rotations[i + 1].timeStamp) {
-                return i;
-            }
-        }
-        return this._rotations.length - 2;
-    }
-    
-    // Index of the scale keyframe at or before `animationTime`.
-    private _getScaleIndex(animationTime: number): number {
-        for (let i = 0; i < this._scales.length - 1; i++) {
-            if (animationTime < this._scales[i + 1].timeStamp) {
-                return i;
-            }
-        }
-        return this._scales.length - 2;
-    }
-    
-    // Interpolation factor between two keyframes. Must stay CLAMPED: the index helpers return `length - 2`
+
+    // Interpolation factor between two keyframes. Must stay CLAMPED: the index lookup returns `length - 2`
     // past the last keyframe, and an unclamped factor would extrapolate along the final segment's slope.
     private _getScaleFactor(lastTimeStamp: number, nextTimeStamp: number, animationTime: number): number {
         const framesDiff = nextTimeStamp - lastTimeStamp;
@@ -481,87 +450,133 @@ class Bone {
         const midWayLength = animationTime - lastTimeStamp;
         return clamp(midWayLength / framesDiff, 0, 1);
     }
-    
+
     // Position at `animationTime`.
-    private _interpolatePosition(animationTime: number): vec3 {
-        if (this._positions.length === 0) {
-            return this._restT; // no channel: hold the bind offset, not the origin (only read)
-        }
-        
-        if (this._positions.length === 1) {
-            return this._positions[0].position;
-        }
-        
-        const p0Index = this._getPositionIndex(animationTime);
-        const p1Index = p0Index + 1;
-        const scaleFactor = this._getScaleFactor(
-            this._positions[p0Index].timeStamp,
-            this._positions[p1Index].timeStamp,
-            animationTime
-        );
-        
-        return vec3.lerp(this._tScratch, this._positions[p0Index].position, this._positions[p1Index].position, scaleFactor);
+    private _interpolatePosition(animationTime: number, out: vec3): vec3 {
+        const ch = this._positions;
+        if (ch.keys.length === 0) return this._restT; // no channel: hold the bind offset, not the origin (only read)
+        if (ch.keys.length === 1 || ch.constant) return ch.keys[0] as unknown as vec3;
+        const i = Bone._index(ch, animationTime);
+        const f = this._getScaleFactor(ch.times[i], ch.times[i + 1], animationTime);
+        return vec3.lerp(out, ch.keys[i] as unknown as vec3, ch.keys[i + 1] as unknown as vec3, f);
     }
-    
-    // Rotation at `animationTime`, slerped.
-    private _interpolateRotation(animationTime: number): quat {
-        if (this._rotations.length === 0) {
-            return this._restR; // no channel: hold the bind rotation (only read)
-        }
-        
-        if (this._rotations.length === 1) {
-            return quat.normalize(this._rScratch, this._rotations[0].orientation);
-        }
-        
-        const p0Index = this._getRotationIndex(animationTime);
-        const p1Index = p0Index + 1;
-        const scaleFactor = this._getScaleFactor(
-            this._rotations[p0Index].timeStamp,
-            this._rotations[p1Index].timeStamp,
-            animationTime
-        );
-        
-        const finalRotation = this._rScratch;
-        quat.slerp(finalRotation, this._rotations[p0Index].orientation, this._rotations[p1Index].orientation, scaleFactor);
-        quat.normalize(finalRotation, finalRotation);
-        return finalRotation;
+
+    // Rotation at `animationTime`, slerped. Keys are normalized when the channel is built.
+    private _interpolateRotation(animationTime: number, out: quat): quat {
+        const ch = this._rotations;
+        if (ch.keys.length === 0) return this._restR; // no channel: hold the bind rotation (only read)
+        if (ch.keys.length === 1 || ch.constant) return ch.keys[0] as unknown as quat;
+        const i = Bone._index(ch, animationTime);
+        const f = this._getScaleFactor(ch.times[i], ch.times[i + 1], animationTime);
+        quat.slerp(out, ch.keys[i] as unknown as quat, ch.keys[i + 1] as unknown as quat, f);
+        return quat.normalize(out, out);
     }
-    
+
     // Scale at `animationTime`.
-    private _interpolateScale(animationTime: number): vec3 {
-        if (this._scales.length === 0) {
-            return this._restS; // no channel: hold the bind scale (only read)
-        }
-        
-        if (this._scales.length === 1) {
-            return this._scales[0].scale;
-        }
-        
-        const p0Index = this._getScaleIndex(animationTime);
-        const p1Index = p0Index + 1;
-        const scaleFactor = this._getScaleFactor(
-            this._scales[p0Index].timeStamp,
-            this._scales[p1Index].timeStamp,
-            animationTime
-        );
-        
-        return vec3.lerp(this._sScratch, this._scales[p0Index].scale, this._scales[p1Index].scale, scaleFactor);
+    private _interpolateScale(animationTime: number, out: vec3): vec3 {
+        const ch = this._scales;
+        if (ch.keys.length === 0) return this._restS; // no channel: hold the bind scale (only read)
+        if (ch.keys.length === 1 || ch.constant) return ch.keys[0] as unknown as vec3;
+        const i = Bone._index(ch, animationTime);
+        const f = this._getScaleFactor(ch.times[i], ch.times[i + 1], animationTime);
+        return vec3.lerp(out, ch.keys[i] as unknown as vec3, ch.keys[i + 1] as unknown as vec3, f);
     }
-    
+
     /**
      * Sample translation and rotation at an arbitrary time without touching `_localTransform`. Root-motion
      * extraction reads the root bone at two times per frame through this.
      */
     public sampleTR(time: number): { t: vec3; r: quat } {
-        return { t: vec3.clone(this._interpolatePosition(time)), r: quat.clone(this._interpolateRotation(time)) };
+        return { t: vec3.clone(this._interpolatePosition(time, vec3.create())),
+                 r: quat.clone(this._interpolateRotation(time, quat.create())) };
+    }
+
+    /**
+     * {@link sampleTR} into caller-owned storage, allocation-free. Its own scratch, never the T/R/S that
+     * {@link update} sampled: a root-motion read between the update and the pose must not change the pose.
+     */
+    public sampleTRInto(time: number, t: vec3, r: quat): void {
+        vec3.copy(t, this._interpolatePosition(time, t));
+        quat.copy(r, this._interpolateRotation(time, r));
+    }
+
+    // The clip's first frame, for an additive layer's reference. Fixed for the channels' lifetime.
+    private _startTR: { t: vec3; r: quat } | null = null;
+    public startTR(): { t: vec3; r: quat } {
+        return this._startTR ??= this.sampleTR(0);
     }
 
     /** Overwrite the local transform directly — root motion locks the root bone to a fixed pose with this. */
-    public setLocalTransform(m: mat4): void { mat4.copy(this._localTransform, m); }
+    public setLocalTransform(m: mat4): void {
+        mat4.copy(this._localTransform, m);
+        // Keep the T/R/S the blends read in step with the matrix they now stand for.
+        this._t = mat4.getTranslation(this._tScratch, m);
+        this._s = mat4.getScaling(this._sScratch, m);
+        this._r = quat.normalize(this._rScratch, mat4.getRotation(this._rScratch, m));
+    }
 
     public get localTransform(): mat4 { return this._localTransform; }
     public get name(): string { return this._name; }
     public get id(): number { return this._id; }
+}
+
+// --- Pose scratch ----------------------------------------------------------------------------------
+//
+// Posing a skeleton used to allocate several vec3/quat/mat4 per bone per blend, every frame, for every
+// character — the bulk of the engine's garbage. Blended locals now come from POSE_ARENA, a pool reset at
+// the start of each top-level `_recomputePose`: a matrix handed out stays valid until the next pose begins,
+// which is all `_recomputePose` (and foot IK inside it) needs. Anything kept longer is cloned (see
+// `boneLocalTransform`). Posing is never re-entrant across animators: a layer's animator only ever hands
+// its locals to the parent posing it.
+
+const POSE_ARENA: mat4[] = [];
+let poseArenaUsed = 0;
+
+/** A scratch matrix valid until the next top-level pose. */
+function arenaMat(): mat4 {
+    // A caller outside any pose (an editor reading bones every frame) only ever clones what it gets, so
+    // wrapping is safe there; inside a pose this cap is far above any skeleton's needs.
+    if (poseArenaUsed >= 16384) poseArenaUsed = 0;
+    return POSE_ARENA[poseArenaUsed++] ??= mat4.create();
+}
+
+/** `bone_${n}`, without building the string per bone per frame. */
+const BONE_KEYS: string[] = [];
+function boneKey(nodeIndex: number): string {
+    return BONE_KEYS[nodeIndex] ??= `bone_${nodeIndex}`;
+}
+
+/** Read-only identity, for a node with neither a pose source nor a rest transform. */
+const IDENTITY: mat4 = mat4.create();
+
+// Blend scratch. Every helper below fully consumes its inputs before returning.
+const MIX_BONES: Bone[] = [];
+const MIX_WEIGHTS: number[] = [];
+const MIX_T = vec3.create(), MIX_S = vec3.create(), MIX_R = quat.create();
+const BL_T0 = vec3.create(), BL_R0 = quat.create(), BL_S0 = vec3.create();
+const BL_T1 = vec3.create(), BL_R1 = quat.create(), BL_S1 = vec3.create();
+const ADD_INV = quat.create(), ADD_DELTA = quat.create(), ADD_ID = quat.create();
+
+// Foot IK scratch: the solve runs per character per frame and used to allocate ~60 vectors and matrices.
+const IK_WORLD_TO_MODEL = mat4.create();
+const IK_UP = vec3.create(), IK_ORIGIN = vec3.create(), IK_FORWARD = vec3.create(), IK_ZERO = vec3.create();
+const IK_ANKLE_WORLD = vec3.create(), IK_FROM = vec3.create(), IK_TO = vec3.create();
+const IK_HIT_MODEL = vec3.create(), IK_TMP = vec3.create(), IK_SHIFT = vec3.create(), IK_O = vec3.create();
+const IK_INV = mat4.create(), IK_FRAME = mat4.create(), IK_ROT = mat4.create(), IK_AROUND = mat4.create();
+const IK_NEW_GLOBAL = mat4.create();
+const IK_HIP = vec3.create(), IK_KNEE = vec3.create(), IK_ANKLE = vec3.create(), IK_EASED = vec3.create();
+const IK_ALIGN = quat.create(), IK_PARTIAL = quat.create(), IK_COUNTER = quat.create(), IK_HALF = quat.create();
+const IK_QID = quat.create();
+
+/** One foot's plan for this frame, pooled per animator. See `_applyFootIk`. */
+interface FootPlan {
+    chain: IkFootChain;
+    ankle: vec3;         // model space, as animated
+    target: vec3;        // model space, on the ground
+    normal: vec3;        // model space, of the surface
+    weight: number;      // this foot's damped contribution
+    /** Signed distance from the animated ankle to its target along `up`. Negative = the foot must drop. */
+    along: number;
 }
 
 // One clip contributing to a field blend. `bones` is SHARED with the Animator's per-clip cache and must
@@ -726,6 +741,13 @@ export class Animator {
     // Per foot: the last surface its ray found, so a foot losing its ground has something to fade towards.
     // WORLD space, re-transformed each frame — a model-space memory would be carried by the character.
     private _ikFootHits: Map<number, { point: vec3; normal: vec3 }> = new Map();
+    /** Foot plans, pooled across frames. */
+    private readonly _ikPlans: FootPlan[] = [];
+    /**
+     * Whether foot IK may query the ground this frame. The LOD tier clears it for a character nobody can
+     * see; its feet then fade out as over a missed ray.
+     */
+    private _ikAllowed = true;
     /** The last validated rig and its result, so validation and its warning happen once per rig, not per frame. */
     private _validatedRigRef: IkRig | null = null;
     private _rigValidation: IkRigValidation | null = null;
@@ -1257,94 +1279,77 @@ export class Animator {
         }
     }
 
-    // Weighted mix of several local transforms, ORDER-INDEPENDENT: rotations flatten into one reference
-    // hemisphere, sum, and normalize. `reference` must be stable frame to frame, or the bug comes back.
-    private _mixTransforms(parts: { m: mat4; w: number }[], reference?: quat | null): mat4 {
-        const result = mat4.create();
-        if (parts.length === 0) return result;
-        if (parts.length === 1) return mat4.copy(result, parts[0].m);
-
-        const t = vec3.create();
-        const s = vec3.create();
-        const r = quat.create();
-
-        // No caller-supplied reference: the heaviest part, deterministic for a given set. Its own sign
-        // does not matter — negating it negates the whole sum, and q and -q are the same rotation.
-        let ref = reference ?? null;
-        if (!ref) {
-            let best: { m: mat4; w: number } | null = null;
-            for (const part of parts) if (!best || part.w > best.w) best = part;
-            ref = mat4.getRotation(quat.create(), (best ?? parts[0]).m);
-        }
-
-        const translation = vec3.create();
-        const scale = vec3.create();
-        const rotation = quat.create();   // starts at (0,0,0,0) — an accumulator, not a rotation yet
-        quat.set(rotation, 0, 0, 0, 0);
-
-        let total = 0;
-        for (const part of parts) {
-            if (part.w <= 0) continue;
-            mat4.getTranslation(t, part.m);
-            mat4.getScaling(s, part.m);
-            mat4.getRotation(r, part.m);
-
-            vec3.scaleAndAdd(translation, translation, t, part.w);
-            vec3.scaleAndAdd(scale, scale, s, part.w);
-
-            // Into the reference hemisphere: a quaternion on the far side would cancel rather than add.
-            const w = quat.dot(ref, r) < 0 ? -part.w : part.w;
-            rotation[0] += r[0] * w;
-            rotation[1] += r[1] * w;
-            rotation[2] += r[2] * w;
-            rotation[3] += r[3] * w;
-            total += part.w;
-        }
-
-        if (total === 0) return mat4.copy(result, parts[0].m);
-        vec3.scale(translation, translation, 1 / total);
-        vec3.scale(scale, scale, 1 / total);
-
-        // A zero sum would normalize to NaN and collapse the skeleton.
-        if (quat.length(rotation) < 1e-8) quat.copy(rotation, ref);
-        quat.normalize(rotation, rotation);
-
-        mat4.fromRotationTranslationScale(result, rotation, translation, scale);
-        return result;
-    }
-
     // The field-blended local transform for a bone, or null when no contributing clip animates it.
     // `dominantClip` names the entry whose rotation anchors the hemisphere.
-    private _fieldLocal(entries: FieldEntry[] | null, boneName: string, dominantClip?: string | null): mat4 | null {
+    //
+    // A weighted mix, ORDER-INDEPENDENT: rotations flatten into one reference hemisphere, sum, and
+    // normalize. The reference must be stable frame to frame, or the bug comes back. Reads each clip's
+    // sampled T/R/S directly — decomposing the matrix it was just composed into was pure overhead.
+    private _fieldLocal(entries: FieldEntry[] | null, key: string, dominantClip?: string | null): mat4 | null {
         if (!entries || entries.length === 0) return null;
-        const parts: { m: mat4; w: number }[] = [];
+        let count = 0;
         let reference: quat | null = null;
         for (const e of entries) {
-            const bone = e.bones.get(boneName);
+            const bone = e.bones.get(key);
             if (!bone) continue;
-            parts.push({ m: bone.localTransform, w: e.weight });
-            // The dominant clip may not animate this bone; _mixTransforms then falls back to the heaviest part.
-            if (dominantClip && e.clipName === dominantClip) {
-                reference = mat4.getRotation(quat.create(), bone.localTransform);
-            }
+            MIX_BONES[count] = bone;
+            MIX_WEIGHTS[count] = e.weight;
+            count++;
+            // The dominant clip may not animate this bone; the heaviest part anchors it then.
+            if (dominantClip && e.clipName === dominantClip) reference = bone.rotation;
         }
-        if (parts.length === 0) return null;
         // Partial coverage is left to the caller's bind-pose fallback: mixing against an implicit
         // identity would drag the bone towards the origin.
-        return this._mixTransforms(parts, reference);
+        if (count === 0) return null;
+        if (count === 1) return MIX_BONES[0].localTransform;
+
+        // No dominant: the heaviest part, deterministic for a given set. Its own sign does not matter —
+        // negating it negates the whole sum, and q and -q are the same rotation.
+        if (!reference) {
+            let best = 0;
+            for (let i = 1; i < count; i++) if (MIX_WEIGHTS[i] > MIX_WEIGHTS[best]) best = i;
+            reference = MIX_BONES[best].rotation;
+        }
+
+        vec3.set(MIX_T, 0, 0, 0);
+        vec3.set(MIX_S, 0, 0, 0);
+        quat.set(MIX_R, 0, 0, 0, 0);   // an accumulator, not a rotation yet
+        let total = 0;
+        for (let i = 0; i < count; i++) {
+            const w = MIX_WEIGHTS[i];
+            if (w <= 0) continue;
+            const bone = MIX_BONES[i];
+            vec3.scaleAndAdd(MIX_T, MIX_T, bone.translation, w);
+            vec3.scaleAndAdd(MIX_S, MIX_S, bone.scale, w);
+            // Into the reference hemisphere: a quaternion on the far side would cancel rather than add.
+            const r = bone.rotation;
+            const signed = quat.dot(reference, r) < 0 ? -w : w;
+            MIX_R[0] += r[0] * signed;
+            MIX_R[1] += r[1] * signed;
+            MIX_R[2] += r[2] * signed;
+            MIX_R[3] += r[3] * signed;
+            total += w;
+        }
+        if (total === 0) return MIX_BONES[0].localTransform;
+        vec3.scale(MIX_T, MIX_T, 1 / total);
+        vec3.scale(MIX_S, MIX_S, 1 / total);
+        // A zero sum would normalize to NaN and collapse the skeleton.
+        if (quat.length(MIX_R) < 1e-8) quat.copy(MIX_R, reference);
+        quat.normalize(MIX_R, MIX_R);
+        return mat4.fromRotationTranslationScale(arenaMat(), MIX_R, MIX_T, MIX_S);
     }
 
     /** Local transform of a bone in the CURRENT pose source (field when one is active, else the clip). */
-    private _currentLocal(boneName: string): mat4 | null {
-        if (this._fieldEntries) return this._fieldLocal(this._fieldEntries, boneName, this._fieldDominant);
-        return this._bones.get(boneName)?.localTransform ?? null;
+    private _currentLocal(key: string): mat4 | null {
+        if (this._fieldEntries) return this._fieldLocal(this._fieldEntries, key, this._fieldDominant);
+        return this._bones.get(key)?.localTransform ?? null;
     }
 
     // Local transform of a bone in the OUTGOING pose source during a cross-fade. Its weights are a
     // frozen snapshot, so they cannot cross and no dominant clip is tracked.
-    private _previousLocal(boneName: string): mat4 | null {
-        if (this._previousFieldEntries) return this._fieldLocal(this._previousFieldEntries, boneName, null);
-        return this._previousBones.get(boneName)?.localTransform ?? null;
+    private _previousLocal(key: string): mat4 | null {
+        if (this._previousFieldEntries) return this._fieldLocal(this._previousFieldEntries, key, null);
+        return this._previousBones.get(key)?.localTransform ?? null;
     }
 
     /** Play a field directly, outside any state machine. Used by the Animation Field editor's preview. */
@@ -1450,8 +1455,28 @@ export class Animator {
     private get _currentState(): AnimationState | null {
         const sm = this._stateMachine;
         if (!sm || !this._currentStateName) return null;
-        return sm.states.find(s => s.name === this._currentStateName) ?? null;
+        return this._stateByName(sm, this._currentStateName);
     }
+
+    /**
+     * A state by name, through a lookup rebuilt only when the machine or its state list changes. Asked
+     * for several times per frame per character; a linear `find` each time added up. A machine edited in
+     * place (a renamed state) is caught by the name check and rebuilt.
+     */
+    private _stateByName(sm: AnimationStateMachine, name: string): AnimationState | null {
+        let lookup = this._stateLookup;
+        if (!lookup || lookup.sm !== sm || lookup.states !== sm.states || lookup.length !== sm.states.length) {
+            lookup = this._stateLookup = { sm, states: sm.states, length: sm.states.length, map: new Map() };
+            for (const state of sm.states) if (!lookup.map.has(state.name)) lookup.map.set(state.name, state);
+        }
+        const state = lookup.map.get(name);
+        if (state && state.name === name) return state;
+        // Missing or renamed since the lookup was built: answer exactly, and rebuild next time.
+        this._stateLookup = null;
+        return sm.states.find(s => s.name === name) ?? null;
+    }
+    private _stateLookup: { sm: AnimationStateMachine; states: AnimationState[]; length: number;
+                            map: Map<string, AnimationState> } | null = null;
 
     /** Advance playback by `deltaTime` seconds and recompute the pose. */
     public update(deltaTime: number): void {
@@ -1460,11 +1485,75 @@ export class Animator {
             this._updateRagdollMatrices();
             return;
         }
-        if (this._overlays.length) this._updateOverlays(deltaTime);
+        // A layer's animator poses whenever the animator it belongs to does; see _skipPose.
+        if (!this._isOverlay) {
+            this._skipPose = false;
+            if (this._lodStride > 1) {
+                this._lodCountdown--;
+                if (this._lodCountdown > 0) this._skipPose = true;
+                else this._lodCountdown = this._lodStride;
+            }
+        }
+        this._ikDelta += Math.max(0, deltaTime);
+        if (this._overlays.length) {
+            for (const o of this._overlays) o.animator._skipPose = this._skipPose;
+            this._updateOverlays(deltaTime);
+        }
         this._posedThisFrame = false;
         this._advance(deltaTime);
         // The base can be idle (a finished one-shot, a bind pose) while a layer or an action still moves.
-        if (!this._posedThisFrame && this._overlays.some(o => o.presence > 0)) this._recomputePose();
+        if (!this._posedThisFrame && !this._skipPose) {
+            for (const o of this._overlays) if (o.presence > 0) { this._recomputePose(); break; }
+        }
+    }
+
+    // ---- Animation LOD ------------------------------------------------------------------------------
+    //
+    // A character nobody can see, or one far away, does not need a fresh pose every frame. Its clock,
+    // state machine, field weights, event markers and root motion still advance EVERY frame — gameplay
+    // reads those — but sampling, blending, skinning and foot IK run every `_lodStride` frames. Sockets
+    // and hitboxes on such a character therefore refresh at that rate too.
+
+    /** Tunables, shared by every animator. `enabled: false` poses every character every frame. */
+    public static lod = {
+        enabled: true,
+        /** Visible and nearer than this (metres, to its bounds): full rate, foot IK on. */
+        fullDistance: 25,
+        /** Off-screen but nearer than this: every 2nd frame, no foot IK. Beyond: every 4th. */
+        offscreenNear: 15,
+    };
+
+    /** Never reduce this animator: a character whose pose must be exact every frame (set from scripts). */
+    public lodExempt = false;
+
+    /** Frames between poses: 1 = every frame. */
+    private _lodStride = 1;
+    private _lodCountdown = 0;
+    /** This frame's pose is skipped (stride). A layer inherits it from the animator it belongs to. */
+    private _skipPose = false;
+    /** Wall-clock time since foot IK last ran, so its smoothing keeps real time across skipped frames. */
+    private _ikDelta = 0;
+
+    /** Pick the LOD tier from what the camera saw last frame. Called by ModelNode before each update. */
+    public setLod(visible: boolean, distance: number): void {
+        const lod = Animator.lod;
+        let stride = 1;
+        let ik = true;
+        if (lod.enabled && !this.lodExempt) {
+            if (visible) {
+                if (distance > lod.fullDistance) stride = 2;
+            } else {
+                stride = distance > lod.offscreenNear ? 4 : 2;
+                ik = false;
+            }
+        }
+        if (stride !== this._lodStride) {
+            this._lodStride = stride;
+            // Pose on the very next frame after a tier change: a character stepping into view must not
+            // show a pose that is several frames old.
+            this._lodCountdown = 1;
+        }
+        this._ikAllowed = ik;
     }
 
     private _advance(deltaTime: number): void {
@@ -1569,14 +1658,15 @@ export class Animator {
             this._fireDueEvents(prevTime, this._currentTime, duration, looped);
         }
 
-        // Update all bones with current animation time
+        // Update all bones with current animation time — unless the LOD skips this frame's pose, in which
+        // case only what gameplay reads (time, events above, root motion below) moves on.
+        const pose = !this._skipPose;
         if (this._fieldEntries) {
-            this._poseFieldAt(this._fieldEntries, this._fieldPhase);
+            if (pose) this._poseFieldAt(this._fieldEntries, this._fieldPhase);
         } else {
-            for (const bone of this._bones.values()) {
-                bone.update(this._currentTime);
-            }
+            if (pose) for (const bone of this._bones.values()) bone.update(this._currentTime);
             // After the pose loop: it drives the character, then pins the root bone to the locked reference.
+            // Every frame: root motion samples the root bone on its own, and it is what moves the character.
             if (this._rootMotionActive) this._applyRootMotion(prevTime, this._currentTime, duration, looped);
         }
 
@@ -1590,7 +1680,7 @@ export class Animator {
                 }
             }
             // The outgoing field keeps its snapshot weights; the live probe must not steer it.
-            this._poseFieldAt(this._previousFieldEntries, this._previousFieldPhase);
+            if (pose) this._poseFieldAt(this._previousFieldEntries, this._previousFieldPhase);
         } else if (this._isBlending && this._previousAnimation) {
             if (this._previousAdvancing) {
                 const previousDuration = this._getPreviousAnimationDuration();
@@ -1601,15 +1691,15 @@ export class Animator {
                 }
             }
             // Not advancing means the clip finished before the blend began; it holds its last pose.
-            for (const bone of this._previousBones.values()) {
-                bone.update(this._previousTime);
+            if (pose) {
+                for (const bone of this._previousBones.values()) bone.update(this._previousTime);
+                // The re-sample above overwrote the outgoing clip's root pin; put it back.
+                this._pinPreviousRoot();
             }
-            // The re-sample above overwrote the outgoing clip's root pin; put it back.
-            this._pinPreviousRoot();
         }
 
         // Turn the current bone local transforms into final skinning matrices.
-        this._recomputePose();
+        if (pose) this._recomputePose();
     }
 
     // ---- Root motion -----------------------------------------------------------------------------
@@ -1704,7 +1794,7 @@ export class Animator {
         if (!this._skin) return null;
         const override = this._boneOverrides?.get(nodeIndex);
         if (override) return mat4.clone(override);
-        const current = this._currentLocal(`bone_${nodeIndex}`);
+        const current = this._currentLocal(boneKey(nodeIndex));
         if (current) return mat4.clone(current);
         const rest = this._skin.nodeTransforms?.get(nodeIndex);
         return rest ? mat4.clone(rest) : mat4.create();
@@ -1838,10 +1928,10 @@ export class Animator {
      * or null when nothing it plays drives that bone. No editor override, no rest fallback, no overlays.
      */
     private _sourceLocal(nodeIndex: number): mat4 | null {
-        const boneName = `bone_${nodeIndex}`;
-        const current = this._currentLocal(boneName);
+        const key = boneKey(nodeIndex);
+        const current = this._currentLocal(key);
         if (!current) return null;
-        const previous = this._isBlending ? this._previousLocal(boneName) : null;
+        const previous = this._isBlending ? this._previousLocal(key) : null;
         if (!previous) return current;
         // A zero blend duration is legal and means "instant"; dividing by it would give NaN.
         const blendFactor = this._activeBlendTime > 0
@@ -1861,88 +1951,80 @@ export class Animator {
         if (this._isOverlay) return;
         this._posedThisFrame = true;
         if (!this._skin) return;
+        // Every blended local of the previous pose is dead now; see POSE_ARENA.
+        poseArenaUsed = 0;
 
-        // Build local transforms map for all joints
+        const skin = this._skin;
         const localTransforms = this._poseLocals;
         localTransforms.clear();
-
-        /** Whatever is posing this node right now — a clip, a weighted field blend, or its rest transform. */
-        const resolveLocal = (nodeIndex: number): mat4 => {
-            // An editor override outranks every pose source. Checked FIRST so a bone being dragged holds
-            // still while the clip underneath keeps playing on every other bone — which is what makes it
-            // possible to pose an arm against the walk cycle it will be keyed into.
-            const override = this._boneOverrides?.get(nodeIndex);
-            if (override) return override;
-            // Nothing playing drives the bone: use the initial node transform from GLTF, or identity.
-            const base = this._sourceLocal(nodeIndex) ?? this._skin!.nodeTransforms?.get(nodeIndex) ?? mat4.create();
-            return this._overlays.length ? this._applyOverlays(nodeIndex, base) : base;
-        };
-
-        for (let jointIndex = 0; jointIndex < this._skin.joints.length; jointIndex++)
-            localTransforms.set(this._skin.joints[jointIndex].nodeIndex, resolveLocal(this._skin.joints[jointIndex].nodeIndex));
+        for (let jointIndex = 0; jointIndex < skin.joints.length; jointIndex++) {
+            const nodeIndex = skin.joints[jointIndex].nodeIndex;
+            localTransforms.set(nodeIndex, this._resolveLocal(nodeIndex));
+        }
 
         // The nodes BETWEEN joints are animated too: an assimp-converted FBX puts a bone's rotation curve
         // on a `$AssimpFbx$` pivot, so reading only joints leaves every such bone in its bind orientation.
-        const chainTopo = this._topology();
-        for (const chain of chainTopo.parentChain)
+        const topo = this._topology();
+        for (const chain of topo.parentChain)
             for (const nodeIndex of chain)
-                if (!localTransforms.has(nodeIndex)) localTransforms.set(nodeIndex, resolveLocal(nodeIndex));
+                if (!localTransforms.has(nodeIndex)) localTransforms.set(nodeIndex, this._resolveLocal(nodeIndex));
 
         // Accumulate global transforms down the hierarchy. A flat loop, because `topo.order` guarantees a
         // parent is finished before any child asks for it.
-        const topo = this._topology();
         const globalTransforms = this._poseGlobals;
         globalTransforms.clear();
-
-        // Fold in the non-joint nodes between this joint and its parent joint. Never cache the skin's own
-        // rest matrix by reference: `globalTransforms` is written in place and would corrupt the bind pose.
-        const applyParentChain = (out: mat4, jointIndex: number): void => {
-            for (const nodeIndex of topo.parentChain[jointIndex]) {
-                const local = localTransforms.get(nodeIndex) ?? this._skin!.nodeTransforms?.get(nodeIndex);
-                if (local) mat4.multiply(out, out, local);
-            }
-        };
-
-        /** parentGlobal x (chain) x local — the one accumulation both passes below share. */
-        const accumulate = (out: mat4, jointIndex: number, local: mat4): void => {
-            const parentJoint = topo.parentJoint[jointIndex];
-            if (parentJoint >= 0) mat4.copy(out, globalTransforms.get(this._skin!.joints[parentJoint].nodeIndex)!);
-            else mat4.identity(out);
-            applyParentChain(out, jointIndex);
-            mat4.multiply(out, out, local);
-        };
-
         for (const jointIndex of topo.order) {
-            const joint = this._skin.joints[jointIndex];
-            const nodeIndex = joint.nodeIndex;
-            const local = localTransforms.get(nodeIndex) ?? this._skin.nodeTransforms?.get(nodeIndex) ?? mat4.create();
-
+            const nodeIndex = skin.joints[jointIndex].nodeIndex;
             let global = this._globalPool.get(nodeIndex);
             if (!global) { global = mat4.create(); this._globalPool.set(nodeIndex, global); }
-            accumulate(global, jointIndex, local);
+            this._accumulate(global, jointIndex, topo);
             globalTransforms.set(nodeIndex, global);
         }
 
         // After the pose is accumulated and before the bind matrices fold in: IK needs to know where the
         // feet ended up, and writing corrected LOCALS lets the loop above be re-run verbatim.
-        if (this._applyFootIk(localTransforms, globalTransforms, topo)) {
-            for (const jointIndex of topo.order) {
-                const joint = this._skin.joints[jointIndex];
-                const nodeIndex = joint.nodeIndex;
-                const local = localTransforms.get(nodeIndex)!;
-                accumulate(globalTransforms.get(nodeIndex)!, jointIndex, local);
-            }
-        }
+        // Each IK change re-accumulates the subtree it moved, so nothing is left to redo afterwards.
+        this._applyFootIk(localTransforms, globalTransforms, topo);
+        this._ikDelta = 0;
 
         // finalMatrix = globalTransform × inverseBindMatrix. NO `inverse(globalTransform(meshNode))` term:
         // glTF includes one only for implementations that also apply the mesh node's transform, and this
         // engine ignores it. Adding it back scales every skinned model by its inverse.
-        for (let jointIndex = 0; jointIndex < this._skin.joints.length; jointIndex++) {
-            const joint = this._skin.joints[jointIndex];
-            const globalTransform = globalTransforms.get(joint.nodeIndex) ?? mat4.create();
+        for (let jointIndex = 0; jointIndex < skin.joints.length; jointIndex++) {
+            const joint = skin.joints[jointIndex];
+            const globalTransform = globalTransforms.get(joint.nodeIndex) ?? IDENTITY;
             mat4.multiply(this._finalBoneMatrices[jointIndex], globalTransform, joint.inverseBindMatrix);
             mat4.copy(this._jointModelMatrices[jointIndex] ??= mat4.create(), globalTransform);
         }
+    }
+
+    /** Whatever is posing this node right now — a clip, a weighted field blend, or its rest transform. */
+    private _resolveLocal(nodeIndex: number): mat4 {
+        // An editor override outranks every pose source. Checked FIRST so a bone being dragged holds
+        // still while the clip underneath keeps playing on every other bone — which is what makes it
+        // possible to pose an arm against the walk cycle it will be keyed into.
+        const override = this._boneOverrides?.get(nodeIndex);
+        if (override) return override;
+        // Nothing playing drives the bone: use the initial node transform from GLTF, or identity.
+        const base = this._sourceLocal(nodeIndex) ?? this._skin!.nodeTransforms?.get(nodeIndex) ?? IDENTITY;
+        return this._overlays.length ? this._applyOverlays(nodeIndex, base) : base;
+    }
+
+    /**
+     * parentGlobal x (the non-joint nodes between) x local, into `out` — the one accumulation the pose and
+     * foot IK share. Never caches the skin's rest matrix by reference: globals are written in place.
+     */
+    private _accumulate(out: mat4, jointIndex: number, topo: SkeletonTopology): void {
+        const skin = this._skin!;
+        const parentJoint = topo.parentJoint[jointIndex];
+        if (parentJoint >= 0) mat4.copy(out, this._poseGlobals.get(skin.joints[parentJoint].nodeIndex)!);
+        else mat4.identity(out);
+        for (const nodeIndex of topo.parentChain[jointIndex]) {
+            const local = this._poseLocals.get(nodeIndex) ?? skin.nodeTransforms?.get(nodeIndex);
+            if (local) mat4.multiply(out, out, local);
+        }
+        const nodeIndex = skin.joints[jointIndex].nodeIndex;
+        mat4.multiply(out, out, this._poseLocals.get(nodeIndex) ?? skin.nodeTransforms?.get(nodeIndex) ?? IDENTITY);
     }
 
     // ---- Foot IK ----------------------------------------------------------------------------------
@@ -1954,9 +2036,7 @@ export class Animator {
     // keeps the static weight rather than reading 0.
     private _stateIkWeight(): number {
         const sm = this._stateMachine;
-        const state = sm && this._currentStateName
-            ? sm.states.find(s => s.name === this._currentStateName)
-            : null;
+        const state = sm && this._currentStateName ? this._stateByName(sm, this._currentStateName) : null;
         if (!state) return 1;
         if (state.ikWeightParam) {
             const v = this._paramValues.get(state.ikWeightParam);
@@ -2002,56 +2082,62 @@ export class Animator {
         const tuning = ikTuning(rig);
         // Wall-clock, not playback-scaled: a foot easing onto a step reacts to the ground, not to the
         // clip. dt is 0 on a scrub, which resolves targets without advancing the smoothing.
-        const dt = this._frameDelta;
+        // Real time since IK last ran: equal to the frame delta at full rate, several frames under the LOD.
+        const dt = Math.min(this._ikDelta, this._frameDelta * Math.max(1, this._lodStride));
 
         const nodeWorld = this._node.worldTransform;
-        const worldToModel = mat4.create();
+        const worldToModel = IK_WORLD_TO_MODEL;
         // A degenerate world transform has no inverse and nothing to place a foot against.
         if (!mat4.invert(worldToModel, nodeWorld)) return false;
         // Gravity-up in MODEL space: a direction, so translation is dropped, and renormalized because a
         // scaled character's model space is not metric.
         const upWorld = physics.up;
-        const up = vec3.transformMat4(vec3.create(), upWorld, worldToModel);
-        const originModel = vec3.transformMat4(vec3.create(), vec3.create(), worldToModel);
+        const up = vec3.transformMat4(IK_UP, upWorld, worldToModel);
+        const originModel = vec3.transformMat4(IK_ORIGIN, vec3.set(IK_ZERO, 0, 0, 0), worldToModel);
         vec3.sub(up, up, originModel);
         if (vec3.length(up) < 1e-8) return false;
         vec3.normalize(up, up);
         // The character's facing in MODEL space, flattened onto the ground plane: where a knee should point
         // when the clip itself does not say (a leg animated near-straight has no bend plane of its own).
         // A node faces its local +Z (Node.worldForward), and model space IS the node's local space.
-        const forward = vec3.fromValues(0, 0, 1);
+        const forward = vec3.set(IK_FORWARD, 0, 0, 1);
         vec3.scaleAndAdd(forward, forward, up, -vec3.dot(forward, up));
         if (vec3.length(forward) > 1e-8) vec3.normalize(forward, forward);
 
         const ownBody = this._nearestBodiedNode()?.body ?? null;
+        // No ground query at all while the character is in the air (a jump, a fall, a dodge off a ledge):
+        // the feet fade out exactly as they do over a ray that misses, without paying for the ray. Only a
+        // DYNAMIC body is asked — a kinematic or scripted one has no contacts to be grounded by.
+        const airborne = !!ownBody && (ownBody as { mass?: number }).mass! > 0
+            && typeof (physics as { isGrounded?: unknown }).isGrounded === 'function'
+            && !(physics as { isGrounded(b: unknown): boolean }).isGrounded(ownBody);
+        // The LOD tier can withhold the query too: see `_ikAllowed`.
+        const query = !airborne && this._ikAllowed;
 
         // ---- Pass 1a: where does each foot want to be? -------------------------------------------------
         // Only where it WANTS to be — whether it goes there is pass 1b's job, and that needs every
         // foot's clearance, so it cannot be decided inside this loop.
-        type FootPlan = {
-            chain: IkFootChain;
-            ankle: vec3;         // model space, as animated
-            target: vec3;        // model space, on the ground
-            normal: vec3;        // model space, of the surface
-            weight: number;      // this foot's damped contribution
-            /** Signed distance from the animated ankle to its target along `up`. Negative = the foot must drop. */
-            along: number;
-        };
-        const plans: FootPlan[] = [];
+        const plans = this._ikPlans;
+        let planCount = 0;
 
         for (const chain of checked.feet) {
             // A half-assigned chain is normal while authoring; skip it rather than throwing.
             const ankleGlobal = globalTransforms.get(chain.foot);
             if (!ankleGlobal || !globalTransforms.get(chain.thigh) || !globalTransforms.get(chain.shin)) continue;
 
-            const ankle = mat4.getTranslation(vec3.create(), ankleGlobal);
-            const ankleWorld = vec3.transformMat4(vec3.create(), ankle, nodeWorld);
-
-            const from = vec3.scaleAndAdd(vec3.create(), ankleWorld, upWorld, tuning.traceUp);
-            const to = vec3.scaleAndAdd(vec3.create(), ankleWorld, upWorld, -tuning.traceDown);
-            const hit = physics.raycast(from, to, { ignore: ownBody });
-
             const key = chain.foot;
+            let hit: { point: vec3; normal: vec3 } | null = null;
+            if (query) {
+                const ankle = mat4.getTranslation(IK_TMP, ankleGlobal);
+                const ankleWorld = vec3.transformMat4(IK_ANKLE_WORLD, ankle, nodeWorld);
+                const from = vec3.scaleAndAdd(IK_FROM, ankleWorld, upWorld, tuning.traceUp);
+                const to = vec3.scaleAndAdd(IK_TO, ankleWorld, upWorld, -tuning.traceDown);
+                // Ground only: another character's capsule, a ragdoll limb or a loose prop under a foot is
+                // not something to plant on, and skipping dynamic bodies before any shape test is most of
+                // what a foot ray used to cost.
+                hit = physics.raycast(from, to, { ignore: ownBody, groundOnly: true });
+            }
+
             const prev = this._ikFootWeights.get(key) ?? 0;
             // No ground: fade out rather than switch off, or a ledge lip snaps the foot on and off.
             const target = hit ? weight : 0;
@@ -2061,10 +2147,10 @@ export class Animator {
             // Fading out needs somewhere to fade TO: with no hit there is no target, and the correction
             // would simply vanish on the frame the ray first misses.
             if (hit) {
-                this._ikFootHits.set(key, {
-                    point: vec3.clone(hit.point),
-                    normal: vec3.clone(hit.normal),
-                });
+                let memo = this._ikFootHits.get(key);
+                if (!memo) { memo = { point: vec3.create(), normal: vec3.create() }; this._ikFootHits.set(key, memo); }
+                vec3.copy(memo.point, hit.point);
+                vec3.copy(memo.normal, hit.normal);
             }
             const ground = this._ikFootHits.get(key);
             if (!ground || next <= 1e-3) {
@@ -2073,16 +2159,20 @@ export class Animator {
                 continue;
             }
 
-            const hitModel = vec3.transformMat4(vec3.create(), ground.point, worldToModel);
-            const normalModel = vec3.transformMat4(vec3.create(), ground.normal, worldToModel);
+            const plan = plans[planCount] ??= { chain, ankle: vec3.create(), target: vec3.create(),
+                                                normal: vec3.create(), weight: 0, along: 0 };
+            planCount++;
+            plan.chain = chain;
+            const ankle = mat4.getTranslation(plan.ankle, ankleGlobal);
+            const hitModel = vec3.transformMat4(IK_HIT_MODEL, ground.point, worldToModel);
+            const normalModel = vec3.transformMat4(plan.normal, ground.normal, worldToModel);
             vec3.sub(normalModel, normalModel, originModel);
             if (vec3.length(normalModel) > 1e-8) vec3.normalize(normalModel, normalModel);
 
             // The ankle sits a foot's height above the sole, or the whole foot sinks through the ground.
-            const desired = vec3.scaleAndAdd(vec3.create(), hitModel, up, tuning.footHeight);
-            const along = vec3.dot(vec3.sub(vec3.create(), desired, ankle), up);
-
-            plans.push({ chain, ankle, target: desired, normal: normalModel, weight: next, along });
+            const desired = vec3.scaleAndAdd(plan.target, hitModel, up, tuning.footHeight);
+            plan.along = vec3.dot(vec3.sub(IK_TMP, desired, ankle), up);
+            plan.weight = next;
         }
 
         // ---- Pass 1b: let go of the feet that are mid-swing --------------------------------------------
@@ -2090,66 +2180,73 @@ export class Animator {
         // foot: absolutely it cannot distinguish a mid-stride lift from ground lower than the animation
         // assumed. One foot with a plan is its own reference and keeps the full correction.
         let ref = Infinity;
-        for (const plan of plans) ref = Math.min(ref, -plan.along);
+        for (let i = 0; i < planCount; i++) ref = Math.min(ref, -plans[i].along);
         // Clamped at 0 so a foot THROUGH the ground cannot lift the reference and release the other leg.
-        ref = plans.length ? Math.max(0, ref) : 0;
+        ref = planCount ? Math.max(0, ref) : 0;
 
-        for (const plan of plans) {
-            plan.weight *= swingReleaseWeight(-plan.along - ref, tuning.swingRelease);
-        }
         // A released foot must not be solved AT ALL: `solveTwoBone` clamps to `maxReach`, so even an
-        // identity solve pulls a straight leg in by a couple of millimetres.
-        const active = plans.filter(p => p.weight > 1e-3);
+        // identity solve pulls a straight leg in by a couple of millimetres. Compacted in place.
+        let activeCount = 0;
+        for (let i = 0; i < planCount; i++) {
+            const plan = plans[i];
+            plan.weight *= swingReleaseWeight(-plan.along - ref, tuning.swingRelease);
+            if (plan.weight > 1e-3) {
+                if (activeCount !== i) { plans[i] = plans[activeCount]; plans[activeCount] = plan; }
+                activeCount++;
+            }
+        }
 
         // The deepest a foot needs to go, WEIGHTED by how much of its correction is applied. Unweighted,
         // a released swing foot would dip the pelvis by the stride height once per step.
         let lowest = 0;
-        for (const plan of active) lowest = Math.min(lowest, Math.min(0, plan.along) * plan.weight);
+        for (let i = 0; i < activeCount; i++) lowest = Math.min(lowest, Math.min(0, plans[i].along) * plans[i].weight);
 
         // ---- Pass 2: lower the pelvis ------------------------------------------------------------------
         // Only ever DOWN: a foot that needs to rise is a step the knee can bend for.
         // With no foot on the ground the target is 0, and this must NOT return early — a pelvis still
         // lowered from a previous frame has to rise back over the smoothing time.
-        const hipTarget = active.length > 0 ? Math.max(-tuning.maxHipDrop, Math.min(0, lowest)) : 0;
+        const hipTarget = activeCount > 0 ? Math.max(-tuning.maxHipDrop, Math.min(0, lowest)) : 0;
         this._ikHipOffset = tuning.smoothing > 0 && dt > 0
             ? dampTime(this._ikHipOffset, hipTarget, tuning.smoothing, dt)
             : hipTarget;
         // Snap the tail of the exponential to zero so a released pelvis stops costing a re-accumulation.
         if (Math.abs(this._ikHipOffset) < 1e-5) this._ikHipOffset = 0;
 
-        if (active.length === 0 && this._ikHipOffset === 0) return false;
+        if (activeCount === 0 && this._ikHipOffset === 0) return false;
 
         const hipsLocal = checked.hips !== undefined ? localTransforms.get(checked.hips) : undefined;
         if (hipsLocal && this._ikHipOffset !== 0) {
             // Applied to the hips' LOCAL translation, so ordinary accumulation carries it down the skeleton.
-            const shift = vec3.scale(vec3.create(), up, this._ikHipOffset);
+            const shift = vec3.scale(IK_SHIFT, up, this._ikHipOffset);
             // Into the frame the hips' LOCAL lives in — the parent joint AND any non-joint wrappers between
             // (a Mixamo `Armature` at 0.01 scale, rotated Z-up to Y-up). Skipping the wrappers turned a
             // model-space drop into a hundredth of a step sideways: the pelvis never lowered, so the foot
             // over the lower ground stayed straight and hovering while the other knee bent.
             const parentFrame = this._parentFrameOf(checked.hips!, localTransforms, globalTransforms, topo);
             if (parentFrame) {
-                const inv = mat4.create();
+                const inv = IK_INV;
                 if (mat4.invert(inv, parentFrame)) {
                     // A direction, so the parent's translation must not come with it.
-                    const o = vec3.transformMat4(vec3.create(), vec3.create(), inv);
+                    const o = vec3.transformMat4(IK_O, vec3.set(IK_ZERO, 0, 0, 0), inv);
                     vec3.transformMat4(shift, shift, inv);
                     vec3.sub(shift, shift, o);
                 }
             }
-            const moved = mat4.clone(hipsLocal);
+            const moved = mat4.copy(arenaMat(), hipsLocal);
             moved[12] += shift[0]; moved[13] += shift[1]; moved[14] += shift[2];
             localTransforms.set(checked.hips!, moved);
 
             // Re-accumulate so the leg solve below sees where the feet actually are AFTER the drop.
-            this._reaccumulate(localTransforms, globalTransforms, topo);
+            this._reaccumulate(localTransforms, globalTransforms, topo, checked.hips!);
         }
 
         // ---- Pass 3: solve each leg --------------------------------------------------------------------
-        for (const plan of active) {
+        for (let i = 0; i < activeCount; i++) {
+            const plan = plans[i];
             this._solveLeg(plan.chain, plan.target, plan.normal, plan.weight, up, forward, tuning,
                 localTransforms, globalTransforms, topo);
         }
+        // Every change above re-accumulated what it moved, so the globals are already final.
         return true;
     }
 
@@ -2169,7 +2266,8 @@ export class Animator {
         const parentJoint = topo.parentJoint[jointIndex];
         const chain = topo.parentChain[jointIndex] ?? [];
         if (parentJoint < 0 && chain.length === 0) return null;
-        const frame = mat4.create();
+        // Scratch: every caller consumes the frame before asking for another.
+        const frame = mat4.identity(IK_FRAME);
         if (parentJoint >= 0) {
             const parentGlobal = globalTransforms.get(this._skin!.joints[parentJoint].nodeIndex);
             if (parentGlobal) mat4.copy(frame, parentGlobal);
@@ -2181,13 +2279,20 @@ export class Animator {
         return frame;
     }
 
-    /** Re-run the parent-to-child accumulation in place. Cheap: one matrix multiply per joint. */
+    /**
+     * Re-run the parent-to-child accumulation in place for `fromNode` and everything beneath it — the only
+     * globals a change to that joint's local can move. Each leg step used to re-accumulate the WHOLE
+     * skeleton, four to ten times per character per frame.
+     */
     private _reaccumulate(
         localTransforms: Map<number, mat4>,
         globalTransforms: Map<number, mat4>,
         topo: SkeletonTopology,
+        fromNode: number,
     ): void {
-        for (const jointIndex of topo.order) {
+        const joint = topo.jointOfNode.get(fromNode);
+        if (joint === undefined) return;
+        for (const jointIndex of subtreeOrder(topo, joint)) {
             const nodeIndex = this._skin!.joints[jointIndex].nodeIndex;
             const local = localTransforms.get(nodeIndex);
             const global = globalTransforms.get(nodeIndex);
@@ -2220,39 +2325,38 @@ export class Animator {
         globalTransforms: Map<number, mat4>,
         topo: SkeletonTopology,
     ): void {
-        const posOf = (node: number): vec3 | null => {
-            const g = globalTransforms.get(node);
-            return g ? mat4.getTranslation(vec3.create(), g) : null;
-        };
-
-        const hip = posOf(chain.thigh), knee = posOf(chain.shin), ankle = posOf(chain.foot);
-        if (!hip || !knee || !ankle) return;
+        const hipG = globalTransforms.get(chain.thigh), kneeG = globalTransforms.get(chain.shin);
+        const ankleG = globalTransforms.get(chain.foot);
+        if (!hipG || !kneeG || !ankleG) return;
+        const hip = mat4.getTranslation(IK_HIP, hipG);
+        const knee = mat4.getTranslation(IK_KNEE, kneeG);
+        const ankle = mat4.getTranslation(IK_ANKLE, ankleG);
 
         // Ease by the foot's weight rather than snapping: ikWeight = 0 is exactly the animated pose.
-        const eased = vec3.lerp(vec3.create(), ankle, target, weight);
+        const eased = vec3.lerp(IK_EASED, ankle, target, weight);
 
         const solve = solveTwoBone({ root: hip, mid: knee, tip: ankle, target: eased,
                                      pole: kneePole(hip, knee, ankle, forward) });
         this._rotateGlobal(chain.thigh, solve.rootDelta, localTransforms, globalTransforms, topo);
-        this._reaccumulate(localTransforms, globalTransforms, topo);
+        this._reaccumulate(localTransforms, globalTransforms, topo, chain.thigh);
         this._rotateGlobal(chain.shin, solve.midDelta, localTransforms, globalTransforms, topo);
-        this._reaccumulate(localTransforms, globalTransforms, topo);
+        this._reaccumulate(localTransforms, globalTransforms, topo, chain.shin);
 
         // Clamped: past maxSlope the foot keeps its animated orientation rather than reading as broken.
         const slope = Math.acos(clamp(vec3.dot(normal, up), -1, 1)) * 180 / Math.PI;
         if (slope > 1e-3 && slope <= tuning.maxSlopeDeg) {
-            const align = quat.rotationTo(quat.create(), up, normal);
+            const align = quat.rotationTo(IK_ALIGN, up, normal);
             // Scaled by weight, so a fading foot un-rolls as smoothly as it un-plants.
-            const partial = quat.slerp(quat.create(), quat.create(), align, weight);
+            const partial = quat.slerp(IK_PARTIAL, quat.identity(IK_QID), align, weight);
             this._rotateGlobal(chain.foot, partial, localTransforms, globalTransforms, topo);
-            this._reaccumulate(localTransforms, globalTransforms, topo);
+            this._reaccumulate(localTransforms, globalTransforms, topo, chain.foot);
 
             // Counter-rotate the inherited roll so the ball stays flat instead of being levered off.
             if (chain.toe !== undefined && globalTransforms.has(chain.toe)) {
-                const counter = quat.invert(quat.create(), partial);
-                const half = quat.slerp(quat.create(), quat.create(), counter, 0.5);
+                const counter = quat.invert(IK_COUNTER, partial);
+                const half = quat.slerp(IK_HALF, quat.identity(IK_QID), counter, 0.5);
                 this._rotateGlobal(chain.toe, half, localTransforms, globalTransforms, topo);
-                this._reaccumulate(localTransforms, globalTransforms, topo);
+                this._reaccumulate(localTransforms, globalTransforms, topo, chain.toe);
             }
         }
     }
@@ -2270,24 +2374,23 @@ export class Animator {
         if (!global) return;
 
         // Rotate about the joint's own origin: translate to it, apply, translate back.
-        const origin = mat4.getTranslation(vec3.create(), global);
-        const rot = mat4.fromQuat(mat4.create(), delta);
-        const around = mat4.create();
-        mat4.fromTranslation(around, origin);
+        const origin = mat4.getTranslation(IK_TMP, global);
+        const rot = mat4.fromQuat(IK_ROT, delta);
+        const around = mat4.fromTranslation(IK_AROUND, origin);
         mat4.multiply(around, around, rot);
-        mat4.translate(around, around, vec3.negate(vec3.create(), origin));
+        mat4.translate(around, around, vec3.negate(IK_O, origin));
 
-        const newGlobal = mat4.multiply(mat4.create(), around, global);
+        const newGlobal = mat4.multiply(IK_NEW_GLOBAL, around, global);
 
         // The frame the LOCAL lives in, wrappers included — must match `_reaccumulate`, or the rotation is
         // written in one frame and read back in another.
         const parentGlobal = this._parentFrameOf(nodeIndex, localTransforms, globalTransforms, topo);
 
-        const local = mat4.create();
+        // A fresh pose-arena matrix: the old local may be a clip bone's own transform, never to be written.
+        const local = arenaMat();
         if (parentGlobal) {
-            const inv = mat4.create();
-            mat4.invert(inv, parentGlobal);
-            mat4.multiply(local, inv, newGlobal);
+            mat4.invert(IK_INV, parentGlobal);
+            mat4.multiply(local, IK_INV, newGlobal);
         } else mat4.copy(local, newGlobal);
         localTransforms.set(nodeIndex, local);
         mat4.copy(global, newGlobal);
@@ -2317,38 +2420,20 @@ export class Animator {
         this._recomputePose();
     }
 
-    // Decompose, lerp/slerp and recompose two transforms.
+    // Decompose, lerp/slerp and recompose two transforms, into a pose-arena matrix.
     private _blendTransforms(from: mat4, to: mat4, factor: number): mat4 {
-        // Decompose both matrices into translation, rotation, and scale
-        const fromTranslation = vec3.create();
-        const fromRotation = quat.create();
-        const fromScale = vec3.create();
-        mat4.getTranslation(fromTranslation, from);
-        mat4.getRotation(fromRotation, from);
-        mat4.getScaling(fromScale, from);
-        
-        const toTranslation = vec3.create();
-        const toRotation = quat.create();
-        const toScale = vec3.create();
-        mat4.getTranslation(toTranslation, to);
-        mat4.getRotation(toRotation, to);
-        mat4.getScaling(toScale, to);
-        
-        // Interpolate each component
-        const blendedTranslation = vec3.create();
-        const blendedRotation = quat.create();
-        const blendedScale = vec3.create();
-        
-        vec3.lerp(blendedTranslation, fromTranslation, toTranslation, factor);
-        quat.slerp(blendedRotation, fromRotation, toRotation, factor);
-        vec3.lerp(blendedScale, fromScale, toScale, factor);
-        
-        // Reconstruct the matrix
-        const result = mat4.create();
-        mat4.fromRotationTranslationScale(result, blendedRotation, blendedTranslation, blendedScale);
-        return result;
+        mat4.getTranslation(BL_T0, from);
+        mat4.getRotation(BL_R0, from);
+        mat4.getScaling(BL_S0, from);
+        mat4.getTranslation(BL_T1, to);
+        mat4.getRotation(BL_R1, to);
+        mat4.getScaling(BL_S1, to);
+        vec3.lerp(BL_T0, BL_T0, BL_T1, factor);
+        quat.slerp(BL_R0, BL_R0, BL_R1, factor);
+        vec3.lerp(BL_S0, BL_S0, BL_S1, factor);
+        return mat4.fromRotationTranslationScale(arenaMat(), BL_R0, BL_T0, BL_S0);
     }
-    
+
     // Duration of the outgoing pose source, for the cross-fade.
     private _getPreviousAnimationDuration(): number {
         if (!this._previousAnimation) return 0;
@@ -2960,24 +3045,22 @@ export class Animator {
 
     // The additive reference for a bone: the current clip's first frame.
     private _additiveReference(nodeIndex: number): { t: vec3; r: quat } | null {
-        const bone = this._bones.get(`bone_${nodeIndex}`);
-        return bone ? bone.sampleTR(0) : null;
+        const bone = this._bones.get(boneKey(nodeIndex));
+        return bone ? bone.startTR() : null;
     }
 
     // base + w x (layer - reference), per component: the rotation delta `inverse(ref) x layer` goes on the
     // right of base (local-space additive), the translation delta is added.
     private _addTransform(base: mat4, layer: mat4, ref: { t: vec3; r: quat } | null, w: number): mat4 {
         if (!ref) return base;
-        const bt = vec3.create(), br = quat.create(), bs = vec3.create();
-        decomposeTRS(base, bt, br, bs);
-        const lt = vec3.create(), lr = quat.create();
-        decomposeTRS(layer, lt, lr, vec3.create());
+        decomposeTRS(base, BL_T0, BL_R0, BL_S0);
+        decomposeTRS(layer, BL_T1, BL_R1, BL_S1);
 
-        const deltaR = quat.multiply(quat.create(), quat.invert(quat.create(), ref.r), lr);
-        quat.slerp(deltaR, quat.create(), deltaR, w);
-        const r = quat.normalize(quat.create(), quat.multiply(quat.create(), br, deltaR));
-        const t = vec3.scaleAndAdd(vec3.create(), bt, vec3.sub(vec3.create(), lt, ref.t), w);
-        return mat4.fromRotationTranslationScale(mat4.create(), r, t, bs);
+        quat.multiply(ADD_DELTA, quat.invert(ADD_INV, ref.r), BL_R1);
+        quat.slerp(ADD_DELTA, quat.identity(ADD_ID), ADD_DELTA, w);
+        quat.normalize(BL_R0, quat.multiply(BL_R0, BL_R0, ADD_DELTA));
+        vec3.scaleAndAdd(BL_T0, BL_T0, vec3.sub(BL_T1, BL_T1, ref.t), w);
+        return mat4.fromRotationTranslationScale(arenaMat(), BL_R0, BL_T0, BL_S0);
     }
 
     // A pose state as a clip: every listed bone held at `delta x rest` across one second. Two identical

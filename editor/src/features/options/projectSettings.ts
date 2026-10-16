@@ -86,7 +86,8 @@ export function projectSettingsConfig(s: ProjectSettings): Record<string, any> {
     physics: { gravity: [...s.engine.gravity], maxSubsteps: s.engine.maxSubsteps },
     runtime: { maxFrameDelta: s.engine.maxFrameDelta },
     audio: { masterVolume: s.engine.masterVolume },
-    window: { ...s.publish },
+    // A publish-time switch, not something the running game reads.
+    window: (({ onlyUsedShaders: _unused, ...w }) => w)(s.publish),
   };
 }
 

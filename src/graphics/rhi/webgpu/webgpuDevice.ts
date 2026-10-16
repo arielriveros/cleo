@@ -963,15 +963,25 @@ class WebGPUCommandEncoder implements CommandEncoder {
                  * Called after `queue.submit` to release every uniform slot this submission read. The
                  * reset point is exactly there — a frame boundary is too late for a many-draw pass.
                  */
-                private readonly _onSubmit: () => void = () => {},
-                label?: string) {
+                private readonly _onSubmit: (encoder: WebGPUCommandEncoder) => void = () => {},
+                label?: string,
+                /** Called once, when this encoder first records anything. See WebGPUDevice._recording. */
+                private readonly _onRecord: (encoder: WebGPUCommandEncoder) => void = () => {}) {
         this._encoder = _device.createCommandEncoder({ label: label ?? 'commands' });
     }
 
+    private _recorded = false;
+    private _markRecorded(): void {
+        if (this._recorded) return;
+        this._recorded = true;
+        this._onRecord(this);
+    }
+
     /** The raw encoder, for device-internal work (readback copies) that rides on the same submission. */
-    public get raw(): GPUCommandEncoder { return this._encoder; }
+    public get raw(): GPUCommandEncoder { this._markRecorded(); return this._encoder; }
 
     public beginRenderPass(target: RenderTarget, descriptor: RenderPassDescriptor): RenderPassEncoder {
+        this._markRecorded();
         const rt = target as WebGPURenderTarget;
 
         // An attachment the descriptor does not mention must still be listed, or WebGPU rejects the
@@ -1050,6 +1060,7 @@ class WebGPUCommandEncoder implements CommandEncoder {
      * submission and orders against the passes around it. Not timestamped.
      */
     public beginComputePass(label?: string): ComputePassEncoder {
+        this._markRecorded();
         return new WebGPUComputePassEncoder(
             this._encoder.beginComputePass({ label: label ?? 'compute' }));
     }
@@ -1061,7 +1072,7 @@ class WebGPUCommandEncoder implements CommandEncoder {
         // to share a command buffer with the passes whose timestamps it is resolving.
         this._timestamps?.recordResolve(this._encoder, this._timedPasses);
         this._device.queue.submit([this._encoder.finish()]);
-        this._onSubmit();
+        this._onSubmit(this);
     }
 }
 
@@ -1555,7 +1566,28 @@ export class WebGPUDevice implements Device {
 
     public createCommandEncoder(label?: string): CommandEncoder {
         return new WebGPUCommandEncoder(this._device, this._timestamps,
-                                        () => this.releaseUniformSlots(), label);
+                                        encoder => this._submitted(encoder), label,
+                                        encoder => this._recording.set(encoder, this._submitCount));
+    }
+
+    /**
+     * Encoders that have recorded work and not been submitted yet. Uniform slots — and the arenas a
+     * program outgrew — may only be released once NONE is left: a helper that submits its own encoder
+     * mid-frame (a readback, a bake) used to release them while the frame's encoder still held draws
+     * reading them, and WebGPU rejected the frame's submit ("used in submit while destroyed").
+     */
+    private readonly _recording = new Map<WebGPUCommandEncoder, number>();
+    private _submitCount = 0;
+
+    private _submitted(encoder: WebGPUCommandEncoder): void {
+        this._submitCount++;
+        this._recording.delete(encoder);
+        // An encoder that recorded and was then dropped without a submit would hold the slots forever and
+        // double every arena each frame. Nothing outlives a frame, so one still open after this many
+        // submits is abandoned, not pending.
+        for (const [open, since] of this._recording)
+            if (this._submitCount - since > 64) this._recording.delete(open);
+        if (this._recording.size === 0) this.releaseUniformSlots();
     }
 
     /** See {@link Device.setTimestampCollection}. Everything it needs lives in `TimestampCollector`. */

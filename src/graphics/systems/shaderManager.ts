@@ -16,7 +16,24 @@ export class ShaderManager {
     }
 
     public addShader(name: string, shader: ShaderProgram): void {
+        if (this._shaders.get(name) === shader) return;
         this._shaders.set(name, shader);
+        this._changed();
+    }
+
+    /**
+     * Bumped whenever a name is registered, re-pointed or removed, so per-frame callers can cache what
+     * they derive from the registry (the renderer's forward-program list) instead of re-deriving it.
+     */
+    public get generation(): number { return this._generation; }
+    private _generation = 0;
+
+    /** Names the resolver could not build, so a name looked up every frame is not re-resolved every frame. */
+    private readonly _unresolvable = new Set<string>();
+
+    private _changed(): void {
+        this._generation++;
+        this._unresolvable.clear();
     }
 
     /**
@@ -28,6 +45,7 @@ export class ShaderManager {
 
     public setResolver(resolver: ((name: string) => ShaderProgram | undefined) | null): void {
         this._resolver = resolver;
+        this._unresolvable.clear();
     }
 
     public getShader(name: string): ShaderProgram {
@@ -40,8 +58,10 @@ export class ShaderManager {
     public find(name: string): ShaderProgram | undefined { return this._shaders.get(name); }
 
     private _resolve(name: string): ShaderProgram | undefined {
-        const shader = this._resolver?.(name);
-        if (shader && !this._shaders.has(name)) this._shaders.set(name, shader);
+        if (!this._resolver || this._unresolvable.has(name)) return undefined;
+        const shader = this._resolver(name);
+        if (!shader) { this._unresolvable.add(name); return undefined; }
+        if (!this._shaders.has(name)) this.addShader(name, shader);
         return shader;
     }
 
@@ -52,7 +72,7 @@ export class ShaderManager {
     public removeShader(name: string): void {
         const shader = this._shaders.get(name);
         if (shader && this._boundShader === shader) this._boundShader = null;
-        this._shaders.delete(name);
+        if (this._shaders.delete(name)) this._changed();
     }
 
     /** Whether this exact ShaderProgram instance is still registered under any name. */

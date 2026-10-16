@@ -3,7 +3,7 @@ import { Scene } from "../core/scene/scene";
 import { Node } from "../core/scene/nodes/node";
 import { ModelNode } from "../core/scene/nodes/modelNode";
 import { unwrapScriptNode } from "../core/scene/nodes/nodeScripting";
-import { World, Body, Constraint, Material, ContactMaterial, Vec3, SAPBroadphase } from 'cannon-es';
+import { World, Body, Constraint, Material, ContactMaterial, Vec3, SAPBroadphase, Ray, RaycastResult, AABB } from 'cannon-es';
 import { vec3 } from "gl-matrix";
 import { RigidBody, DEFAULT_FRICTION, DEFAULT_RESTITUTION } from "./body";
 import { Ragdoll, RagdollOptions } from "./ragdoll";
@@ -57,6 +57,12 @@ export interface PhysicsRaycastOptions {
   includeGhosts?: boolean;
   /** Last word on each candidate. Return true to skip it. `owner` is null for a body with no Node. */
   reject?: (owner: Node | null, body: Body) => boolean;
+  /**
+   * Only what a character can stand on: DYNAMIC bodies (other characters' capsules, ragdoll limbs, loose
+   * props) are dropped before any shape is tested, which is most of what a short downward ray costs.
+   * Static and kinematic bodies — level geometry, moving platforms — still count.
+   */
+  groundOnly?: boolean;
 }
 
 /**
@@ -719,11 +725,7 @@ export class PhysicsSystem {
     PhysicsSystem._rayTo.set(to[0], to[1], to[2]);
 
     let nearest: PhysicsRaycastHit | null = null;
-    world.raycastAll(
-      PhysicsSystem._rayFrom, PhysicsSystem._rayTo,
-      // Defaults to cannon's own solidity filter; the camera turns it off so ghosts still block the boom.
-      { checkCollisionResponse: opts.checkCollisionResponse ?? true },
-      (result) => {
+    const onHit = (result: RaycastResult) => {
         // `distance` is only meaningful on a hit; it is -1 after a reset.
         if (!result.hasHit) return;
         const body = result.body;
@@ -741,7 +743,17 @@ export class PhysicsSystem {
           body,
           node: owner,
         };
-      });
+    };
+
+    if (opts.groundOnly) {
+      this._raycastGround(world, opts.checkCollisionResponse ?? true, onHit);
+    } else {
+      world.raycastAll(
+        PhysicsSystem._rayFrom, PhysicsSystem._rayTo,
+        // Defaults to cannon's own solidity filter; the camera turns it off so ghosts still block the boom.
+        { checkCollisionResponse: opts.checkCollisionResponse ?? true },
+        onHit);
+    }
 
     physicsStats.rayMs += performance.now() - rayStart;
     physicsStats.rayCount++;
@@ -751,6 +763,45 @@ export class PhysicsSystem {
   // Reused across rays to keep the per-frame path allocation-free on our side.
   private static readonly _rayFrom = new Vec3();
   private static readonly _rayTo = new Vec3();
+
+  /**
+   * `world.raycastAll` minus every DYNAMIC body, decided before any shape test. Same Ray, same per-body
+   * intersection and the same callback contract (mode ALL: every hit, the caller keeps the nearest) — only
+   * the candidate list differs: cannon's broad phase hands a ray every body whose box it overlaps, and a
+   * foot's ray starts inside its own character's capsule.
+   */
+  private _raycastGround(world: World, checkCollisionResponse: boolean, onHit: (result: RaycastResult) => void): void {
+    const ray = PhysicsSystem._groundRay;
+    ray.from.copy(PhysicsSystem._rayFrom);
+    ray.to.copy(PhysicsSystem._rayTo);
+    ray.mode = Ray.ALL;
+    ray.result = PhysicsSystem._groundResult;
+    ray.skipBackfaces = false;
+    ray.collisionFilterMask = -1;
+    ray.collisionFilterGroup = -1;
+    ray.checkCollisionResponse = checkCollisionResponse;
+    ray.callback = onHit;
+    ray.hasHit = false;
+    ray.result.reset();
+    // Private in cannon's typings, but it is the step `intersectWorld` runs before anything else.
+    (ray as unknown as { updateDirection(): void }).updateDirection();
+
+    const box = PhysicsSystem._groundBox;
+    ray.getAABB(box);
+    const candidates = PhysicsSystem._groundCandidates;
+    candidates.length = 0;
+    for (const body of world.bodies) {
+      if (body.type === Body.DYNAMIC) continue;
+      if (body.aabbNeedsUpdate) body.updateAABB();
+      if (body.aabb.overlaps(box)) candidates.push(body);
+    }
+    ray.intersectBodies(candidates);
+    candidates.length = 0;
+  }
+  private static readonly _groundRay = new Ray();
+  private static readonly _groundResult = new RaycastResult();
+  private static readonly _groundBox = new AABB();
+  private static readonly _groundCandidates: Body[] = [];
 
   /**
    * Turn a skinned ModelNode into a ragdoll: spawn a rigid body per bone, link them

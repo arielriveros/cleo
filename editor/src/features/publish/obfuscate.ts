@@ -3,20 +3,27 @@
 // transformObjectKeys/renameGlobals must stay OFF: the returned { onStart, onUpdate, ... } keys are read
 // by the engine when it binds a factory, and `window.CLEO_GAME_SCRIPTS` / `window.CLEO_GAME_MODULES` must keep their names
 // (player/index.tsx). No debugProtection/selfDefending — they reintroduce the Function constructor.
+//
+// Only the transforms that cost nothing per frame: renamed identifiers and strings moved into a shuffled
+// array. Game scripts run every frame, and the heavy set (control-flow flattening, dead-code injection,
+// split strings, numbers as expressions, base64 string array) made Hollow Keep's script update ~20%
+// slower — its string decoder was the single hottest JS function in the published game, ~1.4 ms a frame.
+// Measured against the same scripts unobfuscated, this set is indistinguishable.
 const OBFUSCATOR_OPTIONS = {
   compact: true,
-  controlFlowFlattening: true,
-  controlFlowFlatteningThreshold: 0.75,
-  deadCodeInjection: true,
-  deadCodeInjectionThreshold: 0.4,
+  controlFlowFlattening: false,
+  deadCodeInjection: false,
   identifierNamesGenerator: 'hexadecimal',
-  numbersToExpressions: true,
+  numbersToExpressions: false,
   simplify: true,
-  splitStrings: true,
-  splitStringsChunkLength: 6,
+  splitStrings: false,
   stringArray: true,
-  stringArrayEncoding: ['base64'],
-  stringArrayThreshold: 1,
+  stringArrayEncoding: [],
+  stringArrayThreshold: 0.75,
+  stringArrayCallsTransform: false,
+  stringArrayWrappersCount: 0,
+  stringArrayRotate: true,
+  stringArrayShuffle: true,
   transformObjectKeys: false,
   renameGlobals: false,
 };

@@ -34,6 +34,12 @@ export class ModelNode extends Node {
     private _initializedGeometry: number = -1;
     private _animator: Animator | null;
     private _movementDirection: vec3;
+    /**
+     * Whether the camera saw this model last frame, and how far it was from it (to the surface of its
+     * bounding sphere). Written by the renderer for animated models only; they pick the animation LOD.
+     */
+    public cameraVisible = true;
+    public cameraDistance = 0;
     /** Optional per-node ragdoll simulation config (skinned meshes). Persisted with the scene; read by Ragdoll. */
     private _ragdollConfig: RagdollOptions | null = null;
 
@@ -237,6 +243,7 @@ export class ModelNode extends Node {
         // meshes hold their bind pose.
         if (this._animator && this._scene?.animationsEnabled !== false) {
             const start = sceneStatsDetail.enabled ? performance.now() : 0;
+            this._animator.setLod(this.cameraVisible, this.cameraDistance);
             this._animator.checkTriggers();
             this._animator.update(delta);
             if (sceneStatsDetail.enabled) sceneStats.animatorMs += performance.now() - start;

@@ -130,3 +130,32 @@ export function nearestCommonAncestor(topo: SkeletonTopology, joints: number[]):
     }
     return -1;
 }
+
+const SUBTREES = new WeakMap<SkeletonTopology, (number[] | undefined)[]>();
+
+/**
+ * `joint` and every joint beneath it, parents before children — the joints whose globals a change to
+ * `joint`'s local can move, in an order safe to re-accumulate along. Built once per joint per topology.
+ */
+export function subtreeOrder(topo: SkeletonTopology, joint: number): readonly number[] {
+    let perJoint = SUBTREES.get(topo);
+    if (!perJoint) { perJoint = []; SUBTREES.set(topo, perJoint); }
+    let list = perJoint[joint];
+    if (!list) {
+        list = [];
+        // Depth-first preorder: a parent is always emitted before its children. Guarded against a
+        // malformed `children` graph, which `order` itself tolerates.
+        const seen = new Set<number>();
+        const stack = [joint];
+        while (stack.length) {
+            const j = stack.pop()!;
+            if (seen.has(j)) continue;
+            seen.add(j);
+            list.push(j);
+            const kids = topo.children[j] ?? [];
+            for (let k = kids.length - 1; k >= 0; k--) stack.push(kids[k]);
+        }
+        perJoint[joint] = list;
+    }
+    return list;
+}

@@ -105,5 +105,9 @@ export const SIM_STRIP = { NOISE: 1, FIELDS: 2, COLLIDE: 4, SUB: 8 } as const;
 
 /** The particle-simulation program for a strip mask: the full program at 0. */
 export function particleSimProgram(stripMask: number): string {
-    return stripMask > 0 ? `particleSim~s${stripMask}` : 'particleSim';
+    return PARTICLE_SIM_NAMES[stripMask] ?? 'particleSim';
 }
+
+/** Precomputed: asked for on every simulation step, where a template string would be garbage per step. */
+const PARTICLE_SIM_NAMES: readonly string[] =
+    Array.from({ length: 16 }, (_unused, mask) => mask > 0 ? `particleSim~s${mask}` : 'particleSim');
