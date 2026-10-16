@@ -81,18 +81,20 @@ the rest of them glowing too.
 also falls back to base-colour alpha). Cutout casts correct shadows; blended transparency does not,
 so prefer cutout for foliage and fences.
 
-### Height, displacement and tessellation
+### Height and parallax
 
-These live on the **material**, not in render settings: a displacement map, a depth in **world
-units**, a tessellation level, and a "clip at UV border" option for silhouettes.
+These live on the **material**, not in render settings: a height map (`textures.displacementMap`), a
+depth in **world units** (`displacementScale`), `invertHeight` for depth maps, and `clipSilhouette`
+to also clip flat `0..1`-mapped faces at their uv border.
+
+A PBR material with a height map always runs parallax occlusion mapping — there is no on/off flag.
+The march carves curved silhouettes (the ray bends with the surface's measured curvature and is
+discarded where it leaves the relief) and writes the relief's depth, so intersections follow it.
 
 > Depth is in world units for materials authored since that changed; older materials keep UV units,
 > because converting the stored number needs the mesh's chart scale and one material can sit on both
 > a cube and a photogrammetry scan. The editor shows what one UV unit is worth on the mesh in front
 > of you and converts when you switch.
->
-> Parallax occlusion mapping is **off by default** and was withdrawn for the case it was being used
-> for — real tessellated displacement replaced it.
 
 ## Custom materials
 

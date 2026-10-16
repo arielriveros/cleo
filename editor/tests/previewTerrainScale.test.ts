@@ -55,8 +55,6 @@ const material = (tiling = 20) => {
  * (`tilingScale`), never on the material — writing it into the material would get it saved.
  */
 const metresPerRepeat = (t: Terrain) => t.size / (t.layers[0].tiling * t.tilingScale);
-/** World metres between adjacent render vertices. */
-const spacing = (t: Terrain) => t.size / ((t.resolution - 1) * t.densityFor());
 
 describe('the preview patch matches the landscape it will be painted on', () => {
     it('one repeat covers the same metres', () => {

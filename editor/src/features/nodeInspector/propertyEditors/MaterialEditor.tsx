@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { ModelNode, Material, CustomMaterial, TERRAIN_RELIEF_ENABLED, MeshDisplacer, MAX_TESS_LEVEL, tessSegments, tessBudget, TextureManager } from 'cleo';
+import { ModelNode, Material, CustomMaterial, TERRAIN_RELIEF_ENABLED } from 'cleo';
 import { useEventBus } from '../../EventBusContext';
 import { vec3ToHex } from '../../../utils/UtilFunctions';
 import { newCustomMaterial } from '../../../utils/customMaterials';
@@ -10,7 +10,6 @@ import UvMappingSection from './UvMappingSection';
 import { PropertyTable, PropertyRow, Field, Select, NumberInput, Slider, Toggle, ColorInput, Section } from '../../../components/ui';
 import { MaterialIcon } from '../sectionIcons';
 
-const DISPLACE_HINT = 'Subdivide this mesh in a compute pass and displace it by the Height map, so the relief becomes real geometry — a real silhouette, real self-shadowing, correct depth. Each step multiplies the triangle count by four. WebGPU only; WebGL2 draws the mesh as authored.'
 const TERRAIN_HEIGHT_HINT = 'Depth is a fraction of one texture repeat, the same as on any mesh — so this material reads the same on both. The Terrain Material inspector shows what that is in metres. Relief is drawn per fragment: it shades and self-shadows but has no silhouette, and physics follows the sculpted surface.';
 
 export default function MaterialEditor(props: {node: ModelNode}) {
@@ -73,10 +72,6 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   // Which unit that depth is in. Terrain has its own (metres, baked) and never shows this control.
   const [depthInWorld, setDepthInWorld] = useState<boolean>(
     material.properties.get('depthInWorld') !== false);
-  // Subdivision level for compute tessellation. On the MATERIAL rather than the model: the surface
-  // decides how it wants to be represented, and a material moved onto another mesh carries its relief.
-  const [displaceLevel, setDisplaceLevel] = useState<number>(
-    Number(material.properties.get('displaceLevel') ?? 0));
   // World units spanned by one UV unit on THIS mesh. The number that decides whether a uv depth means
   // millimetres or metres, and the one thing that made parallax on an atlas-mapped scan unusable while
   // looking correct on every primitive: a tiling material puts one repeat inside a few centimetres, a
@@ -85,29 +80,12 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     () => (model.geometry ? model.geometry.worldPerUv() : 1),
     [model.geometry, (model.geometry as any)?.geometryVersion]);
 
-  // What the chosen subdivision costs on THIS mesh, and whether the mesh can carry the map at it.
-  // `texelsPerEdge` is the number that decides the level: it halves every step, and below about two
-  // the vertex grid starts resolving the height map's own features instead of the shape they sit on.
-  const displaceBudget = useMemo(() => {
-    const triangles = Math.floor((model.geometry?.indices.length ?? 0) / 3);
-    return tessBudget(triangles, tessSegments(displaceLevel), 14);
-  }, [model.geometry, displaceLevel]);
-  const heightWidth = (() => {
-    const id = material.textures.get('displacementMap');
-    const image = id ? (TextureManager.Instance.getTexture(id)?.data as HTMLImageElement | undefined) : undefined;
-    return image?.naturalWidth ?? 0;
-  })();
-  // MEASURED from the chart, not guessed from the triangle count — see `Geometry.meanUvEdge`. The
-  // guess read an 8-triangle ramp as 181 texels per edge when the truth is 512, which is why it looked
-  // like the feature was broken rather than like the mesh being too coarse for the map.
-  const texelsPerEdge = heightWidth > 0 && model.geometry
-    ? (model.geometry.meanUvEdge() * heightWidth) / tessSegments(displaceLevel)
-    : 0;
   // Whether the Height map is really a DEPTH map (white = deep), the convention most downloaded PBR
   // packs ship. Nothing can detect this from the bytes, and the wrong answer inverts the relief.
   const [invertHeight, setInvertHeight] = useState<boolean>(
     !!((material as any).invertHeight ?? material.properties.get('invertHeight')));
-  // Discard where the march walks off the face, so the outline follows the height field.
+  // Also discard where the march walks off its uv tile, so a FLAT face's outline follows the height
+  // field. Curved surfaces need no switch: the march bends with them and discards on its own.
   const [clipSilhouette, setClipSilhouette] = useState<boolean>(!!material.properties.get('clipSilhouette'));
   // `isTerrain` is declared at the top of the component — a terrain layer marches its height map
   // exactly as a standard material does, so Depth and Invert apply, but Clip silhouette does not: that
@@ -283,9 +261,6 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   // be based on any material type and reads its height from this slot, which is the same reason Basic
   // and Blinn-Phong carry a Height texture slot at all. The Mode row is the part that is terrain-only.
   // -------------------------------------------------------------------------------------------
-  // Terrain and ordinary materials both MARCH their height map now, with the same unit and the same
-  // meaning, so there is nothing here to gate on the material kind any more. A terrain layer briefly
-  // displaced the terrain's own vertices instead, and these rows forked on that.
   const setHeightProp = (key: string, value: any) => {
     // Terrain layers keep their height settings on the TerrainMaterial itself rather than in the
     // properties map: Terrain._writeLayerUniforms fans each one out to `u_<key>{i}`, one per painted
@@ -313,16 +288,8 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   const heightSection = showHeight ? (
     <Section title='Height' hint={isTerrain ? TERRAIN_HEIGHT_HINT : undefined}>
       <PropertyTable columns={['40%', '60%']}>
-        {/* ONE unit everywhere: a fraction of one texture repeat. The march offsets texture
-            coordinates, so a repeat is the only length either surface knows about, and that is what
-            makes the same material read the same on a mesh and on a terrain layer.
-
-            It was briefly WORLD METRES on terrain, because a layer's relief was baked into the terrain's
-            vertices and a bake works in metres. One authored number driving two mechanisms forced a unit
-            that meant nothing to the texture: 6 cm on a 3.2 m brick is 2% of the feature where the same
-            map on a mesh gets 24%, so terrain looked flat beside an identical material. The Terrain
-            Material inspector quotes the repeat in metres beside Tiling, which is what turns this
-            fraction back into a distance. */}
+        {/* A PBR material marches its height map whenever it has one — there is no switch. Depth is
+            in world units by default; the Depth unit row below explains the older uv meaning. */}
         <PropertyRow label='Depth' hint={depthInWorld
           ? `Relief depth in world units. One UV unit is ${worldPerUv.toFixed(2)} on this mesh, so this is ${(dispScale / Math.max(worldPerUv, 1e-6)).toFixed(4)} of a texture repeat.`
           : `A fraction of one texture repeat. One UV unit is ${worldPerUv.toFixed(2)} world units on this mesh, so this is ${(dispScale * worldPerUv).toFixed(3)} units of relief.`}>
@@ -355,42 +322,6 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                     }} />
           </PropertyRow>
         )}
-        {!isTerrain && (
-          <PropertyRow label='Subdivision' hint={DISPLACE_HINT}>
-            {MeshDisplacer.Instance.canDisplace ? (
-              <div className='flex items-center gap-2 w-full'>
-                <Slider min={0} max={MAX_TESS_LEVEL} step={1} value={displaceLevel}
-                        onChange={(v) => { setHeightProp('displaceLevel', v); setDisplaceLevel(v); }} />
-                <span className='text-ui text-muted whitespace-nowrap'>
-                  {displaceLevel === 0 ? 'off' : `x${tessSegments(displaceLevel) ** 2}`}
-                </span>
-              </div>
-            ) : (
-              <span className='text-ui text-muted'>Needs WebGPU — this device has no compute shader.</span>
-            )}
-          </PropertyRow>
-        )}
-        {!isTerrain && displaceLevel > 0 && (
-          <PropertyRow label='Cost'>
-            <span className='text-ui text-muted'>
-              {displaceBudget.triangles.toLocaleString()} triangles{'  ·  '}
-              {(displaceBudget.vertexBytes / 1e6).toFixed(1)} MB
-              {texelsPerEdge > 0 ? `  ·  ~${texelsPerEdge.toFixed(0)} texels/edge` : ''}
-            </span>
-          </PropertyRow>
-        )}
-        {/* The number that explains a flat result, which otherwise reads as the feature not working.
-            Displacement band-limits to the mip matching its vertex spacing — correct, and it means a
-            mesh far coarser than its map carries only the map's lowest frequencies. */}
-        {!isTerrain && displaceLevel > 0 && texelsPerEdge > 8 && (
-          <PropertyRow label=''>
-            <span className='text-ui text-warning'>
-              One edge spans {texelsPerEdge.toFixed(0)} texels, so the geometry can only carry the
-              lowest frequencies of this map and will look nearly flat. Raise the level, tile the UVs,
-              or leave the detail to the normal map.
-            </span>
-          </PropertyRow>
-        )}
         {/* A height map is white at the PEAKS. A depth map - what `*_disp.png` in most PBR packs
             actually is - is white in the CREVICES. They are the same bytes, so nothing can tell them
             apart; getting it wrong turns brick into mortar rather than looking slightly off. If the
@@ -400,17 +331,17 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                   onChange={(c) => { setHeightProp('invertHeight', c); setInvertHeight(c); }} />
         </PropertyRow>
 
-        {/* Parallax only. The only thing a march can do about a BORDER: it offsets texture coordinates
-            and never moves a vertex, so an outline is straight by construction - this discards where
-            the ray walks off the face instead, biting the height field into the edge. It can only carve
-            inward, never bulge out. Displacement has no use for it, because it moves the edge itself.
+        {/* Curved silhouettes are automatic: the march bends its ray with the surface and discards one
+            that leaves the relief layer, so a sphere's outline is bitten into with no switch. A FLAT
+            face has no curvature to bend with, and its only border is the uv one — this discards where
+            the ray walks off the face's own uv tile. It can only carve inward, never bulge out.
 
-            Off by default and deliberately not inferred: the test is against the 0..1 uv rectangle,
-            which is a real border only on a surface mapped 0..1 - a cube face, a quad. Terrain is
-            tiled, so it never gets this row at all. */}
+            Off by default and deliberately not inferred: the test is against the 0..1 tile, which is a
+            real border only on a surface mapped 0..1 per face - a cube face, a quad. Terrain is tiled,
+            so it never gets this row at all. */}
         {!isTerrain &&
         <PropertyRow label='Silhouette' divider={false}>
-          <Toggle label='Clip at UV border' checked={clipSilhouette} onChange={(c) => {
+          <Toggle label='Clip at UV border' title='Curved silhouettes are automatic. This also clips flat faces at the edge of their 0..1 uv tile — for cubes and quads, not tiled surfaces.' checked={clipSilhouette} onChange={(c) => {
             model.material.properties.set('clipSilhouette', c);
             setClipSilhouette(c);
             markMaterialDirty();

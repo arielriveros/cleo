@@ -211,7 +211,6 @@ types under their historical `Animation*` names.
 | Lights | `DirectionalLight`, `PointLight`, `Spotlight`, `LIGHT_UNIT`, `REFERENCE_ILLUMINANCE`, `DEFAULT_DIRECTIONAL_LUX`, `DEFAULT_LUMENS`, `DEFAULT_RANGE`, `DEFAULT_SOURCE_RADIUS`, `DEFAULT_ANGULAR_RADIUS`, `DEFAULT_SCENE_AMBIENT_LUX`, `MAX_LIGHTS`, `legacyRange`, `distanceAttenuation`, `legacyAmbientFromSceneJson`. |
 | Post chain | `DEFAULT_POST_CHAIN`, `resolvePostChain`, `isDefaultChain`, `isBuiltinEffect`, `materialIndexOf`, `PostChainEntry` / `PostEffectId` / `BuiltinEffectId` *(types)*. |
 | Sprites | `Sprite`, `gridTileset`, `legacySheetTileset`, `remapLegacyFrame`, `isInlineTilesetId`, `INLINE_TILESET_PREFIX`, `SpriteOptions` / `SpriteSide` *(types)*. |
-| Displacement | `MAX_TESS_LEVEL`, `tessSegments`, `tessBudget`, `tessVertsPerTri`, `tessTrisPerTri`, `MeshDisplacer`. |
 | Backend | `webgpuAvailableInBrowser`, `WEBGPU_IMPLEMENTED`, `BackendKind` *(type)*, `setGLContext`, `setDevice`, `WebGL2Device`. |
 | Profiling | `frameStats`, `currentViewport`, `RenderStats` *(type)*, `gpuProfiler`, `frameHistory`, `Ring`, `RENDER_PASSES`, `TOGGLEABLE_PASSES`, `PassTiming` / `RenderPass` / `FrameSample` *(types)*, `cpuProfiler`. |
 

@@ -79,7 +79,7 @@ function materialsOf(model: any): any[] {
 
 /** The serialized form of the parallax test in `usesParallax` (programVariants.ts). */
 function marches(m: any): boolean {
-    return m?.type === 'pbr' && m.parallax === true && !!m.textures?.displacementMap && m.uvProjection !== 'triplanar';
+    return m?.type === 'pbr' && !!m.textures?.displacementMap && m.uvProjection !== 'triplanar';
 }
 
 /** Add the programs one serialized model can draw with: forward and G-buffer, static or skinned. */

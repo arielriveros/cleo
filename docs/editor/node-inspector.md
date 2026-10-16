@@ -120,8 +120,8 @@ The material editor is reached from a model node's material slot, or by opening 
 Shader modes: **Basic**, **Blinn-Phong**, **PBR**, **Cel (toon)**, **Custom (shader)**.
 
 Sections, depending on the shader: Colours (diffuse, specular, ambient, emission, shininess,
-opacity), Textures, Cutout, Toon, Properties, **Height** (displacement, world-unit versus UV depth,
-tessellation, clip-at-UV-border), and Options (side, transparency, shadow casting, wireframe).
+opacity), Textures, Cutout, Toon, Properties, **Height** (height map, world-unit versus UV depth,
+invert, clip-at-UV-border), and Options (side, transparency, shadow casting, wireframe).
 
 Full detail: [Models and materials](models-and-materials.md#the-material-editor).
 

@@ -108,32 +108,28 @@ struct PBRMaterial {
      */
     depthInWorld: i32,
     /**
-     * Whether the parallax march runs at all, independent of the height map being present.
+     * Also discard where the march's hit uv leaves the fragment's own uv TILE, so a FLAT face's
+     * silhouette follows the height field instead of staying a straight polygon edge.
      *
-     * The map also feeds compute-tessellated displacement and terrain's height-aware blend, and POM is
-     * the wrong tool for most surfaces: it cannot move a silhouette and it flattens at steep angles.
-     * Off for anything authored from now on; on when parsing an asset with no marker, because that was
-     * the only behaviour when it was written. See `HeightConfig.parallax`.
-     */
-    parallax: i32,
-    /**
-     * Discard where the march's hit uv leaves the 0..1 rectangle, so the SILHOUETTE follows the height
-     * field instead of staying a straight polygon edge.
+     * Curved surfaces need no flag: the march bends its ray with the surface and discards a ray that
+     * climbs back out of the relief layer (see parallaxOcclusion), which bites the outline of a sphere
+     * or a cylinder on its own. A flat face has no curvature to bend with — its only border is the uv
+     * one, and that is what this tests. Clipping cannot add geometry; it only removes fragments, so a
+     * corner gets BITTEN INTO rather than made bumpy.
      *
-     * This is the only thing parallax can do about a border. The march is a fragment-stage trick that
-     * offsets texture coordinates and never moves a vertex, so an outline is untouched by construction —
-     * the reference this follows has flat-edged quads for exactly that reason. Clipping cannot add
-     * geometry either; it only removes fragments, so a corner gets BITTEN INTO rather than made bumpy.
+     * Off by default and not inferrable: the tile is a real border only where the surface is mapped
+     * 0..1 per face (a cube face, a quad). Tiled ground has no border there.
      *
-     * Off by default and not inferrable: the test is against the 0..1 uv rectangle, which is a real
-     * border only where the surface is mapped 0..1 (a cube face, a quad). Tiled ground has no border
-     * there and would come out punched with a grid of holes.
-     *
-     * Depth is NOT modified — see the G-buffer note below on why frag_depth is refused — so shadows and
-     * intersections still see the unclipped surface, and on a closed back-face-culled mesh a clipped
-     * fragment shows the background rather than the inside of the notch.
+     * Shadow casters still see the unclipped surface (the shadow passes do not march), and on a closed
+     * back-face-culled mesh a clipped fragment shows the background rather than the inside of the notch.
      */
     clipSilhouette: i32,
+    /**
+     * The camera's view-projection (GL convention, unjittered), for the parallax hit's PIXEL DEPTH
+     * OFFSET — see `parallaxDepth`. Per-frame camera state riding in the material block for the same
+     * reason `viewPos` does; written beside it in `Renderer._applyMaterialProperties`.
+     */
+    viewProj: mat4x4<f32>,
     /**
      * Geometric specular antialiasing, on or off. Renderer state, not a material constant — the same
      * reason `viewPos` and `sunDirection` below ride in this block: the deferred geometry stage has no
@@ -201,9 +197,26 @@ fn getNormal(in: VertexOutput, front: bool, su: SurfaceUv, uv: vec2<f32>) -> vec
     return N;
 }
 
+#if CLEO_POM
+/**
+ * The `pom` variants' output: the colour, and the parallax hit's depth (see parallaxDepth). Only
+ * those variants write frag_depth, because writing it costs early-Z for the whole draw.
+ */
+struct PomForwardOut {
+    // NOT `color`: naga's GLSL backend names the fragment output after this member, and the stage
+    // already has a local `color` (vec3) — the two collide and WebGL2 rejects the program.
+    @location(0) pomColor: vec4<f32>,
+    @builtin(frag_depth) depth: f32,
+};
+#endif
+
 @fragment
 // See chunks/pbrGBuffer.wgsl for why this is a separate parameter and not a VertexOutput member.
+#if CLEO_POM
+fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> PomForwardOut {
+#else
 fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+#endif
     // The shadow library reads the fragment coordinate through a module-scope global, because only an
     // entry point receives @builtin(position). Publish it before calling in.
     cleoFragCoord = in.position.xy;
@@ -223,12 +236,16 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
 
     var uv = su.uv0;
     var selfShadow = 1.0;
-    // `parallax`, not just the map being present: the height map is also what a
-    // compute-tessellated displacement reads, and a mesh with real geometry must not ALSO
-    // march the same field per fragment.
-    // Not on triplanar: three blended charts have no single surface for a ray to march.
-#if !defined(CLEO_POM) || CLEO_POM
-    if (u_material.hasDisplacementMap != 0 && u_material.parallax != 0 && su.mode != UV_TRIPLANAR) {
+    // The hit's window depth: the rasterised one unless the march moves it (the `pom` variant only).
+    var pomDepth = in.position.z;
+    // A height map IS the request — there is no separate switch. Not on triplanar: three blended
+    // charts have no single surface for a ray to march.
+    //
+    // Compiled into the `pom` variants ONLY (programVariants.ts), the editor included: those are the
+    // programs that write frag_depth, and writing it costs early-Z for the whole draw, so a material
+    // that does not march must never pay for it. The base and `flat` programs take the #else.
+#if CLEO_POM
+    if (u_material.hasDisplacementMap != 0 && su.mode != UV_TRIPLANAR) {
         let invert = u_material.invertHeight != 0;
         let dims = vec2<f32>(textureDimensions(u_material_displacementMap_texture, 0));
         // One LOD, hoisted: the fade, the step count and every fetch in both marches read it, so they
@@ -248,8 +265,13 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
                            u_material.clipSilhouette != 0);
         let hit = parallaxOcclusion(u_material_displacementMap_texture,
                                     u_material_displacementMap_sampler,
-                                    su.uv0, ddx, ddy, vTan, depth, dims, lod, invert);
-        uv = hit.xy;
+                                    su.uv0, ddx, ddy, vTan, depth, dims,
+                                    parallaxCurvature(basis, toEye), basis.worldPerUv, lod, invert);
+        // THE CURVED SILHOUETTE: the ray climbed back out of the relief layer without meeting the
+        // field, so there is no surface along this pixel's ray. See parallaxOcclusion.
+        if (hit.miss) { discard; }
+        uv = hit.uv;
+        pomDepth = parallaxDepth(in.position.z, fragPos, toEye, hit.dist, u_material.viewProj);
         // Safe here: ddx/ddy were taken in uniform control flow at the top of the stage and every fetch
         // below is textureSampleGrad, so this introduces no derivative under a per-fragment branch.
         //
@@ -260,7 +282,7 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
         // used and merely local where it is not.
         let tile = floor(su.uv0);
         if (u_material.clipSilhouette != 0
-            && (any(hit.xy < tile) || any(hit.xy > tile + vec2<f32>(1.0)))) { discard; }
+            && (any(hit.uv < tile) || any(hit.uv > tile + vec2<f32>(1.0)))) { discard; }
         // The sun comes from the light list this pass already shades with, not from u_transform, so
         // the two can never disagree about where it is.
         let sunDir = u_lighting.u_dirLight.direction;
@@ -268,12 +290,12 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
             let lTan = parallaxToTangent(frame, normalize(-sunDir));
             selfShadow = parallaxShadow(u_material_displacementMap_texture,
                                         u_material_displacementMap_sampler,
-                                        uv, lTan, hit.z, depth, lod, invert);
+                                        uv, lTan, hit.h, depth, lod, invert);
         }
     }
 #else
-    // CLEO_POM=0: the variant for materials that never march (no height map, parallax off, or
-    // triplanar). It still READS the height map, behind a test no material passes: WebGPU builds the
+    // CLEO_POM=0 (or undefined — the base program): for materials that never march (no height map,
+    // or triplanar). It still READS the height map, behind a test no material passes: WebGPU builds the
     // bind-group layout from what the shader uses, and both variants share one bind group.
     if (u_material.dispScale < -1e30) {
         selfShadow = textureSampleLevel(u_material_displacementMap_texture,
@@ -403,5 +425,9 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
 
     var alpha = 1.0;
     if (u_lighting.u_isTransparent != 0) { alpha = u_material.opacity; }
+#if CLEO_POM
+    return PomForwardOut(vec4<f32>(color, alpha), pomDepth);
+#else
     return vec4<f32>(color, alpha);
+#endif
 }

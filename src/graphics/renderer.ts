@@ -140,7 +140,6 @@ import { CubeFramebuffer } from './cubeFramebuffer';
 import { Material, CustomMaterial } from './material';
 import { ensureCustomShader, customShaderReady, customShaderModules, customForwardTypes, screenShaderResources, screenUserSamplerNames, customShaderResources } from './systems/customShaders';
 import { TexturePacker } from './systems/texturePacker';
-import { MeshDisplacer } from './systems/meshDisplacer';
 import { ParticleRenderer, PARTICLE_PROGRAMS, setParticleSimVariants, type ParticleSimFrame, type ParticleDrawFrame } from './particles/particleRenderer';
 import { MAX_FORCE_FIELDS } from '../core/scene/nodes/forceFieldNode';
 import type { ParticleSystemNode } from '../core/scene/nodes/particleSystemNode';
@@ -1609,7 +1608,10 @@ export class Renderer {
     }
 
     /**
-     * The programs this boot builds. The editor: the whole table. With variants: each family's base
+     * The programs this boot builds. The editor: the whole table, plus the parallax (`pom`) variants
+     * for the current shadow filter — those are the only programs that march and write frag_depth, so
+     * the base programs never do, and building them up front keeps the first height-mapped material
+     * from stalling a frame on a synchronous compile. With variants: each family's base
      * entry is replaced by the variants it needs (for the current shadow filter, or exactly those a
      * published list names), and a published list drops everything it does not name — those build on
      * first use instead (see {@link _buildOnDemand}).
@@ -1617,7 +1619,13 @@ export class Renderer {
     private _programsToBuild(): readonly (readonly [string, Omit<ShaderProgramDescriptor, 'label'>])[] {
         const table = this._programTable();
         for (const [name, descriptor] of table) this._tableDescriptors.set(name, descriptor);
-        if (!this._variants) return table;
+        if (!this._variants) {
+            const pom = new Set(Object.keys(EXTRA_LOGICAL_NAMES).map(n => this._physicalOf(n)));
+            return [...table, ...[...pom].flatMap(physical => {
+                const descriptor = this._descriptorFor(physical);
+                return descriptor ? [[physical, descriptor] as const] : [];
+            })];
+        }
         if (this._programList === null) this._variantFilter = this._shadowFilterMode === 1 ? 1 : 0;
         const list = this._programList;
         const out: (readonly [string, Omit<ShaderProgramDescriptor, 'label'>])[] = [];
@@ -1657,10 +1665,14 @@ export class Renderer {
         return (base && Renderer._variantsOf(base)?.[split[1]]) ?? null;
     }
 
-    /** The program a logical name is served by right now. */
+    /**
+     * The program a logical name is served by right now. Without variants every name is its own table
+     * entry — EXCEPT the parallax names, which always mean the `pom` variant: the base program has the
+     * march compiled out, because only a program that marches may write frag_depth.
+     */
     private _physicalOf(name: string): string {
         if (this._variants) return physicalFor(name, this._variantFilter);
-        return EXTRA_LOGICAL_NAMES[name] ?? name;
+        return name in EXTRA_LOGICAL_NAMES ? physicalFor(name, this._shadowFilterMode === 1 ? 1 : 0) : name;
     }
 
     /** Register `program` as `physical` and as every logical name that currently resolves to it. */
@@ -1671,7 +1683,7 @@ export class Renderer {
         }
         this._shaderManager.addShader(physical, program);
         for (const alias in EXTRA_LOGICAL_NAMES)
-            if (EXTRA_LOGICAL_NAMES[alias] === physical) this._shaderManager.addShader(alias, program);
+            if (this._physicalOf(alias) === physical) this._shaderManager.addShader(alias, program);
     }
 
     /**
@@ -2024,12 +2036,6 @@ export class Renderer {
         // into the single packed texture the shaders sample. Before any pass binds a material.
         this._ensurePackedTextures(scene);
 
-        // Compute-tessellate any model asking for it, into buffers its Mesh then draws instead of the
-        // authored ones. Here for the same reason the texture pack is: this is a point in the frame
-        // where NO pass is open, and both open their own encoder. Skipped entirely on WebGL2, which has
-        // no compute stage and keeps the parallax march.
-        this._ensureDisplacedMeshes(scene);
-
         // A teleport or a camera switch makes every temporal history an invalid predecessor. Once per
         // frame, before any pass reads one — see `_detectTemporalCut` for why it is not two tests.
         this._detectTemporalCut(scene);
@@ -2376,14 +2382,6 @@ export class Renderer {
 
     // Keep every material's derived texture slots in step with its authored sources. Per frame rather
     // than on assignment: sources decode asynchronously, and an unresolved pack simply retries.
-    /**
-     * Keep every displaced model's tessellated buffers current.
-     *
-     * Cheap per frame: `MeshDisplacer.update` compares a key over every input the dispatch reads and
-     * returns immediately when nothing moved, so the dispatch fires on a settings change and not
-     * otherwise. Models that stop asking for displacement are released here too, which is what puts
-     * their Mesh back on the authored buffers.
-     */
     /** Run the particle systems' queued simulation steps. See {@link ParticleRenderer.simulate}. */
     private _simulateParticles(scene: Scene): void {
         const frame = this._particleSimFrame(scene);
@@ -2477,19 +2475,6 @@ export class Renderer {
         };
     }
     private readonly _particleViewProj: mat4 = mat4.create();
-
-    private _ensureDisplacedMeshes(scene: Scene): void {
-        const displacer = MeshDisplacer.Instance;
-        if (!displacer.canDisplace) return;
-        for (const node of scene.models) {
-            // SKINNED MODELS ARE REFUSED, and it is not an oversight. An AnimatedModel's vertices are
-            // deformed by the bone matrices in the VERTEX stage, so a compute pass over its buffer
-            // would tessellate and displace the bind pose and then hand the result to a skinning step
-            // whose joint bindings no longer address it. `lodGenerate` refuses them for the same
-            // reason, and `AnimatedModel.geometryVersion` returns a constant 0 — it never re-uploads.
-            if (node.model instanceof Model) displacer.update(node.model);
-        }
-    }
 
     private _ensurePackedTextures(scene: Scene): void {
         const packer = TexturePacker.Instance;
@@ -6360,6 +6345,7 @@ export class Renderer {
      * lighting block instead.
      */
     private static readonly _UV_IDENTITY = [1, 1, 0, 0];
+    private readonly _materialViewProj: mat4 = mat4.create();
 
     private _applyMaterialProperties(material: Material): void {
         for (const [name, value] of material.properties)
@@ -6379,6 +6365,13 @@ export class Renderer {
         }
         this._shaderManager.setUniform('u_material.viewPos', this._activeCamera.position);
         this._shaderManager.setUniform('u_material.sunDirection', this._sunDirection);
+        // The parallax hit's pixel depth offset (`parallaxDepth`). Built from the camera being drawn
+        // NOW rather than the frame's cached `_viewProj`, so a probe or thumbnail capture that swaps the
+        // active camera offsets against its own projection. Unjittered and GL-convention on purpose:
+        // the shader adds a DELTA to the rasterised depth, which neither the jitter nor WebGPU's 0..1
+        // remap changes.
+        mat4.multiply(this._materialViewProj, this._activeCamera.projectionMatrix, this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_material.viewProj', this._materialViewProj);
         // Renderer state in a material block for the third time, and the same reason as the two above:
         // the deferred geometry stage binds no lighting block. `setUniform` no-ops on the material
         // types that do not declare it (basic, blinn-phong), which is what keeps this one line enough.
@@ -10022,6 +10015,11 @@ export class Renderer {
         this._shadowFilterMode = v === 1 ? 1 : 0;
         // With variants the filter is compiled into the lit programs: switch those over too.
         this._requestVariantFilter(this._shadowFilterMode as ShadowFilter);
+        // Without them, only the forward parallax names are filter-bound (see `_physicalOf`). Drop their
+        // aliases so the next bind resolves them to the other filter's variant.
+        if (!this._variants && this._deviceReady)
+            for (const name of FILTER_DEPENDENT)
+                if (name in EXTRA_LOGICAL_NAMES) this._shaderManager.removeShader(name);
     }
 
     /** How dark a fully shadowed pixel gets. 1 = full occlusion, lower lifts shadows artistically. */

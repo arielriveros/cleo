@@ -147,16 +147,31 @@ normal maps keep working (their tangent frame is rebuilt per face). Parallax rel
 Box modes but not Triplanar. Cutout shadows still use the model's UVs. The material preview's **Box**
 shape (a stretched 2 × 1 × 0.5 m block) is the quickest way to compare modes.
 
-### Height: displacement, tessellation and parallax
+### Height and parallax
 
-The single most confusing part of the material editor, so it is worth being precise.
+A **Height** map turns into parallax occlusion mapping, on every PBR material that has one: there is
+no separate switch, the map being there is the request.
 
 | Control | Meaning |
 |---|---|
-| **Displacement map** | A height map, read from the red channel. Available on every material type. |
+| **Height map** | Read from the red channel, white = high. Available on every material type (Basic and Blinn-Phong carry it for terrain layers; only PBR marches it). |
 | **Depth** | How deep the relief is, in **world units**. |
-| **Tessellation level** | How finely the mesh is subdivided to carry that relief, with a read-out of triangles, megabytes and texels per edge. |
-| **Clip at UV border** | Silhouette handling on surfaces mapped `0..1`. |
+| **Invert** | The map is a *depth* map (white = deep), as most downloaded `*_disp.png` files are. |
+| **Clip at UV border** | Also bite the relief into the edges of flat faces mapped `0..1` (cube faces, quads). Leave it off on tiled surfaces. |
+
+What the march does, per pixel:
+- **Offsets every texture fetch** to where the view ray meets the height field, and self-shadows the
+  relief from the sun.
+- **Carves curved silhouettes.** The ray bends with the surface's curvature, which is measured from
+  the mesh's own normals, so the outline of a sphere, a cylinder or an organic model is bitten into
+  by the relief instead of staying smooth. Nothing to set up and no import step; skinned models work
+  too. A flat face has no curvature to bend with, which is what **Clip at UV border** is for.
+- **Writes the relief's depth**, so other objects intersect the bumps rather than the flat polygon,
+  and lighting and SSAO see it too. This costs early depth rejection for those draws only — materials
+  without a height map never pay for it.
+
+Limits: shadow casters still use the flat polygon, and the relief cannot bulge *outward* past the
+mesh — it carves inward from the surface. Triplanar mapping does not march.
 
 Depth is in **world units** for materials authored since that changed. Older materials keep UV
 units, because converting the stored number needs the mesh's chart scale, and one material can sit
@@ -168,14 +183,8 @@ front of you and converts when you switch the unit.
 > 47.97 world units — so a default of `0.05` asked for 2.4 units of relief on a branch 12.7 units
 > thick.
 
-Tessellation turns the height map into **real geometry**, with a real silhouette and real
-self-shadowing, and it is picked up by every draw path including shadows and depth. It requires
-WebGPU (there is no compute stage in WebGL 2, which draws the mesh as authored), and **skinned
-models are refused** — an animated mesh is deformed by bone matrices in the vertex stage, so
-displacing its buffer would displace the bind pose.
-
-**Parallax occlusion mapping is off by default and was withdrawn**, including for materials saved
-before the flag existed. Real displacement replaced it for the case it was being used for.
+Compute-shader tessellation (turning the height map into real geometry) was tried and removed; a
+`displaceLevel` stored in an older material is ignored and dropped on the next save.
 
 ## Textures
 

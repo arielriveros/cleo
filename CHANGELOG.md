@@ -16,6 +16,17 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Parallax occlusion mapping is back, with curved silhouettes and depth.** Every PBR material with
+  a height map marches it — there is no on/off flag any more, and materials saved with
+  `parallax: false` march too. The ray now bends with the surface's curvature, measured per pixel from
+  the interpolated normal (Oliveira & Policarpo's curved relief mapping, with no vertex attribute or
+  import step), and a ray that leaves the relief layer is discarded, so a sphere's outline is bitten
+  into by the relief. The march also writes the hit's depth, so other geometry intersects the bumps
+  rather than the polygon. Only the parallax shader variants write depth — the editor now binds them
+  too — so materials without a height map keep early-Z. **Clip at UV border** stays for flat faces.
+- **Compute-shader tessellation is removed.** It did not hold up well enough to keep: `MeshDisplacer`,
+  `Material.displaceLevel`, the Subdivision/Cost rows in the material editor and the `MAX_TESS_LEVEL`
+  family of exports are gone. A stored `displaceLevel` is ignored and dropped on the next save.
 - **Animation Controller assets (`.controller`).** A state machine — parameters, states,
   transitions, layers, action slots — as an asset any number of characters share, like Unity's
   Animator Controller. Create one from **+ Add**, or with **Save as Controller…** in the state

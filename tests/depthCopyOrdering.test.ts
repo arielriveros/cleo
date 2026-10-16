@@ -8,7 +8,7 @@ import { join } from 'path';
  * `_copyDepth` is the only helper in the renderer that CONSUMES what the frame has already drawn —
  * the deferred G-buffer depth handed to the forward overlay, the opaque snapshot the post passes and
  * TAA read, and the coverage an offscreen capture resolves its alpha from. Every other self-contained
- * encoder in the tree (the cloud noise bake, the mesh displacer, the channel packer, the shadow-layer
+ * encoder in the tree (the cloud noise bake, the channel packer, the shadow-layer
  * clear) only PRODUCES data, so submitting early is fine or even required for those.
  *
  * That distinction is the whole test. On WebGPU `finish()` submits, while the frame's render passes

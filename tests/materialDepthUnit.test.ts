@@ -58,50 +58,6 @@ describe('Geometry.worldPerUv measures what one uv unit is worth', () => {
     });
 });
 
-describe('Geometry.meanUvEdge decides what geometry can carry', () => {
-    /**
-     * A displacement bake band-limits to the mip matching its output vertex spacing, and that spacing is
-     * `meanUvEdge / segments` in uv. Getting this from `sqrt(triangleCount)` instead — the first
-     * attempt — conflates mesh density with CHART density: an 8-triangle ramp whose faces each carry a
-     * 0..1 chart came out as 181 texels per output edge when the truth is 512, so it sampled mip 7.5 of
-     * a 4096 map and displaced by a near-constant. "Almost totally flat" was that. The guess only spared
-     * dense meshes, where it happened to land near the truth.
-     */
-    const quad = (size: number, uvSpan: number) => new Geometry(
-        [0, 0, 0, size, 0, 0, size, size, 0, 0, size, 0],
-        [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1],
-        [0, 0, uvSpan, 0, uvSpan, uvSpan, 0, uvSpan],
-        [], [], [0, 1, 2, 0, 2, 3], false);
-
-    it('does not depend on the mesh world size, only on the chart', () => {
-        // The whole point: two meshes of wildly different size with the same 0..1 chart carry the map
-        // equally badly.
-        expect(quad(1, 1).meanUvEdge()).toBeCloseTo(quad(100, 1).meanUvEdge(), 6);
-    });
-
-    it('falls as the chart tiles, which is what makes detail carryable', () => {
-        const one = quad(1, 1).meanUvEdge();
-        expect(quad(1, 8).meanUvEdge() / one, '8 repeats: eight times shorter an edge').toBeCloseTo(8, 4);
-    });
-
-    it('a 0..1 chart on a cube face is 512 texels per edge at level 3 - correctly flat', () => {
-        // Not a bug and not fixable by subdivision: 4096 texels across a face cannot be represented by
-        // nine vertices along it. This is the number the editor warns with.
-        const edge = Geometry.Cube().meanUvEdge();
-        const texelsPerEdge = (edge * 4096) / 8;
-        expect(texelsPerEdge).toBeGreaterThan(400);
-        // A dense chart is the opposite case, and lands where the scan does.
-        const sphere = (Geometry.Sphere().meanUvEdge() * 4096) / 8;
-        expect(sphere).toBeLessThan(32);
-    });
-
-    it('is 0 for a mesh with no chart, so a caller can tell "cannot band-limit"', () => {
-        expect(new Geometry([0, 0, 0, 1, 0, 0, 0, 1, 0], [], [], [], [], [0, 1, 2], false).meanUvEdge())
-            .toBe(0);
-        expect(new Geometry().meanUvEdge()).toBe(0);
-    });
-});
-
 describe('the unit survives a save/load round trip, and its ABSENCE means uv', () => {
     const roundTrip = (m: Material) => Material.parse(JSON.parse(JSON.stringify(m.serialize())));
 
@@ -132,30 +88,21 @@ describe('the unit survives a save/load round trip, and its ABSENCE means uv', (
         expect(Material.parse(legacy).properties.get('depthInWorld')).toBe(false);
     });
 
-    it('PARALLAX is off everywhere, INCLUDING for an unmarked legacy asset', () => {
-        // The one marker in this file that does NOT preserve old behaviour, and deliberately so: the
-        // march was withdrawn rather than re-defaulted, and the editor no longer has a control that
-        // could switch it back off, so a legacy material that kept marching would be stuck that way.
-        expect(Material.PBR({}).properties.get('parallax'), 'created: off').toBe(false);
-
-        const legacy = Material.PBR({ parallax: true }).serialize() as any;
-        delete legacy.parallax;
-        expect(Material.parse(legacy).properties.get('parallax'), 'no marker: OFF').toBe(false);
-
-        // An asset that explicitly asked for it still gets it — the shader still honours the flag.
-        expect(Material.PBR({ parallax: true }).properties.get('parallax')).toBe(true);
-        const on = Material.PBR({ parallax: true }).serialize() as any;
-        expect(Material.parse(on).properties.get('parallax'), 'explicit true survives').toBe(true);
+    it('there is no parallax flag: a height map always marches, legacy assets included', () => {
+        // The march was withdrawn once behind a `parallax` marker. It is back unconditionally, so the
+        // marker is neither written nor read — an asset that stored `parallax: false` marches too.
+        const legacy = { ...(Material.PBR({ textures: { displacementMap: 'h' } }).serialize() as any), parallax: false };
+        expect('parallax' in (Material.PBR({}).serialize() as any)).toBe(false);
+        const parsed = Material.parse(legacy);
+        expect(parsed.properties.has('parallax')).toBe(false);
+        expect(parsed.properties.get('hasDisplacementMap')).toBe(true);
     });
 
-    it('the subdivision level lives on the MATERIAL and round-trips', () => {
-        // Moved off the model: the surface decides how it wants to be represented, so a material
-        // carried onto another mesh brings its relief with it.
-        expect(Material.PBR({}).properties.get('displaceLevel'), 'off by default').toBe(0);
-        const m = Material.PBR({ displaceLevel: 3 });
-        expect(m.properties.get('displaceLevel')).toBe(3);
-        expect(Material.parse(JSON.parse(JSON.stringify(m.serialize()))).properties.get('displaceLevel'))
-            .toBe(3);
+    it('a stored compute-tessellation level is ignored and dropped on re-save', () => {
+        const old = { ...(Material.PBR({}).serialize() as any), displaceLevel: 3 };
+        const parsed = Material.parse(old);
+        expect(parsed.properties.has('displaceLevel')).toBe(false);
+        expect('displaceLevel' in (parsed.serialize() as any)).toBe(false);
     });
 
     it('the marker is not `depthUnit`, which belongs to terrain', () => {

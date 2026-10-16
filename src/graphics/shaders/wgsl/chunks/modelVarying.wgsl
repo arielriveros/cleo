@@ -6,7 +6,7 @@
 // guard, and a second definition of a struct is a compile error.
 //
 // chunks/parallax.wgsl rides in here for that same "exactly once" property. Its consumers are
-// FRAGMENT chunks (terrainLayers, pbrGBuffer, pbrForward), and a program can include more than one
+// FRAGMENT chunks (pbrGBuffer, pbrForward), and a program can include more than one
 // of those, so including it from each would define its functions twice. Here it cannot.
 
 #include "./parallax.wgsl"

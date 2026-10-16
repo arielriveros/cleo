@@ -71,8 +71,35 @@ describe('shader variants are drop-in replacements for their base program', () =
             expect(used(program), `${name}~${tag}: a binding stopped being read`).toEqual(used(base));
     });
 
-    it('keep the vertex stage byte-identical', () => {
+    /**
+     * naga writes every struct in the module into both stages, so a variant whose FRAGMENT OUTPUT gains
+     * a member (the parallax variants add `frag_depth`) shows that struct in its vertex text too. A
+     * declaration nothing in the vertex stage uses cannot change its attributes, so those structs — and
+     * only those — are compared out.
+     */
+    const FRAGMENT_OUTPUTS = ['GBuffer', 'PomForwardOut'];
+    const vertexOf = (glsl: string | undefined) => (glsl ?? '').replace(
+        new RegExp(String.raw`struct (${FRAGMENT_OUTPUTS.join('|')}) \{[^}]*\};\r?\n`, 'g'), '');
+
+    /**
+     * naga's GLSL backend names each fragment output after its WGSL struct member. A local of the same
+     * name in the entry point then shadows it and the generated GLSL fails to compile on WebGL2
+     * ("dimension mismatch") — which naga's own validation and every WGSL-side check let through.
+     * That took the whole editor down: a `PomForwardOut.color` against fs_main's `var color: vec3`.
+     */
+    it('no fragment output shares a name with a local in the generated GLSL', () => {
+        for (const { name, base, variants } of FAMILIES)
+            for (const { tag, program } of [{ tag: 'base', program: base }, ...variants]) {
+                const glsl = program.fragment ?? '';
+                const outs = [...glsl.matchAll(/layout\(location = \d+\) out \w+ (\w+);/g)].map(m => m[1]);
+                for (const out of outs)
+                    expect(glsl, `${name}~${tag}: local '${out}' shadows the fragment output`)
+                        .not.toMatch(new RegExp(String.raw`^\s+\w+ ${out} = `, 'm'));
+            }
+    });
+
+    it('keep the vertex stage byte-identical, fragment output declarations aside', () => {
         for (const { name, base, variants } of FAMILIES) for (const { tag, program } of variants)
-            expect(program.vertex, `${name}~${tag} vertex`).toBe(base.vertex);
+            expect(vertexOf(program.vertex), `${name}~${tag} vertex`).toBe(vertexOf(base.vertex));
     });
 });

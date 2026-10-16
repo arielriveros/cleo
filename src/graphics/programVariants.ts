@@ -12,7 +12,10 @@
 //
 // Variants are only used where the program set is planned up front (a published game, which knows its
 // shadow filter and materials) or when asked for explicitly. The editor builds the base programs, whose
-// runtime branches cover every setting it can toggle without a recompile.
+// runtime branches cover every setting it can toggle without a recompile — with ONE exception: the
+// parallax march is never compiled into a base program, because the march writes frag_depth and that
+// costs early-Z for every draw of the program. So the `Pom` names below mean their `pom` variant
+// everywhere, the editor included (see Renderer._physicalOf).
 
 /** The shadow filter a variant compiles in: 0 = 3x3 PCF, 1 = rotated Poisson. */
 export type ShadowFilter = 0 | 1;
@@ -48,8 +51,9 @@ const RULES: Readonly<Record<string, Rule>> = {
 };
 
 /**
- * Logical names that are not program-table entries. Without variants each is just another name for
- * its base program, so a call site can always ask for the `Pom` name a material needs.
+ * Logical names that are not program-table entries, each mapped to the table entry whose import
+ * declares its variant. These always resolve to the `pom` variant (with or without the variant
+ * system), never to the base program — the base has the march compiled out.
  */
 export const EXTRA_LOGICAL_NAMES: Readonly<Record<string, string>> = {
     pbrPom: 'pbr',
@@ -84,12 +88,13 @@ export function variantLogicalNames(): string[] { return Object.keys(RULES); }
 
 /**
  * Whether any of `materials` runs the parallax march — the condition chunks/pbrForward.wgsl and
- * chunks/pbrGBuffer.wgsl test, read off the material's properties: a height map, parallax on, and not
- * triplanar (uvProjection 2), which has no single surface to march. Such a model draws with the `Pom`
- * variant, which keeps that same test inside, so one marching submesh is enough to choose it.
+ * chunks/pbrGBuffer.wgsl test, read off the material's properties: a height map, and not triplanar
+ * (uvProjection 2), which has no single surface to march. There is no on/off flag: the map being there
+ * IS the request. Such a model draws with the `Pom` variant, which keeps that same test inside, so one
+ * marching submesh is enough to choose it.
  */
 export function usesParallax(materials: readonly { properties: Map<string, unknown> }[]): boolean {
-    return materials.some(m => !!m.properties.get('hasDisplacementMap') && !!m.properties.get('parallax')
+    return materials.some(m => !!m.properties.get('hasDisplacementMap')
                                && m.properties.get('uvProjection') !== 2);
 }
 

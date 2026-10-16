@@ -45,7 +45,7 @@ export const PREVIEW_PLANE_SIZE = 2.6
 /**
  * A flat plane with its UVs repeated so one texture repeat covers the SAME metres it does on the preview
  * sphere — `2 * PI * r / PREVIEW_SPHERE_TILING` for a unit sphere. Switching shapes then changes the
- * surface, never the apparent scale of the material on it. Subdivided, so displacement has vertices.
+ * surface, never the apparent scale of the material on it.
  */
 export function previewPlaneGeometry(): Geometry {
   const g = Geometry.Plane(PREVIEW_PLANE_SIZE, PREVIEW_PLANE_SIZE, 48, 48)

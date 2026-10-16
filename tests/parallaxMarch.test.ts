@@ -418,7 +418,7 @@ describe('a clipped material is depth-bounded', () => {
             // The self-shadow must march the SAME field the view ray did, or the relief and its
             // shadow disagree about how deep the surface is.
             expect((src.match(/lod, invert\)/g) ?? []).length, `${file}: march + shadow`).toBe(2);
-            expect(src, `${file}: shadow uses the bounded depth`).toMatch(/lTan, hit\.z, depth, lod, invert\)/);
+            expect(src, `${file}: shadow uses the bounded depth`).toMatch(/lTan, hit\.h, depth, lod, invert\)/);
         }
     });
 });

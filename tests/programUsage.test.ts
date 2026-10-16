@@ -64,11 +64,11 @@ describe('programsFor', () => {
     it('builds the parallax variant only for a material that marches', () => {
         const model = (material: object) => ({ type: 'model', model: { material } });
         const flat = createProgramUsage();
-        usageFromSceneJson(model({ type: 'pbr', parallax: true, textures: { displacementMap: 'h' }, uvProjection: 'triplanar' }), flat);
+        usageFromSceneJson(model({ type: 'pbr', textures: { displacementMap: 'h' }, uvProjection: 'triplanar' }), flat);
         expect(programsFor(flat)).toContain('pbr~pcf');
         expect(programsFor(flat)).not.toContain('pbr~pcf.pom');
         const pom = createProgramUsage();
-        usageFromSceneJson(model({ type: 'pbr', parallax: true, textures: { displacementMap: 'h' } }), pom);
+        usageFromSceneJson(model({ type: 'pbr', textures: { displacementMap: 'h' } }), pom);
         expect(programsFor(pom)).toContain('pbr~pcf.pom');
         expect(programsFor(pom)).toContain('pbrGeometry~pom');
     });

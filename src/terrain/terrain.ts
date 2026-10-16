@@ -48,17 +48,6 @@ export interface TerrainLayer {
     dispScale: number;
     /** The height map is a DEPTH map (white = deep). */
     invertHeight: boolean;
-    /**
-     * Whether this layer has relief to march. True exactly when it has a height map.
-     *
-     * It used to mean "raises the terrain's VERTICES", and for a while terrain relief was geometry
-     * only: a layer's height map was cut at the mip covering one vertex, the coarse half was baked into
-     * the mesh and the fine half marched. Two mechanisms sharing one authored number could not be made
-     * to agree — vertex spacing and texture footprint are unrelated quantities — so the same map never
-     * read the same on terrain as on a mesh. Terrain marches its whole height map now, exactly as a
-     * standard material does, and the terrain's own sculpted heightfield is its only geometry.
-     */
-    displace: boolean;
     /** Height-aware blend sharpness (0 = linear splat blend). */
     heightBlend: number;
     /** Albedo tint / base color (multiplies the albedo texture). */
@@ -796,7 +785,7 @@ export class Terrain {
         const s = tm ? deriveSurface(tm, tm.tiling, tm.invertHeight) : null;
         return {
             albedoId: s?.albedoId ?? null, aoId: s?.aoId ?? null, normalId: s?.normalId ?? null, heightId: s?.heightId ?? null,
-            dispScale: tm?.displacementScale ?? 0.05, invertHeight: tm?.invertHeight ?? false, displace: !!s?.heightId,
+            dispScale: tm?.displacementScale ?? 0.05, invertHeight: tm?.invertHeight ?? false,
             heightBlend: tm?.heightBlend ?? 0, color: s?.color ?? [1, 1, 1], metallic: s?.metallic ?? 0,
             roughness: s?.roughness ?? 1, tiling: tm?.tiling ?? 20, auto: tm?.auto ?? false,
             hRange: tm ? [tm.hRange[0], tm.hRange[1]] : [0, 100], sRange: tm ? [tm.sRange[0], tm.sRange[1]] : [0, 1],

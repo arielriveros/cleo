@@ -186,12 +186,8 @@ interface PBRProperties extends UvConfig {
      */
     emissiveIntensity?: number;
     /**
-     * Height relief depth. UV units on an ordinary material, where the parallax march offsets texture
-     * coordinates; WORLD METRES on a terrain layer, where it moves the terrain's own vertices.
-     *
-     * The two are different quantities because they do different things, and pretending otherwise is
-     * what made terrain relief unauthorable: a shared unit meant the terrain number changed meaning with
-     * the terrain's size.
+     * Parallax relief depth, in the unit `depthSpace` names (world units, or a fraction of one texture
+     * repeat).
      */
     displacementScale?: number;
     /**
@@ -204,20 +200,17 @@ interface PBRProperties extends UvConfig {
      */
     invertHeight?: boolean;
     /**
-     * Discard where the parallax ray walks off the edge of the face, so the SILHOUETTE follows the
-     * height field instead of staying a straight polygon edge.
+     * Also discard where the parallax ray walks off the edge of its uv TILE, so a flat face's border
+     * follows the height field instead of staying a straight polygon edge.
      *
-     * Off by default, and it has to be: the test is against the 0..1 uv rectangle, which is a real
-     * border only on a surface mapped 0..1 (a cube face, a quad). A tiled surface has no border there
-     * and would come out punched with a grid of holes.
+     * Curved silhouettes need no flag — the march bends with the surface and discards a ray that leaves
+     * the relief layer (see `parallaxOcclusion`). A FLAT face has no curvature to bend with, so its only
+     * border is the uv one. Off by default, and it has to be: the 0..1 tile is a real border only on a
+     * surface mapped 0..1 per face (a cube face, a quad); tiled ground has none there.
      */
     clipSilhouette?: boolean;
     /** Unit for `displacementScale`. See {@link HeightConfig.depthSpace} — this is the same flag. */
     depthSpace?: 'world' | 'uv';
-    /** Whether the parallax march runs. See {@link HeightConfig.parallax} — the same flag. */
-    parallax?: boolean;
-    /** Compute-tessellation level. See {@link HeightConfig.displaceLevel}. */
-    displaceLevel?: number;
     textures?: {
         baseColorTexture?: string;
         /**
@@ -266,21 +259,14 @@ export function applyMask(material: Material, mask: string | undefined | null,
 }
 
 /**
- * What a height field does, and where.
+ * What a height field does: parallax occlusion mapping, and nothing else.
  *
- * On an ORDINARY material it is parallax occlusion mapping: the fragment stage offsets texture
- * coordinates and never moves a vertex, so a silhouette stays a straight polygon edge and the relief
- * flattens under a grazing view. Cheap and resolution-independent.
- *
- * On a TERRAIN paint layer it raises the terrain's own vertices — always, with no mode to choose. Real
- * geometry, so it silhouettes and self-occludes. Only terrain can do this, because only terrain rebuilds
- * its vertices from a field it owns; a mesh's vertices are what `Model.serialize()` writes, so
- * displacing them would be saved over the authored asset. See `Terrain._displacementAt`.
- *
- * `displacementScale` is read in each mode's natural unit: tiled uv for the march (which offsets texture
- * coordinates and has no world scale of its own), world metres for terrain (which moves vertices, and
- * where an artist is asking for "three centimetres of gravel"). Terrains authored before the terrain unit
- * changed are migrated on load by `Terrain.deserialize`.
+ * A PBR material with a height map ALWAYS marches it (there is no on/off flag — the map being there is
+ * the request). The fragment stage walks a ray through the field, offsets every texture fetch to the
+ * hit, discards rays that leave the relief layer on a curved surface (so silhouettes are bitten into),
+ * and writes the hit's depth so other geometry intersects the relief rather than the polygon. See
+ * `chunks/parallax.wgsl`. No vertex is ever moved: geometric displacement was tried (a compute
+ * tessellator) and removed.
  */
 
 /** Everything on the height slot except the texture itself. */
@@ -308,32 +294,6 @@ export interface HeightConfig {
      * `depthUnit: 'metres'` in a saved terrain is the double-migration hazard that marker guards.
      */
     depthSpace?: 'world' | 'uv';
-    /**
-     * Subdivision level for compute tessellation, or 0 for none.
-     *
-     * On the MATERIAL, beside the height map it displaces by, rather than on the model — the surface
-     * decides how it wants to be represented, and a material carried onto another mesh brings its relief
-     * with it. Each level multiplies the triangle count by four, so this is a small number; see
-     * `MAX_TESS_LEVEL`.
-     *
-     * WebGPU only. WebGL2 has no compute stage, so it is inert there and the mesh draws as authored —
-     * the intended fallback, not an error.
-     */
-    displaceLevel?: number;
-    /**
-     * Whether the PARALLAX MARCH runs. OFF EVERYWHERE, including for an asset that predates the flag.
-     *
-     * That last part is a deliberate REMOVAL, not the usual legacy-preservation rule every other marker
-     * in this file follows. The behaviour was withdrawn rather than re-defaulted: the editor no longer
-     * offers a control for it, so a material that kept marching would have no way to stop. Displacement
-     * replaced it for the case it was being used for — POM cannot move a silhouette and it flattens at
-     * steep angles, and on the photogrammetry scan that drove this (25.6 degrees of median dihedral,
-     * 80.4 at p90) it never looked like anything but a smear.
-     *
-     * The march itself survives in `chunks/pbrGBuffer.wgsl` and `chunks/pbrForward.wgsl` and still
-     * honours this flag, so an asset that explicitly stores `true` re-enables it.
-     */
-    parallax?: boolean;
 }
 
 /** How a material maps its textures onto a surface. See {@link UvConfig}. */
@@ -438,9 +398,6 @@ export function applyHeight(material: Material, height: string | undefined | nul
     // Defaults to WORLD, so anything authored from now on carries a unit the shader can scale. Only
     // `parse` passes 'uv', for assets written before the unit existed — see HeightConfig.
     material.properties.set('depthInWorld', (cfg.depthSpace ?? 'world') === 'world');
-    // Off unless asked for. Only `parse` passes true, for assets written before the flag existed.
-    material.properties.set('parallax', cfg.parallax === true);
-    material.properties.set('displaceLevel', Math.max(0, Math.floor(cfg.displaceLevel ?? 0)));
     material.properties.set('invertHeight', cfg.invertHeight ? true : false);
     material.properties.set('clipSilhouette', cfg.clipSilhouette ? true : false);
     material.properties.set('hasDisplacementMap', height ? true : false);
@@ -731,8 +688,6 @@ export class Material {
                 // written before this existed implies — so the read in `parse` must stay forever. PBR
                 // only: it is the one branch whose shaders actually march.
                 depthSpace: this.properties.get('depthInWorld') === false ? 'uv' : 'world',
-                parallax: this.properties.get('parallax') === true,
-                displaceLevel: this.properties.get('displaceLevel') ?? 0,
                 invertHeight: this.properties.get('invertHeight'),
                 clipSilhouette: this.properties.get('clipSilhouette'),
                 ...uvJson(this),
@@ -868,12 +823,6 @@ export class Material {
                 // it would silently reinterpret every stored depth as world units. `applyHeight` defaults
                 // the other way (world) for anything CREATED rather than parsed.
                 depthSpace: m.depthSpace === 'world' ? 'world' : 'uv',
-                // `=== true`, NOT `!== false` — and it is the one marker here that does not preserve
-                // old behaviour. An old asset's silence reads as OFF because the march was WITHDRAWN,
-                // not re-defaulted, and the editor has no control left that could switch it back off.
-                // An asset that explicitly stored `true` still marches.
-                parallax: m.parallax === true,
-                displaceLevel: Number(m.displaceLevel ?? 0),
                 invertHeight: !!m.invertHeight,
                 clipSilhouette: !!m.clipSilhouette,
                 // `metallicRoughnessTexture` is the pre-split key; Material.PBR fans it out to both slots.

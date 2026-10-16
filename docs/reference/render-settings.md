@@ -15,7 +15,7 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 
 > Camera-level effects are **not** here. The post-processing chain (which effects run, in what
 > order) is authored per camera; see [post chain](../scripting/rendering.md#post-processing-chain).
-> Displacement, tessellation and parallax live on the **material**, not in render settings.
+> Height maps and parallax live on the **material**, not in render settings.
 
 ---
 

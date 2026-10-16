@@ -1,19 +1,24 @@
-// Parallax occlusion mapping: the tangent frame, the ray march, and the height-field self-shadow.
+// Parallax occlusion mapping: the tangent frame, the ray march, curved silhouettes, the hit's depth
+// and the height-field self-shadow.
 //
 // The march follows https://learnopengl.com/Advanced-Lighting/Parallax-Mapping, and the constants
 // below are calibrated to REACH that reference rather than approximate it — see parallaxRay, which
-// spent a revision claiming a 1/cos asymptote it never came within 30% of. Used by the standard PBR
-// material chunks (pbrGBuffer / pbrForward) AND by terrain, which marches the half of a layer's height
-// map its vertices are too coarse to carry — see `residualHeight` in terrainLayers.wgsl. Terrain does
-// not call `parallaxOcclusion` itself, because it has four uv spaces at once and has to blend the four
-// fields as it goes; it has its own loop and borrows the pieces here (`parallaxFrame`, `parallaxRay`,
-// `parallaxSteps`, `parallaxFade`, `parallaxGrazeFade`).
+// spent a revision claiming a 1/cos asymptote it never came within 30% of. The SILHOUETTE is Oliveira
+// & Policarpo's curved relief mapping ("An Efficient Representation for Surface Details", 2005): the
+// ray bends with the surface's local curvature, and a ray that leaves the relief layer without meeting
+// it is a miss the caller discards — so a sphere's outline is bitten into instead of staying a smooth
+// polygon edge. Unlike the paper, the curvature is MEASURED per pixel from derivatives of the
+// interpolated normal (see parallaxFrame) rather than fitted per vertex on the CPU, so there is no
+// vertex attribute, no import step, and skinned meshes work unchanged.
+//
+// The only callers are the standard PBR material chunks (pbrGBuffer / pbrForward). The terrain layer
+// stack does not march.
 //
 // Included from chunks/modelVarying.wgsl rather than from each consumer. The include resolver has
 // no include-once guard, and a program includes exactly one vertex chunk, so modelVarying is the
 // single place that lands exactly once for every program carrying a TBN — the same reasoning that
-// already puts VertexOutput there. Including this from both terrainLayers and pbrGBuffer would
-// define every function here twice in any program that pulled in both.
+// already puts VertexOutput there. Including this from both PBR chunks would define every function
+// here twice in any program that pulled in both.
 //
 // EVERY texture fetch a caller makes inside a march must be `textureSampleGrad`. `textureSample`
 // takes implicit derivatives, and WGSL permits those only in uniform control flow — which a ray
@@ -109,6 +114,25 @@ const POM_SHADOW_STEPS: i32 = 8;
  * rather than nibbled.
  */
 const POM_CLIP_REACH: f32 = 0.12;
+/**
+ * The silhouette coefficient `c` (see parallaxOcclusion) over which a CONVEX surface takes over from
+ * parallaxGrazeFade.
+ *
+ * The graze fade flattens relief near edge-on, because on a FLAT surface the 1/cos offset diverges
+ * there. On a curved surface it does not: the curved ray's lateral travel is bounded by the curvature
+ * itself (it leaves the layer after at most `1/c` of a flat ray), so the divergence the fade exists for
+ * never happens — and fading the depth to zero right at the outline would leave an uncarved rim, the
+ * exact band where the silhouette is supposed to be bitten in. So once a surface curves enough that a
+ * ray can miss (`c > 0.25`), the fade is lifted, smoothly from 0.1 so nothing pops.
+ */
+const POM_SILHOUETTE_LO: f32 = 0.1;
+const POM_SILHOUETTE_HI: f32 = 0.25;
+/**
+ * Relative degeneracy test for the shape-operator solve: the projected screen derivatives must span at
+ * least this sine of an angle. RELATIVE, like every other guard here — an absolute floor on a per-pixel
+ * quantity is the trap this file has fallen into three times.
+ */
+const POM_SHAPE_MIN_SINE: f32 = 1e-3;
 
 /**
  * The world -> uv basis the march runs in: how far u and v move per unit of world displacement.
@@ -183,12 +207,30 @@ struct ParallaxBasis {
      * asking whether something aliases on either axis, and the wrong one for "how big is this chart".
      */
     worldPerUv: f32,
+    /**
+     * The surface's SHAPE OPERATOR (second fundamental form) in the tangent plane, as the symmetric
+     * 2x2 `(Sxx, Sxy, Syy)` over the orthonormal axes (`shapeAxis`, `cross(n, shapeAxis)`), in world
+     * units^-1. `dirT S dir` is the normal curvature along a tangent direction: positive is CONVEX as
+     * seen from the eye (a sphere from outside reads `1/R` in every direction), negative concave, zero
+     * flat. Zero wherever it cannot be measured, which is the safe answer: zero curvature is exactly
+     * the flat march.
+     */
+    shape: vec3<f32>,
+    /** Unit first axis of `shape`'s tangent basis. */
+    shapeAxis: vec3<f32>,
 };
 
 fn parallaxFrame(fragPos: vec3<f32>, du1: vec2<f32>, du2: vec2<f32>,
                  tbn: mat3x3<f32>, toEye: vec3<f32>) -> ParallaxBasis {
     let dp1 = dpdx(fragPos);
     let dp2 = dpdy(fragPos);
+    // How the shading normal turns across the pixel: the curvature the silhouette needs. Taken here,
+    // beside the position derivatives, because this is the one place guaranteed to be in uniform
+    // control flow. Of the unit normal BEFORE the eye flip below, which is applied to the result as a
+    // sign rather than differentiated across.
+    let nShade = normalize(tbn[2]);
+    let dn1 = dpdx(nShade);
+    let dn2 = dpdy(nShade);
 
     // THE CHART'S OWN AXES, as LINEAR COMBINATIONS of the derivatives. Invert the chain rule
     //
@@ -224,8 +266,8 @@ fn parallaxFrame(fragPos: vec3<f32>, du1: vec2<f32>, du2: vec2<f32>,
     // naga lowers that to gl_FrontFacing, whose sense depends on the winding the projection ends up
     // with, so the two backends can disagree about the same triangle. The view vector cannot disagree
     // with itself, and this covers a double-sided material's back faces for free.
-    let nShade = normalize(tbn[2]);
-    let n = select(-nShade, nShade, dot(nShade, toEye) >= 0.0);
+    let eyeSide = select(-1.0, 1.0, dot(nShade, toEye) >= 0.0);
+    let n = nShade * eyeSide;
 
     // The reciprocal basis, in the SHADING normal's plane.
     //
@@ -244,14 +286,58 @@ fn parallaxFrame(fragPos: vec3<f32>, du1: vec2<f32>, du2: vec2<f32>,
     // nothing, but `jac` is a product of two quantities already floored above, so an exact-zero test is
     // the only one that can misfire neither way.
     if (abs(jac) < 1e-30) {
-        return ParallaxBasis(mat3x3<f32>(vec3<f32>(0.0), vec3<f32>(0.0), n), worldPerUv);
+        return ParallaxBasis(mat3x3<f32>(vec3<f32>(0.0), vec3<f32>(0.0), n), worldPerUv,
+                             vec3<f32>(0.0), vec3<f32>(0.0));
+    }
+
+    // THE SHAPE OPERATOR, from `dn = S dp` over the two screen directions. Both sides go into an
+    // orthonormal basis of the tangent plane (`tp` is non-zero here — `jac` would be zero otherwise),
+    // and the 2x2 is solved by Cramer's rule. `dp` enters LINEARLY into everything but the
+    // determinant, and the determinant is only compared RELATIVELY (to the lengths it is built from)
+    // and divided by — never used as a direction or a sign, the two uses of a derivative cross product
+    // this file has had to revert. Symmetrised, because the true operator is symmetric and the
+    // asymmetric part is measurement noise. `eyeSide` makes the sign relative to the EYE: the inside of
+    // a double-sided sphere reads concave, which is what it is from there.
+    let e1 = normalize(tp);
+    let e2 = cross(n, e1);
+    let a1 = vec2<f32>(dot(dp1, e1), dot(dp1, e2));
+    let a2 = vec2<f32>(dot(dp2, e1), dot(dp2, e2));
+    let m1 = vec2<f32>(dot(dn1, e1), dot(dn1, e2)) * eyeSide;
+    let m2 = vec2<f32>(dot(dn2, e1), dot(dn2, e2)) * eyeSide;
+    let aDet = a1.x * a2.y - a2.x * a1.y;
+    var shape = vec3<f32>(0.0);
+    if (abs(aDet) > POM_SHAPE_MIN_SINE * length(a1) * length(a2)) {
+        let inv = 1.0 / aDet;
+        let sxx = (m1.x * a2.y - m2.x * a1.y) * inv;
+        let sxy = (m2.x * a1.x - m1.x * a2.x) * inv;
+        let syx = (m1.y * a2.y - m2.y * a1.y) * inv;
+        let syy = (m2.y * a1.x - m1.y * a2.x) * inv;
+        shape = vec3<f32>(sxx, 0.5 * (sxy + syx), syy);
     }
 
     // `worldPerUv` folds in here so `vTan.xy` is already in the units `parallaxRay` multiplies by a
     // depth: with a world depth D = depth_uv * worldPerUv, the reference's `vTan.xy / vTan.z * depth`
     // comes out as `-D * (v.T*, v.B*) / (v.n)`, which is the exact offset.
     let k = worldPerUv * det / jac;
-    return ParallaxBasis(mat3x3<f32>(cross(bp, n) * k, cross(n, tp) * k, n), worldPerUv);
+    return ParallaxBasis(mat3x3<f32>(cross(bp, n) * k, cross(n, tp) * k, n), worldPerUv, shape, e1);
+}
+
+/**
+ * The surface's normal curvature along the direction the view ray travels, in world units^-1.
+ * Positive is convex as seen from the eye. See `ParallaxBasis.shape`.
+ *
+ * The direction is the view vector's tangential part; its sign is irrelevant (curvature is quadratic
+ * in it). Head-on there is no direction, and also no lateral travel for curvature to act over, so 0.
+ */
+fn parallaxCurvature(basis: ParallaxBasis, toEye: vec3<f32>) -> f32 {
+    let n = basis.frame[2];
+    let vt = toEye - n * dot(toEye, n);
+    let len2 = dot(vt, vt);
+    if (len2 < 1e-12) { return 0.0; }
+    let dir = vt * inverseSqrt(len2);
+    let x = dot(dir, basis.shapeAxis);
+    let y = dot(dir, cross(n, basis.shapeAxis));
+    return basis.shape.x * x * x + 2.0 * basis.shape.y * x * y + basis.shape.z * y * y;
 }
 
 /** A world direction in the tangent space of a parallaxFrame basis. */
@@ -348,11 +434,15 @@ fn parallaxLod(ddx: vec2<f32>, ddy: vec2<f32>, dims: vec2<f32>) -> f32 {
  * before that value could matter.
  */
 fn parallaxRay(vTan: vec3<f32>, depth: f32) -> vec2<f32> {
-    let inv = 1.0 / max(vTan.z, 1e-3);
+    return vTan.xy * parallaxRatio(vTan.z) * depth;
+}
+
+/** The soft-saturated `1/cos` parallaxRay scales by. Shared with the silhouette, which needs `tan`. */
+fn parallaxRatio(vz: f32) -> f32 {
+    let inv = 1.0 / max(vz, 1e-3);
     let a = inv * inv;
     let b = POM_MAX_RATIO * POM_MAX_RATIO;
-    let ratio = inv * POM_MAX_RATIO * inverseSqrt(sqrt(a * a + b * b));
-    return vTan.xy * ratio * depth;
+    return inv * POM_MAX_RATIO * inverseSqrt(sqrt(a * a + b * b));
 }
 
 /**
@@ -490,8 +580,24 @@ fn parallaxReachLimit(dims: vec2<f32>, lod: f32) -> f32 {
     return f32(POM_MAX_STEPS) * POM_MAX_TEXELS_PER_STEP * exp2(lod) / max(max(dims.x, dims.y), 1.0);
 }
 
+/** Where a view ray met the height field. See parallaxOcclusion. */
+struct ParallaxHit {
+    /** The offset uv every texture fetch reads. */
+    uv: vec2<f32>,
+    /** The field's height there, 1 top / 0 floor — what the self-shadow climbs from. */
+    h: f32,
+    /** World distance from the fragment back along the view ray to the hit, for the depth offset. */
+    dist: f32,
+    /**
+     * The ray left the relief layer without meeting the field: a CURVED SILHOUETTE, which the caller
+     * discards. Only ever true on a convex surface — on a flat or concave one the ray always reaches
+     * the floor, so it always hits.
+     */
+    miss: bool,
+};
+
 /**
- * March a single height field. Returns the offset uv in xy and the height at the hit in z.
+ * March a single height field, along a ray that bends with the surface.
  *
  * The loop is https://learnopengl.com/Advanced-Lighting/Parallax-Mapping's `steep parallax mapping`
  * plus its `parallax occlusion` refinement, with the same continue-test and the same secant weight.
@@ -499,43 +605,81 @@ fn parallaxReachLimit(dims: vec2<f32>, lod: f32) -> f32 {
  * `1.0 - h` is the depth convention, and its absence was a real defect in the code this replaces. The
  * source is 1 at the TOP of the field; marched raw, the reference plane is the BOTTOM, so the entire
  * surface slides sideways instead of recessing into the geometry.
+ *
+ * THE CURVED RAY. `t` is the flat reference's march parameter — the ray's depth below the TANGENT
+ * PLANE as a fraction of the layer, with lateral travel `t * L`. A surface curving away from that plane
+ * by `k s^2 / 2` (normal curvature `k`, lateral distance `s`) puts the ray at
+ *
+ *     depth below the CURVED surface = t - c t^2,     c = k L^2 / (2 D)
+ *
+ * in layer units, where `D` is the layer depth in world units and `L = D tan(theta)`. That is the
+ * whole change: the field is sampled at the same uv `uv - pMax * t`, and the hit test compares
+ * `t - c t^2` instead of `t`. Flat or concave (`c <= 0.25`) the ray reaches the floor at
+ * `t = 2 / (1 + sqrt(1 - 4c))` — exactly 1 at `c = 0` — so it always hits, and at `c = 0` the
+ * arithmetic is BIT-IDENTICAL to the flat march. Convex past `c = 0.25`, the ray's deepest point
+ * `1/(4c)` is above the floor: it climbs back out and leaves the layer at `t = 1/c`, and if it met no
+ * surface on the way, that is the silhouette.
+ *
+ * `kView` is the curvature along the ray (parallaxCurvature); `worldPerUv` is the frame's chart scale,
+ * which turns the uv depth into the `D` above.
  */
 fn parallaxOcclusion(tex: texture_2d<f32>, smp: sampler, uv: vec2<f32>,
                      ddx: vec2<f32>, ddy: vec2<f32>, vTan: vec3<f32>,
-                     depth: f32, dims: vec2<f32>, lod: f32, invert: bool) -> vec3<f32> {
+                     depth: f32, dims: vec2<f32>, kView: f32, worldPerUv: f32,
+                     lod: f32, invert: bool) -> ParallaxHit {
+    // tan(theta), soft-saturated exactly as parallaxRay saturates the offset, so the curvature term and
+    // the lateral travel it bends describe the same ray.
+    let tanView = sqrt(max(1.0 - vTan.z * vTan.z, 0.0)) * parallaxRatio(vTan.z);
+    // `c` per unit of uv depth.
+    let curve = 0.5 * kView * worldPerUv * tanView * tanView;
+    // A surface convex enough to miss lifts the grazing fade — see POM_SILHOUETTE_LO. Measured on the
+    // depth BEFORE the graze fade, or the fade would switch off the very thing deciding whether to
+    // apply it. Zero curvature gives `max(graze, 0.0) == graze`, so a flat surface is untouched.
+    let silhouette = smoothstep(POM_SILHOUETTE_LO, POM_SILHOUETTE_HI, curve * depth * parallaxFade(lod));
+
     // Bounded AFTER the two fades, not before: the fades decide how deep the surface is, and this
     // decides how far a ray of that depth is allowed to travel before the step budget stops being
     // able to sample it. Applied here rather than at the call sites so every caller gets it and the
     // bound cannot drift from the `parallaxSteps` it is derived from. It composes with the caller's
     // own `parallaxBoundedDepth` for silhouette clipping — whichever is tighter wins.
     let d = parallaxBoundedDepth(vTan,
-                                 depth * parallaxFade(lod) * parallaxGrazeFade(vTan.z),
+                                 depth * parallaxFade(lod) * max(parallaxGrazeFade(vTan.z), silhouette),
                                  parallaxReachLimit(dims, lod));
     if (d <= 1e-7) {
-        return vec3<f32>(uv, parallaxHeight(tex, smp, uv, ddx, ddy, invert));
+        return ParallaxHit(uv, parallaxHeight(tex, smp, uv, ddx, ddy, invert), 0.0, false);
     }
 
-    let pMax = parallaxRay(vTan, d);
-    let steps = parallaxSteps(pMax, dims, lod);
-    let dStep = 1.0 / steps;
+    let c = curve * d;
+    let convex = c > 0.25;
+    // Where the ray ends: the floor, or — convex past 0.25 — the top of the layer it climbs back out
+    // of. `2 / (1 + sqrt(1 - 4c))` is the floor root in the form that stays exact as c -> 0.
+    let tEnd = select(2.0 / (1.0 + sqrt(max(1.0 - 4.0 * c, 0.0))), 1.0 / max(c, 1e-8), convex);
 
-    var ray = 0.0;                 // 0 at the geometric surface, 1 at the floor of the field
+    let pMax = parallaxRay(vTan, d);
+    let steps = parallaxSteps(pMax * tEnd, dims, lod);
+    let dStep = tEnd / steps;
+
+    var t = 0.0;                   // the flat reference: depth below the tangent plane
+    var ray = 0.0;                 // depth below the CURVED surface: 0 at the top, 1 at the floor
     var cur = uv;
     var surf = 1.0 - parallaxHeightLod(tex, smp, cur, lod, invert);
     var prev = cur;
+    var prevT = t;
     var prevRay = ray;
     var prevSurf = surf;
 
     for (var i = 0; i < POM_MAX_STEPS; i++) {
         if (f32(i) >= steps || ray >= surf) { break; }
         prev = cur;
+        prevT = t;
         prevRay = ray;
         prevSurf = surf;
-        ray += dStep;
-        // Recomputed from `ray` rather than subtracted step by step. These offsets can run to a few
+        t += dStep;
+        ray = t - c * t * t;
+        // Recomputed from `t` rather than subtracted step by step. These offsets can run to a few
         // thousandths of a uv, and repeatedly accumulating an increment that small is the worse
         // conditioning of the two.
-        cur = uv - pMax * ray;
+        cur = uv - pMax * t;
         surf = 1.0 - parallaxHeightLod(tex, smp, cur, lod, invert);
     }
 
@@ -558,7 +702,32 @@ fn parallaxOcclusion(tex: texture_2d<f32>, smp: sampler, uv: vec2<f32>,
     let before = prevSurf - prevRay;
     let w = clamp(after / min(after - before, -1e-8), 0.0, 1.0);
     let hitUv = mix(cur, prev, w);
-    return vec3<f32>(hitUv, parallaxHeight(tex, smp, hitUv, ddx, ddy, invert));
+    // The ray is straight in WORLD space: `t` layers below the tangent plane, `tanView` laterally per
+    // layer, so its length is `t * D * sqrt(1 + tan^2)`.
+    let dist = mix(t, prevT, w) * d * worldPerUv * sqrt(1.0 + tanView * tanView);
+    // A miss only where the ray can climb back out. Flat and concave rays always reach the floor, and
+    // one that runs out of steps a rounding error short of it is a hit there, as it always was.
+    let miss = convex && ray < surf;
+    return ParallaxHit(hitUv, parallaxHeight(tex, smp, hitUv, ddx, ddy, invert), dist, miss);
+}
+
+/**
+ * The window-space depth of a parallax hit, for `@builtin(frag_depth)` — the PIXEL DEPTH OFFSET that
+ * makes other geometry intersect the relief rather than the polygon under it.
+ *
+ * A DELTA added to the rasterised depth, not an absolute projection. That keeps it exact under the TAA
+ * jitter (a clip-space x/y shear that moves no depth) and under both backends' depth conventions:
+ * `viewProj` is the GL-convention camera matrix, whose NDC z spans -1..1, and half of an NDC delta is
+ * the window delta on WebGL2 and on WebGPU's remapped 0..1 projection alike (see `_clipProjection`). And
+ * `max(.., 0)` means it can only push a fragment AWAY: a rounding error can never pull the surface in
+ * front of the polygon it belongs to.
+ */
+fn parallaxDepth(rasterDepth: f32, fragPos: vec3<f32>, toEye: vec3<f32>, dist: f32,
+                 viewProj: mat4x4<f32>) -> f32 {
+    let a = viewProj * vec4<f32>(fragPos, 1.0);
+    let b = viewProj * vec4<f32>(fragPos - toEye * dist, 1.0);
+    let delta = 0.5 * (b.z / b.w - a.z / a.w);
+    return clamp(rasterDepth + max(delta, 0.0), 0.0, 1.0);
 }
 
 /**

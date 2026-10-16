@@ -272,8 +272,7 @@ export const ADD_ITEMS: AddItem[] = [
   {
     // A Quad with interior vertices. `Geometry.Plane` has existed and been documented for exactly this
     // and had no caller at all, which meant the one primitive built to carry a height field was the one
-    // nobody could place. 16x16 gives 512 triangles before any subdivision: enough that vertex
-    // displacement shows relief immediately rather than moving four corners.
+    // nobody could place. 16x16 gives 512 triangles, so it shades smoothly under per-vertex lighting.
     id: 'plane', label: 'Plane', icon: QuadIcon, category: 'primitives',
     create: async () => new ModelNode('plane', new Model(Geometry.Plane(2, 2, 16, 16), Material.Default({}, { side: 'double' }))),
   },

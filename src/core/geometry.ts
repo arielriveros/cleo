@@ -453,37 +453,6 @@ export class Geometry {
     }
 
     /**
-     * Mean triangle edge length in UV SPACE — how much of the chart one edge of this mesh spans.
-     *
-     * The number that decides how finely a height map can be carried by geometry, and it is not
-     * derivable from the triangle count. A displacement bake band-limits to the mip matching its output
-     * vertex spacing, and that spacing is `meanUvEdge / segments` in uv, i.e.
-     * `meanUvEdge * textureWidth / segments` in texels. Guessing it from `sqrt(triangleCount)` instead —
-     * which this originally did — conflates mesh density with CHART density, and is wrong by orders of
-     * magnitude on exactly the meshes that looked worst: an 8-triangle ramp whose faces each carry a
-     * 0..1 chart was read as 181 texels per edge when the truth is 512, so it sampled mip 7.5 of a 4096
-     * map (a 16x16 image) and displaced by a near-constant.
-     *
-     * Measured over EDGES rather than from the uv area: an irregular or sliver-heavy chart has an area
-     * that says little about its edges, and edges are what the subdivision divides.
-     *
-     * Returns 0 for a mesh with no usable chart, which callers should read as "cannot band-limit".
-     */
-    public meanUvEdge(): number {
-        const U = this._uvs, I = this._indices;
-        if (I.length < 3 || U.length < 2) return 0;
-        let total = 0, count = 0;
-        for (let i = 0; i + 2 < I.length; i += 3) {
-            const a = I[i] * 2, b = I[i + 1] * 2, c = I[i + 2] * 2;
-            total += Math.hypot(U[b] - U[a], U[b + 1] - U[a + 1]);
-            total += Math.hypot(U[c] - U[b], U[c + 1] - U[b + 1]);
-            total += Math.hypot(U[a] - U[c], U[a + 1] - U[c + 1]);
-            count += 3;
-        }
-        return count > 0 ? total / count : 0;
-    }
-
-    /**
      * Recompute smooth per-vertex normals in place from the current positions and indices
      * (area-weighted face-normal accumulation). Used after deforming positions at runtime
      * (e.g. terrain sculpting). No-op if the geometry is not indexed.
