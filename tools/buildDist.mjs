@@ -10,10 +10,11 @@
 //   - editor/package.json's "cleo": "file:../dist" is how `cd editor && npm run typecheck` resolves a
 //     bare `import ... from 'cleo'`;
 //   - examples/scripts/tsconfig.json points `cleo` at ../../dist/cleo.
-import { rmSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeDistManifest } from './distManifest.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 const dist = path.join(root, 'dist');
@@ -33,15 +34,6 @@ const tsc = spawnSync(
 );
 if (tsc.status !== 0) process.exit(tsc.status ?? 1);
 
-// The root manifest verbatim, with "types" repointed at the tree's own root. Copied rather than
-// hand-written because "dependencies" is load-bearing: `npm i file:../dist` in editor/ is what puts
-// howler, uuid and sucrase into editor/node_modules, and the editor builds engine source that imports
-// all three. This is what CopyWebpackPlugin used to do.
-const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf-8'));
-delete pkg.main;
-pkg.types = 'cleo.d.ts';
-
-mkdirSync(dist, { recursive: true });
-writeFileSync(path.join(dist, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`, 'utf-8');
+writeDistManifest(root, dist);
 
 console.log(`cleo: wrote declarations + package.json to ${path.relative(root, dist)}/`);

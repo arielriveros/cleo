@@ -1,6 +1,7 @@
 import { CharacterNode, Logger, Node, Shape, resolveSocketOwner } from 'cleo'
-import { clamp } from './SoulsMath'
-import { bladeCapsule } from './SoulsHitbox'
+import type { SocketName, TemplateName } from 'cleo'
+import { clamp } from '@/Core/Scripts/SoulsMath'
+import { bladeCapsule } from '@/Core/Scripts/SoulsHitbox'
 
 /**
  * Hollow Keep — what every fighter is: the player, and each enemy type. A base script; the player
@@ -23,7 +24,7 @@ import { bladeCapsule } from './SoulsHitbox'
  *
  * ## Weapons
  *
- * A character names its weapons by TEMPLATE in `weaponTemplates` ("Straight Sword, Greatsword") and
+ * A character names its weapons by TEMPLATE in `weaponTemplates` (['Straight Sword', 'Greatsword']) and
  * spawns them on start under its `Weapons` group (or itself), attached to `weaponSocket`. The first is
  * equipped; `equipWeapon(i)` shows one and hides the rest. The weapon brings its own stats, hitbox and
  * moveset — see SoulsWeapon.
@@ -44,10 +45,10 @@ export default class SoulsCharacterNode extends CharacterNode {
   public bodyRadius: number = 0.4
   public bodyHeight: number = 1.8
 
-  /** Weapon templates to spawn on start, comma separated. The first is held. */
-  public weaponTemplates: string = ''
+  /** Weapon templates to spawn on start. The first is held. */
+  public weaponTemplates: TemplateName[] = []
   /** Socket on this character's skeleton the weapons attach to. */
-  public weaponSocket: string = 'RightHand'
+  public weaponSocket: SocketName = 'RightHand'
   /** Child group the weapons are spawned under (this node itself when there is none). */
   public weaponsGroup: string = 'Weapons'
   /** The held weapon's display name, for the HUD. */
@@ -114,7 +115,10 @@ export default class SoulsCharacterNode extends CharacterNode {
   protected _spawnWeapons(): void {
     for (const w of this._weapons) { try { w.remove() } catch { /* already gone */ } }
     this._weapons = []
-    const names = (this.weaponTemplates || '').split(',').map(s => s.trim()).filter(Boolean)
+    // A list; a comma-separated string is still read, as scenes saved before the field was a list hold one.
+    const raw: unknown = this.weaponTemplates
+    const names = (Array.isArray(raw) ? raw.map(String) : String(raw ?? '').split(','))
+      .map(s => s.trim()).filter(Boolean)
     const parent = this.getChildByName(this.weaponsGroup)[0] ?? this
     for (const name of names) {
       const weapon = this.scene?.instantiate(name, { parent })
@@ -134,7 +138,7 @@ export default class SoulsCharacterNode extends CharacterNode {
       Logger.warn('Hollow Keep: "' + this.name + '"\'s model has no "' + this.weaponSocket + '" socket, so it cannot hold its weapon. '
         + 'Add a socket with that name on its hand bone in the rig editor (or set weaponSocket to one it has).', 'Script')
     if (names.length && !this._weapons.length)
-      Logger.warn('Hollow Keep: "' + this.name + '" has no usable weapon among "' + this.weaponTemplates + '".', 'Script')
+      Logger.warn('Hollow Keep: "' + this.name + '" has no usable weapon among "' + names.join(', ') + '".', 'Script')
     this.equipWeapon(0)
   }
 

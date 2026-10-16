@@ -1,5 +1,5 @@
 import { Node } from 'cleo'
-import { playSound } from './SoulsAudio'
+import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
  * Hollow Keep — the fog wall in front of the boss. Attach to a node at the arena's mouth that carries a

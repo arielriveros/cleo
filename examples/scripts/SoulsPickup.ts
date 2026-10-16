@@ -1,5 +1,6 @@
 import { Node } from 'cleo'
-import { playSound } from './SoulsAudio'
+import type { ClipName } from 'cleo'
+import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
  * Hollow Keep — an item lying in the world (the glowing corpse loot of the souls games). Attach to the
@@ -20,7 +21,7 @@ export default class SoulsPickupNode extends Node {
   public amount: number = 200
   public itemName: string = 'Soul of a Lost Undead'
   public hiddenUntilRevealed: boolean = false
-  public pickupClip: string = 'Souls_Pickup'
+  public pickupClip: ClipName = 'Souls_Pickup'
   public taken: boolean = false
 
   private _gm: Node = null

@@ -73,6 +73,11 @@ declare module '*.wgsl' {
          * module carrying the `// @glsl-chunk` directive; consumed by `systems/customShaders.ts`.
          */
         readonly glslChunk?: string;
+        /**
+         * The module's declared variants (`// @variant <tag> NAME=VAL` lines), each the same source
+         * composed with those defines and translated in full. Absent when it declares none.
+         */
+        readonly variants?: Readonly<Record<string, WgslProgram>>;
     }
     const value: WgslProgram;
     export default value;

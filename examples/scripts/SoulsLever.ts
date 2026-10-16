@@ -1,5 +1,5 @@
 import { Node } from 'cleo'
-import { playSound } from './SoulsAudio'
+import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
  * Hollow Keep — a lever that opens a door elsewhere (the shortcut back to the bonfire). Attach to the

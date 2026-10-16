@@ -1,5 +1,6 @@
 import { Node } from 'cleo'
-import { playDetached } from './SoulsAudio'
+import type { TemplateName } from 'cleo'
+import { playDetached } from '@/Core/Scripts/SoulsAudio'
 
 /**
  * Hollow Keep — a magic bolt. Attach to the root of a projectile template (a plain node with the glowing
@@ -22,7 +23,7 @@ export default class SoulsProjectileNode extends Node {
   public lifetime: number = 4
   /** The bolt's hitbox: a sphere of this radius swept along its flight. */
   public radius: number = 0.2
-  public impactTemplate: string = 'Bolt Impact'
+  public impactTemplate: TemplateName = 'Bolt Impact'
 
   private _dir: number[] = [0, 0, 1]
   private _age: number = 0

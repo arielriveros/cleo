@@ -587,7 +587,9 @@ fn updateParticle(dt: f32) {
     var acc = vec3<f32>(0.0);
     if (hasFeature(mask, SIM_GRAVITY)) { acc = acc + u_sim.u_gravity.xyz; }
     if (hasFeature(mask, SIM_WIND)) { acc = acc + (u_sim.u_wind.xyz - v) * u_sim.u_wind.w; }
+#ifndef SIM_STRIP_NOISE
     if (hasFeature(mask, SIM_NOISE)) { acc = acc + turbulence(x) * u_sim.u_noise.x; }
+#endif
     if (hasFeature(mask, SIM_VORTEX)) {
         let axis = u_sim.u_vortex.xyz;
         let r = x - u_sim.u_vortexCenter.xyz;
@@ -607,12 +609,14 @@ fn updateParticle(dt: f32) {
             acc = acc + to / dist * u_sim.u_attractor.w * falloff;
         }
     }
+#ifndef SIM_STRIP_FIELDS
     if (hasFeature(mask, SIM_FIELDS)) {
         let wp = select(x, transformPoint(toWorld, x), isLocal);
         let wv = select(v, transformDir(toWorld, v), isLocal);
         let wa = forceFieldAccel(wp, wv);
         acc = acc + select(wa, transformDir(u_sim.u_worldToSim, wa), isLocal);
     }
+#endif
 
     // Semi-implicit Euler: velocity first, then position from the NEW velocity — stable for the stiff
     // spring-like forces (wind coupling, vortex pull) where explicit Euler would gain energy.
@@ -629,6 +633,7 @@ fn updateParticle(dt: f32) {
     if (hasFeature(mask, SIM_FLAT)) { x.z = 0.0; v.z = 0.0; }
 
     // Collision, in world space.
+#ifndef SIM_STRIP_COLLIDE
     let collideDepthOn = hasFeature(mask, SIM_COLLIDE_DEPTH);
     let collidePlanesOn = hasFeature(mask, SIM_COLLIDE_PLANES);
     let collideBodiesOn = hasFeature(mask, SIM_COLLIDE_BODIES);
@@ -663,6 +668,7 @@ fn updateParticle(dt: f32) {
             v = select(wv, transformDir(u_sim.u_worldToSim, wv), isLocal);
         }
     }
+#endif
 
     var spinScale = 1.0;
     if (hasFeature(mask, SIM_SPIN_LIFE)) { spinScale = particleLut(LUT_SCALARS, life).z; }
@@ -690,14 +696,25 @@ fn simulateSlot(slot: u32, texel: vec2<i32>) -> Particle {
     let spawnCount = u32(u_sim.u_spawn.y);
     let offset = (slot + capacity - spawnStart) % capacity;
     var stepDt = dt;
+    // Decide WHETHER and HOW this slot is born, then spawn once: `spawnParticle` is large, and two call
+    // sites meant the driver inlined (and compiled) it twice.
+    var born = false;
+    var spawnIndex = 0u;
+    var spawnSeed = 0u;
+    var spawnOrigin = vec4<f32>(0.0);
+    var spawnVelocity = vec3<f32>(0.0);
     if (offset < spawnCount) {
-        p = spawnParticle(slot, offset, u32(u_sim.u_spawn.z) + offset, vec4<f32>(0.0), vec3<f32>(0.0));
+        born = true;
+        spawnIndex = offset;
+        spawnSeed = u32(u_sim.u_spawn.z) + offset;
         // Born partway through the step: integrate only what is left of it.
         let birth = (f32(offset) + 0.5) / max(1.0, f32(spawnCount));
         stepDt = dt * (1.0 - birth);
     }
 
-    // Sub-emitter: born from the parent slot this one belongs to, if it had its event this step.
+#ifndef SIM_STRIP_SUB
+    // Sub-emitter: born from the parent slot this one belongs to, if it had its event this step. It
+    // wins over a ring-window birth in the same step, as it always has.
     let event = i32(u_sim.u_sub.x);
     if (event > 0) {
         let perParent = max(1u, u32(u_sim.u_sub.y));
@@ -721,12 +738,34 @@ fn simulateSlot(slot: u32, texel: vec2<i32>) -> Particle {
             }
             if (fired) {
                 // A fresh random stream per event: the slot, and the time it fired.
-                let seed = pcgHash(slot ^ pcgHash(bitcast<u32>(u_sim.u_step.y)));
-                p = spawnParticle(slot, 0u, seed, vec4<f32>(at, 1.0), vel * u_sim.u_sub.z);
+                born = true;
+                spawnIndex = 0u;
+                spawnSeed = pcgHash(slot ^ pcgHash(bitcast<u32>(u_sim.u_step.y)));
+                spawnOrigin = vec4<f32>(at, 1.0);
+                spawnVelocity = vel * u_sim.u_sub.z;
                 stepDt = 0.0;
             }
         }
     }
+#endif
+    if (born) { p = spawnParticle(slot, spawnIndex, spawnSeed, spawnOrigin, spawnVelocity); }
+
+    // A variant that strips a module still READS the textures only that module used, behind a branch
+    // that never runs (the sim clock is never negative): WebGPU derives its bind-group layout from what
+    // the shader uses, and a binding that vanished would fail the bind group every variant shares.
+#if defined(SIM_STRIP_SUB) || defined(SIM_STRIP_COLLIDE)
+    if (u_sim.u_step.y < -1e30) {
+#ifdef SIM_STRIP_SUB
+        let o = vec2<i32>(0);
+        p.color += textureLoad(u_parentP0_texture, o, 0) + textureLoad(u_parentP1_texture, o, 0)
+                 + textureLoad(u_parentP2_texture, o, 0) + textureLoad(u_parentPrevP0_texture, o, 0)
+                 + textureLoad(u_parentPrevP1_texture, o, 0);
+#endif
+#ifdef SIM_STRIP_COLLIDE
+        p.color += vec4<f32>(textureSampleLevel(u_sceneDepth_texture, u_sceneDepth_sampler, vec2<f32>(0.5), 0));
+#endif
+    }
+#endif
 
     // NO conditional stores to the lifetime here, and no early returns: ANGLE's D3D11 backend (Chrome on
     // Windows, the default WebGL2 path) flattened `if (age >= lifetime) { lifetime = 0; return; }` into

@@ -227,6 +227,7 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     // compute-tessellated displacement reads, and a mesh with real geometry must not ALSO
     // march the same field per fragment.
     // Not on triplanar: three blended charts have no single surface for a ray to march.
+#if !defined(CLEO_POM) || CLEO_POM
     if (u_material.hasDisplacementMap != 0 && u_material.parallax != 0 && su.mode != UV_TRIPLANAR) {
         let invert = u_material.invertHeight != 0;
         let dims = vec2<f32>(textureDimensions(u_material_displacementMap_texture, 0));
@@ -270,6 +271,15 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
                                         uv, lTan, hit.z, depth, lod, invert);
         }
     }
+#else
+    // CLEO_POM=0: the variant for materials that never march (no height map, parallax off, or
+    // triplanar). It still READS the height map, behind a test no material passes: WebGPU builds the
+    // bind-group layout from what the shader uses, and both variants share one bind group.
+    if (u_material.dispScale < -1e30) {
+        selfShadow = textureSampleLevel(u_material_displacementMap_texture,
+                                        u_material_displacementMap_sampler, su.uv0, 0.0).r;
+    }
+#endif
 
     // Base colour / albedo. Every fetch from here down reads the parallax-offset uv - all of them, or
     // the maps come apart.

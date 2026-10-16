@@ -1,5 +1,5 @@
 import { Node } from 'cleo'
-import { clamp, num } from './SoulsMath'
+import { clamp, num } from '@/Core/Scripts/SoulsMath'
 
 /**
  * Hollow Keep — a blood decal on the ground. Attach to the root of a template whose children include

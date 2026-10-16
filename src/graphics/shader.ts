@@ -35,24 +35,50 @@ export class Shader implements ShaderProgram {
         this._fragmentShader = fs;
     }
 
+    /** Compile, link and reflect, blocking until the driver is done. {@link begin} + {@link finish}. */
     public create(vertexSource: string, fragmentSource: string): Shader {
+        this.begin(vertexSource, fragmentSource);
+        return this.finish();
+    }
+
+    /**
+     * Submit the compile and link without asking for any result. Every status query blocks until that
+     * object is built, so querying here (as create() once did, after each compile) serialises the
+     * driver. With KHR_parallel_shader_compile enabled the work runs on driver threads until
+     * {@link finish} or a completion poll ({@link isComplete}).
+     */
+    public begin(vertexSource: string, fragmentSource: string): void {
         gl.shaderSource(this._vertexShader, vertexSource);
         gl.compileShader(this._vertexShader);
-        if (!gl.getShaderParameter(this._vertexShader, gl.COMPILE_STATUS))
-            throw new Error(gl.getShaderInfoLog(this._vertexShader) || 'Unknown error creating vertex shader');
-
         gl.shaderSource(this._fragmentShader, fragmentSource);
         gl.compileShader(this._fragmentShader);
-        if (!gl.getShaderParameter(this._fragmentShader, gl.COMPILE_STATUS))
-            throw new Error(gl.getShaderInfoLog(this._fragmentShader) || 'Unknown error creating fragment shader');
 
         this._shaderProgram = gl.createProgram() as WebGLProgram;
         gl.attachShader(this._shaderProgram, this._vertexShader);
         gl.attachShader(this._shaderProgram, this._fragmentShader);
         gl.linkProgram(this._shaderProgram);
+    }
 
-        if (!gl.getProgramParameter(this._shaderProgram, gl.LINK_STATUS))
+    /**
+     * Whether {@link finish} would return without waiting. Without the extension there is no way to ask,
+     * so it answers true and finish() blocks as create() always has.
+     */
+    public isComplete(parallelCompile: KHR_parallel_shader_compile | null): boolean {
+        if (!parallelCompile) return true;
+        return !!gl.getProgramParameter(this._shaderProgram, parallelCompile.COMPLETION_STATUS_KHR);
+    }
+
+    /** Wait for the link {@link begin} submitted, report failures, and reflect the program. */
+    public finish(): Shader {
+        if (!gl.getProgramParameter(this._shaderProgram, gl.LINK_STATUS)) {
+            // A compile error makes the link fail too; report the stage that actually broke, vertex
+            // first, with the messages create() always gave.
+            if (!gl.getShaderParameter(this._vertexShader, gl.COMPILE_STATUS))
+                throw new Error(gl.getShaderInfoLog(this._vertexShader) || 'Unknown error creating vertex shader');
+            if (!gl.getShaderParameter(this._fragmentShader, gl.COMPILE_STATUS))
+                throw new Error(gl.getShaderInfoLog(this._fragmentShader) || 'Unknown error creating fragment shader');
             throw new Error(gl.getProgramInfoLog(this._shaderProgram) || 'Unknown error creating program');
+        }
 
         // The linked program holds its own reference, so dropping ours frees these with the program.
         gl.deleteShader(this._vertexShader);

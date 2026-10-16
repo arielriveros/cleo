@@ -6,7 +6,7 @@
 // importing node.ts/scene.ts does not drag a bundler config along.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { resolveIncludes } from './shaderIncludes.mjs';
+import { resolveIncludes, listVariants } from './shaderIncludes.mjs';
 import { translateWgsl } from './wgslTranslate.mjs';
 
 /** @returns {import('vite').Plugin} */
@@ -20,7 +20,9 @@ export function glslRaw() {
             // GLSL already generated, exactly as the retired webpack loader emitted it. Translating
             // here rather than shipping raw text keeps a test's view of a shader identical to the build's.
             if (/\.wgsl$/.test(file)) {
-                const composed = resolveIncludes(readFileSync(file, 'utf-8'), path.dirname(file), {
+                const source = readFileSync(file, 'utf-8');
+                const label = path.basename(file);
+                const compose = (defines, watch) => resolveIncludes(source, path.dirname(file), {
                     read: (p) => readFileSync(p, 'utf-8'),
                     resolve: (dir, rel) => path.resolve(dir, rel),
                     // An `#include` is invisible to Vite's module graph: the importer is `pbr.wgsl`,
@@ -29,9 +31,18 @@ export function glslRaw() {
                     // TypeScript beside it hot-reloads, so the engine looks current while its shaders
                     // are hours old, and the only symptom is a validation error naming a line the
                     // source no longer has. Costs one watched file per include.
-                    onDependency: (p) => this.addWatchFile(p),
+                    onDependency: watch ? (p) => this.addWatchFile(p) : undefined,
+                    defines,
                 });
-                const translated = await translateWgsl(composed, path.basename(file));
+                const translated = await translateWgsl(compose({}, true), label);
+                // `// @variant <tag> NAME=VAL` lines: the same module composed with those defines,
+                // translated in full (its own WGSL for WebGPU, its own GLSL for WebGL2).
+                const variants = listVariants(source);
+                if (variants.length) {
+                    translated.variants = {};
+                    for (const { tag, defines } of variants)
+                        translated.variants[tag] = await translateWgsl(compose(defines, false), `${label}~${tag}`);
+                }
                 return { code: `export default ${JSON.stringify(translated)};`, map: null };
             }
 

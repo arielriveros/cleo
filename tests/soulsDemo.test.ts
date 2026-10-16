@@ -119,17 +119,17 @@ describe('defence (each fighter owns its own)', () => {
 describe('enemy types own their stats', () => {
     it('carries the per-type numbers as class defaults', () => {
         const hollow = new SoulsHollowNode('Hollow');
-        expect([hollow.displayName, hollow.maxHp, hollow.defense, hollow.weaponTemplates, hollow.team]).toEqual(['Hollow', 160, 0, 'Club', 'enemy']);
+        expect([hollow.displayName, hollow.maxHp, hollow.defense, hollow.weaponTemplates, hollow.team]).toEqual(['Hollow', 160, 0, ['Club'], 'enemy']);
         const sorcerer = new SoulsHollowSorcererNode('Hollow Sorcerer');
-        expect([sorcerer.maxHp, sorcerer.strafeSpeedScale, sorcerer.weaponTemplates]).toEqual([110, 0.5, 'Sorcerer Staff']);
+        expect([sorcerer.maxHp, sorcerer.strafeSpeedScale, sorcerer.weaponTemplates]).toEqual([110, 0.5, ['Sorcerer Staff']]);
         const knight = new SoulsEliteKnightNode('Elite Knight');
-        expect([knight.maxHp, knight.defense, knight.weaponTemplates]).toEqual([650, 0.15, 'Greatsword']);
+        expect([knight.maxHp, knight.defense, knight.weaponTemplates]).toEqual([650, 0.15, ['Greatsword']]);
         const warden = new SoulsHollowWardenNode('Hollow Warden');
-        expect([warden.maxHp, warden.defense, warden.isBoss, warden.flinchOnHit, warden.weaponTemplates]).toEqual([2600, 0.2, true, false, 'Halberd']);
+        expect([warden.maxHp, warden.defense, warden.isBoss, warden.flinchOnHit, warden.weaponTemplates]).toEqual([2600, 0.2, true, false, ['Halberd']]);
     });
 
     it('the player is on the other team', () => {
-        expect([pl().team, pl().weaponTemplates]).toEqual(['player', 'Straight Sword, Greatsword']);
+        expect([pl().team, pl().weaponTemplates]).toEqual(['player', ['Straight Sword', 'Greatsword']]);
     });
 });
 

@@ -1,4 +1,5 @@
-import SoulsEnemyNode from './SoulsEnemy'
+import type { TemplateName } from 'cleo'
+import SoulsEnemyNode from '@/Characters/Enemies/Base Enemy/Scripts/SoulsEnemy'
 
 /**
  * Hollow Keep — the Hollow Sorcerer: keeps its distance and casts bolts from its staff, shoving anyone
@@ -6,7 +7,7 @@ import SoulsEnemyNode from './SoulsEnemy'
  */
 export default class SoulsHollowSorcererNode extends SoulsEnemyNode {
   public displayName: string = 'Hollow Sorcerer'
-  public weaponTemplates: string = 'Sorcerer Staff'
+  public weaponTemplates: TemplateName[] = ['Sorcerer Staff']
   public maxHp: number = 110
   public hp: number = 110
   public defense: number = 0

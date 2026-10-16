@@ -1,5 +1,5 @@
 import { Node } from 'cleo'
-import { playSound } from './SoulsAudio'
+import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
  * Hollow Keep — a door or portcullis that slides open. Attach to a node with a STATIC box body at the

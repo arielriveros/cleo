@@ -24,11 +24,16 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // The preload reads game.bin with fs. Electron sandboxes preloads by default (no Node modules), which
+      // left CLEO_GAME_BUFFER unset and the game black. The page itself still has no Node access.
+      sandbox: false
     }
   });
   win.setMenuBarVisibility(false);
-  win.loadFile(path.join(__dirname, 'index.html'));
+  // --shader-profile: the player times every shader build with a GPU finish after each (CLEO_SHADER_STATS).
+  const query = process.argv.includes('--shader-profile') ? { shaderProfile: '1' } : undefined;
+  win.loadFile(path.join(__dirname, 'index.html'), query ? { query } : undefined);
 }
 
 app.whenReady().then(() => {
@@ -62,9 +67,21 @@ try {
 }
 `;
 
+// npm (and electron-builder, which validates package.json) only accepts lowercase URL-safe names, so a
+// folder like "New folder" or "My Game!" has to be slugged. The original stays as productName.
+function npmPackageName(name) {
+  const slug = String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^[._-]+|[._-]+$/g, '')
+    .slice(0, 214);
+  return slug || 'cleo-game';
+}
+
 function gamePackageJson(name, electronVersion) {
   return JSON.stringify({
-    name: name || 'cleo-game',
+    name: npmPackageName(name),
+    productName: name || 'Cleo Game',
     version: '1.0.0',
     description: 'A game built with the Cleo engine',
     main: 'main.js',
@@ -92,4 +109,62 @@ function gameReadme(name) {
   ].join('\n');
 }
 
-module.exports = { GAME_MAIN_JS, GAME_PRELOAD_JS, gamePackageJson, gameReadme };
+// NSIS include for the Windows installer (electron-builder `nsis.include`). The assisted installer already
+// offers the install location; this adds a page after it with a checkbox per shortcut. electron-builder
+// creates both shortcuts and removes whichever exist on uninstall, so customInstall (which runs after they
+// are created) deletes the ones left unticked. Unset (a silent /S install never shows the page) = keep.
+// Everything is installer-only: the uninstaller build never inserts these macros, and an unreferenced
+// Var or Function there would fail the build (warnings are errors).
+const GAME_INSTALLER_NSH = `!include nsDialogs.nsh
+!include LogicLib.nsh
+
+!macro customPageAfterChangeDir
+  Var cleoWantDesktop
+  Var cleoWantMenu
+  Var cleoDesktopBox
+  Var cleoMenuBox
+
+  Page custom cleoShortcutsCreate cleoShortcutsLeave
+
+  Function cleoShortcutsCreate
+    !insertmacro MUI_HEADER_TEXT "Shortcuts" "Choose where \${PRODUCT_NAME} can be started from."
+    nsDialogs::Create 1018
+    Pop $0
+    \${If} $0 == error
+      Abort
+    \${EndIf}
+    \${NSD_CreateLabel} 0 0 100% 24u "Create shortcuts to \${PRODUCT_NAME}:"
+    Pop $0
+    \${NSD_CreateCheckbox} 0 30u 100% 12u "Create a &desktop shortcut"
+    Pop $cleoDesktopBox
+    \${If} $cleoWantDesktop != "0"
+      \${NSD_Check} $cleoDesktopBox
+    \${EndIf}
+    \${NSD_CreateCheckbox} 0 46u 100% 12u "Create a &Start Menu shortcut"
+    Pop $cleoMenuBox
+    \${If} $cleoWantMenu != "0"
+      \${NSD_Check} $cleoMenuBox
+    \${EndIf}
+    nsDialogs::Show
+  FunctionEnd
+
+  Function cleoShortcutsLeave
+    \${NSD_GetState} $cleoDesktopBox $cleoWantDesktop
+    \${NSD_GetState} $cleoMenuBox $cleoWantMenu
+  FunctionEnd
+!macroend
+
+!macro customInstall
+  \${If} $cleoWantDesktop == "0"
+    WinShell::UninstShortcut "$newDesktopLink"
+    Delete "$newDesktopLink"
+  \${EndIf}
+  \${If} $cleoWantMenu == "0"
+    WinShell::UninstShortcut "$newStartMenuLink"
+    Delete "$newStartMenuLink"
+  \${EndIf}
+  System::Call 'shell32::SHChangeNotify(i, i, i, i) v (0x08000000, 0, 0, 0)'
+!macroend
+`;
+
+module.exports = { GAME_MAIN_JS, GAME_PRELOAD_JS, GAME_INSTALLER_NSH, gamePackageJson, gameReadme };

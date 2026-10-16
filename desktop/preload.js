@@ -4,7 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 // + game.scripts.js + game.bin) and hands the bytes to the main process, which writes them to a
 // user-chosen folder.
 contextBridge.exposeInMainWorld('cleoDesktop', {
-  publishWeb: (files) => ipcRenderer.invoke('publish:web', files),
+  publishWeb: (files, options) => ipcRenderer.invoke('publish:web', files, options),
   publishDesktop: (files, options) => ipcRenderer.invoke('publish:desktop', files, options),
 
   // A blocked close or reload, handed to the editor so it can ask in its own dialog. `beforeunload` can

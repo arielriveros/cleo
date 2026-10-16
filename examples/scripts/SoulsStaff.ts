@@ -1,4 +1,4 @@
-import SoulsWeaponNode from './SoulsWeapon'
+import SoulsWeaponNode from '@/Weapons/Base Weapon/Scripts/SoulsWeapon'
 
 /**
  * Hollow Keep — the Hollow Sorcerer's staff. Held upright; its orb is where the sorcerer's bolts are cast

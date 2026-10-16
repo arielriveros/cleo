@@ -1,6 +1,7 @@
 import { Input, Logger, Node } from 'cleo'
-import { clamp, forwardYaw, num } from './SoulsMath'
-import { playSound, stopSound } from './SoulsAudio'
+import type { TemplateName } from 'cleo'
+import { clamp, forwardYaw, num } from '@/Core/Scripts/SoulsMath'
+import { playSound, stopSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
  * Hollow Keep — the game manager. Attach to an empty node named `GameManager` at the scene root.
@@ -45,17 +46,17 @@ export default class SoulsGameManagerNode extends Node {
   /** Seconds between the killing blow and the respawn at the bonfire. */
   public respawnDelay: number = 5
   /** Template instantiated where the player died, carrying their souls. */
-  public bloodstainTemplate: string = 'Bloodstain'
+  public bloodstainTemplate: TemplateName = 'Bloodstain'
 
   // ----- blood (see bleed) -------------------------------------------------------------------------
   /** Off, no blood at all: no spray and no decals. */
   public bloodEnabled: boolean = true
   /** Droplets thrown off a wound (particles). */
-  public bloodSprayTemplate: string = 'Blood Spray'
+  public bloodSprayTemplate: TemplateName = 'Blood Spray'
   /** The pool decal left under a wounded body. */
-  public bloodSplatTemplate: string = 'Blood Splat'
+  public bloodSplatTemplate: TemplateName = 'Blood Splat'
   /** The spatter decal thrown along the blow. */
-  public bloodDropsTemplate: string = 'Blood Drops'
+  public bloodDropsTemplate: TemplateName = 'Blood Drops'
   /** Blood decals alive at once. The oldest goes first, so a long fight cannot pile up draws. */
   public maxBloodDecals: number = 24
   /** Damage that leaves a full-size splat; less shrinks it, more grows it (0.6x to 1.6x). */

@@ -114,7 +114,8 @@ function resolveVariables(file, seen = new Set()) {
   const source = readScript(file)
   const own = reflect(source)
   const ext = /export\s+default\s+class\s+\w+\s+extends\s+(\w+)/.exec(source)
-  const imp = ext && new RegExp(`import\\s+${ext[1]}\\s+from\\s+['"]\\./(\\w+)['"]`).exec(source)
+  // `@/Characters/Enemies/Base Enemy/Scripts/SoulsEnemy` or `./SoulsEnemy`: the last segment is the file.
+  const imp = ext && new RegExp(`import\\s+${ext[1]}\\s+from\\s+['"](?:\\./|@/(?:[^'"]*/)?)(\\w+)['"]`).exec(source)
   if (!imp || seen.has(imp[1])) return own
   seen.add(file)
   const merged = new Map()
@@ -1423,8 +1424,6 @@ function fogGateNode() {
 const { regenerateNodeIds, cloneNodeJson } = engine(path.join(ROOT, 'src', 'core', 'scene', 'nodeJson.ts'))
 const { hashAsset, assetHashKey } = moduleRegistry()(path.join(ROOT, 'editor', 'src', 'utils', 'assetHash.ts'))
 
-/** Which folder of the Assets panel each level template lives in. */
-const TEMPLATE_FOLDER = new Map()
 /** A template's source json (builder output, before re-keying), for checking copies against it. */
 const TEMPLATE_SOURCE = new Map()
 // Mirrors NODE_REF_KEYS in src/core/scene/nodeJson.ts: ids of OTHER nodes, which differ per copy.
@@ -1441,7 +1440,7 @@ function walkJson(n, fn, pathTo = '') {
 }
 
 /** A template from a builder's node: re-keyed to ids of its own, bodies moved to the template's map. */
-function asTemplate(key, nodeJson, folder, textureIds = []) {
+function asTemplate(key, nodeJson, textureIds = []) {
   const source = cloneNodeJson(nodeJson)
   const root = cloneNodeJson(nodeJson)
   let i = 0
@@ -1455,7 +1454,6 @@ function asTemplate(key, nodeJson, folder, textureIds = []) {
     if (n.trigger) { triggers[n.id] = n.trigger; delete n.trigger }
   })
   const template = { id: stableId(`template:${key}`), name: root.name, nodeJson: root, textureIds, scripts: {}, bodies, triggers }
-  TEMPLATE_FOLDER.set(template.id, folder)
   TEMPLATE_SOURCE.set(template.id, source)
   return template
 }
@@ -1486,31 +1484,30 @@ function templateShape(key, nodeJson, textureIds) {
 }
 
 /** A variant of `base` whose content is `nodeJson`. */
-function variantTemplate(key, base, nodeJson, folder) {
+function variantTemplate(key, base, nodeJson) {
   const candidate = templateShape(key, nodeJson, [])
   const diff = diffTemplate(base, candidate)
   const t = { id: candidate.id, name: candidate.name, ...materializeVariant(base, candidate.id, diff), variant: { baseTemplateId: base.id, diff } }
-  TEMPLATE_FOLDER.set(t.id, folder)
   return t
 }
 
 /** The weapon templates: the base, then a variant per weapon (player weapons and enemy weapons alike). */
 function weaponTemplates() {
-  const base = asTemplate('weapon:base', baseWeaponNode(), 'Weapons')
+  const base = asTemplate('weapon:base', baseWeaponNode())
   const specs = [...WEAPONS, ...ENEMIES.filter(e => e.weapon).map(e => e.weapon)]
   return [base, ...specs.map(([key, name, script, parts, extra]) => {
     // A player weapon's 5th entry is its moveset; an enemy weapon's, an optional blade direction.
     const isMoves = Array.isArray(extra) && Array.isArray(extra[0])
     const tree = weaponNode(key, name, script, parts, isMoves ? extra : [], isMoves || !extra ? undefined : extra)
-    return variantTemplate(`weapon:${key}`, base, tree, 'Weapons')
+    return variantTemplate(`weapon:${key}`, base, tree)
   })]
 }
 
 /** The enemy templates: the base "Enemy", then a variant per type. */
 function enemyTemplates() {
-  const base = asTemplate('enemy:base', enemyNode(ENEMY_BASE), 'Enemies', [...mannequinMaterial.textureIds])
+  const base = asTemplate('enemy:base', enemyNode(ENEMY_BASE), [...mannequinMaterial.textureIds])
   embedSockets(base.nodeJson)
-  return [base, ...ENEMIES.map(spec => variantTemplate(`enemy:${spec.key}`, base, enemyNode(spec), 'Enemies'))]
+  return [base, ...ENEMIES.map(spec => variantTemplate(`enemy:${spec.key}`, base, enemyNode(spec)))]
 }
 
 // One node's content with everything a copy may differ in taken out, for the comparison below.
@@ -1693,15 +1690,15 @@ const LEVEL = (() => {
   const gate = shortcutGate()
   gate.name = 'Gate'
   return {
-    player: asTemplate('level:player', playerNode(), 'Level', [...mannequinMaterial.textureIds]),
-    torch: asTemplate('level:torch', torchNode('template'), 'Level'),
-    bonfire: asTemplate('level:bonfire', bonfireNode(), 'Level'),
-    fogGate: asTemplate('level:fog-gate', fogGateNode(), 'Level'),
-    lever: asTemplate('level:lever', lever, 'Level'),
-    gate: asTemplate('level:gate', gate, 'Level'),
-    message: asTemplate('level:message', message, 'Interactables'),
-    pickup: asTemplate('level:pickup', pickup, 'Interactables'),
-    enemySpawn: asTemplate('level:enemy-spawn', spawnNode('template', 'Enemy Spawn', [0, 0, 0], 0, SPAWN_DEFAULT), 'Enemies'),
+    player: asTemplate('level:player', playerNode(), [...mannequinMaterial.textureIds]),
+    torch: asTemplate('level:torch', torchNode('template')),
+    bonfire: asTemplate('level:bonfire', bonfireNode()),
+    fogGate: asTemplate('level:fog-gate', fogGateNode()),
+    lever: asTemplate('level:lever', lever),
+    gate: asTemplate('level:gate', gate),
+    message: asTemplate('level:message', message),
+    pickup: asTemplate('level:pickup', pickup),
+    enemySpawn: asTemplate('level:enemy-spawn', spawnNode('template', 'Enemy Spawn', [0, 0, 0], 0, SPAWN_DEFAULT)),
   }
 })()
 
@@ -1835,30 +1832,150 @@ function sceneRefs(refs) {
   }
 }
 
-function vfs(libraries) {
+// The Assets panel layout: grouped by what a thing IS in the game, not by asset type. Each feature
+// (a character, a weapon, a prop, an effect) is a folder holding everything it is made of, filed in
+// type subfolders — Scripts/, Materials/, Particles/, Animations/, AI/ … — that exist only where there is
+// something to put in them. A base and its variants are siblings (Base Enemy beside Hollow), so what a
+// variant adds sits apart from what it inherits.
+//
+// References between assets are by id, so this table is free to change — EXCEPT for scripts: an import
+// path is the explorer path (scriptRuntime.ts), and the scripts import their shared modules absolutely
+// (`@/Core/Scripts/SoulsMath`). Moving a script that others import means moving those import lines too;
+// soulsDemoProject.test.ts resolves every import against this tree to catch it.
+//
+// Every asset must be listed: vfs() throws on one that is not, so a new asset cannot quietly land nowhere.
+
+const ENEMY = (name) => `/Characters/Enemies/${name}`
+const WEAPON = (name) => `/Weapons/${name}`
+const PROP = (name) => `/Props/${name}`
+const FX = (name) => `/Effects/${name}`
+const SHARED = '/Characters/Shared'
+const PLAYER = '/Characters/Player'
+const KEEP = `/Scenes/${PROJECT_NAME}`
+
+/** kind -> asset name -> folder. */
+const FOLDERS = {
+  scene: { [PROJECT_NAME]: '/Scenes' },
+  script: {
+    // Shared modules and the fighter base everything with health builds on.
+    SoulsMath: '/Core/Scripts', SoulsHitbox: '/Core/Scripts', SoulsAudio: '/Core/Scripts', SoulsCharacter: '/Core/Scripts',
+    'Game Manager': '/Game/Scripts',
+    HUD: '/Game/UI/Scripts', 'Boss Bar': '/Game/UI/Scripts', Banner: '/Game/UI/Scripts', 'Bonfire Menu': '/Game/UI/Scripts',
+    Player: `${PLAYER}/Scripts`, 'Lock-On Camera': `${PLAYER}/Scripts`,
+    SoulsEnemy: `${ENEMY('Base Enemy')}/Scripts`, 'Enemy Attack': `${ENEMY('Base Enemy')}/Scripts`,
+    'Enemy Brain': `${ENEMY('Base Enemy')}/Scripts`, 'Enemy Spawn': `${ENEMY('Base Enemy')}/Scripts`,
+    Projectile: `${ENEMY('Base Enemy')}/Scripts`,
+    Hollow: `${ENEMY('Hollow')}/Scripts`, 'Hollow Sorcerer': `${ENEMY('Hollow Sorcerer')}/Scripts`,
+    'Elite Knight': `${ENEMY('Elite Knight')}/Scripts`, 'Hollow Warden': `${ENEMY('Hollow Warden')}/Scripts`,
+    SoulsWeapon: `${WEAPON('Base Weapon')}/Scripts`, 'Weapon Move': `${WEAPON('Base Weapon')}/Scripts`,
+    'Straight Sword': `${WEAPON('Straight Sword')}/Scripts`, Greatsword: `${WEAPON('Greatsword')}/Scripts`,
+    Club: `${WEAPON('Club')}/Scripts`, 'Sorcerer Staff': `${WEAPON('Sorcerer Staff')}/Scripts`, Halberd: `${WEAPON('Halberd')}/Scripts`,
+    Bonfire: `${PROP('Bonfire')}/Scripts`, Pickup: `${PROP('Pickup')}/Scripts`, Message: `${PROP('Message')}/Scripts`,
+    Bloodstain: `${PROP('Bloodstain')}/Scripts`, Lever: `${PROP('Lever & Gate')}/Scripts`, Door: `${PROP('Lever & Gate')}/Scripts`,
+    'Fog Gate': `${PROP('Fog Gate')}/Scripts`,
+    Effect: '/Effects/Scripts', 'Blood Splat': `${FX('Blood')}/Scripts`,
+  },
+  template: {
+    Player: PLAYER,
+    Enemy: ENEMY('Base Enemy'), 'Enemy Spawn': ENEMY('Base Enemy'),
+    Hollow: ENEMY('Hollow'), 'Hollow Sorcerer': ENEMY('Hollow Sorcerer'),
+    'Elite Knight': ENEMY('Elite Knight'), 'Hollow Warden': ENEMY('Hollow Warden'),
+    Weapon: WEAPON('Base Weapon'), 'Straight Sword': WEAPON('Straight Sword'), Greatsword: WEAPON('Greatsword'),
+    Club: WEAPON('Club'), 'Sorcerer Staff': WEAPON('Sorcerer Staff'), Halberd: WEAPON('Halberd'),
+    Torch: PROP('Torch'), Bonfire: PROP('Bonfire'), 'Fog Gate': PROP('Fog Gate'),
+    Lever: PROP('Lever & Gate'), Gate: PROP('Lever & Gate'), Message: PROP('Message'), Pickup: PROP('Pickup'),
+    Bloodstain: PROP('Bloodstain'),
+    'Magic Bolt': FX('Magic Bolt'), 'Bolt Impact': FX('Magic Bolt'), 'Hit Spark': FX('Hit Spark'),
+    'Slam Dust': FX('Slam Dust'), 'Blood Spray': FX('Blood'), 'Blood Splat': FX('Blood'), 'Blood Drops': FX('Blood'),
+  },
+  model: { mannequin: `${SHARED}/Models` },
+  material: {
+    'mannequin pbr': `${SHARED}/Materials`,
+    'Hollow (placeholder)': `${ENEMY('Hollow')}/Materials`, 'Caster (placeholder)': `${ENEMY('Hollow Sorcerer')}/Materials`,
+    'Elite Knight (placeholder)': `${ENEMY('Elite Knight')}/Materials`, 'Hollow Warden (placeholder)': `${ENEMY('Hollow Warden')}/Materials`,
+    'Lock Reticle': `${PLAYER}/Materials`,
+    // The keep's architecture. Wood and iron also dress the props, but they are the level's palette.
+    'Stone (placeholder)': `${KEEP}/Materials`, 'Dark Stone (placeholder)': `${KEEP}/Materials`,
+    'Flagstones (placeholder)': `${KEEP}/Materials`, 'Wood (placeholder)': `${KEEP}/Materials`, 'Iron (placeholder)': `${KEEP}/Materials`,
+    'Blade (placeholder)': `${WEAPON('Base Weapon')}/Materials`, 'Grip Leather (placeholder)': `${WEAPON('Base Weapon')}/Materials`,
+    'Bonfire Ash (placeholder)': `${PROP('Bonfire')}/Materials`, 'Message Glyph (placeholder)': `${PROP('Message')}/Materials`,
+    'Item Glow (placeholder)': `${PROP('Pickup')}/Materials`, 'Fog Wall (placeholder)': `${PROP('Fog Gate')}/Materials`,
+    'Magic Bolt (placeholder)': `${FX('Magic Bolt')}/Materials`,
+    'Blood Splat (placeholder)': `${FX('Blood')}/Materials`, 'Blood Drops (placeholder)': `${FX('Blood')}/Materials`,
+    'Bloodstain Decal (placeholder)': `${FX('Blood')}/Materials`,
+  },
+  rig: { Mannequin: `${SHARED}/Rigs` },
+  animationField: { 'Souls Locomotion': `${SHARED}/Animation` },
+  animController: { 'Souls Character': `${SHARED}/Animation` },
+  particleSystem: {
+    'Bonfire Fire': `${PROP('Bonfire')}/Particles`, 'Torch Fire': `${PROP('Torch')}/Particles`,
+    'Fog Wall': `${PROP('Fog Gate')}/Particles`, 'Item Glow': `${PROP('Pickup')}/Particles`,
+    'Message Glow': `${PROP('Message')}/Particles`, 'Bloodstain Glow': `${PROP('Bloodstain')}/Particles`,
+    'Magic Bolt Trail': `${FX('Magic Bolt')}/Particles`, 'Magic Bolt Impact': `${FX('Magic Bolt')}/Particles`,
+    'Hit Spark': `${FX('Hit Spark')}/Particles`, 'Blood Spray': `${FX('Blood')}/Particles`, 'Slam Dust': `${FX('Slam Dust')}/Particles`,
+    'Phase Two Aura': `${ENEMY('Hollow Warden')}/Particles`,
+  },
+  aiBrain: {
+    'Enemy Brain': `${ENEMY('Base Enemy')}/AI`, 'Hollow Brain': `${ENEMY('Hollow')}/AI`,
+    'Hollow Sorcerer Brain': `${ENEMY('Hollow Sorcerer')}/AI`, 'Elite Knight Brain': `${ENEMY('Elite Knight')}/AI`,
+    'Hollow Warden Brain': `${ENEMY('Hollow Warden')}/AI`,
+  },
+}
+
+/** Clips by who plays them. Locomotion is every character's; the rest belong to one fighter or family. */
+function animationFolder(name) {
+  if (!name.startsWith('Souls_')) return `${SHARED}/Animations/Locomotion`
+  const clip = name.slice('Souls_'.length)
+  if (/^(HitLight|HitHeavy|Death|Cast)$/.test(clip)) return `${SHARED}/Animations/Combat`
+  if (clip.startsWith('Enemy_')) return `${ENEMY('Base Enemy')}/Animations`
+  if (clip.startsWith('Tall_')) return `${ENEMY('Elite Knight')}/Animations`
+  if (clip.startsWith('Giant_') || clip === 'Roar' || clip === 'Leap') return `${ENEMY('Hollow Warden')}/Animations`
+  return `${PLAYER}/Animations`
+}
+
+/** Readable names for the textures, which the explorer otherwise lists by id. */
+function textureEntries() {
+  const out = []
+  const slots = { baseColorTexture: 'Base Color', metallicRoughnessTexture: 'Metallic Roughness', normalMap: 'Normal', emissiveTexture: 'Emissive', occlusionTexture: 'Occlusion' }
+  for (const [slot, id] of Object.entries(mannequinMaterial.material.textures ?? {}))
+    out.push({ folder: `${SHARED}/Textures`, name: `mannequin ${slots[slot] ?? slot}`, id })
+  out.push({ folder: `${FX('Blood')}/Textures`, name: 'Blood Splat', id: BLOOD_TEX.splat })
+  out.push({ folder: `${FX('Blood')}/Textures`, name: 'Blood Drops', id: BLOOD_TEX.drops })
+  return out
+}
+
+function vfs(libraries, textureIds) {
   const entries = []
-  const add = (folder, kind, items) => {
+  const add = (kind, items, folderOf = (item) => FOLDERS[kind]?.[item.name]) => {
     const ext = KIND_EXT[kind]
     if (!ext) throw new Error(`no virtual extension for kind "${kind}"`)
-    for (const item of items) entries.push({ path: `${folder}${item.name}${ext}`, kind, assetId: item.id, created: CREATED_AT })
+    for (const item of items) {
+      const folder = folderOf(item)
+      if (!folder) throw new Error(`no Assets folder for ${kind} "${item.name}" — add it to FOLDERS in tools/soulsDemo/build.mjs`)
+      entries.push({ path: `${folder}/${item.name}${ext}`, kind, assetId: item.id, created: CREATED_AT })
+    }
   }
-  add('/', 'scene', [{ name: PROJECT_NAME, id: SCENE_ID }])
-  add('/Scripts/', 'script', libraries.scripts)
-  const folderOf = (t) => TEMPLATE_FOLDER.get(t.id) ?? 'Effects'
-  for (const folder of ['Level', 'Interactables', 'Weapons', 'Enemies', 'Effects'])
-    add(`/Templates/${folder}/`, 'template', libraries.templates.filter(t => folderOf(t) === folder))
-  add('/Models/', 'model', libraries.models)
-  const isEffect = (m) => EFFECT_MATERIALS.has(m.id)
-  add('/Materials/Characters/', 'material', libraries.materials.filter(m => !isEffect(m) && m.material.textures?.baseColorTexture))
-  add('/Materials/Props/', 'material', libraries.materials.filter(m => !isEffect(m) && !m.material.textures?.baseColorTexture))
-  add('/Materials/Effects/', 'material', libraries.materials.filter(isEffect))
-  add('/Animation/', 'rig', libraries.rigs)
-  add('/Animation/', 'animationField', libraries.animationFields)
-  add('/Animation/', 'animController', libraries.animControllers)
-  add('/Animation/Locomotion/', 'animation', libraries.animations.filter(a => !a.name.startsWith('Souls_')))
-  add('/Animation/Placeholders/', 'animation', libraries.animations.filter(a => a.name.startsWith('Souls_')))
-  add('/Effects/', 'particleSystem', libraries.particleSystems)
-  add('/AI/', 'aiBrain', libraries.aiBrains)
+  add('scene', [{ name: PROJECT_NAME, id: SCENE_ID }])
+  add('script', libraries.scripts)
+  add('template', libraries.templates)
+  add('model', libraries.models)
+  add('material', libraries.materials)
+  add('rig', libraries.rigs)
+  add('animationField', libraries.animationFields)
+  add('animController', libraries.animControllers)
+  add('animation', libraries.animations, a => animationFolder(a.name))
+  add('particleSystem', libraries.particleSystems)
+  add('aiBrain', libraries.aiBrains)
+  // A texture's record and its source image share the texture's id (textureAssets.ts); the editor
+  // re-derives both on import and keeps them wherever these entries put them.
+  const listed = new Set()
+  for (const t of textureEntries()) {
+    listed.add(t.id)
+    entries.push({ path: `${t.folder}/${t.name}${KIND_EXT.texture}`, kind: 'texture', assetId: t.id, created: CREATED_AT })
+    entries.push({ path: `${t.folder}/Source/${t.name}.png`, kind: 'image', assetId: t.id, created: CREATED_AT })
+  }
+  const unlisted = textureIds.filter(id => !listed.has(id))
+  if (unlisted.length) throw new Error(`no Assets folder for texture(s) ${unlisted.join(', ')} — add them to textureEntries()`)
 
   const paths = entries.map(e => e.path)
   const clash = paths.find((p, i) => paths.indexOf(p) !== i)
@@ -1935,7 +2052,7 @@ function main() {
       }),
     }],
   })
-  writeJson(path.join(OUT, 'vfs.json'), vfs(libraries))
+  writeJson(path.join(OUT, 'vfs.json'), vfs(libraries, textures.included))
   writeJson(path.join(OUT, 'example.json'), {
     name: PROJECT_NAME,
     description: 'A one-level souls-like: stamina combat, rolls, lock-on, bonfires, a fog gate and a two-phase boss. Placeholder art, real mechanics — see SOULS_DEMO.md to swap in your own.',

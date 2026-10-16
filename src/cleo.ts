@@ -364,6 +364,11 @@ export { sceneStats, sceneStatsDetail } from "./core/scene/sceneStats";
 export type { SceneStats } from "./core/scene/sceneStats";
 export { frameStats, currentViewport } from "./graphics/renderStats";
 export type { RenderStats } from "./graphics/renderStats";
+export { shaderStats } from "./graphics/shaderStats";
+export { createProgramUsage, usageFromSceneJson, usageFromRenderSettings, castsShadows, programsFor, PROGRAM_CLASS } from "./graphics/programUsage";
+export type { ProgramUsage } from "./graphics/programUsage";
+export { physicalFor, particleSimProgram, usesParallax } from "./graphics/programVariants";
+export type { ShaderBuildRecord } from "./graphics/shaderStats";
 export { gpuProfiler, frameHistory, Ring, RENDER_PASSES, TOGGLEABLE_PASSES } from "./graphics/gpuProfiler";
 export type { PassTiming, RenderPass, FrameSample } from "./graphics/gpuProfiler";
 export { DEFAULT_POST_CHAIN, resolvePostChain, isDefaultChain, isBuiltinEffect, materialIndexOf }
@@ -429,6 +434,9 @@ export {
 } from "./core/scripting/scriptRuntime";
 export type { ScriptCompileOptions, ScriptModuleFactory } from "./core/scripting/scriptRuntime";
 export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime";
+// Typed name fields (clip/sound/socket/template/child): plain strings the inspector offers a picker for.
+export { SOUNDS_GROUP, ownedSoundsGroup } from "./core/scripting/fieldTypes";
+export type { ClipName, SoundName, SocketName, TemplateName, NodeName } from "./core/scripting/fieldTypes";
 export { Game, setGameHost } from "./core/game";
 export type { GameHost } from "./core/game";
 export * as Vec from "gl-matrix";

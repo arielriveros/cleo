@@ -1,4 +1,4 @@
-import SoulsWeaponNode from './SoulsWeapon'
+import SoulsWeaponNode from '@/Weapons/Base Weapon/Scripts/SoulsWeapon'
 
 /**
  * Hollow Keep — the Greatsword: slow, heavy, strength-hungry, and it breaks poise. The player's second

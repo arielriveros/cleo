@@ -1,9 +1,10 @@
-const { app, BrowserWindow, ipcMain, dialog, protocol, net } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const fsp = fs.promises;
 const { pathToFileURL } = require('url');
-const { GAME_MAIN_JS, GAME_PRELOAD_JS, gamePackageJson, gameReadme } = require('./gameTemplates');
+const { GAME_MAIN_JS, GAME_PRELOAD_JS, GAME_INSTALLER_NSH, gamePackageJson, gameReadme } = require('./gameTemplates');
 const scriptWorkspace = require('./scriptWorkspace');
 
 const isDev = process.env.CLEO_DEV === '1';
@@ -79,6 +80,38 @@ ipcMain.on('shell:unload-response', (event, allow) => {
   proceedWithUnload(BrowserWindow.fromWebContents(event.sender), id, pending.action);
 });
 
+// --- Application menu --------------------------------------------------------------------------
+//
+// The editor draws its own chrome, so Electron's default File/Edit/View/Window/Help bar is just noise.
+// It cannot simply be removed, though: the menu is also where the keyboard accelerators live. Reload
+// (Ctrl/Cmd+R) is how the unload guard below gets its 'reload' case, DevTools has no other way in, and
+// on macOS Cmd+C/V/X/Z only reach text inputs and Monaco through Edit-menu roles. So the shell installs
+// a minimal menu carrying exactly those, and every window hides the bar (`setMenuBarVisibility(false)`
+// keeps the accelerators live on Windows/Linux; macOS has no per-window bar to hide).
+
+function installAppMenu() {
+  const isMac = process.platform === 'darwin';
+  const template = [
+    ...(isMac ? [{ role: 'appMenu' }] : []),
+    { role: 'editMenu' },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        ...(isDev ? [{ role: 'forceReload' }, { role: 'toggleDevTools' }] : []),
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    ...(isMac ? [{ role: 'windowMenu' }] : []),
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1600,
@@ -90,6 +123,7 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
+  win.setMenuBarVisibility(false);
 
   // Optional: forward renderer console + failed loads to the terminal (CLEO_LOG_CONSOLE=1).
   if (process.env.CLEO_LOG_CONSOLE === '1') {
@@ -136,12 +170,23 @@ function createWindow() {
   });
 
   // Dev: the editor's Vite dev server. Prod: the built editor bundle over app://.
-  if (isDev) win.loadURL('http://localhost:8080');
-  else win.loadURL(`${APP_ORIGIN}/index.html`);
+  // `desktop:dev` starts Vite and Electron side by side, so on a cold start the window can open before the
+  // server listens. Retry instead of leaving a blank window that needs a manual Ctrl+R.
+  if (isDev) {
+    const DEV_URL = 'http://localhost:8080';
+    win.webContents.on('did-fail-load', (_e, code, _desc, url, isMainFrame) => {
+      // -102 ERR_CONNECTION_REFUSED / -105 name not resolved: the server is not up yet.
+      if (isMainFrame && url.startsWith(DEV_URL) && (code === -102 || code === -105)) {
+        setTimeout(() => { if (!win.isDestroyed()) win.loadURL(DEV_URL); }, 500);
+      }
+    });
+    win.loadURL(DEV_URL);
+  } else win.loadURL(`${APP_ORIGIN}/index.html`);
 }
 
 app.whenReady().then(() => {
   if (!isDev) registerAppProtocol();
+  installAppMenu();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -163,6 +208,27 @@ async function pickDirectory(win, title) {
   return res.filePaths[0];
 }
 
+// The game's name as a folder name: Windows rejects <>:"/\|?*, control characters, trailing dots/spaces
+// and device names (CON, NUL, COM1…), and every platform rejects separators.
+function safeFolderName(name) {
+  let s = String(name || '')
+    .replace(/[<>:"/\\|?*\x00-\x1f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/, '')
+    .slice(0, 100)
+    .trim();
+  if (/^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i.test(s)) s = '_' + s;
+  return s || 'Cleo Game';
+}
+
+// Ask where to save the game, then save it in a folder named after the game inside that location.
+async function pickGameDirectory(win, kind, name) {
+  const folder = safeFolderName(name);
+  const parent = await pickDirectory(win, `Choose where to save the ${kind} build ("${folder}" folder)`);
+  return parent ? { dir: path.join(parent, folder), name: folder } : null;
+}
+
 // Write the four files that make up a published game into `dir`. All game data — scenes, meshes and
 // textures — is in the single binary game.bin; only scripts are a separate file.
 async function writeWebFiles(dir, files) {
@@ -173,11 +239,12 @@ async function writeWebFiles(dir, files) {
   await fsp.writeFile(path.join(dir, 'game.bin'), Buffer.from(files.gameBin));
 }
 
-ipcMain.handle('publish:web', async (event, files) => {
+ipcMain.handle('publish:web', async (event, files, options) => {
   try {
     const win = BrowserWindow.fromWebContents(event.sender);
-    const dir = await pickDirectory(win, 'Choose an empty folder for the web build');
-    if (!dir) return { ok: false, canceled: true };
+    const picked = await pickGameDirectory(win, 'web', options && options.name);
+    if (!picked) return { ok: false, canceled: true };
+    const { dir } = picked;
     await writeWebFiles(dir, files);
     await fsp.writeFile(
       path.join(dir, 'README.txt'),
@@ -193,55 +260,90 @@ ipcMain.handle('publish:web', async (event, files) => {
 ipcMain.handle('publish:desktop', async (event, files, options) => {
   try {
     const win = BrowserWindow.fromWebContents(event.sender);
-    const dir = await pickDirectory(win, 'Choose an empty folder for the desktop build');
-    if (!dir) return { ok: false, canceled: true };
+    const picked = await pickGameDirectory(win, 'desktop', options && options.name);
+    if (!picked) return { ok: false, canceled: true };
+    const { dir, name } = picked;
+    const installer = !!(options && options.installer);
 
-    // 1) The web files + Electron scaffold. preload injects game.bin so it runs from file://.
-    await writeWebFiles(dir, files);
-    const electronVersion = require('electron/package.json').version;
-    const win0 = (options && options.window) || {};
-    const title = typeof win0.title === 'string' && win0.title.trim() ? win0.title.trim().slice(0, 120) : '';
-    const name = path.basename(dir) || 'cleo-game';
-    // The project's window options (size, fullscreen, title); the game's main.js reads them at launch.
-    await fsp.writeFile(path.join(dir, 'window.json'), JSON.stringify({
-      title,
-      width: Number(win0.width) || 1280,
-      height: Number(win0.height) || 720,
-      fullscreen: !!win0.fullscreen,
-      resizable: win0.resizable !== false,
-    }, null, 2), 'utf-8');
-    await fsp.writeFile(path.join(dir, 'main.js'), GAME_MAIN_JS, 'utf-8');
-    await fsp.writeFile(path.join(dir, 'preload.js'), GAME_PRELOAD_JS, 'utf-8');
-    await fsp.writeFile(path.join(dir, 'package.json'), gamePackageJson(name, electronVersion), 'utf-8');
-    await fsp.writeFile(path.join(dir, 'README.md'), gameReadme(name), 'utf-8');
-
-    if (!options || !options.installer) {
-      return { ok: true, path: dir };
-    }
-
-    // 2) Optional: package a native installer with electron-builder (downloads Electron; needs network).
+    // The installer is built from a scratch copy of the runnable game, so the game folder ends up holding
+    // only the installer — nothing electron-builder needed along the way (scaffold, win-unpacked, logs).
+    const stage = installer ? await fsp.mkdtemp(path.join(os.tmpdir(), 'cleo-publish-')) : dir;
     try {
-      const builder = require('electron-builder');
-      const outDir = path.join(dir, 'installer');
-      await builder.build({
-        projectDir: dir,
-        config: {
-          appId: 'com.cleo.game.' + name.replace(/[^a-z0-9]/gi, '').toLowerCase(),
-          productName: title || name,
-          electronVersion,
-          npmRebuild: false,
-          directories: { output: outDir },
-          files: ['**/*', '!installer/**', '!node_modules/**'],
-        },
-      });
-      return { ok: true, path: outDir };
-    } catch (e) {
-      return {
-        ok: false,
-        error: 'Runnable folder written to ' + dir + ', but installer packaging failed: ' +
-          String(e && e.message ? e.message : e) +
-          '\n(Installer packaging needs network access to download Electron.)',
-      };
+      // 1) The web files + Electron scaffold. preload injects game.bin so it runs from file://.
+      await writeWebFiles(stage, files);
+      const electronVersion = require('electron/package.json').version;
+      const win0 = (options && options.window) || {};
+      const title = typeof win0.title === 'string' && win0.title.trim() ? win0.title.trim().slice(0, 120) : '';
+      // The project's window options (size, fullscreen, title); the game's main.js reads them at launch.
+      await fsp.writeFile(path.join(stage, 'window.json'), JSON.stringify({
+        title,
+        width: Number(win0.width) || 1280,
+        height: Number(win0.height) || 720,
+        fullscreen: !!win0.fullscreen,
+        resizable: win0.resizable !== false,
+      }, null, 2), 'utf-8');
+      await fsp.writeFile(path.join(stage, 'main.js'), GAME_MAIN_JS, 'utf-8');
+      await fsp.writeFile(path.join(stage, 'preload.js'), GAME_PRELOAD_JS, 'utf-8');
+      await fsp.writeFile(path.join(stage, 'package.json'), gamePackageJson(name, electronVersion), 'utf-8');
+
+      // The runnable folder is played with `npm install && npm start`, which its README explains.
+      if (!installer) {
+        await fsp.writeFile(path.join(dir, 'README.md'), gameReadme(name), 'utf-8');
+        return { ok: true, path: dir };
+      }
+
+      // 2) Package a native installer with electron-builder (downloads Electron; needs network).
+      // electron-builder runs inside this Electron process, whose patched fs treats any path through an
+      // `.asar` as an archive to read — so writing the game's app.asar fails with "Invalid package …".
+      // noAsar makes fs plain for the duration of the build.
+      const outDir = path.join(stage, 'installer');
+      const nsisInclude = path.join(stage, 'installer.nsh');
+      await fsp.writeFile(nsisInclude, GAME_INSTALLER_NSH, 'utf-8');
+      const prevNoAsar = process.noAsar;
+      process.noAsar = true;
+      try {
+        const builder = require('electron-builder');
+        await builder.build({
+          projectDir: stage,
+          config: {
+            appId: 'com.cleo.game.' + name.replace(/[^a-z0-9]/gi, '').toLowerCase(),
+            productName: title || name,
+            electronVersion,
+            npmRebuild: false,
+            directories: { output: outDir },
+            files: ['**/*', '!installer/**', '!installer.nsh', '!node_modules/**'],
+            // Windows: a wizard, not one-click — the player picks the install folder, then which shortcuts
+            // to create (installer.nsh). electron-builder creates both; the page's choice prunes them.
+            nsis: {
+              oneClick: false,
+              allowToChangeInstallationDirectory: true,
+              createDesktopShortcut: true,
+              createStartMenuShortcut: true,
+              include: nsisInclude,
+            },
+          },
+        });
+      } catch (e) {
+        return {
+          ok: false,
+          error: 'Installer packaging failed: ' + String(e && e.message ? e.message : e) +
+            '\n(If this is a download error: installer packaging needs network access to download Electron.)',
+        };
+      } finally {
+        process.noAsar = prevNoAsar;
+      }
+
+      // The installer itself (Setup .exe / .dmg / .AppImage) sits at the top of the output; the
+      // update block maps and builder logs beside it are not needed to install the game.
+      const artifacts = (await fsp.readdir(outDir, { withFileTypes: true }))
+        .filter(f => f.isFile() && !/\.(blockmap|ya?ml)$/i.test(f.name))
+        .map(f => f.name);
+      if (artifacts.length === 0) return { ok: false, error: 'Installer packaging produced no installer.' };
+      await fsp.mkdir(dir, { recursive: true });
+      for (const f of artifacts) await fsp.copyFile(path.join(outDir, f), path.join(dir, f));
+      return { ok: true, path: path.join(dir, artifacts[0]) };
+    } finally {
+      if (installer) await fsp.rm(stage, { recursive: true, force: true }).catch(() => {});
     }
   } catch (e) {
     return { ok: false, error: String(e && e.stack ? e.stack : e) };

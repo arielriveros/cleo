@@ -2,13 +2,14 @@ import { Node } from 'cleo'
 import { useState, useEffect } from 'react'
 import { useCleoEngine } from '../../EngineContext'
 import Collapsable from '../../../components/Collapsable'
-import { NumberInput, TextInput, Toggle, VectorInput, Select, StringListInput, cn, labelClass, ACCESS_META } from '../../../components/ui'
+import { NumberInput, TextInput, Toggle, VectorInput, Select, StringListInput, ComboSelect, cn, labelClass, ACCESS_META } from '../../../components/ui'
 import { VariablesIcon } from '../sectionIcons'
 import type { ScriptVarSchema } from '../../../utils/scripts'
 import { isOverridden, setFieldOverride } from '../../../utils/templateOverrides'
 import OverrideMark from '../OverrideMark'
 import { useVariantBase } from '../useVariantBase'
 import { deepClone } from '../../../utils/deepClone'
+import { pickChoices, PICK_LABEL, type PickContext } from './pickSources'
 
 // The reflection view for a class-based script asset. Variables are not created here: they are declared in
 // the script as class fields, so name, type and access are read-only. Only each node's own VALUE is editable,
@@ -19,7 +20,7 @@ import { deepClone } from '../../../utils/deepClone'
  * placement's override (templateOverrides.ts) and survives the instance being rebuilt from its template.
  */
 export default function ScriptVariablesEditor(props: { node: Node; overridable?: boolean }) {
-  const { eventEmitter, scriptAssetOf, revertTemplateOverride } = useCleoEngine()
+  const { eventEmitter, scriptAssetOf, revertTemplateOverride, editorScene, rigs, animations, templates } = useCleoEngine()
   const asset = scriptAssetOf(props.node)
   const [values, setValues] = useState<Record<string, any>>({})
   // In a variant's tab: an inherited node's value differs from what its base holds = this variant's override.
@@ -65,8 +66,30 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
     return Array.isArray(def) ? def.map(String) : []
   }
 
+  // A typed name field (`clip: ClipName`): the names valid where this node sits. See pickSources.ts.
+  const pickCtx: PickContext = { sceneRoot: editorScene?.root, rigs, animations, templates }
+  const namePicker = (v: ScriptVarSchema, current: string, onChange: (value: string) => void) => {
+    const noun = PICK_LABEL[v.pick!]
+    return (
+      <ComboSelect value={current} onChange={onChange} noun={noun}
+        choices={pickChoices(v.pick!, props.node, pickCtx)} title={`A ${noun} name`} />
+    )
+  }
+
   const renderValue = (v: ScriptVarSchema) => {
     const value = values[v.name]
+    if (v.choices) {
+      const current = typeof value === 'string' ? value : ''
+      return (
+        <Select className='w-full' value={current} onChange={e => setValue(v.name, e.target.value)}>
+          {!v.choices.includes(current) && <option value={current}>{current || '(none)'} (not in list)</option>}
+          {v.choices.map(c => <option key={c} value={c}>{c}</option>)}
+        </Select>
+      )
+    }
+    if (v.pick && v.type === 'string') {
+      return namePicker(v, typeof value === 'string' ? value : '', s => setValue(v.name, s))
+    }
     if (v.options) {
       const choices = choicesFor(v)
       const current = typeof value === 'string' ? value : ''
@@ -79,7 +102,8 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
       )
     }
     if (v.type === 'stringList') {
-      return <StringListInput value={Array.isArray(value) ? value.map(String) : []} onChange={next => setValue(v.name, next)} />
+      return <StringListInput value={Array.isArray(value) ? value.map(String) : []} onChange={next => setValue(v.name, next)}
+        renderItem={v.pick ? (item, set) => namePicker(v, item, set) : undefined} />
     }
     if (v.type === 'number') return <NumberInput value={typeof value === 'number' ? value : 0} onChange={n => setValue(v.name, n)} />
     if (v.type === 'string') return <TextInput value={value ?? ''} onChange={s => setValue(v.name, s)} />
@@ -94,8 +118,10 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
         <p className='mb-2 text-ui-sm text-dim'>
           Declared in <b>{asset.name}</b> as class fields. Type and access come from the script; edit each
           value here. Add a field in the script (<code>public speed: number = 5</code>); a leading{' '}
-          <code>_</code> keeps it internal. A <code>string[]</code> field is an editable list, and a string field
-          tagged <code>/** @options listField */</code> is picked from that list.
+          <code>_</code> keeps it internal. A <code>string[]</code> field is an editable list. Type a name field as{' '}
+          <code>ClipName</code>, <code>SoundName</code>, <code>SocketName</code>, <code>TemplateName</code> or{' '}
+          <code>NodeName</code> to pick it from what this node can reach, or as <code>'a' | 'b'</code> for fixed
+          choices; a string field tagged <code>/** @options listField */</code> is picked from that list.
         </p>
         {visible.length === 0 && <p className='mb-2 text-ui-sm text-dim'>No exposed variables. Declare a public/protected field in the script.</p>}
         {visible.map(v => {
@@ -103,7 +129,7 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
           const access = ACCESS_META[v.access]
           return (
             <div key={v.name} className='flex items-center gap-1.5 mb-2'>
-              <span className={cn(labelClass, 'w-[30%] truncate')} title={`${v.name}: ${v.type} (${v.access})`}>{v.name}</span>
+              <span className={cn(labelClass, 'w-[30%] truncate')} title={`${v.name}: ${v.pick ? `${v.pick} name` : v.type}${v.type === 'stringList' && v.pick ? ' list' : ''} (${v.access})`}>{v.name}</span>
               {access && (
                 <span className='inline-flex items-center shrink-0' style={{ color: access.color }}
                   title={`Access: ${access.label} — declared in the script`}>

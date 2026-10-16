@@ -1,4 +1,4 @@
-import SoulsWeaponNode from './SoulsWeapon'
+import SoulsWeaponNode from '@/Weapons/Base Weapon/Scripts/SoulsWeapon'
 
 /**
  * Hollow Keep — the Straight Sword: quick, cheap, dexterity-leaning. The "Straight Sword" template (a

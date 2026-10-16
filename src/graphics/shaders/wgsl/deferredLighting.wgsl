@@ -2,6 +2,11 @@
 // position from depth, and computes PBR (Cook-Torrance) lighting for every opaque pixel. All lights
 // are uploaded once per frame here instead of per-object per-shader.
 
+// Build-time variants (see programVariants.ts): one shadow filter each, and no cascade-debug tint —
+// only the editor's debug view needs that, and the editor builds the base program.
+// @variant pcf CLEO_SHADOW_FILTER=0 CLEO_NO_CASCADE_DEBUG
+// @variant poisson CLEO_SHADOW_FILTER=1 CLEO_NO_CASCADE_DEBUG
+
 #include "./chunks/fullscreen.wgsl"
 // Cascaded shadow maps. Every uniform and every sampling function lives in the shared chunk, so this
 // pass, the forward materials, custom materials and the god rays cannot drift apart.
@@ -367,8 +372,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var Lo = vec3<f32>(0.0);
 
-    Lo += evaluateDirectionalLight(u_lighting.u_dirLight, N, V, albedo, metallic, roughness,
-                                   1.0 - directionalShadow(worldPos, N, viewDepth));
+    // Once, and reused by the cascade tint below: every call inlines the whole cascade filter (two
+    // cascades, both filter loops), and a second call doubled the program the driver has to compile.
+    let sunShadow = directionalShadow(worldPos, N, viewDepth);
+    Lo += evaluateDirectionalLight(u_lighting.u_dirLight, N, V, albedo, metallic, roughness, 1.0 - sunShadow);
 
     // Every punctual light that reaches THIS fragment, out of however many the scene has. The two
     // fixed-length loops this replaced ran over 16 point and 8 spot slots for every pixel on screen.
@@ -407,10 +414,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Cascade debug channel: replace the shading with a flat per-cascade tint, modulated by the shadow
     // term so the shadow shapes stay readable inside each coloured band.
+    // Compiled out of the shipped variants (CLEO_NO_CASCADE_DEBUG); only the editor's debug view asks for it.
+#ifndef CLEO_NO_CASCADE_DEBUG
     if (u_shadow.u_debugCascades != 0) {
-        color = cascadeDebugTint(viewDepth)
-              * mix(0.25, 1.0, 1.0 - directionalShadow(worldPos, N, viewDepth));
+        color = cascadeDebugTint(viewDepth) * mix(0.25, 1.0, 1.0 - sunShadow);
     }
+#endif
 
     // Alpha = bloom-eligibility mask: 1 for lit PBR-model surfaces (PBR / terrain / foliage), 0 for
     // unlit "basic" pixels (which write zero albedo). Sampled by the bloom bright-pass so only lit

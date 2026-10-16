@@ -4,8 +4,9 @@ import type { Node } from 'cleo'
  * Hollow Keep — shared maths for the Souls* scripts. A script MODULE: it exports helpers and is never
  * attached to a node. Every script that needs these imports them by path:
  *
- *   import { num, yawTo, angleDiff } from './SoulsMath'        relative to the importing script
- *   import { num } from '@/Scripts/SoulsMath'                   or from the project root
+ *   import { num, yawTo, angleDiff } from '@/Core/Scripts/SoulsMath'
+ *
+ * (the project-root form; a path relative to the importing script works too).
  *
  * Evaluated once per game and shared, so it holds no per-node state.
  *

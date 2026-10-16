@@ -1,4 +1,5 @@
 import { Node } from 'cleo'
+import type { ClipName, NodeName, SoundName, TemplateName } from 'cleo'
 
 /**
  * Hollow Keep — one attack of an enemy's moveset. Attach to a plain child of the enemy's `Attacks`
@@ -27,7 +28,7 @@ import { Node } from 'cleo'
  * distance to the player (capped at `lungeSpeed`) — the boss's leap. Clips must be in place.
  */
 export default class SoulsEnemyAttackNode extends Node {
-  public clip: string = 'Souls_Enemy_Swing'
+  public clip: ClipName = 'Souls_Enemy_Swing'
   public playSpeed: number = 1
   public damage: number = 70
   public poiseDamage: number = 20
@@ -44,7 +45,7 @@ export default class SoulsEnemyAttackNode extends Node {
   /** No flinch while this attack plays (poise breaks still stagger). */
   public hyperArmor: boolean = false
   /** Attack that follows immediately, without a gap, when the player is still in its range. */
-  public comboNext: string = ''
+  public comboNext: NodeName = ''
   /** Fallback active window (clip seconds) for a clip without `hit`/`hitEnd` events. */
   public hitTime: number = 0.6
   public activeSeconds: number = 0.15
@@ -53,13 +54,13 @@ export default class SoulsEnemyAttackNode extends Node {
   /** Ground-slam radius. 0 is an ordinary swing. */
   public aoeRadius: number = 0
   /** Effect template spawned at the enemy's feet on a slam. */
-  public impactTemplate: string = ''
+  public impactTemplate: TemplateName = ''
   /** Projectile template; non-empty makes this a ranged attack. */
-  public projectileTemplate: string = ''
+  public projectileTemplate: TemplateName = ''
   public projectileSpeed: number = 12
   public projectileCount: number = 1
   public spreadDeg: number = 0
   /** Sound cue played when the attack starts (a SoundNode name under Sounds). */
-  public sound: string = 'Enemy Swing'
+  public sound: SoundName = 'Enemy Swing'
   public isEnemyAttack: boolean = true
 }

@@ -19,14 +19,31 @@ export class ShaderManager {
         this._shaders.set(name, shader);
     }
 
+    /**
+     * Builds a program nothing has registered yet, when its name is one the renderer knows how to build
+     * (see Renderer._buildOnDemand). Consulted on a miss by {@link getShader}, {@link bind} and
+     * {@link bindIfRegistered}; never by {@link find}, which stays a pure lookup.
+     */
+    private _resolver: ((name: string) => ShaderProgram | undefined) | null = null;
+
+    public setResolver(resolver: ((name: string) => ShaderProgram | undefined) | null): void {
+        this._resolver = resolver;
+    }
+
     public getShader(name: string): ShaderProgram {
-        const shader = this._shaders.get(name);
+        const shader = this._shaders.get(name) ?? this._resolve(name);
         if (!shader) throw new Error(`ShaderProgram ${name} not found`);
         return shader;
     }
 
     /** The shader registered under `name`, or undefined — unlike {@link getShader}, does not throw. */
     public find(name: string): ShaderProgram | undefined { return this._shaders.get(name); }
+
+    private _resolve(name: string): ShaderProgram | undefined {
+        const shader = this._resolver?.(name);
+        if (shader && !this._shaders.has(name)) this._shaders.set(name, shader);
+        return shader;
+    }
 
     /**
      * Unregister `name`. Does NOT dispose the shader — one program can be registered under several
@@ -54,7 +71,7 @@ export class ShaderManager {
      * load-bearing half — a pipeline with no engine-level program must not inherit the last one's.
      */
     public bindIfRegistered(name: string): boolean {
-        const shader = this._shaders.get(name);
+        const shader = this._shaders.get(name) ?? this._resolve(name);
         this._boundShader = shader ?? null;
         shader?.use();
         return !!shader;

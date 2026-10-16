@@ -8,6 +8,7 @@ import { buildGameData, bakeTemplates, attachScriptModules } from './buildGameDa
 import { compressTerrainData, compressTilemapData } from './terrainImages'
 import { stripDimensionData } from './stripDimensionData'
 import { collectPublishedTextureIds, collectPublishedSoundIds } from '../../utils/references'
+import { collectPrograms } from './collectProgramUsage'
 import { extractNodeState } from '../../utils/projectStorage'
 import { resyncScene } from '../../utils/sceneResync'
 import { loadSceneData } from '../../utils/sceneStorage'
@@ -229,6 +230,9 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   }
   if (src.input && !isDefaultInputMap(src.input)) config.input = src.input
   if (src.projectSettings) Object.assign(config, projectSettingsConfig(src.projectSettings))
+  // The shader programs the game uses: the player builds only these at boot (see collectPrograms).
+  if (src.projectSettings?.publish.onlyUsedShaders !== false)
+    (config.graphics ??= {}).programs = collectPrograms(out, config.render)
   if (Object.keys(config).length > 0) out.config = config
   return out
 }

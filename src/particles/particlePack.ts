@@ -12,6 +12,7 @@ import {
 } from './curves';
 import { activeModule, type EmitterDef } from './particleSystemAsset';
 import { validatedCustomCode } from './particleCustomCode';
+import { SIM_STRIP } from '../graphics/programVariants';
 import type { CollisionPlane } from './particleModules';
 import type { SimStep } from './particleRuntime';
 
@@ -21,6 +22,21 @@ export const SIM = {
     COLLIDE_DEPTH: 256, COLLIDE_PLANES: 512, SPIN_LIFE: 1024, FIELDS: 2048, LOCAL: 4096,
     KILL_ON_HIT: 8192, CUSTOM: 16384, FLAT: 32768, COLLIDE_BODIES: 65536,
 } as const;
+
+/**
+ * The modules a simulation variant may compile out for an emitter with `simMask` (SIM_STRIP in
+ * programVariants.ts): exactly those its mask already skips at runtime, so the variant computes the
+ * same thing as the full program. `hasParent`: the emitter is a sub-emitter, whose births read its
+ * parent's state.
+ */
+export function simStripMask(simMask: number, hasParent: boolean): number {
+    let strip = 0;
+    if ((simMask & SIM.NOISE) === 0) strip |= SIM_STRIP.NOISE;
+    if ((simMask & SIM.FIELDS) === 0) strip |= SIM_STRIP.FIELDS;
+    if ((simMask & (SIM.COLLIDE_DEPTH | SIM.COLLIDE_PLANES | SIM.COLLIDE_BODIES)) === 0) strip |= SIM_STRIP.COLLIDE;
+    if (!hasParent) strip |= SIM_STRIP.SUB;
+    return strip;
+}
 
 /** Bits of `u_drawMask.x` — the DRAW_* constants in chunks/particleDraw.wgsl. SORTED is set per frame. */
 export const DRAW = { COLOR_LIFE: 1, SIZE_LIFE: 2, COLOR_SPEED: 4, SIZE_SPEED: 8, LOCAL: 16, SORTED: 32 } as const;

@@ -1,4 +1,5 @@
-import SoulsEnemyNode from './SoulsEnemy'
+import type { TemplateName } from 'cleo'
+import SoulsEnemyNode from '@/Characters/Enemies/Base Enemy/Scripts/SoulsEnemy'
 
 /**
  * Hollow Keep — the Elite Knight: armoured (15% of every hit turned aside), heavy poise, and a greatsword
@@ -6,7 +7,7 @@ import SoulsEnemyNode from './SoulsEnemy'
  */
 export default class SoulsEliteKnightNode extends SoulsEnemyNode {
   public displayName: string = 'Elite Knight'
-  public weaponTemplates: string = 'Greatsword'
+  public weaponTemplates: TemplateName[] = ['Greatsword']
   public maxHp: number = 650
   public hp: number = 650
   public defense: number = 0.15

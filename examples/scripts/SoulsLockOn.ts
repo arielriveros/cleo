@@ -1,6 +1,6 @@
 import { CameraRigNode, Input, Node } from 'cleo'
-import { angleDiff, planarDistance, yawTo } from './SoulsMath'
-import { playSound } from './SoulsAudio'
+import { angleDiff, planarDistance, yawTo } from '@/Core/Scripts/SoulsMath'
+import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
  * Hollow Keep — the third-person camera with target lock. Attach to the Player's `camera rig`, a Camera

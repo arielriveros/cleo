@@ -1,5 +1,5 @@
 import { Input, Node, UIButtonNode, UIRootNode, UITextNode } from 'cleo'
-import { playSound } from './SoulsAudio'
+import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
  * Hollow Keep — the level-up menu shown while resting at a bonfire. Attach to the `BonfireMenu` node, a

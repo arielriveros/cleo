@@ -28,6 +28,10 @@ const OBFUSCATOR_OPTIONS = {
  */
 export async function obfuscateScripts(source: string): Promise<{ code: string; warning?: string }> {
   try {
+    // The obfuscator's bundled Chance.js runs `chance = new Chance()` whenever `importScripts` exists, i.e.
+    // in a worker. That is an undeclared assignment, which throws inside this strict ES module
+    // ("chance is not defined"), unless the global already exists.
+    if (!('chance' in globalThis)) (globalThis as any).chance = undefined;
     const mod: any = await import('javascript-obfuscator');
     const obfuscator = mod.default ?? mod;
     return { code: obfuscator.obfuscate(source, OBFUSCATOR_OPTIONS).getObfuscatedCode() + '\n' };

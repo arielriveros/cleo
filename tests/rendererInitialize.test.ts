@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { Renderer } from '../src/graphics/renderer';
+import { setParticleSimVariants } from '../src/graphics/particles/particleRenderer';
 
 /**
  * `Renderer.initialize()` is re-entrant-safe.
@@ -93,5 +94,23 @@ describe('Renderer.preInitializeAsync', () => {
         expect(reports.at(-1)).toEqual([total, total]);
         expect(reports).toHaveLength(total + 1);
         for (let i = 1; i < reports.length; i++) expect(reports[i][0]).toBe(reports[i - 1][0] + 1);
+    });
+
+    it('builds only a published list, as variants, in table order', async () => {
+        stubCanvas(() => null);
+        const renderer = new Renderer({ programs: ['particleSim~s15', 'screen', 'pbr~pcf', 'pbrGeometry~pom'] }) as any;
+        renderer._deviceReady = true;
+        renderer._configureDefaultState = () => {};
+        renderer._createTargets = vi.fn();
+        const built: string[] = [];
+        renderer._buildProgram = (entry: readonly [string, unknown]) => { built.push(entry[0]); };
+        const reports: [number, number][] = [];
+        try {
+            await renderer.preInitializeAsync((done: number, total: number) => reports.push([done, total]));
+        } finally {
+            setParticleSimVariants(false);
+        }
+        expect(built).toEqual(['pbr~pcf', 'pbrGeometry~pom', 'screen', 'particleSim~s15']);
+        expect(reports.at(-1)).toEqual([4, 4]);
     });
 });

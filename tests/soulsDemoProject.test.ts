@@ -155,7 +155,7 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
             }
             cuesOf.set(file, cues);
             const ext = /export\s+default\s+class\s+\w+\s+extends\s+(\w+)/.exec(src);
-            const imp = ext && new RegExp(`import\\s+${ext[1]}\\s+from\\s+['"]\\./(\\w+)['"]`).exec(src);
+            const imp = ext && new RegExp(`import\\s+${ext[1]}\\s+from\\s+['"](?:\\./|@/(?:[^'"]*/)?)(\\w+)['"]`).exec(src);
             if (imp) baseOf.set(file, imp[1]);
         }
         const fileOf = (source: string) => /export\s+default\s+class\s+(\w+)Node\b/.exec(source)?.[1];
@@ -407,13 +407,15 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
         const fighters = everyNode().filter(n => field(scriptOf(n), 'weaponTemplates'));
         expect(fighters.length).toBeGreaterThanOrEqual(7);   // player (template + copy), the base enemy, 4 types
         for (const f of fighters) {
-            const list = String(valueOf(f, 'weaponTemplates') ?? '').split(',').map(s => s.trim()).filter(Boolean);
+            const value = valueOf(f, 'weaponTemplates') ?? [];
+            expect(Array.isArray(value), `${f.name}.weaponTemplates is a list`).toBe(true);
+            const list = value as string[];
             for (const w of list) expect(names.has(w), `${f.name} names a missing weapon "${w}"`).toBe(true);
             const group = f.children.find((c: any) => c.name === 'Weapons');
             expect(group?.children ?? [], `${f.name} still holds weapons inline`).toEqual([]);
         }
         const player = allNodes(scene().scene).find(n => n.name === 'Player');
-        expect(valueOf(player, 'weaponTemplates')).toBe('Straight Sword, Greatsword');
+        expect(valueOf(player, 'weaponTemplates')).toEqual(['Straight Sword', 'Greatsword']);
     });
 
     it('gives each enemy type its own script extending SoulsEnemy, holding its stats, on its own variant', () => {
@@ -550,10 +552,37 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
             ...['scripts', 'templates', 'models', 'materials', 'animationFields', 'animControllers', 'animations', 'rigs', 'particleSystems', 'aiBrains']
                 .flatMap(l => library(l).map((a: any) => a.id)),
         ]);
+        // Textures have no library: the editor re-derives a texture record and its source image (same id)
+        // from textures/index.json on import, and keeps them at these entries' paths.
+        const textureIds = new Set<string>(read('textures/index.json').map((t: any) => t.id));
         for (const e of vfs.entries) {
-            expect(ids.has(e.assetId), e.path).toBe(true);
+            if (e.kind === 'image') {
+                expect(textureIds.has(e.assetId), e.path).toBe(true);
+                expect(e.path.endsWith('.png'), e.path).toBe(true);
+                continue;
+            }
+            expect((e.kind === 'texture' ? textureIds : ids).has(e.assetId), e.path).toBe(true);
             expect(e.path.endsWith((KIND_EXT as any)[e.kind]), e.path).toBe(true);
         }
+        for (const id of textureIds) expect(vfs.entries.some((e: any) => e.kind === 'texture' && e.assetId === id), id).toBe(true);
+    });
+
+    // The tree is grouped by FEATURE: each character, weapon, prop and effect is a folder holding what it
+    // is made of, in type subfolders. Nothing sits at the root, and no top-level folder is an asset type.
+    it('files assets by feature, with each one beside what it belongs to', () => {
+        const vfs = read('vfs.json');
+        const at = (kind: string, name: string) => vfs.entries.find((e: any) => e.kind === kind && e.path.split('/').pop().startsWith(name + '.'))?.path;
+        for (const e of vfs.entries) expect(e.path.split('/').length, e.path).toBeGreaterThan(2);
+        const top = new Set(vfs.entries.map((e: any) => e.path.split('/')[1]));
+        expect([...top].sort()).toEqual(['Characters', 'Core', 'Effects', 'Game', 'Props', 'Scenes', 'Weapons']);
+        expect(at('template', 'Hollow')).toBe('/Characters/Enemies/Hollow/Hollow.tpl');
+        expect(at('aiBrain', 'Hollow Brain')).toBe('/Characters/Enemies/Hollow/AI/Hollow Brain.brain');
+        expect(at('script', 'Hollow')).toBe('/Characters/Enemies/Hollow/Scripts/Hollow.script');
+        expect(at('template', 'Enemy')).toBe('/Characters/Enemies/Base Enemy/Enemy.tpl');
+        expect(at('template', 'Straight Sword')).toBe('/Weapons/Straight Sword/Straight Sword.tpl');
+        expect(at('particleSystem', 'Bonfire Fire')).toBe('/Props/Bonfire/Particles/Bonfire Fire.vfx');
+        expect(at('animation', 'Souls_Sword_L1')).toBe('/Characters/Player/Animations/Souls_Sword_L1.anim');
+        expect(at('scene', 'Hollow Keep')).toBe('/Scenes/Hollow Keep.scene');
     });
 
     // ----- linked level templates ------------------------------------------------------------------

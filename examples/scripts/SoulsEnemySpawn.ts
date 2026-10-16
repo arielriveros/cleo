@@ -1,4 +1,5 @@
 import { Logger, Node } from 'cleo'
+import type { TemplateName } from 'cleo'
 
 /**
  * Hollow Keep — where an enemy lives. The script of the "Enemy Spawn" template: place a copy of it (and
@@ -17,7 +18,7 @@ import { Logger, Node } from 'cleo'
  */
 export default class SoulsEnemySpawnNode extends Node {
   /** The templates a spawn may create. Edit the list in the Enemy Spawn template. */
-  public spawnables: string[] = ['Hollow', 'Hollow Sorcerer', 'Elite Knight', 'Hollow Warden']
+  public spawnables: TemplateName[] = ['Hollow', 'Hollow Sorcerer', 'Elite Knight', 'Hollow Warden']
   /**
    * Which of `spawnables` this spawn creates.
    * @options spawnables

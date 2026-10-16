@@ -4,7 +4,7 @@ import { join, dirname } from 'path';
 // @ts-expect-error -- plain .mjs shared with the two bundler configs; it has no declarations.
 import { translateWgsl } from '../tools/wgslTranslate.mjs';
 // @ts-expect-error -- same.
-import { resolveIncludes } from '../tools/shaderIncludes.mjs';
+import { resolveIncludes, listVariants } from '../tools/shaderIncludes.mjs';
 
 /**
  * Two ways the WGSL -> GLSL step produces a program that cannot be built, and one shared consequence:
@@ -42,17 +42,25 @@ function programFiles(): string[] {
 
 type Translated = { file: string; vertex?: string; fragment?: string; resources: { kind: string; type: string; glslName: string }[] };
 
-async function translate(file: string): Promise<Translated> {
-    const composed = resolveIncludes(readFileSync(file, 'utf-8'), dirname(file), {
-        read: (p: string) => readFileSync(p, 'utf-8'),
-        resolve: (dir: string, rel: string) => join(dir, rel),
-        onDependency: () => {},
-    });
-    const out = await translateWgsl(composed, file);
-    return { file, vertex: out.vertex, fragment: out.fragment, resources: out.resources };
+/** The program and every `@variant` it declares: each variant is a program the engine may build. */
+async function translate(file: string): Promise<Translated[]> {
+    const source = readFileSync(file, 'utf-8');
+    const one = async (defines: object, tag?: string): Promise<Translated> => {
+        const composed = resolveIncludes(source, dirname(file), {
+            read: (p: string) => readFileSync(p, 'utf-8'),
+            resolve: (dir: string, rel: string) => join(dir, rel),
+            onDependency: () => {},
+            defines,
+        });
+        const label = tag ? `${file}~${tag}` : file;
+        const out = await translateWgsl(composed, label);
+        return { file: label, vertex: out.vertex, fragment: out.fragment, resources: out.resources };
+    };
+    const variants = listVariants(source) as { tag: string; defines: object }[];
+    return Promise.all([one({}), ...variants.map(v => one(v.defines, v.tag))]);
 }
 
-const PROGRAMS: Translated[] = await Promise.all(programFiles().map(translate));
+const PROGRAMS: Translated[] = (await Promise.all(programFiles().map(translate))).flat();
 
 /** Members of every `layout(std140) uniform Block { … };` that has NO instance name, as member -> block. */
 function instancelessMembers(glsl: string): Map<string, string> {

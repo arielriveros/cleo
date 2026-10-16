@@ -1,8 +1,9 @@
 import { Logger, ModelNode, Node, setMoveWorld } from 'cleo'
-import { clamp, num, planarDistance } from './SoulsMath'
-import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing, wieldedBy } from './SoulsHitbox'
-import SoulsCharacterNode from './SoulsCharacter'
-import { playSound } from './SoulsAudio'
+import type { ClipName, SocketName } from 'cleo'
+import { clamp, num, planarDistance } from '@/Core/Scripts/SoulsMath'
+import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing, wieldedBy } from '@/Core/Scripts/SoulsHitbox'
+import SoulsCharacterNode from '@/Core/Scripts/SoulsCharacter'
+import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
  * Hollow Keep — the base ENEMY. Never attached as-is: each enemy type has its own script extending this
@@ -66,9 +67,9 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   public attackGapMin: number = 0.6
   public attackGapMax: number = 1.2
   public flinchOnHit: boolean = true
-  public flinchClip: string = 'Souls_HitLight'
+  public flinchClip: ClipName = 'Souls_HitLight'
   public flinchSeconds: number = 0.4
-  public staggerClip: string = 'Souls_HitHeavy'
+  public staggerClip: ClipName = 'Souls_HitHeavy'
   public staggerSeconds: number = 1.2
   /** Seconds the death clip plays before the ragdoll takes over (0 = no ragdoll). */
   public deathSeconds: number = 1.6
@@ -76,7 +77,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   /** Seconds the body lies there before it is removed. */
   public corpseSeconds: number = 6
   /** Socket projectiles leave from. */
-  public castSocket: string = 'LeftHand'
+  public castSocket: SocketName = 'LeftHand'
   /** Seconds the health bar stays up after the last hit. */
   public healthBarSeconds: number = 4
 

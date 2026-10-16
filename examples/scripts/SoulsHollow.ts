@@ -1,4 +1,5 @@
-import SoulsEnemyNode from './SoulsEnemy'
+import type { TemplateName } from 'cleo'
+import SoulsEnemyNode from '@/Characters/Enemies/Base Enemy/Scripts/SoulsEnemy'
 
 /**
  * Hollow Keep — the Hollow: the shambling rank and file. Slow, fragile, swings a club. Everything that
@@ -6,7 +7,7 @@ import SoulsEnemyNode from './SoulsEnemy'
  */
 export default class SoulsHollowNode extends SoulsEnemyNode {
   public displayName: string = 'Hollow'
-  public weaponTemplates: string = 'Club'
+  public weaponTemplates: TemplateName[] = ['Club']
   public maxHp: number = 160
   public hp: number = 160
   public defense: number = 0

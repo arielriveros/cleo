@@ -1,6 +1,6 @@
 import { resolveSocketOwner } from 'cleo'
 import type { Node } from 'cleo'
-import { num } from './SoulsMath'
+import { num } from '@/Core/Scripts/SoulsMath'
 
 /**
  * Hollow Keep — hitboxes and hurtboxes. A script MODULE (never attached to a node), shared by the

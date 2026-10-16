@@ -42,6 +42,12 @@ export interface DeviceCapabilities {
     readonly hasStorageBuffers: boolean;
     /** Per-pass GPU timing is available — `EXT_disjoint_timer_query_webgl2`, or timestamp queries. */
     readonly hasTimestampQuery: boolean;
+    /**
+     * Shader programs can be submitted and polled for completion without blocking
+     * (`KHR_parallel_shader_compile`), so a batch compiles on driver threads in parallel. WebGL2 only;
+     * absent means no.
+     */
+    readonly parallelShaderCompile?: boolean;
 
     readonly maxAnisotropy: number;
     /** Format the swap chain wants. Always `rgba8unorm` on WebGL2; often `bgra8unorm` on WebGPU. */
@@ -224,6 +230,14 @@ export interface Device {
      * from {@link createShaderModule}, which describes a program to a pipeline.
      */
     createShaderProgram(descriptor: ShaderProgramDescriptor): ShaderProgram;
+    /**
+     * Start building a program without waiting for it, so a batch compiles in parallel; the matching
+     * {@link createShaderProgram} call later picks it up. Optional, and a no-op where building is not
+     * asynchronous (WebGPU, or WebGL2 without `KHR_parallel_shader_compile`).
+     */
+    prepareShaderProgram?(descriptor: ShaderProgramDescriptor): void;
+    /** Whether {@link createShaderProgram} would return this program without blocking. */
+    isShaderProgramReady?(descriptor: ShaderProgramDescriptor): boolean;
     createRenderPipeline(descriptor: RenderPipelineDescriptor): RenderPipeline;
     /** Build a compute pipeline. Throws on WebGL2 — see {@link DeviceCapabilities.hasCompute}. */
     createComputePipeline(descriptor: ComputePipelineDescriptor): ComputePipeline;

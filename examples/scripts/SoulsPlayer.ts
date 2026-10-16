@@ -1,8 +1,9 @@
 import { Input, Logger, ModelNode, Node, moveWorldDirection, setMoveWorld } from 'cleo'
-import { clamp, num } from './SoulsMath'
-import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing, wieldedBy } from './SoulsHitbox'
-import SoulsCharacterNode from './SoulsCharacter'
-import { playSound } from './SoulsAudio'
+import type { ClipName, TemplateName } from 'cleo'
+import { clamp, num } from '@/Core/Scripts/SoulsMath'
+import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing, wieldedBy } from '@/Core/Scripts/SoulsHitbox'
+import SoulsCharacterNode from '@/Core/Scripts/SoulsCharacter'
+import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
  * Hollow Keep — the player. Attach to the `Player` root, which must be a Character node. Extends
@@ -56,7 +57,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   public displayName: string = 'Player'
   public team: string = 'player'
   /** The weapons the player starts with, by template. F swaps between them. */
-  public weaponTemplates: string = 'Straight Sword, Greatsword'
+  public weaponTemplates: TemplateName[] = ['Straight Sword', 'Greatsword']
 
   // ----- stats (level-up spends souls on these four) ---------------------------------------------
   public vigor: number = 10
@@ -132,18 +133,18 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   public killY: number = -15
 
   // ----- clip names (swap these when the final animations arrive) ---------------------------------
-  public rollClip: string = 'Souls_Roll'
-  public backstepClip: string = 'Souls_Backstep'
-  public drinkClip: string = 'Souls_Drink'
+  public rollClip: ClipName = 'Souls_Roll'
+  public backstepClip: ClipName = 'Souls_Backstep'
+  public drinkClip: ClipName = 'Souls_Drink'
   /** Fallback seconds into the drink clip at which the heal starts when it has no `drink` event. */
   public drinkTime: number = 0.85
-  public hitLightClip: string = 'Souls_HitLight'
-  public hitHeavyClip: string = 'Souls_HitHeavy'
+  public hitLightClip: ClipName = 'Souls_HitLight'
+  public hitHeavyClip: ClipName = 'Souls_HitHeavy'
   /** Played when a swing bounces off a wall. */
-  public recoilClip: string = 'Souls_HitLight'
-  public swapClip: string = 'Souls_Swap'
-  public restClip: string = 'Souls_Rest'
-  public fogWalkClip: string = 'Souls_FogWalk'
+  public recoilClip: ClipName = 'Souls_HitLight'
+  public swapClip: ClipName = 'Souls_Swap'
+  public restClip: ClipName = 'Souls_Rest'
+  public fogWalkClip: ClipName = 'Souls_FogWalk'
 
   // ----- derived, read by the HUD and other scripts ------------------------------------------------
   public level: number = 1

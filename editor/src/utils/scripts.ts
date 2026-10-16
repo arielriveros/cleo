@@ -87,7 +87,19 @@ export type ScriptVarSchema = {
    * field. Declared with a `@options <field>` tag in the field's doc comment; the inspector shows a dropdown.
    */
   options?: string
+  /**
+   * What a string (or `stringList`) field NAMES, so the inspector offers that node's valid names instead of
+   * a text box. Declared by typing the field with an engine name type (`clip: ClipName`, see
+   * src/core/scripting/fieldTypes.ts) or by a `@pick <kind>` doc tag on a plain `string`.
+   */
+  pick?: ScriptPickKind
+  /** A fixed set of values, from a string-literal union type (`mode: 'melee' | 'ranged'`). */
+  choices?: string[]
 }
+
+/** The kinds of name a `pick` field can hold. Mirrors the engine's ClipName / SoundName / ... types. */
+export type ScriptPickKind = 'clip' | 'sound' | 'socket' | 'template' | 'node'
+export const SCRIPT_PICK_KINDS: readonly ScriptPickKind[] = ['clip', 'sound', 'socket', 'template', 'node']
 
 export type ScriptKind = 'class' | 'module'
 
@@ -148,13 +160,15 @@ function stripComments(src: string): string {
 }
 
 /**
- * Turn a block comment carrying an `@options <field>` tag into the bare token `@options:<field>`, so the tag
- * survives stripComments and reaches the field declared after it. Every other comment is left as is.
+ * Turn a block comment carrying field tags (`@options <field>`, `@pick <kind>`) into bare tokens
+ * (`@options:<field>`, `@pick:<kind>`), so the tags survive stripComments and reach the field declared
+ * after them. Every other comment is left as is.
  */
-function keepOptionsTags(src: string): string {
+function keepFieldTags(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, c => {
-    const m = /@options\s+([A-Za-z_$][A-Za-z0-9_$]*)/.exec(c)
-    return m ? `@options:${m[1]} ` : c
+    const tags: string[] = []
+    for (const m of c.matchAll(/@(options|pick)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g)) tags.push(`@${m[1]}:${m[2]}`)
+    return tags.length ? `${tags.join(' ')} ` : c
   })
 }
 
@@ -207,6 +221,24 @@ function parseStringArray(body: string): string[] | undefined {
   return /^[\s,]*$/.test(rest) ? out : undefined
 }
 
+/** An initializer without a trailing type assertion: `'x' as ClipName` / `[] as string[]` / `... satisfies T`. */
+function stripCast(raw: string): string {
+  return raw.replace(/\s+(?:as|satisfies)\s+[^'"`]*$/, '')
+}
+
+/**
+ * Whether the declaration that has run up to a newline at `nl` carries on past it: a multi-line union
+ * type (`mode:\n  | 'a'\n  | 'b'`), an initializer on the next line, or a chained initializer. Without
+ * this, ASI splitting would cut such a field in half and reflect neither half.
+ */
+function continuesOnNextLine(body: string, start: number, nl: number): boolean {
+  const before = body.slice(start, nl).trim()
+  if (!before) return false
+  if (/[=|&:,]$/.test(before) || /\b(as|satisfies)$/.test(before)) return true
+  const after = /^\s*(\S)/.exec(body.slice(nl + 1))
+  return !!after && '|&=.?:'.includes(after[1])
+}
+
 /** Parse a literal initializer (`= 5`, `= 'hi'`, `= true`, `= [1,2,3]`) to a value, or undefined if dynamic. */
 function parseDefault(raw: string): any {
   const t = raw.trim()
@@ -226,10 +258,49 @@ function parseDefault(raw: string): any {
   return undefined
 }
 
+/** Engine name types (lower-cased) -> the kind of name they hold. */
+const TS_TO_PICK: Record<string, ScriptPickKind> = {
+  clipname: 'clip', soundname: 'sound', socketname: 'socket', templatename: 'template', nodename: 'node',
+}
+
+/**
+ * Normalize a type annotation for lookup: whitespace removed, lower-cased, `| undefined` / `| null` dropped,
+ * a namespace qualifier (`Cleo.ClipName`) dropped, `readonly` dropped and `Array<X>` spelled `X[]`.
+ */
+function normalizeAnnotation(annotation: string): string {
+  let key = annotation.replace(/\s+/g, '')
+  key = key.replace(/\|(undefined|null)\b/g, '').replace(/^(undefined|null)\|/, '')
+  key = key.replace(/^readonly/, '')
+  key = key.replace(/^(?:Readonly)?Array<(.+)>$/i, '$1[]').replace(/^\((.+)\)\[\]$/, '$1[]')
+  key = key.replace(/^[A-Za-z_$][A-Za-z0-9_$]*\.(?=[A-Za-z_$])/, '')
+  return key.toLowerCase()
+}
+
+/** A union of string literals (`'a' | "b"`), as its values; undefined for any other annotation. */
+function parseLiteralUnion(annotation: string): string[] | undefined {
+  const parts = annotation.split('|').map(p => p.trim()).filter(p => p && p !== 'undefined' && p !== 'null')
+  if (!parts.length) return undefined
+  const out: string[] = []
+  for (const p of parts) {
+    const m = /^(['"`])((?:\\.|(?!\1)[^\\])*)\1$/.exec(p)
+    if (!m) return undefined
+    out.push(m[2].replace(/\\(.)/g, '$1'))
+  }
+  return out
+}
+
+/** The name kind an annotation (`ClipName`, `ClipName[]`, `Cleo.SoundName`) declares, if any. */
+function pickOf(annotation: string): ScriptPickKind | undefined {
+  return TS_TO_PICK[normalizeAnnotation(annotation).replace(/\[\]$/, '')]
+}
+
 /** Infer the variable type from a TS annotation and/or a default value. */
 function inferType(annotation: string, def: any): ScriptVarType {
-  const key = annotation.replace(/\s+/g, '').toLowerCase()
+  const key = normalizeAnnotation(annotation)
   if (key && TS_TO_VAR_TYPE[key]) return TS_TO_VAR_TYPE[key]
+  const pickKey = key.replace(/\[\]$/, '')
+  if (TS_TO_PICK[pickKey]) return key.endsWith('[]') ? 'stringList' : 'string'
+  if (parseLiteralUnion(annotation)) return 'string'
   if (typeof def === 'number') return 'number'
   if (typeof def === 'boolean') return 'boolean'
   if (Array.isArray(def)) return def.length && def.every(v => typeof v === 'string') ? 'stringList' : 'vec3'
@@ -249,13 +320,14 @@ const MODIFIER_KEYWORDS = new Set(['public', 'private', 'protected', 'readonly',
  * simply not reflected.
  */
 export function parseScriptVariables(source: string): ScriptVarSchema[] {
-  const body = classBody(stripComments(keepOptionsTags(source)))
+  const body = classBody(stripComments(keepFieldTags(source)))
   if (!body) return []
 
   const out: ScriptVarSchema[] = []
   const seen = new Set<string>()
-  // An `@options` tag read from the doc comment above the next field (see keepOptionsTags).
+  // Tags read from the doc comment above the next field (see keepFieldTags).
   let pendingOptions: string | undefined
+  let pendingPick: string | undefined
 
   // Walk statements at class-body depth 0, tracking brace/paren depth so method bodies and
   // object/array initializers are skipped as single units.
@@ -265,15 +337,16 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
   const flush = (end: number) => {
     let stmt = body.slice(stmtStart, end).trim()
     stmtStart = end + 1
-    // A comment ending on the field's own line leaves its tag in front of the declaration.
-    const tag = /^@options:([A-Za-z_$][A-Za-z0-9_$]*)\s*/.exec(stmt)
-    if (tag) {
-      pendingOptions = tag[1]
+    // A comment ending on the field's own line leaves its tags in front of the declaration.
+    for (let tag; (tag = /^@(options|pick):([A-Za-z_$][A-Za-z0-9_$]*)\s*/.exec(stmt));) {
+      if (tag[1] === 'options') pendingOptions = tag[2]
+      else pendingPick = tag[2]
       stmt = stmt.slice(tag[0].length)
     }
     if (!stmt) return
     const options = pendingOptions
-    pendingOptions = undefined
+    const tagPick = pendingPick
+    pendingOptions = pendingPick = undefined
 
     // A call/parameter list before '=' means a method or getter/setter, not a field.
     const eq = stmt.indexOf('=')
@@ -297,17 +370,23 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
     if (seen.has(name)) return
     const annotation = (nameMatch[2] ?? '').trim()
 
-    const def = eq >= 0 ? parseDefault(stmt.slice(eq + 1)) : undefined
+    const def = eq >= 0 ? parseDefault(stripCast(stmt.slice(eq + 1))) : undefined
     const type = inferType(annotation, def)
+    const isText = type === 'string' || type === 'stringList'
+    const pick = pickOf(annotation)
+      ?? (tagPick && (SCRIPT_PICK_KINDS as readonly string[]).includes(tagPick) ? tagPick as ScriptPickKind : undefined)
+    const choices = type === 'string' ? parseLiteralUnion(annotation) : undefined
     seen.add(name)
     out.push({
       name,
       type,
       access,
-      default: def ?? typeDefault(type),
+      default: def ?? (choices?.length ? choices[0] : typeDefault(type)),
       hidden: name.startsWith('_'),
       // Only a string can be picked from a list.
       ...(options && type === 'string' ? { options } : {}),
+      ...(pick && isText ? { pick } : {}),
+      ...(choices ? { choices } : {}),
     })
   }
 
@@ -317,7 +396,8 @@ export function parseScriptVariables(source: string): ScriptVarSchema[] {
     const c = body[i]
     if (c === '{' || c === '(' || c === '[') depth++
     else if (c === '}' || c === ')' || c === ']') depth--
-    else if (depth === 0 && (c === ';' || c === '\n')) flush(i)
+    else if (depth === 0 && c === ';') flush(i)
+    else if (depth === 0 && c === '\n' && !continuesOnNextLine(body, stmtStart, i)) flush(i)
   }
   flush(body.length)
   return out

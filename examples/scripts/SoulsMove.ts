@@ -1,4 +1,5 @@
 import { Node } from 'cleo'
+import type { ClipName, NodeName } from 'cleo'
 
 /**
  * Hollow Keep — one attack of a weapon's moveset. Attach to a plain child node of a SoulsWeapon; the
@@ -22,7 +23,7 @@ import { Node } from 'cleo'
  */
 export default class SoulsMoveNode extends Node {
   /** Animation clip played for this attack (a clip on the player's rig). */
-  public clip: string = 'Souls_Sword_L1'
+  public clip: ClipName = 'Souls_Sword_L1'
   public playSpeed: number = 1
   /** Multipliers on the weapon's attack rating and poise damage. */
   public damageMul: number = 1
@@ -45,6 +46,6 @@ export default class SoulsMoveNode extends Node {
   public comboTime: number = 0.45
   public recoverTime: number = 0.62
   /** Name of the move a buffered light attack chains into. Empty restarts the chain. */
-  public next: string = 'Light2'
+  public next: NodeName = 'Light2'
   public isMove: boolean = true
 }

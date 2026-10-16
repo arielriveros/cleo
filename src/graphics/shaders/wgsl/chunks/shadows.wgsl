@@ -181,15 +181,26 @@ fn cleoCascadeVisibility(layer: i32, worldPos: vec3<f32>, N: vec3<f32>) -> f32 {
     let texStep = u_shadow.u_shadowTexel * u_shadow.u_shadowFilterRadius;
     var sum = 0.0;
 
+    // CLEO_SHADOW_FILTER picks ONE filter at build time (0 = 3x3 PCF, 1 = rotated Poisson): the
+    // per-program variants a published game builds. Undefined keeps the runtime choice on
+    // `u_shadowFilterMode`, which is what the editor, custom materials and god rays get — and both
+    // loops then sit in every caller, inlined twice per call by directionalShadow's cascade blend.
+#if !defined(CLEO_SHADOW_FILTER) || CLEO_SHADOW_FILTER == 0
+#ifndef CLEO_SHADOW_FILTER
     if (u_shadow.u_shadowFilterMode == 0) {
+#endif
         for (var x = -1; x <= 1; x++) {
             for (var y = -1; y <= 1; y++) {
                 sum += cleoCascadeTap(proj.xy + vec2<f32>(f32(x), f32(y)) * texStep, layer, refDepth);
             }
         }
         return sum / 9.0;
+#ifndef CLEO_SHADOW_FILTER
     }
+#endif
+#endif
 
+#if !defined(CLEO_SHADOW_FILTER) || CLEO_SHADOW_FILTER == 1
     let a = cleoShadowRotation();
     let rot = vec2<f32>(cos(a), sin(a));
     for (var i = 0; i < 16; i++) {
@@ -198,6 +209,7 @@ fn cleoCascadeVisibility(layer: i32, worldPos: vec3<f32>, N: vec3<f32>) -> f32 {
         sum += cleoCascadeTap(proj.xy + r * texStep, layer, refDepth);
     }
     return sum / 16.0;
+#endif
 }
 
 /**

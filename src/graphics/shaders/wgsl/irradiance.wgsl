@@ -7,6 +7,9 @@
 
 const PI: f32 = 3.14159265359;
 const SAMPLE_DELTA: f32 = 0.025;
+// The step counts the old `phi < 2*PI` / `theta < PI/2` float loops ran (0.025 apart): 252 x 63.
+const PHI_STEPS: i32 = 252;
+const THETA_STEPS: i32 = 63;
 
 @group(0) @binding(0) var u_envMap_texture: texture_cube<f32>;
 @group(0) @binding(1) var u_envMap_sampler: sampler;
@@ -26,10 +29,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var irradiance = vec3<f32>(0.0);
     var samples = 0.0;
 
-    var phi = 0.0;
-    while (phi < 2.0 * PI) {
-        var theta = 0.0;
-        while (theta < 0.5 * PI) {
+    // Integer loops, with bounds the compiler cannot see through. `opaque` is always 0 (no cube face is
+    // 100000 texels), but the shader compiler cannot know that, so it cannot unroll 15876 iterations of
+    // a texture fetch: D3D's compiler tried, and this one program took 1.4 s to build on every cold start.
+    let opaque = max(0, i32(textureDimensions(u_envMap_texture).x) - 100000);
+    for (var i = 0; i < PHI_STEPS + opaque; i++) {
+        let phi = f32(i) * SAMPLE_DELTA;
+        for (var j = 0; j < THETA_STEPS + opaque; j++) {
+            let theta = f32(j) * SAMPLE_DELTA;
             // Tangent-space sample -> world.
             let tangentSample = vec3<f32>(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
             let sampleVec = tangentSample.x * right + tangentSample.y * up + tangentSample.z * n;
@@ -48,9 +55,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             irradiance += textureSampleLevel(u_envMap_texture, u_envMap_sampler, sampleVec, 0.0).rgb
                           * cos(theta) * sin(theta);
             samples += 1.0;
-            theta += SAMPLE_DELTA;
         }
-        phi += SAMPLE_DELTA;
     }
 
     return vec4<f32>(PI * irradiance * (1.0 / samples), 1.0);

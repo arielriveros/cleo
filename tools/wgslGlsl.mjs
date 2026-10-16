@@ -332,21 +332,78 @@ export function translateWgslWith(wgslToGlsl, wgsl, label = 'shader') {
     // this loop breaks the BUILD, for both backends, over a stage WebGL2 could never have run. The
     // WGSL is carried through untouched either way, which is all the WebGPU backend needs; a compute
     // module simply has no GLSL half, and `WgslProgram` no longer pretends otherwise.
+    let unprunedFragment;
     for (const stage of ['vertex', 'fragment']) {
         const entry = entryPoints[stage];
         if (!entry) continue;
+        let glsl;
         try {
-            out[stage] = fixPlainDepthSamplers(
-                applyRenames(wgslToGlsl(wgsl, stage, entry), renames), out.resources);
+            glsl = fixPlainDepthSamplers(applyRenames(wgslToGlsl(wgsl, stage, entry), renames), out.resources);
         } catch (e) {
             // naga's diagnostics carry the WGSL span, which is what the author actually wrote — worth
             // far more than a line number in generated GLSL nobody has seen.
             throw new Error(label + ': ' + stage + ' stage (' + entry + ') failed to translate\n' + (e.message || e));
         }
+        if (stage === 'fragment') unprunedFragment = glsl;
+        out[stage] = PRUNE ? pruneDeadFunctions(glsl) : glsl;
     }
     if (isLibrary) {
         if (!out.fragment) throw new Error(label + ': @glsl-chunk needs a fragment entry point');
-        out.glslChunk = extractGlslChunk(out.fragment, label);
+        // From the UNPRUNED text: a library's dummy entry calls nothing, and the chunk exists to carry
+        // the functions a custom material will call.
+        out.glslChunk = extractGlslChunk(unprunedFragment, label);
     }
     return out;
+}
+
+// `CLEO_GLSL_PRUNE=0` keeps every function, for A/B measurement. This module also runs in the editor
+// (particle custom code), where there is no `process`.
+const PRUNE = typeof process === 'undefined' || process.env?.CLEO_GLSL_PRUNE !== '0';
+
+/**
+ * Drop every function `main` cannot reach.
+ *
+ * naga emits each function the module defines, whichever entry point is being translated, so a stage
+ * carries the other stage's code and every chunk its includes dragged in: pbr's vertex stage was 27k
+ * characters, 21k of them parallax, BRDF and shadow code only the fragment stage calls. Every byte is
+ * parsed and validated again on every compile, on every launch with a cold cache.
+ *
+ * Works on naga's output shape, which is regular: a definition starts at column 0 as
+ * `<type> <name>(<params>) {` and its body closes with `}` at column 0. A function is kept when its
+ * name appears as an identifier in a kept body. Struct constructors share a struct's name, never a
+ * function's, so they cannot keep anything alive by accident.
+ */
+export function pruneDeadFunctions(glsl) {
+    const DEF = /^(?!struct\b)[A-Za-z_][\w ]*?\b([A-Za-z_]\w*)\(([^)]*)\) \{$/gm;
+    const fns = new Map();
+    for (const m of glsl.matchAll(DEF)) {
+        const start = m.index;
+        const close = glsl.indexOf('\n}', start);
+        if (close < 0) return glsl; // not the shape this expects; leave it alone
+        const end = close + 2;
+        const name = m[1];
+        if (fns.has(name)) return glsl; // overloads: naga never emits them, so bail rather than guess
+        fns.set(name, { start, end, body: glsl.slice(start + m[0].length, end) });
+    }
+    if (!fns.has('main')) return glsl;
+
+    const kept = new Set(['main']);
+    const queue = ['main'];
+    while (queue.length) {
+        const body = fns.get(queue.pop()).body;
+        for (const id of body.match(/\b[A-Za-z_]\w*(?=\s*\()/g) ?? []) {
+            if (fns.has(id) && !kept.has(id)) { kept.add(id); queue.push(id); }
+        }
+    }
+    if (kept.size === fns.size) return glsl;
+
+    let out = '';
+    let at = 0;
+    for (const [name, { start, end }] of [...fns].sort((a, b) => a[1].start - b[1].start)) {
+        if (kept.has(name)) continue;
+        out += glsl.slice(at, start);
+        // Swallow the blank line naga leaves after each definition, so the output stays tidy.
+        at = glsl.startsWith('\n\n', end) ? end + 2 : glsl.startsWith('\n', end) ? end + 1 : end;
+    }
+    return out + glsl.slice(at);
 }

@@ -31,6 +31,34 @@ placeholder with final art from inside the editor, without touching a script.
 Everything you change in that project, whether art, tuning or bindings, is saved in that project like
 any other. The example folder in the repository is only the starting point.
 
+### Where things are in Assets
+
+The Assets panel is grouped by **what a thing is in the game**, not by asset type. Each character,
+weapon, prop and effect has a folder holding everything it is made of, in type subfolders (`Scripts/`,
+`Materials/`, `Particles/`, `Animations/`, `AI/`, `Textures/`). A base and its variants sit side by side,
+so what a variant adds stays apart from what it inherits:
+
+```
+Scenes/            Hollow Keep.scene, Hollow Keep/Materials (the keep's stone, wood and iron)
+Core/Scripts/      shared modules: SoulsMath, SoulsHitbox, SoulsAudio, SoulsCharacter
+Game/              Game Manager, and UI/ (HUD, Boss Bar, Banner, Bonfire Menu)
+Characters/
+  Shared/          mannequin model, rig, locomotion field, controller, textures, shared clips
+  Player/          Player template, its scripts, its sword/greatsword/roll/drink clips
+  Enemies/
+    Base Enemy/    Enemy + Enemy Spawn templates, the shared enemy scripts and brain
+    Hollow/  Hollow Sorcerer/  Elite Knight/  Hollow Warden/
+Weapons/           Base Weapon/ (Weapon template, SoulsWeapon, Weapon Move), then one folder per weapon
+Props/             Bonfire/ Torch/ Fog Gate/ Lever & Gate/ Message/ Pickup/ Bloodstain/
+Effects/           Blood/ Hit Spark/ Magic Bolt/ Slam Dust/
+```
+
+Sounds are not files: each template that makes a sound owns it as a SoundNode in its own `Sounds` group.
+
+Scripts import each other by this path (`import { clamp } from '@/Core/Scripts/SoulsMath'`), so move a
+shared script and you move its import lines with it. Everything else references by id and can be moved
+freely.
+
 ## 2. Controls
 
 | Action | Keyboard / mouse | Gamepad |

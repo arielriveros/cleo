@@ -5,7 +5,7 @@ import type { Node } from 'cleo'
  * child of a `Sounds` group in its own tree (the Player's swings, an enemy's roar, a lever's clank). A
  * script plays a cue by name and the nearest owner up its ancestry answers:
  *
- *   import { playSound } from './SoulsAudio'
+ *   import { playSound } from '@/Core/Scripts/SoulsAudio'
  *   playSound(this, 'Lever')
  *
  * So a script deep inside a template (the Player's bonfire menu, an enemy's attack) plays its owner's

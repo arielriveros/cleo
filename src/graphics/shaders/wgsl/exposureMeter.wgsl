@@ -59,14 +59,18 @@ fn tapLogLuminance(index: i32) -> f32 {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let total = GRID * GRID;
+    // `opaque` is always 0 (no screen is 100000 texels wide) but the compiler cannot prove it, so the
+    // 256-tap loops below stay loops: D3D's compiler unrolled all three, ~768 inlined fetches.
+    let opaque = max(0, i32(textureDimensions(u_screenTexture_texture).x) - 100000);
+    let total = GRID * GRID + opaque;
+    let bins = BINS + opaque;
     let span = LOG_LUM_MAX - LOG_LUM_MIN;
 
     // Pass one: a histogram, which is how the percentile cuts are found without sorting 256 values in
     // a fragment. 64 bins is 256 bytes of local storage, unlike the 1 KB an array of the samples
     // themselves would need.
     var histogram: array<f32, 64>;
-    for (var b = 0; b < BINS; b = b + 1) { histogram[b] = 0.0; }
+    for (var b = 0; b < bins; b = b + 1) { histogram[b] = 0.0; }
     for (var i = 0; i < total; i = i + 1) {
         let t = (tapLogLuminance(i) - LOG_LUM_MIN) / span;
         let bin = clamp(i32(t * f32(BINS)), 0, BINS - 1);
@@ -83,7 +87,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var highCut = LOG_LUM_MAX;
     var seenLow = false;
     var seenHigh = false;
-    for (var b = 0; b < BINS; b = b + 1) {
+    for (var b = 0; b < bins; b = b + 1) {
         running = running + histogram[b];
         let edge = LOG_LUM_MIN + span * f32(b + 1) / f32(BINS);
         if (!seenLow && running >= lowTarget) { lowCut = LOG_LUM_MIN + span * f32(b) / f32(BINS); seenLow = true; }

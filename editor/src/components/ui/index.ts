@@ -36,6 +36,9 @@ export type { VectorInputProps } from './VectorInput';
 export { Popover } from './Popover';
 export type { PopoverProps } from './Popover';
 
+export { ComboSelect } from './ComboSelect';
+export type { ComboSelectProps, ComboChoice } from './ComboSelect';
+
 export { TypeSelect } from './TypeSelect';
 export type { TypeSelectProps } from './TypeSelect';
 

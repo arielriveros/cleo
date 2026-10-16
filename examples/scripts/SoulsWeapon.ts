@@ -1,6 +1,7 @@
 import { Node } from 'cleo'
-import { num, statBonus } from './SoulsMath'
-import { playSound } from './SoulsAudio'
+import type { NodeName, SoundName, TemplateName } from 'cleo'
+import { num, statBonus } from '@/Core/Scripts/SoulsMath'
+import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
  * Hollow Keep — the base WEAPON. Every weapon is its own template, made from the base "Weapon" template
@@ -50,15 +51,15 @@ export default class SoulsWeaponNode extends Node {
   /** Multiplies every move's stamina cost. */
   public staminaMul: number = 1
   /** First move of the light chain, and the heavy attack. Names of child SoulsMove nodes. */
-  public lightMove: string = 'Light1'
-  public heavyMove: string = 'Heavy'
+  public lightMove: NodeName = 'Light1'
+  public heavyMove: NodeName = 'Heavy'
   /** The blade hitbox, in the Mesh child's space. See "Hitbox" above. */
   public bladeStart: number[] = [0, 0.12, 0]
   public bladeEnd: number[] = [0, 1, 0]
   public bladeRadius: number = 0.12
   /** Effect spawned where the blade meets a body, and the sound of the hit. */
-  public hitSparkTemplate: string = 'Hit Spark'
-  public hitSound: string = 'Hit'
+  public hitSparkTemplate: TemplateName = 'Hit Spark'
+  public hitSound: SoundName = 'Hit'
   /** Marker characters look for among the nodes they spawn (a script class is never `instanceof`). */
   public isWeapon: boolean = true
 

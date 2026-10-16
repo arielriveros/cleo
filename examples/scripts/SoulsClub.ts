@@ -1,4 +1,4 @@
-import SoulsWeaponNode from './SoulsWeapon'
+import SoulsWeaponNode from '@/Weapons/Base Weapon/Scripts/SoulsWeapon'
 
 /**
  * Hollow Keep — the Hollows' club. A crude strength weapon; the Hollow's damage comes from its own

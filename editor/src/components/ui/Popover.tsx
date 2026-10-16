@@ -13,6 +13,8 @@ export interface PopoverProps {
   triggerClassName?: string;
   /** Classes for the floating panel. */
   className?: string;
+  /** Classes for the wrapper around the trigger (e.g. `w-full` for a full-width trigger). */
+  rootClassName?: string;
 }
 
 /** Distance between the trigger and the panel, and the closest the panel may sit to a viewport edge. */
@@ -26,7 +28,7 @@ const MARGIN = 8;
  * an absolute panel is clipped by any ancestor overflow (the inspector's scroll container,
  * Collapsable's `overflow-hidden`), and z-index cannot lift it out of a clip.
  */
-export function Popover({ trigger, children, align = 'left', disabled, title, triggerClassName, className }: PopoverProps) {
+export function Popover({ trigger, children, align = 'left', disabled, title, triggerClassName, className, rootClassName }: PopoverProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -84,7 +86,7 @@ export function Popover({ trigger, children, align = 'left', disabled, title, tr
   }, [open, place]);
 
   return (
-    <div className='relative inline-block'>
+    <div className={cn('relative inline-block', rootClassName)}>
       <button
         ref={triggerRef}
         type='button'

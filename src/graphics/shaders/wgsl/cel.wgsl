@@ -5,6 +5,10 @@
 // consume. naga strips the unreachable Cook-Torrance from the emitted GLSL, exactly as it does for
 // blinnPhong.wgsl.
 
+// Build-time variants (see programVariants.ts): one shadow filter each, chosen by the render setting.
+// @variant pcf CLEO_SHADOW_FILTER=0
+// @variant poisson CLEO_SHADOW_FILTER=1
+
 #include "./chunks/modelVertex.wgsl"
 #include "./chunks/tonemap.wgsl"
 #include "./chunks/shadows.wgsl"

@@ -1,4 +1,4 @@
-import SoulsWeaponNode from './SoulsWeapon'
+import SoulsWeaponNode from '@/Weapons/Base Weapon/Scripts/SoulsWeapon'
 
 /**
  * Hollow Keep — the Hollow Warden's halberd. Long reach, a wide head: the hitbox runs from mid-shaft to

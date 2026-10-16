@@ -16,7 +16,13 @@
     "skipLibCheck": true,
     "noEmit": true,
     "baseUrl": ".",
-    "paths": { "cleo": ["../../dist/cleo"] }
+    "paths": {
+      "cleo": ["../../dist/cleo"],
+      // The scripts import each other by their path in the Hollow Keep Assets tree; on disk they are flat.
+      "@/Core/Scripts/*": ["./*"],
+      "@/Weapons/Base Weapon/Scripts/*": ["./*"],
+      "@/Characters/Enemies/Base Enemy/Scripts/*": ["./*"]
+    }
   },
   "include": ["*.ts"]
 }

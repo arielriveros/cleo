@@ -22,6 +22,14 @@ export function anisotropyExtension(gl: WebGL2RenderingContext): any {
     return gl.getExtension('EXT_texture_filter_anisotropic');
 }
 
+/**
+ * The parallel shader compile extension object, or null. ASKING is what enables it: Chromium only
+ * compiles on its worker threads once a page has called `getExtension` for it.
+ */
+export function parallelShaderCompileExtension(gl: WebGL2RenderingContext): KHR_parallel_shader_compile | null {
+    return gl.getExtension('KHR_parallel_shader_compile');
+}
+
 export function detectWebGL2Capabilities(gl: WebGL2RenderingContext): DeviceCapabilities {
     // Optional and independent: a device can render to a float target while refusing to filter it.
     // Reported separately because texture.ts requires both before allocating RGBA16F.
@@ -53,6 +61,7 @@ export function detectWebGL2Capabilities(gl: WebGL2RenderingContext): DeviceCapa
         hasCompute: false,
         hasStorageBuffers: false,
         hasTimestampQuery: timerQueryExtension(gl) !== null,
+        parallelShaderCompile: parallelShaderCompileExtension(gl) != null,
 
         maxAnisotropy,
         // WebGL2 always presents through the canvas's own RGBA8 buffer; no format to negotiate.

@@ -22,6 +22,14 @@ interface CleoConfig {
      * `Renderer.backendFallbackReason`. Read once, when the device is acquired.
      */
     backend?: 'webgl2' | 'webgpu';
+    /**
+     * The shader programs to build at boot, written by publish from what the game uses (see
+     * `programUsage.ts`). Absent builds every program, as the editor does. Anything missing from the
+     * list is still built on first use, with a warning.
+     */
+    programs?: readonly string[];
+    /** Use build-time program variants even without a `programs` list. A testing switch. */
+    shaderVariants?: boolean;
   },
   physics?: {
     gravity?: number[];
@@ -106,7 +114,9 @@ export class CleoEngine {
                                     bloom: config?.graphics?.bloom,
                                     deferred: config?.graphics?.deferred,
                                     shadowDistance: config?.graphics?.shadowDistance,
-                                    backend: config?.graphics?.backend });
+                                    backend: config?.graphics?.backend,
+                                    programs: config?.graphics?.programs,
+                                    shaderVariants: config?.graphics?.shaderVariants });
     this._physicsSystem = new PhysicsSystem({
       gravity: config?.physics?.gravity || [0, -9.81, 0]
     });

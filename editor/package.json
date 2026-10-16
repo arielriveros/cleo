@@ -9,6 +9,7 @@
     "prebuild": "npm run build:engine",
     "prebuild:player": "npm run build:engine",
     "start": "vite --open",
+    "dev": "vite",
     "build": "vite build",
     "build:player": "vite build --config vite.player.config.ts",
     "build:player:only": "vite build --config vite.player.config.ts",

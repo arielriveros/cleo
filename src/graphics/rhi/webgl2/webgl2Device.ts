@@ -1,8 +1,9 @@
 import { gl } from '../../glContext';
 import { GLState } from '../../systems/glState';
 import { Logger } from '../../../core/logger';
+import { shaderStats } from '../../shaderStats';
 import { glBufferTarget, glBufferUsageHint, glTextureTarget, glTextureFormat, glAddressMode, glMinFilter, glMagFilter } from './glEnums';
-import { detectWebGL2Capabilities, anisotropyExtension } from './capabilities';
+import { detectWebGL2Capabilities, anisotropyExtension, parallelShaderCompileExtension } from './capabilities';
 import { applyVertexLayout } from './vertexArray';
 import {
     WebGL2ShaderModule, WebGL2RenderPipeline, WebGL2BindGroup, WebGL2Sampler,
@@ -56,8 +57,17 @@ export class WebGL2Device implements Device {
     private _copyRead: WebGL2Framebuffer | null = null;
     private _copyDraw: WebGL2Framebuffer | null = null;
 
+    /** Null when the driver withholds it; then every build blocks, as it always did. */
+    private readonly _parallelCompile: KHR_parallel_shader_compile | null;
+    /**
+     * Programs submitted by {@link prepareShaderProgram}, keyed by vertex then fragment source: the
+     * caller's descriptor is usually a fresh `{ ...descriptor, label }` object, so identity cannot be the key.
+     */
+    private readonly _pending = new Map<string, Map<string, { shader: Shader; submitAt: number; readyAt?: number }>>();
+
     constructor(context: WebGL2RenderingContext) {
         this.capabilities = detectWebGL2Capabilities(context);
+        this._parallelCompile = parallelShaderCompileExtension(context);
         this._canvas = context.canvas;
     }
 
@@ -225,13 +235,59 @@ export class WebGL2Device implements Device {
             throw new Error(`${descriptor.label}: WebGL2 needs GLSL vertex and fragment stages`);
         // Dispose on failure: the constructor allocates the two shader objects and `create` throws
         // without deleting them.
-        const shader = new Shader();
+        const pending = this._takePending(descriptor.vertex, descriptor.fragment);
+        const shader = pending?.shader ?? new Shader();
+        const start = performance.now();
         try {
-            return shader.create(descriptor.vertex, descriptor.fragment);
+            if (!pending) shader.begin(descriptor.vertex, descriptor.fragment);
+            const program = shader.finish();
+            if (shaderStats.syncEach) gl.finish();
+            return program;
         } catch (error) {
             shader.dispose();
             throw error;
+        } finally {
+            const end = performance.now();
+            const submitAt = pending?.submitAt ?? start;
+            shaderStats.record({
+                label: descriptor.label ?? '(unlabelled)',
+                // Submit to usable: for a prefetched program most of this ran on driver threads.
+                ms: end - submitAt, finishMs: end - start,
+                vsChars: descriptor.vertex.length, fsChars: descriptor.fragment.length,
+                phase: shaderStats.phase, at: submitAt, readyAt: pending?.readyAt, parallel: !!pending,
+            });
         }
+    }
+
+    public prepareShaderProgram(descriptor: ShaderProgramDescriptor): void {
+        const { vertex, fragment } = descriptor;
+        if (!this._parallelCompile || !vertex || !fragment) return;
+        let byFragment = this._pending.get(vertex);
+        if (!byFragment) this._pending.set(vertex, byFragment = new Map());
+        if (byFragment.has(fragment)) return;
+        const shader = new Shader();
+        // Nothing here can report a compile error (that takes a status query, which would block), so a
+        // broken program surfaces in createShaderProgram, exactly as an unprefetched one would.
+        shader.begin(vertex, fragment);
+        byFragment.set(fragment, { shader, submitAt: performance.now() });
+    }
+
+    public isShaderProgramReady(descriptor: ShaderProgramDescriptor): boolean {
+        const { vertex, fragment } = descriptor;
+        const entry = vertex && fragment ? this._pending.get(vertex)?.get(fragment) : undefined;
+        if (!entry || entry.readyAt !== undefined) return true;
+        if (!entry.shader.isComplete(this._parallelCompile)) return false;
+        entry.readyAt = performance.now();
+        return true;
+    }
+
+    private _takePending(vertex: string, fragment: string) {
+        const byFragment = this._pending.get(vertex);
+        const entry = byFragment?.get(fragment);
+        if (!byFragment || !entry) return undefined;
+        byFragment.delete(fragment);
+        if (byFragment.size === 0) this._pending.delete(vertex);
+        return entry;
     }
 
     public createShaderModule(descriptor: ShaderModuleDescriptor): WebGL2ShaderModule {
@@ -447,6 +503,9 @@ export class WebGL2Device implements Device {
     }
 
     public destroy(): void {
+        for (const byFragment of this._pending.values())
+            for (const entry of byFragment.values()) entry.shader.dispose();
+        this._pending.clear();
         // Targets first: each owns a framebuffer, and destroying it removes it from `_framebuffers`.
         for (const target of [...this._renderTargets.values()]) target.destroy();
         this._renderTargets.clear();

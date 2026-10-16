@@ -22,7 +22,8 @@ import { ShaderManager } from '../systems/shaderManager';
 import { Logger } from '../../core/logger';
 import { frameStats } from '../renderStats';
 import { LUT_ROWS, LUT_WIDTH } from '../../particles/curves';
-import { DRAW, SIM, packEmitter, stepUniforms, type PackedEmitter } from '../../particles/particlePack';
+import { DRAW, SIM, packEmitter, simStripMask, stepUniforms, type PackedEmitter } from '../../particles/particlePack';
+import { particleSimProgram } from '../programVariants';
 import { COLLIDER_FLOATS, MAX_PARTICLE_COLLIDERS, packParticleColliders, type ColliderBody } from '../../particles/particleColliders';
 import { builtinParticleMesh, interleaveParticleMesh } from '../../particles/particleMesh';
 import { composeCustomSim } from '../../particles/particleCustomCode';
@@ -53,7 +54,17 @@ interface ParticleProgram {
     readonly resources: readonly ShaderResource[];
     readonly vertexInputs: readonly { name: string; location: number; type: string }[];
     readonly uniformBlocks: readonly unknown[];
+    /** Build-time variants (`// @variant` lines), by tag. See programVariants.ts. */
+    readonly variants?: Readonly<Record<string, ParticleProgram>>;
 }
+
+/**
+ * Whether simulation steps use the build-time variants with unused modules compiled out
+ * (`particleSim~s<mask>`). Off in the editor, which toggles modules live and would recompile on each
+ * toggle; on in a published game, whose emitters are fixed. Set by the Renderer.
+ */
+let useSimVariants = false;
+export function setParticleSimVariants(on: boolean): void { useSimVariants = on; }
 
 /** Program names in `ShaderManager`, with their imports. Registered by `Renderer._programTable`. */
 export const PARTICLE_PROGRAMS: {
@@ -630,7 +641,9 @@ export class ParticleRenderer {
     private _stepCompute(emitter: EmitterGpu, values: Record<string, unknown>, frame: ParticleSimFrame,
                          parent: EmitterGpu | null, _start: number, count: number): void {
         const base = this._ensureComputePipeline();
-        const pipeline = emitter.packed.custom ? this._customComputePipeline(emitter.packed.custom) : base;
+        const strip = !emitter.packed.custom && useSimVariants ? simStripMask(emitter.packed.simMask, !!parent) : 0;
+        const pipeline = emitter.packed.custom ? this._customComputePipeline(emitter.packed.custom)
+            : strip ? this._variantComputePipeline(strip) : base;
         const pid = pipelineId(pipeline);
         const uniforms = this._simUniforms!;
         this._writeStep(emitter, values, frame, 'arena', (name, value) => { uniforms.set(name, value); });
@@ -663,8 +676,10 @@ export class ParticleRenderer {
     private _stepRaster(emitter: EmitterGpu, values: Record<string, unknown>, frame: ParticleSimFrame,
                         parent: EmitterGpu | null, start: number, count: number): void {
         const custom = emitter.packed.custom;
-        const program = custom ? this._customRasterProgram(custom) : PARTICLE_PROGRAMS.sim[0];
-        const pipeline = custom ? this._customRasterPipeline(program) : this._ensureRasterPipeline('sim', 4);
+        const strip = !custom && useSimVariants ? simStripMask(emitter.packed.simMask, !!parent) : 0;
+        const program = custom ? this._customRasterProgram(custom) : particleSimProgram(strip);
+        const pipeline = custom ? this._customRasterPipeline(program)
+            : strip ? this._variantRasterPipeline(program, strip) : this._ensureRasterPipeline('sim', 4);
         const shaders = ShaderManager.Instance;
         const write = emitter.write;
         const target = device.createRenderTarget({
@@ -697,6 +712,42 @@ export class ParticleRenderer {
         pass.setViewport(0, first, width, rows);
         pass.draw(3);
         pass.end();
+    }
+
+    /**
+     * The WebGL2 simulation pipeline for a strip-mask variant. Its program is registered by the Renderer
+     * (built at boot from a published list, or on the first bind), under the same `particleSim~s<mask>`
+     * name this module is keyed by.
+     */
+    private _variantRasterPipeline(program: string, strip: number): RenderPipeline {
+        const key = 'v:' + program;
+        let pipeline = this._customPipelines.get(key) as RenderPipeline | undefined;
+        if (!pipeline) {
+            const variant = ParticleSimProgram.variants?.[`s${strip}`] ?? ParticleSimProgram;
+            const module = device.createShaderModule({
+                label: program, program, stage: ShaderStage.VERTEX | ShaderStage.FRAGMENT,
+                source: variant.wgsl, entryPoints: variant.entryPoints, resources: variant.resources,
+            });
+            pipeline = device.createRenderPipeline({
+                label: program, vertex: module, fragment: module, vertexLayouts: [],
+                primitive: { topology: 'triangle-list', cullMode: 'none', frontFace: 'ccw' },
+                colorTargets: Array.from({ length: 4 }, () => ({ format: 'rgba32float' as const })),
+            });
+            this._customPipelines.set(key, pipeline);
+        }
+        return pipeline;
+    }
+
+    /** The WebGPU simulation pipeline for a strip-mask variant. Same uniform layout as the full one. */
+    private _variantComputePipeline(strip: number): ComputePipeline {
+        const key = 'vc:' + strip;
+        let pipeline = this._customPipelines.get(key) as ComputePipeline | undefined;
+        if (!pipeline) {
+            pipeline = this._computePipelineFor(particleSimProgram(strip),
+                ParticleSimComputeProgram.variants?.[`s${strip}`] ?? ParticleSimComputeProgram);
+            this._customPipelines.set(key, pipeline);
+        }
+        return pipeline;
     }
 
     /** The WebGPU simulation pipeline with `custom` spliced into the core. WGSL, compiled by the browser. */

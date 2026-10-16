@@ -16,7 +16,7 @@ export interface EngineRuntimeSettings {
 }
 
 export interface PublishWindowSettings {
-  /** The game's window / tab title, and the desktop installer's product name. Empty = the folder name. */
+  /** The game's name: window / tab title, installer product name and published folder name. Empty = the project name. */
   title: string;
   /** Desktop window size at launch, in logical pixels. */
   width: number;
@@ -25,6 +25,12 @@ export interface PublishWindowSettings {
   fullscreen: boolean;
   /** The player may resize the desktop window. */
   resizable: boolean;
+  /**
+   * Build only the shader programs the game uses (programUsage.ts in the engine) instead of all of
+   * them, which is most of a first launch's wait. Off is the escape hatch if a game ever hits one the
+   * list missed often enough to matter; it still runs either way.
+   */
+  onlyUsedShaders: boolean;
 }
 
 export interface ProjectSettings {
@@ -34,7 +40,7 @@ export interface ProjectSettings {
 
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, maxFrameDelta: 0.1, masterVolume: 1 },
-  publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true },
+  publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true },
 };
 
 const num = (v: unknown, d: number, min: number, max: number) =>
@@ -61,6 +67,7 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
       height: Math.round(num(p.height, d.publish.height, 240, 4320)),
       fullscreen: typeof p.fullscreen === 'boolean' ? p.fullscreen : d.publish.fullscreen,
       resizable: typeof p.resizable === 'boolean' ? p.resizable : d.publish.resizable,
+      onlyUsedShaders: typeof p.onlyUsedShaders === 'boolean' ? p.onlyUsedShaders : d.publish.onlyUsedShaders,
     },
   };
 }

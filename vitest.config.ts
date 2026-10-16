@@ -1,4 +1,5 @@
 import { defineConfig, mergeConfig } from 'vitest/config';
+import { fileURLToPath } from 'node:url';
 import engineConfig from './vite.config';
 
 // The engine is overwhelmingly WebGL2-bound and not testable without a GL context. What IS testable is
@@ -15,6 +16,11 @@ import engineConfig from './vite.config';
 // shader and one set of class identities. The merge is explicit because vitest ignores vite.config.ts
 // outright once a vitest.config.ts exists.
 export default mergeConfig(engineConfig, defineConfig({
+    resolve: {
+        // The Hollow Keep scripts import each other by their path in the example's Assets tree
+        // ('@/Core/Scripts/SoulsMath'); on disk they all sit flat in examples/scripts/.
+        alias: [{ find: /^@\/(?:[^'"]*\/)?Scripts\/(Souls\w+)$/, replacement: fileURLToPath(new URL('./examples/scripts/', import.meta.url)) + '$1.ts' }],
+    },
     test: {
         include: ['tests/**/*.test.ts'],
         environment: 'node',

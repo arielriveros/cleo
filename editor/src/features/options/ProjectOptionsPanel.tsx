@@ -83,7 +83,7 @@ function GeneralOptions() {
       <Section title='Published game'
         hint='How a published build presents itself. The size and window flags apply to the desktop build.'>
         <Field label='Title' labelClassName={OPTION_LABEL}
-          hint='The window / browser-tab title, and the desktop installer’s product name. Empty = the project name.'>
+          hint='The window / browser-tab title, the desktop installer’s product name and the folder a publish saves into. Empty = the project name.'>
           <TextInput value={w.title} placeholder={name || 'Project name'} maxLength={120}
             onChange={v => setWindow({ title: v })} />
         </Field>
@@ -103,6 +103,10 @@ function GeneralOptions() {
           <span className={cn('flex flex-1', w.fullscreen && 'opacity-60')}>
             <Toggle checked={w.resizable} onChange={v => setWindow({ resizable: v })} />
           </span>
+        </Field>
+        <Field label='Only used shaders' labelClassName={OPTION_LABEL}
+          hint='Compile just the shaders this game uses at startup, not all of them: a much shorter first launch. Anything missed still compiles when first needed.'>
+          <span className='flex flex-1'><Toggle checked={w.onlyUsedShaders} onChange={v => setWindow({ onlyUsedShaders: v })} /></span>
         </Field>
         <Hint className='mt-1'>A web build fills the page it is embedded in; only the title applies there.</Hint>
       </Section>

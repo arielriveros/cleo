@@ -72,7 +72,11 @@ export default mergeConfig(engineConfig, defineConfig({
   // Nothing under src/player/ imports src/version.ts today. The define is here anyway because this is a
   // SEPARATE bundle that drifts silently -- without it, the first shared import to reach the player
   // would be a runtime ReferenceError inside a published game rather than a build error here.
-  define: buildVersionDefines(),
+  //
+  // process.env.NODE_ENV: library mode deliberately leaves it unreplaced (a library's consumer bundles it),
+  // but this IIFE runs as-is in a page with no `process` -- React's entry reads it at load, so the game died
+  // with "process is not defined" before drawing a frame, leaving a black window.
+  define: { ...buildVersionDefines(), 'process.env.NODE_ENV': JSON.stringify('production') },
 
   // outDir lives inside the default publicDir; disabling it stops Vite recursively copying
   // editor/public into editor/public/player. The player needs nothing from there.

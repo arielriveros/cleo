@@ -1,6 +1,7 @@
 import { Node } from 'cleo'
-import SoulsEnemyNode from './SoulsEnemy'
-import { playSound } from './SoulsAudio'
+import type { ClipName, TemplateName } from 'cleo'
+import SoulsEnemyNode from '@/Characters/Enemies/Base Enemy/Scripts/SoulsEnemy'
+import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
  * Hollow Keep — the Hollow Warden, the boss. A giant with a halberd; dormant until the fog gate wakes it,
@@ -13,7 +14,7 @@ import { playSound } from './SoulsAudio'
  */
 export default class SoulsHollowWardenNode extends SoulsEnemyNode {
   public displayName: string = 'Hollow Warden'
-  public weaponTemplates: string = 'Halberd'
+  public weaponTemplates: TemplateName[] = ['Halberd']
   public isBoss: boolean = true
   public flinchOnHit: boolean = false
   public maxHp: number = 2600
@@ -36,7 +37,7 @@ export default class SoulsHollowWardenNode extends SoulsEnemyNode {
   public phase2At: number = 0.5
   public phase2SpeedMul: number = 1.15
   public phase2Seconds: number = 2
-  public roarClip: string = 'Souls_Roar'
+  public roarClip: ClipName = 'Souls_Roar'
 
   protected _onDamaged(dealt: number, poiseDamage: number, from: Node): void {
     super._onDamaged(dealt, poiseDamage, from)

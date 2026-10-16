@@ -4,6 +4,10 @@
 // at locations 5 and 6, which is the LIT family's layout — that is what lets a cel mesh fall through the
 // `basicFamily` tests in the shadow and object-velocity passes onto their default programs.
 
+// Build-time variants (see programVariants.ts): one shadow filter each, chosen by the render setting.
+// @variant pcf CLEO_SHADOW_FILTER=0
+// @variant poisson CLEO_SHADOW_FILTER=1
+
 #include "./chunks/skinnedVertex.wgsl"
 #include "./chunks/tonemap.wgsl"
 #include "./chunks/shadows.wgsl"

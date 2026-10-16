@@ -242,13 +242,15 @@ export default function MenuBar() {
     }
   };
 
-  const gameTitle = projectSettings.publish.title.trim();
+  // The game's name: Options ▸ Project ▸ Published game ▸ Title, else the project name. A native publish
+  // saves into a folder of this name; the browser download is a slug of it.
+  const gameName = projectSettings.publish.title.trim() || projectName.trim();
   const onPublishWeb = () => runPublish('Publishing web build',
-    data => publishWeb(data, gameTitle ? gameTitle.replace(/[^\w.-]+/g, '-').toLowerCase() : undefined));
+    data => publishWeb(data, gameName || undefined));
 
   const onPublishDesktop = (installer: boolean) =>
     runPublish(installer ? 'Publishing desktop installer' : 'Publishing desktop build',
-      data => publishDesktop(data, { installer, window: projectSettings.publish }));
+      data => publishDesktop(data, { installer, name: gameName || undefined, window: projectSettings.publish }));
 
   const onPlay = () => startPlay();
 
