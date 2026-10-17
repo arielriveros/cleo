@@ -6465,7 +6465,7 @@ export class Renderer {
     }
 
     private _applyTerrainMaterial(material: Material): void {
-        // Fixed slot layout, 3 units: the paint masks and the two surface arrays (see
+        // Fixed slot layout, 4 units: the paint masks and the three surface arrays (see
         // chunks/terrainStack.wgsl). Every binding is a 2D ARRAY, so a missing one takes the one-layer
         // array fallback — a 2D texture on a sampler2DArray unit is a draw error. The scalar and array
         // uniforms already match by name.
@@ -6479,6 +6479,7 @@ export class Renderer {
         bindAt('u_masks', 0);
         bindAt('u_surfAlbedo', 1);
         bindAt('u_surfNormal', 2);
+        bindAt('u_surfOrm', 3);
         for (const [name, value] of material.properties)
             this._shaderManager.setUniform(name, value);
     }

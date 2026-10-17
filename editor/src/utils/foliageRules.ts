@@ -143,6 +143,7 @@ export function buildFoliageRuleFromModelAsset(asset: ModelAsset, existing?: Ter
     lods: lods.length ? lods : undefined,
     cullDistance: asset.cullDistance ?? 0,
     billboard: existing?.billboard ?? null,
+    impostorSize: existing?.impostorSize,
     // Authored on the RULE like the impostor, not derived from the asset, so a re-sync must carry it.
     // Leaving it out silently cleared the inspector's own checkbox every time the button was pressed.
     castShadows: existing?.castShadows,

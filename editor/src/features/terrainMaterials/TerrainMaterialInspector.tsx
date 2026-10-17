@@ -4,7 +4,8 @@ import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
 import { Hint, NumberInput, TextInput, Toggle, cn, labelClass } from '../../components/ui'
 import MaterialPicker, { liveMaterial } from './MaterialPicker'
-import TerrainSlots from './TerrainSlots'
+import { blankSlotSurface } from '../../utils/landscapeSlots'
+import TerrainSlots, { SurfaceLook } from './TerrainSlots'
 import TerrainFoliageRules from './TerrainFoliageRules'
 
 /** Terrain side length quoted when no landscape is open (matches the default a landscape is created at). */
@@ -76,7 +77,11 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
         <div className='p-2 space-y-2'>
           <MaterialPicker value={mat.surfaceMaterialId} placeholder='(built-in surface)'
             newName={() => `${editingTerrainMaterialName || 'Landscape'} ground`}
-            seed={() => Material.parse({ ...mat.serialize(), terrainMaterial: undefined })}
+            // The built-in surface when it HAS a texture (nothing is lost by linking it); otherwise a
+            // white blank — the default ground's green tint would multiply into whatever texture comes next.
+            seed={() => ['baseColorTexture', 'baseTexture', 'texture'].some(k => mat.textures.get(k))
+              ? Material.parse({ ...mat.serialize(), terrainMaterial: undefined })
+              : blankSlotSurface()}
             onPick={a => { setTerrainSurfaceFrom(mat, liveMaterial(a)); mat.surfaceMaterialId = a.id; changed() }} />
           <div className='flex items-center justify-between'>
             <span className={label}>Tiling</span>
@@ -94,6 +99,10 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
             <span className={label} title='Foliage may scatter where the ground shows'>Allow foliage</span>
             <Toggle checked={mat.allowFoliage} onChange={c => { mat.allowFoliage = c; changed() }} />
           </div>
+          <SurfaceLook
+            normalStrength={mat.normalStrength} antiTiling={mat.antiTiling}
+            onNormalStrength={v => { mat.normalStrength = v; changed() }}
+            onAntiTiling={v => { mat.antiTiling = v; changed() }} />
           <Hint>Covers the whole landscape; the slots below draw over it.</Hint>
         </div>
       </Collapsable>

@@ -634,7 +634,7 @@ export class Material {
         material.properties.set('u_elevRemap', [1, 0]);
         // Whole arrays, always: the uniform writer stops at the input's length, so a short array would
         // leave the tail of the block holding whatever the previous material wrote there.
-        for (const name of ['u_surfColor', 'u_surfMaterial', 'u_surfFlags', 'u_surfElevation', 'u_surfSlope', 'u_surfNoise', 'u_surfBlend'])
+        for (const name of ['u_surfColor', 'u_surfMaterial', 'u_surfFlags', 'u_surfElevation', 'u_surfSlope', 'u_surfNoise', 'u_surfBlend', 'u_surfShade'])
             material.properties.set(name, new Float32Array(16 * 4));
         return material;
     }
@@ -997,6 +997,8 @@ export interface TerrainFoliageRule {
     lods?: { models: any[]; distance: number }[];
     /** Optional impostor: past `distance`, instances draw as textured cross-quads (the farthest LOD). */
     billboard?: { textureId: string; distance: number } | null;
+    /** Side of the baked impostor card in pixels (512 default; 1024 for large, close-ish trees). Editor-side. */
+    impostorSize?: number;
     /** Hide instances beyond this camera distance; 0/absent = the renderer's global foliage cull. */
     cullDistance?: number;
     /** Rasterize these instances into the shadow cascades. Off by default: one instanced draw per cell per cascade. */
@@ -1038,6 +1040,10 @@ export interface TerrainMaterialSlot {
      * (`TerrainLayerStack.slotChannel`); in a paint layer it is meaningless and ignored.
      */
     manual: boolean;
+    /** Normal-map strength on the landscape: 1 as authored. Optional; absent reads as 1. */
+    normalStrength?: number;
+    /** Break up visible tiling, 0 off .. 1 full. Optional; absent reads as 0. */
+    antiTiling?: number;
 }
 
 /** A new slot's id. Unique enough for a list key; the engine never compares it. */
@@ -1123,6 +1129,10 @@ export class TerrainMaterial extends Material {
      * {@link setTerrainSurfaceFrom}), the slot-0 twin of `TerrainMaterialSlot.surfaceMaterialId`.
      */
     public surfaceMaterialId: string | null = null;
+    /** The ground's normal-map strength on the landscape (1 = as authored). */
+    public normalStrength: number = 1;
+    /** Break up the ground's visible tiling, 0 off .. 1 full. */
+    public antiTiling: number = 0;
 
     /** Build a terrain paint-layer material whose surface is the given base shading model. */
     public static Create(baseType: TerrainBaseType, properties: any = {}, config?: MaterialConfig): TerrainMaterial {
@@ -1170,6 +1180,8 @@ export class TerrainMaterial extends Material {
             rule: cloneBlendRule(this.rule),
             allowFoliage: this.allowFoliage,
             surfaceMaterialId: this.surfaceMaterialId,
+            normalStrength: this.normalStrength,
+            antiTiling: this.antiTiling,
             slots: this.slots.map(s => ({
                 id: s.id,
                 name: s.name,
@@ -1179,6 +1191,8 @@ export class TerrainMaterial extends Material {
                 rule: cloneBlendRule(s.rule),
                 allowFoliage: s.allowFoliage,
                 manual: s.manual,
+                normalStrength: s.normalStrength ?? 1,
+                antiTiling: s.antiTiling ?? 0,
             })),
         };
     }
@@ -1236,6 +1250,8 @@ export class TerrainMaterial extends Material {
         }
         tm.allowFoliage = m.allowFoliage !== false;
         tm.surfaceMaterialId = typeof m.surfaceMaterialId === 'string' ? m.surfaceMaterialId : null;
+        tm.normalStrength = finiteOr(m.normalStrength, 1);
+        tm.antiTiling = finiteOr(m.antiTiling, 0);
         tm.slots =Array.isArray(m.slots) ? m.slots.map((s: any) => TerrainMaterial.parseSlot(s)) : [];
         return tm;
     }
@@ -1252,6 +1268,8 @@ export class TerrainMaterial extends Material {
             rule: parseBlendRule(s.rule),
             allowFoliage: s.allowFoliage !== false,
             manual: s.manual === true,
+            normalStrength: finiteOr(s.normalStrength, 1),
+            antiTiling: finiteOr(s.antiTiling, 0),
         };
     }
 }
@@ -1297,6 +1315,8 @@ export function shallowCloneTerrainMaterial(tm: TerrainMaterial): TerrainMateria
     c.rule = cloneBlendRule(tm.rule);
     c.allowFoliage = tm.allowFoliage;
     c.surfaceMaterialId = tm.surfaceMaterialId;
+    c.normalStrength = tm.normalStrength;
+    c.antiTiling = tm.antiTiling;
     c.slots = tm.slots.map(s => ({ ...s, rule: cloneBlendRule(s.rule) }));
     return c;
 }

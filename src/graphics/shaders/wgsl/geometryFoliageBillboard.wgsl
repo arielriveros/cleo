@@ -5,6 +5,7 @@
 
 #include "./chunks/instancedVertex.wgsl"
 #include "./chunks/tonemap.wgsl"
+#include "./chunks/alphaCutout.wgsl"
 
 @group(0) @binding(0) var u_texture_texture: texture_2d<f32>;
 @group(0) @binding(1) var u_texture_sampler: sampler;
@@ -18,8 +19,10 @@ struct GBuffer {
 @fragment
 fn fs_main(in: VertexOutput) -> GBuffer {
     let c = textureSample(u_texture_texture, u_texture_sampler, in.uv);
-    // Alpha cutout, so blades read as cutouts rather than as the quads they are drawn on.
-    if (c.a < 0.5) { discard; }
+    // Alpha cutout, so blades read as cutouts rather than as the quads they are drawn on — mip-aware, or
+    // distant cards thin out and shimmer (chunks/alphaCutout.wgsl).
+    let a = cutoutAlpha(c.a, dpdx(in.uv), dpdy(in.uv), textureDimensions(u_texture_texture, 0));
+    if (a < 0.5) { discard; }
 
     var out: GBuffer;
     out.albedoMetallic = vec4<f32>(toLinear(c.rgb), 0.0);   // sRGB -> linear

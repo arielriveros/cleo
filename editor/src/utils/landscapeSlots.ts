@@ -34,9 +34,13 @@ export function slotDisplayName(slot: { name: string; surfaceMaterialId: string 
   return linked?.name ?? slot.name
 }
 
-/** A plain surface for a slot that has not been given a library material yet. */
+/**
+ * A plain surface for a slot that has not been given a library material yet. WHITE, because the base
+ * colour multiplies whatever texture is given to it next: the 0.6 grey this used to start at capped a
+ * snow texture at 60% and read as "the whites are never white".
+ */
 export function blankSlotSurface(): Material {
-  return Material.PBR({ baseColor: [0.6, 0.6, 0.6], roughness: 0.9, metallic: 0 })
+  return Material.PBR({ baseColor: [1, 1, 1], roughness: 0.9, metallic: 0 })
 }
 
 /**

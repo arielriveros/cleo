@@ -1,3 +1,4 @@
+#include "./chunks/alphaCutout.wgsl"
 // Alpha-cutout depth pass for a masked SKINNED mesh using the lit vertex layout.
 //
 // One of FOUR cutout depth variants, and the split is forced rather than tidy. `texCoord` sits at
@@ -82,6 +83,7 @@ fn vs_main(
 @fragment
 fn fs_main(in: VertexOutput) {
     let texel = textureSample(u_texture_texture, u_texture_sampler, in.uv);
-    let coverage = select(texel.a, texel.r, u_cutout.u_useRed != 0);
+    let coverage = cutoutAlpha(select(texel.a, texel.r, u_cutout.u_useRed != 0),
+                               dpdx(in.uv), dpdy(in.uv), textureDimensions(u_texture_texture, 0));
     if (coverage < u_cutout.u_cutoff) { discard; }
 }

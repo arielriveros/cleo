@@ -5,6 +5,7 @@
 // in geometryFoliageBillboard.
 
 #include "./chunks/instancedDepthVertex.wgsl"
+#include "./chunks/alphaCutout.wgsl"
 
 @group(0) @binding(0) var u_texture_texture: texture_2d<f32>;
 @group(0) @binding(1) var u_texture_sampler: sampler;
@@ -21,6 +22,7 @@ struct CutoutDepthUniforms {
 @fragment
 fn fs_main(in: VertexOutput) {
     let texel = textureSample(u_texture_texture, u_texture_sampler, in.uv);
-    let coverage = select(texel.a, texel.r, u_cutout.u_useRed != 0);
+    let coverage = cutoutAlpha(select(texel.a, texel.r, u_cutout.u_useRed != 0),
+                               dpdx(in.uv), dpdy(in.uv), textureDimensions(u_texture_texture, 0));
     if (coverage < u_cutout.u_cutoff) { discard; }
 }

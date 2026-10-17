@@ -25,7 +25,9 @@ export const MIN_LOD_TEXTURE_SIZE = 64
  * disposable and are excluded from persistence and publish, while these must survive a reload.
  */
 export function lodTextureId(sourceId: string, width: number): string {
-    return `${sourceId}__lod${width}`
+    // `lodc`: made with its alpha coverage preserved (preserveAlphaCoverage). The plain `lod` ids minted
+    // before that are still recognised, but no longer reused, so a regenerate replaces them.
+    return `${sourceId}__lodc${width}`
 }
 
 /**
@@ -34,7 +36,7 @@ export function lodTextureId(sourceId: string, width: number): string {
  * them and deleting the model deletes them.
  */
 export function isLodTextureId(id: string | null | undefined): boolean {
-    return !!id && /__lod\d+$/.test(id)
+    return !!id && /__lodc?\d+$/.test(id)
 }
 
 /** Half of `n`, floored at {@link MIN_LOD_TEXTURE_SIZE}; stays power-of-two when the source was. */
@@ -52,6 +54,34 @@ export function halveTo(n: number, level: number): number {
  * than dragging the result toward black — but for a map whose alpha carries DATA (a packed ORM with
  * occlusion in alpha) it destroys a channel. Callers use this to leave those alone instead.
  */
+/** Fraction of texels whose alpha (RGBA bytes) reaches `cutoff` (0..255) once scaled by `scale`. */
+export function alphaCoverage(rgba: ArrayLike<number>, cutoff = 128, scale = 1): number {
+    let hit = 0, n = 0
+    for (let i = 3; i < rgba.length; i += 4) { n++; if (rgba[i] * scale >= cutoff) hit++ }
+    return n ? hit / n : 0
+}
+
+/**
+ * Rescale a downscaled image's alpha, in place, so as many of its texels pass a cutout as did in the
+ * full-size source (Castano, "computing alpha mipmaps"). A box filter averages a leaf's opaque texels
+ * with the background around them, so an alpha-tested card at half size passes FEWER texels than at full
+ * size and a level two halvings down has visibly thinned foliage; scaling alpha back up restores the
+ * mass. Binary search on the scale: coverage is monotone in it. Returns the scale applied.
+ */
+export function preserveAlphaCoverage(rgba: { [i: number]: number; length: number }, targetCoverage: number,
+                                      cutoff = 128): number {
+    if (targetCoverage <= 0 || targetCoverage >= 1) return 1
+    let lo = 0.25, hi = 8
+    for (let k = 0; k < 20; k++) {
+        const mid = (lo + hi) / 2
+        if (alphaCoverage(rgba, cutoff, mid) < targetCoverage) lo = mid; else hi = mid
+    }
+    const scale = hi
+    if (Math.abs(scale - 1) < 1e-3) return 1
+    for (let i = 3; i < rgba.length; i += 4) rgba[i] = Math.min(255, Math.round(rgba[i] * scale))
+    return scale
+}
+
 function hasTransparency(ctx: CanvasRenderingContext2D, w: number, h: number): boolean {
     const { data } = ctx.getImageData(0, 0, w, h)
     for (let i = 3; i < data.length; i += 4) if (data[i] !== 255) return true
@@ -104,7 +134,8 @@ export async function downscaleTextures(sourceIds: Iterable<string>, level: numb
             if (!fullCtx) continue
             fullCtx.drawImage(image, 0, 0)
             // Skip a map whose alpha is data rather than coverage — see hasTransparency.
-            if (hasTransparency(fullCtx, full.width, full.height) && isDataMap(sourceId)) continue
+            const transparent = hasTransparency(fullCtx, full.width, full.height)
+            if (transparent && isDataMap(sourceId)) continue
 
             const canvas = document.createElement('canvas')
             canvas.width = width
@@ -114,6 +145,12 @@ export async function downscaleTextures(sourceIds: Iterable<string>, level: numb
             ctx.imageSmoothingEnabled = true
             ctx.imageSmoothingQuality = 'high'
             ctx.drawImage(image, 0, 0, width, height)
+            // A cutout keeps its coverage at the smaller size, or the level's leaves thin out.
+            if (transparent) {
+                const coverage = alphaCoverage(fullCtx.getImageData(0, 0, full.width, full.height).data)
+                const small = ctx.getImageData(0, 0, width, height)
+                if (preserveAlphaCoverage(small.data, coverage) !== 1) ctx.putImageData(small, 0, 0)
+            }
 
             const uri = canvas.toDataURL('image/png')
             const parsed = parseBase64DataUri(uri)
@@ -225,7 +262,7 @@ export function levelMaterialJson(serialized: any, ids: Map<string, string>, lev
 
 /** The full-resolution texture a (possibly chained) LOD twin id was made from. */
 export function lodSourceTextureId(id: string): string {
-    return id.replace(/(__lod\d+)+$/, '')
+    return id.replace(/(__lodc?\d+)+$/, '')
 }
 
 /**

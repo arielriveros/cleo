@@ -24,10 +24,10 @@ fn fs_main(in: VertexOutput) -> GBuffer {
     out.albedoMetallic = vec4<f32>(surface.albedo, surface.metallic);
     // Filtered roughness, exactly as chunks/pbrGBuffer.wgsl writes it, and for the same reason: the
     // variance has to be measured across one surface's own normal, which only the geometry pass can do.
-    // Reflectance 0.5, the neutral dielectric: soil, rock and grass all sit within a few thousandths
-    // of F0 0.04, and terrain has one composite material for its whole stack with nowhere to author it.
+    // Reflectance per surface, from its PBR material's own slider, blended across the stack. It used
+    // to be a fixed 0.5 here, so that slider did nothing at all on a landscape.
     let octN = octEncode(surface.normal);
-    out.normalRoughness = vec4<f32>(octN.x, octN.y, 0.5,
+    out.normalRoughness = vec4<f32>(octN.x, octN.y, surface.reflectance,
         filterSpecularRoughness(surface.roughness, surface.normal, u_terrain.u_specularAA));
     // Occlusion, at last, rather than the constant 1.0 this wrote for as long as the channel has
     // existed. It needed no G-buffer change: `gEmissiveAO.a` was always here, terrain simply had

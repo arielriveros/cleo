@@ -1,3 +1,4 @@
+#include "./alphaCutout.wgsl"
 // Forward Blinn-Phong shading, shared by the plain and skinned programs.
 //
 // Uses the light STRUCTS from chunks/pbrLighting.wgsl (the same lights feed both material models) but
@@ -145,7 +146,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // to 0.5 whenever a mask is present, and `parse` applies the same default to anything saved before
     // the property existed — so a project authored against the old constant reloads unchanged.
     if (u_material.hasMaskMap != 0 && u_material.alphaCutoff > 0.0) {
-        let mask = sampleSurface(u_material_maskMap_texture, u_material_maskMap_sampler, su, su.uv0).r;
+        let mask = cutoutAlpha(sampleSurface(u_material_maskMap_texture, u_material_maskMap_sampler, su, su.uv0).r,
+                               su.dx0, su.dy0, textureDimensions(u_material_maskMap_texture, 0));
         if (mask < u_material.alphaCutoff) { discard; }
     }
 

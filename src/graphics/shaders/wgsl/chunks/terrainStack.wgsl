@@ -30,6 +30,9 @@
 @group(0) @binding(3) var u_surfAlbedo_sampler: sampler;
 @group(0) @binding(4) var u_surfNormal_texture: texture_2d_array<f32>;
 @group(0) @binding(5) var u_surfNormal_sampler: sampler;
+/** Per-surface occlusion (r), roughness (g), metallic (b) - the mesh PBR path's ORM layout. */
+@group(0) @binding(6) var u_surfOrm_texture: texture_2d_array<f32>;
+@group(0) @binding(7) var u_surfOrm_sampler: sampler;
 
 /** Mirrors `MAX_TERRAIN_SURFACES` in terrainLayers.ts. The arrays below are sized by it. */
 const MAX_TERRAIN_SURFACES: i32 = 16;
@@ -73,7 +76,11 @@ struct TerrainUniforms {
     u_surfColor: array<vec4<f32>, 16>,
     /** x = metallic, y = roughness, z = tiling, w = mask channel (>= 0), -1 = no mask, -2 = fill. */
     u_surfMaterial: array<vec4<f32>, 16>,
-    /** Which packed maps are real rather than neutral: albedo, AO, normal, height. 0/1 each. */
+    /**
+     * Which packed maps are real rather than neutral, 0/1 each: x albedo, y ORM (the surface has an
+     * occlusion, roughness or metallic map; the ORM layer then also carries the scalars for the rest),
+     * z normal, w height.
+     */
     u_surfFlags: array<vec4<f32>, 16>,
     /** Elevation band: min, max, falloff (metres), enabled 0/1. */
     u_surfElevation: array<vec4<f32>, 16>,
@@ -81,8 +88,13 @@ struct TerrainUniforms {
     u_surfSlope: array<vec4<f32>, 16>,
     /** Noise: amount 0..1, 1/scale (1/metres), seed offset x, seed offset z. */
     u_surfNoise: array<vec4<f32>, 16>,
-    /** x = height blend 0..1, y = opacity 0..1 (layer opacity already multiplied in). zw unused. */
+    /**
+     * x = height blend 0..1, y = opacity 0..1 (layer opacity already multiplied in), z = normal-map
+     * strength (1 = as authored), w = anti-tiling 0..1.
+     */
     u_surfBlend: array<vec4<f32>, 16>,
+    /** x = dielectric reflectance (the PBR material's specular level, 0.5 neutral). yzw spare. */
+    u_surfShade: array<vec4<f32>, 16>,
 };
 @group(1) @binding(1) var<uniform> u_terrain: TerrainUniforms;
 
@@ -92,6 +104,8 @@ struct TerrainSurface {
     ao: f32,
     metallic: f32,
     roughness: f32,
+    /** Dielectric specular level, blended like roughness; `dielectricF0` turns it into F0. */
+    reflectance: f32,
     normal: vec3<f32>,
 };
 
@@ -147,6 +161,37 @@ fn surfaceDebugColor(i: i32) -> vec3<f32> {
 }
 
 /**
+ * ANTI-TILING (Quilez, "texture repetition", technique 3): two fetches at per-region random offsets,
+ * blended across a low-frequency noise. Translation only - no rotation - so a tangent-space normal map
+ * stays valid as it is. `strength` scales the offsets; 0 is a plain single fetch.
+ */
+struct AntiTile {
+    offA: vec2<f32>,
+    offB: vec2<f32>,
+    t: f32,
+    on: bool,
+};
+
+fn antiTileOf(uv: vec2<f32>, strength: f32) -> AntiTile {
+    if (strength <= 0.0) { return AntiTile(vec2<f32>(0.0), vec2<f32>(0.0), 0.0, false); }
+    // One region every few repeats; the index walks a pseudo-random path between them.
+    let k = valueNoise(uv * 0.35) * 8.0;
+    let i = floor(k);
+    let f = k - i;
+    let offA = sin(vec2<f32>(3.0, 7.0) * i) * strength;
+    let offB = sin(vec2<f32>(3.0, 7.0) * (i + 1.0)) * strength;
+    return AntiTile(offA, offB, smoothstep(0.2, 0.8, f), true);
+}
+
+fn sampleSurfaceArray(tex: texture_2d_array<f32>, smp: sampler, uv: vec2<f32>, layer: i32,
+                      gx: vec2<f32>, gy: vec2<f32>, at: AntiTile) -> vec4<f32> {
+    if (!at.on) { return textureSampleGrad(tex, smp, uv, layer, gx, gy); }
+    let a = textureSampleGrad(tex, smp, uv + at.offA, layer, gx, gy);
+    let b = textureSampleGrad(tex, smp, uv + at.offB, layer, gx, gy);
+    return mix(a, b, at.t);
+}
+
+/**
  * Composite the stack at this fragment.
  *
  * `baseUv` is the landscape's own 0..1 chart (the paint masks live in it); each surface tiles it by its
@@ -165,6 +210,7 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
     var ao = 0.0;
     var metallic = 0.0;
     var roughness = 0.0;
+    var reflectance = 0.0;
     var normal = vec3<f32>(0.0);
     var remaining = 1.0;
     var debugWeight = 0.0;
@@ -206,26 +252,38 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
         let gy = ddyUv * tiling;
         let flags = u_terrain.u_surfFlags[i];
         let color = u_terrain.u_surfColor[i];
+        let blend = u_terrain.u_surfBlend[i];
+        let at = antiTileOf(uv, blend.w);
 
         var alb = toLinear(color.rgb);
+        if (flags.x > 0.5) {
+            // Albedo is sRGB; the shader linearises it (no hardware sRGB formats in this engine).
+            alb *= toLinear(sampleSurfaceArray(u_surfAlbedo_texture, u_surfAlbedo_sampler, uv, i, gx, gy, at).rgb);
+        }
         var occlusion = 1.0;
-        if (flags.x > 0.5 || flags.y > 0.5) {
-            let texel = textureSampleGrad(u_surfAlbedo_texture, u_surfAlbedo_sampler, uv, i, gx, gy);
-            // Albedo is sRGB and occlusion linear, so only the rgb goes through toLinear.
-            if (flags.x > 0.5) { alb *= toLinear(texel.rgb); }
-            if (flags.y > 0.5) { occlusion = texel.a; }
+        var surfMetallic = material.x;
+        var surfRoughness = material.y;
+        if (flags.y > 0.5) {
+            // A map REPLACES its scalar, as on meshes; a missing map was packed as that scalar.
+            let orm = sampleSurfaceArray(u_surfOrm_texture, u_surfOrm_sampler, uv, i, gx, gy, at);
+            occlusion = orm.r;
+            surfRoughness = orm.g;
+            surfMetallic = orm.b;
         }
 
         var n = tbn[2];
         var height = 0.5;
         if (flags.z > 0.5 || flags.w > 0.5) {
-            let texel = textureSampleGrad(u_surfNormal_texture, u_surfNormal_sampler, uv, i, gx, gy);
+            let texel = sampleSurfaceArray(u_surfNormal_texture, u_surfNormal_sampler, uv, i, gx, gy, at);
             // The interpolated tbn, whose bitangent sign is the engine-wide green-channel convention.
-            if (flags.z > 0.5) { n = normalize(tbn * (texel.rgb * 2.0 - 1.0)); }
+            // Strength scales the tangent-plane tilt; 0 leaves the geometric normal.
+            if (flags.z > 0.5) {
+                let tn = texel.rgb * 2.0 - 1.0;
+                n = normalize(tbn * vec3<f32>(tn.xy * blend.z, tn.z));
+            }
             if (flags.w > 0.5) { height = select(texel.a, 1.0 - texel.a, color.a > 0.5); }
         }
 
-        let blend = u_terrain.u_surfBlend[i];
         if (!fill) {
             // Mirrors `surfaceAlpha`'s order: range tests and noise above, then height, then opacity.
             if (blend.x > 0.0) { a = transitionShift(a, height * 2.0 - 1.0, blend.x); }
@@ -235,8 +293,9 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
         let w = a * remaining;
         albedo += w * alb;
         ao += w * occlusion;
-        metallic += w * material.x;
-        roughness += w * material.y;
+        metallic += w * surfMetallic;
+        roughness += w * surfRoughness;
+        reflectance += w * u_terrain.u_surfShade[i].x;
         normal += w * n;
         if (i == u_terrain.u_debugSurface) { debugWeight = w; }
         debugColor += w * surfaceDebugColor(i);
@@ -250,6 +309,7 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
         albedo += remaining * toLinear(u_terrain.u_baseColor);
         ao += remaining;
         roughness += remaining * 0.9;
+        reflectance += remaining * 0.5;
         normal += remaining * nGeom;
     }
 
@@ -258,6 +318,7 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
     out.ao = ao;
     out.metallic = metallic;
     out.roughness = roughness;
+    out.reflectance = reflectance;
     let len = length(normal);
     out.normal = select(nGeom, normal / len, len > 1e-5);
 

@@ -57,12 +57,16 @@ describe('shading fetches keep their gradients', () => {
         expect(tail).toMatch(/parallaxHeight\(/);
     });
 
-    it('the landscape stack samples masks, albedo and normal with gradients', () => {
-        // The stack searches nothing — no march — so every fetch it makes is SEEN, and every one is a
-        // gradient fetch taken from derivatives captured once above its loop.
-        const body = fn(read('terrainStack.wgsl'), 'resolveTerrainSurface');
-        expect((body.match(/textureSampleGrad/g) ?? []).length, 'mask + albedo + normal').toBe(3);
+    it('the landscape stack samples masks, albedo, ORM and normal with gradients', () => {
+        // Every fetch the composite makes is SEEN, so every one is a gradient fetch from derivatives
+        // captured once above its loop: the mask directly, the surface arrays through sampleSurfaceArray
+        // (the anti-tiling wrapper, itself gradient-only).
+        const src = read('terrainStack.wgsl');
+        const body = fn(src, 'resolveTerrainSurface');
+        expect((body.match(/textureSampleGrad/g) ?? []).length, 'the mask').toBe(1);
+        expect((body.match(/sampleSurfaceArray\(/g) ?? []).length, 'albedo + ORM + normal').toBe(3);
         expect(body).not.toMatch(/textureSampleLevel/);
+        expect(fn(src, 'sampleSurfaceArray')).not.toMatch(/textureSampleLevel/);
     });
 });
 
@@ -90,6 +94,7 @@ describe('the LOD is computed once, and everything agrees on it', () => {
         // from the gradients, scaled per surface by its tiling.
         const src = code(read('terrainStack.wgsl'));
         expect(src).not.toMatch(/parallaxLod/);
+        expect(src).not.toMatch(/textureSampleLevel/);
         expect(src, 'per-surface gradient scale').toMatch(/ddxUv \* tiling/);
     });
 });

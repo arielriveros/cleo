@@ -67,7 +67,7 @@ import { groupImportFiles } from "../utils/importGrouping";
 import {
   normalizeRootScale, meshBoundsRadius, combineBounds, awaitSubtreeTexturesReady, captureMaterialSphere,
   renderModelAssetThumbnail,
-  setThumbnailDirtySuppressor, bakeModelImpostor, impostorTextureId } from "../utils/modelThumbnails";
+  setThumbnailDirtySuppressor, bakeModelImpostor, impostorTextureId, IMPOSTOR_SIZE } from "../utils/modelThumbnails";
 import { parseBundleToRoot, type UnresolvedTexture } from "../utils/modelImport";
 import { isValidGrouping, compactGroups, type PartInfo } from "../utils/submeshGroups";
 import { readModelLibrary, writeModelLibrary } from "../utils/modelStore";
@@ -4030,7 +4030,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // a second bake would leave the old card on disk and the new one only in memory until reload.
     await deleteTextures([id]);
 
-    const baked = await bakeModelImpostor(engine, asset, materialsRef.current);
+    const baked = await bakeModelImpostor(engine, asset, materialsRef.current, rule.impostorSize ?? IMPOSTOR_SIZE);
     if (!baked) return null;
     await persistTextures([baked.id]);
 

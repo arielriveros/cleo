@@ -235,6 +235,16 @@ export default function TerrainFoliageRules({ material, onChange }: { material: 
                       linearly, this replaces them all with four. Baking is offered only for a rule with a
                       library model behind it — there is nothing to render otherwise. */}
                   {r.modelId && (
+                    <div className='flex items-center justify-between'>
+                      <span className={label} title='Pixel size of the baked card. Larger keeps distant leaves crisp and stable; costs memory per rule.'>Impostor size</span>
+                      <Select className={num} value={String(r.impostorSize ?? 512)}
+                        onChange={e => patchRule(i, { impostorSize: Number(e.target.value) })}>
+                        <option value='512'>512</option>
+                        <option value='1024'>1024</option>
+                      </Select>
+                    </div>
+                  )}
+                  {r.modelId && (
                     <Button
                       size='sm'
                       className='w-full text-ui-sm py-1'

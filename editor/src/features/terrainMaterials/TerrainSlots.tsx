@@ -5,7 +5,7 @@ import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
 import BlendRuleEditor from './BlendRuleEditor'
 import MaterialPicker, { MaterialMenu, liveMaterial, useCreateMaterial } from './MaterialPicker'
-import { Button, Hint, NumberInput, Popover, TextInput, Toggle, cn, labelClass } from '../../components/ui'
+import { Button, Hint, NumberInput, Popover, Slider, TextInput, Toggle, cn, labelClass } from '../../components/ui'
 import type { MaterialAsset } from '../../utils/materials'
 import { newLandscapeSlot, slotDisplayName } from '../../utils/landscapeSlots'
 
@@ -128,6 +128,9 @@ function SlotRow(props: {
         <NumberInput className='w-16' value={slot.tiling} min={0.01} step={1}
           onChange={v => set('Slot tiling', s => { s.tiling = Math.max(0.01, v) }, 'tiling')} />
       </div>
+      <SurfaceLook normalStrength={slot.normalStrength ?? 1} antiTiling={slot.antiTiling ?? 0}
+        onNormalStrength={v => set('Slot normal strength', s => { s.normalStrength = v }, 'normalStrength')}
+        onAntiTiling={v => set('Slot anti-tiling', s => { s.antiTiling = v }, 'antiTiling')} />
       <div className='flex items-center justify-between gap-2'>
         <span className={labelClass} title='Let the foliage brush scatter where this slot dominates — off for rock and roads'>Allow foliage</span>
         <Toggle checked={slot.allowFoliage} onChange={c => set('Slot foliage', s => { s.allowFoliage = c })} />
@@ -179,6 +182,27 @@ function AddSlotButtons({ material, edit }: { material: TerrainMaterial; edit: S
       {menu(false, '+ Slot', 'Add a surface that blends in by slope and elevation')}
       {menu(true, '+ Paint slot', 'Add a surface that shows only where you paint it — a road, a path')}
     </span>
+  )
+}
+
+/** How a surface reads on the landscape, beyond its Material: normal-map strength and tiling break-up. */
+export function SurfaceLook(props: {
+  normalStrength: number
+  antiTiling: number
+  onNormalStrength: (v: number) => void
+  onAntiTiling: (v: number) => void
+}) {
+  return (
+    <div className='space-y-1'>
+      <Slider label='Normal strength' min={0} max={3} step={0.05} value={props.normalStrength}
+        readout={v => v.toFixed(2)}
+        title='How strongly the normal map tilts the light: 1 as authored, 0 flat, above 1 exaggerated'
+        onChange={props.onNormalStrength} />
+      <Slider label='Break up tiling' min={0} max={1} step={0.05} value={props.antiTiling}
+        readout={v => (v > 0 ? v.toFixed(2) : 'off')}
+        title='Hide the repeating pattern seen from a distance by varying each tile (two texture fetches instead of one)'
+        onChange={props.onAntiTiling} />
+    </div>
   )
 }
 

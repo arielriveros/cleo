@@ -1,3 +1,4 @@
+#include "./alphaCutout.wgsl"
 // Forward Cel (toon) shading, shared by the plain and skinned programs.
 //
 // Uses the light STRUCTS from chunks/pbrLighting.wgsl (the same lights feed every material model) but
@@ -242,7 +243,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // defaults it to 0.5 whenever a mask is present and to 0 when there is none, and `parse` applies the
     // same rule, so a cutout behaves identically across every shading model.
     if (u_material.hasMaskMap != 0 && u_material.alphaCutoff > 0.0) {
-        let mask = sampleSurface(u_material_maskMap_texture, u_material_maskMap_sampler, su, su.uv0).r;
+        let mask = cutoutAlpha(sampleSurface(u_material_maskMap_texture, u_material_maskMap_sampler, su, su.uv0).r,
+                               su.dx0, su.dy0, textureDimensions(u_material_maskMap_texture, 0));
         if (mask < u_material.alphaCutoff) { discard; }
     }
 

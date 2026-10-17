@@ -126,6 +126,22 @@ A landscape material (`.tmat`) is everything a landscape is painted with. Open o
   elevation*). The preview does not show paint-only slots.
 - **Foliage rules** — what this material scatters.
 
+### How a surface reads on the landscape
+
+A landscape surface draws from its Material the same maps a mesh does: **base colour**, **normal**,
+**roughness**, **metallic** and **occlusion** (a packed ARM/ORM texture works when it fills several of
+those slots). The **height** map does not displace the ground (landscapes have no parallax); it only
+shapes the transitions between surfaces (**Height blend**). Each Ground and slot also has:
+
+- **Normal strength** — how strongly the normal map tilts the light (1 = as authored).
+- **Break up tiling** — varies each tile so a texture's repeat stops showing from a distance. Costs a
+  second texture fetch for that surface.
+
+The **base colour multiplies the texture**: a white texture (snow) under a grey tint can never be
+whiter than the tint, and the material editor warns when a texture sits under a non-white colour.
+Every landscape surface is resampled to the renderer's **Surface Tex** size (1024 by default; 2048 for
+close-up detail).
+
 Editing a Material asset updates every ground and slot that uses it.
 
 ### Blend rules

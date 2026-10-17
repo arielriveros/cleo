@@ -4,7 +4,7 @@ import { join } from 'path';
 import { TerrainMaterial, Material } from '../src/graphics/material';
 import { deriveSurface } from '../src/terrain/terrainLayers';
 import { TerrainLayerStack } from '../src/terrain/terrainLayerStack';
-import { albedoPackSpec, normalPackSpec, packKey } from '../src/terrain/terrainSurfaceArrays';
+import { albedoPackSpec, normalPackSpec, ormPackSpec, packKey } from '../src/terrain/terrainSurfaceArrays';
 
 /**
  * Everything a surface is derived from has to reach the shader.
@@ -44,18 +44,27 @@ describe('surface packing', () => {
         color: [1, 1, 1], metallic: 0, roughness: 1, tiling: 20, ...over,
     });
 
-    it('packs occlusion into the albedo alpha, albedo into rgb, and REPEATS', () => {
+    it('packs albedo into rgb and REPEATS', () => {
         const spec = albedoPackSpec(surface({ albedoId: 'alb', aoId: 'ao' }));
         expect(spec.r).toEqual({ textureId: 'alb', channel: 0 });
         expect(spec.b).toEqual({ textureId: 'alb', channel: 2 });
-        expect(spec.a).toEqual({ textureId: 'ao', channel: 0 });
         expect(spec.wrapping).toBe('repeat');
     });
 
     it('an occlusion-only surface keeps white albedo, so the tint alone shows', () => {
-        const spec = albedoPackSpec(surface({ aoId: 'ao' }));
-        expect(spec.r).toEqual({ constant: 1 });
-        expect(spec.a).toEqual({ textureId: 'ao', channel: 0 });
+        expect(albedoPackSpec(surface({ aoId: 'ao' })).r).toEqual({ constant: 1 });
+        expect(ormPackSpec(surface({ aoId: 'ao' })).r).toEqual({ textureId: 'ao', channel: 0 });
+    });
+
+    it('packs occlusion, roughness and metallic like the mesh ORM, scalars where a map is missing', () => {
+        const separate = ormPackSpec(surface({ aoId: 'ao', roughnessId: 'rough', roughness: 0.4, metallic: 0.2 }));
+        expect(separate.r).toEqual({ textureId: 'ao', channel: 0 });
+        expect(separate.g).toEqual({ textureId: 'rough', channel: 0 });   // a lone map is grayscale: red
+        expect(separate.b).toEqual({ constant: 0.2 });                    // no map: the scalar
+        // One ARM texture in all three slots is packed: each slot reads its own channel.
+        const arm = ormPackSpec(surface({ aoId: 'arm', roughnessId: 'arm', metallicId: 'arm' }));
+        expect([arm.r, arm.g, arm.b]).toEqual([
+            { textureId: 'arm', channel: 0 }, { textureId: 'arm', channel: 1 }, { textureId: 'arm', channel: 2 }]);
     });
 
     it('packs height into the normal alpha, with a flat normal where there is none', () => {
@@ -85,13 +94,67 @@ describe('what the shader is told', () => {
         expect([flags[0], flags[1]]).toEqual([0, 1]);
     });
 
-    it('reads occlusion from the albedo alpha, linear, and blends it by the same weights', () => {
+    it('reads occlusion and roughness from the ORM layer, linear, and blends them by the same weights', () => {
         const chunk = readFileSync(join(__dirname, '..', 'src', 'graphics', 'shaders', 'wgsl', 'chunks', 'terrainStack.wgsl'), 'utf-8');
-        // Albedo is sRGB, occlusion is not: one fetch serves both, and only the rgb goes through toLinear.
-        expect(chunk).toMatch(/if \(flags\.x > 0\.5\) \{ alb \*= toLinear\(texel\.rgb\); \}/);
-        expect(chunk).toMatch(/if \(flags\.y > 0\.5\) \{ occlusion = texel\.a; \}/);
+        // Albedo is sRGB and linearised; occlusion, roughness and metallic come linear from the ORM layer.
+        expect(chunk).toMatch(/alb \*= toLinear\(sampleSurfaceArray\(u_surfAlbedo_texture/);
+        expect(chunk).toMatch(/occlusion = orm\.r;/);
+        expect(chunk).toMatch(/surfRoughness = orm\.g;/);
         expect(chunk).toMatch(/ao \+= w \* occlusion;/);
         // Uncovered ground is unoccluded.
         expect(chunk).toMatch(/ao \+= remaining;/);
+    });
+});
+
+describe('the look a landscape surface inherits from its PBR material', () => {
+    it('reads roughness and metallic maps, and an ARM map in several slots', () => {
+        const m = Material.PBR({ baseColor: [1, 1, 1], metallic: 0, roughness: 1 });
+        m.textures.set('occlusionMap', 'arm'); m.textures.set('roughnessMap', 'arm'); m.textures.set('metallicMap', 'arm');
+        const s = deriveSurface(m, 10);
+        expect([s.aoId, s.roughnessId, s.metallicId]).toEqual(['arm', 'arm', 'arm']);
+    });
+
+    it('writes ORM presence, normal strength and anti-tiling into their lanes', () => {
+        const stack = new TerrainLayerStack(16, 16);
+        const tm = TerrainMaterial.Create('pbr', {});
+        tm.textures.set('roughnessMap', 'r');
+        tm.textures.set('displacementMap', 'h');
+        tm.normalStrength = 1.5; tm.antiTiling = 0.4;
+        stack.setBase(tm);
+        const m = Material.Terrain();
+        stack.writeUniforms(m);
+        expect(m.properties.get('u_surfFlags')[1]).toBe(1);                       // a roughness map flags the ORM layer
+        const blend = m.properties.get('u_surfBlend');
+        expect([blend[2], blend[3]]).toEqual([1.5, Math.fround(0.4)]);
+    });
+
+    it('round-trips the landscape-only look fields', () => {
+        const tm = TerrainMaterial.Create('pbr', {});
+        tm.normalStrength = 0.5; tm.antiTiling = 0.7;
+        tm.slots.push({ ...TerrainMaterial.parseSlot({}), normalStrength: 2, antiTiling: 0.3 });
+        const back = TerrainMaterial.parse(JSON.parse(JSON.stringify(tm.serialize())));
+        expect([back.normalStrength, back.antiTiling]).toEqual([0.5, 0.7]);
+        expect([back.slots[0].normalStrength, back.slots[0].antiTiling]).toEqual([2, 0.3]);
+    });
+});
+
+describe('reflectance reaches the landscape', () => {
+    it('writes each surface\'s PBR reflectance, 0.5 where the material has none', () => {
+        const stack = new TerrainLayerStack(16, 16);
+        const tm = TerrainMaterial.Create('pbr', {});
+        tm.properties.set('reflectance', 0.8);
+        const rock = Material.Basic({ color: [1, 1, 1] });
+        tm.slots.push({ ...TerrainMaterial.parseSlot({}), material: rock });
+        stack.setBase(tm);
+        const m = Material.Terrain();
+        stack.writeUniforms(m);
+        const shade = m.properties.get('u_surfShade');
+        expect([shade[0], shade[4]]).toEqual([Math.fround(0.8), 0.5]);
+        expect(shade.length).toBe(64);
+    });
+
+    it('the deferred terrain pass writes it to the G-buffer instead of a constant', () => {
+        const src = readFileSync(join(__dirname, '..', 'src', 'graphics', 'shaders', 'wgsl', 'geometryTerrain.wgsl'), 'utf-8');
+        expect(src).toMatch(/vec4<f32>\(octN\.x, octN\.y, surface\.reflectance,/);
     });
 });

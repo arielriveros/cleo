@@ -1,3 +1,4 @@
+#include "./alphaCutout.wgsl"
 // The PBR G-buffer fragment stage, shared by the plain, skinned and instanced geometry programs.
 //
 // It uses VertexOutput and tbnOf() without including chunks/modelVarying.wgsl itself: whichever
@@ -317,7 +318,8 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     // The mask cutout, before the base-colour fetch: a discarded fragment writes no G-buffer at all.
     // Explicit gradients from the UN-offset uv, like every other fetch below.
     if (u_material.hasMaskMap != 0 && u_material.alphaCutoff > 0.0) {
-        let mask = sampleSurface(u_material_maskMap_texture, u_material_maskMap_sampler, su, uv).r;
+        let mask = cutoutAlpha(sampleSurface(u_material_maskMap_texture, u_material_maskMap_sampler, su, uv).r,
+                               su.dx0, su.dy0, textureDimensions(u_material_maskMap_texture, 0));
         if (mask < u_material.alphaCutoff) { discard; }
     }
 
@@ -328,7 +330,8 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
         // card's background never becomes depth, normal or albedo for the lighting pass to shade.
         // Only when there is no mask texture — that one has already been tested above.
         if (u_material.hasMaskMap == 0 && u_material.alphaCutoff > 0.0
-            && texel.a < u_material.alphaCutoff) { discard; }
+            && cutoutAlpha(texel.a, su.dx0, su.dy0, textureDimensions(u_material_baseColorTexture_texture, 0))
+               < u_material.alphaCutoff) { discard; }
         albedo *= pow(texel.rgb, vec3<f32>(2.2));   // sRGB -> linear
     }
 

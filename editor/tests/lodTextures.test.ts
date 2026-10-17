@@ -117,3 +117,34 @@ describe('materialAssetWithTextures', () => {
     expect(out.textureIds).toEqual([]);
   });
 });
+
+describe('coverage-preserving LOD copies', async () => {
+  const { alphaCoverage, preserveAlphaCoverage } = await import('../src/utils/lodTextures');
+  /** RGBA bytes with the given alphas. */
+  const img = (alphas: number[]) => { const a = new Uint8ClampedArray(alphas.length * 4); alphas.forEach((v, i) => { a[i * 4 + 3] = v }); return a };
+
+  it('measures the fraction of texels a 0.5 cutout keeps', () => {
+    expect(alphaCoverage(img([255, 255, 0, 0]))).toBe(0.5);
+    expect(alphaCoverage(img([100, 100, 0, 0]))).toBe(0);
+  });
+
+  it('raises a box-filtered copy back to the source coverage', () => {
+    // A leaf edge averaged down: the opaque half became 100s, so a 0.5 cutout would drop it all.
+    const small = img([100, 110, 30, 0])
+    const scale = preserveAlphaCoverage(small, 0.5)
+    expect(scale).toBeGreaterThan(1)
+    expect(alphaCoverage(small)).toBeCloseTo(0.5, 5)
+  });
+
+  it('leaves an opaque or empty target alone', () => {
+    const small = img([255, 255])
+    expect(preserveAlphaCoverage(small, 1)).toBe(1)
+  });
+
+  it('mints ids a pre-coverage copy can never collide with, and still recognises both', async () => {
+    const { lodTextureId, isLodTextureId, lodSourceTextureId } = await import('../src/utils/lodTextures')
+    expect(lodTextureId('bark', 256)).toBe('bark__lodc256')
+    expect(isLodTextureId('bark__lod256') && isLodTextureId('bark__lodc256')).toBe(true)
+    expect(lodSourceTextureId('bark__lodc256')).toBe('bark')
+  });
+});

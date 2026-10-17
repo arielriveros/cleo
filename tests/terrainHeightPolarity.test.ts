@@ -65,7 +65,7 @@ describe('terrain reads its height slot exactly as a mesh does', () => {
     it('no negation survives in the derivation', () => {
         // Source-level: a property of the code rather than of one configuration.
         const src = readFileSync('src/terrain/terrainLayerStack.ts', 'utf-8').replace(/\/\/[^\n]*/g, '');
-        expect(src, 'slot 0 passes the flag straight through').toContain('deriveSurface(tm, tm.tiling, tm.invertHeight)');
+        expect(src, 'slot 0 passes the flag straight through').toMatch(/deriveSurface\(tm, tm\.tiling, tm\.invertHeight[,)]/);
         expect(src, 'no negation').not.toContain('!tm.invertHeight');
     });
 

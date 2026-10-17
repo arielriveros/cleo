@@ -254,14 +254,30 @@ export function compositeWeights(alphas: ArrayLike<number>, out: { [i: number]: 
 export interface TerrainSurfaceData {
     albedoId: string | null;
     aoId: string | null;
+    /** Per-pixel roughness (PBR `roughnessMap`; an ARM map in several slots reads its own channel). */
+    roughnessId?: string | null;
+    /** Per-pixel metallic (PBR `metallicMap`). */
+    metallicId?: string | null;
     normalId: string | null;
     heightId: string | null;
     invertHeight: boolean;
     color: number[];
     metallic: number;
     roughness: number;
+    /** Dielectric specular level (PBR `reflectance`), 0.5 = the neutral 4% F0. Absent reads 0.5. */
+    reflectance?: number;
     /** UV repeats across the whole landscape. */
     tiling: number;
+    /** Normal-map strength: 1 as authored, 0 flat, above 1 exaggerated. */
+    normalStrength?: number;
+    /** Break up visible tiling, 0 off .. 1 full (see `terrainStack.wgsl` antiTile). */
+    antiTiling?: number;
+}
+
+/** Per-surface look options that live on the landscape material / slot rather than the Material. */
+export interface SurfaceOptions {
+    normalStrength?: number;
+    antiTiling?: number;
 }
 
 /** The structural slice of a `Material` a surface is derived from. */
@@ -275,27 +291,32 @@ export interface SurfaceMaterialLike {
  * Read a surface out of a material of any base shading model. The height map is `displacementMap` and AO
  * `occlusionMap` for every base type — the keys the material editor's slots already write.
  */
-export function deriveSurface(m: SurfaceMaterialLike, tiling: number, invertHeight = false): TerrainSurfaceData {
+export function deriveSurface(m: SurfaceMaterialLike, tiling: number, invertHeight = false,
+                              opts: SurfaceOptions = {}): TerrainSurfaceData {
     const p = m.properties, t = m.textures, bt = m.type as string;
     const heightId = t.get('displacementMap') ?? null;
     const aoId = t.get('occlusionMap') ?? null;
+    // No parallax on terrain: the height map only shapes layer transitions (height blend).
+    const look = { normalStrength: opts.normalStrength ?? 1, antiTiling: opts.antiTiling ?? 0 };
     if (bt === 'basic') {
         return {
             albedoId: t.get('texture') ?? null, aoId, normalId: null, heightId, invertHeight,
-            color: p.get('color') ?? [1, 1, 1], metallic: 0, roughness: 1, tiling,
+            color: p.get('color') ?? [1, 1, 1], metallic: 0, roughness: 1, tiling, ...look,
         };
     }
     if (bt === 'pbr') {
         return {
             albedoId: t.get('baseColorTexture') ?? null, aoId, normalId: t.get('normalMap') ?? null,
+            roughnessId: t.get('roughnessMap') ?? null, metallicId: t.get('metallicMap') ?? null,
             heightId, invertHeight, color: p.get('baseColor') ?? [1, 1, 1],
-            metallic: p.get('metallic') ?? 0, roughness: p.get('roughness') ?? 1, tiling,
+            metallic: p.get('metallic') ?? 0, roughness: p.get('roughness') ?? 1,
+            reflectance: p.get('reflectance') ?? 0.5, tiling, ...look,
         };
     }
     // blinn_phong, and anything unrecognised — the same fallthrough Material.serialize takes.
     return {
         albedoId: t.get('baseTexture') ?? null, aoId, normalId: t.get('normalMap') ?? null,
-        heightId, invertHeight, color: p.get('diffuse') ?? [1, 1, 1], metallic: 0, roughness: 0.7, tiling,
+        heightId, invertHeight, color: p.get('diffuse') ?? [1, 1, 1], metallic: 0, roughness: 0.7, tiling, ...look,
     };
 }
 

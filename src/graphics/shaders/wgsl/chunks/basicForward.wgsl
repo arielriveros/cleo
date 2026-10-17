@@ -1,3 +1,4 @@
+#include "./alphaCutout.wgsl"
 // Unlit forward shading. The GLSL twin is materials/basic.fs.
 //
 // Uses VertexOutput from whichever basic vertex chunk the program included.
@@ -39,9 +40,13 @@ struct BasicMaterial {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // The cutout first, before any other work — a discarded fragment costs nothing downstream.
+    // The cutout first, before any other work — a discarded fragment costs nothing downstream. Its
+    // gradients are taken here, in uniform control flow, for the mip-aware alpha (chunks/alphaCutout).
+    let cutDx = dpdx(in.uv);
+    let cutDy = dpdy(in.uv);
     if (u_material.hasMaskMap != 0 && u_material.alphaCutoff > 0.0) {
-        let mask = textureSample(u_material_maskMap_texture, u_material_maskMap_sampler, in.uv).r;
+        let mask = cutoutAlpha(textureSample(u_material_maskMap_texture, u_material_maskMap_sampler, in.uv).r,
+                               cutDx, cutDy, textureDimensions(u_material_maskMap_texture, 0));
         if (mask < u_material.alphaCutoff) { discard; }
     }
 

@@ -77,7 +77,8 @@ export function defaultMaskResolution(heightResolution: number): number {
 export function materialSlots(tm: TerrainMaterial,
                               slotMask?: (slot: TerrainMaterialSlot) => number | null | undefined): TerrainSlotSource[] {
     const out: TerrainSlotSource[] = [{
-        surface: deriveSurface(tm, tm.tiling, tm.invertHeight),
+        surface: deriveSurface(tm, tm.tiling, tm.invertHeight,
+                               { normalStrength: tm.normalStrength, antiTiling: tm.antiTiling }),
         rule: tm.rule,
         allowFoliage: tm.allowFoliage,
     }];
@@ -85,7 +86,8 @@ export function materialSlots(tm: TerrainMaterial,
         const mask = slotMask?.(s);
         if (mask === null) continue;
         out.push({
-            surface: deriveSurface(s.material, s.tiling, !!s.material.properties.get('invertHeight')),
+            surface: deriveSurface(s.material, s.tiling, !!s.material.properties.get('invertHeight'),
+                                   { normalStrength: s.normalStrength, antiTiling: s.antiTiling }),
             rule: s.rule,
             allowFoliage: s.allowFoliage,
             mask,
@@ -481,18 +483,20 @@ export class TerrainLayerStack {
         if (this._maskId) m.textures.set('u_masks', this._maskId); else m.textures.delete('u_masks');
         if (this._arrays.albedoId) m.textures.set('u_surfAlbedo', this._arrays.albedoId); else m.textures.delete('u_surfAlbedo');
         if (this._arrays.normalId) m.textures.set('u_surfNormal', this._arrays.normalId); else m.textures.delete('u_surfNormal');
+        if (this._arrays.ormId) m.textures.set('u_surfOrm', this._arrays.ormId); else m.textures.delete('u_surfOrm');
 
         const n = MAX_TERRAIN_SURFACES * 4;
         const color = new Float32Array(n), mat = new Float32Array(n), flags = new Float32Array(n);
         const elevation = new Float32Array(n), slope = new Float32Array(n), noise = new Float32Array(n);
-        const blend = new Float32Array(n);
+        const blend = new Float32Array(n), shade = new Float32Array(n);
         for (let i = 0; i < surfaces.length; i++) {
             const s = surfaces[i], o = i * 4, d = s.surface, r = s.rule;
             color[o] = d.color[0] ?? 1; color[o + 1] = d.color[1] ?? 1; color[o + 2] = d.color[2] ?? 1;
             color[o + 3] = d.invertHeight ? 1 : 0;
             mat[o] = d.metallic; mat[o + 1] = d.roughness; mat[o + 2] = d.tiling * tilingScale;
             mat[o + 3] = s.fill ? -2 : s.mask;
-            flags[o] = d.albedoId ? 1 : 0; flags[o + 1] = d.aoId ? 1 : 0;
+            // y = the ORM array holds this surface's own AO / roughness / metallic (any of the three maps).
+            flags[o] = d.albedoId ? 1 : 0; flags[o + 1] = (d.aoId || d.roughnessId || d.metallicId) ? 1 : 0;
             flags[o + 2] = d.normalId ? 1 : 0; flags[o + 3] = d.heightId ? 1 : 0;
             elevation[o] = r.elevation.min; elevation[o + 1] = r.elevation.max;
             elevation[o + 2] = r.elevation.falloff; elevation[o + 3] = r.elevation.enabled ? 1 : 0;
@@ -502,6 +506,8 @@ export class TerrainLayerStack {
             // The seed offsets ruleNoise adds, pre-multiplied here so the shader does not.
             noise[o + 2] = r.noise.seed * 19.19; noise[o + 3] = r.noise.seed * 7.73;
             blend[o] = r.heightBlend; blend[o + 1] = r.opacity;
+            blend[o + 2] = d.normalStrength ?? 1; blend[o + 3] = Math.max(0, Math.min(1, d.antiTiling ?? 0));
+            shade[o] = Math.max(0, Math.min(1, d.reflectance ?? 0.5));
         }
         m.properties.set('u_surfCount', surfaces.length);
         m.properties.set('u_debugSurface', this._debugSurface);
@@ -513,6 +519,7 @@ export class TerrainLayerStack {
         m.properties.set('u_surfSlope', slope);
         m.properties.set('u_surfNoise', noise);
         m.properties.set('u_surfBlend', blend);
+        m.properties.set('u_surfShade', shade);
     }
 
     private _syncMaskTexture(): void {

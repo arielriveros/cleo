@@ -459,7 +459,8 @@ export async function opaqueFraction(dataUrl: string): Promise<number> {
  * albedo; a baked normal map is the separable next step, and until it exists a distant tree lights
  * flatly rather than following the sun.
  */
-export async function bakeModelImpostor(engine: CleoEngine, asset: ModelAsset, materials?: MaterialAsset[]): Promise<ImpostorBake | null> {
+export async function bakeModelImpostor(engine: CleoEngine, asset: ModelAsset, materials?: MaterialAsset[],
+                                        size: number = IMPOSTOR_SIZE): Promise<ImpostorBake | null> {
   restoreEmbeddedTextures(asset.textures);
 
   const root = silently(() => {
@@ -507,7 +508,7 @@ export async function bakeModelImpostor(engine: CleoEngine, asset: ModelAsset, m
   });
 
   await awaitSubtreeTexturesReady(root);
-  const data = await captureClean(engine, framed.scene, IMPOSTOR_SIZE);
+  const data = await captureClean(engine, framed.scene, size);
   if (!data) return null;
 
   // Checked every time, not only when something looks wrong: a card is authored once and then only

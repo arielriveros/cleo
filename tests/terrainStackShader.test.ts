@@ -8,7 +8,7 @@ import { resolveIncludes } from '../tools/shaderIncludes.mjs';
 import { MAX_TERRAIN_SURFACES, SURFACE_EPSILON, RANGE_FALLOFF_MIN } from '../src/terrain/terrainLayers';
 
 // The landscape layer stack's shader, checked the only ways available without a GPU: it must survive
-// naga (WGSL validation + the GLSL the WebGL2 backend runs), bind exactly three array textures however
+// naga (WGSL validation + the GLSL the WebGL2 backend runs), bind exactly four array textures however
 // many surfaces there are, and keep every fetch inside the loop an explicit-gradient one — an implicit
 // derivative below a data-dependent `continue` is a module Dawn rejects outright.
 
@@ -63,13 +63,13 @@ describe('terrain layer stack shader', () => {
         expect(out.fragment).toContain('sampler2DArray');
     });
 
-    it('binds exactly three array textures, whatever the surface count', async () => {
+    it('binds exactly four array textures (masks, albedo, normal+height, ORM), whatever the surface count', async () => {
         const out = await translate();
         const group0 = out.resources.filter((r: any) => r.group === 0);
         const textures = group0.filter((r: any) => r.kind === 'texture');
-        expect(textures.map((r: any) => r.glslName).sort()).toEqual(['u_masks', 'u_surfAlbedo', 'u_surfNormal']);
+        expect(textures.map((r: any) => r.glslName).sort()).toEqual(['u_masks', 'u_surfAlbedo', 'u_surfNormal', 'u_surfOrm']);
         for (const t of textures) expect(t.type).toContain('texture_2d_array');
-        expect(group0.filter((r: any) => r.kind === 'sampler').length).toBe(3);
+        expect(group0.filter((r: any) => r.kind === 'sampler').length).toBe(4);
     });
 
     it('takes derivatives once, above the loop, and only explicit-gradient fetches below it', () => {

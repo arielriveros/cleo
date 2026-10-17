@@ -528,6 +528,17 @@ export default function MaterialEditor(props: {node: ModelNode}) {
             <Section title='Properties'>
               <PropertyTable columns={['40%', '60%']}>
                 <PropertyRow label='Base Color'><ColorInput color={baseColor} onChange={setColor('baseColor', setBaseColor)} /></PropertyRow>
+                {/* The colour MULTIPLIES a base colour texture: a grey tint caps a white texture (snow) at
+                    that grey, which reads as a lighting problem rather than as this setting. */}
+                {material.textures.get('baseColorTexture') && baseColor.toLowerCase() !== '#ffffff' && (
+                  <PropertyRow label=''>
+                    <span className='text-ui-xs text-warning' title='The base colour multiplies the texture'>
+                      Tints the texture —{' '}
+                      <button type='button' className='underline' onClick={() => setColor('baseColor', setBaseColor)([1, 1, 1])}>use white</button>
+                      {' '}to show it as authored.
+                    </span>
+                  </PropertyRow>
+                )}
                 <PropertyRow label='Metallic'><Slider min={0} max={1} step={0.01} value={metallic} onChange={setNum('metallic', setMetallic)} /></PropertyRow>
                 <PropertyRow label='Roughness'><Slider min={0} max={1} step={0.01} value={roughness} onChange={setNum('roughness', setRoughness)} /></PropertyRow>
                 {/* Dielectric specular level. 0.5 is the neutral default and reproduces the fixed 4%
