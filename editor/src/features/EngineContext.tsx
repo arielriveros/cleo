@@ -40,7 +40,8 @@ import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf,
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds, syncSlotMaterialInTerrain, withSyncedSlotMaterial } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
-import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, modelInstanceShape, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE, buildPartAsset, submeshNodeJson, uniqueModelName, type ModelPart } from "../utils/models";
+import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, modelInstanceShape, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE, buildPartAsset, submeshNodeJson, uniqueModelName, lodLevelMaterialLinks, withLevelLinks, type ModelPart } from "../utils/models";
+import { downscaleTextures, levelTextureIds } from "../utils/lodTextures";
 import { detachForeignChildren, reattachForeignChildren } from "../utils/foreignChildren";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, defaultScriptModule, seedScriptFields, scriptKindOfAsset } from "../utils/scripts";
 import { buildScriptGraphCtx, deriveBaseType, resolveScriptVariables, dependentsOf } from "../utils/scriptGraph";
@@ -3759,13 +3760,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // dropped with a warning.
     const lodRefs: ModelLodDef[] = [];
     const lodJsons: any[] = [];
-    for (const lod of asset.lods ?? []) {
-      const levelJson = lodLevelJson(lod, modelsRef.current);
+    for (const [i, lod] of (asset.lods ?? []).entries()) {
+      const raw = lodLevelJson(lod, modelsRef.current);
+      // A level generated before levels kept their material links gets them back here (see withLevelLinks).
+      const levelJson = raw && lod.generated ? withLevelLinks(raw, asset.nodeJson, i + 1) : raw;
       if (!levelJson) {
         Logger.warn(`LOD level of "${asset.name}" references a model that no longer exists — dropped`, 'Editor');
         continue;
       }
-      lodRefs.push(lod);
+      // Carry the relinked copy, so the next save stores the links rather than re-deriving them forever.
+      lodRefs.push(levelJson !== raw ? { ...lod, nodeJson: levelJson } : lod);
       lodJsons.push(levelJson);
     }
 
@@ -4026,7 +4030,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // a second bake would leave the old card on disk and the new one only in memory until reload.
     await deleteTextures([id]);
 
-    const baked = await bakeModelImpostor(engine, asset);
+    const baked = await bakeModelImpostor(engine, asset, materialsRef.current);
     if (!baked) return null;
     await persistTextures([baked.id]);
 
@@ -4372,8 +4376,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         const stepRatio = Math.min(0.99, specs[i].ratio / previousRatio);
         const built = await generateLodLevel(from, level, { ...specs[i], ratio: stepRatio }, {
           downscaleTextures: downscale,
-          // One halving per step, because the source material is the PREVIOUS level's — already halved.
-          textureHalvings: 1,
           decimate: decimateGeometry,
         });
 
@@ -4382,6 +4384,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // inline (no __materialId), so there is nothing to resolve against the library.
         const clone = deepClone(built.nodeJson);
         regenerateIds(clone, new Map());
+        // Exactly what a placement will draw: the level's version of the current library material.
+        resolveMaterialRefs(clone, materialsRef.current);
         clone.name = `${tab.title} LOD${level}`;
         parseLodPreview(runtime.scene, clone);
 
@@ -4884,6 +4888,34 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Save a material tab to the library (capturing a sphere thumbnail) and propagate to references.
   // captureMaterialSphere renders the tab's own scene offscreen, so this reaches a tab that is not on
   // screen. Async only because the thumbnail readback is; its camera and grid restores precede that.
+  /**
+   * Bring every generated LOD level derived from an edited Material up to date.
+   *
+   * A level resolves its material from the library when it is built (`resolveMaterialRefs`, through its
+   * `__lodMaterialId` link), drawing each texture's twin at the level's size when one exists. An edit can
+   * introduce a texture no twin was ever made for, so the twins are made first; then every placed copy and
+   * foliage rule of the affected models is rebuilt, since nothing patches a level in place.
+   */
+  const refreshLodLevelsForMaterial = async (materialId: string, asset: MaterialAsset, exceptTabId?: string) => {
+    const affected = modelsRef.current.filter(m => lodLevelMaterialLinks(m).has(materialId));
+    if (!affected.length) return;
+    const levels = new Set<number>();
+    for (const m of affected) for (const l of lodLevelMaterialLinks(m).get(materialId) ?? []) levels.add(l);
+    for (const level of levels) {
+      try { await downscaleTextures(levelTextureIds(asset.material, level), level); }
+      catch (e) { Logger.warn(`Could not make smaller textures for LOD${level}: ${e}`, 'Editor'); }
+    }
+    withoutDirty(() => {
+      for (const m of affected) {
+        // The model asset did not change, so its hash did not either; forget it or the rebuild is skipped.
+        instantiatedHashRef.current.delete(m.id);
+        syncModelInstances(m.id, m, exceptTabId);
+        syncFoliageRulesForModel(m, exceptTabId);
+      }
+    });
+    eventEmitter.current.emit('TEXTURES_CHANGED');
+  };
+
   const saveMaterialTab = async (tabId: string) => {
     const instance = instanceRef.current;
     const tab = tabsRef.current.find(t => t.id === tabId);
@@ -4897,6 +4929,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (tab.materialId) {
         const asset = buildMaterialAsset(sphere.model.material, tab.title, thumbnail, tab.materialId);
         updateMaterial(tab.materialId, asset);
+        // Eager mirror: the ref only catches up on the next render, and every propagation below resolves
+        // against it — foliage rules and LOD levels were rebuilt from the material as it was BEFORE this
+        // save, so the edit never reached them.
+        materialsRef.current = materialsRef.current.map(m => (m.id === tab.materialId ? asset : m));
         // Propagation edits other scenes and must not mark them dirty: they store the link (__materialId)
         // and resyncScene re-resolves it on open. Dirtying here would keep Save All from ever going clean.
         withoutDirty(() => {
@@ -4907,6 +4943,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           // …and the landscape-material slots that embed a copy of it.
           syncTerrainMaterialSlots(tab.materialId!, asset, tab.id);
         });
+        // …and the generated LOD levels derived from it — after their texture twins exist.
+        void refreshLodLevelsForMaterial(tab.materialId, asset, tab.id);
       } else {
         const asset = buildMaterialAsset(sphere.model.material, tab.title, thumbnail);
         addMaterial(asset); // asset carries a fresh id

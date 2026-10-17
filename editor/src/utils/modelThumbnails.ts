@@ -4,7 +4,7 @@ import { createMaterialPreviewScene } from '../features/demoScene/createMaterial
 import { fitDistance, MATERIAL_SPHERE_RADIUS, previewSphereGeometry, REFERENCE_LANDSCAPE } from '../features/demoScene/previewFraming';
 import { buildTerrainPreviewSubject } from '../features/demoScene/previewTerrainSubject';
 import { terrainPreviewSphere, applyTerrainPreviewShape, TERRAIN_SPHERE_RADIUS } from '../features/demoScene/previewShapes';
-import type { MaterialAsset } from './materials';
+import { resolveMaterialRefs, type MaterialAsset } from './materials';
 import { ModelAsset } from './models';
 import { parseByType, regenerateIds } from './nodeSubtree';
 import { TerrainMaterialAsset, parseTerrainMaterialAsset } from './terrainMaterials';
@@ -459,7 +459,7 @@ export async function opaqueFraction(dataUrl: string): Promise<number> {
  * albedo; a baked normal map is the separable next step, and until it exists a distant tree lights
  * flatly rather than following the sun.
  */
-export async function bakeModelImpostor(engine: CleoEngine, asset: ModelAsset): Promise<ImpostorBake | null> {
+export async function bakeModelImpostor(engine: CleoEngine, asset: ModelAsset, materials?: MaterialAsset[]): Promise<ImpostorBake | null> {
   restoreEmbeddedTextures(asset.textures);
 
   const root = silently(() => {
@@ -468,6 +468,9 @@ export async function bakeModelImpostor(engine: CleoEngine, asset: ModelAsset): 
     const holder = markEditorOwned(new Node('__impostor'));
     const clone = deepClone(asset.nodeJson);
     regenerateIds(clone, new Map());
+    // The card shows the model as it draws NOW: its embedded material is only a fallback, and baking that
+    // verbatim put a stale (or texture-less, once the edit replaced the texture) copy on every distant tree.
+    if (materials) resolveMaterialRefs(clone, materials);
     parseByType(holder, clone);
     return holder.children[0];
   });

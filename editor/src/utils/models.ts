@@ -2,7 +2,7 @@ import { Node, ModelNode, AnimatedModel, Logger, TextureManager, mergeBlocker, m
 import { mat4, quat, vec3 } from 'gl-matrix'
 import { cryptoRandomId } from './ids'
 import { parseByType, stripDebug, collectTextureIds, regenerateIds } from './nodeSubtree'
-import { resolveMaterialRefs, applyMaterialAsset, applyMaterialAssets, serializedVar, getMaterialIdsOf, MATERIAL_ID_VAR, MATERIAL_IDS_VAR, MaterialAsset } from './materials'
+import { resolveMaterialRefs, applyMaterialAsset, applyMaterialAssets, serializedVar, getMaterialIdsOf, MATERIAL_ID_VAR, MATERIAL_IDS_VAR, LOD_MATERIAL_ID_VAR, LOD_MATERIAL_IDS_VAR, LOD_LEVEL_VAR, MaterialAsset } from './materials'
 import { skinnedModelJsonOf as skinnedJson, flattenModelAsset, nodeJsonTrs, modelTransformDelta, carryModelAssetFields } from './modelClips'
 import type { AnimationAsset } from './animationAssets'
 import { applyModelAnimations, modelAnimationIds } from './animationResolve'
@@ -165,6 +165,33 @@ export function generatedLodCount(asset: Pick<ModelAsset, 'lods'>): number {
 }
 
 /**
+ * The Material assets a model's GENERATED levels derive their materials from, with the levels that use
+ * each (`__lodMaterialId(s)` + `__lodLevel`, see lodGenerate.ts). An edit to one of these has to rebuild
+ * the model's placed copies: those levels resolve the material at instantiation, not in place.
+ */
+export function lodLevelMaterialLinks(asset: Pick<ModelAsset, 'lods'>): Map<string, Set<number>> {
+  const out = new Map<string, Set<number>>()
+  const add = (id: unknown, level: number) => {
+    if (typeof id !== 'string' || !id) return
+    let set = out.get(id)
+    if (!set) out.set(id, set = new Set())
+    set.add(level)
+  }
+  const walk = (json: any) => {
+    if (!json || typeof json !== 'object') return
+    const level = Number(serializedVar(json, LOD_LEVEL_VAR))
+    if (level > 0) {
+      add(serializedVar(json, LOD_MATERIAL_ID_VAR), level)
+      const list = serializedVar(json, LOD_MATERIAL_IDS_VAR)
+      if (list) { try { for (const id of JSON.parse(list)) add(id, level) } catch { /* corrupt link */ } }
+    }
+    for (const child of json.children ?? []) walk(child)
+  }
+  for (const lod of asset.lods ?? []) if (lod.nodeJson) walk(lod.nodeJson)
+  return out
+}
+
+/**
  * How many LOD levels deleting model `id` deletes with it: its embedded (generated) levels, plus any
  * old-scheme level assets minted for it (`lodSource`). Hand-picked levels are other models and survive.
  */
@@ -186,11 +213,47 @@ export function lodLevelJson(lod: ModelLodDef, models?: ModelAsset[]): any | nul
 /** Resolved LOD levels, dangling references dropped (with their distances) so indices stay aligned. */
 export function resolvedLods(asset: ModelAsset, models?: ModelAsset[]): { nodeJson: any; distance: number }[] {
   const out: { nodeJson: any; distance: number }[] = []
-  for (const lod of asset.lods ?? []) {
-    const nodeJson = lodLevelJson(lod, models)
+  ;(asset.lods ?? []).forEach((lod, i) => {
+    let nodeJson = lodLevelJson(lod, models)
+    if (nodeJson && lod.generated) nodeJson = withLevelLinks(nodeJson, asset.nodeJson, i + 1)
     if (nodeJson) out.push({ nodeJson, distance: lod.distance })
-  }
+  })
   return out
+}
+
+/**
+ * A generated level made before levels kept their material links (`__lodMaterialId`), given them back:
+ * copied from the matching LOD0 part, found by walking both trees together (a level is LOD0's tree with
+ * its meshes swapped, so the shapes agree). Without them the level draws the inline copy frozen at
+ * generation — which an edit to the material leaves stale, or textureless once the edit replaces the
+ * texture it pointed at. Returns `levelJson` untouched when it already has links or the trees differ.
+ */
+export function withLevelLinks(levelJson: any, lod0Json: any, level: number): any {
+  let linked = false
+  const scan = (j: any): void => { if (!j || linked) return; if (serializedVar(j, LOD_LEVEL_VAR)) linked = true; (j.children ?? []).forEach(scan) }
+  scan(levelJson)
+  if (linked) return levelJson
+  const copy = deepClone(levelJson)
+  const walk = (lvl: any, src: any) => {
+    if (!lvl || !src || lvl.name !== src.name) return
+    if (lvl.model) {
+      const one = serializedVar(src, MATERIAL_ID_VAR)
+      const list = serializedVar(src, MATERIAL_IDS_VAR)
+      const vars = lvl.variables = lvl.variables ?? {}
+      const levelParts = Array.isArray(lvl.model.materials) ? lvl.model.materials.length : 1
+      let ids: unknown[] = []
+      try { ids = list ? JSON.parse(list) : [] } catch { ids = [] }
+      if (Array.isArray(ids) && ids.length > 1 && ids.length === levelParts)
+        vars[LOD_MATERIAL_IDS_VAR] = { type: 'string', value: JSON.stringify(ids) }
+      else if (one || (Array.isArray(ids) && typeof ids[0] === 'string'))
+        vars[LOD_MATERIAL_ID_VAR] = { type: 'string', value: one ?? ids[0] }
+      if (vars[LOD_MATERIAL_ID_VAR] || vars[LOD_MATERIAL_IDS_VAR]) vars[LOD_LEVEL_VAR] = { type: 'string', value: String(level) }
+    }
+    const a = lvl.children ?? [], b = src.children ?? []
+    for (let i = 0; i < Math.min(a.length, b.length); i++) walk(a[i], b[i])
+  }
+  walk(copy, lod0Json)
+  return copy
 }
 
 // A reusable, named model imported from file(s): a serialized node subtree plus its texture ids and a

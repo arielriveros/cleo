@@ -29,6 +29,15 @@ function loadFaces(): Promise<Faces> {
 let envmap: Texture | null = null;
 
 /**
+ * ONE skybox for every preview scene. A `Skybox` uploads its own 2048² cubemap — six faces plus mips,
+ * ~130 MB of GPU memory and a ~250 ms synchronous upload — and nothing ever frees it. Built per preview,
+ * every material / model / landscape-material tab (and "+ New …", which opens one) stacked another copy
+ * until the GPU ran out of memory and the whole machine stalled. Shared like `envmap` above: the preview
+ * scenes only ever draw it, and nothing disposes a SkyboxNode's skybox.
+ */
+let previewSkybox: Skybox | null = null;
+
+/**
  * Give a preview scene the editor's environment cubemap: `scene.environmentMap` drives reflections, and
  * unless `skybox: false` a SkyboxNode draws it as the background. Thumbnail scenes pass `skybox: false`.
  * Resolves once the environment is applied; never rejects — a failed load leaves the scene as-is.
@@ -51,7 +60,8 @@ export async function applyPreviewEnvironment(
       if (opts?.skybox !== false) {
         // Each scene needs its own Skybox: initializeSkybox() is per-node lazy VAO setup, and sharing
         // one instance would re-initialize the same mesh.
-        scene.addNode(new SkyboxNode('__editor__skybox', new Skybox(faces)));
+        if (!previewSkybox) previewSkybox = new Skybox(faces);
+        scene.addNode(new SkyboxNode('__editor__skybox', previewSkybox));
       }
     });
   } catch (e) {

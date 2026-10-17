@@ -10,8 +10,8 @@ vi.mock('../src/utils/textureStore', () => ({ persistTextures: async () => 0 }))
 
 const { generateLodLevel } = await import('../src/utils/lodGenerate')
 const { levelTextureIds, levelMaterialJson, isLodTextureId } = await import('../src/utils/lodTextures')
-const { modelLodLevelCount, generatedLodCount } = await import('../src/utils/models')
-const { MATERIAL_ID_VAR } = await import('../src/utils/materials')
+const { modelLodLevelCount, generatedLodCount, withLevelLinks, resolvedLods } = await import('../src/utils/models')
+const { MATERIAL_ID_VAR, LOD_MATERIAL_ID_VAR, LOD_LEVEL_VAR, resolveMaterialRefs } = await import('../src/utils/materials')
 
 const quad = () => new Geometry(
   [[-1, 0, 0], [1, 0, 0], [1, 2, 0], [-1, 2, 0]],
@@ -63,11 +63,27 @@ describe('generateLodLevel', () => {
     expect(nodeJson.children[0].children[0].position).toEqual(before.children[0].children[0].position)
   })
 
-  it('carries no material-asset link, so instantiation cannot swap the full-size material back', async () => {
-    const { nodeJson } = await generateLodLevel(model(), 1, { ratio: 0.5, distance: 20 },
+  it('links its material as a LEVEL link, so instantiation derives it instead of restoring full size', async () => {
+    const { nodeJson } = await generateLodLevel(model(), 2, { ratio: 0.5, distance: 20 },
       { downscaleTextures: false, decimate: identity })
     const leaf = nodeJson.children[0].children[0]
     expect(leaf.variables?.[MATERIAL_ID_VAR]).toBeUndefined()
+    expect(leaf.variables?.[LOD_MATERIAL_ID_VAR]?.value).toBe('lib-bark')
+    expect(leaf.variables?.[LOD_LEVEL_VAR]?.value).toBe('2')
+  })
+
+  it('resolves a level from the CURRENT library material, reduced for its level', async () => {
+    const { nodeJson } = await generateLodLevel(model(), 2, { ratio: 0.5, distance: 20 },
+      { downscaleTextures: false, decimate: identity })
+    // The library material was edited after the level was made: a new colour texture and a new value.
+    const edited = pbr()
+    edited.textures.set('baseColorTexture', 'pine_v2')
+    edited.properties.set('roughness', 0.25)
+    resolveMaterialRefs(nodeJson, [{ id: 'lib-bark', name: 'Bark', material: edited.serialize(), textureIds: [], thumbnail: '' } as any])
+    const material = nodeJson.children[0].children[0].model.material
+    expect(material.textures.baseColorTexture).toBe('pine_v2') // no twin registered: full size, never blank
+    expect(material.textures.roughnessMap).toBeUndefined()      // level 2 drops it
+    expect(material.roughness ?? material.properties?.roughness).toBe(0.25)
   })
 
   it('keeps only colour, normal and mask from level 2 on', async () => {
@@ -108,5 +124,23 @@ describe('what deleting a model takes with it', () => {
     expect(generatedLodCount(models[0])).toBe(1)
     expect(modelLodLevelCount('tree', models)).toBe(2)
     expect(modelLodLevelCount('bush', models)).toBe(0)
+  })
+})
+
+describe('levels generated before they kept their links', () => {
+  const lod0 = { name: 'tree', children: [{ name: 'leaf', model: { material: {} }, variables: { [MATERIAL_ID_VAR]: { type: 'string', value: 'lib-bark' } } }] }
+  const oldLevel = { name: 'tree', children: [{ name: 'leaf', model: { material: { textures: { base: 'gone' } } } }] }
+
+  it('get their links back from the matching LOD0 part', () => {
+    const relinked = withLevelLinks(oldLevel, lod0, 2)
+    expect(relinked.children[0].variables[LOD_MATERIAL_ID_VAR].value).toBe('lib-bark')
+    expect(relinked.children[0].variables[LOD_LEVEL_VAR].value).toBe('2')
+    expect((oldLevel.children[0] as any).variables).toBeUndefined() // the stored level is not mutated
+  })
+
+  it('are relinked wherever levels are resolved (placements, foliage)', () => {
+    const asset: any = { id: 'tree', nodeJson: lod0, lods: [{ distance: 20, generated: true, nodeJson: oldLevel }] }
+    const [level] = resolvedLods(asset)
+    expect(level.nodeJson.children[0].variables[LOD_LEVEL_VAR].value).toBe('1')
   })
 })

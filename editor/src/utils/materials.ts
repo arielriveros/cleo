@@ -1,5 +1,6 @@
 import { Node, Material, TextureManager, Logger } from 'cleo'
 import { cryptoRandomId } from './ids'
+import { lodLevelMaterial } from './lodTextures'
 
 // Node variable linking a node's mesh material to a shared material asset.
 export const MATERIAL_ID_VAR = '__materialId'
@@ -7,6 +8,18 @@ export const MATERIAL_ID_VAR = '__materialId'
 // A merged, multi-material model links one asset PER SUBMESH, held as a JSON string list because the node
 // variable system has no array type. MATERIAL_ID_VAR must keep mirroring entry [0].
 export const MATERIAL_IDS_VAR = '__materialIds'
+
+/**
+ * A GENERATED LOD level's links to the Material assets its parts were reduced from (see lodGenerate.ts).
+ * Deliberately NOT `__materialId`: a level must never draw the library material as-is (full-size textures,
+ * every slot). `resolveMaterialRefs` resolves these into the level's own version of the CURRENT library
+ * material instead — so editing the material reaches every level, and a level never keeps pointing at a
+ * texture that the edit replaced.
+ */
+export const LOD_MATERIAL_ID_VAR = '__lodMaterialId'
+export const LOD_MATERIAL_IDS_VAR = '__lodMaterialIds'
+/** Which LOD level a generated level's part belongs to (1..n), as a string. */
+export const LOD_LEVEL_VAR = '__lodLevel'
 
 // A reusable, named material saved to the global material library, with a rendered preview thumbnail.
 export type MaterialAsset = {
@@ -293,6 +306,33 @@ export function resolveMaterialRefs(json: any, materials: MaterialAsset[]): void
         if (json.model.materials.length) json.model.material = json.model.materials[0]
       }
     } catch { /* corrupt link: the embedded copies stand */ }
+  }
+
+  // A generated LOD level: the library material, reduced for this level (fewer slots, smaller textures).
+  const level = Number(serializedVar(json, LOD_LEVEL_VAR))
+  if (level > 0 && json.model) {
+    const reduce = (id: string | undefined) => {
+      const m = resolve(id)
+      return m ? lodLevelMaterial(m, level) : undefined
+    }
+    const one = reduce(serializedVar(json, LOD_MATERIAL_ID_VAR))
+    if (one) {
+      json.model.material = one
+      if (Array.isArray(json.model.materials) && json.model.materials.length) json.model.materials[0] = one
+    }
+    const list = serializedVar(json, LOD_MATERIAL_IDS_VAR)
+    if (list && Array.isArray(json.model.materials)) {
+      try {
+        const ids = JSON.parse(list)
+        if (Array.isArray(ids)) {
+          ids.forEach((id: any, i: number) => {
+            const reduced = reduce(typeof id === 'string' ? id : undefined)
+            if (reduced && i < json.model.materials.length) json.model.materials[i] = reduced
+          })
+          if (json.model.materials.length) json.model.material = json.model.materials[0]
+        }
+      } catch { /* corrupt link: the level's own copies stand */ }
+    }
   }
 
   for (const child of json.children ?? []) resolveMaterialRefs(child, materials)

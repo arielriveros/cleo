@@ -222,3 +222,33 @@ export function levelMaterialJson(serialized: any, ids: Map<string, string>, lev
         }
     return material
 }
+
+/** The full-resolution texture a (possibly chained) LOD twin id was made from. */
+export function lodSourceTextureId(id: string): string {
+    return id.replace(/(__lod\d+)+$/, '')
+}
+
+/**
+ * The texture LOD `level` draws in place of `sourceId`: its registered twin at `level` halvings, or the
+ * source itself when no twin exists (never made, or the source is already at the size floor). Falling
+ * back to full size is the safe direction — a missing twin must never draw as an untextured white model.
+ */
+export function lodTwinFor(sourceId: string, level: number): string {
+    const tm = TextureManager.Instance
+    const source = tm.getTexture(sourceId) as { width?: number } | undefined | null
+    const width = source?.width ?? 0
+    if (!width) return sourceId
+    const twin = lodTextureId(sourceId, halveTo(width, level))
+    return tm.getTexture(twin) ? twin : sourceId
+}
+
+/**
+ * A library material reduced for LOD `level`: from level 2 on only {@link DISTANT_LOD_SLOTS} stay, and
+ * every kept texture is swapped for its twin at that level ({@link lodTwinFor}). What a generated level
+ * draws, re-derived from the CURRENT library material each time it is instantiated.
+ */
+export function lodLevelMaterial(serialized: any, level: number): any {
+    const ids = new Map<string, string>()
+    for (const id of levelTextureIds(serialized, level)) ids.set(id, lodTwinFor(id, level))
+    return levelMaterialJson(serialized, ids, level)
+}

@@ -1,7 +1,9 @@
 import { Node, ModelNode, Geometry, AnimatedModel, serializeGeometry } from 'cleo'
 import type { SimplifyBuffers } from './simplify'
-import { MATERIAL_ID_VAR, MATERIAL_IDS_VAR } from './materials'
-import { downscaleTextures, levelMaterialJson, levelTextureIds } from './lodTextures'
+import {
+    MATERIAL_ID_VAR, MATERIAL_IDS_VAR, LOD_MATERIAL_ID_VAR, LOD_MATERIAL_IDS_VAR, LOD_LEVEL_VAR, getMaterialIdsOf,
+} from './materials'
+import { downscaleTextures, levelMaterialJson, levelTextureIds, lodSourceTextureId } from './lodTextures'
 
 // Building one generated LOD level of a model: decimate every sub-mesh, give it an INLINE copy of its
 // material pointing at smaller textures, and hand back the level's serialized subtree.
@@ -10,9 +12,10 @@ import { downscaleTextures, levelMaterialJson, levelTextureIds } from './lodText
 // library asset of its own. So there is nothing to show in the explorer, nothing a level could generate
 // levels from, and nothing left behind when the model is deleted. Two rules follow from that:
 //
-// - The level's materials are its own, inline, and carry NO `__materialId` link: at instantiation
-//   `resolveMaterialRefs` overwrites any linked material from the library, which would put the full-size
-//   textures straight back.
+// - The level's materials are inline, and its link to the library is `__lodMaterialId(s)` + `__lodLevel`,
+//   never `__materialId`: `resolveMaterialRefs` re-derives each level's material from the CURRENT library
+//   material (this level's slots, this level's texture twins), so editing the material reaches every
+//   level. A plain `__materialId` would put the full-size material straight back.
 // - The level is the source subtree with its geometry swapped, not a rebuilt one. The source's root
 //   transform, every intermediate group and every nested part keep their transforms and parents, so a
 //   model moved 5 units up before generating has every level 5 units up too.
@@ -63,14 +66,31 @@ function indexJson(json: any, out = new Map<string, any>()): Map<string, any> {
     return out
 }
 
-/** Remove every material-asset link from a serialized subtree (see the header: inline materials only). */
-export function stripMaterialLinks(json: any): void {
+/**
+ * Remove every plain material-asset link (`__materialId(s)`) from a serialized subtree — a level must never
+ * resolve to the full-size library material. Level links (`__lodMaterialId(s)`) are kept.
+ */
+export function stripMaterialLinks(json: any, deep = true): void {
     if (!json || typeof json !== 'object') return
     if (json.variables) {
         delete json.variables[MATERIAL_ID_VAR]
         delete json.variables[MATERIAL_IDS_VAR]
     }
-    if (Array.isArray(json.children)) for (const c of json.children) stripMaterialLinks(c)
+    if (deep && Array.isArray(json.children)) for (const c of json.children) stripMaterialLinks(c)
+}
+
+/** A part's library material ids, per submesh: its level links when it is itself a level, else its plain links. */
+function levelLinksOf(node: Node): (string | undefined)[] {
+    const list = node.getVariable(LOD_MATERIAL_IDS_VAR)
+    if (typeof list === 'string' && list) {
+        try {
+            const parsed = JSON.parse(list)
+            if (Array.isArray(parsed)) return parsed.map((id: any) => (typeof id === 'string' ? id : undefined))
+        } catch { /* corrupt: fall through */ }
+    }
+    const one = node.getVariable(LOD_MATERIAL_ID_VAR)
+    if (typeof one === 'string' && one) return [one]
+    return getMaterialIdsOf(node)
 }
 
 /**
@@ -88,14 +108,6 @@ export async function generateLodLevel(
     spec: LodLevelSpec,
     options: {
         downscaleTextures: boolean
-        /**
-         * Halvings to apply to THIS level's textures, relative to the materials on `baseRoot`.
-         *
-         * Not the absolute level: when levels cascade, `baseRoot` is the previous level and its materials
-         * already point at downscaled twins, so halving by the absolute level again would shrink 1/8 where
-         * 1/4 was asked for. Defaults to the level for a non-cascaded call.
-         */
-        textureHalvings?: number
         decimate: (buffers: SimplifyBuffers, ratio: number) => Promise<SimplifyBuffers>
     },
 ): Promise<GeneratedLevel> {
@@ -106,14 +118,19 @@ export async function generateLodLevel(
 
     // Smaller twins of every texture this level keeps, made once for the whole level so parts sharing a
     // texture share its twin. From level 2 on only colour, normal and mask survive (DISTANT_LOD_SLOTS).
+    //
+    // Always made from the FULL-SIZE source, `level` halvings deep — never from the previous level's twin,
+    // even though the geometry cascades. That keeps one naming scheme (`<source>__lod<width>`), which is
+    // what lets `resolveMaterialRefs` find a level's twin from the library material alone.
     const keptIds = new Set<string>()
     for (const source of sources)
         for (const material of source.model.materials) for (const id of levelTextureIds(material.serialize(), level)) keptIds.add(id)
-    let ids = new Map<string, string>()
+    const ids = new Map<string, string>()
     let bytesSaved = 0
     if (options.downscaleTextures && keptIds.size) {
-        const result = await downscaleTextures(keptIds, options.textureHalvings ?? level)
-        ids = result.ids
+        const roots = new Set([...keptIds].map(lodSourceTextureId))
+        const result = await downscaleTextures(roots, level)
+        for (const id of keptIds) ids.set(id, result.ids.get(lodSourceTextureId(id)) ?? id)
         bytesSaved = result.bytesSaved
     }
 
@@ -153,6 +170,18 @@ export async function generateLodLevel(
         if (keptRanges.length > 1) { swapped.materials = materials; swapped.submeshes = keptRanges }
         else { delete swapped.materials; delete swapped.submeshes }
         target.model = swapped
+
+        // The library links, carried as LEVEL links (see the header), parallel to the kept materials. The
+        // source is LOD0 (plain links) or, cascading, the previous level (level links already).
+        const linked = levelLinksOf(source)
+        const keptLinks = ranges.length > 1 ? keep.map(x => linked[x.i]) : linked.slice(0, 1)
+        stripMaterialLinks(target, false)
+        if (keptLinks.some(Boolean)) {
+            target.variables = target.variables ?? {}
+            target.variables[LOD_LEVEL_VAR] = { type: 'string', value: String(level) }
+            if (keptLinks.length > 1) target.variables[LOD_MATERIAL_IDS_VAR] = { type: 'string', value: JSON.stringify(keptLinks) }
+            else if (keptLinks[0]) target.variables[LOD_MATERIAL_ID_VAR] = { type: 'string', value: keptLinks[0] }
+        }
         triangles += Math.floor(reduced.indices.length / 3)
     }
 

@@ -1,7 +1,7 @@
 import { Scene, Node, CameraNode, isInlineTilesetId } from 'cleo'
 import { getMaterialIdsOf, applyMaterialAsset, unlinkMaterialAt, MaterialAsset } from './materials'
 import { getScreenMaterialIds, setScreenMaterialIds, applyScreenMaterials } from './screenMaterials'
-import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig, assetSockets, applyModelTransformDelta, readModelBaseTrs, modelAssetHasLodBehavior, modelInstanceShape } from './models'
+import { MODEL_ID_VAR, instantiateModelAsset, assetIkRig, assetSockets, applyModelTransformDelta, readModelBaseTrs, modelAssetHasLodBehavior, modelInstanceShape, lodLevelMaterialLinks } from './models'
 import { detachForeignChildren, reattachForeignChildren, type ShapeNode } from './foreignChildren'
 import { TEMPLATE_ID_VAR, instantiateTemplate } from './templates'
 import { applyOverrides } from './templateOverrides'
@@ -174,7 +174,13 @@ export function resyncScene(
     // instance belongs to the pass above: rebuilding it from the model asset would replace the template's
     // subtree with a bare model and drop `__templateId` along with it.
     let live = node
-    if (!node.getVariable(TEMPLATE_ID_VAR) && changedSince('model', modelId, hashOf(asset))) {
+    // A generated LOD level derives its material from the library when it is BUILT, so an edit to one of
+    // those materials made while this scene was closed needs the copy rebuilt, just like a model edit.
+    const levelMaterialChanged = [...lodLevelMaterialLinks(asset).keys()].some(id => {
+      const material = materialById.get(id)
+      return !!material && changedSince('material', id, hashOf(material))
+    })
+    if (!node.getVariable(TEMPLATE_ID_VAR) && (changedSince('model', modelId, hashOf(asset)) || levelMaterialChanged)) {
       live = reinstantiate(scene, node, maps,
         parent => instantiateModelAsset(asset, parent, libs.materials, libs.models, libs.animations),
         // The rebuild restores this copy's own transform, so a change the MODEL made to its root transform
