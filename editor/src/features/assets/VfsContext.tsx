@@ -9,6 +9,7 @@ import {
 } from '../../utils/vfs'
 import { AssetDeps, sizeOfAsset } from './assetKinds'
 import { reconcileTextureAssets } from '../../utils/textureAssets'
+import { isLodTextureId } from '../../utils/lodTextures'
 import type { LiveTexture } from '../../utils/textureAssets'
 import { reconcileSoundAssets } from '../../utils/soundSamples'
 import type { LiveSound } from '../../utils/soundSamples'
@@ -20,7 +21,7 @@ import type { LiveSound } from '../../utils/soundSamples'
 // Built-in textures the explorer must never show. `__packed__` ids are engine-derived channel packs,
 // rebuilt from the source maps on demand, so they are not assets and have no bytes to store.
 function isUserTexture(id: string): boolean {
-  return !(id.includes('__editor__') || id.includes('__debug__') || isDerivedTextureId(id) || id === 'Null')
+  return !(id.includes('__editor__') || id.includes('__debug__') || isDerivedTextureId(id) || isLodTextureId(id) || id === 'Null')
 }
 
 type VfsContextValue = {
@@ -39,6 +40,13 @@ type VfsContextValue = {
   folderKindsRef: React.MutableRefObject<Map<string, AssetKind>>
   /** The folder the user is browsing — where assets created outside the explorer land. */
   landingFolderRef: React.MutableRefObject<string>
+  /**
+   * Reads the folder the explorer is SHOWING, straight from the file manager, while it is mounted. The
+   * landing ref is only a mirror fed by `set-path`, which SVAR does not fire when it remounts at `/`,
+   * renames/moves/deletes the open folder, or switches split-view panels — so it can name a folder the
+   * user is no longer in.
+   */
+  browsedFolderRef: React.MutableRefObject<(() => string | null) | null>
   /** Everything the per-kind adapters need, behind a ref so event handlers can register once. */
   depsRef: React.MutableRefObject<AssetDeps>
   /** True once the index and every IndexedDB library have loaded: the file manager may now mount. */
@@ -161,7 +169,11 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   }, [assetsLoaded, audioPreloaded, isSceneReady, soundIds, audioSources, soundSamples, addAudioSource, addSoundSample])
 
   const libs: LibSnapshot = useMemo(
-    () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, scenes: sceneList, images, textures, audioSources, soundSamples, textureIds }),
+    // LOD twins are left out of what the explorer indexes — including the records minted for them before
+    // they were hidden, which the reconcile then prunes from the tree (the records themselves stay).
+    () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, scenes: sceneList,
+      images: images.filter(i => !isLodTextureId(i.id)), textures: textures.filter(t => !isLodTextureId(t.id)),
+      audioSources, soundSamples, textureIds }),
     [materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, sceneList, images, textures, audioSources, soundSamples, textureIds],
   )
 
@@ -250,6 +262,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   }
 
   const landingFolderRef = useRef<string>('/')
+  const browsedFolderRef = useRef<(() => string | null) | null>(null)
 
   // Initial read; on a first run this stays EMPTY_VFS and the reconcile below lands every existing asset
   // at the root. Everything off disk goes through repairVfs first: a stored index with a missing ancestor
@@ -282,8 +295,11 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!vfsLoaded) return
     setVfs(prev => {
+      // The live folder when the explorer can say; else the mirror — and never a folder that is gone.
+      const wanted = browsedFolderRef.current?.() ?? landingFolderRef.current
+      const landingFolder = wanted === '/' || prev.folders.includes(wanted) ? wanted : '/'
       const { next, changed } = reconcileVfs(prev, libs, {
-        landingFolder: landingFolderRef.current,
+        landingFolder,
         prune: assetsLoaded && librariesPopulated,
         // Textures have no library to look "populated"; preload settling is the equivalent signal.
         // `isSceneReady` on top of it: restoring the initial scene registers more textures.
@@ -346,7 +362,7 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   }, [vfs.entries, syncScriptPaths])
 
   const value: VfsContextValue = {
-    vfs, setVfs, libs, pathIndex, pathIndexRef, folderKindsRef, landingFolderRef, depsRef, ready,
+    vfs, setVfs, libs, pathIndex, pathIndexRef, folderKindsRef, landingFolderRef, browsedFolderRef, depsRef, ready,
   }
 
   return <VfsContext.Provider value={value}>{children}</VfsContext.Provider>

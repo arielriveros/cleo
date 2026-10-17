@@ -143,15 +143,34 @@ export function ownSkinnedModelNodeOf(node: Node | null | undefined): ModelNode 
 }
 
 /**
- * One extra LOD level of a model asset: a **reference** to another model asset, plus the camera distance
- * at which it takes over.
+ * One extra LOD level of a model asset, plus the camera distance at which it takes over. Either:
+ * - GENERATED (`generated: true`): the level's own subtree, embedded here — decimated geometry with an
+ *   inline material on smaller textures, no library asset behind it (see utils/lodGenerate.ts). Its root
+ *   transform always mirrors the model's (saveModelTab keeps them equal).
+ * - HAND-PICKED (`modelId`): a reference to another model asset, rendered at this level.
  */
 export type ModelLodDef = {
   distance: number
-  /** The model asset rendered at this level. */
+  /** Hand-picked level: the model asset rendered at this level. */
   modelId?: string
-  /** Legacy: an embedded copy of the level's subtree. Still read; never written. */
+  /** Generated level: the embedded subtree. (Also how levels were stored before references existed.) */
   nodeJson?: any
+  /** Set on a level LOD generation produced — replaced, never kept, by the next generate. */
+  generated?: true
+}
+
+/** The model asset's generated levels — the ones it owns and deletes with itself. */
+export function generatedLodCount(asset: Pick<ModelAsset, 'lods'>): number {
+  return (asset.lods ?? []).filter(l => l.generated || (!l.modelId && l.nodeJson)).length
+}
+
+/**
+ * How many LOD levels deleting model `id` deletes with it: its embedded (generated) levels, plus any
+ * old-scheme level assets minted for it (`lodSource`). Hand-picked levels are other models and survive.
+ */
+export function modelLodLevelCount(id: string, models: readonly ModelAsset[]): number {
+  const asset = models.find(m => m.id === id)
+  return (asset ? generatedLodCount(asset) : 0) + models.filter(m => m.lodSource?.modelId === id).length
 }
 
 /**
@@ -205,11 +224,10 @@ export type ModelAsset = {
    */
   rigId?: string
   /**
-   * Present only on a GENERATED LOD level: which model it was decimated from, and which level it is.
-   *
-   * Provenance, not a reference — `lods` on the source is what actually wires the levels together. This
-   * exists so regenerating a model's LODs can UPDATE the assets it minted last time instead of adding a
-   * second set on every press, which would fill the library with orphans.
+   * LEGACY — present only on a LOD level generated before levels were embedded: which model it was
+   * decimated from, and which level it is. Generated levels now live inside their source (`lods`), so
+   * nothing writes this any more; it is read so the source's next generate/save, and its deletion, can
+   * clear these assets out of the library.
    */
   lodSource?: { modelId: string; level: number }
 }

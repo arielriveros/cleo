@@ -103,6 +103,10 @@ export default function GenerateLodsModal(props: GenerateLodsModalProps) {
                 <div className='pt-2 border-t border-control'>
                     <Toggle label='Halve texture resolution per level' checked={downscale} onChange={setDownscale}
                             title={downscale ? DOWNSCALE_ON_HINT : DOWNSCALE_OFF_HINT} />
+                    <p className='text-ui-sm text-muted mt-1'>
+                        Levels become part of this model, not separate assets. From LOD2 on, only the colour,
+                        normal and alpha-mask textures are kept.
+                    </p>
                 </div>
 
                 {outOfOrder && (

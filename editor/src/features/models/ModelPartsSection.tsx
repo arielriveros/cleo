@@ -5,7 +5,7 @@ import { useVfs } from '../assets/VfsContext'
 import Collapsable from '../../components/Collapsable'
 import { Button, Hint, cn } from '../../components/ui'
 import { getMaterialIdsOf } from '../../utils/materials'
-import { dirOf, indexByAsset } from '../../utils/vfs'
+import { applyMoveOne, baseOf, dirOf, indexByAsset, uniquePath } from '../../utils/vfs'
 import type { ModelPart } from '../../utils/models'
 
 // The model tab's Parts: every mesh in the model, and every material sub-mesh of a merged mesh, each of
@@ -19,9 +19,27 @@ const tris = (n: number) => `${Math.floor(n / 3).toLocaleString()} tris`
 
 export default function ModelPartsSection() {
   const { activeTab, modelSession, saveModelPart, editorScene, materials, eventEmitter } = useCleoEngine()
-  const { vfs, landingFolderRef } = useVfs()
+  const { vfs, setVfs } = useVfs()
   const [version, setVersion] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
+  // A saved part belongs beside the model it came from. It is MOVED there once the reconciler has filed it
+  // (in the folder being browsed) — never by repointing the shared landing folder, which used to stay
+  // pointed here and send every later import into this model's folder.
+  const [placement, setPlacement] = useState<{ assetId: string; folder: string } | null>(null)
+  useEffect(() => {
+    if (!placement) return
+    const entry = indexByAsset(vfs).get(placement.assetId)
+    if (!entry) return // not filed yet; this runs again when it is
+    setPlacement(null)
+    if (dirOf(entry.path) === placement.folder) return
+    setVfs(prev => {
+      const taken = new Set<string>([...prev.entries.map(e => e.path), ...prev.folders])
+      const dot = baseOf(entry.path).lastIndexOf('.')
+      const name = baseOf(entry.path)
+      const target = uniquePath(taken, placement.folder, dot > 0 ? name.slice(0, dot) : name, dot > 0 ? name.slice(dot) : '')
+      return applyMoveOne(prev, entry.path, target)
+    })
+  }, [placement, vfs, setVfs])
 
   useEffect(() => {
     const bump = () => setVersion(v => v + 1)
@@ -62,11 +80,12 @@ export default function ModelPartsSection() {
   const meshRows = rows.filter(r => r.part.submesh === undefined)
 
   const run = async (row: Row, mode: 'copy' | 'extract') => {
-    // New assets land in the folder being browsed; put this one beside the model it came from instead.
     const source = activeTab.modelId ? indexByAsset(vfs).get(activeTab.modelId) : undefined
-    if (source) landingFolderRef.current = dirOf(source.path)
     setBusy(row.key)
-    try { await saveModelPart(row.part, mode) } finally { setBusy(null) }
+    try {
+      const id = await saveModelPart(row.part, mode)
+      if (id && source) setPlacement({ assetId: id, folder: dirOf(source.path) })
+    } finally { setBusy(null) }
   }
 
   // Extracting must leave something behind: the last mesh, or a merged mesh's last material, cannot go.

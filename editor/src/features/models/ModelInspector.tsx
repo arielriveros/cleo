@@ -11,7 +11,7 @@ import { modelAssetTextureIds, modelAssetDiameter } from '../../utils/models'
 const GLOBAL_FOLIAGE_CULL = 65
 
 const FIELDS_HINT = 'A field blends this model’s clips by 1D or 2D parameters. Use one as a state in the animation graph instead of a single clip.'
-const LOD_HINT = 'Each level references another model from the library and takes over at its distance — editing that model updates every level using it. Only LOD0 is edited here; selecting a level just previews it.'
+const LOD_HINT = 'Each level takes over at its distance. Generated levels are part of this model (deleted with it, moved with it); a level added from another model updates when that model is edited. Only LOD0 is edited here; selecting a level just previews it.'
 
 /** Triangles in a serialized model subtree, for the generate dialog's before/after figures. */
 function countTriangles(nodeJson: any): number {
@@ -39,14 +39,22 @@ export default function ModelInspector() {
   const modelRigId = models.find(m => m.id === activeTab.modelId)?.rigId
   const fields = modelRigId ? animationFields.filter(f => f.rigId === modelRigId) : []
 
-  // A model may not be its own LOD level, nor appear twice.
+  // A model may not be its own LOD level, nor appear twice. Nor may a level of another model (old-scheme
+  // generated levels) or a model that has levels of its own: a level renders one subtree, never a chain.
   const candidates = models.filter(m =>
-    m.id !== activeTab.modelId && !modelSession.lodRefs.some(l => l.modelId === m.id))
-  const nameOf = (modelId?: string) => modelId ? (models.find(m => m.id === modelId)?.name ?? 'missing model') : 'embedded (legacy)'
+    m.id !== activeTab.modelId && !modelSession.lodRefs.some(l => l.modelId === m.id)
+    && !m.lodSource && !(m.lods?.length))
+  const levelLabel = (i: number) => {
+    const ref = modelSession.lodRefs[i - 1]
+    if (ref?.modelId) return models.find(m => m.id === ref.modelId)?.name ?? 'missing model'
+    return 'Generated'
+  }
 
   // Read off the SAVED asset rather than the live tab scene: the modal only needs figures to quote, and
   // the asset is what generation will actually reduce.
   const asset = models.find(m => m.id === activeTab.modelId)
+  // A level the old scheme minted as its own asset: it is a LEVEL, so it cannot have levels of its own.
+  const isLevel = !!asset?.lodSource
   const sourceTriangles = countTriangles(asset?.nodeJson)
   // The ladder is derived from the model's own size, and this is the number that makes it so. It used
   // to be a hardcoded 2, which gave EVERY model bands at 16/32/64 m — a 25 m oak dropped to half
@@ -139,8 +147,9 @@ export default function ModelInspector() {
                     <>
                       <div className='flex items-center justify-between'>
                         <span className={label}>Model</span>
-                        <span className='text-ui-sm text-muted truncate max-w-[55%]' title={nameOf(modelSession.lodRefs[i - 1]?.modelId)}>
-                          {nameOf(modelSession.lodRefs[i - 1]?.modelId)}
+                        <span className='text-ui-sm text-muted truncate max-w-[55%]'
+                          title={modelSession.lodRefs[i - 1]?.modelId ? 'Another model, used as this level' : 'Generated from this model; part of it'}>
+                          {levelLabel(i)}
                         </span>
                       </div>
                       <Field label='From distance' className='my-0' labelClassName='w-auto'>
@@ -162,8 +171,10 @@ export default function ModelInspector() {
               ))}
               <Button variant='primary'
                 className='w-full font-semibold disabled:opacity-40'
-                disabled={sourceTriangles === 0}
-                title={sourceTriangles === 0
+                disabled={sourceTriangles === 0 || isLevel}
+                title={isLevel
+                  ? 'This model is a LOD level of another model; only the original can generate levels'
+                  : sourceTriangles === 0
                   ? 'This model has no geometry to reduce'
                   : 'Decimate this model into reduced levels, with half-resolution textures'}
                 onClick={() => setGenerating(true)}>

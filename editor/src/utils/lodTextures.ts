@@ -28,6 +28,15 @@ export function lodTextureId(sourceId: string, width: number): string {
     return `${sourceId}__lod${width}`
 }
 
+/**
+ * True for a LOD level's downscaled twin. Those belong to the model whose generated levels draw them —
+ * stored, shipped and preloaded like any texture, but never an asset of their own: the explorer hides
+ * them and deleting the model deletes them.
+ */
+export function isLodTextureId(id: string | null | undefined): boolean {
+    return !!id && /__lod\d+$/.test(id)
+}
+
 /** Half of `n`, floored at {@link MIN_LOD_TEXTURE_SIZE}; stays power-of-two when the source was. */
 export function halveTo(n: number, level: number): number {
     let out = n
@@ -169,4 +178,47 @@ export function materialAssetWithTextures(asset: MaterialAsset, ids: Map<string,
     // serialize(), and what needs preserving here is the ALREADY-serialized shape with its slots
     // repointed. `textureIds` is recollected from the repointed map, never copied from the source.
     return { id: cryptoRandomId(), name, material, textureIds, thumbnail: asset.thumbnail }
+}
+
+
+/**
+ * Serialized texture slots a level FROM 2 ON still draws: the colour, the normal map, and the alpha mask.
+ *
+ * The rest — metallic/roughness/occlusion, emissive, specular, reflectivity, ramp, displacement — is
+ * detail nobody resolves at that distance, and each one is a texture fetch and a texture upload. The mask
+ * stays because it is not detail: a leaf card without its cutout draws as a solid quad.
+ * Keys are the SERIALIZED names (`Material.serialize`), which differ per shading model.
+ */
+export const DISTANT_LOD_SLOTS: ReadonlySet<string> = new Set([
+    'texture', 'baseColorTexture', 'base',   // basic / pbr / blinn_phong + cel colour
+    'normalMap', 'normal',                    // pbr / blinn_phong + cel normal
+    'mask',                                   // alpha cutout, every model
+])
+
+/** The texture ids a level keeps from one serialized material — every slot at level 1, fewer beyond it. */
+export function levelTextureIds(serialized: any, level: number): string[] {
+    const out: string[] = []
+    const textures = serialized?.textures
+    if (!textures || typeof textures !== 'object') return out
+    for (const [slot, id] of Object.entries(textures))
+        if (typeof id === 'string' && id && (level < 2 || DISTANT_LOD_SLOTS.has(slot)) && !out.includes(id)) out.push(id)
+    return out
+}
+
+/**
+ * A level's INLINE copy of a serialized material: every kept slot repointed at its downscaled twin in `ids`,
+ * and — from level 2 on — every slot outside {@link DISTANT_LOD_SLOTS} removed. Scalar properties are left
+ * alone, so a dropped roughness map falls back to the material's own roughness value, not to a default.
+ */
+export function levelMaterialJson(serialized: any, ids: Map<string, string>, level: number): any {
+    const material = deepClone(serialized)
+    const textures = material?.textures
+    if (textures && typeof textures === 'object')
+        for (const slot of Object.keys(textures)) {
+            const current = textures[slot]
+            if (typeof current !== 'string' || !current) continue
+            if (level >= 2 && !DISTANT_LOD_SLOTS.has(slot)) { delete textures[slot]; continue }
+            textures[slot] = ids.get(current) ?? current
+        }
+    return material
 }

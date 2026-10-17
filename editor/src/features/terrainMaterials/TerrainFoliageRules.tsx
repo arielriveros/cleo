@@ -14,6 +14,8 @@ import { toast } from '../toasts/toastStore'
 // landscape-material editor and the landscape's own Layers panel. Edits `material` IN PLACE and calls
 // `onChange` — foliage rules are not part of the slot undo (their prototypes are rebuilt on change).
 
+/** Area (units²) the density field is shown per: a 10 × 10 block. */
+const DENSITY_BLOCK = 100
 /** Terrain side length the density estimate is quoted against (matches the Landscape panel's default). */
 const ESTIMATE_SIZE = 200
 
@@ -193,8 +195,11 @@ export default function TerrainFoliageRules({ material, onChange }: { material: 
                   <Button variant='remove' size='sm' className='px-1' onClick={() => removeRule(i)} title='Remove'>✕</Button>
                 </div>
                 <div className='flex items-center justify-between'>
-                  <span className={label} title='Instances per square metre — the same unit for the brush and for whole-terrain generation.'>Density /m²</span>
-                  <NumberInput step={0.01} min={0} className={num} value={r.density ?? DEFAULT_FOLIAGE_DENSITY.mesh} onChange={v => patchRule(i, { density: Math.max(0, v) })} />
+                  {/* Shown per 10 × 10 block so sparse props read as whole numbers (5 trees, not 0.05); the rule
+                      and the engine keep instances per unit², so this is display only — no migration. */}
+                  <span className={label} title='Elements per 10 × 10 area (100 units²) — the same for the brush and for whole-terrain generation.'>Density / 10×10</span>
+                  <NumberInput step={0.5} min={0} className={num} value={+((r.density ?? DEFAULT_FOLIAGE_DENSITY.mesh) * DENSITY_BLOCK).toFixed(3)}
+                    onChange={v => patchRule(i, { density: Math.max(0, v) / DENSITY_BLOCK })} />
                 </div>
                 {/* Without this estimate a plausible-looking number silently clips at MAX_INSTANCES. */}
                 <div className={cn('text-ui-xs', estimateFor(r) > MAX_INSTANCES ? 'text-danger-fg' : 'text-muted')}>

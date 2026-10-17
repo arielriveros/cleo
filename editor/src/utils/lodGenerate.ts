@@ -1,18 +1,21 @@
-import { Node, ModelNode, Model, Geometry, AnimatedModel } from 'cleo'
+import { Node, ModelNode, Geometry, AnimatedModel, serializeGeometry } from 'cleo'
 import type { SimplifyBuffers } from './simplify'
-import { buildModelAsset, flattenModelAsset, type ModelAsset } from './models'
-import { getMaterialIdsOf, applyMaterialAssets, type MaterialAsset } from './materials'
-import { downscaleTextures, materialAssetWithTextures } from './lodTextures'
+import { MATERIAL_ID_VAR, MATERIAL_IDS_VAR } from './materials'
+import { downscaleTextures, levelMaterialJson, levelTextureIds } from './lodTextures'
 
-// Building one generated LOD level of a model: decimate every sub-mesh, point it at half-resolution
-// copies of its textures, and hand back a ModelAsset ready for the library.
+// Building one generated LOD level of a model: decimate every sub-mesh, give it an INLINE copy of its
+// material pointing at smaller textures, and hand back the level's serialized subtree.
 //
-// A level is a REFERENCE to its own model asset (`ModelLodDef.modelId`), not embedded geometry, so this
-// mints a first-class library asset. Two rules that come with that: the generated asset must carry no
-// `lods`/`cullDistance` of its own (the viewport refuses to nest LOD-bearing assets inside a model being
-// edited), and it needs its OWN materials — at instantiation `resolveMaterialRefs` overwrites a
-// subtree's embedded material from the library via `__materialId`, so a level sharing the source's
-// material ids would silently draw at full texture resolution.
+// A generated level is EMBEDDED in its source model (`ModelLodDef.nodeJson`, `generated: true`), never a
+// library asset of its own. So there is nothing to show in the explorer, nothing a level could generate
+// levels from, and nothing left behind when the model is deleted. Two rules follow from that:
+//
+// - The level's materials are its own, inline, and carry NO `__materialId` link: at instantiation
+//   `resolveMaterialRefs` overwrites any linked material from the library, which would put the full-size
+//   textures straight back.
+// - The level is the source subtree with its geometry swapped, not a rebuilt one. The source's root
+//   transform, every intermediate group and every nested part keep their transforms and parents, so a
+//   model moved 5 units up before generating has every level 5 units up too.
 
 /** What the user asked for, per level. */
 export interface LodLevelSpec {
@@ -23,8 +26,8 @@ export interface LodLevelSpec {
 }
 
 export interface GeneratedLevel {
-    asset: ModelAsset
-    materials: MaterialAsset[]
+    /** The level's subtree, ready to embed as `ModelLodDef.nodeJson`. */
+    nodeJson: any
     sourceTriangles: number
     triangles: number
     bytesSaved: number
@@ -52,125 +55,107 @@ export function subtreeTriangles(root: Node): number {
     return modelNodes(root).reduce((n, m) => n + Math.floor(m.model.geometry.indices.length / 3), 0)
 }
 
+/** Serialized node by id, anywhere in a subtree. */
+function indexJson(json: any, out = new Map<string, any>()): Map<string, any> {
+    if (!json || typeof json !== 'object') return out
+    if (typeof json.id === 'string') out.set(json.id, json)
+    if (Array.isArray(json.children)) for (const c of json.children) indexJson(c, out)
+    return out
+}
+
+/** Remove every material-asset link from a serialized subtree (see the header: inline materials only). */
+export function stripMaterialLinks(json: any): void {
+    if (!json || typeof json !== 'object') return
+    if (json.variables) {
+        delete json.variables[MATERIAL_ID_VAR]
+        delete json.variables[MATERIAL_IDS_VAR]
+    }
+    if (Array.isArray(json.children)) for (const c of json.children) stripMaterialLinks(c)
+}
+
 /**
  * Build one LOD level from a live model subtree.
  *
- * `decimate` is injected rather than imported so the caller decides whether it runs in the project
- * worker or inline — the algorithm itself is deliberately free of both.
+ * `baseRoot` is LOD0, or the previous level when levels cascade. `decimate` is injected rather than
+ * imported so the caller decides whether it runs in the project worker or inline.
  *
  * Skinned models are refused by the caller, not here: decimating one means rebuilding four joint
- * influences per vertex and capping them, and a bad collapse tears the silhouette at a joint. The model
- * editor already refuses LOD authoring for skinned assets, so this inherits that rather than widening it.
+ * influences per vertex and capping them, and a bad collapse tears the silhouette at a joint.
  */
 export async function generateLodLevel(
     baseRoot: Node,
     level: number,
     spec: LodLevelSpec,
     options: {
-        modelName: string
-        sourceModelId: string
-        materials: MaterialAsset[]
         downscaleTextures: boolean
         /**
          * Halvings to apply to THIS level's textures, relative to the materials on `baseRoot`.
          *
-         * Not the absolute level: when levels cascade, `baseRoot` is the previous level and its
-         * materials already point at downscaled twins, so halving by the absolute level again would
-         * shrink 1/8 where 1/4 was asked for. Defaults to the level for a non-cascaded call.
+         * Not the absolute level: when levels cascade, `baseRoot` is the previous level and its materials
+         * already point at downscaled twins, so halving by the absolute level again would shrink 1/8 where
+         * 1/4 was asked for. Defaults to the level for a non-cascaded call.
          */
         textureHalvings?: number
         decimate: (buffers: SimplifyBuffers, ratio: number) => Promise<SimplifyBuffers>
-        existingId?: string
     },
 ): Promise<GeneratedLevel> {
+    // The level starts as an exact copy of the source subtree — hierarchy, names, transforms, variables.
+    const nodeJson = await baseRoot.serialize()
+    const byId = indexJson(nodeJson)
     const sources = modelNodes(baseRoot)
-    const holder = new Node(`${options.modelName} LOD${level}`)
-    holder.setPosition([0, 0, 0])
 
-    // One derived material per SOURCE material, shared by every part that used it — two sub-meshes on
-    // one material must not end up on two copies of it.
-    const derivedMaterials = new Map<string, MaterialAsset>()
-    const materialIds: string[] = []
+    // Smaller twins of every texture this level keeps, made once for the whole level so parts sharing a
+    // texture share its twin. From level 2 on only colour, normal and mask survive (DISTANT_LOD_SLOTS).
+    const keptIds = new Set<string>()
+    for (const source of sources)
+        for (const material of source.model.materials) for (const id of levelTextureIds(material.serialize(), level)) keptIds.add(id)
+    let ids = new Map<string, string>()
     let bytesSaved = 0
-    let triangles = 0
+    if (options.downscaleTextures && keptIds.size) {
+        const result = await downscaleTextures(keptIds, options.textureHalvings ?? level)
+        ids = result.ids
+        bytesSaved = result.bytesSaved
+    }
 
+    let triangles = 0
     for (const source of sources) {
+        const target = byId.get(source.id)
+        if (!target) continue // not serialized (editor-owned): nothing to replace
         const model = source.model
         const geometry = model.geometry
         const submeshes = model.hasSubmeshes ? model.submeshes.map(s => ({ start: s.start, count: s.count })) : undefined
         const reduced = await options.decimate(buffersOf(geometry, submeshes), spec.ratio)
 
         // `calculateTangents: false` — the decimator carries the authored tangent frame through, so the
-        // attribute set is stable by construction. Recomputing here would need full-length normals AND
-        // uvs already in hand and would smooth the frame the source was authored with.
+        // attribute set is stable by construction.
         const reducedGeometry = new Geometry(
             reduced.positions, reduced.normals, reduced.uvs,
             reduced.tangents, reduced.bitangents, reduced.indices, false,
         )
 
-        // A range that decimated to nothing must lose its MATERIAL too: a Model whose submesh and
-        // material counts disagree silently drops the whole submesh list and draws everything with
-        // materials[0].
-        const sourceMatIds = getMaterialIdsOf(source)
+        // A range that decimated to nothing must lose its MATERIAL too: a Model whose submesh and material
+        // counts disagree silently drops the whole submesh list and draws everything with materials[0].
         const ranges = reduced.submeshes ?? []
         const keep = ranges.map((r, i) => ({ r, i })).filter(x => x.r.count > 0)
-        const usedMatIds = ranges.length > 1 ? keep.map(x => sourceMatIds[x.i]) : sourceMatIds.slice(0, 1)
+        const sourceMaterials = ranges.length > 1 ? keep.map(x => model.materials[x.i]) : [model.materials[0]]
+        const fallback = model.materials[0]
+        const materials = sourceMaterials.map(m => levelMaterialJson((m ?? fallback).serialize(), ids, level))
 
-        const levelMaterials: (MaterialAsset | undefined)[] = []
-        for (const matId of usedMatIds) {
-            if (!matId) { levelMaterials.push(undefined); continue }
-            let derived = derivedMaterials.get(matId)
-            if (!derived) {
-                const sourceAsset = options.materials.find(m => m.id === matId)
-                if (!sourceAsset) { levelMaterials.push(undefined); continue }
-                let ids = new Map<string, string>()
-                if (options.downscaleTextures) {
-                    const result = await downscaleTextures(sourceAsset.textureIds ?? [], options.textureHalvings ?? level)
-                    ids = result.ids
-                    bytesSaved += result.bytesSaved
-                }
-                derived = materialAssetWithTextures(sourceAsset, ids, `${sourceAsset.name} LOD${level}`)
-                derivedMaterials.set(matId, derived)
-            }
-            levelMaterials.push(derived)
-            if (!materialIds.includes(derived.id)) materialIds.push(derived.id)
-        }
-
-        // Rebuild the ranges contiguously over the kept slices only, so they stay parallel to the
-        // materials above and still tile the index buffer.
+        // Ranges rebuilt contiguously over the kept slices, parallel to the materials above.
         const keptRanges: { start: number; count: number }[] = []
         let at = 0
         for (const { r } of keep) { keptRanges.push({ start: at, count: r.count }); at += r.count }
 
-        const placeholder = model.materials[0]
-        const node = new ModelNode(source.name, new Model(
-            reducedGeometry,
-            levelMaterials.map((m, i) => (m ? model.materials[i] ?? placeholder : placeholder)),
-            keptRanges.length > 1 ? keptRanges : [],
-        ))
-        node.setPosition(source.position as any)
-        node.setRotation(source.rotation as any)
-        node.setScale(source.scale as any)
-        holder.addChild(node)
-        // Stamps __materialId/__materialIds and rebuilds the node's live materials from the assets.
-        if (levelMaterials.some(Boolean)) applyMaterialAssets(node, levelMaterials)
+        // Only the MODEL payload is swapped — written in `Model.serialize`'s own shape, without building a
+        // Model (that would allocate a GPU mesh nobody draws) — and the node's transform, name, variables
+        // and children stay exactly as serialized.
+        const swapped: any = { ...target.model, geometry: serializeGeometry(reducedGeometry), material: materials[0] }
+        if (keptRanges.length > 1) { swapped.materials = materials; swapped.submeshes = keptRanges }
+        else { delete swapped.materials; delete swapped.submeshes }
+        target.model = swapped
         triangles += Math.floor(reduced.indices.length / 3)
     }
 
-    holder.updateTransforms()
-    const asset = flattenModelAsset(await buildModelAsset(holder, materialIds, '', options.existingId))
-    asset.name = `${options.modelName} LOD${level}`
-    // Provenance, so a later regeneration updates these instead of minting a second set.
-    asset.lodSource = { modelId: options.sourceModelId, level }
-    // A generated level must never carry levels of its own.
-    delete asset.lods
-    delete asset.cullDistance
-
-    return {
-        asset,
-        materials: [...derivedMaterials.values()],
-        sourceTriangles: subtreeTriangles(baseRoot),
-        triangles,
-        bytesSaved,
-    }
+    stripMaterialLinks(nodeJson)
+    return { nodeJson, sourceTriangles: subtreeTriangles(baseRoot), triangles, bytesSaved }
 }

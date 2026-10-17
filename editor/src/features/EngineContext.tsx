@@ -1194,11 +1194,40 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const [modelSessions, setModelSessions] = useState<Record<string, ModelEditSession>>({});
 
   const addModel = (m: ModelAsset) => setModels(prev => [...prev, m]);
+  /**
+   * Delete the library assets the OLD LOD scheme minted for `sourceId` — level models carrying
+   * `lodSource.modelId === sourceId` (except `keep`), plus the "… LOD n" materials made for them that no
+   * surviving model still lists. Generated levels are embedded now; these are what is left of the ones
+   * that were not, cleared by the source's next save and by its deletion.
+   *
+   * The `__lod` texture twins are deliberately NOT evicted: copies of the model already placed in scenes
+   * embed their levels, and those still draw from them. They are hidden from the explorer either way.
+   */
+  const purgeLegacyLodAssets = (sourceId: string, keep: ReadonlySet<string> = new Set()) => {
+    const legacy = modelsRef.current.filter(m => m.lodSource?.modelId === sourceId && !keep.has(m.id));
+    if (!legacy.length) return;
+    const gone = new Set(legacy.map(m => m.id));
+    const remaining = modelsRef.current.filter(m => !gone.has(m.id) && m.id !== sourceId);
+    const stillUsed = new Set(remaining.flatMap(m => m.materialIds ?? []));
+    const deadMaterials = new Set(legacy.flatMap(m => m.materialIds ?? []).filter(id => !stillUsed.has(id)));
+    for (const t of tabs) if (t.kind === 'model' && t.modelId && gone.has(t.modelId)) removeTabById(t.id);
+    setModels(prev => prev.filter(x => !gone.has(x.id)));
+    modelsRef.current = modelsRef.current.filter(x => !gone.has(x.id));
+    if (deadMaterials.size) {
+      setMaterials(prev => prev.filter(m => !deadMaterials.has(m.id)));
+      materialsRef.current = materialsRef.current.filter(m => !deadMaterials.has(m.id));
+    }
+    Logger.info(`Removed ${legacy.length} old LOD level asset${legacy.length === 1 ? '' : 's'} of a model.`, 'Editor');
+  };
+
   const removeModel = (id: string) => {
     // A preview tab for a deleted mesh would render a subtree whose asset no longer exists — close it
     // first. Safe to reference the later-declared tab helpers: this only ever runs from a click.
     const openTab = tabs.find(t => t.kind === 'model' && t.modelId === id);
     if (openTab) removeTabById(openTab.id);
+    // Its generated levels are embedded and go with it; levels the old scheme kept as assets go too.
+    // (The explorer asked first — see deleteConsequence.)
+    purgeLegacyLodAssets(id);
     setModels(prev => prev.filter(x => x.id !== id));
   };
   const updateModel = (id: string, m: ModelAsset) => setModels(prev => prev.map(x => x.id === id ? m : x));
@@ -4100,6 +4129,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         if (restore.length) withoutDirty(() => { for (const r of restore) r.parent.addChild(r.node); });
       }
       asset.name = tab.title; // the tab title is the asset name (renames edit the title)
+      // A generated level's root ALWAYS sits where the model's root does: the levels were built from it,
+      // and moving the model after generating must move them too. (A hand-picked level is another asset,
+      // placed by its own root, and is left alone.)
+      if (asset.lods?.length) {
+        const { position, rotation, scale } = asset.nodeJson ?? {};
+        asset.lods = asset.lods.map(l => (l.generated && l.nodeJson)
+          ? { ...l, nodeJson: { ...l.nodeJson, position, rotation, scale } }
+          : l);
+      }
 
       // Refuse to persist a mesh with nothing in it: an empty asset renders as nothing and overwrites what
       // was saved before, so a save that produced one has read the wrong subtree. Returning leaves the
@@ -4112,6 +4150,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       }
 
       updateModel(tab.modelId, asset);
+      // Old-scheme level assets this save no longer points at (a regenerate replaced them).
+      purgeLegacyLodAssets(tab.modelId, new Set((asset.lods ?? []).map(l => l.modelId).filter((x): x is string => !!x)));
       withoutDirty(() => {
         syncModelInstances(tab.modelId!, asset, tab.id);
         syncFoliageRulesForModel(asset, tab.id);
@@ -4269,12 +4309,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /**
-   * Generate LOD levels for the open model: decimate its geometry per level, point each level at
-   * half-resolution copies of its textures, and wire the results in as levels 1..N.
+   * Generate LOD levels for the open model: decimate its geometry per level, give each level an inline
+   * material on smaller textures, and wire the results in as EMBEDDED levels 1..N (see lodGenerate.ts).
    *
-   * Levels this model generated BEFORE are replaced in place (matched on `lodSource`, reusing their asset
-   * ids), so pressing generate twice updates one set rather than filling the library with orphans. Levels
-   * the user added by hand are left alone.
+   * Every level a previous generate produced is replaced — embedded ones, and the library assets the old
+   * scheme minted (`lodSource`), which the next save deletes. Levels the user added by hand stay.
    */
   const generateModelLods = async (specs: { ratio: number; distance: number }[], downscale: boolean) => {
     const tab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
@@ -4294,16 +4333,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       steps: specs.map((sp, i) => ({ name: `LOD${i + 1}`, status: 'pending' as StepStatus, detail: `${Math.round(sp.ratio * 100)}% of triangles` })),
     });
 
-    // Keep hand-added levels, drop the ones a previous generate produced — their asset ids are reused
-    // below so the library sees an update rather than a second set.
-    const generatedBefore = new Map<number, string>();
+    // Keep hand-added levels; drop every generated one. A legacy generated level is a library asset with
+    // `lodSource` pointing here — dropped from the session now, deleted by the save that persists this.
     const keptRefs: ModelLodDef[] = [];
     const keptLevelIds: string[] = [session.levelIds[0]];
     const keptDistances: number[] = [0];
     session.lodRefs.forEach((ref, i) => {
-      const asset = modelsRef.current.find(m => m.id === ref.modelId);
-      if (asset?.lodSource?.modelId === modelId) {
-        generatedBefore.set(asset.lodSource.level, asset.id);
+      const legacy = ref.modelId ? modelsRef.current.find(m => m.id === ref.modelId)?.lodSource?.modelId === modelId : false;
+      if (ref.generated || legacy) {
         const stale = runtime.scene.getNodeById(session.levelIds[i + 1]);
         if (stale?.parent) stale.parent.removeChild(stale);
         // Regenerating replaces the preview subtree; without this each press orphans its meshes.
@@ -4317,15 +4354,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
     let previousLevelRoot: Node | null = null;
     const baseTriangles = subtreeTriangles(lod0);
-    // Derived materials this run produced, so the previous run's can be dropped afterwards — model
-    // assets are id-reused via `lodSource`, but materialAssetWithTextures mints a fresh id every time,
-    // so without this every regenerate left another full set of LOD materials in the library.
-    const generatedMaterialIds = new Set<string>();
-    const staleMaterialIds = new Set<string>();
-    for (const ref of session.lodRefs) {
-      const prev = modelsRef.current.find(m => m.id === ref.modelId);
-      if (prev?.lodSource?.modelId === modelId) for (const id of prev.materialIds ?? []) staleMaterialIds.add(id);
-    }
 
     const newRefs: ModelLodDef[] = [];
     const newLevelIds: string[] = [];
@@ -4343,45 +4371,24 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         const previousRatio = i === 0 ? 1 : specs[i - 1].ratio;
         const stepRatio = Math.min(0.99, specs[i].ratio / previousRatio);
         const built = await generateLodLevel(from, level, { ...specs[i], ratio: stepRatio }, {
-          modelName: tab.title,
-          sourceModelId: modelId,
-          materials: materialsRef.current,
           downscaleTextures: downscale,
           // One halving per step, because the source material is the PREVIOUS level's — already halved.
           textureHalvings: 1,
           decimate: decimateGeometry,
-          existingId: generatedBefore.get(level),
         });
 
-        for (const mat of built.materials) addMaterial(mat);
-        materialsRef.current = [...materialsRef.current, ...built.materials];
-        for (const mat of built.materials) generatedMaterialIds.add(mat.id);
-
-        if (generatedBefore.has(level)) updateModel(built.asset.id, built.asset);
-        else addModel(built.asset);
-        // The ref is mirrored during render, so a freshly added asset is invisible to it inside this
-        // handler; seed it by hand, exactly as the tileset and animation-field paths do.
-        //
-        // IN PLACE for an asset that already existed. Appending instead moves it to the end, and
-        // writeModelLibrary treats position as state — so one regenerate rewrote every asset after the
-        // moved one to IndexedDB, a full structured clone each.
-        const at = modelsRef.current.findIndex(m => m.id === built.asset.id);
-        modelsRef.current = at >= 0
-          ? modelsRef.current.map(m => (m.id === built.asset.id ? built.asset : m))
-          : [...modelsRef.current, built.asset];
-
         // A preview of the level, as a SIBLING of level 0 — the levels are alternatives, and parenting
-        // one to another would serialize it into the asset on the next save.
-        const clone = deepClone(built.asset.nodeJson);
+        // one to another would serialize it into the asset on the next save. The level's materials are
+        // inline (no __materialId), so there is nothing to resolve against the library.
+        const clone = deepClone(built.nodeJson);
         regenerateIds(clone, new Map());
-        resolveMaterialRefs(clone, materialsRef.current);
-        clone.name = built.asset.name;
+        clone.name = `${tab.title} LOD${level}`;
         parseLodPreview(runtime.scene, clone);
 
         // The subtree just parsed into the tab scene IS the next level's source.
         previousLevelRoot = runtime.scene.getNodeById(clone.id) ?? previousLevelRoot;
 
-        newRefs.push({ modelId: built.asset.id, distance: specs[i].distance });
+        newRefs.push({ generated: true, nodeJson: built.nodeJson, distance: specs[i].distance });
         newLevelIds.push(clone.id);
         newDistances.push(specs[i].distance);
         totalBytesSaved += built.bytesSaved;
@@ -4420,13 +4427,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       markTabDirty(tab.id, 'model-lod-add');
       eventEmitter.current.emit('TEXTURES_CHANGED');
       eventEmitter.current.emit('SCENE_CHANGED');
-      // Anything the previous run minted that this one did not re-mint is now unreferenced.
-      const orphaned = [...staleMaterialIds].filter(id => !generatedMaterialIds.has(id));
-      if (orphaned.length) {
-        setMaterials(prev => prev.filter(m => !orphaned.includes(m.id)));
-        materialsRef.current = materialsRef.current.filter(m => !orphaned.includes(m.id));
-      }
-
       Logger.info(
         `Generated ${specs.length} LOD level${specs.length === 1 ? '' : 's'} for "${tab.title}"` +
         (totalBytesSaved > 0 ? ` — ${(totalBytesSaved / (1024 * 1024)).toFixed(1)} MB less texture data` : ''),

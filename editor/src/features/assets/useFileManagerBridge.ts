@@ -16,6 +16,7 @@ import {
 import { inUseDialogOptions, planDelete } from './deleteFlow'
 import { assetGraph, assetKey } from 'cleo'
 import { confirmDialog } from '../dialogs/dialogStore'
+import { modelLodLevelCount } from '../../utils/models'
 import {
   collectReferencedMaterialIds, collectReferencedModelIds, collectReferencedTemplateIds,
   collectReferencedTerrainMaterialIds, collectReferencedTextureIds,
@@ -36,7 +37,7 @@ export const FM_MODE_KEY = 'cleo_assets_view_mode'
 
 export function useFileManagerBridge() {
   const { mainScene, instance } = useCleoEngine()
-  const { vfs, setVfs, libs, pathIndexRef, landingFolderRef, depsRef } = useVfs()
+  const { vfs, setVfs, libs, pathIndexRef, landingFolderRef, browsedFolderRef, depsRef } = useVfs()
 
   const apiRef = useRef<IApi | null>(null)
   const vfsRef = useRef<VfsIndex>(vfs)
@@ -193,8 +194,22 @@ export function useFileManagerBridge() {
     safeExec(api, 'delete-files', { ids: live, skipProvider: true })
   }, [setVfs, depsRef])
 
+  // While mounted, new assets land in the folder of the panel the user is looking at, read live (see
+  // VfsContext.browsedFolderRef). Unmounted, the explorer will reopen at the root, so that is where they go.
+  useEffect(() => () => {
+    browsedFolderRef.current = null
+    landingFolderRef.current = '/'
+  }, [browsedFolderRef, landingFolderRef])
+
   const init = useCallback((api: IApi) => {
     apiRef.current = api
+    browsedFolderRef.current = () => {
+      try {
+        const state: any = (api as any).getState?.()
+        const path = state?.panels?.[state?.activePanel ?? 0]?.path
+        return typeof path === 'string' && path ? path : null
+      } catch { return null }
+    }
 
     // --- create ------------------------------------------------------------------------------------
     // SVAR reports each dropped OS file as a create-file carrying a File; those are rejected because
@@ -257,14 +272,23 @@ export function useFileManagerBridge() {
       if (!ids.length) return false
       cfg.ids = ids
 
-      if (inUse.length) {
+      // A model with LOD levels is ALWAYS confirmed, referenced or not: its levels are deleted with it.
+      const lodsOf = (e: VfsEntry) => e.kind === 'model' ? modelLodLevelCount(e.assetId, libsRef.current.models) : 0
+      const cascades = entries.filter(e => lodsOf(e) > 0 && !inUse.includes(e))
+      const flagged = [...inUse, ...cascades]
+      if (flagged.length) {
         // This interceptor is synchronous and the dialog is not, so THIS pass is cancelled outright and
         // the delete is re-issued from commitDelete once the user answers — with skipProvider, so we do
         // not come back through here and ask a second time.
         deleteConfirmRef.current = true
         const batch = new Set(entries.map(e => `${e.kind}:${e.assetId}`))
-        void confirmDialog(inUseDialogOptions(inUse,
-          e => `${baseOf(e.path)} — ${deleteConsequence(e.kind)}${referrerSuffix(e, batch)}`))
+        const levels = (e: VfsEntry) => {
+          const n = lodsOf(e)
+          return n ? `; its ${n} LOD level${n === 1 ? ' is' : 's are'} deleted with it` : ''
+        }
+        void confirmDialog(inUseDialogOptions(flagged,
+          e => `${baseOf(e.path)} — ${deleteConsequence(e.kind)}${levels(e)}${referrerSuffix(e, batch)}`,
+          inUse.length === 0))
           .then(ok => { if (ok) commitDelete(api, ids) })
           .finally(() => { deleteConfirmRef.current = false })
         return false
@@ -350,7 +374,7 @@ export function useFileManagerBridge() {
     api.on('set-mode', (cfg: any) => {
       try { if (cfg.mode) localStorage.setItem(FM_MODE_KEY, cfg.mode) } catch { /* ignore */ }
     })
-  }, [isReferenced, setVfs, pathIndexRef, depsRef, landingFolderRef, refreshFolderThumbnails, commitDelete])
+  }, [isReferenced, setVfs, pathIndexRef, depsRef, landingFolderRef, browsedFolderRef, refreshFolderThumbnails, commitDelete])
 
   useSyncVfsToStore(apiRef, vfs, libs, pathIndexRef, depsRef)
 

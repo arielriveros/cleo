@@ -51,10 +51,14 @@ export function planDelete(
 export function inUseDialogOptions(
   inUse: VfsEntry[],
   describe: (entry: VfsEntry) => string,
+  /** True when none of `inUse` is referenced — they are listed only because deleting them takes more with it. */
+  cascadeOnly = false,
 ): DialogOptions {
   const one = inUse.length === 1
   return {
-    title: one ? 'This asset is still in use' : `${inUse.length} of these assets are still in use`,
+    title: cascadeOnly
+      ? (one ? 'Delete this asset and what belongs to it?' : `Delete these ${inUse.length} assets and what belongs to them?`)
+      : one ? 'This asset is still in use' : `${inUse.length} of these assets are still in use`,
     message: one ? 'Deleting it cannot be undone.' : 'Deleting them cannot be undone.',
     details: inUse.map(describe),
     confirmLabel: 'Delete anyway',
