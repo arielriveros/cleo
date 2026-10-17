@@ -1,4 +1,4 @@
-import { Material, TerrainMaterial, Terrain, TextureManager } from 'cleo'
+import { Material, TerrainMaterial, Terrain, TextureManager, setTerrainSurfaceFrom } from 'cleo'
 import { cryptoRandomId } from './ids'
 import { deepClone } from './deepClone'
 import { resolveFoliageRuleGeometry } from './foliageRules'
@@ -77,6 +77,7 @@ export function collectTerrainMaterialTextureIds(serialized: any): Set<string> {
 /** The plain Material asset ids a serialized landscape material's slots were taken from. */
 export function collectTerrainMaterialSurfaceIds(serialized: any): Set<string> {
   const set = new Set<string>()
+  if (typeof serialized?.surfaceMaterialId === 'string' && serialized.surfaceMaterialId) set.add(serialized.surfaceMaterialId)
   if (Array.isArray(serialized?.slots))
     for (const slot of serialized.slots) if (typeof slot?.surfaceMaterialId === 'string' && slot.surfaceMaterialId) set.add(slot.surfaceMaterialId)
   return set
@@ -199,17 +200,6 @@ export function assignLandscapeMaterial(
   return true
 }
 
-/** Add a paint layer carrying `asset` on top of the stack, named after it. Returns its id, or null when full. */
-export function addLandscapeMaterialLayer(terrain: Terrain, asset: TerrainMaterialAsset | null): string | null {
-  const stack = layerStackOf(terrain)
-  if (!stack) return null
-  const layer = stack.addPaintLayer(null, { name: asset?.name })
-  if (!layer) return null
-  if (asset) assignLandscapeMaterial(terrain, layer.id, asset, { skipAutoGenerate: true })
-  else layersChanged(terrain)
-  return layer.id
-}
-
 /**
  * Re-apply an EDITED landscape material to every stack layer that links it, keeping each layer's own
  * name, visibility, opacity and mask. The stack counterpart of the per-index sync the editor runs on save.
@@ -235,6 +225,11 @@ export function syncLandscapeMaterialLayers(terrain: Terrain, asset: TerrainMate
 export function syncSlotMaterialInTerrain(terrain: Terrain, materialId: string, serializedMaterial: any): number {
   let n = 0
   for (const { material } of stackMaterials(terrain)) {
+    // The ground (slot 0) is the landscape material's own surface, so it is copied over, not swapped.
+    if (material.surfaceMaterialId === materialId) {
+      setTerrainSurfaceFrom(material, Material.parse(serializedMaterial))
+      n++
+    }
     for (const slot of material.slots) {
       if (slot.surfaceMaterialId !== materialId) continue
       // A fresh parse per slot: two slots must never share one Material instance, or a later tiling or
@@ -255,11 +250,22 @@ export function syncSlotMaterialInTerrain(terrain: Terrain, materialId: string, 
 export function withSyncedSlotMaterial(asset: TerrainMaterialAsset, materialId: string,
                                        serializedMaterial: any): TerrainMaterialAsset | null {
   const slots = (asset.material as any)?.slots
-  if (!Array.isArray(slots) || !slots.some((s: any) => s?.surfaceMaterialId === materialId)) return null
+  const ground = (asset.material as any)?.surfaceMaterialId === materialId
+  const inSlots = Array.isArray(slots) && slots.some((s: any) => s?.surfaceMaterialId === materialId)
+  if (!ground && !inSlots) return null
+  // The ground's surface is the asset's own top-level shape: re-derive it through a live copy, so keys the
+  // old shading model wrote do not linger beside the new one's.
+  let material: any = asset.material
+  if (ground) {
+    const tm = TerrainMaterial.parse(asset.material)
+    setTerrainSurfaceFrom(tm, Material.parse(serializedMaterial))
+    material = { ...asset.material, ...tm.serialize() }
+  }
+  if (!inSlots) return { ...asset, material }
   return {
     ...asset,
     material: {
-      ...asset.material,
+      ...material,
       slots: slots.map((s: any) => s?.surfaceMaterialId === materialId
         ? { ...s, material: deepClone(serializedMaterial) } : s),
     },

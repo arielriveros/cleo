@@ -191,9 +191,13 @@ export function collectSceneMaterialIds(scene: Scene | null | undefined): Set<st
     // those landscape materials: a material used only as a rock slot is still used by this scene.
     for (const ln of scene.landscapes) {
       const terrain: any = (ln as any).terrain
-      for (const layer of terrain?.layers ?? [])
+      for (const layer of terrain?.layers ?? []) {
+        // The ground (slot 0) can be taken from a Material asset too.
+        const ground = layer?.material?.surfaceMaterialId
+        if (typeof ground === 'string' && ground) set.add(ground)
         for (const slot of layer?.material?.slots ?? [])
           if (typeof slot?.surfaceMaterialId === 'string' && slot.surfaceMaterialId) set.add(slot.surfaceMaterialId)
+      }
     }
   }
   return set

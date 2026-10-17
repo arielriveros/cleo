@@ -24,8 +24,6 @@ import {
   SkyLightNode,
   TilemapNode,
   Tilemap,
-  LandscapeNode,
-  Terrain,
   Scene,
   Node as CleoNode,
   UINode,
@@ -64,6 +62,7 @@ import {
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon,
   SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon,
 } from './nodeIcons'
+import { createLandscapeNode } from '../../utils/landscapeSlots'
 import { defaultDecalMaterial } from '../../utils/materials'
 
 // The catalog of addable node types, as data rather than closures inside AddNew: the same item is created
@@ -389,7 +388,8 @@ export const ADD_ITEMS: AddItem[] = [
     id: 'landscape', label: 'Landscape', icon: LandscapeIcon, category: 'environment', placeable: false,
     // Not placeable: a terrain spans +/-size/2 around its own origin, so dropping one at an arbitrary
     // raycast point (possibly mid-air) is worse than putting it at 0.
-    create: async () => new LandscapeNode('landscape', new Terrain({ size: 200, resolution: 129, chunkQuads: 32 })),
+    // Arrives with its ground slot, so the Layers panel opens on a slot list rather than an empty one.
+    create: async () => createLandscapeNode(),
   },
   {
     id: 'tilemap', label: 'Tilemap', icon: TilemapIcon, category: 'sprites',

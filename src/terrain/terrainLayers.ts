@@ -304,6 +304,10 @@ export interface TerrainSlotSource {
     surface: TerrainSurfaceData;
     rule: TerrainBlendRule;
     allowFoliage: boolean;
+    /** The slot's own mask channel (a paint-only base slot), overriding its layer's. */
+    mask?: number;
+    /** `TerrainMaterialSlot.id`, for slots 1..n; absent for a material's own surface. */
+    slotId?: string;
 }
 
 /** One layer of the stack: the base (`mask` -1) or a paint layer (`mask` = its channel). */
@@ -347,8 +351,8 @@ export function flattenSurfaces(layers: TerrainLayerSource[]): { surfaces: Terra
             const rule = cloneBlendRule(s.rule);
             rule.opacity = clamp01(rule.opacity * clamp01(L.opacity));
             surfaces.push({
-                surface: s.surface, rule, allowFoliage: s.allowFoliage,
-                layer: li, slot: si, mask: L.mask, fill: L.mask < 0 && si === 0,
+                surface: s.surface, rule, allowFoliage: s.allowFoliage, slotId: s.slotId,
+                layer: li, slot: si, mask: s.mask ?? L.mask, fill: L.mask < 0 && si === 0,
             });
         }
     }

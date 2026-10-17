@@ -6,7 +6,7 @@ import type { Terrain, SculptTool, SculptParams, BrushSpec, GridRegion, MaskGrid
 import { BrushCursor } from "./brushCursor";
 import { lookFromSettings } from "./brushDecal";
 import {
-    getBrush, setBrush, subscribeBrush, activeStrength, setActiveStrength, strengthSpec,
+    getBrush, setBrush, subscribeBrush, activeStrength, setActiveStrength, strengthSpec, resolvePaintTarget,
     type LandscapeBrushSettings,
 } from "./landscapeBrushStore";
 import { toolForHotkey, modeForHotkey } from "./landscapeTools";
@@ -180,18 +180,19 @@ export default function LandscapeBrush({ viewportRef }: Props) {
             if (tool === 'clearToBase') {
                 edited(recordMasks(terrain.clearLayersAt(point, shape, flow)));
             } else {
-                const layers = terrain.layerStack.paintLayers;
-                const layer = layers.find(l => l.id === b.paintLayerId) ?? layers[layers.length - 1];
-                if (!layer) {
-                    Logger.warn('Add a paint layer in the Layers panel first; there is nothing to paint into.', 'Editor');
+                // The target is a paint-only slot; the stack resolves its id to the slot's mask channel.
+                const slot = resolvePaintTarget(terrain.layerStack.paintSlots, b.paintSlotId);
+                if (!slot) {
+                    Logger.warn('Add a paint slot in the Layers panel first (a road, a path); there is nothing to paint into.', 'Editor');
                     paintingRef.current = false;
                     return;
                 }
-                edited(recordMasks(terrain.paintLayerMask(layer.id, point, shape, flow, tool === 'erase' ? 0 : b.targetOpacity)));
+                edited(recordMasks(terrain.paintLayerMask(slot.id, point, shape, flow, tool === 'erase' ? 0 : b.targetOpacity)));
             }
             if (foliageDue(point, b.radius)) {
                 // Erase FIRST, then scatter: the other order removes what this stroke just placed. Keep only
-                // the foliage of whichever layer now dominates under the brush centre.
+                // the foliage of whichever layer now dominates under the brush centre (the ground, unless a
+                // legacy paint layer is still unconverted).
                 const lx = point[0] - terrain.origin[0], lz = point[2] - terrain.origin[2];
                 const w = terrain.layerWeightsAt(lx, lz);
                 let best = w.base, material = terrain.layerStack.base.material;
@@ -328,7 +329,7 @@ export default function LandscapeBrush({ viewportRef }: Props) {
             }
             let masks: { before: MaskPatch[]; after: MaskPatch[] } | null = null;
             if (s.maskRegion && s.masksBefore) {
-                const channels = terrain.layerStack.paintLayers.map(l => l.channel);
+                const channels = terrain.layerStack.usedChannels();
                 const snapshot = s.masksBefore;
                 masks = {
                     before: channels.filter(c => c < snapshot.capacity).map(c => snapshot.readPatch(c, s.maskRegion!)),

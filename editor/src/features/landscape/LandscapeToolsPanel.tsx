@@ -172,7 +172,7 @@ function GenerateFoliage() {
     // Read again after the await: a rebuild in the meantime swaps the terrain.
     const result = node.terrain.generateFoliageEverywhere()
     if (result.reason === 'no-rules')
-      setStatus('No foliage placed: no landscape material on this landscape defines any. Add foliage in a Landscape Material tab, then use that material as the base or a paint layer.')
+      setStatus('No foliage placed: this landscape has no foliage rules. Add foliage rules in the landscape material (✎ in the Layers panel).')
     else if (result.reason === 'no-coverage')
       setStatus('No foliage placed: no ground is dominated by a layer whose material includes foliage (or every candidate point was excluded).')
     else
@@ -199,9 +199,9 @@ function ToolOptions() {
         <Slider label='Target' min={0.05} max={1} step={0.05} value={b.targetOpacity}
           readout={v => `${Math.round(v * 100)}%`} title='The opacity painting moves the layer toward — paint a road at 60% and it stops there'
           onChange={v => setBrush({ targetOpacity: v })} />
-        <Hint>Paints the active layer in the Layers panel. Hold Shift to erase.</Hint>
+        <Hint>Paints the active paint slot (Layers panel or toolbar). Hold Shift to erase.</Hint>
       </div>
-    ) : b.paintTool === 'clearToBase' ? <Hint>Erases every paint layer under the brush, back to the base material.</Hint> : null
+    ) : b.paintTool === 'clearToBase' ? <Hint>Erases every paint slot under the brush, back to the ground and automatic slots.</Hint> : null
   }
   if (b.mode !== 'sculpt') return null
 

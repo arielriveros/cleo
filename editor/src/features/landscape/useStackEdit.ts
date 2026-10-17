@@ -3,16 +3,14 @@ import type { LandscapeNode, TerrainLayerStack, Terrain } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { useHistory } from '../HistoryContext'
 import { recordStackEdit } from './stackHistory'
-import { assignLandscapeMaterial, addLandscapeMaterialLayer, type TerrainMaterialAsset } from '../../utils/terrainMaterials'
-import { setBrush } from './landscapeBrushStore'
+import { assignLandscapeMaterial, buildTerrainMaterialAsset, type TerrainMaterialAsset } from '../../utils/terrainMaterials'
 
 // The layer-stack edits both the Layers panel and the viewport toolbar make, in one place: each is one
 // undo step, each notifies the same three listeners, and each finds its terrain by node id when it runs
-// (see stackHistory). Shared because the toolbar offers the same assign/add as the panel — the material
-// slots have to be reachable from where the painting happens, not only from a panel behind a tab.
+// (see stackHistory). Shared because the toolbar offers the same paint target as the panel.
 
 export function useStackEdit(node: LandscapeNode | null, refresh: () => void) {
-  const { eventEmitter, editorScene } = useCleoEngine()
+  const { eventEmitter, editorScene, addTerrainMaterial } = useCleoEngine()
   const { push } = useHistory()
 
   // TERRAIN_EDITED refreshes the history's snapshot baseline for this landscape: a layer edit changes the
@@ -28,23 +26,34 @@ export function useStackEdit(node: LandscapeNode | null, refresh: () => void) {
     label: string,
     fn: (stack: TerrainLayerStack, terrain: Terrain) => T,
     channels?: readonly number[],
+    coalesceKey?: string,
   ): T | undefined => {
     if (!node) return undefined
-    return recordStackEdit({ scene: editorScene, nodeId: node.id, label, push, notify, channels }, fn)
+    return recordStackEdit({ scene: editorScene, nodeId: node.id, label, push, notify, channels, coalesceKey }, fn)
   }, [editorScene, node, push, notify])
 
+  /** Make a library landscape material THE landscape's material. Its painting is kept by slot id. */
   const assignBase = useCallback((asset: TerrainMaterialAsset) =>
-    edit(`Base: ${asset.name}`, (_s, terrain) => assignLandscapeMaterial(terrain, 'base', asset)), [edit])
+    edit(`Landscape material: ${asset.name}`, (_s, terrain) => assignLandscapeMaterial(terrain, 'base', asset),
+         layerChannels(node)), [edit, node])
 
-  const assignLayer = useCallback((id: string, asset: TerrainMaterialAsset) =>
-    edit(`Layer material: ${asset.name}`, (_s, terrain) => assignLandscapeMaterial(terrain, id, asset)), [edit])
+  /**
+   * Put an EMBEDDED material (one with no library link — a converted legacy landscape) into the library
+   * and link it, so it can be edited in the landscape-material editor like any other.
+   */
+  const saveBaseToLibrary = useCallback((name: string): TerrainMaterialAsset | null => {
+    const tm = node?.terrain?.layerStack.base.material
+    if (!tm) return null
+    const asset = buildTerrainMaterialAsset(tm, name, '')
+    addTerrainMaterial(asset)
+    edit('Save landscape material', stack => { stack.setBase(tm, asset.id); return true })
+    return asset
+  }, [edit, node, addTerrainMaterial])
 
-  /** Adds the layer AND makes it the one the brush paints — adding a layer is always to paint it. */
-  const addLayer = useCallback((asset: TerrainMaterialAsset | null) => {
-    const id = edit('Add paint layer', (_s, terrain) => addLandscapeMaterialLayer(terrain, asset))
-    if (id) setBrush({ paintLayerId: id, mode: 'paint' })
-    return id
-  }, [edit])
+  return { edit, assignBase, saveBaseToLibrary }
+}
 
-  return { edit, assignBase, assignLayer, addLayer }
+/** Every mask channel the landscape uses — what an edit that may clear any of them must save. */
+function layerChannels(node: LandscapeNode | null): number[] {
+  return node?.terrain?.layerStack.usedChannels() ?? []
 }

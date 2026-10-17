@@ -276,6 +276,12 @@ export function resyncScene(
         changed = true
       }
     }
+    // MIGRATION: a landscape is one slot list now. Paint layers saved before that fold into paint-only
+    // slots of the ground material, masks and all — after the relink above, so the newest copies fold.
+    if (terrain.layerStack?.convertPaintLayersToSlots()) {
+      terrain.refreshLayers()
+      changed = true
+    }
   }
 
   // --- Tilemap layers: refresh the embedded tileset copy each layer draws from ---

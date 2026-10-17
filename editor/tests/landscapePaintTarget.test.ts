@@ -32,21 +32,21 @@ describe('the landscape layer stack is on screen', () => {
 })
 
 describe('the paint target in the viewport toolbar', () => {
-  it('shows the active layer and its material, with a way to add one', () => {
+  it('picks only among the landscape material’s paint-only slots, with a way to edit that material', () => {
     expect(TOOLBAR).toMatch(/brush\.mode === 'paint' && <>[\s\S]{0,120}<PaintTarget/)
-    expect(TOOLBAR).toMatch(/setBrush\(\{ paintLayerId: e\.target\.value \}\)/)
-    expect(TOOLBAR).toMatch(/<LandscapeMaterialSlot compact materialId=\{active\.materialId\}/)
-    expect(TOOLBAR).toMatch(/<AddLayerButton/)
+    expect(TOOLBAR).toMatch(/setBrush\(\{ paintSlotId: e\.target\.value \}\)/)
+    expect(TOOLBAR).toMatch(/enterTerrainMaterialEditor\(materialId\)/)
+    // Landscape mode never offers the project's Materials: those are chosen in the material editor.
+    for (const source of [TOOLBAR, PANEL]) expect(source).not.toMatch(/\bMaterialPicker\b|MaterialMenu/)
   })
 
-  it('falls back to the topmost layer exactly as the panel does', () => {
-    const fallback = /layers\.find\(l => l\.id === brush\.paintLayerId\) \?\? layers\[layers\.length - 1\]/
-    expect(TOOLBAR).toMatch(fallback)
-    expect(PANEL).toMatch(/layers\.some\(l => l\.id === brush\.paintLayerId\) \? brush\.paintLayerId : \(layers\[layers\.length - 1\]\?\.id \?\? null\)/)
+  it('falls back to the topmost paint slot exactly as the panel and the brush do', () => {
+    for (const source of [TOOLBAR, PANEL, read('features', 'landscape', 'LandscapeBrush.tsx')])
+      expect(source).toMatch(/resolvePaintTarget\([\w.]+, \w+\.paintSlotId\)/)
   })
 
-  it('records its edits through the same hook as the panel, so either is one undo step', () => {
-    for (const source of [TOOLBAR, PANEL]) expect(source).toMatch(/useStackEdit\(node, refresh\)/)
+  it('records the panel edits through the stack-edit hook, so each is one undo step', () => {
+    expect(PANEL).toMatch(/useStackEdit\(node, refresh\)/)
     expect(read('features', 'landscape', 'useStackEdit.ts')).toMatch(/recordStackEdit\(/)
   })
 })

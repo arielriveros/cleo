@@ -1032,6 +1032,12 @@ export interface TerrainMaterialSlot {
     rule: TerrainBlendRule;
     /** Whether foliage may scatter where this surface dominates. Off for rock, scree, water. */
     allowFoliage: boolean;
+    /**
+     * Paint only: the surface appears ONLY where it has been brushed (roads, paths), its rule then
+     * limiting it further. On a landscape's base the stack gives such a slot a mask channel of its own
+     * (`TerrainLayerStack.slotChannel`); in a paint layer it is meaningless and ignored.
+     */
+    manual: boolean;
 }
 
 /** A new slot's id. Unique enough for a list key; the engine never compares it. */
@@ -1112,6 +1118,11 @@ export class TerrainMaterial extends Material {
     public allowFoliage: boolean = true;
     /** Surfaces 1..n, each blended over the ones before it by its own rule. See {@link TerrainMaterialSlot}. */
     public slots: TerrainMaterialSlot[] = [];
+    /**
+     * Editor-side link to the Material library asset slot 0's surface was copied from (see
+     * {@link setTerrainSurfaceFrom}), the slot-0 twin of `TerrainMaterialSlot.surfaceMaterialId`.
+     */
+    public surfaceMaterialId: string | null = null;
 
     /** Build a terrain paint-layer material whose surface is the given base shading model. */
     public static Create(baseType: TerrainBaseType, properties: any = {}, config?: MaterialConfig): TerrainMaterial {
@@ -1158,6 +1169,7 @@ export class TerrainMaterial extends Material {
             foliageExclude: [...this.foliageExclude],
             rule: cloneBlendRule(this.rule),
             allowFoliage: this.allowFoliage,
+            surfaceMaterialId: this.surfaceMaterialId,
             slots: this.slots.map(s => ({
                 id: s.id,
                 name: s.name,
@@ -1166,6 +1178,7 @@ export class TerrainMaterial extends Material {
                 tiling: s.tiling,
                 rule: cloneBlendRule(s.rule),
                 allowFoliage: s.allowFoliage,
+                manual: s.manual,
             })),
         };
     }
@@ -1222,7 +1235,8 @@ export class TerrainMaterial extends Material {
             tm.rule.heightBlend = legacyHeightBlendToRule(m.heightBlend ?? 0);
         }
         tm.allowFoliage = m.allowFoliage !== false;
-        tm.slots = Array.isArray(m.slots) ? m.slots.map((s: any) => TerrainMaterial.parseSlot(s)) : [];
+        tm.surfaceMaterialId = typeof m.surfaceMaterialId === 'string' ? m.surfaceMaterialId : null;
+        tm.slots =Array.isArray(m.slots) ? m.slots.map((s: any) => TerrainMaterial.parseSlot(s)) : [];
         return tm;
     }
 
@@ -1237,8 +1251,54 @@ export class TerrainMaterial extends Material {
             tiling: typeof s.tiling === 'number' && isFinite(s.tiling) ? s.tiling : 20,
             rule: parseBlendRule(s.rule),
             allowFoliage: s.allowFoliage !== false,
+            manual: s.manual === true,
         };
     }
+}
+
+/**
+ * Make `material` the landscape material's OWN surface (slot 0): its shading model, properties, textures
+ * and config are copied over — the same steps {@link TerrainMaterial.Create} takes — while the terrain
+ * fields (tiling, rule, slots, foliage) stay. Property and texture maps are copied, never shared.
+ */
+export function setTerrainSurfaceFrom(tm: TerrainMaterial, material: Material): void {
+    tm.type = material.type;
+    tm.properties = new Map(material.properties);
+    tm.textures = new Map(material.textures);
+    tm.config = { ...material.config };
+    if (material.properties.has('invertHeight')) tm.invertHeight = !!material.properties.get('invertHeight');
+    const depth = material.properties.get('displacementScale');
+    if (typeof depth === 'number' && isFinite(depth)) tm.displacementScale = depth;
+}
+
+/**
+ * A landscape material copy that can be edited without touching the original: the slot LIST, each slot
+ * object and every rule are new, while slot surfaces, property maps and foliage prototypes are SHARED.
+ *
+ * What the landscape panel edits through — mutate the copy, then `stack.setBase(copy)` — because the
+ * layer stack's undo snapshots are object references (`StackLayersSnapshot`) and must never see the
+ * old material change. A surface Material is only ever REPLACED by an edit, so sharing it is safe.
+ */
+export function shallowCloneTerrainMaterial(tm: TerrainMaterial): TerrainMaterial {
+    const c = new TerrainMaterial(tm.config);
+    c.type = tm.type;
+    c.properties = tm.properties;
+    c.textures = tm.textures;
+    c.config = tm.config;
+    c.tiling = tm.tiling;
+    c.auto = tm.auto;
+    c.hRange = [tm.hRange[0], tm.hRange[1]];
+    c.sRange = [tm.sRange[0], tm.sRange[1]];
+    c.displacementScale = tm.displacementScale;
+    c.invertHeight = tm.invertHeight;
+    c.heightBlend = tm.heightBlend;
+    c.foliageInclude = [...tm.foliageInclude];
+    c.foliageExclude = [...tm.foliageExclude];
+    c.rule = cloneBlendRule(tm.rule);
+    c.allowFoliage = tm.allowFoliage;
+    c.surfaceMaterialId = tm.surfaceMaterialId;
+    c.slots = tm.slots.map(s => ({ ...s, rule: cloneBlendRule(s.rule) }));
+    return c;
 }
 
 /** The editor material a custom shader was seeded from (its "extend" base), or null when written from scratch. */

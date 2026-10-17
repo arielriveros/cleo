@@ -45,7 +45,11 @@ function apply(scene: Scene, nodeId: string, state: StackState, notify: () => vo
  * sides. Returns whatever `edit` returned; nothing is recorded when it returns false.
  */
 export function recordStackEdit<T>(
-  opts: { scene: Scene; nodeId: string; label: string; push: Push; notify: () => void; channels?: readonly number[] },
+  opts: {
+    scene: Scene; nodeId: string; label: string; push: Push; notify: () => void; channels?: readonly number[]
+    /** Edits pushed in quick succession under one key (a slider drag) merge into one undo step. */
+    coalesceKey?: string
+  },
   edit: (stack: TerrainLayerStack, terrain: Terrain) => T,
 ): T | undefined {
   const found = stackFor(opts.scene, opts.nodeId)
@@ -61,6 +65,7 @@ export function recordStackEdit<T>(
   const { scene, nodeId, notify } = opts
   opts.push({
     label: opts.label,
+    coalesceKey: opts.coalesceKey,
     undo: () => apply(scene, nodeId, before, notify),
     redo: () => apply(scene, nodeId, after, notify),
   })

@@ -1,12 +1,12 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Material, TerrainMaterial } from '../graphics/material';
+import { Material, TerrainMaterial, shallowCloneTerrainMaterial, type TerrainMaterialSlot } from '../graphics/material';
 import { Texture } from '../graphics/texture';
 import { TextureManager } from '../graphics/systems/textureManager';
 import { bytesToBase64, base64ToBytes } from '../core/base64';
 import { Logger } from '../core/logger';
 import {
     MAX_TERRAIN_SURFACES, MAX_PAINT_LAYERS, MASK_CHANNELS_PER_SLICE, deriveSurface, flattenSurfaces,
-    surfaceWeightsAt, legacyAutoRule, legacySplatAlphas, slopeDegreesFromNormalY,
+    surfaceWeightsAt, legacyAutoRule, legacySplatAlphas, slopeDegreesFromNormalY, cloneBlendRule,
     type TerrainFlatSurface, type TerrainLayerSource, type TerrainSlotSource,
 } from './terrainLayers';
 import { MaskGrid, type MaskPaint, type MaskRegion, type MaskPatch } from './terrainMasks';
@@ -46,6 +46,8 @@ export interface TerrainBaseLayer {
 export interface StackLayersSnapshot {
     base: TerrainBaseLayer;
     paint: TerrainPaintLayer[];
+    /** Paint-only base slot id -> its mask channel. */
+    slotChannels: Record<string, number>;
 }
 
 /** Everything a layer contributes at one point, for gameplay and foliage queries. */
@@ -53,6 +55,8 @@ export interface TerrainLayerWeights {
     /** Final weight of the base layer and of each paint layer (in stack order), summing to <= 1. */
     base: number;
     paint: number[];
+    /** Final weight of each base-material surface: [0] its own surface, [i] its slot i-1. Sums to `base`. */
+    slots: number[];
     /** Weight of surfaces that forbid foliage. */
     noFoliage: number;
 }
@@ -64,18 +68,28 @@ export function defaultMaskResolution(heightResolution: number): number {
     return Math.max(64, Math.min(1024, p * 2));
 }
 
-/** Slot sources of one landscape material, slot 0 first. */
-export function materialSlots(tm: TerrainMaterial): TerrainSlotSource[] {
+/**
+ * Slot sources of one landscape material, slot 0 first.
+ *
+ * @param slotMask The mask channel of a slot that brings its own (a paint-only base slot), undefined for
+ *                 one that uses its layer's, null for one that cannot draw at all (paint-only, no channel).
+ */
+export function materialSlots(tm: TerrainMaterial,
+                              slotMask?: (slot: TerrainMaterialSlot) => number | null | undefined): TerrainSlotSource[] {
     const out: TerrainSlotSource[] = [{
         surface: deriveSurface(tm, tm.tiling, tm.invertHeight),
         rule: tm.rule,
         allowFoliage: tm.allowFoliage,
     }];
     for (const s of tm.slots) {
+        const mask = slotMask?.(s);
+        if (mask === null) continue;
         out.push({
             surface: deriveSurface(s.material, s.tiling, !!s.material.properties.get('invertHeight')),
             rule: s.rule,
             allowFoliage: s.allowFoliage,
+            mask,
+            slotId: s.id,
         });
     }
     return out;
@@ -91,6 +105,12 @@ export function legacyAlbedoMaterial(textureId: string, tiling: number): Terrain
 export class TerrainLayerStack {
     private _base: TerrainBaseLayer = { material: null, materialId: null };
     private _paint: TerrainPaintLayer[] = [];
+    /**
+     * The mask channel of each PAINT-ONLY slot of the base material, by slot id. Lives here, not on the
+     * slot, because a channel is this landscape's and a material may be shared. Kept in step with the
+     * base by {@link _syncSlotChannels}.
+     */
+    private _slotChannels = new Map<string, number>();
     private _masks: MaskGrid;
     private _size: number;
 
@@ -127,10 +147,57 @@ export class TerrainLayerStack {
         return this._paint.find(l => l.id === id);
     }
 
+    /** The mask channel a paint-only base slot paints into, or undefined. */
+    public slotChannel(slotId: string): number | undefined {
+        return this._slotChannels.get(slotId);
+    }
+
+    /** The base material's paint-only slots that have a channel, bottom to top. */
+    public get paintSlots(): readonly TerrainMaterialSlot[] {
+        const tm = this._base.material;
+        return tm ? tm.slots.filter(s => s.manual && this._slotChannels.has(s.id)) : [];
+    }
+
+    /** Every mask channel in use, by paint layers and paint-only slots alike. */
+    public usedChannels(): number[] {
+        return [...this._paint.map(l => l.channel), ...this._slotChannels.values()];
+    }
+
+    /** The mask channel behind a paintable id: a paint layer's or a paint-only base slot's. */
+    public channelOf(id: string): number | undefined {
+        return this.paintLayer(id)?.channel ?? this._slotChannels.get(id);
+    }
+
     /** Assign the base layer's material (null clears it to the flat base colour). */
     public setBase(material: TerrainMaterial | null, materialId: string | null = null): void {
         this._base = { material, materialId };
+        this._syncSlotChannels();
         this._changed();
+    }
+
+    /**
+     * Give every paint-only base slot a channel (a new one starts unpainted) and free the channels of
+     * slots that are gone or no longer paint-only, clearing them so the next owner starts clean.
+     */
+    private _syncSlotChannels(): void {
+        const tm = this._base.material;
+        const want = new Set((tm?.slots ?? []).filter(s => s.manual).map(s => s.id));
+        for (const [id, ch] of [...this._slotChannels]) {
+            if (want.has(id)) continue;
+            this._slotChannels.delete(id);
+            this._fillChannel(ch, 0);
+        }
+        for (const id of want) {
+            if (this._slotChannels.has(id)) continue;
+            if (this.usedChannels().length >= MAX_PAINT_LAYERS) {
+                Logger.warn(`Out of paint channels (${MAX_PAINT_LAYERS}); a paint-only slot will not draw.`, 'Terrain');
+                break;
+            }
+            const channel = this._freeChannel();
+            if (this._masks.ensureChannels(channel + 1)) this._maskSlicesOnGpu = -1;
+            this._fillChannel(channel, 0);
+            this._slotChannels.set(id, channel);
+        }
     }
 
     /**
@@ -138,7 +205,7 @@ export class TerrainLayerStack {
      * layer count is at its cap.
      */
     public addPaintLayer(material: TerrainMaterial | null, opts: Partial<Omit<TerrainPaintLayer, 'channel'>> = {}): TerrainPaintLayer | null {
-        if (this._paint.length >= MAX_PAINT_LAYERS) return null;
+        if (this._paint.length >= MAX_PAINT_LAYERS || this.usedChannels().length >= MAX_PAINT_LAYERS) return null;
         const channel = this._freeChannel();
         if (this._masks.ensureChannels(channel + 1)) this._maskSlicesOnGpu = -1; // reallocate on next sync
         // A fresh layer starts unpainted, whatever a previous owner of the channel left behind.
@@ -194,16 +261,21 @@ export class TerrainLayerStack {
 
     /** The layer list as it is now; see {@link StackLayersSnapshot}. Masks are not included. */
     public snapshotLayers(): StackLayersSnapshot {
-        return { base: { ...this._base }, paint: this._paint.map(l => ({ ...l })) };
+        return {
+            base: { ...this._base }, paint: this._paint.map(l => ({ ...l })),
+            slotChannels: Object.fromEntries(this._slotChannels),
+        };
     }
 
     /** Put a snapshot's layer list back. Masks are left as they are; restore them with {@link writeMaskPatches}. */
     public restoreLayers(s: StackLayersSnapshot): void {
         this._base = { ...s.base };
         this._paint = s.paint.map(l => ({ ...l }));
+        this._slotChannels = new Map(Object.entries(s.slotChannels ?? {}));
         let top = 0;
-        for (const l of this._paint) top = Math.max(top, l.channel + 1);
+        for (const ch of this.usedChannels()) top = Math.max(top, ch + 1);
         if (this._masks.ensureChannels(top)) this._maskSlicesOnGpu = -1;
+        this._syncSlotChannels();
         this._changed();
     }
 
@@ -221,10 +293,10 @@ export class TerrainLayerStack {
     }
 
     /** Call after mutating a layer's material in place (the terrain-material editor does). */
-    public materialsChanged(): void { this._changed(); }
+    public materialsChanged(): void { this._syncSlotChannels(); this._changed(); }
 
     private _freeChannel(): number {
-        const used = new Set(this._paint.map(l => l.channel));
+        const used = new Set(this.usedChannels());
         let c = 0;
         while (used.has(c)) c++;
         return c;
@@ -238,36 +310,37 @@ export class TerrainLayerStack {
     // --- masks ------------------------------------------------------------------------------
 
     /** Paint a layer's mask. Landscape-local brush coordinates. Returns the changed region or null. */
+    /** `id` is a paint layer's or a paint-only base slot's (see {@link channelOf}). */
     public paint(id: string, p: MaskPaint): MaskRegion | null {
-        const layer = this.paintLayer(id);
-        if (!layer) return null;
-        const reg = this._masks.paint(layer.channel, p);
-        if (reg) this._markMaskDirty(layer.channel, reg);
+        const channel = this.channelOf(id);
+        if (channel === undefined) return null;
+        const reg = this._masks.paint(channel, p);
+        if (reg) this._markMaskDirty(channel, reg);
         return reg;
     }
 
-    /** Fill (1), clear (0) or set a whole layer's mask. */
+    /** Fill (1), clear (0) or set a whole layer's (or paint-only slot's) mask. */
     public fillMask(id: string, value: number): boolean {
-        const layer = this.paintLayer(id);
-        if (!layer) return false;
-        return this._fillChannel(layer.channel, value);
+        const channel = this.channelOf(id);
+        if (channel === undefined) return false;
+        return this._fillChannel(channel, value);
     }
 
     public invertMask(id: string): boolean {
-        const layer = this.paintLayer(id);
-        if (!layer) return false;
-        const reg = this._masks.invert(layer.channel);
-        if (reg) this._markMaskDirty(layer.channel, reg);
+        const channel = this.channelOf(id);
+        if (channel === undefined) return false;
+        const reg = this._masks.invert(channel);
+        if (reg) this._markMaskDirty(channel, reg);
         return !!reg;
     }
 
-    /** Clear EVERY paint layer under a brush — the "restore the base" tool. Returns the union region. */
+    /** Clear EVERY painted mask under a brush — the "restore the base" tool. Returns the union region. */
     public paintAllToZero(p: Omit<MaskPaint, 'target'>): MaskRegion | null {
         let out: MaskRegion | null = null;
-        for (const layer of this._paint) {
-            const reg = this._masks.paint(layer.channel, { ...p, target: 0 });
+        for (const channel of this.usedChannels()) {
+            const reg = this._masks.paint(channel, { ...p, target: 0 });
             if (!reg) continue;
-            this._markMaskDirty(layer.channel, reg);
+            this._markMaskDirty(channel, reg);
             out = out ? {
                 c0: Math.min(out.c0, reg.c0), r0: Math.min(out.r0, reg.r0),
                 c1: Math.max(out.c1, reg.c1), r1: Math.max(out.r1, reg.r1),
@@ -276,9 +349,9 @@ export class TerrainLayerStack {
         return out;
     }
 
-    /** Save a region of every paint layer's mask, for undo. */
+    /** Save a region of every painted mask, for undo. */
     public readMaskPatches(region: MaskRegion): MaskPatch[] {
-        return this._paint.map(l => this._masks.readPatch(l.channel, region));
+        return this.usedChannels().map(ch => this._masks.readPatch(ch, region));
     }
 
     /** Put saved mask regions back (undo/redo). */
@@ -292,14 +365,14 @@ export class TerrainLayerStack {
 
     /** Mask value of a layer at landscape-local x/z, 0..1. */
     public maskAt(id: string, x: number, z: number): number {
-        const layer = this.paintLayer(id);
-        return layer ? this._masks.sample(layer.channel, x, z) : 0;
+        const channel = this.channelOf(id);
+        return channel !== undefined ? this._masks.sample(channel, x, z) : 0;
     }
 
-    /** Fraction of the landscape where a layer's mask is at least half on. */
+    /** Fraction of the landscape where a layer's (or paint-only slot's) mask is at least half on. */
     public coverage(id: string): number {
-        const layer = this.paintLayer(id);
-        return layer ? this._masks.coverage(layer.channel) : 0;
+        const channel = this.channelOf(id);
+        return channel !== undefined ? this._masks.coverage(channel) : 0;
     }
 
     private _fillChannel(channel: number, value: number): boolean {
@@ -322,7 +395,9 @@ export class TerrainLayerStack {
     /** The layers as the flattening sees them, base first. */
     private _sources(): TerrainLayerSource[] {
         const out: TerrainLayerSource[] = [];
-        out.push({ slots: this._base.material ? materialSlots(this._base.material) : [], mask: -1, visible: true, opacity: 1 });
+        // A paint-only slot draws through its own channel, or not at all while it has none.
+        const slotMask = (s: TerrainMaterialSlot) => s.manual ? (this._slotChannels.get(s.id) ?? null) : undefined;
+        out.push({ slots: this._base.material ? materialSlots(this._base.material, slotMask) : [], mask: -1, visible: true, opacity: 1 });
         for (const L of this._paint)
             out.push({ slots: L.material ? materialSlots(L.material) : [], mask: L.channel, visible: L.visible, opacity: L.opacity });
         return out;
@@ -355,10 +430,18 @@ export class TerrainLayerStack {
         const weights: number[] = [];
         surfaceWeightsAt(surfaces, ch => this._masks.sample(ch, x, z), elevation,
                          slopeDegreesFromNormalY(normalY), worldX, worldZ, weights);
-        const out: TerrainLayerWeights = { base: 0, paint: this._paint.map(() => 0), noFoliage: 0 };
+        const out: TerrainLayerWeights = {
+            base: 0, paint: this._paint.map(() => 0),
+            slots: new Array(this._base.material ? this._base.material.slots.length + 1 : 0).fill(0), noFoliage: 0,
+        };
+        const slotIndex = new Map(this._base.material?.slots.map((s, i) => [s.id, i + 1]) ?? []);
         for (let i = 0; i < surfaces.length; i++) {
             const s = surfaces[i], w = weights[i];
-            if (s.layer === 0) out.base += w;
+            if (s.layer === 0) {
+                out.base += w;
+                const k = s.slotId ? slotIndex.get(s.slotId) : 0;
+                if (k !== undefined) out.slots[k] += w;
+            }
             else out.paint[s.layer - 1] += w;
             if (!s.allowFoliage) out.noFoliage += w;
         }
@@ -485,6 +568,7 @@ export class TerrainLayerStack {
                 materialId: L.materialId,
                 material: L.material ? L.material.serialize() : null,
             })),
+            slotChannels: Object.fromEntries(this._slotChannels),
             maskRes: this._masks.resolution,
             maskSlices: slices,
             masks: bytesToBase64(this._masks.data),
@@ -529,8 +613,83 @@ export class TerrainLayerStack {
                 channel,
             });
         }
+        this._slotChannels = new Map();
+        const taken = new Set(this._paint.map(l => l.channel));
+        for (const [id, ch] of Object.entries(json.slotChannels ?? {})) {
+            if (typeof ch !== 'number' || !Number.isInteger(ch) || ch < 0 || taken.has(ch)) continue;
+            taken.add(ch);
+            this._masks.ensureChannels(ch + 1);
+            this._slotChannels.set(id, ch);
+        }
+        this._syncSlotChannels();
         this._maskSlicesOnGpu = -1;
         this._changed();
+    }
+
+    /**
+     * Fold every paint layer into the base as PAINT-ONLY slots — the stack the editor authors now, where a
+     * landscape is one slot list. Bottom layer first, so the stacking order is kept: each layer's own
+     * surface and then its slots become slots on top of the base's, each with a copy of the layer's mask,
+     * its rule's opacity scaled by the layer's (zero for a hidden layer).
+     *
+     * The layer's foliage rules join the base's, which places them by the base's dominance from then on,
+     * not the layer's — the one thing the conversion cannot keep. Returns false when there was nothing
+     * to convert. The base becomes this landscape's own copy (its `materialId` link is dropped).
+     */
+    public convertPaintLayersToSlots(): boolean {
+        if (!this._paint.length) return false;
+        const base = this._base.material
+            ? shallowCloneTerrainMaterial(this._base.material)
+            : TerrainMaterial.Create('pbr', { baseColor: [0.38, 0.5, 0.28], roughness: 0.9, metallic: 0 });
+        const copies: { slotId: string; from: number }[] = [];
+        const foliageNames = new Set(base.foliageInclude.map(r => r.name));
+        let mergedFoliage = 0;
+        for (const L of this._paint) {
+            const tm = L.material;
+            if (!tm) continue;
+            const scale = L.visible ? Math.max(0, Math.min(1, L.opacity)) : 0;
+            const add = (slot: Omit<TerrainMaterialSlot, 'id' | 'manual'>) => {
+                const id = `slot_${uuidv4().slice(0, 8)}`;
+                slot.rule.opacity *= scale;
+                base.slots.push({ ...slot, id, manual: true });
+                copies.push({ slotId: id, from: L.channel });
+            };
+            // The layer's own surface as a plain material; its invert flag rides along as the property
+            // `materialSlots` reads for a slot.
+            const own = Material.parse({ ...tm.serialize(), terrainMaterial: undefined });
+            if (tm.invertHeight) own.properties.set('invertHeight', true);
+            add({
+                name: L.name, material: own, surfaceMaterialId: tm.surfaceMaterialId, tiling: tm.tiling,
+                rule: cloneBlendRule(tm.rule), allowFoliage: tm.allowFoliage,
+            });
+            for (const s of tm.slots) add({ ...s, name: `${L.name} ${s.name}`, rule: cloneBlendRule(s.rule) });
+            for (const r of tm.foliageInclude) {
+                if (foliageNames.has(r.name)) continue;
+                foliageNames.add(r.name);
+                base.foliageInclude.push(r);
+                mergedFoliage++;
+            }
+        }
+        if (mergedFoliage)
+            Logger.warn(`${mergedFoliage} foliage rule(s) from converted paint layers now follow the whole landscape.`, 'Terrain');
+
+        // The layers keep their channels until every mask is copied out, so no new slot channel can land
+        // on a mask still waiting to be read.
+        this._base = { material: base, materialId: null };
+        this._syncSlotChannels();
+        for (const c of copies) {
+            const to = this._slotChannels.get(c.slotId);
+            if (to === undefined) continue;
+            this._masks.copyChannel(c.from, to);
+            this._markMaskDirty(to, this._masks.fullRegion());
+        }
+        const layerChannels = this._paint.map(L => L.channel);
+        this._paint = [];
+        const stillUsed = new Set(this.usedChannels());
+        for (const ch of layerChannels) if (!stillUsed.has(ch)) this._fillChannel(ch, 0);
+        this._maskSlicesOnGpu = -1;
+        this._changed();
+        return true;
     }
 
     /**

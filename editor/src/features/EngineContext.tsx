@@ -2058,7 +2058,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    * setupInitialScene parses the scene blob before the libraries finish their async IndexedDB reads, and
    * resyncing against empty ones would unlink every material; the blob's hashes are stashed at parse time.
    */
-  const initialAssetHashesRef = useRef<{ hashes: Record<string, string> | undefined } | null>(null);
+  const initialAssetHashesRef = useRef<{ hashes: Record<string, string> | undefined; version?: number } | null>(null);
   const initialResyncDoneRef = useRef(false);
 
   /**
@@ -2153,7 +2153,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const resyncStep = bootLoadRef.current.step('resync').start();
     // Propagation, not the user's work — resyncing must not make a freshly-opened scene look unsaved.
     withoutDirty(() => {
-      const changed = resyncScene(editorSceneRef.current, engineMaps(), libs, stashed.hashes);
+      const changed = resyncScene(editorSceneRef.current, engineMaps(), libs, stashed.hashes, stashed.version);
       resyncStep.done(changed ? 'updated' : 'up to date');
       if (changed) {
         showBindPoseForSkinnedModels(editorSceneRef.current);
@@ -5606,7 +5606,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         ensureEditorCamera(editorSceneRef.current);
         // Stash the hashes for the deferred initial resync — the libraries have not been read yet, so it
         // cannot happen here. See the initial-resync effect.
-        initialAssetHashesRef.current = { hashes: data.assetHashes };
+        // The hash VERSION too: without it the hashes read as an older format, nothing compares, and the
+        // boot resync silently skips every library edit made since the scene was saved.
+        initialAssetHashesRef.current = { hashes: data.assetHashes, version: data.assetHashVersion };
       } else {
         // No scene has a saved blob yet (fresh meta, or blobs lost) — open the target empty.
         withoutDirty(() => createEmptyScene(editorSceneRef.current));

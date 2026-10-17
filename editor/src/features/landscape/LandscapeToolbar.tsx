@@ -1,12 +1,11 @@
-import { MAX_PAINT_LAYERS, type LandscapeNode, type SculptTool } from 'cleo'
+import { type LandscapeNode, type SculptTool } from 'cleo'
 import { Button, Hint, Select, Slider, cn } from '../../components/ui'
-import { useLandscapeBrush, setBrush, activeStrength, setActiveStrength, strengthSpec, activeToolKey, type PaintTool } from './landscapeBrushStore'
+import { useLandscapeBrush, setBrush, resolvePaintTarget, activeStrength, setActiveStrength, strengthSpec, activeToolKey, type PaintTool } from './landscapeBrushStore'
 import { MODES, SCULPT_TOOLS, PAINT_TOOLS, type LandscapeToolInfo } from './landscapeTools'
 import { useActiveLandscape } from './useActiveLandscape'
-import { useStackEdit } from './useStackEdit'
-import { AddLayerButton } from './LandscapeLayersPanel'
-import LandscapeMaterialSlot from './LandscapeMaterialSlot'
+import { useCleoEngine } from '../EngineContext'
 import { layerStackOf } from '../../utils/terrainAccess'
+import { slotDisplayName } from '../../utils/landscapeSlots'
 
 // The slim toolbar landscape mode floats over the viewport: the mode, the tools as icons, and the two
 // settings that change mid-stroke — size and strength. Everything else (curve, shape, tool options, the
@@ -21,7 +20,7 @@ const bar = 'absolute top-2 left-2 right-2 z-20 flex flex-wrap items-center gap-
 
 export default function LandscapeToolbar() {
   const brush = useLandscapeBrush()
-  const { node, revision, refresh } = useActiveLandscape()
+  const { node, revision } = useActiveLandscape()
 
   if (!node) {
     return (
@@ -46,7 +45,7 @@ export default function LandscapeToolbar() {
           title='Erase every foliage instance under the brush instead of scattering (Shift inverts too)'
           onClick={() => setBrush({ foliageErase: !brush.foliageErase })}>{brush.foliageErase ? 'Erasing' : 'Scattering'}</Button>
       )}
-      {brush.mode === 'paint' && <><Divider /><PaintTarget node={node} revision={revision} refresh={refresh} /></>}
+      {brush.mode === 'paint' && <><Divider /><PaintTarget node={node} revision={revision} /></>}
       <Divider />
       <Slider className='w-40 my-0' labelClassName='w-8' label='Size' min={0} max={1} step={0.001} value={toSlider(brush.radius)}
         readout={t => `${fromSlider(t)}`} title='Brush radius in metres ( [ and ], Ctrl+wheel )'
@@ -61,38 +60,40 @@ export default function LandscapeToolbar() {
 }
 
 /**
- * Which layer the paint brush writes into, and the material that layer draws — the two things a paint
- * stroke is about. They live in the Layers panel as well; they are repeated here because this is where
- * the painting happens, and a material slot behind a panel tab is a material slot nobody finds.
+ * Which paint-only slot of the landscape's material the brush writes into — the one thing a paint stroke
+ * is about. Also in the Layers panel; repeated here because this is where the painting happens. Slots
+ * come only from the landscape's own material: ✎ opens it to add or change them.
  */
-function PaintTarget({ node, revision, refresh }: { node: LandscapeNode; revision: number; refresh: () => void }) {
+function PaintTarget({ node, revision }: { node: LandscapeNode; revision: number }) {
   const brush = useLandscapeBrush()
-  const { assignLayer, addLayer } = useStackEdit(node, refresh)
+  const { enterTerrainMaterialEditor, materials } = useCleoEngine()
   const stack = layerStackOf(node.terrain)
-  const layers = stack ? stack.paintLayers : []
-  // Same fallback as the Layers panel: the topmost layer when the remembered one is gone.
-  const active = layers.find(l => l.id === brush.paintLayerId) ?? layers[layers.length - 1] ?? null
+  const slots = stack ? stack.paintSlots : []
+  // Same fallback as the Layers panel: the topmost paint slot when the remembered one is gone.
+  const active = resolvePaintTarget(slots, brush.paintSlotId)
+  const materialId = stack?.base.materialId ?? null
+  const editButton = materialId && (
+    <Button size='sm' variant='ghost' className='px-1 text-highlight hover:text-highlight'
+      title='Edit the landscape material (add paint-only slots there)'
+      onClick={() => enterTerrainMaterialEditor(materialId)}>✎</Button>
+  )
 
   if (!active) {
     return (
-      <span className='flex items-center gap-2' key={revision}>
-        <span className='text-ui-sm text-muted'>Nothing to paint into yet.</span>
-        <AddLayerButton disabled={false} onAdd={addLayer} />
+      <span className='flex items-center gap-1' key={revision}>
+        <span className='text-ui-sm text-muted'>{stack?.base.material ? 'No paint-only slot in this landscape material.' : 'Choose a landscape material in the Layers panel.'}</span>
+        {editButton}
       </span>
     )
   }
 
   return (
     <span className='flex items-center gap-1' key={revision}>
-      <Select className='w-28' value={active.id} title='The layer this brush paints into'
-        onChange={e => setBrush({ paintLayerId: e.target.value })}>
-        {[...layers].reverse().map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+      <Select className='w-36' value={active.id} title='The paint-only slot this brush paints'
+        onChange={e => setBrush({ paintSlotId: e.target.value })}>
+        {[...slots].reverse().map(s => <option key={s.id} value={s.id}>{slotDisplayName(s, materials)}</option>)}
       </Select>
-      <span className='w-44'>
-        <LandscapeMaterialSlot compact materialId={active.materialId} hasEmbedded={!!active.material}
-          onAssign={asset => assignLayer(active.id, asset)} />
-      </span>
-      <AddLayerButton disabled={layers.length >= MAX_PAINT_LAYERS} onAdd={addLayer} />
+      {editButton}
     </span>
   )
 }

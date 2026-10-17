@@ -29,13 +29,17 @@ get/set material
 ```
 
 `heightAt` is the cheap way to sit something on the ground when you already know the column.
-`layerWeightsAt` tells you which layers cover a point — useful for surface-dependent footstep
-sounds:
+`layerWeightsAt` tells you which surfaces cover a point — useful for surface-dependent footstep
+sounds. `slots[0]` is the ground, `slots[i]` the landscape material's slot `i` (its order in the
+landscape-material editor):
 
 ```ts
-const w = terrain.layerWeightsAt(x, z)   // { base, paint: number[], noFoliage }
-const onRoad = w.paint[roadLayerIndex] > 0.5
+const w = terrain.layerWeightsAt(x, z)   // { base, slots: number[], paint: number[], noFoliage }
+const onRoad = w.slots[roadSlotIndex] > 0.5
 ```
+
+`paint` is only filled for a landscape that still has legacy paint layers (the editor converts them
+to slots on open).
 
 `sampleSplat(x, z, out)` still works, filling the first four weights of the stack; it is the
 compatibility form of the same query.

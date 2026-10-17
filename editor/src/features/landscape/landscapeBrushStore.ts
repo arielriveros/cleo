@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import type { SculptTool, FalloffCurve, BrushShape } from 'cleo'
+import type { SculptTool, FalloffCurve, BrushShape, TerrainMaterialSlot } from 'cleo'
 
 // The landscape brush's settings: which tool, and how it lands. Lives outside React, like toastStore, so
 // the viewport brush (a non-rendering component with its own pointer loop), the tools panel and the
@@ -12,10 +12,10 @@ import type { SculptTool, FalloffCurve, BrushShape } from 'cleo'
 // reference, so a fresh object per read would render forever.
 
 export type LandscapeMode = 'sculpt' | 'paint' | 'foliage'
-/** Paint toward the layer's target opacity, erase it, or erase EVERY layer back to the base. */
+/** Paint toward the slot's target opacity, erase it, or erase EVERY paint slot back to the ground. */
 export type PaintTool = 'paint' | 'erase' | 'clearToBase'
 export type FlattenMode = 'both' | 'raise' | 'lower'
-/** Authoring view: off, the active paint layer's weight, or every surface in its own colour. */
+/** Authoring view: off, the active paint slot's weight, or every surface in its own colour. */
 export type WeightView = 'off' | 'layer' | 'all'
 
 export interface LandscapeBrushSettings {
@@ -49,10 +49,10 @@ export interface LandscapeBrushSettings {
   foliageErase: boolean
   weightView: WeightView
   /**
-   * The paint layer strokes go into, by its stable id. NOT persisted: a layer belongs to a scene, and
-   * the panel falls back to the topmost layer whenever this names none that exists.
+   * The paint-only slot strokes go into, by its stable id. NOT persisted: a slot belongs to a scene, and
+   * the panel falls back to the topmost paint slot whenever this names none that exists.
    */
-  paintLayerId: string | null
+  paintSlotId: string | null
 }
 
 /** Strength slider bounds and meaning per tool. */
@@ -97,7 +97,7 @@ export const DEFAULT_BRUSH: LandscapeBrushSettings = {
   erosionIterations: 4,
   foliageErase: false,
   weightView: 'off',
-  paintLayerId: null,
+  paintSlotId: null,
 }
 
 const STORAGE_KEY = 'cleo_landscape_brush_v1'
@@ -108,7 +108,7 @@ function load(): LandscapeBrushSettings {
     if (!raw) return { ...DEFAULT_BRUSH }
     const saved = JSON.parse(raw)
     // Field by field over the defaults, so a settings blob from an older build picks up new fields.
-    return { ...DEFAULT_BRUSH, ...saved, strengths: { ...(saved?.strengths ?? {}) }, weightView: 'off', paintLayerId: null }
+    return { ...DEFAULT_BRUSH, ...saved, strengths: { ...(saved?.strengths ?? {}) }, weightView: 'off', paintSlotId: null }
   } catch {
     return { ...DEFAULT_BRUSH }
   }
@@ -125,7 +125,7 @@ function persist(): void {
   saveTimer = setTimeout(() => {
     saveTimer = null
     // The weight view is an authoring overlay, not a preference — it never survives a reload.
-    const { paintLayerId: _scene, ...prefs } = state
+    const { paintSlotId: _scene, ...prefs } = state
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...prefs, weightView: 'off' })) } catch { /* quota */ }
   }, 300)
 }
@@ -176,4 +176,9 @@ export function useLandscapeBrush(): LandscapeBrushSettings {
 export function resetBrushForTests(): void {
   state = { ...DEFAULT_BRUSH, strengths: {} }
   for (const l of listeners) l()
+}
+
+/** The paint-only slot the brush paints into: the remembered one, else the topmost. */
+export function resolvePaintTarget(slots: readonly TerrainMaterialSlot[], remembered: string | null): TerrainMaterialSlot | null {
+  return slots.find(s => s.id === remembered) ?? slots[slots.length - 1] ?? null
 }

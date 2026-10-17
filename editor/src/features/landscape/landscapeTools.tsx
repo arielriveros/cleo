@@ -58,14 +58,14 @@ export const SCULPT_TOOLS: LandscapeToolInfo<SculptTool>[] = [
 ]
 
 export const PAINT_TOOLS: LandscapeToolInfo<PaintTool>[] = [
-  { id: 'paint', label: 'Paint', hotkey: '1', icon: PaintIcon, hint: 'Paint the active layer toward its target opacity. Shift erases.' },
-  { id: 'erase', label: 'Erase', hotkey: '2', icon: EraseIcon, hint: 'Erase the active layer, revealing what is under it.' },
-  { id: 'clearToBase', label: 'Clear to Base', hotkey: '3', icon: ClearToBaseIcon, hint: 'Erase EVERY paint layer, back to the base material and its rules.' },
+  { id: 'paint', label: 'Paint', hotkey: '1', icon: PaintIcon, hint: 'Paint the active paint slot toward its target opacity. Shift erases.' },
+  { id: 'erase', label: 'Erase', hotkey: '2', icon: EraseIcon, hint: 'Erase the active paint slot, revealing what is under it.' },
+  { id: 'clearToBase', label: 'Clear to Ground', hotkey: '3', icon: ClearToBaseIcon, hint: 'Erase EVERY paint slot, back to the ground and the automatic slots.' },
 ]
 
 export const MODES: { id: LandscapeMode; label: string; hotkey: string; icon: () => React.ReactElement; hint: string }[] = [
   { id: 'sculpt', label: 'Sculpt', hotkey: 'Q', icon: SculptModeIcon, hint: 'Shape the ground (Q)' },
-  { id: 'paint', label: 'Paint', hotkey: 'W', icon: PaintModeIcon, hint: 'Paint layers over the base material (W)' },
+  { id: 'paint', label: 'Paint', hotkey: 'W', icon: PaintModeIcon, hint: 'Paint roads and paths with the paint-only slots (W)' },
   { id: 'foliage', label: 'Foliage', hotkey: 'E', icon: FoliageModeIcon, hint: 'Scatter or erase the foliage the materials define (E)' },
 ]
 

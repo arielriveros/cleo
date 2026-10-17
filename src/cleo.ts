@@ -202,7 +202,7 @@ export type { HistoryEntry, HistoryOptions } from "./core/history";
 export { Mesh } from "./graphics/mesh";
 export { applyUvMapping, uvConfigOf } from "./graphics/material";
 export type { UvConfig, UvProjection, UvSpace } from "./graphics/material";
-export { Material, TerrainMaterial, CustomMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, migrateFoliageRule, foliageRuleKey, newTerrainSlotId, legacyHeightBlendToRule } from "./graphics/material";
+export { Material, TerrainMaterial, CustomMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, migrateFoliageRule, foliageRuleKey, newTerrainSlotId, legacyHeightBlendToRule, setTerrainSurfaceFrom, shallowCloneTerrainMaterial } from "./graphics/material";
 export type { TerrainBaseType, TerrainFoliageRule, TerrainMaterialSlot, FoliageCollision, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";
 export { customSeedTemplate, customSeedUniforms, tryCompileCustom, assembleCustomFragment,
          setWgslTranslator, hasWgslTranslator, vulkanUnsupportedReason } from "./graphics/systems/customShaders";

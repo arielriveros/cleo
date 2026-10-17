@@ -41,8 +41,9 @@ describe('TerrainMaterialInspector calls its hooks unconditionally', () => {
     };
 
     it('finds the hooks and the guard at all', () => {
-        // A floor, so the assertion below cannot pass because the patterns stopped matching.
-        expect(hookOffsets().length).toBeGreaterThanOrEqual(3);
+        // A floor, so the assertion below cannot pass because the patterns stopped matching. Two: the
+        // foliage editor's own state moved out to TerrainFoliageRules, which has no early return.
+        expect(hookOffsets().length).toBeGreaterThanOrEqual(2);
     });
 
     it('has every hook above the early return', () => {

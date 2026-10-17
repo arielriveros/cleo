@@ -1,166 +1,208 @@
 import { useState } from 'react'
-import {
-  Material, TerrainMaterial, TextureManager, newTerrainSlotId, defaultBlendRule, cloneBlendRule,
-  MAX_TERRAIN_SURFACES,
-} from 'cleo'
+import { Material, TerrainMaterial, newTerrainSlotId, cloneBlendRule, MAX_TERRAIN_SURFACES } from 'cleo'
 import type { TerrainMaterialSlot } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
 import BlendRuleEditor from './BlendRuleEditor'
-import { Button, Hint, NumberInput, Select, TextInput, Toggle, cn, hintClass, labelClass } from '../../components/ui'
-import { useAssetDrop } from '../../utils/useAssetDrop'
+import MaterialPicker, { MaterialMenu, liveMaterial, useCreateMaterial } from './MaterialPicker'
+import { Button, Hint, NumberInput, Popover, TextInput, Toggle, cn, labelClass } from '../../components/ui'
 import type { MaterialAsset } from '../../utils/materials'
+import { newLandscapeSlot, slotDisplayName } from '../../utils/landscapeSlots'
 
-// The extra surfaces of a landscape material: rock on the steep parts, snow up high, gravel in the hollows.
+// The extra surfaces of a landscape material: rock on the steep parts, snow up high, a road where it is
+// painted. The landscape-material editor's slot section; landscape mode only paints them.
 //
-// A slot is an ordinary Material asset plus a blend rule, composited OVER the slots before it — so the
-// material's own surface (slot 0, the editor above) is the floor and no slot ever has to fill the gaps the
-// others leave. The preview shows exactly this, which is why every edit ends in `refreshTerrainMaterialPreview`.
+// A slot is a Material plus a blend rule, composited OVER the slots before it — so the material's own
+// surface (slot 0, the ground) is the floor and no slot ever has to fill the gaps the others leave. A
+// PAINT-ONLY slot shows nowhere until it is brushed on (its rule can still limit where the brush takes).
+//
+// Every change goes through `edit` (which edits the preview material in place and refreshes it), so a
+// change can look its slot up again by id rather than holding a stale reference.
 
-/** Slots one landscape material may hold. The base surface takes one of the stack's surfaces too. */
-const MAX_SLOTS = MAX_TERRAIN_SURFACES - 1
+/** Slots one landscape material may hold. The ground takes one of the stack's surfaces too. */
+export const MAX_SLOTS = MAX_TERRAIN_SURFACES - 1
 
+export type SlotEdit = (
+  label: string,
+  fn: (tm: TerrainMaterial) => void | false,
+  opts?: { channels?: readonly number[]; coalesceKey?: string },
+) => void
+
+/** The slot of `tm` with this id (edits look a slot up again in the copy they are handed). */
+const find = (tm: TerrainMaterial, id: string) => tm.slots.find(s => s.id === id)
+
+/** Slots 1..n of `material` as rows, in blend order. */
+function SlotList(props: { material: TerrainMaterial; edit: SlotEdit; elevationHint?: string | null }) {
+  const { material, edit } = props
+  const n = material.slots.length
+  const order = material.slots.map((_, i) => i)
+
+  return <>
+    {order.map(i => {
+      const slot = material.slots[i]
+      const move = (dir: number) => edit('Move slot', tm => {
+        const j = i + dir
+        if (j < 0 || j >= tm.slots.length) return false
+        const [s] = tm.slots.splice(i, 1)
+        tm.slots.splice(j, 0, s)
+      })
+      return (
+        <SlotRow key={slot.id} slot={slot} index={i} edit={edit}
+          elevationHint={props.elevationHint}
+          canUp={i > 0} canDown={i < n - 1}
+          onUp={() => move(-1)} onDown={() => move(1)} />
+      )
+    })}
+  </>
+}
+
+function SlotRow(props: {
+  slot: TerrainMaterialSlot
+  index: number
+  edit: SlotEdit
+  elevationHint?: string | null
+  canUp: boolean
+  canDown: boolean
+  onUp: () => void
+  onDown: () => void
+}) {
+  const { slot, edit } = props
+  const id = slot.id
+  const [showRule, setShowRule] = useState(false)
+  const { materials } = useCleoEngine()
+  const linked = slot.surfaceMaterialId ? materials.find(m => m.id === slot.surfaceMaterialId) : undefined
+  const set = (label: string, fn: (s: TerrainMaterialSlot) => void, coalesceKey?: string,
+               channels?: readonly number[]) =>
+    edit(label, tm => { const s = find(tm, id); if (!s) return false; fn(s) },
+         { coalesceKey: coalesceKey && `${id}:${coalesceKey}`, channels })
+  const link = (a: MaterialAsset) => set(`Slot material: ${a.name}`, s => {
+    s.material = liveMaterial(a)
+    s.surfaceMaterialId = a.id
+    // The stored name follows the material too, for wherever the library is not at hand to look it up.
+    s.name = a.name
+  })
+  // A draft the rule editor mutates; each change is copied into the edited material as a new rule.
+  const rule = cloneBlendRule(slot.rule)
+
+  return (
+    <div className='rounded border border-control p-2 space-y-2'>
+      <div className='flex items-center gap-1'>
+        <span className='text-ui-xs text-muted w-4 text-center' title='Blend order: higher numbers draw over lower ones'>{props.index + 1}</span>
+        {linked
+          ? <span className='flex-1 min-w-0 truncate px-1 text-ui' title='Named after its material — rename the material to rename the slot'>{linked.name}</span>
+          : <TextInput className='flex-1 min-w-0 px-1 py-0.5'
+              value={slot.name} onChange={v => set('Rename slot', s => { s.name = v }, 'name')} />}
+        <Button size='sm' variant='ghost' title='Move up' disabled={!props.canUp} onClick={props.onUp}>↑</Button>
+        <Button size='sm' variant='ghost' title='Move down' disabled={!props.canDown} onClick={props.onDown}>↓</Button>
+        <Button size='sm' variant='ghost' title='Duplicate this slot' onClick={() => edit('Duplicate slot', tm => {
+          const i = tm.slots.findIndex(s => s.id === id)
+          if (i < 0) return false
+          tm.slots.splice(i + 1, 0, {
+            ...slot, id: newTerrainSlotId(), name: `${slotDisplayName(slot, materials)} copy`,
+            material: Material.parse(slot.material.serialize()), rule: cloneBlendRule(slot.rule),
+          })
+        })}>⧉</Button>
+        <Button variant='remove' size='sm' title='Remove this slot (and its painting)'
+          onClick={() => edit('Remove slot', tm => {
+            const i = tm.slots.findIndex(s => s.id === id)
+            if (i < 0) return false
+            tm.slots.splice(i, 1)
+          })}>✕</Button>
+      </div>
+
+      <MaterialPicker value={slot.surfaceMaterialId} onPick={link} newName={() => slot.name} />
+
+      <div className='flex items-center justify-between gap-2'>
+        <span className={labelClass} title='Show this surface ONLY where it is painted with the landscape brush — roads, paths, riverbeds. Off: it appears wherever its rule says.'>Paint only</span>
+        <Toggle checked={slot.manual}
+          onChange={c => set(c ? 'Make slot paint-only' : 'Make slot automatic', s => {
+            s.manual = c
+            if (c) s.allowFoliage = false
+          })} />
+      </div>
+      {slot.manual &&
+        <Hint>Paint only: brushed on in Landscape mode; the preview here does not show it.</Hint>}
+
+      <div className='flex items-center justify-between gap-2'>
+        <span className={labelClass} title='UV repeats across the whole landscape, like the ground’s own tiling'>Tiling</span>
+        <NumberInput className='w-16' value={slot.tiling} min={0.01} step={1}
+          onChange={v => set('Slot tiling', s => { s.tiling = Math.max(0.01, v) }, 'tiling')} />
+      </div>
+      <div className='flex items-center justify-between gap-2'>
+        <span className={labelClass} title='Let the foliage brush scatter where this slot dominates — off for rock and roads'>Allow foliage</span>
+        <Toggle checked={slot.allowFoliage} onChange={c => set('Slot foliage', s => { s.allowFoliage = c })} />
+      </div>
+
+      <div>
+        {slot.manual && (
+          <button type='button' className={cn(labelClass, 'w-full text-left hover:text-fg')}
+            title='Optionally keep the painting off some ground — e.g. a road that never climbs cliffs'
+            onClick={() => setShowRule(v => !v)}>
+            {showRule ? '▾' : '▸'} Limit by slope / elevation
+          </button>
+        )}
+        {(!slot.manual || showRule) &&
+          <BlendRuleEditor rule={rule} elevationHint={props.elevationHint}
+            onChange={() => set('Slot rule', s => { s.rule = cloneBlendRule(rule) }, 'rule')} />}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * "+ Slot" and "+ Paint slot": each opens the material menu, so a slot arrives with its surface — a
+ * library material or a new one, made right here.
+ */
+function AddSlotButtons({ material, edit }: { material: TerrainMaterial; edit: SlotEdit }) {
+  const create = useCreateMaterial()
+  const count = material.slots.length
+  const full = count >= MAX_SLOTS
+  const add = (manual: boolean, asset: MaterialAsset) => {
+    const slot = newLandscapeSlot({
+      name: asset.name, material: liveMaterial(asset), surfaceMaterialId: asset.id,
+      tiling: material.tiling, manual,
+    })
+    edit(manual ? 'Add paint slot' : 'Add slot', tm => {
+      if (tm.slots.length >= MAX_SLOTS) return false
+      tm.slots.push(slot)
+    })
+  }
+  const menu = (manual: boolean, label: string, title: string) => (
+    <Popover align='right' disabled={full} title={title}
+      trigger={<span className='text-ui px-1'>{label}</span>}>
+      {close => <MaterialMenu close={close} onPick={a => add(manual, a)}
+        onNew={() => add(manual, create(`${manual ? 'Paint' : 'Slot'} ${count + 1}`))} />}
+    </Popover>
+  )
+  return (
+    <span className='flex items-center gap-1'>
+      {menu(false, '+ Slot', 'Add a surface that blends in by slope and elevation')}
+      {menu(true, '+ Paint slot', 'Add a surface that shows only where you paint it — a road, a path')}
+    </span>
+  )
+}
+
+/** The landscape-material editor's slot section: the list, edited in place on its preview material. */
 export default function TerrainSlots(props: { material: TerrainMaterial; onChange: () => void; elevationHint?: string | null }) {
   const { material, onChange } = props
   const [, force] = useState(0)
-  const changed = () => { onChange(); force(x => x + 1) }
-
-  const addSlot = (asset?: MaterialAsset) => {
-    if (material.slots.length >= MAX_SLOTS) return
-    const slot: TerrainMaterialSlot = {
-      id: newTerrainSlotId(),
-      name: asset?.name ?? `Slot ${material.slots.length + 1}`,
-      material: asset ? liveMaterial(asset) : Material.PBR({ baseColor: [0.6, 0.6, 0.6], roughness: 0.9, metallic: 0 }),
-      surfaceMaterialId: asset?.id ?? null,
-      tiling: material.tiling,
-      // A new slot is visible everywhere until it is given a rule; inheriting the base's would hide it.
-      rule: defaultBlendRule(),
-      allowFoliage: false,
-    }
-    material.slots.push(slot)
-    changed()
-  }
+  const edit: SlotEdit = (_label, fn) => { if (fn(material) !== false) { onChange(); force(x => x + 1) } }
+  // Read so the list re-renders when the library changes (a new material's name appears in its picker).
+  useCleoEngine()
 
   return (
     <Collapsable title={material.slots.length ? `Slots (${material.slots.length})` : 'Slots'} persistKey='terrainMaterial.slots'>
       <div className='p-2 space-y-2'>
         <Hint>
           Extra surfaces blended over this material wherever their rule says so — rock on steep ground, snow
-          above a height. The material’s own surface, edited above, always fills what they leave.
+          above a height — or, paint only, just where they are brushed in Landscape mode. The ground,
+          above, always fills what they leave.
         </Hint>
-        {material.slots.map((slot, i) => (
-          <SlotRow key={slot.id} slot={slot} index={i} count={material.slots.length}
-            elevationHint={props.elevationHint}
-            onChange={changed}
-            onMove={dir => {
-              const j = i + dir
-              if (j < 0 || j >= material.slots.length) return
-              const [s] = material.slots.splice(i, 1)
-              material.slots.splice(j, 0, s)
-              changed()
-            }}
-            onDuplicate={() => {
-              material.slots.splice(i + 1, 0, {
-                ...slot, id: newTerrainSlotId(), name: `${slot.name} copy`,
-                material: Material.parse(slot.material.serialize()), rule: cloneBlendRule(slot.rule),
-              })
-              changed()
-            }}
-            onRemove={() => { material.slots.splice(i, 1); changed() }} />
-        ))}
-        <AddSlot disabled={material.slots.length >= MAX_SLOTS} onAdd={addSlot} />
+        <SlotList material={material} edit={edit} elevationHint={props.elevationHint} />
+        <div className='flex justify-end'><AddSlotButtons material={material} edit={edit} /></div>
         {material.slots.length >= MAX_SLOTS &&
-          <Hint>A landscape material can hold {MAX_SLOTS} slots; the landscape itself can show {MAX_TERRAIN_SURFACES} surfaces at once, base and paint layers together.</Hint>}
+          <Hint>A landscape material can hold {MAX_SLOTS} slots; the landscape itself can show {MAX_TERRAIN_SURFACES} surfaces at once.</Hint>}
       </div>
     </Collapsable>
   )
-}
-
-function SlotRow(props: {
-  slot: TerrainMaterialSlot
-  index: number
-  count: number
-  elevationHint?: string | null
-  onChange: () => void
-  onMove: (dir: -1 | 1) => void
-  onDuplicate: () => void
-  onRemove: () => void
-}) {
-  const { slot } = props
-  const { materials, enterMaterialEditor } = useCleoEngine()
-  const asset = slot.surfaceMaterialId ? materials.find(m => m.id === slot.surfaceMaterialId) : undefined
-  const link = (id: string) => {
-    const a = materials.find(m => m.id === id)
-    if (!a) return
-    slot.material = liveMaterial(a)
-    slot.surfaceMaterialId = a.id
-    if (slot.name.startsWith('Slot ')) slot.name = a.name
-    props.onChange()
-  }
-  const { dragOver, dropProps } = useAssetDrop('text/cleo-material', link, { stopPropagation: true })
-
-  return (
-    <div {...dropProps} className={cn('rounded border p-2 space-y-2', dragOver ? 'border-selected bg-control' : 'border-control')}>
-      <div className='flex items-center gap-1'>
-        {/* Painted in order: a slot lower in the list is covered by the ones under it in the panel. */}
-        <span className='text-ui-xs text-muted w-4 text-center' title='Blend order: later slots draw over earlier ones'>{props.index + 1}</span>
-        <TextInput className='flex-1 min-w-0 px-1 py-0.5'
-          value={slot.name} onChange={v => { slot.name = v; props.onChange() }} />
-        <Button size='sm' variant='ghost' title='Move up (drawn earlier)' disabled={props.index === 0} onClick={() => props.onMove(-1)}>↑</Button>
-        <Button size='sm' variant='ghost' title='Move down (drawn later)' disabled={props.index === props.count - 1} onClick={() => props.onMove(1)}>↓</Button>
-        <Button size='sm' variant='ghost' title='Duplicate this slot' onClick={props.onDuplicate}>⧉</Button>
-        <Button variant='remove' size='sm' title='Remove this slot' onClick={props.onRemove}>✕</Button>
-      </div>
-
-      <div className='flex items-center gap-1'>
-        <Select className='flex-1 min-w-0 px-1 py-0.5'
-          value={slot.surfaceMaterialId ?? ''} onChange={e => { if (e.target.value) link(e.target.value) }}
-          title='The Material asset this surface draws — drop one here too'>
-          <option value=''>{asset ? asset.name : slot.surfaceMaterialId ? '(missing material)' : '(unlinked surface)'}</option>
-          {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </Select>
-        {asset && <Button size='sm' variant='ghost' title='Edit that material' onClick={() => enterMaterialEditor(asset.id)}>✎</Button>}
-      </div>
-      {slot.surfaceMaterialId && !asset &&
-        <p className={cn(hintClass, 'text-warning')}>The linked material is missing from the library; this slot’s copy still draws.</p>}
-
-      <div className='flex items-center justify-between gap-2'>
-        <span className={labelClass} title='UV repeats across the whole landscape, like the material’s own tiling'>Tiling</span>
-        <NumberInput className='w-16' value={slot.tiling} min={0.01} step={1}
-          onChange={v => { slot.tiling = Math.max(0.01, v); props.onChange() }} />
-      </div>
-      <div className='flex items-center justify-between gap-2'>
-        <span className={labelClass} title='Let the foliage brush scatter where this slot dominates — off for rock and roads'>Allow foliage</span>
-        <Toggle checked={slot.allowFoliage} onChange={c => { slot.allowFoliage = c; props.onChange() }} />
-      </div>
-
-      <BlendRuleEditor rule={slot.rule} onChange={props.onChange} elevationHint={props.elevationHint} />
-    </div>
-  )
-}
-
-function AddSlot({ disabled, onAdd }: { disabled: boolean; onAdd: (asset?: MaterialAsset) => void }) {
-  const { materials } = useCleoEngine()
-  const [pick, setPick] = useState('')
-  return (
-    <div className='flex gap-1'>
-      <Select className='flex-1 min-w-0 px-1 py-0.5'
-        value={pick} disabled={disabled} onChange={e => setPick(e.target.value)}>
-        <option value=''>(empty surface)</option>
-        {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-      </Select>
-      <Button size='sm' variant='success' disabled={disabled}
-        title='Add a surface blended over this material by its own rule'
-        onClick={() => { onAdd(materials.find(m => m.id === pick)); setPick('') }}>Add slot</Button>
-    </div>
-  )
-}
-
-/** A library material as a live one, with its textures restored the way `applyMaterialAsset` does. */
-function liveMaterial(asset: MaterialAsset): Material {
-  for (const t of asset.textures || []) {
-    if (t?.id && !TextureManager.Instance.getTexture(t.id))
-      TextureManager.Instance.addTextureFromBase64(t.data, t.config, t.id)
-  }
-  return Material.parse(asset.material)
 }

@@ -74,27 +74,38 @@ Every stroke is **one undo step**, and so is a fill, an invert or a heightmap im
 
 ## Paint
 
-The **Landscape Layers** panel holds the stack:
+A landscape is painted with **one landscape material**, chosen at the top of the **Landscape
+Layers** panel — from the library, or **+ New landscape material**, which creates one, assigns it
+and opens it in the editor. ✎ opens it again. Landscape mode never lists the project's Materials:
+what the surfaces are is authored in the landscape material.
 
-- The **base** — one landscape material covering the whole terrain. No painting needed, and
-  nothing can erase it; it is what shows through everything else.
-- **Paint layers** above it, topmost first, each a landscape material with its own painted mask,
-  an opacity, a visibility toggle, and Fill / Clear / Invert.
+The panel lists that material's slots, topmost first:
 
-Paint, Erase and **Clear to base** work toward a target opacity — paint a dirt road at 60% and it
-stops there. Because each layer is its own mask rather than a share of one normalized splat,
-erasing a road reveals what is under it, automatic rules included.
+- The **Ground** covers the whole terrain. Nothing can erase it.
+- **Auto** slots blend in by their rule — rock on the slopes, snow up high — with no painting.
+- **Paint** slots (Paint only in the material) show nowhere until brushed on: roads, paths,
+  riverbeds. Click one to paint it; it also has **Fill**, **Clear** and **Invert**. The viewport
+  toolbar repeats the choice while in Paint mode.
 
-Fifteen paint layers, and sixteen surfaces on screen at once counting the slots each material
-contributes. Masks are their own resolution (**Paint resolution** in the node inspector, 256–2048),
-independent of the height grid, because a road needs finer texels than a hill does.
+Paint, Erase and **Clear to ground** work toward a target opacity — paint a dirt road at 60% and it
+stops there. Erasing a road reveals what is under it, automatic slots included. Painting is kept per
+slot, so editing and saving the landscape material keeps it; removing a paint slot discards its
+painting.
 
-**Show weights** in the Layers panel tints the ground by which surface is winning, which is the
-quickest way to see what a rule is actually doing.
+Fifteen paint slots, and sixteen surfaces on screen at once. Masks are their own resolution
+(**Paint resolution** in the node inspector, 256–2048), independent of the height grid, because a
+road needs finer texels than a hill does.
+
+Landscapes saved with the older **paint layers** convert on open: each layer becomes paint slots
+carrying its painted mask, and the material becomes embedded — **Save to library and edit** puts it
+back in the library. A layer's foliage rules join the material's own.
+
+**View → All** tints the ground by which surface is winning, which is the quickest way to see what
+a rule is actually doing.
 
 ## Foliage
 
-Scatter the foliage defined by the layer that dominates under the brush, or switch to **Erase**.
+Scatter the foliage rules of the landscape material, or switch to **Erase**.
 
 - **Generate foliage everywhere** fills the whole landscape at once, and confirms first when doing
   so would discard instances placed by hand.
@@ -104,14 +115,18 @@ Scatter the foliage defined by the layer that dominates under the brush, or swit
 
 ## Landscape materials
 
-A landscape material (`.tmat`) is a surface for the base or for a paint layer. Open one to get:
+A landscape material (`.tmat`) is everything a landscape is painted with. Open one to get:
 
-- **Base surface** — the full material editor, on any of Basic, Blinn-Phong or PBR.
-- **Landscape blend** — tiling (with what one repeat measures in metres), whether foliage may
-  scatter here, and the **blend rule** for this surface.
-- **Slots** — extra surfaces blended over it, each an ordinary Material asset with its own tiling
-  and rule.
-- **Foliage rules** — what this surface scatters.
+- **Ground** — the surface covering the whole landscape: a Material asset picked from the library,
+  or **+ New material** made right there (from an older asset, it starts as a copy of the built-in
+  surface). Tiling, with what one repeat measures in metres, and whether foliage may scatter.
+- **Slots** — surfaces over the ground, each a Material (picked, or **+ New material**) with its own
+  tiling and **blend rule**. **+ Slot** adds one that blends by rule; **+ Paint slot** adds one that is
+  **Paint only**, brushed on in landscape mode (its rule can still limit it, under *Limit by slope /
+  elevation*). The preview does not show paint-only slots.
+- **Foliage rules** — what this material scatters.
+
+Editing a Material asset updates every ground and slot that uses it.
 
 ### Blend rules
 
