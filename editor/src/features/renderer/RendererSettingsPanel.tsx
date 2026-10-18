@@ -381,7 +381,7 @@ export default function RendererSettingsPanel() {
       >
         <Toggle label='Frustum Culling' checked={frustumCulling} className='my-1'
           onChange={(c) => { renderer.frustumCulling = c; setFrustumCulling(c); touch(); }} />
-        <Field labelClassName={LABEL_W} label='Foliage Dist'>
+        <Field labelClassName={LABEL_W} label='Foliage Dist' hint='How far grass draws, and the least distance any foliage draws. Trees with LOD levels or an impostor draw on past their last band unless the model sets its own cull distance.'>
           <NumberInput value={foliageCullDistance} min={0} step={5} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.foliageCullDistance = v; setFoliageCullDistance(v); touch(); }} />
         </Field>
@@ -389,9 +389,9 @@ export default function RendererSettingsPanel() {
           <NumberInput value={foliageCellSize} min={1} step={4} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.foliageCellSize = v; setFoliageCellSize(v); touch(); }} />
         </Field>
-        {/* Density scaling. LOD reduces what one instance COSTS; this reduces how many there are, and
-            neither bounds a scatter on its own. 1 draws every instance. */}
-        <Field labelClassName={LABEL_W} label='Foliage Density'>
+        {/* Density scaling, for GRASS (billboard) layers only: dropping trees at a LOD switch is a
+            visible pop, so mesh props are never thinned. 1 draws every instance. */}
+        <Field labelClassName={LABEL_W} label='Grass Density' hint='How much billboard grass thins with distance (1 = none). Mesh props such as trees are never thinned.'>
           <NumberInput value={foliageDensity} min={0.1} max={1} step={0.05} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.foliageDensityFalloff = v; setFoliageDensity(renderer.foliageDensityFalloff); touch(); }} />
         </Field>

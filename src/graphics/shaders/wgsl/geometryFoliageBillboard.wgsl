@@ -26,6 +26,8 @@ fn fs_main(in: VertexOutput) -> GBuffer {
     // distant cards thin out and shimmer (chunks/alphaCutout.wgsl).
     let a = cutoutAlpha(c.a, dpdx(in.uv), dpdy(in.uv), textureDimensions(u_texture_texture, 0));
     if (a < 0.5) { discard; }
+    // The mesh <-> impostor hand-off and the cull fade: the same dissolve the mesh levels use.
+    if (!lodFadeKeeps(in.lodFade, in.position.xy)) { discard; }
 
     var out: GBuffer;
     out.albedoMetallic = vec4<f32>(toLinear(c.rgb), 0.0);   // sRGB -> linear

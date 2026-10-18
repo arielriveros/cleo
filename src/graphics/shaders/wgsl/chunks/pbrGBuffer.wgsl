@@ -325,6 +325,9 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
         if (mask < u_material.alphaCutoff) { discard; }
     }
 
+    // Foliage LOD crossfade: a screen-door dissolve between levels (always kept outside foliage).
+    if (!lodFadeKeeps(in.lodFade, in.position.xy)) { discard; }
+
     var albedo = u_material.baseColor;
     if (u_material.hasBaseColorTexture != 0) {
         let texel = sampleSurface(u_material_baseColorTexture_texture, u_material_baseColorTexture_sampler, su, uv);

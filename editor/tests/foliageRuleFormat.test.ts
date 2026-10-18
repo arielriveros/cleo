@@ -120,6 +120,19 @@ describe('resolveFoliageRuleGeometry', () => {
     expect((rule as any).models[0].geometry.positions).toBeInstanceOf(Float32Array);
   });
 
+  it('takes the cull distance from the MODEL on every resolve, not the copy made when the rule was added', () => {
+    // A grass model's cull set to 20 m in the model editor never reached the foliage: the rule kept the
+    // value from when it was created, so the grass drew far past 20 m.
+    registerFoliageSourceResolver(() => ({ model: { ...modelAsset, cullDistance: 20 }, library: [modelAsset], materials: [] }));
+    const stale = { ...meshRule(), cullDistance: 0 };
+    resolveFoliageRuleGeometry(stale);
+    expect((stale as any).cullDistance).toBe(20);
+    // Even a rule that still carries embedded geometry (legacy) follows its model's cull.
+    const legacy = { ...meshRule(), cullDistance: 300, models: [{ geometry: bakedGeometry(), material: { type: 'pbr' } }] };
+    resolveFoliageRuleGeometry(legacy);
+    expect((legacy as any).cullDistance).toBe(20);
+  });
+
   it('produces FLAT typed arrays, not one array object per vertex', () => {
     // The whole point: the old shape was 5 JS arrays per vertex, ~4x the memory and a million objects.
     registerFoliageSourceResolver(() => ({ model: modelAsset, library: [modelAsset], materials: [] }));

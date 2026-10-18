@@ -6,9 +6,6 @@ import { Button, Field, NumberInput, Select, TextInput, cn, labelClass, hintClas
 import ModelPartsSection from './ModelPartsSection'
 import GenerateLodsModal, { defaultSpecs, type GenerateLodsSpec } from './GenerateLodsModal'
 import { modelAssetTextureIds, modelAssetDiameter } from '../../utils/models'
-// The renderer's own `_foliageCullDistance` default. Mirrored rather than imported because the
-// renderer instance is not in scope here, and this panel only needs it to warn about a dead band.
-const GLOBAL_FOLIAGE_CULL = 65
 
 const FIELDS_HINT = 'A field blends this model’s clips by 1D or 2D parameters. Use one as a state in the animation graph instead of a single clip.'
 const LOD_HINT = 'Each level takes over at its distance. Generated levels are part of this model (deleted with it, moved with it); a level added from another model updates when that model is edited. Only LOD0 is edited here; selecting a level just previews it.'
@@ -66,10 +63,11 @@ export default function ModelInspector() {
     return Math.max(max, image?.naturalWidth ?? 0, image?.naturalHeight ?? 0)
   }, 0)
 
-  // A level whose band starts at or past the cull distance is never drawn. It is silent otherwise:
-  // the level exists, its textures were generated, the panel lists it, and nothing renders it. The
-  // effective cull is the asset's own when set, and the renderer's foliage global when it is not.
-  const effectiveCull = modelSession.cullDistance > 0 ? modelSession.cullDistance : GLOBAL_FOLIAGE_CULL
+  // A level whose band starts at or past an EXPLICIT cull distance is never drawn. It is silent
+  // otherwise: the level exists, its textures were generated, the panel lists it, and nothing renders
+  // it. With no cull set nothing is dead: foliage then draws past its last band (foliageEffectiveCull)
+  // and a placed copy never culls.
+  const effectiveCull = modelSession.cullDistance > 0 ? modelSession.cullDistance : Infinity
   const deadFrom = modelSession.distances.findIndex((d, i) => i > 0 && d >= effectiveCull)
 
   const label = labelClass
@@ -160,9 +158,8 @@ export default function ModelInspector() {
                       </Field>
                       {deadFrom >= 0 && i >= deadFrom && (
                         <p className='text-ui-sm text-warning'>
-                          Never drawn: everything is culled at {Math.round(effectiveCull)} m
-                          {modelSession.cullDistance > 0 ? '' : ' (the renderer\'s default)'}.
-                          Raise the cull distance below, or bring this band closer.
+                          Never drawn: everything is culled at {Math.round(effectiveCull)} m.
+                          Raise the cull distance below (0 = automatic), or bring this band closer.
                         </p>
                       )}
                     </>
@@ -198,7 +195,7 @@ export default function ModelInspector() {
           )}
 
           {!modelSession.skinned && (
-            <Field label='Cull distance (0 = never)' hint='Placed copies disappear beyond this camera distance. 0 = never cull.'
+            <Field label='Cull distance (0 = automatic)' hint='Copies disappear beyond this camera distance (foliage dissolves out rather than popping). 0 = automatic: a placed copy never culls, and foliage draws on past its last LOD or impostor band, at least to the scene foliage distance.'
                    className='my-0 pt-1 border-t border-control' labelClassName='w-auto'>
               <NumberInput
                 min={0} className={num}

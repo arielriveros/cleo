@@ -398,7 +398,7 @@ export type { SculptTool, FalloffCurve, BrushShape, BrushSpec, SculptParams, Gri
 export { decodeHeightmap, decodePng, decodeRaw16, encodePng16, encodeRaw16, heightsFromImage, imageFromHeights, sampleHeight } from "./terrain/heightmapIO";
 export type { HeightImage, HeightImportOptions } from "./terrain/heightmapIO";
 export type { TerrainConfig, SculptBrush, SculptMode, TerrainLayer, PaintBrush, TerrainChunk, TerrainLodSettings, FoliageGenerateResult } from "./terrain/terrain";
-export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES, FOLIAGE_DRAW_TRIANGLE_BUDGET } from "./terrain/foliage";
+export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES, FOLIAGE_DRAW_TRIANGLE_BUDGET, foliageEffectiveCull, foliageLodBands } from "./terrain/foliage";
 export type { FoliageKind, FoliageParams } from "./terrain/foliage";
 export { FoliageColliderField, DEFAULT_FOLIAGE_COLLIDERS } from "./terrain/foliageColliders";
 export type { FoliageColliderSettings } from "./terrain/foliageColliders";

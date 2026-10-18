@@ -159,9 +159,9 @@ import {
     collectOrphanedFoliageBuffers, collectOrphanedFoliageMeshes, foliageCullLimitSq,
     foliageAdmitCount, createFoliageBatch, foliageBatchStale, foliageBatchInstances,
     packFoliageInstances, rememberFoliageBatch, foliageChunkLimit, foliageChunkBounds,
-    foliageKeepFraction, FOLIAGE_DENSITY_FALLOFF,
+    foliageKeepFraction, FOLIAGE_DENSITY_FALLOFF, foliageEffectiveCull, foliageLodBands,
 } from '../terrain/foliage';
-import type { FoliageBatch, FoliageLayer } from '../terrain/foliage';
+import type { FoliageBatch, FoliageLayer, FoliageBand } from '../terrain/foliage';
 
 // The context now lives in its own leaf module (see glContext.ts); re-exported here so every existing
 // `import { gl } from './renderer'` keeps working.
@@ -3081,86 +3081,89 @@ export class Renderer {
                 layer.buckets.length = 0;
                 if (layer.count === 0 || !layer.initialized) continue;
 
-                // The layer's own (mesh-asset) cull threshold wins over the global foliage distance.
-                const cullDistance = layer.cullDistance > 0 ? layer.cullDistance : this._foliageCullDistance;
+                // How far this layer draws: its own cull, or past its last LOD/impostor band (see
+                // foliageEffectiveCull — "unset" used to mean the scene's 65 m, which hid every LOD level
+                // and the impostor of anything taller than a bush).
+                const cullDistance = foliageEffectiveCull(layer, this._foliageCullDistance);
                 const maxD2 = cullDistance > 0 ? cullDistance * cullDistance : Infinity;
 
                 // Visible cells bucketed by detail level so shader/material binds stay one-per-level.
                 // Bucket index levels.length is the billboard-impostor bucket.
                 const billboardBucket = layer.levels.length;
                 const buckets = layer.buckets;
-                // Newly-visible cells, nearest first, so the admission budget below spends itself on the
-                // ones the camera is heading towards rather than on whichever the grid happened to list.
-                const pending: { cell: FoliageCell; d2: number }[] = [];
+                // Where each bucket fades in and out, per instance (chunks/instancedVertex.wgsl). A cell
+                // straddling a band edge goes into BOTH neighbouring buckets; the dissolve does the rest.
+                const bands = foliageLodBands(layer, cullDistance);
+                this._foliageBands.set(layer, bands);
+                const camX = camPos[0], camY = camPos[1], camZ = camPos[2];
+                const place = (cell: FoliageCell) => {
+                    // The cell's distance SPAN, from its instance origins (not the geometry-padded box).
+                    const dn = Math.sqrt(this._aabbDistSq(camPos, cell.pmin, cell.pmax));
+                    const fx = Math.max(Math.abs(camX - cell.pmin[0]), Math.abs(camX - cell.pmax[0]));
+                    const fy = Math.max(Math.abs(camY - cell.pmin[1]), Math.abs(camY - cell.pmax[1]));
+                    const fz = Math.max(Math.abs(camZ - cell.pmin[2]), Math.abs(camZ - cell.pmax[2]));
+                    const df = Math.sqrt(fx * fx + fy * fy + fz * fz);
+                    let first = -1;
+                    for (let slot = 0; slot <= billboardBucket; slot++) {
+                        const band = bands[slot];
+                        if (!band || band.lo > df || band.hi < dn) continue;
+                        (buckets[slot] ??= []).push(cell);
+                        if (first < 0) first = slot;
+                    }
+                    cell.lod = Math.max(0, first);
+                };
+
+                // Newly in-range cells, nearest first. Off-screen ones are admitted for free (nothing is
+                // drawn, so nothing pops); only on-screen arrivals spend the budget — which is what keeps
+                // turning around from revealing trees that trickle in a few cells per frame.
+                const pending: { cell: FoliageCell; d2: number; onScreen: boolean }[] = [];
                 // Was ANY cell of this layer already up? If not, this is the layer's first sight — a
-                // scene load, or the camera reaching a new landscape — and the budget is skipped. Rate-
-                // limiting there would not smooth a spike, it would just make the whole layer fade in
-                // over a second. The budget exists for the steady state, where a moving camera admits a
-                // few cells at a time.
+                // scene load, the camera reaching a new landscape, or a rebuild after a brush stroke —
+                // and everything is admitted at once rather than faded in over a second.
                 let anyWasVisible = false;
                 frameStats.foliageCellsScanned += layer.cells.length;
                 for (const cell of layer.cells) {
-                    // Read BEFORE any cull branch: a cell that is visible but frustum-culled this frame
-                    // still proves the layer is up. Sampling it after the culls would let a fast turn —
-                    // every old cell swinging out of frustum at once — read as "first sight" and admit a
-                    // whole new view in one frame, which is the exact spike being smoothed.
+                    // Read BEFORE any cull branch: a cell that is up but frustum-culled this frame still
+                    // proves the layer is up.
                     const wasVisible = cell.visible;
                     anyWasVisible ||= wasVisible;
                     const d2 = this._aabbDistSq(camPos, cell.min, cell.max);
-                    // Distance cull: nearest point of the cell's AABB to the camera, with a hysteresis
-                    // band so a cell on the boundary cannot flip every frame. Coming IN costs a whole
-                    // cell's worth of instances, so the band is asymmetric in the cheap direction:
-                    // appear at cullDistance, disappear only past cullDistance x hysteresis.
+                    // Distance cull with a hysteresis band, so a cell on the boundary cannot flip every
+                    // frame. Instances themselves dissolve out before the cull (the last band's ramp), so
+                    // the step here is never seen.
                     const limit2 = foliageCullLimitSq(maxD2, wasVisible, this._foliageCullHysteresis);
                     if (d2 > limit2) {
                         frameStats.culledInstances += cell.count;
                         cell.visible = false;
                         continue;
                     }
-                    // Frustum cull (honors the global toggle). Deliberately NOT hysteresis-damped and it
-                    // does not clear `visible`: turning on the spot must not make the cell behind you
-                    // re-pay admission when you turn back.
-                    if (this._frustumCulling && !this._frustum.intersectsAABB(cell.min, cell.max)) {
-                        frameStats.culledInstances += cell.count;
-                        continue;
-                    }
-                    // Newly visible: queue for the budget rather than drawing it this frame.
+                    const onScreen = !this._frustumCulling || this._frustum.intersectsAABB(cell.min, cell.max);
+                    // `visible` means ADMITTED: in range, whether or not it is on screen this frame.
                     if (!wasVisible && this._foliageAdmitPerFrame > 0) {
-                        pending.push({ cell, d2 });
-                        frameStats.culledInstances += cell.count;
+                        pending.push({ cell, d2, onScreen });
+                        if (onScreen) frameStats.culledInstances += cell.count;
                         continue;
                     }
                     cell.visible = true;
-
-                    // Per-cell LOD by the same distance bands a mesh asset's LodGroup uses, with the
-                    // same x0.9 hysteresis: coarsen immediately, refine only comfortably inside.
-                    let target = 0;
-                    if (billboardBucket > 1 || layer.billboardModel) {
-                        const d = Math.sqrt(d2);
-                        if (layer.billboardModel && d >= layer.billboardDistance) {
-                            target = billboardBucket;
-                        } else {
-                            for (let i = layer.levels.length - 1; i > 0; i--)
-                                if (d >= layer.levels[i].distance) { target = i; break; }
-                        }
-                        if (target < cell.lod && cell.lod <= billboardBucket) {
-                            const backEdge = cell.lod === billboardBucket
-                                ? layer.billboardDistance
-                                : layer.levels[cell.lod].distance;
-                            if (d >= backEdge * 0.9) target = cell.lod; // stay coarse near the boundary
-                        }
-                    }
-                    cell.lod = target;
-                    (buckets[target] ??= []).push(cell);
+                    if (!onScreen) { frameStats.culledInstances += cell.count; continue; }
+                    place(cell);
                 }
 
-                // Admit the nearest few newly-visible cells. They are marked visible but NOT drawn this
-                // frame: the draw waits one more frame, which is what keeps the ramp flat. `sort` runs on
-                // the pending list only — typically empty, and a handful of entries while moving.
+                // Admit the waiting cells and draw the admitted on-screen ones THIS frame (they used to
+                // wait one more, which is a frame of missing trees on every arrival).
                 if (pending.length) {
                     pending.sort((a, b) => a.d2 - b.d2);
-                    const admit = foliageAdmitCount(pending.length, this._foliageAdmitPerFrame, !anyWasVisible);
-                    for (let i = 0; i < admit; i++) pending[i].cell.visible = true;
+                    let onScreenPending = 0;
+                    for (const p of pending) if (p.onScreen) onScreenPending++;
+                    let budget = foliageAdmitCount(onScreenPending, this._foliageAdmitPerFrame, !anyWasVisible);
+                    for (const p of pending) {
+                        if (!p.onScreen) { p.cell.visible = true; continue; }
+                        if (budget <= 0) continue;
+                        budget--;
+                        p.cell.visible = true;
+                        place(p.cell);
+                        frameStats.culledInstances -= p.cell.count;
+                    }
                 }
 
                 // Merge and upload while no pass is open. A bucket left null by the loop above still has
@@ -3172,7 +3175,7 @@ export class Renderer {
                     // Density scaling rides on the BUCKET, not on raw distance: `cell.lod` is already
                     // hysteresis-damped and already decides membership, so the fraction is constant
                     // within a bucket and the batch's own staleness check covers a change for free.
-                    const keep = foliageKeepFraction(slot, layer.levels.length, this._foliageDensityFalloff);
+                    const keep = foliageKeepFraction(slot, layer.levels.length, this._foliageDensityFalloff, layer.kind);
                     this._packFoliageBucket(layer, layer.batches, slot, buckets[slot] ??= [], models, keep);
                 }
             }
@@ -3195,7 +3198,7 @@ export class Renderer {
             for (const layer of landscape.terrain.foliage) {
                 if (!this._foliageCastsShadows(layer)) continue;
 
-                const cullDistance = layer.cullDistance > 0 ? layer.cullDistance : this._foliageCullDistance;
+                const cullDistance = foliageEffectiveCull(layer, this._foliageCullDistance);
                 const maxD2 = cullDistance > 0 ? cullDistance * cullDistance : Infinity;
 
                 // Computed ONCE per cascade, then shared by every sub-model. It used to run inside the
@@ -3222,7 +3225,7 @@ export class Renderer {
                 // leave shadows with no tree above them, or trees with no shadow beneath them, and the
                 // prefix rule makes the two sets identical rather than merely the same size.
                 const keep = foliageKeepFraction(layer.levels.length - 1, layer.levels.length,
-                                                 this._foliageDensityFalloff);
+                                                 this._foliageDensityFalloff, layer.kind);
                 this._packFoliageBucket(layer, layer.shadowBatches, cascade, visible, models, keep);
             }
         }
@@ -3409,6 +3412,29 @@ export class Renderer {
         this._shaderManager.setUniform('u_windCamera', c);
     }
 
+    /** Each foliage layer's per-bucket fade bands, as `_prepareFoliage` last computed them. */
+    private readonly _foliageBands = new WeakMap<FoliageLayer, (FoliageBand | null)[]>();
+    private readonly _lodVec: number[][] = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
+
+    /**
+     * The per-instance LOD crossfade block of the instanced program just bound (u_lodBand/Camera/Frame
+     * in chunks/instancedVertex.wgsl). Billboard GRASS layers shrink out instead of dissolving.
+     */
+    private _setLodFadeUniforms(layer: FoliageLayer, slot: number): void {
+        const band = this._foliageBands.get(layer)?.[slot] ?? null;
+        const [b, c, f] = this._lodVec;
+        if (band) { b[0] = band.inStart; b[1] = band.inEnd; b[2] = band.outStart; b[3] = band.outEnd; }
+        else { b[0] = b[1] = b[2] = b[3] = 0; }
+        const cam = this._activeCamera.position;
+        c[0] = cam[0]; c[1] = cam[1]; c[2] = cam[2];
+        c[3] = !band ? 0 : layer.kind === 'billboard' ? 2 : 1;
+        // A different dither phase every frame, so TAA resolves the screen-door into a smooth blend.
+        f[0] = ((this._frameIndex * 7) % 16) / 16;
+        this._shaderManager.setUniform('u_lodBand', b);
+        this._shaderManager.setUniform('u_lodCamera', c);
+        this._shaderManager.setUniform('u_lodFrame', f);
+    }
+
     private _foliagePass(scene: Scene, pass: RenderPassEncoder): void {
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
@@ -3444,6 +3470,7 @@ export class Renderer {
                         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
                         this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
                         if (sway) this._setWindUniforms(scene, wind!, model.material);
+                        this._setLodFadeUniforms(layer, slot);
                         const pipeline = this._pipelineFor(shaderType, reflection, {
                             // Billboard cross quads are two-sided; a mesh prop keeps its material side.
                             cullMode: billboard ? 'none' : Renderer._cullFor(model.material.config.side),
@@ -3755,6 +3782,8 @@ export class Renderer {
         basicSkinned: BasicSkinnedProgram,
         basicInstanced: BasicInstancedProgram,
     };
+
+    private static readonly _LOD_OFF = [0, 0, 0, 0];
 
     private static readonly _GEOMETRY_PROGRAMS: Record<string, { resources: readonly ShaderResource[] }> = {
         pbrGeometry: GeometryPBRProgram,
@@ -4213,12 +4242,15 @@ export class Renderer {
             pass.setPipeline(pipeline);
             this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
             this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+            // Placed instanced models never crossfade, and the foliage pass may have left it on.
+            this._shaderManager.setUniform('u_lodCamera', Renderer._LOD_OFF);
             this._applyMaterialProperties(material);
             pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
         } else {
             this._shaderManager.bind(shaderType);
             this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
             this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+            this._shaderManager.setUniform('u_lodCamera', Renderer._LOD_OFF);
             this._applyMaterial(material);
             this._applyCull(material.config.side);
         }

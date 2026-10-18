@@ -29,7 +29,32 @@ struct VertexOutput {
     // measured as stretched) and the normal in those axes.
     @location(5) objPos: vec3<f32>,
     @location(6) objNormal: vec3<f32>,
+    // Foliage LOD crossfade (chunks/instancedVertex.wgsl): x = fade-in, y = fade-out, z = this frame's
+    // dither phase. 1, 1 for everything else, which `lodFadeKeeps` always keeps.
+    @location(7) lodFade: vec3<f32>,
 };
+
+/** A 4x4 ordered-dither threshold in (0, 1) for a pixel, shifted per frame by `phase`. */
+fn lodDitherThreshold(fragCoord: vec2<f32>, phase: f32) -> f32 {
+    let x = i32(floor(fragCoord.x)) & 3;
+    let y = i32(floor(fragCoord.y)) & 3;
+    // Bayer 4x4 by recursion on the 2x2 pattern [[0, 2], [3, 1]].
+    let lo = ((x ^ y) & 1) * 2 + (y & 1);
+    let hi = (((x >> 1) ^ (y >> 1)) & 1) * 2 + ((y >> 1) & 1);
+    return fract((f32(lo * 4 + hi) + 0.5) / 16.0 + phase);
+}
+
+/**
+ * Whether a fragment survives the foliage LOD crossfade: a screen-door dissolve. While a level fades IN
+ * it keeps the pixels whose threshold is above 1 - fade; while it fades OUT, those below fade. The two
+ * sides of one band edge therefore claim complementary pixels — never a hole, never both — and the
+ * per-frame phase lets TAA resolve the pattern into a smooth blend.
+ */
+fn lodFadeKeeps(fade: vec3<f32>, fragCoord: vec2<f32>) -> bool {
+    if (fade.x >= 1.0 && fade.y >= 1.0) { return true; }
+    let t = lodDitherThreshold(fragCoord, fade.z);
+    return (1.0 - t) < fade.x && t < fade.y;
+}
 
 /**
  * Geometric specular antialiasing: widen roughness by the SUB-PIXEL VARIANCE of the normal.
@@ -117,6 +142,7 @@ fn fillVarying(out: ptr<function, VertexOutput>, model: mat4x4<f32>,
     (*out).objPos = position * scale;
     // Inverse-scaled, the way a normal transforms under a non-uniform scale.
     (*out).objNormal = normalize(normal / max(scale, vec3<f32>(1e-6)));
+    (*out).lodFade = vec3<f32>(1.0, 1.0, 0.0);
 }
 
 /** The material's projection, resolved for this fragment. See chunks/uvProjection.wgsl. */

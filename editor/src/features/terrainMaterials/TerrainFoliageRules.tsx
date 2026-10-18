@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import {
   TerrainMaterial, TerrainFoliageRule, Model, TextureManager, Logger,
-  DEFAULT_FOLIAGE_DENSITY, FOLIAGE_DENSITY_UNIT, MAX_INSTANCES,
+  DEFAULT_FOLIAGE_DENSITY, FOLIAGE_DENSITY_UNIT, MAX_INSTANCES, foliageEffectiveCull,
 } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
@@ -24,7 +24,25 @@ const estimateFor = (r: TerrainFoliageRule): number =>
   Math.round((r.density ?? DEFAULT_FOLIAGE_DENSITY.mesh) * ESTIMATE_SIZE * ESTIMATE_SIZE)
 
 export default function TerrainFoliageRules({ material, onChange }: { material: TerrainMaterial; onChange: () => void }) {
-  const { terrainMaterials, models, materials, dropFoliageLayer, bakeFoliageImpostor } = useCleoEngine()
+  const { terrainMaterials, models, materials, dropFoliageLayer, bakeFoliageImpostor, instance } = useCleoEngine()
+
+  /**
+   * Where a mesh rule's levels take over and how far it draws, as the renderer will actually do it
+   * (foliageEffectiveCull) — the readout that would have shown "draws to 65 m" next to an impostor at
+   * 320 m, which is the whole reason trees used to vanish without ever becoming their impostor.
+   */
+  const rangeOf = (r: TerrainFoliageRule): string => {
+    const levels = [{ distance: 0 }, ...(r.lods ?? []).map(l => ({ distance: l.distance }))]
+    const impostor = r.billboard?.textureId ? r.billboard.distance : undefined
+    const cull = foliageEffectiveCull({
+      kind: 'mesh', cullDistance: r.cullDistance ?? 0, levels,
+      billboardModel: impostor !== undefined ? true : null, billboardDistance: impostor ?? Infinity,
+    }, instance?.renderer.foliageCullDistance ?? 65)
+    const parts = levels.slice(1).map((l, i) => `LOD${i + 1} at ${Math.round(l.distance)} m`)
+    if (impostor !== undefined) parts.push(`impostor at ${Math.round(impostor)} m`)
+    parts.push(cull > 0 ? `draws to ${Math.round(cull)} m` : 'never culls')
+    return parts.join(' · ')
+  }
   const [newFoliageTex, setNewFoliageTex] = useState('')
   const [newFoliageModel, setNewFoliageModel] = useState('')
   // Index of the rule currently baking, so the button can report progress. The bake renders a scene and
@@ -242,8 +260,7 @@ export default function TerrainFoliageRules({ material, onChange }: { material: 
                   {r.modelId && (
                     <div className='flex items-center justify-between'>
                       <span className='text-ui-xs text-muted'>
-                        {1 + (r.lods?.length ?? 0)} LOD level{r.lods?.length ? 's' : ''}
-                        {(r.cullDistance ?? 0) > 0 ? `, culls at ${r.cullDistance}` : ''} (from the model asset)
+                        {1 + (r.lods?.length ?? 0)} LOD level{r.lods?.length ? 's' : ''}: {rangeOf(r)}
                       </span>
                       <Button variant='ghost' size='sm' className='px-1 text-ui-xs underline' title='Rebuild from the current model asset' onClick={() => resyncRule(i)}>re-sync</Button>
                     </div>

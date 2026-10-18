@@ -73,6 +73,9 @@ fn fs_main(in: VertexOutput) -> GBuffer {
         if (mask < u_material.alphaCutoff) { discard; }
     }
 
+    // Foliage LOD crossfade: a screen-door dissolve between levels (always kept outside foliage).
+    if (!lodFadeKeeps(in.lodFade, in.position.xy)) { discard; }
+
     var albedo = u_material.diffuse;
     if (u_material.hasBaseTexture != 0) {
         // sRGB -> linear

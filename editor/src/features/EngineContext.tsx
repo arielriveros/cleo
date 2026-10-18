@@ -4034,11 +4034,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!baked) return null;
     await persistTextures([baked.id]);
 
-    // Past the whole mesh ladder. The renderer's impostor test SHORT-CIRCUITS the level selection, so a
-    // distance inside the ladder would retire every level beyond it rather than extending the view.
+    // Past the whole mesh ladder. The impostor replaces every level that starts at or beyond it, so a
+    // takeover AT the last band (what this used to pick) retired the last, cheapest level unseen. Twice
+    // the last band continues the ladder's own doubling (generated bands are 1x/2x/4x a step).
     const bands = (rule.lods ?? []).map(l => l.distance).filter(d => d > 0);
     const takeover = rule.billboard?.distance
-      ?? (bands.length ? Math.round(Math.max(...bands)) : DEFAULT_IMPOSTOR_DISTANCE);
+      ?? (bands.length ? Math.round(Math.max(...bands) * 2) : DEFAULT_IMPOSTOR_DISTANCE);
     rule.billboard = { textureId: baked.id, distance: takeover };
     eventEmitter.current.emit('SCENE_CHANGED');
     return baked.id;

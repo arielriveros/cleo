@@ -235,11 +235,13 @@ export function registerFoliageSourceResolver(fn: FoliageSourceResolver | null):
  */
 export function resolveFoliageRuleGeometry(rule: any): any {
   if (!rule || rule.kind !== 'mesh') return rule
-  if (rule.models?.length || rule.model) return rule // already carries its geometry
   const modelId = rule.modelId ?? rule.meshId
-  if (!modelId || !sourceResolver) return rule
-
-  const source = sourceResolver(modelId)
+  const source = modelId && sourceResolver ? sourceResolver(modelId) : null
+  // The cull distance is the MODEL's (the rule only displays it), so it is re-read on every resolve.
+  // It used to be copied once, when the rule was created: setting a grass model's cull to 20 m in the
+  // model editor never reached the foliage, which went on drawing to wherever the stale copy said.
+  if (source) rule.cullDistance = source.model.cullDistance ?? 0
+  if (rule.models?.length || rule.model) return rule // already carries its geometry
   if (!source) return rule // the model was deleted; the layer keeps whatever it already had
 
   try {

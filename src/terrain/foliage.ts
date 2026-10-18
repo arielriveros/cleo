@@ -39,6 +39,84 @@ export function foliageCullLimitSq(maxD2: number, wasVisible: boolean, hysteresi
 }
 
 /**
+ * The distance a layer is drawn to.
+ *
+ * An explicit cull (the model asset's) wins. Otherwise a MESH layer is drawn past its own last band —
+ * half as far again beyond where its impostor (or last LOD level) takes over — and never less than the
+ * scene's foliage distance. Before, "no cull set" meant the scene's 65 m, while generated LOD bands
+ * start at ~8x the model's diameter: a 10 m pine's LOD1 began at 80 m and its impostor at 320 m, so
+ * only LOD0 ever drew and every tree vanished at 65 m without becoming its impostor.
+ *
+ * Grass (billboard layers) keeps the scene distance. 0 or less = unlimited.
+ */
+export function foliageEffectiveCull(
+    layer: { kind: FoliageKind; cullDistance: number; levels: readonly { distance: number }[];
+             billboardModel: unknown; billboardDistance: number },
+    sceneDistance: number,
+): number {
+    if (layer.cullDistance > 0) return layer.cullDistance;
+    if (!(sceneDistance > 0)) return 0;
+    if (layer.kind !== 'mesh') return sceneDistance;
+    let lastBand = 0;
+    if (layer.billboardModel && Number.isFinite(layer.billboardDistance) && layer.billboardDistance > 0)
+        lastBand = layer.billboardDistance;
+    else if (layer.levels.length > 1)
+        lastBand = layer.levels[layer.levels.length - 1].distance;
+    return lastBand > 0 ? Math.max(sceneDistance, lastBand * 1.5) : sceneDistance;
+}
+
+/** Width of the dithered crossfade around a band edge at `distance`: 10% of it, at least 3 m. */
+export function foliageFadeWidth(distance: number): number {
+    return Math.max(3, distance * 0.1);
+}
+
+/**
+ * Where one draw bucket fades in and out, in metres from the camera, per INSTANCE (see
+ * chunks/instancedVertex.wgsl). `in*`: the ramp over which it appears, as the previous level dissolves;
+ * `out*`: the ramp over which it dissolves into the next level, or into nothing at the cull distance.
+ * An empty ramp (start == end) means no fade on that side. `lo..hi` is the range a cell must overlap
+ * to be drawn in the bucket at all.
+ */
+export interface FoliageBand { inStart: number; inEnd: number; outStart: number; outEnd: number; lo: number; hi: number }
+
+/**
+ * The band of every bucket of `layer` (levels, then the impostor at index `levels.length`), or null for
+ * a bucket that is never drawn (a level that starts beyond the impostor or the cull). Adjacent buckets
+ * share their ramp exactly — one's fade-out IS the next one's fade-in — so with complementary dither the
+ * two always cover a pixel exactly once and a level change never shows a hole or a double image.
+ */
+export function foliageLodBands(
+    layer: { levels: readonly { distance: number }[]; billboardModel: unknown; billboardDistance: number },
+    cull: number,
+): (FoliageBand | null)[] {
+    const far = cull > 0 ? cull : Infinity;
+    const impostor = !!layer.billboardModel && Number.isFinite(layer.billboardDistance);
+    const impostorAt = impostor ? Math.max(0, layer.billboardDistance) : Infinity;
+    const starts: { slot: number; start: number }[] = [];
+    layer.levels.forEach((l, i) => {
+        const start = i === 0 ? 0 : Math.max(0, l.distance);
+        if (start < impostorAt && start < far) starts.push({ slot: i, start });
+    });
+    if (impostor && impostorAt < far) starts.push({ slot: layer.levels.length, start: impostorAt });
+    starts.sort((a, b) => a.start - b.start);
+
+    const out: (FoliageBand | null)[] = new Array(layer.levels.length + 1).fill(null);
+    for (let k = 0; k < starts.length; k++) {
+        const { slot, start } = starts[k];
+        const inW = k === 0 || start <= 0 ? 0 : foliageFadeWidth(start);
+        const next = k + 1 < starts.length ? starts[k + 1].start : far;
+        const outW = Number.isFinite(next) ? foliageFadeWidth(next) : 0;
+        const band: FoliageBand = {
+            inStart: start - inW, inEnd: start,
+            outStart: Number.isFinite(next) ? next - outW : 0, outEnd: Number.isFinite(next) ? next : 0,
+            lo: start - inW, hi: Number.isFinite(next) ? next : Infinity,
+        };
+        out[slot] = band;
+    }
+    return out;
+}
+
+/**
  * How many newly-visible cells to admit this frame, from `pending.length` waiting.
  *
  * `firstSight` — no cell of the layer was up last frame — means a scene load or the camera arriving at a
@@ -105,7 +183,11 @@ export const FOLIAGE_DENSITY_FLOOR = 0.25;
  * nearly free, so keeping them all would cost little — but it would also mean trees reappearing as
  * the camera backs away, which reads as a bug however cheap it is.
  */
-export function foliageKeepFraction(bucket: number, levelCount: number, falloff: number): number {
+export function foliageKeepFraction(bucket: number, levelCount: number, falloff: number,
+                                    kind: FoliageKind = 'billboard'): number {
+    // Mesh props are never thinned. Dropping a quarter of a cell's TREES the frame it changes level is a
+    // pop nobody can miss — LOD already makes a distant tree cheap. Thinning is a fill-rate tool for grass.
+    if (kind === 'mesh') return 1;
     if (!(falloff > 0) || falloff >= 1) return 1;
     // Bucket `levelCount` is the impostor; clamp it onto the last mesh level.
     const level = Math.max(0, Math.min(bucket, levelCount - 1));
@@ -276,6 +358,13 @@ export interface FoliageCell {
     indices: Int32Array;                 // instance indices in this cell (see forEachInstanceNear)
     min: [number, number, number];       // world AABB (instance extents, expanded by geometry size)
     max: [number, number, number];
+    /**
+     * Bounds of the instance ORIGINS alone (no geometry padding). What the per-instance LOD crossfade
+     * measures a cell's distance span with: the padded box is loose by a whole tree height, which would
+     * put every cell near a band edge into three buckets instead of two.
+     */
+    pmin: [number, number, number];
+    pmax: [number, number, number];
     /**
      * Position in `layer.cells`, assigned by `_rebuild`. The identity a packed batch is keyed on, so
      * the renderer can tell "the same cells as last frame" from "a different set" without hashing.
@@ -630,6 +719,8 @@ export class FoliageLayer {
             }
             c.min = [minX - extent, minY - extent, minZ - extent];
             c.max = [maxX + extent, maxY + extent, maxZ + extent];
+            c.pmin = [minX, minY, minZ];
+            c.pmax = [maxX, maxY, maxZ];
             if (c.lod >= buckets) c.lod = 0;
         }
     }
@@ -855,6 +946,8 @@ export class FoliageLayer {
                 indices: Int32Array.from(arr),
                 min: [minX - extent, minY - extent, minZ - extent],
                 max: [maxX + extent, maxY + extent, maxZ + extent],
+                pmin: [minX, minY, minZ],
+                pmax: [maxX, maxY, maxZ],
                 index: cells.length,
                 visible: false,
                 lod: 0,
