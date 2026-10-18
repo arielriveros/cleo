@@ -3,6 +3,9 @@
 // Alpha-tests the layer texture and writes an up-facing, matte surface into the PBR G-buffer. Shares
 // the instanced vertex stage with the lit instanced materials, so both agree on the vertex layout.
 
+// Build-time variant: the foliage wind (chunks/foliageWind.wgsl) compiled in.
+// @variant wind CLEO_WIND=1
+
 #include "./chunks/instancedVertex.wgsl"
 #include "./chunks/tonemap.wgsl"
 #include "./chunks/alphaCutout.wgsl"

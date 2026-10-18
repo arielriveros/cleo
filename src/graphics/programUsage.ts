@@ -154,6 +154,11 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
             for (const n of ['terrain', 'terrainGeometry', 'foliageBillboardInstanced', 'blinn_phongGeometryInstanced',
                              'pbrGeometryInstanced', 'shadowMapInstanced', 'shadowMapInstancedCutout']) add(n);
             break;
+        // The wind variants of the foliage programs: built only for a game that has a Wind node.
+        case 'wind':
+            for (const n of ['pbrGeometryInstancedWind', 'blinn_phongGeometryInstancedWind', 'foliageBillboardInstancedWind',
+                             'shadowMapInstancedWind', 'shadowMapInstancedCutoutWind']) add(n);
+            break;
         case 'tilemap': add('tilemap'); break;
         case 'decal': add('decalSurface'); add('decalResolve'); add('decalColor'); break;
         case 'volumetricClouds':

@@ -115,6 +115,10 @@ export const SkyAtmosphereIcon = () => (
 export const SkyLightIcon = () => (
   <S><path d="M3.5 8.5a8.5 8.5 0 0 1 17 0" /><path d="M6 12.5v3" /><path d="M12 12.5v5" /><path d="M18 12.5v3" /></S>
 );
+/** Wind: three streamlines, the lower two curling at their tips. */
+export const WindIcon = () => (
+  <S><path d="M3 8h11a3 3 0 1 0-3-3" /><path d="M3 12h15a3 3 0 1 1-3 3" /><path d="M3 16h7" /></S>
+);
 /** Volumetric clouds. */
 export const CloudsIcon = () => (
   <S><path d="M7 18.5h10a4 4 0 0 0 .6-7.95 5.5 5.5 0 0 0-10.5-1.2A3.9 3.9 0 0 0 7 18.5Z" /></S>

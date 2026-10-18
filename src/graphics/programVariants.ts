@@ -48,6 +48,12 @@ const RULES: Readonly<Record<string, Rule>> = {
     pbrGeometrySkinnedPom: fixed('pbrGeometrySkinned', 'pom'),
     pbrGeometryInstanced: fixed('pbrGeometryInstanced', 'flat'),
     pbrGeometryInstancedPom: fixed('pbrGeometryInstanced', 'pom'),
+    // Foliage wind (chunks/foliageWind.wgsl): the instanced programs with the displacement compiled in.
+    pbrGeometryInstancedWind: fixed('pbrGeometryInstanced', 'wind'),
+    blinn_phongGeometryInstancedWind: fixed('blinn_phongGeometryInstanced', 'wind'),
+    foliageBillboardInstancedWind: fixed('foliageBillboardInstanced', 'wind'),
+    shadowMapInstancedWind: fixed('shadowMapInstanced', 'wind'),
+    shadowMapInstancedCutoutWind: fixed('shadowMapInstancedCutout', 'wind'),
 };
 
 /**
@@ -61,6 +67,12 @@ export const EXTRA_LOGICAL_NAMES: Readonly<Record<string, string>> = {
     pbrGeometryPom: 'pbrGeometry',
     pbrGeometrySkinnedPom: 'pbrGeometrySkinned',
     pbrGeometryInstancedPom: 'pbrGeometryInstanced',
+    // Wind names likewise always mean their `wind` variant: the base programs have it compiled out.
+    pbrGeometryInstancedWind: 'pbrGeometryInstanced',
+    blinn_phongGeometryInstancedWind: 'blinn_phongGeometryInstanced',
+    foliageBillboardInstancedWind: 'foliageBillboardInstanced',
+    shadowMapInstancedWind: 'shadowMapInstanced',
+    shadowMapInstancedCutoutWind: 'shadowMapInstancedCutout',
 };
 
 /** Logical names whose program depends on the shadow filter. */

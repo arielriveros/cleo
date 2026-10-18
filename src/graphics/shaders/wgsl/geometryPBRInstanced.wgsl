@@ -5,6 +5,7 @@
 // that use it.
 // @variant flat CLEO_POM=0
 // @variant pom CLEO_POM=1
+// @variant wind CLEO_POM=0 CLEO_WIND=1
 
 #include "./chunks/instancedVertex.wgsl"
 #include "./chunks/pbrGBuffer.wgsl"

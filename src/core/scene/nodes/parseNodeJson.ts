@@ -14,6 +14,7 @@ import { SkyboxNode } from "./skyboxNode";
 import { VolumetricCloudsNode } from "./volumetricCloudsNode";
 import { SkyAtmosphereNode } from "./skyAtmosphereNode";
 import { SkyLightNode } from "./skyLightNode";
+import { WindNode } from "./windNode";
 import { CameraNode } from "./cameraNode";
 import { SpriteNode } from "./spriteNode";
 import { AnimatedSpriteNode } from "./animatedSpriteNode";
@@ -48,6 +49,7 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'volumetricClouds': VolumetricCloudsNode.parse(parent, json); break;
     case 'skyAtmosphere': SkyAtmosphereNode.parse(parent, json); break;
     case 'skyLight': SkyLightNode.parse(parent, json); break;
+    case 'wind': WindNode.parse(parent, json); break;
     case 'lodGroup': LodGroupNode.parse(parent, json); break;
     case 'cameraRig': CameraRigNode.parse(parent, json); break;
     case 'character': CharacterNode.parse(parent, json); break;

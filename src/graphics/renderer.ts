@@ -2026,6 +2026,7 @@ export class Renderer {
         this._activeCamera.resize(this._renderWidth, this._renderHeight);
         // Kept for per-draw lookups (forward light-probe selection) that don't receive the scene.
         this._currentScene = scene;
+        this._advanceWindTime();
 
         // Everything from here to the sky bake runs BEFORE `_statsT0`, so none of it is inside the
         // `Render (CPU)` figure the HUD shows — it lands in "Unattributed" instead. That exclusion is
@@ -3247,6 +3248,9 @@ export class Renderer {
                 if (!chunks || chunks.length === 0) continue;
 
                 const billboard = layer.kind === 'billboard';
+                // Only the nearest cascade sways: farther cascades' texels are larger than the motion, and
+                // keeping them static bounds the shadow cost of wind to the near field.
+                const wind = cascade === 0 ? this._foliageWind(scene, layer) : null;
                 // Billboards route every level through the cutout shader (they have only one level);
                 // mesh layers cast from their CHEAPEST real level.
                 const models = billboard ? layer.levels[0].models : layer.levels[layer.levels.length - 1].models;
@@ -3269,8 +3273,9 @@ export class Renderer {
                     // A cut-out caster culls nothing — its shape is in the texture and its card is
                     // two-sided; a solid prop keeps the FRONT-face culling the rest of the shadow pass
                     // uses to push acne out of view.
+                    const program = (cutout ? 'shadowMapInstancedCutout' : 'shadowMapInstanced') + (wind ? 'Wind' : '');
                     const pipeline = this._pipelineFor(
-                        cutout ? 'shadowMapInstancedCutout' : 'shadowMapInstanced',
+                        program,
                         cutout ? ShadowMapInstancedCutoutProgram : ShadowMapInstancedProgram, {
                         cullMode: cutout || model.material.config.side === 'double' ? 'none' : 'front',
                         depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
@@ -3280,6 +3285,7 @@ export class Renderer {
                     });
                     pass.setPipeline(pipeline);
                     this._shaderManager.setUniform('u_lightSpace', this._clipProjection(lightSpace));
+                    if (wind) this._setWindUniforms(scene, wind);
                     if (cutout) {
                         this._shaderManager.setUniform('u_cutoff', cut!.cutoff);
                         this._shaderManager.setUniform('u_useRed', cut!.useRed);
@@ -3302,6 +3308,84 @@ export class Renderer {
         }
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Foliage wind (chunks/foliageWind.wgsl)
+    // ---------------------------------------------------------------------------------------------
+
+    /** Seconds of wind time, advanced by the frame delta (clamped, so a stall never makes plants jump). */
+    private _windTime: number = 0;
+    /** Last frame's `_windTime`, for the motion vectors. */
+    private _windTimePrev: number = 0;
+    private _windClock: number = -1;
+    /** A layer prototype's [base height, plant height] in object space, keyed on its first model. */
+    private readonly _windShapes = new WeakMap<Model, [number, number]>();
+
+    private _advanceWindTime(): void {
+        const now = performance.now();
+        const dt = this._windClock < 0 ? 0 : Math.min(0.1, Math.max(0, (now - this._windClock) / 1000));
+        this._windClock = now;
+        this._windTimePrev = this._windTime;
+        this._windTime += dt;
+    }
+
+    /**
+     * How `layer` answers the scene's wind, or null when it does not sway: no (visible) WindNode, or no
+     * material of the prototype with a `windStrength`.
+     *
+     * Per LAYER, never per sub-model. A tree's bark and needles are separate models, and they stay
+     * attached only if they bend by exactly the same function — so the strongest material speaks for
+     * the whole prototype, and the bend is measured against the whole prototype's height.
+     */
+    private _foliageWind(scene: Scene, layer: FoliageLayer):
+        { lean: number; stiffness: number; minY: number; height: number; fadeEnd: number } | null {
+        const node = scene.wind;
+        if (!node || !node.visible || !(node.strength > 0)) return null;
+        const models = layer.kind === 'billboard' ? [layer.model] : layer.levels[0]?.models ?? [];
+        if (models.length === 0) return null;
+        let lean = 0, stiffness = 1;
+        for (const model of models)
+            for (const material of model.materials) {
+                const strength = Number(material.properties.get('windStrength') ?? 0);
+                if (strength > lean) {
+                    lean = strength;
+                    stiffness = Number(material.properties.get('windStiffness') ?? 1) || 1;
+                }
+            }
+        if (!(lean > 0)) return null;
+        let shape = this._windShapes.get(models[0]);
+        if (!shape) {
+            let minY = Infinity, maxY = -Infinity;
+            for (const model of models) {
+                const box = model.geometry.boundingBox;
+                minY = Math.min(minY, box.min[1]);
+                maxY = Math.max(maxY, box.max[1]);
+            }
+            shape = Number.isFinite(minY) && maxY > minY ? [minY, maxY - minY] : [0, 1];
+            this._windShapes.set(models[0], shape);
+        }
+        return { lean, stiffness, minY: shape[0], height: shape[1], fadeEnd: node.fadeEnd };
+    }
+
+    private readonly _windVec: number[][] = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
+
+    /** The vertex-stage wind block of the program just bound; see WindParams in foliageWind.wgsl. */
+    private _setWindUniforms(scene: Scene, w: { lean: number; stiffness: number; minY: number; height: number }): void {
+        const node = scene.wind!;
+        const [dx, dz] = node.directionXZ;
+        const cam = this._activeCamera.position;
+        const [g, t, r, sh, c] = this._windVec;
+        g[0] = dx; g[1] = dz; g[2] = node.strength; g[3] = node.gustScale;
+        t[0] = this._windTime; t[1] = this._windTimePrev; t[2] = node.gustSpeed; t[3] = node.fadeEnd;
+        r[0] = w.lean; r[1] = w.stiffness;
+        sh[0] = w.minY; sh[1] = w.height; sh[2] = node.fadeStart;
+        c[0] = cam[0]; c[1] = cam[1]; c[2] = cam[2];
+        this._shaderManager.setUniform('u_windGlobal', g);
+        this._shaderManager.setUniform('u_windTime', t);
+        this._shaderManager.setUniform('u_windResponse', r);
+        this._shaderManager.setUniform('u_windShape', sh);
+        this._shaderManager.setUniform('u_windCamera', c);
+    }
+
     private _foliagePass(scene: Scene, pass: RenderPassEncoder): void {
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
@@ -3312,6 +3396,7 @@ export class Renderer {
                 // culled, merged and uploaded by `_prepareFoliage`, before this pass opened — see the
                 // note there for why that separation is load-bearing rather than tidiness.
                 const billboardBucket = layer.levels.length;
+                const wind = this._foliageWind(scene, layer);
 
                 const drawBucket = (models: Model[], billboard: boolean, slot: number) => {
                     const cells = layer.buckets[slot];
@@ -3320,15 +3405,22 @@ export class Renderer {
                     if (!chunks || chunks.length === 0) return;
                     frameStats.foliageCells += cells.length;
 
+                    // Wind only on real levels that start inside the fade: the impostor never sways, and a
+                    // level that begins past the fade end would compute a displacement of exactly zero.
+                    const windy = !!wind && slot < billboardBucket && layer.levels[slot].distance < wind.fadeEnd;
                     for (const model of models) {
-                        const shaderType = billboard ? 'foliageBillboardInstanced'
-                            : model.material.type !== 'pbr' ? 'blinn_phongGeometryInstanced'
-                            : usesParallax(model.materials) ? 'pbrGeometryInstancedPom' : 'pbrGeometryInstanced';
+                        const parallax = !billboard && model.material.type === 'pbr' && usesParallax(model.materials);
+                        // A marching (POM) prop has no wind variant; it stays still rather than drop its relief.
+                        const sway = windy && !parallax;
+                        const shaderType = billboard ? (sway ? 'foliageBillboardInstancedWind' : 'foliageBillboardInstanced')
+                            : model.material.type !== 'pbr' ? (sway ? 'blinn_phongGeometryInstancedWind' : 'blinn_phongGeometryInstanced')
+                            : parallax ? 'pbrGeometryInstancedPom' : sway ? 'pbrGeometryInstancedWind' : 'pbrGeometryInstanced';
                         const reflection = billboard ? GeometryFoliageBillboardProgram
                                                      : Renderer._GEOMETRY_PROGRAMS[shaderType];
                         this._shaderManager.bind(shaderType);
                         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
                         this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+                        if (sway) this._setWindUniforms(scene, wind!);
                         const pipeline = this._pipelineFor(shaderType, reflection, {
                             // Billboard cross quads are two-sided; a mesh prop keeps its material side.
                             cullMode: billboard ? 'none' : Renderer._cullFor(model.material.config.side),
@@ -3645,6 +3737,8 @@ export class Renderer {
         pbrGeometryPom: GeometryPBRProgram,
         pbrGeometrySkinnedPom: GeometryPBRSkinnedProgram,
         pbrGeometryInstancedPom: GeometryPBRInstancedProgram,
+        pbrGeometryInstancedWind: GeometryPBRInstancedProgram,
+        blinn_phongGeometryInstancedWind: GeometryBlinnPhongInstancedProgram,
         terrainGeometry: GeometryTerrainProgram,
         basicGeometry: GeometryBasicProgram,
         basicGeometrySkinned: GeometryBasicSkinnedProgram,

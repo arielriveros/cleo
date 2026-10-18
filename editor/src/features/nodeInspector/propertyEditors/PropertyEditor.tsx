@@ -1,4 +1,4 @@
-import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode } from 'cleo'
+import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
 import RigSlot from './RigSlot';
@@ -17,6 +17,7 @@ import AnimatedSpriteEditor from './SpriteSheetEditor'
 import VolumetricCloudsEditor from './VolumetricCloudsEditor'
 import SkyAtmosphereEditor from './SkyAtmosphereEditor'
 import SkyLightEditor from './SkyLightEditor'
+import WindEditor from './WindEditor'
 import CameraRigEditor from './CameraRigEditor'
 import CharacterEditor from './CharacterEditor'
 import ControllerEditor from './ControllerEditor'
@@ -91,6 +92,7 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'volumetricClouds' && <VolumetricCloudsEditor node={props.node as VolumetricCloudsNode} /> }
           { props.node.nodeType === 'skyAtmosphere' && <SkyAtmosphereEditor node={props.node as SkyAtmosphereNode} /> }
           { props.node.nodeType === 'skyLight' && <SkyLightEditor node={props.node as SkyLightNode} /> }
+          { props.node.nodeType === 'wind' && <WindEditor node={props.node as WindNode} /> }
           { isUI && <UIEditor node={props.node as UINode} /> }
           {/* Last: a secondary option. Renders itself away unless the node is attached already or sits
               inside a character with sockets — see SocketAttachSlot. */}

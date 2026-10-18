@@ -4,7 +4,7 @@ import { Geometry } from '../core/geometry';
 import { Model } from '../graphics/model';
 import type { Mesh } from '../graphics/mesh';
 import {
-    Material, TerrainFoliageRule, FoliageCollision, foliageRuleKey,
+    Material, TerrainFoliageRule, FoliageCollision, foliageRuleKey, applyWind, windConfigOf,
     FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY,
 } from '../graphics/material';
 
@@ -460,6 +460,7 @@ export class FoliageLayer {
             // Must be read here as well as in `_applyMeshPrototype`, or a billboard rule's cull distance
             // is dropped and the layer falls back to the renderer's global.
             bb.cullDistance = Math.max(0, Number(rule.cullDistance) || 0);
+            bb._applyBillboardWind(rule);
             return bb;
         }
         const base = (rule.models?.length ? rule.models[0] : rule.model);
@@ -539,6 +540,12 @@ export class FoliageLayer {
      * exist rather than what they look like. It is reported back instead; the caller owns the choice
      * to re-scatter, since that is the one operation here that discards the user's placement.
      */
+    /** A billboard layer's wind lives on its card's material, where the renderer reads every layer's. */
+    private _applyBillboardWind(src: { windStrength?: number; windStiffness?: number }): void {
+        if (this.kind !== 'billboard') return;
+        applyWind(this.model.material, { windStrength: src.windStrength ?? 0, windStiffness: src.windStiffness ?? 1 });
+    }
+
     public setPrototype(rule: TerrainFoliageRule): { densityChanged: boolean } {
         const prevDensity = this.params.density;
         const prevMin = this.params.minScale, prevMax = this.params.maxScale;
@@ -568,6 +575,7 @@ export class FoliageLayer {
             // `_instanceExtent` multiplies by `params.maxScale`, which just might have. This branch
             // used to return without refreshing anything, leaving the cell AABBs too tight and
             // culling tall tufts at the screen edge.
+            this._applyBillboardWind(rule);
             if (scaleChanged) this._rerollScales();
             else this._refreshExtents();
             return { densityChanged: this.params.density !== prevDensity };
@@ -882,6 +890,12 @@ export class FoliageLayer {
                 ? { textureId: this.billboardTextureId, distance: this.billboardDistance } : undefined,
             cullDistance: this.cullDistance > 0 ? this.cullDistance : undefined,
             castShadows: this.castShadows || undefined,
+            // A mesh layer's wind rides in its models' materials; a billboard's card material is rebuilt
+            // on load, so its wind is carried here.
+            ...(this.kind === 'billboard' ? (() => {
+                const w = windConfigOf(this.model.material);
+                return { windStrength: w.windStrength || undefined, windStiffness: w.windStiffness !== 1 ? w.windStiffness : undefined };
+            })() : {}),
             cellSize: this.cellSize,
             instances: btoa(bin),
         };
@@ -899,6 +913,7 @@ export class FoliageLayer {
             layer = FoliageLayer.Billboard(json.name, json.textureId, params);
             layer.collision = json.collision ?? null;
             layer.cullDistance = Math.max(0, Number(json.cullDistance) || 0);
+            layer._applyBillboardWind(json);
         } else {
             layer = FoliageLayer.Mesh(json.name, Model.parse(json.models?.length ? json.models[0] : json.model), params);
             layer._applyMeshPrototype(json);

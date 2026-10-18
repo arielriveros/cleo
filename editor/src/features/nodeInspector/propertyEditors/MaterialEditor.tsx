@@ -93,6 +93,9 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   // Cutout threshold, shared by every shader type. 0 means no cutout.
   const [alphaCutoff, setAlphaCutoff] = useState<number>(material.properties.get('alphaCutoff') ?? 0);
   const [defaultOpacity, setDefaultOpacity] = useState<number>(material.properties.get('opacity') ?? 1);
+  // Wind response (any shader type): how far a plant wearing this material leans in the scene's Wind.
+  const [windStrength, setWindStrength] = useState<number>(material.properties.get('windStrength') ?? 0);
+  const [windStiffness, setWindStiffness] = useState<number>(material.properties.get('windStiffness') ?? 1);
 
   const [basicColor, setBasicColor] = useState(
     vec3ToHex(material.properties.get('color') ?? [1,1,1])
@@ -587,6 +590,21 @@ export default function MaterialEditor(props: {node: ModelNode}) {
               </PropertyTable>
             </Section>
           </>
+        )}
+
+        {!isTerrain && (
+          <Section title='Wind'>
+            <PropertyTable columns={['40%', '60%']}>
+              {/* Read by foliage only (instanced plants), and only while the scene has a Wind node. A
+                  tree's bark and needles bend as one: the strongest of its materials sets the lean. */}
+              <PropertyRow label='Strength' hint='How far a plant leans at full gust, as a fraction of its height. 0 = never moves. Grass ~0.3, trees ~0.08.'>
+                <Slider min={0} max={1} step={0.01} value={windStrength} onChange={setNum('windStrength', setWindStrength)} />
+              </PropertyRow>
+              <PropertyRow label='Stiffness' divider={false} hint='Higher is slower and steadier: grass ~0.6, a young tree ~1.5, an old trunk ~3.'>
+                <Slider min={0.1} max={4} step={0.05} value={windStiffness} onChange={setNum('windStiffness', setWindStiffness)} />
+              </PropertyRow>
+            </PropertyTable>
+          </Section>
         )}
 
         <Section title='Options'>

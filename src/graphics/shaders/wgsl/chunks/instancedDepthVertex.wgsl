@@ -10,6 +10,8 @@
 // a narrower set would re-stride any mesh initialized from it and corrupt the colour pass. This
 // matches geometry_instanced.vs exactly so both passes agree on one VAO layout.
 
+#include "./foliageWind.wgsl"
+
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -17,6 +19,13 @@ struct VertexOutput {
 
 struct InstancedDepthUniforms {
     u_lightSpace: mat4x4<f32>,
+    // Foliage wind (chunks/foliageWind.wgsl). Declared in EVERY variant so the block's layout never
+    // depends on the variant; only `CLEO_WIND` builds read them.
+    u_windGlobal: vec4<f32>,
+    u_windTime: vec4<f32>,
+    u_windResponse: vec4<f32>,
+    u_windShape: vec4<f32>,
+    u_windCamera: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> u_depth: InstancedDepthUniforms;
 
@@ -35,6 +44,13 @@ fn vs_main(
     let instanceModel = mat4x4<f32>(instanceModel0, instanceModel1, instanceModel2, instanceModel3);
     var out: VertexOutput;
     out.uv = texCoord;
-    out.position = u_depth.u_lightSpace * instanceModel * vec4<f32>(position, 1.0);
+    var world = (instanceModel * vec4<f32>(position, 1.0)).xyz;
+#if CLEO_WIND
+    // The same displacement as the colour pass, so a swaying plant's shadow sways with it.
+    let wind = WindParams(u_depth.u_windGlobal, u_depth.u_windTime, u_depth.u_windResponse,
+                          u_depth.u_windShape, u_depth.u_windCamera);
+    world = windDisplace(world, position.y, instanceModel, u_depth.u_windTime.x, wind);
+#endif
+    out.position = u_depth.u_lightSpace * vec4<f32>(world, 1.0);
     return out;
 }

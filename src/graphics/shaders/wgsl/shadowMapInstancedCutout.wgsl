@@ -4,6 +4,9 @@
 // depth-only pass would rasterize two solid rectangles and cast rectangular shadows. Mirrors the cutout
 // in geometryFoliageBillboard.
 
+// Build-time variant: the foliage wind (chunks/foliageWind.wgsl) compiled in.
+// @variant wind CLEO_WIND=1
+
 #include "./chunks/instancedDepthVertex.wgsl"
 #include "./chunks/alphaCutout.wgsl"
 

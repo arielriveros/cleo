@@ -18,6 +18,7 @@ import { SkyboxNode } from "./nodes/skyboxNode";
 import { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
 import { SkyAtmosphereNode } from "./nodes/skyAtmosphereNode";
 import { SkyLightNode } from "./nodes/skyLightNode";
+import { WindNode } from "./nodes/windNode";
 import { CameraNode } from "./nodes/cameraNode";
 import { SpriteNode } from "./nodes/spriteNode";
 import { UINode } from "./nodes/ui/uiNode";
@@ -122,6 +123,7 @@ export class Scene {
     private _volumetricClouds: VolumetricCloudsNode | null = null;
     private _skyAtmosphere: SkyAtmosphereNode | null = null;
     private _skyLight: SkyLightNode | null = null;
+    private _wind: WindNode | null = null;
     private _environmentMap: Texture | null = null;
     /**
      * Scene-wide indirect fill, in LUX. What every surface receives from nothing in particular.
@@ -189,6 +191,7 @@ export class Scene {
         this._volumetricClouds = null;
         this._skyAtmosphere = null;
         this._skyLight = null;
+        this._wind = null;
 
         // TODO: Move this to a LightManager class
         this._numPointLights = 0;
@@ -740,6 +743,7 @@ export class Scene {
         this._volumetricClouds = null;
         this._skyAtmosphere = null;
         this._skyLight = null;
+        this._wind = null;
         this._nodesByName = new Map();
         this._nodesById = new Map();
         for (const node of this._nodes) {
@@ -783,6 +787,8 @@ export class Scene {
                 this._skyAtmosphere = node;
             if (node instanceof SkyLightNode)
                 this._skyLight = node;
+            if (node instanceof WindNode)
+                this._wind = node;
             if (node instanceof CameraNode)
                 this._cameras.add(node);
             // A root is also a UINode and lands in both sets: _uiRoots drives the layout pass, _uiNodes is
@@ -1101,6 +1107,13 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._skyAtmosphere;
+    }
+
+    /** The scene's wind, or null — in which case nothing sways and no wind shader is ever bound. */
+    public get wind(): WindNode | null {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._wind;
     }
 
     public get skyLight(): SkyLightNode | null {

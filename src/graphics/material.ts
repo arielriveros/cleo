@@ -374,6 +374,41 @@ function uvJson(material: Material): UvConfig {
     return out;
 }
 
+/**
+ * How a material answers the scene's wind (chunks/foliageWind.wgsl), on any shading model.
+ *
+ * `windStrength` is the lean at full gust, as a fraction of the plant's height (0 = no wind — the
+ * default, and what every existing asset means). `windStiffness` slows and damps it: grass ~0.6, a
+ * young tree ~1.5, an old trunk ~3. A foliage layer bends as ONE plant, so a tree's bark and needles
+ * stay attached: the renderer takes the strongest of a prototype's materials for all of its parts.
+ */
+export interface WindConfig {
+    windStrength?: number;
+    windStiffness?: number;
+}
+
+export function applyWind(material: Material, cfg: WindConfig): void {
+    material.properties.set('windStrength', Math.max(0, finiteOr(cfg.windStrength, 0)));
+    material.properties.set('windStiffness', Math.max(0.05, finiteOr(cfg.windStiffness, 1)));
+}
+
+/** A material's wind response, defaults filled in. */
+export function windConfigOf(material: Material): Required<WindConfig> {
+    return {
+        windStrength: Number(material.properties.get('windStrength') ?? 0) || 0,
+        windStiffness: Number(material.properties.get('windStiffness') ?? 1) || 1,
+    };
+}
+
+/** Wind as serialized JSON: only what differs from the defaults, so no existing asset's bytes change. */
+function windJson(material: Material): WindConfig {
+    const c = windConfigOf(material);
+    const out: WindConfig = {};
+    if (c.windStrength !== 0) out.windStrength = c.windStrength;
+    if (c.windStiffness !== 1) out.windStiffness = c.windStiffness;
+    return out;
+}
+
 /** The mapping fields of a serialized material, for the factories. */
 function uvFieldsOf(m: any): UvConfig {
     return {
@@ -665,6 +700,7 @@ export class Material {
                 displacementScale: this.properties.get('dispScale'),
                 invertHeight: this.properties.get('invertHeight'),
                 clipSilhouette: this.properties.get('clipSilhouette'),
+                ...windJson(this),
                 textures: {
                     texture: this.textures.get('texture'),
                     mask: this.textures.get('maskMap'),
@@ -691,6 +727,7 @@ export class Material {
                 invertHeight: this.properties.get('invertHeight'),
                 clipSilhouette: this.properties.get('clipSilhouette'),
                 ...uvJson(this),
+                ...windJson(this),
                 // Fixed keys, not a dump of the map: that keeps the derived `ormTexture` out of assets.
                 textures: {
                     baseColorTexture: this.textures.get('baseColorTexture'),
@@ -725,6 +762,7 @@ export class Material {
                 invertHeight: this.properties.get('invertHeight'),
                 clipSilhouette: this.properties.get('clipSilhouette'),
                 ...uvJson(this),
+                ...windJson(this),
                 // The AUTHORING spellings, which differ from the runtime map keys (`base` vs
                 // `baseTexture`, `ramp` vs `rampMap`, `mask` vs `maskMap`) exactly as the Basic and
                 // Blinn-Phong branches do. Anything walking these generically stays correct;
@@ -753,6 +791,7 @@ export class Material {
                 invertHeight: this.properties.get('invertHeight'),
                 clipSilhouette: this.properties.get('clipSilhouette'),
                 ...uvJson(this),
+                ...windJson(this),
                 textures: {
                     base: this.textures.get('baseTexture'),
                     specular: this.textures.get('specularMap'),
@@ -769,7 +808,13 @@ export class Material {
 
     /** Rebuild a Material from the JSON produced by serialize(). Missing/legacy 'default' type -> Blinn-Phong. */
     public static parse(m: any): Material {
-        m = m || {};
+        const material = Material._parseShading(m || {});
+        // Every shading model can answer the wind; written only when the asset carries it.
+        if (m && (m.windStrength !== undefined || m.windStiffness !== undefined)) applyWind(material, m);
+        return material;
+    }
+
+    private static _parseShading(m: any): Material {
         // A serialized TerrainMaterial carries the extra terrain/foliage fields; delegate to its subclass.
         if (m.terrainMaterial) return TerrainMaterial.parse(m);
         // Route on the discriminator flag OR a `custom:`/`customGeom:` type prefix — a blob without the
@@ -1003,6 +1048,12 @@ export interface TerrainFoliageRule {
     cullDistance?: number;
     /** Rasterize these instances into the shadow cascades. Off by default: one instanced draw per cell per cascade. */
     castShadows?: boolean;
+    /**
+     * Wind response of a BILLBOARD rule, which has no material of its own (see `WindConfig`). A mesh
+     * rule's plants answer the wind through their materials instead.
+     */
+    windStrength?: number;
+    windStiffness?: number;
     /** Instances per SQUARE METRE — the same unit for the brush disc and whole-terrain generation. */
     density?: number;
     /** Unit marker for `density`. Absent = legacy per-100x100-tile; see {@link migrateFoliageRule}. */

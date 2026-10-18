@@ -78,6 +78,9 @@ describe('shader variants are drop-in replacements for their base program', () =
      * only those — are compared out.
      */
     const FRAGMENT_OUTPUTS = ['GBuffer', 'PomForwardOut'];
+
+    /** Variant tags that change the vertex stage by design (foliage wind displaces positions). */
+    const VERTEX_VARIANTS = new Set(['wind']);
     const vertexOf = (glsl: string | undefined) => (glsl ?? '').replace(
         new RegExp(String.raw`struct (${FRAGMENT_OUTPUTS.join('|')}) \{[^}]*\};\r?\n`, 'g'), '');
 
@@ -99,7 +102,28 @@ describe('shader variants are drop-in replacements for their base program', () =
     });
 
     it('keep the vertex stage byte-identical, fragment output declarations aside', () => {
-        for (const { name, base, variants } of FAMILIES) for (const { tag, program } of variants)
+        for (const { name, base, variants } of FAMILIES) for (const { tag, program } of variants) {
+            if (VERTEX_VARIANTS.has(tag)) continue;
             expect(vertexOf(program.vertex), `${name}~${tag} vertex`).toBe(vertexOf(base.vertex));
+        }
+    });
+
+    /**
+     * The foliage wind variant is the one that changes the vertex stage ON PURPOSE (it displaces the
+     * position). What it must not change is the vertex INTERFACE: the same attributes at the same
+     * locations, and the same uniform blocks — the VAO and the uniform buffer are shared with the base
+     * program, and a mesh initialized from one is drawn by the other.
+     */
+    it('a vertex-changing variant keeps the base program attributes and uniform blocks', () => {
+        const iface = (glsl: string | undefined) => [
+            ...(glsl ?? '').matchAll(/^(?:layout\(location = \d+\) in .*|layout\(std140\) uniform [^{]*\{[^}]*\}.*)$/gm),
+        ].map(m => m[0]).join('\n');
+        let checked = 0;
+        for (const { name, base, variants } of FAMILIES) for (const { tag, program } of variants) {
+            if (!VERTEX_VARIANTS.has(tag)) continue;
+            expect(iface(program.vertex), `${name}~${tag} vertex interface`).toBe(iface(base.vertex));
+            checked++;
+        }
+        expect(checked).toBeGreaterThan(0);
     });
 });

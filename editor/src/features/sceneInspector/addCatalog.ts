@@ -22,6 +22,7 @@ import {
   VolumetricCloudsNode,
   SkyAtmosphereNode,
   SkyLightNode,
+  WindNode,
   TilemapNode,
   Tilemap,
   Scene,
@@ -59,7 +60,7 @@ import {
   EmptyIcon, TriggerIcon, CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon,
   DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
-  SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon,
+  SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon,
   SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon,
 } from './nodeIcons'
 import { createLandscapeNode } from '../../utils/landscapeSlots'
@@ -379,6 +380,11 @@ export const ADD_ITEMS: AddItem[] = [
     // Scene-wide, so unplaceable — unlike a light probe, which has a volume.
     id: 'skyLight', label: 'Sky Light', icon: SkyLightIcon, category: 'environment', placeable: false,
     create: async () => new SkyLightNode('sky light'),
+  },
+  {
+    // Scene-wide, so unplaceable. Plants only sway where their material asks for it.
+    id: 'wind', label: 'Wind', icon: WindIcon, category: 'environment', placeable: false,
+    create: async () => new WindNode('wind'),
   },
   {
     id: 'volumetricClouds', label: 'Clouds', icon: CloudsIcon, category: 'environment', placeable: false,

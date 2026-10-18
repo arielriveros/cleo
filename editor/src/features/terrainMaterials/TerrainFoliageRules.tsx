@@ -219,6 +219,17 @@ export default function TerrainFoliageRules({ material, onChange }: { material: 
                   <span className={label} title='Rasterize these instances into the shadow cascades. Costs one extra instanced draw per cell per cascade — cheap for trees, expensive for dense grass.'>Cast shadows</span>
                   <Toggle checked={!!r.castShadows} onChange={c => patchRule(i, { castShadows: c })} />
                 </div>
+                {/* A billboard has no material of its own, so its wind lives on the rule. A mesh prop
+                    answers the wind through its materials (material editor, Wind section). */}
+                {r.kind === 'billboard' && (
+                  <div className='flex items-center justify-between'>
+                    <span className={label} title='How far the tufts lean in the scene Wind, as a fraction of their height (0 = still), and how stiff they are (higher = slower). Needs a Wind node in the scene.'>Wind lean/stiffness</span>
+                    <span className='flex gap-1'>
+                      <NumberInput step={0.05} min={0} className={num} value={r.windStrength ?? 0} onChange={v => patchRule(i, { windStrength: Math.max(0, v) })} />
+                      <NumberInput step={0.1} min={0.1} className={num} value={r.windStiffness ?? 1} onChange={v => patchRule(i, { windStiffness: Math.max(0.1, v) })} />
+                    </span>
+                  </div>
+                )}
 
                 {r.kind === 'mesh' && <>
                   {/* LOD/cull come from the model asset (edited in the model editor) — shown, not edited. */}

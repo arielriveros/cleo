@@ -58,6 +58,7 @@ export type { VolumetricCloudsOptions } from "./core/scene/nodes/volumetricCloud
 export { SkyAtmosphereNode } from "./core/scene/nodes/skyAtmosphereNode";
 export type { SkyAtmosphereOptions } from "./core/scene/nodes/skyAtmosphereNode";
 export { SkyLightNode } from "./core/scene/nodes/skyLightNode";
+export { WindNode, WIND_DEFAULTS, type WindOptions } from "./core/scene/nodes/windNode";
 export type { SkyLightOptions } from "./core/scene/nodes/skyLightNode";
 export { CameraNode } from "./core/scene/nodes/cameraNode";
 export { SoundNode } from "./core/scene/nodes/soundNode";
@@ -200,7 +201,7 @@ export type { NavPath, RepathPolicy, RepathState } from "./ai/navPath";
 export { HistoryManager } from "./core/history";
 export type { HistoryEntry, HistoryOptions } from "./core/history";
 export { Mesh } from "./graphics/mesh";
-export { applyUvMapping, uvConfigOf } from "./graphics/material";
+export { applyUvMapping, uvConfigOf, applyWind, windConfigOf, type WindConfig } from "./graphics/material";
 export type { UvConfig, UvProjection, UvSpace } from "./graphics/material";
 export { Material, TerrainMaterial, CustomMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, migrateFoliageRule, foliageRuleKey, newTerrainSlotId, legacyHeightBlendToRule, setTerrainSurfaceFrom, shallowCloneTerrainMaterial } from "./graphics/material";
 export type { TerrainBaseType, TerrainFoliageRule, TerrainMaterialSlot, FoliageCollision, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";

@@ -20,7 +20,7 @@ export const SCRIPT_ID_VAR = '__scriptId'
 // The node types a script may extend from (`class X extends <Base>Node`). Matches the engine's NodeType.
 export type ScriptBaseType =
   | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'cameraRig'
-  | 'sprite' | 'animatedSprite' | 'landscape' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'lodGroup'
+  | 'sprite' | 'animatedSprite' | 'landscape' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'wind' | 'lodGroup'
   | 'sound' | 'character' | 'controller'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput'
@@ -40,6 +40,7 @@ export const BASE_CLASS: Record<ScriptBaseType, string> = {
   volumetricClouds: 'VolumetricCloudsNode',
   skyAtmosphere: 'SkyAtmosphereNode',
   skyLight: 'SkyLightNode',
+  wind: 'WindNode',
   lodGroup: 'LodGroupNode',
   sound: 'SoundNode',
   character: 'CharacterNode',
@@ -61,7 +62,7 @@ export const BASE_CLASS: Record<ScriptBaseType, string> = {
 export const BASE_TYPE_LABEL: Record<ScriptBaseType, string> = {
   node: 'Node', model: 'Model', light: 'Light', lightProbe: 'Light Probe', skybox: 'Skybox',
   camera: 'Camera', cameraRig: 'Camera Rig', sprite: 'Sprite', animatedSprite: 'Animated Sprite', landscape: 'Landscape',
-  volumetricClouds: 'Volumetric Clouds', skyAtmosphere: 'Sky Atmosphere', skyLight: 'Sky Light',
+  volumetricClouds: 'Volumetric Clouds', skyAtmosphere: 'Sky Atmosphere', skyLight: 'Sky Light', wind: 'Wind',
   lodGroup: 'LOD Group', sound: 'Sound', character: 'Character', controller: 'Controller',
   uiRoot: 'UI Canvas', uiPanel: 'UI Panel', uiText: 'UI Text', uiImage: 'UI Image',
   uiButton: 'UI Button', uiStack: 'UI Stack', uiSpacer: 'UI Spacer',
