@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import {
   TerrainMaterial, TerrainFoliageRule, Model, TextureManager, Logger,
-  DEFAULT_FOLIAGE_DENSITY, FOLIAGE_DENSITY_UNIT, MAX_INSTANCES, foliageEffectiveCull,
+  DEFAULT_FOLIAGE_DENSITY, FOLIAGE_DENSITY_UNIT, MAX_INSTANCES, foliageEffectiveCull, allTerrainFoliageRules,
 } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
@@ -10,9 +10,10 @@ import { cryptoRandomId } from '../../utils/ids'
 import { Button, FileButton, NumberInput, Select, TextInput, Toggle, cn, hintClass, labelClass } from '../../components/ui'
 import { toast } from '../toasts/toastStore'
 
-// The foliage a landscape material scatters, and the foliage it keeps off itself: shared by the
-// landscape-material editor and the landscape's own Layers panel. Edits `material` IN PLACE and calls
-// `onChange` — foliage rules are not part of the slot undo (their prototypes are rebuilt on change).
+// One foliage list of a landscape material and the foliage names kept off it: the whole-landscape list,
+// the Ground's, or one slot's (TerrainMaterialSlot.foliageInclude/foliageExclude). Edits `rules` IN PLACE
+// and hands exclude changes to `setExclude`, then calls `onChange` — foliage rules are not part of the
+// slot undo (their prototypes are rebuilt on change).
 
 /** Area (units²) the density field is shown per: a 10 × 10 block. */
 const DENSITY_BLOCK = 100
@@ -23,7 +24,21 @@ const ESTIMATE_SIZE = 200
 const estimateFor = (r: TerrainFoliageRule): number =>
   Math.round((r.density ?? DEFAULT_FOLIAGE_DENSITY.mesh) * ESTIMATE_SIZE * ESTIMATE_SIZE)
 
-export default function TerrainFoliageRules({ material, onChange }: { material: TerrainMaterial; onChange: () => void }) {
+export default function TerrainFoliageRules({ material, rules, exclude, setExclude, onChange,
+                                             title = 'Foliage', excludeTitle = 'Exclude foliage',
+                                             hint = 'Foliage the landscape brush scatters where this material is painted.',
+                                             excludeHint = 'Foliage kept off this material even where a neighbouring material would place it.',
+                                             defaultOpen = true }: {
+  /** The landscape material the lists belong to — for the names its other surfaces define. */
+  material: TerrainMaterial
+  rules: TerrainFoliageRule[]
+  exclude: string[]
+  setExclude: (names: string[]) => void
+  onChange: () => void
+  title?: string; excludeTitle?: string; hint?: string; excludeHint?: string
+  /** Start collapsed (per-surface lists) unless the list already holds something. */
+  defaultOpen?: boolean
+}) {
   const { terrainMaterials, models, materials, dropFoliageLayer, bakeFoliageImpostor, instance } = useCleoEngine()
 
   /**
@@ -50,6 +65,7 @@ export default function TerrainFoliageRules({ material, onChange }: { material: 
   const [bakingRule, setBakingRule] = useState(-1)
   const [, force] = useState(0)
   const mat = material
+  // `exclude` is the CURRENT list: the parent re-reads it on every change.
   const changed = () => { onChange(); force(x => x + 1) }
   const label = labelClass
   const num = 'w-16 px-1 py-0.5'
@@ -57,13 +73,14 @@ export default function TerrainFoliageRules({ material, onChange }: { material: 
   // Union of foliage prototype names across the library and this material, for the exclude picker.
   const knownFoliageNames = useMemo(() => {
     const names = new Set<string>()
-    for (const asset of terrainMaterials) {
-      const inc = asset.material?.foliageInclude
-      if (Array.isArray(inc)) for (const r of inc) if (r?.name) names.add(r.name)
-    }
-    for (const r of mat.foliageInclude) names.add(r.name)
+    for (const asset of terrainMaterials)
+      for (const r of allTerrainFoliageRules(asset.material)) if (r?.name) names.add(r.name)
+    // This material's own lists, every surface — what the rest of THIS landscape grows.
+    for (const r of allTerrainFoliageRules(mat)) names.add(r.name)
+    // A list never offers to exclude its own foliage: that is what removing it is for.
+    for (const r of rules) names.delete(r.name)
     return Array.from(names)
-  }, [terrainMaterials, mat])
+  }, [terrainMaterials, mat, rules.length])
 
   /**
    * Models offerable as a foliage prop: everything EXCEPT a generated LOD level.
@@ -81,10 +98,10 @@ export default function TerrainFoliageRules({ material, onChange }: { material: 
 
   const addBillboard = () => {
     if (!newFoliageTex) { toast.warning('Pick a texture for the grass billboard.'); return }
-    const name = `${newFoliageTex.slice(0, 10)}_${mat.foliageInclude.length}`
+    const name = `${newFoliageTex.slice(0, 10)}_${allTerrainFoliageRules(mat).length}`
     // densityUnit must be stamped here: a rule pushed straight onto a live material never passes through
     // TerrainMaterial.parse, where an unmarked rule is treated as legacy and divided by 100.
-    mat.foliageInclude.push({
+    rules.push({
       // A stable identity so the scattered layer follows this rule through a rename. A billboard has
       // no modelId to fall back on, so without this its only key would be the name.
       id: cryptoRandomId(),
@@ -103,12 +120,12 @@ export default function TerrainFoliageRules({ material, onChange }: { material: 
         // the only thing that can keep its layer through a rename.
         id: cryptoRandomId(),
         kind: 'mesh', // rendering mode: real geometry, as opposed to 'billboard'
-        name: `${models[0].name}_${mat.foliageInclude.length}`,
+        name: `${models[0].name}_${allTerrainFoliageRules(mat).length}`,
         model: models[0].model.serialize(),
         density: DEFAULT_FOLIAGE_DENSITY.mesh, densityUnit: FOLIAGE_DENSITY_UNIT,
         minScale: 0.8, maxScale: 1.4,
       }
-      mat.foliageInclude.push(rule)
+      rules.push(rule)
       changed()
     }).catch(err => console.error(err))
   }
@@ -122,8 +139,8 @@ export default function TerrainFoliageRules({ material, onChange }: { material: 
       // The foliage layer then draws LOD0 at every distance, the readout below says "1 LOD level", and
       // the whole LOD feature looks broken when only this argument was missing.
       const rule = buildFoliageRuleFromModelAsset(asset, undefined, models, materials)
-      rule.name = `${rule.name}_${mat.foliageInclude.length}`
-      mat.foliageInclude.push(rule)
+      rule.name = `${rule.name}_${allTerrainFoliageRules(mat).length}`
+      rules.push(rule)
       changed()
     } catch (e) {
       Logger.warn(`${e}`, 'Editor')
@@ -131,11 +148,11 @@ export default function TerrainFoliageRules({ material, onChange }: { material: 
   }
   // Rebuilds from the linked model asset, keeping name/density/impostor.
   const resyncRule = (i: number) => {
-    const r = mat.foliageInclude[i]
+    const r = rules[i]
     const asset = r.modelId ? models.find(m => m.id === r.modelId) : undefined
     if (!asset) { Logger.warn('The source model asset no longer exists', 'Editor'); return }
     try {
-      mat.foliageInclude[i] = buildFoliageRuleFromModelAsset(asset, r, models, materials)
+      rules[i] = buildFoliageRuleFromModelAsset(asset, r, models, materials)
       changed()
     } catch (e) {
       Logger.warn(`${e}`, 'Editor')
@@ -153,7 +170,7 @@ export default function TerrainFoliageRules({ material, onChange }: { material: 
    * instances went no longer exists. Re-run Generate Foliage after adding the replacement.
    */
   const bakeImpostor = async (i: number) => {
-    const rule = mat.foliageInclude[i]
+    const rule = rules[i]
     if (!rule?.modelId) { Logger.warn('This prototype has no library model to bake a card from', 'Editor'); return }
     setBakingRule(i)
     try {
@@ -166,23 +183,23 @@ export default function TerrainFoliageRules({ material, onChange }: { material: 
   }
 
   const removeRule = (i: number) => {
-    const rule = mat.foliageInclude[i]
-    mat.foliageInclude.splice(i, 1)
+    const rule = rules[i]
+    rules.splice(i, 1)
     if (rule) dropFoliageLayer(rule)
     changed()
   }
-  const patchRule = (i: number, patch: Partial<TerrainFoliageRule>) => { Object.assign(mat.foliageInclude[i], patch); changed() }
+  const patchRule = (i: number, patch: Partial<TerrainFoliageRule>) => { Object.assign(rules[i], patch); changed() }
   const toggleExclude = (name: string, on: boolean) => {
-    const set = new Set(mat.foliageExclude)
+    const set = new Set(exclude)
     if (on) set.add(name); else set.delete(name)
-    mat.foliageExclude = Array.from(set)
+    setExclude(Array.from(set))
     changed()
   }
 
   return (
     <>
-        <Collapsable title='Foliage'>
-          <div className='p-2 space-y-2' title='Foliage the landscape brush scatters where this material is painted.'>
+        <Collapsable title={rules.length ? `${title} (${rules.length})` : title} defaultOpen={defaultOpen || rules.length > 0}>
+          <div className='p-2 space-y-2' title={hint}>
             <div className='border border-control rounded p-2 space-y-1'>
               <div className={label}>Add grass billboard</div>
               <div className='flex gap-1'>
@@ -205,7 +222,7 @@ export default function TerrainFoliageRules({ material, onChange }: { material: 
               </div>
             </div>
 
-            {mat.foliageInclude.map((r, i) => (
+            {rules.map((r, i) => (
               <div key={i} className='border border-control rounded p-2 space-y-1'>
                 <div className='flex items-center gap-1'>
                   <TextInput className={cn(num, 'flex-1')} value={r.name} onChange={v => patchRule(i, { name: v })} title='Foliage name (referenced by exclude lists)' />
@@ -344,13 +361,13 @@ export default function TerrainFoliageRules({ material, onChange }: { material: 
           </div>
         </Collapsable>
 
-        <Collapsable title='Exclude foliage'>
-          <div className='p-2 space-y-1' title='Foliage kept off this material even where a neighbouring material would place it.'>
-            {knownFoliageNames.length === 0 && <p className={hintClass}>No foliage defined in the library yet.</p>}
+        <Collapsable title={exclude.length ? `${excludeTitle} (${exclude.length})` : excludeTitle} defaultOpen={defaultOpen || exclude.length > 0}>
+          <div className='p-2 space-y-1' title={excludeHint}>
+            {knownFoliageNames.length === 0 && <p className={hintClass}>No other foliage defined yet.</p>}
             {knownFoliageNames.map(name => (
               <div key={name} className='flex items-center justify-between'>
                 <span className={label}>{name}</span>
-                <Toggle checked={mat.foliageExclude.includes(name)} onChange={c => toggleExclude(name, c)} />
+                <Toggle checked={exclude.includes(name)} onChange={c => toggleExclude(name, c)} />
               </div>
             ))}
           </div>

@@ -1115,6 +1115,43 @@ export interface TerrainMaterialSlot {
     normalStrength?: number;
     /** Break up visible tiling, 0 off .. 1 full. Optional; absent reads as 0. */
     antiTiling?: number;
+    /**
+     * Foliage that grows ONLY where this surface is the dominant one of the landscape material —
+     * grass on a grass slot, pines on a forest slot. Independent of `allowFoliage`, which governs the
+     * material's whole-landscape rules alone. Optional; absent = none.
+     */
+    foliageInclude?: TerrainFoliageRule[];
+    /**
+     * Foliage names kept off wherever this surface shows (weight >= 0.15): a road slot excluding the
+     * grass. Applies to whole-landscape rules and to every other surface's rules alike.
+     */
+    foliageExclude?: string[];
+}
+
+/** Where a foliage rule of a landscape material grows: everywhere, on the Ground, or on one slot (by id). */
+export type TerrainFoliageScope = 'all' | 'ground' | { slotId: string };
+
+/**
+ * Every foliage rule a landscape material carries, with where it grows: the whole-landscape list, the
+ * Ground's own, then each slot's. The ONE walker — anything that needs "all of this material's foliage"
+ * (geometry resolution, reference graphs, publishing, model/material sync) goes through it, so a rule
+ * authored on a slot can never be invisible to one of them.
+ */
+export function terrainFoliageRules(tm: {
+    foliageInclude?: TerrainFoliageRule[]; groundFoliageInclude?: TerrainFoliageRule[];
+    slots?: { id: string; foliageInclude?: TerrainFoliageRule[] }[];
+}): { rule: TerrainFoliageRule; scope: TerrainFoliageScope }[] {
+    const out: { rule: TerrainFoliageRule; scope: TerrainFoliageScope }[] = [];
+    for (const rule of tm.foliageInclude ?? []) out.push({ rule, scope: 'all' });
+    for (const rule of tm.groundFoliageInclude ?? []) out.push({ rule, scope: 'ground' });
+    for (const slot of tm.slots ?? [])
+        for (const rule of slot.foliageInclude ?? []) out.push({ rule, scope: { slotId: slot.id } });
+    return out;
+}
+
+/** Just the rules of {@link terrainFoliageRules}. Works on a live material or its serialized JSON. */
+export function allTerrainFoliageRules(tm: Parameters<typeof terrainFoliageRules>[0] | null | undefined): TerrainFoliageRule[] {
+    return tm ? terrainFoliageRules(tm).map(e => e.rule) : [];
 }
 
 /** A new slot's id. Unique enough for a list key; the engine never compares it. */
@@ -1182,6 +1219,10 @@ export class TerrainMaterial extends Material {
     public foliageInclude: TerrainFoliageRule[] = [];
     /** Foliage names kept off this material even when a neighbouring material would place them. */
     public foliageExclude: string[] = [];
+    /** Foliage that grows only where the Ground (slot 0) dominates. See {@link TerrainMaterialSlot.foliageInclude}. */
+    public groundFoliageInclude: TerrainFoliageRule[] = [];
+    /** Foliage names kept off wherever the Ground shows. See {@link TerrainMaterialSlot.foliageExclude}. */
+    public groundFoliageExclude: string[] = [];
     /**
      * Where this material's OWN surface (slot 0) appears within the layer that paints it. Ignored when
      * the material is a landscape's BASE: the base's first surface covers everything, rules or not,
@@ -1248,6 +1289,9 @@ export class TerrainMaterial extends Material {
             // keeps carrying its geometry.
             foliageInclude: this.foliageInclude.map(r => stripDerivedFoliageGeometry(r)),
             foliageExclude: [...this.foliageExclude],
+            // Written only when used, so a material without per-surface foliage serializes as before.
+            ...(this.groundFoliageInclude.length ? { groundFoliageInclude: this.groundFoliageInclude.map(r => stripDerivedFoliageGeometry(r)) } : {}),
+            ...(this.groundFoliageExclude.length ? { groundFoliageExclude: [...this.groundFoliageExclude] } : {}),
             rule: cloneBlendRule(this.rule),
             allowFoliage: this.allowFoliage,
             surfaceMaterialId: this.surfaceMaterialId,
@@ -1264,6 +1308,8 @@ export class TerrainMaterial extends Material {
                 manual: s.manual,
                 normalStrength: s.normalStrength ?? 1,
                 antiTiling: s.antiTiling ?? 0,
+                ...(s.foliageInclude?.length ? { foliageInclude: s.foliageInclude.map(r => stripDerivedFoliageGeometry(r)) } : {}),
+                ...(s.foliageExclude?.length ? { foliageExclude: [...s.foliageExclude] } : {}),
             })),
         };
     }
@@ -1309,6 +1355,9 @@ export class TerrainMaterial extends Material {
         tm.foliageInclude = Array.isArray(m.foliageInclude)
             ? m.foliageInclude.map((r: any) => migrateFoliageRule({ ...r })) : [];
         tm.foliageExclude = Array.isArray(m.foliageExclude) ? [...m.foliageExclude] : [];
+        tm.groundFoliageInclude = Array.isArray(m.groundFoliageInclude)
+            ? m.groundFoliageInclude.map((r: any) => migrateFoliageRule({ ...r })) : [];
+        tm.groundFoliageExclude = Array.isArray(m.groundFoliageExclude) ? [...m.groundFoliageExclude] : [];
         // MIGRATION, permanent like the height-slot read above: every material saved before rules
         // existed carries its mask as `auto` / `hRange` / `sRange` and its blend as `heightBlend`.
         // `hRange` was WORLD Y; a material cannot know which landscape it will sit on, so it is read as
@@ -1341,6 +1390,9 @@ export class TerrainMaterial extends Material {
             manual: s.manual === true,
             normalStrength: finiteOr(s.normalStrength, 1),
             antiTiling: finiteOr(s.antiTiling, 0),
+            ...(Array.isArray(s.foliageInclude) && s.foliageInclude.length
+                ? { foliageInclude: s.foliageInclude.map((r: any) => migrateFoliageRule({ ...r })) } : {}),
+            ...(Array.isArray(s.foliageExclude) && s.foliageExclude.length ? { foliageExclude: [...s.foliageExclude] } : {}),
         };
     }
 }
@@ -1383,12 +1435,19 @@ export function shallowCloneTerrainMaterial(tm: TerrainMaterial): TerrainMateria
     c.heightBlend = tm.heightBlend;
     c.foliageInclude = [...tm.foliageInclude];
     c.foliageExclude = [...tm.foliageExclude];
+    c.groundFoliageInclude = [...tm.groundFoliageInclude];
+    c.groundFoliageExclude = [...tm.groundFoliageExclude];
     c.rule = cloneBlendRule(tm.rule);
     c.allowFoliage = tm.allowFoliage;
     c.surfaceMaterialId = tm.surfaceMaterialId;
     c.normalStrength = tm.normalStrength;
     c.antiTiling = tm.antiTiling;
-    c.slots = tm.slots.map(s => ({ ...s, rule: cloneBlendRule(s.rule) }));
+    c.slots = tm.slots.map(s => ({
+        ...s, rule: cloneBlendRule(s.rule),
+        // Own arrays, never the original's: an edit to the clone's slot foliage must not reach it.
+        ...(s.foliageInclude ? { foliageInclude: [...s.foliageInclude] } : {}),
+        ...(s.foliageExclude ? { foliageExclude: [...s.foliageExclude] } : {}),
+    }));
     return c;
 }
 

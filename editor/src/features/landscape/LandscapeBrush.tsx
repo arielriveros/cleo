@@ -191,13 +191,10 @@ export default function LandscapeBrush({ viewportRef }: Props) {
             }
             if (foliageDue(point, b.radius)) {
                 // Erase FIRST, then scatter: the other order removes what this stroke just placed. Keep only
-                // the foliage of whichever layer now dominates under the brush centre (the ground, unless a
-                // legacy paint layer is still unconverted).
+                // the foliage allowed on what is under the brush centre NOW — per slot, not per layer — so
+                // painting a road slot clears the grass that only belongs to the grass slot.
                 const lx = point[0] - terrain.origin[0], lz = point[2] - terrain.origin[2];
-                const w = terrain.layerWeightsAt(lx, lz);
-                let best = w.base, material = terrain.layerStack.base.material;
-                terrain.layerStack.paintLayers.forEach((L, i) => { if (w.paint[i] > best) { best = w.paint[i]; material = L.material; } });
-                edited(terrain.eraseFoliageExcept(point as any, b.radius, material ? material.foliageInclude.map(r => r.name) : []));
+                edited(terrain.eraseFoliageExcept(point as any, b.radius, terrain.foliageNamesAllowedAt(lx, lz)));
                 edited(terrain.scatterFoliageFromMaterials(point as any, b.radius));
             }
         };

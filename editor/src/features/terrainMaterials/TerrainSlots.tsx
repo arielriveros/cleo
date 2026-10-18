@@ -8,6 +8,8 @@ import MaterialPicker, { MaterialMenu, liveMaterial, useCreateMaterial } from '.
 import { Button, Hint, NumberInput, Popover, Slider, TextInput, Toggle, cn, labelClass } from '../../components/ui'
 import type { MaterialAsset } from '../../utils/materials'
 import { newLandscapeSlot, slotDisplayName } from '../../utils/landscapeSlots'
+import { cryptoRandomId } from '../../utils/ids'
+import TerrainFoliageRules from './TerrainFoliageRules'
 
 // The extra surfaces of a landscape material: rock on the steep parts, snow up high, a road where it is
 // painted. The landscape-material editor's slot section; landscape mode only paints them.
@@ -32,7 +34,7 @@ export type SlotEdit = (
 const find = (tm: TerrainMaterial, id: string) => tm.slots.find(s => s.id === id)
 
 /** Slots 1..n of `material` as rows, in blend order. */
-function SlotList(props: { material: TerrainMaterial; edit: SlotEdit; elevationHint?: string | null }) {
+function SlotList(props: { material: TerrainMaterial; edit: SlotEdit; elevationHint?: string | null; onChange: () => void }) {
   const { material, edit } = props
   const n = material.slots.length
   const order = material.slots.map((_, i) => i)
@@ -48,6 +50,7 @@ function SlotList(props: { material: TerrainMaterial; edit: SlotEdit; elevationH
       })
       return (
         <SlotRow key={slot.id} slot={slot} index={i} edit={edit}
+          material={material} onFoliageChange={props.onChange}
           elevationHint={props.elevationHint}
           canUp={i > 0} canDown={i < n - 1}
           onUp={() => move(-1)} onDown={() => move(1)} />
@@ -60,6 +63,9 @@ function SlotRow(props: {
   slot: TerrainMaterialSlot
   index: number
   edit: SlotEdit
+  /** The material the slot belongs to, edited in place by the slot's foliage lists. */
+  material: TerrainMaterial
+  onFoliageChange: () => void
   elevationHint?: string | null
   canUp: boolean
   canDown: boolean
@@ -100,6 +106,9 @@ function SlotRow(props: {
           tm.slots.splice(i + 1, 0, {
             ...slot, id: newTerrainSlotId(), name: `${slotDisplayName(slot, materials)} copy`,
             material: Material.parse(slot.material.serialize()), rule: cloneBlendRule(slot.rule),
+            // Its own foliage, under fresh ids: a shared id would file both slots' instances in ONE layer.
+            foliageInclude: slot.foliageInclude?.map(r => ({ ...r, id: cryptoRandomId() })),
+            foliageExclude: slot.foliageExclude ? [...slot.foliageExclude] : undefined,
           })
         })}>⧉</Button>
         <Button variant='remove' size='sm' title='Remove this slot (and its painting)'
@@ -132,7 +141,7 @@ function SlotRow(props: {
         onNormalStrength={v => set('Slot normal strength', s => { s.normalStrength = v }, 'normalStrength')}
         onAntiTiling={v => set('Slot anti-tiling', s => { s.antiTiling = v }, 'antiTiling')} />
       <div className='flex items-center justify-between gap-2'>
-        <span className={labelClass} title='Let the foliage brush scatter where this slot dominates — off for rock and roads'>Allow foliage</span>
+        <span className={labelClass} title='Let the WHOLE-LANDSCAPE foliage grow where this slot dominates — off for rock and roads. The slot’s own foliage (below) grows here regardless.'>Allow landscape foliage</span>
         <Toggle checked={slot.allowFoliage} onChange={c => set('Slot foliage', s => { s.allowFoliage = c })} />
       </div>
 
@@ -148,6 +157,17 @@ function SlotRow(props: {
           <BlendRuleEditor rule={rule} elevationHint={props.elevationHint}
             onChange={() => set('Slot rule', s => { s.rule = cloneBlendRule(rule) }, 'rule')} />}
       </div>
+
+      {/* This slot's OWN foliage — grows only where the slot dominates — and the foliage kept off it. */}
+      <TerrainFoliageRules
+        material={props.material}
+        rules={slot.foliageInclude ??= []}
+        exclude={slot.foliageExclude ?? []}
+        setExclude={names => { slot.foliageExclude = names }}
+        onChange={props.onFoliageChange}
+        title='Foliage on this slot' excludeTitle='Keep off this slot' defaultOpen={false}
+        hint='Foliage that grows only where this slot is the dominant surface — grass on a grass slot, pines on a forest slot.'
+        excludeHint='Foliage kept off wherever this slot shows, whichever list it comes from — a road keeping the grass and trees off.' />
     </div>
   )
 }
@@ -222,7 +242,7 @@ export default function TerrainSlots(props: { material: TerrainMaterial; onChang
           above a height — or, paint only, just where they are brushed in Landscape mode. The ground,
           above, always fills what they leave.
         </Hint>
-        <SlotList material={material} edit={edit} elevationHint={props.elevationHint} />
+        <SlotList material={material} edit={edit} elevationHint={props.elevationHint} onChange={onChange} />
         <div className='flex justify-end'><AddSlotButtons material={material} edit={edit} /></div>
         {material.slots.length >= MAX_SLOTS &&
           <Hint>A landscape material can hold {MAX_SLOTS} slots; the landscape itself can show {MAX_TERRAIN_SURFACES} surfaces at once.</Hint>}

@@ -15,7 +15,7 @@ import { useStableActions } from "../utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
 import { isEditorOwnedChange } from "../utils/editorOwned";
 import { resetScriptModules, addScriptModuleSources } from "cleo";
-import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
+import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, allTerrainFoliageRules, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
 import type { SceneChange, TerrainFoliageRule, InputMap } from "cleo";
 import NullImage from '../images/null.png';
 import EventEmitter from "../utils/eventEmitter";
@@ -40,7 +40,7 @@ import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf,
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds, syncSlotMaterialInTerrain, withSyncedSlotMaterial } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
-import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, recenterIfOffOrigin, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, modelInstanceShape, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE, buildPartAsset, submeshNodeJson, uniqueModelName, lodLevelMaterialLinks, withLevelLinks, type ModelPart } from "../utils/models";
+import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, recenterIfOffOrigin, rescaleLodDistances, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, modelInstanceShape, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE, buildPartAsset, submeshNodeJson, uniqueModelName, lodLevelMaterialLinks, withLevelLinks, type ModelPart } from "../utils/models";
 import { downscaleTextures, levelTextureIds, maskTextureIds } from "../utils/lodTextures";
 import { detachForeignChildren, reattachForeignChildren } from "../utils/foreignChildren";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, defaultScriptModule, seedScriptFields, scriptKindOfAsset } from "../utils/scripts";
@@ -3896,8 +3896,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    */
   const syncFoliageRulesForModel = (modelAsset: ModelAsset, exceptTabId?: string) => {
     const affected = terrainMaterialsRef.current.filter(tmAsset => {
-      const rules = tmAsset.material?.foliageInclude;
-      return Array.isArray(rules) && rules.some((r: any) => r?.modelId === modelAsset.id);
+      return allTerrainFoliageRules(tmAsset.material).some((r: any) => r?.modelId === modelAsset.id);
     });
     if (affected.length === 0) return;
 
@@ -3908,7 +3907,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (tabId === exceptTabId) continue;
       const tm = (rt as any).tm;
       if (!tm?.foliageInclude) continue;
-      for (const rule of tm.foliageInclude)
+      for (const rule of allTerrainFoliageRules(tm))
         if (rule?.modelId === modelAsset.id) { delete rule.models; delete rule.model; delete rule.lods }
     }
 
@@ -3975,7 +3974,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Only models a rule actually references — re-baking a model nothing scatters is wasted work.
     const scattered = new Set<string>();
     for (const tmAsset of terrainMaterialsRef.current)
-      for (const r of tmAsset.material?.foliageInclude ?? []) if ((r as any)?.modelId) scattered.add((r as any).modelId);
+      for (const r of allTerrainFoliageRules(tmAsset.material)) if ((r as any)?.modelId) scattered.add((r as any).modelId);
 
     for (const modelAsset of modelsRef.current) {
       if (!scattered.has(modelAsset.id)) continue;
@@ -4481,7 +4480,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!tab || tab.kind !== 'model') return;
     const session = modelSessions[tab.id];
     if (!session) return;
-    setModelSessions(prev => ({ ...prev, [tab.id]: { ...session, cullDistance: Math.max(0, distance) } }));
+    const cullDistance = Math.max(0, distance);
+    // Levels are placed as a share of the cull (the inspector's slider), so they move with it.
+    const distances = rescaleLodDistances(session.distances, session.cullDistance, cullDistance);
+    setModelSessions(prev => ({ ...prev, [tab.id]: { ...session, cullDistance, distances } }));
     markTabDirty(tab.id, 'model-cull-distance');
   };
 

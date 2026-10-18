@@ -1,4 +1,4 @@
-import { Material, TerrainMaterial, Terrain, TextureManager, setTerrainSurfaceFrom } from 'cleo'
+import { Material, TerrainMaterial, Terrain, TextureManager, setTerrainSurfaceFrom, allTerrainFoliageRules } from 'cleo'
 import { cryptoRandomId } from './ids'
 import { deepClone } from './deepClone'
 import { resolveFoliageRuleGeometry } from './foliageRules'
@@ -70,7 +70,7 @@ export function collectTerrainMaterialTextureIds(serialized: any): Set<string> {
   // Slots 1..n are materials of their own, each with its own `textures` map.
   if (Array.isArray(serialized?.slots))
     for (const slot of serialized.slots) addTextures(slot?.material?.textures)
-  collectFoliageRuleTextureIds(serialized?.foliageInclude, set)
+  collectFoliageRuleTextureIds(allTerrainFoliageRules(serialized), set)
   return set
 }
 
@@ -114,7 +114,7 @@ export function parseTerrainMaterialAsset(asset: TerrainMaterialAsset): TerrainM
   // A saved mesh rule carries only its `modelId`; its baked prototypes are a derived cache that is no
   // longer persisted (see TerrainMaterial.serialize). This is where they come back, on the one path from
   // a stored asset to a live material. A legacy rule that still embeds them is returned untouched.
-  for (const rule of tm.foliageInclude) resolveFoliageRuleGeometry(rule)
+  for (const rule of allTerrainFoliageRules(tm)) resolveFoliageRuleGeometry(rule)
   return tm
 }
 
@@ -167,7 +167,7 @@ export function applyTerrainMaterialToLayer(
   terrain.refreshFoliagePrototypes({ rescatterOnDensityChange: opts?.rescatterOnDensityChange })
   if (opts?.skipAutoGenerate) return
   const alreadyScattered = terrain.foliage.some(f => f.count > 0)
-  if (tm.foliageInclude.length > 0 && !alreadyScattered && terrain.layerCoverage(index) > 0.05)
+  if (allTerrainFoliageRules(tm).length > 0 && !alreadyScattered && terrain.layerCoverage(index) > 0.05)
     terrain.generateFoliageEverywhere()
 }
 
@@ -196,7 +196,7 @@ export function assignLandscapeMaterial(
   terrain.refreshFoliagePrototypes({ rescatterOnDensityChange: opts?.rescatterOnDensityChange })
   if (opts?.skipAutoGenerate) return true
   const alreadyScattered = terrain.foliage.some(f => f.count > 0)
-  if (target === 'base' && tm.foliageInclude.length > 0 && !alreadyScattered) terrain.generateFoliageEverywhere()
+  if (target === 'base' && allTerrainFoliageRules(tm).length > 0 && !alreadyScattered) terrain.generateFoliageEverywhere()
   return true
 }
 

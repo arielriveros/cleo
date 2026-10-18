@@ -1,4 +1,4 @@
-import { Scene, CameraNode, isDerivedTextureId, isInlineTilesetId, particleSystemReferences } from 'cleo'
+import { Scene, CameraNode, isDerivedTextureId, isInlineTilesetId, particleSystemReferences, allTerrainFoliageRules } from 'cleo'
 import { getNodeMaterial, getMaterialIdsOf, MaterialAsset } from './materials'
 import { getScreenMaterialIds } from './screenMaterials'
 import { collectTextureIds } from './nodeSubtree'
@@ -78,7 +78,8 @@ export function collectSceneTextureIds(
         // A landscape material's further slots are materials of their own.
         for (const slot of lm?.slots ?? [])
           for (const id of slot?.material?.textures?.values?.() ?? []) if (!isDerivedTextureId(id as string)) set.add(id)
-        collectFoliageRuleTextureIds(lm?.foliageInclude, set)
+        // Whole-landscape, Ground and per-slot foliage alike.
+        collectFoliageRuleTextureIds(allTerrainFoliageRules(lm), set)
       }
       collectFoliageLayerTextureIds(terrain.foliage, set)
     }
@@ -150,7 +151,7 @@ export function collectPublishedTextureIds(node: any, set: Set<string>): void {
         // Slot surfaces included — collectTerrainMaterialTextureIds walks `slots[]`.
         if (layer.material) for (const id of collectTerrainMaterialTextureIds(layer.material)) set.add(id)
         if (layer.textureId) set.add(layer.textureId) // legacy plain-albedo layers
-        collectFoliageRuleTextureIds(layer.material?.foliageInclude, set)
+        collectFoliageRuleTextureIds(allTerrainFoliageRules(layer.material), set)
       }
       // Serialized foliage layers carry the same field names as rules (textureId/models/lods/billboard).
       collectFoliageRuleTextureIds(terrain.foliage, set)
@@ -220,7 +221,7 @@ export function collectSceneFoliageModelIds(scene: Scene | null | undefined): Se
   for (const ln of scene?.landscapes ?? []) {
     const terrain: any = (ln as any).terrain
     if (!terrain) continue
-    for (const layer of terrain.layers ?? []) addRules(layer?.material?.foliageInclude)
+    for (const layer of terrain.layers ?? []) addRules(allTerrainFoliageRules(layer?.material))
     addRules(terrain.foliage)
   }
   return set

@@ -651,34 +651,41 @@ export class TerrainLayerStack {
         const copies: { slotId: string; from: number }[] = [];
         const foliageNames = new Set(base.foliageInclude.map(r => r.name));
         let mergedFoliage = 0;
+        // The new slot of each converted layer, so its foliage can go with it (see below).
+        const ownSlotOf = new Map<number, string>();
         for (const L of this._paint) {
             const tm = L.material;
             if (!tm) continue;
             const scale = L.visible ? Math.max(0, Math.min(1, L.opacity)) : 0;
-            const add = (slot: Omit<TerrainMaterialSlot, 'id' | 'manual'>) => {
+            const add = (slot: Omit<TerrainMaterialSlot, 'id' | 'manual'>): string => {
                 const id = `slot_${uuidv4().slice(0, 8)}`;
                 slot.rule.opacity *= scale;
                 base.slots.push({ ...slot, id, manual: true });
                 copies.push({ slotId: id, from: L.channel });
+                return id;
             };
             // The layer's own surface as a plain material; its invert flag rides along as the property
             // `materialSlots` reads for a slot.
             const own = Material.parse({ ...tm.serialize(), terrainMaterial: undefined });
             if (tm.invertHeight) own.properties.set('invertHeight', true);
-            add({
+            const ownId = add({
                 name: L.name, material: own, surfaceMaterialId: tm.surfaceMaterialId, tiling: tm.tiling,
                 rule: cloneBlendRule(tm.rule), allowFoliage: tm.allowFoliage,
             });
+            ownSlotOf.set(L.channel, ownId);
             for (const s of tm.slots) add({ ...s, name: `${L.name} ${s.name}`, rule: cloneBlendRule(s.rule) });
+            // The layer's foliage goes WITH its surface — onto the new slot, as that slot's own foliage —
+            // rather than spreading over the whole landscape the way it did before slots had foliage.
+            const ownSlot = base.slots.find(s => s.id === ownId)!;
             for (const r of tm.foliageInclude) {
                 if (foliageNames.has(r.name)) continue;
                 foliageNames.add(r.name);
-                base.foliageInclude.push(r);
+                (ownSlot.foliageInclude ??= []).push(r);
                 mergedFoliage++;
             }
         }
         if (mergedFoliage)
-            Logger.warn(`${mergedFoliage} foliage rule(s) from converted paint layers now follow the whole landscape.`, 'Terrain');
+            Logger.info(`${mergedFoliage} foliage rule(s) from converted paint layers now grow on their new slots.`, 'Terrain');
 
         // The layers keep their channels until every mask is copied out, so no new slot channel can land
         // on a mask still waiting to be read.

@@ -149,6 +149,9 @@ export function band(range: readonly number[], v: number, edge: number): number 
 function copyTerrainMaterial(tm: TerrainMaterial): TerrainMaterial {
     const copy = TerrainMaterial.parse(tm.serialize());
     copy.foliageInclude = tm.foliageInclude;
+    // The per-surface lists carry baked geometry too (see TerrainMaterialSlot.foliageInclude).
+    copy.groundFoliageInclude = tm.groundFoliageInclude;
+    copy.slots.forEach((s, i) => { if (tm.slots[i]?.foliageInclude) s.foliageInclude = tm.slots[i].foliageInclude; });
     return copy;
 }
 
@@ -964,16 +967,36 @@ export class Terrain {
         return [this._stack.base.material, ...this._stack.paintLayers.map(L => (L.visible ? L.material : null))];
     }
 
-    /** Every foliage prototype contributed by an assigned layer material, tagged with its layer index. */
-    private _activeFoliageRules(): { rule: TerrainFoliageRule; layerIndex: number }[] {
-        const out: { rule: TerrainFoliageRule; layerIndex: number }[] = [];
+    /**
+     * Every foliage prototype contributed by an assigned layer material, tagged with its layer index and,
+     * for a rule that belongs to ONE surface of the base material (the Ground or a slot), that surface's
+     * index into `TerrainLayerWeights.slots` (0 = ground, k = slot k-1).
+     */
+    private _activeFoliageRules(): { rule: TerrainFoliageRule; layerIndex: number; surface?: number }[] {
+        const out: { rule: TerrainFoliageRule; layerIndex: number; surface?: number }[] = [];
         const materials = this._layerMaterials();
         for (let i = 0; i < materials.length; i++) {
             const m = materials[i];
             if (!m) continue;
             for (const rule of m.foliageInclude) out.push({ rule, layerIndex: i });
+            // Per-surface foliage is a feature of the landscape's ONE material — its weights are what
+            // `layerWeightsAt` resolves per surface. A legacy paint layer's slots have no such weights.
+            if (i !== 0) continue;
+            for (const rule of m.groundFoliageInclude) out.push({ rule, layerIndex: 0, surface: 0 });
+            m.slots.forEach((slot, k) => {
+                for (const rule of slot.foliageInclude ?? []) out.push({ rule, layerIndex: 0, surface: k + 1 });
+            });
         }
         return out;
+    }
+
+    /** Names of every foliage rule that may place an instance at a terrain-local point. The paint brush keeps these. */
+    public foliageNamesAllowedAt(localX: number, localZ: number): string[] {
+        const w = this.layerWeightsAt(localX, localZ);
+        const names = new Set<string>();
+        for (const e of this._activeFoliageRules())
+            if (this._foliageAllowedAt(e.rule.name, e.layerIndex, w, e.surface)) names.add(e.rule.name);
+        return [...names];
     }
 
     /** The dominant layer (shim index) at a point, and its weight. */
@@ -984,18 +1007,35 @@ export class Terrain {
     }
 
     /**
-     * Whether a foliage rule may place an instance at a point: its own layer must dominate there, no
-     * surface that forbids foliage (a rock slot) may, and no layer present excludes it by name.
+     * Whether a foliage rule may place an instance at a point: its own layer must dominate there; a
+     * whole-landscape rule needs a surface that allows foliage (not a rock slot), while a surface's own
+     * rule needs THAT surface to be the dominant one; and nothing present — a layer or one of the base's
+     * surfaces — may exclude it by name.
      */
-    private _foliageAllowedAt(name: string, layerIndex: number, w: TerrainLayerWeights): boolean {
+    private _foliageAllowedAt(name: string, layerIndex: number, w: TerrainLayerWeights, surface?: number): boolean {
         const dom = this._dominantLayer(w);
         if (dom.index !== layerIndex || dom.weight < 1e-3) return false;
-        if (w.noFoliage >= 0.5) return false;
+        if (surface === undefined) {
+            if (w.noFoliage >= 0.5) return false;
+        } else {
+            // The rule's surface must win among the base's surfaces, and clearly: a blend edge where it
+            // barely leads would scatter grass half onto the road beside it.
+            let best = -1, bestW = -1;
+            for (let k = 0; k < w.slots.length; k++) if (w.slots[k] > bestW) { bestW = w.slots[k]; best = k; }
+            if (best !== surface || bestW < 0.35) return false;
+        }
         const materials = this._layerMaterials();
         const weights = [w.base, ...w.paint];
         for (let k = 0; k < weights.length; k++) {
             if (weights[k] < 0.15) continue;
             if (materials[k]?.foliageExclude.includes(name)) return false;
+        }
+        // Per-surface exclusions of the base material: a road slot keeping the grass off wherever it shows.
+        const base = materials[0];
+        if (base) {
+            if ((w.slots[0] ?? 0) >= 0.15 && base.groundFoliageExclude.includes(name)) return false;
+            for (let k = 0; k < base.slots.length; k++)
+                if ((w.slots[k + 1] ?? 0) >= 0.15 && base.slots[k].foliageExclude?.includes(name)) return false;
         }
         return true;
     }
@@ -1072,7 +1112,7 @@ export class Terrain {
         const wx = worldPoint[0], wz = worldPoint[2];
         const touched = new Set<FoliageLayer>();
         const area = Math.PI * radius * radius;
-        for (const { rule, layerIndex } of rules) {
+        for (const { rule, layerIndex, surface } of rules) {
             // density is per m², so a wide brush scatters proportionally more. Capped: this runs from a
             // pointer handler and a 100-unit brush at grass density is >60k candidate points.
             const count = Math.min(MAX_SCATTER_PER_CALL,
@@ -1084,7 +1124,7 @@ export class Terrain {
                 const pz = wz + Math.sin(a) * rr;
                 // Place only where this rule's own layer dominates, on a surface that allows foliage, and
                 // nowhere a present material excludes it.
-                if (!this._foliageAllowedAt(rule.name, layerIndex, this.layerWeightsAt(px - this._origin[0], pz - this._origin[2]))) continue;
+                if (!this._foliageAllowedAt(rule.name, layerIndex, this.layerWeightsAt(px - this._origin[0], pz - this._origin[2]), surface)) continue;
                 const y = this._origin[1] + this.heightAt(px - this._origin[0], pz - this._origin[2]);
                 const layer = this._resolveFoliageLayer(rule);
                 layer.pushInstance(px, y, pz);
@@ -1141,8 +1181,8 @@ export class Terrain {
 
         const touched = new Set<FoliageLayer>();
         let placed = 0, clipped = false;
-        for (const { rule, layerIndex } of rules) {
-            const r = this._scatterRule(rule, layerIndex);
+        for (const { rule, layerIndex, surface } of rules) {
+            const r = this._scatterRule(rule, layerIndex, surface);
             placed += r.placed;
             if (r.clipped) clipped = true;
             if (r.layer) touched.add(r.layer);
@@ -1164,7 +1204,7 @@ export class Terrain {
      * Extracted so a single rule can be re-scattered on its own (see regenerateFoliageForRule); the
      * body is what generateFoliageEverywhere always ran per rule.
      */
-    private _scatterRule(rule: TerrainFoliageRule, layerIndex: number): { placed: number; clipped: boolean; layer: FoliageLayer | null } {
+    private _scatterRule(rule: TerrainFoliageRule, layerIndex: number, surface?: number): { placed: number; clipped: boolean; layer: FoliageLayer | null } {
         const half = this._cfg.size / 2, size = this._cfg.size;
         // density is instances per m² — the same unit the brush uses.
         const count = Math.max(1, Math.round((rule.density ?? DEFAULT_FOLIAGE_DENSITY.mesh) * size * size));
@@ -1172,7 +1212,7 @@ export class Terrain {
         for (let i = 0; i < count; i++) {
             const lx = -half + Math.random() * size;
             const lz = -half + Math.random() * size;
-            if (!this._foliageAllowedAt(rule.name, layerIndex, this.layerWeightsAt(lx, lz))) continue;
+            if (!this._foliageAllowedAt(rule.name, layerIndex, this.layerWeightsAt(lx, lz), surface)) continue;
             const y = this._origin[1] + this.heightAt(lx, lz);
             layer = this._resolveFoliageLayer(rule);
             if (!layer.pushInstance(this._origin[0] + lx, y, this._origin[2] + lz)) { clipped = true; break; }
@@ -1196,7 +1236,7 @@ export class Terrain {
         const layer = this._findFoliageLayer(entry.rule);
         if (!layer) return 0;
         layer.clear();
-        const r = this._scatterRule(entry.rule, entry.layerIndex);
+        const r = this._scatterRule(entry.rule, entry.layerIndex, entry.surface);
         layer.commit();
         return r.placed;
     }

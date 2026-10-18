@@ -94,3 +94,21 @@ describe('serializedTerrainLayers', () => {
     expect(serializedTerrainFoliageRules(stackTerrain(new Uint8Array(4))).map(r => r.name)).toEqual(['Bush', 'Bush']);
   });
 });
+
+describe('per-surface foliage reaches every walker', () => {
+  it('collects the Ground and each slot\'s foliage too', () => {
+    const terrain = {
+      layerStack: {
+        base: {
+          material: {
+            foliageInclude: [{ name: 'Oak', kind: 'mesh' }],
+            groundFoliageInclude: [{ name: 'Clover', kind: 'billboard' }],
+            slots: [{ id: 'g', foliageInclude: [{ name: 'Tuft', kind: 'billboard' }] }, { id: 'road' }],
+          },
+        },
+        paintLayers: [],
+      },
+    };
+    expect(serializedTerrainFoliageRules(terrain).map(r => r.name)).toEqual(['Oak', 'Clover', 'Tuft']);
+  });
+});

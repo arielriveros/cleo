@@ -42,11 +42,19 @@ export function serializedTerrainLayers(terrain: any): SerializedTerrainLayer[] 
 
 /**
  * Every foliage rule a serialized terrain's layer materials include — the prototypes pack interns and
- * unpack inflates. Slot surfaces carry no foliage rules; the rules belong to the landscape material.
+ * unpack inflates. Whole-landscape, Ground and per-slot rules alike (allTerrainFoliageRules).
  */
 export function serializedTerrainFoliageRules(terrain: any): any[] {
   const rules: any[] = []
   for (const layer of serializedTerrainLayers(terrain))
-    for (const rule of Array.isArray(layer.material?.foliageInclude) ? layer.material.foliageInclude : []) rules.push(rule)
+    for (const rule of materialFoliageRules(layer.material)) rules.push(rule)
   return rules
+}
+
+/** The serialized twin of the engine's allTerrainFoliageRules: whole-landscape, Ground, then each slot's. */
+function materialFoliageRules(m: any): any[] {
+  const list = (v: any) => (Array.isArray(v) ? v : [])
+  const out = [...list(m?.foliageInclude), ...list(m?.groundFoliageInclude)]
+  for (const slot of list(m?.slots)) out.push(...list(slot?.foliageInclude))
+  return out
 }

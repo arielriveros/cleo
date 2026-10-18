@@ -96,7 +96,7 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
             One repeat = <b>{repeatMetres.toFixed(2)} m</b> across a {landscapeSize} m terrain
           </Hint>
           <div className='flex items-center justify-between'>
-            <span className={label} title='Foliage may scatter where the ground shows'>Allow foliage</span>
+            <span className={label} title='Let the whole-landscape foliage grow where the ground shows. The ground’s own foliage (below) grows there regardless.'>Allow landscape foliage</span>
             <Toggle checked={mat.allowFoliage} onChange={c => { mat.allowFoliage = c; changed() }} />
           </div>
           <SurfaceLook
@@ -104,12 +104,29 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
             onNormalStrength={v => { mat.normalStrength = v; changed() }}
             onAntiTiling={v => { mat.antiTiling = v; changed() }} />
           <Hint>Covers the whole landscape; the slots below draw over it.</Hint>
+          <TerrainFoliageRules
+            material={mat}
+            rules={mat.groundFoliageInclude}
+            exclude={mat.groundFoliageExclude}
+            setExclude={names => { mat.groundFoliageExclude = names }}
+            onChange={changed}
+            title='Foliage on Ground' excludeTitle='Keep off Ground' defaultOpen={false}
+            hint='Foliage that grows only where the ground itself shows, not on the slots drawn over it.'
+            excludeHint='Foliage kept off wherever the ground shows.' />
         </div>
       </Collapsable>
 
       <TerrainSlots material={mat} onChange={changed} elevationHint={elevationHint} />
 
-      <TerrainFoliageRules material={mat} onChange={changed} />
+      {/* Foliage for the WHOLE landscape: wherever the material is, on every surface that allows it. */}
+      <TerrainFoliageRules
+        material={mat}
+        rules={mat.foliageInclude}
+        exclude={mat.foliageExclude}
+        setExclude={names => { mat.foliageExclude = names }}
+        onChange={changed}
+        title='Foliage — whole landscape' excludeTitle='Exclude foliage — whole landscape'
+        hint='Foliage that grows anywhere on this landscape where the surface allows it. Per-surface foliage lives in the Ground and each slot.' />
     </div>
   )
 }

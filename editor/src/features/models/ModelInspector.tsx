@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { TextureManager } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
-import { Button, Field, NumberInput, Select, TextInput, cn, labelClass, hintClass } from '../../components/ui'
+import { Button, Field, NumberInput, Select, Slider, TextInput, cn, labelClass, hintClass } from '../../components/ui'
 import ModelPartsSection from './ModelPartsSection'
 import GenerateLodsModal, { defaultSpecs, type GenerateLodsSpec } from './GenerateLodsModal'
 import { modelAssetTextureIds, modelAssetDiameter } from '../../utils/models'
@@ -150,12 +150,28 @@ export default function ModelInspector() {
                           {levelLabel(i)}
                         </span>
                       </div>
-                      <Field label='From distance' className='my-0' labelClassName='w-auto'>
-                        <NumberInput
-                          min={0} className={num}
-                          value={modelSession.distances[i] ?? 0}
-                          onChange={v => setModelLodDistance(i, v)} />
-                      </Field>
+                      {modelSession.cullDistance > 0 ? (
+                        // A SHARE of the cull distance: 50% of a 200 m cull starts this level at 100 m, and
+                        // the level keeps its share when the cull changes (setModelCullDistance rescales).
+                        <Slider
+                          label='From'
+                          labelClassName='w-auto'
+                          title='Where this level takes over, as a share of the cull distance'
+                          min={0} max={100} step={1}
+                          value={Math.round(((modelSession.distances[i] ?? 0) / modelSession.cullDistance) * 100)}
+                          readout={v => `${Math.round(v)}% · ${Math.round(v / 100 * modelSession.cullDistance)} m`}
+                          onChange={v => setModelLodDistance(i, (v / 100) * modelSession.cullDistance)} />
+                      ) : (
+                        <>
+                          <Field label='From distance' className='my-0' labelClassName='w-auto'>
+                            <NumberInput
+                              min={0} className={num}
+                              value={modelSession.distances[i] ?? 0}
+                              onChange={v => setModelLodDistance(i, v)} />
+                          </Field>
+                          <p className={hintClass}>Set a cull distance to place levels as a share of it.</p>
+                        </>
+                      )}
                       {deadFrom >= 0 && i >= deadFrom && (
                         <p className='text-ui-sm text-warning'>
                           Never drawn: everything is culled at {Math.round(effectiveCull)} m.

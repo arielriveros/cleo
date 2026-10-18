@@ -657,6 +657,17 @@ export function mergeSubModels(
   return result
 }
 
+/**
+ * LOD distances after the cull distance moves from `oldCull` to `newCull`. Levels are authored as a SHARE
+ * of the cull (the model editor's slider), so each keeps its share: 50% of 200 m becomes 50% of 400 m.
+ * A 0 cull ("automatic") on either side means there is no share to keep, and the distances stay put.
+ */
+export function rescaleLodDistances(distances: readonly number[], oldCull: number, newCull: number): number[] {
+  if (!(oldCull > 0) || !(newCull > 0) || oldCull === newCull) return [...distances]
+  const k = newCull / oldCull
+  return distances.map((d, i) => i === 0 ? d : Math.round(d * k * 100) / 100)
+}
+
 /** True when two nodes carry the same local position, rotation and scale. */
 function sameTransform(a: Node, b: Node): boolean {
   const near = (x: ArrayLike<number>, y: ArrayLike<number>, eps: number) =>
