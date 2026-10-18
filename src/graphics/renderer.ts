@@ -139,7 +139,7 @@ import { Texture } from './texture';
 import { CubeFramebuffer } from './cubeFramebuffer';
 import { Material, CustomMaterial } from './material';
 import { ensureCustomShader, customShaderReady, customShaderModules, customForwardTypes, screenShaderResources, screenUserSamplerNames, customShaderResources } from './systems/customShaders';
-import { TexturePacker } from './systems/texturePacker';
+import { TexturePacker, DILATED_BASE_SLOT } from './systems/texturePacker';
 import { ParticleRenderer, PARTICLE_PROGRAMS, setParticleSimVariants, type ParticleSimFrame, type ParticleDrawFrame } from './particles/particleRenderer';
 import { MAX_FORCE_FIELDS } from '../core/scene/nodes/forceFieldNode';
 import type { ParticleSystemNode } from '../core/scene/nodes/particleSystemNode';
@@ -2510,6 +2510,16 @@ export class Renderer {
         // Per submesh material — a merged model's second range has its own maps to channel-pack.
         for (const node of scene.models) for (const mat of node.model.materials) packer.sync(mat, this._frameIndex);
         for (const node of scene.landscapes) node.terrain.syncPackedLayers(this._frameIndex, this._terrainLayerTextureSize);
+        // Foliage prototypes are not scene models, so they were never synced: a foliage tree never got
+        // its ORM pack, nor its cutout's edge-padded colour. Every level of every mesh layer, so a LOD
+        // switch never meets an unbaked material.
+        for (const node of scene.landscapes)
+            for (const layer of node.terrain.foliage) {
+                if (layer.kind !== 'mesh') continue;
+                for (const level of layer.levels)
+                    for (const model of level.models)
+                        for (const mat of model.materials) packer.sync(mat, this._frameIndex);
+            }
         // Decals sample the same packed ORM map a mesh wearing their material would.
         for (const decal of scene.decals) if (decal.material) packer.sync(decal.material, this._frameIndex);
         packer.sweep(this._frameIndex);
@@ -3689,8 +3699,12 @@ export class Renderer {
             // The environment cube rides in group 0 alongside the material maps but must NOT be looked
             // up as one: the miss falls back to a 2D texture, a sampler-type mismatch at draw time.
             if (field === null) { textures.push(envCube ?? this._fallbackCube); continue; }
+            // A cutout's edge-padded base colour stands in for the authored one (TexturePacker
+            // `_syncDilation`); until it is baked, or once it is swept, the authored map draws.
+            const dilated = field === 'baseColorTexture' ? material.textures.get(DILATED_BASE_SLOT) : undefined;
+            const dilatedTexture = dilated ? TextureManager.Instance.getTexture(dilated) : null;
             const id = material.textures.get(field);
-            const texture = id ? TextureManager.Instance.getTexture(id) : null;
+            const texture = dilatedTexture ?? (id ? TextureManager.Instance.getTexture(id) : null);
             textures.push(texture ?? this._fallbackTexture);
         }
         return this._textureBindGroup(pipeline, 0, textures);

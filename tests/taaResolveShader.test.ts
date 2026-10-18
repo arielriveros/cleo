@@ -79,7 +79,20 @@ describe('taaResolve.wgsl', () => {
         // the sky. The tolerance is relative for the matching reason — the same surface legitimately
         // changes depth under camera motion.
         expect(source).toContain('linearizeDepth(');
-        expect(source).toContain('max(0.02 * linCur, 0.1)');
+        expect(source).toContain('max(0.02 * linNear, 0.1)');
+        expect(source).toContain('max(0.02 * linFar, 0.1)');
+    });
+
+    it('tests history depth against the NEIGHBOURHOOD range, not the pixel own depth', () => {
+        // A pixel partly covered by a needle or a cutout leaf edge flips between foreground and
+        // background depth with the jitter. Comparing against its own depth discarded the history on
+        // those frames, so alpha-tested foliage under a STILL camera shimmered with TAA on and was
+        // stable with it off (measured: 5% of a distant pine's pixels changing per frame, 0.2% after).
+        const body = code(source);
+        expect(body).toContain('farthestDepth = max(farthestDepth, d)');
+        expect(body).toContain('linearizeDepth(closestDepth');
+        expect(body).toContain('linearizeDepth(farthestDepth');
+        expect(body).not.toContain('abs(linCur - linPrev)');
     });
 
     // ------------------------------------------------------------------------------------------
@@ -99,7 +112,29 @@ describe('taaResolve.wgsl', () => {
         expect(body).toContain('sanitize(raw.rgb)');
         expect(body).toContain('sanitize(textureSampleLevel(u_current_texture');
         expect(body).toContain('sanitize(textureSampleLevel(u_history_texture');
-        expect(body).toContain('let resolved = sanitize(');
+        expect(body).toContain('let resolved = sanitizePerChannel(');
+    });
+
+    it('scrubs the OUTPUT per channel, so one slightly negative channel cannot black out the pixel', () => {
+        // The YCoCg round trip lands a channel a hair below zero on saturated foliage greens. The
+        // all-or-nothing scrub wrote the whole pixel black into the history, and under a still camera
+        // (0.97 feedback, bilinear history) black specks built up across grass.
+        const body = code(source);
+        const at = body.indexOf('fn sanitizePerChannel(');
+        expect(at).toBeGreaterThan(-1);
+        const fn = body.slice(at, body.indexOf('}', at));
+        expect(fn).toContain('select(');
+        expect(fn).not.toContain('clamp(');
+        expect(fn).not.toContain('max(');
+        expect(fn).not.toContain('all(');
+    });
+
+    it('clips history toward the neighbourhood MEAN, which is always a real colour', () => {
+        // The YCoCg box centre can sit outside the RGB gamut (black + red + green neighbours put it at
+        // a negative blue), so clipping toward it manufactured out-of-gamut history.
+        const body = code(source);
+        expect(body).toContain('let centre = clamp(mu, lo, hi)');
+        expect(body).not.toContain('let centre = 0.5 * (lo + hi)');
     });
 
     it('scrubs with select on a comparison, not with clamp', () => {
@@ -120,7 +155,7 @@ describe('taaResolve.wgsl', () => {
         // direct forms accept a NaN reprojection and go on to fetch history at a NaN uv.
         const body = code(source);
         expect(body).toContain('if (!(all(prevUV >= vec2<f32>(0.0))');
-        expect(body).toContain('if (!(abs(linCur - linPrev) <=');
+        expect(body).toContain('if (!(linPrev >= linNear');
         expect(body).toContain('if (!(motion.w >= 0.5))');
     });
 

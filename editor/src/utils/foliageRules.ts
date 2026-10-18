@@ -52,7 +52,7 @@ function flattenLevel(nodeJson: any, materials?: MaterialAsset[]): any[] {
     if (node instanceof ModelNode) {
       if (node.model instanceof AnimatedModel)
         throw new Error(`"${node.name}" is skinned — foliage models must be static`)
-      models.push(bakeModel(node))
+      models.push(...bakeModel(node))
     }
     for (const child of node.children) visit(child)
   }
@@ -75,7 +75,7 @@ function flattenLevel(nodeJson: any, materials?: MaterialAsset[]): any[] {
  * is what exhausted the editor on save. Nothing downstream needed the tuples: `Geometry`'s constructor
  * takes a `Float32Array` with no copy at all, and both packers convert to typed arrays as step one.
  */
-function bakeModel(node: ModelNode): any {
+function bakeModel(node: ModelNode): any[] {
   const g = node.model.geometry
   const world = node.worldTransform
   const normalMat = Vec.mat3.normalFromMat4(Vec.mat3.create(), world)
@@ -101,17 +101,61 @@ function bakeModel(node: ModelNode): any {
     return out
   }
 
+  const geometry = {
+    positions: points(g.positions),
+    normals: directions(g.normals),
+    tangents: directions(g.tangents),
+    bitangents: directions(g.bitangents),
+    // uvs are not transformed at all, so this is a straight copy.
+    texCoords: new Float32Array(g.uvs),
+    indices: new Uint32Array(g.indices),
+  }
+
+  // A foliage draw is one material over the WHOLE index buffer, so a multi-material model (a merged tree:
+  // opaque bark + cutout needles in one mesh) must become one payload per material. Baking it whole drew
+  // the needles with the bark's material — solid cards — or the bark with the needles' cutout.
+  const submeshes = node.model.submeshes
+  const materials = node.model.materials
+  if (submeshes.length <= 1) return [{ geometry, material: materials[0].serialize() }]
+
+  const byMaterial = new Map<string, { material: any; ranges: { start: number; count: number }[] }>()
+  submeshes.forEach((range, i) => {
+    const material = materials[i].serialize()
+    const key = JSON.stringify(material)
+    const entry = byMaterial.get(key)
+    if (entry) entry.ranges.push(range)
+    else byMaterial.set(key, { material, ranges: [range] })
+  })
+  return [...byMaterial.values()].map(({ material, ranges }) => ({
+    geometry: compactRanges(geometry, ranges), material,
+  }))
+}
+
+/** The vertices the index `ranges` reference, re-indexed from 0 — one material's share of a baked mesh. */
+export function compactRanges(geo: { positions: Float32Array; normals: Float32Array; tangents: Float32Array;
+                               bitangents: Float32Array; texCoords: Float32Array; indices: Uint32Array },
+                       ranges: { start: number; count: number }[]) {
+  const remap = new Map<number, number>()
+  const total = ranges.reduce((n, r) => n + r.count, 0)
+  const indices = new Uint32Array(total)
+  let w = 0
+  for (const r of ranges) {
+    for (let i = r.start; i < r.start + r.count; i++) {
+      const old = geo.indices[i]
+      let idx = remap.get(old)
+      if (idx === undefined) { idx = remap.size; remap.set(old, idx) }
+      indices[w++] = idx
+    }
+  }
+  const pick = (src: Float32Array, stride: number) => {
+    if (src.length === 0) return new Float32Array(0) // an absent attribute stays absent
+    const out = new Float32Array(remap.size * stride)
+    for (const [old, idx] of remap) for (let k = 0; k < stride; k++) out[idx * stride + k] = src[old * stride + k]
+    return out
+  }
   return {
-    geometry: {
-      positions: points(g.positions),
-      normals: directions(g.normals),
-      tangents: directions(g.tangents),
-      bitangents: directions(g.bitangents),
-      // uvs are not transformed at all, so this is a straight copy.
-      texCoords: new Float32Array(g.uvs),
-      indices: new Uint32Array(g.indices),
-    },
-    material: node.model.material.serialize(),
+    positions: pick(geo.positions, 3), normals: pick(geo.normals, 3), tangents: pick(geo.tangents, 3),
+    bitangents: pick(geo.bitangents, 3), texCoords: pick(geo.texCoords, 2), indices,
   }
 }
 

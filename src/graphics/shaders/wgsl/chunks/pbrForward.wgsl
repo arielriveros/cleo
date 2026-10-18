@@ -189,6 +189,8 @@ fn getNormal(in: VertexOutput, front: bool, su: SurfaceUv, uv: vec2<f32>) -> vec
                                   uv, ddx, ddy).rgb;
         n = normalize(n * 2.0 - 1.0);
         N = normalize(tbn * n);
+        // Never let a degenerate frame (or map texel) make the normal NaN: see safeNormalize.
+        N = select(tbn[2], N, dot(N, N) > 1e-12);
         // A projected surface has no vertex tangents for its charts; see chunks/uvProjection.wgsl.
         if (su.mode != UV_MESH) {
             N = projectedNormal(u_material_normalMap_texture, u_material_normalMap_sampler, su, uv, tbn[2]);

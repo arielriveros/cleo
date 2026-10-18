@@ -136,6 +136,19 @@ describe('coverage-preserving LOD copies', async () => {
     expect(alphaCoverage(small)).toBeCloseTo(0.5, 5)
   });
 
+  it('preserves a MASK map\'s coverage on red, keeping it gray and its alpha untouched', async () => {
+    // A grayscale JPG mask has no alpha: coverage is red, which is what the shader cuts on.
+    const { maskTextureIds } = await import('../src/utils/lodTextures')
+    const small = new Uint8ClampedArray(16)
+    ;[100, 110, 30, 0].forEach((v, i) => { small[i * 4] = small[i * 4 + 1] = small[i * 4 + 2] = v; small[i * 4 + 3] = 255 })
+    expect(preserveAlphaCoverage(small, 0.5, 128, 0)).toBeGreaterThan(1)
+    expect(alphaCoverage(small, 128, 1, 0)).toBeCloseTo(0.5, 5)
+    expect(small[0]).toBe(small[1])
+    expect(small[3]).toBe(255)
+    expect(maskTextureIds({ textures: { mask: 'm1', baseColorTexture: 'b' } })).toEqual(['m1'])
+    expect(maskTextureIds({ textures: { maskMap: 'm2' } })).toEqual(['m2'])
+  });
+
   it('leaves an opaque or empty target alone', () => {
     const small = img([255, 255])
     expect(preserveAlphaCoverage(small, 1)).toBe(1)

@@ -92,6 +92,8 @@ fn fs_main(in: VertexOutput) -> GBuffer {
             var n = sampleSurface(u_material_normalMap_texture, u_material_normalMap_sampler, su, su.uv0).rgb;
             n = normalize(n * 2.0 - 1.0);
             N = normalize(tbn * n);
+            // Never let a degenerate frame (or map texel) make the normal NaN: see safeNormalize.
+            N = select(tbn[2], N, dot(N, N) > 1e-12);
         } else {
             N = projectedNormal(u_material_normalMap_texture, u_material_normalMap_sampler, su, su.uv0, tbn[2]);
         }

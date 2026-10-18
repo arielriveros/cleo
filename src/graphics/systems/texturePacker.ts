@@ -12,6 +12,7 @@ import { setViewportSize } from "../renderStats";
 import { Logger } from "../../core/logger";
 import { cyrb53 } from "../material";
 import ChannelPackProgram from '../shaders/wgsl/channelPack.wgsl';
+import ColorDilateProgram from '../shaders/wgsl/colorDilate.wgsl';
 import type { Material } from "../material";
 
 // -------------------------------------------------------------------------------------------------
@@ -52,6 +53,13 @@ export interface PackSpec {
 /** Prefix on every packer-owned texture id. Derived textures are never authored, serialized or listed. */
 export const PACKED_ID_PREFIX = '__packed__';
 
+/**
+ * The derived slot holding a cutout material's edge-padded base colour (see colorDilate.wgsl). The
+ * renderer binds it in place of `baseColorTexture` whenever it is present; the authored slot is never
+ * touched, so nothing derived can reach an asset.
+ */
+export const DILATED_BASE_SLOT = 'baseColorDilated';
+
 /** Whether `id` names a packer-derived texture rather than an authored source map. */
 export function isDerivedTextureId(id: string | undefined | null): boolean {
     return !!id && id.startsWith(PACKED_ID_PREFIX);
@@ -81,6 +89,12 @@ export class TexturePacker {
     // replaced wholesale and never disposed, so there is no hook to unregister from.
     private _bindings: WeakMap<Material, Binding> = new WeakMap();
 
+    // The dilation each material is bound to. Separate from `_bindings`, which holds ONE derived slot
+    // per material and is already the ORM pack's.
+    private _dilations: WeakMap<Material, string> = new WeakMap();
+    private _dilateModule: ShaderModule | null = null;
+    private readonly _dilatePipelines = new Map<TextureFormat, RenderPipeline>();
+
     private _module: ShaderModule | null = null;
     private readonly _pipelines = new Map<TextureFormat, RenderPipeline>();
     private _quad: Mesh | null = null;
@@ -107,6 +121,7 @@ export class TexturePacker {
         switch (material.type as string) {
             case 'pbr':
                 this._syncPBR(material, frame);
+                this._syncDilation(material, frame);
                 break;
             case 'blinn_phong':
             case 'blinn_phongSkinned':
@@ -169,6 +184,151 @@ export class TexturePacker {
             // Nothing reads the ORM alpha; leaving it free keeps a channel available for later.
             a: { constant: 1, ignored: true }
         }, flags, frame);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Cutout edge padding
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * A cutout material (alphaCutoff > 0) gets its base colour edge-padded under what the cutout hides.
+     * See colorDilate.wgsl for why a black-backed grass map otherwise turns black at a distance and keeps
+     * a dark fringe up close. Coverage is the mask map's red when there is one, else base alpha.
+     */
+    private _syncDilation(material: Material, frame: number): void {
+        const base = material.textures.get('baseColorTexture');
+        const mask = material.textures.get('maskMap');
+        const cutoff = Number(material.properties.get('alphaCutoff') ?? 0);
+        if (!base || !(cutoff > 0) || isDerivedTextureId(base)) {
+            if (this._dilations.has(material) || material.textures.has(DILATED_BASE_SLOT)) {
+                this._dilations.delete(material);
+                material.textures.delete(DILATED_BASE_SLOT);
+            }
+            return;
+        }
+        // Quantised, so a slider drag re-bakes in steps rather than on every pixel of travel.
+        const key = `dilate:${base}|${mask ?? '@alpha'}|${Math.round(cutoff * 100)}`;
+        const cached = this._cache.get(key);
+        if (cached) {
+            cached.lastFrame = frame;
+            if (this._dilations.get(material) === key && material.textures.get(DILATED_BASE_SLOT) === cached.id) return;
+        }
+        const id = cached ? cached.id : this._bakeDilation(key, base, mask ?? null, cutoff, frame);
+        if (!id) { material.textures.delete(DILATED_BASE_SLOT); this._dilations.delete(material); return; }
+        material.textures.set(DILATED_BASE_SLOT, id);
+        this._dilations.set(material, key);
+    }
+
+    /** The push-pull chain of colorDilate.wgsl. Returns null while a source is still decoding. */
+    private _bakeDilation(key: string, baseId: string, maskId: string | null, cutoff: number,
+                          frame: number): string | null {
+        const base = TextureManager.Instance.getTexture(baseId);
+        const mask = maskId ? TextureManager.Instance.getTexture(maskId) : base;
+        if (!base || !mask || base.width === 0 || base.height === 0 || mask.width === 0 || mask.height === 0) return null;
+
+        const shader = this._ensureDilateShader();
+        const quad = this._ensureQuad(this._ensureShader());
+        const width = Math.min(base.width, TexturePacker.MAX_SIZE);
+        const height = Math.min(base.height, TexturePacker.MAX_SIZE);
+        const wrapping = base.config.wrapping;
+        const scratch: Texture[] = [];
+        const level = (w: number, h: number): Texture => {
+            const t = new Texture({ mipMap: false, precision: 'low', wrapping });
+            t.create(null, w, h);
+            scratch.push(t);
+            return t;
+        };
+        const pass = (mode: number, out: Texture, a: Texture, b: Texture) =>
+            this._renderDilate(mode, out, a, b, maskId ? 0 : 3, cutoff, shader, quad);
+
+        // Push: seed at full size, then halve down to 1x1.
+        const push: Texture[] = [level(width, height)];
+        pass(0, push[0], base, mask);
+        for (let top = push[0]; top.width > 1 || top.height > 1; top = push[push.length - 1]) {
+            const next = level(Math.max(1, top.width >> 1), Math.max(1, top.height >> 1));
+            pass(1, next, top, top);
+            push.push(next);
+        }
+        // Pull: the 1x1 mean seeds the fill, then each level fills its holes from the one below it.
+        let filled = level(1, 1);
+        pass(4, filled, push[push.length - 1], push[push.length - 1]);
+        for (let i = push.length - 2; i >= 0; i--) {
+            const out = level(push[i].width, push[i].height);
+            pass(2, out, push[i], filled);
+            filled = out;
+        }
+        // Final: the filled colour with the base map's own alpha, mipmapped. Every level of the chain now
+        // averages blade colours into blade colours.
+        const output = new Texture({ mipMap: true, precision: 'low', wrapping });
+        output.create(null, width, height);
+        pass(3, output, filled, base);
+        output.generateMipmaps();
+        for (const t of scratch) t.delete();
+
+        const id = PACKED_ID_PREFIX + cyrb53(key);
+        TextureManager.Instance.addTexture(output, id);
+        this._cache.set(key, { id, texture: output, lastFrame: frame });
+        return id;
+    }
+
+    /** One fullscreen pass of colorDilate.wgsl into `out`. Same shape as {@link _renderPack}. */
+    private _renderDilate(mode: number, out: Texture, a: Texture, b: Texture, maskChannel: number,
+                          cutoff: number, shader: ShaderProgram, quad: Mesh): void {
+        const target = device.createRenderTarget({ label: 'colorDilate', colorViews: [out.attachmentView] });
+        const pipeline = this._dilatePipeline(shader, out.rhiTexture.format);
+        setViewportSize(out.width, out.height);
+        const encoder = device.createCommandEncoder('colorDilate');
+        const pass = encoder.beginRenderPass(target, {
+            label: 'colorDilate',
+            colorAttachments: [{ target: 0, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }],
+        });
+        pass.setViewport(0, 0, out.width, out.height);
+        pass.setPipeline(pipeline);
+        ShaderManager.Instance.bind('colorDilate');
+        ShaderManager.Instance.setUniform('u_mode', mode);
+        ShaderManager.Instance.setUniform('u_maskChannel', maskChannel);
+        ShaderManager.Instance.setUniform('u_cutoff', cutoff);
+        pass.setBindGroup(0, device.createBindGroup({
+            label: 'colorDilate:group0',
+            layout: pipeline.layoutForGroup(0)!,
+            entries: [{ binding: 0, textureView: a.sampledView }, { binding: 2, textureView: b.sampledView }],
+        }));
+        pass.setVertexBuffer(0, quad.vertexBuffer);
+        pass.setIndexBuffer(quad.indexBuffer!, quad.indexFormat);
+        pass.drawIndexed(quad.indexCount, 1, 0);   // not a counted pass: a one-off bake is not a frame
+        pass.end();
+        encoder.finish();
+    }
+
+    // Cached per output format, like `_packPipeline`.
+    private _dilatePipeline(shader: ShaderProgram, format: TextureFormat): RenderPipeline {
+        const existing = this._dilatePipelines.get(format);
+        if (existing) return existing;
+        if (!this._dilateModule) this._dilateModule = device.createShaderModule({
+            label: 'colorDilate', program: 'colorDilate',
+            stage: ShaderStage.VERTEX | ShaderStage.FRAGMENT,
+            source: ColorDilateProgram.wgsl,
+            entryPoints: ColorDilateProgram.entryPoints,
+            resources: ColorDilateProgram.resources,
+        });
+        const pipeline = device.createRenderPipeline({
+            label: 'colorDilate',
+            vertex: this._dilateModule, fragment: this._dilateModule,
+            vertexLayouts: screenQuadLayout(shader.attributes),
+            primitive: { topology: 'triangle-list', cullMode: 'none', frontFace: 'ccw' },
+            colorTargets: [{ format }],
+        });
+        this._dilatePipelines.set(format, pipeline);
+        return pipeline;
+    }
+
+    // Self-registers on first use, like the pack program.
+    private _ensureDilateShader(): ShaderProgram {
+        const existing = ShaderManager.Instance.find('colorDilate');
+        if (existing) return existing;
+        const shader = device.createShaderProgram({ label: 'colorDilate', ...ColorDilateProgram });
+        ShaderManager.Instance.addShader('colorDilate', shader);
+        return shader;
     }
 
     /**

@@ -54,10 +54,13 @@ export function halveTo(n: number, level: number): number {
  * than dragging the result toward black — but for a map whose alpha carries DATA (a packed ORM with
  * occlusion in alpha) it destroys a channel. Callers use this to leave those alone instead.
  */
-/** Fraction of texels whose alpha (RGBA bytes) reaches `cutoff` (0..255) once scaled by `scale`. */
-export function alphaCoverage(rgba: ArrayLike<number>, cutoff = 128, scale = 1): number {
+/**
+ * Fraction of texels whose `channel` (RGBA bytes; 3 = alpha, 0 = a mask map's red) reaches `cutoff`
+ * (0..255) once scaled by `scale`.
+ */
+export function alphaCoverage(rgba: ArrayLike<number>, cutoff = 128, scale = 1, channel = 3): number {
     let hit = 0, n = 0
-    for (let i = 3; i < rgba.length; i += 4) { n++; if (rgba[i] * scale >= cutoff) hit++ }
+    for (let i = channel; i < rgba.length; i += 4) { n++; if (rgba[i] * scale >= cutoff) hit++ }
     return n ? hit / n : 0
 }
 
@@ -69,16 +72,20 @@ export function alphaCoverage(rgba: ArrayLike<number>, cutoff = 128, scale = 1):
  * mass. Binary search on the scale: coverage is monotone in it. Returns the scale applied.
  */
 export function preserveAlphaCoverage(rgba: { [i: number]: number; length: number }, targetCoverage: number,
-                                      cutoff = 128): number {
+                                      cutoff = 128, channel = 3): number {
     if (targetCoverage <= 0 || targetCoverage >= 1) return 1
     let lo = 0.25, hi = 8
     for (let k = 0; k < 20; k++) {
         const mid = (lo + hi) / 2
-        if (alphaCoverage(rgba, cutoff, mid) < targetCoverage) lo = mid; else hi = mid
+        if (alphaCoverage(rgba, cutoff, mid, channel) < targetCoverage) lo = mid; else hi = mid
     }
     const scale = hi
     if (Math.abs(scale - 1) < 1e-3) return 1
-    for (let i = 3; i < rgba.length; i += 4) rgba[i] = Math.min(255, Math.round(rgba[i] * scale))
+    // A mask map is grayscale and read from red: scale all three colour channels together so the twin
+    // stays gray, leaving alpha alone.
+    const channels = channel === 3 ? [3] : [0, 1, 2]
+    for (let i = 0; i < rgba.length; i += 4)
+        for (const c of channels) rgba[i + c] = Math.min(255, Math.round(rgba[i + c] * scale))
     return scale
 }
 
@@ -103,7 +110,8 @@ export interface DownscaleResult {
  * Idempotent: an id that already exists is reused rather than re-encoded, which is what lets two levels
  * at the same size share one image and lets regeneration be cheap.
  */
-export async function downscaleTextures(sourceIds: Iterable<string>, level: number): Promise<DownscaleResult> {
+export async function downscaleTextures(sourceIds: Iterable<string>, level: number,
+                                        maskIds: ReadonlySet<string> = new Set()): Promise<DownscaleResult> {
     const tm = TextureManager.Instance
     const ids = new Map<string, string>()
     const minted: string[] = []
@@ -145,11 +153,15 @@ export async function downscaleTextures(sourceIds: Iterable<string>, level: numb
             ctx.imageSmoothingEnabled = true
             ctx.imageSmoothingQuality = 'high'
             ctx.drawImage(image, 0, 0, width, height)
-            // A cutout keeps its coverage at the smaller size, or the level's leaves thin out.
-            if (transparent) {
-                const coverage = alphaCoverage(fullCtx.getImageData(0, 0, full.width, full.height).data)
+            // A cutout keeps its coverage at the smaller size, or the level's leaves thin out. A mask map
+            // carries coverage in RED (a grayscale JPG has no alpha at all), so it is the mask's red that
+            // is preserved; a base map's alpha otherwise.
+            const isMask = maskIds.has(sourceId)
+            if (transparent || isMask) {
+                const channel = isMask ? 0 : 3
+                const coverage = alphaCoverage(fullCtx.getImageData(0, 0, full.width, full.height).data, 128, 1, channel)
                 const small = ctx.getImageData(0, 0, width, height)
-                if (preserveAlphaCoverage(small.data, coverage) !== 1) ctx.putImageData(small, 0, 0)
+                if (preserveAlphaCoverage(small.data, coverage, 128, channel) !== 1) ctx.putImageData(small, 0, 0)
             }
 
             const uri = canvas.toDataURL('image/png')
@@ -233,6 +245,15 @@ export const DISTANT_LOD_SLOTS: ReadonlySet<string> = new Set([
 ])
 
 /** The texture ids a level keeps from one serialized material — every slot at level 1, fewer beyond it. */
+/** The ids in a serialized material's mask slots (`maskMap` at runtime, `mask` serialized). */
+export function maskTextureIds(serialized: any): string[] {
+    const textures = serialized?.textures
+    if (!textures || typeof textures !== 'object') return []
+    return Object.entries(textures)
+        .filter(([slot, id]) => /^mask/i.test(slot) && typeof id === 'string' && !!id)
+        .map(([, id]) => id as string)
+}
+
 export function levelTextureIds(serialized: any, level: number): string[] {
     const out: string[] = []
     const textures = serialized?.textures

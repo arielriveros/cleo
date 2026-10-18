@@ -79,6 +79,26 @@ fn sanitize(c: vec3<f32>) -> vec3<f32> {
     return select(vec3<f32>(0.0), c, all(c >= vec3<f32>(0.0)) && all(c <= vec3<f32>(F32_MAX)));
 }
 
+/**
+ * The OUTPUT scrub: the same predicate, but per CHANNEL. NaN/Inf become 0, a negative becomes 0, and
+ * the other channels survive.
+ *
+ * `sanitize` is right for an input — a NaN anywhere in a sample means the sample is poisoned — and
+ * wrong for the resolved colour. The YCoCg round trip legitimately lands a channel a hair below zero
+ * on saturated colours (a green leaf against blue sky has red and blue near zero), and the
+ * all-or-nothing form turned that whole pixel BLACK and wrote it into the history. Under a still
+ * camera the history is kept at 0.97 feedback and bilinear-smeared, so foliage slowly filled with
+ * black specks. Per channel, (0.3, 0.6, -1e-6) is written as (0.3, 0.6, 0), as it should be.
+ *
+ * Still `select` on comparisons, never `clamp`/`max` on a value that may be NaN.
+ */
+fn sanitizePerChannel(c: vec3<f32>) -> vec3<f32> {
+    // Spelled per component: a vector `&` of two bool vectors is not something every backend's GLSL
+    // translation accepts.
+    let ok = vec3<bool>(c.x >= 0.0 && c.x <= F32_MAX, c.y >= 0.0 && c.y <= F32_MAX, c.z >= 0.0 && c.z <= F32_MAX);
+    return select(vec3<f32>(0.0), c, ok);
+}
+
 // Karis' reversible tonemap. Range-compresses before the blend so one very bright sample cannot drag
 // the average for thirty frames, and `untonemap` is its exact inverse: with y = x / (1 + L(x)) we get
 // 1 - L(y) = 1 / (1 + L(x)), so x = y / (1 - L(y)). This is the single difference between TAA and a
@@ -128,11 +148,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Nine depth taps buy one correct velocity tap.
     var closestUV = uv;
     var closestDepth = 2.0;
+    // The farthest too, for the history test below: together they bound every surface this pixel's
+    // neighbourhood is showing.
+    var farthestDepth = -1.0;
     for (var y = -1; y <= 1; y++) {
         for (var x = -1; x <= 1; x++) {
             let o = uv + vec2<f32>(f32(x), f32(y)) * u_taa.u_texelSize;
             let d = textureSampleLevel(u_depth_texture, u_depth_sampler, o, 0);
             if (d < closestDepth) { closestDepth = d; closestUV = o; }
+            farthestDepth = max(farthestDepth, d);
         }
     }
 
@@ -167,12 +191,23 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // legitimately changes depth — a fixed epsilon would reject everything far away or nothing nearby.
     // This is what the previous-depth buffer exists for, and it closes the one residual the cloud
     // resolve documents and cannot fix: a pixel that was BEHIND geometry last frame and is sky now.
-    let linCur = linearizeDepth(textureSampleLevel(u_depth_texture, u_depth_sampler, uv, 0),
-                                u_taa.u_near, u_taa.u_far);
+    //
+    // Against the RANGE of depths in the 3x3, not this pixel's own. A pixel partly covered by thin
+    // geometry — a needle, a leaf card's cutout edge, a wire — shows the foreground on some jitter
+    // offsets and the background on others, so its own depth flips between the two every frame, and a
+    // test on that alone threw the history away on exactly those frames. Every alpha-tested tree then
+    // fell back to the raw jittered sample: TAA made a still camera shimmer that, without it, was
+    // perfectly stable. History whose depth matches ANY surface in the neighbourhood still describes
+    // something here, and the variance clip below decides how much of it to keep; only history that
+    // matches nothing visible here (a true disocclusion) is discarded.
+    let linNear = linearizeDepth(closestDepth, u_taa.u_near, u_taa.u_far);
+    let linFar = linearizeDepth(farthestDepth, u_taa.u_near, u_taa.u_far);
     let linPrev = linearizeDepth(textureSampleLevel(u_prevDepth_texture, u_prevDepth_sampler, prevUV, 0),
                                  u_taa.u_near, u_taa.u_far);
     // Negated for the same reason the off-screen test is; see there.
-    if (!(abs(linCur - linPrev) <= max(0.02 * linCur, 0.1))) { return current; }
+    if (!(linPrev >= linNear - max(0.02 * linNear, 0.1) && linPrev <= linFar + max(0.02 * linFar, 0.1))) {
+        return current;
+    }
 
     // ---- Constrain the history to colours this neighbourhood could plausibly produce -------------
     // Variance clipping, intersected with the true min/max box. The box on its own is defined by its
@@ -208,8 +243,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let historyRgb = sanitize(textureSampleLevel(u_history_texture, u_history_sampler,
                                                  prevUV, 0.0).rgb);
     let history = rgbToYCoCg(tonemap(historyRgb * exposure));
-    let centre = 0.5 * (lo + hi);
-    let extent = max(0.5 * (hi - lo), vec3<f32>(1e-5));
+    // Toward the neighbourhood MEAN, not the box centre. The centre of a YCoCg box is not necessarily
+    // a colour at all — black, red and green neighbours put it at RGB (0.375, 0.375, -0.125) — so a
+    // history clipped toward it could leave the RGB gamut. `mu` is an average of real samples and is
+    // always inside it; clamped into the box it is still the variance-clip target.
+    let centre = clamp(mu, lo, hi);
+    let extent = max(max(hi - centre, centre - lo), vec3<f32>(1e-5));
     let offset = history - centre;
     let reach = abs(offset / extent);
     let worst = max(reach.x, max(reach.y, reach.z));
@@ -232,7 +271,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // 1e-4, so a clip that lands near the top of the tonemapped range multiplies by up to 1e4 — and
     // the YCoCg round trip can put a component slightly below zero. Neither is worth writing into a
     // buffer that is read back forever.
-    let resolved = sanitize(
+    let resolved = sanitizePerChannel(
         untonemap(yCoCgToRgb(mix(currentYCoCg, clipped, feedback))) / exposure);
 
     // Alpha is the BLOOM MASK, not coverage, and it passes through unfiltered. Temporally filtering a

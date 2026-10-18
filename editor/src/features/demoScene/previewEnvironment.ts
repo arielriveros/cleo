@@ -60,7 +60,8 @@ export async function applyPreviewEnvironment(
       if (opts?.skybox !== false) {
         // Each scene needs its own Skybox: initializeSkybox() is per-node lazy VAO setup, and sharing
         // one instance would re-initialize the same mesh.
-        if (!previewSkybox) previewSkybox = new Skybox(faces);
+        // Drawn from the env map's own cube: the same six faces, uploaded once rather than twice.
+        if (!previewSkybox) previewSkybox = new Skybox(faces, envmap!);
         scene.addNode(new SkyboxNode('__editor__skybox', previewSkybox));
       }
     });

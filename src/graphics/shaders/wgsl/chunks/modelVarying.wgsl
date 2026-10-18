@@ -77,6 +77,23 @@ fn tbnOf(in: VertexOutput) -> mat3x3<f32> {
 }
 
 /**
+ * `v` normalised, or `fallback` when `v` has no length. `normalize(0)` is NaN on most drivers, and a
+ * mesh imported without tangents — leaf and grass cards very often are — has exactly that. The NaN rode
+ * the TBN into a normal-mapped G-buffer normal, lit as black, and TAA then kept the black.
+ * `select`, so the NaN of the unused branch is never the result.
+ */
+fn safeNormalize(v: vec3<f32>, fallback: vec3<f32>) -> vec3<f32> {
+    let d = dot(v, v);
+    return select(fallback, v * inverseSqrt(max(d, 1e-30)), d > 1e-20);
+}
+
+/** Any unit vector perpendicular to the unit `n` — a stand-in tangent for a mesh that has none. */
+fn anyTangent(n: vec3<f32>) -> vec3<f32> {
+    let a = select(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), abs(n.x) > 0.9);
+    return normalize(cross(a, n));
+}
+
+/**
  * Fill the varyings from an object-space vertex and its world matrix.
  *
  * Shared by all three vertex chunks so the basis is built one way only — the GLSL originals had this
@@ -88,10 +105,14 @@ fn fillVarying(out: ptr<function, VertexOutput>, model: mat4x4<f32>,
                normal: vec3<f32>, tangent: vec3<f32>, bitangent: vec3<f32>) {
     (*out).fragPos = (model * vec4<f32>(position, 1.0)).xyz;
     (*out).uv = texCoord;
-    (*out).tangent = normalize((model * vec4<f32>(tangent, 0.0)).xyz);
-    (*out).normal = normalize((model * vec4<f32>(normal, 0.0)).xyz);
+    let n = safeNormalize((model * vec4<f32>(normal, 0.0)).xyz, vec3<f32>(0.0, 1.0, 0.0));
+    (*out).normal = n;
+    // A missing tangent frame falls back to an arbitrary orthonormal one: the normal map then decodes
+    // in a rotated frame, which is wrong but finite, instead of NaN, which is black forever under TAA.
+    let t = safeNormalize((model * vec4<f32>(tangent, 0.0)).xyz, anyTangent(n));
+    (*out).tangent = t;
     // Negated to match the handedness the importers produce; see materials/pbr.vs.
-    (*out).bitangent = normalize((model * vec4<f32>(-bitangent, 0.0)).xyz);
+    (*out).bitangent = safeNormalize((model * vec4<f32>(-bitangent, 0.0)).xyz, cross(n, t));
     let scale = vec3<f32>(length(model[0].xyz), length(model[1].xyz), length(model[2].xyz));
     (*out).objPos = position * scale;
     // Inverse-scaled, the way a normal transforms under a non-uniform scale.

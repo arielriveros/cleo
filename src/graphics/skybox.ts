@@ -9,7 +9,13 @@ export class Skybox {
     private readonly _skyboxTexture: Texture;
     private readonly _geometry: Geometry = Geometry.Cube();
 
-    constructor(cubemapFaces: CubemapFaces | null) {
+    /**
+     * @param texture An already-uploaded cubemap to draw instead of uploading `cubemapFaces` again — the
+     *                editor's preview scenes draw the same cube they light with, and a second copy of a
+     *                2048² cubemap is ~130 MB of GPU memory and a ~250 ms blocking upload.
+     */
+    constructor(cubemapFaces: CubemapFaces | null, texture?: Texture) {
+        if (texture) { this._skyboxTexture = texture; return; }
         this._skyboxTexture = new Texture({ target: 'cubemap', flipY: true });
         if (cubemapFaces)
             this._skyboxTexture.create(cubemapFaces, cubemapFaces.posX?.width, cubemapFaces.posX?.height);

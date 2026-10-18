@@ -40,8 +40,8 @@ import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf,
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds, syncSlotMaterialInTerrain, withSyncedSlotMaterial } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
-import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, modelInstanceShape, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE, buildPartAsset, submeshNodeJson, uniqueModelName, lodLevelMaterialLinks, withLevelLinks, type ModelPart } from "../utils/models";
-import { downscaleTextures, levelTextureIds } from "../utils/lodTextures";
+import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, recenterIfOffOrigin, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, modelInstanceShape, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE, buildPartAsset, submeshNodeJson, uniqueModelName, lodLevelMaterialLinks, withLevelLinks, type ModelPart } from "../utils/models";
+import { downscaleTextures, levelTextureIds, maskTextureIds } from "../utils/lodTextures";
 import { detachForeignChildren, reattachForeignChildren } from "../utils/foreignChildren";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, defaultScriptModule, seedScriptFields, scriptKindOfAsset } from "../utils/scripts";
 import { buildScriptGraphCtx, deriveBaseType, resolveScriptVariables, dependentsOf } from "../utils/scriptGraph";
@@ -4864,6 +4864,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           setStage(i, 'done', summary);
           Logger.info(`Imported "${bundle.name}" as ${summary}`, 'Editor');
         } else {
+          // A file that places the model far from the origin (a scene placement baked into its root
+          // matrix) would otherwise open as an empty model tab and drop out of sight when placed.
+          if (recenterIfOffOrigin(root, children))
+            Logger.info(`Re-centred "${bundle.name}": the file placed it away from the origin`, 'Import');
           // Collapse the import's holder into its single ModelNode, so a one-part model is ONE row in the
           // Scene panel instead of two identically-named ones. A multi-part model keeps its holder.
           const modelAsset = flattenModelAsset(await buildModelAsset(root, materialIds, ''));
@@ -4902,7 +4906,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const levels = new Set<number>();
     for (const m of affected) for (const l of lodLevelMaterialLinks(m).get(materialId) ?? []) levels.add(l);
     for (const level of levels) {
-      try { await downscaleTextures(levelTextureIds(asset.material, level), level); }
+      try { await downscaleTextures(levelTextureIds(asset.material, level), level, new Set(maskTextureIds(asset.material))); }
       catch (e) { Logger.warn(`Could not make smaller textures for LOD${level}: ${e}`, 'Editor'); }
     }
     withoutDirty(() => {

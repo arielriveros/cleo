@@ -578,9 +578,11 @@ export function adoptModelMaterial(added: Node, host: Node, materials: MaterialA
 }
 
 /**
- * Collapse an imported model's sub-meshes into ONE ModelNode carrying one submesh per material.
- * Returns the merged children (a single node), or null with the reason logged when the parts are not
- * mergeable — mixed skeletons, or materials the renderer would route to different passes.
+ * Collapse an imported model's sub-meshes into as FEW ModelNodes as the renderer allows, each carrying one
+ * submesh per material. Ideally that is one node; parts that cannot share a mesh — materials the renderer
+ * routes to different passes (an opaque trunk and alpha-blended needles), different skeletons, different
+ * transforms — land in separate merged nodes instead of keeping every part split. Returns the resulting
+ * children, or null (reason logged) when nothing could be merged at all.
  */
 export function mergeSubModels(
   root: Node,
@@ -589,46 +591,106 @@ export function mergeSubModels(
 ): ModelNode[] | null {
   if (children.length < 2) return null
 
-  const models = children.map(c => c.model)
-  const blocker = mergeBlocker(models)
-  if (blocker) {
-    Logger.warn(`Kept "${root.name}" split across ${children.length} parts: ${blocker}`, 'Import')
+  // Parts sharing a material ASSET each carry their own Material instance, and mergeModels collapses
+  // consecutive parts only on the same instance — so a pine's eight needle splits stayed eight submeshes
+  // (eight draws) of one material. Give them one instance first.
+  const canonical = new Map<MaterialAsset, unknown>()
+  for (const child of children) {
+    const asset = materialAssetOfChild.get(child)
+    const mats = (child.model as any).materials as unknown[] | undefined
+    if (!asset || !mats?.length) continue
+    if (!canonical.has(asset)) canonical.set(asset, mats[0])
+    else mats[0] = canonical.get(asset)
+  }
+
+  // Greedy buckets in file order: a part joins the first bucket it can merge with.
+  const buckets: ModelNode[][] = []
+  let firstReason: string | null = null
+  for (const child of children) {
+    const home = buckets.find(b => {
+      if (!sameTransform(b[0], child)) { firstReason ??= 'the parts sit at different transforms'; return false }
+      const blocker = mergeBlocker([...b.map(c => c.model), child.model])
+      if (blocker) { firstReason ??= blocker; return false }
+      return true
+    })
+    if (home) home.push(child)
+    else buckets.push([child])
+  }
+  if (buckets.length === children.length) {
+    Logger.warn(`Kept "${root.name}" split across ${children.length} parts: ${firstReason ?? 'not mergeable'}`, 'Import')
     return null
   }
-  // Vertices are concatenated verbatim, so a part sitting at its own transform would land in the wrong place.
-  const moved = children.filter(c => !isIdentityTransform(c))
-  if (moved.length) {
-    Logger.warn(`Kept "${root.name}" split across ${children.length} parts: a part has its own transform`, 'Import')
-    return null
+
+  const result: ModelNode[] = []
+  let submeshes = 0
+  const distinct = new Set<MaterialAsset>()
+  for (const bucket of buckets) {
+    if (bucket.length === 1) { result.push(bucket[0]); submeshes++; continue }
+    const merged = mergeModels(bucket.map(c => c.model))
+    if (!merged) { result.push(...bucket); submeshes += bucket.length; continue }
+
+    // One asset per SUBMESH, taken from the child that submesh came from — never de-duplicated by
+    // material: `mergeModels` collapses only CONSECUTIVE parts, so a repeated material legitimately gets
+    // two submeshes and a de-duplicated list would misalign every link after the first repeat.
+    const assets = merged.sources.map(i => materialAssetOfChild.get(bucket[i]))
+    for (const a of assets) if (a) distinct.add(a)
+    submeshes += assets.length
+
+    // Vertices are concatenated verbatim, so the merged node carries the transform its parts shared.
+    // Exporters commonly put one root matrix on every split of a big mesh (65k-vertex Uint16 splits).
+    const shared = bucket[0]
+    const node = new ModelNode(buckets.length === 1 ? root.name : (shared.name || root.name), merged.model)
+    node.setPosition([...shared.position] as [number, number, number])
+    node.setRotation([...shared.rotation] as [number, number, number])
+    node.setScale([...shared.scale] as [number, number, number])
+    if (assets.some(Boolean)) applyMaterialAssets(node, assets)
+    result.push(node)
   }
 
-  const merged = mergeModels(models)
-  if (!merged) return null
-
-  // One asset per SUBMESH, taken from the child that submesh came from — never de-duplicated by material:
-  // `mergeModels` collapses only CONSECUTIVE parts, so a repeated material legitimately gets two submeshes
-  // and a de-duplicated list would misalign every link after the first repeat.
-  const assets = merged.sources.map(i => materialAssetOfChild.get(children[i]))
-
-  const name = root.name
-  const node = new ModelNode(name, merged.model)
+  // Swap in place, keeping the file's part order.
   for (const child of [...children]) root.removeChild(child)
-  root.addChild(node)
+  for (const node of result) root.addChild(node)
   root.updateTransforms()
-  if (assets.some(Boolean)) applyMaterialAssets(node, assets)
 
-  const distinct = new Set(assets.filter(Boolean)).size
-  Logger.info(`Merged ${children.length} parts of "${name}" into one mesh (${assets.length} submesh${assets.length === 1 ? '' : 'es'}, ${distinct || 1} material${distinct === 1 ? '' : 's'})`, 'Import')
-  return [node]
+  const parts = result.length === 1 ? 'one mesh' : `${result.length} meshes${firstReason ? ` (${firstReason})` : ''}`
+  Logger.info(`Merged ${children.length} parts of "${root.name}" into ${parts}: ${submeshes} submesh${submeshes === 1 ? '' : 'es'}, ${distinct.size || 1} material${distinct.size === 1 ? '' : 's'}`, 'Import')
+  return result
 }
 
-/** True when a node sits at its parent's origin unrotated and unscaled. */
-function isIdentityTransform(node: Node): boolean {
-  const near = (v: number, target: number) => Math.abs(v - target) < 1e-6
-  const p = node.position, r = node.rotation, sc = node.scale
-  return near(p[0], 0) && near(p[1], 0) && near(p[2], 0)
-    && near(r[0], 0) && near(r[1], 0) && near(r[2], 0)
-    && near(sc[0], 1) && near(sc[1], 1) && near(sc[2], 1)
+/** True when two nodes carry the same local position, rotation and scale. */
+function sameTransform(a: Node, b: Node): boolean {
+  const near = (x: ArrayLike<number>, y: ArrayLike<number>, eps: number) =>
+    Math.abs(x[0] - y[0]) < eps && Math.abs(x[1] - y[1]) < eps && Math.abs(x[2] - y[2]) < eps
+  return near(a.position, b.position, 1e-5) && near(a.rotation, b.rotation, 1e-4) && near(a.scale, b.scale, 1e-6)
+}
+
+/**
+ * Bring an imported model whose file places it far from the origin back to it — the import modal's plain
+ * and merge-only paths, which (unlike separate/grouped) used to keep the file's layout verbatim. A
+ * Sketchfab export routinely bakes its scene placement into the root matrix: a 20 m pine sat 365 m below
+ * and 367 m away, so its model tab and every placement showed nothing.
+ *
+ * Only when the origin lies OUTSIDE the bounds: a model authored around its own pivot (a character
+ * with its feet at 0, a door hinged on an edge) keeps that pivot exactly as before. All children shift
+ * by one delta, so the parts' layout survives. Returns true when it moved anything.
+ */
+export function recenterIfOffOrigin(root: Node, children: Node[]): boolean {
+  root.updateTransforms()
+  let minX = Infinity, minY = Infinity, minZ = Infinity
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+  for (const child of children) {
+    const s = child.getBoundingSphere()
+    if (!s || !isFinite(s.radius)) continue
+    minX = Math.min(minX, s.center[0] - s.radius); maxX = Math.max(maxX, s.center[0] + s.radius)
+    minY = Math.min(minY, s.center[1] - s.radius); maxY = Math.max(maxY, s.center[1] + s.radius)
+    minZ = Math.min(minZ, s.center[2] - s.radius); maxZ = Math.max(maxZ, s.center[2] + s.radius)
+  }
+  if (!isFinite(minX)) return false
+  const inside = minX <= 0 && maxX >= 0 && minY <= 0 && maxY >= 0 && minZ <= 0 && maxZ >= 0
+  if (inside) return false
+
+  recenterGroupOnBounds(root, children, root.scale)
+  return true
 }
 
 /**
@@ -729,7 +791,7 @@ export async function separateSubModels(
  *
  * Each group's members are merged into a single mesh carrying one submesh per material. A group the
  * merge rejects — mixed material types, mixed opaque/transparent, different skeletons, a part with its
- * own transform — still becomes ONE asset, just with its parts as separate nodes; the reason is logged
+ * parts at different transforms — still becomes ONE asset, just with its parts as separate nodes; the reason is logged
  * by mergeSubModels.
  *
  * `groups[].parts` index into `children`; callers must validate them (isValidGrouping) first.
@@ -756,8 +818,8 @@ export async function groupSubModels(
     for (const child of members) holder.addChild(child)
     holder.updateTransforms()
 
-    // Merge BEFORE re-centring: mergeSubModels requires its children at identity, and re-centring is
-    // exactly what breaks that. On a blocker it returns null and the group keeps its parts as nodes.
+    // Merge BEFORE re-centring: mergeSubModels requires its children at ONE shared transform, and
+    // re-centring per part could break that. On a blocker it returns null and the group keeps its parts as nodes.
     const merged = members.length > 1 ? mergeSubModels(holder, members, materialAssetOfChild) : null
     const content = merged ?? members
 

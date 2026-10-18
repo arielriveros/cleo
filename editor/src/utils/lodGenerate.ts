@@ -3,7 +3,7 @@ import type { SimplifyBuffers } from './simplify'
 import {
     MATERIAL_ID_VAR, MATERIAL_IDS_VAR, LOD_MATERIAL_ID_VAR, LOD_MATERIAL_IDS_VAR, LOD_LEVEL_VAR, getMaterialIdsOf,
 } from './materials'
-import { downscaleTextures, levelMaterialJson, levelTextureIds, lodSourceTextureId } from './lodTextures'
+import { downscaleTextures, levelMaterialJson, levelTextureIds, lodSourceTextureId, maskTextureIds } from './lodTextures'
 
 // Building one generated LOD level of a model: decimate every sub-mesh, give it an INLINE copy of its
 // material pointing at smaller textures, and hand back the level's serialized subtree.
@@ -123,13 +123,18 @@ export async function generateLodLevel(
     // even though the geometry cascades. That keeps one naming scheme (`<source>__lod<width>`), which is
     // what lets `resolveMaterialRefs` find a level's twin from the library material alone.
     const keptIds = new Set<string>()
+    const maskIds = new Set<string>()
     for (const source of sources)
-        for (const material of source.model.materials) for (const id of levelTextureIds(material.serialize(), level)) keptIds.add(id)
+        for (const material of source.model.materials) {
+            const json = material.serialize()
+            for (const id of levelTextureIds(json, level)) keptIds.add(id)
+            for (const id of maskTextureIds(json)) maskIds.add(lodSourceTextureId(id))
+        }
     const ids = new Map<string, string>()
     let bytesSaved = 0
     if (options.downscaleTextures && keptIds.size) {
         const roots = new Set([...keptIds].map(lodSourceTextureId))
-        const result = await downscaleTextures(roots, level)
+        const result = await downscaleTextures(roots, level, maskIds)
         for (const id of keptIds) ids.set(id, result.ids.get(lodSourceTextureId(id)) ?? id)
         bytesSaved = result.bytesSaved
     }
