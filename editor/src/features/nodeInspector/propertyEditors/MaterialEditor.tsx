@@ -96,6 +96,8 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   // Wind response (any shader type): how far a plant wearing this material leans in the scene's Wind.
   const [windStrength, setWindStrength] = useState<number>(material.properties.get('windStrength') ?? 0);
   const [windStiffness, setWindStiffness] = useState<number>(material.properties.get('windStiffness') ?? 1);
+  const [windRole, setWindRole] = useState<'plant' | 'leaves'>(material.properties.get('windRole') === 'leaves' ? 'leaves' : 'plant');
+  const [windFlutter, setWindFlutter] = useState<number>(material.properties.get('windFlutter') ?? 0.5);
 
   const [basicColor, setBasicColor] = useState(
     vec3ToHex(material.properties.get('color') ?? [1,1,1])
@@ -600,9 +602,26 @@ export default function MaterialEditor(props: {node: ModelNode}) {
               <PropertyRow label='Strength' hint='How far a plant leans at full gust, as a fraction of its height. 0 = never moves. Grass ~0.3, trees ~0.08.'>
                 <Slider min={0} max={1} step={0.01} value={windStrength} onChange={setNum('windStrength', setWindStrength)} />
               </PropertyRow>
-              <PropertyRow label='Stiffness' divider={false} hint='Higher is slower and steadier: grass ~0.6, a young tree ~1.5, an old trunk ~3.'>
+              <PropertyRow label='Stiffness' hint='Higher is slower and steadier: grass ~0.6, a young tree ~1.5, an old trunk ~3.'>
                 <Slider min={0.1} max={4} step={0.05} value={windStiffness} onChange={setNum('windStiffness', setWindStiffness)} />
               </PropertyRow>
+              <PropertyRow label='Moves as' divider={windRole === 'leaves'} hint='Bark: Whole plant — it rides the plant&#39;s sway rigidly, like a trunk. Needles and leaves: Leaves — they follow the trunk and add their own sprig sway and flutter, more toward the outside of the canopy, so they stay on their branches.'>
+                <Select value={windRole} onChange={e => {
+                  const role = e.target.value === 'leaves' ? 'leaves' : 'plant'
+                  model.material.properties.set('windRole', role)
+                  if (!model.material.properties.has('windFlutter')) model.material.properties.set('windFlutter', windFlutter)
+                  setWindRole(role)
+                  markMaterialDirty()
+                }}>
+                  <option value='plant'>Whole plant</option>
+                  <option value='leaves'>Leaves</option>
+                </Select>
+              </PropertyRow>
+              {windRole === 'leaves' && (
+                <PropertyRow label='Flutter' divider={false} hint='How lively the leaves are on top of the plant&#39;s sway. 0 = they ride it rigidly.'>
+                  <Slider min={0} max={1} step={0.01} value={windFlutter} onChange={setNum('windFlutter', setWindFlutter)} />
+                </PropertyRow>
+              )}
             </PropertyTable>
           </Section>
         )}

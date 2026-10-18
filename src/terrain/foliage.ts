@@ -541,9 +541,14 @@ export class FoliageLayer {
      * to re-scatter, since that is the one operation here that discards the user's placement.
      */
     /** A billboard layer's wind lives on its card's material, where the renderer reads every layer's. */
-    private _applyBillboardWind(src: { windStrength?: number; windStiffness?: number }): void {
+    private _applyBillboardWind(src: { windStrength?: number; windStiffness?: number; windFlutter?: number }): void {
         if (this.kind !== 'billboard') return;
-        applyWind(this.model.material, { windStrength: src.windStrength ?? 0, windStiffness: src.windStiffness ?? 1 });
+        // A tuft is all canopy and no trunk: any flutter makes it move like leaves rather than rigidly.
+        const flutter = Math.max(0, Number(src.windFlutter) || 0);
+        applyWind(this.model.material, {
+            windStrength: src.windStrength ?? 0, windStiffness: src.windStiffness ?? 1,
+            windRole: flutter > 0 ? 'leaves' : 'plant', windFlutter: flutter,
+        });
     }
 
     public setPrototype(rule: TerrainFoliageRule): { densityChanged: boolean } {
@@ -894,7 +899,11 @@ export class FoliageLayer {
             // on load, so its wind is carried here.
             ...(this.kind === 'billboard' ? (() => {
                 const w = windConfigOf(this.model.material);
-                return { windStrength: w.windStrength || undefined, windStiffness: w.windStiffness !== 1 ? w.windStiffness : undefined };
+                return {
+                    windStrength: w.windStrength || undefined,
+                    windStiffness: w.windStiffness !== 1 ? w.windStiffness : undefined,
+                    windFlutter: w.windRole === 'leaves' && w.windFlutter > 0 ? w.windFlutter : undefined,
+                };
             })() : {}),
             cellSize: this.cellSize,
             instances: btoa(bin),

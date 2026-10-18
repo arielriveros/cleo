@@ -381,22 +381,37 @@ function uvJson(material: Material): UvConfig {
  * default, and what every existing asset means). `windStiffness` slows and damps it: grass ~0.6, a
  * young tree ~1.5, an old trunk ~3. A foliage layer bends as ONE plant, so a tree's bark and needles
  * stay attached: the renderer takes the strongest of a prototype's materials for all of its parts.
+ *
+ * `windRole` is how THIS material's surfaces move within that shared bend: `'plant'` rides it rigidly
+ * (bark, a grass mesh, a rock that leans), `'leaves'` adds its own sprig sway and flutter on top, scaled
+ * by `windFlutter` (0..1) — the trunk sways like a tree and the canopy moves like grass.
  */
+export type WindRole = 'plant' | 'leaves';
+
 export interface WindConfig {
     windStrength?: number;
     windStiffness?: number;
+    windRole?: WindRole;
+    windFlutter?: number;
 }
+
+const WIND_FLUTTER_DEFAULT = 0.5;
 
 export function applyWind(material: Material, cfg: WindConfig): void {
     material.properties.set('windStrength', Math.max(0, finiteOr(cfg.windStrength, 0)));
     material.properties.set('windStiffness', Math.max(0.05, finiteOr(cfg.windStiffness, 1)));
+    material.properties.set('windRole', cfg.windRole === 'leaves' ? 'leaves' : 'plant');
+    material.properties.set('windFlutter', Math.min(1, Math.max(0, finiteOr(cfg.windFlutter, WIND_FLUTTER_DEFAULT))));
 }
 
 /** A material's wind response, defaults filled in. */
 export function windConfigOf(material: Material): Required<WindConfig> {
+    const flutter = material.properties.get('windFlutter');
     return {
         windStrength: Number(material.properties.get('windStrength') ?? 0) || 0,
         windStiffness: Number(material.properties.get('windStiffness') ?? 1) || 1,
+        windRole: material.properties.get('windRole') === 'leaves' ? 'leaves' : 'plant',
+        windFlutter: typeof flutter === 'number' && Number.isFinite(flutter) ? flutter : WIND_FLUTTER_DEFAULT,
     };
 }
 
@@ -406,6 +421,8 @@ function windJson(material: Material): WindConfig {
     const out: WindConfig = {};
     if (c.windStrength !== 0) out.windStrength = c.windStrength;
     if (c.windStiffness !== 1) out.windStiffness = c.windStiffness;
+    if (c.windRole !== 'plant') out.windRole = c.windRole;
+    if (c.windFlutter !== WIND_FLUTTER_DEFAULT) out.windFlutter = c.windFlutter;
     return out;
 }
 
@@ -810,7 +827,8 @@ export class Material {
     public static parse(m: any): Material {
         const material = Material._parseShading(m || {});
         // Every shading model can answer the wind; written only when the asset carries it.
-        if (m && (m.windStrength !== undefined || m.windStiffness !== undefined)) applyWind(material, m);
+        if (m && (m.windStrength !== undefined || m.windStiffness !== undefined
+                  || m.windRole !== undefined || m.windFlutter !== undefined)) applyWind(material, m);
         return material;
     }
 
@@ -1054,6 +1072,8 @@ export interface TerrainFoliageRule {
      */
     windStrength?: number;
     windStiffness?: number;
+    /** A billboard's flutter, 0..1 (see WindConfig): above 0 its tufts move like leaves, not rigidly. */
+    windFlutter?: number;
     /** Instances per SQUARE METRE — the same unit for the brush disc and whole-terrain generation. */
     density?: number;
     /** Unit marker for `density`. Absent = legacy per-100x100-tile; see {@link migrateFoliageRule}. */

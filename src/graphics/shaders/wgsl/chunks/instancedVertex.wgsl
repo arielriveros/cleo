@@ -41,7 +41,7 @@ fn vs_main(
 #if CLEO_WIND
     let wind = WindParams(u_transform.u_windGlobal, u_transform.u_windTime, u_transform.u_windResponse,
                           u_transform.u_windShape, u_transform.u_windCamera);
-    out.fragPos = windDisplace(out.fragPos, position.y, model, u_transform.u_windTime.x, wind);
+    out.fragPos = windDisplace(out.fragPos, position, out.normal, model, u_transform.u_windTime.x, wind);
 #endif
     // From fragPos, which IS model * position unless the wind moved it.
     out.position = u_transform.u_projection * u_transform.u_view * vec4<f32>(out.fragPos, 1.0);

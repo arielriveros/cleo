@@ -49,7 +49,9 @@ fn vs_main(
     // The same displacement as the colour pass, so a swaying plant's shadow sways with it.
     let wind = WindParams(u_depth.u_windGlobal, u_depth.u_windTime, u_depth.u_windResponse,
                           u_depth.u_windShape, u_depth.u_windCamera);
-    world = windDisplace(world, position.y, instanceModel, u_depth.u_windTime.x, wind);
+    let nw = (instanceModel * vec4<f32>(normal, 0.0)).xyz;
+    world = windDisplace(world, position, nw * inverseSqrt(max(dot(nw, nw), 1e-12)), instanceModel,
+                         u_depth.u_windTime.x, wind);
 #endif
     out.position = u_depth.u_lightSpace * vec4<f32>(world, 1.0);
     return out;

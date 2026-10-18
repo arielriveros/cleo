@@ -112,6 +112,16 @@ describe('wiring', () => {
         expect(body).toContain('packer.sync(mat, this._frameIndex)');
     });
 
+    it('billboard cards and impostors are padded too: requested before any pass opens, bound at draw', () => {
+        const renderer = read('renderer.ts');
+        const at = renderer.indexOf('private _ensurePackedTextures');
+        const body = renderer.slice(at, renderer.indexOf('\n    }\n', at));
+        expect(body).toContain('packer.ensureDilated(card, 0.5, this._frameIndex)');
+        expect(renderer).toContain('TexturePacker.Instance.dilatedId(texId, 0.5)');
+        // An impostor re-bake reuses its texture id, so the cache must notice the source object changed.
+        expect(read('systems/texturePacker.ts')).toContain('entry.source === TextureManager.Instance.getTexture(sourceId)');
+    });
+
     it('only cutout materials are padded, and the derived slot never reaches an asset', () => {
         const packer = read('systems/texturePacker.ts');
         expect(packer).toContain("!(cutoff > 0)");

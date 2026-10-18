@@ -2521,6 +2521,15 @@ export class Renderer {
                     for (const model of level.models)
                         for (const mat of model.materials) packer.sync(mat, this._frameIndex);
             }
+        // Billboard cards and baked impostors are bound by texture, not material, so their edge padding
+        // is requested here, where no pass is open. Their alpha IS the cutout (0.5 in the shader), and
+        // the background a capture leaves under it is black: unpadded, every mip averages that black
+        // into the card's edge — the dark rim that made distant impostors look cut out with scissors.
+        for (const node of scene.landscapes)
+            for (const layer of node.terrain.foliage) {
+                const card = layer.kind === 'billboard' ? layer.textureId : layer.billboardModel ? layer.billboardTextureId : null;
+                if (card && card !== 'Null') packer.ensureDilated(card, 0.5, this._frameIndex);
+            }
         // Decals sample the same packed ORM map a mesh wearing their material would.
         for (const decal of scene.decals) if (decal.material) packer.sync(decal.material, this._frameIndex);
         packer.sweep(this._frameIndex);
@@ -3285,7 +3294,7 @@ export class Renderer {
                     });
                     pass.setPipeline(pipeline);
                     this._shaderManager.setUniform('u_lightSpace', this._clipProjection(lightSpace));
-                    if (wind) this._setWindUniforms(scene, wind);
+                    if (wind) this._setWindUniforms(scene, wind, model.material);
                     if (cutout) {
                         this._shaderManager.setUniform('u_cutoff', cut!.cutoff);
                         this._shaderManager.setUniform('u_useRed', cut!.useRed);
@@ -3318,7 +3327,7 @@ export class Renderer {
     private _windTimePrev: number = 0;
     private _windClock: number = -1;
     /** A layer prototype's [base height, plant height] in object space, keyed on its first model. */
-    private readonly _windShapes = new WeakMap<Model, [number, number]>();
+    private readonly _windShapes = new WeakMap<Model, [number, number, number]>();
 
     private _advanceWindTime(): void {
         const now = performance.now();
@@ -3337,12 +3346,12 @@ export class Renderer {
      * the whole prototype, and the bend is measured against the whole prototype's height.
      */
     private _foliageWind(scene: Scene, layer: FoliageLayer):
-        { lean: number; stiffness: number; minY: number; height: number; fadeEnd: number } | null {
+        { lean: number; stiffness: number; minY: number; height: number; radius: number; fadeEnd: number } | null {
         const node = scene.wind;
         if (!node || !node.visible || !(node.strength > 0)) return null;
         const models = layer.kind === 'billboard' ? [layer.model] : layer.levels[0]?.models ?? [];
         if (models.length === 0) return null;
-        let lean = 0, stiffness = 1;
+        let lean = 0, stiffness = 1, flutters = false;
         for (const model of models)
             for (const material of model.materials) {
                 const strength = Number(material.properties.get('windStrength') ?? 0);
@@ -3350,26 +3359,37 @@ export class Renderer {
                     lean = strength;
                     stiffness = Number(material.properties.get('windStiffness') ?? 1) || 1;
                 }
+                if (material.properties.get('windRole') === 'leaves' && Number(material.properties.get('windFlutter') ?? 0.5) > 0)
+                    flutters = true;
             }
-        if (!(lean > 0)) return null;
+        // Leaves that flutter on a plant that does not lean still move: the trunk simply stays put.
+        if (!(lean > 0) && !flutters) return null;
         let shape = this._windShapes.get(models[0]);
         if (!shape) {
-            let minY = Infinity, maxY = -Infinity;
+            let minY = Infinity, maxY = -Infinity, radius = 0;
             for (const model of models) {
                 const box = model.geometry.boundingBox;
                 minY = Math.min(minY, box.min[1]);
                 maxY = Math.max(maxY, box.max[1]);
+                // Horizontal reach from the trunk axis (the prototype's local Y), for the leaf weighting.
+                radius = Math.max(radius, Math.abs(box.min[0]), Math.abs(box.max[0]), Math.abs(box.min[2]), Math.abs(box.max[2]));
             }
-            shape = Number.isFinite(minY) && maxY > minY ? [minY, maxY - minY] : [0, 1];
+            // A billboard card has no trunk: radius 0 tells the shader to weight its flutter by height alone.
+            if (layer.kind === 'billboard') radius = 0;
+            shape = Number.isFinite(minY) && maxY > minY ? [minY, maxY - minY, radius] : [0, 1, 0];
             this._windShapes.set(models[0], shape);
         }
-        return { lean, stiffness, minY: shape[0], height: shape[1], fadeEnd: node.fadeEnd };
+        return { lean, stiffness, minY: shape[0], height: shape[1], radius: shape[2], fadeEnd: node.fadeEnd };
     }
 
     private readonly _windVec: number[][] = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
 
-    /** The vertex-stage wind block of the program just bound; see WindParams in foliageWind.wgsl. */
-    private _setWindUniforms(scene: Scene, w: { lean: number; stiffness: number; minY: number; height: number }): void {
+    /**
+     * The vertex-stage wind block of the program just bound; see WindParams in foliageWind.wgsl. Per
+     * MODEL: the bend is the layer's, but whether these surfaces add leaf motion is their material's.
+     */
+    private _setWindUniforms(scene: Scene, w: { lean: number; stiffness: number; minY: number; height: number; radius: number },
+                             material: Material): void {
         const node = scene.wind!;
         const [dx, dz] = node.directionXZ;
         const cam = this._activeCamera.position;
@@ -3377,7 +3397,10 @@ export class Renderer {
         g[0] = dx; g[1] = dz; g[2] = node.strength; g[3] = node.gustScale;
         t[0] = this._windTime; t[1] = this._windTimePrev; t[2] = node.gustSpeed; t[3] = node.fadeEnd;
         r[0] = w.lean; r[1] = w.stiffness;
-        sh[0] = w.minY; sh[1] = w.height; sh[2] = node.fadeStart;
+        const leaves = material.properties.get('windRole') === 'leaves';
+        r[2] = leaves ? Math.max(0, Number(material.properties.get('windFlutter') ?? 0.5) || 0) : 0;
+        r[3] = leaves ? 1 : 0;
+        sh[0] = w.minY; sh[1] = w.height; sh[2] = node.fadeStart; sh[3] = w.radius;
         c[0] = cam[0]; c[1] = cam[1]; c[2] = cam[2];
         this._shaderManager.setUniform('u_windGlobal', g);
         this._shaderManager.setUniform('u_windTime', t);
@@ -3420,7 +3443,7 @@ export class Renderer {
                         this._shaderManager.bind(shaderType);
                         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
                         this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
-                        if (sway) this._setWindUniforms(scene, wind!);
+                        if (sway) this._setWindUniforms(scene, wind!, model.material);
                         const pipeline = this._pipelineFor(shaderType, reflection, {
                             // Billboard cross quads are two-sided; a mesh prop keeps its material side.
                             cullMode: billboard ? 'none' : Renderer._cullFor(model.material.config.side),
@@ -3433,7 +3456,10 @@ export class Renderer {
                         pass.setPipeline(pipeline);
                         if (billboard) {
                             const texId = layer.kind === 'billboard' ? layer.textureId : layer.billboardTextureId;
-                            const tex = texId ? TextureManager.Instance.getTexture(texId) : null;
+                            // The edge-padded copy once `_ensurePackedTextures` has baked it.
+                            const padded = texId ? TexturePacker.Instance.dilatedId(texId, 0.5) : null;
+                            const tex = (padded ? TextureManager.Instance.getTexture(padded) : null)
+                                ?? (texId ? TextureManager.Instance.getTexture(texId) : null);
                             pass.setBindGroup(0, this._textureBindGroup(pipeline, 0,
                                                                        [tex ?? this._fallbackTexture]));
                         } else {

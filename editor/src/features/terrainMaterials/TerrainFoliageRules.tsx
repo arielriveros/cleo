@@ -230,6 +230,12 @@ export default function TerrainFoliageRules({ material, onChange }: { material: 
                     </span>
                   </div>
                 )}
+                {r.kind === 'billboard' && (
+                  <div className='flex items-center justify-between'>
+                    <span className={label} title='How lively the tufts are on top of their lean, 0..1. 0 = they lean rigidly.'>Wind flutter</span>
+                    <NumberInput step={0.05} min={0} max={1} className={num} value={r.windFlutter ?? 0} onChange={v => patchRule(i, { windFlutter: Math.min(1, Math.max(0, v)) })} />
+                  </div>
+                )}
 
                 {r.kind === 'mesh' && <>
                   {/* LOD/cull come from the model asset (edited in the model editor) — shown, not edited. */}

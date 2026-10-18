@@ -60,6 +60,85 @@ function displace(objPos: number[], origin: number[], scale: number, t: number, 
     return bl > 1e-5 ? bent.map((v, i) => base[i] + v * len / bl) : world;
 }
 
+// ---- The LEAVES layers (phase 2) -------------------------------------------------------------------
+
+const wave = (x: number) => { const f = Math.abs((x + 0.5 - Math.floor(x + 0.5)) * 2 - 1); return f * f * (3 - 2 * f) * 2 - 1; };
+function gustAt(origin: number[], t: number, w: W): number {
+    const sx = w.dir[0] * (w.speed * t / w.wavelength), sz = w.dir[1] * (w.speed * t / w.wavelength);
+    const px = origin[0] / w.wavelength - sx, pz = origin[2] / w.wavelength - sz;
+    return noise(px, pz) * 0.7 + noise(px * 2.13 + 17, pz * 2.13 + 3) * 0.3;
+}
+/** windLeafOffset, normal pointing +X; instance = translation + uniform scale. */
+function leafOffset(obj: number[], origin: number[], scale: number, t: number, w: W, radius: number, flutter: number): number[] {
+    const h = Math.min(1, Math.max(0, (obj[1] - w.minY) / w.height));
+    const heightW = w.height * scale;
+    const b = radius > 1e-4 ? smoothstep(0.15 * radius, radius, Math.hypot(obj[0], obj[2])) * h : h;
+    const d = Math.hypot(origin[0] - w.cam[0], origin[1] - w.cam[1], origin[2] - w.cam[2]);
+    const f = flutter * b * (1 - smoothstep(w.fadeStart, w.fadeEnd, d)) * w.strength;
+    const gust = gustAt(origin, t, w);
+    const cells = radius > 1e-4 ? 4 / radius : 8;
+    const c = obj.map(v => Math.floor(v * cells));
+    const phase = hash(c[0] + c[1] * 7.13 + origin[0], c[2] + c[1] * 1.71 + origin[2]);
+    const swing = wave(t * (1.6 / w.stiffness) + phase), lift = wave(t * (1.1 / w.stiffness) + phase * 1.7 + 0.25);
+    const sprig = f * 0.05 * heightW * (0.4 + 0.6 * gust);
+    const sp = hash(obj[0] * 37 + obj[1] * 11, obj[2] * 37) * 6.2831853;
+    const shimmer = Math.sin(t * 44 + sp) * f * 0.004 * heightW * (0.5 + 0.5 * gust);
+    return [w.dir[0] * swing * sprig + shimmer, 0.35 * lift * sprig, w.dir[1] * swing * sprig];
+}
+
+describe('leaves move on their own, without leaving the tree', () => {
+    const tree = { ...W0, lean: 0.08, stiffness: 1.5, minY: 0, height: 20 };
+    const R = 5;
+
+    it('the motion vanishes at the trunk axis and at the root, so needles stay on their branches', () => {
+        for (const t of [0.3, 1.7, 4.2]) {
+            expect(Math.hypot(...leafOffset([0.2, 12, 0.1], [0, 0, -10], 1, t, tree, R, 1))).toBeLessThan(1e-9);
+            expect(Math.hypot(...leafOffset([4.5, 0, 0], [0, 0, -10], 1, t, tree, R, 1))).toBeLessThan(1e-9);
+        }
+    });
+
+    it('outer canopy leaves move, but only by a few percent of the tree height', () => {
+        let most = 0;
+        for (let t = 0; t < 4; t += 0.05) most = Math.max(most, Math.hypot(...leafOffset([4.8, 16, 0], [0, 0, -10], 1, t, tree, R, 1)));
+        expect(most).toBeGreaterThan(0.05);           // visibly alive
+        expect(most).toBeLessThan(0.06 * 20);         // never more than ~6% of the tree: they stay attached
+    });
+
+    it('neighbouring sprigs swing out of step, so the canopy does not move as one sheet', () => {
+        const a = leafOffset([4.8, 16, 0], [0, 0, -10], 1, 2.0, tree, R, 1);
+        const b = leafOffset([-4.8, 15, 1.3], [0, 0, -10], 1, 2.0, tree, R, 1);
+        expect(Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1])).toBeGreaterThan(1e-3);
+    });
+
+    it('a trunkless grass card flutters from the tip, weighted by height alone', () => {
+        const grass = { ...W0, height: 1 };
+        expect(Math.hypot(...leafOffset([0, 0, 0], [3, 0, 3], 0.7, 1.1, grass, 0, 0.8))).toBe(0);
+        let tip = 0;
+        for (let t = 0; t < 3; t += 0.05) tip = Math.max(tip, Math.hypot(...leafOffset([0.1, 1, 0], [3, 0, 3], 0.7, t, grass, 0, 0.8)));
+        expect(tip).toBeGreaterThan(0.005);
+    });
+});
+
+describe('leaf wiring', () => {
+    const chunk = readFileSync(join(WGSL, 'chunks/foliageWind.wgsl'), 'utf-8');
+    const renderer = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
+
+    it('only the leaves role runs the leaf layers; bark rides the shared bend unchanged', () => {
+        expect(chunk).toContain('if (w.response.w < 0.5) { return trunk; }');
+        expect(chunk).toContain('return trunk + windLeafOffset(');
+    });
+
+    it('the role and flutter are set per MODEL, the bend per LAYER', () => {
+        expect(renderer).toContain("this._setWindUniforms(scene, wind!, model.material)");
+        expect(renderer).toContain("this._setWindUniforms(scene, wind, model.material)");
+        expect(renderer).toContain("const leaves = material.properties.get('windRole') === 'leaves';");
+    });
+
+    it('the shadow pass displaces with the same normal-aware function', () => {
+        expect(readFileSync(join(WGSL, 'chunks/instancedDepthVertex.wgsl'), 'utf-8')).toMatch(/windDisplace\(world, position, nw/);
+    });
+});
+
 describe('the wind displacement', () => {
     it('keeps the root planted and the plant its length', () => {
         const origin = [5, 0, 3];
@@ -186,7 +265,11 @@ describe('wind data', () => {
             expect(m.serialize().windStrength).toBeUndefined();
             applyWind(m, { windStrength: 0.3, windStiffness: 0.6 });
             const back = Material.parse(JSON.parse(JSON.stringify(m.serialize())));
-            expect(windConfigOf(back)).toEqual({ windStrength: 0.3, windStiffness: 0.6 });
+            expect(windConfigOf(back)).toEqual({ windStrength: 0.3, windStiffness: 0.6, windRole: 'plant', windFlutter: 0.5 });
+            expect(m.serialize().windRole).toBeUndefined();          // defaults are not written
+            applyWind(m, { windStrength: 0.1, windRole: 'leaves', windFlutter: 0.7 });
+            const leaves = Material.parse(JSON.parse(JSON.stringify(m.serialize())));
+            expect(windConfigOf(leaves)).toEqual({ windStrength: 0.1, windStiffness: 1, windRole: 'leaves', windFlutter: 0.7 });
         }
     });
 });

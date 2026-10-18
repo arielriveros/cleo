@@ -69,6 +69,12 @@ interface CacheEntry {
     id: string;
     texture: Texture;
     lastFrame: number;
+    /**
+     * A dilation's source texture OBJECT. Ids are reused when a texture is replaced in place (an
+     * impostor re-bake removes and re-adds under the same id), so the id alone would keep serving the
+     * padded copy of the previous image.
+     */
+    source?: Texture;
 }
 
 interface Binding {
@@ -208,7 +214,7 @@ export class TexturePacker {
         }
         // Quantised, so a slider drag re-bakes in steps rather than on every pixel of travel.
         const key = `dilate:${base}|${mask ?? '@alpha'}|${Math.round(cutoff * 100)}`;
-        const cached = this._cache.get(key);
+        const cached = this._freshDilation(key, base);
         if (cached) {
             cached.lastFrame = frame;
             if (this._dilations.get(material) === key && material.textures.get(DILATED_BASE_SLOT) === cached.id) return;
@@ -217,6 +223,36 @@ export class TexturePacker {
         if (!id) { material.textures.delete(DILATED_BASE_SLOT); this._dilations.delete(material); return; }
         material.textures.set(DILATED_BASE_SLOT, id);
         this._dilations.set(material, key);
+    }
+
+    /**
+     * The edge-padded copy of a texture whose OWN alpha is its cutout — a foliage billboard's card or a
+     * mesh layer's baked impostor, which the renderer binds directly rather than through a material.
+     * Bakes on first request; call only where no pass is open (`_ensurePackedTextures`). Null while the
+     * source is decoding.
+     */
+    public ensureDilated(textureId: string, cutoff: number, frame: number): string | null {
+        const key = `dilate:${textureId}|@alpha|${Math.round(cutoff * 100)}`;
+        const cached = this._freshDilation(key, textureId);
+        if (cached) { cached.lastFrame = frame; return cached.id; }
+        return this._bakeDilation(key, textureId, null, cutoff, frame);
+    }
+
+    /** The baked copy {@link ensureDilated} made, without baking — for draw time, inside a pass. */
+    public dilatedId(textureId: string, cutoff: number): string | null {
+        const entry = this._cache.get(`dilate:${textureId}|@alpha|${Math.round(cutoff * 100)}`);
+        return entry && entry.source === TextureManager.Instance.getTexture(textureId) ? entry.id : null;
+    }
+
+    /** A cached dilation of `sourceId`, or null — dropping one whose source was replaced under its id. */
+    private _freshDilation(key: string, sourceId: string): CacheEntry | null {
+        const entry = this._cache.get(key);
+        if (!entry) return null;
+        if (entry.source === TextureManager.Instance.getTexture(sourceId)) return entry;
+        entry.texture.delete();
+        TextureManager.Instance.removeTexture(entry.id);
+        this._cache.delete(key);
+        return null;
     }
 
     /** The push-pull chain of colorDilate.wgsl. Returns null while a source is still decoding. */
@@ -267,7 +303,7 @@ export class TexturePacker {
 
         const id = PACKED_ID_PREFIX + cyrb53(key);
         TextureManager.Instance.addTexture(output, id);
-        this._cache.set(key, { id, texture: output, lastFrame: frame });
+        this._cache.set(key, { id, texture: output, lastFrame: frame, source: base });
         return id;
     }
 

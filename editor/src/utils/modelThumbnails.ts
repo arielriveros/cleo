@@ -315,6 +315,63 @@ export async function renderModelAssetThumbnail(engine: CleoEngine, asset: Model
 
 /** Side of the baked impostor sheet. Four times a thumbnail: this one is looked at in the world. */
 export const IMPOSTOR_SIZE = 512;
+/** Largest offscreen capture an impostor bake renders before box-filtering down to its card size. */
+export const IMPOSTOR_MAX_CAPTURE = 2048;
+
+/**
+ * Box-filter an RGBA capture `factor`x smaller with COVERAGE weighting: alpha becomes the mean coverage
+ * of each block, colour the mean of only the covered samples. Plain averaging would mix the transparent
+ * background's colour into every edge texel. Pure, so it is unit-tested.
+ */
+export function downsampleCoverage(src: ArrayLike<number>, width: number, height: number,
+                                   factor: number): { data: Uint8ClampedArray; width: number; height: number } {
+  const w = Math.floor(width / factor), h = Math.floor(height / factor);
+  const out = new Uint8ClampedArray(w * h * 4);
+  const n = factor * factor;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let r = 0, g = 0, b = 0, a = 0;
+    for (let j = 0; j < factor; j++) for (let i = 0; i < factor; i++) {
+      const k = ((y * factor + j) * width + (x * factor + i)) * 4;
+      const wgt = src[k + 3];
+      r += src[k] * wgt; g += src[k + 1] * wgt; b += src[k + 2] * wgt; a += wgt;
+    }
+    const o = (y * w + x) * 4;
+    if (a > 0) { out[o] = r / a; out[o + 1] = g / a; out[o + 2] = b / a; }
+    out[o + 3] = a / n;
+  }
+  return { data: out, width: w, height: h };
+}
+
+async function decodePixels(dataUrl: string): Promise<{ data: Uint8ClampedArray; width: number; height: number } | null> {
+  const image = await new Promise<HTMLImageElement | null>(resolve => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+  if (!image || !image.width) return null;
+  const big = document.createElement('canvas');
+  big.width = image.width; big.height = image.height;
+  const bctx = big.getContext('2d', { willReadFrequently: true });
+  if (!bctx) return null;
+  bctx.drawImage(image, 0, 0);
+  return { data: bctx.getImageData(0, 0, big.width, big.height).data, width: big.width, height: big.height };
+}
+
+/** The impostor sheet: the supersampled capture box-filtered `factor`x down. A PNG data URL. */
+async function composeImpostor(litUrl: string, factor: number): Promise<string | null> {
+  const lit = await decodePixels(litUrl);
+  if (!lit) return null;
+  const small = factor > 1 ? downsampleCoverage(lit.data, lit.width, lit.height, factor) : lit;
+  const canvas = document.createElement('canvas');
+  canvas.width = small.width; canvas.height = small.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const img = ctx.createImageData(small.width, small.height);
+  img.data.set(small.data);
+  ctx.putImageData(img, 0, 0);
+  return canvas.toDataURL('image/png');
+}
 
 /**
  * The texture id an asset's impostor is registered under. Deterministic, so re-baking REPLACES the card
@@ -508,7 +565,15 @@ export async function bakeModelImpostor(engine: CleoEngine, asset: ModelAsset, m
   });
 
   await awaitSubtreeTexturesReady(root);
-  const data = await captureClean(engine, framed.scene, size);
+  // SUPERSAMPLED: rendered at up to 4x and box-filtered down. A single sample per texel makes the
+  // coverage alpha binary (it comes from the depth buffer), so every needle edge was a stair-step that
+  // the card's mips then smeared — a blurry tree with a hard, visible cutout line. Averaged down, the
+  // alpha is the true fraction of each texel the tree covers, and the colour is the mean of only the
+  // covered samples, so no background bleeds into the edge.
+  const factor = Math.max(1, Math.min(4, Math.floor(IMPOSTOR_MAX_CAPTURE / size)));
+  const lit = await captureClean(engine, framed.scene, size * factor);
+  if (!lit) return null;
+  const data = await composeImpostor(lit, factor);
   if (!data) return null;
 
   // Checked every time, not only when something looks wrong: a card is authored once and then only
