@@ -1944,9 +1944,9 @@ function textureEntries() {
   return out
 }
 
-function vfs(libraries, textureIds) {
+function vfs(libraries, textureIds, { projectName = PROJECT_NAME, sceneId = SCENE_ID, folders = FOLDERS, extraTextures = [] } = {}) {
   const entries = []
-  const add = (kind, items, folderOf = (item) => FOLDERS[kind]?.[item.name]) => {
+  const add = (kind, items, folderOf = (item) => folders[kind]?.[item.name]) => {
     const ext = KIND_EXT[kind]
     if (!ext) throw new Error(`no virtual extension for kind "${kind}"`)
     for (const item of items) {
@@ -1955,11 +1955,12 @@ function vfs(libraries, textureIds) {
       entries.push({ path: `${folder}/${item.name}${ext}`, kind, assetId: item.id, created: CREATED_AT })
     }
   }
-  add('scene', [{ name: PROJECT_NAME, id: SCENE_ID }])
+  add('scene', [{ name: projectName, id: sceneId }])
   add('script', libraries.scripts)
   add('template', libraries.templates)
   add('model', libraries.models)
   add('material', libraries.materials)
+  if (libraries.terrainMaterials.length) add('terrainMaterial', libraries.terrainMaterials)
   add('rig', libraries.rigs)
   add('animationField', libraries.animationFields)
   add('animController', libraries.animControllers)
@@ -1969,10 +1970,10 @@ function vfs(libraries, textureIds) {
   // A texture's record and its source image share the texture's id (textureAssets.ts); the editor
   // re-derives both on import and keeps them wherever these entries put them.
   const listed = new Set()
-  for (const t of textureEntries()) {
+  for (const t of [...textureEntries(), ...extraTextures]) {
     listed.add(t.id)
     entries.push({ path: `${t.folder}/${t.name}${KIND_EXT.texture}`, kind: 'texture', assetId: t.id, created: CREATED_AT })
-    entries.push({ path: `${t.folder}/Source/${t.name}.png`, kind: 'image', assetId: t.id, created: CREATED_AT })
+    entries.push({ path: `${t.folder}/Source/${t.name}.${t.ext ?? 'png'}`, kind: 'image', assetId: t.id, created: CREATED_AT })
   }
   const unlisted = textureIds.filter(id => !listed.has(id))
   if (unlisted.length) throw new Error(`no Assets folder for texture(s) ${unlisted.join(', ')} — add them to textureEntries()`)
@@ -1980,16 +1981,25 @@ function vfs(libraries, textureIds) {
   const paths = entries.map(e => e.path)
   const clash = paths.find((p, i) => paths.indexOf(p) !== i)
   if (clash) throw new Error(`two assets both want the vfs path "${clash}"`)
-  const folders = [...new Set(entries.map(e => e.path.slice(0, e.path.lastIndexOf('/'))).filter(Boolean))]
+  const dirs = [...new Set(entries.map(e => e.path.slice(0, e.path.lastIndexOf('/'))).filter(Boolean))]
   const withParents = new Set()
-  for (const f of folders) { const parts = f.split('/').filter(Boolean); for (let i = 1; i <= parts.length; i++) withParents.add('/' + parts.slice(0, i).join('/')) }
+  for (const f of dirs) { const parts = f.split('/').filter(Boolean); for (let i = 1; i <= parts.length; i++) withParents.add('/' + parts.slice(0, i).join('/')) }
   return { version: 1, folders: [...withParents].sort(), entries }
 }
 
-function main() {
-  fs.rmSync(OUT, { recursive: true, force: true })
-  fs.mkdirSync(path.join(OUT, 'libraries'), { recursive: true })
-  fs.mkdirSync(path.join(OUT, 'scenes'), { recursive: true })
+/**
+ * Write a project built on the souls content: every script, template, clip, effect and material above,
+ * plus the scene `buildScene` returns. Hollow Keep is one caller (`main`); tools/valley/build.mjs is the
+ * other, bringing its own level, models, landscape material and Assets folders.
+ */
+export function writeProject({
+  out = OUT, projectName = PROJECT_NAME, sceneId = SCENE_ID, buildScene, example,
+  models: extraModels = [], terrainMaterials = [], folders = {}, textureEntries: extraTextures = [],
+  refs: extraRefs = {}, excludeMaterials = [], hashKinds = [], templates: extraTemplates = [],
+}) {
+  fs.rmSync(out, { recursive: true, force: true })
+  fs.mkdirSync(path.join(out, 'libraries'), { recursive: true })
+  fs.mkdirSync(path.join(out, 'scenes'), { recursive: true })
 
   // Every base before its variants: the editor re-materializes a variant from its base in this order.
   const templates = [
@@ -2004,17 +2014,18 @@ function main() {
     bloodDecalTemplate('blood-drops', 'Blood Drops', BLOOD.drops, BLOOD_TEX.drops, [1, 0.4, 1.6], { minSize: 0.8, maxSize: 1.2 }),
     bloodstainTemplate(),
     ...Object.values(LEVEL),
+    ...extraTemplates,
   ]
-  const scene = keepScene()
+  const scene = buildScene()
 
   const model = clone(mannequin)
   stripClips(model.nodeJson)
   model.rigId = rig.id
 
   const libraries = {
-    models: [model],
-    materials,
-    terrainMaterials: [],
+    models: [model, ...extraModels],
+    materials: materials.filter(m => !excludeMaterials.includes(m.id)),
+    terrainMaterials,
     animationFields: [locomotionField],
     animControllers: [characterController()],
     animations,
@@ -2026,43 +2037,53 @@ function main() {
     aiBrains: [ENEMY_BASE, ...ENEMIES].map(enemyBrainAsset),
   }
   embedSockets([libraries.models, libraries.templates, scene])
-  for (const [name, value] of Object.entries(libraries)) writeJson(path.join(OUT, 'libraries', `${name}.json`), value)
-  writeJson(path.join(OUT, 'libraries', 'inputMap.json'), SOULS_INPUT_MAP)
+  for (const [name, value] of Object.entries(libraries)) writeJson(path.join(out, 'libraries', `${name}.json`), value)
+  writeJson(path.join(out, 'libraries', 'inputMap.json'), SOULS_INPUT_MAP)
   // The scene's asset hashes, as the editor records them on save: without them every template reads as
   // changed when the scene opens and every placed copy is rebuilt (fresh ids, for nothing). Hashed off
   // what was WRITTEN, read back, since that is what the editor will hash.
-  const written = (name) => readJson(path.join(OUT, 'libraries', `${name}.json`))
+  const written = (name) => readJson(path.join(out, 'libraries', `${name}.json`))
   scene.assetHashes = {}
-  for (const [kind, lib] of [['template', 'templates'], ['material', 'materials'], ['model', 'models'], ['script', 'scripts'], ['aiBrain', 'aiBrains']])
+  for (const [kind, lib] of [['template', 'templates'], ['material', 'materials'], ['model', 'models'], ['script', 'scripts'], ['aiBrain', 'aiBrains'], ...hashKinds])
     for (const asset of written(lib)) scene.assetHashes[assetHashKey(kind, asset.id)] = hashAsset(asset)
-  writeJson(path.join(OUT, 'scenes', `${SCENE_ID}.json`), scene)
-  const textureCount = textures.write(OUT)
+  writeJson(path.join(out, 'scenes', `${sceneId}.json`), scene)
+  const textureCount = textures.write(out)
 
-  writeJson(path.join(OUT, 'manifest.json'), {
-    formatVersion: 1, kind: 'project', createdAt: CREATED_AT, projectName: PROJECT_NAME,
-    mainSceneId: SCENE_ID, openSceneId: SCENE_ID,
+  writeJson(path.join(out, 'manifest.json'), {
+    formatVersion: 1, kind: 'project', createdAt: CREATED_AT, projectName,
+    mainSceneId: sceneId, openSceneId: sceneId,
     sceneMetas: [{
-      id: SCENE_ID, name: PROJECT_NAME, updatedAt: CREATED_AT, dimension: '3D',
+      id: sceneId, name: projectName, updatedAt: CREATED_AT, dimension: '3D',
       refs: sceneRefs({
-        materialIds: materials.map(m => m.id), modelIds: [MANNEQUIN_MODEL], templateIds: templates.map(t => t.id),
+        materialIds: libraries.materials.map(m => m.id), modelIds: [MANNEQUIN_MODEL], templateIds: templates.map(t => t.id),
         textureIds: textures.included, scriptIds: scripts.assets.map(s => s.id),
         animationFieldIds: [locomotionField.id], animationIds: rig.animationIds,
         particleSystemIds: particleSystems.map(p => p.id),
         aiBrainIds: libraries.aiBrains.map(b => b.id),
+        ...extraRefs,
       }),
     }],
   })
-  writeJson(path.join(OUT, 'vfs.json'), vfs(libraries, textures.included))
-  writeJson(path.join(OUT, 'example.json'), {
-    name: PROJECT_NAME,
-    description: 'A one-level souls-like: stamina combat, rolls, lock-on, bonfires, a fog gate and a two-phase boss. Placeholder art, real mechanics — see SOULS_DEMO.md to swap in your own.',
-    order: 2,
-  })
+  const projectFolders = Object.fromEntries([...new Set([...Object.keys(FOLDERS), ...Object.keys(folders)])]
+    .map(kind => [kind, { ...FOLDERS[kind], ...folders[kind] }]))
+  writeJson(path.join(out, 'vfs.json'), vfs(libraries, textures.included, { projectName, sceneId, folders: projectFolders, extraTextures }))
+  writeJson(path.join(out, 'example.json'), example)
 
-  const total = walkSize(OUT)
+  return { total: walkSize(out), textureCount, templates: templates.length, materials: libraries.materials.length }
+}
+
+function main() {
+  const { total, textureCount, templates } = writeProject({
+    buildScene: keepScene,
+    example: {
+      name: PROJECT_NAME,
+      description: 'A one-level souls-like: stamina combat, rolls, lock-on, bonfires, a fog gate and a two-phase boss. Placeholder art, real mechanics — see SOULS_DEMO.md to swap in your own.',
+      order: 2,
+    },
+  })
   console.log('Hollow Keep written to editor/public/examples/souls-demo/')
   console.log('  scripts %d · templates %d · clips %d (%d placeholders) · materials %d · effects %d · textures %d',
-    scripts.assets.length, templates.length, animations.length, placeholderClips.length, materials.length, particleSystems.length, textureCount)
+    scripts.assets.length, templates, animations.length, placeholderClips.length, materials.length, particleSystems.length, textureCount)
   console.log('  level pieces %d · torches %d · TOTAL %s', level.length, lights.length, mb(total))
   console.log('\nNext:  npm --prefix editor run examples:list')
 }
@@ -2076,4 +2097,13 @@ function walkSize(dir) {
   return total
 }
 
-main()
+// Run as a script; not when tools/valley/build.mjs imports this file for the souls content.
+if (path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) main()
+
+export {
+  ROOT, CREATED_AT, MANNEQUIN_MODEL, stableId, textures, materials, material, pbr, matJson, MAT,
+  withScript, scripts, sourceNode, clone, prop, group, staticBody, particles, pointLight, VFX, SOUNDS,
+  MUSIC_CUES, soundsGroup, banner, playerNode, bonfireNode, fogGateNode, leverNode, shortcutGate,
+  torchNode, messageNode, linkInstance, LEVEL, placedMessage, placedSpawn, placedPickup, sourceScene,
+  TEMPLATE_SOURCE, vfx, emitter, mod, burst, fade, fxTemplate, particleSystems,
+}

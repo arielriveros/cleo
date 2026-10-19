@@ -37,7 +37,7 @@ function syncPreviewCamera(scene: Scene): void {
 // The restore must NOT be awaited: `screenshotOffscreen` has already drawn the frame by the time it
 // returns its promise, so the grid goes back on immediately. Awaiting first leaves the live viewport
 // without its grid for the whole readback, which on WebGPU is a visible gap.
-async function captureClean(engine: CleoEngine, scene: Scene, size: number = THUMB_SIZE): Promise<string> {
+export async function captureClean(engine: CleoEngine, scene: Scene, size: number = THUMB_SIZE): Promise<string> {
   const prevGrid = engine.renderer.gridVisible;
   engine.renderer.setGridVisible(false);
   let pending: Promise<string>;

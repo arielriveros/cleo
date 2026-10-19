@@ -19,14 +19,14 @@ const bindCache = new WeakMap<Skin, any[]>()
 
 export default function DebugSkeletonOverlay() {
   const { instance, editorMode } = useCleoEngine()
-  const { isPlayMode } = usePlayback()
+  const { isPlayMode, isSimulating } = usePlayback()
   const { visibility } = useDebugVisibility()
 
   // The skeleton-editing modes own the overlay while they are up (AnimationSkeletonTool draws it there
   // regardless of the toggle). `setSkeletonOverlay` is a single global slot, so two writers would
   // overwrite each other every frame.
   const active = !MODE_SKELETON_OWNER[editorMode] &&
-    (isPlayMode ? visibility.skeleton.runtime : visibility.skeleton.editor)
+    (isPlayMode && !isSimulating ? visibility.skeleton.runtime : visibility.skeleton.editor)
 
   useEffect(() => {
     if (!instance || !active) {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ModelNode, CustomMaterial, customSeedTemplate, tryCompileCustom, vulkanUnsupportedReason } from 'cleo'
+import { ModelNode, CustomMaterial, customSeedTemplate, tryCompileCustom, vulkanUnsupportedReason, customWgslHash } from 'cleo'
 import type { CustomBaseType, CustomRenderMode } from 'cleo'
 import { useEventBus } from '../../EventBusContext'
 import { useDocument } from '../../DocumentContext'
@@ -76,6 +76,8 @@ export default function CustomMaterialEditor(props: { node: ModelNode }) {
       // Must be stamped AFTER refreshType: `compiledWgslType` records the hash this WGSL came from.
       mat.compiledWgsl = res.wgsl
       mat.compiledWgslType = res.wgsl ? mat.type : null
+      // What a published game (no translator) checks before trusting the stored WGSL.
+      mat.compiledWgslHash = res.wgsl ? customWgslHash(mat.renderMode, src, mat.uniforms) : null
     }
     setCompiledSource(src)
     eventEmitter.emit('SCENE_CHANGED')

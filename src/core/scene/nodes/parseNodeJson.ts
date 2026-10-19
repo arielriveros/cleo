@@ -22,6 +22,7 @@ import { SoundNode } from "./soundNode";
 import { DecalNode } from "./decalNode";
 import { ParticleSystemNode } from "./particleSystemNode";
 import { ForceFieldNode } from "./forceFieldNode";
+import { WaterVolumeNode } from "./waterVolumeNode";
 import { UIRootNode } from "./ui/uiRoot";
 import { UIPanelNode, UIStackNode, UISpacerNode } from "./ui/uiContainers";
 import { UITextNode, UIImageNode } from "./ui/uiContent";
@@ -58,6 +59,7 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'decal': DecalNode.parse(parent, json); break;
     case 'particleSystem': ParticleSystemNode.parse(parent, json); break;
     case 'forceField': ForceFieldNode.parse(parent, json); break;
+    case 'waterVolume': WaterVolumeNode.parse(parent, json); break;
     case 'uiRoot': UIRootNode.parse(parent, json); break;
     case 'uiPanel': UIPanelNode.parse(parent, json); break;
     case 'uiText': UITextNode.parse(parent, json); break;

@@ -65,6 +65,12 @@ export default class SoulsLockOnNode extends CameraRigNode {
     this._freePitchMax = this.pitchMax
     this.aimMode = 'orbit'
     this._showReticle(null)
+    // Start behind the player, whichever way the level placed them: the orbit's yaw is a world angle
+    // and does not follow the player's own rotation.
+    if (this._player) {
+      const f = this._player.worldForward
+      this.yaw = Math.atan2(f[0], f[2]) * 180 / Math.PI
+    }
   }
 
   onUpdate(delta: number) {

@@ -11,7 +11,7 @@ type NodeType =
   | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite'
   | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'lodGroup'
   | 'cameraRig' | 'sound' | 'character' | 'controller' | 'navMesh' | 'decal'
-  | 'particleSystem' | 'forceField'
+  | 'particleSystem' | 'forceField' | 'waterVolume'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 ```
@@ -493,6 +493,25 @@ A volume that pushes particles of emitters with the Force Fields module. Up to 1
 Properties: `kind` (`'directional' | 'radial' | 'vortex' | 'turbulence' | 'drag'`), `shape`
 (`'global' | 'sphere' | 'box'`), `strength`, `radius`, `extents` (box half extents), `falloff`
 (0..1), `frequency` (turbulence), `enabled`. Direction and vortex axis are the node's local +Y.
+
+### WaterVolumeNode — `'waterVolume'` *(unreleased)*
+
+A body of water: an axis-aligned box (the node's rotation is ignored, scale multiplies `size`) whose
+**top face is the water surface**. Every dynamic physics body inside is buoyed by Archimedes' principle —
+its colliders are sampled, and each submerged sample is pushed up by the weight of the water it
+displaces, at that point — so whether a body floats, and how low it rides, follows from its **mass**
+against its collider volume, and a tipped body rights itself. Submerged bodies also get linear and
+angular drag. Character bodies are skipped unless `affectCharacters` (a capsule is mostly air).
+
+Properties: `size` (full extents, metres), `density` (kg/m³, default 1000), `linearDrag`,
+`angularDrag` (per second at full submersion), `waveAmplitude` / `waveFrequency` (a swell that makes
+floaters bob), `affectCharacters`, `surfaceNodeId`, `splashTemplate`, `enabled`. Helpers:
+`worldBox()`, `surfaceHeightAt(x, z, t)`, `contains(p)`, `depthAt(p)`.
+
+In play it also disturbs its surface: if the `surfaceNodeId` model's custom material declares vec4
+uniforms `ripple0`..`ripple11`, they are filled each frame with expanding rings (`[x, z, startTime,
+strength]`, startTime on `u_time`'s clock) from characters wading and bodies floating or splashing in;
+and `splashTemplate`, when set, is instantiated at the surface where something enters or wades.
 
 ---
 

@@ -233,6 +233,12 @@ export function registerFoliageSourceResolver(fn: FoliageSourceResolver | null):
  * A rule that still carries embedded `models` (anything saved before this, and the shipped example
  * projects) is left exactly as it is — that is the legacy read path, and it costs nothing to keep.
  */
+/** The prototype geometry of a mesh rule (rebuilt from its model asset if a save stripped it); [] for a texture rule. */
+export function foliageRuleModels(rule: any): any[] {
+  resolveFoliageRuleGeometry(rule)
+  return rule?.models?.length ? rule.models : rule?.model ? [rule.model] : []
+}
+
 export function resolveFoliageRuleGeometry(rule: any): any {
   if (!rule || rule.kind !== 'mesh') return rule
   const modelId = rule.modelId ?? rule.meshId

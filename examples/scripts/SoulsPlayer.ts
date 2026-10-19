@@ -88,6 +88,8 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
   // ----- movement -------------------------------------------------------------------------------
   public jogSpeed: number = 3.8
+  /** Shown once on wading in: water slows you and stops rolls and sprints. */
+  public waterNotice: string = "Can't roll or sprint in water"
   public sprintSpeed: number = 5.8
   /** Throttle while locked on: strafing is slower than running. */
   public lockedSpeedScale: number = 0.8
@@ -400,6 +402,15 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
   onUpdate(delta: number) {
     const intent = this.drive()
+    try {
+      this._frame(intent, delta)
+    } finally {
+      this.applyWater(intent)
+      this.limitClimb(intent)
+    }
+  }
+
+  private _frame(intent: any, delta: number): void {
     this._stateTime += delta
     this._bufferAge += delta
     this._sinceSpend += delta
@@ -452,7 +463,8 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     const moving = Math.hypot(intent.move[0], intent.move[1]) > 0.15
 
     // Sprint: Roll HELD past the threshold while moving, with stamina to burn.
-    const holdSprint = this._rollHeld >= this.sprintHoldSeconds && moving
+    // Not while wading: water slows you and will not let you sprint or roll (see onEnterWater).
+    const holdSprint = this._rollHeld >= this.sprintHoldSeconds && moving && !this.inWater
     if (this.stamina <= 0) this._sprintLocked = true
     if (this._sprintLocked && this.stamina >= this.exhaustThreshold) this._sprintLocked = false
     this.isSprinting = holdSprint && !this._sprintLocked
@@ -596,6 +608,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
   private _startRoll(intent: any): void {
     if (this.stamina <= 0) return
+    if (this.inWater) { this._consumeBuffer(); return }
     this._consumeBuffer()
     const dir = moveWorldDirection([0, 0, 0] as any, intent)
     const len = Math.hypot(dir[0], dir[2])
@@ -734,7 +747,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     if (this._rollHeld >= 0 && Input.pressed('Roll')) this._rollHeld = Input.heldSeconds('Roll')
     if (this.isSprinting) this._sprintedThisHold = true
     if (Input.released('Roll') && this._rollHeld >= 0) {
-      if (!this._sprintedThisHold) this._buffer('roll')
+      if (!this._sprintedThisHold && !this.inWater) this._buffer('roll')
       this._rollHeld = -1
     }
   }
@@ -783,13 +796,22 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
    * authored as each interactable's `trigger` volume — no distance is measured in script.
    */
   onTriggerEnter(other: Node) {
+    super.onTriggerEnter(other)   // water zones (SoulsCharacter)
     if (other && (other as any).interact && !this._nearby.includes(other)) this._nearby.push(other)
     ;(this._gm as any)?.onPlayerEnteredZone?.(other)
   }
 
   onTriggerExit(other: Node) {
+    super.onTriggerExit(other)
     this._nearby = this._nearby.filter(n => n !== other)
     ;(this._gm as any)?.onPlayerLeftZone?.(other)
+  }
+
+  /** Wading: no rolling and no sprinting in water — say so once, on the way in. */
+  protected onEnterWater(): void {
+    if (this._bufferAction === 'roll') this._bufferAction = ''
+    this.isSprinting = false
+    ;(this._gm as any)?.notice?.(this.waterNotice)
   }
 
   /** The interactables in range right now, nearest first (for tests and the HUD). */

@@ -314,6 +314,34 @@ vec4 fragment() {
         expect(wgsl).toContain('sampler_comparison');
     });
 
+    // The opaque scene behind a TRANSPARENT forward material: its depth (a DEPTH texture on WebGPU, which
+    // `retypeDepthTextures` must retype) and its colour, read through the documented helpers.
+    it('translates the scene helpers a transparent material refracts with', () => {
+        const body = `
+vec4 fragment() {
+    vec2 uv = cleoScreenUV();
+    float thickness = cleoHasScene() ? cleoSceneViewDepth(uv) - cleoFragViewDepth() : 1.0;
+    vec3 behind = cleoSceneColor(uv + vec2(0.01));
+    return vec4(behind * exp(-thickness), smoothstep(0.0, 0.2, thickness));
+}
+`;
+        const es = assembleCustomFragment('forward', body, []);
+        for (const name of ['u_sceneDepth', 'u_sceneColor', 'u_resolution', 'u_depthParams'])
+            expect(es, name).toContain(name);
+        const wgsl = glslToWgsl(assembleCustomFragment('forward', body, [], 'vulkan'), 'fragment');
+        expect(wgsl).toContain('u_sceneDepth_t');
+        expect(wgsl).toContain('u_sceneColor_t');
+    });
+
+    // The Valley example's pond water (tools/valley/water.glsl): the one shipped material that uses every
+    // scene helper, with the exact uniforms it ships with.
+    it('translates the Valley water material', async () => {
+        const { WATER_SOURCE, WATER_UNIFORMS } = await import('../tools/valley/water.mjs');
+        const wgsl = glslToWgsl(assembleCustomFragment('forward', WATER_SOURCE, WATER_UNIFORMS, 'vulkan'), 'fragment');
+        expect(wgsl).toContain('@fragment');
+        expect(wgsl).toContain('u_normalMap_t');
+    });
+
     // Every SEED template, through naga. These are the scaffolds a new custom material starts from, so
     // a broken one does not fail a build — it hands the author a magenta material and a compile error
     // the moment they create it. Nothing else in the suite compiles them, and phase 4 edited FWD_PBR.

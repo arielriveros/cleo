@@ -110,12 +110,34 @@ refreshType(): void
 get wgslIsCurrent: boolean
 ```
 
-Setting a uniform from script is how you animate a custom shader:
+Setting a uniform from script is how you animate a custom shader. Values are stored under the uniform's
+**bare** name (the shader sees it as `u_dissolve`):
 
 ```ts
 const custom = mesh.model.material as CustomMaterial
-custom.properties.set('u_dissolve', this.dissolveAmount)
+custom.properties.set('dissolve', this.dissolveAmount)
 ```
+
+### Seeing the scene behind a transparent material
+
+A **transparent forward** material (`config.transparent: true`) can read the opaque scene behind it,
+which is what refraction, water depth and soft intersections need:
+
+```glsl
+vec2  cleoScreenUV()               // this fragment's uv in the screen-sized scene buffers
+bool  cleoHasScene()               // true while the buffers below hold this frame's scene
+float cleoSceneViewDepth(vec2 uv)  // view depth of the opaque scene there (the sky reads as far)
+float cleoFragViewDepth()          // view depth of this fragment — subtract for the thickness between
+vec3  cleoSceneColor(vec2 uv)      // the opaque scene's colour there, linear HDR
+```
+
+The colour is copied only on frames where a visible transparent material's source names
+`cleoSceneColor` / `u_sceneColor`. An opaque material has no such snapshot (`cleoHasScene()` is
+false). `tools/valley/water.glsl` is a complete example.
+
+On WebGPU, a published game has no GLSL translator: a custom material renders from the WGSL saved
+with it (`compiledWgsl`), which the material inspector writes when it compiles the shader, and which is
+ignored if the source or the engine prelude changed since (`compiledWgslHash`).
 
 > A custom material's `type` is a **content hash of its shader source**, so it changes on every
 > edit. That is why post-chain entries reference screen materials **by index**

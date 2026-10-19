@@ -32,5 +32,9 @@ const P = (props: React.SVGProps<SVGSVGElement>) => (
   <svg viewBox='0 0 24 24' width='13' height='13' fill='currentColor' stroke='none' {...props} />
 );
 export const PlayGlyph = () => (<P><path d='M7 4.5v15l13-7.5Z' /></P>);
-export const PauseGlyph = () => (<P><rect x='6' y='4.5' width='4.5' height='15' rx='1' /><rect x='13.5' y='4.5' width='4.5' height='15' rx='1' /></P>);
+// Simulate: the play mark inside an orbit, the world running on its own with no one at the controls.
+export const SimulateGlyph = () => (
+  <P><path d='M10 8.2v7.6l6.4-3.8Z' /><path fillRule='evenodd' d='M12 2.5a9.5 9.5 0 1 0 0 19 9.5 9.5 0 0 0 0-19Zm0 2a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15Z' /></P>
+);
+export const PauseGlyph =() => (<P><rect x='6' y='4.5' width='4.5' height='15' rx='1' /><rect x='13.5' y='4.5' width='4.5' height='15' rx='1' /></P>);
 export const StopGlyph = () => (<P><rect x='5.5' y='5.5' width='13' height='13' rx='1.5' /></P>);

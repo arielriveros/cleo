@@ -8,7 +8,7 @@
 
 
 export type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'wind' | 'lodGroup' | 'cameraRig' | 'sound' | 'character' | 'controller' | 'navMesh' | 'decal'
-  | 'particleSystem' | 'forceField'
+  | 'particleSystem' | 'forceField' | 'waterVolume'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 

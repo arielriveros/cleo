@@ -976,7 +976,10 @@ export interface FoliageCollision {
     radius?: number;
     /** Cylinder/box height. */
     height?: number;
-    /** Box footprint (defaults to `radius * 2` when absent). */
+    /**
+     * Box footprint as HALF-widths: the box reaches this far each side of centre (defaulting to the
+     * radius). The editor shows and edits them as full sizes; `foliageColliderPose` is the one reader.
+     */
     width?: number;
     depth?: number;
     /** Shape centre above the instance base. Defaults to half the height (or the radius for a sphere). */
@@ -1515,6 +1518,13 @@ export class CustomMaterial extends Material {
      */
     public compiledWgslType: string | null = null;
 
+    /**
+     * `customWgslHash` of the Vulkan GLSL `compiledWgsl` was translated from. What a published game —
+     * which has no translator — checks before using the stored WGSL, because it also catches an engine
+     * prelude that changed under an unchanged material.
+     */
+    public compiledWgslHash: string | null = null;
+
     /** Create a bare custom material. Callers (the editor) seed `fragmentSource`/`uniforms` from customShaders' templates, then `refreshType()`. */
     public static Create(baseType: CustomBaseType, renderMode: CustomRenderMode = 'forward', config?: MaterialConfig): CustomMaterial {
         const m = new CustomMaterial(config);
@@ -1548,6 +1558,7 @@ export class CustomMaterial extends Material {
             customMaterial: true,
             compiledWgsl: this.compiledWgsl,
             compiledWgslType: this.compiledWgslType,
+            compiledWgslHash: this.compiledWgslHash,
             renderMode: this.renderMode,
             baseType: this.baseType,
             fragmentSource: this.fragmentSource,
@@ -1581,6 +1592,7 @@ export class CustomMaterial extends Material {
             : [];
         cm.compiledWgsl = typeof m.compiledWgsl === 'string' ? m.compiledWgsl : null;
         cm.compiledWgslType = typeof m.compiledWgslType === 'string' ? m.compiledWgslType : null;
+        cm.compiledWgslHash = typeof m.compiledWgslHash === 'string' ? m.compiledWgslHash : null;
         for (const [k, v] of Object.entries(m.properties ?? {})) cm.properties.set(k, toPlainValue(v));
         for (const [k, v] of Object.entries(m.textures ?? {})) if (v) cm.textures.set(k, v as string);
         cm.refreshType();

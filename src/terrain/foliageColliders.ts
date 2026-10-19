@@ -1,4 +1,4 @@
-import { Body, World, Vec3, Quaternion, Material as PhysicsMaterial } from 'cannon-es';
+import { Body, World, Vec3, Material as PhysicsMaterial } from 'cannon-es';
 import { vec3 } from 'gl-matrix';
 import { FoliageCollision } from '../graphics/material';
 import { Shape } from '../physics/shape';
@@ -169,25 +169,45 @@ function layerCollisionFor(layers: FoliageLayer[], key: string): FoliageCollisio
     return null;
 }
 
-function buildBody(sig: string, col: FoliageCollision | null, scale: number, material: PhysicsMaterial | null): Body | null {
-    if (!col) return null;
-    const body = new Body({ mass: 0, material: material ?? undefined, type: Body.STATIC });
+/**
+ * The world-space shape of one instance's collider: what the physics body is built from, and what the
+ * editor draws (the collider preview and the viewport overlay) — one function, so the three cannot
+ * disagree. `size` is FULL extents (x, y, z); a sphere's is its diameter on every axis. `offsetY` lifts
+ * the shape's centre above the instance base.
+ *
+ * `FoliageCollision.width`/`depth` are HALF-widths (a box defaults to the radius each side of centre),
+ * which is how every saved collider has always been read; only the editor shows them as full sizes.
+ */
+export function foliageColliderPose(col: FoliageCollision, scale: number):
+    { shape: FoliageCollision['shape']; size: [number, number, number]; offsetY: number } {
     const r = (col.radius ?? 0.5) * scale;
     const h = (col.height ?? 2) * scale;
     const offsetY = (col.offsetY ?? (col.shape === 'sphere' ? (col.radius ?? 0.5) : (col.height ?? 2) / 2)) * scale;
-
-    if (col.shape === 'sphere') {
-        body.addShape(Shape.Sphere(r).cShape, new Vec3(0, offsetY, 0));
-    } else if (col.shape === 'box') {
+    if (col.shape === 'sphere') return { shape: 'sphere', size: [r * 2, r * 2, r * 2], offsetY };
+    if (col.shape === 'box') {
         const w = (col.width ?? col.radius ?? 0.5) * 2 * scale;
         const d = (col.depth ?? col.radius ?? 0.5) * 2 * scale;
-        body.addShape(Shape.Box(w, h, d).cShape, new Vec3(0, offsetY, 0));
-    } else {
-        // cannon's Cylinder is Z-aligned; stand it up along Y like every other trunk-shaped collider.
-        const upright = new Quaternion();
-        upright.setFromEuler(-Math.PI / 2, 0, 0);
-        body.addShape(Shape.Cylinder(r, r, h, 8).cShape, new Vec3(0, offsetY, 0), upright);
+        return { shape: 'box', size: [w, h, d], offsetY };
     }
+    return { shape: 'cylinder', size: [r * 2, h, r * 2], offsetY };
+}
+
+/** The static body for one instance's collider (exported for tests). */
+export function buildFoliageColliderBody(col: FoliageCollision, scale: number, material: PhysicsMaterial | null = null): Body {
+    const body = new Body({ mass: 0, material: material ?? undefined, type: Body.STATIC });
+    const pose = foliageColliderPose(col, scale);
+    const at = new Vec3(0, pose.offsetY, 0);
+    if (pose.shape === 'sphere') body.addShape(Shape.Sphere(pose.size[0] / 2).cShape, at);
+    else if (pose.shape === 'box') body.addShape(Shape.Box(pose.size[0], pose.size[1], pose.size[2]).cShape, at);
+    // cannon-es's Cylinder is already Y-up (its vertices sit at ±height/2 on Y), like the node colliders
+    // in physics/shape.ts. The -90° X turn this used to add laid every foliage trunk on its side.
+    else body.addShape(Shape.Cylinder(pose.size[0] / 2, pose.size[0] / 2, pose.size[1], 8).cShape, at);
+    return body;
+}
+
+function buildBody(sig: string, col: FoliageCollision | null, scale: number, material: PhysicsMaterial | null): Body | null {
+    if (!col) return null;
+    const body = buildFoliageColliderBody(col, scale, material);
     (body as any).__foliageSig = sig;
     return body;
 }

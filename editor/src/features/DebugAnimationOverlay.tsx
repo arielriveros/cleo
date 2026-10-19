@@ -24,10 +24,10 @@ function animatorsIn(scene: any): { id: string; name: string; animator: Animator
 
 export default function DebugAnimationOverlay() {
   const { instance, editorMode } = useCleoEngine()
-  const { isPlayMode } = usePlayback()
+  const { isPlayMode, isSimulating } = usePlayback()
   const { visibility } = useDebugVisibility()
 
-  const active = isPlayMode ? visibility.animation.runtime : visibility.animation.editor
+  const active = isPlayMode && !isSimulating ? visibility.animation.runtime : visibility.animation.editor
 
   const [targets, setTargets] = useState<{ id: string; name: string; animator: Animator }[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)

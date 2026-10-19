@@ -14,6 +14,7 @@ import { LightProbeNode } from "./nodes/lightProbeNode";
 import { DecalNode } from "./nodes/decalNode";
 import { ParticleSystemNode } from "./nodes/particleSystemNode";
 import { ForceFieldNode } from "./nodes/forceFieldNode";
+import { WaterVolumeNode } from "./nodes/waterVolumeNode";
 import { SkyboxNode } from "./nodes/skyboxNode";
 import { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
 import { SkyAtmosphereNode } from "./nodes/skyAtmosphereNode";
@@ -106,6 +107,7 @@ export class Scene {
     private _decals: Set<DecalNode> = new Set();
     private _particleSystems: Set<ParticleSystemNode> = new Set();
     private _forceFields: Set<ForceFieldNode> = new Set();
+    private _waterVolumes: Set<WaterVolumeNode> = new Set();
     private _sounds: Set<SoundNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
     private _uiRoots: Set<UIRootNode> = new Set();
@@ -737,6 +739,7 @@ export class Scene {
         this._decals = new Set();
         this._particleSystems = new Set();
         this._forceFields = new Set();
+        this._waterVolumes = new Set();
         this._sounds = new Set();
         this._lightProbes = new Set();
         this._skybox = null;
@@ -775,6 +778,8 @@ export class Scene {
                 this._particleSystems.add(node);
             if (node instanceof ForceFieldNode)
                 this._forceFields.add(node);
+            if (node instanceof WaterVolumeNode)
+                this._waterVolumes.add(node);
             if (node instanceof SoundNode)
                 this._sounds.add(node);
             if (node instanceof LightProbeNode)
@@ -1047,6 +1052,13 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._forceFields;
+    }
+
+    /** Every water volume in the scene: what the physics step buoys bodies with. */
+    public get waterVolumes(): Set<WaterVolumeNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._waterVolumes;
     }
 
     /** Every sound emitter in the scene. Holds only SPAWNED nodes, so a despawn silences one for free. */

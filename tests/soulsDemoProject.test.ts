@@ -16,8 +16,26 @@ import { materializeVariant } from '../editor/src/utils/templateVariants';
 // It is also the safety net for the ASSET SWAP the example exists for (SOULS_DEMO.md): after replacing
 // a clip, re-running the generator and this suite says whether every reference still resolves.
 
-const PROJECT = join(__dirname, '..', 'editor', 'public', 'examples', 'souls-demo');
 const SCRIPTS = join(__dirname, '..', 'examples', 'scripts');
+const allNodes = (root: any): any[] => {
+    const out: any[] = [];
+    const walk = (n: any) => { out.push(n); for (const c of n.children ?? []) walk(c); };
+    walk(root);
+    return out;
+};
+const scriptSources = () => readdirSync(SCRIPTS).filter(f => f.startsWith('Souls') && f.endsWith('.ts'))
+    .map(f => readFileSync(join(SCRIPTS, f), 'utf8'));
+
+// Two projects are built on this content: Hollow Keep itself, and the Valley (tools/valley/build.mjs),
+// which places the same templates on a landscape. Every join holds in both; what is specific to the
+// keep's layout (its walls, its torch count, its folder tree) is checked for the keep alone.
+const PROJECTS = [
+    { slug: 'souls-demo', title: 'Hollow Keep', keep: true },
+    { slug: 'valley', title: 'Valley', keep: false },
+];
+
+for (const { slug, title, keep } of PROJECTS) {
+const PROJECT = join(__dirname, '..', 'editor', 'public', 'examples', slug);
 const present = existsSync(join(PROJECT, 'manifest.json'));
 
 // Memoised: templates.json alone is ~23 MB, and re-parsing it per assertion times tests out under a
@@ -28,16 +46,8 @@ const read = (...parts: string[]) => {
     if (!cache.has(key)) cache.set(key, JSON.parse(readFileSync(join(PROJECT, ...parts), 'utf8')));
     return cache.get(key);
 };
-const allNodes = (root: any): any[] => {
-    const out: any[] = [];
-    const walk = (n: any) => { out.push(n); for (const c of n.children ?? []) walk(c); };
-    walk(root);
-    return out;
-};
-const scriptSources = () => readdirSync(SCRIPTS).filter(f => f.startsWith('Souls') && f.endsWith('.ts'))
-    .map(f => readFileSync(join(SCRIPTS, f), 'utf8'));
 
-describe.skipIf(!present)('the Hollow Keep example project', () => {
+describe.skipIf(!present)(`the ${title} example project`, () => {
     const manifest = () => read('manifest.json');
     const scene = () => read('scenes', `${manifest().mainSceneId}.json`);
     const library = (name: string) => read('libraries', `${name}.json`);
@@ -61,7 +71,7 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
             expect(asset, `${n.name} links a missing script`).toBeDefined();
             expect(n.script).toBe(asset.source);
         }
-        const names = readdirSync(SCRIPTS).filter(f => f.startsWith('Souls'));
+        const names = readdirSync(SCRIPTS).filter(f => /^(Souls|Valley)/.test(f));
         for (const asset of library('scripts'))
             expect(names.some(f => readFileSync(join(SCRIPTS, f), 'utf8') === asset.source), `${asset.name} is stale — re-run the generator`).toBe(true);
     });
@@ -477,7 +487,7 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
         expect(arena.trigger.shapes[0].type).toBe('box');
     });
 
-    it('marks walls, pillars and gates as swing blockers, and no floor', () => {
+    it.skipIf(!keep)('marks walls, pillars and gates as swing blockers, and no floor', () => {
         const inScene = allNodes(scene().scene);
         const blocks = (n: any) => n.variables?.blocksSwings?.value === true;
         expect(inScene.filter(n => /Wall/.test(n.name) && n.body).every(blocks)).toBe(true);
@@ -549,7 +559,7 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
         expect(new Set(paths).size).toBe(paths.length);
         const ids = new Set<string>([
             manifest().mainSceneId,
-            ...['scripts', 'templates', 'models', 'materials', 'animationFields', 'animControllers', 'animations', 'rigs', 'particleSystems', 'aiBrains']
+            ...['scripts', 'templates', 'models', 'materials', 'animationFields', 'animControllers', 'animations', 'rigs', 'particleSystems', 'aiBrains', 'terrainMaterials']
                 .flatMap(l => library(l).map((a: any) => a.id)),
         ]);
         // Textures have no library: the editor re-derives a texture record and its source image (same id)
@@ -558,7 +568,7 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
         for (const e of vfs.entries) {
             if (e.kind === 'image') {
                 expect(textureIds.has(e.assetId), e.path).toBe(true);
-                expect(e.path.endsWith('.png'), e.path).toBe(true);
+                expect(/\.(png|jpg)$/.test(e.path), e.path).toBe(true);
                 continue;
             }
             expect((e.kind === 'texture' ? textureIds : ids).has(e.assetId), e.path).toBe(true);
@@ -569,7 +579,7 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
 
     // The tree is grouped by FEATURE: each character, weapon, prop and effect is a folder holding what it
     // is made of, in type subfolders. Nothing sits at the root, and no top-level folder is an asset type.
-    it('files assets by feature, with each one beside what it belongs to', () => {
+    it.skipIf(!keep)('files assets by feature, with each one beside what it belongs to', () => {
         const vfs = read('vfs.json');
         const at = (kind: string, name: string) => vfs.entries.find((e: any) => e.kind === kind && e.path.split('/').pop().startsWith(name + '.'))?.path;
         for (const e of vfs.entries) expect(e.path.split('/').length, e.path).toBeGreaterThan(2);
@@ -608,7 +618,7 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
     it('places the player, torches and interactables as linked template copies', () => {
         const count = (name: string) => instances().filter(n => templateOf(n)?.name === name).length;
         expect(count('Player')).toBe(1);
-        expect(count('Torch')).toBe(19);
+        expect(count('Torch')).toBe(keep ? 19 : 4);
         expect(count('Message')).toBe(7);
         expect(count('Pickup')).toBe(4);
         for (const name of ['Bonfire', 'Lever', 'Gate', 'Fog Gate']) expect(count(name), name).toBe(1);
@@ -650,3 +660,4 @@ describe.skipIf(!present)('the Hollow Keep example project', () => {
         for (const t of templates()) expect(hashes[assetHashKey('template', t.id)], t.name).toBe(hashAsset(t));
     });
 });
+}

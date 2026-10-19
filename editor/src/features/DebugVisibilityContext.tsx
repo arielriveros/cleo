@@ -19,6 +19,7 @@ export type DebugCategory =
   | 'skeleton'
   | 'animation'
   | 'navMesh'
+  | 'foliageColliders'
   | 'effects'
   | 'particles'
   | 'gameUi'
@@ -55,6 +56,9 @@ export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
   // Worth having at runtime as well as in the editor: a bake can look right standing still and be
   // wrong the moment an agent tries to cross a seam, and the overlay is how you see which.
   { key: 'navMesh', label: 'Navigation mesh', runtimeAvailable: true },
+  // The colliders foliage props get in Play, drawn on the scattered instances near the camera — the same
+  // disc and cap the physics uses — so a trunk collider can be checked against the trunks it stands on.
+  { key: 'foliageColliders', label: 'Foliage colliders', runtimeAvailable: true },
   { key: 'effects', label: 'Effect icons', runtimeAvailable: true },
   // Not an overlay: whether particle systems SIMULATE while authoring, like Niagara's realtime toggle.
   // Editor only — a playing game always simulates them.
@@ -69,7 +73,7 @@ export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
 
 // These categories default to Editor-on; every other overlay defaults off and is opted into. Runtime is
 // off for all.
-const EDITOR_ON_BY_DEFAULT = new Set<DebugCategory>(['colliders', 'triggers', 'lights', 'cameras', 'probes', 'decals', 'sounds', 'effects', 'particles', 'grid']);
+const EDITOR_ON_BY_DEFAULT = new Set<DebugCategory>(['colliders', 'triggers', 'lights', 'cameras', 'probes', 'decals', 'sounds', 'foliageColliders', 'effects', 'particles', 'grid']);
 
 export function defaultDebugVisibility(): DebugVisibility {
   const out = {} as DebugVisibility;

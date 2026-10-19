@@ -134,6 +134,10 @@ export const DecalIcon = () => (
 export const ParticlesIcon = () => (
   <S><circle cx="12" cy="19.5" r="1.6" fill="currentColor" stroke="none" /><circle cx="7" cy="11" r="1.5" /><circle cx="12" cy="7" r="1.9" /><circle cx="17" cy="10.5" r="1.4" /><circle cx="9.5" cy="4" r="0.9" fill="currentColor" stroke="none" /><circle cx="15.5" cy="4.5" r="1" fill="currentColor" stroke="none" /><path d="M12 17.5 7.8 12.6M12 17.5V9.2M12 17.5l4.3-5.5" strokeDasharray="1.6 1.6" /></S>
 );
+/** Water volume: a drop over two waves. */
+export const WaterVolumeIcon = () => (
+  <S><path d="M3 15c2 0 2-1.5 4.5-1.5S9.5 15 12 15s2-1.5 4.5-1.5S18.5 15 21 15" /><path d="M3 19.5c2 0 2-1.5 4.5-1.5S9.5 19.5 12 19.5s2-1.5 4.5-1.5 2 1.5 4.5 1.5" /><path d="M12 3.5c2.3 2.8 3.6 4.9 3.6 6.4a3.6 3.6 0 0 1-7.2 0c0-1.5 1.3-3.6 3.6-6.4Z" /></S>
+);
 /** Force field: wind lines bending around a centre. */
 export const ForceFieldIcon = () => (
   <S><path d="M3 8h10.5a2.5 2.5 0 1 0-2.5-2.5" /><path d="M3 12h15a3 3 0 1 1-3 3" /><path d="M3 16h6" /></S>

@@ -7,7 +7,10 @@ import { createContext, useContext } from 'react';
  */
 export interface PlaybackContextValue {
   isPlayMode: boolean;
+  /** A Simulate session (isPlayMode is true as well): the play scene, seen through the editor camera. */
+  isSimulating: boolean;
   startPlay: () => void;
+  startSimulate: () => void;
   stopPlay: () => void;
   pausePlay: () => void;
 }

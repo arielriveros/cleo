@@ -15,6 +15,7 @@ import { uniformBlocksOf } from '../rhi/webgpu/wgslReflect';
 // arithmetic is authored once. See tools/wgslTranslate.mjs `extractGlslChunk`.
 const SHADOWS_SRC = ShadowsChunk.glslChunk!;
 import type { CustomMaterial, CustomRenderMode, CustomUniform, CustomBaseType } from '../material';
+import { cyrb53 } from '../material';
 import type { ShaderResource } from '../rhi/types';
 
 // -----------------------------------------------------------------------------------------------
@@ -113,6 +114,12 @@ vec3 getNormal() { return normalize(TBN[2]); }
 // are both generated from this, so they cannot disagree. The deferred interface declares none.
 const FORWARD_ENGINE_SAMPLERS: SamplerDecl[] = [
     { name: 'u_envMap', type: 'samplerCube' },
+    // The opaque scene behind a TRANSPARENT material: its depth (the snapshot `_copySceneDepth` takes
+    // before the transparent queue) and its colour (copied at the same point, only when a visible
+    // material asks for it). Read them through the cleoScene* helpers, never directly — see
+    // FORWARD_SCENE_BODY. An opaque material sees last frame's copy, or a 1x1 fallback.
+    { name: 'u_sceneDepth', type: 'sampler2D', depth: true, comment: 'opaque scene depth (transparent materials)' },
+    { name: 'u_sceneColor', type: 'sampler2D', comment: 'opaque scene colour, linear HDR (transparent materials)' },
 ];
 
 /**
@@ -223,6 +230,8 @@ const LIGHTING_UNIFORMS: ValueDecl[] = [
     { name: 'u_dirLight', type: 'DirectionalLight' },
     { name: 'u_useEnvMap', type: 'bool' },
     { name: 'u_envMapLinear', type: 'bool', comment: 'true when u_envMap is a linear HDR probe cube (skip the sRGB decode)' },
+    { name: 'u_resolution', type: 'vec2', comment: 'render target size in pixels' },
+    { name: 'u_depthParams', type: 'vec4', comment: 'x near, y far, z 1 = orthographic, w 1 = u_sceneDepth is live' },
     // NOTE: the cluster addressing uniforms are NOT listed here. They arrive as their own block, in
     // the generated library below, byte-identical to the engine's by construction rather than by a
     // hand-kept list — which is what the old `u_pointLights` array size was, and what it cost.
@@ -259,6 +268,42 @@ void accumulateLight(vec3 N, vec3 V, vec3 albedo, float metallic, float roughnes
 }
 `;
 
+/**
+ * What a transparent forward material can know about the opaque scene behind it — refraction, water
+ * depth, soft intersections. The helpers exist so a material never handles a backend convention:
+ *
+ *  - `cleoScreenUV()` is `gl_FragCoord / resolution`, which indexes a screen-sized engine target
+ *    correctly on BOTH backends: GL counts rows from the bottom for the fragment AND the texture,
+ *    WebGPU from the top for both.
+ *  - Depth is linearized exactly as `chunks/depthLinearize.wgsl` and the particle soft fade do:
+ *    `d * 2 - 1` is GL-convention NDC z on both backends (WebGPU rasterizes with a [0, 1] clip remap
+ *    that lands on the same stored value).
+ *
+ * Distances are view-space depth along the camera axis — the same measure `cleoViewDepth()` gives for
+ * this fragment, so the two subtract to the thickness of whatever lies between.
+ */
+const FORWARD_SCENE_BODY = `
+vec2 cleoScreenUV() { return cleoFragCoord / max(u_resolution, vec2(1.0)); }
+
+/** True when u_sceneDepth / u_sceneColor hold this frame's opaque scene (transparent materials). */
+bool cleoHasScene() { return u_depthParams.w > 0.5; }
+
+/** View-space depth of the opaque scene at a screen uv. The sky reads as the far plane. */
+float cleoSceneViewDepth(vec2 uv) {
+    float d = texture(u_sceneDepth, uv).r;
+    float n = u_depthParams.x, f = u_depthParams.y;
+    if (u_depthParams.z > 0.5) return n + d * (f - n);
+    float z = d * 2.0 - 1.0;
+    return 2.0 * n * f / (f + n - z * (f - n));
+}
+
+/** View-space depth of this fragment (the same measure as cleoSceneViewDepth). */
+float cleoFragViewDepth() { return cleoViewDepth(); }
+
+/** The opaque scene's colour at a screen uv, linear HDR. */
+vec3 cleoSceneColor(vec2 uv) { return texture(u_sceneColor, uv).rgb; }
+`;
+
 /** Forward prelude: the user writes `vec4 fragment()` returning a final linear-HDR colour. */
 const FORWARD_INTERFACE: PreludeInterface = {
     varyings: COMMON_VARYINGS,
@@ -274,7 +319,7 @@ const FORWARD_INTERFACE: PreludeInterface = {
     // POSITIONALLY, so the mismatch is a bind-group error rather than a spare binding nobody reads.
     keepAlive: 'cleoPunctualVisibility(0, 0, fragPos, getNormal(), fragPos)'
              + ' + cleoLightTexel(0).r',
-    body: (dialect) => COMMON_BODY + LIGHTING_BODY(dialect),
+    body: (dialect) => COMMON_BODY + LIGHTING_BODY(dialect) + FORWARD_SCENE_BODY,
 };
 
 const FORWARD_EPILOGUE = `
@@ -647,17 +692,19 @@ export function customShaderResources(mode: CustomRenderMode, uniforms: CustomUn
     if (mode === 'forward') {
         for (const r of ShadowsChunk.resources)
             if (r.group === 3 && (r.kind === 'texture' || r.kind === 'sampler')) out.push(r);
-        // Group 4 is the clustered light data texture, taken from `clusteredLightsChunk.wgsl`'s own
-        // reflection for the same reason group 3 is taken from the shadow chunk's: the engine binds it
-        // by the group number the shader declares, and a hand-written copy would drift.
+        // The clustered light data texture, taken from `clusteredLightsChunk.wgsl`'s own reflection for
+        // the same reason the shadow maps are taken from the shadow chunk's: the engine binds it by the
+        // group and binding the shader declares, and a hand-written copy drifts. It did: this filtered
+        // on `group === 4` after the light grid moved into group 3 (binding 6), so the texture vanished
+        // from every custom pipeline's layout, was never bound, and its sampler defaulted to unit 0 —
+        // the unit `u_envMap`'s CUBE sits on. WebGL2 refuses that draw outright ("two textures of
+        // different types use the same sampler location"), so every lit forward custom material drew
+        // nothing. Matched by name now, whatever group it lives in.
         // Both halves. The engine's own programs declare the texture ALONE — `textureLoad` needs no
         // sampler — but the Vulkan dialect has no combined-sampler type to fetch from, so
         // `vulkanClusterLibrary` splits it into a texture and a sampler and the layout gains an entry.
-        // A custom material's group 4 is therefore two entries where the engine's is one, which is
-        // fine: they are different pipelines with different layouts, and `_textureBindGroup` fills
-        // both from the same single texture.
         for (const r of ClusteredLightsChunk.resources) {
-            if (r.group !== 4 || r.kind !== 'texture') continue;
+            if (r.kind !== 'texture' || r.glslName !== 'u_lightData') continue;
             out.push(r);
             out.push({ group: r.group, binding: r.binding + 1, name: r.name.replace('_texture', '_sampler'),
                        kind: 'sampler', type: 'sampler', glslName: r.glslName });
@@ -989,7 +1036,7 @@ function retypeDepthTextures(wgsl: string, names: readonly string[]): string {
 function webgpuHalf(mat: CustomMaterial, key: string): { wgsl?: string;
         vertexInputs?: readonly { name: string; location: number; type: string }[];
         uniformBlocks?: readonly unknown[] } {
-    if (device.backend === 'webgl2' || !translator) return {};
+    if (device.backend === 'webgl2') return {};
 
     // The engine program whose VERTEX source this material is compiled against. Named per mode:
     // pairing a lit fragment stage with the fullscreen vertex stage draws the mesh as a screen quad.
@@ -999,8 +1046,14 @@ function webgpuHalf(mat: CustomMaterial, key: string): { wgsl?: string;
     const iface = mat.renderMode === 'screen' ? SCREEN_INTERFACE
                 : mat.renderMode === 'deferred' ? DEFERRED_INTERFACE : FORWARD_INTERFACE;
     const vulkan = assembleCustomFragment(mat.renderMode, mat.fragmentSource, mat.uniforms, 'vulkan');
-    const wgsl = retypeDepthTextures(translator(vulkan),
-                                     iface.samplers.filter(s => s.depth).map(s => s.name));
+    // A live translator (the editor) wins. Without one — every published game — the WGSL the material
+    // was saved with is used, but only when it was translated from EXACTLY this Vulkan source: the hash
+    // covers the user's code and the engine prelude alike, so an engine update that moved a binding
+    // invalidates a stored translation instead of binding it wrong.
+    const raw = translator ? translator(vulkan)
+              : mat.compiledWgsl && mat.compiledWgslHash === cyrb53(vulkan) ? mat.compiledWgsl : null;
+    if (!raw) return {};
+    const wgsl = retypeDepthTextures(raw, iface.samplers.filter(s => s.depth).map(s => s.name));
     customWgsl.set(key, { fragment: wgsl, vertex: base.wgsl,
                           vertexEntry: base.entryPoints.vertex ?? 'vs_main' });
     // The fragment stage's blocks, plus the one the VERTEX stage uses.
@@ -1059,6 +1112,14 @@ let translator: WgslTranslator | null = null;
 
 /** Install (or clear, with null) the GLSL -> WGSL translator. Called by the editor once naga is ready. */
 export function setWgslTranslator(next: WgslTranslator | null): void { translator = next; }
+
+/**
+ * The key a stored `compiledWgsl` is valid for: a hash of the Vulkan GLSL it was translated from, so it
+ * changes with the user's source, their uniforms AND the engine prelude. See `webgpuHalf`.
+ */
+export function customWgslHash(renderMode: CustomRenderMode, fragmentSource: string, uniforms: CustomUniform[]): string {
+    return cyrb53(assembleCustomFragment(renderMode, fragmentSource, uniforms, 'vulkan'));
+}
 
 /** Whether a translator is available — false in a published game, and in the editor before naga loads. */
 export function hasWgslTranslator(): boolean { return translator !== null; }

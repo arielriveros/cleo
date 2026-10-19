@@ -44,6 +44,7 @@ import {
   NavMeshNode,
   ParticleSystemNode,
   ForceFieldNode,
+  WaterVolumeNode,
 } from 'cleo'
 import type EventEmitter from '../../utils/eventEmitter'
 import type { ShapeDescription } from '../EngineContext'
@@ -61,7 +62,7 @@ import {
   DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon,
-  SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon,
+  SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon,
 } from './nodeIcons'
 import { createLandscapeNode } from '../../utils/landscapeSlots'
 import { defaultDecalMaterial } from '../../utils/materials'
@@ -359,6 +360,12 @@ export const ADD_ITEMS: AddItem[] = [
     // reusable .vfx.
     id: 'particleSystem', label: 'Particle System', icon: ParticlesIcon, category: 'effects',
     create: async () => new ParticleSystemNode('particles'),
+  },
+  {
+    // A box of water: everything dynamic inside floats by its mass (buoyancy), and what moves through
+    // it ripples and splashes the surface it is pointed at. Placeable: it is a volume.
+    id: 'waterVolume', label: 'Water Volume', icon: WaterVolumeIcon, category: 'environment',
+    create: async () => new WaterVolumeNode('water volume', { size: [10, 2, 10] }),
   },
   {
     id: 'forceField', label: 'Force Field', icon: ForceFieldIcon, category: 'effects',

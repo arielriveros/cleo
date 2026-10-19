@@ -5,7 +5,9 @@ import {
 } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
-import { buildFoliageRuleFromModelAsset } from '../../utils/foliageRules'
+import { buildFoliageRuleFromModelAsset, foliageRuleModels } from '../../utils/foliageRules'
+import { describeCollider, fitColliderToBounds, fitColliderToTrunk } from '../../utils/foliageColliderFit'
+import FoliageColliderModal from './FoliageColliderModal'
 import { cryptoRandomId } from '../../utils/ids'
 import { Button, FileButton, NumberInput, Select, TextInput, Toggle, cn, hintClass, labelClass } from '../../components/ui'
 import { toast } from '../toasts/toastStore'
@@ -64,6 +66,8 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
   // reads it back, which is slow enough to need saying.
   const [bakingRule, setBakingRule] = useState(-1)
   const [, force] = useState(0)
+  // Index of the rule whose collider editor is open.
+  const [colliderRule, setColliderRule] = useState(-1)
   const mat = material
   // `exclude` is the CURRENT list: the parent re-reads it on every change.
   const changed = () => { onChange(); force(x => x + 1) }
@@ -330,31 +334,42 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
                   <div className='flex items-center justify-between'>
                     <span className={label} title='Static collider spawned for nearby instances. Off = walk straight through.'>Collision</span>
                     <Select
-                      className={num}
+                      className='w-24 px-1 py-0.5'
                       value={r.collision?.shape ?? ''}
-                      onChange={e => patchRule(i, {
-                        collision: e.target.value
-                          ? { shape: e.target.value as any, radius: r.collision?.radius ?? 0.4, height: r.collision?.height ?? 2 }
-                          : null,
-                      })}>
+                      onChange={e => {
+                        const shape = e.target.value as '' | 'cylinder' | 'box' | 'sphere'
+                        // A newly picked shape starts fitted to the trunk when there is geometry to fit.
+                        patchRule(i, {
+                          collision: !shape ? null
+                            : fitColliderToTrunk(foliageRuleModels(r), shape)
+                              ?? { shape, radius: r.collision?.radius ?? 0.4, height: r.collision?.height ?? 2 },
+                        })
+                      }}>
                       <option value=''>(none)</option>
                       <option value='cylinder'>Cylinder</option>
                       <option value='box'>Box</option>
                       <option value='sphere'>Sphere</option>
                     </Select>
                   </div>
-                  {r.collision && (
-                    <div className='flex items-center justify-between'>
-                      <span className={label} title='Prototype units — each instance multiplies these by its own random scale.'>Radius / height</span>
-                      <span className='flex gap-1'>
-                        <NumberInput step={0.05} min={0} className={num} value={r.collision.radius ?? 0.4}
-                          onChange={v => patchRule(i, { collision: { ...r.collision!, radius: Math.max(0, v) } })} />
-                        <NumberInput step={0.1} min={0} className={num} value={r.collision.height ?? 2}
-                          disabled={r.collision.shape === 'sphere'}
-                          onChange={v => patchRule(i, { collision: { ...r.collision!, height: Math.max(0, v) } })} />
-                      </span>
+                  {r.collision && <>
+                    <p className={cn(hintClass, 'text-right')} title='Prototype units — each instance multiplies these by its own random scale.'>
+                      {describeCollider(r.collision)}
+                    </p>
+                    <div className='flex gap-1 justify-end'>
+                      {r.kind === 'mesh' && <>
+                        <Button size='sm' variant='ghost' title='Fit to the trunk: what a character should bump into'
+                          onClick={() => { const f = fitColliderToTrunk(foliageRuleModels(r), r.collision!.shape); if (f) patchRule(i, { collision: f }) }}>
+                          Fit trunk
+                        </Button>
+                        <Button size='sm' variant='ghost' title='Fit around the whole plant, canopy included'
+                          onClick={() => { const f = fitColliderToBounds(foliageRuleModels(r), r.collision!.shape); if (f) patchRule(i, { collision: f }) }}>
+                          Fit bounds
+                        </Button>
+                      </>}
+                      <Button size='sm' title='See the collider on the prop and edit every dimension'
+                        onClick={() => setColliderRule(i)}>Edit collider…</Button>
                     </div>
-                  )}
+                  </>}
                 </>}
               </div>
             ))}
@@ -372,6 +387,12 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
             ))}
           </div>
         </Collapsable>
+        {colliderRule >= 0 && rules[colliderRule] && (
+          <FoliageColliderModal
+            rule={rules[colliderRule]}
+            onApply={c => patchRule(colliderRule, { collision: c })}
+            onClose={() => setColliderRule(-1)} />
+        )}
     </>
   )
 }

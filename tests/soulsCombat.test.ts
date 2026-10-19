@@ -510,3 +510,91 @@ describe('a weapon only hits from its own wielder’s hand', () => {
     });
 });
 
+
+describe('wading through a water zone', () => {
+    /** A water zone like the Valley's Pond Zone: a trigger cylinder on a node with `isWater`. */
+    function waterZone(p: PhysicsSystem, at: V3, radius: number, speedScale = 0.5): Node {
+        const n = new Node('Pond Zone');
+        n.setVariable('isWater', true, 'boolean', 'public');
+        n.setVariable('waterSpeedScale', speedScale, 'number', 'public');
+        const trig = new Body({ mass: 0, isTrigger: true, position: new Vec3(at[0], at[1] + 1, at[2]) });
+        trig.addShape(new Cylinder(radius, radius, 3, 16));
+        (trig as any).owner = n;
+        p.addBody(trig);
+        return n;
+    }
+
+    function setup(character: any) {
+        const p = physics();
+        const notices: string[] = [];
+        character._gm = { onPlayerEnteredZone() {}, onPlayerLeftZone() {}, notice: (t: string) => notices.push(t) };
+        character.actionState = 'free';
+        const body = capsule(p, character, [20, 0, 0]);
+        const move = (x: number, z: number) => {
+            body.position.set(x, 0.89, z);
+            character.setPosition([x, 0, z]);
+            character.updateTransforms();
+            p.update(1 / 60); p.update(1 / 60);
+        };
+        return { p, body, move, notices };
+    }
+
+    const forward = () => ({ move: [0, 1], basisYaw: 0, speedScale: 1, sprint: false });
+
+    it('slows the player and stops rolling while wading, and says so once', () => {
+        const player: any = new SoulsPlayerNode('Player');
+        const { p, move, notices } = setup(player);
+        waterZone(p, [0, 0, 0], 5, 0.5);
+        move(10, 0);
+        expect(player.inWater).toBe(false);
+        move(1, 0);
+        expect(player.inWater).toBe(true);
+        expect(notices).toEqual([player.waterNotice]);
+
+        const intent = forward();
+        player.applyWater(intent);
+        expect(intent.speedScale).toBeCloseTo(0.5, 6);
+
+        player.stamina = 100;
+        player._bufferAction = 'roll';
+        player._startRoll(forward());
+        expect(player.actionState).toBe('free');          // no roll in water
+        expect(player._bufferAction).toBe('');            // and the press is spent, not queued for the bank
+
+        move(10, 0);
+        expect(player.inWater).toBe(false);
+        const dry = forward();
+        player.applyWater(dry);
+        expect(dry.speedScale).toBe(1);
+    });
+
+    it("counts as wading only with the feet under the zone's water level", () => {
+        const player: any = new SoulsPlayerNode('Player');
+        const { p, notices } = setup(player);
+        const zone = waterZone(p, [0, 0, 0], 5, 0.5);
+        zone.setVariable('waterLevel', 0.5, 'number', 'public');
+        const at = (y: number) => {
+            player.setPosition([1, y, 0]); player.updateTransforms();
+            (p as any)._inWorld.forEach((b: any) => { if (b.owner === player) b.position.set(1, y + 0.89, 0); });
+            p.update(1 / 60); p.update(1 / 60);
+            player.applyWater(forward());
+        };
+        at(1.0);                                  // inside the zone, standing on the bank above the water
+        expect(player.inWater).toBe(false);
+        expect(notices).toEqual([]);
+        at(0.0);                                  // walked down into it
+        expect(player.inWater).toBe(true);
+        expect(notices).toEqual([player.waterNotice]);
+    });
+
+    it('slows enemies too', () => {
+        const hollow: any = new SoulsEnemyNode('Hollow');
+        const { p, move } = setup(hollow);
+        waterZone(p, [0, 0, 0], 5, 0.6);
+        move(0, 0);
+        expect(hollow.inWater).toBe(true);
+        const intent = forward();
+        hollow.applyWater(intent);
+        expect(intent.speedScale).toBeCloseTo(0.6, 6);
+    });
+});

@@ -20,7 +20,10 @@ import {
   NavMeshNode,
   ParticleSystemNode,
   ForceFieldNode,
+  WaterVolumeNode,
+  foliageColliderPose,
 } from 'cleo';
+import type { FoliageCollision } from 'cleo';
 import type { TriangleSoup } from 'cleo';
 import { CameraGeometry } from './EditorModels';
 import { gatherNavSoup } from './navBakeSources';
@@ -58,6 +61,9 @@ const TRIGGER_PREFIX = '__debug__trigger_';
 const SHAPE_PREFIX = '__debug__shape_';
 const AABB_PREFIX = '__debug__aabb_';
 const TERRAIN_PREFIX = '__debug__terrain_';
+const FOLIAGE_PREFIX = '__debug__foliage_';
+/** Foliage colliders in orange, apart from node colliders (red) and triggers (green). */
+export const FOLIAGE_COLLIDER_COLOR: [number, number, number] = [1, 0.55, 0.1];
 /**
  * How far a coplanar overlay is pulled toward the camera, in NDC depth.
  *
@@ -419,18 +425,19 @@ function wireModel(name: string, lines: { positions: [number, number, number][];
  * one thing an author must size by eye), or a force field's sphere or box. Top-level and re-placed every
  * frame, like the decal box, so the transform gizmo and inspector edits are followed.
  */
-function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNode) {
+function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNode | WaterVolumeNode) {
   const sphere = node instanceof ForceFieldNode && node.shape === 'sphere';
   const name = `${EFFECTSHAPE_PREFIX}${node.id}:${sphere ? 's' : 'b'}`;
   let existing = scene.getNodesByName(name)[0] as ModelNode | undefined;
   if (!existing) {
     existing = wireModel(name, sphere ? unitSphereLines() : unitBoxLines(),
-      node instanceof ParticleSystemNode ? [1, 0.55, 0.3] : [0.45, 0.85, 1]);
+      node instanceof ParticleSystemNode ? [1, 0.55, 0.3] : node instanceof WaterVolumeNode ? [0.3, 0.6, 1] : [0.45, 0.85, 1]);
     scene.addNode(existing);
   }
   const helper = existing;
   const place = () => {
-    if (node instanceof ParticleSystemNode) {
+    // A water volume's box is world-aligned whatever the node's rotation; its top face is the water.
+    if (node instanceof ParticleSystemNode || node instanceof WaterVolumeNode) {
       const { min, max } = node.getBoundingBox();
       helper.setPosition([(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2])
             .setScale([max[0] - min[0], max[1] - min[1], max[2] - min[2]]);
@@ -593,6 +600,109 @@ function terrainSignature(terrain: any): string {
 
 // Ensure a terrain heightfield wireframe following the landscape's world origin.
 // `landscape` is a LandscapeNode, accessed structurally to avoid a hard type import.
+/** Line pairs for a unit cylinder (radius 0.5, height 1, centred): two rings and eight uprights. */
+function unitCylinderLines(segments = 24): { positions: [number, number, number][]; indices: number[] } {
+  const positions: [number, number, number][] = [];
+  const indices: number[] = [];
+  for (const y of [-0.5, 0.5]) {
+    const base = positions.length;
+    for (let i = 0; i < segments; i++) {
+      const a = (i / segments) * Math.PI * 2;
+      positions.push([Math.cos(a) * 0.5, y, Math.sin(a) * 0.5]);
+      indices.push(base + i, base + (i + 1) % segments);
+    }
+  }
+  // Eight uprights, every `segments / 8` steps (segments is a multiple of 8, so the index is whole).
+  for (let i = 0; i < segments; i += segments / 8) indices.push(i, i + segments);
+  return { positions, indices };
+}
+
+/**
+ * A wireframe of one foliage collider at UNIT size (full extent 1 on every axis), placed and sized with
+ * {@link placeFoliageColliderWire}. Shared by the viewport overlay and the collider editor's preview.
+ */
+export function buildFoliageColliderWire(shape: FoliageCollision['shape'], color = FOLIAGE_COLLIDER_COLOR): ModelNode {
+  const lines = shape === 'box' ? unitBoxLines()
+    : shape === 'sphere' ? (() => { const l = unitSphereLines(); return { positions: l.positions.map(p => [p[0] * 0.5, p[1] * 0.5, p[2] * 0.5] as [number, number, number]), indices: l.indices }; })()
+    : unitCylinderLines();
+  return wireModel(`__debug__fcol_${shape}`, lines, color);
+}
+
+/**
+ * Put a collider wireframe where the physics puts the body: the instance at (x, y, z) turned by `yaw`
+ * (radians, as stored), lifted by the pose's centre height and sized to its full extents. `pose` is
+ * `foliageColliderPose(collision, instanceScale)` — the very function the body is built from.
+ */
+export function placeFoliageColliderWire(node: Node, pose: ReturnType<typeof foliageColliderPose>,
+                                         x: number, y: number, z: number, yaw: number): void {
+  node.setPosition([x, y + pose.offsetY, z]);
+  node.setRotation([0, yaw * 180 / Math.PI, 0]);
+  node.setScale([pose.size[0], pose.size[1], pose.size[2]]);
+}
+
+/** The instances whose colliders the overlay draws: those of collidable layers within `radius`, nearest first, capped. */
+export function nearestFoliageColliders(
+  layers: readonly { collision: FoliageCollision | null; count: number;
+                     forEachInstanceNear(x: number, z: number, r: number, cb: (i: number, x: number, y: number, z: number, yaw: number, scale: number) => void): void }[],
+  camX: number, camZ: number, radius: number, cap: number,
+): { collision: FoliageCollision; x: number; y: number; z: number; yaw: number; scale: number }[] {
+  const out: { collision: FoliageCollision; x: number; y: number; z: number; yaw: number; scale: number; d2: number }[] = [];
+  const r2 = radius * radius;
+  for (const layer of layers) {
+    const collision = layer.collision;
+    if (!collision || layer.count === 0) continue;
+    layer.forEachInstanceNear(camX, camZ, radius, (_i, x, y, z, yaw, scale) => {
+      const d2 = (x - camX) * (x - camX) + (z - camZ) * (z - camZ);
+      if (d2 <= r2) out.push({ collision, x, y, z, yaw, scale, d2 });
+    });
+  }
+  out.sort((a, b) => a.d2 - b.d2);
+  return out.slice(0, Math.max(0, cap));
+}
+
+/**
+ * The foliage collider overlay of one landscape: a top-level group whose children are pooled wireframes,
+ * re-placed from its own `onUpdate` — a scatter or erase stroke emits no structural event, so the
+ * reconcile alone would never see the instances move. Rebuilt only when the camera has moved a couple
+ * of metres or a layer's instances or collider changed.
+ */
+function ensureFoliageColliderOverlay(scene: Scene, landscape: any) {
+  const name = `${FOLIAGE_PREFIX}${landscape.id}`;
+  let group = scene.getNodesByName(name)[0];
+  if (!group) { group = chrome(new Node(name)); scene.addNode(group); }
+  const g = group;
+  const state: { key: string; pool: Map<string, ModelNode[]> } =
+    ((g as any).__foliageOverlay ??= { key: '', pool: new Map() });
+  g.onUpdate = () => {
+    const terrain = landscape.terrain;
+    const cam = scene.activeCamera?.worldPosition;
+    if (!terrain || !cam) return;
+    const layers = (terrain.foliage as any[]).filter(l => l.collision && l.count > 0);
+    const key = `${landscape.visible}|${Math.round(cam[0] / 2)},${Math.round(cam[2] / 2)}|` +
+      layers.map(l => `${l.key}:${l.version}:${JSON.stringify(l.collision)}`).join(';');
+    if (key === state.key) return;
+    state.key = key;
+
+    const settings = terrain.foliageColliders ?? { radius: 40, maxBodies: 256 };
+    const wanted = landscape.visible ? nearestFoliageColliders(layers, cam[0], cam[2], settings.radius, settings.maxBodies) : [];
+    const used = new Map<string, number>();
+    for (const w of wanted) {
+      const pose = foliageColliderPose(w.collision, w.scale);
+      const pool = state.pool.get(pose.shape) ?? [];
+      state.pool.set(pose.shape, pool);
+      const k = used.get(pose.shape) ?? 0;
+      used.set(pose.shape, k + 1);
+      let wire = pool[k];
+      if (!wire) { wire = buildFoliageColliderWire(pose.shape); pool.push(wire); g.addChild(wire); }
+      wire.visible = true;
+      placeFoliageColliderWire(wire, pose, w.x, w.y, w.z, w.yaw);
+    }
+    for (const [shape, pool] of state.pool)
+      for (let k = used.get(shape) ?? 0; k < pool.length; k++) pool[k].visible = false;
+    g.updateTransforms();
+  };
+}
+
 function ensureTerrainDebug(scene: Scene, landscape: any) {
   const name = `${TERRAIN_PREFIX}${landscape.id}`;
   const sig = terrainSignature(landscape.terrain);
@@ -968,6 +1078,13 @@ export function reconcileEditorHelpers(
       ensureTerrainDebug(scene, landscape);
     }
   }
+  // 4a. Foliage colliders (orange) on the scattered instances near the camera.
+  if (show('foliageColliders')) {
+    for (const landscape of scene.landscapes) {
+      if ((landscape as any).markForRemoval) continue;
+      ensureFoliageColliderOverlay(scene, landscape);
+    }
+  }
 
   // 4b. Navigation meshes. The BAKED wireframe is independently toggled from colliders: a navmesh is
   // DERIVED from them, and the interesting question is usually where the two disagree.
@@ -1000,7 +1117,8 @@ export function reconcileEditorHelpers(
 
   // 4e. The SELECTED particle system's bounds, or force field's shape — selection-scoped like 4d. A
   // global field has no extent to draw.
-  if (selected instanceof ParticleSystemNode || (selected instanceof ForceFieldNode && selected.shape !== 'global'))
+  if (selected instanceof ParticleSystemNode || selected instanceof WaterVolumeNode
+      || (selected instanceof ForceFieldNode && selected.shape !== 'global'))
     ensureEffectShape(scene, selected);
 
   // 5. Trigger wireframes (green), following the target's world transform.
@@ -1039,6 +1157,9 @@ export function reconcileEditorHelpers(
     } else if (node.name.startsWith(TERRAIN_PREFIX)) {
       const id = node.name.slice(TERRAIN_PREFIX.length);
       if (!show('colliders') || !landscapeIds.has(id)) drop();
+    } else if (node.name.startsWith(FOLIAGE_PREFIX)) {
+      const id = node.name.slice(FOLIAGE_PREFIX.length);
+      if (!show('foliageColliders') || !landscapeIds.has(id)) drop();
     } else if (node.name.startsWith(NAVVOLUME_PREFIX) || node.name.startsWith(NAVPREVIEW_PREFIX)) {
       const prefix = node.name.startsWith(NAVVOLUME_PREFIX) ? NAVVOLUME_PREFIX : NAVPREVIEW_PREFIX;
       const id = node.name.slice(prefix.length);
@@ -1055,7 +1176,7 @@ export function reconcileEditorHelpers(
       // sphere and box drops its old wireframe instead of rescaling the wrong one.
       const [id, kind] = node.name.slice(EFFECTSHAPE_PREFIX.length).split(':');
       const owner = scene.getNodeById(id);
-      const want = owner instanceof ParticleSystemNode ? 'b'
+      const want = owner instanceof ParticleSystemNode || owner instanceof WaterVolumeNode ? 'b'
         : owner instanceof ForceFieldNode && owner.shape !== 'global' ? (owner.shape === 'sphere' ? 's' : 'b') : null;
       if (id !== selectedId || want !== kind) drop();
     } else if (node.name.startsWith(NAVMESH_PREFIX)) {

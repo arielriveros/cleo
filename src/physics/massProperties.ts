@@ -75,6 +75,10 @@ export function shapeMassProperties(shape: Shape): ShapeMass {
             return { volume: 8 * h.x * h.y * h.z, centroid: new Vec3() };
         }
         case Shape.types.CONVEXPOLYHEDRON:
+        // `Cylinder` extends ConvexPolyhedron but DOES carry its own type (CYLINDER, 128) — it was missing
+        // here, so every cylinder (and every capsule's middle) counted as zero volume: a capsule's centre
+        // of mass came from its two end spheres alone, and buoyancy could not see cylinders at all.
+        case Shape.types.CYLINDER:
             return convexMass(shape as ConvexPolyhedron);
         // Plane, Heightfield, Trimesh and Particle bound no volume. They only ever appear on static
         // bodies here, and recenterMass skips those outright.

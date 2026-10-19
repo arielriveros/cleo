@@ -271,6 +271,8 @@ const EngineContext = createContext<{
   bodies: Map<string, BodyDescription>;
   triggers: Map<string, { shapes: ShapeDescription[]; }>;
   startPlay: () => void;
+  /** Play without possession: physics, AI and scripts run, viewed through the editor camera. */
+  startSimulate: () => void;
   stopPlay: () => void;
   pausePlay: () => void;
   /**
@@ -647,6 +649,7 @@ const EngineContext = createContext<{
     bodies: new Map(),
     triggers: new Map(),
     startPlay: () => {},
+    startSimulate: () => {},
     stopPlay: () => {},
     pausePlay: () => {},
     templates: [],
@@ -856,6 +859,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   selectedNodeRef.current = selectedNode;
   const [isGizmoDragging, setIsGizmoDragging] = useState(false);
   const [isPlayMode, setIsPlayMode] = useState(false);
+  // Simulate is a play session nobody possesses: the same throwaway play scene, seen through the editor's
+  // free-fly camera with the Gameplay map off. `isPlayMode` stays true for it, so every edit lock holds.
+  // The ref is written synchronously when a session starts; the SET_PLAY_STATE handler reads it.
+  const [isSimulating, setIsSimulating] = useState(false);
+  const isSimulatingRef = useRef(false);
   const [isSceneReady, setIsSceneReady] = useState(false);
   const [texturesPreloaded, setTexturesPreloaded] = useState(false);
   const [audioPreloaded, setAudioPreloaded] = useState(false);
@@ -875,6 +883,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const playReturnRef = useRef<{ tabId: string; mainMode: MainMode } | null>(null);
   /** Play is waiting for the forced switch to the scene tab to commit (see startPlay). */
   const pendingPlayRef = useRef(false);
+  /** Which session the pending switch starts: Play, or Simulate. */
+  const pendingSimulateRef = useRef(false);
   // Mirrored during RENDER, like tabsRef: startPlay reads it from an async/event path where the render-scoped
   // value would be a commit behind.
   const mainModeRef = useRef(mainMode);
@@ -5180,7 +5190,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // the two-phase "Play from an asset tab" path, which would otherwise show the grid over the play session.
     instance.renderer.setGridVisible(
       tab.kind !== 'material' && tab.kind !== 'terrainMaterial'
-      && (isPlayModeRef.current ? debugVisibilityRef.current.grid.runtime : debugVisibilityRef.current.grid.editor));
+      && (isPlayModeRef.current && !isSimulatingRef.current ? debugVisibilityRef.current.grid.runtime : debugVisibilityRef.current.grid.editor));
     // Auto-exposure meters the scene tab only; every other tab is a preview under a fixed studio rig.
     // The project's `autoExposureEnabled` setting is untouched — this is a separate suppression, so a
     // tab switch neither fights the saved value nor marks the scene dirty.
@@ -5806,7 +5816,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // survives a scene swap and the last writer wins. Assert it on EVERY reconcile from whichever channel
       // is in force. Skipped in options mode, where Engine > Renderer owns its own grid switch.
       if (editorMode !== 'options')
-        instanceRef.current?.renderer.setGridVisible(isPlayMode ? vis.grid.runtime : vis.grid.editor);
+        instanceRef.current?.renderer.setGridVisible(isPlayMode && !isSimulating ? vis.grid.runtime : vis.grid.editor);
       // Particle preview is a property of the authored scene; the particle editor's own stage always
       // previews (that is its whole job), and play mode always simulates regardless of the flag.
       const liveScene = instanceRef.current?.scene;
@@ -5821,8 +5831,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           // Runtime channel: helpers are rebuilt onto the throwaway play scene (which shares node ids with
           // the editor scene, so the bodies/triggers maps still resolve). Still __debug__-named, so still
           // stripped from any real publish. No withoutDirty — play mode never marks the tab dirty.
+          // Simulate is watched through the editor's eyes, so it wears the Editor channel's overlays.
           const playScene = instanceRef.current?.scene;
-          if (playScene) reconcileEditorHelpers(playScene, bodiesRef.current, triggersRef.current, vis, 'runtime', selectedNodeRef.current);
+          if (playScene) reconcileEditorHelpers(playScene, bodiesRef.current, triggersRef.current, vis,
+            isSimulating ? 'editor' : 'runtime', selectedNodeRef.current);
         } else if (activeScene) {
           // withoutDirty as well as suppressReconcileRef: the latter only stops the reconciler re-triggering
           // ITSELF, while the helpers it splices in emit SCENE_CHANGED like any other node edit.
@@ -5875,7 +5887,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       emitter.off('SELECT_NODE', scheduleOnly);
       emitter.off('GIZMO_DRAG_END', scheduleFresh);
     };
-  }, [activeScene, isPlayMode, editorMode]);
+  }, [activeScene, isPlayMode, isSimulating, editorMode]);
 
   useEffect(() => {
     eventEmitter.current.on('CHANGE_DIMENSION', (dimension: '2D' | '3D') => {
@@ -6010,21 +6022,32 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       }
     });
 
-    eventEmitter.current.on('SET_PLAY_STATE', (state: 'play' | 'pause' | 'stop') => {
+    eventEmitter.current.on('SET_PLAY_STATE', (state: 'play' | 'simulate' | 'pause' | 'stop') => {
       if (!instanceRef.current) return;
-      if (state === 'play') {
+      if (state === 'play' || state === 'simulate') {
+        const simulate = state === 'simulate';
         instanceRef.current.isPaused = false;
         setIsPlayMode(true);
-        InputSystem.instance.pointerLockOnClick = true;
-        // The editor's camera stands down while the game has the keyboard; the game's maps come up.
-        InputSystem.instance.disableMap('EditorCamera');
-        InputSystem.instance.enableMap('Gameplay');
+        setIsSimulating(simulate);
+        if (simulate) {
+          // Nobody is possessed: the editor camera keeps the keyboard and mouse, the game's controls
+          // stay down (so the player character just stands there), and a click never grabs the pointer.
+          InputSystem.instance.pointerLockOnClick = false;
+          InputSystem.instance.enableMap('EditorCamera');
+          InputSystem.instance.disableMap('Gameplay');
+        } else {
+          InputSystem.instance.pointerLockOnClick = true;
+          // The editor's camera stands down while the game has the keyboard; the game's maps come up.
+          InputSystem.instance.disableMap('EditorCamera');
+          InputSystem.instance.enableMap('Gameplay');
+        }
         InputSystem.instance.enableMap('UI');
         setSelectedNode(null);
         if (instanceRef.current && instanceRef.current.renderer) {
           instanceRef.current.renderer.setSelectedNode(null);
-          // The grid follows its Runtime toggle in game mode (off by default).
-          instanceRef.current.renderer.setGridVisible(debugVisibilityRef.current.grid.runtime);
+          // The grid follows its Runtime toggle in game mode (off by default); Simulate is the editor's view.
+          instanceRef.current.renderer.setGridVisible(simulate
+            ? debugVisibilityRef.current.grid.editor : debugVisibilityRef.current.grid.runtime);
           // Never render a debug channel in the running game (in case Play is pressed in Options mode).
           instanceRef.current.renderer.debugView = 'final';
           // The running game IS the scene, whichever tab Play was pressed from — so it meters, and
@@ -6040,7 +6063,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // This used to be `registerKeyPress('Escape', ...)`, which was a silent no-op: Escape was not
         // in the old 51-key whitelist, so the callback was never registered and never fired.
         escapeSubRef.current?.();
-        escapeSubRef.current = InputSystem.instance.onAction('UI/Cancel', (state) => {
+        escapeSubRef.current = simulate ? null : InputSystem.instance.onAction('UI/Cancel', (state) => {
           if (state.started) InputSystem.instance.releasePointerLock();
         });
       }
@@ -6057,6 +6080,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       else if (state === 'stop') {
         instanceRef.current.isPaused = false; // Unpause for editor scene
         setIsPlayMode(false);
+        setIsSimulating(false);
         // Every voice, not just this scene's: a script may have started one on a sample the scene no
         // longer references, and leaving the editor with audio still playing is never right.
         AudioManager.Instance.stopAll();
@@ -6213,6 +6237,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const target = meta?.scenes.find(s => s.id === nameOrId) ?? meta?.scenes.find(s => s.name === nameOrId);
     if (!target) { Logger.warn(`loadScene: no scene "${nameOrId}"`, 'Editor'); return; }
     const scene = await buildPlaySceneById(target.id);
+    // A simulation keeps watching through the editor camera across a runtime scene switch.
+    if (isSimulatingRef.current) carryEditorCamera(instance.scene, scene);
     // Held keys, gestures and edges only — NOT the map. Un-binding the game between scenes would
     // leave the next one dead.
     instance.input.resetState();
@@ -6254,11 +6280,38 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     return count;
   };
 
-  const startPlay = async () => {
+  /**
+   * Simulate views the play scene through the editor's OWN camera node, carried across rather than copied:
+   * its free-fly onUpdate closure goes with it, so navigation keeps working, and Stop hands back the very
+   * view the user flew to. Pinned on arrival, or the play scene's first game camera would win the scan.
+   * withoutDirty: it is editor-owned, but leaving the editor scene must not even look like an edit.
+   */
+  const carryEditorCamera = (from: Scene | null | undefined, to: Scene) => {
+    const cam = from?.getNodesByName('__editor__Camera').find((n): n is CameraNode => n instanceof CameraNode);
+    if (!from || !cam) return;
+    withoutDirty(() => {
+      from.removeNode(cam);
+      to.addNode(cam);
+    });
+    to.setActiveCamera(cam);
+  };
+  /** Bring the editor camera home from whatever play scene Simulate left it in, and re-pin it. */
+  const recallEditorCamera = (from: Scene | null | undefined) => {
+    const editor = editorSceneRef.current;
+    if (!editor) return;
+    if (from && from !== editor) carryEditorCamera(from, editor);
+    withoutDirty(() => ensureEditorCamera(editor));
+  };
+
+  const startPlay = () => startSession(false);
+  const startSimulate = () => startSession(true);
+  const startSession = async (simulate: boolean) => {
     const instance = instanceRef.current;
     if (!instance) return;
-    instance.input.preventDefault = true;
-    if (startedRef.current) { eventEmitter.current.emit('SET_PLAY_STATE', 'play'); return; }
+    // The two sessions are exclusive: switching between Play and Simulate goes through Stop.
+    if (startedRef.current && isSimulatingRef.current !== simulate) return;
+    instance.input.preventDefault = !simulate;
+    if (startedRef.current) { eventEmitter.current.emit('SET_PLAY_STATE', simulate ? 'simulate' : 'play'); return; }
 
     // Play always runs the game scene, from wherever the user happens to be; Stop brings them back.
     // It cannot be done in one pass: both this and the tab-activate effect call instance.setScene, and
@@ -6273,6 +6326,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       setMainMode('scene');
       setActiveTab(SCENE_TAB_ID);
       pendingPlayRef.current = true;
+      pendingSimulateRef.current = simulate;
       return;
     }
 
@@ -6283,6 +6337,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // module state leaks from one session into the next.
     resetScriptModules();
     const newScene = await buildPlayScene();
+    isSimulatingRef.current = simulate;
+    if (simulate) carryEditorCamera(editorSceneRef.current, newScene);
     instance.setScene(newScene);
     playSceneRef.current = newScene;
     instance.isPaused = false;
@@ -6291,7 +6347,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // before start(), which resets the scene and drops those just-added nodes. Emitting here mirrors the
     // live-toggle path, so Runtime toggles are honoured from the first frame of Play.
     setTimeout(() => { instance.scene.start(); eventEmitter.current.emit('DEBUG_VISIBILITY_CHANGED'); }, 100);
-    eventEmitter.current.emit('SET_PLAY_STATE', 'play');
+    eventEmitter.current.emit('SET_PLAY_STATE', simulate ? 'simulate' : 'play');
     startedRef.current = true;
   };
   const stopPlay = () => {
@@ -6299,6 +6355,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const instance = instanceRef.current;
     setGameHost(null);
     if (!instance) return;
+    // Before the play scene is released: disposing it would take the editor camera down with it.
+    if (isSimulatingRef.current) recallEditorCamera(playSceneRef.current);
+    isSimulatingRef.current = false;
     instance.setScene(editorSceneRef.current);
     // Held keys, gestures and edges only — NOT the map. Un-binding the game between scenes would
     // leave the next one dead.
@@ -6322,6 +6381,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     currentPlaySceneIdRef.current = playEntrySceneIdRef.current;
     resetScriptModules();
     const newScene = await buildPlayScene();
+    if (isSimulatingRef.current) carryEditorCamera(instance.scene, newScene);
     instance.setScene(newScene);
     releasePlayScene();
     playSceneRef.current = newScene;
@@ -6330,7 +6390,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // isPlayMode effect won't re-fire on its own.
     setTimeout(() => { instance.scene.start(); eventEmitter.current.emit('DEBUG_VISIBILITY_CHANGED'); }, 50);
     startedRef.current = true;
-    eventEmitter.current.emit('SET_PLAY_STATE', 'play');
+    eventEmitter.current.emit('SET_PLAY_STATE', isSimulatingRef.current ? 'simulate' : 'play');
   };
 
   // Second half of the two-phase Play switch above: the tab and mode are now committed, so the engine's
@@ -6339,7 +6399,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!pendingPlayRef.current) return;
     if (activeTabId !== SCENE_TAB_ID || mainMode !== 'scene') return;
     pendingPlayRef.current = false;
-    void startPlay();
+    void startSession(pendingSimulateRef.current);
   }, [activeTabId, mainMode]);
 
   // Return to wherever Play was pressed from. Deliberately an effect on isPlayMode rather than a call inside
@@ -6407,10 +6467,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     selectedNode, isGizmoDragging, gizmoMode, setGizmoMode, gizmoSpace, setGizmoSpace,
   }), [selectedNode, isGizmoDragging, gizmoMode, gizmoSpace]);
 
-  const playActions = useStableActions({ startPlay, stopPlay, pausePlay });
+  const playActions = useStableActions({ startPlay, startSimulate, stopPlay, pausePlay });
   const playbackValue = useMemo<PlaybackContextValue>(() => ({
-    isPlayMode, ...playActions,
-  }), [isPlayMode, playActions]);
+    isPlayMode, isSimulating, ...playActions,
+  }), [isPlayMode, isSimulating, playActions]);
 
   const debugVisibilityValue = useMemo<DebugVisibilityContextValue>(() => ({
     visibility: debugVisibility, setCategory: setDebugCategory,
@@ -6589,6 +6649,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       bodies: bodiesRef.current,
       triggers: triggersRef.current,
       startPlay,
+      startSimulate,
       stopPlay,
       pausePlay,
       templates,

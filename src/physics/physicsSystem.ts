@@ -12,6 +12,7 @@ import { physicsStats, resetPhysicsStats, PhysicsStats } from "./physicsStats";
 import { clearWorld, broadphaseBodyCount } from "./worldTeardown";
 import { MotionRecord, MotionConfig, createMotionRecord, sampleMotion, motionConfig } from "./motion";
 import { OverlapHit, OverlapOptions, OverlapBody, QueryShape, queryPoses, sweepPoses } from "./overlap";
+import { applyBuoyancy, floats } from "./buoyancy";
 
 /**
  * A body's forward axis in world space: its local +Z rotated by its orientation, written into `out`.
@@ -171,6 +172,9 @@ export class PhysicsSystem {
       // onTrigger uses fires on first contact only and has no exit at all.
       this._world.addEventListener('beginContact', (e: any) => this._onContact(e.bodyA, e.bodyB, true));
       this._world.addEventListener('endContact', (e: any) => this._onContact(e.bodyA, e.bodyB, false));
+      // Buoyancy: once per SUBSTEP, after cannon has added gravity and before it integrates, so the water's
+      // push is integrated exactly like gravity is. See physics/buoyancy.ts.
+      this._world.addEventListener('preStep', () => this._applyWater());
     } catch (e) {
       Logger.error(e.toString());
     }
@@ -381,6 +385,30 @@ export class PhysicsSystem {
    * want the shape queries below instead.
    */
   public get bodies(): readonly Body[] { return this._world ? this._world.bodies : []; }
+
+  /**
+   * One substep of buoyancy from every water volume in the scene (the world's `preStep`). Each volume
+   * records what it buoyed, for its surface effects. Character bodies are skipped unless a volume asks:
+   * a capsule averages ~150 kg/m³ and locomotion carries vertical velocity over, so water would launch it.
+   */
+  private _applyWater(): void {
+    const volumes = (this._scene as any)?.waterVolumes as Set<any> | undefined;
+    if (!volumes?.size || !this._world) return;
+    const g = this._world.gravity;
+    const gravity = Math.hypot(g.x, g.y, g.z);
+    const dt = this._world.dt > 0 ? this._world.dt : PhysicsSystem.MAX_SUBSTEP;
+    const time = this._world.time;
+    const isCharacter = (b: Body) => (b as any).owner?.nodeType === 'character';
+    for (const volume of volumes) {
+      if (!volume.enabled) continue;
+      const spec = volume.buoyancyVolume(time);
+      for (const body of this._world.bodies) {
+        if (!floats(body, spec, isCharacter)) continue;
+        const fraction = applyBuoyancy(body, spec, gravity, dt);
+        if (fraction > 0) volume.recordSubmerged(body, fraction);
+      }
+    }
+  }
 
   // ---- Shape queries ----
 

@@ -36,6 +36,8 @@ export { DecalNode, decalLocalToUV, radialDecalWeight, radialDecalT, DECAL_RADIA
 export { ParticleSystemNode } from "./core/scene/nodes/particleSystemNode";
 export type { ParticleSystemNodeOptions, ParticleCullingMode } from "./core/scene/nodes/particleSystemNode";
 export { ForceFieldNode, MAX_FORCE_FIELDS } from "./core/scene/nodes/forceFieldNode";
+export { WaterVolumeNode, WATER_RIPPLE_SLOTS } from "./core/scene/nodes/waterVolumeNode";
+export type { WaterVolumeOptions } from "./core/scene/nodes/waterVolumeNode";
 export type { ForceFieldOptions, ForceFieldKind, ForceFieldShape } from "./core/scene/nodes/forceFieldNode";
 export * from "./particles/particleSystemAsset";
 export { selectParticleLod, particleLodDistance, particleLodFactors, PARTICLE_LOD_HYSTERESIS, type ParticleLodState } from "./particles/particleLod";
@@ -206,7 +208,7 @@ export type { UvConfig, UvProjection, UvSpace } from "./graphics/material";
 export { Material, TerrainMaterial, CustomMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, migrateFoliageRule, foliageRuleKey, newTerrainSlotId, legacyHeightBlendToRule, setTerrainSurfaceFrom, shallowCloneTerrainMaterial, terrainFoliageRules, allTerrainFoliageRules, type TerrainFoliageScope } from "./graphics/material";
 export type { TerrainBaseType, TerrainFoliageRule, TerrainMaterialSlot, FoliageCollision, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";
 export { customSeedTemplate, customSeedUniforms, tryCompileCustom, assembleCustomFragment,
-         setWgslTranslator, hasWgslTranslator, vulkanUnsupportedReason } from "./graphics/systems/customShaders";
+         setWgslTranslator, hasWgslTranslator, vulkanUnsupportedReason, customWgslHash } from "./graphics/systems/customShaders";
 export type { ShaderDialect, WgslTranslator } from "./graphics/systems/customShaders";
 export { webgpuAvailableInBrowser, WEBGPU_IMPLEMENTED } from "./graphics/rhi/backendSelect";
 export type { BackendKind } from "./graphics/rhi/device";
@@ -400,7 +402,7 @@ export type { HeightImage, HeightImportOptions } from "./terrain/heightmapIO";
 export type { TerrainConfig, SculptBrush, SculptMode, TerrainLayer, PaintBrush, TerrainChunk, TerrainLodSettings, FoliageGenerateResult } from "./terrain/terrain";
 export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES, FOLIAGE_DRAW_TRIANGLE_BUDGET, foliageEffectiveCull, foliageLodBands } from "./terrain/foliage";
 export type { FoliageKind, FoliageParams } from "./terrain/foliage";
-export { FoliageColliderField, DEFAULT_FOLIAGE_COLLIDERS } from "./terrain/foliageColliders";
+export { FoliageColliderField, DEFAULT_FOLIAGE_COLLIDERS, foliageColliderPose } from "./terrain/foliageColliders";
 export type { FoliageColliderSettings } from "./terrain/foliageColliders";
 export { Tilemap, DEFAULT_FILL_LIMIT } from "./graphics/tilemap/tilemap";
 export type { TileEdit, TileOrientation } from "./graphics/tilemap/tilemap";

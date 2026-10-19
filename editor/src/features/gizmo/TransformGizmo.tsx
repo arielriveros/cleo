@@ -356,7 +356,7 @@ export default function TransformGizmo({ selectedNodeId, onTransformChange, view
     }, [instance, editorScene, eventEmitter]);
 
     useEffect(() => {
-        const onPlayState = (state: 'play' | 'pause' | 'stop') => setIsPlayMode(state === 'play');
+        const onPlayState = (state: 'play' | 'simulate' | 'pause' | 'stop') => setIsPlayMode(state === 'play' || state === 'simulate');
         eventEmitter.on('SET_PLAY_STATE', onPlayState);
         return () => { eventEmitter.off('SET_PLAY_STATE', onPlayState); };
     }, [eventEmitter]);

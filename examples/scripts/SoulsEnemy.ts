@@ -301,22 +301,27 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     this.runSpeed = this.walkSpeed
     intent.sprint = false
 
-    switch (this.fightState) {
-      case 'dead':
-      case 'dormant':
-        this._still(intent)
-        return
-      case 'attack': this._attacking(intent, delta); return
-      case 'flinch':
-      case 'stagger':
-        this._still(intent)
-        if (this._stateTime >= this._reactSeconds) this._enter('ai')
-        return
-      case 'phase':
-        this._still(intent)
-        if (this._stateTime >= this._phaseSeconds) this._enter('ai')
-        return
-      default: this._ai(intent, delta)
+    try {
+      switch (this.fightState) {
+        case 'dead':
+        case 'dormant':
+          this._still(intent)
+          return
+        case 'attack': this._attacking(intent, delta); return
+        case 'flinch':
+        case 'stagger':
+          this._still(intent)
+          if (this._stateTime >= this._reactSeconds) this._enter('ai')
+          return
+        case 'phase':
+          this._still(intent)
+          if (this._stateTime >= this._phaseSeconds) this._enter('ai')
+          return
+        default: this._ai(intent, delta)
+      }
+    } finally {
+      this.applyWater(intent)
+      this.limitClimb(intent)
     }
   }
 

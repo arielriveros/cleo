@@ -1,4 +1,4 @@
-import { CharacterNode, Logger, Node, Shape, resolveSocketOwner } from 'cleo'
+import { CharacterNode, Logger, Node, Shape, moveWorldDirection, resolveSocketOwner, setMoveWorld } from 'cleo'
 import type { SocketName, TemplateName } from 'cleo'
 import { clamp } from '@/Core/Scripts/SoulsMath'
 import { bladeCapsule } from '@/Core/Scripts/SoulsHitbox'
@@ -57,6 +57,19 @@ export default class SoulsCharacterNode extends CharacterNode {
   public dropWeaponOnDeath: boolean = false
   /** The dropped weapon's mass, kg. */
   public droppedWeaponMass: number = 4
+  /**
+   * The steepest ground, in degrees, this character can walk UP. On anything steeper it can still move
+   * across the slope or down it, but not climb (see limitClimb). The engine's own limit is 60°.
+   */
+  public maxWalkSlope: number = 45
+
+  // ----- wading ------------------------------------------------------------------------------------
+  /**
+   * The water zones this character is standing in: nodes whose trigger it is inside and that carry the
+   * `isWater` variable (with an optional `waterSpeedScale`, 0..1). While in one it moves slower, and the
+   * player cannot roll. Counted, not flagged, so two overlapping zones do not end on the first exit.
+   */
+  private _waterZones: Node[] = []
 
   // ----- runtime, read by others -------------------------------------------------------------------
   public isDead: boolean = false
@@ -70,6 +83,89 @@ export default class SoulsCharacterNode extends CharacterNode {
   protected _weapons: Node[] = []
   protected _weaponIndex: number = 0
   protected _dropped: Node[] = []
+
+  // =================================================================================================
+  // Movement
+  // =================================================================================================
+
+  /**
+   * Whether this character is wading: inside a water zone and, when the zone states its `waterLevel`,
+   * with its feet below that level — a zone is a simple volume, the water's edge is wherever the ground
+   * rises out of it.
+   */
+  public get inWater(): boolean { return this._wadingIn().length > 0 }
+
+  private _wadingIn(): Node[] {
+    const feet = this.worldPosition[1]
+    return this._waterZones.filter(zone => {
+      const level = Number((zone as any).getVariable?.('waterLevel'))
+      return !Number.isFinite(level) || feet < level - 0.05
+    })
+  }
+
+  /** The slowest speed multiplier among the water zones it is wading in (1 out of water). */
+  public get waterSpeedScale(): number {
+    let scale = 1
+    for (const zone of this._wadingIn()) {
+      const s = Number((zone as any).getVariable?.('waterSpeedScale'))
+      scale = Math.min(scale, Number.isFinite(s) ? clamp(s, 0, 1) : 0.55)
+    }
+    return scale
+  }
+
+  onTriggerEnter(other: Node) {
+    if ((other as any)?.getVariable?.('isWater') && !this._waterZones.includes(other)) this._waterZones.push(other)
+    this._updateWading()
+  }
+
+  onTriggerExit(other: Node) {
+    if (!this._waterZones.includes(other)) return
+    this._waterZones = this._waterZones.filter(z => z !== other)
+    this._updateWading()
+  }
+
+  /** Hooks for subclasses: wading begins, wading ends. */
+  protected onEnterWater(): void {}
+  protected onLeaveWater(): void {}
+
+  private _wading: boolean = false
+  /** Fire the wading hooks on a change — a zone edge crossed, or the feet going under or out of the water. */
+  private _updateWading(): void {
+    const now = this.inWater
+    if (now === this._wading) return
+    this._wading = now
+    if (now) this.onEnterWater()
+    else this.onLeaveWater()
+  }
+
+  /**
+   * Slow this frame's move while wading. Call it LAST in onUpdate, beside limitClimb, so it also slows
+   * what the state code drove itself (a lunge, a knockback) rather than only the stick.
+   */
+  protected applyWater(intent: any): void {
+    this._updateWading()
+    if (!intent || !this._wading) return
+    intent.speedScale = clamp((intent.speedScale ?? 1) * this.waterSpeedScale, 0, 1)
+  }
+
+  /**
+   * Take the uphill share out of this frame's move when the ground is steeper than `maxWalkSlope`. What is
+   * left — across the slope, or down it — still goes through, so the character slides along a cliff foot
+   * instead of sticking to it. Call it LAST in onUpdate, after everything that writes the intent.
+   */
+  protected limitClimb(intent: any): void {
+    if (!intent || !(this.maxWalkSlope < 90) || !this.isGrounded) return
+    const n = this.groundNormal
+    if (n[1] >= Math.cos(this.maxWalkSlope * Math.PI / 180)) return
+    const h = Math.hypot(n[0], n[2])
+    if (h < 1e-4) return
+    // The normal's horizontal part points DOWNHILL.
+    const downX = n[0] / h, downZ = n[2] / h
+    const move = moveWorldDirection([0, 0, 0] as any, intent)
+    const along = move[0] * downX + move[2] * downZ
+    if (along >= 0) return
+    setMoveWorld(intent, move[0] - along * downX, move[2] - along * downZ)
+  }
 
   // =================================================================================================
   // Damage

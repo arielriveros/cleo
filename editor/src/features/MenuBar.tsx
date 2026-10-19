@@ -21,7 +21,7 @@ import { Button, MenuItem, buttonVariants, cn } from "../components/ui";
 import {
   SaveIcon, ImportIcon, ExportIcon, PublishIcon, ChevronDownIcon,
   SpinnerIcon, CheckIcon, AlertIcon, LayoutIcon, ProjectsIcon,
-  PlayGlyph, PauseGlyph, StopGlyph,
+  PlayGlyph, SimulateGlyph, PauseGlyph, StopGlyph,
 } from "./topbarIcons";
 import ProjectsModal from "./projects/ProjectsModal";
 import { loadProjects } from "../utils/projects";
@@ -55,7 +55,7 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, chil
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, startSimulate, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings } = useCleoEngine();
   const { vfs } = useVfs();
   // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
   const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
@@ -78,7 +78,10 @@ export default function MenuBar() {
   const saveTitle = activeTab.kind === 'stateMachine'
     ? 'Apply the state machine to the source model (Ctrl+S)'
     : `Save this ${KIND_LABEL[activeTab.kind].toLowerCase()} (Ctrl+S)`;
-  const [playState, setPlayState] = useState<'playing' | 'paused' | 'stopped'>('stopped');
+  const [playState, setPlayState] = useState<'playing' | 'simulating' | 'paused' | 'stopped'>('stopped');
+  // Which kind of session is running (or paused): Play and Simulate are exclusive, and a paused session
+  // resumes through its own button.
+  const [sessionKind, setSessionKind] = useState<'play' | 'simulate' | null>(null);
   const [showProjects, setShowProjects] = useState(false);
   // The open project's name: re-read when the projects modal closes, pushed on a rename from Options.
   const [projectName, setProjectName] = useState('');
@@ -97,10 +100,11 @@ export default function MenuBar() {
   const desktop = isDesktop();
 
   useEffect(() => {
-    const handlePlayState = (state: 'play' | 'pause' | 'stop') => {
-      if (state === 'play') setPlayState('playing');
+    const handlePlayState = (state: 'play' | 'simulate' | 'pause' | 'stop') => {
+      if (state === 'play') { setPlayState('playing'); setSessionKind('play'); }
+      if (state === 'simulate') { setPlayState('simulating'); setSessionKind('simulate'); }
       if (state === 'pause') setPlayState('paused');
-      if (state === 'stop') setPlayState('stopped');
+      if (state === 'stop') { setPlayState('stopped'); setSessionKind(null); }
     }
     eventEmitter.on('SET_PLAY_STATE', handlePlayState);
     return () => { eventEmitter.off('SET_PLAY_STATE', handlePlayState) };
@@ -254,6 +258,8 @@ export default function MenuBar() {
 
   const onPlay = () => startPlay();
 
+  const onSimulate = () => startSimulate();
+
   const onStop = () => stopPlay();
 
   const onPause = () => pausePlay();
@@ -355,11 +361,21 @@ export default function MenuBar() {
           {/* Never gated by the active tab. Play runs the game scene from anywhere: startPlay switches to
               the scene tab itself, and Stop returns to the tab you pressed it from. */}
           <Transport
-            title='Play' disabled={playState === 'playing'}
+            title='Play' disabled={playState === 'playing' || sessionKind === 'simulate'}
             active={playState === 'playing'} activeClass='bg-success hover:bg-success text-fg'
             accent='hover:text-success' onClick={() => onPlay()}
           >
             <PlayGlyph />
+          </Transport>
+          {/* Play without possession: physics, AI and scripts run on a throwaway copy, watched through the
+              editor camera. Stop puts the scene back exactly as it was. */}
+          <Transport
+            title='Simulate — run physics, AI and scripts, viewed from the editor camera'
+            disabled={playState === 'simulating' || sessionKind === 'play'}
+            active={playState === 'simulating'} activeClass='bg-primary hover:bg-primary text-fg'
+            accent='hover:text-primary' onClick={() => onSimulate()}
+          >
+            <SimulateGlyph />
           </Transport>
           <Transport
             title='Pause' disabled={playState === 'paused' || playState === 'stopped'}

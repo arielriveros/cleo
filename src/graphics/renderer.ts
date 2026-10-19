@@ -197,11 +197,16 @@ const FORWARD_SHADERS = ['blinn_phong', 'blinn_phongSkinned', 'pbr', 'pbrSkinned
 
 
 let _forwardShaderCache: string[] = [...FORWARD_SHADERS];
-let _forwardShaderCustomCount = -1;
+let _forwardShaderCustomKey: string | null = null;
 function allForwardShaders(): string[] {
     const custom = customForwardTypes();
-    if (custom.length !== _forwardShaderCustomCount) {
-        _forwardShaderCustomCount = custom.length;
+    // Keyed on the NAMES, not the count. Editing a custom material swaps its key for a new one and
+    // releases the old, which leaves the count unchanged — a count-keyed cache then kept handing out the
+    // released key, `bind` threw "ShaderProgram custom:… not found" on every frame, and the viewport
+    // went black until reload.
+    const key = custom.join('|');
+    if (key !== _forwardShaderCustomKey) {
+        _forwardShaderCustomKey = key;
         _forwardShaderCache = [...FORWARD_SHADERS, ...custom];
     }
     return _forwardShaderCache;
@@ -726,6 +731,14 @@ export class Renderer {
     // Snapshot of _sceneFBO's depth, taken after the opaque forward draw so fullscreen passes can
     // sample full opaque depth without a read/write feedback on the bound _sceneFBO.
     private _sceneDepthFBO!: Framebuffer;
+    /**
+     * The opaque scene's COLOUR, copied just before the transparent queue — what a transparent custom
+     * material refracts (`u_sceneColor`). Allocated on first use and copied only on frames where a
+     * visible transparent material reads it; see `_snapshotSceneColor`.
+     */
+    private _refractionFBO: Framebuffer | null = null;
+    /** True while the transparent queue runs after this frame's depth/colour snapshots. */
+    private _sceneBuffersLive = false;
     /**
      * Decal targets, all LAZY: a scene without decals never allocates them. The DBuffer (three RGBA8
      * attachments: albedo, normal, roughness/metallic/AO), a copy of the G-buffer's colour for the resolve
@@ -3899,6 +3912,11 @@ export class Renderer {
         for (const resource of pipeline.resources) {
             if (resource.group !== 0 || resource.kind !== 'texture') continue;
             if (resource.glslName === 'u_envMap') { textures.push(envCube ?? this._fallbackCube); continue; }
+            if (resource.glslName === 'u_sceneDepth') { textures.push(this._sceneDepthFBO.depth); continue; }
+            if (resource.glslName === 'u_sceneColor') {
+                textures.push(this._refractionFBO?.colors[0] ?? this._fallbackTexture);
+                continue;
+            }
             const id = material.textures.get(resource.glslName.replace(/^u_/, ''));
             const texture = id ? TextureManager.Instance.getTexture(id) : null;
             textures.push(texture ?? this._fallbackTexture);
@@ -5727,10 +5745,12 @@ export class Renderer {
         const depthKey = new Map<ModelNode, number>();
         for (const node of transparentQueue) depthKey.set(node, vec3.squaredDistance(camPos, node.worldPosition));
         transparentQueue.sort((a, b) => depthKey.get(b)! - depthKey.get(a)!);
+        this._snapshotSceneColor(transparentQueue);
         GLState.depthMask(this._thumbnailMode);
         this._forwardDepthWrite = this._thumbnailMode;
         if (this._beginPass('transparent')) this._runForwardQueue('transparent', transparentQueue);
         this._forwardDepthWrite = true;
+        this._sceneBuffersLive = false;
         GLState.depthMask(true);
 
         // GPU particles: after the transparents (and so after TAA — they never enter history), depth
@@ -6610,6 +6630,14 @@ export class Renderer {
     private _applyCustomMaterial(material: CustomMaterial, samplersViaBindGroup: boolean = false): void {
         this._shaderManager.setUniform('u_time', performance.now() * 0.001);
         this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        if (material.renderMode === 'forward') {
+            // The scene helpers' inputs (customShaders.ts FORWARD_SCENE_BODY). Set per draw: both names
+            // are shared with fullscreen passes that leave their own values behind.
+            const cam = this._activeCamera;
+            this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
+            this._shaderManager.setUniform('u_depthParams', [cam.near, cam.far,
+                cam.type === 'orthographic' ? 1 : 0, this._sceneBuffersLive ? 1 : 0]);
+        }
         const fallback = TextureManager.Instance.getTexture('Null');
         let unit = 9;
         for (const u of material.uniforms) {
@@ -6628,6 +6656,40 @@ export class Renderer {
                 this._shaderManager.setUniform(`u_${u.name}`, value);
             }
         }
+        // The legacy (non-bind-group) path binds the forward scene samplers by unit too.
+        if (!samplersViaBindGroup && material.renderMode === 'forward') {
+            this._sceneDepthFBO.depth.bind(unit);
+            this._shaderManager.setUniform('u_sceneDepth', unit++);
+            const color = this._refractionFBO?.colors[0] ?? fallback;
+            if (color) color.bind(unit);
+            this._shaderManager.setUniform('u_sceneColor', unit++);
+        }
+    }
+
+    /** Whether any transparent node in `queue` carries a material that reads the scene colour. */
+    private static _readsSceneColor(queue: readonly ModelNode[]): boolean {
+        for (const node of queue) {
+            const materials = node.model?.materials ?? [];
+            for (const m of materials)
+                if (m instanceof CustomMaterial && m.renderMode === 'forward' && /\b(u_sceneColor|cleoSceneColor)\b/.test(m.fragmentSource))
+                    return true;
+        }
+        return false;
+    }
+
+    /**
+     * Copy the opaque scene's colour for refraction, right before the transparent queue, and mark the
+     * scene buffers live for its draws. A copy rather than a read of `_sceneFBO`: that is the target the
+     * transparents draw INTO, and a pass cannot sample its own attachment. Skipped — no allocation, no
+     * copy — unless something visible actually reads it.
+     */
+    private _snapshotSceneColor(queue: readonly ModelNode[]): void {
+        this._sceneBuffersLive = !this._thumbnailMode;
+        if (this._thumbnailMode || !Renderer._readsSceneColor(queue)) return;
+        const fbo = this._refractionFBO = this._decalTarget(this._refractionFBO, () => new Framebuffer({
+            colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false }));
+        this._copyColors([this._sceneFBO.colors[0]], [fbo.colors[0]], this._renderWidth, this._renderHeight);
+        this._sceneFBO.bind();
     }
 
     private _applyTerrainMaterial(material: Material): void {
@@ -7299,6 +7361,7 @@ export class Renderer {
         this._dBufferFBO?.resize(width, height);
         this._gBufferCopyFBO?.resize(width, height);
         this._decalReceiverFBO?.resize(width, height);
+        this._refractionFBO?.resize(width, height);
         const mbK = Renderer.MOTION_BLUR_TILE;
         this._velocityFBO.resize(width, height);
         this._velocityTileFBO.resize(Math.ceil(width / mbK), Math.ceil(height / mbK));
@@ -7437,7 +7500,9 @@ export class Renderer {
 
         // Depth writes stay ON here, unlike the deferred overlay's transparent queue: leaving
         // `_forwardDepthWrite` alone is deliberate, not an omission.
+        this._snapshotSceneColor(transparentDrawQueue);
         this._runForwardQueue('transparent', transparentDrawQueue);
+        this._sceneBuffersLive = false;
 
         // GPU particles, as in the deferred overlay.
         if (this._beginPass('particles')) this._renderParticles(scene);
@@ -9836,6 +9901,7 @@ export class Renderer {
         // The cloud temporal targets and baked noise volumes belong here too — an 8MB volume absent
         // from the estimate defeats its purpose.
         addFbo(this._sceneDepthFBO); addFbo(this._cloudsFBO); addFbo(this._cloudTraceFBO);
+        addFbo(this._refractionFBO ?? undefined);
         for (const f of this._cloudHistoryFBOs) addFbo(f);
         if (this._cloudBaseNoise) bytes += this._cloudBaseNoise.byteSize;
         if (this._cloudDetailNoise) bytes += this._cloudDetailNoise.byteSize;
