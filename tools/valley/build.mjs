@@ -695,6 +695,9 @@ function valleyScene() {
     exposure: 2.2, autoExposureEnabled: false, motionBlurEnabled: false,
     foliageCullDistance: PINE_CULL, foliageCellSize: 13,
     terrainLodEnabled: true, terrainLodDistance1: 150, terrainLodDistance2: 400, terrainLodStep1: 2, terrainLodStep2: 4,
+    // A 2 km valley seen to 3 km: four detailed cascades over the first 150 m, then the far cascade
+    // carries the ridges' and hills' shadows out to 1.5 km.
+    shadowMapResolution: 4096, shadowCascades: 4, shadowDistance: 150, shadowFarDistance: 1500,
   })
   return { scene: root, textures: [], ui: { version: 1, elements: [] }, config, assetHashes: {}, assetHashVersion: ASSET_HASH_VERSION, savedAt: souls.CREATED_AT }
 }

@@ -6,12 +6,17 @@ import { getAnimationTarget, bonePairsOf, computeBindMatrices, computeJointWorld
 // Viewport overlay for the Animation Editor: per-instance world matrices packed into flat Float32Arrays
 // each frame and submitted to renderer.setSkeletonOverlay, drawn always-on-top. Joint picking is a CPU
 // ray-sphere test that emits SELECT_JOINT.
+//
+// Joints are flat CIRCLES turned to face the camera and bones thin LINES between their edges, both sized
+// per frame from the camera distance so they stay the same size on screen at any zoom. Solid balls hid
+// the character under them and read as part of the mesh.
 
 const JOINT_COLOR: [number, number, number] = [0.25, 0.6, 1.0]
 const SELECTED_COLOR: [number, number, number] = [1.0, 0.85, 0.1]
 const IK_MARKER_COLOR: [number, number, number] = [0.2, 0.95, 0.45]
 const BONE_COLOR: [number, number, number] = [0.85, 0.85, 0.9]
-const JOINT_SCREEN_SIZE = 0.02 // sphere radius as a fraction of the distance metric (constant on screen)
+const JOINT_SCREEN_SIZE = 0.016 // circle radius as a fraction of the half view height (constant on screen)
+const LINE_WIDTH = 0.14 // bone line thickness, as a fraction of the joint circle's radius
 
 interface Props {
   viewportRef: React.RefObject<HTMLDivElement>
@@ -75,15 +80,21 @@ export default function AnimationSkeletonTool({ viewportRef, targetId, pickable 
   useEffect(() => {
     if (!instance || !editorScene) return
     let raf = 0
-    const IDENT_Q = Vec.quat.create()
     const q = Vec.quat.create()
     const up: [number, number, number] = [0, 1, 0]
     const mid: [number, number, number] = [0, 0, 0]
     const scl: [number, number, number] = [0, 0, 0]
     const posv: [number, number, number] = [0, 0, 0]
 
+    const facing = Vec.quat.create()
+    const camWorld = Vec.mat4.create()
+
     const tick = () => {
       const target = getAnimationTarget(editorScene, skeletonTargetId)
+      // The camera's orientation: every circle is turned to face it.
+      const viewCam = instance.scene?.activeCamera?.camera
+      if (viewCam && Vec.mat4.invert(camWorld, viewCam.viewMatrix as any)) Vec.mat4.getRotation(facing, camWorld)
+      else Vec.quat.identity(facing)
       const jointMats = jointMatricesRef.current
       if (target && jointMats.length) {
         const n = target.skin.joints.length
@@ -98,7 +109,7 @@ export default function AnimationSkeletonTool({ viewportRef, targetId, pickable 
           jrad[i] = s
           posv[0] = pos[0]; posv[1] = pos[1]; posv[2] = pos[2]
           scl[0] = s; scl[1] = s; scl[2] = s
-          Vec.mat4.fromRotationTranslationScale(jm.subarray(i * 16, i * 16 + 16) as any, IDENT_Q as any, posv as any, scl as any)
+          Vec.mat4.fromRotationTranslationScale(jm.subarray(i * 16, i * 16 + 16) as any, facing as any, posv as any, scl as any)
         }
 
         const pairs = bonePairsRef.current
@@ -109,11 +120,14 @@ export default function AnimationSkeletonTool({ viewportRef, targetId, pickable 
           const dx = px - cx, dy = py - cy, dz = pz - cz
           const len = Math.hypot(dx, dy, dz)
           const out = bm.subarray(b * 16, b * 16 + 16) as any
-          if (len > 1e-5) {
-            const s = jrad[ci]
+          // From circle edge to circle edge, so the line does not cross the joints' rings.
+          const span = len - jrad[ci] - jrad[pi]
+          if (len > 1e-5 && span > 1e-5) {
+            const s = (jrad[ci] + jrad[pi]) / 2
             Vec.quat.rotationTo(q, up as any, [dx / len, dy / len, dz / len] as any)
-            mid[0] = (cx + px) / 2; mid[1] = (cy + py) / 2; mid[2] = (cz + pz) / 2
-            scl[0] = s * 0.35; scl[1] = len; scl[2] = s * 0.35
+            const t0 = jrad[ci] / len, t1 = 1 - jrad[pi] / len, tm = (t0 + t1) / 2
+            mid[0] = cx + dx * tm; mid[1] = cy + dy * tm; mid[2] = cz + dz * tm
+            scl[0] = s * LINE_WIDTH; scl[1] = span; scl[2] = s * LINE_WIDTH
             Vec.mat4.fromRotationTranslationScale(out, q as any, mid as any, scl as any)
           } else {
             Vec.mat4.identity(out)
@@ -132,7 +146,7 @@ export default function AnimationSkeletonTool({ viewportRef, targetId, pickable 
           const s = jrad[j] * 1.35
           posv[0] = jpos[j * 3]; posv[1] = jpos[j * 3 + 1]; posv[2] = jpos[j * 3 + 2]
           scl[0] = s; scl[1] = s; scl[2] = s
-          Vec.mat4.fromRotationTranslationScale(mm.subarray(markerCount * 16, markerCount * 16 + 16) as any, IDENT_Q as any, posv as any, scl as any)
+          Vec.mat4.fromRotationTranslationScale(mm.subarray(markerCount * 16, markerCount * 16 + 16) as any, facing as any, posv as any, scl as any)
           markerCount++
         }
 
@@ -143,7 +157,7 @@ export default function AnimationSkeletonTool({ viewportRef, targetId, pickable 
           const s = jrad[sel] * 1.5
           posv[0] = jpos[sel * 3]; posv[1] = jpos[sel * 3 + 1]; posv[2] = jpos[sel * 3 + 2]
           scl[0] = s; scl[1] = s; scl[2] = s
-          Vec.mat4.fromRotationTranslationScale(highlightMatRef.current as any, IDENT_Q as any, posv as any, scl as any)
+          Vec.mat4.fromRotationTranslationScale(highlightMatRef.current as any, facing as any, posv as any, scl as any)
           highlight = highlightMatRef.current
         }
 
@@ -152,6 +166,7 @@ export default function AnimationSkeletonTool({ viewportRef, targetId, pickable 
           boneMatrices: bm, boneCount: pairs.length, boneColor: BONE_COLOR,
           markerMatrices: markerCount > 0 ? mm : null, markerCount, markerColor: IK_MARKER_COLOR,
           highlightMatrix: highlight, highlightColor: SELECTED_COLOR,
+          jointShape: 'ring',
         })
       }
       raf = requestAnimationFrame(tick)

@@ -195,3 +195,95 @@ describe('isNavigableUp', () => {
         expect(isNavigableUp([0, 0, 0])).toBe(true);
     });
 });
+
+// ----- terrain-shaped bakes ----------------------------------------------------------------------
+//
+// What a landscape bake actually produces: one region per triangle (the merge is off by default) on a
+// surface that is not flat, queried from an agent whose feet are never exactly on it.
+
+/** An n x n grid of unit cells, two triangles each, heights from `h`, minus the `holes` cells. */
+function terrainData(n: number, h: (x: number, z: number) => number, holes: (x: number, z: number) => boolean = () => false): NavMeshData {
+    const verts: number[] = [];
+    const counts: number[] = [];
+    const v = (x: number, z: number) => verts.push(x, h(x, z), z);
+    for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) {
+        if (holes(x, z)) continue;
+        // Same winding as quadData's (x,z) -> (x,z+1) -> (x+1,z+1) -> (x+1,z), split in two.
+        v(x, z); v(x, z + 1); v(x + 1, z + 1); counts.push(3);
+        v(x, z); v(x + 1, z + 1); v(x + 1, z); counts.push(3);
+    }
+    return { vertices: new Float32Array(verts), counts: new Uint32Array(counts) };
+}
+
+const bumpy = (x: number, z: number) => 0.4 * Math.sin(x * 0.7) + 0.3 * Math.cos(z * 0.5) + 0.05 * x;
+
+describe('CleoNavMesh on terrain', () => {
+    it('finds the region under feet that are not exactly on the surface', () => {
+        const mesh = buildNavMesh(terrainData(10, bumpy))!;
+        const y = bumpy(4.3, 6.2);
+        expect(mesh.contains([4.3, y + 0.3, 6.2])).toBe(true);
+        expect(mesh.contains([4.3, y - 0.2, 6.2])).toBe(true);
+        // But not from a storey up, and not beside the mesh.
+        expect(mesh.contains([4.3, y + 6, 6.2])).toBe(false);
+        expect(mesh.contains([12, y, 6.2])).toBe(false);
+    });
+
+    it('walks straight across open ground instead of a staircase of triangles', () => {
+        const mesh = buildNavMesh(terrainData(30, bumpy))!;
+        for (const [from, to] of [[[1.3, 0, 2.7], [27.6, 0, 21.2]], [[3.1, 0, 25.4], [26.2, 0, 4.9]], [[0.5, 0, 14.5], [29.5, 0, 15.5]]]) {
+            const path = mesh.findPath([from[0], bumpy(from[0], from[2]) + 0.1, from[2]], [to[0], bumpy(to[0], to[2]) + 0.1, to[2]]);
+            expect(path).toHaveLength(2);
+            // Waypoints sit ON the surface, not at the query's height.
+            expect(path[1][1]).toBeCloseTo(bumpy(to[0], to[2]), 1);
+        }
+    });
+
+    it('still bends around a real hole, and only there', () => {
+        // A 4x10 hole in the middle of the field.
+        const hole = (x: number, z: number) => x >= 13 && x < 17 && z >= 5 && z < 25;
+        const mesh = buildNavMesh(terrainData(30, () => 0, hole))!;
+        const path = mesh.findPath([10, 0, 15], [20, 0, 15]);
+        expect(path.length).toBe(4);
+        // The two interior points are the hole's corners on one side.
+        const inner = path.slice(1, -1).map(p => [Math.round(p[0]), Math.round(p[2])]);
+        expect(inner.every(([x]) => x === 13 || x === 17)).toBe(true);
+        expect(new Set(inner.map(([, z]) => z)).size).toBe(1);
+        // Every leg stays on the mesh.
+        for (let i = 0; i < path.length - 1; i++) for (let t = 0.05; t < 1; t += 0.05) {
+            const x = path[i][0] + (path[i + 1][0] - path[i][0]) * t, z = path[i][2] + (path[i + 1][2] - path[i][2]) * t;
+            expect(hole(Math.floor(x), Math.floor(z)) && x > 13.001 && x < 16.999 && z > 5.001 && z < 24.999).toBe(false);
+        }
+    });
+
+    it('routes from an off-mesh point to the nearest ground in XZ, not the nearest 3D centroid', () => {
+        // Two islands at very different heights; the query point is beside the LOW one but level with
+        // the high one. A 3D centroid search picks the high island.
+        const low = terrainData(4, () => 0);
+        const highVerts = Array.from(terrainData(4, () => 10).vertices, (v, i) => i % 3 === 0 ? v + 20 : v);
+        const data: NavMeshData = {
+            vertices: new Float32Array([...low.vertices, ...highVerts]),
+            counts: new Uint32Array([...low.counts, ...low.counts]),
+        };
+        const mesh = buildNavMesh(data)!;
+        const path = mesh.findPath([2, 0, 2], [5, 9, 2]);
+        expect(path.length).toBeGreaterThan(0);
+        expect(path[path.length - 1][0]).toBeCloseTo(4, 3);
+        expect(path[path.length - 1][1]).toBeCloseTo(0, 3);
+    });
+
+    it('loads a landscape-sized bake in well under a second', () => {
+        const data = terrainData(140, bumpy); // 39,200 regions -- a 300 x 260 m volume baked at 2 m
+        const t0 = performance.now();
+        const mesh = buildNavMesh(data)!;
+        expect(performance.now() - t0).toBeLessThan(1500);
+        expect(mesh.regionCount).toBe(39200);
+        expect(mesh.nodeCount).toBe(39200);
+    });
+
+    it('answers a terrain-sized query quickly', () => {
+        const mesh = buildNavMesh(terrainData(90, bumpy))!; // 16,200 regions
+        const t0 = performance.now();
+        for (let i = 0; i < 20; i++) mesh.findPath([2 + i, 0, 3], [85, 0, 80 - i]);
+        expect((performance.now() - t0) / 20).toBeLessThan(40);
+    });
+});

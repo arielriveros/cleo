@@ -5,6 +5,7 @@ import TransformGizmo from "./gizmo/TransformGizmo";
 import BoneGizmo from "./clip/BoneGizmo";
 import SocketPreviews from "./sockets/SocketPreviews";
 import SocketGizmo from "./sockets/SocketGizmo";
+import RagdollPreview from './rig/RagdollPreview';
 import useGizmoShortcuts from "./gizmo/useGizmoShortcuts";
 import type { TransformPatch } from "./gizmo/gizmoDrag";
 import { effectiveGizmoSpace } from "../utils/gizmoMath";
@@ -546,6 +547,8 @@ export default function EngineViewport() {
                     the one selected in the Sockets panel. */}
                 <SocketPreviews />
                 <SocketGizmo viewportRef={viewportRef} />
+                {/* The rig's ragdoll: colliders and joint limits on the preview, and its test fall. */}
+                <RagdollPreview />
             </>}
 
             {/* The clip editor draws the same bone overlay, but NOT `AnimationPlayer`: its transport is a

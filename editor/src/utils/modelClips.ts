@@ -168,6 +168,28 @@ export function assetWithSockets<T extends ClipBearingAsset>(asset: T, sockets: 
   return { ...asset, nodeJson }
 }
 
+/**
+ * The ragdoll profile an asset's skeleton carries, embedded from its rig like the sockets (see
+ * `syncRigSockets`). Stored as `skin.ragdollProfile`; null removes it.
+ */
+export function assetWithRagdollProfile<T extends ClipBearingAsset>(asset: T, profile: any | null | undefined): T {
+  const next = profile && Array.isArray(profile.parts) && profile.parts.length ? profile : null
+  if (JSON.stringify(assetRagdollProfile(asset) ?? null) === JSON.stringify(next)) return asset
+  const nodeJson = deepClone(asset.nodeJson)
+  const models = skinnedModelJsonsOf(nodeJson)
+  if (!models.length) return asset
+  for (const model of models) {
+    if (next) model.skin.ragdollProfile = deepClone(next)
+    else delete model.skin.ragdollProfile
+  }
+  return { ...asset, nodeJson }
+}
+
+/** The ragdoll profile an asset's skeleton carries, or null. */
+export function assetRagdollProfile(asset: ClipBearingAsset | undefined): any | null {
+  return skinnedModelJsonOf(asset?.nodeJson)?.skin?.ragdollProfile ?? null
+}
+
 /** The sockets an asset's skeleton carries, or null. */
 export function assetSockets(asset: ClipBearingAsset | undefined): any[] | null {
   return skinnedModelJsonOf(asset?.nodeJson)?.skin?.sockets ?? null

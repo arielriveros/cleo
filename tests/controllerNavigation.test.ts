@@ -169,6 +169,71 @@ describe('a controller on a path goal', () => {
         // Round the corner, so further than the straight-line distance of ~5.7.
         expect(w.controller.pathRemaining).toBeGreaterThan(6);
     });
+    // Leaving Chase for Strafe and coming back used to resume the OLD route at its old waypoint index.
+    it('throws its route away when the goal changes, and plans afresh on return', () => {
+        const w = world();
+        w.controller.repath = { interval: 100, targetDrift: 100 };
+        acrossTheCorner(w);
+        w.controller.goal = 'seek';
+        w.scene.update(1 / 60, 0, false);
+        expect(w.controller.path.points.length).toBe(0);
+
+        resetAIStats();
+        w.controller.goal = 'path';
+        w.scene.update(1 / 60, 0, false);
+        expect(aiStats.pathQueries).toBe(1);
+    });
+});
+
+describe('obstacle whiskers', () => {
+    /** A physics stand-in whose every ray hits `normal` half a metre out, recording where rays start. */
+    function stubPhysics(w: World, normal: [number, number, number], owner: unknown = null) {
+        const starts: number[][] = [];
+        Object.defineProperty(w.scene, 'physics', { configurable: true, value: {
+            up: [0, 1, 0],
+            raycast: (from: number[], _to: number[], opts?: { reject?: (o: unknown) => boolean }) => {
+                starts.push(from);
+                if (opts?.reject?.(owner)) return null;
+                return { distance: 0.5, normal, point: from, body: null };
+            },
+        } });
+        return starts;
+    }
+
+    function heading(w: World): vec3 {
+        w.character.setPosition([5, 0, 1]);
+        w.controller.steering = { ...w.controller.steering, avoidDistance: 1.5 };
+        w.controller.goal = 'seek';
+        w.controller.goalPoint = [-20, 0, 1];
+        w.controller.targetKey = 'point';
+        w.scene.update(1 / 60, 0, false);
+        return desiredDirection(w.character);
+    }
+
+    it('casts from the hips, not along the ground at the feet', () => {
+        const w = world({ baked: false });
+        const starts = stubPhysics(w, [1, 0, 0]);
+        heading(w);
+        expect(starts.length).toBeGreaterThan(0);
+        for (const s of starts) expect(s[1]).toBeGreaterThan(0.39);
+    });
+
+    // An uphill slope ahead is ground to walk on. Treating it as a wall pushed every agent downhill.
+    it('walks up a slope instead of being turned back by it', () => {
+        const w = world({ baked: false });
+        const slope = Math.sin(25 * Math.PI / 180), flat = Math.cos(25 * Math.PI / 180);
+        stubPhysics(w, [slope, flat, 0]); // a 25 degree rise facing back at an agent walking -X
+        const d = heading(w);
+        expect(d[0]).toBeLessThan(0);
+        expect(Math.abs(d[2])).toBeLessThan(1e-6);
+    });
+
+    it('still steers around a real wall', () => {
+        const w = world({ baked: false });
+        stubPhysics(w, [0.7071, 0, 0.7071]);
+        const d = heading(w);
+        expect(Math.abs(d[2])).toBeGreaterThan(0.05);
+    });
 });
 
 describe('a controller on a patrol goal', () => {

@@ -1485,6 +1485,7 @@ export class Animator {
             this._updateRagdollMatrices();
             return;
         }
+        this._capturePreviousPose(deltaTime);
         // A layer's animator poses whenever the animator it belongs to does; see _skipPose.
         if (!this._isOverlay) {
             this._skipPose = false;
@@ -3186,6 +3187,31 @@ export class Animator {
     }
 
     // ---- Ragdoll drive mode ----
+
+    // The pose BEFORE this frame's update, so a ragdoll can start with the velocity the animation had.
+    // One copy of the bone matrices per frame, skinned animators only.
+    private _prevBones: mat4[] | null = null;
+    private _prevNodeWorld: mat4 | null = null;
+    private _prevDt = 0;
+
+    private _capturePreviousPose(deltaTime: number): void {
+        const nodeWorld = this._node?.worldTransform as mat4 | undefined;
+        if (!this._skin || !nodeWorld || this._isOverlay) return;
+        const n = this._finalBoneMatrices.length;
+        if (!this._prevBones || this._prevBones.length !== n) this._prevBones = Array.from({ length: n }, () => mat4.create());
+        for (let i = 0; i < n; i++) mat4.copy(this._prevBones[i], this._finalBoneMatrices[i]);
+        this._prevNodeWorld = mat4.copy(this._prevNodeWorld ?? mat4.create(), nodeWorld);
+        this._prevDt = deltaTime;
+    }
+
+    /**
+     * The bone matrices and node transform as they were one update ago, and the time between -- what a
+     * ragdoll differences against the current pose for its hand-off velocity. Null before two updates.
+     */
+    public previousPose(): { bones: mat4[]; nodeWorld: mat4; dt: number } | null {
+        if (!this._prevBones || !this._prevNodeWorld || this._prevBones.length !== this._finalBoneMatrices.length) return null;
+        return { bones: this._prevBones, nodeWorld: this._prevNodeWorld, dt: this._prevDt };
+    }
 
     /** True while bones are driven by physics bodies instead of animation. */
     public get ragdollActive(): boolean { return this._ragdollActive; }

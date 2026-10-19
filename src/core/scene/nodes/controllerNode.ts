@@ -39,6 +39,12 @@ import { aiStats } from "../../../ai/aiStats";
 import { vec3 } from "gl-matrix";
 
 /**
+ * A whisker hit whose surface faces up at least this much (cos 50 deg) is ground to walk on, not a
+ * wall to steer around. Steeper than the 45 deg the locomotion climbs, so a real cliff still counts.
+ */
+const WALKABLE_NORMAL_UP = Math.cos(50 * Math.PI / 180);
+
+/**
  * A driver: it possesses a {@link CharacterNode} and decides, each frame, what that character should try
  * to do. Whether the decision comes from a player's actions or from a brain is this node's business and
  * nobody else's.
@@ -266,6 +272,10 @@ export class ControllerNode extends Node {
     private _probes: ProbeHit[] = [];
     private readonly _path: NavPath = createNavPath();
     private readonly _repathState: RepathState = createRepathState();
+    /** The goal + target the current route was planned for; a change throws the route away. */
+    private _routeKey = '';
+    /** What the agent is steering toward this frame, so the whiskers do not swerve away from it. */
+    private _steerTarget: Node | null = null;
     private _routeIndex: number = 0;
     private readonly _pathScratch: vec3[] = [];
     private readonly _perception = new Perception();
@@ -714,6 +724,16 @@ export class ControllerNode extends Node {
         const tuning = this.steering;
 
         const target = this._resolveTarget(targetKey);
+        this._steerTarget = target;
+        // A route belongs to the goal it was planned for. Leaving Chase for Strafe and coming back used
+        // to resume the OLD route at its old index -- walking back toward waypoints already passed --
+        // because the repath timer only advances while a path goal runs.
+        const routeKey = `${goal}|${targetKey}|${target?.id ?? ''}`;
+        if (routeKey !== this._routeKey) {
+            this._routeKey = routeKey;
+            clearNavPath(this._path);
+            this._repathState.planned = false;
+        }
         if (target) {
             const p = target.worldPosition;
             vec3.set(this._targetPos, p[0], p[1], p[2]);
@@ -1207,7 +1227,16 @@ export class ControllerNode extends Node {
 
         const count = Math.max(1, Math.min(9, Math.round(this.whiskerCount)));
         const spread = this.whiskerSpread;
-        const from = pawn.worldPosition;
+        const feet = pawn.worldPosition;
+        // From the hips, not the feet. A level ray from the feet meets ANY rising ground within a metre
+        // and a half -- a 2 degree slope is a wall to it -- and avoidance then pushed every agent
+        // downhill: enemies turned back, paced at the foot of hills, or slid along contour lines.
+        const up = this._resolveUp();
+        const lift = Math.min(1, Math.max(0.4, this.eyeHeight * 0.5));
+        const from = [feet[0] + up[0] * lift, feet[1] + up[1] * lift, feet[2] + up[2] * lift];
+        const target = this._steerTarget;
+        // Ground the agent could walk up is not an obstacle, and neither is the thing it is going to.
+        const reject = (owner: Node | null) => !!target && !!owner && (owner === target || owner.isDescendantOf(target));
         const heading = Math.atan2(this._desired[0], this._desired[2]);
         const body = pawn.body;
 
@@ -1224,9 +1253,11 @@ export class ControllerNode extends Node {
             ];
             let hit = null;
             try {
-                hit = physics.raycast([from[0], from[1], from[2]], to, { ignore: body ? [body] : undefined });
+                hit = physics.raycast([from[0], from[1], from[2]], to, { ignore: body ? [body] : undefined, reject });
             } catch { hit = null; }
             if (!hit) continue;
+            const n = hit.normal;
+            if (n[0] * up[0] + n[1] * up[1] + n[2] * up[2] >= WALKABLE_NORMAL_UP) continue;
             this._probes.push({
                 direction: [dx, 0, dz],
                 distance: hit.distance,

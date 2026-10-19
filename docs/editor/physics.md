@@ -114,23 +114,47 @@ The measured recommendation, from the [third-person example](../../examples/scri
 
 ## Ragdolls
 
-Available on skinned models.
+Available on skinned models. Start one from a script with `scene.physics.startRagdoll(modelNode, options)`
+-- the usual substitute for, or ending to, a death animation.
 
-| Setting | Meaning |
-|---|---|
-| **Joint type** | Ball or Cone-Twist. |
-| **Cone angle** / **Twist angle** | Cone-twist limits. |
-| **Stiffness** | |
-| **Angular / linear damping** | |
-| **Bone mass** | |
-| **Radius scale** | How thick the per-bone capsules are relative to the bone. |
-| **Self collision** | |
-| **Knockback impulse** | Applied when the ragdoll starts. |
+A character falls with one of three ragdolls, and the **Ragdoll** section on the model says which:
 
-> **Keep the twist limit loose.** The constraint solver's twist equation jitters when it is tight.
+| Source | When | What it is |
+|---|---|---|
+| **Rig profile** | Its rig has parts authored in the rig editor's **Ragdoll** panel | Exactly what was authored. |
+| **Automatic humanoid** | No authored parts, and the skeleton has recognizable hips and legs | 16 body parts fitted to the bones. |
+| **Generic** | Anything else | A sphere on every substantial bone, tuned by the fields in this section. |
 
-Start one from a script with `scene.physics.startRagdoll(modelNode, options)` — this is the usual
-substitute for a death animation.
+The humanoid ragdoll (authored or automatic) is built per body *segment*, not per bone:
+
+- pelvis, spine and chest; head; upper arms, forearms and hands; thighs, shins and feet;
+- capsules and boxes along each segment, sized from the bones;
+- masses from human segment proportions, 70 kg by default;
+- knees and elbows are **hinges** that only bend one way;
+- the other joints are cones centred on a natural resting direction, so an arm bound in a T-pose rests lower;
+- limbs collide with each other and with the torso.
+
+Its node settings are **Mass scale** and **Push**. Push is a velocity added to the upper body as it starts
+falling, in the character's own frame (left, up, forward); a negative forward value topples it backwards.
+
+### The Ragdoll panel (rig editor)
+
+Open the rig, then use **Ragdoll** in the inspector:
+
+- **Customize** copies the automatic profile onto the rig so its parts can be edited. **Reset to auto**
+  drops it again.
+- Each part has:
+  - a bone and the bone it ends at;
+  - a shape, size and share of the mass;
+  - a joint: cone (swing, twist, aim) or hinge (bend range, **Flip bend direction**).
+- The viewport draws every collider (cyan) and every joint limit (yellow) on the preview character in its
+  current pose. Clicking a bone opens the part on it.
+- **Test drop** drops the preview character onto a floor so you can see the fall. **Reset pose** brings it
+  back.
+
+Every model on the rig falls with the saved profile, in scenes, templates and the published game.
+
+> **Keep twist limits loose.** The constraint solver's twist equation jitters when it is tight.
 
 ## Terrain and tilemap collision
 

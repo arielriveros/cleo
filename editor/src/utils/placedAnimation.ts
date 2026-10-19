@@ -23,7 +23,7 @@ export interface NodeLike {
   animator?: AnimatorLike | null
   ragdollConfig?: any
   /** ModelNodes only; `skin` exists only on an AnimatedModel. */
-  model?: { skin?: { ikRig?: any; sockets?: any[] } | null } | null
+  model?: { skin?: { ikRig?: any; sockets?: any[]; ragdollProfile?: any } | null } | null
   children: NodeLike[]
 }
 
@@ -48,6 +48,14 @@ export function applySockets(inst: NodeLike, sockets: any[] | null): void {
     const skin = node.model?.skin
     // A fresh array each time: the runtime resolver caches on the array's identity.
     if (skin) skin.sockets = sockets?.length ? sockets.map(s => ({ ...s })) : undefined
+  }
+}
+
+/** Push a model asset's ragdoll profile onto every skinned model in a placed subtree; see {@link applySockets}. */
+export function applyRagdollProfile(inst: NodeLike, profile: any | null): void {
+  for (const node of animationNodesOf(inst)) {
+    const skin = node.model?.skin
+    if (skin) skin.ragdollProfile = profile?.parts?.length ? JSON.parse(JSON.stringify(profile)) : undefined
   }
 }
 

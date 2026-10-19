@@ -20,7 +20,12 @@ import {
     mixNumber,
     mixString,
     mixTransform,
+    lightViewMatrix,
+    pushCasterBounds,
+    staleCascadeCovers,
+    STAGGER_MARGIN,
 } from '../src/graphics/shadowMath';
+import type { ShadowCasterBounds } from '../src/graphics/shadowMath';
 
 /**
  * The cascade fit is where shadow mapping fails silently: a sign error makes everything black, and a
@@ -235,6 +240,67 @@ describe('buildCascadeMatrix', () => {
         const base = footprintFor(0, false);
         const [x] = footprintFor(0.3, false);
         expect(x).not.toBeCloseTo(base[0], 10);
+    });
+
+    describe('caster-fit near plane', () => {
+        function casters(...spheres: [vec3, number][]): ShadowCasterBounds {
+            const view = lightViewMatrix(SUN, mat4.create(), { up: vec3.create(), center: vec3.create() });
+            const b: ShadowCasterBounds = { data: new Float32Array(4), count: 0 };
+            for (const [c, r] of spheres) pushCasterBounds(b, view, c[0], c[1], c[2], r);
+            return b;
+        }
+
+        it('reaches a ridge far up-sun of the slice, past the fixed pad', () => {
+            // The valley case: a ridge 400 m toward the sun shadows the slice, and a 50 m pad clipped
+            // it — its shadow came and went as the cascade moved with the camera.
+            const sphere = { center: vec3.fromValues(0, 0, 0), radius: 20 };
+            const ridge = vec3.scaleAndAdd(vec3.create(), sphere.center, SUN, -400);
+            const out = mat4.create();
+            buildCascadeMatrix(sphere, SUN, 1024, 50, out, scratch(), true, casters([ridge, 30]));
+            expect(project(out, ridge)[2]).toBeGreaterThanOrEqual(-1);
+
+            const padOnly = mat4.create();
+            buildCascadeMatrix(sphere, SUN, 1024, 50, padOnly, scratch(), true);
+            expect(project(padOnly, ridge)[2]).toBeLessThan(-1);
+        });
+
+        it('ignores casters off the footprint, so a distant one cannot stretch the depth range', () => {
+            const sphere = { center: vec3.fromValues(0, 0, 0), radius: 20 };
+            // Up-sun but displaced sideways by 500 m: it shadows somewhere else entirely.
+            const side = vec3.cross(vec3.create(), SUN, [0, 1, 0]);
+            vec3.normalize(side, side);
+            const far = vec3.scaleAndAdd(vec3.create(), vec3.scale(vec3.create(), SUN, -400), side, 500);
+            const withIt = buildCascadeMatrix(sphere, SUN, 1024, 50, mat4.create(), scratch(), true, casters([far, 10]));
+            const without = buildCascadeMatrix(sphere, SUN, 1024, 50, mat4.create(), scratch(), true);
+            expect(withIt.depthRange).toBeCloseTo(without.depthRange, 6);
+        });
+
+        it('never pulls the near plane IN past the pad', () => {
+            const sphere = { center: vec3.fromValues(0, 0, 0), radius: 20 };
+            const inside = buildCascadeMatrix(sphere, SUN, 1024, 50, mat4.create(), scratch(), true,
+                                              casters([vec3.fromValues(0, 0, 0), 5]));
+            const without = buildCascadeMatrix(sphere, SUN, 1024, 50, mat4.create(), scratch(), true);
+            expect(inside.depthRange).toBeCloseTo(without.depthRange, 6);
+        });
+    });
+});
+
+describe('staleCascadeCovers', () => {
+    const s = (x: number, r: number) => ({ center: vec3.fromValues(x, 0, 0), radius: r });
+
+    it('covers while the move stays within the stagger margin', () => {
+        const old = s(0, 20 * (1 + STAGGER_MARGIN));
+        expect(staleCascadeCovers(old, s(0, 20))).toBe(true);
+        expect(staleCascadeCovers(old, s(1.9, 20))).toBe(true);
+    });
+
+    it('stops covering once the slice outruns the margin, forcing a re-render', () => {
+        const old = s(0, 20 * (1 + STAGGER_MARGIN));
+        expect(staleCascadeCovers(old, s(2.1, 20))).toBe(false);
+    });
+
+    it('never covers from a cascade that was never drawn', () => {
+        expect(staleCascadeCovers(s(0, 0), s(0, 1))).toBe(false);
     });
 });
 

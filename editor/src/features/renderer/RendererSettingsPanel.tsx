@@ -208,6 +208,7 @@ export default function RendererSettingsPanel() {
   const [shadowStabilize, setShadowStabilize] = useState<boolean>(() => renderer?.shadowStabilize ?? true);
   const [shadowStagger, setShadowStagger] = useState<boolean>(() => renderer?.shadowStagger ?? true);
   const [shadowCasterPad, setShadowCasterPad] = useState<number>(() => renderer?.shadowCasterPad ?? 50);
+  const [shadowFarDistance, setShadowFarDistance] = useState<number>(() => renderer?.shadowFarDistance ?? 0);
   const [shadowDebugLayer, setShadowDebugLayer] = useState<number>(() => renderer?.shadowDebugLayer ?? 0);
   const [spotShadows, setSpotShadows] = useState<boolean>(() => renderer?.spotShadowsEnabled ?? true);
   const [spotShadowRes, setSpotShadowRes] = useState<number>(() => renderer?.spotShadowResolution ?? 1024);
@@ -303,6 +304,7 @@ export default function RendererSettingsPanel() {
     setShadowStabilize(renderer.shadowStabilize);
     setShadowStagger(renderer.shadowStagger);
     setShadowCasterPad(renderer.shadowCasterPad);
+    setShadowFarDistance(renderer.shadowFarDistance);
     setShadowDebugLayer(renderer.shadowDebugLayer);
     setSpotShadows(renderer.spotShadowsEnabled);
     setSpotShadowRes(renderer.spotShadowResolution);
@@ -678,6 +680,11 @@ export default function RendererSettingsPanel() {
           <NumberInput value={shadowDistance} min={1} step={10} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.shadowDistance = v; setShadowDistance(renderer.shadowDistance); touch(); }} />
         </Field>
+        <Field labelClassName={LABEL_W} label='Far Distance'
+          hint='Landscape-scale shadows past Distance: terrain and large casters only, refreshed as the camera travels. 0 = off.'>
+          <NumberInput value={shadowFarDistance} min={0} step={100} className='flex-1 text-right px-1 py-0.5'
+            onChange={(v) => { renderer.shadowFarDistance = v; setShadowFarDistance(renderer.shadowFarDistance); touch(); }} />
+        </Field>
         <Slider label='Split &#955;' value={shadowLambda} min={0} max={1} step={0.05}
           onChange={(v) => { renderer.shadowSplitLambda = v; setShadowLambda(v); touch(); }} />
 
@@ -717,7 +724,8 @@ export default function RendererSettingsPanel() {
             <SegmentedControl
               value={shadowDebugLayer}
               onChange={(n) => { renderer.shadowDebugLayer = n; setShadowDebugLayer(renderer.shadowDebugLayer); touch(); }}
-              options={Array.from({ length: shadowCascades }, (_, i) => ({ value: i, label: String(i) }))}
+              options={Array.from({ length: shadowCascades + (shadowFarDistance > 0 ? 1 : 0) },
+                (_, i) => ({ value: i, label: i < shadowCascades ? String(i) : 'Far' }))}
             />
           </div>
         )}

@@ -412,7 +412,8 @@ function unitSphereLines(segments = 48): { positions: [number, number, number][]
   return { positions, indices };
 }
 
-function wireModel(name: string, lines: { positions: [number, number, number][]; indices: number[] },
+/** A line-list wireframe node (editor-only overlay), from arbitrary line pairs. */
+export function wireModel(name: string, lines: { positions: [number, number, number][]; indices: number[] },
                    color: [number, number, number]): ModelNode {
   // Normals and uvs only to satisfy the VAO stride — see ensureDecalBox.
   const geometry = new Geometry(lines.positions, lines.positions.map(() => [0, 1, 0] as [number, number, number]),

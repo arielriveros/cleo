@@ -10,6 +10,7 @@ import { getAnimationTarget } from '../animation/skeleton'
 import AnimationAssetPicker from '../animation/AnimationAssetPicker'
 import BoneMappingTable, { mappingCounts } from '../animation/BoneMappingTable'
 import SocketsPanel from './SocketsPanel'
+import RagdollPanel from './RagdollPanel'
 import BoneMasksPanel from './BoneMasksPanel'
 import PoseAssetsPanel from './PoseAssetsPanel'
 import { loadSkin, type StoredSkin } from '../../utils/animationAssets'
@@ -179,6 +180,8 @@ export default function RigInspector() {
 
       {/* ---- Sockets ---------------------------------------------------------------------------- */}
       <SocketsPanel />
+
+      <RagdollPanel />
 
       {/* ---- Bone masks ------------------------------------------------------------------------- */}
       <BoneMasksPanel />

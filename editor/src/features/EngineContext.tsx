@@ -40,7 +40,7 @@ import { MaterialAsset, buildMaterialAsset, applyMaterialAsset, getMaterialIdOf,
 import { getScreenMaterialIds, applyScreenMaterials } from "../utils/screenMaterials";
 import { TerrainMaterialAsset, buildTerrainMaterialAsset, parseTerrainMaterialAsset, applyTerrainMaterialToLayer, collectTerrainMaterialTextureIds, syncSlotMaterialInTerrain, withSyncedSlotMaterial } from "../utils/terrainMaterials";
 import { buildFoliageRuleFromModelAsset } from "../utils/foliageRules";
-import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, recenterIfOffOrigin, rescaleLodDistances, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, modelInstanceShape, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE, buildPartAsset, submeshNodeJson, uniqueModelName, lodLevelMaterialLinks, withLevelLinks, type ModelPart } from "../utils/models";
+import { ModelAsset, ModelLodDef, MODEL_ID_VAR, buildModelAsset, instantiateModelAsset, separateSubModels, mergeSubModels, groupSubModels, recenterIfOffOrigin, rescaleLodDistances, nodeJsonHasSkinnedModel, lodLevelJson, nodeJsonHasModel, modelIdOf, refreshModelClips, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved, assetWithClipRootMotion, assetWithBoneNames, assetWithIkRig, assetWithSockets, assetWithRagdollProfile, flattenModelAsset, skinnedModelJsonOf, skinnedModelJsonsOf, assetWithoutEmbeddedClips, modelAssetHasLodBehavior, modelInstanceShape, applyModelTransformDelta, readModelBaseTrs, modelNodeOf, LOD_CULL_MARGIN, DEFAULT_IMPOSTOR_DISTANCE, buildPartAsset, submeshNodeJson, uniqueModelName, lodLevelMaterialLinks, withLevelLinks, type ModelPart } from "../utils/models";
 import { downscaleTextures, levelTextureIds, maskTextureIds } from "../utils/lodTextures";
 import { detachForeignChildren, reattachForeignChildren } from "../utils/foreignChildren";
 import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScriptAsset, unlinkScript, getScriptIdOf, defaultScriptClass, defaultScriptModule, seedScriptFields, scriptKindOfAsset } from "../utils/scripts";
@@ -2896,14 +2896,20 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const targets = onlyModels
       ? modelsRef.current.filter(m => onlyModels.includes(m.id))
       : modelsRef.current.filter(m => m.rigId === rig.id);
+    // The ragdoll profile rides along the same way: authored on the rig, read from the skin.
+    const ragdoll = rig.ragdoll?.parts?.length ? rig.ragdoll : null;
     for (const model of targets) {
-      const updated = assetWithSockets(model, sockets);
+      const updated = assetWithRagdollProfile(assetWithSockets(model, sockets), ragdoll);
       if (updated !== model) {
         modelsRef.current = modelsRef.current.map(m => (m.id === model.id ? updated : m));
         updateModel(model.id, updated);
       }
       // Fresh arrays per skin: the runtime caches socket resolution on the array's identity.
-      propagateModelClips(model.id, m => { if (m.skin) m.skin.sockets = sockets.length ? sockets.map(s => ({ ...s })) : undefined; });
+      propagateModelClips(model.id, m => {
+        if (!m.skin) return;
+        m.skin.sockets = sockets.length ? sockets.map(s => ({ ...s })) : undefined;
+        m.skin.ragdollProfile = ragdoll ? JSON.parse(JSON.stringify(ragdoll)) : undefined;
+      });
     }
   };
 

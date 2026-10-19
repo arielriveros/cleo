@@ -286,6 +286,13 @@ export type { PackSpec, ChannelSource } from "./graphics/systems/texturePacker";
 export { RigidBody as Body, Trigger } from "./physics/body";
 export { Ragdoll, RAGDOLL_DEFAULTS } from "./physics/ragdoll";
 export type { RagdollOptions } from "./physics/ragdoll";
+export {
+    autoHumanoidProfile, effectiveRagdollProfile, parseRagdollProfile, ragdollLayout, defaultJoint,
+    findBoneJoint, ragdollPartPose, RAGDOLL_PROFILE_DEFAULTS,
+} from "./physics/ragdollProfile";
+export type {
+    RagdollProfile, RagdollPart, RagdollJoint, RagdollShape, RagdollJointType, RagdollLayout, RagdollLayoutPart,
+} from "./physics/ragdollProfile";
 export { Model, serializeGeometry } from "./graphics/model";
 export type { Submesh } from "./graphics/model";
 export { AnimatedModel } from "./animation/animatedModel";

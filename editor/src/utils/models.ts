@@ -385,7 +385,7 @@ export function modelAssetHasLodBehavior(asset: ModelAsset): boolean {
 export {
   skinnedModelJsonOf, skinnedModelJsonsOf, assetWithClipAdded, assetWithClipRenamed, assetWithClipRemoved,
   assetWithClipRootMotion, assetWithBoneNames, assetClipNames, assetWithIkRig, assetIkRig,
-  assetWithSockets, assetSockets,
+  assetWithSockets, assetSockets, assetWithRagdollProfile, assetRagdollProfile,
   flattenModelJson, flattenModelAsset, assetWithoutEmbeddedClips,
   carryModelAssetFields, MODEL_ASSET_PRESERVED_KEYS,
 } from './modelClips'

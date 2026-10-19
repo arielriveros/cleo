@@ -3,7 +3,7 @@ import { Scene } from "../core/scene/scene";
 import { Node } from "../core/scene/nodes/node";
 import { ModelNode } from "../core/scene/nodes/modelNode";
 import { unwrapScriptNode } from "../core/scene/nodes/nodeScripting";
-import { World, Body, Constraint, Material, ContactMaterial, Vec3, SAPBroadphase, Ray, RaycastResult, AABB } from 'cannon-es';
+import { World, Body, Constraint, Material, ContactMaterial, Vec3, SAPBroadphase, Ray, RaycastResult, AABB, Plane } from 'cannon-es';
 import { vec3 } from "gl-matrix";
 import { RigidBody, DEFAULT_FRICTION, DEFAULT_RESTITUTION } from "./body";
 import { Ragdoll, RagdollOptions } from "./ragdoll";
@@ -315,6 +315,18 @@ export class PhysicsSystem {
   // ---- Low-level world access (for bodies/constraints not owned by a scene node, e.g. ragdolls) ----
 
   /** Add a standalone body to the world (deduplicated). Takes the default surface if it has no material. */
+  /**
+   * A static, infinite ground plane at `height` (facing up), in the world until passed to removeBody. For
+   * tools that need something to fall onto in a scene with no level -- the rig editor's ragdoll test.
+   */
+  public addGroundPlane(height = 0): Body {
+    const body = new Body({ mass: 0, shape: new Plane() });
+    body.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+    body.position.set(0, height, 0);
+    this.addBody(body);
+    return body;
+  }
+
   public addBody(body: Body): void {
     if (!this._world) return;
     if (!this._inWorld.has(body)) {
@@ -832,15 +844,44 @@ export class PhysicsSystem {
   private static readonly _groundCandidates: Body[] = [];
 
   /**
-   * Turn a skinned ModelNode into a ragdoll: spawn a rigid body per bone, link them
-   * with ball joints, and drive the skeleton from physics. Returns the Ragdoll handle.
+   * Turn a skinned ModelNode into a ragdoll and drive its skeleton from physics. A humanoid (or a rig
+   * with an authored profile) gets shaped segment bodies with anatomical joints -- see ragdollProfile.ts;
+   * anything else gets a body per substantial bone. Returns the Ragdoll handle.
    */
   public startRagdoll(modelNode: ModelNode, options?: RagdollOptions): Ragdoll {
     // Scripts hand over a script proxy; the ragdoll retains the node and the engine compares nodes by
     // identity, so it must be unwrapped to the real one.
     const ragdoll = new Ragdoll(unwrapScriptNode(modelNode), this, options);
     this._ragdolls.push(ragdoll);
+    this._applyRagdollIterations();
     return ragdoll;
+  }
+
+  /** The solver's own iteration count, from before any ragdoll raised it. */
+  private _baseIterations: number | null = null;
+
+  /**
+   * A chain of 15 jointed bodies sags and stretches at cannon's 10 solver iterations. Raise the count
+   * while a live (unfrozen) ragdoll wants it, and put it back when none does, so nothing pays for it
+   * the rest of the time.
+   */
+  private _applyRagdollIterations(): void {
+    const solver = this._world?.solver as unknown as { iterations?: number } | undefined;
+    if (!solver || typeof solver.iterations !== 'number') return;
+    let want = 0;
+    for (const r of this._ragdolls) if (!r.frozen && !r.destroyed) want = Math.max(want, r.solverIterations);
+    if (want > 0) {
+      if (this._baseIterations === null) this._baseIterations = solver.iterations;
+      solver.iterations = Math.max(this._baseIterations, want);
+    } else if (this._baseIterations !== null) {
+      solver.iterations = this._baseIterations;
+      this._baseIterations = null;
+    }
+  }
+
+  /** The solver iteration count in force (for tests and the stats panel). */
+  public get solverIterations(): number {
+    return (this._world?.solver as unknown as { iterations?: number } | undefined)?.iterations ?? 0;
   }
 
   /**
@@ -861,6 +902,7 @@ export class PhysicsSystem {
       this._ragdolls[kept++] = ragdoll;
     }
     this._ragdolls.length = kept;
+    this._applyRagdollIterations();
   }
 
   /** Ragdolls still alive (frozen ones included), for the stats panel and tests. */
@@ -874,6 +916,7 @@ export class PhysicsSystem {
       r.destroy();
       return false;
     });
+    this._applyRagdollIterations();
   }
 
   public clear(): void {
@@ -881,6 +924,7 @@ export class PhysicsSystem {
 
     for (const ragdoll of this._ragdolls) ragdoll.destroy();
     this._ragdolls = [];
+    this._applyRagdollIterations();
 
     // Remove any remaining constraints before clearing bodies
     for (const constraint of [...this._world.constraints])

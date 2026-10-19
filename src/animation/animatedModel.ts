@@ -5,6 +5,7 @@ import { Geometry } from '../core/geometry';
 import { Logger } from '../core/logger';
 import { mat4 } from 'gl-matrix';
 import type { IkRig } from './ik';
+import type { RagdollProfile } from '../physics/ragdollProfile';
 
 // Animation data structures based on GLTF specification
 export interface AnimationSampler {
@@ -66,6 +67,11 @@ export interface Skin {
      * published game. Bones are named, never indexed: see `sockets.ts`.
      */
     sockets?: SkinSocket[];
+    /**
+     * How this skeleton falls: the authored ragdoll profile, from the rig (see `ragdollProfile.ts`).
+     * Absent: a humanoid skeleton gets the automatic profile, anything else the generic ragdoll.
+     */
+    ragdollProfile?: RagdollProfile;
 }
 
 /** One attach point: a bone (by NAME) plus a local offset from it. */
@@ -318,7 +324,9 @@ export class AnimatedModel {
                 nodeNames,
                 // Plain JSON — joint indices and numbers — so it needs no reconstruction, only carrying.
                 ikRig: data.skin.ikRig ?? undefined,
-                sockets: Array.isArray(data.skin.sockets) ? data.skin.sockets : undefined
+                sockets: Array.isArray(data.skin.sockets) ? data.skin.sockets : undefined,
+                // Carried as plain JSON; the ragdoll validates it when it builds (parseRagdollProfile).
+                ragdollProfile: data.skin.ragdollProfile && Array.isArray(data.skin.ragdollProfile.parts) ? data.skin.ragdollProfile : undefined
             };
         }
         
@@ -496,7 +504,8 @@ export class AnimatedModel {
                 nodeTransforms,
                 nodeNames,
                 ikRig: this._skin.ikRig ?? null,
-                ...(this._skin.sockets?.length ? { sockets: this._skin.sockets } : {})
+                ...(this._skin.sockets?.length ? { sockets: this._skin.sockets } : {}),
+                ...(this._skin.ragdollProfile?.parts?.length ? { ragdollProfile: this._skin.ragdollProfile } : {})
             };
         }
         

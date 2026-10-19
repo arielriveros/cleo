@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ModelNode, AnimatedModel, Node, RAGDOLL_DEFAULTS, hullFromPositions, Logger } from 'cleo'
+import { ModelNode, AnimatedModel, Node, RAGDOLL_DEFAULTS, hullFromPositions, Logger, effectiveRagdollProfile } from 'cleo'
 import type { RagdollOptions, HullQuality } from 'cleo'
 import { BodyDescription, ShapeDescription, useCleoEngine } from '../../EngineContext';
 import Collapsable from '../../../components/Collapsable'
@@ -9,6 +9,8 @@ import { HULL_QUALITIES } from './hullQuality';
 import { collectHullPositions, meshBounds } from '../../../utils/editorHelpers';
 import { Field, Slider, Toggle, Select, NumberInput, Button, Section, Hint, SegmentedControl, cn, labelClass } from '../../../components/ui'
 import { PhysicsIcon, ShapeIcon } from '../sectionIcons'
+import { useAssetLibrary } from '../../AssetLibraryContext'
+import { modelIdOf } from '../../../utils/models'
 
 const LABEL = 'w-[130px]';
 
@@ -82,7 +84,7 @@ const ShapeTools = ({ shapes, canHull, addShape, addHull, regenerateHull, setSha
 };
 
 export default function PhysicsEditor(props: {node: Node}) {
-  const { bodies, triggers, eventEmitter: eventEmitter } = useCleoEngine();
+  const { bodies, triggers, eventEmitter: eventEmitter, enterRigEditor } = useCleoEngine();
   const [bodyProperties, setBodyProperties] = useState<BodyDescription | null>(null)
   const [triggerProperties, setTriggerProperties] = useState<{shapes: ShapeDescription[]} | null>(null);
   const [ragdoll, setRagdoll] = useState<RagdollOptions | null>(null);
@@ -181,10 +183,25 @@ export default function PhysicsEditor(props: {node: Node}) {
     else setRagdoll(null);
   }, [props.node]);
 
-  // Ragdoll config lives on the node itself, so it serializes with the scene.
+  // Ragdoll config lives on the node itself, so it serializes with the scene. An edit is a scene change
+  // (dirty + undo); adopting the node's config on selection is not.
+  const ragdollLoadRef = useRef(true);
+  useEffect(() => { ragdollLoadRef.current = true; }, [props.node]);
   useEffect(() => {
-    if (ragdoll && isSkinned) (props.node as ModelNode).ragdollConfig = ragdoll;
+    if (!ragdoll || !isSkinned) return;
+    (props.node as ModelNode).ragdollConfig = ragdoll;
+    if (ragdollLoadRef.current) ragdollLoadRef.current = false;
+    else eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node });
   }, [ragdoll]);
+  // What this character falls with: the rig's authored profile, the automatic humanoid one, or the
+  // generic per-bone ragdoll. Only the last is tuned by the joint fields below.
+  const { models: modelLibrary } = useAssetLibrary();
+  const ragdollSource = useMemo(() => {
+    const m = props.node as ModelNode;
+    const skin = m.model instanceof AnimatedModel ? m.model.skin : null;
+    return skin ? effectiveRagdollProfile(skin).source : 'generic';
+  }, [props.node, sceneChanged]);
+  const ragdollRigId = modelLibrary.find(m => m.id === modelIdOf(props.node))?.rigId;
 
   // The vertex gathering itself happens fresh on click, so child edits made after selection still count.
   const canHull = useMemo(() => collectHullPositions(props.node) !== null, [props.node, sceneChanged]);
@@ -356,27 +373,43 @@ export default function PhysicsEditor(props: {node: Node}) {
 
     { isSkinned && ragdoll &&
     <Collapsable title='Ragdoll' icon={<PhysicsIcon />} persistKey='ragdoll'
-      hint='How this skinned mesh simulates when turned into a ragdoll.'>
+      hint='How this skinned mesh falls when a script turns it into a ragdoll (physics.startRagdoll).'>
       <div className='w-full p-2'>
-        <Field label='Joint Type' labelClassName={LABEL}>
-          <Select value={ragdoll.jointType} onChange={(e) => setRagdoll({ ...ragdoll, jointType: e.target.value as 'ball' | 'coneTwist' })}>
-            <option value='ball'>Ball (free, stable)</option>
-            <option value='coneTwist'>Cone-Twist (limited)</option>
-          </Select>
-        </Field>
-        { ragdoll.jointType === 'coneTwist' && <>
-          <Slider label='Cone Angle' labelClassName={LABEL} min={0} max={180} step={1} value={ragdoll.coneAngle ?? 0} readout={(v) => `${v.toFixed(0)}°`} onChange={(v) => setRagdoll({ ...ragdoll, coneAngle: v })} />
-          <Slider label='Twist Angle' labelClassName={LABEL} min={0} max={180} step={1} value={ragdoll.twistAngle ?? 0} readout={(v) => `${v.toFixed(0)}°`} onChange={(v) => setRagdoll({ ...ragdoll, twistAngle: v })} />
-          <Field label='Stiffness' labelClassName={LABEL}><NumberInput value={ragdoll.stiffness ?? 0} onChange={(v) => setRagdoll({ ...ragdoll, stiffness: v })} /></Field>
+        <Hint className='mb-2'>
+          {ragdollSource === 'rig' ? 'Falls with the ragdoll authored on its rig: shaped body parts, real masses, knees and elbows that only bend one way.'
+            : ragdollSource === 'auto' ? 'Falls with the automatic humanoid ragdoll. Open the rig to see or customize the parts.'
+            : 'Not a recognizable humanoid: falls with the generic per-bone ragdoll, tuned below. Author parts on the rig for a better one.'}
+        </Hint>
+        {ragdollRigId && <Button variant='subtle' size='sm' className='w-full mb-2' onClick={() => enterRigEditor(ragdollRigId)}>Edit ragdoll in rig</Button>}
+        { ragdollSource === 'generic' ? <>
+          <Field label='Joint Type' labelClassName={LABEL}>
+            <Select value={ragdoll.jointType} onChange={(e) => setRagdoll({ ...ragdoll, jointType: e.target.value as 'ball' | 'coneTwist' })}>
+              <option value='ball'>Ball (free, stable)</option>
+              <option value='coneTwist'>Cone-Twist (limited)</option>
+            </Select>
+          </Field>
+          { ragdoll.jointType === 'coneTwist' && <>
+            <Slider label='Cone Angle' labelClassName={LABEL} min={0} max={180} step={1} value={ragdoll.coneAngle ?? 0} readout={(v) => `${v.toFixed(0)}°`} onChange={(v) => setRagdoll({ ...ragdoll, coneAngle: v })} />
+            <Slider label='Twist Angle' labelClassName={LABEL} min={0} max={180} step={1} value={ragdoll.twistAngle ?? 0} readout={(v) => `${v.toFixed(0)}°`} onChange={(v) => setRagdoll({ ...ragdoll, twistAngle: v })} />
+            <Field label='Stiffness' labelClassName={LABEL}><NumberInput value={ragdoll.stiffness ?? 0} onChange={(v) => setRagdoll({ ...ragdoll, stiffness: v })} /></Field>
+          </> }
+          <Slider label='Angular Damping' labelClassName={LABEL} min={0} max={1} step={0.01} value={ragdoll.angularDamping ?? 0} onChange={(v) => setRagdoll({ ...ragdoll, angularDamping: v })} />
+          <Slider label='Linear Damping' labelClassName={LABEL} min={0} max={1} step={0.01} value={ragdoll.linearDamping ?? 0} onChange={(v) => setRagdoll({ ...ragdoll, linearDamping: v })} />
+          <Field label='Bone Mass' labelClassName={LABEL}><NumberInput step={0.1} value={ragdoll.boneMass ?? 0} onChange={(v) => setRagdoll({ ...ragdoll, boneMass: v })} /></Field>
+          <Field label='Radius Scale' labelClassName={LABEL}><NumberInput step={0.05} value={ragdoll.radiusScale ?? 0} onChange={(v) => setRagdoll({ ...ragdoll, radiusScale: v })} /></Field>
+          <Field label='Self Collision' labelClassName={LABEL}><Toggle checked={!!ragdoll.selfCollision} onChange={(c) => setRagdoll({ ...ragdoll, selfCollision: c })} /></Field>
+          <Field label='Knockback Impulse' labelClassName={LABEL}>
+            <AxisInput step={0.1} value={[ragdoll.impulse?.[0] ?? 0, ragdoll.impulse?.[1] ?? 0, ragdoll.impulse?.[2] ?? 0]} onChange={(v) => setRagdoll({ ...ragdoll, impulse: [v[0], v[1], v[2]] })} />
+          </Field>
+        </> : <>
+          <Field label='Mass Scale' labelClassName={LABEL}>
+            <NumberInput step={0.05} min={0.1} value={ragdoll.massScale ?? 1} onChange={(v) => setRagdoll({ ...ragdoll, massScale: Math.max(0.1, v) })} />
+          </Field>
+          <Field label='Push (m/s)' labelClassName={LABEL}>
+            <AxisInput step={0.1} value={[ragdoll.impulse?.[0] ?? 0, ragdoll.impulse?.[1] ?? 0, ragdoll.impulse?.[2] ?? 0]} onChange={(v) => setRagdoll({ ...ragdoll, impulse: [v[0], v[1], v[2]] })} />
+          </Field>
+          <Hint className='mt-1'>Push: a velocity added to the upper body when it starts falling, in the character’s frame (left, up, forward). Negative forward topples it backwards.</Hint>
         </> }
-        <Slider label='Angular Damping' labelClassName={LABEL} min={0} max={1} step={0.01} value={ragdoll.angularDamping ?? 0} onChange={(v) => setRagdoll({ ...ragdoll, angularDamping: v })} />
-        <Slider label='Linear Damping' labelClassName={LABEL} min={0} max={1} step={0.01} value={ragdoll.linearDamping ?? 0} onChange={(v) => setRagdoll({ ...ragdoll, linearDamping: v })} />
-        <Field label='Bone Mass' labelClassName={LABEL}><NumberInput step={0.1} value={ragdoll.boneMass ?? 0} onChange={(v) => setRagdoll({ ...ragdoll, boneMass: v })} /></Field>
-        <Field label='Radius Scale' labelClassName={LABEL}><NumberInput step={0.05} value={ragdoll.radiusScale ?? 0} onChange={(v) => setRagdoll({ ...ragdoll, radiusScale: v })} /></Field>
-        <Field label='Self Collision' labelClassName={LABEL}><Toggle checked={!!ragdoll.selfCollision} onChange={(c) => setRagdoll({ ...ragdoll, selfCollision: c })} /></Field>
-        <Field label='Knockback Impulse' labelClassName={LABEL}>
-          <AxisInput step={0.1} value={[ragdoll.impulse?.[0] ?? 0, ragdoll.impulse?.[1] ?? 0, ragdoll.impulse?.[2] ?? 0]} onChange={(v) => setRagdoll({ ...ragdoll, impulse: [v[0], v[1], v[2]] })} />
-        </Field>
       </div>
     </Collapsable>
     }

@@ -33,6 +33,7 @@ import type { ResourceDesc } from './renderGraph/resources';
 import {
     MAX_CASCADES, CascadeSphere, computeCascadeSplits, cascadeSphereFromPerspective,
     cascadeSphereFromCorners, quantizeRadius, cascadeDepthScale, buildCascadeMatrix,
+    lightViewMatrix, pushCasterBounds, ShadowCasterBounds, STAGGER_MARGIN, staleCascadeCovers,
     spotShadowFar, SpotShadowSlots,
     MAX_POINT_SHADOWS, POINT_SHADOW_FACES, PointShadowCache, pointShadowFov,
     HASH_SEED, mixString, mixTransform,
@@ -466,6 +467,8 @@ export interface RenderSettings {
     shadowStabilize: boolean;
     shadowStagger: boolean;
     shadowCasterPad: number;
+    /** Reach of the far (landscape) cascade past `shadowDistance`; 0 = off. */
+    shadowFarDistance: number;
     spotShadowsEnabled: boolean;
     spotShadowResolution: number;
     spotShadowDistance: number;
@@ -558,6 +561,12 @@ export interface SkeletonOverlay {
     markerMatrices?: Float32Array | null;
     markerCount?: number;
     markerColor?: [number, number, number];
+    /**
+     * How joints (and markers and the highlight) are drawn. 'sphere' (default): a solid ball. 'ring': a
+     * flat circle outline in the instance's local XY plane, seen from both sides -- the caller turns it
+     * to face the camera and sizes it per frame, so it reads as a constant-size circle on screen.
+     */
+    jointShape?: 'sphere' | 'ring';
 }
 
 export class Renderer {
@@ -840,6 +849,39 @@ export class Renderer {
     private _cascadeSplitPacked: Float32Array = new Float32Array(MAX_CASCADES);
     private _cascadeDepthScalePacked: Float32Array = new Float32Array(MAX_CASCADES);
     private _cascadeTexelPacked: Float32Array = new Float32Array(MAX_CASCADES);
+    /**
+     * Per cascade: the sphere its layer was last rasterized around. A staggered cascade is skipped only
+     * while that sphere still contains this frame's slice — see `staleCascadeCovers`.
+     */
+    private _cascadeFitSpheres: CascadeSphere[] = Array.from({ length: MAX_CASCADES }, () => ({ center: vec3.create(), radius: 0 }));
+    private _cascadeFitLightDirs: vec3[] = Array.from({ length: MAX_CASCADES }, () => vec3.create());
+    /** This frame's shadow casters in light view space, for fitting each cascade's near plane. */
+    private _casterBounds: ShadowCasterBounds = { data: new Float32Array(256), count: 0 };
+    private _casterLightView: mat4 = mat4.create();
+
+    // ---- Far cascade: landscape-scale shadows past the near cascades ------------------------
+    // One extra layer of the cascade array (index `_cascadeCount`), fit around the CAMERA rather than
+    // its view so turning costs nothing, holding only terrain and large casters, and re-rasterized only
+    // when the camera has moved a fraction of its reach, the sun turned, or every FAR_REFRESH_FRAMES.
+    /** View distance the far cascade reaches; 0 = off (no extra layer is even allocated). */
+    private _shadowFarDistance: number = 0;
+    private _farCascadeMatrix: mat4 = mat4.create();
+    private _farCascadeMatPacked: Float32Array = new Float32Array(16);
+    private _farCascadeDepthScale: number = 0;
+    private _farCascadeTexelSize: number = 0;
+    /** The reach the shader is told this frame: 0 while the far layer is off or holds nothing yet. */
+    private _farCascadeActiveDistance: number = 0;
+    private _farCascadeFit: CascadeSphere = { center: vec3.create(), radius: 0 };
+    private _farCascadeLightDir: vec3 = vec3.create();
+    private _farCascadeFrame: number = -Infinity;
+    private _farCascadeValid: boolean = false;
+    private readonly _farCasters: Set<ModelNode> = new Set();
+    /** Fraction of its reach the camera may travel before the far cascade is re-fit. */
+    private static readonly FAR_MOVE_FRACTION = 0.125;
+    /** Re-rasterize the far cascade at least this often, so moved casters and terrain edits catch up. */
+    private static readonly FAR_REFRESH_FRAMES = 30;
+    /** A model this large casts into the far cascade alongside the terrain; anything smaller is lost in a texel. */
+    private static readonly FAR_CASTER_MIN_RADIUS = 4;
 
     // ---- Shadow tunables (all authored in the editor's Renderer mode) -----------------------
     private _shadowsEnabled: boolean = true;
@@ -1374,6 +1416,7 @@ export class Renderer {
     private _skeletonOverlay: SkeletonOverlay | null = null;
     private _overlaySphereMesh: Mesh | null = null;
     private _overlayBoneMesh: Mesh | null = null;
+    private _overlayRingMesh: Mesh | null = null;
     // One instance buffer PER draw set, never one shared by all four — `_drawSkeletonOverlay` records
     // bones, joints, markers and the highlight into the same pass. Same rule as `_instanceBuffers`.
     private _overlayInstanceBuffers: (RhiBuffer | null)[] = [];
@@ -1988,7 +2031,7 @@ export class Renderer {
         // Config wins if given; otherwise the quality tier's value (2048 at the 'high' default).
         const SHADOW_MAP_SIZE = this._config?.shadowMapResolution || this._shadowMapResolution;
         this._shadowMapResolution = SHADOW_MAP_SIZE;
-        this._shadowCascadeFBO.create(SHADOW_MAP_SIZE, this._cascadeCount);
+        this._shadowCascadeFBO.create(SHADOW_MAP_SIZE, this._shadowLayerCount);
         this._spotShadowFBO.create(this._spotShadowResolution, Renderer.MAX_SPOT_SHADOWS);
         this._pointShadowFBO.create(this._pointShadowResolution, MAX_POINT_SHADOWS * 6);
 
@@ -4452,6 +4495,10 @@ export class Renderer {
         this._shaderManager.setUniform('u_cascadeSplits', this._cascadeSplitPacked);
         this._shaderManager.setUniform('u_cascadeDepthScale', this._cascadeDepthScalePacked);
         this._shaderManager.setUniform('u_cascadeTexelSize', this._cascadeTexelPacked);
+        this._shaderManager.setUniform('u_farCascadeMatrix', this._farCascadeMatPacked);
+        this._shaderManager.setUniform('u_farCascadeDistance', this._farCascadeActiveDistance);
+        this._shaderManager.setUniform('u_farCascadeDepthScale', this._farCascadeDepthScale);
+        this._shaderManager.setUniform('u_farCascadeTexelSize', this._farCascadeTexelSize);
 
         // The sampler must point at a COMPLETE texture on every frame, shadows on or off — an
         // incomplete sampler is a draw-time error, not merely a wrong colour.
@@ -4542,6 +4589,7 @@ export class Renderer {
             this._cascadeDepthScalePacked[i] = this._cascadeDepthScales[i];
             this._cascadeTexelPacked[i] = this._cascadeTexelSizes[i];
         }
+        this._farCascadeMatPacked.set(this._uvProducing(this._farCascadeMatrix));
     }
 
     private _setDeferredLighting(scene: Scene): void {
@@ -7864,23 +7912,9 @@ export class Renderer {
         // Cull against the LIGHT's frustum, not the camera's.
         this._shadowFrustum.setFromViewProjection(lightSpace);
         for (const node of models) {
-            // LOD-hidden levels and user-hidden nodes must not cast shadows (user hides already force
-            // castShadow=false via the visible setter, but the LOD flag never touches the material).
-            if (!node.visible) continue;
-            // A merged model can have a non-casting submesh among casting ones, so the test is "any
-            // submesh casts" and the draw below restricts itself to those ranges. Written as a loop
-            // rather than `.some(closure)`: this runs per caster per cascade.
-            let anyCasts = false;
-            for (const m of node.model.materials)
-                if (m.config.castShadow && !m.config.wireframe) { anyCasts = true; break; }
-            if (!anyCasts) continue;
-            // Editor chrome never casts: gizmos, helper wireframes, icon billboards. Mostly redundant
-            // with the wireframe/castShadow scan above, but it states the intent instead of relying on it.
-            if (isEditorOnlyNode(node)) continue;
-            // A node added this frame has no mesh yet: this pass runs BEFORE the geometry pass that
-            // calls `initializeModel`, so its `Mesh` is still the empty one the constructor made. It
-            // cannot cast a shadow, and recording the attempt costs a bind and a zero-count draw.
-            if (!node.initialized) continue;
+            // Visible, has a casting submesh, not editor chrome, has a mesh — see `_castsShadow`.
+            // The draw below restricts itself to the casting submesh ranges.
+            if (!this._castsShadow(node)) continue;
             if (this._frustumCulling) {
                 const s = node.getBoundingSphere();
                 if (!this._shadowFrustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) continue;
@@ -8197,6 +8231,8 @@ export class Renderer {
         // sits behind the lit surface, which is what keeps a small bias from producing acne.
         GLState.cullFace('front');
 
+        this._gatherCasterBounds(models, light.worldForward);
+
         for (let i = 0; i < this._cascadeCount; i++) {
             const nearD = i === 0 ? cam.near : splits[i - 1];
             const farD = splits[i];
@@ -8206,15 +8242,27 @@ export class Renderer {
             this._cascadeSplits[i] = farD;
 
             // Stagger the distant cascades: cascade 1 every other frame, cascade 2 every fourth. A
-            // one-to-three frame lag is invisible at the distances they shade.
-            if (this._shadowStagger && !this._shadowFullUpdate && i > 0 && (this._frameIndex % (1 << i)) !== 0) continue;
+            // one-to-three frame lag is invisible at the distances they shade — PROVIDED the box drawn
+            // back then still contains this frame's slice. A staggered cascade is fit with a margin for
+            // exactly that, and is re-rendered off its turn the moment the camera outruns the margin
+            // (or the sun turns); skipping it then left the slice's edge reading as lit, and the
+            // shadows there strobed on every pan.
+            const staggered = this._shadowStagger && i > 0;
+            this._fitCascadeSphere(nearD, farD);
+            if (staggered && !this._shadowFullUpdate && (this._frameIndex % (1 << i)) !== 0
+                && vec3.dot(this._cascadeFitLightDirs[i], light.worldForward) > 0.99999
+                && staleCascadeCovers(this._cascadeFitSpheres[i], this._csmSphere)) continue;
 
             // Only cascades that are actually re-rendered get a new matrix. Recomputing it every
             // frame while the depth behind it is several frames old means the lighting pass projects
             // pixels with a matrix the map was never drawn with, and distant shadows visibly swim.
-            const fit = this._computeCascadeMatrix(light.worldForward, nearD, farD, this._cascadeMatrices[i]);
+            if (staggered) this._csmSphere.radius *= 1 + STAGGER_MARGIN;
+            const fit = this._buildCascadeFromSphere(light.worldForward, this._cascadeMatrices[i]);
             this._cascadeDepthScales[i] = cascadeDepthScale(fit.depthRange);
             this._cascadeTexelSizes[i] = fit.texelWorldSize;
+            vec3.copy(this._cascadeFitSpheres[i].center, this._csmSphere.center);
+            this._cascadeFitSpheres[i].radius = this._csmSphere.radius;
+            vec3.copy(this._cascadeFitLightDirs[i], light.worldForward);
 
             // BEFORE the pass opens: `_prepareFoliageShadow` uploads this cascade's merged instance
             // buffer, and re-specifying a vertex buffer inside a live pass is what removes a device.
@@ -8228,18 +8276,108 @@ export class Renderer {
             this._foliageShadowPass(scene, this._cascadeMatrices[i], i, pass);
             this._endFullscreenPass(pass);
         }
+
+        this._renderFarCascade(scene, light, shadowFar);
         GLState.cullFace('back');
 
         this._packCascadeUniforms();
         this._shadowFullUpdate = false;
     }
 
+    /** The test every shadow pass applies to a model, kept in one place so the passes cannot disagree. */
+    private _castsShadow(node: ModelNode): boolean {
+        // LOD-hidden levels and user-hidden nodes must not cast shadows (user hides already force
+        // castShadow=false via the visible setter, but the LOD flag never touches the material).
+        if (!node.visible) return false;
+        // A merged model can have a non-casting submesh among casting ones, so the test is "any
+        // submesh casts" and the draw restricts itself to those ranges. Written as a loop rather than
+        // `.some(closure)`: this runs per caster per cascade.
+        let anyCasts = false;
+        for (const m of node.model.materials)
+            if (m.config.castShadow && !m.config.wireframe) { anyCasts = true; break; }
+        if (!anyCasts) return false;
+        // Editor chrome never casts: gizmos, helper wireframes, icon billboards. Mostly redundant
+        // with the wireframe/castShadow scan above, but it states the intent instead of relying on it.
+        if (isEditorOnlyNode(node)) return false;
+        // A node added this frame has no mesh yet: shadows render BEFORE the geometry pass that calls
+        // `initializeModel`, so its `Mesh` is still the empty one the constructor made.
+        return node.initialized;
+    }
+
     /**
-     * Fit one cascade's light-space matrix around the camera sub-frustum [nearD, farD]. The bound is a
-     * SPHERE, never a light-space box: its radius depends only on (near, far, fov, aspect), so camera
-     * rotation moves the fit rigidly and the footprint can be snapped to a stable texel grid.
+     * Pack every caster's bounding sphere into light view space, once per frame, so each cascade can
+     * pull its near plane back to the furthest-up-sun caster over its footprint (`buildCascadeMatrix`).
      */
-    private _computeCascadeMatrix(lightForward: vec3, nearD: number, farD: number, out: mat4): { depthRange: number; texelWorldSize: number } {
+    private _gatherCasterBounds(models: Set<ModelNode>, lightForward: vec3): void {
+        const bounds = this._casterBounds;
+        bounds.count = 0;
+        lightViewMatrix(lightForward, this._casterLightView, this._csmScratch);
+        for (const node of models) {
+            if (!this._castsShadow(node)) continue;
+            const s = node.getBoundingSphere();
+            pushCasterBounds(bounds, this._casterLightView, s.center[0], s.center[1], s.center[2], s.radius);
+        }
+    }
+
+    /**
+     * The far cascade: one layer past the near cascades, covering out to `shadowFarDistance` with the
+     * landscape and large casters. Fit around the camera POSITION, with a margin, so turning never
+     * invalidates it and walking only does once the camera has crossed `FAR_MOVE_FRACTION` of its reach.
+     */
+    private _renderFarCascade(scene: Scene, light: LightNode, nearShadowEnd: number): void {
+        const cam = this._activeCamera;
+        const reach = Math.min(cam.far, this._shadowFarDistance);
+        // Off, or not reaching past the near cascades: the shader is told 0 and never samples the layer.
+        if (this._shadowFarDistance <= 0 || reach <= nearShadowEnd || this._shadowCascadeFBO.layers <= this._cascadeCount) {
+            this._farCascadeActiveDistance = 0;
+            return;
+        }
+
+        const fit = this._csmSphere;
+        vec3.copy(fit.center, cam.position);
+        fit.radius = quantizeRadius(reach * (1 + Renderer.FAR_MOVE_FRACTION), 1);
+
+        const due = this._shadowFullUpdate || !this._farCascadeValid
+            || this._frameIndex - this._farCascadeFrame >= Renderer.FAR_REFRESH_FRAMES
+            || vec3.dot(this._farCascadeLightDir, light.worldForward) < 0.99999
+            || !staleCascadeCovers(this._farCascadeFit, { center: fit.center, radius: reach });
+        if (due) {
+            const built = this._buildCascadeFromSphere(light.worldForward, this._farCascadeMatrix);
+            this._farCascadeDepthScale = cascadeDepthScale(built.depthRange);
+            this._farCascadeTexelSize = built.texelWorldSize;
+            vec3.copy(this._farCascadeFit.center, fit.center);
+            this._farCascadeFit.radius = fit.radius;
+            vec3.copy(this._farCascadeLightDir, light.worldForward);
+            this._farCascadeFrame = this._frameIndex;
+            this._farCascadeValid = true;
+
+            // Terrain chunks, then anything big enough to survive a texel this size. No foliage: a
+            // tree at a kilometre is a fraction of a texel, and the layer is drawn rarely precisely
+            // because it has so little in it.
+            const casters = this._farCasters;
+            casters.clear();
+            for (const landscape of scene.landscapes) {
+                if (!landscape.visible) continue;
+                for (const chunk of landscape.children)
+                    if (chunk instanceof ModelNode) casters.add(chunk);
+            }
+            for (const node of scene.models)
+                if (node.getBoundingSphere().radius >= Renderer.FAR_CASTER_MIN_RADIUS) casters.add(node);
+
+            const pass = this._beginDepthPass(this._shadowCascadeFBO.renderTarget, 'cascade', this._cascadeCount);
+            this._renderShadowCasters(pass, casters, this._farCascadeMatrix);
+            this._endFullscreenPass(pass);
+        }
+        this._farCascadeActiveDistance = this._farCascadeValid ? reach : 0;
+    }
+
+    /**
+     * Fit one cascade's bounding sphere (into `_csmSphere`) around the camera sub-frustum [nearD, farD].
+     * The bound is a SPHERE, never a light-space box: its radius depends only on (near, far, fov,
+     * aspect), so camera rotation moves the fit rigidly and the footprint can be snapped to a stable
+     * texel grid.
+     */
+    private _fitCascadeSphere(nearD: number, farD: number): void {
         const cam = this._activeCamera;
 
         if (cam.type === 'perspective') {
@@ -8264,14 +8402,21 @@ export class Renderer {
                     }
             cascadeSphereFromCorners(this._csmCorners, this._csmSphere);
         }
+    }
 
+    /**
+     * Build a cascade's light-space matrix around `_csmSphere` (as fit, plus any margin the caller
+     * added). The near plane reaches back over this frame's casters — see `_gatherCasterBounds`.
+     */
+    private _buildCascadeFromSphere(lightForward: vec3, out: mat4): { depthRange: number; texelWorldSize: number } {
         // Quantize the radius before it reaches the snap: it is invariant under camera ROTATION but
         // not under a viewport resize or an fov change, and the texel grid is derived from it — a
         // radius that drifts by a hair every frame is a grid that drifts with it.
         if (this._shadowStabilize) this._csmSphere.radius = quantizeRadius(this._csmSphere.radius);
 
         return buildCascadeMatrix(this._csmSphere, lightForward, this._shadowMapResolution,
-                                  this._shadowCasterPad, out, this._csmScratch, this._shadowStabilize);
+                                  this._shadowCasterPad, out, this._csmScratch, this._shadowStabilize,
+                                  this._casterBounds);
     }
 
     /**
@@ -8824,7 +8969,7 @@ export class Renderer {
      * switched off for the draw and back on immediately after.
      */
     private _blitShadowLayer(): void {
-        const layer = Math.min(this._cascadeCount - 1, Math.max(0, this._shadowDebugLayer));
+        const layer = Math.min(this._shadowCascadeFBO.layers - 1, Math.max(0, this._shadowDebugLayer));
         this._shadowCascadeFBO.setCompareEnabled(false);
         const pass = this._beginFullscreenPass(this._screenTarget(), 'shadowDebug', true);
         const pipeline = this._fullscreenPipeline('shadowDebug', ShadowDebugProgram);
@@ -10407,7 +10552,8 @@ export class Renderer {
 
     /** Editor debug: which cascade layer the 'shadow' channel shows. */
     public get shadowDebugLayer(): number { return this._shadowDebugLayer; }
-    public set shadowDebugLayer(n: number) { this._shadowDebugLayer = Math.min(MAX_CASCADES - 1, Math.max(0, Math.round(n))); }
+    // Up to MAX_CASCADES: the far cascade's layer, when on, sits one past the last near cascade.
+    public set shadowDebugLayer(n: number) { this._shadowDebugLayer = Math.min(MAX_CASCADES, Math.max(0, Math.round(n))); }
 
     public get shadowCascades(): number { return this._cascadeCount; }
     public set shadowCascades(n: number) {
@@ -10418,18 +10564,40 @@ export class Renderer {
      * Reallocate the cascade array at `size` x `size` x `layers`. Resolution and cascade count share
      * one path — `texStorage3D` storage is immutable, so either change means a new texture.
      */
-    private _recreateShadowTargets(size: number, layers: number): void {
+    private _recreateShadowTargets(size: number, layers: number, force: boolean = false): void {
         const clampedSize = Math.min(4096, Math.max(512, 1 << Math.round(Math.log2(size))));
         const clampedLayers = Math.min(MAX_CASCADES, Math.max(1, Math.round(layers)));
-        if (clampedSize === this._shadowMapResolution && clampedLayers === this._cascadeCount) return;
+        if (!force && clampedSize === this._shadowMapResolution && clampedLayers === this._cascadeCount) return;
         this._shadowMapResolution = clampedSize;
         this._cascadeCount = clampedLayers;
         if (!this._deviceReady) return;
-        this._shadowCascadeFBO.create(clampedSize, clampedLayers);
+        this._shadowCascadeFBO.create(clampedSize, this._shadowLayerCount);
         // The fresh storage holds undefined depth until the next shadow pass writes or clears it.
         this._shadowMapsDirty = true;
         this._shadowsActive = false;
         this._shadowFullUpdate = true;
+        this._farCascadeValid = false;
+    }
+
+    /** Layers in the cascade array: one per near cascade, plus the far cascade's when it is on. */
+    private get _shadowLayerCount(): number {
+        return this._cascadeCount + (this._shadowFarDistance > 0 ? 1 : 0);
+    }
+
+    /**
+     * How far the FAR cascade carries directional shadows, in view distance; 0 turns it off. Past
+     * `shadowDistance` only the landscape and large casters (bounding radius ≥ 4 m) shadow, from one
+     * extra layer that is re-rasterized only as the camera travels — a big terrain's ridges and hills
+     * keep their shadows to the horizon for roughly the cost of a terrain depth pass every 30 frames.
+     */
+    public get shadowFarDistance(): number { return this._shadowFarDistance; }
+    public set shadowFarDistance(d: number) {
+        const next = Math.max(0, Number.isFinite(d) ? d : 0);
+        const wasOn = this._shadowFarDistance > 0;
+        this._shadowFarDistance = next;
+        // Turning it on or off changes the layer count, and array storage is immutable.
+        if ((next > 0) !== wasOn) this._recreateShadowTargets(this._shadowMapResolution, this._cascadeCount, true);
+        this._farCascadeValid = false;
     }
 
     public get ssaoSamples(): number { return this._ssaoSamples; }
@@ -10472,6 +10640,7 @@ export class Renderer {
             shadowStabilize: this._shadowStabilize,
             shadowStagger: this._shadowStagger,
             shadowCasterPad: this._shadowCasterPad,
+            shadowFarDistance: this._shadowFarDistance,
             spotShadowsEnabled: this._spotShadowsEnabled,
             spotShadowResolution: this._spotShadowResolution,
             spotShadowDistance: this._spotShadowDistance,
@@ -10569,6 +10738,7 @@ export class Renderer {
         if (s.shadowStabilize !== undefined) this.shadowStabilize = s.shadowStabilize;
         if (s.shadowStagger !== undefined) this.shadowStagger = s.shadowStagger;
         if (s.shadowCasterPad !== undefined) this.shadowCasterPad = s.shadowCasterPad;
+        if (s.shadowFarDistance !== undefined) this.shadowFarDistance = s.shadowFarDistance;
         if (s.spotShadowsEnabled !== undefined) this.spotShadowsEnabled = s.spotShadowsEnabled;
         if (s.spotShadowResolution !== undefined) this.spotShadowResolution = s.spotShadowResolution;
         if (s.spotShadowDistance !== undefined) this.spotShadowDistance = s.spotShadowDistance;
@@ -10909,6 +11079,24 @@ export class Renderer {
         };
         if (!this._overlaySphereMesh) this._overlaySphereMesh = build(Geometry.Sphere(8, 1));
         if (!this._overlayBoneMesh) this._overlayBoneMesh = build(Geometry.Cube(1, 1, 1));
+        if (!this._overlayRingMesh) this._overlayRingMesh = build(Renderer._ringGeometry(0.72, 1, 40));
+    }
+
+    /** A flat annulus in the XY plane, wound both ways so it shows from either side under back-face culling. */
+    private static _ringGeometry(inner: number, outer: number, segments: number): Geometry {
+        const positions: [number, number, number][] = [];
+        const indices: number[] = [];
+        for (let i = 0; i < segments; i++) {
+            const a = (i / segments) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+            positions.push([c * inner, s * inner, 0], [c * outer, s * outer, 0]);
+        }
+        for (let i = 0; i < segments; i++) {
+            const a = i * 2, b = a + 1, c = ((i + 1) % segments) * 2, d = c + 1;
+            indices.push(a, b, d, a, d, c);   // front
+            indices.push(a, d, b, a, c, d);   // back
+        }
+        return new Geometry(positions, positions.map(() => [0, 0, 1] as [number, number, number]),
+            positions.map(() => [0, 0] as [number, number]), undefined, undefined, indices, false);
     }
 
     private _drawSkeletonOverlay(pass?: RenderPassEncoder, depthStencil?: DepthStencilState): void {
@@ -10939,6 +11127,12 @@ export class Renderer {
             this._shaderManager.setUniform('u_material.color', color);
             this._shaderManager.setUniform('u_material.hasTexture', false);
             this._shaderManager.setUniform('u_material.opacity', 1.0);
+            // Uniforms are sticky: whatever the last basic draw left in these would apply here too. An
+            // unset `intensity` multiplies the colour by 0 -- the joints drew BLACK whatever colour the
+            // editor asked for.
+            this._shaderManager.setUniform('u_material.intensity', 1.0);
+            this._shaderManager.setUniform('u_material.hasMaskMap', false);
+            this._shaderManager.setUniform('u_material.alphaCutoff', 0.0);
             // Reassigned through the array, not a local: on WebGPU a grown buffer is a NEW one, and a
             // local alias would leave the next frame writing into a destroyed handle.
             let buf = this._overlayInstanceBuffers[set]
@@ -10972,8 +11166,9 @@ export class Renderer {
         // depth test is off in the gizmo pass, so the later draw simply wins where they overlap, and the one
         // thing you are pointing at should never be hidden by a label.
         drawSet(0, bone, o.boneMatrices, o.boneCount, o.boneColor);
-        drawSet(1, sphere, o.jointMatrices, o.jointCount, o.jointColor);
-        if (o.markerMatrices && o.markerColor) drawSet(2, sphere, o.markerMatrices, o.markerCount ?? 0, o.markerColor);
-        if (o.highlightMatrix && o.highlightColor) drawSet(3, sphere, o.highlightMatrix, 1, o.highlightColor);
+        const joint = o.jointShape === 'ring' && this._overlayRingMesh ? this._overlayRingMesh : sphere;
+        drawSet(1, joint, o.jointMatrices, o.jointCount, o.jointColor);
+        if (o.markerMatrices && o.markerColor) drawSet(2, joint, o.markerMatrices, o.markerCount ?? 0, o.markerColor);
+        if (o.highlightMatrix && o.highlightColor) drawSet(3, joint, o.highlightMatrix, 1, o.highlightColor);
     }
 }

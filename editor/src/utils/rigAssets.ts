@@ -57,6 +57,8 @@ export type RigAsset = {
    * only covers bones the clips animate — so a whole-mapping snapshot could not express a re-point for a
    * bone no clip drives.
    */
+  /** The ragdoll profile; see {@link RigRagdollProfile}. */
+  ragdoll?: RigRagdollProfile
   retargets?: Record<string, RetargetOverride[]>
   /**
    * Named poses on THIS skeleton, referenced from a clip's `poseOffset` edit by id.
@@ -102,6 +104,14 @@ export type RigPose = { id: string; name: string; bones: StoredPoseBone[] }
  * One attach point. `offset` is in the bone's frame with the bone's own scale removed, so its units are
  * the model's (metres) whatever the armature scale — see `socketModelMatrix`.
  */
+/**
+ * How the skeleton falls: the ragdoll profile (`RagdollProfile` in the engine's ragdollProfile.ts --
+ * typed loosely here because this module stays engine-free). Bones by NAME. Embedded into every model's
+ * skin as `skin.ragdollProfile` by `syncRigSockets`, like the sockets. Absent: humanoids get the
+ * automatic profile at runtime.
+ */
+export type RigRagdollProfile = { version: 1; parts: any[]; [key: string]: any }
+
 export type RigSocket = {
   id: string
   name: string

@@ -55,6 +55,11 @@ const MAX_POINT_SHADOWS: i32 = 4;
  */
 struct ShadowUniforms {
     u_cascadeMatrices: array<mat4x4<f32>, 4>,
+    // The FAR cascade: one extra layer, sitting at index `u_cascadeCount` of the same array texture,
+    // that covers [last split, u_farCascadeDistance] with the landscape and large casters only. Kept
+    // out of `u_cascadeMatrices` so turning it on never costs a near cascade, and so the vec4-packed
+    // per-cascade lanes below stay exactly four wide.
+    u_farCascadeMatrix: mat4x4<f32>,
     u_spotShadowMatrices: array<mat4x4<f32>, 4>,
     // MAX_POINT_SHADOWS * 6, indexed `slot * 6 + face`. The face matrix is uploaded rather than
     // rebuilt in the shader from the light's near/far and a constant rotation, which would fit in a
@@ -83,6 +88,10 @@ struct ShadowUniforms {
     // World size of one cube-face texel PER UNIT of distance from the light. One value for all six
     // faces and every slot: they share a projection, differing only by rotation.
     u_pointShadowTexelScale: f32,
+    // View-space distance the far cascade reaches; 0 = no far cascade, and shadows end at the last split.
+    u_farCascadeDistance: f32,
+    u_farCascadeDepthScale: f32,                // the far layer's lanes of the two arrays above
+    u_farCascadeTexelSize: f32,
     u_cascadeCount: i32,
     u_shadowFilterMode: i32,                    // 0 = 3x3 grid, 1 = 16-tap rotated Poisson
     // i32 rather than bool throughout: WGSL forbids bool in a uniform buffer. Call sites still pass
@@ -130,18 +139,83 @@ fn cleoPoisson(i: i32) -> vec2<f32> {
     return disk[i];
 }
 
-/** Lane accessors for the vec4-packed per-cascade scalars. */
-fn cleoSplit(i: i32) -> f32 { return u_shadow.u_cascadeSplits[0][i]; }
-fn cleoDepthScale(i: i32) -> f32 { return u_shadow.u_cascadeDepthScale[0][i]; }
-fn cleoTexelSize(i: i32) -> f32 { return u_shadow.u_cascadeTexelSize[0][i]; }
+/** Is the far cascade on? Its layer is then `u_cascadeCount`, one past the near cascades. */
+fn cleoHasFarCascade() -> bool { return u_shadow.u_farCascadeDistance > 0.0; }
+
+/** Highest layer a lookup may use: the far cascade's when it exists, else the last near cascade's. */
+fn cleoLastLayer() -> i32 {
+    return select(u_shadow.u_cascadeCount - 1, u_shadow.u_cascadeCount, cleoHasFarCascade());
+}
+
+/**
+ * Lane accessors for the vec4-packed per-cascade scalars. A layer index past the near cascades means
+ * the far cascade, whose values live in their own scalars — so every caller can treat it as one more
+ * cascade.
+ */
+fn cleoSplit(i: i32) -> f32 {
+    if (i >= u_shadow.u_cascadeCount) { return u_shadow.u_farCascadeDistance; }
+    return u_shadow.u_cascadeSplits[0][i];
+}
+fn cleoDepthScale(i: i32) -> f32 {
+    if (i >= u_shadow.u_cascadeCount) { return u_shadow.u_farCascadeDepthScale; }
+    return u_shadow.u_cascadeDepthScale[0][i];
+}
+fn cleoTexelSize(i: i32) -> f32 {
+    if (i >= u_shadow.u_cascadeCount) { return u_shadow.u_farCascadeTexelSize; }
+    return u_shadow.u_cascadeTexelSize[0][i];
+}
+fn cleoCascadeMatrix(i: i32) -> mat4x4<f32> {
+    if (i >= u_shadow.u_cascadeCount) { return u_shadow.u_farCascadeMatrix; }
+    return u_shadow.u_cascadeMatrices[i];
+}
 fn cleoSpotTexelScale(i: i32) -> f32 { return u_shadow.u_spotShadowTexelScale[0][i]; }
+
+/**
+ * Where directional shadows END, in view depth: the far cascade's reach when it exists, else the last
+ * split. Past it nothing was rasterized for this pixel, so the answer is "lit" — never whatever the
+ * last cascade's square footprint happens to overlap, which is a ragged patch that swings around with
+ * the camera.
+ */
+fn cleoShadowEnd() -> f32 {
+    return select(cleoSplit(u_shadow.u_cascadeCount - 1), u_shadow.u_farCascadeDistance, cleoHasFarCascade());
+}
+
+/** 1 well inside the shadowed range, falling to 0 over its last tenth. */
+fn cleoShadowFade(viewDepth: f32) -> f32 {
+    let end = cleoShadowEnd();
+    let start = end * 0.9;
+    return 1.0 - clamp((viewDepth - start) / max(end - start, 1e-4), 0.0, 1.0);
+}
 
 /** Which cascade covers `viewDepth` (distance in front of the camera, always positive). */
 fn cleoCascadeFor(viewDepth: f32) -> i32 {
-    var layer = u_shadow.u_cascadeCount - 1;
+    var layer = cleoLastLayer();
     for (var i = 0; i < MAX_CASCADES; i++) {
         if (i >= u_shadow.u_cascadeCount) { break; }
         if (viewDepth < cleoSplit(i)) { layer = i; break; }
+    }
+    return layer;
+}
+
+/** Does `worldPos` fall inside layer `layer`'s footprint (and in front of its far plane)? */
+fn cleoCascadeContains(layer: i32, worldPos: vec3<f32>) -> bool {
+    let posLS = cleoCascadeMatrix(layer) * vec4<f32>(worldPos, 1.0);
+    let proj = (posLS.xyz / posLS.w) * 0.5 + 0.5;
+    return proj.x >= 0.0 && proj.x <= 1.0 && proj.y >= 0.0 && proj.y <= 1.0 && proj.z <= 1.0;
+}
+
+/**
+ * The cascade to sample for this pixel: the one its depth selects, or the next one out if the pixel
+ * falls outside that one's footprint. That happens at the screen edge while a staggered cascade still
+ * holds the fit from a frame or two ago — and answering "lit" there is what made edge shadows strobe
+ * on a fast pan. Every cascade further out covers more, so walking outward always lands somewhere.
+ */
+fn cleoCascadeCovering(viewDepth: f32, worldPos: vec3<f32>) -> i32 {
+    var layer = cleoCascadeFor(viewDepth);
+    let last = cleoLastLayer();
+    for (var i = 0; i < MAX_CASCADES; i++) {
+        if (layer >= last || cleoCascadeContains(layer, worldPos)) { break; }
+        layer++;
     }
     return layer;
 }
@@ -164,7 +238,7 @@ fn cleoCascadeVisibility(layer: i32, worldPos: vec3<f32>, N: vec3<f32>) -> f32 {
     // lookup sideways across the shadow map rather than pulling the whole surface toward the light.
     let p = worldPos + N * (u_shadow.u_shadowNormalBias * cleoTexelSize(layer));
 
-    let posLS = u_shadow.u_cascadeMatrices[layer] * vec4<f32>(p, 1.0);
+    let posLS = cleoCascadeMatrix(layer) * vec4<f32>(p, 1.0);
     var proj = posLS.xyz / posLS.w;
     proj = proj * 0.5 + 0.5;
 
@@ -218,24 +292,29 @@ fn cleoCascadeVisibility(layer: i32, worldPos: vec3<f32>, N: vec3<f32>) -> f32 {
  */
 fn directionalShadow(worldPos: vec3<f32>, N: vec3<f32>, viewDepth: f32) -> f32 {
     if (u_shadow.u_shadowsEnabled == 0 || u_shadow.u_cascadeCount <= 0) { return 0.0; }
+    let fade = cleoShadowFade(viewDepth);
+    if (fade <= 0.0) { return 0.0; }
 
-    let layer = cleoCascadeFor(viewDepth);
+    let layer = cleoCascadeCovering(viewDepth, worldPos);
     var vis = cleoCascadeVisibility(layer, worldPos, N);
 
     // Cross-fade over the last slice of each cascade. Without it the resolution step at a split shows
     // up as a hard line across the ground, which reads as a rendering artifact rather than a shadow.
-    if (u_shadow.u_cascadeBlend > 0.0 && layer + 1 < u_shadow.u_cascadeCount) {
+    // `layer + 1` must actually cover the pixel, or the blend would fade toward "lit".
+    if (u_shadow.u_cascadeBlend > 0.0 && layer < cleoLastLayer()) {
         let farD = cleoSplit(layer);
         var nearD = 0.0;
         if (layer != 0) { nearD = cleoSplit(layer - 1); }
         let band = u_shadow.u_cascadeBlend * (farD - nearD);
         if (band > 0.0) {
             let t = clamp((viewDepth - (farD - band)) / band, 0.0, 1.0);
-            if (t > 0.0) { vis = mix(vis, cleoCascadeVisibility(layer + 1, worldPos, N), t); }
+            if (t > 0.0 && cleoCascadeContains(layer + 1, worldPos)) {
+                vis = mix(vis, cleoCascadeVisibility(layer + 1, worldPos, N), t);
+            }
         }
     }
 
-    return (1.0 - vis) * u_shadow.u_shadowStrength;
+    return (1.0 - vis) * u_shadow.u_shadowStrength * fade;
 }
 
 /**
@@ -246,15 +325,17 @@ fn directionalShadow(worldPos: vec3<f32>, N: vec3<f32>, viewDepth: f32) -> f32 {
  */
 fn shadowVisibility(worldPos: vec3<f32>, viewDepth: f32) -> f32 {
     if (u_shadow.u_shadowsEnabled == 0 || u_shadow.u_cascadeCount <= 0) { return 1.0; }
+    let fade = cleoShadowFade(viewDepth);
+    if (fade <= 0.0) { return 1.0; }
 
-    let layer = cleoCascadeFor(viewDepth);
-    let posLS = u_shadow.u_cascadeMatrices[layer] * vec4<f32>(worldPos, 1.0);
+    let layer = cleoCascadeCovering(viewDepth, worldPos);
+    let posLS = cleoCascadeMatrix(layer) * vec4<f32>(worldPos, 1.0);
     var proj = posLS.xyz / posLS.w;
     proj = proj * 0.5 + 0.5;
     if (proj.x < 0.0 || proj.x > 1.0 || proj.y < 0.0 || proj.y > 1.0 || proj.z > 1.0) { return 1.0; }
 
     let refDepth = proj.z - u_shadow.u_shadowDepthBias * cleoDepthScale(layer);
-    return cleoCascadeTap(proj.xy, layer, refDepth);
+    return 1.0 - (1.0 - cleoCascadeTap(proj.xy, layer, refDepth)) * fade;
 }
 
 // -------------------------------------------------------------------------------------------
@@ -403,9 +484,14 @@ fn cleoPunctualVisibility(spotLayer: i32, pointSlot: i32, worldPos: vec3<f32>, N
                      pointShadow(pointSlot, worldPos, N, lightPos));
 }
 
-/** Debug tint identifying the cascade a pixel selected. Red/green/blue/yellow, near to far. */
+/**
+ * Debug tint identifying the cascade a pixel selected. Red/green/blue/yellow, near to far; magenta for
+ * the far cascade, and untinted grey past the end of the shadowed range.
+ */
 fn cascadeDebugTint(viewDepth: f32) -> vec3<f32> {
+    if (viewDepth >= cleoShadowEnd()) { return vec3<f32>(0.6, 0.6, 0.6); }
     let layer = cleoCascadeFor(viewDepth);
+    if (layer >= u_shadow.u_cascadeCount) { return vec3<f32>(1.0, 0.35, 1.0); }
     if (layer == 0) { return vec3<f32>(1.0, 0.35, 0.35); }
     if (layer == 1) { return vec3<f32>(0.35, 1.0, 0.35); }
     if (layer == 2) { return vec3<f32>(0.35, 0.55, 1.0); }

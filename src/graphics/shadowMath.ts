@@ -101,6 +101,27 @@ export function quantizeRadius(radius: number, steps: number = 16): number {
     return Math.ceil(radius * steps) / steps;
 }
 
+/**
+ * How much bigger a STAGGERED cascade is fit than its slice needs, as a fraction of its radius. A
+ * cascade skipped this frame keeps the box it was drawn with; the margin is what lets that box go on
+ * covering the slice while the camera moves, and {@link staleCascadeCovers} says when it no longer does.
+ */
+export const STAGGER_MARGIN = 0.1;
+
+/**
+ * Does a cascade rasterized around `old` still contain this frame's slice sphere `now`? Exact for
+ * spheres (`|Δ| + r_now ≤ r_old`), and conservative for the ortho box built around `old`, which holds
+ * the whole sphere. When false, a staggered cascade must be re-rendered now rather than on its turn:
+ * otherwise the slice's edge pixels fall outside the map and read as lit, and shadows strobe on a pan.
+ */
+export function staleCascadeCovers(old: CascadeSphere, now: CascadeSphere): boolean {
+    if (!(old.radius > 0)) return false;
+    const dx = now.center[0] - old.center[0];
+    const dy = now.center[1] - old.center[1];
+    const dz = now.center[2] - old.center[2];
+    return Math.sqrt(dx * dx + dy * dy + dz * dz) + now.radius <= old.radius;
+}
+
 /** Floor `value` onto a grid of `texelSize`. Idempotent, and stable under sub-texel movement. */
 export function snapToTexelGrid(value: number, texelSize: number): number {
     if (!(texelSize > 0)) return value;
@@ -116,23 +137,67 @@ export function cascadeDepthScale(depthRange: number): number {
 }
 
 /**
+ * The light's view rotation: eye at the world origin, looking along `lightDir`. Shared by
+ * {@link buildCascadeMatrix} and whoever packs {@link ShadowCasterBounds}, which must agree on it.
+ */
+export function lightViewMatrix(lightDir: ArrayLike<number>, out: mat4, scratch: { up: vec3; center: vec3 }): mat4 {
+    // A light pointing straight down or up is parallel to the default up vector, and lookAt degenerates.
+    const up = Math.abs(lightDir[1]) > 0.99 ? vec3.set(scratch.up, 0, 0, 1) : vec3.set(scratch.up, 0, 1, 0);
+    const dir = vec3.set(scratch.center, lightDir[0], lightDir[1], lightDir[2]);
+    vec3.normalize(dir, dir);
+    return mat4.lookAt(out, [0, 0, 0], dir as vec3, up);
+}
+
+/**
+ * Every shadow caster's bounding sphere in LIGHT VIEW space (see {@link lightViewMatrix}), packed
+ * `x, y, z, radius` per caster. Lets a cascade pull its near plane back to the furthest-up-sun caster
+ * that actually overlaps its footprint, instead of a fixed pad.
+ */
+export interface ShadowCasterBounds {
+    data: Float32Array;
+    count: number;
+}
+
+/** Pack one caster's world-space sphere into `bounds` at slot `bounds.count`, growing the buffer. */
+export function pushCasterBounds(bounds: ShadowCasterBounds, lightView: mat4,
+                                 cx: number, cy: number, cz: number, radius: number): void {
+    const need = (bounds.count + 1) * 4;
+    if (bounds.data.length < need) {
+        const grown = new Float32Array(Math.max(need, bounds.data.length * 2, 64));
+        grown.set(bounds.data);
+        bounds.data = grown;
+    }
+    const m = lightView, o = bounds.count * 4;
+    bounds.data[o]     = m[0] * cx + m[4] * cy + m[8]  * cz + m[12];
+    bounds.data[o + 1] = m[1] * cx + m[5] * cy + m[9]  * cz + m[13];
+    bounds.data[o + 2] = m[2] * cx + m[6] * cy + m[10] * cz + m[14];
+    bounds.data[o + 3] = radius;
+    bounds.count++;
+}
+
+/**
+ * How far up-sun a cascade's near plane is allowed to reach for a caster. Caps the depth range against
+ * a stray body at an absurd position — a 24-bit map over 20 km still resolves ~1 mm.
+ */
+export const MAX_CASTER_REACH = 20000;
+
+/**
  * Build one cascade's light-space matrix: an orthographic box around `sphere` along `lightDir`, snapped to
- * the texel grid. `casterPad` pulls the near plane back. Returns the depth range for {@link cascadeDepthScale}.
+ * the texel grid. `casterPad` pulls the near plane back; `casters`, when given, pulls it back FURTHER to
+ * take in every caster whose bounds overlap the box's footprint — a ridge hundreds of metres up-sun still
+ * shadows the slice, and clipping it at a fixed pad made its shadow come and go as the box moved.
+ * Returns the depth range for {@link cascadeDepthScale}.
  */
 export function buildCascadeMatrix(
     sphere: CascadeSphere, lightDir: ArrayLike<number>, resolution: number, casterPad: number,
     out: mat4, scratch: { view: mat4; proj: mat4; up: vec3; center: vec3 }, snap: boolean = true,
+    casters?: ShadowCasterBounds | null,
 ): { depthRange: number; texelWorldSize: number } {
     const r = sphere.radius;
     const texelWorldSize = (2 * r) / Math.max(1, resolution);
 
-    // A light pointing straight down or up is parallel to the default up vector, and lookAt degenerates.
-    const up = Math.abs(lightDir[1]) > 0.99 ? vec3.set(scratch.up, 0, 0, 1) : vec3.set(scratch.up, 0, 1, 0);
-
     // Rotation only: the eye is at the world origin, so the ortho bounds below carry all translation.
-    const dir = vec3.set(scratch.center, lightDir[0], lightDir[1], lightDir[2]);
-    vec3.normalize(dir, dir);
-    mat4.lookAt(scratch.view, [0, 0, 0], dir as vec3, up);
+    lightViewMatrix(lightDir, scratch.view, scratch);
 
     const c = vec3.transformMat4(scratch.center, sphere.center as vec3, scratch.view);
 
@@ -142,8 +207,21 @@ export function buildCascadeMatrix(
 
     // lookAt puts the view direction along -Z, so a point `d` units along the light has view z = -d.
     // Near/far are distances measured along -Z, hence the sign flip on c[2].
-    const zNear = -c[2] - r - casterPad;
     const zFar = -c[2] + r;
+    let zNear = -c[2] - r - casterPad;
+    if (casters) {
+        const right = left + 2 * r, top = bottom + 2 * r;
+        const floor = zNear - MAX_CASTER_REACH;
+        const d = casters.data;
+        for (let i = 0, o = 0; i < casters.count; i++, o += 4) {
+            const x = d[o], y = d[o + 1], z = d[o + 2], cr = d[o + 3];
+            if (x + cr < left || x - cr > right || y + cr < bottom || y - cr > top) continue;
+            // Only the near plane moves. A caster lying wholly up-sun of the box still counts — that is
+            // the ridge case — while one already inside, or behind, needs nothing.
+            const casterNear = -z - cr;
+            if (casterNear < zNear) zNear = Math.max(floor, casterNear);
+        }
+    }
 
     mat4.ortho(scratch.proj, left, left + 2 * r, bottom, bottom + 2 * r, zNear, zFar);
     mat4.multiply(out, scratch.proj, scratch.view);
