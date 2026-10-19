@@ -3,7 +3,7 @@ import { Scene } from "../core/scene/scene";
 import { Node } from "../core/scene/nodes/node";
 import { ModelNode } from "../core/scene/nodes/modelNode";
 import { unwrapScriptNode } from "../core/scene/nodes/nodeScripting";
-import { World, Body, Constraint, Material, ContactMaterial, Vec3, SAPBroadphase, Ray, RaycastResult, AABB, Plane } from 'cannon-es';
+import { World, Body, Constraint, Material, ContactMaterial, Vec3, SAPBroadphase, Ray, RaycastResult, AABB, Box } from 'cannon-es';
 import { vec3 } from "gl-matrix";
 import { RigidBody, DEFAULT_FRICTION, DEFAULT_RESTITUTION } from "./body";
 import { Ragdoll, RagdollOptions } from "./ragdoll";
@@ -320,9 +320,10 @@ export class PhysicsSystem {
    * tools that need something to fall onto in a scene with no level -- the rig editor's ragdoll test.
    */
   public addGroundPlane(height = 0): Body {
-    const body = new Body({ mass: 0, shape: new Plane() });
-    body.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-    body.position.set(0, height, 0);
+    // A wide, thick box rather than a cannon Plane: rays (the ragdoll's ground check, foot IK) do not
+    // reliably hit an infinite plane, and nothing here needs it to be infinite.
+    const body = new Body({ mass: 0, shape: new Box(new Vec3(500, 0.5, 500)) });
+    body.position.set(0, height - 0.5, 0);
     this.addBody(body);
     return body;
   }

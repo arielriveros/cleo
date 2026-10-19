@@ -37,7 +37,7 @@ export default class SoulsHollowWardenNode extends SoulsEnemyNode {
   public phase2At: number = 0.5
   public phase2SpeedMul: number = 1.15
   public phase2Seconds: number = 2
-  public roarClip: ClipName = 'Souls_Roar'
+  public roarClip: ClipName = 'Souls_Battlecry'
 
   protected _onDamaged(dealt: number, poiseDamage: number, from: Node): void {
     super._onDamaged(dealt, poiseDamage, from)

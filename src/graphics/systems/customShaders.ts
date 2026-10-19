@@ -713,6 +713,32 @@ export function customShaderResources(mode: CustomRenderMode, uniforms: CustomUn
     return out;
 }
 
+/**
+ * Keep only the resources the translated WGSL really USES. A pipeline built without an explicit layout
+ * gets an automatic one, and WebGPU leaves out of it every binding the entry points never reach -- so a
+ * resource the reflection lists but the shader ignores (the light-data sampler beside a `textureLoad`,
+ * the spot and point shadow maps of a surface that only takes the sun) is a binding the bind group then
+ * names and the layout lacks: "binding index 7 not present", the group invalid, and every frame's
+ * command buffer with it -- a black viewport.
+ *
+ * Matched by (group, binding) against the WGSL's own declarations, never by name, so naga's renaming
+ * cannot desynchronise it. A resource with no declaration at all is kept: the caller knows best.
+ */
+export function usedResources(resources: ShaderResource[], ...wgsl: (string | null | undefined)[]): ShaderResource[] {
+    const sources = wgsl.filter((w): w is string => !!w)
+    if (!sources.length) return resources
+    const text = sources.join('\n')
+    const varAt = new Map<string, string>()
+    const decl = /@group\((\d+)\)\s*@binding\((\d+)\)\s*var(?:<[^>]*>)?\s+([A-Za-z_]\w*)/g
+    for (let m = decl.exec(text); m; m = decl.exec(text)) varAt.set(`${m[1]}:${m[2]}`, m[3])
+    return resources.filter(r => {
+        const name = varAt.get(`${r.group}:${r.binding}`)
+        if (!name) return true
+        const uses = text.match(new RegExp(`\\b${name}\\b`, 'g'))?.length ?? 0
+        return uses > 1
+    })
+}
+
 /** The user samplers a screen material declares, in the order the prelude and the bind group use. */
 export function screenUserSamplerNames(uniforms: CustomUniform[]): string[] {
     return userSamplerDecls(uniforms).map(s => s.name);

@@ -24,11 +24,17 @@ function stripComments(source: string): string {
 export function samplerBindingsOf(source: string): Map<number, Set<number>> {
     const stripped = stripComments(source);
     const declaration =
-        /@group\(\s*(\d+)\s*\)\s*@binding\(\s*(\d+)\s*\)\s*var(?:<[^>]*>)?\s+\w+\s*:\s*([^;]+);/g;
+        /@group\(\s*(\d+)\s*\)\s*@binding\(\s*(\d+)\s*\)\s*var(?:<[^>]*>)?\s+(\w+)\s*:\s*([^;]+);/g;
 
     const samplers = new Map<number, Set<number>>();
     for (const match of stripped.matchAll(declaration)) {
-        if (!/^sampler(_comparison)?$/.test(match[3].trim())) continue;
+        if (!/^sampler(_comparison)?$/.test(match[4].trim())) continue;
+        // Declared but never USED: a pipeline's automatic layout leaves it out, so a sampler synthesised
+        // for it is an entry the layout does not have and the whole group is rejected ("binding index 7
+        // not present"). naga keeps such declarations -- a GLSL `texelFetch` on a combined sampler comes
+        // out as a texture read plus a sampler nothing touches -- which blacked out the Valley's pond.
+        const uses = stripped.match(new RegExp(`\\b${match[3]}\\b`, 'g'))?.length ?? 0;
+        if (uses < 2) continue;
         const group = Number(match[1]);
         const bindings = samplers.get(group) ?? new Set<number>();
         bindings.add(Number(match[2]));

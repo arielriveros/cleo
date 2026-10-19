@@ -202,8 +202,15 @@ const rig = {
 const idleClip = mannequinModelJson.animations.find(a => a.name === 'Idle')
 const placeholderClips = buildPlaceholderClips(mannequinModelJson.skin, idleClip)
 
+/**
+ * The Mixamo combat clips (tools/soulsDemo/importClips.mjs, committed output). Each takes the name of the
+ * placeholder it replaces, so the placeholder of that name is dropped; the rest are new.
+ */
+const importedClips = readJson(path.join(HERE, 'soulsClips.json'))
+const importedNames = new Set(importedClips.map(c => c.name))
+
 const animations = []
-for (const clip of [...mannequinModelJson.animations, ...placeholderClips]) {
+for (const clip of [...mannequinModelJson.animations, ...placeholderClips.filter(c => !importedNames.has(c.name)), ...importedClips]) {
   animations.push({ id: stableId(`anim:${clip.name}`), name: clip.name, clips: [clip], rigId: rig.id, sourceSkin: rig.skin })
 }
 rig.animationIds = animations.map(a => a.id)
@@ -239,16 +246,39 @@ const locomotionField = (() => {
  * model get it back: linking the rig to a new model node with no machine hands it this controller.
  */
 const CHARACTER_CONTROLLER_ID = stableId('controller:souls-character')
+const ENEMY_CONTROLLER_ID = stableId('controller:souls-enemy')
+/** Death clip per controller: the player falls with Dying, enemies with Standing Death Right (then the ragdoll). */
+const DEATH_CLIP = { player: 'Souls_Dying', enemy: 'Souls_Death' }
 function characterController() {
-  return { id: CHARACTER_CONTROLLER_ID, name: 'Souls Character', rigId: rig.id, machine: characterStateMachine() }
+  return { id: CHARACTER_CONTROLLER_ID, name: 'Souls Character', rigId: rig.id, machine: characterStateMachine('player') }
+}
+function enemyController() {
+  return { id: ENEMY_CONTROLLER_ID, name: 'Souls Enemy', rigId: rig.id, machine: characterStateMachine('enemy') }
 }
 
 /** The machine as a node embeds it: the controller's, stamped with where it came from. */
-function embeddedCharacterMachine() {
-  return { ...characterStateMachine(), controllerId: CHARACTER_CONTROLLER_ID }
+function embeddedCharacterMachine(kind = 'player') {
+  return { ...characterStateMachine(kind), controllerId: kind === 'enemy' ? ENEMY_CONTROLLER_ID : CHARACTER_CONTROLLER_ID }
 }
 
-function characterStateMachine() {
+/**
+ * The "Chest Up" bone mask: the chest (Spine2) and everything above it -- shoulders, arms, neck, head.
+ * What the sword-run layer plays on. It starts at the CHEST, not the spine: the run clip's lower spine
+ * rocks the whole torso over the legs, and laid over the locomotion that read as a heavy sway.
+ */
+const UPPER_BODY_MASK = (() => {
+  const skin = mannequinModelJson.skin
+  const names = new Map(skin.nodeNames)
+  const parents = new Map(skin.nodeParents)
+  const spine = [...names].find(([, n]) => /:Spine2$/.test(n))?.[0]
+  if (spine === undefined) throw new Error('the mannequin has no Spine2 (chest) bone for the chest-up mask')
+  const under = (n) => { for (let p = n; p !== undefined; p = parents.get(p)) if (p === spine) return true; return false }
+  const weights = {}
+  for (const j of skin.joints) if (under(j.nodeIndex)) weights[names.get(j.nodeIndex)] = 1
+  return { id: stableId('mask:upper-body'), name: 'Chest Up', rigId: rig.id, weights }
+})()
+
+function characterStateMachine(kind = 'player') {
   const speed = (op, value) => ({ op: 'and', children: [{ param: 'Speed', op, value, hysteresis: 0.15 }] })
   const trigger = (param) => ({ op: 'and', children: [{ param, op: 'trigger' }] })
   const edge = (from, to, condition) => ({ from, to, conditions: [], minDwell: 0, hasExitTime: false, exitTime: 1, condition })
@@ -265,7 +295,7 @@ function characterStateMachine() {
         name: 'Locomotion', clipName: '', fieldId: locomotionField.id, field: toRuntimeField(locomotionField),
         fieldInputs: { x: 'Direction', y: 'Speed' }, loop: true, speed: 1, isEntry: false, x: 300, y: 40,
       },
-      { name: 'Dead', clipName: 'Souls_Death', loop: false, speed: 1, isEntry: false, x: 170, y: 200 },
+      { name: 'Dead', clipName: DEATH_CLIP[kind], loop: false, speed: 1, isEntry: false, x: 170, y: 200 },
     ],
     transitions: [
       edge('Idle', 'Dead', trigger('Died')),
@@ -274,6 +304,22 @@ function characterStateMachine() {
       { ...edge('Idle', 'Locomotion', speed('gt', 0.5)), minDwell: 0.05 },
       { ...edge('Locomotion', 'Idle', speed('lt', 0.5)), minDwell: 0.1 },
     ],
+    // The sword run, on the upper body only, while running: the arms carry the blade the way a fighter
+    // runs with one, over the legs' own locomotion. Off below a jog (walking and strafing in a fight
+    // keep the guard pose). Attacks, rolls and hit reactions are ACTIONS, which sit above every layer.
+    layers: [{
+      name: 'UpperBody', blend: 'override', weight: 1, maskId: UPPER_BODY_MASK.id, mask: { ...UPPER_BODY_MASK.weights },
+      states: [
+        { name: 'Off', clipName: '', loop: true, speed: 1, isEntry: true, x: 40, y: 40 },
+        { name: 'Sword Run', clipName: 'Souls_RunWithSword', loop: true, speed: 1, isEntry: false, x: 300, y: 40 },
+      ],
+      transitions: [
+        { ...edge('Off', 'Sword Run', speed('gt', 2.2)), blendTime: 0.25, minDwell: 0.1 },
+        { ...edge('Sword Run', 'Off', speed('lt', 1.8)), blendTime: 0.3, minDwell: 0.15 },
+        // Dying drops the arms back to the base layer's death clip.
+        { ...edge('Sword Run', 'Off', trigger('Died')), blendTime: 0.15 },
+      ],
+    }],
     events: [],
   }
 }
@@ -779,7 +825,7 @@ function characterModel(key, materialId, scale) {
   model.scale = [scale, scale, scale]
   model.variables = vars({ __modelId: MANNEQUIN_MODEL, __materialId: materialId })
   model.model.material = matJson(materialId)
-  model.stateMachine = embeddedCharacterMachine()
+  model.stateMachine = embeddedCharacterMachine(key === 'player' ? 'player' : 'enemy')
   model.ragdoll = clone(ragdoll)
   model.children = []
   return model
@@ -822,13 +868,40 @@ const GREATSWORD_PARTS = [
  * the inspector agree with the clip (they are only used when a replacement clip has no markers).
  */
 function swingWindow(clip) {
-  const hit = clipEventTime(clip, 'hit'), end = clipEventTime(clip, 'hitEnd')
+  const hit = eventTime(clip, 'hit'), end = eventTime(clip, 'hitEnd')
   return hit == null || end == null ? {} : { hitTime: hit, activeSeconds: Math.round((end - hit) * 1000) / 1000 }
 }
 
+/** A marker's time on a clip: the imported clip's own, else the placeholder's. */
+function eventTime(clip, event) {
+  const imported = importedClips.find(c => c.name === clip)
+  if (imported) return imported.events?.find(e => e.name === event)?.time ?? null
+  return clipEventTime(clip, event)
+}
+
+/**
+ * The timings an IMPORTED attack clip implies, over what the move table guessed for its placeholder: the
+ * combo/recover fallbacks from its markers, the lunge ending as the blade lands, and turning toward the
+ * target through most of the wind-up (a Mixamo swing winds up for ~0.7 s; the placeholders for ~0.3).
+ */
+function importedTiming(clip, fields) {
+  if (!importedNames.has(clip)) return {}
+  const hit = eventTime(clip, 'hit')
+  if (hit == null) return {}
+  const r3 = (v) => Math.round(v * 1000) / 1000
+  const out = {}
+  const combo = eventTime(clip, 'combo'), recover = eventTime(clip, 'recover')
+  if (combo != null && 'comboTime' in fields) out.comboTime = combo
+  if (recover != null && 'recoverTime' in fields) out.recoverTime = recover
+  if ('lungeStart' in fields) out.lungeStart = r3(Math.max(0, hit - num(fields.lungeSeconds, 0.15) - 0.05))
+  out.trackSeconds = r3(Math.max(num(fields.trackSeconds, 0), hit * 0.75))
+  return out
+}
+const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d)
+
 /** One SoulsMove data node. */
 function move(key, name, fields) {
-  return withScript(node(name, 'node', { id: stableId(`move:${key}:${name}`) }), 'SoulsMove', { ...fields, ...swingWindow(fields.clip) })
+  return withScript(node(name, 'node', { id: stableId(`move:${key}:${name}`) }), 'SoulsMove', { ...fields, ...swingWindow(fields.clip), ...importedTiming(fields.clip, fields) })
 }
 
 // The blade hitboxes are no longer data here: each is the class default of its weapon's script
@@ -858,15 +931,15 @@ function weaponNode(key, name, script, parts, moves = [], bladeDir = BLADE_DOWN_
 
 const WEAPONS = [
   ['sword', 'Straight Sword', 'SoulsStraightSword', SWORD_PARTS, [
-    ['Light1', { clip: 'Souls_Sword_L1', damageMul: 1, staminaCost: 16, lungeStart: 0.1, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.38, comboTime: 0.45, recoverTime: 0.62, next: 'Light2' }],
-    ['Light2', { clip: 'Souls_Sword_L2', damageMul: 1, staminaCost: 16, lungeStart: 0.1, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.36, comboTime: 0.45, recoverTime: 0.62, next: 'Light3' }],
-    ['Light3', { clip: 'Souls_Sword_L3', damageMul: 1.15, staminaCost: 20, lungeStart: 0.3, lungeSeconds: 0.2, lungeSpeed: 3, hitTime: 0.52, comboTime: 0.6, recoverTime: 0.8, next: 'Light1' }],
-    ['Heavy', { clip: 'Souls_Sword_Heavy', bounceOff: false, damageMul: 1.6, poiseMul: 2, staminaCost: 30, lungeStart: 0.62, lungeSeconds: 0.2, lungeSpeed: 4, trackSeconds: 0.35, hitTime: 0.78, comboTime: 1, recoverTime: 1.05, next: '' }],
+    ['Light1', { clip: 'Souls_Sword_L1', playSpeed: 1.6, damageMul: 1, staminaCost: 16, lungeStart: 0.1, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.38, comboTime: 0.45, recoverTime: 0.62, next: 'Light2' }],
+    ['Light2', { clip: 'Souls_Sword_L2', playSpeed: 1.6, damageMul: 1, staminaCost: 16, lungeStart: 0.1, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.36, comboTime: 0.45, recoverTime: 0.62, next: 'Light3' }],
+    ['Light3', { clip: 'Souls_Sword_L3', playSpeed: 1.5, damageMul: 1.15, staminaCost: 20, lungeStart: 0.3, lungeSeconds: 0.2, lungeSpeed: 3, hitTime: 0.52, comboTime: 0.6, recoverTime: 0.8, next: 'Light1' }],
+    ['Heavy', { clip: 'Souls_Sword_Heavy', playSpeed: 1.3, bounceOff: false, damageMul: 1.6, poiseMul: 2, staminaCost: 30, lungeStart: 0.62, lungeSeconds: 0.2, lungeSpeed: 4, trackSeconds: 0.35, hitTime: 0.78, comboTime: 1, recoverTime: 1.05, next: '' }],
   ]],
   ['greatsword', 'Greatsword', 'SoulsGreatsword', GREATSWORD_PARTS, [
-    ['Light1', { clip: 'Souls_GS_L1', damageMul: 1, staminaCost: 26, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light2' }],
-    ['Light2', { clip: 'Souls_GS_L2', damageMul: 1.05, staminaCost: 26, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light1' }],
-    ['Heavy', { clip: 'Souls_GS_Heavy', bounceOff: false, damageMul: 1.7, poiseMul: 2, staminaCost: 42, lungeStart: 0.95, lungeSeconds: 0.2, lungeSpeed: 3, trackSeconds: 0.5, hitTime: 1.15, comboTime: 1.5, recoverTime: 1.55, next: '' }],
+    ['Light1', { clip: 'Souls_GS_L1', playSpeed: 1.35, damageMul: 1, staminaCost: 26, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light2' }],
+    ['Light2', { clip: 'Souls_GS_L2', playSpeed: 1.35, damageMul: 1.05, staminaCost: 26, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light1' }],
+    ['Heavy', { clip: 'Souls_GS_Heavy', playSpeed: 1.15, bounceOff: false, damageMul: 1.7, poiseMul: 2, staminaCost: 42, lungeStart: 0.95, lungeSeconds: 0.2, lungeSpeed: 3, trackSeconds: 0.5, hitTime: 1.15, comboTime: 1.5, recoverTime: 1.55, next: '' }],
   ]],
 ]
 
@@ -919,7 +992,7 @@ function playerNode() {
 // ----- enemies ---------------------------------------------------------------------------------------
 
 function attack(key, name, fields) {
-  return withScript(node(name, 'node', { id: stableId(`attack:${key}:${name}`) }), 'SoulsEnemyAttack', { ...fields, ...swingWindow(fields.clip) })
+  return withScript(node(name, 'node', { id: stableId(`attack:${key}:${name}`) }), 'SoulsEnemyAttack', { ...fields, ...swingWindow(fields.clip), ...importedTiming(fields.clip, fields) })
 }
 
 /**
@@ -1108,8 +1181,8 @@ const ENEMIES = [
     weapon: ['club', 'Club', 'SoulsClub', CLUB],
     sight: 14,
     attacks: [
-      ['Swing', { clip: 'Souls_Enemy_Swing', damage: 70, poiseDamage: 20, minRange: 0, maxRange: 1.8, trackSeconds: 0.45, lungeStart: 0.45, lungeSeconds: 0.15, lungeSpeed: 2.5, hitTime: 0.62 }],
-      ['Sweep', { clip: 'Souls_Enemy_Sweep', damage: 60, poiseDamage: 20, minRange: 0, maxRange: 1.4, weight: 0.6, cooldown: 3, trackSeconds: 0.4, hitTime: 0.7 }],
+      ['Swing', { clip: 'Souls_Enemy_Swing', playSpeed: 1.3, damage: 70, poiseDamage: 20, minRange: 0, maxRange: 1.8, trackSeconds: 0.45, lungeStart: 0.45, lungeSeconds: 0.15, lungeSpeed: 2.5, hitTime: 0.62 }],
+      ['Sweep', { clip: 'Souls_Enemy_Sweep', playSpeed: 1.4, damage: 60, poiseDamage: 20, minRange: 0, maxRange: 1.4, weight: 0.6, cooldown: 3, trackSeconds: 0.4, hitTime: 0.7 }],
     ],
   },
   {
@@ -1119,7 +1192,7 @@ const ENEMIES = [
     sight: 22, fov: 160,
     attacks: [
       ['Bolt', { clip: 'Souls_Cast', damage: 90, poiseDamage: 30, minRange: 3, maxRange: 20, cooldown: 3.5, trackSeconds: 0.65, hitTime: 0.7, projectileTemplate: 'Magic Bolt', projectileSpeed: 12, sound: 'Cast' }],
-      ['Shove', { clip: 'Souls_Enemy_Swing', damage: 40, poiseDamage: 15, minRange: 0, maxRange: 0.7, hitTime: 0.62 }],
+      ['Shove', { clip: 'Souls_Enemy_Swing', playSpeed: 1.4, damage: 40, poiseDamage: 15, minRange: 0, maxRange: 0.7, hitTime: 0.62 }],
     ],
   },
   {
@@ -1128,9 +1201,12 @@ const ENEMIES = [
     ai: { engage: 9, leash: 14, preferredMin: 0, preferredMax: 2.6 },
     sight: 16,
     attacks: [
-      ['Sweep', { clip: 'Souls_Tall_Sweep', damage: 140, poiseDamage: 35, minRange: 0, maxRange: 2.6, trackSeconds: 0.45, hitTime: 0.7 }],
-      ['Overhead', { clip: 'Souls_Enemy_Overhead', damage: 190, poiseDamage: 50, minRange: 0, maxRange: 2.8, hyperArmor: true, trackSeconds: 0.8, lungeStart: 0.95, lungeSeconds: 0.15, lungeSpeed: 3, hitTime: 1.05, weight: 0.8 }],
-      ['Thrust', { clip: 'Souls_Enemy_Thrust', damage: 150, poiseDamage: 40, minRange: 4, maxRange: 9, cooldown: 4, trackSeconds: 0.3, lungeStart: 0.3, lungeSeconds: 0.3, lungeSpeed: 14, lungeToTarget: true, hitTime: 0.55 }],
+      ['Sweep', { clip: 'Souls_GS_L2', playSpeed: 1.3, damage: 140, poiseDamage: 35, minRange: 0, maxRange: 2.6, trackSeconds: 0.45, hitTime: 0.7 }],
+      ['Overhead', { clip: 'Souls_Enemy_Overhead', playSpeed: 1.1, damage: 190, poiseDamage: 50, minRange: 0, maxRange: 2.8, hyperArmor: true, trackSeconds: 0.8, lungeStart: 0.95, lungeSeconds: 0.15, lungeSpeed: 3, hitTime: 1.05, weight: 0.8 }],
+      ['Thrust', { clip: 'Souls_Enemy_Thrust', playSpeed: 1.25, damage: 150, poiseDamage: 40, minRange: 4, maxRange: 9, cooldown: 4, trackSeconds: 0.3, lungeStart: 0.3, lungeSeconds: 0.3, lungeSpeed: 14, lungeToTarget: true, hitTime: 0.55 }],
+      // The two Mixamo combos: several swings in one clip, each opening its own damage window.
+      ['Combo', { clip: 'Souls_Knight_Combo1', playSpeed: 1.2, damage: 110, poiseDamage: 30, minRange: 0, maxRange: 2.4, weight: 0.6, cooldown: 7, hyperArmor: true, trackSeconds: 0.6, lungeStart: 0.4, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.9 }],
+      ['Flurry', { clip: 'Souls_Knight_Combo2', playSpeed: 1.2, damage: 95, poiseDamage: 25, minRange: 0, maxRange: 2.4, weight: 0.5, cooldown: 8, trackSeconds: 0.6, lungeStart: 0.4, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.8 }],
     ],
   },
   {
@@ -1143,7 +1219,7 @@ const ENEMIES = [
       ['Backsweep', { clip: 'Souls_Giant_Backsweep', playSpeed: 1, damage: 140, poiseDamage: 40, minRange: 0, maxRange: 4.2, phase: 9, trackSeconds: 0.4, hitTime: 0.7 }],
       ['Slam', { clip: 'Souls_Enemy_Overhead', playSpeed: 0.85, damage: 220, poiseDamage: 60, minRange: 0, maxRange: 3.8, hyperArmor: true, trackSeconds: 0.8, lungeStart: 0.95, lungeSeconds: 0.2, lungeSpeed: 3, hitTime: 1.05, impactTemplate: 'Slam Dust' }],
       ['Lunge', { clip: 'Souls_Giant_Thrust', damage: 160, poiseDamage: 45, minRange: 5, maxRange: 12, cooldown: 4, trackSeconds: 0.3, lungeStart: 0.3, lungeSeconds: 0.35, lungeSpeed: 16, lungeToTarget: true, hitTime: 0.55 }],
-      ['Leap', { clip: 'Souls_Leap', damage: 200, poiseDamage: 80, minRange: 6, maxRange: 16, aoeRadius: 3.8, phase: 2, cooldown: 6, hyperArmor: true, trackSeconds: 0.55, lungeStart: 0.6, lungeSeconds: 0.6, lungeSpeed: 18, lungeToTarget: true, hitTime: 1.25, impactTemplate: 'Slam Dust', sound: 'Boss Leap' }],
+      ['Leap', { clip: 'Souls_Leap', playSpeed: 1.1, damage: 200, poiseDamage: 80, minRange: 6, maxRange: 16, aoeRadius: 3.8, phase: 2, cooldown: 6, hyperArmor: true, trackSeconds: 0.55, lungeStart: 0.6, lungeSeconds: 0.6, lungeSpeed: 18, lungeToTarget: true, hitTime: 1.25, impactTemplate: 'Slam Dust', sound: 'Boss Leap' }],
       ['Bolt Fan', { clip: 'Souls_Cast', playSpeed: 1.1, damage: 110, poiseDamage: 30, minRange: 6, maxRange: 22, phase: 2, cooldown: 7, trackSeconds: 0.6, hitTime: 0.7, projectileTemplate: 'Magic Bolt', projectileSpeed: 13, projectileCount: 3, spreadDeg: 14, sound: 'Cast' }],
     ],
   },
@@ -1906,7 +1982,8 @@ const FOLDERS = {
   },
   rig: { Mannequin: `${SHARED}/Rigs` },
   animationField: { 'Souls Locomotion': `${SHARED}/Animation` },
-  animController: { 'Souls Character': `${SHARED}/Animation` },
+  animController: { 'Souls Character': `${SHARED}/Animation`, 'Souls Enemy': `${SHARED}/Animation` },
+  boneMask: { 'Chest Up': `${SHARED}/Animation` },
   particleSystem: {
     'Bonfire Fire': `${PROP('Bonfire')}/Particles`, 'Torch Fire': `${PROP('Torch')}/Particles`,
     'Fog Wall': `${PROP('Fog Gate')}/Particles`, 'Item Glow': `${PROP('Pickup')}/Particles`,
@@ -1926,9 +2003,9 @@ const FOLDERS = {
 function animationFolder(name) {
   if (!name.startsWith('Souls_')) return `${SHARED}/Animations/Locomotion`
   const clip = name.slice('Souls_'.length)
-  if (/^(HitLight|HitHeavy|Death|Cast)$/.test(clip)) return `${SHARED}/Animations/Combat`
+  if (/^(HitLight|HitHeavy|Death|Dying|Cast|RunWithSword|Battlecry)$/.test(clip)) return `${SHARED}/Animations/Combat`
   if (clip.startsWith('Enemy_')) return `${ENEMY('Base Enemy')}/Animations`
-  if (clip.startsWith('Tall_')) return `${ENEMY('Elite Knight')}/Animations`
+  if (clip.startsWith('Tall_') || clip.startsWith('Knight_')) return `${ENEMY('Elite Knight')}/Animations`
   if (clip.startsWith('Giant_') || clip === 'Roar' || clip === 'Leap') return `${ENEMY('Hollow Warden')}/Animations`
   return `${PLAYER}/Animations`
 }
@@ -1964,6 +2041,7 @@ function vfs(libraries, textureIds, { projectName = PROJECT_NAME, sceneId = SCEN
   add('rig', libraries.rigs)
   add('animationField', libraries.animationFields)
   add('animController', libraries.animControllers)
+  if (libraries.boneMasks?.length) add('boneMask', libraries.boneMasks)
   add('animation', libraries.animations, a => animationFolder(a.name))
   add('particleSystem', libraries.particleSystems)
   add('aiBrain', libraries.aiBrains)
@@ -2020,6 +2098,13 @@ export function writeProject({
 
   const model = clone(mannequin)
   stripClips(model.nodeJson)
+  // The import left an EMPTY machine on the asset. A model asset carries no machine -- placements do --
+  // and an empty one here once read as "the asset has an opinion" and wiped the player's on a rebuild.
+  const dropEmptyMachines = (n) => {
+    if (n.stateMachine && !n.stateMachine.states?.length) delete n.stateMachine
+    for (const c of n.children ?? []) dropEmptyMachines(c)
+  }
+  dropEmptyMachines(model.nodeJson)
   model.rigId = rig.id
 
   const libraries = {
@@ -2027,7 +2112,8 @@ export function writeProject({
     materials: materials.filter(m => !excludeMaterials.includes(m.id)),
     terrainMaterials,
     animationFields: [locomotionField],
-    animControllers: [characterController()],
+    animControllers: [characterController(), enemyController()],
+    boneMasks: [UPPER_BODY_MASK],
     animations,
     rigs: [rig],
     tilesets: [],
@@ -2082,8 +2168,9 @@ function main() {
     },
   })
   console.log('Hollow Keep written to editor/public/examples/souls-demo/')
-  console.log('  scripts %d · templates %d · clips %d (%d placeholders) · materials %d · effects %d · textures %d',
-    scripts.assets.length, templates, animations.length, placeholderClips.length, materials.length, particleSystems.length, textureCount)
+  console.log('  scripts %d · templates %d · clips %d (%d imported, %d placeholders) · materials %d · effects %d · textures %d',
+    scripts.assets.length, templates, animations.length, importedClips.length,
+    placeholderClips.filter(c => !importedNames.has(c.name)).length, materials.length, particleSystems.length, textureCount)
   console.log('  level pieces %d · torches %d · TOTAL %s', level.length, lights.length, mb(total))
   console.log('\nNext:  npm --prefix editor run examples:list')
 }

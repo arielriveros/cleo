@@ -348,7 +348,37 @@ only needs this:
 If you build a new machine for a new model, keep the two trigger names. The scripts fire `Died` and
 `Revive` by name.
 
+There are two controllers on the `Mannequin` rig, alike except for their `Dead` clip:
+- **Souls Character** (the player) falls with `Souls_Dying`.
+- **Souls Enemy** falls with `Souls_Death` (Standing Death Right), then goes limp after `deathSeconds`.
+
+**Upper body: running with the sword.** Both machines carry an `UpperBody` layer:
+- It is an override layer with the **Chest Up** bone mask: `mixamorig1:Spine2` (the chest) and everything above it. The lower spine stays with the legs, or the run rocks the whole torso.
+- Its two states are `Off`, an empty state that contributes nothing, and `Sword Run` (`Souls_RunWithSword`, looping).
+- It switches on above `Speed` 2.2 and off below 1.8. While running, the arms carry the blade the way a
+  fighter runs with one, and the legs keep the locomotion blend's footwork.
+- Walking and strafing keep the guard pose.
+- Attacks, rolls and hit reactions are actions, which play over every layer.
+
 ### Clips the player uses
+
+**The combat clips are Mixamo downloads.** These come from `build/animations/`:
+- the straight sword and greatsword movesets, the roll (Standing Dive Forward), the heavy hit reaction and the
+  player death;
+- sheathe and draw;
+- the enemy swings, the knight's two combos and the warden's leap;
+- the battle cry, the enemy death, and the sword run.
+
+`tools/soulsDemo/importClips.mjs` retargets them onto the mannequin, holds them in place and writes
+`tools/soulsDemo/soulsClips.json`, which is committed. Each clip takes the name of the placeholder it
+replaces, and the generator drops that placeholder.
+
+Their `hit` / `hitEnd` / `combo` / `recover` markers are measured from the right hand's speed: each
+swing's fastest moment gets a short window around it. Pin any time the measurement gets wrong in
+`MARKER_OVERRIDES`.
+
+The downloads are slow next to a souls swing, so the moves play them faster with `playSpeed` 1.15–1.6.
+The generator derives the moves' fallback timings, their `lungeStart` and their tracking from the markers.
 
 | Clip (placeholder name) | Length | Required events | Referenced by |
 |---|---|---|---|
@@ -360,11 +390,12 @@ If you build a new machine for a new model, keep the two trigger names. The scri
 | `Souls_Backstep` | 0.45 s | — | `Player` → `backstepClip` |
 | `Souls_Drink` | 1.4 s | `drink` (when the heal starts) | `Player` → `drinkClip` |
 | `Souls_HitLight` / `Souls_HitHeavy` | 0.45 / 0.9 s | — | `Player` → `hitLightClip` / `hitHeavyClip` (also the enemies' flinch and stagger) |
-| `Souls_Swap` | 0.4 s | — | `Player` → `swapClip` |
+| `Souls_Sheath` / `Souls_Draw` | 1.7 / 1.5 s (played at 2x) | — | `Player` → `sheathClip` / `drawClip`: a swap sheathes, changes weapon, then draws |
+| `Souls_Swap` | 0.4 s | — | `Player` → `swapClip`, used only when `sheathClip` is empty |
 | `Souls_Rest` | 1.2 s, loops | — | `Player` → `restClip` (sitting at the bonfire) |
 | `Souls_Interact` / `Souls_Pickup` | 0.9 / 0.8 s | — | lever, bonfire lighting / pickups, bloodstain |
 | `Souls_FogWalk` | 1.5 s | — | `Player` → `fogWalkClip` |
-| `Souls_Death` | 1.5 s | — | the `Dead` state |
+| `Souls_Death` | 2.3 s, root motion | — | the enemies' `Dead` state (then the ragdoll) |
 | `Idle`, `Walk`, `Run`, strafes, backwards, diagonals | — | — | the `Souls Locomotion` blend space |
 
 ### Clips the enemies use
@@ -380,7 +411,10 @@ If you build a new machine for a new model, keep the two trigger names. The scri
 | `Souls_Giant_Thrust` | 1.2 s | `hit`, `hitEnd` | Warden `Lunge` |
 | `Souls_Cast` | 1.2 s | `cast` (the bolt leaves) | Sorcerer `Bolt`, Warden `Bolt Fan` |
 | `Souls_Leap` | 1.8 s | `hit` (landing) | Warden `Leap` |
-| `Souls_Roar` | 2.0 s | — | Warden → `roarClip` (phase two) |
+| `Souls_Knight_Combo1` / `Combo2` | 4.7 / 4.2 s | several `hit` / `hitEnd` pairs | Knight `Combo` / `Flurry`: each pair is a fresh damage window |
+| `Souls_Battlecry` | 2.8 s | — | the boss's `tauntClip`, played once on first sight (regular enemies never taunt); Warden → `roarClip` (phase two) |
+| `Souls_Dying` | 2.6 s, root motion | — | the player's `Dead` state |
+| `Souls_Roar` | 2.0 s | — | placeholder, no longer used |
 
 ### What the events mean
 

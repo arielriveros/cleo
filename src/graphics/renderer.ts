@@ -139,7 +139,7 @@ import { GLState } from './systems/glState';
 import { Texture } from './texture';
 import { CubeFramebuffer } from './cubeFramebuffer';
 import { Material, CustomMaterial } from './material';
-import { ensureCustomShader, customShaderReady, customShaderModules, customForwardTypes, screenShaderResources, screenUserSamplerNames, customShaderResources } from './systems/customShaders';
+import { ensureCustomShader, customShaderReady, customShaderModules, customForwardTypes, screenShaderResources, screenUserSamplerNames, customShaderResources, usedResources } from './systems/customShaders';
 import { TexturePacker, DILATED_BASE_SLOT } from './systems/texturePacker';
 import { ParticleRenderer, PARTICLE_PROGRAMS, setParticleSimVariants, type ParticleSimFrame, type ParticleDrawFrame } from './particles/particleRenderer';
 import { MAX_FORCE_FIELDS } from '../core/scene/nodes/forceFieldNode';
@@ -3952,8 +3952,12 @@ export class Renderer {
     private _customBindGroup(pipeline: RenderPipeline, material: CustomMaterial,
                              envCube?: Texture | null): BindGroup {
         const textures: Texture[] = [];
+        // Each at the binding its resource declares: a resource the shader never uses is filtered out of
+        // a translated pipeline (see `usedResources`), so counting slots off by twos would shift the rest.
+        const bindings: number[] = [];
         for (const resource of pipeline.resources) {
             if (resource.group !== 0 || resource.kind !== 'texture') continue;
+            bindings.push(resource.binding);
             if (resource.glslName === 'u_envMap') { textures.push(envCube ?? this._fallbackCube); continue; }
             if (resource.glslName === 'u_sceneDepth') { textures.push(this._sceneDepthFBO.depth); continue; }
             if (resource.glslName === 'u_sceneColor') {
@@ -3964,7 +3968,7 @@ export class Renderer {
             const texture = id ? TextureManager.Instance.getTexture(id) : null;
             textures.push(texture ?? this._fallbackTexture);
         }
-        return this._textureBindGroup(pipeline, 0, textures);
+        return this._textureBindGroup(pipeline, 0, textures, bindings);
     }
 
     private _terrainBindGroup(pipeline: RenderPipeline, material: Material): BindGroup {
@@ -4562,17 +4566,24 @@ export class Renderer {
     private _frameLightingBindGroup(pipeline: RenderPipeline, withPunctual: boolean = true): BindGroup {
         const textures: Texture[] = [];
         const bindings: number[] = [];
+        // Only the bindings this program's layout really has. A CUSTOM material's WGSL comes out of naga,
+        // which drops every resource the shader never reaches: a lit custom surface (the Valley's water)
+        // that samples the sun's cascades but never a spot or point shadow has no binding 2 or 4, and
+        // naming them anyway made the whole group -- and every frame's command buffer -- invalid.
+        const declared = new Set(pipeline.resources.filter(r => r.group === 3).map(r => r.binding));
+        const add = (texture: Texture, binding: number) => {
+            if (!declared.has(binding)) return;
+            textures.push(texture); bindings.push(binding);
+        };
         if (this._declaresShadowGroup(pipeline)) {
-            textures.push(this._shadowCascadeFBO.texture); bindings.push(0);
+            add(this._shadowCascadeFBO.texture, 0);
             if (withPunctual) {
-                textures.push(this._spotShadowFBO.texture);  bindings.push(2);
-                textures.push(this._pointShadowFBO.texture); bindings.push(4);
+                add(this._spotShadowFBO.texture, 2);
+                add(this._pointShadowFBO.texture, 4);
             }
         }
         // One texture and no sampler beside it — the light data is only ever `textureLoad`ed.
-        if (this._declaresLightGrid(pipeline)) {
-            textures.push(this._lightGrid.texture); bindings.push(6);
-        }
+        if (this._declaresLightGrid(pipeline)) add(this._lightGrid.texture, 6);
         return this._textureBindGroup(pipeline, 3, textures, bindings);
     }
 
@@ -7737,7 +7748,8 @@ export class Renderer {
                 // translate; group 3 (the shadow maps) is bound below as for any lit program.
                 const customWgsl = customShaderModules(mat);
                 const customPipeline = this._pipelineFor(shaderType, {
-                    resources: customShaderResources('forward', mat.uniforms),
+                    resources: usedResources(customShaderResources('forward', mat.uniforms),
+                                             customWgsl?.fragment, customWgsl?.vertex),
                     ...(customWgsl ? { wgsl: customWgsl.fragment, entryPoints: { fragment: 'main' },
                                        vertexWgsl: { wgsl: customWgsl.vertex,
                                                      entryPoint: customWgsl.vertexEntry } } : {}),

@@ -598,3 +598,61 @@ describe('wading through a water zone', () => {
         expect(intent.speedScale).toBeCloseTo(0.6, 6);
     });
 });
+
+describe('the imported combat clips in the scripts', () => {
+    const oneSecond = { samplers: [{ input: [0, 1] }] };
+    const intent = () => ({ move: [0, 0], basisYaw: 0, speedScale: 1, sprint: false, look: [0, 0] });
+
+    it('swaps weapons by sheathing, changing, then drawing', () => {
+        const player: any = new SoulsPlayerNode('Player');
+        const played: string[] = [];
+        let equipped = -1;
+        player._findClip = () => oneSecond;
+        player._play = (clip: string) => { played.push(clip); player._clip = clip; player._clipLength = 1; };
+        player._weapons = [{}, {}];
+        player._weaponIndex = 0;
+        player.equipWeapon = (i: number) => { equipped = i; };
+        player.recomputeStats = () => {};
+        player._startSwap();
+        expect(player.actionState).toBe('swap');
+        expect(played).toEqual([player.sheathClip]);
+        player._stateTime = 0.4;  player._swap(intent());          // still sheathing (1 s at 2x = 0.5 s)
+        expect(equipped).toBe(-1);
+        player._stateTime = 0.55; player._swap(intent());          // sheathed: change, then draw
+        expect(equipped).toBe(1);
+        expect(played).toEqual([player.sheathClip, player.drawClip]);
+        player._stateTime = 1.1;  player._swap(intent());          // drawn
+        expect(player.actionState).toBe('free');
+    });
+
+    it('never lets a regular enemy taunt', () => {
+        const hollow: any = new SoulsEnemyNode('Hollow');
+        const played: string[] = [];
+        hollow._findClip = () => oneSecond;
+        hollow._play = (clip: string) => { played.push(clip); hollow._clipLength = 1; };
+        hollow._player = { isDead: false, worldPosition: [0, 0, 5] };
+        hollow._brain = { behaviorState: 'Chase' };
+        hollow._ai(intent(), 1 / 60);
+        expect(played).toEqual([]);
+        expect(hollow.fightState).not.toBe('taunt');
+    });
+
+    it('lets a boss shout a battle cry once, the first time it spots the player', () => {
+        const hollow: any = new SoulsEnemyNode('Warden');
+        hollow.isBoss = true;
+        const played: string[] = [];
+        hollow._findClip = () => oneSecond;
+        hollow._play = (clip: string) => { played.push(clip); hollow._clip = clip; hollow._clipLength = 1; };
+        hollow._player = { isDead: false, worldPosition: [0, 0, 5] };
+        hollow._brain = { behaviorState: 'Idle' };
+        hollow._ai(intent(), 1 / 60);
+        expect(played).toEqual([]);                       // not seen yet
+        hollow._brain.behaviorState = 'Chase';
+        hollow._ai(intent(), 1 / 60);
+        expect(hollow.fightState).toBe('taunt');
+        expect(played).toEqual([hollow.tauntClip]);
+        hollow.fightState = 'ai';
+        hollow._ai(intent(), 1 / 60);
+        expect(played).toEqual([hollow.tauntClip]);       // once per life
+    });
+});

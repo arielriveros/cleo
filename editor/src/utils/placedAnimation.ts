@@ -107,7 +107,11 @@ export function restoreAnimationState(inst: NodeLike, saved: PlacedAnimationStat
   for (let i = 0; i < Math.min(nodes.length, saved.length); i++) {
     const s = saved[i]
     const animator = nodes[i].animator
-    if (animator && s.stateMachine && !animator.getStateMachine()) animator.setStateMachine(s.stateMachine)
+    // A machine with no STATES is no opinion: a model asset made from an import carries an empty
+    // `{ states: [] }`, and treating that as "the source has a machine" threw the placement's own away on
+    // every model rebuild -- the character stood in its bind pose until the rig was re-linked.
+    const hasStates = (sm: any) => !!sm?.states?.length
+    if (animator && hasStates(s.stateMachine) && !hasStates(animator.getStateMachine())) animator.setStateMachine(s.stateMachine)
     if (animator && s.mappings?.length && !animator.getAnimationMappings()?.length) {
       animator.setAnimationMappings(s.mappings)
     }

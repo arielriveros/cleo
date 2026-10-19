@@ -71,8 +71,14 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   public flinchSeconds: number = 0.4
   public staggerClip: ClipName = 'Souls_HitHeavy'
   public staggerSeconds: number = 1.2
+  /**
+   * A BOSS's battle cry, played once the first time it spots the player each life. Regular enemies
+   * never taunt -- a shout from every Hollow in the room is noise, not menace.
+   */
+  public tauntClip: ClipName = 'Souls_Battlecry'
+  public tauntOnAggro: boolean = true
   /** Seconds the death clip plays before the ragdoll takes over (0 = no ragdoll). */
-  public deathSeconds: number = 1.6
+  public deathSeconds: number = 2
   public useRagdoll: boolean = true
   /** Seconds the body lies there before it is removed. */
   public corpseSeconds: number = 6
@@ -143,6 +149,8 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   /** Multiplies movement and attack speed (a boss's later phase raises it). */
   protected _speedMul: number = 1
   private _reactSeconds: number = 0
+  /** Whether this life's battle cry has happened (or been skipped). */
+  private _taunted: boolean = false
   /** How long the current `phase` state (an invulnerable transition) lasts. */
   protected _phaseSeconds: number = 0
 
@@ -169,6 +177,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     this.phase = 1
     this._speedMul = 1
     this.isAwake = !this.isBoss
+    this._taunted = false
     this.fightState = this.isBoss ? 'dormant' : 'ai'
     this._gap = this._rand(this.attackGapMin, this.attackGapMax)
     this._setBar(false)
@@ -279,6 +288,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     this.phase = 1
     this._speedMul = 1
     this.isAwake = !this.isBoss
+    this._taunted = false
     this._enter(this.isBoss ? 'dormant' : 'ai')
   }
 
@@ -313,6 +323,14 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
           this._still(intent)
           if (this._stateTime >= this._reactSeconds) this._enter('ai')
           return
+        case 'taunt': {
+          // Stand and shout at the player, turned toward them; a hit cuts it short (flinch/stagger).
+          this._still(intent)
+          const p = (this._player as any)?.worldPosition
+          if (p) this._turnToward(p, this.engageTurnRate * delta)
+          if (this._stateTime >= this._reactSeconds) this._enter('ai')
+          return
+        }
         case 'phase':
           this._still(intent)
           if (this._stateTime >= this._phaseSeconds) this._enter('ai')
@@ -338,6 +356,16 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
    */
   private _ai(intent: any, delta: number): void {
     const state: string = (this._brain as any)?.behaviorState ?? 'Idle'
+    // First sight of the player this life: the battle cry, then the fight.
+    if (!this._taunted && state !== 'Idle' && state !== 'Return' && (this._player as any) && !(this._player as any).isDead) {
+      this._taunted = true
+      if (this.tauntOnAggro && this.isBoss && this.tauntClip && this._findClip(this.tauntClip)) {
+        this._react('taunt', this.tauntClip, 0)
+        this._reactSeconds = this._clipLength > 0 ? this._clipLength : 1.5
+        this._still(intent)
+        return
+      }
+    }
     this.acceleration = 12
     this.turnSpeed = this.engageTurnRate
     const engaged = state === 'Approach' || state === 'Strafe' || state === 'Retreat' || state === 'Attack'
@@ -456,7 +484,10 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
 
   private _onAnimEvent(name: string, clip: string): void {
     if (this.fightState !== 'attack' || (clip && clip !== this._clip)) return
-    if ((name === 'hit' || name === 'cast') && !this._windowOpened) this._land()
+    // A combo clip swings more than once: each `hit` after a `hitEnd` opens a fresh melee window (and
+    // a fresh "hit the player at most once" set). A projectile or a slam still lands only once.
+    const melee = !this._attack?.projectileTemplate && !(num(this._attack?.aoeRadius, 0) > 0)
+    if ((name === 'hit' || name === 'cast') && (!this._windowOpened || (melee && !this._swing.open))) this._land()
     else if (name === 'hitEnd') closeSwing(this._swing)
   }
 

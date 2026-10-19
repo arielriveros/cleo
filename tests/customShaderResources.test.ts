@@ -28,3 +28,25 @@ describe('customShaderResources — forward', () => {
         expect(new Set(keys).size).toBe(keys.length);
     });
 });
+
+describe('usedResources', () => {
+    // WebGPU's automatic layout drops every binding the entry points never reach. Listing one anyway made
+    // the group invalid ("binding index 7 not present") and blacked out the frame: the Valley's water
+    // reads the light grid with textureLoad, so its light-data SAMPLER is declared and never used.
+    it('keeps only resources the WGSL uses, matched by group and binding', async () => {
+        const { usedResources } = await import('../src/graphics/systems/customShaders');
+        const wgsl = `
+@group(3) @binding(6) var u_lightData_texture: texture_2d<f32>;
+@group(3) @binding(7) var u_lightData_sampler: sampler;
+@group(3) @binding(0) var shadows: texture_depth_2d_array;
+@fragment fn main() -> @location(0) vec4<f32> { let a = textureLoad(u_lightData_texture, vec2<i32>(0), 0); return a; }`;
+        const res = [
+            { group: 3, binding: 6, name: 'a', kind: 'texture', type: 't', glslName: 'u_lightData' },
+            { group: 3, binding: 7, name: 'b', kind: 'sampler', type: 's', glslName: 'u_lightData' },
+            { group: 3, binding: 0, name: 'c', kind: 'texture', type: 't', glslName: 'u_shadowCascades' },
+            { group: 0, binding: 0, name: 'd', kind: 'texture', type: 't', glslName: 'u_undeclared' },
+        ] as any[];
+        expect(usedResources(res, wgsl).map(r => r.binding + ':' + r.group)).toEqual(['6:3', '0:0']);
+        expect(usedResources(res)).toBe(res);   // no WGSL (WebGL2): untouched
+    });
+});

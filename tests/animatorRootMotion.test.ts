@@ -223,3 +223,77 @@ describe('Animator — root motion', () => {
         expect(node.position[0]).toBeCloseTo(afterClip); // the field does not extract root motion
     });
 });
+
+// A Mixamo rig keeps its bones in centimetres under an `Armature` node scaled 0.01, so the root's channel
+// says 100 for a one-metre step. Read raw, root motion threw the character a hundred times too far — the
+// Hollow Keep enemies' death clip launched their bodies across the map.
+describe('Animator — root motion units', () => {
+    const scaledSkin = (): Skin => ({
+        joints: [{ nodeIndex: 0, parentIndex: 1, inverseBindMatrix: mat4.create() } as any],
+        nodeParents: new Map([[0, 1]]),
+        nodeTransforms: new Map([[0, mat4.create()], [1, mat4.fromScaling(mat4.create(), [0.01, 0.01, 0.01])]]),
+    });
+
+    it('converts the root bone units through the armature scale', () => {
+        const node = makeNode();
+        const a = new Animator({ skin: scaledSkin(), animations: [rmTranslate('fall', 100, 1)] } as unknown as AnimatedModel, node as any);
+        a.playAnimationByName('fall', false, false);
+        a.play();
+        a.update(1);
+        expect(node.position[0]).toBeCloseTo(1, 4);
+    });
+
+    it('and through the character node scale', () => {
+        const node: any = makeNode();
+        node.worldTransform = mat4.fromScaling(mat4.create(), [2, 2, 2]);
+        const a = new Animator({ skin: scaledSkin(), animations: [rmTranslate('fall', 100, 1)] } as unknown as AnimatedModel, node);
+        a.playAnimationByName('fall', false, false);
+        a.play();
+        a.update(1);
+        expect(node.position[0]).toBeCloseTo(2, 4);
+    });
+});
+
+describe('Animator — foot IK under an action', () => {
+    it('fades foot IK out with an action that asks for none (a roll), and back in after', () => {
+        const a: any = makeAnimator([rmTranslate('walk', 1, 1)], makeNode());
+        expect(a._stateIkWeight()).toBe(1);
+        a._overlays = [{ kind: 'slot', action: { ikWeight: 0 }, presence: 1 }];
+        expect(a._stateIkWeight()).toBe(0);
+        a._overlays[0].presence = 0.25;                 // fading in, or out
+        expect(a._stateIkWeight()).toBeCloseTo(0.75, 6);
+        a._overlays[0].action = null;                   // over
+        expect(a._stateIkWeight()).toBe(1);
+    });
+});
+
+describe('Animator — root motion from an action', () => {
+    // A model with no machine auto-plays its FIRST clip in the base layer; give it a still one so the
+    // only thing playing the roll is the action.
+    const still = (): Animation => ({ ...rmTranslate('still', 0, 1), rootMotion: false });
+    it('extracts the travel for the script instead of moving the mesh or the character', () => {
+        const node: any = makeNode();
+        node.worldTransform = mat4.create();
+        const clip = rmTranslate('roll', 2, 1);
+        clip.rootMotion = false;   // an in-place-flagged import still carries its travel in the root channel
+        const a = makeAnimator([still(), clip], node);
+        a.playAction('roll', { rootMotion: true, blendIn: 0.001 });
+        a.update(0.5);
+        const d = a.consumeRootMotion();
+        expect(d[0]).toBeCloseTo(1, 4);
+        expect(node.position[0]).toBe(0);            // the script decides what moves
+        expect(a.consumeRootMotion()[0]).toBe(0);    // consumed
+        a.update(0.25);
+        expect(a.consumeRootMotion()[0]).toBeCloseTo(0.5, 4);
+    });
+
+    it('leaves the travel alone without the option', () => {
+        const node: any = makeNode();
+        node.worldTransform = mat4.create();
+        const a = makeAnimator([still(), rmTranslate('roll', 2, 1)], node);
+        a.playAction('roll', { blendIn: 0.001 });
+        a.update(0.5);
+        expect(a.consumeRootMotion()[0]).toBe(0);
+        expect(node.position[0]).toBe(0);
+    });
+});

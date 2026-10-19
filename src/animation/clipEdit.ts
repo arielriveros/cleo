@@ -553,6 +553,26 @@ export function rootParentRotation(skin: Skin, rootNode: number, topo?: Skeleton
     return quat.normalize(out, out);
 }
 
+/**
+ * The uniform SCALE of the joints above `rootNode`, in the model node's local space -- what turns the
+ * root bone's channel units into model units. A Mixamo rig keeps its bones in centimetres under an
+ * `Armature` node scaled 0.01, so a root clip's 100-unit step is ONE metre; read raw, root motion threw
+ * the character a hundred times as far as the clip moves. Same chain as {@link rootParentRotation}.
+ */
+export function rootParentScale(skin: Skin, rootNode: number, topo?: SkeletonTopology): number {
+    const t = topoOf(skin, topo);
+    const acc = mat4.create();
+    const chain: number[] = [];
+    let p = t.parentNodeOfNode.get(rootNode);
+    for (let guard = 0; p !== undefined && guard < 256; guard++) { chain.push(p); p = t.parentNodeOfNode.get(p); }
+    for (let i = chain.length - 1; i >= 0; i--) {
+        const local = skin.nodeTransforms?.get(chain[i]);
+        if (local) mat4.multiply(acc, acc, local as any);
+    }
+    const s = Math.cbrt(Math.abs(mat4.determinant(acc)));
+    return Number.isFinite(s) && s > 0 ? s : 1;
+}
+
 /** Split `q` into the part that rotates about `axis` (twist) and the rest (swing), with `q = swing * twist`. */
 function twistAbout(q: quat, axis: vec3): quat {
     const d = q[0] * axis[0] + q[1] * axis[1] + q[2] * axis[2];

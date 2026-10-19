@@ -189,6 +189,24 @@ describe('a profile ragdoll falling', () => {
         expect(p.solverIterations).toBe(before);
     });
 
+    // A death clip ends lying on the floor, so limb capsules spawn partly inside it; the solver used to
+    // push the buried body out at whatever speed cleared it -- the corpse leapt metres into the air.
+    it('starts resting on the ground instead of being shot out of it', () => {
+        const p = new PhysicsSystem({ gravity: [0, -9.82, 0] });
+        p.initialize();
+        (p as any)._scene = { nodes: [], landscapes: [], tilemaps: [], activeCamera: null };
+        p.addGroundPlane(0.5);                     // half a metre above the feet: the legs start buried
+        p.update(1 / 60);                          // a live world: the ground's bounds are current
+        const r = p.startRagdoll(mannequin());
+        for (const b of r.bodies.values()) { b.updateAABB(); expect(b.aabb.lowerBound.y).toBeGreaterThan(0.49); }
+        let fastestUp = 0;
+        for (let i = 0; i < 60; i++) {
+            p.update(1 / 60);
+            for (const b of r.bodies.values()) fastestUp = Math.max(fastestUp, b.velocity.y);
+        }
+        expect(fastestUp).toBeLessThan(1.5);
+    });
+
     it('still builds the generic ragdoll when asked to', () => {
         const p = world();
         const r = p.startRagdoll(mannequin(), { profile: null });

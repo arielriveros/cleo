@@ -258,7 +258,10 @@ export async function importClipFile(ctx, file, clipName, target, opts = {}) {
   if (!sourceHips) throw new Error(`${label}: the clip does not animate a Hips bone`)
   const ratio = vec3.length(mat4.getTranslation(vec3.create(), target.nodeTransforms.get(sourceHips.targetNode)))
     / vec3.length(mat4.getTranslation(vec3.create(), source.nodeTransforms.get(sourceHips.sourceNode)))
-  if (ratio < 0.9 || ratio > 1.1) {
+  // A caller retargeting clips downloaded on a DIFFERENT Mixamo character (the souls combat set) widens
+  // this: the retarget rescales the hips by exactly this ratio, which is what an in-place clip wants.
+  const [lo, hi] = opts.ratioRange ?? [0.9, 1.1]
+  if (ratio < lo || ratio > hi) {
     throw new Error(`${label}: hips rest ratio ${ratio.toFixed(3)} — the clip was authored for a `
       + `differently-sized character, so its root motion would be rescaled`)
   }

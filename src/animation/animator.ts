@@ -13,7 +13,7 @@ import { ModelNode } from '../core/scene/nodes/modelNode';
 import { canAccessVariable } from '../core/scene/nodes/nodeVariables';
 import { InputSystem } from '../input/inputSystem';
 import { Logger } from '../core/logger';
-import { rootMotionNodeOf, rootParentRotation } from './clipEdit';
+import { rootMotionNodeOf, rootParentRotation, rootParentScale } from './clipEdit';
 // The condition model and evaluator live in core/conditions.ts — they read a table of named values and
 // answer yes or no, which has nothing to do with animation, and the behavior state machine needs the
 // same latching. See that module for why the band is centred and why latches refresh machine-wide.
@@ -285,6 +285,18 @@ export interface AnimationActionOptions {
     speed?: number;
     /** Loop until stopped. Default false. */
     loop?: boolean;
+    /**
+     * Foot-IK weight while this action plays, 0..1, faded in and out with it. Default 1 (unchanged). A
+     * roll, a dive or a knockdown passes 0: planting feet on the ground mid-tumble bends the legs wrong.
+     */
+    ikWeight?: number;
+    /**
+     * Extract the clip's root-bone travel instead of letting it move the mesh: the bone is pinned in place
+     * and the travel collects for {@link Animator.consumeRootMotion}, so a SCRIPT moves the body by it (a
+     * roll that covers exactly the ground the animation does, through the character's own collision).
+     * Actions never move the character themselves -- only the base layer drives root motion directly.
+     */
+    rootMotion?: boolean;
 }
 
 /** A playing action. `finished` resolves once it has faded fully out, however it ended. */
@@ -328,6 +340,8 @@ interface ActionState {
     stopping: boolean;
     done: boolean;
     resolve: () => void;
+    /** Foot-IK weight while it plays (see AnimationActionOptions.ikWeight). */
+    ikWeight: number;
 }
 
 /**
@@ -761,6 +775,14 @@ export class Animator {
     // For a clip flagged `rootMotion`, the root bone's per-frame delta drives the character and the bone
     // is locked to its clip-start pose. Single-clip playback only — a field has no single root.
     private _rootMotionActive: boolean = false;
+    /** Units of the root bone's channels -> model units (a Mixamo armature's 0.01). See rootParentScale. */
+    private _rootParentScale: number = 1;
+    /** A slot playing an action with `rootMotion`: extract the travel (see AnimationActionOptions). */
+    private _extractRoot: boolean = false;
+    /** Model-space root travel an action has extracted and nobody has consumed yet. */
+    private readonly _rootDelta = vec3.create();
+    /** The root channel's vertical axis (0/1/2), for extraction: only the GROUND-PLANE travel is taken. */
+    private _rootUpAxis = 1;
     private _rootBoneName: string | null = null;
     /**
      * Editor-only per-bone local overrides, or null when there are none. Null rather than an empty Map so
@@ -1711,7 +1733,9 @@ export class Animator {
         this._rootMotionActive = false;
         this._rootBoneName = null;
         // Only the base layer moves the character: two layers both driving it would double the motion.
-        if (!animation.rootMotion || this._isOverlay) return;
+        // An action may ask for its travel to be EXTRACTED (pinned and handed to a script) -- even on a clip
+        // not flagged root-motion, which is how an in-place import would otherwise carry its travel.
+        if (this._isOverlay ? !this._extractRoot : !animation.rootMotion) return;
 
         const rootName = this._findRootMotionBone(animation);
         const bone = rootName ? this._bones.get(rootName) : null;
@@ -1726,6 +1750,13 @@ export class Animator {
         if (rest) mat4.getScaling(this._rootRefS, rest);
 
         this._rootParentRot = this._rootParentRotation(bone.id);
+        this._rootParentScale = this._skin ? rootParentScale(this._skin, bone.id, this._topology()) : 1;
+        // The axis the root sits up along at rest (a metre up one axis, near zero on the others) -- the
+        // same rule the offline in-place hold uses, so it holds whether the rig is Y-up or Z-up.
+        if (rest) {
+            const t = mat4.getTranslation(vec3.create(), rest);
+            this._rootUpAxis = [0, 1, 2].reduce((best, a) => (Math.abs(t[a]) > Math.abs(t[best]) ? a : best), 1);
+        }
         this._rootBoneName = rootName;
         this._rootMotionActive = true;
     }
@@ -1831,6 +1862,8 @@ export class Animator {
         const cur = bone.sampleTR(curTime);
         const prev = bone.sampleTR(prevTime);
 
+        if (this._isOverlay) { this._extractRootTravel(bone, cur, prev, curTime, duration, looped); return; }
+
         if (looped && duration > 0) {
             // Two spans across the loop point: prev→end and start→cur.
             const end = bone.sampleTR(duration);
@@ -1851,32 +1884,71 @@ export class Animator {
         }
         quat.normalize(deltaR, deltaR);
 
-        const target = this._nearestBodiedNode() ?? this._node;
-        if (target) {
-            // Rotate the translation by Wp, and CONJUGATE the rotation by it, so a yaw about the
-            // armature's up-axis becomes a yaw about world up.
-            const wp = quat.multiply(
-                quat.create(),
-                this._node ? this._node.worldQuaternion : quat.create(),
-                this._rootParentRot);
-            quat.normalize(wp, wp);
-            const wpInv = quat.invert(quat.create(), wp);
+        // Rotate the translation by Wp, and CONJUGATE the rotation by it, so a yaw about the armature's
+        // up-axis becomes a yaw about world up. (An action's slot animator has no node: Wp is then the
+        // armature's alone, and the delta stays in MODEL space for consumeRootMotion to place.)
+        const wp = quat.multiply(
+            quat.create(),
+            this._node ? this._node.worldQuaternion : quat.create(),
+            this._rootParentRot);
+        quat.normalize(wp, wp);
+        const wpInv = quat.invert(quat.create(), wp);
+        // Into metres: the armature's own scale (bones in centimetres under a 0.01 armature) and the
+        // character node's. Without them a Mixamo death clip's one-metre fall moved the body 100 m.
+        const nw = this._node?.worldTransform;
+        const nodeScale = nw ? Math.cbrt(Math.abs(mat4.determinant(nw as mat4))) || 1 : 1;
+        vec3.scale(deltaT, deltaT, this._rootParentScale * nodeScale);
+        const worldT = vec3.transformQuat(vec3.create(), deltaT, wp);
 
-            const worldT = vec3.transformQuat(vec3.create(), deltaT, wp);
-            target.setPosition(vec3.add(vec3.create(), target.position, worldT));
-
-            // World-space rotation delta, so it LEFT-multiplies the target's (world = local) orientation.
-            const worldR = quat.multiply(quat.create(), quat.multiply(quat.create(), wp, deltaR), wpInv);
-            const newQ = quat.normalize(quat.create(), quat.multiply(quat.create(), worldR, target.quaternion));
-            target.setQuaternion(newQ);
-            // setQuaternion does not push into the body, so a bodied target needs it set explicitly.
-            if (target.body) target.body.setQuaternion(newQ);
+        if (this._isOverlay) {
+            // An action's travel: collected for the script (consumeRootMotion), never applied here.
+            vec3.add(this._rootDelta, this._rootDelta, worldT);
+        } else {
+            const target = this._nearestBodiedNode() ?? this._node;
+            if (target) {
+                target.setPosition(vec3.add(vec3.create(), target.position, worldT));
+                // World-space rotation delta, so it LEFT-multiplies the target's (world = local) orientation.
+                const worldR = quat.multiply(quat.create(), quat.multiply(quat.create(), wp, deltaR), wpInv);
+                const newQ = quat.normalize(quat.create(), quat.multiply(quat.create(), worldR, target.quaternion));
+                target.setQuaternion(newQ);
+                // setQuaternion does not push into the body, so a bodied target needs it set explicitly.
+                if (target.body) target.body.setQuaternion(newQ);
+            }
         }
 
         // Pin the root bone to its start pose: the character carries the motion, the mesh renders in place.
         const locked = mat4.create();
         mat4.fromRotationTranslationScale(locked, this._rootRefR, this._rootRefT, this._rootRefS);
         bone.setLocalTransform(locked);
+    }
+
+    /**
+     * An action's root motion (AnimationActionOptions.rootMotion): take only the GROUND-PLANE travel and
+     * leave everything else animating. A roll or a dive tumbles its hips through a full turn and bobs them
+     * up and down -- pinning the whole root as the base layer does would freeze the tumble.
+     */
+    private _extractRootTravel(bone: { setLocalTransform(m: mat4): void; sampleTR(t: number): { t: vec3; r: quat } },
+                               cur: { t: vec3; r: quat }, prev: { t: vec3; r: quat },
+                               curTime: number, duration: number, looped: boolean): void {
+        const up = this._rootUpAxis;
+        const deltaT = vec3.create();
+        if (looped && duration > 0) {
+            const end = bone.sampleTR(duration), start = bone.sampleTR(0);
+            vec3.add(deltaT, vec3.sub(vec3.create(), end.t, prev.t), vec3.sub(vec3.create(), cur.t, start.t));
+        } else {
+            vec3.sub(deltaT, cur.t, prev.t);
+        }
+        deltaT[up] = 0;
+        vec3.scale(deltaT, deltaT, this._rootParentScale);
+        vec3.transformQuat(deltaT, deltaT, this._rootParentRot);   // model space; consumeRootMotion places it
+        vec3.add(this._rootDelta, this._rootDelta, deltaT);
+
+        // Pin the horizontal position to the start; keep the clip's own rotation and height.
+        const t = vec3.clone(cur.t);
+        for (let a = 0; a < 3; a++) if (a !== up) t[a] = this._rootRefT[a];
+        const pinned = mat4.fromRotationTranslationScale(mat4.create(), cur.r, t, this._rootRefS);
+        bone.setLocalTransform(pinned);
+        void curTime;
     }
 
     // Remember the current clip's root pin as the outgoing one. Called as a cross-fade starts, BEFORE the
@@ -2036,6 +2108,15 @@ export class Animator {
     // The IK weight this frame: the current state's, or the parameter it names. A missing parameter
     // keeps the static weight rather than reading 0.
     private _stateIkWeight(): number {
+        // An action that turns IK off (a roll) eases it out as the action fades in, and back as it fades out.
+        let actions = 1;
+        for (const o of this._overlays) {
+            if (o.kind === 'slot' && o.action && o.action.ikWeight < 1) actions *= 1 + (o.action.ikWeight - 1) * o.presence;
+        }
+        return actions * this._stateIkWeightOfState();
+    }
+
+    private _stateIkWeightOfState(): number {
         const sm = this._stateMachine;
         const state = sm && this._currentStateName ? this._stateByName(sm, this._currentStateName) : null;
         if (!state) return 1;
@@ -3121,6 +3202,7 @@ export class Animator {
         const action: ActionState = {
             clipName, loop: !!options.loop, blendOut: Math.max(0, options.blendOut ?? 0.2),
             stopping: false, done: false, resolve,
+            ikWeight: clamp(typeof options.ikWeight === 'number' ? options.ikWeight : 1, 0, 1),
         };
         const target = slot;
         const handle: AnimationActionHandle = {
@@ -3146,6 +3228,8 @@ export class Animator {
 
         const child = slot.animator;
         child._speed = Math.max(0, options.speed ?? 1);
+        child._extractRoot = !!options.rootMotion;
+        vec3.set(child._rootDelta, 0, 0, 0);
         const crossFade = !!previous && slot.presence > 0;
         child.playAnimationByName(clipName, action.loop, crossFade);
         slot.action = action;
@@ -3153,6 +3237,26 @@ export class Animator {
         slot.fadeSeconds = Math.max(1e-3, options.blendIn ?? 0.15);
         if (crossFade) child._activeBlendTime = slot.fadeSeconds;
         return handle;
+    }
+
+    /**
+     * The world-space root travel the playing actions extracted since the last call (see
+     * AnimationActionOptions.rootMotion), and reset. Divide by the frame time for a velocity.
+     */
+    public consumeRootMotion(out: vec3 = vec3.create()): vec3 {
+        vec3.set(out, 0, 0, 0);
+        for (const o of this._overlays) {
+            if (o.kind !== 'slot') continue;
+            vec3.add(out, out, o.animator._rootDelta);
+            vec3.set(o.animator._rootDelta, 0, 0, 0);
+        }
+        if (this._node) {
+            const nw = this._node.worldTransform;
+            const scale = nw ? Math.cbrt(Math.abs(mat4.determinant(nw as mat4))) || 1 : 1;
+            vec3.transformQuat(out, out, this._node.worldQuaternion);
+            vec3.scale(out, out, scale);
+        }
+        return out;
     }
 
     /** Fade out whatever action is playing in `slot` (every slot when omitted). */

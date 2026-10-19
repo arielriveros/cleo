@@ -113,6 +113,14 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   public rollSpeed: number = 6.5
   public rollFastSeconds: number = 0.45
   public rollSlowSpeed: number = 2
+  /**
+   * Move by the roll clip's OWN travel (its root motion, extracted by the animator) instead of the
+   * rollSpeed curve above: the body covers exactly the ground the dive does, through its own collision.
+   * The roll always faces the way it goes -- there is only a forward roll animation.
+   */
+  public rollRootMotion: boolean = true
+  /** Playback speed of the roll clip when it drives the roll (the download is a slow, full dive). */
+  public rollPlaySpeed: number = 1.5
   public backstepCost: number = 12
   public backstepSeconds: number = 0.45
   public backstepInvulnEnd: number = 0.22
@@ -145,6 +153,14 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   /** Played when a swing bounces off a wall. */
   public recoilClip: ClipName = 'Souls_HitLight'
   public swapClip: ClipName = 'Souls_Swap'
+  /**
+   * A weapon swap in two halves: sheathe the one in hand, then draw the next. The weapon changes between
+   * them. Empty `sheathClip` falls back to the single `swapClip`.
+   */
+  public sheathClip: ClipName = 'Souls_Sheath'
+  public drawClip: ClipName = 'Souls_Draw'
+  /** Playback speed of the sheathe and draw (the downloads are unhurried). */
+  public swapSpeed: number = 2
   public restClip: ClipName = 'Souls_Rest'
   public fogWalkClip: ClipName = 'Souls_FogWalk'
 
@@ -171,6 +187,9 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   private _bufferAction: string = ''
   private _bufferAge: number = 99
   private _rollHeld: number = -1
+  /** Seconds the current root-motion roll lasts (0: the timed roll). */
+  private _rollLength: number = 0
+  private _frameDelta: number = 1 / 60
   private _sprintedThisHold: boolean = false
   private _sinceSpend: number = 99
   private _sprintLocked: boolean = false
@@ -193,6 +212,8 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   private _healRate: number = 0
   private _drank: boolean = false
   private _swapped: boolean = false
+  /** 1 while sheathing, 2 while drawing; 0 for a single-clip swap. */
+  private _swapPhase: number = 0
   private _gestureSeconds: number = 0
   private _fogSpeed: number = 0
   private _interactTarget: Node = null
@@ -412,6 +433,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
   private _frame(intent: any, delta: number): void {
     this._stateTime += delta
+    this._frameDelta = delta
     this._bufferAge += delta
     this._sinceSpend += delta
     this.soulsGainAge += delta
@@ -546,6 +568,14 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
   private _roll(intent: any): void {
     const t = this._stateTime
+    if (this._rollLength > 0) {
+      // The animation's own travel this frame, along the roll direction.
+      const d = (this._model?.animator as any)?.consumeRootMotion?.()
+      const dist = d ? Math.hypot(d[0], d[2]) : 0
+      this._driveMotion(intent, this._motionDir, this._frameDelta > 1e-5 ? dist / this._frameDelta : 0)
+      if (t >= this._rollLength) this._enter('free')
+      return
+    }
     const speed = t < this.rollFastSeconds ? this.rollSpeed : (t < this.rollSeconds * 0.85 ? this.rollSlowSpeed : 0)
     this._driveMotion(intent, this._motionDir, speed)
     if (t >= this.rollSeconds) this._enter('free')
@@ -566,7 +596,18 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
   private _swap(intent: any): void {
     this._holdStill(intent)
-    if (!this._swapped && this._stateTime >= this._actionSeconds * 0.5) {
+    if (this._swapPhase === 1 && this._stateTime >= this._actionSeconds) {
+      // Sheathed: change weapons, then draw the new one.
+      this._swapped = true
+      this.equipWeapon((this._weaponIndex + 1) % Math.max(1, this._weapons.length))
+      this.recomputeStats()
+      this._swapPhase = 2
+      const start = this._stateTime
+      this._play(this.drawClip, this.swapSpeed)
+      this._actionSeconds = start + (this._clipLength > 0 ? this._clipLength / this.swapSpeed : 0.4)
+      return
+    }
+    if (this._swapPhase === 0 && !this._swapped && this._stateTime >= this._actionSeconds * 0.5) {
       this._swapped = true
       this.equipWeapon((this._weaponIndex + 1) % Math.max(1, this._weapons.length))
       this.recomputeStats()
@@ -617,13 +658,26 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
       this._spend(this.backstepCost)
       this._motionDir = this._forward(-1)
       this._enter('backstep')
-      this._play(this.backstepClip, 1)
+      this._play(this.backstepClip, 1, false, 0)   // no foot IK mid-backstep
     } else {
       this._spend(this.rollCost)
       this._motionDir = [dir[0] / len, 0, dir[2] / len]
+      // There is only a FORWARD roll, so the body turns to the roll's direction for its length -- even
+      // locked on and rolling backwards, toward the camera -- and lock-on turns it back to the target
+      // afterwards. 'none' from this very frame: the locked strafe's 'aim' facing set earlier in it would
+      // otherwise start pulling the body back toward the enemy before the roll's first step.
+      this.facingMode = 'none'
       this.setRotation([0, Math.atan2(dir[0], dir[2]) * 180 / Math.PI, 0])
       this._enter('roll')
-      this._play(this.rollClip, 1)
+      this._rollLength = 0
+      if (this.rollRootMotion && this._findClip(this.rollClip)) {
+        // No foot planting mid-tumble, and the clip's travel extracted for _roll to move the body by.
+        this._play(this.rollClip, this.rollPlaySpeed, false, 0, true)
+        ;(this._model?.animator as any)?.consumeRootMotion?.()   // drop anything left from before
+        this._rollLength = this._clipLength > 0 ? this._clipLength / this.rollPlaySpeed : this.rollSeconds
+      } else {
+        this._play(this.rollClip, 1, false, 0)
+      }
     }
     playSound(this, 'Roll')
   }
@@ -646,6 +700,13 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     if (this._weapons.length < 2) return
     this._swapped = false
     this._enter('swap')
+    if (this.sheathClip && this.drawClip && this._findClip(this.sheathClip) && this._findClip(this.drawClip)) {
+      this._swapPhase = 1
+      this._play(this.sheathClip, this.swapSpeed)
+      this._actionSeconds = this._clipLength > 0 ? this._clipLength / this.swapSpeed : 0.4
+      return
+    }
+    this._swapPhase = 0
     this._play(this.swapClip, 1)
     this._actionSeconds = this._clipLength > 0 ? this._clipLength : 0.4
   }
@@ -908,12 +969,12 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     }
   }
 
-  private _play(clip: string, speed: number, loop: boolean = false): void {
+  private _play(clip: string, speed: number, loop: boolean = false, ikWeight: number = 1, rootMotion: boolean = false): void {
     this._clip = clip
     this._clipLength = this._clipDuration(clip)
     const animator = this._model?.animator as any
     if (!animator?.playAction || !clip) return
-    animator.playAction(clip, { speed, loop, blendIn: 0.08, blendOut: 0.18 })
+    animator.playAction(clip, { speed, loop, blendIn: 0.08, blendOut: 0.18, ikWeight, rootMotion })
   }
 
   private _stopAction(): void {

@@ -495,13 +495,56 @@ describe.skipIf(!present)(`the ${title} example project`, () => {
         expect(inScene.filter(n => /Floor/.test(n.name)).some(blocks)).toBe(false);
     });
 
-    it('ships the character controller, and every character embeds it (so a swapped model can get it back)', () => {
-        const [controller] = library('animControllers');
-        expect(controller.name).toBe('Souls Character');
-        expect(controller.rigId).toBe(library('rigs')[0].id);
+    it('ships the character controllers, and every character embeds one (so a swapped model can get it back)', () => {
+        const controllers = library('animControllers');
+        expect(controllers.map((c: any) => c.name)).toEqual(['Souls Character', 'Souls Enemy']);
+        for (const c of controllers) expect(c.rigId).toBe(library('rigs')[0].id);
         const machines = everyNode().filter(n => n.stateMachine?.states?.length).map(n => n.stateMachine);
         expect(machines.length).toBeGreaterThan(4);
-        for (const sm of machines) expect(sm.controllerId).toBe(controller.id);
+        const ids = new Set(controllers.map((c: any) => c.id));
+        for (const sm of machines) expect(ids.has(sm.controllerId)).toBe(true);
+        // The player falls with Dying; enemies with Standing Death Right (then the ragdoll).
+        const dead = (c: any) => c.machine.states.find((st: any) => st.name === 'Dead').clipName;
+        expect(dead(controllers[0])).toBe('Souls_Dying');
+        expect(dead(controllers[1])).toBe('Souls_Death');
+    });
+
+    // "Run With Sword" from the waist up: a masked override layer over the locomotion blend, on while running.
+    it('runs with the sword on the upper body only', () => {
+        const [mask] = library('boneMasks');
+        expect(mask.name).toBe('Chest Up');
+        const bones = Object.keys(mask.weights);
+        // From the chest: the lower spine stays with the legs, or the run rocks the whole torso.
+        expect(bones.some(b => /:Spine2$/.test(b))).toBe(true);
+        expect(bones.some(b => /:Spine1?$/.test(b))).toBe(false);
+        expect(bones.some(b => /:Head$/.test(b))).toBe(true);
+        expect(bones.some(b => /:RightHand$/.test(b))).toBe(true);
+        expect(bones.some(b => /(UpLeg|:Hips)$/.test(b))).toBe(false);
+        for (const c of library('animControllers')) {
+            const layer = c.machine.layers.find((l: any) => l.name === 'UpperBody');
+            expect(layer.maskId).toBe(mask.id);
+            expect(layer.mask).toEqual(mask.weights);
+            expect(layer.states.map((st: any) => st.clipName)).toEqual(['', 'Souls_RunWithSword']);
+        }
+        const names = library('animations').map((a: any) => a.name);
+        expect(names).toContain('Souls_RunWithSword');
+    });
+
+    it('fights with the imported Mixamo clips, each marked where its blade lands', () => {
+        const byName = new Map(library('animations').map((a: any) => [a.name, a.clips[0]]));
+        for (const name of ['Souls_Sword_L1', 'Souls_Sword_L2', 'Souls_Sword_L3', 'Souls_Sword_Heavy', 'Souls_GS_L1', 'Souls_GS_L2',
+            'Souls_GS_Heavy', 'Souls_Enemy_Swing', 'Souls_Enemy_Sweep', 'Souls_Enemy_Overhead', 'Souls_Enemy_Thrust', 'Souls_Leap']) {
+            const clip: any = byName.get(name);
+            const end = Math.max(...clip.samplers.map((sm: any) => sm.input[sm.input.length - 1]));
+            expect(end, name).toBeGreaterThan(1.5);   // a real download, not a 1-second pose stub
+            const ev = (e: string) => clip.events.filter((x: any) => x.name === e).map((x: any) => x.time);
+            expect(ev('hit').length, name).toBeGreaterThan(0);
+            expect(ev('hitEnd')[0], name).toBeGreaterThan(ev('hit')[0]);
+            expect(ev('recover')[0], name).toBeGreaterThan(ev('hitEnd')[0]);
+        }
+        // The combos swing more than once.
+        for (const name of ['Souls_Knight_Combo1', 'Souls_Knight_Combo2'])
+            expect((byName.get(name) as any).events.filter((e: any) => e.name === 'hit').length, name).toBeGreaterThan(1);
     });
 
     it('owns every clip on the rig, and embeds none', () => {
@@ -559,7 +602,7 @@ describe.skipIf(!present)(`the ${title} example project`, () => {
         expect(new Set(paths).size).toBe(paths.length);
         const ids = new Set<string>([
             manifest().mainSceneId,
-            ...['scripts', 'templates', 'models', 'materials', 'animationFields', 'animControllers', 'animations', 'rigs', 'particleSystems', 'aiBrains', 'terrainMaterials']
+            ...['scripts', 'templates', 'models', 'materials', 'animationFields', 'animControllers', 'boneMasks', 'animations', 'rigs', 'particleSystems', 'aiBrains', 'terrainMaterials']
                 .flatMap(l => library(l).map((a: any) => a.id)),
         ]);
         // Textures have no library: the editor re-derives a texture record and its source image (same id)

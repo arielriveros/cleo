@@ -17,14 +17,29 @@ describe('samplerBindingsOf', () => {
         const found = samplerBindingsOf(`
             @group(0) @binding(0) var t: texture_2d<f32>;
             @group(0) @binding(1) var s: sampler;
+            fn f() -> vec4<f32> { return textureSample(t, s, vec2<f32>(0.0)); }
         `);
         expect([...(found.get(0) ?? [])]).toEqual([1]);
+    });
+
+    // A pipeline's AUTOMATIC layout leaves out every binding the shader never uses, so a sampler
+    // synthesised for an unused declaration names a binding the layout lacks and the group is rejected.
+    // naga keeps such declarations (a GLSL texelFetch on a combined sampler) — the Valley pond's black frame.
+    it('reports nothing for a sampler that is declared but never used', () => {
+        const found = samplerBindingsOf(`
+            @group(3) @binding(6) var light: texture_2d<f32>;
+            @group(3) @binding(7)
+            var light_s: sampler;
+            fn f() -> vec4<f32> { return textureLoad(light, vec2<i32>(0), 0); }
+        `);
+        expect(found.size).toBe(0);
     });
 
     it('finds a comparison sampler', () => {
         const found = samplerBindingsOf(`
             @group(3) @binding(0) var shadows: texture_depth_2d_array;
             @group(3) @binding(1) var shadowCmp: sampler_comparison;
+            fn f() -> f32 { return textureSampleCompare(shadows, shadowCmp, vec2<f32>(0.0), 0, 0.5); }
         `);
         expect([...(found.get(3) ?? [])]).toEqual([1]);
     });
@@ -61,6 +76,7 @@ describe('samplerBindingsOf', () => {
         const found = samplerBindingsOf(`
             @group(0) @binding(1) var a: sampler;
             @group(2) @binding(3) var b: sampler;
+            fn f() { _ = a; _ = b; }
         `);
         expect([...(found.get(0) ?? [])]).toEqual([1]);
         expect([...(found.get(2) ?? [])]).toEqual([3]);

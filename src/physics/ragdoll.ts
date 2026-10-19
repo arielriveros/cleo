@@ -79,7 +79,9 @@ const DEG2RAD = Math.PI / 180;
 /** Ragdoll bodies' collision group (the static world is group 1). Matches `overlap.ts`. */
 const RAGDOLL_GROUP = 2;
 /** Fastest a part may start, so a teleport or a hitch in the last frame cannot launch a corpse. */
-const MAX_HANDOFF_SPEED = 8;
+const MAX_HANDOFF_SPEED = 5;
+/** Fastest a part may start moving UP (m/s). */
+const MAX_HANDOFF_RISE = 0.5;
 
 /**
  * Hands a skinned ModelNode's skeleton over to physics: every joint becomes a sphere-collider rigid
@@ -436,6 +438,9 @@ export class Ragdoll {
                 const v = vec3.scale(vec3.create(), vec3.sub(vec3.create(), center, before.center), 1 / prev.dt);
                 const speed = vec3.length(v);
                 if (speed > MAX_HANDOFF_SPEED) vec3.scale(v, v, MAX_HANDOFF_SPEED / speed);
+                // Never upward faster than a stumble: a death clip settling onto the floor reads as
+                // the hips springing up for a frame, and that was enough to throw the body in the air.
+                v[1] = Math.min(v[1], MAX_HANDOFF_RISE);
                 if (Number.isFinite(speed)) body.velocity.set(v[0], v[1], v[2]);
             }
             if (cfg.inheritVelocity) body.velocity.vadd(new Vec3(cfg.inheritVelocity[0], cfg.inheritVelocity[1], cfg.inheritVelocity[2]), body.velocity);
@@ -508,7 +513,37 @@ export class Ragdoll {
 
         this.solverIterations = Math.max(0, Math.round(profile.solverIterations));
         animator.enableRagdoll(this._bodies);
+        // AFTER the skin is bound to the bodies, so the mesh rises with them rather than staying buried.
+        this._liftOutOfGround(bodies);
         return true;
+    }
+
+    /**
+     * Lift the whole ragdoll so no part starts inside the ground. A death clip ends lying ON the floor, so
+     * capsules sized to the limbs spawn partly beneath it -- and the solver pushes a buried body out at
+     * whatever speed clears it, which threw the corpse metres into the air. One rigid lift for every part,
+     * by the deepest penetration found straight under each one, keeps the pose and starts it resting.
+     */
+    private _liftOutOfGround(bodies: Body[]): void {
+        let lift = 0;
+        for (const body of bodies) {
+            body.updateAABB();
+            const lo = body.aabb.lowerBound, hi = body.aabb.upperBound;
+            const x = body.position.x, z = body.position.z;
+            let hit = null;
+            try {
+                hit = this._physics.raycast([x, hi.y + 1, z], [x, lo.y - 1, z], { groundOnly: true });
+            } catch { hit = null; }
+            if (hit) lift = Math.max(lift, hit.point[1] - lo.y);
+        }
+        if (lift <= 0) return;
+        lift += 0.01;
+        for (const body of bodies) {
+            body.position.y += lift;
+            body.previousPosition.y += lift;
+            body.interpolatedPosition.y += lift;
+            body.updateAABB();
+        }
     }
 
     private _add(constraint: Constraint): void {

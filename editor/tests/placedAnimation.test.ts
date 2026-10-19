@@ -41,6 +41,17 @@ describe('captureAnimationState / restoreAnimationState', () => {
         expect(rebuilt.children[0].animator!.getStateMachine()).toEqual(SM);
     });
 
+    // An imported model asset carries an EMPTY machine, `{ states: [] }`. Read as "the asset has a machine",
+    // it threw the placement's away on every model rebuild: the player stood in its bind pose until the rig
+    // was re-linked by hand.
+    it('replaces an empty machine the asset brought with the placement own', () => {
+        const old = holder([modelNode({ animator: animator(SM) })]);
+        const saved = captureAnimationState(old);
+        const rebuilt = holder([modelNode({ animator: animator({ parameters: [], states: [], transitions: [], events: [] }) })]);
+        restoreAnimationState(rebuilt, saved);
+        expect(rebuilt.children[0].animator!.getStateMachine()).toEqual(SM);
+    });
+
     it('carries animation mappings and the ragdoll config too', () => {
         const old = holder([modelNode({ animator: animator(null, MAPPINGS), ragdollConfig: RAGDOLL })]);
         const rebuilt = holder([modelNode()]);
