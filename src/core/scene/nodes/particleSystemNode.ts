@@ -301,7 +301,10 @@ export class ParticleSystemNode extends Node {
         if ((this.offscreen || this.lod.culled) && this.pausesOffscreen) return;
         const lod = this._system.lod;
         const { spawnScale, stepScale } = particleLodFactors(lod, this.lod.level);
-        this._runtime.advance(delta * this._simulationSpeed, this.worldTransform, this._spawnRateScale, undefined,
+        // Despawning gradually (Node.remove): stop feeding the system and let what is alive play out
+        // over the dissolve, rather than cutting a burst off mid-air.
+        const rate = this.effectiveFade < 1 ? 0 : this._spawnRateScale;
+        this._runtime.advance(delta * this._simulationSpeed, this.worldTransform, rate, undefined,
             { level: this.lod.level, spawnScale, stepScale, scaleBursts: lod?.scaleBursts === true });
     }
 

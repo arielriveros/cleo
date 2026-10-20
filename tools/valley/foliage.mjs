@@ -9,8 +9,9 @@
 // (An instance scale multiplies a mesh but IS the size of an impostor card; keeping the authored size
 // right keeps the two from disagreeing.)
 //
-// The pine is 477k triangles (133k bark, 344k needle cards). It is decimated by the editor's own QEM
-// simplifier into three levels, so the library asset is what "Generate LOD levels…" would have made.
+// The pine is 477k triangles (133k bark, 344k needle cards), drawn at full detail as LOD0. LOD1 and LOD2
+// (15% and 5%) come from the editor's own QEM simplifier, so the library asset is what "Generate LOD
+// levels…" would have made, and past those an impostor card baked by impostor.py takes over.
 //
 // ## Placement
 //
@@ -19,7 +20,7 @@
 // props' footprints, the hamlet and the boss plaza. Y comes from the shipped 1 m surface.
 
 import { decimate, geometryJson, mergeParts, normalizeParts, partsOf, readGltf, triangles, boundsOf } from './meshes.mjs'
-import { groundFoliageAllowed, surfaceWeights } from './landscape.mjs'
+import { groundFoliageAllowed, surfaceFoliageAllowed, surfaceWeights } from './landscape.mjs'
 import { mat4 } from 'gl-matrix'
 
 export const GRASS_PATCHES = [
@@ -30,13 +31,36 @@ export const GRASS_PATCHES = [
 
 /** Clump height multiplier: the source clumps are 4-32 cm; meadow grass here is ~0.3-0.65 m. */
 const GRASS_SCALE = 1.8
-/** LOD ratios and switch distances. Grass ends at `GRASS_CULL`; the pine is visible to the horizon. */
-const GRASS_LOD0 = 0.25
+/**
+ * LOD ratios and switch distances. LOD0 is the source model at full detail for both; grass ends at
+ * `GRASS_CULL`, and past `PINE_BILLBOARD` a pine is its baked impostor card out to the horizon.
+ */
 const GRASS_LODS = [[0.08, 6], [0.025, 15]]
-export const GRASS_CULL = 45
-const PINE_LOD0 = 0.12
-const PINE_LODS = [[0.03, 25], [0.006, 70]]
+export const GRASS_CULL = 20
+const PINE_LODS = [[0.15, 15], [0.05, 35]]
+export const PINE_BILLBOARD = 70
 export const PINE_CULL = 450
+/** The celandine flowers share the meadow's LOD ladder and end with it. */
+export const FLOWER_CULL = GRASS_CULL
+/** Moss rocks: full detail close up, then 25% and 8%; visible a long way, they are big and still. */
+const ROCK_LODS = [[0.25, 25], [0.08, 60]]
+export const ROCK_CULL = 120
+
+/** Celandine clumps (build/foliage/celandine_01_1k.gltf), grouped like the grass patches. */
+export const FLOWER_PATCHES = [
+  { key: 'a', name: 'Celandine A', clumps: ['a', 'c', 'e'] },
+  { key: 'b', name: 'Celandine B', clumps: ['b', 'd', 'a'] },
+]
+/** The source plants are 12-19 cm; a celandine in flower stands a little taller than that in the meadow. */
+const FLOWER_SCALE = 1.4
+
+/** The moss rocks used, by their node name in rock_moss_set_02, and which get a collider. */
+export const MOSS_ROCKS = [
+  { key: 'rock08', name: 'Moss Rock A', collide: false },
+  { key: 'rock09', name: 'Moss Rock B', collide: false },
+  { key: 'rock11', name: 'Moss Rock C', collide: true },
+  { key: 'rock13', name: 'Moss Rock D', collide: true },
+]
 
 /** Small deterministic PRNG (mulberry32). */
 export function rng(seed) {
@@ -76,6 +100,48 @@ export function buildGrassPatches(file) {
     const merged = mergeParts(parts, patch.name, 0)
     normalizeParts([merged])
     return { ...patch, part: merged }
+  })
+}
+
+/** Each celandine patch as one merged part: a few clumps in a small ring, like a grass patch. */
+export function buildFlowerPatches(file) {
+  const doc = readGltf(file)
+  const byName = new Map(doc.gltf.nodes.map((n, i) => [n.name, i]))
+  return FLOWER_PATCHES.map((patch, pi) => {
+    const random = rng(0xf10e + pi)
+    const parts = []
+    patch.clumps.forEach((clump, ci) => {
+      const index = byName.get(`celandine_01_${clump}_LOD0`)
+      if (index === undefined) throw new Error(`no celandine clump "${clump}" in ${file}`)
+      const a = (ci / patch.clumps.length) * Math.PI * 2 + random() * 0.8
+      const r = ci === 0 ? 0 : 0.08 + random() * 0.07
+      const m = mat4.create()
+      mat4.scale(m, m, [FLOWER_SCALE, FLOWER_SCALE * (0.9 + random() * 0.2), FLOWER_SCALE])
+      mat4.translate(m, m, [Math.cos(a) * r, 0, Math.sin(a) * r])
+      mat4.rotateY(m, m, random() * Math.PI * 2)
+      // `transform` REPLACES the node's world matrix, so the file's row layout along x is dropped.
+      parts.push(...partsOf(doc, { filter: (_, i) => i === index, transform: () => m }))
+    })
+    const merged = mergeParts(parts, patch.name, 0)
+    normalizeParts([merged])
+    return { ...patch, part: merged }
+  })
+}
+
+/** The moss rocks, each its own part, base centre at the origin (sunk a little at placement). */
+export function buildMossRocks(file) {
+  const doc = readGltf(file)
+  const byName = new Map(doc.gltf.nodes.map((n, i) => [n.name, i]))
+  return MOSS_ROCKS.map(rock => {
+    const index = byName.get(`rock_moss_set_02_${rock.key}`)
+    if (index === undefined) throw new Error(`no moss rock "${rock.key}" in ${file}`)
+    // Its own mesh at the origin: the file's layout translation is dropped, its scale kept.
+    const n = doc.gltf.nodes[index]
+    const s = n.scale ?? [1, 1, 1]
+    const m = mat4.fromScaling(mat4.create(), s)
+    const part = mergeParts(partsOf(doc, { filter: (_, i) => i === index, transform: () => m }), rock.name, 0)
+    normalizeParts([part])
+    return { ...rock, part }
   })
 }
 
@@ -123,10 +189,21 @@ export function layerModels(levels, materialJson) {
 }
 
 export function grassLevels(root, patch, materialId) {
-  // LOD0 itself is thinned: a patch is five or six 1-2k-triangle clumps, and the near ring holds hundreds.
-  const lv = [[{ name: 'Grass', part: decimate(root, patch.part, GRASS_LOD0), materialId }]]
+  const lv = [[{ name: 'Grass', part: patch.part, materialId }]]
   for (const [ratio] of GRASS_LODS) lv.push([{ name: 'Grass', part: decimate(root, patch.part, ratio), materialId }])
   return { levels: lv, distances: GRASS_LODS.map(([, d]) => d) }
+}
+
+export function flowerLevels(root, patch, materialId) {
+  const lv = [[{ name: 'Flowers', part: patch.part, materialId }]]
+  for (const [ratio] of GRASS_LODS) lv.push([{ name: 'Flowers', part: decimate(root, patch.part, ratio), materialId }])
+  return { levels: lv, distances: GRASS_LODS.map(([, d]) => d) }
+}
+
+export function rockLevels(root, rock, materialId) {
+  const lv = [[{ name: 'Rock', part: rock.part, materialId }]]
+  for (const [ratio] of ROCK_LODS) lv.push([{ name: 'Rock', part: decimate(root, rock.part, ratio), materialId }])
+  return { levels: lv, distances: ROCK_LODS.map(([, d]) => d) }
 }
 
 export function pineLevels(root, pine, barkId, needlesId) {
@@ -134,7 +211,7 @@ export function pineLevels(root, pine, barkId, needlesId) {
     { name: 'Bark', part: decimate(root, pine.bark, ratio), materialId: barkId },
     { name: 'Needles', part: decimate(root, pine.needles, ratio), materialId: needlesId },
   ]
-  return { levels: [level(PINE_LOD0), ...PINE_LODS.map(([r]) => level(r))], distances: PINE_LODS.map(([, d]) => d) }
+  return { levels: [level(1), ...PINE_LODS.map(([r]) => level(r))], distances: PINE_LODS.map(([, d]) => d) }
 }
 
 export { triangles, boundsOf }
@@ -200,4 +277,9 @@ export function cliffDistanceField(heights, { half = 320, cell = 2, steep = 42 }
 /** Whether a ground-foliage rule may grow at x/z per the landscape material (rules + trail mask). */
 export function onGround(math, material, mask, heights, name) {
   return (x, z) => groundFoliageAllowed(material, surfaceWeights(math, material, mask, heights, x, z), name)
+}
+
+/** Whether a rule owned by surface `surface` (see landscape.mjs surfaceFoliageAllowed) may grow at x/z. */
+export function onSurface(math, material, mask, heights, name, surface) {
+  return (x, z) => surfaceFoliageAllowed(material, surfaceWeights(math, material, mask, heights, x, z), name, surface)
 }

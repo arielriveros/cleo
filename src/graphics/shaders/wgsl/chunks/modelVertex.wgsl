@@ -40,6 +40,8 @@ struct ModelTransform {
     u_model: mat4x4<f32>,
     u_view: mat4x4<f32>,
     u_projection: mat4x4<f32>,
+    // Despawn dissolve: x = how far gone (0 solid), y = dither phase. See Node.remove.
+    u_dissolve: vec2<f32>,
 };
 @group(1) @binding(0) var<uniform> u_transform: ModelTransform;
 
@@ -53,6 +55,7 @@ fn vs_main(
 ) -> VertexOutput {
     var out: VertexOutput;
     fillVarying(&out, u_transform.u_model, position, texCoord, normal, tangent, bitangent);
+    out.lodFade = dissolveLodFade(u_transform.u_dissolve);
     out.position = u_transform.u_projection * u_transform.u_view * u_transform.u_model
                  * vec4<f32>(position, 1.0);
     return out;

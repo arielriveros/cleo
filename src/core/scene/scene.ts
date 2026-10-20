@@ -83,6 +83,9 @@ interface ScheduledTimer {
     cancelled: boolean;
 }
 
+/** How long a despawn dissolves by default during play, in seconds. See `Scene.despawnFadeSeconds`. */
+export const DEFAULT_DESPAWN_FADE_SECONDS = 0.8;
+
 export class Scene {
     private _root: Node = new Node('root');
     private _nodes: Set<Node>;
@@ -378,6 +381,18 @@ export class Scene {
             this.removeNode(nodeToRemove);
     }
 
+    /**
+     * Seconds a {@link Node.remove} / {@link Node.despawn} takes to dissolve during play (see
+     * `Node.remove`). 0 makes every despawn immediate. Serialized with the scene.
+     */
+    public despawnFadeSeconds: number = DEFAULT_DESPAWN_FADE_SECONDS;
+    private readonly _fadingNodes = new Set<Node>();
+
+    /** @internal Node bookkeeping for a dissolve in progress. */
+    public registerFading(node: Node): void { this._fadingNodes.add(node); }
+    /** @internal */
+    public unregisterFading(node: Node): void { this._fadingNodes.delete(node); }
+
     public update(delta: number, time: number, paused: boolean): void {
         try {
             const frameStart = performance.now();
@@ -392,6 +407,9 @@ export class Scene {
             if (this._hasStarted && !paused) {
                 const timerStart = performance.now();
                 this._updateTimers(delta);
+                // Copied: a finished dissolve despawns its node, which unregisters it mid-iteration.
+                if (this._fadingNodes.size > 0)
+                    for (const node of Array.from(this._fadingNodes)) node.advanceFade(delta);
                 sceneStats.timerMs = performance.now() - timerStart;
             }
 
@@ -839,6 +857,8 @@ export class Scene {
             this._root.serialize().then((json: any) => {
                 output.scene = json;
                 output.scene.ambientLight = [this._ambientLight[0], this._ambientLight[1], this._ambientLight[2]];
+                if (this.despawnFadeSeconds !== DEFAULT_DESPAWN_FADE_SECONDS)
+                    output.scene.despawnFadeSeconds = this.despawnFadeSeconds;
                 if (this._environmentMap) {
                     try {
                         output.scene.environmentMap = TextureManager.Instance.serializeCubeMap(this._environmentMap);
@@ -875,6 +895,12 @@ export class Scene {
         const ambient = json.scene?.ambientLight ?? legacyAmbientFromSceneJson(json);
         this._ambientLight = ambient ? vec3.fromValues(ambient[0], ambient[1], ambient[2])
             : vec3.fromValues(DEFAULT_SCENE_AMBIENT_LUX, DEFAULT_SCENE_AMBIENT_LUX, DEFAULT_SCENE_AMBIENT_LUX);
+
+        const fade = json.scene?.despawnFadeSeconds;
+        this.despawnFadeSeconds = typeof fade === 'number' && Number.isFinite(fade) ? Math.max(0, fade)
+            : DEFAULT_DESPAWN_FADE_SECONDS;
+        for (const node of Array.from(this._fadingNodes)) node.cancelFade();
+        this._fadingNodes.clear();
 
         const env = json.scene?.environmentMap;
         if (env) {

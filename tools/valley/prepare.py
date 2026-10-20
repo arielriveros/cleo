@@ -47,7 +47,10 @@ def load(path: Path) -> Image.Image:
 
 def grey8(im: Image.Image) -> Image.Image:
     """One 8-bit channel. A 16-bit greyscale PNG (the ground/rock/trail height maps) is SHIFTED down:
-    Pillow's convert("L") clips I;16 at 255, which turned every one of those maps into flat white."""
+    Pillow's convert("L") clips I;16 at 255, which turned every one of those maps into flat white.
+    A 16-bit grey+alpha map (rocks_ground_05) opens as LA or RGBA at 8 bits already, and keeps its grey."""
+    if im.mode in ("LA", "La"):
+        return im.getchannel("L")
     if im.mode in ("I;16", "I;16B", "I;16L", "I"):
         import numpy as np
         a = np.asarray(im, dtype=np.uint32)
@@ -86,7 +89,11 @@ def save_png(im: Image.Image, name: str, size: int, mode: str = "RGB") -> None:
 
 def terrain(prefix: str, folder: str, base: str) -> None:
     tex = SRC / "terrain_textures" / folder / "textures"
-    save_jpeg(load(tex / f"{base}_diff_1k.png"), f"{prefix}_diff", 1024)
+    # Most sets name the colour map `_diff_`; forest_leaves_02 spells it `_diffuse_`.
+    diff = tex / f"{base}_diff_1k.png"
+    if not diff.exists():
+        diff = tex / f"{base}_diffuse_1k.png"
+    save_jpeg(load(diff), f"{prefix}_diff", 1024)
     save_png(load(tex / f"{base}_nor_gl_1k.png"), f"{prefix}_nor", 1024)
     save_jpeg(load(tex / f"{base}_arm_1k.png"), f"{prefix}_arm", 1024)
     save_png(load(tex / f"{base}_disp_1k.png"), f"{prefix}_disp", 512, "L")
@@ -145,6 +152,32 @@ def pine() -> None:
     save_png(pick(needles, "normalTexture"), "pine_needles_nor", 1024)
 
 
+def rock_moss() -> None:
+    """The moss rocks ship roughness but no ARM: one is assembled (AO 1, roughness, metal 0), the layout
+    every lit material in this example reads."""
+    tex = SRC / "foliage" / "rock_moss_set_02_1k.gltf" / "textures"
+    rough = grey8(load(tex / "rock_moss_set_02_rough_1k.jpg"))
+    white = Image.new("L", rough.size, 255)
+    black = Image.new("L", rough.size, 0)
+    save_jpeg(Image.merge("RGB", (white, rough, black)), "rock_moss_arm", 1024)
+
+
+def skull_cave() -> None:
+    """The cave's three maps live inside its GLB: base colour, normal, and a metal/rough map whose
+    channels (G roughness, B metal) become the ARM this example's materials read, with AO 1."""
+    doc, images = glb_images(SRC / "props" / "skull_cave" / "source" / "model.glb")
+    tex = [t["source"] for t in doc["textures"]]
+    m = doc["materials"][0]
+    pbr = m["pbrMetallicRoughness"]
+    color = images[tex[pbr["baseColorTexture"]["index"]]]
+    normal = images[tex[m["normalTexture"]["index"]]]
+    mr = images[tex[pbr["metallicRoughnessTexture"]["index"]]].convert("RGB")
+    _, g, b = mr.split()
+    save_jpeg(color, "skull_cave_diff", 2048)
+    save_png(normal, "skull_cave_nor", 2048)
+    save_jpeg(Image.merge("RGB", (Image.new("L", g.size, 255), g, b)), "skull_cave_arm", 2048)
+
+
 def water_normal(size: int = 512, seed: int = 1337) -> None:
     """
     A seamlessly tiling wave normal map for the pond (water.glsl samples it in world space).
@@ -182,9 +215,13 @@ def main() -> None:
     terrain("trail", "rocky_trail_02_1k", "rocky_trail_02")
     terrain("rock", "rock_05_1k", "rock_05")
     terrain("snow", "snow_02_1k", "snow_02")
+    terrain("forest", "forest_leaves_02_1k", "forest_leaves_02")
+    terrain("rockydirt", "rocks_ground_05_1k", "rocks_ground_05")
     props()
     grass()
     pine()
+    rock_moss()
+    skull_cave()
     water_normal()
     total = sum(f.stat().st_size for f in OUT.iterdir())
     print(f"wrote {len(list(OUT.iterdir()))} textures to {OUT.relative_to(ROOT)} ({total / 1e6:.1f} MB)")

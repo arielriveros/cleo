@@ -72,8 +72,12 @@ body and trigger out of the physics world.
 get spawned: boolean
 get/set spawnOnStart: boolean       // authored; ignored while merely authoring
 spawn(options?: { subtree?: boolean }): void
-despawn(): void
-remove(): void
+despawn(options?: { immediate?: boolean; fade?: number }): void
+remove(options?: { immediate?: boolean; fade?: number }): void
+get isDespawning: boolean           // dissolving toward a despawn or removal
+get despawnFade: number             // this node's own dissolve, 1 solid .. 0 gone
+get effectiveFade: number           // times every ancestor's: what the renderer draws with
+onFadeStart(): void                 // the dissolve began
 get hasStarted: boolean
 get markForRemoval: boolean
 ```
@@ -83,6 +87,28 @@ get markForRemoval: boolean
 | `spawn()` | Wakes the node. Fires `onSpawn` **every time**; fires `onStart` only the first time. |
 | `despawn()` | Sleeps it. No render, no update, no animation; body and trigger leave the world; **timers are cancelled**. |
 | `remove()` | Despawn, then unlink at the next update. Permanent. |
+
+### Despawns are gradual during play
+
+In play, `despawn()` and `remove()` dissolve anything visible in the subtree before acting. That
+covers models, characters, sprites, lights, particles and decals. The dissolve uses the same
+screen-door dither as a foliage LOD change.
+
+- **Duration:** `scene.despawnFadeSeconds`, default `0.8`, saved with the scene. `{ fade: seconds }`
+  overrides it for one call.
+- **While it fades,** the node keeps updating and simulating, so a ragdoll keeps settling. Its timers
+  keep running. Particles stop emitting and a decal's opacity follows the fade. Shadows drop out
+  halfway.
+- **When the fade ends,** the real despawn or removal happens and `onDespawn` fires.
+- **Immediate cases:** `{ immediate: true }` acts at once. So does a subtree with nothing to draw,
+  and anything done while authoring in the editor.
+- **During a fade:** `spawn()` cancels it, and a later `remove()` turns a fading despawn into a
+  removal.
+
+```ts
+this.after(this.corpseSeconds, () => this.remove({ fade: 1.5 }))   // a corpse dissolving away
+weapon.remove({ immediate: true })                                 // a swap must not linger in the hand
+```
 
 `spawnOnStart` is the authored flag behind "this door exists but is not there yet". It is a
 runtime-only rule: while you are authoring, a node marked `spawnOnStart: false` is still visible,

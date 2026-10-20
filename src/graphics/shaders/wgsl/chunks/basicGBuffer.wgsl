@@ -44,6 +44,8 @@ struct GBuffer {
 
 @fragment
 fn fs_main(in: VertexOutput) -> GBuffer {
+    // A despawn dissolve: see Node.remove and chunks/dither.wgsl.
+    if (!dissolveKeeps(in.dissolve, in.position.xy)) { discard; }
     // The cutout first, before any other work — a discarded fragment costs nothing downstream. Its
     // gradients are taken here, in uniform control flow, for the mip-aware alpha (chunks/alphaCutout).
     let cutDx = dpdx(in.uv);

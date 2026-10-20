@@ -697,7 +697,7 @@ export class Terrain {
                 dst = FoliageLayer.deserialize({ ...src.serialize(), instances: undefined });
                 dst.key = src.key;
                 this._foliageByKey.set(dst.key, dst);
-                this._foliage.push(dst);
+                this._adoptFoliage(dst);
             }
             for (let i = 0; i < src.count; i++) {
                 if (!src.instanceAt(i, inst)) continue;
@@ -895,7 +895,21 @@ export class Terrain {
 
     public get foliage(): FoliageLayer[] { return this._foliage; }
 
-    public addFoliage(layer: FoliageLayer): FoliageLayer { this._foliage.push(layer); return layer; }
+    public addFoliage(layer: FoliageLayer): FoliageLayer { return this._adoptFoliage(layer); }
+
+    /**
+     * Take a layer into this terrain: listed, and given the ground's normal, which a layer oriented to
+     * the 'normal' needs to tilt its instances (they are stored upright: position, yaw, scale).
+     */
+    private _adoptFoliage(layer: FoliageLayer): FoliageLayer {
+        this._foliage.push(layer);
+        layer.setNormalSampler(this._normalSampler);
+        return layer;
+    }
+
+    /** World x/z -> the ground's unit normal there; what `_heightSampler` is for heights. */
+    private _normalSampler = (wx: number, wz: number): [number, number, number] =>
+        this.normalAt(wx - this._origin[0], wz - this._origin[2]);
 
     /**
      * Drop the runtime layer filed under `key`, instances and GPU buffers included.
@@ -1074,7 +1088,7 @@ export class Terrain {
         if (!layer) {
             layer = FoliageLayer.fromRule(rule);
             this._foliageByKey.set(layer.key, layer);
-            this._foliage.push(layer);
+            this._adoptFoliage(layer);
         }
         return layer;
     }

@@ -209,7 +209,8 @@ export default class SoulsCharacterNode extends CharacterNode {
 
   /** Spawn every weapon in `weaponTemplates` into the hand, and hold the first. */
   protected _spawnWeapons(): void {
-    for (const w of this._weapons) { try { w.remove() } catch { /* already gone */ } }
+    // Immediate: a weapon swap or a re-spawn must not leave the old blade dissolving in the hand.
+    for (const w of this._weapons) { try { w.remove({ immediate: true }) } catch { /* already gone */ } }
     this._weapons = []
     // A list; a comma-separated string is still read, as scenes saved before the field was a list hold one.
     const raw: unknown = this.weaponTemplates
@@ -221,7 +222,7 @@ export default class SoulsCharacterNode extends CharacterNode {
       if (!weapon) continue   // instantiate has logged the missing template
       if (!(weapon as any).isWeapon) {
         Logger.warn('Hollow Keep: "' + name + '" is not a weapon template (its root has no SoulsWeapon script).', 'Script')
-        weapon.remove()
+        weapon.remove({ immediate: true })
         continue
       }
       weapon.attachToSocket('parent', this.weaponSocket)

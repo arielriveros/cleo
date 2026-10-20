@@ -19,6 +19,14 @@ import { eulerFromQuatDeg } from "../../math";
 // Type-only: actionMap is a pure leaf with no imports of its own, so this closes no cycle.
 import type { ActionState } from "../../../input/actionMap";
 
+/** How {@link Node.remove} and {@link Node.despawn} go. */
+export interface DespawnOptions {
+  /** Skip the dissolve and act now. Always the case in the editor's edit mode. */
+  immediate?: boolean;
+  /** Seconds the dissolve takes; defaults to `Scene.despawnFadeSeconds`. */
+  fade?: number;
+}
+
 
 
 /**
@@ -136,6 +144,13 @@ export class Node {
   // Renderer-driven visibility for LOD level switching and distance culling (see LodGroupNode). Must stay
   // separate from _visible: that setter emits SCENE_CHANGED and, on ModelNode, writes castShadow.
   protected _lodVisible: boolean = true;
+
+  // Gradual despawn (see {@link remove}). `_despawnFade` is this node's own dissolve factor, 1 = solid; the
+  // renderer multiplies it down the parent chain. `_despawnFading` is the dissolve in progress, if any.
+  protected _despawnFade: number = 1;
+  protected _despawnFading: { elapsed: number; duration: number; then: 'remove' | 'despawn' } | null = null;
+  /** How many nodes are mid-dissolve, engine-wide: lets {@link effectiveFade} skip the parent walk. */
+  private static _fadingCount = 0;
 
   /**
    * Editor/debug CHROME: a grid, a gizmo, a collider wireframe, a helper icon. The renderer keeps
@@ -492,16 +507,102 @@ export class Node {
   private static readonly _rotationScratch: mat4 = mat4.create();
 
   /**
-   * Destroys this node and its whole subtree: it is {@link despawn}ed immediately (onDespawn, timers
-   * cancelled, physics bodies dropped) and unlinked from the scene at the next update.
+   * Destroys this node and its whole subtree. Permanent — the node cannot be brought back; for something
+   * that should reappear later, use {@link despawn} and {@link spawn} instead.
    *
-   * Permanent — the node cannot be brought back. For something that should reappear later, use
-   * {@link despawn} and {@link spawn} instead.
+   * During play it is GRADUAL: anything visible in the subtree (models, lights, particles, decals)
+   * dissolves with the same screen-door dither foliage uses between LOD levels, over
+   * `Scene.despawnFadeSeconds` (or `options.fade`). The node keeps updating and simulating while it
+   * fades -- a ragdoll keeps settling -- and is then {@link despawn}ed (onDespawn, timers cancelled,
+   * physics bodies dropped) and unlinked at the next update. `immediate: true` skips the fade, as does
+   * anything in the editor's edit mode.
    */
-  public remove(): void {
-    this.despawn();
+  public remove(options: DespawnOptions = {}): void {
+    if (this._beginFade('remove', options)) return;
+    this._endFade();
+    this.despawn({ immediate: true });
     this._forEachInSubtree(n => { n._markForRemoval = true; });
   }
+
+  /** Whether this node is dissolving toward a despawn or removal (see {@link remove}). */
+  public get isDespawning(): boolean { return this._despawnFading !== null; }
+
+  /** This node's own dissolve factor: 1 solid, 0 gone. */
+  public get despawnFade(): number { return this._despawnFade; }
+
+  /**
+   * The dissolve the renderer applies to this node: its own {@link despawnFade} times every ancestor's, so a
+   * despawning root takes its whole subtree with it.
+   */
+  public get effectiveFade(): number {
+    if (Node._fadingCount === 0) return 1;
+    let f = 1;
+    for (let n: Node | null = this; n; n = n._parent) f *= n._despawnFade;
+    return f;
+  }
+
+  /**
+   * Start a dissolve instead of acting now, when one applies. True when the caller should stop here.
+   * A second request while fading only upgrades a despawn into a removal (or skips the rest of the fade
+   * when it is `immediate`, which the caller then carries out).
+   */
+  private _beginFade(then: 'remove' | 'despawn', options: DespawnOptions): boolean {
+    if (options.immediate) return false;
+    if (this._despawnFading) {
+      if (then === 'remove') this._despawnFading.then = 'remove';
+      return true;
+    }
+    const scene = this._scene;
+    if (!scene || !scene.hasStarted || authoring.enabled || !this._spawned) return false;
+    const duration = options.fade ?? scene.despawnFadeSeconds;
+    if (!(duration > 0)) return false;
+    let visible = false;
+    this._forEachInSubtree(n => { if (!visible && n._spawned && Node._fadeable(n)) visible = true; });
+    if (!visible) return false;
+    this._despawnFading = { elapsed: 0, duration, then };
+    Node._fadingCount++;
+    scene.registerFading(this);
+    try { this.onFadeStart(); } catch (e) { Logger.error(`Error in onFadeStart for node ${this.name}: ${e}`); }
+    return true;
+  }
+
+  /** Stop a dissolve without acting on it: the node stays, solid again. */
+  public cancelFade(): void { this._endFade(); }
+
+  private _endFade(): void {
+    if (!this._despawnFading) return;
+    this._despawnFading = null;
+    this._despawnFade = 1;
+    Node._fadingCount = Math.max(0, Node._fadingCount - 1);
+    this._scene?.unregisterFading(this);
+  }
+
+  /** What a dissolve reaches: things that draw. Typed by `nodeType`, since this module sits beneath them all. */
+  private static _fadeable(n: Node): boolean {
+    const t = n._nodeType;
+    return t === 'model' || t === 'character' || t === 'light' || t === 'particleSystem' || t === 'decal'
+      || t === 'sprite' || t === 'animatedSprite';
+  }
+
+  /** Called by the scene once per frame for a fading node. @internal */
+  public advanceFade(delta: number): void {
+    const f = this._despawnFading;
+    if (!f) return;
+    f.elapsed += delta;
+    const t = Math.min(1, f.elapsed / f.duration);
+    this._despawnFade = 1 - t;
+    if (t < 1) return;
+    const then = f.then;
+    this._endFade();
+    if (then === 'remove') this.remove({ immediate: true });
+    else this.despawn({ immediate: true });
+  }
+
+  /**
+   * Fires when a gradual despawn or removal begins (see {@link remove}). Override to react: a particle
+   * system stops emitting, a light dims with the fade.
+   */
+  public onFadeStart(): void { }
 
   /**
    * Brings a dormant node (and its subtree) back to life: it renders, updates, animates and simulates again.
@@ -515,6 +616,8 @@ export class Node {
    * @param options `subtree: true` wakes every descendant, ignoring their own spawnOnStart flags.
    */
   public spawn(options: { subtree?: boolean } = {}): void {
+    // Brought back mid-dissolve: it simply stays, solid again.
+    this._endFade();
     if (this._spawned) return;
 
     // Decided before anything fires: this node unconditionally (an explicit spawn overrides its own flag),
@@ -565,10 +668,12 @@ export class Node {
    * already dormant.
    *
    * The node stays in the scene tree and remains findable by name/id. Use {@link remove} instead when it
-   * should never come back.
+   * should never come back. Gradual during play, exactly as {@link remove} is.
    */
-  public despawn(): void {
+  public despawn(options: DespawnOptions = {}): void {
     if (!this._spawned) return;
+    if (this._beginFade('despawn', options)) return;
+    this._endFade();
 
     this._forEachInSubtree(n => {
       // A descendant that was already dormant has had all of this done; firing its onDespawn again from

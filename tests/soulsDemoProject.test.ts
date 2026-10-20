@@ -107,8 +107,10 @@ describe.skipIf(!present)(`the ${title} example project`, () => {
 
     it('has every node the scripts find by name', () => {
         const names = new Set(allNodes(scene().scene).map(n => n.name));
-        for (const name of ['GameManager', 'Player', 'HUD', 'Banner', 'BonfireMenu', 'LockReticle', 'Sounds',
-            'Shortcut Gate', 'Fog Gate', 'Boss Reward', 'Epilogue Message', 'Bonfire']) {
+        // The Valley has no boss: its fog wall became the skull cave, which loads the dungeon scene.
+        const specific = keep ? ['Fog Gate', 'Boss Reward', 'Epilogue Message'] : ['Skull Cave Entrance']
+        for (const name of ['GameManager', 'Player', 'HUD', 'Banner', 'BonfireMenu', 'ConfirmDialog', 'LockReticle', 'Sounds',
+            'Shortcut Gate', 'Bonfire', ...specific]) {
             expect(names.has(name), name).toBe(true);
         }
     });
@@ -222,7 +224,7 @@ describe.skipIf(!present)(`the ${title} example project`, () => {
         expect(asset.variables.find((v: any) => v.name === 'spawnables')?.type).toBe('stringList');
         expect(asset.variables.find((v: any) => v.name === 'templateName')?.options).toBe('spawnables');
         const placed = allNodes(scene().scene).filter(n => scriptOf(n) === asset);
-        expect(placed).toHaveLength(8);
+        expect(placed).toHaveLength(keep ? 8 : 7);
         for (const n of placed) {
             expect(n.variables.__templateId?.value, n.name).toBe(spawnTemplate.id);
             expect(list, n.name).toContain(n.scriptVars.templateName);
@@ -265,7 +267,7 @@ describe.skipIf(!present)(`the ${title} example project`, () => {
         }
     });
 
-    it('spawns exactly one boss', () => {
+    it.skipIf(!keep)('spawns exactly one boss', () => {
         expect(withScript('SoulsEnemySpawn').filter(n => n.scriptVars.isBossSpawn)).toHaveLength(1);
     });
 
@@ -485,9 +487,11 @@ describe.skipIf(!present)(`the ${title} example project`, () => {
                 expect(trigger?.shapes?.length, `${n.name} (${f}) has no trigger zone`).toBeGreaterThan(0);
             }
         }
-        const arena = inScene.find(n => n.name === 'Boss Arena');
-        expect(arena.variables.isBossArena.value).toBe(true);
-        expect(arena.trigger.shapes[0].type).toBe('box');
+        if (keep) {
+            const arena = inScene.find(n => n.name === 'Boss Arena');
+            expect(arena.variables.isBossArena.value).toBe(true);
+            expect(arena.trigger.shapes[0].type).toBe('box');
+        }
     });
 
     it.skipIf(!keep)('marks walls, pillars and gates as swing blockers, and no floor', () => {
@@ -604,7 +608,7 @@ describe.skipIf(!present)(`the ${title} example project`, () => {
         const paths = vfs.entries.map((e: any) => e.path);
         expect(new Set(paths).size).toBe(paths.length);
         const ids = new Set<string>([
-            manifest().mainSceneId,
+            ...manifest().sceneMetas.map((m: any) => m.id),
             ...['scripts', 'templates', 'models', 'materials', 'animationFields', 'animControllers', 'boneMasks', 'animations', 'rigs', 'particleSystems', 'aiBrains', 'terrainMaterials']
                 .flatMap(l => library(l).map((a: any) => a.id)),
         ]);
@@ -664,10 +668,15 @@ describe.skipIf(!present)(`the ${title} example project`, () => {
     it('places the player, torches and interactables as linked template copies', () => {
         const count = (name: string) => instances().filter(n => templateOf(n)?.name === name).length;
         expect(count('Player')).toBe(1);
-        expect(count('Torch')).toBe(keep ? 19 : 4);
-        expect(count('Message')).toBe(7);
-        expect(count('Pickup')).toBe(4);
-        for (const name of ['Bonfire', 'Lever', 'Gate', 'Fog Gate']) expect(count(name), name).toBe(1);
+        expect(count('Torch')).toBe(keep ? 19 : 2);
+        expect(count('Message')).toBe(keep ? 7 : 6);
+        expect(count('Pickup')).toBe(keep ? 4 : 3);
+        for (const name of ['Bonfire', 'Lever', 'Gate']) expect(count(name), name).toBe(1);
+        expect(count('Fog Gate')).toBe(keep ? 1 : 0);
+        if (!keep) {
+            expect(count('Skull Cave Entrance')).toBe(1);
+            expect(count('Breakable Barrel')).toBeGreaterThan(8);
+        }
         for (const n of instances()) expect(templateOf(n), n.name).toBeDefined();
     });
 
@@ -691,7 +700,7 @@ describe.skipIf(!present)(`the ${title} example project`, () => {
 
     it('keeps the names scripts look up as name overrides, so a template rebuild cannot lose them', () => {
         const named = (name: string) => instances().find(n => n.name === name);
-        for (const name of ['Boss Reward', 'Epilogue Message', 'Shortcut Gate', 'Shortcut Lever']) {
+        for (const name of [...(keep ? ['Boss Reward', 'Epilogue Message'] : []), 'Shortcut Gate', 'Shortcut Lever']) {
             const n = named(name);
             expect(n, name).toBeDefined();
             expect(JSON.parse(n.variables.__overrides.value)[''].name).toBe(name);

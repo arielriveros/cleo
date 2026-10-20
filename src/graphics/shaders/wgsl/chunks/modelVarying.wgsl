@@ -12,6 +12,7 @@
 #include "./parallax.wgsl"
 
 #include "./octNormal.wgsl"
+#include "./dither.wgsl"
 
 #include "./uvProjection.wgsl"
 
@@ -34,14 +35,12 @@ struct VertexOutput {
     @location(7) lodFade: vec3<f32>,
 };
 
-/** A 4x4 ordered-dither threshold in (0, 1) for a pixel, shifted per frame by `phase`. */
-fn lodDitherThreshold(fragCoord: vec2<f32>, phase: f32) -> f32 {
-    let x = i32(floor(fragCoord.x)) & 3;
-    let y = i32(floor(fragCoord.y)) & 3;
-    // Bayer 4x4 by recursion on the 2x2 pattern [[0, 2], [3, 1]].
-    let lo = ((x ^ y) & 1) * 2 + (y & 1);
-    let hi = (((x >> 1) ^ (y >> 1)) & 1) * 2 + ((y >> 1) & 1);
-    return fract((f32(lo * 4 + hi) + 0.5) / 16.0 + phase);
+/**
+ * A despawn dissolve (`u_dissolve`: x = how far gone, y = dither phase) as a fade-OUT on the LOD
+ * crossfade varying, so a despawning model dithers away exactly as a foliage level does.
+ */
+fn dissolveLodFade(dissolve: vec2<f32>) -> vec3<f32> {
+    return vec3<f32>(1.0, 1.0 - dissolve.x, dissolve.y);
 }
 
 /**

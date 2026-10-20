@@ -42,8 +42,9 @@ position.
 | **Max distance** | |
 | **Rolloff factor** | How steeply it falls off. |
 
-Spatial emitters are drawn in the viewport when **Sound emitters** is on in the debug eye menu,
-which is the only practical way to see falloff spheres while placing them.
+Sound emitters show an icon in the viewport when **Sound emitters** is on in the debug eye menu. A
+spatial emitter's falloff sphere (drawn at **Max distance**) appears only while that emitter is
+selected.
 
 ## Buses
 

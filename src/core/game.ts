@@ -3,11 +3,18 @@
 // scene members throw. Everything else forwards straight to CleoEngine.instance.
 
 import { CleoEngine } from "./engine";
+import { showLoadingOverlay, whenFramesSmooth } from "./loadingOverlay";
 import type { RenderSettings } from "../graphics/renderer";
 
+/** Progress of a scene load: 0..1, and a short name for the stage it is in. */
+export type LoadProgressListener = (fraction: number, stage: string) => void;
+
 export interface GameHost {
-  /** Switch the running game to another scene, by its name or id. */
-  loadScene(nameOrId: string): void | Promise<void>;
+  /**
+   * Switch the running game to another scene, by its name or id. Resolves once the new scene has
+   * STARTED; reports its stages through `onProgress` along the way.
+   */
+  loadScene(nameOrId: string, options?: { onProgress?: LoadProgressListener }): void | Promise<void>;
   /** The currently running scene's name. */
   currentSceneName(): string;
   /** Every scene name available to load at runtime. */
@@ -26,10 +33,58 @@ function requireHost(): GameHost {
   return host;
 }
 
+const progressListeners = new Set<LoadProgressListener>();
+
+export interface LoadSceneOptions {
+  /**
+   * Cover the switch with a loading screen and a progress bar, lifted once the new scene runs smoothly.
+   * `true` for the default heading, or `{ title }`.
+   */
+  loadingScreen?: boolean | { title?: string };
+}
+
+async function runLoad(h: GameHost, nameOrId: string, options: LoadSceneOptions): Promise<void> {
+  const screen = options.loadingScreen;
+  const overlay = screen
+    ? showLoadingOverlay(CleoEngine.instance?.viewport, typeof screen === 'object' ? screen : {})
+    : null;
+  const report: LoadProgressListener = (fraction, stage) => {
+    overlay?.set(fraction, stage);
+    for (const listener of progressListeners) {
+      try { listener(fraction, stage); } catch { /* a listener's failure is not the load's */ }
+    }
+  };
+  report(0, 'Loading');
+  try {
+    await h.loadScene(nameOrId, { onProgress: report });
+    report(1, '');
+    if (overlay) await whenFramesSmooth();
+  } finally {
+    overlay?.hide();
+  }
+}
+
 export const Game = {
-  /** Load another scene by name or id. Resets scripts, physics, input and UI for the new scene. */
-  loadScene(nameOrId: string): void | Promise<void> {
-    return requireHost().loadScene(nameOrId);
+  /**
+   * Load another scene by name or id. Resets scripts, physics, input and UI for the new scene, and
+   * resolves once it has started (and, with a loading screen, once its first frames run smoothly).
+   *
+   *   await Game.loadScene('Dungeon', { loadingScreen: { title: 'The Skull Cave' } });
+   *
+   * The loading screen belongs to the host, not to either scene, so it stays up across the swap.
+   */
+  loadScene(nameOrId: string, options: LoadSceneOptions = {}): Promise<void> {
+    // Checked synchronously: a script that guards the call with try/catch (no host outside play) must
+    // see the throw, not an unhandled rejection.
+    return runLoad(requireHost(), nameOrId, options);
+  },
+  /**
+   * Listen to scene-load progress (0..1 and a stage name), for a loading UI of your own. Returns the
+   * unsubscribe. Module-level, so it survives the switch it reports on.
+   */
+  onLoadProgress(listener: LoadProgressListener): () => void {
+    progressListeners.add(listener);
+    return () => { progressListeners.delete(listener); };
   },
   /** The name of the scene currently running. */
   get sceneName(): string {

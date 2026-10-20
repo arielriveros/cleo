@@ -468,7 +468,8 @@ describe('a controller parented under its own pawn', () => {
     it('leaves nothing dangling when the whole actor is removed', () => {
         const { scene, character, controller } = actor();
         character.remove();
-        scene.update(1 / 60, 0, false);
+        // Gradual during play (Node.remove): the actor dissolves first, then goes.
+        for (let t = 0; t <= scene.despawnFadeSeconds + 0.1; t += 1 / 60) scene.update(1 / 60, 0, false);
         expect(controller.possessed).toBeNull();
     });
 });

@@ -9,7 +9,8 @@ The script-facing surface for anything above a single scene.
 ```ts
 import { Game } from 'cleo'
 
-Game.loadScene(nameOrId: string): void | Promise<void>
+Game.loadScene(nameOrId: string, options?: { loadingScreen?: boolean | { title?: string } }): Promise<void>
+Game.onLoadProgress((fraction: number, stage: string) => void): () => void   // returns unsubscribe
 Game.sceneName: string
 Game.sceneNames(): string[]
 
@@ -29,8 +30,27 @@ export default class PlayButtonNode extends UIButtonNode {
 }
 ```
 
-`Game.loadScene` throws if no host is installed — that only happens outside the editor and the
-published player, so in practice it always works.
+`Game.loadScene` throws, at the call, if no host is installed. That only happens outside the editor
+and the published player, so in practice it always works. The promise resolves once the new scene
+has started.
+
+With `loadingScreen`, the switch is covered by a loading screen showing a heading and a progress bar.
+The screen belongs to the host, not to either scene, so it stays up across the swap. It lifts once the
+new scene's first frames run smoothly. The progress is the host's real stages:
+
+- reading the scene;
+- unpacking models and terrain;
+- building it;
+- starting.
+
+To drive a loading UI of your own, use `Game.onLoadProgress`.
+
+```ts
+Game.loadScene('Dungeon', { loadingScreen: { title: 'The Skull Cave' } })
+```
+
+> A menu that turned the Gameplay input map off must turn it back on **before** `loadScene`. A scene
+> switch resets held keys, but keeps which maps are enabled.
 
 ## The scene
 

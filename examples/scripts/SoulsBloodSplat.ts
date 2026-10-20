@@ -45,13 +45,14 @@ export default class SoulsBloodSplatNode extends Node {
   onUpdate(delta: number) {
     if (!this._placed) {
       this._placed = true
-      if (!this._place()) { this.remove(); return }
+      if (!this._place()) { this.remove({ immediate: true }); return }
     }
     this._age += delta
     const fade = Math.max(0.01, this.fadeSeconds)
     const k = clamp((this.lifetime - this._age) / fade, 0, 1)
     for (const d of this._decals) d.opacity = k
-    if (this._age >= this.lifetime) this.remove()
+    // Its own opacity fade has already run; nothing is left to dissolve.
+    if (this._age >= this.lifetime) this.remove({ immediate: true })
   }
 
   /** Snap onto the floor below, turn, size. False when there is no floor in reach. */

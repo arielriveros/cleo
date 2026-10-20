@@ -8,8 +8,11 @@
 // chunk, so this lands once. The include resolver has no include-once guard.
 
 #include "./octNormal.wgsl"
+#include "./dither.wgsl"
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
+    // Despawn dissolve (x = how far gone, y = dither phase); zero keeps everything. See dissolveKeeps.
+    @location(1) dissolve: vec2<f32>,
 };

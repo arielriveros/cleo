@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { CleoEngine, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, registerTemplates, Logger, InputSystem, shaderStats } from 'cleo';
+import { CleoEngine, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, registerTemplates, Logger, InputSystem, shaderStats, nextFrame } from 'cleo';
+import type { LoadProgressListener } from 'cleo';
 import UILayer from '../features/gameUi/UILayer';
 import VirtualControlsLayer from '../features/gameUi/VirtualControlsLayer';
 import { unpackGameBin, inflateSceneGeometry, inflateTerrainData, inflateTilemapData } from './unpack';
@@ -192,14 +193,23 @@ async function boot(): Promise<void> {
 
   // Async because terrain splat/height payloads are DEFLATE-compressed and DecompressionStream
   // has no synchronous form.
-  const startScene = async (id: string) => {
+  const startScene = async (id: string, onProgress?: LoadProgressListener) => {
     const entry = table[id];
     if (!entry) { Logger.warn(`loadScene: no scene "${id}"`, 'Player'); return; }
     currentId = id;
+    // Each stage yields a frame so a loading screen's bar paints before the next one blocks.
+    const stage = async (fraction: number, name: string) => {
+      if (!onProgress) return;
+      onProgress(fraction, name);
+      await nextFrame();
+    };
     // Deferred to immediately before parse, so an unvisited scene's meshes are never touched.
+    await stage(0.15, 'Unpacking models');
     inflateSceneGeometry(entry.scene, pack);
+    await stage(0.35, 'Unpacking terrain');
     await inflateTerrainData(entry.scene, pack);
     await inflateTilemapData(entry.scene, pack);
+    await stage(0.6, 'Building the scene');
     const scene = new Scene();
     scene.parse({ scene: entry.scene, textures: [] }, true); // textures already registered
     // Shared clips are not in the serialized scene by design; retarget after parse, before start.
@@ -215,18 +225,21 @@ async function boot(): Promise<void> {
     // previous scene's box for one frame.
     const uiBox = document.getElementById('ui-root')?.getBoundingClientRect();
     if (uiBox) scene.setUIViewport(uiBox.width, uiBox.height, window.devicePixelRatio || 1);
-    setTimeout(() => { scene.start(); }, 100);
+    // A script that paused before switching (a menu) must not land in a frozen scene.
+    engine.isPaused = false;
+    onProgress?.(0.9, 'Starting');
+    await new Promise<void>(resolve => setTimeout(() => { scene.start(); resolve(); }, 100));
   };
 
   setGameHost({
-    loadScene: (nameOrId: string) => {
+    loadScene: (nameOrId: string, options?: { onProgress?: LoadProgressListener }) => {
       const id = resolve(nameOrId);
       if (!id) { Logger.warn(`loadScene: unknown scene "${nameOrId}"`, 'Player'); return; }
       engine.physics.clear();
       // Held keys and in-flight gestures only — NOT the map. Un-binding the game between scenes would
       // leave the next one dead.
       engine.input.resetState();
-      void startScene(id).catch(showError);
+      return startScene(id, options?.onProgress).catch(showError);
     },
     currentSceneName: () => table[currentId]?.name ?? '',
     sceneNames: () => Object.values(table).map(s => s.name),

@@ -24,6 +24,7 @@ import { TextureSet, loadScriptReflector, mb, node, readJson, stableId as nsId, 
 import { editorModules } from '../nightShift/fbxImport.mjs'
 import { moduleRegistry } from '../nightShift/tsLoader.mjs'
 import { headlessNavBaker } from '../navBakeHeadless.mjs'
+import { boundsOf, geometryJson, mergeParts, partsOf, readGltf } from '../valley/meshes.mjs'
 import { ASSET_HASH_VERSION, KIND_EXT, SCENE_REFS_VERSION } from '../nightShift/editorConstants.mjs'
 import { buildPlaceholderClips, clipEventTime } from './placeholderClips.mjs'
 import { bloodDrops, bloodSplat } from './png.mjs'
@@ -93,10 +94,14 @@ const SCRIPT_FILES = [
   ['Lever', 'SoulsLever', 'node'],
   ['Door', 'SoulsDoor', 'node'],
   ['Fog Gate', 'SoulsFogGate', 'node'],
+  ['Scene Door', 'SoulsSceneDoor', 'node'],
+  ['Breakable', 'SoulsBreakable', 'node'],
+  ['Debris', 'SoulsDebris', 'node'],
   ['HUD', 'SoulsHud', 'uiRoot'],
   ['Boss Bar', 'SoulsBossBar', 'uiRoot'],
   ['Banner', 'SoulsBanner', 'uiRoot'],
   ['Bonfire Menu', 'SoulsBonfireMenu', 'uiRoot'],
+  ['Confirm Dialog', 'SoulsConfirmDialog', 'uiRoot'],
   // A script MODULE (shared helpers, no class). Named after its FILE: the explorer path is the import
   // path, so the scripts' `import … from './SoulsMath'` resolves to /Scripts/SoulsMath.script.
   ['SoulsMath', 'SoulsMath', 'node'],
@@ -842,27 +847,73 @@ function capsuleBody(radius, height, mass = 60) {
   }
 }
 
-/** A weapon visual: a group whose local transform is the grip, holding boxes along +Y. */
+/**
+ * A weapon visual: a group whose local transform is the grip, holding the weapon along +Y. `parts` is
+ * either a list of primitive boxes/cylinders, or a scanned mesh from WEAPON_MESHES.
+ */
 function weaponMesh(key, hand, bladeDir, parts) {
   const g = grip(hand, bladeDir, [hand === 'RightHand' ? -0.02 : 0.02, -0.07, 0.03])
-  return node('Mesh', 'node', {
-    id: stableId(`${key}:mesh`), position: g.position, rotation: g.rotation,
-    children: parts.map(([name, shape, mat, size, at]) => prop(`${key}:${name}`, name, shape, mat, { position: at, scale: size })),
-  })
+  const children = Array.isArray(parts)
+    ? parts.map(([name, shape, mat, size, at]) => prop(`${key}:${name}`, name, shape, mat, { position: at, scale: size }))
+    : [node(parts.name, 'model', {
+      id: stableId(`${key}:model`),
+      variables: vars({ __materialId: parts.materialId }),
+      model: { geometry: parts.geometry, material: matJson(parts.materialId) },
+      animationMappings: null, stateMachine: null, ragdoll: null,
+    })]
+  return node('Mesh', 'node', { id: stableId(`${key}:mesh`), position: g.position, rotation: g.rotation, children })
+}
+
+// ----- scanned weapon meshes (build/props/weapons) ---------------------------------------------------
+//
+// Each is a glTF with its long axis on +Y and the grip at the origin -- exactly the frame `grip()` poses
+// -- so only a scale is applied: the sword and the club keep their length, the hammer and the mace grow
+// into the reach their wielders' moves were tuned for (the Greatsword's and the Halberd's).
+
+const WEAPON_SRC = path.join(ROOT, 'build', 'props', 'weapons')
+const WEAPON_TEXTURES = []
+const WEAPON_MATERIAL_FOLDERS = {}
+
+function scannedWeapon(key, file, name, template, scale) {
+  const dir = path.join(WEAPON_SRC, `${file}_1k.gltf`)
+  const parts = partsOf(readGltf(path.join(dir, `${file}_1k.gltf`)))
+  const part = mergeParts(parts, name, 0)
+  for (let k = 0; k < part.positions.length; k++) part.positions[k] *= scale
+  const tex = (suffix, label, mime = 'image/jpeg') => {
+    const id = stableId(`texture:weapon:${key}:${suffix}`)
+    textures.add(id, path.join(dir, 'textures', `${file}_${suffix}_1k.jpg`), { wrapping: 'repeat', mipMap: true }, mime)
+    WEAPON_TEXTURES.push({ folder: `/Weapons/${template}/Textures`, name: `${name} ${label}`, id, ext: 'jpg' })
+    return id
+  }
+  const diff = tex('diff', 'Base Color'), arm = tex('arm', 'ARM'), nor = tex('nor_gl', 'Normal')
+  const materialId = material(`weapon:${key}`, name, {
+    ...pbr([1, 1, 1], { metallic: 1, roughness: 1 }),
+    textures: { baseColorTexture: diff, metallicRoughnessTexture: arm, occlusionMap: arm, normalMap: nor },
+    config: { side: 'double', wireframe: false, transparent: false, castShadow: true, probeable: true },
+  }, [diff, arm, nor])
+  const b = boundsOf([part])
+  const length = b.max[1]
+  // The capsule a swing sweeps, in the Mesh child's space: from a quarter of the way up the haft to the
+  // tip, as thick as the head is wide -- the whole striking end, not just the very top.
+  const half = Math.max(b.size[0], b.size[2]) / 2
+  const r3 = (v) => Math.round(v * 1000) / 1000
+  const hitbox = {
+    bladeStart: [0, r3(Math.max(0.1, length * 0.25)), 0],
+    bladeEnd: [0, r3(length), 0],
+    bladeRadius: r3(Math.min(0.2, Math.max(0.08, half))),
+  }
+  WEAPON_MATERIAL_FOLDERS[name] = `/Weapons/${template}/Materials`
+  return { name, geometry: geometryJson(part), materialId, hitbox }
 }
 
 const BLADE_DOWN_FORWARD = [0, -0.45, 1]
 
-const SWORD_PARTS = [
-  ['Blade', 'box', MAT.blade, [0.06, 0.85, 0.012], [0, 0.55, 0]],
-  ['Guard', 'box', MAT.metal, [0.22, 0.03, 0.04], [0, 0.11, 0]],
-  ['Grip', 'cylinder', MAT.leather, [0.035, 0.2, 0.035], [0, 0, 0]],
-]
-const GREATSWORD_PARTS = [
-  ['Blade', 'box', MAT.blade, [0.11, 1.35, 0.02], [0, 0.85, 0]],
-  ['Guard', 'box', MAT.metal, [0.34, 0.05, 0.06], [0, 0.15, 0]],
-  ['Grip', 'cylinder', MAT.leather, [0.04, 0.32, 0.04], [0, 0, 0]],
-]
+const WEAPON_MESHES = {
+  saber: scannedWeapon('saber', 'wooden_handle_saber', 'Wooden Saber', 'Straight Sword', 1),
+  axe: scannedWeapon('axe', 'wooden_axe', 'Wooden Axe', 'Club', 1.2),
+  hammer: scannedWeapon('hammer', 'ornate_war_hammer', 'War Hammer', 'Greatsword', 1.8),
+  mace: scannedWeapon('mace', 'ornate_medieval_mace', 'Ornate Mace', 'Halberd', 2.5),
+}
 
 /**
  * The fallback active window for a clip, read off its own `hit`/`hitEnd` markers, so the fields shown in
@@ -927,17 +978,18 @@ function weaponNode(key, name, script, parts, moves = [], bladeDir = BLADE_DOWN_
     id: stableId(`weapon:${key}`),
     socketAttachment: { target: 'parent', socket: 'RightHand' },
     children: [mesh, ...moves.map(([moveName, fields]) => move(key, moveName, fields)), soundsGroup(`weapon:${key}`, SOUNDS.weapon, { spatial: true })],
-  }), script)
+  // A scanned mesh carries its own swing capsule, fitted to it; the primitives use the script defaults.
+  }), script, Array.isArray(parts) ? undefined : parts.hitbox)
 }
 
 const WEAPONS = [
-  ['sword', 'Straight Sword', 'SoulsStraightSword', SWORD_PARTS, [
+  ['sword', 'Straight Sword', 'SoulsStraightSword', WEAPON_MESHES.saber, [
     ['Light1', { clip: 'Souls_Sword_L1', playSpeed: 1.6, damageMul: 1, staminaCost: 16, lungeStart: 0.1, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.38, comboTime: 0.45, recoverTime: 0.62, next: 'Light2' }],
     ['Light2', { clip: 'Souls_Sword_L2', playSpeed: 1.6, damageMul: 1, staminaCost: 16, lungeStart: 0.1, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.36, comboTime: 0.45, recoverTime: 0.62, next: 'Light3' }],
     ['Light3', { clip: 'Souls_Sword_L3', playSpeed: 1.5, damageMul: 1.15, staminaCost: 20, lungeStart: 0.3, lungeSeconds: 0.2, lungeSpeed: 3, hitTime: 0.52, comboTime: 0.6, recoverTime: 0.8, next: 'Light1' }],
     ['Heavy', { clip: 'Souls_Sword_Heavy', playSpeed: 1.3, bounceOff: false, damageMul: 1.6, poiseMul: 2, staminaCost: 30, lungeStart: 0.62, lungeSeconds: 0.2, lungeSpeed: 4, trackSeconds: 0.35, hitTime: 0.78, comboTime: 1, recoverTime: 1.05, next: '' }],
   ]],
-  ['greatsword', 'Greatsword', 'SoulsGreatsword', GREATSWORD_PARTS, [
+  ['greatsword', 'Greatsword', 'SoulsGreatsword', WEAPON_MESHES.hammer, [
     ['Light1', { clip: 'Souls_GS_L1', playSpeed: 1.35, damageMul: 1, staminaCost: 26, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light2' }],
     ['Light2', { clip: 'Souls_GS_L2', playSpeed: 1.35, damageMul: 1.05, staminaCost: 26, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light1' }],
     ['Heavy', { clip: 'Souls_GS_Heavy', playSpeed: 1.15, bounceOff: false, damageMul: 1.7, poiseMul: 2, staminaCost: 42, lungeStart: 0.95, lungeSeconds: 0.2, lungeSpeed: 3, trackSeconds: 0.5, hitTime: 1.15, comboTime: 1.5, recoverTime: 1.55, next: '' }],
@@ -986,7 +1038,7 @@ function playerNode() {
   // ORDER: the camera rig before the controller (the controller finds the first rig in the subtree).
   // `Weapons` starts empty: SoulsPlayer spawns its `weaponTemplates` into it on start. The player's UI —
   // its HUD, its level-up menu, its lock-on reticle — is the PLAYER's: children of it, in its template.
-  player.children = [rigNode, model, group('player:weapons', 'Weapons', []), hud(), bonfireMenu(), lockReticle(), soundsGroup('player', SOUNDS.player), controller]
+  player.children = [rigNode, model, group('player:weapons', 'Weapons', []), hud(), bonfireMenu(), confirmDialog(), lockReticle(), soundsGroup('player', SOUNDS.player), controller]
   return player
 }
 
@@ -1178,15 +1230,13 @@ function enemyHealthBar(key, anchorId) {
  */
 const ENEMY_BASE = { key: 'base', name: 'Enemy', script: 'SoulsEnemy', material: MAT.hollow, scale: 1, moveSpeed: 3, attacks: [] }
 
-const CLUB = [['Club', 'cylinder', MAT.wood, [0.07, 0.75, 0.07], [0, 0.35, 0]]]
 const STAFF = [['Staff', 'cylinder', MAT.wood, [0.05, 1.6, 0.05], [0, 0.25, 0]], ['Orb', 'sphere', MAT.bolt, [0.12, 0.12, 0.12], [0, 1.08, 0]]]
-const HALBERD = [['Shaft', 'cylinder', MAT.wood, [0.06, 2.2, 0.06], [0, 0.6, 0]], ['Head', 'box', MAT.blade, [0.4, 0.5, 0.03], [0.12, 1.65, 0]]]
 
 const ENEMIES = [
   {
     key: 'hollow', name: 'Hollow', script: 'SoulsHollow', material: MAT.hollow, scale: 1, moveSpeed: 2.6,
     ai: { engage: 4, leash: 18, preferredMin: 0, preferredMax: 1.5 },
-    weapon: ['club', 'Club', 'SoulsClub', CLUB],
+    weapon: ['club', 'Club', 'SoulsClub', WEAPON_MESHES.axe],
     sight: 14,
     attacks: [
       ['Swing', { clip: 'Souls_Enemy_Swing', playSpeed: 1.3, damage: 70, poiseDamage: 20, minRange: 0, maxRange: 1.8, trackSeconds: 0.45, lungeStart: 0.45, lungeSeconds: 0.15, lungeSpeed: 2.5, hitTime: 0.62 }],
@@ -1220,7 +1270,7 @@ const ENEMIES = [
   {
     key: 'warden', name: 'Hollow Warden', script: 'SoulsHollowWarden', material: MAT.warden, scale: 1.8, moveSpeed: 3, boss: true, aura: true,
     ai: { engage: 12, leash: 999, preferredMin: 0, preferredMax: 3.6 },
-    weapon: ['halberd', 'Halberd', 'SoulsHalberd', HALBERD],
+    weapon: ['halberd', 'Halberd', 'SoulsHalberd', WEAPON_MESHES.mace],
     radius: 0.45, mass: 300, sight: 60, fov: 360,
     attacks: [
       ['Sweep', { clip: 'Souls_Giant_Sweep', playSpeed: 0.9, damage: 150, poiseDamage: 40, minRange: 0, maxRange: 4.2, trackSeconds: 0.5, hitTime: 0.7, comboNext: 'Backsweep' }],
@@ -1762,6 +1812,22 @@ function bonfireMenu() {
   return withScript(screenRoot('BonfireMenu', 'menu', [backdrop], { visible: false }, { zOrder: 40 }), 'SoulsBonfireMenu')
 }
 
+/** The yes/no question a scene door asks ("Enter the skull cave?"). See SoulsConfirmDialog. */
+function confirmDialog() {
+  const button = (key, name, label, r) => uiNode(name, 'uiButton', {
+    ...r, label, disabled: false, tint: [0.18, 0.15, 0.12, 1], hoverTint: [1, 1, 1, 0.16], pressedTint: [0, 0, 0, 0.22],
+    disabledTint: [0.5, 0.5, 0.5, 0.4], interactive: true, borderRadius: 4,
+  }, { id: stableId(`ui:${key}`) })
+  const card = panel('confirm:card', 'Card', rect([0.5, 0.5], [-360, -150], [360, 150]), [0.05, 0.045, 0.04, 0.94], [
+    text('confirm:title', 'Title', 'Enter?', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [24, 26], offsetMax: [-24, 80] }, { size: 36, align: 'center', tint: GOLD }),
+    text('confirm:body', 'Body', '', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [40, 92], offsetMax: [-40, 180] }, { size: 22, align: 'center', tint: DIM, vAlign: 'top' }),
+    button('confirm:yes', 'Yes', 'Yes', { anchorMin: [0.5, 1], anchorMax: [0.5, 1], offsetMin: [-230, -88], offsetMax: [-20, -40] }),
+    button('confirm:no', 'No', 'No', { anchorMin: [0.5, 1], anchorMax: [0.5, 1], offsetMin: [20, -88], offsetMax: [230, -40] }),
+  ], { radius: 8 })
+  const backdrop = panel('confirm:backdrop', 'Backdrop', stretch(0), [0, 0, 0, 0.45], [card], { interactive: true })
+  return withScript(screenRoot('ConfirmDialog', 'confirm', [backdrop], { visible: false }, { zOrder: 45 }), 'SoulsConfirmDialog')
+}
+
 function lockReticle() {
   const dot = panel('reticle:dot', 'Dot', stretch(0), [1, 1, 1, 0.9], [], { radius: 7 })
   return uiNode('LockReticle', 'uiRoot', {
@@ -1958,6 +2024,8 @@ const FOLDERS = {
     SoulsMath: '/Core/Scripts', SoulsHitbox: '/Core/Scripts', SoulsAudio: '/Core/Scripts', SoulsCharacter: '/Core/Scripts',
     'Game Manager': '/Game/Scripts',
     HUD: '/Game/UI/Scripts', 'Boss Bar': '/Game/UI/Scripts', Banner: '/Game/UI/Scripts', 'Bonfire Menu': '/Game/UI/Scripts',
+    'Confirm Dialog': '/Game/UI/Scripts',
+    'Scene Door': `${PROP('Scene Door')}/Scripts`, Breakable: `${PROP('Breakable Barrel')}/Scripts`, Debris: `${PROP('Breakable Barrel')}/Scripts`,
     Player: `${PLAYER}/Scripts`, 'Lock-On Camera': `${PLAYER}/Scripts`,
     SoulsEnemy: `${ENEMY('Base Enemy')}/Scripts`, 'Enemy Attack': `${ENEMY('Base Enemy')}/Scripts`,
     'Enemy Brain': `${ENEMY('Base Enemy')}/Scripts`, 'Enemy Spawn': `${ENEMY('Base Enemy')}/Scripts`,
@@ -1995,6 +2063,7 @@ const FOLDERS = {
     'Stone (placeholder)': `${KEEP}/Materials`, 'Dark Stone (placeholder)': `${KEEP}/Materials`,
     'Flagstones (placeholder)': `${KEEP}/Materials`, 'Wood (placeholder)': `${KEEP}/Materials`, 'Iron (placeholder)': `${KEEP}/Materials`,
     'Blade (placeholder)': `${WEAPON('Base Weapon')}/Materials`, 'Grip Leather (placeholder)': `${WEAPON('Base Weapon')}/Materials`,
+    ...WEAPON_MATERIAL_FOLDERS,
     'Bonfire Ash (placeholder)': `${PROP('Bonfire')}/Materials`, 'Message Glyph (placeholder)': `${PROP('Message')}/Materials`,
     'Item Glow (placeholder)': `${PROP('Pickup')}/Materials`, 'Fog Wall (placeholder)': `${PROP('Fog Gate')}/Materials`,
     'Magic Bolt (placeholder)': `${FX('Magic Bolt')}/Materials`,
@@ -2037,12 +2106,13 @@ function textureEntries() {
   const slots = { baseColorTexture: 'Base Color', metallicRoughnessTexture: 'Metallic Roughness', normalMap: 'Normal', emissiveTexture: 'Emissive', occlusionTexture: 'Occlusion' }
   for (const [slot, id] of Object.entries(mannequinMaterial.material.textures ?? {}))
     out.push({ folder: `${SHARED}/Textures`, name: `mannequin ${slots[slot] ?? slot}`, id })
+  out.push(...WEAPON_TEXTURES)
   out.push({ folder: `${FX('Blood')}/Textures`, name: 'Blood Splat', id: BLOOD_TEX.splat })
   out.push({ folder: `${FX('Blood')}/Textures`, name: 'Blood Drops', id: BLOOD_TEX.drops })
   return out
 }
 
-function vfs(libraries, textureIds, { projectName = PROJECT_NAME, sceneId = SCENE_ID, folders = FOLDERS, extraTextures = [] } = {}) {
+function vfs(libraries, textureIds, { projectName = PROJECT_NAME, sceneId = SCENE_ID, folders = FOLDERS, extraTextures = [], extraScenes = [] } = {}) {
   const entries = []
   const add = (kind, items, folderOf = (item) => folders[kind]?.[item.name]) => {
     const ext = KIND_EXT[kind]
@@ -2053,7 +2123,7 @@ function vfs(libraries, textureIds, { projectName = PROJECT_NAME, sceneId = SCEN
       entries.push({ path: `${folder}/${item.name}${ext}`, kind, assetId: item.id, created: CREATED_AT })
     }
   }
-  add('scene', [{ name: projectName, id: sceneId }])
+  add('scene', [{ name: projectName, id: sceneId }, ...extraScenes])
   add('script', libraries.scripts)
   add('template', libraries.templates)
   add('model', libraries.models)
@@ -2095,6 +2165,8 @@ export function writeProject({
   out = OUT, projectName = PROJECT_NAME, sceneId = SCENE_ID, buildScene, example,
   models: extraModels = [], terrainMaterials = [], folders = {}, textureEntries: extraTextures = [],
   refs: extraRefs = {}, excludeMaterials = [], hashKinds = [], templates: extraTemplates = [],
+  // More scenes in the same project, after the main one: [{ id, name, build: () => scene, refs }].
+  extraScenes = [],
 }) {
   fs.rmSync(out, { recursive: true, force: true })
   fs.mkdirSync(path.join(out, 'libraries'), { recursive: true })
@@ -2143,17 +2215,23 @@ export function writeProject({
     particleSystems,
     aiBrains: [ENEMY_BASE, ...ENEMIES].map(enemyBrainAsset),
   }
-  embedSockets([libraries.models, libraries.templates, scene])
+  const others = extraScenes.map(e => ({ ...e, scene: e.build() }))
+  embedSockets([libraries.models, libraries.templates, scene, ...others.map(o => o.scene)])
   for (const [name, value] of Object.entries(libraries)) writeJson(path.join(out, 'libraries', `${name}.json`), value)
   writeJson(path.join(out, 'libraries', 'inputMap.json'), SOULS_INPUT_MAP)
   // The scene's asset hashes, as the editor records them on save: without them every template reads as
   // changed when the scene opens and every placed copy is rebuilt (fresh ids, for nothing). Hashed off
   // what was WRITTEN, read back, since that is what the editor will hash.
   const written = (name) => readJson(path.join(out, 'libraries', `${name}.json`))
-  scene.assetHashes = {}
+  const hashes = {}
   for (const [kind, lib] of [['template', 'templates'], ['material', 'materials'], ['model', 'models'], ['script', 'scripts'], ['aiBrain', 'aiBrains'], ...hashKinds])
-    for (const asset of written(lib)) scene.assetHashes[assetHashKey(kind, asset.id)] = hashAsset(asset)
+    for (const asset of written(lib)) hashes[assetHashKey(kind, asset.id)] = hashAsset(asset)
+  scene.assetHashes = { ...hashes }
   writeJson(path.join(out, 'scenes', `${sceneId}.json`), scene)
+  for (const o of others) {
+    o.scene.assetHashes = { ...hashes }
+    writeJson(path.join(out, 'scenes', `${o.id}.json`), o.scene)
+  }
   const textureCount = textures.write(out)
 
   writeJson(path.join(out, 'manifest.json'), {
@@ -2169,11 +2247,24 @@ export function writeProject({
         aiBrainIds: libraries.aiBrains.map(b => b.id),
         ...extraRefs,
       }),
-    }],
+    }, ...others.map(o => ({
+      id: o.id, name: o.name, updatedAt: CREATED_AT, dimension: '3D',
+      // The same libraries the project holds: a scene's refs only steer what the editor preloads for it.
+      refs: sceneRefs({
+        materialIds: libraries.materials.map(m => m.id), modelIds: [MANNEQUIN_MODEL], templateIds: templates.map(t => t.id),
+        textureIds: textures.included, scriptIds: scripts.assets.map(s => s.id),
+        animationFieldIds: [locomotionField.id], animationIds: rig.animationIds,
+        particleSystemIds: particleSystems.map(p => p.id),
+        aiBrainIds: libraries.aiBrains.map(b => b.id),
+        ...(o.refs ?? {}),
+      }),
+    }))],
   })
   const projectFolders = Object.fromEntries([...new Set([...Object.keys(FOLDERS), ...Object.keys(folders)])]
     .map(kind => [kind, { ...FOLDERS[kind], ...folders[kind] }]))
-  writeJson(path.join(out, 'vfs.json'), vfs(libraries, textures.included, { projectName, sceneId, folders: projectFolders, extraTextures }))
+  writeJson(path.join(out, 'vfs.json'), vfs(libraries, textures.included, {
+    projectName, sceneId, folders: projectFolders, extraTextures, extraScenes: others.map(o => ({ id: o.id, name: o.name })),
+  }))
   writeJson(path.join(out, 'example.json'), example)
 
   return { total: walkSize(out), textureCount, templates: templates.length, materials: libraries.materials.length }
@@ -2214,4 +2305,5 @@ export {
   MUSIC_CUES, soundsGroup, banner, playerNode, bonfireNode, fogGateNode, leverNode, shortcutGate,
   torchNode, messageNode, linkInstance, LEVEL, placedMessage, placedSpawn, placedPickup, sourceScene,
   TEMPLATE_SOURCE, vfx, emitter, mod, burst, fade, fxTemplate, particleSystems, navBaker, isMover,
+  asTemplate, PROP,
 }

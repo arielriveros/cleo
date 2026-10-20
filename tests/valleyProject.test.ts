@@ -98,15 +98,24 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(b64(s.masks).length).toBe(s.maskSlices * s.maskRes * s.maskRes * 4);
     });
 
-    it('uses the library landscape material: ground, then rock, snow and a painted trail', () => {
+    it('uses the library landscape material: ground, rocky dirt, a painted forest floor, rock, snow and a painted trail', () => {
         const s = terrain().layerStack;
         const asset = library('terrainMaterials').find((m: any) => m.id === s.base.materialId);
         expect(asset).toBeDefined();
         expect(s.base.material).toEqual(asset.material);
-        expect(asset.material.slots.map((x: any) => x.name)).toEqual(['Rock', 'Snow', 'Trail']);
-        const trail = asset.material.slots.find((x: any) => x.name === 'Trail');
-        expect(trail.manual).toBe(true);
-        expect(s.slotChannels[trail.id]).toBeTypeOf('number');
+        expect(asset.material.slots.map((x: any) => x.name)).toEqual(['Rocky Dirt', 'Forest Floor', 'Rock', 'Snow', 'Trail']);
+        for (const name of ['Trail', 'Forest Floor']) {
+            const slot = asset.material.slots.find((x: any) => x.name === name);
+            expect(slot.manual, name).toBe(true);
+            expect(s.slotChannels[slot.id], name).toBeTypeOf('number');
+        }
+        // Two painted slots, two channels.
+        expect(new Set(Object.values(s.slotChannels)).size).toBe(2);
+        // The moss rocks belong to the Rocky Dirt, not the ground.
+        const dirt = asset.material.slots.find((x: any) => x.name === 'Rocky Dirt');
+        expect(dirt.foliageInclude.map((r: any) => r.name)).toEqual(['Moss Rock A', 'Moss Rock B', 'Moss Rock C', 'Moss Rock D']);
+        // Bedded into the slope rather than standing level on it.
+        for (const r of dirt.foliageInclude) expect(r.orientation, r.name).toBe('normal');
         const shipped = new Set(read('textures', 'index.json').map((t: any) => t.id));
         for (const id of asset.textureIds) expect(shipped.has(id), id).toBe(true);
     });
@@ -116,8 +125,14 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         for (const [x, z] of [[40, 60], [-80, -20], [300, 300]]) expect(trailAt(x, z), `${x},${z}`).toBe(0);
     });
 
-    it('files every foliage layer under a ground rule of the material, linked to a library model', () => {
-        const rules = terrain().layerStack.base.material.groundFoliageInclude;
+    /** Every foliage rule of the landscape material: the ground's and each surface's own. */
+    const allRules = () => {
+        const m = terrain().layerStack.base.material;
+        return [...m.groundFoliageInclude, ...m.slots.flatMap((x: any) => x.foliageInclude ?? [])];
+    };
+
+    it('files every foliage layer under a rule of the material, linked to a library model', () => {
+        const rules = allRules();
         const models = new Set(library('models').map((m: any) => m.id));
         const foliageIds = new Set(manifest().sceneMetas[0].refs.foliageModelIds);
         expect(terrain().foliage.length).toBe(rules.length);
@@ -128,6 +143,34 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             expect(foliageIds.has(rule.modelId), rule.name).toBe(true);
             expect(layer.model?.geometry?.positions?.length, layer.name).toBeGreaterThan(0);
             expect(layer.lods.length, layer.name).toBe(2);
+        }
+    });
+
+    it('draws the source plants at LOD0, ends grass at 20 m and hands distant pines to a shipped impostor', () => {
+        const rules = allRules();
+        const textures = new Set(manifest().sceneMetas[0].refs.textureIds);
+        const tris = (models: any[]) => models.reduce((n, m) => n + m.geometry.indices.length / 3, 0);
+        for (const layer of terrain().foliage) {
+            const rule = rules.find((r: any) => r.id === layer.key);
+            const lod0 = tris(layer.models ?? [layer.model]);
+            if (layer.name.includes('Grass') || layer.name.includes('Celandine')) {
+                expect(layer.cullDistance, layer.name).toBe(20);
+                expect(lod0, layer.name).toBeGreaterThan(4000);   // full clumps, not a thinned patch
+                expect(layer.billboard, layer.name).toBeUndefined();
+            } else if (layer.name.includes('Moss Rock')) {
+                expect(lod0, layer.name).toBeGreaterThan(7000);
+                expect(layer.cullDistance, layer.name).toBe(120);
+            } else {
+                expect(lod0, layer.name).toBeGreaterThan(400000);
+                // 15% and 5% of the source, give or take what the decimator keeps.
+                const [l1, l2] = layer.lods.map((l: any) => tris(l.models));
+                expect(l1 / lod0).toBeGreaterThan(0.13); expect(l1 / lod0).toBeLessThan(0.17);
+                expect(l2 / lod0).toBeGreaterThan(0.04); expect(l2 / lod0).toBeLessThan(0.06);
+                expect(layer.billboard?.distance).toBeGreaterThan(layer.lods[1].distance);
+                expect(layer.billboard.textureId).toBe(`${rule.modelId}__impostor`);
+                expect(rule.billboard).toEqual(layer.billboard);
+                expect(textures.has(layer.billboard.textureId)).toBe(true);
+            }
         }
     });
 
@@ -163,7 +206,8 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         for (const group of ['Interactables', 'Enemy Spawns']) {
             for (const n of nodes().find(g => g.name === group).children) {
                 const [x, y, z] = n.position;
-                const lift = n.name === 'Shortcut Gate' ? 2 : 0;
+                // The gate hangs 2 m up its posts; the cave is sunk into the plaza so its base never floats.
+                const lift = n.name === 'Shortcut Gate' ? 2 : n.name === 'Skull Cave Entrance' ? -0.4 : 0;
                 expect(Math.abs(y - lift - heightAt(x, z)), n.name).toBeLessThan(0.1);
             }
         }
@@ -272,13 +316,47 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(asset.material.fragmentSource).not.toMatch(/foam/i);
     });
 
-    it('closes the cliff notch with the fog gate and fights the boss in the plaza beyond it', () => {
-        const fog = nodes().find(n => n.name === 'Fog Gate');
-        const arena = nodes().find(n => n.variables?.isBossArena?.value === true);
-        const boss = nodes().find(n => n.scriptVars?.isBossSpawn === true);
-        expect(fog.position[2]).toBeGreaterThan(arena.position[2]);
-        expect(boss.position[2]).toBeLessThan(fog.position[2]);
-        // Wide enough for the ~13 m notch: the souls gate is 6 m, scaled.
-        expect(6 * fog.scale[0]).toBeGreaterThanOrEqual(13);
+    it('fills the cliff notch with the skull cave, which asks before loading the dungeon scene', () => {
+        expect(nodes().some(n => n.name === 'Fog Gate')).toBe(false);
+        expect(nodes().some(n => n.scriptVars?.isBossSpawn === true)).toBe(false);
+        const cave = nodes().find(n => n.name === 'Skull Cave Entrance');
+        expect(cave.scriptVars.targetScene).toBe('Dungeon');
+        expect(cave.scriptVars.frontOnly).toBe(true);
+        // Its face on the notch line, the rest of it back over the plaza.
+        expect(cave.position[2]).toBeLessThan(-117.5);
+        const template = library('templates').find((t: any) => t.id === cave.variables.__templateId.value);
+        expect(template.bodies[template.nodeJson.id].shapes[0].type).toBe('convex');
+        expect(template.triggers[template.nodeJson.id].shapes[0].offset[2]).toBeGreaterThan(0);
+    });
+
+    it('ships the dungeon as a second scene, with the way back to the valley', () => {
+        const metas = manifest().sceneMetas;
+        expect(metas.map((m: any) => m.name)).toEqual(['Valley', 'Dungeon']);
+        const dungeon = read('scenes', `${metas[1].id}.json`);
+        const all: any[] = [];
+        const walk = (n: any) => { all.push(n); (n.children ?? []).forEach(walk); };
+        walk(dungeon.scene);
+        expect(all.some(n => n.name === 'Player')).toBe(true);
+        expect(all.some(n => n.name === 'GameManager')).toBe(true);
+        const exit = all.find(n => n.name === 'Way Out');
+        expect(exit.scriptVars.targetScene).toBe('Valley');
+        expect(exit.trigger.shapes.length).toBe(1);
+        expect(all.find(n => n.name === 'Floor').body.shapes.length).toBe(1);
+    });
+
+    it('breaks barrels into a debris template whose pieces stand inside the barrel', () => {
+        const templates = library('templates');
+        const barrel = templates.find((t: any) => t.name === 'Breakable Barrel');
+        const debris = templates.find((t: any) => t.name === 'Barrel Debris');
+        expect(barrel.nodeJson.scriptVars.debrisTemplate ?? 'Barrel Debris').toBe(debris.name);
+        expect(barrel.bodies[barrel.nodeJson.id].mass).toBe(0);
+        expect(barrel.triggers[barrel.nodeJson.id].shapes.length).toBe(1);
+        expect(debris.nodeJson.children).toHaveLength(17);
+        for (const p of debris.nodeJson.children) {
+            expect(Math.hypot(p.position[0], p.position[2]), p.name).toBeLessThan(0.5);
+            expect(p.position[1], p.name).toBeGreaterThanOrEqual(0);
+            expect(p.position[1], p.name).toBeLessThan(1);
+        }
+        expect(nodes().filter(n => n.name === 'Breakable Barrel').length).toBeGreaterThan(8);
     });
 });

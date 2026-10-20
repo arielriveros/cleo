@@ -993,6 +993,10 @@ describe('a burning zombie', () => {
         expect(node.markForRemoval, 'still lying there').toBe(false);
 
         run(scene, 0.4);
+        // Then it dissolves (Node.remove), and only then is it gone.
+        expect(node.isDespawning, 'dissolving').toBe(true);
+        expect(node.markForRemoval).toBe(false);
+        run(scene, node.corpseFadeSeconds + 0.1);
         expect(node.markForRemoval).toBe(true);
     });
 
@@ -1003,8 +1007,9 @@ describe('a burning zombie', () => {
         run(scene, 0.5);
         node.ignite();
         run(scene, 0.6);
-        // Still on the first ignition's schedule: the second call did not restart anything.
-        run(scene, node.corpseSeconds + 0.1);
+        // Still on the first ignition's schedule (corpse time, then the dissolve), which a restart at the
+        // second ignition would have pushed 0.5 s later.
+        run(scene, node.corpseSeconds + node.corpseFadeSeconds - 1.1 + 0.2);
         expect(node.markForRemoval).toBe(true);
     });
 

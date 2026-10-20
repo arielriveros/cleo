@@ -211,8 +211,8 @@ export type { HistoryEntry, HistoryOptions } from "./core/history";
 export { Mesh } from "./graphics/mesh";
 export { applyUvMapping, uvConfigOf, applyWind, windConfigOf, type WindConfig } from "./graphics/material";
 export type { UvConfig, UvProjection, UvSpace } from "./graphics/material";
-export { Material, TerrainMaterial, CustomMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, migrateFoliageRule, foliageRuleKey, newTerrainSlotId, legacyHeightBlendToRule, setTerrainSurfaceFrom, shallowCloneTerrainMaterial, terrainFoliageRules, allTerrainFoliageRules, type TerrainFoliageScope } from "./graphics/material";
-export type { TerrainBaseType, TerrainFoliageRule, TerrainMaterialSlot, FoliageCollision, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";
+export { Material, TerrainMaterial, CustomMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, FOLIAGE_ORIENTATIONS, migrateFoliageRule, foliageRuleKey, newTerrainSlotId, legacyHeightBlendToRule, setTerrainSurfaceFrom, shallowCloneTerrainMaterial, terrainFoliageRules, allTerrainFoliageRules, type TerrainFoliageScope } from "./graphics/material";
+export type { TerrainBaseType, TerrainFoliageRule, TerrainMaterialSlot, FoliageCollision, FoliageOrientation, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";
 export { customSeedTemplate, customSeedUniforms, tryCompileCustom, assembleCustomFragment,
          setWgslTranslator, hasWgslTranslator, vulkanUnsupportedReason, customWgslHash } from "./graphics/systems/customShaders";
 export type { ShaderDialect, WgslTranslator } from "./graphics/systems/customShaders";
@@ -452,7 +452,9 @@ export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime
 export { SOUNDS_GROUP, ownedSoundsGroup } from "./core/scripting/fieldTypes";
 export type { ClipName, SoundName, SocketName, TemplateName, NodeName } from "./core/scripting/fieldTypes";
 export { Game, setGameHost } from "./core/game";
-export type { GameHost } from "./core/game";
+export { showLoadingOverlay, nextFrame, whenFramesSmooth } from "./core/loadingOverlay";
+export type { LoadingOverlay, LoadingOverlayOptions } from "./core/loadingOverlay";
+export type { GameHost, LoadProgressListener, LoadSceneOptions } from "./core/game";
 export * as Vec from "gl-matrix";
 export * as MathUtils from "./core/math";
 export { clamp, lerp, damp, dampTime, eulerFromQuatDeg, decomposeTRS } from "./core/math";

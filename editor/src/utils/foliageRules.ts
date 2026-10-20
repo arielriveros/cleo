@@ -191,6 +191,8 @@ export function buildFoliageRuleFromModelAsset(asset: ModelAsset, existing?: Ter
     // Authored on the RULE like the impostor, not derived from the asset, so a re-sync must carry it.
     // Leaving it out silently cleared the inspector's own checkbox every time the button was pressed.
     castShadows: existing?.castShadows,
+    // Authored on the rule as well: how each instance stands (upright, on the ground's normal, random).
+    orientation: existing?.orientation,
     // `existing` is already migrated, so its density passes through untouched, but the unit marker must
     // still be stamped or the returned rule is re-divided on its next load.
     density: existing?.density ?? DEFAULT_FOLIAGE_DENSITY.mesh,

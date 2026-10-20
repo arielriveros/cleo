@@ -54,6 +54,8 @@ export default class NightShiftZombieNode extends CharacterNode {
   public burnSeconds: number = 3.5
   /** Seconds the ragdoll is left lying before the node is removed. */
   public corpseSeconds: number = 6
+  /** Seconds the corpse then takes to dissolve away. */
+  public corpseFadeSeconds: number = 1.5
   /**
    * How long the collapse takes before the ragdoll takes over. The authored clip is 3.33 s.
    *
@@ -260,7 +262,7 @@ export default class NightShiftZombieNode extends CharacterNode {
     // instead of quietly starting while the body is still falling. Scheduled on the node being removed,
     // which is fine — removal is what the timer DOES. A restore timer would have to live elsewhere; see
     // NightShiftPowerup.
-    this.after(this.corpseSeconds, () => this.remove())
+    this.after(this.corpseSeconds, () => this.remove({ fade: this.corpseFadeSeconds }))
   }
 
   private _planarDistanceTo(other: Node): number {

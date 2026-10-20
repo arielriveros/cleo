@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Logger } from "../../logger";
+import { authoring } from "../../eventBus";
 import { Node } from "./node";
 import { isEditorOwnedName } from "../editorOwnership";
 import { CharacterNode } from "./characterNode";
@@ -503,6 +504,10 @@ export class ControllerNode extends Node {
 
         switch (this.controlSource) {
             case 'player':
+                // Not while authoring. The edit-mode scene is started and unpaused, so this used to read
+                // the mouse the EDITOR camera was being dragged with and turn the player's camera rig --
+                // and the camera gizmo on it -- along with the view.
+                if (authoring.enabled) { clearIntent(this._intent); break; }
                 this._readPlayer();
                 applyPlayerReading(this._intent, this._reading, basisYaw, pawn.jumpBufferSeconds);
                 break;
@@ -516,7 +521,7 @@ export class ControllerNode extends Node {
 
         // Steer the camera BEFORE the pawn consumes the intent, so the strafe matches this frame's look
         // rather than the previous one's.
-        if (this.driveAimTarget && this.controlSource !== 'none') this._driveAim(delta);
+        if (this.driveAimTarget && this.controlSource !== 'none' && !authoring.enabled) this._driveAim(delta);
 
         this._publish(pawn);
 

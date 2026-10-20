@@ -27,14 +27,19 @@ import {
   GATE_PLAZA, HAMLET, NOTCH_HALF_WIDTH, POND, ROADS, SPAWN, SUN_TRAVEL, TERRAIN, WATCHTOWER,
   catmullRom, distanceToPolyline, rimRadius,
 } from './layout.mjs'
-import { MASK_RES, TRAIL_CHANNEL, TRAIL_SLOT, loadLayerMath, sampleMask, surfaceWeights, trailMask, valleyTerrainMaterial } from './landscape.mjs'
 import {
-  GRASS_CULL, PINE_CULL, buildGrassPatches, buildPine, cliffDistanceField, grassLevels, instancesBlob,
-  jitteredCandidates, layerModels, modelAsset, onGround, pineLevels, rng, triangles,
+  MASK_RES, ROCKY_DIRT_SLOT, SLOT_CHANNELS, TRAIL_CHANNEL, TRAIL_SLOT, loadLayerMath, paintForestFloor, sampleMask, surfaceWeights,
+  trailMask, valleyTerrainMaterial,
+} from './landscape.mjs'
+import {
+  FLOWER_CULL, GRASS_CULL, PINE_BILLBOARD, PINE_CULL, ROCK_CULL, buildFlowerPatches, buildGrassPatches, buildMossRocks, buildPine,
+  cliffDistanceField, flowerLevels, grassLevels, instancesBlob, jitteredCandidates, layerModels, modelAsset, onGround, onSurface,
+  pineLevels, rng, rockLevels, triangles,
 } from './foliage.mjs'
 import { buildProps } from './props.mjs'
 import { WATER_SOURCE, WATER_UNIFORMS } from './water.mjs'
 import { boundsOf, convexShape, geometryJson } from './meshes.mjs'
+import { buildBarrel, buildSkullCave } from './setPieces.mjs'
 
 const { ROOT, stableId: soulsId, clone, matJson, material, textures, LEVEL, linkInstance, withScript } = souls
 const BUILD = path.join(ROOT, 'build')
@@ -60,7 +65,9 @@ const TEXTURE_ENTRIES = []
 function tex(file, folder, name) {
   const texId = id(`texture:${file}`)
   const ext = path.extname(file).slice(1)
-  textures.add(texId, path.join(PREPARED, file), { wrapping: 'repeat', mipMap: true }, ext === 'jpg' ? 'image/jpeg' : 'image/png')
+  // A bare name is a prepared texture; an absolute path is shipped as it is (already a 1k JPEG).
+  const source = path.isAbsolute(file) ? file : path.join(PREPARED, file)
+  textures.add(texId, source, { wrapping: 'repeat', mipMap: true }, ext === 'jpg' ? 'image/jpeg' : 'image/png')
   TEXTURE_ENTRIES.push({ folder, name, id: texId, ext })
   return texId
 }
@@ -78,6 +85,7 @@ const groundTex = (prefix, label) => ({
 const TERRAIN_TEX = {
   ground: groundTex('ground', 'Ground'), rock: groundTex('rock', 'Rock'),
   snow: groundTex('snow', 'Snow'), trail: groundTex('trail', 'Trail'),
+  forest: groundTex('forest', 'Forest Floor'), rockydirt: groundTex('rockydirt', 'Rocky Dirt'),
 }
 
 /** A PBR material in Material.serialize()'s shape, with only the slots that are given. */
@@ -130,6 +138,22 @@ const NEEDLES_MAT = libraryMaterial('pine-needles', 'Pine Needles', `${FOLIAGE}/
   roughness: 0.75, side: 'double',
   // The needles add their own sprig sway and flutter on top of the trunk's sway.
   wind: { windStrength: 0.025, windStiffness: 2.2, windRole: 'leaves', windFlutter: 0.45 },
+}))
+
+const CELANDINE_SRC = path.join(BUILD, 'foliage', 'celandine_01_1k.gltf')
+const CELANDINE_MAT = libraryMaterial('celandine', 'Celandine', `${FOLIAGE}/Materials`, pbrMaterial({
+  diff: tex(path.join(CELANDINE_SRC, 'textures', 'celandine_01_diff_1k.jpg'), `${FOLIAGE}/Textures`, 'Celandine Base Color'),
+  nor: tex(path.join(CELANDINE_SRC, 'textures', 'celandine_01_nor_gl_1k.jpg'), `${FOLIAGE}/Textures`, 'Celandine Normal'),
+  arm: tex(path.join(CELANDINE_SRC, 'textures', 'celandine_01_arm_1k.jpg'), `${FOLIAGE}/Textures`, 'Celandine ARM'),
+  side: 'double', castShadow: false,
+  // Modelled petals, no cutout: the flowers bend like the grass they grow in.
+  wind: { windStrength: 0.2, windStiffness: 0.6 },
+}))
+const MOSS_SRC = path.join(BUILD, 'foliage', 'rock_moss_set_02_1k.gltf')
+const MOSS_ROCK_MAT = libraryMaterial('moss-rock', 'Moss Rock', `${FOLIAGE}/Materials`, pbrMaterial({
+  diff: tex(path.join(MOSS_SRC, 'textures', 'rock_moss_set_02_diff_1k.jpg'), `${FOLIAGE}/Textures`, 'Moss Rock Base Color'),
+  nor: tex(path.join(MOSS_SRC, 'textures', 'rock_moss_set_02_nor_gl_1k.jpg'), `${FOLIAGE}/Textures`, 'Moss Rock Normal'),
+  arm: tex('rock_moss_arm.jpg', `${FOLIAGE}/Textures`, 'Moss Rock ARM'),
 }))
 
 const BOARDS = {
@@ -361,6 +385,8 @@ function placedBuilding(b, asset) {
 
 const grassPatches = buildGrassPatches(path.join(BUILD, 'foliage', 'grass_medium_01_1k.gltf', 'grass_medium_01_1k.gltf'))
 const pine = buildPine(path.join(BUILD, 'foliage', 'realistic_pine.glb'))
+const flowerPatches = buildFlowerPatches(path.join(CELANDINE_SRC, 'celandine_01_1k.gltf'))
+const mossRocks = buildMossRocks(path.join(MOSS_SRC, 'rock_moss_set_02_1k.gltf'))
 log('foliage read', grassPatches.map(g => `${g.name} ${triangles([g.part])} tris ${boundsOf([g.part]).size.map(v => v.toFixed(2)).join('x')}`).join(', '),
   `pine ${triangles([pine.bark, pine.needles])} tris ${boundsOf([pine.bark, pine.needles]).size.map(v => v.toFixed(1)).join('x')} m`)
 
@@ -374,21 +400,87 @@ const FOLIAGE_PROTOS = [
     rule: { density: 0.004, minScale: 0.55, maxScale: 0.95, castShadows: true, collision: { shape: 'cylinder', radius: 0.4, height: 8 } },
     cellSize: 40,
   },
+  // Celandine: yellow flower clumps through the meadow grass, culled with it.
+  ...flowerPatches.map(f => ({
+    key: `flower-${f.key}`, name: f.name, ...flowerLevels(ROOT, f, CELANDINE_MAT), cull: FLOWER_CULL,
+    rule: { density: 0.04, minScale: 0.8, maxScale: 1.2, castShadows: false, collision: null }, cellSize: 13,
+  })),
+  // Moss rocks: owned by the Rocky Dirt surface (its `foliageInclude`), not by the ground.
+  ...mossRocks.map(r => ({
+    key: `moss-${r.key}`, name: r.name, ...rockLevels(ROOT, r, MOSS_ROCK_MAT), cull: ROCK_CULL, surface: ROCKY_DIRT_SLOT,
+    // Bedded into the slope they lie on, not standing level on it.
+    orientation: 'normal',
+    rule: {
+      density: 0.0035, minScale: 0.7, maxScale: 1.4, castShadows: true,
+      collision: r.collide ? { shape: 'sphere', radius: 0.7, offsetY: 0.35 } : null,
+    },
+    cellSize: 24,
+  })),
 ]
+const protoOf = (key) => FOLIAGE_PROTOS.find(f => f.key === key)
 log('foliage LODs', FOLIAGE_PROTOS.map(f => `${f.name} ${f.levels.map(l => triangles(l.map(x => x.part))).join('/')}`).join(', '))
 
 const foliageAssets = FOLIAGE_PROTOS.map(f => modelAsset({
   id: id(`model:${f.key}`), idOf: id, name: f.name, levels: f.levels, distances: f.distances,
   cullDistance: f.cull, materialJson: matJson, vars, node,
 }))
+
+// The pine's impostor card, baked offline by impostor.py (a software rasterizer following the editor's
+// `bakeModelImpostor` contract). Registered under the editor's own id for it, `<modelId>__impostor`, so
+// "Bake impostor" in the terrain material REPLACES this card rather than adding a second one.
+const IMPOSTOR_SIZE = 1024
+function bakeImpostor(asset, level, materials) {
+  const dir = path.join(BUILD, 'valley_impostor')
+  fs.mkdirSync(dir, { recursive: true })
+  const parts = level.map(({ name, part, materialId }, i) => {
+    const write = (suffix, arr) => {
+      const file = path.join(dir, `${asset.name}-${i}.${suffix}`)
+      fs.writeFileSync(file, Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength))
+      return file
+    }
+    const m = materials[materialId]
+    return {
+      name,
+      positions: write('pos', Float32Array.from(part.positions)),
+      uvs: write('uv', Float32Array.from(part.uvs)),
+      indices: write('idx', Uint32Array.from(part.indices)),
+      diffuse: path.join(PREPARED, m.diffuse),
+      mask: m.mask ? path.join(PREPARED, m.mask) : null,
+    }
+  })
+  const request = path.join(dir, `${asset.name}.json`)
+  const out = path.join(dir, `${asset.name}_impostor.png`)
+  fs.writeFileSync(request, JSON.stringify({ size: IMPOSTOR_SIZE, supersample: 2, parts }))
+  const res = spawnSync('python', [path.join(ROOT, 'tools', 'valley', 'impostor.py'), request, out], { encoding: 'utf8' })
+  if (res.status !== 0) throw new Error(`impostor bake failed:\n${res.stderr}`)
+  const report = JSON.parse(res.stdout.trim().split('\n').pop())
+  const texId = `${asset.id}__impostor`
+  textures.add(texId, out, { mipMap: true }, 'image/png')
+  TEXTURE_ENTRIES.push({ folder: `${FOLIAGE}/Textures`, name: `${asset.name} Impostor`, id: texId, ext: 'png' })
+  log('impostor', `${asset.name} ${report.width.toFixed(1)}x${report.height.toFixed(1)} m card, ${Math.round(report.coverage * 100)}% covered`)
+  return texId
+}
+const PINE_INDEX = FOLIAGE_PROTOS.findIndex(f => f.key === 'pine')
+const FLOWER_NAMES = flowerPatches.map(f => f.name)
+const PINE_IMPOSTOR = bakeImpostor(foliageAssets[PINE_INDEX], FOLIAGE_PROTOS[PINE_INDEX].levels[0], {
+  [BARK_MAT]: { diffuse: 'pine_bark_diff.jpg' },
+  [NEEDLES_MAT]: { diffuse: 'pine_needles_diff.jpg', mask: 'pine_needles_mask.png' },
+})
+FOLIAGE_PROTOS[PINE_INDEX].billboard = { textureId: PINE_IMPOSTOR, distance: PINE_BILLBOARD }
 const GRASS_NAMES = grassPatches.map(g => g.name)
 const RULES = FOLIAGE_PROTOS.map((f, i) => ({
   kind: 'mesh', id: id(`rule:${f.key}`), name: f.name, modelId: foliageAssets[i].id,
   density: f.rule.density, densityUnit: 'm2', minScale: f.rule.minScale, maxScale: f.rule.maxScale,
-  cullDistance: f.cull, billboard: null, castShadows: f.rule.castShadows, collision: f.rule.collision,
+  cullDistance: f.cull, billboard: f.billboard ?? null, ...(f.billboard ? { impostorSize: IMPOSTOR_SIZE } : {}),
+  castShadows: f.rule.castShadows, collision: f.rule.collision,
+  ...(f.orientation ? { orientation: f.orientation } : {}),
 }))
 
-const terrainMaterial = valleyTerrainMaterial(TERRAIN_TEX, RULES, GRASS_NAMES)
+// Ground rules on the Ground; the moss rocks on the Rocky Dirt that carries them.
+const terrainMaterial = valleyTerrainMaterial(TERRAIN_TEX, RULES.filter((_, i) => !FOLIAGE_PROTOS[i].surface),
+  [...GRASS_NAMES, ...FLOWER_NAMES], { rockFoliage: RULES.filter((_, i) => FOLIAGE_PROTOS[i].surface === ROCKY_DIRT_SLOT) })
+/** Index of a slot's surface in `surfaceWeights` (0 is the ground). */
+const surfaceIndex = (slotId) => 1 + terrainMaterial.slots.findIndex(s => s.id === slotId)
 const TERRAIN_MATERIAL_ID = id('terrain-material')
 
 // ----- where things may grow -------------------------------------------------------------------------
@@ -408,22 +500,8 @@ const inValley = (x, z) => heights.heightAt(x, z) < 25 && Math.hypot(x, z) < 200
 function scatter() {
   const layers = []
   const counts = {}
-  // Grass: three patches sharing the valley floor at random, at the same overall density.
-  {
-    const random = rng(0x6a55)
-    const allowed = GRASS_NAMES.map(n => onGround(math, terrainMaterial, mask, heights, n))
-    const per = GRASS_NAMES.map(() => [])
-    const total = FOLIAGE_PROTOS.slice(0, 3).reduce((s, f) => s + f.rule.density, 0)
-    jitteredCandidates(random, { minX: -200, maxX: 200, minZ: -200, maxZ: 200 }, total, (x, z, r) => {
-      if (!inValley(x, z) || inPlaza(x, z) || !clear(x, z) || heights.slopeAt(x, z) > 30) return false
-      const k = Math.floor(r() * GRASS_NAMES.length)
-      if (!allowed[k](x, z)) return false
-      per[k].push([x, z])
-      return true
-    })
-    per.forEach((pts, k) => { counts[GRASS_NAMES[k]] = pts.length; layers.push({ proto: FOLIAGE_PROTOS[k], points: pts, seed: 0x6a60 + k, sink: 0.02 }) })
-  }
-  // Pines: a dense belt at the cliff foot, a few stands in the valley, and sparse forest beyond the rim.
+  // Pines FIRST: the forest floor is painted where they stand, and everything after reads that mask.
+  // A dense belt at the cliff foot, a few stands in the valley, and sparse forest beyond the rim.
   {
     const random = rng(0x914e)
     const allowed = onGround(math, terrainMaterial, mask, heights, 'Pine')
@@ -442,7 +520,50 @@ function scatter() {
     })
     const pts = [...belt, ...stands, ...beyond]
     counts.Pine = `${pts.length} (belt ${belt.length}, valley ${stands.length}, beyond ${beyond.length})`
-    layers.push({ proto: FOLIAGE_PROTOS[3], points: pts, seed: 0x9150, sink: 0.25 })
+    layers.push({ proto: protoOf('pine'), points: pts, seed: 0x9150, sink: 0.25 })
+    // The leaf litter under them: the Forest Floor surface's mask channel.
+    paintForestFloor(mask, pts)
+  }
+  // Grass and celandine share the valley floor: one jittered grid, each candidate given to one patch.
+  {
+    const random = rng(0x6a55)
+    const kinds = [...GRASS_NAMES, ...FLOWER_NAMES].map(name => FOLIAGE_PROTOS.find(f => f.name === name))
+    const allowed = kinds.map(f => onGround(math, terrainMaterial, mask, heights, f.name))
+    const per = kinds.map(() => [])
+    const total = kinds.reduce((sum, f) => sum + f.rule.density, 0)
+    jitteredCandidates(random, { minX: -200, maxX: 200, minZ: -200, maxZ: 200 }, total, (x, z, r) => {
+      if (!inValley(x, z) || inPlaza(x, z) || !clear(x, z) || heights.slopeAt(x, z) > 30) return false
+      // Weighted by each prototype's own density, so the flowers stay a sprinkle in the grass.
+      let pick = r() * total, k = 0
+      while (k < kinds.length - 1 && pick > kinds[k].rule.density) { pick -= kinds[k].rule.density; k++ }
+      if (!allowed[k](x, z)) return false
+      per[k].push([x, z])
+      return true
+    })
+    per.forEach((pts, k) => {
+      counts[kinds[k].name] = pts.length
+      layers.push({ proto: kinds[k], points: pts, seed: 0x6a60 + k, sink: 0.02 })
+    })
+  }
+  // Moss rocks on the Rocky Dirt: only where that surface clearly wins, as the engine places them.
+  {
+    const random = rng(0x2c0c)
+    const rocks = FOLIAGE_PROTOS.filter(f => f.surface === ROCKY_DIRT_SLOT)
+    const surface = surfaceIndex(ROCKY_DIRT_SLOT)
+    const allowed = rocks.map(f => onSurface(math, terrainMaterial, mask, heights, f.name, surface))
+    const per = rocks.map(() => [])
+    const total = rocks.reduce((sum, f) => sum + f.rule.density, 0)
+    jitteredCandidates(random, { minX: -260, maxX: 260, minZ: -260, maxZ: 260 }, total, (x, z, r) => {
+      if (inPlaza(x, z) || !clear(x, z, 2) || roadDistance(x, z) < 4) return false
+      const k = Math.floor(r() * rocks.length)
+      if (!allowed[k](x, z)) return false
+      per[k].push([x, z])
+      return true
+    })
+    per.forEach((pts, k) => {
+      counts[rocks[k].name] = pts.length
+      layers.push({ proto: rocks[k], points: pts, seed: 0x2c10 + k, sink: 0.1 })
+    })
   }
   log('scatter', JSON.stringify(counts))
   return layers.map(({ proto, points, seed, sink }) => {
@@ -457,6 +578,8 @@ function scatter() {
       model: base[0],
       ...(base.length > 1 ? { models: base } : {}),
       lods: lods.map((models, k) => ({ models, distance: proto.distances[k] })),
+      ...(proto.billboard ? { billboard: proto.billboard } : {}),
+      ...(proto.orientation ? { orientation: proto.orientation } : {}),
       cullDistance: proto.cull,
       ...(proto.rule.castShadows ? { castShadows: true } : {}),
       cellSize: proto.cellSize,
@@ -497,6 +620,136 @@ function widenCamera(json) {
 widenCamera(LEVEL.player.nodeJson)
 widenCamera(souls.TEMPLATE_SOURCE.get(LEVEL.player.id))
 
+/** A model node over one part, its material linked by id (as a library model's nodes are). */
+const modelNode = (key, name, part, materialId, extra = {}) => node(name, 'model', {
+  id: id(key), variables: vars({ __materialId: materialId }),
+  model: { geometry: geometryJson(part), material: matJson(materialId) },
+  animationMappings: null, stateMachine: null, ragdoll: null, ...extra,
+})
+
+// =====================================================================================================
+// Breakable barrels
+// =====================================================================================================
+//
+// `Breakable Barrel` stands where it is placed and shatters into `Barrel Debris` when the player hits
+// it or rolls into it (SoulsBreakable); the debris tumbles with physics and dissolves away (SoulsDebris).
+
+const BARREL_SRC = path.join(BUILD, 'props', 'wooden_barrels_01_1k.gltf')
+const BARREL_DIR = souls.PROP('Breakable Barrel')
+const barrelTex = (set, kind, label) =>
+  tex(path.join(BARREL_SRC, 'textures', `wooden_barrels_01_${set}_${kind}_1k.jpg`), `${BARREL_DIR}/Textures`, label)
+const BARREL_MAT = libraryMaterial('barrel', 'Barrel', `${BARREL_DIR}/Materials`, pbrMaterial({
+  diff: barrelTex('barrel01', 'diff', 'Barrel Base Color'), nor: barrelTex('barrel01', 'nor_gl', 'Barrel Normal'),
+  arm: barrelTex('barrel01', 'arm', 'Barrel ARM'),
+}))
+const BARREL_PIECES_MAT = libraryMaterial('barrel-pieces', 'Barrel Pieces', `${BARREL_DIR}/Materials`, pbrMaterial({
+  diff: barrelTex('pieces', 'diff', 'Barrel Pieces Base Color'), nor: barrelTex('pieces', 'nor_gl', 'Barrel Pieces Normal'),
+  arm: barrelTex('pieces', 'arm', 'Barrel Pieces ARM'), side: 'double',
+}))
+const barrel = buildBarrel(path.join(BARREL_SRC, 'wooden_barrels_01_1k.gltf'))
+log('barrel', `${barrel.height.toFixed(2)} m tall, r ${barrel.radius.toFixed(2)}, ${barrel.pieces.length} pieces`)
+
+function breakableBarrelNode(key, position = [0, 0, 0], yaw = 0) {
+  const H = barrel.height, R = barrel.radius
+  const n = withScript(node('Breakable Barrel', 'node', {
+    id: id(`barrel:${key}`), position, rotation: [0, yaw, 0],
+    // Walked on, not carved round: one hit and it is gone.
+    variables: vars({ navObstacle: false }),
+    children: [
+      modelNode(`barrel:${key}:mesh`, 'Mesh', barrel.barrel, BARREL_MAT),
+      souls.soundsGroup(`valley:barrel:${key}`, ['Break'], { spatial: true }),
+    ],
+  }), 'SoulsBreakable')
+  n.body = { ...souls.staticBody('cylinder'), shapes: [{ type: 'cylinder', radius: R, height: H, numSegments: 12, offset: [0, H / 2, 0], rotation: [0, 0, 0] }] }
+  // A little wider than the body: a roll is noticed before the body stops it.
+  n.trigger = { shapes: [{ type: 'box', width: 2 * R + 1, height: H + 0.4, depth: 2 * R + 1, offset: [0, (H + 0.4) / 2, 0], rotation: [0, 0, 0] }] }
+  return n
+}
+
+function barrelDebrisNode() {
+  return withScript(node('Barrel Debris', 'node', {
+    id: id('barrel-debris'),
+    children: barrel.pieces.map((p, i) => modelNode(`barrel-debris:${i}`, p.name, p.part, BARREL_PIECES_MAT, { position: p.position })),
+  }), 'SoulsDebris')
+}
+
+const BARREL_TEMPLATE = souls.asTemplate('valley:barrel', breakableBarrelNode('template'))
+const DEBRIS_TEMPLATE = souls.asTemplate('valley:barrel-debris', barrelDebrisNode())
+
+// =====================================================================================================
+// The skull cave
+// =====================================================================================================
+//
+// Where the boss's fog wall stood: a skull carved into the cliff notch, the arch through it dark.
+// Interact in front of it asks to go in (the player's ConfirmDialog) and loads the Dungeon scene behind
+// a loading screen (SoulsSceneDoor).
+
+const CAVE_DIR = souls.PROP('Skull Cave')
+const CAVE_MAT = libraryMaterial('skull-cave', 'Skull Cave', `${CAVE_DIR}/Materials`, pbrMaterial({
+  diff: tex('skull_cave_diff.jpg', `${CAVE_DIR}/Textures`, 'Skull Cave Base Color'),
+  nor: tex('skull_cave_nor.png', `${CAVE_DIR}/Textures`, 'Skull Cave Normal'),
+  arm: tex('skull_cave_arm.jpg', `${CAVE_DIR}/Textures`, 'Skull Cave ARM'),
+  side: 'double',
+}))
+const CAVE_DARK_MAT = libraryMaterial('cave-dark', 'Cave Darkness', `${CAVE_DIR}/Materials`, souls.pbr([0, 0, 0], { roughness: 1, castShadow: false }))
+const CAVE_WIDTH = 14
+const cave = buildSkullCave(ROOT, path.join(BUILD, 'props', 'skull_cave', 'source', 'model.glb'), { width: CAVE_WIDTH })
+const caveBounds = boundsOf([cave])
+log('skull cave', `${(cave.indices.length / 3) | 0} tris, ${caveBounds.size.map(v => v.toFixed(1)).join(' x ')} m`)
+
+/** A flat card facing +Z, base on y = 0: what stops the eye at the back of the arch. */
+function darknessCard(width, height) {
+  const w = width / 2
+  return {
+    positions: [-w, 0, 0, w, 0, 0, w, height, 0, -w, height, 0], normals: [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1],
+    tangents: [], bitangents: [], texCoords: [0, 0, 1, 0, 1, 1, 0, 1], indices: [0, 1, 2, 0, 2, 3],
+  }
+}
+
+function caveEntranceNode(position = [0, 0, 0]) {
+  const depth = caveBounds.size[2]
+  const n = withScript(node('Skull Cave Entrance', 'node', {
+    id: id('cave'), position,
+    children: [
+      modelNode('cave:mesh', 'Mesh', cave, CAVE_MAT),
+      // The arch runs right through the skull: a dark card in it reads as a cave going down, not a gap.
+      node('Darkness', 'model', {
+        id: id('cave:dark'), variables: vars({ __materialId: CAVE_DARK_MAT }),
+        model: { geometry: darknessCard(caveBounds.size[0] * 0.44, caveBounds.size[1] * 0.62), material: matJson(CAVE_DARK_MAT) },
+        animationMappings: null, stateMachine: null, ragdoll: null,
+      }),
+    ],
+  }), 'SoulsSceneDoor', {
+    targetScene: 'Dungeon', prompt: 'Enter the skull cave', question: 'Enter the skull cave?',
+    detail: 'Cold air breathes out of the dark.\nThe way back out waits just inside.', loadingTitle: 'The Skull Cave', frontOnly: true,
+  })
+  n.body = { ...souls.staticBody('box'), shapes: [convexShape(ROOT, [cave])] }
+  n.trigger = { shapes: [{ type: 'box', width: 7, height: 4, depth: 4, offset: [0, 2, depth / 2 + 1.5], rotation: [0, 0, 0] }] }
+  return n
+}
+const CAVE_TEMPLATE = souls.asTemplate('valley:cave', caveEntranceNode())
+
+/** Where the barrels stand: beside the hamlet's houses and by the bonfire, on level ground. */
+function barrelSpots() {
+  const out = []
+  const random = rng(0xba22e1)
+  for (const b of buildings) {
+    let placed = 0
+    for (let tries = 0; tries < 24 && placed < 3; tries++) {
+      const a = random() * Math.PI * 2
+      const r = b.radius + 1.2 + random() * 0.8
+      const x = b.x + Math.cos(a) * r, z = b.z + Math.sin(a) * r
+      if (heights.slopeAt(x, z) > 14 || roadDistance(x, z) < 3) continue
+      if (buildings.some(o => Math.hypot(x - o.x, z - o.z) < o.radius + 0.8)) continue
+      if (out.some(([px, pz]) => Math.hypot(x - px, z - pz) < 1.1)) continue
+      out.push([x, z, Math.round(random() * 360)])
+      placed++
+    }
+  }
+  for (const [dx, dz] of [[3.2, 1.6], [3.8, 2.6], [-2.9, 2.4]]) out.push([BONFIRE.x + dx, BONFIRE.z + dz, Math.round(random() * 360)])
+  return out
+}
+
 function landscapeNode() {
   const blob = heights.serialize()
   return node('Landscape', 'landscape', {
@@ -508,7 +761,7 @@ function landscapeNode() {
         layerFormat: 2,
         base: { materialId: TERRAIN_MATERIAL_ID, material: terrainMaterial },
         paintLayers: [],
-        slotChannels: { [TRAIL_SLOT]: TRAIL_CHANNEL },
+        slotChannels: SLOT_CHANNELS,
         maskRes: MASK_RES, maskSlices: 1,
         masks: Buffer.from(mask).toString('base64'),
       },
@@ -661,11 +914,11 @@ function valleyScene() {
   bonfire.position = at(BONFIRE.x, BONFIRE.z, 0)
   bonfire.rotation = [0, 200, 0]
 
-  const fog = souls.fogGateNode()
-  // Across the mouth of the cliff notch; widened to its ~13 m (the body and the wall scale with the node).
-  const fogZ = -117.5
-  fog.position = at(0, fogZ, 0)
-  fog.scale = [2.2, 1.25, 1]
+  // The skull cave fills the cliff notch where the boss's fog wall used to stand: its face on the notch
+  // line, the rest of it reaching back over the plaza.
+  const notchZ = -117.5
+  const caveCentreZ = notchZ - caveBounds.size[2] / 2
+  const caveEntrance = linkInstance(CAVE_TEMPLATE, caveEntranceNode(at(0, caveCentreZ, -0.4)))
 
   const lever = souls.leverNode()
   const gate = souls.shortcutGate()
@@ -675,33 +928,26 @@ function valleyScene() {
   lever.position = at(40.5, -31, 0)
   lever.rotation = [0, -34, 0]
 
-  const epilogue = souls.messageNode('epilogue', 'The Warden rests', 'The valley falls silent.\nThank you for playing.', at(2.5, -137, 0), 0)
-  epilogue.name = 'Epilogue Message'
-  epilogue.scriptVars.hiddenUntilRevealed = true
 
   const interactables = souls.group('interactables', 'Interactables', [
     linkInstance(LEVEL.bonfire, bonfire),
-    souls.placedMessage('welcome', 'The Valley', 'Follow the road north, through the hamlet, to the gate in the cliffs.\nRest at the bonfire to level up and refill your Estus.\nLock on with Q / R3. Tap Space / B to roll.', at(-9.5, 79, 0), 180),
+    souls.placedMessage('welcome', 'The Valley', 'Follow the road north, through the hamlet, to the skull in the cliffs.\nRest at the bonfire to level up and refill your Estus.\nLock on with Q / R3. Tap Space / B to roll.', at(-9.5, 79, 0), 180),
     souls.placedMessage('roll', 'Try rolling', 'Tap Space (B) to roll through an attack.\nHold it to sprint. Rolling costs stamina.', at(-16, 63, 0), 160),
     souls.placedMessage('lock', 'Lock on', 'Q (R3) holds the camera on a foe.\nZ / C or a flick of the stick switches targets.', at(-27, 22, 0), 200),
     souls.placedMessage('sorcerer', "Beware the sorcerer's light", 'Bolts fly true but slow.\nRoll toward them, not away.', at(-14, 3, 0), 120),
     souls.placedMessage('knight', 'A knight keeps the pond', 'Its overhead blow cannot be interrupted.\nA greatsword breaks its stance.', at(31, 12, 0), 240),
-    souls.placedMessage('warden', 'The Hollow Warden', 'Beyond the fog waits the keeper of the gate.\nWhen it bleeds, it rages.', at(2.5, -108, 0), 180),
-    linkInstance(LEVEL.message, epilogue),
+    souls.placedMessage('warden', 'The Skull Cave', 'A mouth in the cliff, breathing cold.\nWhat waits below has not been seen.', at(2.5, -108, 0), 180),
     souls.placedPickup('souls-hamlet', 'Souls Pickup', at(-60, 36, 0), { kind: 'souls', amount: 300, itemName: 'Soul of a Lost Undead' }),
     souls.placedPickup('estus-shard', 'Estus Shard', at(WATCHTOWER.x + 6, WATCHTOWER.z + 5, 0), { kind: 'flaskShard', amount: 1, itemName: 'Estus Shard' }),
     souls.placedPickup('souls-pond', 'Pond Souls', at(POND.x + 4, POND.z - 13, 0), { kind: 'souls', amount: 800, itemName: 'Soul of a Nameless Soldier' }),
-    souls.placedPickup('boss-reward', 'Boss Reward', at(0, -136, 0), { kind: 'souls', amount: 3000, itemName: 'Soul of the Hollow Warden', hiddenUntilRevealed: true }),
     linkInstance(LEVEL.lever, lever),
     linkInstance(LEVEL.gate, gate),
-    linkInstance(LEVEL.fogGate, fog),
-    // Walking into this starts the boss fight even without passing the fog: the plaza past the notch.
-    node('Boss Arena', 'node', {
-      id: id('zone:arena'), position: at(0, -130, 0),
-      variables: vars({ isBossArena: true }),
-      trigger: { shapes: [{ type: 'box', width: 2 * NOTCH_HALF_WIDTH + 6, height: 8, depth: 22, offset: [0, 4, 0], rotation: [0, 0, 0] }] },
-    }),
+    caveEntrance,
   ])
+
+  // Breakable barrels about the hamlet and the bonfire (SoulsBreakable): hit one or roll into it.
+  const barrels = souls.group('barrels', 'Barrels', barrelSpots().map(([x, z, yaw], i) =>
+    linkInstance(BARREL_TEMPLATE, breakableBarrelNode(`placed:${i}`, at(x, z, 0), yaw))))
 
   const spawns = souls.group('spawns', 'Enemy Spawns', [
     souls.placedSpawn('hollow-a', 'Spawn Hollow A', at(-24, 16), 20, { templateName: 'Hollow' }),
@@ -711,12 +957,11 @@ function valleyScene() {
     souls.placedSpawn('hollow-e', 'Spawn Hollow E', at(14, -15), 300, { templateName: 'Hollow' }),
     souls.placedSpawn('caster', 'Spawn Sorcerer', at(WATCHTOWER.x - 7, WATCHTOWER.z + 7), 230, { templateName: 'Hollow Sorcerer' }),
     souls.placedSpawn('knight', 'Spawn Elite Knight', at(POND.x - 6, POND.z - 9), 300, { templateName: 'Elite Knight' }),
-    souls.placedSpawn('warden', 'Spawn Hollow Warden', at(0, -133), 0, { templateName: 'Hollow Warden', isBossSpawn: true }),
   ])
 
-  // Braziers in all but name: torches standing on the ground either side of the fog, their bracket post
-  // down to the dirt (the keep's hung on walls at 2.2 m; there are no walls here).
-  const torches = souls.group('torches', 'Torches', [[-5.6, fogZ + 1.5], [5.6, fogZ + 1.5], [-4.5, -139], [4.5, -139]]
+  // Braziers in all but name: torches standing on the ground either side of the cave's mouth, their
+  // bracket post down to the dirt (the keep's hung on walls at 2.2 m; there are no walls here).
+  const torches = souls.group('torches', 'Torches', [[-6.5, notchZ + 2], [6.5, notchZ + 2]]
     .map(([x, z], i) => linkInstance(LEVEL.torch, souls.torchNode(`valley-torch:${i}`, at(x, z, 0.6)))))
 
   const player = souls.playerNode()
@@ -741,6 +986,7 @@ function valleyScene() {
       landscapeNode(),
       souls.group('water', 'Water', [pondWater(), pondProbe(), pondVolume(), pondZone(), ...floaters()]),
       souls.group('buildings', 'Buildings', placedBuildings),
+      barrels,
       torches,
       interactables,
       spawns,
@@ -764,6 +1010,61 @@ function valleyScene() {
 }
 
 // =====================================================================================================
+// The dungeon (a second scene, through the skull cave)
+// =====================================================================================================
+//
+// Empty for now: a stone floor walled in, two torches, the player, and the way back out -- enough to go
+// through the cave and back again.
+
+const DUNGEON_ID = id('scene:dungeon')
+const DUNGEON_NAME = 'Dungeon'
+
+function dungeonScene() {
+  const MAT = souls.MAT
+  const slab = (key, name, position, scale) => souls.prop(`dungeon:${key}`, name, 'box', MAT.darkStone, { position, scale, solid: true })
+  const level = souls.group('dungeon:level', 'Level', [
+    slab('floor', 'Floor', [0, -0.25, 0], [24, 0.5, 24]),
+    slab('wall-n', 'Wall N', [0, 2.5, -12], [24, 5, 0.6]),
+    slab('wall-s', 'Wall S', [0, 2.5, 12], [24, 5, 0.6]),
+    slab('wall-w', 'Wall W', [-12, 2.5, 0], [0.6, 5, 24]),
+    slab('wall-e', 'Wall E', [12, 2.5, 0], [0.6, 5, 24]),
+  ])
+  const torches = souls.group('dungeon:torches', 'Torches', [[-4, 11.2], [4, 11.2], [-11.2, 0], [11.2, 0]]
+    .map(([x, z], i) => linkInstance(LEVEL.torch, souls.torchNode(`dungeon-torch:${i}`, [x, 2.2, z]))))
+
+  const player = souls.playerNode()
+  widenCamera(player)
+  player.position = [0, 0.05, 8]
+  player.rotation = [0, 180, 0]
+
+  // The way back up: stand by the south wall, behind where you arrive.
+  const exit = withScript(node('Way Out', 'node', {
+    id: id('dungeon:exit'), position: [0, 0, 10.6],
+    trigger: { shapes: [{ type: 'box', width: 4, height: 3, depth: 2.4, offset: [0, 1.5, 0], rotation: [0, 0, 0] }] },
+  }), 'SoulsSceneDoor', {
+    targetScene: PROJECT_NAME, prompt: 'Leave the dungeon', question: 'Return to the valley?',
+    detail: '', loadingTitle: 'The Valley', frontOnly: false,
+  })
+
+  const root = node('root', 'node', {
+    id: id('dungeon:root'),
+    children: [
+      withScript(node('GameManager', 'node', {
+        id: id('dungeon:manager'), children: [souls.banner(), souls.soundsGroup('dungeon:manager', souls.SOUNDS.manager, { music: souls.MUSIC_CUES })],
+      }), 'SoulsGameManager'),
+      linkInstance(LEVEL.player, player),
+      level, torches, exit,
+    ],
+    ambientLight: [600, 620, 700],
+  })
+  const config = clone(souls.sourceScene.config)
+  config.graphics.clearColor = [0.01, 0.01, 0.012, 1]
+  config.render.clearColor = [0.01, 0.01, 0.012, 1]
+  Object.assign(config.render, { exposure: 1.2, autoExposureEnabled: false, motionBlurEnabled: false })
+  return { scene: root, textures: [], ui: { version: 1, elements: [] }, config, assetHashes: {}, assetHashVersion: ASSET_HASH_VERSION, savedAt: souls.CREATED_AT }
+}
+
+// =====================================================================================================
 // Write
 // =====================================================================================================
 
@@ -780,13 +1081,16 @@ const result = souls.writeProject({
   buildScene: valleyScene,
   example: {
     name: PROJECT_NAME,
-    description: 'Hollow Keep, outdoors: the same souls-like combat, bonfire, fog gate and boss on a 2 km mountain valley — landscape layers for ground, rock, snow and trails, meadow grass, pine forest and a thatched hamlet.',
+    description: 'Hollow Keep, outdoors: the same souls-like combat and bonfire on a 2 km mountain valley — landscape layers for ground, rock, snow, forest floor and trails, meadow grass and flowers, pine forest, moss rocks, a thatched hamlet with breakable barrels, and a skull cave that loads a second scene.',
     order: 3,
   },
   models: [...propAssets, ...foliageAssets],
+  templates: [BARREL_TEMPLATE, DEBRIS_TEMPLATE, CAVE_TEMPLATE],
+  extraScenes: [{ id: DUNGEON_ID, name: DUNGEON_NAME, build: dungeonScene }],
   terrainMaterials: [{ id: TERRAIN_MATERIAL_ID, name: 'Valley Landscape', material: terrainMaterial, textureIds: [...new Set(Object.values(TERRAIN_TEX).flatMap(t => Object.values(t)))] }],
   folders: {
-    scene: { [PROJECT_NAME]: '/Scenes' },
+    scene: { [PROJECT_NAME]: '/Scenes', [DUNGEON_NAME]: '/Scenes' },
+    template: { 'Breakable Barrel': BARREL_DIR, 'Barrel Debris': BARREL_DIR, 'Skull Cave Entrance': CAVE_DIR },
     model: { ...foliageFolder, ...buildingFolder },
     material: {
       ...materialFolder,

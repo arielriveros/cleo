@@ -82,6 +82,8 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   public useRagdoll: boolean = true
   /** Seconds the body lies there before it is removed. */
   public corpseSeconds: number = 6
+  /** Seconds the body then takes to dissolve away. */
+  public corpseFadeSeconds: number = 1.5
   /** Socket projectiles leave from. */
   public castSocket: SocketName = 'LeftHand'
   /** Seconds the health bar stays up after the last hit. */
@@ -597,7 +599,8 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     playSound(this, 'Enemy Death')
     gm?.onEnemyKilled?.(this)
     if (this.useRagdoll && this.deathSeconds > 0) this.after(this.deathSeconds, () => this._ragdoll())
-    this.after(this.corpseSeconds, () => this.remove())
+    // Dissolves rather than vanishing, like a foliage LOD change (Node.remove), over `corpseFadeSeconds`.
+    this.after(this.corpseSeconds, () => this.remove({ fade: this.corpseFadeSeconds }))
   }
 
   private _ragdoll(): void {

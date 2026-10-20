@@ -90,6 +90,7 @@ export default class SoulsProjectileNode extends Node {
       gm?.fx?.(this.impactTemplate, this.worldPosition)
       playDetached(this, 'Bolt Impact')
     }
-    this.remove()
+    // Immediate: the impact effect takes its place this frame.
+    this.remove({ immediate: true })
   }
 }

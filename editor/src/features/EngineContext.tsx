@@ -14,9 +14,9 @@ import { EditorSessionsContext, type EditorSessionsContextValue } from "./Editor
 import { useStableActions } from "../utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
 import { isEditorOwnedChange } from "../utils/editorOwned";
-import { resetScriptModules, addScriptModuleSources } from "cleo";
+import { resetScriptModules, addScriptModuleSources, nextFrame } from "cleo";
 import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, allTerrainFoliageRules, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
-import type { SceneChange, TerrainFoliageRule, InputMap } from "cleo";
+import type { SceneChange, TerrainFoliageRule, InputMap, LoadProgressListener } from "cleo";
 import NullImage from '../images/null.png';
 import EventEmitter from "../utils/eventEmitter";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
@@ -6210,10 +6210,17 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Build a runnable play Scene for any scene id. The play-session entry (the scene open when Play was
   // pressed) uses the live editor scene so unsaved edits play; every other scene is loaded from its blob,
   // re-resolved against the current libraries, then parsed with its scripts compiled.
-  const buildPlaySceneById = async (id: string): Promise<Scene> => {
-    if (id === playEntrySceneIdRef.current) return buildPlayScene();
+  const buildPlaySceneById = async (id: string, onProgress?: LoadProgressListener): Promise<Scene> => {
+    // Each stage yields a frame so a loading screen's bar paints before the next one blocks.
+    const stage = async (fraction: number, name: string) => { onProgress?.(fraction, name); await nextFrame(); };
+    if (id === playEntrySceneIdRef.current) {
+      await stage(0.2, 'Building the scene');
+      return buildPlayScene();
+    }
+    await stage(0.1, 'Reading the scene');
     const data = await loadSceneData(id);
     if (!data) return new Scene();
+    await stage(0.3, 'Resolving assets');
     const clone = deepClone({ scene: data.scene, ui: data.ui });
     // A scene never opened in this session still carries its UI as the legacy blob — same reason the
     // publish path migrates here: without it, loading that scene at runtime gives it no HUD, silently.
@@ -6223,10 +6230,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const tmp = new Scene();
     tmp.parse({ scene: clone.scene, textures: [] }, true);
     resyncScene(tmp, maps, currentLibs(), data.assetHashes, data.assetHashVersion);
+    await stage(0.5, 'Preparing scripts and models');
     const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, bodies: maps.bodies, triggers: maps.triggers, scriptAssets: scriptAssetsRef.current, scriptPaths: scriptPathsRef.current, templates: templatesRef.current, materials: materialsRef.current, models: modelsRef.current, animations: animationsRef.current, useCache: true });
     // `tmp` existed only to be resynced and serialized; `gd` is plain JSON, so its GPU meshes and bus
     // subscription can go now.
     tmp.dispose();
+    await stage(0.7, 'Building the scene');
     const scene = new Scene();
     registerTemplates(gd.templates);
     addScriptModuleSources(gd.modules); // adds what is new; an already-evaluated module keeps its state
@@ -6236,13 +6245,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Runtime scene switch (Game.loadScene from a script). Swaps the engine's scene, resetting UI/physics/
   // input for the new scene — the editor-play counterpart of the player's loadScene.
-  const playLoadScene = async (nameOrId: string): Promise<void> => {
+  const playLoadScene = async (nameOrId: string, onProgress?: LoadProgressListener): Promise<void> => {
     const instance = instanceRef.current;
     if (!instance || !startedRef.current) return;
     const meta = projectMetaRef.current;
     const target = meta?.scenes.find(s => s.id === nameOrId) ?? meta?.scenes.find(s => s.name === nameOrId);
     if (!target) { Logger.warn(`loadScene: no scene "${nameOrId}"`, 'Editor'); return; }
-    const scene = await buildPlaySceneById(target.id);
+    const scene = await buildPlaySceneById(target.id, onProgress);
+    onProgress?.(0.9, 'Starting');
     // A simulation keeps watching through the editor camera across a runtime scene switch.
     if (isSimulatingRef.current) carryEditorCamera(instance.scene, scene);
     // Held keys, gestures and edges only — NOT the map. Un-binding the game between scenes would
@@ -6255,14 +6265,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     playSceneRef.current = scene;
     currentPlaySceneIdRef.current = target.id;
     instance.isPaused = false;
-    setTimeout(() => { instance.scene.start(); }, 50);
     // The new play scene starts with no runtime debug helpers; rebuild them for it (isPlayMode is
     // already true, so the reconcile effect won't re-fire on its own).
     eventEmitter.current.emit('DEBUG_VISIBILITY_CHANGED');
+    // Resolved once it has STARTED, which is what Game.loadScene promises its caller.
+    await new Promise<void>(resolve => setTimeout(() => { instance.scene.start(); resolve(); }, 50));
   };
 
   const installGameHost = () => setGameHost({
-    loadScene: (nameOrId: string) => { void playLoadScene(nameOrId); },
+    loadScene: (nameOrId: string, options?: { onProgress?: LoadProgressListener }) =>
+      playLoadScene(nameOrId, options?.onProgress),
     currentSceneName: () => projectMetaRef.current?.scenes.find(s => s.id === currentPlaySceneIdRef.current)?.name ?? '',
     sceneNames: () => (projectMetaRef.current?.scenes ?? []).map(s => s.name),
   });

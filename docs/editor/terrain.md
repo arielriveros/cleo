@@ -186,6 +186,17 @@ There are also **exclusion** rules, so a material can say "not here" as well as 
 Defaults: `2.0` per m² for billboards, `0.05` for meshes. Meshes are three orders of magnitude
 sparser for the obvious reason.
 
+A mesh rule's **Orientation** decides how each instance stands:
+
+| Orientation | Use for |
+|---|---|
+| **Up** (default) | Upright whatever the slope: trees and grass. |
+| **Ground normal** | Tilted to the slope under it: rocks bedded into a hillside. |
+| **Free** | A random orientation per instance, the same every time: scattered stones. |
+
+Changing it re-orients what is already placed without moving anything. Billboards always stand up.
+A foliage collider still stands upright, so a tilted rock is best given a sphere collider.
+
 > Foliage automatically refreshes when the model or material it uses is saved. Layers are keyed by a
 > stable rule id, so renaming a rule does not orphan what it already placed.
 

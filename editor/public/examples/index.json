@@ -25,19 +25,19 @@
       "name": "Hollow Keep",
       "description": "A one-level souls-like: stamina combat, rolls, lock-on, bonfires, a fog gate and a two-phase boss. Placeholder art, real mechanics — see SOULS_DEMO.md to swap in your own.",
       "order": 2,
-      "bytes": 104924807,
+      "bytes": 115475867,
       "sceneCount": 1,
-      "textureCount": 5,
+      "textureCount": 17,
       "createdAt": 1790000000000
     },
     {
       "slug": "valley",
       "name": "Valley",
-      "description": "Hollow Keep, outdoors: the same souls-like combat, bonfire, fog gate and boss on a 2 km mountain valley — landscape layers for ground, rock, snow and trails, meadow grass, pine forest and a thatched hamlet.",
+      "description": "Hollow Keep, outdoors: the same souls-like combat and bonfire on a 2 km mountain valley — landscape layers for ground, rock, snow, forest floor and trails, meadow grass and flowers, pine forest, moss rocks, a thatched hamlet with breakable barrels, and a skull cave that loads a second scene.",
       "order": 3,
-      "bytes": 206323343,
-      "sceneCount": 1,
-      "textureCount": 41,
+      "bytes": 369581923,
+      "sceneCount": 2,
+      "textureCount": 77,
       "createdAt": 1790000000000
     }
   ]

@@ -1,4 +1,4 @@
-import { mat4, quat } from 'gl-matrix';
+import { mat4, quat, vec3 } from 'gl-matrix';
 import type { Buffer as RhiBuffer } from '../graphics/rhi/resources';
 import { Geometry } from '../core/geometry';
 import { Model } from '../graphics/model';
@@ -7,6 +7,7 @@ import {
     Material, TerrainFoliageRule, FoliageCollision, foliageRuleKey, applyWind, windConfigOf,
     FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY,
 } from '../graphics/material';
+import type { FoliageOrientation } from '../graphics/material';
 
 export type FoliageKind = 'mesh' | 'billboard';
 
@@ -451,6 +452,14 @@ export class FoliageLayer {
      * materials stay authored `castShadow: false` for the colour pass.
      */
     public castShadows = false;
+    /**
+     * How a mesh instance stands (see `TerrainFoliageRule.orientation`): upright, tilted to the ground's
+     * normal, or at a random orientation. Applied when the instance matrices are built -- the stored
+     * record stays [x, y, z, yaw, scale], so changing it never re-scatters anything.
+     */
+    public orientation: FoliageOrientation = 'up';
+    /** The ground's normal at a world x/z, supplied by the terrain that holds this layer. */
+    private _normalSampler: ((x: number, z: number) => ArrayLike<number>) | null = null;
     /** Static physics proxy for nearby instances, or null for non-collidable foliage. Mirrored from the
      *  rule onto the LAYER, since a published build rebuilds layers from the serialized foliage blob
      *  without re-parsing terrain materials. */
@@ -514,6 +523,8 @@ export class FoliageLayer {
 
     private _q = quat.create();
     private _m = mat4.create();
+    private readonly _tilt = quat.create();
+    private readonly _n = vec3.create();
 
     constructor(kind: FoliageKind, name: string, model: Model, textureId: string | null, params?: Partial<FoliageParams>) {
         this.kind = kind;
@@ -564,6 +575,7 @@ export class FoliageLayer {
      *  legacy single-`model` payloads still load (one level, no impostor). */
     private _applyMeshPrototype(src: any): void {
         if (this.kind !== 'mesh') return;
+        this.setOrientation(parseFoliageOrientation(src.orientation));
         const baseModels: any[] | null = src.models?.length ? src.models : (src.model ? [src.model] : null);
         // Levels are only rebuilt when the payload carries a base — appending `lods` to levels that were
         // kept from before would duplicate them on every refresh.
@@ -907,6 +919,44 @@ export class FoliageLayer {
         return e * this.params.maxScale;
     }
 
+    /** Change how instances stand; rebuilds the matrices (never the placement) when it changes. */
+    public setOrientation(orientation: FoliageOrientation): void {
+        const next = this.kind === 'mesh' ? orientation : 'up';
+        if (next === this.orientation) return;
+        this.orientation = next;
+        if (this._instances.length > 0) this._rebuild();
+    }
+
+    /** Called by the owning terrain. A layer tilted to the ground re-reads it. */
+    public setNormalSampler(sampler: ((x: number, z: number) => ArrayLike<number>) | null): void {
+        this._normalSampler = sampler;
+        if (this.orientation === 'normal' && this._instances.length > 0) this._rebuild();
+    }
+
+    /** The rotation of instance `i` (record at `b`) into `out`, per `orientation`. */
+    private _instanceRotation(out: quat, i: number, b: number): quat {
+        const x = this._instances[b], z = this._instances[b + 2], yaw = this._instances[b + 3];
+        quat.setAxisAngle(out, [0, 1, 0], yaw);
+        if (this.orientation === 'normal' && this._normalSampler) {
+            const n = this._normalSampler(x, z);
+            vec3.set(this._n, n[0], n[1], n[2]);
+            if (vec3.length(this._n) > 1e-6) {
+                vec3.normalize(this._n, this._n);
+                // Tilt +Y onto the normal, AFTER the yaw: the instance still turns about its own axis.
+                quat.rotationTo(this._tilt, [0, 1, 0], this._n);
+                quat.multiply(out, this._tilt, out);
+            }
+        } else if (this.orientation === 'free') {
+            // A uniformly random orientation (Shoemake), seeded by the instance's own record so it is
+            // the same every rebuild and on every machine -- nothing extra is stored.
+            const u1 = hash01(x, z, yaw, 1), u2 = hash01(x, z, yaw, 2), u3 = hash01(x, z, yaw, 3);
+            const a = Math.sqrt(1 - u1), c = Math.sqrt(u1);
+            quat.set(out, a * Math.sin(2 * Math.PI * u2), a * Math.cos(2 * Math.PI * u2),
+                c * Math.sin(2 * Math.PI * u3), c * Math.cos(2 * Math.PI * u3));
+        }
+        return out;
+    }
+
     private _rebuild(): void {
         this.count = this._instances.length / 5;
 
@@ -924,7 +974,9 @@ export class FoliageLayer {
             arr.push(i);
         }
 
-        const extent = this._instanceExtent();
+        // A tilted instance can reach further from its base along any axis than an upright one: pad the
+        // cell bounds by the diagonal, or culling clips rocks lying on their side.
+        const extent = this._instanceExtent() * (this.orientation === 'up' ? 1 : Math.SQRT2);
         const cells: FoliageCell[] = [];
         for (const arr of buckets.values()) {
             const matrices = new Float32Array(arr.length * 16);
@@ -933,7 +985,7 @@ export class FoliageLayer {
             for (let j = 0; j < arr.length; j++) {
                 const b = arr[j] * 5;
                 const x = this._instances[b], y = this._instances[b + 1], z = this._instances[b + 2];
-                quat.setAxisAngle(this._q, [0, 1, 0], this._instances[b + 3]);
+                this._instanceRotation(this._q, arr[j], b);
                 const s = this._instances[b + 4];
                 mat4.fromRotationTranslationScale(this._m, this._q, [x, y, z], [s, s, s]);
                 matrices.set(this._m, j * 16);
@@ -988,6 +1040,7 @@ export class FoliageLayer {
                 ? { textureId: this.billboardTextureId, distance: this.billboardDistance } : undefined,
             cullDistance: this.cullDistance > 0 ? this.cullDistance : undefined,
             castShadows: this.castShadows || undefined,
+            orientation: this.orientation !== 'up' ? this.orientation : undefined,
             // A mesh layer's wind rides in its models' materials; a billboard's card material is rebuilt
             // on load, so its wind is carried here.
             ...(this.kind === 'billboard' ? (() => {
@@ -1038,4 +1091,19 @@ export class FoliageLayer {
         }
         return layer;
     }
+}
+
+/** A rule's or payload's orientation, defaulting anything unknown to upright. */
+export function parseFoliageOrientation(v: unknown): FoliageOrientation {
+    return v === 'normal' || v === 'free' ? v : 'up';
+}
+
+/** A deterministic value in [0, 1) from an instance's record and a salt. */
+function hash01(x: number, z: number, yaw: number, salt: number): number {
+    let h = Math.imul(Math.round(x * 1000) | 0, 0x9e3779b1) ^ Math.imul(Math.round(z * 1000) | 0, 0x85ebca77)
+        ^ Math.imul(Math.round(yaw * 1e5) | 0, 0xc2b2ae3d) ^ Math.imul(salt, 0x27d4eb2f);
+    h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d);
+    h ^= h >>> 12; h = Math.imul(h, 0x297a2d39);
+    h ^= h >>> 15;
+    return (h >>> 0) / 4294967296;
 }

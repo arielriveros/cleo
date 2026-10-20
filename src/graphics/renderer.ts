@@ -2892,7 +2892,7 @@ export class Renderer {
         sm.setUniform('u_radialInner', Renderer._linearRgba(this._decalInner, r.innerColor));
         sm.setUniform('u_radialOuter', Renderer._linearRgba(this._decalOuter, r.outerColor));
         sm.setUniform('u_ringColor', Renderer._linearRgba(this._decalRing, r.ringColor));
-        sm.setUniform('u_decalOpacity', decal.opacity);
+        sm.setUniform('u_decalOpacity', decal.opacity * decal.effectiveFade);
         sm.setUniform('u_angleFade', decal.angleFade);
         sm.setUniform('u_depthFade', decal.depthFade);
         sm.setUniform('u_radialExponent', r.exponent);
@@ -3492,6 +3492,20 @@ export class Renderer {
         this._shaderManager.setUniform('u_lodFrame', f);
     }
 
+    /**
+     * A node's despawn dissolve for the program just bound (`u_dissolve`, see Node.remove). Written on
+     * EVERY draw through a model or basic program, never only on fading ones: a uniform keeps its last
+     * value, so a solid draw after a dissolving one would otherwise inherit its holes.
+     */
+    private _setDissolve(fade: number): void {
+        const d = this._dissolveVec;
+        d[0] = fade >= 1 ? 0 : 1 - Math.max(0, fade);
+        // The foliage crossfade's phase, so a despawn resolves under TAA exactly as a LOD change does.
+        d[1] = ((this._frameIndex * 7) % 16) / 16;
+        this._shaderManager.setUniform('u_dissolve', d);
+    }
+    private readonly _dissolveVec: [number, number] = [0, 0];
+
     private _foliagePass(scene: Scene, pass: RenderPassEncoder): void {
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
@@ -4026,6 +4040,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
         this._shaderManager.setUniform('u_model', node.worldTransform);
+        this._setDissolve(node.effectiveFade);
 
         if (animated) this._uploadBoneMatrices(shaderType, node);
 
@@ -7747,6 +7762,7 @@ export class Renderer {
         // Set Transform releted uniforms on the model's shader type
         // TODO: Mutliply node transform with model transform for model correction
         this._shaderManager.setUniform('u_model', node.worldTransform);
+        this._setDissolve(node.effectiveFade);
 
         // For animated models, set bone matrices
         if (isAnimatedModel) this._uploadBoneMatrices(shaderType, node);
@@ -7920,6 +7936,7 @@ export class Renderer {
 
 
         this._shaderManager.setUniform('u_model', spriteMatrix);
+        this._setDissolve(node.effectiveFade);
 
         // Per draw, from the tile on screen: an animated sprite follows its frame's overdrive, and two
         // sprites sharing a tileset never fight over one value.
@@ -8260,6 +8277,7 @@ export class Renderer {
         for (const node of scene.models) {
             // Must agree with the caster loop above, or this cache key oscillates every frame.
             if (!node.visible || !node.initialized || isEditorOnlyNode(node)) continue;
+            if (node.effectiveFade < 0.5) continue;
             let casts = false;
             for (const m of node.model.materials)
                 if (m.config.castShadow && !m.config.wireframe) { casts = true; break; }
@@ -8351,6 +8369,8 @@ export class Renderer {
         // LOD-hidden levels and user-hidden nodes must not cast shadows (user hides already force
         // castShadow=false via the visible setter, but the LOD flag never touches the material).
         if (!node.visible) return false;
+        // A despawn dissolve drops its shadow halfway through: depth has no screen-door to share.
+        if (node.effectiveFade < 0.5) return false;
         // A merged model can have a non-casting submesh among casting ones, so the test is "any
         // submesh casts" and the draw restricts itself to those ranges. Written as a loop rather than
         // `.some(closure)`: this runs per caster per cascade.
@@ -11012,6 +11032,7 @@ export class Renderer {
 
         // Set Transform related uniforms
         this._shaderManager.setUniform('u_model', node.worldTransform);
+        this._setDissolve(node.effectiveFade);
 
         // Set Material related uniforms
         this._applyMaterialProperties(node.model.material);
@@ -11019,7 +11040,12 @@ export class Renderer {
         // Textures: a bind group when the program has build-time reflection, otherwise the hand-
         // rolled slot table this used to carry — which was a third copy of `_textureSlot`, drifting
         // independently of the other two.
-        if (pipeline) pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
+        if (pipeline) {
+            pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
+            // A LIT helper (the camera gizmo is Blinn-Phong) reads the frame's lights and shadow maps
+            // from group 3 like any forward draw; an unlit one never declares it.
+            if (this._declaresFrameLighting(pipeline)) pass.setBindGroup(3, this._frameLightingBindGroup(pipeline));
+        }
         else this._applyMaterial(material);
 
         // Draw the mesh

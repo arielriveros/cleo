@@ -3,6 +3,7 @@ import {
   TerrainMaterial, TerrainFoliageRule, Model, TextureManager, Logger,
   DEFAULT_FOLIAGE_DENSITY, FOLIAGE_DENSITY_UNIT, MAX_INSTANCES, foliageEffectiveCull, allTerrainFoliageRules,
 } from 'cleo'
+import type { FoliageOrientation } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
 import { buildFoliageRuleFromModelAsset, foliageRuleModels } from '../../utils/foliageRules'
@@ -258,6 +259,19 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
                   <span className={label} title='Rasterize these instances into the shadow cascades. Costs one extra instanced draw per cell per cascade — cheap for trees, expensive for dense grass.'>Cast shadows</span>
                   <Toggle checked={!!r.castShadows} onChange={c => patchRule(i, { castShadows: c })} />
                 </div>
+                {/* How each instance stands. Rocks want the slope under them (or none at all); trees and
+                    grass want to stand up whatever the slope. Re-orients in place: nothing is re-scattered. */}
+                {r.kind === 'mesh' && (
+                  <div className='flex items-center justify-between'>
+                    <span className={label} title='Up: every instance stands upright (trees, grass). Ground normal: tilted to the slope it stands on (rocks bedded into a hillside). Free: a random orientation (scattered stones).'>Orientation</span>
+                    <Select className={num} value={r.orientation ?? 'up'}
+                      onChange={e => patchRule(i, { orientation: e.target.value as FoliageOrientation })}>
+                      <option value='up'>Up</option>
+                      <option value='normal'>Ground normal</option>
+                      <option value='free'>Free</option>
+                    </Select>
+                  </div>
+                )}
                 {/* A billboard has no material of its own, so its wind lives on the rule. A mesh prop
                     answers the wind through its materials (material editor, Wind section). */}
                 {r.kind === 'billboard' && (

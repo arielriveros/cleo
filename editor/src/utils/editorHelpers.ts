@@ -289,12 +289,13 @@ function ensureLightIcon(light: LightNode) {
  *
  * The sphere is drawn at `maxDistance`, which is where a `linear` emitter goes silent and where the other
  * two models are clamped — so it answers the one question a placed emitter raises that its numbers do
- * not: how far does this actually carry, relative to the level around it. Ambient emitters get only the
- * icon: their world position means nothing, so a radius drawn around it would be a lie.
+ * not: how far does this actually carry, relative to the level around it. Drawn only while the emitter is
+ * SELECTED; the icon stays always. Ambient emitters get only the icon: their world position means
+ * nothing, so a radius drawn around it would be a lie.
  *
  * The sphere is rebuilt when the radius changes, because the geometry is a unit sphere scaled to it.
  */
-function ensureSoundHelpers(node: SoundNode) {
+function ensureSoundHelpers(node: SoundNode, selected: boolean) {
   if (!node.getChildByName(SOUND_ICON).length) {
     // Tinted to match the sample slot's accent, and distinct from a light's warm icon.
     const icon = chrome(new SpriteNode(SOUND_ICON, Sprite.fromTexture('__editor__sound_icon', {
@@ -305,7 +306,8 @@ function ensureSoundHelpers(node: SoundNode) {
   }
 
   const existing = node.getChildByName(SOUND_RADIUS)[0];
-  if (node.mode !== 'spatial') {
+  // Only while this emitter is selected: a level full of carry spheres hides the level they describe.
+  if (node.mode !== 'spatial' || !selected) {
     if (existing) node.removeChild(existing);
     return;
   }
@@ -329,9 +331,13 @@ function ensureSoundHelpers(node: SoundNode) {
 // gizmo keeps a constant size.
 function ensureCameraGizmo(camera: CameraNode) {
   if (camera.getChildByName(CAMERA_GIZMO).length) return;
+  const geometry = new Geometry(CameraGeometry.positions, undefined, CameraGeometry.texCoords, undefined, undefined, CameraGeometry.indices, false);
+  // Lit (Blinn-Phong), so the body reads as a solid camera rather than a flat silhouette. The source
+  // mesh ships no normals; they are derived from its faces.
+  geometry.computeNormals();
   const model = new Model(
-    new Geometry(CameraGeometry.positions, undefined, CameraGeometry.texCoords, undefined, undefined, CameraGeometry.indices, false),
-    Material.Basic({ color: [0.2, 0.2, 0.75] }, { castShadow: false })
+    geometry,
+    Material.Default({ diffuse: [0.2, 0.2, 0.75], specular: [0.35, 0.35, 0.4], shininess: 24 }, { castShadow: false })
   );
   const gizmo = chrome(new ModelNode(CAMERA_GIZMO, model));
   gizmo.onUpdate = () => {
@@ -1010,9 +1016,9 @@ export function reconcileEditorHelpers(
   visibility?: DebugVisibility,
   channel: DebugChannel = 'editor',
   /**
-   * The selected node's id. Only the navmesh overlays and the decal box read it — a bake volume, its
-   * cyan preview and a decal's projection box are authoring aids for the node you are placing, not
-   * permanent scene furniture.
+   * The selected node's id. Only the navmesh overlays, the decal box and a sound's falloff sphere read
+   * it — a bake volume, its cyan preview, a decal's projection box and an emitter's reach are authoring
+   * aids for the node you are placing, not permanent scene furniture.
    */
   selectedId: string | null = null,
 ) {
@@ -1050,7 +1056,7 @@ export function reconcileEditorHelpers(
     } else if (node instanceof SoundNode) {
       // Reconciled every pass rather than only on absence: the falloff sphere follows `maxDistance`,
       // which the inspector changes while the helper already exists.
-      if (show('sounds')) ensureSoundHelpers(node);
+      if (show('sounds')) ensureSoundHelpers(node, node.id === selectedId);
       else for (const name of [SOUND_ICON, SOUND_RADIUS]) {
         const child = node.getChildByName(name)[0];
         if (child) node.removeChild(child);

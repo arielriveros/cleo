@@ -1085,7 +1085,17 @@ export interface TerrainFoliageRule {
     maxScale?: number;
     /** Static physics proxy spawned for nearby instances. Absent/null = never collidable (grass). */
     collision?: FoliageCollision | null;
+    /**
+     * How a MESH instance stands: 'up' (default, upright whatever the slope -- trees, grass), 'normal'
+     * (tilted to the ground under it -- rocks bedded into a slope), or 'free' (a random orientation --
+     * scattered stones). Billboards always stand up.
+     */
+    orientation?: FoliageOrientation;
 }
+
+/** See {@link TerrainFoliageRule.orientation}. */
+export type FoliageOrientation = 'up' | 'normal' | 'free';
+export const FOLIAGE_ORIENTATIONS: readonly FoliageOrientation[] = ['up', 'normal', 'free'];
 
 /**
  * One further surface of a landscape material, blended over the material's own surface (slot 0) by its

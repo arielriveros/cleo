@@ -9,6 +9,8 @@ struct BasicTransform {
     // UV transform for sprite sheets: scale then offset.
     u_uvOffset: vec2<f32>,
     u_uvScale: vec2<f32>,
+    // Despawn dissolve: x = how far gone (0 solid), y = dither phase. See Node.remove.
+    u_dissolve: vec2<f32>,
 };
 @group(1) @binding(0) var<uniform> u_transform: BasicTransform;
 
@@ -19,6 +21,7 @@ fn vs_main(
 ) -> VertexOutput {
     var out: VertexOutput;
     out.uv = texCoord * u_transform.u_uvScale + u_transform.u_uvOffset;
+    out.dissolve = u_transform.u_dissolve;
     out.position = u_transform.u_projection * u_transform.u_view * u_transform.u_model
                  * vec4<f32>(position, 1.0);
     return out;
