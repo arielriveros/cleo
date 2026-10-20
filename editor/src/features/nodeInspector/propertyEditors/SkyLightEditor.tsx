@@ -5,16 +5,17 @@ import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { useEventBus } from '../../EventBusContext'
 import { useCleoEngine } from '../../EngineContext'
-import { PropertyTable, PropertyRow, Slider } from '../../../components/ui'
+import { PropertyTable, PropertyRow, Slider, Toggle } from '../../../components/ui'
 import { SkyIcon } from '../sectionIcons'
 
 type Vec3 = [number, number, number]
 
 const SKY_LIGHT_HINT = 'Lights the scene with the sky itself — a surface facing up receives the zenith, one facing a sunset receives the sunset. Works from the Sky Atmosphere or from a Skybox, whichever the scene has. Add one and there is no need for a light probe just to get ambient light.'
+const CLOUD_SHADOWS_HINT = 'The volumetric clouds shade the ground: the sun is dimmed under each cloud, and the shadows drift with the cloud wind. Shown while the scene has enabled Volumetric Clouds.'
 const CLOUD_RESPONSE_HINT = 'How much the scene’s clouds change the lighting. At 1 an overcast sky takes the sun’s strength and its warm cast and hands both to the sky, which also goes flat — so the scene reads white and shadowless. At 0 the clouds are drawn but light nothing.'
 
 /**
- * The sky light has only two authored values; everything else is derived from the sky itself. The L0
+ * The sky light has few authored values; everything else is derived from the sky itself. The L0
  * read-out separates "the projection has not landed" — a failed async readback leaves flat ambient alone —
  * from "the sky is dim".
  */
@@ -25,14 +26,37 @@ export default function SkyLightEditor(props: { node: SkyLightNode }) {
   const [intensity, setIntensity] = useState(props.node.intensity)
   const [tint, setTint] = useState<Vec3>(props.node.tint)
   const [cloudResponse, setCloudResponse] = useState(props.node.cloudResponse)
+  const [cloudShadows, setCloudShadows] = useState(props.node.cloudShadows)
+  const [cloudShadowStrength, setCloudShadowStrength] = useState(props.node.cloudShadowStrength)
 
   useEffect(() => {
     setIntensity(props.node.intensity)
     setTint(props.node.tint)
     setCloudResponse(props.node.cloudResponse)
+    setCloudShadows(props.node.cloudShadows)
+    setCloudShadowStrength(props.node.cloudShadowStrength)
   }, [props.node])
 
-  const apply = (next: { intensity?: number; tint?: Vec3; cloudResponse?: number }) => {
+  // Cloud shadows only mean something while the scene draws volumetric clouds, so the toggle follows them.
+  const cloudsPresent = () => {
+    const clouds = props.node.scene?.volumetricClouds
+    return !!clouds && clouds.enabled
+  }
+  const [hasClouds, setHasClouds] = useState(cloudsPresent)
+  useEffect(() => {
+    const refresh = () => setHasClouds(cloudsPresent())
+    refresh()
+    eventEmitter.on('SCENE_CHANGED', refresh)
+    return () => { eventEmitter.off('SCENE_CHANGED', refresh) }
+  }, [eventEmitter, props.node])
+
+  const apply = (next: {
+    intensity?: number; tint?: Vec3; cloudResponse?: number; cloudShadows?: boolean; cloudShadowStrength?: number
+  }) => {
+    if (next.cloudShadows !== undefined) { props.node.cloudShadows = next.cloudShadows; setCloudShadows(next.cloudShadows) }
+    if (next.cloudShadowStrength !== undefined) {
+      props.node.cloudShadowStrength = next.cloudShadowStrength; setCloudShadowStrength(next.cloudShadowStrength)
+    }
     if (next.intensity !== undefined) { props.node.intensity = next.intensity; setIntensity(next.intensity) }
     if (next.tint !== undefined) { props.node.tint = next.tint; setTint(next.tint) }
     if (next.cloudResponse !== undefined) {
@@ -63,10 +87,19 @@ export default function SkyLightEditor(props: { node: SkyLightNode }) {
           <PropertyRow label='Tint'>
             <ColorInput color={vec3ToHex(tint)} onChange={(c) => apply({ tint: c as Vec3 })} />
           </PropertyRow>
-          <PropertyRow label='Cloud Response' divider={false} hint={CLOUD_RESPONSE_HINT}>
+          <PropertyRow label='Cloud Response' divider={hasClouds} hint={CLOUD_RESPONSE_HINT}>
             <Slider min={0} max={1} step={0.05} value={cloudResponse}
                     onChange={(v) => apply({ cloudResponse: v })} />
           </PropertyRow>
+          {hasClouds &&
+            <PropertyRow label='Cloud Shadows' divider={cloudShadows} hint={CLOUD_SHADOWS_HINT}>
+              <Toggle checked={cloudShadows} onChange={(c) => apply({ cloudShadows: c })} />
+            </PropertyRow>}
+          {hasClouds && cloudShadows &&
+            <PropertyRow label='Shadow Strength' divider={false}>
+              <Slider min={0} max={1} step={0.05} value={cloudShadowStrength}
+                      onChange={(v) => apply({ cloudShadowStrength: v })} />
+            </PropertyRow>}
         </PropertyTable>
         <div className='mt-2 text-ui text-muted'>
           {l0

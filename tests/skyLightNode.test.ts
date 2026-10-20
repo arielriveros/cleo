@@ -19,6 +19,18 @@ describe('SkyLightNode', () => {
         expect(parsed.tint).toEqual([0.9, 1.0, 1.2]);
     });
 
+    it('round-trips cloud shadows, off by default so existing scenes keep their look', async () => {
+        expect(new SkyLightNode('sky light').cloudShadows).toBe(false);
+        const node = new SkyLightNode('sky light', { cloudShadows: true, cloudShadowStrength: 0.6 });
+        const root = new Node('root');
+        parseNodeJson(root, await node.serialize());
+        const parsed = root.children[0] as SkyLightNode;
+        expect(parsed.cloudShadows).toBe(true);
+        expect(parsed.cloudShadowStrength).toBeCloseTo(0.6);
+        parsed.cloudShadowStrength = 4;
+        expect(parsed.cloudShadowStrength).toBe(1);
+    });
+
     it('clamps a negative intensity rather than inverting the light', () => {
         const node = new SkyLightNode('sky light');
         node.intensity = -3;

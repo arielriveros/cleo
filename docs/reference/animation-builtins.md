@@ -63,6 +63,8 @@ Selected with `{ kind: 'sense' }`.
 | Sense | Meaning |
 |---|---|
 | `distanceToTarget` | Straight-line distance to the blackboard target. |
+| `planarDistanceToTarget` | Ground-plane (XZ) distance to the target, ignoring height. What melee ranges mean. |
+| `heightToTarget` | Target height minus own height, in metres. Positive when the target is above. |
 | `angleToTarget` | Degrees between facing and the target. |
 | `hasTarget` | Whether the target key resolves to anything. |
 | `targetVisible` | A bare line-of-sight test. Kept for compatibility. |
@@ -76,6 +78,11 @@ Selected with `{ kind: 'sense' }`.
 
 > Prefer `pathRemaining` over `distanceToTarget` for anything about approach. A straight line says a
 > wall is one metre away when the way around it is thirty.
+>
+> Band melee states on `planarDistanceToTarget`, not `distanceToTarget`. Steering and attack reach are
+> planar, so with the target on a ledge overhead the straight-line distance never drops into the attack
+> band: the agent stays in its approach state and circles underneath. Pair it with `heightToTarget` to
+> tell "close" from "close but out of reach".
 >
 > Prefer `targetInSight` over `targetVisible`. The bare test has no cone, no range and no reaction
 > delay, so an agent using it notices you instantly, through the back of its head.

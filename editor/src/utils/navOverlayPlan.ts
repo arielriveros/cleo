@@ -1,4 +1,5 @@
-import { Vec, clipSoupToVolume, walkableSoup } from 'cleo'
+import { Vec, carveSoup, clipSoupToVolume, walkableSoup } from 'cleo'
+import type { NavObstacle } from 'cleo'
 import type { NavMeshNode, TriangleSoup } from 'cleo'
 
 /**
@@ -72,6 +73,30 @@ export function soupBounds(soup: TriangleSoup): { min: Vec.vec3; max: Vec.vec3 }
   return { min, max }
 }
 
+/** The last preview, keyed by everything it read, so a reconcile that changed none of it is free. */
+let lastPreview: { soup: TriangleSoup; obstacles: readonly NavObstacle[]; key: string; walkable: TriangleSoup } | null = null
+
+function previewSoup(navMesh: NavMeshNode, soup: TriangleSoup, obstacles: readonly NavObstacle[]): TriangleSoup {
+  const bake = navMesh.bake
+  const volume = navMesh.invVolumeMatrix
+  const key = JSON.stringify([bake, navMesh.agentRadius, volume ? Array.from(volume) : null])
+  if (lastPreview && lastPreview.soup === soup && lastPreview.obstacles === obstacles && lastPreview.key === key) {
+    return lastPreview.walkable
+  }
+  const clipped = clipSoupToVolume(soup, volume)
+  const carved = bake.carve && obstacles.length > 0
+    ? carveSoup(clipped, obstacles, {
+        agentRadius: navMesh.agentRadius,
+        agentHeight: bake.agentHeight,
+        stepHeight: bake.stepHeight,
+        maxSlope: bake.maxSlope,
+      })
+    : clipped
+  const walkable = walkableSoup(carved, bake)
+  lastPreview = { soup, obstacles, key, walkable }
+  return walkable
+}
+
 /**
  * Decide both overlays for one nav-mesh node.
  *
@@ -81,7 +106,7 @@ export function soupBounds(soup: TriangleSoup): { min: Vec.vec3; max: Vec.vec3 }
  * the author has to already know about is how the first version of this shipped invisible.
  */
 export function planNavOverlays(
-  navMesh: NavMeshNode, soup: TriangleSoup, isSelected: boolean,
+  navMesh: NavMeshNode, soup: TriangleSoup, isSelected: boolean, obstacles: readonly NavObstacle[] = [],
 ): NavOverlayPlan {
   if (!isSelected) return EMPTY_PLAN
 
@@ -89,7 +114,9 @@ export function planNavOverlays(
 
   // `invVolumeMatrix` is null when unbounded, and `clipSoupToVolume` reads that as "keep everything"
   // — which is exactly right, because an unbounded bake really does cover the whole level.
-  const walkable = walkableSoup(clipSoupToVolume(soup, navMesh.invVolumeMatrix), navMesh.bake)
+  // Carved here rather than in the cached soup: the radius and heights are sliders, and the clipped
+  // soup is far smaller than the level's, so the preview shows exactly the floor a bake would keep.
+  const walkable = previewSoup(navMesh, soup, obstacles)
   const triangles = walkable.positions.length / 9
 
   if (triangles < 1) return { box, preview: null, previewSkipped: null }

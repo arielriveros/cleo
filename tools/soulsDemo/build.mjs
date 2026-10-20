@@ -23,6 +23,7 @@ import { TextureSet, loadScriptReflector, mb, node, readJson, stableId as nsId, 
   from '../nightShift/bundle.mjs'
 import { editorModules } from '../nightShift/fbxImport.mjs'
 import { moduleRegistry } from '../nightShift/tsLoader.mjs'
+import { headlessNavBaker } from '../navBakeHeadless.mjs'
 import { ASSET_HASH_VERSION, KIND_EXT, SCENE_REFS_VERSION } from '../nightShift/editorConstants.mjs'
 import { buildPlaceholderClips, clipEventTime } from './placeholderClips.mjs'
 import { bloodDrops, bloodSplat } from './png.mjs'
@@ -1010,6 +1011,8 @@ function attack(key, name, fields) {
  * below `engage`, drop back to Chase only past `engage + 0.75`.
  */
 const ENEMY_AI = { engage: 4.5, leash: 25, preferredMin: 0, preferredMax: 1.8 }
+/** How far above or below an enemy its target may stand and still be swung at. */
+const ATTACK_REACH_UP = 1.5
 
 function enemyBrainMachine(spec) {
   const ai = { ...ENEMY_AI, ...(spec.ai ?? {}) }
@@ -1044,7 +1047,8 @@ function enemyBrainMachine(spec) {
     transitions.push(
       { from, to: 'Return', condition: giveUp },
       { from, to: 'Chase', condition: any(leaf('Has Target', 'false'), leaf('Distance', 'gt', ai.engage + 0.75)), minDwell: 0.3 },
-      { from, to: 'Attack', condition: all(leaf('Attack Ready', 'true')) },
+      // Not at a target on a ledge overhead: the reach is planar, so a swing there only cuts the air.
+      { from, to: 'Attack', condition: all(leaf('Attack Ready', 'true'), leaf('Height', 'lt', ATTACK_REACH_UP), leaf('Height', 'gt', -ATTACK_REACH_UP)) },
     )
   }
   transitions.push(
@@ -1081,7 +1085,11 @@ function enemyBrainMachine(spec) {
       builtin('Dead', 'isDead'),
       builtin('Awake', 'isAwake', 'boolean', true),
       sense('Has Target', 'hasTarget', 'boolean', false),
-      sense('Distance', 'distanceToTarget', 'number', 0),
+      // PLANAR, as the scripts' ranges and the steering are. The straight-line distance to a player on a
+      // ledge overhead never drops below `preferredMax`, so Approach never ended: its seek overshot the
+      // point under the target and flipped direction every frame, a spin on the spot.
+      sense('Distance', 'planarDistanceToTarget', 'number', 0),
+      sense('Height', 'heightToTarget', 'number', 0),
       builtin('Target Dead', 'targetDead'),
       builtin('From Home', 'distanceFromHome', 'number', 0),
       builtin('Attack Ready', 'attackReady'),
@@ -1449,7 +1457,8 @@ function shortcutGate() {
   g.body = { ...staticBody('box'), shapes: [{ type: 'box', width: 3.2, height: 4, depth: 0.4, offset: [0, 0, 0], rotation: [0, 0, 0] }] }
   // The zone spans BOTH sides of the bars (2.4 m each way); SoulsDoor.canInteract picks the locked side.
   g.trigger = { shapes: [{ type: 'box', width: 3.6, height: 4, depth: 4.8, offset: [0, 0, 0], rotation: [0, 0, 0] }] }
-  g.variables = { ...(g.variables ?? {}), ...vars({ blocksSwings: true }) }
+  // `navObstacle: false`: the bars lift, and a navmesh carved around them would close the shortcut for good.
+  g.variables = { ...(g.variables ?? {}), ...vars({ blocksSwings: true, navObstacle: false }) }
   return withScript(g, 'SoulsDoor', { openOffset: [0, 4.2, 0], lockedText: 'Opens from the other side', lockedFromFront: false })
 }
 
@@ -1480,6 +1489,8 @@ function fogGateNode() {
   g.body = { ...staticBody('box'), shapes: [{ type: 'box', width: 6, height: 4, depth: 0.5, offset: [0, 2, 0], rotation: [0, 0, 0] }] }
   // The prompt zone straddles the wall; SoulsFogGate.canInteract only offers it from outside.
   g.trigger = { shapes: [{ type: 'box', width: 6, height: 3, depth: 4.4, offset: [0, 1.5, 0], rotation: [0, 0, 0] }] }
+  // Walked through, so not carved: the arena stays one navmesh with the approach.
+  g.variables = { ...(g.variables ?? {}), ...vars({ navObstacle: false }) }
   return withScript(g, 'SoulsFogGate')
 }
 
@@ -1496,6 +1507,10 @@ function fogGateNode() {
 // What a copy may legitimately differ in is exactly what the editor keeps across a rebuild — the root's
 // transform, and its OVERRIDES (templateOverrides.ts): the root's name and any script field values. Those
 // are computed here by diffing the copy against the template and recorded in `__overrides`.
+
+/** What a navmesh bake leaves out: anything that walks, and the spawn markers that place it. */
+const isMover = (n) => n.type === 'character' || n.name === 'Enemy Spawns'
+const navBaker = headlessNavBaker(ROOT)
 
 const { regenerateNodeIds, cloneNodeJson } = engine(path.join(ROOT, 'src', 'core', 'scene', 'nodeJson.ts'))
 const { hashAsset, assetHashKey } = moduleRegistry()(path.join(ROOT, 'editor', 'src', 'utils', 'assetHash.ts'))
@@ -1882,6 +1897,12 @@ function keepScene() {
     ambientLight: [2300, 2350, 2700],
   })
 
+  // Baked here, as the editor's Bake button would: every static collider is floor or obstacle, and the
+  // characters (which move) are left out.
+  const { surface, obstacles } = navBaker.gather(root, { skip: isMover })
+  const baked = navBaker.bakeInto(navMesh, { surface, obstacles })
+  console.log('  navmesh: %d regions from %d triangles, %d obstacles carved, %d ms', baked.regions, baked.triangles, baked.obstacles, baked.ms)
+
   const config = clone(sourceScene.config)
   config.graphics.clearColor = [0.05, 0.05, 0.06, 1]
   config.render.clearColor = [0.05, 0.05, 0.06, 1]
@@ -2192,5 +2213,5 @@ export {
   withScript, scripts, sourceNode, clone, prop, group, staticBody, particles, pointLight, VFX, SOUNDS,
   MUSIC_CUES, soundsGroup, banner, playerNode, bonfireNode, fogGateNode, leverNode, shortcutGate,
   torchNode, messageNode, linkInstance, LEVEL, placedMessage, placedSpawn, placedPickup, sourceScene,
-  TEMPLATE_SOURCE, vfx, emitter, mod, burst, fade, fxTemplate, particleSystems,
+  TEMPLATE_SOURCE, vfx, emitter, mod, burst, fade, fxTemplate, particleSystems, navBaker, isMover,
 }

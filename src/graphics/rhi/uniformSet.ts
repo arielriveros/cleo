@@ -152,6 +152,19 @@ export class UniformSet {
             // Suffix aliases, so `u_present.u_exposure` is also reachable as `u_exposure`.
             for (const alias of suffixesOf(member.name))
                 if (!this._shapes.has(alias)) this._shapes.set(alias, shape);
+            // A custom material's `bool` is carried as `int <name>_b` (naga rejects a bool member; see
+            // `declareUniforms` in customShaders.ts), but every call site still writes the bare name.
+            // Without this alias `u_useEnvMap` never reached the water's block on WebGPU: the probe
+            // reflection stayed off and the pond mirrored the pale sky fallback instead.
+            // naga also appends `_` to any identifier ending in a DIGIT (it keeps those for its own
+            // numbered names), so `u_ripple0` arrives as `u_ripple0_` -- and the pond's ripples, fed by
+            // name, never moved on WebGPU.
+            const bare = shape.integer && member.name.endsWith('_b') ? member.name.slice(0, -2)
+                       : /\d_$/.test(member.name) ? member.name.slice(0, -1) : null;
+            if (bare) {
+                for (const alias of [bare, ...suffixesOf(bare)])
+                    if (!this._shapes.has(alias)) this._shapes.set(alias, shape);
+            }
         }
     }
 

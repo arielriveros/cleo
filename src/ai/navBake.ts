@@ -13,6 +13,8 @@
  *
  * ## The pipeline
  *
+ *   0. **Carve.** Obstacles, padded by the agent radius, are subtracted from the floor -- see
+ *      `carveSoup` in navSources.ts, and why that is not the inset described below.
  *   1. **Slope filter.** A triangle whose normal leans further from +Y than `maxSlope` is a wall.
  *   2. **Weld.** Snap positions to a quantisation grid. This is not an optimisation — it is
  *      load-bearing. Yuka matches half-edge twins by **exact float equality**, so two triangles that
@@ -33,7 +35,7 @@
  * had moved and the other had not. Clipping cannot express "pull back near *this* wall only"; doing
  * it properly means offsetting the mesh's boundary loops, which is a different algorithm.
  *
- * So clearance is applied at PATH time instead — `navPath.insetCorners` pushes a funnelled waypoint
+ * So clearance from the mesh's own EDGES is applied at PATH time instead — `navPath.insetCorners` pushes a funnelled waypoint
  * off the corner it hugs, along the bisector, into open space. That is local, exact, costs nothing at
  * bake time, and lets two agents of different sizes share one navmesh.
  *
@@ -49,6 +51,8 @@ import { CleoNavMesh } from "./navMesh";
 import type { NavMeshData } from "./navMesh";
 import { Vector3 } from "./yuka";
 import { clamp } from "../core/math";
+import { carveSoup } from "./navSources";
+import type { NavObstacle } from "./navSources";
 
 /**
  * Triangles to bake, in WORLD space.
@@ -91,6 +95,16 @@ export interface NavBakeSettings {
      * is graph size and stored bytes that grow, and both are recoverable later by a merge we own.
      */
     mergeRegions: boolean;
+    /**
+     * Subtract the obstacles handed to `bakeNavMesh` from the floor, padded by the agent radius (see
+     * `carveSoup`). Without it the floor under a wall or pillar stays walkable, paths run straight
+     * through solids and only the steering whiskers keep agents off them.
+     */
+    carve: boolean;
+    /** Headroom an agent needs. An obstacle wholly higher than this above the floor does not carve. */
+    agentHeight: number;
+    /** An obstacle rising less than this above the floor is stepped over rather than carved around. */
+    stepHeight: number;
 }
 
 export const NAV_BAKE_DEFAULTS: NavBakeSettings = {
@@ -99,6 +113,9 @@ export const NAV_BAKE_DEFAULTS: NavBakeSettings = {
     minTriangleArea: 1e-4,
     simplifyTolerance: 1e-3,
     mergeRegions: false,
+    carve: true,
+    agentHeight: 1.8,
+    stepHeight: 0.3,
 };
 
 function num(v: unknown, fallback: number): number {
@@ -116,6 +133,10 @@ export function navBakeSettings(over?: Partial<NavBakeSettings> | null): NavBake
         minTriangleArea: Math.max(0, num(o.minTriangleArea, d.minTriangleArea)),
         simplifyTolerance: Math.max(0, num(o.simplifyTolerance, d.simplifyTolerance)),
         mergeRegions: o.mergeRegions === true,
+        // Absent in bakes saved before carving existed, which is the `true` default.
+        carve: o.carve !== false,
+        agentHeight: clamp(num(o.agentHeight, d.agentHeight), 0.1, 20),
+        stepHeight: clamp(num(o.stepHeight, d.stepHeight), 0, 5),
     };
 }
 
@@ -456,15 +477,35 @@ export function simplifyContour(
 // The pipeline
 // ---------------------------------------------------------------------------------------------------
 
+/** What a bake carves, beside the soup it walks. */
+export interface NavBakeInput {
+    /** Solids to subtract from the floor; ignored when `settings.carve` is off. */
+    obstacles?: readonly NavObstacle[];
+    /** Clearance kept from every obstacle -- the navmesh node's `agentRadius`. */
+    agentRadius?: number;
+}
+
 /**
  * Bake a triangle soup into storable navmesh data.
  *
  * Never throws: an empty or hopeless input is an empty result, because "nothing here is walkable" is
  * a legitimate answer for a scene with no floor yet.
  */
-export function bakeNavMesh(soup: TriangleSoup, over?: Partial<NavBakeSettings> | null): NavBakeResult {
+export function bakeNavMesh(
+    soup: TriangleSoup, over?: Partial<NavBakeSettings> | null, input?: NavBakeInput | null,
+): NavBakeResult {
     const settings = navBakeSettings(over);
-    const welded = filterAndWeld(soup, settings);
+    // Before the weld, so the cut edges are welded and T-junction-split like every other edge.
+    const obstacles = input?.obstacles ?? [];
+    const carved = settings.carve && obstacles.length > 0
+        ? carveSoup(soup, obstacles, {
+            agentRadius: input?.agentRadius ?? 0,
+            agentHeight: settings.agentHeight,
+            stepHeight: settings.stepHeight,
+            maxSlope: settings.maxSlope,
+        })
+        : soup;
+    const welded = filterAndWeld(carved, settings);
     if (welded.triangles.length === 0) {
         return { ...EMPTY_BAKE_RESULT, rejectedTriangles: welded.rejected };
     }

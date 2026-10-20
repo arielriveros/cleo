@@ -72,11 +72,10 @@ import { defaultDecalMaterial } from '../../utils/materials'
 // receive only the item's `id` through a DataTransfer.
 export const NEW_NODE_MIME = 'text/cleo-new-node';
 
-export type AddCategory = 'common' | 'gameplay' | 'cameras' | 'lights' | 'audio' | 'sprites' | 'primitives' | 'complex'
+export type AddCategory = 'gameplay' | 'cameras' | 'lights' | 'audio' | 'sprites' | 'primitives' | 'complex'
   | 'environment' | 'effects' | 'uiLayout' | 'uiCore' | 'uiWidgets';
 
 export const ADD_CATEGORIES: { value: AddCategory, label: string }[] = [
-  { value: 'common', label: 'Common' },
   { value: 'gameplay', label: 'Gameplay' },
   { value: 'cameras', label: 'Cameras' },
   { value: 'lights', label: 'Lights' },
@@ -130,11 +129,11 @@ export function removeExistingSky(ctx: Pick<AddContext, 'editorScene' | 'eventEm
 
 export const ADD_ITEMS: AddItem[] = [
   {
-    id: 'empty', label: 'Empty', icon: EmptyIcon, category: 'common',
+    id: 'empty', label: 'Empty', icon: EmptyIcon, category: 'gameplay',
     create: async () => new Node('node'),
   },
   {
-    id: 'trigger', label: 'Trigger', icon: TriggerIcon, category: 'common',
+    id: 'trigger', label: 'Trigger', icon: TriggerIcon, category: 'gameplay',
     // Just an empty node with a trigger; the editor-helper reconciler draws its debug wireframe.
     create: async (ctx) => {
       const triggerNode = new Node('trigger');
@@ -351,7 +350,7 @@ export const ADD_ITEMS: AddItem[] = [
     //
     // Starts with a placeholder PBR material rather than none: a decal with no material projects plain
     // white, which reads as broken, and MaterialSlot's "Create Material" builds the asset from this one.
-    id: 'decal', label: 'Decal', icon: DecalIcon, category: 'environment',
+    id: 'decal', label: 'Decal', icon: DecalIcon, category: 'effects',
     create: async () => new DecalNode('decal', { size: [2, 1, 2], material: defaultDecalMaterial() }),
   },
   {
@@ -385,7 +384,7 @@ export const ADD_ITEMS: AddItem[] = [
   },
   {
     // Scene-wide, so unplaceable — unlike a light probe, which has a volume.
-    id: 'skyLight', label: 'Sky Light', icon: SkyLightIcon, category: 'environment', placeable: false,
+    id: 'skyLight', label: 'Sky Light', icon: SkyLightIcon, category: 'lights', placeable: false,
     create: async () => new SkyLightNode('sky light'),
   },
   {

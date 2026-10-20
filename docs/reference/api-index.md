@@ -143,9 +143,11 @@ and the parsers `parseBehaviorMachine` / `parseBehaviorState` / `parseBehaviorTr
 `polygonsFromData`, `isNavigableUp`, `EMPTY_NAV_MESH_DATA` (+ `NavMeshData`, `NavMeshJson`,
 `NavMeshBuildOptions`, `NavRoute`, `OffMeshLink`); baking — `bakeNavMesh`, `NAV_BAKE_DEFAULTS`,
 `EMPTY_BAKE_RESULT`, `navBakeSettings`, `simplifyContour`, `triangleSlope`, `walkableSoup`
-(+ `NavBakeSettings`, `NavBakeResult`, `TriangleSoup`); sources — `SoupBuilder`,
-`clipSoupToVolume`, `heightfieldSoup`, `mergeSoups`, `tessellateSource`, `tessellateSources`
-(+ `HeightfieldSource`, `NavPrimitive`, `NavSource`); paths — `createNavPath`, `setNavPath`,
+(+ `NavBakeInput`, `NavBakeSettings`, `NavBakeResult`, `TriangleSoup`); sources — `SoupBuilder`,
+`clipSoupToVolume`, `heightfieldSoup`, `mergeSoups`, `tessellateSource`, `tessellateSources`,
+`navSourceForShape`; carving — `carveSoup`, `navObstacleFor`, `foliageNavObstacles`
+(+ `HeightfieldSource`, `NavPrimitive`, `NavSource`, `NavShapeDescription`, `NavObstacle`,
+`NavCarveOptions`); paths — `createNavPath`, `setNavPath`,
 `clearNavPath`, `hasPath`, `currentWaypoint`, `onFinalWaypoint`, `advancePath`, `followPath`,
 `insetCorners`, `remainingDistance`, `REPATH_DEFAULTS`, `repathPolicy`, `createRepathState`,
 `shouldRepath`, `markRepathed` (+ `NavPath`, `RepathPolicy`, `RepathState`).

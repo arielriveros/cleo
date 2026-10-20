@@ -21,12 +21,18 @@ export interface SkyLightOptions {
      * sky takes the sun's strength and warm cast); 0 = clouds are drawn but light nothing differently.
      */
     cloudResponse?: number;
+    /** Let the scene's volumetric clouds shade the ground: the sun is dimmed under each cloud. */
+    cloudShadows?: boolean;
+    /** How dark a cloud's shadow gets, 0..1. 1 = what the cloud's density says. */
+    cloudShadowStrength?: number;
 }
 
 export class SkyLightNode extends Node {
     private _intensity: number;
     private _tint: [number, number, number];
     private _cloudResponse: number;
+    private _cloudShadows: boolean;
+    private _cloudShadowStrength: number;
 
     /**
      * Set whenever something the projection depends on changes, cleared by the renderer once it has
@@ -39,6 +45,8 @@ export class SkyLightNode extends Node {
         this._intensity = Math.max(0, options.intensity ?? 1);
         this._tint = options.tint ? [options.tint[0], options.tint[1], options.tint[2]] : [1, 1, 1];
         this._cloudResponse = Math.min(1, Math.max(0, options.cloudResponse ?? 1));
+        this._cloudShadows = options.cloudShadows ?? false;
+        this._cloudShadowStrength = Math.min(1, Math.max(0, options.cloudShadowStrength ?? 0.85));
     }
 
     public get intensity(): number { return this._intensity; }
@@ -54,6 +62,11 @@ export class SkyLightNode extends Node {
     public get cloudResponse(): number { return this._cloudResponse; }
     // No re-projection: the cloud grade is applied to the coefficients at upload time, not baked in.
     public set cloudResponse(v: number) { this._cloudResponse = Math.min(1, Math.max(0, v)); }
+
+    public get cloudShadows(): boolean { return this._cloudShadows; }
+    public set cloudShadows(v: boolean) { this._cloudShadows = v; }
+    public get cloudShadowStrength(): number { return this._cloudShadowStrength; }
+    public set cloudShadowStrength(v: number) { this._cloudShadowStrength = Math.min(1, Math.max(0, v)); }
 
     public get needsProjection(): boolean { return this._needsProjection; }
     /** Force a re-projection on the next frame (the sky changed, or the editor asked). */
@@ -76,6 +89,8 @@ export class SkyLightNode extends Node {
                 intensity: this._intensity,
                 tint: this._tint,
                 cloudResponse: this._cloudResponse,
+                cloudShadows: this._cloudShadows,
+                cloudShadowStrength: this._cloudShadowStrength,
             },
         };
     }

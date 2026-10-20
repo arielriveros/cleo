@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { parseInputMap } from '../src/input/actionMap';
+import { buildNavMesh, parseNavMeshData } from '../src/ai/navMesh';
 import { parseBehaviorMachine, createBehaviorRuntime, stepBehavior } from '../src/core/control/behavior';
 import { KIND_EXT } from '../editor/src/utils/vfs';
 import { hashAsset, assetHashKey } from '../editor/src/utils/assetHash';
@@ -310,7 +311,7 @@ describe.skipIf(!present)(`the ${title} example project`, () => {
         let rt = createBehaviorRuntime();
         const v = rt.ctx.values;
         const set = (o: Record<string, number | boolean>) => { for (const [k, x] of Object.entries(o)) v.set(k, x); };
-        set({ Dead: false, Awake: true, 'Has Target': false, Distance: 0, 'Target Dead': false, 'From Home': 0,
+        set({ Dead: false, Awake: true, 'Has Target': false, Distance: 0, Height: 0, 'Target Dead': false, 'From Home': 0,
               'Attack Ready': false, Attacking: false, Reacting: false });
         const step = (dt = 0.5) => { rt = stepBehavior(machine, rt, dt).next; return rt.current; };
 
@@ -321,7 +322,9 @@ describe.skipIf(!present)(`the ${title} example project`, () => {
         expect(step()).toBe('Approach');
         set({ Distance: 1 });                              // inside its spacing band (1.5)
         expect(step()).toBe('Strafe');
-        set({ 'Attack Ready': true });
+        set({ 'Attack Ready': true, Height: 3 });          // on a ledge overhead: planar reach, but out of it
+        expect(step()).toBe('Strafe');
+        set({ Height: 0 });
         expect(step()).toBe('Attack');
         set({ 'Attack Ready': false, Attacking: true });
         expect(step()).toBe('Attack');                     // held while the swing plays
@@ -701,6 +704,20 @@ describe.skipIf(!present)(`the ${title} example project`, () => {
     it('records the asset hashes the editor computes, so opening the scene rebuilds nothing', () => {
         const hashes = scene().assetHashes;
         for (const t of templates()) expect(hashes[assetHashKey('template', t.id)], t.name).toBe(hashAsset(t));
+    });
+
+    // Baked by the generator (tools/navBakeHeadless.mjs), obstacles carved. Without a bake every
+    // `path` goal falls back to a straight line and enemies walk into walls and trees.
+    it('ships a baked navmesh every enemy spawn can be reached on from the player', () => {
+        const nav = allNodes(scene().scene).find((n: any) => n.type === 'navMesh');
+        expect(nav?.navMesh, 'baked navmesh').toBeTruthy();
+        expect(nav.bake.carve).toBe(true);
+        const mesh = buildNavMesh(parseNavMeshData(nav.navMesh), { merge: false })!;
+        const player = allNodes(scene().scene).find((n: any) => n.type === 'character');
+        // The keep's sorcerer stands on a ledge whose ramp overlaps the floor without sharing an edge.
+        const spawns = allNodes(scene().scene).filter((n: any) => n.name?.startsWith('Spawn ') && n.name !== 'Spawn Sorcerer');
+        expect(spawns.length).toBeGreaterThan(4);
+        for (const spawn of spawns) expect(mesh.findPath(player.position, spawn.position).length, spawn.name).toBeGreaterThan(1);
     });
 });
 }

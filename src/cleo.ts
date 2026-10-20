@@ -57,6 +57,8 @@ export type { DecalOptions, DecalAffects, DecalRadialPattern, DecalRadialCurve, 
 export { SkyboxNode } from "./core/scene/nodes/skyboxNode";
 export { VolumetricCloudsNode } from "./core/scene/nodes/volumetricCloudsNode";
 export type { VolumetricCloudsOptions } from "./core/scene/nodes/volumetricCloudsNode";
+export { VOLUMETRIC_CLOUDS_PRESETS } from "./core/scene/nodes/volumetricCloudsPresets";
+export type { VolumetricCloudsPreset } from "./core/scene/nodes/volumetricCloudsPresets";
 export { SkyAtmosphereNode } from "./core/scene/nodes/skyAtmosphereNode";
 export type { SkyAtmosphereOptions } from "./core/scene/nodes/skyAtmosphereNode";
 export { SkyLightNode } from "./core/scene/nodes/skyLightNode";
@@ -157,9 +159,13 @@ export {
     NavMeshNode, parseRoutes, parseLinks, parseSize, parseBakedVolume, isDefaultNavMeshSettings,
 } from "./core/scene/nodes/navMeshNode";
 export {
-    SoupBuilder, clipSoupToVolume, heightfieldSoup, mergeSoups, tessellateSource, tessellateSources,
+    SoupBuilder, carveSoup, clipSoupToVolume, foliageNavObstacles, heightfieldSoup, mergeSoups, navObstacleFor,
+    navSourceForShape,
+    tessellateSource, tessellateSources,
 } from "./ai/navSources";
-export type { HeightfieldSource, NavPrimitive, NavSource } from "./ai/navSources";
+export type {
+    HeightfieldSource, NavCarveOptions, NavObstacle, NavPrimitive, NavShapeDescription, NavSource,
+} from "./ai/navSources";
 export {
     DEFUZZIFICATIONS, EMPTY_FUZZY_MODEL, FUZZY_SET_SHAPES, FuzzyBrain, buildFuzzyModule,
     isDefaultFuzzyModel, parseFuzzyModel, parseFuzzyRule, parseFuzzySet, parseFuzzyTerm,
@@ -193,7 +199,7 @@ export {
     NAV_BAKE_DEFAULTS, EMPTY_BAKE_RESULT, bakeNavMesh, navBakeSettings, simplifyContour,
     triangleSlope, walkableSoup,
 } from "./ai/navBake";
-export type { NavBakeSettings, NavBakeResult, TriangleSoup } from "./ai/navBake";
+export type { NavBakeInput, NavBakeSettings, NavBakeResult, TriangleSoup } from "./ai/navBake";
 export {
     REPATH_DEFAULTS, advancePath, clearNavPath, createNavPath, createRepathState, currentWaypoint,
     followPath, hasPath, insetCorners, markRepathed, onFinalWaypoint, remainingDistance, repathPolicy,

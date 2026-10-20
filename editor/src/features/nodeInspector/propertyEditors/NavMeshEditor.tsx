@@ -15,7 +15,9 @@ const SOURCE_HINT = 'Colliders, not render meshes: an invisible collider blockin
 const SLOPE_HINT = 'Steepest incline an agent will walk. Anything steeper is a wall — including, deliberately, the underside of everything, because a ceiling is a floor with its normal reversed.'
 const WELD_HINT = 'Snaps nearby vertices together before linking. Load-bearing, not an optimisation: two surfaces are joined only when their shared edge matches EXACTLY, so a hairline seam between meshes becomes two disconnected islands and every path across it silently fails.'
 const TERRAIN_HINT = 'Sample terrain heightfields. Step 1 is every vertex — far more detail than a planar navmesh can use, and a 129² terrain is 32,768 triangles.'
-const RADIUS_HINT = 'How far an agent keeps off a corner when following a path from this mesh. Applied per path rather than baked in, which is what lets a child and an ogre share one navmesh.'
+const RADIUS_HINT = 'How far an agent keeps clear of things. Carving pads every obstacle by it at bake time, and paths also keep it off the mesh corners they hug.'
+const CARVE_HINT = 'Cut static solids — walls, pillars, buildings, trunks — out of the floor, padded by the agent radius, so paths go around them instead of through. Dynamic bodies are skipped, and so is any node with a boolean variable navObstacle set to false (a gate that opens).'
+const HEIGHT_HINT = 'Headroom an agent needs. Something higher above the floor than this — a lintel, a bridge — does not carve the floor under it.'
 
 interface NavState {
   sizeX: number
@@ -25,6 +27,8 @@ interface NavState {
   weldTolerance: number
   simplifyTolerance: number
   agentRadius: number
+  carve: boolean
+  agentHeight: number
   includeTerrain: boolean
   terrainStep: number
 }
@@ -38,6 +42,8 @@ function readNode(node: NavMeshNode): NavState {
     weldTolerance: node.bake.weldTolerance,
     simplifyTolerance: node.bake.simplifyTolerance,
     agentRadius: node.agentRadius,
+    carve: node.bake.carve,
+    agentHeight: node.bake.agentHeight,
     includeTerrain: true,
     terrainStep: 2,
   }
@@ -50,6 +56,7 @@ interface BakeReport {
   rejected: number
   colliders: number
   terrains: number
+  obstacles: number
   ms: number
   /** Whether the bake was restricted to the node's box, so the report can say what it covered. */
   bounded: boolean
@@ -67,10 +74,14 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
     const next = { ...state, ...patch }
     // The bake block is nested on the node; the two terrain fields are not stored at all, because they
     // describe how to GATHER rather than what was baked.
+    // Spread first: fields this panel has no row for (mergeRegions, stepHeight) must survive an edit.
     props.node.bake = navBakeSettings({
+      ...props.node.bake,
       maxSlope: next.maxSlope,
       weldTolerance: next.weldTolerance,
       simplifyTolerance: next.simplifyTolerance,
+      carve: next.carve,
+      agentHeight: next.agentHeight,
     })
     props.node.agentRadius = next.agentRadius
     props.node.size = [next.sizeX, next.sizeY, next.sizeZ]
@@ -92,7 +103,10 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
           // Null when unbounded, which gathers the whole scene exactly as before.
           volume: props.node.invVolumeMatrix,
         })
-        const result = bakeNavMesh(gathered.soup, props.node.bake)
+        const result = bakeNavMesh(gathered.soup, props.node.bake, {
+          obstacles: gathered.obstacles,
+          agentRadius: props.node.agentRadius,
+        })
         props.node.setData(result.data)
         // Recorded so the panel can tell a bake that covers the current box from one that covers a
         // box the author has since moved. The two are indistinguishable in the viewport otherwise.
@@ -103,6 +117,7 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
           rejected: result.rejectedTriangles,
           colliders: gathered.colliders,
           terrains: gathered.terrains,
+          obstacles: props.node.bake.carve ? gathered.obstacles.length : 0,
           ms: performance.now() - started,
           bounded: props.node.bounded,
         })
@@ -187,7 +202,8 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
     : !props.node.isBaked && !baking ? 'Not baked yet.' : ''
   const reportTitle = report
     ? `${report.regions} regions from ${report.walkable} walkable triangles, ${report.rejected} rejected as too steep or degenerate. ` +
-      `Sources: ${report.colliders} colliders, ${report.terrains} terrain${report.bounded ? ', clipped to the box' : ', whole scene'}.`
+      `Sources: ${report.colliders} colliders, ${report.terrains} terrain${report.bounded ? ', clipped to the box' : ', whole scene'}. ` +
+      `${report.obstacles} obstacles carved.`
     : 'Controllers set to path walk in a straight line until this mesh exists, so nothing breaks — they just stop going around things.'
 
   return (
@@ -215,6 +231,12 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
           <PropertyRow label='Weld' hint={WELD_HINT}>{slider('weldTolerance', 0.001, 0.5, 0.001, 3)}</PropertyRow>
           <PropertyRow label='Simplify'>{slider('simplifyTolerance', 0, 0.5, 0.001, 3)}</PropertyRow>
           <PropertyRow label='Agent radius' hint={RADIUS_HINT}>{slider('agentRadius', 0, 5, 0.05)}</PropertyRow>
+          <PropertyRow label='Carve obstacles' hint={CARVE_HINT}>
+            <Toggle checked={state.carve} onChange={(c) => apply({ carve: c })} />
+          </PropertyRow>
+          {state.carve && (
+            <PropertyRow label='Agent height' hint={HEIGHT_HINT}>{slider('agentHeight', 0.5, 5, 0.05)}</PropertyRow>
+          )}
           <PropertyRow label='Terrain' hint={TERRAIN_HINT}>
             <span className='flex items-center gap-2'>
               <Toggle checked={state.includeTerrain} onChange={(c) => setState({ ...state, includeTerrain: c })} />

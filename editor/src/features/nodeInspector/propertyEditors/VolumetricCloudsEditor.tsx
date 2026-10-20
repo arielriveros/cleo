@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { VolumetricCloudsNode } from 'cleo'
+import { VolumetricCloudsNode, VOLUMETRIC_CLOUDS_PRESETS, type VolumetricCloudsPreset } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
 import AxisInput from '../../../components/AxisInput'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { useEventBus } from '../../EventBusContext'
-import { Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
+import { MenuItem, Popover, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
 import { CloudsIcon } from '../sectionIcons'
 
 type Vec3 = [number, number, number]
@@ -81,8 +81,29 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
 
   const header = (label: string) => <div className={cn(sectionTitleClass, 'mt-3 mb-1')}>{label}</div>
 
+  const applyPreset = (p: VolumetricCloudsPreset) => {
+    props.node.applyPreset(p)
+    setState(readNode(props.node))
+    eventEmitter.emit('SCENE_CHANGED')
+  }
+
+  const presets = (
+    <Popover title='Cloud presets' align='right' className='p-1 w-[260px] max-h-[420px] overflow-y-auto'
+             trigger={<span className='px-1 text-ui text-muted hover:text-fg'>Presets ▾</span>}>
+      {close => (
+        <div className='flex flex-col'>
+          {VOLUMETRIC_CLOUDS_PRESETS.map(p => (
+            <MenuItem key={p.id} hint={p.description} onClick={() => { applyPreset(p); close() }}>
+              {p.label}
+            </MenuItem>
+          ))}
+        </div>
+      )}
+    </Popover>
+  )
+
   return (
-    <Collapsable title='Volumetric Clouds' icon={<CloudsIcon />} persistKey='volumetricClouds'>
+    <Collapsable title='Volumetric Clouds' icon={<CloudsIcon />} persistKey='volumetricClouds' right={presets}>
       <div className='w-full p-2'>
         {check('Enabled', 'enabled')}
         {slider('Opacity', 'opacity', 0, 1, 0.01)}

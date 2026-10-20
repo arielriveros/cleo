@@ -149,8 +149,40 @@ expressible.
 | **Max slope** | `45°` | Steepest walkable incline. |
 | **Weld tolerance** | `0.01` | The grid coincident vertices snap to. Load-bearing, not an optimisation — without it, surfaces that visually touch stay disconnected. |
 | **Simplify tolerance** | `0.001` | How straight a contour has to be to drop a vertex. |
-| **Agent radius** | `0.4` | Pulls the walkable area back from walls. |
+| **Agent radius** | `0.4` | Clearance: carving pads every obstacle by it, and paths keep it off the corners they hug. |
+| **Carve obstacles** | on | Cuts static solids out of the floor (see below). |
+| **Agent height** | `1.8` | Headroom. Something higher than this above the floor, such as a lintel, does not carve it. |
 | **Include terrain** + **terrain step** | | Whether the heightfield is sampled, and how coarsely. |
+
+The step height (`stepHeight`, `0.3`) is stored with the bake but has no row: an obstacle that rises
+less than this above the floor is stepped over, not carved around.
+
+### Obstacle carving
+
+Without carving, the floor under a wall, a pillar or a building stays walkable. Paths then run
+straight through solids, and only steering avoidance keeps agents off them. With **Carve obstacles**
+on, the bake removes every floor point that has something solid within **agent radius** of it,
+between **step height** and **agent height** above it. Heights are measured from the floor's own
+slope, so:
+
+- a ramp does not carve itself, or the floor at its foot,
+- a ledge does not eat the top of the ramp that climbs it.
+
+What carves:
+
+- **Static colliders** of any shape, spheres and capsules included.
+- **Collidable foliage instances** inside the volume, such as tree trunks, posed exactly as their
+  physics bodies.
+
+What does not carve:
+
+- **Dynamic bodies** (mass above 0), which move away from where they were baked.
+- **Ghosts** (`simulatePhysics: false`).
+- **Any node with a boolean variable `navObstacle` set to `false`.** Use this for a gate or door that
+  opens, or its route stays closed for good.
+
+> Surfaces that **overlap** without sharing an edge are separate islands. A ramp lying on a floor is
+> one example, and the bake does not stitch them. Model the junction so the two meet along an edge.
 
 **Bake** reports regions, walkable and rejected triangles, colliders, terrains and milliseconds, and
 says whether it was clipped to the box or covered the whole scene. **Clear** discards it.

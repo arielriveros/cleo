@@ -81,6 +81,27 @@ describe('scalars and vectors', () => {
         set.set('u_test.u_enabled', true);
         expect(intsOf(set)[0]).toBe(1);
     });
+
+    // A custom material's bool is lowered to `int <name>_b` for naga, and the renderer still writes the
+    // bare name. Missing this left the Valley pond's probe reflection off on WebGPU.
+    it('reaches a lowered bool member by its bare name', () => {
+        const set = new UniformSet(layout([
+            { name: 'global.u_useEnvMap_b', type: 'i32', offset: 0, size: 4 },
+            { name: 'global.u_tint_b', type: 'f32', offset: 4, size: 4 },
+        ]), ALLOCATOR);
+        expect(set.set('u_useEnvMap', true)).toBe(true);
+        expect(intsOf(set)[0]).toBe(1);
+        // Only integers: a float that merely ends in `_b` is not a lowered flag.
+        expect(set.has('u_tint')).toBe(false);
+    });
+
+    it('reaches a member naga suffixed for ending in a digit', () => {
+        const set = new UniformSet(layout([
+            { name: 'global_3.u_ripple0_', type: 'vec4<f32>', offset: 0, size: 16 },
+        ]), ALLOCATOR);
+        expect(set.set('u_ripple0', [1, 2, 3, 4])).toBe(true);
+        expect(Array.from(floatsOf(set).slice(0, 4))).toEqual([1, 2, 3, 4]);
+    });
 });
 
 describe('matrices', () => {

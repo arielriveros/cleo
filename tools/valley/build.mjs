@@ -81,9 +81,11 @@ const TERRAIN_TEX = {
 }
 
 /** A PBR material in Material.serialize()'s shape, with only the slots that are given. */
-function pbrMaterial({ diff, nor, arm, rough, mask, side = 'front', roughness = 1, castShadow = true, tint = [1, 1, 1] }) {
+function pbrMaterial({ diff, nor, arm, rough, mask, side = 'front', roughness = 1, castShadow = true, tint = [1, 1, 1], wind }) {
   return {
     type: 'pbr', baseColor: tint, metallic: 0, roughness, reflectance: 0.5, opacity: 1,
+    // Material.parse reads windStrength/windStiffness/windRole/windFlutter off the top level.
+    ...(wind ?? {}),
     ...(mask ? { alphaCutoff: 0.5 } : {}),
     emissiveFactor: [0, 0, 0], emissiveIntensity: 1,
     textures: {
@@ -111,17 +113,23 @@ const GRASS_MAT = libraryMaterial('grass', 'Meadow Grass', `${FOLIAGE}/Materials
   arm: tex('grass_arm.jpg', `${FOLIAGE}/Textures`, 'Grass ARM'),
   mask: tex('grass_mask.png', `${FOLIAGE}/Textures`, 'Grass Mask'),
   side: 'double', castShadow: false,
+  // Soft meadow grass: a fifth of its height at full gust, little stiffness.
+  wind: { windStrength: 0.2, windStiffness: 0.6 },
 }))
 const BARK_MAT = libraryMaterial('pine-bark', 'Pine Bark', `${FOLIAGE}/Materials`, pbrMaterial({
   diff: tex('pine_bark_diff.jpg', `${FOLIAGE}/Textures`, 'Pine Bark Base Color'),
   nor: tex('pine_bark_nor.png', `${FOLIAGE}/Textures`, 'Pine Bark Normal'),
   roughness: 0.85, side: 'double',
+  // A pine layer bends as one plant (the strongest of its materials), so bark and needles share the lean.
+  wind: { windStrength: 0.025, windStiffness: 2.2 },
 }))
 const NEEDLES_MAT = libraryMaterial('pine-needles', 'Pine Needles', `${FOLIAGE}/Materials`, pbrMaterial({
   diff: tex('pine_needles_diff.jpg', `${FOLIAGE}/Textures`, 'Pine Needles Base Color'),
   nor: tex('pine_needles_nor.png', `${FOLIAGE}/Textures`, 'Pine Needles Normal'),
   mask: tex('pine_needles_mask.png', `${FOLIAGE}/Textures`, 'Pine Needles Mask'),
   roughness: 0.75, side: 'double',
+  // The needles add their own sprig sway and flutter on top of the trunk's sway.
+  wind: { windStrength: 0.025, windStiffness: 2.2, windRole: 'leaves', windFlutter: 0.45 },
 }))
 
 const BOARDS = {
@@ -584,6 +592,49 @@ function pondProbe() {
   return probe
 }
 
+/**
+ * The navmesh, baked as the editor's Bake button would: the terrain inside the volume at a 2 m step (the
+ * full 2049-sample landscape would be eight million triangles), the static colliders, and every pine
+ * trunk and building carved out. Floaters (dynamic) and characters are left out.
+ *
+ * Not 4 m: the fog-gate notch is about 4 m wide, and a 4 m grid samples its cliff walls into the floor
+ * as 50-degree slopes, cutting the boss plaza off from the rest of the valley.
+ */
+function bakeValleyNavMesh(root, navMesh) {
+  const volume = { position: navMesh.position, size: navMesh.size }
+  const STEP = 2
+  const lo = [0, 2].map(a => Math.floor((volume.position[a] - volume.size[a] / 2) / STEP) * STEP)
+  const hi = [0, 2].map(a => Math.ceil((volume.position[a] + volume.size[a] / 2) / STEP) * STEP)
+  const terrain = []
+  for (let z = lo[1]; z < hi[1]; z += STEP) for (let x = lo[0]; x < hi[0]; x += STEP) {
+    const a = [x, heights.heightAt(x, z), z], b = [x, heights.heightAt(x, z + STEP), z + STEP]
+    const c = [x + STEP, heights.heightAt(x + STEP, z + STEP), z + STEP], d = [x + STEP, heights.heightAt(x + STEP, z), z]
+    // Wound as heightfieldSoup winds, so the normal points up: a -> c -> d and a -> b -> c.
+    terrain.push(...a, ...c, ...d, ...a, ...b, ...c)
+  }
+  const soup = { positions: new Float32Array(terrain), indices: new Uint32Array(0) }
+
+  const { gather, bakeInto, sources } = souls.navBaker
+  const { surface, obstacles } = gather(root, { skip: n => souls.isMover(n) || n.body?.mass > 0 })
+  const inside = (x, z, m) => Math.abs(x - volume.position[0]) < volume.size[0] / 2 + m && Math.abs(z - volume.position[2]) < volume.size[2] / 2 + m
+  let trunks = 0
+  for (const layer of foliageLayers) {
+    if (!layer.collision) continue
+    const bytes = Buffer.from(layer.instances, 'base64')
+    const all = new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+    const kept = []
+    for (let i = 0; i + 4 < all.length; i += 5) if (inside(all[i], all[i + 2], 2)) kept.push(...all.subarray(i, i + 5))
+    const carved = sources.foliageNavObstacles(kept, layer.collision)
+    trunks += carved.length
+    obstacles.push(...carved)
+  }
+  const baked = bakeInto(navMesh, { surface, soups: [soup], obstacles, volume })
+  log('navmesh', `${baked.regions} regions from ${baked.triangles} triangles, ${baked.obstacles} obstacles (${trunks} trunks), ${baked.ms} ms, ${mb(baked.bytes)}`)
+}
+
+/** Where the valley's wind blows TOWARD: degrees counter-clockwise from +X (WindNode's convention). */
+const WIND_DIRECTION = 25
+
 function valleyScene() {
   const sun = souls.sourceNode('light')
   sun.name = 'Sun'
@@ -596,6 +647,13 @@ function valleyScene() {
   Object.assign(sky.atmosphere, { fogStart: 250, fogDensity: 0.0005, fogHeight: 150, fogMaxOpacity: 0.55, godRayMaxDistance: 160 })
   const clouds = souls.sourceNode('volumetric clouds')
   clouds.id = id('clouds')
+  // One wind for the whole valley: the grass and pines sway with it, and the clouds drift the same way.
+  const wind = node('Wind', 'wind', {
+    id: id('wind'),
+    wind: { direction: WIND_DIRECTION, strength: 1, gustScale: 22, gustSpeed: 5, fadeStart: 35, fadeEnd: 70 },
+  })
+  const windRad = WIND_DIRECTION * Math.PI / 180
+  clouds.clouds = { ...clouds.clouds, windDirection: [Math.round(Math.cos(windRad) * 1000) / 1000, 0, Math.round(-Math.sin(windRad) * 1000) / 1000] }
 
   const placedBuildings = buildings.map(b => placedBuilding(b, propAssets[props.indexOf(b.prop)]))
 
@@ -671,6 +729,7 @@ function valleyScene() {
     id: id('navmesh'), position: [0, 20, -20], bake: {}, agentRadius: 0.45, size: [300, 80, 260],
   })
 
+
   const root = node('root', 'node', {
     id: id('root'),
     children: [
@@ -678,7 +737,7 @@ function valleyScene() {
         id: soulsId('manager'), children: [souls.banner(), souls.soundsGroup('manager', souls.SOUNDS.manager, { music: souls.MUSIC_CUES })],
       }), 'SoulsGameManager'),
       linkInstance(LEVEL.player, player),
-      sun, sky, clouds,
+      sun, sky, clouds, wind,
       landscapeNode(),
       souls.group('water', 'Water', [pondWater(), pondProbe(), pondVolume(), pondZone(), ...floaters()]),
       souls.group('buildings', 'Buildings', placedBuildings),
@@ -689,6 +748,8 @@ function valleyScene() {
     ],
     ambientLight: [9000, 9500, 11000],
   })
+
+  bakeValleyNavMesh(root, navMesh)
 
   const config = clone(souls.sourceScene.config)
   Object.assign(config.render, {

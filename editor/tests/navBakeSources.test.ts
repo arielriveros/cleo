@@ -134,16 +134,19 @@ describe('gatherNavSoup', () => {
     expect(gatherNavSoup(root, { bodies, includeTerrain: false }).colliders).toBe(0)
   })
 
-  // A sphere has no surface an agent can stand on, and subtracting it as an obstacle is an operation
-  // the baker does not do -- so including it would contribute a degenerate patch at the apex.
-  it('skips spheres and capsules', () => {
+  // A sphere has no surface an agent can stand on -- tessellating it would add a degenerate patch at
+  // the apex -- but it is still solid, so it comes back as an obstacle to carve.
+  it('takes no surface from spheres and capsules, only obstacles', () => {
     const body = box(1, 1, 1)
     body.shapes = [
       { type: 'sphere', offset: [0, 0, 0], rotation: [0, 0, 0], radius: 2 },
       { type: 'capsule', offset: [0, 0, 0], rotation: [0, 0, 0], radius: 1, height: 4, numSegments: 8 },
     ] as BodyDescription['shapes']
     const { root, bodies } = sceneWith(() => {}, body)
-    expect(gatherNavSoup(root, { bodies, includeTerrain: false }).colliders).toBe(0)
+    const gathered = gatherNavSoup(root, { bodies, includeTerrain: false })
+    expect(gathered.colliders).toBe(0)
+    expect(gathered.soup.positions.length).toBe(0)
+    expect(gathered.obstacles).toHaveLength(2)
   })
 
   it('bakes two abutting floors into one connected surface', () => {
@@ -250,5 +253,38 @@ describe('gatherNavSoup with a bake volume', () => {
     const clipped = gatherNavSoup(root, { bodies, includeTerrain: false, volume: nav.invVolumeMatrix })
     expect(clipped.clippedTriangles).toBeLessThan(whole.clippedTriangles)
     expect(clipped.clippedTriangles).toBeGreaterThan(0)
+  })
+})
+
+describe('gatherNavSoup obstacles', () => {
+  /** A floor plus one more collider node, configured by the caller. */
+  function floorAnd(configure: (node: Node) => void, body: BodyDescription) {
+    const root = new Node('root')
+    const floor = new Node('floor')
+    const other = new Node('other')
+    root.addChild(floor)
+    root.addChild(other)
+    floor.setPosition([0, -0.25, 0])
+    configure(other)
+    root.updateTransforms()
+    return gatherNavSoup(root, {
+      bodies: new Map([[floor.id, box(10, 0.5, 10)], [other.id, body]]),
+      includeTerrain: false,
+    })
+  }
+
+  it('hands back every static collider, and a pillar carves the floor around it', () => {
+    const gathered = floorAnd(n => n.setPosition([0, 1.5, 0]), box(1, 3, 1))
+    expect(gathered.obstacles).toHaveLength(2)
+
+    const result = bakeNavMesh(gathered.soup, undefined, { obstacles: gathered.obstacles, agentRadius: 0.5 })
+    const plain = bakeNavMesh(gathered.soup)
+    expect(result.regions).toBeGreaterThan(plain.regions)
+  })
+
+  it('skips dynamic bodies, ghosts and nodes flagged navObstacle = false', () => {
+    expect(floorAnd(() => {}, box(1, 3, 1, { mass: 5 })).obstacles).toHaveLength(1)
+    expect(floorAnd(() => {}, box(1, 3, 1, { simulatePhysics: false })).obstacles).toHaveLength(1)
+    expect(floorAnd(n => n.setVariable('navObstacle', false, 'boolean'), box(1, 3, 1)).obstacles).toHaveLength(1)
   })
 })

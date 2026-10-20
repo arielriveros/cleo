@@ -1,9 +1,10 @@
-import { mat4, quat, vec3 } from 'gl-matrix'
+import { mat4, vec3 } from 'gl-matrix'
 import {
-  LandscapeNode, Node, clipSoupToVolume, heightfieldSoup, isEditorOwnedName, mergeSoups, tessellateSources,
+  LandscapeNode, Node, clipSoupToVolume, foliageNavObstacles, heightfieldSoup, isEditorOwnedName, mergeSoups,
+  navObstacleFor, navSourceForShape, tessellateSources,
 } from 'cleo'
-import type { NavSource, TriangleSoup } from 'cleo'
-import type { BodyDescription, ShapeDescription } from '../features/engineContextTypes'
+import type { NavObstacle, NavSource, TriangleSoup } from 'cleo'
+import type { BodyDescription } from '../features/engineContextTypes'
 
 /**
  * Turning the scene the author is looking at into the triangle soup `bakeNavMesh` wants.
@@ -24,12 +25,21 @@ import type { BodyDescription, ShapeDescription } from '../features/engineContex
  *
  * `applyShapeTransform` in editorHelpers is the reference, and it is the order cannon uses: a shape's
  * OFFSET is scaled by the owner's world scale and then rotated, while the shape's DIMENSIONS take that
- * same scale directly. So the node's scale is folded into the primitive's size here rather than into
- * the matrix -- putting it in both is how a collider ends up the square of its intended size.
+ * same scale directly. So the node's scale is folded into the primitive's size rather than into the
+ * matrix -- putting it in both is how a collider ends up the square of its intended size. That rule
+ * now lives in the engine as `navSourceForShape`, so the headless example generators bake with it too.
+ *
+ * ## Obstacles
+ *
+ * Every STATIC solid is also handed back as an obstacle for `bakeNavMesh` to carve out of the floor,
+ * spheres and capsules included. Left out: dynamic bodies (mass > 0), which move away from where they
+ * were baked; ghosts (`simulatePhysics: false`), which nothing collides with; and any node whose
+ * variable `navObstacle` is `false` -- a gate that opens, which would otherwise close its route for
+ * good. A body can still be walked ON when it is not an obstacle.
+ *
+ * Collidable foliage (a forest's trunks) carves too, posed as `foliageColliderPose` poses its bodies --
+ * but only instances inside the bake volume, since a terrain can carry a hundred thousand of them.
  */
-
-/** Degrees, matching Node.rotation and ShapeDescription.rotation. */
-const DEG2RAD = Math.PI / 180
 
 /**
  * Node position + rotation, with SCALE DELIBERATELY LEFT OUT.
@@ -39,61 +49,6 @@ const DEG2RAD = Math.PI / 180
  */
 function rigidWorldMatrix(node: Node): mat4 {
   return mat4.fromRotationTranslation(mat4.create(), node.worldQuaternion, node.worldPosition)
-}
-
-/** The shape's own placement inside its body: offset scaled by the owner, then the shape's rotation. */
-function shapeLocalMatrix(shape: ShapeDescription, scale: vec3): mat4 {
-  const sx = Math.abs(scale[0]), sy = Math.abs(scale[1]), sz = Math.abs(scale[2])
-  const rotation = quat.fromEuler(
-    quat.create(), shape.rotation[0], shape.rotation[1], shape.rotation[2])
-  return mat4.fromRotationTranslation(mat4.create(), rotation, [
-    shape.offset[0] * sx, shape.offset[1] * sy, shape.offset[2] * sz,
-  ])
-}
-
-/**
- * One collider as a placed primitive, or null when it contributes no walkable surface.
- *
- * Spheres and capsules return null on purpose: neither offers a surface an agent can stand on, and
- * subtracting them as obstacles is an operation the baker does not do -- so including them would add
- * a degenerate patch at the apex and nothing else.
- */
-function sourceFor(shape: ShapeDescription, world: mat4, scale: vec3): NavSource | null {
-  const transform = mat4.multiply(mat4.create(), world, shapeLocalMatrix(shape, scale))
-  const sx = Math.abs(scale[0]), sy = Math.abs(scale[1]), sz = Math.abs(scale[2])
-
-  switch (shape.type) {
-    case 'box':
-      return {
-        primitive: { kind: 'box', size: [shape.width * sx, shape.height * sy, shape.depth * sz] },
-        transform,
-      }
-    case 'cylinder': {
-      const radial = Math.max(sx, sz)
-      return {
-        primitive: {
-          kind: 'cylinder',
-          radius: shape.radius * radial,
-          height: shape.height * sy,
-          segments: shape.numSegments,
-        },
-        transform,
-      }
-    }
-    case 'convex':
-      // Hull vertices are authored in the node's local space, so the node scale belongs in the matrix
-      // for this one -- there is no scalar dimension to fold it into.
-      return {
-        primitive: { kind: 'convex', vertices: shape.vertices, faces: shape.faces },
-        transform: mat4.scale(transform, transform, [sx, sy, sz]),
-      }
-    case 'plane':
-      // cannon's plane is an infinite half-space. `extent` is how much of it is worth emitting; a
-      // navmesh over a genuinely infinite floor is not a thing anyone wants baked.
-      return { primitive: { kind: 'plane', extent: 100 }, transform }
-    default:
-      return null
-  }
 }
 
 export interface NavBakeGatherOptions {
@@ -118,6 +73,35 @@ export interface NavBakeGatherResult {
   terrains: number
   /** Triangles left after the bake volume clipped the gathered soup. */
   clippedTriangles: number
+  /** Static solids for the bake to carve; not clipped, since one just outside the box still pads in. */
+  obstacles: NavObstacle[]
+}
+
+/** A landscape's collidable foliage instances inside the volume (with a margin), as obstacles. */
+function foliageObstaclesOf(node: LandscapeNode, volume: mat4 | null): NavObstacle[] {
+  const out: NavObstacle[] = []
+  const record = [0, 0, 0, 0, 0]
+  const local = vec3.create()
+  for (const layer of node.terrain.foliage) {
+    if (!layer.collision) continue
+    const kept: number[] = []
+    for (let i = 0; i < layer.count; i++) {
+      if (!layer.instanceAt(i, record)) break
+      if (volume) {
+        vec3.transformMat4(local, vec3.set(local, record[0], record[1], record[2]), volume)
+        if (Math.abs(local[0]) > 0.55 || Math.abs(local[1]) > 0.55 || Math.abs(local[2]) > 0.55) continue
+      }
+      kept.push(...record)
+    }
+    out.push(...foliageNavObstacles(kept, layer.collision))
+  }
+  return out
+}
+
+/** The opt-out an author sets on a node -- a gate that opens -- to keep it from carving the floor. */
+function isNavObstacle(node: Node, body: BodyDescription): boolean {
+  if (body.mass > 0 || body.simulatePhysics === false) return false
+  return node.getVariable('navObstacle') !== false
 }
 
 /**
@@ -131,6 +115,7 @@ export function gatherNavSoup(root: Node, options: NavBakeGatherOptions): NavBak
   const { bodies, includeTerrain = true, terrainStep = 2, volume = null } = options
   const sources: NavSource[] = []
   const soups: TriangleSoup[] = []
+  const obstacles: NavObstacle[] = []
   let colliders = 0
   let terrains = 0
 
@@ -144,12 +129,26 @@ export function gatherNavSoup(root: Node, options: NavBakeGatherOptions): NavBak
       if (body && body.shapes.length > 0) {
         const world = rigidWorldMatrix(node)
         const scale = node.worldScale
+        const carves = isNavObstacle(node, body)
         let contributed = false
         for (const shape of body.shapes) {
-          const source = sourceFor(shape, world, scale)
-          if (source) { sources.push(source); contributed = true }
+          const source = navSourceForShape(shape, world, scale)
+          if (!source) continue
+          // A sphere or capsule is solid but has no floor: an obstacle, never a contributor.
+          if (source.primitive.kind !== 'sphere' && source.primitive.kind !== 'capsule') {
+            contributed = true
+            sources.push(source)
+          }
+          if (carves) {
+            const obstacle = navObstacleFor(source)
+            if (obstacle) obstacles.push(obstacle)
+          }
         }
         if (contributed) colliders++
+      }
+
+      if (node instanceof LandscapeNode && node.terrain.foliageColliders.enabled) {
+        obstacles.push(...foliageObstaclesOf(node, volume))
       }
 
       if (includeTerrain && node instanceof LandscapeNode) {
@@ -174,5 +173,5 @@ export function gatherNavSoup(root: Node, options: NavBakeGatherOptions): NavBak
   // terrain gathering ever shows up in a profile -- but the bake is a one-shot button and the live
   // preview re-clips a cached soup, so today it would buy nothing and split the clipping logic in two.
   const soup = clipSoupToVolume(mergeSoups(soups), volume)
-  return { soup, colliders, terrains, clippedTriangles: soup.positions.length / 9 }
+  return { soup, colliders, terrains, clippedTriangles: soup.positions.length / 9, obstacles }
 }

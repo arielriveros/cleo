@@ -1178,6 +1178,9 @@ export class ControllerNode extends Node {
         const from = pawn.worldPosition;
         const to = target.worldPosition;
         if (name === 'distanceToTarget') return Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+        if (name === 'planarDistanceToTarget') return Math.hypot(to[0] - from[0], to[2] - from[2]);
+        // Positive when the target is above. World Y, which is the navigable up (`isNavigableUp`).
+        if (name === 'heightToTarget') return to[1] - from[1];
         if (name === 'angleToTarget') {
             const forward = pawn.worldForward;
             const heading = Math.atan2(to[0] - from[0], to[2] - from[2]);

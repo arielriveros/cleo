@@ -2193,6 +2193,7 @@ export class Renderer {
             break;
         }
         this._shadowLight = shadowLight; // post passes (volumetric god rays) need the sun
+        this._prepareCloudShadow(scene);
 
         // Foliage GPU state must be current BEFORE the shadow pass, which can now draw it. Timed under
         // its own scope: a layer whose prototypes were just re-derived re-uploads every cell here, and
@@ -4474,6 +4475,49 @@ export class Renderer {
     private static readonly MAX_SUN_PENUMBRA_SCALE = 8;
 
 
+    // Cloud-shadow uniforms (chunks/shadows.wgsl `cleoCloudShadow`), refreshed once per frame.
+    private readonly _cloudShadowSun = [0, 0, 0, 0];
+    private readonly _cloudShadowSlab = [0, 0, 0, 0];
+    private readonly _cloudShadowShape = [0, 0, 0, 0];
+    private readonly _cloudShadowWind = [0, 0, 0, 0];
+    /** Optical depth a cloud of unit absorption casts per unit of column density. Tuned by eye. */
+    private static readonly CLOUD_SHADOW_EXTINCTION = 6;
+
+    /**
+     * Cloud shadows are on while the Sky Light asks for them and the scene has visible clouds. They
+     * follow the scene's sun, not the clouds' own light override: the ground is lit by the scene sun.
+     * Strength 0 (in `.w`) is what turns the shader's evaluation off entirely.
+     */
+    private _prepareCloudShadow(scene: Scene): void {
+        const sun = this._cloudShadowSun;
+        sun[3] = 0;
+        const skyLight = scene.skyLight;
+        const clouds = scene.volumetricClouds;
+        if (this._thumbnailMode || !skyLight || !skyLight.cloudShadows || skyLight.cloudShadowStrength <= 0
+            || !clouds || !clouds.enabled || clouds.opacity <= 0 || clouds.coverage <= 0) return;
+        let light: LightNode | null = null;
+        for (const node of scene.lights) {
+            if (node.type === 'directional') { light = node; break; }
+        }
+        if (!light) return;
+        const f = light.worldForward;
+        const len = Math.hypot(f[0], f[1], f[2]) || 1;
+        sun[0] = -f[0] / len; sun[1] = -f[1] / len; sun[2] = -f[2] / len;
+        sun[3] = skyLight.cloudShadowStrength;
+
+        const slab = this._cloudShadowSlab;
+        slab[0] = clouds.baseAltitude; slab[1] = clouds.thickness; slab[2] = clouds.baseScale; slab[3] = clouds.coverage;
+        const shape = this._cloudShadowShape;
+        shape[0] = clouds.cloudType; shape[1] = clouds.anvilBias;
+        // The raymarch's own density scale, times the composite opacity: a faded-out layer casts less.
+        shape[2] = Math.min(1, Math.max(0, clouds.density / 2.5)) * clouds.opacity;
+        shape[3] = clouds.absorption * Renderer.CLOUD_SHADOW_EXTINCTION;
+        // The same wind offset the cloud pass computes from the same clock (`u_wind * windSpeed * time`).
+        const drift = clouds.windSpeed * performance.now() * 0.001;
+        const wind = this._cloudShadowWind;
+        wind[0] = clouds.windDirection[0] * drift; wind[1] = clouds.windDirection[1] * drift; wind[2] = clouds.windDirection[2] * drift;
+    }
+
     private _uploadShadowUniforms(shaderKey: string): void {
         const shader = this._shaderManager.getShader(shaderKey);
         if (!shader) return;
@@ -4503,6 +4547,12 @@ export class Renderer {
         this._shaderManager.setUniform('u_farCascadeDistance', this._farCascadeActiveDistance);
         this._shaderManager.setUniform('u_farCascadeDepthScale', this._farCascadeDepthScale);
         this._shaderManager.setUniform('u_farCascadeTexelSize', this._farCascadeTexelSize);
+
+        // Cloud shadows ride the directional term, so every program that shades with the sun gets them.
+        this._shaderManager.setUniform('u_cloudShadowSun', this._cloudShadowSun);
+        this._shaderManager.setUniform('u_cloudShadowSlab', this._cloudShadowSlab);
+        this._shaderManager.setUniform('u_cloudShadowShape', this._cloudShadowShape);
+        this._shaderManager.setUniform('u_cloudShadowWind', this._cloudShadowWind);
 
         // The sampler must point at a COMPLETE texture on every frame, shadows on or off — an
         // incomplete sampler is a draw-time error, not merely a wrong colour.

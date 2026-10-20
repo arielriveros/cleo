@@ -73,6 +73,12 @@ struct ShadowUniforms {
     u_cascadeTexelSize: array<vec4<f32>, 1>,    // world size of one shadow texel in this cascade
     u_spotShadowTexelScale: array<vec4<f32>, 1>,// per layer: 2*tan(halfFov)/resolution
 
+    // Cloud shadows (see cleoCloudShadow). `u_cloudShadowSun.w` is the strength; 0 turns them off.
+    u_cloudShadowSun: vec4<f32>,                // xyz = unit direction TOWARD the sun, w = strength
+    u_cloudShadowSlab: vec4<f32>,               // base altitude, thickness, base noise scale, coverage
+    u_cloudShadowShape: vec4<f32>,              // cloud type, anvil bias, density scale, extinction
+    u_cloudShadowWind: vec4<f32>,               // xyz = the clouds' current wind offset (world units)
+
     u_shadowTexel: vec2<f32>,                   // 1 / resolution
     u_spotShadowTexel: vec2<f32>,
     u_pointShadowTexel: vec2<f32>,
@@ -286,14 +292,102 @@ fn cleoCascadeVisibility(layer: i32, worldPos: vec3<f32>, N: vec3<f32>) -> f32 {
 #endif
 }
 
+// -------------------------------------------------------------------------------------------
+// Cloud shadows.
+//
+// The volumetric clouds' own density field, evaluated with ALU where the sun ray from a surface
+// crosses the cloud slab. No texture: the deferred pass is at its sampler limit (see group 3 above),
+// and the field is cheap to rebuild because the clouds' baked base volume IS this noise — value-noise
+// FBM, 4 octaves, period 8, sampled at texel centres. These are cleo-prefixed copies of hashCell /
+// valueNoiseTiled / fbmTiled in chunks/cloudNoiseField.wgsl and of the cheap path of sampleDensity /
+// heightGradient in volumetricClouds.wgsl, and must stay in step with them or the shadows stop lining
+// up with the clouds. Detail erosion is skipped: it moves an edge by metres, not the shadow's shape.
+// -------------------------------------------------------------------------------------------
+
+const CLEO_CLOUD_PERIOD: f32 = 8.0;
+
+fn cleoCloudHash(cell: vec3<f32>) -> f32 {
+    var c = fract(cell * 0.1031);
+    c += vec3<f32>(dot(c, c.zyx + 31.32));
+    return fract((c.x + c.y) * c.z);
+}
+
+/** Floor-mod: unlike `%`, wraps negative cells onto the same lattice the baked volume repeats. */
+fn cleoCloudWrap(i: vec3<f32>, period: f32) -> vec3<f32> {
+    return i - period * floor(i / period);
+}
+
+fn cleoCloudNoise(x: vec3<f32>, period: f32) -> f32 {
+    let i = floor(x);
+    var f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    let i0 = cleoCloudWrap(i, period);
+    let i1 = cleoCloudWrap(i + 1.0, period);
+    let nx00 = mix(cleoCloudHash(vec3<f32>(i0.x, i0.y, i0.z)), cleoCloudHash(vec3<f32>(i1.x, i0.y, i0.z)), f.x);
+    let nx10 = mix(cleoCloudHash(vec3<f32>(i0.x, i1.y, i0.z)), cleoCloudHash(vec3<f32>(i1.x, i1.y, i0.z)), f.x);
+    let nx01 = mix(cleoCloudHash(vec3<f32>(i0.x, i0.y, i1.z)), cleoCloudHash(vec3<f32>(i1.x, i0.y, i1.z)), f.x);
+    let nx11 = mix(cleoCloudHash(vec3<f32>(i0.x, i1.y, i1.z)), cleoCloudHash(vec3<f32>(i1.x, i1.y, i1.z)), f.x);
+    return mix(mix(nx00, nx10, f.y), mix(nx01, nx11, f.y), f.z);
+}
+
+/** The base volume's R channel at lattice position `p`. */
+fn cleoCloudBase(p: vec3<f32>) -> f32 {
+    var sum = 0.0;
+    var amp = 0.5;
+    var norm = 0.0;
+    var per = CLEO_CLOUD_PERIOD;
+    for (var i = 0; i < 4; i++) {
+        sum += amp * cleoCloudNoise(p * (per / CLEO_CLOUD_PERIOD), per);
+        norm += amp;
+        per *= 2.0;
+        amp *= 0.5;
+    }
+    return sum / norm;
+}
+
+fn cleoCloudHeightGradient(h: f32, cloudType: f32, anvilBias: f32) -> f32 {
+    let topEnd = mix(0.25, 1.0, cloudType);
+    let bottom = smoothstep(0.0, 0.12, h);
+    let top = 1.0 - smoothstep(topEnd * 0.6, topEnd, h);
+    let anvil = 1.0 + anvilBias * smoothstep(0.5, 1.0, h) * 1.5;
+    return clamp(bottom * top, 0.0, 1.0) * anvil;
+}
+
+/** Cloud density where the sun ray from `worldPos` crosses height fraction `h` of the slab. */
+fn cleoCloudDensityAt(worldPos: vec3<f32>, toSun: vec3<f32>, h: f32) -> f32 {
+    let slab = u_shadow.u_cloudShadowSlab;
+    let shape = u_shadow.u_cloudShadowShape;
+    let t = (slab.x + h * slab.y - worldPos.y) / toSun.y;
+    if (t <= 0.0) { return 0.0; }
+    let p = worldPos + toSun * t + u_shadow.u_cloudShadowWind.xyz;
+    let base = cleoCloudBase(p * slab.z);
+    let cov = clamp(slab.w * (1.0 + h * shape.y * 0.6), 0.0, 1.0);
+    let hg = cleoCloudHeightGradient(h, shape.x, shape.y);
+    return clamp(smoothstep(1.0 - cov, 1.0, base) * hg, 0.0, 1.0) * hg * shape.z;
+}
+
+/** Fraction of the sun that gets through the clouds to `worldPos`, 1 = clear sky. */
+fn cleoCloudShadow(worldPos: vec3<f32>) -> f32 {
+    let sun = u_shadow.u_cloudShadowSun;
+    if (sun.w <= 0.0 || sun.y <= 0.01) { return 1.0; }
+    // Two samples inside the part of the slab this cloud type actually fills.
+    let topEnd = mix(0.25, 1.0, u_shadow.u_cloudShadowShape.x);
+    let d = 0.5 * (cleoCloudDensityAt(worldPos, sun.xyz, topEnd * 0.3)
+                 + cleoCloudDensityAt(worldPos, sun.xyz, topEnd * 0.6));
+    // A low sun crosses more cloud, so the shadow deepens as it sets.
+    let transmittance = exp(-d * u_shadow.u_cloudShadowShape.w / max(sun.y, 0.2));
+    return mix(1.0, transmittance, sun.w);
+}
+
 /**
  * Shadow amount at `worldPos` — 0 is fully lit, 1 is fully shadowed (multiply light by 1 - this).
  * `viewDepth` is the positive distance in front of the camera; `N` the shading normal.
  */
 fn directionalShadow(worldPos: vec3<f32>, N: vec3<f32>, viewDepth: f32) -> f32 {
-    if (u_shadow.u_shadowsEnabled == 0 || u_shadow.u_cascadeCount <= 0) { return 0.0; }
+    // Cloud shadows do not depend on the shadow maps, so they still land with cascades off or out of range.
+    if (u_shadow.u_shadowsEnabled == 0 || u_shadow.u_cascadeCount <= 0) { return 1.0 - cleoCloudShadow(worldPos); }
     let fade = cleoShadowFade(viewDepth);
-    if (fade <= 0.0) { return 0.0; }
+    if (fade <= 0.0) { return 1.0 - cleoCloudShadow(worldPos); }
 
     let layer = cleoCascadeCovering(viewDepth, worldPos);
     var vis = cleoCascadeVisibility(layer, worldPos, N);
@@ -314,7 +408,7 @@ fn directionalShadow(worldPos: vec3<f32>, N: vec3<f32>, viewDepth: f32) -> f32 {
         }
     }
 
-    return (1.0 - vis) * u_shadow.u_shadowStrength * fade;
+    return 1.0 - (1.0 - (1.0 - vis) * u_shadow.u_shadowStrength * fade) * cleoCloudShadow(worldPos);
 }
 
 /**

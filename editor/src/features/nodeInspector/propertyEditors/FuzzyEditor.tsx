@@ -36,8 +36,8 @@ const DEFUZ_HINT = 'How the fired rules collapse to one number. maxav averages e
 
 /** Names a variable can carry and be fed automatically. Mirrors the engine's resolution order. */
 const KNOWN_INPUTS = [
-  'distanceToTarget', 'angleToTarget', 'timeSinceSeen', 'lastKnownDistance', 'pathRemaining',
-  'stateTime', 'neighborCount',
+  'distanceToTarget', 'planarDistanceToTarget', 'heightToTarget', 'angleToTarget', 'timeSinceSeen',
+  'lastKnownDistance', 'pathRemaining', 'stateTime', 'neighborCount',
   'planarSpeed', 'currentSpeed', 'verticalSpeed', 'stillTime', 'movingTime', 'airTime',
   'groundedTime', 'groundDistance', 'slopeAngle', 'turnRate',
 ]

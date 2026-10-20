@@ -24,7 +24,7 @@ import {
   foliageColliderPose,
 } from 'cleo';
 import type { FoliageCollision } from 'cleo';
-import type { TriangleSoup } from 'cleo';
+import type { NavObstacle, TriangleSoup } from 'cleo';
 import { CameraGeometry } from './EditorModels';
 import { gatherNavSoup } from './navBakeSources';
 import { boundedBox, navPreviewSignature, planNavOverlays } from './navOverlayPlan';
@@ -820,7 +820,7 @@ function ensureNavMeshDebug(scene: Scene, navMesh: any) {
  * someone drags a gizmo. The volume clip and the slope filter run against this on every reconcile;
  * only {@link invalidateNavSoup} forces the walk again.
  */
-const navSoupCache = new WeakMap<Scene, TriangleSoup>();
+const navSoupCache = new WeakMap<Scene, { soup: TriangleSoup; obstacles: NavObstacle[] }>();
 
 /**
  * Drop the cached soup, so the next preview re-walks the scene.
@@ -836,14 +836,16 @@ export function invalidateNavSoup(scene: Scene | null | undefined) {
 
 /** What an unselected navmesh's plan is given: planNavOverlays returns before reading it. */
 const EMPTY_SOUP = { positions: new Float32Array(0) } as unknown as TriangleSoup;
+const EMPTY_GATHER = { soup: EMPTY_SOUP, obstacles: [] as NavObstacle[] };
 
-function navSoupFor(scene: Scene, bodies: Map<string, BodyDescription>): TriangleSoup {
-  let soup = navSoupCache.get(scene);
-  if (!soup) {
-    soup = gatherNavSoup(scene.root, { bodies }).soup;
-    navSoupCache.set(scene, soup);
+function navSoupFor(scene: Scene, bodies: Map<string, BodyDescription>): { soup: TriangleSoup; obstacles: NavObstacle[] } {
+  let gathered = navSoupCache.get(scene);
+  if (!gathered) {
+    const { soup, obstacles } = gatherNavSoup(scene.root, { bodies });
+    gathered = { soup, obstacles };
+    navSoupCache.set(scene, gathered);
   }
-  return soup;
+  return gathered;
 }
 
 /**
@@ -1104,7 +1106,8 @@ export function reconcileEditorHelpers(
     // The soup only when the plan will use it: re-gathering the whole level's colliders for an UNSELECTED
     // navmesh — on every structural change, which in play mode is every spawned effect — was pure waste.
     const selected = navMesh.id === selectedId;
-    const plan = planNavOverlays(navMesh, selected ? navSoupFor(scene, bodies) : EMPTY_SOUP, selected);
+    const gathered = selected ? navSoupFor(scene, bodies) : EMPTY_GATHER;
+    const plan = planNavOverlays(navMesh, gathered.soup, selected, gathered.obstacles);
     if (plan.box) ensureNavVolumeBox(scene, navMesh, plan.box);
     ensureNavPreview(scene, navMesh, plan);
   }

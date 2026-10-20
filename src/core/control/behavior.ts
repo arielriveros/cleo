@@ -105,6 +105,10 @@ export type BehaviorParameterSource =
 
 export const BEHAVIOR_SENSES = [
     'distanceToTarget', 'angleToTarget', 'hasTarget', 'targetVisible', 'stateTime',
+    // The ground-plane distance and the signed height difference. Melee and locomotion are planar --
+    // a target on a ledge straight overhead is 0 m away for steering and 3 m away in a straight line,
+    // and a machine banding on the straight line approaches forever, circling under it.
+    'planarDistanceToTarget', 'heightToTarget',
     // Navigation. `pathRemaining` is the distance still to WALK, which is the question a machine
     // actually wants to ask -- `distanceToTarget` is a straight line and says a wall is one metre away
     // when the way round it is thirty.
