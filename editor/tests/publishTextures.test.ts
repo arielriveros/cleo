@@ -61,8 +61,8 @@ describe('published texture references', () => {
   it('finds a terrain layer height map in the LEGACY top-level shape', () => {
     // Terrain used to serialize its height map as a top-level sibling of `textures`, because
     // Material.serialize()'s basic/blinn_phong branches had no displacement slot to put it in. Asset
-    // JSON on disk is never rewritten until the user re-saves that asset — the shipped 3d-example is
-    // still in this shape — so the collector must keep understanding it. Missing it flags the texture
+    // JSON on disk is never rewritten until the user re-saves that asset — projects saved before
+    // the change are still in this shape — so the collector must keep understanding it. Missing it flags the texture
     // as orphaned and omits it from published builds, which breaks the layer permanently.
     expect(ids({
       children: [{

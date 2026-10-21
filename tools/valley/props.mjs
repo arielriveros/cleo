@@ -11,7 +11,7 @@
 // sails stay a separate node so ValleyWindmill.ts can turn them about that axle.
 
 import path from 'path'
-import { loadAssimp, toGltf } from '../nightShift/fbxImport.mjs'
+import { loadAssimp, toGltf } from '../exampleKit/fbxImport.mjs'
 import { boundsOf, decimate, mergeByMaterial, normalizeParts, partsOf, triangles } from './meshes.mjs'
 
 /** Windmill sail hub in construction.fbx's own units (see the header). */

@@ -11,6 +11,7 @@ import { DecalNode, DECAL_RADIAL_CURVES } from '../core/scene/nodes/decalNode';
 import { SkyboxNode } from '../core/scene/nodes/skyboxNode';
 import { VolumetricCloudsNode } from '../core/scene/nodes/volumetricCloudsNode';
 import { SkyAtmosphereNode } from '../core/scene/nodes/skyAtmosphereNode';
+import { atmosphereTransmittance, shHemisphereMeans } from './cloudLighting';
 import { SpriteNode } from '../core/scene/nodes/spriteNode';
 import { Tilemap } from '../graphics/tilemap/tilemap';
 import { TilemapLayer } from '../graphics/tilemap/tilemapLayer';
@@ -5898,6 +5899,109 @@ export class Renderer {
         this._renderSelectionMask(selectedNodes, selectedSprites);
     }
 
+    /** Cloud extinction per metre at unit density and `absorption` 1 — real cumulus is ~0.02-0.1. */
+    private static readonly CLOUD_SIGMA_BASE = 0.05;
+    /** Sun transmittance at the cloud layer, cached against the inputs that produce it. */
+    private _cloudSunT: [number, number, number] = [1, 1, 1];
+    private _cloudSunTKey = '';
+
+    /**
+     * The sun and ambient light the clouds are lit by this frame.
+     *
+     * Following Hillaire 2016, the sun reaching the clouds is the sun as the atmosphere has attenuated
+     * it AT THE CLOUD ALTITUDE, so when the scene has a SkyAtmosphere the reddening and dimming toward
+     * the horizon come from the same Rayleigh/Mie medium that colours the sky — the clouds and the sky
+     * can no longer disagree at sunset, and clouds keep catching the sun a little after it has set on
+     * the ground. The transmittance is normalised by its zenith value, so a high sun reproduces the
+     * authored colour exactly. Likewise the ambient comes from the Sky Light's projection of the real
+     * sky (mean radiance of each hemisphere) when there is one and `useSkyAmbient` is on.
+     *
+     * Without those nodes the authored colours are tinted by hand-tuned day/sunset/night curves of the
+     * sun's elevation, which is all the information there is.
+     */
+    private _cloudLightInputs(scene: Scene, node: VolumetricCloudsNode, sunDir: ArrayLike<number>,
+                              sunColor: ArrayLike<number>) {
+        // u_sunDir is the sun's TRAVEL direction, so toward-sun elevation is -y.
+        const invLen = 1 / (Math.hypot(sunDir[0], sunDir[1], sunDir[2]) || 1);
+        const toSun = [-sunDir[0] * invLen, -sunDir[1] * invLen, -sunDir[2] * invLen];
+        const elevation = toSun[1];
+        const smooth01 = (a: number, b: number, x: number) => {
+            const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+            return t * t * (3 - 2 * t);
+        };
+        const day = smooth01(0.08, 0.35, elevation);         // 1 = sun clearly above the horizon
+        const night = 1 - smooth01(-0.22, -0.03, elevation); // 1 = sun clearly below it
+        const sunset = (1 - day) * (1 - night);              // peaks with the sun on the horizon
+        const mix1 = (a: number, b: number, t: number) => a + (b - a) * t;
+        const sunsetColor = node.sunsetColor;                // user-set sunrise/sunset glow color
+        // Softer cast of the sunset color (pulled halfway toward white) for the indirect terms.
+        const sunsetCast = [0, 1, 2].map(i => mix1(sunsetColor[i], 1, 0.45));
+        const NIGHT_AMBIENT = [0.30, 0.36, 0.55];  // cool moonlit cast
+        const NIGHT_SUN_DIM = 0.04, NIGHT_AMBIENT_DIM = 0.15, NIGHT_GROUND_DIM = 0.12;
+
+        let effSunColor: number[];
+        let effSunIntensity: number;
+        const atmo = scene.skyAtmosphere;
+        if (atmo) {
+            const rs = atmo.rayleighScatter;
+            const params = {
+                // The same coefficients `_bakeSkyAtmosphere` hands the sky shader.
+                rayleigh: [5.8e-6 * rs, 13.5e-6 * rs, 33.1e-6 * rs] as [number, number, number],
+                mie: 21e-6 * atmo.mieScatter,
+                rayleighHeight: atmo.rayleighHeight, mieHeight: atmo.mieHeight,
+                planetRadius: atmo.planetRadius, atmosphereRadius: atmo.atmosphereRadius,
+            };
+            const altitude = node.baseAltitude + node.thickness * 0.5;
+            // Quantised key: a slowly animated sun recomputes about every 0.06 degrees, not every frame.
+            const key = `${toSun.map(v => Math.round(v * 1000)).join(',')}|${Math.round(altitude)}|`
+                      + `${rs}|${atmo.mieScatter}|${atmo.rayleighHeight}|${atmo.mieHeight}|`
+                      + `${atmo.planetRadius}|${atmo.atmosphereRadius}`;
+            if (key !== this._cloudSunTKey) {
+                const t = atmosphereTransmittance(params, altitude, toSun);
+                const z = atmosphereTransmittance(params, altitude, [0, 1, 0]);
+                this._cloudSunT = [t[0] / z[0], t[1] / z[1], t[2] / z[2]];
+                this._cloudSunTKey = key;
+            }
+            effSunColor = [0, 1, 2].map(i => sunColor[i] * this._cloudSunT[i]);
+            effSunIntensity = node.sunIntensity;
+        } else {
+            effSunColor = [0, 1, 2].map(i =>
+                sunColor[i] * mix1(1, sunsetColor[i], sunset) * mix1(1, NIGHT_SUN_DIM, night));
+            // Sun intensity follows elevation: dimmest on the horizon (long atmospheric path), ramping
+            // to the authored full value with the sun at the zenith.
+            const HORIZON_SUN_INTENSITY = 0.25;
+            effSunIntensity = node.sunIntensity * mix1(HORIZON_SUN_INTENSITY, 1, smooth01(0, 1, elevation));
+        }
+
+        let effAmbientColor: number[];
+        let effGroundColor: number[];
+        let effAmbientIntensity = node.ambientIntensity;
+        // Only with an atmosphere: its sun irradiance is what puts the sky's radiance and the clouds'
+        // `sunIntensity` on one scale. A skybox's SH comes in arbitrary units the clouds cannot relate to.
+        const skySH = node.useSkyAmbient && atmo && scene.skyLight && this._skySHValid ? this._skySH : null;
+        if (skySH && atmo) {
+            // The real sky's radiance: it already darkens, reddens and goes blue-hour with the sun.
+            // Re-expressed in the clouds' units: sky radiance per unit of the atmosphere's sun
+            // irradiance, times the clouds' own sun irradiance.
+            const toCloudUnits = node.sunIntensity / Math.max(1e-4, atmo.sunIntensity * atmo.exposure);
+            const up = shHemisphereMeans(skySH).up.map(v => v * toCloudUnits);
+            effAmbientColor = up;
+            // The ground under the clouds is a Lambertian reflector of albedo `groundColor`, lit by the
+            // sun (at this elevation) and by that same sky: L = albedo * (E_sun + pi * L_sky) / pi.
+            // The sky's own lower hemisphere is not used — it is a stylised ground tint, not a bounce.
+            const sunE = effSunIntensity * Math.max(0, elevation) / Math.PI;
+            effGroundColor = [0, 1, 2].map(i => node.groundColor[i] * (effSunColor[i] * sunE + up[i]));
+        } else {
+            effAmbientColor = [0, 1, 2].map(i =>
+                node.ambientColor[i] * mix1(1, sunsetCast[i], sunset) * mix1(1, NIGHT_AMBIENT[i], night));
+            effAmbientIntensity *= mix1(1, NIGHT_AMBIENT_DIM, night);
+            effGroundColor = [0, 1, 2].map(i =>
+                node.groundColor[i] * mix1(1, sunsetCast[i], sunset) * mix1(1, NIGHT_GROUND_DIM, night));
+        }
+        return { sunColor: effSunColor, sunIntensity: effSunIntensity, ambientColor: effAmbientColor,
+                 ambientIntensity: effAmbientIntensity, groundColor: effGroundColor };
+    }
+
     /**
      * Volumetric cloud layer: a fullscreen raymarch bounded by the G-buffer depth, composited over
      * the sky/scene. No-op unless the scene has an enabled VolumetricCloudsNode.
@@ -5954,35 +6058,9 @@ export class Renderer {
                 }
             }
         }
-        // Day/sunset/night response from the sun's elevation, as multiplicative tints on the authored
-        // colours. u_sunDir is the sun's TRAVEL direction, so toward-sun elevation is -y.
-        const invLen = 1 / (Math.hypot(sunDir[0], sunDir[1], sunDir[2]) || 1);
-        const elevation = -sunDir[1] * invLen;
-        const smooth01 = (a: number, b: number, x: number) => {
-            const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-            return t * t * (3 - 2 * t);
-        };
-        const day = smooth01(0.08, 0.35, elevation);         // 1 = sun clearly above the horizon
-        const night = 1 - smooth01(-0.22, -0.03, elevation); // 1 = sun clearly below it
-        const sunset = (1 - day) * (1 - night);              // peaks with the sun on the horizon
-        const mix1 = (a: number, b: number, t: number) => a + (b - a) * t;
-        const sunsetColor = node.sunsetColor;                // user-set sunrise/sunset glow color
-        // Softer cast of the sunset color (pulled halfway toward white) for the indirect terms.
-        const sunsetCast = [0, 1, 2].map(i => mix1(sunsetColor[i], 1, 0.45));
-        const NIGHT_AMBIENT = [0.30, 0.36, 0.55];  // cool moonlit cast
-        const NIGHT_SUN_DIM = 0.04, NIGHT_AMBIENT_DIM = 0.15, NIGHT_GROUND_DIM = 0.12;
-        const effSunColor = [0, 1, 2].map(i =>
-            sunColor[i] * mix1(1, sunsetColor[i], sunset) * mix1(1, NIGHT_SUN_DIM, night));
-        const effAmbientColor = [0, 1, 2].map(i =>
-            node.ambientColor[i] * mix1(1, sunsetCast[i], sunset) * mix1(1, NIGHT_AMBIENT[i], night));
-        const effAmbientIntensity = node.ambientIntensity * mix1(1, NIGHT_AMBIENT_DIM, night);
-        const effGroundColor = [0, 1, 2].map(i =>
-            node.groundColor[i] * mix1(1, sunsetCast[i], sunset) * mix1(1, NIGHT_GROUND_DIM, night));
-        // Sun intensity follows elevation: dimmest on the horizon (long atmospheric path), ramping
-        // to the authored full value with the sun at the zenith.
-        const HORIZON_SUN_INTENSITY = 0.25;
-        const effSunIntensity = node.sunIntensity * mix1(HORIZON_SUN_INTENSITY, 1, smooth01(0, 1, elevation));
-
+        const { sunColor: effSunColor, sunIntensity: effSunIntensity, ambientColor: effAmbientColor,
+                ambientIntensity: effAmbientIntensity, groundColor: effGroundColor }
+            = this._cloudLightInputs(scene, node, sunDir, sunColor);
         this._shaderManager.setUniform('u_sunDir', sunDir);
         this._shaderManager.setUniform('u_sunColor', effSunColor);
 
@@ -6006,7 +6084,15 @@ export class Renderer {
         this._shaderManager.setUniform('u_silverIntensity', node.silverIntensity);
         this._shaderManager.setUniform('u_silverSpread', node.silverSpread);
         this._shaderManager.setUniform('u_powderStrength', node.powderStrength);
-        this._shaderManager.setUniform('u_absorption', node.absorption);
+        this._shaderManager.setUniform('u_extinction', node.absorption * Renderer.CLOUD_SIGMA_BASE);
+        this._shaderManager.setUniform('u_albedo', node.albedo);
+        this._shaderManager.setUniform('u_phaseBackG', node.phaseBackG);
+        this._shaderManager.setUniform('u_phaseBackWeight', node.phaseBackWeight);
+        this._shaderManager.setUniform('u_msOctaves', node.msOctaves);
+        this._shaderManager.setUniform('u_msScatter', node.msScatter);
+        this._shaderManager.setUniform('u_msExtinction', node.msExtinction);
+        this._shaderManager.setUniform('u_msEccentricity', node.msEccentricity);
+        this._shaderManager.setUniform('u_hazeDistance', node.hazeDistance);
         // Animation
         this._shaderManager.setUniform('u_wind', node.windDirection);
         this._shaderManager.setUniform('u_windSpeed', node.windSpeed);

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Authors the "Hollow Keep" souls-like example into editor/public/examples/souls-demo/.
+// The souls-like content of the Valley example (tools/valley/build.mjs imports this as a library). Run
+// directly, it still writes the original walled level, "Hollow Keep", to a scratch folder for testing:
 //
-//     node tools/soulsDemo/build.mjs
-//     npm --prefix editor run examples:list      # regenerates the gallery index
+//     node tools/soulsDemo/build.mjs [out-dir]   # default build/hollow-keep/ (gitignored)
 //
 // Everything visible here is a PLACEHOLDER — the mannequin in tinted materials for every character,
 // boxes and cylinders for the level, procedural stub animations — and every mechanic is real. The point
@@ -10,30 +10,31 @@
 // SOULS_DEMO.md walks through every swap, and this file is where each placeholder's name and contract
 // comes from.
 //
-// The shape follows tools/nightShift/build.mjs, whose helpers it reuses: deterministic ids (re-runs are
-// byte-identical), the editor's own reflector for script variables, the editor's own constants for the
-// stamps a project carries. It copies the mannequin, its material and textures out of the 3d-example and
-// generates everything else.
+// The helpers live in tools/exampleKit/: deterministic ids (re-runs are byte-identical), the editor's own
+// reflector for script variables, the editor's own constants for the stamps a project carries. It copies
+// the mannequin, its material and textures out of seed/ and generates everything else.
 
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { mat3, mat4, quat, vec3 } from 'gl-matrix'
 import { TextureSet, loadScriptReflector, mb, node, readJson, stableId as nsId, uiNode, vars, writeJson }
-  from '../nightShift/bundle.mjs'
-import { editorModules } from '../nightShift/fbxImport.mjs'
-import { moduleRegistry } from '../nightShift/tsLoader.mjs'
+  from '../exampleKit/bundle.mjs'
+import { editorModules } from '../exampleKit/fbxImport.mjs'
+import { moduleRegistry } from '../exampleKit/tsLoader.mjs'
 import { headlessNavBaker } from '../navBakeHeadless.mjs'
 import { boundsOf, geometryJson, mergeParts, partsOf, readGltf } from '../valley/meshes.mjs'
-import { ASSET_HASH_VERSION, KIND_EXT, SCENE_REFS_VERSION } from '../nightShift/editorConstants.mjs'
+import { ASSET_HASH_VERSION, KIND_EXT, SCENE_REFS_VERSION } from '../exampleKit/editorConstants.mjs'
 import { buildPlaceholderClips, clipEventTime } from './placeholderClips.mjs'
 import { bloodDrops, bloodSplat } from './png.mjs'
 import { SOULS_INPUT_MAP } from './inputMap.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
-const SRC = path.join(ROOT, 'editor', 'public', 'examples', '3d-example')
-const OUT = path.join(ROOT, 'editor', 'public', 'examples', 'souls-demo')
+/** The mannequin, its material, textures and blend space, trimmed out of the retired 3d-example. */
+const SRC = path.join(HERE, 'seed')
+/** Hollow Keep is no longer shipped: run directly, it lands in the gitignored build/ folder. */
+const OUT = path.resolve(process.argv[2] ?? path.join(ROOT, 'build', 'hollow-keep'))
 const SCRIPTS = path.join(ROOT, 'examples', 'scripts')
 
 const CREATED_AT = 1790000000000
@@ -160,14 +161,14 @@ function withScript(target, file, scriptVars = {}) {
 // Source project: the mannequin
 // =====================================================================================================
 
-const sourceScene = readJson(path.join(SRC, 'scenes', 'afe4727c54de62f1bafbf6ac25c32b74.json'))
-const sourceModels = readJson(path.join(SRC, 'libraries', 'models.json'))
-const sourceMaterials = readJson(path.join(SRC, 'libraries', 'materials.json'))
-const sourceFields = readJson(path.join(SRC, 'libraries', 'animationFields.json'))
+const sourceScene = readJson(path.join(SRC, 'scene.json'))
+const sourceModels = readJson(path.join(SRC, 'models.json'))
+const sourceMaterials = readJson(path.join(SRC, 'materials.json'))
+const sourceFields = readJson(path.join(SRC, 'animationFields.json'))
 const textures = new TextureSet(SRC)
 
 const mannequin = sourceModels.find(m => m.id === MANNEQUIN_MODEL)
-if (!mannequin) throw new Error('the mannequin model is not in the 3d-example library')
+if (!mannequin) throw new Error('the mannequin model is not in the seed library')
 const mannequinModelJson = mannequin.nodeJson.children[0].model
 const mannequinMaterial = sourceMaterials.find(m => m.id === MANNEQUIN_MATERIAL)
 for (const id of mannequinMaterial.textureIds) textures.copy(id)
@@ -177,7 +178,7 @@ const clone = (x) => JSON.parse(JSON.stringify(x))
 function sourceNode(name) {
   const walk = (n) => n.name === name ? n : (n.children ?? []).reduce((a, c) => a ?? walk(c), null)
   const found = walk(sourceScene.scene)
-  if (!found) throw new Error(`the 3d-example scene has no node named "${name}"`)
+  if (!found) throw new Error(`the seed scene has no node named "${name}"`)
   return clone(found)
 }
 
@@ -2279,13 +2280,11 @@ function main() {
       order: 2,
     },
   })
-  console.log('Hollow Keep written to editor/public/examples/souls-demo/')
+  console.log(`Hollow Keep written to ${path.relative(ROOT, OUT)}/`)
   console.log('  scripts %d · templates %d · clips %d (%d imported, %d placeholders) · materials %d · effects %d · textures %d',
     scripts.assets.length, templates, animations.length, importedClips.length,
     placeholderClips.filter(c => !importedNames.has(c.name)).length, materials.length, particleSystems.length, textureCount)
-  console.log('  level pieces %d · torches %d · TOTAL %s', level.length, lights.length, mb(total))
-  console.log('\nNext:  npm --prefix editor run examples:list')
-}
+  console.log('  level pieces %d · torches %d · TOTAL %s', level.length, lights.length, mb(total))}
 
 function walkSize(dir) {
   let total = 0

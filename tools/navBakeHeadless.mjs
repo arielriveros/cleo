@@ -14,7 +14,7 @@
 import path from 'path'
 import { createRequire } from 'module'
 import { mat4, quat, vec3 } from 'gl-matrix'
-import { moduleRegistry } from './nightShift/tsLoader.mjs'
+import { moduleRegistry } from './exampleKit/tsLoader.mjs'
 
 /** The engine's nav modules, loaded once per generator run. */
 export function headlessNavBaker(root) {

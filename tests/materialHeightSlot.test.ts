@@ -11,8 +11,8 @@ import { Material, TerrainMaterial } from '../src/graphics/material';
  *
  * All three branches carry the slot now and the sibling is gone from the writer. The reader must keep
  * it forever, and that is what most of this file is about: asset JSON on disk is never rewritten until
- * the user re-saves that specific asset, and the shipped `3d-example` stores its terrain height ids at
- * the top level and NOWHERE else. Dropping the legacy read loads those terrains with no height at all —
+ * the user re-saves that specific asset, and projects saved before the change (the retired `3d-example`
+ * was one) store their terrain height ids at the top level and NOWHERE else. Dropping the legacy read loads those terrains with no height at all —
  * `u_hasHeight{i}` goes to 0 and the height-aware blend silently degrades to a plain linear splat, with
  * nothing logged and nothing to see except slightly wrong layer boundaries.
  */
@@ -69,9 +69,9 @@ describe('a terrain material round-trips a height map on every base type', () =>
     });
 });
 
-describe('legacy blobs still load — the shipped example is one', () => {
+describe('legacy blobs still load', () => {
     it('reads a top-level displacementMap with no `textures` entry', () => {
-        // Exactly the shape in editor/public/examples/3d-example/libraries/terrainMaterials.json.
+        // Exactly the shape the retired 3d-example shipped in libraries/terrainMaterials.json.
         const legacy = {
             type: 'pbr', terrainMaterial: true, tiling: 20, heightBlend: 5.5,
             textures: { baseColorTexture: 'diff' },

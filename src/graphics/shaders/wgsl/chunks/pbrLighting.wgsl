@@ -129,16 +129,6 @@ fn skyIrradiance(sky: SkyLight, n: vec3<f32>) -> vec3<f32> {
 // The specular BRDF: Cook-Torrance with a height-correlated visibility term, an energy-conserving
 // diffuse, and multi-scatter compensation. See DIRECT_LIGHTING_ROADMAP.md phase 2.
 //
-// What this replaced, and why each piece went:
-//   - SEPARABLE Smith `G`, which assumes shadowing and masking are independent. They are not, and the
-//     error grows with roughness. The height-correlated VISIBILITY form below also folds in the
-//     `1 / (4 NoV NoL)` denominator, which is what let the `+ 0.001` epsilon go: that epsilon was a
-//     divide-by-zero guard sitting in the numerator's way, biasing every grazing highlight dark.
-//   - `kD = (1 - F)` on the diffuse lobe. No modern reference BRDF has it — Filament, Frostbite and
-//     Disney all use `(1 - metallic) * albedo` alone — and it over-darkened grazing angles.
-//   - Lambert, replaced by Burley, which is what makes a rough dielectric read as one: it lifts the
-//     diffuse response at grazing angles instead of leaving it flat.
-// -----------------------------------------------------------------------------------------------
 
 /**
  * Perceptual-roughness floor.
@@ -231,7 +221,7 @@ fn energyCompensation(f0: vec3<f32>, NoV: f32, roughness: f32) -> vec3<f32> {
 }
 
 /**
- * Specular ambient occlusion (Lagarde, "Moving Frostbite to Physically Based Rendering").
+ * Specular ambient occlusion
  *
  * An AO map and SSAO both answer one question: how much of the HEMISPHERE is blocked. That is the right
  * question for a diffuse lobe, which samples the whole hemisphere, and the wrong one for a specular

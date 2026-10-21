@@ -16,8 +16,8 @@
 import fs from 'fs'
 import path from 'path'
 import { mat3, mat4, vec3 } from 'gl-matrix'
-import { moduleRegistry } from '../nightShift/tsLoader.mjs'
-import { localMatrix, readAccessor } from '../nightShift/fbxImport.mjs'
+import { moduleRegistry } from '../exampleKit/tsLoader.mjs'
+import { localMatrix, readAccessor } from '../exampleKit/fbxImport.mjs'
 
 // ---------------------------------------------------------------------------------------------------
 // Reading

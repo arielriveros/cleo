@@ -1,12 +1,12 @@
 # Valley example generator
 
-Builds `editor/public/examples/valley/`, the Hollow Keep souls content set in an outdoor mountain valley.
+Builds `editor/public/examples/valley/`, the engine's example game: the souls content of `tools/soulsDemo/build.mjs` set in an outdoor mountain valley.
 
 ```sh
 python tools/valley/prepare.py                          # textures: build/ -> build/valley_prepared/
 node --max-old-space-size=12288 tools/valley/build.mjs  # writes the example (~200 MB)
 npm --prefix editor run examples:list                   # refreshes the gallery index
-npx vitest run tests/valleyProject.test.ts tests/soulsDemoProject.test.ts
+npx vitest run tests/valleyProject.test.ts tests/valleySouls.test.ts
 ```
 
 The source art in `build/` is gitignored, so this generator is run by hand and its output is committed.

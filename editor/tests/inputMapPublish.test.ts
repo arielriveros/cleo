@@ -1,6 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import { DEFAULT_INPUT_MAP, Scene, cloneInputMap, isDefaultInputMap, parseInputMap } from 'cleo';
 import type { InputMap } from 'cleo';
 import { buildGameData } from '../src/features/publish/buildGameData';
@@ -69,60 +67,5 @@ describe('buildGameData writes config.input', () => {
         expect(json.config.render).toBeDefined();
         expect(json.config.input).toBeDefined();
         expect(json.config.graphics.clearColor).toEqual([0, 0, 0, 1]);
-    });
-});
-
-describe('the shipped example project', () => {
-    // Its scripts are EMBEDDED as strings in three generated JSON files with no generator to regenerate
-    // them, so they drift silently: nothing typechecks them, nothing imports them, and the only symptom
-    // of a stale copy is that the sample project stops responding to input once the API it used is gone.
-    const FIXTURES = [
-        'public/examples/3d-example/libraries/scripts.json',
-        'public/examples/3d-example/libraries/templates.json',
-        'public/examples/3d-example/scenes/afe4727c54de62f1bafbf6ac25c32b74.json',
-    ];
-
-    it('calls no input API the engine no longer has', () => {
-        // CALL forms, not bare names: the migrated scripts mention the old API in a comment explaining
-        // what replaced it, and that comment is worth keeping for anyone reading the sample.
-        const gone = ['InputManager.', '.isKeyPressed(', '.registerKeyPress(', '.unregisterKeyPress('];
-        for (const rel of FIXTURES) {
-            const text = readFileSync(join(__dirname, '..', rel), 'utf-8');
-            for (const call of gone)
-                expect(text.includes(call), `${rel} still calls ${call}`).toBe(false);
-        }
-    });
-
-    it('drives its character through actions', () => {
-        const text = readFileSync(join(__dirname, '..', FIXTURES[0]), 'utf-8');
-        expect(text).toContain('onAction(');
-    });
-
-    it('carries no field from the pre-controller character script', () => {
-        // `_jumpCooldown` and `_smoothDir` were PRIVATE fields of the locomotion that now lives in the
-        // engine. Only a stale copy of the old script has them, so their presence is the cheapest
-        // possible signal that one of these three files was missed by the migration.
-        //
-        // Underscore-prefixed names on purpose: the migrated scripts mention the old design in prose —
-        // `pivotName` appears in a comment explaining what replaced it — and a guard that tripped on
-        // prose would have to be weakened or deleted the first time someone wrote a good comment.
-        for (const rel of FIXTURES) {
-            const text = readFileSync(join(__dirname, '..', rel), 'utf-8');
-            for (const gone of ['_jumpCooldown', '_smoothDir', '_turning'])
-                expect(text.includes(gone), `${rel} still carries ${gone}`).toBe(false);
-        }
-    });
-
-    it('uses the control node pair', () => {
-        // The scene has to demonstrate the thing: a Character that a Controller possesses. A Character
-        // with nothing driving it is inert by design, so a missed controller means a sample project that
-        // opens fine and simply does not respond.
-        const scene = readFileSync(join(__dirname, '..', FIXTURES[2]), 'utf-8');
-        expect(scene).toContain('"type":"character"');
-        expect(scene).toContain('"type":"controller"');
-        expect(scene).toContain('"possessedId"');
-        // ...and the template, or instantiating it gives a plain Node the Character script cannot bind to.
-        const templates = readFileSync(join(__dirname, '..', FIXTURES[1]), 'utf-8');
-        expect(templates).toContain('"type":"character"');
     });
 });

@@ -4,8 +4,8 @@
 //     node tools/soulsDemo/importClips.mjs
 //
 // Writes `soulsClips.json` next to this file. It is COMMITTED, because `build/` is gitignored and the
-// examples must regenerate byte-identically on a clean checkout -- the same bargain Night Shift's
-// importer documents (tools/nightShift/importClips.mjs), whose fold-map-retarget path this reuses.
+// examples must regenerate byte-identically on a clean checkout. The fold-map-retarget path is the one in
+// tools/exampleKit/fbxImport.mjs.
 //
 // ## Names are a contract
 //
@@ -39,7 +39,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import * as glMatrix from 'gl-matrix'
-import { editorModules, engineModules, importClipFile, loadAssimp, retargetTargetOf } from '../nightShift/fbxImport.mjs'
+import { editorModules, engineModules, importClipFile, loadAssimp, retargetTargetOf } from '../exampleKit/fbxImport.mjs'
 
 const { mat4, quat, vec3 } = glMatrix
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -192,9 +192,9 @@ async function main() {
   const ctx = { ajs, ...engineModules(ROOT) }
   const { loadSkin, storeSkin } = editorModules(ROOT)
 
-  const models = readJson(path.join(ROOT, 'editor', 'public', 'examples', '3d-example', 'libraries', 'models.json'))
+  const models = readJson(path.join(HERE, 'seed', 'models.json'))
   const mannequin = models.find(m => m.id === MANNEQUIN_MODEL)
-  if (!mannequin) throw new Error('the mannequin model is not in the 3d-example library')
+  if (!mannequin) throw new Error('the mannequin model is not in the seed library')
   const target = retargetTargetOf(loadSkin, storeSkin(mannequin.nodeJson.children[0].model.skin))
   console.log(`souls: ${CLIPS.length} clips onto ${target.joints.length} joints (${path.relative(ROOT, DIR)})`)
 

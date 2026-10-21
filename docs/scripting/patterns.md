@@ -304,4 +304,4 @@ Every trap in these docs, in one place.
 
 ## See also
 
-[Scripting guide](README.md) · [Third-person character](../../examples/scripts/README.md) · [Night Shift](../../examples/scripts/NIGHT_SHIFT.md)
+[Scripting guide](README.md) · [Third-person character](../../examples/scripts/README.md) · [Valley](../../examples/scripts/SOULS_DEMO.md)

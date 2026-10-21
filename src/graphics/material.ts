@@ -1280,8 +1280,8 @@ export class TerrainMaterial extends Material {
         // shape that `terrainMaterials.ts`, `bundleMerge.ts` and `references.ts` each had to special-case.
         //
         // `parse` still READS the old top-level key, and must forever: asset JSON on disk is never
-        // rewritten until that asset is re-saved, and the shipped 3d-example stores its height ids there
-        // and nowhere else.
+        // rewritten until that asset is re-saved, and older projects store their height ids there and
+        // nowhere else.
         return {
             ...super.serialize(), // base surface shape, keyed by this.type (basic/pbr/blinn_phong)
             terrainMaterial: true,
@@ -1342,7 +1342,7 @@ export class TerrainMaterial extends Material {
         tm.sRange = m.sRange ? [m.sRange[0], m.sRange[1]] : [0, 1];
         // LEGACY READ, and it stays. Terrain used to serialize its height map as a top-level sibling of
         // `textures`; it now rides inside `textures` like every other slot (see serialize above). Every
-        // project saved before that — the shipped 3d-example included — has the id ONLY out here, and
+        // project saved before that has the id ONLY out here, and
         // nothing rewrites an asset until the user re-saves it. Dropping this line loads those terrains
         // with no height at all: `u_hasHeight{i}` goes to 0 and the height-aware blend silently becomes a
         // plain linear splat, with nothing logged.

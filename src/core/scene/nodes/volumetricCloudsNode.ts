@@ -25,6 +25,7 @@ export interface VolumetricCloudsOptions {
     sunDirection?: [number, number, number]; // override travel direction (used when useSceneSun=false)
     sunColor?: [number, number, number];
     sunIntensity?: number;
+    useSkyAmbient?: boolean;  // true = ambient from the scene's Sky Light when it has one (colours below are the fallback)
     ambientColor?: [number, number, number];  // sky-side ambient
     ambientIntensity?: number;
     groundColor?: [number, number, number];    // ground bounce tint on cloud bottoms
@@ -33,7 +34,15 @@ export interface VolumetricCloudsOptions {
     silverIntensity?: number; // silver-lining boost near the sun
     silverSpread?: number;    // silver-lining angular spread
     powderStrength?: number;  // 0..1 — dark-edge (powder) effect
-    absorption?: number;      // Beer's-law extinction coefficient
+    absorption?: number;      // extinction multiplier: 1 = 0.05 per metre at full density (real cumulus)
+    albedo?: number;          // 0..1 — single-scattering albedo, scattering / extinction (clouds ~0.98)
+    phaseBackG?: number;      // -0.99..0 — anisotropy of the back-scatter lobe of the dual-lobe phase
+    phaseBackWeight?: number; // 0..1 — share of the back-scatter lobe
+    msOctaves?: number;       // 1..4 — multiple-scattering octaves (1 = single scattering only)
+    msScatter?: number;       // 0..1 — per-octave scattering attenuation (a)
+    msExtinction?: number;    // 0..1 — per-octave extinction attenuation (b); kept >= msScatter
+    msEccentricity?: number;  // 0..1 — per-octave phase eccentricity attenuation (c)
+    hazeDistance?: number;    // world units — aerial-perspective fade distance (0 = off)
     // Animation
     windDirection?: [number, number, number]; // x/z used; drifts the cloud field over time
     windSpeed?: number;
@@ -71,6 +80,7 @@ export class VolumetricCloudsNode extends Node {
     private _sunDirection: [number, number, number];
     private _sunColor: [number, number, number];
     private _sunIntensity: number;
+    private _useSkyAmbient: boolean;
     private _ambientColor: [number, number, number];
     private _ambientIntensity: number;
     private _groundColor: [number, number, number];
@@ -80,6 +90,14 @@ export class VolumetricCloudsNode extends Node {
     private _silverSpread: number;
     private _powderStrength: number;
     private _absorption: number;
+    private _albedo: number;
+    private _phaseBackG: number;
+    private _phaseBackWeight: number;
+    private _msOctaves: number;
+    private _msScatter: number;
+    private _msExtinction: number;
+    private _msEccentricity: number;
+    private _hazeDistance: number;
     // Animation
     private _windDirection: [number, number, number];
     private _windSpeed: number;
@@ -112,6 +130,7 @@ export class VolumetricCloudsNode extends Node {
         this._sunDirection = options.sunDirection ?? [-0.5, -0.8, -0.35];
         this._sunColor = options.sunColor ?? [1.0, 0.95, 0.85];
         this._sunIntensity = options.sunIntensity ?? 10.0;
+        this._useSkyAmbient = options.useSkyAmbient ?? true;
         this._ambientColor = options.ambientColor ?? [0.55, 0.65, 0.8];
         this._ambientIntensity = options.ambientIntensity ?? 1.0;
         this._groundColor = options.groundColor ?? [0.4, 0.4, 0.42];
@@ -119,8 +138,16 @@ export class VolumetricCloudsNode extends Node {
         this._phaseG = options.phaseG ?? 0.5;
         this._silverIntensity = options.silverIntensity ?? 0.6;
         this._silverSpread = options.silverSpread ?? 0.08;
-        this._powderStrength = options.powderStrength ?? 0.5;
+        this._powderStrength = options.powderStrength ?? 0.25;
         this._absorption = options.absorption ?? 1.0;
+        this._albedo = options.albedo ?? 0.98;
+        this._phaseBackG = options.phaseBackG ?? -0.25;
+        this._phaseBackWeight = options.phaseBackWeight ?? 0.2;
+        this._msOctaves = options.msOctaves ?? 3;
+        this._msScatter = options.msScatter ?? 0.5;
+        this._msExtinction = options.msExtinction ?? 0.5;
+        this._msEccentricity = options.msEccentricity ?? 0.5;
+        this._hazeDistance = options.hazeDistance ?? 35000;
 
         this._windDirection = options.windDirection ?? [1.0, 0.0, 0.2];
         this._windSpeed = options.windSpeed ?? 12.0;
@@ -172,6 +199,8 @@ export class VolumetricCloudsNode extends Node {
     public set sunColor(v: [number, number, number]) { this._sunColor = v; }
     public get sunIntensity(): number { return this._sunIntensity; }
     public set sunIntensity(v: number) { this._sunIntensity = Math.max(0, v); }
+    public get useSkyAmbient(): boolean { return this._useSkyAmbient; }
+    public set useSkyAmbient(v: boolean) { this._useSkyAmbient = v; }
     public get ambientColor(): [number, number, number] { return this._ambientColor; }
     public set ambientColor(v: [number, number, number]) { this._ambientColor = v; }
     public get ambientIntensity(): number { return this._ambientIntensity; }
@@ -190,6 +219,22 @@ export class VolumetricCloudsNode extends Node {
     public set powderStrength(v: number) { this._powderStrength = Math.min(1, Math.max(0, v)); }
     public get absorption(): number { return this._absorption; }
     public set absorption(v: number) { this._absorption = Math.max(0, v); }
+    public get albedo(): number { return this._albedo; }
+    public set albedo(v: number) { this._albedo = Math.min(1, Math.max(0, v)); }
+    public get phaseBackG(): number { return this._phaseBackG; }
+    public set phaseBackG(v: number) { this._phaseBackG = Math.min(0, Math.max(-0.99, v)); }
+    public get phaseBackWeight(): number { return this._phaseBackWeight; }
+    public set phaseBackWeight(v: number) { this._phaseBackWeight = Math.min(1, Math.max(0, v)); }
+    public get msOctaves(): number { return this._msOctaves; }
+    public set msOctaves(v: number) { this._msOctaves = Math.min(4, Math.max(1, Math.round(v))); }
+    public get msScatter(): number { return this._msScatter; }
+    public set msScatter(v: number) { this._msScatter = Math.min(1, Math.max(0, v)); }
+    public get msExtinction(): number { return this._msExtinction; }
+    public set msExtinction(v: number) { this._msExtinction = Math.min(1, Math.max(0, v)); }
+    public get msEccentricity(): number { return this._msEccentricity; }
+    public set msEccentricity(v: number) { this._msEccentricity = Math.min(1, Math.max(0, v)); }
+    public get hazeDistance(): number { return this._hazeDistance; }
+    public set hazeDistance(v: number) { this._hazeDistance = Math.max(0, v); }
 
     // --- Animation ---
     public get windDirection(): [number, number, number] { return this._windDirection; }
@@ -221,7 +266,7 @@ export class VolumetricCloudsNode extends Node {
 
     /**
      * Applies a weather / time-of-day preset by id (see VOLUMETRIC_CLOUDS_PRESETS) or a preset object.
-     * Quality, enabled, opacity and useSceneSun are left untouched. Returns false for an unknown id.
+     * Quality, enabled, opacity, useSceneSun and useSkyAmbient are left untouched. Returns false for an unknown id.
      */
     public applyPreset(idOrPreset: string | VolumetricCloudsPreset): boolean {
         const preset = typeof idOrPreset === 'string'
@@ -261,6 +306,7 @@ export class VolumetricCloudsNode extends Node {
                         sunDirection: this._sunDirection,
                         sunColor: this._sunColor,
                         sunIntensity: this._sunIntensity,
+                        useSkyAmbient: this._useSkyAmbient,
                         ambientColor: this._ambientColor,
                         ambientIntensity: this._ambientIntensity,
                         groundColor: this._groundColor,
@@ -270,6 +316,14 @@ export class VolumetricCloudsNode extends Node {
                         silverSpread: this._silverSpread,
                         powderStrength: this._powderStrength,
                         absorption: this._absorption,
+                        albedo: this._albedo,
+                        phaseBackG: this._phaseBackG,
+                        phaseBackWeight: this._phaseBackWeight,
+                        msOctaves: this._msOctaves,
+                        msScatter: this._msScatter,
+                        msExtinction: this._msExtinction,
+                        msEccentricity: this._msEccentricity,
+                        hazeDistance: this._hazeDistance,
                         windDirection: this._windDirection,
                         windSpeed: this._windSpeed,
                         detailWindFactor: this._detailWindFactor,

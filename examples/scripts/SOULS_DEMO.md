@@ -1,9 +1,16 @@
-# Hollow Keep — a souls-like demo
+# Valley — the souls-like example game
 
-*Hollow Keep* is a one-level souls-like built from placeholders. The mechanics are all real; the art is
-not. Every character is the engine's mannequin in a tinted material, the level is boxes and cylinders,
-and the animations are procedural stubs. This document covers how the demo works and how to replace each
-placeholder with final art from inside the editor, without touching a script.
+*Valley* is the engine's example game: a souls-like on a 2 km mountain valley. The mechanics are all real;
+the characters are not final art. Every character is the engine's mannequin in a tinted material, and the
+combat clips are Mixamo motions plus a few procedural stubs. The world is real content — a layered
+landscape, meadow grass and pine forest, a thatched hamlet, a pond, and a skull cave that loads a second
+scene. This document covers how the game works and how to replace each placeholder with final art from
+inside the editor, without touching a script.
+
+The souls content (characters, weapons, enemies, bonfire, UI) is authored by `tools/soulsDemo/build.mjs`;
+the level around it by `tools/valley/build.mjs`. The two used to ship separately, the first as a walled
+blockout level called *Hollow Keep* — sections below that describe the keep's own pieces (its fog gate,
+the Warden's arena) now describe templates that ship in the project but are not placed in the valley.
 
 - [1. Opening and playing](#1-opening-and-playing)
 - [2. Controls](#2-controls)
@@ -23,8 +30,8 @@ placeholder with final art from inside the editor, without touching a script.
 
 ## 1. Opening and playing
 
-1. Open the project launcher and go to **Examples ▸ Hollow Keep**, then press **Download**. The example
-   (about 83 MB) is copied into a **new project**, so your other projects are untouched.
+1. Open the project launcher and go to **Examples ▸ Valley**, then press **Download**. The example
+   (about 370 MB) is copied into a **new project**, so your other projects are untouched.
 2. Wait for the scene to finish loading, then press **Play** (▶).
 3. Click the game view to capture the mouse.
 
@@ -39,7 +46,7 @@ weapon, prop and effect has a folder holding everything it is made of, in type s
 so what a variant adds stays apart from what it inherits:
 
 ```
-Scenes/            Hollow Keep.scene, Hollow Keep/Materials (the keep's stone, wood and iron)
+Scenes/            Valley.scene, Dungeon.scene, and their materials
 Core/Scripts/      shared modules: SoulsMath, SoulsHitbox, SoulsAudio, SoulsCharacter
 Game/              Game Manager, and UI/ (HUD, Boss Bar, Banner, Bonfire Menu)
 Characters/
@@ -82,40 +89,25 @@ LightAttack…"*, the map is missing; re-import the example or add the actions s
 
 ## 3. What is in the level
 
-```
-       ┌──────────── G. Boss arena (36×36) ──────────────┐   Hollow Warden, reward, epilogue
-       └──────────────────┤ fog gate ├───────────────────┘
-                     F. Approach (lore message)
- ┌──── C. Courtyard ────┬──── D. Elite hall ────┐
- │ 2 Hollows, Sorcerer  │ Elite Knight, souls   │
- │ on a ledge, Estus    │                       │
- │ Shard, pillars       ├─────┐                 │
- └──────┤      ├────────┘     │ E. Shortcut     │
-        B. Corridor           │ corridor (Hollow)│
-        2 Hollows, souls      │                 │
- ┌──────┤      ├─────────┐    │                 │
- │ A. Bonfire yard       ╞════╛ lever + gate (opens from the far side)
- │ start, bonfire, message
- └───────────────────────┘
-```
+The player starts at the south end of the valley and follows the road north to the cliffs.
 
-| Area | Contents |
+| Place | Contents |
 |---|---|
-| A. Bonfire yard | Player start, the bonfire, the first message, and the shortcut gate (locked from this side). |
-| B. Corridor | A rolling tutorial message, two Hollows, and a souls pickup. |
-| C. Courtyard | Two Hollows, the Sorcerer on a ledge with a ramp, an Estus Shard, and a warning message. |
-| D. Elite hall | The Elite Knight, a souls pickup, and a message. |
-| E. Shortcut | A Hollow, then the lever that opens the gate back into the yard. |
-| F. Approach | A lore message and the fog gate. |
-| G. Arena | The Hollow Warden. On victory, a reward pickup and an epilogue message appear. |
+| Start and bonfire | Player start, the bonfire, the welcome and rolling messages. |
+| Hamlet | Four FBX buildings (houses, granary, windmill with spinning sails), breakable barrels, a souls pickup, Hollows on the road. |
+| Watchtower | The Hollow Sorcerer and an Estus Shard. |
+| Pond | Wading water that slows you and stops rolls, floating debris, the Elite Knight, a souls pickup. |
+| Windmill hill | The shortcut: a gate across the side path, its lever on the hill side. |
+| Skull cave | Two torches and a message at a skull carved into the cliff notch. Interacting asks to go in and loads the **Dungeon** scene; its exit returns you to the valley. |
 
 The **game loop**:
 - **Bonfire:** light it, then rest to heal, refill flasks and level up. Resting respawns every enemy
   except a defeated boss, and the bonfire becomes your respawn point.
 - **Death:** your souls drop as a bloodstain where you fell. Touch it to recover them. Die again first
   and they are gone for good.
-- **Boss:** walk through the fog to wake the boss. Below half health it roars and enters phase two:
-  it gets faster and adds a leap slam and a bolt fan. Dying mid-fight resets the boss and the fog.
+- **Boss (not placed):** the Hollow Warden and Fog Gate templates ship in the project. Placed, the fog
+  wakes the boss; below half health it roars and enters phase two, faster and with a leap slam and a bolt
+  fan. Dying mid-fight resets the boss and the fog.
 
 ## 4. How the scripts fit together
 
@@ -582,7 +574,7 @@ stay. A missing widget is simply skipped.
 
 ## 11. Step-by-step swap procedures
 
-> Open the imported **Hollow Keep** project first. Save (Ctrl+S) after each step.
+> Open the imported **Valley** project first. Save (Ctrl+S) after each step.
 
 ### 11.1 Import a character model
 
@@ -827,26 +819,28 @@ Retreat, and plays reactions. Editing a brain asset updates every enemy of that 
 
 ## 13. Regenerating the example, tests, limitations
 
-The example folder `editor/public/examples/souls-demo/` is **generated**:
+The example folder `editor/public/examples/valley/` is **generated** (see `tools/valley/README.md` for
+the source art it needs):
 
 ```
-node tools/soulsDemo/build.mjs        # rebuild the folder (deterministic; re-runs are byte-identical)
-npm --prefix editor run examples:list # refresh the gallery index
-npx vitest run tests/soulsDemo        # rules + generated-project checks
+node --max-old-space-size=12288 tools/valley/build.mjs   # rebuild (deterministic; re-runs are byte-identical)
+npm --prefix editor run examples:list                    # refresh the gallery index
+npx vitest run tests/soulsDemo tests/valley              # rules + generated-project checks
 ```
 
-- `tools/soulsDemo/build.mjs` holds the scene, templates, UI, materials and effects.
+- `tools/soulsDemo/build.mjs` holds the templates, UI, materials and effects; `tools/valley/` the level.
+- `tools/soulsDemo/seed/` is the mannequin, its material, textures and locomotion field the characters
+  are built from.
 - `placeholderClips.mjs` holds the procedural stub animations, posed in character space.
 - `inputMap.mjs` holds the bindings.
 - Your art swaps happen in **your imported project**, not here. Edit the generator only to change what
   the example ships with.
-- `tests/soulsDemoProject.test.ts` checks every name-based join: clips and their events, templates,
+- `tests/valleySouls.test.ts` checks every name-based join: clips and their events, templates,
   sounds, widgets, input actions, sockets and child order. Run it after changing the generator.
 
 **Known limitations:**
 - **Placeholder clips are crude.** They exist for timing and events. The roll is an in-place somersault.
 - **No root motion in actions.** One-shot clips must be in place; travel is scripted.
-- **The navmesh ships unbaked** (§11.11).
 - **Hurtboxes are whole-body capsules.** A blade that grazes an outstretched arm outside the capsule
   does not count, and there are no head or limb multipliers.
 - **Enemy reach comes from the placeholder swings.** The attacks' `maxRange` values were measured against

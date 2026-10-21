@@ -12,7 +12,7 @@
 
 import fs from 'fs'
 import path from 'path'
-import { moduleRegistry } from '../nightShift/tsLoader.mjs'
+import { moduleRegistry } from '../exampleKit/tsLoader.mjs'
 import { MAP, TERRAIN } from './layout.mjs'
 
 export async function loadHeights(root, buildDir) {

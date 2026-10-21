@@ -168,7 +168,7 @@ hold two listeners and do everything twice.
 
 Marker times are in CLIP seconds, so a state playing at `speed: 1.5` fires the marker at
 `time / 1.5` wall-clock seconds. A marker beyond a state's `exitTime` is never reached at all.
-`examples/scripts/NightShiftZombie.ts` lands its attack damage this way.
+`examples/scripts/SoulsEnemy.ts` times its attacks' hits this way.
 
 ## Blend spaces
 

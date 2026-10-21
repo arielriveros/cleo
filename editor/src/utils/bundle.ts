@@ -167,6 +167,11 @@ export interface BundleGeometry extends Partial<Record<GeometryAttr, ChunkRef & 
    * that way. The twin of `nested`, and mutually exclusive with it — a nested tuple shape is always plain.
    */
   typed?: true
+  /**
+   * Attributes the source held as an EMPTY plain array (`"tangents": []`, which asks Geometry to rebuild
+   * them). Restored as `[]` in their slot; dropping them would change the asset's content hash.
+   */
+  empty?: GeometryAttr[]
 }
 
 /** A blob chunk that carries an image, so inflate can rebuild the exact data URI it came from. */

@@ -39,23 +39,23 @@ describe('program classification', () => {
 });
 
 describe('programsFor', () => {
-    const SOULS = JSON.parse(readFileSync(join(__dirname, '..', 'editor', 'public', 'examples', 'souls-demo',
-        'scenes', 'a08f6be5626f2c412295157c8c4b2def.json'), 'utf-8'));
+    const VALLEY = JSON.parse(readFileSync(join(__dirname, '..', 'editor', 'public', 'examples', 'valley',
+        'scenes', 'd6387d3a3c48c8a3f5ebe850ffb9d3ab.json'), 'utf-8'));
 
-    it('lists what the Hollow Keep scene draws, and nothing the editor alone uses', () => {
+    it('lists what the Valley scene draws, and nothing the editor alone uses', () => {
         const use = createProgramUsage();
-        usageFromSceneJson(SOULS.scene, use, castsShadows(SOULS.scene));
+        usageFromSceneJson(VALLEY.scene, use, castsShadows(VALLEY.scene));
         usageFromRenderSettings({ shadowFilterMode: 0, ssaoEnabled: true, taaEnabled: false, motionBlurEnabled: false,
                                   dofEnabled: false, autoExposureEnabled: false, lensFlareIntensity: 0,
                                   chromaticAberrationStrength: 0, filmGrainIntensity: 0, vignetteStrength: 0.35 }, use);
         const list = programsFor(use);
         // Skinned PBR characters, static PBR geometry, one shadow filter, the deferred resolve.
         for (const name of ['pbrSkinned~pcf', 'pbrGeometrySkinned~flat', 'pbrGeometry~flat', 'deferredLighting~pcf',
-                            'screen', 'present', 'skyAtmosphere', 'particleBillboard', 'ssao', 'vignette'])
+                            'screen', 'present', 'skyAtmosphere', 'volumetricClouds', 'particleBillboard', 'ssao', 'vignette'])
             expect(list, name).toContain(name);
         // Particles as stripped variants.
         expect(list.some(n => /^particleSim~s\d+$/.test(n))).toBe(true);
-        for (const name of ['cel', 'cel~pcf', 'grid', 'outline', 'debugView', 'pbr~poisson', 'volumetricClouds',
+        for (const name of ['cel', 'cel~pcf', 'grid', 'outline', 'debugView', 'pbr~poisson',
                             'decalSurface', 'dofCoc', 'taaResolve', 'motionBlur', 'exposureMeter', 'lensFlare'])
             expect(list, name).not.toContain(name);
         expect(list.length).toBeLessThan(60);

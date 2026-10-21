@@ -1,6 +1,6 @@
-# Hollow Keep — feature matrix
+# Valley — feature matrix
 
-This page lists which engine features the [Hollow Keep](SOULS_DEMO.md) example uses, and which
+This page lists which engine features the [Valley](SOULS_DEMO.md) example game uses, and which
 souls-like game features it has or lacks. It is a map for two jobs:
 - **Growing the demo:** what to add next, and whether the engine already supports it.
 - **Showcasing the engine:** what the demo does not exercise yet.
@@ -11,7 +11,8 @@ souls-like game features it has or lacks. It is a map for two jobs:
 | ◐ | Partial: wired up but inert out of the box, or only part of the feature is used. |
 | ✗ | Not used. |
 
-"Where" names the generator (`tools/soulsDemo/build.mjs`), a script (`Souls*.ts`), or the scene.
+"Where" names a generator (`tools/soulsDemo/build.mjs` for the souls content, `tools/valley/` for the level), a
+script (`Souls*.ts`), or the scene.
 
 ## 1. Engine features
 
@@ -23,7 +24,7 @@ souls-like game features it has or lacks. It is a map for two jobs:
 | Deferred G-buffer pipeline | `Renderer` | ✅ | The default; the blood decals need it. |
 | Frustum culling | `Frustum`, BVH | ✅ | Scene config `frustumCulling: true`. |
 | Decals (surface and emissive routes) | `DecalNode` | ✅ | Blood splat and spatter decals on hit, plus the bloodstain pool (emissive route). |
-| LOD groups / generated LODs | `LodGroupNode` | ✗ | Placeholder geometry is too cheap to need them. |
+| LOD groups / generated LODs | `LodGroupNode` | ◐ | Foliage LOD levels and pine impostors; characters and buildings have none. |
 | Quality presets, render scale | `RenderSettings` | ✗ | Defaults only. |
 | Performance HUD, profilers | `renderStats`, `gpuProfiler` | ◐ | Editor tooling. Used to measure the demo, not by it. |
 
@@ -37,8 +38,8 @@ souls-like game features it has or lacks. It is a map for two jobs:
 | Lights driven by scripts | `light.intensity` | ✅ | The bonfire lights up (`SoulsBonfire`), and effects fade their lights (`SoulsFx`). |
 | Physical sky | `SkyAtmosphereNode` | ✅ | Its height fog and god rays are turned **off**. |
 | Skybox, sky light (SH ambient) | `SkyboxNode`, `SkyLightNode` | ✗ | Scene `ambientLight` is used instead. |
-| Light probes | `LightProbeNode` | ✗ | |
-| Volumetric clouds | `VolumetricCloudsNode` | ✗ | The level is mostly enclosed. |
+| Light probes | `LightProbeNode` | ◐ | One over the pond, for the water's reflection. None in the dungeon. |
+| Volumetric clouds | `VolumetricCloudsNode` | ✅ | Wind-driven, with cloud shadows. |
 
 ### Post-processing
 
@@ -61,7 +62,8 @@ souls-like game features it has or lacks. It is a map for two jobs:
 | PBR | ✅ | All 21 materials, including the textured blood decal materials. |
 | Emissive | ✅ | Glyphs, items, bolt, bonfire ash, bloodstain. |
 | Transparency | ✅ | The fog wall. |
-| Cel, Blinn-Phong, Custom shaders | ✗ | |
+| Custom shaders | ✅ | The pond water (`tools/valley/water.glsl`, compiled to WGSL at build time). |
+| Cel, Blinn-Phong | ✗ | |
 | Height, parallax, displacement | ✗ | |
 | Procedurally generated textures | ✅ | The blood splat images (`tools/soulsDemo/png.mjs`). |
 
@@ -78,7 +80,7 @@ souls-like game features it has or lacks. It is a map for two jobs:
 | Rig asset, retargeting | ✅ | One shared rig. |
 | Layers, bone masks, Pose assets, Animation Controller asset | ✗ | |
 | Foot IK | ✗ | |
-| Root motion | ✗ | Off by design: lunges are scripted (SOULS_DEMO §6). |
+| Root motion | ◐ | The roll and the deaths; lunges are scripted (SOULS_DEMO §6). |
 
 ### Physics
 
@@ -87,9 +89,9 @@ souls-like game features it has or lacks. It is a map for two jobs:
 | Static colliders (box, cylinder) | ✅ | About 60 level pieces, each also blocking the camera. |
 | Dynamic capsule characters | ✅ | Player and enemies. |
 | Raycast | ✅ | Lock-on line of sight, projectile flight, blood decals finding the floor. |
-| Ragdoll | ◐ | Enemies on death; the player does not ragdoll. |
+| Ragdoll | ✅ | Humanoid ragdolls on every character's death. |
 | Triggers (`onTriggerEnter`/`onTriggerExit`) | ✅ | Every interactable's zone, and the boss arena. Collision callbacks (`onCollision`) are unused. |
-| Convex hulls | ✗ | |
+| Convex hulls | ✅ | The buildings and the skull cave. |
 | Overlap and shape queries (`sweepCapsule`, `sweepSphere`, `overlapSphere`) | ✅ | Blade hitboxes, the bolt, slams (`SoulsHitbox`). |
 
 ### Control and AI
@@ -101,7 +103,7 @@ souls-like game features it has or lacks. It is a map for two jobs:
 | Perception (field of view, range, memory) | ✅ | Every enemy brain. |
 | Blackboard | ✅ | `SoulsEnemyBrain` writes the target; the graph reads senses and builtin enemy fields. |
 | Steering | ✅ | |
-| NavMesh and pathfinding | ◐ | A `Nav Mesh` node exists but ships **unbaked**, so chases fall back to straight lines until you bake it. |
+| NavMesh and pathfinding | ✅ | Baked by the generator with trunks and buildings carved out. |
 | AI Brain assets, goal planner, fuzzy logic, flocking | ✗ | The behaviour machine is inline on each brain. |
 
 ### Particles and VFX
@@ -118,7 +120,8 @@ souls-like game features it has or lacks. It is a map for two jobs:
 | Feature | | Where / note |
 |---|---|---|
 | Sound nodes, `play`/`stop` from scripts | ◐ | 27 SFX and 2 music cues are wired, but every sample slot is **empty**, so it is silent until you assign files. |
-| Spatial audio, buses, effect rack, `fadeTo` | ✗ | |
+| Spatial audio | ◐ | The barrels' break sound only. |
+| Buses, effect rack, `fadeTo` | ✗ | |
 
 ### UI
 
@@ -149,14 +152,17 @@ souls-like game features it has or lacks. It is a map for two jobs:
 | Runtime spawning from templates | ✅ | Enemies, effects, projectiles. |
 | Spawn/despawn lifecycle (`spawnOnStart`) | ✗ | |
 | Event bus | ✗ | The GameManager is the hub instead (SOULS_DEMO §4). |
-| Engine time scale, game pause | ✗ (not in engine) | No `timeScale` or pause API for scripts (§2). |
+| Game pause | ✗ | `Game.pause()` / `Game.resume()` exist; nothing calls them. |
+| Engine time scale | ✗ (not in engine) | No `timeScale` for scripts. |
 | Save / load API | ✗ (not in engine) | |
 
 ### Terrain, 2D, publishing
 
 | Feature | | Where / note |
 |---|---|---|
-| Landscape, foliage, heightmaps | ✗ | The level is blockout geometry. |
+| Landscape, foliage, heightmaps | ✅ | A 2 km heightmap landscape with five surfaces, pre-scattered grass, flowers, rocks and pines, wind. |
+| Water volumes, buoyancy | ✅ | The pond: wading slows you and stops rolls; barrels and debris float. |
+| Multiple scenes, `Game.loadScene` | ✅ | The skull cave loads the Dungeon scene behind a loading overlay. |
 | Tilemaps, sprites | ✗ | Not relevant to a 3D souls-like. |
 | Publishing (web, desktop) | ◐ | Not exercised by the example itself. Every feature it uses is in player contract 8. |
 
@@ -188,8 +194,8 @@ souls-like game features it has or lacks. It is a map for two jobs:
 | Enemies | Melee, ranged caster, elite with hyper armour | ✅ | 4 enemy templates | |
 | | Spacing, strafing, leash and return, attack weights, cooldowns | ✅ | AI graphs (decisions), `SoulsEnemy` (attack choice, movement) | |
 | | Respawn on rest | ✅ | `SoulsEnemySpawn` | |
-| | Pathfinding around obstacles | ◐ | Navmesh unbaked | Ready: bake it in the editor (SOULS_DEMO §11.11). |
-| Boss | Fog gate, boss bar, two phases (roar, speed-up, new attacks), reset on death, reward | ✅ | `SoulsFogGate`, `SoulsEnemy._startPhase2` | |
+| | Pathfinding around obstacles | ✅ | Baked navmesh | |
+| Boss | Fog gate, boss bar, two phases (roar, speed-up, new attacks), reset on death, reward | ◐ | `SoulsFogGate`, `SoulsEnemy._startPhase2` ship as templates, but no boss is placed in the valley or the dungeon | Ready: place the Hollow Warden and a Fog Gate. |
 | World | Bonfire checkpoint, rest, respawn point | ✅ | `SoulsBonfire` | |
 | | Lever shortcut, one-way gate | ✅ | `SoulsLever`, `SoulsDoor` | |
 | | Readable messages | ◐ | Authored only: players cannot write or rate them. | |
@@ -201,7 +207,7 @@ souls-like game features it has or lacks. It is a map for two jobs:
 | UI and menus | HUD (HP with drain bar, stamina, Estus, souls, prompts, messages) | ✅ | `SoulsHud` | |
 | | Banners: YOU DIED, BONFIRE LIT, VICTORY | ✅ | `SoulsBanner` | |
 | | Floating enemy health bars | ✅ | World canvases | |
-| | Pause menu | ✗ | The `Pause` action exists but nothing reads it | **Engine gap:** no game-pause API for scripts. A menu can still disable the Gameplay map and freeze the GameManager. |
+| | Pause menu | ✗ | The `Pause` action exists but nothing reads it | Ready: `Game.pause()` plus a UI canvas. |
 | | Settings and title screen | ✗ | | Ready: UI widgets. Rebinding exists in the engine. |
 | Audio | SFX cues, ambience and boss music switching | ◐ | Wired, but the samples are empty | Ready: assign samples. Spatial mode, buses and `fadeTo` are unused. |
 | Feedback | Screen shake | ✅ | `GameManager.shake` | |
@@ -215,25 +221,23 @@ souls-like game features it has or lacks. It is a map for two jobs:
 
 Ranked by what they add against what they cost.
 
-1. **Pause menu and settings.** High value, small cost: UI widgets plus disabling the Gameplay map.
-   A real pause needs an **engine game-pause API**; until then a "soft pause" can freeze the GameManager
-   and the enemy brains.
-2. **Save and load.** High value, medium cost. Needs an **engine save API** (key/value storage that works
+1. **A boss.** The Warden, its fog gate and boss bar are finished templates; the dungeon is the obvious arena.
+2. **Pause menu and settings.** Small cost: `Game.pause()`, UI widgets, and disabling the Gameplay map.
+3. **Save and load.** High value, medium cost. Needs an **engine save API** (key/value storage that works
    in web and desktop builds). Then a script persists souls, stats, shortcuts and boss state.
-3. **Guard, parry, riposte and backstab.** The defining combat verbs, script-only. Parry windows ride on
+4. **Guard, parry, riposte and backstab.** The defining combat verbs, script-only. Parry windows ride on
    the existing animation events.
-4. **Hit-stop.** Cheap and very noticeable, but needs an **engine time scale** first (global, or per
+5. **Hit-stop.** Cheap and very noticeable, but needs an **engine time scale** first (global, or per
    animator plus physics).
-5. **Keys and keyed doors.** Trivial with `SoulsDoor` and a new pickup `kind`.
-6. **Bake the navmesh, assign audio samples.** No code: these make two wired features actually work.
-7. **Per-bone hurtboxes.** Head and limb hits, with multipliers. The shape queries already support it;
+6. **Keys and keyed doors.** Trivial with `SoulsDoor` and a new pickup `kind`.
+7. **Assign audio samples.** No code: every sound slot is wired and empty.
+8. **Per-bone hurtboxes.** Head and limb hits, with multipliers. The shape queries already support it;
    it needs small capsules that follow the skeleton.
-8. **Ladders and NPCs.** Larger script work: a climb state, a dialogue UI.
+9. **Ladders and NPCs.** Larger script work: a climb state, a dialogue UI.
 
-The engine features the demo does not exercise yet, and that could be shown with little change:
-- light probes in the interiors;
-- height fog and god rays on the sky (turned off for clarity today);
-- spatial audio;
-- foot IK on the characters;
-- LODs on final art;
-- a landscape outside the walls.
+The engine features the game does not exercise yet, and that could be shown with little change:
+- light probes in the dungeon, spot lights with shadows on its torches;
+- height fog and god rays on the sky;
+- foot IK on the characters (the valley is all slopes);
+- LODs on the buildings and characters;
+- buses, an effect rack (cave reverb) and music crossfades with `fadeTo`.

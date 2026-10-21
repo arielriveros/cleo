@@ -9,7 +9,7 @@ import { Terrain } from '../src/terrain/terrain';
 /**
  * The layer-stack migration, against a landscape that was actually shipped.
  *
- * Every other migration test builds its input; this one reads `3d-example`'s scene as it sits on disk —
+ * Every other migration test builds its input; this one reads the landscape the retired 3d-example shipped, kept verbatim as a fixture —
  * two layers, `auto` off, a 400x400 RGBA splat — and asserts that the surfaces the new stack composites
  * are the weights the old renderer would have blended, texel for texel. That is the whole promise of the
  * change: an existing project opens looking the same. The stick-breaking conversion
@@ -51,8 +51,8 @@ function findTerrain(json: any): any {
     return null;
 }
 
-const EXAMPLE = join(__dirname, '..', 'editor', 'public', 'examples', '3d-example', 'scenes',
-    'afe4727c54de62f1bafbf6ac25c32b74.json');
+/** The 3d-example's Landscape node, exactly as that scene saved it. */
+const EXAMPLE = join(__dirname, 'fixtures', 'legacyLandscape.json');
 
 describe('a shipped 4-layer landscape', () => {
     const scene = JSON.parse(readFileSync(EXAMPLE, 'utf8'));

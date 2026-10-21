@@ -16,9 +16,12 @@ interface CloudsState {
   baseScale: number; detailScale: number; detailStrength: number;
   curlStrength: number; anvilBias: number;
   useSceneSun: boolean; sunDirection: Vec3; sunColor: Vec3; sunIntensity: number;
-  ambientColor: Vec3; ambientIntensity: number; groundColor: Vec3; sunsetColor: Vec3;
+  useSkyAmbient: boolean; ambientColor: Vec3; ambientIntensity: number; groundColor: Vec3; sunsetColor: Vec3;
   phaseG: number; silverIntensity: number; silverSpread: number;
-  powderStrength: number; absorption: number;
+  powderStrength: number; absorption: number; albedo: number;
+  phaseBackG: number; phaseBackWeight: number;
+  msOctaves: number; msScatter: number; msExtinction: number; msEccentricity: number;
+  hazeDistance: number;
   windDirection: Vec3; windSpeed: number; detailWindFactor: number;
   steps: number; lightSteps: number; maxDistance: number; jitter: boolean; resolutionScale: number;
   temporalUpscale: boolean;
@@ -32,10 +35,15 @@ function readNode(node: VolumetricCloudsNode): CloudsState {
     baseScale: node.baseScale, detailScale: node.detailScale, detailStrength: node.detailStrength,
     curlStrength: node.curlStrength, anvilBias: node.anvilBias,
     useSceneSun: node.useSceneSun, sunDirection: node.sunDirection, sunColor: node.sunColor, sunIntensity: node.sunIntensity,
+    useSkyAmbient: node.useSkyAmbient,
     ambientColor: node.ambientColor, ambientIntensity: node.ambientIntensity, groundColor: node.groundColor,
     sunsetColor: node.sunsetColor,
     phaseG: node.phaseG, silverIntensity: node.silverIntensity, silverSpread: node.silverSpread,
-    powderStrength: node.powderStrength, absorption: node.absorption,
+    powderStrength: node.powderStrength, absorption: node.absorption, albedo: node.albedo,
+    phaseBackG: node.phaseBackG, phaseBackWeight: node.phaseBackWeight,
+    msOctaves: node.msOctaves, msScatter: node.msScatter, msExtinction: node.msExtinction,
+    msEccentricity: node.msEccentricity,
+    hazeDistance: node.hazeDistance,
     windDirection: node.windDirection, windSpeed: node.windSpeed, detailWindFactor: node.detailWindFactor,
     steps: node.steps, lightSteps: node.lightSteps, maxDistance: node.maxDistance, jitter: node.jitter,
     resolutionScale: node.resolutionScale,
@@ -121,6 +129,7 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
         {slider('Detail Strength', 'detailStrength', 0, 1, 0.01)}
         {slider('Curl / Turbulence', 'curlStrength', 0, 3, 0.01)}
         {slider('Anvil Bias', 'anvilBias', 0, 1, 0.01)}
+        {slider('Haze Distance', 'hazeDistance', 0, 100000, 500, 0)}
 
         {header('Lighting')}
         {check('Use Scene Directional Light', 'useSceneSun')}
@@ -133,15 +142,25 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
         }
         {!state.useSceneSun && color('Sun Color', 'sunColor')}
         {slider('Sun Intensity', 'sunIntensity', 0, 30, 0.1)}
+        {check('Ambient from Sky Light', 'useSkyAmbient')}
         {color('Ambient (Sky) Color', 'ambientColor')}
         {slider('Ambient Intensity', 'ambientIntensity', 0, 5, 0.05)}
-        {color('Ground Color', 'groundColor')}
+        {color('Ground Albedo', 'groundColor')}
         {color('Sunset/Sunrise Color', 'sunsetColor')}
+        {slider('Extinction', 'absorption', 0, 4, 0.01)}
+        {slider('Albedo', 'albedo', 0.5, 1, 0.005, 3)}
         {slider('Forward Scatter (Phase g)', 'phaseG', 0, 0.99, 0.01)}
+        {slider('Back Scatter g', 'phaseBackG', -0.99, 0, 0.01)}
+        {slider('Back Scatter Weight', 'phaseBackWeight', 0, 1, 0.01)}
         {slider('Silver Lining', 'silverIntensity', 0, 2, 0.01)}
         {slider('Silver Spread', 'silverSpread', 0.01, 0.5, 0.01)}
         {slider('Powder (dark edges)', 'powderStrength', 0, 1, 0.01)}
-        {slider('Absorption', 'absorption', 0, 4, 0.01)}
+
+        {header('Multiple Scattering')}
+        {slider('Octaves', 'msOctaves', 1, 4, 1, 0)}
+        {slider('Scatter (a)', 'msScatter', 0, 1, 0.01)}
+        {slider('Extinction (b)', 'msExtinction', 0, 1, 0.01)}
+        {slider('Eccentricity (c)', 'msEccentricity', 0, 1, 0.01)}
 
         {header('Animation')}
         <div className='mb-2'>

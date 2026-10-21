@@ -162,6 +162,7 @@ export async function packBundleAssets(bundle: BundleData): Promise<PackBundleRe
     let typed = false
     for (const name of GEOMETRY_ATTRS) {
       const source = raw[name]
+      if (Array.isArray(source) && source.length === 0) { (record.empty ??= []).push(name); continue }
       if (!source || source.length === 0) continue
       if (isNestedArray(source)) nested = true
       if (wasTyped(source)) typed = true
@@ -267,7 +268,8 @@ export async function packBundleAssets(bundle: BundleData): Promise<PackBundleRe
     packModel(value.model)
     for (const m of (value.models ?? [])) packModel(m)
     if (value.samplers) packClip(value)
-    if (value.skin && !value.model) packSkin(value.skin) // a bare skin: AnimationAsset.sourceSkin
+    if (value.skin && !value.model) packSkin(value.skin) // a bare skin: a rig
+    if (value.sourceSkin) packSkin(value.sourceSkin) // AnimationAsset.sourceSkin
 
     if (typeof value.thumbnail === 'string') {
       const marker = packDataUrl(value.thumbnail)
@@ -361,6 +363,7 @@ export async function inflateBundleAssets(
     if (!record) return undefined
     const out: any = {}
     for (const name of GEOMETRY_ATTRS) {
+      if (record.empty?.includes(name)) { out[name] = []; continue }
       const chunk = record[name] as (ChunkRef & { f64?: 1 }) | undefined
       if (!chunk) continue
       const flat = chunk.f64 ? readDoubles(chunk) : reader.floats(chunk)!

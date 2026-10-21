@@ -169,4 +169,4 @@ Edits are not pushed on every keystroke — that would re-embed into every live 
 
 ## See also
 
-[AI agents](ai-agents.md) · [AI (scripting)](../scripting/ai.md) · [Animation built-ins](../reference/animation-builtins.md) · [Night Shift example](../../examples/scripts/NIGHT_SHIFT.md)
+[AI agents](ai-agents.md) · [AI (scripting)](../scripting/ai.md) · [Animation built-ins](../reference/animation-builtins.md) · [Valley example](../../examples/scripts/SOULS_DEMO.md)

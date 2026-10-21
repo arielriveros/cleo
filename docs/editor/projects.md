@@ -27,7 +27,7 @@ untouched. Anything over 25 MB asks first.
 Examples are the fastest way to see a working setup. Two are documented in depth:
 
 - [Third-person strafe character](../../examples/scripts/README.md)
-- [Night Shift](../../examples/scripts/NIGHT_SHIFT.md), a complete small game
+- [Valley](../../examples/scripts/SOULS_DEMO.md), the souls-like example game
 
 ## Scenes
 

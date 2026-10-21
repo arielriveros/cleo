@@ -238,4 +238,4 @@ is doing.
 
 ## See also
 
-[AI brains](ai-brains.md) · [AI (scripting)](../scripting/ai.md) · [Characters and controllers](../scripting/characters-and-controllers.md) · [Night Shift example](../../examples/scripts/NIGHT_SHIFT.md)
+[AI brains](ai-brains.md) · [AI (scripting)](../scripting/ai.md) · [Characters and controllers](../scripting/characters-and-controllers.md) · [Valley example](../../examples/scripts/SOULS_DEMO.md)

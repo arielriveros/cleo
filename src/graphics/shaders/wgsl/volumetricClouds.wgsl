@@ -2,9 +2,18 @@
 //
 // For every pixel a world-space view ray is reconstructed from `u_invViewProj`, intersected with a
 // horizontal cloud slab, and marched through a density field (baked value-noise FBM shaped by a height
-// gradient and coverage, eroded by higher-frequency detail). Lighting uses a secondary march toward the
-// sun (Beer-Powder) with a Henyey-Greenstein phase plus silver lining, and a sky/ground ambient
-// gradient. The scene depth buffer bounds the ray so solid geometry occludes the clouds.
+// gradient and coverage, eroded by higher-frequency detail). The scene depth buffer bounds the ray so
+// solid geometry occludes the clouds.
+//
+//   - participating media in real units: extinction sigma_t per metre, scattering = albedo * sigma_t;
+//   - the energy-conserving analytical integration of in-scattering over each step;
+//   - a dual-lobe Henyey-Greenstein phase (forward + back, plus a sharp silver-lining lobe), mixed so it
+//     still integrates to one, never `max`ed;
+//   - multiple scattering approximated with Wrenninge's octaves: per octave i the scattering, the
+//     extinction and the phase eccentricity are scaled by a^i, b^i and c^i (a <= b keeps it energy
+//     conserving), all from ONE toward-sun optical depth;
+//   - an isotropic sky/ground ambient term, occluded by an analytic estimate of the cloud above/below;
+//   - aerial perspective from the transmittance-weighted cloud depth.
 //
 // GLSL ES needed `precision highp sampler3D` here because it does not predeclare one — the shader
 // simply failed to compile without it. WGSL has no precision qualifiers at all, so that whole class of
@@ -15,6 +24,10 @@
 const PI: f32 = 3.14159265359;
 const MAX_STEPS: i32 = 192;
 const MAX_LIGHT_STEPS: i32 = 12;
+const MAX_OCTAVES: i32 = 4;
+// Fraction of the remaining slab height whose extinction occludes the ambient sky/ground at a sample.
+// The local density stands in for the whole column, which overestimates it, hence well under 1.
+const AMBIENT_DEPTH: f32 = 0.25;
 
 @group(0) @binding(0) var u_gDepth_texture: texture_depth_2d;     // device depth (occlusion bound)
 @group(0) @binding(1) var u_gDepth_sampler: sampler;
@@ -56,7 +69,6 @@ struct CloudUniforms {
     u_silverIntensity: f32,
     u_silverSpread: f32,
     u_powderStrength: f32,
-    u_absorption: f32,
     // Animation
     u_windSpeed: f32,
     u_detailWindFactor: f32,
@@ -72,6 +84,16 @@ struct CloudUniforms {
     // Which slot of the 16-frame Bayer cycle this frame is, used to advance the ray-start dither.
     // Also set on the non-temporal paths (from the raw frame counter) so they still get a moving one.
     u_jitterSlot: i32,
+    // Physically based lighting (see the header).
+    u_extinction: f32,            // sigma_t per metre at unit density (the renderer folds `absorption` in)
+    u_albedo: f32,                // scattering / extinction
+    u_phaseBackG: f32,            // back-scatter lobe anisotropy (negative)
+    u_phaseBackWeight: f32,       // share of the back-scatter lobe
+    u_msOctaves: i32,             // multiple-scattering octaves, 1..MAX_OCTAVES
+    u_msScatter: f32,             // a: per-octave scattering attenuation
+    u_msExtinction: f32,          // b: per-octave extinction attenuation (>= a)
+    u_msEccentricity: f32,        // c: per-octave phase eccentricity attenuation
+    u_hazeDistance: f32,          // aerial-perspective fade distance, 0 = off
 };
 @group(1) @binding(0) var<uniform> u_cloud: CloudUniforms;
 
@@ -160,7 +182,25 @@ fn sampleDensity(pos: vec3<f32>, h: f32, cheap: bool, wind: vec3<f32>) -> f32 {
 
 fn henyeyGreenstein(cosAngle: f32, g: f32) -> f32 {
     let g2 = g * g;
-    return (1.0 - g2) / (4.0 * PI * pow(1.0 + g2 - 2.0 * g * cosAngle, 1.5));
+    return (1.0 - g2) / (4.0 * PI * pow(max(1.0 + g2 - 2.0 * g * cosAngle, 1e-4), 1.5));
+}
+
+/**
+ * Cloud phase function with every lobe's eccentricity scaled by `ecc` (1 for single scattering, c^i for
+ * multiple-scattering octave i, which flattens the phase toward isotropic as light bounces).
+ *
+ * Each lobe is a normalised HG and they are combined with `mix`, so the result still integrates to one
+ * over the sphere. The old `max(forward, silver)` did not, and it put a visible kink where the two
+ * lobes crossed. The silver-lining intensity becomes a weight `s / (1 + s)`, so 0 removes the lobe and
+ * large values approach (but never exceed) a pure silver lobe.
+ */
+fn cloudPhase(cosAngle: f32, ecc: f32) -> f32 {
+    let forward = henyeyGreenstein(cosAngle, u_cloud.u_phaseG * ecc);
+    let silverG = clamp(0.99 - u_cloud.u_silverSpread, 0.0, 0.999);
+    let silver = henyeyGreenstein(cosAngle, silverG * ecc);
+    let silverWeight = u_cloud.u_silverIntensity / (1.0 + u_cloud.u_silverIntensity);
+    let back = henyeyGreenstein(cosAngle, u_cloud.u_phaseBackG * ecc);
+    return mix(mix(forward, silver, silverWeight), back, u_cloud.u_phaseBackWeight);
 }
 
 fn reconstructWorldPos(depth: f32, uv: vec2<f32>) -> vec3<f32> {
@@ -249,20 +289,54 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     var t = tEnter + stepLen * jitter;
 
-    // Sun setup (direction TOWARD the sun) plus phase.
+    // Sun setup (direction TOWARD the sun).
     let sunDir = normalize(-u_cloud.u_sunDir);
     let cosAngle = dot(rd, sunDir);
-    let phase = max(henyeyGreenstein(cosAngle, u_cloud.u_phaseG),
-                    u_cloud.u_silverIntensity
-                    * henyeyGreenstein(cosAngle, clamp(0.99 - u_cloud.u_silverSpread, 0.0, 0.999)));
     let sunLight = u_cloud.u_sunColor * u_cloud.u_sunIntensity;
 
+    // Multiple-scattering octaves. The phase of every octave depends only on the ray, so it is
+    // evaluated once here and folded with that octave's scattering weight a^i; the extinction scale
+    // b^i is kept alongside for the per-sample exp().
+    let octaves = clamp(u_cloud.u_msOctaves, 1, MAX_OCTAVES);
+    let msA = u_cloud.u_msScatter;
+    let msB = max(u_cloud.u_msExtinction, msA);   // a <= b, or the octaves create energy
+    var octaveWeight: array<f32, 4>;
+    var octaveExt: array<f32, 4>;
+    var a = 1.0;
+    var b = 1.0;
+    var c = 1.0;
+    // The ambient term is isotropic, so its octaves need no phase: only the summed scattering weight.
+    var ambientBoost = 0.0;
+    for (var o = 0; o < MAX_OCTAVES; o++) {
+        if (o < octaves) {
+            octaveWeight[o] = a * cloudPhase(cosAngle, c);
+            octaveExt[o] = b;
+            ambientBoost += a;
+        } else {
+            octaveWeight[o] = 0.0;
+            octaveExt[o] = 1.0;
+        }
+        a *= msA;
+        b *= msB;
+        c *= u_cloud.u_msEccentricity;
+    }
+    // Powder (Schneider) darkens sun-facing edges that have not yet built up in-scattered light. It is
+    // not energy conserving, so it stays an artist control: applied to the sun term only, and faded out
+    // looking toward the sun, where forward scattering makes those same edges the brightest part.
+    let powderWeight = u_cloud.u_powderStrength * (0.5 - 0.5 * cosAngle);
+
     let lightSteps = clamp(u_cloud.u_lightSteps, 1, MAX_LIGHT_STEPS);
-    let lightStepLen = u_cloud.u_thickness / f32(lightSteps);
+    let invLightSteps = 1.0 / f32(lightSteps);
     let invSlab = 1.0 / max(u_cloud.u_thickness, 1e-3);
+    let sigmaScale = u_cloud.u_extinction;
+    // Toward-sun march length cap: a low sun would otherwise march tens of kilometres through the slab.
+    let lightCap = u_cloud.u_thickness * 3.0;
 
     var transmittance = 1.0;
     var scatteredLight = vec3<f32>(0.0);
+    // Transmittance-weighted mean cloud depth, for the aerial perspective.
+    var depthSum = 0.0;
+    var depthWeight = 0.0;
 
     // -----------------------------------------------------------------------------------------
     // Two-speed march.
@@ -309,29 +383,57 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
         if (density > 0.001) {
             misses = 0;
-            // Secondary march toward the sun for self-shadowing (cheap density).
-            var lightOpticalDepth = 0.0;
+            // Secondary march toward the sun for self-shadowing (cheap density). It runs to the top of
+            // the slab rather than a fixed `thickness`, so a low sun is shadowed by all the cloud in its
+            // way. Steps grow quadratically: the near field, which decides how bright an edge is, gets
+            // most of the samples while the far field still counts.
+            let toTop = (slabTop - pos.y) / max(sunDir.y, 0.05);
+            let lightLen = clamp(toTop, u_cloud.u_thickness * 0.05, lightCap);
+            var lightDensity = 0.0;
+            var prevT = 0.0;
             for (var j = 0; j < MAX_LIGHT_STEPS; j++) {
                 if (j >= lightSteps) { break; }
-                let lp = pos + sunDir * (lightStepLen * (f32(j) + 0.5));
+                let f1 = (f32(j) + 1.0) * invLightSteps;
+                let fm = (f32(j) + 0.5) * invLightSteps;
+                let nextT = lightLen * f1 * f1;
+                let lp = pos + sunDir * (lightLen * fm * fm);
                 let lh = clamp((lp.y - slabBottom) * invSlab, 0.0, 1.0);
-                lightOpticalDepth += sampleDensity(lp, lh, true, wind) * lightStepLen;
+                lightDensity += sampleDensity(lp, lh, true, wind) * (nextT - prevT);
+                prevT = nextT;
             }
+            let tauSun = lightDensity * sigmaScale;
 
-            let beers = exp(-lightOpticalDepth * u_cloud.u_absorption);
-            let powder = 1.0 - exp(-lightOpticalDepth * 2.0 * u_cloud.u_absorption);
-            let powderTerm = mix(1.0, 2.0 * powder, u_cloud.u_powderStrength);
+            // Sun: the sum of the octaves, each with its own extinction and phase.
+            var sunScatter = 0.0;
+            for (var o = 0; o < MAX_OCTAVES; o++) {
+                if (o >= octaves) { break; }
+                sunScatter += octaveWeight[o] * exp(-tauSun * octaveExt[o]);
+            }
+            let powder = 1.0 - exp(-2.0 * tauSun);
+            sunScatter *= mix(1.0, powder, powderWeight);
 
-            let sampleLight = sunLight * beers * powderTerm * phase;
-            let ambient = mix(u_cloud.u_groundColor, u_cloud.u_ambientColor, h)
-                          * u_cloud.u_ambientIntensity;
+            let sigmaT = density * sigmaScale;
+            let sigmaS = sigmaT * u_cloud.u_albedo;
 
-            // Energy-conserving analytical integration of in-scattering over the step.
-            let sigmaT = density * u_cloud.u_absorption;
-            let s = (sampleLight + ambient) * density;
+            // Isotropic ambient: half the sphere sees the sky, half the ground. Each half is occluded by
+            // an analytic estimate of the cloud column above / below this sample, so bases and interiors
+            // darken while tops stay sky-lit. The octaves add the light bounced in from neighbours.
+            let skyVis = exp(-sigmaT * (1.0 - h) * u_cloud.u_thickness * AMBIENT_DEPTH);
+            let groundVis = exp(-sigmaT * h * u_cloud.u_thickness * AMBIENT_DEPTH);
+            let ambient = (u_cloud.u_ambientColor * skyVis + u_cloud.u_groundColor * groundVis)
+                          * (0.5 * u_cloud.u_ambientIntensity * ambientBoost);
+
+            // Energy-conserving analytical integration of in-scattering over the step (Hillaire 2016):
+            // S is the radiance scattered toward the eye per metre, integrated against the step's own
+            // extinction rather than assumed constant-transmittance across it.
+            let S = (sunLight * sunScatter + ambient) * sigmaS;
             let tr = exp(-sigmaT * stepLen);
-            let sInt = (s - s * tr) / max(sigmaT, 1e-5);
+            let sInt = (S - S * tr) / max(sigmaT, 1e-7);
             scatteredLight += transmittance * sInt;
+
+            let absorbed = transmittance * (1.0 - tr);
+            depthSum += t * absorbed;
+            depthWeight += absorbed;
             transmittance *= tr;
         } else {
             misses++;
@@ -341,12 +443,25 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         t += stepLen;
     }
 
-    let alpha = (1.0 - transmittance) * u_cloud.u_opacity;
+    // Aerial perspective. The clouds composite over the sky, so fading their premultiplied colour AND
+    // coverage together blends them into whatever sky is behind them: the right haze colour at every
+    // time of day, for free.
+    var haze = 1.0;
+    if (u_cloud.u_hazeDistance > 0.0 && depthWeight > 0.0) {
+        haze = exp(-(depthSum / depthWeight) / u_cloud.u_hazeDistance);
+    }
+
+    let fade = u_cloud.u_opacity * haze;
+    let alpha = (1.0 - transmittance) * fade;
     if (alpha <= 0.0) { return vec4<f32>(0.0); }
 
     // The scene buffer is LINEAR HDR, so output linear scattered radiance and let the single final
     // tonemapper handle exposure/tonemap/gamma like every other surface. Output is PREMULTIPLIED
     // (composited with ONE, ONE_MINUS_SRC_ALPHA) so bilinear upsampling from the reduced-resolution
     // path does not fringe cloud silhouettes toward black.
-    return vec4<f32>(scatteredLight * alpha, alpha);
+    //
+    // `scatteredLight` is ALREADY premultiplied: it is radiance reaching the eye, accumulated under the
+    // view transmittance. It used to be multiplied by alpha a second time, which squared the coverage
+    // and darkened every thin edge and wisp toward black.
+    return vec4<f32>(scatteredLight * fade, alpha);
 }

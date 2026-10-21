@@ -17,7 +17,7 @@
 // roads exactly where the renderer will draw them.
 
 import path from 'path'
-import { moduleRegistry } from '../nightShift/tsLoader.mjs'
+import { moduleRegistry } from '../exampleKit/tsLoader.mjs'
 import { ROADS, TERRAIN, catmullRom, distanceToPolyline } from './layout.mjs'
 
 /** The mask resolution the engine gives a 2049² landscape: defaultMaskResolution(2049) = min(1024, 2·2048). */

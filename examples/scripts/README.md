@@ -1,12 +1,8 @@
 # Example scripts — third-person strafe character
 
-> **Building a whole game on this?** [NIGHT_SHIFT.md](NIGHT_SHIFT.md) documents *Night Shift*, a complete
-> example game assembled on top of this character — a night-to-dawn clock, zombie AI with real sight
-> cones, pickups, powerups and a HUD. Its nine scripts are the `NightShift*.ts` files beside this one.
->
-> **Making a souls-like?** [SOULS_DEMO.md](SOULS_DEMO.md) documents *Hollow Keep*: stamina combat, rolls with
-> i-frames, lock-on, bonfires, a fog gate and a two-phase boss, built on placeholders with a full guide to
-> swapping in final art. Its scripts are the `Souls*.ts` files.
+> **Building a whole game?** [SOULS_DEMO.md](SOULS_DEMO.md) documents the *Valley* example, a souls-like:
+> stamina combat, rolls with i-frames, lock-on, bonfires and a second scene behind a skull cave, with a full
+> guide to swapping in final art. Its scripts are the `Souls*.ts` files.
 
 A third-person **strafe** character: move relative to the camera, sprint, jump, look. "Forward" is always where
 the camera looks — while moving, the character turns to face the camera and side-steps for left/right (the

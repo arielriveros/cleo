@@ -9,7 +9,7 @@ The art in build/ arrives as it was exported: 4096^2 RGBA PNGs for one house (63
 albedo PNGs for a 1k ground texture, a pine whose four maps live inside its GLB. Shipped as-is the example
 would weigh several hundred megabytes for detail nobody can see at the distances it is viewed from.
 
-Same split as tools/nightShift/packZombieTextures.py, for the same reason: colour and packed AO/rough/metal
+The usual split for shipped textures: colour and packed AO/rough/metal
 maps go out as JPEG; normal maps and cutout masks stay PNG. A normal map's channels are a direction, so
 JPEG ringing shows up as shimmering facets; a mask's edge is the cutout itself.
 

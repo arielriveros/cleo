@@ -2,40 +2,11 @@
   "version": 1,
   "examples": [
     {
-      "slug": "3d-example",
-      "name": "3D Example",
-      "order": 0,
-      "bytes": 215527442,
-      "sceneCount": 1,
-      "textureCount": 29,
-      "createdAt": 1787013290557
-    },
-    {
-      "slug": "night-shift",
-      "name": "Night Shift",
-      "description": "A third-person survival night: collect before dawn, and stay ahead of what the dark brings.",
-      "order": 1,
-      "bytes": 167953128,
-      "sceneCount": 2,
-      "textureCount": 30,
-      "createdAt": 1788000000000
-    },
-    {
-      "slug": "souls-demo",
-      "name": "Hollow Keep",
-      "description": "A one-level souls-like: stamina combat, rolls, lock-on, bonfires, a fog gate and a two-phase boss. Placeholder art, real mechanics — see SOULS_DEMO.md to swap in your own.",
-      "order": 2,
-      "bytes": 115475867,
-      "sceneCount": 1,
-      "textureCount": 17,
-      "createdAt": 1790000000000
-    },
-    {
       "slug": "valley",
       "name": "Valley",
-      "description": "Hollow Keep, outdoors: the same souls-like combat and bonfire on a 2 km mountain valley — landscape layers for ground, rock, snow, forest floor and trails, meadow grass and flowers, pine forest, moss rocks, a thatched hamlet with breakable barrels, and a skull cave that loads a second scene.",
-      "order": 3,
-      "bytes": 369581923,
+      "description": "A souls-like on a 2 km mountain valley: stamina combat, rolls, lock-on, bonfires and Estus, on landscape layers for ground, rock, snow, forest floor and trails, meadow grass and flowers, pine forest, moss rocks, a thatched hamlet with breakable barrels, and a skull cave that loads a second scene.",
+      "order": 0,
+      "bytes": 369581926,
       "sceneCount": 2,
       "textureCount": 77,
       "createdAt": 1790000000000

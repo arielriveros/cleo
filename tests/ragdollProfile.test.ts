@@ -32,7 +32,7 @@ beforeAll(() => {
     setGLContext(gl as any);
     setDevice(new WebGL2Device(gl as unknown as WebGL2RenderingContext));
 
-    const lib = JSON.parse(readFileSync('editor/public/examples/souls-demo/libraries/models.json', 'utf8'));
+    const lib = JSON.parse(readFileSync('editor/public/examples/valley/libraries/models.json', 'utf8'));
     const find = (n: any): any => n.model?.skin ? n : (n.children ?? []).map(find).find(Boolean);
     modelJson = find(lib[0].nodeJson).model;
 });

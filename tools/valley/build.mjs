@@ -5,7 +5,7 @@
 //     node --max-old-space-size=8192 tools/valley/build.mjs
 //     npm --prefix editor run examples:list                  # regenerates the gallery index
 //
-// The Hollow Keep souls-like, moved outdoors. Every playable element — the player, both weapons, the four
+// The souls-like content, outdoors. Every playable element — the player, both weapons, the four
 // enemy types, the Warden, the bonfire, the fog gate, the lever and gate, messages, pickups, the HUD — is
 // the souls demo's own, imported from tools/soulsDemo/build.mjs and linked to the same templates. What is
 // new is the level: a 2 km landscape from build/valley_height_4097_16bit.png with a four-surface landscape
@@ -14,13 +14,13 @@
 //
 // Positions come from the map's technical reference (layout.mjs); every height is sampled from the
 // heightmap (heights.mjs). The source art is in build/, which is gitignored: this is run by hand and its
-// OUTPUT is committed, like tools/nightShift/importZombie.mjs.
+// OUTPUT is committed.
 
 import fs from 'fs'
 import { spawnSync } from 'child_process'
 import path from 'path'
-import { node, vars, loadScriptReflector, mb } from '../nightShift/bundle.mjs'
-import { ASSET_HASH_VERSION } from '../nightShift/editorConstants.mjs'
+import { node, vars, loadScriptReflector, mb } from '../exampleKit/bundle.mjs'
+import { ASSET_HASH_VERSION } from '../exampleKit/editorConstants.mjs'
 import * as souls from '../soulsDemo/build.mjs'
 import { loadHeights } from './heights.mjs'
 import {
@@ -1081,8 +1081,8 @@ const result = souls.writeProject({
   buildScene: valleyScene,
   example: {
     name: PROJECT_NAME,
-    description: 'Hollow Keep, outdoors: the same souls-like combat and bonfire on a 2 km mountain valley — landscape layers for ground, rock, snow, forest floor and trails, meadow grass and flowers, pine forest, moss rocks, a thatched hamlet with breakable barrels, and a skull cave that loads a second scene.',
-    order: 3,
+    description: 'A souls-like on a 2 km mountain valley: stamina combat, rolls, lock-on, bonfires and Estus, on landscape layers for ground, rock, snow, forest floor and trails, meadow grass and flowers, pine forest, moss rocks, a thatched hamlet with breakable barrels, and a skull cave that loads a second scene.',
+    order: 0,
   },
   models: [...propAssets, ...foliageAssets],
   templates: [BARREL_TEMPLATE, DEBRIS_TEMPLATE, CAVE_TEMPLATE],
