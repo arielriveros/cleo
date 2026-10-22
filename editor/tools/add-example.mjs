@@ -172,7 +172,11 @@ async function writeThumbnail(dir, manifest) {
   if (match) {
     bytes = Buffer.from(match[1], 'base64');
   } else if (chunk && typeof chunk.o === 'number' && typeof chunk.l === 'number') {
-    const blob = await fs.readFile(path.join(dir, 'assets.bin')).catch(() => null);
+    // A checked-in example may split the blob across assets.bin, assets.1.bin, … (assets.json `parts`).
+    const index = JSON.parse(await fs.readFile(path.join(dir, 'assets.json'), 'utf8').catch(() => '{}'));
+    const files = index.parts?.length > 1 ? index.parts.map((_, i) => i ? `assets.${i}.bin` : 'assets.bin') : ['assets.bin'];
+    const parts = await Promise.all(files.map(f => fs.readFile(path.join(dir, f)).catch(() => null)));
+    const blob = parts.every(Boolean) ? Buffer.concat(parts) : null;
     if (blob && chunk.o + chunk.l <= blob.length) bytes = blob.subarray(chunk.o, chunk.o + chunk.l);
   }
 

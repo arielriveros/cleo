@@ -7,6 +7,7 @@ import { parseBehaviorMachine, createBehaviorRuntime, stepBehavior } from '../sr
 import { KIND_EXT } from '../editor/src/utils/vfs';
 import { hashAsset, assetHashKey } from '../editor/src/utils/assetHash';
 import { materializeVariant } from '../editor/src/utils/templateVariants';
+import { readExample } from '../tools/exampleKit/readExample.mjs';
 import { UIRootNode } from '../src/core/scene/nodes/ui/uiRoot';
 import { UIPanelNode } from '../src/core/scene/nodes/ui/uiContainers';
 import { UITextNode } from '../src/core/scene/nodes/ui/uiContent';
@@ -35,14 +36,11 @@ const scriptSources = () => readdirSync(SCRIPTS).filter(f => f.startsWith('Souls
 const PROJECT = join(__dirname, '..', 'editor', 'public', 'examples', 'valley');
 const present = existsSync(join(PROJECT, 'manifest.json'));
 
-// Memoised: templates.json alone is ~23 MB, and re-parsing it per assertion times tests out under a
-// full-suite run. Every test treats what it reads as read-only.
-const cache = new Map<string, any>();
-const read = (...parts: string[]) => {
-    const key = parts.join('/');
-    if (!cache.has(key)) cache.set(key, JSON.parse(readFileSync(join(PROJECT, ...parts), 'utf8')));
-    return cache.get(key);
-};
+// Read once, up front, through the editor's own bundle reader: the example is checked in as format 2,
+// whose JSON holds markers into assets.bin rather than the payloads these tests look at. Every test
+// treats what it reads as read-only.
+const valley = present ? await readExample(PROJECT) : null;
+const read = (...parts: string[]) => valley!.read(...parts);
 
 describe.skipIf(!present)('the Valley example project', () => {
     const manifest = () => read('manifest.json');

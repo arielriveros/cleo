@@ -20,6 +20,7 @@ import fs from 'fs'
 import { spawnSync } from 'child_process'
 import path from 'path'
 import { node, vars, loadScriptReflector, mb } from '../exampleKit/bundle.mjs'
+import { packFormat2 } from '../exampleKit/packFormat2.mjs'
 import { ASSET_HASH_VERSION } from '../exampleKit/editorConstants.mjs'
 import * as souls from '../soulsDemo/build.mjs'
 import { loadHeights } from './heights.mjs'
@@ -1110,6 +1111,11 @@ const result = souls.writeProject({
 })
 
 const sceneFile = path.join(OUT, 'scenes', `${SCENE_ID}.json`)
+const sceneBytes = fs.statSync(sceneFile).size
+// Format 1 is what writeProject can author; format 2 is what can be checked in. The pine alone is ~60 MB
+// of decimal text, stored in the model library, the terrain material and the scene's foliage layer, which
+// put the scene file past GitHub's 100 MB limit. Packing interns it once, as binary, in split parts.
+const largest = await packFormat2(OUT)
 log(`${PROJECT_NAME} written to editor/public/examples/valley/`)
-log(`  templates ${result.templates} · materials ${result.materials} · textures ${result.textureCount} · scene ${mb(fs.statSync(sceneFile).size)} · TOTAL ${mb(result.total)}`)
+log(`  templates ${result.templates} · materials ${result.materials} · textures ${result.textureCount} · scene ${mb(sceneBytes)} unpacked · largest file ${mb(largest)}`)
 log('Next:  npm --prefix editor run examples:list')

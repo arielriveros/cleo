@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BUNDLE_FORMAT_VERSION, BUNDLE_PATHS } from '../src/utils/bundle';
+import { assetPartPath, BUNDLE_FORMAT_VERSION, BUNDLE_PATHS } from '../src/utils/bundle';
 import type { BundleData } from '../src/utils/bundle';
 import { bundleEntries, readBundle, type BundleEntry } from '../src/utils/bundleRead';
 import { bytesToBase64 } from '../src/utils/bytes';
@@ -11,7 +11,7 @@ import { bytesToBase64 } from '../src/utils/bytes';
  * an archive here is a plain Map of the same entries, which is all readBundle's BundleSource ever wanted.
  *
  * The case worth having: a format-1 bundle — payloads inline, one file per texture — still imports. Every
- * already-exported .cleoproj.zip and every shipped example folder is format 1.
+ * already-exported .cleoproj.zip is format 1.
  */
 
 const cube = () => ({
@@ -124,6 +124,53 @@ describe('bundle layout round trip', () => {
     archive.delete(BUNDLE_PATHS.assets);
 
     await expect(readBundle(sourceOver(archive))).rejects.toThrow(/assets\.bin/);
+  });
+});
+
+/**
+ * Split a format-2 archive's blob into `n` part files the way tools/exampleKit/packFormat2.mjs does for a
+ * checked-in example (git hosts cap one file at 100 MB), recording the sizes in the index.
+ */
+function splitBlob(archive: Archive, n: number): number[] {
+  const blob = new Uint8Array(archive.get(BUNDLE_PATHS.assets) as ArrayBuffer);
+  const size = Math.ceil(blob.byteLength / n);
+  const parts: number[] = [];
+  archive.delete(BUNDLE_PATHS.assets);
+  for (let i = 0, o = 0; o < blob.byteLength; i++, o += size) {
+    const part = blob.slice(o, Math.min(o + size, blob.byteLength));
+    archive.set(assetPartPath(i), part.buffer);
+    parts.push(part.byteLength);
+  }
+  const index = JSON.parse(archive.get(BUNDLE_PATHS.assetsIndex) as string);
+  archive.set(BUNDLE_PATHS.assetsIndex, JSON.stringify({ ...index, parts }));
+  return parts;
+}
+
+describe('split assets blob', () => {
+  it('names the parts assets.bin, assets.1.bin, assets.2.bin', () => {
+    expect([0, 1, 2].map(assetPartPath)).toEqual(['assets.bin', 'assets.1.bin', 'assets.2.bin']);
+  });
+
+  it('stitches the parts back together before inflating', async () => {
+    const expected = JSON.stringify(makeBundle().scenes);
+    const archive = archiveOf(await bundleEntries(makeBundle()));
+    expect(splitBlob(archive, 3)).toHaveLength(3);
+
+    const { bundle } = await readBundle(sourceOver(archive));
+    expect(JSON.stringify(bundle.scenes)).toBe(expected);
+    expect(Array.from(new Uint8Array(bundle.textures[0].bytes))).toEqual(Array.from(PNG));
+  });
+
+  it('refuses a split blob with a part missing or truncated, rather than inflating shifted offsets', async () => {
+    const missing = archiveOf(await bundleEntries(makeBundle()));
+    splitBlob(missing, 3);
+    missing.delete(assetPartPath(1));
+    await expect(readBundle(sourceOver(missing))).rejects.toThrow(/assets\.bin/);
+
+    const short = archiveOf(await bundleEntries(makeBundle()));
+    splitBlob(short, 3);
+    short.set(assetPartPath(2), new Uint8Array(1).buffer);
+    await expect(readBundle(sourceOver(short))).rejects.toThrow(/assets\.bin/);
   });
 });
 

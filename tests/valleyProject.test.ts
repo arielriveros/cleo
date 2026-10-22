@@ -4,6 +4,7 @@ import { join } from 'path';
 import { defaultMaskResolution } from '../src/terrain/terrainLayerStack';
 import { MAX_INSTANCES } from '../src/terrain/foliage';
 import { decodePng } from '../src/terrain/heightmapIO';
+import { readExample } from '../tools/exampleKit/readExample.mjs';
 
 // The Valley example (tools/valley/build.mjs) is the souls content on a generated landscape. The joins
 // it shares with Hollow Keep are checked by soulsDemoProject.test.ts; this suite checks what the valley
@@ -15,12 +16,10 @@ const PROJECT = join(__dirname, '..', 'editor', 'public', 'examples', 'valley');
 const HEIGHTMAP = join(__dirname, '..', 'build', 'valley_height_4097_16bit.png');
 const present = existsSync(join(PROJECT, 'manifest.json'));
 
-const cache = new Map<string, any>();
-const read = (...parts: string[]) => {
-    const key = parts.join('/');
-    if (!cache.has(key)) cache.set(key, JSON.parse(readFileSync(join(PROJECT, ...parts), 'utf8')));
-    return cache.get(key);
-};
+// Read through the editor's own bundle reader: the example is checked in as format 2, whose JSON holds
+// markers into assets.bin rather than the payloads these tests look at.
+const valley = present ? await readExample(PROJECT) : null;
+const read = (...parts: string[]) => valley!.read(...parts);
 const allNodes = (root: any): any[] => {
     const out: any[] = [];
     const walk = (n: any) => { out.push(n); for (const c of n.children ?? []) walk(c); };

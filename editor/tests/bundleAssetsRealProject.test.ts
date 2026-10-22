@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { packBundleAssets, inflateBundleAssets } from '../src/utils/bundleAssets';
+import { readBundle } from '../src/utils/bundleRead';
 import type { BundleData } from '../src/utils/bundle';
 
 /**
@@ -19,24 +20,23 @@ import type { BundleData } from '../src/utils/bundle';
 const DIR = path.join(__dirname, '..', 'public', 'examples', 'valley');
 const present = fs.existsSync(path.join(DIR, 'manifest.json'));
 
-const readJson = (p: string) => JSON.parse(fs.readFileSync(path.join(DIR, p), 'utf8'));
-const lib = (n: string) => { try { return readJson(`libraries/${n}.json`); } catch { return []; } };
-
-/** Textures are left out: they are already raw bytes, and 152 MB of them proves nothing extra here. */
-function load(): BundleData {
-  const scenes: any = {};
-  for (const f of fs.readdirSync(path.join(DIR, 'scenes'))) scenes[f.replace(/\.json$/, '')] = readJson(`scenes/${f}`);
-  return {
-    manifest: readJson('manifest.json'),
-    scenes,
-    libraries: {
-      materials: lib('materials'), terrainMaterials: lib('terrainMaterials'),
-      templates: lib('templates'), models: lib('models'), scripts: lib('scripts'),
-      animationFields: lib('animationFields'), animations: lib('animations'), tilesets: lib('tilesets'),
+/**
+ * The example as the editor imports it — through `readBundle`, which also stitches a split assets blob
+ * (assets.bin, assets.1.bin, …) back together. Textures are dropped: they are already raw bytes, and
+ * ~90 MB of them proves nothing extra here.
+ */
+async function load(): Promise<BundleData> {
+  const file = (p: string) => path.join(DIR, ...p.split('/'));
+  const { bundle } = await readBundle({
+    async json(p) { return fs.existsSync(file(p)) ? JSON.parse(fs.readFileSync(file(p), 'utf8')) : null; },
+    async bytes(p) {
+      if (!fs.existsSync(file(p))) return null;
+      const b = fs.readFileSync(file(p));
+      return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
     },
-    vfs: readJson('vfs.json'),
-    textures: [],
-  };
+    async scenePaths(manifest) { return (manifest.sceneMetas ?? []).map((m: any) => `scenes/${m.id}.json`); },
+  });
+  return { ...bundle, textures: [], audio: [] };
 }
 
 const dataOf = (b: BundleData) => ({ manifest: b.manifest, scenes: b.scenes, libraries: b.libraries, vfs: b.vfs });
@@ -56,7 +56,7 @@ const totalLength = (sections: [string, string][]) => sections.reduce((n, [, s])
 
 describe.skipIf(!present)('assets.bin against the shipped Valley example', () => {
   it('round-trips it byte-for-byte, and shrinks the JSON by an order of magnitude', async () => {
-    let bundle: BundleData | null = load();
+    let bundle: BundleData | null = await load();
     let before: Map<string, string> | null = new Map(sectionsOf(bundle));
     const beforeLength = totalLength([...before]);
 

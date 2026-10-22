@@ -6,6 +6,9 @@ import { physicalFor, variantLogicalNames, EXTRA_LOGICAL_NAMES } from '../src/gr
 import { ShaderManager } from '../src/graphics/systems/shaderManager';
 import { PARTICLE_PROGRAMS } from '../src/graphics/particles/particleRenderer';
 import type { ShaderProgram } from '../src/graphics/rhi/shaderProgram';
+import { readExample } from '../tools/exampleKit/readExample.mjs';
+
+const VALLEY_EXAMPLE = await readExample(join(__dirname, '..', 'editor', 'public', 'examples', 'valley'));
 
 /**
  * A published game builds only the programs `programsFor` lists. Two ways that goes wrong quietly:
@@ -39,8 +42,8 @@ describe('program classification', () => {
 });
 
 describe('programsFor', () => {
-    const VALLEY = JSON.parse(readFileSync(join(__dirname, '..', 'editor', 'public', 'examples', 'valley',
-        'scenes', 'd6387d3a3c48c8a3f5ebe850ffb9d3ab.json'), 'utf-8'));
+    // Through the bundle reader: the example is checked in as format 2, with its payloads in assets.bin.
+    const VALLEY = VALLEY_EXAMPLE.read('scenes', 'd6387d3a3c48c8a3f5ebe850ffb9d3ab.json');
 
     it('lists what the Valley scene draws, and nothing the editor alone uses', () => {
         const use = createProgramUsage();

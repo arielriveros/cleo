@@ -188,4 +188,16 @@ export interface BundleAssetIndex {
   textures: { id: string; mime: string; config: any; o: number; l: number }[]
   /** Absent in a bundle written before audio existed; read as "no sounds". */
   audio?: { id: string; mime: string; o: number; l: number }[]
+  /**
+   * Byte length of each file the blob is split across, in order (see `assetPartPath`). Absent — the
+   * normal case, and every export — means one `assets.bin`. Only checked-in example folders split it,
+   * because git hosts cap a single file (GitHub at 100 MB). Offsets everywhere else stay offsets into
+   * the WHOLE blob: the reader concatenates the parts before inflating.
+   */
+  parts?: number[]
+}
+
+/** Path of part `i` of a split assets blob: `assets.bin`, then `assets.1.bin`, `assets.2.bin`, … */
+export function assetPartPath(i: number): string {
+  return i === 0 ? BUNDLE_PATHS.assets : BUNDLE_PATHS.assets.replace(/\.bin$/, `.${i}.bin`)
 }

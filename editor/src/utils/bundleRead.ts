@@ -1,4 +1,4 @@
-import { BundleAssetIndex, BundleData, BundleManifest, BundleTexture, BundleTextureIndexRow, BUNDLE_PATHS } from './bundle';
+import { assetPartPath, BundleAssetIndex, BundleData, BundleManifest, BundleTexture, BundleTextureIndexRow, BUNDLE_PATHS } from './bundle';
 import { inflateBundleAssets, packBundleAssets } from './bundleAssets';
 
 // The one place that knows the on-disk bundle layout — which filenames exist, which are optional, how
@@ -95,7 +95,9 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     const bundle: BundleData = { manifest, scenes, libraries, vfs, textures: [], audio: [] };
     const index = (await src.json(BUNDLE_PATHS.assetsIndex)) as BundleAssetIndex | null;
     src.onEntry?.(++done, total);
-    const blob = await src.bytes(BUNDLE_PATHS.assets);
+    const blob = index?.parts && index.parts.length > 1
+      ? await readSplitBlob(src, index.parts)
+      : await src.bytes(BUNDLE_PATHS.assets);
     src.onEntry?.(++done, total);
     // A v2 bundle without its blob is truncated, not empty; importing it yields a project of empty meshes.
     if (!index || !blob) throw new Error('Bundle is missing assets.bin');
@@ -120,6 +122,23 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
 
   const textures = slots.filter((t): t is BundleTexture => t !== null);
   return { bundle: { manifest, scenes, libraries, vfs, textures }, transfer: textures.map(t => t.bytes) };
+}
+
+/**
+ * Reassemble a blob split across `assets.bin`, `assets.1.bin`, … into one buffer, or null if any part is
+ * missing or the wrong size — a short part would shift every later offset and inflate garbage silently.
+ * Copied into one preallocated buffer rather than concatenated pairwise, so the peak stays one blob.
+ */
+async function readSplitBlob(src: BundleSource, parts: number[]): Promise<ArrayBuffer | null> {
+  const whole = new Uint8Array(parts.reduce((a, b) => a + b, 0));
+  let offset = 0;
+  for (let i = 0; i < parts.length; i++) {
+    const part = await src.bytes(assetPartPath(i));
+    if (!part || part.byteLength !== parts[i]) return null;
+    whole.set(new Uint8Array(part), offset);
+    offset += parts[i];
+  }
+  return whole.buffer;
 }
 
 /** One file inside the archive. `text` entries are worth DEFLATE-ing; the blob is not (see below). */

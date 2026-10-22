@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readExample } from '../tools/exampleKit/readExample.mjs';
 import { Body, Plane, Vec3 } from 'cannon-es';
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { AnimatedModel } from '../src/animation/animatedModel';
@@ -18,7 +18,7 @@ import { setDevice } from '../src/graphics/rhi/deviceHandle';
 // own world config, never a synthetic one.
 
 let modelJson: any;
-beforeAll(() => {
+beforeAll(async () => {
     // The stub context celMaterial.test.ts uses: building an AnimatedModel touches the device.
     let n = 0;
     const constants: Record<string, number> = {
@@ -32,7 +32,8 @@ beforeAll(() => {
     setGLContext(gl as any);
     setDevice(new WebGL2Device(gl as unknown as WebGL2RenderingContext));
 
-    const lib = JSON.parse(readFileSync('editor/public/examples/valley/libraries/models.json', 'utf8'));
+    // Through the bundle reader: the example is checked in as format 2, with its payloads in assets.bin.
+    const lib = (await readExample('editor/public/examples/valley')).read('libraries', 'models.json');
     const find = (n: any): any => n.model?.skin ? n : (n.children ?? []).map(find).find(Boolean);
     modelJson = find(lib[0].nodeJson).model;
 });
