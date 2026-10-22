@@ -99,10 +99,10 @@ describe('the camera projection reaches every pass through one wrapper', () => {
         // so both are immune by construction rather than by being excluded, and jittering either would
         // move shadows and probe captures against the image instead of with it.
         expect([...callers('_clipProjection').keys()].sort()).toEqual([
-            '_bakeSkyAtmosphere',     // _captureProj
             '_convolveCubeFaces',     // _captureProj
             '_foliageShadowPass',     // lightSpace
             '_rasterProjection',      // the wrapper's own two returns
+            '_renderAtmosphereFaces', // _captureProj (the sky bake and the cloud-sky bake)
             '_renderShadowCasters',   // lightSpace
         ].sort());
     });

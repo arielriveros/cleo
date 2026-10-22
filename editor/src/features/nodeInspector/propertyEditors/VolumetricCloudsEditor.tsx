@@ -5,7 +5,8 @@ import AxisInput from '../../../components/AxisInput'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { useEventBus } from '../../EventBusContext'
-import { MenuItem, Popover, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
+import { Button, Hint, MenuItem, Popover, Select, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
+import { cloudBakeWarning, formatBakeAge, useCloudBakeStatus } from '../../../utils/cloudBake'
 import { CloudsIcon } from '../sectionIcons'
 
 type Vec3 = [number, number, number]
@@ -26,6 +27,7 @@ interface CloudsState {
   steps: number; lightSteps: number; maxDistance: number; jitter: boolean; resolutionScale: number;
   temporalUpscale: boolean;
   enabled: boolean; opacity: number;
+  bakeIntoSky: boolean; previewBake: boolean; bakeResolution: number; autoRebake: boolean;
 }
 
 function readNode(node: VolumetricCloudsNode): CloudsState {
@@ -48,7 +50,9 @@ function readNode(node: VolumetricCloudsNode): CloudsState {
     steps: node.steps, lightSteps: node.lightSteps, maxDistance: node.maxDistance, jitter: node.jitter,
     resolutionScale: node.resolutionScale,
     temporalUpscale: node.temporalUpscale,
-    enabled: node.enabled, opacity: node.opacity
+    enabled: node.enabled, opacity: node.opacity,
+    bakeIntoSky: node.bakeIntoSky, previewBake: node.previewBake, bakeResolution: node.bakeResolution,
+    autoRebake: node.autoRebake
   }
 }
 
@@ -88,6 +92,10 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
   )
 
   const header = (label: string) => <div className={cn(sectionTitleClass, 'mt-3 mb-1')}>{label}</div>
+
+  const bake = useCloudBakeStatus(props.node.scene)
+  const bakeWarning = state.bakeIntoSky ? cloudBakeWarning(bake.staleness) : null
+  const regenerate = () => { props.node.requestBake(); eventEmitter.emit('SCENE_CHANGED') }
 
   const applyPreset = (p: VolumetricCloudsPreset) => {
     props.node.applyPreset(p)
@@ -170,6 +178,35 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
         </div>
         {slider('Wind Speed', 'windSpeed', 0, 80, 0.5)}
         {slider('Detail Wind Factor', 'detailWindFactor', 0, 5, 0.05)}
+
+        {header('Sky Bake')}
+        {check('Bake into Sky in Play', 'bakeIntoSky')}
+        {state.bakeIntoSky && <>
+          {!bake.hasAtmosphere && <Hint>The bake paints the clouds over the Sky Atmosphere — add one, or the clouds stay live.</Hint>}
+          {check('Preview Baked in Editor', 'previewBake')}
+          {check('Re-bake When the Sun Moves', 'autoRebake')}
+          <div className='flex items-center justify-between my-1'>
+            <span className={labelClass}>Bake Resolution</span>
+            <Select value={state.bakeResolution} onChange={(e) => apply({ bakeResolution: parseInt(e.target.value) })}>
+              <option value={256}>256</option>
+              <option value={512}>512</option>
+              <option value={1024}>1024</option>
+            </Select>
+          </div>
+          <div className='flex items-center gap-2 my-1'>
+            <Button size='sm' onClick={regenerate} disabled={!bake.hasAtmosphere}>Regenerate</Button>
+            <span className='text-ui text-muted'>
+              {bake.age === null ? 'Not baked yet' : `Baked ${formatBakeAge(bake.age)}`}
+            </span>
+          </div>
+          {bakeWarning && <div className='text-warning text-ui my-1'
+            title='Play mode re-bakes at load anyway; this is about the preview, and about a sun animated during play when re-baking is off.'>
+            {bakeWarning}</div>}
+          <Hint>
+            Play mode and published games bake the clouds into the sky cubemap at load and draw it as a static
+            texture instead of raymarching every frame. Wind and cloud shadows freeze at the bake.
+          </Hint>
+        </>}
 
         {header('Quality')}
         <Slider label='Resolution Scale' min={0.25} max={1} step={0.05} value={state.resolutionScale}

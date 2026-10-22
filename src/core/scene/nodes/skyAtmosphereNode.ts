@@ -47,6 +47,25 @@ export interface SkyAtmosphereOptions {
     godRayTint?: [number, number, number]; // multiply tint on the shafts
     godRayAnisotropy?: number;   // 0..0.95 — Henyey-Greenstein g: higher = light hugs the sun direction
     godRayMaxDistance?: number;  // world units — how far from the camera the march extends
+    // Night sky (stars, moon, airglow — baked into the same cubemap)
+    nightEnabled?: boolean;       // stars, moon and airglow once the sun has set
+    starIntensity?: number;       // brightness of the procedural stars
+    starDensity?: number;         // 0..1 — how many stars
+    starColorVariance?: number;   // 0..1 — spread of star colour temperatures
+    nightSkyTexture?: string | null; // equirect texture id replacing the procedural stars (null = procedural)
+    nightSkyIntensity?: number;   // multiplier on the custom night-sky texture
+    nightSkyRotation?: number;    // degrees — spins the custom night sky about the vertical axis
+    airglowColor?: [number, number, number]; // faint emission toward the horizon, so a moonless night is not black
+    airglowIntensity?: number;    // multiplier on the airglow
+    moonEnabled?: boolean;        // draw the moon and let it light the night
+    moonTexture?: string | null;  // texture id for the moon disc (null = procedural)
+    moonSize?: number;            // angular radius of the moon disc (degrees)
+    moonPhase?: number;           // 0 = new moon .. 1 = full moon
+    moonOffsetYaw?: number;       // degrees — moon azimuth away from the point opposite the sun
+    moonOffsetPitch?: number;     // degrees — moon elevation away from the point opposite the sun
+    moonColor?: [number, number, number]; // tint of the moon and its light
+    moonIntensity?: number;       // brightness of the moon disc and the moonlit sky
+    moonlightIntensity?: number;  // direct moonlight on the scene, as a fraction of the sun light
 }
 
 /**
@@ -92,6 +111,25 @@ export class SkyAtmosphereNode extends Node {
     private _godRayTint: [number, number, number];
     private _godRayAnisotropy: number;
     private _godRayMaxDistance: number;
+    // Night sky
+    private _nightEnabled: boolean;
+    private _starIntensity: number;
+    private _starDensity: number;
+    private _starColorVariance: number;
+    private _nightSkyTexture: string | null;
+    private _nightSkyIntensity: number;
+    private _nightSkyRotation: number;
+    private _airglowColor: [number, number, number];
+    private _airglowIntensity: number;
+    private _moonEnabled: boolean;
+    private _moonTexture: string | null;
+    private _moonSize: number;
+    private _moonPhase: number;
+    private _moonOffsetYaw: number;
+    private _moonOffsetPitch: number;
+    private _moonColor: [number, number, number];
+    private _moonIntensity: number;
+    private _moonlightIntensity: number;
     // Runtime bake state (not serialized)
     private _cubemap: Texture | null = null;
     private _cubemapResolution: number = 0;
@@ -136,6 +174,25 @@ export class SkyAtmosphereNode extends Node {
         this._godRayTint = options.godRayTint ?? [1.0, 1.0, 1.0];
         this._godRayAnisotropy = options.godRayAnisotropy ?? 0.6;
         this._godRayMaxDistance = options.godRayMaxDistance ?? 80;
+
+        this._nightEnabled = options.nightEnabled ?? true;
+        this._starIntensity = options.starIntensity ?? 1.0;
+        this._starDensity = options.starDensity ?? 0.5;
+        this._starColorVariance = options.starColorVariance ?? 0.6;
+        this._nightSkyTexture = options.nightSkyTexture ?? null;
+        this._nightSkyIntensity = options.nightSkyIntensity ?? 1.0;
+        this._nightSkyRotation = options.nightSkyRotation ?? 0;
+        this._airglowColor = options.airglowColor ?? [0.10, 0.13, 0.22];
+        this._airglowIntensity = options.airglowIntensity ?? 1.0;
+        this._moonEnabled = options.moonEnabled ?? true;
+        this._moonTexture = options.moonTexture ?? null;
+        this._moonSize = options.moonSize ?? 2.0;
+        this._moonPhase = options.moonPhase ?? 1.0;
+        this._moonOffsetYaw = options.moonOffsetYaw ?? 25;
+        this._moonOffsetPitch = options.moonOffsetPitch ?? 15;
+        this._moonColor = options.moonColor ?? [0.82, 0.88, 1.0];
+        this._moonIntensity = options.moonIntensity ?? 1.0;
+        this._moonlightIntensity = options.moonlightIntensity ?? 0.08;
     }
 
     // --- Sun ---
@@ -212,6 +269,44 @@ export class SkyAtmosphereNode extends Node {
     public get godRayMaxDistance(): number { return this._godRayMaxDistance; }
     public set godRayMaxDistance(v: number) { this._godRayMaxDistance = Math.min(1000, Math.max(5, v)); }
 
+    // --- Night sky (baked into the cubemap; moonlightIntensity is per-frame lighting only) ---
+    public get nightEnabled(): boolean { return this._nightEnabled; }
+    public set nightEnabled(v: boolean) { this._nightEnabled = v; this._needsBake = true; }
+    public get starIntensity(): number { return this._starIntensity; }
+    public set starIntensity(v: number) { this._starIntensity = Math.max(0, v); this._needsBake = true; }
+    public get starDensity(): number { return this._starDensity; }
+    public set starDensity(v: number) { this._starDensity = Math.min(1, Math.max(0, v)); this._needsBake = true; }
+    public get starColorVariance(): number { return this._starColorVariance; }
+    public set starColorVariance(v: number) { this._starColorVariance = Math.min(1, Math.max(0, v)); this._needsBake = true; }
+    public get nightSkyTexture(): string | null { return this._nightSkyTexture; }
+    public set nightSkyTexture(v: string | null) { this._nightSkyTexture = v || null; this._needsBake = true; }
+    public get nightSkyIntensity(): number { return this._nightSkyIntensity; }
+    public set nightSkyIntensity(v: number) { this._nightSkyIntensity = Math.max(0, v); this._needsBake = true; }
+    public get nightSkyRotation(): number { return this._nightSkyRotation; }
+    public set nightSkyRotation(v: number) { this._nightSkyRotation = v; this._needsBake = true; }
+    public get airglowColor(): [number, number, number] { return this._airglowColor; }
+    public set airglowColor(v: [number, number, number]) { this._airglowColor = v; this._needsBake = true; }
+    public get airglowIntensity(): number { return this._airglowIntensity; }
+    public set airglowIntensity(v: number) { this._airglowIntensity = Math.max(0, v); this._needsBake = true; }
+    public get moonEnabled(): boolean { return this._moonEnabled; }
+    public set moonEnabled(v: boolean) { this._moonEnabled = v; this._needsBake = true; }
+    public get moonTexture(): string | null { return this._moonTexture; }
+    public set moonTexture(v: string | null) { this._moonTexture = v || null; this._needsBake = true; }
+    public get moonSize(): number { return this._moonSize; }
+    public set moonSize(v: number) { this._moonSize = Math.min(15, Math.max(0.1, v)); this._needsBake = true; }
+    public get moonPhase(): number { return this._moonPhase; }
+    public set moonPhase(v: number) { this._moonPhase = Math.min(1, Math.max(0, v)); this._needsBake = true; }
+    public get moonOffsetYaw(): number { return this._moonOffsetYaw; }
+    public set moonOffsetYaw(v: number) { this._moonOffsetYaw = v; this._needsBake = true; }
+    public get moonOffsetPitch(): number { return this._moonOffsetPitch; }
+    public set moonOffsetPitch(v: number) { this._moonOffsetPitch = v; this._needsBake = true; }
+    public get moonColor(): [number, number, number] { return this._moonColor; }
+    public set moonColor(v: [number, number, number]) { this._moonColor = v; this._needsBake = true; }
+    public get moonIntensity(): number { return this._moonIntensity; }
+    public set moonIntensity(v: number) { this._moonIntensity = Math.max(0, v); this._needsBake = true; }
+    public get moonlightIntensity(): number { return this._moonlightIntensity; }
+    public set moonlightIntensity(v: number) { this._moonlightIntensity = Math.min(1, Math.max(0, v)); }
+
     // --- Runtime bake state (renderer-facing) ---
     public get cubemap(): Texture | null { return this._cubemap; }
     public get cubemapResolution(): number { return this._cubemapResolution; }
@@ -273,7 +368,25 @@ export class SkyAtmosphereNode extends Node {
                         godRayExposure: this._godRayExposure,
                         godRayTint: this._godRayTint,
                         godRayAnisotropy: this._godRayAnisotropy,
-                        godRayMaxDistance: this._godRayMaxDistance
+                        godRayMaxDistance: this._godRayMaxDistance,
+                        nightEnabled: this._nightEnabled,
+                        starIntensity: this._starIntensity,
+                        starDensity: this._starDensity,
+                        starColorVariance: this._starColorVariance,
+                        nightSkyTexture: this._nightSkyTexture,
+                        nightSkyIntensity: this._nightSkyIntensity,
+                        nightSkyRotation: this._nightSkyRotation,
+                        airglowColor: this._airglowColor,
+                        airglowIntensity: this._airglowIntensity,
+                        moonEnabled: this._moonEnabled,
+                        moonTexture: this._moonTexture,
+                        moonSize: this._moonSize,
+                        moonPhase: this._moonPhase,
+                        moonOffsetYaw: this._moonOffsetYaw,
+                        moonOffsetPitch: this._moonOffsetPitch,
+                        moonColor: this._moonColor,
+                        moonIntensity: this._moonIntensity,
+                        moonlightIntensity: this._moonlightIntensity
                     },
         };
     }

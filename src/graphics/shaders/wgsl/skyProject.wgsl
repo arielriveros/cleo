@@ -27,6 +27,12 @@ const RGBM_RANGE: f32 = 64.0;
 struct SkyProjectUniforms {
     /** 1 = the cube is already linear HDR (a baked atmosphere); 0 = sRGB-authored (a user skybox). */
     u_linearInput: f32,
+    /**
+     * Radiance multiplier applied before encoding and divided back out on the CPU. A night sky sits far
+     * below RGBM's smallest multiplier (1/255 of the range), where a channel keeps only a few of its 8
+     * bits; scaling it up first keeps the moonlit ambient from quantizing into banded colour casts.
+     */
+    u_projectScale: f32,
 };
 @group(1) @binding(0) var<uniform> u_project: SkyProjectUniforms;
 
@@ -43,6 +49,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // that is about to do its own averaging with proper solid-angle weights.
     var radiance = textureSampleLevel(u_cube_texture, u_cube_sampler, dir, 0.0).rgb;
     if (u_project.u_linearInput < 0.5) { radiance = toLinear(radiance); }
+    radiance *= u_project.u_projectScale;
 
     let peak = max(max(radiance.r, radiance.g), radiance.b);
     // `ceil` to 1/255 rather than round: the multiplier must never quantize BELOW the value it is

@@ -21,6 +21,9 @@ export { MenuItem } from './MenuItem';
 export type { MenuItemProps } from './MenuItem';
 
 
+export { TexturePicker } from './TexturePicker';
+export type { TexturePickerProps } from './TexturePicker';
+
 export { Toggle } from './Toggle';
 export type { ToggleProps } from './Toggle';
 

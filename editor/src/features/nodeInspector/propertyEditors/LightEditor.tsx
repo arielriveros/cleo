@@ -5,6 +5,7 @@ import { useEventBus } from '../../EventBusContext';
 import Collapsable from '../../../components/Collapsable'
 import { Button, ColorInput, PropertyTable, PropertyRow, NumberInput, Slider, Section, Toggle, Hint } from '../../../components/ui'
 import { LightIcon } from '../sectionIcons'
+import { cloudBakeWarning, useCloudBakeStatus } from '../../../utils/cloudBake'
 
 // Re-exported so SkyAtmosphereEditor and VolumetricCloudsEditor keep resolving ColorInput from here.
 export { ColorInput };
@@ -80,10 +81,18 @@ export default function LightEditor(props: {node: LightNode}) {
 
   const isDirectional = light instanceof DirectionalLight;
   const isSpot = light instanceof Spotlight;
+  // Rotating the sun invalidates clouds baked into the sky (see VolumetricCloudsEditor › Sky Bake).
+  const cloudBake = useCloudBakeStatus(props.node.scene);
+  const cloudBakeStale = isDirectional && cloudBake.clouds && cloudBake.staleness === 'sun'
+    ? cloudBakeWarning('sun') : null;
 
   return (
     <Collapsable title='Light' icon={<LightIcon />} persistKey='light'>
     <div className='w-full p-2'>
+      {cloudBakeStale && <div className='flex items-center gap-2 mb-2'>
+        <span className='text-warning text-ui flex-1'>Volumetric clouds are baked into the sky: this sun direction needs a new bake.</span>
+        <Button size='sm' onClick={() => { cloudBake.clouds!.requestBake(); eventEmitter.emit('SCENE_CHANGED'); }}>Regenerate</Button>
+      </div>}
       <Section title='Emission'>
         <PropertyTable columns={['40%', '60%']}>
           <PropertyRow label='Color'>

@@ -6,9 +6,8 @@ import {
 import Collapsable from '../../../components/Collapsable';
 import { UI_ICONS, CanvasIcon } from '../../sceneInspector/uiIcons';
 import { TransformIcon, AppearanceIcon } from '../sectionIcons';
-import { ColorInput, NumberInput, TextInput, Select, Toggle, Slider, PropertyTable, PropertyRow } from '../../../components/ui';
+import { ColorInput, NumberInput, TextInput, Select, Toggle, Slider, PropertyTable, PropertyRow, TexturePicker } from '../../../components/ui';
 import { useEventBus } from '../../EventBusContext';
-import { TextureManager, isDerivedTextureId } from 'cleo';
 import { clamp } from '../../../utils/math';
 
 /** The inspector for every UI element type; the rect/appearance block is shared and only the payload differs. */
@@ -22,24 +21,6 @@ function Choice<T extends string>({ value, onChange, options }: {
     return (
         <Select value={value} onChange={e => onChange(e.target.value as T)}>
             {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </Select>
-    );
-}
-
-/**
- * Texture picker for a UI image, which holds a bare texture id rather than a `Material` slot. Derived
- * (channel-packed) textures are engine-owned and never assignable, per `isDerivedTextureId`.
- */
-function TexturePicker({ value, onChange }: { value: string | null, onChange: (id: string | null) => void }) {
-    const ids = Array.from(TextureManager.Instance.textures.keys())
-        .filter(id => !isDerivedTextureId(id) && !id.startsWith('__editor__'));
-    return (
-        <Select value={value ?? ''} onChange={e => onChange(e.target.value || null)}>
-            <option value=''>(none)</option>
-            {/* A texture the scene references but the manager has dropped still has to be selectable, or
-                the field would silently reset itself the moment anything re-rendered. */}
-            {value && !ids.includes(value) && <option value={value}>{value} (missing)</option>}
-            {ids.map(id => <option key={id} value={id}>{id}</option>)}
         </Select>
     );
 }

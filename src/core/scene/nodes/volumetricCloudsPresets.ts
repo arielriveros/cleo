@@ -109,7 +109,7 @@ export const VOLUMETRIC_CLOUDS_PRESETS: VolumetricCloudsPreset[] = [
         ambientColor: [0.24, 0.3, 0.52], ambientIntensity: 0.5, groundColor: [0.16, 0.17, 0.24],
         sunsetColor: [0.8, 0.35, 0.4], phaseG: 0.6, silverIntensity: 0.5, powderStrength: 0.2, windSpeed: 6,
     }),
-    preset('night', 'Night (Moonlit)', 'Dark clouds faintly lit by a cool moon.', {
+    preset('night', 'Night (Moonlit)', 'Dark clouds faintly lit by a cool moon. With a Sky Atmosphere the moon already lights any preset after sunset; this one is for a manual sun or a sky without one.', {
         coverage: 0.35, cloudType: 0.5,
         sunDirection: [-0.3, -0.7, 0.6], sunColor: [0.65, 0.75, 1.0], sunIntensity: 1.0,
         ambientColor: [0.06, 0.08, 0.16], ambientIntensity: 0.2, groundColor: [0.04, 0.04, 0.06],

@@ -5,7 +5,7 @@ import AxisInput from '../../../components/AxisInput'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { useEventBus } from '../../EventBusContext'
-import { Select, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
+import { Hint, Select, Slider, TexturePicker, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
 import { SkyIcon } from '../sectionIcons'
 
 type Vec3 = [number, number, number]
@@ -19,6 +19,11 @@ interface AtmoState {
   fogMaxOpacity: number; fogColor: Vec3; fogColorBlend: number;
   godRaysEnabled: boolean; godRaySamples: number; godRayDensity: number; godRayExposure: number;
   godRayTint: Vec3; godRayAnisotropy: number; godRayMaxDistance: number;
+  nightEnabled: boolean; starIntensity: number; starDensity: number; starColorVariance: number;
+  nightSkyTexture: string | null; nightSkyIntensity: number; nightSkyRotation: number;
+  airglowColor: Vec3; airglowIntensity: number;
+  moonEnabled: boolean; moonTexture: string | null; moonSize: number; moonPhase: number;
+  moonOffsetYaw: number; moonOffsetPitch: number; moonColor: Vec3; moonIntensity: number; moonlightIntensity: number;
 }
 
 function readNode(node: SkyAtmosphereNode): AtmoState {
@@ -34,7 +39,14 @@ function readNode(node: SkyAtmosphereNode): AtmoState {
     fogColor: node.fogColor, fogColorBlend: node.fogColorBlend,
     godRaysEnabled: node.godRaysEnabled, godRaySamples: node.godRaySamples, godRayDensity: node.godRayDensity,
     godRayExposure: node.godRayExposure, godRayTint: node.godRayTint,
-    godRayAnisotropy: node.godRayAnisotropy, godRayMaxDistance: node.godRayMaxDistance
+    godRayAnisotropy: node.godRayAnisotropy, godRayMaxDistance: node.godRayMaxDistance,
+    nightEnabled: node.nightEnabled, starIntensity: node.starIntensity, starDensity: node.starDensity,
+    starColorVariance: node.starColorVariance, nightSkyTexture: node.nightSkyTexture,
+    nightSkyIntensity: node.nightSkyIntensity, nightSkyRotation: node.nightSkyRotation,
+    airglowColor: node.airglowColor, airglowIntensity: node.airglowIntensity,
+    moonEnabled: node.moonEnabled, moonTexture: node.moonTexture, moonSize: node.moonSize, moonPhase: node.moonPhase,
+    moonOffsetYaw: node.moonOffsetYaw, moonOffsetPitch: node.moonOffsetPitch, moonColor: node.moonColor,
+    moonIntensity: node.moonIntensity, moonlightIntensity: node.moonlightIntensity
   }
 }
 
@@ -63,7 +75,7 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
       onChange={(c) => apply({ [k]: c } as Partial<AtmoState>)} />
   )
 
-  const color = (label: string, k: 'sunColor' | 'groundColor' | 'fogColor' | 'godRayTint') => (
+  const color = (label: string, k: 'sunColor' | 'groundColor' | 'fogColor' | 'godRayTint' | 'airglowColor' | 'moonColor') => (
     <div className='flex items-center justify-between my-1'>
       <span className={labelClass}>{label}</span>
       <ColorInput color={vec3ToHex(state[k])} onChange={(c) => apply({ [k]: c } as Partial<AtmoState>)} />
@@ -71,6 +83,16 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
   )
 
   const header = (label: string) => <div className={cn(sectionTitleClass, 'mt-3 mb-1')}>{label}</div>
+
+  const texture = (label: string, k: 'nightSkyTexture' | 'moonTexture', emptyLabel: string) => (
+    <div className='flex items-center justify-between gap-2 my-1'>
+      <span className={labelClass}>{label}</span>
+      <TexturePicker value={state[k]} emptyLabel={emptyLabel} onChange={(id) => apply({ [k]: id } as Partial<AtmoState>)} />
+    </div>
+  )
+
+  const phaseName = (p: number) =>
+    p < 0.06 ? 'New' : p < 0.45 ? 'Crescent' : p < 0.55 ? 'Half' : p < 0.94 ? 'Gibbous' : 'Full'
 
   return (
     <Collapsable title='Sky Atmosphere' icon={<SkyIcon />} persistKey='skyAtmosphere'>
@@ -98,6 +120,41 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
         {color('Ground Color', 'groundColor')}
         {slider('Planet Radius', 'planetRadius', 1000000, 10000000, 100000, 0)}
         {slider('Atmosphere Radius', 'atmosphereRadius', 1000000, 11000000, 100000, 0)}
+
+        {header('Night Sky')}
+        {check('Enable Night Sky', 'nightEnabled')}
+        {state.nightEnabled && <>
+          {texture('Night Sky Texture', 'nightSkyTexture', '(procedural stars)')}
+          {state.nightSkyTexture ? <>
+            {slider('Texture Intensity', 'nightSkyIntensity', 0, 4, 0.01)}
+            {slider('Texture Rotation', 'nightSkyRotation', 0, 360, 1, 0)}
+          </> : <>
+            {slider('Star Brightness', 'starIntensity', 0, 4, 0.01)}
+            {slider('Star Density', 'starDensity', 0, 1, 0.01)}
+            {slider('Star Colour Variance', 'starColorVariance', 0, 1, 0.01)}
+          </>}
+          {color('Airglow Color', 'airglowColor')}
+          {slider('Airglow', 'airglowIntensity', 0, 4, 0.01)}
+
+          {header('Moon')}
+          {check('Enable Moon', 'moonEnabled')}
+          {state.moonEnabled && <>
+            {texture('Moon Texture', 'moonTexture', '(procedural)')}
+            <Slider label='Phase' min={0} max={1} step={0.01} value={state.moonPhase}
+              labelClassName='w-[104px]' readout={(v) => phaseName(v)}
+              onChange={(v) => apply({ moonPhase: v })} />
+            {slider('Size (deg)', 'moonSize', 0.1, 15, 0.1, 1)}
+            {slider('Offset Azimuth', 'moonOffsetYaw', -180, 180, 1, 0)}
+            {slider('Offset Elevation', 'moonOffsetPitch', -60, 60, 1, 0)}
+            {color('Moon Color', 'moonColor')}
+            {slider('Moon Brightness', 'moonIntensity', 0, 4, 0.01)}
+            {slider('Moonlight on Scene', 'moonlightIntensity', 0, 1, 0.01)}
+            <Hint>
+              The moon rises opposite the sun, moved by the offsets. Once the sun has set, the scene's
+              directional light shines from the moon at this fraction of its intensity, shadows included.
+            </Hint>
+          </>}
+        </>}
 
         {header('Quality')}
         <div className='flex items-center justify-between mb-2'>

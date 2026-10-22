@@ -94,6 +94,9 @@ struct CloudUniforms {
     u_msExtinction: f32,          // b: per-octave extinction attenuation (>= a)
     u_msEccentricity: f32,        // c: per-octave phase eccentricity attenuation
     u_hazeDistance: f32,          // aerial-perspective fade distance, 0 = off
+    // 1 while baking the clouds into the sky cubemap: nothing occludes a sky face, and the G-buffer
+    // depth bound here belongs to the camera view, not to the face being drawn.
+    u_ignoreDepth: i32,
 };
 @group(1) @binding(0) var<uniform> u_cloud: CloudUniforms;
 
@@ -243,7 +246,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // 2. Occlusion bound: distance to solid geometry (background depth == 1.0 means infinite).
     let depth = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, uv, 0);
     var sceneDist = u_cloud.u_maxDistance;
-    if (depth < 1.0) {
+    if (depth < 1.0 && u_cloud.u_ignoreDepth == 0) {
         sceneDist = min(sceneDist, length(reconstructWorldPos(depth, uv) - u_cloud.u_viewPos));
     }
 

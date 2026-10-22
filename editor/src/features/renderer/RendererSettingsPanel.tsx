@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { engineEventBus, TextureManager, isDerivedTextureId, TERRAIN_LAYER_TEXTURE_SIZES } from 'cleo';
+import { engineEventBus, TERRAIN_LAYER_TEXTURE_SIZES } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
-import { Section, Slider, Toggle, Field, NumberInput, SegmentedControl, Select, Hint, cn, labelClass } from '../../components/ui';
+import { Section, Slider, Toggle, Field, NumberInput, SegmentedControl, Select, Hint, TexturePicker, cn, labelClass } from '../../components/ui';
 
 // The renderer's labels ("Foliage Density", "LOD1 Detail") are longer than the inspector's; at the shared
 // 12px they wrap in Field's default 70px column.
@@ -86,26 +86,6 @@ const TONE_MAPPERS: { value: string; label: string; title: string }[] = [
  * Picker for the colour-grading LUT, which holds a bare texture id in `RenderSettings` rather than a
  * `Material` slot. Derived (channel-packed) textures are engine-owned and never assignable.
  */
-function TexturePicker(props: {
-  value: string | null;
-  onChange: (id: string | null) => void;
-  /** What the empty option means. For the LUT that is "no LUT"; for lens dirt it is the built-in mask. */
-  emptyLabel: string;
-}) {
-  const ids = Array.from(TextureManager.Instance.textures.keys())
-    .filter((id) => !isDerivedTextureId(id) && !id.startsWith('__editor__'));
-  return (
-    <Select value={props.value ?? ''} onChange={(e) => props.onChange(e.target.value || null)}>
-      <option value=''>{props.emptyLabel}</option>
-      {/* A texture the scene references but the manager has dropped still has to be selectable, or
-          the field silently resets itself the moment anything re-renders. It matters more here than
-          anywhere else: the id lives in the render settings, so no node keeps it alive. */}
-      {props.value && !ids.includes(props.value) && <option value={props.value}>{props.value} (missing)</option>}
-      {ids.map((id) => <option key={id} value={id}>{id}</option>)}
-    </Select>
-  );
-}
-
 function LutPicker({ value, onChange }: { value: string | null; onChange: (id: string | null) => void }) {
   return <TexturePicker value={value} onChange={onChange} emptyLabel='(none)' />;
 }

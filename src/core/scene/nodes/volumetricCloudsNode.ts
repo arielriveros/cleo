@@ -57,7 +57,17 @@ export interface VolumetricCloudsOptions {
     // Render
     enabled?: boolean;
     opacity?: number;         // 0..1 — final composite opacity
+    // Sky bake
+    bakeIntoSky?: boolean;    // play mode / published games draw the clouds baked into the sky cubemap
+    previewBake?: boolean;    // the editor shows the baked sky instead of the live raymarch
+    bakeResolution?: number;  // cubemap face size of the bake (256 / 512 / 1024)
+    autoRebake?: boolean;     // during play, re-bake (a face per frame) once the sun has moved ~2 degrees
 }
+
+/** The sun may move this far (degrees) before a bake reads as stale in the editor. */
+export const CLOUD_BAKE_STALE_DEGREES = 0.5;
+
+export type CloudBakeStaleness = 'none' | 'never' | 'sun' | 'settings';
 
 /**
  * Scene-wide volumetric cloud layer. Holds only configuration, no GPU resources — the renderer
@@ -112,6 +122,16 @@ export class VolumetricCloudsNode extends Node {
     // Render
     private _enabled: boolean;
     private _opacity: number;
+    // Sky bake
+    private _bakeIntoSky: boolean;
+    private _previewBake: boolean;
+    private _bakeResolution: number;
+    private _autoRebake: boolean;
+    // Runtime bake state (not serialized: the bake is redone at load)
+    private _bakedSunDir: [number, number, number] | null = null;
+    private _bakedAt = 0;
+    private _bakedSignature = '';
+    private _bakeRequested = false;
 
     constructor(name: string, options: VolumetricCloudsOptions = {}, id: string = uuidv4()) {
         super(name, 'volumetricClouds', id);
@@ -166,6 +186,15 @@ export class VolumetricCloudsNode extends Node {
 
         this._enabled = options.enabled ?? true;
         this._opacity = options.opacity ?? 1.0;
+
+        this._bakeIntoSky = options.bakeIntoSky ?? false;
+        this._previewBake = options.previewBake ?? false;
+        this._bakeResolution = VolumetricCloudsNode._bakeSize(options.bakeResolution ?? 512);
+        this._autoRebake = options.autoRebake ?? true;
+    }
+
+    private static _bakeSize(v: number): number {
+        return v >= 1024 ? 1024 : v >= 512 ? 512 : 256;
     }
 
     // --- Shape ---
@@ -264,6 +293,53 @@ export class VolumetricCloudsNode extends Node {
     public get opacity(): number { return this._opacity; }
     public set opacity(v: number) { this._opacity = Math.min(1, Math.max(0, v)); }
 
+    // --- Sky bake ---
+    public get bakeIntoSky(): boolean { return this._bakeIntoSky; }
+    public set bakeIntoSky(v: boolean) { this._bakeIntoSky = v; }
+    public get previewBake(): boolean { return this._previewBake; }
+    public set previewBake(v: boolean) { this._previewBake = v; }
+    public get bakeResolution(): number { return this._bakeResolution; }
+    public set bakeResolution(v: number) { this._bakeResolution = VolumetricCloudsNode._bakeSize(v); }
+    public get autoRebake(): boolean { return this._autoRebake; }
+    public set autoRebake(v: boolean) { this._autoRebake = v; }
+
+    /** Sun direction (TOWARD the sun) of the current bake, or null before the first one. */
+    public get bakedSunDir(): [number, number, number] | null { return this._bakedSunDir; }
+    /** `performance.now()` seconds the current bake was taken at — also the frozen wind clock. */
+    public get bakedAt(): number { return this._bakedAt; }
+    /** True once Regenerate was asked for and the renderer has not started on it yet. */
+    public get bakeRequested(): boolean { return this._bakeRequested; }
+    /** Ask the renderer for a fresh bake (the inspector's Regenerate). */
+    public requestBake(): void { this._bakeRequested = true; }
+    /** Renderer-facing: a bake has started, so the request is taken. */
+    public takeBakeRequest(): void { this._bakeRequested = false; }
+    /** Renderer-facing: a bake finished, lit by `sunDir` with the wind frozen at `time` seconds. */
+    public markBaked(sunDir: ArrayLike<number>, time: number, signature = this.bakeSignature()): void {
+        this._bakedSunDir = [sunDir[0], sunDir[1], sunDir[2]];
+        this._bakedAt = time;
+        this._bakedSignature = signature;
+    }
+    /** Every field that changes what a bake looks like, as one comparable string. */
+    public bakeSignature(): string {
+        const { bakeIntoSky, previewBake, autoRebake, enabled, ...look } = this._serializePayload().clouds;
+        return JSON.stringify(look);
+    }
+    /**
+     * Whether the current bake still matches the node and `toSun` (direction TOWARD the sun, null when
+     * the scene has no sun): 'never' before any bake, 'sun' once the sun has moved past
+     * CLOUD_BAKE_STALE_DEGREES, 'settings' when a look-affecting field changed since.
+     */
+    public bakeStaleness(toSun: ArrayLike<number> | null): CloudBakeStaleness {
+        if (!this._bakedSunDir) return 'never';
+        if (toSun) {
+            const len = Math.hypot(toSun[0], toSun[1], toSun[2]) || 1;
+            const dot = (toSun[0] * this._bakedSunDir[0] + toSun[1] * this._bakedSunDir[1]
+                         + toSun[2] * this._bakedSunDir[2]) / len;
+            if (dot < Math.cos(CLOUD_BAKE_STALE_DEGREES * Math.PI / 180)) return 'sun';
+        }
+        return this._bakedSignature === this.bakeSignature() ? 'none' : 'settings';
+    }
+
     /**
      * Applies a weather / time-of-day preset by id (see VOLUMETRIC_CLOUDS_PRESETS) or a preset object.
      * Quality, enabled, opacity, useSceneSun and useSkyAmbient are left untouched. Returns false for an unknown id.
@@ -334,7 +410,11 @@ export class VolumetricCloudsNode extends Node {
                         resolutionScale: this._resolutionScale,
                         temporalUpscale: this._temporalUpscale,
                         enabled: this._enabled,
-                        opacity: this._opacity
+                        opacity: this._opacity,
+                        bakeIntoSky: this._bakeIntoSky,
+                        previewBake: this._previewBake,
+                        bakeResolution: this._bakeResolution,
+                        autoRebake: this._autoRebake
                     },
         };
     }
