@@ -105,7 +105,7 @@ export function LayerSection() {
           title='Drop a Bone Mask here'>
           <span className='text-ui-xs text-muted w-[46px] shrink-0'>Mask</span>
           <Select className={cn(tight, 'flex-1 min-w-0')} value={layer.maskId ?? ''}
-            title='Which bones this layer affects. Masks are edited in the rig editor.'
+            title='Which bones this layer affects. Masks are edited in the skeleton editor.'
             onChange={e => setLayer(activeLayer, { maskId: e.target.value || undefined, mask: undefined })}>
             <option value=''>Whole body</option>
             {maskMissing && <option value={layer.maskId}>missing mask</option>}

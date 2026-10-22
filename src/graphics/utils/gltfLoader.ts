@@ -2,6 +2,7 @@ import { Geometry } from "../../core/geometry";
 import { Material } from "../material";
 import { TextureManager } from "../systems/textureManager";
 import { AnimatedModel, Skin, Animation, AnimationSampler, AnimationChannel } from "../../animation/animatedModel";
+import { bakeClipCubicSplines } from "../../animation/samplerBake";
 import { Logger } from "../../core/logger";
 import { mat4, quat, vec3 } from "gl-matrix";
 import { collapseFbxPivots } from "./fbxPivots";
@@ -1291,10 +1292,11 @@ export class GLTFLoader {
             }
         }
         
-        return {
+        // CUBICSPLINE keys carry tangents; resolve them now so every consumer reads one value per key.
+        return bakeClipCubicSplines({
             name: gltfAnim.name || 'Animation',
             samplers,
             channels
-        };
+        });
     }
 }

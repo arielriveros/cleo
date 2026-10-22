@@ -54,7 +54,7 @@ export default function RigSlot(props: { node: Node }) {
   const rig = model.rigId ? rigs.find(r => r.id === model.rigId) : undefined
 
   return (
-    <Collapsable title='Rig' icon={<RigIcon />} persistKey='rigSlot'>
+    <Collapsable title='Skeleton' icon={<RigIcon />} persistKey='rigSlot'>
     <div className='w-full p-2'>
 
       {retargetNeeded && (
@@ -89,11 +89,11 @@ export default function RigSlot(props: { node: Node }) {
           </div>
           <Button
             variant='ghost' size='icon' className='text-highlight'
-            title='Edit this rig — its clips, retargeting and IK'
+            title='Edit this skeleton — its clips, retargeting and IK'
             onClick={() => enterRigEditor(rig.id)}
           >✎</Button>
           <Button variant='remove' size='icon'
-            title='Unlink this rig — the character stops playing its clips'
+            title='Unlink this skeleton — the character stops playing its clips'
             onClick={() => assign(undefined)}
           >✕</Button>
         </div>
@@ -107,7 +107,7 @@ export default function RigSlot(props: { node: Node }) {
         >
           {model.rigId && (
             <Hint className='text-warning'>
-              Linked rig is missing from the library — link another below, or its clips will not play.
+              Linked skeleton is missing from the library — link another below, or its clips will not play.
             </Hint>
           )}
           {rigs.length > 0 ? (
@@ -116,9 +116,9 @@ export default function RigSlot(props: { node: Node }) {
               {rigs.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
             </Select>
           ) : (
-            <Hint>No rigs in this project yet — importing a skinned model creates one.</Hint>
+            <Hint>No skeletons in this project yet — importing a skinned model creates one.</Hint>
           )}
-          <Hint>…or drag a rig from the <b>Assets</b> tab here.</Hint>
+          <Hint>…or drag a skeleton from the <b>Assets</b> tab here.</Hint>
         </div>
       )}
     </div>

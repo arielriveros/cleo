@@ -10,7 +10,7 @@ type EngineValue = ReturnType<typeof useCleoEngine>;
  * `clearTabDirty` are what non-engine edits (script buffers, animation apply, model LODs) call directly.
  */
 export type DocumentContextValue = Pick<EngineValue,
-  | 'tabs' | 'activeTabId' | 'activeTab' | 'setActiveTab' | 'closeTab' | 'reorderTabs'
+  | 'tabs' | 'activeTabId' | 'activeTab' | 'setActiveTab' | 'closeTab' | 'closeTabs' | 'saveTabs' | 'reorderTabs'
   | 'saveActiveTab' | 'saveAll' | 'savingState'
   | 'dirtyTabs' | 'mainDirty' | 'markTabDirty' | 'clearTabDirty' | 'withoutDirty'
 >;

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import MenuBar from "./MenuBar";
 import TabBar from "./TabBar";
+import WorkspaceBar from "./characterAnimation/WorkspaceBar";
 import StaleDependencyBanner from './StaleDependencyBanner';
 import DockLayout from "./layout/DockLayout";
 import ModelImportModal from "./models/ModelImportModal";
@@ -20,23 +21,32 @@ import { ParticleEditorProvider } from './particles/ParticleEditorContext';
 import { HistoryProvider, useHistory } from "./HistoryContext";
 import DimensionSwitchModal from "./dialogs/DimensionSwitchModal";
 import { useDocument } from "./DocumentContext";
+import { useAssetLibrary } from "./AssetLibraryContext";
+import { groupTabStrip } from "../utils/animationWorkspace";
 
 // Ctrl/Cmd+S saves the active tab, Ctrl/Cmd+Shift+S saves everything. Bound on the window (capture phase)
 // so it fires wherever focus is — including inside the Monaco script editor, which handles Ctrl+S itself
 // and would otherwise swallow it.
 function useSaveShortcuts() {
-  const { saveActiveTab, saveAll } = useDocument();
+  const { saveActiveTab, saveAll, saveTabs, tabs, activeTabId, dirtyTabs } = useDocument();
+  const { rigs, animations, animationFields } = useAssetLibrary();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() !== 's' || !(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
       e.stopPropagation();
-      if (e.shiftKey) void saveAll();
+      if (e.shiftKey) { void saveAll(); return; }
+      // Inside a Character Animation workspace the document is the whole workspace, so Save covers every
+      // unsaved part of it — the same as its Save button.
+      const ws = groupTabStrip(tabs, { rigs, animations, animationFields })
+        .find(en => en.type === 'workspace' && en.memberIds.includes(activeTabId));
+      const dirty = ws?.type === 'workspace' ? ws.memberIds.filter(id => dirtyTabs[id]) : [];
+      if (ws?.type === 'workspace' && dirty.length) void saveTabs(dirty, `Saving ${ws.title}`);
       else void saveActiveTab();
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [saveActiveTab, saveAll]);
+  }, [saveActiveTab, saveAll, saveTabs, tabs, activeTabId, dirtyTabs, rigs, animations, animationFields]);
 }
 
 /**
@@ -83,6 +93,8 @@ function Shell() {
                 <AiEditorProvider>
                   <RigProvider><ClipProvider><ParticleEditorProvider>
                   <TabBar />
+                  {/* A skeleton's animation editors read as one document: its part switcher and Save. */}
+                  <WorkspaceBar />
                   {/* "An asset you depend on changed" — one mount for every tab kind, so a full-panel
                       editor cannot go silently stale the way a per-view banner would let it. */}
                   <StaleDependencyBanner />

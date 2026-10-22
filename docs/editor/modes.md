@@ -31,7 +31,7 @@ Landscape and Tilemap share one slot, chosen by the scene's authored dimension â
 | **Material** | Opening a `.mat` | Editing a material on a preview sphere. |
 | **Terrain Material** | Opening a `.tmat` | Base surface, blend settings and foliage rules. |
 | **Animation** | The Animation Editor button on a skinned model | Clips, state graph, blend spaces, IK, events. |
-| **Animation Field** | Opening an `.afield` | Authoring a 1D or 2D blend space. |
+| **Blend Space** | Opening a `.blendspace` (part of the [Character Animation workspace](animation.md)) | Authoring a 1D or 2D blend space. |
 | **AI Brain** | Opening a `.brain` | Behaviour, goal and fuzzy graphs. *(unreleased)* |
 | **Particle System** | Opening a `.vfx` | Emitters and their module stacks, previewed live. *(unreleased)* |
 | **Script** | Opening a `.script` | The code editor. |

@@ -117,7 +117,7 @@ object. Terrain and tilemaps use analytic pickers — a tilemap only registers a
 actually painted.
 
 Selection is disabled in the modes where it would not mean anything: landscape, tilemap, UI,
-renderer, input, material, terrain material, animation and animation field.
+renderer, input, material, terrain material, animation and blend space.
 
 **Gizmos:** the floating top-right chrome has **Move / Rotate / Scale**, the debug overlay eye menu,
 and a **2D/3D view switch**.

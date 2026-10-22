@@ -74,7 +74,7 @@ and links the same materials. A piece of a skinned character keeps the rig and i
 ## LOD generation
 
 Open a model asset to reach the **Model inspector**: name, LOD levels, cull distance, *Generate
-LODs*, and the animation fields that use it.
+LODs*, and the blend spaces that use it.
 
 **Generate LODs** builds a ladder — each level a ratio and a takeover distance, defaulting to
 `0.5 / 0.25 / 0.1` at distances derived from the model's diameter. **Downscale textures** halves

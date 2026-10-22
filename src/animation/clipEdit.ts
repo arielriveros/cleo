@@ -4,6 +4,7 @@ import { humanoidSlotOf, mirrorBoneName, normalizeBoneName } from './boneNames';
 import { skeletonTopology, SkeletonTopology } from './skeletonTopology';
 import { humanoidRigOf, localBindRotation, localRestTranslation } from './animationRetarget';
 import { Logger } from '../core/logger';
+import { bakeClipCubicSplines } from './samplerBake';
 
 // ---------------------------------------------------------------------------
 // Non-destructive clip edits: mirror, in-place bake, additive pose offset, trim, retime.
@@ -104,12 +105,9 @@ const AXIS_INDEX: Record<MirrorAxis, number> = { x: 0, y: 1, z: 2 };
 // ---------------------------------------------------------------------------
 // Sampling
 //
-// These MATCH PLAYBACK rather than the glTF spec, deliberately. `Bone.addRotationChannel` reads
-// `sampler.output` at stride 1 per key and always lerps/slerps, ignoring `sampler.interpolation`
-// entirely — so a STEP clip is already played as LINEAR and a CUBICSPLINE clip is already misread. An
-// edit that sampled by the spec would produce a clip that does not match what the engine plays, which is
-// a worse bug than the one it would be working around. The interpolation string is carried through
-// verbatim and CUBICSPLINE is reported once, so the underlying gap stays visible.
+// These MATCH PLAYBACK (`Bone` in animator.ts): one value per key, LINEAR lerps/slerps, STEP holds a key
+// until the next one. CUBICSPLINE never reaches here — loading bakes it to LINEAR (samplerBake.ts), and
+// `applyClipEdits` bakes any that slipped through before editing.
 // ---------------------------------------------------------------------------
 
 /** The clip's length: the largest time any sampler reaches. Mirrors `Animator._getAnimationDuration`. */
@@ -127,8 +125,9 @@ function keyIndexAt(input: number[], t: number): number {
 }
 
 /** Blend factor between key `i` and `i+1`, clamped to [0,1] so sampling past the end holds, never extrapolates. */
-function keyFactor(input: number[], i: number, t: number): number {
+function keyFactor(input: number[], i: number, t: number, step = false): number {
     if (input.length < 2) return 0;
+    if (step) return t >= input[i + 1] ? 1 : 0;
     const span = input[i + 1] - input[i];
     if (span <= EPS) return 0;
     return Math.min(1, Math.max(0, (t - input[i]) / span));
@@ -140,7 +139,7 @@ function sampleVec3(s: AnimationSampler, t: number, out = vec3.create()): vec3 {
     const i = keyIndexAt(s.input, t);
     const a = vec3.fromValues(s.output[i * 3], s.output[i * 3 + 1], s.output[i * 3 + 2]);
     const b = vec3.fromValues(s.output[(i + 1) * 3], s.output[(i + 1) * 3 + 1], s.output[(i + 1) * 3 + 2]);
-    return vec3.lerp(out, a, b, keyFactor(s.input, i, t));
+    return vec3.lerp(out, a, b, keyFactor(s.input, i, t, s.interpolation === 'STEP'));
 }
 
 function sampleQuat(s: AnimationSampler, t: number, out = quat.create()): quat {
@@ -152,7 +151,7 @@ function sampleQuat(s: AnimationSampler, t: number, out = quat.create()): quat {
     const b = quat.fromValues(
         s.output[(i + 1) * 4], s.output[(i + 1) * 4 + 1], s.output[(i + 1) * 4 + 2], s.output[(i + 1) * 4 + 3]);
     quat.normalize(b, b);
-    return quat.normalize(out, quat.slerp(out, a, b, keyFactor(s.input, i, t)));
+    return quat.normalize(out, quat.slerp(out, a, b, keyFactor(s.input, i, t, s.interpolation === 'STEP')));
 }
 
 // ---------------------------------------------------------------------------
@@ -961,15 +960,9 @@ export function applyClipEdits(clip: Animation, edits: ClipEdit[] | undefined | 
     const active = edits.filter(e => e.enabled !== false);
     if (!active.length) return clip;
 
-    if (clip.samplers.some(s => s.interpolation === 'CUBICSPLINE')) {
-        warnOnce(clip, 'cubicspline',
-            `"${clip.name}" has CUBICSPLINE keyframes. The engine plays every sampler as LINEAR, so its edits ` +
-            'are computed the same way and will match playback — but neither matches what the file intended.');
-    }
-
     const ordered = [...active].sort((a, b) => EDIT_ORDER[a.kind] - EDIT_ORDER[b.kind]);
     const topo = topoOf(ctx.skin, ctx.topo);
-    let out = clip;
+    let out = bakeClipCubicSplines(clip);
 
     for (const edit of ordered) {
         switch (edit.kind) {

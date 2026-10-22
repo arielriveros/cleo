@@ -154,9 +154,13 @@ a locked linear axis, and no camera pivot child. Beyond those:
 
 ## Animator setup — the pieces
 
-The strafe system is a **2D Animation Field** (the blend space) for all the ground motion, wrapped in a small
-**state machine** that switches between Idle, that field, Jump, and four turn-in-place clips. Build the field
-first, then the machine that plays it.
+The strafe system is a **2D blend space** for all the ground motion, wrapped in a small **animator** that
+switches between Idle, that blend space, Jump, and four turn-in-place clips. Build the blend space first, then
+the animator that plays it — both in the character's **Character Animation workspace** (inspector → Animation
+→ **Edit Animation**).
+
+> For plain forward locomotion you can skip all of this: **✨ Animate this character…** in the Animation
+> section builds idle / walk / run / jump for you. This walkthrough is for the strafing, turn-in-place setup.
 
 The script publishes three fields for the animator to read; speed comes straight from the engine:
 
@@ -174,11 +178,10 @@ The script publishes three fields for the animator to read; speed comes straight
 
 ---
 
-## 1. Build the Locomotion Animation Field (the blend space)
+## 1. Build the Locomotion blend space
 
-**Assets → + Add → Animation Field** (or from the Model's inspector → skinned-model tab → *New Field*). Pick
-the **model asset** whose clips you're blending — a field can only place clips from one model. Name it
-`Locomotion`. This opens the Animation Field editor: a 2D plot over a live preview of your character.
+On the workspace bar, **Blend Spaces ▾ → + New Blend Space**. It blends the clips of the character's skeleton.
+Name it `Locomotion`. This opens the Blend Space editor: a 2D plot over a live preview of your character.
 
 **Set the axes** (sidebar):
 
@@ -210,7 +213,7 @@ gaits.
 | walk backward | `180` | `1.5` |
 | run backward | `180` | `4` |
 
-> **Turn on `wrap` for the Direction axis** (Animation Field panel, Smoothing block — it is on by default for
+> **Turn on `wrap` for the Direction axis** (Blend Space Settings panel, Smoothing block — it is on by default for
 > new fields). That makes the axis a CIRCLE, so `-180` and `+180` are the same heading and a probe at `-170`
 > is ten degrees from the backward clips rather than three hundred and fifty.
 >
@@ -244,16 +247,16 @@ flags a clip much shorter than the field's median and sets `rateScale = length/m
 
 ---
 
-## 2. Build the state machine (Model → Animation editor → State Machine)
+## 2. Build the animator (workspace bar → Animator)
 
-**Parameters** (Variables tab) — bind each as in the table at the top:
+**Parameters** (Parameters panel) — link each as in the table at the top:
 
-| name | type | binds to |
+| name | type | linked to |
 |---|---|---|
-| `Direction` | Variable (number) | Parent → `moveDir` |
-| `Speed` | Variable (number) | **Built-in** → Parent → `planarSpeed` |
-| `Jumping` | Variable (boolean) | Parent → `isJumping` |
-| `Turn` | Variable (number) | Parent → `turnRequest` |
+| `Direction` | Linked (number) | Parent → `moveDir` |
+| `Speed` | Linked (number) | **Built-in** → Parent → `planarSpeed` |
+| `Jumping` | Linked (boolean) | Parent → `isJumping` |
+| `Turn` | Linked (number) | Parent → `turnRequest` |
 
 **States** (drag on the graph canvas):
 
@@ -267,11 +270,11 @@ flags a clip much shorter than the field's median and sets `rateScale = length/m
 | `Turn180L` | clip: turn 180 left | **no** | **Root motion** ON |
 | `Turn180R` | clip: turn 180 right | **no** | **Root motion** ON |
 
-> **Enable Root motion on the four turn clips** — the toggle sits between each clip's name and its ✕ in the
-> **Clips** panel. That is what makes the turn animation physically rotate the character (the body if it has
+> **Enable Root motion on the four turn clips** — open each in the workspace's **Clips** part and set **Root
+> motion** to *Drive the character*. That is what makes the turn animation physically rotate the character (the body if it has
 > one, else the model node) instead of spinning the mesh back to where it started. Leave it **off** on Idle,
 > Jump and the locomotion clips: the locomotion field is driven by physics velocity, so root motion there would
-> double-move the character. Root motion applies only to single-clip states — a Field state ignores it.
+> double-move the character. Root motion applies only to single-clip states — a Blend Space state ignores it.
 
 > **Do not also set a playback Speed/`speedParam` on `Locomotion`.** A field matches speed by *choosing* clips,
 > not by playing one faster — binding the movement speed to both the field's Y axis and the state's playback

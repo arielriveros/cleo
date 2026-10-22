@@ -205,20 +205,12 @@ export function resolveAnimationAsset(
 }
 
 /**
- * The animation asset ids a model plays: its RIG's list, plus any still recorded on the model itself.
- *
- * The rig is the owner — every character built on one armature plays the same clips, which is what makes
- * linking a walk cycle once worth doing. The model's own list is the pre-migration shape and is unioned in
- * so a project that has not yet run the v4 pass keeps playing; `extractRigs` empties it.
+ * The animation asset ids a model plays: its SKELETON's list. The rig is the only owner of clip links —
+ * every character built on one armature plays the same clips, which is what makes linking a walk cycle
+ * once worth doing. (Models used to carry their own `animationIds`; the load-time migration moves them.)
  */
-export function modelAnimationIds(modelAsset: { rigId?: string; animationIds?: string[] }): string[] {
-  const fromRig = rigById(modelAsset.rigId)?.animationIds ?? []
-  const own = modelAsset.animationIds ?? []
-  if (!own.length) return fromRig
-  if (!fromRig.length) return own
-  // Rig first, so a clip present in both keeps the rig's ORDER — the order clips are added in is what
-  // `addAnimation`'s de-dupe suffixes against.
-  return [...fromRig, ...own.filter(id => !fromRig.includes(id))]
+export function modelAnimationIds(modelAsset: { rigId?: string }): string[] {
+  return rigById(modelAsset.rigId)?.animationIds ?? []
 }
 
 /**
@@ -226,7 +218,7 @@ export function modelAnimationIds(modelAsset: { rigId?: string; animationIds?: s
  * An id naming a deleted asset is skipped silently; the library is the source of truth.
  */
 export function resolveModelAnimations(
-  modelAsset: { id: string; nodeJson: any; rigId?: string; animationIds?: string[] },
+  modelAsset: { id: string; nodeJson: any; rigId?: string },
   animations: AnimationAsset[],
 ): StoredClip[] {
   const ids = modelAnimationIds(modelAsset)
@@ -264,7 +256,7 @@ export function resolveModelAnimations(
  */
 export function applyModelAnimations(
   root: Node,
-  modelAsset: { id: string; nodeJson: any; animationIds?: string[] },
+  modelAsset: { id: string; nodeJson: any; rigId?: string },
   animations: AnimationAsset[],
 ): number {
   const clips = resolveModelAnimations(modelAsset, animations) as unknown as Animation[]

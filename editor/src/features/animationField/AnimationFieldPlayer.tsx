@@ -101,7 +101,7 @@ export default function AnimationFieldPlayer() {
             ))}
         </div>
 
-        <Button className='ml-auto shrink-0' title='Close the Animation Field tab'
+        <Button className='ml-auto shrink-0' title='Close the Blend Space tab'
           onClick={() => closeTab(activeTabId)}>Close</Button>
       </div>
 

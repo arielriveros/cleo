@@ -139,8 +139,8 @@ export default function ClipTimeline() {
     return (
       <div className='p-3 text-ui text-muted'>
         {asset.rigId
-          ? 'No character on this clip’s rig, so there is nothing to play it on. Edits still apply — link a model to the rig to see them.'
-          : 'This animation is not linked to a rig, so there is no skeleton to play it on.'}
+          ? 'No character on this clip’s skeleton, so there is nothing to play it on. Edits still apply — link a model to the skeleton to see them.'
+          : 'This animation is not linked to a skeleton, so there is no skeleton to play it on.'}
       </div>
     )
   }

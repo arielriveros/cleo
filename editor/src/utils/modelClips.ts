@@ -305,19 +305,17 @@ export function modelTransformDelta(
  *
  * The bar for this list: the value exists NOWHERE in the serialized node tree, so rebuilding from the tree
  * loses it silently.
- *  - `animationIds` — `AnimatedModel.serialize` filters out every clip carrying an `assetId`, so a linked
- *    animation leaves no trace at all in `nodeJson`. This is the one that bit: every Model Editor save
- *    dropped the model's `.anim` links and the clips simply stopped appearing.
- *  - `rigId`        — a library link, same category.
+ *  - `rigId`        — a library link: the skeleton, which owns the model's clips. `AnimatedModel.serialize`
+ *    drops every clip carrying an `assetId`, so without this a re-save would unhook them all.
  *  - `lodSource`    — provenance the node never carried (see ModelAsset).
  */
-export const MODEL_ASSET_PRESERVED_KEYS = ['animationIds', 'rigId', 'lodSource'] as const
+export const MODEL_ASSET_PRESERVED_KEYS = ['rigId', 'lodSource'] as const
 
 /**
  * Copy the preserved fields from `prev` onto `next`, for a record being rebuilt from a live subtree.
  *
- * Only where `next` has no value: a caller that deliberately writes `animationIds: []` — unlinking the last
- * animation — must not have the old list restored underneath it. `undefined` means "did not derive this",
+ * Only where `next` has no value: a caller that deliberately writes a value must not have the old one
+ * restored underneath it. `undefined` means "did not derive this",
  * which is exactly what `buildModelAsset` leaves behind.
  */
 export function carryModelAssetFields<T extends object>(next: T, prev: T | undefined | null): T {

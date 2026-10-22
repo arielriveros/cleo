@@ -1,16 +1,15 @@
 import { useEffect, useState } from 'react'
-import {
-  IK_DEFAULTS, humanoidRigOf, skeletonTopology, isAncestorJoint, nearestCommonAncestor, validateIkRig,
-} from 'cleo'
+import { IK_DEFAULTS } from 'cleo'
 import type { IkRig, IkFootChain, Skin } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
 import { jointLabel } from './skeleton'
 import { Button, cn, controlClass } from '../../components/ui'
+import { guessFootPlacement } from '../../utils/footPlacementAuto'
 
 // Foot-IK rig authoring, under the skeleton tree. Bones are assigned by hand: select a joint (SELECT_JOINT,
 // from the tree or the viewport) and click the role it fills; the ⤓ button offers a name-matched guess.
-// Everything writes through commitIkRig, which lands on the MODEL ASSET, so every placement inherits it.
+// Everything writes through commitIkRig, which lands on the SKELETON, so every character on it inherits it.
 
 /** The tuning inputs stay raw (uncontrolled, commit on blur, blank = default), in the library's control chrome. */
 const input = cn(controlClass, 'px-1 py-0.5')
@@ -21,16 +20,8 @@ const LEG_ROLES: { key: Role; label: string; hint: string }[] = [
   { key: 'thigh', label: 'Thigh', hint: 'Upper leg — the joint at the hip. The IK chain starts here.' },
   { key: 'shin', label: 'Shin', hint: 'Lower leg — the knee joint. This is the one that bends.' },
   { key: 'foot', label: 'Foot', hint: 'The ankle. This is what gets placed on the ground.' },
-  { key: 'toe', label: 'Toe', hint: 'Ball of the foot. Optional — leave empty if the rig has no toe bone.' },
+  { key: 'toe', label: 'Toe', hint: 'Ball of the foot. Optional — leave empty if the skeleton has no toe bone.' },
 ]
-
-/** The humanoid slots each role maps to, for the auto-fill guess. Index 0 is the left leg, 1 the right. */
-const SLOTS: Record<Role, [string, string]> = {
-  thigh: ['upLeg.L', 'upLeg.R'],
-  shin: ['leg.L', 'leg.R'],
-  foot: ['foot.L', 'foot.R'],
-  toe: ['toe.L', 'toe.R'],
-}
 
 const emptyRig = (): IkRig => ({ feet: [] })
 
@@ -89,47 +80,16 @@ export default function IkRigPanel({ skin, selectedJoint }: { skin: Skin; select
    * skipped, and refuses to write a rig the skeleton cannot support.
    */
   const autoFill = () => {
-    // Must be the engine's own matcher: a private copy drifts from what retargeting believes about the
-    // same skeleton.
-    const bySlot = humanoidRigOf(skin)
-    const topo = skeletonTopology(skin)
-
-    const feet: IkFootChain[] = []
-    const notes: string[] = []
-    for (const [side, label] of [[0, 'left'], [1, 'right']] as const) {
-      const thigh = bySlot.get(SLOTS.thigh[side])
-      const shin = bySlot.get(SLOTS.shin[side])
-      const foot = bySlot.get(SLOTS.foot[side])
-      const missing = [['thigh', thigh], ['shin', shin], ['foot', foot]]
-        .filter(([, v]) => v === undefined).map(([k]) => k)
-      if (missing.length) { notes.push(`no ${label} ${missing.join('/')} found by name`); continue }
-      const toe = bySlot.get(SLOTS.toe[side])
-      feet.push(toe !== undefined ? { thigh: thigh!, shin: shin!, foot: foot!, toe } : { thigh: thigh!, shin: shin!, foot: foot! })
-    }
-
-    if (feet.length === 0) {
+    const { rig: guessed, notes } = guessFootPlacement(skin, current, n => nameOfNode(n).text)
+    if (!guessed) {
       setReport(`Could not identify a leg from the bone names. ${notes.join('; ')}. Assign them by hand.`)
       return
     }
-
-    // The pelvis is the nearest common ancestor of the two thighs, by construction. Ask the hierarchy, never
-    // the name: `root`/`cog` are synonyms for `hips` and a root-motion bone is usually joint 0.
-    const thighJoints = feet.map(f => topo.jointOfNode.get(f.thigh) ?? -1).filter(j => j >= 0)
-    const ncaJoint = thighJoints.length > 1 ? nearestCommonAncestor(topo, thighJoints) : -1
-    const hips = ncaJoint >= 0 ? skin.joints[ncaJoint].nodeIndex : bySlot.get('hips') ?? current.hips
-
-    const next: IkRig = { ...current, hips, feet }
-    const check = validateIkRig(next, topo, isAncestorJoint, n => nameOfNode(n).text)
-    if (check.feet.length === 0) {
-      setReport(`The bones matched by name do not form a leg: ${check.problems.map(p => p.message).join('; ')}.`)
-      return
-    }
-
-    write({ ...next, feet: check.feet, hips: check.hips })
+    write(guessed)
     const named = (n: number | undefined) => n === undefined ? '—' : nameOfNode(n).text
     setReport(
-      `Matched ${check.feet.length} leg${check.feet.length > 1 ? 's' : ''}, hips = ${named(check.hips)}.`
-      + [...notes, ...check.problems.map(p => p.message)].map(m => ` Skipped: ${m}.`).join(''))
+      `Matched ${guessed.feet.length} leg${guessed.feet.length > 1 ? 's' : ''}, hips = ${named(guessed.hips)}.`
+      + notes.map(m => ` Skipped: ${m}.`).join(''))
   }
 
   /**
@@ -162,7 +122,7 @@ export default function IkRigPanel({ skin, selectedJoint }: { skin: Skin; select
   const hips = nameOfNode(current.hips)
 
   return (
-    <Collapsable title='Foot IK' badge={current.feet.length || undefined}>
+    <Collapsable title='Foot Placement' badge={current.feet.length || undefined}>
       <div className='flex flex-col gap-2 p-2'
         title='Select a bone, then click the role it fills. Runs in Play only — the editor has no physics to stand on.'>
         <div className='flex items-center gap-1'>
@@ -171,7 +131,7 @@ export default function IkRigPanel({ skin, selectedJoint }: { skin: Skin; select
             ⤓ Guess from bone names
           </Button>
           {rig && (
-            <Button size='sm' variant='danger' className='ml-auto' title='Remove the whole rig' onClick={() => write(null)}>
+            <Button size='sm' variant='danger' className='ml-auto' title='Remove foot placement from this skeleton' onClick={() => write(null)}>
               Clear
             </Button>
           )}

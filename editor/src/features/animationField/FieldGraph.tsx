@@ -43,7 +43,7 @@ export default function FieldGraph() {
 
   if (editorMode !== 'animationField') return null
   // A message rather than null: this is a dock panel now, and an empty tab body reads as a broken panel.
-  if (!field) return <div className='flex h-full w-full flex-col bg-surface-raised p-3 text-ui text-muted'>No animation field open.</div>
+  if (!field) return <div className='flex h-full w-full flex-col bg-surface-raised p-3 text-ui text-muted'>No blend space open.</div>
 
   const is2D = field.mode === '2d'
   const plotW = Math.max(1, size.w - PAD.left - PAD.right)

@@ -358,6 +358,33 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     force(x => x + 1)
   }
 
+  /**
+   * Run the WORKING COPY on the preview character without saving it — what Preview → simulate shows. The
+   * clone is never saved (Save writes the source node or the controller), so this cannot leak an unsaved
+   * edit anywhere; it only means simulate no longer needs a save first.
+   */
+  const previewWorkingCopy = () => {
+    if (!target) return
+    const libs = { animationFields, boneMasks, poses: poseAssets }
+    let machine = resolveMachineLinks(clone(fullSm), libs)
+    const linked = fullSm.controllerId ? animControllers.find(c => c.id === fullSm.controllerId) : undefined
+    if (linked) {
+      machine = instantiateController({ ...linked, machine: controllerMachineOf(fullSm) }, libs,
+        target.animator.getStateMachine()?.clipOverrides)
+    }
+    target.animator.setStateMachine(clone(machine))
+    force(x => x + 1)
+  }
+  const setSimulateLive = (on: boolean) => {
+    if (on) previewWorkingCopy()
+    setSimulate(on)
+  }
+  // While simulating, an edit restarts the preview on the edited machine, so what runs is what you see.
+  useEffect(() => {
+    if (simulate) previewWorkingCopy()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullSm])
+
   // An animation tab has no asset, so "saving" it means applying the machine onto the source model.
   // Publishing Apply here is what lets Save All / Ctrl+S reach the working copy.
   useEffect(() => {
@@ -637,7 +664,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     target, hasBoneNames, clips, clipAssetId, modelId, adoptModel, accessVars, animationFields, fieldOf,
     sm, fullSm, activeLayer: layerIdx, setActiveLayer, addLayer, setLayer, removeLayer, addSlot, setSlot, removeSlot,
     boneMasks, poseAssets, controller, saveAsController, detachController,
-    selection, setSelection, graphView, setGraphView, simulate, setSimulate,
+    selection, setSelection, graphView, setGraphView, simulate, setSimulate: setSimulateLive,
     apply, paramOf,
     addParam, setParam, removeParam,
     addState, setState, removeState, stateIndex, commitLayout, deleteElements,

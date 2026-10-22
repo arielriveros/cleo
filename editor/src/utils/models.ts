@@ -273,12 +273,6 @@ export type ModelAsset = {
   /** Hide placed instances beyond this camera distance; 0/absent = never cull. */
   cullDistance?: number
   /**
-   * Shared animation assets this model plays, by id (see utils/animationAssets.ts). The clips themselves
-   * live once in the animation library in their SOURCE rig's space, and are retargeted onto this model's
-   * skeleton at instantiation. Clips embedded directly in `nodeJson` also still play.
-   */
-  animationIds?: string[]
-  /**
    * The `.rig` asset holding this character's skeleton (utils/rigAssets.ts).
    *
    * The subtree still embeds its own `skin` — the renderer needs it at parse time — but that copy is found
@@ -409,9 +403,7 @@ export function refreshModelClips(root: Node, models: ModelAsset[], animations?:
         // Replace wholesale rather than diffing: a clip deleted or renamed on the asset must not survive here.
         for (const name of model.animations.map((a: any) => a.name)) model.removeAnimation(name)
         for (const clip of json.animations ?? []) model.addAnimation(clip)
-        // Shared clips are not in `json` (serialize drops them), so re-resolve them from the library.
-        // Guarded on the RESOLVED ids, not the model's own list: clips live on the rig now, so the
-        // model's `animationIds` is empty for any project that has run the v4 migration.
+        // Shared clips are not in `json` (serialize drops them), so re-resolve them from the skeleton.
         if (animations?.length && modelAnimationIds(asset).length) applyModelAnimations(node, asset, animations)
 
         const names = json.skin?.nodeNames

@@ -44,12 +44,12 @@ export const KIND_EXT: Record<Exclude<AssetKind, RawByteKind>, string> = {
   model: '.model',
   scene: '.scene',
   script: '.script',
-  animationField: '.afield',
+  animationField: '.blendspace',
   animation: '.anim',
   rig: '.rig',
   tileset: '.tileset',
   aiBrain: '.brain',
-  animController: '.controller',
+  animController: '.animator',
   boneMask: '.mask',
   pose: '.pose',
   particleSystem: '.vfx',
@@ -80,12 +80,12 @@ export const KIND_LABEL: Record<AssetKind, string> = {
   model: 'model',
   scene: 'scene',
   script: 'script',
-  animationField: 'animation field',
+  animationField: 'blend space',
   animation: 'animation',
-  rig: 'rig',
+  rig: 'skeleton',
   tileset: 'tileset',
   aiBrain: 'AI brain',
-  animController: 'animation controller',
+  animController: 'animator',
   boneMask: 'bone mask',
   pose: 'pose asset',
   particleSystem: 'particle system',
@@ -194,11 +194,14 @@ export function kindOfExt(ext: string): AssetKind {
     // '.mesh' is the legacy spelling of '.model' and must stay resolvable.
     case '.mesh': return 'model'
     case '.script': return 'script'
+    case '.blendspace': return 'animationField'
+    // '.afield' and '.controller' are the old spellings of '.blendspace' and '.animator'.
     case '.afield': return 'animationField'
     case '.anim': return 'animation'
     case '.rig': return 'rig'
     case '.tileset': return 'tileset'
     case '.brain': return 'aiBrain'
+    case '.animator': return 'animController'
     case '.controller': return 'animController'
     case '.mask': return 'boneMask'
     case '.pose': return 'pose'

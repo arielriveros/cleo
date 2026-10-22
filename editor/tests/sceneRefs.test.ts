@@ -110,11 +110,16 @@ describe('buildSceneRefs', () => {
   // One hop, deliberately: a scene places a MODEL and the model lists its clips.
   it('reaches animations through the models the scene places', () => {
     const s = scene({ nodes: [node({ vars: { __modelId: 'hero' } })] })
+    // Two hops: the placed MODEL names its skeleton, and the skeleton owns the clips.
     const models = [
-      { id: 'hero', animationIds: ['idle'] },
-      { id: 'unplaced', animationIds: ['never'] },
+      { id: 'hero', rigId: 'heroRig' },
+      { id: 'unplaced', rigId: 'otherRig' },
     ]
-    expect(buildSceneRefs(s, null, [], models).animationIds).toEqual(['idle'])
+    const rigs = [
+      { id: 'heroRig', animationIds: ['idle'] },
+      { id: 'otherRig', animationIds: ['never'] },
+    ]
+    expect(buildSceneRefs(s, null, [], models, rigs).animationIds).toEqual(['idle'])
   })
 
   // A particle node keeps the LINK beside an embedded copy; its emitters' sprite textures are direct

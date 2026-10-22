@@ -7,13 +7,13 @@ Terms used throughout the documentation and in the editor's own labels.
 | **Action** | A named input verb (`Jump`, `Move`). Scripts read actions; players rebind what drives them. See [Input](../scripting/input.md). |
 | **Action slot** | A named place on an animation state machine that a script plays one-shot clips into with `animator.playAction`, over whatever the machine is doing. Optionally masked and placed above a given layer. Unreal's montage slot. See [Animation](../editor/animation.md#action-slots). |
 | **AI brain** | A `.brain` asset holding either a behaviour machine or a goal graph, plus the fuzzy model both read. See [AI brains](../editor/ai-brains.md). |
-| **Animation field** | A blend space: several clips placed on a 1D or 2D plot, blended by where a probe sits. Stored as `.afield`. |
+| **Animator** | The graph that decides which clip a character plays: states, transitions, parameters, layers, action slots. A shared one is stored as `.animator`. |
 | **Animation controller** | A `.controller` asset: an animation state machine — parameters, layers, action slots — shared by any number of characters, each with optional clip overrides. Not the *Controller* node. See [Animation](../editor/animation.md#animation-controllers). |
 | **Asset** | Reusable content stored in the project library rather than inside a scene. 18 kinds. |
 | **Bake** | To precompute something and store the result: a navmesh from colliders, a sky cubemap from a sun direction, an impostor from a mesh, a light probe from its surroundings. |
 | **Behaviour machine** | A state machine whose states are AI goals and whose transitions are gated by condition trees. |
 | **Blackboard** | A controller's runtime key/value store. Never serialized — authored values belong in node variables. |
-| **Blend space** | See *animation field*. |
+| **Blend space** | Several clips placed on a 1D or 2D plot, blended by where a probe sits. Stored as `.blendspace`. |
 | **Bone mask** | A `.mask` asset: per-bone weights, by bone name, saying which bones an animation layer or action slot may move. Authored in the rig editor. |
 | **Cascade** | One slice of the directional-light shadow map, covering a distance band. |
 | **Character** | A pawn node: turns a control intent into velocity and facing. Does not read input. |

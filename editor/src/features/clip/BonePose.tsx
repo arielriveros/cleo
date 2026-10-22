@@ -234,7 +234,7 @@ export default function BonePose() {
 
         {posedCount > 0 && asset.rigId && (
           <Button size='sm' onClick={() => void captureAsPose()}
-            title='Store the posed bones on the rig as a named pose, so any clip can reference it'>
+            title='Store the posed bones on the skeleton as a named pose, so any clip can reference it'>
             Save {posedCount} posed bone{posedCount === 1 ? '' : 's'} as a shared pose…
           </Button>
         )}

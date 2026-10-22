@@ -98,7 +98,7 @@ export default function ClipInspector() {
           onClick={() => {
             void promptDialog({
               title: 'Save as a new animation',
-              message: 'The clips and their edits are copied to a new .anim asset on the same rig. This one is left unchanged.',
+              message: 'The clips and their edits are copied to a new .anim asset on the same skeleton. This one is left unchanged.',
               defaultValue: `${asset.name} copy`,
               // Names are how a `.anim` is found in the asset tree, so an empty one is refused here rather
               // than minting an unnamed asset the user then has to hunt for.
@@ -129,7 +129,7 @@ export default function ClipInspector() {
             className='w-full'
             value={previewId ?? ''}
             onChange={e => setClipPreviewModel(activeTab.id, e.target.value)}
-            title='Which character on this rig to preview the clip on'>
+            title='Which character on this skeleton to preview the clip on'>
             {characters.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </Select>
         </Collapsable>
@@ -172,7 +172,7 @@ export default function ClipInspector() {
                 </div>
 
                 {e.kind === 'mirror' && (
-                  <label className='flex items-center gap-1 text-muted' title='Which axis separates left from right. Auto measures it from the rig rather than assuming X.'>
+                  <label className='flex items-center gap-1 text-muted' title='Which axis separates left from right. Auto measures it from the skeleton rather than assuming X.'>
                     axis
                     <Select className='px-1 py-0'
                       value={e.axis ?? ''} onChange={ev => replaceEdit(i, { ...e, axis: (ev.target.value || undefined) as any })}>
@@ -219,7 +219,7 @@ export default function ClipInspector() {
 
                 {e.kind === 'poseOffset' && (
                   <div className='flex items-center gap-2 flex-wrap text-muted'>
-                    <label className='flex items-center gap-1' title='A pose stored on this clip’s rig. Editing it updates every clip that references it.'>
+                    <label className='flex items-center gap-1' title='A pose stored on this clip’s skeleton. Editing it updates every clip that references it.'>
                       pose
                       <Select className='px-1 py-0 max-w-[130px]'
                         value={e.poseId ?? ''} onChange={ev => replaceEdit(i, { ...e, poseId: ev.target.value || undefined })}>

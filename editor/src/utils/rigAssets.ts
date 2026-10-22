@@ -258,6 +258,41 @@ export function withOverride(
   return { ...rig, retargets: Object.keys(retargets).length ? retargets : undefined }
 }
 
+/** The slice of a `BoneMapping` this module reads, restated structurally to stay engine-free. */
+type MappingLike = { entries: { sourceNode: number; sourceName: string | null; targetNode: number | null }[] }
+
+/**
+ * The overrides a reviewed mapping implies: every source bone whose target differs from the AUTOMATIC
+ * mapping, by name. This is what the import modal's re-points are saved as — `resolveAnimationAsset`
+ * rebuilds the automatic match on every retarget and replays these on top.
+ *
+ * A source bone with no name cannot be stored (overrides are by name), nor can a target node missing from
+ * `targetNames`; both are skipped rather than stored under a placeholder that would match nothing.
+ */
+export function overridesFromMapping(
+  automatic: MappingLike,
+  reviewed: MappingLike,
+  targetNames: Iterable<[number, string]> | null | undefined,
+): RetargetOverride[] {
+  const auto = new Map(automatic.entries.map(e => [e.sourceNode, e.targetNode] as const))
+  const names = new Map(targetNames ?? [])
+  const out: RetargetOverride[] = []
+  for (const e of reviewed.entries) {
+    if (!e.sourceName || auto.get(e.sourceNode) === e.targetNode) continue
+    if (e.targetNode === null) { out.push({ sourceName: e.sourceName, targetName: null }); continue }
+    const targetName = names.get(e.targetNode)
+    if (targetName) out.push({ sourceName: e.sourceName, targetName })
+  }
+  return out
+}
+
+/** `rig` with `overrides` merged in for `sourceRigId` (each replaces any existing one for its bone). */
+export function withOverrides(rig: RigAsset, sourceRigId: string, overrides: RetargetOverride[]): RigAsset {
+  let next = rig
+  for (const o of overrides) next = withOverride(next, sourceRigId, o.sourceName, o.targetName)
+  return next
+}
+
 /** Every override on `rig` cleared for one source rig — the "back to automatic" button. */
 export function withoutOverrides(rig: RigAsset, sourceRigId: string): RigAsset {
   if (!rig.retargets?.[sourceRigId]) return rig

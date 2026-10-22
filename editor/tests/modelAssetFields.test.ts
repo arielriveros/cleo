@@ -15,7 +15,6 @@ const read = (...parts: string[]) => readFileSync(join(SRC, ...parts), 'utf-8').
 describe('carryModelAssetFields', () => {
   const prev = {
     id: 'm', name: 'old',
-    animationIds: ['idle', 'run'],
     rigId: 'mannequin-rig',
     lodSource: { modelId: 'boulder', level: 1 },
   }
@@ -24,7 +23,6 @@ describe('carryModelAssetFields', () => {
     const next: any = { id: 'm', name: 'new' }
     carryModelAssetFields(next, prev)
     expect(next).toMatchObject({
-      animationIds: ['idle', 'run'],
       rigId: 'mannequin-rig',
       lodSource: { modelId: 'boulder', level: 1 },
     })
@@ -37,25 +35,25 @@ describe('carryModelAssetFields', () => {
     expect(next.materialIds).toEqual(['stone'])
   })
 
-  // The reason the guard is `=== undefined` and not falsiness: unlinking the LAST animation writes `[]`,
-  // and restoring the old list underneath that would make the unlink impossible.
-  it('does not resurrect a deliberately emptied list', () => {
-    const next: any = { id: 'm', animationIds: [] }
+  // The reason the guard is `=== undefined` and not falsiness: a deliberately written empty value must not
+  // have the old one restored underneath it.
+  it('does not resurrect a deliberately emptied value', () => {
+    const next: any = { id: 'm', rigId: '' }
     carryModelAssetFields(next, prev)
-    expect(next.animationIds).toEqual([])
+    expect(next.rigId).toBe('')
   })
 
   it('does not overwrite a value the rebuild did derive', () => {
-    const next: any = { id: 'm', animationIds: ['walk'] }
+    const next: any = { id: 'm', rigId: 'other' }
     carryModelAssetFields(next, prev)
-    expect(next.animationIds).toEqual(['walk'])
+    expect(next.rigId).toBe('other')
   })
 
   it('is a no-op with no previous record', () => {
     const next: any = { id: 'm', name: 'new' }
     expect(carryModelAssetFields(next, undefined)).toBe(next)
     expect(carryModelAssetFields(next, null)).toBe(next)
-    expect(next.animationIds).toBeUndefined()
+    expect(next.rigId).toBeUndefined()
   })
 
   it('returns the same object it was given', () => {
@@ -124,7 +122,9 @@ describe('ModelAsset field coverage', () => {
     ).toEqual([])
   })
 
-  it('keeps animationIds preserved — the field the bug was about', () => {
-    expect(MODEL_ASSET_PRESERVED_KEYS).toContain('animationIds')
+  // The skeleton owns the clips, and `AnimatedModel.serialize` drops every asset-backed one — so losing
+  // `rigId` on a re-save would silently unhook all of them.
+  it('keeps rigId preserved — the link that carries the clips', () => {
+    expect(MODEL_ASSET_PRESERVED_KEYS).toContain('rigId')
   })
 })

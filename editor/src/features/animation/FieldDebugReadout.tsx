@@ -106,7 +106,7 @@ export default function FieldDebugReadout({ animator }: { animator: Animator }) 
           fighting itself — and the fix is `hysteresis` on the condition or `minDwell` on the transition. */}
       <div className={`flex items-center gap-2 text-ui-xs tabular-nums ${flipRate > 1 ? 'text-warning' : 'text-dim'}`}
         title={'State changes in the last second. Sustained non-zero means the machine is ping-ponging: two '
-          + 'transitions are both satisfied around one threshold. Give the condition a hysteresis band, or the '
+          + 'transitions are both satisfied around one threshold. Give the condition a tolerance, or the '
           + 'transition a minimum dwell.'}>
         <span className='w-[52px] shrink-0'>flips/s</span>
         <span className='w-[64px] text-right'>{flipRate}</span>
@@ -138,7 +138,7 @@ export default function FieldDebugReadout({ animator }: { animator: Animator }) 
         <p className={`text-ui-xs mt-0.5 ${d.stateWantsField ? 'text-warning' : 'text-dim'}`}>
           {d.stateWantsField
             ? '⚠ This state plays a field, but none is loaded — its asset is missing, so the character holds the bind pose. Re-pick the field on the state and Apply.'
-            : 'No animation field in the current state.'}
+            : 'No blend space in the current state.'}
         </p>
       )}
 

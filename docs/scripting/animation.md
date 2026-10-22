@@ -68,9 +68,9 @@ A `trigger` parameter is consumed by the first transition that reads it, so it c
 That holds across [layers](#layers) too: they share the parameter table, and whichever layer fires on
 a trigger first consumes it.
 
-A character running an [Animation Controller](../editor/animation.md#animation-controllers) holds a
-resolved copy of it, so all of the above works the same either way. `getStateMachine()` returns that
-copy; its `controllerId` says which controller it came from.
+A character running a [shared animator](../editor/animation.md#shared-animators) holds a resolved
+copy of it, so all of the above works the same either way. `getStateMachine()` returns that copy; its
+`controllerId` says which shared animator it came from.
 
 ## Layers
 
@@ -172,10 +172,11 @@ Marker times are in CLIP seconds, so a state playing at `speed: 1.5` fires the m
 
 ## Blend spaces
 
-A field blends several clips by where a probe sits on a 1D or 2D plot. Normally a *state* plays a
-field and the machine drives its axes. To drive one directly:
+A blend space blends several clips by where a probe sits on a 1D or 2D plot. In code it is an
+`AnimationField`. Normally a *state* plays one and the animator drives its axes. To drive one directly:
 
 ```ts
+playBlendSpace(field: AnimationField, x: number, y?: number, loop = true): void   // = playField
 playField(field: AnimationField, x: number, y?: number, loop = true): void
 updateField(field: AnimationField): void
 setFieldProbe(x: number, y?: number): void

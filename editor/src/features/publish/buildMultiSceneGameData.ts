@@ -160,7 +160,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   // untouched — the same trick used just below for `sourceSkin`.
   const rigClips = new Map((src.libs.rigs ?? []).map(r => [r.id, r.animationIds ?? []]))
   for (const m of src.libs.models ?? []) {
-    const ids = [...(m.rigId ? rigClips.get(m.rigId) ?? [] : []), ...(m.animationIds ?? [])]
+    const ids = m.rigId ? rigClips.get(m.rigId) ?? [] : []
     const unique = [...new Set(ids)]
     if (!unique.length) continue
     modelAnimations[m.id] = unique

@@ -366,11 +366,11 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
     { label: 'Particle System', icon: <img src={iconFor('particleSystem')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterParticleSystemEditor(), title: 'Create a GPU particle effect: emitters, their module stacks and renderers' },
     // The three animation-authoring kinds are created empty and rig-less, straight into the library; the
     // reconcile files them under the landing folder like any asset created outside the explorer.
-    { label: 'Animation Controller', icon: <img src={iconFor('animController')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => addAnimController(buildControllerAsset('New Controller')), title: 'Create a shareable animation state machine: parameters, layers and slots' },
+    { label: 'Animator', icon: <img src={iconFor('animController')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => addAnimController(buildControllerAsset('New Animator')), title: 'Create a shareable animator: the graph that decides which clip a character plays' },
     // No Bone Mask / Pose Asset entries: both are subsets of ONE skeleton, so they are created in that
     // rig's editor (Bone Masks / Poses sections), where they get their rig and a bone tree to edit against.
     { label: 'Sound', icon: <img src={iconFor('soundSample')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => document.getElementById('sound-import')?.click(), title: 'Import an audio file as a sound sample' },
-    { label: 'Animation', icon: <img src={iconFor('animation')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => document.getElementById('animation-clip-import')?.click(), title: 'Import animation clips from a .fbx/.glb/.gltf and pick the rig they belong to' },
+    { label: 'Animation', icon: <img src={iconFor('animation')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => document.getElementById('animation-clip-import')?.click(), title: 'Import animation clips from a .fbx/.glb/.gltf and pick the character they belong to' },
     { label: 'Scene', icon: <img src={iconFor('scene')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => { void createScene() }, title: 'Create a new scene asset' },
     { label: 'Folder', icon: <img src={iconFor('folder')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: newFolder, title: 'Create a folder in the current directory' },
     {

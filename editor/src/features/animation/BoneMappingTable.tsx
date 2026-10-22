@@ -76,7 +76,7 @@ export default function BoneMappingTable(props: {
       ))}
       {!rows.length && (
         <div className='px-2 py-3 text-ui-sm text-dim'>
-          Nothing to map — no clip on this source rig animates a bone.
+          Nothing to map — no clip on this source skeleton animates a bone.
         </div>
       )}
     </div>

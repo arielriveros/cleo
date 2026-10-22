@@ -80,7 +80,7 @@ export default function RigInspector() {
     }
   }, [asset, sourceRigId, target, rigs, animations])
 
-  if (!asset) return <div className={cn(hintClass, 'p-3')}>No rig open.</div>
+  if (!asset) return <div className={cn(hintClass, 'p-3')}>No skeleton open.</div>
 
   /** The blend spaces authored on this skeleton. Keyed by rig, so every character on it shares them. */
   const fields = animationFields.filter(f => f.rigId === asset.id)
@@ -134,8 +134,8 @@ export default function RigInspector() {
         {models.length > 0 && (
           <Hint className='mt-1'>
             {models.length === 1
-              ? 'One character is built on this rig.'
-              : `${models.length} characters are built on this rig — they all play its clips.`}
+              ? 'One character is built on this skeleton.'
+              : `${models.length} characters are built on this skeleton — they all play its clips.`}
           </Hint>
         )}
       </div>
@@ -143,7 +143,7 @@ export default function RigInspector() {
       {/* ---- Clips ------------------------------------------------------------------------------ */}
       <div>
         <div className={cn(sectionTitleClass, 'mb-1')}>Clips</div>
-        <Hint className='mb-1'>Linked here, so every character on this rig plays them.</Hint>
+        <Hint className='mb-1'>Linked here, so every character on this skeleton plays them.</Hint>
         <AnimationAssetPicker rigId={asset.id} />
         {linked.length === 0 && <Hint className='mt-1'>No clips yet — link or drag one in.</Hint>}
       </div>
@@ -156,7 +156,7 @@ export default function RigInspector() {
       <div>
         <div className={cn(sectionTitleClass, 'mb-1')}>Blend Spaces</div>
         {fields.length === 0 && (
-          <Hint className='mb-1'>None yet — a field mixes this rig’s clips by speed, direction or any parameter.</Hint>
+          <Hint className='mb-1'>None yet — a blend space mixes this skeleton’s clips by speed, direction or any parameter.</Hint>
         )}
         <div className='flex flex-col gap-1'>
           {fields.map(f => (
@@ -170,10 +170,10 @@ export default function RigInspector() {
             <Button
               variant='subtle' className='w-full py-1.5'
               onClick={() => createAnimationFieldForModel(runtimeModelId)}
-              title='Create a blend space that mixes this rig’s clips by 1D or 2D parameters'
+              title='Create a blend space that mixes this skeleton’s clips by 1D or 2D parameters'
             >+ New Blend Space</Button>
           ) : (
-            <Hint>A character on this rig is needed to author one against.</Hint>
+            <Hint>A character on this skeleton is needed to author one against.</Hint>
           )}
         </div>
       </div>
@@ -196,12 +196,12 @@ export default function RigInspector() {
         <div className={cn(sectionTitleClass, 'mb-1')}>Retargeting</div>
         {sourceRigs.length === 0 ? (
           <Hint>
-            Nothing to retarget: no other rig in this project has clips. Corrections are per source rig.
+            Nothing to retarget: no other skeleton in this project has clips. Corrections are per source skeleton.
           </Hint>
         ) : (
           <>
             <Hint className='mb-1'>
-              Fix a bone once and every clip from that rig retargets correctly onto this one, permanently.
+              Fix a bone once and every clip from that skeleton retargets correctly onto this one, permanently.
             </Hint>
             <Select value={sourceRigId} onChange={e => setSourceRigId(e.target.value)}>
               <option value=''>Clips from…</option>
@@ -210,11 +210,11 @@ export default function RigInspector() {
 
             {sourceRigId && !target && (
               <Hint className='mt-1 text-warning'>
-                A preview character is needed to map bones onto — this rig has no model yet.
+                A preview character is needed to map bones onto — this skeleton has no model yet.
               </Hint>
             )}
             {sourceRigId && target && !preview && (
-              <Hint className='mt-1'>That rig has no clips to map.</Hint>
+              <Hint className='mt-1'>That skeleton has no clips to map.</Hint>
             )}
             {preview && counts && (
               <>
@@ -228,7 +228,7 @@ export default function RigInspector() {
                     variant='ghost'
                     size='sm'
                     className='text-ui-sm'
-                    title='Discard the saved corrections for this source rig'
+                    title='Discard the saved corrections for this source skeleton'
                     onClick={() => clearOverrides(sourceRigId)}
                   >
                     Reset

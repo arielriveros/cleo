@@ -170,7 +170,7 @@ export default function StateGraph() {
           <Button variant='primary'
             onClick={addAtCenter} title='Add a new state (or double-click the canvas)'>+ State</Button>
           <Button variant='success'
-            onClick={apply} title='Save the machine onto the model (used at runtime and by Simulate)'>Apply</Button>
+            onClick={apply} title='Save this animator (Ctrl+S)'>Save</Button>
         </>
       }
     />

@@ -9,7 +9,7 @@ A single toolbar row:
 
 | Control | Does |
 |---|---|
-| **+ Add ▾** | Material, Landscape Material, Template, Script, Tileset, **AI Brain (Machine)**, **AI Brain (Goals)**, **Particle System**, **Animation Controller**, Sound, Animation, Scene, Folder, Import Files… |
+| **+ Add ▾** | Material, Landscape Material, Template, Script, Tileset, **AI Brain (Machine)**, **AI Brain (Goals)**, **Particle System**, **Animator**, Sound, Animation, Scene, Folder, Import Files… |
 | **Search** | Filters by name. |
 | **Audit** | Flags assets a library holds but the explorer is not showing, and orphan entries pointing at deleted assets. Carries a warning badge when either exists. |
 | **Details** | Toggles the details pane. |
@@ -35,10 +35,10 @@ Folders are yours to arrange; nothing depends on where an asset sits.
 | **Script** | `.script` | **+ Add** | [Script mode](scripting-workflow.md) | attached to nodes |
 | **Animation** | `.anim` | **+ Add** (pick a `.fbx`/`.glb`/`.gltf`) | [Clip mode](animation.md) — clips stay in source-rig space | rig clip lists, state machines |
 | **Rig** | `.rig` | Model or animation import — one per distinct skeleton | [Rig mode](animation.md): clips, retargeting, IK, sockets, bone masks, poses | models built on that skeleton |
-| **Animation Controller** | `.controller` | **+ Add**, or **Save as Controller…** in the state machine editor | [State machine editor](animation.md#animation-controllers), previewed on a character on its rig | characters' **Animation** section |
+| **Animator** | `.animator` | **+ Add**, the workspace's **Animator ▾ → + New Animator**, the [Animate wizard](animation.md#animate-a-character-in-a-minute), or **Share…** in the Animator | [Character Animation workspace](animation.md#shared-animators), previewed on a character on its skeleton | characters' **Animation** section |
 | **Bone Mask** | `.mask` | The rig editor's **Bone Masks** section | Rig mode, **Bone Masks** section | controller layers and action slots |
 | **Pose Asset** | `.pose` | Saving a pose in the clip editor, or **+ New pose asset** in the rig editor's **Poses** section | Rig mode, **Poses** section | clip pose offsets, controller pose states |
-| **Animation Field** | `.afield` | Model inspector, or **+ Add** | Animation Field mode | a state in a state machine |
+| **Blend Space** | `.blendspace` | The workspace's **Blend Spaces ▾ → + New Blend Space**, or the Animate wizard | The Character Animation workspace | a state in an animator |
 | **AI Brain** | `.brain` | **+ Add ▸ AI Brain (Machine \| Goals)** | [AI Brain mode](ai-brains.md) | linked from a Controller |
 | **Particle System** | `.vfx` | **+ Add ▸ Particle System**, or **Create asset from this effect** on a Particle System node | [Particle System mode](modes.md) | linked from a Particle System node, which embeds a copy |
 | **Tileset** | `.tileset` | **+ Add** (pick an atlas) | Tileset mode | tilemap layers, sprites |

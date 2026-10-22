@@ -113,7 +113,7 @@ export default function ModelInspector() {
               className='w-full'
               onClick={() => createAnimationFieldForModel(activeTab.modelId!)}
               title='Create a new blend space from this model'>
-              + New Animation Field
+              + New Blend Space
             </Button>
           </div>
         </Collapsable>

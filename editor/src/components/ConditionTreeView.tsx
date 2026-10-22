@@ -35,9 +35,10 @@ export const CONDITION_OP_LABEL: Record<ConditionOp, string> = {
 }
 
 const HYSTERESIS_HINT =
-  'Hysteresis band, centred on the threshold. Full width — so ±0.4 on “> 1” engages at 1.2 and does not '
-  + 'release until the value falls back through 0.8. Put the same band on the opposite condition (“< 1”) '
-  + 'and the pair stops flipping every frame when the value hovers at 1. 0 or blank = off.'
+  'Tolerance: how far past the threshold the value must go before this switches, and back before it '
+  + 'switches back. ±0.4 on “> 1” engages at 1.2 and does not release until the value falls back through 0.8. '
+  + 'Put the same tolerance on the opposite condition (“< 1”) and the pair stops flickering when the value '
+  + 'hovers at 1. 0 or blank = off.'
 
 /** Dense-row padding for the library controls (their default is px-2 py-1). */
 const tight = 'px-1 py-0.5'
@@ -186,7 +187,7 @@ function ConditionRow({ params, root, path, onChange }: NodeProps) {
           every frame. Centring the band is what pushes the two halves of such a pair apart. */}
       {(node.op === 'gt' || node.op === 'lt') && (
         <label className={cn(labelClass, 'flex items-center gap-0.5 text-ui-xs')} title={HYSTERESIS_HINT}>
-          ±
+          tol ±
           <OptionalNumberInput className={cn(tight, 'w-[46px]')} placeholder='0'
             value={node.hysteresis}
             onChange={v => patch({ hysteresis: v === undefined ? undefined : Math.max(0, v) })} />

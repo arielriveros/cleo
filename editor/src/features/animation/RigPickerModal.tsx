@@ -21,9 +21,9 @@ export default function RigPickerModal() {
   return (
     <Modal onClose={() => resolveRigPick(null)} className='w-[420px]'>
       <ModalHeader>
-        <div className='text-ui-lg font-semibold'>Choose a rig</div>
+        <div className='text-ui-lg font-semibold'>Which character are these clips for?</div>
         <div className='text-ui-lg font-bold truncate' title={fileName}>{fileName}</div>
-        <div className={cn(hintClass, 'mt-0.5')}>the skeleton its clips will be retargeted onto</div>
+        <div className={cn(hintClass, 'mt-0.5')}>its skeleton is what the clips are matched and linked to</div>
       </ModalHeader>
 
       <div className='max-h-[50vh] overflow-y-auto px-4 py-3 space-y-1'>
@@ -31,7 +31,7 @@ export default function RigPickerModal() {
           <label key={m.id}
             className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-ui ${
               selected === m.id ? 'bg-primary/15 text-primary' : 'hover:bg-control-hover text-fg'}`}>
-            <input type='radio' name='rig' value={m.id} checked={selected === m.id}
+            <input type='radio' name='character' value={m.id} checked={selected === m.id}
               onChange={() => setSelected(m.id)} />
             <span className='truncate'>{m.name}</span>
           </label>
@@ -39,8 +39,8 @@ export default function RigPickerModal() {
       </div>
 
       <div className={cn(hintClass, 'px-4 pb-2')}>
-        The clips are stored once, in the file's own skeleton space — picking a rig here links them to that
-        model, it does not tie the animation to it.
+        The clips are linked to that character's skeleton, so every character built on it plays them. They
+        are stored once, in the file's own skeleton space, so they can be linked to other skeletons later.
       </div>
 
       <ModalFooter>

@@ -125,8 +125,8 @@ const CHROME_PANELS = [
 const PANEL_TITLES: Record<string, string> = {
   viewport: 'Viewport', scene: 'Scene', sceneAdd: 'Scene Elements', uiAdd: 'UI Elements', properties: 'Properties',
   scripts: 'Scripts', physics: 'Physics', logger: 'Logger', assets: 'Assets',
-  animClips: 'Clips', animVariables: 'Variables', animStateMachine: 'State Machine',
-  animField: 'Field Settings', animFieldPlot: 'Blend Space',
+  animClips: 'Clips', animVariables: 'Parameters', animStateMachine: 'Animator',
+  animField: 'Blend Space Settings', animFieldPlot: 'Blend Space',
   clipTracks: 'Clip', clipTimeline: 'Timeline',
   particleTransport: 'Particle Preview',
   tilePalette: 'Tiles', tilemapLayers: 'Layers',
@@ -144,7 +144,7 @@ function panelTitle(id: string, mode: EditorMode): string {
     if (mode === 'particleSystem') return 'Particle System';
     if (mode === 'texture') return 'Texture';
     if (mode === 'soundSample') return 'Sound';
-    if (mode === 'rig') return 'Rig';
+    if (mode === 'rig') return 'Skeleton';
   }
   return PANEL_TITLES[id];
 }

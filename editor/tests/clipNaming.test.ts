@@ -142,7 +142,7 @@ function functionBody(source: string, decl: string): string {
 
 describe('the import routes keep their fixes', () => {
   it('importAnimationFiles splits the selection before parsing it', () => {
-    const body = functionBody(read('src/features/EngineContext.tsx'), 'const importAnimationFiles = async (files: File[]) => {');
+    const body = functionBody(read('src/features/EngineContext.tsx'), 'const importAnimationFiles = async (files: File[], opts?: { modelId?: string }) => {');
 
     // Without this the whole selection goes to assimp in one call and only the first file survives.
     expect(body).toContain('groupImportFiles(files)');

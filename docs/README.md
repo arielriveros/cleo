@@ -11,8 +11,8 @@ publishing the result as a self-contained web page or desktop application.
 > landed after it are marked *unreleased* where they appear: the `Character` / `Controller` node
 > pair, the `NavMesh` node with its bake-bounds volume, the **AI Brain** asset with the
 > Behaviour / Goals / Fuzzy graph editors, the `Decal` node, and the animation additions —
-> **Animation Controller**, **Bone Mask** and **Pose** assets, controller layers, action slots, clip
-> events and bone sockets. The published-game player contract
+> the **Character Animation workspace** and **Animate** wizard, shared **Animator**, **Bone Mask**
+> and **Pose** assets, animator layers, action slots, clip events and bone sockets. The published-game player contract
 > is at **8** on this branch; the last tagged release shipped 6.
 
 ---

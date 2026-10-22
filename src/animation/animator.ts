@@ -7,6 +7,7 @@ import {
 import { clamp, dampTime, dampWrapped, decomposeTRS, wrapSpan } from '../core/math';
 import { skeletonTopology, SkeletonTopology, isAncestorJoint, subtreeOrder } from './skeletonTopology';
 import { findKey, findKeyLinear, isSorted } from './keyframes';
+import { bakeCubicSpline } from './samplerBake';
 import { solveTwoBone, kneePole, ikTuning, validateIkRig, swingReleaseWeight, IkFootChain, IkRig, IkRigValidation } from './ik';
 import { Node } from '../core/scene/nodes/node';
 import { ModelNode } from '../core/scene/nodes/modelNode';
@@ -356,11 +357,16 @@ interface Channel {
     cursor: number;
     constant: boolean;
     sorted: boolean;
+    /** STEP interpolation: hold each key until the next one instead of blending toward it. */
+    step: boolean;
 }
 
-const NO_CHANNEL: Channel = { times: [], keys: [], cursor: 0, constant: false, sorted: true };
+const NO_CHANNEL: Channel = { times: [], keys: [], cursor: 0, constant: false, sorted: true, step: false };
 
-function makeChannel(sampler: AnimationSampler, stride: 3 | 4, normalize: boolean): Channel {
+function makeChannel(source: AnimationSampler, stride: 3 | 4, normalize: boolean): Channel {
+    // CUBICSPLINE stores in-tangent/value/out-tangent per key; resolve it to LINEAR keys first (normally
+    // already done at load — this catches clips built some other way).
+    const sampler = bakeCubicSpline(source);
     const count = sampler.input.length;
     const packed = new Float32Array(count * stride);
     const keys: Float32Array[] = new Array(count);
@@ -373,7 +379,7 @@ function makeChannel(sampler: AnimationSampler, stride: 3 | 4, normalize: boolea
     let constant = count > 1;
     for (let i = stride; constant && i < packed.length; i++) if (packed[i] !== packed[i % stride]) constant = false;
     const times = Array.from(sampler.input as ArrayLike<number>);
-    return { times, keys, cursor: 0, constant, sorted: isSorted(times) };
+    return { times, keys, cursor: 0, constant, sorted: isSorted(times), step: sampler.interpolation === 'STEP' };
 }
 
 /** Keyframe interpolation for a single bone. */
@@ -458,7 +464,10 @@ class Bone {
 
     // Interpolation factor between two keyframes. Must stay CLAMPED: the index lookup returns `length - 2`
     // past the last keyframe, and an unclamped factor would extrapolate along the final segment's slope.
-    private _getScaleFactor(lastTimeStamp: number, nextTimeStamp: number, animationTime: number): number {
+    private _getScaleFactor(lastTimeStamp: number, nextTimeStamp: number, animationTime: number, step: boolean): number {
+        // STEP holds key i across the whole segment; it only reaches key i+1 once time does (index lookup
+        // returns length - 2 past the end, where the factor clamps to 1 and lands on the last key).
+        if (step) return animationTime >= nextTimeStamp ? 1 : 0;
         const framesDiff = nextTimeStamp - lastTimeStamp;
         if (!(framesDiff > 0)) return 0;
         const midWayLength = animationTime - lastTimeStamp;
@@ -471,7 +480,7 @@ class Bone {
         if (ch.keys.length === 0) return this._restT; // no channel: hold the bind offset, not the origin (only read)
         if (ch.keys.length === 1 || ch.constant) return ch.keys[0] as unknown as vec3;
         const i = Bone._index(ch, animationTime);
-        const f = this._getScaleFactor(ch.times[i], ch.times[i + 1], animationTime);
+        const f = this._getScaleFactor(ch.times[i], ch.times[i + 1], animationTime, ch.step);
         return vec3.lerp(out, ch.keys[i] as unknown as vec3, ch.keys[i + 1] as unknown as vec3, f);
     }
 
@@ -481,7 +490,7 @@ class Bone {
         if (ch.keys.length === 0) return this._restR; // no channel: hold the bind rotation (only read)
         if (ch.keys.length === 1 || ch.constant) return ch.keys[0] as unknown as quat;
         const i = Bone._index(ch, animationTime);
-        const f = this._getScaleFactor(ch.times[i], ch.times[i + 1], animationTime);
+        const f = this._getScaleFactor(ch.times[i], ch.times[i + 1], animationTime, ch.step);
         quat.slerp(out, ch.keys[i] as unknown as quat, ch.keys[i + 1] as unknown as quat, f);
         return quat.normalize(out, out);
     }
@@ -492,7 +501,7 @@ class Bone {
         if (ch.keys.length === 0) return this._restS; // no channel: hold the bind scale (only read)
         if (ch.keys.length === 1 || ch.constant) return ch.keys[0] as unknown as vec3;
         const i = Bone._index(ch, animationTime);
-        const f = this._getScaleFactor(ch.times[i], ch.times[i + 1], animationTime);
+        const f = this._getScaleFactor(ch.times[i], ch.times[i + 1], animationTime, ch.step);
         return vec3.lerp(out, ch.keys[i] as unknown as vec3, ch.keys[i + 1] as unknown as vec3, f);
     }
 
@@ -1374,7 +1383,12 @@ export class Animator {
         return this._previousBones.get(key)?.localTransform ?? null;
     }
 
-    /** Play a field directly, outside any state machine. Used by the Animation Field editor's preview. */
+    /** {@link playField} under the name the editor uses: play a blend space directly, outside any state. */
+    public playBlendSpace(field: AnimationField, x: number, y?: number, loop: boolean = true): void {
+        this.playField(field, x, y, loop);
+    }
+
+    /** Play a field directly, outside any state machine. Used by the Blend Space editor's preview. */
     public playField(field: AnimationField, x: number, y?: number, loop: boolean = true): void {
         this._fieldX = x;
         this._fieldY = y ?? 0;
@@ -2643,6 +2657,18 @@ export class Animator {
     public resetTrigger(name: string): void { this._paramValues.set(name, false); }
     public getParam(name: string): number | boolean | undefined { return this._paramValues.get(name); }
 
+    // Hand-set values for LINKED ('variable') parameters, which otherwise re-read their source every frame.
+    private _paramOverrides = new Map<string, number | boolean>();
+    /**
+     * Pin a linked parameter to a value, or pass null to follow its link again. For the editor's preview,
+     * where nothing moves, so a parameter linked to the character's speed would otherwise always read 0.
+     */
+    public setParamOverride(name: string, value: number | boolean | null): void {
+        if (value === null) this._paramOverrides.delete(name);
+        else { this._paramOverrides.set(name, value); this._paramValues.set(name, value); }
+    }
+    public getParamOverride(name: string): number | boolean | undefined { return this._paramOverrides.get(name); }
+
     /** Subscribe to animation events fired by clip event markers. Returns an unsubscribe fn. */
     public onAnimationEvent(cb: (eventName: string, clipName: string) => void): () => void {
         this._eventCallbacks.push(cb);
@@ -2845,6 +2871,8 @@ export class Animator {
         if (!sm || !this._node) return;
         for (const p of sm.parameters) {
             if (p.type !== 'variable' || !p.variable) continue;
+            const pinned = this._paramOverrides.get(p.name);
+            if (pinned !== undefined) { this._paramValues.set(p.name, pinned); continue; }
             let src = this._resolveVarNode(p.variable.nodeRef);
             let val: number | boolean = p.default;
 

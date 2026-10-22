@@ -410,14 +410,14 @@ export const KIND_LABEL: Record<TabKind, string> = {
   template: 'Template',
   material: 'Material',
   terrainMaterial: 'Landscape material',
-  stateMachine: 'State machine',
-  animation: 'Animation',
-  animationField: 'Animation field',
+  stateMachine: 'Animator',
+  animation: 'Clips',
+  animationField: 'Blend space',
   model: 'Model',
   script: 'Script',
   tileset: 'Tileset',
   aiBrain: 'AI Brain',
-  rig: 'Rig',
+  rig: 'Skeleton',
   texture: 'Texture',
   soundSample: 'Sound',
   particleSystem: 'Particle System',
@@ -458,6 +458,12 @@ export interface EditorTab {
   textureId?: string | null; // texture tabs: the edited texture asset id (also its TextureManager id)
   soundId?: string | null; // sound tabs: the edited sample asset id (also its AudioManager id)
   particleSystemId?: string | null; // particle tabs: the edited `.vfx` asset id
+  /**
+   * Animator tabs: the skeleton whose Character Animation workspace this tab belongs to. Stamped when the
+   * tab opens, since a character's machine reaches its skeleton only through a live node. The other
+   * animation tab kinds derive theirs from the library (see utils/animationWorkspace.ts).
+   */
+  workspaceRigId?: string | null;
 }
 /**
  * Which landscape the landscape-mode tools act on. Every brush setting lives in the landscape brush store

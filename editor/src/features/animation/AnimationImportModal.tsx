@@ -81,7 +81,7 @@ export default function AnimationImportModal() {
               <span className='text-ui-sm'>{showMap ? '▾' : '▸'}</span>
               <span className='font-semibold text-ui flex-1'>Skeleton</span>
               {mapping.sameRig
-                ? <span className='text-ui-sm text-success-fg'>same rig — no retargeting needed</span>
+                ? <span className='text-ui-sm text-success-fg'>same skeleton — no retargeting needed</span>
                 : <span className='text-ui-sm text-muted'>
                     {mappedCount}/{mapping.entries.length} mapped
                     {exactCount ? ` · ${exactCount} exact` : ''}

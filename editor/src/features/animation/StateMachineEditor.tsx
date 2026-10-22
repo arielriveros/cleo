@@ -35,9 +35,9 @@ function ApplyBar() {
   const { apply, controller, fullSm, saveAsController, detachController } = useStateMachine()
   const saveAs = async () => {
     const name = await promptDialog({
-      title: 'Save as Animation Controller',
-      message: 'A controller can be shared by any number of characters. Each can swap clips with its own overrides.',
-      defaultValue: 'Controller', validate: v => (v.trim() ? null : 'Give the controller a name.'),
+      title: 'Share as an Animator',
+      message: 'A shared animator can drive any number of characters. Each can swap clips with its own overrides.',
+      defaultValue: 'Animator', validate: v => (v.trim() ? null : 'Give the animator a name.'),
     })
     if (name?.trim()) saveAsController(name.trim())
   }
@@ -46,29 +46,29 @@ function ApplyBar() {
       {/* Where Apply lands: the shared CONTROLLER asset, or this character's own machine. */}
       {controller ? (
         <div className='flex items-center gap-1 text-ui-sm'>
-          <span className='flex-1 truncate text-highlight' title='Apply writes this controller; every character using it updates'>
-            Controller: {controller.name}
+          <span className='flex-1 truncate text-highlight' title='Saving writes this shared animator; every character using it updates'>
+            Shared animator: {controller.name}
           </span>
           <Button size='sm' variant='subtle' onClick={detachController}
-            title='Stop following the controller — this character keeps the machine as its own'>Detach</Button>
+            title='Stop following the shared animator — this character keeps a copy as its own'>Detach</Button>
         </div>
       ) : (
         <div className='flex items-center gap-1 text-ui-sm'>
           <span className='flex-1 truncate text-muted'>
-            {fullSm.controllerId ? 'Its controller was deleted — own machine' : 'This character’s own machine'}
+            {fullSm.controllerId ? 'Its shared animator was deleted — using its own copy' : 'This character’s own animator'}
           </span>
           <Button size='sm' variant='subtle' onClick={() => void saveAs()}
-            title='Turn this machine into a shared Animation Controller asset'>Save as Controller…</Button>
+            title='Turn this into a shared Animator other characters can use too'>Share…</Button>
         </div>
       )}
       {/* NOT "Apply to Model", which it was called and which is wrong twice over: it writes nothing to
-          the model ASSET, and nothing about clips — those belong to the rig. What it commits is the
+          the model ASSET, and nothing about clips — those belong to the skeleton. What it commits is the
           state machine, onto the node's animator. That is genuinely node-owned data (ModelNode
           serializes `stateMachine`), and this is its only commit path: the working copy lives in
           per-tab React state and is lost on close without it. */}
       <Button size='sm' variant='primary' className=' w-full' onClick={apply}
-        title='Save the state machine onto the node it was opened from (used at runtime and by Simulate)'>
-        {controller ? 'Apply to Controller' : 'Apply State Machine'}
+        title={controller ? 'Save the shared animator (Ctrl+S)' : 'Save this character’s animator (Ctrl+S)'}>
+        Save
       </Button>
     </div>
   )
@@ -165,10 +165,10 @@ export function VariablesPanel() {
             <div key={i} className='flex items-center gap-1'>
               <TextInput className={cn(tight, 'flex-1')} value={p.name} onChange={v => setParam(i, { name: v })} />
               <Select className={tight} value={p.type} onChange={e => setParam(i, { type: e.target.value as AnimationParameterType })}>
-                <option value='float'>float</option>
-                <option value='bool'>bool</option>
-                <option value='trigger'>trigger</option>
-                <option value='variable'>variable</option>
+                <option value='float' title='A number you set from a script'>Number</option>
+                <option value='bool' title='On or off, set from a script'>Toggle</option>
+                <option value='trigger' title='Fires once, then resets — for jump, attack, hit'>Trigger</option>
+                <option value='variable' title='Follows a value automatically: the character’s speed, whether it is grounded, or any node variable'>Linked</option>
               </Select>
               {p.type === 'float'
                 ? <NumberInput className={cn(tight, 'w-[56px]')} step='0.1' value={Number(p.default)} onChange={v => setParam(i, { default: v })} />
@@ -286,10 +286,11 @@ function SelectedState() {
         <TextInput className={cn(tight, 'flex-1 min-w-0')} title='State name' value={s.name} onChange={v => setState(i, { name: v })} />
         <Button variant='remove' size='sm' className='shrink-0' title='Delete state' onClick={() => removeState(i)}>✕</Button>
       </div>
-      {/* Entry is set by right-clicking the node in the graph, where it is also drawn (green border + ▶). */}
+      {/* Entry is drawn in the graph (green border + ▶); it can be set here or by right-clicking the node. */}
       {s.isEntry
-        ? <p className='text-ui-xs text-success'>▶ Entry state — the machine starts here.</p>
-        : <p className={hintClass}>Right-click this state in the graph to make it the entry.</p>}
+        ? <p className='text-ui-xs text-success'>▶ Entry state — the character starts here.</p>
+        : <Button size='sm' variant='subtle' className='self-start' title='Start the character in this state'
+            onClick={() => setState(i, { isEntry: true })}>▶ Make this the entry state</Button>}
 
       {/* Dropping a pose asset here makes the state hold that asset's first pose. */}
       <AssetDropRow mime='text/cleo-pose' title='Drop a Pose asset here to hold its first pose'
@@ -306,14 +307,14 @@ function SelectedState() {
           size='sm' value={playsField ? 'field' : playsPose ? 'pose' : 'clip'} onChange={setPlays}
           options={[
             { value: 'clip', label: 'Clip', title: 'Play a single animation clip' },
-            { value: 'field', label: 'Field', title: 'Blend several clips through an Animation Field' },
+            { value: 'field', label: 'Blend Space', title: 'Blend several clips by speed, direction or any parameter' },
             { value: 'pose', label: 'Pose', title: 'Hold a static pose from a Pose asset — on a masked layer, a hand grip over locomotion' },
           ]} />
       </AssetDropRow>
 
       {playsPose && (allPoses.length === 0
         ? <p className='text-ui-xs text-warning'>No poses yet — pose bones in a clip’s editor and save them as a pose.</p>
-        : <Select className={cn(tight, 'flex-1 min-w-0')} title='The pose this state holds. Re-embedded on Apply.'
+        : <Select className={cn(tight, 'flex-1 min-w-0')} title='The pose this state holds.'
             value={s.poseRef ? `${s.poseRef.assetId}/${s.poseRef.poseId}` : ''}
             onChange={e => {
               const [assetId, poseId] = e.target.value.split('/')
@@ -337,12 +338,12 @@ function SelectedState() {
       )}
 
       {playsField && (animationFields.length === 0
-        ? <p className='text-ui-xs text-warning'>No animation fields yet — create one from a model in the Assets explorer.</p>
+        ? <p className='text-ui-xs text-warning'>No blend spaces yet — create one from <b>Blend Spaces</b> in the bar at the top.</p>
         : <>
           <Select className={cn(tight, 'flex-1 min-w-0')} value={s.fieldId ?? ''}
-            title='Animation field. Fields are re-embedded when the machine is applied.'
+            title='The blend space this state plays'
             onChange={e => setState(i, { fieldId: e.target.value })}>
-            <option value=''>(no field)</option>
+            <option value=''>(no blend space)</option>
             {!field && s.fieldId && <option value={s.fieldId}>{s.fieldId} — missing</option>}
             {animationFields.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
           </Select>
@@ -426,9 +427,9 @@ function SelectedState() {
           itself out, so mid-air already looks right with no authoring. This is for the exceptions: a state
           whose animation should be trusted verbatim, or one gated on a grounded/falling parameter. */}
       <div className='flex items-center gap-1 text-ui-xs'
-        title={'How strongly foot IK applies during this state. 1 is fully on, 0 leaves the animation exactly as '
+        title={'How strongly foot placement applies during this state. 1 is fully on, 0 leaves the animation exactly as '
           + 'authored. Feet with no ground under them fade out by themselves, so this is rarely needed.'}>
-        <span className='text-muted'>foot IK</span>
+        <span className='text-muted'>feet</span>
         <SegmentedControl<'number' | 'param'>
           size='sm'
           value={s.ikWeightParam ? 'param' : 'number'}
@@ -600,7 +601,7 @@ function SelectedTransition() {
         <p className='text-ui-xs text-warning border border-warning/40 rounded p-1'>
           <b>These two transitions test different parameters</b> — <code>{disjoint.fwd.join(', ')}</code> one
           way and <code>{disjoint.bwd.join(', ')}</code> the other — so nothing stops both being true at once,
-          and while they are, the machine flips every frame. A hysteresis band cannot help here: it separates
+          and while they are, the machine flips every frame. A tolerance cannot help here: it separates
           two comparisons of the <i>same</i> signal.
           {' '}The way back is usually meant to be the <b>mirror</b> of the way out, on the same parameter.
         </p>
@@ -610,8 +611,8 @@ function SelectedTransition() {
           <b>These two transitions will flip every frame.</b> “{chatter.param}” crosses <code>&gt;</code> and{' '}
           <code>&lt;</code> with no gap between them, so a value sitting on the threshold satisfies both on
           alternating frames — which shows up as the character vibrating, not as a state problem.
-          {' '}Give each condition a <b>±</b> hysteresis band (0.1 is plenty for a speed), separate the two
-          thresholds, or set a <b>min dwell</b> below.
+          {' '}Give each condition a <b>tolerance</b> (0.1 is plenty for a speed), separate the two
+          thresholds, or set <b>stay at least</b> below.
         </p>
       )}
       {dirs.map(({ from, to, t }) => (
@@ -628,9 +629,12 @@ function SelectedTransition() {
 
           {t && <>
             <div className='flex items-center gap-1'>
-              <Toggle label='has exit time' checked={!!t.hasExitTime} onChange={c => setTransition(from, to, { hasExitTime: c })} className='text-ui-xs' />
+              <span title='Only leave once the clip has played this far: 1 is its end, 0.5 halfway'>
+                <Toggle label='wait for clip end' checked={!!t.hasExitTime} onChange={c => setTransition(from, to, { hasExitTime: c })} className='text-ui-xs' />
+              </span>
               {t.hasExitTime && (
                 <NumberInput className={cn(tight, 'w-[52px]')} step='0.05' min='0' max='1' value={t.exitTime ?? 1}
+                  title='How far through the clip, 0 to 1'
                   onChange={v => setTransition(from, to, { exitTime: clamp(v, 0, 1) })} />
               )}
             </div>
@@ -648,9 +652,9 @@ function SelectedTransition() {
                 reads as a spasm. This stops it changing its mind at all for a while. */}
             <label className='flex items-center gap-1 text-ui-xs'
               title={'Seconds the machine must already have spent in the source state before this transition may '
-                + 'fire. Use it when two states flip back and forth every frame. Unlike exit time this is real '
-                + 'seconds, so it works for a looping state with no natural end.'}>
-              min dwell
+                + 'fire. Use it when two states flip back and forth every frame. Unlike waiting for the clip end '
+                + 'this is real seconds, so it works for a looping state with no natural end.'}>
+              stay at least
               <OptionalNumberInput className={cn(tight, 'w-[52px]')} placeholder='0'
                 value={t.minDwell}
                 onChange={v => setTransition(from, to, { minDwell: v === undefined ? undefined : Math.max(0, v) })} />
@@ -670,7 +674,8 @@ function SelectedTransition() {
 function PreviewSection() {
   const { target, sm, simulate, setSimulate } = useStateMachine()
   if (!target) return null
-  const hasMachine = target.animator.hasStateMachine
+  // Simulate runs the working copy (see previewWorkingCopy), so all it needs is something to run.
+  const hasMachine = sm.states.length > 0
 
   return (
     <Collapsable title='Preview' defaultOpen>
@@ -679,7 +684,7 @@ function PreviewSection() {
           <Toggle label='simulate' checked={simulate} disabled={!hasMachine} onChange={setSimulate} />
           {simulate && hasMachine && <span className='text-highlight'>state: {target.animator.currentStateName ?? '—'}</span>}
         </div>
-        {!hasMachine && <p className={hintClass}>Press <b>Apply State Machine</b> first.</p>}
+        {!hasMachine && <p className={hintClass}>Add a state to preview it.</p>}
 
         {sm.parameters.map((p, i) => (
           <div key={i} className='flex items-center gap-2 text-ui'>
@@ -687,11 +692,9 @@ function PreviewSection() {
             {p.type === 'float' && <input className={cn(input, 'w-[64px]')} type='number' step='0.1' defaultValue={Number(p.default)} onChange={e => target.animator.setFloat(p.name, parseFloat(e.target.value) || 0)} />}
             {p.type === 'bool' && <BoolDriver name={p.name} initial={!!p.default} onSet={(v) => target.animator.setBool(p.name, v)} />}
             {p.type === 'trigger' && <Button size='sm' variant='subtle' onClick={() => target.animator.setTrigger(p.name)}>fire</Button>}
-            {p.type === 'variable' && (
-              <span className='text-ui-xs text-dim truncate' title={p.variable ? `${p.variable.nodeRef}.${p.variable.varName}` : 'unbound'}>
-                {p.variable ? `= ${String(target.animator.getParam(p.name))} (from ${p.variable.nodeRef}.${p.variable.varName})` : 'unbound'}
-              </span>
-            )}
+            {p.type === 'variable' && <LinkedDriver name={p.name} animator={target.animator}
+              isBool={p.variable?.varType === 'boolean'}
+              source={p.variable ? `${p.variable.nodeRef}.${p.variable.varName}` : 'unbound'} />}
           </div>
         ))}
         {sm.parameters.length === 0 && <p className='text-ui-sm text-muted'>No parameters.</p>}
@@ -705,6 +708,30 @@ function PreviewSection() {
         )}
       </div>
     </Collapsable>
+  )
+}
+
+/**
+ * A LINKED parameter in the preview. Nothing moves in the editor, so a parameter linked to the character's
+ * speed reads 0 forever and every state or layer gated on it is unreachable. This pins it to a hand-set
+ * value (the animator's preview override) until cleared, when it follows its link again.
+ */
+function LinkedDriver({ name, animator, isBool, source }: {
+  name: string; animator: import('cleo').Animator; isBool: boolean; source: string
+}) {
+  const [pinned, setPinned] = useState<number | boolean | undefined>(() => animator.getParamOverride(name))
+  const pin = (v: number | boolean | null) => { animator.setParamOverride(name, v); setPinned(v ?? undefined) }
+  return (
+    <span className='flex items-center gap-1 min-w-0' title={`Linked to ${source}. Set a value to try it here; ↺ follows the link again.`}>
+      {isBool
+        ? <Toggle checked={!!pinned} onChange={c => pin(c)} />
+        : <input className={cn(input, 'w-[64px]')} type='number' step='0.1' placeholder='0'
+            value={typeof pinned === 'number' ? pinned : ''}
+            onChange={e => pin(e.target.value === '' ? null : parseFloat(e.target.value) || 0)} />}
+      {pinned !== undefined
+        ? <Button size='sm' variant='ghost' title='Follow the link again' onClick={() => pin(null)}>↺</Button>
+        : <span className='text-ui-xs text-dim truncate'>{source}</span>}
+    </span>
   )
 }
 

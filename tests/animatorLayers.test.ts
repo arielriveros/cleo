@@ -116,6 +116,32 @@ describe('Animator — layers', () => {
         expect(localAngle(a, 0)).toBeCloseTo(30, 3);
     });
 
+    it('mixes by a fixed weight below 1', () => {
+        const a = makeAnimator();
+        a.setStateMachine(machine({
+            layers: [{ name: 'Upper', states: [state('Hold', 'Hold', { isEntry: true })], transitions: [], weight: 0.5 }],
+        }));
+        frame(a);
+        expect(localAngle(a, 0)).toBeCloseTo(-5, 2);
+    });
+
+    // In the editor nothing moves, so a parameter LINKED to the character's speed reads 0 and a layer gated
+    // on it can never be previewed. A preview override pins it until cleared.
+    it('lets the preview pin a linked parameter, and follow the link again', () => {
+        const a = makeAnimator();
+        a.setStateMachine(machine({
+            parameters: [{ name: 'Aim', type: 'variable', default: 0, variable: { nodeRef: 'self', varName: 'planarSpeed', varType: 'number', source: 'builtin' } }],
+            layers: [{ name: 'Upper', states: [state('Hold', 'Hold', { isEntry: true })], transitions: [], weightParam: 'Aim' }],
+        }));
+        a.setParamOverride('Aim', 1);
+        frame(a);
+        expect(a.getParam('Aim')).toBe(1);
+        expect(localAngle(a, 0)).toBeCloseTo(-40, 2);
+        a.setParamOverride('Aim', null);
+        frame(a);
+        expect(a.getParam('Aim')).not.toBe(1);
+    });
+
     it('adds an additive layer relative to its clip’s first frame', () => {
         const a = makeAnimator();
         a.setStateMachine(machine({

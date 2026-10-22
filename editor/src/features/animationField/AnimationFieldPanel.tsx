@@ -17,7 +17,7 @@ const fieldLabel = 'w-[42px] shrink-0 text-ui-xs text-muted'
 const warnBtn = 'border-warning text-warning hover:text-warning'
 
 function NoField() {
-  return <div className='flex h-full w-full flex-col bg-surface-raised p-3 text-ui text-muted'>No animation field open.</div>
+  return <div className='flex h-full w-full flex-col bg-surface-raised p-3 text-ui text-muted'>No blend space open.</div>
 }
 
 export default function AnimationFieldPanel() {

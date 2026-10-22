@@ -3,7 +3,7 @@ import { buildBoneMapping, applyManualMapping } from 'cleo'
 import type { Skin } from 'cleo'
 import { mat4 } from 'gl-matrix'
 import {
-  buildRigAsset, nodeByName, overridesFor, withOverride, withoutOverrides,
+  buildRigAsset, nodeByName, overridesFor, withOverride, withoutOverrides, overridesFromMapping, withOverrides,
 } from '../src/utils/rigAssets'
 import type { StoredSkin } from '../src/utils/animationAssets'
 
@@ -165,5 +165,30 @@ describe('replaying overrides onto a built mapping', () => {
     const mapping = buildBoneMapping(clips, source, reordered)
     const fixed = applyManualMapping(mapping, 1, names.get('chest')!)
     expect(targetOf(fixed, 1)).toBe(0) // resolved by NAME; an index-keyed override would have said 1
+  })
+})
+
+describe('import review → stored overrides', () => {
+  // The import modal's re-points used to be discarded. They are saved as the DIFFERENCE between the
+  // reviewed mapping and the automatic one, by name, so the next resolve replays them.
+  const names = ['hips', 'spine', 'chest']
+  const source = liveSkin(['mixamorig:Hips', 'mixamorig:Spine', 'mixamorig:Spine1'])
+  const target = liveSkin(names)
+  const auto = buildBoneMapping(clipFor(names), source, target)
+
+  it('stores nothing when the user changed nothing', () => {
+    expect(overridesFromMapping(auto, auto, target.nodeNames)).toEqual([])
+  })
+
+  it('stores a re-point and a drop by name', () => {
+    let reviewed = applyManualMapping(auto, 1, 2)
+    reviewed = applyManualMapping(reviewed, 2, null)
+    const o = overridesFromMapping(auto, reviewed, target.nodeNames)
+    expect(o).toEqual([
+      { sourceName: 'mixamorig:Spine', targetName: 'chest' },
+      { sourceName: 'mixamorig:Spine1', targetName: null },
+    ])
+    const rig = withOverrides(buildRigAsset('t', storedSkin(names)), 'src', o)
+    expect(overridesFor(rig, 'src')).toEqual(o)
   })
 })

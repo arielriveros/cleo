@@ -48,7 +48,7 @@ export type EditorSessionsContextValue = Pick<EngineValue,
   | 'enterRigEditor' | 'setRigPreviewModel' | 'rigPreviewModelId' | 'saveRig' | 'modelsOnRig'
   | 'editingRigId' | 'registerRigApply'
   // Animation controller (a shared state machine: parameters, layers, slots)
-  | 'openAnimController'
+  | 'openAnimController' | 'createAnimatorForRig' | 'animateCharacter'
   // Clips (one `.anim` asset: its clips, their edit stacks and its preview character)
   | 'enterClipEditor' | 'setClipPreviewModel' | 'clipPreviewModelId' | 'saveClip' | 'saveClipAs'
   | 'modelsForClip' | 'editingAnimationId' | 'registerClipApply'

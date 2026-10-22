@@ -23,13 +23,13 @@ Two kinds keep the real extension of the file their bytes arrived as; every othe
 | `model` | `.model` | |
 | `scene` | `.scene` | |
 | `script` | `.script` | |
-| `animationField` | `.afield` | A blend space. |
+| `animationField` | `.blendspace` | A blend space. (`.afield` still opens.) |
 | `animation` | `.anim` | A shared clip, in its source rig's space. |
 | `rig` | `.rig` | A shared skeleton: its clips, retarget corrections, IK, sockets. |
 | `tileset` | `.tileset` | |
 | `aiBrain` | `.brain` | *(unreleased)* |
 | `particleSystem` | `.vfx` | Emitters, each a module stack plus a renderer, plus `bounds` and `lod` (`{ enabled, levels: [{ distance, spawnScale, stepScale }], cullDistance, scaleBursts }`); each emitter's `maxLod` is the coarsest level it spawns at (99 = all). A `collision` module's `bodies: true` collides with physics bodies (absent = off). Embedded by value into Particle System nodes. *(unreleased)* |
-| `animController` | `.controller` | A shareable state machine: parameters, layers, action slots. *(unreleased)* |
+| `animController` | `.animator` | A shared animator: parameters, states, layers, action slots. (`.controller` still opens.) |
 | `boneMask` | `.mask` | Per-bone weights, by bone name, on one rig. *(unreleased)* |
 | `pose` | `.pose` | Named static poses of one rig. *(unreleased)* |
 

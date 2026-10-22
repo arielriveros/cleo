@@ -37,7 +37,7 @@ export interface GameDataSources {
   // `attachSharedClips`. Passed by editor PLAY only. The publish path deliberately leaves them out: it
   // ships the clips once at the top level and the player retargets them at load, so baking them here
   // as well would put every clip on every character twice.
-  models?: { id: string; nodeJson: any; rigId?: string; animationIds?: string[] }[];
+  models?: { id: string; nodeJson: any; rigId?: string }[];
   animations?: AnimationAsset[];
   // Play mode passes `true` (textures already live in TextureManager, skip re-serializing them).
   // Publishing passes `false` so every texture is embedded as base64 in the output.

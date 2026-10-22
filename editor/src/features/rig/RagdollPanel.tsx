@@ -94,7 +94,7 @@ export default function RagdollPanel() {
       <div className={cn(sectionTitleClass, 'mb-1')}>Ragdoll</div>
       <Hint className='mb-1'>
         {authored
-          ? 'How characters on this skeleton fall when they die. Every model on the rig falls with this.'
+          ? 'How characters on this skeleton fall when they die. Every model on the skeleton falls with this.'
           : profile
             ? 'Automatic humanoid ragdoll (shown in the viewport). Customize it to edit the parts.'
             : 'Not a recognizable humanoid: characters fall with the generic per-bone ragdoll. Add parts to author one.'}
@@ -102,7 +102,7 @@ export default function RagdollPanel() {
 
       <div className='flex gap-1 mb-1'>
         {!authored && profile && <Button variant='subtle' size='sm' className='flex-1' onClick={() => write(profile)}
-          title='Copy the automatic profile into the rig so its parts can be edited'>Customize</Button>}
+          title='Copy the automatic profile into the skeleton so its parts can be edited'>Customize</Button>}
         {authored && <Button variant='subtle' size='sm' className='flex-1' onClick={generate} disabled={!skin}
           title='Replace every part with a fresh automatic humanoid fit'>Regenerate</Button>}
         {authored && <Button variant='subtle' size='sm' className='flex-1' onClick={() => { write(null); select(null) }}
@@ -175,7 +175,7 @@ export default function RagdollPanel() {
                         {SHAPES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                       </Select>
                     </PropertyRow>
-                    <PropertyRow label={part.shape === 'box' ? 'Half width' : 'Radius'} hint='In the skeleton’s units (metres on most rigs).'>
+                    <PropertyRow label={part.shape === 'box' ? 'Half width' : 'Radius'} hint='In the skeleton’s units (metres on most skeletons).'>
                       <NumberInput value={part.radius} min={0.005} step={0.005} disabled={!authored} onChange={v => setPart(i, { radius: Math.max(0.005, v) })} />
                     </PropertyRow>
                     {part.shape !== 'sphere' && (

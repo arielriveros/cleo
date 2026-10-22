@@ -22,10 +22,13 @@ export function useSaving(deps: {
   saveMaterialTab: (tabId: string) => Promise<void>;
   saveTerrainMaterialTab: (tabId: string) => Promise<void>;
   saveScriptTab: (tabId: string) => void;
+  /** Focus a tab. Saving a session tab that is not the active one goes through this — see `makeLive`. */
+  setActiveTab?: (id: string) => void;
 }) {
   const {
     tabsRef, dirtyTabsRef, activeTabIdRef, setSavingState,
     saveCurrentScene, saveTemplateTab, saveModelTab, saveMaterialTab, saveTerrainMaterialTab, saveScriptTab,
+    setActiveTab,
   } = deps;
 
   // ---- Saving: one action per tab, plus Save All ------------------------------------------------
@@ -129,6 +132,42 @@ export function useSaving(deps: {
     return !dirtyTabsRef.current[tabId];
   };
 
+  /** The registration slot each session kind's provider hands its Apply to. */
+  const sessionSlot = (kind: TabKind): React.MutableRefObject<{ tabId: string } | null> | null => {
+    switch (kind) {
+      case 'stateMachine': case 'animationField': return animationApplyRef;
+      case 'animation': return clipApplyRef;
+      case 'rig': return rigApplyRef;
+      case 'tileset': return tilesetApplyRef;
+      case 'texture': return textureApplyRef;
+      case 'soundSample': return soundApplyRef;
+      case 'aiBrain': return aiBrainApplyRef;
+      case 'particleSystem': return particleSystemApplyRef;
+      default: return null;
+    }
+  };
+
+  /**
+   * Make a session tab's provider live, so its Apply can be called.
+   *
+   * A session keeps its working copy as React state in its provider, and only the ACTIVE tab has a live
+   * session — so saving an inactive one (a Character Animation workspace saving all its parts, or Save
+   * All) means focusing it and waiting for its provider to register. Resolves false on a timeout.
+   */
+  const makeLive = async (tabId: string): Promise<boolean> => {
+    const tab = tabsRef.current.find(t => t.id === tabId);
+    const slot = tab ? sessionSlot(tab.kind) : null;
+    if (!slot || slot.current?.tabId === tabId) return true;
+    if (!setActiveTab) return false;
+    setActiveTab(tabId);
+    const deadline = performance.now() + 3000;
+    while (slot.current?.tabId !== tabId) {
+      if (performance.now() > deadline) return false;
+      await new Promise(r => setTimeout(r, 16));
+    }
+    return true;
+  };
+
   const savingRef = useRef(false);
 
   /**
@@ -147,6 +186,8 @@ export function useSaving(deps: {
       cancellable: tabIds.length > 1,
     });
     let failed = 0;
+    // Saving an inactive session tab focuses it (see makeLive); the user's tab is restored afterwards.
+    const returnTo = activeTabIdRef.current;
     try {
       for (let i = 0; i < named.length; i++) {
         if (task.cancelled) {
@@ -156,6 +197,7 @@ export function useSaving(deps: {
         }
         task.setStep(i, { status: 'running', detail: named[i].tab ? KIND_LABEL[named[i].tab!.kind] : undefined });
         try {
+          await makeLive(named[i].id);
           const ok = await Promise.race<boolean>([
             saveTabById(named[i].id),
             new Promise<boolean>((_, rej) => setTimeout(() => rej(new Error('Save timed out')), 15000)),
@@ -171,6 +213,7 @@ export function useSaving(deps: {
       setSavingState(failed ? 'error' : 'saved');
       return failed === 0;
     } finally {
+      if (activeTabIdRef.current !== returnTo && tabsRef.current.some(t => t.id === returnTo)) setActiveTab?.(returnTo);
       task.finish();
       savingRef.current = false;
       setTimeout(() => setSavingState('idle'), 2000);
