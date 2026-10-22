@@ -138,9 +138,9 @@ function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) 
   const data = node.data;
   const hoveredScript = useHoveredScript();
   const selected = node.isSelected;
-  // A script glyph on a template-instance node is greyed (its script is authored in the template) but
-  // stays clickable, and is highlighted while its script is the one hovered anywhere.
-  const scriptGrey = !!data.templateId;
+  // A template-instance row shows no script glyph: its script is authored in the template, reached through
+  // the edit-template button. Elsewhere the glyph is highlighted while its script is the one hovered anywhere.
+  const showScript = !!data.scriptId && !data.templateId;
   const scriptHot = !!data.scriptId && data.scriptId === hoveredScript;
   // UI elements are tinted so a HUD subtree is distinguishable from world geometry. A SELECTED row drops
   // the tint for the standard indigo fill and white text: selection must never be ambiguous.
@@ -188,14 +188,14 @@ function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) 
       {/* The row's own controls. They fade in with the row rather than sitting there permanently, so a deep
           hierarchy reads as names first and buttons second. */}
       <div className='flex flex-row items-center shrink-0 gap-1 pl-1'>
-        { data.scriptId &&
+        { showScript &&
           <button
-            title={scriptGrey ? 'Edit script (authored in the template)' : 'Edit script'}
+            title='Edit script'
             onClick={(e) => { e.stopPropagation(); enterScriptEditor(data.scriptId); }}
             onMouseEnter={() => hoveredScriptStore.set(data.scriptId ?? null)}
             onMouseLeave={() => hoveredScriptStore.set(null)}
             className={`inline-flex items-center justify-center w-4 h-4 transition-colors ${
-              scriptHot ? 'text-highlight' : scriptGrey ? 'text-dim hover:text-muted' : 'text-muted hover:text-highlight'}`}>
+              scriptHot ? 'text-highlight' : 'text-muted hover:text-highlight'}`}>
             <ScriptIcon />
           </button>
         }

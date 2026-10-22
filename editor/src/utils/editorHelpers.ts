@@ -331,7 +331,10 @@ function ensureSoundHelpers(node: SoundNode, selected: boolean) {
 // gizmo keeps a constant size.
 function ensureCameraGizmo(camera: CameraNode) {
   if (camera.getChildByName(CAMERA_GIZMO).length) return;
-  const geometry = new Geometry(CameraGeometry.positions, undefined, CameraGeometry.texCoords, undefined, undefined, CameraGeometry.indices, false);
+  // Tangents are generated even though nothing here is normal-mapped: the lit program declares them, and
+  // `getData` drops an absent attribute, so without them the buffer packs to 32 bytes while the WebGPU
+  // pipeline reads it at the program's 56-byte stride, scattering the triangles.
+  const geometry = new Geometry(CameraGeometry.positions, undefined, CameraGeometry.texCoords, undefined, undefined, CameraGeometry.indices);
   // Lit (Blinn-Phong), so the body reads as a solid camera rather than a flat silhouette. The source
   // mesh ships no normals; they are derived from its faces.
   geometry.computeNormals();
