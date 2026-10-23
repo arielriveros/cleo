@@ -4815,7 +4815,20 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       for (const asset of r.models) {
         const skin = skinnedModelJsonsOf(asset.nodeJson)[0]?.skin;
         const rig = ensureRig(storeSkin(skin), asset.name);
-        addModel(rig ? { ...asset, rigId: rig.id } : asset);
+        // The lifted clips come back as links on the MODEL (`extractEmbeddedClips` is shared with the load
+        // migration, which moves them later). The skeleton is the only clip owner now, so they go there at
+        // once: left on the model they would be read by nothing and the character would import clip-less.
+        const { animationIds: lifted = [], ...model } = asset as ModelAsset & { animationIds?: string[] };
+        if (rig && lifted.length) {
+          let owner = rigsRef.current.find(x => x.id === rig.id) ?? rig;
+          for (const id of lifted) owner = withAnimationRef(owner, id);
+          updateRig(rig.id, owner);
+          // They were authored on this very skeleton, which is what their rig must say.
+          animLib = animLib.map(a => (lifted.includes(a.id) && !a.rigId ? { ...a, rigId: rig.id } : a));
+          animationsRef.current = animLib;
+          setAnimations(animLib);
+        }
+        addModel(rig ? { ...model, rigId: rig.id } : model);
       }
     };
 
