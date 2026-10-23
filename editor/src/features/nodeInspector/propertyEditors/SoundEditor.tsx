@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { SoundNode, attenuationAt, DISTANCE_MODELS } from 'cleo'
-import type { DistanceModel, LoopMode, SoundMode } from 'cleo'
+import { SoundNode, SOUND_FALLOFF_PRESETS, applyPreset, attenuationAt, DISTANCE_MODELS } from 'cleo'
+import type { DistanceModel, LoopMode, SoundFalloffPreset, SoundMode } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
 import {
-  Button, NumberInput, PropertyRow, PropertyTable, SegmentedControl, Select, Slider, Toggle, Hint,
+  Button, NumberInput, PresetMenu, PropertyRow, PropertyTable, SegmentedControl, Select, Slider, Toggle, Hint,
 } from '../../../components/ui'
 import { SoundIcon, FalloffIcon } from '../sectionIcons'
 import { useEventBus } from '../../EventBusContext'
@@ -66,6 +66,12 @@ export default function SoundEditor(props: { node: SoundNode }) {
     eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
   }
 
+  const applyFalloffPreset = (p: SoundFalloffPreset) => {
+    applyPreset(props.node, SOUND_FALLOFF_PRESETS, p)
+    setValues(read())
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
+  }
+
   // Force a render after play/stop so the buttons reflect the node, which React cannot observe.
   const [, force] = useState(0)
   const transport = (fn: () => void) => { fn(); force(x => x + 1) }
@@ -118,7 +124,8 @@ export default function SoundEditor(props: { node: SoundNode }) {
       </Collapsable>
 
       {values.mode === 'spatial' && (
-        <Collapsable title='Falloff' icon={<FalloffIcon />} persistKey='soundFalloff'>
+        <Collapsable title='Falloff' icon={<FalloffIcon />} persistKey='soundFalloff'
+          right={<PresetMenu presets={SOUND_FALLOFF_PRESETS} onApply={applyFalloffPreset} title='Falloff presets' />}>
           <div className='p-2 flex flex-col gap-2'>
             <PropertyTable columns={['45%', '55%']}>
               <PropertyRow label='Distance model' hint='How volume drops with distance.' divider>

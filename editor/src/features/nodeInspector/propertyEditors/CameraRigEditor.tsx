@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { CameraRigNode, Node } from 'cleo'
+import { CameraRigNode, CAMERA_RIG_PRESETS, Node, type CameraRigPreset } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
 import AxisInput from '../../../components/AxisInput'
 import NodeRefInput from '../NodeRefInput'
 import { useCleoEngine } from '../../EngineContext'
-import { Button, Select, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
+import { Button, PresetMenu, Select, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
 import { hintAffordance } from '../../../components/ui/Field'
 import { RigIcon } from '../sectionIcons'
 
@@ -81,6 +81,13 @@ export default function CameraRigEditor(props: { node: CameraRigNode }) {
     eventEmitter.emit('SCENE_CHANGED')
   }
 
+  // Re-read rather than merge: the preset may lock or free the yaw, which the UI shows as a checkbox.
+  const applyPreset = (p: CameraRigPreset) => {
+    props.node.applyPreset(p)
+    setState(readNode(props.node))
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
+  }
+
   // Invoked as functions, not components, so the inputs keep identity across re-renders.
   const slider = (label: string, k: keyof RigState, min: number, max: number, step: number, fixed = 2, hint?: string) => (
     <Slider label={label} min={min} max={max} step={step} value={state[k] as number} title={hint}
@@ -118,7 +125,8 @@ export default function CameraRigEditor(props: { node: CameraRigNode }) {
   const notSelfOrDescendant = (node: Node) => node !== props.node && !node.isDescendantOf(props.node)
 
   return (
-    <Collapsable title='Camera Rig' icon={<RigIcon />} persistKey='cameraRig' hint={RIG_HINT}>
+    <Collapsable title='Camera Rig' icon={<RigIcon />} persistKey='cameraRig' hint={RIG_HINT}
+      right={<PresetMenu presets={CAMERA_RIG_PRESETS} onApply={applyPreset} title='Camera styles — targets, sensitivity and shake stay yours' />}>
       <div className='w-full p-2'>
         {header('Follow (drives position)')}
         <div className='mb-2'>

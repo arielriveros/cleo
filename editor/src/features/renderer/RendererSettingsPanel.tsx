@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { engineEventBus, TERRAIN_LAYER_TEXTURE_SIZES } from 'cleo';
+import {
+  engineEventBus, TERRAIN_LAYER_TEXTURE_SIZES, AUTO_EXPOSURE_PRESETS, LENS_LOOK_PRESETS, DOF_PRESETS, applyPreset,
+} from 'cleo';
+import type { Preset } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
-import { Section, Slider, Toggle, Field, NumberInput, SegmentedControl, Select, Hint, TexturePicker, cn, labelClass } from '../../components/ui';
+import { Section, Slider, Toggle, Field, NumberInput, PresetMenu, SegmentedControl, Select, Hint, TexturePicker, cn, labelClass } from '../../components/ui';
 
 // The renderer's labels ("Foliage Density", "LOD1 Detail") are longer than the inspector's; at the shared
 // 12px they wrap in Field's default 70px column.
@@ -332,6 +335,13 @@ export default function RendererSettingsPanel() {
   // tests/renderSettingsPersistence.test.ts).
   const setValidity = (on: boolean) => { renderer.debugValidity = on; setDebugValidity(on); };
 
+  // A preset is a dozen setter writes in one click, so re-read the whole mirror rather than track which.
+  const applyRenderPreset = <O extends object>(table: readonly Preset<O>[], p: Preset<O>) => {
+    applyPreset(renderer, table, p);
+    syncFromRenderer();
+    touch();
+  };
+
   return (
     // The content column is capped rather than filling the dock group (see PerformancePanel); the panel
     // itself stays resizable.
@@ -429,7 +439,16 @@ export default function RendererSettingsPanel() {
         </Field>
       </Section>
 
-      <Section title='Tone / Post' hint={'Exposure is written as a photographic EV100 — the same setting a light meter reads. '
+      <Section title='Tone / Post'
+        right={<>
+          <PresetMenu label='Exposure' presets={AUTO_EXPOSURE_PRESETS}
+            title='Exposure presets — metered ranges and adaptation, or a fixed EV'
+            onApply={(p) => applyRenderPreset(AUTO_EXPOSURE_PRESETS, p)} />
+          <PresetMenu label='Look' presets={LENS_LOOK_PRESETS}
+            title='Lens looks — bloom, flare, dirt, vignette, grain, fringing and saturation; the tone map and LUT stay yours'
+            onApply={(p) => applyRenderPreset(LENS_LOOK_PRESETS, p)} />
+        </>}
+        hint={'Exposure is written as a photographic EV100 — the same setting a light meter reads. '
         + 'It matters more than it used to: lights carry real photometric intensity, and the sun is about three decades '
         + 'brighter than a lamp, so one exposure can only meter one of them. A sunny exterior sits near EV 15, an '
         + 'interior near EV 5. Exposure is per-scene, so a cave and a hillside can each carry their own. '
@@ -510,6 +529,8 @@ export default function RendererSettingsPanel() {
 
       <Section
         title='Depth of Field'
+        right={<PresetMenu presets={DOF_PRESETS} title='Depth-of-field presets — the focus distance stays yours'
+          onApply={(p) => applyRenderPreset(DOF_PRESETS, p)} />}
         hint={'A thin lens with a real aperture, so the near field blurs harder than the far field and '
             + 'the far field settles at a fixed blur toward infinity. Aperture is written as an f-stop: '
             + 'smaller is wider, and shallower. A camera can name a Focus Target node in its inspector, '

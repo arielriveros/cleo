@@ -5,7 +5,7 @@ import AxisInput from '../../../components/AxisInput'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { useEventBus } from '../../EventBusContext'
-import { Button, Hint, MenuItem, Popover, Select, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
+import { Button, Hint, PresetMenu, Select, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
 import { cloudBakeWarning, formatBakeAge, useCloudBakeStatus } from '../../../utils/cloudBake'
 import { CloudsIcon } from '../sectionIcons'
 
@@ -69,7 +69,7 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
   const apply = (patch: Partial<CloudsState>) => {
     for (const k in patch) (props.node as any)[k] = (patch as any)[k]
     setState(prev => ({ ...prev, ...patch }))
-    eventEmitter.emit('SCENE_CHANGED')
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: props.node })
   }
 
   // Invoked as functions, not JSX components, so the inputs keep identity and do not remount mid-drag.
@@ -100,23 +100,10 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
   const applyPreset = (p: VolumetricCloudsPreset) => {
     props.node.applyPreset(p)
     setState(readNode(props.node))
-    eventEmitter.emit('SCENE_CHANGED')
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: props.node })
   }
 
-  const presets = (
-    <Popover title='Cloud presets' align='right' className='p-1 w-[260px] max-h-[420px] overflow-y-auto'
-             trigger={<span className='px-1 text-ui text-muted hover:text-fg'>Presets ▾</span>}>
-      {close => (
-        <div className='flex flex-col'>
-          {VOLUMETRIC_CLOUDS_PRESETS.map(p => (
-            <MenuItem key={p.id} hint={p.description} onClick={() => { applyPreset(p); close() }}>
-              {p.label}
-            </MenuItem>
-          ))}
-        </div>
-      )}
-    </Popover>
-  )
+  const presets = <PresetMenu presets={VOLUMETRIC_CLOUDS_PRESETS} onApply={applyPreset} title='Cloud presets' />
 
   return (
     <Collapsable title='Volumetric Clouds' icon={<CloudsIcon />} persistKey='volumetricClouds' right={presets}>

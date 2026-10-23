@@ -2,6 +2,8 @@ import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import type { Body as CannonBody } from 'cannon-es';
 import { Node } from "./node";
+import { WATER_VOLUME_PRESETS, type WaterVolumePreset } from "./waterVolumePresets";
+import { applyPreset } from "../../presets";
 import type { BuoyancyVolume } from "../../../physics/buoyancy";
 
 export interface WaterVolumeOptions {
@@ -279,6 +281,11 @@ export class WaterVolumeNode extends Node {
     }
 
     // ---- serialization ----
+
+    /** Applies a preset by id (see WATER_VOLUME_PRESETS) or a preset object. Returns false for an unknown id. */
+    public applyPreset(idOrPreset: string | WaterVolumePreset): boolean {
+        return applyPreset(this, WATER_VOLUME_PRESETS, idOrPreset);
+    }
 
     protected _serializePayload(): any {
         return {

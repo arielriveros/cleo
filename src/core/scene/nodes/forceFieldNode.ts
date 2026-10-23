@@ -1,6 +1,8 @@
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
+import { FORCE_FIELD_PRESETS, type ForceFieldPreset } from "./forceFieldPresets";
+import { applyPreset } from "../../presets";
 
 export type ForceFieldKind = 'directional' | 'radial' | 'vortex' | 'turbulence' | 'drag';
 export type ForceFieldShape = 'global' | 'sphere' | 'box';
@@ -116,6 +118,11 @@ export class ForceFieldNode extends Node {
         out.set([up[0], up[1], up[2], this._strength], offset + 4);
         out.set([SHAPES.indexOf(this._shape), this._radius * Math.max(sx, sy, sz), this._falloff, this._frequency], offset + 8);
         out.set([this._extents[0] * sx, this._extents[1] * sy, this._extents[2] * sz, 0], offset + 12);
+    }
+
+    /** Applies a preset by id (see FORCE_FIELD_PRESETS) or a preset object. Returns false for an unknown id. */
+    public applyPreset(idOrPreset: string | ForceFieldPreset): boolean {
+        return applyPreset(this, FORCE_FIELD_PRESETS, idOrPreset);
     }
 
     protected _serializePayload(): any {

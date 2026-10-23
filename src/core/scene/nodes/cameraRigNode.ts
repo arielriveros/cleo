@@ -8,6 +8,8 @@ import { mat4, quat, vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { CameraNode } from "./cameraNode";
 import { Node } from "./node";
+import { CAMERA_RIG_PRESETS, type CameraRigPreset } from "./cameraRigPresets";
+import { applyPreset } from "../../presets";
 import { isEditorOwnedName } from "../editorOwnership";
 
 /**
@@ -560,6 +562,11 @@ export class CameraRigNode extends Node {
     }
 
     // --- serialization ------------------------------------------------------------------------------
+
+    /** Applies a preset by id (see CAMERA_RIG_PRESETS) or a preset object. Returns false for an unknown id. */
+    public applyPreset(idOrPreset: string | CameraRigPreset): boolean {
+        return applyPreset(this, CAMERA_RIG_PRESETS, idOrPreset);
+    }
 
     protected _serializePayload(): any {
         return {

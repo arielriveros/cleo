@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { SkyAtmosphereNode } from 'cleo'
+import { SkyAtmosphereNode, SKY_ATMOSPHERE_PRESETS, type SkyAtmospherePreset } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
 import AxisInput from '../../../components/AxisInput'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { useEventBus } from '../../EventBusContext'
-import { Hint, Select, Slider, TexturePicker, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
+import { Hint, PresetMenu, Select, Slider, TexturePicker, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
 import { SkyIcon } from '../sectionIcons'
 
 type Vec3 = [number, number, number]
@@ -60,7 +60,13 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
   const apply = (patch: Partial<AtmoState>) => {
     for (const k in patch) (props.node as any)[k] = (patch as any)[k]
     setState(prev => ({ ...prev, ...patch }))
-    eventEmitter.emit('SCENE_CHANGED')
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: props.node })
+  }
+
+  const applyPreset = (p: SkyAtmospherePreset) => {
+    props.node.applyPreset(p)
+    setState(readNode(props.node))
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: props.node })
   }
 
   // Invoked as functions, not components, so the inputs keep identity across re-renders.
@@ -95,7 +101,8 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
     p < 0.06 ? 'New' : p < 0.45 ? 'Crescent' : p < 0.55 ? 'Half' : p < 0.94 ? 'Gibbous' : 'Full'
 
   return (
-    <Collapsable title='Sky Atmosphere' icon={<SkyIcon />} persistKey='skyAtmosphere'>
+    <Collapsable title='Sky Atmosphere' icon={<SkyIcon />} persistKey='skyAtmosphere'
+      right={<PresetMenu presets={SKY_ATMOSPHERE_PRESETS} onApply={applyPreset} title='Air and fog presets' />}>
       <div className='w-full p-2'>
         {header('Sun')}
         {check('Use Scene Directional Light', 'useSceneSun')}

@@ -18,20 +18,25 @@ export interface SectionProps {
   className?: string;
   /** Native tooltip on the caption, for explanation that would otherwise be a paragraph under it. */
   hint?: string;
+  /** Controls at the right end of the caption row (a Presets menu), outside the caption's styling and hint. */
+  right?: React.ReactNode;
 }
 
 /** A titled group of controls (uppercase caption + body). */
-export function Section({ title, children, className, hint }: SectionProps) {
+export function Section({ title, children, className, hint, right }: SectionProps) {
+  const caption = (extra?: string) => (
+    <div className={cn(sectionTitleClass, extra, hintAffordance(hint))} title={hint}>
+      {title}
+    </div>
+  );
   return (
     <div className={cn('mb-3', className)}>
-      {title !== undefined && (
-        <div
-          className={cn(sectionTitleClass, 'mb-1', hintAffordance(hint))}
-          title={hint}
-        >
-          {title}
+      {title !== undefined && (right === undefined ? caption('mb-1') : (
+        <div className='flex items-center justify-between gap-2 mb-1'>
+          {caption()}
+          <div className='flex items-center gap-1 shrink-0'>{right}</div>
         </div>
-      )}
+      ))}
       {children}
     </div>
   );

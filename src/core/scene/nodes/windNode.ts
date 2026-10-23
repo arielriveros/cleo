@@ -1,6 +1,8 @@
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
+import { WIND_PRESETS, type WindPreset } from "./windPresets";
+import { applyPreset } from "../../presets";
 
 /**
  * The scene's wind: one global field every wind-enabled foliage material responds to (see
@@ -73,6 +75,11 @@ export class WindNode extends Node {
         // Scene-wide and unplaceable; the box only gives the editor something to frame.
         const p = this.worldPosition;
         return { min: vec3.fromValues(p[0] - 1, p[1] - 1, p[2] - 1), max: vec3.fromValues(p[0] + 1, p[1] + 1, p[2] + 1) };
+    }
+
+    /** Applies a preset by id (see WIND_PRESETS) or a preset object. Returns false for an unknown id. */
+    public applyPreset(idOrPreset: string | WindPreset): boolean {
+        return applyPreset(this, WIND_PRESETS, idOrPreset);
     }
 
     protected _serializePayload(): any {

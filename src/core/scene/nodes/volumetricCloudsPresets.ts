@@ -1,4 +1,5 @@
 import type { VolumetricCloudsOptions } from "./volumetricCloudsNode";
+import type { Preset } from "../../presets";
 
 /**
  * One-click weather / time-of-day looks for VolumetricCloudsNode. A preset sets the shape, lighting
@@ -6,12 +7,7 @@ import type { VolumetricCloudsOptions } from "./volumetricCloudsNode";
  * useSceneSun, which stay the user's choice. sunDirection/sunColor only take effect when the node
  * overrides the scene sun.
  */
-export interface VolumetricCloudsPreset {
-    id: string;
-    label: string;
-    description: string;
-    options: VolumetricCloudsOptions;
-}
+export type VolumetricCloudsPreset = Preset<VolumetricCloudsOptions>;
 
 // Every preset is spread over this, so applying one never leaves fields from the previous preset behind.
 const BASE: VolumetricCloudsOptions = {

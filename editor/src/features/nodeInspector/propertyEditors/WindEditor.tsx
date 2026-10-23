@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { WindNode } from 'cleo'
+import { WindNode, WIND_PRESETS, type WindPreset } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
 import { useEventBus } from '../../EventBusContext'
-import { PropertyTable, PropertyRow, Slider } from '../../../components/ui'
+import { PresetMenu, PropertyTable, PropertyRow, Slider } from '../../../components/ui'
 import { WindIcon } from '../../sceneInspector/nodeIcons'
 
 const WIND_HINT = 'One wind for the whole scene. Plants sway only if their material (or billboard foliage rule) has a Wind strength above 0 — this node sets the direction, how strong every plant’s lean is, and how gusts travel across the landscape.'
@@ -36,8 +36,15 @@ export default function WindEditor(props: { node: WindNode }) {
     eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: n })
   }
 
+  const applyPreset = (p: WindPreset) => {
+    props.node.applyPreset(p)
+    setF(read(props.node))
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: props.node })
+  }
+
   return (
-    <Collapsable title='Wind' icon={<WindIcon />} persistKey='wind' hint={WIND_HINT}>
+    <Collapsable title='Wind' icon={<WindIcon />} persistKey='wind' hint={WIND_HINT}
+      right={<PresetMenu presets={WIND_PRESETS} onApply={applyPreset} title='Wind presets — strength and gusts; the direction stays yours' />}>
       <div className='w-full p-2'>
         <PropertyTable columns={['45%', '55%']}>
           <PropertyRow label='Direction' hint={DIRECTION_HINT}>

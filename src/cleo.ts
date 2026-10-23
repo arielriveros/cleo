@@ -59,6 +59,28 @@ export { VolumetricCloudsNode } from "./core/scene/nodes/volumetricCloudsNode";
 export type { VolumetricCloudsOptions } from "./core/scene/nodes/volumetricCloudsNode";
 export { VOLUMETRIC_CLOUDS_PRESETS } from "./core/scene/nodes/volumetricCloudsPresets";
 export type { VolumetricCloudsPreset } from "./core/scene/nodes/volumetricCloudsPresets";
+// One-click presets: a table per node / render section, all applied through `applyPreset`.
+export { applyPreset, definePresets, type Preset } from "./core/presets";
+export { WIND_PRESETS, type WindPreset } from "./core/scene/nodes/windPresets";
+export { WATER_VOLUME_PRESETS, type WaterVolumePreset } from "./core/scene/nodes/waterVolumePresets";
+export { FORCE_FIELD_PRESETS, type ForceFieldPreset } from "./core/scene/nodes/forceFieldPresets";
+export { SKY_ATMOSPHERE_PRESETS, type SkyAtmospherePreset } from "./core/scene/nodes/skyAtmospherePresets";
+export { CAMERA_RIG_PRESETS, type CameraRigPreset, type CameraRigPresetOptions } from "./core/scene/nodes/cameraRigPresets";
+export { CHARACTER_PRESETS, type CharacterPreset, type CharacterPresetOptions } from "./core/scene/nodes/characterPresets";
+export {
+    PERCEPTION_PRESETS, FLOCKING_PRESETS, type PerceptionPreset, type FlockingPreset, type FlockingPresetOptions,
+} from "./core/scene/nodes/controllerPresets";
+export { SOUND_FALLOFF_PRESETS, type SoundFalloffPreset } from "./core/scene/nodes/soundPresets";
+export {
+    AUTO_EXPOSURE_PRESETS, LENS_LOOK_PRESETS, DOF_PRESETS,
+    type AutoExposurePreset, type LensLookPreset, type DofPreset,
+} from "./graphics/renderPresets";
+export {
+    DIRECTIONAL_LIGHT_PRESETS, POINT_LIGHT_PRESETS, SPOT_LIGHT_PRESETS, lightPresetsFor,
+    type LightPreset, type LightPresetOptions,
+} from "./graphics/lightPresets";
+export { kelvinToRgb } from "./graphics/colorTemperature";
+export { PHYSICS_SURFACE_PRESETS, type PhysicsSurfacePreset } from "./physics/surfacePresets";
 export { SkyAtmosphereNode } from "./core/scene/nodes/skyAtmosphereNode";
 export type { SkyAtmosphereOptions } from "./core/scene/nodes/skyAtmosphereNode";
 export { SkyLightNode } from "./core/scene/nodes/skyLightNode";

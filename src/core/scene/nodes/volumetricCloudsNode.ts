@@ -3,6 +3,7 @@ import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 import { VOLUMETRIC_CLOUDS_PRESETS, type VolumetricCloudsPreset } from "./volumetricCloudsPresets";
+import { applyPreset } from "../../presets";
 
 /**
  * Raymarched volumetric clouds. Scene singleton.
@@ -345,16 +346,7 @@ export class VolumetricCloudsNode extends Node {
      * Quality, enabled, opacity, useSceneSun and useSkyAmbient are left untouched. Returns false for an unknown id.
      */
     public applyPreset(idOrPreset: string | VolumetricCloudsPreset): boolean {
-        const preset = typeof idOrPreset === 'string'
-            ? VOLUMETRIC_CLOUDS_PRESETS.find(p => p.id === idOrPreset)
-            : idOrPreset;
-        if (!preset) return false;
-        for (const [k, v] of Object.entries(preset.options)) {
-            if (v === undefined) continue;
-            // Copy arrays so the shared preset table is never mutated through the node.
-            (this as any)[k] = Array.isArray(v) ? [...v] : v;
-        }
-        return true;
+        return applyPreset(this, VOLUMETRIC_CLOUDS_PRESETS, idOrPreset);
     }
 
     public getBoundingBox(): { min: vec3, max: vec3 } {

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { ForceFieldNode } from 'cleo'
+import { ForceFieldNode, FORCE_FIELD_PRESETS, type ForceFieldPreset } from 'cleo'
 import type { ForceFieldKind, ForceFieldShape } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
-import { Hint, NumberInput, PropertyRow, PropertyTable, SegmentedControl, Select, Slider, Toggle, VectorInput } from '../../../components/ui'
+import { Hint, NumberInput, PresetMenu, PropertyRow, PropertyTable, SegmentedControl, Select, Slider, Toggle, VectorInput } from '../../../components/ui'
 import { ForceFieldIcon } from '../sectionIcons'
 import { useEventBus } from '../../EventBusContext'
 
@@ -47,9 +47,16 @@ export default function ForceFieldEditor(props: { node: ForceFieldNode }) {
     eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
   }
 
+  const applyPreset = (p: ForceFieldPreset) => {
+    props.node.applyPreset(p)
+    setV(read())
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
+  }
+
   const kind = KINDS.find(k => k.value === v.kind)
   return (
-    <Collapsable title='Force Field' icon={<ForceFieldIcon />} persistKey='forceFieldEditor'>
+    <Collapsable title='Force Field' icon={<ForceFieldIcon />} persistKey='forceFieldEditor'
+      right={<PresetMenu presets={FORCE_FIELD_PRESETS} onApply={applyPreset} title='Force presets — kind, shape and strength; size and aim stay yours' />}>
       <div className='p-2 flex flex-col gap-2'>
         <PropertyTable columns={['45%', '55%']}>
           <PropertyRow label='Enabled' divider>

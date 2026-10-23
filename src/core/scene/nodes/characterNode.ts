@@ -2,6 +2,8 @@ import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Logger } from "../../logger";
 import { Node } from "./node";
+import { CHARACTER_PRESETS, type CharacterPreset } from "./characterPresets";
+import { applyPreset } from "../../presets";
 import {
     createLocomotionState, locomotionTuning, stepLocomotion, FACING_MODES,
 } from "../../control/locomotion";
@@ -286,6 +288,11 @@ export class CharacterNode extends Node {
     }
 
     // ----- serialization ---------------------------------------------------------------------------
+
+    /** Applies a preset by id (see CHARACTER_PRESETS) or a preset object. Returns false for an unknown id. */
+    public applyPreset(idOrPreset: string | CharacterPreset): boolean {
+        return applyPreset(this, CHARACTER_PRESETS, idOrPreset);
+    }
 
     protected _serializePayload(): any {
         return {

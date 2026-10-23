@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { ModelNode, WaterVolumeNode } from 'cleo'
+import { ModelNode, WaterVolumeNode, WATER_VOLUME_PRESETS, type WaterVolumePreset } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
-import { Hint, NumberInput, PropertyRow, PropertyTable, Select, Toggle, VectorInput } from '../../../components/ui'
+import { Hint, NumberInput, PresetMenu, PropertyRow, PropertyTable, Select, Toggle, VectorInput } from '../../../components/ui'
 import NodeRefInput from '../NodeRefInput'
 import { useCleoEngine } from '../../EngineContext'
 import { WaterVolumeIcon } from '../sectionIcons'
@@ -36,8 +36,15 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
     eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
   }
 
+  const applyPreset = (p: WaterVolumePreset) => {
+    props.node.applyPreset(p)
+    setV(read())
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
+  }
+
   return (
-    <Collapsable title='Water Volume' icon={<WaterVolumeIcon />} persistKey='waterVolumeEditor'>
+    <Collapsable title='Water Volume' icon={<WaterVolumeIcon />} persistKey='waterVolumeEditor'
+      right={<PresetMenu presets={WATER_VOLUME_PRESETS} onApply={applyPreset} title='Liquid presets' />}>
       <div className='p-2 flex flex-col gap-2'>
         <PropertyTable columns={['45%', '55%']}>
           <PropertyRow label='Enabled' divider>

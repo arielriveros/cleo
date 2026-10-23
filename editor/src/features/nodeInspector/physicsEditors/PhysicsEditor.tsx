@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ModelNode, AnimatedModel, Node, RAGDOLL_DEFAULTS, hullFromPositions, Logger, effectiveRagdollProfile } from 'cleo'
+import { ModelNode, AnimatedModel, Node, RAGDOLL_DEFAULTS, PHYSICS_SURFACE_PRESETS, hullFromPositions, Logger, effectiveRagdollProfile } from 'cleo'
 import type { RagdollOptions, HullQuality } from 'cleo'
 import { BodyDescription, ShapeDescription, useCleoEngine } from '../../EngineContext';
 import Collapsable from '../../../components/Collapsable'
@@ -7,7 +7,7 @@ import AxisInput from '../../../components/AxisInput'
 import ShapeEditor from './ShapeEditor';
 import { HULL_QUALITIES } from './hullQuality';
 import { collectHullPositions, meshBounds } from '../../../utils/editorHelpers';
-import { Field, Slider, Toggle, Select, NumberInput, Button, Section, Hint, SegmentedControl, cn, labelClass } from '../../../components/ui'
+import { Field, Slider, Toggle, Select, NumberInput, Button, PresetMenu, Section, Hint, SegmentedControl, cn, labelClass } from '../../../components/ui'
 import { PhysicsIcon, ShapeIcon } from '../sectionIcons'
 import { useAssetLibrary } from '../../AssetLibraryContext'
 import { modelIdOf } from '../../../utils/models'
@@ -310,7 +310,10 @@ export default function PhysicsEditor(props: {node: Node}) {
   );
 
   return ( <>
-    <Collapsable title='Rigid Body' icon={<PhysicsIcon />} badge={bodyProperties?.shapes.length || undefined} persistKey='rigidBody'>
+    <Collapsable title='Rigid Body' icon={<PhysicsIcon />} badge={bodyProperties?.shapes.length || undefined} persistKey='rigidBody'
+      right={bodyProperties && <PresetMenu label='Surface' presets={PHYSICS_SURFACE_PRESETS}
+        title='What the body is made of — friction and bounce only'
+        onApply={(p) => setBodyProperties({ ...bodyProperties, ...p.options })} />}>
       <div className='w-full p-2'>
         { !bodyProperties ?
           (props.node.name === 'root'

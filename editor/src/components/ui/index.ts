@@ -39,6 +39,9 @@ export type { VectorInputProps } from './VectorInput';
 export { Popover } from './Popover';
 export type { PopoverProps } from './Popover';
 
+export { PresetMenu } from './PresetMenu';
+export type { PresetMenuProps, PresetMenuEntry } from './PresetMenu';
+
 export { ComboSelect } from './ComboSelect';
 export type { ComboSelectProps, ComboChoice } from './ComboSelect';
 

@@ -1,6 +1,6 @@
-import { ControllerNode, perceptionTuning } from 'cleo'
-import type { PerceptionTuning } from 'cleo'
-import { Slider, Toggle, cn, sectionTitleClass } from '../../../components/ui'
+import { ControllerNode, PERCEPTION_PRESETS, perceptionTuning } from 'cleo'
+import type { PerceptionPreset, PerceptionTuning } from 'cleo'
+import { PresetMenu, Slider, Toggle, cn, sectionTitleClass } from '../../../components/ui'
 import { hintAffordance } from '../../../components/ui/Field'
 
 /**
@@ -28,6 +28,9 @@ export default function PerceptionEditor({ node, onChange }: Props) {
     onChange()
   }
 
+  // Replaces the whole tuning (through the same clamp), leaving eye height and auto-acquire alone.
+  const applyPreset = (p: PerceptionPreset) => apply(p.options)
+
   const slider = (
     label: string, key: keyof PerceptionTuning, min: number, max: number, step: number,
     fixed: number, hint: string, unit = '',
@@ -39,8 +42,10 @@ export default function PerceptionEditor({ node, onChange }: Props) {
 
   return (
     <div>
-      <div className={cn(sectionTitleClass, 'mt-3 mb-1', hintAffordance(FOV_HINT))} title={FOV_HINT}>
-        Sight
+      <div className='flex items-center justify-between mt-3 mb-1'>
+        <div className={cn(sectionTitleClass, hintAffordance(FOV_HINT))} title={FOV_HINT}>Sight</div>
+        <PresetMenu presets={PERCEPTION_PRESETS} onApply={applyPreset}
+          title='Perception presets — cone, range, memory and reaction; eye height stays yours' />
       </div>
       {slider('Field of view', 'fieldOfView', 0, 360, 5, 0, FOV_HINT, '°')}
       {slider('Range', 'range', 0, 100, 0.5, 1, RANGE_HINT)}

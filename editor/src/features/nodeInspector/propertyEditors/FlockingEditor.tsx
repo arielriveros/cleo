@@ -1,5 +1,5 @@
-import { ControllerNode } from 'cleo'
-import { Slider, cn, hintClass, sectionTitleClass } from '../../../components/ui'
+import { ControllerNode, FLOCKING_PRESETS, applyPreset, type FlockingPreset } from 'cleo'
+import { PresetMenu, Slider, cn, hintClass, sectionTitleClass } from '../../../components/ui'
 import { hintAffordance } from '../../../components/ui/Field'
 
 /**
@@ -26,10 +26,16 @@ export default function FlockingEditor({ node, onChange }: Props) {
     onChange()
   }
 
+  const preset = (p: FlockingPreset) => {
+    applyPreset(node, FLOCKING_PRESETS, p)
+    onChange()
+  }
+
   return (
     <div>
-      <div className={cn(sectionTitleClass, 'mt-3 mb-1', hintAffordance(FLOCK_HINT))} title={FLOCK_HINT}>
-        Flocking
+      <div className='flex items-center justify-between mt-3 mb-1'>
+        <div className={cn(sectionTitleClass, hintAffordance(FLOCK_HINT))} title={FLOCK_HINT}>Flocking</div>
+        <PresetMenu presets={FLOCKING_PRESETS} onApply={preset} title='Flocking presets' />
       </div>
       <p className={hintClass}>{FLOCK_HINT}</p>
 

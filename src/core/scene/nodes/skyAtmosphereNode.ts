@@ -3,6 +3,8 @@ import type { Scene } from "../scene";
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
+import { SKY_ATMOSPHERE_PRESETS, type SkyAtmospherePreset } from "./skyAtmospherePresets";
+import { applyPreset } from "../../presets";
 
 /**
  * Nishita atmospheric scattering baked to a cubemap. Scene singleton.
@@ -332,6 +334,11 @@ export class SkyAtmosphereNode extends Node {
         const min = vec3.fromValues(position[0] - radius, position[1] - radius, position[2] - radius);
         const max = vec3.fromValues(position[0] + radius, position[1] + radius, position[2] + radius);
         return { min, max };
+    }
+
+    /** Applies a preset by id (see SKY_ATMOSPHERE_PRESETS) or a preset object. Returns false for an unknown id. */
+    public applyPreset(idOrPreset: string | SkyAtmospherePreset): boolean {
+        return applyPreset(this, SKY_ATMOSPHERE_PRESETS, idOrPreset);
     }
 
     protected _serializePayload(): any {

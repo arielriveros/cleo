@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { DirectionalLight, LightNode, PointLight, Spotlight, SpriteNode } from 'cleo'
+import { DirectionalLight, LightNode, PointLight, Spotlight, SpriteNode, applyPreset, lightPresetsFor, type LightPreset } from 'cleo'
 import { vec3ToHex } from '../../../utils/UtilFunctions';
 import { useEventBus } from '../../EventBusContext';
 import Collapsable from '../../../components/Collapsable'
-import { Button, ColorInput, PropertyTable, PropertyRow, NumberInput, Slider, Section, Toggle, Hint } from '../../../components/ui'
+import { Button, ColorInput, PresetMenu, PropertyTable, PropertyRow, NumberInput, Slider, Section, Toggle, Hint } from '../../../components/ui'
 import { LightIcon } from '../sectionIcons'
 import { cloudBakeWarning, useCloudBakeStatus } from '../../../utils/cloudBake'
 
@@ -79,6 +79,15 @@ export default function LightEditor(props: {node: LightNode}) {
     markLightDirty();
   };
 
+  // The table follows the light's type, which a preset never changes. Shadows are left alone.
+  const presets = lightPresetsFor(light);
+  const applyLightPreset = (p: LightPreset) => {
+    applyPreset(props.node.light, presets, p);
+    setColor(vec3ToHex(props.node.light.color));
+    read();
+    markLightDirty();
+  };
+
   const isDirectional = light instanceof DirectionalLight;
   const isSpot = light instanceof Spotlight;
   // Rotating the sun invalidates clouds baked into the sky (see VolumetricCloudsEditor › Sky Bake).
@@ -87,7 +96,8 @@ export default function LightEditor(props: {node: LightNode}) {
     ? cloudBakeWarning('sun') : null;
 
   return (
-    <Collapsable title='Light' icon={<LightIcon />} persistKey='light'>
+    <Collapsable title='Light' icon={<LightIcon />} persistKey='light'
+      right={<PresetMenu presets={presets} onApply={applyLightPreset} title='Real-world lights, in real units' />}>
     <div className='w-full p-2'>
       {cloudBakeStale && <div className='flex items-center gap-2 mb-2'>
         <span className='text-warning text-ui flex-1'>Volumetric clouds are baked into the sky: this sun direction needs a new bake.</span>

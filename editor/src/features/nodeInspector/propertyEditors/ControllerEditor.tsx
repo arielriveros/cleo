@@ -75,8 +75,8 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
     eventEmitter.emit('SCENE_CHANGED')
   }
 
-  /** The sub-editors write straight to the node, so all they owe the inspector is a nudge. */
-  const changed = () => eventEmitter.emit('SCENE_CHANGED')
+  /** The sub-editors write straight to the node, so all they owe the inspector is a nudge — with the node, so it undoes. */
+  const changed = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
 
   const slider = (label: string, k: keyof ControllerState, min: number, max: number, step: number, fixed = 2, hint?: string) => (
     <Slider label={label} min={min} max={max} step={step} value={state[k] as number} title={hint}

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { CharacterNode, FACING_MODES } from 'cleo'
+import { CharacterNode, CHARACTER_PRESETS, FACING_MODES, type CharacterPreset } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
 import { useCleoEngine } from '../../EngineContext'
-import { SegmentedControl, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
+import { PresetMenu, SegmentedControl, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
 import { hintAffordance } from '../../../components/ui/Field'
 import { CharacterIcon } from '../sectionIcons'
 
@@ -47,6 +47,12 @@ export default function CharacterEditor(props: { node: CharacterNode }) {
     eventEmitter.emit('SCENE_CHANGED')
   }
 
+  const applyPreset = (p: CharacterPreset) => {
+    props.node.applyPreset(p)
+    setState(readNode(props.node))
+    eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
+  }
+
   // Invoked as functions, not components, so the inputs keep identity across re-renders.
   const slider = (label: string, k: keyof CharacterState, min: number, max: number, step: number, fixed = 2, hint?: string) => (
     <Slider label={label} min={min} max={max} step={step} value={state[k] as number} title={hint}
@@ -59,7 +65,8 @@ export default function CharacterEditor(props: { node: CharacterNode }) {
   )
 
   return (
-    <Collapsable title='Character' icon={<CharacterIcon />} persistKey='character' hint={CHARACTER_HINT}>
+    <Collapsable title='Character' icon={<CharacterIcon />} persistKey='character' hint={CHARACTER_HINT}
+      right={<PresetMenu presets={CHARACTER_PRESETS} onApply={applyPreset} title='Movement feels — speeds change what the locomotion clips cover' />}>
       <div className='w-full p-2'>
         {header('Speed')}
         {slider('Walk', 'walkSpeed', 0, 20, 0.1)}
