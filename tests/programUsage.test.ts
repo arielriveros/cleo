@@ -61,7 +61,8 @@ describe('programsFor', () => {
         for (const name of ['cel', 'cel~pcf', 'grid', 'outline', 'debugView', 'pbr~poisson',
                             'decalSurface', 'dofCoc', 'taaResolve', 'motionBlur', 'exposureMeter', 'lensFlare'])
             expect(list, name).not.toContain(name);
-        expect(list.length).toBeLessThan(60);
+        // 60 with the impostor shadow program the Valley's pines cast through in the outer cascades.
+        expect(list.length).toBeLessThan(62);
     });
 
     it('builds the parallax variant only for a material that marches', () => {

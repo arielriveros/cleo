@@ -1,4 +1,4 @@
-import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode } from 'cleo'
+import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OccluderNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
 import RigSlot from './RigSlot';
@@ -26,6 +26,7 @@ import SoundEditor from './SoundEditor'
 import ParticleSystemEditor from './ParticleSystemEditor'
 import ForceFieldEditor from './ForceFieldEditor'
 import WaterVolumeEditor from './WaterVolumeEditor'
+import OccluderEditor from './OccluderEditor'
 import TilemapEditor from './TilemapEditor'
 import LandscapeEditor from './LandscapeEditor'
 import SceneSettings from './SceneSettings'
@@ -89,6 +90,7 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'particleSystem' && <ParticleSystemEditor key={props.node.id} node={props.node as ParticleSystemNode} /> }
           { props.node.nodeType === 'forceField' && <ForceFieldEditor key={props.node.id} node={props.node as ForceFieldNode} /> }
           { props.node.nodeType === 'waterVolume' && <WaterVolumeEditor key={props.node.id} node={props.node as WaterVolumeNode} /> }
+          { props.node.nodeType === 'occluder' && <OccluderEditor key={props.node.id} node={props.node as OccluderNode} /> }
           { props.node.nodeType === 'tilemap' && <TilemapEditor node={props.node as TilemapNode} /> }
           { props.node.nodeType === 'landscape' && <LandscapeEditor key={props.node.id} node={props.node as LandscapeNode} /> }
           { props.node.nodeType === 'volumetricClouds' && <VolumetricCloudsEditor node={props.node as VolumetricCloudsNode} /> }

@@ -64,6 +64,9 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             '_drawInstancedGroup',    // twice: the RHI branch and the legacy one
             '_drawSky',               // the horizon aliases harder than anything else in a scene
             '_foliagePass',
+            '_drawOctahedralImpostors',   // the foliage pass's impostor bucket, inside it
+            // Occlusion query boxes, tested against the jittered G-buffer depth they must agree with.
+            '_gpuOcclusionPass',
             // Its draws depth-test `less-equal` against the JITTERED depth buffer; unjittered here and
             // every mover's velocity is rejected or smeared by half a pixel at its own silhouette.
             '_objectVelocityPass',
@@ -100,6 +103,7 @@ describe('the camera projection reaches every pass through one wrapper', () => {
         // move shadows and probe captures against the image instead of with it.
         expect([...callers('_clipProjection').keys()].sort()).toEqual([
             '_convolveCubeFaces',     // _captureProj
+            '_drawImpostorShadows',   // lightSpace
             '_foliageShadowPass',     // lightSpace
             '_rasterProjection',      // the wrapper's own two returns
             '_renderAtmosphereFaces', // _captureProj (the sky bake and the cloud-sky bake)

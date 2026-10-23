@@ -35,6 +35,8 @@ export const RENDER_PASSES = [
     'particles.sim',
     'geometry',
     'foliage',
+    // GPU occlusion query boxes against the finished G-buffer depth (graphics/gpuOcclusion.ts).
+    'occlusion.queries',
     // Decal volumes: the landscape-only receiver depth, then the DBuffer write + its G-buffer resolve.
     'decals.receivers',
     'decals',
@@ -104,6 +106,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     // Exact: the label and the scope are the same span of work.
     geometry: 'geometry',
     foliage: 'foliage',
+    occlusionQueries: 'occlusion.queries',
     decals: 'decals',
     'decals.emissive': 'decals.emissive',
     decalReceivers: 'decals.receivers',

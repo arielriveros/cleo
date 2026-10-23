@@ -119,6 +119,14 @@ describe('every generated GLSL program can actually be built', () => {
         expect(bad, 'a depth read left returning vec4 -- the program will not compile').toEqual([]);
     });
 
+    it('names every vertex input, so a vertex layout can find it', () => {
+        // The translator renames naga's `_p2vs_locationN` to `a_<param>` only when it can parse the vertex
+        // signature, which wants `-> StructName`. A bare `-> @builtin(position) vec4<f32>` left the input
+        // unnamed: the program linked, the layout matched nothing, and every vertex read (0, 0, 0, 1).
+        const bad = PROGRAMS.filter(p => p.vertex && /_p2vs_location\d/.test(p.vertex)).map(p => p.file);
+        expect(bad, 'a vertex stage kept the translator-generated input names — return a struct from vs_main').toEqual([]);
+    });
+
     it('never declares one uniform block member in both stages', () => {
         const bad: string[] = [];
         for (const program of PROGRAMS) {

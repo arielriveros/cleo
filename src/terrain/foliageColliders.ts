@@ -112,6 +112,8 @@ export class FoliageColliderField {
             if (!body) continue;
             body.position.set(w.x, w.y, w.z);
             body.quaternion.setFromEuler(0, w.yaw, 0);
+            // A pooled body keeps the box it had where it was last used; cannon only re-measures what it moves.
+            body.aabbNeedsUpdate = true;
             world.addBody(body);
             this._active.set(key, body);
         }

@@ -30,11 +30,18 @@ interface CleoConfig {
     programs?: readonly string[];
     /** Use build-time program variants even without a `programs` list. A testing switch. */
     shaderVariants?: boolean;
+    /**
+     * Pipeline recipes to build ahead of use (WebGPU), recorded in the editor and written by publish. See
+     * graphics/shaderOptimizer/pipelineRecipes.ts.
+     */
+    pipelines?: readonly unknown[];
   },
   physics?: {
     gravity?: number[];
     /** Cap on physics substeps per frame. See `PhysicsSystem.maxSubsteps`. */
     maxSubsteps?: number;
+    /** Metres from the camera past which dynamic bodies freeze. See `PhysicsSystem.simulationRange`. */
+    simulationRange?: number;
   }
   runtime?: {
     /** Longest frame delta the loop reports, seconds. See `CleoEngine.maxFrameDelta`. */
@@ -116,11 +123,13 @@ export class CleoEngine {
                                     shadowDistance: config?.graphics?.shadowDistance,
                                     backend: config?.graphics?.backend,
                                     programs: config?.graphics?.programs,
-                                    shaderVariants: config?.graphics?.shaderVariants });
+                                    shaderVariants: config?.graphics?.shaderVariants,
+                                    pipelines: config?.graphics?.pipelines });
     this._physicsSystem = new PhysicsSystem({
       gravity: config?.physics?.gravity || [0, -9.81, 0]
     });
     if (config?.physics?.maxSubsteps) this._physicsSystem.maxSubsteps = config.physics.maxSubsteps;
+    if (config?.physics?.simulationRange) this._physicsSystem.simulationRange = config.physics.simulationRange;
     if (config?.runtime?.maxFrameDelta) this.maxFrameDelta = config.runtime.maxFrameDelta;
 
     this.onUpdate = () => {};

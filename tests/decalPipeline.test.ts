@@ -150,7 +150,12 @@ describe('the programs', () => {
     it('are appended at the end of the program table', () => {
         const table = methodBody('_programTable');
         const entries = [...table.matchAll(/\['(\w+)',\s+\w+Program\]/g)].map(m => m[1]);
-        expect(entries.slice(-3)).toEqual(['decalSurface', 'decalResolve', 'decalColor']);
+        // Appended as a block, and only programs added LATER may follow them (the table never reorders:
+        // the driver assigns attribute locations per program).
+        const at = entries.indexOf('decalSurface');
+        expect(entries.slice(at, at + 3)).toEqual(['decalSurface', 'decalResolve', 'decalColor']);
+        expect(entries.slice(at + 3)).toEqual(['overdrawInstanced', 'foliageImpostorInstanced', 'occlusionBox',
+                                              'shadowMapImpostorInstanced']);
     });
 
     it('never discard in the box passes, which keeps them in uniform control flow', () => {

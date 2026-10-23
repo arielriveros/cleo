@@ -1,4 +1,4 @@
-import { CameraRigNode, Input, Node } from 'cleo'
+import { CameraRigNode, Input, Node, dampTime } from 'cleo'
 import { angleDiff, planarDistance, yawTo } from '@/Core/Scripts/SoulsMath'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
@@ -23,6 +23,10 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  * The reticle is a world-space UI Root named `LockReticle`, a child of the player beside this rig. Its
  * `uiTargetId` is kept pointed at the
  * target's lock point.
+ *
+ * Framing: while locked, the boom eases in to `lockedArmLength` and over the shoulder to
+ * `lockedSocketOffset`, so the fight fills the frame; unlocking eases it back out to the authored values.
+ * Both blend over `lockBlendSeconds` — the rig itself does not damp its arm, so a snap would be a cut.
  */
 export default class SoulsLockOnNode extends CameraRigNode {
   public lockRange: number = 20
@@ -44,6 +48,12 @@ export default class SoulsLockOnNode extends CameraRigNode {
   public reticleName: string = 'LockReticle'
   /** When the target dies, the lock jumps to another enemy only if one is this close. */
   public retargetRange: number = 10
+  /** Boom length while locked: closer than the free camera, for a tighter view of the fight. */
+  public lockedArmLength: number = 3.1
+  /** Pivot offset while locked (rig space: +X right, +Y up) — over the right shoulder. */
+  public lockedSocketOffset: [number, number, number] = [0.55, 0.15, 0]
+  /** Seconds the camera takes to move in on a lock, and back out on release. */
+  public lockBlendSeconds: number = 0.3
 
   /** The locked enemy (a SoulsEnemy root), or null. SoulsPlayer reads this. */
   public lockTarget: Node = null
@@ -55,6 +65,8 @@ export default class SoulsLockOnNode extends CameraRigNode {
   private _switchWait: number = 0
   private _freePitchMin: number = -80
   private _freePitchMax: number = 80
+  private _freeArmLength: number = 4
+  private _freeSocket: [number, number, number] = [0, 0, 0]
 
   onStart() {
     this._gm = this.findNode('GameManager')
@@ -63,6 +75,8 @@ export default class SoulsLockOnNode extends CameraRigNode {
     this._reticle = this._player?.getChildByName(this.reticleName)[0] ?? null
     this._freePitchMin = this.pitchMin
     this._freePitchMax = this.pitchMax
+    this._freeArmLength = this.armLength
+    this._freeSocket = [this.socketOffset[0], this.socketOffset[1], this.socketOffset[2]]
     this.aimMode = 'orbit'
     this._showReticle(null)
     // Start behind the player, whichever way the level placed them: the orbit's yaw is a world angle
@@ -82,6 +96,9 @@ export default class SoulsLockOnNode extends CameraRigNode {
       if (this.lockTarget) this.unlock()
       else if (!this._lockBest()) this._recenter()
     }
+    // Every frame, locked or not, so a release eases back out rather than stopping where it was. Runs
+    // before the rig's lateUpdate, so the boom it builds this frame already uses these values.
+    this._frame(delta)
     if (!this.lockTarget) return
 
     // Lost?
@@ -177,10 +194,23 @@ export default class SoulsLockOnNode extends CameraRigNode {
   private _candidates(): { node: Node, position: ArrayLike<number> }[] {
     const gm = this._gm as any
     if (!gm?.liveEnemies || !this._player) return []
+    const me = this._player.worldPosition
+    // Range BEFORE line of sight: the ray is the expensive half (a long one over the terrain walks every
+    // cell under it), and an enemy out of range is never a candidate whatever it can see.
     const list = gm.liveEnemies()
+      .filter((e: Node) => planarDistance(me, e.worldPosition) <= this.lockRange)
       .filter((e: Node) => this._hasLineOfSight(e))
       .map((e: Node) => ({ node: e, position: e.worldPosition }))
-    return this.rankLockTargets(this._player.worldPosition, this.yaw, list, this.lockRange)
+    return this.rankLockTargets(me, this.yaw, list, this.lockRange)
+  }
+
+  /** Ease the boom toward the locked framing, or back to the free one. */
+  private _frame(delta: number): void {
+    const locked = !!this.lockTarget
+    const s = this.lockBlendSeconds
+    this.armLength = dampTime(this.armLength, locked ? this.lockedArmLength : this._freeArmLength, s, delta)
+    const to = locked ? this.lockedSocketOffset : this._freeSocket
+    for (let i = 0; i < 3; i++) this.socketOffset[i] = dampTime(this.socketOffset[i], to[i], s, delta)
   }
 
   /**

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { gpuProfiler, cpuProfiler, frameHistory, frameStats, sceneStatsDetail, TextureManager, TOGGLEABLE_PASSES } from 'cleo';
+import { gpuProfiler, cpuProfiler, frameHistory, frameStats, sceneStatsDetail, TextureManager, TOGGLEABLE_PASSES, navBuildStats, shaderOptimizerStats } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
 import { Section, Slider, Toggle, SegmentedControl, Button, Hint } from '../../components/ui';
 import Sparkline from './Sparkline';
@@ -51,9 +51,12 @@ type PassRow = { name: string; avgMs: number; maxMs: number; cpuMs: number };
 // cascades are staggered on a 4-frame cycle, so draw calls and triangles swing several-fold frame to
 // frame and a single raw sample reads as noise.
 const RANGED = ['drawCalls', 'instancedDrawCalls', 'objects', 'instances', 'triangles',
-                'culledObjects', 'culledInstances', 'fullscreenPasses', 'shadedMpx',
+                'culledObjects', 'culledInstances', 'occludedObjects', 'queryOccludedObjects', 'occlusionQueries',
+                'occludedCells', 'occluderTriangles', 'occlusionMs',
+                'fullscreenPasses', 'shadedMpx',
                 'stateChanges', 'stateChangesSaved',
                 'foliageDraws', 'foliageShadowDraws', 'foliageCells', 'foliageCellsScanned',
+                'shadowLayers', 'shadowLayersSkipped', 'shadowDraws', 'shadowTriangles',
                 'particleSystems', 'particleSystemsCulled', 'particleSystemsLodCulled', 'particleSystemsLodReduced', 'particleColliders', 'particleSteps', 'particleDraws', 'particlesDrawn',
                 'particleGpuCreates', 'particleGpuReuses'] as const;
 type RangedKey = typeof RANGED[number];
@@ -92,7 +95,13 @@ type Sample = {
   cpuMs: number; cpuPassMs: number; gpuMs: number; gpuAvailable: boolean; gpuOn: boolean;
   physicsMs: number; stepMs: number; writeBackMs: number; rayMs: number; rayCount: number;
   bodies: number; broadphaseBodies: number; contacts: number; terrainMs: number;
+  activeBodies: number; frozenBodies: number; restingBodies: number;
+  broadphaseMs: number; narrowphaseMs: number; solveMs: number; integrateMs: number;
   sceneMs: number; transformMs: number; scriptMs: number; animatorMs: number; rigMs: number; nodes: number;
+  aiPathMs: number; aiQueries: number; aiAgents: number; navBuildMs: number; navBuilds: number; navReused: number;
+  matWrites: number; matSkips: number; fallbackDraws: number; pipelinesBuilt: number;
+  asyncCompiles: number; pendingCompiles: number; syncCompiles: number; worstStallMs: number; worstStallName: string;
+  moduleReuses: number; pipelinesWarmed: number; recipesRecorded: number;
   textures: number; textureMB: number; gpuMB: number;
   heapUsedMB: number | null; heapLimitMB: number | null;
   lights: number; sprites: number;
@@ -105,7 +114,13 @@ const EMPTY: Sample = {
   cpuMs: 0, cpuPassMs: 0, gpuMs: 0, gpuAvailable: false, gpuOn: false,
   physicsMs: 0, stepMs: 0, writeBackMs: 0, rayMs: 0, rayCount: 0,
   bodies: 0, broadphaseBodies: 0, contacts: 0, terrainMs: 0,
+  activeBodies: 0, frozenBodies: 0, restingBodies: 0,
+  broadphaseMs: 0, narrowphaseMs: 0, solveMs: 0, integrateMs: 0,
   sceneMs: 0, transformMs: 0, scriptMs: 0, animatorMs: 0, rigMs: 0, nodes: 0,
+  aiPathMs: 0, aiQueries: 0, aiAgents: 0, navBuildMs: 0, navBuilds: 0, navReused: 0,
+  matWrites: 0, matSkips: 0, fallbackDraws: 0, pipelinesBuilt: 0,
+  asyncCompiles: 0, pendingCompiles: 0, syncCompiles: 0, worstStallMs: 0, worstStallName: '',
+  moduleReuses: 0, pipelinesWarmed: 0, recipesRecorded: 0,
   textures: 0, textureMB: 0, gpuMB: 0, heapUsedMB: null, heapLimitMB: null,
   lights: 0, sprites: 0,
   width: 0, height: 0, renderWidth: 0, renderHeight: 0, renderScale: 1,
@@ -135,6 +150,14 @@ export default function PerformancePanel() {
   const last = useRef(performance.now());
   /** Per-counter accumulator for the current refresh window; drained and zeroed on each boundary. */
   const bins = useRef(RANGED.map(() => ({ min: Infinity, max: -Infinity, sum: 0, n: 0 })));
+
+  // cannon's own step split costs a few performance.now() per substep: measured only while this is open.
+  useEffect(() => {
+    const physics: any = instance?.physics;
+    if (!physics) return;
+    physics.profileStep = true;
+    return () => { physics.profileStep = false; };
+  }, [instance]);
 
   useEffect(() => {
     if (!renderer) return;
@@ -176,6 +199,7 @@ export default function PerformancePanel() {
         const phys: any = instance?.physics ? (instance.physics as any).stats : null;
         const scene: any = instance?.scene ?? null;
         const sceneS: any = scene ? (scene as any).stats : null;
+        const ai: any = instance?.ai ? (instance.ai as any).stats : null;
 
         let textures = 0, textureBytes = 0;
         try {
@@ -216,12 +240,37 @@ export default function PerformancePanel() {
           broadphaseBodies: phys?.broadphaseBodies ?? 0,
           contacts: phys?.contacts ?? 0,
           terrainMs: phys?.terrainMs ?? 0,
+          activeBodies: phys?.activeBodies ?? 0,
+          frozenBodies: phys?.frozenBodies ?? 0,
+          restingBodies: phys?.restingBodies ?? 0,
+          broadphaseMs: phys?.broadphaseMs ?? 0,
+          narrowphaseMs: phys?.narrowphaseMs ?? 0,
+          solveMs: phys?.solveMs ?? 0,
+          integrateMs: phys?.integrateMs ?? 0,
           sceneMs: sceneS?.frameMs ?? 0,
           transformMs: sceneS?.transformMs ?? 0,
           scriptMs: sceneS?.scriptMs ?? 0,
           animatorMs: sceneS?.animatorMs ?? 0,
           rigMs: sceneS?.rigMs ?? 0,
           nodes: sceneS?.nodes ?? 0,
+          aiPathMs: ai?.pathMs ?? 0,
+          aiQueries: ai?.pathQueries ?? 0,
+          aiAgents: ai?.navAgents ?? 0,
+          navBuildMs: navBuildStats.lastMs,
+          navBuilds: navBuildStats.builds,
+          navReused: navBuildStats.reused,
+          matWrites: shaderOptimizerStats.materialWrites,
+          matSkips: shaderOptimizerStats.materialSkips,
+          fallbackDraws: shaderOptimizerStats.fallbackDraws,
+          pipelinesBuilt: shaderOptimizerStats.pipelinesBuilt,
+          asyncCompiles: shaderOptimizerStats.asyncCompiles,
+          pendingCompiles: shaderOptimizerStats.pendingCompiles,
+          syncCompiles: shaderOptimizerStats.syncCompiles,
+          worstStallMs: shaderOptimizerStats.worstStallMs,
+          worstStallName: shaderOptimizerStats.worstStallName,
+          moduleReuses: shaderOptimizerStats.moduleReuses,
+          pipelinesWarmed: shaderOptimizerStats.pipelinesWarmed,
+          recipesRecorded: shaderOptimizerStats.recipesRecorded,
           textures,
           textureMB: textureBytes / MB,
           gpuMB: (stats?.gpuBytes ?? 0) / MB,
@@ -344,12 +393,20 @@ export default function PerformancePanel() {
         <Row label='Physics' value={`${fmt(d.physicsMs)} ms`} hl={d.physicsMs > 5}
              title='Only steps in Play mode — 0 while stopped is the honest answer, not a missing value.' />
         <Row label='· step' value={`${fmt(d.stepMs)} ms`} title="cannon's solver — the part a worker could take off this thread." />
+        {/* cannon's own split of the step (measured while this panel is open). Narrowphase is where terrain
+            contacts land; broadphase is pairing. */}
+        <Row label='·· broad / narrow' value={`${fmt(d.broadphaseMs)} / ${fmt(d.narrowphaseMs)} ms`} />
+        <Row label='·· solve / integrate' value={`${fmt(d.solveMs)} / ${fmt(d.integrateMs)} ms`} />
         <Row label='· write-back' value={`${fmt(d.writeBackMs)} ms`} title='Scene-graph sync, which would stay on this thread regardless.' />
         <Row label='· rays' value={`${fmt(d.rayMs)} ms · ${d.rayCount.toLocaleString()}`} />
         {/* `broadphase` is what the broadphase will actually iterate next step. It must equal `bodies`;
             anything higher is a body that left the world without the broadphase hearing about it and is
             still being sorted, paired and collided against. See worldTeardown.clearWorld. */}
         <Row label='· bodies' value={`${d.bodies.toLocaleString()} · ${d.contacts.toLocaleString()} contacts`} />
+        {/* Dynamic bodies only. Frozen = out of simulation range (Options ▸ Engine ▸ Runtime, or the body's own
+            setting); resting = asleep with "Sleep when resting". Neither is integrated or tested against terrain. */}
+        <Row label='· dynamic' value={`${d.activeBodies} active · ${d.frozenBodies} frozen · ${d.restingBodies} resting`}
+             title='Frozen bodies are out of their simulation range; resting ones are asleep after coming to rest. Both stay solid, neither is simulated.' />
         <Row label='· broadphase' value={d.broadphaseBodies.toLocaleString()} hl={d.broadphaseBodies > d.bodies}
              title='Bodies the broadphase iterates. Higher than `bodies` means stale bodies from an earlier play session are still being simulated against — a leak.' />
         {/* Brackets updateFoliageColliders exactly. Foliage collision defaults to OFF, so a non-zero
@@ -361,6 +418,14 @@ export default function PerformancePanel() {
              title='Scripts, animators, transform propagation and camera rigs.' />
         <Row label='· transforms' value={`${fmt(d.transformMs)} ms`} />
         <Row label='· rigs' value={`${fmt(d.rigMs)} ms`} />
+        {/* Path queries run inside the node loop (Scene), so these are a slice of it, not an addition. */}
+        <Row label='· AI paths' value={`${fmt(d.aiPathMs)} ms · ${d.aiQueries} queries · ${d.aiAgents} agents`}
+             title='Navmesh path queries this frame. Queries near the agent count per FRAME means a repath policy is not doing its job.' />
+        {/* The one AI cost that lands in a single frame. A scene prewarms its meshes at start, so a build
+            mid-game (navBuilds climbing while playing) is the hitch this row exists to catch. */}
+        <Row label='· navmesh build' value={`${fmt(d.navBuildMs, 1)} ms last · ${d.navBuilds} built · ${d.navReused} reused`}
+             hl={d.navBuildMs > 50}
+             title='Time the last navmesh build took. Built when a running scene starts, and shared by content across Play sessions.' />
         {detail && <>
           <Row label='· scripts' value={`${fmt(d.scriptMs)} ms`} />
           <Row label='· animators' value={`${fmt(d.animatorMs)} ms`} />
@@ -452,6 +517,29 @@ export default function PerformancePanel() {
                   title='Scene meshes rejected by the camera frustum test before any draw.' />
         <RangeRow label='Culled (instances)' r={r.culledInstances}
                   title='Foliage instances rejected by the distance or frustum test, counted per blade.' />
+        {/* CPU occlusion culling (graphics/occlusion): the share of "culled" an occluder accounts for. */}
+        <RangeRow label='· occluded objects' r={r.occludedObjects}
+                  title='Of the culled objects, those in view but hidden behind the landscape or an Occluder volume.' />
+        <RangeRow label='· by GPU queries' r={r.queryOccludedObjects}
+                  title='Of the occluded objects, those a GPU occlusion query found hidden behind what was actually drawn — a building, a cliff — which the CPU occluders cannot see.' />
+        <RangeRow label='· GPU queries' r={r.occlusionQueries}
+                  title='Occlusion queries issued this frame: one bounding box per large or heavy object in view.' />
+        <RangeRow label='· occluded cells' r={r.occludedCells}
+                  title='Foliage cells in range and in view but hidden behind an occluder.' />
+        <RangeRow label='· occluder tris' r={r.occluderTriangles}
+                  title='Occluder triangles rasterized into the CPU occlusion buffer.' />
+        <RangeRow label='· occlusion' r={r.occlusionMs} dp={2} unit=' ms'
+                  title='CPU time spent rasterizing the occluders this frame (part of prepare).' />
+        {/* Shadow maps are the one pass that re-draws the scene several times a frame, so they get their
+            own slice of the draw and triangle totals above. */}
+        <RangeRow label='Shadow layers' r={r.shadowLayers}
+                  title='Shadow map layers rasterized this frame: sun cascades (staggered, so this swings frame to frame), the far cascade, spot slots and point-light faces.' />
+        <RangeRow label='· kept' r={r.shadowLayersSkipped}
+                  title='Cascades that came due but were kept as drawn, because nothing they hold moved or changed since.' />
+        <RangeRow label='· draws' r={r.shadowDraws}
+                  title='Draws recorded into shadow layers, foliage included. Part of the draw call total.' />
+        <RangeRow label='· triangles' r={r.shadowTriangles}
+                  title='Triangles rasterized into shadow layers. Part of the triangle total.' />
         <Row label='Nodes' value={d.nodes.toLocaleString()} />
         {/* Foliage draws are the counter that used to grow with terrain AREA: one per spatial cell per
             prototype sub-model, and again per shadow cascade. Merged batching made it one per sub-model
@@ -507,6 +595,28 @@ export default function PerformancePanel() {
                   title='GL state calls the cache could not elide (a genuine difference).' />
         <RangeRow label='· saved' r={r.stateChangesSaved}
                   title='Redundant GL state calls the state cache absorbed.' />
+      </Section>
+
+      <Section
+        title='Shaders'
+        hint={'How programs, pipelines and material parameters reach the GPU (graphics/shaderOptimizer). A '
+            + 'material write is skipped when its program already holds that material for this view. A '
+            + 'program nobody built at boot compiles in the background while its family\'s uber program '
+            + 'draws in its place; "sync" builds are the ones that held a frame up.'}
+      >
+        <Row label='Material writes' value={`${d.matWrites} · ${d.matSkips} skipped`}
+             title='Per frame: material blocks written, and draws that found their material already in place.' />
+        <Row label='Programs' value={`${d.asyncCompiles} background · ${d.syncCompiles} sync · ${d.pendingCompiles} pending`}
+             hl={d.pendingCompiles > 0}
+             title='Programs built after boot. Background ones never stalled a frame; sync ones did.' />
+        <Row label='· stand-in draws' value={`${d.fallbackDraws}`} hl={d.fallbackDraws > 0}
+             title='This frame: draws made with the uber program while the specialised one compiles.' />
+        <Row label='Worst stall' value={d.worstStallMs > 0 ? `${fmt(d.worstStallMs, 1)} ms · ${d.worstStallName}` : '—'}
+             hl={d.worstStallMs > 16} title='The longest synchronous program or pipeline build this session.' />
+        <Row label='Pipelines' value={`${d.pipelinesBuilt} built this frame · ${d.recipesRecorded} recorded · ${d.pipelinesWarmed} warmed`}
+             title='Recorded pipelines ship with a publish, and the player builds them during its loading screen.' />
+        <Row label='· module reuses' value={`${d.moduleReuses}`}
+             title='Pipelines that reused a compiled shader module instead of compiling the program again.' />
       </Section>
 
       <Section

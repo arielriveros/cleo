@@ -1,5 +1,7 @@
 import { device } from '../rhi/deviceHandle';
-import type { ShaderProgram } from '../rhi/shaderProgram';
+import type { ShaderProgram, ShaderProgramDescriptor } from '../rhi/shaderProgram';
+import { authoring } from '../../core/eventBus';
+import { shaderOptimizerStats, recordStall } from '../shaderOptimizer/stats';
 import { ShaderManager } from './shaderManager';
 import { Logger } from '../../core/logger';
 import PBR_VERTEX_SRC from '../shaders/materials/pbr.vs';
@@ -889,6 +891,8 @@ function releaseKey(key: string): void {
     unbuildable.delete(key);
     customWgsl.delete(key);
     errors.delete(key);
+    // A compile still in flight is abandoned; its stand-in (an engine program) is never disposed below.
+    pendingCompiles.delete(key);
 
     // Only free the program if this key was its last registration and it is not a shared fallback.
     if (shader && !isFallback(shader) && !ShaderManager.Instance.isRegistered(shader))
@@ -966,6 +970,9 @@ function fallbackShader(mode: CustomRenderMode): ShaderProgram | null {
     return s;
 }
 
+/** Custom programs submitted for a background compile and not yet finished, by key. */
+const pendingCompiles = new Map<string, ShaderProgramDescriptor>();
+
 /**
  * Idempotently compile and register the program for `mat.type`, falling back to magenta under the same
  * key so the draw paths never throw. Safe to call every frame; returns whether the user shader compiled.
@@ -993,14 +1000,43 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
         return false;
     }
 
-    try {
-        const shader = device.createShaderProgram({
+    // A running game (Play, or a published build) compiles a custom material that just appeared IN THE
+    // BACKGROUND (KHR_parallel_shader_compile): the material's models skip their draws for the few frames
+    // it takes, with its stand-in registered so a mesh can still be packed to its attributes, instead of
+    // the frame stalling on a link. Authoring keeps the synchronous build — its errors are what the
+    // material editor shows, and an edit should land on the next frame. Without the extension
+    // `prepareShaderProgram` is a no-op and `isShaderProgramReady` answers true, so this falls through to
+    // the synchronous build as before.
+    let descriptor = pendingCompiles.get(key);
+    if (!descriptor) {
+        descriptor = {
             label: key,
             vertex: vertexSource(mat.renderMode),
             fragment: assembleCustomFragment(mat.renderMode, mat.fragmentSource, mat.uniforms),
             // The WebGPU half. Absent on WebGL2, and on WebGPU with no translator installed.
             ...webgpuHalf(mat, key),
-        });
+        };
+        if (!authoring.enabled && device.backend === 'webgl2' && device.prepareShaderProgram) {
+            device.prepareShaderProgram(descriptor);
+            pendingCompiles.set(key, descriptor);
+            if (!ShaderManager.Instance.find(key)) {
+                const standIn = standInFor(mat.renderMode);
+                if (standIn) ShaderManager.Instance.addShader(key, standIn);
+            }
+        }
+    }
+    if (pendingCompiles.has(key)) {
+        if (device.isShaderProgramReady && !device.isShaderProgramReady(descriptor)) return false;
+        pendingCompiles.delete(key);
+    }
+
+    const started = performance.now();
+    try {
+        const shader = device.createShaderProgram(descriptor);
+        if (performance.now() - started > 2) {
+            shaderOptimizerStats.syncCompiles++;
+            recordStall(key, performance.now() - started);
+        } else shaderOptimizerStats.asyncCompiles++;
         ShaderManager.Instance.addShader(key, shader);
         registered.add(key);
         errors.delete(key);

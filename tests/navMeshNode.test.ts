@@ -51,8 +51,20 @@ describe('NavMeshNode', () => {
     it('drops the built mesh when the data is replaced', () => {
         const node = bakedNode();
         const first = node.mesh;
-        node.setData(bakedNode().data);
+        const other = new NavMeshNode('other');
+        other.setData(bakeNavMesh({
+            positions: new Float32Array([...quad(0, 0, 4, 1), ...quad(0, 1, 1, 4)]),
+            indices: new Uint32Array(0),
+        }).data);
+        node.setData(other.data);
         expect(node.mesh).not.toBe(first);
+    });
+
+    it('shares one built mesh between nodes baked with identical data', () => {
+        // Every editor Play re-serializes the scene: the play scene's navmesh is byte-identical to the last
+        // one and a different object, and building it again was the first-chase hitch (navMesh.ts,
+        // buildNavMeshShared).
+        expect(bakedNode('a').mesh).toBe(bakedNode('b').mesh);
     });
 
     it('round-trips baked data through serialize and parse', async () => {

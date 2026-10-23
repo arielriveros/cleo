@@ -36,7 +36,8 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     pbr: 'feature', pbrSkinned: 'feature', pbrGeometry: 'feature', pbrGeometrySkinned: 'feature',
     pbrGeometryInstanced: 'feature',
     cel: 'feature', celSkinned: 'feature',
-    terrain: 'feature', terrainGeometry: 'feature', terrainForward: 'feature', foliageBillboardInstanced: 'feature',
+    terrain: 'feature', terrainGeometry: 'feature', terrainForward: 'feature', foliageBillboardInstanced: 'feature', occlusionBox: 'core',
+    foliageImpostorInstanced: 'feature', shadowMapImpostorInstanced: 'feature',
     tilemap: 'feature',
     ssil: 'feature', ssilTemporal: 'feature', ssilBlur: 'feature', ssilHistory: 'feature',
     shadowMapSkinned: 'feature', shadowMapInstanced: 'feature', shadowMapInstancedCutout: 'feature',
@@ -52,7 +53,7 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     decalSurface: 'feature', decalResolve: 'feature', decalColor: 'feature',
     particleSim: 'feature', particleBillboard: 'feature', particleMesh: 'feature', particleSort: 'feature',
     basicInstanced: 'editor', probePreview: 'editor', overlayComposite: 'editor', debugView: 'editor',
-    shadowDebug: 'editor', overdraw: 'editor', grid: 'editor', outline: 'editor', outlinePost: 'editor',
+    shadowDebug: 'editor', overdraw: 'editor', overdrawInstanced: 'editor', grid: 'editor', outline: 'editor', outlinePost: 'editor',
 };
 
 /** What a game uses, accumulated over every scene and template. Logical names, plus the filter. */
@@ -104,6 +105,12 @@ function addModel(model: any, use: ProgramUsage, shadows: boolean): void {
         if (base === 'pbr' || base === 'blinn_phong' || base === 'basic') {
             add(`${base}Geometry${skinned ? 'Skinned' : ''}${base === 'pbr' ? pom : ''}`);
             if (!skinned && base !== 'basic') add(`${base}GeometryInstanced${base === 'pbr' ? pom : ''}`);
+            // The no-discard twin an opaque PBR material draws with. The plain one above stays: a despawn
+            // dissolve needs its discard, and it is the same material.
+            if (base === 'pbr' && !pom && !cutout) {
+                add(`pbrGeometry${skinned ? 'Skinned' : ''}Opaque`);
+                if (!skinned) add('pbrGeometryInstancedOpaque');
+            }
         }
         if (shadows) {
             if (base === 'basic') add(cutout ? (skinned ? 'shadowMapBasicSkinnedCutout' : 'shadowMapBasicCutout') : skinned ? 'shadowMapSkinned' : 'shadowMap');
@@ -151,12 +158,13 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
             break;
         }
         case 'landscape':
-            for (const n of ['terrain', 'terrainGeometry', 'foliageBillboardInstanced', 'blinn_phongGeometryInstanced',
-                             'pbrGeometryInstanced', 'shadowMapInstanced', 'shadowMapInstancedCutout']) add(n);
+            for (const n of ['terrain', 'terrainGeometry', 'foliageBillboardInstanced', 'foliageImpostorInstanced', 'blinn_phongGeometryInstanced',
+                             'pbrGeometryInstanced', 'pbrGeometryInstancedLean', 'shadowMapInstanced', 'shadowMapInstancedCutout',
+                             'shadowMapImpostorInstanced']) add(n);
             break;
         // The wind variants of the foliage programs: built only for a game that has a Wind node.
         case 'wind':
-            for (const n of ['pbrGeometryInstancedWind', 'blinn_phongGeometryInstancedWind', 'foliageBillboardInstancedWind',
+            for (const n of ['pbrGeometryInstancedWind', 'pbrGeometryInstancedLeanWind', 'blinn_phongGeometryInstancedWind', 'foliageBillboardInstancedWind',
                              'shadowMapInstancedWind', 'shadowMapInstancedCutoutWind']) add(n);
             break;
         case 'tilemap': add('tilemap'); break;
@@ -216,6 +224,10 @@ export function usageFromRenderSettings(settings: Partial<RenderSettings> | null
     if (taa) add('taaResolve');
     if (taa || blur) add('motionBlurVelocity');
     if (blur) add('motionBlurTileMax', 'motionBlurNeighborMax', 'motionBlur');
+    // The foliage depth prepass is opt-in and off by default, so only a game that turns it on ships it.
+    if (s.foliagePrepass === true)
+        add('pbrGeometryInstancedPrepass', 'pbrGeometryInstancedPrepassWind',
+            'pbrGeometryInstancedLeanOpaque', 'pbrGeometryInstancedLeanOpaqueWind');
 }
 
 /** Logical names the velocity pass needs only when TAA or motion blur runs. */

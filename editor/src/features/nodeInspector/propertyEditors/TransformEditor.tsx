@@ -3,18 +3,21 @@ import { Node, Vec } from 'cleo';
 import Collapsable from '../../../components/Collapsable';
 import { PropertyTable, PropertyRow, VectorInput, Button } from '../../../components/ui';
 import { TransformIcon } from '../sectionIcons';
+import { useLiveTick } from '../useSelectedNode';
 
 export default function TransformEditor(props: {node: Node}) {
 
   const [position, setPosition] = useState(props.node.position);
   const [rotation, setRotation] = useState(props.node.rotation);
   const [scale, setScale] = useState(props.node.scale);
+  // Ticks only while Simulating: the running game moves the node every frame without emitting anything.
+  const live = useLiveTick();
 
   useEffect(() => {
       setPosition(props.node.position);
       setRotation(props.node.rotation);
       setScale(props.node.scale);
-  }, [props.node]);
+  }, [props.node, live]);
 
   // The node is written from the change handlers, never from an effect. An effect runs on mount and on every
   // selection change, and each setter emits a `transform` change. That is how merely SELECTING a node used to

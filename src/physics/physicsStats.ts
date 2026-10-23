@@ -26,6 +26,20 @@ export interface PhysicsStats {
     broadphaseBodies: number;
     /** Contact equations produced by the last step — a rough proxy for solver load. */
     contacts: number;
+    /** Dynamic bodies simulated this frame. */
+    activeBodies: number;
+    /** Dynamic bodies frozen for being outside their simulation range (see physics/simulationRange.ts). */
+    frozenBodies: number;
+    /** Dynamic bodies asleep at rest (`canSleep`). */
+    restingBodies: number;
+    /**
+     * cannon's own split of the step, summed over this frame's substeps. Only measured while
+     * `PhysicsSystem.profileStep` is on (the HUD turns it on while it is open); 0 otherwise.
+     */
+    broadphaseMs: number;
+    narrowphaseMs: number;
+    solveMs: number;
+    integrateMs: number;
     /** Everything inside PhysicsSystem.update(). */
     frameMs: number;
 }
@@ -42,6 +56,13 @@ export const physicsStats: PhysicsStats = {
     bodies: 0,
     broadphaseBodies: 0,
     contacts: 0,
+    activeBodies: 0,
+    frozenBodies: 0,
+    restingBodies: 0,
+    broadphaseMs: 0,
+    narrowphaseMs: 0,
+    solveMs: 0,
+    integrateMs: 0,
     frameMs: 0,
 };
 
@@ -57,4 +78,8 @@ export function resetPhysicsStats(): void {
     physicsStats.tilemapMs = 0;
     physicsStats.rayMs = 0;
     physicsStats.rayCount = 0;
+    physicsStats.broadphaseMs = 0;
+    physicsStats.narrowphaseMs = 0;
+    physicsStats.solveMs = 0;
+    physicsStats.integrateMs = 0;
 }

@@ -1007,7 +1007,8 @@ function playerNode() {
   player.rotation = [0, 0, 0]
   player.variables = {}
   delete player.script
-  player.body = capsuleBody(0.3, 1.78, 70)
+  // The player is always simulated, wherever the camera is: it is what everything else is measured from.
+  player.body = { ...capsuleBody(0.3, 1.78, 70), simulationMode: 'always' }
   Object.assign(player, {
     walkSpeed: 3.8, runSpeed: 5.8, turnSpeed: 720, turnThreshold: 170, acceleration: 24,
     facingMode: 'velocity', directionSmoothing: 0.1, jumpSpeed: 0, coyoteSeconds: 0.1,
@@ -1029,6 +1030,9 @@ function playerNode() {
   const model = characterModel('player', MANNEQUIN_MATERIAL, 1)
   model.variables = vars({ __modelId: MANNEQUIN_MODEL, __materialId: MANNEQUIN_MATERIAL })
   model.model.material = clone(mannequinMaterial.material)
+  // The rig follows the MODEL, not the Player root it rides under: the camera tracks what is drawn. A
+  // light, explicit damping: the rig's default (0.15 / 0.25 s) would add a lag the camera never had.
+  Object.assign(rigNode, { followId: model.id, followDamping: [0.04, 0.08, 0.04] })
 
   const controller = node('Player Controller', 'controller', {
     id: stableId('player:controller'),
@@ -2168,6 +2172,9 @@ export function writeProject({
   refs: extraRefs = {}, excludeMaterials = [], hashKinds = [], templates: extraTemplates = [],
   // More scenes in the same project, after the main one: [{ id, name, build: () => scene, refs }].
   extraScenes = [],
+  // Project options (editor options/projectSettings.ts shape), or null for the defaults. Written as
+  // libraries/projectSettings.json, which a bundle import reads into the project.
+  projectSettings = null,
 }) {
   fs.rmSync(out, { recursive: true, force: true })
   fs.mkdirSync(path.join(out, 'libraries'), { recursive: true })
@@ -2220,6 +2227,7 @@ export function writeProject({
   embedSockets([libraries.models, libraries.templates, scene, ...others.map(o => o.scene)])
   for (const [name, value] of Object.entries(libraries)) writeJson(path.join(out, 'libraries', `${name}.json`), value)
   writeJson(path.join(out, 'libraries', 'inputMap.json'), SOULS_INPUT_MAP)
+  if (projectSettings) writeJson(path.join(out, 'libraries', 'projectSettings.json'), projectSettings)
   // The scene's asset hashes, as the editor records them on save: without them every template reads as
   // changed when the scene opens and every placed copy is rebuilt (fresh ids, for nothing). Hashed off
   // what was WRITTEN, read back, since that is what the editor will hash.

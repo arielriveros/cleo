@@ -651,6 +651,71 @@ export function buildNavMesh(data: NavMeshData, options?: NavMeshBuildOptions): 
     return CleoNavMesh.build(data, options);
 }
 
+/**
+ * A content key for baked data: lengths plus a 53-bit hash over the raw words of both arrays.
+ *
+ * Content, not identity, because the editor's Play re-serializes the scene every session: the data a
+ * second Play parses is byte-identical and a different object. Hashing words rather than bytes keeps it
+ * at ~1 ms for the Valley's 45k-region mesh, against the ~0.5-1.5 s the build it saves costs.
+ */
+export function navMeshDataKey(data: NavMeshData): string {
+    const v = data.vertices, c = data.counts;
+    let h1 = 0xdeadbeef ^ v.length, h2 = 0x41c6ce57 ^ c.length;
+    const mix = (words: Uint32Array) => {
+        for (let i = 0; i < words.length; i++) {
+            const w = words[i];
+            h1 = Math.imul(h1 ^ w, 2654435761);
+            h2 = Math.imul(h2 ^ w, 1597334677);
+        }
+    };
+    mix(new Uint32Array(v.buffer, v.byteOffset, v.length));
+    mix(c);
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return `${v.length}:${c.length}:${(4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36)}`;
+}
+
+/** Built meshes kept across scenes. Two: the play scene being entered and the one it replaced. */
+const SHARED_MESH_LIMIT = 2;
+const sharedMeshes = new Map<string, CleoNavMesh | null>();
+
+/** Time spent building navmeshes, for the HUD: the build is the one AI cost that lands in a single frame. */
+export const navBuildStats = { lastMs: 0, builds: 0, reused: 0 };
+
+/**
+ * `buildNavMesh`, shared by content across scenes.
+ *
+ * A built `CleoNavMesh` is immutable apart from its off-mesh links (and scratch vectors that no query
+ * holds across calls), so one instance can serve every scene that bakes the same data. The caller still
+ * owns `setLinks`, and must call it each time it takes a mesh from here.
+ *
+ * This is what keeps the first chase of a session from paying the build: the play scene prewarms through
+ * it at start, and a second Play in the same editor session reuses the first one's mesh outright.
+ */
+export function buildNavMeshShared(data: NavMeshData, options?: NavMeshBuildOptions): CleoNavMesh | null {
+    const key = `${navMeshDataKey(data)}|${options?.merge ? 1 : 0}|${options?.epsilonContains ?? ''}|${options?.epsilonCoplanar ?? ''}`;
+    if (sharedMeshes.has(key)) {
+        const hit = sharedMeshes.get(key)!;
+        // Re-insert: Map order is the LRU order.
+        sharedMeshes.delete(key);
+        sharedMeshes.set(key, hit);
+        navBuildStats.reused++;
+        return hit;
+    }
+    const start = performance.now();
+    const mesh = CleoNavMesh.build(data, options);
+    navBuildStats.lastMs = performance.now() - start;
+    navBuildStats.builds++;
+    sharedMeshes.set(key, mesh);
+    while (sharedMeshes.size > SHARED_MESH_LIMIT) sharedMeshes.delete(sharedMeshes.keys().next().value!);
+    return mesh;
+}
+
+/** Drop every shared mesh. For tests, and for a host that wants the memory back. */
+export function clearSharedNavMeshes(): void {
+    sharedMeshes.clear();
+}
+
 // ---------------------------------------------------------------------------------------------------
 // Serialization
 //

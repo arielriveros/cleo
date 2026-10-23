@@ -19,6 +19,8 @@ Available on **root-level nodes only**.
 | **Restitution** | Bounce. Default `0`. Combines with **max**. |
 | **Ground probe** | Distance a downward probe reaches, which is what makes `groundDistance` and `slopeAngle` readable. |
 | **Motion smoothing** | Filters the measured speed that feeds animation blends. |
+| **Simulation** | How far from the camera the body keeps simulating: **Project range**, **Always** or **Custom range**. See below. |
+| **Sleep when resting** | Sleeps once the body stops moving, until it is hit, pushed or a script sets its velocity. Off by default. |
 | **Linear constraints** | Per-axis toggles. |
 | **Angular constraints** | Per-axis toggles. |
 
@@ -36,6 +38,25 @@ still push the camera out of itself.
 > Locking **angular** stops the physics *solver* tipping or spinning the body on contact. It does
 > **not** stop a script or a root-motion clip from rotating it, which is exactly what you want for a
 > character.
+
+### Simulation range
+
+A large level does not need to simulate the barrel two kilometres behind the camera. Past its range a
+dynamic body is **frozen in place**:
+
+- it stays in the world, so rays, the camera boom, triggers and other bodies still hit it;
+- it is not integrated and is not tested against terrain or other static geometry;
+- when the camera comes back it carries on with the velocity it had, so something mid-fall resumes the fall.
+
+The project's range is **Options ▸ Engine ▸ Runtime ▸ Simulation range** (`0` = simulate everything, the
+default). A body's **Simulation** setting picks that range, **Always** (never frozen — the player, or
+anything a far-away script depends on) or its own **Custom range**. Distance is measured from the active
+camera: the game camera in Play, the editor camera in Simulate.
+
+> A frozen character keeps reporting `isGrounded` as it did when it froze, so it never plays a fall.
+> Its script still runs and may still write a velocity; that does not thaw it. A hit or an impulse does.
+
+The Performance panel's **· dynamic** row shows how many bodies are active, frozen and resting.
 
 ## Triggers
 
@@ -165,6 +186,9 @@ Neither needs setting up here.
 - A **tilemap** merges its solid tiles into as few boxes as possible, so a hand-painted floor becomes
   a handful of colliders rather than hundreds.
 - **Foliage** colliders are pooled and created near the camera rather than for every instance.
+- Terrain contacts only ever look at the cells a body overlaps, and a cell whose height range the body
+  cannot reach is skipped before anything is built. Rays walk only the cells the segment crosses.
+  (`physics/heightfieldCollision.ts` replaces cannon's own heightfield resolvers for this.)
 
 ## Seeing colliders
 

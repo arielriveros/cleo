@@ -110,6 +110,25 @@ fn surfaceUv(params: UvParams, meshUv: vec2<f32>,
 }
 
 /**
+ * `surfaceUv` for a material that maps by its mesh uv ALONE: one chart and its gradients, without the
+ * three planar projections and their eight derivative pairs that the full version takes for every
+ * fragment whatever the mode says. The `lean` foliage variants (geometryPBRInstanced.wgsl) use it — a
+ * leaf card is shaded millions of times a frame and never projects. Same uniform-control-flow rule.
+ */
+fn meshSurfaceUv(params: UvParams, meshUv: vec2<f32>) -> SurfaceUv {
+    var s: SurfaceUv;
+    let cm = meshUv * params.transform.xy + params.transform.zw;
+    s.mode = UV_MESH;
+    s.uv0 = cm; s.dx0 = dpdx(cm); s.dy0 = dpdy(cm);
+    s.uv1 = cm; s.dx1 = s.dx0; s.dy1 = s.dy0;
+    s.uv2 = cm; s.dx2 = s.dx0; s.dy2 = s.dy0;
+    s.weights = vec3<f32>(1.0, 0.0, 0.0);
+    s.dpx = vec3<f32>(0.0);
+    s.dpy = vec3<f32>(0.0);
+    return s;
+}
+
+/**
  * Fetch a texture through the surface mapping. `uv` is chart 0 as the caller has it — possibly offset by
  * a parallax march, which only runs on single-chart modes — and the triplanar charts are read as
  * resolved. Gradients are always the ones `surfaceUv` took.

@@ -3,7 +3,7 @@ import { Scene } from "../core/scene/scene";
 import { Node } from "../core/scene/nodes/node";
 import { ModelNode } from "../core/scene/nodes/modelNode";
 import { unwrapScriptNode } from "../core/scene/nodes/nodeScripting";
-import { World, Body, Constraint, Material, ContactMaterial, Vec3, SAPBroadphase, Ray, RaycastResult, AABB, Box } from 'cannon-es';
+import { World, Body, Constraint, Material, ContactMaterial, Vec3, Ray, RaycastResult, AABB, Box } from 'cannon-es';
 import { vec3 } from "gl-matrix";
 import { RigidBody, DEFAULT_FRICTION, DEFAULT_RESTITUTION } from "./body";
 import { Ragdoll, RagdollOptions } from "./ragdoll";
@@ -13,6 +13,10 @@ import { clearWorld, broadphaseBodyCount } from "./worldTeardown";
 import { MotionRecord, MotionConfig, createMotionRecord, sampleMotion, motionConfig } from "./motion";
 import { OverlapHit, OverlapOptions, OverlapBody, QueryShape, queryPoses, sweepPoses } from "./overlap";
 import { applyBuoyancy, floats } from "./buoyancy";
+import { CleoSAPBroadphase } from "./cleoBroadphase";
+import { installHeightfieldCollision } from "./heightfieldCollision";
+import { installConvexSat } from "./convexSat";
+import { effectiveSimulationRange, shouldFreeze, SIMULATION_WAKE_GRACE } from "./simulationRange";
 
 /**
  * A body's forward axis in world space: its local +Z rotated by its orientation, written into `out`.
@@ -89,6 +93,21 @@ function isSpawnedInScene(node: { spawned: boolean; parent: any }): boolean {
   return true;
 }
 
+/** Below these speeds a `canSleep` body counts as resting (m/s, rad/s). */
+const REST_LINEAR_SPEED = 0.05;
+const REST_ANGULAR_SPEED = 0.05;
+/** Seconds a `canSleep` body must rest before it sleeps. */
+const REST_SECONDS = 1.0;
+
+/** What a frozen (or resting) body was doing when it stopped, so waking can hand it back. */
+interface FrozenState {
+  reason: 'range' | 'rest';
+  vx: number; vy: number; vz: number;
+  wx: number; wy: number; wz: number;
+  /** Whether it was standing on something: held for the freeze, so a frozen character never "falls". */
+  grounded: boolean;
+}
+
 export class PhysicsSystem {
   private _scene!: Scene;
   private _world!: World;
@@ -130,6 +149,12 @@ export class PhysicsSystem {
    */
   private _triggerPairs = new Map<number, { a: Body; b: Body }>();
   private _reportedPairs = new Map<number, { a: Body; b: Body }>();
+  /** Bodies this system has put to sleep — out of range, or at rest — and what they were doing. */
+  private _frozen = new Map<Body, FrozenState>();
+  /** When a frozen body was last woken by something else (a hit, an impulse): it gets a grace period. */
+  private _wokenAt = new WeakMap<Body, number>();
+  /** Per `canSleep` body: seconds it has been continuously at rest. */
+  private _restTime = new WeakMap<Body, number>();
 
   constructor(config?: PhysicsSystemConfig) {
     this._gravity = config?.gravity ? config.gravity: [0, -9.82, 0]; // y = up
@@ -156,13 +181,36 @@ export class PhysicsSystem {
    */
   public maxSubsteps: number = PhysicsSystem.MAX_SUBSTEPS;
 
+  /**
+   * The project's simulation range, in metres from the active camera (project option "Simulation range").
+   * Dynamic bodies beyond it are frozen in place — still solid, not simulated — unless their own
+   * `simulationMode` says otherwise. `0` = unlimited, the default. See physics/simulationRange.ts.
+   */
+  public simulationRange: number = 0;
+
+  /**
+   * Measure cannon's own broadphase / narrowphase / solver / integrate split into the stats. Costs a few
+   * `performance.now()` per substep, so the performance HUD turns it on only while it is showing.
+   */
+  public profileStep: boolean = false;
+
   public initialize(): void {
     try {
       this._world = new World();
       this._world.gravity.set(this._gravity[0], this._gravity[1], this._gravity[2]);
       // Sweep-and-prune, not cannon's default NaiveBroadphase: hundreds of pooled foliage collider bodies
       // make its O(N^2) pair generation dominate the step.
-      this._world.broadphase = new SAPBroadphase(this._world);
+      // CleoSAPBroadphase rather than cannon's own: its pair loop scanned every static body against every
+      // later body regardless of position — see cleoBroadphase.ts.
+      this._world.broadphase = new CleoSAPBroadphase(this._world);
+      // Terrain contacts and rays that only touch the cells a body or ray actually reaches. See
+      // heightfieldCollision.ts for what cannon's own resolvers paid on a large landscape.
+      installHeightfieldCollision(this._world);
+      // The separating-axis test behind every convex-convex contact, without its parallel repeats and its
+      // per-vertex overhead — once measured as 37% of the Valley's physics. See convexSat.ts.
+      installConvexSat();
+      // cannon's automatic sleep stays off: bodies are put to sleep by this system (out of range, or at
+      // rest when they opt in), which knows what may never sleep — a character steered by velocity.
       this._world.allowSleep = false;
       this._world.quatNormalizeSkip = 0;
       // Accurate quaternion normalization: the fast approximation blows cone-twist ragdoll joints up to NaN.
@@ -195,11 +243,25 @@ export class PhysicsSystem {
       // sprint to walk; above 60 fps the body moved in 1/60 s jumps that read as 0 and 2x speed on
       // alternate frames. Equal substeps that sum to the frame have none of that, and stay at or under
       // the 1/60 s that keeps ragdoll joints and contacts stable.
+      // BEFORE the step: a body frozen this frame must not be integrated by it.
+      this._updateActivation(deltaTime);
+
       const stepStart = performance.now();
       const substeps = PhysicsSystem.substepsFor(deltaTime, this.maxSubsteps);
+      const world = this._world;
+      if (world) world.doProfiling = this.profileStep;
       if (substeps > 0) {
         const h = deltaTime / substeps;
-        for (let i = 0; i < substeps; i++) this._world?.step(h);
+        for (let i = 0; i < substeps; i++) {
+          world?.step(h);
+          if (world && this.profileStep) {
+            const prof = (world as any).profile;
+            physicsStats.broadphaseMs += prof.broadphase;
+            physicsStats.narrowphaseMs += prof.narrowphase;
+            physicsStats.solveMs += prof.solve + prof.makeContactConstraints;
+            physicsStats.integrateMs += prof.integrate;
+          }
+        }
       }
       physicsStats.stepMs = performance.now() - stepStart;
 
@@ -236,6 +298,7 @@ export class PhysicsSystem {
           // Where the NODE sits, not where the body's centre of mass does: with an offset collider the
           // two differ by RigidBody's centre-of-mass offset (see CBody.recenterMass).
           const pos = node.body.originPosition(this._originScratch);
+          const asleep = node.body.sleepState === Body.SLEEPING;
 
           // Must sample after world.step() and before Scene.update runs every script's onUpdate, so a script
           // reading node.currentSpeed sees the step that just happened rather than last frame's.
@@ -250,10 +313,14 @@ export class PhysicsSystem {
             this._motionConfigFor(node.body),
           );
 
-          node.setPosition(pos);
+          // A sleeping body did not move: writing its pose back would only dirty the node's transform (and
+          // every descendant's) for nothing. Its motion record still samples, so its speed reads 0.
+          if (!asleep) {
+            node.setPosition(pos);
 
-          const quat = node.body.quaternion;
-          node.setQuaternion([quat.x, quat.y, quat.z, quat.w]);
+            const quat = node.body.quaternion;
+            node.setQuaternion([quat.x, quat.y, quat.z, quat.w]);
+          }
         }
 
         if (node.trigger) {
@@ -262,6 +329,8 @@ export class PhysicsSystem {
 
           const quat = node.worldQuaternion;
           node.trigger.quaternion.set(quat[0], quat[1], quat[2], quat[3]);
+          // Moved behind cannon's back (it only re-measures what it integrates).
+          node.trigger.aabbNeedsUpdate = true;
         }
       }
       physicsStats.writeBackMs = performance.now() - writeBackStart;
@@ -306,6 +375,120 @@ export class PhysicsSystem {
     }
   }
 
+  // ---- Activation: simulation range and resting sleep ----
+
+  /**
+   * Freeze dynamic bodies that are out of their simulation range, wake the ones that came back, and put
+   * resting `canSleep` bodies to sleep. Once per frame, before the step. See physics/simulationRange.ts.
+   *
+   * Only bodies that came through this system (node bodies) are considered: ragdoll bones and the foliage
+   * pool manage their own lifetimes, and a ragdoll freezes itself once it settles.
+   */
+  private _updateActivation(dt: number): void {
+    const world = this._world;
+    if (!world) return;
+    const cam = this._scene?.activeCamera;
+    const camPos = cam ? cam.worldPosition : null;
+    let active = 0, frozen = 0, resting = 0;
+
+    for (const body of this._inWorld) {
+      if (!(body instanceof RigidBody) || body.type !== Body.DYNAMIC) continue;
+      let state = this._frozen.get(body);
+
+      // Something else woke it: a hit from an awake body, an impulse, a force. Let it be. It is moving for
+      // a reason, and refreezing it on the spot would swallow that. It may refreeze after a grace period.
+      if (state && body.sleepState !== Body.SLEEPING) {
+        this._frozen.delete(body);
+        body.rangeFrozen = false;
+        this._wokenAt.set(body, this._time);
+        state = undefined;
+      }
+
+      const range = effectiveSimulationRange(body.simulationMode, body.simulationRange, this.simulationRange);
+      let outOfRange = false;
+      if (camPos && Number.isFinite(range)) {
+        const p = body.position;
+        const dx = p.x - camPos[0], dy = p.y - camPos[1], dz = p.z - camPos[2];
+        outOfRange = shouldFreeze(state?.reason === 'range', dx * dx + dy * dy + dz * dz, range);
+        if (outOfRange && !state) {
+          const woken = this._wokenAt.get(body);
+          if (woken !== undefined && this._time - woken < SIMULATION_WAKE_GRACE) outOfRange = false;
+        }
+      }
+
+      if (state) {
+        if (state.reason === 'range' && !outOfRange) {
+          this._thaw(body, state);
+        } else {
+          // Out of range, or resting (which ends only when something wakes it): stays asleep. A resting
+          // body that drifts out of range is relabelled, so coming back into range wakes it.
+          if (outOfRange && state.reason === 'rest') { state.reason = 'range'; body.rangeFrozen = true; }
+          this._holdGround(body, state);
+          if (state.reason === 'range') frozen++; else resting++;
+          continue;
+        }
+      } else if (outOfRange) {
+        this._freeze(body, 'range');
+        frozen++;
+        continue;
+      }
+
+      if (body.canSleep && this._atRest(body, dt)) {
+        this._freeze(body, 'rest');
+        resting++;
+        continue;
+      }
+      active++;
+    }
+    physicsStats.activeBodies = active;
+    physicsStats.frozenBodies = frozen;
+    physicsStats.restingBodies = resting;
+  }
+
+  /** Whether a `canSleep` body has been below the rest speeds for {@link REST_SECONDS}. */
+  private _atRest(body: RigidBody, dt: number): boolean {
+    const v = body.velocity, w = body.angularVelocity;
+    const still = v.lengthSquared() < REST_LINEAR_SPEED * REST_LINEAR_SPEED
+      && w.lengthSquared() < REST_ANGULAR_SPEED * REST_ANGULAR_SPEED;
+    const t = still ? (this._restTime.get(body) ?? 0) + dt : 0;
+    this._restTime.set(body, t);
+    return t >= REST_SECONDS;
+  }
+
+  private _freeze(body: RigidBody, reason: 'range' | 'rest'): void {
+    const v = body.velocity, w = body.angularVelocity;
+    this._frozen.set(body, {
+      reason, vx: v.x, vy: v.y, vz: v.z, wx: w.x, wy: w.y, wz: w.z, grounded: this.isGrounded(body),
+    });
+    body.rangeFrozen = reason === 'range';
+    // cannon's manual sleep: not integrated, skipped against static bodies, still in the world.
+    body.sleep();
+  }
+
+  private _thaw(body: RigidBody, state: FrozenState): void {
+    this._frozen.delete(body);
+    body.rangeFrozen = false;
+    body.wakeUp();
+    // Pick up where it left off: something mid-arc resumes the arc instead of dropping from rest.
+    body.velocity.set(state.vx, state.vy, state.vz);
+    body.angularVelocity.set(state.wx, state.wy, state.wz);
+    this._restTime.set(body, 0);
+  }
+
+  /**
+   * Keep a frozen body's ground stamp alive if it was standing when it froze. Its contacts are gone (a
+   * sleeping body is skipped against static geometry), so without this `isGrounded` would expire after
+   * GROUND_GRACE and a frozen character would read as falling, and play its fall.
+   */
+  private _holdGround(body: Body, state: FrozenState): void {
+    if (!state.grounded) return;
+    const stamp = this._ground.get(body);
+    if (stamp) stamp.time = this._time;
+  }
+
+  /** Whether this system is holding `body` asleep (out of range or at rest). For tests and the HUD. */
+  public isFrozen(body: Body): boolean { return this._frozen.has(body); }
+
   /**
    * Per-frame timings and counts for the last completed step. Read by the editor's performance HUD.
    * `rayMs`/`rayCount` cover queries made anywhere in the frame, so the parts do not sum to `frameMs`.
@@ -345,6 +528,7 @@ export class PhysicsSystem {
     if (!this._world) return;
     if (this._inWorld.delete(body))
       this._world.removeBody(body);
+    this._frozen.delete(body);
     if (this._triggerPairs.size > 0)
       for (const [key, pair] of this._triggerPairs)
         if (pair.a === body || pair.b === body) this._triggerPairs.delete(key);
@@ -370,6 +554,10 @@ export class PhysicsSystem {
     if (this._triggerPairs.size === 0 && this._reportedPairs.size === 0) return;
     for (const [key, pair] of this._reportedPairs) {
       if (this._triggerPairs.has(key)) continue;
+      // A body put to sleep inside a trigger drops out of cannon's overlap tracking (sleeping-vs-static is
+      // skipped in the broadphase), which reads as an exit. It has not moved: hold the overlap until it
+      // wakes, when cannon reports the pair again and nothing is re-entered.
+      if (pair.a.sleepState === Body.SLEEPING || pair.b.sleepState === Body.SLEEPING) continue;
       this._reportedPairs.delete(key);
       PhysicsSystem._dispatchTrigger(pair, 'onTriggerExit');
     }
@@ -416,6 +604,8 @@ export class PhysicsSystem {
       if (!volume.enabled) continue;
       const spec = volume.buoyancyVolume(time);
       for (const body of this._world.bodies) {
+        // applyForce wakes a sleeping body: a frozen floater would be thawed every substep.
+        if (body.sleepState === Body.SLEEPING) continue;
         if (!floats(body, spec, isCharacter)) continue;
         const fraction = applyBuoyancy(body, spec, gravity, dt);
         if (fraction > 0) volume.recordSubmerged(body, fraction);
@@ -559,6 +749,8 @@ export class PhysicsSystem {
     // vanishes. Off by default.
     for (const body of world.bodies) {
       if (!(body instanceof RigidBody) || body.isTrigger || body.groundProbeDistance <= 0) continue;
+      // Asleep: it has not moved, and its held stamp (see _holdGround) already answers isGrounded.
+      if (body.sleepState === Body.SLEEPING) continue;
       const hit = this._probeGround(body, downX, downY, downZ, body.groundProbeDistance);
       if (hit) this._record(body, hit.dot, hit.normal, hit.gap);
     }
@@ -719,6 +911,8 @@ export class PhysicsSystem {
     if (deltaTime <= 0 || !this._world) return;
     for (const body of this._world.bodies) {
       if (!this._motion.has(body)) continue;
+      // Frozen clocks for a frozen body: neither airborne nor grounded time passes for something asleep.
+      if (body.sleepState === Body.SLEEPING) continue;
       let rec = this._airborne.get(body);
       if (!rec) { rec = { airTime: 0, groundedTime: 0 }; this._airborne.set(body, rec); }
       if (this.isGrounded(body)) {
@@ -936,6 +1130,7 @@ export class PhysicsSystem {
     // strand half of every play session's bodies in the SAPBroadphase for the lifetime of the page.
     clearWorld(this._world);
     this._inWorld.clear();
+    this._frozen.clear();
     // The scene is going away: no exits are reported for it.
     this._triggerPairs.clear();
     this._reportedPairs.clear();

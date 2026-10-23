@@ -169,6 +169,11 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
                 expect(layer.billboard.textureId).toBe(`${rule.modelId}__impostor`);
                 expect(rule.billboard).toEqual(layer.billboard);
                 expect(textures.has(layer.billboard.textureId)).toBe(true);
+                // Octahedral: 8 x 8 views around the tree, and the normals they are lit with.
+                expect(layer.billboard.octahedral.frames).toBe(8);
+                expect(layer.billboard.octahedral.radius).toBeGreaterThan(3);
+                expect(layer.billboard.textures.normal).toBe(`${rule.modelId}__impostorNormal`);
+                expect(textures.has(layer.billboard.textures.normal)).toBe(true);
             }
         }
     });

@@ -1061,10 +1061,23 @@ export interface TerrainFoliageRule {
     models?: any[];
     /** Additional detail levels, ascending by the camera distance at which each takes over. */
     lods?: { models: any[]; distance: number }[];
-    /** Optional impostor: past `distance`, instances draw as textured cross-quads (the farthest LOD). */
-    billboard?: { textureId: string; distance: number } | null;
-    /** Side of the baked impostor card in pixels (512 default; 1024 for large, close-ish trees). Editor-side. */
+    /**
+     * Optional impostor: past `distance`, instances draw as their baked stand-in (the farthest LOD) — a
+     * textured cross-quad card, or with `octahedral` set an N x N atlas of views (`textureId`) and their
+     * normals (`textures.normal`) drawn on one camera-facing quad (terrain/octahedralImpostor.ts).
+     */
+    billboard?: {
+        textureId: string; distance: number;
+        octahedral?: { frames: number; radius: number; center: [number, number, number] };
+        textures?: { normal?: string };
+    } | null;
+    /**
+     * Side of the baked impostor in pixels: the card (512 default; 1024 for large, close-ish trees), or the
+     * whole atlas of an octahedral bake. Editor-side.
+     */
     impostorSize?: number;
+    /** Which impostor "Bake impostor" makes: `'octahedral'` (the default) or the single-view `'card'`. Editor-side. */
+    impostorKind?: 'octahedral' | 'card';
     /** Hide instances beyond this camera distance; 0/absent = the renderer's global foliage cull. */
     cullDistance?: number;
     /** Rasterize these instances into the shadow cascades. Off by default: one instanced draw per cell per cascade. */

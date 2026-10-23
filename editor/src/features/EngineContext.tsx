@@ -74,7 +74,8 @@ import { parseBundleToRoot, type UnresolvedTexture } from "../utils/modelImport"
 import { isValidGrouping, compactGroups, type PartInfo } from "../utils/submeshGroups";
 import { readModelLibrary, writeModelLibrary } from "../utils/modelStore";
 import { generateLodLevel, hasSkinnedPart, subtreeTriangles } from "../utils/lodGenerate";
-import { registerFoliageSourceResolver } from "../utils/foliageRules";
+import { registerFoliageSourceResolver, foliageRuleModels } from "../utils/foliageRules";
+import { bakeOctahedralFromModels, octahedralNormalTextureId, OCTAHEDRAL_ATLAS_SIZE } from "../utils/octahedralImpostorBake";
 import { findEquivalentRig, buildRigAsset, runtimeSockets, overridesFromMapping, withOverrides, type RigAsset } from "../utils/rigAssets";
 import { extractRigs, moveClipsToRigs } from "../utils/rigMigration";
 import { decimateGeometry } from "../workers/workerClient";
@@ -160,11 +161,18 @@ export type {
 const EngineContext = createContext<{
   instance: CleoEngine | null;
   editorScene: Scene;
+  /**
+   * The scene the tree, Inspector and viewport picking show. `editorScene` everywhere except Simulate, where
+   * it is the running play scene: edits to it are live and die on Stop.
+   */
+  inspectedScene: Scene;
   mainScene: Scene; // the game scene (editorScene may be a template/material preview scene)
   eventEmitter: EventEmitter;
   selectedNode: string | null;
   isGizmoDragging: boolean;
   isPlayMode: boolean;
+  /** A Simulate session is running (isPlayMode is true as well). Mirrors PlaybackContext's flag. */
+  isSimulating: boolean;
   isSceneReady: boolean;
   /**
    * True once `preloadTextures()` has settled, so the TextureManager's contents are authoritative. Before
@@ -579,11 +587,13 @@ const EngineContext = createContext<{
   }>({
     instance: null,
     editorScene: new Scene(),
+    inspectedScene: new Scene(),
     mainScene: new Scene(),
     eventEmitter: new EventEmitter(),
     selectedNode: null,
     isGizmoDragging: false,
     isPlayMode: false,
+    isSimulating: false,
     isSceneReady: false,
     texturesPreloaded: false,
     audioPreloaded: false,
@@ -877,6 +887,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // The ref is written synchronously when a session starts; the SET_PLAY_STATE handler reads it.
   const [isSimulating, setIsSimulating] = useState(false);
   const isSimulatingRef = useRef(false);
+  // The play scene a Simulate session is running, published so the tree and Inspector can show the live
+  // simulation. Null outside Simulate — Play hides those panels, and the authoring scene is never it.
+  const [simulatedScene, setSimulatedScene] = useState<Scene | null>(null);
   const [isSceneReady, setIsSceneReady] = useState(false);
   const [texturesPreloaded, setTexturesPreloaded] = useState(false);
   const [audioPreloaded, setAudioPreloaded] = useState(false);
@@ -1115,10 +1128,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     input.setOverlayMaps([EDITOR_CAMERA_MAP]);
     // `setMap` resets every map to its AUTHORED enable state, so the edit/play split has to be applied
     // again here. Without it, rebinding a key while the game is running would hand the keyboard back to
-    // the editor's camera mid-play.
-    if (isPlayModeRef.current) {
+    // the editor's camera mid-play. Simulate is the exception: nobody is possessed, so the editor camera
+    // keeps the keyboard there exactly as the SET_PLAY_STATE handler set it up.
+    if (isPlayModeRef.current && !isSimulatingRef.current) {
       input.disableMap('EditorCamera');
       input.enableMap('Gameplay');
+      input.enableMap('UI');
+    } else if (isPlayModeRef.current) {
+      input.enableMap('EditorCamera');
+      input.disableMap('Gameplay');
       input.enableMap('UI');
     } else {
       input.enableMap('EditorCamera');
@@ -2453,6 +2471,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const activeRuntime = activeTab.kind !== 'scene' ? tabRuntimeRef.current.get(activeTab.id) : undefined;
   // The scene the inspectors/gizmo/AddNew currently edit: the game scene (Main tab) or a template/material/animation scene.
   const activeScene = activeRuntime ? activeRuntime.scene : editorSceneRef.current;
+  // What the tree, the Inspector and viewport picking show: the running simulation while Simulating, the
+  // edited scene otherwise. Deliberately NOT `editorScene`: publish, the asset graph, undo and the gizmo
+  // must keep addressing the authored scene, which is the one that gets saved.
+  const inspectedScene = simulatedScene ?? activeScene;
   // Single mode value, derived from the active tab kind, for `editorMode === ...` consumers. The map is
   // exhaustive over TabKind, so a new kind cannot fall through to some other mode's panels.
   const editorMode: EditorMode = activeTab.kind === 'scene' ? mainMode : TAB_EDITOR_MODE[activeTab.kind];
@@ -4145,11 +4167,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /**
-   * Bake a flat card for a foliage rule's source model, register it, and point the rule at it.
+   * Bake an impostor for a foliage rule's source model, register it, and point the rule at it.
    *
    * The single largest thing that can be done for a heavy foliage prototype. A LOD level reduces
-   * triangles linearly; the card replaces them all with four, and past the distance it takes over the
-   * difference is not visible. Returns the texture id, or null when the rule has no model behind it.
+   * triangles linearly; the impostor replaces them all with one quad, and past the distance it takes
+   * over the difference is not visible. Returns the texture id, or null when the rule has no model behind it.
+   *
+   * OCTAHEDRAL by default (`impostorKind`): 8 x 8 unlit views with their normals, lit by the scene and
+   * right from every side and from above, so it holds up much closer than the flat card, which stays
+   * available for small plants where one view is plenty.
    *
    * The takeover distance defaults to the model's LAST LOD band, so the mesh ladder plays out in full
    * and the card picks up where it ends. It is authored on the rule like every other impostor field, so
@@ -4162,25 +4188,48 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const asset = modelsRef.current.find(m => m.id === modelId);
     if (!asset) return null;
 
-    const id = impostorTextureId(modelId);
+    const id = impostorTextureId(modelId), normalId = octahedralNormalTextureId(modelId);
     // The stored record has to go BEFORE the re-bake: `persistTextures` skips an id it already has, so
     // a second bake would leave the old card on disk and the new one only in memory until reload.
-    await deleteTextures([id]);
+    await deleteTextures([id, normalId]);
+
+    if ((rule.impostorKind ?? 'octahedral') === 'octahedral') {
+      // From the LAST mesh level, the one the impostor takes over from: baked from the full model it
+      // comes out denser than the sparse level beside it, and the hand-over shows as a pop.
+      const models = foliageRuleModels(rule);
+      const lastLevel = rule.lods?.length ? rule.lods[rule.lods.length - 1].models : null;
+      const baked = await bakeOctahedralFromModels(lastLevel?.length ? lastLevel : models, rule.impostorSize ?? OCTAHEDRAL_ATLAS_SIZE);
+      if (!baked) return null;
+      const tm = TextureManager.Instance;
+      tm.removeTexture(id); tm.removeTexture(normalId);
+      tm.addTextureFromBase64(baked.albedo, { mipMap: true }, id);
+      tm.addTextureFromBase64(baked.normal, { mipMap: true }, normalId);
+      await persistTextures([id, normalId]);
+      Logger.info(`Baked an octahedral impostor for "${asset.name}": ${Math.round(baked.coverage * 100)}% of its views covered.`, 'Editor');
+      rule.billboard = { textureId: id, distance: impostorTakeover(rule), octahedral: baked.info, textures: { normal: normalId } };
+      eventEmitter.current.emit('SCENE_CHANGED');
+      return id;
+    }
 
     const baked = await bakeModelImpostor(engine, asset, materialsRef.current, rule.impostorSize ?? IMPOSTOR_SIZE);
     if (!baked) return null;
     await persistTextures([baked.id]);
-
-    // Past the whole mesh ladder. The impostor replaces every level that starts at or beyond it, so a
-    // takeover AT the last band (what this used to pick) retired the last, cheapest level unseen. Twice
-    // the last band continues the ladder's own doubling (generated bands are 1x/2x/4x a step).
-    const bands = (rule.lods ?? []).map(l => l.distance).filter(d => d > 0);
-    const takeover = rule.billboard?.distance
-      ?? (bands.length ? Math.round(Math.max(...bands) * 2) : DEFAULT_IMPOSTOR_DISTANCE);
-    rule.billboard = { textureId: baked.id, distance: takeover };
+    rule.billboard = { textureId: baked.id, distance: impostorTakeover(rule) };
     eventEmitter.current.emit('SCENE_CHANGED');
     return baked.id;
   };
+
+  /**
+   * Where a rule's impostor takes over: the distance already authored on it, or past the whole mesh
+   * ladder. The impostor replaces every level that starts at or beyond it, so a takeover AT the last band
+   * (what this used to pick) retired the last, cheapest level unseen. Twice the last band continues the
+   * ladder's own doubling (generated bands are 1x/2x/4x a step).
+   */
+  function impostorTakeover(rule: TerrainFoliageRule): number {
+    const bands = (rule.lods ?? []).map(l => l.distance).filter(d => d > 0);
+    return rule.billboard?.distance
+      ?? (bands.length ? Math.round(Math.max(...bands) * 2) : DEFAULT_IMPOSTOR_DISTANCE);
+  }
 
   // Save a mesh tab back to the library and propagate to placed instances.
   const saveModelTab = async (tabId: string) => {
@@ -6398,6 +6447,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // After the swap: the outgoing scene is off the engine and its bodies are out of the world.
     releasePlayScene();
     playSceneRef.current = scene;
+    if (isSimulatingRef.current) setSimulatedScene(scene);
     currentPlaySceneIdRef.current = target.id;
     instance.isPaused = false;
     // The new play scene starts with no runtime debug helpers; rebuild them for it (isPlayMode is
@@ -6494,6 +6544,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (simulate) carryEditorCamera(editorSceneRef.current, newScene);
     instance.setScene(newScene);
     playSceneRef.current = newScene;
+    setSimulatedScene(simulate ? newScene : null);
     instance.isPaused = false;
     installGameHost();
     // Rebuild runtime debug helpers AFTER scene.start() — the reconcile the isPlayMode flip triggers runs
@@ -6511,6 +6562,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // Before the play scene is released: disposing it would take the editor camera down with it.
     if (isSimulatingRef.current) recallEditorCamera(playSceneRef.current);
     isSimulatingRef.current = false;
+    setSimulatedScene(null);
     instance.setScene(editorSceneRef.current);
     // Held keys, gestures and edges only — NOT the map. Un-binding the game between scenes would
     // leave the next one dead.
@@ -6538,6 +6590,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     instance.setScene(newScene);
     releasePlayScene();
     playSceneRef.current = newScene;
+    if (isSimulatingRef.current) setSimulatedScene(newScene);
     instance.isPaused = false;
     // Reconcile runtime debug helpers after start() (see startPlay) — reset stays in play mode, so the
     // isPlayMode effect won't re-fire on its own.
@@ -6742,12 +6795,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   <EngineContext.Provider value={{
       instance: instanceRef.current,
       editorScene: activeScene,
+      inspectedScene,
       skeletonTargetId,
       mainScene: editorSceneRef.current,
       eventEmitter: eventEmitter.current,
       selectedNode,
       isGizmoDragging,
       isPlayMode,
+      isSimulating,
       isSceneReady,
       texturesPreloaded,
       audioPreloaded,

@@ -21,6 +21,7 @@ import {
   ParticleSystemNode,
   ForceFieldNode,
   WaterVolumeNode,
+  OccluderNode,
   foliageColliderPose,
 } from 'cleo';
 import type { FoliageCollision } from 'cleo';
@@ -435,13 +436,14 @@ export function wireModel(name: string, lines: { positions: [number, number, num
  * one thing an author must size by eye), or a force field's sphere or box. Top-level and re-placed every
  * frame, like the decal box, so the transform gizmo and inspector edits are followed.
  */
-function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNode | WaterVolumeNode) {
+function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNode | WaterVolumeNode | OccluderNode) {
   const sphere = node instanceof ForceFieldNode && node.shape === 'sphere';
   const name = `${EFFECTSHAPE_PREFIX}${node.id}:${sphere ? 's' : 'b'}`;
   let existing = scene.getNodesByName(name)[0] as ModelNode | undefined;
   if (!existing) {
     existing = wireModel(name, sphere ? unitSphereLines() : unitBoxLines(),
-      node instanceof ParticleSystemNode ? [1, 0.55, 0.3] : node instanceof WaterVolumeNode ? [0.3, 0.6, 1] : [0.45, 0.85, 1]);
+      node instanceof ParticleSystemNode ? [1, 0.55, 0.3] : node instanceof WaterVolumeNode ? [0.3, 0.6, 1]
+        : node instanceof OccluderNode ? [0.75, 0.45, 1] : [0.45, 0.85, 1]);
     scene.addNode(existing);
   }
   const helper = existing;
@@ -454,6 +456,13 @@ function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNo
       return;
     }
     const m = node.worldTransform;
+    // An occluder box follows the node's FULL transform, rotation included: it is what the culling uses.
+    if (node instanceof OccluderNode) {
+      helper.setPosition(node.worldPosition).setQuaternion(node.worldQuaternion)
+            .setScale([node.size[0] * Math.hypot(m[0], m[1], m[2]), node.size[1] * Math.hypot(m[4], m[5], m[6]),
+                       node.size[2] * Math.hypot(m[8], m[9], m[10])]);
+      return;
+    }
     const scale = Math.max(Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10]));
     helper.setPosition(node.worldPosition);
     if (sphere) helper.setUniformScale(node.radius * scale);
@@ -1130,7 +1139,7 @@ export function reconcileEditorHelpers(
 
   // 4e. The SELECTED particle system's bounds, or force field's shape — selection-scoped like 4d. A
   // global field has no extent to draw.
-  if (selected instanceof ParticleSystemNode || selected instanceof WaterVolumeNode
+  if (selected instanceof ParticleSystemNode || selected instanceof WaterVolumeNode || selected instanceof OccluderNode
       || (selected instanceof ForceFieldNode && selected.shape !== 'global'))
     ensureEffectShape(scene, selected);
 
@@ -1189,7 +1198,7 @@ export function reconcileEditorHelpers(
       // sphere and box drops its old wireframe instead of rescaling the wrong one.
       const [id, kind] = node.name.slice(EFFECTSHAPE_PREFIX.length).split(':');
       const owner = scene.getNodeById(id);
-      const want = owner instanceof ParticleSystemNode || owner instanceof WaterVolumeNode ? 'b'
+      const want = owner instanceof ParticleSystemNode || owner instanceof WaterVolumeNode || owner instanceof OccluderNode ? 'b'
         : owner instanceof ForceFieldNode && owner.shape !== 'global' ? (owner.shape === 'sphere' ? 's' : 'b') : null;
       if (id !== selectedId || want !== kind) drop();
     } else if (node.name.startsWith(NAVMESH_PREFIX)) {

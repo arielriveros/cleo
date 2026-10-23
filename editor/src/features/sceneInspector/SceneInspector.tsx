@@ -6,7 +6,7 @@ import type { SceneChange } from 'cleo';
 import { SkyIcon } from '../nodeInspector/sectionIcons'
 import {
   CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon, NavMeshIcon, ModelIcon, LightIcon, LightProbeIcon, SkyboxIcon, SkyLightIcon, CloudsIcon, WindIcon,
-  SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon,
+  SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OccluderIcon,
 } from './nodeIcons'
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
 import { TEMPLATE_ID_VAR, isWithinTemplateInstance } from '../../utils/templates';
@@ -29,7 +29,7 @@ const TYPE_ICONS: Record<string, () => JSX.Element> = {
   landscape: LandscapeIcon,
   // One glyph for both modes: the tree shows what a node IS, and ambient vs spatial is a property of it.
   sound: SoundIcon,
-  particleSystem: ParticlesIcon, forceField: ForceFieldIcon, waterVolume: WaterVolumeIcon,
+  particleSystem: ParticlesIcon, forceField: ForceFieldIcon, waterVolume: WaterVolumeIcon, occluder: OccluderIcon,
 };
 
 
@@ -134,7 +134,8 @@ function RenameInput({ node }: { node: NodeRendererProps<NodeDescription>['node'
  * add its own gutter and paint the guides behind a fill that runs the full width.
  */
 function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) {
-  const { editorScene, isPlayMode, enterTemplateEditor, enterScriptEditor } = useCleoEngine();
+  // The inspected scene: the running simulation while Simulating, the edited scene otherwise.
+  const { inspectedScene: editorScene, isPlayMode, enterTemplateEditor, enterScriptEditor } = useCleoEngine();
   const data = node.data;
   const hoveredScript = useHoveredScript();
   const selected = node.isSelected;
@@ -233,8 +234,10 @@ const DropCursor = ({ top, left, indent }: { top: number; left: number; indent: 
 );
 
 export default function SceneInspector() {
-  const { editorScene, eventEmitter, bodies, triggers, isPlayMode, editorMode, templateRootId, attachScriptToNode,
-          activeTab, sceneList, openSceneId, selectedNode } = useCleoEngine()
+  // `inspectedScene` is the running play scene while Simulating, so the tree shows the live simulation (spawns,
+  // despawns, renames). Every structural edit below stays gated on isPlayMode, which Simulate keeps true.
+  const { inspectedScene: editorScene, isSimulating, eventEmitter, bodies, triggers, isPlayMode, editorMode, templateRootId,
+          attachScriptToNode, activeTab, sceneList, openSceneId, selectedNode } = useCleoEngine()
   const [ nodes, setNodes ] = useState<NodeDescription | null>(null);
   const [ filter, setFilter ] = useState('');
   const treeRef = useRef<TreeApi<NodeDescription> | undefined>(undefined);
@@ -324,7 +327,8 @@ export default function SceneInspector() {
   }, [selectedNode, nodes, dndManager, size.height]);
 
   const handleSelect = (selection: { id: string }[]) => {
-    if (isPlayMode) return; // Don't allow node selection during play mode
+    // No selection during Play (the panels are hidden anyway); Simulate selects to inspect the live node.
+    if (isPlayMode && !isSimulating) return;
     const id = selection.length ? selection[selection.length - 1].id : null;
     if (id === selectedRef.current) return; // the echo of the sync above, or a rebuild re-reporting the same row
     eventEmitter.emit('SELECT_NODE', id);
@@ -434,6 +438,9 @@ export default function SceneInspector() {
     if (!kind) return;
     event.preventDefault();
     event.stopPropagation();
+    // A Simulate session shows the running scene here: attaching a script writes the persistent script map
+    // and a new node would land in a scene that is thrown away on Stop. Neither belongs in a session.
+    if (isPlayMode) return;
 
     const targetElement = (event.target as HTMLElement).closest('.scene-item');
 

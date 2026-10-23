@@ -14,7 +14,8 @@ import type {
     ShaderModuleDescriptor, RenderPipelineDescriptor, BindGroupDescriptor, RenderTargetDescriptor,
     ComputePipelineDescriptor,
 } from '../device';
-import type { ComputePipeline } from '../resources';
+import type { ComputePipeline, OcclusionQuerySet } from '../resources';
+import { WebGL2OcclusionQuerySet } from './webgl2Queries';
 import type { RenderPassDescriptor } from '../types';
 import type { Buffer, Texture } from '../resources';
 import type { BufferUsageFlags, TextureFormat, TextureDimension, TextureUsageFlags, SamplerDescriptor, AddressMode, TextureConfigureDescriptor } from '../types';
@@ -40,11 +41,18 @@ export class WebGL2Device implements Device {
     /** VAOs by pipeline and buffer set. See vertexArrayFor. */
     private readonly _vertexArrays = new Map<WebGL2RenderPipeline, Map<string, WebGLVertexArrayObject>>();
     /** Which VAO entries each buffer appears in, so destroying the buffer evicts them. */
-    private readonly _vaosByBuffer = new Map<number, { byBuffers: Map<string, WebGLVertexArrayObject>; key: string }[]>();
+    private readonly _vaosByBuffer = new Map<number, { byBuffers: Map<string | number, WebGLVertexArrayObject>; key: string | number }[]>();
+    /**
+     * The one-vertex-buffer case — nearly every draw — keyed pipeline, then vertex buffer id, then index
+     * buffer id (-1 for none): numbers all the way, where the general key is a string built per draw.
+     */
+    private readonly _singleVertexArrays = new Map<WebGL2RenderPipeline, Map<number, Map<number, WebGLVertexArrayObject>>>();
     /** VAOs a caller owns and binds itself — Mesh and TileMesh. See createVertexArray. */
     private readonly _ownedVertexArrays = new Set<WebGLVertexArrayObject>();
     /** Deduped render targets, keyed by their attachment set. See createRenderTarget. */
     private readonly _renderTargets = new Map<string, WebGL2RenderTarget>();
+    /** Attachment shapes already found complete (see {@link createRenderTarget}). */
+    private readonly _completeShapes = new Set<string>();
     /** Which target keys each texture appears in, so destroying it releases them. */
     private readonly _targetsByTexture = new Map<number, Set<string>>();
     /** The canvas this context draws to — the surface, in WebGPU's vocabulary. */
@@ -165,7 +173,14 @@ export class WebGL2Device implements Device {
         // Zero colour attachments is the shadow maps' normal case, and needs BOTH draw and read buffers
         // explicitly NONE or the framebuffer is incomplete and drops every draw silently.
         framebuffer.setDrawBuffers(colorViews.length);
-        framebuffer.checkStatus('createRenderTarget');
+        // Once per attachment SHAPE, not per framebuffer. checkFramebufferStatus is a synchronous round
+        // trip to the GPU process, which first drains everything already queued: the first burst of a
+        // blood spray — a new emitter's ping-pong targets — measured a 121 ms frame in the Valley, every
+        // millisecond of it in this call. Completeness is decided by the formats and kinds of the
+        // attachments, so a shape that came back complete once is complete again.
+        const shape = attachmentShape(colorViews, depthView);
+        if (!this._completeShapes.has(shape) && framebuffer.checkStatus('createRenderTarget'))
+            this._completeShapes.add(shape);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
         const target = new WebGL2RenderTarget(framebuffer, width, height, colorViews, depthView, label, true);
@@ -211,14 +226,15 @@ export class WebGL2Device implements Device {
             if (attachment.clearValue) gl.clearBufferfv(gl.COLOR, attachment.target, attachment.clearValue);
             else clearBits |= gl.COLOR_BUFFER_BIT;
         }
+        // A GL depth clear is MASKED by `depthMask` — `clearBufferfv` as much as `clear` — and WebGPU's
+        // `loadOp: 'clear'` is not. Force it, or a pass whose predecessor left depth writes off silently
+        // clears nothing and the frame draws against the last one's depth.
         if (descriptor.depthAttachment?.loadOp === 'clear') {
+            GLState.depthMask(true);
             if (descriptor.depthAttachment.clearValue !== undefined)
                 gl.clearBufferfv(gl.DEPTH, 0, [descriptor.depthAttachment.clearValue]);
             else clearBits |= gl.DEPTH_BUFFER_BIT;
         }
-        // A GL depth clear is MASKED by `depthMask`; WebGPU's `loadOp: 'clear'` is not. Force it, or a
-        // pass whose predecessor left depth writes off silently clears nothing.
-        if ((clearBits & gl.DEPTH_BUFFER_BIT) !== 0) GLState.depthMask(true);
         if (clearBits !== 0) gl.clear(clearBits);
     }
 
@@ -336,6 +352,11 @@ export class WebGL2Device implements Device {
         return new WebGL2TextureView(texture, 0, 0);
     }
 
+    /** Occlusion queries — `ANY_SAMPLES_PASSED_CONSERVATIVE`, core in WebGL2. See WebGL2OcclusionQuerySet. */
+    public createOcclusionQuerySet(capacity: number, label?: string): OcclusionQuerySet {
+        return new WebGL2OcclusionQuerySet(capacity, label);
+    }
+
     /** Always throws: WebGL2 has no compute stage. Check `capabilities.hasCompute` first. */
     public createComputePipeline(descriptor: ComputePipelineDescriptor): ComputePipeline {
         throw new Error(`${descriptor.label ?? 'compute pipeline'}: WebGL2 has no compute stage — ` +
@@ -349,10 +370,24 @@ export class WebGL2Device implements Device {
     public vertexArrayFor(pipeline: WebGL2RenderPipeline,
                           buffers: readonly (WebGL2Buffer | null)[],
                           indexBuffer: WebGL2Buffer | null): WebGLVertexArrayObject {
-        let byBuffers = this._vertexArrays.get(pipeline);
-        if (!byBuffers) { byBuffers = new Map(); this._vertexArrays.set(pipeline, byBuffers); }
-
-        const key = buffers.map(b => (b ? b.id : '-')).join(',') + '|' + (indexBuffer ? indexBuffer.id : '-');
+        let byBuffers: Map<string | number, WebGLVertexArrayObject>;
+        let key: string | number;
+        if (buffers.length === 1 && buffers[0]) {
+            let byVertex = this._singleVertexArrays.get(pipeline);
+            if (!byVertex) { byVertex = new Map(); this._singleVertexArrays.set(pipeline, byVertex); }
+            let byIndex = byVertex.get(buffers[0].id);
+            if (!byIndex) { byIndex = new Map(); byVertex.set(buffers[0].id, byIndex); }
+            byBuffers = byIndex as Map<string | number, WebGLVertexArrayObject>;
+            key = indexBuffer ? indexBuffer.id : -1;
+        } else {
+            let byString = this._vertexArrays.get(pipeline);
+            if (!byString) { byString = new Map(); this._vertexArrays.set(pipeline, byString); }
+            byBuffers = byString as Map<string | number, WebGLVertexArrayObject>;
+            // Built by hand: this runs for every draw, and `map().join()` allocated an array for each.
+            key = '';
+            for (let i = 0; i < buffers.length; i++) { const b = buffers[i]; key += (b ? b.id : '-') + ','; }
+            key += '|' + (indexBuffer ? indexBuffer.id : '-');
+        }
         let vao = byBuffers.get(key);
         if (vao) return vao;
 
@@ -388,6 +423,8 @@ export class WebGL2Device implements Device {
             if (GLState.currentVAO === vao) GLState.bindVAO(null);
             gl.deleteVertexArray(vao);
         }
+        // The emptied per-vertex-buffer maps of the one-buffer path go with their buffer.
+        for (const byVertex of this._singleVertexArrays.values()) byVertex.delete(bufferId);
     }
 
     // -- uploads and readback ---------------------------------------------------------------------
@@ -522,6 +559,10 @@ export class WebGL2Device implements Device {
         for (const byBuffers of this._vertexArrays.values())
             for (const vao of byBuffers.values()) gl.deleteVertexArray(vao);
         this._vertexArrays.clear();
+        for (const byVertex of this._singleVertexArrays.values())
+            for (const byIndex of byVertex.values())
+                for (const vao of byIndex.values()) gl.deleteVertexArray(vao);
+        this._singleVertexArrays.clear();
         for (const vao of this._ownedVertexArrays) gl.deleteVertexArray(vao);
         this._ownedVertexArrays.clear();
     }
@@ -753,16 +794,23 @@ export class WebGL2Texture implements Texture {
         if (ext) gl.texParameterf(this.target, ext.TEXTURE_MAX_ANISOTROPY_EXT, this._maxAnisotropy);
     }
 
-    /** Upload a 2D image, or allocate an empty 2D render target when `image` is null. */
+    /**
+     * Upload a 2D image, or allocate an empty 2D render target when `image` is null.
+     *
+     * Only an image upload is checked with `getError`. Like checkFramebufferStatus, getError is a
+     * synchronous round trip that first drains the GPU process's queue, and storage-only allocations
+     * happen MID-FRAME (a particle emitter's state the first time it plays, a resize); the render target
+     * built on them reports an unusable format through createRenderTarget's completeness check anyway.
+     */
     public upload2D(image: TexImageSource | null, width: number, height: number, mipMap: boolean): void {
         this.bindForUpload();
-        this._clearPendingErrors();
+        if (image) this._clearPendingErrors();
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, this._flipY);
         if (image) gl.texImage2D(this.target, 0, this._internalFormat, this._glFormat, this._type, image);
         else gl.texImage2D(this.target, 0, this._internalFormat, width, height, 0, this._glFormat, this._type, null);
         this._applySamplerState();
         if (mipMap) gl.generateMipmap(this.target);
-        this.checkForErrors();
+        if (image) this.checkForErrors();
     }
 
     /** The six cube-face targets, in GL face order. */
@@ -967,6 +1015,14 @@ export class WebGL2Texture implements Texture {
         this._handle = null;
         this._onDestroy();
     }
+}
+
+// What framebuffer completeness depends on: each attachment's format and kind, whether it has storage
+// yet, and whether it is a mip below the base. Never the texture's identity.
+function attachmentShape(colors: readonly WebGL2TextureView[], depth: WebGL2TextureView | undefined): string {
+    const one = (v: WebGL2TextureView) =>
+        `${v.texture.format}/${v.texture.dimension}/${v.texture.width > 0 && v.texture.height > 0 ? 1 : 0}/${v.baseMipLevel > 0 ? 1 : 0}`;
+    return colors.map(one).join(',') + '|' + (depth ? one(depth) : '-');
 }
 
 // The identity of a view, for the render-target cache. Texture id, not the handle, which is opaque.

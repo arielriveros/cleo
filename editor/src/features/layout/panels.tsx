@@ -139,7 +139,7 @@ function MaterialPanel() {
 // Animation is the exception: it has its own three panels and hides Properties entirely.
 function PropertiesPanel(_: IDockviewPanelProps) {
   const { editorMode, editingTerrainMaterialNode } = useCleoEngine();
-  const { node, readOnly } = useSelectedNode();
+  const { node, readOnly, simulating } = useSelectedNode();
 
   // Terrain-material mode edits the dedicated unrendered edit node; the visible preview node carries
   // the composite terrain material.
@@ -165,7 +165,7 @@ function PropertiesPanel(_: IDockviewPanelProps) {
 
   return (
     <SidePanel>
-      {readOnly && <TemplateInstanceNotice revert />}
+      {simulating ? <SimulationNotice /> : readOnly && <TemplateInstanceNotice revert />}
       {editorMode === 'template' && <TemplateVariantNotice />}
       {/* An editor-owned node (a preview tab's holder) is not the user's content: shown, never edited. */}
       {node && <PropertyEditor node={node} readOnly={readOnly || node.isEditorOwned} />}
@@ -177,11 +177,20 @@ function ScriptsPanel(_: IDockviewPanelProps) {
   return <SidePanel><ScriptEditor /></SidePanel>;
 }
 
+/** Shown over an inspector while Simulating: the values are live, and nothing here outlives Stop. */
+function SimulationNotice() {
+  return (
+    <div className='text-ui-sm text-highlight bg-highlight/15 px-2 py-1'>
+      Simulating: this is the running scene. The Transform is live and editable; changes are discarded on Stop.
+    </div>
+  );
+}
+
 function PhysicsPanel(_: IDockviewPanelProps) {
-  const { node, readOnly } = useSelectedNode();
+  const { node, readOnly, simulating } = useSelectedNode();
   return (
     <SidePanel>
-      {readOnly && <TemplateInstanceNotice />}
+      {simulating ? <SimulationNotice /> : readOnly && <TemplateInstanceNotice />}
       {node &&
         <fieldset disabled={readOnly} className={`${readOnly ? 'opacity-60' : ''} border-0 m-0 p-0 min-w-0`}>
           <PhysicsEditor node={node} />

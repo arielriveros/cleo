@@ -9,6 +9,11 @@ export interface EngineRuntimeSettings {
   gravity: [number, number, number];
   /** Cap on physics substeps per frame (PhysicsSystem.maxSubsteps). */
   maxSubsteps: number;
+  /**
+   * Metres from the camera past which dynamic bodies are frozen in place (PhysicsSystem.simulationRange).
+   * 0 = unlimited. A body's own Simulation setting can opt out or override it.
+   */
+  simulationRange: number;
   /** Longest frame delta the loop reports, seconds (CleoEngine.maxFrameDelta). */
   maxFrameDelta: number;
   /** Master volume, 0..1 (the audio mixer's master bus). */
@@ -39,7 +44,7 @@ export interface ProjectSettings {
 }
 
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
-  engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, maxFrameDelta: 0.1, masterVolume: 1 },
+  engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, maxFrameDelta: 0.1, masterVolume: 1 },
   publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true },
 };
 
@@ -58,6 +63,7 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
     engine: {
       gravity: g,
       maxSubsteps: Math.round(num(e.maxSubsteps, d.engine.maxSubsteps, 1, 32)),
+      simulationRange: num(e.simulationRange, d.engine.simulationRange, 0, 100000),
       maxFrameDelta: num(e.maxFrameDelta, d.engine.maxFrameDelta, 1 / 240, 0.5),
       masterVolume: num(e.masterVolume, d.engine.masterVolume, 0, 1),
     },
@@ -83,7 +89,7 @@ export function isDefaultProjectSettings(s: ProjectSettings): boolean {
  */
 export function projectSettingsConfig(s: ProjectSettings): Record<string, any> {
   return {
-    physics: { gravity: [...s.engine.gravity], maxSubsteps: s.engine.maxSubsteps },
+    physics: { gravity: [...s.engine.gravity], maxSubsteps: s.engine.maxSubsteps, simulationRange: s.engine.simulationRange },
     runtime: { maxFrameDelta: s.engine.maxFrameDelta },
     audio: { masterVolume: s.engine.masterVolume },
     // A publish-time switch, not something the running game reads.
@@ -94,7 +100,7 @@ export function projectSettingsConfig(s: ProjectSettings): Record<string, any> {
 /** The structural slice of the engine these settings drive, so this module stays free of `cleo` imports. */
 export interface EngineRuntimeTarget {
   maxFrameDelta: number;
-  physics: { gravity: [number, number, number]; maxSubsteps: number } | null | undefined;
+  physics: { gravity: [number, number, number]; maxSubsteps: number; simulationRange: number } | null | undefined;
 }
 
 /** Push the runtime settings into a live engine (the editor does it on every change and at Play). */
@@ -107,6 +113,7 @@ export function applyEngineRuntime(
   if (engine.physics) {
     engine.physics.gravity = [...s.gravity] as [number, number, number];
     engine.physics.maxSubsteps = s.maxSubsteps;
+    engine.physics.simulationRange = s.simulationRange;
   }
   if (mixer) mixer.masterVolume = s.masterVolume;
 }

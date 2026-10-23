@@ -9,7 +9,7 @@ import type {
 } from './types';
 import type {
     Buffer, Texture, TextureView, Sampler, ShaderModule, BindGroup, BindGroupLayout,
-    RenderPipeline, RenderTarget, ComputePipeline,
+    RenderPipeline, RenderTarget, ComputePipeline, OcclusionQuerySet,
 } from './resources';
 import type { ShaderProgram, ShaderProgramDescriptor } from './shaderProgram';
 
@@ -40,6 +40,10 @@ export interface DeviceCapabilities {
     /** Compute shaders and storage buffers. False on WebGL2, always. */
     readonly hasCompute: boolean;
     readonly hasStorageBuffers: boolean;
+    /** `drawIndexedIndirect`: draw arguments read from a GPU buffer. WebGPU only; absent means no. */
+    readonly hasIndirectDraw?: boolean;
+    /** Occlusion queries (`createOcclusionQuerySet`). Both backends; absent means no. */
+    readonly hasOcclusionQuery?: boolean;
     /** Per-pass GPU timing is available — `EXT_disjoint_timer_query_webgl2`, or timestamp queries. */
     readonly hasTimestampQuery: boolean;
     /**
@@ -181,6 +185,15 @@ export interface RenderPassEncoder {
     setScissor(x: number, y: number, width: number, height: number): void;
     draw(vertexCount: number, instanceCount?: number, firstVertex?: number): void;
     drawIndexed(indexCount: number, instanceCount?: number, firstIndex?: number, baseVertex?: number): void;
+    /**
+     * An indexed draw whose arguments a GPU pass wrote: five u32 at `indirectOffset` in an `INDIRECT`
+     * buffer — index count, instance count, first index, base vertex, first instance (which must be 0).
+     * Throws where {@link DeviceCapabilities.hasIndirectDraw} is not set.
+     */
+    drawIndexedIndirect(indirectBuffer: Buffer, indirectOffset: number): void;
+    /** Start counting samples into query `index` of the pass's `occlusionQuerySet`. One open at a time. */
+    beginOcclusionQuery(index: number): void;
+    endOcclusionQuery(): void;
     end(): void;
 }
 
@@ -239,6 +252,14 @@ export interface Device {
     /** Whether {@link createShaderProgram} would return this program without blocking. */
     isShaderProgramReady?(descriptor: ShaderProgramDescriptor): boolean;
     createRenderPipeline(descriptor: RenderPipelineDescriptor): RenderPipeline;
+    /**
+     * {@link createRenderPipeline} without blocking: on WebGPU the driver compiles the pipeline off the
+     * main thread and the promise resolves when it can be used. Optional — WebGL2 pipelines are plain
+     * state bundles over programs that are already linked, so there is nothing to wait for there.
+     */
+    createRenderPipelineAsync?(descriptor: RenderPipelineDescriptor): Promise<RenderPipeline>;
+    /** A pool of `capacity` occlusion queries. Present where {@link DeviceCapabilities.hasOcclusionQuery} is set. */
+    createOcclusionQuerySet?(capacity: number, label?: string): OcclusionQuerySet;
     /** Build a compute pipeline. Throws on WebGL2 — see {@link DeviceCapabilities.hasCompute}. */
     createComputePipeline(descriptor: ComputePipelineDescriptor): ComputePipeline;
     createRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget;

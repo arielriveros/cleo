@@ -9,6 +9,9 @@ export class Frustum {
     // 6 planes × (a, b, c, d), normalized so (a, b, c) is unit length. Order: L, R, B, T, N, F.
     private readonly _planes = new Float32Array(24);
 
+    /** The six planes, (a, b, c, d) each, in the order above. Read-only: for handing to a shader. */
+    public get planes(): Readonly<Float32Array> { return this._planes; }
+
     /** Rebuild the 6 planes from a combined view-projection matrix (`projection * view`). */
     public setFromViewProjection(m: mat4): void {
         // gl-matrix is column-major: element(row, col) = m[col * 4 + row].

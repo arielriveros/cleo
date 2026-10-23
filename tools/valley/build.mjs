@@ -426,13 +426,32 @@ const foliageAssets = FOLIAGE_PROTOS.map(f => modelAsset({
   cullDistance: f.cull, materialJson: matJson, vars, node,
 }))
 
-// The pine's impostor card, baked offline by impostor.py (a software rasterizer following the editor's
-// `bakeModelImpostor` contract). Registered under the editor's own id for it, `<modelId>__impostor`, so
-// "Bake impostor" in the terrain material REPLACES this card rather than adding a second one.
-const IMPOSTOR_SIZE = 1024
+// The pine's OCTAHEDRAL impostor: 8 x 8 views over the hemisphere, unlit albedo plus model-space normals,
+// baked offline by the engine's own baker (tools/valley/bakeOctahedral.ts runs src/terrain/octahedralBake.ts,
+// the code behind the editor's "Bake impostor"). Lit by the scene like the mesh, and right from every side
+// and from above, so it can take over far closer than the flat card it replaced. Registered under the
+// editor's own ids for it, so a re-bake in the terrain material REPLACES these rather than adding more.
+const IMPOSTOR_FRAMES = 8
+const IMPOSTOR_FRAME_SIZE = 256
+const IMPOSTOR_NORMAL_FRAME_SIZE = 128
+const IMPOSTOR_SIZE = IMPOSTOR_FRAMES * IMPOSTOR_FRAME_SIZE
 function bakeImpostor(asset, level, materials) {
   const dir = path.join(BUILD, 'valley_impostor')
   fs.mkdirSync(dir, { recursive: true })
+  const raw = path.join(ROOT, 'tools', 'valley', 'rawimage.py')
+  const python = (args) => {
+    const res = spawnSync('python', [raw, ...args], { encoding: 'utf8' })
+    if (res.status !== 0) throw new Error(`rawimage ${args[0]} failed:\n${res.stderr}`)
+    return res.stdout
+  }
+  const decoded = new Map()
+  const decode = (file) => {
+    if (!decoded.has(file)) {
+      const out = path.join(dir, `${file}.rgba`)
+      decoded.set(file, { file: out, ...JSON.parse(python(['decode', path.join(PREPARED, file), out])) })
+    }
+    return decoded.get(file)
+  }
   const parts = level.map(({ name, part, materialId }, i) => {
     const write = (suffix, arr) => {
       const file = path.join(dir, `${asset.name}-${i}.${suffix}`)
@@ -443,31 +462,51 @@ function bakeImpostor(asset, level, materials) {
     return {
       name,
       positions: write('pos', Float32Array.from(part.positions)),
+      normals: write('nrm', Float32Array.from(part.normals)),
       uvs: write('uv', Float32Array.from(part.uvs)),
       indices: write('idx', Uint32Array.from(part.indices)),
-      diffuse: path.join(PREPARED, m.diffuse),
-      mask: m.mask ? path.join(PREPARED, m.mask) : null,
+      diffuse: decode(m.diffuse),
+      mask: m.mask ? decode(m.mask) : null,
+      // The needles' material cutoff, so the baked holes are the ones the mesh shows.
+      cutoff: m.mask ? 0.5 : 0,
     }
   })
+  const albedoRaw = path.join(dir, `${asset.name}_impostor.rgba`)
+  const normalRaw = path.join(dir, `${asset.name}_impostorNormal.rgba`)
   const request = path.join(dir, `${asset.name}.json`)
-  const out = path.join(dir, `${asset.name}_impostor.png`)
-  fs.writeFileSync(request, JSON.stringify({ size: IMPOSTOR_SIZE, supersample: 2, parts }))
-  const res = spawnSync('python', [path.join(ROOT, 'tools', 'valley', 'impostor.py'), request, out], { encoding: 'utf8' })
+  fs.writeFileSync(request, JSON.stringify({
+    frames: IMPOSTOR_FRAMES, frameSize: IMPOSTOR_FRAME_SIZE, normalFrameSize: IMPOSTOR_NORMAL_FRAME_SIZE, supersample: 2,
+    albedoOut: albedoRaw, normalOut: normalRaw, parts,
+  }))
+  const res = spawnSync(process.platform === 'win32' ? 'npx.cmd' : 'npx',
+    ['vite-node', '--config', 'vitest.config.ts', 'tools/valley/bakeOctahedral.ts', request],
+    { cwd: ROOT, encoding: 'utf8', shell: process.platform === 'win32', maxBuffer: 64 << 20 })
   if (res.status !== 0) throw new Error(`impostor bake failed:\n${res.stderr}`)
-  const report = JSON.parse(res.stdout.trim().split('\n').pop())
-  const texId = `${asset.id}__impostor`
-  textures.add(texId, out, { mipMap: true }, 'image/png')
+  const report = JSON.parse(res.stdout.slice(res.stdout.indexOf('{')).trim().split('\n').pop())
+  const albedo = path.join(dir, `${asset.name}_impostor.png`)
+  const normal = path.join(dir, `${asset.name}_impostorNormal.png`)
+  python(['encode', albedoRaw, String(report.albedoSize), String(report.albedoSize), albedo])
+  python(['encode', normalRaw, String(report.normalSize), String(report.normalSize), normal])
+  // Clamp-wrapped (the default): repeat would blend the atlas's outer frames into its opposite edge.
+  const texId = `${asset.id}__impostor`, normalId = `${asset.id}__impostorNormal`
+  textures.add(texId, albedo, { mipMap: true }, 'image/png')
+  textures.add(normalId, normal, { mipMap: true }, 'image/png')
   TEXTURE_ENTRIES.push({ folder: `${FOLIAGE}/Textures`, name: `${asset.name} Impostor`, id: texId, ext: 'png' })
-  log('impostor', `${asset.name} ${report.width.toFixed(1)}x${report.height.toFixed(1)} m card, ${Math.round(report.coverage * 100)}% covered`)
-  return texId
+  TEXTURE_ENTRIES.push({ folder: `${FOLIAGE}/Textures`, name: `${asset.name} Impostor Normals`, id: normalId, ext: 'png' })
+  log('impostor', `${asset.name}: ${IMPOSTOR_FRAMES}x${IMPOSTOR_FRAMES} views, r ${report.info.radius.toFixed(1)} m, ` +
+    `${Math.round(report.coverage * 100)}% covered, ${report.ms} ms`)
+  return { textureId: texId, textures: { normal: normalId }, octahedral: report.info }
 }
 const PINE_INDEX = FOLIAGE_PROTOS.findIndex(f => f.key === 'pine')
 const FLOWER_NAMES = flowerPatches.map(f => f.name)
-const PINE_IMPOSTOR = bakeImpostor(foliageAssets[PINE_INDEX], FOLIAGE_PROTOS[PINE_INDEX].levels[0], {
+// From the LAST mesh level, the one it takes over from: baked from the full tree it came out denser and
+// darker than the sparse level beside it, and the hand-over at PINE_BILLBOARD showed as a pop.
+const PINE_LEVELS = FOLIAGE_PROTOS[PINE_INDEX].levels
+const PINE_IMPOSTOR = bakeImpostor(foliageAssets[PINE_INDEX], PINE_LEVELS[PINE_LEVELS.length - 1], {
   [BARK_MAT]: { diffuse: 'pine_bark_diff.jpg' },
   [NEEDLES_MAT]: { diffuse: 'pine_needles_diff.jpg', mask: 'pine_needles_mask.png' },
 })
-FOLIAGE_PROTOS[PINE_INDEX].billboard = { textureId: PINE_IMPOSTOR, distance: PINE_BILLBOARD }
+FOLIAGE_PROTOS[PINE_INDEX].billboard = { ...PINE_IMPOSTOR, distance: PINE_BILLBOARD }
 const GRASS_NAMES = grassPatches.map(g => g.name)
 const RULES = FOLIAGE_PROTOS.map((f, i) => ({
   kind: 'mesh', id: id(`rule:${f.key}`), name: f.name, modelId: foliageAssets[i].id,
@@ -1006,6 +1045,9 @@ function valleyScene() {
     // A 2 km valley seen to 3 km: four detailed cascades over the first 150 m, then the far cascade
     // carries the ridges' and hills' shadows out to 1.5 km.
     shadowMapResolution: 4096, shadowCascades: 4, shadowDistance: 150, shadowFarDistance: 1500,
+    // Pine shadows stop at 110 m: past that a tree's shadow is a few texels of the last cascade, and the
+    // pines are what the foliage shadow pass spends its triangles on. The trees themselves still draw.
+    foliageShadowDistance: 110,
   })
   return { scene: root, textures: [], ui: { version: 1, elements: [] }, config, assetHashes: {}, assetHashVersion: ASSET_HASH_VERSION, savedAt: souls.CREATED_AT }
 }
@@ -1088,6 +1130,9 @@ const result = souls.writeProject({
   models: [...propAssets, ...foliageAssets],
   templates: [BARREL_TEMPLATE, DEBRIS_TEMPLATE, CAVE_TEMPLATE],
   extraScenes: [{ id: DUNGEON_ID, name: DUNGEON_NAME, build: dungeonScene }],
+  // 2 km of valley: barrels, debris and enemies far from the camera freeze in place instead of
+  // simulating against the terrain. The player opts out (simulationMode 'always').
+  projectSettings: { engine: { simulationRange: 90 } },
   terrainMaterials: [{ id: TERRAIN_MATERIAL_ID, name: 'Valley Landscape', material: terrainMaterial, textureIds: [...new Set(Object.values(TERRAIN_TEX).flatMap(t => Object.values(t)))] }],
   folders: {
     scene: { [PROJECT_NAME]: '/Scenes', [DUNGEON_NAME]: '/Scenes' },

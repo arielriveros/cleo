@@ -40,8 +40,20 @@ Reach for it when something flickers or goes black in a way that makes no sense.
 
 ### Optimizations
 
-Frustum culling; foliage cull distance, cell size and density falloff; terrain LOD with two
-distances and two detail steps.
+Frustum culling; occlusion culling; foliage cull distance, shadow distance, prepass, GPU culling, cell
+size and density falloff; terrain LOD with two distances and two detail steps.
+
+**Occlusion** skips what is hidden, in two stages. The first rasterizes the landscape (lowered, so it
+can only hide what the real ground hides) and any **Occluder** volumes into a small CPU depth buffer
+the same frame: exact, and never wrong. **GPU Occlusion Queries** add what that cannot see — a cart
+behind a house, a camp below a cliff that is not terrain — by drawing each large or heavy model's box
+against the frame's real depth. Those results arrive a frame or two late, so an object can appear a
+frame late when whatever hid it moves away fast; turn the queries off if that shows. The Performance
+HUD's *occluded objects* row splits into the two.
+
+**GPU Foliage Culling** (WebGPU) moves the per-instance half of foliage culling to a compute pass:
+every tree faded out of its detail band, or off screen, is dropped before a vertex of it runs, and the
+buckets draw indirectly. On WebGL2 the toggle is disabled and foliage is packed on the CPU.
 
 ### Tone and post
 
@@ -100,11 +112,27 @@ Directional shadows with cascades, plus separate spot and point shadow blocks.
 | **Softness / Strength / Blend** | |
 | **Depth Bias / Normal Bias** | Acne versus peter-panning. |
 | **Stabilize** | Snaps the frustum to texels so shadows stop crawling as the camera moves. |
-| **Stagger Updates** | Updates distant cascades on alternating frames. |
+| **Stagger Updates** | Updates distant cascades on their own frames: cascade *i* every 2^*i* frames, never two on one frame. |
 | **Caster Pad** | How far outside the view casters are still gathered. |
 
 > **Stagger makes the frame-time graph deliberately uneven.** A periodic spike is the feature
 > working. A *constant* stall is something else.
+
+What keeps cascades cheap, all automatic:
+
+- **Only what can show.** A caster is drawn into a cascade only if its shadow can land on a pixel that
+  cascade shades. A hill too low to reach the valley floor stays out. The player, standing beside the
+  camera, casts into the nearest cascade only.
+- **Nothing redrawn for nothing.** A cascade whose contents have not moved since it was drawn is
+  kept as it is. The Performance panel's **Shadow layers · kept** row counts these. An animated
+  character or swaying foliage inside a cascade keeps it redrawing.
+- **Turning is free.** With Stagger on, the distant cascades are fit around the camera, not its
+  view, so mouse-look never forces them to redraw early. Walking does once the camera has
+  travelled past their margin.
+- **Cheaper far detail.** Beyond the nearest cascade, a mesh foliage layer with an octahedral
+  impostor casts through the impostor, and terrain that only casts (no pixel of that cascade lands
+  on it) draws at its coarsest level. The far cascade draws the landscape as a few dozen coarse
+  blocks. The nearest cascade always draws the real meshes.
 
 Point shadow resolution is **per cube face**, so it is six times the memory it looks like.
 
@@ -178,7 +206,8 @@ going — render CPU, render GPU, physics, or scene — and the fix for each is 
 costs. A steady frame rate standing still and spikes while walking is this.
 
 **Periodic spikes with shadows on** are cascade staggering. Turn Stagger off to confirm; that will
-make the cost constant and higher, not lower.
+make the cost constant and higher, not lower. The **Shadow layers** rows under Geometry show how many
+shadow maps were drawn and kept each frame, and how many draws and triangles they took.
 
 Every number here is also readable from script — see
 [Math and utilities](../scripting/math-and-utils.md#statistics) — so you can build an in-game debug

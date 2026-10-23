@@ -221,6 +221,9 @@ export default function MenuBar() {
           input: inputMap,
           // Engine runtime + window options (Options ▸ Engine / Project ▸ General), into `config`.
           projectSettings,
+          // What this session drew, so the published game can build those pipelines up front. The more of
+          // the game was played (Play or Simulate) before publishing, the more of them there are.
+          pipelines: instance?.renderer.pipelineRecipes(),
         });
       } catch (e: any) {
         task.setStep(0, { status: 'failed', error: String(e?.message ?? e) });

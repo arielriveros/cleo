@@ -15,6 +15,7 @@ import { DecalNode } from "./nodes/decalNode";
 import { ParticleSystemNode } from "./nodes/particleSystemNode";
 import { ForceFieldNode } from "./nodes/forceFieldNode";
 import { WaterVolumeNode } from "./nodes/waterVolumeNode";
+import { OccluderNode } from "./nodes/occluderNode";
 import { SkyboxNode } from "./nodes/skyboxNode";
 import { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
 import { SkyAtmosphereNode } from "./nodes/skyAtmosphereNode";
@@ -111,6 +112,7 @@ export class Scene {
     private _particleSystems: Set<ParticleSystemNode> = new Set();
     private _forceFields: Set<ForceFieldNode> = new Set();
     private _waterVolumes: Set<WaterVolumeNode> = new Set();
+    private _occluders: Set<OccluderNode> = new Set();
     private _sounds: Set<SoundNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
     private _uiRoots: Set<UIRootNode> = new Set();
@@ -234,6 +236,11 @@ export class Scene {
         this._root.runConstructHandlers();
         this._root.runSpawnHandlers();
         this._root.start();
+
+        // A running scene builds its navmeshes now, while a load is expected, instead of on the frame the
+        // first agent asks for a path (see AISystem.prewarm). Never while authoring: the editor's own
+        // scene starts too, and nothing paths there.
+        if (!CleoEngine.authoringMode) this.ai?.prewarm();
     }
 
     public stop(): void {
@@ -758,6 +765,7 @@ export class Scene {
         this._particleSystems = new Set();
         this._forceFields = new Set();
         this._waterVolumes = new Set();
+        this._occluders = new Set();
         this._sounds = new Set();
         this._lightProbes = new Set();
         this._skybox = null;
@@ -798,6 +806,8 @@ export class Scene {
                 this._forceFields.add(node);
             if (node instanceof WaterVolumeNode)
                 this._waterVolumes.add(node);
+            if (node instanceof OccluderNode)
+                this._occluders.add(node);
             if (node instanceof SoundNode)
                 this._sounds.add(node);
             if (node instanceof LightProbeNode)
@@ -1078,6 +1088,13 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._forceFields;
+    }
+
+    /** Every occluder volume in the scene: what the renderer's occlusion culling hides things behind. */
+    public get occluders(): Set<OccluderNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._occluders;
     }
 
     /** Every water volume in the scene: what the physics step buoys bodies with. */

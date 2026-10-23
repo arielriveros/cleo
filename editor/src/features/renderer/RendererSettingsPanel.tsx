@@ -167,6 +167,11 @@ export default function RendererSettingsPanel() {
   const [gridVisible, setGridVisible] = useState<boolean>(() => renderer?.gridVisible ?? true);
   const [gridPlane, setGridPlane] = useState<string>(() => renderer?.gridPlane ?? 'xz');
   const [frustumCulling, setFrustumCulling] = useState<boolean>(() => renderer?.frustumCulling ?? true);
+  const [occlusionCulling, setOcclusionCulling] = useState<'off' | 'terrain' | 'all'>(() => renderer?.occlusionCulling ?? 'all');
+  const [occlusionQueries, setOcclusionQueries] = useState<boolean>(() => renderer?.occlusionQueries ?? true);
+  const [foliageShadowDistance, setFoliageShadowDistance] = useState<number>(() => renderer?.foliageShadowDistance ?? 0);
+  const [foliagePrepass, setFoliagePrepass] = useState<boolean>(() => renderer?.foliagePrepass ?? false);
+  const [foliageGpuCulling, setFoliageGpuCulling] = useState<boolean>(() => renderer?.foliageGpuCulling ?? true);
   const [foliageCullDistance, setFoliageCullDistance] = useState<number>(() => renderer?.foliageCullDistance ?? 65);
   const [particleLodScale, setParticleLodScale] = useState<number>(() => renderer?.particleLodDistanceScale ?? 1);
   const [foliageCellSize, setFoliageCellSize] = useState<number>(() => renderer?.foliageCellSize ?? 13);
@@ -266,6 +271,11 @@ export default function RendererSettingsPanel() {
     setGridVisible(renderer.gridVisible);
     setGridPlane(renderer.gridPlane);
     setFrustumCulling(renderer.frustumCulling);
+    setOcclusionCulling(renderer.occlusionCulling);
+    setOcclusionQueries(renderer.occlusionQueries);
+    setFoliageShadowDistance(renderer.foliageShadowDistance);
+    setFoliagePrepass(renderer.foliagePrepass);
+    setFoliageGpuCulling(renderer.foliageGpuCulling);
     setFoliageCullDistance(renderer.foliageCullDistance);
     setParticleLodScale(renderer.particleLodDistanceScale);
     setFoliageCellSize(renderer.foliageCellSize);
@@ -380,10 +390,43 @@ export default function RendererSettingsPanel() {
       >
         <Toggle label='Frustum Culling' checked={frustumCulling} className='my-1'
           onChange={(c) => { renderer.frustumCulling = c; setFrustumCulling(c); touch(); }} />
+        {/* CPU occlusion culling (graphics/occlusion): what is behind a hill, or behind an Occluder volume,
+            is skipped before it is drawn. Conservative by construction, so it never hides what can be seen. */}
+        <div className='flex items-center gap-1 my-1 text-ui'
+             title='Skip models and foliage hidden behind the landscape (Terrain) or behind the landscape and Occluder volumes (All). Needs Frustum Culling on.'>
+          <span className={cn(labelClass, LABEL_W, 'shrink-0')}>Occlusion</span>
+          <SegmentedControl
+            value={occlusionCulling}
+            onChange={(mode) => { renderer.occlusionCulling = mode; setOcclusionCulling(mode); touch(); }}
+            options={[
+              { value: 'off' as const, label: 'Off', title: 'No occlusion culling' },
+              { value: 'terrain' as const, label: 'Terrain', title: 'Hidden behind the landscape' },
+              { value: 'all' as const, label: 'All', title: 'Hidden behind the landscape or an Occluder volume' },
+            ]}
+          />
+        </div>
+        <Toggle label='GPU Occlusion Queries' checked={occlusionQueries} className='my-1'
+          disabled={occlusionCulling === 'off'}
+          title='Also ask the GPU which large or heavy objects are hidden behind what was actually drawn — a building, a cliff, a rock — not just the landscape and Occluder volumes. Results arrive a frame or two late, so an object can appear a frame late when what hid it moves away fast.'
+          onChange={(c) => { renderer.occlusionQueries = c; setOcclusionQueries(c); touch(); }} />
         <Field labelClassName={LABEL_W} label='Foliage Dist' hint='How far grass draws, and the least distance any foliage draws. Trees with LOD levels or an impostor draw on past their last band unless the model sets its own cull distance.'>
           <NumberInput value={foliageCullDistance} min={0} step={5} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.foliageCullDistance = v; setFoliageCullDistance(v); touch(); }} />
         </Field>
+        <Field labelClassName={LABEL_W} label='Foliage Shadow'
+               hint='How far terrain foliage casts shadows, in metres (0 = as far as it draws). Past it the foliage still draws, only not into the shadow map — a distant tree&apos;s shadow is a few texels.'>
+          <NumberInput value={foliageShadowDistance} min={0} step={10} className='flex-1 text-right px-1 py-0.5'
+            onChange={(v) => { renderer.foliageShadowDistance = v; setFoliageShadowDistance(renderer.foliageShadowDistance); touch(); }} />
+        </Field>
+        <Toggle label='Foliage Prepass' checked={foliagePrepass} className='my-1'
+          title='Write the depth of alpha-tested mesh foliage first, then shade each pixel once. Saves fragment work where foliage overlaps heavily, costs a second vertex pass: compare the foliage GPU row with it on and off.'
+          onChange={(c) => { renderer.foliagePrepass = c; setFoliagePrepass(c); touch(); }} />
+        <Toggle label='GPU Foliage Culling' checked={foliageGpuCulling && renderer.foliageGpuCullingSupported} className='my-1'
+          disabled={!renderer.foliageGpuCullingSupported}
+          title={renderer.foliageGpuCullingSupported
+            ? 'Cull every foliage instance on the GPU — each one faded out of its detail band or off screen is dropped before a vertex of it runs — and draw indirectly, with no instance upload per frame.'
+            : 'Needs WebGPU (compute and indirect draws). On WebGL2 foliage is culled per cell and packed on the CPU.'}
+          onChange={(c) => { renderer.foliageGpuCulling = c; setFoliageGpuCulling(c); touch(); }} />
         <Field labelClassName={LABEL_W} label='Cell Size'>
           <NumberInput value={foliageCellSize} min={1} step={4} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.foliageCellSize = v; setFoliageCellSize(v); touch(); }} />

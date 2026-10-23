@@ -53,6 +53,13 @@ function RuntimeOptions() {
           <NumberInput value={e.maxSubsteps} min={1} max={32} step={1}
             onChange={v => set({ maxSubsteps: Math.max(1, Math.min(32, Math.round(v))) })} />
         </Field>
+        <Field label='Simulation range (m)' labelClassName={OPTION_LABEL}
+          hint={'Dynamic bodies farther than this from the camera are frozen in place: still solid to rays, '
+            + 'the camera and other bodies, but not simulated, until the camera comes back. 0 = simulate '
+            + 'everything. A body can opt out (Always) or set its own range in its Physics panel.'}>
+          <NumberInput value={e.simulationRange} min={0} max={100000} step={5}
+            onChange={v => set({ simulationRange: Math.max(0, v) })} />
+        </Field>
       </Section>
 
       <Section title='Frame timing'>

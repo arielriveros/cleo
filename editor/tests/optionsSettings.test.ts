@@ -30,6 +30,7 @@ describe('project settings', () => {
     });
     expect(s.engine.gravity).toEqual([0, -9.81, 0]);
     expect(s.engine.maxSubsteps).toBe(32);
+    expect(s.engine.simulationRange).toBe(0);
     expect(s.engine.maxFrameDelta).toBeCloseTo(1 / 240);
     expect(s.engine.masterVolume).toBe(1);
     expect(s.publish.width).toBe(320);
@@ -45,7 +46,7 @@ describe('project settings', () => {
     });
     expect(isDefaultProjectSettings(s)).toBe(false);
     expect(projectSettingsConfig(s)).toEqual({
-      physics: { gravity: [0, 0, 0], maxSubsteps: 4 },
+      physics: { gravity: [0, 0, 0], maxSubsteps: 4, simulationRange: 0 },
       runtime: { maxFrameDelta: 0.05 },
       audio: { masterVolume: 0.5 },
       window: { title: 'Hollow Keep', width: 1920, height: 1080, fullscreen: true, resizable: false },
@@ -53,11 +54,11 @@ describe('project settings', () => {
   });
 
   it('applies the runtime slice to a live engine, physics and mixer', () => {
-    const engine = { maxFrameDelta: 0.1, physics: { gravity: [0, -9.81, 0] as [number, number, number], maxSubsteps: 8 } };
+    const engine = { maxFrameDelta: 0.1, physics: { gravity: [0, -9.81, 0] as [number, number, number], maxSubsteps: 8, simulationRange: 0 } };
     const mixer = { masterVolume: 1 };
-    const s = { gravity: [0, -1.62, 0] as [number, number, number], maxSubsteps: 3, maxFrameDelta: 0.2, masterVolume: 0.25 };
+    const s = { gravity: [0, -1.62, 0] as [number, number, number], maxSubsteps: 3, simulationRange: 90, maxFrameDelta: 0.2, masterVolume: 0.25 };
     applyEngineRuntime(engine, s, mixer);
-    expect(engine).toEqual({ maxFrameDelta: 0.2, physics: { gravity: [0, -1.62, 0], maxSubsteps: 3 } });
+    expect(engine).toEqual({ maxFrameDelta: 0.2, physics: { gravity: [0, -1.62, 0], maxSubsteps: 3, simulationRange: 90 } });
     expect(engine.physics.gravity).not.toBe(s.gravity);   // copied, not aliased
     expect(mixer.masterVolume).toBe(0.25);
     // No physics world (a 2D scene before one exists) is not an error.

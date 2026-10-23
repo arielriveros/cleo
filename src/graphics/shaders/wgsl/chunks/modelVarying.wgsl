@@ -17,7 +17,11 @@
 #include "./uvProjection.wgsl"
 
 struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
+    // INVARIANT: two programs that share this vertex code must rasterize bit-identical depth. The foliage
+    // depth prepass (geometryPBRInstanced.wgsl `prepass`) writes depth with one program and the colour
+    // pass then tests it with depthCompare 'equal' through another; without invariance a driver is free to
+    // compile the same expression differently per program, and 'equal' would punch holes in the leaves.
+    @builtin(position) @invariant position: vec4<f32>,
     @location(0) fragPos: vec3<f32>,        // world-space position
     @location(1) uv: vec2<f32>,
     // The TBN basis travels as three vectors, never as a mat3: a matrix is not a valid shader
@@ -147,4 +151,9 @@ fn fillVarying(out: ptr<function, VertexOutput>, model: mat4x4<f32>,
 /** The material's projection, resolved for this fragment. See chunks/uvProjection.wgsl. */
 fn surfaceUvOf(in: VertexOutput, params: UvParams) -> SurfaceUv {
     return surfaceUv(params, in.uv, in.objPos, in.objNormal, in.fragPos, in.normal);
+}
+
+/** `surfaceUvOf` for a mesh-uv-only material: see `meshSurfaceUv`. */
+fn meshSurfaceUvOf(in: VertexOutput, params: UvParams) -> SurfaceUv {
+    return meshSurfaceUv(params, in.uv);
 }

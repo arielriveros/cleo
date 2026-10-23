@@ -406,6 +406,8 @@ export interface DepthAttachmentDescriptor {
 }
 
 export interface RenderPassDescriptor {
+    /** Occlusion queries this pass's draws may record into (`RenderPassEncoder.beginOcclusionQuery`). */
+    occlusionQuerySet?: import('./resources').OcclusionQuerySet;
     /**
      * What this pass is called: debug marker, GPU-timing row, and the WebGPU profiler's attribution key.
      * NOT the same name space as `RenderPass` in gpuProfiler.ts — `PASS_LABEL_TO_SCOPE` is the mapping.

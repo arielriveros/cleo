@@ -27,6 +27,8 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | `renderScale` | `number` | `1.0` | Internal render resolution as a fraction of the canvas. |
 | `clearColor` | `number[]` | `[0, 0, 0, 1]` | Background colour where nothing is drawn. |
 | `frustumCulling` | `boolean` | `true` | Skip objects outside the camera frustum. |
+| `occlusionCulling` | `'off' \| 'terrain' \| 'all'` | `'all'` | Skip models and foliage cells hidden behind the landscape (`'terrain'`), or behind the landscape and Occluder volumes (`'all'`). A conservative CPU depth buffer, built the same frame — it never hides something visible. Needs `frustumCulling`. |
+| `occlusionQueries` | `boolean` | `true` | Occlusion culling's second stage: GPU occlusion queries against what was actually drawn, for large or heavy models hidden behind buildings, cliffs or rocks. Results arrive a frame or two late, so only a fresh "hidden" is acted on and a camera cut forgets them. Needs `occlusionCulling` on. |
 
 **What each preset sets:**
 
@@ -175,7 +177,7 @@ The names predate it and are kept so saved settings still load.
 | `shadowStrength` | `number` | `1.0` | How dark a shadowed pixel goes. |
 | `shadowCascadeBlend` | `number` | `0.1` | Cross-fade width at cascade boundaries. |
 | `shadowStabilize` | `boolean` | `true` | Snap the shadow frustum to texels so shadows stop crawling as the camera moves. |
-| `shadowStagger` | `boolean` | `true` | Update distant cascades on alternating frames. |
+| `shadowStagger` | `boolean` | `true` | Update distant cascades on their own frames (cascade *i* every 2^*i* frames, never two on one frame), fit around the camera so turning never forces a redraw. |
 | `shadowCasterPad` | `number` | `50` | How far outside the view casters are still gathered. |
 | `spotShadowsEnabled` | `boolean` | `true` | |
 | `spotShadowResolution` | `number` | `1024` | 256 / 512 / 1024 / 2048. |
@@ -187,13 +189,17 @@ The names predate it and are kept so saved settings still load.
 | `pointShadowBias` | `number` | `0.0015` | |
 
 > `shadowStagger` spreads cascade updates across frames. This makes the frame-time graph
-> deliberately uneven — a periodic spike there is the feature working, not a leak.
+> deliberately uneven — a periodic spike there is the feature working, not a leak. A cascade whose
+> contents did not change since it was drawn is kept rather than redrawn, stagger or not.
 
 ## Foliage and terrain LOD
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `foliageCullDistance` | `number` | `65` | Beyond this, foliage instances are not drawn. |
+| `foliageShadowDistance` | `number` | `0` | How far foliage casts shadows, metres; `0` = as far as it draws. Past it the foliage still draws, only not into the shadow map. |
+| `foliagePrepass` | `boolean` | `false` | Depth prepass for alpha-tested mesh foliage, then one shade per pixel. A win only where foliage is fill-bound; compare the foliage GPU row with it on and off. |
+| `foliageGpuCulling` | `boolean` | `true` | WebGPU only: a compute pass culls every foliage instance — faded out of its detail band, or off screen — and the buckets draw indirectly, with no per-frame instance upload. WebGL2 packs on the CPU whatever this says. |
 | `particleLodDistanceScale` | `number` | `1` | Multiplies every particle effect's LOD and cull distances (0.25–4). Set by the quality tier: Low 0.5, Medium 0.75, High 1, Ultra 1.5. |
 | `foliageDensityFalloff` | `number` | engine constant | How density thins toward the cull distance. |
 | `foliageCellSize` | `number` | `13` | Size of a foliage admission cell, in world units. |

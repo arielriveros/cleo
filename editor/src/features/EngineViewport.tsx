@@ -52,9 +52,9 @@ const GIZMO_HIDDEN_MODES: EditorMode[] = ['landscape', 'tilemap', 'options', 'ma
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, editorMode, viewDimension, setViewDimension, isSceneReady,
             templateRootId, modelEditTargetId, templates, models, materials, animations, scripts, bodies, triggers,
-            animationFieldTargetId, adoptRigController } = useCleoEngine();
+            animationFieldTargetId, adoptRigController, inspectedScene } = useCleoEngine();
     const { selectedNode, isGizmoDragging, gizmoMode, setGizmoMode, gizmoSpace, setGizmoSpace } = useSelection();
-    const { isPlayMode } = usePlayback();
+    const { isPlayMode, isSimulating } = usePlayback();
     const { graphView, setGraphView } = useStateMachine();
 
     // The animation state machine's graph covers the canvas, so viewport chrome (gizmo modes, 2D/3D,
@@ -123,7 +123,7 @@ export default function EngineViewport() {
             let best: Node | null = null;
             let bestDistance = Infinity;
 
-            for (const landscape of Array.from(editorScene.landscapes) as any[]) {
+            for (const landscape of Array.from(inspectedScene.landscapes) as any[]) {
                 if (!landscape.visible) continue;
                 const point = landscape.terrain?.raycast(ray.origin, ray.direction);
                 if (!point) continue;
@@ -131,7 +131,7 @@ export default function EngineViewport() {
                 if (distance < bestDistance) { bestDistance = distance; best = landscape; }
             }
 
-            for (const node of Array.from(editorScene.tilemaps) as any[]) {
+            for (const node of Array.from(inspectedScene.tilemaps) as any[]) {
                 if (!node.visible) continue;
                 const dz = ray.direction[2];
                 if (Math.abs(dz) < 1e-6) continue;
@@ -193,7 +193,8 @@ export default function EngineViewport() {
         const handleClick = (event: MouseEvent) => {
             // Ignore clicks that land on a floating overlay (2D/3D control, etc.).
             if (inOverlay(event.target)) return;
-            if (isPlayMode) return;
+            // Play has no selection; Simulate picks from the running scene (inspectedScene) to inspect it.
+            if (isPlayMode && !isSimulating) return;
             // In landscape/tilemap/options modes the viewport is not a selection surface — options mode
             // renders live only so bindings and on-screen controls can be judged against the real scene, and it
             // hides the tree and Properties, so a selection there has nowhere to show. In material mode the
@@ -227,7 +228,7 @@ export default function EngineViewport() {
 
                 // Get all selectable nodes from the scene. Exclude gizmo nodes so a stray ray can never
                 // select the transform gizmo itself (the gizmo has its own grab raycast in PositionGizmo).
-                const allNodes = Array.from(editorScene.nodes).filter(n => !(n as any).isGizmo);
+                const allNodes = Array.from(inspectedScene.nodes).filter(n => !(n as any).isGizmo);
 
                 const hits = Raycaster.raycast(ray, allNodes);
 
@@ -267,7 +268,7 @@ export default function EngineViewport() {
             viewport.removeEventListener('click', handleClick);
             window.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [instance, editorScene, eventEmitter, isDragging, isGizmoDragging, dragStartPos, isPlayMode, editorMode]);
+    }, [instance, editorScene, inspectedScene, eventEmitter, isDragging, isGizmoDragging, dragStartPos, isPlayMode, isSimulating, editorMode]);
 
     useEffect(() => {
         const handleGizmoDragStart = () => {

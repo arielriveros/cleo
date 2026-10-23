@@ -39,6 +39,43 @@ function collectSubtreeIds(node: Node, out: string[] = []): string[] {
   return out
 }
 
+/** Every node of a subtree by its name path from the root (`''` is the root; namesakes get `#k`). */
+function idsByPath(node: Node, path = '', out = new Map<string, string>()): Map<string, string> {
+  out.set(path, node.id)
+  const seen = new Map<string, number>()
+  for (const c of node.children as Node[]) {
+    const k = seen.get(c.name) ?? 0
+    seen.set(c.name, k + 1)
+    idsByPath(c, `${path}/${c.name}${k ? '#' + k : ''}`, out)
+  }
+  return out
+}
+
+/** Live node fields that hold ANOTHER node's id (the engine's NODE_REF_KEYS, as properties). */
+const LIVE_NODE_REF_KEYS = ['followId', 'lookAtId', 'cameraNodeId', 'possessedId', 'aimSourceId', 'navMeshId', 'uiTargetId'] as const
+
+/**
+ * Point every node-reference field in `scene` that names an id in `map` at its replacement.
+ *
+ * A rebuild from an asset mints fresh ids for the whole subtree. References from INSIDE a rebuilt template
+ * are remapped by the instantiation itself, but a reference from outside the rebuilt subtree — the Player's
+ * camera rig following the model nested inside it, which the mesh pass rebuilds on its own — kept the old
+ * id and dangled: the rig logged "follows a node that no longer exists" and stopped following.
+ */
+export function retargetNodeRefs(scene: Scene, map: ReadonlyMap<string, string>): void {
+  if (map.size === 0) return
+  for (const node of scene.nodes) {
+    const n = node as unknown as Record<string, unknown>
+    for (const key of LIVE_NODE_REF_KEYS) {
+      const value = n[key]
+      if (typeof value === 'string' && map.has(value)) n[key] = map.get(value)
+    }
+    const ignore = n.collisionIgnoreIds
+    if (Array.isArray(ignore) && ignore.some(id => map.has(id)))
+      n.collisionIgnoreIds = ignore.map(id => map.get(id) ?? id)
+  }
+}
+
 /**
  * Re-instantiate a placed instance subtree in place, preserving its transform (mesh/template shared).
  * Returns the rebuilt node, so callers keep working on the live one rather than the detached original.
@@ -75,6 +112,8 @@ export function reinstantiate(
   // `instantiateModelAsset` overwrites the clone's `variables` wholesale, taking the placement's
   // `__scriptId`, `__templateId` and every authored variable with it.
   const variables = new Map(inst.variables)
+  // Where every node of the old copy sat, so references to it from elsewhere can follow the rebuild.
+  const oldIds = idsByPath(inst)
   // Out of the old tree BEFORE its map entries are dropped and its GPU buffers freed: these survive.
   const foreign = assetShape ? detachForeignChildren(inst, assetShape) : []
   // Drop the old subtree's out-of-band data so map entries do not leak.
@@ -96,6 +135,13 @@ export function reinstantiate(
     }
     restoreAnimationState(newNode, animation)
     reattachForeignChildren(newNode, foreign)
+    // Same path, new id: anything outside that pointed into the old copy points into the new one.
+    const moved = new Map<string, string>()
+    for (const [path, id] of idsByPath(newNode)) {
+      const old = oldIds.get(path)
+      if (old && old !== id) moved.set(old, id)
+    }
+    retargetNodeRefs(scene, moved)
     // The placement's own name and script values, recorded as overrides (templateOverrides.ts). The
     // variable restore above has just put the record back; this puts the values back.
     applyOverrides(newNode)

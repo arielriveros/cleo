@@ -2,6 +2,8 @@ import { Body as CannonBody, Vec3, Quaternion} from 'cannon-es'
 import { quat, vec3 } from 'gl-matrix';
 import { Shape } from './shape';
 import { bodyCenterOfMass } from './massProperties';
+import { parseSimulationMode } from './simulationRange';
+import type { SimulationMode } from './simulationRange';
 import type { Node } from '../core/scene/nodes/node';
 
 
@@ -130,6 +132,9 @@ class CBody extends CannonBody {
         const com = CBody._comWorld;
         this.quaternion.vmult(this._com, com);
         this._origin.vadd(com, this.position);
+        // cannon only re-measures a body's AABB when IT moved the body (integrate); a static or sleeping
+        // body placed from a script would otherwise keep the box it had where it used to be.
+        this.aabbNeedsUpdate = true;
     }
 
     /**
@@ -208,6 +213,18 @@ interface RigidBodyConfig {
      * an animation blend, lower it where the body must react instantly. Frame-rate independent either way.
      */
     motionSmoothing?: number;
+    /**
+     * Where this body's simulation range comes from: the project's (`'project'`, the default), nowhere
+     * (`'always'`: never frozen), or {@link simulationRange} (`'custom'`). See physics/simulationRange.ts.
+     */
+    simulationMode?: SimulationMode;
+    /** Metres from the camera past which a `'custom'` body freezes. `0` = unlimited. */
+    simulationRange?: number;
+    /**
+     * Put the body to sleep once it has come to rest, until something hits, pushes or moves it. Off by
+     * default — a script that writes `body.velocity` directly will not wake it (Node.velocity does).
+     */
+    canSleep?: boolean;
 }
 
 export class RigidBody extends CBody {
@@ -221,6 +238,17 @@ export class RigidBody extends CBody {
   public readonly groundProbeDistance: number;
   /** See {@link RigidBodyConfig.motionSmoothing}. Read by PhysicsSystem when it samples measured motion. */
   public readonly motionSmoothing: number;
+  /** See {@link RigidBodyConfig.simulationMode}. */
+  public simulationMode: SimulationMode;
+  /** See {@link RigidBodyConfig.simulationRange}. */
+  public simulationRange: number;
+  /** See {@link RigidBodyConfig.canSleep}. */
+  public canSleep: boolean;
+  /**
+   * True while PhysicsSystem holds this body frozen for being out of range. Script-driven velocity does not
+   * wake such a body (that would undo the freeze every frame an AI steers); a hit or an impulse does.
+   */
+  public rangeFrozen: boolean = false;
 
   constructor(config?: RigidBodyConfig, owner?: Node) {
     super({
@@ -243,6 +271,18 @@ export class RigidBody extends CBody {
     this.groundProbeDistance = config?.groundProbeDistance ?? 0;
     this.motionSmoothing = config?.motionSmoothing ?? 0;
     this.simulatePhysics = config?.simulatePhysics ?? true;
+    this.simulationMode = parseSimulationMode(config?.simulationMode);
+    this.simulationRange = Math.max(0, config?.simulationRange ?? 0);
+    this.canSleep = config?.canSleep ?? false;
+  }
+
+  /**
+   * Wake a body a script just gave a velocity — unless it is frozen for being out of range, where an AI
+   * writing its steering every frame would otherwise thaw it every frame. cannon itself only wakes on a
+   * force, an impulse or a hit, never on a velocity written in place.
+   */
+  public wakeForMotion(): void {
+    if (this.sleepState === CannonBody.SLEEPING && !this.rangeFrozen) this.wakeUp();
   }
 
   /**

@@ -48,6 +48,18 @@ const RULES: Readonly<Record<string, Rule>> = {
     pbrGeometrySkinnedPom: fixed('pbrGeometrySkinned', 'pom'),
     pbrGeometryInstanced: fixed('pbrGeometryInstanced', 'flat'),
     pbrGeometryInstancedPom: fixed('pbrGeometryInstanced', 'pom'),
+    // No-discard G-buffer programs for opaque materials (chunks/pbrGBuffer.wgsl, CLEO_OPAQUE).
+    pbrGeometryOpaque: fixed('pbrGeometry', 'opaque'),
+    pbrGeometrySkinnedOpaque: fixed('pbrGeometrySkinned', 'opaque'),
+    pbrGeometryInstancedOpaque: fixed('pbrGeometryInstanced', 'opaque'),
+    // The lean foliage programs (chunks/pbrGBuffer.wgsl, CLEO_LEAN): mesh-uv materials on terrain foliage.
+    pbrGeometryInstancedLean: fixed('pbrGeometryInstanced', 'lean'),
+    pbrGeometryInstancedLeanWind: fixed('pbrGeometryInstanced', 'leanWind'),
+    // The foliage depth prepass and the no-discard colour pass after it (Renderer.foliagePrepass).
+    pbrGeometryInstancedPrepass: fixed('pbrGeometryInstanced', 'prepass'),
+    pbrGeometryInstancedPrepassWind: fixed('pbrGeometryInstanced', 'prepassWind'),
+    pbrGeometryInstancedLeanOpaque: fixed('pbrGeometryInstanced', 'leanOpaque'),
+    pbrGeometryInstancedLeanOpaqueWind: fixed('pbrGeometryInstanced', 'leanOpaqueWind'),
     // Foliage wind (chunks/foliageWind.wgsl): the instanced programs with the displacement compiled in.
     pbrGeometryInstancedWind: fixed('pbrGeometryInstanced', 'wind'),
     blinn_phongGeometryInstancedWind: fixed('blinn_phongGeometryInstanced', 'wind'),
@@ -67,6 +79,16 @@ export const EXTRA_LOGICAL_NAMES: Readonly<Record<string, string>> = {
     pbrGeometryPom: 'pbrGeometry',
     pbrGeometrySkinnedPom: 'pbrGeometrySkinned',
     pbrGeometryInstancedPom: 'pbrGeometryInstanced',
+    // Opaque names always mean their no-discard variant: the base programs keep every cutout test.
+    pbrGeometryOpaque: 'pbrGeometry',
+    pbrGeometrySkinnedOpaque: 'pbrGeometrySkinned',
+    pbrGeometryInstancedOpaque: 'pbrGeometryInstanced',
+    pbrGeometryInstancedLean: 'pbrGeometryInstanced',
+    pbrGeometryInstancedLeanWind: 'pbrGeometryInstanced',
+    pbrGeometryInstancedPrepass: 'pbrGeometryInstanced',
+    pbrGeometryInstancedPrepassWind: 'pbrGeometryInstanced',
+    pbrGeometryInstancedLeanOpaque: 'pbrGeometryInstanced',
+    pbrGeometryInstancedLeanOpaqueWind: 'pbrGeometryInstanced',
     // Wind names likewise always mean their `wind` variant: the base programs have it compiled out.
     pbrGeometryInstancedWind: 'pbrGeometryInstanced',
     blinn_phongGeometryInstancedWind: 'blinn_phongGeometryInstanced',
@@ -74,6 +96,16 @@ export const EXTRA_LOGICAL_NAMES: Readonly<Record<string, string>> = {
     shadowMapInstancedWind: 'shadowMapInstanced',
     shadowMapInstancedCutoutWind: 'shadowMapInstancedCutout',
 };
+
+/**
+ * Variant names the editor does NOT build at boot: they serve an opt-in feature (the foliage prepass), so
+ * paying their compile on every launch would tax everyone for something few use. The first draw that asks
+ * compiles them in the background while the family's base program stands in (Renderer._buildOnDemand).
+ */
+export const LAZY_LOGICAL_NAMES: ReadonlySet<string> = new Set([
+    'pbrGeometryInstancedPrepass', 'pbrGeometryInstancedPrepassWind',
+    'pbrGeometryInstancedLeanOpaque', 'pbrGeometryInstancedLeanOpaqueWind',
+]);
 
 /** Logical names whose program depends on the shadow filter. */
 export const FILTER_DEPENDENT: readonly string[] = Object.keys(RULES).filter(n => RULES[n].tag(0) !== RULES[n].tag(1));
@@ -97,6 +129,15 @@ export function logicalNamesFor(physical: string, filter: ShadowFilter): string[
 
 /** Every logical name with a variant rule. */
 export function variantLogicalNames(): string[] { return Object.keys(RULES); }
+
+/**
+ * Whether every one of `materials` can take a no-discard (`Opaque`) G-buffer program: no cutout of any
+ * kind (an `alphaCutoff` is what arms both the mask and the base-colour alpha test). The draw-side half —
+ * no despawn dissolve and no LOD crossfade on this draw — is the caller's to check.
+ */
+export function opaqueEligible(materials: readonly { properties: Map<string, unknown> }[]): boolean {
+    return materials.every(m => !((m.properties.get('alphaCutoff') as number) > 0));
+}
 
 /**
  * Whether any of `materials` runs the parallax march — the condition chunks/pbrForward.wgsl and

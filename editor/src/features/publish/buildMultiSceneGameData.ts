@@ -45,6 +45,11 @@ export interface MultiSceneSources {
   projectSettings?: ProjectSettings
   /** The OPEN scene's live dimension. Its meta can be one save behind, and the live value is the truth. */
   liveDimension?: '2D' | '3D'
+  /**
+   * Pipeline recipes the editor recorded this session (Renderer.pipelineRecipes): the player builds them
+   * while its loading screen is up, so a WebGPU game does not compile one on each first draw.
+   */
+  pipelines?: readonly unknown[]
 }
 
 export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<any> {
@@ -233,6 +238,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   // The shader programs the game uses: the player builds only these at boot (see collectPrograms).
   if (src.projectSettings?.publish.onlyUsedShaders !== false)
     (config.graphics ??= {}).programs = collectPrograms(out, config.render)
+  if (src.pipelines?.length) (config.graphics ??= {}).pipelines = src.pipelines
   if (Object.keys(config).length > 0) out.config = config
   return out
 }

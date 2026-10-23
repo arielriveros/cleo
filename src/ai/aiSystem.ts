@@ -68,6 +68,25 @@ export class AISystem {
     public get stats() { return aiStats; }
 
     /**
+     * Build every baked navmesh of the bound scene now, rather than on the frame an agent first asks.
+     *
+     * `NavMeshNode.mesh` builds lazily, and for a large terrain bake that build is the single most
+     * expensive thing an agent ever does: the Valley's 45k regions took the better part of a second, on
+     * the frame the first enemy noticed the player and started its chase. `Scene.start` calls this on a
+     * running scene, where a load is already expected. Returns the milliseconds it spent, which is ~0 when
+     * the meshes were already built or shared from an earlier scene with the same bake.
+     */
+    public prewarm(): number {
+        const scene = this._scene;
+        if (!scene) return 0;
+        const start = performance.now();
+        for (const source of scene.navMeshes) {
+            if (source.isBaked) void source.mesh;
+        }
+        return performance.now() - start;
+    }
+
+    /**
      * The navmesh a controller should use.
      *
      * A named one when it resolves and is baked; otherwise the scene's first baked mesh, so a scene

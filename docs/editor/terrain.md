@@ -181,6 +181,17 @@ estimate of how many instances that means over the terrain. Rules also carry LOD
 an **impostor** — a billboard stand-in used past the distance where real geometry stops being worth
 it.
 
+**Bake impostor** makes one of two kinds, chosen by the rule's **Impostor** setting:
+
+| Kind | What it is | Use for |
+|---|---|---|
+| **Octahedral** (default) | 8 × 8 views of the model over the upper hemisphere, with their normals, drawn on one camera-facing quad that blends the three nearest views. Lit by the scene like the mesh. | Trees and anything seen from several sides or from above. Holds up much closer than a card, so the mesh levels can hand over sooner. |
+| **Flat card** | One front view on two crossed quads, lit into the texture. | Small plants, where one view is plenty and memory matters. |
+
+The octahedral bake is made from the rule's **last** LOD level — the one it takes over from — so the
+hand-over does not pop. **Impostor size** is the card's side for a card, the whole atlas's for an
+octahedral bake (1024 = 128 px views; 2048 for a tree seen large).
+
 There are also **exclusion** rules, so a material can say "not here" as well as "grass here".
 
 Defaults: `2.0` per m² for billboards, `0.05` for meshes. Meshes are three orders of magnitude

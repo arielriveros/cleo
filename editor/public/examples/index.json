@@ -6,9 +6,9 @@
       "name": "Valley",
       "description": "A souls-like on a 2 km mountain valley: stamina combat, rolls, lock-on, bonfires and Estus, on landscape layers for ground, rock, snow, forest floor and trails, meadow grass and flowers, pine forest, moss rocks, a thatched hamlet with breakable barrels, and a skull cave that loads a second scene.",
       "order": 0,
-      "bytes": 208259211,
+      "bytes": 211470736,
       "sceneCount": 2,
-      "textureCount": 77,
+      "textureCount": 78,
       "createdAt": 1790000000000
     }
   ]

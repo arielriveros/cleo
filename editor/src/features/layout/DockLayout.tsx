@@ -312,13 +312,15 @@ function relayout(api: DockviewApi) {
  * Which panels a given mode / play state hides. A group is hidden once by default and a mode opts out, so
  * a new mode-specific group cannot leak into unrelated modes.
  */
-function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
+export function hiddenPanelIds(mode: EditorMode, playing: boolean, simulating: boolean = false): readonly string[] {
   // Options mode is the only branch that keeps the options panels, alone over the live viewport.
   if (mode === 'options') return CHROME_PANELS;
-  // Play strips the chrome AND every mode-specific panel.
-  if (playing) return [...CHROME_PANELS, ...OPTIONS_PANELS];
+  // Play strips the chrome AND every mode-specific panel. Simulate does not: nobody is possessed, so the
+  // editor stays the user's — the tree and Inspector show the running simulation, and the Engine options
+  // panel (Performance, Renderer) can be docked beside it.
+  if (playing && !simulating) return [...CHROME_PANELS, ...OPTIONS_PANELS];
 
-  const hidden = new Set<string>(OPTIONS_PANELS);
+  const hidden = new Set<string>(simulating ? OPTIONS_PANELS.filter(id => id !== 'optionsEngine') : OPTIONS_PANELS);
 
   // Mode-specific panels: hidden everywhere, revealed by the single mode that owns them.
   if (mode !== 'stateMachine') for (const id of STATE_MACHINE_PANELS) hidden.add(id);
@@ -389,11 +391,14 @@ function hiddenPanelIds(mode: EditorMode, playing: boolean): readonly string[] {
       break;
   }
 
+  // The Add palettes build into the AUTHORED scene, which is not the one on screen while Simulating.
+  if (simulating) hide(...ADD_PANELS);
+
   return [...hidden];
 }
 
 export default function DockLayout() {
-  const { eventEmitter, editorMode, isPlayMode } = useCleoEngine();
+  const { eventEmitter, editorMode, isPlayMode, isSimulating } = useCleoEngine();
   const [api, setApi] = useState<DockviewApi | null>(null);
   // The controller's own memory of the last commit, not derived state: the effect needs the OUTGOING mode
   // to know which key to save the tree under before it swaps trees.
@@ -466,8 +471,8 @@ export default function DockLayout() {
    */
   const applyRestriction = useCallback((dock: DockviewApi) => {
     for (const id of Object.keys(PANEL_TITLES)) dock.getPanel(id)?.api.setTitle(panelTitle(id, editorMode));
-    for (const id of hiddenPanelIds(editorMode, isPlayMode)) dock.getPanel(id)?.api.close();
-  }, [editorMode, isPlayMode]);
+    for (const id of hiddenPanelIds(editorMode, isPlayMode, isSimulating)) dock.getPanel(id)?.api.close();
+  }, [editorMode, isPlayMode, isSimulating]);
 
   // Mode/play controller. One path serves mode->mode, mode->play and play->mode: bank the outgoing mode's
   // arrangement, put the incoming mode's tree up, then restrict it. applyRestriction must run even on a
@@ -494,6 +499,15 @@ export default function DockLayout() {
 
       assertRenderers(api);
       applyRestriction(api);
+      // A scene tree never carries the Engine options panel (scene mode closes it), so Simulate docks it
+      // beside Properties itself: Performance is the reason to keep the editor open while simulating.
+      // Inactive, so Properties stays the visible tab; the tree is never saved (playingRef mutes it).
+      if (isSimulating && !api.getPanel('optionsEngine') && api.getPanel('properties')) {
+        api.addPanel({
+          id: 'optionsEngine', component: 'optionsEngine', title: PANEL_TITLES['optionsEngine'],
+          position: { referencePanel: 'properties', direction: 'within' }, inactive: true,
+        });
+      }
       // fromJSON restores the tab selected when the tree was saved; put the user's choice back.
       restoreBottomTab(api);
       // Landscape mode opens on its tools, not on Properties: the tools and the layer stack under them
@@ -508,7 +522,7 @@ export default function DockLayout() {
     });
     keyRef.current = editorMode;
     playingRef.current = isPlayMode;
-  }, [api, editorMode, isPlayMode, applyRestriction, restoreBottomTab, withProgrammaticLayout]);
+  }, [api, editorMode, isPlayMode, isSimulating, applyRestriction, restoreBottomTab, withProgrammaticLayout]);
 
   // Remember which bottom tab the user is on. When a mode hides both there is no selection to read, so
   // the remembered value is left alone.

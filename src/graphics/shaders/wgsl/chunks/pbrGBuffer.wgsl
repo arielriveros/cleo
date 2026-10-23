@@ -238,6 +238,14 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     // module, and a rejected module takes its pipeline and every bind group built from it down.
     // The material's mapping (mesh uv / box / triplanar), with its gradients — taken here, in uniform
     // control flow. `ddx`/`ddy` are chart 0's, which is THE chart in mesh and box modes.
+#if CLEO_LEAN
+    // The `lean` foliage variants: the mesh uv chart alone (meshSurfaceUv), and no parallax frame — a
+    // lean program never marches (CLEO_POM is 0 there), and the frame's position and normal derivatives
+    // were taken for every foliage fragment only to go unused.
+    let su = meshSurfaceUvOf(in, materialUv());
+    let ddx = su.dx0;
+    let ddy = su.dy0;
+#else
     let su = surfaceUvOf(in, materialUv());
     let ddx = su.dx0;
     let ddy = su.dy0;
@@ -247,6 +255,7 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     let toEye = normalize(u_material.viewPos - in.fragPos);
     let basis = parallaxFrame(in.fragPos, ddx, ddy, tbnOf(in), toEye);
     let frame = basis.frame;
+#endif
 
     var uv = su.uv0;
     var selfShadow = 1.0;
@@ -317,6 +326,19 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
 
     // Every fetch below reads the parallax-offset uv. All of them, or the maps come apart: an albedo
     // displaced while its normal is not is worse than no parallax at all.
+#if CLEO_OPAQUE
+    // The `opaque` variants (programVariants.ts): no `discard` anywhere in the stage. A fragment shader
+    // that CAN discard costs the GPU its early depth write (and on many, its early test) for every
+    // fragment of every draw — whether or not any fragment is ever thrown away — so an opaque material
+    // with no cutout, drawn with no dissolve, takes this program and keeps early-Z. MJP's list of what
+    // must stay a permutation rather than a runtime branch has exactly this on it.
+    //
+    // It still READS the mask map, behind a test no material passes: WebGPU builds the bind-group layout
+    // from what the shader uses, and every variant shares one bind group.
+    if (u_material.alphaCutoff < -1e30) {
+        selfShadow *= sampleSurface(u_material_maskMap_texture, u_material_maskMap_sampler, su, uv).r;
+    }
+#else
     // The mask cutout, before the base-colour fetch: a discarded fragment writes no G-buffer at all.
     // Explicit gradients from the UN-offset uv, like every other fetch below.
     if (u_material.hasMaskMap != 0 && u_material.alphaCutoff > 0.0) {
@@ -327,6 +349,7 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
 
     // Foliage LOD crossfade: a screen-door dissolve between levels (always kept outside foliage).
     if (!lodFadeKeeps(in.lodFade, in.position.xy)) { discard; }
+#endif
 
     var albedo = u_material.baseColor;
     if (u_material.hasBaseColorTexture != 0) {
@@ -334,11 +357,32 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
         // The cutout, before any other work: a discarded fragment writes no G-buffer at all, so a leaf
         // card's background never becomes depth, normal or albedo for the lighting pass to shade.
         // Only when there is no mask texture — that one has already been tested above.
+#if !CLEO_OPAQUE
         if (u_material.hasMaskMap == 0 && u_material.alphaCutoff > 0.0
             && cutoutAlpha(texel.a, su.dx0, su.dy0, textureDimensions(u_material_baseColorTexture_texture, 0))
                < u_material.alphaCutoff) { discard; }
+#endif
         albedo *= pow(texel.rgb, vec3<f32>(2.2));   // sRGB -> linear
     }
+
+#if CLEO_PREPASS
+    // The foliage DEPTH PREPASS (the `prepass` variants): everything a fragment can be thrown away for has
+    // been decided above — the mask, the LOD dissolve, the base-colour cutout — so this is where its depth
+    // is known. The pipeline writes no colour; the colour pass then shades each pixel once, with
+    // depthCompare 'equal' and a program with no discard (`leanOpaque`), so it keeps early-Z.
+    //
+    // The remaining maps are still READ, behind a test no material passes: WebGPU builds the bind-group
+    // layout from what the shader uses, and every variant of the family shares one bind group.
+    // Named `out` like the colour path's result, so naga allocates the same identifiers and the vertex
+    // stage stays byte-identical to the base program's (tests/shaderVariants.test.ts).
+    var out: GBuffer;
+    if (u_material.alphaCutoff < -1e30) {
+        out.gAlbedoMetallic = sampleSurface(u_material_ormTexture_texture, u_material_ormTexture_sampler, su, uv)
+            + sampleSurface(u_material_emissiveMap_texture, u_material_emissiveMap_sampler, su, uv)
+            + sampleSurface(u_material_normalMap_texture, u_material_normalMap_sampler, su, uv) * selfShadow;
+    }
+    return out;
+#else
 
     var metallic = u_material.metallic;
     var roughness = u_material.roughness;
@@ -386,11 +430,18 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     // straddle silhouettes, sampling two unrelated surfaces into one variance estimate and painting a
     // rim of blur around every object. Here the derivative is taken across one triangle's own normal.
     let octN = octEncode(N);
+#if CLEO_LEAN
+    // No geometric specular AA on the lean foliage path: it takes two more derivative pairs per fragment,
+    // and foliage is rough enough that its specular barely aliases.
+    out.gNormalRoughness = vec4<f32>(octN.x, octN.y, u_material.reflectance, roughness);
+#else
     out.gNormalRoughness = vec4<f32>(octN.x, octN.y, u_material.reflectance,
                                      filterSpecularRoughness(roughness, N, u_material.specularAA));
+#endif
     out.gEmissiveAO = vec4<f32>(emissive, ao);
 #if CLEO_POM
     out.depth = pomDepth;
 #endif
     return out;
+#endif
 }

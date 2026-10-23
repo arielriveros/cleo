@@ -206,6 +206,7 @@ export class Terrain {
     private _R: number;              // vertices per side
     private _element: number;        // world spacing between samples
     private _heights: Float32Array;  // row-major [r * R + c]
+    private _heightsVersion = 0;
     private _chunks: TerrainChunk[] = [];
     private _material: Material;
 
@@ -245,6 +246,11 @@ export class Terrain {
     public get config(): Required<TerrainConfig> { return this._cfg; }
     public get chunks(): TerrainChunk[] { return this._chunks; }
     public get heights(): Float32Array { return this._heights; }
+    /**
+     * Bumped whenever the heights change after construction (sculpt, resample, import), alongside the
+     * physics rebuild flag. What derived height data keys on — the renderer's occluder mesh.
+     */
+    public get heightsVersion(): number { return this._heightsVersion; }
     public get resolution(): number { return this._R; }
     public get size(): number { return this._cfg.size; }
     public get elementSize(): number { return this._element; }
@@ -478,6 +484,7 @@ export class Terrain {
             this._refreshChunkGeometry(ch);
         }
         this._bodyDirty = true;
+        this._heightsVersion++;
     }
 
     // --- level of detail ----------------------------------------------------------------------
@@ -636,6 +643,7 @@ export class Terrain {
         for (let i = 0; i < n; i++) this._heights[i] = heights[i];
         for (const ch of this._chunks) this._refreshChunkGeometry(ch);
         this._bodyDirty = true;
+        this._heightsVersion++;
     }
 
     /** Lowest and highest sculpted height, terrain-local. */
@@ -667,6 +675,7 @@ export class Terrain {
         }
         for (const ch of this._chunks) this._refreshChunkGeometry(ch);
         this._bodyDirty = true;
+        this._heightsVersion++;
     }
 
     /**
@@ -724,6 +733,7 @@ export class Terrain {
         }
         for (const ch of this._chunks) this._refreshChunkGeometry(ch);
         this._bodyDirty = true;
+        this._heightsVersion++;
     }
 
     /** Render the current height field to a grayscale PNG data URL (normalized to its own min..max). */
@@ -1342,7 +1352,9 @@ export class Terrain {
             return;
         }
         if (this._physicsMaterial && this._body.material !== this._physicsMaterial) this._body.material = this._physicsMaterial;
-        if (world.bodies.indexOf(this._body) === -1) world.addBody(this._body);
+        // cannon stamps `body.world` on add and clears it on remove: an O(1) membership test, where
+        // `world.bodies.indexOf` scanned every body in the world once per landscape per frame.
+        if ((this._body as any).world !== world) world.addBody(this._body);
         // Rebuild at most a few times per second so a continuous sculpt drag doesn't rebuild every frame.
         if (this._bodyDirty && Date.now() - this._lastBodyBuild > 200) this._rebuildBody();
     }

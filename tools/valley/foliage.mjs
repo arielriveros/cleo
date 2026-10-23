@@ -11,7 +11,8 @@
 //
 // The pine is 477k triangles (133k bark, 344k needle cards), drawn at full detail as LOD0. LOD1 and LOD2
 // (15% and 5%) come from the editor's own QEM simplifier, so the library asset is what "Generate LOD
-// levels…" would have made, and past those an impostor card baked by impostor.py takes over.
+// levels…" would have made, and past those an octahedral impostor (tools/valley/bakeOctahedral.ts, the
+// engine's own baker) takes over.
 //
 // ## Placement
 //
@@ -33,12 +34,14 @@ export const GRASS_PATCHES = [
 const GRASS_SCALE = 1.8
 /**
  * LOD ratios and switch distances. LOD0 is the source model at full detail for both; grass ends at
- * `GRASS_CULL`, and past `PINE_BILLBOARD` a pine is its baked impostor card out to the horizon.
+ * `GRASS_CULL`, and past `PINE_BILLBOARD` a pine is its baked octahedral impostor out to the horizon. That
+ * impostor is lit like the mesh and right from every side and from above, so it takes over at 50 m where the
+ * flat card it replaced needed 70: a 256 px view of a ~15 m pine still out-resolves the tree on screen there.
  */
 const GRASS_LODS = [[0.08, 6], [0.025, 15]]
 export const GRASS_CULL = 20
 const PINE_LODS = [[0.15, 15], [0.05, 35]]
-export const PINE_BILLBOARD = 70
+export const PINE_BILLBOARD = 50
 export const PINE_CULL = 450
 /** The celandine flowers share the meadow's LOD ladder and end with it. */
 export const FLOWER_CULL = GRASS_CULL

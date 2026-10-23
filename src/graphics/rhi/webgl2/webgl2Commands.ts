@@ -15,6 +15,7 @@ import {
 import { frameStats, setViewportSize } from '../../renderStats';
 import { isTriangleTopology, uniformTargetBlend } from '../types';
 import { glDevice } from './webgl2Device';
+import type { WebGL2OcclusionQuerySet } from './webgl2Queries';
 import type { WebGL2Texture, WebGL2Buffer, WebGL2Framebuffer } from './webgl2Device';
 import type {
     RenderPipelineDescriptor, BindGroupDescriptor, ShaderModuleDescriptor,
@@ -275,6 +276,9 @@ export class WebGL2BindGroup implements BindGroup {
 // ------------------------------------------------------------------------------------------------
 
 export class WebGL2RenderPassEncoder implements RenderPassEncoder {
+    /** The pass's occlusion queries, from its descriptor. Immediate mode: begin/end issue at once. */
+    constructor(private readonly _queries: WebGL2OcclusionQuerySet | null = null) {}
+
     private _pipeline: WebGL2RenderPipeline | null = null;
     /** Next free texture unit. Groups bind consecutively from 0, in the order they are set. */
     private _nextUnit = 0;
@@ -333,6 +337,14 @@ export class WebGL2RenderPassEncoder implements RenderPassEncoder {
         this._countDraw(indexCount, instanceCount);
     }
 
+    public beginOcclusionQuery(index: number): void { this._queries?.begin(index); }
+    public endOcclusionQuery(): void { this._queries?.end(); }
+
+    /** WebGL2 has no indirect draws: `capabilities.hasIndirectDraw` is unset here. */
+    public drawIndexedIndirect(): void {
+        throw new Error('drawIndexedIndirect: WebGL2 has no indirect draws (capabilities.hasIndirectDraw)');
+    }
+
     // Bind the VAO this draw needs and flush pending uniform writes. The VAO is built from the
     // PIPELINE's layouts over this encoder's buffers, and cached on the device.
     private _beginDraw(): number {
@@ -369,7 +381,7 @@ export class WebGL2CommandEncoder implements CommandEncoder {
 
     public beginRenderPass(target: RenderTarget, descriptor: any): RenderPassEncoder {
         this._beginPass(target, descriptor);
-        return new WebGL2RenderPassEncoder();
+        return new WebGL2RenderPassEncoder((descriptor?.occlusionQuerySet as WebGL2OcclusionQuerySet | undefined) ?? null);
     }
 
     /** Always throws: WebGL2 has no compute stage. Check `capabilities.hasCompute` first. */

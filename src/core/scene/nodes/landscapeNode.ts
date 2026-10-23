@@ -31,12 +31,15 @@ export class LandscapeNode extends Node {
         this._chunkNodes = [];
         for (let i = 0; i < this._terrain.chunks.length; i++) {
             const node = new ModelNode(`__terrain_chunk__${i}`, this._terrain.chunks[i].model);
+            node.isTerrainChunk = true;
             this._chunkNodes.push(node);
             this.addChild(node);
         }
     }
 
     public get terrain(): Terrain { return this._terrain; }
+    /** The generated chunk nodes, one per terrain chunk, in `terrain.chunks` order. */
+    public get chunkNodes(): readonly ModelNode[] { return this._chunkNodes; }
 
     /** Swap in a rebuilt terrain (e.g. resized/re-resolutioned) while keeping this node + its transform.
      *  Disposes the old physics body and replaces the internal chunk child nodes. */

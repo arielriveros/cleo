@@ -3,6 +3,7 @@ import { authoring, engineEventBus } from '../core/eventBus';
 import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
+import type { LandscapeNode } from '../core/scene/nodes/landscapeNode';
 import { ModelNode } from '../core/scene/nodes/modelNode';
 import { TilemapNode } from '../core/scene/nodes/tilemapNode';
 import { LightNode } from '../core/scene/nodes/lightNode';
@@ -38,8 +39,12 @@ import {
     lightViewMatrix, pushCasterBounds, ShadowCasterBounds, STAGGER_MARGIN, staleCascadeCovers,
     spotShadowFar, SpotShadowSlots,
     MAX_POINT_SHADOWS, POINT_SHADOW_FACES, PointShadowCache, pointShadowFov,
-    HASH_SEED, mixString, mixTransform,
+    HASH_SEED, mixNumber, mixString, mixTransform,
 } from './shadowMath';
+import {
+    EYE_FIT_MARGIN, ShadowLayerCache, TerrainFloorGrid, cascadeSphereAroundEye, isFreeShadowSlot, receiverInnerRadius,
+    shadowFarthestFrom, shadowReach, shadowTouchesSphere, sliceCornerFactor, staggeredCascadeDue, unitDirection,
+} from './shadowCasters';
 import { Geometry } from '../core/geometry';
 import { Frustum } from '../core/frustum';
 import { AnimatedModel } from '../animation/animatedModel';
@@ -87,6 +92,7 @@ import PresentProgram from './shaders/wgsl/present.wgsl'
 import OverlayCompositeProgram from './shaders/wgsl/overlayComposite.wgsl'
 import DebugViewProgram from './shaders/wgsl/debugView.wgsl'
 import OverdrawProgram from './shaders/wgsl/overdraw.wgsl'
+import OverdrawInstancedProgram from './shaders/wgsl/overdrawInstanced.wgsl'
 import BloomProgram from './shaders/wgsl/bloom.wgsl'
 import ExposureMeterProgram from './shaders/wgsl/exposureMeter.wgsl'
 import BloomDownsampleProgram from './shaders/wgsl/bloomDownsample.wgsl'
@@ -126,6 +132,12 @@ import GeometryBlinnPhongSkinnedProgram from './shaders/wgsl/geometryBlinnPhongS
 import GeometryBlinnPhongInstancedProgram from './shaders/wgsl/geometryBlinnPhongInstanced.wgsl'
 import GeometryTerrainProgram from './shaders/wgsl/geometryTerrain.wgsl'
 import GeometryFoliageBillboardProgram from './shaders/wgsl/geometryFoliageBillboard.wgsl'
+import GeometryFoliageImpostorProgram from './shaders/wgsl/geometryFoliageImpostor.wgsl'
+import OcclusionBoxProgram from './shaders/wgsl/occlusionBox.wgsl'
+import ShadowMapImpostorProgram from './shaders/wgsl/shadowMapImpostor.wgsl'
+import { buildShadowBlock, shadowBlockSpans } from '../terrain/terrainShadowBlocks';
+import { GpuOcclusion, GPU_OCCLUSION_BUDGET } from './gpuOcclusion'
+import type { OcclusionQuerySet } from './rhi/resources'
 import GeometryBasicProgram from './shaders/wgsl/geometryBasic.wgsl'
 import GeometryBasicSkinnedProgram from './shaders/wgsl/geometryBasicSkinned.wgsl'
 import DeferredLightingProgram from './shaders/wgsl/deferredLighting.wgsl'
@@ -153,7 +165,15 @@ import { TextureManager } from './systems/textureManager';
 import { Logger } from '../core/logger';
 import { frameStats, resetFrameStats, countFullscreenPass, setViewportSize } from './renderStats';
 import { shaderStats } from './shaderStats';
-import { physicalFor, splitPhysical, logicalNamesFor, usesParallax, EXTRA_LOGICAL_NAMES, FILTER_DEPENDENT, type ShadowFilter } from './programVariants';
+import {
+    MaterialSync, MATERIAL_VIEW_SIZE, DrawSortKeys, ProgramCompileQueue, parseRecipes, serializeRecipe,
+    resetShaderOptimizerFrame, recordStall, shaderOptimizerStats,
+} from './shaderOptimizer';
+import type { PipelineRecipe } from './shaderOptimizer';
+import { OcclusionBuffer } from './occlusion/occlusionBuffer';
+import { TerrainOccluder, type OccluderGrid } from './occlusion/terrainOccluder';
+import type { Terrain } from '../terrain/terrain';
+import { physicalFor, splitPhysical, logicalNamesFor, usesParallax, opaqueEligible, EXTRA_LOGICAL_NAMES, LAZY_LOGICAL_NAMES, FILTER_DEPENDENT, type ShadowFilter } from './programVariants';
 import { gpuProfiler, initializeGpuProfiler, RENDER_PASSES, RenderPass } from './gpuProfiler';
 import { cpuProfiler } from './cpuProfiler';
 import { ssilTraceShape } from './ssilSettings';
@@ -165,8 +185,10 @@ import {
     foliageAdmitCount, createFoliageBatch, foliageBatchStale, foliageBatchInstances,
     packFoliageInstances, rememberFoliageBatch, foliageChunkLimit, foliageChunkBounds,
     foliageKeepFraction, FOLIAGE_DENSITY_FALLOFF, foliageEffectiveCull, foliageLodBands,
+    sortFoliageFrontToBack, FOLIAGE_SORT_REFRESH,
 } from '../terrain/foliage';
 import type { FoliageBatch, FoliageLayer, FoliageBand } from '../terrain/foliage';
+import { FoliageGpuCuller, type GpuCullBucket, type GpuFoliageSegment } from './foliageGpuCulling';
 
 // The context now lives in its own leaf module (see glContext.ts); re-exported here so every existing
 // `import { gl } from './renderer'` keeps working.
@@ -189,11 +211,15 @@ import type { Buffer as RhiBuffer } from './rhi/resources';
 import { BufferUsage, ShaderStage, ADDITIVE_BLEND, DEFAULT_BLEND, OVERLAY_BLEND,
          OVERLAY_COMPOSITE_BLEND } from './rhi/types';
 import { isEditorOnlyNode } from '../core/scene/editorNodes';
-import type { ShaderResource, BlendState, DepthStencilState, CullMode, PrimitiveTopology, VertexBufferLayout } from './rhi/types';
-import type { RenderPipeline, BindGroup, RenderTarget } from './rhi/resources';
-import type { RenderPassEncoder, CommandEncoder } from './rhi/device';
+import type { ShaderResource, BlendState, DepthStencilState, CullMode, PrimitiveTopology, VertexBufferLayout, TextureFormat } from './rhi/types';
+import type { RenderPipeline, BindGroup, RenderTarget, ShaderModule } from './rhi/resources';
+import type { RenderPassEncoder, CommandEncoder, RenderPipelineDescriptor } from './rhi/device';
 import { modelVertexLayout, instanceMatrixLayout, boneLayouts, screenQuadLayout, TILE_VERTEX_LAYOUT } from './rhi/vertexLayouts';
 import type { WebGL2RenderPassEncoder } from './rhi/webgl2/webgl2Commands';
+
+/** Built frames in a row that hid nothing before occlusion backs off, and how often it probes then. */
+const OCCLUSION_IDLE_FRAMES = 30;
+const OCCLUSION_IDLE_PROBE = 8;
 
 /** The material shader keys that receive per-frame forward lighting/shadow/env uploads. Custom
  *  forward materials are appended at runtime via `customForwardTypes()`. */
@@ -223,6 +249,9 @@ export type DebugView =
     'emissive' | 'ao' | 'depth' | 'ssao' | 'ssil' | 'shadow' | 'cascades' | 'bloom' | 'bloomMask' | 'mask' | 'velocity' |
     'taaHistory' | 'overdraw';
 
+/** How much the CPU occlusion culling uses: nothing, the landscape, or the landscape and Occluder volumes. */
+export type OcclusionMode = 'off' | 'terrain' | 'all';
+
 interface RendererConfig {
     clearColor?: number[];
     shadowMapResolution?: number;
@@ -244,6 +273,11 @@ interface RendererConfig {
     programs?: readonly string[];
     /** Use build-time program variants (implied by `programs`). See programVariants.ts. */
     shaderVariants?: boolean;
+    /**
+     * Pipeline recipes to build ahead of use, recorded in the editor and shipped by publish
+     * (`config.graphics.pipelines`). See shaderOptimizer/pipelineRecipes.ts. WebGPU only.
+     */
+    pipelines?: readonly unknown[];
 }
 
 /**
@@ -448,6 +482,35 @@ export interface RenderSettings {
      */
     taaEnabled: boolean;
     frustumCulling: boolean;
+    /**
+     * CPU occlusion culling (graphics/occlusion): skip what is hidden behind the landscape (`terrain`) or
+     * behind the landscape and Occluder volumes (`all`). Absent = `all`.
+     */
+    occlusionCulling?: OcclusionMode;
+    /**
+     * How far terrain foliage casts shadows, metres. 0 (or absent) = as far as it draws. Past it a tree's
+     * shadow is a few texels of a distant cascade; the cells are still drawn, only not into the shadow map.
+     */
+    foliageShadowDistance?: number;
+    /**
+     * Depth prepass for alpha-tested mesh foliage (the two nearest detail levels): its depth is written
+     * first with a cutout-only program, then it is shaded ONCE per pixel with a no-discard program tested
+     * 'equal'. Trades a second vertex pass for the fragment overdraw; a win only where foliage is
+     * fill-bound — measure (the foliage GPU row, and the overdraw view) before leaving it on. Off by default.
+     */
+    foliagePrepass?: boolean;
+    /**
+     * GPU-driven foliage culling, WebGPU only (graphics/foliageGpuCulling.ts): a compute pass drops every
+     * instance faded out of its detail band or off screen, and the buckets draw indirectly — no instance
+     * upload per frame. On by default where the device supports it; WebGL2 always packs on the CPU.
+     */
+    foliageGpuCulling?: boolean;
+    /**
+     * Occlusion culling's second stage (graphics/gpuOcclusion.ts): hardware occlusion queries against the
+     * frame's real depth, for what the CPU occluders cannot see — a house hiding the cart behind it. Results
+     * arrive a frame or two late, so only a fresh "hidden" is acted on. Needs `occlusionCulling` on.
+     */
+    occlusionQueries?: boolean;
     foliageCullDistance: number;
     /**
      * Multiplies every particle system's LOD distances and cull distance (each `.vfx` authors its own;
@@ -588,6 +651,84 @@ export interface SkeletonOverlay {
      * to face the camera and sizes it per frame, so it reads as a constant-size circle on screen.
      */
     jointShape?: 'sphere' | 'ring';
+}
+
+/**
+ * One shadow caster, gathered once per frame and shared by every shadow layer that frame: the cascades,
+ * the far cascade, spot slots and point faces. See `Renderer._ensureShadowCasters`.
+ */
+interface ShadowCasterRecord {
+    node: ModelNode;
+    /** The node's world bounding sphere: a live reference, valid for this frame. */
+    sphere: { center: vec3; radius: number };
+    state: ShadowCasterState;
+    /** How far its shadow can travel along the sun this frame (`shadowReach`). */
+    reach: number;
+    /** The owning terrain's heights version when this is a landscape chunk, else -1. */
+    terrainVersion: number;
+    /** A mesh drawn in place of the node's own — a terrain shadow block (terrain/terrainShadowBlocks.ts). */
+    mesh: Mesh | null;
+}
+
+/** One landscape's chunk casters, and their spheres and reaches packed `x, y, z, r, reach` for the layer test. */
+interface TerrainCasterSet {
+    key: number;
+    records: ShadowCasterRecord[];
+    packed: Float32Array;
+}
+
+/** One landscape's far-cascade terrain blocks: meshes, their records, and what they were built from. */
+interface TerrainBlockSet {
+    terrain: object | null;
+    version: number;
+    step: number;
+    /** Positions each block's mesh was last uploaded from, so an unchanged block re-uploads nothing. */
+    positions: Float32Array[];
+    meshes: Mesh[];
+    bounds: { min: [number, number, number]; max: [number, number, number] }[];
+    records: ShadowCasterRecord[];
+    recordsKey: number;
+    lastUsed: number;
+}
+
+/**
+ * What a caster draws with — program, pipeline, cutout — kept per node across frames and rebuilt only
+ * when an input it was resolved from changes.
+ */
+interface ShadowCasterState {
+    model: Model | AnimatedModel;
+    material: Material;
+    /** `_shadowPipelineEpoch` (and the cube-capture winding) the pipeline was built under. */
+    epoch: number;
+    shaderType: string;
+    cullMode: CullMode;
+    pipeline: RenderPipeline;
+    skinned: boolean;
+    anyCutout: boolean;
+    /** One draw over the whole index buffer, rather than one per casting submesh. */
+    wholeBuffer: boolean;
+    /** The node's identity, for the layer hashes. */
+    id: number;
+    /** The draw state — pipeline, cutout textures and thresholds — as one number, for the layer hashes. */
+    key: number;
+    pipelineId: number;
+    /** The shadow reach, and the sphere, sun and ground it was found for (see `_ensureShadowCasters`). */
+    reach: number;
+    reachKey: number;
+    reachX: number; reachY: number; reachZ: number; reachR: number;
+}
+
+type ShadowCutout = { texture: Texture, cutoff: number, useRed: boolean };
+
+/** A foliage layer's cells bucketed on the ground plane, for the shadow pass's range query. */
+interface FoliageCellGrid {
+    cells: readonly FoliageCell[];
+    version: number;
+    minX: number; minZ: number; size: number; cols: number; rows: number;
+    /** The largest cell's half-extent on the ground: how far past a bucket its cells can reach. */
+    reach: number;
+    start: Int32Array;
+    items: Int32Array;
 }
 
 export class Renderer {
@@ -876,14 +1017,65 @@ export class Renderer {
      */
     private _cascadeFitSpheres: CascadeSphere[] = Array.from({ length: MAX_CASCADES }, () => ({ center: vec3.create(), radius: 0 }));
     private _cascadeFitLightDirs: vec3[] = Array.from({ length: MAX_CASCADES }, () => vec3.create());
-    /** This frame's shadow casters in light view space, for fitting each cascade's near plane. */
+    /** One layer's shadow casters in light view space, for fitting its near plane. */
     private _casterBounds: ShadowCasterBounds = { data: new Float32Array(256), count: 0 };
     private _casterLightView: mat4 = mat4.create();
+
+    // ---- Shadow casters, shared by every shadow layer (graphics/shadowCasters.ts) --------------
+    /**
+     * This frame's casters, gathered once by `_ensureShadowCasters`; valid up to `_casterCount`. Each node
+     * keeps its record object across frames (`_casterRecordOf`), and a landscape its chunks' (`_terrainCasters`).
+     */
+    private readonly _casterRecords: ShadowCasterRecord[] = [];
+    private readonly _casterRecordByNode = new WeakMap<ModelNode, ShadowCasterRecord>();
+    private readonly _terrainCasterCache = new WeakMap<LandscapeNode, TerrainCasterSet>();
+    /** This frame's terrain caster sets, one per visible landscape; their records follow the others'. */
+    private readonly _terrainSets: TerrainCasterSet[] = [];
+    /** How many of `_casterRecords` are not terrain: those come first. */
+    private _nonTerrainCount: number = 0;
+    private _casterCount: number = 0;
+    /** The frame and scene `_casterRecords` were gathered for. */
+    private _castersFrame: number = -1;
+    private _castersScene: Scene | null = null;
+    /** The casters one layer draws, picked from `_casterRecords` by `_selectLayerCasters`. */
+    private readonly _layerCasters: ShadowCasterRecord[] = [];
+    private _layerCasterCount: number = 0;
+    /** The unit direction the sun's light travels this frame. */
+    private readonly _shadowLightUnit: vec3 = vec3.fromValues(0, -1, 0);
+    /** The lowest point anything visible can be shaded at this frame — where a shadow volume ends. */
+    private _receiverFloorY: number = 0;
+    /** Each visible landscape's ground grid, for shadow volumes that end on the terrain under them. */
+    private readonly _floorGrids: TerrainFloorGrid[] = [];
+    private readonly _terrainFloors = new WeakMap<LandscapeNode, {
+        grid: TerrainFloorGrid; terrain: object | null; version: number; x: number; y: number; z: number;
+    }>();
+    private _floorScratch: Float32Array = new Float32Array(0);
+    private readonly _shadowCasterStates = new WeakMap<ModelNode, ShadowCasterState>();
+    private readonly _shadowCutoutMemo = new WeakMap<Material, { frame: number; cut: ShadowCutout | null }>();
+    /** Bumped whenever a cached caster pipeline may no longer be the one `_pipelineFor` would build. */
+    private _shadowPipelineEpoch: number = 0;
+    /** Per cascade-array layer: the content hash it was last drawn with, so an unchanged layer is kept. */
+    private readonly _shadowLayerCache = new ShadowLayerCache(MAX_CASCADES + 1);
+    private readonly _shadowLayerDrawn = new Float64Array(MAX_CASCADES + 1).fill(-Infinity);
+    /** How the layer being drawn picks a terrain chunk's level — see `_shadowLodFor`. */
+    private _layerLodMode: 'camera' | 'beyond' | 'coarse' = 'camera';
+    private _layerLodRadius: number = 0;
+    private readonly _farReachSphere: CascadeSphere = { center: vec3.create(), radius: 0 };
+    /**
+     * A kept layer is still redrawn this often, so an edit no hash input sees — vertices rewritten in
+     * place, a texture's pixels replaced under the same object — catches up within half a second.
+     */
+    private static readonly SHADOW_LAYER_MAX_AGE = 32;
+    private static readonly FAR_LAYER_MAX_AGE = 120;
+    /** The depth state of every shadow pipeline: ONE object, so `_pipelineFor`'s key memo hits. */
+    private static readonly _SHADOW_DEPTH: DepthStencilState = {
+        format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal',
+    };
 
     // ---- Far cascade: landscape-scale shadows past the near cascades ------------------------
     // One extra layer of the cascade array (index `_cascadeCount`), fit around the CAMERA rather than
     // its view so turning costs nothing, holding only terrain and large casters, and re-rasterized only
-    // when the camera has moved a fraction of its reach, the sun turned, or every FAR_REFRESH_FRAMES.
+    // when the camera has moved a fraction of its reach, the sun turned, or something it holds changed.
     /** View distance the far cascade reaches; 0 = off (no extra layer is even allocated). */
     private _shadowFarDistance: number = 0;
     private _farCascadeMatrix: mat4 = mat4.create();
@@ -894,13 +1086,9 @@ export class Renderer {
     private _farCascadeActiveDistance: number = 0;
     private _farCascadeFit: CascadeSphere = { center: vec3.create(), radius: 0 };
     private _farCascadeLightDir: vec3 = vec3.create();
-    private _farCascadeFrame: number = -Infinity;
     private _farCascadeValid: boolean = false;
-    private readonly _farCasters: Set<ModelNode> = new Set();
     /** Fraction of its reach the camera may travel before the far cascade is re-fit. */
     private static readonly FAR_MOVE_FRACTION = 0.125;
-    /** Re-rasterize the far cascade at least this often, so moved casters and terrain edits catch up. */
-    private static readonly FAR_REFRESH_FRAMES = 30;
     /** A model this large casts into the far cascade alongside the terrain; anything smaller is lost in a texel. */
     private static readonly FAR_CASTER_MIN_RADIUS = 4;
 
@@ -935,6 +1123,29 @@ export class Renderer {
     private readonly _tableDescriptors = new Map<string, Omit<ShaderProgramDescriptor, 'label'>>();
     /** Every program built so far, by descriptor: one source never links twice (terrain has two names). */
     private readonly _builtByDescriptor = new Map<object, ShaderProgram>();
+
+    // ---- The shader optimizer (shaderOptimizer/) ----
+    /** Which material each program's material block already holds; see MaterialSync. */
+    private readonly _materialSync = new MaterialSync();
+    /** The per-view values riding in the material block, gathered for MaterialSync's comparison. */
+    private readonly _materialView = new Float64Array(MATERIAL_VIEW_SIZE);
+    /** Interned program/material ids for the opaque draw sort. */
+    private readonly _drawSortKeys = new DrawSortKeys();
+    /** Programs compiling in the background while a stand-in draws. See _buildOnDemand. */
+    private readonly _compileQueue = new ProgramCompileQueue<ShaderProgramDescriptor, ShaderProgram>({
+        prepareShaderProgram: d => this.device.prepareShaderProgram?.(d),
+        isShaderProgramReady: d => this.device.isShaderProgramReady?.(d) ?? true,
+        createShaderProgram: d => this.device.createShaderProgram(d),
+    }, () => !!this._capabilities?.parallelShaderCompile && !shaderStats.syncEach);
+    /** Every pipeline built this session, as a recipe a publish can ship. See pipelineRecipes. */
+    private readonly _pipelineRecipes = new Map<string, PipelineRecipe>();
+    /** Recipes handed in by the config, built ahead of use by {@link warmPipelines}. */
+    private readonly _warmRecipes: PipelineRecipe[];
+    /**
+     * Shader modules by program and source: a program drawn under several pipeline states (cull modes,
+     * targets, blends) compiles its module once. WebGPU parses and validates WGSL per module.
+     */
+    private readonly _moduleCache = new Map<string, Map<string, ShaderModule>>();
     private _shadowStrength: number = 1.0;
     /** Fraction of a cascade's range used to cross-fade into the next one; 0 = a hard seam. */
     private _cascadeBlend: number = 0.1;
@@ -1399,6 +1610,43 @@ export class Renderer {
     // Per-object camera frustum culling for the main color passes. Rebuilt each frame from _viewProj.
     private _frustum: Frustum = new Frustum();
     private _frustumCulling: boolean = true;
+    /** See RenderSettings.occlusionCulling. */
+    private _occlusionMode: OcclusionMode = 'all';
+    /** See RenderSettings.foliageShadowDistance. */
+    private _foliageShadowDistance = 0;
+    /** See RenderSettings.foliagePrepass. */
+    private _foliagePrepass = false;
+    /** See RenderSettings.foliageGpuCulling. */
+    private _foliageGpuCulling = true;
+    private readonly _foliageGpu = new FoliageGpuCuller();
+    /** The frame the GPU culler last ran: it may run once per frame (see foliageGpuCulling.ts). */
+    private _foliageGpuFrame = -1;
+    /** This frame's occluders, rasterized on the CPU (graphics/occlusion/occlusionBuffer.ts). */
+    private readonly _occlusion = new OcclusionBuffer(256, 144);
+    /** Whether `_occlusion` describes the view being drawn right now (never during a capture). */
+    private _occlusionActive = false;
+    /** The camera `_occlusion` was built for: a probe or thumbnail capture draws through another. */
+    private _occlusionCamera: Camera | null = null;
+    /** Per landscape: its lowered occluder mesh, rebuilt when its heights change. */
+    private readonly _terrainOccluders = new WeakMap<Terrain, { version: number; builtAt: number;
+                                                               origin: [number, number, number]; occluder: TerrainOccluder }>();
+    /** Per node, this frame: whether it is occluded (`_outsideFrustum` asks up to four times a frame). */
+    private readonly _occludedMemo = new Map<ModelNode, boolean>();
+    private readonly _occMin = [0, 0, 0];
+    private readonly _occMax = [0, 0, 0];
+    private readonly _occlusionFrameStats = { triangles: 0, ms: 0 };
+    /** See RenderSettings.occlusionQueries, and graphics/gpuOcclusion.ts. */
+    private _occlusionQueriesEnabled = true;
+    private readonly _gpuOcclusion = new GpuOcclusion();
+    private _occlusionQueries: OcclusionQuerySet | null = null;
+    /** Whether this frame's view takes and acts on GPU occlusion queries, and for which camera. */
+    private _gpuOcclusionActive = false;
+    private _gpuOcclusionCamera: Camera | null = null;
+    private readonly _gpuOcclusionForward = [0, 0, -1];
+    private readonly _gpuOcclusionModel = mat4.create();
+    /** Consecutive built frames in which occlusion hid nothing, and the frames skipped since (see `_buildOcclusion`). */
+    private _occlusionIdleFrames = 0;
+    private _occlusionSkipped = 0;
     // Foliage cells beyond this camera distance are skipped (world units; 0 = disabled).
     private _foliageCullDistance: number = 65;
     /** See RenderSettings.particleLodDistanceScale. */
@@ -1506,6 +1754,7 @@ export class Renderer {
         this._cascadeCount = Math.min(MAX_CASCADES, Math.max(1, Math.round(config.shadowCascades ?? this._cascadeCount)));
         this._ssaoEnabled = config.ssao !== false; // default: SSAO on
         this._programList = config.programs ? new Set(config.programs) : null;
+        this._warmRecipes = parseRecipes(config.pipelines);
         this._variants = !!config.programs || !!config.shaderVariants;
         // A published list names the filter its variants were built for.
         if (config.programs?.some(n => /~poisson(\.pom)?$/.test(n))) this._variantFilter = 1;
@@ -1739,6 +1988,9 @@ export class Renderer {
         }
         this._shaderManager.setResolver(name => this._buildOnDemand(name));
         this._createTargets();
+        // The recorded pipelines (config.graphics.pipelines), while the loading screen is still up: on
+        // WebGPU each would otherwise compile on the first frame that draws it.
+        await this.warmPipelines();
     }
 
     /**
@@ -1754,7 +2006,9 @@ export class Renderer {
         const table = this._programTable();
         for (const [name, descriptor] of table) this._tableDescriptors.set(name, descriptor);
         if (!this._variants) {
-            const pom = new Set(Object.keys(EXTRA_LOGICAL_NAMES).map(n => this._physicalOf(n)));
+            // Every always-variant name, except the lazy ones an opt-in feature builds on first use.
+            const pom = new Set(Object.keys(EXTRA_LOGICAL_NAMES).filter(n => !LAZY_LOGICAL_NAMES.has(n))
+                                                                 .map(n => this._physicalOf(n)));
             return [...table, ...[...pom].flatMap(physical => {
                 const descriptor = this._descriptorFor(physical);
                 return descriptor ? [[physical, descriptor] as const] : [];
@@ -1832,15 +2086,52 @@ export class Renderer {
         if (existing) { this._registerProgram(physical, existing); return existing; }
         const descriptor = this._descriptorFor(physical);
         if (!descriptor) return undefined;
+        let program = this._builtByDescriptor.get(descriptor);
+        if (program) { this._registerProgram(physical, program); return program; }
+
+        // A VARIANT can be compiled in the background while its family's uber program draws in its place:
+        // the base program's runtime branches cover whatever the variant compiled out, so the frame is
+        // right (or, for a parallax or wind variant, merely flat or still for a few frames) and nothing
+        // stalls. The variant is swapped in under its names the frame its compile finishes.
+        const standIn = this._standInFor(physical);
+        if (standIn && this._compileQueue.request(physical, { ...descriptor, label: physical }, built => {
+            this._builtByDescriptor.set(descriptor, built);
+            this._registerProgram(physical, built);
+        }, error => Logger.error(`[shaders] '${physical}' failed to compile: ${error}`, 'Renderer'))) {
+            if (this._programList)
+                Logger.warn(`[shaders] '${physical}' compiling in the background — missing from the published program list`, 'Renderer');
+            shaderOptimizerStats.fallbackDraws++;
+            return standIn;
+        }
+
         if (this._programList)
             Logger.warn(`[shaders] '${physical}' built on demand — missing from the published program list`, 'Renderer');
-        let program = this._builtByDescriptor.get(descriptor);
-        if (!program) {
-            program = this.device.createShaderProgram({ ...descriptor, label: physical });
-            this._builtByDescriptor.set(descriptor, program);
-        }
+        const start = performance.now();
+        program = this.device.createShaderProgram({ ...descriptor, label: physical });
+        shaderOptimizerStats.syncCompiles++;
+        recordStall(physical, performance.now() - start);
+        this._builtByDescriptor.set(descriptor, program);
         this._registerProgram(physical, program);
         return program;
+    }
+
+    /**
+     * The program that may draw in a variant's place while it compiles: its family's base (the uber
+     * program), else any sibling variant already built — every variant of a family shares its bindings,
+     * blocks and vertex inputs by construction (tests/shaderVariants.test.ts). Undefined for a program
+     * with no family, which then has to be built on the spot.
+     */
+    private _standInFor(physical: string): ShaderProgram | undefined {
+        const split = splitPhysical(physical);
+        if (!split) return undefined;
+        const base = split[0];
+        const own = this._shaderManager.find(base);
+        if (own) return own;
+        const prefix = base + '~';
+        for (const name of this._shaderManager.registeredShaders) {
+            if (name !== physical && name.startsWith(prefix)) return this._shaderManager.find(name);
+        }
+        return undefined;
     }
 
     /**
@@ -2066,6 +2357,14 @@ export class Renderer {
             [PARTICLE_PROGRAMS.billboard[0], PARTICLE_PROGRAMS.billboard[1]],
             [PARTICLE_PROGRAMS.mesh[0],      PARTICLE_PROGRAMS.mesh[1]],
             [PARTICLE_PROGRAMS.sort[0],      PARTICLE_PROGRAMS.sort[1]],
+            // The overdraw debug view's instanced twin, for terrain foliage. APPENDED.
+            ['overdrawInstanced',            OverdrawInstancedProgram],
+            // Octahedral foliage impostors (terrain/octahedralImpostor.ts). APPENDED.
+            ['foliageImpostorInstanced',     GeometryFoliageImpostorProgram],
+            // GPU occlusion query boxes (graphics/gpuOcclusion.ts). APPENDED.
+            ['occlusionBox',                 OcclusionBoxProgram],
+            // Foliage shadows cast through the octahedral impostor, in the outer cascades. APPENDED.
+            ['shadowMapImpostorInstanced',   ShadowMapImpostorProgram],
         ];
     }
 
@@ -2146,6 +2445,11 @@ export class Renderer {
         if (!this._presentTarget
             && (this._viewportEmpty || this._canvas.width === 0 || this._canvas.height === 0)) return;
         this._pollVariantFilter();
+        // The shader optimizer's frame: counters zeroed, material memos expired (a material may have been
+        // edited since the last frame), and any background compile that finished swapped in.
+        resetShaderOptimizerFrame();
+        this._materialSync.beginFrame();
+        this._compileQueue.poll();
         this._frameEncoder = device.createCommandEncoder('frame');
         try {
             this._renderFrame(scene);
@@ -2226,6 +2530,11 @@ export class Renderer {
         // Same for per-mesh LOD groups: each picks its active level (or distance-culls) before shadows.
         this._updateModelLOD(scene);
 
+        // The occluders, rasterized for this view before anything asks what is visible: the foliage
+        // prepare, the geometry pass, the forward overlay and the velocity pass all consult it.
+        this._buildOcclusion(scene);
+        this._beginGpuOcclusion();
+
         // Which models moved since last frame. AFTER LOD selection, so a level that was just swapped in
         // is already flagged not-visible-last-frame rather than reading as a teleport, and BEFORE post
         // processing, which is where the answer is needed — see `_detectObjectMotion`.
@@ -2263,6 +2572,8 @@ export class Renderer {
 
         // Reset per-frame perf counters AFTER the (occasional) IBL bake so bakes don't spike the stats.
         resetFrameStats();
+        frameStats.occluderTriangles = this._occlusionFrameStats.triangles;
+        frameStats.occlusionMs = this._occlusionFrameStats.ms;
         const _statsT0 = performance.now();
 
         // Particle simulation steps. Here because no pass is open and every pass that READS the state
@@ -2676,7 +2987,9 @@ export class Renderer {
         for (const node of scene.landscapes)
             for (const layer of node.terrain.foliage) {
                 const card = layer.kind === 'billboard' ? layer.textureId : layer.billboardModel ? layer.billboardTextureId : null;
-                if (card && card !== 'Null') packer.ensureDilated(card, 0.5, this._frameIndex);
+                // Not an octahedral atlas: the baker already dilated every frame inside its own tile, and
+                // padding the whole sheet would bleed each view into its neighbours.
+                if (card && card !== 'Null' && !layer.billboardOctahedral) packer.ensureDilated(card, 0.5, this._frameIndex);
             }
         // Decals sample the same packed ORM map a mesh wearing their material would.
         for (const decal of scene.decals) if (decal.material) packer.sync(decal.material, this._frameIndex);
@@ -3046,20 +3359,237 @@ export class Renderer {
         }
     }
 
+    /**
+     * Whether the camera cannot see `node`: outside the frustum, or inside it but hidden behind this
+     * frame's occluders (see {@link _buildOcclusion}). Every per-view visibility test goes through here,
+     * which is what keeps the geometry pass, the forward overlay and the velocity pass in agreement.
+     */
     private _outsideFrustum(node: ModelNode): boolean {
         if (!this._frustumCulling) return false;
         const s = node.getBoundingSphere();
-        return !this._frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius);
+        if (!this._frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) return true;
+        return this._nodeOccluded(node, s);
     }
 
     /**
-     * {@link _outsideFrustum}, additionally incrementing the `culledObjects` stat so the editor HUD can
-     * report savings. Every node must reach this at most once per frame or the HUD double-counts.
+     * Occlusion half of {@link _outsideFrustum}, memoised per node for the frame: the CPU occluders first
+     * (same frame, exact), then a fresh GPU occlusion query result (graphics/gpuOcclusion.ts). A node the
+     * CPU test lets through is offered for this frame's queries whatever its last result, so a node that
+     * was hidden is found again the moment it is uncovered.
+     */
+    private _nodeOccluded(node: ModelNode, s: { center: ArrayLike<number>; radius: number }): boolean {
+        if (this._cubeFaceCapture) return false;
+        const cpu = this._occlusionActive && this._activeCamera === this._occlusionCamera;
+        const gpu = this._gpuOcclusionActive && this._activeCamera === this._gpuOcclusionCamera;
+        if (!cpu && !gpu) return false;
+        // The selected node is redrawn by the outline mask whatever happens; keep it honest everywhere.
+        if (this._selectedNodeId && node.id === this._selectedNodeId) return false;
+        const memo = this._occludedMemo.get(node);
+        if (memo !== undefined) return memo;
+        const r = s.radius, c = s.center;
+        let hidden = false;
+        if (cpu) {
+            const min = this._occMin, max = this._occMax;
+            min[0] = c[0] - r; min[1] = c[1] - r; min[2] = c[2] - r;
+            max[0] = c[0] + r; max[1] = c[1] + r; max[2] = c[2] + r;
+            hidden = this._occlusion.isBoxOccluded(min, max);
+        }
+        if (!hidden && gpu && Renderer._worthQuerying(node, c, r, this._activeCamera)) {
+            const triangles = node.model.geometry.indices.length / 3;
+            if (this._gpuOcclusion.consider(node, r, triangles) && this._gpuOcclusion.isHidden(node)) {
+                hidden = true;
+                frameStats.queryOccludedObjects++;
+            }
+        }
+        this._occludedMemo.set(node, hidden);
+        return hidden;
+    }
+
+    /**
+     * Whether a node is worth an occlusion query at all. A query is a draw of its box, and its cost is the
+     * box's screen area: a box filling half the screen costs a full-screen depth test and is almost never
+     * hidden, which in the Valley made the query pass 5 ms on WebGL2 — the near landscape chunks, two
+     * hundred metres across as boxes, were each a full-screen test. The FAR chunks stay candidates: one
+     * behind a ridge is exactly what the queries are for, and those are small on screen. Never the eye
+     * inside the box either: its near faces would be clipped and the query could report nothing.
+     */
+    private static _worthQuerying(node: ModelNode, c: ArrayLike<number>, r: number, cam: Camera): boolean {
+        const eye = cam.position;
+        const d = Math.hypot(eye[0] - c[0], eye[1] - c[1], eye[2] - c[2]);
+        if (d < r * 1.2 + 1) return false;
+        // Projected radius as a fraction of the screen height: r * cot(fov/2) / d under perspective.
+        const p = cam.projectionMatrix;
+        const screen = p[11] !== 0 ? r * Math.abs(p[5]) / d : r * Math.abs(p[5]);
+        return screen < 0.15;
+    }
+
+    /**
+     * Start the frame's GPU occlusion: collect whatever query results have come back, decide whether this
+     * view uses them. The main view only — a capture or a thumbnail never reads the main view's verdicts.
+     */
+    private _beginGpuOcclusion(): void {
+        const active = this._occlusionQueriesEnabled && this._occlusionMode !== 'off' && this._frustumCulling
+            && !this._thumbnailMode && !this._capturing && !this._cubeFaceCapture
+            && !!device.capabilities.hasOcclusionQuery && !!device.createOcclusionQuerySet;
+        if (active && !this._occlusionQueries)
+            this._occlusionQueries = device.createOcclusionQuerySet!(GPU_OCCLUSION_BUDGET, 'occlusionQueries');
+        const view = this._activeCamera.viewMatrix, f = this._gpuOcclusionForward;
+        f[0] = -view[2]; f[1] = -view[6]; f[2] = -view[10];
+        this._gpuOcclusion.beginFrame(active ? this._occlusionQueries : null, this._activeCamera.position, f);
+        this._gpuOcclusionActive = active;
+        this._gpuOcclusionCamera = this._activeCamera;
+    }
+
+    /**
+     * Draw every candidate node's box against the depth the geometry pass just wrote, each inside its own
+     * occlusion query, and record the readback (graphics/gpuOcclusion.ts). No colour, no depth write: it
+     * changes nothing on screen. The box is the bounding sphere's cube, a tenth larger — loose on purpose,
+     * so a node about to come into view already reads as visible.
+     */
+    private _gpuOcclusionPass(): void {
+        const set = this._occlusionQueries, nodes = this._gpuOcclusion.candidates;
+        if (!this._gpuOcclusionActive || !set || nodes.length === 0 || this._activeCamera !== this._gpuOcclusionCamera) return;
+        // Its own scope, so the boxes' cost is a row of its own rather than part of the foliage pass's.
+        this._scope('occlusion.queries');
+        const target = device.createRenderTarget({
+            label: 'occlusionQueries', colorViews: [], depthView: this._gBufferFBO.depth.attachmentView,
+        });
+        this._passEncoder = this._acquireEncoder('occlusionQueries');
+        this._passTarget = target;
+        const pass = this._passEncoder.beginRenderPass(target, {
+            label: 'occlusionQueries',
+            colorAttachments: [],
+            depthAttachment: { loadOp: 'load', storeOp: 'store' },
+            occlusionQuerySet: set,
+        });
+        const cam = this._activeCamera;
+        this._shaderManager.bind('occlusionBox');
+        this._shaderManager.setUniform('u_view', cam.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._rasterProjection(cam.projectionMatrix));
+        const pipeline = this._pipelineFor('occlusionBox', OcclusionBoxProgram, {
+            cullMode: 'none',
+            depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
+            targets: 0,
+            vertex: 'model',
+            builtFor: 'irradiance',   // `_iblCubeMesh` is position-only, built from that program's attributes
+        });
+        pass.setPipeline(pipeline);
+        const model = this._gpuOcclusionModel;
+        for (let i = 0; i < nodes.length; i++) {
+            const s = nodes[i].getBoundingSphere();
+            const size = s.radius * 2 * 1.1;
+            mat4.fromTranslation(model, s.center as vec3);
+            mat4.scale(model, model, [size, size, size]);
+            this._shaderManager.setUniform('u_model', model);
+            pass.beginOcclusionQuery(i);
+            if (!this._recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
+            pass.endOcclusionQuery();
+        }
+        pass.end();
+        frameStats.occlusionQueries += nodes.length;
+        // Into the encoder that holds the pass, after it; then finish that encoder only if this owns it.
+        set.resolve(this._passEncoder, nodes.length, this._gpuOcclusion.submitted());
+        if (this._passEncoder !== this._frameEncoder) this._passEncoder.finish();
+        this._passEncoder = null;
+        this._passTarget = null;
+        // The box pipeline left depth writes off; the legacy draws after it assume they are on.
+        GLState.depthMask(true);
+    }
+
+    /**
+     * {@link _outsideFrustum}, additionally incrementing the `culledObjects` stat (and `occludedObjects` for
+     * the ones only an occluder hid) so the editor HUD can report savings. Every node must reach this at
+     * most once per frame or the HUD double-counts.
      */
     private _culled(node: ModelNode): boolean {
         const outside = this._outsideFrustum(node);
-        if (outside) frameStats.culledObjects++;
+        if (outside) {
+            frameStats.culledObjects++;
+            if (this._occludedMemo.get(node)) frameStats.occludedObjects++;
+        }
         return outside;
+    }
+
+    /**
+     * Rasterize this frame's occluders into the CPU occlusion buffer (graphics/occlusion): every visible
+     * landscape as its lowered occluder mesh, and every enabled Occluder volume. Conservative throughout —
+     * see OcclusionBuffer — so nothing it hides is visible.
+     *
+     * A landscape the camera is BELOW (a cave, a noclip camera) is left out: the lowering argument holds
+     * only for a viewer above the surface.
+     */
+    private _buildOcclusion(scene: Scene): void {
+        // What the last built buffer achieved, read before begin() zeroes it.
+        const lastHits = this._occlusionActive ? this._occlusion.stats.occluded : -1;
+        this._occludedMemo.clear();
+        this._occlusionActive = false;
+        this._occlusionFrameStats.triangles = 0;
+        this._occlusionFrameStats.ms = 0;
+        if (this._occlusionMode === 'off' || !this._frustumCulling || this._thumbnailMode) return;
+        // A view in which nothing is hidden — the editor's high overview, open ground — would pay for the
+        // buffer every frame for nothing. After a run of such frames it is built only every few frames, as
+        // a probe, until one hides something again. Not building is always safe: it only culls less.
+        if (lastHits === 0) this._occlusionIdleFrames++;
+        else if (lastHits > 0) this._occlusionIdleFrames = 0;
+        if (this._occlusionIdleFrames >= OCCLUSION_IDLE_FRAMES && ++this._occlusionSkipped < OCCLUSION_IDLE_PROBE) return;
+        this._occlusionSkipped = 0;
+        const start = performance.now();
+        const eye = this._activeCamera.position;
+        this._occlusion.begin(this._viewProj);
+        let any = false;
+        for (const landscape of scene.landscapes) {
+            if (!landscape.visible) continue;
+            const terrain = landscape.terrain;
+            const o = terrain.origin;
+            if (terrain.heightAt(eye[0] - o[0], eye[2] - o[2]) + o[1] > eye[1]) continue;
+            let entry = this._terrainOccluders.get(terrain);
+            // Built in world space, so a moved landscape needs a new one as much as a sculpted one.
+            const moved = !!entry && (entry.origin[0] !== o[0] || entry.origin[1] !== o[1] || entry.origin[2] !== o[2]);
+            if (!entry || entry.version !== terrain.heightsVersion || moved) {
+                // A rebuild walks the whole height grid (tens of ms for a 2k landscape), so a sculpt drag
+                // rebuilds at most twice a second — and until it does, this landscape occludes nothing:
+                // a stale mesh could stand above ground the brush just lowered.
+                const now = performance.now();
+                if (entry && now - entry.builtAt < 500) continue;
+                entry = {
+                    version: terrain.heightsVersion,
+                    builtAt: now,
+                    origin: [o[0], o[1], o[2]],
+                    occluder: new TerrainOccluder({ heights: terrain.heights, resolution: terrain.resolution,
+                                                    size: terrain.size, origin: [o[0], o[1], o[2]] }),
+                };
+                this._terrainOccluders.set(terrain, entry);
+            }
+            entry.occluder.emit(this._frustum, eye, this._rasterOccluder, undefined, this._occluderHidden);
+            any = true;
+        }
+        if (this._occlusionMode === 'all') {
+            const min = this._occMin, max = this._occMax;
+            for (const occluder of scene.occluders) {
+                if (!occluder.enabled || !occluder.visible) continue;
+                occluder.localBox(min, max);
+                this._occlusion.rasterizeBox(min, max, occluder.worldTransform);
+                any = true;
+            }
+        }
+        if (!any) return;
+        this._occlusion.finish();
+        this._occlusionActive = true;
+        this._occlusionCamera = this._activeCamera;
+        // Kept until after resetFrameStats, which runs later in the frame. Inside the `prepare` scope
+        // (scopes never nest), so the time gets a counter of its own instead of a profiler row.
+        this._occlusionFrameStats.triangles = this._occlusion.stats.triangles;
+        this._occlusionFrameStats.ms = performance.now() - start;
+    }
+
+    /** `_buildOcclusion`'s callbacks into the terrain occluder, bound once rather than per frame. */
+    private readonly _rasterOccluder = (grid: OccluderGrid) => this._occlusion.rasterizeGrid(grid.positions, grid.cols, grid.rows);
+    private readonly _occluderHidden = (min: ArrayLike<number>, max: ArrayLike<number>) => this._occlusion.isBoxHiddenSoFar(min, max);
+
+    /** Whether a foliage cell's box is hidden behind this frame's occluders. */
+    private _cellOccluded(min: ArrayLike<number>, max: ArrayLike<number>): boolean {
+        if (!this._occlusionActive || this._activeCamera !== this._occlusionCamera) return false;
+        return this._occlusion.isBoxOccluded(min, max);
     }
 
     /**
@@ -3087,6 +3617,9 @@ export class Renderer {
                  || dtype === 'cel' || dtype === 'celSkinned'
                  || dtype.startsWith('custom:') || dtype.startsWith('customScreen:'));
     }
+
+    /** Per-frame scratch for the opaque sort keys; reused so the sort allocates nothing. */
+    private readonly _drawSortScratch = new Map<ModelNode, number>();
 
     private _geometryPass(scene: Scene): void {
         // Refreshed here, at the one point in this pass that still has the scene. See `_sunDirection`.
@@ -3131,14 +3664,18 @@ export class Renderer {
             }
         }
 
-        // Sort singles by geometry shader to keep identical binds consecutive. The key is computed ONCE
-        // per node and compared with `<`, never rebuilt inside the comparator or run through ICU collation.
-        const shaderKey = new Map<ModelNode, string>();
-        for (const node of singles) shaderKey.set(node, this._geometryShaderFor(node));
-        singles.sort((a, b) => {
-            const ka = shaderKey.get(a)!, kb = shaderKey.get(b)!;
-            return ka < kb ? -1 : ka > kb ? 1 : 0;
-        });
+        // State first, then front to back (shaderOptimizer/drawSort.ts): program, then material — so a
+        // run of one material re-sends nothing — then nearest first, so the `opaque` (no-discard) programs
+        // reject hidden fragments at the early depth test. One number per node, computed once.
+        const sortKey = this._drawSortScratch;
+        sortKey.clear();
+        const eye = this._activeCamera.position, far = this._activeCamera.far;
+        for (const node of singles) {
+            const s = node.getBoundingSphere();
+            const depth = Math.max(0, vec3.distance(eye, s.center) - s.radius);
+            sortKey.set(node, this._drawSortKeys.key(this._geometryShaderFor(node), node.model.material, depth, far));
+        }
+        singles.sort((a, b) => sortKey.get(a)! - sortKey.get(b)!);
         for (const node of singles) this._drawGeometryNode(pass, node);
 
         // Instanced groups (>=2 identical mesh+material), else fall back to a single draw.
@@ -3158,6 +3695,8 @@ export class Renderer {
             this._foliagePass(scene, foliage);
             this._endFullscreenPass(foliage);
         }
+        // The G-buffer depth is complete: ask the GPU which candidate nodes it hides.
+        this._gpuOcclusionPass();
         this._endScope();
     }
 
@@ -3222,6 +3761,12 @@ export class Renderer {
      */
     private _prepareFoliage(scene: Scene): void {
         const camPos = this._activeCamera.position;
+        // The GPU path for the main view only, once a frame: its per-bucket parameters go up with
+        // `writeBuffer`, which a second cull in the same unsubmitted frame would overwrite under the first.
+        const gpu = this._foliageGpuCulling && FoliageGpuCuller.supported && this._frustumCulling
+            && !this._thumbnailMode && !this._capturing && !this._cubeFaceCapture
+            && this._foliageGpuFrame !== this._frameIndex;
+        if (gpu) this._foliageGpuFrame = this._frameIndex;
 
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
@@ -3285,7 +3830,13 @@ export class Renderer {
                         cell.visible = false;
                         continue;
                     }
-                    const onScreen = !this._frustumCulling || this._frustum.intersectsAABB(cell.min, cell.max);
+                    // Off screen also when an occluder hides it: an occluded cell is ADMITTED like an
+                    // off-screen one (so it appears at once when revealed) and simply not drawn.
+                    let onScreen = !this._frustumCulling || this._frustum.intersectsAABB(cell.min, cell.max);
+                    if (onScreen && this._cellOccluded(cell.min, cell.max)) {
+                        onScreen = false;
+                        frameStats.occludedCells++;
+                    }
                     // `visible` means ADMITTED: in range, whether or not it is on screen this frame.
                     if (!wasVisible && this._foliageAdmitPerFrame > 0) {
                         pending.push({ cell, d2, onScreen });
@@ -3314,6 +3865,20 @@ export class Renderer {
                     }
                 }
 
+                // The two nearest detail levels nearest first (see sortFoliageFrontToBack): that is where
+                // trees overlap on screen and overdraw costs. The order is taken from an eye that only
+                // moves every few metres, so a walking camera does not repack the batches every frame.
+                if (!layer.sortEye || vec3.distance(layer.sortEye, camPos) > FOLIAGE_SORT_REFRESH)
+                    layer.sortEye = [camPos[0], camPos[1], camPos[2]];
+                for (let slot = 0; slot < Math.min(2, billboardBucket); slot++)
+                    if (buckets[slot]) sortFoliageFrontToBack(buckets[slot], layer.sortEye);
+
+                if (gpu) {
+                    this._cullFoliageOnGpu(layer, bands);
+                    continue;
+                }
+                layer.gpuCulled = false;
+
                 // Merge and upload while no pass is open. A bucket left null by the loop above still has
                 // to be visited, or its batch keeps last frame's cells and draws them again.
                 for (let slot = 0; slot <= billboardBucket; slot++) {
@@ -3331,43 +3896,90 @@ export class Renderer {
     }
 
     /**
-     * The shadow half of {@link _prepareFoliage}: pick and upload the cells one cascade will rasterize.
+     * The GPU half of {@link _prepareFoliage} for one layer: hand each colour bucket's cells to the compute
+     * cull (graphics/foliageGpuCulling.ts) instead of packing their matrices here. Recorded into the
+     * frame's encoder, so it runs before the geometry pass that draws its output.
+     */
+    private _cullFoliageOnGpu(layer: FoliageLayer, bands: (FoliageBand | null)[]): void {
+        const billboardBucket = layer.levels.length;
+        const buckets: GpuCullBucket[] = [];
+        for (let slot = 0; slot <= billboardBucket; slot++) {
+            const models = slot === billboardBucket
+                ? (layer.billboardModel ? [layer.billboardModel] : [])
+                : layer.levels[slot].models;
+            const octa = slot === billboardBucket ? layer.billboardOctahedral : null;
+            buckets.push({
+                cells: layer.buckets[slot] ?? [],
+                models,
+                band: bands[slot] ?? null,
+                keep: foliageKeepFraction(slot, layer.levels.length, this._foliageDensityFalloff, layer.kind),
+                sphere: octa ? [octa.center[0], octa.center[1], octa.center[2], octa.radius * 1.05] : Renderer._modelsSphere(models),
+            });
+        }
+        layer.gpuBatches = this._foliageGpu.cull(this._acquireEncoder('foliage.cull'), layer, buckets,
+                                                 this._frustum.planes, this._activeCamera.position);
+        layer.gpuCulled = true;
+    }
+
+    /** The bounding sphere (model space) of a set of sub-models: centre and radius of their union box. */
+    private static _modelsSphere(models: readonly Model[]): [number, number, number, number] {
+        const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+        for (const m of models) {
+            const b = m.geometry.boundingBox;
+            for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], b.min[a]); hi[a] = Math.max(hi[a], b.max[a]); }
+        }
+        if (!(hi[0] >= lo[0])) return [0, 0, 0, 0];
+        const r = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2;
+        return [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2, r];
+    }
+
+    /**
+     * The shadow half of {@link _prepareFoliage}: pick and upload the cells one cascade will rasterize,
+     * and return a hash of what it picked for the cascade's layer cache.
      *
      * Called from `_renderCascades` BEFORE the cascade's depth pass opens, for the upload reason given
      * there. It sets `_shadowFrustum` itself rather than borrowing the one `_renderShadowCasters`
-     * builds, because that runs inside the pass, after this.
+     * builds, because that runs inside the pass, after this. A cell is kept on the same terms as a model
+     * caster: its shadow volume must reach the cascade's `sphere` and, past cascade 0, the receiver shell
+     * (`eye`, `inner`) — see graphics/shadowCasters.ts.
      */
-    private _prepareFoliageShadow(scene: Scene, lightSpace: mat4, cascade: number): void {
+    private _prepareFoliageShadow(scene: Scene, lightSpace: mat4, cascade: number,
+                                  sphere: CascadeSphere, eye: ArrayLike<number>, inner: number): number {
         this._shadowFrustum.setFromViewProjection(lightSpace);
-        const camPos = this._activeCamera.position;
+        const d = this._shadowLightUnit;
+        let hash = HASH_SEED;
 
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
             for (const layer of landscape.terrain.foliage) {
                 if (!this._foliageCastsShadows(layer)) continue;
 
-                const cullDistance = foliageEffectiveCull(layer, this._foliageCullDistance);
-                const maxD2 = cullDistance > 0 ? cullDistance * cullDistance : Infinity;
-
-                // Computed ONCE per cascade, then shared by every sub-model. It used to run inside the
-                // model loop, so a tree with three sub-models paid three full walks of every cell in the
-                // layer to reach the same answer each time.
+                // Each cell's shadow volume must reach this cascade's sphere and, past cascade 0, its
+                // receiver shell — the cells a model caster would keep — and sit in its light frustum.
+                const candidates = this._foliageShadowCandidates(layer);
                 const visible = this._foliageScratchCells;
                 visible.length = 0;
-                for (const cell of layer.cells) {
-                    // The same distance cull as the colour pass, hysteresis band included, so a cell on
-                    // the boundary does not flicker its shadow in and out. `cell.visible` is READ, never
-                    // written, here: `_prepareFoliage` owns that flag and clears it on the distance test
-                    // alone, which makes it exactly "inside the damped cull range".
-                    const limit2 = foliageCullLimitSq(maxD2, cell.visible, this._foliageCullHysteresis);
-                    if (this._aabbDistSq(camPos, cell.min, cell.max) > limit2) continue;
+                for (let i = 0; i < candidates.count; i++) {
+                    const cell = candidates.cells[i];
+                    const o = i * 5, b = candidates.bounds;
+                    const cx = b[o], cy = b[o + 1], cz = b[o + 2], r = b[o + 3], reach = b[o + 4];
+                    if (!shadowTouchesSphere(cx, cy, cz, r, d, reach, sphere)) continue;
+                    if (inner > 0 && shadowFarthestFrom(cx, cy, cz, r, d, reach, eye) < inner) continue;
                     if (!this._shadowFrustum.intersectsAABB(cell.min, cell.max)) continue;
                     visible.push(cell);
                 }
-                frameStats.foliageCellsScanned += layer.cells.length;
-                // The cheapest real level is what casts, so it decides the chunk size too.
-                const models = layer.kind === 'billboard'
-                    ? layer.levels[0].models
+                // Nearest the sun first, so a tree in front fills the depth before the needles behind it
+                // reach the early depth test. Order only: the same cells, the same shadow.
+                if (visible.length > 1)
+                    visible.sort((a, b) =>
+                        (a.min[0] + a.max[0]) * d[0] + (a.min[1] + a.max[1]) * d[1] + (a.min[2] + a.max[2]) * d[2]
+                        - ((b.min[0] + b.max[0]) * d[0] + (b.min[1] + b.max[1]) * d[1] + (b.min[2] + b.max[2]) * d[2]));
+                // The cheapest real level is what casts, so it decides the chunk size too — or, in an outer
+                // cascade, the impostor's one quad.
+                const impostor = this._impostorCasts(layer, cascade);
+                if (impostor) this._impostorModels[0] = layer.billboardModel!;
+                const models = impostor ? this._impostorModels
+                    : layer.kind === 'billboard' ? layer.levels[0].models
                     : layer.levels[layer.levels.length - 1].models;
                 // The SAME fraction the cheapest colour level keeps. Thinning the two differently would
                 // leave shadows with no tree above them, or trees with no shadow beneath them, and the
@@ -3375,9 +3987,224 @@ export class Renderer {
                 const keep = foliageKeepFraction(layer.levels.length - 1, layer.levels.length,
                                                  this._foliageDensityFalloff, layer.kind);
                 this._packFoliageBucket(layer, layer.shadowBatches, cascade, visible, models, keep);
+
+                // What this layer puts in the cascade: which cells, at which version and thinning, drawn
+                // from which meshes — and, where the cascade sways it, the wind's clock.
+                hash = mixNumber(mixNumber(mixNumber(hash, this._objectId(layer)), layer.version), keep);
+                hash = mixNumber(hash, visible.length);
+                for (const cell of visible) hash = mixNumber(hash, cell.index);
+                for (const model of models)
+                    hash = mixNumber(mixNumber(hash, this._objectId(model.mesh)), model.mesh.activeIndexCount);
+                if (cascade === 0 && this._foliageWind(scene, layer)) hash = mixNumber(hash, this._windTime);
             }
         }
+        this._impostorModels[0] = undefined!;
+        return hash;
     }
+    /** The one-model list an impostor-cast bucket is chunked by. Never holds a model past the call. */
+    private readonly _impostorModels: Model[] = [undefined!];
+
+    /** From this cascade out, a layer with an octahedral impostor casts through it. See `_impostorCasts`. */
+    private static readonly IMPOSTOR_SHADOW_CASCADE = 1;
+
+    /**
+     * Does `layer` cast into `cascade` through its octahedral impostor (shadowMapImpostor.wgsl) rather than
+     * its cheapest mesh level? From IMPOSTOR_SHADOW_CASCADE out, where a texel is a few centimetres and the
+     * shadow's penumbra wider still, so the impostor's own resolution never shows; never in cascade 0. Only
+     * once its atlas is decoded, and never for a card impostor, which has no view from the sun.
+     */
+    private _impostorCasts(layer: FoliageLayer, cascade: number): boolean {
+        if (cascade < Renderer.IMPOSTOR_SHADOW_CASCADE || layer.kind === 'billboard') return false;
+        if (!layer.billboardModel || !layer.billboardOctahedral || !layer.billboardTextureId) return false;
+        return !!TextureManager.Instance.getTexture(layer.billboardTextureId);
+    }
+
+    /**
+     * Draw one layer's packed shadow chunks as light-facing impostor quads: one instanced draw per chunk,
+     * the atlas's coverage cut out, each texel at the depth of a round canopy (shadowMapImpostor.wgsl).
+     */
+    private _drawImpostorShadows(layer: FoliageLayer, chunks: FoliageBatch[], lightSpace: mat4,
+                                 pass: RenderPassEncoder): void {
+        const model = layer.billboardModel!, info = layer.billboardOctahedral!;
+        const albedo = TextureManager.Instance.getTexture(layer.billboardTextureId!);
+        if (!albedo) return;
+        const pipeline = this._pipelineFor('shadowMapImpostorInstanced', ShadowMapImpostorProgram, {
+            // The quad is rebuilt facing the light in the vertex stage, so it never shows its back.
+            cullMode: 'none',
+            depthStencil: Renderer._SHADOW_DEPTH,
+            targets: 0,
+            vertex: 'model+instance',
+            builtFor: 'blinn_phongGeometry',
+        });
+        pass.setPipeline(pipeline);
+        const clip = this._clipProjection(lightSpace);
+        this._shaderManager.setUniform('u_lightSpace', clip);
+        // Window depth per world unit along the light: the clip matrix's z row against the light direction,
+        // halved where clip depth spans [-1, 1] (WebGL2) rather than [0, 1].
+        const d = this._shadowLightUnit, v = this._impostorShadowVec;
+        v[0][0] = d[0]; v[0][1] = d[1]; v[0][2] = d[2];
+        v[0][3] = (clip[2] * d[0] + clip[6] * d[1] + clip[10] * d[2]) * (device.backend === 'webgpu' ? 1 : 0.5);
+        v[1][0] = info.frames; v[1][1] = info.radius; v[1][2] = albedo.config.flipY ? 1 : 0;
+        v[2][0] = info.center[0]; v[2][1] = info.center[1]; v[2][2] = info.center[2];
+        this._shaderManager.setUniform('u_lightDir', v[0]);
+        this._shaderManager.setUniform('u_impostor', v[1]);
+        this._shaderManager.setUniform('u_impostorCenter', v[2]);
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [albedo]));
+        for (const batch of chunks) {
+            if (batch.count === 0 || !batch.buffer) continue;
+            if (!this._recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch)) {
+                model.mesh.setupInstanceMatrixBuffer(batch.buffer, 5);
+                model.mesh.drawInstanced(batch.count);
+                model.mesh.teardownInstanceMatrixBuffer(5);
+            }
+            frameStats.foliageShadowDraws++;
+        }
+    }
+    private readonly _impostorShadowVec: [number[], number[], number[]] = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
+
+    /**
+     * The cells of one layer that cast at all this frame — inside the colour pass's cull distance and the
+     * foliage shadow distance — with each one's bounding sphere and shadow reach, found ONCE per frame.
+     * Every cascade used to walk every cell of the layer for this, and a large terrain has tens of
+     * thousands of them; each cascade now tests only these.
+     */
+    private _foliageShadowCandidates(layer: FoliageLayer): { count: number; cells: FoliageCell[]; bounds: Float32Array } {
+        let entry = this._foliageCandidates.get(layer);
+        if (!entry) { entry = { frame: -1, count: 0, cells: [], bounds: new Float32Array(0) }; this._foliageCandidates.set(layer, entry); }
+        if (entry.frame === this._frameIndex) return entry;
+        entry.frame = this._frameIndex;
+
+        const camPos = this._activeCamera.position;
+        const cullDistance = foliageEffectiveCull(layer, this._foliageCullDistance);
+        const maxD2 = cullDistance > 0 ? cullDistance * cullDistance : Infinity;
+        // The shadow distance, with its own hysteresis band (appear inside it, vanish 10% past it).
+        const shadowD = this._foliageShadowDistance;
+        const shadowIn2 = shadowD > 0 ? shadowD * shadowD : Infinity;
+        const shadowOut2 = shadowD > 0 ? (shadowD * 1.1) * (shadowD * 1.1) : Infinity;
+
+        // Only the cells near enough to pass both tests, through a coarse grid over the layer; a cell the
+        // grid skips is one the tests below would reject.
+        const reachMax = Math.min(Math.sqrt(foliageCullLimitSq(maxD2, true, this._foliageCullHysteresis)),
+                                  Math.sqrt(shadowOut2));
+        const near = this._foliageCellsNear(layer, camPos, reachMax);
+        const stamp = this._foliageCellStamp(layer);
+        const frame = this._frameIndex;
+        // Last frame's candidates, before this frame's overwrite them: see the clean-up below.
+        const previous = this._foliagePreviousCells;
+        previous.length = 0;
+        for (let k = 0; k < entry.count; k++) previous.push(entry.cells[k]);
+        let n = 0;
+        for (let k = 0; k < near.count; k++) {
+            const cell = near.cells[k];
+            stamp[cell.index] = frame;
+            // The same distance cull as the colour pass, hysteresis band included, so a cell on the
+            // boundary does not flicker its shadow in and out. `cell.visible` is READ, never written, here:
+            // `_prepareFoliage` owns that flag and clears it on the distance test alone, which makes it
+            // exactly "inside the damped cull range".
+            const limit2 = foliageCullLimitSq(maxD2, cell.visible, this._foliageCullHysteresis);
+            const d2 = this._aabbDistSq(camPos, cell.min, cell.max);
+            if (d2 > limit2) continue;
+            const casts = d2 <= (cell.shadowCast ? shadowOut2 : shadowIn2);
+            cell.shadowCast = casts;
+            if (!casts) continue;
+            if (entry.bounds.length < (n + 1) * 5) {
+                const grown = new Float32Array(Math.max(64, entry.bounds.length * 2) * 5);
+                grown.set(entry.bounds);
+                entry.bounds = grown;
+            }
+            const lo = cell.min, hi = cell.max, o = n * 5;
+            const cx = (lo[0] + hi[0]) * 0.5, cy = (lo[1] + hi[1]) * 0.5, cz = (lo[2] + hi[2]) * 0.5;
+            const r = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) * 0.5;
+            entry.bounds[o] = cx; entry.bounds[o + 1] = cy; entry.bounds[o + 2] = cz; entry.bounds[o + 3] = r;
+            entry.bounds[o + 4] = this._shadowReachOf(cx, cy, cz, r);
+            entry.cells[n++] = cell;
+        }
+        // A cell that cast last frame and is now past the grid's reach was not visited: it is past the
+        // shadow distance, so its hysteresis memory goes, as the full scan used to clear it.
+        for (const cell of previous) if (stamp[cell.index] !== frame) cell.shadowCast = false;
+        previous.length = 0;
+        entry.cells.length = n;
+        entry.count = n;
+        frameStats.foliageCellsScanned += near.count;
+        return entry;
+    }
+
+    /**
+     * The cells of `layer` whose centre lies within `radius` (plus the largest cell's half-extent) of `p`
+     * on the ground plane, through a 64 m bucket grid built once per layer version. Unbounded radius:
+     * every cell.
+     */
+    private _foliageCellsNear(layer: FoliageLayer, p: ArrayLike<number>, radius: number): { count: number; cells: FoliageCell[] } {
+        const out = this._foliageNearScratch;
+        out.count = 0;
+        const cells = layer.cells;
+        if (!Number.isFinite(radius)) {
+            for (const cell of cells) out.cells[out.count++] = cell;
+            return out;
+        }
+        let grid = this._foliageCellGrids.get(layer);
+        if (!grid || grid.cells !== cells || grid.version !== layer.version) {
+            grid = Renderer._buildCellGrid(cells, layer.version);
+            this._foliageCellGrids.set(layer, grid);
+        }
+        if (grid.cols === 0) return out;
+        const r = radius + grid.reach;
+        const c0 = Math.max(0, Math.floor((p[0] - r - grid.minX) / grid.size));
+        const c1 = Math.min(grid.cols - 1, Math.floor((p[0] + r - grid.minX) / grid.size));
+        const r0 = Math.max(0, Math.floor((p[2] - r - grid.minZ) / grid.size));
+        const r1 = Math.min(grid.rows - 1, Math.floor((p[2] + r - grid.minZ) / grid.size));
+        for (let row = r0; row <= r1; row++)
+            for (let col = c0; col <= c1; col++) {
+                const b = row * grid.cols + col;
+                for (let i = grid.start[b]; i < grid.start[b + 1]; i++) out.cells[out.count++] = cells[grid.items[i]];
+            }
+        return out;
+    }
+    private readonly _foliageNearScratch: { count: number; cells: FoliageCell[] } = { count: 0, cells: [] };
+    private readonly _foliagePreviousCells: FoliageCell[] = [];
+    private readonly _foliageCellGrids = new WeakMap<FoliageLayer, FoliageCellGrid>();
+    private readonly _foliageCellStamps = new WeakMap<FoliageLayer, Int32Array>();
+
+    /** Per cell of `layer`, the frame the candidate scan last visited it. */
+    private _foliageCellStamp(layer: FoliageLayer): Int32Array {
+        let stamp = this._foliageCellStamps.get(layer);
+        if (!stamp || stamp.length < layer.cells.length) {
+            stamp = new Int32Array(Math.max(16, layer.cells.length)).fill(-1);
+            this._foliageCellStamps.set(layer, stamp);
+        }
+        return stamp;
+    }
+
+    /** Bucket `cells` by centre into 64 m squares (counting sort: `start` per bucket, then `items`). */
+    private static _buildCellGrid(cells: readonly FoliageCell[], version: number): FoliageCellGrid {
+        const size = 64;
+        let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity, reach = 0;
+        for (const c of cells) {
+            const x = (c.min[0] + c.max[0]) * 0.5, z = (c.min[2] + c.max[2]) * 0.5;
+            if (x < minX) minX = x; if (x > maxX) maxX = x;
+            if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+            reach = Math.max(reach, Math.hypot(c.max[0] - c.min[0], c.max[2] - c.min[2]) * 0.5);
+        }
+        if (cells.length === 0)
+            return { cells, version, minX: 0, minZ: 0, size, cols: 0, rows: 0, reach: 0,
+                     start: new Int32Array(1), items: new Int32Array(0) };
+        const cols = Math.max(1, Math.floor((maxX - minX) / size) + 1);
+        const rows = Math.max(1, Math.floor((maxZ - minZ) / size) + 1);
+        const bucketOf = (c: FoliageCell) => {
+            const col = Math.min(cols - 1, Math.floor(((c.min[0] + c.max[0]) * 0.5 - minX) / size));
+            const row = Math.min(rows - 1, Math.floor(((c.min[2] + c.max[2]) * 0.5 - minZ) / size));
+            return row * cols + col;
+        };
+        const start = new Int32Array(cols * rows + 1);
+        for (const c of cells) start[bucketOf(c) + 1]++;
+        for (let b = 0; b < cols * rows; b++) start[b + 1] += start[b];
+        const fill = start.slice(0, cols * rows);
+        const items = new Int32Array(cells.length);
+        for (let i = 0; i < cells.length; i++) items[fill[bucketOf(cells[i])]++] = i;
+        return { cells, version, minX, minZ, size, cols, rows, reach, start, items };
+    }
+    private readonly _foliageCandidates = new WeakMap<FoliageLayer,
+        { frame: number; count: number; cells: FoliageCell[]; bounds: Float32Array }>();
 
     /** Whether this layer rasterizes into the shadow cascades at all. One test, two call sites. */
     private _foliageCastsShadows(layer: FoliageLayer): boolean {
@@ -3406,6 +4233,10 @@ export class Renderer {
                 // keep one submission bounded.
                 const chunks = layer.shadowBatches[cascade];
                 if (!chunks || chunks.length === 0) continue;
+                if (this._impostorCasts(layer, cascade)) {
+                    this._drawImpostorShadows(layer, chunks, lightSpace, pass);
+                    continue;
+                }
 
                 const billboard = layer.kind === 'billboard';
                 // Only the nearest cascade sways: farther cascades' texels are larger than the motion, and
@@ -3438,7 +4269,7 @@ export class Renderer {
                         program,
                         cutout ? ShadowMapInstancedCutoutProgram : ShadowMapInstancedProgram, {
                         cullMode: cutout || model.material.config.side === 'double' ? 'none' : 'front',
-                        depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+                        depthStencil: Renderer._SHADOW_DEPTH,
                         targets: 0,
                         vertex: 'model+instance',
                         builtFor: 'blinn_phongGeometry',
@@ -3454,7 +4285,7 @@ export class Renderer {
 
                     for (const batch of chunks) {
                         if (batch.count === 0 || !batch.buffer) continue;
-                        if (!this._recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count)) {
+                        if (!this._recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch)) {
                             model.mesh.setupInstanceMatrixBuffer(batch.buffer, 5);
                             model.mesh.drawInstanced(batch.count);
                             // Locations 5-8 left at divisor 1 corrupt the next NON-instanced draw of
@@ -3597,6 +4428,14 @@ export class Renderer {
     }
     private readonly _dissolveVec: [number, number] = [0, 0];
 
+    /** Whether every material maps by its mesh uv (no box or triplanar projection): the lean foliage test. */
+    /** The (slot, model) pairs whose prepass depth went down this layer: see `_foliagePass`. */
+    private readonly _prepassScratch = new Set<number>();
+
+    private static _meshUvOnly(materials: readonly Material[]): boolean {
+        return materials.every(m => !((m.properties.get('uvProjection') as number) > 0));
+    }
+
     private _foliagePass(scene: Scene, pass: RenderPassEncoder): void {
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
@@ -3608,11 +4447,53 @@ export class Renderer {
                 // note there for why that separation is load-bearing rather than tidiness.
                 const billboardBucket = layer.levels.length;
                 const wind = this._foliageWind(scene, layer);
+                // Which buckets take the depth prepass: the two nearest real levels of a MESH layer, where
+                // leaves overlap on screen. Billboards gain nothing — their colour pass is already one fetch.
+                const prepassSlots = this._foliagePrepass && layer.kind !== 'billboard' ? Math.min(2, billboardBucket) : 0;
+                const prepassed = (model: Model, slot: number) => slot < prepassSlots && model.material.type === 'pbr'
+                    && !usesParallax(model.materials) && Renderer._meshUvOnly(model.materials);
+
+                // The prepass itself, every eligible model of those buckets before any is shaded, so one
+                // sub-model's leaves already occlude another's when the colour pass runs. A model whose
+                // depth did NOT go down (a draw the RHI path refused) must not be shaded 'equal' after it.
+                const depthWritten = this._prepassScratch;
+                depthWritten.clear();
+                for (let slot = 0; slot < prepassSlots; slot++) {
+                    const cells = layer.buckets[slot];
+                    const chunks = this._colourChunks(layer, slot);
+                    if (!cells?.length || !chunks?.length) continue;
+                    const sway = !!wind && layer.levels[slot].distance < wind.fadeEnd;
+                    for (const model of layer.levels[slot].models) {
+                        if (!prepassed(model, slot)) continue;
+                        const shaderType = sway ? 'pbrGeometryInstancedPrepassWind' : 'pbrGeometryInstancedPrepass';
+                        this._shaderManager.bind(shaderType);
+                        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+                        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+                        if (sway) this._setWindUniforms(scene, wind!, model.material);
+                        this._setLodFadeUniforms(layer, slot);
+                        const pipeline = this._pipelineFor(shaderType, Renderer._GEOMETRY_PROGRAMS[shaderType], {
+                            cullMode: Renderer._cullFor(model.material.config.side),
+                            depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+                            targets: 3, colorWrite: false,
+                            vertex: 'model+instance', builtFor: 'blinn_phongGeometry',
+                        });
+                        pass.setPipeline(pipeline);
+                        this._applyMaterialProperties(model.material);
+                        pass.setBindGroup(0, this._materialBindGroup(pipeline, model.material));
+                        let all = true;
+                        for (const batch of chunks) {
+                            if (batch.count === 0 || !batch.buffer) continue;
+                            all = this._recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch) && all;
+                            frameStats.foliageDraws++;
+                        }
+                        if (all) depthWritten.add(slot * 4096 + layer.levels[slot].models.indexOf(model));
+                    }
+                }
 
                 const drawBucket = (models: Model[], billboard: boolean, slot: number) => {
                     const cells = layer.buckets[slot];
                     if (!cells || cells.length === 0) return;
-                    const chunks = layer.batches[slot];
+                    const chunks = this._colourChunks(layer, slot);
                     if (!chunks || chunks.length === 0) return;
                     frameStats.foliageCells += cells.length;
 
@@ -3623,9 +4504,19 @@ export class Renderer {
                         const parallax = !billboard && model.material.type === 'pbr' && usesParallax(model.materials);
                         // A marching (POM) prop has no wind variant; it stays still rather than drop its relief.
                         const sway = windy && !parallax;
+                        // A mesh-uv PBR prop takes the LEAN program: no projection charts, no parallax frame,
+                        // no specular AA — the derivative work every foliage fragment paid for nothing.
+                        const lean = !parallax && Renderer._meshUvOnly(model.materials);
+                        // After a prepass: no discard (the depth it wrote, tested 'equal', does the cutting),
+                        // which is what lets this one keep early-Z and shade each pixel once.
+                        const afterPrepass = !billboard && prepassed(model, slot)
+                            && depthWritten.has(slot * 4096 + models.indexOf(model));
                         const shaderType = billboard ? (sway ? 'foliageBillboardInstancedWind' : 'foliageBillboardInstanced')
                             : model.material.type !== 'pbr' ? (sway ? 'blinn_phongGeometryInstancedWind' : 'blinn_phongGeometryInstanced')
-                            : parallax ? 'pbrGeometryInstancedPom' : sway ? 'pbrGeometryInstancedWind' : 'pbrGeometryInstanced';
+                            : parallax ? 'pbrGeometryInstancedPom'
+                            : afterPrepass ? (sway ? 'pbrGeometryInstancedLeanOpaqueWind' : 'pbrGeometryInstancedLeanOpaque')
+                            : lean ? (sway ? 'pbrGeometryInstancedLeanWind' : 'pbrGeometryInstancedLean')
+                            : sway ? 'pbrGeometryInstancedWind' : 'pbrGeometryInstanced';
                         const reflection = billboard ? GeometryFoliageBillboardProgram
                                                      : Renderer._GEOMETRY_PROGRAMS[shaderType];
                         this._shaderManager.bind(shaderType);
@@ -3636,8 +4527,9 @@ export class Renderer {
                         const pipeline = this._pipelineFor(shaderType, reflection, {
                             // Billboard cross quads are two-sided; a mesh prop keeps its material side.
                             cullMode: billboard ? 'none' : Renderer._cullFor(model.material.config.side),
-                            depthStencil: { format: 'depth24plus', depthWriteEnabled: true,
-                                            depthCompare: 'less-equal' },
+                            depthStencil: afterPrepass
+                                ? { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'equal' }
+                                : { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
                             targets: 3,   // the G-buffer
                             vertex: 'model+instance',
                             builtFor: 'blinn_phongGeometry',
@@ -3659,7 +4551,7 @@ export class Renderer {
                         // Every chunk shares the binds above; only the instance buffer differs.
                         for (const batch of chunks) {
                             if (batch.count === 0 || !batch.buffer) continue;
-                            if (!this._recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count)) {
+                            if (!this._recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch)) {
                                 model.mesh.setupInstanceMatrixBuffer(batch.buffer, 5);
                                 model.mesh.drawInstanced(batch.count);
                                 model.mesh.teardownInstanceMatrixBuffer(5);
@@ -3671,11 +4563,60 @@ export class Renderer {
 
                 for (let i = 0; i < layer.levels.length; i++)
                     drawBucket(layer.levels[i].models, layer.kind === 'billboard', i);
-                if (layer.billboardModel)
+                if (layer.billboardModel && layer.billboardOctahedral)
+                    this._drawOctahedralImpostors(layer, billboardBucket, pass);
+                else if (layer.billboardModel)
                     drawBucket([layer.billboardModel], true, billboardBucket);
             }
         }
     }
+
+    /**
+     * A mesh layer's OCTAHEDRAL impostor bucket: one camera-facing quad per instance, its baked views picked
+     * and blended per instance (geometryFoliageImpostor.wgsl). Drawn like the card it replaces — same
+     * chunks, same crossfade band — with the atlas and its normals bound instead of a material.
+     */
+    private _drawOctahedralImpostors(layer: FoliageLayer, slot: number, pass: RenderPassEncoder): void {
+        const cells = layer.buckets[slot], chunks = this._colourChunks(layer, slot);
+        const model = layer.billboardModel, info = layer.billboardOctahedral;
+        if (!cells?.length || !chunks?.length || !model || !info) return;
+        frameStats.foliageCells += cells.length;
+        const albedo = layer.billboardTextureId ? TextureManager.Instance.getTexture(layer.billboardTextureId) : null;
+        const normal = layer.billboardNormalTextureId ? TextureManager.Instance.getTexture(layer.billboardNormalTextureId) : null;
+        // Nothing to draw it with yet (still decoding): skip rather than draw black quads.
+        if (!albedo || !normal) return;
+
+        this._shaderManager.bind('foliageImpostorInstanced');
+        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+        this._setLodFadeUniforms(layer, slot);
+        const v = this._impostorVec;
+        // Which way up the atlas sits in its texture: see `atlasUv` in geometryFoliageImpostor.wgsl.
+        v[0][0] = info.frames; v[0][1] = info.radius; v[0][2] = albedo.config.flipY ? 1 : 0;
+        v[1][0] = info.center[0]; v[1][1] = info.center[1]; v[1][2] = info.center[2];
+        this._shaderManager.setUniform('u_impostor', v[0]);
+        this._shaderManager.setUniform('u_impostorCenter', v[1]);
+        const pipeline = this._pipelineFor('foliageImpostorInstanced', GeometryFoliageImpostorProgram, {
+            // The quad is rebuilt facing the camera in the vertex stage, so it can never show its back.
+            cullMode: 'none',
+            depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+            targets: 3,   // the G-buffer
+            vertex: 'model+instance',
+            builtFor: 'blinn_phongGeometry',
+        });
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [albedo, normal]));
+        for (const batch of chunks) {
+            if (batch.count === 0 || !batch.buffer) continue;
+            if (!this._recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch)) {
+                model.mesh.setupInstanceMatrixBuffer(batch.buffer, 5);
+                model.mesh.drawInstanced(batch.count);
+                model.mesh.teardownInstanceMatrixBuffer(5);
+            }
+            frameStats.foliageDraws++;
+        }
+    }
+    private readonly _impostorVec: [number[], number[]] = [[0, 0, 0, 0], [0, 0, 0, 0]];
 
     // Distance-based terrain LOD: every landscape re-picks its chunks' detail levels. The levels are
     // alternate index buffers over one unchanged vertex buffer, so this is a distance test per chunk.
@@ -3946,6 +4887,8 @@ export class Renderer {
     };
 
     private static readonly _LOD_OFF = [0, 0, 0, 0];
+    /** A colour target's write mask with every channel off: a depth-only draw into a colour pass. */
+    private static readonly _NO_COLOR_WRITE: [boolean, boolean, boolean, boolean] = [false, false, false, false];
 
     private static readonly _GEOMETRY_PROGRAMS: Record<string, { resources: readonly ShaderResource[] }> = {
         pbrGeometry: GeometryPBRProgram,
@@ -3955,6 +4898,15 @@ export class Renderer {
         pbrGeometrySkinnedPom: GeometryPBRSkinnedProgram,
         pbrGeometryInstancedPom: GeometryPBRInstancedProgram,
         pbrGeometryInstancedWind: GeometryPBRInstancedProgram,
+        pbrGeometryOpaque: GeometryPBRProgram,
+        pbrGeometrySkinnedOpaque: GeometryPBRSkinnedProgram,
+        pbrGeometryInstancedOpaque: GeometryPBRInstancedProgram,
+        pbrGeometryInstancedLean: GeometryPBRInstancedProgram,
+        pbrGeometryInstancedLeanWind: GeometryPBRInstancedProgram,
+        pbrGeometryInstancedPrepass: GeometryPBRInstancedProgram,
+        pbrGeometryInstancedPrepassWind: GeometryPBRInstancedProgram,
+        pbrGeometryInstancedLeanOpaque: GeometryPBRInstancedProgram,
+        pbrGeometryInstancedLeanOpaqueWind: GeometryPBRInstancedProgram,
         blinn_phongGeometryInstancedWind: GeometryBlinnPhongInstancedProgram,
         terrainGeometry: GeometryTerrainProgram,
         basicGeometry: GeometryBasicProgram,
@@ -4115,8 +5067,12 @@ export class Renderer {
             default: {
                 // The parallax variant if ANY submesh marches: it keeps the runtime test, so it is
                 // right for the ones that do not too. See programVariants.ts.
-                const pom = usesParallax(node.model.materials) ? 'Pom' : '';
-                return (animated ? 'pbrGeometrySkinned' : 'pbrGeometry') + pom;
+                const base = animated ? 'pbrGeometrySkinned' : 'pbrGeometry';
+                if (usesParallax(node.model.materials)) return base + 'Pom';
+                // No cutout on any submesh and no despawn dissolve under way: the no-discard program,
+                // which keeps early-Z (chunks/pbrGBuffer.wgsl, CLEO_OPAQUE). A dissolving node falls
+                // back to the plain one for the length of its fade.
+                return opaqueEligible(node.model.materials) && !(node.effectiveFade > 0) ? base + 'Opaque' : base;
             }
         }
     }
@@ -4244,8 +5200,11 @@ export class Renderer {
 
     // Record a mesh draw through the RHI. Returns false ONLY for a skinned mesh missing its bone
     // buffers — everything else records, indexed or not, LOD levels and submesh ranges included.
-    private _recordDraw(pass: RenderPassEncoder, mesh: Mesh, firstIndex: number, indexCount: number): boolean {
-        const indices = mesh.activeIndexBuffer;
+    // `lod` >= 0 draws that index level instead of the active one, for a whole-buffer draw only.
+    private _recordDraw(pass: RenderPassEncoder, mesh: Mesh, firstIndex: number, indexCount: number,
+                        lod: number = -1): boolean {
+        const level = lod >= 0 && indexCount === 0 && firstIndex === 0 && mesh.hasLods ? lod : -1;
+        const indices = level >= 0 ? mesh.lodIndexBuffer(level) : mesh.activeIndexBuffer;
         pass.setVertexBuffer(0, mesh.vertexBuffer);
         if (mesh.isAnimated) {
             // Bone data rides in dedicated buffers rather than the interleaved vertex, so it is two
@@ -4265,8 +5224,8 @@ export class Renderer {
             if (count > 0) pass.draw(count, 1, firstIndex);
             return true;
         }
-        pass.setIndexBuffer(indices, mesh.activeIndexFormat);
-        const count = indexCount > 0 ? indexCount : mesh.activeIndexCount;
+        pass.setIndexBuffer(indices, level >= 0 ? mesh.lodIndexFormat(level) : mesh.activeIndexFormat);
+        const count = indexCount > 0 ? indexCount : level >= 0 ? mesh.lodIndexCount(level) : mesh.activeIndexCount;
         if (count > 0) pass.drawIndexed(count, 1, firstIndex);
         return true;
     }
@@ -4373,11 +5332,22 @@ export class Renderer {
     // `builtFor: 'blinn_phongGeometry'` — every foliage mesh is initialised from its five attributes,
     // whatever program later draws it.
     private _recordFoliageDraw(pass: RenderPassEncoder, mesh: Mesh,
-                               instances: RhiBuffer, count: number): boolean {
+                               instances: RhiBuffer, count: number, batch?: FoliageBatch): boolean {
         // LODs are NOT a reason to fall back: a level is an alternate index buffer over the same
         // vertices, and `activeIndexBuffer` names the selected one. Only `isAnimated` needs the
         // legacy path.
         const indices = mesh.activeIndexBuffer;
+        const indirect = (batch as GpuFoliageSegment | undefined)?.indirect;
+        // A GPU-culled segment never falls back: its instance count exists only on the GPU.
+        if (indirect) {
+            const offset = indirect.offsets.get(mesh);
+            if (offset === undefined || mesh.isAnimated || !indices) return true;
+            pass.setVertexBuffer(0, mesh.vertexBuffer);
+            pass.setVertexBuffer(1, instances, indirect.vertexOffset);
+            pass.setIndexBuffer(indices, mesh.activeIndexFormat);
+            pass.drawIndexedIndirect(indirect.args, offset);
+            return true;
+        }
         if (mesh.isAnimated || !indices) return false;
         pass.setVertexBuffer(0, mesh.vertexBuffer);
         pass.setVertexBuffer(1, instances);
@@ -4386,11 +5356,23 @@ export class Renderer {
         return true;
     }
 
+    /**
+     * A colour bucket's draw chunks: the GPU-culled segments when this frame's prepare culled the layer
+     * on the GPU, else the CPU-packed batches. Kept apart so a capture drawn on the CPU path in the same
+     * frame can never repack a segment the main view's draws were recorded against.
+     */
+    private _colourChunks(layer: FoliageLayer, slot: number): FoliageBatch[] | undefined {
+        return layer.gpuCulled ? layer.gpuBatches[slot] : layer.batches[slot];
+    }
+
     private _drawInstancedGroup(pass: RenderPassEncoder, group: ModelNode[], key: string): void {
         const first = group[0];
         const type = first.model.material.type;
+        // Placed instanced copies never dissolve as a group or crossfade (u_lodCamera is turned off below),
+        // so an opaque material takes the no-discard program outright.
         const shaderType = type === 'blinn_phong' ? 'blinn_phongGeometryInstanced'
-            : usesParallax(first.model.materials) ? 'pbrGeometryInstancedPom' : 'pbrGeometryInstanced';
+            : usesParallax(first.model.materials) ? 'pbrGeometryInstancedPom'
+            : opaqueEligible(first.model.materials) ? 'pbrGeometryInstancedOpaque' : 'pbrGeometryInstanced';
 
         // Pack per-instance model matrices into the shared instance buffer.
         const count = group.length;
@@ -7324,8 +8306,19 @@ export class Renderer {
     private readonly _materialViewProj: mat4 = mat4.create();
 
     private _applyMaterialProperties(material: Material): void {
+        // The per-view values below, gathered first: if the bound program's block already holds this
+        // material under this exact view, this frame, there is nothing to send (shaderOptimizer/materialSync).
+        const cam = this._activeCamera;
+        mat4.multiply(this._materialViewProj, cam.projectionMatrix, cam.viewMatrix);
+        const view = this._materialView, eye = cam.position, sun = this._sunDirection;
+        for (let i = 0; i < 16; i++) view[i] = this._materialViewProj[i];
+        view[16] = eye[0]; view[17] = eye[1]; view[18] = eye[2];
+        view[19] = sun[0]; view[20] = sun[1]; view[21] = sun[2];
+        view[22] = this._specularAaEnabled ? 1 : 0;
+        if (!this._materialSync.needsWrite(this._shaderManager.bound, material, view)) return;
+
         for (const [name, value] of material.properties)
-            this._shaderManager.setUniform(`u_material.${name}`, value);
+            this._shaderManager.setUniform(this._materialSync.uniformName(name), value);
         // Uniforms stick to the program, so a Basic material built without `intensity` (Material.Basic sets
         // it) would inherit the last sprite's overdrive. Pin it to 1 instead.
         if (material.type === 'basic' && !material.properties.has('intensity'))
@@ -7345,8 +8338,7 @@ export class Renderer {
         // NOW rather than the frame's cached `_viewProj`, so a probe or thumbnail capture that swaps the
         // active camera offsets against its own projection. Unjittered and GL-convention on purpose:
         // the shader adds a DELTA to the rasterised depth, which neither the jitter nor WebGPU's 0..1
-        // remap changes.
-        mat4.multiply(this._materialViewProj, this._activeCamera.projectionMatrix, this._activeCamera.viewMatrix);
+        // remap changes. (Computed at the top, where the memo needs it.)
         this._shaderManager.setUniform('u_material.viewProj', this._materialViewProj);
         // Renderer state in a material block for the third time, and the same reason as the two above:
         // the deferred geometry stage binds no lighting block. `setUniform` no-ops on the material
@@ -7718,6 +8710,9 @@ export class Renderer {
      * No colour attachments. The LAYER belongs to the descriptor, not the target.
      */
     private _beginDepthPass(target: RenderTarget, label: string, layer: number): RenderPassEncoder {
+        frameStats.shadowLayers++;
+        this._shadowDrawMark = frameStats.drawCalls;
+        this._shadowTriangleMark = frameStats.triangles;
         this._passEncoder = this._acquireEncoder(label);
         this._passTarget = target;
         return this._passEncoder.beginRenderPass(target, {
@@ -7726,6 +8721,15 @@ export class Renderer {
             depthAttachment: { loadOp: 'clear', storeOp: 'store', baseArrayLayer: layer },
         });
     }
+
+    /** Close a pass opened by {@link _beginDepthPass}, charging what it drew to the shadow counters. */
+    private _endDepthPass(pass: RenderPassEncoder): void {
+        frameStats.shadowDraws += frameStats.drawCalls - this._shadowDrawMark;
+        frameStats.shadowTriangles += frameStats.triangles - this._shadowTriangleMark;
+        this._endFullscreenPass(pass);
+    }
+    private _shadowDrawMark = 0;
+    private _shadowTriangleMark = 0;
 
     /**
      * The RHI pipeline for a fullscreen pass, built once per program + state combination. Every
@@ -7818,9 +8822,11 @@ export class Renderer {
                                      * The target this pipeline will draw into, required only when it is
                                      * built BEFORE the pass is opened; otherwise `_passTarget`.
                                      */
-                                    target?: RenderTarget | null } = {}): RenderPipeline {
+                                    target?: RenderTarget | null;
+                                    /** False writes depth only: every colour target's write mask off. */
+                                    colorWrite?: boolean } = {}): RenderPipeline {
         const { blend, depthStencil, cullMode = 'none', targets = 1,
-                topology = 'triangle-list', vertex = false, builtFor = null } = options;
+                topology = 'triangle-list', vertex = false, builtFor = null, colorWrite = true } = options;
         // A logical name served by a variant (programVariants.ts): WebGPU compiles the WGSL handed in
         // here, not the program ShaderManager has, so the variant's own source has to replace the base
         // reflection the caller passed — and its name keys the cache, so a filter switch builds anew.
@@ -7834,6 +8840,7 @@ export class Renderer {
             const filter = this._variants ? this._variantFilter : (this._shadowFilterMode === 1 ? 1 : 0);
             if (this._variantMemoFilter !== filter) {
                 this._variantMemo.clear();
+                this._shadowPipelineEpoch++;
                 this._variantMemoFilter = filter;
             }
             let swap = this._variantMemo.get(program);
@@ -7872,20 +8879,15 @@ export class Renderer {
                             + (reflection.vertexWgsl ? '|vs' : '')
                             + '|' + this._formatKey(target, targets)
                             + (blend ? '|' + Renderer._blendKey(blend) : '')
-                            + (resolvedDepth ? '|' + Renderer._depthKey(resolvedDepth) : '');
+                            + (resolvedDepth ? '|' + Renderer._depthKey(resolvedDepth) : '')
+                            + (colorWrite ? '' : '|nc');
         let pipeline = this._fullscreenPipelines.get(key);
         if (!pipeline) {
+            const buildStart = performance.now();
             const colorFormats = target ? target.colorViews.slice(0, targets).map(v => v.texture.format) : [];
-            const module = device.createShaderModule({
-                label: program,
-                program,
-                stage: ShaderStage.VERTEX | ShaderStage.FRAGMENT,
-                // WebGPU compiles the WGSL; WebGL2 reaches the linked program by name and uses only the
-                // reflection. Optional — a runtime-assembled custom material has no WGSL at all.
-                source: reflection.wgsl ?? '',
-                ...(reflection.entryPoints ? { entryPoints: reflection.entryPoints } : {}),
-                resources: reflection.resources,
-            });
+            // One module per program and source, shared by every pipeline state it is drawn under. Not for a
+            // custom material's split vertex stage, whose resources are rebuilt per material.
+            const module = this._shaderModuleFor(program, reflection, !reflection.vertexWgsl);
             const vertexModule = reflection.vertexWgsl
                 ? device.createShaderModule({
                     label: program, program, stage: ShaderStage.VERTEX,
@@ -7912,11 +8914,135 @@ export class Renderer {
                     // shape every one of these used to have unconditionally.
                     format: colorFormats[i] ?? ('rgba8unorm' as const),
                     ...(blend ? { blend } : {}),
+                    ...(colorWrite ? {} : { writeMask: Renderer._NO_COLOR_WRITE }),
                 })),
             });
             this._fullscreenPipelines.set(key, pipeline);
+            shaderOptimizerStats.pipelinesBuilt++;
+            if (device.backend === 'webgpu') recordStall(`pipeline ${program}`, performance.now() - buildStart);
+            // Recorded for a publish to warm (shaderOptimizer/pipelineRecipes.ts) — never a custom material's,
+            // whose program is assembled at runtime and has no name a later boot could look up.
+            if (!reflection.vertexWgsl && !program.startsWith('custom') && !this._pipelineRecipes.has(key)) {
+                this._pipelineRecipes.set(key, {
+                    program, cullMode, targets, topology, vertex, builtFor, cubeFace,
+                    colorFormats: colorFormats.slice(),
+                    blend: blend ?? null,
+                    depthStencil: resolvedDepth ?? null,
+                    ...(colorWrite ? {} : { colorWrite: false }),
+                });
+                shaderOptimizerStats.recipesRecorded = this._pipelineRecipes.size;
+            }
         }
         return pipeline;
+    }
+
+    /**
+     * The shader module for `program`'s source, from the module cache when `cacheable`. WebGPU parses and
+     * validates WGSL per module, so a program drawn under several pipeline states (both cull modes,
+     * wireframe, a second target set) used to compile its module once per state.
+     */
+    private _shaderModuleFor(program: string,
+                             reflection: { resources: readonly ShaderResource[]; wgsl?: string;
+                                           entryPoints?: { vertex?: string; fragment?: string; compute?: string } },
+                             cacheable: boolean): ShaderModule {
+        const source = reflection.wgsl ?? '';
+        const entries = reflection.entryPoints;
+        const entryKey = entries ? `${entries.vertex ?? ''}/${entries.fragment ?? ''}/${entries.compute ?? ''}` : '';
+        let byProgram = cacheable ? this._moduleCache.get(program + '#' + entryKey) : undefined;
+        const hit = byProgram?.get(source);
+        if (hit) { shaderOptimizerStats.moduleReuses++; return hit; }
+        const module = device.createShaderModule({
+            label: program,
+            program,
+            stage: ShaderStage.VERTEX | ShaderStage.FRAGMENT,
+            // WebGPU compiles the WGSL; WebGL2 reaches the linked program by name and uses only the
+            // reflection. Optional — a runtime-assembled custom material has no WGSL at all.
+            source,
+            ...(entries ? { entryPoints: entries } : {}),
+            resources: reflection.resources,
+        });
+        if (cacheable) {
+            if (!byProgram) { byProgram = new Map(); this._moduleCache.set(program + '#' + entryKey, byProgram); }
+            byProgram.set(source, module);
+        }
+        return module;
+    }
+
+    /**
+     * Every pipeline this session has built, as recipes (shaderOptimizer/pipelineRecipes.ts). The editor
+     * hands them to publish, which writes them into `config.graphics.pipelines` for the player to warm.
+     */
+    public pipelineRecipes(): PipelineRecipe[] {
+        return [...this._pipelineRecipes.values()].map(serializeRecipe);
+    }
+
+    /**
+     * Build the config's recorded pipelines ahead of use, off the main thread (WebGPU's
+     * `createRenderPipelineAsync`), so the first frame that draws each one finds it ready instead of
+     * stalling to compile it. Resolves when all are done; a recipe whose program this build does not have
+     * is skipped. A no-op on WebGL2, where a pipeline is a state bundle over an already-linked program.
+     */
+    public async warmPipelines(onProgress?: (done: number, total: number) => void): Promise<number> {
+        const recipes = this._warmRecipes;
+        if (!recipes.length || device?.backend !== 'webgpu') return 0;
+        const create = device.createRenderPipelineAsync?.bind(device);
+        if (!create) return 0;
+        let done = 0, warmed = 0;
+        const jobs = recipes.map(async (r) => {
+            try {
+                const built = this._recipePipeline(r, create);
+                if (built) {
+                    const [key, pipeline] = await built;
+                    if (!this._fullscreenPipelines.has(key)) {
+                        this._fullscreenPipelines.set(key, pipeline);
+                        warmed++;
+                    }
+                }
+            } catch (e) {
+                Logger.warn(`[shaders] could not warm pipeline '${r.program}': ${e}`, 'Renderer');
+            } finally {
+                onProgress?.(++done, recipes.length);
+            }
+        });
+        await Promise.all(jobs);
+        shaderOptimizerStats.pipelinesWarmed += warmed;
+        return warmed;
+    }
+
+    /**
+     * Start building one recipe's pipeline, under exactly the key `_pipelineFor` would look it up by.
+     * Null when this build has no program by that name (a recipe from an older or larger build).
+     */
+    private _recipePipeline(r: PipelineRecipe, create: (d: RenderPipelineDescriptor) => Promise<RenderPipeline>):
+            Promise<[string, RenderPipeline]> | null {
+        const descriptor = this._descriptorFor(r.program) ?? this._descriptorFor(this._physicalOf(r.program));
+        if (!descriptor || !this._shaderManager.find(r.program) && !this._shaderManager.find(this._physicalOf(r.program)))
+            return null;
+        const reflection = descriptor as unknown as { resources: readonly ShaderResource[]; wgsl?: string;
+                                                      entryPoints?: { vertex?: string; fragment?: string; compute?: string } };
+        if (!reflection.wgsl) return null;
+        const key = r.program + '|' + r.cullMode + '|' + r.targets + '|' + r.topology + '|' + r.vertex
+                  + '|' + (r.builtFor ?? '') + (r.cubeFace ? '|cw' : '')
+                  + '|' + r.colorFormats.join(',')
+                  + (r.blend ? '|' + Renderer._blendKey(r.blend) : '')
+                  + (r.depthStencil ? '|' + Renderer._depthKey(r.depthStencil) : '')
+                  + (r.colorWrite === false ? '|nc' : '');
+        if (this._fullscreenPipelines.has(key)) return null;
+        const module = this._shaderModuleFor(r.program, reflection, true);
+        return create({
+            label: r.program,
+            vertex: module, fragment: module,
+            vertexLayouts: r.vertex
+                ? this._vertexLayoutsFor(r.program, r.vertex, r.builtFor)
+                : screenQuadLayout(this._shaderManager.getShader(r.program).attributes),
+            primitive: { topology: r.topology, cullMode: r.cullMode, frontFace: r.cubeFace ? 'cw' : 'ccw' },
+            ...(r.depthStencil ? { depthStencil: r.depthStencil } : {}),
+            colorTargets: Array.from({ length: r.targets }, (_unused, i) => ({
+                format: (r.colorFormats[i] ?? 'rgba8unorm') as TextureFormat,
+                ...(r.blend ? { blend: r.blend } : {}),
+                ...(r.colorWrite === false ? { writeMask: Renderer._NO_COLOR_WRITE } : {}),
+            })),
+        }).then(pipeline => [key, pipeline] as [string, RenderPipeline]);
     }
 
     /**
@@ -8606,117 +9732,501 @@ export class Renderer {
         if (!this._shadowMapsDirty) return;
         this._shadowCascadeFBO.clearAll();
         this._shadowMapsDirty = false;
+        // Every layer now holds the far plane, whatever the stagger and the layer cache remember drawing.
+        this._shadowLayerCache.invalidateAll();
+        this._shadowFullUpdate = true;
+        this._farCascadeValid = false;
     }
 
     /**
-     * Draw every shadow-casting model into the bound depth target for one light-space matrix. Skinned
-     * meshes take the skinned depth shader so the shadow follows the animated pose.
+     * Draw `count` of `casters` into the bound depth target for one light-space matrix. The records come
+     * from `_ensureShadowCasters` with program, pipeline and cutout already resolved, so per caster this is
+     * a frustum test, the model matrix and the draw. Skinned meshes take the skinned depth shader so the
+     * shadow follows the animated pose.
      */
-    private _renderShadowCasters(pass: RenderPassEncoder, models: Set<ModelNode>, lightSpace: mat4): void {
+    private _renderShadowCasters(pass: RenderPassEncoder, casters: readonly ShadowCasterRecord[], count: number,
+                                 lightSpace: mat4): void {
         let bound: string | null = null;
-        // The pipeline last SET, not merely last built. This loop runs per caster per cascade and the
-        // pipelines repeat heavily — most scenes use two — so re-setting an identical one was several
-        // undeduped raw `gl` calls plus a state-array allocation per node, for nothing.
+        // The pipeline last SET, not merely last built. Most scenes use two, so re-setting an identical
+        // one per caster was several undeduped raw `gl` calls plus a state-array allocation, for nothing.
         let boundPipeline: RenderPipeline | null = null;
         // Cull against the LIGHT's frustum, not the camera's.
         this._shadowFrustum.setFromViewProjection(lightSpace);
-        for (const node of models) {
-            // Visible, has a casting submesh, not editor chrome, has a mesh — see `_castsShadow`.
-            // The draw below restricts itself to the casting submesh ranges.
-            if (!this._castsShadow(node)) continue;
+        let modelSet = false;
+        const lastModel = this._shadowLastModel;
+        for (let k = 0; k < count; k++) {
+            const record = casters[k];
+            const node = record.node, state = record.state;
             if (this._frustumCulling) {
-                const s = node.getBoundingSphere();
+                const s = record.sphere;
                 if (!this._shadowFrustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) continue;
             }
 
-            const skinned = node.model instanceof AnimatedModel && (node.model as AnimatedModel).hasSkin && !!node.animator;
-            // Unlit casters use the Basic vertex layout, which puts texCoord at location 1 where every
-            // lit family puts it at 2 — so the cutout variant is chosen by family as well as by skin.
-            const basicFamily = node.model.material.type === 'basic' || node.model.material.type === 'basicSkinned';
-            const plainType = skinned ? 'shadowMapSkinned' : 'shadowMap';
-            const cutoutType = basicFamily
-                ? (skinned ? 'shadowMapBasicSkinnedCutout' : 'shadowMapBasicCutout')
-                : (skinned ? 'shadowMapSkinnedCutout' : 'shadowMapCutout');
-
-            // Resolved per SUBMESH below; this is only "does any of them need the cutout program".
-            const casterMaterials = node.model.materials;
-            let anyCutout = false;
-            for (const m of casterMaterials) if (this._shadowCutoutOf(m) !== null) { anyCutout = true; break; }
-            const shaderType = anyCutout ? cutoutType : plainType;
-
-            // Uniforms live per-program, so (re)set u_lightSpace whenever the bound program changes.
-            // The pipeline carries depth on, depth writes on, and FRONT-face culling, which pushes
-            // shadow acne onto surfaces the camera cannot see.
-            const pipeline = this._pipelineFor(shaderType, Renderer._SHADOW_PROGRAMS[shaderType], {
-                // A cut-out caster culls nothing: its shape is in the texture and it is usually a
-                // two-sided card, so front-face culling would erase half of it. A solid caster keeps
-                // the front-face culling that pushes shadow acne onto surfaces the camera cannot see.
-                cullMode: anyCutout || node.model.material.config.side === 'double' ? 'none' : 'front',
-                depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
-                targets: 0,
-                vertex: skinned ? 'model+skin' : 'model',
-                // The shadow programs declare only position, but the buffer under them was written for
-                // whatever material the node wears — 20 bytes for an unlit caster, 56 for a lit one.
-                builtFor: node.model.material.type,   // skinned too — see `_geometryPass`
-            });
-            if (pipeline !== boundPipeline) {
-                pass.setPipeline(pipeline);
-                boundPipeline = pipeline;
+            // The pipeline carries depth on, depth writes on, and the cull mode `_shadowCasterStateOf`
+            // picked. Uniforms live per-program, so (re)set u_lightSpace whenever the program changes.
+            if (state.pipeline !== boundPipeline) {
+                pass.setPipeline(state.pipeline);
+                boundPipeline = state.pipeline;
             }
-            if (shaderType !== bound) {
+            if (state.shaderType !== bound) {
                 this._shaderManager.setUniform('u_lightSpace', this._clipProjection(lightSpace));
-                bound = shaderType;
+                bound = state.shaderType;
+                modelSet = false;
             }
 
-            this._shaderManager.setUniform('u_model', node.worldTransform);
+            // Only when it differs from the last draw's: every chunk of a landscape shares one transform,
+            // and an unchanged block uploads nothing.
+            const world = node.worldTransform;
+            if (!modelSet || !Renderer._sameMatrix(lastModel, world)) {
+                this._shaderManager.setUniform('u_model', world);
+                lastModel.set(world);
+                modelSet = true;
+            }
 
-            if (skinned) {
+            if (state.skinned) {
                 // Initialize the animated VAO from the program ABOUT TO DRAW IT, never from the node's
                 // geometry shader: the unlit Basic family has no normal/tangent/bitangent, so its bone
                 // attributes sit at locations 2/3 where every lit family puts them at 5/6.
-                (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(shaderType).attributes);
+                (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(state.shaderType).attributes);
                 this._uploadBoneMatrices('shadowMapSkinned', node);
             }
 
             // Depth-only, so no material is bound — a merged model normally casts its whole buffer in
             // ONE call. Only when some submesh opts out of shadows, or needs its own cutout texture,
             // does this fall back to ranges.
-            const casters = node.model.materials;
-            if (anyCutout) {
+            const model = node.model;
+            const materials = model.materials;
+            if (state.anyCutout) {
                 // Per submesh, because the mask texture and threshold are per material. A merged model
                 // is rare here and a cut-out one rarer still, so the extra binds are not on any hot
                 // path — and a model with no cutout never reaches this branch at all.
-                const submeshes = node.model.hasSubmeshes ? node.model.submeshes : null;
-                const count = submeshes ? submeshes.length : 1;
-                for (let i = 0; i < count; i++) {
-                    const caster = casters[i] ?? casters[0];
+                const submeshes = model.hasSubmeshes ? model.submeshes : null;
+                const n = submeshes ? submeshes.length : 1;
+                for (let i = 0; i < n; i++) {
+                    const caster = materials[i] ?? materials[0];
                     if (!caster.config.castShadow || caster.config.wireframe) continue;
-                    const cut = this._shadowCutoutOf(caster);
+                    const cut = this._shadowCutoutCached(caster);
                     // A solid submesh inside an otherwise cut-out model still has to be drawn, and the
                     // cutout program is what is bound — so give it a threshold nothing can fall below.
                     this._shaderManager.setUniform('u_cutoff', cut ? cut.cutoff : 0.0);
                     this._shaderManager.setUniform('u_useRed', cut ? cut.useRed : false);
-                    pass.setBindGroup(0, this._textureBindGroup(pipeline, 0,
+                    pass.setBindGroup(0, this._textureBindGroup(state.pipeline, 0,
                         [cut ? cut.texture : this._fallbackTexture]));
                     const start = submeshes ? submeshes[i].start : 0;
                     const drawCount = submeshes ? submeshes[i].count : 0;
-                    if (this._recordDraw(pass, node.model.mesh, start, drawCount)) continue;
-                    if (submeshes) node.model.mesh.drawRange(start, drawCount, 'triangle-list');
-                    else node.model.mesh.draw('triangle-list');
+                    if (this._recordDraw(pass, model.mesh, start, drawCount)) continue;
+                    if (submeshes) model.mesh.drawRange(start, drawCount, 'triangle-list');
+                    else model.mesh.draw('triangle-list');
                 }
-            } else if (!node.model.hasSubmeshes || casters.every(m => m.config.castShadow && !m.config.wireframe)) {
-                if (!this._recordDraw(pass, node.model.mesh, 0, 0))
-                    node.model.mesh.draw('triangle-list');
+            } else if (record.mesh) {
+                this._recordDraw(pass, record.mesh, 0, 0);
+            } else if (state.wholeBuffer) {
+                if (!this._recordDraw(pass, model.mesh, 0, 0, this._shadowLodFor(record)))
+                    model.mesh.draw('triangle-list');
             } else {
-                const submeshes = node.model.submeshes;
+                const submeshes = model.submeshes;
                 for (let i = 0; i < submeshes.length; i++) {
-                    const caster = casters[i] ?? casters[0];   // see _drawSubmeshes: never index past the array
+                    const caster = materials[i] ?? materials[0];   // see _drawSubmeshes: never index past the array
                     if (!caster.config.castShadow || caster.config.wireframe) continue;
-                    if (this._recordDraw(pass, node.model.mesh, submeshes[i].start, submeshes[i].count)) continue;
-                    node.model.mesh.drawRange(submeshes[i].start, submeshes[i].count, 'triangle-list');
+                    if (this._recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count)) continue;
+                    model.mesh.drawRange(submeshes[i].start, submeshes[i].count, 'triangle-list');
                 }
             }
         }
+    }
+
+    /**
+     * Gather this frame's shadow casters ONCE, for every shadow layer to share. Each layer used to walk
+     * all of `scene.models` itself — a landscape alone is a thousand chunk nodes — re-deciding per node
+     * which program, cutout and pipeline it draws with. Also finds the receiver floor that ends every
+     * caster's shadow volume (see `shadowReach`).
+     */
+    private _ensureShadowCasters(scene: Scene): void {
+        if (this._castersFrame === this._frameIndex && this._castersScene === scene) return;
+        this._castersFrame = this._frameIndex;
+        this._castersScene = scene;
+
+        const sun = this._shadowLight;
+        const d = sun ? unitDirection(this._dirOf(sun), this._shadowLightUnit)
+                      : vec3.set(this._shadowLightUnit, 0, -1, 0);
+        lightViewMatrix(d, this._casterLightView, this._csmScratch);
+
+        const records = this._casterRecords;
+        const landscapes = scene.landscapes;
+        let count = 0;
+        // The lowest receiver that is not terrain; the terrain's own come from its ground grid below,
+        // because a chunk's bounding sphere reaches tens of metres under the ground it holds.
+        let floor = Infinity;
+        for (const node of scene.models) {
+            // Terrain chunks come per landscape, below.
+            if (node.isTerrainChunk) continue;
+            // LOD-hidden levels and user-hidden nodes neither cast nor receive; editor chrome never casts.
+            // A node added this frame has no mesh yet: shadows render BEFORE the geometry pass that calls
+            // `initializeModel`, so its `Mesh` is still the empty one the constructor made.
+            if (!node.visible || !node.initialized || isEditorOnlyNode(node)) continue;
+            const s = node.getBoundingSphere();
+            // Casting or not, anything visible receives: a ground plane that casts nothing still ends the
+            // shadow volume of the cube floating over it.
+            if (s.center[1] - s.radius < floor) floor = s.center[1] - s.radius;
+            // A despawn dissolve drops its shadow halfway through: depth has no screen-door to share.
+            if (node.effectiveFade < 0.5) continue;
+            // A merged model can have a non-casting submesh among casting ones, so the test is "any
+            // submesh casts" and the draw restricts itself to those ranges.
+            let casts = false;
+            for (const m of node.model.materials)
+                if (m.config.castShadow && !m.config.wireframe) { casts = true; break; }
+            if (!casts) continue;
+            records[count++] = this._casterRecordOf(node, s, -1);
+        }
+
+        const grids = this._floorGrids;
+        grids.length = 0;
+        for (const landscape of landscapes) {
+            if (!landscape.visible) continue;
+            const grid = this._terrainFloorOf(landscape);
+            grids.push(grid);
+            if (grid.lowest < floor) floor = grid.lowest;
+        }
+        // Floored to the metre, so a crate bobbing at the bottom of the scene does not re-derive every
+        // caster's reach each frame; lower is the safe direction (a longer path, a lower ground).
+        this._receiverFloorY = Number.isFinite(floor) ? Math.floor(floor) : 0;
+        const key = mixNumber(mixNumber(mixNumber(mixNumber(mixNumber(HASH_SEED, d[0]), d[1]), d[2]),
+                                        this._receiverFloorY), this._floorEpoch);
+        this._reachKey = key;
+        for (let i = 0; i < count; i++) this._updateReach(records[i], key);
+        this._nonTerrainCount = count;
+
+        this._terrainSets.length = 0;
+        for (const landscape of landscapes) {
+            if (!landscape.visible) continue;
+            const set = this._terrainCasters(landscape, key);
+            this._terrainSets.push(set);
+            for (const record of set.records) records[count++] = record;
+        }
+        records.length = count;
+        this._casterCount = count;
+    }
+
+    /** The record `node` is gathered into, kept across frames; refreshed for this frame. */
+    private _casterRecordOf(node: ModelNode, sphere: { center: vec3; radius: number },
+                            terrainVersion: number): ShadowCasterRecord {
+        let record = this._casterRecordByNode.get(node);
+        const state = this._shadowCasterStateOf(node);
+        if (!record) {
+            record = { node, sphere, state, reach: 0, terrainVersion, mesh: null };
+            this._casterRecordByNode.set(node, record);
+        }
+        record.sphere = sphere;
+        record.state = state;
+        record.terrainVersion = terrainVersion;
+        return record;
+    }
+
+    /** Refresh a record's shadow reach, kept on its state while neither it, the sun nor the ground moved. */
+    private _updateReach(r: ShadowCasterRecord, key: number): void {
+        const c = r.sphere.center, state = r.state;
+        if (state.reachKey !== key || state.reachX !== c[0] || state.reachY !== c[1] || state.reachZ !== c[2]
+            || state.reachR !== r.sphere.radius) {
+            state.reach = this._shadowReachOf(c[0], c[1], c[2], r.sphere.radius);
+            state.reachKey = key;
+            state.reachX = c[0]; state.reachY = c[1]; state.reachZ = c[2]; state.reachR = r.sphere.radius;
+        }
+        r.reach = state.reach;
+    }
+
+    /**
+     * One landscape's chunk casters, rebuilt only when something they depend on changes: its heights, its
+     * transform, its material and how that casts, the pipelines, the sun or the ground grid. Walking a
+     * thousand chunk nodes every frame to find them exactly as they were was most of the gather.
+     */
+    private _terrainCasters(landscape: LandscapeNode, reachKey: number): TerrainCasterSet {
+        const terrain = landscape.terrain;
+        const material = terrain.material;
+        const cut = this._shadowCutoutCached(material);
+        const casts = landscape.effectiveFade >= 0.5 && material.config.castShadow && !material.config.wireframe;
+        let key = mixNumber(mixNumber(mixNumber(HASH_SEED, terrain.heightsVersion), landscape.transformVersion),
+                            this._objectId(terrain));
+        key = mixNumber(mixNumber(mixNumber(key, this._objectId(material)), casts ? 1 : 0),
+                        material.config.side === 'double' ? 1 : 0);
+        key = mixNumber(mixNumber(mixNumber(key, cut ? this._objectId(cut.texture) : 0), cut ? cut.cutoff : 0),
+                        this._shadowPipelineEpoch * 2 + (this._cubeFaceCapture && device.backend === 'webgpu' ? 1 : 0));
+        key = mixNumber(mixNumber(key, reachKey), landscape.chunkNodes.length);
+        // A density change swaps every chunk's geometry, and a chunk waits for its new mesh.
+        const first = landscape.chunkNodes[0];
+        key = mixNumber(key, first ? first.model.geometryVersion : -1);
+
+        let entry = this._terrainCasterCache.get(landscape);
+        if (entry && entry.key === key) return entry;
+        if (!entry) { entry = { key: 0, records: [], packed: new Float32Array(0) }; this._terrainCasterCache.set(landscape, entry); }
+        entry.records.length = 0;
+        let complete = true;
+        if (casts) {
+            for (const node of landscape.chunkNodes) {
+                // A chunk without its mesh yet is skipped, and the list rebuilt next frame.
+                if (!node.initialized) { complete = false; continue; }
+                const record = this._casterRecordOf(node, node.getBoundingSphere(), terrain.heightsVersion);
+                this._updateReach(record, reachKey);
+                entry.records.push(record);
+            }
+        }
+        if (entry.packed.length !== entry.records.length * 5) entry.packed = new Float32Array(entry.records.length * 5);
+        for (let i = 0; i < entry.records.length; i++) {
+            const r = entry.records[i], c = r.sphere.center, o = i * 5;
+            entry.packed[o] = c[0]; entry.packed[o + 1] = c[1]; entry.packed[o + 2] = c[2];
+            entry.packed[o + 3] = r.sphere.radius; entry.packed[o + 4] = r.reach;
+        }
+        entry.key = complete ? key : NaN;
+        return entry;
+    }
+    /** Bumped whenever a landscape's ground grid is rebuilt, invalidating every cached reach. */
+    private _floorEpoch: number = 0;
+    /** This frame's sun + ground key, which every cached reach was found for. */
+    private _reachKey: number = 0;
+
+    /**
+     * How far along the sun a shadow cast from the sphere (`x`, `y`, `z`, `r`) can travel before it meets
+     * the ground: over a landscape, the lowest terrain under its path, else the scene's lowest receiver.
+     */
+    private _shadowReachOf(x: number, y: number, z: number, r: number): number {
+        const d = this._shadowLightUnit;
+        let floor = this._receiverFloorY;
+        if (this._floorGrids.length > 0 && d[1] < -1e-3) {
+            // The path as far as the scene's floor would let it run, then the ground actually under it.
+            const longest = shadowReach(y, r, floor, d[1]);
+            for (const grid of this._floorGrids) {
+                const ground = grid.floorAlong(x, z, x + d[0] * longest, z + d[2] * longest, r);
+                if (!Number.isNaN(ground)) { floor = ground; break; }
+            }
+        }
+        return shadowReach(y, r, floor, d[1]);
+    }
+
+    /** One landscape's ground grid (a cell per chunk, holding its lowest point), rebuilt when it changes. */
+    private _terrainFloorOf(landscape: LandscapeNode): TerrainFloorGrid {
+        const terrain = landscape.terrain;
+        const o = terrain.origin;
+        let entry = this._terrainFloors.get(landscape);
+        if (!entry) {
+            entry = { grid: new TerrainFloorGrid(), terrain: null, version: -1, x: NaN, y: NaN, z: NaN };
+            this._terrainFloors.set(landscape, entry);
+        }
+        if (entry.terrain !== terrain || entry.version !== terrain.heightsVersion
+            || entry.x !== o[0] || entry.y !== o[1] || entry.z !== o[2]) {
+            // Chunks are cut row-major from the grid's corner, `chunkQuads` cells a side (Terrain._buildChunks).
+            const step = terrain.config.chunkQuads;
+            const chunks = terrain.chunks;
+            const cols = Math.max(1, Math.ceil((terrain.resolution - 1) / step));
+            const rows = Math.max(1, Math.ceil(chunks.length / cols));
+            if (this._floorScratch.length < cols * rows) this._floorScratch = new Float32Array(cols * rows);
+            const minY = this._floorScratch;
+            for (let i = 0; i < cols * rows; i++) minY[i] = i < chunks.length ? chunks[i].minY + o[1] : o[1];
+            const half = terrain.size / 2;
+            entry.grid.set(o[0] - half, o[2] - half, step * terrain.elementSize, cols, rows, minY);
+            entry.terrain = terrain;
+            entry.version = terrain.heightsVersion;
+            entry.x = o[0]; entry.y = o[1]; entry.z = o[2];
+            this._floorEpoch++;
+        }
+        return entry.grid;
+    }
+
+    /**
+     * Program, pipeline and cutout for one caster, kept per node across frames. Its inputs are re-read
+     * every frame (materials are edited in place, so nothing here can be versioned) but they are a few
+     * field reads; the pipeline, whose key is a dozen-part string, is only looked up again when one of
+     * them changed.
+     */
+    private _shadowCasterStateOf(node: ModelNode): ShadowCasterState {
+        const model = node.model;
+        const material = model.material;
+        const skinned = model instanceof AnimatedModel && model.hasSkin && !!node.animator;
+
+        let anyCutout = false;
+        let wholeBuffer = true;
+        let key = HASH_SEED;
+        for (const m of model.materials) {
+            const cut = this._shadowCutoutCached(m);
+            if (cut) {
+                anyCutout = true;
+                key = mixNumber(mixNumber(mixNumber(key, this._objectId(cut.texture)), cut.cutoff), cut.useRed ? 1 : 0);
+            }
+            if (!m.config.castShadow || m.config.wireframe) wholeBuffer = false;
+        }
+        if (!model.hasSubmeshes) wholeBuffer = true;
+
+        // Unlit casters use the Basic vertex layout, which puts texCoord at location 1 where every
+        // lit family puts it at 2 — so the cutout variant is chosen by family as well as by skin.
+        const basicFamily = material.type === 'basic' || material.type === 'basicSkinned';
+        const shaderType = !anyCutout ? (skinned ? 'shadowMapSkinned' : 'shadowMap')
+            : basicFamily ? (skinned ? 'shadowMapBasicSkinnedCutout' : 'shadowMapBasicCutout')
+            : (skinned ? 'shadowMapSkinnedCutout' : 'shadowMapCutout');
+        // A cut-out caster culls nothing: its shape is in the texture and it is usually a two-sided card,
+        // so front-face culling would erase half of it. A solid caster keeps the FRONT-face culling that
+        // pushes shadow acne onto surfaces the camera cannot see.
+        const cullMode: CullMode = anyCutout || material.config.side === 'double' ? 'none' : 'front';
+        const epoch = this._shadowPipelineEpoch * 2 + (this._cubeFaceCapture && device.backend === 'webgpu' ? 1 : 0);
+
+        let state = this._shadowCasterStates.get(node);
+        if (!state || state.model !== model || state.material !== material || state.shaderType !== shaderType
+            || state.cullMode !== cullMode || state.epoch !== epoch) {
+            const pipeline = this._pipelineFor(shaderType, Renderer._SHADOW_PROGRAMS[shaderType], {
+                cullMode,
+                depthStencil: Renderer._SHADOW_DEPTH,
+                targets: 0,
+                vertex: skinned ? 'model+skin' : 'model',
+                // The shadow programs declare only position, but the buffer under them was written for
+                // whatever material the node wears — 20 bytes for an unlit caster, 56 for a lit one.
+                builtFor: material.type,   // skinned too — see `_geometryPass`
+                // Resolved outside any pass. A depth-only pipeline takes no colour formats from it.
+                target: this._shadowCascadeFBO.renderTarget,
+            });
+            state = { model, material, epoch, shaderType, cullMode, pipeline, skinned, anyCutout, wholeBuffer,
+                      id: this._objectId(node), key: 0, pipelineId: this._objectId(pipeline),
+                      reach: 0, reachKey: -1, reachX: NaN, reachY: NaN, reachZ: NaN, reachR: NaN };
+            this._shadowCasterStates.set(node, state);
+        }
+        state.skinned = skinned;
+        state.anyCutout = anyCutout;
+        state.wholeBuffer = wholeBuffer;
+        state.key = mixNumber(mixNumber(key, state.pipelineId), wholeBuffer ? 1 : 0);
+        return state;
+    }
+
+    private readonly _shadowLastModel = new Float32Array(16);
+    private static _sameMatrix(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
+        for (let i = 0; i < 16; i++) if (a[i] !== b[i]) return false;
+        return true;
+    }
+
+    /** `_shadowCutoutOf`, once per material per frame: a landscape's thousand chunks share one material. */
+    private _shadowCutoutCached(material: Material): ShadowCutout | null {
+        const entry = this._shadowCutoutMemo.get(material);
+        if (entry && entry.frame === this._frameIndex) return entry.cut;
+        const cut = this._shadowCutoutOf(material);
+        if (entry) { entry.frame = this._frameIndex; entry.cut = cut; }
+        else this._shadowCutoutMemo.set(material, { frame: this._frameIndex, cut });
+        return cut;
+    }
+
+    /**
+     * Pick the casters one layer draws into `_layerCasters`, and their light-view bounds into
+     * `_casterBounds` for its near plane: those whose shadow volume reaches the layer's `sphere` and, when
+     * `inner` > 0, the receiver shell around `eye` (see graphics/shadowCasters.ts). With `minRadius`, only
+     * terrain chunks and casters at least that large — the far cascade's contents.
+     */
+    private _selectLayerCasters(sphere: CascadeSphere, eye: ArrayLike<number> | null, inner: number,
+                                minRadius: number = 0, blocks: readonly ShadowCasterRecord[] | null = null): void {
+        const d = this._shadowLightUnit, dx = d[0], dy = d[1], dz = d[2];
+        const bounds = this._casterBounds;
+        const lightView = this._casterLightView;
+        const sx = sphere.center[0], sy = sphere.center[1], sz = sphere.center[2], sr = sphere.radius;
+        const shell = inner > 0 && eye !== null;
+        const ex = eye ? eye[0] : 0, ey = eye ? eye[1] : 0, ez = eye ? eye[2] : 0;
+        bounds.count = 0;
+        let n = 0;
+        // `shadowTouchesSphere` then `shadowFarthestFrom` (graphics/shadowCasters.ts), over this layer's
+        // numbers held in locals: this runs for every caster of every layer, a thousand chunks among them.
+        const reaches = (cx: number, cy: number, cz: number, cr: number, reach: number): boolean => {
+            // The swept segment against the layer's sphere.
+            const px = sx - cx, py = sy - cy, pz = sz - cz;
+            let t = px * dx + py * dy + pz * dz;
+            if (t < 0) t = 0; else if (t > reach) t = reach;
+            const qx = px - dx * t, qy = py - dy * t, qz = pz - dz * t, R = cr + sr;
+            if (qx * qx + qy * qy + qz * qz > R * R) return false;
+            if (!shell) return true;
+            // Its farthest point from the eye: an end of the segment, plus the radius.
+            const reachIn = inner - cr;
+            if (reachIn <= 0) return true;
+            const ax = cx - ex, ay = cy - ey, az = cz - ez;
+            const bx = ax + dx * reach, by = ay + dy * reach, bz = az + dz * reach;
+            return Math.max(ax * ax + ay * ay + az * az, bx * bx + by * by + bz * bz) >= reachIn * reachIn;
+        };
+        for (let i = 0; i < this._nonTerrainCount; i++) {
+            const r = this._casterRecords[i];
+            const s = r.sphere, cx = s.center[0], cy = s.center[1], cz = s.center[2], cr = s.radius;
+            if (minRadius > 0 && cr < minRadius) continue;
+            if (!reaches(cx, cy, cz, cr, r.reach)) continue;
+            this._layerCasters[n++] = r;
+            pushCasterBounds(bounds, lightView, cx, cy, cz, cr);
+        }
+        if (blocks) {
+            // The far cascade: the terrain as its coarse blocks instead of chunk by chunk.
+            for (const r of blocks) {
+                const s = r.sphere, cx = s.center[0], cy = s.center[1], cz = s.center[2], cr = s.radius;
+                if (!reaches(cx, cy, cz, cr, r.reach)) continue;
+                this._layerCasters[n++] = r;
+                pushCasterBounds(bounds, lightView, cx, cy, cz, cr);
+            }
+        } else {
+            for (const set of this._terrainSets) {
+                const p = set.packed, records = set.records;
+                for (let k = 0, o = 0; k < records.length; k++, o += 5) {
+                    const cx = p[o], cy = p[o + 1], cz = p[o + 2], cr = p[o + 3];
+                    if (!reaches(cx, cy, cz, cr, p[o + 4])) continue;
+                    this._layerCasters[n++] = records[k];
+                    pushCasterBounds(bounds, lightView, cx, cy, cz, cr);
+                }
+            }
+        }
+        // Entries past the count are left from an earlier layer and never read.
+        this._layerCasterCount = n;
+    }
+
+    /**
+     * The index level a caster draws with in the layer being drawn; -1 = the camera's own. Only terrain
+     * chunks are re-levelled. In an outer cascade a chunk wholly beyond every pixel the cascade shades
+     * only CASTS there, and casts from its coarsest level; a chunk the cascade's pixels can land on keeps
+     * the camera's level, so terrain never self-shadows against a surface it is not drawn as.
+     */
+    private _shadowLodFor(record: ShadowCasterRecord): number {
+        if (record.terrainVersion < 0 || this._layerLodMode === 'camera') return -1;
+        const mesh = record.node.model.mesh;
+        if (!mesh.hasLods) return -1;
+        if (this._layerLodMode === 'beyond') {
+            const c = record.sphere.center, e = this._activeCamera.position;
+            const dx = c[0] - e[0], dy = c[1] - e[1], dz = c[2] - e[2];
+            if (Math.sqrt(dx * dx + dy * dy + dz * dz) - record.sphere.radius <= this._layerLodRadius) return -1;
+        }
+        return mesh.lodLevels - 1;
+    }
+
+    /**
+     * Everything one layer's depth depends on, as a number: its matrix, the light, and each caster it
+     * draws — which node, whether it moved (its transform version, and its sphere, which also catches a
+     * matrix written in place), what it draws with, a chunk's level and heights, and for a skinned caster
+     * the frame, since a pose has no version and an animated character is never quite still.
+     */
+    private _layerHash(matrix: mat4, coarseMotion: number = 0, motionFrom: number = 0): number {
+        let h = mixTransform(HASH_SEED, matrix);
+        const d = this._shadowLightUnit;
+        h = mixNumber(mixNumber(mixNumber(h, d[0]), d[1]), d[2]);
+        h = mixNumber(h, this._frustumCulling ? 1 : 0);
+        for (let k = 0; k < this._layerCasterCount; k++) {
+            const r = this._layerCasters[k];
+            const state = r.state, c = r.sphere.center;
+            h = mixNumber(h, state.id);
+            if (coarseMotion > 0 && r.terrainVersion < 0) {
+                // Only movement this layer could show: a crate bobbing on the pond is a fraction of a texel
+                // of it, and a sail turning in the wind beside the camera is shaded by the near cascades,
+                // not by this. Redrawing the whole landscape to follow either cost more than anything else
+                // in the frame. Its age limit catches the rest.
+                const e = this._activeCamera.position;
+                const dx = c[0] - e[0], dy = c[1] - e[1], dz = c[2] - e[2];
+                if (Math.sqrt(dx * dx + dy * dy + dz * dz) + r.sphere.radius + r.reach > motionFrom)
+                    h = mixNumber(mixNumber(mixNumber(h, Math.round(c[0] / coarseMotion)), Math.round(c[1] / coarseMotion)),
+                                  Math.round(c[2] / coarseMotion));
+            } else {
+                h = mixNumber(h, r.node.transformVersion);
+                h = mixNumber(mixNumber(mixNumber(mixNumber(h, c[0]), c[1]), c[2]), r.sphere.radius);
+            }
+            h = mixNumber(h, state.key);
+            if (r.terrainVersion >= 0) {
+                const lod = this._shadowLodFor(r);
+                h = mixNumber(mixNumber(h, r.terrainVersion), lod >= 0 ? lod : r.node.model.mesh.activeLod);
+            }
+            if (state.skinned && coarseMotion <= 0) h = mixNumber(h, this._frameIndex);
+        }
+        return h;
     }
 
     /**
@@ -8741,6 +10251,7 @@ export class Renderer {
             return;
         }
         if (!this._beginPass('shadows.spot')) return;
+        this._ensureShadowCasters(scene);
 
         GLState.depthTest(true);
         GLState.depthMask(true);
@@ -8775,8 +10286,8 @@ export class Renderer {
             this._spotShadowTexelScalePacked[layer] = (2 * Math.tan(halfFov)) / this._spotShadowResolution;
 
             const pass = this._beginDepthPass(this._spotShadowFBO.renderTarget, 'spotShadow', layer);
-            this._renderShadowCasters(pass, scene.models, this._spotShadowMatrices[layer]);
-            this._endFullscreenPass(pass);
+            this._renderShadowCasters(pass, this._casterRecords, this._casterCount, this._spotShadowMatrices[layer]);
+            this._endDepthPass(pass);
         }
 
         GLState.cullFace('back');
@@ -8835,6 +10346,7 @@ export class Renderer {
             return;
         }
         if (!this._beginPass('shadows.point')) return;
+        this._ensureShadowCasters(scene);
 
         GLState.depthTest(true);
         GLState.depthMask(true);
@@ -8881,8 +10393,8 @@ export class Renderer {
                 if (!stale) continue;
 
                 const pass = this._beginDepthPass(this._pointShadowFBO.renderTarget, 'pointShadow', layer);
-                this._renderShadowCasters(pass, scene.models, this._pointShadowMatrices[layer]);
-                this._endFullscreenPass(pass);
+                this._renderShadowCasters(pass, this._casterRecords, this._casterCount, this._pointShadowMatrices[layer]);
+                this._endDepthPass(pass);
             }
         }
 
@@ -8928,7 +10440,6 @@ export class Renderer {
     private _renderCascades(scene: Scene, light: LightNode): void {
         // The key light's direction — the moon's at night (see `_updateKeyLight`).
         const lightDir = this._dirOf(light);
-        const models = scene.models;
         const cam = this._activeCamera;
         // Cap the shadowed range so cascades stay tight regardless of the camera far plane
         // (the editor camera uses far=10000, which otherwise stretches the cascades → jagged).
@@ -8943,7 +10454,15 @@ export class Renderer {
         // sits behind the lit surface, which is what keeps a small bias from producing acne.
         GLState.cullFace('front');
 
-        this._gatherCasterBounds(models, lightDir);
+        this._ensureShadowCasters(scene);
+
+        // The camera-centred fit and the receiver shell are perspective geometry. An orthographic (2D)
+        // camera keeps the corner fit, and its cascades draw every caster that reaches them.
+        const perspective = cam.type === 'perspective';
+        const fovY = cam.fov * Math.PI / 180;
+        const aspect = this._renderWidth / this._renderHeight;
+        const corner = perspective ? sliceCornerFactor(fovY, aspect) : 0;
+        const eye = cam.position;
 
         for (let i = 0; i < this._cascadeCount; i++) {
             const nearD = i === 0 ? cam.near : splits[i - 1];
@@ -8953,22 +10472,37 @@ export class Renderer {
             // wrong map. The matrix is the opposite — see below.
             this._cascadeSplits[i] = farD;
 
-            // Stagger the distant cascades: cascade 1 every other frame, cascade 2 every fourth. A
-            // one-to-three frame lag is invisible at the distances they shade — PROVIDED the box drawn
-            // back then still contains this frame's slice. A staggered cascade is fit with a margin for
-            // exactly that, and is re-rendered off its turn the moment the camera outruns the margin
-            // (or the sun turns); skipping it then left the slice's edge reading as lit, and the
-            // shadows there strobed on every pan.
+            // Stagger the distant cascades: cascade i every 2^i frames, on phases that never coincide
+            // (`staggeredCascadeDue`). A lag of a few frames is invisible at the distances they shade —
+            // PROVIDED the box drawn back then still contains this frame's slice. A staggered cascade is
+            // fit around the EYE, so turning never moves it, with a margin for travel; it is re-rendered
+            // off its turn the moment the camera outruns that margin (or the sun turns). Cascade 0 keeps
+            // the tight forward fit: it is drawn every frame anyway, and it is the one that shows.
             const staggered = this._shadowStagger && i > 0;
-            this._fitCascadeSphere(nearD, farD);
-            if (staggered && !this._shadowFullUpdate && (this._frameIndex % (1 << i)) !== 0
+            const eyeFit = staggered && perspective;
+            if (eyeFit) cascadeSphereAroundEye(farD, fovY, aspect, eye, this._csmSphere);
+            else this._fitCascadeSphere(nearD, farD);
+            if (staggered && !this._shadowFullUpdate && !staggeredCascadeDue(i, this._frameIndex)
                 && vec3.dot(this._cascadeFitLightDirs[i], lightDir) > 0.99999
                 && staleCascadeCovers(this._cascadeFitSpheres[i], this._csmSphere)) continue;
 
             // Only cascades that are actually re-rendered get a new matrix. Recomputing it every
             // frame while the depth behind it is several frames old means the lighting pass projects
             // pixels with a matrix the map was never drawn with, and distant shadows visibly swim.
-            if (staggered) this._csmSphere.radius *= 1 + STAGGER_MARGIN;
+            const base = this._csmSphere.radius;
+            if (staggered) this._csmSphere.radius *= 1 + (eyeFit ? EYE_FIT_MARGIN : STAGGER_MARGIN);
+            if (this._shadowStabilize) this._csmSphere.radius = quantizeRadius(this._csmSphere.radius);
+            // How far the camera can travel before this layer is redrawn off its turn: the pixels it shades
+            // are judged from where the camera is NOW, and the answer must hold until then.
+            const travel = staggered ? this._csmSphere.radius - base : 0;
+
+            // Only what can shadow a pixel this cascade shades (graphics/shadowCasters.ts), and terrain
+            // past those pixels at its coarsest level.
+            const inner = perspective ? receiverInnerRadius(splits, i, this._cascadeBlend, travel) : 0;
+            this._selectLayerCasters(this._csmSphere, eye, inner);
+            this._layerLodMode = perspective && i > 0 ? 'beyond' : 'camera';
+            this._layerLodRadius = farD * corner + travel;
+
             const fit = this._buildCascadeFromSphere(lightDir, this._cascadeMatrices[i]);
             this._cascadeDepthScales[i] = cascadeDepthScale(fit.depthRange);
             this._cascadeTexelSizes[i] = fit.texelWorldSize;
@@ -8978,16 +10512,27 @@ export class Renderer {
 
             // BEFORE the pass opens: `_prepareFoliageShadow` uploads this cascade's merged instance
             // buffer, and re-specifying a vertex buffer inside a live pass is what removes a device.
-            this._prepareFoliageShadow(scene, this._cascadeMatrices[i], i);
+            const foliage = this._prepareFoliageShadow(scene, this._cascadeMatrices[i], i, this._csmSphere, eye, inner);
+
+            // A layer that would come out exactly as it is — same matrix, same casters where they were,
+            // same foliage — is kept. Shadows from a still sun over still things cost nothing.
+            const hash = mixNumber(this._layerHash(this._cascadeMatrices[i]), foliage);
+            const changed = this._shadowLayerCache.changed(i, hash);
+            if (!changed && !this._shadowFullUpdate
+                && this._frameIndex - this._shadowLayerDrawn[i] < Renderer.SHADOW_LAYER_MAX_AGE) {
+                frameStats.shadowLayersSkipped++;
+                continue;
+            }
+            this._shadowLayerDrawn[i] = this._frameIndex;
 
             const pass = this._beginDepthPass(this._shadowCascadeFBO.renderTarget, 'cascade', i);
-            this._renderShadowCasters(pass, models, this._cascadeMatrices[i]);
-            // Inside the cascade pass, not after it: _renderShadowCasters leaves _shadowFrustum set
-            // to this cascade, which is what the foliage cull tests against, and a caster recorded
-            // after the encoder closed is not recorded at all on a deferred backend.
+            this._renderShadowCasters(pass, this._layerCasters, this._layerCasterCount, this._cascadeMatrices[i]);
+            // Inside the cascade pass, not after it: a caster recorded after the encoder closed is not
+            // recorded at all on a deferred backend.
             this._foliageShadowPass(scene, this._cascadeMatrices[i], i, pass);
-            this._endFullscreenPass(pass);
+            this._endDepthPass(pass);
         }
+        this._layerLodMode = 'camera';
 
         this._renderFarCascade(scene, light, shadowFar);
         GLState.cullFace('back');
@@ -8996,47 +10541,12 @@ export class Renderer {
         this._shadowFullUpdate = false;
     }
 
-    /** The test every shadow pass applies to a model, kept in one place so the passes cannot disagree. */
-    private _castsShadow(node: ModelNode): boolean {
-        // LOD-hidden levels and user-hidden nodes must not cast shadows (user hides already force
-        // castShadow=false via the visible setter, but the LOD flag never touches the material).
-        if (!node.visible) return false;
-        // A despawn dissolve drops its shadow halfway through: depth has no screen-door to share.
-        if (node.effectiveFade < 0.5) return false;
-        // A merged model can have a non-casting submesh among casting ones, so the test is "any
-        // submesh casts" and the draw restricts itself to those ranges. Written as a loop rather than
-        // `.some(closure)`: this runs per caster per cascade.
-        let anyCasts = false;
-        for (const m of node.model.materials)
-            if (m.config.castShadow && !m.config.wireframe) { anyCasts = true; break; }
-        if (!anyCasts) return false;
-        // Editor chrome never casts: gizmos, helper wireframes, icon billboards. Mostly redundant
-        // with the wireframe/castShadow scan above, but it states the intent instead of relying on it.
-        if (isEditorOnlyNode(node)) return false;
-        // A node added this frame has no mesh yet: shadows render BEFORE the geometry pass that calls
-        // `initializeModel`, so its `Mesh` is still the empty one the constructor made.
-        return node.initialized;
-    }
-
-    /**
-     * Pack every caster's bounding sphere into light view space, once per frame, so each cascade can
-     * pull its near plane back to the furthest-up-sun caster over its footprint (`buildCascadeMatrix`).
-     */
-    private _gatherCasterBounds(models: Set<ModelNode>, lightForward: vec3): void {
-        const bounds = this._casterBounds;
-        bounds.count = 0;
-        lightViewMatrix(lightForward, this._casterLightView, this._csmScratch);
-        for (const node of models) {
-            if (!this._castsShadow(node)) continue;
-            const s = node.getBoundingSphere();
-            pushCasterBounds(bounds, this._casterLightView, s.center[0], s.center[1], s.center[2], s.radius);
-        }
-    }
-
     /**
      * The far cascade: one layer past the near cascades, covering out to `shadowFarDistance` with the
      * landscape and large casters. Fit around the camera POSITION, with a margin, so turning never
      * invalidates it and walking only does once the camera has crossed `FAR_MOVE_FRACTION` of its reach.
+     * Between re-fits it is redrawn only when something it holds changed, asked on the frames no
+     * staggered cascade takes.
      */
     private _renderFarCascade(scene: Scene, light: LightNode, nearShadowEnd: number): void {
         const lightDir = this._dirOf(light);
@@ -9047,43 +10557,169 @@ export class Renderer {
             this._farCascadeActiveDistance = 0;
             return;
         }
+        const layer = this._cascadeCount;
 
         const fit = this._csmSphere;
         vec3.copy(fit.center, cam.position);
         fit.radius = quantizeRadius(reach * (1 + Renderer.FAR_MOVE_FRACTION), 1);
+        vec3.copy(this._farReachSphere.center, cam.position);
+        this._farReachSphere.radius = reach;
 
-        const due = this._shadowFullUpdate || !this._farCascadeValid
-            || this._frameIndex - this._farCascadeFrame >= Renderer.FAR_REFRESH_FRAMES
+        // Terrain and large casters only, and every chunk at its coarsest level: a texel here is most of
+        // a metre. No foliage: a tree at a kilometre is a fraction of a texel.
+        this._layerLodMode = 'coarse';
+        let due = this._shadowFullUpdate || !this._farCascadeValid
             || vec3.dot(this._farCascadeLightDir, lightDir) < 0.99999
-            || !staleCascadeCovers(this._farCascadeFit, { center: fit.center, radius: reach });
+            || !staleCascadeCovers(this._farCascadeFit, this._farReachSphere);
+        // The landscape as a few dozen coarse blocks rather than a thousand chunks, where it can be.
+        const blocks = this._farTerrainBlocks(scene);
+        // Pixels nearer than this are shaded by the near cascades: movement there does not show here.
+        const motionFrom = nearShadowEnd * (1 - this._cascadeBlend);
+        if (!due && (!this._shadowStagger || isFreeShadowSlot(this._frameIndex, this._cascadeCount))) {
+            // Judged against the fit it was DRAWN with: re-fitting just to ask would change the matrix,
+            // and so the answer, whenever the camera moved at all.
+            this._selectLayerCasters(this._farCascadeFit, null, 0, Renderer.FAR_CASTER_MIN_RADIUS, blocks);
+            due = this._shadowLayerCache.changed(layer, this._layerHash(this._farCascadeMatrix, this._farMotionStep(), motionFrom))
+                || this._frameIndex - this._shadowLayerDrawn[layer] >= Renderer.FAR_LAYER_MAX_AGE;
+            if (!due) frameStats.shadowLayersSkipped++;
+        }
         if (due) {
+            this._selectLayerCasters(fit, null, 0, Renderer.FAR_CASTER_MIN_RADIUS, blocks);
             const built = this._buildCascadeFromSphere(lightDir, this._farCascadeMatrix);
             this._farCascadeDepthScale = cascadeDepthScale(built.depthRange);
             this._farCascadeTexelSize = built.texelWorldSize;
             vec3.copy(this._farCascadeFit.center, fit.center);
             this._farCascadeFit.radius = fit.radius;
             vec3.copy(this._farCascadeLightDir, lightDir);
-            this._farCascadeFrame = this._frameIndex;
             this._farCascadeValid = true;
+            // Remember what it is drawn with, for the next free frame's question.
+            this._shadowLayerCache.changed(layer, this._layerHash(this._farCascadeMatrix, this._farMotionStep(), motionFrom));
+            this._shadowLayerDrawn[layer] = this._frameIndex;
 
-            // Terrain chunks, then anything big enough to survive a texel this size. No foliage: a
-            // tree at a kilometre is a fraction of a texel, and the layer is drawn rarely precisely
-            // because it has so little in it.
-            const casters = this._farCasters;
-            casters.clear();
-            for (const landscape of scene.landscapes) {
-                if (!landscape.visible) continue;
-                for (const chunk of landscape.children)
-                    if (chunk instanceof ModelNode) casters.add(chunk);
-            }
-            for (const node of scene.models)
-                if (node.getBoundingSphere().radius >= Renderer.FAR_CASTER_MIN_RADIUS) casters.add(node);
-
-            const pass = this._beginDepthPass(this._shadowCascadeFBO.renderTarget, 'cascade', this._cascadeCount);
-            this._renderShadowCasters(pass, casters, this._farCascadeMatrix);
-            this._endFullscreenPass(pass);
+            const pass = this._beginDepthPass(this._shadowCascadeFBO.renderTarget, 'cascade', layer);
+            this._renderShadowCasters(pass, this._layerCasters, this._layerCasterCount, this._farCascadeMatrix);
+            this._endDepthPass(pass);
         }
+        this._layerLodMode = 'camera';
         this._farCascadeActiveDistance = this._farCascadeValid ? reach : 0;
+    }
+
+    /**
+     * Every visible landscape's far-cascade blocks, or null when any of them cannot cast that way (a cut-out
+     * or skinned terrain material, a chunk without its mesh yet) and the chunks must draw instead.
+     */
+    private _farTerrainBlocks(scene: Scene): readonly ShadowCasterRecord[] | null {
+        const out = this._farBlockScratch;
+        out.length = 0;
+        for (const landscape of scene.landscapes) {
+            if (!landscape.visible) continue;
+            const records = this._terrainBlockRecords(landscape);
+            if (!records) return null;
+            for (const r of records) out.push(r);
+        }
+        // Blocks of landscapes no longer drawn: freed once unused for a while (a play session's scene
+        // comes and goes; its editor twin's blocks are rebuilt in a few milliseconds if it returns).
+        for (const [landscape, set] of this._terrainBlocks) {
+            if (scene.landscapes.has(landscape) || this._frameIndex - set.lastUsed < 600) continue;
+            for (const mesh of set.meshes) mesh.dispose();
+            this._terrainBlocks.delete(landscape);
+        }
+        return out;
+    }
+    private readonly _farBlockScratch: ShadowCasterRecord[] = [];
+    private readonly _terrainBlocks = new Map<LandscapeNode, TerrainBlockSet>();
+    /** Chunks a side per far-cascade terrain block: 4 x 4 of the Valley's 64 m chunks is 256 m. */
+    private static readonly TERRAIN_BLOCK_CHUNKS = 4;
+
+    /**
+     * One landscape's far-cascade blocks (terrain/terrainShadowBlocks.ts), as caster records drawn with
+     * the landscape's transform: rebuilt from the heights when they change — re-uploading only blocks
+     * whose positions did — and re-derived when the landscape, its material or the sun moved.
+     */
+    private _terrainBlockRecords(landscape: LandscapeNode): readonly ShadowCasterRecord[] | null {
+        const chunk0 = landscape.chunkNodes[0];
+        if (!chunk0 || !chunk0.initialized) return null;
+        const record0 = this._casterRecordByNode.get(chunk0);
+        // The chunks' own state decides: a plain solid caster can be drawn as positions only.
+        const chunkState = record0?.state ?? this._shadowCasterStateOf(chunk0);
+        if (chunkState.shaderType !== 'shadowMap' || chunkState.anyCutout) return null;
+
+        const terrain = landscape.terrain;
+        const step = Math.max(1, this._terrainLodStep2 | 0);
+        let set = this._terrainBlocks.get(landscape);
+        if (!set) {
+            set = { terrain: null, version: -1, step: 0, positions: [], meshes: [], bounds: [], records: [],
+                    recordsKey: NaN, lastUsed: 0 };
+            this._terrainBlocks.set(landscape, set);
+        }
+        set.lastUsed = this._frameIndex;
+        let rebuilt = false;
+        if (set.terrain !== terrain || set.version !== terrain.heightsVersion || set.step !== step) {
+            const spans = shadowBlockSpans(terrain.resolution, terrain.config.chunkQuads, Renderer.TERRAIN_BLOCK_CHUNKS);
+            for (let i = spans.length; i < set.meshes.length; i++) set.meshes[i].dispose();
+            set.meshes.length = Math.min(set.meshes.length, spans.length);
+            for (let i = 0; i < spans.length; i++) {
+                const data = buildShadowBlock(terrain.heights, terrain.resolution, terrain.elementSize, terrain.size,
+                                              spans[i], step);
+                const old = set.positions[i];
+                let same = !!old && old.length === data.positions.length;
+                for (let k = 0; same && k < data.positions.length; k++) same = old[k] === data.positions[k];
+                if (!same) {
+                    const mesh = set.meshes[i] ?? (set.meshes[i] = new Mesh());
+                    mesh.create(data.positions, data.positions.length / 3, data.indices);
+                    set.positions[i] = data.positions;
+                }
+                set.bounds[i] = { min: data.min, max: data.max };
+            }
+            set.positions.length = spans.length;
+            set.bounds.length = spans.length;
+            set.terrain = terrain;
+            set.version = terrain.heightsVersion;
+            set.step = step;
+            rebuilt = true;
+        }
+
+        const key = mixNumber(mixNumber(mixNumber(mixNumber(HASH_SEED, chunk0.transformVersion), chunkState.pipelineId),
+                                        this._reachKey), this._shadowPipelineEpoch);
+        if (rebuilt || set.recordsKey !== key || set.records.length !== set.meshes.length) {
+            const pipeline = this._pipelineFor('shadowMap', Renderer._SHADOW_PROGRAMS.shadowMap, {
+                cullMode: chunkState.cullMode,
+                depthStencil: Renderer._SHADOW_DEPTH,
+                targets: 0,
+                vertex: 'model',
+                // Positions only: the buffer is packed for the shadow program's own single attribute.
+                builtFor: 'shadowMap',
+                target: this._shadowCascadeFBO.renderTarget,
+            });
+            const world = chunk0.worldTransform;
+            const sx = Math.hypot(world[0], world[1], world[2]), sy = Math.hypot(world[4], world[5], world[6]);
+            const sz = Math.hypot(world[8], world[9], world[10]);
+            const scale = Math.max(sx, sy, sz);
+            set.records.length = 0;
+            for (let i = 0; i < set.meshes.length; i++) {
+                const { min, max } = set.bounds[i];
+                const center = vec3.fromValues((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
+                vec3.transformMat4(center, center, world);
+                const radius = 0.5 * Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) * scale;
+                const state: ShadowCasterState = {
+                    ...chunkState, shaderType: 'shadowMap', pipeline, pipelineId: this._objectId(pipeline),
+                    skinned: false, anyCutout: false, wholeBuffer: true, id: this._objectId(set.meshes[i]),
+                    reach: 0, reachKey: -1, reachX: NaN, reachY: NaN, reachZ: NaN, reachR: NaN, key: 0,
+                };
+                state.key = mixNumber(HASH_SEED, state.pipelineId);
+                const record: ShadowCasterRecord = { node: chunk0, sphere: { center, radius }, state, reach: 0,
+                                                     terrainVersion: terrain.heightsVersion, mesh: set.meshes[i] };
+                this._updateReach(record, this._reachKey);
+                set.records.push(record);
+            }
+            set.recordsKey = key;
+        }
+        return set.records;
+    }
+
+    /** How far a non-terrain caster must move to redraw the far layer: four of its texels. */
+    private _farMotionStep(): number {
+        return Math.max(0.5, 4 * this._farCascadeTexelSize);
     }
 
     /**
@@ -9121,7 +10757,7 @@ export class Renderer {
 
     /**
      * Build a cascade's light-space matrix around `_csmSphere` (as fit, plus any margin the caller
-     * added). The near plane reaches back over this frame's casters — see `_gatherCasterBounds`.
+     * added). The near plane reaches back over the layer's casters — see `_selectLayerCasters`.
      */
     private _buildCascadeFromSphere(lightForward: vec3, out: mat4): { depthRange: number; texelWorldSize: number } {
         // Quantize the radius before it reaches the snap: it is invariant under camera ROTATION but
@@ -9675,8 +11311,41 @@ export class Renderer {
             this._recordDraw(pass, node.model.mesh, 0, 0);
         }
 
+        // Terrain foliage, which never was in `scene.models`: the batches `_prepareFoliage` packed for
+        // this frame's colour pass, every level and the impostor, counted the same way.
+        this._shaderManager.bind('overdrawInstanced');
+        this._shaderManager.setUniform('u_increment', 1 / Renderer.OVERDRAW_MAX);
+        mat4.multiply(this._overdrawViewProj, this._rasterProjection(this._activeCamera.projectionMatrix),
+                      this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_lightSpace', this._overdrawViewProj);
+        for (const landscape of scene.landscapes) {
+            if (!landscape.visible) continue;
+            for (const layer of landscape.terrain.foliage) {
+                const billboardBucket = layer.levels.length;
+                for (let slot = 0; slot <= billboardBucket; slot++) {
+                    const chunks = this._colourChunks(layer, slot);
+                    if (!chunks || !layer.buckets[slot]?.length) continue;
+                    const models = slot === billboardBucket
+                        ? (layer.billboardModel ? [layer.billboardModel] : [])
+                        : layer.levels[slot].models;
+                    for (const model of models) {
+                        const pipeline = this._pipelineFor('overdrawInstanced', OverdrawInstancedProgram, {
+                            blend: Renderer._OVERDRAW_BLEND, depthStencil: depthAlways,
+                            cullMode: 'none', vertex: 'model+instance', builtFor: 'blinn_phongGeometry',
+                        });
+                        pass.setPipeline(pipeline);
+                        for (const batch of chunks) {
+                            if (batch.count === 0 || !batch.buffer) continue;
+                            this._recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch);
+                        }
+                    }
+                }
+            }
+        }
+
         this._endFullscreenPass(pass);
     }
+    private readonly _overdrawViewProj = mat4.create();
 
     /**
      * Blit one cascade layer's depth to the screen (the 'shadow' debug channel). The array is a
@@ -10657,6 +12326,10 @@ export class Renderer {
             instancedDrawCalls: frameStats.instancedDrawCalls,
             objects: frameStats.objects,
             culledObjects: frameStats.culledObjects,
+            occludedObjects: frameStats.occludedObjects,
+            occludedCells: frameStats.occludedCells,
+            occluderTriangles: frameStats.occluderTriangles,
+            occlusionMs: frameStats.occlusionMs,
             culledInstances: frameStats.culledInstances,
             // Surfaced here, not just on `frameStats`: the performance panel reads its per-frame
             // counters off THIS object, so a counter added to the accumulator and not to this list
@@ -10665,6 +12338,10 @@ export class Renderer {
             foliageShadowDraws: frameStats.foliageShadowDraws,
             foliageCells: frameStats.foliageCells,
             foliageCellsScanned: frameStats.foliageCellsScanned,
+            shadowLayers: frameStats.shadowLayers,
+            shadowLayersSkipped: frameStats.shadowLayersSkipped,
+            shadowDraws: frameStats.shadowDraws,
+            shadowTriangles: frameStats.shadowTriangles,
             instances: frameStats.instances,
             triangles: frameStats.triangles,
             vertices: frameStats.vertices,
@@ -10999,6 +12676,29 @@ export class Renderer {
     /** Per-object camera frustum culling for the main color passes (on by default). */
     public get frustumCulling(): boolean { return this._frustumCulling; }
     public set frustumCulling(enabled: boolean) { this._frustumCulling = enabled; }
+    /** See RenderSettings.occlusionCulling. */
+    public get occlusionCulling(): OcclusionMode { return this._occlusionMode; }
+    public set occlusionCulling(mode: OcclusionMode) {
+        this._occlusionMode = mode === 'off' || mode === 'terrain' ? mode : 'all';
+    }
+    /** See RenderSettings.foliagePrepass. */
+    public get foliagePrepass(): boolean { return this._foliagePrepass; }
+    public set foliagePrepass(on: boolean) { this._foliagePrepass = !!on; }
+    /** See RenderSettings.occlusionQueries. */
+    public get occlusionQueries(): boolean { return this._occlusionQueriesEnabled; }
+    public set occlusionQueries(on: boolean) { this._occlusionQueriesEnabled = !!on; }
+    /** See RenderSettings.foliageGpuCulling. */
+    public get foliageGpuCulling(): boolean { return this._foliageGpuCulling; }
+    public set foliageGpuCulling(on: boolean) { this._foliageGpuCulling = !!on; }
+    /** Whether this device can cull foliage on the GPU at all (compute and indirect draws). */
+    public get foliageGpuCullingSupported(): boolean { return FoliageGpuCuller.supported; }
+    /** See RenderSettings.foliageShadowDistance. */
+    public get foliageShadowDistance(): number { return this._foliageShadowDistance; }
+    public set foliageShadowDistance(metres: number) {
+        this._foliageShadowDistance = Number.isFinite(metres) ? Math.max(0, metres) : 0;
+    }
+    /** This frame's CPU occlusion buffer, for a debug view. Its contents are only meaningful mid-frame. */
+    public get occlusionBuffer(): OcclusionBuffer { return this._occlusion; }
 
     /** Distance (world units) beyond which foliage cells are culled; 0 disables distance culling. */
     public get particleLodDistanceScale(): number { return this._particleLodDistanceScale; }
@@ -11298,6 +12998,7 @@ export class Renderer {
         this._shadowsActive = false;
         this._shadowFullUpdate = true;
         this._farCascadeValid = false;
+        this._shadowLayerCache.invalidateAll();
     }
 
     /** Layers in the cascade array: one per near cascade, plus the far cascade's when it is on. */
@@ -11308,8 +13009,8 @@ export class Renderer {
     /**
      * How far the FAR cascade carries directional shadows, in view distance; 0 turns it off. Past
      * `shadowDistance` only the landscape and large casters (bounding radius ≥ 4 m) shadow, from one
-     * extra layer that is re-rasterized only as the camera travels — a big terrain's ridges and hills
-     * keep their shadows to the horizon for roughly the cost of a terrain depth pass every 30 frames.
+     * extra layer that is re-rasterized only as the camera travels or something in it changes — a big
+     * terrain's ridges and hills keep their shadows to the horizon for a terrain depth pass now and then.
      */
     public get shadowFarDistance(): number { return this._shadowFarDistance; }
     public set shadowFarDistance(d: number) {
@@ -11418,6 +13119,11 @@ export class Renderer {
             motionBlurSamples: this._motionBlurSamples,
             taaEnabled: this._taaEnabled,
             frustumCulling: this._frustumCulling,
+            occlusionCulling: this._occlusionMode,
+            foliageShadowDistance: this._foliageShadowDistance,
+            foliagePrepass: this._foliagePrepass,
+            foliageGpuCulling: this._foliageGpuCulling,
+            occlusionQueries: this._occlusionQueriesEnabled,
             foliageCullDistance: this._foliageCullDistance,
             particleLodDistanceScale: this._particleLodDistanceScale,
             foliageDensityFalloff: this._foliageDensityFalloff,
@@ -11525,6 +13231,11 @@ export class Renderer {
         if (s.motionBlurSamples !== undefined) this.motionBlurSamples = s.motionBlurSamples;
         if (s.taaEnabled !== undefined) this.taaEnabled = s.taaEnabled;
         if (s.frustumCulling !== undefined) this.frustumCulling = s.frustumCulling;
+        if (s.occlusionCulling !== undefined) this.occlusionCulling = s.occlusionCulling;
+        if (s.foliageShadowDistance !== undefined) this.foliageShadowDistance = s.foliageShadowDistance;
+        if (s.foliagePrepass !== undefined) this.foliagePrepass = s.foliagePrepass;
+        if (s.foliageGpuCulling !== undefined) this.foliageGpuCulling = s.foliageGpuCulling;
+        if (s.occlusionQueries !== undefined) this.occlusionQueries = s.occlusionQueries;
         if (s.foliageCullDistance !== undefined) this.foliageCullDistance = s.foliageCullDistance;
         if (s.particleLodDistanceScale !== undefined) this.particleLodDistanceScale = s.particleLodDistanceScale;
         if (s.foliageDensityFalloff !== undefined) this.foliageDensityFalloff = s.foliageDensityFalloff;
@@ -11853,6 +13564,8 @@ export class Renderer {
         const drawSet = (set: number, mesh: Mesh, matrices: Float32Array, count: number,
                          color: [number, number, number]) => {
             if (count <= 0) return;
+            // Written by hand, not from a material: the block no longer holds what MaterialSync remembers.
+            this._materialSync.invalidate(this._shaderManager.bound);
             this._shaderManager.setUniform('u_material.color', color);
             this._shaderManager.setUniform('u_material.hasTexture', false);
             this._shaderManager.setUniform('u_material.opacity', 1.0);

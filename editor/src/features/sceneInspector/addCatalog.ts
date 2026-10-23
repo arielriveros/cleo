@@ -45,6 +45,7 @@ import {
   ParticleSystemNode,
   ForceFieldNode,
   WaterVolumeNode,
+  OccluderNode,
 } from 'cleo'
 import type EventEmitter from '../../utils/eventEmitter'
 import type { ShapeDescription } from '../EngineContext'
@@ -62,7 +63,7 @@ import {
   DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon,
-  SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon,
+  SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OccluderIcon,
 } from './nodeIcons'
 import { createLandscapeNode } from '../../utils/landscapeSlots'
 import { defaultDecalMaterial } from '../../utils/materials'
@@ -365,6 +366,12 @@ export const ADD_ITEMS: AddItem[] = [
     // it ripples and splashes the surface it is pointed at. Placeable: it is a volume.
     id: 'waterVolume', label: 'Water Volume', icon: WaterVolumeIcon, category: 'environment',
     create: async () => new WaterVolumeNode('water volume', { size: [10, 2, 10] }),
+  },
+  {
+    // An occlusion-culling volume: hides what is behind it from rendering. Placed INSIDE a building's
+    // walls or a cliff's bulk; landscapes need none (see graphics/occlusion).
+    id: 'occluder', label: 'Occluder', icon: OccluderIcon, category: 'environment',
+    create: async () => new OccluderNode('occluder', [4, 3, 4]),
   },
   {
     id: 'forceField', label: 'Force Field', icon: ForceFieldIcon, category: 'effects',

@@ -12,6 +12,18 @@ export interface RenderStats {
     objects: number;
     /** Scene meshes skipped this frame by camera frustum culling (color pass only). */
     culledObjects: number;
+    /** Of those, the ones in the frustum but hidden behind an occluder (graphics/occlusion). */
+    occludedObjects: number;
+    /** Of `occludedObjects`, the ones a GPU occlusion query found hidden (graphics/gpuOcclusion.ts). */
+    queryOccludedObjects: number;
+    /** GPU occlusion queries issued this frame. */
+    occlusionQueries: number;
+    /** Foliage cells in range and on screen but hidden behind an occluder. */
+    occludedCells: number;
+    /** Occluder triangles rasterized into the CPU occlusion buffer this frame. */
+    occluderTriangles: number;
+    /** CPU time building the occlusion buffer (rasterizing the occluders), ms. Part of `prepare`. */
+    occlusionMs: number;
     /** Foliage instances skipped this frame by the distance or frustum test (per blade, not per cell). */
     culledInstances: number;
     /** Instanced draws the foliage COLOUR pass issued. One per prototype sub-model per detail level. */
@@ -28,6 +40,17 @@ export interface RenderStats {
      * terrain can pay tens of thousands of tests to draw a handful of cells, and only this number says so.
      */
     foliageCellsScanned: number;
+    /** Shadow map layers rasterized this frame: cascades, the far cascade, spot slots, point faces. */
+    shadowLayers: number;
+    /**
+     * Cascade layers that were due but kept as they were, because nothing they hold changed since
+     * they were drawn (see `graphics/shadowCasters.ts`). Rendered + skipped = layers that came due.
+     */
+    shadowLayersSkipped: number;
+    /** Draws recorded into shadow layers, foliage included. Part of `drawCalls`. */
+    shadowDraws: number;
+    /** Triangles rasterized into shadow layers. Part of `triangles`. */
+    shadowTriangles: number;
     /** Total instances submitted across all instanced draws (PBR batches + foliage). */
     instances: number;
     /** Triangles submitted to the GPU this frame (× instanceCount for instanced draws). */
@@ -77,11 +100,21 @@ export const frameStats: RenderStats = {
     rhiDrawCalls: 0,
     objects: 0,
     culledObjects: 0,
+    occludedObjects: 0,
+    queryOccludedObjects: 0,
+    occlusionQueries: 0,
+    occludedCells: 0,
+    occluderTriangles: 0,
+    occlusionMs: 0,
     culledInstances: 0,
     foliageDraws: 0,
     foliageShadowDraws: 0,
     foliageCells: 0,
     foliageCellsScanned: 0,
+    shadowLayers: 0,
+    shadowLayersSkipped: 0,
+    shadowDraws: 0,
+    shadowTriangles: 0,
     instances: 0,
     triangles: 0,
     vertices: 0,
@@ -129,11 +162,21 @@ export function resetFrameStats(): void {
     frameStats.rhiDrawCalls = 0;
     frameStats.objects = 0;
     frameStats.culledObjects = 0;
+    frameStats.occludedObjects = 0;
+    frameStats.queryOccludedObjects = 0;
+    frameStats.occlusionQueries = 0;
+    frameStats.occludedCells = 0;
+    frameStats.occluderTriangles = 0;
+    frameStats.occlusionMs = 0;
     frameStats.culledInstances = 0;
     frameStats.foliageDraws = 0;
     frameStats.foliageShadowDraws = 0;
     frameStats.foliageCells = 0;
     frameStats.foliageCellsScanned = 0;
+    frameStats.shadowLayers = 0;
+    frameStats.shadowLayersSkipped = 0;
+    frameStats.shadowDraws = 0;
+    frameStats.shadowTriangles = 0;
     frameStats.instances = 0;
     frameStats.triangles = 0;
     frameStats.vertices = 0;

@@ -40,6 +40,11 @@ export class ModelNode extends Node {
      */
     public cameraVisible = true;
     public cameraDistance = 0;
+    /**
+     * Set by `LandscapeNode` on the chunk nodes it generates. The shadow caster gather takes those per
+     * landscape, from a cache, rather than one node at a time: a large terrain is a thousand of them.
+     */
+    public isTerrainChunk = false;
     /** Optional per-node ragdoll simulation config (skinned meshes). Persisted with the scene; read by Ragdoll. */
     private _ragdollConfig: RagdollOptions | null = null;
 
@@ -207,6 +212,11 @@ export class ModelNode extends Node {
         return bvh.triangleCount > 0 ? bvh : null;
     }
 
+    /** What `_worldSphere` was last computed from: the transform version and the object-space bounds. */
+    private _sphereVersion = -1;
+    private readonly _sphereSource: { local: object | null; radius: number; center: vec3; skinned: boolean } =
+        { local: null, radius: NaN, center: vec3.create(), skinned: false };
+
     /** The factor the culling sphere's radius is inflated by; see {@link SKINNED_BOUNDS_MARGIN}. */
     public get boundsMargin(): number { return this._model instanceof AnimatedModel ? SKINNED_BOUNDS_MARGIN : 1; }
 
@@ -214,11 +224,29 @@ export class ModelNode extends Node {
         if (!this._worldSphereDirty) return this._worldSphere;
 
         const local = this._model.geometry.boundingSphere;
+        // `updateTransforms` dirties the cache every frame whether or not anything moved, and this runs for
+        // every model every frame (the shadow caster gather alone walks them all). Unmoved, over the same
+        // object-space bounds, the sphere is the one already here.
+        const lc = local.center, seen = this._sphereSource;
+        if (this._sphereVersion === this.transformVersion && seen.local === local && seen.radius === local.radius
+            && seen.center[0] === lc[0] && seen.center[1] === lc[1] && seen.center[2] === lc[2]
+            && seen.skinned === (this._model instanceof AnimatedModel)) {
+            this._worldSphereDirty = false;
+            return this._worldSphere;
+        }
+        this._sphereVersion = this.transformVersion;
+        seen.local = local; seen.radius = local.radius; vec3.copy(seen.center, lc);
+        seen.skinned = this._model instanceof AnimatedModel;
+
         vec3.transformMat4(this._worldSphere.center, local.center, this.worldTransform);
 
-        const scale = this.worldScale;
-        const maxScale = Math.max(Math.abs(scale[0]), Math.abs(scale[1]), Math.abs(scale[2]));
-        let radius = local.radius * maxScale;
+        // The largest axis scale, straight from the basis columns: `worldScale` would decompose the whole
+        // rotation to get there, and this runs for every model every frame (the shadow caster gather).
+        const m = this.worldTransform;
+        const sx = m[0] * m[0] + m[1] * m[1] + m[2] * m[2];
+        const sy = m[4] * m[4] + m[5] * m[5] + m[6] * m[6];
+        const sz = m[8] * m[8] + m[9] * m[9] + m[10] * m[10];
+        let radius = local.radius * Math.sqrt(Math.max(sx, sy, sz));
         if (this._model instanceof AnimatedModel) radius *= SKINNED_BOUNDS_MARGIN;
 
         this._worldSphere.radius = radius;

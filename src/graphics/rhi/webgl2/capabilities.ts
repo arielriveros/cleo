@@ -61,6 +61,8 @@ export function detectWebGL2Capabilities(gl: WebGL2RenderingContext): DeviceCapa
         hasCompute: false,
         hasStorageBuffers: false,
         hasTimestampQuery: timerQueryExtension(gl) !== null,
+        // Core in WebGL2 (ANY_SAMPLES_PASSED_CONSERVATIVE); no extension to ask for.
+        hasOcclusionQuery: true,
         parallelShaderCompile: parallelShaderCompileExtension(gl) != null,
 
         maxAnisotropy,

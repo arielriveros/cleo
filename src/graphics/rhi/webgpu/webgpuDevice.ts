@@ -20,7 +20,7 @@ import type { BindGroupEntry,
 } from '../device';
 import type {
     Buffer, Texture, TextureView, Sampler, ShaderModule, BindGroup, BindGroupLayout,
-    RenderPipeline, RenderTarget, ComputePipeline,
+    RenderPipeline, RenderTarget, ComputePipeline, OcclusionQuerySet,
 } from '../resources';
 import type { ShaderProgram, ShaderProgramDescriptor } from '../shaderProgram';
 import type { UniformBlockLayout } from '../uniformSet';
@@ -774,6 +774,18 @@ class WebGPURenderPassEncoder implements RenderPassEncoder {
         this._countDraw(indexCount, instanceCount);
     }
 
+    public beginOcclusionQuery(index: number): void { this._pass.beginOcclusionQuery(index); }
+    public endOcclusionQuery(): void { this._pass.endOcclusionQuery(); }
+
+    public drawIndexedIndirect(indirectBuffer: Buffer, indirectOffset: number): void {
+        this._flushUniforms();
+        this._pass.drawIndexedIndirect((indirectBuffer as WebGPUBuffer).handle, indirectOffset);
+        // The counts live on the GPU, so only the call is counted — never its triangles.
+        frameStats.drawCalls++;
+        frameStats.rhiDrawCalls++;
+        frameStats.instancedDrawCalls++;
+    }
+
     // The per-frame counters. Mirrors `WebGL2RenderPassEncoder._countDraw` exactly, instanced charging
     // included, so the two backends' numbers are comparable.
     private _countDraw(elements: number, instanceCount: number): void {
@@ -832,6 +844,88 @@ interface TimestampStaging {
     /** Pass labels in query order, so index 2i/2i+1 is `labels[i]`'s begin/end. */
     labels: string[];
     state: 'free' | 'submitted' | 'mapping' | 'ready';
+}
+
+/** Readbacks of occlusion results in flight. A full ring drops a frame's results, never waits. */
+const OCCLUSION_STAGING_RING = 4;
+
+/**
+ * Occlusion queries on WebGPU: an `occlusion` query set bound to a render pass through its descriptor, its
+ * resolve buffer, and a staging ring mapped for reading once each submission completes — the timestamp
+ * collector's shape (below), for sample counts instead of times. A count above zero is "visible".
+ */
+class WebGPUOcclusionQuerySet implements OcclusionQuerySet {
+    public readonly handle: GPUQuerySet;
+    public readonly capacity: number;
+    private readonly _resolve: GPUBuffer;
+    private readonly _ring: { buffer: GPUBuffer; tag: number; count: number; state: 'free' | 'submitted' | 'mapping' | 'ready' }[] = [];
+    private _destroyed = false;
+
+    constructor(device: GPUDevice, capacity: number, public readonly label: string) {
+        this.capacity = Math.max(1, Math.floor(capacity));
+        this.handle = device.createQuerySet({ label, type: 'occlusion', count: this.capacity });
+        this._resolve = device.createBuffer({
+            label: `${label}-resolve`, size: this.capacity * 8,
+            usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+        });
+        for (let i = 0; i < OCCLUSION_STAGING_RING; i++) {
+            this._ring.push({
+                buffer: device.createBuffer({
+                    label: `${label}-staging-${i}`, size: this.capacity * 8,
+                    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+                }),
+                tag: -1, count: 0, state: 'free',
+            });
+        }
+    }
+
+    /** Record the resolve and copy into the encoder holding the pass. Mapping waits for `poll`. */
+    public resolve(encoder: unknown, count: number, tag: number): void {
+        if (this._destroyed || count <= 0) return;
+        const staging = this._ring.find(e => e.state === 'free');
+        if (!staging) return;
+        const n = Math.min(count, this.capacity);
+        const enc = (encoder as WebGPUCommandEncoder).gpuEncoder;
+        enc.resolveQuerySet(this.handle, 0, n, this._resolve, 0);
+        enc.copyBufferToBuffer(this._resolve, 0, staging.buffer, 0, n * 8);
+        staging.tag = tag;
+        staging.count = n;
+        staging.state = 'submitted';
+    }
+
+    /**
+     * Start mapping what was submitted since the last call (its encoder has been submitted by now: this
+     * runs at the start of a frame), and hand over the oldest readback that has finished.
+     */
+    public poll(): { tag: number; count: number; visible: Uint8Array } | null {
+        if (this._destroyed) return null;
+        let ready: (typeof this._ring)[number] | null = null;
+        for (const entry of this._ring) {
+            if (entry.state === 'ready' && (!ready || entry.tag < ready.tag)) ready = entry;
+            else if (entry.state === 'submitted') {
+                entry.state = 'mapping';
+                entry.buffer.mapAsync(GPUMapMode.READ).then(
+                    () => { if (!this._destroyed) entry.state = 'ready'; },
+                    () => { entry.state = 'free'; },
+                );
+            }
+        }
+        if (!ready) return null;
+        const samples = new BigUint64Array(ready.buffer.getMappedRange(0, ready.count * 8));
+        const visible = new Uint8Array(ready.count);
+        for (let i = 0; i < ready.count; i++) visible[i] = samples[i] !== BIGINT_ZERO ? 1 : 0;
+        ready.buffer.unmap();
+        ready.state = 'free';
+        return { tag: ready.tag, count: visible.length, visible };
+    }
+
+    public destroy(): void {
+        if (this._destroyed) return;
+        this._destroyed = true;
+        this.handle.destroy();
+        this._resolve.destroy();
+        for (const entry of this._ring) entry.buffer.destroy();
+    }
 }
 
 /**
@@ -971,6 +1065,9 @@ class WebGPUCommandEncoder implements CommandEncoder {
         this._encoder = _device.createCommandEncoder({ label: label ?? 'commands' });
     }
 
+    /** The raw encoder, for a resource that records its own commands (WebGPUOcclusionQuerySet.resolve). */
+    public get gpuEncoder(): GPUCommandEncoder { this._markRecorded(); return this._encoder; }
+
     private _recorded = false;
     private _markRecorded(): void {
         if (this._recorded) return;
@@ -1031,10 +1128,12 @@ class WebGPUCommandEncoder implements CommandEncoder {
                       && queryIndex + 1 < TIMESTAMP_QUERY_CAPACITY;
         if (timed) this._timedPasses.push(descriptor.label);
 
+        const queries = descriptor.occlusionQuerySet as WebGPUOcclusionQuerySet | undefined;
         return new WebGPURenderPassEncoder(this._encoder.beginRenderPass({
             label: descriptor.label,
             colorAttachments,
             ...(depthStencilAttachment ? { depthStencilAttachment } : {}),
+            ...(queries ? { occlusionQuerySet: queries.handle } : {}),
             ...(timed ? {
                 timestampWrites: {
                     querySet: timestamps!.querySet!,
@@ -1308,6 +1407,25 @@ export class WebGPUDevice implements Device {
     }
 
     public createRenderPipeline(descriptor: RenderPipelineDescriptor): RenderPipeline {
+        const { gpu, groups, vertex, fragment } = this._renderPipelineDescriptor(descriptor);
+        const handle = this._scoped(gpu.label!, 'render pipeline',
+                                    () => this._device.createRenderPipeline(gpu));
+        return new WebGPURenderPipeline(descriptor, handle, groups, [vertex, fragment]);
+    }
+
+    /**
+     * The same pipeline, compiled by the driver off the main thread. What the renderer's pipeline warm-up
+     * (shaderOptimizer/pipelineRecipes.ts) uses, so a recorded list builds while a loading screen is up
+     * instead of one stall per first draw. A rejection carries the validation message, against the label.
+     */
+    public async createRenderPipelineAsync(descriptor: RenderPipelineDescriptor): Promise<RenderPipeline> {
+        const { gpu, groups, vertex, fragment } = this._renderPipelineDescriptor(descriptor);
+        const handle = await this._device.createRenderPipelineAsync(gpu);
+        return new WebGPURenderPipeline(descriptor, handle, groups, [vertex, fragment]);
+    }
+
+    /** The GPU descriptor for a render pipeline, and the bind groups its two modules declare. */
+    private _renderPipelineDescriptor(descriptor: RenderPipelineDescriptor) {
         const vertex = descriptor.vertex as WebGPUShaderModule;
         const fragment = descriptor.fragment as WebGPUShaderModule;
 
@@ -1355,10 +1473,7 @@ export class WebGPUDevice implements Device {
         // are the union of what its two modules declare — and asking for any other index throws.
         const groups = Array.from(new Set([...vertex.groups, ...fragment.groups])).sort((a, b) => a - b);
         this._checkGroupIndices(pipelineDescriptor.label!, groups);
-
-        const handle = this._scoped(pipelineDescriptor.label!, 'render pipeline',
-                                    () => this._device.createRenderPipeline(pipelineDescriptor));
-        return new WebGPURenderPipeline(descriptor, handle, groups, [vertex, fragment]);
+        return { gpu: pipelineDescriptor, groups, vertex, fragment };
     }
 
     /**
@@ -1397,6 +1512,10 @@ export class WebGPUDevice implements Device {
         Logger.error(`${label}: declares ${over.map(g => `@group(${g})`).join(', ')}, but this device `
                      + `allows ${limit} bind groups (0-${limit - 1}). Groups are numbered by ROLE, so `
                      + `a new one must SHARE a group rather than take the next index.`, SCOPE);
+    }
+
+    public createOcclusionQuerySet(capacity: number, label?: string): OcclusionQuerySet {
+        return new WebGPUOcclusionQuerySet(this._device, capacity, label ?? 'occlusion');
     }
 
     public createComputePipeline(descriptor: ComputePipelineDescriptor): ComputePipeline {
@@ -1759,6 +1878,8 @@ export async function acquireWebGPUDevice(
         floatFilterable: device.features.has('float32-filterable'),
         hasCompute: true,
         hasStorageBuffers: true,
+        hasIndirectDraw: true,
+        hasOcclusionQuery: true,
         hasTimestampQuery: device.features.has('timestamp-query'),
         // WebGPU has no anisotropy limit query; 16 is the ceiling every implementation accepts.
         maxAnisotropy: 16,

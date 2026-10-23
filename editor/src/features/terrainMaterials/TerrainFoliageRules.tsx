@@ -303,13 +303,25 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
                   {/* The card is what actually makes distant foliage cheap: a LOD level reduces triangles
                       linearly, this replaces them all with four. Baking is offered only for a rule with a
                       library model behind it — there is nothing to render otherwise. */}
+                  {/* Octahedral (the default): 8 x 8 views, lit by the scene and right from every side and from
+                      above. A flat card is one front view — cheaper in memory, fine for a small plant. */}
                   {r.modelId && (
                     <div className='flex items-center justify-between'>
-                      <span className={label} title='Pixel size of the baked card. Larger keeps distant leaves crisp and stable; costs memory per rule.'>Impostor size</span>
-                      <Select className={num} value={String(r.impostorSize ?? 512)}
+                      <span className={label} title='Octahedral: 8 x 8 views with normals, lit like the mesh and correct from every angle. Card: one front view, lit into the texture.'>Impostor</span>
+                      <Select className='w-24 px-1 py-0.5' value={r.impostorKind ?? 'octahedral'}
+                        onChange={e => patchRule(i, { impostorKind: e.target.value as 'octahedral' | 'card', impostorSize: undefined })}>
+                        <option value='octahedral'>Octahedral</option>
+                        <option value='card'>Flat card</option>
+                      </Select>
+                    </div>
+                  )}
+                  {r.modelId && (
+                    <div className='flex items-center justify-between'>
+                      <span className={label} title='Pixel size of the baked card, or of the whole atlas of views. Larger keeps distant leaves crisp and stable; costs memory per rule.'>Impostor size</span>
+                      <Select className={num} value={String(r.impostorSize ?? ((r.impostorKind ?? 'octahedral') === 'octahedral' ? 1024 : 512))}
                         onChange={e => patchRule(i, { impostorSize: Number(e.target.value) })}>
-                        <option value='512'>512</option>
-                        <option value='1024'>1024</option>
+                        {((r.impostorKind ?? 'octahedral') === 'octahedral' ? [1024, 2048] : [512, 1024]).map(s =>
+                          <option key={s} value={String(s)}>{s}</option>)}
                       </Select>
                     </div>
                   )}
@@ -318,7 +330,7 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
                       size='sm'
                       className='w-full text-ui-sm py-1'
                       disabled={bakingRule >= 0}
-                      title='Render this model to a flat card and use it past the last LOD band. The single biggest win for a heavy prototype.'
+                      title='Bake this model into its impostor and use it past the last LOD band. The single biggest win for a heavy prototype.'
                       onClick={() => void bakeImpostor(i)}>
                       {bakingRule === i ? 'Baking…' : (r.billboard ? 'Re-bake impostor' : 'Bake impostor')}
                     </Button>
@@ -330,7 +342,13 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
                       <Select
                         className={num}
                         value={r.billboard?.textureId ?? ''}
-                        onChange={e => patchRule(i, { billboard: e.target.value ? { textureId: e.target.value, distance: r.billboard?.distance ?? 60 } : null })}>
+                        onChange={e => patchRule(i, {
+                          // Picking the texture it already has keeps the rest (an octahedral bake's views and
+                          // normals); any other texture is a plain card.
+                          billboard: !e.target.value ? null
+                            : e.target.value === r.billboard?.textureId ? r.billboard
+                            : { textureId: e.target.value, distance: r.billboard?.distance ?? 60 },
+                        })}>
                         <option value=''>(off)</option>
                         {textureIds.map(id => <option key={id} value={id}>{id.length > 16 ? id.slice(0, 15) + '…' : id}</option>)}
                       </Select>
@@ -338,7 +356,7 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
                         <NumberInput
                           min={0} className={num} title='Distance where the billboard takes over'
                           value={r.billboard.distance}
-                          onChange={v => patchRule(i, { billboard: { textureId: r.billboard!.textureId, distance: Math.max(0, v) } })} />
+                          onChange={v => patchRule(i, { billboard: { ...r.billboard!, distance: Math.max(0, v) } })} />
                       )}
                     </span>
                   </div>

@@ -300,7 +300,15 @@ scene.physics.airborneTimes(body): { airTime: number, groundedTime: number }
 scene.physics.startRagdoll(modelNode, options?): Ragdoll
 scene.physics.get/set gravity: [number, number, number]
 scene.physics.get stats: PhysicsStats
+scene.physics.simulationRange: number            // metres from the camera; 0 = unlimited
+scene.physics.isFrozen(body): boolean            // asleep: out of range, or resting
 ```
+
+Out of its simulation range a dynamic body is frozen in place (see the editor's Physics page). A body's
+own setting is `body.simulationMode` (`'project' | 'always' | 'custom'`) with `body.simulationRange`, and
+`body.canSleep` puts it to sleep once at rest. Writing `node.velocity` wakes a resting body; it does not
+wake one frozen for range — an AI steering every frame would otherwise undo the freeze. An impulse or a
+hit wakes either.
 
 `Game.gravity` is the same value, reachable without going through the scene.
 

@@ -5,7 +5,7 @@ import { Node } from "./node";
 import { NAV_BAKE_DEFAULTS, navBakeSettings } from "../../../ai/navBake";
 import type { NavBakeSettings } from "../../../ai/navBake";
 import {
-    EMPTY_NAV_MESH_DATA, buildNavMesh, isNavigableUp, parseNavMeshData, serializeNavMeshData,
+    EMPTY_NAV_MESH_DATA, buildNavMeshShared, isNavigableUp, parseNavMeshData, serializeNavMeshData,
 } from "../../../ai/navMesh";
 import type { CleoNavMesh, NavMeshData, NavRoute, OffMeshLink } from "../../../ai/navMesh";
 
@@ -203,8 +203,8 @@ export class NavMeshNode extends Node {
         }
 
         // merge: false — the stored contours are ALREADY merged regions. Re-merging would be both
-        // slower and lossy.
-        this._mesh = buildNavMesh(this._data, { merge: false });
+        // slower and lossy. Shared by content: a later Play of the same bake reuses this build.
+        this._mesh = buildNavMeshShared(this._data, { merge: false });
         if (this._mesh) this._mesh.setLinks(this.links);
         else Logger.warn(`Navmesh '${this._name}' has baked data that could not be rebuilt.`, 'Scene');
         return this._mesh;

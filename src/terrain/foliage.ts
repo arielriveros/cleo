@@ -8,6 +8,7 @@ import {
     FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY,
 } from '../graphics/material';
 import type { FoliageOrientation } from '../graphics/material';
+import { parseOctahedralInfo, type OctahedralImpostorInfo } from './octahedralImpostor';
 
 export type FoliageKind = 'mesh' | 'billboard';
 
@@ -381,6 +382,38 @@ export interface FoliageCell {
      * newly visible and therefore subject to the per-frame admission budget.
      */
     visible: boolean;
+    /** Scratch for {@link sortFoliageFrontToBack}: the cell's distance ring from the sort eye. */
+    ring?: number;
+    /**
+     * Renderer-owned: whether the cell cast a shadow last frame, for the hysteresis on the foliage shadow
+     * distance (a cell on the boundary must not flicker its shadow on sub-metre camera motion).
+     */
+    shadowCast?: boolean;
+}
+
+/** Metres per distance ring in the front-to-back foliage order. */
+export const FOLIAGE_SORT_RING = 8;
+/** How far the camera moves before the front-to-back order is re-derived. */
+export const FOLIAGE_SORT_REFRESH = 4;
+
+/**
+ * Order a bucket's cells nearest first, so the trees in front fill the depth buffer before the ones behind
+ * them are rasterized and those fail the early depth test instead of being shaded and overwritten.
+ *
+ * By RING (`ringSize` metres of distance from `eye`), and stably: cells in one ring keep their grid order.
+ * A batch is repacked whenever its cell order changes (foliageBatchStale compares element-wise), so the
+ * order must not churn on every small camera move — the caller holds `eye` still until the camera has
+ * moved FOLIAGE_SORT_REFRESH metres, and coarse rings mean a cell rarely changes rank even then.
+ */
+export function sortFoliageFrontToBack(cells: FoliageCell[], eye: ArrayLike<number>, ringSize = FOLIAGE_SORT_RING): void {
+    if (cells.length < 2) return;
+    for (const c of cells) {
+        const x = (c.pmin[0] + c.pmax[0]) / 2 - eye[0];
+        const y = (c.pmin[1] + c.pmax[1]) / 2 - eye[1];
+        const z = (c.pmin[2] + c.pmax[2]) / 2 - eye[2];
+        c.ring = Math.floor(Math.sqrt(x * x + y * y + z * z) / ringSize);
+    }
+    cells.sort((a, b) => (a.ring! - b.ring!) || (a.index - b.index));
 }
 
 /** One detail level of a mesh foliage layer: the sub-mesh models drawn per instance (transforms baked
@@ -408,6 +441,22 @@ export function crossQuadGeometry(width: number = 1, height: number = 1): Geomet
     ];
     const indices = [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7];
     return new Geometry(positions, normals, uvs, [], [], indices);
+}
+
+/**
+ * The card an OCTAHEDRAL impostor draws on: one quad over the captured sphere, facing +Z in the
+ * prototype's own space — a sensible flat stand-in for anything that draws it as ordinary geometry (the
+ * overdraw view). The impostor program ignores the positions: it rebuilds the quad facing the camera from
+ * the uv, corner (0, 0) at the top left (geometryFoliageImpostor.wgsl).
+ */
+export function octahedralQuadGeometry(info: OctahedralImpostorInfo): Geometry {
+    const [cx, cy, cz] = info.center, r = info.radius;
+    const positions: [number, number, number][] = [
+        [cx - r, cy - r, cz], [cx + r, cy - r, cz], [cx + r, cy + r, cz], [cx - r, cy + r, cz],
+    ];
+    const normals: [number, number, number][] = positions.map(() => [0, 0, 1]);
+    const uvs: [number, number][] = [[0, 1], [1, 1], [1, 0], [0, 0]];
+    return new Geometry(positions, normals, uvs, [], [], [0, 1, 2, 0, 2, 3]);
 }
 
 /**
@@ -444,6 +493,13 @@ export class FoliageLayer {
     public billboardModel: Model | null = null;
     public billboardTextureId: string | null = null;
     public billboardDistance = Infinity;
+    /**
+     * Set when the impostor is OCTAHEDRAL (terrain/octahedralImpostor.ts): `billboardTextureId` is then an
+     * N x N atlas of views, `billboardNormalTextureId` its normals, and `billboardModel` one camera-facing
+     * quad instead of the crossed card. Null for the classic single-view card.
+     */
+    public billboardOctahedral: OctahedralImpostorInfo | null = null;
+    public billboardNormalTextureId: string | null = null;
     /** Hide instances beyond this camera distance; 0 = use the renderer's global foliage cull distance. */
     public cullDistance = 0;
     /**
@@ -488,6 +544,14 @@ export class FoliageLayer {
      * the frame prologue and the pass only binds and draws what it finds here.
      */
     public buckets: FoliageCell[][] = [];
+    /**
+     * Renderer-owned: the colour buckets' draw segments when the GPU culled this layer this frame
+     * (graphics/foliageGpuCulling.ts), and whether it did — the draw reads these instead of {@link batches}.
+     */
+    public gpuBatches: FoliageBatch[][] = [];
+    public gpuCulled = false;
+    /** Renderer-owned: the eye the front-to-back cell order was last derived from (sortFoliageFrontToBack). */
+    public sortEye: [number, number, number] | null = null;
     /**
      * CPU staging for whichever batch is being packed. Shared across buckets and grow-only: both
      * backends COPY on upload, so it is free the moment `reallocateBuffer` returns.
@@ -591,11 +655,22 @@ export class FoliageLayer {
         this.model = this.levels[0].models[0];
         if (src.billboard?.textureId) {
             const material = Material.Basic({ color: [1, 1, 1], texture: src.billboard.textureId }, { side: 'double', castShadow: false });
-            // Sized to the prototype it replaces, NOT 1x1: an instance scale MULTIPLIES the authored size
-            // on the mesh but IS the size in metres on a unit quad, so a unit card would not match.
-            const [w, h] = this._prototypeFootprint();
+            // Octahedral only with BOTH atlases: without its normals it would light as a black card.
+            const octahedral = parseOctahedralInfo(src.billboard.octahedral);
+            const normalId: string | null = typeof src.billboard.textures?.normal === 'string' ? src.billboard.textures.normal : null;
             if (this.billboardModel) this._retireMeshes([this.billboardModel]);
-            this.billboardModel = new Model(crossQuadGeometry(w, h), material);
+            if (octahedral && normalId) {
+                this.billboardModel = new Model(octahedralQuadGeometry(octahedral), material);
+                this.billboardOctahedral = octahedral;
+                this.billboardNormalTextureId = normalId;
+            } else {
+                // Sized to the prototype it replaces, NOT 1x1: an instance scale MULTIPLIES the authored size
+                // on the mesh but IS the size in metres on a unit quad, so a unit card would not match.
+                const [w, h] = this._prototypeFootprint();
+                this.billboardModel = new Model(crossQuadGeometry(w, h), material);
+                this.billboardOctahedral = null;
+                this.billboardNormalTextureId = null;
+            }
             this.billboardTextureId = src.billboard.textureId;
             this.billboardDistance = Math.max(0, Number(src.billboard.distance) || 0);
         } else {
@@ -603,6 +678,8 @@ export class FoliageLayer {
             this.billboardModel = null;
             this.billboardTextureId = null;
             this.billboardDistance = Infinity;
+            this.billboardOctahedral = null;
+            this.billboardNormalTextureId = null;
         }
         this.cullDistance = Math.max(0, Number(src.cullDistance) || 0);
         this.collision = src.collision ?? null;
@@ -903,6 +980,9 @@ export class FoliageLayer {
      *  Expands each cell's AABB so it fully contains the meshes/billboards standing on it. */
     private _instanceExtent(): number {
         let e = 0;
+        // A camera-facing octahedral quad sweeps the whole captured sphere, which can reach past LOD0's box.
+        const octa = this.billboardOctahedral;
+        if (octa) e = Math.max(e, ...octa.center.map(c => Math.abs(c) + octa.radius));
         for (const m of this.levels[0].models) {
             // `boundingBox`, NEVER `bvh.bounds`: reading `bvh` force-builds the whole hierarchy over the
             // prototype's triangles (geometry.ts warns about this twice). For a heavy tree across several
@@ -1037,7 +1117,13 @@ export class FoliageLayer {
                 ? this.levels.slice(1).map(l => ({ models: l.models.map(m => m.serialize()), distance: l.distance }))
                 : undefined,
             billboard: this.kind === 'mesh' && this.billboardModel
-                ? { textureId: this.billboardTextureId, distance: this.billboardDistance } : undefined,
+                ? {
+                    textureId: this.billboardTextureId, distance: this.billboardDistance,
+                    // A `textures` slot map, so every texture-reference walker already counts the normals.
+                    ...(this.billboardOctahedral ? {
+                        octahedral: this.billboardOctahedral, textures: { normal: this.billboardNormalTextureId },
+                    } : {}),
+                } : undefined,
             cullDistance: this.cullDistance > 0 ? this.cullDistance : undefined,
             castShadows: this.castShadows || undefined,
             orientation: this.orientation !== 'up' ? this.orientation : undefined,

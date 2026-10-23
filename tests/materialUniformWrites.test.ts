@@ -27,8 +27,12 @@ import { join } from 'path';
 
 const SRC = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
 
-/** The inline write that bypasses the helper, in any of the spellings the call sites used. */
-const INLINE_LOOP = /for \(const \[name, value\] of [A-Za-z0-9_.!]+\.properties\)\s*\n\s*this\._shaderManager\.setUniform\(`u_material\.\$\{name\}`, value\);/g;
+/**
+ * The inline write that bypasses the helper, in any of the spellings the call sites used. The helper itself
+ * writes through MaterialSync's interned names (shaderOptimizer/materialSync.ts): the same write, without a
+ * template string per property per draw.
+ */
+const INLINE_LOOP = /for \(const \[name, value\] of [A-Za-z0-9_.!]+\.properties\)\s*\n\s*this\._shaderManager\.setUniform\((?:`u_material\.\$\{name\}`|this\._materialSync\.uniformName\(name\)), value\);/g;
 
 describe('material uniform writes go through one place', () => {
     it('has exactly one loop writing u_material.<property>', () => {

@@ -418,6 +418,24 @@ export class Mesh {
     public get activeIndexFormat(): IndexFormat {
         return this.hasLods ? this._lodFormats[this._lod] : this._indexFormat;
     }
+    /** Index levels this mesh has: 1 without LODs. Level `lodLevels - 1` is the coarsest. */
+    public get lodLevels(): number { return Math.max(1, this._lodBuffers.length); }
+    /**
+     * One level's index buffer, count and format, whatever `activeLod` says — for a pass that picks its
+     * own level (a far shadow cascade drawing terrain coarser than the camera sees it). Clamped.
+     */
+    public lodIndexBuffer(level: number): GpuBuffer | null {
+        return this.hasLods ? this._lodBuffers[this._clampLevel(level)] : this._indexBuffer;
+    }
+    public lodIndexCount(level: number): number {
+        return this.hasLods ? this._lodCounts[this._clampLevel(level)] : this._indexCount;
+    }
+    public lodIndexFormat(level: number): IndexFormat {
+        return this.hasLods ? this._lodFormats[this._clampLevel(level)] : this._indexFormat;
+    }
+    private _clampLevel(level: number): number {
+        return Math.max(0, Math.min(level | 0, this._lodBuffers.length - 1));
+    }
     public get vertexCount(): number { return this._vertexCount; }
     public get isAnimated(): boolean { return this._isAnimated; }
 }

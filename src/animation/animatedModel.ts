@@ -637,11 +637,19 @@ export class AnimatedModel {
     // A stable identity for "which attributes at which locations". Sorted, because `getActiveAttrib`
     // enumeration order is driver-dependent.
     private static _layoutKey(shaderAttributes: any[]): string {
-        return shaderAttributes
-            .map(a => `${a.name}@${a.location}`)
-            .sort()
-            .join(',');
+        // Memoised per attribute list: a program hands out the same array every time, and this runs per
+        // skinned draw per pass (every shadow cascade among them).
+        let key = AnimatedModel._layoutKeys.get(shaderAttributes);
+        if (key === undefined) {
+            key = shaderAttributes
+                .map(a => `${a.name}@${a.location}`)
+                .sort()
+                .join(',');
+            AnimatedModel._layoutKeys.set(shaderAttributes, key);
+        }
+        return key;
     }
+    private static readonly _layoutKeys = new WeakMap<any[], string>();
 
     // Getters
     public get geometry(): Geometry { return this._geometry; }

@@ -165,6 +165,15 @@ export type BodyDescription = {
   groundProbeDistance?: number;
   /** Time constant for this body's MEASURED motion, in seconds. 0/absent = the engine default (~0.09s). */
   motionSmoothing?: number;
+  /**
+   * Where the body's simulation range comes from: the project's (absent / 'project'), nowhere ('always':
+   * never frozen), or `simulationRange` ('custom'). Out of range the body is frozen in place.
+   */
+  simulationMode?: 'project' | 'always' | 'custom';
+  /** Metres from the camera past which a 'custom' body freezes. 0 = unlimited. */
+  simulationRange?: number;
+  /** Sleep once at rest until hit, pushed or moved. Absent = false. */
+  canSleep?: boolean;
   shapes: ShapeDescription[];
 }
 export type ShapeDescription = BoxShapeDescription | SphereShapeDescription | CylinderShapeDescription | CapsuleShapeDescription | PlaneShapeDescription | ConvexShapeDescription;

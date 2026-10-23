@@ -19,6 +19,8 @@ const CAMERA_COLLISION_HINT = 'Whether camera rigs collide with this body. Off a
 const MASS_HINT = 'Mass of 0 will make the object static.';
 const FRICTION_HINT = 'Contact friction. At 0 the body is frictionless — nothing will slow it down but damping. What a character wants, since its script sets its own speed.';
 const GROUND_PROBE_HINT = 'Counts as grounded while the collider’s feet are within this distance of solid ground, probed every frame. Removes isGrounded flicker (and false falling animations) for a character resting on terrain. Also what makes the groundDistance animation built-in answer. At 0 it is off and grounding comes from solver contacts only — raise it (~0.1–0.2) if a resting character flickers to airborne.';
+const SIMULATION_HINT = 'How far from the camera this body keeps simulating. Past it the body freezes in place: still solid to rays, the camera and other bodies, but not moving, until the camera comes back — and then it carries on with the velocity it had. Project uses the range in Options ▸ Engine ▸ Runtime (0 there = unlimited); Always never freezes (the player, anything a far-off script depends on); Custom sets this body’s own.';
+const CAN_SLEEP_HINT = 'Put the body to sleep once it has stopped moving, until something hits it, pushes it or a script sets its velocity. Saves the cost of props lying still. Off for anything a script steers by writing body.velocity directly.';
 const MOTION_SMOOTHING_HINT = 'Time constant for this body’s measured motion — currentSpeed, planarSpeed, acceleration, turn rate. Higher is steadier but slower to react. At 0 the default (~0.09s) applies. Raise it if an animation blend driven by this body’s speed vibrates or jitters; lower it if a script needs a faster answer than it gets.';
 
 // 3 axis toggles (used for linear/angular constraints; value is a [x,y,z] of 0|1).
@@ -84,7 +86,7 @@ const ShapeTools = ({ shapes, canHull, addShape, addHull, regenerateHull, setSha
 };
 
 export default function PhysicsEditor(props: {node: Node}) {
-  const { bodies, triggers, eventEmitter: eventEmitter, enterRigEditor } = useCleoEngine();
+  const { bodies, triggers, eventEmitter: eventEmitter, enterRigEditor, projectSettings } = useCleoEngine();
   const [bodyProperties, setBodyProperties] = useState<BodyDescription | null>(null)
   const [triggerProperties, setTriggerProperties] = useState<{shapes: ShapeDescription[]} | null>(null);
   const [ragdoll, setRagdoll] = useState<RagdollOptions | null>(null);
@@ -130,6 +132,10 @@ export default function PhysicsEditor(props: {node: Node}) {
         groundProbeDistance: body.groundProbeDistance ?? 0,
         // 0 means "use the engine default (~0.09s)".
         motionSmoothing: body.motionSmoothing ?? 0,
+        // Absent in bodies authored before simulation range: the project's range, no resting sleep.
+        simulationMode: body.simulationMode ?? 'project',
+        simulationRange: body.simulationRange ?? 0,
+        canSleep: body.canSleep ?? false,
         shapes: body.shapes
       })
     }
@@ -150,6 +156,9 @@ export default function PhysicsEditor(props: {node: Node}) {
         cameraCollision: bodyProperties.cameraCollision,
         groundProbeDistance: bodyProperties.groundProbeDistance,
         motionSmoothing: bodyProperties.motionSmoothing,
+        simulationMode: bodyProperties.simulationMode,
+        simulationRange: bodyProperties.simulationRange,
+        canSleep: bodyProperties.canSleep,
         shapes: bodyProperties.shapes
       });
       eventEmitter.emit('PHYSICS_CHANGED');
@@ -322,7 +331,7 @@ export default function PhysicsEditor(props: {node: Node}) {
               ? <Hint>Can only add rigid bodies to nodes at root level.</Hint>
               : <>
                   <Hint className='mb-2'>Node does not have a rigid body.</Hint>
-                  <Button variant='primary' size='sm' onClick={() => setBodyProperties({ mass: 0, linearDamping: 0, angularDamping: 0, linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1], friction: 0.3, restitution: 0, simulatePhysics: true, cameraCollision: true, groundProbeDistance: 0, shapes: [] })}>Add Rigid Body</Button>
+                  <Button variant='primary' size='sm' onClick={() => setBodyProperties({ mass: 0, linearDamping: 0, angularDamping: 0, linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1], friction: 0.3, restitution: 0, simulatePhysics: true, cameraCollision: true, groundProbeDistance: 0, simulationMode: 'project', simulationRange: 0, canSleep: false, shapes: [] })}>Add Rigid Body</Button>
                 </>)
           : <>
               {/* The two channels this body takes part in. Independent on purpose: scenery can block
@@ -346,6 +355,23 @@ export default function PhysicsEditor(props: {node: Node}) {
                   speed thresholds read, so this slider is the first thing to reach for when a blend
                   vibrates: the noise is in the measurement, not the animation. */}
               <Slider label='Motion smoothing' labelClassName={LABEL} title={MOTION_SMOOTHING_HINT} min={0} max={0.5} step={0.01} value={bodyProperties.motionSmoothing ?? 0} onChange={(v) => setBodyProperties({ ...bodyProperties, motionSmoothing: v })} />
+              {/* Freeze-in-place out of range, and sleep at rest: what keeps a large level's far props free. */}
+              <Field label='Simulation' labelClassName={LABEL} hint={SIMULATION_HINT}>
+                <Select value={bodyProperties.simulationMode ?? 'project'}
+                  onChange={(e) => setBodyProperties({ ...bodyProperties, simulationMode: e.target.value as 'project' | 'always' | 'custom' })}>
+                  <option value='project'>{`Project range (${projectSettings.engine.simulationRange > 0 ? `${projectSettings.engine.simulationRange} m` : 'unlimited'})`}</option>
+                  <option value='always'>Always</option>
+                  <option value='custom'>Custom range</option>
+                </Select>
+              </Field>
+              {bodyProperties.simulationMode === 'custom' &&
+                <Field label='Range (m)' labelClassName={LABEL} hint='Metres from the camera past which this body freezes. 0 = unlimited.'>
+                  <NumberInput value={bodyProperties.simulationRange ?? 0} min={0} step={5}
+                    onChange={(v) => setBodyProperties({ ...bodyProperties, simulationRange: Math.max(0, v) })} />
+                </Field>}
+              <Toggle label='Sleep when resting' className='my-1' title={CAN_SLEEP_HINT}
+                checked={bodyProperties.canSleep ?? false}
+                onChange={(c) => setBodyProperties({ ...bodyProperties, canSleep: c })} />
               <AxisToggles label='Linear Constraints' value={bodyProperties.linearConstraints} onChange={(v) => setBodyProperties({ ...bodyProperties, linearConstraints: v as [number, number, number] })} />
               <AxisToggles label='Angular Constraints' value={bodyProperties.angularConstraints} onChange={(v) => setBodyProperties({ ...bodyProperties, angularConstraints: v as [number, number, number] })} />
               <Button variant='danger' size='sm' className='mt-2' onClick={removeBody}>Remove Rigid Body</Button>

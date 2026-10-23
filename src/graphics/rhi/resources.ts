@@ -150,6 +150,23 @@ export interface BindGroup extends GpuResource {
  * An immutable compute program: the module, plus the layouts its bind groups must satisfy. Minimal on
  * purpose — the engine has one compute workload, and a general system built on it would be premature.
  */
+/**
+ * A pool of OCCLUSION queries: did any sample of a draw pass the depth test. Bound to a render pass through
+ * its descriptor (`RenderPassDescriptor.occlusionQuerySet`), each query wrapped around draws with the pass
+ * encoder's `beginOcclusionQuery`/`endOcclusionQuery`. Results come back frames later and NEVER block:
+ * `resolve` records the readback of a frame's queries, `poll` hands over whatever has completed.
+ */
+export interface OcclusionQuerySet extends GpuResource {
+    readonly capacity: number;
+    /**
+     * Read back queries 0..count-1 of the pass just ended, under `tag` (the caller's frame number).
+     * Record it into the same encoder as that pass, after it. A full readback ring drops the frame.
+     */
+    resolve(encoder: unknown, count: number, tag: number): void;
+    /** The oldest completed readback — one 0/1 per query — or null. Call once a frame, or more to drain. */
+    poll(): { tag: number; count: number; visible: Uint8Array } | null;
+}
+
 export interface ComputePipeline extends GpuResource {
     /** Layouts this pipeline binds, indexed by group. */
     readonly bindGroupLayouts: readonly BindGroupLayout[];

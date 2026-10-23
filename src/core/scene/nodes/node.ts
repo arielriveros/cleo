@@ -1,5 +1,6 @@
 import { mat4, vec3, quat } from "gl-matrix";
 import { RigidBody, Trigger } from "../../../physics/body";
+import type { SimulationMode } from "../../../physics/simulationRange";
 import { MotionRecord, MotionConfig, motionConfig, planarSplit, signedAngleBetween, headingAngle, facingComponents } from "../../../physics/motion";
 import type { Scene } from "../scene";
 import { sceneStats, sceneStatsDetail } from "../sceneStats";
@@ -104,6 +105,11 @@ export class Node {
   // Same deal for the world-space AABB used by picking and camera collision — see getBoundingBox().
   protected _worldBox: { min: vec3; max: vec3 } = { min: vec3.create(), max: vec3.create() };
   protected _worldBoxDirty: boolean = true;
+
+  // The world matrix as `_transformVersion` last saw it. A copy, not the live matrix: code that writes
+  // `worldTransform` in place between frames would otherwise make the next comparison see no change.
+  private _worldSnapshot: Float32Array | null = null;
+  private _transformVersion: number = 0;
 
   protected readonly _position: vec3;
   protected readonly _translationMatrix: mat4;
@@ -474,6 +480,19 @@ export class Node {
     this._worldCacheDirty = true;
     this._worldSphereDirty = true;
     this._worldBoxDirty = true;
+
+    // The caches above stay dirtied every frame — bounds also move with geometry, children and sizes that
+    // never touch this matrix. The version moves only when the matrix does.
+    const world = this._worldTransform;
+    const snapshot = this._worldSnapshot;
+    if (!snapshot) {
+      this._worldSnapshot = new Float32Array(world);
+      this._transformVersion++;
+    } else {
+      for (let i = 0; i < 16; i++) {
+        if (snapshot[i] !== world[i]) { snapshot.set(world); this._transformVersion++; break; }
+      }
+    }
 
     // Dormant subtrees are skipped: nothing reads their matrices, and spawn() recomputes them first.
     for (const child of this._children) {
@@ -998,7 +1017,12 @@ export class Node {
         // Absent in scenes saved before the ground probe existed; RigidBody defaults it to 0 (off).
         json.body.groundProbeDistance,
         // Likewise: absent means 0, which RigidBody reads as "use the engine default".
-        json.body.motionSmoothing
+        json.body.motionSmoothing,
+        // Absent in scenes saved before simulation range existed: 'project' (the project's range, which is
+        // itself unlimited unless set), and no resting sleep.
+        json.body.simulationMode,
+        json.body.simulationRange,
+        json.body.canSleep
       );
       setShapes(json.body.shapes, body);
       // AFTER every shape is attached: cannon has no centre of mass (`body.position` is it), so an
@@ -1271,6 +1295,13 @@ export class Node {
   // The four world-space getters below share one contract: each returns the LIVE cached vector, filled
   // lazily on first read after a transform change. Never mutate one and never hold it across a frame —
   // the cache is rewritten in place. Copy with `vec3.clone` to keep a value.
+
+  /**
+   * Bumped whenever {@link updateTransforms} finds the world matrix actually changed, so a cache keyed on
+   * "has this moved" (the shadow layers', see graphics/shadowCasters.ts) asks one integer instead of
+   * comparing sixteen floats. Only ever increases; its value means nothing beyond that.
+   */
+  public get transformVersion(): number { return this._transformVersion; }
 
   /**
    * This node's position in world space, with every ancestor transform applied. Live cached reference.
@@ -1576,7 +1607,10 @@ export class Node {
   }
   public set velocity(value: vec3) {
     // cannon owns the Vec3 and reads it in place every step, so it is mutated rather than replaced.
-    this._body?.velocity.set(value[0], value[1], value[2]);
+    if (!this._body) return;
+    this._body.velocity.set(value[0], value[1], value[2]);
+    // A resting body asleep would ignore the new velocity: cannon only wakes on forces, impulses and hits.
+    this._body.wakeForMotion();
   }
 
   /**
@@ -1903,6 +1937,11 @@ export class Node {
    *                          `planarAcceleration`, `turnRate` and everything else derived from its position
    *                          delta. Default `0` = the engine's ~90ms. Raise it when a blend driven off those
    *                          values vibrates; lower it when a script needs a faster answer.
+   * @param simulationMode    Where the body's simulation range comes from: `'project'` (default), `'always'`
+   *                          (never frozen) or `'custom'` (`simulationRange`). Out of range, the body is
+   *                          frozen in place: still solid to rays and other bodies, but not simulated.
+   * @param simulationRange   Metres from the camera past which a `'custom'` body freezes. `0` = unlimited.
+   * @param canSleep          Sleep once at rest, until hit, pushed or moved. Default `false`.
    * @returns The new body, also available afterwards as {@link body}.
    */
   public setBody(
@@ -1916,7 +1955,10 @@ export class Node {
     simulatePhysics?: boolean,
     cameraCollision?: boolean,
     groundProbeDistance?: number,
-    motionSmoothing?: number
+    motionSmoothing?: number,
+    simulationMode?: SimulationMode,
+    simulationRange?: number,
+    canSleep?: boolean
   ): RigidBody {
     // TODO: Handle the case where the node is a child of another node
     this._body = new RigidBody({
@@ -1929,7 +1971,8 @@ export class Node {
       linearConstraints, angularConstraints,
       friction, restitution,
       simulatePhysics, cameraCollision,
-      groundProbeDistance, motionSmoothing
+      groundProbeDistance, motionSmoothing,
+      simulationMode, simulationRange, canSleep
     }, this);
 
     this._body.addEventListener('collide', (event: any) => {

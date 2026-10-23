@@ -85,6 +85,9 @@ export { SkyAtmosphereNode } from "./core/scene/nodes/skyAtmosphereNode";
 export type { SkyAtmosphereOptions } from "./core/scene/nodes/skyAtmosphereNode";
 export { SkyLightNode } from "./core/scene/nodes/skyLightNode";
 export { WindNode, WIND_DEFAULTS, type WindOptions } from "./core/scene/nodes/windNode";
+export { OccluderNode } from "./core/scene/nodes/occluderNode";
+export { OcclusionBuffer } from "./graphics/occlusion/occlusionBuffer";
+export { TerrainOccluder } from "./graphics/occlusion/terrainOccluder";
 export type { SkyLightOptions } from "./core/scene/nodes/skyLightNode";
 export { CameraNode } from "./core/scene/nodes/cameraNode";
 export { SoundNode } from "./core/scene/nodes/soundNode";
@@ -213,8 +216,8 @@ export type { AISceneLike, NavMeshSource } from "./ai/aiSystem";
 export { aiStats, resetAIStats } from "./ai/aiStats";
 export type { AIStats } from "./ai/aiStats";
 export {
-    CleoNavMesh, EMPTY_NAV_MESH_DATA, buildNavMesh, isNavigableUp, parseNavMeshData, polygonsFromData,
-    serializeNavMeshData,
+    CleoNavMesh, EMPTY_NAV_MESH_DATA, buildNavMesh, buildNavMeshShared, clearSharedNavMeshes, isNavigableUp,
+    navBuildStats, navMeshDataKey, parseNavMeshData, polygonsFromData, serializeNavMeshData,
 } from "./ai/navMesh";
 export type { NavMeshData, NavMeshJson, NavMeshBuildOptions, NavRoute, OffMeshLink } from "./ai/navMesh";
 export {
@@ -401,6 +404,10 @@ export type { SceneStats } from "./core/scene/sceneStats";
 export { frameStats, currentViewport } from "./graphics/renderStats";
 export type { RenderStats } from "./graphics/renderStats";
 export { shaderStats } from "./graphics/shaderStats";
+export {
+    shaderOptimizerStats, MaterialSync, DrawSortKeys, ProgramCompileQueue, parseRecipes, serializeRecipe,
+} from "./graphics/shaderOptimizer";
+export type { ShaderOptimizerStats, PipelineRecipe } from "./graphics/shaderOptimizer";
 export { createProgramUsage, usageFromSceneJson, usageFromRenderSettings, castsShadows, programsFor, PROGRAM_CLASS } from "./graphics/programUsage";
 export type { ProgramUsage } from "./graphics/programUsage";
 export { physicalFor, particleSimProgram, usesParallax } from "./graphics/programVariants";
@@ -437,6 +444,10 @@ export type { HeightImage, HeightImportOptions } from "./terrain/heightmapIO";
 export type { TerrainConfig, SculptBrush, SculptMode, TerrainLayer, PaintBrush, TerrainChunk, TerrainLodSettings, FoliageGenerateResult } from "./terrain/terrain";
 export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES, FOLIAGE_DRAW_TRIANGLE_BUDGET, foliageEffectiveCull, foliageLodBands } from "./terrain/foliage";
 export type { FoliageKind, FoliageParams } from "./terrain/foliage";
+export { bakeOctahedralImpostor, rgbaSampler, impostorSphere } from "./terrain/octahedralBake";
+export type { OctahedralBakePart, OctahedralBakeOptions, OctahedralBakeResult } from "./terrain/octahedralBake";
+export { parseOctahedralInfo, OCTA_DEFAULT_FRAMES } from "./terrain/octahedralImpostor";
+export type { OctahedralImpostorInfo } from "./terrain/octahedralImpostor";
 export { FoliageColliderField, DEFAULT_FOLIAGE_COLLIDERS, foliageColliderPose } from "./terrain/foliageColliders";
 export type { FoliageColliderSettings } from "./terrain/foliageColliders";
 export { Tilemap, DEFAULT_FILL_LIMIT } from "./graphics/tilemap/tilemap";
