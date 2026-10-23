@@ -23,7 +23,7 @@ interface CloudsState {
   phaseBackG: number; phaseBackWeight: number;
   msOctaves: number; msScatter: number; msExtinction: number; msEccentricity: number;
   hazeDistance: number;
-  windDirection: Vec3; windSpeed: number; detailWindFactor: number;
+  useSceneWind: boolean; windDirection: Vec3; windSpeed: number; detailWindFactor: number;
   steps: number; lightSteps: number; maxDistance: number; jitter: boolean; resolutionScale: number;
   temporalUpscale: boolean;
   enabled: boolean; opacity: number;
@@ -46,6 +46,7 @@ function readNode(node: VolumetricCloudsNode): CloudsState {
     msOctaves: node.msOctaves, msScatter: node.msScatter, msExtinction: node.msExtinction,
     msEccentricity: node.msEccentricity,
     hazeDistance: node.hazeDistance,
+    useSceneWind: node.useSceneWind,
     windDirection: node.windDirection, windSpeed: node.windSpeed, detailWindFactor: node.detailWindFactor,
     steps: node.steps, lightSteps: node.lightSteps, maxDistance: node.maxDistance, jitter: node.jitter,
     resolutionScale: node.resolutionScale,
@@ -105,6 +106,10 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
 
   const presets = <PresetMenu presets={VOLUMETRIC_CLOUDS_PRESETS} onApply={applyPreset} title='Cloud presets' />
 
+  // Read at render: the clouds editor re-renders on every edit, and adding a Wind node selects it anyway.
+  const sceneWind = props.node.scene?.wind ?? null
+  const followingWind = state.useSceneWind && !!sceneWind
+
   return (
     <Collapsable title='Volumetric Clouds' icon={<CloudsIcon />} persistKey='volumetricClouds' right={presets}>
       <div className='w-full p-2'>
@@ -158,11 +163,18 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
         {slider('Eccentricity (c)', 'msEccentricity', 0, 1, 0.01)}
 
         {header('Animation')}
-        <div className='mb-2'>
-          <label className={labelClass}>Wind Direction</label>
-          <AxisInput step={0.05} value={state.windDirection}
-            onChange={(v) => apply({ windDirection: v })} />
-        </div>
+        {check('Follow Scene Wind', 'useSceneWind')}
+        {followingWind
+          ? <Hint>Blowing the way Wind ‘{sceneWind!.name}’ does. Wind Speed is the altitude wind at its
+              Strength 1 — the Wind node’s Strength scales it, and 0 stills the sky.</Hint>
+          : <>
+              {state.useSceneWind && <Hint>No Wind node in the scene — the clouds use the direction below.</Hint>}
+              <div className='mb-2'>
+                <label className={labelClass}>Wind Direction</label>
+                <AxisInput step={0.05} value={state.windDirection}
+                  onChange={(v) => apply({ windDirection: v })} />
+              </div>
+            </>}
         {slider('Wind Speed', 'windSpeed', 0, 80, 0.5)}
         {slider('Detail Wind Factor', 'detailWindFactor', 0, 5, 0.05)}
 

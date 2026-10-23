@@ -4586,6 +4586,8 @@ export class Renderer {
     private readonly _cloudShadowSlab = [0, 0, 0, 0];
     private readonly _cloudShadowShape = [0, 0, 0, 0];
     private readonly _cloudShadowWind = [0, 0, 0, 0];
+    /** Scratch for `VolumetricCloudsNode.resolveWind` — the cloud pass and the cloud shadows read the same drift. */
+    private readonly _cloudWindDir: [number, number, number] = [0, 0, 0];
     /** Optical depth a cloud of unit absorption casts per unit of column density. Tuned by eye. */
     private static readonly CLOUD_SHADOW_EXTINCTION = 6;
 
@@ -4621,9 +4623,10 @@ export class Renderer {
         shape[3] = clouds.absorption * Renderer.CLOUD_SHADOW_EXTINCTION;
         // The same wind offset the cloud pass computes from the same clock (`u_wind * windSpeed * time`),
         // frozen at the bake while the clouds are drawn from it.
-        const drift = clouds.windSpeed * this._cloudTime(scene, clouds);
+        const dir = this._cloudWindDir;
+        const drift = clouds.resolveWind(scene.wind, dir) * this._cloudTime(scene, clouds);
         const wind = this._cloudShadowWind;
-        wind[0] = clouds.windDirection[0] * drift; wind[1] = clouds.windDirection[1] * drift; wind[2] = clouds.windDirection[2] * drift;
+        wind[0] = dir[0] * drift; wind[1] = dir[1] * drift; wind[2] = dir[2] * drift;
     }
 
     private _uploadShadowUniforms(shaderKey: string): void {
@@ -6401,8 +6404,10 @@ export class Renderer {
         this._shaderManager.setUniform('u_msEccentricity', node.msEccentricity);
         this._shaderManager.setUniform('u_hazeDistance', node.hazeDistance);
         // Animation
-        this._shaderManager.setUniform('u_wind', node.windDirection);
-        this._shaderManager.setUniform('u_windSpeed', node.windSpeed);
+        // The scene Wind's direction and strength when the node follows it, else its own.
+        const windSpeed = node.resolveWind(scene.wind, this._cloudWindDir);
+        this._shaderManager.setUniform('u_wind', this._cloudWindDir);
+        this._shaderManager.setUniform('u_windSpeed', windSpeed);
         this._shaderManager.setUniform('u_detailWindFactor', node.detailWindFactor);
         // Quality
         this._shaderManager.setUniform('u_steps', node.steps);

@@ -4,8 +4,8 @@ import type { Preset } from "../../presets";
 /**
  * One-click weather / time-of-day looks for VolumetricCloudsNode. A preset sets the shape, lighting
  * and animation fields only — never quality (steps, resolution, temporal), enabled, opacity or
- * useSceneSun, which stay the user's choice. sunDirection/sunColor only take effect when the node
- * overrides the scene sun.
+ * useSceneSun / useSceneWind, which stay the user’s choice. sunDirection/sunColor only take effect when the node
+ * overrides the scene sun, and windDirection only when it does not follow the scene Wind.
  */
 export type VolumetricCloudsPreset = Preset<VolumetricCloudsOptions>;
 

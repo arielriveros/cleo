@@ -11,7 +11,7 @@ describe('volumetric cloud presets', () => {
     it('only sets real node properties, never quality / enabled / opacity / useSceneSun', () => {
         const node = new VolumetricCloudsNode('clouds');
         const reserved = ['steps', 'lightSteps', 'maxDistance', 'jitter', 'resolutionScale', 'temporalUpscale',
-            'enabled', 'opacity', 'useSceneSun'];
+            'enabled', 'opacity', 'useSceneSun', 'useSceneWind'];
         for (const p of VOLUMETRIC_CLOUDS_PRESETS) {
             for (const k of Object.keys(p.options)) {
                 expect(k in node, `${p.id}.${k}`).toBe(true);

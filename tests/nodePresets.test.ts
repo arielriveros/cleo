@@ -8,6 +8,7 @@ import { CameraRigNode } from '../src/core/scene/nodes/cameraRigNode';
 import { CharacterNode } from '../src/core/scene/nodes/characterNode';
 import { ControllerNode } from '../src/core/scene/nodes/controllerNode';
 import { SoundNode } from '../src/core/scene/nodes/soundNode';
+import { VolumetricCloudsNode } from '../src/core/scene/nodes/volumetricCloudsNode';
 import { WIND_PRESETS } from '../src/core/scene/nodes/windPresets';
 import { WATER_VOLUME_PRESETS } from '../src/core/scene/nodes/waterVolumePresets';
 import { FORCE_FIELD_PRESETS } from '../src/core/scene/nodes/forceFieldPresets';
@@ -222,3 +223,48 @@ describe('render presets', () => {
     });
 });
 
+describe('clouds follow the scene wind', () => {
+    const out: [number, number, number] = [0, 0, 0];
+
+    it('blows the Wind node’s way at windSpeed × its strength', () => {
+        const clouds = new VolumetricCloudsNode('clouds', { windSpeed: 10, windDirection: [1, 0, 0] });
+        const wind = new WindNode('wind', { direction: 90, strength: 1.5 });
+        const speed = clouds.resolveWind(wind, out);
+        expect(speed).toBeCloseTo(15);
+        // 90 degrees counter-clockwise from +X is -Z (see WindNode.directionXZ).
+        expect(out[0]).toBeCloseTo(0);
+        expect(out[1]).toBe(0);
+        expect(out[2]).toBeCloseTo(-1);
+    });
+
+    it('a calm wind stills the sky', () => {
+        const clouds = new VolumetricCloudsNode('clouds', { windSpeed: 10 });
+        expect(clouds.resolveWind(new WindNode('wind', { strength: 0 }), out)).toBe(0);
+    });
+
+    it('falls back to its own wind with no Wind node, a hidden one, or following switched off', () => {
+        const own: [number, number, number] = [0.6, 0, 0.8];
+        const clouds = new VolumetricCloudsNode('clouds', { windSpeed: 7, windDirection: own });
+        expect(clouds.resolveWind(null, out)).toBe(7);
+        expect(out).toEqual(own);
+
+        const hidden = new WindNode('wind', { direction: 0 });
+        hidden.visible = false;
+        expect(clouds.resolveWind(hidden, out)).toBe(7);
+        expect(out).toEqual(own);
+
+        clouds.useSceneWind = false;
+        expect(clouds.resolveWind(new WindNode('wind', { direction: 0, strength: 2 }), out)).toBe(7);
+        expect(out).toEqual(own);
+    });
+
+    it('follows by default, saves the choice, and a cloud preset never changes it', () => {
+        expect(new VolumetricCloudsNode('clouds').useSceneWind).toBe(true);
+        const clouds = new VolumetricCloudsNode('clouds', { useSceneWind: false });
+        const json = (clouds as any)._serializePayload().clouds;
+        expect(json.useSceneWind).toBe(false);
+        expect(new VolumetricCloudsNode('again', json).useSceneWind).toBe(false);
+        clouds.applyPreset('stormy');
+        expect(clouds.useSceneWind).toBe(false);
+    });
+});

@@ -2,6 +2,7 @@ import type { Scene } from "../scene";
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
+import type { WindNode } from "./windNode";
 import { VOLUMETRIC_CLOUDS_PRESETS, type VolumetricCloudsPreset } from "./volumetricCloudsPresets";
 import { applyPreset } from "../../presets";
 
@@ -45,7 +46,8 @@ export interface VolumetricCloudsOptions {
     msEccentricity?: number;  // 0..1 — per-octave phase eccentricity attenuation (c)
     hazeDistance?: number;    // world units — aerial-perspective fade distance (0 = off)
     // Animation
-    windDirection?: [number, number, number]; // x/z used; drifts the cloud field over time
+    useSceneWind?: boolean;   // true = drift the way the scene's Wind node blows, at windSpeed × its strength
+    windDirection?: [number, number, number]; // x/z used; drifts the cloud field over time (no scene wind)
     windSpeed?: number;
     detailWindFactor?: number; // detail layer drifts faster than the base by this factor
     // Quality
@@ -110,6 +112,7 @@ export class VolumetricCloudsNode extends Node {
     private _msEccentricity: number;
     private _hazeDistance: number;
     // Animation
+    private _useSceneWind: boolean;
     private _windDirection: [number, number, number];
     private _windSpeed: number;
     private _detailWindFactor: number;
@@ -170,6 +173,7 @@ export class VolumetricCloudsNode extends Node {
         this._msEccentricity = options.msEccentricity ?? 0.5;
         this._hazeDistance = options.hazeDistance ?? 35000;
 
+        this._useSceneWind = options.useSceneWind ?? true;
         this._windDirection = options.windDirection ?? [1.0, 0.0, 0.2];
         this._windSpeed = options.windSpeed ?? 12.0;
         this._detailWindFactor = options.detailWindFactor ?? 2.0;
@@ -267,12 +271,30 @@ export class VolumetricCloudsNode extends Node {
     public set hazeDistance(v: number) { this._hazeDistance = Math.max(0, v); }
 
     // --- Animation ---
+    public get useSceneWind(): boolean { return this._useSceneWind; }
+    public set useSceneWind(v: boolean) { this._useSceneWind = v; }
     public get windDirection(): [number, number, number] { return this._windDirection; }
     public set windDirection(v: [number, number, number]) { this._windDirection = v; }
     public get windSpeed(): number { return this._windSpeed; }
     public set windSpeed(v: number) { this._windSpeed = v; }
     public get detailWindFactor(): number { return this._detailWindFactor; }
     public set detailWindFactor(v: number) { this._detailWindFactor = v; }
+
+    /**
+     * The drift the renderer actually uses, written to `out` as [x, y, z] direction and returned speed.
+     * Following a visible scene Wind, the clouds blow its way at windSpeed × its strength — windSpeed reads
+     * as the altitude wind at strength 1, and a calm wind (strength 0) stills the sky. Otherwise, or with no
+     * Wind in the scene, the node's own direction and speed.
+     */
+    public resolveWind(wind: WindNode | null, out: [number, number, number] | Float32Array): number {
+        if (this._useSceneWind && wind && wind.visible) {
+            const [x, z] = wind.directionXZ;
+            out[0] = x; out[1] = 0; out[2] = z;
+            return this._windSpeed * wind.strength;
+        }
+        out[0] = this._windDirection[0]; out[1] = this._windDirection[1]; out[2] = this._windDirection[2];
+        return this._windSpeed;
+    }
 
     // --- Quality ---
     public get steps(): number { return this._steps; }
@@ -343,7 +365,8 @@ export class VolumetricCloudsNode extends Node {
 
     /**
      * Applies a weather / time-of-day preset by id (see VOLUMETRIC_CLOUDS_PRESETS) or a preset object.
-     * Quality, enabled, opacity, useSceneSun and useSkyAmbient are left untouched. Returns false for an unknown id.
+     * Quality, enabled, opacity, useSceneSun, useSceneWind and useSkyAmbient are left untouched. Returns false
+     * for an unknown id.
      */
     public applyPreset(idOrPreset: string | VolumetricCloudsPreset): boolean {
         return applyPreset(this, VOLUMETRIC_CLOUDS_PRESETS, idOrPreset);
@@ -392,6 +415,7 @@ export class VolumetricCloudsNode extends Node {
                         msExtinction: this._msExtinction,
                         msEccentricity: this._msEccentricity,
                         hazeDistance: this._hazeDistance,
+                        useSceneWind: this._useSceneWind,
                         windDirection: this._windDirection,
                         windSpeed: this._windSpeed,
                         detailWindFactor: this._detailWindFactor,
