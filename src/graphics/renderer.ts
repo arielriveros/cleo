@@ -2143,7 +2143,8 @@ export class Renderer {
         // `getCurrentTexture()` fails, and every pass recorded into the frame's command buffer goes
         // down with it, once per frame for as long as the panel stays hidden. Nothing is visible, so
         // there is nothing to render. An offscreen capture brings its own target and still renders.
-        if (!this._presentTarget && (this._canvas.width === 0 || this._canvas.height === 0)) return;
+        if (!this._presentTarget
+            && (this._viewportEmpty || this._canvas.width === 0 || this._canvas.height === 0)) return;
         this._pollVariantFilter();
         this._frameEncoder = device.createCommandEncoder('frame');
         try {
@@ -7580,6 +7581,9 @@ export class Renderer {
                                    : Math.max(1, Math.round(this._canvas.height * this._renderScale));
     }
 
+    /** The viewport element had no area at the last `resize()`; see there and in `render`. */
+    private _viewportEmpty = false;
+
     /** True while capturing an offscreen thumbnail: backgrounds are skipped and the present writes coverage alpha. */
     private get _thumbnailMode(): boolean { return this._presentTarget !== null; }
 
@@ -8070,8 +8074,14 @@ export class Renderer {
 
     public resize(): void {
         if (!this._viewport) return;
-        this._canvas.width = this._viewport.clientWidth;
-        this._canvas.height = this._viewport.clientHeight;
+        const width = this._viewport.clientWidth, height = this._viewport.clientHeight;
+        // A viewport with no area — a panel hidden behind another tab, or collapsed — leaves the canvas
+        // as it was. Shrinking the canvas to 0x0 makes the browser rebuild the WebGPU swap chain at an
+        // empty size, which Dawn reports as an error by itself; `render` skips frames meanwhile.
+        this._viewportEmpty = width === 0 || height === 0;
+        if (this._viewportEmpty) return;
+        this._canvas.width = width;
+        this._canvas.height = height;
 
         if (!this._deviceReady) return;
         // Re-establish the surface configuration. Not needed for the resize itself — the swap chain
