@@ -48,15 +48,60 @@ One walk cycle can therefore drive several different characters.
 
 **+ Add ▸ Animation**, pick a `.fbx`/`.glb`/`.gltf`, then:
 
-1. **Rig picker** — which skeleton is this for?
-2. **Bone mapping table** — every source bone against a target bone, colour-coded by how it was
-   matched: exact, by name, auto-humanoid, spine, by index, manual, or none. Counts update live as
-   you correct it.
-3. **Clip list** — check the clips you want and rename them. Mixamo's `mixamo.com` and glTF's
+1. **Character picker**: which character are these clips for? They are linked to its skeleton.
+2. **Skeleton**: a one-line summary of the bone match, and **Map bones…**, which opens the
+   [bone mapper](#the-bone-mapper). Whatever you change there is saved on the character's skeleton, so
+   every later clip from the same source skeleton is matched the same way.
+3. **Clip list**: check the clips you want and rename them. Mixamo's `mixamo.com` and glTF's
    `Animation` are auto-named from the filename, because those names are useless.
 
-> **A model with no bone names cannot be mapped by name**, only by index, and the Clips panel warns
+> **A model with no bone names cannot be mapped by name**, only by index, and the import warns
 > about it. Fix the export if you can.
+
+### The bone mapper
+
+**Map bones…** (in the import dialog, or in a skeleton's **Retargeting** section after picking *Clips
+from…*) shows both skeletons side by side in a front view of their bind pose: the clips' skeleton on the
+left, the character's on the right.
+
+- **Drag** a bone from the left onto a bone on the right to make it drive that bone, or click one and then
+  the other. The searchable lists at the sides do the same for bones that overlap in the drawing.
+- **Right-click** a left bone: *Don't animate this bone*, or *Back to automatic*.
+- **Scroll** to zoom (fingers), drag the background to pan. **Mirror left → right** copies your left-side
+  changes to the right side; **Auto-match all** forgets every change.
+
+Every bone is coloured by what the retarget will actually do with it:
+
+| Clip bone | Meaning |
+|---|---|
+| green | matched automatically |
+| blue | matched by hand |
+| purple | merged into the matched bone below it |
+| red | animated, but its motion is lost: map it |
+| grey (dashed) | turned off on purpose |
+| grey | no clip animates it |
+
+| Character bone | Meaning |
+|---|---|
+| green | driven by one bone |
+| purple | driven by several bones, combined |
+| teal | shares the bend of the bone below it |
+| grey | holds its rest pose |
+
+#### When the two skeletons do not match bone for bone
+
+Three rules keep the posture right when the bone counts differ:
+
+1. **Merge.** Several clip bones mapped to one character bone are combined: their rotations add up, so a
+   3-bone spine onto a 2-bone spine bends just as far. A clip bone with no counterpart that sits between
+   matched bones (a clavicle the character lacks, an extra spine bone) is merged into the matched bone
+   below it automatically: its motion is not lost.
+2. **Share.** A character bone that nothing drives, sitting in a single chain between two driven bones (a
+   3-bone spine played from a 2-bone one, a clavicle the clips lack), takes an even share of the bend
+   below it instead of staying rigid. Twist, roll and helper bones never share.
+3. **Leftovers are fine.** A clip bone with nothing to drive at the end of a chain (finger tips, helper
+   bones) is dropped; a character bone outside any driven chain (twist, props, face) holds its rest pose.
+   The colours show both, so nothing goes missing silently.
 
 ## Splitting a model into parts
 

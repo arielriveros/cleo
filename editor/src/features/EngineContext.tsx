@@ -3188,7 +3188,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
               report: mappingReport(clip, sourceSkin, targetSkin, mapping),
               animatedNodes: [...new Set(clip.channels.map((ch: any) => ch.targetNodeIndex))] as number[],
             })),
-            mapping, sourceBones, targetBones,
+            mapping, sourceBones, targetBones, sourceSkin, targetSkin, targetName: targetModel.name,
           });
         });
         if (!decision) {

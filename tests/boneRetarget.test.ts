@@ -710,3 +710,136 @@ describe('retargetAnimation — clip flags survive', () => {
         expect(retargetAnimation(clip, s, s, buildBoneMapping([clip], s, s)).assetId).toBeUndefined();
     });
 });
+
+// ---------------------------------------------------------------------------------------------------
+// Skeletons that do not match bone for bone. The retarget used to drop an unmatched source bone's motion,
+// let the LAST of two sources on one target win, and leave an undriven target bone rigid. Each case below is
+// judged on what matters: the world orientation at the end of the chain must equal the source's.
+// ---------------------------------------------------------------------------------------------------
+
+const qx = (deg: number) => Array.from(quat.setAxisAngle(quat.create(), [1, 0, 0], deg * Math.PI / 180)) as [number, number, number, number];
+const qz = (deg: number) => Array.from(quat.setAxisAngle(quat.create(), [0, 0, 1], deg * Math.PI / 180));
+
+/** World rotation of a node from a one-key clip: animated locals where a channel exists, rest elsewhere. */
+function worldRot(skin: Skin, clip: Animation, node: number): quat {
+    const chain: number[] = [];
+    for (let n: number | undefined = node; n !== undefined; n = skin.nodeParents?.get(n)) chain.unshift(n);
+    const q = quat.create();
+    for (const n of chain) {
+        const ch = clip.channels.find(c => c.targetNodeIndex === n && c.targetPath === 'rotation');
+        const local = ch
+            ? quat.fromValues(...(clip.samplers[ch.samplerIndex].output.slice(0, 4) as [number, number, number, number]))
+            : mat4.getRotation(quat.create(), skin.nodeTransforms!.get(n)! as any);
+        quat.multiply(q, q, quat.normalize(local, local));
+    }
+    return quat.normalize(q, q);
+}
+const sameRot = (a: quat, b: quat) => expect(Math.abs(quat.dot(a, b))).toBeCloseTo(1, 5);
+
+/** Local rotation of `bind` with a delta on top: a source pose relative to its own rest. */
+const posed = (bind: number[] | undefined, delta: number[]) =>
+    Array.from(quat.normalize(quat.create(), quat.multiply(quat.create(), (bind ?? [0, 0, 0, 1]) as any, delta as any)));
+
+describe('retarget — skeletons that do not match bone for bone', () => {
+    it('MERGES a 3-bone spine onto 2: the chest carries both upper spine bones', () => {
+        const src: BoneSpec[] = [
+            { name: 'Hips', parent: -1, t: [0, 1, 0] },
+            { name: 'Spine', parent: 0, t: [0, 0.1, 0] },
+            { name: 'Spine1', parent: 1, t: [0, 0.1, 0], r: qx(20) },
+            { name: 'Spine2', parent: 2, t: [0, 0.1, 0], r: qx(-20) },
+            { name: 'Neck', parent: 3, t: [0, 0.1, 0] },
+        ];
+        const tgt: BoneSpec[] = [
+            { name: 'hips', parent: -1, t: [0, 1, 0] },
+            { name: 'spine', parent: 0, t: [0, 0.15, 0] },
+            { name: 'chest', parent: 1, t: [0, 0.15, 0] },
+            { name: 'neck', parent: 2, t: [0, 0.1, 0] },
+        ];
+        const s = skinWithIBM(src), t = skinWithIBM(tgt);
+        const clip = clipOf('bend', [
+            { node: 1, rot: posed(undefined, qz(10)) },
+            { node: 2, rot: posed(src[2].r, qz(20)) },
+            { node: 3, rot: posed(src[3].r, qz(30)) },
+        ]);
+        const m = buildBoneMapping([clip], s, t);
+        expect(m.entries.filter(e => e.targetNode === 2).map(e => e.sourceName)).toEqual(['Spine1', 'Spine2']);
+        const out = retargetAnimation(clip, s, t, m);
+        expect(out.channels.filter(c => c.targetNodeIndex === 2 && c.targetPath === 'rotation')).toHaveLength(1);
+        sameRot(worldRot(t, out, 2), worldRot(s, clip, 3)); // target chest ends where source Spine2 does
+        sameRot(worldRot(t, out, 1), worldRot(s, clip, 1));
+    });
+
+    it('SHARES a 2-bone spine across 3: the middle bone bends, the end still matches', () => {
+        const src: BoneSpec[] = [
+            { name: 'Hips', parent: -1, t: [0, 1, 0] },
+            { name: 'Spine', parent: 0, t: [0, 0.15, 0] },
+            { name: 'Chest', parent: 1, t: [0, 0.15, 0] },
+            { name: 'Neck', parent: 2, t: [0, 0.1, 0] },
+        ];
+        const tgt: BoneSpec[] = [
+            { name: 'hips', parent: -1, t: [0, 1, 0] },
+            { name: 'spine_01', parent: 0, t: [0, 0.1, 0] },
+            { name: 'spine_02', parent: 1, t: [0, 0.1, 0], r: qx(15) },
+            { name: 'spine_03', parent: 2, t: [0, 0.1, 0], r: qx(-15) },
+            { name: 'neck_01', parent: 3, t: [0, 0.1, 0] },
+        ];
+        const s = skinWithIBM(src), t = skinWithIBM(tgt);
+        const clip = clipOf('bend', [{ node: 1, rot: qz(10) }, { node: 2, rot: qz(40) }]);
+        const m = buildBoneMapping([clip], s, t);
+        expect(m.entries.map(e => e.targetNode)).toEqual([1, 3]); // spine_02 has no source
+        const out = retargetAnimation(clip, s, t, m);
+        const mid = out.channels.find(c => c.targetNodeIndex === 2 && c.targetPath === 'rotation');
+        expect(mid).toBeTruthy(); // it moves now
+        sameRot(worldRot(t, out, 3), worldRot(s, clip, 2)); // the chain still ends where the source chest does
+        // ...and the 40 degrees are split, not dumped on one joint: the middle bone carries a real part of it.
+        const restMid = quat.fromValues(...qx(15));
+        const midLocal = quat.fromValues(...(out.samplers[mid!.samplerIndex].output.slice(0, 4) as [number, number, number, number]));
+        const moved = quat.getAngle(restMid, midLocal) * 180 / Math.PI;
+        expect(moved).toBeGreaterThan(10);
+        expect(moved).toBeLessThan(30);
+    });
+
+    it('FOLDS a clavicle the target lacks into the upper arm', () => {
+        const src: BoneSpec[] = [
+            { name: 'Hips', parent: -1, t: [0, 1, 0] },
+            { name: 'Spine', parent: 0, t: [0, 0.3, 0] },
+            { name: 'LeftShoulder', parent: 1, t: [0.05, 0.1, 0], r: qx(10) },
+            { name: 'LeftArm', parent: 2, t: [0.1, 0, 0], r: qx(-10) },
+        ];
+        const tgt: BoneSpec[] = [
+            { name: 'hips', parent: -1, t: [0, 1, 0] },
+            { name: 'spine', parent: 0, t: [0, 0.3, 0] },
+            { name: 'upperarm_l', parent: 1, t: [0.15, 0.1, 0] },
+        ];
+        const s = skinWithIBM(src), t = skinWithIBM(tgt);
+        const clip = clipOf('shrug', [
+            { node: 2, rot: posed(src[2].r, qz(25)) },
+            { node: 3, rot: posed(src[3].r, qz(-40)) },
+        ]);
+        const m = buildBoneMapping([clip], s, t);
+        expect(m.entries.find(e => e.sourceName === 'LeftShoulder')?.targetNode).toBeNull();
+        const out = retargetAnimation(clip, s, t, m);
+        sameRot(worldRot(t, out, 2), worldRot(s, clip, 3));
+        expect(mappingReport(clip, s, t, m).missingBones).toEqual([]); // merged, not lost
+    });
+
+    it('holds a bone dropped ON PURPOSE at rest instead of merging it', () => {
+        const src: BoneSpec[] = [
+            { name: 'Hips', parent: -1, t: [0, 1, 0] },
+            { name: 'Spine', parent: 0, t: [0, 0.3, 0] },
+            { name: 'LeftShoulder', parent: 1, t: [0.05, 0.1, 0] },
+            { name: 'LeftArm', parent: 2, t: [0.1, 0, 0] },
+        ];
+        const tgt: BoneSpec[] = [
+            { name: 'hips', parent: -1, t: [0, 1, 0] },
+            { name: 'spine', parent: 0, t: [0, 0.3, 0] },
+            { name: 'upperarm_l', parent: 1, t: [0.15, 0.1, 0] },
+        ];
+        const s = skinWithIBM(src), t = skinWithIBM(tgt);
+        const clip = clipOf('shrug', [{ node: 2, rot: qz(25) }, { node: 3, rot: qz(-40) }]);
+        const m = applyManualMapping(buildBoneMapping([clip], s, t), 2, null);
+        const out = retargetAnimation(clip, s, t, m);
+        // Only the arm's own -40 reaches the target: the shrug was dropped.
+        sameRot(worldRot(t, out, 2), quat.fromValues(...(qz(-40) as [number, number, number, number])));
+    });
+});

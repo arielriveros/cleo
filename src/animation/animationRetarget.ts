@@ -2,6 +2,7 @@ import { mat4, quat, vec3 } from 'gl-matrix';
 import { Animation, AnimationChannel, AnimationSampler, Skin } from './animatedModel';
 import { normalizeBoneName, humanoidSlotOf } from './boneNames';
 import { skeletonTopology } from './skeletonTopology';
+import { sampleQuat, sampleVec3, unionKeyTimes } from './samplerSample';
 
 // Retargeting an imported animation clip onto a model's skeleton, in three stages so the editor can put
 // a mapping review between them: buildBoneMapping, mappingReport, retargetAnimation.
@@ -23,7 +24,7 @@ export interface AnimationCompatibility {
     animatedBones: number;
     /** Distinct animated bones that matched a bone in the target skeleton. */
     matchedBones: number;
-    /** Animated bones with no counterpart in the target skeleton (won't play). */
+    /** Animated bones with no counterpart in the target skeleton, and none merged into one (won't play). */
     missingBones: string[];
     /** Exact-matched bones whose parent (by name) differs between the source and target skeleton. */
     hierarchyMismatches: HierarchyMismatch[];
@@ -43,6 +44,12 @@ export interface BoneMappingEntry {
     sourceName: string | null;
     targetNode: number | null;
     kind: BoneMatchKind;
+    /**
+     * Unmapped ON PURPOSE ("don't animate this bone"), as opposed to nothing matching it. A dropped bone is
+     * held at rest; an unmapped one that sits between mapped bones is merged into its mapped descendant
+     * instead (see {@link retargetSegments}).
+     */
+    dropped?: boolean;
 }
 
 export interface BoneMapping {
@@ -56,6 +63,12 @@ export interface BoneMapping {
     /** True when both skins carry the rest data the delta retarget needs (names + local rest transforms). */
     canRetarget: boolean;
     matchMode: 'name' | 'index';
+    /**
+     * `[sourceNode, targetNode]` for source joints NO clip animates that would still match a target joint.
+     * They are not entries (nothing to retarget), but they say two bones correspond: a merge never folds
+     * across one, and a share never bends its target, which must stay at rest like its source.
+     */
+    restMatches?: [number, number][];
 }
 
 const IDENTITY_EPS = 0.005; // ~0.3°, below which a bind-rotation correction is treated as no correction
@@ -245,22 +258,32 @@ export function buildBoneMapping(clips: Animation[], sourceSkin: Skin, targetSki
         return { sourceNode: node, sourceName: nameOf(sourceSkin, node), targetNode, kind };
     });
 
+    // The same match for every joint NO clip animates: see `restMatches`.
+    const rest = new Map<number, number>();
+    for (const j of sourceSkin.joints) {
+        if (seen.has(j.nodeIndex)) continue;
+        const { targetNode } = matchOne(j.nodeIndex);
+        if (targetNode !== null) rest.set(j.nodeIndex, targetNode);
+    }
+
     // Spine: pair the two chains positionally, overriding whatever the tiers guessed for those bones.
+    // Several source bones landing on one target is fine: they are merged (see retargetSegments).
     if (haveNames) {
         const srcSpine = spineChain(sourceSkin);
         const tgtSpine = spineChain(targetSkin);
         if (srcSpine.length && tgtSpine.length) {
             const byNode = new Map(entries.map(e => [e.sourceNode, e] as const));
             for (let i = 0; i < srcSpine.length; i++) {
-                const e = byNode.get(srcSpine[i]);
-                if (!e) continue;
                 // Distribute source index across the target chain length.
                 const ti = srcSpine.length === 1 ? 0 : Math.round((i * (tgtSpine.length - 1)) / (srcSpine.length - 1));
-                e.targetNode = tgtSpine[Math.min(ti, tgtSpine.length - 1)];
-                e.kind = 'spine';
+                const target = tgtSpine[Math.min(ti, tgtSpine.length - 1)];
+                const e = byNode.get(srcSpine[i]);
+                if (e) { e.targetNode = target; e.kind = 'spine'; }
+                else rest.set(srcSpine[i], target);
             }
         }
     }
+    const restMatches = [...rest.entries()];
 
     // sameRig: every bone maps, every LOCAL-bind correction is identity, and rest proportions match.
     // Judged on the binds, never on names — a renamed namespace is still the same skeleton.
@@ -275,7 +298,7 @@ export function buildBoneMapping(clips: Animation[], sourceSkin: Skin, targetSki
         }
     }
 
-    return { entries, sameRig, canRetarget, matchMode };
+    return { entries, sameRig, canRetarget, matchMode, ...(restMatches.length ? { restMatches } : {}) };
 }
 
 // WORLD rotation of a node's ARMATURE: the accumulated rest rotation of every ancestor above it.
@@ -300,27 +323,172 @@ function armatureWorldRotation(skin: Skin, node: number): quat {
 // a non-joint node (assimp pivot) copies through; the ROOT bone uses the armature difference
 // `Awt⁻¹ · Aws`; a source with no usable IBM copies through; otherwise the local bind delta `Bt · Bs⁻¹`.
 function boneCorrection(sourceSkin: Skin, sNode: number, targetSkin: Skin, tNode: number): quat {
+    return segmentCorrection(sourceSkin, [sNode], targetSkin, tNode);
+}
+
+// The same for a SEGMENT: a chain of source bones (top first) driving one target bone as if it were one bone,
+// `At = corr · (A1·A2·…)`. The segment's bind is the product of its members' local binds, so the correction
+// stays `Bt · (Bs1·Bs2·…)⁻¹`; a one-bone segment is exactly {@link boneCorrection}.
+function segmentCorrection(sourceSkin: Skin, segment: number[], targetSkin: Skin, tNode: number): quat {
     // A pivot has no inverse bind matrix on EITHER side, so there is no rest to delta against, and
     // `nodeTransforms` is frame 0 for an animation-only file. This makes the armature branch below
     // unreachable for a converted FBX, which only matters cross-rig.
     if (!topoOf(targetSkin).jointOfNode.has(tNode)) return quat.create();
 
     if (isRootJoint(targetSkin, tNode)) {
-        const aws = armatureWorldRotation(sourceSkin, sNode);
+        const aws = armatureWorldRotation(sourceSkin, segment[0]);
         const awt = armatureWorldRotation(targetSkin, tNode);
         return quat.normalize(quat.create(), quat.multiply(quat.create(), quat.invert(quat.create(), awt), aws));
     }
-    const sJoint = sourceSkin.joints.find(j => j.nodeIndex === sNode);
+    const end = segment[segment.length - 1];
+    const sJoint = sourceSkin.joints.find(j => j.nodeIndex === end);
     if (!sJoint || isIdentityMatrix(sJoint.inverseBindMatrix as any)) return quat.create(); // no source bind → raw
-    const bs = localBindRotation(sourceSkin, sNode);
+    const bs = quat.create();
+    for (const n of segment) quat.multiply(bs, bs, localBindRotation(sourceSkin, n));
+    quat.normalize(bs, bs);
     const bt = localBindRotation(targetSkin, tNode);
     return quat.normalize(quat.create(), quat.multiply(quat.create(), bt, quat.invert(quat.create(), bs)));
 }
 
+/** A node's local rest rotation from its node transform, or identity. */
+function restRotation(skin: Skin, node: number): quat {
+    const nt = skin.nodeTransforms?.get(node);
+    return nt ? quat.normalize(quat.create(), mat4.getRotation(quat.create(), nt as any)) : quat.create();
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Segments: what to do when the two skeletons do not match bone for bone.
+//
+// Each driven target bone is fed by a SEGMENT of source bones: the source bone mapped to it (the deepest one,
+// when several are) plus every source ancestor up to, not including, the nearest one that drives a
+// DIFFERENT target bone. Composing the segment as one bone is exact: the target bone's parent corresponds to
+// that ancestor, so it must absorb everything in between.
+//
+//  - MERGE: several source bones mapped to one target (a 3-bone spine onto 2), or an unmapped source bone
+//    between mapped ones (a clavicle the target has no counterpart for), compose into one rotation instead
+//    of the last one winning or the bone's bend being lost.
+//  - SHARE: a target bone nothing drives, sitting in a single chain between two driven bones (a 2-bone spine
+//    onto 3), takes an even share of the bend below it instead of staying rigid.
+//  - Everything else is left alone: a source leaf with nowhere to go is dropped, and a target bone outside
+//    any driven chain (twist, prop, face) holds its rest pose.
+// ---------------------------------------------------------------------------------------------------
+
+export interface RetargetPlan {
+    /** Driven target node -> its source segment, top first (the mapped end bone last). */
+    segments: Map<number, number[]>;
+    /** Driven target node -> undriven target joints directly above it that share its bend, top first. */
+    shares: Map<number, number[]>;
+    /** Animated source node -> the target node its motion reaches (directly, or merged into a segment). */
+    contributions: Map<number, number>;
+}
+
+/** Bones a share must never bend: they twist or steer, they do not carry a chain's curve. */
+const NO_SHARE = /twist|roll|helper|corrective|pole|(^|[_:.\s])ik([_:.\s]|$)|nub|end$/i;
+
+/**
+ * How a mapping drives the target: its segments, shares and per-source contributions. The retarget runs on
+ * this; the editor colours bones from it. A raw (same-skeleton or index) mapping is one bone per segment.
+ */
+export function retargetSegments(mapping: BoneMapping, sourceSkin: Skin, targetSkin: Skin): RetargetPlan {
+    const segments = new Map<number, number[]>();
+    const shares = new Map<number, number[]>();
+    const contributions = new Map<number, number>();
+    const byNode = new Map(mapping.entries.map(e => [e.sourceNode, e] as const));
+    const raw = mapping.sameRig || !mapping.canRetarget;
+
+    const groups = new Map<number, number[]>();
+    for (const e of mapping.entries) {
+        if (e.targetNode === null) continue;
+        let g = groups.get(e.targetNode);
+        if (!g) { g = []; groups.set(e.targetNode, g); }
+        g.push(e.sourceNode);
+    }
+    if (raw) {
+        for (const [t, g] of groups) { segments.set(t, [g[g.length - 1]]); for (const s of g) contributions.set(s, t); }
+        return { segments, shares, contributions };
+    }
+
+    const sTopo = topoOf(sourceSkin);
+    const tTopo = topoOf(targetSkin);
+    const restSource = new Map(mapping.restMatches ?? []);
+    const restTargets = new Set((mapping.restMatches ?? []).map(([, t]) => t));
+    const depth = (node: number) => {
+        let d = 0;
+        for (let j = sTopo.jointOfNode.get(node) ?? -1; j >= 0 && d < 256; j = sTopo.parentJoint[j]) d++;
+        return d;
+    };
+    // A static bone (not animated, or dropped on purpose) holds its rest. Where the rest IS its bind it
+    // cancels out of a segment exactly, so it only has to be composed when it sits between animated members.
+    const isStatic = (node: number) => { const e = byNode.get(node); return !e || !!e.dropped; };
+    const restIsBind = (node: number) => {
+        const d = quat.multiply(quat.create(), quat.invert(quat.create(), localBindRotation(sourceSkin, node)), restRotation(sourceSkin, node));
+        return nearIdentity(quat.normalize(d, d));
+    };
+
+    for (const [t, group] of groups) {
+        // The deepest mapped source bone ends the segment; another one off its ancestor path is ignored.
+        const end = group.reduce((a, b) => (depth(b) > depth(a) ? b : a));
+        const chain: number[] = [end];
+        const endJoint = sTopo.jointOfNode.get(end);
+        if (tTopo.jointOfNode.has(t) && endJoint !== undefined) {
+            let jointIdx: number = endJoint;
+            for (let guard = 0; guard < 16; guard++) {
+                const pj: number = sTopo.parentJoint[jointIdx];
+                if (pj < 0) break;
+                const pNode = sourceSkin.joints[pj].nodeIndex;
+                // A non-joint node in between (an FBX pivot) has its own curves and binds: do not compose across it.
+                if (parentOf(sourceSkin, chain[0]) !== pNode) break;
+                const pe = byNode.get(pNode);
+                if (pe && pe.targetNode !== null && pe.targetNode !== t) break; // drives another bone: the frame
+                if (!pe && restSource.has(pNode)) break;                        // corresponds to a static target bone
+                chain.unshift(pNode);
+                jointIdx = pj;
+            }
+        }
+        // Keep from the topmost bone that must be composed: an animated one, or a static one whose rest is not
+        // its bind. Static bones above it cancel exactly and are trimmed, so a matched rig stays one bone.
+        let top = chain.length - 1;
+        for (let i = 0; i < chain.length - 1; i++) {
+            if (!isStatic(chain[i]) || !restIsBind(chain[i])) { top = i; break; }
+        }
+        const segment = chain.slice(top);
+        segments.set(t, segment);
+        for (const n of segment) if (!isStatic(n)) contributions.set(n, t);
+    }
+
+    // Shares: undriven, unbranched target joints directly above a driven one, bounded by a driven ancestor.
+    const driven = new Set(segments.keys());
+    for (const t of driven) {
+        const ti = tTopo.jointOfNode.get(t);
+        if (ti === undefined) continue;
+        const gap: number[] = [];
+        let child = t;
+        let pj = tTopo.parentJoint[ti];
+        let ok = true;
+        while (pj >= 0 && gap.length <= 3) {
+            const pNode = targetSkin.joints[pj].nodeIndex;
+            if (parentOf(targetSkin, child) !== pNode) { ok = false; break; } // a pivot in between
+            if (driven.has(pNode)) break;
+            const name = nameOf(targetSkin, pNode) ?? '';
+            if (restTargets.has(pNode) || NO_SHARE.test(name) || tTopo.children[pj].length !== 1) { ok = false; break; }
+            gap.unshift(pNode);
+            child = pNode;
+            pj = tTopo.parentJoint[pj];
+        }
+        if (ok && gap.length && gap.length <= 3 && pj >= 0 && driven.has(targetSkin.joints[pj].nodeIndex)) shares.set(t, gap);
+    }
+    return { segments, shares, contributions };
+}
+
 /** Return a copy of `mapping` with one source bone re-pointed (or unmapped when targetNode is null). */
 export function applyManualMapping(mapping: BoneMapping, sourceNode: number, targetNode: number | null): BoneMapping {
-    const entries = mapping.entries.map(e =>
-        e.sourceNode === sourceNode ? { ...e, targetNode, kind: (targetNode === null ? 'none' : 'manual') as BoneMatchKind } : e);
+    const entries = mapping.entries.map(e => {
+        if (e.sourceNode !== sourceNode) return e;
+        const { dropped: _d, ...rest } = e;
+        return targetNode === null
+            ? { ...rest, targetNode, kind: 'none' as BoneMatchKind, dropped: true }
+            : { ...rest, targetNode, kind: 'manual' as BoneMatchKind };
+    });
     // A manual edit means the rigs are being treated as different: drop the raw fast path, or the
     // override would be ignored entirely.
     return { ...mapping, entries, sameRig: false };
@@ -331,6 +499,8 @@ export function mappingReport(
     clip: Animation, sourceSkin: Skin, targetSkin: Skin, mapping: BoneMapping,
 ): AnimationCompatibility {
     const byNode = new Map(mapping.entries.map(e => [e.sourceNode, e] as const));
+    // A bone merged into a segment plays too, through its mapped descendant: it is not missing.
+    const reach = retargetSegments(mapping, sourceSkin, targetSkin).contributions;
     const animated = new Set<string>();
     const matched = new Set<string>();
     const missing = new Set<string>();
@@ -352,6 +522,9 @@ export function mappingReport(
                 const tp = parentName(targetSkin, e.targetNode);
                 if (sp !== null && tp !== null && sp !== tp) hierarchy.push({ bone: label, sourceParent: sp, targetParent: tp });
             }
+        } else if (reach.has(ch.targetNodeIndex)) {
+            matched.add(label);
+            covered.add(reach.get(ch.targetNodeIndex)!);
         } else missing.add(label);
     }
 
@@ -374,17 +547,11 @@ function parentName(skin: Skin, node: number): string | null {
     return nameOf(skin, p);
 }
 
-interface Correction {
-    corr: quat;         // Bt · Bs⁻¹ — left-multiplies an animated local rotation onto the target bone
-    isHips: boolean;
-    tsRest: vec3;       // source local rest translation (root translation re-basing)
-    ttRest: vec3;       // target local rest translation
-    heightRatio: number;
-}
-
 /**
  * Rebuild a clip's samplers so it drives the target skeleton. `mapping.sameRig` copies verbatim; otherwise
  * rotations go through the local bind delta (`At = Bt·Bs⁻¹·As`) and non-hips translation/scale is dropped.
+ * Mismatched skeletons are handled by {@link retargetSegments}: merged source chains compose into one
+ * rotation, and undriven target bones between driven ones take a share of the bend.
  */
 export function retargetAnimation(
     clip: Animation, sourceSkin: Skin, targetSkin: Skin, mapping: BoneMapping,
@@ -397,92 +564,172 @@ export function retargetAnimation(
     const addSampler = (input: number[], output: number[], interpolation: AnimationSampler['interpolation']) =>
         (outSamplers.push({ input, output, interpolation }), outSamplers.length - 1);
 
-    const hipsTarget = raw ? null : hipsNodeOf(targetSkin);
-    const corrections = new Map<number, Correction>();
-    const correctionFor = (srcNode: number, tgtNode: number): Correction => {
-        const cached = corrections.get(tgtNode);
-        if (cached) return cached;
-        const corr = boneCorrection(sourceSkin, srcNode, targetSkin, tgtNode);
-        const isHips = tgtNode === hipsTarget;
-        const tsRest = localRestTranslation(sourceSkin, srcNode);
-        const ttRest = localRestTranslation(targetSkin, tgtNode);
-
-        // The hips ratio is measured in the SAME SPACE the motion it scales lives in — the rest
-        // translations below, which are LOCAL. It used to read the WORLD bind translation, and that is
-        // wrong twice over:
-        //
-        //  - **Space.** The scaled offset is added back onto `ttRest`, which is local. A world figure
-        //    carries the armature's scale, so the moment two rigs disagree about units the offset lands
-        //    in one space and the rest it is added to is in another. Measured: a Mixamo clip in
-        //    centimetres retargeted onto a rig whose armature carries the 0.01 cm->m conversion gave a
-        //    ratio of 0.0093, and an 86 cm death-collapse arrived as 0.8 — the character died standing
-        //    up. Local/local cancels the armature on both sides and leaves only the height difference,
-        //    which is the whole point of the ratio.
-        //  - **Axis.** It took component [1], assuming hips height is world Y. A rig stored Z-up reads
-        //    its height as whatever small lateral value happens to sit in Y. The magnitude is the
-        //    honest measure of "how far the hips sit from their parent" and needs no such assumption.
-        let heightRatio = 1;
-        if (isHips) {
-            const sh = vec3.length(tsRest);
-            const th = vec3.length(ttRest);
-            if (sh > 1e-4 && th > 1e-4) heightRatio = th / sh;
+    if (raw) {
+        for (const ch of clip.channels) {
+            const e = byNode.get(ch.targetNodeIndex);
+            if (!e || e.targetNode === null) continue; // unmatched: dropped
+            outChannels.push({ samplerIndex: ch.samplerIndex, targetNodeIndex: e.targetNode, targetPath: ch.targetPath });
         }
-        const c: Correction = { corr, isHips, tsRest, ttRest, heightRatio };
-        corrections.set(tgtNode, c);
-        return c;
-    };
-
-    for (const ch of clip.channels) {
-        const e = byNode.get(ch.targetNodeIndex);
-        if (!e || e.targetNode === null) continue; // unmatched: dropped
-        const tgt = e.targetNode;
-        const src = clip.samplers[ch.samplerIndex];
-
-        if (raw || !src) {
-            outChannels.push({ samplerIndex: ch.samplerIndex, targetNodeIndex: tgt, targetPath: ch.targetPath });
-            continue;
-        }
-
-        const corr = correctionFor(ch.targetNodeIndex, tgt);
-
-        if (ch.targetPath === 'scale') continue; // dropped — bone scale does not transfer across rigs
-        if (ch.targetPath === 'translation') {
-            if (!corr.isHips) continue; // only the hips carries root motion; other bone translations stretch
-            const out: number[] = [];
-            const v = vec3.create();
-            for (let k = 0; k * 3 < src.output.length; k++) {
-                vec3.set(v,
-                    (src.output[k * 3] - corr.tsRest[0]) * corr.heightRatio,
-                    (src.output[k * 3 + 1] - corr.tsRest[1]) * corr.heightRatio,
-                    (src.output[k * 3 + 2] - corr.tsRest[2]) * corr.heightRatio);
-                vec3.transformQuat(v, v, corr.corr); // rotate the source-local motion onto the target hips
-                out.push(corr.ttRest[0] + v[0], corr.ttRest[1] + v[1], corr.ttRest[2] + v[2]);
-            }
-            outChannels.push({ samplerIndex: addSampler(src.input.slice(), out, src.interpolation), targetNodeIndex: tgt, targetPath: 'translation' });
-            continue;
-        }
-
-        // rotation: At = corr · As = (Bt·Bs⁻¹) · As  (unit quaternions — cannot blow up).
-        const out: number[] = [];
-        const q = quat.create();
-        for (let k = 0; k * 4 < src.output.length; k++) {
-            quat.set(q, src.output[k * 4], src.output[k * 4 + 1], src.output[k * 4 + 2], src.output[k * 4 + 3]);
-            quat.normalize(q, q);
-            quat.multiply(q, corr.corr, q);
-            quat.normalize(q, q);
-            out.push(q[0], q[1], q[2], q[3]);
-        }
-        outChannels.push({ samplerIndex: addSampler(src.input.slice(), out, src.interpolation), targetNodeIndex: tgt, targetPath: 'rotation' });
+        return finishClip(clip, outSamplers, outChannels);
     }
 
-    // `rootMotion` is a property of the CLIP, not of the skeleton it is playing on, so it must survive the
-    // retarget. It used to be dropped here, which silently disabled root motion on every shared `.anim`
-    // clip that had a source skin — the flag was set in the editor, written to the asset, and then thrown
-    // away on the way to the character. `assetId` is deliberately NOT carried: the resolve layer stamps it
-    // (see animationResolve.ts), and only a clip that came from an asset should have one.
-    // Clip-owned event markers are timing, not bones: carried untouched for the same reason.
+    const plan = retargetSegments(mapping, sourceSkin, targetSkin);
+    const hipsTarget = hipsNodeOf(targetSkin);
+
+    // This clip's curves, by source node.
+    const rotOf = new Map<number, AnimationSampler>();
+    const posOf = new Map<number, AnimationSampler>();
+    for (const ch of clip.channels) {
+        const smp = clip.samplers[ch.samplerIndex];
+        if (!smp) continue;
+        if (ch.targetPath === 'rotation' && !rotOf.has(ch.targetNodeIndex)) rotOf.set(ch.targetNodeIndex, smp);
+        else if (ch.targetPath === 'translation' && !posOf.has(ch.targetNodeIndex)) posOf.set(ch.targetNodeIndex, smp);
+    }
+    const dropped = (n: number) => !!byNode.get(n)?.dropped;
+    const rotAt = (n: number, t: number, out: quat) => {
+        const s = dropped(n) ? undefined : rotOf.get(n);
+        return s ? sampleQuat(s, t, out) : quat.copy(out, restRotation(sourceSkin, n));
+    };
+    const posAt = (n: number, t: number, out: vec3) => {
+        const s = dropped(n) ? undefined : posOf.get(n);
+        return s ? sampleVec3(s, t, out) : vec3.copy(out, localRestTranslation(sourceSkin, n));
+    };
+
+    // Rotation curves emitted per target node, kept so the share pass can split them.
+    const rotOut = new Map<number, { input: number[]; output: number[]; channel: AnimationChannel }>();
+
+    for (const [tgt, segment] of plan.segments) {
+        const corr = segmentCorrection(sourceSkin, segment, targetSkin, tgt);
+        const end = segment[segment.length - 1];
+
+        // ---- rotation: At = corr · (A1·A2·…). A one-bone segment keeps its own keys and interpolation.
+        const rotSamplers = segment.map(n => (dropped(n) ? undefined : rotOf.get(n))).filter((s): s is AnimationSampler => !!s);
+        if (rotSamplers.length) {
+            const single = segment.length === 1;
+            const input = single ? rotSamplers[0].input.slice() : unionKeyTimes(rotSamplers);
+            const out: number[] = [];
+            const q = quat.create();
+            const m = quat.create();
+            if (single) {
+                const src = rotSamplers[0];
+                for (let k = 0; k * 4 < src.output.length; k++) {
+                    quat.set(q, src.output[k * 4], src.output[k * 4 + 1], src.output[k * 4 + 2], src.output[k * 4 + 3]);
+                    quat.normalize(q, q);
+                    quat.normalize(q, quat.multiply(q, corr, q));
+                    out.push(q[0], q[1], q[2], q[3]);
+                }
+            } else {
+                for (const t of input) {
+                    quat.identity(q);
+                    for (const n of segment) quat.multiply(q, q, rotAt(n, t, m));
+                    quat.normalize(q, quat.multiply(q, corr, quat.normalize(q, q)));
+                    out.push(q[0], q[1], q[2], q[3]);
+                }
+            }
+            const interpolation = single ? rotSamplers[0].interpolation : 'LINEAR';
+            const channel: AnimationChannel = { samplerIndex: addSampler(input, out, interpolation), targetNodeIndex: tgt, targetPath: 'rotation' };
+            outChannels.push(channel);
+            rotOut.set(tgt, { input, output: out, channel });
+        }
+
+        // ---- translation: only the hips carries it (root motion); every other bone keeps its rest length.
+        if (tgt !== hipsTarget) continue;
+        const posSamplers = segment.map(n => (dropped(n) ? undefined : posOf.get(n))).filter((s): s is AnimationSampler => !!s);
+        if (!posSamplers.length) continue;
+        // The segment's END position relative to the segment's parent, and the same at rest.
+        const chainPos = (t: number | null, out: vec3) => {
+            const r = quat.create();
+            const a = quat.create();
+            const v = vec3.create();
+            vec3.set(out, 0, 0, 0);
+            for (const n of segment) {
+                if (t === null) vec3.copy(v, localRestTranslation(sourceSkin, n));
+                else posAt(n, t, v);
+                vec3.add(out, out, vec3.transformQuat(v, v, r));
+                quat.multiply(r, r, t === null ? restRotation(sourceSkin, n) : rotAt(n, t, a));
+            }
+            return out;
+        };
+        const tsRest = segment.length === 1 ? localRestTranslation(sourceSkin, end) : chainPos(null, vec3.create());
+        const ttRest = localRestTranslation(targetSkin, tgt);
+        // The hips ratio is measured in the SAME SPACE the motion it scales lives in: the LOCAL rest
+        // translations. A world figure carries the armature's unit scale, so two rigs disagreeing about units
+        // put the offset and the rest it is added to in different spaces (an 86 cm death collapse arrived as
+        // 0.8 cm and the character died standing up). Magnitude, not world Y, so a Z-up rig reads its height.
+        let heightRatio = 1;
+        const sh = vec3.length(tsRest);
+        const th = vec3.length(ttRest);
+        if (sh > 1e-4 && th > 1e-4) heightRatio = th / sh;
+
+        const single = segment.length === 1;
+        const input = single ? posSamplers[0].input.slice() : unionKeyTimes(posSamplers);
+        const out: number[] = [];
+        const v = vec3.create();
+        for (let k = 0; k < input.length; k++) {
+            if (single) vec3.set(v, posSamplers[0].output[k * 3], posSamplers[0].output[k * 3 + 1], posSamplers[0].output[k * 3 + 2]);
+            else chainPos(input[k], v);
+            vec3.scale(v, vec3.sub(v, v, tsRest), heightRatio);
+            vec3.transformQuat(v, v, corr); // rotate the source-local motion onto the target hips
+            out.push(ttRest[0] + v[0], ttRest[1] + v[1], ttRest[2] + v[2]);
+        }
+        outChannels.push({ samplerIndex: addSampler(input, out, single ? posSamplers[0].interpolation : 'LINEAR'), targetNodeIndex: tgt, targetPath: 'translation' });
+    }
+
+    // ---- shares: undriven target joints above a driven one take an even part of its bend.
+    //
+    // With gap bones G1..Gn (rest locals R1..Rn) above driven T (rest Bt, retargeted AT), the chain's pose is
+    // C = R1·…·Rn·AT. The extra rotation it makes over rest, in the frame above G1, is E = C·(R1·…·Rn·Bt)⁻¹.
+    // Split into e = E^(1/(n+1)) and apply e at every joint: Gi = P⁻¹·e·P·Ri with P = R1·…·R(i-1), and T takes
+    // what is left, so the chain still ends exactly at C.
+    for (const [tgt, gap] of plan.shares) {
+        const curve = rotOut.get(tgt);
+        if (!curve) continue;
+        const rest = gap.map(g => localBindRotation(targetSkin, g));
+        const bt = localBindRotation(targetSkin, tgt);
+        const restAbove = quat.create();
+        for (const r of rest) quat.multiply(restAbove, restAbove, r);
+        const restAboveInv = quat.invert(quat.create(), restAbove);
+        const restChainInv = quat.invert(quat.create(), quat.multiply(quat.create(), restAbove, bt));
+        const gapOut: number[][] = gap.map(() => []);
+        const at = quat.create(), E = quat.create(), e = quat.create(), P = quat.create(), Pinv = quat.create(), g = quat.create();
+        const ident = quat.create();
+        for (let k = 0; k * 4 < curve.output.length; k++) {
+            quat.set(at, curve.output[k * 4], curve.output[k * 4 + 1], curve.output[k * 4 + 2], curve.output[k * 4 + 3]);
+            // E = (R1·…·Rn·AT)·(R1·…·Rn·Bt)⁻¹
+            quat.multiply(E, restAbove, at);
+            quat.normalize(E, quat.multiply(E, E, restChainInv));
+            quat.slerp(e, ident, E, 1 / (gap.length + 1));
+            quat.identity(P);
+            for (let i = 0; i < gap.length; i++) {
+                quat.invert(Pinv, P);
+                quat.multiply(g, Pinv, e);
+                quat.multiply(g, g, P);
+                quat.normalize(g, quat.multiply(g, g, rest[i]));
+                gapOut[i].push(g[0], g[1], g[2], g[3]);
+                quat.multiply(P, P, rest[i]);
+            }
+            // T keeps one share: AT' = (R1·…·Rn)⁻¹·e·(R1·…·Rn)·Bt
+            quat.multiply(g, restAboveInv, e);
+            quat.multiply(g, g, restAbove);
+            quat.normalize(g, quat.multiply(g, g, bt));
+            curve.output[k * 4] = g[0]; curve.output[k * 4 + 1] = g[1]; curve.output[k * 4 + 2] = g[2]; curve.output[k * 4 + 3] = g[3];
+        }
+        const interpolation = outSamplers[curve.channel.samplerIndex].interpolation;
+        gap.forEach((node, i) => outChannels.push({
+            samplerIndex: addSampler(curve.input.slice(), gapOut[i], interpolation), targetNodeIndex: node, targetPath: 'rotation',
+        }));
+    }
+
+    return finishClip(clip, outSamplers, outChannels);
+}
+
+// `rootMotion` is a property of the CLIP, not of the skeleton it is playing on, so it must survive the
+// retarget. It used to be dropped, which silently disabled root motion on every shared `.anim` clip that had
+// a source skin. `assetId` is deliberately NOT carried: the resolve layer stamps it (see animationResolve.ts),
+// and only a clip that came from an asset should have one. Clip-owned event markers are timing, not bones.
+function finishClip(clip: Animation, samplers: AnimationSampler[], channels: AnimationChannel[]): Animation {
     return {
-        name: clip.name, samplers: outSamplers, channels: outChannels, rootMotion: clip.rootMotion,
+        name: clip.name, samplers, channels, rootMotion: clip.rootMotion,
         ...(clip.events?.length ? { events: clip.events.map(e => ({ ...e })) } : {}),
     };
 }

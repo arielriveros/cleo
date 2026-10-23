@@ -64,7 +64,7 @@ const CENTER_SYNONYMS: Record<CenterSlot, string[]> = {
     hips: ['hips', 'hip', 'pelvis', 'root', 'cog'],
     spine: ['spine', 'spine1', 'spine01', 'abdomen', 'torso'],
     chest: ['chest', 'spine2', 'spine02', 'spine3', 'upperchest', 'ribcage', 'thorax'],
-    neck: ['neck', 'neck1'],
+    neck: ['neck', 'neck1', 'neck01'],
     head: ['head', 'skull'],
 };
 

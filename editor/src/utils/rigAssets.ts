@@ -55,11 +55,11 @@ export type RigAsset = {
    * Sparse OVERRIDES, never a stored `BoneMapping`: everything else in a mapping (`kind`, `sameRig`,
    * `canRetarget`, `matchMode`) is derived from the two skins and would go stale, and `mapping.entries`
    * only covers bones the clips animate — so a whole-mapping snapshot could not express a re-point for a
-   * bone no clip drives.
+   * bone no clip drives. Several overrides naming one target bone MERGE into it (see `retargetSegments`).
    */
+  retargets?: Record<string, RetargetOverride[]>
   /** The ragdoll profile; see {@link RigRagdollProfile}. */
   ragdoll?: RigRagdollProfile
-  retargets?: Record<string, RetargetOverride[]>
   /**
    * Named poses on THIS skeleton, referenced from a clip's `poseOffset` edit by id.
    *
@@ -96,7 +96,6 @@ export type RigAsset = {
   thumbnail?: string
 }
 
-/** One hand-made bone re-point. `targetName: null` means "drop this bone's curve". */
 /** One bone's contribution to a shared pose, as a delta from its rest. Mirrors {@link StoredPoseBone}. */
 export type RigPose = { id: string; name: string; bones: StoredPoseBone[] }
 
@@ -128,6 +127,7 @@ export function runtimeSockets(sockets: RigSocket[] | undefined): { name: string
     .map(s => ({ name: s.name, bone: s.bone, ...(s.offset ? { offset: s.offset } : {}) }))
 }
 
+/** One hand-made bone re-point. `targetName: null` means "don't animate this bone" (it holds its rest). */
 export type RetargetOverride = {
   sourceName: string
   targetName: string | null

@@ -1,22 +1,22 @@
 import { useMemo, useState } from 'react'
-import { buildBoneMapping, applyManualMapping, Logger } from 'cleo'
+import { buildBoneMapping, Logger } from 'cleo'
 import type { BoneMapping, Skin } from 'cleo'
 import { mat4 } from 'gl-matrix'
 import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { useEditorSessions } from '../EditorSessionsContext'
 import { useRig } from './RigContext'
-import { getAnimationTarget } from '../animation/skeleton'
 import AnimationAssetPicker from '../animation/AnimationAssetPicker'
-import BoneMappingTable, { mappingCounts } from '../animation/BoneMappingTable'
+import RetargetMapper from './RetargetMapper'
 import SocketsPanel from './SocketsPanel'
 import RagdollPanel from './RagdollPanel'
 import BoneMasksPanel from './BoneMasksPanel'
 import PoseAssetsPanel from './PoseAssetsPanel'
 import { loadSkin, type StoredSkin } from '../../utils/animationAssets'
-import { nodeByName, overridesFor } from '../../utils/rigAssets'
+import { overridesFor } from '../../utils/rigAssets'
+import { applyRetargetOverrides } from '../../utils/animationResolve'
+import { retargetView } from '../../utils/retargetView'
 import { Button, Hint, Select, TextInput, cn, hintClass, sectionTitleClass, valueClass } from '../../components/ui'
-import type { RetargetBoneOption } from '../engineContextTypes'
 
 // The rig editor's Properties panel: the clips this skeleton owns, the retarget corrections onto it, and
 // which character it is previewed through.
@@ -29,13 +29,13 @@ const toMat4 = (a: number[]) => {
 
 export default function RigInspector() {
   // Every hook above any early return — a rig tab can be active before its working copy has been adopted.
-  const { editorScene, skeletonTargetId, activeTab, setRigPreviewModel, modelsOnRig } = useCleoEngine()
+  const { activeTab, setRigPreviewModel, modelsOnRig } = useCleoEngine()
   const { rigs, animations, animationFields } = useAssetLibrary()
   const { enterModelEditor, enterAnimationFieldEditor, createAnimationFieldForModel } = useEditorSessions()
   const { asset, patch, setOverride, clearOverrides } = useRig()
   const [sourceRigId, setSourceRigId] = useState<string>('')
+  const [mapperOpen, setMapperOpen] = useState(false)
 
-  const target = getAnimationTarget(editorScene, skeletonTargetId)
   const models = asset ? modelsOnRig(asset.id) : []
   const runtimeModelId = models[0]?.id
 
@@ -45,40 +45,32 @@ export default function RigInspector() {
     [asset?.animationIds, animations],
   )
 
+  /** This skeleton, read from the asset itself: mapping onto it needs no preview character. */
+  const targetSkin = useMemo(() => (asset ? loadSkin(asset.skin as StoredSkin, toMat4) as Skin | null : null), [asset?.skin])
+
   /**
-   * The mapping from `sourceRigId`'s skeleton onto this one, with the saved corrections replayed.
+   * The mapping from `sourceRigId`'s skeleton onto this one, with the saved corrections replayed: the same
+   * path the runtime retarget takes (`resolveAnimationAsset`), so what the mapper shows is what plays.
    *
    * Rebuilt from the two skeletons rather than stored: the automatic tiers keep improving, and only the
    * human's decisions are persisted. `clips` is the source rig's clip set, because `buildBoneMapping`
    * derives its rows from the bones the clips actually animate.
    */
-  const preview = useMemo((): { mapping: BoneMapping; targetBones: RetargetBoneOption[] } | null => {
-    if (!asset || !sourceRigId || !target) return null
+  const preview = useMemo((): { mapping: BoneMapping; sourceSkin: Skin } | null => {
+    if (!asset || !sourceRigId || !targetSkin) return null
     const sourceRig = rigs.find(r => r.id === sourceRigId)
     if (!sourceRig) return null
-
     const sourceSkin = loadSkin(sourceRig.skin as StoredSkin, toMat4) as Skin | null
     if (!sourceSkin) return null
-
-    // Every clip authored on the source rig — that is the set whose bones need mapping.
+    // Every clip authored on the source rig: that is the set whose bones need mapping.
     const clips = animations.filter(a => a.rigId === sourceRigId).flatMap(a => a.clips) as any[]
     if (!clips.length) return null
+    const auto = buildBoneMapping(clips, sourceSkin, targetSkin)
+    const mapping = applyRetargetOverrides(auto, overridesFor(asset, sourceRigId), sourceSkin, targetSkin, `mapper:${asset.id}:${sourceRigId}`)
+    return { mapping, sourceSkin }
+  }, [asset, sourceRigId, targetSkin, rigs, animations])
 
-    let mapping = buildBoneMapping(clips, sourceSkin, target.skin)
-    const nodes = nodeByName(target.skin.nodeNames)
-    const sourceNodes = nodeByName(sourceSkin.nodeNames)
-    for (const o of overridesFor(asset, sourceRigId)) {
-      const sn = sourceNodes.get(o.sourceName)
-      if (sn === undefined) continue
-      mapping = applyManualMapping(mapping, sn, o.targetName === null ? null : nodes.get(o.targetName) ?? null)
-    }
-
-    const nameOf = (n: number) => target.skin.nodeNames?.get(n) ?? `node ${n}`
-    return {
-      mapping,
-      targetBones: target.skin.joints.map(j => ({ node: j.nodeIndex, name: nameOf(j.nodeIndex) })),
-    }
-  }, [asset, sourceRigId, target, rigs, animations])
+  const status = useMemo(() => (preview && targetSkin ? retargetView(preview.mapping, preview.sourceSkin, targetSkin).counts : null), [preview, targetSkin])
 
   if (!asset) return <div className={cn(hintClass, 'p-3')}>No skeleton open.</div>
 
@@ -87,18 +79,14 @@ export default function RigInspector() {
 
   /** Other rigs whose clips could be retargeted onto this one. */
   const sourceRigs = rigs.filter(r => r.id !== asset.id && animations.some(a => a.rigId === r.id))
-  const counts = preview ? mappingCounts(preview.mapping) : null
-
   const remap = (sourceNode: number, targetNode: number | null) => {
-    if (!preview || !target) return
-    const sourceRig = rigs.find(r => r.id === sourceRigId)
-    const sourceSkin = sourceRig ? loadSkin(sourceRig.skin as StoredSkin, toMat4) as Skin | null : null
-    const sourceName = sourceSkin?.nodeNames?.get(sourceNode)
+    if (!preview || !targetSkin) return
+    const sourceName = preview.sourceSkin.nodeNames?.get(sourceNode)
     // Stored by NAME, so the correction survives a bone-name backfill or a re-export that renumbers nodes.
     if (!sourceName) return
 
     if (targetNode === null) { setOverride(sourceRigId, sourceName, null); return } // deliberate drop
-    const targetName = target.skin.nodeNames?.get(targetNode)
+    const targetName = targetSkin.nodeNames?.get(targetNode)
     // A joint with no NAME cannot be stored — and must not fall through to `null`, which means "drop this
     // bone's curve", the opposite of what was picked. Nameless skeletons cannot be corrected by name at
     // all; import the source file's bone names first.
@@ -107,6 +95,12 @@ export default function RigInspector() {
       return
     }
     setOverride(sourceRigId, sourceName, targetName)
+  }
+
+  /** Forget the saved correction for one bone: it goes back to whatever the automatic tiers match. */
+  const restoreAuto = (sourceNode: number) => {
+    const sourceName = preview?.sourceSkin.nodeNames?.get(sourceNode)
+    if (sourceName) setOverride(sourceRigId, sourceName, undefined)
   }
 
   return (
@@ -208,39 +202,45 @@ export default function RigInspector() {
               {sourceRigs.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
             </Select>
 
-            {sourceRigId && !target && (
-              <Hint className='mt-1 text-warning'>
-                A preview character is needed to map bones onto — this skeleton has no model yet.
-              </Hint>
-            )}
-            {sourceRigId && target && !preview && (
+            {sourceRigId && !preview && (
               <Hint className='mt-1'>That skeleton has no clips to map.</Hint>
             )}
-            {preview && counts && (
+            {preview && status && (
               <>
-                <div className='flex items-center justify-between mt-1'>
-                  <span className='text-ui-sm text-muted'>
-                    {counts.mapped}/{counts.total} mapped
-                    {counts.manual ? ` · ${counts.manual} manual` : ''}
-                    {counts.unmapped ? ` · ${counts.unmapped} unmapped` : ''}
-                  </span>
-                  <Button
-                    variant='ghost'
-                    size='sm'
-                    className='text-ui-sm'
+                <div className='mt-1 text-ui-sm text-muted'
+                  title='Mapped: has a bone to drive. Merged: folded into the bone below it. Lost: animated but drives nothing. Sharing: takes part of the bend below it. At rest: nothing drives it.'>
+                  {status.mapped} mapped
+                  {status.merged ? ` · ${status.merged} merged` : ''}
+                  {status.lost ? <span className='text-danger-fg'> · {status.lost} lost</span> : ''}
+                  {status.dropped ? ` · ${status.dropped} off` : ''}
+                  {' — '}{status.driven} driven
+                  {status.shared ? ` · ${status.shared} sharing` : ''}
+                  {` · ${status.rest} at rest`}
+                </div>
+                <div className='flex items-center gap-1 mt-1'>
+                  <Button variant='primary' className='flex-1 py-1.5' onClick={() => setMapperOpen(true)}
+                    title='See both skeletons side by side and drag bones from one to the other'>
+                    Map bones…
+                  </Button>
+                  <Button variant='ghost' size='sm' className='text-ui-sm'
                     title='Discard the saved corrections for this source skeleton'
-                    onClick={() => clearOverrides(sourceRigId)}
-                  >
+                    onClick={() => clearOverrides(sourceRigId)}>
                     Reset
                   </Button>
                 </div>
-                <div className='border border-control rounded mt-1 max-h-[260px] overflow-y-auto'>
-                  <BoneMappingTable
+                {mapperOpen && targetSkin && (
+                  <RetargetMapper
+                    sourceLabel={rigs.find(r => r.id === sourceRigId)?.name ?? 'Clips'}
+                    targetLabel={asset.name}
+                    sourceSkin={preview.sourceSkin}
+                    targetSkin={targetSkin}
                     mapping={preview.mapping}
-                    targetBones={preview.targetBones}
                     onRemap={remap}
+                    onAuto={restoreAuto}
+                    onResetAll={() => clearOverrides(sourceRigId)}
+                    onClose={() => setMapperOpen(false)}
                   />
-                </div>
+                )}
               </>
             )}
           </>

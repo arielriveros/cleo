@@ -5,7 +5,7 @@ one tab per skeleton. It has four parts, switched from the bar under the tab str
 
 | Part | For |
 |---|---|
-| **Skeleton** | The bones: humanoid mapping, [sockets](#sockets), [bone masks](#bone-masks), [poses](#poses), [foot placement](#foot-placement), ragdoll and retargeting. |
+| **Skeleton** | The bones: humanoid mapping, [sockets](#sockets), [bone masks](#bone-masks), [poses](#poses), [foot placement](#foot-placement), ragdoll and retargeting ([the bone mapper](models-and-materials.md#the-bone-mapper)). |
 | **Clips** | One `.anim`'s clips: trim, mirror, root motion, bone posing and [clip events](#events-on-the-clip). |
 | **Animator** | The graph that decides which clip plays: states, transitions, parameters, layers and action slots. |
 | **Blend Spaces** | Clips mixed by speed, direction or any other parameter — see [Blend spaces](#blend-spaces). |

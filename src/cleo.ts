@@ -305,12 +305,12 @@ export { AnimatedModel } from "./animation/animatedModel";
 export type { Skin, SkinSocket, Joint, Animation, AnimationSampler, AnimationChannel } from "./animation/animatedModel";
 export { socketNames, socketJoint, socketModelMatrix, socketOffsetMatrix, IMPLICIT_SOCKETS } from "./animation/sockets";
 export { resolveSocketOwner } from "./core/scene/socketFollow";
-export { remapAnimationToSkin, buildBoneMapping, applyManualMapping, mappingReport, retargetAnimation, describeRetarget, humanoidRigOf } from "./animation/animationRetarget";
+export { remapAnimationToSkin, buildBoneMapping, applyManualMapping, mappingReport, retargetAnimation, retargetSegments, describeRetarget, humanoidRigOf } from "./animation/animationRetarget";
 export { skeletonTopology, isAncestorJoint, nearestCommonAncestor } from "./animation/skeletonTopology";
 export type { SkeletonTopology } from "./animation/skeletonTopology";
 export { solveTwoBone, applyTwoBone, ikTuning, validateIkRig, IK_DEFAULTS, DEFAULT_MAX_REACH } from "./animation/ik";
 export type { IkRig, IkFootChain, IkRigTuning, IkRigProblem, IkRigValidation, TwoBoneSolve, TwoBoneResult } from "./animation/ik";
-export type { AnimationCompatibility, HierarchyMismatch, BoneMapping, BoneMappingEntry, BoneMatchKind } from "./animation/animationRetarget";
+export type { AnimationCompatibility, HierarchyMismatch, BoneMapping, BoneMappingEntry, BoneMatchKind, RetargetPlan } from "./animation/animationRetarget";
 export { normalizeBoneName, humanoidSlotOf } from "./animation/boneNames";
 export { mirrorBoneName } from "./animation/boneNames";
 // Non-destructive clip edits. Exported in full because three separate consumers need them: the editor's

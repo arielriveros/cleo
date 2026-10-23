@@ -1,4 +1,4 @@
-import type { AnimationCompatibility, BoneMapping, HullQuality } from "cleo";
+import type { AnimationCompatibility, BoneMapping, HullQuality, Skin } from "cleo";
 import type { UnresolvedTexture } from "../utils/modelImport";
 import type { PartInfo, PartGroup } from "../utils/submeshGroups";
 import type { ModelLodDef } from "../utils/models";
@@ -54,6 +54,11 @@ export type PendingAnimationImportView = {
   /** Source bones the clips animate (the mapping's left column), and every target joint (the dropdowns). */
   sourceBones: RetargetBoneOption[];
   targetBones: RetargetBoneOption[];
+  /** Both skeletons, for the bone mapper's side-by-side view. */
+  sourceSkin: Skin;
+  targetSkin: Skin;
+  /** The character the clips are being imported onto. */
+  targetName: string;
 };
 /** The rig picker's data: which skinned models the animation could be retargeted onto. */
 export type PendingRigPickView = { fileName: string; models: { id: string; name: string }[] };
