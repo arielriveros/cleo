@@ -38,7 +38,10 @@ export const RENDER_PASSES = [
     // Decal volumes: the landscape-only receiver depth, then the DBuffer write + its G-buffer resolve.
     'decals.receivers',
     'decals',
+    // Screen-space indirect lighting (SSIL), under the scope names its SSAO predecessor had: the trace,
+    // its temporal accumulation and blur, and the radiance copy taken at the end of the opaque scene.
     'ssao',
+    'ssao.temporal',
     'ssao.blur',
     'lighting',
     'sky',
@@ -49,6 +52,7 @@ export const RENDER_PASSES = [
     'decals.emissive',
     'skyFog',
     'taa',
+    'ssao.history',
     'grid',
     'transparent',
     'particles',
@@ -83,7 +87,7 @@ export type RenderPass = typeof RENDER_PASSES[number];
 
 /** Passes the profiler panel offers as on/off switches. Excludes any pass the image cannot do without. */
 export const TOGGLEABLE_PASSES: RenderPass[] = [
-    'shadows.cascades', 'shadows.spot', 'shadows.point', 'foliage', 'decals', 'decals.emissive', 'ssao', 'ssao.blur', 'sky', 'clouds', 'skyFog', 'taa', 'grid',
+    'shadows.cascades', 'shadows.spot', 'shadows.point', 'foliage', 'decals', 'decals.emissive', 'ssao', 'ssao.temporal', 'ssao.blur', 'ssao.history', 'sky', 'clouds', 'skyFog', 'taa', 'grid',
     'transparent', 'particles', '2d', 'gizmos', 'overlay', 'velocity', 'motionBlur', 'godRays', 'bloom.bright',
     'bloom.blur', 'bloom.composite', 'chromatic', 'screenMaterials',
     // `dof.coc` switches depth of field as a whole. Its other two passes report their own timings
@@ -104,7 +108,9 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     'decals.emissive': 'decals.emissive',
     decalReceivers: 'decals.receivers',
     ssao: 'ssao',
+    'ssao.temporal': 'ssao.temporal',
     'ssao.blur': 'ssao.blur',
+    'ssao.history': 'ssao.history',
     sky: 'sky',
     clouds: 'clouds',
     'clouds.resolve': 'clouds.resolve',

@@ -16,7 +16,7 @@
 #include "./chunks/octNormal.wgsl"
 
 const MAX_REFLECTION_LOD: f32 = 4.0;
-/** Relative depth difference beyond which an AO neighbour is treated as a different surface. */
+/** Relative depth difference beyond which an AO/SSIL neighbour is treated as a different surface. */
 const AO_DEPTH_TOLERANCE: f32 = 0.02;
 
 // --- G-buffer -----------------------------------------------------------------------------------
@@ -28,6 +28,7 @@ const AO_DEPTH_TOLERANCE: f32 = 0.02;
 @group(0) @binding(5) var u_gEmissiveAO_sampler: sampler;
 @group(0) @binding(6) var u_gDepth_texture: texture_depth_2d;             // non-linear depth
 @group(0) @binding(7) var u_gDepth_sampler: sampler;
+// SSIL (ssil.wgsl): rgb = one bounce of nearby indirect light as E/pi, a = screen-space visibility.
 @group(0) @binding(8) var u_ssao_texture: texture_2d<f32>;
 @group(0) @binding(9) var u_ssao_sampler: sampler;
 
@@ -72,6 +73,8 @@ struct Lighting {
 
     u_iblIntensity0: f32,
     u_iblIntensity1: f32,
+    /** Scale on SSIL's bounce (`.rgb`); 0 leaves its visibility as plain ambient occlusion. */
+    u_ssilIntensity: f32,
     u_probeCount: i32,              // 0 = no baked probes -> flat ambient / crude env fallback
     // i32 rather than bool: WGSL forbids bool in a uniform buffer.
     u_probeUnbounded0: i32,         // true = legacy whole-scene probe (weight 1 everywhere)
@@ -205,7 +208,8 @@ fn probeIBL(irr: texture_cube<f32>, irrSampler: sampler,
 }
 
 /**
- * Fetch ambient occlusion, upsampling depth-aware when the AO buffer is smaller than this pass.
+ * Fetch SSIL (bounce in `.rgb`, visibility in `.a`), upsampling depth-aware when its buffer is smaller
+ * than this pass. Disabled reads as no bounce and full visibility.
  *
  * A plain bilinear fetch blends the four nearest AO texels regardless of what geometry they belong to.
  * At half resolution that blends a foreground silhouette's AO into the background behind it and vice
@@ -223,36 +227,36 @@ fn probeIBL(irr: texture_cube<f32>, irrSampler: sampler,
 // only be called from uniform control flow". An invalid module means an invalid pipeline, and an
 // invalid pipeline draws nothing while its pass still clears. Explicit level 0 is exactly what the
 // implicit form resolved to anyway: every texture sampled here is screen-sized and un-mipped.
-fn sampleAO(uv: vec2<f32>, centerDepth: f32) -> f32 {
-    if (u_lighting.u_ssaoEnabled == 0) { return 1.0; }
+fn sampleSSIL(uv: vec2<f32>, centerDepth: f32) -> vec4<f32> {
+    if (u_lighting.u_ssaoEnabled == 0) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
     if (u_lighting.u_ssaoTexelSize.x <= 0.0) {
-        return textureSampleLevel(u_ssao_texture, u_ssao_sampler, uv, 0.0).r;   // full-res: nothing to do
+        return textureSampleLevel(u_ssao_texture, u_ssao_sampler, uv, 0.0);   // full-res: nothing to do
     }
 
-    // The four AO texels surrounding this pixel, and the depths they were computed from.
+    // The four SSIL texels surrounding this pixel, and the depths they were computed from.
     var offsets = array<vec2<f32>, 4>(
         vec2<f32>(-0.5, -0.5), vec2<f32>(0.5, -0.5),
         vec2<f32>(-0.5,  0.5), vec2<f32>(0.5,  0.5),
     );
 
-    var total = 0.0;
+    var total = vec4<f32>(0.0);
     var weightSum = 0.0;
-    var nearest = 1.0;
+    var nearest = vec4<f32>(0.0, 0.0, 0.0, 1.0);
     var nearestDelta = 1e9;
 
     for (var i = 0; i < 4; i++) {
         let tapUV = uv + offsets[i] * u_lighting.u_ssaoTexelSize;
-        let ao = textureSampleLevel(u_ssao_texture, u_ssao_sampler, tapUV, 0.0).r;
+        let tap = textureSampleLevel(u_ssao_texture, u_ssao_sampler, tapUV, 0.0);
         // Compare in linear-ish terms: raw device depth is wildly non-linear, so a fixed epsilon on it
         // would be far too strict near the camera and far too loose in the distance. Dividing by the
         // centre depth makes the tolerance relative, which behaves at both ends.
         let d = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, tapUV, 0);
         let delta = abs(d - centerDepth) / max(centerDepth, 1e-5);
 
-        if (delta < nearestDelta) { nearestDelta = delta; nearest = ao; }
+        if (delta < nearestDelta) { nearestDelta = delta; nearest = tap; }
 
         let w = 1.0 - smoothstep(0.0, AO_DEPTH_TOLERANCE, delta);
-        total += ao * w;
+        total += tap * w;
         weightSum += w;
     }
 
@@ -297,7 +301,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // `dielectricF0(reflectance)`, not the 0.04 literal this used to hardcode. A conductor still takes
     // its base colour; what changes is that water, skin and a gemstone stop sharing one specular level.
     let F0 = mix(vec3<f32>(dielectricF0(reflectance)), albedo, metallic);
-    let ssao = sampleAO(uv, depth);
+    let ssil = sampleSSIL(uv, depth);
 
     // Fallback indirect term used where no probe volume applies: the scene ambient as a simple fill
     // floor, plus a crude env reflection when a map is present. The sky light is scene-wide indirect: it
@@ -393,11 +397,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // present. Unlit "basic" materials arrive as zero albedo + authored emissive, so they pass straight
     // through here and are tonemapped uniformly with everything else.
     //
-    // The two indirect lobes take DIFFERENT occlusion. `ao` (the material's map) and `ssao` both measure
+    // The two indirect lobes take DIFFERENT occlusion. `ao` (the material's map) and SSIL's visibility both measure
     // how much of the hemisphere is blocked, which is the right question for diffuse and the wrong one
     // for a narrow specular cone — see `computeSpecularAO`. Multiplying both by the same number is what
     // used to strip the reflection off a polished floor standing in a corner.
-    let diffuseAO = ao * ssao;
+    let diffuseAO = ao * ssil.a;
     var specularAO = diffuseAO;
     if (u_lighting.u_specularOcclusion != 0) {
         specularAO = computeSpecularAO(max(dot(N, V), 0.0), diffuseAO, roughness);
@@ -411,6 +415,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         specularAO *= horizonOcclusion(reflect(-V, N), Ng);
     }
     var color = indirect.diffuse * diffuseAO + indirect.specular * specularAO + Lo + emissive;
+    // SSIL's bounce: the light the occluders above send back, in the directions `ssil.a` just took the
+    // ambient away from — so this replaces what AO removed rather than adding on top of it. Diffuse
+    // only, hence (1 - metallic); the material AO still applies, as it does to every indirect term.
+    color += albedo * (1.0 - metallic) * ssil.rgb * (u_lighting.u_ssilIntensity * ao);
 
     // Cascade debug channel: replace the shading with a flat per-cascade tint, modulated by the shadow
     // term so the shadow shapes stay readable inside each coloured band.

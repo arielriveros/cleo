@@ -15,7 +15,7 @@
 // THE ONE THING TO KNOW BEFORE READING A DECODED NORMAL: (0, 0) is a VALID direction — it decodes to
 // +Z. The G-buffer clears to zero, so "nothing was written here" and "this surface faces the camera"
 // are no longer distinguishable in this target, and any consumer that used `dot(n, n) < eps` as a
-// background test has to use DEPTH instead. ssao.wgsl did exactly that and now does not.
+// background test has to use DEPTH instead. The AO pass (now ssil.wgsl) did exactly that and now does not.
 //
 // Included from chunks/modelVarying.wgsl and chunks/basicVarying.wgsl — the two varying chunks each
 // program includes exactly one of — plus by hand in the fullscreen passes that read the G-buffer.

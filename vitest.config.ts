@@ -82,7 +82,7 @@ export default mergeConfig(engineConfig, defineConfig({
                 'src/graphics/renderGraph/resources.ts',
                 'src/graphics/shadowMath.ts',
                 'src/animation/skeletonTopology.ts',
-                'src/graphics/ssaoKernel.ts',
+                'src/graphics/ssilSettings.ts',
                 'src/graphics/tilemap/cellMath.ts',
                 'src/graphics/tilemap/chunk.ts',
                 'src/graphics/tilemap/tilemapCollision.ts',

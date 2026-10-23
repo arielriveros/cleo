@@ -102,7 +102,7 @@ describe('findUniformBlocks', () => {
 
 describe('the whole shader tree reflects cleanly', () => {
     // A sweep rather than a list, so a newly converted program is covered the moment it lands.
-    const programs = ['screen.wgsl', 'present.wgsl', 'bloom.wgsl', 'composer.wgsl', 'ssao.wgsl',
+    const programs = ['screen.wgsl', 'present.wgsl', 'bloom.wgsl', 'composer.wgsl', 'ssil.wgsl',
                       'motionBlur.wgsl', 'deferredLighting.wgsl', 'grid.wgsl', 'chromaticAberration.wgsl',
                       // Not fullscreen passes: the per-object velocity programs rasterize geometry and
                       // bind no textures at all, so they exercise the uniform-block half on its own.

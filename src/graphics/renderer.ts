@@ -129,8 +129,10 @@ import GeometryFoliageBillboardProgram from './shaders/wgsl/geometryFoliageBillb
 import GeometryBasicProgram from './shaders/wgsl/geometryBasic.wgsl'
 import GeometryBasicSkinnedProgram from './shaders/wgsl/geometryBasicSkinned.wgsl'
 import DeferredLightingProgram from './shaders/wgsl/deferredLighting.wgsl'
-import SSAOProgram from './shaders/wgsl/ssao.wgsl'
-import SSAOBlurProgram from './shaders/wgsl/ssaoBlur.wgsl'
+import SsilProgram from './shaders/wgsl/ssil.wgsl'
+import SsilTemporalProgram from './shaders/wgsl/ssilTemporal.wgsl'
+import SsilBlurProgram from './shaders/wgsl/ssilBlur.wgsl'
+import SsilHistoryProgram from './shaders/wgsl/ssilHistory.wgsl'
 
 // IBL (image-based lighting) precompute shaders
 import IrradianceProgram from './shaders/wgsl/irradiance.wgsl'
@@ -154,7 +156,7 @@ import { shaderStats } from './shaderStats';
 import { physicalFor, splitPhysical, logicalNamesFor, usesParallax, EXTRA_LOGICAL_NAMES, FILTER_DEPENDENT, type ShadowFilter } from './programVariants';
 import { gpuProfiler, initializeGpuProfiler, RENDER_PASSES, RenderPass } from './gpuProfiler';
 import { cpuProfiler } from './cpuProfiler';
-import { buildSSAOKernel } from './ssaoKernel';
+import { ssilTraceShape } from './ssilSettings';
 import { TerrainLodSettings } from '../terrain/terrain';
 import { TERRAIN_LAYER_TEXTURE_SIZES, DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from '../terrain/terrainSurfaceArrays';
 import type { FoliageCell } from '../terrain/foliage';
@@ -218,7 +220,7 @@ function allForwardShaders(): string[] {
 /** Editor-only debug channels: which internal buffer the renderer blits to the screen. */
 export type DebugView =
     'final' | 'scene' | 'albedo' | 'metallic' | 'normal' | 'roughness' |
-    'emissive' | 'ao' | 'depth' | 'ssao' | 'shadow' | 'cascades' | 'bloom' | 'bloomMask' | 'mask' | 'velocity' |
+    'emissive' | 'ao' | 'depth' | 'ssao' | 'ssil' | 'shadow' | 'cascades' | 'bloom' | 'bloomMask' | 'mask' | 'velocity' |
     'taaHistory' | 'overdraw';
 
 interface RendererConfig {
@@ -422,6 +424,20 @@ export interface RenderSettings {
     ssaoRadius: number;
     ssaoPower: number;
     ssaoBias: number;
+    /**
+     * How far behind its visible face an occluder is assumed to extend, in world units. What lets light
+     * pass behind a thin object instead of every depth sample standing for a solid wall — see ssil.wgsl.
+     */
+    ssaoThickness: number;
+    /**
+     * Screen-space indirect light: the ambient-occlusion pass also gathers last frame's light off the
+     * nearby surfaces that occlude, and adds it where their occlusion took the ambient away — colour
+     * bleeding and bounce light near geometry. Off leaves the same pass as ambient occlusion alone.
+     * Deferred surfaces only, like the AO.
+     */
+    ssilEnabled: boolean;
+    /** Scale on that bounce light. 1 is energy-correct; the occlusion itself is unaffected. */
+    ssilIntensity: number;
     motionBlurEnabled: boolean;
     motionBlurIntensity: number;
     motionBlurSamples: number;
@@ -491,6 +507,8 @@ export interface QualityTier {
     ssaoEnabled: boolean;
     ssaoSamples: number;
     ssaoResolutionScale: number;
+    /** SSIL's bounce light on top of the AO (see RenderSettings.ssilEnabled). */
+    ssilEnabled: boolean;
     shadowMapResolution: number;
     shadowCascades: number;
     /** 0 = 3x3 tap grid, 1 = 16-tap rotated Poisson. */
@@ -504,13 +522,13 @@ export interface QualityTier {
     taaEnabled: boolean;
 }
 
-// Tier definitions. Each step down roughly quarters the cost of the cloud raymarch and SSAO, which
+// Tier definitions. Each step down roughly quarters the cost of the cloud raymarch and SSAO/SSIL, which
 // scale with resolution squared AND with their step/sample count.
 export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier> = {
     ultra: {
         renderScale: 1.0,
         cloudResolutionScale: 1.0, cloudSteps: 48, cloudLightSteps: 6,
-        ssaoEnabled: true, ssaoSamples: 64, ssaoResolutionScale: 1.0,
+        ssaoEnabled: true, ssaoSamples: 64, ssaoResolutionScale: 1.0, ssilEnabled: true,
         shadowMapResolution: 4096, shadowCascades: 4, shadowFilterMode: 1, shadowFilterRadius: 2.0,
         bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true,
         particleLodDistanceScale: 1.5,
@@ -518,7 +536,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
     high: {
         renderScale: 1.0,
         cloudResolutionScale: 0.5, cloudSteps: 40, cloudLightSteps: 5,
-        ssaoEnabled: true, ssaoSamples: 24, ssaoResolutionScale: 0.5,
+        ssaoEnabled: true, ssaoSamples: 24, ssaoResolutionScale: 0.5, ssilEnabled: true,
         shadowMapResolution: 2048, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
         bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true,
         particleLodDistanceScale: 1,
@@ -526,7 +544,8 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
     medium: {
         renderScale: 1.0,
         cloudResolutionScale: 0.35, cloudSteps: 28, cloudLightSteps: 4,
-        ssaoEnabled: true, ssaoSamples: 16, ssaoResolutionScale: 0.5,
+        // AO alone: the bounce costs a normal and a radiance fetch per visible sample on top.
+        ssaoEnabled: true, ssaoSamples: 16, ssaoResolutionScale: 0.5, ssilEnabled: false,
         shadowMapResolution: 1024, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
         // Kept at medium: one fullscreen resolve is cheap next to what this tier already spends on
         // clouds and shadows, and aliasing is the most visible artefact left at a reduced tier.
@@ -536,7 +555,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
     low: {
         renderScale: 0.75,
         cloudResolutionScale: 0.25, cloudSteps: 20, cloudLightSteps: 3,
-        ssaoEnabled: false, ssaoSamples: 16, ssaoResolutionScale: 0.5,
+        ssaoEnabled: false, ssaoSamples: 16, ssaoResolutionScale: 0.5, ssilEnabled: false,
         shadowMapResolution: 1024, shadowCascades: 2, shadowFilterMode: 0, shadowFilterRadius: 0.0,
         bloomEnabled: false, motionBlurEnabled: false, taaEnabled: false,
         particleLodDistanceScale: 0.5,
@@ -1141,12 +1160,46 @@ export class Renderer {
     /** Standard deviations the neighbourhood clamp box spans. */
     private static readonly TAA_VARIANCE_GAMMA = 1.0;
 
-    // SSAO (deferred path). Raw pass -> blur pass, consumed in the deferred lighting pass.
+    // SSIL (deferred path; screen-space indirect lighting with a visibility bitmask, which replaced the
+    // old hemisphere-kernel SSAO and still answers to its settings). Trace -> temporal accumulation ->
+    // edge-aware blur, consumed by the deferred lighting pass: rgb = bounce light, a = visibility.
+    // The `_ssao*` names are the settings' and the profiler scopes', kept so saved projects load.
     private _ssaoFBO!: Framebuffer;
     private _ssaoBlurFBO!: Framebuffer;
-    // Whichever AO buffer the lighting pass should read: the blurred one, or the raw one when the
-    // blur is off.
+    // Whichever buffer the lighting pass should read: the last of the three stages that ran.
     private _ssaoResult!: Framebuffer;
+    /** Temporal ping-pong, at the trace's resolution. Lazily allocated in `_ensureSsilTargets`. */
+    private readonly _ssilHistoryFBOs: Framebuffer[] = [];
+    private _ssilHistoryIndex: number = 0;
+    /**
+     * Last frame's lit opaque colour at the trace's resolution, with the view depth it was seen at —
+     * what the trace bounces, and how both it and the temporal pass tell a surface they still see from
+     * one that has since been uncovered. See ssilHistory.wgsl.
+     */
+    private _ssilRadianceFBO: Framebuffer | null = null;
+    private _ssilTargetsW: number = 0;
+    private _ssilTargetsH: number = 0;
+    /**
+     * `_frameIndex` the history / the radiance copy were last written in. Each is usable only by the very
+     * next frame — a STAMP rather than a valid flag, because a flag survives a frame that skipped the
+     * pass (the profiler kill switch, an empty G-buffer, a thumbnail) and would then hand over an image
+     * from several frames back as if it were the last one. -1 = never.
+     */
+    private _ssilHistoryFrame: number = -1;
+    private _ssilRadianceFrame: number = -1;
+    /**
+     * Cleared when an SSIL target came back rgba8unorm on a device without float render targets: an
+     * 8-bit radiance copy clips every highlight at 1 and has no room for a depth. The pass then runs as
+     * ambient occlusion alone, which 8 bits still hold. Separate from the setting, as `_taaSupported` is.
+     */
+    private _ssilSupported: boolean = true;
+    /** Last frame's view matrix, beside `_prevViewProj`: SSIL compares depths in that camera's space. */
+    private readonly _prevView: mat4 = mat4.create();
+    private readonly _ssilInvView: mat4 = mat4.create();
+    private readonly _ssilProj: mat4 = mat4.create();
+    private readonly _ssilViewToPrevClip: mat4 = mat4.create();
+    private readonly _ssilViewToPrevView: mat4 = mat4.create();
+    private readonly _ssilDepthParams: Float32Array = new Float32Array(4);
     /**
      * Did the SSAO pass actually RUN this frame — not merely: is SSAO switched on.
      *
@@ -1162,6 +1215,10 @@ export class Renderer {
      */
     private _ssaoProducedThisFrame: boolean = false;
     private _ssaoEnabled: boolean;
+    private _ssilEnabled: boolean = true;
+    private _ssilIntensity: number = 1.0;
+    /** Whether THIS frame's trace gathered bounce light — false on a cut, the first frame, or when off. */
+    private _ssilBounceThisFrame: boolean = false;
     private _specularOcclusionEnabled: boolean = true;
     private _specularAaEnabled: boolean = true;
     private _horizonOcclusionEnabled: boolean = true;
@@ -1201,11 +1258,10 @@ export class Renderer {
      * and the value every photographic exposure system is calibrated around.
      */
     private static readonly EXPOSURE_KEY = 0.18;
-    private _ssaoKernel: Float32Array = new Float32Array(64 * 3);
-    /** Kernel samples actually taken per pixel. 64 was the fixed value; the shader now breaks early. */
+    /** Depth fetches per pixel in the SSIL trace; split into slices and steps by `ssilTraceShape`. */
     private _ssaoSamples: number = 24;
-    // SSAO resolution as a fraction of the render size. AO is low-frequency and box-blurred anyway,
-    // so full resolution pays 4x the fill rate for detail the next pass discards.
+    // SSIL resolution as a fraction of the render size. Occlusion and bounce are low-frequency and
+    // filtered anyway, so full resolution pays 4x the fill rate for detail the next passes discard.
     private _ssaoResolutionScale: number = 0.5;
     /** Active quality tier; 'custom' once any individual knob has been changed by hand. */
     private _quality: QualityPreset = 'high';
@@ -1237,12 +1293,12 @@ export class Renderer {
     private _csmForward: vec3 = vec3.create();
     /** Frame counter used to stagger distant cascade updates (see _renderCascades). */
     private _frameIndex: number = 0;
-    // Scratch for the clip->view matrix handed to ssao.fs (see viewPosFromUV).
+    // Scratch for the clip->view matrix handed to the SSIL passes (see viewPosAt in ssil.wgsl).
     private _invProjection: mat4 = mat4.create();
-    private _ssaoNoise!: Texture;
     private _ssaoRadius: number = 0.5;
     private _ssaoBias: number = 0.025;
     private _ssaoPower: number = 1.5;
+    private _ssaoThickness: number = 0.25;
 
     // IBL (image-based lighting). Shared BRDF LUT + a cube framebuffer/mesh/camera for baking, plus a
     // scene-wide IBL cache built from scene.environmentMap when no light probe is active.
@@ -1578,9 +1634,9 @@ export class Renderer {
         this._velocityFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
         this._velocityTileFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         this._velocityNeighborFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
-        // SSAO is one 8-bit scalar per pixel: R8, not RGBA8, and no depth attachment — both passes are
-        // fullscreen with depth testing off.
-        const aoOptions = { colorTextureOptions: { mipMap: false, channels: 'r' as const }, depth: false };
+        // SSIL: bounce light in rgb (HDR, so float) and visibility in a. No depth attachment — every
+        // stage is fullscreen with depth testing off.
+        const aoOptions = { colorTextureOptions: { mipMap: false, precision: 'high' as const }, depth: false };
         // Metering targets: 1x1, and 8-BIT rather than float because `readPixels` refuses anything
         // else on WebGL2. Two of them, ping-ponged — see `_exposurePass`.
         this._exposureFBOs = [new Framebuffer({ colorTextureOptions: { mipMap: false } }),
@@ -1917,9 +1973,11 @@ export class Renderer {
             ['foliageBillboardInstanced',    GeometryFoliageBillboardProgram],
             // Deferred lighting (fullscreen).
             ['deferredLighting',             DeferredLightingProgram],
-            // SSAO (fullscreen).
-            ['ssao',                         SSAOProgram],
-            ['ssaoBlur',                     SSAOBlurProgram],
+            // SSIL: trace, temporal accumulation, edge-aware blur, and the radiance it bounces (fullscreen).
+            ['ssil',                         SsilProgram],
+            ['ssilTemporal',                 SsilTemporalProgram],
+            ['ssilBlur',                     SsilBlurProgram],
+            ['ssilHistory',                  SsilHistoryProgram],
             // IBL precompute.
             ['irradiance',                   IrradianceProgram],
             ['prefilter',                    PrefilterProgram],
@@ -2040,7 +2098,6 @@ export class Renderer {
         // Must match `_sceneFBO` exactly: `_overlayTarget` attaches that buffer's depth alongside this
         // one's colour, and a mismatched extent is an incomplete framebuffer on WebGL2.
         this._overlayFBO.create(rw, rh);
-        this._generateSSAOKernelAndNoise();
 
         // Shared instance-matrix buffer for GPU instancing in the geometry pass
         // VERTEX | COPY_DST: rewritten every frame with the batch's world matrices, which is what
@@ -2081,6 +2138,12 @@ export class Renderer {
     public render(scene: Scene): void {
         // Set active camera
         if (!scene.activeCamera) return;
+        // A canvas with no area — the viewport panel hidden behind another tab, collapsed, or not laid
+        // out yet — has no swap-chain image to draw into. WebGL2 shrugs that off; on WebGPU
+        // `getCurrentTexture()` fails, and every pass recorded into the frame's command buffer goes
+        // down with it, once per frame for as long as the panel stays hidden. Nothing is visible, so
+        // there is nothing to render. An offscreen capture brings its own target and still renders.
+        if (!this._presentTarget && (this._canvas.width === 0 || this._canvas.height === 0)) return;
         this._pollVariantFilter();
         this._frameEncoder = device.createCommandEncoder('frame');
         try {
@@ -2265,6 +2328,7 @@ export class Renderer {
 
         // Remember this frame's camera transform so next frame's motion blur can reproject against it.
         mat4.copy(this._prevViewProj, this._viewProj);
+        mat4.copy(this._prevView, this._activeCamera.viewMatrix);
         this._hasPrevViewProj = true;
 
         // And the camera behind this frame's depth snapshot, for next frame's particle collision. Not
@@ -2332,14 +2396,17 @@ export class Renderer {
         if (this._offscreenFBO.width !== size || this._offscreenFBO.height !== size)
             this._offscreenFBO.create(size, size);
 
-        const prevW = this._canvas.width, prevH = this._canvas.height;
         this._presentTarget = this._offscreenFBO;
         this._resizeBuffers(size, size);
         try {
             this.render(scene); // resolves into _offscreenFBO (see _applyPostProcessing)
         } finally {
             this._presentTarget = null;
-            this._resizeBuffers(prevW, prevH); // hand the pipeline back to the live viewport
+            // Hand the pipeline back to the live viewport at its RENDER size — the canvas times
+            // `renderScale`, never below 1. The canvas size itself was used here, which left every
+            // buffer at full size after a thumbnail under a reduced render scale, and at 0x0 (invalid
+            // textures on WebGPU) when the thumbnail was taken with the viewport hidden.
+            this._resizeBuffers(this._renderWidth, this._renderHeight);
         }
 
         const pixels = await device.readPixels(this._offscreenFBO.colors[0].attachmentView, 0, 0, size, size);
@@ -2627,16 +2694,16 @@ export class Renderer {
         // BOTH counters, not just `objects`: instanced foliage bumps only `instances`, and a landscape
         // whose only deferred geometry is grass would otherwise lose its AO.
         const gBufferHasGeometry = frameStats.objects > 0 || frameStats.instances > 0;
-        // 1a. Surface decals, resolved into the G-buffer before anything reads it — SSAO occludes the
+        // 1a. Surface decals, resolved into the G-buffer before anything reads it — SSIL occludes the
         // decal's normal and the lighting pass shades its albedo like the surface's own.
         if (this._surfaceDecals.length > 0 && gBufferHasGeometry && this._beginPass('decals')) {
             this._surfaceDecalPass();
             this._checkGLErrors('decals');
         }
-        // 1b. Screen-space ambient occlusion from the G-buffer depth and normals.
+        // 1b. Screen-space ambient occlusion and bounce light from the G-buffer and last frame's light.
         this._ssaoProducedThisFrame = false;
         if (this._ssaoEnabled && gBufferHasGeometry && this._beginPass('ssao')) {
-            this._ssaoPass();
+            this._ssilPass();
             this._ssaoProducedThisFrame = true;
         }
         // 2. Light the G-buffer in a single fullscreen pass into the scene FBO.
@@ -4412,7 +4479,7 @@ export class Renderer {
         const pipeline = this._fullscreenPipeline('deferredLighting', DeferredLightingProgram);
         pass.setPipeline(pipeline);
 
-        // Group 0: the G-buffer plus AO. SSAO always binds a complete texture even when disabled —
+        // Group 0: the G-buffer plus SSIL. SSIL always binds a complete texture even when disabled —
         // the shader gates on u_ssaoEnabled, but the sampler still has to point somewhere valid.
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
             this._gBufferFBO.colors[0], this._gBufferFBO.colors[1], this._gBufferFBO.colors[2],
@@ -4462,9 +4529,10 @@ export class Renderer {
             this._shaderManager.setUniform(`u_probeBlend${i}`, slot && slot.bounded ? slot.volumeBlend : [0, 0, 0]);
         }
 
-        // SSAO (unit 4). Always bind a complete texture so the sampler is valid; the shader only
-        // reads it when u_ssaoEnabled is true.
+        // SSIL. Always bind a complete texture so the sampler is valid; the shader only reads it when
+        // u_ssaoEnabled is true. The bounce is scaled to nothing when it was not gathered this frame.
         this._shaderManager.setUniform('u_ssaoEnabled', this._ssaoProducedThisFrame);
+        this._shaderManager.setUniform('u_ssilIntensity', this._ssilBounceThisFrame ? this._ssilIntensity : 0);
         this._shaderManager.setUniform('u_specularOcclusion', this._specularOcclusionEnabled);
         this._shaderManager.setUniform('u_horizonOcclusion', this._horizonOcclusionEnabled);
         // Texel size drives the depth-aware upsample. Zero when the AO buffer is already full
@@ -4712,82 +4780,181 @@ export class Renderer {
         if (!hasDirectional) this._clearDirectional();
     }
 
-    // Build the hemisphere sample kernel (biased toward the origin) and a small tiled rotation-noise
-    // texture. Done once; the kernel is uploaded to the SSAO shader each frame.
-    private _generateSSAOKernelAndNoise(): void {
-        // The kernel's distribution lives in ssaoKernel.ts, free of GL, so the ramp invariant it
-        // depends on (the last sample must reach the full radius at ANY sample count) is unit-tested.
-        buildSSAOKernel(this._ssaoKernel, this._ssaoSamples);
+    /** SSIL's bounce light: history weight while the reprojection is trusted. See ssilTemporal.wgsl. */
+    private static readonly SSIL_FEEDBACK = 0.9;
 
-        const noiseData = new Uint8Array(4 * 4 * 4);
-        for (let i = 0; i < 16; i++) {
-            noiseData[i * 4 + 0] = Math.floor(Math.random() * 256);
-            noiseData[i * 4 + 1] = Math.floor(Math.random() * 256);
-            noiseData[i * 4 + 2] = 128; // z ~ 0 after remap
-            noiseData[i * 4 + 3] = 255;
+    /**
+     * Allocate and size the SSIL history and radiance copy, and drop both whenever they are reallocated —
+     * `Framebuffer.resize` hands back uninitialized memory, not a stale image.
+     */
+    private _ensureSsilTargets(w: number, h: number): void {
+        if (!this._ssilRadianceFBO) {
+            const options = { colorTextureOptions: { mipMap: false, precision: 'high' as const }, depth: false };
+            for (let i = 0; i < 2; i++) this._ssilHistoryFBOs.push(new Framebuffer(options));
+            this._ssilRadianceFBO = new Framebuffer(options);
         }
-        this._ssaoNoise = new Texture({ mipMap: false });
-        this._ssaoNoise.createFromData(noiseData, 4, 4, 'repeat');
+        if (this._ssilTargetsW === w && this._ssilTargetsH === h) return;
+        for (const fbo of this._ssilHistoryFBOs) fbo.resize(w, h);
+        this._ssilRadianceFBO.resize(w, h);
+        this._ssilTargetsW = w;
+        this._ssilTargetsH = h;
+        this._ssilHistoryFrame = -1;
+        this._ssilRadianceFrame = -1;
+        this._checkSsilFormats();
     }
 
-    // Screen-space ambient occlusion: raw pass from the G-buffer into _ssaoFBO, then a box blur into
-    // _ssaoBlurFBO. Consumed by the deferred lighting pass (unit 4).
-    private _ssaoPass(): void {
-        // Depth off, depth writes off, no blend: all three are now the pipeline's, not three loose
-        // GLState calls that the pass had to remember to make and later undo.
-        const ssaoPass = this._beginFullscreenPass(this._ssaoFBO.renderTarget, 'ssao', true,
-                                                   undefined, false);
-        const ssaoPipeline = this._fullscreenPipeline('ssao', SSAOProgram);
-        ssaoPass.setPipeline(ssaoPipeline);
-        ssaoPass.setBindGroup(0, this._textureBindGroup(ssaoPipeline, 0, [
-            this._gBufferFBO.colors[1], this._gBufferFBO.depth, this._ssaoNoise,
-        ]));
+    /** See {@link _ssilSupported}. Same shape as `_checkTaaFormats`. */
+    private _checkSsilFormats(): void {
+        const downgraded = this._ssaoFBO.colors[0].downgraded
+            || (this._ssilRadianceFBO?.colors[0].downgraded ?? false);
+        if (!downgraded) { this._ssilSupported = true; return; }
+        if (this._ssilSupported)
+            Logger.warn('Screen-space indirect light disabled: this device has no float render targets, so '
+                + 'its buffers were allocated as rgba8unorm, which cannot hold HDR light or a depth. '
+                + 'Ambient occlusion still runs.', 'Renderer');
+        this._ssilSupported = false;
+    }
 
-        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        // The UNADJUSTED projection, unlike every mesh pass: SSAO's fragment stage projects kernel
-        // samples back to screen space and compares against stored depth. That RECONSTRUCTS rather
-        // than rasterises, so it takes the GL-convention form — see `_clipProjection`.
-        //
-        // It does carry the TAA jitter, though, which is not a contradiction: the buffer it compares
-        // against was RASTERIZED with the jitter, so a kernel sample projected through the unjittered
-        // projection lands half a texel away from its own geometry. Reconstruction follows the buffer
-        // it reads, not the convention it reads it in — hence `_jitteredCameraProj`, which is the
-        // plain camera projection while TAA is off.
-        this._shaderManager.setUniform('u_projection',
-                                       this._uvProducing(this._jitteredCameraProj));
+    /** Whether a stamp says "written last frame" — the only age the reprojecting passes can use. */
+    private _ssilFresh(stamp: number): boolean {
+        return stamp >= 0 && stamp === this._frameIndex - 1 && this._hasPrevViewProj;
+    }
+
+    /**
+     * Screen-space indirect lighting with a visibility bitmask (ssil.wgsl): the trace into `_ssaoFBO`, then
+     * temporal accumulation (which filters spatially too) into the history — or, with that switched off
+     * in the profiler, an edge-aware blur into `_ssaoBlurFBO`. `_ssaoResult` ends on whichever ran last.
+     * Consumed by the deferred lighting pass: rgb = bounce light, a = visibility.
+     */
+    private _ssilPass(): void {
+        const w = this._ssaoWidth, h = this._ssaoHeight;
+        this._ensureSsilTargets(w, h);
+        const radiance = this._ssilRadianceFBO!;
+        const radianceFresh = this._ssilSupported && this._ssilFresh(this._ssilRadianceFrame);
+        this._ssilBounceThisFrame = this._ssilEnabled && radianceFresh;
+        const { slices, steps } = ssilTraceShape(this._ssaoSamples);
+
+        // Every stage RECONSTRUCTS from the depth buffer, so every stage takes the projection it was
+        // rasterized with — TAA jitter included, as SSAO did — in the GL-convention form, flipped only for
+        // the uv convention. Last frame's camera is the UNJITTERED one: jitter there would read as motion.
         mat4.invert(this._invProjection, this._jitteredCameraProj);
         this._uvConsuming(this._invProjection, this._invProjection);
+        mat4.copy(this._ssilProj, this._uvProducing(this._jitteredCameraProj));
+        // A view-space point to last frame's clip space and view space in one multiply each.
+        mat4.invert(this._ssilInvView, this._activeCamera.viewMatrix);
+        mat4.multiply(this._ssilViewToPrevClip, this._uvProducing(this._prevViewProj), this._ssilInvView);
+        mat4.multiply(this._ssilViewToPrevView, this._prevView, this._ssilInvView);
+        // The inverse projection's z and w rows, which is all a view DEPTH needs (column-major).
+        const ip = this._invProjection;
+        this._ssilDepthParams[0] = ip[10]; this._ssilDepthParams[1] = ip[14];
+        this._ssilDepthParams[2] = ip[11]; this._ssilDepthParams[3] = ip[15];
+
+        const trace = this._beginFullscreenPass(this._ssaoFBO.renderTarget, 'ssao', true, undefined, false);
+        const tracePipeline = this._fullscreenPipeline('ssil', SsilProgram);
+        trace.setPipeline(tracePipeline);
+        trace.setBindGroup(0, this._textureBindGroup(tracePipeline, 0, [
+            this._gBufferFBO.colors[1], this._gBufferFBO.depth, radiance.colors[0],
+        ]));
+        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._ssilProj);
         this._shaderManager.setUniform('u_invProjection', this._invProjection);
-        this._shaderManager.setUniform('u_noiseScale', [this._ssaoWidth / 4, this._ssaoHeight / 4]);
+        this._shaderManager.setUniform('u_viewToPrevClip', this._ssilViewToPrevClip);
+        this._shaderManager.setUniform('u_viewToPrevView', this._ssilViewToPrevView);
         this._shaderManager.setUniform('u_radius', this._ssaoRadius);
+        this._shaderManager.setUniform('u_thickness', this._ssaoThickness);
         this._shaderManager.setUniform('u_bias', this._ssaoBias);
         this._shaderManager.setUniform('u_power', this._ssaoPower);
-        this._shaderManager.setUniform('u_sampleCount', this._ssaoSamples);
-
-        // Upload only the samples in use; the std140 writer stops at the end of a short value and
-        // spaces what it writes by the reported array stride.
-        // Through `setUniform`, never a cached `[0]` location — that is null for a block member.
-        this._shaderManager.setUniform('u_samples', this._ssaoKernel.subarray(0, this._ssaoSamples * 3));
-
-        this._drawFullscreen(ssaoPass);
-        this._endFullscreenPass(ssaoPass);
-
-        // Blur to remove the tiled-noise pattern. Timed and toggled separately from the kernel pass —
-        // a scattered dependent-fetch loop and a coherent box filter cost very different amounts.
+        this._shaderManager.setUniform('u_slices', slices);
+        this._shaderManager.setUniform('u_steps', steps);
+        // Small and wrapping: the noise only needs a new phase each frame, and a float that grows for a
+        // whole session loses the fraction the hash lives in.
+        this._shaderManager.setUniform('u_frame', this._frameIndex % 64);
+        this._shaderManager.setUniform('u_hasRadiance', this._ssilBounceThisFrame);
+        this._shaderManager.setUniform('u_ortho', this._activeCamera.type === 'orthographic');
+        // A cap on the screen-space search, so a surface right in front of the camera does not send its
+        // samples across the whole frame and through every cache line on the way.
+        this._shaderManager.setUniform('u_maxRadiusPx', Math.max(16, this._renderHeight * 0.15));
+        this._drawFullscreen(trace);
+        this._endFullscreenPass(trace);
         this._ssaoResult = this._ssaoFBO;
-        if (this._beginPass('ssao.blur')) {
-            const blurPass = this._beginFullscreenPass(this._ssaoBlurFBO.renderTarget, 'ssao.blur',
-                                                       true, undefined, false);
-            const blurPipeline = this._fullscreenPipeline('ssaoBlur', SSAOBlurProgram);
-            blurPass.setPipeline(blurPipeline);
-            blurPass.setBindGroup(0, this._textureBindGroup(blurPipeline, 0, [this._ssaoFBO.colors[0]]));
-            this._drawFullscreen(blurPass);
-            this._endFullscreenPass(blurPass);
+
+        // Temporal accumulation, which also filters spatially. Needs last frame's depth for its
+        // disocclusion test, which rides in the radiance copy's alpha — so without a fresh copy the
+        // history is restarted, not trusted.
+        let accumulated = false;
+        if (this._beginPass('ssao.temporal')) {
+            const historyValid = radianceFresh && this._ssilFresh(this._ssilHistoryFrame);
+            const src = this._ssilHistoryFBOs[this._ssilHistoryIndex];
+            const dst = this._ssilHistoryFBOs[this._ssilHistoryIndex ^ 1];
+            const pass = this._beginFullscreenPass(dst.renderTarget, 'ssao.temporal', true, undefined, false);
+            const pipeline = this._fullscreenPipeline('ssilTemporal', SsilTemporalProgram);
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+                this._ssaoFBO.colors[0], src.colors[0], radiance.colors[0], this._gBufferFBO.depth,
+            ]));
+            this._shaderManager.setUniform('u_invProjection', this._invProjection);
+            this._shaderManager.setUniform('u_viewToPrevClip', this._ssilViewToPrevClip);
+            this._shaderManager.setUniform('u_viewToPrevView', this._ssilViewToPrevView);
+            this._shaderManager.setUniform('u_depthParams', this._ssilDepthParams);
+            this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
+            this._shaderManager.setUniform('u_feedback', Renderer.SSIL_FEEDBACK);
+            this._shaderManager.setUniform('u_historyValid', historyValid);
+            this._drawFullscreen(pass);
+            this._endFullscreenPass(pass);
+            this._ssilHistoryIndex ^= 1;
+            this._ssilHistoryFrame = this._frameIndex;
+            this._ssaoResult = dst;
+            accumulated = true;
+        }
+
+        // Edge-aware blur of the raw trace — only when the accumulation, which filters spatially itself,
+        // did not run (it is switched off in the profiler).
+        if (!accumulated && this._beginPass('ssao.blur')) {
+            const pass = this._beginFullscreenPass(this._ssaoBlurFBO.renderTarget, 'ssao.blur', true,
+                                                   undefined, false);
+            const pipeline = this._fullscreenPipeline('ssilBlur', SsilBlurProgram);
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+                this._ssaoResult.colors[0], this._gBufferFBO.colors[1], this._gBufferFBO.depth,
+            ]));
+            this._shaderManager.setUniform('u_depthParams', this._ssilDepthParams);
+            this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
+            this._drawFullscreen(pass);
+            this._endFullscreenPass(pass);
             this._ssaoResult = this._ssaoBlurFBO;
         }
 
         GLState.depthMask(true);
         GLState.depthTest(true);
+    }
+
+    /**
+     * Keep this frame's lit opaque image, at SSIL's resolution, for NEXT frame's trace to bounce. At the
+     * temporal boundary on purpose: the scene is final there (TAA-resolved when TAA ran) and nothing
+     * that must not bounce — transparents, particles, sprites, editor chrome — has been drawn yet.
+     */
+    private _ssilHistoryPass(): void {
+        if (!this._ssaoEnabled || !this._ssilSupported || this._thumbnailMode || !this._ssilRadianceFBO) return;
+        if (!this._beginPass('ssao.history')) return;
+        const target = this._ssilRadianceFBO;
+        const pass = this._beginFullscreenPass(target.renderTarget, 'ssao.history', true, undefined, false);
+        const pipeline = this._fullscreenPipeline('ssilHistory', SsilHistoryProgram);
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+            this._sceneFBO.colors[0], this._depthSource(),
+        ]));
+        // The depth snapshot was rasterized through this frame's jittered projection.
+        mat4.invert(this._invProjection, this._jitteredCameraProj);
+        this._uvConsuming(this._invProjection, this._invProjection);
+        this._shaderManager.setUniform('u_invProjection', this._invProjection);
+        this._drawFullscreen(pass);
+        this._endFullscreenPass(pass);
+        this._ssilRadianceFrame = this._frameIndex;
+        // Put back what the overlay passes below expect, as the TAA resolve does.
+        this._sceneFBO.bind();
+        GLState.blend(false);
+        GLState.depthTest(true);
+        GLState.depthMask(true);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -6027,6 +6194,8 @@ export class Renderer {
         this._produceVelocity();
         this._taaResolvePass();
         this._endJitterPhase();
+        // And the same image, reduced, as next frame's bounce light — before anything above is drawn.
+        this._ssilHistoryPass();
 
         // Transparent models: back-to-front, depth-tested against opaque, no depth writes. Thumbnails
         // are the exception — their coverage alpha comes from the scene depth, so they must write it.
@@ -6834,6 +7003,8 @@ export class Renderer {
     public invalidateTemporalHistory(): void {
         this._cloudHistoryValid = false;
         this._taaHistoryValid = false;
+        this._ssilHistoryFrame = -1;
+        this._ssilRadianceFrame = -1;
     }
 
     /**
@@ -9535,11 +9706,13 @@ export class Renderer {
             // Mode 3 reads its own `texture_depth_2d` binding rather than this one — a depth texture
             // cannot satisfy a colour sampler on WebGPU. The colour slot still needs SOMETHING valid.
             case 'depth':     tex = this._gBufferFBO.colors[0];    mode = 3; break;
-            // `_ssaoResult`, not `_ssaoBlurFBO`: the blur is a separately switchable pass, and with it
-            // off the lighting pass reads the RAW buffer while this channel would have gone on showing
-            // a blurred one nothing was consuming. A debug channel that disagrees with the frame is
-            // worse than no channel.
-            case 'ssao':      tex = (this._ssaoResult ?? this._ssaoBlurFBO).colors[0]; mode = 4; break;
+            // `_ssaoResult`, not `_ssaoBlurFBO`: the blur and the accumulation are separately
+            // switchable, and with one off the lighting pass reads an EARLIER stage while this channel
+            // would have gone on showing a later one nothing was consuming. A debug channel that
+            // disagrees with the frame is worse than no channel. Visibility is SSIL's alpha.
+            case 'ssao':      tex = (this._ssaoResult ?? this._ssaoBlurFBO).colors[0]; mode = 2; break;
+            // The bounce light, before albedo, through the same exposure and curve as the image.
+            case 'ssil':      tex = (this._ssaoResult ?? this._ssaoBlurFBO).colors[0]; mode = 6; break;
             case 'bloom':     tex = this._bloomMips[0].colors[0];  mode = 6; break;
             // The bloom-eligibility mask itself: the scene buffer's ALPHA, as greyscale. White blooms,
             // black cannot. Exists because "bloom does nothing" is otherwise indistinguishable between
@@ -10580,6 +10753,8 @@ export class Renderer {
         if (this._cloudBaseNoise) bytes += this._cloudBaseNoise.byteSize;
         if (this._cloudDetailNoise) bytes += this._cloudDetailNoise.byteSize;
         addFbo(this._ssaoFBO); addFbo(this._ssaoBlurFBO);
+        for (const f of this._ssilHistoryFBOs) addFbo(f);
+        addFbo(this._ssilRadianceFBO ?? undefined);
         addFbo(this._brdfFBO); addFbo(this._outlineMaskFBO); addFbo(this._overlayFBO);
         addFbo(this._overdrawFBO ?? undefined);
         addFbo(this._velocityFBO); addFbo(this._velocityTileFBO); addFbo(this._velocityNeighborFBO);
@@ -10742,6 +10917,12 @@ export class Renderer {
     public set ssaoRadius(radius: number) { this._ssaoRadius = Math.max(0, radius); }
     public get ssaoPower(): number { return this._ssaoPower; }
     public set ssaoPower(power: number) { this._ssaoPower = Math.max(0, power); }
+    public get ssaoThickness(): number { return this._ssaoThickness; }
+    public set ssaoThickness(thickness: number) { this._ssaoThickness = Math.max(0, thickness); }
+    public get ssilEnabled(): boolean { return this._ssilEnabled; }
+    public set ssilEnabled(enabled: boolean) { this._ssilEnabled = enabled; }
+    public get ssilIntensity(): number { return this._ssilIntensity; }
+    public set ssilIntensity(intensity: number) { this._ssilIntensity = Math.max(0, intensity); }
     public get ssaoBias(): number { return this._ssaoBias; }
     public set ssaoBias(bias: number) { this._ssaoBias = Math.max(0, bias); }
 
@@ -10862,12 +11043,8 @@ export class Renderer {
         if (preset === 'custom') return;
         const t = QUALITY_TIERS[preset];
         this._ssaoEnabled = t.ssaoEnabled;
-        if (this._ssaoSamples !== t.ssaoSamples) {
-            this._ssaoSamples = t.ssaoSamples;
-            // The kernel's ramp is sized to the sample count, so the samples must be rebuilt or the
-            // new tier inherits the previous tier's radius.
-            if (this._deviceReady) this._generateSSAOKernelAndNoise();
-        }
+        this._ssaoSamples = t.ssaoSamples;
+        this._ssilEnabled = t.ssilEnabled;
         this._motionBlurEnabled = t.motionBlurEnabled;
         if (this._taaEnabled !== t.taaEnabled) {
             this._taaEnabled = t.taaEnabled;
@@ -11131,11 +11308,7 @@ export class Renderer {
 
     public get ssaoSamples(): number { return this._ssaoSamples; }
     public set ssaoSamples(n: number) {
-        const clamped = Math.min(64, Math.max(4, Math.round(n)));
-        if (clamped !== this._ssaoSamples) {
-            this._ssaoSamples = clamped;
-            if (this._deviceReady) this._generateSSAOKernelAndNoise(); // ramp is sized to the count — see the generator
-        }
+        this._ssaoSamples = Math.min(64, Math.max(4, Math.round(n)));
         this._quality = 'custom';
     }
 
@@ -11222,6 +11395,9 @@ export class Renderer {
             ssaoRadius: this._ssaoRadius,
             ssaoPower: this._ssaoPower,
             ssaoBias: this._ssaoBias,
+            ssaoThickness: this._ssaoThickness,
+            ssilEnabled: this._ssilEnabled,
+            ssilIntensity: this._ssilIntensity,
             motionBlurEnabled: this._motionBlurEnabled,
             motionBlurIntensity: this._motionBlurIntensity,
             motionBlurSamples: this._motionBlurSamples,
@@ -11326,6 +11502,9 @@ export class Renderer {
         if (s.ssaoRadius !== undefined) this.ssaoRadius = s.ssaoRadius;
         if (s.ssaoPower !== undefined) this.ssaoPower = s.ssaoPower;
         if (s.ssaoBias !== undefined) this.ssaoBias = s.ssaoBias;
+        if (s.ssaoThickness !== undefined) this.ssaoThickness = s.ssaoThickness;
+        if (s.ssilEnabled !== undefined) this.ssilEnabled = s.ssilEnabled;
+        if (s.ssilIntensity !== undefined) this.ssilIntensity = s.ssilIntensity;
         if (s.motionBlurEnabled !== undefined) this.motionBlurEnabled = s.motionBlurEnabled;
         if (s.motionBlurIntensity !== undefined) this.motionBlurIntensity = s.motionBlurIntensity;
         if (s.motionBlurSamples !== undefined) this.motionBlurSamples = s.motionBlurSamples;

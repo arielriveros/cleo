@@ -300,7 +300,8 @@ class WebGPUTexture implements Texture {
 
     /**
      * Raw RGBA8 bytes, and the ADDRESS MODE they are sampled with. The mode must be honoured: this
-     * backend keeps sampler state in `_config`, and the SSAO rotation noise depends on repeating.
+     * backend keeps sampler state in `_config`, and a tiled pattern (the old SSAO rotation noise was
+     * one) depends on repeating.
      */
     public uploadBytes(data: Uint8Array, width: number, height: number, wrapping: AddressMode): void {
         this.uploadRegion(0, 0, width, height, data);

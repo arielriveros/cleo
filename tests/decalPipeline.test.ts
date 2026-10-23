@@ -37,15 +37,15 @@ function blendState(name: string): string {
 }
 
 describe('surface decals', () => {
-    it('resolve into the G-buffer after it is drawn and before SSAO and lighting read it', () => {
+    it('resolve into the G-buffer after it is drawn and before SSIL and lighting read it', () => {
         const body = methodBody('_renderDeferred');
         const geometry = body.indexOf('this._geometryPass(scene)');
         const decals = body.indexOf('this._surfaceDecalPass()');
-        const ssao = body.indexOf('this._ssaoPass()');
+        const ssil = body.indexOf('this._ssilPass()');
         const lighting = body.indexOf('this._deferredLightingPass(');
         expect(geometry).toBeGreaterThan(-1);
         expect(decals).toBeGreaterThan(geometry);
-        expect(ssao).toBeGreaterThan(decals);
+        expect(ssil).toBeGreaterThan(decals);
         expect(lighting).toBeGreaterThan(decals);
     });
 

@@ -20,6 +20,7 @@ const CHANNELS: { key: string; label: string }[] = [
   { key: 'ao',        label: 'AO' },
   { key: 'depth',     label: 'Depth' },
   { key: 'ssao',      label: 'SSAO' },
+  { key: 'ssil',      label: 'Indirect' },
   { key: 'shadow',    label: 'Shadow' },
   { key: 'cascades',  label: 'Cascades' },
   { key: 'bloom',     label: 'Bloom' },
@@ -157,6 +158,9 @@ export default function RendererSettingsPanel() {
   const [ssaoRadius, setSsaoRadius] = useState<number>(() => renderer?.ssaoRadius ?? 0.5);
   const [ssaoPower, setSsaoPower] = useState<number>(() => renderer?.ssaoPower ?? 1.5);
   const [ssaoBias, setSsaoBias] = useState<number>(() => renderer?.ssaoBias ?? 0.025);
+  const [ssaoThickness, setSsaoThickness] = useState<number>(() => renderer?.ssaoThickness ?? 0.25);
+  const [ssilEnabled, setSsilEnabled] = useState<boolean>(() => renderer?.ssilEnabled ?? true);
+  const [ssilIntensity, setSsilIntensity] = useState<number>(() => renderer?.ssilIntensity ?? 1);
   const [gridVisible, setGridVisible] = useState<boolean>(() => renderer?.gridVisible ?? true);
   const [gridPlane, setGridPlane] = useState<string>(() => renderer?.gridPlane ?? 'xz');
   const [frustumCulling, setFrustumCulling] = useState<boolean>(() => renderer?.frustumCulling ?? true);
@@ -253,6 +257,9 @@ export default function RendererSettingsPanel() {
     setSsaoRadius(renderer.ssaoRadius);
     setSsaoPower(renderer.ssaoPower);
     setSsaoBias(renderer.ssaoBias);
+    setSsaoThickness(renderer.ssaoThickness);
+    setSsilEnabled(renderer.ssilEnabled);
+    setSsilIntensity(renderer.ssilIntensity);
     setGridVisible(renderer.gridVisible);
     setGridPlane(renderer.gridPlane);
     setFrustumCulling(renderer.frustumCulling);
@@ -769,13 +776,23 @@ export default function RendererSettingsPanel() {
         {!shadowsEnabled && <Hint>The global Shadows toggle above is off, which also disables these.</Hint>}
       </Section>
 
-      <Section title='SSAO' hint='Screen-space ambient occlusion, deferred path only. Radius is in world units; Power sharpens the falloff; Bias lifts the sample off the surface to stop it occluding itself.'>
+      <Section title='Ambient Occlusion & Indirect Light'
+        hint={'Screen-space, deferred path only. Occluders within Radius (world units) darken the ambient light, '
+          + "and with Indirect Light on they also bounce last frame's light onto what they occlude: colour bleeding "
+          + 'near surfaces. Thickness is how deep an occluder is assumed to be, so light passes behind thin objects; '
+          + 'Power sharpens the occlusion; Bias ignores samples this close, against self-occlusion.'}>
         <Toggle label='Enabled' checked={ssaoEnabled} className='my-1'
           onChange={(c) => { renderer.ssaoEnabled = c; setSsaoEnabled(c); touch(); }} />
+        <Toggle label='Indirect Light' checked={ssilEnabled} className='my-1'
+          onChange={(c) => { renderer.ssilEnabled = c; setSsilEnabled(c); touch(); }} />
+        <Slider label='Indirect Intensity' value={ssilIntensity} min={0} max={4} step={0.05}
+          onChange={(v) => { renderer.ssilIntensity = v; setSsilIntensity(v); touch(); }} />
         <Slider label='Radius' value={ssaoRadius} min={0} max={2} step={0.05}
           onChange={(v) => { renderer.ssaoRadius = v; setSsaoRadius(v); touch(); }} />
         <Slider label='Power' value={ssaoPower} min={0} max={5} step={0.1}
           onChange={(v) => { renderer.ssaoPower = v; setSsaoPower(v); touch(); }} />
+        <Slider label='Thickness' value={ssaoThickness} min={0} max={2} step={0.05}
+          onChange={(v) => { renderer.ssaoThickness = v; setSsaoThickness(v); touch(); }} />
         <Slider label='Bias' value={ssaoBias} min={0} max={0.2} step={0.005}
           onChange={(v) => { renderer.ssaoBias = v; setSsaoBias(v); touch(); }} />
       </Section>

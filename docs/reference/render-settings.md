@@ -35,6 +35,7 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | `renderScale` | 1.0 | 1.0 | 1.0 | 0.75 |
 | cloud resolution / steps / light steps | 1.0 / 48 / 6 | 0.5 / 40 / 5 | 0.35 / 28 / 4 | 0.25 / 20 / 3 |
 | `ssaoEnabled` / `ssaoSamples` / `ssaoResolutionScale` | on / 64 / 1.0 | on / 24 / 0.5 | on / 16 / 0.5 | **off** / 16 / 0.5 |
+| `ssilEnabled` | on | on | off | off |
 | `shadowMapResolution` / `shadowCascades` | 4096 / 4 | 2048 / 3 | 1024 / 3 | 1024 / 2 |
 | `shadowFilterMode` / `shadowFilterRadius` | 1 / 2.0 | 0 / 1.0 | 0 / 1.0 | 0 / **0.0** |
 | `bloomEnabled` | on | on | on | off |
@@ -137,16 +138,23 @@ with a real aperture, so the near field blurs harder than the far field.
 
 Per-object motion blur can be suppressed on a node with `node.motionBlur = 'objectOnly' | 'none'`.
 
-## Ambient occlusion and shading
+## Ambient occlusion, indirect light and shading
+
+The `ssao*` fields drive one screen-space pass, SSIL (screen-space indirect lighting with a visibility
+bitmask), which gives the ambient occlusion and, with `ssilEnabled`, one bounce of nearby light.
+The names predate it and are kept so saved settings still load.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `ssaoEnabled` | `boolean` | preset | Screen-space AO. Deferred path only. |
-| `ssaoRadius` | `number` | `0.5` | Sample radius in **world units**. |
-| `ssaoPower` | `number` | `1.5` | Contrast of the occlusion term. |
-| `ssaoBias` | `number` | `0.025` | Depth bias, to stop a surface occluding itself. |
-| `ssaoSamples` | `number` | `24` | Samples per pixel. |
-| `ssaoResolutionScale` | `number` | `0.5` | AO buffer size as a fraction of the render size. |
+| `ssaoEnabled` | `boolean` | preset | The pass: ambient occlusion, and the bounce if `ssilEnabled`. Deferred path only. |
+| `ssilEnabled` | `boolean` | preset | Bounce light from nearby surfaces, from last frame's image. Off leaves AO alone. |
+| `ssilIntensity` | `number` | `1.0` | Scale on the bounce. 1 is physically based. |
+| `ssaoRadius` | `number` | `0.5` | How far an occluder can be, in **world units**. |
+| `ssaoPower` | `number` | `1.5` | Contrast of the occlusion term. The bounce is unaffected. |
+| `ssaoThickness` | `number` | `0.25` | How deep an occluder is assumed to be, in world units. Light passes behind anything thinner. |
+| `ssaoBias` | `number` | `0.025` | Samples nearer than this, in world units, are ignored, to stop a surface occluding itself. |
+| `ssaoSamples` | `number` | `24` | Per-pixel cost budget. The trace spends about two thirds of it in depth samples, split into directions and steps. |
+| `ssaoResolutionScale` | `number` | `0.5` | Buffer size as a fraction of the render size. |
 | `specularOcclusionEnabled` | `boolean` | `true` | Give the indirect specular lobe its own occlusion term. Off multiplies both lobes by the same number, which visibly strips the reflection off a polished floor in a corner. |
 | `specularAaEnabled` | `boolean` | `true` | Widen roughness by sub-pixel normal variance so highlights stop flickering. PBR and terrain only. |
 | `horizonOcclusionEnabled` | `boolean` | `true` | Drop indirect specular where the reflection ray points into the surface. This is the fix for the wet-looking rim on strongly normal-mapped surfaces at glancing angles. |

@@ -54,7 +54,7 @@ describe('programsFor', () => {
         const list = programsFor(use);
         // Skinned PBR characters, static PBR geometry, one shadow filter, the deferred resolve.
         for (const name of ['pbrSkinned~pcf', 'pbrGeometrySkinned~flat', 'pbrGeometry~flat', 'deferredLighting~pcf',
-                            'screen', 'present', 'skyAtmosphere', 'volumetricClouds', 'particleBillboard', 'ssao', 'vignette'])
+                            'screen', 'present', 'skyAtmosphere', 'volumetricClouds', 'particleBillboard', 'ssil', 'vignette'])
             expect(list, name).toContain(name);
         // Particles as stripped variants.
         expect(list.some(n => /^particleSim~s\d+$/.test(n))).toBe(true);

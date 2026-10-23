@@ -20,8 +20,11 @@ live buffers.
 Blit one internal buffer instead of the final composite. This is the fastest way to answer "why does
 this look wrong":
 
-**Final, Lit Scene, Albedo, Metallic, Normal, Roughness, Emissive, AO, Depth, SSAO, Shadow,
+**Final, Lit Scene, Albedo, Metallic, Normal, Roughness, Emissive, AO, Depth, SSAO, Indirect, Shadow,
 Cascades, Bloom, Bloom Mask, Velocity, TAA History, Overdraw.**
+
+**SSAO** is the screen-space occlusion; **Indirect** is the bounce light the same pass gathers, before
+it is multiplied by each surface's colour.
 
 | Looking at | Channel |
 |---|---|
@@ -105,10 +108,30 @@ Directional shadows with cascades, plus separate spot and point shadow blocks.
 
 Point shadow resolution is **per cube face**, so it is six times the memory it looks like.
 
-### SSAO and shading
+### Ambient occlusion and indirect light
 
-SSAO (deferred path only) with a world-unit radius, power and bias. Then three shading toggles, all
-on by default:
+One screen-space pass (deferred path only) gives both. Nearby geometry darkens the ambient light it
+blocks, and with **Indirect Light** on it also sends back the light it received last frame — colour
+bleeding from a red wall onto the floor, bounce light under eaves and at the foot of walls, an
+emissive surface lighting what is next to it.
+
+| Setting | What it does |
+|---|---|
+| **Enabled** | The whole pass. Off is no occlusion and no bounce. |
+| **Indirect Light** | The bounce. Off leaves ambient occlusion alone, which is cheaper. On in the High and Ultra presets. |
+| **Indirect Intensity** | Scales the bounce. 1 is physically based. |
+| **Radius** | How far, in world units, an occluder can be and still count. Larger finds more bounce. |
+| **Power** | Contrast of the occlusion. Does not affect the bounce. |
+| **Thickness** | How deep each occluder is assumed to be. Light passes behind anything thinner, so a pole in front of a wall no longer paints a dark halo on it. |
+| **Bias** | Samples closer than this are ignored, against a surface occluding itself. |
+
+It only sees what is on screen: light from something behind the camera, or hidden behind another
+object, is not bounced. Blinn-Phong, cel and custom forward materials neither receive it nor, being
+outside the G-buffer, occlude.
+
+### Shading
+
+Three shading toggles, all on by default:
 
 - **Specular occlusion** — gives the specular lobe its own occlusion term. Off, a polished floor
   standing in a corner visibly loses its reflection.

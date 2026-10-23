@@ -375,8 +375,8 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     // `gNormalRoughness = vec4(normalize(s.normal), s.roughness)` after the user's `surface(s)` returns,
     // so how those bits are encoded is entirely the engine's business. Oct-packing IS available, frees
     // exactly one channel, and only four engine-owned consumers decode the normal (deferredLighting,
-    // ssao, debugView, and the hand-written fallback FS in customShaders.ts). One trap if anyone takes
-    // it: ssao.wgsl's `dot(normalW, normalW) < 1e-6` "nothing was written here" sentinel stops working,
+    // the AO pass (now ssil), debugView, and the hand-written fallback FS in customShaders.ts). One trap
+    // if anyone takes it: the old ssao.wgsl's `dot(normalW, normalW) < 1e-6` "nothing was written here" sentinel stops working,
     // because (0,0) is a VALID oct direction.
     //
     // chunks/pbrForward.wgsl, which has the light list, applies the same term properly.

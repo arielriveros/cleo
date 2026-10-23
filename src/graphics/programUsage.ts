@@ -38,7 +38,7 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     cel: 'feature', celSkinned: 'feature',
     terrain: 'feature', terrainGeometry: 'feature', terrainForward: 'feature', foliageBillboardInstanced: 'feature',
     tilemap: 'feature',
-    ssao: 'feature', ssaoBlur: 'feature',
+    ssil: 'feature', ssilTemporal: 'feature', ssilBlur: 'feature', ssilHistory: 'feature',
     shadowMapSkinned: 'feature', shadowMapInstanced: 'feature', shadowMapInstancedCutout: 'feature',
     shadowMapCutout: 'feature', shadowMapSkinnedCutout: 'feature', shadowMapBasicCutout: 'feature',
     shadowMapBasicSkinnedCutout: 'feature',
@@ -204,7 +204,7 @@ export function usageFromRenderSettings(settings: Partial<RenderSettings> | null
     const filter = (s.shadowFilterMode ?? (tier as { shadowFilterMode?: number } | undefined)?.shadowFilterMode ?? 0) === 1 ? 1 : 0;
     use.filters.add(filter);
     if (on('bloomEnabled', 'bloomEnabled')) add('bloom', 'bloomDownsample', 'bloomUpsample');
-    if (on('ssaoEnabled', 'ssaoEnabled')) add('ssao', 'ssaoBlur');
+    if (on('ssaoEnabled', 'ssaoEnabled')) add('ssil', 'ssilTemporal', 'ssilBlur', 'ssilHistory');
     if (on('autoExposureEnabled')) add('exposureMeter');
     if (on('dofEnabled')) add('dofCoc', 'dofGather', 'dofComposite');
     if (positive('lensFlareIntensity')) add('lensFlare', 'lensFlareComposite');
