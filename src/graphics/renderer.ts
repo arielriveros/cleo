@@ -2841,7 +2841,7 @@ export class Renderer {
         // Frame-default probe: the one whose volume covers the camera. Uses its SHARP linear-HDR
         // capture rather than the convolved prefilter, falling back to the sRGB scene environment;
         // `u_envMapLinear` tells the shader which decode to apply.
-        const probe = scene.probeForPoint(this._activeCamera.position);
+        const probe = scene.probeForPoint(this._activeCamera.position, true);
         const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
         const envCube = probeCube ?? scene.environmentMap;
         for (const shaderName of this._forwardShaders()) {
@@ -5445,6 +5445,8 @@ export class Renderer {
         gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
     }
 
+    private readonly _probeLobes: [number[], number[]] = [[1, 1], [1, 1]];
+
     private _deferredLightingPass(scene: Scene, shadowLight: LightNode | null): void {
         const w = this._renderWidth, h = this._renderHeight;
 
@@ -5510,6 +5512,11 @@ export class Renderer {
             this._shaderManager.setUniform(`u_probeUnbounded${i}`, slot ? !slot.bounded : false);
             this._shaderManager.setUniform(`u_probeInvVolume${i}`, slot && slot.bounded ? slot.invVolumeMatrix : Renderer._IDENTITY_MAT4);
             this._shaderManager.setUniform(`u_probeBlend${i}`, slot && slot.bounded ? slot.volumeBlend : [0, 0, 0]);
+            // Which lobes the probe claims: x = lighting (diffuse), y = reflections (specular).
+            const lobes = this._probeLobes[i];
+            lobes[0] = slot && slot.affectsLighting ? 1 : 0;
+            lobes[1] = slot && slot.affectsReflections ? 1 : 0;
+            this._shaderManager.setUniform(`u_probeLobes${i}`, lobes);
         }
 
         // SSIL. Always bind a complete texture so the sampler is valid; the shader only reads it when
@@ -6632,11 +6639,33 @@ export class Renderer {
      * sky light, which receives what the sun loses (see _uploadSkyLight and CLOUD_SKY_FILL); applying
      * the same grade here as well would count it twice. This term is the floor for a scene that has
      * no sky light at all.
+     *
+     * A sky light, when there is one, owns how much of that floor survives: its `ambient` scale and its
+     * `nightAmbient` share. Unlike the sky's own projection, the floor does not darken with the sky, so
+     * without that a moonless night stays as lit as the shade at noon.
      */
     private _internalAmbient(scene: Scene | null): number[] {
         const lux = scene ? scene.ambientLight : [DEFAULT_SCENE_AMBIENT_LUX, DEFAULT_SCENE_AMBIENT_LUX, DEFAULT_SCENE_AMBIENT_LUX];
-        const k = 1 / REFERENCE_ILLUMINANCE;
+        const sky = scene?.skyLight ?? null;
+        const k = (sky ? sky.ambientScale(this._sunElevation(scene!)) : 1) / REFERENCE_ILLUMINANCE;
         return [lux[0] * k, lux[1] * k, lux[2] * k];
+    }
+
+    /**
+     * Sine of the sun's elevation as the sky shows it, or null when the scene has no sun. The
+     * atmosphere's baked sun when it has one — that is the sky actually drawn, and a manual atmosphere
+     * sun need not match any light. Otherwise the first directional light, read off the node itself:
+     * `_dirOf` hands back the moon at night.
+     */
+    private _sunElevation(scene: Scene): number | null {
+        const atmo = scene.skyAtmosphere;
+        if (atmo && atmo.cubemap) return atmo.lastSunDir[1];
+        for (const node of scene.lights) {
+            if (node.type !== 'directional') continue;
+            const f = node.worldForward;
+            return -f[1] / (Math.hypot(f[0], f[1], f[2]) || 1);
+        }
+        return null;
     }
 
     /** A directional light's colour after the cloud grade: whitened, but NOT dimmed — see _uploadDirectional. */
@@ -9503,7 +9532,8 @@ export class Renderer {
         if (!this._capturing && this._currentScene &&
             (shaderType === 'blinn_phong' || shaderType === 'blinn_phongSkinned' ||
              shaderType === 'pbr' || shaderType === 'pbrSkinned' || shaderType.startsWith('custom:'))) {
-            const probe = this._currentScene.probeForPoint(node.worldPosition);
+            // Reflections are all the forward path takes from a probe; its lighting is the sky and ambient.
+            const probe = this._currentScene.probeForPoint(node.worldPosition, true);
             const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
             const cube = probeCube ?? this._currentScene.environmentMap;
             this._shaderManager.setUniform('u_useEnvMap', cube ? true : false);

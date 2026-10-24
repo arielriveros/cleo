@@ -1198,15 +1198,17 @@ export class Scene {
     /**
      * The baked probe with the highest feathered containment weight at `position` (bounded volumes
      * first — an unbounded probe only wins when no volume contains the point), else null.
-     * Used for per-mesh probe selection on the forward path.
+     * Used for per-mesh probe selection on the forward path. `reflections` skips probes set not to
+     * give reflections, which is all the forward path takes from one.
      */
-    public probeForPoint(position: vec3): LightProbeNode | null {
+    public probeForPoint(position: vec3, reflections: boolean = false): LightProbeNode | null {
         let best: LightProbeNode | null = null;
         let bestWeight = 0;
         let nearestUnbounded: LightProbeNode | null = null;
         let nearestDist = Infinity;
         for (const probe of this.lightProbes) {
             if (!probe.hasBakedMaps) continue;
+            if (reflections && !probe.affectsReflections) continue;
             if (probe.bounded) {
                 const w = probe.probeWeight(position);
                 if (w > bestWeight) { bestWeight = w; best = probe; }
@@ -1228,6 +1230,8 @@ export class Scene {
         const unbounded: LightProbeNode[] = [];
         for (const probe of this.lightProbes) {
             if (!probe.hasBakedMaps) continue;
+            // A probe that contributes nothing would only take a slot from one that does.
+            if (!probe.affectsLighting && !probe.affectsReflections) continue;
             (probe.bounded ? bounded : unbounded).push(probe);
         }
         const byDist = (a: LightProbeNode, b: LightProbeNode) =>

@@ -236,6 +236,7 @@ Captures local reflections and irradiance inside a bounded volume.
 ```ts
 resolution: number ; mode: 'baked' | 'realtime' ; updateFrequency: number
 intensity: number ; size: vec3 ; blendDistance: number
+affectsLighting: boolean ; affectsReflections: boolean   // both true by default
 get bounded: boolean ; get invVolumeMatrix: mat4 ; get volumeBlend: number
 probeWeight(p: vec3): number
 bake(): void ; markBaked(t: number): void
@@ -244,6 +245,12 @@ get hasBakedMaps / irradiance / prefiltered / envMap / needsBake / lastBakeTime
 ```
 
 Probes saved before volumes existed deserialize as unbounded.
+
+`affectsLighting` off keeps the probe out of the diffuse lighting inside its volume: surfaces there are
+lit by whatever else covers them (another probe, the sky light, the scene ambient) and still take
+their reflections from this probe. `affectsReflections` is the converse. Neither needs a re-bake. The
+forward-shaded materials only ever take reflections from a probe, so `affectsLighting` changes the
+deferred path alone.
 
 ### SkyboxNode — `'skybox'`
 
@@ -273,9 +280,18 @@ Ambient light projected from the sky.
 
 ```ts
 intensity: number ; tint: vec3 ; cloudResponse: number   // 0..1
+ambient: number        // x the scene's flat ambient (Scene settings), default 1
+nightAmbient: number   // 0..1, share of that ambient kept after sunset, default 1
+ambientScale(sunElevationSin: number | null): number
 get needsProjection: boolean
 markDirty(): void ; markProjected(): void
 ```
+
+The scene's flat ambient (`Scene.ambientLight`, lux) is added to every shaded pixel and does not
+darken with the sky. With a sky light in the scene, the renderer scales it by `ambientScale`: `ambient`
+always, and `nightAmbient` faded in by `nightFactor` of the sun's elevation (full from about 8° below
+the horizon). The sun is the Sky Atmosphere's baked sun, or else the first directional light. Set
+`nightAmbient` near 0 and a moonless night goes almost black while the day keeps its fill.
 
 > The spherical-harmonic projection decides it is stale by comparing cubemap **object identity**,
 > and a sky re-bake renders into the same texture. So indirect light freezes at the first sun

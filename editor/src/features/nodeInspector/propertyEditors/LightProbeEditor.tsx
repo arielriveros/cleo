@@ -1,10 +1,11 @@
 import { LightProbeNode } from 'cleo';
 import { useState, useEffect, useCallback } from 'react';
 import Collapsable from '../../../components/Collapsable';
-import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button } from '../../../components/ui';
+import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Toggle } from '../../../components/ui';
 import { ProbeIcon } from '../sectionIcons';
 
 const BOUNDS_HINT = 'Set all three sizes above 0 and the probe only lights meshes/pixels inside its box volume, which moves and rotates with the node; the IBL feathers out over the blend distance. Any size at 0 leaves the probe unbounded: it affects the whole scene (legacy behavior).';
+const AFFECTS_HINT = 'What the probe gives surfaces inside its volume. Lighting is the light it bounces onto them; Reflections is what they mirror. Turn Lighting off to keep the area lit by the sky light and ambient (or another probe) while still reflecting this probe\'s surroundings. No re-bake needed.';
 import { useEventBus } from '../../EventBusContext';
 import { useCleoEngine } from '../../EngineContext';
 import { clamp } from '../../../utils/math';
@@ -19,6 +20,8 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
     sizeY: props.node.size[1],
     sizeZ: props.node.size[2],
     blendDistance: props.node.blendDistance,
+    affectsLighting: props.node.affectsLighting,
+    affectsReflections: props.node.affectsReflections,
   });
 
   useEffect(() => {
@@ -31,6 +34,8 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
       sizeY: props.node.size[1],
       sizeZ: props.node.size[2],
       blendDistance: props.node.blendDistance,
+      affectsLighting: props.node.affectsLighting,
+      affectsReflections: props.node.affectsReflections,
     });
   }, [props.node]);
 
@@ -41,6 +46,8 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
     props.node.intensity = state.intensity;
     props.node.size = [state.sizeX, state.sizeY, state.sizeZ];
     props.node.blendDistance = state.blendDistance;
+    props.node.affectsLighting = state.affectsLighting;
+    props.node.affectsReflections = state.affectsReflections;
   }, [state, props.node]);
 
   const eventEmitter = useEventBus();
@@ -122,6 +129,14 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
           )}
           <PropertyRow label='Intensity'>
             <Slider min={0} max={3} step={0.05} value={state.intensity} onChange={(v) => update({ intensity: v })} />
+          </PropertyRow>
+          <PropertyRow label='Affects' labelClassName='align-top pt-1.5' hint={AFFECTS_HINT}>
+            <div className='flex flex-col items-start gap-1'>
+              <Toggle label='Lighting' checked={state.affectsLighting}
+                      onChange={(v) => update({ affectsLighting: v })} />
+              <Toggle label='Reflections' checked={state.affectsReflections}
+                      onChange={(v) => update({ affectsReflections: v })} />
+            </div>
           </PropertyRow>
           <PropertyRow label='Size X' hint={BOUNDS_HINT}>
             <NumberInput min={0} step={0.5} value={state.sizeX} onChange={(v) => update({ sizeX: Math.max(0, v) })} />

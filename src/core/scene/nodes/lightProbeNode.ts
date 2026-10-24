@@ -17,6 +17,11 @@ export class LightProbeNode extends Node {
     private _size: [number, number, number];
     // Feather width in world units: IBL fades to zero over this distance inside the volume boundary.
     private _blendDistance: number;
+    // What the probe contributes inside its volume: the diffuse light it bounces onto surfaces, the
+    // reflections, or both. Off for one, whatever is behind the probe — another probe, the sky light,
+    // the scene ambient — supplies it there instead.
+    private _affectsLighting: boolean;
+    private _affectsReflections: boolean;
     private _needsBake: boolean = true;
     private _lastBakeTime: number = 0;
     private _sourceCube: Texture | null = null;
@@ -28,7 +33,8 @@ export class LightProbeNode extends Node {
 
     constructor(
         name: string,
-        options: { resolution?: number, mode?: 'baked' | 'realtime', updateFrequency?: number, intensity?: number, size?: [number, number, number], blendDistance?: number } = {},
+        options: { resolution?: number, mode?: 'baked' | 'realtime', updateFrequency?: number, intensity?: number, size?: [number, number, number], blendDistance?: number,
+                   affectsLighting?: boolean, affectsReflections?: boolean } = {},
         id: string = uuidv4()
     ) {
         super(name, 'lightProbe', id);
@@ -38,6 +44,8 @@ export class LightProbeNode extends Node {
         this._intensity = options.intensity ?? 1;
         this._size = options.size ? [options.size[0], options.size[1], options.size[2]] : [0, 0, 0];
         this._blendDistance = options.blendDistance ?? 1;
+        this._affectsLighting = options.affectsLighting ?? true;
+        this._affectsReflections = options.affectsReflections ?? true;
     }
 
     // --- Editor-facing properties (setting the ones that affect the capture flags a re-bake) ---
@@ -54,6 +62,16 @@ export class LightProbeNode extends Node {
     public set size(v: [number, number, number]) { this._size = [Math.max(0, v[0]), Math.max(0, v[1]), Math.max(0, v[2])]; }
     public get blendDistance(): number { return this._blendDistance; }
     public set blendDistance(v: number) { this._blendDistance = Math.max(0, v); }
+    /**
+     * Whether the probe lights surfaces inside its volume (diffuse irradiance). Off, it only gives them
+     * reflections, and their lighting comes from whatever covers them otherwise. No re-bake: the capture
+     * is the same, only how it is applied changes.
+     */
+    public get affectsLighting(): boolean { return this._affectsLighting; }
+    public set affectsLighting(v: boolean) { this._affectsLighting = !!v; }
+    /** Whether the probe gives surfaces inside its volume their reflections (specular). */
+    public get affectsReflections(): boolean { return this._affectsReflections; }
+    public set affectsReflections(v: boolean) { this._affectsReflections = !!v; }
 
     // --- Influence volume ---
     /** True when the probe has a finite influence box; false = unbounded (affects the whole scene). */
@@ -149,6 +167,8 @@ export class LightProbeNode extends Node {
                     intensity: this._intensity,
                     size: [this._size[0], this._size[1], this._size[2]],
                     blendDistance: this._blendDistance,
+                    affectsLighting: this._affectsLighting,
+                    affectsReflections: this._affectsReflections,
         };
     }
 
@@ -159,7 +179,9 @@ export class LightProbeNode extends Node {
             updateFrequency: json.updateFrequency,
             intensity: json.intensity,
             size: json.size,           // absent in pre-volume scenes -> [0,0,0] = unbounded (legacy)
-            blendDistance: json.blendDistance
+            blendDistance: json.blendDistance,
+            affectsLighting: json.affectsLighting,         // absent in older scenes -> true
+            affectsReflections: json.affectsReflections,
         }, json.id);
         Node.finishParse(node, parent, json);
     }

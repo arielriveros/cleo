@@ -49,6 +49,46 @@ describe('SkyLightNode', () => {
         expect(node.needsProjection).toBe(true);
     });
 
+    it('leaves the scene ambient alone by default, day and night', () => {
+        const node = new SkyLightNode('sky light');
+        expect(node.ambientScale(0.8)).toBe(1);
+        expect(node.ambientScale(-0.5)).toBe(1);
+        expect(node.ambientScale(null)).toBe(1);
+    });
+
+    it('fades the ambient to the night share once the sun is down', () => {
+        const node = new SkyLightNode('sky light', { ambient: 0.5, nightAmbient: 0.02 });
+        expect(node.ambientScale(0.5)).toBeCloseTo(0.5);           // day: the plain scale
+        expect(node.ambientScale(-0.5)).toBeCloseTo(0.5 * 0.02);   // deep night: the night share of it
+        const dusk = node.ambientScale(-0.05);
+        expect(dusk).toBeLessThan(0.5);
+        expect(dusk).toBeGreaterThan(0.01);
+        // No sun to tell day from night: the night share never applies.
+        expect(node.ambientScale(null)).toBeCloseTo(0.5);
+        node.nightAmbient = -1;
+        expect(node.nightAmbient).toBe(0);
+        node.ambient = -2;
+        expect(node.ambient).toBe(0);
+    });
+
+    it('round-trips the ambient settings; an older save keeps the full ambient', async () => {
+        const node = new SkyLightNode('sky light', { ambient: 1.5, nightAmbient: 0.1 });
+        const root = new Node('root');
+        parseNodeJson(root, await node.serialize());
+        const parsed = root.children[0] as SkyLightNode;
+        expect(parsed.ambient).toBeCloseTo(1.5);
+        expect(parsed.nightAmbient).toBeCloseTo(0.1);
+
+        const old = await new SkyLightNode('old').serialize();
+        delete old.skyLight.ambient;
+        delete old.skyLight.nightAmbient;
+        const root2 = new Node('root');
+        parseNodeJson(root2, old);
+        const restored = root2.children[0] as SkyLightNode;
+        expect(restored.ambient).toBe(1);
+        expect(restored.nightAmbient).toBe(1);
+    });
+
     it('starts dirty, so a freshly loaded scene projects without anything having to touch it', () => {
         expect(new SkyLightNode('sky light').needsProjection).toBe(true);
     });

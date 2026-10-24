@@ -2,6 +2,7 @@ import type { Scene } from "../scene";
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
+import { nightFactor } from "../../../graphics/skyNight";
 
 /**
  * Scene-wide indirect light taken from whatever is in the sky — the baked `SkyAtmosphereNode` cubemap
@@ -25,6 +26,17 @@ export interface SkyLightOptions {
     cloudShadows?: boolean;
     /** How dark a cloud's shadow gets, 0..1. 1 = what the cloud's density says. */
     cloudShadowStrength?: number;
+    /**
+     * Multiplier on the scene's flat ambient fill (Scene settings -> Ambient) while this sky light is in
+     * the scene. 1 = as authored there; 0 = the sky light (and any probes) alone light the shade.
+     */
+    ambient?: number;
+    /**
+     * Share of that fill kept once the sun is down, 0..1. It fades on the sky's own dusk curve
+     * (`nightFactor`), so the day keeps its fill and a moonless night can go almost black.
+     * 1 = the night keeps the full fill, as it always did.
+     */
+    nightAmbient?: number;
 }
 
 export class SkyLightNode extends Node {
@@ -33,6 +45,8 @@ export class SkyLightNode extends Node {
     private _cloudResponse: number;
     private _cloudShadows: boolean;
     private _cloudShadowStrength: number;
+    private _ambient: number;
+    private _nightAmbient: number;
 
     /**
      * Set whenever something the projection depends on changes, cleared by the renderer once it has
@@ -47,6 +61,8 @@ export class SkyLightNode extends Node {
         this._cloudResponse = Math.min(1, Math.max(0, options.cloudResponse ?? 1));
         this._cloudShadows = options.cloudShadows ?? false;
         this._cloudShadowStrength = Math.min(1, Math.max(0, options.cloudShadowStrength ?? 0.85));
+        this._ambient = Math.max(0, options.ambient ?? 1);
+        this._nightAmbient = Math.min(1, Math.max(0, options.nightAmbient ?? 1));
     }
 
     public get intensity(): number { return this._intensity; }
@@ -67,6 +83,22 @@ export class SkyLightNode extends Node {
     public set cloudShadows(v: boolean) { this._cloudShadows = v; }
     public get cloudShadowStrength(): number { return this._cloudShadowStrength; }
     public set cloudShadowStrength(v: number) { this._cloudShadowStrength = Math.min(1, Math.max(0, v)); }
+
+    // Neither re-projects: the scene ambient is a separate uniform, scaled at upload time.
+    public get ambient(): number { return this._ambient; }
+    public set ambient(v: number) { this._ambient = Math.max(0, v); }
+    public get nightAmbient(): number { return this._nightAmbient; }
+    public set nightAmbient(v: number) { this._nightAmbient = Math.min(1, Math.max(0, v)); }
+
+    /**
+     * What the renderer multiplies the scene's flat ambient by. `sunElevationSin` is the sine of the
+     * sun's elevation, or null for a scene with no sun to tell day from night — the night share then
+     * never applies.
+     */
+    public ambientScale(sunElevationSin: number | null): number {
+        if (sunElevationSin === null || this._nightAmbient >= 1) return this._ambient;
+        return this._ambient * (1 + (this._nightAmbient - 1) * nightFactor(sunElevationSin));
+    }
 
     public get needsProjection(): boolean { return this._needsProjection; }
     /** Force a re-projection on the next frame (the sky changed, or the editor asked). */
@@ -91,6 +123,8 @@ export class SkyLightNode extends Node {
                 cloudResponse: this._cloudResponse,
                 cloudShadows: this._cloudShadows,
                 cloudShadowStrength: this._cloudShadowStrength,
+                ambient: this._ambient,
+                nightAmbient: this._nightAmbient,
             },
         };
     }

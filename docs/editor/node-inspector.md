@@ -58,15 +58,19 @@ none), yaw and pitch sensitivity and limits, **arm length**, **socket offset**, 
 **Light** — photometric intensity (lux for directional, lumens for point and spot), colour,
 per-kind parameters, shadow casting.
 
-**Light Probe** — influence volume, blend distance, intensity, capture mode and bake controls.
+**Light Probe** — influence volume, blend distance, intensity, what it affects (lighting,
+reflections, or both), capture mode and bake controls. A reflections-only probe gives a room or a
+pond its local reflections without changing how the sky and ambient light it.
 
 **Skybox** — six cube faces.
 
 **Sky Atmosphere** — sun, atmosphere, quality, fog and god-ray parameters. See
 [Node types](../reference/node-types.md#skyatmospherenode--skyatmosphere).
 
-**Sky Light** — intensity, tint, cloud response, and an L0 read-out that separates "the projection
-has not landed yet" from "the sky really is that dim".
+**Sky Light** — intensity, tint, ambient and night ambient, cloud response, and an L0 read-out that
+separates "the projection has not landed yet" from "the sky really is that dim". **Ambient** scales
+the scene's flat ambient fill (Scene settings → Ambient); **Night Ambient** is how much of it is kept
+after sunset, so a night without a moon can go almost pitch black while the day is unchanged.
 
 **Volumetric Clouds** — shape, lighting, animation, quality and render parameters.
 

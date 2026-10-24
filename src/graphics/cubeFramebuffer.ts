@@ -9,8 +9,14 @@ import { Texture } from './texture';
  * depth attachment. Used by the IBL pipeline for scene capture and the convolution passes.
  */
 export class CubeFramebuffer {
-    private _depth: Texture | null = null;
-    private _depthSize: number = 0;
+    /**
+     * Scratch depth, one per face size, kept for the life of the framebuffer. It used to be ONE texture
+     * reallocated whenever the size changed, and deleting it mid-frame is what broke WebGPU: two light
+     * probes of different resolutions captured in the same frame — every probe bakes at the start of
+     * Play — left the first capture's passes pointing at a destroyed texture, the queue rejected the
+     * frame's whole command buffer, and the sky bake recorded in it with them: a black sky.
+     */
+    private readonly _depths = new Map<number, Texture>();
 
     /**
      * The render target for one face/mip of `cube`, for callers recording through the RHI.
@@ -42,21 +48,21 @@ export class CubeFramebuffer {
         });
     }
 
-    // Reallocated only on a size change; deleting the old texture also evicts every render target
-    // that referenced it.
+    // Made on first use of each size and never released before `destroy`: a frame may already have
+    // recorded passes against it. Probe resolutions are a handful of powers of two.
     private _depthFor(size: number): Texture {
-        if (this._depth && this._depthSize === size) return this._depth;
-        this._depth?.delete();
-        this._depth = new Texture({ usage: 'depth', mipMap: false });
-        this._depth.create(null, size, size);
-        this._depthSize = size;
-        return this._depth;
+        let depth = this._depths.get(size);
+        if (!depth) {
+            depth = new Texture({ usage: 'depth', mipMap: false });
+            depth.create(null, size, size);
+            this._depths.set(size, depth);
+        }
+        return depth;
     }
 
-    /** Release the scratch depth texture. The cube faces belong to the cubemap, not to this. */
+    /** Release the scratch depth textures. The cube faces belong to the cubemap, not to this. */
     public destroy(): void {
-        this._depth?.delete();
-        this._depth = null;
-        this._depthSize = 0;
+        for (const depth of this._depths.values()) depth.delete();
+        this._depths.clear();
     }
 }

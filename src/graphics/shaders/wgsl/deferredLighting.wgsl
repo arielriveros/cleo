@@ -70,6 +70,10 @@ struct Lighting {
     u_probeBlend1: vec3<f32>,
     /** One AO texel in this pass's UV space; (0,0) means the AO buffer is full resolution. */
     u_ssaoTexelSize: vec2<f32>,
+    // What each probe slot contributes: x = lighting (diffuse irradiance), y = reflections (specular),
+    // each 0 or 1. See the probe blend in the fragment stage.
+    u_probeLobes0: vec2<f32>,
+    u_probeLobes1: vec2<f32>,
 
     u_iblIntensity0: f32,
     u_iblIntensity1: f32,
@@ -339,8 +343,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (u_lighting.u_probeCount > 0) {
         // Priority blend: slot 0 (nearest/bounded first — see Scene.probesForFrame) claims its weight,
         // slot 1 fills what remains, and the fallback covers the rest. A single unbounded probe reduces
-        // to w0 = 1 -> exactly the legacy full-IBL result. Both lobes blend by the SAME weights: the
-        // split is about how they are occluded, not about where they come from.
+        // to w0 = 1 -> exactly the legacy full-IBL result.
+        //
+        // Each lobe runs the blend with its OWN weights, because a probe can be set to give only one of
+        // them (`u_probeLobes`): a reflections-only probe claims the specular and leaves the diffuse to
+        // whatever is behind it — the other slot, the sky light, the ambient — exactly as if it were not
+        // there. With both lobes on the two blends are the same one, as they always were.
         let w0 = probeWeight(worldPos, u_lighting.u_probeInvVolume0, u_lighting.u_probeBlend0,
                              u_lighting.u_probeUnbounded0);
         var w1 = 0.0;
@@ -348,26 +356,30 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             w1 = probeWeight(worldPos, u_lighting.u_probeInvVolume1, u_lighting.u_probeBlend1,
                              u_lighting.u_probeUnbounded1);
         }
-        let c0 = w0;
-        let c1 = w1 * (1.0 - w0);
-        let rest = (1.0 - w0) * (1.0 - w1);
-        indirect.diffuse *= rest;
-        indirect.specular *= rest;
-        if (c0 > 0.0) {
+        let d0 = w0 * u_lighting.u_probeLobes0.x;
+        let d1 = w1 * u_lighting.u_probeLobes1.x;
+        let s0 = w0 * u_lighting.u_probeLobes0.y;
+        let s1 = w1 * u_lighting.u_probeLobes1.y;
+        // Each slot's share of each lobe; the fallback keeps what neither claims.
+        let dc0 = d0;
+        let dc1 = d1 * (1.0 - d0);
+        let sc0 = s0;
+        let sc1 = s1 * (1.0 - s0);
+        indirect.diffuse *= (1.0 - d0) * (1.0 - d1);
+        indirect.specular *= (1.0 - s0) * (1.0 - s1);
+        if (dc0 > 0.0 || sc0 > 0.0) {
             let probe = probeIBL(u_irradiance0_texture, u_irradiance0_sampler,
                                  u_prefiltered0_texture, u_prefiltered0_sampler,
                                  N, V, albedo, metallic, roughness, F0);
-            let k = u_lighting.u_iblIntensity0 * c0;
-            indirect.diffuse += probe.diffuse * k;
-            indirect.specular += probe.specular * k;
+            indirect.diffuse += probe.diffuse * (u_lighting.u_iblIntensity0 * dc0);
+            indirect.specular += probe.specular * (u_lighting.u_iblIntensity0 * sc0);
         }
-        if (c1 > 0.0) {
+        if (dc1 > 0.0 || sc1 > 0.0) {
             let probe = probeIBL(u_irradiance1_texture, u_irradiance1_sampler,
                                  u_prefiltered1_texture, u_prefiltered1_sampler,
                                  N, V, albedo, metallic, roughness, F0);
-            let k = u_lighting.u_iblIntensity1 * c1;
-            indirect.diffuse += probe.diffuse * k;
-            indirect.specular += probe.specular * k;
+            indirect.diffuse += probe.diffuse * (u_lighting.u_iblIntensity1 * dc1);
+            indirect.specular += probe.specular * (u_lighting.u_iblIntensity1 * sc1);
         }
     }
 

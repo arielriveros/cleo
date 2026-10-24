@@ -12,6 +12,8 @@ type Vec3 = [number, number, number]
 
 const SKY_LIGHT_HINT = 'Lights the scene with the sky itself — a surface facing up receives the zenith, one facing a sunset receives the sunset. Works from the Sky Atmosphere or from a Skybox, whichever the scene has. Add one and there is no need for a light probe just to get ambient light.'
 const CLOUD_SHADOWS_HINT = 'The volumetric clouds shade the ground: the sun is dimmed under each cloud, and the shadows drift with the cloud wind. Shown while the scene has enabled Volumetric Clouds.'
+const AMBIENT_HINT = 'Scales the scene’s flat ambient fill (Scene settings → Ambient) while this sky light is in the scene. That fill lights every shadow evenly and, unlike the sky light, does not darken with the sky. At 0 only the sky light and any light probes light the shade.'
+const NIGHT_AMBIENT_HINT = 'How much of that ambient fill is kept once the sun is down. It fades with the sky over dusk, so the day keeps its fill. At 0 a night without a moon goes almost pitch black; the moon, torches and the sky light still light it.'
 const CLOUD_RESPONSE_HINT = 'How much the scene’s clouds change the lighting. At 1 an overcast sky takes the sun’s strength and its warm cast and hands both to the sky, which also goes flat — so the scene reads white and shadowless. At 0 the clouds are drawn but light nothing.'
 
 /**
@@ -28,6 +30,8 @@ export default function SkyLightEditor(props: { node: SkyLightNode }) {
   const [cloudResponse, setCloudResponse] = useState(props.node.cloudResponse)
   const [cloudShadows, setCloudShadows] = useState(props.node.cloudShadows)
   const [cloudShadowStrength, setCloudShadowStrength] = useState(props.node.cloudShadowStrength)
+  const [ambient, setAmbient] = useState(props.node.ambient)
+  const [nightAmbient, setNightAmbient] = useState(props.node.nightAmbient)
 
   useEffect(() => {
     setIntensity(props.node.intensity)
@@ -35,6 +39,8 @@ export default function SkyLightEditor(props: { node: SkyLightNode }) {
     setCloudResponse(props.node.cloudResponse)
     setCloudShadows(props.node.cloudShadows)
     setCloudShadowStrength(props.node.cloudShadowStrength)
+    setAmbient(props.node.ambient)
+    setNightAmbient(props.node.nightAmbient)
   }, [props.node])
 
   // Cloud shadows only mean something while the scene draws volumetric clouds, so the toggle follows them.
@@ -52,6 +58,7 @@ export default function SkyLightEditor(props: { node: SkyLightNode }) {
 
   const apply = (next: {
     intensity?: number; tint?: Vec3; cloudResponse?: number; cloudShadows?: boolean; cloudShadowStrength?: number
+    ambient?: number; nightAmbient?: number
   }) => {
     if (next.cloudShadows !== undefined) { props.node.cloudShadows = next.cloudShadows; setCloudShadows(next.cloudShadows) }
     if (next.cloudShadowStrength !== undefined) {
@@ -62,6 +69,8 @@ export default function SkyLightEditor(props: { node: SkyLightNode }) {
     if (next.cloudResponse !== undefined) {
       props.node.cloudResponse = next.cloudResponse; setCloudResponse(next.cloudResponse)
     }
+    if (next.ambient !== undefined) { props.node.ambient = next.ambient; setAmbient(next.ambient) }
+    if (next.nightAmbient !== undefined) { props.node.nightAmbient = next.nightAmbient; setNightAmbient(next.nightAmbient) }
     eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: props.node })
   }
 
@@ -86,6 +95,13 @@ export default function SkyLightEditor(props: { node: SkyLightNode }) {
           </PropertyRow>
           <PropertyRow label='Tint'>
             <ColorInput color={vec3ToHex(tint)} onChange={(c) => apply({ tint: c as Vec3 })} />
+          </PropertyRow>
+          <PropertyRow label='Ambient' hint={AMBIENT_HINT}>
+            <Slider min={0} max={2} step={0.05} value={ambient} onChange={(v) => apply({ ambient: v })} />
+          </PropertyRow>
+          <PropertyRow label='Night Ambient' hint={NIGHT_AMBIENT_HINT}>
+            <Slider min={0} max={1} step={0.01} value={nightAmbient}
+                    onChange={(v) => apply({ nightAmbient: v })} />
           </PropertyRow>
           <PropertyRow label='Cloud Response' divider={hasClouds} hint={CLOUD_RESPONSE_HINT}>
             <Slider min={0} max={1} step={0.05} value={cloudResponse}
