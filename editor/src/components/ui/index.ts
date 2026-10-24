@@ -3,7 +3,7 @@
 
 export { cn } from './cn';
 
-export { labelClass, valueClass, hintClass, sectionTitleClass } from './typography';
+export { labelClass, valueClass, hintClass, sectionTitleClass, hintAffordance } from './typography';
 
 export { Button, buttonVariants, ButtonWithConfirm } from './Button';
 export type { ButtonProps, ButtonWithConfirmProps } from './Button';
@@ -71,11 +71,16 @@ export type { RangeInputProps } from './RangeInput';
 export { PropertyTable, PropertyRow } from './PropertyTable';
 export type { PropertyTableProps, PropertyRowProps } from './PropertyTable';
 
-export { Panel, Section } from './Panel';
-export type { SectionProps } from './Panel';
+export { Panel, Section, SectionTitle } from './Panel';
+export type { SectionProps, SectionTitleProps } from './Panel';
 
 export { Modal, ModalHeader, ModalFooter } from './Modal';
-export type { ModalProps } from './Modal';
+export type { ModalProps, ModalHeaderProps } from './Modal';
+
+// Docs-driven hover cards (the text comes from docs/**/*.md via features/docs).
+export { DocHover, useDocTooltip, docTitleAffordance } from './DocTooltip';
+export type { DocHoverProps, DocTooltipHandle } from './DocTooltip';
+export { DocScope, useDocEntry } from '../../features/docs/DocScope';
 
 
 

@@ -6,7 +6,7 @@ The shell: a menu bar, a strip of document tabs, and a dockable workspace of pan
 ┌──────────────────────────────────────────────────────────────────────┐
 │ Projects  Save  Save All  Import  Export  VSCode  Publish ▾          │
 │              ◀ Play Pause Stop ▶       [ Scene | Landscape | UI |    │
-│                                          Renderer | Input ]  ↶ ↷  ⟲  │
+│                                          Options ]  ↶ ↷  ⟲           │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Main Scene ● │ Rock.model │ Stone.mat │ Player.script │ ✕            │
 ├───────────────┬──────────────────────────────────┬───────────────────┤
@@ -94,21 +94,34 @@ disturb your layout.
 | Panel | What it is |
 |---|---|
 | **Viewport** | The 3D or 2D view, plus every overlay and full-panel editor. |
-| **Scene** | The node hierarchy. Becomes **Skeleton** in animation mode. |
+| **Scene** | The node hierarchy. Becomes **Skeleton** while you edit an animator, a clip or a rig. |
 | **Scene Elements** | The Add catalog for scene nodes. |
-| **UI Elements** | The Add catalog for UI nodes (shown in UI mode). |
-| **Properties** | The node inspector. Retitled per mode: *Material*, *Terrain Material*, *Tileset*, *Texture*, *Sound*, *Brain*. |
+| **UI Elements** | The Add catalog for UI nodes. |
+| **Properties** | The selected node's inspector. When an asset tab is open it edits that asset instead, and its tab is retitled to match: *Material*, *Landscape Material*, *Tileset*, *Brain*, *Particle System*, *Texture*, *Sound* or *Skeleton*. |
+| **Material** | Properties while a material tab is open: the material editor, on a preview sphere. |
+| **Landscape Material** | Properties while a landscape material tab is open: its ground, slots and blend rules. |
+| **Tileset** | Properties while a tileset tab is open: the atlas, tile selection, auto-tiling and variants. |
+| **Brain** | Properties while an AI brain tab is open: the detail behind its canvas — conditions, desirability curves, fuzzy sets, and the parameters and variables the canvas does not show. |
+| **Particle System** | Properties while a particle effect is open: its emitters and their module stacks. |
+| **Texture** | Properties while a texture tab is open: how the image is sampled and imported. |
+| **Sound** | Properties while a sound sample is open: loudness, loop points, fades, bus and effects. |
+| **Skeleton** | The bone tree in place of the Scene tree while you edit an animator, a clip or a rig; in a rig tab, Properties too, where the rig's clips, retargeting, sockets and ragdoll live. |
 | **Scripts** | Script slot and per-node script variables. |
 | **Physics** | Rigid body, trigger, shapes, ragdoll. |
 | **Logger** | The console. |
 | **Assets** | The asset explorer. |
-| **Clips** | Animation clips (animation mode). |
-| **Variables** | Animation parameters and events (animation mode). |
-| **State Machine** | The selected state or transition (animation mode). |
-| **Field Settings** | Blend-space axes and samples (animation-field mode). |
+| **Clips** | The animator's clips (animator mode). |
+| **Parameters** | The animator's parameters, events and action slots (animator mode). |
+| **Animator** | The selected state or transition of the animator's graph (animator mode). |
+| **Blend Space Settings** | A blend space's axes, smoothing and samples (blend-space mode). |
 | **Blend Space** | The blend-space plot and its transport. |
+| **Clip** | The open animation's clips, preview character, root motion and edit stack (clip mode). |
+| **Timeline** | The clip's transport and scrubber. It drives the preview, so it keeps running while another tab of its group is shown. |
+| **Particle Preview** | Play, pause and restart for the particle effect being edited. |
 | **Tiles** | The tile palette (tilemap mode). |
 | **Layers** | The tilemap layer stack. |
+| **Landscape Tools** | The brush, its tools and their settings (landscape mode). |
+| **Landscape Layers** | The landscape's base and paint layer stack (landscape mode). |
 | **Engine** | Renderer, Performance and Runtime pages (options mode). |
 | **Editor** | Scripts and Viewport preferences (options mode). |
 | **Project** | General and Input pages (options mode). |

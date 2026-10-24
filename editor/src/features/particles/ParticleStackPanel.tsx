@@ -18,12 +18,8 @@ import { EMITTER_PRESETS } from './emitterPresets'
 //
 // All edits go through `edit`, which clones the working copy, applies a mutation and commits it. Cloning
 // the whole system per keystroke is cheap at this size and is what makes undo trivially correct.
-
-const STAGES: { stage: ParticleStage; title: string; key: 'spawn' | 'init' | 'update'; hint: string }[] = [
-  { stage: 'spawn', title: 'Spawn', key: 'spawn', hint: 'How many particles are born, and when.' },
-  { stage: 'init', title: 'Initialize', key: 'init', hint: 'Each particle\'s starting state, rolled once at birth.' },
-  { stage: 'update', title: 'Update', key: 'update', hint: 'Forces, collision and how particles change over their life. Applied in a fixed order every step.' },
-]
+//
+// What each card is for is not written here: its title's hover card is read from docs/editor/particles.md.
 
 const FLIPBOOK_PARAMS: ParamSpec[] = [
   { key: 'columns', label: 'Columns', kind: 'int', min: 1, max: 64 },
@@ -60,6 +56,11 @@ export default function ParticleStackPanel() {
       if (target) mutate(target)
     }, coalesceKey && `${emitter.id}:${coalesceKey}`)
   }
+  /** One stage's module list, editing that stage of the selected emitter. */
+  const stageModules = (e: EmitterDef, stage: ParticleStage) => (
+    <StageModules stage={stage} modules={e[stage]} emitterId={e.id} emitters={system.emitters}
+                  onChange={(modules, label, coalesceKey) => editEmitter(label, d => { d[stage] = modules }, coalesceKey)} />
+  )
 
   return (
     <div className='flex flex-col'>
@@ -73,11 +74,16 @@ export default function ParticleStackPanel() {
       {emitter ? (
         <>
           <EmitterSettings emitter={emitter} editEmitter={editEmitter} lodLevels={system.lod?.levels.length ?? 0} />
-          {STAGES.map(s => (
-            <StageSection key={s.stage} stage={s.stage} title={s.title} hint={s.hint}
-                          modules={emitter[s.key]} emitterId={emitter.id} emitters={system.emitters}
-                          onChange={(modules, label, coalesceKey) => editEmitter(label, e => { e[s.key] = modules }, coalesceKey)} />
-          ))}
+          {/* Three literal cards rather than a map over the stages: each title is its stage's docs term. */}
+          <Collapsable title='Spawn' badge={emitter.spawn.length} persistKey='particles.stage.spawn'>
+            {stageModules(emitter, 'spawn')}
+          </Collapsable>
+          <Collapsable title='Initialize' badge={emitter.init.length} persistKey='particles.stage.init'>
+            {stageModules(emitter, 'init')}
+          </Collapsable>
+          <Collapsable title='Update' badge={emitter.update.length} persistKey='particles.stage.update'>
+            {stageModules(emitter, 'update')}
+          </Collapsable>
           <RenderSection emitter={emitter} editEmitter={editEmitter} />
         </>
       ) : (
@@ -115,7 +121,6 @@ function EmitterList({ system, selected, onSelect, edit }: {
 
   return (
     <Collapsable title='Emitters' badge={system.emitters.length} persistKey='particles.emitters'
-      hint='Every emitter simulates and draws independently; together they are the effect.'
       right={
         <Popover title='Add emitter' align='right' className='p-1 w-[240px]'
                  trigger={<span className='px-1 text-ui text-muted hover:text-fg'>+ Emitter</span>}>
@@ -224,10 +229,9 @@ function EmitterSettings({ emitter, editEmitter, lodLevels }: {
 
 // --- Module stacks ----------------------------------------------------------------------------------
 
-function StageSection({ stage, title, hint, modules, emitterId, emitters, onChange }: {
+/** A stage's modules and its add menu: the body of that stage's card. */
+function StageModules({ stage, modules, emitterId, emitters, onChange }: {
   stage: ParticleStage
-  title: string
-  hint: string
   modules: ParticleModule[]
   emitterId: string
   emitters: readonly EmitterDef[]
@@ -240,31 +244,29 @@ function StageSection({ stage, title, hint, modules, emitterId, emitters, onChan
     onChange(modules.map((m, i) => (i === index ? next : m)), label, coalesceKey)
 
   return (
-    <Collapsable title={title} badge={modules.length} hint={hint} persistKey={`particles.stage.${stage}`}>
-      <div className='flex flex-col gap-1 p-1'>
-        {modules.map((m, i) => (
-          <ModuleCard key={`${emitterId}:${m.type}`} module={m} emitterId={emitterId} emitters={emitters}
-                      onToggle={enabled => update(i, { ...m, enabled }, enabled ? 'Enable module' : 'Disable module')}
-                      onParams={(patch, coalesce) => update(i, { ...m, params: { ...m.params, ...patch } },
-                                                            `Edit ${moduleDefinition(m.type)?.label ?? m.type}`,
-                                                            coalesce ? `${m.type}.${Object.keys(patch).join(',')}` : undefined)}
-                      onRemove={() => onChange(modules.filter((_, j) => j !== i), 'Remove module')}
-                      onMove={by => {
-                        const next = [...modules]
-                        const [x] = next.splice(i, 1)
-                        next.splice(Math.max(0, Math.min(next.length, i + by)), 0, x)
-                        onChange(next, 'Reorder modules')
-                      }} />
-        ))}
-        {addable.length > 0 && (
-          <Select value='' className='mt-1 w-full text-muted'
-                  onChange={e => { if (e.target.value) onChange([...modules, makeModule(e.target.value)], 'Add module') }}>
-            <option value=''>+ Add module…</option>
-            {addable.map(m => <option key={m.type} value={m.type} title={m.description}>{m.label}</option>)}
-          </Select>
-        )}
-      </div>
-    </Collapsable>
+    <div className='flex flex-col gap-1 p-1'>
+      {modules.map((m, i) => (
+        <ModuleCard key={`${emitterId}:${m.type}`} module={m} emitterId={emitterId} emitters={emitters}
+                    onToggle={enabled => update(i, { ...m, enabled }, enabled ? 'Enable module' : 'Disable module')}
+                    onParams={(patch, coalesce) => update(i, { ...m, params: { ...m.params, ...patch } },
+                                                          `Edit ${moduleDefinition(m.type)?.label ?? m.type}`,
+                                                          coalesce ? `${m.type}.${Object.keys(patch).join(',')}` : undefined)}
+                    onRemove={() => onChange(modules.filter((_, j) => j !== i), 'Remove module')}
+                    onMove={by => {
+                      const next = [...modules]
+                      const [x] = next.splice(i, 1)
+                      next.splice(Math.max(0, Math.min(next.length, i + by)), 0, x)
+                      onChange(next, 'Reorder modules')
+                    }} />
+      ))}
+      {addable.length > 0 && (
+        <Select value='' className='mt-1 w-full text-muted'
+                onChange={e => { if (e.target.value) onChange([...modules, makeModule(e.target.value)], 'Add module') }}>
+          <option value=''>+ Add module…</option>
+          {addable.map(m => <option key={m.type} value={m.type} title={m.description}>{m.label}</option>)}
+        </Select>
+      )}
+    </div>
   )
 }
 
@@ -326,7 +328,8 @@ function RenderSection({ emitter, editEmitter }: {
   const textured = !!emitter.render.textureId
   const { models } = useCleoEngine()
   return (
-    <Collapsable title='Render' persistKey='particles.render' hint="How this emitter's particles are drawn.">
+    // The Rendering section rather than the short "Render" line, so its table also explains the fields.
+    <Collapsable title='Render' doc='editor/particles#rendering' persistKey='particles.render'>
       <div className='p-2'>
         <PropertyTable columns={['40%', '60%']}>
           {visible.map(spec => (
@@ -400,20 +403,19 @@ function LodSection({ system, edit }: {
   const active = lod.enabled && (lod.levels.length > 0 || lod.cullDistance > 0)
 
   return (
-    <Collapsable title='LOD' persistKey='particles.lod' defaultOpen={false}
-                 badge={active ? lod.levels.length + (lod.cullDistance > 0 ? 1 : 0) : undefined}
-                 hint="Level of detail by distance from the camera: to the surface of the Bounds, times the renderer's Particle LOD distance. Coarser levels spawn less and simulate less often; past the cull distance the effect is not drawn.">
+    // Cull distance and Scale bursts are rows of the Level of detail table, so their cards come from there.
+    <Collapsable title='LOD' doc='editor/particles#level-of-detail' persistKey='particles.lod' defaultOpen={false}
+                 badge={active ? lod.levels.length + (lod.cullDistance > 0 ? 1 : 0) : undefined}>
       <div className='p-2'>
         <PropertyTable columns={['40%', '60%']}>
           <PropertyRow label='Enabled' divider>
             <Toggle checked={lod.enabled} onChange={on => editLod('LOD', l => { l.enabled = on })} />
           </PropertyRow>
-          <PropertyRow label='Cull distance' divider
-                       hint='Past this many metres the effect is not drawn, and a looping one stops simulating (a one-shot plays out). 0 = never.'>
+          <PropertyRow label='Cull distance' divider>
             <NumberInput value={lod.cullDistance} min={0} step={5}
                          onChange={v => editLod('Cull distance', l => { l.cullDistance = Math.max(0, v) }, 'cull')} />
           </PropertyRow>
-          <PropertyRow label='Scale bursts' hint="Off: a burst is an event and always fires in full. On: bursts thin out with the level's spawn rate too.">
+          <PropertyRow label='Scale bursts'>
             <Toggle checked={lod.scaleBursts} onChange={on => editLod('Scale bursts', l => { l.scaleBursts = on })} />
           </PropertyRow>
         </PropertyTable>
@@ -431,7 +433,6 @@ function LodSection({ system, edit }: {
         {beyondCull.length > 0 && (
           <Hint className='text-warning'>A level starts beyond the cull distance and will never be seen.</Hint>
         )}
-        <Hint>Emitter &gt; Detail drops a layer (sparks, embers) past a level. Preview a level with the LOD select in Particle Preview.</Hint>
       </div>
     </Collapsable>
   )
@@ -466,8 +467,7 @@ function BoundsSection({ system, edit }: {
   edit: (label: string, mutate: (draft: ParticleSystemDef) => void, coalesceKey?: string) => void
 }) {
   return (
-    <Collapsable title='Bounds' persistKey='particles.bounds' defaultOpen={false}
-                 hint="A fixed box, in the effect's local space, that its particles stay inside. Used for culling and selection — GPU particles are never read back, so it cannot be measured.">
+    <Collapsable title='Bounds' persistKey='particles.bounds' defaultOpen={false}>
       <div className='p-2'>
         <PropertyTable columns={['40%', '60%']}>
           <PropertyRow label='Center' divider>

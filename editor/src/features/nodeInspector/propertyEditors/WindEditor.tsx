@@ -5,7 +5,6 @@ import { useEventBus } from '../../EventBusContext'
 import { PresetMenu, PropertyTable, PropertyRow, Slider } from '../../../components/ui'
 import { WindIcon } from '../../sceneInspector/nodeIcons'
 
-const WIND_HINT = 'One wind for the whole scene. Plants sway only if their material (or billboard foliage rule) has a Wind strength above 0 — this node sets the direction, how strong every plant’s lean is, and how gusts travel across the landscape.'
 const DIRECTION_HINT = 'The way the wind blows, in degrees around the up axis (0 = +X, 90 = −Z).'
 const STRENGTH_HINT = 'Scales every plant’s lean at once: 0 is calm, 1 is what the materials were authored for, 2 is a storm.'
 const GUST_SCALE_HINT = 'Metres between gust crests. Small values make plants next to each other move differently; large values make whole fields lean together.'
@@ -43,7 +42,7 @@ export default function WindEditor(props: { node: WindNode }) {
   }
 
   return (
-    <Collapsable title='Wind' icon={<WindIcon />} persistKey='wind' hint={WIND_HINT}
+    <Collapsable title='Wind' icon={<WindIcon />} persistKey='wind'
       right={<PresetMenu presets={WIND_PRESETS} onApply={applyPreset} title='Wind presets — strength and gusts; the direction stays yours' />}>
       <div className='w-full p-2'>
         <PropertyTable columns={['45%', '55%']}>

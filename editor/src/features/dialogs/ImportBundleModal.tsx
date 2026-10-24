@@ -20,9 +20,7 @@ export default function ImportBundleModal(props: {
 
   return (
     <Modal onClose={onCancel} className='w-[440px]'>
-      <ModalHeader>
-        <div className='text-ui-lg font-semibold'>Import {isProject ? 'project' : 'asset pack'}</div>
-      </ModalHeader>
+      <ModalHeader title={`Import ${isProject ? 'project' : 'asset pack'}`} doc='editor/projects#import' />
 
       <div className='px-4 py-3 space-y-3 text-ui text-fg'>
         <div className='flex gap-4 text-ui text-muted'>

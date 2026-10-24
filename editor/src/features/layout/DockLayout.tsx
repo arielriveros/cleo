@@ -7,6 +7,7 @@ import {
   SerializedDockview,
 } from 'dockview-react';
 import { dockComponents, PanelTab } from './panels';
+import { PANEL_TITLES, panelTitle } from './panelTitles';
 import { EditorMode, useCleoEngine } from '../EngineContext';
 import { LS_KEYS, lsKey } from '../../utils/lsScope';
 import './dockview.css';
@@ -121,33 +122,6 @@ const CHROME_PANELS = [
   ...ADD_PANELS,
 ] as const;
 
-// The Scene panel hosts the mode-specific tree, so its tab label follows the mode.
-const PANEL_TITLES: Record<string, string> = {
-  viewport: 'Viewport', scene: 'Scene', sceneAdd: 'Scene Elements', uiAdd: 'UI Elements', properties: 'Properties',
-  scripts: 'Scripts', physics: 'Physics', logger: 'Logger', assets: 'Assets',
-  animClips: 'Clips', animVariables: 'Parameters', animStateMachine: 'Animator',
-  animField: 'Blend Space Settings', animFieldPlot: 'Blend Space',
-  clipTracks: 'Clip', clipTimeline: 'Timeline',
-  particleTransport: 'Particle Preview',
-  tilePalette: 'Tiles', tilemapLayers: 'Layers',
-  landscapeTools: 'Landscape Tools', landscapeLayers: 'Landscape Layers',
-  optionsEngine: 'Engine', optionsEditor: 'Editor', optionsProject: 'Project',
-};
-
-function panelTitle(id: string, mode: EditorMode): string {
-  if (id === 'scene' && (mode === 'stateMachine' || mode === 'rig' || mode === 'animation')) return 'Skeleton';
-  if (id === 'properties') {
-    if (mode === 'material') return 'Material';
-    if (mode === 'terrainMaterial') return 'Landscape Material';
-    if (mode === 'tileset') return 'Tileset';
-    if (mode === 'aiBrain') return 'Brain';
-    if (mode === 'particleSystem') return 'Particle System';
-    if (mode === 'texture') return 'Texture';
-    if (mode === 'soundSample') return 'Sound';
-    if (mode === 'rig') return 'Skeleton';
-  }
-  return PANEL_TITLES[id];
-}
 
 const cleoTheme: DockviewTheme = { name: 'cleo', className: 'dockview-theme-cleo', colorScheme: 'dark' };
 

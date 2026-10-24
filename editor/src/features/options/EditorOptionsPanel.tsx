@@ -18,8 +18,8 @@ export default function EditorOptionsPanel() {
       page={page}
       onPage={setPage}
       pages={[
-        { value: 'scripts', label: 'Scripts', title: 'Where scripts open, the external editor, the code theme' },
-        { value: 'viewport', label: 'Viewport', title: 'Editor camera speed and gizmo snapping' },
+        { value: 'scripts', label: 'Scripts', doc: 'editor/options#scripts' },
+        { value: 'viewport', label: 'Viewport', doc: 'editor/options#viewport' },
       ]}
     >
       {page === 'scripts' && <ScriptOptions />}
@@ -51,8 +51,7 @@ function ScriptOptions() {
   return (
     <OptionsPageBody>
       <Section title='Opening scripts'>
-        <Field label='Open scripts with' labelClassName={OPTION_LABEL}
-          hint='Where a script opens when you double-click it, press ✎ on a script slot, or create a new one.'>
+        <Field label='Open scripts with' labelClassName={OPTION_LABEL}>
           <SegmentedControl<ScriptOpener>
             grow
             className='flex-1'
@@ -72,9 +71,7 @@ function ScriptOptions() {
           </Hint>
         )}
 
-        <Field label='External editor' labelClassName={OPTION_LABEL}
-          hint={'The command the desktop app runs to open the workspace: code (VSCode), cursor, codium… '
-            + 'A program name on your PATH, no arguments.'}>
+        <Field label='External editor' labelClassName={OPTION_LABEL}>
           <TextInput
             value={command}
             disabled={!desktop}
@@ -126,9 +123,7 @@ function WorkspaceSection({ desktop }: { desktop: boolean }) {
   const attention = ws.status === 'paused' || ws.status === 'error'
 
   return (
-    <Section title='Script workspace folder'
-      hint={'Every script of this project, mirrored to a real folder with typings, so an external editor gets '
-        + 'autocomplete. Saved files sync back into the editor.'}>
+    <Section title='Script workspace folder'>
       {!desktop ? (
         <Hint>Available in the Cleo desktop app.</Hint>
       ) : (
@@ -195,7 +190,7 @@ function ViewportOptions() {
           readout={multiplier} />
       </Section>
 
-      <Section title='Gizmo snapping' hint='Hold Ctrl while dragging a gizmo to snap to these steps.'>
+      <Section title='Gizmo snapping'>
         <Field label='Move step (m)' labelClassName={OPTION_LABEL}>
           <NumberInput value={prefs.snapTranslate} min={0.001} step={0.25}
             onChange={v => editorPrefsStore.set({ snapTranslate: v })} />

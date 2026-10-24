@@ -67,8 +67,7 @@ export default function SocketAttachSlot({ node }: { node: Node }) {
 
   return (
     <Collapsable title='Socket' icon={<RigIcon />} persistKey='socketAttach'
-      badge={attachment ? attachment.socket : undefined}
-      hint='Pin this node to a socket on a character’s skeleton — the sword in the hand.'>
+      badge={attachment ? attachment.socket : undefined}>
       <div className='w-full p-2 flex flex-col gap-1'>
         <Select
           value={targetValue}

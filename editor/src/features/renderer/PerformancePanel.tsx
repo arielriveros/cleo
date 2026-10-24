@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { gpuProfiler, cpuProfiler, frameHistory, frameStats, sceneStatsDetail, TextureManager, TOGGLEABLE_PASSES, navBuildStats, shaderOptimizerStats } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
-import { Section, Slider, Toggle, SegmentedControl, Button, Hint } from '../../components/ui';
+import { DocScope, Section, Slider, Toggle, SegmentedControl, Button, Hint } from '../../components/ui';
 import Sparkline from './Sparkline';
 
 // The renderer's performance panel: what the frame costs, and where. Cost is attributed two ways:
@@ -11,17 +11,9 @@ import Sparkline from './Sparkline';
 //     WebGL2 times renderer scopes, WebGPU times render passes, and they are not the same list.
 //  2. Per-pass kill switches, which measure a pass's marginal cost including downstream savings.
 //
-// Explanatory prose belongs in `title` tooltips, not visible captions: this is a long column already.
-
-// Appended to the Passes tooltip when `attribution` says the rows are passes. The two backends do not
-// measure the same thing and the rows are not interchangeable between them, so a reader comparing a
-// WebGPU capture against a WebGL2 one needs this before they draw a conclusion from the difference.
-const PASS_ATTRIBUTION_HINT =
-  ' Rows are render PASSES, not the renderer scopes WebGL2 times. Passes with no matching scope appear '
-  + 'as “pass:…”; “frameEnd” has no row because per-pass timestamps already exclude the driver’s '
-  + 'end-of-frame drain it exists to absorb. Absolute values run high — the renderer submits one command '
-  + 'buffer per pass today, so each pass pays a submission at both ends of its own window. Compare passes '
-  + 'with each other, not with WebGL2.';
+// Explanatory prose belongs in docs/editor/rendering.md › Performance HUD, whose entries are the section
+// titles' hover cards (the WebGPU pass-attribution caveat included), and in per-row `title` tooltips —
+// not in visible captions: this is a long column already.
 
 const REFRESH_MS = 250; // fast enough to feel live, slow enough not to churn React
 /** Slack on the frame budget before the readout turns red — see `overBudget`. */
@@ -352,14 +344,10 @@ export default function PerformancePanel() {
   return (
     // The content column is capped rather than filling the dock group: options mode hides the rest of
     // the right rail, so this group can end up 700px+ wide. The panel itself stays resizable.
+    <DocScope page='editor/rendering' section='performance-hud'>
     <div className='h-full overflow-y-auto p-3 text-ui-sm text-fg'>
       <div className='w-full max-w-[420px]'>
-      <Section
-        title='Frame'
-        hint={'Mean alone hides hitching: a flat 12 ms and a 9 ms mean with a 30 ms p95 read identically '
-            + 'in a single number and are completely different problems. The budget selector only moves '
-            + 'the target line on the graph.'}
-      >
+      <Section title='Frame'>
         <div className='flex items-baseline justify-between'>
           <span className={`font-mono text-lg ${overBudget ? 'text-danger-fg' : 'text-success-fg'}`}>
             {fmt(d.frameMs, 1)} ms
@@ -377,17 +365,12 @@ export default function PerformancePanel() {
         </div>
       </Section>
 
-      <Section
-        title='Frame budget'
-        hint={'Where the frame actually goes. Render is CPU time only — it returns as soon as the commands '
-            + 'are queued, so GPU cost shows up under GPU passes, not here. Unattributed is whatever the '
-            + 'three measured phases do not account for: browser work, GPU sync, rAF idle.'}
-      >
+      <Section title='Frame budget'>
         <Row label='Render (CPU)' value={`${fmt(d.cpuMs, 1)} ms`} />
         {d.gpuOn
           ? <Row label='Render (GPU)' value={`${fmt(d.gpuMs)} ms`} hl={d.gpuMs > budgetMs} />
           : <Row label='Render (GPU)' value={d.gpuAvailable ? 'off' : 'n/a'}
-                 title={d.gpuAvailable ? 'Enable timer queries under GPU passes.' : (gpuProfiler.unavailableReason ?? 'GPU timing is unavailable.')} />}
+                 title={d.gpuAvailable ? 'Enable timer queries under Passes.' : (gpuProfiler.unavailableReason ?? 'GPU timing is unavailable.')} />}
         {/* Split rather than one total on purpose: `step` is cannon's solver (the part a worker could
             take off this thread) while `write-back` is scene-graph sync that would stay here regardless. */}
         <Row label='Physics' value={`${fmt(d.physicsMs)} ms`} hl={d.physicsMs > 5}
@@ -443,15 +426,7 @@ export default function PerformancePanel() {
         <Row label='Unattributed' value={`${fmt(unattributed)} ms`} />
       </Section>
 
-      <Section
-        title='Passes (CPU / GPU)'
-        hint={'Two numbers per scope: the CPU time spent SUBMITTING it and the GPU time spent running '
-            + 'it. They answer different questions — a scope that is expensive on the CPU and cheap on '
-            + 'the GPU is issuing too many draws, not shading too much, and no amount of LOD will help '
-            + 'it. CPU timing is always available; GPU timer queries are gated by driver and browser '
-            + 'flags, and when they are missing the pass switches below attribute cost by A/B instead.'
-            + (gpuProfiler.attribution === 'passes' ? PASS_ATTRIBUTION_HINT : '')}
-      >
+      <Section title='Passes (CPU / GPU)'>
         <Toggle
           label='Timer queries'
           checked={enabled}
@@ -499,13 +474,7 @@ export default function PerformancePanel() {
         )}
       </Section>
 
-      <Section
-        title='Geometry'
-        hint={'Mean over the last refresh, with the frame-to-frame range beside it. A wide range with a '
-            + 'still camera is usually shadow cascade staggering, which re-draws every caster on a '
-            + '4-frame cycle — not a bug. A low draw count next to a high Mpx figure below means the '
-            + 'frame is spent on fullscreen passes, not on meshes.'}
-      >
+      <Section title='Geometry'>
         <RangeRow label='Draw calls' r={r.drawCalls} />
         <RangeRow label='Instanced' r={r.instancedDrawCalls} />
         <RangeRow label='Objects' r={r.objects} />
@@ -557,12 +526,7 @@ export default function PerformancePanel() {
                   title='Cell culling tests run this frame, colour and shadow together. Far above "Foliage cells" means the linear scan itself is the cost, not the draws.' />
       </Section>
 
-      <Section
-        title='Particles'
-        hint={'Steps are the simulation cost: one GPU pass per emitter per step. Builds are emitters whose '
-            + 'GPU state was created this frame (textures, LUT, bind groups); a spawned effect normally '
-            + 'reuses a pooled one instead, so builds above zero during play are the allocation spikes.'}
-      >
+      <Section title='Particles'>
         <RangeRow label='Systems' r={r.particleSystems}
                   title='Particle systems that ran at least one simulation step this frame.' />
         <RangeRow label='· paused off screen' r={r.particleSystemsCulled}
@@ -583,12 +547,7 @@ export default function PerformancePanel() {
         <RangeRow label='· reused' r={r.particleGpuReuses} title='Emitters handed pooled GPU state instead of building it.' />
       </Section>
 
-      <Section
-        title='Fill rate'
-        hint={'Fill counts each fullscreen pass at ITS OWN resolution, so a half-res pass contributes a '
-            + 'quarter as much as a full-res one. It is the number that explains a frame whose triangle '
-            + 'count is trivial.'}
-      >
+      <Section title='Fill rate'>
         <RangeRow label='Screen passes' r={r.fullscreenPasses} />
         <RangeRow label='Shaded' r={r.shadedMpx} dp={1} unit=' Mpx' hl={r.shadedMpx.mean > 40} />
         <RangeRow label='State changes' r={r.stateChanges}
@@ -597,13 +556,7 @@ export default function PerformancePanel() {
                   title='Redundant GL state calls the state cache absorbed.' />
       </Section>
 
-      <Section
-        title='Shaders'
-        hint={'How programs, pipelines and material parameters reach the GPU (graphics/shaderOptimizer). A '
-            + 'material write is skipped when its program already holds that material for this view. A '
-            + 'program nobody built at boot compiles in the background while its family\'s uber program '
-            + 'draws in its place; "sync" builds are the ones that held a frame up.'}
-      >
+      <Section title='Shaders'>
         <Row label='Material writes' value={`${d.matWrites} · ${d.matSkips} skipped`}
              title='Per frame: material blocks written, and draws that found their material already in place.' />
         <Row label='Programs' value={`${d.asyncCompiles} background · ${d.syncCompiles} sync · ${d.pendingCompiles} pending`}
@@ -619,11 +572,7 @@ export default function PerformancePanel() {
              title='Pipelines that reused a compiled shader module instead of compiling the program again.' />
       </Section>
 
-      <Section
-        title='Memory'
-        hint={'GPU est. is computed from each texture&apos;s requested format and mip chain, so it is an '
-            + 'estimate of texture memory, not total VRAM.'}
-      >
+      <Section title='Memory'>
         <Row label='Textures' value={`${d.textures.toLocaleString()} · ${fmt(d.textureMB, 1)} MB`} />
         <Row label='GPU est.' value={`${fmt(d.gpuMB, 1)} MB`} />
         <Row label='JS heap'
@@ -631,7 +580,7 @@ export default function PerformancePanel() {
              title={d.heapUsedMB != null ? undefined : 'performance.memory is Chromium-only.'} />
       </Section>
 
-      <Section title='Scene' hint='Counts and the resolution the pipeline is actually shading at.'>
+      <Section title='Scene'>
         <Row label='Lights' value={d.lights.toLocaleString()} />
         <Row label='Sprites' value={d.sprites.toLocaleString()} />
         <Row label='Resolution' value={`${d.width}×${d.height}`} />
@@ -643,12 +592,7 @@ export default function PerformancePanel() {
         <Row label='Pipeline' value={d.pipeline} />
       </Section>
 
-      <Section
-        title='Quality'
-        hint={'Ultra reproduces the engine&apos;s original defaults exactly; High is the current default. '
-            + 'Render scale is the internal resolution — halving it quarters every fullscreen pass, so if '
-            + 'that barely moves the frame time the frame is not fill-rate bound.'}
-      >
+      <Section title='Quality'>
         <SegmentedControl
           value={quality}
           options={QUALITY_OPTIONS}
@@ -672,13 +616,7 @@ export default function PerformancePanel() {
         </div>
       </Section>
 
-      <Section
-        title='Pass switches'
-        hint={"Turn a pass off and watch the frame graph. The drop is that pass's true marginal cost, "
-            + 'including downstream savings a GPU timer around the draw call would not capture. The '
-            + 'list is the same on every backend on purpose: bisection is exactly the fallback for a '
-            + 'cost the timers cannot see, so it must not shrink where the timers are weaker.'}
-      >
+      <Section title='Pass switches'>
         <div className='grid grid-cols-2 gap-x-3'>
           {TOGGLEABLE_PASSES.map(name => (
             <Toggle
@@ -698,5 +636,6 @@ export default function PerformancePanel() {
       </Section>
       </div>
     </div>
+    </DocScope>
   );
 }

@@ -15,16 +15,19 @@ three routes end up in the same place.
 
 ### The review modal
 
-Import stops and asks before it commits:
+Import stops once per model and asks before it commits: which textures are missing, how the file's
+parts become assets, and what size it comes in at. **Accept & Import** commits it; **Cancel** skips
+that model.
 
 | Control | Does |
 |---|---|
-| **Missing textures** | Lists textures the model references but that were not in the drop, and lets you pick replacements. The file is aliased to the expected name and re-parsed. |
-| **Unloadable references** | Reports what could not be read at all. |
-| **Normalize scale** | Rescales to a target bounding diameter. Use it — imported models disagree wildly about what one unit means. |
-| **Separate** | One asset per sub-model. |
-| **Merge** | Collapse sub-meshes into one mesh with one submesh per material. |
-| **Submesh grouping** | With both Separate and Merge on, partition the parts into assets by hand. |
+| **Missing textures** | Textures the model references that were not in the drop, listed under **Textures** with **Select missing textures…** to pick replacements. A picked file is aliased to the expected name and the model re-parsed. |
+| **Unloadable references** | Textures embedded in the model in a format the browser cannot read. There is no file to pick: re-export the model with its textures as separate `.png` / `.jpg` files and import them together. |
+| **Contents** | Shown when the file holds more than one part: whether they become one asset or several, merged into one mesh or kept as separate nodes. |
+| **Separate** | One asset per sub-model, each centred on its own origin. |
+| **Merge** | Collapse sub-meshes into one mesh with one submesh per material. Parts that use different material types, or mix opaque and transparent, stay separate, and the log says why. |
+| **Groups** | With both Separate and Merge on, each group becomes one model asset, its parts merged into a single mesh. It starts with one group per material; drag a part to another group (or pick the group's number beside it), and **+ Add group** for another. |
+| **Size** / **Normalize size** | Rescales to a target bounding diameter (**Fit to**, in units). Use it — imported models disagree wildly about what one unit means. |
 
 Progress runs queued → parsing → **review** → reparsing → scaling → textures → materials → saving.
 The review step shows as *paused*, which is how you tell "waiting on you" from "still working".
@@ -48,7 +51,9 @@ One walk cycle can therefore drive several different characters.
 
 **+ Add ▸ Animation**, pick a `.fbx`/`.glb`/`.gltf`, then:
 
-1. **Character picker**: which character are these clips for? They are linked to its skeleton.
+1. **Character picker**: which character are these clips for? Its skeleton is what the clips are
+   matched and linked to, so every character built on it plays them. The clips themselves stay in the
+   file's own skeleton space, so they can be linked to other skeletons later.
 2. **Skeleton**: a one-line summary of the bone match, and **Map bones…**, which opens the
    [bone mapper](#the-bone-mapper). Whatever you change there is saved on the character's skeleton, so
    every later clip from the same source skeleton is matched the same way.
@@ -105,33 +110,54 @@ Three rules keep the posture right when the bone counts differ:
 
 ## Splitting a model into parts
 
-Open a model (double-click it in Assets) and use the **Parts** section. It lists every mesh in the model
-and, under a merged mesh, each of its material **sub-meshes**. Each row has two actions:
+Open a model (double-click it in Assets) to split pieces of it off into models of their own, from its
+**Parts** section.
 
-- **Save as model** copies that piece into a new model, named `<model> – <part>`, beside the original
-  in the asset folder. The original is untouched.
+**Parts** — every mesh in the model and, under a merged mesh, each of its material **sub-meshes**.
+Each row has two actions: **Save as model** copies the piece into a new model next to this one, and
+**Extract** also removes it from this model — save the model afterwards to keep that.
+
+- **Save as model** names the new model `<model> – <part>` and files it beside the original in the
+  asset folder. The original is untouched.
 - **Extract** does the same and removes the piece from the open model. **Save** the model afterwards to
   keep it; placed copies update as with any model edit. The last mesh can't be extracted.
 
 The new model keeps the piece's orientation and size inside the original, is centred on its own bounds,
 and links the same materials. A piece of a skinned character keeps the rig and its animations.
 
-## LOD generation
+## The model inspector
 
-Open a model asset to reach the **Model inspector**: name, LOD levels, cull distance, *Generate
-LODs*, and the blend spaces that use it.
+Open a model asset (double-click it in Assets) and Properties shows the **Model inspector** above the
+usual node inspector: the model's name, its [Parts](#splitting-a-model-into-parts), the blend spaces
+on its skeleton, and its LOD levels.
 
-**Generate LODs** builds a ladder — each level a ratio and a takeover distance, defaulting to
-`0.5 / 0.25 / 0.1` at distances derived from the model's diameter. **Downscale textures** halves
-maps alongside the geometry; levels landing on the same size share one image, small maps stop at
-64 px, and maps carrying alpha are left at full size.
+**Blend spaces** — on a skinned model, the blend spaces of the skeleton it is built on, shared by every
+character on that skeleton: click one to open it, or **+ New Blend Space** to make one from this
+model. A blend space mixes clips by one or two parameters and stands in an animator as a state of its
+own instead of a single clip — see [Blend spaces](animation.md#blend-spaces).
 
-Each generated level becomes its own model asset and is *referenced*. Regenerating updates them
-rather than adding more. You can also add a LOD level from an existing asset by hand.
+### LOD levels
+
+Each level takes over at its distance. Only LOD0 is edited here; selecting another level just
+previews it. Generated levels are part of this model — deleted with it, moved with it — and a level
+added from another model updates when that model is edited. A skinned model has no LOD levels.
+
+- **From** / **From distance** — where a level takes over. With a cull distance set it is a share of
+  it (50% of a 200 m cull starts the level at 100 m), kept when the cull changes; without one it is a
+  distance in metres.
+- **Cull distance** — copies disappear beyond this camera distance, and foliage dissolves out rather
+  than popping. 0 is automatic: a placed copy never culls, and foliage draws on past its last LOD or
+  impostor band, at least to the scene foliage distance. A level whose band starts at or past the
+  cull distance is never drawn, and the panel says so.
+- **Generate LOD levels…** — decimates this model into a ladder, each level a ratio and a takeover
+  distance, defaulting to `0.5 / 0.25 / 0.1` at distances derived from the model's diameter.
+  **Halve texture resolution per level** gives each level smaller textures too: levels landing on the
+  same size share one image, small maps stop at 64 px, and maps whose alpha carries data are left at
+  full size. From LOD2 on, only the colour, normal and alpha-mask textures are kept. Regenerating
+  replaces the levels a previous generate made, and keeps the ones added by hand.
+- **Add LOD level from model…** — uses another, lower-poly model asset as a level.
 
 A model with LOD levels instantiates as a LOD group node.
-
-**Cull distance** stops drawing it entirely past a distance.
 
 > LOD generation is static-only: skinned models are excluded.
 
@@ -153,21 +179,40 @@ scene's grading.
 
 ### Sections
 
-**Colours** — diffuse, specular, ambient, emission, shininess, opacity.
+**Colors** — Blinn-Phong and Cel: diffuse, specular, ambient, emission and opacity, plus shininess
+(Blinn-Phong) or the rim colour (Cel).
+
+**Properties** — Basic and PBR. Basic has a colour and an opacity. PBR has base colour, metallic,
+roughness, reflectance, opacity, an emissive colour and **Emissive power**: the colour is the hue and
+the power how hot, and above about 2 an emissive surface starts to bloom. The base colour multiplies a
+base-colour texture, and the section warns when a texture sits under a non-white colour.
 
 **Textures** — one slot per map. Drop a texture on a slot, or pick one.
 
-**Cutout** — `alphaCutoff`. **`0` disables cutout entirely**; above zero it tests the mask texture's
+**Cutout** — **Alpha cutoff**, with the **Mask** texture beside it (Blinn-Phong and Cel keep the mask
+with their other textures). **`0` disables cutout entirely**; above zero it tests the mask texture's
 red channel (PBR also falls back to base-colour alpha). Cutout casts correct shadows, which blended
 transparency does not — so prefer it for foliage, fences and grates.
 
-**Toon** — band count and spread, for Cel.
+**Toon** — Cel only: the number of bands (or a **Ramp** texture in their place), edge softness, the
+highlight's shininess and cut, and the rim's power and strength.
 
-**UV Mapping** — see below (Blinn-Phong, Cel and PBR).
+**UV Mapping** — Blinn-Phong, Cel and PBR: how the textures are laid on the surface. **Mesh UV** uses
+the model's own texture coordinates; **Box** projects along each face's axis in metres, so a scaled
+wall or floor keeps its texel size; **Triplanar** blends all three axes for rocks and organic shapes.
+See [UV mapping](#uv-mapping-textures-that-dont-stretch).
 
-**Height** — see below.
+**Height** — a height map turned into parallax relief on PBR, with its depth in world units, an
+invert for depth maps and clipping at the UV border. See [Height and parallax](#height-and-parallax).
 
-**Options** — side (front / back / double), transparency, shadow casting, probe participation,
+**Wind** — how a plant wearing this material sways in the scene's [Wind](node-inspector.md#wind):
+**Strength** (the lean at full gust, as a fraction of the plant's height), **Stiffness**, and **Moves
+as** — **Whole plant** rides the sway rigidly, like a trunk; **Leaves** follows it and adds its own
+sprig sway and **Flutter**, more toward the outside of the canopy. Read by foliage only, while the
+scene has a Wind node; a tree's materials bend as one, the strongest setting the lean. Not on terrain
+materials.
+
+**Options** — side (front / back / both), transparency, shadow casting, probe participation,
 wireframe.
 
 ### UV mapping: textures that don't stretch
@@ -243,6 +288,10 @@ bug there is: a normal map imported as sRGB.
 uniform list (name, type, default), and a forward / deferred / screen render mode.
 
 Uniform types: `float`, `vec2`, `vec3`, `vec4`, `int`, `bool`, `sampler2D`, `samplerCube`.
+
+**Uniforms** — the material's declared uniforms, each a name, a type and a value. A uniform is
+`u_<name>` in the shader; a sampler binds the texture you pick, and a scalar or vector uploads its
+value every frame. Adding, removing or retyping one recompiles the shader.
 
 **Screen** mode makes the material a fullscreen post-processing pass, ordered within a camera's
 post chain. Screen materials run for the **active camera only**.

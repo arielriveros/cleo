@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { humanoidSlotOf, mirrorBoneName } from 'cleo'
 import type { BoneMapping, Skin } from 'cleo'
-import { Modal, Button, TextInput, cn } from '../../components/ui'
+import { DocScope, Modal, ModalHeader, Button, TextInput, cn } from '../../components/ui'
 import { token } from '../../utils/cssTokens'
 import {
   skeletonLayout, retargetView, SOURCE_LABEL, TARGET_LABEL,
@@ -55,7 +55,16 @@ function palette() {
 
 const HIT_PX = 10
 
+/** Documented as the bone mapper (Models and materials), whether it opens from an import or a skeleton. */
 export default function RetargetMapper(props: RetargetMapperProps) {
+  return (
+    <DocScope page='editor/models-and-materials' section='the-bone-mapper'>
+      <Mapper {...props} />
+    </DocScope>
+  )
+}
+
+function Mapper(props: RetargetMapperProps) {
   const { sourceSkin, targetSkin, mapping, onRemap, onAuto, onResetAll, onClose } = props
   const colors = useMemo(palette, [])
   const layouts = useMemo(() => ({ source: skeletonLayout(sourceSkin), target: skeletonLayout(targetSkin) }), [sourceSkin, targetSkin])
@@ -325,14 +334,9 @@ export default function RetargetMapper(props: RetargetMapperProps) {
   return (
     // Raised above the dialog that opens it (the import review is a modal too).
     <Modal onClose={onClose} overlayClassName='z-[60]' className='w-[92vw] h-[86vh] max-h-[86vh] flex flex-col overflow-hidden'>
-      <div className='px-4 py-2 border-b border-control flex items-center gap-3 shrink-0'>
-        <div className='min-w-0'>
-          <div className='text-ui-lg font-semibold truncate'>Map bones: {props.sourceLabel} → {props.targetLabel}</div>
-          <div className='text-ui-xs text-dim'>
-            Drag a bone from the left onto the right (or click one, then the other). Right-click a left bone for more.
-            Scroll to zoom, drag the background to pan.
-          </div>
-        </div>
+      {/* How to drive it is the bone mapper's docs section, which the title's card shows. */}
+      <ModalHeader className='py-2 flex items-center gap-3 shrink-0'
+        title={`Map bones: ${props.sourceLabel} → ${props.targetLabel}`} doc='editor/models-and-materials#the-bone-mapper'>
         <div className='ml-auto flex items-center gap-1 shrink-0'>
           <Button size='sm' variant={showAll ? 'subtle' : 'ghost'} active={showAll} onClick={() => setShowAll(v => !v)}
             title='Draw every link, not just the one under the cursor'>All links</Button>
@@ -343,7 +347,7 @@ export default function RetargetMapper(props: RetargetMapperProps) {
           <Button size='sm' variant='subtle' onClick={onResetAll} title='Forget every hand-made change and match by name again'>Auto-match all</Button>
           <Button size='sm' variant='primary' onClick={onClose}>Done</Button>
         </div>
-      </div>
+      </ModalHeader>
 
       <div className='px-4 py-1.5 border-b border-control flex items-start gap-6 shrink-0'>
         <div className='flex-1 min-w-0'>

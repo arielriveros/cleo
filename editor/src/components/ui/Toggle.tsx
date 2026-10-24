@@ -1,5 +1,7 @@
 import React from 'react';
 import { cn } from './cn';
+import { DocHover } from './DocTooltip';
+import { useDocEntry } from '../../features/docs/DocScope';
 
 export interface ToggleProps {
   checked: boolean;
@@ -8,19 +10,25 @@ export interface ToggleProps {
   label?: React.ReactNode;
   disabled?: boolean;
   className?: string;
-  /** Native tooltip. On the button itself, so it covers the track as well as the label. */
+  /**
+   * Native tooltip. On the button itself, so it covers the track as well as the label. Unused when the
+   * label names a row of its section's docs, whose card is shown on the label instead.
+   */
   title?: string;
+  /** Docs key for the label when its text is not the term (see resolveDocKey); `false` opts out. */
+  doc?: string | false;
 }
 
 /** Pill on/off switch (primary when on). The whole control — track + optional label — is one button. */
-export function Toggle({ checked, onChange, label, disabled, className, title }: ToggleProps) {
+export function Toggle({ checked, onChange, label, disabled, className, title, doc }: ToggleProps) {
+  const entry = useDocEntry(label, doc, 'field');
   return (
     <button
       type='button'
       role='switch'
       aria-checked={checked}
       disabled={disabled}
-      title={title}
+      title={entry ? undefined : title}
       onClick={(e) => onChange(!checked, e)}
       className={cn('inline-flex items-center gap-2 text-ui select-none disabled:opacity-60 disabled:cursor-not-allowed', className)}
     >
@@ -37,7 +45,7 @@ export function Toggle({ checked, onChange, label, disabled, className, title }:
           )}
         />
       </span>
-      {label !== undefined && <span className='text-left'>{label}</span>}
+      {label !== undefined && <DocHover entry={entry} affordance='field' className='text-left'>{label}</DocHover>}
     </button>
   );
 }

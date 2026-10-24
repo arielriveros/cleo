@@ -529,7 +529,10 @@ export default function EngineViewport() {
             {editorMode === 'stateMachine' && !graphView && <>
                 <div data-cleo-overlay className='absolute top-2 left-2 z-20' onMouseDown={e => e.stopPropagation()}>
                     <SegmentedControl<'3d' | 'graph'>
-                        options={[{ value: '3d', label: 'Animations' }, { value: 'graph', label: 'Graph' }]}
+                        options={[
+                            { value: '3d', label: 'Animations', doc: 'editor/animation#the-animator::Animations' },
+                            { value: 'graph', label: 'Graph', doc: 'editor/animation#the-animator::Graph' },
+                        ]}
                         value='3d'
                         onChange={v => setGraphView(v === 'graph')} />
                 </div>

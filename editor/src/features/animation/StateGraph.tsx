@@ -163,7 +163,10 @@ export default function StateGraph() {
       toolbar={
         <>
           <SegmentedControl<'3d' | 'graph'>
-            options={[{ value: '3d', label: 'Animations' }, { value: 'graph', label: 'Graph' }]}
+            options={[
+              { value: '3d', label: 'Animations', doc: 'editor/animation#the-animator::Animations' },
+              { value: 'graph', label: 'Graph', doc: 'editor/animation#the-animator::Graph' },
+            ]}
             value='graph'
             onChange={v => setGraphView(v === 'graph')} />
           <LayerTabs />

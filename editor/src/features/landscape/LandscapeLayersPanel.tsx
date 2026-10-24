@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
-import { Button, Hint, MenuItem, Popover, SegmentedControl, Select, cn, hintClass, sectionTitleClass } from '../../components/ui'
+import { Button, DocScope, Hint, MenuItem, Popover, SectionTitle, SegmentedControl, Select, cn, hintClass } from '../../components/ui'
 import { useActiveLandscape } from './useActiveLandscape'
 import { useLandscapeBrush, setBrush, resolvePaintTarget, type WeightView } from './landscapeBrushStore'
 import { useStackEdit } from './useStackEdit'
@@ -14,8 +14,6 @@ import { useAssetDrop } from '../../utils/useAssetDrop'
 // slots draw by their rules, and the PAINT-ONLY slots are what the brush paints — roads, paths. What the
 // slots are, and which Materials they draw, is authored in the landscape-material editor (✎), never here.
 // Every change is one undo step (see useStackEdit).
-
-const sectionTitle = sectionTitleClass
 
 export default function LandscapeLayersPanel() {
   const { eventEmitter, editorScene, materials, enterTerrainMaterialEditor } = useCleoEngine()
@@ -63,85 +61,89 @@ export default function LandscapeLayersPanel() {
   }
   const thumbOf = (materialId: string | null) => materialId ? materials.find(m => m.id === materialId)?.thumbnail : undefined
 
+  // Documented under terrain.md › Paint: its "Slots" is what the brush paints, not the landscape-material
+  // editor's section of the same name.
   return (
-    <div className='flex flex-col text-fg p-2 gap-3'>
-      {landscapes.length > 1 && (
-        <Select value={node.id} onChange={e => select(e.target.value)} title='Which landscape these panels edit'>
-          {landscapes.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-        </Select>
-      )}
+    <DocScope page='editor/terrain' section='paint'>
+      <div className='flex flex-col text-fg p-2 gap-3'>
+        {landscapes.length > 1 && (
+          <Select value={node.id} onChange={e => select(e.target.value)} title='Which landscape these panels edit'>
+            {landscapes.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </Select>
+        )}
 
-      {stack.paintLayers.length > 0 && (
-        <div className='rounded border border-warning p-2 space-y-1'>
-          <Hint>This landscape still has {stack.paintLayers.length} paint layer(s) from an older version.</Hint>
-          <Button size='sm' onClick={() => edit('Convert paint layers', s => s.convertPaintLayersToSlots(), stack.usedChannels())}>
-            Convert to paint slots
-          </Button>
-        </div>
-      )}
-
-      <section className='space-y-1'>
-        <div className={sectionTitle}>Landscape material</div>
-        <LandscapeMaterialPicker materialId={stack.base.materialId} landscapeName={node.name}
-          onAssign={assignBase} onEdit={id => enterTerrainMaterialEditor(id)} />
-        {base && !stack.base.materialId && (
-          <div className='space-y-1'>
-            <Hint>This landscape’s material is embedded, not in the library, so it cannot be edited yet.</Hint>
-            <Button size='sm' onClick={() => {
-              const asset = saveBaseToLibrary(`${node.name} material`)
-              if (asset) enterTerrainMaterialEditor(asset.id)
-            }}>Save to library and edit</Button>
+        {stack.paintLayers.length > 0 && (
+          <div className='rounded border border-warning p-2 space-y-1'>
+            <Hint>This landscape still has {stack.paintLayers.length} paint layer(s) from an older version.</Hint>
+            <Button size='sm' onClick={() => edit('Convert paint layers', s => s.convertPaintLayersToSlots(), stack.usedChannels())}>
+              Convert to paint slots
+            </Button>
           </div>
         )}
-      </section>
 
-      {base && (
         <section className='space-y-1'>
-          <div className={sectionTitle}>Slots</div>
-          {[...base.slots].reverse().map(slot => {
-            const paintable = slot.manual && stack.slotChannel(slot.id) !== undefined
-            const active = paintable && target?.id === slot.id
-            return (
-              <div key={slot.id}
-                className={cn('rounded border p-1.5 space-y-1', active ? 'border-selected bg-control' : 'border-control',
-                              paintable && 'cursor-pointer')}
-                onClick={() => { if (paintable) setBrush({ paintSlotId: slot.id, mode: 'paint' }) }}>
-                <SlotLine name={slotDisplayName(slot, materials)} thumb={thumbOf(slot.surfaceMaterialId)}
-                  tag={slot.manual ? 'paint' : 'auto'}
-                  tagTitle={slot.manual ? 'Shows only where painted' : 'Blends in by its slope / elevation rule'} />
-                {paintable && (
-                  <div className='flex items-center gap-1' onClick={e => e.stopPropagation()}>
-                    <Button size='sm' variant={active ? 'default' : 'ghost'} active={active} className='flex-1'
-                      title='Paint this slot with the landscape brush'
-                      onClick={() => setBrush({ paintSlotId: slot.id, mode: 'paint' })}>{active ? 'Painting' : 'Paint'}</Button>
-                    <Button size='sm' variant='ghost' title='Cover the whole landscape with this slot' onClick={() => mask(slot.id, 'fill')}>Fill</Button>
-                    <Button size='sm' variant='ghost' title='Erase all painting of this slot' onClick={() => mask(slot.id, 'clear')}>Clear</Button>
-                    <Button size='sm' variant='ghost' title='Painted becomes unpainted and back' onClick={() => mask(slot.id, 'invert')}>Invert</Button>
-                  </div>
-                )}
-              </div>
-            )
-          })}
-          <div className='rounded border border-control p-1.5'>
-            <SlotLine name='Ground' thumb={thumbOf(base.surfaceMaterialId)} tag='covers' tagTitle='Covers the whole landscape' />
-          </div>
-          {!base.slots.some(s => s.manual) &&
-            <Hint>Nothing to paint yet: add a <b>Paint only</b> slot (a road, a path) in the landscape material (✎).</Hint>}
-          {stack.truncated && <Hint>More surfaces than the renderer draws at once; the topmost are hidden.</Hint>}
+          <SectionTitle title='Landscape material' />
+          <LandscapeMaterialPicker materialId={stack.base.materialId} landscapeName={node.name}
+            onAssign={assignBase} onEdit={id => enterTerrainMaterialEditor(id)} />
+          {base && !stack.base.materialId && (
+            <div className='space-y-1'>
+              <Hint>This landscape’s material is embedded, not in the library, so it cannot be edited yet.</Hint>
+              <Button size='sm' onClick={() => {
+                const asset = saveBaseToLibrary(`${node.name} material`)
+                if (asset) enterTerrainMaterialEditor(asset.id)
+              }}>Save to library and edit</Button>
+            </div>
+          )}
         </section>
-      )}
 
-      <section className='space-y-1'>
-        <div className={sectionTitle}>View</div>
-        <SegmentedControl<WeightView> size='sm' grow
-          options={[
-            { value: 'off', label: 'Shaded', title: 'The landscape as it renders' },
-            { value: 'layer', label: 'Paint slot', title: "Heat map of the active paint slot's weight" },
-            { value: 'all', label: 'All', title: 'Every surface in a colour of its own' },
-          ]}
-          value={brush.weightView} onChange={v => setBrush({ weightView: v })} />
-      </section>
-    </div>
+        {base && (
+          <section className='space-y-1'>
+            <SectionTitle title='Slots' />
+            {[...base.slots].reverse().map(slot => {
+              const paintable = slot.manual && stack.slotChannel(slot.id) !== undefined
+              const active = paintable && target?.id === slot.id
+              return (
+                <div key={slot.id}
+                  className={cn('rounded border p-1.5 space-y-1', active ? 'border-selected bg-control' : 'border-control',
+                                paintable && 'cursor-pointer')}
+                  onClick={() => { if (paintable) setBrush({ paintSlotId: slot.id, mode: 'paint' }) }}>
+                  <SlotLine name={slotDisplayName(slot, materials)} thumb={thumbOf(slot.surfaceMaterialId)}
+                    tag={slot.manual ? 'paint' : 'auto'}
+                    tagTitle={slot.manual ? 'Shows only where painted' : 'Blends in by its slope / elevation rule'} />
+                  {paintable && (
+                    <div className='flex items-center gap-1' onClick={e => e.stopPropagation()}>
+                      <Button size='sm' variant={active ? 'default' : 'ghost'} active={active} className='flex-1'
+                        title='Paint this slot with the landscape brush'
+                        onClick={() => setBrush({ paintSlotId: slot.id, mode: 'paint' })}>{active ? 'Painting' : 'Paint'}</Button>
+                      <Button size='sm' variant='ghost' title='Cover the whole landscape with this slot' onClick={() => mask(slot.id, 'fill')}>Fill</Button>
+                      <Button size='sm' variant='ghost' title='Erase all painting of this slot' onClick={() => mask(slot.id, 'clear')}>Clear</Button>
+                      <Button size='sm' variant='ghost' title='Painted becomes unpainted and back' onClick={() => mask(slot.id, 'invert')}>Invert</Button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            <div className='rounded border border-control p-1.5'>
+              <SlotLine name='Ground' thumb={thumbOf(base.surfaceMaterialId)} tag='covers' tagTitle='Covers the whole landscape' />
+            </div>
+            {!base.slots.some(s => s.manual) &&
+              <Hint>Nothing to paint yet: add a <b>Paint only</b> slot (a road, a path) in the landscape material (✎).</Hint>}
+            {stack.truncated && <Hint>More surfaces than the renderer draws at once; the topmost are hidden.</Hint>}
+          </section>
+        )}
+
+        <section className='space-y-1'>
+          <SectionTitle title='View' />
+          <SegmentedControl<WeightView> size='sm' grow
+            options={[
+              { value: 'off', label: 'Shaded', title: 'The landscape as it renders' },
+              { value: 'layer', label: 'Paint slot', title: "Heat map of the active paint slot's weight" },
+              { value: 'all', label: 'All', title: 'Every surface in a colour of its own' },
+            ]}
+            value={brush.weightView} onChange={v => setBrush({ weightView: v })} />
+        </section>
+      </div>
+    </DocScope>
   )
 }
 

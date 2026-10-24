@@ -7,7 +7,8 @@ The runtime side is in [Motion and physics](../scripting/motion-and-physics.md).
 
 ## Rigid body
 
-Available on **root-level nodes only**.
+What makes the node solid: a body the physics solver moves (or holds still, at mass `0`), and the
+shapes it collides with. Available on **root-level nodes only**.
 
 | Setting | Meaning |
 |---|---|
@@ -19,7 +20,7 @@ Available on **root-level nodes only**.
 | **Restitution** | Bounce. Default `0`. Combines with **max**. |
 | **Ground probe** | Distance a downward probe reaches, which is what makes `groundDistance` and `slopeAngle` readable. |
 | **Motion smoothing** | Filters the measured speed that feeds animation blends. |
-| **Simulation** | How far from the camera the body keeps simulating: **Project range**, **Always** or **Custom range**. See below. |
+| **Simulation** | How far from the camera the body keeps simulating before it freezes in place: **Project range** (the range in Options ▸ Engine ▸ Runtime), **Always** (never frozen) or **Custom range** (its own, in metres). See [Simulation range](#simulation-range). |
 | **Sleep when resting** | Sleeps once the body stops moving, until it is hit, pushed or a script sets its velocity. Off by default. |
 | **Linear constraints** | Per-axis toggles. |
 | **Angular constraints** | Per-axis toggles. |
@@ -58,7 +59,7 @@ camera: the game camera in Play, the editor camera in Simulate.
 
 The Performance panel's **· dynamic** row shows how many bodies are active, frozen and resting.
 
-## Triggers
+## Trigger
 
 A trigger detects overlap without responding to collision. Add one, give it shapes, and the node's
 `onTriggerEnter(other)` / `onTriggerExit(other)` fire as things come and go (on both nodes of the
@@ -71,16 +72,21 @@ Trigger volumes are drawn in the viewport when the debug eye menu has them on.
 
 ## Shapes
 
-Both bodies and triggers take a list of shapes; each has its own offset and rotation.
+Both bodies and triggers take a list of shapes; each has its own offset and rotation. **Add** puts a
+box, sphere, capsule, cylinder or plane on the list, and **Add Convex Hull** fits one to the mesh at the
+chosen **Hull Definition**.
 
 | Shape | Notes |
 |---|---|
 | **Box** | |
 | **Sphere** | |
-| **Capsule** | The right shape for a character. |
+| **Capsule** | The right shape for a character. Its **Total Height** spans the caps too, so the straight section is height − 2 × radius; at or below 2 × radius it is a sphere. |
 | **Cylinder** | |
 | **Plane** | An infinite half-space. |
-| **Convex hull** | Fitted to the mesh, with a quality ladder and a *Regenerate hull* action. |
+| **Convex hull** | Fitted to the mesh's vertices, at a **Definition** from Low (exactly the bounding box, 6 faces) to Very High (up to 50 faces). Every level encloses the whole mesh, so a lower one is looser, never tighter. Changing a hull's Definition rebuilds it in place and keeps the rotation you gave it. Not offered on skinned meshes. |
+
+**Shape** — one collider on the list, titled by its type: its dimensions, an **Offset** and a
+**Rotation** in the node's own space, and **Remove**.
 
 Adding a primitive **auto-fits it to the mesh**, including for skinned characters, so you rarely
 have to type dimensions.
@@ -133,18 +139,20 @@ The measured recommendation, from the [third-person example](../../examples/scri
 > A frictionless character does not slide when idle, because its locomotion zeroes horizontal
 > velocity when there is no input.
 
-## Ragdolls
+## Ragdoll
 
-Available on skinned models. Start one from a script with `scene.physics.startRagdoll(modelNode, options)`
--- the usual substitute for, or ending to, a death animation.
+How a skinned model falls when a script turns it into a ragdoll, with
+`scene.physics.startRagdoll(modelNode, options)` — the usual substitute for, or ending to, a death
+animation. The section appears on skinned models only.
 
-A character falls with one of three ragdolls, and the **Ragdoll** section on the model says which:
+**Source** — which of three ragdolls the character falls with, decided by its rig. The fields below it
+change with the source, and **Edit ragdoll in rig** opens the rig whenever the model has one.
 
 | Source | When | What it is |
 |---|---|---|
-| **Rig profile** | Its rig has parts authored in the rig editor's **Ragdoll** panel | Exactly what was authored. |
-| **Automatic humanoid** | No authored parts, and the skeleton has recognizable hips and legs | 16 body parts fitted to the bones. |
-| **Generic** | Anything else | A sphere on every substantial bone, tuned by the fields in this section. |
+| **Rig profile** | Its rig has parts authored in the rig editor's **Ragdoll** panel | Exactly what was authored: shaped body parts, real masses, knees and elbows that only bend one way. |
+| **Automatic humanoid** | No authored parts, and the skeleton has recognizable hips and legs | 16 body parts fitted to the bones. Open the rig to see the parts or customize them. |
+| **Generic** | Anything else | A sphere on every substantial bone, tuned by the fields in this section. Authoring parts on the rig gives a better fall. |
 
 The humanoid ragdoll (authored or automatic) is built per body *segment*, not per bone:
 
@@ -155,12 +163,22 @@ The humanoid ragdoll (authored or automatic) is built per body *segment*, not pe
 - the other joints are cones centred on a natural resting direction, so an arm bound in a T-pose rests lower;
 - limbs collide with each other and with the torso.
 
-Its node settings are **Mass scale** and **Push**. Push is a velocity added to the upper body as it starts
-falling, in the character's own frame (left, up, forward); a negative forward value topples it backwards.
+Its node settings:
+
+- **Mass Scale** — multiplies the profile's total mass.
+- **Push** — a velocity, in m/s, added to the upper body as it starts falling, in the character's own
+  frame (left, up, forward). A negative forward value topples it backwards.
+
+The generic ragdoll has its own fields instead: the joint type (a free, stable ball, or a cone-twist
+with cone and twist limits and a stiffness), damping, bone mass and radius scale, self collision, and a
+knockback impulse applied to its root bone in world space.
 
 ### The Ragdoll panel (rig editor)
 
-Open the rig, then use **Ragdoll** in the inspector:
+The **Ragdoll** section of a skeleton's inspector — the [Skeleton part](animation.md#the-skeleton-part)
+of its animation workspace — says how characters on that skeleton fall when they die: which bones
+become bodies, how big and heavy each is, and how each joint bends. Until parts are authored, it shows
+the automatic humanoid profile (or says the skeleton falls with the generic one) read-only.
 
 - **Customize** copies the automatic profile onto the rig so its parts can be edited. **Reset to auto**
   drops it again.

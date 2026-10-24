@@ -7,19 +7,20 @@ import AxisInput from '../../../components/AxisInput'
 import ShapeEditor from './ShapeEditor';
 import { HULL_QUALITIES } from './hullQuality';
 import { collectHullPositions, meshBounds } from '../../../utils/editorHelpers';
-import { Field, Slider, Toggle, Select, NumberInput, Button, PresetMenu, Section, Hint, SegmentedControl, cn, labelClass } from '../../../components/ui'
+import { Field, Slider, Toggle, Select, NumberInput, Button, PresetMenu, Section, Hint, SegmentedControl, DocScope, cn, labelClass, valueClass } from '../../../components/ui'
 import { PhysicsIcon, ShapeIcon } from '../sectionIcons'
 import { useAssetLibrary } from '../../AssetLibraryContext'
 import { modelIdOf } from '../../../utils/models'
 
 const LABEL = 'w-[130px]';
 
+/** The names the docs' Ragdoll › Source table gives the three ragdolls a character can fall with. */
+const RAGDOLL_SOURCE_LABEL = { rig: 'Rig profile', auto: 'Automatic humanoid', generic: 'Generic' } as const;
+
 const SIMULATE_HINT = 'Whether this body takes part in the physics solver. Off makes it a ghost — nothing collides with it, but it can still block a camera rig.';
 const CAMERA_COLLISION_HINT = 'Whether camera rigs collide with this body. Off and they pass straight through it. Independent of Simulate Physics on purpose: scenery can block the camera without blocking the character, or the reverse.';
-const MASS_HINT = 'Mass of 0 will make the object static.';
 const FRICTION_HINT = 'Contact friction. At 0 the body is frictionless — nothing will slow it down but damping. What a character wants, since its script sets its own speed.';
 const GROUND_PROBE_HINT = 'Counts as grounded while the collider’s feet are within this distance of solid ground, probed every frame. Removes isGrounded flicker (and false falling animations) for a character resting on terrain. Also what makes the groundDistance animation built-in answer. At 0 it is off and grounding comes from solver contacts only — raise it (~0.1–0.2) if a resting character flickers to airborne.';
-const SIMULATION_HINT = 'How far from the camera this body keeps simulating. Past it the body freezes in place: still solid to rays, the camera and other bodies, but not moving, until the camera comes back — and then it carries on with the velocity it had. Project uses the range in Options ▸ Engine ▸ Runtime (0 there = unlimited); Always never freezes (the player, anything a far-off script depends on); Custom sets this body’s own.';
 const CAN_SLEEP_HINT = 'Put the body to sleep once it has stopped moving, until something hits it, pushes it or a script sets its velocity. Saves the cost of props lying still. Off for anything a script steers by writing body.velocity directly.';
 const MOTION_SMOOTHING_HINT = 'Time constant for this body’s measured motion — currentSpeed, planarSpeed, acceleration, turn rate. Higher is steadier but slower to react. At 0 the default (~0.09s) applies. Raise it if an animation blend driven by this body’s speed vibrates or jitters; lower it if a script needs a faster answer than it gets.';
 
@@ -318,7 +319,7 @@ export default function PhysicsEditor(props: {node: Node}) {
     />
   );
 
-  return ( <>
+  return ( <DocScope page='editor/physics'>
     <Collapsable title='Rigid Body' icon={<PhysicsIcon />} badge={bodyProperties?.shapes.length || undefined} persistKey='rigidBody'
       right={bodyProperties && <PresetMenu label='Surface' presets={PHYSICS_SURFACE_PRESETS}
         title='What the body is made of — friction and bounce only'
@@ -342,7 +343,7 @@ export default function PhysicsEditor(props: {node: Node}) {
               <Toggle label='Camera Collision' className='my-1' title={CAMERA_COLLISION_HINT}
                 checked={bodyProperties.cameraCollision ?? true}
                 onChange={(c) => setBodyProperties({ ...bodyProperties, cameraCollision: c })} />
-              <Field label='Mass' labelClassName={LABEL} hint={MASS_HINT}>
+              <Field label='Mass' labelClassName={LABEL}>
                 <NumberInput value={bodyProperties.mass} onChange={(v) => setBodyProperties({ ...bodyProperties, mass: v })} />
               </Field>
               <Slider label='Damping' labelClassName={LABEL} min={0} max={1} step={0.01} value={bodyProperties.linearDamping} onChange={(v) => setBodyProperties({ ...bodyProperties, linearDamping: v })} />
@@ -356,7 +357,7 @@ export default function PhysicsEditor(props: {node: Node}) {
                   vibrates: the noise is in the measurement, not the animation. */}
               <Slider label='Motion smoothing' labelClassName={LABEL} title={MOTION_SMOOTHING_HINT} min={0} max={0.5} step={0.01} value={bodyProperties.motionSmoothing ?? 0} onChange={(v) => setBodyProperties({ ...bodyProperties, motionSmoothing: v })} />
               {/* Freeze-in-place out of range, and sleep at rest: what keeps a large level's far props free. */}
-              <Field label='Simulation' labelClassName={LABEL} hint={SIMULATION_HINT}>
+              <Field label='Simulation' labelClassName={LABEL}>
                 <Select value={bodyProperties.simulationMode ?? 'project'}
                   onChange={(e) => setBodyProperties({ ...bodyProperties, simulationMode: e.target.value as 'project' | 'always' | 'custom' })}>
                   <option value='project'>{`Project range (${projectSettings.engine.simulationRange > 0 ? `${projectSettings.engine.simulationRange} m` : 'unlimited'})`}</option>
@@ -401,14 +402,12 @@ export default function PhysicsEditor(props: {node: Node}) {
     </Collapsable>
 
     { isSkinned && ragdoll &&
-    <Collapsable title='Ragdoll' icon={<PhysicsIcon />} persistKey='ragdoll'
-      hint='How this skinned mesh falls when a script turns it into a ragdoll (physics.startRagdoll).'>
+    <Collapsable title='Ragdoll' icon={<PhysicsIcon />} persistKey='ragdoll'>
       <div className='w-full p-2'>
-        <Hint className='mb-2'>
-          {ragdollSource === 'rig' ? 'Falls with the ragdoll authored on its rig: shaped body parts, real masses, knees and elbows that only bend one way.'
-            : ragdollSource === 'auto' ? 'Falls with the automatic humanoid ragdoll. Open the rig to see or customize the parts.'
-            : 'Not a recognizable humanoid: falls with the generic per-bone ragdoll, tuned below. Author parts on the rig for a better one.'}
-        </Hint>
+        {/* Which of the three ragdolls this character falls with: the fields below change with it. */}
+        <Field label='Source' labelClassName={LABEL}>
+          <span className={valueClass}>{RAGDOLL_SOURCE_LABEL[ragdollSource]}</span>
+        </Field>
         {ragdollRigId && <Button variant='subtle' size='sm' className='w-full mb-2' onClick={() => enterRigEditor(ragdollRigId)}>Edit ragdoll in rig</Button>}
         { ragdollSource === 'generic' ? <>
           <Field label='Joint Type' labelClassName={LABEL}>
@@ -437,10 +436,9 @@ export default function PhysicsEditor(props: {node: Node}) {
           <Field label='Push (m/s)' labelClassName={LABEL}>
             <AxisInput step={0.1} value={[ragdoll.impulse?.[0] ?? 0, ragdoll.impulse?.[1] ?? 0, ragdoll.impulse?.[2] ?? 0]} onChange={(v) => setRagdoll({ ...ragdoll, impulse: [v[0], v[1], v[2]] })} />
           </Field>
-          <Hint className='mt-1'>Push: a velocity added to the upper body when it starts falling, in the character’s frame (left, up, forward). Negative forward topples it backwards.</Hint>
         </> }
       </div>
     </Collapsable>
     }
-  </>)
+  </DocScope>)
 }

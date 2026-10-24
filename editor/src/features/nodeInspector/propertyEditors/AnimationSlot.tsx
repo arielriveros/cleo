@@ -6,7 +6,7 @@ import { useAssetLibrary } from '../../AssetLibraryContext'
 import { useCleoEngine } from '../../EngineContext'
 import { useDocument } from '../../DocumentContext'
 import Collapsable from '../../../components/Collapsable'
-import { Button, Hint, Select, cn } from '../../../components/ui'
+import { Button, Hint, SectionTitle, Select, cn } from '../../../components/ui'
 import { useAssetDrop } from '../../../utils/useAssetDrop'
 import { AnimationIcon } from '../sectionIcons'
 import { ownSkinnedModelNodeOf, modelIdOf } from '../../../utils/models'
@@ -100,7 +100,8 @@ export default function AnimationSlot(props: { node: Node }) {
 
         {controller && controllerClips.length > 0 && (
           <div className='flex flex-col gap-1'>
-            <div className='text-ui-sm text-muted'>Clip overrides (this character only)</div>
+            <SectionTitle title='Clip overrides (this character only)'
+              doc='editor/animation#using-one-on-a-character::Clip overrides (this character only)' />
             {controllerClips.map(from => (
               <div key={from} className='flex items-center gap-1 text-ui-sm'>
                 <span className='w-[96px] truncate text-fg' title={from}>{from}</span>

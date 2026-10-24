@@ -3,9 +3,8 @@ import { Material, applyUvMapping, uvConfigOf, type UvConfig } from 'cleo'
 import { PropertyTable, PropertyRow, Section, Select, NumberInput, VectorInput, Slider, Hint } from '../../../components/ui'
 
 // How a lit material maps its textures: the mesh's uv (tiled/offset), or a box / triplanar projection in
-// metres that does not stretch on scaled geometry. See UvConfig in src/graphics/material.ts.
-
-const HINT = 'Mesh UV uses the model\'s own texture coordinates. Box projects the texture along each face\'s axis in metres, so a scaled wall or floor keeps the same texel size — use it for level geometry and props. Triplanar blends all three axes for rocks and organic shapes. World space lines adjacent pieces up seamlessly; Object space sticks to the object when it moves.'
+// metres that does not stretch on scaled geometry. See UvConfig in src/graphics/material.ts. Explained in
+// docs/editor/models-and-materials.md (the material editor's UV Mapping).
 
 export default function UvMappingSection({ material, onChange }: { material: Material; onChange: () => void }) {
   const [cfg, setCfg] = useState<Required<UvConfig>>(() => uvConfigOf(material))
@@ -20,7 +19,7 @@ export default function UvMappingSection({ material, onChange }: { material: Mat
   const projected = cfg.uvProjection !== 'mesh'
 
   return (
-    <Section title='UV Mapping' hint={HINT}>
+    <Section title='UV Mapping'>
       <PropertyTable columns={['40%', '60%']}>
         <PropertyRow label='Projection'>
           <Select value={cfg.uvProjection} onChange={(e) => write({ uvProjection: e.target.value as UvConfig['uvProjection'] })}>

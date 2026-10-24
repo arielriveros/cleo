@@ -13,9 +13,7 @@ export default function UnsavedSceneModal() {
 
   return (
     <Modal onClose={() => resolveSceneConfirm('cancel')} className='w-[400px]'>
-      <ModalHeader>
-        <div className='text-ui-lg font-semibold'>Unsaved changes</div>
-      </ModalHeader>
+      <ModalHeader title='Unsaved changes' doc='editor/projects#saving::Unsaved changes' />
 
       <div className='px-4 py-3 text-ui text-fg'>
         <p>

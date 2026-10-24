@@ -105,9 +105,8 @@ export default function DialogHost() {
     // z-[60] so a confirm raised from inside another modal (the Projects modal's delete) sits over it.
     <Modal onClose={cancel} className='w-[440px] max-w-[92vw]' overlayClassName='z-[60]'>
       <div ref={cardRef} onKeyDown={trapTab}>
-        <ModalHeader>
-          <div className='text-ui-lg font-semibold'>{options.title}</div>
-        </ModalHeader>
+        {/* The caller's own words (a question, a warning), not a part of the editor the docs describe. */}
+        <ModalHeader title={options.title} doc={false} />
 
         {options.message && <Message text={options.message} warn={options.tone === 'warning'} />}
 

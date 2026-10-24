@@ -106,3 +106,27 @@ something moving. They are written against real, working scenes:
 Every signature, default and string literal here is taken from the engine source rather than
 paraphrased. Where a rule is surprising, the reason is given — most of the surprising rules exist
 because the obvious alternative was tried and produced a bug that was hard to see.
+
+## Docs feed the editor's tooltips
+
+The editor does not carry its own explanations. Hover a section title, a panel tab, a modal's title or
+a page tab, and the card that appears is read from these pages. Change a sentence here and the card
+changes with it.
+
+A title finds its text by name, on the page that documents the panel it sits in:
+
+| Written as | Card shows |
+|---|---|
+| A heading (`### Shadows`) | The first plain paragraph under it |
+| A table row whose first cell is bold (`\| **Model** \| … \| … \|`) | The last column; the other columns as extra lines |
+| `**Term** — text`, in a paragraph, a bullet or a numbered item | The text after the dash |
+| `**Label:** text` | The text after the label |
+
+So when a doc names a piece of the editor, use its on-screen title exactly. Case, punctuation, `&`
+versus "and", and a count such as "(3)" do not matter. A field label inside a section finds a bold row
+or `**Term** —` line within that section's heading the same way, and falls back to the editor's own
+hint when there is none. Blockquote notes, code blocks and the "See also" line are never used.
+
+Renaming a term that names a title leaves that title without a card. `editor/tests/docTooltips.test.ts`
+catches it, and `npx vite-node tools/docAudit.ts --misses` (run in `editor/`) lists every title with
+no entry.

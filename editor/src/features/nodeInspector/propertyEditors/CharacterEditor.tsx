@@ -2,17 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { CharacterNode, CHARACTER_PRESETS, FACING_MODES, type CharacterPreset } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
 import { useCleoEngine } from '../../EngineContext'
-import { PresetMenu, SegmentedControl, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
+import { DocScope, PresetMenu, SectionTitle, SegmentedControl, Slider, Toggle, cn, labelClass } from '../../../components/ui'
 import { hintAffordance } from '../../../components/ui/Field'
 import { CharacterIcon } from '../sectionIcons'
 
-const CHARACTER_HINT = 'The pawn. It turns a ControlIntent into velocity and facing, and never asks where the intent came from — so the same character walks under a player, an AI or a script. Possess it with a Controller node.'
-const FACING_HINT = 'Aim turns the body toward where the Controller is looking (a strafe character). Velocity turns it toward travel (a face-your-movement character). None leaves rotation alone.'
-const TURN_HINT = 'Turn-in-place fires once the aim swings past the threshold and holds until it is back within the release angle. Two numbers, not one: with a single threshold the turn chatters whenever the camera hovers on it.'
 const SETTLE_HINT = 'Seconds the aim must stay past the threshold before a 90-degree turn engages, so a camera swept round to the back plays the 180 instead of a 90. Past 135 degrees the turn starts at once.'
-const JUMP_HINT = 'Coyote time keeps a jump working just after walking off an edge; the buffer keeps one pressed just before landing. Lockout suppresses the ground projection right after take-off, so it cannot flatten the jump.'
 const ACCEL_HINT = 'Units per second squared. 0 snaps to full speed, which is what a keyboard character usually wants; above 0 makes the engine’s isAccelerating / isDecelerating animation builtins meaningful.'
-const OUTPUT_HINT = 'What this character publishes to its Animator each frame. Bind these from a state machine parameter of type Variable, with the node reference set to this character.'
 const DRIVE_HINT = 'Run locomotion with nothing possessing this character. Off by default, so an unpossessed character is inert and cannot fight physics for its own velocity.'
 
 interface CharacterState {
@@ -60,52 +55,51 @@ export default function CharacterEditor(props: { node: CharacterNode }) {
       onChange={(v) => apply({ [k]: v } as Partial<CharacterState>)} />
   )
 
-  const header = (label: string, hint?: string) => (
-    <div className={cn(sectionTitleClass, 'mt-3 mb-1', hintAffordance(hint))} title={hint}>{label}</div>
-  )
-
   return (
-    <Collapsable title='Character' icon={<CharacterIcon />} persistKey='character' hint={CHARACTER_HINT}
+    <Collapsable title='Character' icon={<CharacterIcon />} persistKey='character'
       right={<PresetMenu presets={CHARACTER_PRESETS} onApply={applyPreset} title='Movement feels — speeds change what the locomotion clips cover' />}>
-      <div className='w-full p-2'>
-        {header('Speed')}
-        {slider('Walk', 'walkSpeed', 0, 20, 0.1)}
-        {slider('Run', 'runSpeed', 0, 30, 0.1)}
-        {slider('Acceleration', 'acceleration', 0, 100, 0.5, 1, ACCEL_HINT)}
-        {slider('Air Control', 'airControl', 0, 1, 0.01)}
+      {/* The title is a node-inspector entry; its groups are described with the tuning they set. */}
+      <DocScope page='scripting/characters-and-controllers' section='character-tuning'>
+        <div className='w-full p-2'>
+          <SectionTitle title='Speed' className='mt-3 mb-1' />
+          {slider('Walk', 'walkSpeed', 0, 20, 0.1)}
+          {slider('Run', 'runSpeed', 0, 30, 0.1)}
+          {slider('Acceleration', 'acceleration', 0, 100, 0.5, 1, ACCEL_HINT)}
+          {slider('Air Control', 'airControl', 0, 1, 0.01)}
 
-        {header('Facing', FACING_HINT)}
-        <div className='mb-2'>
-          <SegmentedControl
-            value={state.facingMode}
-            options={FACING_MODES.map(m => ({ value: m, label: m[0].toUpperCase() + m.slice(1) }))}
-            onChange={(v) => apply({ facingMode: v })}
-          />
+          <SectionTitle title='Facing' className='mt-3 mb-1' />
+          <div className='mb-2'>
+            <SegmentedControl
+              value={state.facingMode}
+              options={FACING_MODES.map(m => ({ value: m, label: m[0].toUpperCase() + m.slice(1) }))}
+              onChange={(v) => apply({ facingMode: v })}
+            />
+          </div>
+          {slider('Turn Speed', 'turnSpeed', 0, 1440, 10, 0)}
+          {slider('Direction Smooth', 'directionSmoothing', 0, 1, 0.01)}
+
+          <SectionTitle title='Turn in place' className='mt-3 mb-1' />
+          {slider('Threshold', 'turnThreshold', 1, 180, 1, 0)}
+          {slider('Release', 'turnReleaseAngle', 0, Math.max(1, state.turnThreshold - 1), 1, 0)}
+          {slider('Settle', 'turnSettleSeconds', 0, 0.5, 0.01, 2, SETTLE_HINT)}
+
+          <SectionTitle title='Jump' className='mt-3 mb-1' />
+          {slider('Speed', 'jumpSpeed', 0, 20, 0.1)}
+          {slider('Coyote', 'coyoteSeconds', 0, 0.5, 0.01)}
+          {slider('Buffer', 'jumpBufferSeconds', 0, 0.5, 0.01)}
+          {slider('Lockout', 'jumpLockoutSeconds', 0, 1, 0.01)}
+
+          <SectionTitle title='Advanced' className='mt-3 mb-1' />
+          <Toggle className='mb-2' checked={state.driveWhenUnpossessed}
+            onChange={checked => apply({ driveWhenUnpossessed: checked })}
+            label={<span className={cn(labelClass, hintAffordance(DRIVE_HINT))} title={DRIVE_HINT}>
+              Drive without a Controller
+            </span>} />
+
+          <SectionTitle title='Animator outputs' className='mt-3 mb-1' />
+          <AnimatorOutputs node={props.node} live={isPlayMode} />
         </div>
-        {slider('Turn Speed', 'turnSpeed', 0, 1440, 10, 0)}
-        {slider('Direction Smooth', 'directionSmoothing', 0, 1, 0.01)}
-
-        {header('Turn in place', TURN_HINT)}
-        {slider('Threshold', 'turnThreshold', 1, 180, 1, 0)}
-        {slider('Release', 'turnReleaseAngle', 0, Math.max(1, state.turnThreshold - 1), 1, 0)}
-        {slider('Settle', 'turnSettleSeconds', 0, 0.5, 0.01, 2, SETTLE_HINT)}
-
-        {header('Jump', JUMP_HINT)}
-        {slider('Speed', 'jumpSpeed', 0, 20, 0.1)}
-        {slider('Coyote', 'coyoteSeconds', 0, 0.5, 0.01)}
-        {slider('Buffer', 'jumpBufferSeconds', 0, 0.5, 0.01)}
-        {slider('Lockout', 'jumpLockoutSeconds', 0, 1, 0.01)}
-
-        {header('Advanced')}
-        <Toggle className='mb-2' checked={state.driveWhenUnpossessed}
-          onChange={checked => apply({ driveWhenUnpossessed: checked })}
-          label={<span className={cn(labelClass, hintAffordance(DRIVE_HINT))} title={DRIVE_HINT}>
-            Drive without a Controller
-          </span>} />
-
-        {header('Animator outputs', OUTPUT_HINT)}
-        <AnimatorOutputs node={props.node} live={isPlayMode} />
-      </div>
+      </DocScope>
     </Collapsable>
   )
 }

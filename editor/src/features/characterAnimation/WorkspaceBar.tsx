@@ -3,7 +3,7 @@ import { useDocument } from '../DocumentContext';
 import { useAssetLibrary } from '../AssetLibraryContext';
 import { useEditorSessions } from '../EditorSessionsContext';
 import { usePlayback } from '../PlaybackContext';
-import { Button, MenuItem, Popover, cn } from '../../components/ui';
+import { Button, DocHover, MenuItem, Popover, cn, useDocEntry } from '../../components/ui';
 import {
   PART_LABEL, PART_OF_KIND, groupTabStrip, isWorkspaceKind, type WorkspacePart,
 } from '../../utils/animationWorkspace';
@@ -15,12 +15,23 @@ import {
 
 const PARTS: WorkspacePart[] = ['skeleton', 'clips', 'animator', 'blendSpace'];
 
-const PART_HINT: Record<WorkspacePart, string> = {
-  skeleton: 'Bones, humanoid mapping, sockets, masks, poses, foot placement, ragdoll and retargeting',
-  clips: 'The animation clips this skeleton plays: trim, mirror, root motion and events',
-  animator: 'The graph that decides which clip plays: states, transitions and parameters',
-  blendSpace: 'Mix several clips by speed, direction or any other parameter',
+/**
+ * Each part's hover card, from docs/editor/animation.md: the table of parts at the top of that page (Blend
+ * Spaces finds its own section there instead, which says the same and how to make one). Written as `doc:`
+ * keys so the docs coverage test checks every one of them.
+ */
+const PART_DOC: Record<WorkspacePart, { doc: string }> = {
+  skeleton: { doc: 'editor/animation::Skeleton' },
+  clips: { doc: 'editor/animation::Clips' },
+  animator: { doc: 'editor/animation::Animator' },
+  blendSpace: { doc: 'editor/animation::Blend Spaces' },
 };
+
+/** A part's name with its docs card. A component, so each part's lookup is its own hook. */
+function PartLabel({ part }: { part: WorkspacePart }) {
+  const entry = useDocEntry(PART_LABEL[part], PART_DOC[part].doc);
+  return <DocHover entry={entry}>{PART_LABEL[part]}</DocHover>;
+}
 
 export default function WorkspaceBar() {
   const { tabs, activeTabId, setActiveTab, dirtyTabs, saveTabs, closeTabs } = useDocument();
@@ -64,7 +75,7 @@ export default function WorkspaceBar() {
     const partDirty = members.some(t => isWorkspaceKind(t.kind) && PART_OF_KIND[t.kind] === part && dirtyTabs[t.id]);
     const label = (
       <span className='flex items-center gap-1'>
-        {PART_LABEL[part]}
+        <PartLabel part={part} />
         {partDirty && <span className='text-warning text-ui-xs leading-none'>●</span>}
         {menu && <span className='text-dim text-ui-xs'>▾</span>}
       </span>
@@ -75,14 +86,14 @@ export default function WorkspaceBar() {
     );
     if (!menu) {
       return (
-        <button key={part} type='button' className={cls} title={PART_HINT[part]}
+        <button key={part} type='button' className={cls}
           onClick={() => focusOr(t => t.kind === 'rig' && t.rigId === rig.id, () => enterRigEditor(rig.id))}>
           {label}
         </button>
       );
     }
     return (
-      <Popover key={part} trigger={label} title={PART_HINT[part]} triggerClassName={cls} className='min-w-[240px] max-h-[60vh] overflow-y-auto p-1'>
+      <Popover key={part} trigger={label} triggerClassName={cls} className='min-w-[240px] max-h-[60vh] overflow-y-auto p-1'>
         {close => menu(close)}
       </Popover>
     );

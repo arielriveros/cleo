@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Field, SegmentedControl, TextInput, Toggle, hintClass, sectionTitleClass } from '../../components/ui'
+import { DocScope, Field, Section, SegmentedControl, TextInput, Toggle, hintClass } from '../../components/ui'
 import { useCleoEngine } from '../EngineContext'
 import { useTexture } from './TextureContext'
 import type { FilterMode, WrapMode } from '../../utils/textureAssets'
@@ -54,106 +54,99 @@ export default function TextureSettingsPanel() {
   const anisoIgnored = s.anisotropy > 1
     && (s.minFilter !== 'linear' || s.magFilter !== 'linear' || s.mipMapFilter !== 'linear')
 
+  // Each Section is a heading under assets.md › Textures, so its field labels find their rows there.
   return (
-    <div className='flex flex-col gap-3 p-2'>
-      <Field label='Name'>
-        <TextInput value={asset.name} onChange={rename} />
-      </Field>
+    <DocScope page='editor/assets' section='textures'>
+      <div className='flex flex-col gap-3 p-2'>
+        <Field label='Name'>
+          <TextInput value={asset.name} onChange={rename} />
+        </Field>
 
-      <div>
-        <div className={sectionTitleClass}>Source</div>
-        <div className={hintClass}>
-          {asset.source.kind === 'image'
-            ? `${image?.name ?? asset.source.imageId}${image?.byteSize ? ` · ${Math.round(image.byteSize / 1024)} KB` : ''}`
-            : asset.source.kind === 'pack'
-              ? 'Channel pack'
-              : 'Provided by the engine — this texture has no stored image.'}
-        </div>
-      </div>
-
-      <div>
-        <div className={sectionTitleClass}>Wrapping</div>
-        <Field label='U'>
-          <SegmentedControl value={s.wrapU} onChange={(v) => patch({ wrapU: v })} options={WRAPS} size='sm' grow />
-        </Field>
-        <Field label='V'>
-          <SegmentedControl value={s.wrapV} onChange={(v) => patch({ wrapV: v })} options={WRAPS} size='sm' grow />
-        </Field>
-      </div>
-
-      <div>
-        <div className={sectionTitleClass}>Filtering</div>
-        <Field label='Magnify' hint='Sampling when the texture is drawn larger than its texels. Nearest keeps pixel art sharp.'>
-          <SegmentedControl value={s.magFilter} onChange={(v) => patch({ magFilter: v })} options={FILTERS} size='sm' grow />
-        </Field>
-        <Field label='Minify' hint='Sampling when the texture is drawn smaller than its texels.'>
-          <SegmentedControl value={s.minFilter} onChange={(v) => patch({ minFilter: v })} options={FILTERS} size='sm' grow />
-        </Field>
-      </div>
-
-      <div>
-        <div className={sectionTitleClass}>Mipmaps</div>
-        <Field label='Generate' hint='Prefiltered smaller copies, sampled as a surface recedes. Without them a minified texture shimmers.'>
-          <Toggle checked={s.mipMap} onChange={(v) => patch({ mipMap: v })} />
-        </Field>
-        {s.mipMap && (
-          <>
-            <Field label='Between levels'>
-              <SegmentedControl value={s.mipMapFilter} onChange={(v) => patch({ mipMapFilter: v })} options={FILTERS} size='sm' grow />
-            </Field>
-            <Field label='Anisotropy' hint='Extra samples along the view direction, for surfaces seen at a grazing angle.'>
-              <SegmentedControl value={s.anisotropy} onChange={(v) => patch({ anisotropy: v })} options={ANISO} size='sm' grow />
-            </Field>
-            {anisoIgnored && (
-              <div className={hintClass}>
-                Ignored while any filter is Nearest — WebGPU refuses such a sampler outright, so it is
-                forced back to Off on both backends.
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      <div>
-        <div className={sectionTitleClass}>Interpretation</div>
-        <Field label='Contents' hint='Colour maps are decoded to linear by the shaders; data maps must not be.'>
-          <SegmentedControl
-            value={s.colorSpace}
-            onChange={(v) => patch({ colorSpace: v })}
-            options={[
-              { value: 'srgb', label: 'Colour', title: 'Albedo, emissive — decoded to linear when lit' },
-              { value: 'linear', label: 'Data', title: 'Normals, roughness, masks — read as numbers' },
-            ]}
-            size='sm'
-            grow
-          />
-        </Field>
-        {mismatches.length > 0 && (
-          <div className='rounded border border-warning/40 bg-warning/10 px-2 py-1 text-ui-sm text-warning'>
-            Marked {s.colorSpace === 'srgb' ? 'Colour' : 'Data'} but bound to a{' '}
-            {s.colorSpace === 'srgb' ? 'data' : 'colour'} slot on {mismatches.length}{' '}
-            material{mismatches.length === 1 ? '' : 's'}: {mismatches.slice(0, 3).join(', ')}
-            {mismatches.length > 3 ? '…' : ''}
+        <Section title='Source' className='mb-0'>
+          <div className={hintClass}>
+            {asset.source.kind === 'image'
+              ? `${image?.name ?? asset.source.imageId}${image?.byteSize ? ` · ${Math.round(image.byteSize / 1024)} KB` : ''}`
+              : asset.source.kind === 'pack'
+                ? 'Channel pack'
+                : 'Provided by the engine — this texture has no stored image.'}
           </div>
-        )}
-        <Field label='Flip Y' hint='Images are top-left origin and the GPU samples bottom-left, so this is on for almost everything.'>
-          <Toggle checked={s.flipY} onChange={(v) => patch({ flipY: v })} />
-        </Field>
-        <Field label='Precision' hint='Float allocates a wider format, for maps whose values exceed 0..1.'>
-          <SegmentedControl
-            value={s.precision}
-            onChange={(v) => patch({ precision: v })}
-            options={[{ value: 'low', label: '8-bit' }, { value: 'high', label: 'Float' }]}
-            size='sm'
-            grow
-          />
-        </Field>
-      </div>
+        </Section>
 
-      <div className={hintClass}>
-        Wrapping, filters and mipmaps take effect in the viewport as you change them. Flip Y and Precision
-        change how the bytes are uploaded, so they apply on the next load.
+        <Section title='Wrapping' className='mb-0'>
+          <Field label='U'>
+            <SegmentedControl value={s.wrapU} onChange={(v) => patch({ wrapU: v })} options={WRAPS} size='sm' grow />
+          </Field>
+          <Field label='V'>
+            <SegmentedControl value={s.wrapV} onChange={(v) => patch({ wrapV: v })} options={WRAPS} size='sm' grow />
+          </Field>
+        </Section>
+
+        <Section title='Filtering' className='mb-0'>
+          <Field label='Magnify'>
+            <SegmentedControl value={s.magFilter} onChange={(v) => patch({ magFilter: v })} options={FILTERS} size='sm' grow />
+          </Field>
+          <Field label='Minify'>
+            <SegmentedControl value={s.minFilter} onChange={(v) => patch({ minFilter: v })} options={FILTERS} size='sm' grow />
+          </Field>
+        </Section>
+
+        <Section title='Mipmaps' className='mb-0'>
+          <Field label='Generate'>
+            <Toggle checked={s.mipMap} onChange={(v) => patch({ mipMap: v })} />
+          </Field>
+          {s.mipMap && (
+            <>
+              <Field label='Between levels'>
+                <SegmentedControl value={s.mipMapFilter} onChange={(v) => patch({ mipMapFilter: v })} options={FILTERS} size='sm' grow />
+              </Field>
+              <Field label='Anisotropy'>
+                <SegmentedControl value={s.anisotropy} onChange={(v) => patch({ anisotropy: v })} options={ANISO} size='sm' grow />
+              </Field>
+              {anisoIgnored && (
+                <div className={hintClass}>
+                  Ignored while any filter is Nearest — WebGPU refuses such a sampler outright, so it is
+                  forced back to Off on both backends.
+                </div>
+              )}
+            </>
+          )}
+        </Section>
+
+        <Section title='Interpretation' className='mb-0'>
+          <Field label='Contents'>
+            <SegmentedControl
+              value={s.colorSpace}
+              onChange={(v) => patch({ colorSpace: v })}
+              options={[
+                { value: 'srgb', label: 'Colour', title: 'Albedo, emissive — decoded to linear when lit' },
+                { value: 'linear', label: 'Data', title: 'Normals, roughness, masks — read as numbers' },
+              ]}
+              size='sm'
+              grow
+            />
+          </Field>
+          {mismatches.length > 0 && (
+            <div className='rounded border border-warning/40 bg-warning/10 px-2 py-1 text-ui-sm text-warning'>
+              Marked {s.colorSpace === 'srgb' ? 'Colour' : 'Data'} but bound to a{' '}
+              {s.colorSpace === 'srgb' ? 'data' : 'colour'} slot on {mismatches.length}{' '}
+              material{mismatches.length === 1 ? '' : 's'}: {mismatches.slice(0, 3).join(', ')}
+              {mismatches.length > 3 ? '…' : ''}
+            </div>
+          )}
+          <Field label='Flip Y'>
+            <Toggle checked={s.flipY} onChange={(v) => patch({ flipY: v })} />
+          </Field>
+          <Field label='Precision'>
+            <SegmentedControl
+              value={s.precision}
+              onChange={(v) => patch({ precision: v })}
+              options={[{ value: 'low', label: '8-bit' }, { value: 'high', label: 'Float' }]}
+              size='sm'
+              grow
+            />
+          </Field>
+        </Section>
       </div>
-    </div>
+    </DocScope>
   )
 }

@@ -105,10 +105,6 @@ export default function AnimationFieldPanel() {
               a body's speed, a heading off the physics solver — and carry frame-to-frame noise that lands in
               the pose one-for-one unless it is filtered here. Only applies in Play; the preview below always
               shows the field exactly as authored, so placing samples stays direct. */}
-          <p className={hintClass}>
-            Applies at runtime only — the preview here always tracks the probe exactly.
-          </p>
-
           <AxisSmoothingRow label='X' axis={field.xAxis} onChange={p => setAxis('x', p)} />
           {is2D && <AxisSmoothingRow label='Y' axis={field.yAxis} onChange={p => setAxis('y', p)} />}
 

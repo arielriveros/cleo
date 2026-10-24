@@ -1,6 +1,6 @@
 import { useStateMachine } from './StateMachineContext'
 import Collapsable from '../../components/Collapsable'
-import { Button, cn, hintClass, SegmentedControl, Select, Slider, TextInput } from '../../components/ui'
+import { Button, cn, SegmentedControl, Select, Slider, TextInput } from '../../components/ui'
 import type { AnimationBlendMode } from 'cleo'
 import type { ReactNode } from 'react'
 import { useAssetDrop } from '../../utils/useAssetDrop'
@@ -67,7 +67,7 @@ export function LayerSection() {
   const maskMissing = !!layer.maskId && !boneMasks.some(m => m.id === layer.maskId)
 
   return (
-    <Collapsable title={`Layer — ${layer.name}`} defaultOpen>
+    <Collapsable title={`Layer — ${layer.name}`} doc='Layer' defaultOpen>
       <div className='p-2 flex flex-col gap-2'>
         <div className='flex items-center gap-1'>
           <TextInput className={cn(tight, 'flex-1 min-w-0')} value={layer.name} title='Layer name (scripts address it by this)'
@@ -113,9 +113,6 @@ export function LayerSection() {
           </Select>
         </AssetDropRow>
         {maskMissing && <p className='text-ui-xs text-warning'>That mask was deleted, so this layer affects nothing until another is picked.</p>}
-        <p className={hintClass}>
-          An empty state (no clip) on a layer means “add nothing”: the layer fades out while it is there.
-        </p>
       </div>
     </Collapsable>
   )
@@ -129,11 +126,6 @@ export function SlotsSection() {
   return (
     <Collapsable title='Action slots' badge={slots.length || undefined}>
       <div className='p-2 flex flex-col gap-2'>
-        <p className={hintClass}>
-          Scripts play one-shots here without wiring them into the graph:
-          <code className='text-fg'> animator.playAction('Reload', {'{'} slot: 'UpperBody' {'}'})</code>.
-          With none declared, actions play full-body over everything.
-        </p>
         {slots.map((slot, i) => (
           <div key={i} className='flex flex-col gap-1 border border-control rounded p-1'>
             <div className='flex items-center gap-1'>

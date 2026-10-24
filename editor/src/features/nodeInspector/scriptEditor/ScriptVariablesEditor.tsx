@@ -115,14 +115,6 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
   return (
     <Collapsable title='Variables' icon={<VariablesIcon />} badge={visible.length || undefined} persistKey='variables'>
       <div className='w-full p-2'>
-        <p className='mb-2 text-ui-sm text-dim'>
-          Declared in <b>{asset.name}</b> as class fields. Type and access come from the script; edit each
-          value here. Add a field in the script (<code>public speed: number = 5</code>); a leading{' '}
-          <code>_</code> keeps it internal. A <code>string[]</code> field is an editable list. Type a name field as{' '}
-          <code>ClipName</code>, <code>SoundName</code>, <code>SocketName</code>, <code>TemplateName</code> or{' '}
-          <code>NodeName</code> to pick it from what this node can reach, or as <code>'a' | 'b'</code> for fixed
-          choices; a string field tagged <code>/** @options listField */</code> is picked from that list.
-        </p>
         {visible.length === 0 && <p className='mb-2 text-ui-sm text-dim'>No exposed variables. Declare a public/protected field in the script.</p>}
         {visible.map(v => {
           // Read-only: the access level is declared in the script, not chosen in the inspector.

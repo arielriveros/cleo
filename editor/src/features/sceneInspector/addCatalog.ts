@@ -76,21 +76,23 @@ export const NEW_NODE_MIME = 'text/cleo-new-node';
 export type AddCategory = 'gameplay' | 'cameras' | 'lights' | 'audio' | 'sprites' | 'primitives' | 'complex'
   | 'environment' | 'effects' | 'uiLayout' | 'uiCore' | 'uiWidgets';
 
-export const ADD_CATEGORIES: { value: AddCategory, label: string }[] = [
-  { value: 'gameplay', label: 'Gameplay' },
-  { value: 'cameras', label: 'Cameras' },
-  { value: 'lights', label: 'Lights' },
-  { value: 'audio', label: 'Audio' },
-  { value: 'sprites', label: 'Sprites' },
+// `doc` is the category's heading in the Add catalog docs, which is what its hover card shows. Literal
+// keys, so the docs coverage test can check each one resolves.
+export const ADD_CATEGORIES: { value: AddCategory, label: string, doc: string }[] = [
+  { value: 'gameplay', label: 'Gameplay', doc: 'editor/scene-authoring#gameplay' },
+  { value: 'cameras', label: 'Cameras', doc: 'editor/scene-authoring#cameras' },
+  { value: 'lights', label: 'Lights', doc: 'editor/scene-authoring#lights' },
+  { value: 'audio', label: 'Audio', doc: 'editor/scene-authoring#audio' },
+  { value: 'sprites', label: 'Sprites', doc: 'editor/scene-authoring#sprites' },
   // The values are internal; renaming one invalidates the stored cleo.addnew.category preference.
-  { value: 'primitives', label: 'Primitive Geometries' },
-  { value: 'complex', label: 'Complex Geometries' },
-  { value: 'environment', label: 'Environment' },
-  { value: 'effects', label: 'Effects' },
+  { value: 'primitives', label: 'Primitive Geometries', doc: 'editor/scene-authoring#primitive-geometries' },
+  { value: 'complex', label: 'Complex Geometries', doc: 'editor/scene-authoring#complex-geometries' },
+  { value: 'environment', label: 'Environment', doc: 'editor/scene-authoring#environment' },
+  { value: 'effects', label: 'Effects', doc: 'editor/scene-authoring#effects' },
   // UI categories. Shown only in `ui` mode (see AddNew).
-  { value: 'uiLayout', label: 'Layout' },
-  { value: 'uiCore', label: 'Elements' },
-  { value: 'uiWidgets', label: 'Widgets' },
+  { value: 'uiLayout', label: 'Layout', doc: 'editor/scene-authoring#ui--layout' },
+  { value: 'uiCore', label: 'Elements', doc: 'editor/scene-authoring#ui--elements' },
+  { value: 'uiWidgets', label: 'Widgets', doc: 'editor/scene-authoring#ui--widgets' },
 ];
 
 /** The three UI-only categories, hidden outside `ui` mode. */

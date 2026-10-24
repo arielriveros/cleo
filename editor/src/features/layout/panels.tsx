@@ -48,6 +48,9 @@ import { useOptionPageShown } from '../options/OptionsShell';
 import AssetsExplorer from '../assets/AssetsExplorer';
 import { useCleoEngine, MODE_RENDERS_VIEWPORT } from '../EngineContext';
 import { TextInput, cn, labelClass } from '../../components/ui';
+import { DocHover } from '../../components/ui/DocTooltip';
+import { DocScope, useDocEntry } from '../docs/DocScope';
+import { PANEL_TAB_DOC_PAGE, PANEL_TAB_DOC_SECTION, panelDocPage } from './panelTitles';
 
 // The wrapper must stay `relative` so UIOverlay/StateGraph/LoadingScreen (absolute inset-0) and the
 // data-cleo-overlay HUD anchor to the viewport, not the dock. Its group is locked and headerless.
@@ -298,16 +301,29 @@ function EditorOptionsDockPanel(_: IDockviewPanelProps) { return <OptionsDockFra
 function ProjectOptionsDockPanel(_: IDockviewPanelProps) { return <OptionsDockFrame><ProjectOptionsPanel /></OptionsDockFrame>; }
 
 // Panels are movable but not closable, so the tab renders the title only; dockview's tab wrapper still
-// owns drag behavior and colors.
+// owns drag behavior and colors. The title's card is that panel's row in the docs' "Every panel" table.
 export function PanelTab(props: IDockviewPanelHeaderProps) {
+  const title = props.api.title ?? '';
+  const entry = useDocEntry(undefined, `${PANEL_TAB_DOC_PAGE}#${PANEL_TAB_DOC_SECTION}::${title}`);
   return (
     <div className="flex items-center h-full px-2 text-ui whitespace-nowrap select-none">
-      {props.api.title}
+      <DocHover entry={entry}>{title}</DocHover>
     </div>
   );
 }
 
-export const dockComponents = {
+// Every panel's content is scoped to the docs page that describes it in the current mode, so the titles
+// inside it find their entries (see panelDocPage).
+function scoped(id: string, Panel: (props: IDockviewPanelProps) => JSX.Element) {
+  function DocScopedPanel(props: IDockviewPanelProps) {
+    const { editorMode } = useCleoEngine();
+    return <DocScope page={panelDocPage(id, editorMode)}><Panel {...props} /></DocScope>;
+  }
+  DocScopedPanel.displayName = `DocScoped(${id})`;
+  return DocScopedPanel;
+}
+
+const panelComponents = {
   viewport: ViewportPanel,
   scene: ScenePanel,
   sceneAdd: SceneAddPanel,
@@ -333,3 +349,7 @@ export const dockComponents = {
   optionsEditor: EditorOptionsDockPanel,
   optionsProject: ProjectOptionsDockPanel,
 };
+
+export const dockComponents = Object.fromEntries(
+  Object.entries(panelComponents).map(([id, Panel]) => [id, scoped(id, Panel)]),
+) as unknown as typeof panelComponents;

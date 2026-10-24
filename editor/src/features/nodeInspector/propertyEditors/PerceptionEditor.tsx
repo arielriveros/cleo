@@ -1,7 +1,6 @@
 import { ControllerNode, PERCEPTION_PRESETS, perceptionTuning } from 'cleo'
 import type { PerceptionPreset, PerceptionTuning } from 'cleo'
-import { PresetMenu, Slider, Toggle, cn, sectionTitleClass } from '../../../components/ui'
-import { hintAffordance } from '../../../components/ui/Field'
+import { PresetMenu, SectionTitle, Slider, Toggle } from '../../../components/ui'
 
 /**
  * What an agent can see, and what it remembers.
@@ -43,7 +42,7 @@ export default function PerceptionEditor({ node, onChange }: Props) {
   return (
     <div>
       <div className='flex items-center justify-between mt-3 mb-1'>
-        <div className={cn(sectionTitleClass, hintAffordance(FOV_HINT))} title={FOV_HINT}>Sight</div>
+        <SectionTitle title='Sight' />
         <PresetMenu presets={PERCEPTION_PRESETS} onApply={applyPreset}
           title='Perception presets — cone, range, memory and reaction; eye height stays yours' />
       </div>
@@ -53,9 +52,7 @@ export default function PerceptionEditor({ node, onChange }: Props) {
         labelClassName='w-[104px]' readout={(v) => v.toFixed(2)}
         onChange={(v) => { node.eyeHeight = v; onChange() }} />
 
-      <div className={cn(sectionTitleClass, 'mt-3 mb-1', hintAffordance(MEMORY_HINT))} title={MEMORY_HINT}>
-        Memory
-      </div>
+      <SectionTitle title='Memory' className='mt-3 mb-1' />
       {slider('Memory span', 'memorySpan', 0, 30, 0.5, 1, MEMORY_HINT, 's')}
       {slider('Reaction time', 'reactionTime', 0, 3, 0.05, 2, REACTION_HINT, 's')}
 

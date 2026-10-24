@@ -33,9 +33,26 @@ answer to "what is this attached to".
 
 One script asset can be attached to many nodes. It is shared: editing it changes all of them.
 
+## The Scripts panel
+
+The panel works on the selected node: which script it runs, and that node's own values for the
+script's fields. The source itself is edited in the script's tab, not here. On a node inside a placed
+template instance the script is the template's, so only the field values stay editable, and each edit
+becomes that instance's override.
+
+**Script** — the slot that links a script asset to the node. **+ Create Script** makes a new
+class-based script for it and opens it; **Link existing…** lists the scripts whose base class can sit
+on this node type; a script dragged from the Assets panel onto the slot links too. ✎ opens the linked
+script, ✕ removes it from the node and keeps the asset.
+
+**Variables** — with a script linked, its class fields and this node's values for them
+([per-node variables](#per-node-variables)). Without one, the node's own
+[node variables](#node-variables), added and removed here.
+
 ## Per-node variables
 
-Public class fields with defaults appear in the Scripts panel as editable values on **that node**:
+Class fields appear in the Scripts panel as editable values on **that node**. Name, type and access
+come from the script; only the value is edited here.
 
 ```ts
 export default class SpawnerNode extends Node {
@@ -49,17 +66,27 @@ export default class SpawnerNode extends Node {
 
 One spawner script can drive an easy spawner and a hard one with no code duplication.
 
-Supported types are `number`, `string`, `boolean` and `vec3`. Anything else works as private state
-but does not appear.
+Supported types are `number`, `string`, `boolean`, `vec3` and `string[]` (an editable list). A string
+field can be picked rather than typed:
+
+- typed `ClipName`, `SoundName`, `SocketName`, `TemplateName` or `NodeName`, it offers the names this
+  node can reach;
+- typed as a literal union (`'a' | 'b'`), it offers those choices;
+- tagged `/** @options listField */`, it offers the entries of that list field.
+
+A leading `_` keeps a field internal and out of the panel. Give any other state that prefix: a field
+of another type would be shown as one of these.
 
 A value edited on a node is saved with the scene and overrides the code default. Changing the
 default in code affects only the nodes that have never had that field edited.
 
 ## Node variables
 
-Separate from script fields, and used differently: variables are created at runtime or in the
-Variables panel, carry a type and an **access modifier** (`public` / `protected` / `private`), and
-are meant for *other* scripts to read.
+Separate from script fields, and used differently: variables are created at runtime or, on a node
+with no script, in the Scripts panel's **Variables** section. Each carries a type and an **access
+modifier** (`public` / `protected` / `private`), and they are meant for *other* scripts to read. In a
+script they are plain properties of the node — `this.isPlayer`, or `other.health` on another node —
+and the editor type-checks them as you type.
 
 The usual use is a marker:
 
@@ -70,7 +97,8 @@ onStart() { this.setVariable('isPlayer', true, 'boolean', 'public') }
 Matching on a variable rather than a node name means renaming the node cannot silently break
 everything looking for it.
 
-Access is enforced at the boundary between scripts: a blocked write warns and does nothing, a
+Access is enforced at the boundary between scripts: `public` is open to any node, `protected` to the
+node and its descendants, `private` to the node alone. A blocked write warns and does nothing, a
 blocked read returns nothing.
 
 ## Editing in VS Code

@@ -22,7 +22,7 @@ export default function MaterialSlot(props: { node: Node }) {
   const linkedIds = getMaterialIdsOf(props.node)
 
   return (
-    <Collapsable title={count > 1 ? `Materials (${count})` : 'Material'} icon={<MaterialIcon />} persistKey='materialSlot'>
+    <Collapsable title={count > 1 ? `Materials (${count})` : 'Material'} doc='Material' icon={<MaterialIcon />} persistKey='materialSlot'>
       {Array.from({ length: count }, (_, i) => (
         <Slot
           key={i}

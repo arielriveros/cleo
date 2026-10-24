@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ParticleSystemNode, type ParticleCullingMode } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
-import { Button, ColorInput, Hint, NumberInput, PropertyRow, PropertyTable, Select, Slider, Toggle } from '../../../components/ui'
+import { Button, ColorInput, DocScope, Hint, NumberInput, PropertyRow, PropertyTable, Select, Slider, Toggle } from '../../../components/ui'
 import { ParticlesIcon } from '../sectionIcons'
 import { useEventBus } from '../../EventBusContext'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
@@ -46,8 +46,10 @@ export default function ParticleSystemEditor(props: { node: ParticleSystemNode }
 
   const emitters = props.node.system.emitters
 
+  // Documented with the particle editor ("In a scene"), next to the asset this node plays.
   return (
-    <Collapsable title='Particle System' icon={<ParticlesIcon />} persistKey='particleSystemEditor'>
+    <DocScope page='editor/particles' section='in-a-scene'>
+    <Collapsable title='Particle System' doc='editor/particles#in-a-scene' icon={<ParticlesIcon />} persistKey='particleSystemEditor'>
       <div className='p-2 flex flex-col gap-2'>
         <ParticleSystemSlot node={props.node} onChange={() => force(x => x + 1)} />
 
@@ -98,11 +100,8 @@ export default function ParticleSystemEditor(props: { node: ParticleSystemNode }
           <Button size='sm' variant='subtle' onClick={() => transport(() => props.node.burst(burst))} title='Emit this many particles at once from every emitter'>Burst</Button>
           <Hint>{props.node.isPlaying ? 'Playing' : props.node.isAlive ? 'Finishing' : 'Stopped'} · {emitters.length} emitter{emitters.length === 1 ? '' : 's'}</Hint>
         </div>
-        <Hint>
-          Particles preview while authoring unless switched off in the viewport's visibility menu. Scripts
-          drive the same calls: <code>play()</code>, <code>stop()</code>, <code>burst(n)</code>.
-        </Hint>
       </div>
     </Collapsable>
+    </DocScope>
   )
 }

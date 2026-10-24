@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { OccluderNode } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
-import { Hint, PropertyRow, PropertyTable, Toggle, VectorInput } from '../../../components/ui'
+import { PropertyRow, PropertyTable, Toggle, VectorInput } from '../../../components/ui'
 import { useCleoEngine } from '../../EngineContext'
 import { OccluderIcon } from '../sectionIcons'
 
@@ -32,12 +32,6 @@ export default function OccluderEditor(props: { node: OccluderNode }) {
             <VectorInput value={v.size} min={0} step={0.25} onChange={size => set({ size: size as [number, number, number] })} />
           </PropertyRow>
         </PropertyTable>
-        <Hint>
-          Hides whatever is behind it from rendering. Keep it inside the solid part of what it stands for — the
-          walls of a building, the bulk of a rock: anything that pokes out of the real geometry would hide
-          things you can see past it. Landscapes occlude on their own. Turn culling off or to terrain-only in
-          Options ▸ Engine ▸ Renderer.
-        </Hint>
       </div>
     </Collapsable>
   )

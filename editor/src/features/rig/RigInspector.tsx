@@ -16,7 +16,7 @@ import { loadSkin, type StoredSkin } from '../../utils/animationAssets'
 import { overridesFor } from '../../utils/rigAssets'
 import { applyRetargetOverrides } from '../../utils/animationResolve'
 import { retargetView } from '../../utils/retargetView'
-import { Button, Hint, Select, TextInput, cn, hintClass, sectionTitleClass, valueClass } from '../../components/ui'
+import { Button, DocScope, Hint, SectionTitle, Select, TextInput, cn, hintClass, valueClass } from '../../components/ui'
 
 // The rig editor's Properties panel: the clips this skeleton owns, the retarget corrections onto it, and
 // which character it is previewed through.
@@ -104,158 +104,158 @@ export default function RigInspector() {
   }
 
   return (
-    <div className='flex flex-col gap-3 p-2'>
-      <div>
-        <div className={cn(valueClass, 'truncate')} title={asset.name}>{asset.name}</div>
-        <div className={hintClass}>{asset.skin.joints?.length ?? 0} bones</div>
-      </div>
+    // The Skeleton part's section first, so "Clips" here is this skeleton's linked clips, not the
+    // Animator's Clips panel; the sockets, masks and poses below fall back to their own sections.
+    <DocScope page='editor/animation' section='the-skeleton-part'>
+      <div className='flex flex-col gap-3 p-2'>
+        <div>
+          <div className={cn(valueClass, 'truncate')} title={asset.name}>{asset.name}</div>
+          <div className={hintClass}>{asset.skin.joints?.length ?? 0} bones</div>
+        </div>
 
-      {/* ---- Preview character ------------------------------------------------------------------ */}
-      <div>
-        <div className={cn(sectionTitleClass, 'mb-1')}>Preview</div>
-        {models.length > 0 ? (
-          <Select
-            value={runtimeModelId ?? ''}
-            onChange={e => e.target.value && setRigPreviewModel(activeTab.id, e.target.value)}
-          >
-            {models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </Select>
-        ) : (
-          <Hint>
-            No model uses this rig yet, so only its skeleton is shown. Link one from a model's Rig slot.
-          </Hint>
-        )}
-        {models.length > 0 && (
-          <Hint className='mt-1'>
-            {models.length === 1
-              ? 'One character is built on this skeleton.'
-              : `${models.length} characters are built on this skeleton — they all play its clips.`}
-          </Hint>
-        )}
-      </div>
-
-      {/* ---- Clips ------------------------------------------------------------------------------ */}
-      <div>
-        <div className={cn(sectionTitleClass, 'mb-1')}>Clips</div>
-        <Hint className='mb-1'>Linked here, so every character on this skeleton plays them.</Hint>
-        <AnimationAssetPicker rigId={asset.id} />
-        {linked.length === 0 && <Hint className='mt-1'>No clips yet — link or drag one in.</Hint>}
-      </div>
-
-      {/* ---- Blend spaces ----------------------------------------------------------------------- */}
-      {/* Moved here from the model node's inspector. A field is keyed by `rigId`, blends clips the RIG
-          owns by name, and is shared by every character on the armature — so the model was only ever a
-          way of reaching it. Creating one still goes through a model (`createAnimationFieldForModel`
-          mints the rig if there is none), which is why this needs a preview character. */}
-      <div>
-        <div className={cn(sectionTitleClass, 'mb-1')}>Blend Spaces</div>
-        {fields.length === 0 && (
-          <Hint className='mb-1'>None yet — a blend space mixes this skeleton’s clips by speed, direction or any parameter.</Hint>
-        )}
-        <div className='flex flex-col gap-1'>
-          {fields.map(f => (
-            <Button
-              key={f.id} variant='subtle' className='w-full py-1.5'
-              onClick={() => enterAnimationFieldEditor(f.id)}
-              title={`Open the “${f.name}” blend space`}
-            >⊞ {f.name}</Button>
-          ))}
-          {runtimeModelId ? (
-            <Button
-              variant='subtle' className='w-full py-1.5'
-              onClick={() => createAnimationFieldForModel(runtimeModelId)}
-              title='Create a blend space that mixes this skeleton’s clips by 1D or 2D parameters'
-            >+ New Blend Space</Button>
+        {/* ---- Preview character ------------------------------------------------------------------ */}
+        <div>
+          <SectionTitle title='Preview character' className='mb-1' />
+          {models.length > 0 ? (
+            <Select
+              value={runtimeModelId ?? ''}
+              onChange={e => e.target.value && setRigPreviewModel(activeTab.id, e.target.value)}
+            >
+              {models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </Select>
           ) : (
-            <Hint>A character on this skeleton is needed to author one against.</Hint>
+            <Hint>
+              No model uses this rig yet, so only its skeleton is shown. Link one from a model's Rig slot.
+            </Hint>
+          )}
+          {models.length > 0 && (
+            <Hint className='mt-1'>
+              {models.length === 1
+                ? 'One character is built on this skeleton.'
+                : `${models.length} characters are built on this skeleton — they all play its clips.`}
+            </Hint>
           )}
         </div>
-      </div>
 
-      {/* ---- Sockets ---------------------------------------------------------------------------- */}
-      <SocketsPanel />
+        {/* ---- Clips ------------------------------------------------------------------------------ */}
+        <div>
+          <SectionTitle title='Clips' className='mb-1' />
+          <AnimationAssetPicker rigId={asset.id} />
+          {linked.length === 0 && <Hint className='mt-1'>No clips yet — link or drag one in.</Hint>}
+        </div>
 
-      <RagdollPanel />
+        {/* ---- Blend spaces ----------------------------------------------------------------------- */}
+        {/* Moved here from the model node's inspector. A field is keyed by `rigId`, blends clips the RIG
+            owns by name, and is shared by every character on the armature — so the model was only ever a
+            way of reaching it. Creating one still goes through a model (`createAnimationFieldForModel`
+            mints the rig if there is none), which is why this needs a preview character. */}
+        <div>
+          <SectionTitle title='Blend Spaces' className='mb-1' />
+          {fields.length === 0 && (
+            <Hint className='mb-1'>None yet — a blend space mixes this skeleton’s clips by speed, direction or any parameter.</Hint>
+          )}
+          <div className='flex flex-col gap-1'>
+            {fields.map(f => (
+              <Button
+                key={f.id} variant='subtle' className='w-full py-1.5'
+                onClick={() => enterAnimationFieldEditor(f.id)}
+                title={`Open the “${f.name}” blend space`}
+              >⊞ {f.name}</Button>
+            ))}
+            {runtimeModelId ? (
+              <Button
+                variant='subtle' className='w-full py-1.5'
+                onClick={() => createAnimationFieldForModel(runtimeModelId)}
+                title='Create a blend space that mixes this skeleton’s clips by 1D or 2D parameters'
+              >+ New Blend Space</Button>
+            ) : (
+              <Hint>A character on this skeleton is needed to author one against.</Hint>
+            )}
+          </div>
+        </div>
 
-      {/* ---- Bone masks ------------------------------------------------------------------------- */}
-      <BoneMasksPanel />
+        {/* ---- Sockets ---------------------------------------------------------------------------- */}
+        <SocketsPanel />
 
-      {/* ---- Poses ------------------------------------------------------------------------------ */}
-      {/* Pose ASSETS on this skeleton (plus any legacy poses stored on the rig itself). Authored in the
-          clip editor, where a character is posed bone by bone; managed here. */}
-      <PoseAssetsPanel />
+        <RagdollPanel />
 
-      {/* ---- Retargeting ------------------------------------------------------------------------ */}
-      <div>
-        <div className={cn(sectionTitleClass, 'mb-1')}>Retargeting</div>
-        {sourceRigs.length === 0 ? (
-          <Hint>
-            Nothing to retarget: no other skeleton in this project has clips. Corrections are per source skeleton.
-          </Hint>
-        ) : (
-          <>
-            <Hint className='mb-1'>
-              Fix a bone once and every clip from that skeleton retargets correctly onto this one, permanently.
+        {/* ---- Bone masks ------------------------------------------------------------------------- */}
+        <BoneMasksPanel />
+
+        {/* ---- Poses ------------------------------------------------------------------------------ */}
+        {/* Pose ASSETS on this skeleton (plus any legacy poses stored on the rig itself). Authored in the
+            clip editor, where a character is posed bone by bone; managed here. */}
+        <PoseAssetsPanel />
+
+        {/* ---- Retargeting ------------------------------------------------------------------------ */}
+        <div>
+          <SectionTitle title='Retargeting' className='mb-1' />
+          {sourceRigs.length === 0 ? (
+            <Hint>
+              Nothing to retarget: no other skeleton in this project has clips. Corrections are per source skeleton.
             </Hint>
-            <Select value={sourceRigId} onChange={e => setSourceRigId(e.target.value)}>
-              <option value=''>Clips from…</option>
-              {sourceRigs.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </Select>
+          ) : (
+            <>
+              <Select value={sourceRigId} onChange={e => setSourceRigId(e.target.value)}>
+                <option value=''>Clips from…</option>
+                {sourceRigs.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </Select>
 
-            {sourceRigId && !preview && (
-              <Hint className='mt-1'>That skeleton has no clips to map.</Hint>
-            )}
-            {preview && status && (
-              <>
-                <div className='mt-1 text-ui-sm text-muted'
-                  title='Mapped: has a bone to drive. Merged: folded into the bone below it. Lost: animated but drives nothing. Sharing: takes part of the bend below it. At rest: nothing drives it.'>
-                  {status.mapped} mapped
-                  {status.merged ? ` · ${status.merged} merged` : ''}
-                  {status.lost ? <span className='text-danger-fg'> · {status.lost} lost</span> : ''}
-                  {status.dropped ? ` · ${status.dropped} off` : ''}
-                  {' — '}{status.driven} driven
-                  {status.shared ? ` · ${status.shared} sharing` : ''}
-                  {` · ${status.rest} at rest`}
-                </div>
-                <div className='flex items-center gap-1 mt-1'>
-                  <Button variant='primary' className='flex-1 py-1.5' onClick={() => setMapperOpen(true)}
-                    title='See both skeletons side by side and drag bones from one to the other'>
-                    Map bones…
-                  </Button>
-                  <Button variant='ghost' size='sm' className='text-ui-sm'
-                    title='Discard the saved corrections for this source skeleton'
-                    onClick={() => clearOverrides(sourceRigId)}>
-                    Reset
-                  </Button>
-                </div>
-                {mapperOpen && targetSkin && (
-                  <RetargetMapper
-                    sourceLabel={rigs.find(r => r.id === sourceRigId)?.name ?? 'Clips'}
-                    targetLabel={asset.name}
-                    sourceSkin={preview.sourceSkin}
-                    targetSkin={targetSkin}
-                    mapping={preview.mapping}
-                    onRemap={remap}
-                    onAuto={restoreAuto}
-                    onResetAll={() => clearOverrides(sourceRigId)}
-                    onClose={() => setMapperOpen(false)}
-                  />
-                )}
-              </>
-            )}
-          </>
+              {sourceRigId && !preview && (
+                <Hint className='mt-1'>That skeleton has no clips to map.</Hint>
+              )}
+              {preview && status && (
+                <>
+                  <div className='mt-1 text-ui-sm text-muted'
+                    title='Mapped: has a bone to drive. Merged: folded into the bone below it. Lost: animated but drives nothing. Sharing: takes part of the bend below it. At rest: nothing drives it.'>
+                    {status.mapped} mapped
+                    {status.merged ? ` · ${status.merged} merged` : ''}
+                    {status.lost ? <span className='text-danger-fg'> · {status.lost} lost</span> : ''}
+                    {status.dropped ? ` · ${status.dropped} off` : ''}
+                    {' — '}{status.driven} driven
+                    {status.shared ? ` · ${status.shared} sharing` : ''}
+                    {` · ${status.rest} at rest`}
+                  </div>
+                  <div className='flex items-center gap-1 mt-1'>
+                    <Button variant='primary' className='flex-1 py-1.5' onClick={() => setMapperOpen(true)}
+                      title='See both skeletons side by side and drag bones from one to the other'>
+                      Map bones…
+                    </Button>
+                    <Button variant='ghost' size='sm' className='text-ui-sm'
+                      title='Discard the saved corrections for this source skeleton'
+                      onClick={() => clearOverrides(sourceRigId)}>
+                      Reset
+                    </Button>
+                  </div>
+                  {mapperOpen && targetSkin && (
+                    <RetargetMapper
+                      sourceLabel={rigs.find(r => r.id === sourceRigId)?.name ?? 'Clips'}
+                      targetLabel={asset.name}
+                      sourceSkin={preview.sourceSkin}
+                      targetSkin={targetSkin}
+                      mapping={preview.mapping}
+                      onRemap={remap}
+                      onAuto={restoreAuto}
+                      onResetAll={() => clearOverrides(sourceRigId)}
+                      onClose={() => setMapperOpen(false)}
+                    />
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Foot IK is NOT duplicated here. `IkRigPanel` already sits under the bone tree in the Skeleton
+            panel, where it belongs: assigning a bone to a role starts with a click in that tree, so the two
+            have to be visible at once. The rig tab shows that panel the same way the animation tab does. */}
+
+        {models.length > 0 && runtimeModelId && (
+          <Button variant='subtle' className='w-full py-1.5' onClick={() => enterModelEditor(runtimeModelId)}>
+            Open “{models[0].name}”
+          </Button>
         )}
       </div>
-
-      {/* Foot IK is NOT duplicated here. `IkRigPanel` already sits under the bone tree in the Skeleton
-          panel, where it belongs: assigning a bone to a role starts with a click in that tree, so the two
-          have to be visible at once. The rig tab shows that panel the same way the animation tab does. */}
-
-      {models.length > 0 && runtimeModelId && (
-        <Button variant='subtle' className='w-full py-1.5' onClick={() => enterModelEditor(runtimeModelId)}>
-          Open “{models[0].name}”
-        </Button>
-      )}
-    </div>
+    </DocScope>
   )
 }

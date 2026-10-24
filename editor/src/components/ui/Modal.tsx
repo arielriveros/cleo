@@ -1,5 +1,7 @@
 import React from 'react';
 import { cn } from './cn';
+import { DocHover } from './DocTooltip';
+import { useDocEntry } from '../../features/docs/DocScope';
 
 export interface ModalProps {
   onClose: () => void;
@@ -30,8 +32,31 @@ export function Modal({ onClose, children, className, overlayClassName }: ModalP
   );
 }
 
-export function ModalHeader({ className, children }: { className?: string; children: React.ReactNode }) {
-  return <div className={cn('px-4 py-3 border-b border-control', className)}>{children}</div>;
+export interface ModalHeaderProps {
+  className?: string;
+  /** The modal's title. Its hover card is the docs' entry for it, so the header needs no explanatory line. */
+  title?: React.ReactNode;
+  /** Docs key when the title alone does not find the entry (see resolveDocKey); `false` opts out. */
+  doc?: string | false;
+  /** Beside the title: live state ("Currently open: …"), never a description of the modal. */
+  aside?: React.ReactNode;
+  /** Anything else the header holds, under the title row. */
+  children?: React.ReactNode;
+}
+
+export function ModalHeader({ className, title, doc, aside, children }: ModalHeaderProps) {
+  const entry = useDocEntry(title, title === undefined ? false : doc);
+  return (
+    <div className={cn('px-4 py-3 border-b border-control', className)}>
+      {title !== undefined && (
+        <div className='flex items-baseline gap-2 min-w-0'>
+          <DocHover entry={entry} className='text-ui-lg font-semibold truncate'>{title}</DocHover>
+          {aside !== undefined && <span className='text-ui text-muted truncate'>{aside}</span>}
+        </div>
+      )}
+      {children}
+    </div>
+  );
 }
 
 export function ModalFooter({ className, children }: { className?: string; children: React.ReactNode }) {

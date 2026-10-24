@@ -10,7 +10,6 @@ import { SkyIcon } from '../sectionIcons'
 
 type Vec3 = [number, number, number]
 
-const SKY_LIGHT_HINT = 'Lights the scene with the sky itself — a surface facing up receives the zenith, one facing a sunset receives the sunset. Works from the Sky Atmosphere or from a Skybox, whichever the scene has. Add one and there is no need for a light probe just to get ambient light.'
 const CLOUD_SHADOWS_HINT = 'The volumetric clouds shade the ground: the sun is dimmed under each cloud, and the shadows drift with the cloud wind. Shown while the scene has enabled Volumetric Clouds.'
 const AMBIENT_HINT = 'Scales the scene’s flat ambient fill (Scene settings → Ambient) while this sky light is in the scene. That fill lights every shadow evenly and, unlike the sky light, does not darken with the sky. At 0 only the sky light and any light probes light the shade.'
 const NIGHT_AMBIENT_HINT = 'How much of that ambient fill is kept once the sun is down. It fades with the sky over dusk, so the day keeps its fill. At 0 a night without a moon goes almost pitch black; the moon, torches and the sky light still light it.'
@@ -87,7 +86,7 @@ export default function SkyLightEditor(props: { node: SkyLightNode }) {
   }, [instance, props.node])
 
   return (
-    <Collapsable title='Sky Light' icon={<SkyIcon />} persistKey='skyLight' hint={SKY_LIGHT_HINT}>
+    <Collapsable title='Sky Light' icon={<SkyIcon />} persistKey='skyLight'>
       <div className='w-full p-2'>
         <PropertyTable columns={['45%', '55%']}>
           <PropertyRow label='Intensity'>

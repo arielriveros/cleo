@@ -5,7 +5,7 @@ import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { useRig } from './RigContext'
 import { getAnimationTarget } from '../animation/skeleton'
-import { Button, Hint, Select, TextInput, VectorInput, cn, labelClass, sectionTitleClass } from '../../components/ui'
+import { Button, Hint, SectionTitle, Select, TextInput, VectorInput, cn, labelClass } from '../../components/ui'
 import { cryptoRandomId } from '../../utils/ids'
 import type { RigSocket } from '../../utils/rigAssets'
 
@@ -92,10 +92,7 @@ export default function SocketsPanel() {
 
   return (
     <div>
-      <div className={cn(sectionTitleClass, 'mb-1')}>Sockets</div>
-      <Hint className='mb-1'>
-        Attach points on bones. Any node can follow one — pick it in that node’s “Attach to socket” section.
-      </Hint>
+      <SectionTitle title='Sockets' className='mb-1' />
 
       <div className='flex flex-col gap-1'>
         {sockets.map(socket => {

@@ -5,7 +5,7 @@ import TilesetSlot, { tilesetAssetOf } from './TilesetSlot';
 import SpriteAppearance from './SpriteAppearance';
 import TileGrid from '../../tileset/TileGrid';
 import { useCleoEngine } from '../../EngineContext';
-import { PropertyTable, PropertyRow, Field, Section, NumberInput, TextInput, Toggle, Select, Hint, Button } from '../../../components/ui';
+import { PropertyTable, PropertyRow, Field, Section, NumberInput, TextInput, Toggle, Select, Hint, Button, DocScope } from '../../../components/ui';
 import { SpriteIcon } from '../sectionIcons';
 import { token } from '../../../utils/cssTokens';
 
@@ -73,8 +73,9 @@ export default function SpriteSheetEditor() {
     changed();
   };
 
+  // Sprites are documented with the rest of 2D, tileset slot and appearance included.
   return (
-    <>
+    <DocScope page='editor/tilemap-2d'>
       <TilesetSlot node={node} onChange={() => { setTileIndex(node.tileIndex); bump(x => x + 1) }} />
 
       <Collapsable title='Animated Sprite' icon={<SpriteIcon />} persistKey='animatedSprite'>
@@ -92,7 +93,7 @@ export default function SpriteSheetEditor() {
           {!asset ? (
             <Hint className='mt-2'>Assign a tileset above to choose this sprite’s frames.</Hint>
           ) : frameSource === 'node' ? (
-            <Section title='Frames' hint='Drag a rectangle over the atlas to set the frames, in reading order.'>
+            <Section title='Frames'>
               <TileGrid
                 className='max-h-[280px]'
                 asset={asset}
@@ -106,7 +107,7 @@ export default function SpriteSheetEditor() {
               <TextInput value={framesText} onChange={applyFramesText} placeholder='e.g. 0,1,2,3,2,1' />
             </Section>
           ) : (
-            <Section title='Tile' hint='Pick the tile whose animation this sprite plays.'>
+            <Section title='Tile'>
               <TileGrid
                 className='max-h-[280px]'
                 asset={asset}
@@ -192,6 +193,6 @@ export default function SpriteSheetEditor() {
       </Collapsable>
 
       <SpriteAppearance node={node} />
-    </>
+    </DocScope>
   )
 }

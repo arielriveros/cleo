@@ -8,10 +8,8 @@ import ConditionTreeView, { emptyConditionGroup } from '../../../components/Cond
 import ParamSourcePicker from './ParamSourcePicker'
 import type { ConditionParam } from '../../../components/ConditionTreeView'
 import {
-  Button, ButtonWithConfirm, Select, Slider, TextInput, Toggle, cn, hintClass, labelClass,
-  sectionTitleClass,
+  Button, ButtonWithConfirm, DocScope, SectionTitle, Select, Slider, TextInput, Toggle, hintClass, labelClass,
 } from '../../../components/ui'
-import { hintAffordance } from '../../../components/ui/Field'
 
 /**
  * The behaviour state machine: which goal this controller pursues, and what makes it change its mind.
@@ -25,7 +23,6 @@ import { hintAffordance } from '../../../components/ui/Field'
  */
 
 const MACHINE_HINT = 'States name a goal; transitions name the condition that leaves one. With no states at all the controller just pursues its Goal field, so adding a machine is never a behaviour change on its own.'
-const PARAM_HINT = 'What the conditions compare. Built-ins read the pawn’s measured motion (planarSpeed, isGrounded, slopeAngle …); senses are the few things only the controller knows about its target.'
 const ENTRY_HINT = 'The state the machine starts in, and the one it falls back to if the held state is deleted.'
 const DWELL_HINT = 'Seconds the machine must have spent in the source state before this transition may fire. The guard against a pair that flips every frame.'
 
@@ -74,10 +71,6 @@ export default function BehaviorEditor({ node, onChange }: Props) {
     for (let i = 2; ; i++) if (!taken.includes(`${base} ${i}`)) return `${base} ${i}`
   }
 
-  const header = (label: string, hint?: string) => (
-    <div className={cn(sectionTitleClass, 'mt-3 mb-1', hintAffordance(hint))} title={hint}>{label}</div>
-  )
-
   if (machine.states.length === 0) {
     return (
       <div className='mt-2'>
@@ -95,8 +88,9 @@ export default function BehaviorEditor({ node, onChange }: Props) {
   }
 
   return (
+    <DocScope page='editor/ai-brains'>
     <div>
-      {header('Parameters', PARAM_HINT)}
+      <SectionTitle title='Parameters' className='mt-3 mb-1' />
       <div className='flex flex-col gap-1'>
         {machine.parameters.map((p, i) => (
           <div key={i} className='rounded border border-border bg-control/30 p-1.5 flex flex-col gap-1'>
@@ -126,7 +120,7 @@ export default function BehaviorEditor({ node, onChange }: Props) {
         </Button>
       </div>
 
-      {header('States')}
+      <SectionTitle title='States' className='mt-3 mb-1' />
       <div className='flex flex-col gap-1'>
         {machine.states.map(s => (
           <div key={s.name} className='rounded border border-border bg-control/30 p-1.5 flex flex-col gap-1'>
@@ -186,7 +180,7 @@ export default function BehaviorEditor({ node, onChange }: Props) {
         </Button>
       </div>
 
-      {header('Transitions')}
+      <SectionTitle title='Transitions' className='mt-3 mb-1' />
       <div className='flex flex-col gap-1'>
         {machine.transitions.map((t, i) => (
           <div key={i} className='rounded border border-border bg-control/30 p-1.5 flex flex-col gap-1'>
@@ -232,6 +226,7 @@ export default function BehaviorEditor({ node, onChange }: Props) {
         </ButtonWithConfirm>
       </div>
     </div>
+    </DocScope>
   )
 }
 

@@ -1,6 +1,6 @@
 import { defaultEffect, EFFECT_KINDS } from 'cleo'
 import type { EffectKind, SoundEffect } from 'cleo'
-import { Button, Select, Slider, Toggle, hintClass, sectionTitleClass } from '../../components/ui'
+import { Button, SectionTitle, Select, Slider, Toggle, hintClass } from '../../components/ui'
 
 // The DSP rack: an ordered list of inserts, each toggleable, movable and removable.
 //
@@ -58,7 +58,7 @@ export default function EffectRackEditor({ effects, onChange }: Props) {
 
   return (
     <div className='flex flex-col gap-1'>
-      <div className={sectionTitleClass}>Effects</div>
+      <SectionTitle title='Effects' />
 
       {effects.length === 0 && (
         <div className={hintClass}>
@@ -108,11 +108,6 @@ export default function EffectRackEditor({ effects, onChange }: Props) {
           <option key={kind} value={kind}>{LABELS[kind]}</option>
         ))}
       </Select>
-
-      <div className={hintClass}>
-        Inserts run top to bottom. Order matters — a filter before a distortion is not the same patch as
-        one after it. Effects need Web Audio; a device that falls back to HTML5 audio plays the sample dry.
-      </div>
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import { ParticleSystemNode } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
 import { ParticleSystemAsset } from '../../../utils/particleSystems'
-import { Select, Button, Hint, cn, sectionTitleClass, valueClass } from '../../../components/ui'
+import { Select, Button, Hint, SectionTitle, cn, valueClass } from '../../../components/ui'
 import { useAssetDrop } from '../../../utils/useAssetDrop'
 
 /**
@@ -58,7 +58,7 @@ export default function ParticleSystemSlot(props: { node: ParticleSystemNode; on
 
   return (
     <div className='w-full' {...dropProps}>
-      <div className={cn(sectionTitleClass, 'mb-1')}>Effect</div>
+      <SectionTitle title='Effect' className='mb-1' />
       {asset ? (
         <div className={`flex items-center gap-2 p-2 bg-control border rounded ${dragOver ? 'border-selected' : 'border-border'}`}>
           <div className='flex-1 min-w-0'>

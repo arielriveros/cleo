@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { cn } from './cn';
 import { labelClass, valueClass } from './typography';
 import { clamp } from '../../utils/math';
+import { DocHover } from './DocTooltip';
+import { useDocEntry } from '../../features/docs/DocScope';
 
 export interface SliderProps {
   value: number;
@@ -16,8 +18,13 @@ export interface SliderProps {
   editable?: boolean;
   className?: string;
   labelClassName?: string;
-  /** Native tooltip covering the whole control. Falls back to the label text when omitted. */
+  /**
+   * Native tooltip covering the whole control. Falls back to the label text when omitted. Unused when the
+   * label names a row of its section's docs, whose card is shown on the label instead.
+   */
   title?: string;
+  /** Docs key for the label when its text is not the term (see resolveDocKey); `false` opts out. */
+  doc?: string | false;
 }
 
 /**
@@ -36,8 +43,10 @@ export function Slider({
   className,
   labelClassName,
   title,
+  doc,
 }: SliderProps) {
   const [editing, setEditing] = useState(false);
+  const entry = useDocEntry(label, doc, 'field');
   const pct = max > min ? clamp(((value - min) / (max - min)) * 100, 0, 100) : 0;
   const text = typeof readout === 'function' ? readout(value) : value.toFixed(2);
 
@@ -48,8 +57,13 @@ export function Slider({
   };
 
   return (
-    <label className={cn('flex items-center gap-2 my-1', valueClass, className)} title={title}>
-      {label !== undefined && <span className={cn(labelClass, 'w-[70px] shrink-0 truncate', labelClassName)} title={title ?? (typeof label === 'string' ? label : undefined)}>{label}</span>}
+    <label className={cn('flex items-center gap-2 my-1', valueClass, className)} title={entry ? undefined : title}>
+      {label !== undefined && (
+        <DocHover entry={entry} fallback={title ?? (typeof label === 'string' ? label : undefined)}
+          affordance='field' className={cn(labelClass, 'w-[70px] shrink-0 truncate', labelClassName)}>
+          {label}
+        </DocHover>
+      )}
       <input
         className='flex-1 min-w-0'
         style={{ ['--slider-fill' as any]: pct + '%' }}

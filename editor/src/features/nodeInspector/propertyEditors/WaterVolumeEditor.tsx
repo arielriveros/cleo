@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ModelNode, WaterVolumeNode, WATER_VOLUME_PRESETS, type WaterVolumePreset } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
-import { Hint, NumberInput, PresetMenu, PropertyRow, PropertyTable, Select, Toggle, VectorInput } from '../../../components/ui'
+import { NumberInput, PresetMenu, PropertyRow, PropertyTable, Select, Toggle, VectorInput } from '../../../components/ui'
 import NodeRefInput from '../NodeRefInput'
 import { useCleoEngine } from '../../EngineContext'
 import { WaterVolumeIcon } from '../sectionIcons'
@@ -82,7 +82,6 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
             </Select>
           </PropertyRow>
         </PropertyTable>
-        <Hint>Bodies float by their <b>mass</b> against the water their colliders displace. Physics runs in Play.</Hint>
       </div>
     </Collapsable>
   )

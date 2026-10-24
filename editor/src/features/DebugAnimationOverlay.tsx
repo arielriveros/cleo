@@ -5,7 +5,7 @@ import { useCleoEngine } from './EngineContext'
 import { usePlayback } from './PlaybackContext'
 import { useDebugVisibility } from './DebugVisibilityContext'
 import FieldDebugReadout from './animation/FieldDebugReadout'
-import { Select } from '../components/ui'
+import { Select, SectionTitle } from '../components/ui'
 
 // The animation blend readout, in the VIEWPORT. The State Machine inspector shows the same numbers, but it
 // runs against the editor's preview scene, which has no physics, so every MEASURED built-in reads 0 there.
@@ -51,7 +51,7 @@ export default function DebugAnimationOverlay() {
     <div data-cleo-overlay
       className='absolute bottom-2 right-2 z-20 w-64 select-none rounded-md border border-control bg-surface-raised/95 p-2 text-fg shadow-lg'>
       <div className='mb-1 flex items-center gap-1'>
-        <span className='text-ui-xs font-medium text-muted'>Animation blend</span>
+        <SectionTitle title='Animation blend' doc='editor/scene-authoring#debug-overlays::Animation blend' />
         {targets.length > 1 && (
           <Select
             className='ml-auto min-w-0 flex-1 px-1 py-0.5 text-ui-xs'

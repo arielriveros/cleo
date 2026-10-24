@@ -1,7 +1,7 @@
 import { ControllerNode } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
 import { AiBrainAsset } from '../../../utils/aiBrains'
-import { Select, Button, Hint, cn, sectionTitleClass, valueClass } from '../../../components/ui'
+import { Select, Button, Hint, SectionTitle, cn, valueClass } from '../../../components/ui'
 import { useAssetDrop } from '../../../utils/useAssetDrop'
 
 /**
@@ -59,7 +59,7 @@ export default function AiBrainSlot(props: { node: ControllerNode; onChange?: ()
 
   return (
     <div className='w-full' {...dropProps}>
-      <div className={cn(sectionTitleClass, 'mt-3 mb-1')}>Brain</div>
+      <SectionTitle title='Brain' className='mt-3 mb-1' />
       {asset ? (
         <div className={`flex items-center gap-2 p-2 bg-control border rounded ${dragOver ? 'border-selected' : 'border-border'}`}>
           <div className='flex-1 min-w-0'>

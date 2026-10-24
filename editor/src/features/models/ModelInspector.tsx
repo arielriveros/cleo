@@ -7,9 +7,6 @@ import ModelPartsSection from './ModelPartsSection'
 import GenerateLodsModal, { defaultSpecs, type GenerateLodsSpec } from './GenerateLodsModal'
 import { modelAssetTextureIds, modelAssetDiameter } from '../../utils/models'
 
-const FIELDS_HINT = 'A field blends this model’s clips by 1D or 2D parameters. Use one as a state in the animation graph instead of a single clip.'
-const LOD_HINT = 'Each level takes over at its distance. Generated levels are part of this model (deleted with it, moved with it); a level added from another model updates when that model is edited. Only LOD0 is edited here; selecting a level just previews it.'
-
 /** Triangles in a serialized model subtree, for the generate dialog's before/after figures. */
 function countTriangles(nodeJson: any): number {
   if (!nodeJson || typeof nodeJson !== 'object') return 0
@@ -99,8 +96,8 @@ export default function ModelInspector() {
       {/* Blend spaces belong to a skinned model, which is exactly what this tab has open — so this is the
           natural place to create one. Static models have no clips to blend. */}
       {modelSession.skinned && activeTab.modelId && (
-        <Collapsable title='Animation fields' badge={fields.length || undefined} defaultOpen>
-          <div className='p-2 space-y-1' title={FIELDS_HINT}>
+        <Collapsable title='Blend spaces' badge={fields.length || undefined} defaultOpen>
+          <div className='p-2 space-y-1'>
             {fields.map(f => (
               <Button key={f.id} variant='subtle'
                 className='w-full justify-start text-left'
@@ -120,7 +117,7 @@ export default function ModelInspector() {
       )}
 
       <Collapsable title='LOD levels'>
-        <div className='p-2 space-y-2' title={modelSession.skinned ? undefined : LOD_HINT}>
+        <div className='p-2 space-y-2'>
           {modelSession.skinned ? (
             <p className={hintClass}>LOD levels are not available for skinned models.</p>
           ) : (
@@ -211,8 +208,7 @@ export default function ModelInspector() {
           )}
 
           {!modelSession.skinned && (
-            <Field label='Cull distance (0 = automatic)' hint='Copies disappear beyond this camera distance (foliage dissolves out rather than popping). 0 = automatic: a placed copy never culls, and foliage draws on past its last LOD or impostor band, at least to the scene foliage distance.'
-                   className='my-0 pt-1 border-t border-control' labelClassName='w-auto'>
+            <Field label='Cull distance (0 = automatic)' className='my-0 pt-1 border-t border-control' labelClassName='w-auto'>
               <NumberInput
                 min={0} className={num}
                 value={modelSession.cullDistance}

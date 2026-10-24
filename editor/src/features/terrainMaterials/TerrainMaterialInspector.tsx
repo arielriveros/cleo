@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Node, ModelNode, TerrainMaterial, Material, setTerrainSurfaceFrom } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import Collapsable from '../../components/Collapsable'
-import { Hint, NumberInput, TextInput, Toggle, cn, labelClass } from '../../components/ui'
+import { DocScope, Hint, NumberInput, TextInput, Toggle, cn, labelClass } from '../../components/ui'
 import MaterialPicker, { liveMaterial } from './MaterialPicker'
 import { blankSlotSurface } from '../../utils/landscapeSlots'
 import TerrainSlots, { SurfaceLook } from './TerrainSlots'
@@ -59,74 +59,74 @@ export default function TerrainMaterialInspector(props: { node: Node | null }) {
   // repeat itself still earns its place — it is the only thing that turns a tiling COUNT into a size an
   // author can picture, and tiling still drives every layer texture.
 
+  // Documented under terrain.md › Landscape materials, so its titles (Ground, Slots, the foliage lists)
+  // look there before the rest of the page — the Landscape Layers panel has a "Slots" of its own.
   return (
-    <div className='flex flex-col text-fg bg-surface-raised w-full h-full overflow-y-auto'>
-      <div className='p-2 border-b border-success'>
-        <label className={cn(labelClass, 'block mb-1')}>Landscape material name</label>
-        <TextInput
-          className='border-success'
-          value={editingTerrainMaterialName ?? ''}
-          onChange={(v) => setActiveTerrainMaterialName(v)} />
-      </div>
-
-      {/* The GROUND: slot 0, the landscape material's own surface, covering the whole landscape. Taken
-          from a Material asset like every other slot — picked, or made right here — instead of an inline
-          base-material editor. An asset authored before this keeps its surface ("built-in"); "+ New
-          material" turns that surface into an asset, so nothing is lost by linking it. */}
-      <Collapsable title='Ground'>
-        <div className='p-2 space-y-2'>
-          <MaterialPicker value={mat.surfaceMaterialId} placeholder='(built-in surface)'
-            newName={() => `${editingTerrainMaterialName || 'Landscape'} ground`}
-            // The built-in surface when it HAS a texture (nothing is lost by linking it); otherwise a
-            // white blank — the default ground's green tint would multiply into whatever texture comes next.
-            seed={() => ['baseColorTexture', 'baseTexture', 'texture'].some(k => mat.textures.get(k))
-              ? Material.parse({ ...mat.serialize(), terrainMaterial: undefined })
-              : blankSlotSurface()}
-            onPick={a => { setTerrainSurfaceFrom(mat, liveMaterial(a)); mat.surfaceMaterialId = a.id; changed() }} />
-          <div className='flex items-center justify-between'>
-            <span className={label}>Tiling</span>
-            {/* Floored: 0 or a negative makes `log2(tiling)` -inf in the shader. */}
-            <NumberInput className={num} min={0.01} step={1} value={mat.tiling}
-                   onChange={v => { mat.tiling = Math.max(0.01, v); changed() }} />
-          </div>
-          {/* THE NUMBER NOBODY COULD SEE. Tiling is a repeat COUNT across the whole terrain, so what
-              it means in metres depends on a size edited in a different panel: 31 across 400 m is a
-              12.9 m repeat, which makes a brick in a brick texture over three metres wide. */}
-          <Hint>
-            One repeat = <b>{repeatMetres.toFixed(2)} m</b> across a {landscapeSize} m terrain
-          </Hint>
-          <div className='flex items-center justify-between'>
-            <span className={label} title='Let the whole-landscape foliage grow where the ground shows. The ground’s own foliage (below) grows there regardless.'>Allow landscape foliage</span>
-            <Toggle checked={mat.allowFoliage} onChange={c => { mat.allowFoliage = c; changed() }} />
-          </div>
-          <SurfaceLook
-            normalStrength={mat.normalStrength} antiTiling={mat.antiTiling}
-            onNormalStrength={v => { mat.normalStrength = v; changed() }}
-            onAntiTiling={v => { mat.antiTiling = v; changed() }} />
-          <Hint>Covers the whole landscape; the slots below draw over it.</Hint>
-          <TerrainFoliageRules
-            material={mat}
-            rules={mat.groundFoliageInclude}
-            exclude={mat.groundFoliageExclude}
-            setExclude={names => { mat.groundFoliageExclude = names }}
-            onChange={changed}
-            title='Foliage on Ground' excludeTitle='Keep off Ground' defaultOpen={false}
-            hint='Foliage that grows only where the ground itself shows, not on the slots drawn over it.'
-            excludeHint='Foliage kept off wherever the ground shows.' />
+    <DocScope page='editor/terrain' section='landscape-materials'>
+      <div className='flex flex-col text-fg bg-surface-raised w-full h-full overflow-y-auto'>
+        <div className='p-2 border-b border-success'>
+          <label className={cn(labelClass, 'block mb-1')}>Landscape material name</label>
+          <TextInput
+            className='border-success'
+            value={editingTerrainMaterialName ?? ''}
+            onChange={(v) => setActiveTerrainMaterialName(v)} />
         </div>
-      </Collapsable>
 
-      <TerrainSlots material={mat} onChange={changed} elevationHint={elevationHint} />
+        {/* The GROUND: slot 0, the landscape material's own surface, covering the whole landscape. Taken
+            from a Material asset like every other slot — picked, or made right here — instead of an inline
+            base-material editor. An asset authored before this keeps its surface ("built-in"); "+ New
+            material" turns that surface into an asset, so nothing is lost by linking it. */}
+        <Collapsable title='Ground'>
+          <div className='p-2 space-y-2'>
+            <MaterialPicker value={mat.surfaceMaterialId} placeholder='(built-in surface)'
+              newName={() => `${editingTerrainMaterialName || 'Landscape'} ground`}
+              // The built-in surface when it HAS a texture (nothing is lost by linking it); otherwise a
+              // white blank — the default ground's green tint would multiply into whatever texture comes next.
+              seed={() => ['baseColorTexture', 'baseTexture', 'texture'].some(k => mat.textures.get(k))
+                ? Material.parse({ ...mat.serialize(), terrainMaterial: undefined })
+                : blankSlotSurface()}
+              onPick={a => { setTerrainSurfaceFrom(mat, liveMaterial(a)); mat.surfaceMaterialId = a.id; changed() }} />
+            <div className='flex items-center justify-between'>
+              <span className={label}>Tiling</span>
+              {/* Floored: 0 or a negative makes `log2(tiling)` -inf in the shader. */}
+              <NumberInput className={num} min={0.01} step={1} value={mat.tiling}
+                     onChange={v => { mat.tiling = Math.max(0.01, v); changed() }} />
+            </div>
+            {/* THE NUMBER NOBODY COULD SEE. Tiling is a repeat COUNT across the whole terrain, so what
+                it means in metres depends on a size edited in a different panel: 31 across 400 m is a
+                12.9 m repeat, which makes a brick in a brick texture over three metres wide. */}
+            <Hint>
+              One repeat = <b>{repeatMetres.toFixed(2)} m</b> across a {landscapeSize} m terrain
+            </Hint>
+            <div className='flex items-center justify-between'>
+              <span className={label} title='Let the whole-landscape foliage grow where the ground shows. The ground’s own foliage (below) grows there regardless.'>Allow landscape foliage</span>
+              <Toggle checked={mat.allowFoliage} onChange={c => { mat.allowFoliage = c; changed() }} />
+            </div>
+            <SurfaceLook
+              normalStrength={mat.normalStrength} antiTiling={mat.antiTiling}
+              onNormalStrength={v => { mat.normalStrength = v; changed() }}
+              onAntiTiling={v => { mat.antiTiling = v; changed() }} />
+            <TerrainFoliageRules
+              material={mat}
+              rules={mat.groundFoliageInclude}
+              exclude={mat.groundFoliageExclude}
+              setExclude={names => { mat.groundFoliageExclude = names }}
+              onChange={changed}
+              title='Foliage on Ground' excludeTitle='Keep off Ground' defaultOpen={false} />
+          </div>
+        </Collapsable>
 
-      {/* Foliage for the WHOLE landscape: wherever the material is, on every surface that allows it. */}
-      <TerrainFoliageRules
-        material={mat}
-        rules={mat.foliageInclude}
-        exclude={mat.foliageExclude}
-        setExclude={names => { mat.foliageExclude = names }}
-        onChange={changed}
-        title='Foliage — whole landscape' excludeTitle='Exclude foliage — whole landscape'
-        hint='Foliage that grows anywhere on this landscape where the surface allows it. Per-surface foliage lives in the Ground and each slot.' />
-    </div>
+        <TerrainSlots material={mat} onChange={changed} elevationHint={elevationHint} />
+
+        {/* Foliage for the WHOLE landscape: wherever the material is, on every surface that allows it. */}
+        <TerrainFoliageRules
+          material={mat}
+          rules={mat.foliageInclude}
+          exclude={mat.foliageExclude}
+          setExclude={names => { mat.foliageExclude = names }}
+          onChange={changed}
+          title='Foliage — whole landscape' excludeTitle='Exclude foliage — whole landscape' />
+      </div>
+    </DocScope>
   )
 }

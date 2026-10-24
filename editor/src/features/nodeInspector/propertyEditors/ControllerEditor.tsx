@@ -5,24 +5,16 @@ import NodeRefInput from '../NodeRefInput'
 import ActionSelect from '../../input/ActionSelect'
 import { useCleoEngine } from '../../EngineContext'
 import AxisInput from '../../../components/AxisInput'
-import { Button, SegmentedControl, Select, Slider, TextInput, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
+import { Button, DocScope, SectionTitle, SegmentedControl, Select, Slider, TextInput, Toggle, cn, labelClass } from '../../../components/ui'
 import { hintAffordance } from '../../../components/ui/Field'
 import PerceptionEditor from './PerceptionEditor'
 import FlockingEditor from './FlockingEditor'
 import AiBrainSlot from './AiBrainSlot'
 import { ControllerIcon } from '../sectionIcons'
 
-const CONTROLLER_HINT = 'The driver. It possesses a Character and decides, each frame, what that character should try to do — from player actions or from a brain. Swapping a player for an AI is switching Source; the character does not change.'
-const POSSESS_HINT = 'The Character this controller drives. One controller can move between pawns, and a second controller possessing the same pawn takes over — last possess wins.'
-const SOURCE_HINT = 'Player reads the actions below. AI steers itself (and runs onThink). None holds the character still, which is what a cutscene wants.'
-const ACTIONS_HINT = 'ACTION names, not keys. Nothing here names a key, so a player can rebind every one of these in the Input panel and this controller keeps working. Leave one empty to leave it unbound.'
-const AIM_HINT = 'Where movement’s "forward" points. Possessed finds the Camera Rig under the pawn — the usual third-person setup. World makes movement world-relative, which is what a top-down game wants.'
 const DRIVE_AIM_HINT = 'Push the look intent into that Camera Rig. Leave this on unless something else already drives the rig — two writers on one rig is a camera that moves at double speed.'
 
-const GOAL_HINT = 'The verb. The blackboard supplies the noun — a script writes setBlackboard("target", node.id). "Script" writes no intent at all and leaves the frame to onThink.'
 const TARGET_KEY_HINT = 'Which blackboard key holds the target node id. A key rather than a node field, so "chase whoever is called target" is authored once and works for every copy of an NPC — with no id to dangle.'
-const AVOID_HINT = 'Fans this many rays ahead and steers around what they hit. A look-ahead of 0 switches it off entirely and fires no rays at all. cannon has no sphere cast, so a fan is the approximation available.'
-const NAV_HINT = 'Route around geometry using a baked Nav Mesh instead of walking in a straight line. With no navmesh in the scene the path and patrol goals fall back to seek, so turning this on is never a regression.'
 
 interface ControllerState {
   possessedId: string | null
@@ -84,10 +76,6 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
       onChange={(v) => apply({ [k]: v } as Partial<ControllerState>)} />
   )
 
-  const header = (label: string, hint?: string) => (
-    <div className={cn(sectionTitleClass, 'mt-3 mb-1', hintAffordance(hint))} title={hint}>{label}</div>
-  )
-
   const action = (label: string, k: keyof ControllerState) => (
     <div className='flex items-center justify-between mb-1.5'>
       <span className={labelClass}>{label}</span>
@@ -104,10 +92,12 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
   const selected = selectedNode ? editorScene.getNodeById(selectedNode) : null
   const canPossessSelected = selected instanceof CharacterNode && selected.id !== state.possessedId
 
+  // Documented on the AI agents page, not with the other node-type editors.
   return (
-    <Collapsable title='Controller' icon={<ControllerIcon />} persistKey='controller' hint={CONTROLLER_HINT}>
+    <DocScope page='editor/ai-agents'>
+    <Collapsable title='Controller' doc='editor/ai-agents#the-controller-inspector' icon={<ControllerIcon />} persistKey='controller'>
       <div className='w-full p-2'>
-        {header('Possession', POSSESS_HINT)}
+        <SectionTitle title='Possession' className='mt-3 mb-1' />
         <NodeRefInput value={state.possessedId} scene={editorScene} filter={characters}
           placeholder='No character'
           onChange={(id) => apply({ possessedId: id })} />
@@ -123,7 +113,7 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
           </p>
         )}
 
-        {header('Source', SOURCE_HINT)}
+        <SectionTitle title='Source' className='mt-3 mb-1' />
         <SegmentedControl
           value={state.controlSource}
           options={CONTROL_SOURCES.map(s => ({ value: s, label: s === 'ai' ? 'AI' : s[0].toUpperCase() + s.slice(1) }))}
@@ -132,7 +122,7 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
 
         {state.controlSource === 'player' && (
           <>
-            {header('Actions', ACTIONS_HINT)}
+            <SectionTitle title='Actions' className='mt-3 mb-1' />
             {action('Move', 'moveAction')}
             {action('Look', 'lookAction')}
             {action('Jump', 'jumpAction')}
@@ -141,7 +131,7 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
           </>
         )}
 
-        {header('Aim', AIM_HINT)}
+        <SectionTitle title='Aim' className='mt-3 mb-1' />
         <div className='flex items-center justify-between mb-2'>
           <span className={labelClass}>Basis</span>
           <Select value={state.aimSource} onChange={(e) => apply({ aimSource: e.target.value })}>
@@ -168,7 +158,7 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
 
         {state.controlSource === 'ai' && (
           <>
-            {header('Goal', GOAL_HINT)}
+            <SectionTitle title='Goal' className='mt-3 mb-1' />
             <div className='flex items-center justify-between mb-2'>
               <span className={labelClass}>Behaviour</span>
               <Select value={state.goal} onChange={(e) => apply({ goal: e.target.value })}>
@@ -207,7 +197,7 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
 
             {state.goal !== 'script' && (
               <>
-                {header('Steering')}
+                <SectionTitle title='Steering' className='mt-3 mb-1' />
                 {slider('Max speed', 'maxSpeed', 0, 20, 0.1)}
                 {(state.goal === 'arrive' || state.goal === 'follow') && (
                   <>
@@ -224,7 +214,7 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
                   </>
                 )}
 
-                {header('Obstacle avoidance', AVOID_HINT)}
+                <SectionTitle title='Obstacle avoidance' className='mt-3 mb-1' />
                 {slider('Look ahead', 'avoidDistance', 0, 20, 0.1)}
                 {state.avoidDistance > 0 && (
                   <>
@@ -236,7 +226,7 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
               </>
             )}
 
-            {header('Perception')}
+            <SectionTitle title='Perception' className='mt-3 mb-1' />
             <PerceptionEditor node={props.node} onChange={changed} />
 
             <FlockingEditor node={props.node} onChange={changed} />
@@ -251,5 +241,6 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
         )}
       </div>
     </Collapsable>
+    </DocScope>
   )
 }

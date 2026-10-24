@@ -231,8 +231,7 @@ function PostChainList(props: { node: CameraNode }) {
   });
 
   return (
-    <Collapsable title='Post-Processing' icon={<MaterialIcon />} persistKey='cameraPostChain'
-      hint='Passes run top to bottom. Motion blur, auto-exposure and the final tonemap are fixed: they run before and after this list.'>
+    <Collapsable title='Post-Processing' icon={<MaterialIcon />} persistKey='cameraPostChain'>
       <div className={`w-full p-2 flex flex-col gap-2 ${dragOver ? 'bg-border/30' : ''}`} {...dropProps}>
         {chain.map((entry, i) => {
           const materialIndex = materialIndexOf(entry.effect);

@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { TextInput, Select, Button, cn } from '../../components/ui'
+import { TextInput, Select, Button, SectionTitle, cn } from '../../components/ui'
 import { addGroup, movePart, removeGroup, renameGroup, groupOfPart, type PartGroup, type PartInfo } from '../../utils/submeshGroups'
 
 /** MIME for a sub-mesh chip dragged between group columns. Scoped to this editor — nothing else reads it. */
@@ -37,10 +37,7 @@ export default function SubmeshGroupEditor({ parts, bundleName, groups, onChange
   return (
     <div>
       <div className='flex items-center justify-between mb-1'>
-        <span className='text-ui font-semibold'
-              title='Each group becomes one model asset, its parts merged into a single mesh. Drag a part to move it.'>
-          Groups
-        </span>
+        <SectionTitle title='Groups' />
         <Button size='sm'
                 onClick={() => onChange(addGroup(groups, bundleName))}>
           + Add group

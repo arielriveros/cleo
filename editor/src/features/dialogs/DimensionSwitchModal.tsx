@@ -15,9 +15,7 @@ export default function DimensionSwitchModal() {
 
   return (
     <Modal onClose={() => resolveDimensionConfirm(false)} className='w-[440px]'>
-      <ModalHeader>
-        <div className='text-ui-lg font-semibold'>Switch this scene to {to}?</div>
-      </ModalHeader>
+      <ModalHeader title={`Switch this scene to ${to}?`} doc='editor/tilemap-2d#switching-dimension' />
 
       <div className='px-4 py-3 text-ui text-fg space-y-2'>
         <p>

@@ -33,6 +33,7 @@ import SceneSettings from './SceneSettings'
 import UIEditor from './UIEditor'
 import { isRootNode } from '../useSelectedNode'
 import { useCleoEngine } from '../../EngineContext'
+import { DocScope } from '../../../components/ui'
 
 export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) {
   const { activeTab, editorMode, templateRootId } = useCleoEngine();
@@ -51,8 +52,10 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
   // one is not a scene asset.
   if (root && activeTab.kind === 'scene') return <SceneSettings />;
 
+  // The inspector is documented on its own page whatever panel page hosts it (scene, template, model);
+  // editors described elsewhere (materials, UI, audio, terrain, 2D, particles) open their own scope.
   return (
-    <>
+    <DocScope page='editor/node-inspector'>
         {/* NodeInfo (name locked, Delete kept) and Transform stay editable for instances. */}
         <NodeInfo node={props.node} readOnly={ro} allowTypeChange={allowTypeChange} />
         {showTransform && <TransformEditor node={props.node} />}
@@ -102,6 +105,6 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
               inside a character with sockets — see SocketAttachSlot. */}
           { !root && !isUI && <SocketAttachSlot node={props.node} /> }
         </fieldset>
-    </>
+    </DocScope>
   )
 }

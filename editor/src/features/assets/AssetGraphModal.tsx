@@ -11,7 +11,7 @@ import type { AssetKind } from '../../utils/vfs'
 import { buildReferenceView } from './assetGraphLayout'
 import type { AssetNodeView } from './assetGraphLayout'
 import AssetGraphCanvas from './AssetGraphCanvas'
-import { Modal, ModalHeader, ModalFooter, Button, TextInput, SegmentedControl, cn, hintClass, sectionTitleClass } from '../../components/ui'
+import { Modal, ModalHeader, ModalFooter, Button, TextInput, SegmentedControl, SectionTitle, cn, hintClass } from '../../components/ui'
 
 // The reference viewer. One asset in the middle, what uses it on the left, what it uses on the right.
 //
@@ -118,7 +118,7 @@ export default function AssetGraphModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal onClose={onClose} className='w-[92vw] h-[86vh] max-h-[86vh] flex flex-col overflow-hidden overflow-y-hidden'>
       <ModalHeader className='shrink-0 px-3 py-2 border-border flex items-center gap-2'>
-        <span className={sectionTitleClass}>Reference graph</span>
+        <SectionTitle title='Reference graph' />
 
         {/* Root picker */}
         <div className='relative ml-2' ref={pickerRef}>

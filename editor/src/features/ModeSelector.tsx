@@ -1,6 +1,6 @@
 import { useCleoEngine, EditorMode } from "./EngineContext";
 import { useProject } from "./ProjectContext";
-import { Button, cn } from "../components/ui";
+import { Button, cn, useDocEntry, useDocTooltip } from "../components/ui";
 
 // Inline SVG glyphs (stroke currentColor) so no binary icon assets are needed.
 const SceneIcon = () => (
@@ -44,22 +44,27 @@ const OptionsIcon = () => (
 interface SegmentProps {
   active: boolean;
   disabled: boolean;
-  title: string;
+  /** The mode's row in modes.md, which is what its hover card shows. */
+  mode: string;
   onClick: () => void;
   children: React.ReactNode;
 }
-function Segment({ active, disabled, title, onClick, children }: SegmentProps) {
+function Segment({ active, disabled, mode, onClick, children }: SegmentProps) {
+  const tip = useDocTooltip(useDocEntry(undefined, `editor/modes#modes-you-choose::${mode}`));
   return (
     <Button
+      ref={tip.ref}
+      {...tip.hoverProps}
+      aria-describedby={tip.describedBy}
       className={cn(
         'gap-1 px-2 py-0 h-[25px] rounded-none border-0 border-r border-control-hover last:border-r-0 font-normal',
         active ? 'bg-selected hover:bg-selected text-fg' : 'text-muted',
         disabled ? 'opacity-50 pointer-events-none' : 'cursor-pointer',
       )}
-      title={title}
       onClick={onClick}
     >
       {children}
+      {tip.card}
     </Button>
   );
 }
@@ -84,24 +89,24 @@ export default function ModeSelector() {
   return (
     <div className='flex items-center h-full mx-[5px]'>
       <div className='flex items-center rounded overflow-hidden border border-control-hover my-[2px]'>
-        <Segment active={editorMode === 'scene'} disabled={isPlayMode} title='Scene editing' onClick={() => select('scene')}>
+        <Segment active={editorMode === 'scene'} disabled={isPlayMode} mode='Scene' onClick={() => select('scene')}>
           <SceneIcon /> Scene
         </Segment>
         {is2D ? (
-          <Segment active={editorMode === 'tilemap'} disabled={isPlayMode} title='Tile painting' onClick={() => select('tilemap')}>
+          <Segment active={editorMode === 'tilemap'} disabled={isPlayMode} mode='Tilemap' onClick={() => select('tilemap')}>
             <TilemapIcon /> Tilemap
           </Segment>
         ) : (
-          <Segment active={editorMode === 'landscape'} disabled={isPlayMode} title='Landscape sculpting' onClick={() => select('landscape')}>
+          <Segment active={editorMode === 'landscape'} disabled={isPlayMode} mode='Landscape' onClick={() => select('landscape')}>
             <LandscapeIcon /> Landscape
           </Segment>
         )}
         {/* Not dimension-gated, unlike the Landscape/Tilemap slot: a HUD applies equally to 2D and 3D. */}
-        <Segment active={editorMode === 'ui'} disabled={isPlayMode} title='UI layout & anchoring' onClick={() => select('ui')}>
+        <Segment active={editorMode === 'ui'} disabled={isPlayMode} mode='UI' onClick={() => select('ui')}>
           <UIIcon /> UI
         </Segment>
         {/* Engine, editor and project settings over the live viewport. Not dimension-gated. */}
-        <Segment active={editorMode === 'options'} disabled={isPlayMode} title='Options: engine, editor and project settings (renderer, input map, publishing…)' onClick={() => select('options')}>
+        <Segment active={editorMode === 'options'} disabled={isPlayMode} mode='Options' onClick={() => select('options')}>
           <OptionsIcon /> Options
         </Segment>
       </div>

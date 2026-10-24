@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { heightsFromImage, type HeightImage, type HeightImportOptions, type LandscapeNode, type Scene } from 'cleo'
 import { Modal, ModalHeader, ModalFooter } from '../../components/ui/Modal'
-import { Button, Hint, NumberInput, SegmentedControl, Toggle } from '../../components/ui'
+import { Button, DocScope, Hint, NumberInput, SegmentedControl, Toggle } from '../../components/ui'
 import { setTerrainHeights } from '../../utils/terrainAccess'
 import { rangeFromFileName } from './heightmapImport'
 
@@ -56,55 +56,55 @@ export default function HeightmapImportDialog({ node, image, fileName, onClose, 
   const set = (patch: Partial<HeightImportOptions>) => setOpts(o => ({ ...o, ...patch }))
   const metresPerStep = (opts.max - opts.min) / (image.bitDepth >= 16 ? 65535 : 255)
 
+  // Opened from the Landscape node inspector (scene authoring), but documented with the terrain.
   return (
-    <Modal onClose={cancel} className='w-[520px]'>
-      <ModalHeader>
-        <div className='text-ui-lg font-semibold'>Import heightmap</div>
-        <div className='text-ui text-muted'>{fileName} · {image.width}×{image.height} · {image.bitDepth}-bit</div>
-      </ModalHeader>
-      <div className='p-4 flex gap-4'>
-        <img src={preview} alt='' className='w-40 h-40 rounded border border-control object-cover shrink-0'
-          style={{ transform: `rotate(${opts.rotate ?? 0}deg) scale(${opts.flipX ? -1 : 1}, ${opts.flipY ? -1 : 1})` }} />
-        <div className='flex-1 space-y-2 text-ui'>
-          <div className='flex items-center justify-between'>
-            <span title='Height of a black pixel, terrain-local metres'>Lowest (black)</span>
-            <NumberInput className='w-24' value={opts.min} step={1} onChange={min => set({ min })} />
+    <DocScope page='editor/terrain' section='heightmaps'>
+      <Modal onClose={cancel} className='w-[520px]'>
+        <ModalHeader title='Import heightmap' aside={`${fileName} · ${image.width}×${image.height} · ${image.bitDepth}-bit`} />
+        <div className='p-4 flex gap-4'>
+          <img src={preview} alt='' className='w-40 h-40 rounded border border-control object-cover shrink-0'
+            style={{ transform: `rotate(${opts.rotate ?? 0}deg) scale(${opts.flipX ? -1 : 1}, ${opts.flipY ? -1 : 1})` }} />
+          <div className='flex-1 space-y-2 text-ui'>
+            <div className='flex items-center justify-between'>
+              <span title='Height of a black pixel, terrain-local metres'>Lowest (black)</span>
+              <NumberInput className='w-24' value={opts.min} step={1} onChange={min => set({ min })} />
+            </div>
+            <div className='flex items-center justify-between'>
+              <span title='Height of a white pixel, terrain-local metres'>Highest (white)</span>
+              <NumberInput className='w-24' value={opts.max} step={1} onChange={max => set({ max })} />
+            </div>
+            <div className='flex items-center justify-between'>
+              <span>Rotate</span>
+              <SegmentedControl<number> size='sm'
+                options={[0, 90, 180, 270].map(r => ({ value: r, label: `${r}°` }))}
+                value={opts.rotate ?? 0} onChange={r => set({ rotate: r as HeightImportOptions['rotate'] })} />
+            </div>
+            <div className='flex items-center justify-between'>
+              <span>Flip horizontally</span>
+              <Toggle checked={!!opts.flipX} onChange={flipX => set({ flipX })} />
+            </div>
+            <div className='flex items-center justify-between'>
+              <span>Flip vertically</span>
+              <Toggle checked={!!opts.flipY} onChange={flipY => set({ flipY })} />
+            </div>
+            <div className='flex items-center justify-between'>
+              <span title='Apply to the landscape as you change the settings'>Live preview</span>
+              <Toggle checked={live} onChange={v => { setLive(v); if (!v) restore() }} />
+            </div>
+            {image.bitDepth < 16 && metresPerStep > 0.25 && (
+              <Hint>An 8-bit image has 256 levels: {metresPerStep.toFixed(2)} m per step over this range, which shows as terraces on slopes. A 16-bit PNG or RAW avoids that.</Hint>
+            )}
+            {(image.width < node.terrain.resolution || image.height < node.terrain.resolution) && (
+              <Hint>The image is smaller than the landscape's {node.terrain.resolution}×{node.terrain.resolution} height grid; it is interpolated.</Hint>
+            )}
           </div>
-          <div className='flex items-center justify-between'>
-            <span title='Height of a white pixel, terrain-local metres'>Highest (white)</span>
-            <NumberInput className='w-24' value={opts.max} step={1} onChange={max => set({ max })} />
-          </div>
-          <div className='flex items-center justify-between'>
-            <span>Rotate</span>
-            <SegmentedControl<number> size='sm'
-              options={[0, 90, 180, 270].map(r => ({ value: r, label: `${r}°` }))}
-              value={opts.rotate ?? 0} onChange={r => set({ rotate: r as HeightImportOptions['rotate'] })} />
-          </div>
-          <div className='flex items-center justify-between'>
-            <span>Flip horizontally</span>
-            <Toggle checked={!!opts.flipX} onChange={flipX => set({ flipX })} />
-          </div>
-          <div className='flex items-center justify-between'>
-            <span>Flip vertically</span>
-            <Toggle checked={!!opts.flipY} onChange={flipY => set({ flipY })} />
-          </div>
-          <div className='flex items-center justify-between'>
-            <span title='Apply to the landscape as you change the settings'>Live preview</span>
-            <Toggle checked={live} onChange={v => { setLive(v); if (!v) restore() }} />
-          </div>
-          {image.bitDepth < 16 && metresPerStep > 0.25 && (
-            <Hint>An 8-bit image has 256 levels: {metresPerStep.toFixed(2)} m per step over this range, which shows as terraces on slopes. A 16-bit PNG or RAW avoids that.</Hint>
-          )}
-          {(image.width < node.terrain.resolution || image.height < node.terrain.resolution) && (
-            <Hint>The image is smaller than the landscape's {node.terrain.resolution}×{node.terrain.resolution} height grid; it is interpolated.</Hint>
-          )}
         </div>
-      </div>
-      <ModalFooter>
-        <Button variant='ghost' onClick={cancel}>Cancel</Button>
-        <Button variant='primary' onClick={ok}>Import</Button>
-      </ModalFooter>
-    </Modal>
+        <ModalFooter>
+          <Button variant='ghost' onClick={cancel}>Cancel</Button>
+          <Button variant='primary' onClick={ok}>Import</Button>
+        </ModalFooter>
+      </Modal>
+    </DocScope>
   )
 }
 

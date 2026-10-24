@@ -42,9 +42,9 @@ export default function AiBrainTabView() {
             {
               value: 'graph',
               label: asset.kind === 'goals' ? 'Goals' : 'Behaviour',
-              title: asset.kind === 'goals' ? 'The goal graph this brain arbitrates' : 'The state machine this brain runs',
+              doc: asset.kind === 'goals' ? 'editor/ai-brains#the-goals-canvas' : 'editor/ai-brains#the-behaviour-canvas',
             },
-            { value: 'fuzzy', label: 'Fuzzy', title: 'Fuzzy variables and rules, which either kind of brain can read through a parameter' },
+            { value: 'fuzzy', label: 'Fuzzy', doc: 'editor/ai-brains#the-fuzzy-canvas' },
           ]}
         />
       </div>

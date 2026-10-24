@@ -5,7 +5,7 @@ import AxisInput from '../../../components/AxisInput'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { useEventBus } from '../../EventBusContext'
-import { Button, Hint, PresetMenu, Select, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
+import { Button, Hint, PresetMenu, SectionTitle, Select, Slider, Toggle, labelClass } from '../../../components/ui'
 import { cloudBakeWarning, formatBakeAge, useCloudBakeStatus } from '../../../utils/cloudBake'
 import { CloudsIcon } from '../sectionIcons'
 
@@ -92,8 +92,6 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
     </div>
   )
 
-  const header = (label: string) => <div className={cn(sectionTitleClass, 'mt-3 mb-1')}>{label}</div>
-
   const bake = useCloudBakeStatus(props.node.scene)
   const bakeWarning = state.bakeIntoSky ? cloudBakeWarning(bake.staleness) : null
   const regenerate = () => { props.node.requestBake(); eventEmitter.emit('SCENE_CHANGED') }
@@ -116,7 +114,7 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
         {check('Enabled', 'enabled')}
         {slider('Opacity', 'opacity', 0, 1, 0.01)}
 
-        {header('Shape')}
+        <SectionTitle title='Shape' className='mt-3 mb-1' />
         {slider('Coverage', 'coverage', 0, 1, 0.01)}
         {slider('Density', 'density', 0, 4, 0.01)}
         <Slider label='Cloud Type' min={0} max={1} step={0.01} value={state.cloudType}
@@ -131,7 +129,7 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
         {slider('Anvil Bias', 'anvilBias', 0, 1, 0.01)}
         {slider('Haze Distance', 'hazeDistance', 0, 100000, 500, 0)}
 
-        {header('Lighting')}
+        <SectionTitle title='Lighting' className='mt-3 mb-1' />
         {check('Use Scene Directional Light', 'useSceneSun')}
         {!state.useSceneSun &&
           <div className='mb-2'>
@@ -156,13 +154,13 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
         {slider('Silver Spread', 'silverSpread', 0.01, 0.5, 0.01)}
         {slider('Powder (dark edges)', 'powderStrength', 0, 1, 0.01)}
 
-        {header('Multiple Scattering')}
+        <SectionTitle title='Multiple Scattering' className='mt-3 mb-1' />
         {slider('Octaves', 'msOctaves', 1, 4, 1, 0)}
         {slider('Scatter (a)', 'msScatter', 0, 1, 0.01)}
         {slider('Extinction (b)', 'msExtinction', 0, 1, 0.01)}
         {slider('Eccentricity (c)', 'msEccentricity', 0, 1, 0.01)}
 
-        {header('Animation')}
+        <SectionTitle title='Animation' className='mt-3 mb-1' />
         {check('Follow Scene Wind', 'useSceneWind')}
         {followingWind
           ? <Hint>Blowing the way Wind ‘{sceneWind!.name}’ does. Wind Speed is the altitude wind at its
@@ -178,7 +176,7 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
         {slider('Wind Speed', 'windSpeed', 0, 80, 0.5)}
         {slider('Detail Wind Factor', 'detailWindFactor', 0, 5, 0.05)}
 
-        {header('Sky Bake')}
+        <SectionTitle title='Sky Bake' className='mt-3 mb-1' />
         {check('Bake into Sky in Play', 'bakeIntoSky')}
         {state.bakeIntoSky && <>
           {!bake.hasAtmosphere && <Hint>The bake paints the clouds over the Sky Atmosphere — add one, or the clouds stay live.</Hint>}
@@ -201,13 +199,9 @@ export default function VolumetricCloudsEditor(props: { node: VolumetricCloudsNo
           {bakeWarning && <div className='text-warning text-ui my-1'
             title='Play mode re-bakes at load anyway; this is about the preview, and about a sun animated during play when re-baking is off.'>
             {bakeWarning}</div>}
-          <Hint>
-            Play mode and published games bake the clouds into the sky cubemap at load and draw it as a static
-            texture instead of raymarching every frame. Wind and cloud shadows freeze at the bake.
-          </Hint>
         </>}
 
-        {header('Quality')}
+        <SectionTitle title='Quality' className='mt-3 mb-1' />
         <Slider label='Resolution Scale' min={0.25} max={1} step={0.05} value={state.resolutionScale}
           labelClassName='w-[104px]' readout={(v) => `${Math.round(v * 100)}%`}
           onChange={(v) => apply({ resolutionScale: v })} />

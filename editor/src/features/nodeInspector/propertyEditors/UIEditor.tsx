@@ -6,7 +6,7 @@ import {
 import Collapsable from '../../../components/Collapsable';
 import { UI_ICONS, CanvasIcon } from '../../sceneInspector/uiIcons';
 import { TransformIcon, AppearanceIcon } from '../sectionIcons';
-import { ColorInput, NumberInput, TextInput, Select, Toggle, Slider, PropertyTable, PropertyRow, TexturePicker } from '../../../components/ui';
+import { ColorInput, NumberInput, TextInput, Select, Toggle, Slider, PropertyTable, PropertyRow, TexturePicker, DocScope } from '../../../components/ui';
 import { useEventBus } from '../../EventBusContext';
 import { clamp } from '../../../utils/math';
 
@@ -444,14 +444,18 @@ export default function UIEditor({ node }: { node: UINode }) {
 
     // Same card body as every other inspector section (`w-full p-2`): Collapsable adds no padding itself,
     // and a bare PropertyTable put the labels flush against the card edge in UI mode only.
+    const payload = <div className='w-full p-2'><PayloadFields node={node} onChange={bump} /></div>;
+
+    // Documented on the UI page. The payload card is two literal titles rather than one chosen by type, so
+    // each names its own docs entry.
     return (
-        <>
-            <Collapsable title={isRoot ? 'Canvas' : 'Element'} icon={<TypeIcon />} persistKey='ui-payload'>
-                <div className='w-full p-2'><PayloadFields node={node} onChange={bump} /></div>
-            </Collapsable>
+        <DocScope page='editor/ui'>
+            {isRoot
+                ? <Collapsable title='Canvas' doc='editor/ui#canvases' icon={<TypeIcon />} persistKey='ui-payload'>{payload}</Collapsable>
+                : <Collapsable title='Element' doc='editor/ui#element-types' icon={<TypeIcon />} persistKey='ui-payload'>{payload}</Collapsable>}
 
             {!isRoot && (
-                <Collapsable title='Anchor & Rect' icon={<TransformIcon />} persistKey='ui-rect'>
+                <Collapsable title='Anchor & Rect' doc='editor/ui#anchors-and-rectangles' icon={<TransformIcon />} persistKey='ui-rect'>
                     <div className='w-full p-2'>
                         <AnchorPicker node={node} onChange={bump} />
                         <RectFields node={node} onChange={bump} />
@@ -462,6 +466,6 @@ export default function UIEditor({ node }: { node: UINode }) {
             <Collapsable title='Appearance' icon={<AppearanceIcon />} persistKey='ui-appearance'>
                 <div className='w-full p-2'><AppearanceFields node={node} onChange={bump} /></div>
             </Collapsable>
-        </>
+        </DocScope>
     );
 }

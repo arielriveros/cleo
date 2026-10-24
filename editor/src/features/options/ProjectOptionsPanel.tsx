@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import InputMapPanel from '../input/InputMapPanel'
-import { Button, Field, Hint, NumberInput, Section, Select, TextInput, Toggle, cn } from '../../components/ui'
+import { Button, Field, NumberInput, Section, Select, TextInput, Toggle, cn } from '../../components/ui'
 import { loadProjects, renameProject } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'
 import { OptionsPageBody, OptionsShell, OPTION_LABEL, useMarkOptionPageShown, useOptionsPage } from './OptionsShell'
@@ -22,8 +22,8 @@ export default function ProjectOptionsPanel() {
       page={page}
       onPage={setPage}
       pages={[
-        { value: 'general', label: 'General', title: 'Name, main scene and how a published build presents itself' },
-        { value: 'input', label: 'Input', title: 'Actions, bindings and on-screen touch controls' },
+        { value: 'general', label: 'General', doc: 'editor/options#general' },
+        { value: 'input', label: 'Input', doc: 'editor/options#input' },
       ]}
     >
       {page === 'general' && <GeneralOptions />}
@@ -65,13 +65,13 @@ function GeneralOptions() {
 
   return (
     <OptionsPageBody>
+      {/* The explanations live in docs/editor/options.md › Project: each Field label's card is its line there. */}
       <Section title='Project'>
-        <Field label='Name' labelClassName={OPTION_LABEL} hint='Shown in the projects list and the menu bar.'>
+        <Field label='Name' labelClassName={OPTION_LABEL}>
           <TextInput value={name} onChange={setName} onBlur={commitName} disabled={!projectId}
             onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
         </Field>
-        <Field label='Main scene' labelClassName={OPTION_LABEL}
-          hint='The scene a published game starts in. Scenes load each other from scripts after that.'>
+        <Field label='Main scene' labelClassName={OPTION_LABEL}>
           <Select className='flex-1' value={mainSceneId} onChange={e => setMainScene(e.target.value)}
             disabled={sceneList.length === 0}>
             {!sceneList.some(s => s.id === mainSceneId) && <option value=''>—</option>}
@@ -80,14 +80,12 @@ function GeneralOptions() {
         </Field>
       </Section>
 
-      <Section title='Published game'
-        hint='How a published build presents itself. The size and window flags apply to the desktop build.'>
-        <Field label='Title' labelClassName={OPTION_LABEL}
-          hint='The window / browser-tab title, the desktop installer’s product name and the folder a publish saves into. Empty = the project name.'>
+      <Section title='Published game'>
+        <Field label='Title' labelClassName={OPTION_LABEL}>
           <TextInput value={w.title} placeholder={name || 'Project name'} maxLength={120}
             onChange={v => setWindow({ title: v })} />
         </Field>
-        <Field label='Window size' labelClassName={OPTION_LABEL} hint='Desktop window size at launch, in pixels.'>
+        <Field label='Window size' labelClassName={OPTION_LABEL}>
           <div className='flex flex-1 items-center gap-1.5'>
             <NumberInput value={w.width} min={320} max={7680} step={1}
               onChange={v => setWindow({ width: clampInt(v, 320, 7680) })} />
@@ -104,11 +102,9 @@ function GeneralOptions() {
             <Toggle checked={w.resizable} onChange={v => setWindow({ resizable: v })} />
           </span>
         </Field>
-        <Field label='Only used shaders' labelClassName={OPTION_LABEL}
-          hint='Compile just the shaders this game uses at startup, not all of them: a much shorter first launch. Anything missed still compiles when first needed.'>
+        <Field label='Only used shaders' labelClassName={OPTION_LABEL}>
           <span className='flex flex-1'><Toggle checked={w.onlyUsedShaders} onChange={v => setWindow({ onlyUsedShaders: v })} /></span>
         </Field>
-        <Hint className='mt-1'>A web build fills the page it is embedded in; only the title applies there.</Hint>
       </Section>
 
       <Button size='sm' variant='ghost' onClick={() => setWindow({ ...d })}>

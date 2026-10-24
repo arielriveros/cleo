@@ -25,9 +25,12 @@ The runtime API is in [Animation (scripting)](../scripting/animation.md).
 ## Animate a character in a minute
 
 A character with no animator holds its bind pose, and its **Animation** section says so with one
-button: **✨ Animate this character…**. The wizard:
+button: **✨ Animate this character…**. It opens a wizard that builds a working animator from a
+starting point you pick; everything it makes can be changed afterwards in the Animator. The wizard:
 
-1. **Checks the skeleton** — how many key humanoid bones it recognised by name.
+1. **Checks the skeleton** — how many key humanoid bones it recognised by name. With few of them,
+   templates still work, but foot placement and clips from other skeletons may need the bone mapping
+   checked.
 2. **Picks a template** — *Third-person locomotion* (idle, walk/run/sprint blended by speed, jump,
    fall, land), *Melee fighter* (locomotion, death, and an action slot for attacks, rolls and hits)
    or *Simple NPC* (idle and walk).
@@ -40,31 +43,84 @@ none, and opens the workspace on it. Every parameter it makes is **linked** to a
 speed, air time, grounded — so the character animates in Play with no script. Attacks, rolls and hit
 reactions are actions: a script plays them with `playAction`.
 
-## Clips
+## The Skeleton part
 
-Lists the clips the character's skeleton owns.
+The workspace's **Skeleton** part edits what every character built on the skeleton shares. Pick a
+bone in the **Skeleton** panel's bone tree or in the viewport; [foot placement](#foot-placement) is set
+up under that tree. Properties holds, from the top:
 
-- **Rename** — renaming a linked clip renames it in its `.anim` asset, and every model using it
-  follows.
-- **Delete**.
-- **Root motion** — a per-clip toggle between the clip's name and its ✕.
-- **Import animation clips** — glTF, GLB or FBX, through the retargeting flow described in
-  [Models and materials](models-and-materials.md#animation-import-and-retargeting).
+- **Preview character** — which character built on the skeleton the preview shows. Every one of them
+  plays the skeleton's clips, so the choice only changes what you look at. With no character on the
+  skeleton yet, only its bones are drawn; link one from a model's Rig slot.
+- **Clips** — the animations linked to the skeleton, so every character on it plays them.
+  **+ Link Animation…** picks one from the library; dragging one in from Assets does the same.
+- **Blend Spaces** — the [blend spaces](#blend-spaces) authored on the skeleton; click one to open it.
+  **+ New Blend Space** needs a character on the skeleton to author it against.
+- Its [sockets](#on-the-skeleton), its ragdoll ([Physics](physics.md#the-ragdoll-panel-rig-editor)), its
+  [bone masks](#bone-masks) and its [poses](#poses).
+- **Retargeting** — corrections for clips authored on another skeleton. Pick the source under *Clips
+  from…*, then **Map bones…** opens the [bone mapper](models-and-materials.md#the-bone-mapper). Fix a
+  bone once and every clip from that skeleton retargets onto this one the same way, permanently.
+  Corrections are kept per source skeleton; **Reset** discards that source's.
 
-Clips belong to the model's **rig**, so every character built on that skeleton inherits them.
+## The clip editor
+
+The workspace's **Clips** part edits one `.anim` at a time — pick it from **Clips ▾** on the
+workspace bar, or double-click it in Assets. The **Clip** panel holds the sections below; **Timeline**
+plays and scrubs the clip on the preview character, with its [events](#events-on-the-clip) in the row
+above the bone keys. **Save** writes the `.anim`, and **Save As…** copies its clips and their edits
+into a new `.anim` on the same skeleton, leaving this one as it was.
+
+- **Clips** — the clips in this `.anim`. Pick one to show and edit it; ✦ marks a clip with edits.
+- **Bone** — poses the bone picked in the Skeleton panel or the viewport. A posed bone is held over
+  the clip, so an arm pose can be judged against the walk it goes into, until **Key at …** writes the
+  pose into the clip at the playhead or **Reset** lets the clip drive it again. ◆ marks a track with
+  a key at the playhead, and its ✕ deletes that key. **Save N posed bones as a shared pose…** stores
+  the posed bones as a [pose](#poses).
+- **Edits** — the clip's edit stack: **Mirror**, **In place**, **Pose** offset, **Trim** and
+  **Retime**. Edits are applied every time the clip plays and never written into the keyframes, so
+  removing one brings the original back. They always run in the same order — trim, mirror, pose
+  offset, in place, retime — whatever order they were added in, and the list shows them in that
+  order. **Apply an edit to other clips…** copies the newest edit onto several clips at once.
+
+With more than one character on the skeleton, a *Preview character* section picks which one plays
+the clip.
 
 ### Root motion
 
 Root motion lets the *animation* physically move the character — the body if it has one, otherwise
-the model node — instead of returning it to where it started.
+the model node — instead of returning it to where it started. Each clip makes one of three choices:
 
-Turn it **on** for turn-in-place and other clips whose animation is authoritative. Leave it **off**
-for locomotion driven by physics velocity, or the character double-moves. A blend-space state
-ignores root motion entirely, and only the base layer applies it — never a layer or an action.
+- **Leave in the clip** — the mesh travels and the character node stays put: the raw import.
+- **Drive the character** — the root's motion is extracted at runtime and moves the character.
+- **Bake in place** — the travel is removed from the curves and a script drives movement instead.
+  Vertical motion is kept, so a jump keeps its arc. It is an *In place* edit in the stack.
 
-## Variables
+Drive the character for turn-in-place and other clips whose animation is authoritative. Locomotion
+that physics velocity already moves must not drive the character as well, or it double-moves; Bake in
+place also keeps its mesh from travelling away from the body. A blend-space state ignores root motion
+entirely, and only the base layer applies it — never a layer or an action.
 
-Two lists.
+## The Clips panel
+
+The Animator part's **Clips** panel lists the clips its machine can name — the clips the character's
+skeleton owns.
+
+- **Import Animation…** — glTF, GLB or FBX, through the retargeting flow described in
+  [Models and materials](models-and-materials.md#animation-import-and-retargeting).
+- **+ Link Animation…** — plays the clips of a `.anim` already in the library; dragging one in from
+  Assets does the same.
+- **From linked animations** — clips from a linked `.anim`. Renaming one renames it in that asset,
+  and every model using it follows. To remove one, unlink its animation.
+- **This model’s own clips** — clips stored on the character itself rather than in a linked asset.
+  Rename them here, or delete one with ✕.
+
+Clips belong to the model's **rig**, so every character built on that skeleton inherits them.
+
+## The Parameters panel
+
+The Animator part's **Parameters** panel holds three lists: the machine's parameters, its events and
+its action slots.
 
 **Parameters** — **Number**, **Toggle**, **Trigger** or **Linked**. The first three are set from a
 script; a **Linked** parameter follows a value by itself:
@@ -87,11 +143,16 @@ The event is delivered to `onAnimationEvent`. This is how a footstep, a hit fram
 burst stays locked to the animation rather than to a timer. These markers belong to *this* machine;
 a marker that should fire wherever the clip plays belongs [on the clip](#events-on-the-clip).
 
-**Action slots** — named places a script plays one-shots into. See [Action slots](#action-slots).
+**Action slots** — named places a script plays one-shots into, without wiring them into the graph.
+See [Action slots](#action-slots).
 
 ## The Animator
 
-Two views, switched with the **Animations | Graph** control.
+Two views, switched with the **Animations | Graph** control:
+
+- **Animations** — the character in the viewport, with a transport to play and scrub a clip and drag
+  the machine's event markers.
+- **Graph** — the state graph, below.
 
 ### The graph
 
@@ -104,6 +165,17 @@ The toolbar carries a tab strip — **Base | *layer* … | + Layer** — that pi
 
 ### The inspector
 
+The Animator part's **Animator** panel edits what the graph has selected. On a layer's tab it starts
+with that [layer's settings](#layers-and-bone-masks).
+
+**Save** commits the animator: onto the character it was opened from, or — when it is a
+[shared animator](#shared-animators) — into the `.animator` asset.
+
+#### Selected
+
+Whatever is selected in the graph: a state — what it plays, and how — or a transition, one each way
+between two states, with its conditions.
+
 **A selected state:**
 
 | Field | Meaning |
@@ -114,6 +186,7 @@ The toolbar carries a tab strip — **Base | *layer* … | + Layer** — that pi
 | **Play count** | |
 | **Speed** or **speed parameter** | Playback rate. |
 | **Foot-placement weight**, optionally from a parameter | How strongly foot placement applies in this state. |
+| **Links** | The states this one connects to, and which way (→ out, ← in, ⇄ both). Drag from the state's right handle in the graph to add one. |
 
 **A selected transition:**
 
@@ -124,12 +197,10 @@ The toolbar carries a tab strip — **Base | *layer* … | + Layer** — that pi
 | **Stay at least** | Least time in the source state before this may fire. |
 | **Conditions** | A tree of AND/OR groups over parameters. |
 
-There is also a **Preview**: it simulates the machine *as you are editing it* — no save needed — and
-lets you drive parameters by hand, which is far quicker than pressing Play to find out whether a
-transition can fire.
+#### Preview
 
-**Save** commits the animator: onto the character it was opened from, or — when it is a
-[shared animator](#shared-animators) — into the `.animator` asset.
+It simulates the machine *as you are editing it* — no save needed — and lets you drive parameters by
+hand, which is far quicker than pressing Play to find out whether a transition can fire.
 
 ### The tolerance is not optional
 
@@ -188,8 +259,10 @@ A machine can have **layers** above the base. Each layer runs its own states and
 the **same parameters**, and is blended on top of everything beneath it — the legs keep walking on
 the base while an upper-body layer aims, waves or holds a torch.
 
-Add one with **+ Layer** on the graph toolbar, then pick its tab to edit its states. Its settings are
-the **Layer** section at the top of the State Machine panel:
+Add one with **+ Layer** on the graph toolbar, then pick its tab to edit its states.
+
+**Layer** — the section at the top of the Animator panel while a layer's tab is picked, titled with
+the layer's name. It holds that layer's own settings:
 
 | Field | Meaning |
 |---|---|
@@ -209,8 +282,8 @@ Three rules worth knowing:
 ### Bone masks
 
 A **bone mask** (`.mask`) says which bones a layer or an [action slot](#action-slots) may move, and
-how strongly. Masks are made and edited in the workspace's **Skeleton** part, in its **Bone Masks** section, against
-that skeleton:
+how strongly — an *Upper body* mask keeps the legs on locomotion. Masks are made and edited in the
+workspace's **Skeleton** part, in its **Bone Masks** section, against that skeleton:
 
 - **+ New mask…** starts from a preset — **Upper body**, **Lower body**, **Left arm**, **Right arm**,
   **Head**, found by bone names — or **Empty**.
@@ -228,7 +301,8 @@ from rest — a hand grip, a pointing finger, an injured stance. It is Unreal's 
 
 **Authoring.** Two ways:
 
-- In the clip editor's Bone panel, pose some bones and use **Save N posed bones as a shared pose…**.
+- In the [clip editor](#the-clip-editor)'s Bone section, pose some bones and use **Save N posed
+  bones as a shared pose…**.
 - In the Skeleton part, pause a clip on the frame you want and press **Capture pose** in the **Poses**
   section. Every bone that differs from rest is kept.
 
@@ -256,7 +330,8 @@ An **action** is a one-shot a script plays over whatever the machine is doing �
 a wave — with no graph wiring at all. It fades in, plays, and fades out by itself; a second action in
 the same slot cross-fades from the first. Unreal calls this a montage slot.
 
-Slots are declared on the machine, in the Variables panel's **Action slots** section:
+Slots are declared on the machine, in the Parameters panel's **Action slots** section, and a script
+plays into one by name — `animator.playAction('Reload', { slot: 'UpperBody' })`:
 
 | Field | Meaning |
 |---|---|
@@ -278,8 +353,9 @@ They are authored on the clip editor's timeline, in the row above the bone keys:
 - **+ Event at playhead** adds one and asks for its name.
 - **Drag** a marker to move it, **click** it to rename, **double-click** it to delete.
 
-The machine's own **Events** list (in Variables) still works. Prefer the clip's for anything that is
-a fact about the animation — a footstep, a contact frame — so every machine that plays it gets it.
+The machine's own **Events** list (in the Parameters panel) still works. Prefer the clip's for
+anything that is a fact about the animation — a footstep, a contact frame — so every machine that
+plays it gets it.
 
 ## Blend spaces
 
@@ -287,8 +363,19 @@ A **blend space** (`.blendspace`) blends several clips by where a probe sits on 
 from **Blend Spaces ▾ → + New Blend Space** on the workspace bar; the Animate wizard makes one for
 locomotion.
 
-**Blend Space Settings** (right): name, 1D or 2D, axis ranges and smoothing, and per-sample clip and
-rate scale. **Blend Space** (bottom): the plot itself, with a draggable probe and a live preview.
+**Blend Space** (bottom) is the plot itself, with a draggable probe and a live preview. **Blend Space
+Settings** (right) has three sections:
+
+- **Field** — the blend space's name, **1D** or **2D**, and each axis's name and range. Switching to
+  1D keeps the samples' Y positions, so switching back restores the layout.
+- **Smoothing** — filtering for the measured parameters that drive the probe, which carry
+  frame-to-frame noise into the pose unless it is filtered here. Per axis: **lag** (seconds for the
+  probe to catch up with its parameter), **dead** (movement smaller than this is ignored outright) and
+  **wrap** (the axis is a circle); plus **Weights**, how fast a clip fades in or out of the mix. It
+  applies at runtime only: the preview always tracks the probe exactly, so placing samples stays
+  direct.
+- **Samples** — each sample's clip, coordinates, **rate** and **phase**, with its live weight at the
+  probe. Double-click the plot to drop a clip; **+ Sample** adds one here.
 
 ### Authoring one
 
@@ -372,7 +459,7 @@ leaves its followers where they were.
 
 ### Attaching a node
 
-Any node can follow a socket, from the **Attach to socket** section of its inspector:
+Any node can follow a socket, from the **Socket** section of its inspector:
 
 | Field | Meaning |
 |---|---|
@@ -395,7 +482,7 @@ rig's follow target instead.
 
 - The **Animation blend** debug overlay shows the live blend read-out, and works during Play.
 - The **Skeletons** overlay draws joints and bones.
-- The State Machine panel's **Preview** simulates without entering Play.
+- The Animator panel's **Preview** simulates without entering Play.
 - Warnings flag oscillating transition pairs and unreachable ones.
 - On a layer's tab, the graph highlights that layer's current state.
 

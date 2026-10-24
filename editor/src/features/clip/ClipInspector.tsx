@@ -6,7 +6,7 @@ import { useClip } from './ClipContext'
 import Collapsable from '../../components/Collapsable'
 import BonePose from './BonePose'
 import { promptDialog } from '../dialogs/dialogStore'
-import { Button, NumberInput, SegmentedControl, Select, Toggle, cn, hintClass } from '../../components/ui'
+import { Button, DocScope, NumberInput, SegmentedControl, Select, Toggle } from '../../components/ui'
 import type { StoredClip, StoredClipEdit } from '../../utils/animationAssets'
 
 // The clip editor's inspector: which clip is on screen, what its root motion does, and its edit stack.
@@ -87,192 +87,190 @@ export default function ClipInspector() {
   const num = 'w-[64px] px-1 py-0'
 
   return (
-    <div className='flex flex-col gap-2 p-2 text-ui'>
-      <div className='flex items-center gap-2'>
-        <span className='font-semibold text-fg truncate' title={asset.name}>{asset.name}</span>
-        {dirty && <span className='text-highlight' title='Unsaved changes'>●</span>}
-        <Button size='sm' className='ml-auto' onClick={save} disabled={!dirty} title='Save this animation (Ctrl+S)'>Save</Button>
-        <Button
-          size='sm'
-          title='Save the edited clips as a NEW .anim asset, leaving this one exactly as it was'
-          onClick={() => {
-            void promptDialog({
-              title: 'Save as a new animation',
-              message: 'The clips and their edits are copied to a new .anim asset on the same skeleton. This one is left unchanged.',
-              defaultValue: `${asset.name} copy`,
-              // Names are how a `.anim` is found in the asset tree, so an empty one is refused here rather
-              // than minting an unnamed asset the user then has to hunt for.
-              validate: v => (v.trim() ? null : 'Give the new animation a name.'),
-            }).then(name => { if (name?.trim()) saveAs(name.trim()) })
-          }}>Save As…</Button>
-      </div>
-
-      <Collapsable title='Clips'>
-        <div className='flex flex-col gap-0.5'>
-          {asset.clips.length === 0 && <div className='text-muted'>This asset has no clips.</div>}
-          {asset.clips.map(c => (
-            <button
-              key={c.name}
-              className={`text-left px-2 py-1 rounded ${c.name === clipName ? 'bg-control-hover text-fg' : 'hover:bg-control text-muted'}`}
-              onClick={() => selectClip(c.name)}>
-              {c.name}
-              {!!c.edits?.filter(e => e.enabled !== false).length &&
-                <span className='ml-1 text-highlight' title={`${c.edits.filter(e => e.enabled !== false).length} edit(s)`}>✦</span>}
-            </button>
-          ))}
+    // The clip editor's own section first: its "Clips" is this asset's clip list, not the Animator's panel.
+    <DocScope page='editor/animation' section='the-clip-editor'>
+      <div className='flex flex-col gap-2 p-2 text-ui'>
+        <div className='flex items-center gap-2'>
+          <span className='font-semibold text-fg truncate' title={asset.name}>{asset.name}</span>
+          {dirty && <span className='text-highlight' title='Unsaved changes'>●</span>}
+          <Button size='sm' className='ml-auto' onClick={save} disabled={!dirty} title='Save this animation (Ctrl+S)'>Save</Button>
+          <Button
+            size='sm'
+            title='Save the edited clips as a NEW .anim asset, leaving this one exactly as it was'
+            onClick={() => {
+              void promptDialog({
+                title: 'Save as a new animation',
+                message: 'The clips and their edits are copied to a new .anim asset on the same skeleton. This one is left unchanged.',
+                defaultValue: `${asset.name} copy`,
+                // Names are how a `.anim` is found in the asset tree, so an empty one is refused here rather
+                // than minting an unnamed asset the user then has to hunt for.
+                validate: v => (v.trim() ? null : 'Give the new animation a name.'),
+              }).then(name => { if (name?.trim()) saveAs(name.trim()) })
+            }}>Save As…</Button>
         </div>
-      </Collapsable>
 
-      {characters.length > 1 && (
-        <Collapsable title='Preview character'>
-          <Select
-            className='w-full'
-            value={previewId ?? ''}
-            onChange={e => setClipPreviewModel(activeTab.id, e.target.value)}
-            title='Which character on this skeleton to preview the clip on'>
-            {characters.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </Select>
-        </Collapsable>
-      )}
-
-      {clip && <BonePose />}
-
-      {clip && (
-        <Collapsable title='Root motion'>
-          {/* Was a radio group: re-picking the current answer must stay a no-op, or re-choosing "Bake in place"
-              would reset that edit's strip/keep-turn settings. */}
-          <SegmentedControl<'mesh' | 'character' | 'inPlace'>
-            className='flex w-full flex-col items-stretch' itemClassName='justify-start'
-            value={rootMode} onChange={mode => { if (mode !== rootMode) setRootMode(mode) }}
-            options={[
-              { value: 'mesh', label: 'Leave in the clip', title: 'The mesh travels and the character node stays put — the raw import.' },
-              { value: 'character', label: 'Drive the character', title: 'Extract the root delta at runtime and move the character with it.' },
-              { value: 'inPlace', label: 'Bake in place', title: 'Remove the travel from the curves; a script drives movement instead. Vertical motion is kept, so a jump keeps its arc.' },
-            ]} />
-        </Collapsable>
-      )}
-
-      {clip && (
-        <Collapsable title={`Edits${edits.length ? ` (${edits.length})` : ''}`}>
-          <div className='flex flex-col gap-1'>
-            <p className={cn(hintClass, 'leading-snug')}>
-              Applied every time the clip is played, never written into the keyframes — remove one and the
-              original is back. Rows run in the order shown, whatever order they were added in.
-            </p>
-
-            {sortedEdits.map(({ e, i }) => (
-              <div key={i} className='border border-border rounded p-1.5 flex flex-col gap-1'>
-                <div className='flex items-center gap-2'>
-                  <Toggle
-                    checked={e.enabled !== false}
-                    onChange={on => replaceEdit(i, { ...e, enabled: on || undefined } as StoredClipEdit)} />
-                  <span className={e.enabled === false ? 'text-dim line-through' : 'text-fg'}>{EDIT_LABEL[e.kind]}</span>
-                  <span className='text-muted truncate'>{summarize(e)}</span>
-                  <Button variant='remove' size='sm' className='ml-auto px-1 py-0' title='Remove this edit' onClick={() => removeEdit(i)}>✕</Button>
-                </div>
-
-                {e.kind === 'mirror' && (
-                  <label className='flex items-center gap-1 text-muted' title='Which axis separates left from right. Auto measures it from the skeleton rather than assuming X.'>
-                    axis
-                    <Select className='px-1 py-0'
-                      value={e.axis ?? ''} onChange={ev => replaceEdit(i, { ...e, axis: (ev.target.value || undefined) as any })}>
-                      <option value=''>auto</option><option value='x'>X</option><option value='y'>Y</option><option value='z'>Z</option>
-                    </Select>
-                  </label>
-                )}
-
-                {e.kind === 'inPlace' && (
-                  <div className='flex items-center gap-2 flex-wrap text-muted'>
-                    <label className='flex items-center gap-1' title='Which travel to remove. "xz" keeps vertical motion, so a jump keeps its arc.'>
-                      strip
-                      <Select className='px-1 py-0'
-                        value={e.strip ?? 'xz'} onChange={ev => replaceEdit(i, { ...e, strip: ev.target.value as any })}>
-                        <option value='xz'>horizontal</option><option value='all'>all</option><option value='y'>vertical only</option>
-                      </Select>
-                    </label>
-                    <Toggle label='keep turn' checked={!!e.keepYaw}
-                      onChange={on => replaceEdit(i, { ...e, keepYaw: on || undefined })} />
-                  </div>
-                )}
-
-                {e.kind === 'timeScale' && (
-                  <label className='flex items-center gap-1 text-muted' title='Playback speed of the clip itself. Root-motion speed scales with it.'>
-                    scale
-                    <NumberInput className={num}
-                      step='0.05' min='0.01' value={e.scale ?? 1}
-                      onChange={v => replaceEdit(i, { ...e, scale: Math.max(0.01, v || 1), duration: undefined })} />
-                  </label>
-                )}
-
-                {e.kind === 'trim' && (
-                  <div className='flex items-center gap-2 text-muted'>
-                    <label className='flex items-center gap-1'>from
-                      <NumberInput className={num}
-                        step='0.05' min='0' value={e.start}
-                        onChange={v => replaceEdit(i, { ...e, start: Math.max(0, v) })} /></label>
-                    <label className='flex items-center gap-1'>to
-                      <NumberInput className={num}
-                        step='0.05' min='0' value={e.end}
-                        onChange={v => replaceEdit(i, { ...e, end: Math.max(0, v) })} /></label>
-                  </div>
-                )}
-
-                {e.kind === 'poseOffset' && (
-                  <div className='flex items-center gap-2 flex-wrap text-muted'>
-                    <label className='flex items-center gap-1' title='A pose stored on this clip’s skeleton. Editing it updates every clip that references it.'>
-                      pose
-                      <Select className='px-1 py-0 max-w-[130px]'
-                        value={e.poseId ?? ''} onChange={ev => replaceEdit(i, { ...e, poseId: ev.target.value || undefined })}>
-                        <option value=''>— none —</option>
-                        {poses.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                      </Select>
-                    </label>
-                    <label className='flex items-center gap-1' title='How much of the pose to apply.'>
-                      weight
-                      <NumberInput className='w-[56px] px-1 py-0'
-                        step='0.05' min='0' max='1' value={e.weight ?? 1}
-                        onChange={v => replaceEdit(i, { ...e, weight: Math.max(0, Math.min(1, v)) })} />
-                    </label>
-                  </div>
-                )}
-              </div>
+        <Collapsable title='Clips'>
+          <div className='flex flex-col gap-0.5'>
+            {asset.clips.length === 0 && <div className='text-muted'>This asset has no clips.</div>}
+            {asset.clips.map(c => (
+              <button
+                key={c.name}
+                className={`text-left px-2 py-1 rounded ${c.name === clipName ? 'bg-control-hover text-fg' : 'hover:bg-control text-muted'}`}
+                onClick={() => selectClip(c.name)}>
+                {c.name}
+                {!!c.edits?.filter(e => e.enabled !== false).length &&
+                  <span className='ml-1 text-highlight' title={`${c.edits.filter(e => e.enabled !== false).length} edit(s)`}>✦</span>}
+              </button>
             ))}
-
-            <div className='flex items-center gap-1 flex-wrap pt-1'>
-              <Button size='sm' title='Swap left and right' onClick={() => addEdit({ kind: 'mirror' })}>+ Mirror</Button>
-              <Button size='sm' title='Remove the root travel' onClick={() => addEdit({ kind: 'inPlace', strip: 'xz' })}>+ In place</Button>
-              <Button size='sm' title='Add a pose on top of the clip' onClick={() => addEdit({ kind: 'poseOffset', poseId: poses[0]?.id })}>+ Pose</Button>
-              <Button size='sm' title='Keep only part of the clip' onClick={() => addEdit({ kind: 'trim', start: 0, end: Math.max(0.1, clipLength(clip)) })}>+ Trim</Button>
-              <Button size='sm' title='Speed the clip up or slow it down' onClick={() => addEdit({ kind: 'timeScale', scale: 1 })}>+ Retime</Button>
-            </div>
-
-            {asset.clips.length > 1 && (
-              <Button size='sm' className='mt-1' onClick={() => { setBatchPicked(new Set()); setBatchOpen(v => !v) }}
-                title='Add the selected clip’s newest edit to several clips at once'>
-                {batchOpen ? 'Cancel' : 'Apply an edit to other clips…'}
-              </Button>
-            )}
-
-            {batchOpen && edits.length > 0 && (
-              <div className='border border-border rounded p-1.5 flex flex-col gap-1'>
-                <div className='text-muted'>Copy “{EDIT_LABEL[edits[edits.length - 1].kind]}” onto:</div>
-                {asset.clips.filter(c => c.name !== clipName).map(c => (
-                  <Toggle key={c.name} className='text-muted' label={c.name} checked={batchPicked.has(c.name)} onChange={on => {
-                    const next = new Set(batchPicked)
-                    if (on) next.add(c.name); else next.delete(c.name)
-                    setBatchPicked(next)
-                  }} />
-                ))}
-                <Button size='sm' disabled={batchPicked.size === 0}
-                  onClick={() => { addEditToClips([...batchPicked], edits[edits.length - 1]); setBatchOpen(false) }}>
-                  Apply to {batchPicked.size} clip{batchPicked.size === 1 ? '' : 's'}
-                </Button>
-              </div>
-            )}
           </div>
         </Collapsable>
-      )}
-    </div>
+
+        {characters.length > 1 && (
+          <Collapsable title='Preview character'>
+            <Select
+              className='w-full'
+              value={previewId ?? ''}
+              onChange={e => setClipPreviewModel(activeTab.id, e.target.value)}
+              title='Which character on this skeleton to preview the clip on'>
+              {characters.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </Select>
+          </Collapsable>
+        )}
+
+        {clip && <BonePose />}
+
+        {clip && (
+          <Collapsable title='Root motion'>
+            {/* Was a radio group: re-picking the current answer must stay a no-op, or re-choosing "Bake in place"
+                would reset that edit's strip/keep-turn settings. */}
+            <SegmentedControl<'mesh' | 'character' | 'inPlace'>
+              className='flex w-full flex-col items-stretch' itemClassName='justify-start'
+              value={rootMode} onChange={mode => { if (mode !== rootMode) setRootMode(mode) }}
+              options={[
+                { value: 'mesh', label: 'Leave in the clip', doc: 'editor/animation#root-motion::Leave in the clip' },
+                { value: 'character', label: 'Drive the character', doc: 'editor/animation#root-motion::Drive the character' },
+                { value: 'inPlace', label: 'Bake in place', doc: 'editor/animation#root-motion::Bake in place' },
+              ]} />
+          </Collapsable>
+        )}
+
+        {clip && (
+          <Collapsable title={`Edits${edits.length ? ` (${edits.length})` : ''}`} doc='Edits'>
+            <div className='flex flex-col gap-1'>
+              {sortedEdits.map(({ e, i }) => (
+                <div key={i} className='border border-border rounded p-1.5 flex flex-col gap-1'>
+                  <div className='flex items-center gap-2'>
+                    <Toggle
+                      checked={e.enabled !== false}
+                      onChange={on => replaceEdit(i, { ...e, enabled: on || undefined } as StoredClipEdit)} />
+                    <span className={e.enabled === false ? 'text-dim line-through' : 'text-fg'}>{EDIT_LABEL[e.kind]}</span>
+                    <span className='text-muted truncate'>{summarize(e)}</span>
+                    <Button variant='remove' size='sm' className='ml-auto px-1 py-0' title='Remove this edit' onClick={() => removeEdit(i)}>✕</Button>
+                  </div>
+
+                  {e.kind === 'mirror' && (
+                    <label className='flex items-center gap-1 text-muted' title='Which axis separates left from right. Auto measures it from the skeleton rather than assuming X.'>
+                      axis
+                      <Select className='px-1 py-0'
+                        value={e.axis ?? ''} onChange={ev => replaceEdit(i, { ...e, axis: (ev.target.value || undefined) as any })}>
+                        <option value=''>auto</option><option value='x'>X</option><option value='y'>Y</option><option value='z'>Z</option>
+                      </Select>
+                    </label>
+                  )}
+
+                  {e.kind === 'inPlace' && (
+                    <div className='flex items-center gap-2 flex-wrap text-muted'>
+                      <label className='flex items-center gap-1' title='Which travel to remove. "xz" keeps vertical motion, so a jump keeps its arc.'>
+                        strip
+                        <Select className='px-1 py-0'
+                          value={e.strip ?? 'xz'} onChange={ev => replaceEdit(i, { ...e, strip: ev.target.value as any })}>
+                          <option value='xz'>horizontal</option><option value='all'>all</option><option value='y'>vertical only</option>
+                        </Select>
+                      </label>
+                      <Toggle label='keep turn' checked={!!e.keepYaw}
+                        onChange={on => replaceEdit(i, { ...e, keepYaw: on || undefined })} />
+                    </div>
+                  )}
+
+                  {e.kind === 'timeScale' && (
+                    <label className='flex items-center gap-1 text-muted' title='Playback speed of the clip itself. Root-motion speed scales with it.'>
+                      scale
+                      <NumberInput className={num}
+                        step='0.05' min='0.01' value={e.scale ?? 1}
+                        onChange={v => replaceEdit(i, { ...e, scale: Math.max(0.01, v || 1), duration: undefined })} />
+                    </label>
+                  )}
+
+                  {e.kind === 'trim' && (
+                    <div className='flex items-center gap-2 text-muted'>
+                      <label className='flex items-center gap-1'>from
+                        <NumberInput className={num}
+                          step='0.05' min='0' value={e.start}
+                          onChange={v => replaceEdit(i, { ...e, start: Math.max(0, v) })} /></label>
+                      <label className='flex items-center gap-1'>to
+                        <NumberInput className={num}
+                          step='0.05' min='0' value={e.end}
+                          onChange={v => replaceEdit(i, { ...e, end: Math.max(0, v) })} /></label>
+                    </div>
+                  )}
+
+                  {e.kind === 'poseOffset' && (
+                    <div className='flex items-center gap-2 flex-wrap text-muted'>
+                      <label className='flex items-center gap-1' title='A pose stored on this clip’s skeleton. Editing it updates every clip that references it.'>
+                        pose
+                        <Select className='px-1 py-0 max-w-[130px]'
+                          value={e.poseId ?? ''} onChange={ev => replaceEdit(i, { ...e, poseId: ev.target.value || undefined })}>
+                          <option value=''>— none —</option>
+                          {poses.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </Select>
+                      </label>
+                      <label className='flex items-center gap-1' title='How much of the pose to apply.'>
+                        weight
+                        <NumberInput className='w-[56px] px-1 py-0'
+                          step='0.05' min='0' max='1' value={e.weight ?? 1}
+                          onChange={v => replaceEdit(i, { ...e, weight: Math.max(0, Math.min(1, v)) })} />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              <div className='flex items-center gap-1 flex-wrap pt-1'>
+                <Button size='sm' title='Swap left and right' onClick={() => addEdit({ kind: 'mirror' })}>+ Mirror</Button>
+                <Button size='sm' title='Remove the root travel' onClick={() => addEdit({ kind: 'inPlace', strip: 'xz' })}>+ In place</Button>
+                <Button size='sm' title='Add a pose on top of the clip' onClick={() => addEdit({ kind: 'poseOffset', poseId: poses[0]?.id })}>+ Pose</Button>
+                <Button size='sm' title='Keep only part of the clip' onClick={() => addEdit({ kind: 'trim', start: 0, end: Math.max(0.1, clipLength(clip)) })}>+ Trim</Button>
+                <Button size='sm' title='Speed the clip up or slow it down' onClick={() => addEdit({ kind: 'timeScale', scale: 1 })}>+ Retime</Button>
+              </div>
+
+              {asset.clips.length > 1 && (
+                <Button size='sm' className='mt-1' onClick={() => { setBatchPicked(new Set()); setBatchOpen(v => !v) }}
+                  title='Add the selected clip’s newest edit to several clips at once'>
+                  {batchOpen ? 'Cancel' : 'Apply an edit to other clips…'}
+                </Button>
+              )}
+
+              {batchOpen && edits.length > 0 && (
+                <div className='border border-border rounded p-1.5 flex flex-col gap-1'>
+                  <div className='text-muted'>Copy “{EDIT_LABEL[edits[edits.length - 1].kind]}” onto:</div>
+                  {asset.clips.filter(c => c.name !== clipName).map(c => (
+                    <Toggle key={c.name} className='text-muted' label={c.name} checked={batchPicked.has(c.name)} onChange={on => {
+                      const next = new Set(batchPicked)
+                      if (on) next.add(c.name); else next.delete(c.name)
+                      setBatchPicked(next)
+                    }} />
+                  ))}
+                  <Button size='sm' disabled={batchPicked.size === 0}
+                    onClick={() => { addEditToClips([...batchPicked], edits[edits.length - 1]); setBatchOpen(false) }}>
+                    Apply to {batchPicked.size} clip{batchPicked.size === 1 ? '' : 's'}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </Collapsable>
+        )}
+      </div>
+    </DocScope>
   )
 }
 

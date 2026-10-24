@@ -4,7 +4,7 @@ import {
 } from 'cleo';
 import type { Preset } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
-import { Section, Slider, Toggle, Field, NumberInput, PresetMenu, SegmentedControl, Select, Hint, TexturePicker, cn, labelClass } from '../../components/ui';
+import { DocScope, Section, Slider, Toggle, Field, NumberInput, PresetMenu, SegmentedControl, Select, Hint, TexturePicker, cn, labelClass } from '../../components/ui';
 
 // The renderer's labels ("Foliage Density", "LOD1 Detail") are longer than the inspector's; at the shared
 // 12px they wrap in Field's default 70px column.
@@ -353,20 +353,18 @@ export default function RendererSettingsPanel() {
   };
 
   return (
+    // Each section is a heading of docs/editor/rendering.md › Renderer Settings, and the fields its docs
+    // table names take their cards from that table: the explanation lives there, not in hints here.
     // The content column is capped rather than filling the dock group (see PerformancePanel); the panel
     // itself stays resizable.
+    <DocScope page='editor/rendering'>
     <div className='h-full overflow-y-auto p-3 text-ui-sm text-fg'>
       <div className='w-full max-w-[420px]'>
-      <Section
-        title='Graphics API'
-        hint={'Which API drives the renderer. A request, not a live switch: a context cannot change API '
-            + 'underneath the buffers, textures and programs already built on it, so it applies when the '
-            + 'editor reloads.'}
-      >
+      <Section title='Graphics API'>
         <BackendSelector />
       </Section>
 
-      <Section title='Channels' hint='Blit one internal buffer to the viewport instead of the composited image. Overdraw costs an extra pass — it re-rasterizes the scene additively to show how many times each pixel was shaded.'>
+      <Section title='Channels'>
         <SegmentedControl
           className='grid grid-cols-3 gap-1'
           size='sm'
@@ -382,12 +380,7 @@ export default function RendererSettingsPanel() {
           onChange={setValidity} />
       </Section>
 
-      <Section
-        title='Optimizations'
-        hint={'Foliage cull distance and grid cell size are in world units (distance 0 = off). Terrain '
-            + 'chunks past each LOD distance draw on a coarser grid; chunk borders stay full-detail, so '
-            + 'levels meet seamlessly.'}
-      >
+      <Section title='Optimizations'>
         <Toggle label='Frustum Culling' checked={frustumCulling} className='my-1'
           onChange={(c) => { renderer.frustumCulling = c; setFrustumCulling(c); touch(); }} />
         {/* CPU occlusion culling (graphics/occlusion): what is behind a hill, or behind an Occluder volume,
@@ -409,12 +402,11 @@ export default function RendererSettingsPanel() {
           disabled={occlusionCulling === 'off'}
           title='Also ask the GPU which large or heavy objects are hidden behind what was actually drawn — a building, a cliff, a rock — not just the landscape and Occluder volumes. Results arrive a frame or two late, so an object can appear a frame late when what hid it moves away fast.'
           onChange={(c) => { renderer.occlusionQueries = c; setOcclusionQueries(c); touch(); }} />
-        <Field labelClassName={LABEL_W} label='Foliage Dist' hint='How far grass draws, and the least distance any foliage draws. Trees with LOD levels or an impostor draw on past their last band unless the model sets its own cull distance.'>
+        <Field labelClassName={LABEL_W} label='Foliage Dist'>
           <NumberInput value={foliageCullDistance} min={0} step={5} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.foliageCullDistance = v; setFoliageCullDistance(v); touch(); }} />
         </Field>
-        <Field labelClassName={LABEL_W} label='Foliage Shadow'
-               hint='How far terrain foliage casts shadows, in metres (0 = as far as it draws). Past it the foliage still draws, only not into the shadow map — a distant tree&apos;s shadow is a few texels.'>
+        <Field labelClassName={LABEL_W} label='Foliage Shadow'>
           <NumberInput value={foliageShadowDistance} min={0} step={10} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.foliageShadowDistance = v; setFoliageShadowDistance(renderer.foliageShadowDistance); touch(); }} />
         </Field>
@@ -433,7 +425,7 @@ export default function RendererSettingsPanel() {
         </Field>
         {/* Density scaling, for GRASS (billboard) layers only: dropping trees at a LOD switch is a
             visible pop, so mesh props are never thinned. 1 draws every instance. */}
-        <Field labelClassName={LABEL_W} label='Grass Density' hint='How much billboard grass thins with distance (1 = none). Mesh props such as trees are never thinned.'>
+        <Field labelClassName={LABEL_W} label='Grass Density'>
           <NumberInput value={foliageDensity} min={0.1} max={1} step={0.05} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.foliageDensityFalloff = v; setFoliageDensity(renderer.foliageDensityFalloff); touch(); }} />
         </Field>
@@ -490,21 +482,7 @@ export default function RendererSettingsPanel() {
           <PresetMenu label='Look' presets={LENS_LOOK_PRESETS}
             title='Lens looks — bloom, flare, dirt, vignette, grain, fringing and saturation; the tone map and LUT stay yours'
             onApply={(p) => applyRenderPreset(LENS_LOOK_PRESETS, p)} />
-        </>}
-        hint={'Exposure is written as a photographic EV100 — the same setting a light meter reads. '
-        + 'It matters more than it used to: lights carry real photometric intensity, and the sun is about three decades '
-        + 'brighter than a lamp, so one exposure can only meter one of them. A sunny exterior sits near EV 15, an '
-        + 'interior near EV 5. Exposure is per-scene, so a cave and a hillside can each carry their own. '
-        + 'The tone map is the curve that turns linear HDR into a displayable image, and it is the single biggest lever here: '
-        + 'AgX rolls a saturated highlight toward white instead of clipping it to a primary, ACES is the older filmic fit '
-        + 'every scene used before this control existed, and Khronos Neutral leaves in-gamut albedo untouched. '
-        + 'Saturation is a trim applied in linear, before the tonemap, so the filmic shoulder still rolls off correctly — '
-        + 'a Sky Light with clouds multiplies its own desaturation on top of this. AgX already desaturates highlights by '
-        + 'construction, so the same trim reads stronger under it than under ACES. '
-        + 'The colour LUT is a horizontal strip of N tiles, N by N each (256x16 or 1024x32): red runs left to right within '
-        + 'a tile, green downward from the top row, blue across the tiles. It is applied AFTER the tone map, on the display '
-        + 'colour, which is the space a .cube LUT from a grading tool was measured in. '
-        + 'Chromatic aberration offsets the colour channels radially.'}>
+        </>}>
         <Toggle label='Auto exposure' checked={autoExposure}
           onChange={(v) => { renderer.autoExposureEnabled = v; setAutoExposure(v); touch(); }} />
         {/* The manual slider is REPLACED rather than disabled while metering is on: a control that
@@ -552,13 +530,7 @@ export default function RendererSettingsPanel() {
           onChange={(v) => { renderer.colorGradingIntensity = v; setLutIntensity(v); touch(); }} />}
       </Section>
 
-      <Section
-        title='Bloom'
-        hint={'HDR bright-pass. Threshold is a luminance cutoff measured AFTER exposure, so it means '
-            + '"bloom what would clip on screen"; knee softens the ramp. Restricting to lit surfaces uses '
-            + "the scene buffer's alpha mask — sprites, tilemaps, transparents and unlit materials cannot "
-            + 'set it, so they never bloom while it is on (see the Bloom Mask channel).'}
-      >
+      <Section title='Bloom'>
         <Slider label='Threshold' value={bloomThreshold} min={0} max={5} step={0.05}
           onChange={(v) => { renderer.bloomThreshold = v; setBloomThreshold(v); touch(); }} />
         <Slider label='Knee' value={bloomKnee} min={0} max={2} step={0.05}
@@ -574,10 +546,6 @@ export default function RendererSettingsPanel() {
         title='Depth of Field'
         right={<PresetMenu presets={DOF_PRESETS} title='Depth-of-field presets — the focus distance stays yours'
           onApply={(p) => applyRenderPreset(DOF_PRESETS, p)} />}
-        hint={'A thin lens with a real aperture, so the near field blurs harder than the far field and '
-            + 'the far field settles at a fixed blur toward infinity. Aperture is written as an f-stop: '
-            + 'smaller is wider, and shallower. A camera can name a Focus Target node in its inspector, '
-            + 'which overrides the distance here and tracks that object instead.'}
       >
         <Toggle label='Enabled' checked={dofEnabled} className='my-1'
           onChange={(c) => { renderer.dofEnabled = c; setDofEnabled(c); touch(); }} />
@@ -597,12 +565,7 @@ export default function RendererSettingsPanel() {
         </>}
       </Section>
 
-      <Section
-        title='Lens Flare'
-        hint={'Ghosts and a halo, traced from bright areas of the IMAGE rather than from the sun. That '
-            + 'is what makes them occlude correctly: a sun behind a wall is not in the buffer, so it '
-            + 'throws nothing. Threshold is the radiance a pixel must exceed before it flares.'}
-      >
+      <Section title='Lens Flare'>
         <Slider label='Intensity' value={flare} min={0} max={2} step={0.01}
           onChange={(v) => { renderer.lensFlareIntensity = v; setFlare(v); touch(); }} />
         {flare > 0 && <>
@@ -617,12 +580,7 @@ export default function RendererSettingsPanel() {
         </>}
       </Section>
 
-      <Section
-        title='Lens Dirt'
-        hint={'Smudges on the front element, which brighten the bloom and flare that pass through them '
-            + 'and are invisible everywhere else — so nothing shows until there is glare to catch. An '
-            + 'overlay ships with the engine; leave the texture unset to use it.'}
-      >
+      <Section title='Lens Dirt'>
         <Slider label='Intensity' value={dirtIntensity} min={0} max={4} step={0.05}
           onChange={(v) => { renderer.lensDirtIntensity = v; setDirtIntensity(v); touch(); }} />
         {dirtIntensity > 0 && <Field labelClassName={LABEL_W} label='Mask'>
@@ -633,12 +591,7 @@ export default function RendererSettingsPanel() {
           <Hint>Nothing to catch: lens dirt only shows where bloom or lens flare put glare on the frame.</Hint>}
       </Section>
 
-      <Section
-        title='Vignette'
-        hint={'The fall-off toward the corners every real lens has. Applied to linear radiance before '
-            + 'the tone curve, so the corners are exposed down rather than crushed flat. Roundness 0 '
-            + 'follows the frame shape, as a lens does; 1 is a circle.'}
-      >
+      <Section title='Vignette'>
         <Slider label='Strength' value={vignette} min={0} max={1} step={0.01}
           onChange={(v) => { renderer.vignetteStrength = v; setVignette(v); touch(); }} />
         {vignette > 0 && <>
@@ -649,12 +602,7 @@ export default function RendererSettingsPanel() {
         </>}
       </Section>
 
-      <Section
-        title='Film Grain'
-        hint={'Sensor and emulsion noise, weighted toward the midtones — black stays clean and a blown '
-            + 'highlight does not sparkle, which is what separates grain from video noise. Animated, '
-            + 'because a fixed pattern reads as dirt on the screen rather than as film.'}
-      >
+      <Section title='Film Grain'>
         <Slider label='Intensity' value={grain} min={0} max={0.5} step={0.005}
           onChange={(v) => { renderer.filmGrainIntensity = v; setGrain(v); touch(); }} />
         {grain > 0 && <>
@@ -666,13 +614,7 @@ export default function RendererSettingsPanel() {
         </>}
       </Section>
 
-      <Section
-        title='Antialiasing'
-        hint={'Temporal antialiasing: the projection is offset by a fraction of a pixel each frame and '
-            + 'the results are accumulated, so a still image converges on about eight times the '
-            + 'sampling. Motion vectors carry the history across camera and object movement; the editor '
-            + 'grid, gizmos and sprites are drawn afterwards and are never blended.'}
-      >
+      <Section title='Antialiasing'>
         <Toggle label='Temporal AA' checked={taa} className='my-1'
           onChange={(c) => { renderer.taaEnabled = c; setTaa(c); touch(); }} />
         {taa && !renderer.taaSupported &&
@@ -680,7 +622,7 @@ export default function RendererSettingsPanel() {
             velocity buffers cannot hold the values TAA needs.</Hint>}
       </Section>
 
-      <Section title='Motion Blur' hint='Camera-reprojection motion blur (UE5-style). Amount scales the shutter length.'>
+      <Section title='Motion Blur'>
         <Toggle label='Enabled' checked={motionBlur} className='my-1'
           onChange={(c) => { renderer.motionBlurEnabled = c; setMotionBlur(c); touch(); }} />
         <Slider label='Amount' value={motionBlurIntensity} min={0} max={4} step={0.05}
@@ -695,19 +637,7 @@ export default function RendererSettingsPanel() {
         </div>
       </Section>
 
-      <Section
-        title='Shadows'
-        hint={'Distance is how far the cascades reach; nothing past it is shadowed. Split lambda trades '
-            + 'near detail against far coverage (0 = even slabs, 1 = resolution packed near the camera) — '
-            + 'watch the Cascades channel while dragging it. Softness is the filter radius in shadow '
-            + 'texels (0 = one hard tap); Blend cross-fades the seam between cascades, and 0 leaves a '
-            + 'visible line. Depth Bias is in WORLD units and is rescaled per cascade, so one value means '
-            + 'the same thing in all of them — raise Normal Bias first for acne on steeply lit surfaces, '
-            + 'since it moves the lookup across the map rather than pulling the surface toward the light. '
-            + 'Stabilize snaps each cascade to a texel grid so edges stop crawling; Stagger re-draws the '
-            + 'distant cascades every 2nd/4th frame; Caster Pad is how far behind a cascade the depth pass '
-            + 'still captures occluders.'}
-      >
+      <Section title='Shadows'>
         <Toggle label='Enabled' checked={shadowsEnabled} className='my-1'
           onChange={(c) => { renderer.shadowsEnabled = c; setShadowsEnabled(c); touch(); }} />
 
@@ -731,8 +661,7 @@ export default function RendererSettingsPanel() {
           <NumberInput value={shadowDistance} min={1} step={10} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.shadowDistance = v; setShadowDistance(renderer.shadowDistance); touch(); }} />
         </Field>
-        <Field labelClassName={LABEL_W} label='Far Distance'
-          hint='Landscape-scale shadows past Distance: terrain and large casters only, refreshed as the camera travels. 0 = off.'>
+        <Field labelClassName={LABEL_W} label='Far Distance'>
           <NumberInput value={shadowFarDistance} min={0} step={100} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.shadowFarDistance = v; setShadowFarDistance(renderer.shadowFarDistance); touch(); }} />
         </Field>
@@ -783,13 +712,7 @@ export default function RendererSettingsPanel() {
         {!shadowsEnabled && <Hint>Shadows are off — every lookup returns fully lit.</Hint>}
       </Section>
 
-      <Section
-        title='Spot Shadows'
-        hint={`Up to ${renderer.maxSpotShadows} spot lights cast at once — flag them per light with Cast `
-            + `Shadows in the inspector; any beyond the cap simply go unshadowed. A spot's frustum matches `
-            + `its outer cone, and its far plane comes from its attenuation, capped by Max Dist. Bias is in `
-            + `DEPTH units here, not world units: perspective depth does not convert linearly.`}
-      >
+      <Section title='Spot Shadows'>
         <Toggle label='Enabled' checked={spotShadows} className='my-1'
           onChange={(c) => { renderer.spotShadowsEnabled = c; setSpotShadows(c); touch(); }} />
         <div className='flex items-center gap-1 my-1 text-ui'>
@@ -810,16 +733,7 @@ export default function RendererSettingsPanel() {
         {!shadowsEnabled && <Hint>The global Shadows toggle above is off, which also disables these.</Hint>}
       </Section>
 
-      <Section
-        title='Point Shadows'
-        hint={`Up to ${renderer.maxPointShadows} point lights cast at once — flag them per light with `
-            + `Cast Shadows in the inspector. A point light shadows in every direction, so it costs SIX `
-            + `depth passes (one per cube face) where a spot light costs one; that is why the cap is low `
-            + `and Resolution is per FACE. The lights nearest the camera get the maps, and only lights `
-            + `whose range reaches the view are drawn at all — a light and its surroundings that have `
-            + `not moved keep the maps they already have, so a static lamp is free after the first `
-            + `frame. Bias is in DEPTH units, like Spot.`}
-      >
+      <Section title='Point Shadows'>
         <Toggle label='Enabled' checked={pointShadows} className='my-1'
           onChange={(c) => { renderer.pointShadowsEnabled = c; setPointShadows(c); touch(); }} />
         <div className='flex items-center gap-1 my-1 text-ui'>
@@ -840,11 +754,7 @@ export default function RendererSettingsPanel() {
         {!shadowsEnabled && <Hint>The global Shadows toggle above is off, which also disables these.</Hint>}
       </Section>
 
-      <Section title='Ambient Occlusion & Indirect Light'
-        hint={'Screen-space, deferred path only. Occluders within Radius (world units) darken the ambient light, '
-          + "and with Indirect Light on they also bounce last frame's light onto what they occlude: colour bleeding "
-          + 'near surfaces. Thickness is how deep an occluder is assumed to be, so light passes behind thin objects; '
-          + 'Power sharpens the occlusion; Bias ignores samples this close, against self-occlusion.'}>
+      <Section title='Ambient Occlusion & Indirect Light'>
         <Toggle label='Enabled' checked={ssaoEnabled} className='my-1'
           onChange={(c) => { renderer.ssaoEnabled = c; setSsaoEnabled(c); touch(); }} />
         <Toggle label='Indirect Light' checked={ssilEnabled} className='my-1'
@@ -861,17 +771,7 @@ export default function RendererSettingsPanel() {
           onChange={(v) => { renderer.ssaoBias = v; setSsaoBias(v); touch(); }} />
       </Section>
 
-      <Section title='Shading'
-        hint={'Three corrections to how the specular lobe behaves, all on by default and all all but '
-            + 'invisible on rough surfaces by design — they act where the highlight is sharp. '
-            + 'Specular occlusion asks how much of the narrow reflection CONE is blocked rather than '
-            + 'the whole hemisphere, so a polished floor in a corner keeps the reflection of the room. '
-            + 'Specular AA widens roughness by the sub-pixel variance of the normal, which is what '
-            + 'stops a sharp highlight flickering as it moves — MSAA cannot fix that, because the '
-            + 'aliasing is in the shading rather than the coverage. Horizon occlusion drops the '
-            + 'reflection where a normal map has tilted it INTO the surface, which is the wet-looking '
-            + 'rim on strongly normal-mapped materials seen at an angle. Turn one off to see what it '
-            + 'was doing.'}>
+      <Section title='Shading'>
         <Toggle label='Specular occlusion' checked={specularOcclusion} className='my-1'
           onChange={(c) => { renderer.specularOcclusionEnabled = c; setSpecularOcclusion(c); touch(); }} />
         <Toggle label='Specular antialiasing' checked={specularAa} className='my-1'
@@ -880,7 +780,7 @@ export default function RendererSettingsPanel() {
           onChange={(c) => { renderer.horizonOcclusionEnabled = c; setHorizonOcclusion(c); touch(); }} />
       </Section>
 
-      <Section title='Grid' hint='Editor-only reference grid. Never rendered in a published game.'>
+      <Section title='Grid'>
         <Toggle label='Visible' checked={gridVisible} className='my-1'
           onChange={(c) => { renderer.setGridVisible(c); setGridVisible(c); touch(); }} />
         <div className='flex items-center gap-1 my-1 text-ui'>
@@ -895,5 +795,6 @@ export default function RendererSettingsPanel() {
       </Section>
       </div>
     </div>
+    </DocScope>
   );
 }

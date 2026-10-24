@@ -79,8 +79,7 @@ export default function CustomVariablesEditor(props: { node: Node }) {
   }
 
   return (
-    <Collapsable title='Variables' icon={<VariablesIcon />} badge={vars.length || undefined} persistKey='variables'
-      hint={'In a script these are properties of the node: read and write this.{name}, or other.{name} on another node. The editor checks the type as you type. Access: public = any node, private = this node only, protected = this node + descendants.'}>
+    <Collapsable title='Variables' icon={<VariablesIcon />} badge={vars.length || undefined} persistKey='variables'>
       <div className='w-full p-2'>
         {vars.length === 0 && <Hint className='mb-2'>No variables yet.</Hint>}
         {vars.map(v => (

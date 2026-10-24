@@ -7,10 +7,8 @@ import Collapsable from '../../../components/Collapsable';
 import TextureInspector from './TextureInspector';
 import CustomMaterialEditor from './CustomMaterialEditor';
 import UvMappingSection from './UvMappingSection';
-import { PropertyTable, PropertyRow, Field, Select, NumberInput, Slider, Toggle, ColorInput, Section } from '../../../components/ui';
+import { PropertyTable, PropertyRow, Field, Select, NumberInput, Slider, Toggle, ColorInput, Section, DocScope } from '../../../components/ui';
 import { MaterialIcon } from '../sectionIcons';
-
-const TERRAIN_HEIGHT_HINT = 'Depth is a fraction of one texture repeat, the same as on any mesh — so this material reads the same on both. The Terrain Material inspector shows what that is in metres. Relief is drawn per fragment: it shades and self-shadows but has no silhouette, and physics follows the sculpted surface.';
 
 export default function MaterialEditor(props: {node: ModelNode}) {
   if (!props.node.model) {
@@ -282,7 +280,9 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   //
   // The height map is still read for the height-aware layer blend, so it is not that the slot is
   // meaningless on terrain — it is that the RELIEF half of it is switched off. When the flag comes back
-  // this returns with it and nothing else here changes.
+  // this returns with it and nothing else here changes — except that its Height title should then point
+  // at a terrain docs entry (`doc='editor/terrain::Height'`), which terrain.md does not have while the
+  // relief is off.
   const showHeight = !isTerrain || TERRAIN_RELIEF_ENABLED;
 
   // Texture mapping for the lit types (Blinn-Phong, Cel, PBR). Not on terrain, which has its own tiling.
@@ -291,11 +291,12 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   ) : null;
 
   const heightSection = showHeight ? (
-    <Section title='Height' hint={isTerrain ? TERRAIN_HEIGHT_HINT : undefined}>
+    <Section title='Height'>
       <PropertyTable columns={['40%', '60%']}>
         {/* A PBR material marches its height map whenever it has one — there is no switch. Depth is
-            in world units by default; the Depth unit row below explains the older uv meaning. */}
-        <PropertyRow label='Depth' hint={depthInWorld
+            in world units by default; the Depth unit row below explains the older uv meaning.
+            `doc={false}`: the hint is this mesh's own numbers, which the docs' Depth row cannot give. */}
+        <PropertyRow label='Depth' doc={false} hint={depthInWorld
           ? `Relief depth in world units. One UV unit is ${worldPerUv.toFixed(2)} on this mesh, so this is ${(dispScale / Math.max(worldPerUv, 1e-6)).toFixed(4)} of a texture repeat.`
           : `A fraction of one texture repeat. One UV unit is ${worldPerUv.toFixed(2)} world units on this mesh, so this is ${(dispScale * worldPerUv).toFixed(3)} units of relief.`}>
           {/* The world range is the uv range converted, so nothing the old control could reach becomes
@@ -370,8 +371,10 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     </div>
   );
 
+  // Documented with the material editor, not the node inspector: this is the whole of Material mode's panel.
   return (
-    <Collapsable title='Material' icon={<MaterialIcon />} persistKey='material'>
+    <DocScope page='editor/models-and-materials'>
+    <Collapsable title='Material' doc='editor/models-and-materials#the-material-editor' icon={<MaterialIcon />} persistKey='material'>
       <div className='w-full p-2'>
         <Field label='Shader'>
           <Select value={shaderType} onChange={(e) => handleShaderTypeChange(e.target.value as ShaderType)}>
@@ -643,5 +646,6 @@ export default function MaterialEditor(props: {node: ModelNode}) {
         </Section>
       </div>
     </Collapsable>
+    </DocScope>
   )
 }

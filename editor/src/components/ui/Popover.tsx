@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from './cn';
+import { placeAnchored } from './anchoredPosition';
 
 export interface PopoverProps {
   /** Visual content of the trigger (wrapped in a button by this component). */
@@ -16,10 +17,6 @@ export interface PopoverProps {
   /** Classes for the wrapper around the trigger (e.g. `w-full` for a full-width trigger). */
   rootClassName?: string;
 }
-
-/** Distance between the trigger and the panel, and the closest the panel may sit to a viewport edge. */
-const GAP = 4;
-const MARGIN = 8;
 
 /**
  * Anchored, outside-click-dismiss floating panel. Foundation for the typed selects + texture picker.
@@ -38,20 +35,7 @@ export function Popover({ trigger, children, align = 'left', disabled, title, tr
     const trigger = triggerRef.current;
     const panel = panelRef.current;
     if (!trigger || !panel) return;
-
-    const t = trigger.getBoundingClientRect();
-    const p = panel.getBoundingClientRect();
-
-    // Open downwards, flipping above the trigger when the panel would run off the bottom of the
-    // viewport and there is room above.
-    let top = t.bottom + GAP;
-    if (top + p.height > window.innerHeight - MARGIN && t.top - GAP - p.height >= MARGIN)
-      top = t.top - GAP - p.height;
-
-    let left = align === 'right' ? t.right - p.width : t.left;
-    left = Math.min(Math.max(left, MARGIN), Math.max(MARGIN, window.innerWidth - p.width - MARGIN));
-
-    setPos({ top, left });
+    setPos(placeAnchored(trigger.getBoundingClientRect(), panel.getBoundingClientRect(), align));
   }, [align]);
 
   // Measure after the panel is in the DOM but before paint, so it never shows at the wrong spot.

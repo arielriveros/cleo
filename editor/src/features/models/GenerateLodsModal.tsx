@@ -7,7 +7,6 @@ import { clamp } from '../../utils/math';
 // than the globally-mounted pending/resolver pattern — that exists for flows that PARK on the user's
 // answer (model import awaits it mid-parse); this one just collects a form and calls an action.
 
-const GENERATE_HINT = 'Each level becomes its own model asset in the library, decimated from this one and referenced as a level. Regenerating updates those assets rather than adding more.'
 const DOWNSCALE_ON_HINT = 'Levels landing on the same size share one image, so a second level costs no extra texture memory. Small maps stop at 64px, and maps whose alpha carries data are left at full size.'
 const DOWNSCALE_OFF_HINT = 'Levels reuse this model’s materials and textures unchanged — only the triangle count drops.'
 
@@ -60,12 +59,9 @@ export default function GenerateLodsModal(props: GenerateLodsModalProps) {
 
     return (
         <Modal onClose={props.onCancel} className='w-[460px]'>
-            <ModalHeader>
-                <div className='text-ui font-semibold text-muted'>Generate LOD levels</div>
-                <div className='text-ui-lg font-semibold truncate' title={props.modelName}>{props.modelName}</div>
-            </ModalHeader>
+            <ModalHeader title='Generate LOD levels' aside={<span title={props.modelName}>{props.modelName}</span>} />
 
-            <div className='px-4 py-3 space-y-3 text-ui' title={GENERATE_HINT}>
+            <div className='px-4 py-3 space-y-3 text-ui'>
                 <div className='space-y-2'>
                     <div className='flex items-center gap-2 text-ui-sm text-muted px-1'>
                         <span className='w-[46px]'>Level</span>

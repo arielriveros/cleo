@@ -7,7 +7,10 @@ Switch to **UI mode** to lay them out.
 
 ## Canvases
 
-Everything lives under a **UI root**:
+Everything lives under a **UI root**. A root's first inspector section, **Canvas**, sets its space —
+screen or world — and then a screen canvas's reference size and scaling, or a world one's follow
+node, reference distance, scale limits, and whether it clamps to the screen or hides behind the
+camera:
 
 | Root | Entry | Behaviour |
 |---|---|---|
@@ -33,7 +36,10 @@ scale, not drift.
 ## Anchors and rectangles
 
 Layout is an **anchor pair plus two offsets**, as in Unity's `RectTransform`. The **Anchor & Rect**
-section holds anchor min/max, offset min/max and pivot.
+section (on everything but a root) picks the anchors from a grid of presets — nine pins, the
+horizontal and vertical stretches, and stretch both — then holds the offsets, the pivot, a rotation
+and a scale. On a pinned axis the offsets read as position and size; on a stretched one, as insets
+from each edge. The stored data is the same either way.
 
 | Anchors | Behaviour |
 |---|---|
@@ -63,6 +69,9 @@ In UI mode:
 
 ## Element types
 
+Each type has its own fields, shown first in its inspector under **Element**: a text's string and
+font, an image's texture, a button's label, a widget's range and value. The types:
+
 **Layout** — Canvas, World UI, Column, Row, Spacer.
 
 **Elements** — Panel, Text, Image, Button.
@@ -79,8 +88,8 @@ a HUD out of stacks and it survives resizing without further thought.
 
 ## Appearance
 
-Every UI node has opacity, tint, z-order, clipping, padding, border radius, border width and border
-colour.
+Every UI node has a colour (its tint, with alpha), opacity, z-order, whether it is interactive,
+clipping of its children, corner radius, a border width and colour, and padding.
 
 > **Tints are sRGB `0..1` RGBA**, not linear. `[1, 0, 0, 1]` is red at full alpha.
 

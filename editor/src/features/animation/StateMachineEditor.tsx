@@ -11,7 +11,7 @@ import ConditionTree from './ConditionTree'
 import { AssetDropRow, LayerSection, SlotsSection } from './LayerPanels'
 import AnimationAssetPicker from './AnimationAssetPicker'
 import Collapsable from '../../components/Collapsable'
-import { Button, cn, controlClass, FileButton, hintClass, NumberInput, OptionalNumberInput, SegmentedControl, Select, TextInput, Toggle } from '../../components/ui'
+import { Button, cn, controlClass, FileButton, hintClass, NumberInput, OptionalNumberInput, SectionTitle, SegmentedControl, Select, TextInput, Toggle } from '../../components/ui'
 import { clamp } from '../../utils/math';
 import { promptDialog } from '../dialogs/dialogStore'
 
@@ -141,9 +141,9 @@ export function ClipsPanel() {
 
         <div className='mt-1 flex flex-col gap-1'>
           {clips.length === 0 && <p className='text-ui-sm text-muted'>No clips. Import or link one above.</p>}
-          {shared.length > 0 && <p className='text-ui-xs uppercase tracking-wide text-muted mt-1'>From linked animations</p>}
+          {shared.length > 0 && <SectionTitle title='From linked animations' className='mt-1' />}
           {shared.map(clipRow)}
-          {own.length > 0 && shared.length > 0 && <p className='text-ui-xs uppercase tracking-wide text-muted mt-1'>This model’s own clips</p>}
+          {own.length > 0 && shared.length > 0 && <SectionTitle title='This model’s own clips' className='mt-1' />}
           {own.map(clipRow)}
         </div>
       </div>
@@ -455,7 +455,7 @@ function SelectedState() {
         <span className='text-dim'>{!s.ikWeightParam && s.ikWeight === undefined ? '(on)' : ''}</span>
       </div>
 
-      <div className='text-ui-xs uppercase tracking-wide text-muted mt-1'>Links</div>
+      <SectionTitle title='Links' className='mt-1' />
       {linked.length === 0
         ? <p className={cn(hintClass, 'text-ui-sm')}>None. Drag from this node's right handle in the graph to connect it.</p>
         : linked.map(l => {

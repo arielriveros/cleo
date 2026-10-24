@@ -1,7 +1,9 @@
 import React from 'react';
 import { cn } from './cn';
 import { sectionTitleClass } from './typography';
-import { hintAffordance } from './Field';
+import { DocHover } from './DocTooltip';
+import { DocRegion, useDocEntry } from '../../features/docs/DocScope';
+import type { DocEntry } from '../../features/docs/parseDocs';
 
 /** Elevated bordered container (popovers, overlays, grouped chrome). */
 export function Panel({ className, children, ...rest }: React.HTMLAttributes<HTMLDivElement>) {
@@ -12,32 +14,53 @@ export function Panel({ className, children, ...rest }: React.HTMLAttributes<HTM
   );
 }
 
+export interface SectionTitleProps {
+  title: React.ReactNode;
+  /**
+   * Where the docs describe this caption, when its text alone does not find it: a term, `page#anchor`
+   * or `page[#anchor]::Term` (see resolveDocKey). `false` opts out.
+   */
+  doc?: string | false;
+  className?: string;
+  /** An entry the caller already resolved (Section does, to scope its body), skipping a second lookup. */
+  entry?: DocEntry | null;
+}
+
+/**
+ * The small uppercase caption of a group of controls, with the docs' hover card for it. Use this for
+ * any sub-heading inside a panel, never a hand-styled div: the caption is what carries the explanation.
+ */
+export function SectionTitle({ title, doc, className, entry }: SectionTitleProps) {
+  const own = useDocEntry(entry === undefined ? title : undefined, entry === undefined ? doc : false);
+  return (
+    <DocHover as='div' entry={entry === undefined ? own : entry} className={cn(sectionTitleClass, className)}>
+      {title}
+    </DocHover>
+  );
+}
+
 export interface SectionProps {
   title?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
-  /** Native tooltip on the caption, for explanation that would otherwise be a paragraph under it. */
-  hint?: string;
-  /** Controls at the right end of the caption row (a Presets menu), outside the caption's styling and hint. */
+  /** See SectionTitle. The caption's hover card comes from the docs; there is no hand-written hint. */
+  doc?: string | false;
+  /** Controls at the right end of the caption row (a Presets menu), outside the caption's styling. */
   right?: React.ReactNode;
 }
 
 /** A titled group of controls (uppercase caption + body). */
-export function Section({ title, children, className, hint, right }: SectionProps) {
-  const caption = (extra?: string) => (
-    <div className={cn(sectionTitleClass, extra, hintAffordance(hint))} title={hint}>
-      {title}
-    </div>
-  );
+export function Section({ title, children, className, doc, right }: SectionProps) {
+  const entry = useDocEntry(title, title === undefined ? false : doc);
   return (
     <div className={cn('mb-3', className)}>
-      {title !== undefined && (right === undefined ? caption('mb-1') : (
+      {title !== undefined && (right === undefined ? <SectionTitle title={title} entry={entry} className='mb-1' /> : (
         <div className='flex items-center justify-between gap-2 mb-1'>
-          {caption()}
+          <SectionTitle title={title} entry={entry} />
           <div className='flex items-center gap-1 shrink-0'>{right}</div>
         </div>
       ))}
-      {children}
+      <DocRegion entry={entry}>{children}</DocRegion>
     </div>
   );
 }

@@ -165,9 +165,7 @@ function SlotRow(props: {
         exclude={slot.foliageExclude ?? []}
         setExclude={names => { slot.foliageExclude = names }}
         onChange={props.onFoliageChange}
-        title='Foliage on this slot' excludeTitle='Keep off this slot' defaultOpen={false}
-        hint='Foliage that grows only where this slot is the dominant surface — grass on a grass slot, pines on a forest slot.'
-        excludeHint='Foliage kept off wherever this slot shows, whichever list it comes from — a road keeping the grass and trees off.' />
+        title='Foliage on this slot' excludeTitle='Keep off this slot' defaultOpen={false} />
     </div>
   )
 }
@@ -235,13 +233,8 @@ export default function TerrainSlots(props: { material: TerrainMaterial; onChang
   useCleoEngine()
 
   return (
-    <Collapsable title={material.slots.length ? `Slots (${material.slots.length})` : 'Slots'} persistKey='terrainMaterial.slots'>
+    <Collapsable title={material.slots.length ? `Slots (${material.slots.length})` : 'Slots'} doc='editor/terrain#landscape-materials::Slots' persistKey='terrainMaterial.slots'>
       <div className='p-2 space-y-2'>
-        <Hint>
-          Extra surfaces blended over this material wherever their rule says so — rock on steep ground, snow
-          above a height — or, paint only, just where they are brushed in Landscape mode. The ground,
-          above, always fills what they leave.
-        </Hint>
         <SlotList material={material} edit={edit} elevationHint={props.elevationHint} onChange={onChange} />
         <div className='flex justify-end'><AddSlotButtons material={material} edit={edit} /></div>
         {material.slots.length >= MAX_SLOTS &&

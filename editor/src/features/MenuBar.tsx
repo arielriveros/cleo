@@ -17,7 +17,7 @@ import { startTask } from "./progress/progressStore";
 import Topbar from "../components/Topbar";
 import ModeSelector from "./ModeSelector";
 import UndoButtons from "./UndoButtons";
-import { Button, MenuItem, buttonVariants, cn } from "../components/ui";
+import { Button, MenuItem, buttonVariants, cn, useDocEntry, useDocTooltip } from "../components/ui";
 import {
   SaveIcon, ImportIcon, ExportIcon, PublishIcon, ChevronDownIcon,
   SpinnerIcon, CheckIcon, AlertIcon, LayoutIcon, ProjectsIcon,
@@ -52,6 +52,19 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, chil
       {children}
     </Button>
   );
+}
+
+/**
+ * A top-bar control's hover card: its row in the docs' Menu bar table (or a line of the page), with the
+ * plain `title` as the fallback when the docs have no entry for it.
+ */
+function useBarDoc(doc: string, title: string) {
+  const entry = useDocEntry(undefined, doc);
+  const tip = useDocTooltip(entry);
+  return {
+    props: { ref: tip.ref, ...tip.hoverProps, title: entry ? undefined : title, 'aria-describedby': tip.describedBy },
+    card: tip.card,
+  };
 }
 
 export default function MenuBar() {
@@ -267,6 +280,13 @@ export default function MenuBar() {
 
   const onPause = () => pausePlay();
 
+  const projectsDoc = useBarDoc('editor/interface#menu-bar::Projects', 'Switch, create or delete projects');
+  const saveAllDoc = useBarDoc('editor/interface#menu-bar::Save All', 'Save every asset with unsaved changes');
+  const importDoc = useBarDoc('editor/interface#menu-bar::Import', 'Import a project .zip — replace or merge the whole workspace');
+  const exportDoc = useBarDoc('editor/interface#menu-bar::Export', 'Export the whole project (scenes + assets + textures) to a .zip');
+  const publishDoc = useBarDoc('editor/interface#menu-bar::Publish', 'Publish an optimized build of your game');
+  const resetDoc = useBarDoc('editor/interface#the-dockable-workspace::Reset Layout', 'Restore the default panel layout');
+
   return (
     <Topbar>
       <div className='flex items-center gap-1.5 h-full px-1.5'>
@@ -274,11 +294,12 @@ export default function MenuBar() {
             the active tab: which project you are in is not an editing mode. */}
         <Button
           variant='subtle' size='sm' className='h-[25px] max-w-[180px]'
-          title='Switch, create or delete projects'
+          {...projectsDoc.props}
           onClick={() => setShowProjects(true)}
         >
           <ProjectsIcon /> <span className='truncate'>{projectName || 'Projects'}</span>
         </Button>
+        {projectsDoc.card}
         {showProjects && <ProjectsModal onClose={() => setShowProjects(false)} />}
         <Button
           variant={saveVariant} size='sm' className='h-[25px] w-[86px]'
@@ -291,23 +312,26 @@ export default function MenuBar() {
         <Button
           variant='subtle' size='sm' className='h-[25px]'
           disabled={saving || dirtyCount === 0}
-          title='Save every asset with unsaved changes'
+          {...saveAllDoc.props}
           onClick={() => void saveAll()}
         >
           <SaveIcon /> Save All{dirtyCount > 0 && ` (${dirtyCount})`}
         </Button>
+        {saveAllDoc.card}
         {/* A file input needs a <label> to trigger it, so it borrows the Button styles rather than being one. */}
         <label
           htmlFor='load-project-file'
-          title='Import a project .zip — replace or merge the whole workspace'
+          {...importDoc.props}
           className={cn(buttonVariants({ variant: 'subtle', size: 'sm' }), 'h-[25px] cursor-pointer', libEdit && 'opacity-60 pointer-events-none')}
         >
           <ImportIcon /> Import
         </label>
+        {importDoc.card}
         <input className="hidden" type='file' accept='.zip' id='load-project-file' name='file' onChange={(e) => { onImport(e.target.files); e.currentTarget.value = ''; }} />
-        <Button variant='subtle' size='sm' className='h-[25px]' disabled={libEdit} title='Export the whole project (scenes + assets + textures) to a .zip' onClick={onExport}>
+        <Button variant='subtle' size='sm' className='h-[25px]' disabled={libEdit} {...exportDoc.props} onClick={onExport}>
           <ExportIcon /> Export
         </Button>
+        {exportDoc.card}
         {/* The script workspace appears here only when it needs attention (paused sync, error, conflict);
             setting it up and its everyday status live in Options ▸ Editor ▸ Scripts. */}
         <WorkspaceStatusChip />
@@ -332,13 +356,14 @@ export default function MenuBar() {
           <Button
             variant='primary' size='sm' className='h-[25px]'
             disabled={publishing || libEdit}
-            title='Publish an optimized build of your game'
+            {...publishDoc.props}
             onClick={() => setShowPublish(v => !v)}
           >
             {publishing ? <SpinnerIcon /> : <PublishIcon />}
             {publishing ? 'Publishing…' : 'Publish'}
             {!publishing && <ChevronDownIcon />}
           </Button>
+          {publishDoc.card}
           {showPublish && (
             <div className='absolute left-[5px] top-[29px] z-50 w-[240px] bg-surface-raised border border-control-hover rounded shadow-lg p-1 text-fg text-ui'>
               <MenuItem className='py-1.5' onClick={onPublishWeb}
@@ -402,11 +427,12 @@ export default function MenuBar() {
         <Button
           variant='subtle' size='sm' className='h-[25px]'
           disabled={playState !== 'stopped'}
-          title='Restore the default panel layout'
+          {...resetDoc.props}
           onClick={() => eventEmitter.emit('RESET_DOCK_LAYOUT')}
         >
           <LayoutIcon /> Reset Layout
         </Button>
+        {resetDoc.card}
       </div>
     </Topbar>
   )

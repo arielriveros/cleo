@@ -5,7 +5,7 @@ import AxisInput from '../../../components/AxisInput'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { useEventBus } from '../../EventBusContext'
-import { Hint, PresetMenu, Select, Slider, TexturePicker, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
+import { PresetMenu, SectionTitle, Select, Slider, TexturePicker, Toggle, labelClass } from '../../../components/ui'
 import { SkyIcon } from '../sectionIcons'
 
 type Vec3 = [number, number, number]
@@ -88,8 +88,6 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
     </div>
   )
 
-  const header = (label: string) => <div className={cn(sectionTitleClass, 'mt-3 mb-1')}>{label}</div>
-
   const texture = (label: string, k: 'nightSkyTexture' | 'moonTexture', emptyLabel: string) => (
     <div className='flex items-center justify-between gap-2 my-1'>
       <span className={labelClass}>{label}</span>
@@ -104,7 +102,7 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
     <Collapsable title='Sky Atmosphere' icon={<SkyIcon />} persistKey='skyAtmosphere'
       right={<PresetMenu presets={SKY_ATMOSPHERE_PRESETS} onApply={applyPreset} title='Air and fog presets' />}>
       <div className='w-full p-2'>
-        {header('Sun')}
+        <SectionTitle title='Sun' className='mt-3 mb-1' />
         {check('Use Scene Directional Light', 'useSceneSun')}
         {!state.useSceneSun &&
           <div className='mb-2'>
@@ -117,7 +115,7 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
         {slider('Sun Intensity', 'sunIntensity', 0, 40, 0.1)}
         {slider('Sun Disk Size (deg)', 'sunDiskSize', 0, 10, 0.1)}
 
-        {header('Atmosphere')}
+        <SectionTitle title='Atmosphere' className='mt-3 mb-1' />
         {slider('Rayleigh Scatter', 'rayleighScatter', 0, 4, 0.01)}
         {slider('Rayleigh Height', 'rayleighHeight', 1000, 16000, 100, 0)}
         {slider('Mie Scatter', 'mieScatter', 0, 4, 0.01)}
@@ -128,7 +126,7 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
         {slider('Planet Radius', 'planetRadius', 1000000, 10000000, 100000, 0)}
         {slider('Atmosphere Radius', 'atmosphereRadius', 1000000, 11000000, 100000, 0)}
 
-        {header('Night Sky')}
+        <SectionTitle title='Night Sky' className='mt-3 mb-1' />
         {check('Enable Night Sky', 'nightEnabled')}
         {state.nightEnabled && <>
           {texture('Night Sky Texture', 'nightSkyTexture', '(procedural stars)')}
@@ -143,7 +141,7 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
           {color('Airglow Color', 'airglowColor')}
           {slider('Airglow', 'airglowIntensity', 0, 4, 0.01)}
 
-          {header('Moon')}
+          <SectionTitle title='Moon' className='mt-3 mb-1' />
           {check('Enable Moon', 'moonEnabled')}
           {state.moonEnabled && <>
             {texture('Moon Texture', 'moonTexture', '(procedural)')}
@@ -156,14 +154,10 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
             {color('Moon Color', 'moonColor')}
             {slider('Moon Brightness', 'moonIntensity', 0, 4, 0.01)}
             {slider('Moonlight on Scene', 'moonlightIntensity', 0, 1, 0.01)}
-            <Hint>
-              The moon rises opposite the sun, moved by the offsets. Once the sun has set, the scene's
-              directional light shines from the moon at this fraction of its intensity, shadows included.
-            </Hint>
           </>}
         </>}
 
-        {header('Quality')}
+        <SectionTitle title='Quality' className='mt-3 mb-1' />
         <div className='flex items-center justify-between mb-2'>
           <span className={labelClass}>Resolution</span>
           <Select value={state.resolution} onChange={(e) => apply({ resolution: parseInt(e.target.value) })}>
@@ -176,7 +170,7 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
         {slider('View Steps', 'viewSteps', 4, 64, 1, 0)}
         {slider('Light Steps', 'lightSteps', 2, 32, 1, 0)}
 
-        {header('Fog (aerial perspective)')}
+        <SectionTitle title='Fog (aerial perspective)' className='mt-3 mb-1' />
         {check('Enable Fog', 'fogEnabled')}
         {state.fogEnabled && <>
           {slider('Density', 'fogDensity', 0, 0.02, 0.0001, 4)}
@@ -188,7 +182,7 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
           {slider('Custom Color Blend', 'fogColorBlend', 0, 1, 0.01)}
         </>}
 
-        {header('God Rays (volumetric light shafts)')}
+        <SectionTitle title='God Rays (volumetric light shafts)' className='mt-3 mb-1' />
         {check('Enable God Rays', 'godRaysEnabled')}
         {state.godRaysEnabled && <>
           {slider('Intensity', 'godRayExposure', 0, 2, 0.01)}

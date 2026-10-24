@@ -3,7 +3,7 @@ import { SoundNode, SOUND_FALLOFF_PRESETS, applyPreset, attenuationAt, DISTANCE_
 import type { DistanceModel, LoopMode, SoundFalloffPreset, SoundMode } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
 import {
-  Button, NumberInput, PresetMenu, PropertyRow, PropertyTable, SegmentedControl, Select, Slider, Toggle, Hint,
+  Button, DocScope, NumberInput, PresetMenu, PropertyRow, PropertyTable, SegmentedControl, Select, Slider, Toggle, Hint,
 } from '../../../components/ui'
 import { SoundIcon, FalloffIcon } from '../sectionIcons'
 import { useEventBus } from '../../EventBusContext'
@@ -76,14 +76,15 @@ export default function SoundEditor(props: { node: SoundNode }) {
   const [, force] = useState(0)
   const transport = (fn: () => void) => { fn(); force(x => x + 1) }
 
+  // Documented in Audio › Sound nodes, whose rows are these fields' tooltips (so they carry no hints here).
   return (
-    <>
-      <Collapsable title='Sound' icon={<SoundIcon />} persistKey='soundEditor'>
+    <DocScope page='editor/audio' section='sound-nodes'>
+      <Collapsable title='Sound' doc='editor/audio#sound-nodes' icon={<SoundIcon />} persistKey='soundEditor'>
         <div className='p-2 flex flex-col gap-2'>
           <SoundSampleSlot node={props.node} onChange={() => force(x => x + 1)} />
 
           <PropertyTable columns={['45%', '55%']}>
-            <PropertyRow label='Mode' hint='Spatial emitters are placed and attenuated; ambient ones are not.' divider>
+            <PropertyRow label='Mode' divider>
               <SegmentedControl
                 value={values.mode}
                 onChange={mode => set({ mode })}
@@ -92,10 +93,10 @@ export default function SoundEditor(props: { node: SoundNode }) {
                 grow
               />
             </PropertyRow>
-            <PropertyRow label='Volume' hint="Multiplied by the sample's own volume." divider>
+            <PropertyRow label='Volume' divider>
               <Slider min={0} max={1} step={0.01} value={values.volume} onChange={volume => set({ volume })} />
             </PropertyRow>
-            <PropertyRow label='Loop' hint="Overrides the sample's loop setting for this emitter only." divider>
+            <PropertyRow label='Loop' divider>
               <SegmentedControl
                 value={values.loopMode}
                 onChange={loopMode => set({ loopMode })}
@@ -104,7 +105,7 @@ export default function SoundEditor(props: { node: SoundNode }) {
                 grow
               />
             </PropertyRow>
-            <PropertyRow label='Play on start' hint='Start automatically when the scene begins playing.'>
+            <PropertyRow label='Play on start'>
               <Toggle checked={values.playOnStart} onChange={playOnStart => set({ playOnStart })} />
             </PropertyRow>
           </PropertyTable>
@@ -116,10 +117,6 @@ export default function SoundEditor(props: { node: SoundNode }) {
               {props.node.isPlaying ? 'Playing' : 'Stopped'}
             </Hint>
           </div>
-          <Hint>
-            Sounds are silent while authoring; press Play in the toolbar to hear the scene, or audition one
-            emitter with the button above.
-          </Hint>
         </div>
       </Collapsable>
 
@@ -128,7 +125,7 @@ export default function SoundEditor(props: { node: SoundNode }) {
           right={<PresetMenu presets={SOUND_FALLOFF_PRESETS} onApply={applyFalloffPreset} title='Falloff presets' />}>
           <div className='p-2 flex flex-col gap-2'>
             <PropertyTable columns={['45%', '55%']}>
-              <PropertyRow label='Distance model' hint='How volume drops with distance.' divider>
+              <PropertyRow label='Distance model' divider>
                 <Select
                   value={values.distanceModel}
                   onChange={e => set({ distanceModel: e.target.value as DistanceModel })}
@@ -136,13 +133,13 @@ export default function SoundEditor(props: { node: SoundNode }) {
                   {DISTANCE_MODELS.map(m => <option key={m} value={m}>{MODEL_LABELS[m]}</option>)}
                 </Select>
               </PropertyRow>
-              <PropertyRow label='Reference' hint='Full volume within this radius. It gets no louder.' divider>
+              <PropertyRow label='Reference' divider>
                 <NumberInput value={values.refDistance} min={0.01} step={0.1} onChange={refDistance => set({ refDistance })} />
               </PropertyRow>
-              <PropertyRow label='Max' hint='Linear silences here; the other models only clamp at it.' divider>
+              <PropertyRow label='Max' divider>
                 <NumberInput value={values.maxDistance} min={0.02} step={1} onChange={maxDistance => set({ maxDistance })} />
               </PropertyRow>
-              <PropertyRow label='Rolloff' hint='How steeply it falls off. 0 is no attenuation at all.'>
+              <PropertyRow label='Rolloff'>
                 <Slider min={0} max={10} step={0.1} value={values.rolloffFactor} onChange={rolloffFactor => set({ rolloffFactor })} />
               </PropertyRow>
             </PropertyTable>
@@ -156,7 +153,7 @@ export default function SoundEditor(props: { node: SoundNode }) {
           </div>
         </Collapsable>
       )}
-    </>
+    </DocScope>
   )
 }
 

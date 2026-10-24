@@ -24,17 +24,15 @@ Every entry can be **clicked** — which parents it under the current selection 
 the tree or the viewport. A dragged entry lands at the point under the cursor unless it is marked
 not placeable.
 
-### Common
+### Gameplay
+
+The nodes a game's logic hangs on: empty holders and trigger volumes, and the pawn, driver and
+navigation mesh that AI and player characters are built from.
 
 | Entry | What you get |
 |---|---|
 | **Empty** | A bare node: a transform, children, somewhere to hang a script. |
 | **Trigger** | An empty node with a 1 m sphere trigger volume. |
-
-### Gameplay
-
-| Entry | What you get |
-|---|---|
 | **Character** | A pawn. *(unreleased)* |
 | **Controller** | A driver that possesses a character. *(unreleased)* |
 | **Nav Mesh** | A navmesh node with a default `20 × 10 × 20` bake box. *(unreleased)* |
@@ -50,7 +48,8 @@ already attached).
 
 ### Lights
 
-**Directional**, **Point**, **Spotlight**.
+**Directional**, **Point**, **Spotlight**, and **Sky Light**, which lights the scene with the sky
+itself (not placeable — it is scene-wide).
 
 ### Audio
 
@@ -72,17 +71,32 @@ level layout.
 
 ### Environment
 
+The world around the level: the sky, its light and clouds, the terrain, the wind, water, and the
+volumes that tune how the scene is lit and culled.
+
 | Entry | Notes |
 |---|---|
 | **Skybox** | Not placeable. **Removes any Sky Atmosphere.** |
 | **Sky Atmosphere** | Not placeable. **Removes any Skybox.** |
 | **Light Probe** | Default `10 × 10 × 10` influence volume. |
-| **Sky Light** | Not placeable. |
 | **Clouds (volumetric)** | Not placeable. |
 | **Landscape** | Not placeable. `size 200`, `resolution 129`, `chunkQuads 32`. |
-| **Decal** | A `2 × 1 × 2` box that projects straight down, with a default PBR material. *(unreleased)* |
+| **Wind** | Not placeable: one wind for the whole scene. Plants sway only where their material asks for it. |
+| **Water Volume** | A `10 × 2 × 10` box of water: what is inside floats, and what moves through it ripples the surface. |
+| **Occluder** | A `4 × 3 × 4` occlusion-culling volume, placed inside a building's walls or a cliff's bulk. |
 
 Skybox and Sky Atmosphere are mutually exclusive: they are two answers to the same question.
+
+### Effects
+
+Things that are drawn on top of the world rather than being part of it: projected decals, particle
+effects, and the force fields that push particles around.
+
+| Entry | Notes |
+|---|---|
+| **Decal** | A `2 × 1 × 2` box that projects straight down, with a default PBR material. *(unreleased)* |
+| **Particle System** | Starts with the default effect (soft rising puffs) so it is visibly doing something; **Create asset** on its slot turns that into a reusable `.vfx`. *(unreleased)* |
+| **Force Field** | A spherical vortex that pushes the particles of emitters with the Force Fields module. *(unreleased)* |
 
 > **A freshly added primitive does not take a decal's colour.** Every primitive and complex geometry
 > starts with the Blinn-Phong default material, which is shaded forward. A decal's colour, normal
@@ -93,16 +107,16 @@ Skybox and Sky Atmosphere are mutually exclusive: they are two answers to the sa
 
 ### UI — Layout
 
-**Canvas** (screen-space root, not placeable), **World UI** (world-space root, **placeable**, pivot
+The roots and containers a UI is laid out with. **Canvas** (screen-space root, not placeable), **World UI** (world-space root, **placeable**, pivot
 bottom-centre), **Column**, **Row**, **Spacer**.
 
 ### UI — Elements
 
-**Panel**, **Text**, **Image**, **Button**.
+The visible pieces of a UI: **Panel**, **Text**, **Image**, **Button**.
 
 ### UI — Widgets
 
-**Progress**, **Slider**, **Toggle**, **Text Input**.
+Interactive controls with a value: **Progress**, **Slider**, **Toggle**, **Text Input**.
 
 Any UI element dropped outside a UI root is automatically retargeted into the scene's first root,
 creating one if there is none — so you cannot accidentally strand a button in world space.
@@ -216,6 +230,11 @@ The eye menu in the viewport toggles helpers, each with **two independent switch
 Runtime**. That separation is the point — you can leave collision wireframes on while authoring and
 off in Play, or turn navmesh display on *during* Play to see what an agent is walking on.
 
+- **Overlay** — the helper the row switches.
+- **Editor** — whether it draws while you author, and while you Simulate (Simulate is watched through
+  the editor's eyes).
+- **Runtime** — whether it draws in Play. Greyed out for the rows that mean nothing in a running game.
+
 | Category | Default (editor) |
 |---|---|
 | Collision wireframes | on |
@@ -223,34 +242,57 @@ off in Play, or turn navmesh display on *during* Play to see what an agent is wa
 | Light icons | on |
 | Camera frustums | on |
 | Light probes | on |
-| Decals | on |
+| Decal icons | on |
 | Sound emitters | on |
-| Reference grid | on |
 | Bounding boxes | off |
 | Skeletons | off |
 | Animation blend | off |
-| Game UI | off — always shown in UI mode and in Play |
 | Navigation mesh | off |
+| Foliage colliders | on |
+| Effect icons | on |
+| Preview particles | on — whether particle effects simulate while you author; editor only, since a running game always simulates them |
+| Game UI | off — always shown in UI mode and in Play |
+| Reference grid | on |
+
+**Animation blend** shows, in a corner of the viewport, every link from an animated model's
+parameters to its pose, sampled live, with how much each value moved over the last second (a settled
+value reads 0, a buzzing one its amplitude) and the last few state changes — so a state machine
+ping-ponging between two states names the pair. Turn its **Runtime** switch on to read it in Play: a
+blend driven by measured motion reads 0 in the editor, which has no physics.
 
 Every helper is an editor-only node: never serialized, never lit, and structurally absent from a
 published build.
 
 ## Scene settings
 
-Selecting the scene root shows:
+Selecting the scene root shows the settings of the scene asset itself rather than of a node, in two
+sections.
+
+### Scene
+
+The scene asset: its name, what kind of scene it is, and whether a published game starts in it.
 
 | Setting | Meaning |
 |---|---|
-| **Name**, **ID**, **Last saved** | |
-| **Scene type: 2D / 3D** | Decides Landscape versus Tilemap mode, and what a build keeps. |
+| **Name** | The scene's name in the project. |
+| **ID**, **Saved** | Read-only: the scene's id, and when it was last saved. |
+| **Type** | **2D** or **3D**. Decides Landscape versus Tilemap mode, and what a build keeps. |
 | **Set as main scene** | The scene a published game starts in. |
-| **Clear color** | Background where nothing is drawn. |
-| **Ambient color** and **ambient lux** | Scene-wide ambient light. |
-| **Reflections** | *Use skybox* or *Clear*. |
 
 > Switching a scene's 2D/3D type warns first when it would strand authoring work — a landscape in a
 > scene about to become 2D, or a tilemap in one about to become 3D. A published build **discards**
 > the data for the dimension it is not using, so the warning is about real loss, not tidiness.
+
+### Environment (scene settings)
+
+The scene's background and its baseline lighting: what it is cleared to, its flat ambient fill and
+its reflections.
+
+| Setting | Meaning |
+|---|---|
+| **Clear color** | Background where nothing is drawn. |
+| **Ambient** and **Ambient (lx)** | Scene-wide ambient fill: its colour, and its strength in lux. It lights every shadow evenly and does not darken with the sky; a [Sky Light](node-inspector.md#sky-light) scales it. A scene with a sky light or a light probe wants it near zero; one with neither needs it, or unlit surfaces go black. |
+| **Reflections** | The environment map PBR and Blinn-Phong materials reflect. **Use skybox** takes it from the scene's Skybox node, **Clear** removes it. It is saved inside the scene, so a scene with one is much bigger. |
 
 ## See also
 

@@ -149,7 +149,7 @@ export default function DecalEditor(props: { node: DecalNode }) {
         </PropertyTable>
 
         {state.pattern === 'radial' && (
-          <Section title='Radial pattern' className='mt-2' hint={RADIAL_HINT}>
+          <Section title='Radial pattern' className='mt-2'>
             <PropertyTable columns={['45%', '55%']}>
               <PropertyRow label='Inner colour'>
                 <RgbaInput value={radial.innerColor} onChange={(c) => setRadial({ innerColor: c })} />

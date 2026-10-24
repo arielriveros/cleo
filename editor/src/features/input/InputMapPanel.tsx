@@ -5,8 +5,7 @@ import {
 import type { ActionKind, InputMap, ProcessorKind } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import {
-  Button, ButtonWithConfirm, Panel, Section, Select, Slider, TextInput, Toggle, hintClass, labelClass,
-  sectionTitleClass,
+  Button, ButtonWithConfirm, DocScope, Panel, Section, SectionTitle, Select, Slider, TextInput, Toggle, hintClass,
 } from '../../components/ui'
 import BindingRow from './BindingRow'
 import ProcessorList from './ProcessorList'
@@ -26,6 +25,9 @@ import * as edits from './inputMapEdits'
  *
  * The editor's own viewport camera map is NOT shown. It is a host overlay, lives outside the project's
  * map entirely, and is not the user's to rebind here.
+ *
+ * Its sections are documented in docs/editor/input.md (headings named as the titles here), which is
+ * where their explanations live: each title's hover card is read from there.
  */
 export default function InputMapPanel() {
   const { inputMap, setInputMap } = useCleoEngine()
@@ -64,9 +66,10 @@ export default function InputMapPanel() {
   }
 
   return (
+    <DocScope page='editor/input'>
     <Panel className='p-2 flex flex-col gap-3 overflow-auto'>
       {/* ----- maps ----- */}
-      <Section title='Action maps' hint='A map is a context. Turn one off and everything held in it is released.'>
+      <Section title='Action maps'>
         <div className='flex flex-col gap-1'>
           {inputMap.maps.map(m => (
             <div key={m.name}
@@ -96,7 +99,7 @@ export default function InputMapPanel() {
       </Section>
 
       {/* ----- actions ----- */}
-      <Section title={`Actions in ${mapName}`}>
+      <Section title={`Actions in ${mapName}`} doc='Actions'>
         <div className='flex flex-col gap-1'>
           {map.actions.map(a => (
             <div key={a.name}
@@ -131,7 +134,7 @@ export default function InputMapPanel() {
 
       {/* ----- bindings ----- */}
       {action && (
-        <Section title={`Bindings for ${action.name}`}>
+        <Section title={`Bindings for ${action.name}`} doc='Bindings'>
           <div className='flex flex-col gap-1'>
             {action.bindings.map(binding => (
               <BindingRow
@@ -181,8 +184,7 @@ export default function InputMapPanel() {
           )}
 
           <div className='mt-2'>
-            <p className={labelClass}>Action processors</p>
-            <p className={hintClass}>Applied after the winning binding, to the composed value.</p>
+            <SectionTitle title='Action processors' />
             <ProcessorList
               chain={action.processors ?? []}
               onAdd={(kind: ProcessorKind) => apply(edits.addProcessor(inputMap, mapName, action.name, null, kind))}
@@ -195,13 +197,12 @@ export default function InputMapPanel() {
       )}
 
       {/* ----- live values ----- */}
-      <Section title='Live values' hint='Press keys, move a stick or drag on a touch screen — this updates as you do.'>
+      <Section title='Live values'>
         <InputMonitor mapName={mapName} />
       </Section>
 
       {/* ----- on-screen controls ----- */}
-      <Section title='On-screen controls'
-        hint='Drawn over the game on a touch device, and bindable like any other source.'>
+      <Section title='On-screen controls'>
         <VirtualControlsEditor
           controls={inputMap.virtualControls}
           selectedId={selectedControl}
@@ -219,13 +220,14 @@ export default function InputMapPanel() {
       </Section>
 
       <div className='pt-1 border-t border-border'>
-        <p className={sectionTitleClass}>Reset</p>
+        <SectionTitle title='Reset' />
         <ButtonWithConfirm onClick={() => { setInputMap(cloneInputMap(DEFAULT_INPUT_MAP)); setSelectedAction('') }}>
           Restore default bindings
         </ButtonWithConfirm>
         <p className={hintClass}>Replaces every map with the ones this build ships.</p>
       </div>
     </Panel>
+    </DocScope>
   )
 }
 

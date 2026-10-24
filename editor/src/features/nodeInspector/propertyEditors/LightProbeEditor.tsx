@@ -1,7 +1,7 @@
 import { LightProbeNode } from 'cleo';
 import { useState, useEffect, useCallback } from 'react';
 import Collapsable from '../../../components/Collapsable';
-import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Toggle } from '../../../components/ui';
+import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Toggle, SectionTitle } from '../../../components/ui';
 import { ProbeIcon } from '../sectionIcons';
 
 const BOUNDS_HINT = 'Set all three sizes above 0 and the probe only lights meshes/pixels inside its box volume, which moves and rotates with the node; the IBL feathers out over the blend distance. Any size at 0 leaves the probe unbounded: it affects the whole scene (legacy behavior).';
@@ -153,7 +153,7 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
           </PropertyRow>
         </PropertyTable>
         <div className='mt-2'>
-          <div className='text-ui text-muted mb-1'>Cubemap Preview</div>
+          <SectionTitle title='Cubemap Preview' className='mb-1' />
           {previewSrc ? (
             <img src={previewSrc} className='w-full rounded border border-border' style={{ aspectRatio: '2 / 1' }} />
           ) : (

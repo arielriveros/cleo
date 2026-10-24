@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { SkyboxNode } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
 import Collapsable from '../../../components/Collapsable'
-import { PropertyTable, PropertyRow, TextInput, Button, ColorInput, NumberInput, SegmentedControl } from '../../../components/ui'
+import { PropertyTable, PropertyRow, TextInput, Button, ColorInput, NumberInput, SegmentedControl, DocScope } from '../../../components/ui'
 import { InfoIcon, SkyIcon } from '../sectionIcons'
 import { clamp } from '../../../utils/math';
 
@@ -72,7 +72,7 @@ export default function SceneSettings() {
   }
 
   return (
-    <>
+    <DocScope page='editor/scene-authoring' section='scene-settings'>
       <Collapsable title='Scene' icon={<InfoIcon />} persistKey='sceneSettings'>
         <div className='w-full p-2'>
           <PropertyTable columns={['32%', '68%']}>
@@ -141,6 +141,6 @@ export default function SceneSettings() {
           </div>
         </div>
       </Collapsable>
-    </>
+    </DocScope>
   )
 }

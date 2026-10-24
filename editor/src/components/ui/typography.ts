@@ -16,3 +16,8 @@ export const sectionTitleClass = 'type-section uppercase tracking-wide text-dim'
 
 /** Collapsable section header ("Rigid Body", "Transform"). */
 export const headerClass = 'type-header tracking-wide';
+
+/** The dotted-underline + help-cursor treatment that marks a label as carrying a tooltip. */
+export function hintAffordance(hint?: string): string | undefined {
+  return hint ? 'cursor-help decoration-dotted underline underline-offset-2' : undefined;
+}

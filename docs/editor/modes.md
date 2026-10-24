@@ -11,13 +11,13 @@ also opens a document tab for it.
 The mode selector sits in the top bar and is only shown while the **scene tab** is active — opening
 an asset tab hides it, because that tab's mode is not a choice. All five are disabled during Play.
 
-| Mode | For | Availability |
+| Mode | Availability | For |
 |---|---|---|
-| **Scene** | Normal scene authoring. | Always. |
-| **Landscape** | Sculpt, paint and scatter foliage on terrain. | **3D scenes only.** |
-| **Tilemap** | Paint tiles. | **2D scenes only.** |
-| **UI** | Screen-space layout and anchoring. | Always. |
-| **Options** | Engine, editor and project settings — renderer, input map, publishing… — over a live render. See [Options](options.md). | Always. |
+| **Scene** | Always. | Normal scene authoring: build the node tree, place and move nodes, edit their properties. |
+| **Landscape** | **3D scenes only.** | Sculpt, paint and scatter foliage on terrain. |
+| **Tilemap** | **2D scenes only.** | Paint tiles. |
+| **UI** | Always. | Screen-space layout and anchoring. |
+| **Options** | Always. | Engine, editor and project settings — renderer, input map, publishing… — over a live render. See [Options](options.md). |
 
 Landscape and Tilemap share one slot, chosen by the scene's authored dimension — see
 [Scene settings](scene-authoring.md#scene-settings).
@@ -50,7 +50,7 @@ Landscape and Tilemap share one slot, chosen by the scene's authored dimension �
 | `ui` | Scene + DOM overlay | Everything except **Physics** — a screen rectangle has no rigid body |
 | `options` | Live render | **Only** the Engine, Editor and Project panels |
 | `material` | Preview sphere | Properties, titled *Material*. No tree, no Add palettes |
-| `terrainMaterial` | Preview sphere | Properties, titled *Terrain Material* |
+| `terrainMaterial` | Preview sphere | Properties, titled *Landscape Material* |
 | `model` | Model preview | Model inspector plus the node property editor |
 | `animation` | Character + skeleton | Scene panel becomes **Skeleton**, plus **Clips**, **Variables**, **State Machine**. *Properties hidden* |
 | `animationField` | Character preview | **Field Settings** on the right, **Blend Space** plot at the bottom |

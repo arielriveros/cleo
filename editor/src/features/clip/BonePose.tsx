@@ -210,7 +210,7 @@ export default function BonePose() {
   }
 
   return (
-    <Collapsable title={`Bone — ${label}`}>
+    <Collapsable title={`Bone — ${label}`} doc='Bone'>
       <div className='flex flex-col gap-1'>
         {row('position', 't', 0.01, 'translation')}
         {row('rotation', 'r', 1, 'rotation')}

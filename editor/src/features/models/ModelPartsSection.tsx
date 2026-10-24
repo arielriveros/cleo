@@ -11,8 +11,6 @@ import type { ModelPart } from '../../utils/models'
 // The model tab's Parts: every mesh in the model, and every material sub-mesh of a merged mesh, each of
 // which can be saved as a model of its own — as a copy, or extracted out of this one.
 
-const HINT = 'Save as model copies a piece into a new model next to this one. Extract also removes it from this model — save this model afterwards to keep that.'
-
 interface Row { key: string; part: ModelPart; label: string; detail: string; depth: number }
 
 const tris = (n: number) => `${Math.floor(n / 3).toLocaleString()} tris`
@@ -92,7 +90,7 @@ export default function ModelPartsSection() {
   const canExtract = (row: Row) => row.part.submesh !== undefined || meshRows.length > 1
 
   return (
-    <Collapsable title='Parts' persistKey='model.parts' hint={HINT}
+    <Collapsable title='Parts' persistKey='model.parts'
       badge={rows.length ? rows.length : undefined}>
       <div className='w-full p-2'>
         {modelSession.activeLevel !== 0 && (

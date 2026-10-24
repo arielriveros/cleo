@@ -1,4 +1,4 @@
-import { Popover, Toggle, cn, sectionTitleClass } from '../components/ui';
+import { Popover, SectionTitle, Toggle } from '../components/ui';
 import { useDebugVisibility, DEBUG_CATEGORIES } from './DebugVisibilityContext';
 import { useCleoEngine } from './EngineContext';
 import { MODE_SKELETON_OWNER } from './engineContextTypes';
@@ -35,9 +35,10 @@ export default function DebugVisibilityMenu() {
         >
             <div data-cleo-overlay className='p-1'>
                 <div className='grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-1'>
-                    <div className={cn(sectionTitleClass, 'px-1')}>Overlay</div>
-                    <div className={cn(sectionTitleClass, 'text-center')}>Editor</div>
-                    <div className={cn(sectionTitleClass, 'text-center')}>Runtime</div>
+                    {/* Explicit keys: the viewport's docs scope follows the mode, but these are documented in one place. */}
+                    <SectionTitle title='Overlay' doc='editor/scene-authoring#debug-overlays::Overlay' className='px-1' />
+                    <SectionTitle title='Editor' doc='editor/scene-authoring#debug-overlays::Editor' className='text-center' />
+                    <SectionTitle title='Runtime' doc='editor/scene-authoring#debug-overlays::Runtime' className='text-center' />
                     {DEBUG_CATEGORIES.map(cat => {
                         const locked = isLocked(cat.key);
                         return (

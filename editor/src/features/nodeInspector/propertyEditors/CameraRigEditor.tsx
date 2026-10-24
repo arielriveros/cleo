@@ -4,17 +4,14 @@ import Collapsable from '../../../components/Collapsable'
 import AxisInput from '../../../components/AxisInput'
 import NodeRefInput from '../NodeRefInput'
 import { useCleoEngine } from '../../EngineContext'
-import { Button, PresetMenu, Select, Slider, Toggle, cn, labelClass, sectionTitleClass } from '../../../components/ui'
+import { Button, PresetMenu, SectionTitle, Select, Slider, Toggle, cn, labelClass } from '../../../components/ui'
 import { hintAffordance } from '../../../components/ui/Field'
 import { RigIcon } from '../sectionIcons'
 
-const RIG_HINT = 'The rig drives its child camera’s position and rotation every frame — edit the boom here rather than moving the camera directly.'
 const FOLLOW_TARGET_HINT = 'The node the rig follows. With no target, the rig’s own position is the pivot.'
 const FOLLOW_DAMPING_HINT = 'Seconds of lag per axis. 0 seconds is rigid; higher values lag further behind.'
 const AIM_MODE_HINT = 'Orbit is script-driven — feed it input with rig.addYaw(dx) / rig.addPitch(dy).'
 const ARM_LENGTH_HINT = 'How far back along the boom the camera sits. Arm length 0 gives a first-person camera at the pivot.'
-const COLLISION_HINT = 'Tests physics collider shapes — the same solids the character collides with — including terrain. A body only blocks the camera while its Camera Collision channel is on (Physics panel). Trigger volumes, the follow and look-at targets, and the rig’s own character are always ignored.'
-const SHAKE_HINT = 'Shake is visible in Play mode. From a script: rig.shake(0.6).'
 
 type Vec3 = [number, number, number]
 
@@ -117,18 +114,14 @@ export default function CameraRigEditor(props: { node: CameraRigNode }) {
     </div>
   )
 
-  const header = (label: string, hint?: string) => (
-    <div className={cn(sectionTitleClass, 'mt-3 mb-1', hintAffordance(hint))} title={hint}>{label}</div>
-  )
-
   // Referencing the rig itself (or anything under it, including its own camera) would be circular.
   const notSelfOrDescendant = (node: Node) => node !== props.node && !node.isDescendantOf(props.node)
 
   return (
-    <Collapsable title='Camera Rig' icon={<RigIcon />} persistKey='cameraRig' hint={RIG_HINT}
+    <Collapsable title='Camera Rig' icon={<RigIcon />} persistKey='cameraRig'
       right={<PresetMenu presets={CAMERA_RIG_PRESETS} onApply={applyPreset} title='Camera styles — targets, sensitivity and shake stay yours' />}>
       <div className='w-full p-2'>
-        {header('Follow (drives position)')}
+        <SectionTitle title='Follow (drives position)' className='mt-3 mb-1' />
         <div className='mb-2'>
           <label className={cn(labelClass, hintAffordance(FOLLOW_TARGET_HINT))} title={FOLLOW_TARGET_HINT}>Follow Target</label>
           <NodeRefInput value={state.followId} scene={editorScene} filter={notSelfOrDescendant}
@@ -146,7 +139,7 @@ export default function CameraRigEditor(props: { node: CameraRigNode }) {
           { value: 'rig', label: "Rig (behind / side / up)" },
         ])}
 
-        {header('Aim (drives rotation)')}
+        <SectionTitle title='Aim (drives rotation)' className='mt-3 mb-1' />
         {dropdown('Aim Mode', 'aimMode', [
           { value: 'orbit', label: 'Orbit (script-driven)' },
           { value: 'lookAt', label: 'Look At target' },
@@ -178,18 +171,18 @@ export default function CameraRigEditor(props: { node: CameraRigNode }) {
           {slider('Yaw Max', 'yawMax', 0, 180, 1, 0)}
         </>}
 
-        {header('Spring Arm')}
+        <SectionTitle title='Spring Arm' className='mt-3 mb-1' />
         {slider('Arm Length', 'armLength', 0, 30, 0.1, 2, ARM_LENGTH_HINT)}
         {axis('Socket Offset', 'socketOffset')}
 
-        {header('Field of View')}
+        <SectionTitle title='Field of View' className='mt-3 mb-1' />
         {check('Rig Controls FOV', 'fovEnabled')}
         {state.fovEnabled && <>
           {slider('FOV', 'fov', 20, 120, 0.5, 1)}
           {slider('FOV Damping', 'fovDamping', 0, 2, 0.01)}
         </>}
 
-        {header('Collision', COLLISION_HINT)}
+        <SectionTitle title='Collision' className='mt-3 mb-1' />
         {check('Pull In On Obstruction', 'collisionEnabled')}
         {state.collisionEnabled && <>
           {slider('Probe Radius', 'collisionRadius', 0, 2, 0.01)}
@@ -198,7 +191,7 @@ export default function CameraRigEditor(props: { node: CameraRigNode }) {
           {slider('Return Time', 'collisionReturnTime', 0, 2, 0.01)}
         </>}
 
-        {header('Shake', SHAKE_HINT)}
+        <SectionTitle title='Shake' className='mt-3 mb-1' />
         {axis('Position Amplitude', 'shakePositionAmplitude', 0.01)}
         {axis('Rotation Amplitude (deg)', 'shakeRotationAmplitude', 0.1)}
         {slider('Frequency (Hz)', 'shakeFrequency', 1, 60, 0.5, 1)}

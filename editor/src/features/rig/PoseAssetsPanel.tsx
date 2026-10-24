@@ -3,7 +3,7 @@ import { Logger } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { useRig } from './RigContext'
-import { Button, Hint, TextInput, cn, sectionTitleClass } from '../../components/ui'
+import { Button, Hint, SectionTitle, TextInput, cn } from '../../components/ui'
 import { buildPoseAsset, newPose, poseAssetFromRig } from '../../utils/poseAssets'
 import type { RigPose } from '../../utils/rigAssets'
 import type { StoredPoseBone } from '../../utils/animationAssets'
@@ -115,10 +115,7 @@ export default function PoseAssetsPanel() {
 
   return (
     <div>
-      <div className={cn(sectionTitleClass, 'mb-1')}>Poses</div>
-      <Hint className='mb-1'>
-        Pose bones in a clip’s editor and save them as a pose. A pose can ride on any clip, or be held by a controller state.
-      </Hint>
+      <SectionTitle title='Poses' className='mb-1' />
 
       {legacy.length > 0 && (
         <div className='mb-1 flex flex-col gap-1 rounded border border-warning/40 bg-warning/10 p-2'>

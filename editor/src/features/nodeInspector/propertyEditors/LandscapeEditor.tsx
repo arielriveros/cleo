@@ -3,7 +3,7 @@ import { LandscapeNode, Logger, Loader, decodeHeightmap, imageFromHeights, encod
 import type { HeightImage } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
 import { LandscapeIcon } from '../../sceneInspector/nodeIcons'
-import { Button, Field, FileButton, Hint, MenuItem, NumberInput, Popover, Select } from '../../../components/ui'
+import { Button, DocScope, Field, FileButton, Hint, MenuItem, NumberInput, Popover, Select } from '../../../components/ui'
 import { useCleoEngine } from '../../EngineContext'
 import { useHistory } from '../../HistoryContext'
 import { rebuildTerrain } from '../../landscape/rebuildTerrain'
@@ -151,7 +151,9 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
     else download(encodeRaw16(image), `heightmap${terrain.resolution}x${terrain.resolution}${tag}.r16`, 'application/octet-stream')
   }
 
+  // Documented with the rest of terrain: the node holds the structure, Landscape mode the brushes.
   return (
+    <DocScope page='editor/terrain' section='the-node-versus-the-brushes'>
     <Collapsable title='Landscape' icon={<LandscapeIcon />} persistKey='node.landscape' defaultOpen>
       <div className='p-2 space-y-2'>
         <Field className='my-0' labelClassName='w-auto' label='Size' hint='World size of the terrain, centred on this node'>
@@ -203,13 +205,12 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
             </Popover>
           </div>
         </div>
-
-        <Hint>Sculpt, paint and scatter foliage in Landscape mode. Move it with the transform gizmo.</Hint>
       </div>
       {pendingImport && (
         <HeightmapImportDialog node={props.node} scene={editorScene} image={pendingImport.image} fileName={pendingImport.fileName}
           onClose={() => setPendingImport(null)} onCommit={commitHeights} />
       )}
     </Collapsable>
+    </DocScope>
   )
 }

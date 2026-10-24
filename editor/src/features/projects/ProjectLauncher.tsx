@@ -28,9 +28,6 @@ export default function ProjectLauncher({ projects }: { projects: ProjectRecord[
           <div className='h-[380px] rounded-md border border-control overflow-hidden bg-surface-raised'>
             <ProjectsBrowser projects={list} onChanged={setList} />
           </div>
-          <div className='text-ui-sm text-dim'>
-            A project owns its scenes, models, materials, scripts and textures. Nothing is shared between projects.
-          </div>
         </div>
       </div>
     </div>

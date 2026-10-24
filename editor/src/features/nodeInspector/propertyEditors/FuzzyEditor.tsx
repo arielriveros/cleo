@@ -5,10 +5,8 @@ import type {
   FuzzyTermNode, FuzzyVariableDefinition,
 } from 'cleo'
 import {
-  Button, ButtonWithConfirm, NumberInput, Select, TextInput, cn, hintClass, labelClass,
-  sectionTitleClass,
+  Button, ButtonWithConfirm, DocScope, NumberInput, SectionTitle, Select, TextInput, hintClass, labelClass,
 } from '../../../components/ui'
-import { hintAffordance } from '../../../components/ui/Field'
 import {
   flattenAndTerm, renameFuzzySet, renameFuzzyVariable, termUsesVariable,
 } from '../../../utils/aiGraphEdits'
@@ -29,10 +27,6 @@ import {
  */
 
 const FUZZY_HINT = 'Turns several gradients into one number. A threshold says a guard at 9.9 metres and one at 10.1 are in different worlds; a rule set says they are nearly the same. Read through a Fuzzy parameter source in the Behaviour or Goals sections.'
-const INPUT_HINT = 'Variables are fed BY NAME: a variable called distanceToTarget is filled from that sense, one called planarSpeed from the pawn’s measured motion. Nothing to wire up — but a name that matches nothing is never fed, and its rules see the bottom of its range.'
-const SET_HINT = 'left and right are where membership falls to zero; mid is where it peaks. The shoulders stay at 1 beyond their midpoint, which is what makes the ends of a range behave rather than falling off.'
-const RULE_HINT = 'IF every listed term holds, THEN the output variable takes the named set, to the degree the weakest term held. A rule naming a variable or set that does not exist is dropped when the model is read.'
-const DEFUZ_HINT = 'How the fired rules collapse to one number. maxav averages each output set’s peak weighted by how strongly it fired — cheap, and jumpier. centroid integrates the whole surface — smoother, and roughly twenty times the work.'
 
 /** Names a variable can carry and be fed automatically. Mirrors the engine's resolution order. */
 const KNOWN_INPUTS = [
@@ -80,10 +74,6 @@ export default function FuzzyEditor({ node, onChange }: Props) {
 
   const setsOf = (variable: string) => model.variables.find(v => v.name === variable)?.sets ?? []
 
-  const header = (label: string, hint?: string) => (
-    <div className={cn(sectionTitleClass, 'mt-3 mb-1', hintAffordance(hint))} title={hint}>{label}</div>
-  )
-
   if (model.variables.length === 0) {
     return (
       <div className='mt-2'>
@@ -119,10 +109,9 @@ export default function FuzzyEditor({ node, onChange }: Props) {
   }
 
   return (
+    <DocScope page='editor/ai-brains'>
     <div>
-      <p className={hintClass}>{INPUT_HINT}</p>
-
-      {header('Variables', SET_HINT)}
+      <SectionTitle title='Variables' className='mt-3 mb-1' />
       <div className='flex flex-col gap-1'>
         {model.variables.map(v => {
           const isOutput = outputs.has(v.name)
@@ -204,7 +193,7 @@ export default function FuzzyEditor({ node, onChange }: Props) {
         </Button>
       </div>
 
-      {header('Rules', RULE_HINT)}
+      <SectionTitle title='Rules' className='mt-3 mb-1' />
       <div className='flex flex-col gap-1'>
         {model.rules.map((r, i) => (
           <RuleRow key={i} rule={r} variables={model.variables} setsOf={setsOf}
@@ -228,7 +217,7 @@ export default function FuzzyEditor({ node, onChange }: Props) {
         </Button>
       </div>
 
-      {header('Output', DEFUZ_HINT)}
+      <SectionTitle title='Output' className='mt-3 mb-1' />
       <div className='flex items-center justify-between'>
         <span className={labelClass}>Defuzzification</span>
         <Select className='w-[132px]' value={model.defuzzification}
@@ -237,6 +226,7 @@ export default function FuzzyEditor({ node, onChange }: Props) {
         </Select>
       </div>
     </div>
+    </DocScope>
   )
 }
 

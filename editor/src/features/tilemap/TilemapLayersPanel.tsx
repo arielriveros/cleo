@@ -1,5 +1,5 @@
 import { useCleoEngine } from '../EngineContext'
-import { Button, ButtonWithConfirm, Hint, NumberInput, Select, TextInput, Toggle, cn, labelClass } from '../../components/ui'
+import { Button, ButtonWithConfirm, Hint, NumberInput, SectionTitle, Select, TextInput, Toggle, cn, labelClass } from '../../components/ui'
 import { useActiveTilemap } from './useActiveTilemap'
 import { clamp } from '../../utils/math';
 
@@ -39,7 +39,7 @@ export default function TilemapLayersPanel() {
       )}
 
       <div className='flex items-center justify-between'>
-        <span className={labelClass}>Layers</span>
+        <SectionTitle title='Layers' />
         <Button size='sm' variant='ghost' onClick={() => { tilemap.addLayer(); commit() }} title='Add a layer above'>
           + Layer
         </Button>

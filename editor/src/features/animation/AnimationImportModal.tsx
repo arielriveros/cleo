@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { applyManualMapping } from 'cleo'
 import type { BoneMapping } from 'cleo'
 import { useEditorSessions } from '../EditorSessionsContext'
-import { Button, cn, hintClass, Modal, ModalHeader, ModalFooter, TextInput, Toggle } from '../../components/ui'
+import { Button, cn, DocScope, hintClass, Modal, ModalHeader, ModalFooter, SectionTitle, TextInput, Toggle } from '../../components/ui'
 import RetargetMapper from '../rig/RetargetMapper'
 import { retargetView } from '../../utils/retargetView'
 // Shared with the model-import route: a placeholder clip name is renamed after its file in BOTH
@@ -14,6 +14,15 @@ import { clipNameFromFile } from '../../utils/clipNaming'
 // effect before Accept, which is where EngineContext runs the retarget.
 
 export default function AnimationImportModal() {
+  // Raised from the editor root, outside every panel's docs scope: the import flow is documented here.
+  return (
+    <DocScope page='editor/models-and-materials' section='animation-import-and-retargeting'>
+      <ImportReview />
+    </DocScope>
+  )
+}
+
+function ImportReview() {
   const { pendingAnimationImport, resolveAnimationImport } = useEditorSessions()
   const [include, setInclude] = useState<boolean[]>([])
   // Per-clip name, editable before commit. Animation Field samples reference clips by name and are NOT
@@ -69,8 +78,7 @@ export default function AnimationImportModal() {
 
   return (
     <Modal onClose={cancel} className='w-[640px]'>
-      <ModalHeader>
-        <div className='text-ui-lg font-semibold'>Import animation</div>
+      <ModalHeader title='Import animation' doc='editor/models-and-materials#animation-import-and-retargeting'>
         <div className='text-ui-lg font-bold truncate' title={info.fileName}>{info.fileName}</div>
         <div className={cn(hintClass, 'mt-0.5')}>{info.clips.length} clip{info.clips.length === 1 ? '' : 's'} found</div>
       </ModalHeader>
@@ -83,7 +91,7 @@ export default function AnimationImportModal() {
           </p>
         ) : (
           <div className='rounded border border-control p-2 flex items-center gap-2'>
-            <span className='font-semibold text-ui'>Skeleton</span>
+            <SectionTitle title='Skeleton' />
             {mapping.sameRig
               ? <span className='text-ui-sm text-success-fg flex-1'>same skeleton — no retargeting needed</span>
               : <span className='text-ui-sm text-muted flex-1'>

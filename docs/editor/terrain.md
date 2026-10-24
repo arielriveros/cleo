@@ -9,10 +9,12 @@ Landscape mode is only available in **3D scenes**.
 
 Two different places, and the split matters:
 
-- The **Landscape node inspector** (Scene mode) holds the terrain's **structure**: size,
-  resolution, chunk quads, paint resolution, and heightmap import/export. Positioning uses the
-  normal gizmo.
-- **Landscape mode** holds the **brushes**. Nothing structural.
+- **Landscape** — the node's section in the inspector (Scene mode). It holds the terrain's
+  **structure**: size, resolution, chunk quads, paint resolution, and heightmap import/export.
+  **Rebuild terrain** applies them, resampling the sculpted shape, the painted layers and the
+  scattered foliage onto the new grid, so nothing authored is lost. Positioning uses the normal
+  gizmo.
+- **Landscape mode** holds the **brushes** — sculpt, paint and foliage. Nothing structural.
 
 A new landscape defaults to `size 200`, `resolution 129`, `chunkQuads 32`.
 
@@ -21,11 +23,15 @@ A new landscape defaults to `size 200`, `resolution 129`, `chunkQuads 32`.
 Landscape mode brings up two panels plus a slim toolbar:
 
 - **Landscape Tools** — the mode, the tool, the brush, and whatever that tool needs.
-- **Landscape Layers** — the base material and the paint-layer stack.
+- **Landscape Layers** — the landscape material and its slots: which one the brush paints, and how
+  the viewport shows them.
 - A **toolbar** floating over the viewport with the mode, the tools and the two settings that
   change mid-stroke: size and strength.
 
 ### Brush
+
+The settings every tool strokes with, kept across tools; only the strength is remembered per tool.
+Size and strength are on the toolbar too, so they can change without leaving the viewport.
 
 | Setting | What it does |
 |---|---|
@@ -39,12 +45,18 @@ Landscape mode brings up two panels plus a slim toolbar:
 The cursor is a decal projected onto the ground: a gradient of the brush's own weight curve,
 coloured per tool and as opaque as the strength.
 
-### Modifiers and hotkeys
+### Shortcuts
+
+The keys of Landscape mode, also listed in the **Shortcuts** section of Landscape Tools. They work
+whenever no text field has the focus. The mode and tool keys wait while a mouse button is held,
+because the editor camera flies on WASD and Q / E with the left button down.
 
 | Key | Action |
 |---|---|
 | **Q / W / E** | Sculpt / Paint / Foliage |
 | **1 … 0** | Pick a tool within the mode |
+| **`[` / `]`** | Brush size; Ctrl+wheel does the same |
+| **Shift + `[` / `]`** | Strength |
 | **Shift + drag** | Invert: Lower instead of Raise, erase instead of paint |
 | **Ctrl + drag** | Smooth, whatever the tool |
 | **Ctrl + click** | Flatten and Set Height: pick the height under the cursor |
@@ -74,18 +86,21 @@ Every stroke is **one undo step**, and so is a fill, an invert or a heightmap im
 
 ## Paint
 
-A landscape is painted with **one landscape material**, chosen at the top of the **Landscape
-Layers** panel — from the library, or **+ New landscape material**, which creates one, assigns it
-and opens it in the editor. ✎ opens it again. Landscape mode never lists the project's Materials:
-what the surfaces are is authored in the landscape material.
+A landscape is painted with **one landscape material**, and only with it: Landscape mode never lists
+the project's Materials, because what the surfaces are is authored in the landscape material. The
+**Landscape Layers** panel shows it, top to bottom:
 
-The panel lists that material's slots, topmost first:
-
-- The **Ground** covers the whole terrain. Nothing can erase it.
-- **Auto** slots blend in by their rule — rock on the slopes, snow up high — with no painting.
-- **Paint** slots (Paint only in the material) show nowhere until brushed on: roads, paths,
-  riverbeds. Click one to paint it; it also has **Fill**, **Clear** and **Invert**. The viewport
-  toolbar repeats the choice while in Paint mode.
+- **Landscape material** — the one this landscape paints with. Pick it from the library (or drop one
+  on the picker), or **+ New landscape material**, which creates one, assigns it and opens it in the
+  editor. ✎ opens it again.
+- **Slots** — that material's slots, topmost first, down to the **Ground**, which covers the whole
+  terrain and cannot be erased. *Auto* slots blend in by their rule — rock on the slopes, snow up
+  high — with no painting. *Paint* slots (**Paint only** in the material) show nowhere until brushed
+  on: roads, paths, riverbeds. Click one to paint it; it also has **Fill**, **Clear** and **Invert**.
+  The viewport toolbar repeats the choice while in Paint mode.
+- **View** — **Shaded** is the landscape as it renders, **Paint slot** a heat map of the active paint
+  slot's weight, and **All** tints the ground by which surface is winning, which is the quickest way
+  to see what a rule is actually doing.
 
 Paint, Erase and **Clear to ground** work toward a target opacity — paint a dirt road at 60% and it
 stops there. Erasing a road reveals what is under it, automatic slots included. Painting is kept per
@@ -100,9 +115,6 @@ Landscapes saved with the older **paint layers** convert on open: each layer bec
 carrying its painted mask, and the material becomes embedded — **Save to library and edit** puts it
 back in the library. A layer's foliage rules join the material's own.
 
-**View → All** tints the ground by which surface is winning, which is the quickest way to see what
-a rule is actually doing.
-
 ## Foliage
 
 Scatter the foliage rules of the landscape material, or switch to **Erase**.
@@ -111,19 +123,23 @@ Scatter the foliage rules of the landscape material, or switch to **Erase**.
   so would discard instances placed by hand.
 - A status line reports instances placed, layers involved, and how close you are to the
   **200,000-instance ceiling**.
-- A slot with **Allow foliage** off rejects candidates — no grass on the rock slot.
+- A surface with **Allow landscape foliage** off rejects the whole-landscape foliage — no grass on the
+  rock slot. Its own foliage list still grows there.
 
 ## Landscape materials
 
 A landscape material (`.tmat`) is everything a landscape is painted with. Open one to get:
 
-- **Ground** — the surface covering the whole landscape: a Material asset picked from the library,
-  or **+ New material** made right there (from an older asset, it starts as a copy of the built-in
-  surface). Tiling, with what one repeat measures in metres, and whether foliage may scatter.
-- **Slots** — surfaces over the ground, each a Material (picked, or **+ New material**) with its own
-  tiling and **blend rule**. **+ Slot** adds one that blends by rule; **+ Paint slot** adds one that is
-  **Paint only**, brushed on in landscape mode (its rule can still limit it, under *Limit by slope /
-  elevation*). The preview does not show paint-only slots.
+- **Ground** — the surface covering the whole landscape, under everything the slots draw over it: a
+  Material asset picked from the library, or **+ New material** made right there (from an older
+  asset, it starts as a copy of the built-in surface). Tiling, with what one repeat measures in
+  metres, whether the whole-landscape foliage may grow on it, and its own foliage lists.
+- **Slots** — extra surfaces blended over the ground wherever their rule says so — rock on steep
+  ground, snow above a height — each a Material (picked, or **+ New material**) with its own tiling
+  and **blend rule**. Each draws over the slots before it, and the ground fills whatever they leave.
+  **+ Slot** adds one that blends by rule; **+ Paint slot** adds one that is **Paint only**, brushed
+  on in Landscape mode (its rule can still limit it, under *Limit by slope / elevation*). The preview
+  does not show paint-only slots.
 - **Foliage rules** — what this material scatters.
 
 ### How a surface reads on the landscape
@@ -176,10 +192,21 @@ its height stands for.
 
 ### Foliage rules
 
-Each rule names a model or a billboard texture and a **density in instances per m²**, with an
-estimate of how many instances that means over the terrain. Rules also carry LOD levels and can bake
-an **impostor** — a billboard stand-in used past the distance where real geometry stops being worth
-it.
+A landscape material grows foliage from three lists of rules: **Foliage — whole landscape**, anywhere
+on the landscape where the surface allows it; **Foliage on Ground**, only where the ground itself
+shows, not on the slots drawn over it; and each slot's **Foliage on this slot**, only where that slot
+is the dominant surface — grass on a grass slot, pines on a forest slot. Each list has an exclusion
+list beside it.
+
+**Exclude foliage** — the list beside each foliage list, naming foliage to keep off rather than to
+grow, whichever list it comes from: **Exclude foliage — whole landscape** keeps it off wherever this
+material shows, **Keep off Ground** wherever the ground shows, and **Keep off this slot** wherever that
+slot shows — a road keeping the grass and the trees off.
+
+Each rule names a model or a billboard texture and a **density** — typed per 10 × 10 m block so a
+sparse prop reads as a whole number, stored per m² — with an estimate of how many instances that
+means over a 200 × 200 terrain. Rules also carry LOD levels and can bake an **impostor** — a billboard
+stand-in used past the distance where real geometry stops being worth it.
 
 **Bake impostor** makes one of two kinds, chosen by the rule's **Impostor** setting:
 
@@ -191,8 +218,6 @@ it.
 The octahedral bake is made from the rule's **last** LOD level — the one it takes over from — so the
 hand-over does not pop. **Impostor size** is the card's side for a card, the whole atlas's for an
 octahedral bake (1024 = 128 px views; 2048 for a tree seen large).
-
-There are also **exclusion** rules, so a material can say "not here" as well as "grass here".
 
 Defaults: `2.0` per m² for billboards, `0.05` for meshes. Meshes are three orders of magnitude
 sparser for the obvious reason.
@@ -216,6 +241,28 @@ A foliage collider still stands upright, so a tilted rock is best given a sphere
 Foliage instances can carry pooled colliders, created **near the camera** rather than for every
 instance — 200,000 colliders would be neither useful nor affordable. Configure this per rule.
 
+A mesh rule's **Collision** picks the shape: cylinder, box or sphere, or none to walk straight
+through. A newly picked shape starts fitted to the trunk; **Fit trunk** and **Fit bounds** refit it,
+and **Edit collider…** opens the collider editor. Only instances within 40 m of the camera get a
+body, and the nearest win once 256 are live. Turn on **Foliage colliders** in the viewport's eye menu
+to see them on the landscape. Keep collision off anything grass-like.
+
+### Collider editor
+
+One prop with its collider drawn over it — drag to orbit, wheel to zoom — beside every dimension of
+the shape. Nothing changes on the rule until **Apply**; **Reset** goes back to the collider the editor
+opened with, and **Remove collider** leaves the prop with none.
+
+- **Fit to trunk** — the radius of the bottom of the plant, spanning its lower part: what a character
+  should bump into.
+- **Fit to bounds** — around the whole plant, canopy included.
+- **Centre height** — where the shape's centre sits above the instance's base. *Auto* is half the
+  height (a sphere: its radius), so the shape stands on the ground.
+- **Preview scale** — instances are scattered between the rule's min and max scale, and the collider
+  scales with each one; this previews it at any scale in that range.
+
+Dimensions are in prototype units, and a box's width and depth are full sizes.
+
 ## Level of detail
 
 Terrain LOD is in [Renderer settings](../reference/render-settings.md#foliage-and-terrain-lod),
@@ -233,10 +280,15 @@ size — is **Landscape texture size** in renderer settings: 512, 1024 (the defa
 
 Import and export from the node inspector.
 
-Import opens a dialog: **8- and 16-bit PNG** or **RAW / R16**, with the minimum and maximum height
-the image maps onto, plus rotate and flip, previewed live and applied as one undo step. Export
-writes 16-bit PNG or RAW R16 and records the range in the file name, so a round trip through an
-external tool keeps absolute heights.
+**Import heightmap** — the dialog an import opens: **8- and 16-bit PNG** or **RAW / R16**, with the
+heights a black and a white pixel map onto (terrain-local metres), plus rotate and flip, previewed
+live on the landscape and applied as one undo step. **Cancel** puts the ground back exactly; the
+painting and the foliage stay either way. A 16-bit file Cleo exported opens with its range already
+filled in.
+
+Export writes 16-bit PNG or RAW R16 and records the range in the file name, so a round trip through
+an external tool keeps absolute heights. An 8-bit PNG export is normalised to the terrain's own range
+and records none.
 
 > A 16-bit import is worth insisting on for large landscapes: 8 bits over a 300 m range quantizes
 > to about 1.2 m, which reads as terracing on any gentle slope.

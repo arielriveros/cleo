@@ -7,7 +7,7 @@ import type {
   ActionKind, BindingSource, CompositePart, DeviceKind, InputBinding, ModifierSource, Processor,
   ProcessorKind, VirtualControl,
 } from 'cleo'
-import { Button, Select, hintClass, labelClass } from '../../components/ui'
+import { Button, SectionTitle, Select, hintClass, labelClass } from '../../components/ui'
 import ProcessorList from './ProcessorList'
 import type { RebindCapture } from './useRebindCapture'
 
@@ -131,16 +131,14 @@ export default function BindingRow(props: Props) {
 
       {expanded && (
         <div className='pl-1 border-l border-border flex flex-col gap-2 mt-1'>
+          {/* What a modifier gate and a processor chain do is in docs/editor/input.md › Bindings, the
+              captions' hover cards. */}
           <div>
-            <p className={labelClass}>Only while held</p>
+            <SectionTitle title='Only while held' />
             <ModifierList modifiers={binding.modifiers ?? []} onChange={props.onModifiers} />
-            <p className={hintClass}>
-              All of these must be held. A plain binding on the same input stands down while a modified
-              one is active — so Ctrl+S does not also fire S.
-            </p>
           </div>
           <div>
-            <p className={labelClass}>Processors</p>
+            <SectionTitle title='Processors' />
             <ProcessorList
               chain={binding.processors ?? []}
               onAdd={props.onAddProcessor}

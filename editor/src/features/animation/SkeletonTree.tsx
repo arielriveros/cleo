@@ -5,7 +5,7 @@ import { getAnimationTarget, buildJointTree, jointLabel, JointTreeNode } from '.
 import { useElementSize } from '../../utils/useElementSize'
 import { useScopedDndManager } from '../../utils/treeDnd'
 import IkRigPanel from './IkRigPanel'
-import { TextInput } from '../../components/ui'
+import { SectionTitle, TextInput } from '../../components/ui'
 
 // Left-sidebar skeleton hierarchy for the Animation Editor: a react-arborist tree that is READ-ONLY, since
 // a skeleton's shape comes from the model. Selection emits SELECT_JOINT, separate from scene SELECT_NODE.
@@ -127,7 +127,8 @@ export default function SkeletonTree() {
   return (
     <div className='flex flex-col text-fg bg-surface-raised w-full h-full overflow-hidden'>
       <div className='px-3 py-2 border-b border-fg/[0.06] shrink-0'>
-        <div className='text-ui uppercase tracking-wide text-highlight'>Skeleton</div>
+        {/* The panel's own heading: its card is the panel's row, not the workspace's Skeleton part. */}
+        <SectionTitle title='Skeleton' doc='editor/interface#every-panel::Skeleton' className='text-ui text-highlight' />
         <div className='text-ui-sm text-muted truncate' title={target.node.name}>{target.node.name}</div>
         <div className='text-ui-sm text-dim'>{target.skin.joints.length} joints</div>
       </div>

@@ -18,13 +18,23 @@ on its inspector slot.
 
 The effect plays over a ground plane in its own tab. **Properties** holds the stack:
 
-- **Emitters** — every emitter simulates and draws independently. **+ Emitter** offers presets: Empty,
-  Smoke, Fire, Sparks, Fountain, Magic, Snow, Rain. Each preset is an ordinary stack you can take apart.
-- **Emitter** — capacity, simulation space, duration, looping, prewarm, start delay and seed.
-- **Spawn**, **Initialize**, **Update** — the module stack in three stages. Add modules from the
-  drop-down at the end of each stage. Every module can be disabled or removed.
-- **Render** — how the emitter draws.
-- **Bounds** — a fixed box the particles stay inside, used for culling and selection.
+- **Emitters** — every emitter simulates and draws independently; together they are the effect.
+  **+ Emitter** offers presets: Empty, Smoke, Fire, Sparks, Fountain, Magic, Snow, Rain. Each preset is
+  an ordinary stack you can take apart.
+- **Emitter** — capacity, simulation space, duration, looping, prewarm, start delay, seed, and the
+  coarsest [LOD](#level-of-detail) level it still spawns at.
+- Then the selected emitter's module stack, in three stages. Add modules from the drop-down at the end
+  of each stage; every module can be disabled or removed.
+  - **Spawn** — how many particles are born, and when.
+  - **Initialize** — each particle's starting state, rolled once at birth.
+  - **Update** — forces, collision and how particles change over their life, applied in a
+    [fixed order](#modules) every step.
+- **Render** — how the emitter's particles are drawn; see [Rendering](#rendering).
+- **LOD** — what the whole effect gives up with distance from the camera; see
+  [Level of detail](#level-of-detail).
+- **Bounds** — a fixed box, in the effect's local space, that its particles stay inside. It is used for
+  culling, selection and LOD distance. GPU particles are never read back, so the box cannot be measured:
+  size it to the effect.
 
 **Particle Preview** at the bottom has restart, play/pause, stop, clear, a one-shot burst, a speed
 slider, and a timeline for each emitter that shows its cycle and marks its bursts.
@@ -96,6 +106,9 @@ needs the shader compiler.
 
 ## Rendering
 
+The **Render** section sets how the selected emitter's particles are drawn. Each emitter has its own,
+so one effect can mix additive sparks with alpha-blended smoke.
+
 | Setting | Meaning |
 |---|---|
 | **Renderer** | Billboard, or Mesh (cube, sphere, shard, cylinder, or a model asset — its geometry is copied into the effect). |
@@ -105,8 +118,8 @@ needs the shader compiler.
 | **Soft fade** | Fades particles out where they meet opaque geometry instead of clipping. |
 | **Brightness** | HDR multiplier. Values above 1 bloom. |
 | **Lit** | Half-Lambert sun plus sky fill. |
-| **Sort particles** | Back to front on the GPU every frame. Alpha blending only; up to 65,536 particles. |
-| **Sorting order** | Draw order between emitters, and the sorting band in 2D scenes. |
+| **Sort particles** | Back to front on the GPU every frame, which fixes dark fringes where alpha puffs overlap and costs a few passes. Alpha blending only; up to 65,536 particles. |
+| **Sorting order** | Draw order between emitters — higher draws later, on top — and the sorting band in 2D scenes. |
 
 In a 2D scene (an orthographic camera over a tilemap) particles draw in the 2D pass, sorted with the
 sprites by their emitter's Y, and simulate flat.
@@ -139,6 +152,13 @@ Particle Preview transport. The Performance panel counts systems that are **LOD 
 The **Particle System** node's inspector links an asset and sets **Play on start**, **Simulation
 speed**, **Spawn rate** (a multiplier on continuous spawning), **Off screen**, **Distance LOD** and
 **Tint**, with play, stop, clear and burst buttons. Selecting the node draws its bounds.
+
+**Effect** — the `.vfx` asset the node plays, with ✎ into the particle editor. Linking one copies it
+onto the node, so the effect still plays where the library is not around (a published game ships
+none); ✕ unlinks without changing what plays. A node always holds an effect — a new one starts with
+the default emitter — so with no asset linked it offers **Create asset from this effect**, which makes
+the copy a library asset, links it and opens it. Emitters are edited only on an asset. Drag a particle
+system from the Assets panel onto the slot to link it.
 
 Effects simulate while you author a scene. **Preview particles** in the viewport's eye menu switches
 that off; play mode always simulates. **Effect icons** in the same menu shows or hides their

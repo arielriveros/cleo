@@ -23,7 +23,8 @@ export function useOptionsPage<T extends string>(panel: string, fallback: T): [T
   return [(current[panel] as T) ?? fallback, (page: T) => navStore.set(panel, page)]
 }
 
-export interface OptionsPage<T extends string> { value: T; label: string; title?: string }
+/** One page tab. `doc` names its entry in docs/editor/options.md, which is the tab's hover card. */
+export interface OptionsPage<T extends string> { value: T; label: string; title?: string; doc?: string }
 
 /** A panel's page switcher + the page body. The body scrolls; the switcher stays put. */
 export function OptionsShell<T extends string>({ pages, page, onPage, children }: {

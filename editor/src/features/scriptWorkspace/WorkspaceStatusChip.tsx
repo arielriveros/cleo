@@ -82,9 +82,7 @@ export default function WorkspaceStatusChip() {
 
       {conflict && (
         <Modal onClose={() => ws.resolveConflict(conflict.scriptId, 'external')} className='w-[440px]'>
-          <ModalHeader>
-            <div className='text-ui-lg font-semibold'>“{conflict.name}” was edited in both places</div>
-          </ModalHeader>
+          <ModalHeader title={`“${conflict.name}” was edited in both places`} doc='editor/scripting-workflow::Resolve conflict' />
           <div className='px-4 py-3 text-ui text-muted leading-relaxed'>
             This script had unsaved changes in the editor when a new version arrived from the workspace
             folder. The workspace version has been taken — keep it, or put your unsaved editor version

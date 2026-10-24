@@ -6,14 +6,20 @@ and even dock layouts are namespaced per project.
 
 ## The launcher and the browser
 
-On a fresh install you get a full-screen **launcher** to create or pick a project. It shows the
-engine version.
+On a fresh install, or when no project can be opened, you get a full-screen **launcher** to create or
+pick a project. It shows the engine version.
 
-Once a project is open, **Projects** in the top bar opens the browser, which has two tabs: **My
-Projects** and **Examples**.
+**Projects** — the top bar's **Projects** opens the same browser over the editor, with the open
+project named beside its title. Each project has its own scenes, assets, scripts and layout; nothing
+is shared between them.
 
-The project explorer is a file manager over your projects: create an empty project, open one, or
-delete one (from the toolbar or the context menu).
+Both have two tabs, **My Projects** and **Examples** — the second only when this build carries
+examples:
+
+- **My Projects** — the project explorer, a file manager over your projects: create an empty
+  project, open one (double-click), or delete one (from the toolbar, the context menu or the Delete
+  key).
+- The **Examples** tab is described [below](#examples).
 
 > **Switching projects reloads the editor**, because every storage key is namespaced and the whole
 > library set changes. **Deleting a project takes its dock layouts with it.**
@@ -73,6 +79,9 @@ Save All button shows how many there are.
 
 Closing the editor with unsaved work warns first, as does switching project or importing over the
 top of one.
+
+**Unsaved changes** — asked before closing a tab or switching scenes would drop edits. **Save** writes
+them and carries on, **Discard** drops them and carries on, **Cancel** stays where you are.
 
 ## Storage
 

@@ -29,8 +29,6 @@ const estimateFor = (r: TerrainFoliageRule): number =>
 
 export default function TerrainFoliageRules({ material, rules, exclude, setExclude, onChange,
                                              title = 'Foliage', excludeTitle = 'Exclude foliage',
-                                             hint = 'Foliage the landscape brush scatters where this material is painted.',
-                                             excludeHint = 'Foliage kept off this material even where a neighbouring material would place it.',
                                              defaultOpen = true }: {
   /** The landscape material the lists belong to — for the names its other surfaces define. */
   material: TerrainMaterial
@@ -38,7 +36,8 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
   exclude: string[]
   setExclude: (names: string[]) => void
   onChange: () => void
-  title?: string; excludeTitle?: string; hint?: string; excludeHint?: string
+  /** Which list this is ("Foliage on Ground"); the docs explain all three under terrain.md › Foliage rules. */
+  title?: string; excludeTitle?: string
   /** Start collapsed (per-surface lists) unless the list already holds something. */
   defaultOpen?: boolean
 }) {
@@ -203,8 +202,8 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
 
   return (
     <>
-        <Collapsable title={rules.length ? `${title} (${rules.length})` : title} defaultOpen={defaultOpen || rules.length > 0}>
-          <div className='p-2 space-y-2' title={hint}>
+        <Collapsable title={rules.length ? `${title} (${rules.length})` : title} doc='Foliage rules' defaultOpen={defaultOpen || rules.length > 0}>
+          <div className='p-2 space-y-2'>
             <div className='border border-control rounded p-2 space-y-1'>
               <div className={label}>Add grass billboard</div>
               <div className='flex gap-1'>
@@ -408,8 +407,8 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
           </div>
         </Collapsable>
 
-        <Collapsable title={exclude.length ? `${excludeTitle} (${exclude.length})` : excludeTitle} defaultOpen={defaultOpen || exclude.length > 0}>
-          <div className='p-2 space-y-1' title={excludeHint}>
+        <Collapsable title={exclude.length ? `${excludeTitle} (${exclude.length})` : excludeTitle} doc='Exclude foliage' defaultOpen={defaultOpen || exclude.length > 0}>
+          <div className='p-2 space-y-1'>
             {knownFoliageNames.length === 0 && <p className={hintClass}>No other foliage defined yet.</p>}
             {knownFoliageNames.map(name => (
               <div key={name} className='flex items-center justify-between'>

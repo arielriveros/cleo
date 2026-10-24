@@ -109,10 +109,7 @@ export default function FoliageColliderModal({ rule, onApply, onClose }: {
 
   return (
     <Modal onClose={onClose} className='w-[860px]'>
-      <ModalHeader>
-        <div className='font-semibold'>Collider — {rule.name}</div>
-        <div className='text-ui-sm text-muted'>{describeCollider(draft)}</div>
-      </ModalHeader>
+      <ModalHeader title={`Collider — ${rule.name}`} doc='Collider editor' aside={describeCollider(draft)} />
       <div className='flex gap-4 px-4 py-3'>
         <div className='flex flex-col gap-2'>
           <div

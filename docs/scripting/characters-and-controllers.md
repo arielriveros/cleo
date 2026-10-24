@@ -74,6 +74,24 @@ onUpdate() {
 
 ## Character tuning
 
+The inspector's **Character** section sets these fields, in groups; the table below gives each one's
+script name and default.
+
+- **Speed** — **Walk** and **Run** speeds, **Acceleration** (`0` snaps to full speed; see
+  [on slopes](#acceleration-on-slopes)) and **Air Control**.
+- **Facing** — **Aim** turns the body toward where the controller is looking (a strafe character),
+  **Velocity** toward where it travels (a face-your-movement character), and **None** leaves rotation
+  alone. **Turn Speed** is how fast the body swings while moving; **Direction Smooth** glides the
+  blend-space direction axis.
+- **Jump** — take-off **Speed**. **Coyote** keeps a jump working just after walking off an edge,
+  **Buffer** keeps one pressed just before landing, and **Lockout** suppresses the ground projection
+  right after take-off so it cannot flatten the jump.
+- **Advanced** — **Drive without a Controller** runs locomotion with nothing possessing the character.
+  Off by default, so an unpossessed character is inert and cannot fight physics for its own velocity.
+
+The **Turn in place** group is [below](#turn-in-place), and **Animator outputs** shows the
+[three outputs](#animator-outputs) live while the scene runs.
+
 | Field | Default | |
 |---|---|---|
 | `walkSpeed` | `1.5` | |
@@ -95,8 +113,10 @@ onUpdate() {
 ### Turn-in-place
 
 A standing character with `facingMode: 'aim'` does not rotate itself. When the aim gets more than
-`turnThreshold` away from the body it raises a `turnRequest`, and the turn clip's **root motion**
-rotates the body.
+`turnThreshold` (**Threshold**) away from the body it raises a `turnRequest`, and the turn clip's
+**root motion** rotates the body. The turn holds until the body is back within `turnReleaseAngle`
+(**Release**): two angles rather than one, so a camera hovering on the threshold does not make the
+turn chatter.
 
 - **The choice of clip waits for the aim to settle.** A camera swept round to the back crosses 90°
   long before it reaches 180°; picking the clip at that crossing would always play the 90. So a turn
@@ -126,11 +146,14 @@ command. Two consequences worth knowing before you tune it:
   below it slides back down. At `10` that limit is around 40 degrees in practice. Budget for the steepest
   ground the character has to walk on, not for the feel on the flat.
 
-## The three animator outputs
+## Animator outputs
 
-A character publishes exactly three fields for its animator to read. They are **plain fields, not
-getters**, because the animator's variable binding uses an own-property check that a prototype
-getter fails.
+A character publishes exactly three fields for its animator to read, shown live in the inspector
+while the scene runs. Bind one from an animator parameter of type **Variable** whose node reference
+is the character (**Parent**, from a model that is its child).
+
+They are **plain fields, not getters**, because the animator's variable binding uses an own-property
+check that a prototype getter fails.
 
 | Field | Meaning |
 |---|---|

@@ -3,21 +3,14 @@ import { NavMeshNode, bakeNavMesh, navBakeSettings } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
 import { useCleoEngine } from '../../EngineContext'
 import {
-  Button, NumberInput, PropertyRow, PropertyTable, Slider, Toggle, cn,
+  Button, DocScope, NumberInput, PropertyRow, PropertyTable, Slider, Toggle, cn,
 } from '../../../components/ui'
 import { gatherNavSoup } from '../../../utils/navBakeSources'
 import { navPreviewSkippedFor } from '../../../utils/editorHelpers'
 import { NavMeshIcon } from '../../sceneInspector/nodeIcons'
 
-const NAV_HINT = 'The walkable surface AI pathfinds over. Baked from the scene colliders and terrain inside this node’s box. The contours are stored in WORLD space, so moving the node never invalidates a path that already exists — it changes what the NEXT bake will cover.'
-const BOUNDS_HINT = 'The box that decides what gets baked. Drag and scale the node to place it; while it is selected the box is outlined and every walkable surface inside it is painted cyan, which is exactly what a bake would keep. Set any size to 0 to bake the whole scene instead.'
-const SOURCE_HINT = 'Colliders, not render meshes: an invisible collider blocking a corridor has no mesh, a LOD group holds three copies of one floor, and a skinned mesh contributes a bind pose. The bake agrees with the physics rather than approximating it.'
-const SLOPE_HINT = 'Steepest incline an agent will walk. Anything steeper is a wall — including, deliberately, the underside of everything, because a ceiling is a floor with its normal reversed.'
-const WELD_HINT = 'Snaps nearby vertices together before linking. Load-bearing, not an optimisation: two surfaces are joined only when their shared edge matches EXACTLY, so a hairline seam between meshes becomes two disconnected islands and every path across it silently fails.'
-const TERRAIN_HINT = 'Sample terrain heightfields. Step 1 is every vertex — far more detail than a planar navmesh can use, and a 129² terrain is 32,768 triangles.'
-const RADIUS_HINT = 'How far an agent keeps clear of things. Carving pads every obstacle by it at bake time, and paths also keep it off the mesh corners they hug.'
-const CARVE_HINT = 'Cut static solids — walls, pillars, buildings, trunks — out of the floor, padded by the agent radius, so paths go around them instead of through. Dynamic bodies are skipped, and so is any node with a boolean variable navObstacle set to false (a gate that opens).'
-const HEIGHT_HINT = 'Headroom an agent needs. Something higher above the floor than this — a lintel, a bridge — does not carve the floor under it.'
+// Every row's explanation is its row in docs/editor/ai-agents.md › Navigation meshes, shown as the
+// label's hover card; only the live status lines below carry their own tooltips.
 
 interface NavState {
   sizeX: number
@@ -206,11 +199,13 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
       `${report.obstacles} obstacles carved.`
     : 'Controllers set to path walk in a straight line until this mesh exists, so nothing breaks — they just stop going around things.'
 
+  // Documented on the AI agents page, not with the other node-type editors.
   return (
-    <Collapsable title='Nav Mesh' icon={<NavMeshIcon />} persistKey='navMesh' hint={NAV_HINT}>
+    <DocScope page='editor/ai-agents'>
+    <Collapsable title='Nav Mesh' doc='editor/ai-agents#navigation-meshes' icon={<NavMeshIcon />} persistKey='navMesh'>
       <div className='w-full p-2'>
         <PropertyTable columns={['32%', '68%']}>
-          <PropertyRow label='Size' hint={BOUNDS_HINT}>
+          <PropertyRow label='Size'>
             <span className='flex gap-1'>
               {(['sizeX', 'sizeY', 'sizeZ'] as const).map((k, i) => (
                 <NumberInput key={k} className='min-w-0 flex-1' min={0} step={0.5} value={state[k]}
@@ -219,7 +214,7 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
               ))}
             </span>
           </PropertyRow>
-          <PropertyRow label='Bake' hint={SOURCE_HINT}>
+          <PropertyRow label='Bake'>
             <span className='flex items-center gap-1'>
               <Button size='sm' onClick={bake} disabled={baking}>{baking ? 'Baking…' : 'Bake'}</Button>
               {props.node.isBaked && <Button size='sm' variant='ghost' onClick={clear}>Clear</Button>}
@@ -227,17 +222,17 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
                 title='Resize the box around everything walkable'>Fit</Button>
             </span>
           </PropertyRow>
-          <PropertyRow label='Max slope' hint={SLOPE_HINT}>{slider('maxSlope', 0, 89, 1, 0, (v) => v.toFixed(0) + '°')}</PropertyRow>
-          <PropertyRow label='Weld' hint={WELD_HINT}>{slider('weldTolerance', 0.001, 0.5, 0.001, 3)}</PropertyRow>
+          <PropertyRow label='Max slope'>{slider('maxSlope', 0, 89, 1, 0, (v) => v.toFixed(0) + '°')}</PropertyRow>
+          <PropertyRow label='Weld'>{slider('weldTolerance', 0.001, 0.5, 0.001, 3)}</PropertyRow>
           <PropertyRow label='Simplify'>{slider('simplifyTolerance', 0, 0.5, 0.001, 3)}</PropertyRow>
-          <PropertyRow label='Agent radius' hint={RADIUS_HINT}>{slider('agentRadius', 0, 5, 0.05)}</PropertyRow>
-          <PropertyRow label='Carve obstacles' hint={CARVE_HINT}>
+          <PropertyRow label='Agent radius'>{slider('agentRadius', 0, 5, 0.05)}</PropertyRow>
+          <PropertyRow label='Carve obstacles'>
             <Toggle checked={state.carve} onChange={(c) => apply({ carve: c })} />
           </PropertyRow>
           {state.carve && (
-            <PropertyRow label='Agent height' hint={HEIGHT_HINT}>{slider('agentHeight', 0.5, 5, 0.05)}</PropertyRow>
+            <PropertyRow label='Agent height'>{slider('agentHeight', 0.5, 5, 0.05)}</PropertyRow>
           )}
-          <PropertyRow label='Terrain' hint={TERRAIN_HINT}>
+          <PropertyRow label='Terrain'>
             <span className='flex items-center gap-2'>
               <Toggle checked={state.includeTerrain} onChange={(c) => setState({ ...state, includeTerrain: c })} />
               {state.includeTerrain && (
@@ -256,5 +251,6 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
         )}
       </div>
     </Collapsable>
+    </DocScope>
   )
 }

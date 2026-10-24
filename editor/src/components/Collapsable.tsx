@@ -1,7 +1,8 @@
 import { useId, useState } from 'react';
 import { cn } from './ui/cn';
 import { headerClass } from './ui/typography';
-import { hintAffordance } from './ui/Field';
+import { docTitleAffordance, useDocTooltip } from './ui/DocTooltip';
+import { DocRegion, useDocEntry } from '../features/docs/DocScope';
 
 interface CollapsableProps {
     title: string;
@@ -16,15 +17,21 @@ interface CollapsableProps {
     /** When set, the open/closed state is remembered in localStorage under this key. */
     persistKey?: string;
     className?: string;
-    /** Native tooltip on the header, for explanation that covers the whole panel rather than one control. */
-    hint?: string;
+    /**
+     * Where the docs describe this section, when the title alone does not find it (a dynamic title, or
+     * an entry on another page): a term, `page#anchor` or `page[#anchor]::Term`. `false` opts out.
+     * The title's hover card is that entry — explanation belongs in the docs, not in a hint here.
+     */
+    doc?: string | false;
 }
 
 const storagePrefix = 'cleo.collapsable.';
 
-export default function Collapsable({ title, children, icon, badge, right, defaultOpen = true, persistKey, className, hint }: CollapsableProps) {
+export default function Collapsable({ title, children, icon, badge, right, defaultOpen = true, persistKey, className, doc }: CollapsableProps) {
     const contentId = useId();
     const storageKey = persistKey ? storagePrefix + persistKey : null;
+    const entry = useDocEntry(title, doc);
+    const tip = useDocTooltip(entry);
 
     const [open, setOpen] = useState<boolean>(() => {
         if (storageKey) {
@@ -47,14 +54,18 @@ export default function Collapsable({ title, children, icon, badge, right, defau
                 role='button'
                 aria-expanded={open}
                 aria-controls={contentId}
+                aria-describedby={tip.describedBy}
                 tabIndex={0}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } }}
+                onFocus={(e) => { if (e.target === e.currentTarget && e.currentTarget.matches(':focus-visible')) tip.show(); }}
+                onBlur={tip.hide}
             >
                 <span className={cn('text-ui-sm text-muted transition-transform duration-200', open ? '' : '-rotate-90')}>▼</span>
                 {/* Sized HERE, not by the glyph: the node-type and UI-type icons (shared with the scene tree) carry no
                     width of their own, and one of them filled the whole card — the "huge" Nav Mesh section. */}
                 {icon && <span className='shrink-0 inline-flex w-[15px] h-[15px] text-muted group-hover:text-fg transition-colors [&>svg]:w-full [&>svg]:h-full'>{icon}</span>}
-                <span className={cn(headerClass, 'truncate', hintAffordance(hint))} title={hint}>{title}</span>
+                <span ref={tip.ref} {...tip.hoverProps} className={cn(headerClass, 'truncate', entry && docTitleAffordance)}>{title}</span>
+                {tip.card}
                 {badge !== undefined && badge !== null && badge !== false && (
                     <span className='shrink-0 min-w-[18px] h-[18px] px-1.5 inline-flex items-center justify-center rounded-full bg-border-subtle text-ui-xs text-muted tabular-nums'>
                         {badge}
@@ -69,7 +80,7 @@ export default function Collapsable({ title, children, icon, badge, right, defau
                 style={{ gridTemplateRows: open ? '1fr' : '0fr' }}
             >
                 <div className='overflow-hidden bg-surface-raised'>
-                    {children}
+                    <DocRegion entry={entry}>{children}</DocRegion>
                 </div>
             </div>
         </div>

@@ -1,6 +1,8 @@
 import React from 'react';
 import { cva } from 'class-variance-authority';
 import { cn } from './cn';
+import { useDocTooltip } from './DocTooltip';
+import { useDocEntry } from '../../features/docs/DocScope';
 
 const segment = cva(
   'flex items-center justify-center gap-1 border transition-colors',
@@ -27,6 +29,11 @@ export interface SegmentedOption<T> {
   value: T;
   label: React.ReactNode;
   title?: string;
+  /**
+   * The docs entry this option names (a page tab, a catalog category): a term, `page#anchor` or
+   * `page[#anchor]::Term`. When it resolves, its hover card replaces `title`.
+   */
+  doc?: string;
   disabled?: boolean;
 }
 
@@ -59,11 +66,9 @@ export function SegmentedControl<T extends string | number>({
   return (
     <div className={cn('inline-flex items-center gap-1', className)}>
       {options.map((opt) => (
-        <button
+        <Segment
           key={String(opt.value)}
-          type='button'
-          title={opt.title}
-          disabled={opt.disabled}
+          option={opt}
           onClick={() => onChange(opt.value)}
           className={cn(
             segment({ size, active: value === opt.value, disabled: opt.disabled }),
@@ -71,11 +76,31 @@ export function SegmentedControl<T extends string | number>({
             grow && 'flex-1',
             itemClassName
           )}
-        >
-          {opt.label}
-        </button>
+        />
       ))}
     </div>
+  );
+}
+
+function Segment<T>({ option, onClick, className }: { option: SegmentedOption<T>; onClick: () => void; className: string }) {
+  const entry = useDocEntry(undefined, option.doc ?? false);
+  const tip = useDocTooltip(entry);
+  return (
+    <button
+      ref={tip.ref}
+      {...tip.hoverProps}
+      type='button'
+      title={entry ? undefined : option.title}
+      aria-describedby={tip.describedBy}
+      disabled={option.disabled}
+      onClick={onClick}
+      onFocus={(e) => { if (e.currentTarget.matches(':focus-visible')) tip.show(); }}
+      onBlur={tip.hide}
+      className={className}
+    >
+      {option.label}
+      {tip.card}
+    </button>
   );
 }
 

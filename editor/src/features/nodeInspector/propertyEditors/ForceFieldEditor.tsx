@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ForceFieldNode, FORCE_FIELD_PRESETS, type ForceFieldPreset } from 'cleo'
 import type { ForceFieldKind, ForceFieldShape } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
-import { Hint, NumberInput, PresetMenu, PropertyRow, PropertyTable, SegmentedControl, Select, Slider, Toggle, VectorInput } from '../../../components/ui'
+import { NumberInput, PresetMenu, PropertyRow, PropertyTable, SegmentedControl, Select, Slider, Toggle, VectorInput } from '../../../components/ui'
 import { ForceFieldIcon } from '../sectionIcons'
 import { useEventBus } from '../../EventBusContext'
 
@@ -94,7 +94,6 @@ export default function ForceFieldEditor(props: { node: ForceFieldNode }) {
             </PropertyRow>
           )}
         </PropertyTable>
-        <Hint>Only emitters with the <b>Force Fields</b> module respond. Up to 16 fields act at once.</Hint>
       </div>
     </Collapsable>
   )

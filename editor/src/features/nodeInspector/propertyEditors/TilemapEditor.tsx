@@ -3,7 +3,7 @@ import { TilemapNode } from 'cleo'
 import type { GridKind, HexOffset, HexOrientation } from 'cleo'
 import Collapsable from '../../../components/Collapsable'
 import { TilemapIcon } from '../../sceneInspector/nodeIcons'
-import { Field, Hint, NumberInput, Select, Toggle } from '../../../components/ui'
+import { DocScope, Field, NumberInput, Select, Toggle } from '../../../components/ui'
 import { useCleoEngine } from '../../EngineContext'
 
 // Node inspector for a TilemapNode: the grid layout every cell coordinate is interpreted through, plus the
@@ -19,6 +19,7 @@ export default function TilemapEditor(props: { node: TilemapNode }) {
   const setGrid = (patch: Partial<typeof grid>) => { tilemap.setGrid({ ...grid, ...patch }); commit() }
 
   return (
+    <DocScope page='editor/tilemap-2d'>
     <Collapsable title='Tilemap' icon={<TilemapIcon />} persistKey='node.tilemap' defaultOpen>
       <div className='p-2 space-y-2'>
         <Field className='my-0' labelClassName='w-auto' label='Grid' hint='How a cell coordinate is laid out. Isometric here is a screen-space diamond on the XY plane, not a 3D projection.'>
@@ -90,8 +91,8 @@ export default function TilemapEditor(props: { node: TilemapNode }) {
         <Field className='my-0 pt-1' labelClassName='w-auto' label='Layers'>
           <span className='text-ui-sm text-muted'>{tilemap.layers.length}</span>
         </Field>
-        <Hint>Paint and manage layers in Tilemap mode.</Hint>
       </div>
     </Collapsable>
+    </DocScope>
   )
 }

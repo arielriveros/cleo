@@ -4,8 +4,8 @@ import type { AiGoal, DesirabilityDefinition, GoalDefinition, GoalGraph } from '
 import ConditionTreeView, { emptyConditionGroup } from '../../../components/ConditionTreeView'
 import type { ConditionParam } from '../../../components/ConditionTreeView'
 import {
-  Button, ButtonWithConfirm, NumberInput, Select, Slider, TextInput, cn, hintClass, labelClass,
-  sectionTitleClass,
+  Button, ButtonWithConfirm, DocScope, NumberInput, SectionTitle, Select, Slider, TextInput, cn, hintClass,
+  labelClass,
 } from '../../../components/ui'
 import { hintAffordance } from '../../../components/ui/Field'
 import ParamSourcePicker from './ParamSourcePicker'
@@ -21,16 +21,14 @@ import { renameGoal } from '../../../utils/aiGraphEdits'
  *
  *  - **An evaluator cannot abstain.** Yuka's arbitration starts at -1, so a goal scoring 0 still wins
  *    if it is the only one. That is why the empty state seeds a graph with a fallback rather than a
- *    single goal, and why the hint says so.
+ *    single goal, and why the docs' Arbitration entry says so.
  *  - **A goal's conditions read the behaviour machine's parameters.** `until` and `failWhen` are
  *    condition trees over the same parameter table, so an author needs parameters declared over in
  *    the Behaviour section for them to compare anything. The editor says so instead of showing an
  *    empty dropdown.
  */
 
-const GOALS_HINT = 'What the agent wants, scored. Whichever goal scores highest runs; a goal with subgoals runs them in order. Adding a graph changes nothing until Brain is switched to "goal".'
-const DESIRE_HINT = 'Desirability maps one readable value onto 0..1, then multiplies by the bias. A range running BACKWARDS inverts it, which is how "nearer is better" reads: from 20 to 0 scores 1 when the distance is 0.'
-const ABSTAIN_HINT = 'Nothing can abstain: the best score starts below zero, so a goal scoring 0 still wins if it is the only candidate. Author a low-scoring fallback rather than expecting nothing to run.'
+const GOALS_HINT = 'What the agent wants, scored. Whichever goal scores highest runs; a goal with subgoals runs them in order.'
 const SUBGOAL_HINT = 'Names of goals to run in order, comma separated. A goal with subgoals drives none of its own — its children do. Self-reference and cycles are dropped when the graph is read.'
 const UNTIL_HINT = 'The goal reports COMPLETED once this is met, which pops it and lets its parent move on. Compares the Behaviour section’s parameters, so declare one there first.'
 const FAIL_HINT = 'The goal FAILS once this is met. Failure beats completion when both are true — "I am in reach" and "my target died" want the second answer.'
@@ -75,10 +73,6 @@ export default function GoalsEditor({ node, onChange }: Props) {
   const patchEvaluator = (index: number, patch: Partial<DesirabilityDefinition>) =>
     apply({ ...graph, evaluators: graph.evaluators.map((e, i) => (i === index ? { ...e, ...patch } : e)) })
 
-  const header = (label: string, hint?: string) => (
-    <div className={cn(sectionTitleClass, 'mt-3 mb-1', hintAffordance(hint))} title={hint}>{label}</div>
-  )
-
   if (graph.goals.length === 0) {
     return (
       <div className='mt-2'>
@@ -101,10 +95,9 @@ export default function GoalsEditor({ node, onChange }: Props) {
   }
 
   return (
+    <DocScope page='editor/ai-brains'>
     <div>
-      <p className={hintClass}>{ABSTAIN_HINT}</p>
-
-      {header('Goals', SUBGOAL_HINT)}
+      <SectionTitle title='Goals' className='mt-3 mb-1' />
       <div className='flex flex-col gap-1'>
         {graph.goals.map(g => (
           <div key={g.name} className='rounded border border-border bg-control/30 p-1.5 flex flex-col gap-1'>
@@ -170,7 +163,7 @@ export default function GoalsEditor({ node, onChange }: Props) {
         </Button>
       </div>
 
-      {header('Desirability', DESIRE_HINT)}
+      <SectionTitle title='Desirability' className='mt-3 mb-1' />
       <div className='flex flex-col gap-1'>
         {graph.evaluators.map((e, i) => (
           <div key={i} className='rounded border border-border bg-control/30 p-1.5 flex flex-col gap-1'>
@@ -210,12 +203,13 @@ export default function GoalsEditor({ node, onChange }: Props) {
         </Button>
       </div>
 
-      {header('Arbitration', INTERVAL_HINT)}
+      <SectionTitle title='Arbitration' className='mt-3 mb-1' />
       <Slider label='Interval' min={0} max={5} step={0.05} value={graph.arbitrationInterval}
         title={INTERVAL_HINT} labelClassName='w-[104px]'
         readout={(v) => (v === 0 ? 'every frame' : `${v.toFixed(2)}s`)}
         onChange={(arbitrationInterval) => apply({ ...graph, arbitrationInterval })} />
     </div>
+    </DocScope>
   )
 }
 

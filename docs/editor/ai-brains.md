@@ -16,8 +16,8 @@ kind decides which canvas its editor opens; it is not a mode you flip per sessio
 
 | Kind | Shape | Good for |
 |---|---|---|
-| **Machine** | States are goals; transitions are gated by condition trees. | Explicit, readable behaviour: patrol → chase → attack. You know exactly why it did what it did. |
-| **Goals** | Goals with desirability scores, arbitrated periodically; composites made of subgoals. | Agents that weigh options — flee when hurt, loot when safe, fight when cornered. |
+| **Behaviour machine** | States are goals; transitions are gated by condition trees. | Explicit, readable behaviour: patrol → chase → attack. You know exactly why it did what it did. |
+| **Goal graph** | Goals with desirability scores, arbitrated periodically; composites made of subgoals. | Agents that weigh options — flee when hurt, loot when safe, fight when cornered. |
 
 Both halves exist in the file regardless (the unused one is empty), so switching kind loses nothing.
 
@@ -78,7 +78,8 @@ and fuzzy *variables* are not on the canvas at all.
 
 ## The Behaviour canvas
 
-Nodes are **states**; each names a goal. An edge is a transition.
+The state machine a behaviour brain runs. Nodes are **states**; each names a goal. An edge is a
+transition.
 
 | | |
 |---|---|
@@ -99,9 +100,23 @@ While the game is playing, the current state is highlighted live.
 A machine only evaluates the transitions leaving the state it is currently in, which is what keeps
 layered machines predictable: while in `Jump`, nothing about `Idle` is even looked at.
 
+The inspector holds the machine's detail:
+
+- **Parameters** — what the transition conditions compare. Each has a name, a type (`number`,
+  `boolean` or `trigger`) and a source: a **built-in** reading the pawn's measured motion
+  (`planarSpeed`, `isGrounded`, `slopeAngle` …), a **sense** — one of the few things only the
+  controller knows about its target — a blackboard entry, a variable on the pawn, a fuzzy output
+  (offered once the brain's fuzzy model writes one), or a constant.
+- **States** — each state's name and goal, **Entry** (the state the machine starts in, and the one it
+  falls back to if the held state is deleted), a target key (empty uses the controller's own) and a
+  **Speed** throttle. Renaming a state carries its transitions along.
+- **Transitions** — from a state (or *any state*) to another, a **Min dwell** — seconds the machine
+  must have spent in the source state before the transition may fire, the guard against a pair that
+  flips every frame — and the condition tree that opens it.
+
 ## The Goals canvas
 
-Nodes are **goals**. A composite (one with subgoals) is tinted and marked `▽` with a "N subgoals"
+The goal graph a goals brain arbitrates. Nodes are **goals**. A composite (one with subgoals) is tinted and marked `▽` with a "N subgoals"
 subtitle; a leaf shows its goal verb.
 
 > **An edge means containment, not a transition.** `A → B` reads "B is a subgoal of A", and the
@@ -118,18 +133,29 @@ removes every reference to it as a subgoal and its evaluator. Clicking an **edge
 
 There is no entry state — a goal graph arbitrates rather than starting somewhere.
 
-The inspector holds the **desirability evaluators**: for each goal, a source, a `from` and `to`
-range mapping that value to 0…1 desirability, and a `bias` multiplier. `to < from` **inverts** the
-mapping, which is how "nearer is better" is expressed.
+The inspector holds the graph's detail:
 
-`arbitrationInterval` (default `0.5 s`) governs how often a plan may be **abandoned** partway; a
-plan that finishes always re-arbitrates immediately. Setting it to 0 rarely helps — it flickers
-between near-equal goals.
+- **Goals** — each goal's name and verb (ignored once it has subgoals), a target key (empty uses the
+  controller's own), a speed throttle, its **Subgoals** — names of goals to run in order, comma
+  separated; a goal with subgoals drives none of its own, its children do — and optional **Until** and
+  **Fail when** conditions. Until completes the goal, which pops it and lets its parent move on; Fail
+  when fails it, and failure beats completion when both are true. Both are condition trees over the
+  behaviour machine's parameters.
+- **Desirability** — the evaluators: for each goal, a source, the value that scores 0 (**0 at**) and
+  the one that scores 1 (**1 at**), and a **×** bias the result is multiplied by. A range running
+  backwards **inverts** the mapping, which is how "nearer is better" is expressed: 0 at 20, 1 at 0
+  scores 1 when the distance is 0.
+- **Arbitration** — **Interval** (`arbitrationInterval`, default `0.5 s`) governs how often a plan may
+  be **abandoned** partway; a plan that finishes always re-arbitrates immediately. Setting it to 0
+  rarely helps — it flickers between near-equal goals. Nothing can abstain: the best score starts
+  below zero, so a goal scoring 0 still wins if it is the only candidate. Author a low-scoring
+  fallback rather than expecting nothing to run.
 
 ## The Fuzzy canvas
 
 Fuzzy logic turns crisp numbers into graded judgements: "distance 12" becomes "somewhat close", and
-rules combine those into outputs an agent acts on.
+rules combine those into outputs an agent acts on. Either kind of brain reads those outputs through a
+**Fuzzy** parameter source.
 
 > **A rule is a node here, not an edge.** A rule is a hyper-edge — several antecedent variables
 > feeding one consequent — which no pairwise link can express. Promoting it to a node keeps every
@@ -147,8 +173,20 @@ exists) seeds both ends from the first variable's first set. Connecting variable
 antecedent; rule → variable **replaces** the consequent; rule → rule and variable → variable are
 ignored.
 
-**Set shapes stay in the inspector**: seven shapes (`triangular`, `leftShoulder`, `rightShoulder`,
-`leftSCurve`, `rightSCurve`, `normal`, `singleton`) with left / mid / right breakpoints.
+Set shapes stay in the inspector, with the rest of the model's detail:
+
+- **Variables** — each variable's sets: a name, one of seven shapes (`triangular`, `leftShoulder`,
+  `rightShoulder`, `leftSCurve`, `rightSCurve`, `normal`, `singleton`), and left / mid / right
+  breakpoints. Left and right are where membership falls to zero, mid is where it peaks; the
+  shoulders stay at 1 beyond their midpoint, which is what makes the ends of a range behave rather
+  than falling off. Each variable is tagged **input**, **output** (a rule writes it) or **unfed** —
+  see below.
+- **Rules** — IF every listed term holds, THEN the output variable takes the named set, to the degree
+  the weakest term held. A rule naming a variable or set that does not exist is dropped when the
+  model is read. One using OR or a hedge, authored elsewhere, is shown read-only and still runs.
+- **Output** — **Defuzzification**, how the fired rules collapse to one number. `maxav` averages each
+  output set's peak weighted by how strongly it fired — cheap, and jumpier; `centroid` integrates the
+  whole surface — smoother, and roughly twenty times the work.
 
 ### Fuzzy inputs are matched by name
 

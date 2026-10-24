@@ -18,7 +18,8 @@ export default function ShapeEditor(props: {
 
   return (
     <div className='w-full p-2'>
-      <Section title={title}>
+      {/* The title is the shape's type; every type shares the docs' one entry for a shape card. */}
+      <Section title={title} doc='editor/physics#shapes::Shape'>
         <PropertyTable columns={['30%', '70%']}>
           {s.type === 'box' && <>
             <PropertyRow label='Width'><NumberInput value={s.width} step={0.01} onChange={(v) => patch({ width: v })} /></PropertyRow>

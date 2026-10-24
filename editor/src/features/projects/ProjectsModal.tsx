@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Modal, ModalHeader } from '../../components/ui'
+import { DocScope, Modal, ModalHeader } from '../../components/ui'
 import ProjectsBrowser from './ProjectsBrowser'
 import { ProjectRecord, loadProjects } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'
@@ -25,20 +25,15 @@ export default function ProjectsModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal onClose={onClose} className='w-[720px] max-w-[92vw]'>
-      <ModalHeader>
-        <div className='flex items-baseline gap-2'>
-          <span className='text-ui-lg font-semibold'>Projects</span>
-          {current && <span className='text-ui text-muted'>Currently open: {current.name}</span>}
+      {/* What a project is, and what this browser does, is docs/editor/projects.md: the title's card. */}
+      <DocScope page='editor/projects'>
+        <ModalHeader title='Projects' aside={current && `Currently open: ${current.name}`} />
+        <div className='h-[420px]'>
+          {projects
+            ? <ProjectsBrowser projects={projects} onChanged={setProjects} />
+            : <div className='w-full h-full flex items-center justify-center text-ui text-muted'>Loading projects…</div>}
         </div>
-        <div className='mt-1 text-ui-sm text-dim'>
-          Each project has its own scenes, assets, scripts and layout. Nothing is shared between them.
-        </div>
-      </ModalHeader>
-      <div className='h-[420px]'>
-        {projects
-          ? <ProjectsBrowser projects={projects} onChanged={setProjects} />
-          : <div className='w-full h-full flex items-center justify-center text-ui text-muted'>Loading projects…</div>}
-      </div>
+      </DocScope>
     </Modal>
   )
 }

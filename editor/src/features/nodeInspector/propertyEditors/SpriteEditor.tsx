@@ -6,7 +6,7 @@ import SpriteAppearance from './SpriteAppearance';
 import TileGrid from '../../tileset/TileGrid';
 import { useCleoEngine } from '../../EngineContext';
 import { useEventBus } from '../../EventBusContext';
-import { Field, Select, Hint } from '../../../components/ui';
+import { Field, Select, Hint, DocScope } from '../../../components/ui';
 import { SpriteIcon } from '../sectionIcons';
 
 // A static sprite is a tileset plus one tile. TileGrid is the same picker the tilemap palette uses, with
@@ -29,8 +29,9 @@ export default function SpriteEditor(props: {node: SpriteNode}) {
 
   const asset = tilesetAssetOf(props.node, tilesets);
 
+  // Sprites are documented with the rest of 2D, tileset slot and appearance included.
   return (
-    <>
+    <DocScope page='editor/tilemap-2d'>
       <TilesetSlot node={props.node} onChange={() => { setTileIndex(props.node.tileIndex); force(x => x + 1) }} />
 
       <Collapsable title='Sprite' icon={<SpriteIcon />} persistKey='sprite'>
@@ -73,6 +74,6 @@ export default function SpriteEditor(props: {node: SpriteNode}) {
       </Collapsable>
 
       <SpriteAppearance node={props.node} />
-    </>
+    </DocScope>
   )
 }
