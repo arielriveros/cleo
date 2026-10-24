@@ -3,7 +3,8 @@ import { definePresets, type Preset } from "../../presets";
 
 /**
  * One-click distance falloffs for a spatial SoundNode. Key order is assignment order: the reference distance
- * lands before the max distance, which the node keeps above it.
+ * lands before the max distance, which the node keeps above it. The inverse model never reaches silence
+ * (Max Distance only clamps it), so every preset that should cut off uses the linear one.
  */
 export type SoundFalloffPreset = Preset<SpatialSettings>;
 
@@ -11,10 +12,10 @@ const BASE: SpatialSettings = { distanceModel: 'inverse', refDistance: 1, maxDis
 
 export const SOUND_FALLOFF_PRESETS: SoundFalloffPreset[] = definePresets(BASE, [
     ['default', 'Default', 'Natural inverse-distance falloff from one metre.', {}],
-    ['smallProp', 'Small Prop', 'Quiet, close sounds — a clock, a dripping tap, a buzzing lamp.',
+    ['smallProp', 'Small Prop', 'Quiet, close sounds that fall away fast — a clock, a dripping tap, a buzzing lamp.',
         { refDistance: 0.5, maxDistance: 20, rolloffFactor: 1.5 }],
-    ['voice', 'Voice', 'Dialogue and barks: clear up close, gone across a large room.',
-        { refDistance: 1, maxDistance: 30, rolloffFactor: 1 }],
+    ['voice', 'Voice', 'Dialogue and barks: clear up close, fading out to silence across a large room.',
+        { distanceModel: 'linear', refDistance: 1.5, maxDistance: 30, rolloffFactor: 1 }],
     ['room', 'Room', 'Fills about one room and is silent outside it.',
         { distanceModel: 'linear', refDistance: 1, maxDistance: 15, rolloffFactor: 1 }],
     ['ambientZone', 'Ambient Zone', 'Full volume across an area, fading out at its edge — wind, birdsong, room tone.',

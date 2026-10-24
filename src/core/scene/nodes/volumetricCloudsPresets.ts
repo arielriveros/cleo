@@ -94,7 +94,7 @@ export const VOLUMETRIC_CLOUDS_PRESETS: VolumetricCloudsPreset[] = [
     }),
     preset('sunset', 'Sunset', 'Warm orange glow lighting the cloud bases from below the horizon.', {
         coverage: 0.45, cloudType: 0.45, thickness: 700,
-        sunDirection: [0.85, -0.1, 0.5], sunColor: [1.0, 0.55, 0.28], sunIntensity: 9,
+        sunDirection: [0.85, 0.04, 0.5], sunColor: [1.0, 0.55, 0.28], sunIntensity: 9,
         ambientColor: [0.55, 0.4, 0.55], ambientIntensity: 0.7, groundColor: [0.45, 0.3, 0.25],
         sunsetColor: [1.0, 0.32, 0.1], phaseG: 0.75, silverIntensity: 1.5, silverSpread: 0.14,
         powderStrength: 0.25, absorption: 1.1, windSpeed: 8,
@@ -114,7 +114,7 @@ export const VOLUMETRIC_CLOUDS_PRESETS: VolumetricCloudsPreset[] = [
     preset('windy', 'Windy', 'Broken, fast-moving clouds with ragged edges.', {
         coverage: 0.5, cloudType: 0.55, thickness: 650,
         detailStrength: 0.5, curlStrength: 1.2,
-        windDirection: [1.0, 0.0, 0.35], windSpeed: 60, detailWindFactor: 3.5,
+        windDirection: [1.0, 0.0, 0.35], windSpeed: 30, detailWindFactor: 3.5,
     }),
     preset('haze', 'Hazy', 'Soft, low-contrast veil of cloud.', {
         coverage: 0.7, density: 0.6, cloudType: 0.15, baseAltitude: 1200, thickness: 900,

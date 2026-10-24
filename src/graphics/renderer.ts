@@ -7014,9 +7014,10 @@ export class Renderer {
         if (encoder !== this._frameEncoder) encoder.finish();
     }
 
-    // Aerial-perspective fog for the SkyAtmosphere node: a fullscreen pass tinting opaque geometry
-    // toward the atmosphere cubemap by distance. Reads the scene-depth snapshot, not the G-buffer,
-    // so forward Blinn-Phong opaques fog at their own depth too.
+    // Height fog for the SkyAtmosphere node: a fullscreen pass that integrates the fog along each view
+    // ray and tints toward the atmosphere's horizon colour (see skyFog.wgsl), over the opaque scene and
+    // the sky's horizon band. Reads the scene-depth snapshot, not the G-buffer, so forward Blinn-Phong
+    // opaques fog at their own depth too.
     private _renderSkyFog(scene: Scene): void {
         const node = scene.skyAtmosphere;
         if (!node || !node.fogEnabled || !node.cubemap || node.fogMaxOpacity <= 0 || node.fogDensity <= 0) return;
@@ -7026,8 +7027,9 @@ export class Renderer {
         pass.setPipeline(pipeline);
 
         this._shaderManager.bind('skyFog');
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._sceneDepthFBO.depth,
-                                                                  this._atmosphereSkyCube(scene) ?? node.cubemap]));
+        // The CLEAN atmosphere, never the cloud-baked sky: fog is the colour of the air at the horizon, and
+        // sampling clouds into it painted them onto every fogged hillside.
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._sceneDepthFBO.depth, node.cubemap]));
         this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
         this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
         this._shaderManager.setUniform('u_fogDensity', node.fogDensity);
@@ -7037,10 +7039,10 @@ export class Renderer {
         this._shaderManager.setUniform('u_fogMaxOpacity', node.fogMaxOpacity);
         this._shaderManager.setUniform('u_fogColor', node.fogColor);
         this._shaderManager.setUniform('u_fogColorBlend', node.fogColorBlend);
-        // Sample the atmosphere a few mips up so fog is smooth colour haze (no crisp sun disk / detail
-        // showing through geometry). ~16px-per-face target regardless of the baked cubemap resolution.
+        // Sample the atmosphere well up the mip chain so fog is a smooth colour haze (no crisp sun disk
+        // or sky detail in it). ~8px-per-face target regardless of the baked cubemap resolution.
         const res = node.cubemapResolution || node.resolution;
-        this._shaderManager.setUniform('u_fogSkyLod', Math.max(0, Math.log2(res) - 4));
+        this._shaderManager.setUniform('u_fogSkyLod', Math.max(0, Math.log2(res) - 3));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
 
@@ -11816,6 +11818,9 @@ export class Renderer {
             halfRange: this._dofFocusRange * 0.5,
             focal,
             // f*f / N / sensorHeight * screenHeight — the leading term of the thin-lens CoC, in pixels.
+            // The thin lens gives the blur circle's DIAMETER and the gather uses it as a RADIUS, so every
+            // f-stop blurs twice as much as a real lens would. Kept on purpose: the camera's default 60
+            // degree FOV is a ~21 mm lens, which barely defocuses anything at true scale.
             scale: (focal * focal / Math.max(1e-3, this._dofAperture) / SENSOR_HEIGHT) * this._renderHeight,
         };
     }
@@ -11889,7 +11894,9 @@ export class Renderer {
                                                   undefined, false);
         const genPipeline = this._fullscreenPipeline('lensFlare', LensFlareProgram);
         genPass.setPipeline(genPipeline);
-        this._shaderManager.setUniform('u_flareThreshold', this._lensFlareThreshold);
+        // The threshold is on the EXPOSED image, as bloom's is, so it means the same brightness on screen in
+        // a sunlit field and in a cave; the buffer is pre-exposure, so it is uploaded divided back out.
+        this._shaderManager.setUniform('u_flareThreshold', this._lensFlareThreshold / Math.max(1e-8, this._exposure));
         this._shaderManager.setUniform('u_flareGhosts', this._lensFlareGhosts);
         // Not a setting: the spacing that puts the ghosts across the frame rather than piled at the
         // centre. Exposing it alongside the ghost count would mostly be a way to hide them all.
@@ -11950,6 +11957,7 @@ export class Renderer {
         // speed to the frame rate, so it would crawl on a slow machine and shimmer on a fast one.
         this._shaderManager.setUniform('u_time', performance.now() * 0.001);
         this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
+        this._shaderManager.setUniform('u_exposure', this._exposure);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [source.colors[0]]));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
@@ -11960,6 +11968,7 @@ export class Renderer {
         const pipeline = this._fullscreenPipeline('chromaticAberration', ChromaticAberrationProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_strength', this._chromaticAberrationStrength);
+        this._shaderManager.setUniform('u_aspect', this._renderWidth / Math.max(1, this._renderHeight));
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [source.colors[0]]));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);

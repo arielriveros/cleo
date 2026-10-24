@@ -722,6 +722,28 @@ describe('air control', () => {
         expect(out.velocity[0]).toBeCloseTo(3, 5);
         expect(out.velocity[2]).toBeCloseTo(0, 5);
     });
+
+    // A share of the gap per SECOND, compounded per frame: 0.5 halves it in one second, at any frame rate.
+    // It used to be a share per frame, so 0.5 closed the gap almost entirely within a tenth of a second at
+    // 60 fps, and twice as fast again at 120.
+    it('closes the same share of the gap per second at any frame rate', () => {
+        const t = tuning({ walkSpeed: 4, airControl: 0.5 });
+        const after = (fps: number) => {
+            let velocity: [number, number, number] = [3, 0, 0];
+            let state = createLocomotionState();
+            for (let i = 0; i < fps; i++) {
+                const out = stepLocomotion(moving(0, 1), sense({ grounded: false, velocity, dt: 1 / fps }), t, state);
+                velocity = [out.velocity[0], 0, out.velocity[2]];
+                state = out.next;
+            }
+            return velocity;
+        };
+        for (const fps of [30, 60, 144]) {
+            const v = after(fps);
+            expect(v[0], `${fps} fps`).toBeCloseTo(1.5, 3);
+            expect(v[2], `${fps} fps`).toBeCloseTo(2, 3);
+        }
+    });
 });
 
 describe('totality and purity', () => {

@@ -21,8 +21,8 @@ export const PHYSICS_SURFACE_PRESETS: PhysicsSurfacePreset[] = definePresets<Phy
     ['ice', 'Ice', 'Slides on everything.', { friction: 0.02, restitution: 0.05 }],
     ['wood', 'Wood', 'Moderate grip and a dull knock of a bounce.', { friction: 0.45, restitution: 0.2 }],
     ['metal', 'Metal', 'Slick and a little lively.', { friction: 0.35, restitution: 0.15 }],
-    ['stone', 'Stone', 'Grippy and dead.', { friction: 0.6, restitution: 0.05 }],
-    ['rubber', 'Rubber', 'Very grippy and springy.', { friction: 0.9, restitution: 0.6 }],
-    ['bouncy', 'Bouncy Ball', 'Keeps most of its speed on every bounce.', { friction: 0.5, restitution: 0.9 }],
-    ['sticky', 'Sticky / Mud', 'Full grip, no bounce — nothing slides off it.', { friction: 1, restitution: 0 }],
+    ['stone', 'Stone', 'Grippy and dead. The extra grip shows only against other grippy surfaces.', { friction: 0.6, restitution: 0.05 }],
+    ['rubber', 'Rubber', 'Springy, and grippy against other grippy surfaces.', { friction: 0.9, restitution: 0.6 }],
+    ['bouncy', 'Bouncy Ball', 'Keeps most of its speed on every bounce, off anything.', { friction: 0.5, restitution: 0.9 }],
+    ['sticky', 'Sticky / Mud', 'Full grip and no bounce. Grips only what is grippy itself — the floor still lets it slide at 0.3.', { friction: 1, restitution: 0 }],
 ]);

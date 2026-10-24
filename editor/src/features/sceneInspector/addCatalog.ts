@@ -46,7 +46,11 @@ import {
   ForceFieldNode,
   WaterVolumeNode,
   OccluderNode,
+  LIGHT_UNIT,
+  newLightOptions,
 } from 'cleo'
+import type { Renderer } from 'cleo'
+import { sceneLightLevel } from '../../utils/sceneLightLevel'
 import type EventEmitter from '../../utils/eventEmitter'
 import type { ShapeDescription } from '../EngineContext'
 import {
@@ -102,6 +106,8 @@ export interface AddContext {
   editorScene: Scene;
   eventEmitter: EventEmitter;
   triggers: Map<string, { shapes: ShapeDescription[] }>;
+  /** For new lights, which are brightened to the scene's exposure (see `newLightOptions`). */
+  renderer?: Renderer | null;
 }
 
 export interface AddItem {
@@ -205,15 +211,22 @@ export const ADD_ITEMS: AddItem[] = [
   // automatically by the reconciler, keyed off the node type.
   {
     id: 'directionalLight', label: 'Directional', icon: DirectionalLightIcon, category: 'lights',
-    create: async () => new LightNode('directional light', new DirectionalLight({}), true),
+    create: async () => new LightNode('directional light',
+      new DirectionalLight({ unit: LIGHT_UNIT, ...newLightOptions('directional', null) }), true),
   },
   {
     id: 'pointLight', label: 'Point', icon: PointLightIcon, category: 'lights',
-    create: async () => new LightNode('point light', new PointLight({})),
+    // Photometric from the start, never the legacy `{}` (a ~9.4 million lm lamp), and brightened to the
+    // scene so a lamp added to a daylit scene still shows.
+    create: async (ctx) => new LightNode('point light', new PointLight({
+      unit: LIGHT_UNIT, ...newLightOptions('point', sceneLightLevel(ctx.editorScene, ctx.renderer)),
+    })),
   },
   {
     id: 'spotlight', label: 'Spotlight', icon: SpotlightIcon, category: 'lights',
-    create: async () => new LightNode('spot light', new Spotlight({})),
+    create: async (ctx) => new LightNode('spot light', new Spotlight({
+      unit: LIGHT_UNIT, ...newLightOptions('spot', sceneLightLevel(ctx.editorScene, ctx.renderer)),
+    })),
   },
 
   {

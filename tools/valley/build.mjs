@@ -198,6 +198,19 @@ function translateCustom(request) {
   return JSON.parse(res.stdout.slice(res.stdout.indexOf('{')))
 }
 
+// The engine presets the valley's look is made of (tools/valley/presets.ts), resolved through vite-node
+// because the tables are TypeScript. Every effect below is one named preset; nothing is hand-tuned.
+const VALLEY_AMBIENT = [9000, 9500, 11000]
+const PRESETS = (() => {
+  const ambientLux = 0.2126 * VALLEY_AMBIENT[0] + 0.7152 * VALLEY_AMBIENT[1] + 0.0722 * VALLEY_AMBIENT[2]
+  const res = spawnSync(process.platform === 'win32' ? 'npx.cmd' : 'npx',
+    ['vite-node', '--config', 'vitest.config.ts', 'tools/valley/presets.ts'],
+    { cwd: ROOT, input: JSON.stringify({ ambientLux }), encoding: 'utf8', shell: process.platform === 'win32', maxBuffer: 16 << 20 })
+  if (res.status !== 0) throw new Error(`preset resolution failed:
+${res.stderr}`)
+  return JSON.parse(res.stdout.slice(res.stdout.indexOf('{')))
+})()
+
 const WATER_MAT = (() => {
   const compiled = translateCustom({ renderMode: 'forward', fragmentSource: WATER_SOURCE, uniforms: WATER_UNIFORMS })
   const properties = Object.fromEntries(WATER_UNIFORMS.filter(u => !u.type.startsWith('sampler')).map(u => [u.name, u.value]))
@@ -652,6 +665,15 @@ function eulerToward(dir) {
 
 /** The player's camera sees the far mountains: the Playable's 100 m far plane is a room's. */
 const CAMERA_FAR = 3000
+/** The player camera's boom length: where the player stands from the lens, so where depth of field focuses. */
+const PLAYER_ARM = (() => {
+  let arm = null
+  const walk = (n) => { if (n.type === 'cameraRig' && arm === null) arm = n.armLength; (n.children ?? []).forEach(walk) }
+  walk(LEVEL.player.nodeJson)
+  if (typeof arm !== 'number') throw new Error('the player template has no camera rig')
+  return arm
+})()
+
 function widenCamera(json) {
   const walk = (n) => { if (n.type === 'camera' && n.camera) n.camera.far = CAMERA_FAR; (n.children ?? []).forEach(walk) }
   walk(json)
@@ -832,8 +854,8 @@ function pondVolume() {
     id: id('pond:volume'),
     position: [POND.x, Math.round((floor + depth / 2) * 1000) / 1000, POND.z],
     waterVolume: {
-      size: [2 * POND_HALF, Math.round(depth * 1000) / 1000, 2 * POND_HALF], density: 1000,
-      linearDrag: 2.5, angularDrag: 1.5, waveAmplitude: 0.025, waveFrequency: 0.45, affectCharacters: false,
+      size: [2 * POND_HALF, Math.round(depth * 1000) / 1000, 2 * POND_HALF],
+      ...PRESETS.water, affectCharacters: false,
       surfaceNodeId: id('pond:water'), splashTemplate: '', enabled: true,
     },
   })
@@ -933,20 +955,26 @@ function valleyScene() {
   sun.name = 'Sun'
   sun.id = id('sun')
   sun.rotation = eulerToward(SUN_TRAVEL)
-  sun.light = { unit: 'photometric', color: [1, 0.96, 0.9], intensity: 100000, angularRadius: 0.27 }
+  // A morning sun (the Morning Sun light preset, brightened against the valley's ambient as the inspector
+  // does), a hazy summer sky with its distance haze, scattered fair-weather clouds, a breeze.
+  sun.light = { unit: 'photometric', ...PRESETS.sun }
   sun.castShadows = true
   const sky = souls.sourceNode('sky atmosphere')
   sky.id = id('sky')
-  Object.assign(sky.atmosphere, { fogStart: 250, fogDensity: 0.0005, fogHeight: 150, fogMaxOpacity: 0.55, godRayMaxDistance: 160 })
+  // The god rays have no preset; their reach is the valley's scale.
+  sky.atmosphere = { ...sky.atmosphere, ...PRESETS.sky, godRayMaxDistance: 160 }
   const clouds = souls.sourceNode('volumetric clouds')
   clouds.id = id('clouds')
+  // The preset sets the look; the clouds follow the Wind node below (useSceneWind), so its wind direction is unused.
+  clouds.clouds = { ...clouds.clouds, ...PRESETS.clouds, useSceneWind: true }
   // One wind for the whole valley: the grass and pines sway with it, and the clouds drift the same way.
+  // The fade distances are the foliage's performance budget, not a look, so they stay the valley's.
   const wind = node('Wind', 'wind', {
     id: id('wind'),
-    wind: { direction: WIND_DIRECTION, strength: 1, gustScale: 22, gustSpeed: 5, fadeStart: 35, fadeEnd: 70 },
+    wind: { direction: WIND_DIRECTION, ...PRESETS.wind, fadeStart: 35, fadeEnd: 70 },
   })
-  const windRad = WIND_DIRECTION * Math.PI / 180
-  clouds.clouds = { ...clouds.clouds, windDirection: [Math.round(Math.cos(windRad) * 1000) / 1000, 0, Math.round(-Math.sin(windRad) * 1000) / 1000] }
+  // Lights the valley with its own sky, and lets the clouds' shadows sweep across it.
+  const skyLight = node('Sky Light', 'skyLight', { id: id('skylight'), skyLight: { cloudShadows: true } })
 
   const placedBuildings = buildings.map(b => placedBuilding(b, propAssets[props.indexOf(b.prop)]))
 
@@ -1022,7 +1050,7 @@ function valleyScene() {
         id: soulsId('manager'), children: [souls.banner(), souls.soundsGroup('manager', souls.SOUNDS.manager, { music: souls.MUSIC_CUES })],
       }), 'SoulsGameManager'),
       linkInstance(LEVEL.player, player),
-      sun, sky, clouds, wind,
+      sun, sky, skyLight, clouds, wind,
       landscapeNode(),
       souls.group('water', 'Water', [pondWater(), pondProbe(), pondVolume(), pondZone(), ...floaters()]),
       souls.group('buildings', 'Buildings', placedBuildings),
@@ -1032,14 +1060,17 @@ function valleyScene() {
       spawns,
       navMesh,
     ],
-    ambientLight: [9000, 9500, 11000],
+    ambientLight: VALLEY_AMBIENT,
   })
 
   bakeValleyNavMesh(root, navMesh)
 
   const config = clone(souls.sourceScene.config)
   Object.assign(config.render, {
-    exposure: 2.2, autoExposureEnabled: false, motionBlurEnabled: false,
+    // The High quality tier (SSIL, motion blur, TAA, bloom), the Sunny 16 fixed exposure, the
+    // Cinematic lens look, and Cinematic depth of field focused where the camera boom puts the player.
+    quality: 'high', motionBlurEnabled: true,
+    ...PRESETS.exposure, ...PRESETS.look, ...PRESETS.dof, dofFocusDistance: PLAYER_ARM,
     foliageCullDistance: PINE_CULL, foliageCellSize: 13,
     terrainLodEnabled: true, terrainLodDistance1: 150, terrainLodDistance2: 400, terrainLodStep1: 2, terrainLodStep2: 4,
     // A 2 km valley seen to 3 km: four detailed cascades over the first 150 m, then the far cascade
@@ -1103,7 +1134,11 @@ function dungeonScene() {
   const config = clone(souls.sourceScene.config)
   config.graphics.clearColor = [0.01, 0.01, 0.012, 1]
   config.render.clearColor = [0.01, 0.01, 0.012, 1]
-  Object.assign(config.render, { exposure: 1.2, autoExposureEnabled: false, motionBlurEnabled: false })
+  // Exposure stays fixed down here: metering would lift the dark to daylight grey. The lens is the valley's.
+  Object.assign(config.render, {
+    exposure: 1.2, autoExposureEnabled: false, quality: 'high', motionBlurEnabled: true,
+    ...PRESETS.look, ...PRESETS.dof, dofFocusDistance: PLAYER_ARM,
+  })
   return { scene: root, textures: [], ui: { version: 1, elements: [] }, config, assetHashes: {}, assetHashVersion: ASSET_HASH_VERSION, savedAt: souls.CREATED_AT }
 }
 

@@ -155,7 +155,13 @@ Intensities are photometric.
 
 Other fields: `range` (default `10`), `sourceRadius` (`0.05`), directional `angularRadius`
 (`0.00465`), spot `cutOff` / `outerCutOff` / `coneScaleOffset`. `resetToPhysicalDefaults()` puts a
-light back to plausible values.
+light back to plausible values. These defaults need `unit: LIGHT_UNIT` (or an `intensity`): a light
+constructed with neither is read as a pre-photometric light and migrated from its colour.
+
+The real-world presets (`POINT_LIGHT_PRESETS`, `SPOT_LIGHT_PRESETS`, `DIRECTIONAL_LIGHT_PRESETS`,
+or `lightPresetsFor(light)`) hold real values. Pass one through `presetForScene(preset, { ev100,
+ambientLux })` before `applyPreset(light, table, preset)` to brighten it as far as a brighter scene
+needs; `newLightOptions('point', level)` gives a freshly added lamp the same treatment.
 
 ```ts
 const lamp = this.findNode('Lamp') as LightNode

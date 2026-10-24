@@ -75,10 +75,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Sky. The depth buffer holds the clear value there — nothing wrote it — and linearising that
     // lands somewhere arbitrary near the far plane. Treat it as genuinely at infinity, which is what
-    // it is, so a scene focused on the foreground blurs its background by the full CoC rather than by
-    // whatever the far plane happens to be set to.
+    // it is: the lens's CoC at infinity (a thousand kilometres is infinity to any lens here), not Max
+    // Blur — that clamp is a cost limit, and blurring the sky to it smeared the sky of a deep-focus shot
+    // that leaves the distant hills sharp.
     var cocN: f32;
-    if (d >= 1.0) { cocN = select(0.0, 1.0, u_dof.u_maxCocPx > 0.0); }
+    if (d >= 1.0) { cocN = cocPixels(1.0e6) / max(1e-4, u_dof.u_maxCocPx); }
     else { cocN = cocPixels(linearizeDepth(d, u_dof.u_near, u_dof.u_far)) / max(1e-4, u_dof.u_maxCocPx); }
 
     return vec4<f32>(color, cocN);

@@ -1,4 +1,4 @@
-import { Scene, Camera, CameraNode, LightNode, DirectionalLight } from 'cleo';
+import { Scene, Camera, CameraNode, LightNode, DirectionalLight, LIGHT_UNIT } from 'cleo';
 
 /**
  * Build the editor's navigable camera. The `__editor__` prefix excludes it from selection,
@@ -31,7 +31,8 @@ export function ensureEditorCamera(scene: Scene): void {
 export function createEmptyScene(scene: Scene): void {
   ensureEditorCamera(scene);
 
-  const light = new LightNode('light', new DirectionalLight({}));
+  // Photometric: the 100,000 lx default sun, not the legacy `{}` (which migrates to 78,643 lx).
+  const light = new LightNode('light', new DirectionalLight({ unit: LIGHT_UNIT }));
   light.setPosition([0, 1, 0]).setRotation([100, 25, 0]);
   light.castShadows = true;
   scene.addNode(light);

@@ -126,14 +126,14 @@ export default function RendererSettingsPanel() {
   const [specularOcclusion, setSpecularOcclusion] = useState<boolean>(() => renderer?.specularOcclusionEnabled ?? true);
   const [specularAa, setSpecularAa] = useState<boolean>(() => renderer?.specularAaEnabled ?? true);
   const [horizonOcclusion, setHorizonOcclusion] = useState<boolean>(() => renderer?.horizonOcclusionEnabled ?? true);
-  const [exposureComp, setExposureComp] = useState<number>(() => renderer?.exposureCompensation ?? 0);
+  const [exposureComp, setExposureComp] = useState<number>(() => renderer?.exposureCompensation ?? 1);
   const [exposureMinEV, setExposureMinEV] = useState<number>(() => renderer?.exposureMinEV ?? 2);
   const [exposureMaxEV, setExposureMaxEV] = useState<number>(() => renderer?.exposureMaxEV ?? 17);
   const [exposureSpeedUp, setExposureSpeedUp] = useState<number>(() => renderer?.exposureSpeedUp ?? 3);
   const [exposureSpeedDown, setExposureSpeedDown] = useState<number>(() => renderer?.exposureSpeedDown ?? 1);
-  const [bloomThreshold, setBloomThreshold] = useState<number>(() => renderer?.bloomThreshold ?? 1.0);
+  const [bloomThreshold, setBloomThreshold] = useState<number>(() => renderer?.bloomThreshold ?? 2.0);
   const [bloomKnee, setBloomKnee] = useState<number>(() => renderer?.bloomKnee ?? 0.5);
-  const [bloomIntensity, setBloomIntensity] = useState<number>(() => renderer?.bloomIntensity ?? 0.6);
+  const [bloomIntensity, setBloomIntensity] = useState<number>(() => renderer?.bloomIntensity ?? 0.35);
   const [bloomMask, setBloomMask] = useState<boolean>(() => renderer?.bloomMaskEnabled ?? false);
   const [chromatic, setChromatic] = useState<number>(() => renderer?.chromaticAberrationStrength ?? 0);
   const [saturation, setSaturation] = useState<number>(() => renderer?.saturation ?? 1);

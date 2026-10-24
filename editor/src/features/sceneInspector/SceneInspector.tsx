@@ -237,7 +237,7 @@ export default function SceneInspector() {
   // `inspectedScene` is the running play scene while Simulating, so the tree shows the live simulation (spawns,
   // despawns, renames). Every structural edit below stays gated on isPlayMode, which Simulate keeps true.
   const { inspectedScene: editorScene, isSimulating, eventEmitter, bodies, triggers, isPlayMode, editorMode, templateRootId,
-          attachScriptToNode, activeTab, sceneList, openSceneId, selectedNode } = useCleoEngine()
+          attachScriptToNode, activeTab, sceneList, openSceneId, selectedNode, instance } = useCleoEngine()
   const [ nodes, setNodes ] = useState<NodeDescription | null>(null);
   const [ filter, setFilter ] = useState('');
   const treeRef = useRef<TreeApi<NodeDescription> | undefined>(undefined);
@@ -466,7 +466,7 @@ export default function SceneInspector() {
       Logger.warn('Cannot add a node inside a template instance', 'Editor');
       return;
     }
-    addItemTo(item, parent, { editorScene, eventEmitter, triggers }).catch(err => console.error(err));
+    addItemTo(item, parent, { editorScene, eventEmitter, triggers, renderer: instance?.renderer }).catch(err => console.error(err));
   };
 
   // Delete and F2, on top of react-arborist's own keymap. Capture phase and stopping propagation, because

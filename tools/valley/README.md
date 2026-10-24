@@ -35,6 +35,10 @@ The source art in `build/` is gitignored, so this generator is run by hand and i
 - `foliage.mjs` builds the grass patches, the pine levels and the seeded scatter. Placement is pre-baked because opening a scene never scatters.
 - `props.mjs` handles the FBX props: assimp to parts, with scaling. Some files carry no unit stamp, so those props are sized to a stated height. It also measures the windmill hub.
 - `water.glsl` / `water.mjs` hold the pond's water: a transparent forward custom material (waves from a generated tiling normal map, Fresnel reflection of the pond's light probe, a sun glint, refraction with depth absorption, shore foam and a soft edge) and its uniforms. `compileCustomWgsl.ts` translates it to WGSL at build time (through `vite-node`), so a published WebGPU game can render it.
+- `presets.ts` resolves the engine presets the valley's look is made of, through `vite-node`: the Sunny 16
+  fixed exposure, the Cinematic lens look and depth of field, the Hazy Summer sky, Sunny clouds, a Breezy wind,
+  a Pond / Lake water volume and the Morning Sun (brightened against the valley's ambient). The High quality tier
+  and a sky light with cloud shadows complete it. Nothing in the look is hand-tuned; change a preset to change it.
 - `meshes.mjs` contains the part pipeline. It flips glTF V, leaves tangents for `Geometry` to rebuild, rounds values for JSON, and builds convex hulls.
 - `build.mjs` assembles everything around `writeProject` from `tools/soulsDemo/build.mjs`.
 

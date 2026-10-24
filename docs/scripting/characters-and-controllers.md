@@ -103,7 +103,7 @@ The **Turn in place** group is [below](#turn-in-place), and **Animator outputs**
 | `turnSettleSeconds` | `0.12` | **Settle** in the inspector. How long the aim must stay past the threshold before a 90° turn engages. See below. |
 | `directionSmoothing` | `0.12` | Seconds the blend-space direction axis takes to glide. |
 | `acceleration` | `0` | Units/s^2, measured **along the ground**. `0` reaches commanded speed immediately. See below. |
-| `airControl` | `1` | |
+| `airControl` | `1` | Steering while airborne, as the share of the gap to the steered velocity closed per **second**: `1` steers freely, `0` keeps the launch velocity, `0.5` halves the gap in a second at any frame rate. |
 | `coyoteSeconds` | `0.12` | |
 | `jumpBufferSeconds` | `0.15` | |
 | `jumpLockoutSeconds` | `0.15` | |

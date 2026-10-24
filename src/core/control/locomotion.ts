@@ -259,9 +259,12 @@ export function stepLocomotion(
     let targetY = 0;
 
     // Airborne steering authority. At 1 this is the original script's behaviour (full control in the
-    // air); at 0 the character keeps whatever planar velocity it launched with.
+    // air); at 0 the character keeps whatever planar velocity it launched with. In between it is the share
+    // of the gap to the steered velocity closed per SECOND, compounded over the frame's real length (0.5
+    // halves the gap in a second). It used to be a flat share per FRAME, which steered twice as hard at
+    // 120 fps as at 60 and at 0.1 still let a 60 fps jump all but reverse in mid-air.
     if (!sense.grounded && tuning.airControl < 1) {
-        const t = tuning.airControl;
+        const t = 1 - Math.pow(1 - clamp(tuning.airControl, 0, 1), dt);
         targetX = planarX + (targetX - planarX) * t;
         targetY = planarY + (targetY - planarY) * t;
         targetZ = planarZ + (targetZ - planarZ) * t;

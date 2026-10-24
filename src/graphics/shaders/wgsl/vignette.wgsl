@@ -15,9 +15,8 @@ struct VignetteUniforms {
     /** 0 = off, 1 = corners fully dark. */
     u_vignetteStrength: f32,
     /**
-     * 0 follows the frame's aspect ratio (an ellipse touching the short edges); 1 is a circle. A
-     * lens vignette is genuinely elliptical on a non-square sensor, so 0 is the honest default and 1
-     * is the stylistic one.
+     * 0 is a circle on screen, whatever the aspect; 1 stretches it to the frame's shape (an ellipse
+     * reaching into the corners of a wide frame). The default 0 is the round one.
      */
     u_vignetteRoundness: f32,
     /** Width of the falloff. Small values give a hard iris edge, large ones a gentle shade. */
@@ -32,8 +31,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let color = textureSample(u_screenTexture_texture, u_screenTexture_sampler, in.uv);
 
     var d = in.uv - vec2<f32>(0.5, 0.5);
-    // Stretch the x axis back out toward square as roundness goes to 1. At 0 the distance is measured
-    // in frame-relative units, so the ellipse follows the viewport.
+    // At roundness 0 the x offset is scaled by the aspect, so distance is measured in frame HEIGHTS and
+    // the shade is a circle on screen; at 1 it is measured in frame-relative units, so it follows the
+    // viewport's shape.
     d.x = d.x * mix(u_vignette.u_aspect, 1.0, u_vignette.u_vignetteRoundness);
 
     // 0 at the centre, 1 at the short-edge midpoint. `smoothstep` from just inside that outward, so a

@@ -77,7 +77,8 @@ export {
 } from "./graphics/renderPresets";
 export {
     DIRECTIONAL_LIGHT_PRESETS, POINT_LIGHT_PRESETS, SPOT_LIGHT_PRESETS, lightPresetsFor,
-    type LightPreset, type LightPresetOptions,
+    presetForScene, keyIlluminance, spotEquivalentLumens, newLightOptions,
+    type LightPreset, type LightPresetOptions, type SceneLightLevel,
 } from "./graphics/lightPresets";
 export { kelvinToRgb } from "./graphics/colorTemperature";
 export { PHYSICS_SURFACE_PRESETS, type PhysicsSurfacePreset } from "./physics/surfacePresets";

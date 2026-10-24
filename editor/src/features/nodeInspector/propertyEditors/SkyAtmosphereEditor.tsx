@@ -118,7 +118,7 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
         <SectionTitle title='Atmosphere' className='mt-3 mb-1' />
         {slider('Rayleigh Scatter', 'rayleighScatter', 0, 4, 0.01)}
         {slider('Rayleigh Height', 'rayleighHeight', 1000, 16000, 100, 0)}
-        {slider('Mie Scatter', 'mieScatter', 0, 4, 0.01)}
+        {slider('Mie Scatter', 'mieScatter', 0, 10, 0.01)}
         {slider('Mie Height', 'mieHeight', 100, 4000, 50, 0)}
         {slider('Mie Anisotropy (g)', 'mieG', 0, 0.99, 0.01)}
         {slider('Exposure', 'exposure', 0, 4, 0.05)}
@@ -173,11 +173,11 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
         <SectionTitle title='Fog (aerial perspective)' className='mt-3 mb-1' />
         {check('Enable Fog', 'fogEnabled')}
         {state.fogEnabled && <>
-          {slider('Density', 'fogDensity', 0, 0.02, 0.0001, 4)}
+          {slider('Density', 'fogDensity', 0, 0.05, 0.0001, 4)}
           {slider('Start Distance', 'fogStart', 0, 2000, 5, 0)}
           {slider('Max Opacity', 'fogMaxOpacity', 0, 1, 0.01)}
           {slider('Height', 'fogHeight', -500, 2000, 10, 0)}
-          {slider('Height Falloff', 'fogHeightFalloff', 0, 0.02, 0.0001, 4)}
+          {slider('Height Falloff', 'fogHeightFalloff', 0, 0.2, 0.0005, 4)}
           {color('Custom Color', 'fogColor')}
           {slider('Custom Color Blend', 'fogColorBlend', 0, 1, 0.01)}
         </>}

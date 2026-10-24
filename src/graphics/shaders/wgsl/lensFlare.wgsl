@@ -16,7 +16,7 @@
 @group(0) @binding(1) var u_screenTexture_sampler: sampler;
 
 struct LensFlareUniforms {
-    /** Linear-HDR radiance a pixel must exceed before it throws a flare at all. */
+    /** Radiance a pixel must exceed before it throws a flare: the exposed threshold / exposure. */
     u_flareThreshold: f32,
     /** How many ghosts to trace back along the centre line. Clamped to GHOST_LIMIT below. */
     u_flareGhosts: f32,

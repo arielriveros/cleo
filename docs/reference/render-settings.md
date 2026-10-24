@@ -100,14 +100,14 @@ with a real aperture, so the near field blurs harder than the far field.
 | `dofFocusDistance` | `number` | `10.0` | Metres to the focal plane. **Ignored** on a camera that names a focus target — that camera measures the distance to the node instead. |
 | `dofFocusRange` | `number` | `0.0` | Metres around the plane that stay perfectly sharp. |
 | `dofAperture` | `number` | `2.8` | f-number as written on a lens barrel. Smaller is wider and shallower. |
-| `dofMaxBlur` | `number` | `24.0` | Blur-radius clamp in pixels. This is a **cost** control. |
+| `dofMaxBlur` | `number` | `24.0` | Blur-radius clamp in pixels. This is a **cost** control: it caps the near field, while the sky blurs only as far as the lens blurs infinity. |
 
 ## Lens
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `lensFlareIntensity` | `number` | `0.0` | `0` = off. Generated from image brightness, so it occludes correctly. |
-| `lensFlareThreshold` | `number` | `1.0` | Radiance needed to throw a flare. |
+| `lensFlareThreshold` | `number` | `1.0` | Brightness needed to throw a flare, measured after exposure (as bloom's threshold is). |
 | `lensFlareGhosts` | `number` | `4` | Ghosts traced through the centre. Clamped to 8 (the shader's bound). |
 | `lensFlareHaloWidth` | `number` | `0.45` | Halo radius in uv. `0` keeps the ghosts, drops the halo. |
 | `lensDirtTexture` | `string \| null` | `null` | Texture id of a dirt mask. **`null` means the built-in mask**, not "none". |
@@ -122,12 +122,12 @@ with a real aperture, so the near field blurs harder than the far field.
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `vignetteStrength` | `number` | `0.0` | `0` = off, `1` = corners fully dark. Applied **before** the tone curve, because that is what it physically is. |
-| `vignetteRoundness` | `number` | `0.0` | `0` follows the frame aspect (as a real lens does); `1` is a circle. |
+| `vignetteRoundness` | `number` | `0.0` | `0` is a circle on screen; `1` stretches it to the frame's shape. |
 | `vignetteSmoothness` | `number` | `0.4` | Width of the falloff band. |
-| `filmGrainIntensity` | `number` | `0.0` | `0` = off. ~`0.05` is subtle 35mm; past ~`0.3` reads as sensor noise. |
+| `filmGrainIntensity` | `number` | `0.0` | `0` = off. Sized against the exposed image, so it reads the same at any exposure: `0.02`–`0.04` is a subtle 35mm stock, `0.1` heavy, past ~`0.2` sensor noise. |
 | `filmGrainSize` | `number` | `2.0` | Grain cell size in pixels. `1` aliases under TAA; 1.5–3 is filmic. |
 | `filmGrainColored` | `boolean` | `false` | Tint each channel independently, as colour film does. |
-| `chromaticAberrationStrength` | `number` | `0.0` | Channel separation toward the corners. |
+| `chromaticAberrationStrength` | `number` | `0.0` | Radial red/blue separation, growing toward the corners; green stays put. `1` = a corner fringe of 1% of the frame height (about 11 px at 1080p); `0.2`–`0.4` is subtle. |
 
 ## Antialiasing and motion blur
 

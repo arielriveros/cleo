@@ -67,8 +67,13 @@ export class CameraRigNode extends Node {
     public socketOffset: vec3 = vec3.create();
 
     // --- fov -------------------------------------------------------------------------------------
-    /** Opt-in: while false the rig leaves `camera.fov` alone, so the Camera inspector stays authoritative. */
-    public fovEnabled: boolean = false;
+    private _fovEnabled: boolean = false;
+    /**
+     * The camera's own FOV from before the rig took it over, put back when `fovEnabled` goes off — so a
+     * camera style with its own lens (Isometric's 25 degrees) does not leave the camera stuck at it after
+     * switching to one without. Saved with the rig, because the camera saves whatever FOV the rig wrote.
+     */
+    private _cameraFov: number | null = null;
     public fov: number = 60;
     public fovDamping: number = 0.2;
 
@@ -165,6 +170,21 @@ export class CameraRigNode extends Node {
         this._lookAtId = id || null;
         this._lookAtNode = null;
         this._warnedDanglingLookAt = false;
+    }
+
+    /** Opt-in: while false the rig leaves `camera.fov` alone, so the Camera inspector stays authoritative. */
+    public get fovEnabled(): boolean { return this._fovEnabled; }
+    public set fovEnabled(on: boolean) {
+        on = !!on;
+        if (on === this._fovEnabled) return;
+        this._fovEnabled = on;
+        if (!on) this._restoreCameraFov(this.camera);
+    }
+
+    private _restoreCameraFov(cam: CameraNode | null): void {
+        if (this._cameraFov === null || !cam) return;
+        if (cam.camera.type === 'perspective') cam.camera.fov = this._cameraFov;
+        this._cameraFov = null;
     }
 
     // --- orbit ------------------------------------------------------------------------------------
@@ -516,7 +536,9 @@ export class CameraRigNode extends Node {
     };
 
     private _updateFov(cam: CameraNode, dt: number, rigid: boolean): void {
-        if (!this.fovEnabled || cam.camera.type !== 'perspective') return;
+        if (!this._fovEnabled) { this._restoreCameraFov(cam); return; }
+        if (cam.camera.type !== 'perspective') return;
+        if (this._cameraFov === null) this._cameraFov = cam.camera.fov;
         this._currentFov = rigid ? this.fov : dampTime(this._currentFov, this.fov, this.fovDamping, dt);
         cam.camera.fov = this._currentFov;
     }
@@ -600,6 +622,7 @@ export class CameraRigNode extends Node {
                     fovEnabled: this.fovEnabled,
                     fov: this.fov,
                     fovDamping: this.fovDamping,
+                    ...(this._cameraFov !== null ? { cameraFov: this._cameraFov } : {}),
 
                     collisionEnabled: this.collisionEnabled,
                     collisionRadius: this.collisionRadius,
@@ -656,6 +679,7 @@ export class CameraRigNode extends Node {
         node.fov = num(json.fov, node.fov);
         node.fovDamping = num(json.fovDamping, node.fovDamping);
         node._currentFov = node.fov;
+        node._cameraFov = typeof json.cameraFov === 'number' && Number.isFinite(json.cameraFov) ? json.cameraFov : null;
 
         node.collisionEnabled = bool(json.collisionEnabled, node.collisionEnabled);
         node.collisionRadius = num(json.collisionRadius, node.collisionRadius);

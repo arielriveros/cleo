@@ -49,7 +49,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let d = textureSample(u_depth_texture, u_depth_sampler, in.uv);
     var coc: f32;
-    if (d >= 1.0) { coc = u_dofComposite.u_maxCocPx; }   // sky: at infinity, as in dofCoc.wgsl
+    if (d >= 1.0) { coc = cocPixels(1.0e6); }   // sky: at infinity, as in dofCoc.wgsl
     else { coc = cocPixels(linearizeDepth(d, u_dofComposite.u_near, u_dofComposite.u_far)); }
 
     // Below about a pixel of CoC there is nothing to see and the half-res buffer can only lose detail,

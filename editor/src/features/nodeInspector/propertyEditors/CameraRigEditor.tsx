@@ -154,21 +154,25 @@ export default function CameraRigEditor(props: { node: CameraRigNode }) {
           {axis('Look At Offset', 'lookAtOffset')}
         </>}
         {state.aimMode !== 'none' && <>
-          {slider('Aim Damping', 'aimDamping', 0, 2, 0.01)}
+          {/* Aim damping smooths the look-at tracking; orbit input is applied as it arrives. */}
+          {state.aimMode === 'lookAt' && slider('Aim Damping', 'aimDamping', 0, 2, 0.01)}
           {slider('Yaw', 'yaw', -180, 180, 0.5, 1)}
-          {slider('Pitch', 'pitch', state.pitchMin, state.pitchMax, 0.5, 1)}
+          {/* A locked pitch (min = max) still needs a slider with some width to draw. */}
+          {slider('Pitch', 'pitch', state.pitchMin, Math.max(state.pitchMax, state.pitchMin + 1), 0.5, 1)}
         </>}
         {state.aimMode === 'orbit' && <>
           {slider('Yaw Sensitivity', 'yawSensitivity', 0.01, 2, 0.01)}
           {slider('Pitch Sensitivity', 'pitchSensitivity', 0.01, 2, 0.01)}
           {check('Invert Pitch', 'invertPitch')}
         </>}
-        {slider('Pitch Min', 'pitchMin', -89, 0, 1, 0)}
-        {slider('Pitch Max', 'pitchMax', 0, 89, 1, 0)}
+        {/* Full ranges on both ends: a locked view (Top-Down's 60/60, Isometric's yaw 45/45) is a limit
+            pair sitting on one side, and a half-range slider would clamp it the moment it was touched. */}
+        {slider('Pitch Min', 'pitchMin', -89, 89, 1, 0)}
+        {slider('Pitch Max', 'pitchMax', -89, 89, 1, 0)}
         {check('Limit Yaw', 'yawLimited')}
         {state.yawLimited && <>
-          {slider('Yaw Min', 'yawMin', -180, 0, 1, 0)}
-          {slider('Yaw Max', 'yawMax', 0, 180, 1, 0)}
+          {slider('Yaw Min', 'yawMin', -180, 180, 1, 0)}
+          {slider('Yaw Max', 'yawMax', -180, 180, 1, 0)}
         </>}
 
         <SectionTitle title='Spring Arm' className='mt-3 mb-1' />

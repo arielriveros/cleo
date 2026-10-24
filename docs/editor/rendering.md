@@ -90,7 +90,10 @@ selectable; *Neutral* (Khronos PBR Neutral) leaves in-gamut albedo untouched, fo
 Saturation is a trim applied in linear light, before the tone map, so the filmic shoulder still
 rolls off correctly. A Sky Light with clouds multiplies its own desaturation on top, and AgX already
 desaturates highlights by construction, so the same trim reads stronger under it than under ACES.
-Chromatic aberration offsets the colour channels radially.
+Chromatic aberration is a lens that bends red and blue by slightly different amounts: red is pushed
+outward and blue inward from the centre of the frame, growing toward the corners, while the picture
+itself stays put. At 1 the corners carry a red-to-blue fringe of 1% of the frame height (about 11
+pixels at 1080p); 0.2–0.4 is a subtle, cinematic amount.
 
 The colour LUT is a horizontal strip of N tiles, N×N each (256×16 or 1024×32): red runs left to right
 within a tile, green downward from the top row, blue across the tiles. It is applied *after* the tone
@@ -132,15 +135,19 @@ space, not a broken effect.
 
 A thin lens with a real aperture, so the near field blurs harder than the far field and the far
 field settles at a fixed blur toward infinity. Off by default; its focus controls appear once it is
-on. **Aperture** is written as an f-stop: smaller is wider, and shallower. A camera that names a
-**Focus Target** node in its inspector measures the distance to that node and ignores the focus
-distance here. The section's presets leave the focus distance alone.
+on. **Aperture** is written as an f-stop: smaller is wider, and shallower. The sky blurs as far as the
+lens blurs infinity, so a deep-focus shot keeps it as sharp as the far hills; **Max Blur** only caps
+the near field. A wide camera (the default 60° FOV is about a 21 mm lens) defocuses little, so the
+stronger presets read best with a narrower FOV. A camera that names a **Focus Target** node in its
+inspector measures the distance to that node and ignores the focus distance here. The section's
+presets leave the focus distance alone.
 
 ### Lens flare
 
 Ghosts and a halo, traced from the bright areas of the *image* rather than from the sun. That is
 what makes them occlude correctly: a sun behind a wall is not in the buffer, so it throws nothing.
-**Intensity** 0 is off. **Threshold** is the radiance a pixel must exceed before it flares;
+**Intensity** 0 is off. **Threshold** is the brightness a pixel must exceed before it flares, measured
+after exposure like bloom's, so it means the same thing in a sunlit field and in a cave;
 **Ghosts** (up to 8) and **Halo** (0 keeps the ghosts and drops the halo) shape what it throws.
 
 ### Lens dirt
@@ -155,15 +162,17 @@ mask** that ships with the engine, not "off".
 ### Vignette
 
 The fall-off toward the corners every real lens has. It is applied to linear radiance before the
-tone curve, so the corners are exposed down rather than crushed flat. **Roundness** 0 follows the
-frame shape, as a lens does; 1 is a circle. **Smoothness** is the width of the falloff band.
+tone curve, so the corners are exposed down rather than crushed flat. **Roundness** 0 is a circle on
+screen; 1 stretches it to the frame's shape. **Smoothness** is the width of the falloff band.
 
 ### Film grain
 
 Sensor and emulsion noise, weighted toward the midtones — black stays clean and a blown highlight
 does not sparkle, which is what separates grain from video noise. It is animated, because a fixed
-pattern reads as dirt on the screen rather than as film. **Size** is the grain cell in pixels;
-**Coloured** tints each channel independently, as colour film does.
+pattern reads as dirt on the screen rather than as film. It is sized against the exposed image, so
+one intensity looks the same outdoors and in a lamp-lit room: 0.02–0.04 is a subtle stock, 0.1 is
+heavy. **Size** is the grain cell in pixels; **Coloured** tints each channel independently, as colour
+film does.
 
 ### Antialiasing
 

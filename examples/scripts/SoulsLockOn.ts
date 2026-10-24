@@ -50,7 +50,7 @@ export default class SoulsLockOnNode extends CameraRigNode {
   public retargetRange: number = 10
   /** Boom length while locked: closer than the free camera, for a tighter view of the fight. */
   public lockedArmLength: number = 3.1
-  /** Pivot offset while locked (rig space: +X right, +Y up) — over the right shoulder. */
+  /** Pivot offset while locked (rig space: +X is the rig's LEFT, +Y up) — so this sits over the left shoulder. */
   public lockedSocketOffset: [number, number, number] = [0.55, 0.15, 0]
   /** Seconds the camera takes to move in on a lock, and back out on release. */
   public lockBlendSeconds: number = 0.3

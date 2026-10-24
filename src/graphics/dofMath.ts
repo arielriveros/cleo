@@ -70,7 +70,8 @@ export function effectiveFocusDistance(depth: number, focusDistance: number, foc
 }
 
 /**
- * Signed circle of confusion in PIXELS, at a view-space depth of `depth` metres.
+ * Signed circle of confusion in PIXELS, at a view-space depth of `depth` metres: the blur circle's
+ * DIAMETER, which the shaders gather as a radius (see `_dofUniforms`).
  *
  * NEGATIVE in the near field (nearer than focus), positive in the far field. The sign is not
  * decoration: the near field has to be composited OVER the focused image because an out-of-focus

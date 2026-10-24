@@ -20,7 +20,11 @@ import { SOUND_FALLOFF_PRESETS } from '../src/core/scene/nodes/soundPresets';
 import { DirectionalLight, PointLight, Spotlight } from '../src/graphics/lighting';
 import {
     DIRECTIONAL_LIGHT_PRESETS, POINT_LIGHT_PRESETS, SPOT_LIGHT_PRESETS, lightPresetsFor,
+    presetForScene, keyIlluminance, spotEquivalentLumens, newLightOptions,
 } from '../src/graphics/lightPresets';
+import { DEFAULT_LUMENS, distanceAttenuation } from '../src/graphics/lighting';
+import { CameraNode } from '../src/core/scene/nodes/cameraNode';
+import { Camera } from '../src/core/camera';
 import { kelvinToRgb } from '../src/graphics/colorTemperature';
 import { PHYSICS_SURFACE_PRESETS } from '../src/physics/surfacePresets';
 import { AUTO_EXPOSURE_PRESETS, LENS_LOOK_PRESETS, DOF_PRESETS } from '../src/graphics/renderPresets';
@@ -266,5 +270,122 @@ describe('clouds follow the scene wind', () => {
         expect(new VolumetricCloudsNode('again', json).useSceneWind).toBe(false);
         clouds.applyPreset('stormy');
         expect(clouds.useSceneWind).toBe(false);
+    });
+});
+
+describe('light presets brightened to the scene', () => {
+    const daylight = { ev100: 16, ambientLux: 7864.32 };   // the editor's default scene
+    const dark = { ev100: -5, ambientLux: 0 };   // a candlelit room is about EV -3
+    const lum = (c: ArrayLike<number>) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+
+    it('leaves the real values alone where the scene is dark enough for them', () => {
+        for (const p of [...POINT_LIGHT_PRESETS, ...SPOT_LIGHT_PRESETS, ...DIRECTIONAL_LIGHT_PRESETS])
+            expect(presetForScene(p, dark).options.intensity, p.id).toBe(p.options.intensity);
+    });
+
+    it('never dims a light', () => {
+        for (const p of [...POINT_LIGHT_PRESETS, ...SPOT_LIGHT_PRESETS, ...DIRECTIONAL_LIGHT_PRESETS])
+            for (const level of [daylight, dark, { ev100: 8, ambientLux: 200 }])
+                expect(presetForScene(p, level).options.intensity!, p.id).toBeGreaterThanOrEqual(p.options.intensity!);
+    });
+
+    it('raises a lamp until it lights its typical distance to the key illuminance', () => {
+        for (const p of [...POINT_LIGHT_PRESETS, ...SPOT_LIGHT_PRESETS]) {
+            const o = presetForScene(p, daylight).options;
+            const lux = o.intensity! / (4 * Math.PI) * distanceAttenuation(p.typicalDistance!, o.range!) * lum(o.color!);
+            expect(lux / keyIlluminance(daylight.ev100), p.id).toBeGreaterThan(0.99);
+            expect(lux / keyIlluminance(daylight.ev100), p.id).toBeLessThan(1.01);
+        }
+    });
+
+    it('holds a sun to its ratio over the ambient fill', () => {
+        const golden = DIRECTIONAL_LIGHT_PRESETS.find(p => p.id === 'goldenHour')!;
+        const o = presetForScene(golden, daylight).options;
+        expect(o.intensity! * lum(o.color!) / (Math.PI * daylight.ambientLux)).toBeCloseTo(golden.keyRatio!, 1);
+    });
+
+    it('does not mutate the shared table', () => {
+        const before = POINT_LIGHT_PRESETS[0].options.intensity;
+        presetForScene(POINT_LIGHT_PRESETS[0], daylight);
+        expect(POINT_LIGHT_PRESETS[0].options.intensity).toBe(before);
+    });
+
+    it('converts a fixture rating to the lumens of the same beam', () => {
+        // 300 lm into a 14 degree half-angle: 2 / (1 - cos 14deg) = 67.3x.
+        expect(spotEquivalentLumens(300, 14)).toBeCloseTo(300 * 2 / (1 - Math.cos(14 * Math.PI / 180)), -2);
+    });
+
+    it('starts a new lamp at the real defaults, brightened only into a bright scene', () => {
+        expect(newLightOptions('point', null).intensity).toBe(DEFAULT_LUMENS);
+        expect(newLightOptions('point', dark).intensity).toBe(DEFAULT_LUMENS);
+        expect(newLightOptions('point', daylight).intensity!).toBeGreaterThan(DEFAULT_LUMENS * 100);
+        expect(newLightOptions('directional', daylight).intensity).toBe(100000);
+    });
+});
+
+describe('look presets', () => {
+    it('keep the bloom knee inside the threshold, so nothing below it blooms', () => {
+        for (const p of LENS_LOOK_PRESETS)
+            expect(p.options.bloomKnee!, p.id).toBeLessThanOrEqual(p.options.bloomThreshold!);
+    });
+});
+
+describe('camera rig FOV', () => {
+    it('gives the camera its own FOV back when the rig stops driving it', () => {
+        const rig = new CameraRigNode('rig');
+        const cam = new CameraNode('cam', new Camera({ type: 'perspective' }));
+        rig.addChild(cam);
+        cam.camera.fov = 70;
+
+        rig.applyPreset('isometric');            // drives a 25 degree lens
+        rig.lateUpdate(1 / 60, true);
+        expect(cam.camera.fov).toBeCloseTo(25);
+
+        rig.applyPreset('thirdPerson');          // no lens of its own
+        expect(cam.camera.fov).toBeCloseTo(70);
+    });
+
+    it('remembers the camera FOV across a save while it drives it', () => {
+        const rig = new CameraRigNode('rig');
+        const cam = new CameraNode('cam', new Camera({ type: 'perspective' }));
+        rig.addChild(cam);
+        cam.camera.fov = 70;
+        rig.applyPreset('firstPerson');
+        rig.lateUpdate(1 / 60, true);
+        expect((rig as any)._serializePayload().cameraFov).toBeCloseTo(70);
+    });
+});
+
+describe('camera rig preset framing', () => {
+    // The camera's world position for a preset, plus where it looks: the rig with no follow target pivots
+    // on its own position, so the unshifted camera looks straight at that pivot.
+    function frame(id: string, patch: Partial<CameraRigNode> = {}) {
+        const rig = new CameraRigNode('rig');
+        const cam = new CameraNode('cam', new Camera({ type: 'perspective' }));
+        rig.addChild(cam);
+        rig.applyPreset(id);
+        Object.assign(rig, patch);
+        rig.lateUpdate(0, true);
+        const p = cam.worldPosition;
+        return [p[0], p[1], p[2]];
+    }
+    const sub = (a: number[], b: number[]) => a.map((v, i) => v - b[i]);
+    const norm = (a: number[]) => { const l = Math.hypot(...a); return a.map(v => v / l); };
+    // Screen-right of a camera looking along `forward`, Y up.
+    const rightOf = (f: number[]) => norm([-f[2], 0, f[0]]);   // forward x up
+
+    it('Over-the-Shoulder sits over the RIGHT shoulder', () => {
+        const centred = frame('overShoulder', { socketOffset: [0, 0.15, 0] as any });
+        const shifted = frame('overShoulder');
+        const forward = norm(sub([0, 1.55, 0], centred));
+        const right = rightOf(forward);
+        const delta = sub(shifted, centred);
+        expect(delta[0] * right[0] + delta[2] * right[2]).toBeGreaterThan(0.4);
+    });
+
+    it('Side-Scroller puts +X on the right of the screen', () => {
+        const cam = frame('sideScroller');
+        const forward = norm(sub([0, 1.6, 0], cam));
+        expect(rightOf(forward)[0]).toBeGreaterThan(0.99);
     });
 });

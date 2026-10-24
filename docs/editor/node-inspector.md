@@ -63,11 +63,14 @@ rather than moving the camera itself. Its groups:
   seconds (`0` is rigid), along world or rig axes.
 - **Aim** — what drives rotation: **Orbit** is script-driven (`rig.addYaw(dx)` / `rig.addPitch(dy)`,
   or a controller's look input), **Look At** turns to a target, **None** keeps the authored rotation.
-  Then aim damping, yaw and pitch, orbit sensitivity, and pitch and yaw limits.
+  Then aim damping (look-at only), yaw and pitch, orbit sensitivity, and pitch and yaw limits. Setting
+  a limit pair to one value locks that angle, which is how the Top-Down, Isometric and Side-Scroller
+  presets hold their view.
 - **Spring Arm** — **Arm Length**, how far back along the boom the camera sits (`0` is a
-  first-person camera at the pivot), and **Socket Offset**.
+  first-person camera at the pivot), and **Socket Offset**. The rig's local +X is its *left*, so a
+  negative X puts the camera over the right shoulder.
 - **Field of View** — when **Rig Controls FOV** is on, the rig owns the camera's FOV and eases it
-  with its own damping.
+  with its own damping. Turning it off gives the camera back the FOV it had before.
 - **Collision** — pulls the camera in when something is between it and the pivot. It tests physics
   collider shapes, terrain included: the same solids the character collides with. A body blocks it
   only while its **Camera Collision** channel is on (Physics panel); trigger volumes, the follow and
@@ -84,7 +87,13 @@ rather than moving the camera itself. Its groups:
 #### Light
 
 Photometric intensity — lux for directional, lumens for point and spot — colour, per-kind
-parameters and shadow casting. **Presets** sets real-world lights in real units.
+parameters and shadow casting. **Presets** sets real-world lights: the colour from the source's colour
+temperature, the range, cone and size of the real thing. Real brightness only shows in the setting a
+light belongs to — a real 800 lm bulb changes no pixel in a scene exposed for daylight — so a preset
+is brightened as far as the scene needs: a lamp until it lights the distance it is meant for as
+brightly as that scene is exposed, a sun until it stands the right number of times over the ambient
+fill. In a dark scene exposed for it, the real values apply unchanged. A new point or spot light
+starts at 1500 lm, brightened the same way.
 
 - **Emission** — colour and intensity, plus **Range** and **Source Radius** on point and spot
   lights. Brightness lives in the intensity, not the colour: keep the colour as the light's tint. A
@@ -131,8 +140,10 @@ A physically based sky, baked to a cubemap whenever the sun moves, with air and 
   offsets, with a phase, size, colour and brightness. Once the sun has set, the scene's directional
   light shines from the moon at **Moonlight on Scene** times its intensity, shadows included.
 - **Quality** — the baked sky's resolution, and the view and light march steps.
-- **Fog** — aerial perspective: density, start distance, maximum opacity, height and height falloff,
-  and a custom colour blended over the sky's own.
+- **Fog** — height fog, measured along each line of sight: density, start distance, maximum opacity,
+  and the **Height** below which it is uniform and the **Height Falloff** with which it thins above
+  that. Its colour is the sky's horizon colour in that direction, optionally blended toward a custom
+  colour, and it hazes the sky near the horizon too, so fogged ground meets a fogged sky.
 - **God Rays** — volumetric light shafts: intensity, density, anisotropy, maximum distance, march
   steps and tint.
 

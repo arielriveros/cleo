@@ -7,6 +7,10 @@
 // Applied in linear HDR, before the tone curve, which is where Unreal applies it. Grain will therefore
 // be more visible in midtones than in highlights, since the curve compresses what is above them. That
 // is the film-like behaviour and it is intended; Unity's post-tonemap grain has uniform visibility.
+//
+// Everything is measured on the EXPOSED image (radiance x `u_exposure`, what the tone curve will see) and
+// the grain is divided back out of it. The buffer here is pre-exposure, so measuring it raw made one
+// intensity a whisper outdoors and a blizzard in a lamp-lit room, where the radiance is 1000x lower.
 
 #include "./chunks/fullscreen.wgsl"
 
@@ -14,7 +18,7 @@
 @group(0) @binding(1) var u_screenTexture_sampler: sampler;
 
 struct FilmGrainUniforms {
-    /** 0 = off. Around 0.05 is a subtle 35mm stock; past ~0.3 it reads as sensor noise. */
+    /** 0 = off. 0.02-0.04 is a subtle 35mm stock, 0.1 heavy; past ~0.2 it reads as sensor noise. */
     u_grainIntensity: f32,
     /** Grain cell size in pixels. 1 is per-pixel and will alias under TAA; ~1.5-3 is filmic. */
     u_grainSize: f32,
@@ -23,6 +27,8 @@ struct FilmGrainUniforms {
     /** Seconds. Animates the pattern — a fixed one looks like a dirty screen, not like film. */
     u_time: f32,
     u_resolution: vec2<f32>,
+    /** The exposure the present pass will apply. */
+    u_exposure: f32,
 };
 @group(1) @binding(0) var<uniform> u_grain: FilmGrainUniforms;
 
@@ -61,12 +67,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Response peaks in the midtones and vanishes at both ends. `sqrt(l)*(1-l)` normalised to ~1 at its
     // peak: black stays black (no grain floating over a letterbox) and a blown highlight stays clean.
-    let luma = dot(color.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let exposure = max(u_grain.u_exposure, 1e-8);
+    let luma = dot(color.rgb, vec3<f32>(0.2126, 0.7152, 0.0722)) * exposure;
     let l = clamp(luma, 0.0, 1.0);
     let response = sqrt(l) * (1.0 - l) * 2.6;
 
     // ADDITIVE, scaled by the response rather than by the colour: multiplying would leave the shadows
-    // untouched, which is the opposite of how film behaves.
-    let grain = noise * u_grain.u_grainIntensity * response;
+    // untouched, which is the opposite of how film behaves. Sized in exposed units, added pre-exposure.
+    let grain = noise * u_grain.u_grainIntensity * response / exposure;
     return vec4<f32>(max(color.rgb + grain, vec3<f32>(0.0)), color.a);
 }

@@ -78,7 +78,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Soft-knee curve (Unreal/Unity style): 0 below (threshold - knee), smooth ramp across the knee,
     // then linear (luma - threshold) above. Scaling the colour by contribution/luma keeps its hue.
-    let knee = max(u_bloom.u_bloomKnee, 1e-4);
+    // The knee never reaches past the threshold: wider, its ramp starts below zero, so every pixel down to
+    // black passes a sliver through and the whole frame wears a veil of bloom.
+    let knee = clamp(u_bloom.u_bloomKnee, 1e-4, max(u_bloom.u_bloomThreshold, 1e-4));
     var soft = clamp(luma - (u_bloom.u_bloomThreshold - knee), 0.0, 2.0 * knee);
     soft = (soft * soft) / (4.0 * knee + 1e-5);
     let contribution = max(soft, luma - u_bloom.u_bloomThreshold) / max(luma, 1e-5);
