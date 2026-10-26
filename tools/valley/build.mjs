@@ -39,8 +39,9 @@ import {
 } from './foliage.mjs'
 import { buildProps } from './props.mjs'
 import { WATER_SOURCE, WATER_UNIFORMS } from './water.mjs'
-import { boundsOf, convexShape, geometryJson } from './meshes.mjs'
+import { boundsOf, convexShape, geometryJson, partsOf, readGltf } from './meshes.mjs'
 import { buildBarrel, buildSkullCave } from './setPieces.mjs'
+import { buildCampfire, buildStandingTorch, buildWallTorch } from './torches.mjs'
 
 const { ROOT, stableId: soulsId, clone, matJson, material, textures, LEVEL, linkInstance, withScript } = souls
 const BUILD = path.join(ROOT, 'build')
@@ -90,7 +91,7 @@ const TERRAIN_TEX = {
 }
 
 /** A PBR material in Material.serialize()'s shape, with only the slots that are given. */
-function pbrMaterial({ diff, nor, arm, rough, mask, side = 'front', roughness = 1, castShadow = true, tint = [1, 1, 1], wind }) {
+function pbrMaterial({ diff, nor, arm, rough, mask, side = 'front', roughness = 1, castShadow = true, tint = [1, 1, 1], wind, ...extra }) {
   return {
     type: 'pbr', baseColor: tint, metallic: 0, roughness, reflectance: 0.5, opacity: 1,
     // Material.parse reads windStrength/windStiffness/windRole/windFlutter off the top level.
@@ -104,6 +105,7 @@ function pbrMaterial({ diff, nor, arm, rough, mask, side = 'front', roughness = 
       normalMap: nor,
       ...(mask ? { mask } : {}),
     },
+    ...extra,
     config: { side, wireframe: false, transparent: false, castShadow, probeable: true },
   }
 }
@@ -180,6 +182,69 @@ const SURFACES = {
   })),
 }
 
+const DUNGEON = '/Environment/Dungeon'
+const dungeonTexture = (prefix, name) => ({
+  diff: tex(`${prefix}_diff.jpg`, `${DUNGEON}/Textures`, `${name} Base Color`),
+  nor: tex(`${prefix}_nor.png`, `${DUNGEON}/Textures`, `${name} Normal`),
+  arm: tex(`${prefix}_arm.jpg`, `${DUNGEON}/Textures`, `${name} ARM`),
+})
+function dungeonMaterial(key, name, prefix) {
+  const maps = dungeonTexture(prefix, name)
+  return libraryMaterial(`dungeon-${key}`, name, `${DUNGEON}/Materials`, pbrMaterial({
+    ...maps, uvProjection: 'box', uvSpace: 'world', uvWorldSize: 2,
+  }))
+}
+const DUNGEON_FLOOR_MAT = dungeonMaterial('floor', 'Dungeon Cobblestone Floor', 'cobblestone_floor_09')
+const DUNGEON_WALL_MAT = dungeonMaterial('wall', 'Dungeon Brick Wall', 'stone_brick_wall_001')
+const DUNGEON_HEWN_MAT = dungeonMaterial('hewn', 'Dungeon Hewn Stone', 'stone_wall_04')
+const DUNGEON_SLATE_MAT = dungeonMaterial('slate', 'Dungeon Castle Slates', 'castle_wall_slates')
+
+const FIRE_TEXTURE = tex(path.join(BUILD, 'fire.png'), `${DUNGEON}/Textures`, 'Fire Animation')
+const FIRE_TILESET = {
+  id: id('tileset:fire'), name: 'Fire', textureId: FIRE_TEXTURE,
+  imageWidth: 1024, imageHeight: 1024, tileWidth: 128, tileHeight: 128,
+  margin: 0, spacing: 0, columns: 8, rows: 8, tiles: {},
+}
+const torchMaterial = libraryMaterial('torch', 'Torch Metal', `${DUNGEON}/Materials`, pbrMaterial({
+  diff: tex('wall_torch_diff.jpg', `${DUNGEON}/Textures`, 'Torch Base Color'),
+  nor: tex('wall_torch_nor.png', `${DUNGEON}/Textures`, 'Torch Normal'),
+  arm: tex('wall_torch_arm.jpg', `${DUNGEON}/Textures`, 'Torch ARM'),
+}))
+const campfireMaterial = libraryMaterial('campfire', 'Bonfire Stones', `${DUNGEON}/Materials`, pbrMaterial({
+  diff: tex('campfire_Material_25_diff.jpg', `${DUNGEON}/Textures`, 'Bonfire Base Color'),
+  nor: tex('campfire_Material_25_nor.png', `${DUNGEON}/Textures`, 'Bonfire Normal'),
+  arm: tex('campfire_Material_25_arm.jpg', `${DUNGEON}/Textures`, 'Bonfire ARM'),
+}))
+const PROPS = path.join(BUILD, 'props')
+const standingTorch = buildStandingTorch(PROPS)
+const wallTorch = await buildWallTorch(ROOT, PROPS)
+const campfire = buildCampfire(PROPS)
+const fireSprite = (key, height, base = 0) => node('Flame', 'animatedSprite', {
+  id: id(`fire:${key}`), position: [0, base + height / 2, 0], scale: [height / 2, height, 1],
+  sprite: { constraints: 'cylindrical', tilesetId: FIRE_TILESET.id, tileset: FIRE_TILESET, tileIndex: 0,
+    tint: [1, 1, 1], opacity: 1, transparent: true, side: 'double', blend: 'additive' },
+  animation: { frames: Array.from({ length: 32 }, (_, i) => i), frameSource: 'node', fps: 24, loop: true, randomStart: true },
+})
+const torchNode = (key, position, parts, flame, lightLumens = 2200) => node('Torch', 'node', {
+  id: id(`torch:${key}`), position, children: [
+    ...parts.map((part, i) => modelNode(`torch:${key}:mesh:${i}`, i ? `Mesh ${i + 1}` : 'Mesh', part, torchMaterial)),
+    fireSprite(`${key}:flame`, 0.6, flame[1] - 0.1),
+    souls.particles(`torch:${key}:embers`, 'Embers', souls.VFX.torch),
+    souls.pointLight(`torch:${key}:light`, 'Light', [1, 0.6, 0.3], lightLumens, 9, [flame[0], flame[1] + 0.3, flame[2]]),
+  ],
+})
+const standingTorchTemplate = souls.asTemplate('valley:standing-torch', torchNode('standing-template', [0, 0, 0], standingTorch.parts, standingTorch.flame))
+const wallTorchTemplate = souls.asTemplate('valley:wall-torch', torchNode('wall-template', [0, 0, 0], wallTorch.parts, wallTorch.flame))
+wallTorchTemplate.name = 'Wall Torch'
+const bonfireNode = (key, position) => node('Bonfire', 'node', {
+  id: id(`bonfire:${key}`), position, children: [
+    ...campfire.parts.map((part, i) => modelNode(`bonfire:${key}:mesh:${i}`, i ? `Mesh ${i + 1}` : 'Mesh', part, campfireMaterial)),
+    fireSprite(`${key}:flame`, 1.2, 0.35), souls.particles(`bonfire:${key}:embers`, 'Embers', souls.VFX.torch),
+    souls.pointLight(`bonfire:${key}:light`, 'Fire Light', [1, 0.55, 0.22], 1800, 12, [0, 1.1, 0]),
+  ],
+})
+const bonfireTemplate = souls.asTemplate('valley:bonfire', bonfireNode('template', [0, 0, 0]))
+
 // ----- water ---------------------------------------------------------------------------------------
 //
 // A forward, TRANSPARENT custom material (tools/valley/water.glsl): normal-mapped waves, Fresnel
@@ -200,7 +265,9 @@ function translateCustom(request) {
 
 // The engine presets the valley's look is made of (tools/valley/presets.ts), resolved through vite-node
 // because the tables are TypeScript. Every effect below is one named preset; nothing is hand-tuned.
-const VALLEY_AMBIENT = [9000, 9500, 11000]
+// Keep the sun readable against the terrain. Higher ambient lifted every shaded prop and made the
+// valley look uniformly overcast even under the sunny cloud preset.
+const VALLEY_AMBIENT = [7000, 7600, 9000]
 const PRESETS = (() => {
   const ambientLux = 0.2126 * VALLEY_AMBIENT[0] + 0.7152 * VALLEY_AMBIENT[1] + 0.0722 * VALLEY_AMBIENT[2]
   const res = spawnSync(process.platform === 'win32' ? 'npx.cmd' : 'npx',
@@ -683,11 +750,13 @@ widenCamera(LEVEL.player.nodeJson)
 widenCamera(souls.TEMPLATE_SOURCE.get(LEVEL.player.id))
 
 /** A model node over one part, its material linked by id (as a library model's nodes are). */
-const modelNode = (key, name, part, materialId, extra = {}) => node(name, 'model', {
-  id: id(key), variables: vars({ __materialId: materialId }),
-  model: { geometry: geometryJson(part), material: matJson(materialId) },
-  animationMappings: null, stateMachine: null, ragdoll: null, ...extra,
-})
+function modelNode(key, name, part, materialId, extra = {}) {
+  return node(name, 'model', {
+    id: id(key), variables: vars({ __materialId: materialId }),
+    model: { geometry: geometryJson(part), material: matJson(materialId) },
+    animationMappings: null, stateMachine: null, ragdoll: null, ...extra,
+  })
+}
 
 // =====================================================================================================
 // Breakable barrels
@@ -978,7 +1047,8 @@ function valleyScene() {
 
   const placedBuildings = buildings.map(b => placedBuilding(b, propAssets[props.indexOf(b.prop)]))
 
-  const bonfire = souls.bonfireNode()
+  const bonfire = clone(bonfireTemplate)
+  bonfire.id = id('bonfire:valley')
   bonfire.position = at(BONFIRE.x, BONFIRE.z, 0)
   bonfire.rotation = [0, 200, 0]
 
@@ -998,7 +1068,7 @@ function valleyScene() {
 
 
   const interactables = souls.group('interactables', 'Interactables', [
-    linkInstance(LEVEL.bonfire, bonfire),
+    bonfire,
     souls.placedMessage('welcome', 'The Valley', 'Follow the road north, through the hamlet, to the skull in the cliffs.\nRest at the bonfire to level up and refill your Estus.\nLock on with Q / R3. Tap Space / B to roll.', at(-9.5, 79, 0), 180),
     souls.placedMessage('roll', 'Try rolling', 'Tap Space (B) to roll through an attack.\nHold it to sprint. Rolling costs stamina.', at(-16, 63, 0), 160),
     souls.placedMessage('lock', 'Lock on', 'Q (R3) holds the camera on a foe.\nZ / C or a flick of the stick switches targets.', at(-27, 22, 0), 200),
@@ -1030,7 +1100,12 @@ function valleyScene() {
   // Braziers in all but name: torches standing on the ground either side of the cave's mouth, their
   // bracket post down to the dirt (the keep's hung on walls at 2.2 m; there are no walls here).
   const torches = souls.group('torches', 'Torches', [[-6.5, notchZ + 2], [6.5, notchZ + 2]]
-    .map(([x, z], i) => linkInstance(LEVEL.torch, souls.torchNode(`valley-torch:${i}`, at(x, z, 0.6)))))
+    .map(([x, z], i) => {
+      const torch = clone(standingTorchTemplate)
+      torch.id = id(`valley-torch:${i}`)
+      torch.position = at(x, z, 0.6)
+      return linkInstance(standingTorchTemplate, torch)
+    }))
 
   const player = souls.playerNode()
   widenCamera(player)
@@ -1092,19 +1167,45 @@ function valleyScene() {
 
 const DUNGEON_ID = id('scene:dungeon')
 const DUNGEON_NAME = 'Dungeon'
+const DUNGEON_STRUCTURE = partsOf(readGltf(path.join(BUILD, 'props', 'medieval_dungeon_structure (1).glb')))
+const DUNGEON_MATERIALS = [DUNGEON_WALL_MAT, DUNGEON_FLOOR_MAT, DUNGEON_HEWN_MAT, DUNGEON_HEWN_MAT,
+  DUNGEON_WALL_MAT, DUNGEON_SLATE_MAT, DUNGEON_HEWN_MAT, DUNGEON_FLOOR_MAT, DUNGEON_SLATE_MAT]
 
 function dungeonScene() {
-  const MAT = souls.MAT
-  const slab = (key, name, position, scale) => souls.prop(`dungeon:${key}`, name, 'box', MAT.darkStone, { position, scale, solid: true })
-  const level = souls.group('dungeon:level', 'Level', [
-    slab('floor', 'Floor', [0, -0.25, 0], [24, 0.5, 24]),
-    slab('wall-n', 'Wall N', [0, 2.5, -12], [24, 5, 0.6]),
-    slab('wall-s', 'Wall S', [0, 2.5, 12], [24, 5, 0.6]),
-    slab('wall-w', 'Wall W', [-12, 2.5, 0], [0.6, 5, 24]),
-    slab('wall-e', 'Wall E', [12, 2.5, 0], [0.6, 5, 24]),
+  const structure = node('Dungeon Structure', 'node', {
+    id: id('dungeon:structure'),
+    children: DUNGEON_STRUCTURE.map((part, i) =>
+      modelNode(`dungeon:mesh:${i}`, part.name, part, DUNGEON_MATERIALS[part.material] ?? DUNGEON_HEWN_MAT)),
+  })
+  const bounds = boundsOf(DUNGEON_STRUCTURE)
+  const cx = (bounds.min[0] + bounds.max[0]) / 2
+  const cz = (bounds.min[2] + bounds.max[2]) / 2
+  const midY = (bounds.min[1] + bounds.max[1]) / 2
+  const collision = node('Dungeon Collision', 'node', {
+    id: id('dungeon:collision'),
+    body: {
+      ...souls.staticBody('box'),
+      shapes: [
+        { type: 'box', width: bounds.size[0], height: 0.5, depth: bounds.size[2], offset: [cx, bounds.min[1] - 0.25, cz], rotation: [0, 0, 0] },
+        { type: 'box', width: bounds.size[0], height: bounds.size[1], depth: 0.5, offset: [cx, midY, bounds.min[2]], rotation: [0, 0, 0] },
+        { type: 'box', width: bounds.size[0], height: bounds.size[1], depth: 0.5, offset: [cx, midY, bounds.max[2]], rotation: [0, 0, 0] },
+        { type: 'box', width: 0.5, height: bounds.size[1], depth: bounds.size[2], offset: [bounds.min[0], midY, cz], rotation: [0, 0, 0] },
+        { type: 'box', width: 0.5, height: bounds.size[1], depth: bounds.size[2], offset: [bounds.max[0], midY, cz], rotation: [0, 0, 0] },
+      ],
+    },
+  })
+  const level = souls.group('dungeon:level', 'Level', [structure, collision])
+  const torches = souls.group('dungeon:torches', 'Torches', [
+    ...[[-7, -11.2], [7, -11.2], [-7, 11.2], [7, 11.2], [-11.2, -6], [-11.2, 6], [11.2, -6], [11.2, 6]]
+      .map(([x, z], i) => {
+        const torch = clone(wallTorchTemplate)
+        torch.id = id(`dungeon-torch:${i}`)
+        torch.position = [x, 2.2, z]
+        return linkInstance(wallTorchTemplate, torch)
+      }),
+    souls.pointLight('dungeon-fill-west', 'Dungeon Fill West', [1, 0.55, 0.3], 500, 14, [-5, 2.4, 0]),
+    souls.pointLight('dungeon-fill-east', 'Dungeon Fill East', [1, 0.55, 0.3], 500, 14, [5, 2.4, 0]),
   ])
-  const torches = souls.group('dungeon:torches', 'Torches', [[-4, 11.2], [4, 11.2], [-11.2, 0], [11.2, 0]]
-    .map(([x, z], i) => linkInstance(LEVEL.torch, souls.torchNode(`dungeon-torch:${i}`, [x, 2.2, z]))))
 
   const player = souls.playerNode()
   widenCamera(player)
@@ -1129,7 +1230,7 @@ function dungeonScene() {
       linkInstance(LEVEL.player, player),
       level, torches, exit,
     ],
-    ambientLight: [600, 620, 700],
+    ambientLight: [350, 360, 420],
   })
   const config = clone(souls.sourceScene.config)
   config.graphics.clearColor = [0.01, 0.01, 0.012, 1]
@@ -1163,7 +1264,9 @@ const result = souls.writeProject({
     order: 0,
   },
   models: [...propAssets, ...foliageAssets],
-  templates: [BARREL_TEMPLATE, DEBRIS_TEMPLATE, CAVE_TEMPLATE],
+  templates: [BARREL_TEMPLATE, DEBRIS_TEMPLATE, CAVE_TEMPLATE, standingTorchTemplate, wallTorchTemplate, bonfireTemplate],
+  excludeTemplates: [LEVEL.torch.id, LEVEL.bonfire.id],
+  tilesets: [FIRE_TILESET],
   extraScenes: [{ id: DUNGEON_ID, name: DUNGEON_NAME, build: dungeonScene }],
   // 2 km of valley: barrels, debris and enemies far from the camera freeze in place instead of
   // simulating against the terrain. The player opts out (simulationMode 'always').
@@ -1171,7 +1274,10 @@ const result = souls.writeProject({
   terrainMaterials: [{ id: TERRAIN_MATERIAL_ID, name: 'Valley Landscape', material: terrainMaterial, textureIds: [...new Set(Object.values(TERRAIN_TEX).flatMap(t => Object.values(t)))] }],
   folders: {
     scene: { [PROJECT_NAME]: '/Scenes', [DUNGEON_NAME]: '/Scenes' },
-    template: { 'Breakable Barrel': BARREL_DIR, 'Barrel Debris': BARREL_DIR, 'Skull Cave Entrance': CAVE_DIR },
+    template: {
+      'Breakable Barrel': BARREL_DIR, 'Barrel Debris': BARREL_DIR, 'Skull Cave Entrance': CAVE_DIR,
+      Torch: `${DUNGEON}/Templates`, 'Wall Torch': `${DUNGEON}/Templates`, Bonfire: `${DUNGEON}/Templates`,
+    },
     model: { ...foliageFolder, ...buildingFolder },
     material: {
       ...materialFolder,

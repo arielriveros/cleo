@@ -1701,7 +1701,7 @@ function torchNode(k, position = [0, 0, 0]) {
   return group(k, 'Torch', [
     prop(`${k}:post`, 'Bracket', 'cylinder', MAT.wood, { position: [0, -0.3, 0], scale: [0.08, 0.6, 0.08] }),
     particles(`${k}:fire`, 'Fire', VFX.torch),
-    pointLight(`${k}:light`, 'Light', [1, 0.6, 0.3], 1400, 9, [0, 0.3, 0]),
+    pointLight(`${k}:light`, 'Light', [1, 0.6, 0.3], 2200, 9, [0, 0.3, 0]),
   ], { position })
 }
 
@@ -2170,8 +2170,10 @@ export function writeProject({
   out = OUT, projectName = PROJECT_NAME, sceneId = SCENE_ID, buildScene, example,
   models: extraModels = [], terrainMaterials = [], folders = {}, textureEntries: extraTextures = [],
   refs: extraRefs = {}, excludeMaterials = [], hashKinds = [], templates: extraTemplates = [],
+  excludeTemplates = [],
   // More scenes in the same project, after the main one: [{ id, name, build: () => scene, refs }].
   extraScenes = [],
+  tilesets: extraTilesets = [],
   // Project options (editor options/projectSettings.ts shape), or null for the defaults. Written as
   // libraries/projectSettings.json, which a bundle import reads into the project.
   projectSettings = null,
@@ -2192,7 +2194,7 @@ export function writeProject({
     bloodDecalTemplate('blood-splat', 'Blood Splat', BLOOD.splat, BLOOD_TEX.splat, [1.1, 0.4, 1.1], {}),
     bloodDecalTemplate('blood-drops', 'Blood Drops', BLOOD.drops, BLOOD_TEX.drops, [1, 0.4, 1.6], { minSize: 0.8, maxSize: 1.2 }),
     bloodstainTemplate(),
-    ...Object.values(LEVEL),
+    ...Object.values(LEVEL).filter(template => !excludeTemplates.includes(template.id)),
     ...extraTemplates,
   ]
   const scene = buildScene()
@@ -2217,7 +2219,7 @@ export function writeProject({
     boneMasks: [UPPER_BODY_MASK],
     animations,
     rigs: [rig],
-    tilesets: [],
+    tilesets: extraTilesets,
     scripts: scripts.assets,
     templates,
     particleSystems,

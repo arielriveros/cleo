@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useCleoEngine } from "./EngineContext";
 import { Raycaster, Node, Vec, Logger } from "cleo";
 import TransformGizmo from "./gizmo/TransformGizmo";
+import CollisionGizmo from "./gizmo/CollisionGizmo";
 import BoneGizmo from "./clip/BoneGizmo";
 import SocketPreviews from "./sockets/SocketPreviews";
 import SocketGizmo from "./sockets/SocketGizmo";
@@ -511,6 +512,10 @@ export default function EngineViewport() {
             {showGizmo && <TransformGizmo
                 selectedNodeId={selectedNode}
                 onTransformChange={handleTransformChange}
+                viewportRef={viewportRef}
+            />}
+            {showGizmo && editorMode === 'scene' && <CollisionGizmo
+                selectedNodeId={selectedNode}
                 viewportRef={viewportRef}
             />}
             {editorMode === 'tilemap' && <>

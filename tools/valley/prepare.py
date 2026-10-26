@@ -116,6 +116,13 @@ def props() -> None:
     mask = load(shared / "thatch_with_opacity" / "thatch_opacity_mask.png")
     save_png(mask_of(mask), "thatch_mask", 1024, "L")
 
+    dungeon = SRC / "wall_textures"
+    for base in ("cobblestone_floor_09", "stone_brick_wall_001", "stone_wall_04", "castle_wall_slates"):
+        tex = dungeon / f"{base}_1k" / "textures"
+        save_jpeg(load(tex / f"{base}_diff_1k.png"), f"{base}_diff", 1024)
+        save_png(load(tex / f"{base}_nor_gl_1k.png"), f"{base}_nor", 1024)
+        save_jpeg(load(tex / f"{base}_arm_1k.png"), f"{base}_arm", 1024)
+
 
 def grass() -> None:
     tex = SRC / "foliage" / "grass_medium_01_1k.gltf" / "textures"
