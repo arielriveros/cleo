@@ -9,6 +9,8 @@ import { Tileset } from '../graphics/tilemap/tileset';
 // a material asset; and the tileset is EMBEDDED on serialize, so `parse` needs no asset library in scope.
 
 export type SpriteSide = 'front' | 'back' | 'double';
+/** How a sprite composites: `alpha` draws over what is behind it, `additive` adds light to it (fire, glows). */
+export type SpriteBlend = 'alpha' | 'additive';
 
 export interface SpriteOptions {
     tileset?: Tileset | null;
@@ -18,7 +20,11 @@ export interface SpriteOptions {
     transparent?: boolean;
     side?: SpriteSide;
     wireframe?: boolean;
+    blend?: SpriteBlend;
+    exposureWeight?: number;
 }
+
+const unitOr1 = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1);
 
 /** Full-quad UVs, for a sprite with no tileset. Matches what `Tileset.uvOf` returns for a 1x1 set. */
 const FULL_RECT: [number, number, number, number] = [0, 0, 1, 1];
@@ -42,12 +48,16 @@ export class Sprite {
   private _tileIndex: number;
   private _tint: [number, number, number];
   private _opacity: number;
+  private _blend: SpriteBlend;
+  private _exposureWeight: number;
 
   constructor(options?: SpriteOptions) {
       this._tileset = options?.tileset ?? null;
       this._tileIndex = Math.max(0, Math.floor(options?.tileIndex ?? 0));
       this._tint = options?.tint ?? [1, 1, 1];
       this._opacity = options?.opacity ?? 1;
+      this._blend = options?.blend === 'additive' ? 'additive' : 'alpha';
+      this._exposureWeight = unitOr1(options?.exposureWeight);
       this._material = Material.Basic(
           { color: this._tint, opacity: this._opacity, texture: this._tileset?.textureId },
           {
@@ -124,6 +134,17 @@ export class Sprite {
   public set side(value: SpriteSide) { this._material.config.side = value; }
   public get wireframe(): boolean { return this._material.config.wireframe === true; }
   public set wireframe(value: boolean) { this._material.config.wireframe = value; }
+  public get blend(): SpriteBlend { return this._blend; }
+  public set blend(value: SpriteBlend) { this._blend = value === 'additive' ? 'additive' : 'alpha'; }
+  /**
+   * How much the camera's exposure brightens the sprite, 0..1. A sprite is unlit: at 1 (the default) its
+   * colour reaches the screen multiplied by the exposure like everything lit, so a flame that reads right in
+   * daylight is a white smear once the exposure opens for a night or a dungeon (a thousand times, for a
+   * torch-lit room). At 0 it shows at the same brightness under any exposure. In between it still brightens
+   * in the dark, by that fraction of the stops. The same idea as an emissive "exposure weight".
+   */
+  public get exposureWeight(): number { return this._exposureWeight; }
+  public set exposureWeight(value: number) { this._exposureWeight = unitOr1(value); }
 
   /** Texture-space rect [u0, v0, u1, v1] of the tile this sprite shows. */
   public uvRect(): [number, number, number, number] {
@@ -154,6 +175,9 @@ export class Sprite {
           transparent: this._material.config.transparent,
           side: this._material.config.side,
           wireframe: this._material.config.wireframe,
+          // Only when set, so an alpha sprite serializes as it always did.
+          ...(this._blend === 'additive' ? { blend: 'additive' } : {}),
+          ...(this._exposureWeight < 1 ? { exposureWeight: this._exposureWeight } : {}),
       };
   }
 
@@ -167,6 +191,8 @@ export class Sprite {
           transparent: data?.transparent ?? migrated.transparent,
           side: data?.side ?? migrated.side,
           wireframe: data?.wireframe ?? migrated.wireframe,
+          blend: data?.blend,
+          exposureWeight: data?.exposureWeight,
       });
   }
 }

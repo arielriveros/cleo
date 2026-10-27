@@ -34,6 +34,10 @@ export default class PlayButtonNode extends UIButtonNode {
 and the published player, so in practice it always works. The promise resolves once the new scene
 has started.
 
+The new scene brings its own render settings: what its scene saved, applied before it starts. So a
+scene's scripts can still change them in `onStart`, and what the last scene's scripts changed does
+not follow the player into the next.
+
 With `loadingScreen`, the switch is covered by a loading screen showing a heading and a progress bar.
 The screen belongs to the host, not to either scene, so it stays up across the swap. It lifts once the
 new scene's first frames run smoothly. The progress is the host's real stages:

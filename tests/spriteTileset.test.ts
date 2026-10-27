@@ -276,3 +276,26 @@ describe('animated sprite frame rate', () => {
     });
 });
 
+
+describe('sprite blending and random start', () => {
+    const frames = Array.from({ length: 16 }, (_, i) => i);
+
+    it('round-trips additive blending, and writes nothing for the alpha default', async () => {
+        const alpha = new SpriteNode('s', new Sprite({ tileset: ATLAS() }));
+        expect('blend' in ((await alpha.serialize()) as any).sprite).toBe(false);
+        const additive = new SpriteNode('fire', new Sprite({ tileset: ATLAS(), blend: 'additive' }));
+        const holder = new Node('h');
+        parseNodeJson(holder, JSON.parse(JSON.stringify(await additive.serialize())));
+        expect((holder.children[0] as SpriteNode).sprite.blend).toBe('additive');
+    });
+
+    it('starts copies of one sprite on frames of their own, and round-trips the flag', async () => {
+        const make = () => new AnimatedSpriteNode('flame', new Sprite({ tileset: ATLAS() }), { frames, fps: 24, randomStart: true });
+        const starts = new Set(Array.from({ length: 24 }, () => make().currentFrame));
+        expect(starts.size).toBeGreaterThan(4);
+        expect(new AnimatedSpriteNode('still', new Sprite({ tileset: ATLAS() }), { frames, fps: 24 }).currentFrame).toBe(0);
+        const holder = new Node('h');
+        parseNodeJson(holder, JSON.parse(JSON.stringify(await make().serialize())));
+        expect((holder.children[0] as AnimatedSpriteNode).randomStart).toBe(true);
+    });
+});

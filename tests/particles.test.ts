@@ -626,3 +626,31 @@ describe('cycle boundaries', () => {
         expect(rt.time).toBeGreaterThan(99);
     });
 });
+
+describe('per-copy particle seeds', () => {
+    // Bursts rolled on a chance (spawnBurst probability) come from the emitter's seed; copies of one effect
+    // share their definition, so each node salts it with its id or a row of torches sparks in lockstep.
+    const sparks = () => emitterWith(d => {
+        d.duration = 1;
+        d.spawn = [makeModule('spawnBurst')];
+        d.spawn[0].params.bursts = [{ time: 0, count: 1, cycles: 0, interval: 0.05, probability: 0.3 }];
+    });
+    const pattern = (rt: EmitterRuntime) => {
+        rt.play();
+        return Array.from({ length: 40 }, () => rt.advance(0.05, I).spawnCount).join('');
+    };
+
+    it('rolls the same with the same salt and differently with another', () => {
+        const e = sparks();
+        expect(pattern(new EmitterRuntime(e, 7))).toBe(pattern(new EmitterRuntime(e, 7)));
+        expect(pattern(new EmitterRuntime(e, 7))).not.toBe(pattern(new EmitterRuntime(e, 8)));
+    });
+
+    it('salts each node by its id', () => {
+        const system = { version: 1, emitters: [sparks()], bounds: { center: [0, 0, 0], extents: [1, 1, 1] } };
+        const a = new ParticleSystemNode('torch', { system }, 'torch-a');
+        const b = new ParticleSystemNode('torch', { system }, 'torch-b');
+        expect(a.runtime.emitters[0].seed).not.toBe(b.runtime.emitters[0].seed);
+        expect(new ParticleSystemNode('torch', { system }, 'torch-a').runtime.emitters[0].seed).toBe(a.runtime.emitters[0].seed);
+    });
+});

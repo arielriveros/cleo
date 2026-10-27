@@ -447,6 +447,7 @@ setTilemap(t: Tilemap): void
 get sprite: Sprite
 get/set constraints: 'free' | 'spherical' | 'cylindrical'    // billboarding
 tileset: string ; tileIndex: number ; tint: vec3 ; opacity: number
+sprite.blend: 'alpha' | 'additive'                           // additive adds light: fire, glows
 uvRect(): [number, number, number, number]
 initializeSprite(): void
 ```
@@ -457,7 +458,7 @@ Extends `SpriteNode`.
 
 ```ts
 frames: number[] ; frameSource: 'node' | 'tile'
-fps: number ; loop: boolean
+fps: number ; loop: boolean ; randomStart: boolean   // randomStart: each copy begins on a random frame
 get currentTile: number ; get/set currentFrame: number
 reset(): void
 ```

@@ -30,6 +30,7 @@ export default function SpriteSheetEditor() {
   const [fps, setFps] = useState(12);
   const [tileFps, setTileFps] = useState(0);
   const [loop, setLoop] = useState(true);
+  const [randomStart, setRandomStart] = useState(false);
   const [zoom, setZoom] = useState(2);
   // The tileset lives on the engine node, which React cannot observe: `revision` is bumped whenever the
   // slot reassigns it, and is a memo dependency of the lookup below.
@@ -44,6 +45,7 @@ export default function SpriteSheetEditor() {
     setFps(node.fps);
     setTileFps(node.tileFps);
     setLoop(node.loop);
+    setRandomStart(node.randomStart);
   }, [node]);
 
   const asset = useMemo(() => node ? tilesetAssetOf(node, tilesets) : undefined, [node, tilesets, revision]);
@@ -141,8 +143,11 @@ export default function SpriteSheetEditor() {
                     const f = Math.max(0.01, v); node.fps = f; setFps(f); changed();
                   }} />
                 </PropertyRow>
-                <PropertyRow label='Loop' divider={false}>
+                <PropertyRow label='Loop'>
                   <Toggle checked={loop} onChange={(c) => { node.loop = c; setLoop(c); changed() }} />
+                </PropertyRow>
+                <PropertyRow label='Random start' divider={false}>
+                  <Toggle checked={randomStart} onChange={(c) => { node.randomStart = c; setRandomStart(c); changed() }} />
                 </PropertyRow>
               </PropertyTable>
               {frames.length > 0 && (

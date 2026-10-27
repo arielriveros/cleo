@@ -333,19 +333,106 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(template.triggers[template.nodeJson.id].shapes[0].offset[2]).toBeGreaterThan(0);
     });
 
+    const dungeonNodes = () => allNodes(read('scenes', `${manifest().sceneMetas[1].id}.json`).scene);
+
     it('ships the dungeon as a second scene, with the way back to the valley', () => {
         const metas = manifest().sceneMetas;
         expect(metas.map((m: any) => m.name)).toEqual(['Valley', 'Dungeon']);
-        const dungeon = read('scenes', `${metas[1].id}.json`);
-        const all: any[] = [];
-        const walk = (n: any) => { all.push(n); (n.children ?? []).forEach(walk); };
-        walk(dungeon.scene);
+        const all = dungeonNodes();
         expect(all.some(n => n.name === 'Player')).toBe(true);
         expect(all.some(n => n.name === 'GameManager')).toBe(true);
-        const exit = all.find(n => n.name === 'Way Out');
+        const exit = all.find(n => n.name === 'Way Out' && n.scriptVars);
         expect(exit.scriptVars.targetScene).toBe('Valley');
         expect(exit.trigger.shapes.length).toBe(1);
-        expect(all.find(n => n.name === 'Floor').body.shapes.length).toBe(1);
+        // The cave and the ladder name each other, so a trip down and back ends where it began.
+        expect(exit.scriptVars.exitTo).toBe('Skull Cave Entrance');
+        expect(nodes().find(n => n.name === 'Skull Cave Entrance').scriptVars.exitTo).toBe('Way Out');
+    });
+
+    it('builds the dungeon from the medieval structure, chunked, every glb material mapped', () => {
+        const all = dungeonNodes();
+        const structure = all.find(n => n.name === 'Dungeon Structure');
+        const chunks = allNodes(structure).filter(n => n.type === 'model');
+        expect(chunks.length).toBeGreaterThan(60);
+        const materials = new Map(library('materials').map((m: any) => [m.id, m.name]));
+        const used = new Set(chunks.map(n => materials.get(n.variables.__materialId.value)));
+        // Rocky walls and slabs from build/wall_textures, wood and metal the model's own.
+        for (const name of ['Dungeon Castle Slates', 'Dungeon Cobblestone Floor', 'Dungeon Stone Brick Wall', 'Dungeon Stone Slabs',
+            'Dungeon Wood Planks', 'Dungeon Old Wood', 'Dungeon Iron']) expect(used.has(name), name).toBe(true);
+        // No chunk spans the dungeon: each is one 10 m cell's triangles (and their overhang).
+        for (const c of chunks.slice(0, 40)) {
+            const p = c.model.geometry.positions;
+            let minX = Infinity, maxX = -Infinity;
+            for (let i = 0; i < p.length; i += 3) { minX = Math.min(minX, p[i]); maxX = Math.max(maxX, p[i]); }
+            expect(maxX - minX, c.name).toBeLessThan(25);
+        }
+    });
+
+    it('gives the dungeon box colliders over its floors, walls, ramps and steps', () => {
+        const all = dungeonNodes();
+        const bodies = allNodes(all.find(n => n.name === 'Collision')).filter(n => n.body);
+        const shapes = bodies.flatMap(n => n.body.shapes);
+        expect(shapes.length).toBeGreaterThan(1000);
+        expect(shapes.every((s: any) => s.type === 'box')).toBe(true);
+        // The stairs are ramps under 45 degrees.
+        const ramps = shapes.filter((s: any) => Math.abs(s.rotation[0]) > 20);
+        expect(ramps.length).toBeGreaterThanOrEqual(2);
+        for (const r of ramps) expect(Math.abs(r.rotation[0])).toBeLessThan(45);
+        // Walls are what swings bounce off; floors are walked on, never carved out of the navmesh.
+        for (const n of bodies) {
+            if (n.name.startsWith('Walls')) expect(n.variables.blocksSwings?.value, n.name).toBe(true);
+            else expect(n.variables.navObstacle?.value, n.name).toBe(false);
+        }
+    });
+
+    it('hangs a wall torch at every sconce of the light rig, and lights the dungeon with fire', () => {
+        const all = dungeonNodes();
+        const templates = library('templates');
+        const templateOf = (n: any) => templates.find((t: any) => t.id === n.variables?.__templateId?.value);
+        const count = (name: string) => all.filter(n => templateOf(n)?.name === name).length;
+        expect(count('Wall Torch')).toBeGreaterThan(45);
+        expect(count('Torch')).toBeGreaterThanOrEqual(6);
+        expect(count('Candle')).toBeGreaterThan(12);
+        expect(count('Fire Pit')).toBe(3);
+        expect(count('Bonfire')).toBe(1);
+        expect(count('Hanging Brazier')).toBe(2);
+        // Fire is the tileset's: 8 x 4 frames of 128 x 256, additive, each copy on a frame of its own.
+        const flames = all.filter(n => n.type === 'animatedSprite');
+        expect(flames.length).toBeGreaterThan(60);
+        for (const f of flames) {
+            expect(f.sprite.tileset.tileWidth).toBe(128);
+            expect(f.sprite.tileset.tileHeight).toBe(256);
+            expect(f.sprite.tileset.rows).toBe(4);
+            expect(f.sprite.blend).toBe('additive');
+            expect(f.animation.randomStart).toBe(true);
+            expect(f.animation.frames).toHaveLength(32);
+        }
+        // Embers always; sparks now and then, falling and bouncing off the floor.
+        const fx = library('particleSystems').find((p: any) => p.name === 'Torch Embers');
+        const sparks = fx.system.emitters.find((e: any) => e.name === 'Sparks');
+        const burst = sparks.spawn.find((m: any) => m.type === 'spawnBurst').params.bursts[0];
+        expect(burst.probability).toBeLessThan(0.5);
+        expect(burst.cycles).toBe(0);
+        const collision = sparks.update.find((m: any) => m.type === 'collision').params;
+        // Off the scene depth, where the floor they land on is drawn; not the physics bodies, which would
+        // pack every collider near every torch into the simulation each frame.
+        expect(collision.depth).toBe(true);
+        expect(collision.bodies).toBe(false);
+        expect(collision.restitution).toBeGreaterThan(0.2);
+        expect(fx.system.emitters.some((e: any) => e.name === 'Embers')).toBe(true);
+    });
+
+    it('makes the dungeon a level: enemies, a bonfire, and the Warden behind a fog gate', () => {
+        const all = dungeonNodes();
+        const spawns = all.filter(n => n.name?.startsWith('Spawn '));
+        expect(spawns.length).toBeGreaterThanOrEqual(10);
+        const boss = spawns.find(n => n.scriptVars?.isBossSpawn === true);
+        expect(boss.scriptVars.templateName).toBe('Hollow Warden');
+        expect(all.some(n => n.name === 'Fog Gate')).toBe(true);
+        expect(all.some(n => n.variables?.isBossArena?.value === true)).toBe(true);
+        for (const name of ['Boss Reward', 'Epilogue Message']) expect(all.some(n => n.name === name), name).toBe(true);
+        const nav = all.find(n => n.type === 'navMesh');
+        expect(nav?.navMesh, 'baked navmesh').toBeTruthy();
     });
 
     it('breaks barrels into a debris template whose pieces stand inside the barrel', () => {

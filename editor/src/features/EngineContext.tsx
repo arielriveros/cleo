@@ -16,7 +16,7 @@ import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../ut
 import { isEditorOwnedChange } from "../utils/editorOwned";
 import { resetScriptModules, addScriptModuleSources, nextFrame } from "cleo";
 import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, allTerrainFoliageRules, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
-import type { SceneChange, TerrainFoliageRule, InputMap, LoadProgressListener } from "cleo";
+import type { SceneChange, TerrainFoliageRule, InputMap, LoadProgressListener, RenderSettings } from "cleo";
 import NullImage from '../images/null.png';
 import EventEmitter from "../utils/eventEmitter";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
@@ -50,7 +50,7 @@ import { AnimationAsset, buildAnimationAsset, storeSkin, findEquivalentAnimation
 import type { StoredSkin } from "../utils/animationAssets";
 import { modelAssetSkin, applyModelAnimations, modelAnimationIds, invalidateAnimationCache, resolveAnimationAsset, registerRigResolver, registerPoseAssetResolver } from "../utils/animationResolve";
 import { AnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
-import { TilesetAsset, reembedTilesets, detachTileset } from "../utils/tilesets";
+import { TilesetAsset, reembedTilesets, detachTileset, normalizeTilesetAsset } from "../utils/tilesets";
 import { AiBrainAsset, AiBrainKind, buildAiBrainAsset, reembedBrains, detachBrain } from "../utils/aiBrains";
 import { ParticleSystemAsset, buildParticleSystemAsset, reembedParticleSystems, detachParticleSystem } from "../utils/particleSystems";
 import type { AnimControllerAsset } from "../utils/animationControllers";
@@ -1561,7 +1561,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     (async () => {
       try {
         const list = await idbGet<TilesetAsset[]>(libKey('tilesets'));
-        if (list && list.length) setTilesets(prev => prev.length ? prev : list);
+        if (list && list.length) setTilesets(prev => prev.length ? prev : list.map(normalizeTilesetAsset));
       } catch (e) { console.warn('Failed to load tilesets:', e); }
       finally { tilesetsLoadedRef.current = true; }
     })();
@@ -6351,6 +6351,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // it a discarded play scene leaks its GPU meshes, its terrain heightfield body, its foliage collider
   // pool and its permanent SCENE_CHANGED subscription — one full set per Play.
   const playSceneRef = useRef<Scene | null>(null);
+  // The open scene's render settings as Play found them. Render settings belong to a scene: a runtime
+  // Game.loadScene switch applies the target's, coming back to the entry scene applies these, and Stop
+  // puts them back — a script that changed the exposure, or a scene switch, must not leave its look on
+  // the scene being edited (whose next save reads the live renderer).
+  const playRenderRef = useRef<RenderSettings | null>(null);
 
   /**
    * Release a play scene being thrown away. Guarded twice on purpose: only the scene this ref is holding
@@ -6393,17 +6398,19 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   // Build a runnable play Scene for any scene id. The play-session entry (the scene open when Play was
   // pressed) uses the live editor scene so unsaved edits play; every other scene is loaded from its blob,
-  // re-resolved against the current libraries, then parsed with its scripts compiled.
-  const buildPlaySceneById = async (id: string, onProgress?: LoadProgressListener): Promise<Scene> => {
+  // re-resolved against the current libraries, then parsed with its scripts compiled. Comes with the
+  // scene's render settings: the entry scene's as Play found them, any other's as saved.
+  const buildPlaySceneById = async (id: string, onProgress?: LoadProgressListener):
+      Promise<{ scene: Scene, render: Partial<RenderSettings> | null }> => {
     // Each stage yields a frame so a loading screen's bar paints before the next one blocks.
     const stage = async (fraction: number, name: string) => { onProgress?.(fraction, name); await nextFrame(); };
     if (id === playEntrySceneIdRef.current) {
       await stage(0.2, 'Building the scene');
-      return buildPlayScene();
+      return { scene: await buildPlayScene(), render: playRenderRef.current };
     }
     await stage(0.1, 'Reading the scene');
     const data = await loadSceneData(id);
-    if (!data) return new Scene();
+    if (!data) return { scene: new Scene(), render: null };
     await stage(0.3, 'Resolving assets');
     const clone = deepClone({ scene: data.scene, ui: data.ui });
     // A scene never opened in this session still carries its UI as the legacy blob — same reason the
@@ -6424,7 +6431,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     registerTemplates(gd.templates);
     addScriptModuleSources(gd.modules); // adds what is new; an already-evaluated module keeps its state
     scene.parse(gd, true); // gd injects scripts into nodes → compiled here
-    return scene;
+    return { scene, render: data.config?.render ?? null };
   };
 
   // Runtime scene switch (Game.loadScene from a script). Swaps the engine's scene, resetting UI/physics/
@@ -6435,7 +6442,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const meta = projectMetaRef.current;
     const target = meta?.scenes.find(s => s.id === nameOrId) ?? meta?.scenes.find(s => s.name === nameOrId);
     if (!target) { Logger.warn(`loadScene: no scene "${nameOrId}"`, 'Editor'); return; }
-    const scene = await buildPlaySceneById(target.id, onProgress);
+    const { scene, render } = await buildPlaySceneById(target.id, onProgress);
     onProgress?.(0.9, 'Starting');
     // A simulation keeps watching through the editor camera across a runtime scene switch.
     if (isSimulatingRef.current) carryEditorCamera(instance.scene, scene);
@@ -6443,6 +6450,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // leave the next one dead.
     instance.input.resetState();
     instance.physics.clear();
+    // The scene's own look, as opening it in the editor would give it. Before it starts, so its scripts
+    // can still change it.
+    instance.renderer.applyRenderSettings(render);
     instance.setScene(scene);
     // After the swap: the outgoing scene is off the engine and its bodies are out of the world.
     releasePlayScene();
@@ -6536,6 +6546,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     reembedSceneFields(editorSceneRef.current);
     playEntrySceneIdRef.current = openSceneIdRef.current;
     currentPlaySceneIdRef.current = openSceneIdRef.current;
+    playRenderRef.current = instance.renderer.getRenderSettings();
     // A fresh session evaluates every script module afresh: edits made since the last Play apply, and no
     // module state leaks from one session into the next.
     resetScriptModules();
@@ -6563,6 +6574,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (isSimulatingRef.current) recallEditorCamera(playSceneRef.current);
     isSimulatingRef.current = false;
     setSimulatedScene(null);
+    instance.renderer.applyRenderSettings(playRenderRef.current);
+    playRenderRef.current = null;
     instance.setScene(editorSceneRef.current);
     // Held keys, gestures and edges only — NOT the map. Un-binding the game between scenes would
     // leave the next one dead.
@@ -6587,6 +6600,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     resetScriptModules();
     const newScene = await buildPlayScene();
     if (isSimulatingRef.current) carryEditorCamera(instance.scene, newScene);
+    instance.renderer.applyRenderSettings(playRenderRef.current);
     instance.setScene(newScene);
     releasePlayScene();
     playSceneRef.current = newScene;

@@ -34,6 +34,8 @@ import { decalBoxFrame, decalBoxLines, planDecalBox } from './decalOverlayPlan';
 import type { DecalOverlayFrame } from './decalOverlayPlan';
 import type { BodyDescription, ShapeDescription } from '../features/EngineContext';
 import type { DebugVisibility, DebugChannel, DebugCategory } from '../features/DebugVisibilityContext';
+import { shapeScaleFactors } from '../features/gizmo/collisionGizmoMath';
+import { selectedCollisionShape, type CollisionChannel } from '../features/gizmo/collisionSelection';
 
 /**
  * Editor-only visual helpers (light/probe icons, camera frustum gizmos, physics debug wireframes),
@@ -60,6 +62,8 @@ const SOUND_RADIUS = '__debug__SoundRadius';
 const BODY_PREFIX = '__debug__body_';
 const TRIGGER_PREFIX = '__debug__trigger_';
 const SHAPE_PREFIX = '__debug__shape_';
+/** An owner's shapes merged into one wireframe (see buildMergedShapeWire). */
+const MERGED_SHAPES = '__debug__shapes';
 const AABB_PREFIX = '__debug__aabb_';
 const TERRAIN_PREFIX = '__debug__terrain_';
 const FOLIAGE_PREFIX = '__debug__foliage_';
@@ -129,6 +133,11 @@ function collectMeshPositions(root: Node, includeSkinned: boolean): number[][] {
   return out;
 }
 
+/** Every mesh vertex under `root`, skinned meshes included, in root-local space: what a fitted primitive covers. */
+export function meshPositions(root: Node): number[][] {
+  return collectMeshPositions(root, true);
+}
+
 /** Vertices to hull, or null when there is nothing usable. Skinned meshes are excluded — see above. */
 export function collectHullPositions(root: Node): number[][] | null {
   const out = collectMeshPositions(root, false);
@@ -171,41 +180,95 @@ export function meshBounds(root: Node): { center: Vec.vec3; half: Vec.vec3; radi
 }
 
 /**
- * Build a single wireframe mesh visualizing one physics shape, at unit size (planes get no wireframe).
- * `color` is red for bodies, green for triggers; `applyShapeTransform` supplies the transform per frame.
- * A capsule is the exception, baked at FINAL size from `scale` — its caps must stay spherical under a
- * non-uniform scale, so `shapesSignature` folds that scale into its entry.
+ * Build a single wireframe mesh visualizing one physics shape, at unit size. `color` is red for bodies,
+ * green for triggers; `applyShapeTransform` supplies the transform per frame. A capsule is the exception,
+ * baked at FINAL size from `scale` — its caps must stay spherical under a non-uniform scale, so
+ * `shapesSignature` folds that scale into its entry. A plane is infinite, so it is drawn as a 4 m grid
+ * square on its own XY (the side cannon's plane faces, +Z) with a stub along that normal.
  */
 export function buildShapeDebugMesh(shape: ShapeDescription, color: [number, number, number], scale: Vec.vec3): ModelNode | null {
-  let model: Model | null;
+  if (shape.type === 'plane') return wireModel(SHAPE_PREFIX, planeLines(), color);
+  const geometry = shapeDebugGeometry(shape, scale);
+  return geometry ? chrome(new ModelNode(SHAPE_PREFIX, new Model(geometry, Material.Basic({ color }, { wireframe: true })))) : null;
+}
+
+/** The unit-size line geometry `buildShapeDebugMesh` draws for one shape (see there for the capsule). */
+function shapeDebugGeometry(shape: ShapeDescription, scale: Vec.vec3): Geometry | null {
   switch (shape.type) {
-    case 'box':
-      model = new Model(Geometry.Cube(1, 1, 1, true), Material.Basic({ color }, { wireframe: true }));
-      break;
-    case 'sphere':
-      model = new Model(Geometry.Sphere(8, 1), Material.Basic({ color }, { wireframe: true }));
-      break;
-    case 'cylinder':
-      model = new Model(Geometry.Cylinder(12, 1, 1), Material.Basic({ color }, { wireframe: true }));
-      break;
+    case 'box': return Geometry.Cube(1, 1, 1, true);
+    case 'sphere': return Geometry.Sphere(8, 1);
+    // The collider's own segment count: cannon's cylinder IS that prism, not a smooth one.
+    case 'cylinder': return Geometry.Cylinder(Math.max(3, Math.round(shape.numSegments || 12)), 1, 1);
     case 'capsule': {
       const { radius, cylinder } = capsuleDims(shape, scale);
-      model = new Model(Geometry.Capsule(shape.numSegments, radius, cylinder), Material.Basic({ color }, { wireframe: true }));
-      break;
+      return Geometry.Capsule(shape.numSegments, radius, cylinder);
     }
-    case 'convex':
-      // Geometry.ConvexHull must fill normals/uvs as well as the gl.LINES index pairs: the VAO is
-      // strided by the shader's attribute list, so a positions-only geometry scrambles.
-      model = new Model(
-        Geometry.ConvexHull(shape.vertices, shape.faces),
-        Material.Basic({ color }, { wireframe: true })
-      );
-      break;
-    case 'plane':
-    default:
-      model = null;
+    // Geometry.ConvexHull must fill normals/uvs as well as the gl.LINES index pairs: the VAO is
+    // strided by the shader's attribute list, so a positions-only geometry scrambles.
+    case 'convex': return Geometry.ConvexHull(shape.vertices, shape.faces);
+    case 'plane': return lineGeometry(planeLines());
+    default: return null;
   }
-  return model ? chrome(new ModelNode(SHAPE_PREFIX, model)) : null;
+}
+
+/**
+ * Every shape of one owner as ONE line mesh, each baked where `applyShapeTransform` puts its own mesh.
+ * What an owner shows while none of its shapes is being edited: a generated level carries thousands of
+ * colliders, and a mesh per shape (a draw, a material and a transform to update every frame) cost the
+ * editor more than the level itself.
+ */
+function buildMergedShapeWire(shapes: ShapeDescription[], color: [number, number, number], scale: Vec.vec3): ModelNode | null {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const place = new Node('__debug__place');
+  const p = Vec.vec3.create();
+  for (const shape of shapes) {
+    const geometry = shapeDebugGeometry(shape, scale);
+    if (!geometry) continue;
+    applyShapeTransform(place, shape, scale);
+    place.updateTransforms(null);
+    const base = positions.length / 3;
+    const src = geometry.positions;
+    for (let i = 0; i < src.length; i += 3) {
+      Vec.vec3.transformMat4(p, Vec.vec3.set(p, src[i], src[i + 1], src[i + 2]), place.localTransform);
+      positions.push(p[0], p[1], p[2]);
+    }
+    for (const index of geometry.indices) indices.push(base + index);
+  }
+  if (!indices.length) return null;
+  const count = positions.length / 3;
+  const normals = new Float32Array(count * 3);
+  for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
+  // Normals and uvs only to satisfy the VAO stride — see ensureDecalBox.
+  const geometry = new Geometry(new Float32Array(positions), normals, new Float32Array(count * 2), undefined, undefined, indices, false);
+  return chrome(new ModelNode(MERGED_SHAPES, new Model(geometry, Material.Basic({ color }, { wireframe: true }))));
+}
+
+/**
+ * What the merged mesh depends on: every shape's type, size, offset and rotation, and the owner's scale.
+ * Built when the helpers reconcile (an edit, a drag's end), never per frame.
+ */
+function bakedShapesSignature(shapes: ShapeDescription[], scale: Vec.vec3): string {
+  return `${shapesSignature(shapes, scale)}#${scale[0]},${scale[1]},${scale[2]}#` + shapes.map((s) => {
+    const sized = s as Partial<{ width: number, height: number, depth: number, radius: number }>;
+    return `${s.offset.join(',')}|${s.rotation.join(',')}|${sized.width},${sized.height},${sized.depth},${sized.radius}`;
+  }).join(';');
+}
+
+/** A 4 m square grid on the XY plane, 1 m cells, plus a 1 m stub along the +Z normal. */
+function planeLines(): { positions: [number, number, number][]; indices: number[] } {
+  const positions: [number, number, number][] = [];
+  const indices: number[] = [];
+  const line = (a: [number, number, number], b: [number, number, number]) => {
+    indices.push(positions.length, positions.length + 1);
+    positions.push(a, b);
+  };
+  for (let i = -2; i <= 2; i++) {
+    line([i, -2, 0], [i, 2, 0]);
+    line([-2, i, 0], [2, i, 0]);
+  }
+  line([0, 0, 0], [0, 0, 1]);
+  return { positions, indices };
 }
 
 /**
@@ -221,54 +284,55 @@ function capsuleDims(shape: { radius: number, height: number }, scale: Vec.vec3)
 /**
  * Place one wireframe exactly where the physics engine puts the collider it stands for. Dimensions and
  * offset are scaled by the owner's world scale and THEN rotated — the order `setShapes` and cannon use.
- * Scale resolves per shape type: a sphere takes the dominant axis, a cylinder max(X, Z) radially.
+ * Scale resolves per shape type through `shapeScaleFactors`, which the viewport handles share, so the
+ * two can never disagree: a sphere takes the dominant axis, a cylinder max(X, Z) radially.
  */
-function applyShapeTransform(node: ModelNode, shape: ShapeDescription, scale: Vec.vec3) {
+function applyShapeTransform(node: Node, shape: ShapeDescription, scale: Vec.vec3) {
   const sx = Math.abs(scale[0]), sy = Math.abs(scale[1]), sz = Math.abs(scale[2]);
+  const f = shapeScaleFactors(shape, scale);
 
   node.setPosition(Vec.vec3.fromValues(shape.offset[0] * sx, shape.offset[1] * sy, shape.offset[2] * sz))
       .setRotation(Vec.vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2]));
 
   switch (shape.type) {
     case 'box':
-      node.setScale(Vec.vec3.fromValues(shape.width * sx, shape.height * sy, shape.depth * sz));
+      node.setScale(Vec.vec3.fromValues(shape.width * f[0], shape.height * f[1], shape.depth * f[2]));
       break;
     case 'sphere':
-      node.setUniformScale(shape.radius * Math.max(sx, sy, sz));
+      node.setUniformScale(shape.radius * f[0]);
       break;
-    case 'cylinder': {
-      const radial = Math.max(sx, sz);
-      node.setScale(Vec.vec3.fromValues(shape.radius * radial, shape.height * sy, shape.radius * radial));
+    case 'cylinder':
+      node.setScale(Vec.vec3.fromValues(shape.radius * f[0], shape.height * f[1], shape.radius * f[2]));
       break;
-    }
     case 'capsule':
-      // Already baked at final size by buildShapeDebugMesh; scaling again would double-apply.
+    case 'plane':
+      // A capsule is already baked at final size by buildShapeDebugMesh; scaling again would double-apply.
+      // A plane is infinite, and its grid is a fixed-size marker.
       node.setUniformScale(1);
       break;
     case 'convex':
-      node.setScale(Vec.vec3.fromValues(sx, sy, sz));
+      node.setScale(Vec.vec3.fromValues(f[0], f[1], f[2]));
       break;
   }
 }
 
 /**
- * Cheap identity of a shape list. A convex hull contributes only its vertex count and transform.
- * Only a capsule folds in the owner's `scale` — it is the one mesh baked at final size; folding scale
- * into the others would rebuild their geometry on every drag of the scale gizmo.
+ * Cheap identity of a shape list: what the MESHES depend on, not where they go. Offsets, rotations and
+ * the size of a box, sphere or cylinder are applied per frame by `applyShapeTransform` onto a unit mesh,
+ * so they stay out — with them in, a handle drag rebuilt every wireframe on every pointer move. A
+ * cylinder's segment count and a convex hull's identity are geometry. Only a capsule folds in the owner's
+ * `scale`, because it is the one mesh baked at final size.
  */
 function shapesSignature(shapes: ShapeDescription[], scale: Vec.vec3): string {
   return shapes.map((s) => {
-    const common = `${s.type}|${s.offset.join(',')}|${s.rotation.join(',')}`;
     switch (s.type) {
-      case 'box': return `${common}|${s.width},${s.height},${s.depth}`;
-      case 'sphere': return `${common}|${s.radius}`;
-      case 'cylinder': return `${common}|${s.radius},${s.height},${s.numSegments}`;
+      case 'cylinder': return `cylinder|${s.numSegments}`;
       case 'capsule': {
         const { radius, cylinder } = capsuleDims(s, scale);
-        return `${common}|${s.numSegments}|${radius},${cylinder}`;
+        return `capsule|${s.numSegments}|${radius},${cylinder}`;
       }
-      case 'convex': return `${common}|${s.quality},${s.vertices.length},${s.faces.length},v${s.v ?? 1}`;
-      default: return common;
+      case 'convex': return `convex|${s.quality},${s.vertices.length},${s.faces.length},v${s.v ?? 1}`;
+      default: return s.type;
     }
   }).join(';');
 }
@@ -425,10 +489,13 @@ function unitSphereLines(segments = 48): { positions: [number, number, number][]
 /** A line-list wireframe node (editor-only overlay), from arbitrary line pairs. */
 export function wireModel(name: string, lines: { positions: [number, number, number][]; indices: number[] },
                    color: [number, number, number]): ModelNode {
+  return chrome(new ModelNode(name, new Model(lineGeometry(lines), Material.Basic({ color }, { wireframe: true, castShadow: false }))));
+}
+
+function lineGeometry(lines: { positions: [number, number, number][]; indices: number[] }): Geometry {
   // Normals and uvs only to satisfy the VAO stride — see ensureDecalBox.
-  const geometry = new Geometry(lines.positions, lines.positions.map(() => [0, 1, 0] as [number, number, number]),
+  return new Geometry(lines.positions, lines.positions.map(() => [0, 1, 0] as [number, number, number]),
     lines.positions.map(() => [0, 0] as [number, number]), undefined, undefined, lines.indices, false);
-  return chrome(new ModelNode(name, new Model(geometry, Material.Basic({ color }, { wireframe: true, castShadow: false }))));
 }
 
 /**
@@ -474,50 +541,114 @@ function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNo
   helper.onUpdate = place;
 }
 
+/** The shape being edited (the ragdoll editor's selection orange), and how far its siblings fade. */
+const SELECTED_SHAPE_COLOR: [number, number, number] = [1, 0.6, 0.2];
+const UNSELECTED_SHAPE_DIM = 0.35;
+
+/** What an owner's debug group is drawing, and what each of its meshes was built from. */
+interface ShapeGroupState {
+  /** All the shapes in one mesh, and the list, scale and signature it baked. */
+  merged: ModelNode | null;
+  mergedFrom: ShapeDescription[] | null;
+  mergedScale: string;
+  mergedSig: string;
+  /** One mesh per shape, while one of the owner's shapes is being edited; and their signature. */
+  meshes: ModelNode[];
+  meshesSig: string;
+}
+const shapeGroupStates = new WeakMap<Node, ShapeGroupState>();
+
 /**
- * Ensure a top-level debug node that follows `target` and carries one wireframe per shape. The meshes
- * rebuild only when the shapes signature changes, but the per-frame `onUpdate` must be re-bound on every
- * reconcile: the group outlives an edit and a stale closure keeps drawing the previous offsets.
+ * Ensure a top-level debug node that follows `target` and draws its shapes' wireframes. The per-frame
+ * `onUpdate` must be re-bound on every reconcile: the group outlives an edit and a stale closure keeps
+ * drawing the previous offsets.
+ *
+ * Two ways to draw them. Normally all of an owner's shapes are ONE merged mesh (see
+ * `buildMergedShapeWire`), rebuilt when the list or the owner's scale changes. While one of its shapes is
+ * being edited, the owner switches to a mesh per shape, built then: those are placed every frame from the
+ * shapes read LIVE through `read` — the viewport handles rewrite them on every pointer move and only ask
+ * for a reconcile when the drag ends — and they tint: the edited shape in {@link SELECTED_SHAPE_COLOR},
+ * the rest faded to {@link UNSELECTED_SHAPE_DIM} of their channel colour. A shape whose type no longer
+ * matches the mesh built for it (a convert or a removal in flight) keeps the reconciled one until the
+ * next reconcile rebuilds.
  */
 function ensureShapeGroup(
   scene: Scene,
   target: Node,
   debugName: string,
+  channel: CollisionChannel,
   shapes: ShapeDescription[],
+  read: () => ShapeDescription[] | undefined,
   color: [number, number, number],
   follow: (debug: Node) => void,
 ) {
-  const sig = shapesSignature(shapes, target.worldScale);
-  const cache = sigMapFor(scene);
-
   let group = scene.getNodesByName(debugName)[0];
-  const isNew = !group;
   if (!group) {
     group = chrome(new Node(debugName));
     scene.addNode(group);
   }
-
-  // Both must run every frame: dragging the transform gizmo changes neither the shapes nor their
-  // signature, but it does move and rescale every collider.
   const debug = group;
-  debug.onUpdate = () => {
-    follow(debug);
-    for (const child of debug.children) {
-      if (!(child instanceof ModelNode) || !child.name.startsWith(SHAPE_PREFIX)) continue;
-      const shape = shapes[Number(child.name.slice(SHAPE_PREFIX.length))];
-      if (shape) applyShapeTransform(child, shape, target.worldScale);
-    }
+  let state = shapeGroupStates.get(debug);
+  if (!state) {
+    state = { merged: null, mergedFrom: null, mergedScale: '', mergedSig: '', meshes: [], meshesSig: '' };
+    shapeGroupStates.set(debug, state);
+  }
+  const st = state;
+
+  const merge = (list: ShapeDescription[]) => {
+    const scale = target.worldScale;
+    const key = `${scale[0]},${scale[1]},${scale[2]}`;
+    if (list === st.mergedFrom && key === st.mergedScale) return;
+    st.mergedFrom = list;
+    st.mergedScale = key;
+    const sig = bakedShapesSignature(list, scale);
+    if (st.merged && sig === st.mergedSig) return;
+    // Owned outright (built here, never shared), so its buffers go with it: a scale drag rebuilds per frame.
+    if (st.merged) { debug.removeChild(st.merged); st.merged.dispose(); }
+    st.merged = buildMergedShapeWire(list, color, scale);
+    st.mergedSig = sig;
+    if (st.merged) debug.addChild(st.merged);
+  };
+  const dropMeshes = () => {
+    for (const mesh of st.meshes) { debug.removeChild(mesh); mesh.dispose(); }
+    st.meshes = [];
   };
 
-  if (!isNew && cache.get(debugName) === sig) return; // shapes unchanged — keep existing children
+  // The per-shape meshes no longer match the list: drop them, the next edit builds them afresh.
+  const meshesSig = shapesSignature(shapes, target.worldScale);
+  if (st.meshes.length && st.meshesSig !== meshesSig) dropMeshes();
+  merge(shapes);
 
-  // Rebuild from scratch so type/size/count changes and shrinks are all handled.
-  for (const child of Array.from(debug.children)) debug.removeChild(child);
-  shapes.forEach((shape, i) => {
-    const mesh = buildShapeDebugMesh(shape, color, target.worldScale);
-    if (mesh) { mesh.name = `${SHAPE_PREFIX}${i}`; debug.addChild(mesh); }
-  });
-  cache.set(debugName, sig);
+  const dimmed = color.map(c => c * UNSELECTED_SHAPE_DIM) as [number, number, number];
+  // Every frame: dragging the transform gizmo changes neither the shapes nor their signature, but it
+  // does move and rescale every collider.
+  debug.onUpdate = () => {
+    follow(debug);
+    const live = read() ?? shapes;
+    const selected = selectedCollisionShape();
+    const editing = selected && selected.nodeId === target.id && selected.channel === channel ? selected.index : -1;
+    if (editing < 0) {
+      // Edits arrive as new lists (and a drag's end reconciles), so this rebuilds once per change.
+      merge(live);
+      if (st.merged) st.merged.visible = true;
+      if (st.meshes.length) dropMeshes();
+      return;
+    }
+    if (st.merged) st.merged.visible = false;
+    if (!st.meshes.length) {
+      shapes.forEach((shape, i) => {
+        const mesh = buildShapeDebugMesh(shape, color, target.worldScale);
+        if (mesh) { mesh.name = `${SHAPE_PREFIX}${i}`; debug.addChild(mesh); st.meshes.push(mesh); }
+      });
+      st.meshesSig = meshesSig;
+    }
+    for (const child of st.meshes) {
+      const i = Number(child.name.slice(SHAPE_PREFIX.length));
+      const shape = live[i]?.type === shapes[i]?.type ? live[i] : shapes[i];
+      if (shape) applyShapeTransform(child, shape, target.worldScale);
+      child.model.material.properties.set('color', i === editing ? SELECTED_SHAPE_COLOR : dimmed);
+    }
+  };
 }
 
 const HULL_VERSION = 5;
@@ -535,7 +666,6 @@ function migrateConvexShapes(scene: Scene, shapeLists: Map<string, { shapes: Sha
     entry.shapes = entry.shapes.map((s) => {
       if (s.type !== 'convex' || s.v === HULL_VERSION) return s;
       const hull = positions ? hullFromPositions(positions, s.quality) : null;
-      console.log(`[hull] migrate v${s.v ?? 1}->v${HULL_VERSION} node='${target.name}' quality=${s.quality} -> ${hull ? `${hull.vertices.length} vertices, ${hull.faces.length} faces` : 'kept as-is (no geometry)'}`);
       return hull
         ? { ...s, vertices: hull.vertices, faces: hull.faces, offset: hull.center, v: HULL_VERSION }
         : { ...s, v: HULL_VERSION };
@@ -1088,7 +1218,7 @@ export function reconcileEditorHelpers(
       const target = scene.getNodeById(id);
       if (!target) continue;
       // The group carries only the body's transform; `applyShapeTransform` folds the owner's scale in.
-      ensureShapeGroup(scene, target, `${BODY_PREFIX}${id}`, body.shapes, [1, 0, 0], (debug) => {
+      ensureShapeGroup(scene, target, `${BODY_PREFIX}${id}`, 'body', body.shapes, () => bodies.get(id)?.shapes, [1, 0, 0], (debug) => {
         debug.setPosition(target.position);
         debug.setRotation(target.rotation);
       });
@@ -1148,7 +1278,7 @@ export function reconcileEditorHelpers(
     for (const [id, trigger] of triggers) {
       const target = scene.getNodeById(id);
       if (!target) continue;
-      ensureShapeGroup(scene, target, `${TRIGGER_PREFIX}${id}`, trigger.shapes, [0, 1, 0], (debug) => {
+      ensureShapeGroup(scene, target, `${TRIGGER_PREFIX}${id}`, 'trigger', trigger.shapes, () => triggers.get(id)?.shapes, [0, 1, 0], (debug) => {
         debug.setPosition(target.worldPosition);
         debug.setQuaternion(target.worldQuaternion);
       });

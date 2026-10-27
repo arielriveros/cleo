@@ -13,7 +13,7 @@
 import path from 'path'
 import { mat4, quat, vec3 } from 'gl-matrix'
 import { loadAssimp, toGltf } from '../exampleKit/fbxImport.mjs'
-import { boundsOf, mergeByMaterial, normalizeParts, partsOf, readGltf } from './meshes.mjs'
+import { boundsOf, decimate, mergeByMaterial, normalizeParts, partsOf, readGltf } from './meshes.mjs'
 
 /** Transform every part's positions and normals in place by `m` (rotation + uniform scale only). */
 function transformParts(parts, m) {
@@ -78,9 +78,11 @@ export function buildStandingTorch(propsDir, { height = 1.7 } = {}) {
   return { parts, flame: headOf(parts, 0.12), size: boundsOf(parts).size }
 }
 
-export async function buildWallTorch(root, propsDir, { height = 0.7 } = {}) {
+export async function buildWallTorch(root, propsDir, { height = 0.7, ratio = 0.4 } = {}) {
   const ajs = await loadAssimp(root)
+  // 4 k triangles at the source; the dungeon hangs fifty of them, none ever bigger than a hand on screen.
   const parts = mergeByMaterial(partsOf(await toGltf(ajs, path.join(propsDir, 'wall_torch_model', 'torch.fbx'))))
+    .map(p => ({ ...decimate(root, p, ratio), name: p.name, material: p.material }))
   const s = height / boundsOf(parts).size[1]
   for (const p of parts) for (let k = 0; k < p.positions.length; k++) p.positions[k] *= s
   // Origin on the wall plate: x centred, y at the bottom, z at the back.

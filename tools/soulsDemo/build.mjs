@@ -2177,6 +2177,9 @@ export function writeProject({
   // Project options (editor options/projectSettings.ts shape), or null for the defaults. Written as
   // libraries/projectSettings.json, which a bundle import reads into the project.
   projectSettings = null,
+  // A project's own values for some of the kit's materials, by material id: merged into the library entry
+  // and into every copy embedded in a template or a scene, which is what the editor renders.
+  materialOverrides = {},
 }) {
   fs.rmSync(out, { recursive: true, force: true })
   fs.mkdirSync(path.join(out, 'libraries'), { recursive: true })
@@ -2226,6 +2229,15 @@ export function writeProject({
     aiBrains: [ENEMY_BASE, ...ENEMIES].map(enemyBrainAsset),
   }
   const others = extraScenes.map(e => ({ ...e, scene: e.build() }))
+  if (Object.keys(materialOverrides).length) {
+    libraries.materials = libraries.materials.map(m => materialOverrides[m.id] ? { ...m, material: { ...m.material, ...materialOverrides[m.id] } } : m)
+    const embedded = (n) => {
+      const patch = materialOverrides[n.variables?.__materialId?.value]
+      if (patch && n.model?.material) n.model.material = { ...n.model.material, ...patch }
+      for (const c of n.children ?? []) embedded(c)
+    }
+    for (const root of [...templates.map(t => t.nodeJson), scene.scene, ...others.map(o => o.scene.scene)]) embedded(root)
+  }
   embedSockets([libraries.models, libraries.templates, scene, ...others.map(o => o.scene)])
   for (const [name, value] of Object.entries(libraries)) writeJson(path.join(out, 'libraries', `${name}.json`), value)
   writeJson(path.join(out, 'libraries', 'inputMap.json'), SOULS_INPUT_MAP)

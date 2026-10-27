@@ -2,7 +2,7 @@
 // Authors the "Valley" example into editor/public/examples/valley/.
 //
 //     python tools/valley/prepare.py                         # once: textures -> build/valley_prepared/
-//     node --max-old-space-size=8192 tools/valley/build.mjs
+//     node --max-old-space-size=12288 tools/valley/build.mjs
 //     npm --prefix editor run examples:list                  # regenerates the gallery index
 //
 // The souls-like content, outdoors. Every playable element — the player, both weapons, the four
@@ -41,13 +41,17 @@ import { buildProps } from './props.mjs'
 import { WATER_SOURCE, WATER_UNIFORMS } from './water.mjs'
 import { boundsOf, convexShape, geometryJson, partsOf, readGltf } from './meshes.mjs'
 import { buildBarrel, buildSkullCave } from './setPieces.mjs'
-import { buildCampfire, buildStandingTorch, buildWallTorch } from './torches.mjs'
+import { buildCampfire, buildStandingTorch, buildWallTorch, rayHit } from './torches.mjs'
+import { buildCage, buildCandle } from './dungeon/props.mjs'
+import { buildDungeon } from './dungeon/scene.mjs'
 
 const { ROOT, stableId: soulsId, clone, matJson, material, textures, LEVEL, linkInstance, withScript } = souls
 const BUILD = path.join(ROOT, 'build')
 const PREPARED = path.join(BUILD, 'valley_prepared')
 const OUT = path.join(ROOT, 'editor', 'public', 'examples', 'valley')
 const PROJECT_NAME = 'Valley'
+/** Lux on a surface that renders white at exposure 1 (src/graphics/lighting.ts). */
+const REFERENCE_ILLUMINANCE = 78643.2
 
 /** Ids for everything this example adds, in their own namespace beside the souls content's. */
 const id = (key) => soulsId('valley:' + key)
@@ -182,68 +186,292 @@ const SURFACES = {
   })),
 }
 
-const DUNGEON = '/Environment/Dungeon'
-const dungeonTexture = (prefix, name) => ({
-  diff: tex(`${prefix}_diff.jpg`, `${DUNGEON}/Textures`, `${name} Base Color`),
-  nor: tex(`${prefix}_nor.png`, `${DUNGEON}/Textures`, `${name} Normal`),
-  arm: tex(`${prefix}_arm.jpg`, `${DUNGEON}/Textures`, `${name} ARM`),
-})
-function dungeonMaterial(key, name, prefix) {
-  const maps = dungeonTexture(prefix, name)
-  return libraryMaterial(`dungeon-${key}`, name, `${DUNGEON}/Materials`, pbrMaterial({
-    ...maps, uvProjection: 'box', uvSpace: 'world', uvWorldSize: 2,
-  }))
+// The valley's own scripts, beside the souls scripts in the same library: the windmill's sails, the
+// fires' light, and the time of day.
+const reflect = loadScriptReflector(ROOT)
+for (const [file, name] of [['ValleyWindmill', 'Windmill Sails'], ['ValleyFireLight', 'Fire Light'], ['ValleyDayNight', 'Day and Night']]) {
+  const source = fs.readFileSync(path.join(ROOT, 'examples', 'scripts', `${file}.ts`), 'utf8')
+  const asset = { id: id(`script:${file}`), name, baseType: 'node', source, kind: 'class', variables: reflect(source) }
+  souls.scripts.assets.push(asset)
+  souls.scripts.byFile.set(file, asset)
 }
-const DUNGEON_FLOOR_MAT = dungeonMaterial('floor', 'Dungeon Cobblestone Floor', 'cobblestone_floor_09')
-const DUNGEON_WALL_MAT = dungeonMaterial('wall', 'Dungeon Brick Wall', 'stone_brick_wall_001')
-const DUNGEON_HEWN_MAT = dungeonMaterial('hewn', 'Dungeon Hewn Stone', 'stone_wall_04')
-const DUNGEON_SLATE_MAT = dungeonMaterial('slate', 'Dungeon Castle Slates', 'castle_wall_slates')
 
-const FIRE_TEXTURE = tex(path.join(BUILD, 'fire.png'), `${DUNGEON}/Textures`, 'Fire Animation')
+// =====================================================================================================
+// Fire: torches, the bonfire, fire pits, candles, hanging braziers
+// =====================================================================================================
+//
+// Every fire here is the same three things: FLAMES, animated sprites playing build/fire.png (32 frames of
+// a flame, 8 x 4 cells of 128 x 256); EMBERS rising off it and, now and then, a burst of SPARKS that fall
+// and bounce across the floor; and a point LIGHT. A FireLight script on the root flickers the light, keeps
+// the unlit flames at a sane brightness whatever the exposure (the valley's noon, its night, the dungeon),
+// and lets the valley's Time of Day raise the light after dark.
+
+const FIRE = '/Props/Fire'
+const FIRE_TEXTURE = (() => {
+  // Clamp-wrapped: the sheet is an atlas, and repeat would bleed the neighbouring frame in at every edge.
+  const texId = id('texture:fire.png')
+  textures.add(texId, path.join(BUILD, 'fire.png'), { wrapping: 'clamp', mipMap: true }, 'image/png')
+  TEXTURE_ENTRIES.push({ folder: `${FIRE}/Textures`, name: 'Fire Animation', id: texId, ext: 'png' })
+  return texId
+})()
 const FIRE_TILESET = {
   id: id('tileset:fire'), name: 'Fire', textureId: FIRE_TEXTURE,
-  imageWidth: 1024, imageHeight: 1024, tileWidth: 128, tileHeight: 128,
-  margin: 0, spacing: 0, columns: 8, rows: 8, tiles: {},
+  imageWidth: 1024, imageHeight: 1024, tileWidth: 128, tileHeight: 256,
+  margin: 0, spacing: 0, columns: 8, rows: 4,
+  // Over the bloom threshold: a flame should glow.
+  overdrive: 2, tiles: {}, terrains: [], variantSets: [], textureIds: [FIRE_TEXTURE],
 }
-const torchMaterial = libraryMaterial('torch', 'Torch Metal', `${DUNGEON}/Materials`, pbrMaterial({
-  diff: tex('wall_torch_diff.jpg', `${DUNGEON}/Textures`, 'Torch Base Color'),
-  nor: tex('wall_torch_nor.png', `${DUNGEON}/Textures`, 'Torch Normal'),
-  arm: tex('wall_torch_arm.jpg', `${DUNGEON}/Textures`, 'Torch ARM'),
+const FIRE_FRAMES = Array.from({ length: 32 }, (_, i) => i)
+
+/**
+ * How much the camera's exposure brightens the flames and embers (Sprite / ParticleSystemNode
+ * exposureWeight). They are unlit: taken whole, the exposure the valley's night opens up to (three times its
+ * noon's) turns every flame tuned for daylight into a white smear, and a darker scene's more so. A tenth of
+ * it keeps them the same flame everywhere, glowing a little brighter in the dark, in the editor as in play.
+ */
+const FIRE_EXPOSURE_WEIGHT = 0.1
+
+/**
+ * A flame `height` tall standing on `base`: a cylindrical billboard (it turns to the camera about its
+ * upright axis), additive, each copy starting on a frame of its own so a row of torches does not flicker
+ * in step. A frame's flame fills its cell from the bottom edge, its white-hot root a tenth of the way up,
+ * so the sprite is sunk by that much to sit the root on `base`.
+ */
+function flame(key, height, base = [0, 0, 0], name = 'Flame') {
+  return node(name, 'animatedSprite', {
+    id: id(`flame:${key}`), position: [base[0], base[1] + height * 0.4, base[2]], scale: [height / 2, height, 1],
+    sprite: {
+      constraints: 'cylindrical', tilesetId: FIRE_TILESET.id, tileset: FIRE_TILESET, tileIndex: 0,
+      tint: [1, 1, 1], opacity: 1, transparent: true, side: 'double', wireframe: false, blend: 'additive',
+      exposureWeight: FIRE_EXPOSURE_WEIGHT,
+    },
+    animation: { frames: FIRE_FRAMES, frameSource: 'node', fps: 24, loop: true, randomStart: true },
+  })
+}
+
+/**
+ * A fire's light: warm and photometric.
+ *
+ * Lumens are set for the dungeon, which is held at EV 15 like the valley's noon: the souls content (glyphs,
+ * glows, bolts, sparks) is tuned for an exposure about that, and a truly dark one (EV 0-2, a real torch-lit
+ * room) would blow every one of them out. So the fires are as bright as the sun is dim. The valley's Time
+ * of Day scales them down by day, when a torch should not light anything, and back up at night.
+ *
+ * Nothing casts shadows. A shadow-casting point light renders everything in its range six times, again
+ * every frame something moves near it, and the player is always near the bonfire.
+ */
+function fireLight(key, lumens, range, position, castShadows = false) {
+  return node('Light', 'light', {
+    id: id(`fire-light:${key}`), position, lightType: 'point', castShadows,
+    light: { unit: 'photometric', color: [1, 0.58, 0.28], intensity: lumens, range, sourceRadius: 0.08, legacyFalloff: false },
+  })
+}
+
+const sparkFade = {
+  color: [{ t: 0, c: [1, 0.9, 0.6] }, { t: 0.35, c: [1, 0.55, 0.15] }, { t: 1, c: [0.6, 0.1, 0.02] }],
+  alpha: [{ t: 0, a: 1 }, { t: 0.75, a: 0.9 }, { t: 1, a: 0 }],
+}
+const emberFade = {
+  color: [{ t: 0, c: [1, 0.8, 0.45] }, { t: 0.4, c: [1, 0.45, 0.1] }, { t: 1, c: [0.5, 0.08, 0.02] }],
+  alpha: [{ t: 0, a: 0 }, { t: 0.08, a: 1 }, { t: 0.7, a: 0.8 }, { t: 1, a: 0 }],
+}
+/**
+ * Embers, always rising off the flame; and sparks, NOW AND THEN: a burst is rolled every `interval` seconds
+ * and comes up `chance` of the time, so it never falls on a beat (and each copy rolls its own: the engine
+ * salts an effect's seed per node). Sparks fall under gravity and bounce off the colliders round the fire
+ * (the dungeon's floor boxes, a building's hull) and scene depth, losing a little life at each bounce.
+ */
+function emberEmitters(key, { rate, radius, interval, chance, count, speed }) {
+  return [
+    souls.emitter(`valley:${key}-embers`, 'Embers', {
+      capacity: 128,
+      spawn: [souls.mod('spawnRate', { rate })],
+      init: [souls.mod('shape', { shape: 'sphere', radius, thickness: 1 }), souls.mod('lifetime', { range: [1.2, 2.8] }),
+        souls.mod('velocity', { mode: 'direction', direction: [0, 1, 0], spread: 25, speed: [0.35, 0.9] }), souls.mod('size', { range: [0.012, 0.026] }),
+        souls.mod('color', { mode: 'constant', colorA: [1, 0.6, 0.2, 1], intensity: 8 })],
+      update: [souls.mod('curlNoise', { strength: 0.9, frequency: 1.3, scroll: 0.4 }), souls.mod('drag', { coefficient: 0.5 }),
+        souls.mod('colorOverLife', { gradient: emberFade })],
+      render: { blend: 'additive', softness: 0 },
+    }),
+    souls.emitter(`valley:${key}-sparks`, 'Sparks', {
+      capacity: 64, maxLod: 1,
+      spawn: [souls.mod('spawnRate', { rate: 0 }), souls.mod('spawnBurst', { bursts: [{ time: 0.3, count, cycles: 0, interval, probability: chance }] })],
+      init: [souls.mod('shape', { shape: 'sphere', radius: radius * 0.6, thickness: 1 }), souls.mod('lifetime', { range: [1.4, 2.6] }),
+        souls.mod('velocity', { mode: 'direction', direction: [0, 1, 0], spread: 65, speed }), souls.mod('size', { range: [0.01, 0.022] }),
+        souls.mod('color', { mode: 'constant', colorA: [1, 0.75, 0.35, 1], intensity: 14 })],
+      update: [souls.mod('gravity', { scale: 1 }), souls.mod('drag', { coefficient: 0.25 }),
+        // Off scene depth: the floor where they land is on screen whenever they are. Colliding with the
+        // physics bodies too would pack the colliders round every torch, every frame.
+        souls.mod('collision', { bodies: false, depth: true, radius: 1, restitution: 0.45, friction: 0.35, lifetimeLoss: 0.12, kill: false }),
+        souls.mod('colorOverLife', { gradient: sparkFade })],
+      render: { blend: 'additive', alignment: 'velocity', stretch: 0.7, softness: 0 },
+    }),
+  ]
+}
+const fxLod = (near, far, cull) => ({
+  enabled: true, cullDistance: cull, scaleBursts: false,
+  levels: [{ distance: near, spawnScale: 0.6, stepScale: 2 }, { distance: far, spawnScale: 0.3, stepScale: 3 }],
+})
+// Bounds reach down to the floor under the flame: that is where the sparks end up.
+const TORCH_FX = souls.vfx('valley:torch-embers', 'Torch Embers',
+  emberEmitters('torch', { rate: 6, radius: 0.06, interval: 1.3, chance: 0.12, count: 7, speed: [1.2, 3] }),
+  { center: [0, -1.1, 0], extents: [1.8, 1.9, 1.8] }, fxLod(8, 16, 26))
+const HEARTH_FX = souls.vfx('valley:hearth-embers', 'Hearth Embers',
+  emberEmitters('hearth', { rate: 16, radius: 0.3, interval: 0.8, chance: 0.3, count: 12, speed: [1.6, 3.6] }),
+  { center: [0, 0.8, 0], extents: [2.6, 2.4, 2.6] }, fxLod(12, 24, 45))
+const fx = (key, asset, position) => {
+  const n = souls.particles(`valley:${key}`, 'Embers', asset, { position })
+  n.particleSystem.exposureWeight = FIRE_EXPOSURE_WEIGHT
+  return n
+}
+
+// ----- materials ---------------------------------------------------------------------------------------
+
+const fireMaterial = (key, name, prefix, extra = {}) => libraryMaterial(key, name, `${FIRE}/Materials`, pbrMaterial({
+  diff: tex(`${prefix}_diff.jpg`, `${FIRE}/Textures`, `${name} Base Color`),
+  nor: tex(`${prefix}_nor.png`, `${FIRE}/Textures`, `${name} Normal`),
+  arm: tex(`${prefix}_arm.jpg`, `${FIRE}/Textures`, `${name} ARM`),
+  ...extra,
 }))
-const campfireMaterial = libraryMaterial('campfire', 'Bonfire Stones', `${DUNGEON}/Materials`, pbrMaterial({
-  diff: tex('campfire_Material_25_diff.jpg', `${DUNGEON}/Textures`, 'Bonfire Base Color'),
-  nor: tex('campfire_Material_25_nor.png', `${DUNGEON}/Textures`, 'Bonfire Normal'),
-  arm: tex('campfire_Material_25_arm.jpg', `${DUNGEON}/Textures`, 'Bonfire ARM'),
+const WALL_TORCH_MAT = fireMaterial('wall-torch', 'Wall Torch', 'wall_torch')
+const STANDING_TORCH_MAT = fireMaterial('standing-torch', 'Standing Torch', 'standing_torch')
+// The campfire's three: the stone ring, the logs, and the charred bed under them.
+const CAMPFIRE_MATS = ['Material_25', 'Material_26', 'Material_27'].map((m, i) =>
+  fireMaterial(`campfire-${i}`, ['Campfire Stones', 'Campfire Logs', 'Campfire Embers'][i], `campfire_${m}`, { side: 'double' }))
+const CANDLE_MAT = libraryMaterial('candle', 'Candle Wax', `${FIRE}/Materials`, souls.pbr([0.86, 0.8, 0.62], { roughness: 0.55, emissive: [1, 0.6, 0.25], emissiveIntensity: 0.15 }))
+// Its metal/rough map is on a second uv set the parts do not carry: plain values stand in.
+const CAGE_MAT = libraryMaterial('cage', 'Iron Cage', `${FIRE}/Materials`, pbrMaterial({
+  diff: tex('cage_diff.jpg', `${FIRE}/Textures`, 'Iron Cage Base Color'), roughness: 0.55, metallic: 0.8, side: 'double',
 }))
+
 const PROPS = path.join(BUILD, 'props')
 const standingTorch = buildStandingTorch(PROPS)
 const wallTorch = await buildWallTorch(ROOT, PROPS)
 const campfire = buildCampfire(PROPS)
-const fireSprite = (key, height, base = 0) => node('Flame', 'animatedSprite', {
-  id: id(`fire:${key}`), position: [0, base + height / 2, 0], scale: [height / 2, height, 1],
-  sprite: { constraints: 'cylindrical', tilesetId: FIRE_TILESET.id, tileset: FIRE_TILESET, tileIndex: 0,
-    tint: [1, 1, 1], opacity: 1, transparent: true, side: 'double', blend: 'additive' },
-  animation: { frames: Array.from({ length: 32 }, (_, i) => i), frameSource: 'node', fps: 24, loop: true, randomStart: true },
-})
-const torchNode = (key, position, parts, flame, lightLumens = 2200) => node('Torch', 'node', {
-  id: id(`torch:${key}`), position, children: [
-    ...parts.map((part, i) => modelNode(`torch:${key}:mesh:${i}`, i ? `Mesh ${i + 1}` : 'Mesh', part, torchMaterial)),
-    fireSprite(`${key}:flame`, 0.6, flame[1] - 0.1),
-    souls.particles(`torch:${key}:embers`, 'Embers', souls.VFX.torch),
-    souls.pointLight(`torch:${key}:light`, 'Light', [1, 0.6, 0.3], lightLumens, 9, [flame[0], flame[1] + 0.3, flame[2]]),
-  ],
-})
-const standingTorchTemplate = souls.asTemplate('valley:standing-torch', torchNode('standing-template', [0, 0, 0], standingTorch.parts, standingTorch.flame))
-const wallTorchTemplate = souls.asTemplate('valley:wall-torch', torchNode('wall-template', [0, 0, 0], wallTorch.parts, wallTorch.flame))
-wallTorchTemplate.name = 'Wall Torch'
-const bonfireNode = (key, position) => node('Bonfire', 'node', {
-  id: id(`bonfire:${key}`), position, children: [
-    ...campfire.parts.map((part, i) => modelNode(`bonfire:${key}:mesh:${i}`, i ? `Mesh ${i + 1}` : 'Mesh', part, campfireMaterial)),
-    fireSprite(`${key}:flame`, 1.2, 0.35), souls.particles(`bonfire:${key}:embers`, 'Embers', souls.VFX.torch),
-    souls.pointLight(`bonfire:${key}:light`, 'Fire Light', [1, 0.55, 0.22], 1800, 12, [0, 1.1, 0]),
-  ],
-})
-const bonfireTemplate = souls.asTemplate('valley:bonfire', bonfireNode('template', [0, 0, 0]))
+const brazierCage = buildCage(PROPS, { height: 1.0 })
+const candle = buildCandle(0.4)
+
+const meshNodes = (key, parts, materialOf) => parts.map((part, i) => modelNode(`${key}:mesh:${i}`, i ? `Mesh ${i + 1}` : 'Mesh', part, materialOf(part, i)))
+const above = (p, dy) => [p[0], p[1] + dy, p[2]]
+
+// ----- the templates, each built by one builder for the template and for every placed copy ------------
+
+function wallTorchNode(key, position = [0, 0, 0], rotation = [0, 0, 0]) {
+  const f = wallTorch.flame
+  return withScript(node('Wall Torch', 'node', {
+    id: id(`wall-torch:${key}`), position, rotation,
+    children: [
+      ...meshNodes(`wall-torch:${key}`, wallTorch.parts, () => WALL_TORCH_MAT),
+      flame(`wall-torch:${key}`, 0.5, above(f, -0.06)),
+      fx(`wall-torch:${key}:embers`, TORCH_FX, above(f, 0.1)),
+      // Half a metre out in front of the flame: a light that close to the stone burns a white disc into it.
+      fireLight(`wall-torch:${key}`, 850000, 7, [f[0], f[1] + 0.2, f[2] + 0.5]),
+    ],
+  }), 'ValleyFireLight')
+}
+
+function standingTorchNode(key, position = [0, 0, 0], rotation = [0, 0, 0], scale = [1, 1, 1]) {
+  const f = standingTorch.flame
+  const n = withScript(node('Torch', 'node', {
+    id: id(`torch:${key}`), position, rotation, scale,
+    children: [
+      ...meshNodes(`torch:${key}`, standingTorch.parts, () => STANDING_TORCH_MAT),
+      flame(`torch:${key}`, 0.6, above(f, -0.08)),
+      fx(`torch:${key}:embers`, TORCH_FX, above(f, 0.1)),
+      fireLight(`torch:${key}`, 1000000, 7, above(f, 0.3)),
+    ],
+  }), 'ValleyFireLight')
+  n.body = { ...souls.staticBody('cylinder'), shapes: [{ type: 'cylinder', radius: 0.12, height: f[1], numSegments: 8, offset: [0, f[1] / 2, 0], rotation: [0, 0, 0] }] }
+  return n
+}
+
+/** The fire of a bonfire or fire pit: flames over the logs, embers and sparks, and its light, under one FireLight. */
+function hearth(key, { height = 1.2, lumens = 1100000, range = 10, base = [0, 0.3, 0], name = 'Fire' } = {}) {
+  return withScript(node(name, 'node', {
+    id: id(`hearth:${key}`),
+    children: [
+      flame(`hearth:${key}:a`, height, base, 'Flame'),
+      flame(`hearth:${key}:b`, height * 0.8, [base[0] + 0.18, base[1], base[2] - 0.12], 'Flame'),
+      flame(`hearth:${key}:c`, height * 0.7, [base[0] - 0.16, base[1], base[2] + 0.1], 'Flame'),
+      fx(`hearth:${key}:embers`, HEARTH_FX, base),
+      fireLight(`hearth:${key}`, lumens, range, [base[0], base[1] + height * 0.75, base[2]]),
+    ],
+  }), 'ValleyFireLight')
+}
+
+/** The bonfire: the scanned campfire, its fire (lit on first use) and where the player gets up. */
+function bonfireNode(key, position = [0, 0, 0], rotation = [0, 0, 0]) {
+  const n = withScript(node('Bonfire', 'node', {
+    id: id(`bonfire:${key}`), position, rotation,
+    children: [
+      souls.group(`valley:bonfire:${key}:model`, 'Model', meshNodes(`bonfire:${key}`, campfire.parts, (p) => CAMPFIRE_MATS[p.material])),
+      hearth(`bonfire:${key}`),
+      node('RespawnPoint', 'node', { id: id(`bonfire:${key}:respawn`), position: [0, 0.05, -1.6] }),
+    ],
+    // The interaction zone, as the souls bonfire's (a trigger cylinder the player's capsule overlaps).
+    trigger: { shapes: [{ type: 'cylinder', radius: 1.5, height: 3, numSegments: 16, offset: [0, 1, 0], rotation: [0, 0, 0] }] },
+  }), 'SoulsBonfire')
+  n.body = { ...souls.staticBody('cylinder'), shapes: [{ type: 'cylinder', radius: 0.75, height: 0.4, numSegments: 12, offset: [0, 0.2, 0], rotation: [0, 0, 0] }] }
+  return n
+}
+
+/** A fire pit: the same campfire, always burning, no rest. */
+function firePitNode(key, position = [0, 0, 0], rotation = [0, 0, 0]) {
+  const n = node('Fire Pit', 'node', {
+    id: id(`fire-pit:${key}`), position, rotation,
+    children: [
+      souls.group(`valley:fire-pit:${key}:model`, 'Model', meshNodes(`fire-pit:${key}`, campfire.parts, (p) => CAMPFIRE_MATS[p.material])),
+      hearth(`fire-pit:${key}`, { lumens: 1400000, range: 11 }),
+    ],
+  })
+  n.body = { ...souls.staticBody('cylinder'), shapes: [{ type: 'cylinder', radius: 0.75, height: 0.4, numSegments: 12, offset: [0, 0.2, 0], rotation: [0, 0, 0] }] }
+  return n
+}
+
+/** A fire laid in a fireplace: the flames, embers and light of a bonfire with no campfire under them. */
+function hearthNode(key, position = [0, 0, 0]) {
+  const n = hearth(`hearth-node:${key}`, { height: 1.0, lumens: 1600000, range: 11, base: [0, 0, 0], name: 'Hearth' })
+  n.position = position
+  return n
+}
+
+/** A tall candle on an iron dish: a small flame, a small light, no shadow (too many candles, too few maps). */
+function candleNode(key, position = [0, 0, 0]) {
+  return withScript(node('Candle', 'node', {
+    id: id(`candle:${key}`), position,
+    children: [
+      ...meshNodes(`candle:${key}`, candle.parts, () => CANDLE_MAT),
+      flame(`candle:${key}`, 0.13, [0, candle.flame - 0.01, 0]),
+      fireLight(`candle:${key}`, 62000, 3, [0, candle.flame + 0.08, 0]),
+    ],
+  }), 'ValleyFireLight', { flicker: 0.12 })
+}
+
+/** An iron cage hung from the ceiling with a fire in it. */
+function brazierNode(key, position = [0, 0, 0]) {
+  return withScript(node('Hanging Brazier', 'node', {
+    id: id(`brazier:${key}`), position,
+    children: [
+      ...meshNodes(`brazier:${key}`, brazierCage.parts, () => CAGE_MAT),
+      flame(`brazier:${key}`, 0.55, [0, 0.12, 0]),
+      fx(`brazier:${key}:embers`, TORCH_FX, [0, 0.3, 0]),
+      fireLight(`brazier:${key}`, 1300000, 9, [0, 0.55, 0]),
+    ],
+  }), 'ValleyFireLight')
+}
+
+const FIRE_TEMPLATES = {
+  wallTorch: souls.asTemplate('valley:wall-torch', wallTorchNode('template')),
+  torch: souls.asTemplate('valley:standing-torch', standingTorchNode('template')),
+  bonfire: souls.asTemplate('valley:bonfire', bonfireNode('template')),
+  firePit: souls.asTemplate('valley:fire-pit', firePitNode('template')),
+  candle: souls.asTemplate('valley:candle', candleNode('template')),
+  hearth: souls.asTemplate('valley:hearth', hearthNode('template')),
+  brazier: souls.asTemplate('valley:brazier', brazierNode('template')),
+}
+const FIRE_BUILDERS = { wallTorch: wallTorchNode, torch: standingTorchNode, bonfire: bonfireNode, firePit: firePitNode, candle: candleNode, brazier: brazierNode, hearth: hearthNode }
+/** A placed fire: the builder's node, linked to its template. */
+const placeFire = (kind, key, ...args) => linkInstance(FIRE_TEMPLATES[kind], FIRE_BUILDERS[kind](key, ...args))
 
 // ----- water ---------------------------------------------------------------------------------------
 //
@@ -293,14 +521,6 @@ const WATER_MAT = (() => {
   }, [WATER_NORMAL])
 })()
 
-// The windmill's sail script, beside the souls scripts in the same library.
-const reflect = loadScriptReflector(ROOT)
-{
-  const source = fs.readFileSync(path.join(ROOT, 'examples', 'scripts', 'ValleyWindmill.ts'), 'utf8')
-  const asset = { id: id('script:ValleyWindmill'), name: 'Windmill Sails', baseType: 'node', source, kind: 'class', variables: reflect(source) }
-  souls.scripts.assets.push(asset)
-  souls.scripts.byFile.set('ValleyWindmill', asset)
-}
 
 // =====================================================================================================
 // Heights, landscape material, trail mask
@@ -853,6 +1073,7 @@ function caveEntranceNode(position = [0, 0, 0]) {
   }), 'SoulsSceneDoor', {
     targetScene: 'Dungeon', prompt: 'Enter the skull cave', question: 'Enter the skull cave?',
     detail: 'Cold air breathes out of the dark.\nThe way back out waits just inside.', loadingTitle: 'The Skull Cave', frontOnly: true,
+    exitTo: 'Way Out', arrivalDistance: 3.5,
   })
   n.body = { ...souls.staticBody('box'), shapes: [convexShape(ROOT, [cave])] }
   n.trigger = { shapes: [{ type: 'box', width: 7, height: 4, depth: 4, offset: [0, 2, depth / 2 + 1.5], rotation: [0, 0, 0] }] }
@@ -966,6 +1187,16 @@ function floaters() {
   })
 }
 
+/** Lighting and reflections for the hamlet: its houses and their torches, re-captured as the day turns. */
+function hamletProbe() {
+  const probe = souls.sourceNode('light probe')
+  probe.name = 'Hamlet Probe'
+  probe.id = id('hamlet:probe')
+  probe.position = at(HAMLET.x, HAMLET.z, 6)
+  Object.assign(probe, { resolution: 128, mode: 'baked', intensity: 1, size: [64, 26, 64], blendDistance: 12 })
+  return probe
+}
+
 /** What the water reflects: a probe over the pond, baked on load (a probe with no bake data bakes). */
 function pondProbe() {
   const probe = souls.sourceNode('light probe')
@@ -1019,6 +1250,61 @@ function bakeValleyNavMesh(root, navMesh) {
 /** Where the valley's wind blows TOWARD: degrees counter-clockwise from +X (WindNode's convention). */
 const WIND_DIRECTION = 25
 
+const round3 = (v) => Math.round(v * 1000) / 1000
+
+/**
+ * The valley's lamps, for the night: standing torches down the road through the hamlet (alternating sides,
+ * about every 12 m) and either side of the bonfire, and wall torches on the buildings, on the walls that
+ * face the road. A building's wall is found by casting at its own mesh, at lamp height, from eight sides.
+ */
+function valleyLamps(cavePair) {
+  const out = []
+  const clearOf = (x, z) => buildings.every(b => Math.hypot(x - b.x, z - b.z) > b.radius + 1)
+    && Math.hypot(x - BONFIRE.x, z - BONFIRE.z) > 4 && out.every(l => Math.hypot(x - l.at[0], z - l.at[2]) > 5)
+  // Road torches: from where the main road enters the hamlet to where it leaves it.
+  const main = roadLines[0]
+  let run = 0, side = 1
+  for (let i = 1; i < main.length; i++) {
+    const [ax, az] = main[i - 1], [bx, bz] = main[i]
+    const len = Math.hypot(bx - ax, bz - az) || 1
+    run += len
+    if (az > 66 || az < 6 || run < 12) continue
+    const nx = -(bz - az) / len, nz = (bx - ax) / len
+    const x = bx + nx * 3.6 * side, z = bz + nz * 3.6 * side
+    if (heights.slopeAt(x, z) > 18 || !clearOf(x, z)) continue
+    out.push({ kind: 'torch', at: at(x, z, 0), yaw: 0 })
+    run = 0
+    side = -side
+  }
+  for (const [dx, dz] of [[-2.6, -1.6], [2.4, -2.6]]) out.push({ kind: 'torch', at: at(BONFIRE.x + dx, BONFIRE.z + dz, 0), yaw: 0 })
+  // Wall torches: per building, the wall hits at 2.3 m whose outward normal looks most toward the road.
+  const nearestRoad = (x, z) => roadLines[0].reduce((best, p) => Math.hypot(p[0] - x, p[1] - z) < Math.hypot(best[0] - x, best[1] - z) ? p : best)
+  for (const b of buildings) {
+    const c = Math.cos(b.yaw), s = Math.sin(b.yaw)
+    // Ry(yaw): local +X goes to (cos, 0, -sin), local +Z to (sin, 0, cos).
+    const toWorld = (p) => [b.x + p[0] * c + p[2] * s, b.y + p[1], b.z - p[0] * s + p[2] * c]
+    const dirWorld = (n) => [n[0] * c + n[2] * s, n[1], -n[0] * s + n[2] * c]
+    const parts = b.prop.parts.map(x => x.part)
+    const hits = []
+    for (let k = 0; k < 8; k++) {
+      const a = k / 8 * Math.PI * 2, r = b.radius + 3
+      const hit = rayHit(parts, [Math.cos(a) * r, 2.3, Math.sin(a) * r], [0, 2.3, 0])
+      if (!hit || Math.abs(hit.normal[1]) > 0.3) continue
+      const p = toWorld(hit.point), n = dirWorld(hit.normal)
+      const road = nearestRoad(p[0], p[2])
+      const away = Math.hypot(road[0] - p[0], road[1] - p[2]) || 1
+      hits.push({ p, n, score: (n[0] * (road[0] - p[0]) + n[2] * (road[1] - p[2])) / away })
+    }
+    hits.sort((u, v) => v.score - u.score)
+    const chosen = []
+    for (const h of hits) if (chosen.length < 2 && h.score > -0.2 && chosen.every(o => Math.hypot(o.p[0] - h.p[0], o.p[2] - h.p[2]) > 4)) chosen.push(h)
+    for (const h of chosen) out.push({
+      kind: 'wallTorch', at: [round3(h.p[0]), round3(h.p[1] - wallTorch.flame[1] + 0.3), round3(h.p[2])], yaw: Math.atan2(h.n[0], h.n[2]) * 180 / Math.PI,
+    })
+  }
+  return [...cavePair.map(([x, z]) => ({ kind: 'torch', at: at(x, z, 0.6), yaw: 0 })), ...out]
+}
+
 function valleyScene() {
   const sun = souls.sourceNode('light')
   sun.name = 'Sun'
@@ -1026,12 +1312,20 @@ function valleyScene() {
   sun.rotation = eulerToward(SUN_TRAVEL)
   // A morning sun (the Morning Sun light preset, brightened against the valley's ambient as the inspector
   // does), a hazy summer sky with its distance haze, scattered fair-weather clouds, a breeze.
-  sun.light = { unit: 'photometric', ...PRESETS.sun }
+  // A sun twice the disc of the real one: softer shadow edges, which a 4k cascade can afford. The Time of Day
+  // script moves it, warms it at the horizon and hands over to the moon.
+  sun.light = { unit: 'photometric', ...PRESETS.sun, angularRadius: PRESETS.sun.angularRadius * 2 }
   sun.castShadows = true
   const sky = souls.sourceNode('sky atmosphere')
   sky.id = id('sky')
-  // The god rays have no preset; their reach is the valley's scale.
-  sky.atmosphere = { ...sky.atmosphere, ...PRESETS.sky, godRayMaxDistance: 160 }
+  // The god rays have no preset; their reach is the valley's scale. The night: a bright, cool moon well up
+  // the sky, more stars, a faint airglow. The moon's LIGHT is the Time of Day's (moonlightIntensity).
+  sky.atmosphere = {
+    ...sky.atmosphere, ...PRESETS.sky, godRayMaxDistance: 160,
+    nightEnabled: true, starIntensity: 1.6, starDensity: 0.6, airglowIntensity: 0.8,
+    moonEnabled: true, moonSize: 2.4, moonPhase: 1, moonOffsetYaw: 20, moonOffsetPitch: 22, moonColor: [0.74, 0.82, 1], moonIntensity: 1.3,
+    moonlightIntensity: 0.02,
+  }
   const clouds = souls.sourceNode('volumetric clouds')
   clouds.id = id('clouds')
   // The preset sets the look; the clouds follow the Wind node below (useSceneWind), so its wind direction is unused.
@@ -1042,15 +1336,14 @@ function valleyScene() {
     id: id('wind'),
     wind: { direction: WIND_DIRECTION, ...PRESETS.wind, fadeStart: 35, fadeEnd: 70 },
   })
-  // Lights the valley with its own sky, and lets the clouds' shadows sweep across it.
-  const skyLight = node('Sky Light', 'skyLight', { id: id('skylight'), skyLight: { cloudShadows: true } })
+  // Lights the valley with its own sky, and lets the clouds' shadows sweep across it. At night the flat
+  // ambient falls to a few percent with the sun (nightAmbient), so the moon and the torches carry it.
+  const skyLight = node('Sky Light', 'skyLight', { id: id('skylight'), skyLight: { cloudShadows: true, nightAmbient: 0.025 } })
+  const timeOfDay = withScript(node('Time of Day', 'node', { id: id('time-of-day') }), 'ValleyDayNight')
 
   const placedBuildings = buildings.map(b => placedBuilding(b, propAssets[props.indexOf(b.prop)]))
 
-  const bonfire = clone(bonfireTemplate)
-  bonfire.id = id('bonfire:valley')
-  bonfire.position = at(BONFIRE.x, BONFIRE.z, 0)
-  bonfire.rotation = [0, 200, 0]
+  const bonfire = placeFire('bonfire', 'valley', at(BONFIRE.x, BONFIRE.z, 0), [0, 200, 0])
 
   // The skull cave fills the cliff notch where the boss's fog wall used to stand: its face on the notch
   // line, the rest of it reaching back over the plaza.
@@ -1097,15 +1390,12 @@ function valleyScene() {
     souls.placedSpawn('knight', 'Spawn Elite Knight', at(POND.x - 6, POND.z - 9), 300, { templateName: 'Elite Knight' }),
   ])
 
-  // Braziers in all but name: torches standing on the ground either side of the cave's mouth, their
-  // bracket post down to the dirt (the keep's hung on walls at 2.2 m; there are no walls here).
-  const torches = souls.group('torches', 'Torches', [[-6.5, notchZ + 2], [6.5, notchZ + 2]]
-    .map(([x, z], i) => {
-      const torch = clone(standingTorchTemplate)
-      torch.id = id(`valley-torch:${i}`)
-      torch.position = at(x, z, 0.6)
-      return linkInstance(standingTorchTemplate, torch)
-    }))
+  // Torches either side of the cave's mouth, down the road through the hamlet and on its walls: by day you
+  // hardly see them, by night they carry the valley.
+  const lamps = valleyLamps([[-6.5, notchZ + 2], [6.5, notchZ + 2]])
+  log('lamps', `${lamps.filter(l => l.kind === 'torch').length} standing, ${lamps.filter(l => l.kind === 'wallTorch').length} on walls`)
+  const torches = souls.group('torches', 'Torches', lamps.map((l, i) =>
+    placeFire(l.kind, `valley:${i}`, l.at, [0, Math.round(l.yaw * 100) / 100, 0])))
 
   const player = souls.playerNode()
   widenCamera(player)
@@ -1125,9 +1415,10 @@ function valleyScene() {
         id: soulsId('manager'), children: [souls.banner(), souls.soundsGroup('manager', souls.SOUNDS.manager, { music: souls.MUSIC_CUES })],
       }), 'SoulsGameManager'),
       linkInstance(LEVEL.player, player),
-      sun, sky, skyLight, clouds, wind,
+      sun, sky, skyLight, clouds, wind, timeOfDay,
       landscapeNode(),
       souls.group('water', 'Water', [pondWater(), pondProbe(), pondVolume(), pondZone(), ...floaters()]),
+      hamletProbe(),
       souls.group('buildings', 'Buildings', placedBuildings),
       barrels,
       torches,
@@ -1146,6 +1437,10 @@ function valleyScene() {
     // Cinematic lens look, and Cinematic depth of field focused where the camera boom puts the player.
     quality: 'high', motionBlurEnabled: true,
     ...PRESETS.exposure, ...PRESETS.look, ...PRESETS.dof, dofFocusDistance: PLAYER_ARM,
+    // The preset's EV, as the exposure the renderer reads (it has no ev100 key). The Time of Day moves it.
+    exposure: REFERENCE_ILLUMINANCE / (1.2 * 2 ** PRESETS.exposure.ev100),
+    // The torches' cube shadows, for the nearest four: what makes the hamlet's night.
+    pointShadowsEnabled: true, pointShadowResolution: 512, pointShadowDistance: 30,
     foliageCullDistance: PINE_CULL, foliageCellSize: 13,
     terrainLodEnabled: true, terrainLodDistance1: 150, terrainLodDistance2: 400, terrainLodStep1: 2, terrainLodStep2: 4,
     // A 2 km valley seen to 3 km: four detailed cascades over the first 150 m, then the far cascade
@@ -1162,86 +1457,17 @@ function valleyScene() {
 // The dungeon (a second scene, through the skull cave)
 // =====================================================================================================
 //
-// Empty for now: a stone floor walled in, two torches, the player, and the way back out -- enough to go
-// through the cave and back again.
+// tools/valley/dungeon/: the medieval dungeon structure, dressed, lit and played. It is handed what it shares
+// with the valley: the material and texture registries, the fire templates, the barrels, the souls content.
 
 const DUNGEON_ID = id('scene:dungeon')
 const DUNGEON_NAME = 'Dungeon'
-const DUNGEON_STRUCTURE = partsOf(readGltf(path.join(BUILD, 'props', 'medieval_dungeon_structure (1).glb')))
-const DUNGEON_MATERIALS = [DUNGEON_WALL_MAT, DUNGEON_FLOOR_MAT, DUNGEON_HEWN_MAT, DUNGEON_HEWN_MAT,
-  DUNGEON_WALL_MAT, DUNGEON_SLATE_MAT, DUNGEON_HEWN_MAT, DUNGEON_FLOOR_MAT, DUNGEON_SLATE_MAT]
-
-function dungeonScene() {
-  const structure = node('Dungeon Structure', 'node', {
-    id: id('dungeon:structure'),
-    children: DUNGEON_STRUCTURE.map((part, i) =>
-      modelNode(`dungeon:mesh:${i}`, part.name, part, DUNGEON_MATERIALS[part.material] ?? DUNGEON_HEWN_MAT)),
-  })
-  const bounds = boundsOf(DUNGEON_STRUCTURE)
-  const cx = (bounds.min[0] + bounds.max[0]) / 2
-  const cz = (bounds.min[2] + bounds.max[2]) / 2
-  const midY = (bounds.min[1] + bounds.max[1]) / 2
-  const collision = node('Dungeon Collision', 'node', {
-    id: id('dungeon:collision'),
-    body: {
-      ...souls.staticBody('box'),
-      shapes: [
-        { type: 'box', width: bounds.size[0], height: 0.5, depth: bounds.size[2], offset: [cx, bounds.min[1] - 0.25, cz], rotation: [0, 0, 0] },
-        { type: 'box', width: bounds.size[0], height: bounds.size[1], depth: 0.5, offset: [cx, midY, bounds.min[2]], rotation: [0, 0, 0] },
-        { type: 'box', width: bounds.size[0], height: bounds.size[1], depth: 0.5, offset: [cx, midY, bounds.max[2]], rotation: [0, 0, 0] },
-        { type: 'box', width: 0.5, height: bounds.size[1], depth: bounds.size[2], offset: [bounds.min[0], midY, cz], rotation: [0, 0, 0] },
-        { type: 'box', width: 0.5, height: bounds.size[1], depth: bounds.size[2], offset: [bounds.max[0], midY, cz], rotation: [0, 0, 0] },
-      ],
-    },
-  })
-  const level = souls.group('dungeon:level', 'Level', [structure, collision])
-  const torches = souls.group('dungeon:torches', 'Torches', [
-    ...[[-7, -11.2], [7, -11.2], [-7, 11.2], [7, 11.2], [-11.2, -6], [-11.2, 6], [11.2, -6], [11.2, 6]]
-      .map(([x, z], i) => {
-        const torch = clone(wallTorchTemplate)
-        torch.id = id(`dungeon-torch:${i}`)
-        torch.position = [x, 2.2, z]
-        return linkInstance(wallTorchTemplate, torch)
-      }),
-    souls.pointLight('dungeon-fill-west', 'Dungeon Fill West', [1, 0.55, 0.3], 500, 14, [-5, 2.4, 0]),
-    souls.pointLight('dungeon-fill-east', 'Dungeon Fill East', [1, 0.55, 0.3], 500, 14, [5, 2.4, 0]),
-  ])
-
-  const player = souls.playerNode()
-  widenCamera(player)
-  player.position = [0, 0.05, 8]
-  player.rotation = [0, 180, 0]
-
-  // The way back up: stand by the south wall, behind where you arrive.
-  const exit = withScript(node('Way Out', 'node', {
-    id: id('dungeon:exit'), position: [0, 0, 10.6],
-    trigger: { shapes: [{ type: 'box', width: 4, height: 3, depth: 2.4, offset: [0, 1.5, 0], rotation: [0, 0, 0] }] },
-  }), 'SoulsSceneDoor', {
-    targetScene: PROJECT_NAME, prompt: 'Leave the dungeon', question: 'Return to the valley?',
-    detail: '', loadingTitle: 'The Valley', frontOnly: false,
-  })
-
-  const root = node('root', 'node', {
-    id: id('dungeon:root'),
-    children: [
-      withScript(node('GameManager', 'node', {
-        id: id('dungeon:manager'), children: [souls.banner(), souls.soundsGroup('dungeon:manager', souls.SOUNDS.manager, { music: souls.MUSIC_CUES })],
-      }), 'SoulsGameManager'),
-      linkInstance(LEVEL.player, player),
-      level, torches, exit,
-    ],
-    ambientLight: [350, 360, 420],
-  })
-  const config = clone(souls.sourceScene.config)
-  config.graphics.clearColor = [0.01, 0.01, 0.012, 1]
-  config.render.clearColor = [0.01, 0.01, 0.012, 1]
-  // Exposure stays fixed down here: metering would lift the dark to daylight grey. The lens is the valley's.
-  Object.assign(config.render, {
-    exposure: 1.2, autoExposureEnabled: false, quality: 'high', motionBlurEnabled: true,
-    ...PRESETS.look, ...PRESETS.dof, dofFocusDistance: PLAYER_ARM,
-  })
-  return { scene: root, textures: [], ui: { version: 1, elements: [] }, config, assetHashes: {}, assetHashVersion: ASSET_HASH_VERSION, savedAt: souls.CREATED_AT }
-}
+const dungeon = buildDungeon({
+  id, node, vars, souls, withScript, linkInstance, tex, pbrMaterial, libraryMaterial, modelNode, matJson, texIdsOf, log,
+  placeFire, wallTorch, brazierCage, campfire, CAMPFIRE_MATS, CAGE_MAT, CAVE_DARK_MAT, SURFACES, rayHit,
+  BARREL_TEMPLATE, breakableBarrelNode, mossRocks, MOSS_ROCK_MAT,
+  ROOT, BUILD, PROPS, PROJECT_NAME, PRESETS, PLAYER_ARM, widenCamera, REFERENCE_ILLUMINANCE, ASSET_HASH_VERSION,
+})
 
 // =====================================================================================================
 // Write
@@ -1260,31 +1486,35 @@ const result = souls.writeProject({
   buildScene: valleyScene,
   example: {
     name: PROJECT_NAME,
-    description: 'A souls-like on a 2 km mountain valley: stamina combat, rolls, lock-on, bonfires and Estus, on landscape layers for ground, rock, snow, forest floor and trails, meadow grass and flowers, pine forest, moss rocks, a thatched hamlet with breakable barrels, and a skull cave that loads a second scene.',
+    description: 'A souls-like on a 2 km mountain valley with a day and night cycle: stamina combat, rolls, lock-on, bonfires and Estus, on landscape layers for ground, rock, snow, forest floor and trails, meadow grass and flowers, pine forest, moss rocks, a torch-lit hamlet with breakable barrels, and a skull cave down into a three-level dungeon with a boss in its throne arena.',
     order: 0,
   },
-  models: [...propAssets, ...foliageAssets],
-  templates: [BARREL_TEMPLATE, DEBRIS_TEMPLATE, CAVE_TEMPLATE, standingTorchTemplate, wallTorchTemplate, bonfireTemplate],
+  models: [...propAssets, ...foliageAssets, ...dungeon.models],
+  templates: [BARREL_TEMPLATE, DEBRIS_TEMPLATE, CAVE_TEMPLATE, ...Object.values(FIRE_TEMPLATES)],
   excludeTemplates: [LEVEL.torch.id, LEVEL.bonfire.id],
   tilesets: [FIRE_TILESET],
-  extraScenes: [{ id: DUNGEON_ID, name: DUNGEON_NAME, build: dungeonScene }],
+  extraScenes: [{ id: DUNGEON_ID, name: DUNGEON_NAME, build: dungeon.scene, refs: { modelIds: [souls.MANNEQUIN_MODEL, ...dungeon.models.map(a => a.id)] } }],
   // 2 km of valley: barrels, debris and enemies far from the camera freeze in place instead of
   // simulating against the terrain. The player opts out (simulationMode 'always').
   projectSettings: { engine: { simulationRange: 90 } },
+  // A message's glyph is tuned for Hollow Keep's dusk exposure; under the valley's noon (and the dungeon,
+  // held at the same EV) and the brighter exposure of its night it burned white. Lit for those instead.
+  materialOverrides: { [souls.MAT.glyph]: { emissiveIntensity: 1.2 } },
   terrainMaterials: [{ id: TERRAIN_MATERIAL_ID, name: 'Valley Landscape', material: terrainMaterial, textureIds: [...new Set(Object.values(TERRAIN_TEX).flatMap(t => Object.values(t)))] }],
   folders: {
     scene: { [PROJECT_NAME]: '/Scenes', [DUNGEON_NAME]: '/Scenes' },
     template: {
       'Breakable Barrel': BARREL_DIR, 'Barrel Debris': BARREL_DIR, 'Skull Cave Entrance': CAVE_DIR,
-      Torch: `${DUNGEON}/Templates`, 'Wall Torch': `${DUNGEON}/Templates`, Bonfire: `${DUNGEON}/Templates`,
+      ...Object.fromEntries(Object.values(FIRE_TEMPLATES).map(t => [t.name, `${FIRE}/Templates`])),
     },
-    model: { ...foliageFolder, ...buildingFolder },
+    model: { ...foliageFolder, ...buildingFolder, ...dungeon.folders },
+    particleSystem: { 'Torch Embers': `${FIRE}/Particles`, 'Hearth Embers': `${FIRE}/Particles` },
     material: {
       ...materialFolder,
       'Dark Stone (placeholder)': SHARED_PROPS, 'Wood (placeholder)': SHARED_PROPS, 'Iron (placeholder)': SHARED_PROPS,
     },
     terrainMaterial: { 'Valley Landscape': LANDSCAPE },
-    script: { 'Windmill Sails': `${BUILDINGS}/Scripts` },
+    script: { 'Windmill Sails': `${BUILDINGS}/Scripts`, 'Fire Light': `${FIRE}/Scripts`, 'Day and Night': '/Environment/Scripts' },
   },
   textureEntries: TEXTURE_ENTRIES,
   refs: {

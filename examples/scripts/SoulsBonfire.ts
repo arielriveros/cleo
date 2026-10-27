@@ -9,6 +9,9 @@ import { Node } from 'cleo'
  *   ├── Fire Light    point light, on only while lit
  *   └── RespawnPoint  empty node: where (and facing where) the player respawns
  *
+ * `Fire` may instead be a whole fire carrying the Valley's Fire Light script (ValleyFireLight.ts), with its
+ * flames, embers and light under it: then it is lit and put out through its `lit`, and `Fire Light` is optional.
+ *
  * ## The interactable protocol
  *
  * Every interactable in Hollow Keep — this, pickups, bloodstains, messages, the lever, the door and the
@@ -76,7 +79,8 @@ export default class SoulsBonfireNode extends Node {
 
   private _applyLit(): void {
     const fire = this._fire as any
-    if (fire) { if (this.lit) fire.play?.(); else fire.stop?.(true) }
+    if (fire && 'lit' in fire) fire.lit = this.lit
+    else if (fire) { if (this.lit) fire.play?.(); else fire.stop?.(true) }
     const light = (this._light as any)?.light
     if (light) light.intensity = this.lit ? this.lightIntensity : 0
   }

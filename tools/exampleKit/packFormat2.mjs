@@ -35,6 +35,7 @@ export async function packFormat2(dir) {
 
   const { bundle } = await readBundle(folderSource(dir))
   bundle.manifest = { ...bundle.manifest, formatVersion: 2 }
+  typedGeometry(bundle)
   const entries = await bundleEntries(bundle)
 
   // Split the blob, and record the part sizes in the index so the reader can stitch it back.
@@ -64,6 +65,42 @@ export async function packFormat2(dir) {
     largest = Math.max(largest, Buffer.byteLength(data))
   }
   return largest
+}
+
+const FLOAT_ATTRS = ['positions', 'normals', 'tangents', 'bitangents', 'texCoords']
+
+/**
+ * Every model geometry as typed arrays, the shape the editor itself serializes a mesh in (serializeGeometry
+ * in src/graphics/model.ts). A generator can only write JSON, so its meshes arrive as plain number arrays,
+ * and a bundle restores what it was given: plain arrays, which IndexedDB stores at nine bytes a number. A
+ * scene of a million and a half triangles then outgrows the browser's largest storable value (128 MB in
+ * Chromium) and the example cannot be opened. Typed, the bundle marks them so, they come back as
+ * Float32Array / Uint32Array at four bytes a number, and the asset hashes do not move (assetHash.ts digests
+ * either form to the same bytes). Empty attributes stay `[]`, as written.
+ */
+function typedGeometry(bundle) {
+  const isBuffer = (a) => Array.isArray(a) || ArrayBuffer.isView(a)
+  const isGeometry = (v) => v && typeof v === 'object' && isBuffer(v.positions) && isBuffer(v.indices)
+    && v.positions.length > 0 && typeof v.positions[0] === 'number'
+  const visit = (v) => {
+    if (!v || typeof v !== 'object' || ArrayBuffer.isView(v)) return
+    if (Array.isArray(v)) {
+      // A run of numbers holds nothing to convert; skip it without walking it.
+      if (v.length && typeof v[0] === 'number') return
+      for (const x of v) visit(x)
+      return
+    }
+    // Only a mesh whose every buffer is long enough to hash as a buffer (assetHash.ts keeps a run under 16
+    // numbers literal, so a quad must stay plain or its asset's recorded hash would no longer match).
+    const g = v.geometry
+    if (isGeometry(g) && [...FLOAT_ATTRS.map(n => g[n]), g.indices].every(a => !isBuffer(a) || a.length === 0 || a.length >= 16)) {
+      for (const name of FLOAT_ATTRS) if (Array.isArray(g[name]) && g[name].length) g[name] = new Float32Array(g[name])
+      if (Array.isArray(g.indices)) g.indices = new Uint32Array(g.indices)
+    }
+    for (const key of Object.keys(v)) visit(v[key])
+  }
+  visit(bundle.scenes)
+  visit(bundle.libraries)
 }
 
 // CLI: node tools/exampleKit/packFormat2.mjs <example folder>

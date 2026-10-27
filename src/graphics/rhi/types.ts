@@ -301,6 +301,15 @@ export const ADDITIVE_BLEND: BlendState = {
 };
 
 /**
+ * An additive sprite (fire, glows): its colour, weighted by its own alpha, is added to what is behind it.
+ * Destination alpha is left alone, as in `DEFAULT_BLEND`, because it is the bloom mask.
+ */
+export const SPRITE_ADDITIVE_BLEND: BlendState = {
+    color: { srcFactor: 'src-alpha', dstFactor: 'one', operation: 'add' },
+    alpha: { srcFactor: 'zero',      dstFactor: 'one', operation: 'add' },
+};
+
+/**
  * The editor overlay layer, and the ONE sanctioned exception to the rule above. That buffer is not
  * the scene buffer: it is composited over the finished image after the post chain, so its alpha is
  * genuine COVERAGE and every draw has to accumulate it. `DEFAULT_BLEND` here would leave alpha at

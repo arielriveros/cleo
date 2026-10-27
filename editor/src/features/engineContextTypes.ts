@@ -134,8 +134,8 @@ type ConvexShapeDescription = {
   vertices: number[][];
   faces: number[][];
   /**
-   * Hull algorithm version. 3 = AABB-anchored carve with a containment audit over every mesh vertex.
-   * Older hulls are rebuilt on load by the editor-helper reconciler.
+   * Hull algorithm version: the editor's `HULL_VERSION` (editorHelpers), currently 5. A hull stamped with
+   * an older one (or none) is rebuilt from its node's mesh by the editor-helper reconciler on load.
    */
   v?: number;
 };

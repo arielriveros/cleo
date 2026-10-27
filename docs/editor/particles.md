@@ -150,8 +150,15 @@ Particle Preview transport. The Performance panel counts systems that are **LOD 
 ## In a scene
 
 The **Particle System** node's inspector links an asset and sets **Play on start**, **Simulation
-speed**, **Spawn rate** (a multiplier on continuous spawning), **Off screen**, **Distance LOD** and
-**Tint**, with play, stop, clear and burst buttons. Selecting the node draws its bounds.
+speed**, **Spawn rate** (a multiplier on continuous spawning), **Off screen**, **Distance LOD**,
+**Exposure weight** and **Tint**, with play, stop, clear and burst buttons. Selecting the node draws its
+bounds.
+
+**Exposure weight** — how much the camera's exposure brightens the particles. They are unlit, so at 1
+(the default) they are multiplied by the exposure like everything lit: embers tuned in daylight blaze white
+at night or in a torch-lit interior, where the exposure is hundreds of times higher. At 0 they keep the same
+brightness under any exposure; fire and glows usually want a little (0.1), so they still read brighter in
+the dark.
 
 **Effect** — the `.vfx` asset the node plays, with ✎ into the particle editor. Linking one copies it
 onto the node, so the effect still plays where the library is not around (a published game ships

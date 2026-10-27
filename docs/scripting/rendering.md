@@ -19,6 +19,9 @@ Game.updateRenderSettings({ saturation: 0.4, vignetteStrength: 0.6 })
 
 Every field is in [Render settings](../reference/render-settings.md).
 
+A change lasts until the next scene switch, which applies the new scene's own settings, and **Stop**
+undoes it in the editor.
+
 ### Ramping the look over time
 
 ```ts

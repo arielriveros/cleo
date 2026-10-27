@@ -208,7 +208,7 @@ import { ColorGradingLut, IDENTITY_LUT_SIZE } from './colorGrading';
 import { DEFAULT_CLUSTER_GRID, spotBoundingSphere, type ClusterLight } from './clusters';
 import { NO_SHADOW_SLOT, POINT_CONE_OFFSET, POINT_CONE_SCALE } from './lightData';
 import type { Buffer as RhiBuffer } from './rhi/resources';
-import { BufferUsage, ShaderStage, ADDITIVE_BLEND, DEFAULT_BLEND, OVERLAY_BLEND,
+import { BufferUsage, ShaderStage, ADDITIVE_BLEND, DEFAULT_BLEND, OVERLAY_BLEND, SPRITE_ADDITIVE_BLEND,
          OVERLAY_COMPOSITE_BLEND } from './rhi/types';
 import { isEditorOnlyNode } from '../core/scene/editorNodes';
 import type { ShaderResource, BlendState, DepthStencilState, CullMode, PrimitiveTopology, VertexBufferLayout, TextureFormat } from './rhi/types';
@@ -2961,6 +2961,7 @@ export class Renderer {
             ambient, sunDirection, sunColor,
             visible: this._frustumCulling ? (min, max) => this._frustum.intersectsAABB(min, max) : undefined,
             lodDistanceScale: this._particleLodDistanceScale,
+            exposure: this._exposure,
         };
     }
     private readonly _particleViewProj: mat4 = mat4.create();
@@ -9662,6 +9663,11 @@ export class Renderer {
 
         this._shaderManager.bind(node.sprite.material.type);
 
+        // A scene sprite authored additive (fire, glows) adds its light instead. The editor overlay's
+        // icons keep the blend they were handed.
+        const additive = blend === DEFAULT_BLEND && node.sprite.blend === 'additive';
+        if (additive) blend = SPRITE_ADDITIVE_BLEND;
+
         // Everything the hand-written tail below sets, as pipeline state: always blended, never a
         // depth write (a blended sprite that wrote depth would occlude the ones sorted behind it),
         // and the material's own cull side and topology.
@@ -9727,8 +9733,11 @@ export class Renderer {
         this._setDissolve(node.effectiveFade);
 
         // Per draw, from the tile on screen: an animated sprite follows its frame's overdrive, and two
-        // sprites sharing a tileset never fight over one value.
-        material.properties.set('intensity', node.overdrive);
+        // sprites sharing a tileset never fight over one value. A sprite that takes less than the whole
+        // exposure (Sprite.exposureWeight) is divided by the rest of it here; the tonemapper multiplies by all.
+        const weight = node.sprite.exposureWeight;
+        material.properties.set('intensity', weight < 1 && this._exposure > 0
+            ? node.overdrive * Math.pow(this._exposure, weight - 1) : node.overdrive);
 
         // Set material uniforms + bind textures
         if (pipeline) {
@@ -9742,6 +9751,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_isTransparent', true);
         if (!pipeline) {
             GLState.blend(true);
+            if (additive && gl) gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE, gl.ZERO, gl.ONE);
             // Don't write to depth for blended sprites to avoid occluding later sprites
             GLState.depthMask(false);
             this._applyCull(materialConfig.side);
@@ -9750,6 +9760,7 @@ export class Renderer {
         const topology = materialConfig.wireframe ? 'line-list' : 'triangle-list';
         if (!pipeline || !this._recordDraw(pass!, node.sprite.mesh, 0, 0))
             node.sprite.mesh.draw(topology);
+        if (!pipeline && additive) this._restoreDefaultBlend();
 
         // Restore depth writes after drawing sprite
         if (manageDepth) GLState.depthMask(true);

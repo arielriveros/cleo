@@ -134,7 +134,8 @@ Selection is disabled in the modes where it would not mean anything: landscape, 
 renderer, input, material, terrain material, animation and blend space.
 
 **Gizmos:** the floating top-right chrome has **Move / Rotate / Scale**, the debug overlay eye menu,
-and a **2D/3D view switch**.
+and a **2D/3D view switch**. Selecting one of a node's collision shapes turns Move and Rotate onto that
+shape and adds its size handles — see [Editing shapes in the viewport](physics.md#editing-shapes-in-the-viewport).
 
 > The 2D/3D switch in the viewport is **view-only**. The scene's authored dimension is a different
 > setting, in Scene settings, and it is the one that decides whether you get Landscape or Tilemap
@@ -221,6 +222,10 @@ a slider is one undo step rather than sixty.
 
 The undo button's tooltip names the change kind: Transform, Rename, Visibility, Variable, Physics,
 Script, Material, Texture, Light, Camera, Environment, Component.
+
+Rigid bodies and triggers are not part of a node's snapshot, so the Physics panel and the viewport's
+collision handles record their own steps: one per edit, per drag of a field, or per handle drag, named
+for what it did ("Resize body shape", "Add trigger shape").
 
 A tilemap stroke is pushed as one entry, so **Ctrl+Z undoes a whole stroke**.
 

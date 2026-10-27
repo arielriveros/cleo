@@ -80,7 +80,8 @@ export interface PackManifest {
   /** See PLAYER_CONTRACT. Absent on games published before the guard existed. */
   contract?: number;
   entry: string;
-  scenes: Record<string, { name: string; scene: any }>;
+  /** `render`: the scene's render settings, applied as it starts. Absent before contract 14. */
+  scenes: Record<string, { name: string; scene: any; render?: any }>;
   /** Baked node templates for runtime scene.instantiate. Global, like textures — not per scene. */
   templates?: { id: string; name: string; node: any }[];
   /**

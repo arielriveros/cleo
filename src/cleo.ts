@@ -389,7 +389,7 @@ export type {
     AnimationActionHandle,
 } from "./animation/animator";
 export { Sprite, gridTileset, legacySheetTileset, remapLegacyFrame, isInlineTilesetId, INLINE_TILESET_PREFIX } from "./graphics/sprite";
-export type { SpriteOptions, SpriteSide } from "./graphics/sprite";
+export type { SpriteOptions, SpriteSide, SpriteBlend } from "./graphics/sprite";
 export { DirectionalLight, PointLight, Spotlight, LIGHT_UNIT, REFERENCE_ILLUMINANCE, DEFAULT_DIRECTIONAL_LUX,
          DEFAULT_LUMENS, DEFAULT_RANGE, DEFAULT_SOURCE_RADIUS, DEFAULT_ANGULAR_RADIUS,
          DEFAULT_SCENE_AMBIENT_LUX, MAX_LIGHTS, legacyRange,

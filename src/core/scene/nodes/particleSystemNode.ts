@@ -5,7 +5,7 @@ import { authoring } from "../../eventBus";
 import {
     cloneParticleSystem, defaultParticleSystem, parseParticleSystem, type ParticleSystemDef,
 } from "../../../particles/particleSystemAsset";
-import { ParticleSystemRuntime } from "../../../particles/particleRuntime";
+import { ParticleSystemRuntime, seedSalt } from "../../../particles/particleRuntime";
 import { FULL_DETAIL, particleLodFactors, type ParticleLodState } from "../../../particles/particleLod";
 
 export interface ParticleSystemNodeOptions {
@@ -20,6 +20,8 @@ export interface ParticleSystemNodeOptions {
     spawnRateScale?: number;
     /** Multiplies every particle's colour. */
     tint?: [number, number, number, number];
+    /** How much the camera's exposure brightens the particles, 0..1 (see the property). */
+    exposureWeight?: number;
     /** What the system does while its bounds are out of view. See {@link ParticleCullingMode}. */
     cullingMode?: ParticleCullingMode;
     /** Follow the system's distance LOD (its `.vfx` `lod`). Off = full detail at any distance, never culled. */
@@ -62,6 +64,7 @@ export class ParticleSystemNode extends Node {
     private _simulationSpeed: number;
     private _spawnRateScale: number;
     private _tint: [number, number, number, number];
+    private _exposureWeight: number;
 
     private _runtime: ParticleSystemRuntime;
     /** Bumped whenever the GPU state must be rebuilt: a new pool layout. */
@@ -102,10 +105,11 @@ export class ParticleSystemNode extends Node {
         this._spawnRateScale = Math.max(0, num(options.spawnRateScale, 1));
         const t = options.tint;
         this._tint = Array.isArray(t) ? [num(t[0], 1), num(t[1], 1), num(t[2], 1), num(t[3], 1)] : [1, 1, 1, 1];
+        this._exposureWeight = Math.min(1, Math.max(0, num(options.exposureWeight, 1)));
         this._cullingMode = CULLING_MODES.includes(options.cullingMode as ParticleCullingMode)
             ? options.cullingMode as ParticleCullingMode : 'auto';
         this._lodEnabled = options.lodEnabled !== false;
-        this._runtime = new ParticleSystemRuntime(this._system.emitters);
+        this._runtime = new ParticleSystemRuntime(this._system.emitters, seedSalt(this.id));
     }
 
     // -----------------------------------------------------------------------------------------------
@@ -129,7 +133,7 @@ export class ParticleSystemNode extends Node {
             this._runtime.adopt(this._system.emitters);
             this._paramsVersion++;
         } else {
-            this._runtime = new ParticleSystemRuntime(this._system.emitters);
+            this._runtime = new ParticleSystemRuntime(this._system.emitters, seedSalt(this.id));
             this._version++;
             if (this._playing) this._startRuntime();
         }
@@ -182,6 +186,20 @@ export class ParticleSystemNode extends Node {
     public set tint(value: [number, number, number, number]) {
         this._tint = [num(value?.[0], 1), num(value?.[1], 1), num(value?.[2], 1), num(value?.[3], 1)];
         this._notifyChange('component', 'tint');
+    }
+
+    /**
+     * How much the camera's exposure brightens the particles, 0..1. They are unlit (or lit by a fixed sky
+     * and sun), so at 1 (the default) their colour reaches the screen multiplied by the exposure: embers
+     * tuned for daylight blaze white once it opens for a night or a torch-lit dungeon. At 0 they show the
+     * same under any exposure. In between they still brighten in the dark, by that fraction of the stops.
+     */
+    public get exposureWeight(): number { return this._exposureWeight; }
+    public set exposureWeight(value: number) {
+        const next = Math.min(1, Math.max(0, num(value, 1)));
+        if (next === this._exposureWeight) return;
+        this._exposureWeight = next;
+        this._notifyChange('component', 'exposureWeight');
     }
 
     public get cullingMode(): ParticleCullingMode { return this._cullingMode; }
@@ -321,6 +339,8 @@ export class ParticleSystemNode extends Node {
                 simulationSpeed: this._simulationSpeed,
                 spawnRateScale: this._spawnRateScale,
                 tint: [...this._tint],
+                // Only when set, so a system that follows the exposure serializes as it always did.
+                ...(this._exposureWeight < 1 ? { exposureWeight: this._exposureWeight } : {}),
                 cullingMode: this._cullingMode,
                 lodEnabled: this._lodEnabled,
             },

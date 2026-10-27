@@ -23,7 +23,9 @@ import { posesForRig } from '../../utils/poseAssets'
 // game.json v2: a multi-scene published game. The entry (main) scene runs first; scripts call
 // Game.loadScene(name|id) to switch at runtime. Textures are serialized ONCE at the top level (they are
 // global) and every scene's tree goes through the same buildGameData path as a single-scene publish.
-// Closed scenes are re-resolved against the current asset libraries first (resyncScene).
+// Closed scenes are re-resolved against the current asset libraries first (resyncScene). Each scene
+// carries its own render settings, which the player applies as it starts that scene: a dark interior
+// and a daylit valley are not seen through one exposure.
 
 export interface MultiSceneSources {
   mainSceneId: string
@@ -53,7 +55,7 @@ export interface MultiSceneSources {
 }
 
 export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<any> {
-  const scenes: Record<string, { name: string; scene: any }> = {}
+  const scenes: Record<string, { name: string; scene: any; render?: Partial<RenderSettings> }> = {}
 
   for (const meta of src.scenes) {
     if (meta.id === src.openSceneId) {
@@ -66,7 +68,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
         triggers: src.liveTriggers,
         useCache: true, // textures are embedded once below, not per scene
       })
-      scenes[meta.id] = { name: meta.name, scene: gd.scene }
+      scenes[meta.id] = { name: meta.name, scene: gd.scene, ...(src.settings ? { render: src.settings } : {}) }
       continue
     }
 
@@ -91,7 +93,7 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
       triggers: maps.triggers,
       useCache: true,
     })
-    scenes[meta.id] = { name: meta.name, scene: gd.scene }
+    scenes[meta.id] = { name: meta.name, scene: gd.scene, ...(data.config?.render ? { render: data.config.render } : {}) }
   }
 
   // Discard the authoring each scene's dimension does not use. The ordering is load-bearing: the texture

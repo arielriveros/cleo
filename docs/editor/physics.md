@@ -82,14 +82,52 @@ chosen **Hull Definition**.
 | **Sphere** | |
 | **Capsule** | The right shape for a character. Its **Total Height** spans the caps too, so the straight section is height − 2 × radius; at or below 2 × radius it is a sphere. |
 | **Cylinder** | |
-| **Plane** | An infinite half-space. |
+| **Plane** | An infinite half-space, facing its own +Z. Drawn as a 4 m grid with a short stub along that normal. |
 | **Convex hull** | Fitted to the mesh's vertices, at a **Definition** from Low (exactly the bounding box, 6 faces) to Very High (up to 50 faces). Every level encloses the whole mesh, so a lower one is looser, never tighter. Changing a hull's Definition rebuilds it in place and keeps the rotation you gave it. Not offered on skinned meshes. |
 
-**Shape** — one collider on the list, titled by its type: its dimensions, an **Offset** and a
-**Rotation** in the node's own space, and **Remove**.
+**Shape** — one collider on the list, titled by its type and place ("Box 2"): its dimensions, an
+**Offset** and a **Rotation** in the node's own space. Clicking the title selects the shape for editing
+in the viewport (see below); the arrow folds the row away. The frame button selects it and moves the
+camera to it, ✕ removes it, and the **⋯** menu holds the rest:
+
+| Action | What it does |
+|---|---|
+| **Duplicate** | A copy right after it, selected. |
+| **Move up / Move down** | Reorders the list. Only the order you read it in changes. |
+| **Fit to mesh** | Re-sizes the shape to the node's mesh along the shape's *own* axes, keeping its rotation, so a box turned to lie along a beam fits the beam. Not for planes or hulls. |
+| **Convert to …** | The same space as another primitive: a box becomes the sphere around it, a cylinder the capsule of its radius and length. Offset and rotation are kept. |
+| **Copy to trigger / Copy to rigid body** | Appends a copy to the other list. A trigger is added if the node has none; a body has to exist already. |
+
+Sizes never go below 1 mm and segment counts below three. Every edit in the list is one undo step,
+including a whole drag of a number field.
 
 Adding a primitive **auto-fits it to the mesh**, including for skinned characters, so you rarely
-have to type dimensions.
+have to type dimensions, and selects it, so its handles are up straight away.
+
+### Editing shapes in the viewport
+
+With a node selected, each of its shapes shows a small dot at its centre: red for the body's, green for
+the trigger's. Click a dot, or a row's title in the panel, to select that shape. Its wireframe turns
+orange, the node's other shapes fade, and the viewport edits the shape instead of the node:
+
+- **Square handles** sit on both faces of every axis the shape can be sized along: all six faces of a
+  box, the radius of a sphere in every direction, and the radius and length of a capsule or cylinder.
+  Dragging one moves that face alone. The opposite face stays put and the offset follows. A readout
+  shows the size in metres as you drag. A handle on a face turned away from you is drawn faded.
+  - Hold **Alt** to grow both sides at once about the centre.
+  - Hold **Ctrl** to snap the size to the translate step set in Options ▸ Editor ▸ Viewport.
+- **Move (W)** and **Rotate (E)** drive the shape's **Offset** and **Rotation** with the usual gizmo,
+  whose local axes are now the shape's own. The node's own gizmo is hidden meanwhile.
+- **Escape** during a drag puts the shape back as it was. With no drag, Escape, clicking elsewhere, or
+  selecting any node goes back to editing the node.
+
+Each drag is one undo step, and the panel shows the new values as you drag. Handles follow the
+node's scale and rotation exactly as the physics does. On a non-uniformly scaled node, that means a
+sphere grows with the largest axis, and a capsule or cylinder grows radially with the larger of X and Z.
+
+The handles are not shown in Play or Simulate, on a placed template instance (which is read-only here),
+or for a channel whose wireframes are switched off in the debug eye menu. A convex hull and a plane can
+be moved and rotated but not sized: a hull's size is its Definition, and a plane has no size.
 
 > ### Use a capsule for characters, not a box
 >

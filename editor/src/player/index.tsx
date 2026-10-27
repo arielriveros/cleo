@@ -215,6 +215,9 @@ async function boot(): Promise<void> {
     // Shared clips are not in the serialized scene by design; retarget after parse, before start.
     attachSharedAnimations(scene, data);
     Logger.info(`scene "${entry.name}" nodes=${[...scene.nodes].length}`, 'Player');
+    // The scene's own look (exposure, shadows, post), as the editor shows it. A game published before
+    // scenes carried one keeps the boot settings throughout.
+    engine.renderer.applyRenderSettings(entry.render);
     const outgoing = engine.scene;
     engine.setScene(scene);
     // The scene we just replaced is gone for good: release its GPU meshes, terrain bodies and its

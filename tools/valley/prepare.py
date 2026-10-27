@@ -124,6 +124,55 @@ def props() -> None:
         save_jpeg(load(tex / f"{base}_arm_1k.png"), f"{base}_arm", 1024)
 
 
+def gltf_material(path: Path, index: int, prefix: str, size: int = 1024) -> None:
+    """One glTF material's maps as this example's set: `_diff`, `_nor`, `_arm`, and `_emissive` when it
+    has one. glTF keeps roughness in G and metal in B; an occlusion map that shares that image (an ORM
+    pack) already has AO in R, so the image IS an ARM. Without one, R is set to 1 (no occlusion).
+    A metal/rough map on a second UV set is skipped: parts carry one UV set, and the scalars stand in."""
+    doc, images = glb_images(path)
+    tex = [t["source"] for t in doc["textures"]]
+    m = doc["materials"][index]
+    pbr = m.get("pbrMetallicRoughness", {})
+    pick = lambda ref: images[tex[ref["index"]]]
+    save_jpeg(pick(pbr["baseColorTexture"]), f"{prefix}_diff", size)
+    if "normalTexture" in m:
+        save_png(pick(m["normalTexture"]), f"{prefix}_nor", size)
+    mr = pbr.get("metallicRoughnessTexture")
+    if mr and mr.get("texCoord", 0) == 0:
+        r, g, b = pick(mr).convert("RGB").split()
+        if m.get("occlusionTexture", {}).get("index") != mr["index"]:
+            r = Image.new("L", g.size, 255)
+        save_jpeg(Image.merge("RGB", (r, g, b)), f"{prefix}_arm", size)
+    if "emissiveTexture" in m:
+        save_jpeg(pick(m["emissiveTexture"]), f"{prefix}_emissive", min(size, 512))
+
+
+def dungeon_props() -> None:
+    """The dungeon's own wood, metal and carved-stone sets (its rocky walls and slabs use wall_textures
+    above), the torches, the bonfire's campfire, and the props that dress the dungeon."""
+    structure = SRC / "props" / "medieval_dungeon_structure (1).glb"
+    doc, _ = glb_images(structure)
+    names = [m["name"] for m in doc["materials"]]
+    for name in ("stone_hewn", "wood_planks", "wood_old", "iron", "brass", "cast_iron", "gold", "sky", "void"):
+        gltf_material(structure, names.index(name), f"dungeon_{name}")
+
+    gltf_material(SRC / "props" / "medieval_torch.glb", 0, "standing_torch")
+    campfire = SRC / "props" / "campfire_fire_with_stones.glb"
+    doc, _ = glb_images(campfire)
+    for i, m in enumerate(doc["materials"]):
+        gltf_material(campfire, i, f"campfire_{m['name']}")
+    gltf_material(SRC / "props" / "bookcase.glb", 0, "bookcase")
+    gltf_material(SRC / "props" / "dungeon_cage.glb", 0, "cage")
+
+    # The wall torch's maps are separate 4k greyscale PNGs; roughness and metalness become its ARM.
+    torch = SRC / "props" / "wall_torch_model" / "textures"
+    save_jpeg(load(torch / "torch_BaseColor.png"), "wall_torch_diff", 1024)
+    save_png(load(torch / "torch_Normal.png"), "wall_torch_nor", 1024)
+    rough = grey8(load(torch / "torch_Roughness.png"))
+    metal = grey8(load(torch / "torch_Metalness.png"))
+    save_jpeg(Image.merge("RGB", (Image.new("L", rough.size, 255), rough, metal)), "wall_torch_arm", 1024)
+
+
 def grass() -> None:
     tex = SRC / "foliage" / "grass_medium_01_1k.gltf" / "textures"
     save_jpeg(load(tex / "grass_medium_01_diff_1k.jpg"), "grass_diff", 1024)
@@ -225,6 +274,7 @@ def main() -> None:
     terrain("forest", "forest_leaves_02_1k", "forest_leaves_02")
     terrain("rockydirt", "rocks_ground_05_1k", "rocks_ground_05")
     props()
+    dungeon_props()
     grass()
     pine()
     rock_moss()

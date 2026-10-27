@@ -16,6 +16,8 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
   const [transparent, setTransparent] = useState(sprite.transparent)
   const [side, setSide] = useState(sprite.side)
   const [wireframe, setWireframe] = useState(sprite.wireframe)
+  const [blend, setBlend] = useState(sprite.blend)
+  const [exposureWeight, setExposureWeight] = useState(sprite.exposureWeight)
 
   useEffect(() => {
     setTint(vec3ToHex(sprite.tint))
@@ -23,6 +25,8 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
     setTransparent(sprite.transparent)
     setSide(sprite.side)
     setWireframe(sprite.wireframe)
+    setBlend(sprite.blend)
+    setExposureWeight(sprite.exposureWeight)
   }, [props.node])
 
   const changed = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
@@ -39,6 +43,20 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
           <PropertyRow label='Opacity'>
             <Slider min={0} max={1} step={0.01} value={opacity} onChange={(v) => {
               sprite.opacity = v; setOpacity(v); changed()
+            }} />
+          </PropertyRow>
+          <PropertyRow label='Blending'>
+            <Select value={blend} onChange={(e) => {
+              const v = e.target.value as typeof blend
+              sprite.blend = v; setBlend(v); changed()
+            }}>
+              <option value='alpha'>Alpha</option>
+              <option value='additive'>Additive</option>
+            </Select>
+          </PropertyRow>
+          <PropertyRow label='Exposure weight'>
+            <Slider min={0} max={1} step={0.05} value={exposureWeight} onChange={(v) => {
+              sprite.exposureWeight = v; setExposureWeight(v); changed()
             }} />
           </PropertyRow>
           <PropertyRow label='Transparent'>

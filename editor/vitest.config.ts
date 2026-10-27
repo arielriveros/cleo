@@ -17,6 +17,9 @@ export default mergeConfig(engineConfig, defineConfig({
         // bundleAssetsRealProject round-trips the shipped 3D example, and scriptWorkspaceTypes shells out
         // to tsc; both are slow by nature rather than hung.
         testTimeout: 30_000,
+        // The same test holds the example several times over (its JSON, packed, re-parsed and inflated): with
+        // the dungeon that is past a worker's default heap.
+        poolOptions: { forks: { execArgv: ['--max-old-space-size=8192'] } },
         coverage: {
             // istanbul, not v8 — see the note in ../vitest.config.ts.
             provider: 'istanbul',

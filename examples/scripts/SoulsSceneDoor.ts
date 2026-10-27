@@ -7,6 +7,10 @@ import { Game, Logger, Node } from 'cleo'
  *
  * Only offered from in FRONT of the node (its local +Z side) when `frontOnly` is set, so a door in a
  * wall is not usable from inside the wall.
+ *
+ * `exitTo` names the door in the target scene the player comes out of: that door puts the player
+ * `arrivalDistance` in front of itself, facing out, instead of at the scene's start. The skull cave and the
+ * dungeon's way out name each other, so a trip down and back up ends where it began.
  */
 export default class SoulsSceneDoorNode extends Node {
   /** The scene to load, by name or id. */
@@ -17,8 +21,27 @@ export default class SoulsSceneDoorNode extends Node {
   /** Heading on the loading screen. */
   public loadingTitle: string = ''
   public frontOnly: boolean = false
+  /** The door (by node name) in the target scene to come out of; empty = the scene's own start. */
+  public exitTo: string = ''
+  /** How far in front of this door an arriving player stands. */
+  public arrivalDistance: number = 2
 
   private _busy: boolean = false
+
+  onStart() {
+    const g = globalThis as any
+    if (!this.name || g.__soulsArrival !== this.name) return
+    // A frame later: the player has run its own start (and placed its body) by then. The arrival is
+    // cleared then too, so anything else starting in this scene can tell it was arrived at through a door.
+    this.after(0, () => {
+      g.__soulsArrival = undefined
+      const player = this.findNode('Player') as any
+      if (!player) return
+      const me = this.worldPosition, f = this.worldForward
+      player.setPosition?.([me[0] + f[0] * this.arrivalDistance, me[1] + 0.05, me[2] + f[2] * this.arrivalDistance])
+      player.setRotation?.([0, Math.atan2(f[0], f[2]) * 180 / Math.PI, 0])
+    })
+  }
 
   public canInteract(player: Node): boolean {
     if (this._busy || !player) return false
@@ -39,6 +62,7 @@ export default class SoulsSceneDoorNode extends Node {
   public go(): void {
     if (this._busy) return
     this._busy = true
+    ;(globalThis as any).__soulsArrival = this.exitTo || undefined
     try {
       Game.loadScene(this.targetScene, { loadingScreen: { title: this.loadingTitle || this.targetScene } })
         .catch(e => { this._busy = false; Logger.error(`Could not load "${this.targetScene}": ${e}`, 'Script') })

@@ -21,6 +21,7 @@ export default function ParticleSystemEditor(props: { node: ParticleSystemNode }
     simulationSpeed: props.node.simulationSpeed,
     spawnRateScale: props.node.spawnRateScale,
     tint: [...props.node.tint] as [number, number, number, number],
+    exposureWeight: props.node.exposureWeight,
     cullingMode: props.node.cullingMode,
     lodEnabled: props.node.lodEnabled,
   })
@@ -33,6 +34,7 @@ export default function ParticleSystemEditor(props: { node: ParticleSystemNode }
     if (patch.simulationSpeed !== undefined) n.simulationSpeed = patch.simulationSpeed
     if (patch.spawnRateScale !== undefined) n.spawnRateScale = patch.spawnRateScale
     if (patch.tint !== undefined) n.tint = patch.tint
+    if (patch.exposureWeight !== undefined) n.exposureWeight = patch.exposureWeight
     if (patch.cullingMode !== undefined) n.cullingMode = patch.cullingMode
     if (patch.lodEnabled !== undefined) n.lodEnabled = patch.lodEnabled
     setValues(read())
@@ -78,6 +80,12 @@ export default function ParticleSystemEditor(props: { node: ParticleSystemNode }
               + 'effect the camera looks at from afar.'
               + ((props.node.system.lod?.levels.length || props.node.system.lod?.cullDistance) ? '' : ' This effect has no LOD levels yet.')}>
             <Toggle checked={values.lodEnabled} onChange={lodEnabled => set({ lodEnabled })} />
+          </PropertyRow>
+          <PropertyRow label='Exposure weight' divider
+            hint={"How much the camera's exposure brightens the particles. 1 follows it like everything lit; 0 keeps "
+              + 'them the same brightness under any exposure. Fire, sparks and glows tuned in daylight want a little '
+              + '(0.1), or they blaze white at night and in a dark interior.'}>
+            <Slider min={0} max={1} step={0.05} value={values.exposureWeight} readout onChange={exposureWeight => set({ exposureWeight })} />
           </PropertyRow>
           <PropertyRow label='Tint' hint="Multiplies every particle's colour, alpha included.">
             <div className='flex items-center gap-2'>

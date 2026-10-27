@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_TILE_SIZE, buildTilesetAsset, gridOf, guessTileSize, resliceTileset, toRuntimeTileset,
   reembedTilesets, detachTileset, tilesetIdsInScene, fromRuntimeTileset,
-  frameBadges, appendFrames, removeLastFrame, moveFrame,
+  frameBadges, appendFrames, removeLastFrame, moveFrame, normalizeTilesetAsset,
 } from '../src/utils/tilesets';
 import { Scene, SpriteNode, Sprite } from 'cleo';
 
@@ -228,5 +228,23 @@ describe('animation frames picked on the atlas', () => {
   it('reorders without losing or duplicating frames', () => {
     expect(moveFrame([1, 2, 3], 2, 0)).toEqual([3, 1, 2]);
     expect(moveFrame([1, 2, 3], 0, 5)).toEqual([1, 2, 3]);
+  });
+});
+
+// A tileset stored without its sets (a generated bundle did this) crashed the inspector, which maps them.
+describe('normalizeTilesetAsset', () => {
+  it('fills the collections a stored tileset lacks', () => {
+    const stored = { id: 't', name: 'Fire', textureId: 'fire.png', imageWidth: 1024, imageHeight: 1024,
+      tileWidth: 128, tileHeight: 256, margin: 0, spacing: 0, columns: 8, rows: 4 } as any;
+    const asset = normalizeTilesetAsset(stored);
+    expect(asset.tiles).toEqual({});
+    expect(asset.terrains).toEqual([]);
+    expect(asset.variantSets).toEqual([]);
+    expect(asset.textureIds).toEqual(['fire.png']);
+  });
+
+  it('keeps what is there', () => {
+    const full = buildTilesetAsset('Grass', 'grass.png', 64, 64, { tiles: { 3: { solid: true } as any } });
+    expect(normalizeTilesetAsset(full)).toEqual(full);
   });
 });

@@ -1,12 +1,12 @@
 # Valley example generator
 
-Builds `editor/public/examples/valley/`, the engine's example game: the souls content of `tools/soulsDemo/build.mjs` set in an outdoor mountain valley.
+Builds `editor/public/examples/valley/`, the engine's example game: the souls content of `tools/soulsDemo/build.mjs` set in an outdoor mountain valley with a day and night cycle, and a second scene, the Dungeon, entered through the skull cave.
 
 ```sh
 python tools/valley/prepare.py                          # textures: build/ -> build/valley_prepared/
-node --max-old-space-size=12288 tools/valley/build.mjs  # writes the example (~200 MB)
+node --max-old-space-size=12288 tools/valley/build.mjs  # writes the example (~240 MB)
 npm --prefix editor run examples:list                   # refreshes the gallery index
-npx vitest run tests/valleyProject.test.ts tests/valleySouls.test.ts
+npx vitest run tests/valleyProject.test.ts tests/valleySouls.test.ts tests/dungeonCollision.test.ts
 ```
 
 The source art in `build/` is gitignored, so this generator is run by hand and its output is committed.
@@ -26,6 +26,12 @@ The source art in `build/` is gitignored, so this generator is run by hand and i
 | `props/long_house` | Long House, from the artist's LOD1. |
 | `props/silo` | Granary. |
 | `props/windmill` | Windmill. Its sails spin via `ValleyWindmill.ts`. |
+| `props/skull_cave` | The Skull Cave Entrance in the cliff notch: the door to the Dungeon. |
+| `props/medieval_dungeon_structure (1).glb` | The Dungeon, at full detail: split into 10 m chunks, its lights read as placement anchors. |
+| `wall_textures` | The dungeon's stone: walls, slabs, brick and cobbled floors. Wood and metal keep the structure's own textures. |
+| `props/wall_torch_model`, `props/medieval_torch.glb` | Wall-mounted and standing torches. |
+| `props/campfire_fire_with_stones.glb`, `props/dungeon_cage.glb`, `props/bookcase.glb`, `props/weapons` | The bonfire and fire pits, cages and braziers, bookcases, racked and dropped weapons. |
+| `fire.png` | The fire tileset: 8 x 4 frames of 128 x 256, the flame on every torch, brazier and fire. |
 
 ## Files
 
@@ -40,13 +46,16 @@ The source art in `build/` is gitignored, so this generator is run by hand and i
   a Pond / Lake water volume and the Morning Sun (brightened against the valley's ambient). The High quality tier
   and a sky light with cloud shadows complete it. Nothing in the look is hand-tuned; change a preset to change it.
 - `meshes.mjs` contains the part pipeline. It flips glTF V, leaves tangents for `Geometry` to rebuild, rounds values for JSON, and builds convex hulls.
+- `torches.mjs` builds the fire props (wall and standing torches, campfire, cages, candles) and finds walls to hang torches on.
+- `dungeon/` builds the Dungeon: `structure.mjs` loads and chunks the structure and opens its sealed doorways; `collision.mjs` rasterises its floors, walls, ceilings and stairs into box colliders (the scene format has no triangle meshes) and checks the level can be walked; `layout.mjs` holds the zones, fires, enemies, pickups and messages; `props.mjs` the procedural furniture; `scene.mjs` assembles it.
 - `build.mjs` assembles everything around `writeProject` from `tools/soulsDemo/build.mjs`.
+
+## Light and time
+
+- **The Time of Day** node (`examples/scripts/ValleyDayNight.ts`) runs the valley's day: the sun's path and colour, the moon, the exposure, the morning mist and the god rays, and how bright the fires are. A death skips half a day.
+- **Fires** (`examples/scripts/ValleyFireLight.ts`) are linked templates with a tileset flame, embers, sparks that bounce on the floor, and a flickering light. Their flames and embers have an Exposure weight of 0.1, so the camera's exposure barely changes them.
+- **The Dungeon** is held at EV 15, the valley's noon, and its fires are lit for that: the souls content (glyphs, glows, bolts) is tuned for an exposure about that. The Time of Day scales the fires down by day and up at night.
 
 ## Not built
 
-The reference's `valley_outdoor.glb` is not in `build/`, so the following are missing:
-
-- the dungeon façade and tunnel
-- the dungeon trigger
-
-The fog gate closes the cliff notch instead, and the Hollow Warden waits in the gate plaza.
+The reference's `valley_outdoor.glb` is not used, so its dungeon façade and tunnel are not either: the skull cave in the cliff notch is the way in.

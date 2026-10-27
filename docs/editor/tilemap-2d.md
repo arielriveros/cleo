@@ -124,10 +124,20 @@ better choice when the same animation is used in several places.
   rate, with **Loop** and the loop length under it; for a tile's animation it shows the tile's rate
   from the tileset, and typing another value speeds up or slows down this sprite only (↺ follows the
   tile again).
+- **Random start** — each copy starts on a random frame of its own list, so a row of the same sprite
+  (torches along a wall) does not flicker in step. It applies when the sprite spawns.
 
-**Appearance** — tint, opacity, transparency, which sides draw, and wireframe. A tileset with
+**Appearance** — tint, opacity, blending, exposure weight, transparency, which sides draw, and wireframe. A tileset with
 **overdrive** makes its sprites glow through bloom; the value belongs to the tileset, and the section
 only reports it.
+
+- **Blending** — **Alpha** draws the sprite over what is behind it. **Additive** adds it as light, for
+  fire and glows: black parts vanish and overlapping sprites brighten each other.
+- **Exposure weight** — how much the camera's exposure brightens the sprite. A sprite is unlit, so at 1
+  (the default) it is multiplied by the exposure like everything lit, and a flame that reads right in
+  daylight turns to a white smear at night or in a dark interior, where the exposure is hundreds of times
+  higher. At 0 it keeps the same brightness under any exposure; fire usually wants a little (0.1), so it
+  still glows brighter in the dark.
 
 Both support **billboarding** (**Constraints**: `free`, `spherical`, `cylindrical`), which matters in
 3D scenes where sprites are used for effects.

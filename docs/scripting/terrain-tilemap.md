@@ -257,7 +257,9 @@ anim.reset()
 ```
 
 `frameSource` chooses whether the frame list comes from the node (`'node'`) or from the tile's own
-animation metadata in the tileset (`'tile'`).
+animation metadata in the tileset (`'tile'`). `randomStart` starts each copy on a random frame, so many
+copies of one sprite do not animate in step, and `sprite.blend = 'additive'` makes a sprite add light
+(fire, glows) instead of drawing over what is behind it.
 
 Sprites reference a **tileset** and a tile index rather than a raw texture, which is what lets one
 atlas back a whole set of sprites.

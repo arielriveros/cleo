@@ -631,7 +631,9 @@ describe.skipIf(!present)('the Valley example project', () => {
     it('places the player, torches and interactables as linked template copies', () => {
         const count = (name: string) => instances().filter(n => templateOf(n)?.name === name).length;
         expect(count('Player')).toBe(1);
-        expect(count('Torch')).toBe(2);
+        // The cave mouth's pair, and the hamlet's lamps for the night: down the road and on the walls.
+        expect(count('Torch')).toBeGreaterThan(6);
+        expect(count('Wall Torch')).toBeGreaterThan(3);
         expect(count('Message')).toBe(6);
         expect(count('Pickup')).toBe(3);
         for (const name of ['Bonfire', 'Lever', 'Gate']) expect(count(name), name).toBe(1);

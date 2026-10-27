@@ -59,6 +59,17 @@ describe('game.bin round-trip', () => {
     expect(manifest.config.render.exposure).toBe(1);
   });
 
+  // The player applies these as it starts each scene: a dungeon must not be seen through the exposure
+  // of the valley it was entered from.
+  it("carries each scene's own render settings", () => {
+    const data: any = gameWith([model(cube())]);
+    data.scenes.main.render = { exposure: 2, pointShadowsEnabled: true };
+    data.scenes.dungeon = { name: 'Dungeon', scene: { name: 'root', children: [] }, render: { exposure: 11.3 } };
+    const { manifest } = unpackGameBin(packGameBin(data).buffer);
+    expect(manifest.scenes.main.render).toEqual({ exposure: 2, pointShadowsEnabled: true });
+    expect(manifest.scenes.dungeon.render.exposure).toBe(11.3);
+  });
+
   // The stamp publishing checks against public/player/build.json before it ships a bundle, and the
   // player re-checks at boot. Without it a player built before a packer change renders the game wrong
   // in silence — which is exactly how a month-stale bundle published flat terrain and dead animation

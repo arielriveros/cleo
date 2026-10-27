@@ -133,6 +133,17 @@ export interface ParticleDrawFrame {
     visible?: (min: vec3, max: vec3) => boolean;
     /** Multiplies every system's LOD distances (the renderer's `particleLodDistanceScale`). Default 1. */
     lodDistanceScale?: number;
+    /** The camera exposure the frame is shown at, for `ParticleSystemNode.exposureWeight`. */
+    exposure?: number;
+}
+
+/** A node's tint, its colour divided by the part of the exposure it does not take (alpha untouched). */
+const compensatedTint: [number, number, number, number] = [1, 1, 1, 1];
+function exposureTint(tint: readonly number[], weight: number, exposure: number | undefined): readonly number[] {
+    if (!(weight < 1) || !(exposure! > 0)) return tint;
+    const k = Math.pow(exposure!, weight - 1);
+    compensatedTint[0] = tint[0] * k; compensatedTint[1] = tint[1] * k; compensatedTint[2] = tint[2] * k; compensatedTint[3] = tint[3];
+    return compensatedTint;
 }
 
 const stateTexture = (width: number, height: number): Texture => {
@@ -549,7 +560,7 @@ export class ParticleRenderer {
         if (count === 0) return;
 
         const parent = link ? gpu.emitters[link.parent] ?? null : null;
-        const values = stepUniforms(emitter.packed, step, runtime.capacity, runtime.width, frame.gravity, runtime.def.seed);
+        const values = stepUniforms(emitter.packed, step, runtime.capacity, runtime.width, frame.gravity, runtime.seed);
         values.u_mask = [emitter.packed.simMask, reset ? 1 : 0, start, count];
         if (link && parent) {
             values.u_sub = [link.event === 'collision' ? 2 : 1, link.count, link.inherit, parent.runtime.width];
@@ -1058,7 +1069,7 @@ export class ParticleRenderer {
                                                      frame.cameraPosition[2], packed.draw.alignment[0]]);
                     shaders.setUniform('u_camForward', [forward[0], forward[1], forward[2], packed.draw.stretch[0]]);
                     shaders.setUniform('u_drawMask', [mask, scale, sorted ? 0 : emitter.liveStart, emitter.runtime.capacity]);
-                    shaders.setUniform('u_tint', node.tint);
+                    shaders.setUniform('u_tint', exposureTint(node.tint, node.exposureWeight, frame.exposure));
                     shaders.setUniform('u_flipbook', packed.draw.u_flipbook);
                     shaders.setUniform('u_flipbook2', packed.draw.u_flipbook2);
                     shaders.setUniform('u_speedRange', packed.draw.u_speedRange);

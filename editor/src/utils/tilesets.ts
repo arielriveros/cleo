@@ -101,6 +101,21 @@ export function buildTilesetAsset(
   }
 }
 
+/**
+ * A stored tileset with every collection present. One written by an older build or by hand can lack its
+ * terrain and variant sets (which the inspector maps over) or `textureIds` (which the texture store scans
+ * to keep the atlas alive): read as empty, and as the atlas alone.
+ */
+export function normalizeTilesetAsset(asset: TilesetAsset): TilesetAsset {
+  return {
+    ...asset,
+    tiles: asset.tiles ?? {},
+    terrains: asset.terrains ?? [],
+    variantSets: asset.variantSets ?? [],
+    textureIds: asset.textureIds?.length ? asset.textureIds : [asset.textureId],
+  }
+}
+
 /** Re-derive `columns`/`rows` after a slicing change. Returns a new asset; the old one is left alone. */
 export function resliceTileset(asset: TilesetAsset, patch: Partial<TilesetAsset>): TilesetAsset {
   const next = { ...asset, ...patch, textureIds: [patch.textureId ?? asset.textureId] }

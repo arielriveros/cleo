@@ -20,7 +20,8 @@ Two reported phases:
 2. **Building and writing files** — scripts are extracted and obfuscated, assets are packed, and the
    output is written or zipped.
 
-The project's current render settings and its input map are written into the build.
+Every scene's render settings and the project's input map are written into the build. The open scene's
+are taken live from the renderer, the others as last saved.
 
 ## What ships, and what does not
 

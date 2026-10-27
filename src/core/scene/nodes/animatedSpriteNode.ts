@@ -17,6 +17,11 @@ export class AnimatedSpriteNode extends SpriteNode {
     private _loop: boolean;
     /** The `tile` source's rate: 0 plays at the tile's own fps, above 0 overrides it for this sprite only. */
     private _tileFps: number;
+    /**
+     * Start somewhere random in `frames` (and part-way into that frame), so copies of one sprite — a row
+     * of torches — do not flicker in step.
+     */
+    private _randomStart: boolean;
     /** Index INTO `_frames`, not a tile index. */
     private _currentFrame: number;
     private _accumulator: number;
@@ -32,6 +37,7 @@ export class AnimatedSpriteNode extends SpriteNode {
             fps?: number,
             loop?: boolean,
             tileFps?: number,
+            randomStart?: boolean,
             constraints?: 'free' | 'spherical' | 'cylindrical',
             id?: string
         }
@@ -42,9 +48,18 @@ export class AnimatedSpriteNode extends SpriteNode {
         this._fps = Math.max(0.0001, options?.fps ?? 12);
         this._loop = options?.loop ?? true;
         this._tileFps = Math.max(0, options?.tileFps ?? 0);
+        this._randomStart = options?.randomStart === true;
         this._currentFrame = 0;
         this._accumulator = 0;
         this._elapsed = 0;
+        if (this._randomStart) this._startRandomly();
+    }
+
+    private _startRandomly(): void {
+        if (this._frames.length > 0) this._currentFrame = Math.floor(Math.random() * this._frames.length);
+        this._accumulator = Math.random() / this._fps;
+        // The `tile` source reads elapsed time; an offset into one loop of it does the same job there.
+        this._elapsed = Math.random() * Math.max(1, this._frames.length) / this._fps;
     }
 
     public update(delta: number, time: number): void {
@@ -88,6 +103,7 @@ export class AnimatedSpriteNode extends SpriteNode {
                 loop: this._loop,
                 // Only when set, so a sprite that follows its tile serializes as it always did.
                 ...(this._tileFps > 0 ? { tileFps: this._tileFps } : {}),
+                ...(this._randomStart ? { randomStart: true } : {}),
             },
         };
     }
@@ -103,6 +119,7 @@ export class AnimatedSpriteNode extends SpriteNode {
             fps: animation.fps,
             loop: animation.loop,
             tileFps: json?.animation?.tileFps,
+            randomStart: json?.animation?.randomStart,
         });
         Node.finishParse(spriteNode, parent, json);
     }
@@ -132,6 +149,9 @@ export class AnimatedSpriteNode extends SpriteNode {
     }
     public get loop(): boolean { return this._loop; }
     public set loop(v: boolean) { this._loop = v; }
+    /** See `_randomStart`. Takes effect from the next spawn; setting it does not jump the current frame. */
+    public get randomStart(): boolean { return this._randomStart; }
+    public set randomStart(v: boolean) { this._randomStart = v === true; }
     /** Position within `frames`. Clamped, and resets the sub-frame accumulator. */
     public get currentFrame(): number { return this._currentFrame; }
     public set currentFrame(v: number) {

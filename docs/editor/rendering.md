@@ -2,6 +2,9 @@
 
 **Options ▸ Engine** has the **Renderer** and **Performance** pages, over a live render (see
 [Options](options.md)). Render settings are saved with the open scene and carried into a published build.
+Each scene keeps its own: when a game switches scenes, the scene it loads brings its exposure, shadows
+and post with it, in the editor's Play and in a published game alike. Changes made during Play are
+undone by **Stop**, whether a script made them or the panel did.
 
 Every field with its type and default is in [Render settings](../reference/render-settings.md); this
 page is about using them.

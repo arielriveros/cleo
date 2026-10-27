@@ -119,6 +119,17 @@ function rng(seed: number): () => number {
 
 const num = (x: unknown, fallback: number): number => (typeof x === 'number' && Number.isFinite(x) ? x : fallback);
 
+/**
+ * A per-instance salt for emitter seeds, from a stable key (the node id). Two copies of one effect share
+ * their emitter definitions, seeds included; without a salt a row of torches would roll every random
+ * burst on the same frame and scatter their sparks identically. FNV-1a.
+ */
+export function seedSalt(key: string): number {
+    let h = 0x811C9DC5;
+    for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 0x01000193);
+    return h >>> 0;
+}
+
 export type EmitterState = 'idle' | 'playing' | 'stopping';
 
 export class EmitterRuntime {
@@ -143,6 +154,8 @@ export class EmitterRuntime {
     private _hasMatrix = false;
     private _maxLife: number;
     private _def: EmitterDef;
+    /** XORed into the definition's seed: see {@link seedSalt}. */
+    private readonly _salt: number;
     /** Emitter time that never restarts (`_time` does, on play), for the spawn log. */
     private _clock = 0;
     // The spawn log: when (on `_clock`) and how many slots each recent step handed out, oldest first
@@ -152,17 +165,20 @@ export class EmitterRuntime {
     private _logHead = 0;
     private _logSum = 0;
 
-    constructor(def: EmitterDef) {
+    constructor(def: EmitterDef, salt: number = 0) {
         this._def = def;
+        this._salt = salt >>> 0;
         const layout = particleTextureLayout(def.capacity);
         this.capacity = layout.capacity;
         this.width = layout.width;
         this.height = layout.height;
-        this._random = rng(def.seed ^ 0x9E3779B9);
+        this._random = rng(this.seed ^ 0x9E3779B9);
         this._maxLife = maxLifetime(def);
     }
 
     public get def(): EmitterDef { return this._def; }
+    /** The seed this instance actually runs on: the definition's, salted per instance. */
+    public get seed(): number { return (this._def.seed ^ this._salt) >>> 0; }
 
     /**
      * Swap in an edited definition WITHOUT disturbing live particles or the clock: the authoring path,
@@ -229,7 +245,7 @@ export class EmitterRuntime {
         this._rateCarry = 0;
         this._burstCarry = 0;
         this._distanceCarry = 0;
-        this._random = rng(this.def.seed ^ 0x9E3779B9);
+        this._random = rng(this.seed ^ 0x9E3779B9);
     }
 
     /** Stop spawning; live particles finish their lives. */
@@ -408,9 +424,10 @@ export class ParticleSystemRuntime {
     /** Frame time held back by a LOD level that simulates less often than every frame. */
     private _lodCarry = 0;
 
-    constructor(defs: readonly EmitterDef[]) {
+    /** `salt` desynchronizes copies of one system; see {@link seedSalt}. */
+    constructor(defs: readonly EmitterDef[], salt: number = 0) {
         const resolved = resolveSubEmitters(defs);
-        this.emitters = resolved.defs.map(d => new EmitterRuntime(d));
+        this.emitters = resolved.defs.map(d => new EmitterRuntime(d, salt));
         this.links = resolved.links;
         this.pending = this.emitters.map(() => []);
         this._prewarmLeft = this.emitters.map(() => 0);

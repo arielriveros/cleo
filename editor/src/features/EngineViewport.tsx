@@ -3,6 +3,7 @@ import { useCleoEngine } from "./EngineContext";
 import { Raycaster, Node, Vec, Logger } from "cleo";
 import TransformGizmo from "./gizmo/TransformGizmo";
 import CollisionGizmo from "./gizmo/CollisionGizmo";
+import { useCollisionShapeSelection } from "./gizmo/collisionSelection";
 import BoneGizmo from "./clip/BoneGizmo";
 import SocketPreviews from "./sockets/SocketPreviews";
 import SocketGizmo from "./sockets/SocketGizmo";
@@ -23,7 +24,7 @@ import DebugSkeletonOverlay from "./DebugSkeletonOverlay";
 import DebugAnimationOverlay from "./DebugAnimationOverlay";
 import { useStateMachine } from "./animation/StateMachineContext";
 import { SegmentedControl, Select } from "../components/ui";
-import { instantiateTemplate, templateInstanceRootOf } from "../utils/templates";
+import { instantiateTemplate, templateInstanceRootOf, isWithinTemplateInstance } from "../utils/templates";
 import { instantiateModelAsset, adoptModelMaterial } from "../utils/models";
 import { NEW_NODE_MIME, addItemTo, findAddItem } from "./sceneInspector/addCatalog";
 import { captureViewport, releaseViewport } from "../utils/pointerCapture";
@@ -74,6 +75,15 @@ export default function EngineViewport() {
       && editorMode !== 'stateMachine' && editorMode !== 'animation';
     // Keyed to the toolbar, not the gizmo: the letters must not fire where the buttons are not shown.
     useGizmoShortcuts(showGizmoTools);
+    // Collision shapes are edited in place in the scene and template tabs (CollisionGizmo). While one of
+    // the selected node's shapes is picked, the move/rotate gizmo is the SHAPE's, so the node's own steps
+    // aside — but never on a read-only template instance, whose transform stays editable and whose
+    // shapes are not.
+    const collisionShapes = showGizmo && (editorMode === 'scene' || editorMode === 'template');
+    const collisionSelection = useCollisionShapeSelection(eventEmitter);
+    const selectedNodeObject = selectedNode && editorScene ? editorScene.getNodeById(selectedNode) : null;
+    const editingShape = collisionShapes && !isPlayMode && !!collisionSelection && collisionSelection.nodeId === selectedNode
+        && !(editorMode === 'scene' && isWithinTemplateInstance(selectedNodeObject));
     const viewportRef = useRef<HTMLDivElement>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number } | null>(null);
@@ -510,11 +520,11 @@ export default function EngineViewport() {
                 )}
             </div>}
             {showGizmo && <TransformGizmo
-                selectedNodeId={selectedNode}
+                selectedNodeId={editingShape ? null : selectedNode}
                 onTransformChange={handleTransformChange}
                 viewportRef={viewportRef}
             />}
-            {showGizmo && editorMode === 'scene' && <CollisionGizmo
+            {collisionShapes && <CollisionGizmo
                 selectedNodeId={selectedNode}
                 viewportRef={viewportRef}
             />}
