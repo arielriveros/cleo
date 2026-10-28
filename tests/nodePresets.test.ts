@@ -20,9 +20,9 @@ import { SOUND_FALLOFF_PRESETS } from '../src/core/scene/nodes/soundPresets';
 import { DirectionalLight, PointLight, Spotlight } from '../src/graphics/lighting';
 import {
     DIRECTIONAL_LIGHT_PRESETS, POINT_LIGHT_PRESETS, SPOT_LIGHT_PRESETS, lightPresetsFor,
-    presetForScene, keyIlluminance, spotEquivalentLumens, newLightOptions,
+    spotEquivalentLumens, newLightOptions,
 } from '../src/graphics/lightPresets';
-import { DEFAULT_LUMENS, distanceAttenuation } from '../src/graphics/lighting';
+import { DEFAULT_LUMENS, DEFAULT_DIRECTIONAL_LUX, exposureCurveStops } from '../src/graphics/lighting';
 import { CameraNode } from '../src/core/scene/nodes/cameraNode';
 import { Camera } from '../src/core/camera';
 import { kelvinToRgb } from '../src/graphics/colorTemperature';
@@ -79,7 +79,9 @@ function expectHolds(target: any, options: object, label: string): void {
         const got = target[k];
         if (Array.isArray(v)) {
             expect(got.length, `${label}.${k}`).toBe(v.length);
-            v.forEach((x: number, i: number) => expect(got[i], `${label}.${k}[${i}]`).toBeCloseTo(x, 4));
+            v.forEach((x: any, i: number) => Array.isArray(x)
+                ? expect(Array.from(got[i]), `${label}.${k}[${i}]`).toEqual(x)
+                : expect(got[i], `${label}.${k}[${i}]`).toBeCloseTo(x, 4));
         } else if (typeof v === 'number' && Number.isFinite(v)) {
             expect(got, `${label}.${k}`).toBeCloseTo(v, 4);
         } else {
@@ -225,6 +227,20 @@ describe('render presets', () => {
         expect(renderer.autoExposureEnabled).toBe(true);
         expect(renderer.exposureCompensation).toBe(1);
     });
+
+    it('trims the metered EV by the compensation curve, keyed on the unclamped scene EV', () => {
+        const renderer = makeRenderer();
+        renderer.exposureMinEV = 2; renderer.exposureMaxEV = 17; renderer.exposureCompensation = 1;
+        renderer.exposureCompensationCurve = [[-2, -2], [10, 0]];
+        const clamp = (ev: number) => (renderer as any)._clampExposureEV(ev);
+        // Metered at EV -2 (a moonlit night): clamped to the EV 2 floor, then 1 stop brighter and 2 darker.
+        expect(clamp(-2)).toBeCloseTo(2 - 1 + 2, 6);
+        expect(clamp(15)).toBeCloseTo(15 - 1, 6);
+        // A whole settings blob without a curve clears it; a patch through the setter keeps the copy.
+        renderer.applyRenderSettings({});
+        expect(renderer.exposureCompensationCurve).toEqual([]);
+        expect(clamp(-2)).toBeCloseTo(1, 6);
+    });
 });
 
 describe('clouds follow the scene wind', () => {
@@ -273,41 +289,15 @@ describe('clouds follow the scene wind', () => {
     });
 });
 
-describe('light presets brightened to the scene', () => {
-    const daylight = { ev100: 16, ambientLux: 7864.32 };   // the editor's default scene
-    const dark = { ev100: -5, ambientLux: 0 };   // a candlelit room is about EV -3
-    const lum = (c: ArrayLike<number>) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-
-    it('leaves the real values alone where the scene is dark enough for them', () => {
-        for (const p of [...POINT_LIGHT_PRESETS, ...SPOT_LIGHT_PRESETS, ...DIRECTIONAL_LIGHT_PRESETS])
-            expect(presetForScene(p, dark).options.intensity, p.id).toBe(p.options.intensity);
-    });
-
-    it('never dims a light', () => {
-        for (const p of [...POINT_LIGHT_PRESETS, ...SPOT_LIGHT_PRESETS, ...DIRECTIONAL_LIGHT_PRESETS])
-            for (const level of [daylight, dark, { ev100: 8, ambientLux: 200 }])
-                expect(presetForScene(p, level).options.intensity!, p.id).toBeGreaterThanOrEqual(p.options.intensity!);
-    });
-
-    it('raises a lamp until it lights its typical distance to the key illuminance', () => {
-        for (const p of [...POINT_LIGHT_PRESETS, ...SPOT_LIGHT_PRESETS]) {
-            const o = presetForScene(p, daylight).options;
-            const lux = o.intensity! / (4 * Math.PI) * distanceAttenuation(p.typicalDistance!, o.range!) * lum(o.color!);
-            expect(lux / keyIlluminance(daylight.ev100), p.id).toBeGreaterThan(0.99);
-            expect(lux / keyIlluminance(daylight.ev100), p.id).toBeLessThan(1.01);
-        }
-    });
-
-    it('holds a sun to its ratio over the ambient fill', () => {
-        const golden = DIRECTIONAL_LIGHT_PRESETS.find(p => p.id === 'goldenHour')!;
-        const o = presetForScene(golden, daylight).options;
-        expect(o.intensity! * lum(o.color!) / (Math.PI * daylight.ambientLux)).toBeCloseTo(golden.keyRatio!, 1);
-    });
-
-    it('does not mutate the shared table', () => {
-        const before = POINT_LIGHT_PRESETS[0].options.intensity;
-        presetForScene(POINT_LIGHT_PRESETS[0], daylight);
-        expect(POINT_LIGHT_PRESETS[0].options.intensity).toBe(before);
+describe('light presets in real units', () => {
+    it('store real-world values, the same in every scene', () => {
+        // Exposure decides how bright a light reads; the preset itself is never rescaled.
+        const candle = POINT_LIGHT_PRESETS.find(p => p.id === 'candle')!;
+        expect(candle.options.intensity).toBe(12);
+        const noon = DIRECTIONAL_LIGHT_PRESETS.find(p => p.id === 'noon')!;
+        expect(noon.options.intensity).toBe(100000);
+        const moon = DIRECTIONAL_LIGHT_PRESETS.find(p => p.id === 'moonlight')!;
+        expect(moon.options.intensity!).toBeLessThan(1);
     });
 
     it('converts a fixture rating to the lumens of the same beam', () => {
@@ -315,11 +305,35 @@ describe('light presets brightened to the scene', () => {
         expect(spotEquivalentLumens(300, 14)).toBeCloseTo(300 * 2 / (1 - Math.cos(14 * Math.PI / 180)), -2);
     });
 
-    it('starts a new lamp at the real defaults, brightened only into a bright scene', () => {
-        expect(newLightOptions('point', null).intensity).toBe(DEFAULT_LUMENS);
-        expect(newLightOptions('point', dark).intensity).toBe(DEFAULT_LUMENS);
-        expect(newLightOptions('point', daylight).intensity!).toBeGreaterThan(DEFAULT_LUMENS * 100);
-        expect(newLightOptions('directional', daylight).intensity).toBe(100000);
+    it('starts a new light at the engine defaults', () => {
+        expect(newLightOptions('point').intensity).toBe(DEFAULT_LUMENS);
+        expect(newLightOptions('spot').intensity).toBe(DEFAULT_LUMENS);
+        expect(newLightOptions('directional').intensity).toBe(DEFAULT_DIRECTIONAL_LUX);
+    });
+});
+
+describe('exposure compensation curve', () => {
+    it('is zero when empty and flat past its ends', () => {
+        expect(exposureCurveStops([], 5)).toBe(0);
+        expect(exposureCurveStops(undefined, 5)).toBe(0);
+        expect(exposureCurveStops([[4, -1]], -10)).toBe(-1);
+        expect(exposureCurveStops([[4, -1]], 20)).toBe(-1);
+        expect(exposureCurveStops([[0, -2], [10, 0]], -5)).toBe(-2);
+        expect(exposureCurveStops([[0, -2], [10, 0]], 15)).toBe(0);
+    });
+
+    it('interpolates linearly between keys, in any key order', () => {
+        expect(exposureCurveStops([[0, -2], [10, 0]], 5)).toBeCloseTo(-1);
+        expect(exposureCurveStops([[10, 0], [0, -2], [4, -1]], 2)).toBeCloseTo(-1.5);
+        expect(exposureCurveStops([[10, 0], [0, -2], [4, -1]], 7)).toBeCloseTo(-0.5);
+    });
+
+    it('darkens the dark end of the day-night and cave presets, and leaves daylight alone', () => {
+        for (const id of ['dayNight', 'cave']) {
+            const curve = AUTO_EXPOSURE_PRESETS.find(p => p.id === id)!.options.exposureCompensationCurve!;
+            expect(exposureCurveStops(curve, -2), id).toBeLessThan(-0.5);
+            expect(exposureCurveStops(curve, 15), id).toBe(0);
+        }
     });
 });
 

@@ -422,10 +422,21 @@ function grip(hand, bladeDir, palm) {
 
 const materials = [clone(mannequinMaterial)]
 
+/**
+ * How much of the camera's exposure the souls glows take: emissive materials (glyphs, items, bolts, the fog
+ * wall, the bloodstain) and every unlit particle effect. Lights are physical, so the exposure runs from
+ * about EV 15 at noon to EV 3-5 at night and underground, a thousand times brighter; a physical glow would
+ * be faint by day and a white smear in the dungeon. A tenth of the exposure keeps each one the same effect
+ * everywhere, a little hotter in the dark (Material emissiveExposureWeight, ParticleSystemNode exposureWeight).
+ */
+const GLOW_EXPOSURE_WEIGHT = 0.1
+
 function pbr(baseColor, extra = {}) {
+  const glows = (extra.emissive ?? [0, 0, 0]).some(c => c > 0)
   return {
     type: 'pbr', baseColor, metallic: extra.metallic ?? 0, roughness: extra.roughness ?? 0.85, opacity: extra.opacity ?? 1,
     emissiveFactor: extra.emissive ?? [0, 0, 0], emissiveIntensity: extra.emissiveIntensity ?? 1,
+    ...(glows ? { emissiveExposureWeight: extra.emissiveExposureWeight ?? GLOW_EXPOSURE_WEIGHT } : {}),
     textures: extra.textures ?? {},
     ...(extra.uv ?? {}),
     config: { side: 'front', wireframe: false, transparent: !!extra.transparent, castShadow: extra.castShadow ?? true, probeable: true },
@@ -465,7 +476,8 @@ const MAT = {
   item: material('item', 'Item Glow (placeholder)', pbr([0.95, 0.9, 0.75], { emissive: [1, 0.92, 0.7], emissiveIntensity: 4, castShadow: false })),
   bolt: material('bolt', 'Magic Bolt (placeholder)', pbr([0.5, 0.7, 1], { emissive: [0.45, 0.65, 1], emissiveIntensity: 12, castShadow: false })),
   fog: material('fog', 'Fog Wall (placeholder)', pbr([0.95, 0.95, 1], { opacity: 0.28, transparent: true, emissive: [0.6, 0.62, 0.7], emissiveIntensity: 0.6, castShadow: false })),
-  marker: material('marker', 'Lock Reticle', pbr([1, 1, 1], { emissive: [1, 1, 1], castShadow: false })),
+  // A HUD mark in the world: the same at every exposure.
+  marker: material('marker', 'Lock Reticle', pbr([1, 1, 1], { emissive: [1, 1, 1], emissiveExposureWeight: 0, castShadow: false })),
 }
 const matJson = (id) => clone(materials.find(m => m.id === id).material)
 
@@ -802,9 +814,14 @@ const VFX = {
 }
 
 function particles(key, name, asset, { position = [0, 0, 0], playOnStart = true, scale = [1, 1, 1] } = {}) {
+  // Unlit effects glow and take GLOW_EXPOSURE_WEIGHT; a lit one (dust) is a surface and takes it all.
+  const lit = asset.system.emitters.every(e => e.render?.lit)
   return node(name, 'particleSystem', {
     id: stableId(`particles:${key}`), position, scale,
-    particleSystem: { system: clone(asset.system), particleSystemId: asset.id, playOnStart, simulationSpeed: 1, spawnRateScale: 1, tint: [1, 1, 1, 1] },
+    particleSystem: {
+      system: clone(asset.system), particleSystemId: asset.id, playOnStart, simulationSpeed: 1, spawnRateScale: 1, tint: [1, 1, 1, 1],
+      ...(lit ? {} : { exposureWeight: GLOW_EXPOSURE_WEIGHT }),
+    },
   })
 }
 
@@ -2076,9 +2093,9 @@ const FOLDERS = {
     'Bloodstain Decal (placeholder)': `${FX('Blood')}/Materials`,
   },
   rig: { Mannequin: `${SHARED}/Rigs` },
-  animationField: { 'Souls Locomotion': `${SHARED}/Animation` },
-  animController: { 'Souls Character': `${SHARED}/Animation`, 'Souls Enemy': `${SHARED}/Animation` },
-  boneMask: { 'Chest Up': `${SHARED}/Animation` },
+  animationField: { 'Souls Locomotion': `${SHARED}/Animations` },
+  animController: { 'Souls Character': `${SHARED}/Animations`, 'Souls Enemy': `${SHARED}/Animations` },
+  boneMask: { 'Chest Up': `${SHARED}/Animations` },
   particleSystem: {
     'Bonfire Fire': `${PROP('Bonfire')}/Particles`, 'Torch Fire': `${PROP('Torch')}/Particles`,
     'Fog Wall': `${PROP('Fog Gate')}/Particles`, 'Item Glow': `${PROP('Pickup')}/Particles`,
@@ -2141,6 +2158,7 @@ function vfs(libraries, textureIds, { projectName = PROJECT_NAME, sceneId = SCEN
   add('animation', libraries.animations, a => animationFolder(a.name))
   add('particleSystem', libraries.particleSystems)
   add('aiBrain', libraries.aiBrains)
+  if (libraries.tilesets?.length) add('tileset', libraries.tilesets)
   // A texture's record and its source image share the texture's id (textureAssets.ts); the editor
   // re-derives both on import and keeps them wherever these entries put them.
   const listed = new Set()

@@ -14,6 +14,8 @@ import {
     MAX_POINT_SHADOWS,
     POINT_SHADOW_FACES,
     PointShadowCache,
+    CasterMotion,
+    STATIC_CASTER_FRAMES,
     cubeFaceIndex,
     pointShadowFov,
     HASH_SEED,
@@ -610,5 +612,24 @@ describe('caster hashing', () => {
         expect(Number.isInteger(h)).toBe(true);
         expect(h).toBeGreaterThanOrEqual(0);
         expect(h).toBeLessThanOrEqual(0xffffffff);
+    });
+});
+
+describe('CasterMotion', () => {
+    it('treats a caster as static once it has held still for the window, and a skinned one never', () => {
+        const m = new CasterMotion();
+        const wall = {}, barrel = {}, player = {};
+        // First sight is settled: a scene that just loaded is static.
+        expect(m.isDynamic(wall, 1, 0, false)).toBe(false);
+        expect(m.isDynamic(barrel, 1, 0, false)).toBe(false);
+        // The barrel is knocked: dynamic while it moves, and for the window after it stops.
+        expect(m.isDynamic(barrel, 2, 10, false)).toBe(true);
+        expect(m.isDynamic(barrel, 2, 10 + STATIC_CASTER_FRAMES - 1, false)).toBe(true);
+        expect(m.isDynamic(barrel, 2, 10 + STATIC_CASTER_FRAMES, false)).toBe(false);
+        // The wall never moved.
+        expect(m.isDynamic(wall, 1, 500, false)).toBe(false);
+        // A skinned character animates in place without moving its transform: always dynamic.
+        expect(m.isDynamic(player, 1, 0, true)).toBe(true);
+        expect(m.isDynamic(player, 1, 500, true)).toBe(true);
     });
 });

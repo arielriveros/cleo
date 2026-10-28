@@ -77,8 +77,8 @@ export {
 } from "./graphics/renderPresets";
 export {
     DIRECTIONAL_LIGHT_PRESETS, POINT_LIGHT_PRESETS, SPOT_LIGHT_PRESETS, lightPresetsFor,
-    presetForScene, keyIlluminance, spotEquivalentLumens, newLightOptions,
-    type LightPreset, type LightPresetOptions, type SceneLightLevel,
+    spotEquivalentLumens, newLightOptions,
+    type LightPreset, type LightPresetOptions,
 } from "./graphics/lightPresets";
 export { kelvinToRgb } from "./graphics/colorTemperature";
 export { PHYSICS_SURFACE_PRESETS, type PhysicsSurfacePreset } from "./physics/surfacePresets";
@@ -235,7 +235,7 @@ export type { NavPath, RepathPolicy, RepathState } from "./ai/navPath";
 export { HistoryManager } from "./core/history";
 export type { HistoryEntry, HistoryOptions } from "./core/history";
 export { Mesh } from "./graphics/mesh";
-export { applyUvMapping, uvConfigOf, applyWind, windConfigOf, type WindConfig } from "./graphics/material";
+export { applyUvMapping, uvConfigOf, applyWind, windConfigOf, emissiveExposureWeightOf, setEmissiveExposureWeight, type WindConfig } from "./graphics/material";
 export type { UvConfig, UvProjection, UvSpace } from "./graphics/material";
 export { Material, TerrainMaterial, CustomMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, FOLIAGE_ORIENTATIONS, migrateFoliageRule, foliageRuleKey, newTerrainSlotId, legacyHeightBlendToRule, setTerrainSurfaceFrom, shallowCloneTerrainMaterial, terrainFoliageRules, allTerrainFoliageRules, type TerrainFoliageScope } from "./graphics/material";
 export type { TerrainBaseType, TerrainFoliageRule, TerrainMaterialSlot, FoliageCollision, FoliageOrientation, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";
@@ -393,7 +393,8 @@ export type { SpriteOptions, SpriteSide, SpriteBlend } from "./graphics/sprite";
 export { DirectionalLight, PointLight, Spotlight, LIGHT_UNIT, REFERENCE_ILLUMINANCE, DEFAULT_DIRECTIONAL_LUX,
          DEFAULT_LUMENS, DEFAULT_RANGE, DEFAULT_SOURCE_RADIUS, DEFAULT_ANGULAR_RADIUS,
          DEFAULT_SCENE_AMBIENT_LUX, MAX_LIGHTS, legacyRange,
-         distanceAttenuation, legacyAmbientFromSceneJson } from "./graphics/lighting";
+         distanceAttenuation, legacyAmbientFromSceneJson, exposureCurveStops } from "./graphics/lighting";
+export type { ExposureCurveKey } from "./graphics/lighting";
 export { Shape } from "./physics/shape";
 export { PhysicsSystem } from "./physics/physicsSystem";
 export type { PhysicsRaycastHit, PhysicsRaycastOptions } from "./physics/physicsSystem";

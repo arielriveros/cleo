@@ -426,6 +426,30 @@ function windJson(material: Material): WindConfig {
     return out;
 }
 
+/**
+ * How much of the camera's exposure an emissive surface takes, 0..1 (HDRP's emission "exposure weight",
+ * the same as `Sprite.exposureWeight`). 1, the default, is physical: the glow is a luminance like any
+ * other, so it is faint at noon and fierce in a cave. Lower weights hold it closer to one look in every
+ * exposure — a rune or a magic bolt that must read the same by day and by night. The renderer divides
+ * the emissive term by `exposure^(1 - weight)` at upload; the tonemapper multiplies by the whole exposure.
+ */
+export function emissiveExposureWeightOf(material: Material): number {
+    const w = Number(material.properties.get('emissiveExposureWeight'));
+    return Number.isFinite(w) ? Math.min(1, Math.max(0, w)) : 1;
+}
+
+/** Set the weight; 1 removes the property, so a material that never used it keeps its bytes. */
+export function setEmissiveExposureWeight(material: Material, weight: number | undefined): void {
+    const w = Number(weight);
+    if (!Number.isFinite(w) || w >= 1) material.properties.delete('emissiveExposureWeight');
+    else material.properties.set('emissiveExposureWeight', Math.max(0, w));
+}
+
+function emissiveWeightJson(material: Material): { emissiveExposureWeight?: number } {
+    const w = emissiveExposureWeightOf(material);
+    return w < 1 ? { emissiveExposureWeight: w } : {};
+}
+
 /** The mapping fields of a serialized material, for the factories. */
 function uvFieldsOf(m: any): UvConfig {
     return {
@@ -718,6 +742,7 @@ export class Material {
                 invertHeight: this.properties.get('invertHeight'),
                 clipSilhouette: this.properties.get('clipSilhouette'),
                 ...windJson(this),
+                ...emissiveWeightJson(this),
                 textures: {
                     texture: this.textures.get('texture'),
                     mask: this.textures.get('maskMap'),
@@ -745,6 +770,7 @@ export class Material {
                 clipSilhouette: this.properties.get('clipSilhouette'),
                 ...uvJson(this),
                 ...windJson(this),
+                ...emissiveWeightJson(this),
                 // Fixed keys, not a dump of the map: that keeps the derived `ormTexture` out of assets.
                 textures: {
                     baseColorTexture: this.textures.get('baseColorTexture'),
@@ -780,6 +806,7 @@ export class Material {
                 clipSilhouette: this.properties.get('clipSilhouette'),
                 ...uvJson(this),
                 ...windJson(this),
+                ...emissiveWeightJson(this),
                 // The AUTHORING spellings, which differ from the runtime map keys (`base` vs
                 // `baseTexture`, `ramp` vs `rampMap`, `mask` vs `maskMap`) exactly as the Basic and
                 // Blinn-Phong branches do. Anything walking these generically stays correct;
@@ -809,6 +836,7 @@ export class Material {
                 clipSilhouette: this.properties.get('clipSilhouette'),
                 ...uvJson(this),
                 ...windJson(this),
+                ...emissiveWeightJson(this),
                 textures: {
                     base: this.textures.get('baseTexture'),
                     specular: this.textures.get('specularMap'),
@@ -829,6 +857,7 @@ export class Material {
         // Every shading model can answer the wind; written only when the asset carries it.
         if (m && (m.windStrength !== undefined || m.windStiffness !== undefined
                   || m.windRole !== undefined || m.windFlutter !== undefined)) applyWind(material, m);
+        if (m && m.emissiveExposureWeight !== undefined) setEmissiveExposureWeight(material, m.emissiveExposureWeight);
         return material;
     }
 

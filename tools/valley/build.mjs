@@ -95,7 +95,7 @@ const TERRAIN_TEX = {
 }
 
 /** A PBR material in Material.serialize()'s shape, with only the slots that are given. */
-function pbrMaterial({ diff, nor, arm, rough, mask, side = 'front', roughness = 1, castShadow = true, tint = [1, 1, 1], wind, ...extra }) {
+function pbrMaterial({ diff, nor, arm, rough, ao, mask, side = 'front', roughness = 1, castShadow = true, tint = [1, 1, 1], wind, ...extra }) {
   return {
     type: 'pbr', baseColor: tint, metallic: 0, roughness, reflectance: 0.5, opacity: 1,
     // Material.parse reads windStrength/windStiffness/windRole/windFlutter off the top level.
@@ -106,6 +106,7 @@ function pbrMaterial({ diff, nor, arm, rough, mask, side = 'front', roughness = 
       baseColorTexture: diff,
       ...(arm ? { metallicRoughnessTexture: arm, occlusionMap: arm } : {}),
       ...(rough ? { roughnessMap: rough } : {}),
+      ...(ao ? { occlusionMap: ao } : {}),
       normalMap: nor,
       ...(mask ? { mask } : {}),
     },
@@ -225,9 +226,10 @@ const FIRE_FRAMES = Array.from({ length: 32 }, (_, i) => i)
 
 /**
  * How much the camera's exposure brightens the flames and embers (Sprite / ParticleSystemNode
- * exposureWeight). They are unlit: taken whole, the exposure the valley's night opens up to (three times its
- * noon's) turns every flame tuned for daylight into a white smear, and a darker scene's more so. A tenth of
- * it keeps them the same flame everywhere, glowing a little brighter in the dark, in the editor as in play.
+ * exposureWeight). They are unlit, and the exposure runs from EV 15 at noon to EV 3-5 at night and in the
+ * dungeon, a thousand times brighter: taken whole, every flame would be a white smear after dark. A tenth of
+ * it keeps them the same flame everywhere, glowing a little brighter in the dark, in the editor as in play
+ * (the souls glows use the same weight, GLOW_EXPOSURE_WEIGHT).
  */
 const FIRE_EXPOSURE_WEIGHT = 0.1
 
@@ -250,15 +252,13 @@ function flame(key, height, base = [0, 0, 0], name = 'Flame') {
 }
 
 /**
- * A fire's light: warm and photometric.
+ * A fire's light: warm and photometric, in real lumens (a torch about 1,000, a candle 60), the same at noon,
+ * at midnight and underground. Nothing scales them: by day a torch is lost in the sun, and at night and in
+ * the dungeon the auto exposure opens up until it carries the scene, which is the eye's job, not the lamp's.
  *
- * Lumens are set for the dungeon, which is held at EV 15 like the valley's noon: the souls content (glyphs,
- * glows, bolts, sparks) is tuned for an exposure about that, and a truly dark one (EV 0-2, a real torch-lit
- * room) would blow every one of them out. So the fires are as bright as the sun is dim. The valley's Time
- * of Day scales them down by day, when a torch should not light anything, and back up at night.
- *
- * Nothing casts shadows. A shadow-casting point light renders everything in its range six times, again
- * every frame something moves near it, and the player is always near the bonfire.
+ * Torches cast shadows (`castShadows`); hearths, candles and braziers do not. A shadowed point light
+ * renders everything in its range six times, again whenever something moves near it, and the renderer
+ * shadows only the nearest four, so the torches, spaced well apart, are the ones that get them.
  */
 function fireLight(key, lumens, range, position, castShadows = false) {
   return node('Light', 'light', {
@@ -365,7 +365,7 @@ function wallTorchNode(key, position = [0, 0, 0], rotation = [0, 0, 0]) {
       flame(`wall-torch:${key}`, 0.5, above(f, -0.06)),
       fx(`wall-torch:${key}:embers`, TORCH_FX, above(f, 0.1)),
       // Half a metre out in front of the flame: a light that close to the stone burns a white disc into it.
-      fireLight(`wall-torch:${key}`, 850000, 7, [f[0], f[1] + 0.2, f[2] + 0.5]),
+      fireLight(`wall-torch:${key}`, 850, 7, [f[0], f[1] + 0.2, f[2] + 0.5], true),
     ],
   }), 'ValleyFireLight')
 }
@@ -378,7 +378,7 @@ function standingTorchNode(key, position = [0, 0, 0], rotation = [0, 0, 0], scal
       ...meshNodes(`torch:${key}`, standingTorch.parts, () => STANDING_TORCH_MAT),
       flame(`torch:${key}`, 0.6, above(f, -0.08)),
       fx(`torch:${key}:embers`, TORCH_FX, above(f, 0.1)),
-      fireLight(`torch:${key}`, 1000000, 7, above(f, 0.3)),
+      fireLight(`torch:${key}`, 1000, 7, above(f, 0.3), true),
     ],
   }), 'ValleyFireLight')
   n.body = { ...souls.staticBody('cylinder'), shapes: [{ type: 'cylinder', radius: 0.12, height: f[1], numSegments: 8, offset: [0, f[1] / 2, 0], rotation: [0, 0, 0] }] }
@@ -386,7 +386,7 @@ function standingTorchNode(key, position = [0, 0, 0], rotation = [0, 0, 0], scal
 }
 
 /** The fire of a bonfire or fire pit: flames over the logs, embers and sparks, and its light, under one FireLight. */
-function hearth(key, { height = 1.2, lumens = 1100000, range = 10, base = [0, 0.3, 0], name = 'Fire' } = {}) {
+function hearth(key, { height = 1.2, lumens = 1100, range = 10, base = [0, 0.3, 0], name = 'Fire' } = {}) {
   return withScript(node(name, 'node', {
     id: id(`hearth:${key}`),
     children: [
@@ -421,7 +421,7 @@ function firePitNode(key, position = [0, 0, 0], rotation = [0, 0, 0]) {
     id: id(`fire-pit:${key}`), position, rotation,
     children: [
       souls.group(`valley:fire-pit:${key}:model`, 'Model', meshNodes(`fire-pit:${key}`, campfire.parts, (p) => CAMPFIRE_MATS[p.material])),
-      hearth(`fire-pit:${key}`, { lumens: 1400000, range: 11 }),
+      hearth(`fire-pit:${key}`, { lumens: 1400, range: 11 }),
     ],
   })
   n.body = { ...souls.staticBody('cylinder'), shapes: [{ type: 'cylinder', radius: 0.75, height: 0.4, numSegments: 12, offset: [0, 0.2, 0], rotation: [0, 0, 0] }] }
@@ -430,7 +430,7 @@ function firePitNode(key, position = [0, 0, 0], rotation = [0, 0, 0]) {
 
 /** A fire laid in a fireplace: the flames, embers and light of a bonfire with no campfire under them. */
 function hearthNode(key, position = [0, 0, 0]) {
-  const n = hearth(`hearth-node:${key}`, { height: 1.0, lumens: 1600000, range: 11, base: [0, 0, 0], name: 'Hearth' })
+  const n = hearth(`hearth-node:${key}`, { height: 1.0, lumens: 1600, range: 11, base: [0, 0, 0], name: 'Hearth' })
   n.position = position
   return n
 }
@@ -442,7 +442,7 @@ function candleNode(key, position = [0, 0, 0]) {
     children: [
       ...meshNodes(`candle:${key}`, candle.parts, () => CANDLE_MAT),
       flame(`candle:${key}`, 0.13, [0, candle.flame - 0.01, 0]),
-      fireLight(`candle:${key}`, 62000, 3, [0, candle.flame + 0.08, 0]),
+      fireLight(`candle:${key}`, 60, 3, [0, candle.flame + 0.08, 0]),
     ],
   }), 'ValleyFireLight', { flicker: 0.12 })
 }
@@ -455,7 +455,7 @@ function brazierNode(key, position = [0, 0, 0]) {
       ...meshNodes(`brazier:${key}`, brazierCage.parts, () => CAGE_MAT),
       flame(`brazier:${key}`, 0.55, [0, 0.12, 0]),
       fx(`brazier:${key}:embers`, TORCH_FX, [0, 0.3, 0]),
-      fireLight(`brazier:${key}`, 1300000, 9, [0, 0.55, 0]),
+      fireLight(`brazier:${key}`, 1300, 9, [0, 0.55, 0]),
     ],
   }), 'ValleyFireLight')
 }
@@ -497,10 +497,9 @@ function translateCustom(request) {
 // valley look uniformly overcast even under the sunny cloud preset.
 const VALLEY_AMBIENT = [7000, 7600, 9000]
 const PRESETS = (() => {
-  const ambientLux = 0.2126 * VALLEY_AMBIENT[0] + 0.7152 * VALLEY_AMBIENT[1] + 0.0722 * VALLEY_AMBIENT[2]
   const res = spawnSync(process.platform === 'win32' ? 'npx.cmd' : 'npx',
     ['vite-node', '--config', 'vitest.config.ts', 'tools/valley/presets.ts'],
-    { cwd: ROOT, input: JSON.stringify({ ambientLux }), encoding: 'utf8', shell: process.platform === 'win32', maxBuffer: 16 << 20 })
+    { cwd: ROOT, encoding: 'utf8', shell: process.platform === 'win32', maxBuffer: 16 << 20 })
   if (res.status !== 0) throw new Error(`preset resolution failed:
 ${res.stderr}`)
   return JSON.parse(res.stdout.slice(res.stdout.indexOf('{')))
@@ -1187,23 +1186,18 @@ function floaters() {
   })
 }
 
-/** Lighting and reflections for the hamlet: its houses and their torches, re-captured as the day turns. */
-function hamletProbe() {
+/**
+ * One probe for the whole valley: lighting and reflections for the hamlet, its houses and torches, and what
+ * the pond's water reflects. Unbounded (size 0), so every surface in the valley takes it at full weight, with
+ * no seam where one probe's box gives way to another's. Captured between the hamlet and the pond, and
+ * re-captured as the day turns (ValleyDayNight).
+ */
+function valleyProbe() {
   const probe = souls.sourceNode('light probe')
-  probe.name = 'Hamlet Probe'
-  probe.id = id('hamlet:probe')
-  probe.position = at(HAMLET.x, HAMLET.z, 6)
-  Object.assign(probe, { resolution: 128, mode: 'baked', intensity: 1, size: [64, 26, 64], blendDistance: 12 })
-  return probe
-}
-
-/** What the water reflects: a probe over the pond, baked on load (a probe with no bake data bakes). */
-function pondProbe() {
-  const probe = souls.sourceNode('light probe')
-  probe.name = 'Pond Probe'
-  probe.id = id('pond:probe')
-  probe.position = [POND.x, Math.round((POND_LEVEL + 4) * 1000) / 1000, POND.z]
-  Object.assign(probe, { resolution: 128, mode: 'baked', intensity: 1, size: [44, 24, 44], blendDistance: 10 })
+  probe.name = 'Valley Probe'
+  probe.id = id('valley:probe')
+  probe.position = at((HAMLET.x + POND.x) / 2, (HAMLET.z + POND.z) / 2, 8)
+  Object.assign(probe, { resolution: 256, mode: 'baked', intensity: 1, size: [0, 0, 0], blendDistance: 0 })
   return probe
 }
 
@@ -1254,13 +1248,17 @@ const round3 = (v) => Math.round(v * 1000) / 1000
 
 /**
  * The valley's lamps, for the night: standing torches down the road through the hamlet (alternating sides,
- * about every 12 m) and either side of the bonfire, and wall torches on the buildings, on the walls that
- * face the road. A building's wall is found by casting at its own mesh, at lamp height, from eight sides.
+ * about every 34 m), one beside the bonfire, and a wall torch on the buildings, on the wall that faces the
+ * road. A building's wall is found by casting at its own mesh, at lamp height, from eight sides. Every lamp
+ * keeps LAMP_SPACING from the others: pools of light with dark between them read as a night, and a cluster
+ * of them only costs frame time.
  */
+const LAMP_SPACING = 16
 function valleyLamps(cavePair) {
   const out = []
+  const spaced = (x, z) => out.every(l => Math.hypot(x - l.at[0], z - l.at[2]) > LAMP_SPACING)
   const clearOf = (x, z) => buildings.every(b => Math.hypot(x - b.x, z - b.z) > b.radius + 1)
-    && Math.hypot(x - BONFIRE.x, z - BONFIRE.z) > 4 && out.every(l => Math.hypot(x - l.at[0], z - l.at[2]) > 5)
+    && Math.hypot(x - BONFIRE.x, z - BONFIRE.z) > 4 && spaced(x, z)
   // Road torches: from where the main road enters the hamlet to where it leaves it.
   const main = roadLines[0]
   let run = 0, side = 1
@@ -1268,7 +1266,7 @@ function valleyLamps(cavePair) {
     const [ax, az] = main[i - 1], [bx, bz] = main[i]
     const len = Math.hypot(bx - ax, bz - az) || 1
     run += len
-    if (az > 66 || az < 6 || run < 12) continue
+    if (az > 66 || az < 6 || run < 34) continue
     const nx = -(bz - az) / len, nz = (bx - ax) / len
     const x = bx + nx * 3.6 * side, z = bz + nz * 3.6 * side
     if (heights.slopeAt(x, z) > 18 || !clearOf(x, z)) continue
@@ -1276,7 +1274,8 @@ function valleyLamps(cavePair) {
     run = 0
     side = -side
   }
-  for (const [dx, dz] of [[-2.6, -1.6], [2.4, -2.6]]) out.push({ kind: 'torch', at: at(BONFIRE.x + dx, BONFIRE.z + dz, 0), yaw: 0 })
+  // The bonfire is a light of its own: one torch beside it, unless the road already put one near.
+  for (const [dx, dz] of [[2.4, -2.6]]) if (spaced(BONFIRE.x + dx, BONFIRE.z + dz)) out.push({ kind: 'torch', at: at(BONFIRE.x + dx, BONFIRE.z + dz, 0), yaw: 0 })
   // Wall torches: per building, the wall hits at 2.3 m whose outward normal looks most toward the road.
   const nearestRoad = (x, z) => roadLines[0].reduce((best, p) => Math.hypot(p[0] - x, p[1] - z) < Math.hypot(best[0] - x, best[1] - z) ? p : best)
   for (const b of buildings) {
@@ -1297,7 +1296,7 @@ function valleyLamps(cavePair) {
     }
     hits.sort((u, v) => v.score - u.score)
     const chosen = []
-    for (const h of hits) if (chosen.length < 2 && h.score > -0.2 && chosen.every(o => Math.hypot(o.p[0] - h.p[0], o.p[2] - h.p[2]) > 4)) chosen.push(h)
+    for (const h of hits) if (chosen.length < 1 && h.score > -0.2 && spaced(h.p[0], h.p[2])) chosen.push(h)
     for (const h of chosen) out.push({
       kind: 'wallTorch', at: [round3(h.p[0]), round3(h.p[1] - wallTorch.flame[1] + 0.3), round3(h.p[2])], yaw: Math.atan2(h.n[0], h.n[2]) * 180 / Math.PI,
     })
@@ -1322,6 +1321,8 @@ function valleyScene() {
   // the sky, more stars, a faint airglow. The moon's LIGHT is the Time of Day's (moonlightIntensity).
   sky.atmosphere = {
     ...sky.atmosphere, ...PRESETS.sky, godRayMaxDistance: 160,
+    // Distance fog only past 300 m: the valley reads clear, and only its far ridges go into the air.
+    fogEnabled: true, fogDensity: 0.0004, fogStart: 300, fogMaxOpacity: 0.5,
     nightEnabled: true, starIntensity: 1.6, starDensity: 0.6, airglowIntensity: 0.8,
     moonEnabled: true, moonSize: 2.4, moonPhase: 1, moonOffsetYaw: 20, moonOffsetPitch: 22, moonColor: [0.74, 0.82, 1], moonIntensity: 1.3,
     moonlightIntensity: 0.02,
@@ -1329,7 +1330,9 @@ function valleyScene() {
   const clouds = souls.sourceNode('volumetric clouds')
   clouds.id = id('clouds')
   // The preset sets the look; the clouds follow the Wind node below (useSceneWind), so its wind direction is unused.
-  clouds.clouds = { ...clouds.clouds, ...PRESETS.clouds, useSceneWind: true }
+  // More cloud than Sunny's scattered puffs, lit softer: a weaker silver lining and forward lobe, so the
+  // clouds round the sun do not burn white when you look up.
+  clouds.clouds = { ...clouds.clouds, ...PRESETS.clouds, coverage: 0.5, silverIntensity: 0.3, phaseG: 0.4, sunIntensity: 9, useSceneWind: true }
   // One wind for the whole valley: the grass and pines sway with it, and the clouds drift the same way.
   // The fade distances are the foliage's performance budget, not a look, so they stay the valley's.
   const wind = node('Wind', 'wind', {
@@ -1337,8 +1340,9 @@ function valleyScene() {
     wind: { direction: WIND_DIRECTION, ...PRESETS.wind, fadeStart: 35, fadeEnd: 70 },
   })
   // Lights the valley with its own sky, and lets the clouds' shadows sweep across it. At night the flat
-  // ambient falls to a few percent with the sun (nightAmbient), so the moon and the torches carry it.
-  const skyLight = node('Sky Light', 'skyLight', { id: id('skylight'), skyLight: { cloudShadows: true, nightAmbient: 0.025 } })
+  // The flat ambient (VALLEY_AMBIENT, a daylight fill) falls to about a lux with the sun (nightAmbient), so
+  // the moon and the torches carry the night. Anything more and the metering lifts the night to a grey day.
+  const skyLight = node('Sky Light', 'skyLight', { id: id('skylight'), skyLight: { cloudShadows: true, nightAmbient: 0.0001 } })
   const timeOfDay = withScript(node('Time of Day', 'node', { id: id('time-of-day') }), 'ValleyDayNight')
 
   const placedBuildings = buildings.map(b => placedBuilding(b, propAssets[props.indexOf(b.prop)]))
@@ -1417,8 +1421,8 @@ function valleyScene() {
       linkInstance(LEVEL.player, player),
       sun, sky, skyLight, clouds, wind, timeOfDay,
       landscapeNode(),
-      souls.group('water', 'Water', [pondWater(), pondProbe(), pondVolume(), pondZone(), ...floaters()]),
-      hamletProbe(),
+      souls.group('water', 'Water', [pondWater(), pondVolume(), pondZone(), ...floaters()]),
+      valleyProbe(),
       souls.group('buildings', 'Buildings', placedBuildings),
       barrels,
       torches,
@@ -1433,14 +1437,14 @@ function valleyScene() {
 
   const config = clone(souls.sourceScene.config)
   Object.assign(config.render, {
-    // The High quality tier (SSIL, motion blur, TAA, bloom), the Sunny 16 fixed exposure, the
+    // The High quality tier (SSIL, motion blur, TAA, bloom), the Day–Night metered exposure, the
     // Cinematic lens look, and Cinematic depth of field focused where the camera boom puts the player.
     quality: 'high', motionBlurEnabled: true,
     ...PRESETS.exposure, ...PRESETS.look, ...PRESETS.dof, dofFocusDistance: PLAYER_ARM,
-    // The preset's EV, as the exposure the renderer reads (it has no ev100 key). The Time of Day moves it.
-    exposure: REFERENCE_ILLUMINANCE / (1.2 * 2 ** PRESETS.exposure.ev100),
+    // Where metering starts before its first sample, and what a host that cannot meter shows: noon.
+    exposure: REFERENCE_ILLUMINANCE / (1.2 * 2 ** 15),
     // The torches' cube shadows, for the nearest four: what makes the hamlet's night.
-    pointShadowsEnabled: true, pointShadowResolution: 512, pointShadowDistance: 30,
+    pointShadowsEnabled: true, pointShadowResolution: 512, pointShadowDistance: 40,
     foliageCullDistance: PINE_CULL, foliageCellSize: 13,
     terrainLodEnabled: true, terrainLodDistance1: 150, terrainLodDistance2: 400, terrainLodStep1: 2, terrainLodStep2: 4,
     // A 2 km valley seen to 3 km: four detailed cascades over the first 150 m, then the far cascade
@@ -1497,24 +1501,33 @@ const result = souls.writeProject({
   // 2 km of valley: barrels, debris and enemies far from the camera freeze in place instead of
   // simulating against the terrain. The player opts out (simulationMode 'always').
   projectSettings: { engine: { simulationRange: 90 } },
-  // A message's glyph is tuned for Hollow Keep's dusk exposure; under the valley's noon (and the dungeon,
-  // held at the same EV) and the brighter exposure of its night it burned white. Lit for those instead.
-  materialOverrides: { [souls.MAT.glyph]: { emissiveIntensity: 1.2 } },
+  // A message's glyph is tuned for Hollow Keep's dusk exposure; under the valley's noon it burned white. It
+  // takes a tenth of the exposure (GLOW_EXPOSURE_WEIGHT), so this is how it reads at noon, a little hotter
+  // at night and underground.
+  materialOverrides: { [souls.MAT.glyph]: { emissiveIntensity: 2.2 } },
   terrainMaterials: [{ id: TERRAIN_MATERIAL_ID, name: 'Valley Landscape', material: terrainMaterial, textureIds: [...new Set(Object.values(TERRAIN_TEX).flatMap(t => Object.values(t)))] }],
   folders: {
     scene: { [PROJECT_NAME]: '/Scenes', [DUNGEON_NAME]: '/Scenes' },
     template: {
       'Breakable Barrel': BARREL_DIR, 'Barrel Debris': BARREL_DIR, 'Skull Cave Entrance': CAVE_DIR,
-      ...Object.fromEntries(Object.values(FIRE_TEMPLATES).map(t => [t.name, `${FIRE}/Templates`])),
+      // At the feature's root, as every other template is.
+      ...Object.fromEntries(Object.values(FIRE_TEMPLATES).map(t => [t.name, FIRE])),
     },
+    tileset: { Fire: FIRE },
     model: { ...foliageFolder, ...buildingFolder, ...dungeon.folders },
-    particleSystem: { 'Torch Embers': `${FIRE}/Particles`, 'Hearth Embers': `${FIRE}/Particles` },
+    // The souls torch and bonfire are excluded (the valley's fires replace them); what they leave in the
+    // libraries joins the valley's fires rather than keeping a folder each.
+    particleSystem: {
+      'Torch Embers': `${FIRE}/Particles`, 'Hearth Embers': `${FIRE}/Particles`,
+      'Torch Fire': `${FIRE}/Particles`, 'Bonfire Fire': `${FIRE}/Particles`,
+    },
     material: {
       ...materialFolder,
+      'Bonfire Ash (placeholder)': `${FIRE}/Materials`,
       'Dark Stone (placeholder)': SHARED_PROPS, 'Wood (placeholder)': SHARED_PROPS, 'Iron (placeholder)': SHARED_PROPS,
     },
     terrainMaterial: { 'Valley Landscape': LANDSCAPE },
-    script: { 'Windmill Sails': `${BUILDINGS}/Scripts`, 'Fire Light': `${FIRE}/Scripts`, 'Day and Night': '/Environment/Scripts' },
+    script: { 'Windmill Sails': `${BUILDINGS}/Scripts`, 'Fire Light': `${FIRE}/Scripts`, Bonfire: `${FIRE}/Scripts`, 'Day and Night': '/Environment/Scripts' },
   },
   textureEntries: TEXTURE_ENTRIES,
   refs: {

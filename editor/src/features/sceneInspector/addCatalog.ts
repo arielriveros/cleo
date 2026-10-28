@@ -49,8 +49,6 @@ import {
   LIGHT_UNIT,
   newLightOptions,
 } from 'cleo'
-import type { Renderer } from 'cleo'
-import { sceneLightLevel } from '../../utils/sceneLightLevel'
 import type EventEmitter from '../../utils/eventEmitter'
 import type { ShapeDescription } from '../EngineContext'
 import {
@@ -106,8 +104,6 @@ export interface AddContext {
   editorScene: Scene;
   eventEmitter: EventEmitter;
   triggers: Map<string, { shapes: ShapeDescription[] }>;
-  /** For new lights, which are brightened to the scene's exposure (see `newLightOptions`). */
-  renderer?: Renderer | null;
 }
 
 export interface AddItem {
@@ -212,21 +208,16 @@ export const ADD_ITEMS: AddItem[] = [
   {
     id: 'directionalLight', label: 'Directional', icon: DirectionalLightIcon, category: 'lights',
     create: async () => new LightNode('directional light',
-      new DirectionalLight({ unit: LIGHT_UNIT, ...newLightOptions('directional', null) }), true),
+      new DirectionalLight({ unit: LIGHT_UNIT, ...newLightOptions('directional') }), true),
   },
   {
     id: 'pointLight', label: 'Point', icon: PointLightIcon, category: 'lights',
-    // Photometric from the start, never the legacy `{}` (a ~9.4 million lm lamp), and brightened to the
-    // scene so a lamp added to a daylit scene still shows.
-    create: async (ctx) => new LightNode('point light', new PointLight({
-      unit: LIGHT_UNIT, ...newLightOptions('point', sceneLightLevel(ctx.editorScene, ctx.renderer)),
-    })),
+    // Photometric from the start, never the legacy `{}` (a ~9.4 million lm lamp).
+    create: async () => new LightNode('point light', new PointLight({ unit: LIGHT_UNIT, ...newLightOptions('point') })),
   },
   {
     id: 'spotlight', label: 'Spotlight', icon: SpotlightIcon, category: 'lights',
-    create: async (ctx) => new LightNode('spot light', new Spotlight({
-      unit: LIGHT_UNIT, ...newLightOptions('spot', sceneLightLevel(ctx.editorScene, ctx.renderer)),
-    })),
+    create: async () => new LightNode('spot light', new Spotlight({ unit: LIGHT_UNIT, ...newLightOptions('spot') })),
   },
 
   {

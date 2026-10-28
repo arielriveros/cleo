@@ -138,7 +138,12 @@ export const Game = {
     const renderer = CleoEngine.instance?.renderer;
     if (!renderer) return;
     // `applyRenderSettings` resolves an absent tone mapper to the default (a whole scene blob without
-    // one predates the setting). A patch is not a scene: whatever curve is on now stays on.
-    renderer.applyRenderSettings({ toneMapper: renderer.toneMapper, ...settings });
+    // one predates the setting), and likewise an absent exposure compensation curve to none. A patch is
+    // not a scene: whatever curves are on now stay on.
+    renderer.applyRenderSettings({
+      toneMapper: renderer.toneMapper,
+      exposureCompensationCurve: renderer.exposureCompensationCurve,
+      ...settings,
+    });
   },
 };

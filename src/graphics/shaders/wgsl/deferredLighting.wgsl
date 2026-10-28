@@ -400,9 +400,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let count = cleoClusterCount(cluster);
     for (var i = 0; i < count; i++) {
         let cl = cleoLight(cleoClusterLight(first + i));
-        Lo += evaluateSpotLight(cl.light, worldPos, N, V, albedo, metallic, roughness,
-                                cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
-                                                       worldPos, N, cl.light.position));
+        if (cleoLightReaches(cl.light, worldPos)) {
+            Lo += evaluateSpotLight(cl.light, worldPos, N, V, albedo, metallic, roughness,
+                                    cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
+                                                           worldPos, N, cl.light.position));
+        }
     }
 
     // Output LINEAR HDR radiance. Exposure, tonemap and sRGB encode are applied once at the final

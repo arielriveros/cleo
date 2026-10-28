@@ -16,6 +16,45 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Lights keep one intensity; exposure does the rest.** The way Frostbite, Unreal and HDRP treat
+  light: a light's lux or lumens never change with the time of day or the room, and auto exposure
+  adapts to them as an eye does. The artistic control moved to the exposure:
+  - `exposureCompensationCurve` (renderer setting, *Compensation curve* in the Renderer panel) adds
+    stops keyed on the metered scene EV100, Unreal's exposure compensation curve. A negative key at the
+    dark end keeps a night or a cave darker than a fully adapted eye would show it. The *Day–Night
+    Cycle* and *Cave / Dungeon* exposure presets carry one.
+  - Materials gained an **Exposure weight** (`setEmissiveExposureWeight`, 0..1, default 1), like
+    sprites and particles already had: a glow at 1 is physical; lower values hold a rune or a magic
+    bolt closer to one look at every exposure.
+  - Light presets and new lights apply their real values as stored, in every scene. They are no longer
+    brightened to the scene's exposure (`presetForScene`, `keyIlluminance` and the `SceneLightLevel`
+    type are removed; `newLightOptions` takes only the light type).
+- **Night and underground now meter correctly.** Three things only showed once lights kept real
+  values:
+  - The exposure meter's window ended at about EV 6.5, so every darker scene metered the same,
+    whatever was in it. It now reaches EV −3.5 (`LOG_LUMINANCE_WINDOW` −22..8, 96 bins).
+  - The baked night sky (moonlit air, stars, airglow, the disc) was a fixed 6% of the day sky, and
+    its ground tint kept a tenth of noon's sun at midnight. Both lit the night through the sky light.
+    The night sky now scales with the atmosphere's `moonlightIntensity` (unchanged at the default
+    0.08), and the ground tint's sun term leaves with the sun.
+  - God rays ignored the brightness of the light scattering them, so the moon's haze was the sun's.
+    They now scale with the key light's intensity; daylight is unchanged.
+- **Cheaper local lights: line-of-sight culling, per-face shadow caching, no wasted shadow taps.**
+  - **Light Occlusion** (`lightOcclusionCulling`, on by default, Renderer panel under GPU Occlusion
+    Queries): the occlusion queries also test each point and spot light's whole reach against what
+    was drawn. A light whose reach is entirely hidden (the torch in the next room) is left out of
+    the light grid, and goes to the back of the queue for shadow maps. `renderer.occludedLights`
+    counts them.
+  - Point shadows cache each cube face on its own, and keep a static-only copy of every face: a face
+    with something moving in it (the player, an enemy, a falling barrel) starts from that copy and
+    draws only what moves, instead of redrawing all six faces over every wall in range. Spot maps
+    are cached the same way, and are now culled to the view and handed out nearest first like the
+    point maps. A skinned caster animating in place now updates its shadow (it kept a stale pose).
+  - The lighting loops test a light's range and cone before sampling its shadow map, rather than
+    running the 9-tap filter for every shadowed light listed in a pixel's cluster.
+- **The asset explorer no longer lists every texture twice.** A texture's source image (the same
+  asset, under a `Source/` folder beside it) is hidden, with the `Source` folder it leaves empty. An
+  image no texture is made from still shows.
 - **Parallax occlusion mapping is back, with curved silhouettes and depth.** Every PBR material with
   a height map marches it — there is no on/off flag any more, and materials saved with
   `parallax: false` march too. The ray now bends with the surface's curvature, measured per pixel from
@@ -62,10 +101,14 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   `modelNode.getSocketWorldMatrix(name)` and `animator.getJointModelMatrix(joint)` read them. The
   socket ignores its bone's scale, so an FBX armature's 0.01 does not shrink a held sword, and the
   follow runs after animation and before camera rigs, so nothing trails the hand by a frame.
-- **Night Shift**: both rigs ship `RightHand` / `LeftHand` sockets.
 
 ### Fixes & refactors
 
+- **Fixed: importing a project left every texture loose in the Assets root.** The texture records are
+  derived a render after the explorer starts pruning, so each texture's entry was pruned and then
+  re-added at the root under its hash id. Entries for textures that are still registered are kept, and
+  a derived record takes its name from the entry already there. A project imported before this fix
+  keeps its scattered index; import it again to get the shipped folders back.
 - **Player contract 10.** Published games now carry controller layers, action slots, pose states,
   clip events and socket attachments. A player built before this ignores all of them without a word,
   so publishing refuses a stale player — rebuild it with `npm --prefix editor run build:player`.
@@ -81,9 +124,7 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   long before it reaches 180, so the 90 clip always won. The new Character tuning **Settle**
   (`turnSettleSeconds`, 0.12 s) holds the choice until the aim has stayed past the threshold that
   long; past 135 degrees the turn engages at once. A turn now also releases when the body overshoots
-  the aim, instead of replaying the same side and rotating further away. Moving cancels a turn, and
-  Night Shift's turn states exit to Locomotion on `Speed > 1.2`, so a turn cut short does not keep
-  rotating a walking body.
+  the aim, instead of replaying the same side and rotating further away. Moving cancels a turn.
 - **Posing a bone no longer explodes on zero or tiny scales.** The clip editor's bone panel and gizmo
   produced NaN on a zero scale and on rigs under a 0.01 armature; both now decompose and rebuild bone
   transforms safely.
@@ -366,7 +407,7 @@ BRDF, and the model pipeline gained LOD generation and a storage format that sur
 - feat: Implement PBR material support and refactor material handling (175539b)
 - feat: enhance MaterialEditor with shader selection and properties management (b65076f)
 - feat: migrate to tailwind css (5d4fc21)
-- feat: Add interpolation between degrees of movement in demo, fix implicit any (aac8411)
+- fix: implicit any (aac8411)
 - feat: Implement animation direction vector for correct triggers (bcb100b)
 - feat: Add Animation Editor and integrate animation mapping functionality in ModelNode and Animator (577f201)
 - feat: Add update method to ModelNode for animator updates and remove it from Scene (2bc8c2f)
@@ -375,16 +416,16 @@ BRDF, and the model pipeline gained LOD generation and a storage format that sur
 - feat: Enhance input handling by capturing wheel events only when mouse is over the canvas and add mouse over detection method, fix texture loading issues with loader (2728f4f)
 - feat: Implement animated model support with GLTF loading and enhance loader functionality (8ba1e66)
 - feat: Add support for GLTF model loading and enhance texture management (4791751)
-- Enhance demo scene setup by adding collectibles and hazards with corresponding triggers and scripts. Refactor node removal logic to include onDespawn handling for better cleanup. (3275fac)
-- Add Sponza assets and implement environment mapping in demo scene (7adde7d)
-- Enhance asset management and scene setup: - Implement createDemoScene function for initializing demo scenes with camera, grid, axes, and a damaged helmet model. - Refactor EngineContext to utilize createDemoScene for better organization and performance. - Update InputManager to capture mouse wheel events for zoom functionality. (6bbce52)
+- Refactor node removal logic to include onDespawn handling for better cleanup. (3275fac)
+- Implement environment mapping (7adde7d)
+- Update InputManager to capture mouse wheel events for zoom functionality. (6bbce52)
 - Add copy-webpack-plugin for asset management in webpack configuration and update package dependencies (5253433)
 - Implement asset path resolution for local and deployed environments in loader and assimpLoader. Update image loading methods to use the new path resolution function for improved asset management. (109e4b1)
-- Add damaged helmet model and textures to the editor. Implement loading logic in EngineContext, including physics setup and debug visualization. Update initial scene setup to include the helmet model. Refactor engine initialization to be asynchronous for better performance. (73cb9bd)
+- Refactor engine initialization to be asynchronous for better performance. (73cb9bd)
 - Add gizmo functionality for 3D object manipulation in the editor. Implement PositionGizmo component for positioning nodes, integrate gizmo drag events, and enhance raycasting to include gizmo nodes. Update camera controls to prevent interference during gizmo dragging and ensure proper visibility management in play mode. (3316ef3)
 - Implement raycasting for node selection in the editor viewport, add selection outline visualization, and enhance bounding box calculations for various node types. (be7a720)
 - node visibility, improved scene changed event (23db9b3)
-- editor playable example, input prevent default, reset physics world (551e444)
+- input prevent default, reset physics world (551e444)
 - code editor contexts for globals and node object (026ad64)
 - input in global script state (4500d5b)
 - script logging (e177fda)

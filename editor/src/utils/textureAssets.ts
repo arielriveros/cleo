@@ -264,6 +264,12 @@ export function reconcileTextureAssets(
   live: LiveTexture[],
   images: ImageAsset[],
   textures: TextureAsset[],
+  /**
+   * A name for a record about to be minted, when one is already known: the asset explorer's entry for the
+   * id, which a bundle ships with readable names ("Grass Base Color") while the id is a hash. Minting under
+   * the id instead would make the explorer rename its entry to the hash.
+   */
+  nameHint?: (kind: 'image' | 'texture', id: string) => string | undefined,
 ): { images: ImageAsset[]; textures: TextureAsset[]; changed: boolean } {
   const haveImage = new Set(images.map(i => i.id))
   const haveTexture = new Set(textures.map(t => t.id))
@@ -279,7 +285,7 @@ export function reconcileTextureAssets(
       haveImage.add(t.id)
       newImages.push({
         id: t.id,
-        name: t.id,
+        name: nameHint?.('image', t.id) ?? t.id,
         mime: bytes.mime,
         width: t.width,
         height: t.height,
@@ -294,7 +300,7 @@ export function reconcileTextureAssets(
       t.id,
       // A texture id is a filename on every path that mints one, so the stem is the readable half. The
       // id itself keeps the extension, because it is what materials reference.
-      stemOf(t.id),
+      nameHint?.('texture', t.id) ?? stemOf(t.id),
       // `haveImage` already covers the row just minted above, and also an image a previous pass created
       // for a texture whose bytes have since been released.
       haveImage.has(t.id) ? { kind: 'image', imageId: t.id } : { kind: 'runtime' },

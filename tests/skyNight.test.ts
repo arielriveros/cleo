@@ -89,8 +89,13 @@ describe('night sky fields', () => {
         expect(back.moonSize).toBe(3);
     });
 
-    it('re-bakes the sky for night-sky edits but not for moonlight on the scene', () => {
+    it('re-bakes the sky for night-sky edits, and for a moonlight change but not a rewrite of the same value', () => {
         const node = new SkyAtmosphereNode('sky');
+        node.markBaked([0, 1, 0]);
+        // The night sky's brightness follows the moonlight (u_nightScale), so a change re-bakes...
+        node.moonlightIntensity = 0.2;
+        expect(node.needsBake).toBe(true);
+        // ...but a time-of-day script writing the same value every frame must not re-bake every frame.
         node.markBaked([0, 1, 0]);
         node.moonlightIntensity = 0.2;
         expect(node.needsBake).toBe(false);

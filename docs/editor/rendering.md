@@ -59,6 +59,12 @@ against the frame's real depth. Those results arrive a frame or two late, so an 
 frame late when whatever hid it moves away fast; turn the queries off if that shows. The Performance
 HUD's *occluded objects* row splits into the two.
 
+**Light Occlusion** uses the same queries for point and spot lights. Each light's whole reach (the
+sphere where its falloff ends) is tested against what was drawn; a light whose reach is entirely
+hidden, such as a torch in the next room, lights no visible pixel, so it is left out of the light grid
+and goes to the back of the queue for shadow maps, which then go to the lights you can see the light of. A
+light can come back a frame late when you round a corner fast. Needs **GPU Occlusion Queries**.
+
 **GPU Foliage Culling** (WebGPU) moves the per-instance half of foliage culling to a compute pass:
 every tree faded out of its detail band, or off screen, is dropped before a vertex of it runs, and the
 buckets draw indirectly. On WebGL2 the toggle is disabled and foliage is packed on the CPU.
@@ -74,7 +80,7 @@ buckets draw indirectly. On WebGL2 the toggle is disabled and foliage is packed 
 
 ### Tone and post
 
-**Auto exposure** (compensation, min/max EV, adaptation speeds) or manual **EV100**; **tone map**
+**Auto exposure** (compensation, compensation curve, min/max EV, adaptation speeds) or manual **EV100**; **tone map**
 (AgX default, ACES, Neutral, None); saturation; chromatic aberration; a **colour LUT** and its
 amount. The section's *Exposure* and *Look* presets set metering and lens looks in one click; a look
 leaves the tone map and the LUT alone.
@@ -83,6 +89,21 @@ Exposure is written as a photographic EV100, the number a light meter reads. Lig
 photometric intensity and the sun is about three decades brighter than a lamp, so one exposure can
 only meter one of them: a sunny exterior sits near EV 15, an interior near EV 5. Exposure is per
 scene, so a cave and a hillside can each carry their own.
+
+**Light intensity vs exposure.** A light keeps one value for the whole game — the sun its lux, a torch
+its lumens — and never needs scaling for the time of day or the room it is in. Auto exposure is the
+eye: at noon it meters near EV 15 and a 1,000 lm torch is lost in the sun; at midnight or underground
+it opens up to EV 3–5 and the same torch carries the scene. This is how Frostbite, Unreal and HDRP
+treat light. The artistic control is in the exposure, not the lights: the EV range, the
+**Compensation**, and the **Compensation curve**. Glows that should read the same everywhere (runes,
+magic, UI in the world) take less of the exposure through their **Exposure weight** (materials,
+sprites and particles).
+
+**Compensation curve** — extra compensation, in stops, keyed on the metered scene EV100 (Unreal's
+exposure compensation curve), added to Compensation. Between keys it is linear; past the first and last
+key it holds. A fully adapted eye lifts a moonlit night or a torch-lit crypt to a grey day; a negative
+key at the dark end (say −2 stops at EV −2, rising to 0 by EV 12) keeps a night a night without touching
+a single light. The *Day–Night Cycle* and *Cave / Dungeon* exposure presets carry one.
 
 The tone map is the curve that turns linear HDR into a displayable image, and it is the single
 biggest lever here. *AgX* rolls a saturated highlight toward white instead of clipping it to a
@@ -114,12 +135,12 @@ map, on display colour, which is the space a `.cube` LUT from a grading tool was
 > | 15.3 | 1.6 |
 > | 16.5 | 0.7 |
 >
-> **With metering on, the manual exposure is ignored.** To ramp the look over a day/night cycle,
-> animate `exposureCompensation`, which is applied after the clamp.
+> **With metering on, the manual exposure is ignored.**
 >
 > And left free, metering normalises whatever it is shown toward middle grey — that is its entire
-> job — so a night comes out as bright as a dawn and your lighting ramp becomes cosmetic. A night
-> scene wants a **narrow EV band** bracketing the authored exposure, roughly a stop either side.
+> job — so a night comes out as bright as a dawn. Keep it a night with the **compensation curve**:
+> negative stops at the dark end of the metered EV. That follows the scene by itself, so a day/night
+> cycle needs no script touching the exposure or the lamps.
 
 ### Bloom
 
@@ -231,7 +252,9 @@ What keeps cascades cheap, all automatic:
 
 Up to **4** spot lights cast shadows at once. Flag each with **Cast Shadows** in its inspector; any
 beyond the cap simply go unshadowed, and a light that already holds a map keeps it, so one at the
-edge of the cap goes dark once rather than flickering. Each map is redrawn every frame. A spot's
+edge of the cap goes dark once rather than flickering. Only spots whose cone reaches the view are drawn, nearest first (with **Light Occlusion**, hidden
+ones last), and a map is
+redrawn only when something in its cone moves, as the point maps are below. A spot's
 frustum matches its outer cone, and its far plane is the light's range, capped by **Max Dist**. The
 global Shadows toggle switches these off too.
 
@@ -246,9 +269,13 @@ global Shadows toggle switches these off too.
 Up to **4** point lights cast shadows at once, flagged per light with **Cast Shadows**. A point
 light shadows in every direction, so it costs *six* depth passes, one per cube face, where a spot
 light costs one; that is why the cap is low. Only lights whose range reaches the view are drawn at
-all, the lights nearest the camera get the maps, and a light whose surroundings have not moved keeps
-the maps it already has — a static lamp is free after the first frame. The global Shadows toggle
-switches these off too.
+all, the lights nearest the camera get the maps (with **Light Occlusion**, lights whose whole reach is
+hidden come last), and each of the six faces is cached on its own. What stands still
+(walls, props at rest) is drawn into a static copy of each face once; when something moves inside a
+face (the player, an enemy, a falling barrel), that face starts from its static copy and draws only
+what moves. A static lamp is free after the first frame, and one the player walks past costs a face
+or two and a character, not six passes over the whole room. The global Shadows toggle switches these
+off too.
 
 | Setting | Note |
 |---|---|

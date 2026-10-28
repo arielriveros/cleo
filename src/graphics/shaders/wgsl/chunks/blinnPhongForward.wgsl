@@ -202,10 +202,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let count = cleoClusterCount(cluster);
     for (var i = 0; i < count; i++) {
         let cl = cleoLight(cleoClusterLight(first + i));
-        result += computePunctualLight(fragPos, normal, viewDir, cl.light,
-                                       cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
-                                                              fragPos, normal, cl.light.position),
-                                       matDiffuse, matSpecular);
+        if (cleoLightReaches(cl.light, fragPos)) {
+            result += computePunctualLight(fragPos, normal, viewDir, cl.light,
+                                           cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
+                                                                  fragPos, normal, cl.light.position),
+                                           matDiffuse, matSpecular);
+        }
     }
 
     if (u_lighting.u_useEnvMap != 0) {

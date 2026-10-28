@@ -397,7 +397,7 @@ export default function EngineViewport() {
             e.preventDefault();
             const item = findAddItem(newNodeId);
             if (!item) return;
-            addItemTo(item, dropParent, { editorScene, eventEmitter, triggers, renderer: instance?.renderer })
+            addItemTo(item, dropParent, { editorScene, eventEmitter, triggers })
                 .then(node => {
                     // Sky/clouds fill the scene — a world position is meaningless for them.
                     if (point && item.placeable !== false) placeAt(node, point, dropParent);

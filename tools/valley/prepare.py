@@ -121,7 +121,9 @@ def props() -> None:
         tex = dungeon / f"{base}_1k" / "textures"
         save_jpeg(load(tex / f"{base}_diff_1k.png"), f"{base}_diff", 1024)
         save_png(load(tex / f"{base}_nor_gl_1k.png"), f"{base}_nor", 1024)
-        save_jpeg(load(tex / f"{base}_arm_1k.png"), f"{base}_arm", 1024)
+        # The pack's own AO and roughness maps, one each (its ARM holds the same two plus an all-zero metal).
+        save_jpeg(load(tex / f"{base}_ao_1k.png"), f"{base}_ao", 1024, grey=True)
+        save_jpeg(load(tex / f"{base}_rough_1k.png"), f"{base}_rough", 1024, grey=True)
 
 
 def gltf_material(path: Path, index: int, prefix: str, size: int = 1024) -> None:

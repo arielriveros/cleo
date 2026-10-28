@@ -5,7 +5,7 @@ import { useAssetLibrary } from '../AssetLibraryContext'
 import { idbGet, idbSet } from '../../utils/idb'
 import {
   EMPTY_VFS, LibSnapshot, VfsEntry, VfsIndex, vfsKey,
-  AssetKind, indexByPath, reconcileVfs, repairVfs,
+  AssetKind, indexByPath, reconcileVfs, repairVfs, baseOf, stemOf,
 } from '../../utils/vfs'
 import { AssetDeps, sizeOfAsset } from './assetKinds'
 import { reconcileTextureAssets } from '../../utils/textureAssets'
@@ -76,6 +76,8 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
   const [vfs, setVfs] = useState<VfsIndex>(EMPTY_VFS)
   const vfsLoadedRef = useRef(false)
   const [vfsLoaded, setVfsLoaded] = useState(false)
+  const vfsRef = useRef(vfs)
+  vfsRef.current = vfs
 
   // Textures live in the TextureManager singleton, not React state; mirror their ids here and refresh on
   // the events that add/remove them.
@@ -108,7 +110,8 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
    * waits on the image and texture libraries too (see EngineContext's predicate).
    */
   useEffect(() => {
-    if (!assetsLoaded || !texturesPreloaded || !isSceneReady) return
+    // And the stored index read, so a minted record can take its name from the entry already there.
+    if (!assetsLoaded || !texturesPreloaded || !isSceneReady || !vfsLoaded) return
     const tm = TextureManager.Instance
     const live: LiveTexture[] = textureIds.map(id => {
       const texture = tm.getTexture(id)
@@ -121,13 +124,20 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
         source: source ? { mime: source.mime, byteLength: source.bytes.byteLength } : null,
       }
     })
-    const next = reconcileTextureAssets(live, images, textures)
+    // Names from the explorer's own entries where it has them: a bundle's index names every texture, and
+    // the records minted here would otherwise carry the hash ids and drag the entries' names along.
+    const named = new Map<string, string>()
+    for (const e of vfsRef.current.entries) {
+      if (e.kind === 'texture') named.set(`texture:${e.assetId}`, stemOf(baseOf(e.path)))
+      else if (e.kind === 'image') named.set(`image:${e.assetId}`, baseOf(e.path))
+    }
+    const next = reconcileTextureAssets(live, images, textures, (kind, id) => named.get(`${kind}:${id}`))
     if (!next.changed) return
     // Added one at a time through the library actions rather than by replacing the arrays: those actions
     // are what the persistence hook and the live-GPU retune are wired to.
     for (const image of next.images) if (!images.some(i => i.id === image.id)) addImage(image)
     for (const texture of next.textures) if (!textures.some(t => t.id === texture.id)) addTextureAsset(texture)
-  }, [assetsLoaded, texturesPreloaded, isSceneReady, textureIds, images, textures, addImage, addTextureAsset])
+  }, [assetsLoaded, texturesPreloaded, isSceneReady, vfsLoaded, textureIds, images, textures, addImage, addTextureAsset])
 
   // Sounds live in the AudioManager singleton, not React state; mirror their ids here and refresh on the
   // events that add or remove them. The exact shape of the texture mirror above.

@@ -27,6 +27,8 @@ export const REMOVE_PIECES = [{ part: 'Pillars', box: [[28.3, -6.3, -38.4], [30.
 
 /** The lights of the file's rig that are NOT fixtures to dress: sconces on cell bars or behind a pillar. */
 export const SKIP_LIGHTS = new Set([12, 58, 68])
+/** Metres: the closest two wall torches may hang. The rig's sconces come every few metres. */
+export const SCONCE_SPACING = 9
 
 export const SPAWN = { position: [0, 0.05, 6.4], yaw: 180 }
 
@@ -44,17 +46,15 @@ export const FIRES = [
   { kind: 'firePit', key: 'stair-hall-s', position: [30.6, 0, -19.3] },
   { kind: 'firePit', key: 'guard-room', position: [41.4, -6, -18.8] },
   { kind: 'hearth', key: 'fireplace', position: [22.6, 0.1, 7.4] },
-  // The arena's four braziers, and two either side of the throne: tall torches.
-  ...[[44.53, -32.77], [35.47, -32.77], [35.47, -41.83], [44.53, -41.83]].map(([x, z], i) =>
+  // Two of the arena's braziers, on opposite corners, and two either side of the throne: tall torches.
+  ...[[44.53, -32.77], [35.47, -41.83]].map(([x, z], i) =>
     ({ kind: 'torch', key: `arena-${i}`, position: [x, -5.38, z], scale: 1.25 })),
   { kind: 'torch', key: 'throne-w', position: [37, -6, -45.9], scale: 1.25 },
   { kind: 'torch', key: 'throne-e', position: [43, -6, -45.9], scale: 1.25 },
-  // Candles: the crypt's four corners, the catacombs' shelves, the ossuary, and on tables.
-  ...[[10.4, 0, 2.4], [13.6, 0, 2.3], [10.5, 0, 6.4], [13.5, 0, 6.5],
-    [18.5, -6, -37.6], [22.3, -6, -36.9], [25.6, -6, -37.5], [11.2, -6, -34.6], [14.8, -6, -40]]
+  // Candles: two of the crypt's corners, the catacombs, the ossuary, and one on each room's table.
+  ...[[10.4, 0, 2.4], [13.5, 0, 6.5], [22.3, -6, -36.9], [11.2, -6, -34.6]]
     .map((position, i) => ({ kind: 'candle', key: `floor-${i}`, position })),
-  ...[[5.4, 0.82, 2.0], [5.5, 0.82, 3.1], [0.1, 0.82, -23.5], [21.9, 0.82, -2.7], [23.4, 0.82, -2.5], [22.4, 0.82, 2.65],
-    [31.0, 5.32, 6.9], [31.6, 5.32, 9.6]]
+  ...[[5.4, 0.82, 2.0], [0.1, 0.82, -23.5], [22.4, 0.82, 2.65], [31.0, 5.32, 6.9]]
     .map((position, i) => ({ kind: 'candle', key: `table-${i}`, position })),
 ]
 
@@ -63,7 +63,7 @@ export const FIRES = [
  * the floor below (13 m from the high windows, 14 from the oculus), not the rig's 22-30 m: a spot is lit
  * wherever its cone's bounding sphere reaches, and a long one makes every pixel of a hall pay for it.
  */
-export const SHAFTS = { lumens: 4500000, oculusLumens: 22000000, range: 18, oculusRange: 20 }
+export const SHAFTS = { lumens: 4400, oculusLumens: 21500, range: 18, oculusRange: 20 }
 
 // ---------------------------------------------------------------------------------------------------
 // Props

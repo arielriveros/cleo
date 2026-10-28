@@ -394,9 +394,11 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     let count = cleoClusterCount(cluster);
     for (var i = 0; i < count; i++) {
         let cl = cleoLight(cleoClusterLight(first + i));
-        Lo += evaluateSpotLight(cl.light, fragPos, N, V, albedo, metallic, roughness,
-                                cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
-                                                       fragPos, N, cl.light.position));
+        if (cleoLightReaches(cl.light, fragPos)) {
+            Lo += evaluateSpotLight(cl.light, fragPos, N, V, albedo, metallic, roughness,
+                                    cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
+                                                           fragPos, N, cl.light.position));
+        }
     }
 
     // Occlusion came out of the ORM fetch above, and the two indirect lobes take DIFFERENT amounts of

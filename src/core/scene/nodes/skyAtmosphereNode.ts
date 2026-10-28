@@ -67,8 +67,14 @@ export interface SkyAtmosphereOptions {
     moonOffsetPitch?: number;     // degrees — moon elevation away from the point opposite the sun
     moonColor?: [number, number, number]; // tint of the moon and its light
     moonIntensity?: number;       // brightness of the moon disc and the moonlit sky
-    moonlightIntensity?: number;  // direct moonlight on the scene, as a fraction of the sun light
+    moonlightIntensity?: number;  // moonlight as a fraction of the sun light: the moon's key light, and the night sky's brightness
 }
+
+/**
+ * The default moonlight ratio, at which the baked night sky keeps the brightness it was tuned at. The sky
+ * scales with `moonlightIntensity / DEFAULT_MOONLIGHT_INTENSITY`: a real moon is about 2e-6 of the sun.
+ */
+export const DEFAULT_MOONLIGHT_INTENSITY = 0.08;
 
 /**
  * Scene-wide physically-based sky. Holds only parameters; the runtime cubemap is NOT serialized. The
@@ -194,7 +200,7 @@ export class SkyAtmosphereNode extends Node {
         this._moonOffsetPitch = options.moonOffsetPitch ?? 15;
         this._moonColor = options.moonColor ?? [0.82, 0.88, 1.0];
         this._moonIntensity = options.moonIntensity ?? 1.0;
-        this._moonlightIntensity = options.moonlightIntensity ?? 0.08;
+        this._moonlightIntensity = options.moonlightIntensity ?? DEFAULT_MOONLIGHT_INTENSITY;
     }
 
     // --- Sun ---
@@ -271,7 +277,7 @@ export class SkyAtmosphereNode extends Node {
     public get godRayMaxDistance(): number { return this._godRayMaxDistance; }
     public set godRayMaxDistance(v: number) { this._godRayMaxDistance = Math.min(1000, Math.max(5, v)); }
 
-    // --- Night sky (baked into the cubemap; moonlightIntensity is per-frame lighting only) ---
+    // --- Night sky (baked into the cubemap; moonlightIntensity also scales its brightness) ---
     public get nightEnabled(): boolean { return this._nightEnabled; }
     public set nightEnabled(v: boolean) { this._nightEnabled = v; this._needsBake = true; }
     public get starIntensity(): number { return this._starIntensity; }
@@ -307,7 +313,13 @@ export class SkyAtmosphereNode extends Node {
     public get moonIntensity(): number { return this._moonIntensity; }
     public set moonIntensity(v: number) { this._moonIntensity = Math.max(0, v); this._needsBake = true; }
     public get moonlightIntensity(): number { return this._moonlightIntensity; }
-    public set moonlightIntensity(v: number) { this._moonlightIntensity = Math.min(1, Math.max(0, v)); }
+    public set moonlightIntensity(v: number) {
+        const next = Math.min(1, Math.max(0, v));
+        // The night sky's brightness follows it (see DEFAULT_MOONLIGHT_INTENSITY): a change re-bakes. Only a
+        // change, since a time-of-day script writes the same value every frame.
+        if (next !== this._moonlightIntensity) this._needsBake = true;
+        this._moonlightIntensity = next;
+    }
 
     // --- Runtime bake state (renderer-facing) ---
     public get cubemap(): Texture | null { return this._cubemap; }

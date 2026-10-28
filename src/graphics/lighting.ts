@@ -137,6 +137,36 @@ export function legacyRange(constant: number, linear: number, quadratic: number)
 }
 
 /**
+ * One key of an exposure compensation curve: at a metered scene EV100 of `[0]`, trim the exposure by
+ * `[1]` stops (positive is brighter, as on a camera). Unreal's `ExposureCompensationCurve`.
+ */
+export type ExposureCurveKey = [ev100: number, stops: number];
+
+/**
+ * The compensation, in stops, a curve gives at a metered EV100: piecewise linear between keys, held
+ * flat past the first and last one, and 0 for an empty curve.
+ *
+ * This is where art direction lives once lights keep real values. A 2,000 lm torch is the same torch at
+ * noon and at midnight; what changes is the eye, and a fully adapted eye would lift a moonlit night to
+ * a grey day. Keying a negative trim on the dark end of the scene EV keeps a night a night (and a cave
+ * a cave) without touching a single light. Keys need not be sorted.
+ */
+export function exposureCurveStops(curve: readonly ExposureCurveKey[] | undefined, ev100: number): number {
+    if (!curve || curve.length === 0 || !Number.isFinite(ev100)) return 0;
+    const keys = curve.length > 1 ? [...curve].sort((a, b) => a[0] - b[0]) : curve;
+    if (ev100 <= keys[0][0]) return keys[0][1];
+    const last = keys[keys.length - 1];
+    if (ev100 >= last[0]) return last[1];
+    for (let i = 1; i < keys.length; i++) {
+        const [e1, s1] = keys[i];
+        if (ev100 > e1) continue;
+        const [e0, s0] = keys[i - 1];
+        return e1 === e0 ? s1 : s0 + (s1 - s0) * (ev100 - e0) / (e1 - e0);
+    }
+    return last[1];
+}
+
+/**
  * The windowed inverse-square falloff, in JS. The twin of `distanceAttenuation` in
  * chunks/pbrLighting.wgsl — this exists so the migration can FIT against the curve the shader will
  * actually evaluate rather than against an idealised `1/d^2`.

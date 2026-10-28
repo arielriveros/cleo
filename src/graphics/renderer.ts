@@ -11,7 +11,7 @@ import { LightProbeNode } from '../core/scene/nodes/lightProbeNode';
 import { DecalNode, DECAL_RADIAL_CURVES } from '../core/scene/nodes/decalNode';
 import { SkyboxNode } from '../core/scene/nodes/skyboxNode';
 import { VolumetricCloudsNode } from '../core/scene/nodes/volumetricCloudsNode';
-import { SkyAtmosphereNode } from '../core/scene/nodes/skyAtmosphereNode';
+import { DEFAULT_MOONLIGHT_INTENSITY, SkyAtmosphereNode } from '../core/scene/nodes/skyAtmosphereNode';
 import { atmosphereTransmittance, shHemisphereMeans } from './cloudLighting';
 import { keyLight, moonDirection, nightFactor, type KeyLight } from './skyNight';
 import { SpriteNode } from '../core/scene/nodes/spriteNode';
@@ -20,7 +20,7 @@ import { TilemapLayer } from '../graphics/tilemap/tilemapLayer';
 import { TileMesh } from '../graphics/tilemap/tileMesh';
 import { CHUNK_SIZE, TileChunk } from '../graphics/tilemap/chunk';
 import { cellToWorld } from '../graphics/tilemap/cellMath';
-import { DEFAULT_ANGULAR_RADIUS, DEFAULT_SCENE_AMBIENT_LUX, DirectionalLight, PointLight, REFERENCE_ILLUMINANCE, Spotlight } from './lighting';
+import { DEFAULT_ANGULAR_RADIUS, DEFAULT_SCENE_AMBIENT_LUX, DirectionalLight, exposureCurveStops, type ExposureCurveKey, PointLight, REFERENCE_ILLUMINANCE, Spotlight } from './lighting';
 import { Mesh } from './mesh';
 import type { ShaderProgram, ShaderProgramDescriptor } from './rhi/shaderProgram';
 import { Framebuffer } from './framebuffer';
@@ -38,7 +38,7 @@ import {
     cascadeSphereFromCorners, quantizeRadius, cascadeDepthScale, buildCascadeMatrix,
     lightViewMatrix, pushCasterBounds, ShadowCasterBounds, STAGGER_MARGIN, staleCascadeCovers,
     spotShadowFar, SpotShadowSlots,
-    MAX_POINT_SHADOWS, POINT_SHADOW_FACES, PointShadowCache, pointShadowFov,
+    MAX_POINT_SHADOWS, POINT_SHADOW_FACES, PointShadowCache, CasterMotion, pointShadowFov,
     HASH_SEED, mixNumber, mixString, mixTransform,
 } from './shadowMath';
 import {
@@ -445,6 +445,12 @@ export interface RenderSettings {
     autoExposureEnabled: boolean;
     /** Artist trim on the metered result, in stops. Positive is brighter, as on a camera. */
     exposureCompensation: number;
+    /**
+     * Extra trim in stops keyed on the METERED scene EV100 (Unreal's exposure compensation curve), on
+     * top of `exposureCompensation`. Lights keep fixed physical values; this is how an artist keeps a
+     * night or a cave darker than a fully adapted eye would show it. Empty = no curve.
+     */
+    exposureCompensationCurve: ExposureCurveKey[];
     /** Clamps on the metered EV100. Defaults span a night interior to a sunlit exterior. */
     exposureMinEV: number;
     exposureMaxEV: number;
@@ -511,6 +517,12 @@ export interface RenderSettings {
      * arrive a frame or two late, so only a fresh "hidden" is acted on. Needs `occlusionCulling` on.
      */
     occlusionQueries?: boolean;
+    /**
+     * Leave out every point and spot light whose whole reach is hidden behind what is on screen: the same
+     * occlusion queries, asked about the box round each light's influence sphere. A torch in the next room
+     * then takes no cluster slot and no shadow map. Needs `occlusionQueries`.
+     */
+    lightOcclusionCulling?: boolean;
     foliageCullDistance: number;
     /**
      * Multiplies every particle system's LOD distances and cull distance (each `.vfx` authors its own;
@@ -657,6 +669,16 @@ export interface SkeletonOverlay {
  * One shadow caster, gathered once per frame and shared by every shadow layer that frame: the cascades,
  * the far cascade, spot slots and point faces. See `Renderer._ensureShadowCasters`.
  */
+/** One point-shadow face's casters, split static/dynamic, with a hash of each (`_pointFaceCasters`). */
+interface PointFaceCasters {
+    statics: ShadowCasterRecord[];
+    dynamics: ShadowCasterRecord[];
+    staticCount: number;
+    dynamicCount: number;
+    staticHash: number;
+    dynamicHash: number;
+}
+
 interface ShadowCasterRecord {
     node: ModelNode;
     /** The node's world bounding sphere: a live reference, valid for this frame. */
@@ -1212,7 +1234,21 @@ export class Renderer {
     /** 2*tan(halfFov)/resolution. ONE value: every face and every slot shares the widened fov. */
     private _pointShadowTexelScale: number = 0;
     /** What each slot was last rasterized for, so a static lamp costs nothing after the first frame. */
-    private _pointShadowCache: PointShadowCache = new PointShadowCache(MAX_POINT_SHADOWS);
+    /** Per point-shadow FACE (atlas layer): what the live layer was last drawn with. */
+    private _pointShadowCache: PointShadowCache = new PointShadowCache(MAX_POINT_SHADOWS * 6);
+    /** Per face: what the static-only copy was last drawn with. */
+    private _pointStaticCache: PointShadowCache = new PointShadowCache(MAX_POINT_SHADOWS * 6);
+    /** The static-only copy of every point-shadow face (see `_pointFaceCasters`). */
+    private _pointStaticFBO!: LayeredDepthFramebuffer;
+    /** The same pair for the spot maps, one layer per light. */
+    private _spotShadowCache: PointShadowCache = new PointShadowCache(Renderer.MAX_SPOT_SHADOWS);
+    private _spotStaticCache: PointShadowCache = new PointShadowCache(Renderer.MAX_SPOT_SHADOWS);
+    private _spotStaticFBO!: LayeredDepthFramebuffer;
+    private readonly _casterMotion = new CasterMotion();
+    private readonly _pointFaceFrustum = new Frustum();
+    private readonly _pointFaceLists: PointFaceCasters = {
+        statics: [], dynamics: [], staticCount: 0, dynamicCount: 0, staticHash: 0, dynamicHash: 0,
+    };
     private _pointShadowsEnabled: boolean = true;
     private _pointShadowResolution: number = 512;
     /** Cap on a point light's derived far plane, mirroring `_spotShadowDistance`. */
@@ -1441,6 +1477,7 @@ export class Renderer {
     // frame mean 202 to 146 — because 0.18 is a reflectance target and most content is not an 18% grey
     // card. Every engine that ships auto-exposure ships a positive bias on top of it for that reason.
     private _exposureCompensation: number = 1.0;
+    private _exposureCompensationCurve: ExposureCurveKey[] = [];
     private _exposureMinEV: number = 2.0;
     private _exposureMaxEV: number = 17.0;
     private _exposureSpeedUp: number = 3.0;
@@ -1463,7 +1500,7 @@ export class Renderer {
     /** The adapted value, in EV100. Seeded from the initial exposure so frame one does not jump. */
     private _exposureEV: number = 0;
     /** Must match LOG_LUM_MIN/MAX in exposureMeter.wgsl. */
-    private static readonly LOG_LUMINANCE_WINDOW: [number, number] = [-12.0, 8.0];
+    private static readonly LOG_LUMINANCE_WINDOW: [number, number] = [-22.0, 8.0];
     /**
      * Where the metered average is placed. 0.18 is middle grey — the reflectance a light meter assumes
      * and the value every photographic exposure system is calibrated around.
@@ -1637,6 +1674,10 @@ export class Renderer {
     private readonly _occlusionFrameStats = { triangles: 0, ms: 0 };
     /** See RenderSettings.occlusionQueries, and graphics/gpuOcclusion.ts. */
     private _occlusionQueriesEnabled = true;
+    /** See RenderSettings.lightOcclusionCulling. */
+    private _lightOcclusionCulling = true;
+    /** Per light, this frame: whether its reach is hidden (see `_lightOccluded`). */
+    private readonly _lightOccludedMemo = new Map<LightNode, boolean>();
     private readonly _gpuOcclusion = new GpuOcclusion();
     private _occlusionQueries: OcclusionQuerySet | null = null;
     /** Whether this frame's view takes and acts on GPU occlusion queries, and for which camera. */
@@ -1857,6 +1898,8 @@ export class Renderer {
         this._shadowCascadeFBO = new LayeredDepthFramebuffer();
         this._spotShadowFBO = new LayeredDepthFramebuffer();
         this._pointShadowFBO = new LayeredDepthFramebuffer();
+        this._pointStaticFBO = new LayeredDepthFramebuffer();
+        this._spotStaticFBO = new LayeredDepthFramebuffer();
         this._gBufferFBO = new Framebuffer({ colorAttachments: 3, colorTextureOptions: { mipMap: false, precision: 'high' } });
         // Bloom carries linear HDR (bright pixels can far exceed 1.0), so both the bright buffer and the
         // ping-pong blur targets are float — an RGBA8 bloom would clamp and defeat the HDR bright-pass.
@@ -3407,6 +3450,28 @@ export class Renderer {
     }
 
     /**
+     * Whether nothing on screen is within reach of `light`: a fresh GPU occlusion query found the box
+     * around its influence sphere (`center`, `radius`) hidden behind the frame's depth. Such a light can
+     * light no visible pixel, so it is left out of the light grid and passed over for a shadow map. The
+     * light is offered for this frame's queries either way, so it is found again the moment that changes.
+     * Never true with the eye inside (or near) the sphere, whose box the near plane would clip, nor in a
+     * capture, nor with `lightOcclusionCulling` off. Memoised for the frame.
+     */
+    private _lightOccluded(node: LightNode, center: ArrayLike<number>, radius: number): boolean {
+        if (!this._lightOcclusionCulling || !this._gpuOcclusionActive || this._cubeFaceCapture
+            || this._activeCamera !== this._gpuOcclusionCamera) return false;
+        const memo = this._lightOccludedMemo.get(node);
+        if (memo !== undefined) return memo;
+        const eye = this._activeCamera.position;
+        const d = Math.hypot(eye[0] - center[0], eye[1] - center[1], eye[2] - center[2]);
+        const hidden = d > radius * 1.2 + 1
+            && this._gpuOcclusion.considerLight(node, center, radius)
+            && this._gpuOcclusion.isLightHidden(node);
+        this._lightOccludedMemo.set(node, hidden);
+        return hidden;
+    }
+
+    /**
      * Whether a node is worth an occlusion query at all. A query is a draw of its box, and its cost is the
      * box's screen area: a box filling half the screen costs a full-screen depth test and is almost never
      * hidden, which in the Valley made the query pass 5 ms on WebGL2 — the near landscape chunks, two
@@ -3437,6 +3502,7 @@ export class Renderer {
         const view = this._activeCamera.viewMatrix, f = this._gpuOcclusionForward;
         f[0] = -view[2]; f[1] = -view[6]; f[2] = -view[10];
         this._gpuOcclusion.beginFrame(active ? this._occlusionQueries : null, this._activeCamera.position, f);
+        this._lightOccludedMemo.clear();
         this._gpuOcclusionActive = active;
         this._gpuOcclusionCamera = this._activeCamera;
     }
@@ -3477,7 +3543,9 @@ export class Renderer {
         pass.setPipeline(pipeline);
         const model = this._gpuOcclusionModel;
         for (let i = 0; i < nodes.length; i++) {
-            const s = nodes[i].getBoundingSphere();
+            // A light is tested by its influence sphere, stored when it was offered; a node by its own.
+            const light = this._gpuOcclusion.lightSpheres.get(nodes[i]);
+            const s = light ? { center: light, radius: light[3] } : (nodes[i] as ModelNode).getBoundingSphere();
             const size = s.radius * 2 * 1.1;
             mat4.fromTranslation(model, s.center as vec3);
             mat4.scale(model, model, [size, size, size]);
@@ -6515,14 +6583,17 @@ export class Renderer {
                 spotBoundingSphere(node.worldPosition, node.worldForward, spot.range,
                                    spot.outerCutOff * Math.PI / 180, this._coneSphere);
                 center.set(this._coneSphere.center);
-                this._setClusterLight(count, center, this._coneSphere.radius);
+                // A light whose whole reach is hidden keeps its record (its index is fixed) but reaches
+                // no cluster: radius 0 is "reaches nothing" to buildClusters.
+                const r = this._coneSphere.radius;
+                this._setClusterLight(count, center, this._lightOccluded(node, center, r) ? 0 : r);
             } else {
                 const point = node.light as PointLight;
                 const p = node.worldPosition;
                 center[0] = p[0]; center[1] = p[1]; center[2] = p[2];
                 // The windowed falloff reaches EXACTLY zero at `range`, which is what makes this a
                 // cull rather than an approximation. See `distanceAttenuation`.
-                this._setClusterLight(count, center, point.range);
+                this._setClusterLight(count, center, this._lightOccluded(node, center, point.range) ? 0 : point.range);
             }
             count++;
         }
@@ -6825,7 +6896,12 @@ export class Renderer {
         this._shaderManager.setUniform('u_sunDir', s);
         this._shaderManager.setUniform('u_lightColor', lightColor);
         this._shaderManager.setUniform('u_tint', node.godRayTint);
-        this._shaderManager.setUniform('u_intensity', node.godRayExposure);
+        // In-scattered light is proportional to the light doing the scattering: times the key light's
+        // internal intensity (1 = REFERENCE_ILLUMINANCE, the level the shafts were tuned at under the
+        // sun), so a 2 lux moon draws shafts 40,000 times fainter than the sun's, and the sun's fade at
+        // the horizon fades them with it. Without the term the moon's haze was the sun's, and once
+        // lights kept real values it was the brightest thing in a night scene.
+        this._shaderManager.setUniform('u_intensity', node.godRayExposure * (key ? key.intensity : 1));
         this._shaderManager.setUniform('u_density', node.godRayDensity);
         this._shaderManager.setUniform('u_anisotropy', node.godRayAnisotropy);
         this._shaderManager.setUniform('u_maxDistance', node.godRayMaxDistance);
@@ -6956,6 +7032,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_nightTexture', !!nightTex);
         this._shaderManager.setUniform('u_moonTexture', !!moonTex);
         this._shaderManager.setUniform('u_moonEnabled', node.moonEnabled);
+        this._shaderManager.setUniform('u_nightScale', node.moonlightIntensity / DEFAULT_MOONLIGHT_INTENSITY);
         const nightGroup = this._textureBindGroup(skyPipeline, 2, [nightTex ?? this._fallbackTexture,
                                                                     moonTex ?? this._fallbackTexture]);
         // A texture still loading bakes the procedural fallback; remember to bake again once it is in.
@@ -8351,6 +8428,19 @@ export class Renderer {
 
         for (const [name, value] of material.properties)
             this._shaderManager.setUniform(this._materialSync.uniformName(name), value);
+        // An emissive that takes less than the whole exposure (Material emissiveExposureWeight) is divided
+        // by the rest of it here, as a sprite's overdrive is; the tonemapper multiplies by all of it. Safe
+        // against the per-frame memo above: the exposure does not change within a frame.
+        const emissiveWeight = material.properties.get('emissiveExposureWeight');
+        if (emissiveWeight !== undefined && emissiveWeight < 1 && this._exposure > 0) {
+            const k = Math.pow(this._exposure, Math.max(0, emissiveWeight) - 1);
+            if (material.properties.has('emissiveIntensity'))
+                this._shaderManager.setUniform('u_material.emissiveIntensity', Number(material.properties.get('emissiveIntensity')) * k);
+            else {
+                const e = material.properties.get('emissive');
+                if (e) this._shaderManager.setUniform('u_material.emissive', [e[0] * k, e[1] * k, e[2] * k]);
+            }
+        }
         // Uniforms stick to the program, so a Basic material built without `intensity` (Material.Basic sets
         // it) would inherit the last sprite's overdrive. Pin it to 1 instead.
         if (material.type === 'basic' && !material.properties.has('intensity'))
@@ -8741,7 +8831,8 @@ export class Renderer {
      * Open a depth-only pass into one layer of an array target: a shadow cascade, or a spot slot.
      * No colour attachments. The LAYER belongs to the descriptor, not the target.
      */
-    private _beginDepthPass(target: RenderTarget, label: string, layer: number): RenderPassEncoder {
+    private _beginDepthPass(target: RenderTarget, label: string, layer: number,
+                            loadOp: 'clear' | 'load' = 'clear'): RenderPassEncoder {
         frameStats.shadowLayers++;
         this._shadowDrawMark = frameStats.drawCalls;
         this._shadowTriangleMark = frameStats.triangles;
@@ -8750,7 +8841,7 @@ export class Renderer {
         return this._passEncoder.beginRenderPass(target, {
             label,
             colorAttachments: [],
-            depthAttachment: { loadOp: 'clear', storeOp: 'store', baseArrayLayer: layer },
+            depthAttachment: { loadOp, storeOp: 'store', baseArrayLayer: layer },
         });
     }
 
@@ -10281,9 +10372,33 @@ export class Renderer {
         this._spotShadowsActive = false;
 
         const casters: LightNode[] = [];
-        if (this._shadowsEnabled && this._spotShadowsEnabled)
-            for (const node of scene.lights)
-                if (node.type === 'spotlight' && node.castShadows) casters.push(node);
+        if (this._shadowsEnabled && this._spotShadowsEnabled) {
+            for (const node of scene.lights) {
+                if (node.type !== 'spotlight' || !node.castShadows || node.index < 0) continue;
+                // As the point lights are filtered: a spot whose cone is off screen, or whose whole reach
+                // is hidden behind what is on screen, shadows nothing anyone can see.
+                const spot = node.light as Spotlight;
+                spotBoundingSphere(node.worldPosition, node.worldForward, spot.range,
+                                   spot.outerCutOff * Math.PI / 180, this._coneSphere);
+                const c = this._coneSphere.center, r = this._coneSphere.radius;
+                if (this._frustumCulling && !this._frustum.intersectsSphere(c[0], c[1], c[2], r)) continue;
+                casters.push(node);
+            }
+        }
+        // Nearest first, hidden ones last, then truncated, as the point lights are (see there): the slots
+        // go to the lights the camera is among, and `SpotShadowSlots.update` lets an incumbent keep its own.
+        if (casters.length > Renderer.MAX_SPOT_SHADOWS) {
+            const cam = this._activeCamera.position;
+            const rank = (n: LightNode) => {
+                const spot = n.light as Spotlight;
+                spotBoundingSphere(n.worldPosition, n.worldForward, spot.range,
+                                   spot.outerCutOff * Math.PI / 180, this._coneSphere);
+                return vec3.squaredDistance(n.worldPosition, cam)
+                    + (this._lightOccluded(n, this._coneSphere.center, this._coneSphere.radius) ? 1e12 : 0);
+            };
+            casters.sort((a, b) => rank(a) - rank(b));
+            casters.length = Renderer.MAX_SPOT_SHADOWS;
+        }
 
         // Reconcile first, THEN read layers back: an id that already held a layer keeps it, so a light
         // that merely moved in the traversal order keeps rendering into the same map.
@@ -10291,10 +10406,18 @@ export class Renderer {
 
         if (casters.length === 0) {
             if (this._spotShadowsDirty) { this._spotShadowFBO.clearAll(); this._spotShadowsDirty = false; }
+            this._spotShadowCache.invalidateAll();
+            this._spotStaticCache.invalidateAll();
             return;
         }
         if (!this._beginPass('shadows.spot')) return;
         this._ensureShadowCasters(scene);
+        // The static copy, as for the point faces (see `_renderPointShadows`).
+        if (this._spotStaticFBO.size !== this._spotShadowFBO.size || this._spotStaticFBO.layers !== this._spotShadowFBO.layers) {
+            this._spotStaticFBO.create(this._spotShadowFBO.size, this._spotShadowFBO.layers);
+            this._spotStaticCache.invalidateAll();
+            this._spotShadowCache.invalidateAll();
+        }
 
         GLState.depthTest(true);
         GLState.depthMask(true);
@@ -10328,9 +10451,28 @@ export class Renderer {
             // distance, because a perspective map's texel grows as it goes.
             this._spotShadowTexelScalePacked[layer] = (2 * Math.tan(halfFov)) / this._spotShadowResolution;
 
-            const pass = this._beginDepthPass(this._spotShadowFBO.renderTarget, 'spotShadow', layer);
-            this._renderShadowCasters(pass, this._casterRecords, this._casterCount, this._spotShadowMatrices[layer]);
-            this._endDepthPass(pass);
+            // Cached as a point face is: redrawn only when what stands in its frustum changed, and then
+            // from its static copy plus what moves. Keyed on the light matrix itself, which carries
+            // position, direction, cone and range.
+            const matrix = this._spotShadowMatrices[layer];
+            const lists = this._pointFaceCasters(matrix);
+            const key = mixTransform(HASH_SEED, matrix);
+            const staticStale = this._spotStaticCache.needsUpdate(layer, pos, far, mixNumber(key, lists.staticHash));
+            const liveStale = this._spotShadowCache.needsUpdate(layer, pos, far,
+                mixNumber(mixNumber(key, lists.staticHash), lists.dynamicHash)) || staticStale;
+            if (staticStale) {
+                const pass = this._beginDepthPass(this._spotStaticFBO.renderTarget, 'spotShadow', layer);
+                this._renderShadowCasters(pass, lists.statics, lists.staticCount, matrix);
+                this._endDepthPass(pass);
+            }
+            if (!liveStale) continue;
+            this._copyDepthLayer(this._spotStaticFBO.texture, this._spotShadowFBO.texture, layer,
+                                 this._spotShadowResolution);
+            if (lists.dynamicCount > 0) {
+                const pass = this._beginDepthPass(this._spotShadowFBO.renderTarget, 'spotShadow', layer, 'load');
+                this._renderShadowCasters(pass, lists.dynamics, lists.dynamicCount, matrix);
+                this._endDepthPass(pass);
+            }
         }
 
         GLState.cullFace('back');
@@ -10373,10 +10515,15 @@ export class Renderer {
         // Nearest first, then truncated, so a light walking up to the camera can claim a free slot
         // ahead of one further away. `SpotShadowSlots.update` still lets an incumbent keep its slot —
         // that is what stops a light sitting on the capacity boundary from strobing.
+        // A light whose whole reach is hidden behind what is on screen (the torch in the next room) goes
+        // to the back of the queue rather than out of it: it gets a map only when there are slots to
+        // spare. Dropping it outright made a light at the edge of visibility trade its slot back and
+        // forth as its query verdict aged, and every hand-over redraws all six faces from scratch.
         if (casters.length > MAX_POINT_SHADOWS) {
             const cam = this._activeCamera.position;
-            casters.sort((a, b) => vec3.squaredDistance(a.worldPosition, cam)
-                                 - vec3.squaredDistance(b.worldPosition, cam));
+            const rank = (n: LightNode) => vec3.squaredDistance(n.worldPosition, cam)
+                + (this._lightOccluded(n, n.worldPosition, (n.light as PointLight).range) ? 1e12 : 0);
+            casters.sort((a, b) => rank(a) - rank(b));
             casters.length = MAX_POINT_SHADOWS;
         }
 
@@ -10386,10 +10533,18 @@ export class Renderer {
         if (casters.length === 0) {
             if (this._pointShadowsDirty) { this._pointShadowFBO.clearAll(); this._pointShadowsDirty = false; }
             this._pointShadowCache.invalidateAll();
+            this._pointStaticCache.invalidateAll();
             return;
         }
         if (!this._beginPass('shadows.point')) return;
         this._ensureShadowCasters(scene);
+        // The static copy, the live atlas's twin: allocated with the first casting point light, and
+        // reallocated with the live one (fresh storage holds undefined depth, so every face redraws).
+        if (this._pointStaticFBO.size !== this._pointShadowFBO.size || this._pointStaticFBO.layers !== this._pointShadowFBO.layers) {
+            this._pointStaticFBO.create(this._pointShadowFBO.size, this._pointShadowFBO.layers);
+            this._pointStaticCache.invalidateAll();
+            this._pointShadowCache.invalidateAll();
+        }
 
         GLState.depthTest(true);
         GLState.depthMask(true);
@@ -10417,8 +10572,7 @@ export class Renderer {
             const near = Math.max(0.05, Math.min(0.5, light.sourceRadius));
             mat4.perspective(this._pointProj, fov, 1, near, far);
 
-            const stale = this._pointShadowFullUpdate
-                || this._pointShadowCache.needsUpdate(slot, pos, far, this._casterHash(scene, pos, far));
+            const full = this._pointShadowFullUpdate;
 
             for (let f = 0; f < 6; f++) {
                 const layer = slot * 6 + f;
@@ -10427,17 +10581,34 @@ export class Renderer {
                 mat4.lookAt(this._pointView, pos, this._pointTarget, face.up);
                 mat4.multiply(this._pointShadowMatrices[layer], this._pointProj, this._pointView);
 
-                // Rebuilt even for a cached slot, and identically so: the cache key covers everything
+                // Rebuilt even for a cached face, and identically so: the cache key covers everything
                 // that moves this matrix, so the recomputed value is the one the layer was drawn with.
                 // `_uvProducing` for the reason the spot matrices take it — the lookup in
                 // chunks/shadows.wgsl turns this into a texture coordinate, and that step is mirrored
                 // on WebGPU. NOT the cube-face capture treatment: this writes a plain 2D array layer.
                 this._pointShadowMatPacked.set(this._uvProducing(this._pointShadowMatrices[layer]), layer * 16);
-                if (!stale) continue;
 
-                const pass = this._beginDepthPass(this._pointShadowFBO.renderTarget, 'pointShadow', layer);
-                this._renderShadowCasters(pass, this._casterRecords, this._casterCount, this._pointShadowMatrices[layer]);
-                this._endDepthPass(pass);
+                // PER FACE, and static apart from dynamic. A face is redrawn only when what stands in
+                // ITS frustum changed, and then from the face's static copy plus the casters that move:
+                // the player walking past a torch costs the one or two faces they are in, a depth copy
+                // and a character, not six passes over every wall of the dungeon.
+                const lists = this._pointFaceCasters(this._pointShadowMatrices[layer]);
+                const staticStale = this._pointStaticCache.needsUpdate(layer, pos, far, lists.staticHash) || full;
+                const liveStale = this._pointShadowCache.needsUpdate(layer, pos, far,
+                    mixNumber(lists.staticHash, lists.dynamicHash)) || staticStale;
+                if (staticStale) {
+                    const pass = this._beginDepthPass(this._pointStaticFBO.renderTarget, 'pointShadow', layer);
+                    this._renderShadowCasters(pass, lists.statics, lists.staticCount, this._pointShadowMatrices[layer]);
+                    this._endDepthPass(pass);
+                }
+                if (!liveStale) continue;
+                this._copyDepthLayer(this._pointStaticFBO.texture, this._pointShadowFBO.texture, layer,
+                                     this._pointShadowResolution);
+                if (lists.dynamicCount > 0) {
+                    const pass = this._beginDepthPass(this._pointShadowFBO.renderTarget, 'pointShadow', layer, 'load');
+                    this._renderShadowCasters(pass, lists.dynamics, lists.dynamicCount, this._pointShadowMatrices[layer]);
+                    this._endDepthPass(pass);
+                }
             }
         }
 
@@ -10449,34 +10620,48 @@ export class Renderer {
     }
 
     /**
-     * A hash of every shadow caster standing inside this light's range, so the cache can tell "nothing
-     * moved" from "something did".
-     *
-     * A sphere test and a few multiplies per model per casting light, against six rasterizations —
-     * the trade is not close. It collapses to a single lookup the day `Scene` grows a revision
-     * counter; until then this is the only signal available that does not lie when a caster is
-     * animated in place.
+     * The shadow casters standing in one point-shadow face's frustum (`lightSpace`), split into static
+     * and dynamic (see `CasterMotion`), with a hash of each half so the face caches can tell "nothing
+     * moved" from "something did". A sphere test and a few multiplies per caster per face, against a
+     * rasterization of the face — the trade is not close. A skinned caster mixes in the frame, because
+     * one animating in place moves no transform and would otherwise keep a stale pose in the map.
      */
-    private _casterHash(scene: Scene, lightPos: vec3, range: number): number {
-        let h = HASH_SEED;
-        for (const node of scene.models) {
-            // Must agree with the caster loop above, or this cache key oscillates every frame.
-            if (!node.visible || !node.initialized || isEditorOnlyNode(node)) continue;
-            if (node.effectiveFade < 0.5) continue;
-            let casts = false;
-            for (const m of node.model.materials)
-                if (m.config.castShadow && !m.config.wireframe) { casts = true; break; }
-            if (!casts) continue;
-            const s = node.getBoundingSphere();
-            const dx = s.center[0] - lightPos[0];
-            const dy = s.center[1] - lightPos[1];
-            const dz = s.center[2] - lightPos[2];
-            const reach = range + s.radius;
-            if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
-            h = mixString(h, node.id);
-            h = mixTransform(h, node.worldTransform);
+    private _pointFaceCasters(lightSpace: mat4): PointFaceCasters {
+        const out = this._pointFaceLists;
+        out.staticCount = 0; out.dynamicCount = 0;
+        let sh = HASH_SEED, dh = HASH_SEED;
+        const frustum = this._pointFaceFrustum;
+        frustum.setFromViewProjection(lightSpace);
+        for (let k = 0; k < this._casterCount; k++) {
+            const r = this._casterRecords[k];
+            const c = r.sphere.center;
+            if (!frustum.intersectsSphere(c[0], c[1], c[2], r.sphere.radius)) continue;
+            const node = r.node;
+            const dynamic = r.terrainVersion < 0
+                && this._casterMotion.isDynamic(node, node.transformVersion, this._frameIndex, r.state.skinned);
+            let h = mixTransform(mixString(dynamic ? dh : sh, node.id), node.worldTransform);
+            if (r.terrainVersion >= 0) h = mixNumber(h, r.terrainVersion);
+            if (dynamic) {
+                if (r.state.skinned) h = mixNumber(h, this._frameIndex);
+                dh = h;
+                out.dynamics[out.dynamicCount++] = r;
+            } else {
+                sh = h;
+                out.statics[out.staticCount++] = r;
+            }
         }
-        return h;
+        out.staticHash = sh; out.dynamicHash = dh;
+        return out;
+    }
+
+    /**
+     * Copy one layer of a depth array into the same layer of another, recorded into the frame's encoder
+     * for the reason {@link _copyDepth} gives.
+     */
+    private _copyDepthLayer(source: Texture, destination: Texture, layer: number, size: number): void {
+        const encoder = this._acquireEncoder('copyDepthLayer');
+        encoder.copyTextureToTexture(source.layerView(layer), destination.layerView(layer), size, size);
+        if (encoder !== this._frameEncoder) encoder.finish();
     }
 
     /** Render the directional light's cascaded shadow maps (one array layer per view-frustum slice). */
@@ -11601,10 +11786,12 @@ export class Renderer {
 
     private _clampExposureEV(ev: number): number {
         // Compensation is SUBTRACTED: +1 stop of exposure compensation means a brighter picture, which
-        // on a meter is a LOWER EV. Applied after the clamp so the trim can still reach past it.
+        // on a meter is a LOWER EV. Applied after the clamp so the trim can still reach past it. The
+        // curve is keyed on the UNCLAMPED metered EV, the scene's own brightness, as Unreal keys it.
         const lo = Math.min(this._exposureMinEV, this._exposureMaxEV);
         const hi = Math.max(this._exposureMinEV, this._exposureMaxEV);
-        return Math.min(hi, Math.max(lo, ev)) - this._exposureCompensation;
+        return Math.min(hi, Math.max(lo, ev)) - this._exposureCompensation
+            - exposureCurveStops(this._exposureCompensationCurve, ev);
     }
 
     /**
@@ -12714,6 +12901,12 @@ export class Renderer {
     }
     public get exposureCompensation(): number { return this._exposureCompensation; }
     public set exposureCompensation(v: number) { this._exposureCompensation = v; }
+    public get exposureCompensationCurve(): ExposureCurveKey[] { return this._exposureCompensationCurve; }
+    public set exposureCompensationCurve(curve: ExposureCurveKey[]) {
+        this._exposureCompensationCurve = (curve ?? [])
+            .filter(k => Array.isArray(k) && Number.isFinite(k[0]) && Number.isFinite(k[1]))
+            .map(k => [k[0], k[1]] as ExposureCurveKey);
+    }
     public get exposureMinEV(): number { return this._exposureMinEV; }
     public set exposureMinEV(v: number) { this._exposureMinEV = v; }
     public get exposureMaxEV(): number { return this._exposureMaxEV; }
@@ -12737,6 +12930,11 @@ export class Renderer {
     /** See RenderSettings.occlusionQueries. */
     public get occlusionQueries(): boolean { return this._occlusionQueriesEnabled; }
     public set occlusionQueries(on: boolean) { this._occlusionQueriesEnabled = !!on; }
+    /** See RenderSettings.lightOcclusionCulling. */
+    public get lightOcclusionCulling(): boolean { return this._lightOcclusionCulling; }
+    public set lightOcclusionCulling(on: boolean) { this._lightOcclusionCulling = !!on; }
+    /** Point and spot lights left out last frame because their whole reach was hidden. */
+    public get occludedLights(): number { return this._gpuOcclusion.hiddenLightsThisFrame; }
     /** See RenderSettings.foliageGpuCulling. */
     public get foliageGpuCulling(): boolean { return this._foliageGpuCulling; }
     public set foliageGpuCulling(on: boolean) { this._foliageGpuCulling = !!on; }
@@ -13009,6 +13207,7 @@ export class Renderer {
         // resolution besides — neither is something the cache key can see.
         this._pointShadowFullUpdate = true;
         this._pointShadowCache.invalidateAll();
+        this._pointStaticCache.invalidateAll();
     }
 
     public get pointShadowDistance(): number { return this._pointShadowDistance; }
@@ -13154,6 +13353,7 @@ export class Renderer {
             horizonOcclusionEnabled: this._horizonOcclusionEnabled,
             autoExposureEnabled: this._autoExposureEnabled,
             exposureCompensation: this._exposureCompensation,
+            exposureCompensationCurve: this._exposureCompensationCurve.map(k => [k[0], k[1]] as ExposureCurveKey),
             exposureMinEV: this._exposureMinEV,
             exposureMaxEV: this._exposureMaxEV,
             exposureSpeedUp: this._exposureSpeedUp,
@@ -13174,6 +13374,7 @@ export class Renderer {
             foliagePrepass: this._foliagePrepass,
             foliageGpuCulling: this._foliageGpuCulling,
             occlusionQueries: this._occlusionQueriesEnabled,
+            lightOcclusionCulling: this._lightOcclusionCulling,
             foliageCullDistance: this._foliageCullDistance,
             particleLodDistanceScale: this._particleLodDistanceScale,
             foliageDensityFalloff: this._foliageDensityFalloff,
@@ -13266,6 +13467,8 @@ export class Renderer {
             this.horizonOcclusionEnabled = s.horizonOcclusionEnabled;
         if (s.autoExposureEnabled !== undefined) this.autoExposureEnabled = s.autoExposureEnabled;
         if (s.exposureCompensation !== undefined) this._exposureCompensation = s.exposureCompensation;
+        // Whole-blob semantics like the tone mapper: a scene without a curve must not inherit the last one.
+        this.exposureCompensationCurve = s.exposureCompensationCurve ?? [];
         if (s.exposureMinEV !== undefined) this._exposureMinEV = s.exposureMinEV;
         if (s.exposureMaxEV !== undefined) this._exposureMaxEV = s.exposureMaxEV;
         if (s.exposureSpeedUp !== undefined) this._exposureSpeedUp = Math.max(0, s.exposureSpeedUp);
@@ -13286,6 +13489,7 @@ export class Renderer {
         if (s.foliagePrepass !== undefined) this.foliagePrepass = s.foliagePrepass;
         if (s.foliageGpuCulling !== undefined) this.foliageGpuCulling = s.foliageGpuCulling;
         if (s.occlusionQueries !== undefined) this.occlusionQueries = s.occlusionQueries;
+        if (s.lightOcclusionCulling !== undefined) this.lightOcclusionCulling = s.lightOcclusionCulling;
         if (s.foliageCullDistance !== undefined) this.foliageCullDistance = s.foliageCullDistance;
         if (s.particleLodDistanceScale !== undefined) this.particleLodDistanceScale = s.particleLodDistanceScale;
         if (s.foliageDensityFalloff !== undefined) this.foliageDensityFalloff = s.foliageDensityFalloff;

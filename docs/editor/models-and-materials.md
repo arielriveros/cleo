@@ -184,7 +184,10 @@ scene's grading.
 
 **Properties** — Basic and PBR. Basic has a colour and an opacity. PBR has base colour, metallic,
 roughness, reflectance, opacity, an emissive colour and **Emissive power**: the colour is the hue and
-the power how hot, and above about 2 an emissive surface starts to bloom. The base colour multiplies a
+the power how hot, and above about 2 an emissive surface starts to bloom. **Exposure weight** is how
+much of the camera's exposure the glow takes: 1 (the default) is physical, faint in daylight and
+fierce in the dark like any other light; lower values hold it closer to one look in every exposure,
+for a rune or a magic effect that must read the same at noon and in a cave. The base colour multiplies a
 base-colour texture, and the section warns when a texture sits under a non-white colour.
 
 **Textures** — one slot per map. Drop a texture on a slot, or pick one.

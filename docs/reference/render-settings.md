@@ -29,6 +29,7 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | `frustumCulling` | `boolean` | `true` | Skip objects outside the camera frustum. |
 | `occlusionCulling` | `'off' \| 'terrain' \| 'all'` | `'all'` | Skip models and foliage cells hidden behind the landscape (`'terrain'`), or behind the landscape and Occluder volumes (`'all'`). A conservative CPU depth buffer, built the same frame — it never hides something visible. Needs `frustumCulling`. |
 | `occlusionQueries` | `boolean` | `true` | Occlusion culling's second stage: GPU occlusion queries against what was actually drawn, for large or heavy models hidden behind buildings, cliffs or rocks. Results arrive a frame or two late, so only a fresh "hidden" is acted on and a camera cut forgets them. Needs `occlusionCulling` on. |
+| `lightOcclusionCulling` | `boolean` | `true` | Leave out every point and spot light whose whole reach is hidden behind what was drawn, using the GPU occlusion queries: it takes no cluster slot and no shadow map. Needs `occlusionQueries` on. |
 
 **What each preset sets:**
 
@@ -51,6 +52,7 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | `exposure` | `number` | `2.0` | The **authored** exposure. Used only while auto-exposure is off. |
 | `autoExposureEnabled` | `boolean` | `true` | Meter the frame and drive exposure from it. |
 | `exposureCompensation` | `number` | `1.0` | Artist trim on the metered result, **in stops**. Positive is brighter. |
+| `exposureCompensationCurve` | `[number, number][]` | `[]` | Extra trim in stops keyed on the **metered** scene EV100: `[ev100, stops]` keys, linear between, held past the ends. Keeps nights and caves darker than full adaptation. |
 | `exposureMinEV` | `number` | `2.0` | Lower clamp on metered EV100. |
 | `exposureMaxEV` | `number` | `17.0` | Upper clamp on metered EV100. |
 | `exposureSpeedUp` | `number` | `3.0` | Adaptation rate as the scene gets brighter. `0` snaps. |
@@ -72,8 +74,9 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 > | 14.5 | 2.8 |
 > | 16.5 | 0.7 |
 >
-> With metering on, the renderer **ignores** `exposure` entirely. To ramp the look over time — a
-> dusk-to-dawn cycle, say — animate `exposureCompensation`, which is applied after the clamp.
+> With metering on, the renderer **ignores** `exposure` entirely. A day/night cycle needs no ramp:
+> the lights keep their real values, metering follows them, and `exposureCompensationCurve` decides how
+> much darker than fully adapted the night may look.
 
 ## Bloom
 

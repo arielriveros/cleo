@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { ModelNode, Material, CustomMaterial, TERRAIN_RELIEF_ENABLED } from 'cleo';
+import { ModelNode, Material, CustomMaterial, TERRAIN_RELIEF_ENABLED, emissiveExposureWeightOf, setEmissiveExposureWeight } from 'cleo';
 import { useEventBus } from '../../EventBusContext';
 import { vec3ToHex } from '../../../utils/UtilFunctions';
 import { newCustomMaterial } from '../../../utils/customMaterials';
@@ -50,6 +50,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   const [reflectance, setReflectance] = useState<number>(material.properties.get('reflectance') ?? 0.5);
   const [emissiveFactor, setEmissiveFactor] = useState<string>(vec3ToHex(material.properties.get('emissiveFactor') || [0,0,0]));
   const [emissiveIntensity, setEmissiveIntensity] = useState<number>(material.properties.get('emissiveIntensity') ?? 1);
+  const [emissiveWeight, setEmissiveWeight] = useState<number>(emissiveExposureWeightOf(material));
 
   // Cel. `diffuse`/`specular`/`ambient`/`shininess`/`emissive` are shared with Blinn-Phong and already
   // have state above; only the toon-specific controls need their own.
@@ -128,6 +129,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     setReflectance(material.properties.get('reflectance') ?? 0.5);
     setEmissiveFactor(vec3ToHex(material.properties.get('emissiveFactor') || [0,0,0]));
     setEmissiveIntensity(material.properties.get('emissiveIntensity') ?? 1);
+    setEmissiveWeight(emissiveExposureWeightOf(material));
     setPbrOpacity(material.properties.get('opacity') ?? 1);
     setDefaultOpacity(material.properties.get('opacity') ?? 1);
 
@@ -452,7 +454,8 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                   : 'How many flat steps the light response is quantized into. 3 is shadow, mid and lit.'}>
                   {hasRamp
                     ? <span className='text-ui-sm text-muted'>From the Ramp texture</span>
-                    : <Slider min={1} max={8} step={1} value={bands} readout={(v) => String(Math.round(v))}                              onChange={(v) => setNum('bands', setBands)(Math.round(v))} />}
+                    : <Slider min={1} max={8} step={1} value={bands} readout={(v) => String(Math.round(v))}
+                              onChange={(v) => setNum('bands', setBands)(Math.round(v))} />}
                 </PropertyRow>
                 <PropertyRow label='Edge softness' hint='Width of every hard edge in this material — the band boundaries, the highlight and the rim — as a fraction of one band, so it means the same thing at any band count. 0 is aliased; a little antialiases the terminator.'>
                   <Slider min={0} max={1} step={0.01} value={bandSoftness} onChange={setNum('bandSoftness', setBandSoftness)} />
@@ -560,8 +563,15 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                     brightness at which anything happens, because bloom thresholds in display-referred
                     terms and a mid-tone emissive lands exactly ON the default threshold. The colour is
                     the hue; this is how hot. Above ~2 an emissive surface starts to bloom. */}
-                <PropertyRow label='Emissive power' divider={false}>
+                <PropertyRow label='Emissive power'>
                   <Slider min={0} max={20} step={0.1} value={emissiveIntensity} onChange={setNum('emissiveIntensity', setEmissiveIntensity)} />
+                </PropertyRow>
+                <PropertyRow label='Exposure weight' divider={false}>
+                  <Slider min={0} max={1} step={0.05} value={emissiveWeight} onChange={(v) => {
+                    setEmissiveExposureWeight(model.material, v);
+                    setEmissiveWeight(v);
+                    markMaterialDirty();
+                  }} />
                 </PropertyRow>
               </PropertyTable>
             </Section>

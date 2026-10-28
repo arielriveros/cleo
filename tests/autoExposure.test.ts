@@ -24,7 +24,7 @@ import { REFERENCE_ILLUMINANCE } from '../src/graphics/lighting';
  */
 
 /** Must match `LOG_LUM_MIN` / `LOG_LUM_MAX` in exposureMeter.wgsl and `LOG_LUMINANCE_WINDOW`. */
-const LOG_LUM_MIN = -12;
+const LOG_LUM_MIN = -22;
 const LOG_LUM_MAX = 8;
 const KEY = 0.18;
 
@@ -33,7 +33,7 @@ const evForExposure = (e: number) => Math.log2(REFERENCE_ILLUMINANCE / (1.2 * Ma
 
 /** The shader's encode, and the renderer's decode. */
 const encode = (luminance: number) =>
-    Math.min(1, Math.max(0, (Math.log2(Math.max(luminance, 1e-6)) - LOG_LUM_MIN) / (LOG_LUM_MAX - LOG_LUM_MIN)));
+    Math.min(1, Math.max(0, (Math.log2(Math.max(luminance, 1e-8)) - LOG_LUM_MIN) / (LOG_LUM_MAX - LOG_LUM_MIN)));
 const decode = (t: number) => Math.pow(2, LOG_LUM_MIN + t * (LOG_LUM_MAX - LOG_LUM_MIN));
 
 /** `_onExposureSample`: average luminance to the EV the adaptation chases. */
@@ -71,16 +71,18 @@ describe('the EV100 relation auto-exposure writes through', () => {
 });
 
 describe('the log-luminance encode', () => {
-    it('round-trips through 8 bits to better than a tenth of a stop', () => {
-        // The number comes back as one byte, because readPixels refuses a float target on WebGL2.
+    it('round-trips through two bytes to better than a hundredth of a stop', () => {
+        // The number comes back as two bytes (readPixels refuses a float target on WebGL2), decoded as
+        // `(hi + lo / 255) / 255` by `_readExposureSample`.
         let worstStops = 0;
         for (let log2L = LOG_LUM_MIN; log2L <= LOG_LUM_MAX; log2L += 0.13) {
             const L = Math.pow(2, log2L);
-            const quantised = Math.round(encode(L) * 255) / 255;
+            const v = encode(L) * 255, hi = Math.floor(v), lo = Math.round((v - hi) * 255);
+            const quantised = (hi + lo / 255) / 255;
             worstStops = Math.max(worstStops, Math.abs(Math.log2(decode(quantised)) - log2L));
         }
-        // 20 stops over 255 steps is 0.078 per step, so half a step is the floor.
-        expect(worstStops).toBeLessThan(0.05);
+        // 30 stops over 65,025 steps.
+        expect(worstStops).toBeLessThan(0.01);
     });
 
     it('saturates rather than wrapping outside the window', () => {

@@ -155,6 +155,13 @@ describe('buildTextureAsset / withSource', () => {
 });
 
 describe('reconcileTextureAssets', () => {
+    it('names a minted record from a hint when one is known', () => {
+        const r = reconcileTextureAssets([liveOf({ id: 'd97d8775.jpg' })], [], [],
+            (kind) => kind === 'texture' ? 'Grass Base Color' : 'Grass Base Color.jpg');
+        expect(r.textures[0].name).toBe('Grass Base Color');
+        expect(r.images[0].name).toBe('Grass Base Color.jpg');
+    });
+
   it('mints an image and a texture under the SAME id, which is what moves no bytes', () => {
     const r = reconcileTextureAssets([liveOf({ id: 'rock.png' })], [], []);
     expect(r.changed).toBe(true);

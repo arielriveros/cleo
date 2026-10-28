@@ -28,19 +28,24 @@ undoes it in the editor.
 onUpdate(delta: number) {
   const t = this.progress                       // 0 at dusk, 1 at dawn
   Game.updateRenderSettings({
-    exposureCompensation: lerp(this.nightEV, this.dayEV, t),
-    saturation:           lerp(0.7, 1.0, t),
-    vignetteStrength:     lerp(0.55, 0.15, t),
+    saturation:       lerp(0.7, 1.0, t),
+    vignetteStrength: lerp(0.55, 0.15, t),
   })
 }
 ```
 
-Exposure, saturation and vignette are cheap and safe to write every frame.
+Saturation and vignette are cheap and safe to write every frame.
 
-> **With auto-exposure on, the renderer ignores `exposure` entirely.** Ramp
-> `exposureCompensation` instead — it is applied after the metering clamp. And remember that
-> `exposureMinEV` is a **ceiling on brightness**, not a floor; lowering it is what makes a scene
-> blow out.
+> **Don't ramp the exposure or the lamps for a day/night cycle.** Lights keep their real values and
+> auto exposure follows them, as an eye does; how dark the night may look is the
+> `exposureCompensationCurve` (`[ev100, stops]` keys on the metered EV), set once:
+>
+> ```ts
+> Game.updateRenderSettings({ exposureCompensationCurve: [[-2, -2.5], [4, -1.75], [9, -0.5], [12, 0]] })
+> ```
+>
+> With auto-exposure on, the renderer ignores `exposure` entirely. And `exposureMinEV` is a
+> **ceiling on brightness**, not a floor; lowering it is what makes a scene blow out.
 
 ## Materials
 
@@ -162,9 +167,15 @@ light back to plausible values. These defaults need `unit: LIGHT_UNIT` (or an `i
 constructed with neither is read as a pre-photometric light and migrated from its colour.
 
 The real-world presets (`POINT_LIGHT_PRESETS`, `SPOT_LIGHT_PRESETS`, `DIRECTIONAL_LIGHT_PRESETS`,
-or `lightPresetsFor(light)`) hold real values. Pass one through `presetForScene(preset, { ev100,
-ambientLux })` before `applyPreset(light, table, preset)` to brighten it as far as a brighter scene
-needs; `newLightOptions('point', level)` gives a freshly added lamp the same treatment.
+or `lightPresetsFor(light)`) hold real values — a candle is 12 lm, the noon sun 100,000 lx — and
+`applyPreset(light, table, preset)` applies them as stored, in every scene. `newLightOptions('point')`
+gives the defaults a freshly added light starts with. In a daylit scene a real lamp barely registers,
+which is physics: the exposure, not the light, decides how bright it reads.
+
+An emissive material, a sprite or a particle system can take less than the whole exposure with its
+**exposure weight** (0..1, default 1): `setEmissiveExposureWeight(material, 0.1)`,
+`sprite.exposureWeight`, `particles.exposureWeight`. At 1 a glow is physical, faint by day and fierce
+in the dark; lower values hold it closer to one look at every exposure.
 
 ```ts
 const lamp = this.findNode('Lamp') as LightNode

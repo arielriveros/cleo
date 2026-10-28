@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   engineEventBus, TERRAIN_LAYER_TEXTURE_SIZES, AUTO_EXPOSURE_PRESETS, LENS_LOOK_PRESETS, DOF_PRESETS, applyPreset,
 } from 'cleo';
-import type { Preset } from 'cleo';
+import type { ExposureCurveKey, Preset } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
 import { DocScope, Section, Slider, Toggle, Field, NumberInput, PresetMenu, SegmentedControl, Select, Hint, TexturePicker, cn, labelClass } from '../../components/ui';
 
@@ -10,6 +10,7 @@ import { DocScope, Section, Slider, Toggle, Field, NumberInput, PresetMenu, Segm
 // 12px they wrap in Field's default 70px column.
 const LABEL_W = 'w-[112px]';
 import BackendSelector from './BackendSelector';
+import ExposureCurveEditor from './ExposureCurveEditor';
 
 // Debug channels map 1:1 to the renderer's `debugView` setter; the grouping here is display only.
 const CHANNELS: { key: string; label: string }[] = [
@@ -60,8 +61,8 @@ const SHADOW_FILTER: { label: string; mode: number; title: string }[] = [
   { label: 'Poisson', mode: 1, title: '16 taps on a per-pixel rotated disk — softer at wide radii' },
 ];
 
-// Spot-light shadow map resolution. One map per casting spot light, re-rendered every frame with no
-// cascade-style stagger, so this ladder tops out lower than the cascades'.
+// Spot-light shadow map resolution. One map per casting spot light, redrawn whenever something in its
+// cone moves, with no cascade-style stagger, so this ladder tops out lower than the cascades'.
 const SPOT_RES: { label: string; size: number }[] = [
   { label: '256', size: 256 },
   { label: '512', size: 512 },
@@ -127,6 +128,7 @@ export default function RendererSettingsPanel() {
   const [specularAa, setSpecularAa] = useState<boolean>(() => renderer?.specularAaEnabled ?? true);
   const [horizonOcclusion, setHorizonOcclusion] = useState<boolean>(() => renderer?.horizonOcclusionEnabled ?? true);
   const [exposureComp, setExposureComp] = useState<number>(() => renderer?.exposureCompensation ?? 1);
+  const [exposureCurve, setExposureCurve] = useState<ExposureCurveKey[]>(() => renderer?.exposureCompensationCurve ?? []);
   const [exposureMinEV, setExposureMinEV] = useState<number>(() => renderer?.exposureMinEV ?? 2);
   const [exposureMaxEV, setExposureMaxEV] = useState<number>(() => renderer?.exposureMaxEV ?? 17);
   const [exposureSpeedUp, setExposureSpeedUp] = useState<number>(() => renderer?.exposureSpeedUp ?? 3);
@@ -169,6 +171,7 @@ export default function RendererSettingsPanel() {
   const [frustumCulling, setFrustumCulling] = useState<boolean>(() => renderer?.frustumCulling ?? true);
   const [occlusionCulling, setOcclusionCulling] = useState<'off' | 'terrain' | 'all'>(() => renderer?.occlusionCulling ?? 'all');
   const [occlusionQueries, setOcclusionQueries] = useState<boolean>(() => renderer?.occlusionQueries ?? true);
+  const [lightOcclusion, setLightOcclusion] = useState<boolean>(() => renderer?.lightOcclusionCulling ?? true);
   const [foliageShadowDistance, setFoliageShadowDistance] = useState<number>(() => renderer?.foliageShadowDistance ?? 0);
   const [foliagePrepass, setFoliagePrepass] = useState<boolean>(() => renderer?.foliagePrepass ?? false);
   const [foliageGpuCulling, setFoliageGpuCulling] = useState<boolean>(() => renderer?.foliageGpuCulling ?? true);
@@ -231,6 +234,7 @@ export default function RendererSettingsPanel() {
     setSpecularAa(renderer.specularAaEnabled);
     setHorizonOcclusion(renderer.horizonOcclusionEnabled);
     setExposureComp(renderer.exposureCompensation);
+    setExposureCurve(renderer.exposureCompensationCurve);
     setExposureMinEV(renderer.exposureMinEV);
     setExposureMaxEV(renderer.exposureMaxEV);
     setExposureSpeedUp(renderer.exposureSpeedUp);
@@ -273,6 +277,7 @@ export default function RendererSettingsPanel() {
     setFrustumCulling(renderer.frustumCulling);
     setOcclusionCulling(renderer.occlusionCulling);
     setOcclusionQueries(renderer.occlusionQueries);
+    setLightOcclusion(renderer.lightOcclusionCulling);
     setFoliageShadowDistance(renderer.foliageShadowDistance);
     setFoliagePrepass(renderer.foliagePrepass);
     setFoliageGpuCulling(renderer.foliageGpuCulling);
@@ -402,6 +407,10 @@ export default function RendererSettingsPanel() {
           disabled={occlusionCulling === 'off'}
           title='Also ask the GPU which large or heavy objects are hidden behind what was actually drawn — a building, a cliff, a rock — not just the landscape and Occluder volumes. Results arrive a frame or two late, so an object can appear a frame late when what hid it moves away fast.'
           onChange={(c) => { renderer.occlusionQueries = c; setOcclusionQueries(c); touch(); }} />
+        <Toggle label='Light Occlusion' checked={lightOcclusion} className='my-1'
+          disabled={occlusionCulling === 'off' || !occlusionQueries}
+          title='Leave out every point and spot light whose whole reach is hidden behind what was drawn — the torch in the next room — so it takes no lighting work and no shadow map. Like the queries, a light can come back a frame late.'
+          onChange={(c) => { renderer.lightOcclusionCulling = c; setLightOcclusion(c); touch(); }} />
         <Field labelClassName={LABEL_W} label='Foliage Dist'>
           <NumberInput value={foliageCullDistance} min={0} step={5} className='flex-1 text-right px-1 py-0.5'
             onChange={(v) => { renderer.foliageCullDistance = v; setFoliageCullDistance(v); touch(); }} />
@@ -495,6 +504,8 @@ export default function RendererSettingsPanel() {
           <Hint>Metered at EV {ev100.toFixed(2)}.</Hint>
           <Slider label='Compensation (stops)' value={exposureComp} min={-4} max={4} step={0.1}
             onChange={(v) => { renderer.exposureCompensation = v; setExposureComp(v); touch(); }} />
+          <ExposureCurveEditor value={exposureCurve} labelClassName={LABEL_W}
+            onChange={(c) => { renderer.exposureCompensationCurve = c; setExposureCurve(renderer.exposureCompensationCurve); touch(); }} />
           <Slider label='Min EV' value={exposureMinEV} min={-4} max={17} step={0.5}
             onChange={(v) => { renderer.exposureMinEV = v; setExposureMinEV(v); touch(); }} />
           <Slider label='Max EV' value={exposureMaxEV} min={-4} max={20} step={0.5}

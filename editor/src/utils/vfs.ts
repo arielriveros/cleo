@@ -505,6 +505,7 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   const landing = opts.landingFolder && opts.landingFolder !== '/' ? opts.landingFolder : '/'
   const byAsset = indexByAsset(prev)
   const taken = new Set<string>([...prev.entries.map(e => e.path), ...prev.folders])
+  const liveTextures = new Set(libs.textureIds ?? [])
 
   const entries: VfsEntry[] = []
   const kept = new Set<VfsEntry>()
@@ -580,7 +581,12 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
     // Both split halves of BOTH byte kinds are gated on pruneTextures: all four are populated by asset
     // reconcilers reading a manager, so they are only trustworthy once the preload has settled.
     const fromManager = isRawByteKind(e.kind) || e.kind === 'texture' || e.kind === 'soundSample'
-    const prunable = fromManager ? opts.pruneTextures : opts.prune
+    // Never an image or texture the TextureManager still holds: its record is about to be minted (the
+    // asset reconciler runs in the same commit that arms pruneTextures, a render behind this pass), and
+    // pruning it here re-lands it at the root under its hash id the moment the record arrives. That is
+    // how a freshly imported project used to open with every texture loose in the root folder.
+    const live = (e.kind === 'texture' || e.kind === 'image') && liveTextures.has(e.assetId)
+    const prunable = !live && (fromManager ? opts.pruneTextures : opts.prune)
     if (prunable) { changed = true; continue }
     entries.push(e)
   }
@@ -716,14 +722,27 @@ function aliveIds(libs: LibSnapshot): Record<AssetKind, Set<string>> {
  * The flat `data[]` the SVAR file manager is initialised with. Folders come first, shallowest first —
  * FileTree.add resolves `byId(parent)` eagerly. The root '/' must not be emitted; FileTree creates it.
  * Entries whose asset no longer exists are skipped rather than dropped from the index.
+ *
+ * A texture's source image is not shown: the texture card is the asset, and its image (same id, kept in a
+ * `Source` folder beside it) would list every texture twice. The index keeps the image entry, so moves,
+ * deletes and reconcile see it as before; an image with no texture over it (a raw import) still shows. A
+ * `Source` folder left with nothing to show is not shown either.
  */
 export function buildFileManagerData(vfs: VfsIndex, libs: LibSnapshot): FmEntity[] {
   const alive = aliveIds(libs)
+  const textured = new Set(vfs.entries.filter(e => e.kind === 'texture' && alive.texture.has(e.assetId)).map(e => e.assetId))
 
-  const out: FmEntity[] = vfs.folders.map(f => ({ id: f, type: 'folder' as const }))
+  const files: FmEntity[] = []
   for (const e of vfs.entries) {
     if (!alive[e.kind].has(e.assetId)) continue
-    out.push({ id: e.path, type: 'file', date: e.created ? new Date(e.created) : undefined, size: e.size })
+    if (e.kind === 'image' && textured.has(e.assetId)) continue
+    files.push({ id: e.path, type: 'file', date: e.created ? new Date(e.created) : undefined, size: e.size })
   }
-  return out
+  // Every folder that holds something shown, at any depth: a file, or a folder that is not a Source folder.
+  const occupied = new Set<string>()
+  const occupy = (p: string) => { for (let d = dirOf(p); d !== '/' && !occupied.has(d); d = dirOf(d)) occupied.add(d) }
+  for (const f of files) occupy(f.id)
+  for (const f of vfs.folders) if (baseOf(f) !== SOURCE_FOLDER) occupy(f)
+  const folders = vfs.folders.filter(f => baseOf(f) !== SOURCE_FOLDER || occupied.has(f))
+  return [...folders.map(f => ({ id: f, type: 'folder' as const })), ...files]
 }

@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react'
-import { DirectionalLight, LightNode, PointLight, Spotlight, SpriteNode, applyPreset, lightPresetsFor, presetForScene, type LightPreset } from 'cleo'
+import { DirectionalLight, LightNode, PointLight, Spotlight, SpriteNode, applyPreset, lightPresetsFor, type LightPreset } from 'cleo'
 import { vec3ToHex } from '../../../utils/UtilFunctions';
 import { useEventBus } from '../../EventBusContext';
-import { useCleoEngine } from '../../EngineContext';
-import { sceneLightLevel } from '../../../utils/sceneLightLevel';
 import Collapsable from '../../../components/Collapsable'
 import { Button, ColorInput, PresetMenu, PropertyTable, PropertyRow, NumberInput, Slider, Section, Toggle, Hint } from '../../../components/ui'
 import { LightIcon } from '../sectionIcons'
@@ -19,7 +17,6 @@ const CONE_HINT = 'Half-angles in degrees. Full brightness inside the inner cone
 
 export default function LightEditor(props: {node: LightNode}) {
   const eventEmitter = useEventBus();
-  const { instance } = useCleoEngine();
   const light = props.node.light;
   const markLightDirty = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'light', node: props.node });
 
@@ -82,12 +79,11 @@ export default function LightEditor(props: {node: LightNode}) {
     markLightDirty();
   };
 
-  // The table follows the light's type, which a preset never changes. Shadows are left alone. The real
-  // values are brightened to this scene first: a real bulb in a daylit scene changes no pixel at all.
+  // The table follows the light's type, which a preset never changes. Shadows are left alone. Real values,
+  // the same in every scene: how bright they read is the exposure's job.
   const presets = lightPresetsFor(light);
   const applyLightPreset = (p: LightPreset) => {
-    const level = sceneLightLevel(props.node.scene, instance?.renderer);
-    applyPreset(props.node.light, presets, level ? presetForScene(p, level) : p);
+    applyPreset(props.node.light, presets, p);
     setColor(vec3ToHex(props.node.light.color));
     read();
     markLightDirty();

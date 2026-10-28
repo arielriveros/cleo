@@ -26,7 +26,7 @@ Folders are yours to arrange; nothing depends on where an asset sits.
 
 | Kind | Ext | Created by | Edited in | Used by |
 |---|---|---|---|---|
-| **Image** | real | Import / drop / model import | *no editor* — raw bytes, filed under `Source/` | backs Textures |
+| **Image** | real | Import / drop / model import | *no editor* — raw bytes, filed under `Source/`, hidden while a texture is made from it | backs Textures |
 | **Texture** | `.tex` | Derived automatically from whatever registers as a texture | [Texture mode](#textures) | material slots, tileset atlases, LUTs, lens dirt |
 | **Material** | `.mat` | **+ Add**, or model import | [Material mode](models-and-materials.md#the-material-editor) | model nodes |
 | **Landscape Material** | `.tmat` | **+ Add** | Landscape Material mode | a landscape — each has exactly one, and its slots are the surfaces you paint |

@@ -138,7 +138,10 @@ A physically based sky, baked to a cubemap whenever the sun moves, with air and 
   its own intensity and rotation, plus airglow.
 - **Moon** — part of the night sky. It rises opposite the sun, moved by the azimuth and elevation
   offsets, with a phase, size, colour and brightness. Once the sun has set, the scene's directional
-  light shines from the moon at **Moonlight on Scene** times its intensity, shadows included.
+  light shines from the moon at **Moonlight on Scene** times its intensity, shadows included. The
+  whole night sky (moonlit air, stars, airglow and the disc) scales with it too, at the brightness it
+  was tuned for at the default 0.08: a real moon is about 0.000002 of the sun, and with lights in real
+  units an auto exposure opens up to a sky that dark rather than the sky lighting the night.
 - **Quality** — the baked sky's resolution, and the view and light march steps.
 - **Fog** — height fog, measured along each line of sight: density, start distance, maximum opacity,
   and the **Height** below which it is uniform and the **Height Falloff** with which it thins above

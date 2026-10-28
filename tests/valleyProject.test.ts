@@ -240,9 +240,22 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             expect(level, `bank at ${a}°`).toBeLessThan(heightAt(px + Math.cos(a * Math.PI / 180) * r, pz + Math.sin(a * Math.PI / 180) * r));
         }
         expect(level - heightAt(px, pz)).toBeGreaterThan(0.5);    // there is a pond, not a puddle
-        const probe = nodes().find(n => n.name === 'Pond Probe');
-        expect(probe.type).toBe('lightProbe');
-        expect(Math.hypot(probe.position[0] - px, probe.position[2] - pz)).toBeLessThan(1);
+        // One probe lights and reflects the whole valley, the pond included: unbounded, so it holds everywhere.
+        const probes = nodes().filter(n => n.type === 'lightProbe');
+        expect(probes.map(p => p.name)).toEqual(['Valley Probe']);
+        expect(probes[0].size).toEqual([0, 0, 0]);
+    });
+
+    it("shadows the torches' lights, and only theirs", () => {
+        const templates = library('templates');
+        const lightsOf = (name: string) => {
+            const out: any[] = [];
+            const walk = (n: any) => { if (n.type === 'light') out.push(n); (n.children ?? []).forEach(walk); };
+            walk(templates.find((t: any) => t.name === name).nodeJson);
+            return out;
+        };
+        for (const name of ['Torch', 'Wall Torch']) expect(lightsOf(name).map(l => l.castShadows), name).toEqual([true]);
+        for (const name of ['Candle', 'Hanging Brazier']) expect(lightsOf(name).map(l => l.castShadows), name).toEqual([false]);
     });
 
     it('gives the water a transparent forward custom material with WGSL a published WebGPU game can use', async () => {
@@ -385,20 +398,22 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         }
     });
 
-    it('hangs a wall torch at every sconce of the light rig, and lights the dungeon with fire', () => {
+    it('hangs wall torches at the light rig sconces, spaced apart, and lights the dungeon with fire', () => {
         const all = dungeonNodes();
         const templates = library('templates');
         const templateOf = (n: any) => templates.find((t: any) => t.id === n.variables?.__templateId?.value);
         const count = (name: string) => all.filter(n => templateOf(n)?.name === name).length;
-        expect(count('Wall Torch')).toBeGreaterThan(45);
-        expect(count('Torch')).toBeGreaterThanOrEqual(6);
-        expect(count('Candle')).toBeGreaterThan(12);
+        // Thinned (layout SCONCE_SPACING and the FIRES list): enough to light every room, never a cluster.
+        expect(count('Wall Torch')).toBeGreaterThan(12);
+        expect(count('Wall Torch')).toBeLessThan(30);
+        expect(count('Torch')).toBe(4);
+        expect(count('Candle')).toBe(8);
         expect(count('Fire Pit')).toBe(3);
         expect(count('Bonfire')).toBe(1);
         expect(count('Hanging Brazier')).toBe(2);
         // Fire is the tileset's: 8 x 4 frames of 128 x 256, additive, each copy on a frame of its own.
         const flames = all.filter(n => n.type === 'animatedSprite');
-        expect(flames.length).toBeGreaterThan(60);
+        expect(flames.length).toBeGreaterThan(30);
         for (const f of flames) {
             expect(f.sprite.tileset.tileWidth).toBe(128);
             expect(f.sprite.tileset.tileHeight).toBe(256);

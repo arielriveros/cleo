@@ -27,13 +27,19 @@
 @group(0) @binding(0) var u_screenTexture_texture: texture_2d<f32>;
 @group(0) @binding(1) var u_screenTexture_sampler: sampler;
 
-/** The encode window, in log2 of internal radiance. Must match `Renderer.LOG_LUMINANCE_WINDOW`. */
-const LOG_LUM_MIN: f32 = -12.0;
+/**
+ * The encode window, in log2 of internal radiance. Must match `Renderer.LOG_LUMINANCE_WINDOW`.
+ *
+ * The floor is what the meter can see: -22 is a scene metering at about EV -3.5, a moonlit field. It was
+ * -12 (EV 6.5) while lights were daylight-scaled; with real lumens a torch-lit room meters near EV 3-5 and
+ * a -12 floor pinned every such scene to the same EV, whatever was in it.
+ */
+const LOG_LUM_MIN: f32 = -22.0;
 const LOG_LUM_MAX: f32 = 8.0;
 /** Taps per axis. 256 total, which is plenty for a number that is then smoothed over ~a second. */
 const GRID: i32 = 16;
-/** Histogram resolution. 64 bins over a 20-stop window is 0.31 stops per bin. */
-const BINS: i32 = 64;
+/** Histogram resolution. 96 bins over a 30-stop window is 0.31 stops per bin. */
+const BINS: i32 = 96;
 /**
  * Fraction of the frame discarded from each end before averaging — Unreal's `AutoExposureLowPercent`
  * and `HighPercent`, whose defaults are the same 10 and 90.
@@ -53,7 +59,7 @@ fn tapLogLuminance(index: i32) -> f32 {
     // nothing about the frame and the taps have to be placed explicitly.
     let uv = (vec2<f32>(f32(index % GRID), f32(index / GRID)) + 0.5) / f32(GRID);
     let c = textureSampleLevel(u_screenTexture_texture, u_screenTexture_sampler, uv, 0.0).rgb;
-    let lum = max(dot(c, vec3<f32>(0.2126, 0.7152, 0.0722)), 1e-6);
+    let lum = max(dot(c, vec3<f32>(0.2126, 0.7152, 0.0722)), 1e-8);
     return clamp(log2(lum), LOG_LUM_MIN, LOG_LUM_MAX);
 }
 
@@ -67,9 +73,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let span = LOG_LUM_MAX - LOG_LUM_MIN;
 
     // Pass one: a histogram, which is how the percentile cuts are found without sorting 256 values in
-    // a fragment. 64 bins is 256 bytes of local storage, unlike the 1 KB an array of the samples
+    // a fragment. 96 bins is 384 bytes of local storage, unlike the 1 KB an array of the samples
     // themselves would need.
-    var histogram: array<f32, 64>;
+    var histogram: array<f32, 96>;
     for (var b = 0; b < bins; b = b + 1) { histogram[b] = 0.0; }
     for (var i = 0; i < total; i = i + 1) {
         let t = (tapLogLuminance(i) - LOG_LUM_MIN) / span;

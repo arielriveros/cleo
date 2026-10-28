@@ -1,4 +1,4 @@
-import { Node, Game, REFERENCE_ILLUMINANCE, kelvinToRgb } from 'cleo'
+import { Node, kelvinToRgb } from 'cleo'
 
 /**
  * Valley — the time of day. Attach to a node named "Time of Day" (the fires look it up by that name).
@@ -10,10 +10,13 @@ import { Node, Game, REFERENCE_ILLUMINANCE, kelvinToRgb } from 'cleo'
  *   - the sun's colour (warm and dim at the horizon, white at noon) and brightness;
  *   - the moon: below the horizon the renderer hands the key light to the moon, opposite the sun. Its light
  *     is the sun's times the sky's `moonlightIntensity`, set here so the moon gives `moonLux`;
- *   - the camera's exposure, from `dayEV` at noon through `duskEV` to `nightEV`: the eye adapting;
  *   - the valley mist, thick at dawn and burning off by mid-morning;
- *   - the god rays, strongest with a low sun;
- *   - `lampScale` / `lampRange`, read by every Fire Light (ValleyFireLight): torches carry the night.
+ *   - the god rays, strongest with a low sun.
+ *
+ * What it does NOT touch is the camera or the lamps. Every light keeps its real value all day — the sun
+ * its lux, a torch its lumens — and the scene's auto exposure adapts to whatever they add up to, as an eye
+ * does: at noon a torch is lost in the sun, at midnight it carries the road. How dark the night is allowed
+ * to look is the exposure's compensation curve (the Day–Night exposure preset), not a multiplier here.
  *
  * The ambient fill falls with the sun on its own (the Sky Light's night ambient). Light probes are
  * re-captured each time the sun has moved `probeDegrees`, so reflections keep up.
@@ -38,19 +41,11 @@ export default class ValleyDayNightNode extends Node {
   public declination: number = 10
   /** The sun's illuminance (lux) once it is well up. */
   public sunLux: number = 79600
-  /** The moon's illuminance (lux) at full night. */
-  public moonLux: number = 1600
-  /** Exposure value (EV100) with the sun well up, at the horizon, and at full night. */
-  public dayEV: number = 15
-  public duskEV: number = 14.2
-  public nightEV: number = 13.4
   /**
-   * What torches and lamps are multiplied by in daylight and at full night, and their range at night. The
-   * fires are lit for the dungeon: by day a torch should light nothing, by night it lights the road.
+   * The moon's illuminance (lux) at full night. A real full moon gives about 0.25 lx; this is a storybook
+   * one, bright enough to show the shape of the valley between the torches.
    */
-  public dayLampScale: number = 0.18
-  public nightLampScale: number = 2.1
-  public nightLampRange: number = 1.6
+  public moonLux: number = 2
   /** The Sky Light's intensity at full night: the night sky lights the valley as well as the moon does. */
   public nightSkyLight: number = 0.4
   /** Degrees the sun moves between light-probe captures. */
@@ -59,9 +54,6 @@ export default class ValleyDayNightNode extends Node {
   public hour: number = 9.5
   /** Runtime: 0 by day, 1 at full night. */
   public nightFactor: number = 0
-  /** Runtime, for the Fire Light script. */
-  public lampScale: number = 1
-  public lampRange: number = 1
 
   private _sun: any = null
   private _sky: any = null
@@ -71,7 +63,6 @@ export default class ValleyDayNightNode extends Node {
   private _wasDead: boolean = false
   private _fog: { density: number, falloff: number, opacity: number } = null
   private _godRays: number = 0
-  private _lastEV: number = NaN
   private _lastStep: number = NaN
   private _probeAt: number[] = null
 
@@ -144,23 +135,14 @@ export default class ValleyDayNightNode extends Node {
       const low = smooth(-12, -2, elevation) * (1 - smooth(4, 14, elevation))
       const mist = Math.max(0.08 * this.nightFactor, low * (this.hour < 12 ? 1 : 0.15))
       if (this._fog) {
-        this._sky.fogDensity = this._fog.density + (0.006 - this._fog.density) * mist
+        this._sky.fogDensity = this._fog.density + (0.002 - this._fog.density) * mist
         this._sky.fogHeightFalloff = this._fog.falloff + (0.05 - this._fog.falloff) * mist
-        this._sky.fogMaxOpacity = this._fog.opacity + (0.85 - this._fog.opacity) * mist
+        this._sky.fogMaxOpacity = this._fog.opacity + (0.6 - this._fog.opacity) * mist
       }
       this._sky.godRayExposure = this._godRays * (1 + 1.4 * (1 - smooth(5, 30, elevation)) * (1 - this.nightFactor) - 0.4 * this.nightFactor)
     }
 
-    // Exposure: dayEV -> duskEV as the sun comes down to the horizon, -> nightEV as night falls.
-    const ev = this.nightEV + (this.duskEV - this.nightEV) * (1 - this.nightFactor) + (this.dayEV - this.duskEV) * day
-    if (force || !(Math.abs(ev - this._lastEV) < 0.01)) {
-      this._lastEV = ev
-      Game.updateRenderSettings({ exposure: REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, ev)) })
-    }
-
     if (this._skyLight) this._skyLight.intensity = this._skyLightIntensity * (1 + (this.nightSkyLight - 1) * this.nightFactor)
-    this.lampScale = this.dayLampScale + (this.nightLampScale - this.dayLampScale) * this.nightFactor
-    this.lampRange = 1 + (this.nightLampRange - 1) * this.nightFactor
 
     // Light probes, each time the sun has moved far enough (and right after a jump).
     if (force || !this._probeAt || Math.acos(Math.min(1, pos[0] * this._probeAt[0] + pos[1] * this._probeAt[1] + pos[2] * this._probeAt[2])) * 180 / Math.PI > this.probeDegrees) {

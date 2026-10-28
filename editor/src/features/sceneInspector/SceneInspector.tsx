@@ -466,7 +466,7 @@ export default function SceneInspector() {
       Logger.warn('Cannot add a node inside a template instance', 'Editor');
       return;
     }
-    addItemTo(item, parent, { editorScene, eventEmitter, triggers, renderer: instance?.renderer }).catch(err => console.error(err));
+    addItemTo(item, parent, { editorScene, eventEmitter, triggers }).catch(err => console.error(err));
   };
 
   // Delete and F2, on top of react-arborist's own keymap. Capture phase and stopping propagation, because

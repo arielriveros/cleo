@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { GpuOcclusion, GPU_OCCLUSION_BUDGET, MAX_AGE, MIN_RADIUS, MIN_TRIANGLES } from '../src/graphics/gpuOcclusion';
+import { GpuOcclusion, GPU_OCCLUSION_BUDGET, LIGHT_OCCLUSION_BUDGET, MAX_AGE, MIN_RADIUS, MIN_TRIANGLES } from '../src/graphics/gpuOcclusion';
 import type { OcclusionQuerySet } from '../src/graphics/rhi/resources';
 import type { ModelNode } from '../src/core/scene/nodes/modelNode';
 
@@ -84,5 +84,31 @@ describe('GpuOcclusion', () => {
         o.beginFrame(set, EYE, FWD);
         o.isHidden(a); o.isHidden(b);
         expect(o.hiddenThisFrame).toBe(2);
+    });
+
+    it('queries lights by their influence sphere, within a budget of their own', () => {
+        const set = new FakeQueries();
+        const o = new GpuOcclusion();
+        const torch = {}, lamp = {};
+        o.beginFrame(set, EYE, FWD);
+        expect(o.considerLight(torch, [1, 2, 3], 7)).toBe(true);
+        expect(o.considerLight(torch, [1, 2, 3], 7)).toBe(false);   // once a frame
+        expect(o.considerLight(lamp, [0, 0, 0], 0)).toBe(false);    // reaches nothing: nothing to ask
+        expect(Array.from(o.lightSpheres.get(torch)!)).toEqual([1, 2, 3, 7]);
+        for (let i = 0; i < LIGHT_OCCLUSION_BUDGET * 2; i++) o.considerLight({}, [0, 0, 0], 5);
+        expect(o.candidates.length).toBe(LIGHT_OCCLUSION_BUDGET);
+        // Nodes still get the rest of the total budget.
+        expect(o.consider(node('house'), MIN_RADIUS * 2, 10)).toBe(true);
+
+        const tag = o.submitted();
+        const visible = new Uint8Array(o.candidates.length).fill(1);
+        visible[0] = 0;                                              // the torch's reach is hidden
+        set.ready.push({ tag, count: visible.length, visible });
+        o.beginFrame(set, EYE, FWD);
+        expect(o.isLightHidden(torch)).toBe(true);
+        expect(o.hiddenLightsThisFrame).toBe(1);
+        // A camera cut forgets it.
+        o.beginFrame(set, [100, 0, 0], FWD);
+        expect(o.isLightHidden(torch)).toBe(false);
     });
 });

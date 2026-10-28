@@ -1,4 +1,5 @@
 import { definePresets, type Preset } from "../core/presets";
+import type { ExposureCurveKey } from "./lighting";
 
 /**
  * One-click render looks, assigned onto the Renderer through its own setters. They never touch what the
@@ -14,6 +15,7 @@ export interface AutoExposurePresetOptions {
     exposureMaxEV?: number;
     exposureSpeedUp?: number;
     exposureSpeedDown?: number;
+    exposureCompensationCurve?: ExposureCurveKey[];
     ev100?: number;
 }
 
@@ -23,8 +25,13 @@ export type AutoExposurePreset = Preset<AutoExposurePresetOptions>;
 // at, and a fixed one appends it after `autoExposureEnabled`, so metering is off before the EV is written.
 const EXPOSURE_BASE: AutoExposurePresetOptions = {
     autoExposureEnabled: true, exposureCompensation: 1, exposureMinEV: 2, exposureMaxEV: 17,
-    exposureSpeedUp: 3, exposureSpeedDown: 1,
+    exposureSpeedUp: 3, exposureSpeedDown: 1, exposureCompensationCurve: [],
 };
+
+// Darker-than-adapted trims for the dark end of the meter. Lights keep real values, so without these a
+// fully adapted eye lifts a moonlit field or a torch-lit crypt to a grey day. Keyed on the metered EV100.
+const NIGHT_CURVE: ExposureCurveKey[] = [[-3, -3.5], [1, -3], [5, -2], [9, -0.75], [12, 0]];
+const CAVE_CURVE: ExposureCurveKey[] = [[0, -0.75], [4, -0.5], [8, -0.25], [11, 0]];
 
 export const AUTO_EXPOSURE_PRESETS: AutoExposurePreset[] = definePresets(EXPOSURE_BASE, [
     ['default', 'Default', 'Engine defaults: +1 stop of bias, metering from interiors (EV 2) to snow (EV 17).', {}],
@@ -32,10 +39,11 @@ export const AUTO_EXPOSURE_PRESETS: AutoExposurePreset[] = definePresets(EXPOSUR
         { exposureMinEV: 8 }],
     ['interior', 'Interior', 'Lamp-lit rooms: a range centred on interiors, so a window cannot crush the room.',
         { exposureCompensation: 0.5, exposureMinEV: 0, exposureMaxEV: 12, exposureSpeedUp: 2.5, exposureSpeedDown: 1.5 }],
-    ['cave', 'Cave / Dungeon', 'Eyes slowly adjust to the dark, and daylight dazzles for a moment on the way out.',
-        { exposureCompensation: 0, exposureMinEV: -2, exposureMaxEV: 13, exposureSpeedUp: 1.5, exposureSpeedDown: 0.4 }],
-    ['dayNight', 'Day–Night Cycle', 'A wide range, so a moonlit night still meters to something visible.',
-        { exposureMinEV: -3, exposureSpeedUp: 2, exposureSpeedDown: 0.7 }],
+    ['cave', 'Cave / Dungeon', 'Eyes slowly adjust to the dark, but never past a torch-lit room (EV 3), and daylight dazzles for a moment on the way out.',
+        { exposureCompensation: 0, exposureMinEV: 3, exposureMaxEV: 13, exposureSpeedUp: 1.5, exposureSpeedDown: 0.4,
+            exposureCompensationCurve: CAVE_CURVE }],
+    ['dayNight', 'Day–Night Cycle', 'Meters from noon to a moonlit night, with a curve that keeps the night darker than a fully adapted eye would.',
+        { exposureMinEV: -3, exposureSpeedUp: 2, exposureSpeedDown: 0.7, exposureCompensationCurve: NIGHT_CURVE }],
     ['lowKey', 'Low Key / Horror', 'Keeps darkness dark: never lifts shadows past EV 4, and adapts to the dark slowly.',
         { exposureCompensation: -0.5, exposureMinEV: 4, exposureMaxEV: 15, exposureSpeedUp: 2, exposureSpeedDown: 0.3 }],
     ['cinematic', 'Cinematic', 'Gentle, slow adaptation in both directions.',

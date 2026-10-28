@@ -130,6 +130,25 @@ describe('reconcileVfs', () => {
     expectClosedUnderAncestors(next);
   });
 
+  it('does not prune a texture the TextureManager still holds, so it keeps its folder until its record lands', () => {
+    // A bundle's index files every texture; on a fresh import the texture records are minted a render
+    // after pruneTextures arms. Pruning in between re-landed every texture at the root under its hash.
+    const prev = index(['/Rock/Textures', `/Rock/Textures/${SOURCE_FOLDER}`], [
+      entry('/Rock/Textures/Rock.tex', { kind: 'texture', assetId: 'h1' }),
+      entry(`/Rock/Textures/${SOURCE_FOLDER}/Rock.png`, { kind: 'image', assetId: 'h1' }),
+      entry('/Gone.tex', { kind: 'texture', assetId: 'gone' }),
+    ]);
+    const pending = reconcileVfs(prev, libs({ textureIds: ['h1'] }), { prune: true, pruneTextures: true }).next;
+    expect(pending.entries.map(e => e.path)).toEqual(['/Rock/Textures/Rock.tex', `/Rock/Textures/${SOURCE_FOLDER}/Rock.png`]);
+    // The records arrive, named from those entries: nothing moves.
+    const settled = reconcileVfs(pending, libs({
+      textureIds: ['h1'],
+      textures: [{ id: 'h1', name: 'Rock' }] as any,
+      images: [{ id: 'h1', name: 'Rock.png' }] as any,
+    }), { prune: true, pruneTextures: true }).next;
+    expect(settled.entries.map(e => e.path).sort()).toEqual(['/Rock/Textures/Rock.tex', `/Rock/Textures/${SOURCE_FOLDER}/Rock.png`].sort());
+  });
+
   it('keeps texture entries until pruneTextures is explicitly armed', () => {
     // TextureManager is emptied and refilled on every project load, so an entry that merely looks
     // orphaned may just be waiting for preloadTextures.
@@ -162,6 +181,29 @@ describe('buildFileManagerData', () => {
     const vfs = applyDelete(index(['/Props'], [entry('/Props/Crate.mat', { assetId: 'crate' })]), ['/Props']);
     const data = buildFileManagerData(vfs, libs({ materials: [{ id: 'crate', name: 'Crate' }] as any }));
     expect(data).toEqual([]);
+  });
+
+  it("hides a texture's source image, and the Source folder it leaves empty", () => {
+    const src = `/Rock/Textures/${SOURCE_FOLDER}`;
+    const vfs = repairVfs(index([], [
+      entry('/Rock/Textures/Rock.tex', { kind: 'texture', assetId: 'rock' }),
+      entry(`${src}/Rock.png`, { kind: 'image', assetId: 'rock' }),
+      // A raw image import with no texture over it still shows, and keeps its folder.
+      entry(`/Raw/${SOURCE_FOLDER}/Sketch.png`, { kind: 'image', assetId: 'sketch' }),
+    ])).next;
+    const data = buildFileManagerData(vfs, libs({
+      textures: [{ id: 'rock', name: 'Rock' }] as any,
+      images: [{ id: 'rock', name: 'Rock' }, { id: 'sketch', name: 'Sketch' }] as any,
+    }));
+
+    const ids = data.map(d => d.id);
+    expect(ids).toContain('/Rock/Textures/Rock.tex');
+    expect(ids).not.toContain(`${src}/Rock.png`);
+    expect(ids).not.toContain(src);
+    expect(ids).toContain(`/Raw/${SOURCE_FOLDER}/Sketch.png`);
+    expect(ids).toContain(`/Raw/${SOURCE_FOLDER}`);
+    // The index itself keeps the image: moves and deletes still find it.
+    expect(vfs.entries.map(e => e.path)).toContain(`${src}/Rock.png`);
   });
 });
 

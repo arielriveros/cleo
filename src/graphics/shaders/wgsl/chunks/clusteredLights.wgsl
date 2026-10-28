@@ -183,3 +183,23 @@ fn cleoLight(index: i32) -> ClusteredLight {
     out.pointShadowSlot = i32(t3.w);
     return out;
 }
+
+/**
+ * Whether `light` can reach `p` at all: inside its range and, for a spot, inside its cone. Every
+ * lighting loop asks this BEFORE `cleoPunctualVisibility`, because a function argument is evaluated
+ * whether or not the callee returns early: a shadowed light's 9-tap PCF used to run for every pixel of
+ * every cluster it was listed in, and a cluster box is much looser than the sphere that put it there.
+ *
+ * Conservative on purpose, so skipping is exact: the range uses the unclamped distance (PBR clamps it
+ * UP to the bulb radius, which only shrinks the reach), and the cone is only tested outside the bulb.
+ * A point light's cone is inert (`coneScale = 0`), and its direction may be zero, so it is not read.
+ */
+fn cleoLightReaches(light: SpotLight, p: vec3<f32>) -> bool {
+    let toLight = light.position - p;
+    let d2 = dot(toLight, toLight);
+    if (d2 * light.invRangeSquared >= 1.0) { return false; }
+    if (d2 <= light.sourceRadius * light.sourceRadius) { return true; }
+    if (light.coneScale == 0.0) { return light.coneOffset > 0.0; }
+    let cosAngle = dot(toLight, normalize(-light.direction)) * inverseSqrt(max(d2, 1e-12));
+    return cosAngle * light.coneScale + light.coneOffset > 0.0;
+}

@@ -589,7 +589,7 @@ describe.skipIf(!present)('the Valley example project', () => {
         expect(new Set(paths).size).toBe(paths.length);
         const ids = new Set<string>([
             ...manifest().sceneMetas.map((m: any) => m.id),
-            ...['scripts', 'templates', 'models', 'materials', 'animationFields', 'animControllers', 'boneMasks', 'animations', 'rigs', 'particleSystems', 'aiBrains', 'terrainMaterials']
+            ...['scripts', 'templates', 'models', 'materials', 'animationFields', 'animControllers', 'boneMasks', 'animations', 'rigs', 'particleSystems', 'aiBrains', 'terrainMaterials', 'tilesets']
                 .flatMap(l => library(l).map((a: any) => a.id)),
         ]);
         // Textures have no library: the editor re-derives a texture record and its source image (same id)
@@ -631,9 +631,9 @@ describe.skipIf(!present)('the Valley example project', () => {
     it('places the player, torches and interactables as linked template copies', () => {
         const count = (name: string) => instances().filter(n => templateOf(n)?.name === name).length;
         expect(count('Player')).toBe(1);
-        // The cave mouth's pair, and the hamlet's lamps for the night: down the road and on the walls.
-        expect(count('Torch')).toBeGreaterThan(6);
-        expect(count('Wall Torch')).toBeGreaterThan(3);
+        // The cave mouth's pair, and the hamlet's lamps for the night, well apart: down the road and on the walls.
+        expect(count('Torch')).toBeGreaterThanOrEqual(4);
+        expect(count('Wall Torch')).toBeGreaterThanOrEqual(2);
         expect(count('Message')).toBe(6);
         expect(count('Pickup')).toBe(3);
         for (const name of ['Bonfire', 'Lever', 'Gate']) expect(count(name), name).toBe(1);

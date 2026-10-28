@@ -464,3 +464,27 @@ export class PointShadowCache {
     /** Force every slot to re-rasterize. Required after a reallocation: fresh depth storage is undefined. */
     public invalidateAll(): void { this._valid.fill(false); }
 }
+
+/** Frames a caster's transform must hold still before a point shadow treats it as static. */
+export const STATIC_CASTER_FRAMES = 30;
+
+/**
+ * Which shadow casters are STATIC for the point-shadow cache: those whose transform has not changed for
+ * {@link STATIC_CASTER_FRAMES} frames and that are not skinned. A point light keeps a second, static-only
+ * copy of its cube faces, drawn once; each frame a face with a moving caster in it starts from that copy
+ * and draws only what moves, rather than redrawing a dungeon's every wall because the player walked by.
+ * A barrel knocked over and come to rest goes back to static after the window, at the cost of one more
+ * static redraw of the faces it sits in.
+ */
+export class CasterMotion {
+    private readonly _seen = new WeakMap<object, { version: number; changedAt: number }>();
+
+    /** Whether `key` (whose transform counter reads `version` at `frame`) is dynamic this frame. */
+    public isDynamic(key: object, version: number, frame: number, skinned: boolean): boolean {
+        let s = this._seen.get(key);
+        // First sight counts as settled: a scene that just loaded is all static, which is what it is.
+        if (!s) { s = { version, changedAt: -Infinity }; this._seen.set(key, s); }
+        else if (s.version !== version) { s.version = version; s.changedAt = frame; }
+        return skinned || frame - s.changedAt < STATIC_CASTER_FRAMES;
+    }
+}

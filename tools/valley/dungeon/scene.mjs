@@ -16,7 +16,8 @@ import * as L from './layout.mjs'
 
 const round = (v) => Math.round(v * 1000) / 1000
 const D = '/Environment/Dungeon'
-const DP = '/Props/Dungeon'
+// The dungeon's props live with the rest of it: one tree for everything the Dungeon scene is made of.
+const DP = `${D}/Props`
 
 export function buildDungeon(kit) {
   const { id, node, vars, souls, withScript, linkInstance, tex, pbrMaterial, libraryMaterial, modelNode, placeFire, log } = kit
@@ -35,12 +36,16 @@ export function buildDungeon(kit) {
 
   // ----- materials: rocky walls and slabs from build/wall_textures, wood and metal the model's own ---------
 
-  // No height maps: parallax marching on every wall and floor pixel cost more than any other pass on an
-  // integrated GPU (about 4 ms a frame), for a relief the normal maps already mostly give.
+  // A wall set takes every map its pack ships but the height map: colour, normal, ambient occlusion and
+  // roughness (the texture packer folds the last two into the runtime ORM). No metal map: the packs have
+  // none, and the stone is not metal. No height maps: parallax marching on every wall and floor pixel cost
+  // more than any other pass on an integrated GPU (about 4 ms a frame), for a relief the normal maps already
+  // mostly give. A model's own materials (embedded) come packed, as one ARM.
   const textured = (key, name, prefix, extra = {}) => libraryMaterial(`dungeon-${key}`, name, `${D}/Materials`, pbrMaterial({
     diff: tex(`${prefix}_diff.jpg`, `${D}/Textures`, `${name} Base Color`),
     nor: tex(`${prefix}_nor.png`, `${D}/Textures`, `${name} Normal`),
-    arm: tex(`${prefix}_arm.jpg`, `${D}/Textures`, `${name} ARM`),
+    ao: tex(`${prefix}_ao.jpg`, `${D}/Textures`, `${name} AO`),
+    rough: tex(`${prefix}_rough.jpg`, `${D}/Textures`, `${name} Roughness`),
     ...extra,
   }))
   const SLATES = textured('slates', 'Dungeon Castle Slates', 'castle_wall_slates')
@@ -48,11 +53,17 @@ export function buildDungeon(kit) {
   const BRICK = textured('brick', 'Dungeon Stone Brick Wall', 'stone_brick_wall_001')
   // stone_wall_04 is a pale limestone: darkened to sit with the rest of the dungeon.
   const SLABS = textured('slabs', 'Dungeon Stone Slabs', 'stone_wall_04', { tint: [0.58, 0.56, 0.54] })
-  const embedded = (key, name, extra = {}) => textured(key, name, `dungeon_${key}`, extra)
+  const embedded = (key, name, extra = {}) => libraryMaterial(`dungeon-${key}`, name, `${D}/Materials`, pbrMaterial({
+    diff: tex(`dungeon_${key}_diff.jpg`, `${D}/Textures`, `${name} Base Color`),
+    nor: tex(`dungeon_${key}_nor.png`, `${D}/Textures`, `${name} Normal`),
+    arm: tex(`dungeon_${key}_arm.jpg`, `${D}/Textures`, `${name} ARM`),
+    ...extra,
+  }))
   const SKY = libraryMaterial('dungeon-sky', 'Dungeon Night Sky', `${D}/Materials`, {
     ...pbrMaterial({ diff: tex('dungeon_sky_diff.jpg', `${D}/Textures`, 'Dungeon Night Sky Base Color'), roughness: 1, castShadow: false }),
-    // A window's sky glows on its own: faintly, so it reads as moonlit sky rather than a white panel.
-    emissiveFactor: [0.55, 0.65, 1], emissiveIntensity: 0.45,
+    // A window's sky glows on its own: faintly, so it reads as moonlit sky rather than a white panel. A tenth
+    // of the exposure, like the souls glows: held at what it was tuned for when the dungeon opens up to EV 5.
+    emissiveFactor: [0.55, 0.65, 1], emissiveIntensity: 0.45, emissiveExposureWeight: 0.1,
   })
   const MATERIALS = {
     stone_wall: SLATES, stone_slate: SLATES, stone_rubble: SLATES,
@@ -203,8 +214,11 @@ export function buildDungeon(kit) {
 
   function fires() {
     const out = []
-    // The sconces: every torch-height light of the rig, on the wall it hangs off. Cast at the render chunks
-    // within reach of the light only: the whole structure is 1.4 M triangles.
+    // The sconces: the torch-height lights of the rig, on the wall they hang off, no two within
+    // L.SCONCE_SPACING of each other (the rig hangs one every few metres, which is a cluster of lights for
+    // no more light). Cast at the render chunks within reach of the light only: the whole structure is
+    // 1.4 M triangles.
+    const hung = []
     const solidChunks = chunks.filter(c => !['Windows', 'Beams', 'Floors', 'Ceilings'].includes(c.partName))
       .map(c => ({ part: c, bounds: boundsOf([c]) }))
     let wall = 0
@@ -218,6 +232,8 @@ export function buildDungeon(kit) {
         if (hit && (!best || hit.t < best.t)) best = hit
       }
       if (!best || Math.abs(best.normal[1]) > 0.3) throw new Error(`light ${l.index} has no wall to hang a torch on`)
+      if (hung.some(p => Math.hypot(p[0] - best.point[0], p[1] - best.point[1], p[2] - best.point[2]) < L.SCONCE_SPACING)) continue
+      hung.push(best.point)
       const n = [best.normal[0], 0, best.normal[2]]
       const len = Math.hypot(n[0], n[2])
       // Snap the wall to its axis (they all are): a torch square to its wall.
@@ -272,7 +288,7 @@ export function buildDungeon(kit) {
     const daylight = node('Daylight', 'light', {
       id: id('dungeon:daylight'), position: [p[0] + out[0] * 0.45, ceiling - 0.1, p[2] + out[1] * 0.45], rotation: [90, 0, 0],
       lightType: 'spotlight', castShadows: false,
-      light: { unit: 'photometric', color: [0.85, 0.9, 1], intensity: 2150000, range: 7, sourceRadius: 0.3, legacyFalloff: false, cutOff: 18, outerCutOff: 34 },
+      light: { unit: 'photometric', color: [0.85, 0.9, 1], intensity: 2100, range: 7, sourceRadius: 0.3, legacyFalloff: false, cutOff: 18, outerCutOff: 34 },
     })
     const door = withScript(node('Way Out', 'node', {
       id: id('dungeon:exit'), position: [p[0], p[1], p[2]], rotation: [0, yaw, 0],
@@ -366,8 +382,8 @@ export function buildDungeon(kit) {
         wayOut(),
         interactables, spawns, navMesh,
       ],
-      // Near black and cool: what a torch does not reach, the eye barely makes out.
-      ambientLight: [1250, 1400, 2040],
+      // Near black and cool: what a torch does not reach, the eye barely makes out. A lux or two.
+      ambientLight: [1.2, 1.37, 2],
     })
 
     // The navmesh is the walkable area the reachability check found (see walkableSoup): already clear of
@@ -379,13 +395,17 @@ export function buildDungeon(kit) {
     const config = souls.clone(souls.sourceScene.config)
     config.graphics.clearColor = [0.004, 0.004, 0.006, 1]
     config.render.clearColor = [0.004, 0.004, 0.006, 1]
-    // A held exposure (metering would lift the dark to grey), EV 15: the valley's noon. Darker would be truer
-    // to a torch-lit room, and would blow out every glyph, glow and bolt the souls content is tuned for; the
-    // fires are lit for this instead (see fireLight in build.mjs). The valley's lens.
+    // Metered, with the Cave preset: the fires are real torches and candles, so the eye opens up to about
+    // EV 5, slowly, and the curve keeps a torch-lit crypt darker than a fully adapted eye would (metering
+    // alone lifts the dark to grey). The glyphs, glows and bolts take a tenth of the exposure, so they read
+    // as they did. The valley's lens.
     Object.assign(config.render, {
-      exposure: kit.REFERENCE_ILLUMINANCE / (1.2 * 2 ** 15), autoExposureEnabled: false, quality: 'high', motionBlurEnabled: true,
+      ...kit.PRESETS.caveExposure, quality: 'high', motionBlurEnabled: true,
+      // Where metering starts before its first sample, and what a host that cannot meter shows.
+      exposure: kit.REFERENCE_ILLUMINANCE / (1.2 * 2 ** 5),
       ...kit.PRESETS.look, ...kit.PRESETS.dof, dofFocusDistance: kit.PLAYER_ARM,
-      pointShadowsEnabled: true, pointShadowResolution: 512, pointShadowDistance: 20,
+      // The wall and standing torches cast cube shadows (the nearest four); candles, braziers and hearths do not.
+      pointShadowsEnabled: true, pointShadowResolution: 512, pointShadowDistance: 25,
     })
     return { scene: root, textures: [], ui: { version: 1, elements: [] }, config, assetHashes: {}, assetHashVersion: kit.ASSET_HASH_VERSION, savedAt: souls.CREATED_AT }
   }

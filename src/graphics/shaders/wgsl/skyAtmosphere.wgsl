@@ -55,6 +55,14 @@ struct SkyUniforms {
     u_nightTexture: i32,          // 1 = sample the custom night-sky texture instead of procedural stars
     u_moonTexture: i32,           // 1 = sample the custom moon texture instead of the procedural disc
     u_moonEnabled: i32,
+    /**
+     * The whole night sky's brightness: `moonlightIntensity / 0.08`, so 1 at the default. The moonlit air
+     * is the sunlit air times the moon-to-sun illuminance ratio, which is exactly what moonlightIntensity
+     * is for the moon's key light; the stars, airglow and disc ride along so the night keeps its balance.
+     * A scene with a real moon (lux in the single digits against a 100,000 lx sun) gets a sky that dark
+     * too, and its auto exposure opens up to it instead of the sky lighting the ground at 6% of day.
+     */
+    u_nightScale: f32,
 };
 @group(0) @binding(0) var<uniform> u_sky: SkyUniforms;
 // Group 1 is the cube transform (cubeVertex.wgsl). Both textures are bound always — a 1x1 fallback when
@@ -298,7 +306,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let moonDir = normalize(u_sky.u_moonDir);
     let moonScale = u_sky.u_moonIntensity * u_sky.u_moonPhase * f32(u_sky.u_moonEnabled);
     if (u_sky.u_night > 0.0) {
-        let night = u_sky.u_night;
+        let night = u_sky.u_night * u_sky.u_nightScale;
         // The atmosphere a second time, lit by the moon: the moonlit sky and the halo round the moon.
         if (moonScale > 0.0 && moonDir.y > -0.1) {
             col += atmosphere(marchDir, ro, moonDir) * u_sky.u_moonColor * (MOON_SKY * moonScale * night);
@@ -333,11 +341,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Lower hemisphere: fade the horizon sky (see `marchDir`) into a lit ground tint, so the bottom of
     // the cubemap reads as ground rather than a void. At night the moon lights it instead.
     if (viewHitsGround) {
-        let lambert = max(sunDir.y, 0.0) * 0.9 + 0.1;
+        // The 0.1 floor is the sky's own light on the ground, which leaves with the sun: without the
+        // `1 - u_night` a midnight ground glowed at a tenth of noon's, and that tint is what the sky
+        // light projects into the night's ambient.
+        let lambert = (max(sunDir.y, 0.0) * 0.9 + 0.1) * (1.0 - u_sky.u_night);
         var ground = u_sky.u_groundColor * lambert * u_sky.u_sunColor * (u_sky.u_sunIntensity * 0.05);
         let moonLambert = max(moonDir.y, 0.0) * 0.9 + 0.1;
         ground += u_sky.u_groundColor * moonLambert * u_sky.u_moonColor
-                  * (u_sky.u_sunIntensity * 0.05 * MOON_SKY * moonScale * u_sky.u_night);
+                  * (u_sky.u_sunIntensity * 0.05 * MOON_SKY * moonScale * u_sky.u_night * u_sky.u_nightScale);
         let blend = smoothstep(0.0, -0.15, dir.y);
         col = mix(col, ground, blend);
     }
