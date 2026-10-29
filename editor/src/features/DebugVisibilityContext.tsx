@@ -13,6 +13,7 @@ export type DebugCategory =
   | 'lights'
   | 'cameras'
   | 'probes'
+  | 'exposureVolumes'
   | 'decals'
   | 'sounds'
   | 'boundingBoxes'
@@ -44,6 +45,7 @@ export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
   { key: 'lights', label: 'Light icons', runtimeAvailable: true },
   { key: 'cameras', label: 'Camera frustums', runtimeAvailable: true },
   { key: 'probes', label: 'Light probes', runtimeAvailable: true },
+  { key: 'exposureVolumes', label: 'Exposure volumes', runtimeAvailable: true },
   // The icon only. A decal's box is drawn for the SELECTED decal regardless of this switch, like the
   // navmesh bake volume: selecting the node is the request to see it.
   { key: 'decals', label: 'Decal icons', runtimeAvailable: true },
@@ -73,7 +75,7 @@ export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
 
 // These categories default to Editor-on; every other overlay defaults off and is opted into. Runtime is
 // off for all.
-const EDITOR_ON_BY_DEFAULT = new Set<DebugCategory>(['colliders', 'triggers', 'lights', 'cameras', 'probes', 'decals', 'sounds', 'foliageColliders', 'effects', 'particles', 'grid']);
+const EDITOR_ON_BY_DEFAULT = new Set<DebugCategory>(['colliders', 'triggers', 'lights', 'cameras', 'probes', 'exposureVolumes', 'decals', 'sounds', 'foliageColliders', 'effects', 'particles', 'grid']);
 
 export function defaultDebugVisibility(): DebugVisibility {
   const out = {} as DebugVisibility;

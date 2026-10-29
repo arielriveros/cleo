@@ -3,6 +3,7 @@ import { useCleoEngine } from "./EngineContext";
 import { Raycaster, Node, Vec, Logger } from "cleo";
 import TransformGizmo from "./gizmo/TransformGizmo";
 import CollisionGizmo from "./gizmo/CollisionGizmo";
+import BoxVolumeGizmo from "./gizmo/BoxVolumeGizmo";
 import { useCollisionShapeSelection } from "./gizmo/collisionSelection";
 import BoneGizmo from "./clip/BoneGizmo";
 import SocketPreviews from "./sockets/SocketPreviews";
@@ -525,6 +526,11 @@ export default function EngineViewport() {
                 viewportRef={viewportRef}
             />}
             {collisionShapes && <CollisionGizmo
+                selectedNodeId={selectedNode}
+                viewportRef={viewportRef}
+            />}
+            {/* Light probe and exposure volume boxes, sized by the same face handles as collision shapes. */}
+            {collisionShapes && !editingShape && <BoxVolumeGizmo
                 selectedNodeId={selectedNode}
                 viewportRef={viewportRef}
             />}

@@ -10,6 +10,7 @@ import { CameraRigNode } from '../src/core/scene/nodes/cameraRigNode';
 import { TilemapNode } from '../src/core/scene/nodes/tilemapNode';
 import { LightNode } from '../src/core/scene/nodes/lightNode';
 import { LightProbeNode } from '../src/core/scene/nodes/lightProbeNode';
+import { ExposureVolumeNode } from '../src/core/scene/nodes/exposureVolumeNode';
 import { VolumetricCloudsNode } from '../src/core/scene/nodes/volumetricCloudsNode';
 import { SkyAtmosphereNode } from '../src/core/scene/nodes/skyAtmosphereNode';
 import { SkyLightNode } from '../src/core/scene/nodes/skyLightNode';
@@ -58,6 +59,7 @@ const CASES: { label: string, make: () => Node, cls: Function }[] = [
     { label: 'light-point', make: () => new LightNode('bulb', new PointLight({})), cls: LightNode },
     { label: 'light-spot', make: () => new LightNode('spot', new Spotlight({})), cls: LightNode },
     { label: 'lightProbe', make: () => new LightProbeNode('probe', { size: [4, 4, 4] }), cls: LightProbeNode },
+    { label: 'exposureVolume', make: () => new ExposureVolumeNode('exposure', { size: [4, 4, 4], overrides: { exposureMinEV: 3 } }), cls: ExposureVolumeNode },
     { label: 'volumetricClouds', make: () => new VolumetricCloudsNode('clouds'), cls: VolumetricCloudsNode },
     { label: 'skyAtmosphere', make: () => new SkyAtmosphereNode('sky'), cls: SkyAtmosphereNode },
     { label: 'skyLight', make: () => new SkyLightNode('sky light'), cls: SkyLightNode },

@@ -11,7 +11,7 @@ type NodeType =
   | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite'
   | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'lodGroup'
   | 'cameraRig' | 'sound' | 'character' | 'controller' | 'navMesh' | 'decal'
-  | 'particleSystem' | 'forceField' | 'waterVolume'
+  | 'particleSystem' | 'forceField' | 'waterVolume' | 'occluder' | 'exposureVolume'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 ```
@@ -245,6 +245,29 @@ get hasBakedMaps / irradiance / prefiltered / envMap / needsBake / lastBakeTime
 ```
 
 Probes saved before volumes existed deserialize as unbounded.
+
+### ExposureVolumeNode — `'exposureVolume'`
+
+A box with its own exposure. While the active camera is inside, the fields in `overrides` replace the
+scene's exposure settings (the same names as in `RenderSettings`), blended in by `weightAt(camera)`
+over `blendDistance` at the faces. The renderer blends a per-frame copy and never writes it back, so
+`getRenderSettings()` and a saved scene keep the scene's own values.
+
+```ts
+size: [number, number, number]       // full extents, before the node transform; min 0.01
+blendDistance: number ; priority: number ; enabled: boolean
+overrides: ExposureOverrides         // a copy; absent fields inherit the scene
+setOverride(key, value | undefined) ; hasOverride(key): boolean
+applyPreset(idOrPreset): boolean     // AUTO_EXPOSURE_PRESETS: overrides every field the preset sets
+weightAt(p: vec3): number            // 0..1, 0 when disabled
+```
+
+`ExposureOverrides` fields: `autoExposureEnabled`, `ev100` (manual), `exposureCompensation`,
+`exposureCompensationCurve`, `exposureMinEV`, `exposureMaxEV`, `exposureSpeedUp`, `exposureSpeedDown`.
+Overlapping volumes apply lowest `priority` first, each blended over the result so far; at equal
+priority the smaller box applies last. Scalars blend linearly (the manual exposure in EV); the curve
+blends by its output at the metered EV; `autoExposureEnabled` switches at half weight. What is in force
+is readable as `renderer.effectiveExposureSettings`.
 
 `affectsLighting` off keeps the probe out of the diffuse lighting inside its volume: surfaces there are
 lit by whatever else covers them (another probe, the sky light, the scene ambient) and still take

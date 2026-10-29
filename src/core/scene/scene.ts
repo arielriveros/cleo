@@ -15,6 +15,7 @@ import { DecalNode } from "./nodes/decalNode";
 import { ParticleSystemNode } from "./nodes/particleSystemNode";
 import { ForceFieldNode } from "./nodes/forceFieldNode";
 import { WaterVolumeNode } from "./nodes/waterVolumeNode";
+import { ExposureVolumeNode } from "./nodes/exposureVolumeNode";
 import { OccluderNode } from "./nodes/occluderNode";
 import { SkyboxNode } from "./nodes/skyboxNode";
 import { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
@@ -112,6 +113,7 @@ export class Scene {
     private _particleSystems: Set<ParticleSystemNode> = new Set();
     private _forceFields: Set<ForceFieldNode> = new Set();
     private _waterVolumes: Set<WaterVolumeNode> = new Set();
+    private _exposureVolumes: Set<ExposureVolumeNode> = new Set();
     private _occluders: Set<OccluderNode> = new Set();
     private _sounds: Set<SoundNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
@@ -765,6 +767,7 @@ export class Scene {
         this._particleSystems = new Set();
         this._forceFields = new Set();
         this._waterVolumes = new Set();
+        this._exposureVolumes = new Set();
         this._occluders = new Set();
         this._sounds = new Set();
         this._lightProbes = new Set();
@@ -806,6 +809,8 @@ export class Scene {
                 this._forceFields.add(node);
             if (node instanceof WaterVolumeNode)
                 this._waterVolumes.add(node);
+            if (node instanceof ExposureVolumeNode)
+                this._exposureVolumes.add(node);
             if (node instanceof OccluderNode)
                 this._occluders.add(node);
             if (node instanceof SoundNode)
@@ -1175,6 +1180,28 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._skyLight;
+    }
+
+    /** Every exposure volume in the scene: the regions that override the scene's exposure settings. */
+    public get exposureVolumes(): Set<ExposureVolumeNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._exposureVolumes;
+    }
+
+    /**
+     * The exposure volumes that reach a world point, with their weights, in the order they apply: lowest
+     * priority first, and at equal priority the larger box first, so the more specific one wins.
+     */
+    public exposureVolumesAt(position: vec3): { volume: ExposureVolumeNode, weight: number }[] {
+        const out: { volume: ExposureVolumeNode, weight: number }[] = [];
+        for (const volume of this.exposureVolumes) {
+            const weight = volume.weightAt(position);
+            if (weight > 0) out.push({ volume, weight });
+        }
+        if (out.length > 1)
+            out.sort((a, b) => (a.volume.priority - b.volume.priority) || (b.volume.worldVolume - a.volume.worldVolume));
+        return out;
     }
 
     public get lightProbes(): Set<LightProbeNode> {

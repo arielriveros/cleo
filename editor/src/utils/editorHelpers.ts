@@ -11,6 +11,7 @@ import {
   LightNode,
   CameraNode,
   LightProbeNode,
+  ExposureVolumeNode,
   DecalNode,
   SoundNode,
   Vec,
@@ -57,6 +58,7 @@ const chrome = <T extends Node>(node: T): T => { markEditorOnly(node); return no
 const LIGHT_ICON = '__editor__LightSprite';
 const CAMERA_GIZMO = '__debug__CameraModel';
 const PROBE_HELPER = '__editor__ProbeHelper';
+const EXPOSURE_HELPER = '__editor__ExposureVolumeHelper';
 const SOUND_ICON = '__editor__SoundSprite';
 const SOUND_RADIUS = '__debug__SoundRadius';
 const BODY_PREFIX = '__debug__body_';
@@ -427,6 +429,20 @@ function ensureProbeHelper(probe: LightProbeNode) {
   probe.addChild(icon);
 }
 
+// The same billboard under an exposure volume, tinted warm so it is not read as a probe.
+function ensureExposureHelper(volume: ExposureVolumeNode) {
+  if (volume.getChildByName(EXPOSURE_HELPER).length) return;
+  const icon = chrome(new SpriteNode(EXPOSURE_HELPER, Sprite.fromTexture('__editor__probe_icon', {
+    tint: [1, 0.8, 0.3],
+  })));
+  icon.setUniformScale(0.5);
+  volume.addChild(icon);
+}
+
+/** A box volume whose extent the selection shows as an oriented wireframe: an exposure volume, a bounded probe. */
+const isOrientedVolume = (node: unknown): node is ExposureVolumeNode | LightProbeNode =>
+  node instanceof ExposureVolumeNode || (node instanceof LightProbeNode && node.bounded);
+
 // Attach a billboard icon under a decal, so a decal that projects nothing visible yet (no material, or
 // nothing inside its box) still shows where it is. Tinted amber, like its selection box. It is also what
 // a click selects the decal BY: the raycaster skips `__editor__` children, and picks a decal through
@@ -503,14 +519,15 @@ function lineGeometry(lines: { positions: [number, number, number][]; indices: n
  * one thing an author must size by eye), or a force field's sphere or box. Top-level and re-placed every
  * frame, like the decal box, so the transform gizmo and inspector edits are followed.
  */
-function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNode | WaterVolumeNode | OccluderNode) {
+function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNode | WaterVolumeNode | OccluderNode | ExposureVolumeNode | LightProbeNode) {
   const sphere = node instanceof ForceFieldNode && node.shape === 'sphere';
   const name = `${EFFECTSHAPE_PREFIX}${node.id}:${sphere ? 's' : 'b'}`;
   let existing = scene.getNodesByName(name)[0] as ModelNode | undefined;
   if (!existing) {
     existing = wireModel(name, sphere ? unitSphereLines() : unitBoxLines(),
       node instanceof ParticleSystemNode ? [1, 0.55, 0.3] : node instanceof WaterVolumeNode ? [0.3, 0.6, 1]
-        : node instanceof OccluderNode ? [0.75, 0.45, 1] : [0.45, 0.85, 1]);
+        : node instanceof OccluderNode ? [0.75, 0.45, 1] : node instanceof ExposureVolumeNode ? [1, 0.8, 0.3]
+        : node instanceof LightProbeNode ? [0.4, 0.8, 1] : [0.45, 0.85, 1]);
     scene.addNode(existing);
   }
   const helper = existing;
@@ -524,7 +541,8 @@ function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNo
     }
     const m = node.worldTransform;
     // An occluder box follows the node's FULL transform, rotation included: it is what the culling uses.
-    if (node instanceof OccluderNode) {
+    // So do the exposure volume and light probe boxes: both are oriented boxes under the node transform.
+    if (node instanceof OccluderNode || node instanceof ExposureVolumeNode || node instanceof LightProbeNode) {
       helper.setPosition(node.worldPosition).setQuaternion(node.worldQuaternion)
             .setScale([node.size[0] * Math.hypot(m[0], m[1], m[2]), node.size[1] * Math.hypot(m[4], m[5], m[6]),
                        node.size[2] * Math.hypot(m[8], m[9], m[10])]);
@@ -1187,6 +1205,10 @@ export function reconcileEditorHelpers(
       const existing = node.getChildByName(PROBE_HELPER)[0];
       if (show('probes') && !existing) ensureProbeHelper(node);
       else if (!show('probes') && existing) node.removeChild(existing);
+    } else if (node instanceof ExposureVolumeNode) {
+      const existing = node.getChildByName(EXPOSURE_HELPER)[0];
+      if (show('exposureVolumes') && !existing) ensureExposureHelper(node);
+      else if (!show('exposureVolumes') && existing) node.removeChild(existing);
     } else if (node instanceof DecalNode) {
       const existing = node.getChildByName(DECAL_ICON)[0];
       if (show('decals') && !existing) ensureDecalIcon(node);
@@ -1270,7 +1292,7 @@ export function reconcileEditorHelpers(
   // 4e. The SELECTED particle system's bounds, or force field's shape — selection-scoped like 4d. A
   // global field has no extent to draw.
   if (selected instanceof ParticleSystemNode || selected instanceof WaterVolumeNode || selected instanceof OccluderNode
-      || (selected instanceof ForceFieldNode && selected.shape !== 'global'))
+      || isOrientedVolume(selected) || (selected instanceof ForceFieldNode && selected.shape !== 'global'))
     ensureEffectShape(scene, selected);
 
   // 5. Trigger wireframes (green), following the target's world transform.
@@ -1328,7 +1350,8 @@ export function reconcileEditorHelpers(
       // sphere and box drops its old wireframe instead of rescaling the wrong one.
       const [id, kind] = node.name.slice(EFFECTSHAPE_PREFIX.length).split(':');
       const owner = scene.getNodeById(id);
-      const want = owner instanceof ParticleSystemNode || owner instanceof WaterVolumeNode || owner instanceof OccluderNode ? 'b'
+      const want = owner instanceof ParticleSystemNode || owner instanceof WaterVolumeNode || owner instanceof OccluderNode
+        || isOrientedVolume(owner) ? 'b'
         : owner instanceof ForceFieldNode && owner.shape !== 'global' ? (owner.shape === 'sphere' ? 's' : 'b') : null;
       if (id !== selectedId || want !== kind) drop();
     } else if (node.name.startsWith(NAVMESH_PREFIX)) {

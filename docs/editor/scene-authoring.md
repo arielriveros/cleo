@@ -79,6 +79,7 @@ volumes that tune how the scene is lit and culled.
 | **Skybox** | Not placeable. **Removes any Sky Atmosphere.** |
 | **Sky Atmosphere** | Not placeable. **Removes any Skybox.** |
 | **Light Probe** | Default `10 × 10 × 10` influence volume. |
+| **Exposure Volume** | A `10 × 10 × 10` box with its own exposure while the camera is inside. Overrides nothing until a field or preset is picked. |
 | **Clouds (volumetric)** | Not placeable. |
 | **Landscape** | Not placeable. `size 200`, `resolution 129`, `chunkQuads 32`. |
 | **Wind** | Not placeable: one wind for the whole scene. Plants sway only where their material asks for it. |
@@ -136,6 +137,14 @@ renderer, input, material, terrain material, animation and blend space.
 **Gizmos:** the floating top-right chrome has **Move / Rotate / Scale**, the debug overlay eye menu,
 and a **2D/3D view switch**. Selecting one of a node's collision shapes turns Move and Rotate onto that
 shape and adds its size handles — see [Editing shapes in the viewport](physics.md#editing-shapes-in-the-viewport).
+
+### Volume handles
+
+A selected light probe (with a bounded box) or exposure volume shows its box as a wireframe, with the
+same square handles as a collision shape on all six faces. Dragging one moves that face alone: the
+opposite face stays put and the node moves by half the change. Hold **Alt** to grow both sides about
+the centre, and **Ctrl** to snap the size to the translate step. **Escape** during a drag puts the box
+back. The node's own Move, Rotate and Scale gizmo stays up alongside, and each drag is one undo step.
 
 > The 2D/3D switch in the viewport is **view-only**. The scene's authored dimension is a different
 > setting, in Scene settings, and it is the one that decides whether you get Landscape or Tilemap
@@ -247,6 +256,7 @@ off in Play, or turn navmesh display on *during* Play to see what an agent is wa
 | Light icons | on |
 | Camera frustums | on |
 | Light probes | on |
+| Exposure volumes | on |
 | Decal icons | on |
 | Sound emitters | on |
 | Bounding boxes | off |

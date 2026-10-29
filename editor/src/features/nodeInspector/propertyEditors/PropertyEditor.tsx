@@ -1,4 +1,4 @@
-import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OccluderNode } from 'cleo'
+import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OccluderNode, ExposureVolumeNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
 import RigSlot from './RigSlot';
@@ -27,6 +27,7 @@ import ParticleSystemEditor from './ParticleSystemEditor'
 import ForceFieldEditor from './ForceFieldEditor'
 import WaterVolumeEditor from './WaterVolumeEditor'
 import OccluderEditor from './OccluderEditor'
+import ExposureVolumeEditor from './ExposureVolumeEditor'
 import TilemapEditor from './TilemapEditor'
 import LandscapeEditor from './LandscapeEditor'
 import SceneSettings from './SceneSettings'
@@ -80,6 +81,7 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'animatedSprite' && <AnimatedSpriteEditor /> }
           { props.node.nodeType === 'light' && <LightEditor node={props.node as LightNode} /> }
           { props.node.nodeType === 'lightProbe' && <LightProbeEditor node={props.node as LightProbeNode} /> }
+          { props.node.nodeType === 'exposureVolume' && <ExposureVolumeEditor key={props.node.id} node={props.node as ExposureVolumeNode} /> }
           {/* Keyed by id so selecting another decal starts from ITS values rather than writing this one's
               state into it for a frame. */}
           { props.node.nodeType === 'decal' && <DecalEditor key={props.node.id} node={props.node as DecalNode} /> }

@@ -10,7 +10,7 @@ import { DocScope, Section, Slider, Toggle, Field, NumberInput, PresetMenu, Segm
 // 12px they wrap in Field's default 70px column.
 const LABEL_W = 'w-[112px]';
 import BackendSelector from './BackendSelector';
-import ExposureCurveEditor from './ExposureCurveEditor';
+import ExposureSettingsFields from './ExposureSettingsFields';
 
 // Debug channels map 1:1 to the renderer's `debugView` setter; the grouping here is display only.
 const CHANNELS: { key: string; label: string }[] = [
@@ -323,6 +323,13 @@ export default function RendererSettingsPanel() {
 
   // Play/stop resets debugView and toggles the grid on the renderer directly.
   useEffect(() => { syncFromRenderer(); }, [isPlayMode, syncFromRenderer]);
+  // While metering, the EV moves every frame on its own: follow it, so the "Metered at" readout and the
+  // compensation curve's "now" line show where the scene actually sits.
+  useEffect(() => {
+    if (!renderer || !autoExposure) return;
+    const id = window.setInterval(() => setEv100(renderer.ev100), 250);
+    return () => window.clearInterval(id);
+  }, [renderer, autoExposure]);
 
   // A quality preset moves a dozen knobs at once from a different panel; without this the mirror only
   // refreshes on remount and the two panels sit side by side disagreeing.
@@ -492,34 +499,22 @@ export default function RendererSettingsPanel() {
             title='Lens looks — bloom, flare, dirt, vignette, grain, fringing and saturation; the tone map and LUT stay yours'
             onApply={(p) => applyRenderPreset(LENS_LOOK_PRESETS, p)} />
         </>}>
-        <Toggle label='Auto exposure' checked={autoExposure}
-          onChange={(v) => { renderer.autoExposureEnabled = v; setAutoExposure(v); touch(); }} />
-        {/* The manual slider is REPLACED rather than disabled while metering is on: a control that
-            silently loses its value on the next frame is worse than one that is not there. The
-            artist's handle is Compensation, which is how a camera works. */}
-        {!autoExposure && <Slider label={`Exposure (EV ${ev100.toFixed(2)})`}
-          value={ev100} min={-4} max={17} step={0.25}
-          onChange={(v) => { renderer.ev100 = v; setEv100(v); touch(); }} />}
-        {autoExposure && <>
-          <Hint>Metered at EV {ev100.toFixed(2)}.</Hint>
-          <Slider label='Compensation (stops)' value={exposureComp} min={-4} max={4} step={0.1}
-            onChange={(v) => { renderer.exposureCompensation = v; setExposureComp(v); touch(); }} />
-          <ExposureCurveEditor value={exposureCurve} labelClassName={LABEL_W}
-            onChange={(c) => { renderer.exposureCompensationCurve = c; setExposureCurve(renderer.exposureCompensationCurve); touch(); }} />
-          <Slider label='Min EV' value={exposureMinEV} min={-4} max={17} step={0.5}
-            onChange={(v) => { renderer.exposureMinEV = v; setExposureMinEV(v); touch(); }} />
-          <Slider label='Max EV' value={exposureMaxEV} min={-4} max={20} step={0.5}
-            onChange={(v) => { renderer.exposureMaxEV = v; setExposureMaxEV(v); touch(); }} />
-          {/* SPEEDS, so right is faster — the same two controls Unreal exposes, under the same names
-              and with its defaults (3 and 1). They were labelled as durations in seconds while the
-              code treated them as a time constant, which made a higher number adapt SLOWER. */}
-          <Slider label='Adaptation speed (to bright)' value={exposureSpeedUp} min={0} max={10} step={0.1}
-            onChange={(v) => { renderer.exposureSpeedUp = v; setExposureSpeedUp(v); touch(); }} />
-          <Slider label='Adaptation speed (to dark)' value={exposureSpeedDown} min={0} max={10} step={0.1}
-            onChange={(v) => { renderer.exposureSpeedDown = v; setExposureSpeedDown(v); touch(); }} />
-          <Hint>Higher adapts faster; 0 snaps with no easing. Eyes adjust to brightening
-            faster than to darkening, which is why the two differ by default.</Hint>
-        </>}
+        <ExposureSettingsFields labelClassName={LABEL_W} meteredEV={ev100}
+          values={{
+            autoExposureEnabled: autoExposure, ev100, exposureCompensation: exposureComp,
+            exposureCompensationCurve: exposureCurve, exposureMinEV, exposureMaxEV, exposureSpeedUp, exposureSpeedDown,
+          }}
+          onChange={(p) => {
+            if (p.autoExposureEnabled !== undefined) { renderer.autoExposureEnabled = p.autoExposureEnabled; setAutoExposure(p.autoExposureEnabled); }
+            if (p.ev100 !== undefined) { renderer.ev100 = p.ev100; setEv100(p.ev100); }
+            if (p.exposureCompensation !== undefined) { renderer.exposureCompensation = p.exposureCompensation; setExposureComp(p.exposureCompensation); }
+            if (p.exposureCompensationCurve !== undefined) { renderer.exposureCompensationCurve = p.exposureCompensationCurve; setExposureCurve(renderer.exposureCompensationCurve); }
+            if (p.exposureMinEV !== undefined) { renderer.exposureMinEV = p.exposureMinEV; setExposureMinEV(p.exposureMinEV); }
+            if (p.exposureMaxEV !== undefined) { renderer.exposureMaxEV = p.exposureMaxEV; setExposureMaxEV(p.exposureMaxEV); }
+            if (p.exposureSpeedUp !== undefined) { renderer.exposureSpeedUp = p.exposureSpeedUp; setExposureSpeedUp(p.exposureSpeedUp); }
+            if (p.exposureSpeedDown !== undefined) { renderer.exposureSpeedDown = p.exposureSpeedDown; setExposureSpeedDown(p.exposureSpeedDown); }
+            touch();
+          }} />
         <div className='flex items-center gap-1 my-1 text-ui'>
           <span className={cn(labelClass, LABEL_W, 'shrink-0')}>Tone Map</span>
           <SegmentedControl

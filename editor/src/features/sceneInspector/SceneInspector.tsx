@@ -5,7 +5,7 @@ import { CleoEngine, Logger, Node, isEditorOwnedName, isUINodeType } from 'cleo'
 import type { SceneChange } from 'cleo';
 import { SkyIcon } from '../nodeInspector/sectionIcons'
 import {
-  CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon, NavMeshIcon, ModelIcon, LightIcon, LightProbeIcon, SkyboxIcon, SkyLightIcon, CloudsIcon, WindIcon,
+  CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon, NavMeshIcon, ModelIcon, LightIcon, LightProbeIcon, ExposureVolumeIcon, SkyboxIcon, SkyLightIcon, CloudsIcon, WindIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OccluderIcon,
 } from './nodeIcons'
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
@@ -24,7 +24,7 @@ const TYPE_ICONS: Record<string, () => JSX.Element> = {
   camera: CameraIcon, cameraRig: CameraRigIcon, model: ModelIcon,
   character: CharacterAddIcon, controller: ControllerAddIcon, navMesh: NavMeshIcon,
   sprite: SpriteIcon, animatedSprite: AnimatedSpriteIcon, tilemap: TilemapIcon,
-  light: LightIcon, lightProbe: LightProbeIcon, decal: DecalIcon,
+  light: LightIcon, lightProbe: LightProbeIcon, exposureVolume: ExposureVolumeIcon, decal: DecalIcon,
   skybox: SkyboxIcon, volumetricClouds: CloudsIcon, skyAtmosphere: SkyIcon, skyLight: SkyLightIcon, wind: WindIcon,
   landscape: LandscapeIcon,
   // One glyph for both modes: the tree shows what a node IS, and ambient vs spatial is a property of it.

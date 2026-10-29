@@ -88,7 +88,9 @@ leaves the tone map and the LUT alone.
 Exposure is written as a photographic EV100, the number a light meter reads. Lights carry real
 photometric intensity and the sun is about three decades brighter than a lamp, so one exposure can
 only meter one of them: a sunny exterior sits near EV 15, an interior near EV 5. Exposure is per
-scene, so a cave and a hillside can each carry their own.
+scene, so a cave and a hillside can each carry their own. Within one scene, an
+[Exposure Volume](node-inspector.md#exposure-volume) overrides these settings in a region while the
+camera is inside it.
 
 **Light intensity vs exposure.** A light keeps one value for the whole game — the sun its lux, a torch
 its lumens — and never needs scaling for the time of day or the room it is in. Auto exposure is the
@@ -103,7 +105,11 @@ sprites and particles).
 exposure compensation curve), added to Compensation. Between keys it is linear; past the first and last
 key it holds. A fully adapted eye lifts a moonlit night or a torch-lit crypt to a grey day; a negative
 key at the dark end (say −2 stops at EV −2, rising to 0 by EV 12) keeps a night a night without touching
-a single light. The *Day–Night Cycle* and *Cave / Dungeon* exposure presets carry one.
+a single light. The *Day–Night Cycle* and *Cave / Dungeon* exposure presets carry one. It is edited
+as a graph, scene EV across and stops up: drag a key (it snaps to half an EV and a quarter stop),
+double-click empty space to add one, double-click a key to remove it, and **Clear** removes them all.
+The dashed parts past the end keys are the held values, and the dashed vertical line is the EV the
+scene is metered at now.
 
 The tone map is the curve that turns linear HDR into a displayable image, and it is the single
 biggest lever here. *AgX* rolls a saturated highlight toward white instead of clipping it to a

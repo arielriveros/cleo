@@ -20,6 +20,7 @@ export const VariablesIcon = () => (<S><path d='M8 4c-2.5 1.5-2.5 14.5 0 16M16 4
 export const UniformsIcon = () => (<S><path d='M4 7h10M18 7h2M4 12h4M12 12h8M4 17h13M20 17h0' /><circle cx='15' cy='7' r='1.6' fill='currentColor' stroke='none' /><circle cx='9' cy='12' r='1.6' fill='currentColor' stroke='none' /><circle cx='18' cy='17' r='1.6' fill='currentColor' stroke='none' /></S>);
 export const SkyIcon = () => (<S><circle cx='7' cy='8' r='3' /><path d='M4 18h13a3 3 0 0 0 0-6 4.5 4.5 0 0 0-8.7-1.3' /></S>);
 export const CloudsIcon = () => (<S><path d='M6 16a4 4 0 0 1 .6-7.9A5 5 0 0 1 16 8a3.5 3.5 0 0 1-.5 8Z' /></S>);
+export const ExposureVolumeIcon = () => (<S><path d='M3.5 3.5h17v17h-17Z' strokeDasharray='2.6 2.2' /><circle cx='12' cy='12' r='4.5' /><path d='M12 7.5a4.5 4.5 0 0 1 0 9Z' fill='currentColor' stroke='none' /></S>);
 export const ProbeIcon = () => (<S><circle cx='12' cy='12' r='4' /><circle cx='12' cy='12' r='9' strokeDasharray='2 3' /></S>);
 // A dashed projector box pressing a mark onto the ground: the decal volume, its direction and its print.
 export const DecalIcon = () => (<S><path d='M4 3.5h16v10H4Z' strokeDasharray='2.6 2.2' /><path d='M12 6v8.8M9.3 12.1 12 14.8l2.7-2.7' /><ellipse cx='12' cy='19' rx='8' ry='2.4' /></S>);

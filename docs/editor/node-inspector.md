@@ -120,6 +120,29 @@ without changing how the sky and ambient light it.
 **Cubemap Preview** — what the probe last captured, unwrapped into a 2 : 1 panorama. **Bake Probe**
 captures again.
 
+A bounded probe's box shows as a wireframe while it is selected, with square handles on its six faces
+for sizing it in the viewport — see [Volume handles](scene-authoring.md#volume-handles).
+
+#### Exposure Volume
+
+A region with its own exposure. While the camera is inside the box, the fields it overrides replace the
+scene's exposure settings ([Tone and post](rendering.md#tone-and-post)), eased in over the blend
+distance at its faces, so walking into a cave or a lit hall adapts the eye there. The scene's settings
+are never changed: leave the volume and they apply again. The *Exposure* presets fill in every field
+they set.
+
+| Field | Meaning |
+|---|---|
+| **Enabled** | Off leaves the volume in the scene without it changing anything. |
+| **Size** | Full extents of the box in metres, before the node transform, which it follows, rotation included. The face handles in the viewport size it too. |
+| **Blend distance** | How far inside its faces the override fades in, in metres. 0 is a hard edge; the exposure still eases at its adaptation speed. |
+| **Priority** | Where volumes overlap, they apply lowest priority first, each over the result so far, so the highest wins. At equal priority the smaller box wins. |
+
+**Overrides** — the scene's exposure fields, each with a tick box. A ticked field takes the value set
+here; an unticked one shows the scene's value, dimmed, and passes it through. Editing a field ticks it.
+Above them, a line says whether the camera is inside the volume now, how strongly, and the EV it is
+exposed at.
+
 #### Skybox
 
 Six cube faces, laid out as an unfolded cube, each with its own image. Mutually exclusive with Sky

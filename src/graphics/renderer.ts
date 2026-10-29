@@ -20,7 +20,8 @@ import { TilemapLayer } from '../graphics/tilemap/tilemapLayer';
 import { TileMesh } from '../graphics/tilemap/tileMesh';
 import { CHUNK_SIZE, TileChunk } from '../graphics/tilemap/chunk';
 import { cellToWorld } from '../graphics/tilemap/cellMath';
-import { DEFAULT_ANGULAR_RADIUS, DEFAULT_SCENE_AMBIENT_LUX, DirectionalLight, exposureCurveStops, type ExposureCurveKey, PointLight, REFERENCE_ILLUMINANCE, Spotlight } from './lighting';
+import { DEFAULT_ANGULAR_RADIUS, DEFAULT_SCENE_AMBIENT_LUX, DirectionalLight, type ExposureCurveKey, PointLight, REFERENCE_ILLUMINANCE, Spotlight } from './lighting';
+import { blendExposure, effectiveCurveStops, type EffectiveExposure, type ExposureLayer } from './exposureBlend';
 import { Mesh } from './mesh';
 import type { ShaderProgram, ShaderProgramDescriptor } from './rhi/shaderProgram';
 import { Framebuffer } from './framebuffer';
@@ -1482,6 +1483,25 @@ export class Renderer {
     private _exposureMaxEV: number = 17.0;
     private _exposureSpeedUp: number = 3.0;
     private _exposureSpeedDown: number = 1.0;
+    /**
+     * The exposure settings IN FORCE this frame: the scene's fields above, with any exposure volumes
+     * around the camera blended over them (`_resolveExposure`). The meter, the clamp and the adaptation
+     * read this; the getters, setters and `getRenderSettings` stay on the scene's own fields, so a volume
+     * never reaches a saved scene.
+     */
+    private get _effExposure(): EffectiveExposure {
+        // Rebuilt on every read (a handful a frame) rather than cached, so a setter or
+        // `applyRenderSettings` between frames is in force at once, as it was before volumes.
+        return this._sceneExposureOnly(this._effExposureLayers);
+    }
+    /** The volumes around the camera at the last `_resolveExposure`, as blend layers. */
+    private _effExposureLayers: ExposureLayer[] = [];
+    /** The same volumes, by id and weight, for the inspector. */
+    private _effExposureVolumes: { id: string, weight: number }[] = [];
+    /** Whether metering was in force at the last `_resolveExposure`, to catch a volume switching it on. */
+    private _effAutoWas: boolean = true;
+    /** A volume around the camera sets the manual EV; otherwise the authored `_baseExposure` stands exactly. */
+    private _effManualFromVolume: boolean = false;
     /** Two 1x1 metering targets. See `_exposurePass` for why they are read a frame late. */
     private _exposureFBOs: Framebuffer[] = [];
     private _exposureWrite: number = 0;
@@ -11707,7 +11727,57 @@ export class Renderer {
 
     /** Is metering driving the exposure this frame? The project's setting AND this host's permission. */
     private _meteringActive(): boolean {
-        return this._autoExposureEnabled && this._exposureMeteringAllowed;
+        return this._effExposure.autoExposureEnabled && this._exposureMeteringAllowed;
+    }
+
+    /** The scene's own exposure settings, with no volume over them. */
+    private _sceneExposureOnly(layers: readonly ExposureLayer[] = []): EffectiveExposure {
+        return blendExposure({
+            autoExposureEnabled: this._autoExposureEnabled,
+            ev100: Math.log2(REFERENCE_ILLUMINANCE / (1.2 * Math.max(1e-6, this._baseExposure))),
+            exposureCompensation: this._exposureCompensation,
+            exposureCompensationCurve: this._exposureCompensationCurve,
+            exposureMinEV: this._exposureMinEV,
+            exposureMaxEV: this._exposureMaxEV,
+            exposureSpeedUp: this._exposureSpeedUp,
+            exposureSpeedDown: this._exposureSpeedDown,
+        }, layers);
+    }
+
+    /**
+     * Blend the exposure volumes around the camera over the scene's settings, into `_effExposure`.
+     * A volume that switches metering on re-seeds the adaptation from the current picture, as the
+     * `autoExposureEnabled` setter does, so walking into it eases instead of snapping.
+     */
+    private _updateEffectiveExposure(): void {
+        const scene = this._currentScene;
+        const camera = this._activeCamera;
+        const found = scene && camera ? scene.exposureVolumesAt(camera.position) : [];
+        this._effExposureLayers = found.map(f => ({ overrides: f.volume.overridesView, weight: f.weight }));
+        this._effExposureVolumes = found.map(f => ({ id: f.volume.id, weight: f.weight }));
+        this._effManualFromVolume = found.some(f => f.volume.overridesView.ev100 !== undefined);
+        const auto = this._effExposure.autoExposureEnabled;
+        if (auto && !this._effAutoWas) {
+            this._exposureEV = this.ev100;
+            this._exposureMetered = false;
+        }
+        this._effAutoWas = auto;
+    }
+
+    /**
+     * The exposure settings in force this frame — the scene's, with the exposure volumes around the
+     * camera blended over them — and the volumes that contributed, with their weights.
+     */
+    public get effectiveExposureSettings(): {
+        autoExposureEnabled: boolean, ev100: number, exposureCompensation: number, exposureMinEV: number,
+        exposureMaxEV: number, exposureSpeedUp: number, exposureSpeedDown: number, volumes: { id: string, weight: number }[],
+    } {
+        const e = this._effExposure;
+        return {
+            autoExposureEnabled: e.autoExposureEnabled, ev100: e.ev100, exposureCompensation: e.exposureCompensation,
+            exposureMinEV: e.exposureMinEV, exposureMaxEV: e.exposureMaxEV, exposureSpeedUp: e.exposureSpeedUp,
+            exposureSpeedDown: e.exposureSpeedDown, volumes: this._effExposureVolumes.map(v => ({ ...v })),
+        };
     }
 
     /**
@@ -11734,8 +11804,14 @@ export class Renderer {
             this._exposure = Renderer.PREVIEW_EXPOSURE;
             return;
         }
-        // Metering allowed but switched off for the project: the artist's manual exposure stands.
-        if (!this._autoExposureEnabled) this._exposure = this._baseExposure;
+        this._updateEffectiveExposure();
+        // Metering allowed but switched off (for the project, or by a volume around the camera): the
+        // manual exposure stands — the artist's, blended toward any volume's in EV.
+        if (!this._effAutoWas) {
+            this._exposure = this._effManualFromVolume
+                ? REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, this._effExposure.ev100))
+                : this._baseExposure;
+        }
     }
 
     /**
@@ -11788,10 +11864,11 @@ export class Renderer {
         // Compensation is SUBTRACTED: +1 stop of exposure compensation means a brighter picture, which
         // on a meter is a LOWER EV. Applied after the clamp so the trim can still reach past it. The
         // curve is keyed on the UNCLAMPED metered EV, the scene's own brightness, as Unreal keys it.
-        const lo = Math.min(this._exposureMinEV, this._exposureMaxEV);
-        const hi = Math.max(this._exposureMinEV, this._exposureMaxEV);
-        return Math.min(hi, Math.max(lo, ev)) - this._exposureCompensation
-            - exposureCurveStops(this._exposureCompensationCurve, ev);
+        // Reads the settings in force, so an exposure volume around the camera clamps and trims too.
+        const e = this._effExposure;
+        const lo = Math.min(e.exposureMinEV, e.exposureMaxEV);
+        const hi = Math.max(e.exposureMinEV, e.exposureMaxEV);
+        return Math.min(hi, Math.max(lo, ev)) - e.exposureCompensation - effectiveCurveStops(e, ev);
     }
 
     /**
@@ -11811,7 +11888,7 @@ export class Renderer {
         if (!this._exposureMetered) return;
         const target = this._clampExposureEV(this._exposureTargetEV);
         // Brightening the PICTURE means the EV falls, and that is the direction an eye is slow in.
-        const speed = target < this._exposureEV ? this._exposureSpeedDown : this._exposureSpeedUp;
+        const speed = target < this._exposureEV ? this._effExposure.exposureSpeedDown : this._effExposure.exposureSpeedUp;
         // 0 snaps rather than freezing. A rate of zero would literally never converge, which is useless
         // as the bottom of a slider and is also what `passConfigs.js` relies on to gate this
         // deterministically.

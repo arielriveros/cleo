@@ -6,6 +6,7 @@ import {
   ModelNode,
   LightNode,
   LightProbeNode,
+  ExposureVolumeNode,
   DecalNode,
   DirectionalLight,
   PointLight,
@@ -62,7 +63,7 @@ import {
 } from './primitiveIcons'
 import {
   EmptyIcon, TriggerIcon, CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon,
-  DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon,
+  DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon, ExposureVolumeIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon,
   SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OccluderIcon,
@@ -349,6 +350,13 @@ export const ADD_ITEMS: AddItem[] = [
     // New probes get a bounded influence volume out of the box; probes from legacy scenes
     // deserialize size [0,0,0] = unbounded (whole scene).
     create: async () => new LightProbeNode('light probe', { size: [10, 10, 10] }),
+  },
+  {
+    // A region with its own exposure: while the camera is inside, its overrides replace the scene's
+    // exposure settings (feathered at the faces). Placeable: it is a volume, like the probe. Starts
+    // overriding nothing, so dropping one changes nothing until a field or preset is picked.
+    id: 'exposureVolume', label: 'Exposure Volume', icon: ExposureVolumeIcon, category: 'environment',
+    create: async () => new ExposureVolumeNode('exposure volume', { size: [10, 10, 10] }),
   },
   {
     // Placeable, like the probe: the box is centred on the node, so a viewport drop puts the surface under

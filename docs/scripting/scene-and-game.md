@@ -87,7 +87,7 @@ ai?: AISystem                              // OPTIONAL — always guard
 
 The scene keeps lists per node kind, rebuilt lazily when the tree changes: `lights`, `models`,
 `sprites`, `landscapes`, `tilemaps`, `lodGroups`, `cameraRigs`, `characters`, `controllers`,
-`navMeshes`, `sounds`, `lightProbes`, `decals`, `uiRoots`, `uiNodes`, `skybox`,
+`navMeshes`, `sounds`, `lightProbes`, `exposureVolumes`, `decals`, `uiRoots`, `uiNodes`, `skybox`,
 `volumetricClouds`, `skyAtmosphere`, `skyLight`.
 
 ```ts

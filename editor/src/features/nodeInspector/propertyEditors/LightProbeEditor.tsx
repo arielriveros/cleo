@@ -9,6 +9,7 @@ const AFFECTS_HINT = 'What the probe gives surfaces inside its volume. Lighting 
 import { useEventBus } from '../../EventBusContext';
 import { useCleoEngine } from '../../EngineContext';
 import { clamp } from '../../../utils/math';
+import { BOX_VOLUME_EDITED } from '../../gizmo/BoxVolumeGizmo';
 
 export default function LightProbeEditor(props: { node: LightProbeNode }) {
   const [state, setState] = useState({
@@ -51,6 +52,17 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
   }, [state, props.node]);
 
   const eventEmitter = useEventBus();
+  // The viewport's face handles resize the box (and move the node) behind this panel's back: re-read the
+  // size, or the next edit here would write the old one over it.
+  useEffect(() => {
+    const onEdited = (e: { nodeId: string }) => {
+      if (e?.nodeId !== props.node.id) return;
+      const [sizeX, sizeY, sizeZ] = props.node.size;
+      setState(prev => ({ ...prev, sizeX, sizeY, sizeZ }));
+    };
+    eventEmitter.on(BOX_VOLUME_EDITED, onEdited);
+    return () => { eventEmitter.off(BOX_VOLUME_EDITED, onEdited); };
+  }, [eventEmitter, props.node]);
   // Emit from the user handlers, not the apply-effect above, which also runs on mount and would false-dirty
   // on selection. The 'environment' kind marks the tab unsaved without triggering a tree rebuild.
   const update = (patch: Partial<typeof state>) => {

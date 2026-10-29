@@ -2,6 +2,7 @@ import { Texture } from "../../../graphics/texture";
 import { mat4, vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
+import { boxBlendFractions, boxInverseMatrix, boxWeight, boxWorldBounds } from "./boxVolume";
 
 /**
  * Baked irradiance probe with a bounded influence volume.
@@ -27,9 +28,7 @@ export class LightProbeNode extends Node {
     private _sourceCube: Texture | null = null;
     private _irradiance: Texture | null = null;
     private _prefiltered: Texture | null = null;
-    private _volScratch: mat4 = mat4.create();
     private _invVolScratch: mat4 = mat4.create();
-    private static _pointScratch: vec3 = vec3.create();
 
     constructor(
         name: string,
@@ -79,21 +78,13 @@ export class LightProbeNode extends Node {
 
     /** world -> probe-volume unit cube (containment = |xyz| <= 0.5). Only meaningful when bounded. */
     public get invVolumeMatrix(): mat4 {
-        mat4.scale(this._volScratch, this.worldTransform, [this._size[0], this._size[1], this._size[2]]);
-        mat4.invert(this._invVolScratch, this._volScratch);
-        return this._invVolScratch;
+        return boxInverseMatrix(this._invVolScratch, this.worldTransform, this._size);
     }
 
     /** Per-axis feather as a fraction of the unit cube (blendDistance / world size, capped at 0.5).
      *  Uploaded alongside invVolumeMatrix so the shader can smoothstep the boundary. */
     public get volumeBlend(): [number, number, number] {
-        const ws = this.worldScale;
-        const out: [number, number, number] = [0, 0, 0];
-        for (let i = 0; i < 3; i++) {
-            const worldSize = Math.abs(this._size[i] * ws[i]);
-            out[i] = worldSize > 0 ? Math.min(0.5, this._blendDistance / worldSize) : 0;
-        }
-        return out;
+        return boxBlendFractions(this._size, this.worldScale, this._blendDistance);
     }
 
     /**
@@ -102,18 +93,7 @@ export class LightProbeNode extends Node {
      */
     public probeWeight(p: vec3): number {
         if (!this.bounded) return 1;
-        const local = vec3.transformMat4(LightProbeNode._pointScratch, p, this.invVolumeMatrix);
-        const blend = this.volumeBlend;
-        let w = 1;
-        for (let i = 0; i < 3; i++) {
-            const edge = 0.5 - Math.abs(local[i]); // distance to the boundary in unit-cube space
-            if (edge <= 0) return 0;
-            if (blend[i] > 0) {
-                const t = Math.min(1, edge / blend[i]);
-                w = Math.min(w, t * t * (3 - 2 * t)); // smoothstep
-            }
-        }
-        return w;
+        return boxWeight(p, this.invVolumeMatrix, this.volumeBlend);
     }
 
     // --- Renderer-facing baking state ---
@@ -137,20 +117,8 @@ export class LightProbeNode extends Node {
     }
 
     public getBoundingBox(): { min: vec3, max: vec3 } {
-        if (this.bounded) {
-            // World AABB of the oriented influence box, so the editor's selection box shows the volume.
-            const world = mat4.scale(this._volScratch, this.worldTransform, [this._size[0], this._size[1], this._size[2]]);
-            const min = vec3.fromValues(Infinity, Infinity, Infinity);
-            const max = vec3.fromValues(-Infinity, -Infinity, -Infinity);
-            const corner = LightProbeNode._pointScratch;
-            for (let i = 0; i < 8; i++) {
-                vec3.set(corner, (i & 1) ? 0.5 : -0.5, (i & 2) ? 0.5 : -0.5, (i & 4) ? 0.5 : -0.5);
-                vec3.transformMat4(corner, corner, world);
-                vec3.min(min, min, corner);
-                vec3.max(max, max, corner);
-            }
-            return { min, max };
-        }
+        // World AABB of the oriented influence box, so the editor's selection box shows the volume.
+        if (this.bounded) return boxWorldBounds(this.worldTransform, this._size);
         const position = this.worldPosition;
         const scale = this.worldScale;
         const radius = Math.max(scale[0], scale[1], scale[2]) * 0.5;

@@ -239,9 +239,11 @@ describe('the authored exposure is kept apart from the metered one', () => {
     it('leaves a manual exposure alone when metering is merely switched off', () => {
         // Auto-exposure off project-wide is not a preview: the artist's own exposure has to stand.
         const fn = RENDERER.slice(RENDERER.indexOf('private _resolveExposure()'));
-        const body = fn.slice(0, fn.indexOf('\n    }'));
-        expect(body).toContain('if (!this._autoExposureEnabled) this._exposure = this._baseExposure;');
-        expect(RENDERER).toContain('return this._autoExposureEnabled && this._exposureMeteringAllowed;');
+        // Exactly, unless an exposure volume around the camera sets a manual EV of its own.
+        const body = fn.slice(0, fn.indexOf('\n    private '));
+        expect(body).toContain('if (!this._effAutoWas) {');
+        expect(body).toContain(': this._baseExposure;');
+        expect(RENDERER).toContain('return this._effExposure.autoExposureEnabled && this._exposureMeteringAllowed;');
     });
 });
 

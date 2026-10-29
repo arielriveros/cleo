@@ -32,6 +32,8 @@ export { LandscapeNode } from "./core/scene/nodes/landscapeNode";
 export { TilemapNode } from "./core/scene/nodes/tilemapNode";
 export { LightNode } from "./core/scene/nodes/lightNode";
 export { LightProbeNode } from "./core/scene/nodes/lightProbeNode";
+export { ExposureVolumeNode, EXPOSURE_OVERRIDE_KEYS, MIN_EXPOSURE_VOLUME_SIZE } from "./core/scene/nodes/exposureVolumeNode";
+export type { ExposureOverrides } from "./core/scene/nodes/exposureVolumeNode";
 export { DecalNode, decalLocalToUV, radialDecalWeight, radialDecalT, DECAL_RADIAL_CURVES } from "./core/scene/nodes/decalNode";
 export { ParticleSystemNode } from "./core/scene/nodes/particleSystemNode";
 export type { ParticleSystemNodeOptions, ParticleCullingMode } from "./core/scene/nodes/particleSystemNode";

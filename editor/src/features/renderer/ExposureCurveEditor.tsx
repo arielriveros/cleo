@@ -1,43 +1,63 @@
-import type { ExposureCurveKey } from 'cleo';
-import { Button, DocHover, NumberInput, cn, labelClass, useDocEntry } from '../../components/ui';
+import { exposureCurveStops, type CurveKey, type ExposureCurveKey } from 'cleo';
+import { Button, CurveGraph, DocHover, cn, labelClass, snapGraphValue, useDocEntry } from '../../components/ui';
 
 export interface ExposureCurveEditorProps {
   value: ExposureCurveKey[];
   onChange: (value: ExposureCurveKey[]) => void;
   labelClassName?: string;
+  /** The EV the meter reads now, drawn as a line so a key can be put where the scene actually sits. */
+  meteredEV?: number;
+}
+
+/** The EV100 span the graph opens on: what the Min / Max EV sliders allow. Keys outside widen it. */
+const EV_DOMAIN: [number, number] = [-4, 20];
+const EV_TICKS = [-4, 0, 4, 8, 12, 16, 20];
+/** Drag steps: half an EV across, a quarter stop up. */
+const SNAP = { x: 0.5, y: 0.25 };
+
+/** `[ev, stops]` keys as graph keys. */
+export function curveToGraphKeys(curve: readonly ExposureCurveKey[]): CurveKey[] {
+  return curve.map(([ev, stops]) => ({ t: ev, v: stops }));
+}
+
+/** Graph keys back as `[ev, stops]`, sorted by EV and on the snap grid's decimals. */
+export function graphKeysToCurve(keys: readonly CurveKey[]): ExposureCurveKey[] {
+  return [...keys].sort((a, b) => a.t - b.t).map(k => [snapGraphValue(k.t), snapGraphValue(k.v)] as ExposureCurveKey);
 }
 
 /**
- * The exposure compensation curve as a key list: one row per metered EV100 → stops pair, a ✕ per row
- * and an Add button. A list rather than a plot because the keys are few and their numbers are the point.
+ * The exposure compensation curve as a graph: metered scene EV100 across, stops of compensation up. Linear
+ * between keys and held flat past the ends, exactly as `exposureCurveStops` applies it, so what is drawn is
+ * what the renderer does. An empty curve is the flat zero line: no trim anywhere.
  */
-export function ExposureCurveEditor({ value, onChange, labelClassName }: ExposureCurveEditorProps) {
+export function ExposureCurveEditor({ value, onChange, labelClassName, meteredEV }: ExposureCurveEditorProps) {
   const entry = useDocEntry('Compensation curve', undefined, 'field');
-  const set = (i: number, key: ExposureCurveKey) => onChange(value.map((k, j) => (j === i ? key : k)));
-  const add = () => {
-    const last = value[value.length - 1];
-    onChange([...value, last ? [last[0] + 3, last[1]] : [4, 0]]);
-  };
   return (
     <div className='flex flex-col gap-1 my-1'>
       <div className='flex items-center justify-between gap-2'>
         <DocHover entry={entry} affordance='field' className={cn(labelClass, 'shrink-0', labelClassName)}>
           Compensation curve
         </DocHover>
-        <Button size='sm' onClick={add}>+ Key</Button>
+        <Button size='sm' disabled={value.length === 0} title='Remove every key: no trim at any EV'
+          onClick={() => onChange([])}>Clear</Button>
       </div>
-      {value.map(([ev, stops], i) => (
-        <div key={i} className='flex items-center gap-1 text-ui'>
-          <span className={cn(labelClass, 'shrink-0')}>EV</span>
-          <NumberInput value={ev} step={0.5} title='Metered scene EV100'
-            onChange={(v) => set(i, [v, stops])} />
-          <span className={cn(labelClass, 'shrink-0')}>stops</span>
-          <NumberInput value={stops} step={0.25} title='Compensation at that EV, in stops (positive is brighter)'
-            onChange={(v) => set(i, [ev, v])} />
-          <Button variant='remove' size='sm' className='px-1 py-0 shrink-0' title='Remove key'
-            onClick={() => onChange(value.filter((_, j) => j !== i))}>✕</Button>
-        </div>
-      ))}
+      <CurveGraph
+        keys={curveToGraphKeys(value)}
+        onChange={(keys) => onChange(graphKeysToCurve(keys))}
+        evaluate={(ev) => exposureCurveStops(value, ev)}
+        linear
+        domain={EV_DOMAIN}
+        xTicks={EV_TICKS}
+        min={-4}
+        max={4}
+        zeroLine
+        xLabel='Scene EV'
+        yLabel='Stops'
+        snap={SNAP}
+        allowEmpty
+        keyLabels={['EV', 'stops']}
+        presets={[]}
+        marker={meteredEV !== undefined && Number.isFinite(meteredEV) ? { x: meteredEV, label: `now ${meteredEV.toFixed(1)}` } : undefined} />
     </div>
   );
 }
