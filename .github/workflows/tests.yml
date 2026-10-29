@@ -73,3 +73,30 @@ jobs:
           name: coverage-editor
           path: applications/editor/coverage/lcov.info
           if-no-files-found: warn
+
+  test-apps:
+    name: Test app-kit and Cleo Creator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # Same arrangement as the editor job: engine source resolves out of the root install, the apps'
+      # dependencies out of the applications/ workspace install.
+      - run: npm ci
+
+      - name: Install application deps
+        run: npm ci
+        working-directory: applications
+
+      - name: Test app-kit
+        run: npm test
+        working-directory: applications/app-kit
+
+      - name: Test Cleo Creator
+        run: npm test
+        working-directory: applications/creator

@@ -29,6 +29,7 @@ After that the two halves are independent, and you can read either first:
 |---|---|
 | **[Editor guide](editor/README.md)** | What every mode, panel and workflow does. Read this to author scenes, import models, paint terrain, rig animation, build UI and publish. |
 | **[Scripting guide](scripting/README.md)** | How to write game code. Read this to make things move, react, spawn, score and end. |
+| **[Cleo Creator](creator/index.md)** | The procedural asset tool: World Creator heightmaps and FX Creator fire/smoke flipbooks, ready to import into the editor. |
 | **[Reference](reference/node-types.md)** | Exhaustive tables: every node type, every export, every render setting, every input binding. Look things up here rather than reading it through. |
 
 ## The editor guide

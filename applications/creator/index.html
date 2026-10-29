@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cleo Creator</title>
+    <!-- Shown while the bundle downloads; the colours mirror the app-kit theme tokens. -->
+    <style>
+        html, body { margin: 0; height: 100%; background: #0f1117; }
+        .cleo-boot { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+                     justify-content: center; gap: 12px; font-family: system-ui, sans-serif; color: #e5e7eb; }
+        .cleo-boot h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.3em; }
+        .cleo-boot small { font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: #9aa4b2; }
+    </style>
+</head>
+
+<body>
+    <div id="root">
+        <div class="cleo-boot" role="progressbar" aria-label="Loading Cleo Creator">
+            <h1>CLEO CREATOR</h1><small>Procedural assets</small>
+        </div>
+    </div>
+    <script type="module" src="/src/index.tsx"></script>
+</body>
+
+</html>
