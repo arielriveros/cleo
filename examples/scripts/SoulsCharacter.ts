@@ -257,9 +257,9 @@ export default class SoulsCharacterNode extends CharacterNode {
   public currentWeapon(): Node { return this._weapons[this._weaponIndex] ?? null }
 
   /**
-   * Let go of the held weapon. It is moved to the scene root where it is (a body must not be parented,
-   * see the scripting docs), detached from the hand, and given a dynamic body made of spheres along its
-   * blade hitbox. Not solid to the camera. Returns the weapon, or null with none held.
+   * Let go of the held weapon. It is moved to the scene root where it is (a dropped weapon belongs to the
+   * world, not to whoever let go of it), detached from the hand, and given a dynamic body made of spheres
+   * along its blade hitbox. Not solid to the camera. Returns the weapon, or null with none held.
    */
   public dropWeapon(): Node {
     const weapon = this.currentWeapon()

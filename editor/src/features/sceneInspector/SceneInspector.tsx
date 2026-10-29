@@ -236,7 +236,7 @@ const DropCursor = ({ top, left, indent }: { top: number; left: number; indent: 
 export default function SceneInspector() {
   // `inspectedScene` is the running play scene while Simulating, so the tree shows the live simulation (spawns,
   // despawns, renames). Every structural edit below stays gated on isPlayMode, which Simulate keeps true.
-  const { inspectedScene: editorScene, isSimulating, eventEmitter, bodies, triggers, isPlayMode, editorMode, templateRootId,
+  const { inspectedScene: editorScene, isSimulating, eventEmitter, triggers, isPlayMode, editorMode, templateRootId,
           attachScriptToNode, activeTab, sceneList, openSceneId, selectedNode, instance } = useCleoEngine()
   const [ nodes, setNodes ] = useState<NodeDescription | null>(null);
   const [ filter, setFilter ] = useState('');
@@ -352,8 +352,6 @@ export default function SceneInspector() {
     for (const id of dragIds) {
       const node = editorScene?.getNodeById(id);
       if (!node || id === rootId) continue;
-      // TODO: Temporary solution, in the future inner nodes should be able to have bodies
-      if (bodies.get(id)) { Logger.warn('Cannot move a node with a body', 'Editor'); continue; }
       // Dragging a parent already carries its children; moving them too would flatten the subtree.
       if (node.parent && dragging.has(node.parent.id)) continue;
       if (node === parent || isAncestorOf(node, parent)) {

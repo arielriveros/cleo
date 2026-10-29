@@ -6240,6 +6240,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (state === 'play' || state === 'simulate') {
         const simulate = state === 'simulate';
         instanceRef.current.isPaused = false;
+        // The refs the dirty bridge and the engine read, NOW rather than in the effect after the next
+        // render: the play scene starts on a timer, and when that render had not committed yet its
+        // scripts' first writes (a banner hiding itself in onStart) marked the EDITOR's scene unsaved.
+        isPlayModeRef.current = true;
+        CleoEngine.authoringMode = false;
         setIsPlayMode(true);
         setIsSimulating(simulate);
         if (simulate) {

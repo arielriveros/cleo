@@ -116,8 +116,18 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   the circle over time, with the ring standing across the direction the emitter moves. A moving emitter,
   such as a projectile, then leaves a spiral trail.
 
+- **Physics bodies on any node, not only the scene's top level.** A body lives in world space and its
+  node can now sit under any parent: a static body follows its node when a group is moved or turned, and
+  a dynamic body is moved by physics with its node's local pose solved under the parent. New
+  `setWorldPosition` / `setWorldQuaternion`; character facing and root motion now work in world space.
+  The editor no longer limits bodies to root-level nodes, or blocks moving a bodied node in the tree.
+
 ### Fixes & refactors
 
+- **Fixed: a scene was marked unsaved on its own.** Anything a node's per-frame update or the physics
+  write-back changed (a decorative script turning a windmill's sails) reached the editor as an edit.
+  Those writes are now counted as the scene ticking (`authoring.derived`), not as authoring, and setting
+  `visible` to the value it already has no longer reports a change.
 - **Fixed: bones with exporter numbers did not match.** Sketchfab numbers every node in its glTF
   exports (`mixamorig:Hips_01`), so those rigs matched nothing on retarget, implicit hand sockets or bone
   masks. A trailing `_NN` is now ignored under a namespace. A bare `spine_01` is still its own bone,

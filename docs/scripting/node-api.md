@@ -26,6 +26,9 @@ setRotation(euler: vec3): Node          // Rz(roll) · Ry(yaw) · Rx(pitch)
 rotateX(deg: number): Node ; rotateY(deg) ; rotateZ(deg)
 setQuaternion(q: quat): Node
 
+setWorldPosition(p: vec3): Node         // world space: solves the local position under the parent
+setWorldQuaternion(q: quat): Node       // world space; also turns a physics body
+
 setScale(s: vec3): Node ; setUniformScale(n: number): Node
 setXScale(v: number): Node ; setYScale(v) ; setZScale(v)
 addXScale(v: number): Node ; addYScale(v) ; addZScale(v)

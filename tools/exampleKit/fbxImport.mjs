@@ -29,7 +29,8 @@ export const CM_TO_M = 0.01
 // ---------------------------------------------------------------------------------------------------
 
 /**
- * `collapseFbxPivots`, `buildBoneMapping` and `retargetAnimation` out of the engine sources.
+ * `collapseFbxPivots`, `buildBoneMapping`, `retargetAnimation`, `applyManualMapping` and
+ * `autoHumanoidProfile` out of the engine sources.
  *
  * `animatedModel` is stubbed because everything imported from it here is a TYPE; every other module in
  * the graph (`fbxPivots`, `animationRetarget`, `boneNames`, `skeletonTopology`) is pure maths over plain
@@ -38,12 +39,14 @@ export const CM_TO_M = 0.01
 export function engineModules(root) {
   const load = moduleRegistry({ '/animatedModel': {} })
   const { collapseFbxPivots } = load(path.join(root, 'src', 'graphics', 'utils', 'fbxPivots.ts'))
-  const { buildBoneMapping, retargetAnimation } =
+  const { buildBoneMapping, retargetAnimation, applyManualMapping } =
     load(path.join(root, 'src', 'animation', 'animationRetarget.ts'))
-  for (const [name, fn] of Object.entries({ collapseFbxPivots, buildBoneMapping, retargetAnimation })) {
+  const { autoHumanoidProfile } = load(path.join(root, 'src', 'physics', 'ragdollProfile.ts'))
+  const fns = { collapseFbxPivots, buildBoneMapping, retargetAnimation, applyManualMapping, autoHumanoidProfile }
+  for (const [name, fn] of Object.entries(fns)) {
     if (typeof fn !== 'function') throw new Error(`${name} did not load out of the engine sources`)
   }
-  return { collapseFbxPivots, buildBoneMapping, retargetAnimation }
+  return fns
 }
 
 /**

@@ -123,7 +123,7 @@ describe('enemy types own their stats', () => {
         const sorcerer = new SoulsHollowSorcererNode('Hollow Sorcerer');
         expect([sorcerer.maxHp, sorcerer.strafeSpeedScale, sorcerer.weaponTemplates]).toEqual([110, 0.5, ['Sorcerer Staff']]);
         const knight = new SoulsEliteKnightNode('Elite Knight');
-        expect([knight.maxHp, knight.defense, knight.weaponTemplates]).toEqual([650, 0.15, ['Greatsword']]);
+        expect([knight.maxHp, knight.defense, knight.weaponTemplates]).toEqual([650, 0.15, ['Maul']]);
         const warden = new SoulsHollowWardenNode('Hollow Warden');
         expect([warden.maxHp, warden.defense, warden.isBoss, warden.flinchOnHit, warden.weaponTemplates]).toEqual([2600, 0.2, true, false, ['Halberd']]);
     });

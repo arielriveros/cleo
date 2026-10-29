@@ -4,7 +4,8 @@ import { Node } from "../core/scene/nodes/node";
 import { ModelNode } from "../core/scene/nodes/modelNode";
 import { unwrapScriptNode } from "../core/scene/nodes/nodeScripting";
 import { World, Body, Constraint, Material, ContactMaterial, Vec3, Ray, RaycastResult, AABB, Box } from 'cannon-es';
-import { vec3 } from "gl-matrix";
+import { quat, vec3 } from "gl-matrix";
+import { authoring } from "../core/eventBus";
 import { RigidBody, DEFAULT_FRICTION, DEFAULT_RESTITUTION } from "./body";
 import { Ragdoll, RagdollOptions } from "./ragdoll";
 import { skipCameraHit, CameraProbeBody, skipRayHit, RayHitBody, RayFilter } from "./cameraRayFilter";
@@ -126,6 +127,8 @@ export class PhysicsSystem {
   }>();
   /** Per body: measured motion (how fast it ACTUALLY moved), sampled in the write-back pass. See motion.ts. */
   private _motion = new WeakMap<Body, MotionRecord>();
+  /** A static body's node `transformVersion` when its pose was last pushed (see the write-back). */
+  private _followVersion = new WeakMap<Body, number>();
   /** Per body: the resolved motion tuning. `motionSmoothing` is readonly, so it can only change with the body. */
   private _motionCfg = new WeakMap<Body, MotionConfig>();
   /** Per body: how long it has been continuously airborne / grounded, in unpaused seconds. */
@@ -276,6 +279,9 @@ export class PhysicsSystem {
 
       const writeBackStart = performance.now();
       const nodes = this._scene.nodes;
+      // A body moving its node is simulation, never an edit (see authoring.derived).
+      authoring.derived++;
+      try {
       for (const node of nodes) {
         if ((!node.body && !node.trigger) || !node.hasStarted) continue;
 
@@ -313,13 +319,24 @@ export class PhysicsSystem {
             this._motionConfigFor(node.body),
           );
 
-          // A sleeping body did not move: writing its pose back would only dirty the node's transform (and
-          // every descendant's) for nothing. Its motion record still samples, so its speed reads 0.
-          if (!asleep) {
-            node.setPosition(pos);
-
-            const quat = node.body.quaternion;
-            node.setQuaternion([quat.x, quat.y, quat.z, quat.w]);
+          if (node.body.mass > 0) {
+            // DYNAMIC: physics owns the world pose, and the node's local one is rebased from it under
+            // whatever parent it has. A moving parent does not drag the body (as in Unity or Godot).
+            // A sleeping body did not move: writing its pose back would only dirty the node's transform (and
+            // every descendant's) for nothing. Its motion record still samples, so its speed reads 0.
+            if (!asleep) {
+              node.setWorldPosition(pos);
+              const quat = node.body.quaternion;
+              node.setWorldQuaternion([quat.x, quat.y, quat.z, quat.w]);
+            }
+          } else if (this._followVersion.get(node.body) !== node.transformVersion) {
+            // STATIC: the body follows its node, so colliders in a moved group (or on a moving platform)
+            // stay where they are drawn. Only when the node actually moved, which is rare.
+            this._followVersion.set(node.body, node.transformVersion);
+            const wp = node.worldPosition, wq = node.worldQuaternion;
+            node.body.setPosition(vec3.clone(wp));
+            node.body.setQuaternion(quat.clone(wq));
+            node.body.aabbNeedsUpdate = true;
           }
         }
 
@@ -332,6 +349,9 @@ export class PhysicsSystem {
           // Moved behind cannon's back (it only re-measures what it integrates).
           node.trigger.aabbNeedsUpdate = true;
         }
+      }
+      } finally {
+        authoring.derived--;
       }
       physicsStats.writeBackMs = performance.now() - writeBackStart;
 

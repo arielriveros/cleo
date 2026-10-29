@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { mat4, quat, vec3 } from 'gl-matrix';
-import { buildBoneMapping, retargetAnimation } from '../src/animation/animationRetarget';
+import { applyManualMapping, buildBoneMapping, retargetAnimation } from '../src/animation/animationRetarget';
 import type { Animation, Skin } from '../src/animation/animatedModel';
 import { normalizeBoneName, humanoidSlotOf } from '../src/animation/boneNames';
 import { Sprite } from '../src/graphics/sprite';
@@ -161,5 +161,70 @@ describe('retarget between bind poses', () => {
         const out = retargetAnimation(clip, source, target, buildBoneMapping([clip], source, target));
         const o = out.samplers[out.channels.find(c => c.targetNodeIndex === 1)!.samplerIndex].output;
         expect(Math.abs(quat.dot(quat.fromValues(o[0], o[1], o[2], o[3]), qz(-70)))).toBeGreaterThan(0.9999);
+    });
+});
+
+describe('retarget onto a custom-named skeleton mapped by hand', () => {
+    // The Valley's Elite Knight: `_rootJoint > hips_01 > L_arm_015 > L_elbow_016`, names no humanoid table
+    // reads, bound in an A-pose. Mapped by hand, its hips must still carry the root motion and its arm
+    // still get the bind-pose alignment the mapped mannequin bone implies.
+    const qz = (deg: number) => quat.setAxisAngle(quat.create(), [0, 0, 1], deg * Math.PI / 180);
+    const skin = (bones: { name: string; parent: number; r?: quat; t: number[] }[]): Skin => {
+        const nodeNames = new Map<number, string>(), nodeParents = new Map<number, number>(), nodeTransforms = new Map<number, mat4>();
+        const world: mat4[] = [];
+        bones.forEach((b, i) => {
+            nodeNames.set(i, b.name);
+            if (b.parent >= 0) nodeParents.set(i, b.parent);
+            const l = mat4.fromRotationTranslation(mat4.create(), b.r ?? quat.create(), b.t as any);
+            nodeTransforms.set(i, l);
+            world[i] = b.parent >= 0 ? mat4.multiply(mat4.create(), world[b.parent], l) : l;
+        });
+        const joints = bones.map((b, i) => ({ nodeIndex: i, inverseBindMatrix: mat4.invert(mat4.create(), world[i])!, parentIndex: b.parent >= 0 ? b.parent : undefined }));
+        return { joints, nodeNames, nodeParents, nodeTransforms } as Skin;
+    };
+    const source = skin([
+        { name: 'mixamorig1:Hips', parent: -1, t: [0, 1, 0] },
+        { name: 'mixamorig1:LeftArm', parent: 0, t: [0.2, 0.4, 0] },
+        { name: 'mixamorig1:LeftForeArm', parent: 1, t: [0.3, 0, 0] },
+    ]);
+    const target = skin([
+        { name: '_rootJoint', parent: -1, t: [0, 0, 0] },
+        { name: 'hips_01', parent: 0, t: [0, 1.1, 0] },
+        { name: 'L_arm_015', parent: 1, r: qz(-45), t: [0.2, 0.4, 0] },
+        { name: 'L_elbow_016', parent: 2, t: [0.3, 0, 0] },
+    ]);
+    const clip: Animation = {
+        name: 'Walk',
+        samplers: [
+            { input: [0, 1], output: [0, 1, 0, 0, 1, 2], interpolation: 'LINEAR' },
+            { input: [0], output: Array.from(qz(-90)), interpolation: 'LINEAR' },
+            { input: [0], output: [0, 0, 0, 1], interpolation: 'LINEAR' },
+        ],
+        channels: [
+            { samplerIndex: 0, targetNodeIndex: 0, targetPath: 'translation' },
+            { samplerIndex: 1, targetNodeIndex: 1, targetPath: 'rotation' },
+            { samplerIndex: 2, targetNodeIndex: 2, targetPath: 'rotation' },
+        ],
+    };
+    const mapped = () => {
+        let m = buildBoneMapping([clip], source, target);
+        m = applyManualMapping(m, 0, 1);
+        m = applyManualMapping(m, 1, 2);
+        m = applyManualMapping(m, 2, 3);
+        return m;
+    };
+
+    it('drives the mapped hips, not the first root joint', () => {
+        const out = retargetAnimation(clip, source, target, mapped());
+        const tr = out.channels.filter(c => c.targetPath === 'translation').map(c => c.targetNodeIndex);
+        expect(tr).toEqual([1]);
+    });
+
+    it('aligns the A-pose arm to the source bind, so the clip leaves it hanging down', () => {
+        const out = retargetAnimation(clip, source, target, mapped());
+        const ch = out.channels.find(c => c.targetNodeIndex === 2 && c.targetPath === 'rotation')!;
+        const o = out.samplers[ch.samplerIndex].output;
+        const dir = vec3.transformQuat(vec3.create(), [1, 0, 0], quat.fromValues(o[0], o[1], o[2], o[3]));
+        expect(dir[1]).toBeLessThan(-0.99);
     });
 });

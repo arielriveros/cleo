@@ -1921,13 +1921,12 @@ export class Animator {
         } else {
             const target = this._nearestBodiedNode() ?? this._node;
             if (target) {
-                target.setPosition(vec3.add(vec3.create(), target.position, worldT));
-                // World-space rotation delta, so it LEFT-multiplies the target's (world = local) orientation.
+                // In WORLD space, so a target under a moved or turned parent travels the clip's world delta.
+                target.setWorldPosition(vec3.add(vec3.create(), target.worldPosition, worldT));
+                // A world-space rotation delta LEFT-multiplies the target's world orientation;
+                // setWorldQuaternion also turns its body.
                 const worldR = quat.multiply(quat.create(), quat.multiply(quat.create(), wp, deltaR), wpInv);
-                const newQ = quat.normalize(quat.create(), quat.multiply(quat.create(), worldR, target.quaternion));
-                target.setQuaternion(newQ);
-                // setQuaternion does not push into the body, so a bodied target needs it set explicitly.
-                if (target.body) target.body.setQuaternion(newQ);
+                target.setWorldQuaternion(quat.normalize(quat.create(), quat.multiply(quat.create(), worldR, target.worldQuaternion)));
             }
         }
 

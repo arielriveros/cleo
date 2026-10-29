@@ -273,6 +273,69 @@ def knight() -> None:
             save_png(color.getchannel("A"), f"{prefix}_mask", 2048, "L")
 
 
+def metal_rough(diffuse: Image.Image, specular: Image.Image, gloss: Image.Image):
+    """Specular/glossiness maps as this example's metal/rough set: `(base colour, ARM)`.
+
+    The per-texel solve of Khronos's glTF spec-gloss converter: metalness from how far the specular
+    colour sits above a dielectric's 4% against the diffuse brightness, the base colour blended between
+    the diffuse (dielectric) and specular (metal) readings, roughness = 1 - glossiness. Worked in linear
+    light; AO is 1 (neither file has one)."""
+    import numpy as np
+    size = diffuse.size
+    lin = lambda im: (np.asarray(im.convert("RGB").resize(size, Image.LANCZOS), dtype=np.float32) / 255.0) ** 2.2
+    d, sp = lin(diffuse), lin(specular)
+    g = np.asarray(grey8(gloss).resize(size, Image.LANCZOS), dtype=np.float32) / 255.0
+    bright = lambda c: np.sqrt(0.299 * c[..., 0] ** 2 + 0.587 * c[..., 1] ** 2 + 0.114 * c[..., 2] ** 2)
+    diel = 0.04
+    one_minus = 1.0 - sp.max(axis=-1)
+    db, sb = bright(d), bright(sp)
+    a_ = diel
+    b_ = db * one_minus / (1 - diel) + sb - 2 * diel
+    c_ = diel - sb
+    disc = np.maximum(b_ * b_ - 4 * a_ * c_, 0)
+    metal = np.where(sb < diel, 0.0, np.clip((-b_ + np.sqrt(disc)) / (2 * a_), 0, 1))
+    m = metal[..., None]
+    from_diffuse = d * (one_minus / (1 - diel) / np.maximum(1 - metal, 1e-4))[..., None]
+    from_spec = (sp - diel * (1 - m)) / np.maximum(m, 1e-4)
+    base = np.clip(from_diffuse + (from_spec - from_diffuse) * m * m, 0, 1)
+    to8 = lambda x: Image.fromarray((np.clip(x, 0, 1) * 255 + 0.5).astype("uint8"))
+    color = to8(base ** (1 / 2.2))
+    arm = Image.merge("RGB", (Image.new("L", size, 255), to8(1 - g), to8(metal)))
+    return color, arm
+
+
+def strong_knight() -> None:
+    """The Elite Knight's three materials (cloth, knight, weapons). The file is spec-gloss
+    (KHR_materials_pbrSpecularGlossiness): diffuse, a specular RGB + glossiness A map and a normal map,
+    converted to base colour / ARM (see metal_rough)."""
+    path = SRC / "strong_knight.glb"
+    doc, images = glb_images(path)
+    tex = [t["source"] for t in doc["textures"]]
+    for m in doc["materials"]:
+        sg = m["extensions"]["KHR_materials_pbrSpecularGlossiness"]
+        diffuse = images[tex[sg["diffuseTexture"]["index"]]]
+        spec_gloss = images[tex[sg["specularGlossinessTexture"]["index"]]].convert("RGBA")
+        color, arm = metal_rough(diffuse, spec_gloss.convert("RGB"), spec_gloss.getchannel("A"))
+        prefix = f"strong_knight_{m['name']}"
+        save_jpeg(color, f"{prefix}_diff", 2048)
+        save_jpeg(arm, f"{prefix}_arm", 1024)
+        save_png(images[tex[m["normalTexture"]["index"]]], f"{prefix}_nor", 2048)
+
+
+def hollow() -> None:
+    """The Hollow's three UDIM tiles (Ch05_1001..1003), each a diffuse, specular, glossiness and normal
+    map cut out of the FBX by prepareEnemy.mjs, as base colour / ARM / normal (see metal_rough)."""
+    src = OUT / "enemy"
+    if not (src / "Ch05_1001_Diffuse.png").exists():
+        sys.exit("no build/valley_prepared/enemy — run `node tools/valley/prepareEnemy.mjs` first")
+    for tile in ("1001", "1002", "1003"):
+        stem = src / f"Ch05_{tile}"
+        color, arm = metal_rough(load(Path(f"{stem}_Diffuse.png")), load(Path(f"{stem}_Specular.png")), load(Path(f"{stem}_Glossiness.png")))
+        save_jpeg(color, f"hollow_{tile}_diff", 2048)
+        save_jpeg(arm, f"hollow_{tile}_arm", 1024)
+        save_png(load(Path(f"{stem}_Normal.png")), f"hollow_{tile}_nor", 2048)
+
+
 def rock_moss() -> None:
     """The moss rocks ship roughness but no ARM: one is assembled (AO 1, roughness, metal 0), the layout
     every lit material in this example reads."""
@@ -350,11 +413,14 @@ def main() -> None:
     jacaranda()
     cutout_masks()
     knight()
+    strong_knight()
+    hollow()
     rock_moss()
     skull_cave()
     water_normal()
-    total = sum(f.stat().st_size for f in OUT.iterdir())
-    print(f"wrote {len(list(OUT.iterdir()))} textures to {OUT.relative_to(ROOT)} ({total / 1e6:.1f} MB)")
+    files = [f for f in OUT.iterdir() if f.is_file()]
+    total = sum(f.stat().st_size for f in files)
+    print(f"wrote {len(files)} textures to {OUT.relative_to(ROOT)} ({total / 1e6:.1f} MB)")
 
 
 if __name__ == "__main__":

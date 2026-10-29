@@ -40,6 +40,7 @@ import { sceneStats, resetSceneStats, SceneStats } from "./sceneStats";
 import { resetAIStats } from "../../ai/aiStats";
 import type { AISystem } from "../../ai/aiSystem";
 import type { SceneChange } from "../eventBus";
+import { authoring } from "../eventBus";
 import { cloneNodeJson, regenerateNodeIds } from "./nodeJson";
 import { getTemplate, templateNames } from "./templates";
 import { followSocket, resolveSocketOwner } from "./socketFollow";
@@ -465,6 +466,10 @@ export class Scene {
             // immediately BEFORE that node's onUpdate, so a handler and the same frame's poll agree.
             // Empty on almost every frame, so the cost is one length check per node loop.
             const actions = this._hasStarted && !paused ? InputSystem.instance.changedThisFrame : EMPTY_ACTIONS;
+            // Everything the loop writes is the scene ticking, not an author's edit (see authoring.derived):
+            // a script turning a windmill's sails in the editor marked the scene unsaved every frame.
+            authoring.derived++;
+            try {
             for (const node of this.nodes) {
                 if (!assignedLightIndices && node instanceof LightNode) {
                     this._asignLightIndices();
@@ -485,6 +490,9 @@ export class Scene {
             // `remove()` is ordinary, and the node would otherwise stay in the tree forever.
             for (const node of this._dormant)
                 if (node.markForRemoval) this._removeForGood(node);
+            } finally {
+                authoring.derived--;
+            }
 
             sceneStats.nodeLoopMs = performance.now() - loopStart;
 

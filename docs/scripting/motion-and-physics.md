@@ -31,9 +31,11 @@ get trigger: Trigger | null
 **max** — so one frictionless body is enough to make a contact frictionless, and one bouncy body is
 enough to make it bounce.
 
-> `setBody` places the body at the node's **world** position, but `setPosition` writes the node's
-> **local** position into the body. A body on a parented node therefore ends up in the wrong place.
-> Keep bodied roots at the scene root.
+> A body lives in **world** space; its node can sit under any parent. `setPosition` and
+> `setRotation` are local, and put the body at the parent's world transform times that local pose.
+> To place a node in world space, use `setWorldPosition(p)` and `setWorldQuaternion(q)` (the latter
+> also turns the body). A static body follows its node when a parent moves; a dynamic one is moved
+> by physics and its node follows it.
 
 ### Shapes
 

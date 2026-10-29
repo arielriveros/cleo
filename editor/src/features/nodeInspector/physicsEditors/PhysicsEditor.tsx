@@ -457,12 +457,10 @@ export default function PhysicsEditor(props: {node: Node}) {
         { !bodyProperties ?
           (props.node.name === 'root'
             ? <Hint>Root node cannot have a rigid body.</Hint>
-            : props.node.parent?.name !== 'root'
-              ? <Hint>Can only add rigid bodies to nodes at root level.</Hint>
-              : <>
-                  <Hint className='mb-2'>Node does not have a rigid body.</Hint>
-                  <Button variant='primary' size='sm' onClick={() => commit('body', { ...NEW_BODY, shapes: [] }, 'Add rigid body')}>Add Rigid Body</Button>
-                </>)
+            : <>
+                <Hint className='mb-2'>Node does not have a rigid body.</Hint>
+                <Button variant='primary' size='sm' onClick={() => commit('body', { ...NEW_BODY, shapes: [] }, 'Add rigid body')}>Add Rigid Body</Button>
+              </>)
           : <>
               {/* The two channels this body takes part in. Independent on purpose: scenery can block
                   the camera without blocking the character, or the reverse. */}

@@ -16,8 +16,8 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  *   └── Heavy
  *
  * A character does not carry its weapons in its template. It names them (`weaponTemplates` on
- * SoulsCharacter) and spawns them on start, into the hand. So the same "Greatsword" template is the
- * player's second weapon and the Elite Knight's only one, and a change to it reaches both.
+ * SoulsCharacter) and spawns them on start, into the hand. So one "Club" template arms every Hollow,
+ * and a change to it reaches them all.
  *
  * The weapon owns everything about itself: its numbers, its hitbox, its moves (with the clips the wielder
  * plays), and the maths that turns a swing into damage (`attackRating`, `hitFor`, `strike`). The wielder

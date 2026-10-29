@@ -1017,6 +1017,15 @@ function scannedWeapon(key, file, name, template, scale, edgeAxis = [0, 0, 1]) {
     textures: { baseColorTexture: diff, metallicRoughnessTexture: arm, occlusionMap: arm, normalMap: nor },
     config: { side: 'double', wireframe: false, transparent: false, castShadow: true, probeable: true },
   }, [diff, arm, nor])
+  WEAPON_MATERIAL_FOLDERS[name] = `/Weapons/${template}/Materials`
+  return weaponPart(name, part, materialId, edgeAxis)
+}
+
+/**
+ * A weapon mesh as `weaponMesh` takes it: `part` (positions, normals, uvs, indices) with its long axis on
+ * +Y and the grip at the origin, in metres. The Valley's Elite Knight hands its own maul in through here.
+ */
+export function weaponPart(name, part, materialId, edgeAxis = [0, 0, 1]) {
   const b = boundsOf([part])
   const length = b.max[1]
   // The capsule a swing sweeps, in the Mesh child's space: from a quarter of the way up the haft to the
@@ -1028,7 +1037,6 @@ function scannedWeapon(key, file, name, template, scale, edgeAxis = [0, 0, 1]) {
     bladeEnd: [0, r3(length), 0],
     bladeRadius: r3(Math.min(0.2, Math.max(0.08, half))),
   }
-  WEAPON_MATERIAL_FOLDERS[name] = `/Weapons/${template}/Materials`
   return { name, geometry: geometryJson(part), materialId, hitbox, edgeAxis }
 }
 
@@ -1320,7 +1328,10 @@ function enemyNode(spec) {
   const key = `enemy:${spec.key}`
   const rootId = stableId(`${key}:root`)
   const s = spec.scale
-  const model = characterModel(key, spec.material, s)
+  // A project's own character for this type (writeProject `enemyModels`), already at its size, or the
+  // tinted mannequin scaled.
+  const own = ENEMY_MODELS[spec.name]
+  const model = own ? own.placement(key) : characterModel(key, spec.material, s)
 
   const lockPoint = node('LockPoint', 'node', { id: stableId(`${key}:lock`), position: [0, 1.25 * s, 0] })
   const anchor = node('HealthAnchor', 'node', { id: stableId(`${key}:anchor`), position: [0, 1.95 * s, 0] })
@@ -1377,6 +1388,9 @@ function enemyHealthBar(key, anchorId) {
  * group, the Attacks group, a floating health bar and the brain — on the base SoulsEnemy script. Each
  * type is a variant: its own script, scale and tint, its attacks; the boss drops the bar and adds an aura.
  */
+/** Per enemy type name, a project's own character: `{ placement(key), weaponPart? }` (writeProject). */
+let ENEMY_MODELS = {}
+
 const ENEMY_BASE = { key: 'base', name: 'Enemy', script: 'SoulsEnemy', material: MAT.hollow, scale: 1, moveSpeed: 3, attacks: [] }
 
 const STAFF = [['Staff', 'cylinder', MAT.wood, [0.05, 1.6, 0.05], [0, 0.25, 0]], ['Orb', 'sphere', MAT.bolt, [0.12, 0.12, 0.12], [0, 1.08, 0]]]
@@ -1403,9 +1417,10 @@ const ENEMIES = [
     ],
   },
   {
-    // Wields the player's own Greatsword template — one weapon, two wielders.
+    // A maul: the war hammer here, the Valley's knight's own (writeProject `enemyModels`) there.
     key: 'knight', name: 'Elite Knight', script: 'SoulsEliteKnight', material: MAT.knight, scale: 1.2, moveSpeed: 2.8,
     ai: { engage: 9, leash: 14, preferredMin: 0, preferredMax: 2.6 },
+    weapon: ['maul', 'Maul', 'SoulsGreatsword', WEAPON_MESHES.hammer],
     sight: 16,
     attacks: [
       ['Sweep', { clip: 'Souls_GS_L2', playSpeed: 1.3, damage: 140, poiseDamage: 35, minRange: 0, maxRange: 2.6, trackSeconds: 0.45, hitTime: 0.7 }],
@@ -1784,7 +1799,11 @@ function variantTemplate(key, base, nodeJson) {
 /** The weapon templates: the base, then a variant per weapon (player weapons and enemy weapons alike). */
 function weaponTemplates() {
   const base = asTemplate('weapon:base', baseWeaponNode())
-  const specs = [...WEAPONS, ...ENEMIES.filter(e => e.weapon).map(e => e.weapon)]
+  const specs = [...WEAPONS, ...ENEMIES.filter(e => e.weapon).map(e => {
+    // A project's own character may bring its own weapon mesh (the Valley's Elite Knight, its maul).
+    const parts = ENEMY_MODELS[e.name]?.weaponPart
+    return parts ? [e.weapon[0], e.weapon[1], e.weapon[2], parts, ...e.weapon.slice(4)] : e.weapon
+  })]
   return [base, ...specs.map(([key, name, script, parts, extra]) => {
     // A player weapon's 5th entry is its moveset; an enemy weapon's, an optional blade direction.
     const isMoves = Array.isArray(extra) && Array.isArray(extra[0])
@@ -2195,7 +2214,7 @@ const FOLDERS = {
     Hollow: ENEMY('Hollow'), 'Hollow Sorcerer': ENEMY('Hollow Sorcerer'),
     'Elite Knight': ENEMY('Elite Knight'), 'Hollow Warden': ENEMY('Hollow Warden'),
     Weapon: WEAPON('Base Weapon'), 'Straight Sword': WEAPON('Straight Sword'), Greatsword: WEAPON('Greatsword'),
-    Club: WEAPON('Club'), 'Sorcerer Staff': WEAPON('Sorcerer Staff'), Halberd: WEAPON('Halberd'),
+    Club: WEAPON('Club'), 'Sorcerer Staff': WEAPON('Sorcerer Staff'), Halberd: WEAPON('Halberd'), Maul: WEAPON('Maul'),
     Torch: PROP('Torch'), Bonfire: PROP('Bonfire'), 'Fog Gate': PROP('Fog Gate'),
     Lever: PROP('Lever & Gate'), Gate: PROP('Lever & Gate'), Message: PROP('Message'), Pickup: PROP('Pickup'),
     Bloodstain: PROP('Bloodstain'),
@@ -2328,7 +2347,11 @@ export function writeProject({
   materialOverrides = {},
   // More skeletons beside the mannequin's: [RigAsset].
   rigs: extraRigs = [],
+  // Enemy types played by the project's own characters instead of the mannequin, by type name:
+  // { 'Hollow': { placement(key) -> model node, weaponPart? } } (see tools/exampleKit/character.mjs).
+  enemyModels = {},
 }) {
+  ENEMY_MODELS = enemyModels
   fs.rmSync(out, { recursive: true, force: true })
   fs.mkdirSync(path.join(out, 'libraries'), { recursive: true })
   fs.mkdirSync(path.join(out, 'scenes'), { recursive: true })

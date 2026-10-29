@@ -41,6 +41,7 @@ import {
 } from './foliage.mjs'
 import { buildProps } from './props.mjs'
 import { buildKnight } from './knight.mjs'
+import { buildHollow, buildStrongKnight } from './enemies.mjs'
 import { WATER_SOURCE, WATER_UNIFORMS } from './water.mjs'
 import { boundsOf, convexShape, geometryJson, mergeParts, partsOf, readGltf } from './meshes.mjs'
 import { buildBarrel, buildSkullCave } from './setPieces.mjs'
@@ -258,6 +259,24 @@ const KNIGHT_MATERIALS = [
   knightMaterial('blinn2', 'Knight Armour', true),
   knightMaterial('blinn1', 'Knight Plate', false),
   knightMaterial('blinn3', 'Knight Cloth', true),
+]
+
+// ----- the enemies' own characters --------------------------------------------------------------------
+// Both files are spec-gloss; prepare.py converts each material to base colour / ARM / normal.
+const enemyMaterial = (dir, key, prefix, name, metallic) => libraryMaterial(key, name, `${dir}/Materials`, pbrMaterial({
+  diff: tex(`${prefix}_diff.jpg`, `${dir}/Textures`, `${name} Base Color`),
+  nor: tex(`${prefix}_nor.png`, `${dir}/Textures`, `${name} Normal`),
+  arm: tex(`${prefix}_arm.jpg`, `${dir}/Textures`, `${name} ARM`),
+  metallic, roughness: 1, side: 'double',
+}))
+const HOLLOW_DIR = '/Characters/Enemies/Hollow'
+// The FBX's three UDIM tiles, in its material order (Ch05_body, _body1, _body2).
+const HOLLOW_MATERIALS = ['1001', '1002', '1003'].map((tile, i) => enemyMaterial(HOLLOW_DIR, `hollow-${tile}`, `hollow_${tile}`, `Hollow Body ${i + 1}`, 1))
+const ELITE_DIR = '/Characters/Enemies/Elite Knight'
+const STRONG_KNIGHT_MATERIALS = [
+  enemyMaterial(ELITE_DIR, 'strong-knight-cloth', 'strong_knight_cloth', 'Strong Knight Cloth', 1),
+  enemyMaterial(ELITE_DIR, 'strong-knight-armour', 'strong_knight_knight', 'Strong Knight Armour', 1),
+  enemyMaterial(ELITE_DIR, 'strong-knight-weapons', 'strong_knight_weapons', 'Strong Knight Weapons', 1),
 ]
 
 const SURFACES = {
@@ -1254,6 +1273,22 @@ const knight = buildKnight({ ROOT, BUILD, souls, idOf: id, node, vars, matJson, 
 log('knight', knight.report)
 LEVEL.player = souls.asTemplate('level:player', souls.playerNode(knight.playerModel), knight.textureIds)
 
+// The Hollow and the Elite Knight are characters of their own (enemies.mjs); the other types keep the
+// mannequin. The Elite Knight fights with the maul its model carried.
+const hollow = buildHollow({ ROOT, PREPARED, souls, idOf: id, node, vars, matJson, materialIds: HOLLOW_MATERIALS })
+log('hollow', hollow.report)
+const strongKnight = buildStrongKnight({ ROOT, BUILD, souls, idOf: id, node, vars, matJson, materialIds: STRONG_KNIGHT_MATERIALS })
+log('elite knight', strongKnight.report)
+const ENEMY_MODELS = {
+  Hollow: { placement: hollow.placement },
+  'Elite Knight': {
+    placement: strongKnight.placement,
+    // The haft along +Y, the grip at the maul node's origin; its head's faces along the mesh's Z.
+    weaponPart: souls.weaponPart('Strong Knight Maul', strongKnight.maul, STRONG_KNIGHT_MATERIALS[2]),
+  },
+}
+const CHARACTER_MODELS = [knight.model, hollow.model, strongKnight.model]
+
 /** The player's camera sees the far mountains: the Playable's 100 m far plane is a room's. */
 const CAMERA_FAR = 3000
 /** The player camera's boom length: where the player stands from the lens, so where depth of field focuses. */
@@ -1841,12 +1876,13 @@ const result = souls.writeProject({
     description: 'A souls-like on a 2 km mountain valley with a day and night cycle: stamina combat, rolls, lock-on, bonfires and Estus, on landscape layers for ground, rock, snow, forest floor and trails, meadow grass and flowers, pine forest, moss rocks, a torch-lit hamlet with breakable barrels, and a skull cave down into a three-level dungeon with a boss in its throne arena.',
     order: 0,
   },
-  models: [knight.model, ...propAssets, ...foliageAssets, ...dungeon.models],
-  rigs: [knight.rig],
+  models: [...CHARACTER_MODELS, ...propAssets, ...foliageAssets, ...dungeon.models],
+  rigs: [knight.rig, hollow.rig, strongKnight.rig],
+  enemyModels: ENEMY_MODELS,
   templates: [BARREL_TEMPLATE, DEBRIS_TEMPLATE, CAVE_TEMPLATE, ...Object.values(FIRE_TEMPLATES)],
   excludeTemplates: [LEVEL.torch.id, LEVEL.bonfire.id],
   tilesets: [FIRE_TILESET],
-  extraScenes: [{ id: DUNGEON_ID, name: DUNGEON_NAME, build: dungeon.scene, refs: { modelIds: [souls.MANNEQUIN_MODEL, knight.model.id, ...dungeon.models.map(a => a.id)] } }],
+  extraScenes: [{ id: DUNGEON_ID, name: DUNGEON_NAME, build: dungeon.scene, refs: { modelIds: [souls.MANNEQUIN_MODEL, ...CHARACTER_MODELS.map(a => a.id), ...dungeon.models.map(a => a.id)] } }],
   // 2 km of valley: barrels, debris and enemies far from the camera freeze in place instead of
   // simulating against the terrain. The player opts out (simulationMode 'always').
   projectSettings: { engine: { simulationRange: 90 } },
@@ -1863,8 +1899,11 @@ const result = souls.writeProject({
       ...Object.fromEntries(Object.values(FIRE_TEMPLATES).map(t => [t.name, FIRE])),
     },
     tileset: { Fire: FIRE },
-    model: { ...foliageFolder, ...buildingFolder, ...dungeon.folders, Knight: `${KNIGHT_DIR}/Models` },
-    rig: { Knight: `${KNIGHT_DIR}/Rigs` },
+    model: {
+      ...foliageFolder, ...buildingFolder, ...dungeon.folders, Knight: `${KNIGHT_DIR}/Models`,
+      Hollow: `${HOLLOW_DIR}/Models`, 'Strong Knight': `${ELITE_DIR}/Models`,
+    },
+    rig: { Knight: `${KNIGHT_DIR}/Rigs`, Hollow: `${HOLLOW_DIR}/Rigs`, 'Strong Knight': `${ELITE_DIR}/Rigs` },
     // The souls torch and bonfire are excluded (the valley's fires replace them); what they leave in the
     // libraries joins the valley's fires rather than keeping a folder each.
     particleSystem: {
@@ -1881,7 +1920,7 @@ const result = souls.writeProject({
   },
   textureEntries: TEXTURE_ENTRIES,
   refs: {
-    modelIds: [souls.MANNEQUIN_MODEL, knight.model.id, ...propAssets.map(a => a.id), ...foliageAssets.map(a => a.id)],
+    modelIds: [souls.MANNEQUIN_MODEL, ...CHARACTER_MODELS.map(a => a.id), ...propAssets.map(a => a.id), ...foliageAssets.map(a => a.id)],
     terrainMaterialIds: [TERRAIN_MATERIAL_ID],
     foliageModelIds: foliageAssets.map(a => a.id),
   },

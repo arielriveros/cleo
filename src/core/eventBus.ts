@@ -181,4 +181,20 @@ export const engineEventBus = new TypedEmitter<EngineEventMap>();
  * Must stay in this leaf module: `Node` reads it, and an import from there to engine.ts would close a
  * cycle through the class every node subclass extends at module-evaluation time.
  */
-export const authoring = { enabled: false };
+export const authoring = {
+    enabled: false,
+    /**
+     * Above 0 while the scene TICKS: per-frame updates, scripts' onUpdate, the physics write-back. What a
+     * tick writes is derived (a windmill's script turning its sails, a body settling), never an author's
+     * edit, so property-level SCENE_CHANGED is held back without touching `enabled` — controllers, particle
+     * preview and input still read that to know they are in the editor. A depth, not a flag, so nested
+     * passes compose.
+     */
+    derived: 0,
+};
+
+/** Run `fn` as part of the scene's tick: transform changes it makes are not authoring edits. */
+export function asDerived<T>(fn: () => T): T {
+    authoring.derived++;
+    try { return fn(); } finally { authoring.derived--; }
+}

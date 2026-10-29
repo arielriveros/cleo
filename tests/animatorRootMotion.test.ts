@@ -40,8 +40,11 @@ interface DuckNode {
     position: vec3;
     quaternion: quat;
     worldQuaternion: quat;
+    worldPosition: vec3;
     setPosition(v: vec3): void;
     setQuaternion(q: quat): void;
+    setWorldPosition(v: vec3): void;
+    setWorldQuaternion(q: quat): void;
     parent: DuckNode | null;
     body: { setQuaternion(q: quat): void; q: quat } | null;
     currentSpeed: number;
@@ -55,8 +58,12 @@ function makeNode(opts?: { parent?: DuckNode | null; withBody?: boolean }): Duck
         position, quaternion,
         // Parentless test nodes: world rotation == local rotation. Kept in sync on setQuaternion.
         worldQuaternion: quaternion,
+        worldPosition: position,
         setPosition(v) { vec3.copy(position, v); },
         setQuaternion(q) { quat.copy(quaternion, q); },
+        // At the root world == local; a world rotation also turns the body, as Node.setWorldQuaternion does.
+        setWorldPosition(v) { vec3.copy(position, v); },
+        setWorldQuaternion(q) { quat.copy(quaternion, q); body?.setQuaternion(q); },
         parent: opts?.parent ?? null,
         body,
         currentSpeed: 0,

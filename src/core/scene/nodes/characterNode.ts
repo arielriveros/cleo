@@ -1,4 +1,4 @@
-import { vec3 } from "gl-matrix";
+import { quat, vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Logger } from "../../logger";
 import { Node } from "./node";
@@ -207,9 +207,10 @@ export class CharacterNode extends Node {
         this._locomotion = out.next;
 
         this.velocity = out.velocity as [number, number, number];
-        // `setRotation` pushes into the body; `setQuaternion` deliberately would not, and the physics
-        // solver has to agree with the transform or the capsule slides while facing elsewhere.
-        if (out.yaw !== null) this.setRotation([0, out.yaw, 0]);
+        // A WORLD yaw (it came from worldForward), so it is set in world space: under a turned parent a local
+        // write would face the character off its path. `setWorldQuaternion` also turns the body, which the
+        // physics solver has to agree with or the capsule slides while facing elsewhere.
+        if (out.yaw !== null) this.setWorldQuaternion(quat.fromEuler(CharacterNode._yawQ, 0, out.yaw, 0));
 
         this.moveDir = out.moveDir;
         this.isJumping = out.isJumping;
@@ -220,6 +221,8 @@ export class CharacterNode extends Node {
         if (out.jumped) consumeRequest(this._intent, 'jump');
         decayRequests(this._intent, delta);
     }
+
+    private static _yawQ = quat.create();
 
     /** Everything the world can say about this character this frame, as plain numbers. */
     private _sense(delta: number): LocomotionSense {

@@ -47,8 +47,13 @@ function accessorValues(gltf, bin, index) {
  * `nodeParents`/`nodeTransforms`/`nodeNames` as entry pairs). Each part is
  * `{ material, positions, normals, uvs, indices, jointIndices, jointWeights }`, uvs with V flipped as
  * GLTFLoader stores them. `keepMesh(nodeName, meshName)` drops a mesh node when false.
+ *
+ * `rigidMeshes(nodeName, meshName)` takes in an UNSKINNED mesh hanging under a joint (a sheathed dagger
+ * parented to the spine): its vertices are bound with full weight to that nearest joint, placed so the
+ * joint's inverse bind carries them to where the node draws them at rest. Unskinned meshes are otherwise
+ * skipped.
  */
-export function readSkinnedGltf({ gltf, bin }, { keepMesh = () => true } = {}) {
+export function readSkinnedGltf({ gltf, bin }, { keepMesh = () => true, rigidMeshes = () => false } = {}) {
   const gskin = gltf.skins?.[0]
   if (!gskin) throw new Error('the document has no skin')
 
@@ -68,22 +73,59 @@ export function readSkinnedGltf({ gltf, bin }, { keepMesh = () => true } = {}) {
   }))
   const skin = { name: gskin.name ?? 'Armature', joints, nodeParents, nodeTransforms, nodeNames }
 
+  // A rigid mesh's binding: its nearest joint ancestor, and the matrix taking its vertices into bind space.
+  const jointOfNode = new Map(gskin.joints.map((nodeIndex, i) => [nodeIndex, i]))
+  const worldOf = (i) => {
+    const m = localMatrix(gltf.nodes[i])
+    const p = parentOf.get(i)
+    return p === undefined ? m : mat4.multiply(mat4.create(), worldOf(p), m)
+  }
+  const rigidBinding = (i) => {
+    let p = parentOf.get(i)
+    while (p !== undefined && !jointOfNode.has(p)) p = parentOf.get(p)
+    if (p === undefined) return null
+    const ji = jointOfNode.get(p)
+    // bind = inv(IBM_J) · inv(world_J) · world_node: what IBM_J and then the joint's rest carry back to
+    // the node's own rest placement.
+    const ibmJ = ibm ? mat4.clone(ibm.slice(ji * 16, ji * 16 + 16)) : mat4.create()
+    const m = mat4.invert(mat4.create(), ibmJ)
+    mat4.multiply(m, m, mat4.invert(mat4.create(), worldOf(p)))
+    mat4.multiply(m, m, worldOf(i))
+    return { joint: ji, matrix: m }
+  }
+
   // One part per material, concatenated across every skinned mesh node kept.
   const byMaterial = new Map()
-  gltf.nodes.forEach((n) => {
-    if (n.mesh === undefined || n.skin === undefined) return
+  gltf.nodes.forEach((n, nodeIndex) => {
+    if (n.mesh === undefined) return
     const mesh = gltf.meshes[n.mesh]
     if (!keepMesh(n.name ?? '', mesh.name ?? '')) return
+    const rigid = n.skin === undefined ? (rigidMeshes(n.name ?? '', mesh.name ?? '') ? rigidBinding(nodeIndex) : null) : null
+    if (n.skin === undefined && !rigid) return
     for (const prim of mesh.primitives) {
       const a = prim.attributes
-      if (a.JOINTS_0 === undefined || a.WEIGHTS_0 === undefined) continue
+      if (!rigid && (a.JOINTS_0 === undefined || a.WEIGHTS_0 === undefined)) continue
       const pos = accessorValues(gltf, bin, a.POSITION)
       const count = pos.length / 3
       const nor = a.NORMAL !== undefined ? accessorValues(gltf, bin, a.NORMAL) : new Array(count * 3).fill(0).map((_, k) => (k % 3 === 1 ? 1 : 0))
       const uv = a.TEXCOORD_0 !== undefined ? accessorValues(gltf, bin, a.TEXCOORD_0) : new Array(count * 2).fill(0)
       for (let k = 1; k < uv.length; k += 2) uv[k] = 1 - uv[k]
-      const ji = accessorValues(gltf, bin, a.JOINTS_0)
-      const jw = accessorValues(gltf, bin, a.WEIGHTS_0)
+      let ji, jw
+      if (rigid) {
+        ji = new Array(count * 4).fill(0); jw = new Array(count * 4).fill(0)
+        const nm = mat3.normalFromMat4(mat3.create(), rigid.matrix)
+        const v = vec3.create()
+        for (let k = 0; k < count; k++) {
+          ji[k * 4] = rigid.joint; jw[k * 4] = 1
+          vec3.transformMat4(v, [pos[k * 3], pos[k * 3 + 1], pos[k * 3 + 2]], rigid.matrix)
+          pos[k * 3] = v[0]; pos[k * 3 + 1] = v[1]; pos[k * 3 + 2] = v[2]
+          vec3.normalize(v, vec3.transformMat3(v, [nor[k * 3], nor[k * 3 + 1], nor[k * 3 + 2]], nm))
+          nor[k * 3] = v[0]; nor[k * 3 + 1] = v[1]; nor[k * 3 + 2] = v[2]
+        }
+      } else {
+        ji = accessorValues(gltf, bin, a.JOINTS_0)
+        jw = accessorValues(gltf, bin, a.WEIGHTS_0)
+      }
       const idx = prim.indices !== undefined ? accessorValues(gltf, bin, prim.indices) : [...Array(count).keys()]
       const key = prim.material ?? 0
       if (!byMaterial.has(key)) byMaterial.set(key, { material: key, positions: [], normals: [], uvs: [], indices: [], jointIndices: [], jointWeights: [] })

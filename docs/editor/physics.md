@@ -8,7 +8,8 @@ The runtime side is in [Motion and physics](../scripting/motion-and-physics.md).
 ## Rigid body
 
 What makes the node solid: a body the physics solver moves (or holds still, at mass `0`), and the
-shapes it collides with. Available on **root-level nodes only**.
+shapes it collides with. Any node can have one, at any depth in the scene tree (only the scene root
+itself cannot).
 
 | Setting | Meaning |
 |---|---|
@@ -28,9 +29,13 @@ shapes it collides with. Available on **root-level nodes only**.
 Two independent channels is the useful part: a decorative bush can be non-colliding for gameplay yet
 still push the camera out of itself.
 
-> **A bodied node must sit at the scene root.** Adding a body places it at the node's *world*
-> position, but writing the node's position afterwards writes its *local* position into the body, so
-> a parented body ends up in the wrong place.
+> **A body under a parent.** A body lives in world space, and its node may sit anywhere in the tree:
+> - A **static** body (mass `0`) follows its node. Move or turn the group it is in and the collider
+>   moves with it, as a door on a moving platform should.
+> - A **dynamic** body is moved by physics in world space; its node's local pose is worked out from
+>   that under whatever parent it has. Moving the parent afterwards does not drag a falling crate along,
+>   as in other engines.
+> - A non-uniformly scaled ancestor is not supported: physics shapes cannot be sheared.
 
 > **A locked linear axis silently kills movement along it.** This is the usual cause of "movement is
 > janky or dead in some directions" — with Z locked, forward and back do nothing while strafing

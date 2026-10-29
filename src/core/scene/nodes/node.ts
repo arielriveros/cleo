@@ -1305,7 +1305,7 @@ export class Node {
 
   /**
    * This node's position in world space, with every ancestor transform applied. Live cached reference.
-   * To *move* the node, set {@link position} (local space); there is no world-space position setter.
+   * To *move* the node, set {@link position} (local space) or use {@link setWorldPosition}.
    */
   public get worldPosition(): vec3 {
     if (this._worldCacheDirty) this._updateWorldCache();
@@ -1381,6 +1381,65 @@ export class Node {
     return this;
   }
 
+  /**
+   * The parent's world matrix when it actually transforms anything, else null — the fast path every
+   * world <-> local conversion below takes for a node at the root or under identity groups.
+   */
+  private _parentWorldOrNull(): mat4 | null {
+    const w = this._parent?.worldTransform;
+    if (!w) return null;
+    for (let i = 0; i < 16; i++) if (Math.abs(w[i] - ((i % 5 === 0) ? 1 : 0)) > 1e-7) return w;
+    return null;
+  }
+
+  /**
+   * Moves the node so its WORLD position is `pos`, whatever its parent's transform: the local position is
+   * solved from the parent's current world matrix. Pushes into a physics body like {@link setPosition}.
+   */
+  public setWorldPosition(pos: ArrayLike<number>): Node {
+    const pw = this._parentWorldOrNull();
+    if (!pw) return this.setPosition(vec3.set(Node._wv, pos[0], pos[1], pos[2]));
+    const inv = mat4.invert(Node._wm, pw);
+    if (!inv) return this.setPosition(vec3.set(Node._wv, pos[0], pos[1], pos[2]));
+    return this.setPosition(vec3.transformMat4(Node._wv, vec3.set(Node._wv, pos[0], pos[1], pos[2]), inv));
+  }
+
+  /**
+   * Turns the node so its WORLD orientation is `q`, whatever its parent's. Unlike {@link setQuaternion}
+   * it also turns a physics body, whose orientation is a world one.
+   */
+  public setWorldQuaternion(q: ArrayLike<number>): Node {
+    const world = quat.set(Node._wq, q[0], q[1], q[2], q[3]);
+    const parent = this._parentWorldOrNull() ? this._parent!.worldQuaternion : null;
+    const local = parent
+      ? quat.normalize(Node._wq2, quat.multiply(Node._wq2, quat.invert(Node._wq3, parent), world))
+      : world;
+    this.setQuaternion(local);
+    if (this._body) this._body.setQuaternion(quat.normalize(Node._wq, world));
+    return this;
+  }
+  private static _wv = vec3.create();
+  private static _wm = mat4.create();
+  private static _wq = quat.create();
+  private static _wq2 = quat.create();
+  private static _wq3 = quat.create();
+  private static _bv = vec3.create();
+  private static _bq = quat.create();
+
+  /** The body's world position for this node's local position: `parentWorld · local`. */
+  private _pushBodyPosition(): void {
+    const pw = this._parentWorldOrNull();
+    this._body!.setPosition(pw ? vec3.transformMat4(Node._bv, this._position, pw) : this._position);
+  }
+
+  /** The body's world orientation for this node's local rotation: `parentWorld · local`. */
+  private _pushBodyRotation(): void {
+    const pw = this._parentWorldOrNull();
+    this._body!.setQuaternion(pw
+      ? quat.normalize(Node._bq, quat.multiply(Node._bq, this._parent!.worldQuaternion, this._quaternion))
+      : this._quaternion);
+  }
+
   /** Sets local-space position (local to this node's parent — use `worldPosition` to read world-space). */
   public setPosition(pos: vec3): Node {
     vec3.copy(this._position, pos);
@@ -1435,13 +1494,14 @@ export class Node {
    * eagerly: by the time it emits, its node has left the ancestors its ownership came from.
    */
   protected _notifyChange(kind: ChangeKind, prop?: string, prev?: unknown, next?: unknown): void {
-    if (authoring.enabled && !this.isEditorOwned)
+    if (authoring.enabled && authoring.derived === 0 && !this.isEditorOwned)
       engineEventBus.emit('SCENE_CHANGED', { kind, node: this, prop, prev, next, editorOwned: false, scene: this._scene });
   }
 
   private _updateTranslationMatrix(): void {
-    if (this._body)
-      this._body.setPosition(this._position);
+    // A body lives in WORLD space: under a transformed parent its pose is the parent's world times this
+    // local one, never the local values as they stand.
+    if (this._body) this._pushBodyPosition();
 
     mat4.fromTranslation(this._translationMatrix, this._position);
     this._notifyChange('transform', 'position');
@@ -1499,7 +1559,7 @@ export class Node {
   
   private _updateRotationMatrix(): void {
     quat.fromEuler(this._quaternion, this._euler[0], this._euler[1], this._euler[2]);
-    if (this._body) this._body.setQuaternion(this._quaternion);
+    if (this._body) this._pushBodyRotation();
     mat4.fromQuat(this._rotationMatrix, this._quaternion);
     this._notifyChange('transform', 'rotation');
   }
@@ -1909,7 +1969,8 @@ export class Node {
    * {@link onCollision}. The body drives the node's transform from here on.
    *
    * The body is built from the node's world transform at call time, so set the node's transform *before*
-   * calling this. Only meaningful on root-level nodes — a body on a child node does not track its parent.
+   * calling this. Works at any depth: the body lives in world space, a STATIC body follows its node when an
+   * ancestor moves, and a DYNAMIC one is moved by physics with its node's local pose solved under the parent.
    *
    * @param mass              Kilograms. `0` makes the body static: immovable, but still collidable.
    * @param linearDamping     Fraction of linear velocity bled off per second (0 = none, 1 = frozen).
@@ -1960,7 +2021,7 @@ export class Node {
     simulationRange?: number,
     canSleep?: boolean
   ): RigidBody {
-    // TODO: Handle the case where the node is a child of another node
+    // Built at the WORLD pose (below), so a node under a moved or turned parent starts where it is drawn.
     this._body = new RigidBody({
       mass,
       linearDamping,
@@ -2034,9 +2095,13 @@ export class Node {
   public get visible(): boolean { return this._visible && this._lodVisible; }
   /** Sets authored visibility, recursively for every descendant. */
   public set visible(value: boolean) {
+    const changed = this._visible !== value;
     this._visible = value;
     for (const child of this._children)
       child.visible = value;
+    // Only a real change is news: a script or a pass re-asserting the same value every frame marked the
+    // scene unsaved for nothing.
+    if (!changed) return;
     engineEventBus.emit('SCENE_CHANGED', { kind: 'visibility', node: this, get editorOwned() { return this.node!.isEditorOwned; }, scene: this._scene });
   }
 
