@@ -12,7 +12,7 @@ import { contract } from './src/features/publish/playerContract.json'
  * published game reuses; only game.bin changes per game. They land in public/ so the editor dev server
  * and the production build both serve them, and so publishing can fetch them same-origin.
  *
- * LIBRARY MODE, NOT AN HTML ENTRY, and that is not a stylistic choice: desktop/gameTemplates.js runs a
+ * LIBRARY MODE, NOT AN HTML ENTRY, and that is not a stylistic choice: app-kit/desktop/gameTemplates.js runs a
  * published game with `win.loadFile(index.html)`, i.e. from file://, where an ES module script is
  * blocked by the opaque origin. Vite's HTML pipeline always emits <script type="module" crossorigin>.
  * An IIFE bundle referenced by a plain `<script defer>` in a hand-written index.html is the only shape

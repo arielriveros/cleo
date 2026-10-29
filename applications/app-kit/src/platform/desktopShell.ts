@@ -1,4 +1,4 @@
-// Typed view of the window-shell half of `window.cleoDesktop` (desktop/preload.js), in the same shape
+// Typed view of the window-shell half of `window.cleoDesktop` (app-kit/desktop/preload.js), in the same shape
 // as features/scriptWorkspace/desktopScripts.ts and features/publish/publishClient.ts.
 //
 // What it is for: `beforeunload` is the only thing a page can use to stop a close or a reload, and it
@@ -8,7 +8,7 @@
 //
 // A shell can do better, because `webContents` reports the attempt through `will-prevent-unload`. The
 // main process hands it back here, the editor asks with `confirmDialog` like every other question, and
-// the shell then carries out or abandons the close/reload. See the unload guard in desktop/main.js.
+// the shell then carries out or abandons the close/reload. See the unload guard in app-kit/desktop/main.js.
 
 /** What the user was trying to do when `beforeunload` stopped them. */
 export type UnloadAction = 'close' | 'reload'

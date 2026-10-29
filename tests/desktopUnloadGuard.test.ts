@@ -19,8 +19,8 @@ import { execFileSync } from 'child_process';
  */
 
 const ROOT = join(__dirname, '..');
-const MAIN = readFileSync(join(ROOT, 'desktop', 'main.js'), 'utf-8');
-const PRELOAD = readFileSync(join(ROOT, 'desktop', 'preload.js'), 'utf-8');
+const MAIN = readFileSync(join(ROOT, 'applications', 'app-kit', 'desktop', 'main.js'), 'utf-8');
+const PRELOAD = readFileSync(join(ROOT, 'applications', 'app-kit', 'desktop', 'preload.js'), 'utf-8');
 const BRIDGE = readFileSync(join(ROOT, 'applications', 'app-kit', 'src', 'platform', 'desktopShell.ts'), 'utf-8');
 
 /** main -> renderer, then renderer -> main. */
@@ -70,7 +70,7 @@ describe('desktop unload guard', () => {
 
   it('parses — neither desktop file is loadable outside Electron, so nothing else would catch a typo', () => {
     for (const file of ['main.js', 'preload.js']) {
-      expect(() => execFileSync(process.execPath, ['--check', join(ROOT, 'desktop', file)]))
+      expect(() => execFileSync(process.execPath, ['--check', join(ROOT, 'applications', 'app-kit', 'desktop', file)]))
         .not.toThrow();
     }
   });

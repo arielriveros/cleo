@@ -12,7 +12,7 @@ It has two tools, switched in the top bar:
 | **World Creator** | Landscapes from landform layers and erosion | A 16-bit heightmap (PNG and RAW), slope/curvature/flow/wetness masks, and a JSON sidecar |
 | **FX Creator** | Fire, smoke and explosions from a volumetric fluid simulation | A tileset flipbook (RGBA atlas PNG), a `.tileset` asset, and a JSON sidecar with the particle flipbook settings |
 
-Run it with `npm run creator:dev` at the repository root (it serves on port 8081, beside the Editor's
+Run it with `npm run creator:dev` at the repository root (it serves on port 8082, beside the Editor's
 8080).
 
 ## Determinism

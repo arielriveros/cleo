@@ -1,7 +1,7 @@
 {
   "name": "cleo-desktop",
   "version": "1.2.4",
-  "description": "Electron desktop shell for the Cleo engine editor + game publishing",
+  "description": "Electron desktop shell (part of the app-kit) hosting the Cleo Editor, with game publishing",
   "main": "main.js",
   "author": "Ariel Riveros",
   "license": "ISC",
@@ -21,7 +21,7 @@
     ],
     "extraResources": [
       {
-        "from": "../applications/editor/dist",
+        "from": "../../editor/dist",
         "to": "editor"
       }
     ],

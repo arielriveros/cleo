@@ -3,6 +3,12 @@
 Electron shell that runs the Cleo engine + editor as a native desktop app, and adds a **Publish**
 feature for exporting optimized, standalone games.
 
+It lives in the app-kit (`applications/app-kit/desktop`) as a standalone npm project with its own
+lockfile, outside the `applications/` workspace: electron-builder needs electron in a local
+`node_modules`. It hosts the Editor, the only app that ships on desktop for now; everything
+app-specific is the `HOSTED_APP` block at the top of `main.js` (plus `extraResources` in
+`package.json`).
+
 ## Develop
 
 From the repo root:
@@ -13,7 +19,7 @@ npm run desktop:dev
 
 This runs the engine type watcher, the editor dev server (port 8080) and Electron pointed at it. Only the
 Electron window opens; the dev server does not launch a browser (`npm run editor:dev` is the browser
-flavour). (Requires `npm install` in the root, `editor/`, and `desktop/`.)
+flavour). (Requires `npm install` at the root, `npm ci` in `applications/`, and `npm run desktop:install`.)
 
 No engine build is needed first. The editor compiles engine **source** directly through the `cleo` alias
 (vite.config.ts), so engine edits hot-reload like editor edits. `dist/` only carries declarations for the
@@ -59,4 +65,4 @@ npm run desktop:build
 ```
 
 Builds the engine, editor, and player, then runs electron-builder to produce an installer for the
-editor itself (`desktop/dist/`).
+editor itself (`applications/app-kit/desktop/dist/`).

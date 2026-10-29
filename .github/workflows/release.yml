@@ -170,7 +170,7 @@ jobs:
           git config user.name  'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           # Explicit paths rather than `-a`: on a first release CHANGELOG.md is untracked, and `-a` skips it.
-          git add package.json package-lock.json src/version.ts CHANGELOG.md applications/package.json applications/package-lock.json applications/app-kit/package.json applications/creator/package.json applications/editor/package.json desktop/package.json desktop/package-lock.json
+          git add package.json package-lock.json src/version.ts CHANGELOG.md applications/package.json applications/package-lock.json applications/app-kit/package.json applications/creator/package.json applications/editor/package.json applications/app-kit/desktop/package.json applications/app-kit/desktop/package-lock.json
           git commit -m 'chore(release): v${{ steps.bump.outputs.version }}'
           git tag 'v${{ steps.bump.outputs.version }}'
 
@@ -236,7 +236,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      # electron-builder packages ../applications/editor/dist as extraResources, so the editor must be built first --
+      # electron-builder (applications/app-kit/desktop) packages ../../editor/dist as extraResources, so the editor must be built first --
       # and with the production engine, since this is what ships in the installer.
       - name: Build engine and editor
         run: npm ci && npm run build && npm run editor:install && npm run editor:build
@@ -244,7 +244,7 @@ jobs:
       # Nothing here is signed. Without this, electron-builder hunts for a keychain identity on macOS and
       # fails the job; unsigned is the honest outcome, not a silent one.
       - name: Build installer
-        working-directory: desktop
+        working-directory: applications/app-kit/desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npm ci && npm run dist
@@ -263,11 +263,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           shopt -s nullglob
-          pkg=$(node -p "require('./desktop/package.json').version")
-          installers=(desktop/dist/*"$pkg"*.exe desktop/dist/*"$pkg"*.dmg desktop/dist/*"$pkg"*.AppImage)
+          pkg=$(node -p "require('./applications/app-kit/desktop/package.json').version")
+          installers=(applications/app-kit/desktop/dist/*"$pkg"*.exe applications/app-kit/desktop/dist/*"$pkg"*.dmg applications/app-kit/desktop/dist/*"$pkg"*.AppImage)
           if [ ${#installers[@]} -eq 0 ]; then
             echo "::error title=No installer::electron-builder produced nothing matching $pkg"
-            ls -l desktop/dist || true
+            ls -l applications/app-kit/desktop/dist || true
             exit 1
           fi
           printf 'uploading: %s\n' "${installers[@]}"

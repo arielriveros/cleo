@@ -1,6 +1,6 @@
 import type { ExternalChange } from '../../utils/scriptMirror'
 
-// Typed view of the script-workspace half of `window.cleoDesktop` (desktop/preload.js). The bridge only
+// Typed view of the script-workspace half of `window.cleoDesktop` (app-kit/desktop/preload.js). The bridge only
 // exists inside the Electron shell, so every caller must go through `hasScriptWorkspace()`.
 
 export type ScriptBatch = {

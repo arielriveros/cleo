@@ -16,7 +16,7 @@ against an app's own context, so a new tool on the engine gets the same look and
 | `gizmo/` | Transform-gizmo picking, handle geometry and drag math. |
 | `params/` | `ParamForm`: a parameter set drawn from an engine `ParamSpec` schema. |
 | `code/` | Monaco setup with the engine's declarations, WGSL/GLSL language support, code themes. |
-| `platform/` | The desktop-shell bridge. |
+| `platform/` | The renderer side of the desktop-shell bridge (`window.cleoDesktop`). |
 | `utils/` | IndexedDB, bytes and chunked blobs, event emitter, deep clone, small hooks. |
 
 ## Using it from an application
@@ -28,3 +28,9 @@ against an app's own context, so a new tool on the engine gets the same look and
 5. Import `@cleo/app-kit/styles/theme.css` once, and wrap the app in an `EngineHostProvider`.
 
 Tests: `npm test` here (pure stores and math, node environment).
+
+## Desktop shell
+
+`desktop/` (beside `src/`, not in it) is the Electron shell: main process, preload, the published-game
+templates and the on-disk script workspace. It is its own npm project (`npm run desktop:install`,
+`desktop:dev`, `desktop:build` at the repo root) and currently hosts the Editor; see `desktop/README.md`.

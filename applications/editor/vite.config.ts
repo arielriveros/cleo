@@ -60,7 +60,7 @@ export default mergeConfig(engineConfig, defineConfig({
   // `@cleo/app-kit/...` -> the shared app-kit's source (see ../app-kit/vite.preset.ts).
   resolve: { alias: appKitAlias },
 
-  // desktop/main.js serves applications/editor/dist over app://editor and resolves "/assets/..." against the origin
+  // app-kit/desktop/main.js serves applications/editor/dist over app://editor and resolves "/assets/..." against the origin
   // root; Firebase rewrites ** -> /index.html. Both need root-absolute asset URLs.
   base: '/',
 
@@ -85,7 +85,7 @@ export default mergeConfig(engineConfig, defineConfig({
 
   server: {
     port: 8080,
-    // desktop/main.js hardcodes http://localhost:8080 in dev. Fail loudly rather than drifting to 8081.
+    // app-kit/desktop/main.js loads http://localhost:8080 in dev (HOSTED_APP.devUrl). Fail loudly rather than drifting to 8081.
     strictPort: true,
     // Opening a browser is the `start` script's job (`vite --open`), not the config's: a build,
     // a preview or a scripted dev server must not spawn one.

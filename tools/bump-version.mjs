@@ -8,7 +8,7 @@
 //
 //   package.json "0.156.26"   <->   v1.0.156.26
 //
-// Four things must agree at all times: the three package.json files (root/editor/desktop, kept in
+// Four things must agree at all times: every package.json (root, applications/*, the desktop shell; kept in
 // lockstep so the Electron installer version tracks releases too), their lockfiles, and src/version.ts
 // -- which is what the engine exports and what the editor's splash renders. `--check` runs in CI.
 //
@@ -31,7 +31,7 @@ const PACKAGES = [
     { dir: 'applications/app-kit', lock: 0 },
     { dir: 'applications/creator', lock: 0 },
     { dir: 'applications/editor', lock: 0 },
-    { dir: 'desktop', lock: 2 },
+    { dir: 'applications/app-kit/desktop', lock: 2 },
 ];
 const VERSION_TS = join(ROOT, 'src', 'version.ts');
 

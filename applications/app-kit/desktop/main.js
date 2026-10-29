@@ -9,22 +9,36 @@ const scriptWorkspace = require('./scriptWorkspace');
 
 const isDev = process.env.CLEO_DEV === '1';
 
+// --- Hosted application ------------------------------------------------------------------------
+//
+// The shell lives in the app-kit, but it hosts ONE application: the Editor, the only app that ships on
+// desktop for now. Everything app-specific is here, so a second desktop target (Cleo Creator) is a
+// change to this block and to package.json's extraResources, not to the shell.
+const HOSTED_APP = {
+  /** Host of the app:// origin the built bundle is served from. */
+  name: 'editor',
+  /** The app's Vite build, relative to this folder (applications/app-kit/desktop -> applications/editor/dist). */
+  devDist: path.join(__dirname, '..', '..', 'editor', 'dist'),
+  /** Where electron-builder's extraResources puts that build in a packaged app. */
+  packagedDist: () => path.join(process.resourcesPath, 'editor'),
+  /** The app's dev server (applications/editor/vite.config.ts pins this port with strictPort). */
+  devUrl: 'http://localhost:8080',
+};
+
 // --- Editor window -----------------------------------------------------------------------------
 
 // The built editor references assets by root-absolute URLs (e.g. "/assets/...") that only resolve
 // correctly when served from an origin root. Under file:// those point at the drive root, so we
 // serve the editor's dist/ over a custom "app://" scheme where "/assets/..." maps to dist/assets/...
 const APP_SCHEME = 'app';
-const APP_ORIGIN = `${APP_SCHEME}://editor`;
+const APP_ORIGIN = `${APP_SCHEME}://${HOSTED_APP.name}`;
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);
 
 function editorRoot() {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, 'editor')
-    : path.join(__dirname, '..', 'applications', 'editor', 'dist');
+  return app.isPackaged ? HOSTED_APP.packagedDist() : HOSTED_APP.devDist;
 }
 
 function registerAppProtocol() {
@@ -173,7 +187,7 @@ function createWindow() {
   // `desktop:dev` starts Vite and Electron side by side, so on a cold start the window can open before the
   // server listens. Retry instead of leaving a blank window that needs a manual Ctrl+R.
   if (isDev) {
-    const DEV_URL = 'http://localhost:8080';
+    const DEV_URL = HOSTED_APP.devUrl;
     win.webContents.on('did-fail-load', (_e, code, _desc, url, isMainFrame) => {
       // -102 ERR_CONNECTION_REFUSED / -105 name not resolved: the server is not up yet.
       if (isMainFrame && url.startsWith(DEV_URL) && (code === -102 || code === -105)) {
