@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { AudioManager } from 'cleo'
-import { Button, TextInput, Toggle } from '../../components/ui'
+import { Button, TextInput, Toggle } from '@cleo/app-kit/ui'
 import { formatDuration } from '../../utils/audioSources'
 import { useSound } from './SoundContext'
 import SoundWaveform from './SoundWaveform'

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Node, Scene, isEditorOwnedName } from 'cleo'
 import { useEventBus } from '../EventBusContext'
-import { Select, cn } from '../../components/ui'
+import { Select, cn } from '@cleo/app-kit/ui'
 
 export interface NodeRefInputProps {
   /** Currently referenced node id, or null. */

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api'
-import { ensureMonaco } from './monacoSetup'
-import { useCodeTheme } from './codeThemeStore'
+import { ensureMonaco } from '@cleo/app-kit/code/monacoSetup'
+import { useCodeTheme } from '@cleo/app-kit/code/codeThemeStore'
 import CodeEditorHeader from './CodeEditorHeader'
 
 // A Monaco editor for GLSL fragment-shader source (language registered in glslMonaco.ts via ensureMonaco).

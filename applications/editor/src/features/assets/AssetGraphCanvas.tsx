@@ -9,8 +9,8 @@ import { iconFor } from './assetKinds'
 import { KIND_LABEL } from '../../utils/vfs'
 import type { AssetKind } from '../../utils/vfs'
 import type { AssetNodeView, ReferenceView } from './assetGraphLayout'
-import { cn } from '../../components/ui'
-import { token } from '../../utils/cssTokens'
+import { cn } from '@cleo/app-kit/ui'
+import { token } from '@cleo/app-kit/utils/cssTokens'
 
 // The reference viewer's canvas.
 //

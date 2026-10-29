@@ -3,7 +3,7 @@ import { useAiEditor } from './AiEditorContext'
 import BehaviorGraph from './BehaviorGraph'
 import GoalGraph from './GoalGraph'
 import FuzzyGraph from './FuzzyGraph'
-import { SegmentedControl } from '../../components/ui'
+import { SegmentedControl } from '@cleo/app-kit/ui'
 
 /**
  * The AI Brain tab's work surface: the brain's own graph, or the fuzzy model it reads.

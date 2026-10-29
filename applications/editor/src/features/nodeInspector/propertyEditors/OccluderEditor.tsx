@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { OccluderNode } from 'cleo'
-import Collapsable from '../../../components/Collapsable'
-import { PropertyRow, PropertyTable, Toggle, VectorInput } from '../../../components/ui'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import { PropertyRow, PropertyTable, Toggle, VectorInput } from '@cleo/app-kit/ui'
 import { useCleoEngine } from '../../EngineContext'
 import { OccluderIcon } from '../sectionIcons'
 

@@ -7,7 +7,7 @@ import type {
   ActionKind, BindingSource, CompositePart, DeviceKind, InputBinding, ModifierSource, Processor,
   ProcessorKind, VirtualControl,
 } from 'cleo'
-import { Button, SectionTitle, Select, hintClass, labelClass } from '../../components/ui'
+import { Button, SectionTitle, Select, hintClass, labelClass } from '@cleo/app-kit/ui'
 import ProcessorList from './ProcessorList'
 import type { RebindCapture } from './useRebindCapture'
 

@@ -2,7 +2,7 @@ import { useCleoEngine } from '../EngineContext'
 import { useSelectedNode } from './useSelectedNode'
 import { templateInstanceRootOf } from '../../utils/templates'
 import { overrideCount } from '../../utils/templateOverrides'
-import { Button } from '../../components/ui'
+import { Button } from '@cleo/app-kit/ui'
 
 export default function TemplateInstanceNotice(props: { revert?: boolean }) {
   const { revertTemplateOverride, createVariantFromInstance } = useCleoEngine()

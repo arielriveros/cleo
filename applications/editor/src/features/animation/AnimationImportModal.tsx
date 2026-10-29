@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { applyManualMapping } from 'cleo'
 import type { BoneMapping } from 'cleo'
 import { useEditorSessions } from '../EditorSessionsContext'
-import { Button, cn, DocScope, hintClass, Modal, ModalHeader, ModalFooter, SectionTitle, TextInput, Toggle } from '../../components/ui'
+import { Button, cn, DocScope, hintClass, Modal, ModalHeader, ModalFooter, SectionTitle, TextInput, Toggle } from '@cleo/app-kit/ui'
 import RetargetMapper from '../rig/RetargetMapper'
 import { retargetView } from '../../utils/retargetView'
 // Shared with the model-import route: a placeholder clip name is renamed after its file in BOTH

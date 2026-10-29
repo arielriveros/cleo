@@ -1,5 +1,5 @@
 import { Node } from 'cleo'
-import { deepClone } from './deepClone'
+import { deepClone } from '@cleo/app-kit/utils/deepClone'
 import { TEMPLATE_ID_VAR, templateInstanceRootOf } from './templates'
 
 // Per-instance OVERRIDES of a placed template: what a placement changed on top of its template, so a

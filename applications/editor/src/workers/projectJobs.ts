@@ -5,7 +5,7 @@
 import JSZip from 'jszip';
 import { packGameBin } from '../features/publish/pack';
 import { obfuscateScripts } from '../features/publish/obfuscate';
-import { idbSet } from '../utils/idb';
+import { idbSet } from '@cleo/app-kit/utils/idb';
 import { BundleData, BUNDLE_PATHS } from '../utils/bundle';
 import { BundleSource, bundleEntries, readBundle } from '../utils/bundleRead';
 // Dependency-free by construction — it works over typed arrays rather than `Geometry`, which is exactly

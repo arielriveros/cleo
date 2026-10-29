@@ -1,5 +1,5 @@
 import type { TerrainBlendRule, TerrainRuleRange } from 'cleo'
-import { Hint, NumberInput, Slider, Toggle, labelClass } from '../../components/ui'
+import { Hint, NumberInput, Slider, Toggle, labelClass } from '@cleo/app-kit/ui'
 
 // The editor for one blend rule — where a landscape-material surface appears. Four independent tests,
 // multiplied: elevation, slope, the noise that breaks their edges up, and a plain opacity. A disabled test

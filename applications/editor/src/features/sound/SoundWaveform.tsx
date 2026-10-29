@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Peaks } from './waveform'
-import { token } from '../../utils/cssTokens'
+import { token } from '@cleo/app-kit/utils/cssTokens'
 
 // The waveform view: the envelope, the playhead, and the loop region as two draggable handles.
 //

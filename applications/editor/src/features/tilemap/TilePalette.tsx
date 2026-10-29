@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
-import { Button, Hint, Select, cn } from '../../components/ui'
+import { Button, Hint, Select, cn } from '@cleo/app-kit/ui'
 import { toRuntimeTileset } from '../../utils/tilesets'
 import TileGrid from '../tileset/TileGrid'
 import { useActiveTilemap } from './useActiveTilemap'
 import { useAssetDrop } from '../../utils/useAssetDrop'
-import { token } from '../../utils/cssTokens'
+import { token } from '@cleo/app-kit/utils/cssTokens'
 
 // The tilemap mode's palette panel: pick the layer's tileset, then pick what the brush paints. Dragging a
 // rectangle across the atlas builds a multi-tile stamp rather than selecting one tile.

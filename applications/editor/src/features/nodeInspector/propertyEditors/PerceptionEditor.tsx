@@ -1,6 +1,6 @@
 import { ControllerNode, PERCEPTION_PRESETS, perceptionTuning } from 'cleo'
 import type { PerceptionPreset, PerceptionTuning } from 'cleo'
-import { PresetMenu, SectionTitle, Slider, Toggle } from '../../../components/ui'
+import { PresetMenu, SectionTitle, Slider, Toggle } from '@cleo/app-kit/ui'
 
 /**
  * What an agent can see, and what it remembers.

@@ -130,7 +130,7 @@ describe('RenderSettings survives save, publish and export', () => {
 });
 
 describe('the editor notifies when a render setting changes', () => {
-    const PANEL = readFileSync(join(__dirname, '..', 'applications', 'editor', 'src', 'features', 'renderer',
+    const PANEL = readFileSync(join(__dirname, '..', 'applications', 'app-kit', 'src', 'renderer',
                                     'RendererSettingsPanel.tsx'), 'utf-8');
 
     it('marks the scene dirty from every handler that writes to the renderer', () => {

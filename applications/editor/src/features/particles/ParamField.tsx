@@ -1,9 +1,7 @@
-import type { Burst, CollisionPlane, CompiledCustomCode, Curve, EmitterDef, Gradient, ParamSpec } from 'cleo'
-import {
-  Button, ColorInput, CurveInput, GradientInput, NumberInput, RangeInput, Select, Slider, Toggle, VectorInput,
-} from '../../components/ui'
+import type { Burst, CollisionPlane, CompiledCustomCode, EmitterDef, ParamSpec } from 'cleo'
+import { Button, NumberInput, Select, VectorInput } from '@cleo/app-kit/ui'
+import { GenericParamField, isGenericParam } from '@cleo/app-kit/params/ParamField'
 import { useCleoEngine } from '../EngineContext'
-import { vec3ToHex } from '../../utils/UtilFunctions'
 import CustomCodeField from './CustomCodeField'
 
 // One module parameter, drawn from its `ParamSpec`. Every module card is these and nothing else, so a new
@@ -25,55 +23,11 @@ export interface ParamFieldProps {
   selfId?: string
 }
 
-const num = (x: unknown, fallback = 0) => (typeof x === 'number' && Number.isFinite(x) ? x : fallback)
-const arr = (x: unknown, n: number, fallback = 0): number[] =>
-  Array.from({ length: n }, (_, i) => (Array.isArray(x) ? num(x[i], fallback) : fallback))
-
 export default function ParamField({ spec, value, onChange, params, onPatch, emitters, selfId }: ParamFieldProps) {
+  // Numbers, toggles, vectors, colours, curves, gradients and enums are the app-kit's, shared with every
+  // tool that draws a parameter schema; what is left reaches into the editor's own state.
+  if (isGenericParam(spec)) return <GenericParamField spec={spec} value={value} onChange={onChange} />
   switch (spec.kind) {
-    case 'float':
-      if (spec.min !== undefined && spec.max !== undefined)
-        return <Slider min={spec.min} max={spec.max} step={spec.step ?? 0.01} value={num(value)} onChange={v => onChange(v, true)} />
-      if (spec.readout) {
-        return (
-          <div className='flex flex-col gap-0.5'>
-            <NumberInput value={num(value)} min={spec.min} max={spec.max} step={spec.step ?? 0.1} onChange={v => onChange(v, true)} />
-            <span className='text-ui-xs text-dim tabular-nums'>{spec.readout(num(value))}</span>
-          </div>
-        )
-      }
-      return <NumberInput value={num(value)} min={spec.min} max={spec.max} step={spec.step ?? 0.1} onChange={v => onChange(v, true)} />
-    case 'int':
-      return <NumberInput value={num(value)} min={spec.min} max={spec.max} step={1} onChange={v => onChange(Math.round(v), true)} />
-    case 'bool':
-      return <Toggle checked={!!value} onChange={v => onChange(v)} />
-    case 'vec3': {
-      // A vec3 spec may carry four components (custom code's u_custom); keep whatever length is there.
-      const n = Array.isArray(value) ? Math.max(3, value.length) : 3
-      return <VectorInput value={arr(value, n)} step={0.1} onChange={v => onChange(v, true)} />
-    }
-    case 'range':
-      return <RangeInput value={arr(value, 2) as [number, number]} min={spec.min} max={spec.max} step={spec.step ?? 0.1}
-                         onChange={v => onChange(v, true)} />
-    case 'color': {
-      const c = arr(value, 4, 1)
-      return (
-        <div className='flex items-center gap-2'>
-          <ColorInput color={vec3ToHex(c.slice(0, 3) as [number, number, number])} onChange={rgb => onChange([rgb[0], rgb[1], rgb[2], c[3]])} />
-          <Slider min={0} max={1} step={0.01} value={c[3]} label='A' onChange={a => onChange([c[0], c[1], c[2], a], true)} />
-        </div>
-      )
-    }
-    case 'curve':
-      return <CurveInput value={value as Curve} onChange={v => onChange(v, true)} />
-    case 'gradient':
-      return <GradientInput value={value as Gradient} onChange={v => onChange(v, true)} />
-    case 'enum':
-      return (
-        <Select value={String(value)} onChange={e => onChange(e.target.value)} className='w-full'>
-          {spec.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </Select>
-      )
     case 'bursts':
       return <BurstList value={Array.isArray(value) ? value as Burst[] : []} onChange={onChange} />
     case 'planes':

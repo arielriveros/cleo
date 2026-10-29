@@ -4,7 +4,7 @@ import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { useRig } from './RigContext'
 import { getAnimationTarget } from '../animation/skeleton'
-import { Button, Hint, OptionalNumberInput, SectionTitle, Select, TextInput, Toggle, cn } from '../../components/ui'
+import { Button, Hint, OptionalNumberInput, SectionTitle, Select, TextInput, Toggle, cn } from '@cleo/app-kit/ui'
 import { buildBoneMaskAsset, presetMask, withBranch, type BoneTree } from '../../utils/boneMasks'
 
 // The rig's BONE MASKS: which bones a controller layer or an action slot is allowed to move.

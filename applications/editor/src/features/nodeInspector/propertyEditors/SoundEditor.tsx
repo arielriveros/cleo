@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { SoundNode, SOUND_FALLOFF_PRESETS, applyPreset, attenuationAt, DISTANCE_MODELS } from 'cleo'
 import type { DistanceModel, LoopMode, SoundFalloffPreset, SoundMode } from 'cleo'
-import Collapsable from '../../../components/Collapsable'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import {
   Button, DocScope, NumberInput, PresetMenu, PropertyRow, PropertyTable, SegmentedControl, Select, Slider, Toggle, Hint,
-} from '../../../components/ui'
+} from '@cleo/app-kit/ui'
 import { SoundIcon, FalloffIcon } from '../sectionIcons'
 import { useEventBus } from '../../EventBusContext'
 import SoundSampleSlot from './SoundSampleSlot'

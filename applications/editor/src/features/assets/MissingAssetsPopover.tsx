@@ -4,7 +4,7 @@ import { useVfs } from './VfsContext'
 import { iconFor } from './assetKinds'
 import { sizeOfAsset } from './assetKinds'
 import { MissingAsset, OrphanEntry, KIND_LABEL, applyDelete, baseOf, restoreMissing } from '../../utils/vfs'
-import { Button, Panel, cn, hintClass, valueClass, SectionTitle } from '../../components/ui'
+import { Button, Panel, cn, hintClass, valueClass, SectionTitle } from '@cleo/app-kit/ui'
 
 // The two-way audit between the asset libraries and the explorer.
 //   no-entry     the VFS index never got an entry for the asset (reconcileVfs didn't index it)

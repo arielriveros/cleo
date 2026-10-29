@@ -2,7 +2,7 @@ import {
     UINode, UIRootNode, UITextNode, UIImageNode, UIButtonNode, UIProgressBarNode,
     UISliderNode, UIToggleNode, UITextInputNode, UIColor, TextureManager,
 } from 'cleo';
-import { clamp } from '../../utils/math';
+import { clamp } from '@cleo/app-kit/utils/math';
 
 /**
  * The imperative half of the game-UI renderer.

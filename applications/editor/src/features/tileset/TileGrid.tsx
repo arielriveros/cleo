@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Button, cn } from '../../components/ui'
-import { token } from '../../utils/cssTokens'
+import { Button, cn } from '@cleo/app-kit/ui'
+import { token } from '@cleo/app-kit/utils/cssTokens'
 import type { TilesetAsset } from '../../utils/tilesets'
 import { awaitTextureImage, textureImage } from '../../utils/textureReady'
-import { clamp } from '../../utils/math';
+import { clamp } from '@cleo/app-kit/utils/math';
 
 // The atlas with its slicing grid drawn over it, plus rectangular selection. Shared by the tileset editor
 // (picking the tile being edited) and the tilemap palette (picking the brush, a rectangle being a stamp).

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
-import { Button, DocScope, Hint, MenuItem, Popover, SectionTitle, SegmentedControl, Select, cn, hintClass } from '../../components/ui'
+import { Button, DocScope, Hint, MenuItem, Popover, SectionTitle, SegmentedControl, Select, cn, hintClass } from '@cleo/app-kit/ui'
 import { useActiveLandscape } from './useActiveLandscape'
 import { useLandscapeBrush, setBrush, resolvePaintTarget, type WeightView } from './landscapeBrushStore'
 import { useStackEdit } from './useStackEdit'

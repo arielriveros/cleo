@@ -6,7 +6,7 @@ import type {
 } from 'cleo'
 import {
   Button, ButtonWithConfirm, DocScope, NumberInput, SectionTitle, Select, TextInput, hintClass, labelClass,
-} from '../../../components/ui'
+} from '@cleo/app-kit/ui'
 import {
   flattenAndTerm, renameFuzzySet, renameFuzzyVariable, termUsesVariable,
 } from '../../../utils/aiGraphEdits'

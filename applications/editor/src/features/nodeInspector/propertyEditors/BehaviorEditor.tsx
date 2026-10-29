@@ -9,7 +9,7 @@ import ParamSourcePicker from './ParamSourcePicker'
 import type { ConditionParam } from '../../../components/ConditionTreeView'
 import {
   Button, ButtonWithConfirm, DocScope, SectionTitle, Select, Slider, TextInput, Toggle, hintClass, labelClass,
-} from '../../../components/ui'
+} from '@cleo/app-kit/ui'
 
 /**
  * The behaviour state machine: which goal this controller pursues, and what makes it change its mind.

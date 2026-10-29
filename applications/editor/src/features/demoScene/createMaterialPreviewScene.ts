@@ -2,7 +2,7 @@ import { Scene, Node, Camera, CameraNode, LightNode, DirectionalLight, InputSyst
 import { PREVIEW_FOV, fitDistance, previewClipPlanes } from './previewFraming';
 import { applyPreviewEnvironment } from './previewEnvironment';
 import { PREVIEW_KEY_LIGHT_NAME, PREVIEW_FILL_LIGHT_NAME } from './createModelPreviewScene';
-import { clamp } from '../../utils/math';
+import { clamp } from '@cleo/app-kit/utils/math';
 
 const RADIUS = 3.2;       // camera distance from the sphere (at the origin)
 // Closer than the sphere's fit distance (~2.8) crops it; thumbnail capture clamps back out

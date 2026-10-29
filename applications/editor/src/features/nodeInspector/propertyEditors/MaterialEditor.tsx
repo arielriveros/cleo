@@ -3,11 +3,11 @@ import { ModelNode, Material, CustomMaterial, TERRAIN_RELIEF_ENABLED, emissiveEx
 import { useEventBus } from '../../EventBusContext';
 import { vec3ToHex } from '../../../utils/UtilFunctions';
 import { newCustomMaterial } from '../../../utils/customMaterials';
-import Collapsable from '../../../components/Collapsable';
+import Collapsable from '@cleo/app-kit/ui/Collapsable';
 import TextureInspector from './TextureInspector';
 import CustomMaterialEditor from './CustomMaterialEditor';
 import UvMappingSection from './UvMappingSection';
-import { PropertyTable, PropertyRow, Field, Select, NumberInput, Slider, Toggle, ColorInput, Section, DocScope } from '../../../components/ui';
+import { PropertyTable, PropertyRow, Field, Select, NumberInput, Slider, Toggle, ColorInput, Section, DocScope } from '@cleo/app-kit/ui';
 import { MaterialIcon } from '../sectionIcons';
 
 export default function MaterialEditor(props: {node: ModelNode}) {

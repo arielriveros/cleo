@@ -1,5 +1,5 @@
 import { subtreeOf, topMostIds, type VfsEntry, type VfsIndex } from '../../utils/vfs'
-import type { DialogOptions } from '../dialogs/dialogStore'
+import type { DialogOptions } from '@cleo/app-kit/feedback/dialogStore'
 
 // The decision half of the asset explorer's delete, extracted from useFileManagerBridge's SVAR
 // interceptor so it can be tested without a file manager, a VfsProvider or a DOM.

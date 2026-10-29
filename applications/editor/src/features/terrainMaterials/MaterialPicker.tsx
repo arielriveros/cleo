@@ -2,7 +2,7 @@ import { Material, TextureManager } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { useAssetDrop } from '../../utils/useAssetDrop'
 import { buildMaterialAsset, type MaterialAsset } from '../../utils/materials'
-import { Button, MenuItem, Popover, cn, hintClass } from '../../components/ui'
+import { Button, MenuItem, Popover, cn, hintClass } from '@cleo/app-kit/ui'
 import { blankSlotSurface } from '../../utils/landscapeSlots'
 
 // Where a landscape slot gets its surface: a library Material, or a NEW one made right here. Making a

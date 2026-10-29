@@ -6,7 +6,7 @@ import { useRig } from '../rig/RigContext'
 import { getAnimationTarget } from '../animation/skeleton'
 import { SELECT_SOCKET } from '../rig/SocketsPanel'
 import TransformGizmo from '../gizmo/TransformGizmo'
-import type { TransformPatch } from '../gizmo/gizmoDrag'
+import type { TransformPatch } from '@cleo/app-kit/gizmo/gizmoDrag'
 
 /**
  * Dragging a socket's offset with the transform gizmo, in the rig editor.

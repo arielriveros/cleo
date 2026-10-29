@@ -1,9 +1,9 @@
 import { forwardRef, useImperativeHandle, useRef } from 'react';
 import type { ReadonlyMat4 } from 'gl-matrix';
 import { uiProjectToScreen } from 'cleo';
-import type { GizmoOverlayColor, GizmoOverlayModel } from './gizmoDrag';
-import { AXIS_CSS_COLORS, CENTRE_CSS_COLOR } from './gizmoHandles';
-import { token } from '../../utils/cssTokens';
+import type { GizmoOverlayColor, GizmoOverlayModel } from '@cleo/app-kit/gizmo/gizmoDrag';
+import { AXIS_CSS_COLORS, CENTRE_CSS_COLOR } from '@cleo/app-kit/gizmo/gizmoHandles';
+import { token } from '@cleo/app-kit/utils/cssTokens';
 
 /**
  * The reference lines and numeric readout drawn while a gizmo handle is being dragged.

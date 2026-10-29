@@ -3,7 +3,7 @@ import { humanoidRigOf } from 'cleo'
 import type { ModelNode } from 'cleo'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { useEditorSessions } from '../EditorSessionsContext'
-import { DocScope, Modal, ModalHeader, ModalFooter, Button, SectionTitle, Select, cn, hintClass } from '../../components/ui'
+import { DocScope, Modal, ModalHeader, ModalFooter, Button, SectionTitle, Select, cn, hintClass } from '@cleo/app-kit/ui'
 import { modelIdOf } from '../../utils/models'
 import {
   ANIMATOR_TEMPLATES, guessClipSlots, missingRequired, templateById, type TemplateId,

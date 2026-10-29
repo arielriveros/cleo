@@ -7,7 +7,7 @@ import { MIN_SHAPE_SIZE } from '../../gizmo/collisionGizmoMath';
 import {
   PropertyTable, PropertyRow, OptionalNumberInput, Button, VectorInput, SegmentedControl, Hint, SectionTitle, Popover,
   MenuItem, cn,
-} from '../../../components/ui';
+} from '@cleo/app-kit/ui';
 
 const CAPSULE_HEIGHT_HINT = 'Total height, spanning the caps too: the straight section is height − 2 × radius. At or below 2 × radius the shape is a sphere — raise the height to get a capsule.';
 

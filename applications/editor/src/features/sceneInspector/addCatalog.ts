@@ -50,7 +50,7 @@ import {
   LIGHT_UNIT,
   newLightOptions,
 } from 'cleo'
-import type EventEmitter from '../../utils/eventEmitter'
+import type EventEmitter from '@cleo/app-kit/utils/eventEmitter'
 import type { ShapeDescription } from '../EngineContext'
 import {
   CanvasIcon, WorldUIIcon, PanelIcon, StackIcon, SpacerIcon, TextIcon, ImageIcon,

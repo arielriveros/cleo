@@ -5,7 +5,7 @@ import { useRig } from './RigContext'
 import { getAnimationTarget } from '../animation/skeleton'
 import {
   Button, DocScope, Hint, NumberInput, PropertyRow, PropertyTable, SectionTitle, Select, Slider, TextInput, Toggle, cn,
-} from '../../components/ui'
+} from '@cleo/app-kit/ui'
 import { RAGDOLL_SELECT_PART, RAGDOLL_SHOW, RAGDOLL_TEST, RAGDOLL_TEST_STATE, rigRagdollProfile } from './RagdollPreview'
 
 // The rig's ragdoll: which bones become bodies when a character on this skeleton dies, how big and

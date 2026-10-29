@@ -2,7 +2,7 @@ import { Node, TextureManager } from 'cleo'
 import { cryptoRandomId } from './ids'
 import { parseByType, stripDebug, collectIds, collectTextureIds, regenerateIds } from './nodeSubtree'
 import { resolveMaterialRefs, MaterialAsset } from './materials'
-import { deepClone } from './deepClone'
+import { deepClone } from '@cleo/app-kit/utils/deepClone'
 import { getScriptIdOf, collectScriptVars, scriptKindOfAsset, type ScriptAsset } from './scripts'
 import type { TemplateDiff } from './templateVariants'
 

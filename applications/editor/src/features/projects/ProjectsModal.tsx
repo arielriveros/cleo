@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { DocScope, Modal, ModalHeader } from '../../components/ui'
+import { DocScope, Modal, ModalHeader } from '@cleo/app-kit/ui'
 import ProjectsBrowser from './ProjectsBrowser'
 import { ProjectRecord, loadProjects } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'

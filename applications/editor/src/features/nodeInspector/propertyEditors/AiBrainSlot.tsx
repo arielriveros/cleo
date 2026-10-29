@@ -1,7 +1,7 @@
 import { ControllerNode } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
 import { AiBrainAsset } from '../../../utils/aiBrains'
-import { Select, Button, Hint, SectionTitle, cn, valueClass } from '../../../components/ui'
+import { Select, Button, Hint, SectionTitle, cn, valueClass } from '@cleo/app-kit/ui'
 import { useAssetDrop } from '../../../utils/useAssetDrop'
 
 /**

@@ -3,10 +3,10 @@ import { vec3, mat4, quat } from 'gl-matrix';
 import { Raycaster, type Node } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
 import { useSelection } from '../SelectionContext';
-import { captureViewport, releaseViewport, isViewportCaptured } from '../../utils/pointerCapture';
-import { gizmoWorldScale, effectiveGizmoSpace } from '../../utils/gizmoMath';
-import { buildPickShapes, pickHandle, type GizmoFrame, type HandleId } from './gizmoPick';
-import { buildHandles, placeHandles, tintHandles, thickenHandles, type GizmoHandle } from './gizmoHandles';
+import { captureViewport, releaseViewport, isViewportCaptured } from '@cleo/app-kit/utils/pointerCapture';
+import { gizmoWorldScale, effectiveGizmoSpace } from '@cleo/app-kit/gizmo/gizmoMath';
+import { buildPickShapes, pickHandle, type GizmoFrame, type HandleId } from '@cleo/app-kit/gizmo/gizmoPick';
+import { buildHandles, placeHandles, tintHandles, thickenHandles, type GizmoHandle } from '@cleo/app-kit/gizmo/gizmoHandles';
 import {
     beginDrag,
     solveDrag,
@@ -15,7 +15,7 @@ import {
     type DragViewContext,
     type TransformPatch,
     type GizmoOverlayModel,
-} from './gizmoDrag';
+} from '@cleo/app-kit/gizmo/gizmoDrag';
 import GizmoDragOverlay, { type GizmoOverlayHandle } from './GizmoDragOverlay';
 
 /**

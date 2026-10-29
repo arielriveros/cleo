@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react'
 import { LandscapeNode, Logger, Loader, decodeHeightmap, imageFromHeights, encodePng16, encodeRaw16 } from 'cleo'
 import type { HeightImage } from 'cleo'
-import Collapsable from '../../../components/Collapsable'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { LandscapeIcon } from '../../sceneInspector/nodeIcons'
-import { Button, DocScope, Field, FileButton, Hint, MenuItem, NumberInput, Popover, Select } from '../../../components/ui'
+import { Button, DocScope, Field, FileButton, Hint, MenuItem, NumberInput, Popover, Select } from '@cleo/app-kit/ui'
 import { useCleoEngine } from '../../EngineContext'
 import { useHistory } from '../../HistoryContext'
 import { rebuildTerrain } from '../../landscape/rebuildTerrain'
 import { applyHeightsTo } from '../../landscape/heightmapImport'
 import HeightmapImportDialog from '../../landscape/HeightmapImportDialog'
 import { setTerrainHeights } from '../../../utils/terrainAccess'
-import { clamp } from '../../../utils/math';
+import { clamp } from '@cleo/app-kit/utils/math';
 
 // Node inspector for a LandscapeNode: the terrain's STRUCTURE — size, sampling, chunking — plus the
 // heightmap import/export that replaces its shape wholesale. Landscape mode holds the brushes that edit it.

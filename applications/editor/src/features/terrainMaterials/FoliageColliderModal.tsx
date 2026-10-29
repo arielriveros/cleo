@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FoliageCollision, TerrainFoliageRule } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
-import { Button, Hint, Modal, ModalFooter, ModalHeader, NumberInput, Slider, Toggle, cn, labelClass } from '../../components/ui'
+import { Button, Hint, Modal, ModalFooter, ModalHeader, NumberInput, Slider, Toggle, cn, labelClass } from '@cleo/app-kit/ui'
 import { createColliderPreview, type ColliderPreview } from '../../utils/colliderPreview'
 import { describeCollider, fitColliderToBounds, fitColliderToTrunk } from '../../utils/foliageColliderFit'
 import { foliageRuleModels } from '../../utils/foliageRules'

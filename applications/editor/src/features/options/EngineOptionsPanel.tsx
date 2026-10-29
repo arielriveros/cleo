@@ -1,8 +1,8 @@
 import { useCleoEngine } from '../EngineContext'
-import RendererSettingsPanel from '../renderer/RendererSettingsPanel'
-import PerformancePanel from '../renderer/PerformancePanel'
-import { Button, Field, NumberInput, Section, Slider, VectorInput } from '../../components/ui'
-import { OptionsPageBody, OptionsShell, OPTION_LABEL, useOptionsPage } from './OptionsShell'
+import RendererSettingsPanel from '@cleo/app-kit/renderer/RendererSettingsPanel'
+import PerformancePanel from '@cleo/app-kit/renderer/PerformancePanel'
+import { Button, Field, NumberInput, Section, Slider, VectorInput } from '@cleo/app-kit/ui'
+import { OptionsPageBody, OptionsShell, OPTION_LABEL, useOptionsPage } from '@cleo/app-kit/ui/OptionsShell'
 import { DEFAULT_PROJECT_SETTINGS, type EngineRuntimeSettings } from './projectSettings'
 
 // Options ▸ Engine: how the engine renders and runs THIS game. Renderer settings are saved with the open

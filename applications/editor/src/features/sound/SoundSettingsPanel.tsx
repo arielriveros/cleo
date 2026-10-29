@@ -1,6 +1,6 @@
 import { BUS_IDS } from 'cleo'
 import type { BusId } from 'cleo'
-import { DocScope, Field, NumberInput, Section, SegmentedControl, Slider, TextInput, Toggle, hintClass } from '../../components/ui'
+import { DocScope, Field, NumberInput, Section, SegmentedControl, Slider, TextInput, Toggle, hintClass } from '@cleo/app-kit/ui'
 import { formatDuration } from '../../utils/audioSources'
 import { useSound } from './SoundContext'
 import EffectRackEditor from './EffectRackEditor'

@@ -6,7 +6,7 @@ import { ModelAsset, resolvedLods } from './models'
 import { MaterialAsset, resolveMaterialRefs } from './materials'
 import { parseByType, regenerateIds } from './nodeSubtree'
 import { cryptoRandomId } from './ids'
-import { deepClone } from './deepClone'
+import { deepClone } from '@cleo/app-kit/utils/deepClone'
 
 // Builds engine-consumable foliage rules from mesh library assets. A TerrainFoliageRule must stay plain
 // JSON (material.ts cannot import scene/foliage classes), so a mesh asset's subtree is flattened here:

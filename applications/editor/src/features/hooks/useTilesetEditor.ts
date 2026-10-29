@@ -1,4 +1,4 @@
-import EventEmitter from '../../utils/eventEmitter';
+import EventEmitter from '@cleo/app-kit/utils/eventEmitter';
 import { Logger } from 'cleo';
 import { TilesetAsset, buildTilesetAsset, guessTileSize } from '../../utils/tilesets';
 import { cryptoRandomId } from '../../utils/ids';

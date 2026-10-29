@@ -6,9 +6,9 @@ import { useClip } from './ClipContext'
 import { getAnimationTarget } from '../animation/skeleton'
 import { applyPreviewClips } from './clipPreview'
 import { tracksOf, withMovedKey, withoutKey, type BoneTrack, type TrackPath } from '../../utils/clipTracks'
-import { Button, NumberInput, Select, Toggle } from '../../components/ui'
-import { promptDialog } from '../dialogs/dialogStore'
-import { clamp } from '../../utils/math'
+import { Button, NumberInput, Select, Toggle } from '@cleo/app-kit/ui'
+import { promptDialog } from '@cleo/app-kit/feedback/dialogStore'
+import { clamp } from '@cleo/app-kit/utils/math'
 
 /** One key colour per property, so a bone driven on more than one reads at a glance. */
 const KEY_CLASS: Record<TrackPath, string> = {

@@ -9,15 +9,15 @@ import WorkspaceStatusChip from "./scriptWorkspace/WorkspaceStatusChip";
 import { importBundleJob } from "../workers/workerClient";
 import { exportBundle } from "../utils/bundleExport";
 import { applyBundleReplace, applyBundleMerge, applyBundleAsNewProject, IMPORT_WRITE_STEPS } from "../utils/bundleImport";
-import { beginLoad, type LoadStepSpec } from "./loading/loadingStore";
+import { beginLoad, type LoadStepSpec } from "@cleo/app-kit/feedback/loadingStore";
 import { confirmDiscard } from "./unloadGuard";
 import type { BundleData } from "../utils/bundle";
 import ImportBundleModal from "./dialogs/ImportBundleModal";
-import { startTask } from "./progress/progressStore";
-import Topbar from "../components/Topbar";
+import { startTask } from "@cleo/app-kit/feedback/progressStore";
+import Topbar from "@cleo/app-kit/ui/Topbar";
 import ModeSelector from "./ModeSelector";
 import UndoButtons from "./UndoButtons";
-import { Button, MenuItem, buttonVariants, cn, useDocEntry, useDocTooltip } from "../components/ui";
+import { Button, MenuItem, buttonVariants, cn, useDocEntry, useDocTooltip } from "@cleo/app-kit/ui";
 import {
   SaveIcon, ImportIcon, ExportIcon, PublishIcon, ChevronDownIcon,
   SpinnerIcon, CheckIcon, AlertIcon, LayoutIcon, ProjectsIcon,

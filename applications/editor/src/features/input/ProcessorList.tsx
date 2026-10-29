@@ -1,6 +1,6 @@
 import { PROCESSOR_KINDS } from 'cleo'
 import type { Processor, ProcessorKind } from 'cleo'
-import { Button, NumberInput, Select, Toggle, hintClass, labelClass } from '../../components/ui'
+import { Button, NumberInput, Select, Toggle, hintClass, labelClass } from '@cleo/app-kit/ui'
 
 /**
  * The ordered processor chain on a binding or an action: add, remove, reorder, tune.

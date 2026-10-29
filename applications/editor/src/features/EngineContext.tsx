@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useRef, useEffect, useMemo } from "react";
 import { EventBusContext } from "./EventBusContext";
+import { EngineHostProvider, type EngineHost } from "@cleo/app-kit/engine/EngineHost";
+import { stepViewCamera2D, stepViewCamera3D, type ViewCameraPrefs } from "@cleo/app-kit/engine/viewCamera";
 import { SelectionContext, type SelectionContextValue } from "./SelectionContext";
 import { PlaybackContext, type PlaybackContextValue } from "./PlaybackContext";
 import {
@@ -11,14 +13,14 @@ import { AssetLibraryContext, type AssetLibraryContextValue } from "./AssetLibra
 import { DocumentContext, type DocumentContextValue } from "./DocumentContext";
 import { ProjectContext, type ProjectContextValue } from "./ProjectContext";
 import { EditorSessionsContext, type EditorSessionsContextValue } from "./EditorSessionsContext";
-import { useStableActions } from "../utils/useStableActions";
+import { useStableActions } from "@cleo/app-kit/utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
 import { isEditorOwnedChange } from "../utils/editorOwned";
 import { resetScriptModules, addScriptModuleSources, nextFrame } from "cleo";
 import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, allTerrainFoliageRules, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
 import type { SceneChange, TerrainFoliageRule, InputMap, LoadProgressListener, RenderSettings } from "cleo";
 import NullImage from '../images/null.png';
-import EventEmitter from "../utils/eventEmitter";
+import EventEmitter from "@cleo/app-kit/utils/eventEmitter";
 import { createEmptyScene, ensureEditorCamera } from './demoScene/createEmptyScene';
 import { createMaterialPreviewScene } from './demoScene/createMaterialPreviewScene';
 import { previewSphereGeometry, PREVIEW_TERRAIN_RADIUS, PREVIEW_TERRAIN_SIZE, REFERENCE_LANDSCAPE }
@@ -100,12 +102,12 @@ import {
   collectReferencedAnimationFieldIds, collectReferencedSoundIds, collectReferencedAudioIds,
   collectReferencedAnimationIds, buildSceneRefs,
 } from "../utils/references";
-import { idbGet, idbSet } from "../utils/idb";
-import { EDITOR_CAMERA_MAP } from "./input/editorInputMap";
+import { idbGet, idbSet } from "@cleo/app-kit/utils/idb";
+import { EDITOR_CAMERA_MAP } from "@cleo/app-kit/engine/viewCameraMap";
 import { KEYS, libKey, inputMapKey, projectSettingsKey } from "../utils/storageKeys";
 import { ProjectSettings, DEFAULT_PROJECT_SETTINGS, parseProjectSettings, applyEngineRuntime } from "./options/projectSettings";
 import { getEditorPrefs, editorPrefsStore } from "./options/editorPrefs";
-import { setGizmoSnapSteps } from "./gizmo/gizmoDrag";
+import { setGizmoSnapSteps } from "@cleo/app-kit/gizmo/gizmoDrag";
 import { openScriptExternally } from "./options/scriptOpener";
 import { isDesktop } from "./publish/publishClient";
 import { assetIdOfTab, loadTabState, saveTabState, MAIN_MODES, MainMode } from "../utils/tabState";
@@ -113,10 +115,10 @@ import { activeProjectAllowsLegacyImport, touchProject } from "../utils/projects
 import { activeProjectId } from "../utils/projectScope";
 import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextureIds, legacyTexturesOf, deleteTextures } from "../utils/textureStore";
 import { preloadAudio, persistAudio } from "../utils/audioStore";
-import { startTask, StepStatus } from "./progress/progressStore";
+import { startTask, StepStatus } from "@cleo/app-kit/feedback/progressStore";
 import { invalidateNavSoup, reconcileEditorHelpers } from "../utils/editorHelpers";
-import { readBackendPreference } from './renderer/backendPreference';
-import { deepClone } from '../utils/deepClone';
+import { readBackendPreference } from '@cleo/app-kit/renderer/backendPreference';
+import { deepClone } from '@cleo/app-kit/utils/deepClone';
 import { buildProbeIconDataURL, buildLightIconDataURL, buildSoundIconDataURL, buildDecalIconDataURL, buildParticleIconDataURL, buildForceFieldIconDataURL } from './editorIcons';
 import { ImportStage, IMPORT_STAGES, AnimImportStage, ANIM_IMPORT_STAGES } from './importStages';
 import { usePersistedLibrary, usePersistedModelLibrary } from './persistLibrary';
@@ -131,7 +133,7 @@ import { useSoundEditor } from './hooks/useSoundEditor';
 import { useAnimationFieldEditor } from './hooks/useAnimationFieldEditor';
 import { useRigEditor } from './hooks/useRigEditor';
 import { useClipEditor } from './hooks/useClipEditor';
-import { getShellBridge } from './desktopShell';
+import { getShellBridge } from '@cleo/app-kit/platform/desktopShell';
 import { confirmDiscard, setUnsavedWork, unloadGuardSuppressed } from './unloadGuard';
 import {
   EDITOR_CLEAR_COLOR, LEGACY_CLEAR_COLOR, TAB_METERS_EXPOSURE, TAB_RUNS_POST_PROCESSING, SCENE_TAB_ID,
@@ -143,7 +145,7 @@ import type {
   SavingState, TabKind, ModelEditSession, EditorTab, TerrainBrushState, TilemapBrushState,
 } from './engineContextTypes';
 import { currentOrNoop } from './loading/bootLoad';
-import { beginLoad, currentLoad, subscribeLoad, yieldToPaint, type LoadHandle } from './loading/loadingStore';
+import { beginLoad, currentLoad, subscribeLoad, yieldToPaint, type LoadHandle } from '@cleo/app-kit/feedback/loadingStore';
 
 // The types, constant tables and standalone helpers this file used to declare inline now live in sibling
 // modules. They are re-exported here verbatim so every consumer keeps importing them from EngineContext.
@@ -863,6 +865,12 @@ function createEditorScene(): Scene {
   const scene = new Scene();
   scene.spawnRulesEnabled = false;
   return scene;
+}
+
+/** The editor's camera preferences, as the shared view camera reads them. Read per frame, so a change applies at once. */
+function viewCameraPrefs(): ViewCameraPrefs {
+  const prefs = getEditorPrefs();
+  return { flySpeed: prefs.cameraFlySpeed, lookSensitivity: prefs.cameraLookSensitivity };
 }
 
 export function EngineProvider(props: { children: React.ReactNode }) {
@@ -6149,52 +6157,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         cameraNode.camera.right = o?.right ?? 4;
         if (remembered) cameraNode.setPosition(remembered.position).setRotation(remembered.rotation);
         else cameraNode.setZ(10).setRotation([0, 180, 0]);
-        cameraNode.onUpdate = (delta) => {
-            const node = cameraNode;
-            const input = InputSystem.instance;
-            const movement = delta * getEditorPrefs().cameraFlySpeed;
-            // The EditorCamera map is turned OFF during a gizmo drag and during Play, which is what the
-            // `!isGizmoDraggingRef.current` guard used to do at every read site — except that disabling
-            // the map also cancels anything held, so the camera stops rather than freezing mid-motion.
-            const pan = input.vector('EditorCamera/Pan2D');
-            const nudge = input.vector('EditorCamera/Fly');
-            if (pan[0] !== 0 || pan[1] !== 0) {
-                node.addX(-pan[0] * movement);
-                node.addY(pan[1] * movement);
-            }
-            node.addX(nudge[0] * movement * 10);
-            node.addY(nudge[1] * movement * 10);
-            const wheel = input.value('EditorCamera/Zoom');
-            if (Math.abs(wheel) > 0) {
-              // Wheel up (deltaY < 0) SHRINKS the ortho extents — shows less world, zooms in — matching
-              // the 3D rig's dolly below and every other wheel in the editor.
-              const step = wheel * 0.001;
-              const factor = Math.max(0.1, 1 + step); // avoid inverting the frustum on a fast scroll
-              const cam = cameraNode.camera;
-              cam.top *= factor;
-              cam.bottom *= factor;
-              cam.left *= factor;
-              cam.right *= factor;
-              // Clamp minimal extent to avoid zero frustum
-              const minExtent = 0.1;
-              if (Math.abs(cam.top) < minExtent) {
-                const sign = cam.top >= 0 ? 1 : -1;
-                cam.top = sign * minExtent;
-              }
-              if (Math.abs(cam.bottom) < minExtent) {
-                const sign = cam.bottom >= 0 ? 1 : -1;
-                cam.bottom = sign * minExtent;
-              }
-              if (Math.abs(cam.left) < minExtent) {
-                const sign = cam.left >= 0 ? 1 : -1;
-                cam.left = sign * minExtent;
-              }
-              if (Math.abs(cam.right) < minExtent) {
-                const sign = cam.right >= 0 ? 1 : -1;
-                cam.right = sign * minExtent;
-              }
-            }
-        };
+        // Navigation is the app-kit's shared view camera; the EditorCamera map it reads is turned OFF
+        // during a gizmo drag and during Play, so a held key cancels rather than freezing mid-motion.
+        cameraNode.onUpdate = (delta) => stepViewCamera2D(cameraNode, delta, viewCameraPrefs());
 
         // Orient the infinite grid onto the front (XY) plane for 2D.
         instanceRef.current.renderer.setGridPlane('xy');
@@ -6204,31 +6169,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // Unlike 2D there is no default pose to fall back to — a first switch to 3D keeps whatever the
         // scene set up. Only a remembered pose moves the camera.
         if (remembered) cameraNode.setPosition(remembered.position).setRotation(remembered.rotation);
-        cameraNode.onUpdate = (delta) => {
-          const node = cameraNode;
-          const input = InputSystem.instance;
-          const prefs = getEditorPrefs();
-          const movement = delta * 2 * prefs.cameraFlySpeed;
-          const lookRate = delta * 2 * prefs.cameraLookSensitivity;
-          // Every chord below is a BINDING now (see editorInputMap): the button each one needs held is
-          // a modifier on the binding rather than an `if` here, and the whole map goes off during a
-          // gizmo drag and during Play.
-          const look = input.vector('EditorCamera/Look');
-          if (look[0] !== 0 || look[1] !== 0)
-            node.rotateX(look[1] * lookRate * 5).rotateY(-look[0] * lookRate * 5);
-          const fly = input.vector('EditorCamera/Fly');
-          const lift = input.value('EditorCamera/Lift');
-          if (fly[1] !== 0) node.addForward(fly[1] * movement);
-          if (fly[0] !== 0) node.addRight(fly[0] * movement);
-          if (lift !== 0) node.addY(lift * movement);
-          const pan = input.vector('EditorCamera/Pan');
-          if (pan[0] !== 0 || pan[1] !== 0) {
-            node.addRight(-pan[0] * movement);
-            node.addUp(pan[1] * movement);
-          }
-          const wheel = input.value('EditorCamera/Zoom');
-          if (Math.abs(wheel) > 0) node.addForward(-wheel * 0.01); // wheel up -> move forward
-        };
+        cameraNode.onUpdate = (delta) => stepViewCamera3D(cameraNode, delta, viewCameraPrefs());
 
         // Orient the infinite grid onto the ground (XZ) plane for 3D.
         instanceRef.current.renderer.setGridPlane('xz');
@@ -6833,6 +6774,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     activeTab, modelSessions, pendingModelImport, sessionActions,
   ]);
 
+  // What the app-kit's shared chrome (renderer and performance panels) reads instead of this context.
+  const engineHostValue = useMemo<EngineHost>(
+    () => ({ instance: instanceRef.current, isPlayMode, eventEmitter: eventEmitter.current }),
+    // instanceRef.current is set once, during boot; it is a dependency so the host picks it up then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [instanceRef.current, isPlayMode],
+  );
+
   return (
   <EngineContext.Provider value={{
       instance: instanceRef.current,
@@ -7105,6 +7054,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }}>
     {/* The bus first: its value is the emitter ref, which never changes, so bus-only consumers never
         re-render from context at all. */}
+    <EngineHostProvider value={engineHostValue}>
     <EventBusContext.Provider value={eventEmitter.current}>
       <SelectionContext.Provider value={selectionValue}>
         <PlaybackContext.Provider value={playbackValue}>
@@ -7122,6 +7072,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         </PlaybackContext.Provider>
       </SelectionContext.Provider>
     </EventBusContext.Provider>
+    </EngineHostProvider>
   </EngineContext.Provider>
   );
 }

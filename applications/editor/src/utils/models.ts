@@ -6,7 +6,7 @@ import { resolveMaterialRefs, applyMaterialAsset, applyMaterialAssets, serialize
 import { skinnedModelJsonOf as skinnedJson, flattenModelAsset, nodeJsonTrs, modelTransformDelta, carryModelAssetFields } from './modelClips'
 import type { AnimationAsset } from './animationAssets'
 import { applyModelAnimations, modelAnimationIds } from './animationResolve'
-import { deepClone } from './deepClone'
+import { deepClone } from '@cleo/app-kit/utils/deepClone'
 
 // MODEL assets: a named, thumbnailed subtree of ModelNodes sharing a material, with optional LOD levels
 // and a cull distance. Vocabulary: a "mesh" is the GPU-side structure, internal to the engine and never

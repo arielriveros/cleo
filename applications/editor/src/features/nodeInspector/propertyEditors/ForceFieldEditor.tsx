@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ForceFieldNode, FORCE_FIELD_PRESETS, type ForceFieldPreset } from 'cleo'
 import type { ForceFieldKind, ForceFieldShape } from 'cleo'
-import Collapsable from '../../../components/Collapsable'
-import { NumberInput, PresetMenu, PropertyRow, PropertyTable, SegmentedControl, Select, Slider, Toggle, VectorInput } from '../../../components/ui'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import { NumberInput, PresetMenu, PropertyRow, PropertyTable, SegmentedControl, Select, Slider, Toggle, VectorInput } from '@cleo/app-kit/ui'
 import { ForceFieldIcon } from '../sectionIcons'
 import { useEventBus } from '../../EventBusContext'
 

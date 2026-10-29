@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { TextureManager, Material, isDerivedTextureId } from 'cleo';
 import { useEventBus } from '../../EventBusContext';
-import { cn, TextInput, Button } from '../../../components/ui';
+import { cn, TextInput, Button } from '@cleo/app-kit/ui';
 import { ImportIcon } from '../../topbarIcons';
 import NullImage from '../../../images/null.png';
 

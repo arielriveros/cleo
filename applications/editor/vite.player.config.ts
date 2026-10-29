@@ -2,6 +2,7 @@ import { defineConfig, mergeConfig, type Plugin } from 'vite'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import engineConfig from '../../vite.config'
+import { appKitAlias } from '../app-kit/vite.preset'
 import { buildVersionDefines } from './buildVersion'
 import { contract } from './src/features/publish/playerContract.json'
 
@@ -69,6 +70,9 @@ function playerGraphGuard(): Plugin {
 // ../src/cleo.ts alias -- the same source the editor dev server and both test suites use, so a published
 // game is built from exactly the engine the editor previewed it with.
 export default mergeConfig(engineConfig, defineConfig({
+  // `@cleo/app-kit/...` -> the shared app-kit's source (see ../app-kit/vite.preset.ts).
+  resolve: { alias: appKitAlias },
+
   // Nothing under src/player/ imports src/version.ts today. The define is here anyway because this is a
   // SEPARATE bundle that drifts silently -- without it, the first shared import to reach the player
   // would be a runtime ReferenceError inside a published game rather than a build error here.

@@ -1,4 +1,4 @@
-import { Button } from '../../components/ui'
+import { Button } from '@cleo/app-kit/ui'
 
 // Beside a value a placed template instance overrides: says so, and puts the template's value back.
 export default function OverrideMark(props: { onRevert: () => void; title?: string }) {

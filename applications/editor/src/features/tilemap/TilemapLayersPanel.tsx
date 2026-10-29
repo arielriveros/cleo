@@ -1,7 +1,7 @@
 import { useCleoEngine } from '../EngineContext'
-import { Button, ButtonWithConfirm, Hint, NumberInput, SectionTitle, Select, TextInput, Toggle, cn, labelClass } from '../../components/ui'
+import { Button, ButtonWithConfirm, Hint, NumberInput, SectionTitle, Select, TextInput, Toggle, cn, labelClass } from '@cleo/app-kit/ui'
 import { useActiveTilemap } from './useActiveTilemap'
-import { clamp } from '../../utils/math';
+import { clamp } from '@cleo/app-kit/utils/math';
 
 // The tilemap mode's layer stack: order, visibility, opacity, parallax, Y-sorting and which layer is the
 // collision override. Painting always targets the ACTIVE layer, which is selected here.

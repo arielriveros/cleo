@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Logger } from 'cleo'
-import { confirmDialog } from '../dialogs/dialogStore'
+import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
 import { Filemanager, WillowDark, getMenuOptions } from '@svar-ui/react-filemanager'
 import type { IFileMenuOption, IParsedEntity, TContextMenuType, TMode } from '@svar-ui/react-filemanager'
 // filemanager.css @imports the SVAR stylesheet itself, so the skin's rules deterministically follow it.
@@ -21,7 +21,7 @@ import { readDroppedEntries } from '../../utils/importGrouping'
 import { buildTemplateFromNode } from '../../utils/templates'
 import { buildControllerAsset } from '../../utils/animationControllers'
 import { hoveredScriptStore } from '../sceneInspector/hoveredScriptStore'
-import { Button, MenuItem, TextInput } from '../../components/ui'
+import { Button, MenuItem, TextInput } from '@cleo/app-kit/ui'
 
 // The bottom bar's single "Assets" tab: one file-manager view over all five asset libraries, with real
 // folders. Folder layout lives in VfsContext, SVAR's store owns what is on screen, useFileManagerBridge

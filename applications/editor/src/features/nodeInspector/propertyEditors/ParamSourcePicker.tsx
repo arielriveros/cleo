@@ -1,6 +1,6 @@
 import { BEHAVIOR_SENSES } from 'cleo'
 import type { BehaviorParameterSource } from 'cleo'
-import { Select, TextInput } from '../../../components/ui'
+import { Select, TextInput } from '@cleo/app-kit/ui'
 
 /**
  * Where a value comes from: the one picker for every readable in the AI layer.

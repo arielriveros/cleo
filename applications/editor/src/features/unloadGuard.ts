@@ -1,4 +1,4 @@
-import { confirmDialog } from './dialogs/dialogStore'
+import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
 
 // "Is there unsaved work, and what is it" — kept OUTSIDE React, and the reason is the code that reads it.
 //

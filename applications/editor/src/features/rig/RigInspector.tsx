@@ -16,7 +16,7 @@ import { loadSkin, type StoredSkin } from '../../utils/animationAssets'
 import { overridesFor } from '../../utils/rigAssets'
 import { applyRetargetOverrides } from '../../utils/animationResolve'
 import { retargetView } from '../../utils/retargetView'
-import { Button, DocScope, Hint, SectionTitle, Select, TextInput, cn, hintClass, valueClass } from '../../components/ui'
+import { Button, DocScope, Hint, SectionTitle, Select, TextInput, cn, hintClass, valueClass } from '@cleo/app-kit/ui'
 
 // The rig editor's Properties panel: the clips this skeleton owns, the retarget corrections onto it, and
 // which character it is previewed through.

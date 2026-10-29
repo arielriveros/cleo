@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { useEditorSessions } from '../EditorSessionsContext'
-import { Button, cn, TextInput, Hint } from '../../components/ui'
+import { Button, cn, TextInput, Hint } from '@cleo/app-kit/ui'
 import { useAssetDrop } from '../../utils/useAssetDrop'
 
 // Links shared `.anim` assets to a RIG. The link lives on the rig, not on a model or a node, so one stored

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { SpriteNode } from 'cleo';
-import Collapsable from '../../../components/Collapsable';
+import Collapsable from '@cleo/app-kit/ui/Collapsable';
 import TilesetSlot, { tilesetAssetOf } from './TilesetSlot';
 import SpriteAppearance from './SpriteAppearance';
 import TileGrid from '../../tileset/TileGrid';
 import { useCleoEngine } from '../../EngineContext';
 import { useEventBus } from '../../EventBusContext';
-import { Field, Select, Hint, DocScope } from '../../../components/ui';
+import { Field, Select, Hint, DocScope } from '@cleo/app-kit/ui';
 import { SpriteIcon } from '../sectionIcons';
 
 // A static sprite is a tileset plus one tile. TileGrid is the same picker the tilemap palette uses, with

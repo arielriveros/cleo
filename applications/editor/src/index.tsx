@@ -1,10 +1,12 @@
 import ReactDOM from 'react-dom/client';
 import App from './app';
-import DialogHost from './features/dialogs/DialogHost';
-import ToastStack from './features/toasts/ToastStack';
-import { attachLogStore } from './features/logger/logStore';
+import DialogHost from '@cleo/app-kit/feedback/DialogHost';
+import ToastStack from '@cleo/app-kit/feedback/ToastStack';
+import { attachLogStore } from '@cleo/app-kit/feedback/logStore';
 import { VERSION_LABEL } from './version';
-import './index.css';
+// Registers the docs every tooltip reads; first, so nothing renders against an empty index.
+import './features/docs/docsSource';
+import '@cleo/app-kit/styles/theme.css';
 
 // Capture logs (and uncaught errors) from the first frame — before the console panel mounts.
 attachLogStore();

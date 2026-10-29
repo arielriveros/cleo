@@ -1,5 +1,5 @@
 import { type LandscapeNode, type SculptTool } from 'cleo'
-import { Button, Hint, Select, Slider, cn } from '../../components/ui'
+import { Button, Hint, Select, Slider, cn } from '@cleo/app-kit/ui'
 import { useLandscapeBrush, setBrush, resolvePaintTarget, activeStrength, setActiveStrength, strengthSpec, activeToolKey, type PaintTool } from './landscapeBrushStore'
 import { MODES, SCULPT_TOOLS, PAINT_TOOLS, type LandscapeToolInfo } from './landscapeTools'
 import { useActiveLandscape } from './useActiveLandscape'

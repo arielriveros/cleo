@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import type { TilemapTool } from '../EngineContext'
-import { Button, Hint, Select, Toggle, labelClass } from '../../components/ui'
+import { Button, Hint, Select, Toggle, labelClass } from '@cleo/app-kit/ui'
 import { useActiveTilemap } from './useActiveTilemap'
 
 // The floating tool card for tilemap mode: a `data-cleo-overlay` panel over the viewport whose controls

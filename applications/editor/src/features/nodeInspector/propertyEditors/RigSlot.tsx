@@ -14,8 +14,8 @@ import {
 import { applyRetargetOverrides } from '../../../utils/animationResolve'
 import { retargetView } from '../../../utils/retargetView'
 import RetargetMapper from '../../rig/RetargetMapper'
-import Collapsable from '../../../components/Collapsable'
-import { Button, Hint, Select, cn, hintClass, valueClass } from '../../../components/ui'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import { Button, Hint, Select, cn, hintClass, valueClass } from '@cleo/app-kit/ui'
 import { RigIcon } from '../sectionIcons'
 
 // The skeleton a character uses, as an inspector slot — shaped like MaterialSlot and AiBrainSlot.

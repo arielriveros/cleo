@@ -2,8 +2,8 @@ import { Logger, Node, isEditorOwnedName } from 'cleo'
 import type { MotionBlurMode } from 'cleo'
 import { useState, useEffect } from 'react';
 import { useCleoEngine } from '../../EngineContext';
-import Collapsable from '../../../components/Collapsable'
-import { PropertyTable, PropertyRow, TextInput, ButtonWithConfirm, Toggle, Hint, SegmentedControl, Select } from '../../../components/ui'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import { PropertyTable, PropertyRow, TextInput, ButtonWithConfirm, Toggle, Hint, SegmentedControl, Select } from '@cleo/app-kit/ui'
 import { InfoIcon } from '../sectionIcons'
 import { validateNodeName } from '../../../utils/nodeNames'
 import { modelNodeOf } from '../../../utils/models'

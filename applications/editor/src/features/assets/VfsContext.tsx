@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { CleoEngine, Logger, TextureManager, AudioManager, isDerivedTextureId } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
-import { idbGet, idbSet } from '../../utils/idb'
+import { idbGet, idbSet } from '@cleo/app-kit/utils/idb'
 import {
   EMPTY_VFS, LibSnapshot, VfsEntry, VfsIndex, vfsKey,
   AssetKind, indexByPath, reconcileVfs, repairVfs, baseOf, stemOf,

@@ -6,7 +6,7 @@ import {
 import {
   Button, Collapsable, Hint, MenuItem, NumberInput, Popover, PropertyRow, PropertyTable, SegmentedControl, Select, TextInput,
   Toggle, VectorInput, cn,
-} from '../../components/ui'
+} from '@cleo/app-kit/ui'
 import { useParticleEditor } from './ParticleEditorContext'
 import { useCleoEngine } from '../EngineContext'
 import ParamField from './ParamField'

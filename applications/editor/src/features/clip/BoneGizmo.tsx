@@ -5,7 +5,7 @@ import { useCleoEngine } from '../EngineContext'
 import { getAnimationTarget, computeBindMatrices, computeJointWorldMatrices } from '../animation/skeleton'
 import { boneLocalFromWorld, boneRotation } from './boneTrs'
 import TransformGizmo from '../gizmo/TransformGizmo'
-import type { TransformPatch } from '../gizmo/gizmoDrag'
+import type { TransformPatch } from '@cleo/app-kit/gizmo/gizmoDrag'
 
 /**
  * Posing a bone with the transform gizmo.

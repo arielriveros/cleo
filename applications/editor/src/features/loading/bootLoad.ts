@@ -1,4 +1,4 @@
-import { beginLoadWithHandoff, continueLoad, type LoadHandle, type LoadStepHandle, type LoadStepSpec } from './loadingStore'
+import { beginLoadWithHandoff, continueLoad, type LoadHandle, type LoadStepHandle, type LoadStepSpec } from '@cleo/app-kit/feedback/loadingStore'
 
 // The editor startup as one load: app.tsx begins it before a project is open, EngineContext reports
 // every step after that, and the splash stays up until the last one is done.

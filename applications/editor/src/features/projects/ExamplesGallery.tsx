@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Logger } from 'cleo'
 import { iconFor } from '../assets/assetKinds'
-import { beginLoad } from '../loading/loadingStore'
+import { beginLoad } from '@cleo/app-kit/feedback/loadingStore'
 import { confirmDiscard } from '../unloadGuard'
 import { IMPORT_WRITE_STEPS } from '../../utils/bundleImport'
-import { confirmDialog } from '../dialogs/dialogStore'
+import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
 import {
   ExampleEntry, exampleThumbnailUrl, formatBytes, importExample, loadExampleIndex,
 } from '../../utils/examples'

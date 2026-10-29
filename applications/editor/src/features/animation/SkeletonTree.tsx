@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { NodeRendererProps, Tree, TreeApi } from 'react-arborist'
 import { useCleoEngine } from '../EngineContext'
 import { getAnimationTarget, buildJointTree, jointLabel, JointTreeNode } from './skeleton'
-import { useElementSize } from '../../utils/useElementSize'
+import { useElementSize } from '@cleo/app-kit/utils/useElementSize'
 import { useScopedDndManager } from '../../utils/treeDnd'
 import IkRigPanel from './IkRigPanel'
-import { SectionTitle, TextInput } from '../../components/ui'
+import { SectionTitle, TextInput } from '@cleo/app-kit/ui'
 
 // Left-sidebar skeleton hierarchy for the Animation Editor: a react-arborist tree that is READ-ONLY, since
 // a skeleton's shape comes from the model. Selection emits SELECT_JOINT, separate from scene SELECT_NODE.

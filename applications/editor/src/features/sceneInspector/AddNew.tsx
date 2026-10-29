@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { SegmentedControl } from '../../components/ui';
+import { SegmentedControl } from '@cleo/app-kit/ui';
 import { useCleoEngine } from '../EngineContext';
 import { isWithinTemplateInstance } from '../../utils/templates';
 import { ADD_CATEGORIES, ADD_ITEMS, UI_CATEGORIES, AddCategory, AddContext, AddItem, NEW_NODE_MIME, addItemTo } from './addCatalog';

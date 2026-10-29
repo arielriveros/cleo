@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useEditorSessions } from '../EditorSessionsContext'
-import { DocScope, Modal, ModalHeader, ModalFooter, SectionTitle, Toggle, Button, FileButton, NumberInput, cn, hintClass } from '../../components/ui'
+import { DocScope, Modal, ModalHeader, ModalFooter, SectionTitle, Toggle, Button, FileButton, NumberInput, cn, hintClass } from '@cleo/app-kit/ui'
 import SubmeshGroupEditor from './SubmeshGroupEditor'
 import { defaultGroupsByMaterial, compactGroups, type PartGroup } from '../../utils/submeshGroups'
 

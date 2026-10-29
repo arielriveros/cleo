@@ -17,7 +17,7 @@ import type { AssetLibs } from '../../utils/assetHash'
 import type { BodyDescription, ShapeDescription } from '../EngineContext'
 import { migrateLegacyUI } from '../../utils/uiMigration'
 import type { ScriptAsset } from '../../utils/scripts'
-import { deepClone } from '../../utils/deepClone'
+import { deepClone } from '@cleo/app-kit/utils/deepClone'
 import { posesForRig } from '../../utils/poseAssets'
 
 // game.json v2: a multi-scene published game. The entry (main) scene runs first; scripts call

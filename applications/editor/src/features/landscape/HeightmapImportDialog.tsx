@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { heightsFromImage, type HeightImage, type HeightImportOptions, type LandscapeNode, type Scene } from 'cleo'
-import { Modal, ModalHeader, ModalFooter } from '../../components/ui/Modal'
-import { Button, DocScope, Hint, NumberInput, SegmentedControl, Toggle } from '../../components/ui'
+import { Modal, ModalHeader, ModalFooter } from '@cleo/app-kit/ui/Modal'
+import { Button, DocScope, Hint, NumberInput, SegmentedControl, Toggle } from '@cleo/app-kit/ui'
 import { setTerrainHeights } from '../../utils/terrainAccess'
 import { rangeFromFileName } from './heightmapImport'
 

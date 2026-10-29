@@ -1,14 +1,14 @@
 import { Node } from 'cleo'
 import { useState, useEffect } from 'react'
 import { useCleoEngine } from '../../EngineContext'
-import Collapsable from '../../../components/Collapsable'
-import { NumberInput, TextInput, Toggle, VectorInput, Select, StringListInput, ComboSelect, cn, labelClass, ACCESS_META } from '../../../components/ui'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import { NumberInput, TextInput, Toggle, VectorInput, Select, StringListInput, ComboSelect, cn, labelClass, ACCESS_META } from '@cleo/app-kit/ui'
 import { VariablesIcon } from '../sectionIcons'
 import type { ScriptVarSchema } from '../../../utils/scripts'
 import { isOverridden, setFieldOverride } from '../../../utils/templateOverrides'
 import OverrideMark from '../OverrideMark'
 import { useVariantBase } from '../useVariantBase'
-import { deepClone } from '../../../utils/deepClone'
+import { deepClone } from '@cleo/app-kit/utils/deepClone'
 import { pickChoices, PICK_LABEL, type PickContext } from './pickSources'
 
 // The reflection view for a class-based script asset. Variables are not created here: they are declared in

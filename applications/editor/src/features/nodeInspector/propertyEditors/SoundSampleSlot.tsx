@@ -3,7 +3,7 @@ import { SoundNode, AudioManager } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
 import { useAssetLibrary } from '../../AssetLibraryContext'
 import { useEditorSessions } from '../../EditorSessionsContext'
-import { Button, Hint, Select, cn, valueClass } from '../../../components/ui'
+import { Button, Hint, Select, cn, valueClass } from '@cleo/app-kit/ui'
 import { formatDuration } from '../../../utils/audioSources'
 import { useAssetDrop } from '../../../utils/useAssetDrop'
 

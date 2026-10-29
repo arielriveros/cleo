@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { handleSpecs, HANDLE_NAME_PREFIX } from '../src/features/gizmo/gizmoHandles';
+import { handleSpecs, HANDLE_NAME_PREFIX } from '@cleo/app-kit/gizmo/gizmoHandles';
 import type { GizmoMode } from '../src/features/engineContextTypes';
 
 /**

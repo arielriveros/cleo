@@ -1,5 +1,6 @@
 import { defineConfig, mergeConfig } from 'vitest/config';
 import engineConfig from '../../vite.config';
+import { appKitAlias } from '../app-kit/vite.preset';
 
 // The editor half of the suite: bundle / VFS / publish-pack logic — the pure data transforms that decide
 // whether a saved project can be read back and whether a published game boots. Anything React, DOM or GL
@@ -11,6 +12,8 @@ import engineConfig from '../../vite.config';
 // config. Aliasing to engine SOURCE means CI can run this suite with no build first, and — more
 // importantly — a test gets one set of class identities rather than two.
 export default mergeConfig(engineConfig, defineConfig({
+    // `@cleo/app-kit/...` -> the shared app-kit's source (see ../app-kit/vite.preset.ts).
+    resolve: { alias: appKitAlias },
     test: {
         include: ['tests/**/*.test.ts'],
         environment: 'node',
@@ -30,21 +33,14 @@ export default mergeConfig(engineConfig, defineConfig({
             //     npx vitest run --coverage --coverage.include='src/**/*.ts'
             include: [
                 'src/features/assets/deleteFlow.ts',
-                'src/features/dialogs/dialogStore.ts',
                 'src/features/input/inputMapEdits.ts',
                 'src/features/publish/pack.ts',
-                'src/features/toasts/toastStore.ts',
                 'src/features/publish/stripDimensionData.ts',
-                'src/features/gizmo/gizmoDrag.ts',
-                'src/features/gizmo/gizmoHandles.ts',
-                'src/features/gizmo/gizmoPick.ts',
                 'src/player/unpack.ts',
                 'src/utils/animationAssets.ts',
                 'src/utils/bundle.ts',
                 'src/utils/bundleAssets.ts',
                 'src/utils/bundleRead.ts',
-                'src/utils/bytes.ts',
-                'src/utils/gizmoMath.ts',
                 'src/utils/modelClips.ts',
                 'src/utils/placedAnimation.ts',
                 'src/utils/scriptMirror.ts',

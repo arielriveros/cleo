@@ -7,7 +7,7 @@ import { useAssetLibrary } from './AssetLibraryContext';
 import { iconFor } from './assets/assetKinds';
 import type { AssetKind } from '../utils/vfs';
 import { groupTabStrip, type StripEntry } from '../utils/animationWorkspace';
-import { Button } from '../components/ui';
+import { Button } from '@cleo/app-kit/ui';
 
 // The asset-type icon shown on a tab. `TAB_ASSET_KIND` names the asset each kind edits; the two that edit
 // none fall back to a glyph that describes what is on screen — an animation tab is a skinned mesh, and the

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Material, applyUvMapping, uvConfigOf, type UvConfig } from 'cleo'
-import { PropertyTable, PropertyRow, Section, Select, NumberInput, VectorInput, Slider, Hint } from '../../../components/ui'
+import { PropertyTable, PropertyRow, Section, Select, NumberInput, VectorInput, Slider, Hint } from '@cleo/app-kit/ui'
 
 // How a lit material maps its textures: the mesh's uv (tiled/offset), or a box / triplanar projection in
 // metres that does not stretch on scaled geometry. See UvConfig in src/graphics/material.ts. Explained in

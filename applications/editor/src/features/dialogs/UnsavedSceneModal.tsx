@@ -1,6 +1,6 @@
 import React from 'react'
 import { useProject } from '../ProjectContext'
-import { Modal, ModalHeader, ModalFooter, Button } from '../../components/ui'
+import { Modal, ModalHeader, ModalFooter, Button } from '@cleo/app-kit/ui'
 
 // Shown when unsaved edits are about to be lost. `openScene` and `closeTab` park a promise
 // (confirmUnsavedScene) that this modal resolves: Save writes then proceeds, Discard drops the edits and

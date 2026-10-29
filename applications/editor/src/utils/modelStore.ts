@@ -9,7 +9,7 @@
 // prefix scan, and textureStore keeps payloads out of the library for exactly this reason (see the intent
 // comment at the top of idb.ts).
 
-import { idbGet, idbSet, idbDelete, idbKeysByPrefix } from './idb'
+import { idbGet, idbSet, idbDelete, idbKeysByPrefix } from '@cleo/app-kit/utils/idb'
 import { libKey, modelKey, modelPrefix } from './storageKeys'
 import type { ModelAsset } from './models'
 import { libraryReport, formatBytes } from './assetSize'

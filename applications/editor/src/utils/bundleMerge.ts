@@ -19,7 +19,7 @@ import type { ParticleSystemAsset } from './particleSystems'
 import type { AnimControllerAsset } from './animationControllers'
 import type { BoneMaskAsset } from './boneMasks'
 import type { PoseAsset } from './poseAssets'
-import { deepClone } from './deepClone'
+import { deepClone } from '@cleo/app-kit/utils/deepClone'
 import { isBinaryPayload } from './binaryPayload'
 
 // Pure merge logic for importing a bundle alongside an existing project (the "Merge", not "Replace",

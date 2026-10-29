@@ -7,7 +7,7 @@ import { fanOutScripts, SCRIPT_ID_VAR, type ScriptAsset } from '../../utils/scri
 import { buildScriptGraphCtx, importClosure } from '../../utils/scriptGraph';
 import type { Template } from '../../utils/templates';
 import { resolveMaterialRefs, type MaterialAsset } from '../../utils/materials';
-import { deepClone } from '../../utils/deepClone';
+import { deepClone } from '@cleo/app-kit/utils/deepClone';
 import { MODEL_ID_VAR, LEGACY_MODEL_ID_VAR } from '../../utils/models';
 import { resolveModelAnimations } from '../../utils/animationResolve';
 import type { AnimationAsset } from '../../utils/animationAssets';

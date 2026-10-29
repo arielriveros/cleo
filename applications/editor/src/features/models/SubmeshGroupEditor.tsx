@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { TextInput, Select, Button, SectionTitle, cn } from '../../components/ui'
+import { TextInput, Select, Button, SectionTitle, cn } from '@cleo/app-kit/ui'
 import { addGroup, movePart, removeGroup, renameGroup, groupOfPart, type PartGroup, type PartInfo } from '../../utils/submeshGroups'
 
 /** MIME for a sub-mesh chip dragged between group columns. Scoped to this editor — nothing else reads it. */

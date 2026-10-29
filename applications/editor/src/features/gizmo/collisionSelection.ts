@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type EventEmitter from '../../utils/eventEmitter';
+import type EventEmitter from '@cleo/app-kit/utils/eventEmitter';
 
 /**
  * Which collision shape is being edited: one shape of one channel (body or trigger) of one node.

@@ -6,6 +6,7 @@ import path from 'node:path'
 // which does not inherit the top-level plugins the shared engine config contributes.
 import { glslRaw } from '../../tools/viteGlsl.mjs'
 import engineConfig from '../../vite.config'
+import { appKitAlias } from '../app-kit/vite.preset'
 import { buildVersionDefines } from './buildVersion'
 
 const ENGINE_ROOT = path.resolve(__dirname, '../..')
@@ -56,6 +57,9 @@ function nagaAssets(): Plugin {
 // ../src/cleo.ts alias, so the dev server, this build, the player build and both test suites resolve and
 // transform engine source identically. Everything below is editor-specific.
 export default mergeConfig(engineConfig, defineConfig({
+  // `@cleo/app-kit/...` -> the shared app-kit's source (see ../app-kit/vite.preset.ts).
+  resolve: { alias: appKitAlias },
+
   // desktop/main.js serves applications/editor/dist over app://editor and resolves "/assets/..." against the origin
   // root; Firebase rewrites ** -> /index.html. Both need root-absolute asset URLs.
   base: '/',

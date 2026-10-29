@@ -1,14 +1,14 @@
 import { LightProbeNode } from 'cleo';
 import { useState, useEffect, useCallback } from 'react';
-import Collapsable from '../../../components/Collapsable';
-import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Toggle, SectionTitle } from '../../../components/ui';
+import Collapsable from '@cleo/app-kit/ui/Collapsable';
+import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Toggle, SectionTitle } from '@cleo/app-kit/ui';
 import { ProbeIcon } from '../sectionIcons';
 
 const BOUNDS_HINT = 'Set all three sizes above 0 and the probe only lights meshes/pixels inside its box volume, which moves and rotates with the node; the IBL feathers out over the blend distance. Any size at 0 leaves the probe unbounded: it affects the whole scene (legacy behavior).';
 const AFFECTS_HINT = 'What the probe gives surfaces inside its volume. Lighting is the light it bounces onto them; Reflections is what they mirror. Turn Lighting off to keep the area lit by the sky light and ambient (or another probe) while still reflecting this probe\'s surroundings. No re-bake needed.';
 import { useEventBus } from '../../EventBusContext';
 import { useCleoEngine } from '../../EngineContext';
-import { clamp } from '../../../utils/math';
+import { clamp } from '@cleo/app-kit/utils/math';
 import { BOX_VOLUME_EDITED } from '../../gizmo/BoxVolumeGizmo';
 
 export default function LightProbeEditor(props: { node: LightProbeNode }) {

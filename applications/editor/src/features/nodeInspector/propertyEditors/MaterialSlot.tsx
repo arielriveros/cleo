@@ -1,12 +1,12 @@
 import React, { useState } from 'react'
 import { Node } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
-import Collapsable from '../../../components/Collapsable'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { getMaterialIdsOf, applyMaterialAsset, unlinkMaterialAt, canLinkMaterial, isProjectableMaterial, seedDecalMaterial } from '../../../utils/materials'
-import { Select, Button, Hint, cn, valueClass } from '../../../components/ui'
+import { Select, Button, Hint, cn, valueClass } from '@cleo/app-kit/ui'
 import { MaterialIcon } from '../sectionIcons'
 import { useAssetDrop } from '../../../utils/useAssetDrop'
-import { toast } from '../../toasts/toastStore'
+import { toast } from '@cleo/app-kit/feedback/toastStore'
 
 // The material reference control for model and decal nodes: the linked material (thumbnail + edit/unlink),
 // or a create/link affordance when none is set. A model merged at import carries one material per SUBMESH —

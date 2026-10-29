@@ -5,7 +5,7 @@ import WorkspaceBar from "./characterAnimation/WorkspaceBar";
 import StaleDependencyBanner from './StaleDependencyBanner';
 import DockLayout from "./layout/DockLayout";
 import ModelImportModal from "./models/ModelImportModal";
-import ProgressWindow from "./progress/ProgressWindow";
+import ProgressWindow from "@cleo/app-kit/feedback/ProgressWindow";
 import AnimationImportModal from "./animation/AnimationImportModal";
 import RigPickerModal from "./animation/RigPickerModal";
 import UnsavedSceneModal from "./dialogs/UnsavedSceneModal";

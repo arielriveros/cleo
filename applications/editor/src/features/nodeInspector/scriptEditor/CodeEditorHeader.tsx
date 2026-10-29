@@ -1,8 +1,8 @@
 // The strip above every code surface: the theme picker plus a note about keys that behave unusually inside
 // a code editor. The picker writes to the shared store, so it switches every code editor on screen.
 import React from 'react';
-import { SegmentedControl } from '../../../components/ui';
-import { codeThemeStore, useCodeTheme, type CodeThemeName } from './codeThemeStore';
+import { SegmentedControl } from '@cleo/app-kit/ui';
+import { codeThemeStore, useCodeTheme, type CodeThemeName } from '@cleo/app-kit/code/codeThemeStore';
 
 const THEME_OPTIONS: { value: CodeThemeName; label: string }[] = [
   { value: 'dark', label: 'Dark' },

@@ -6,7 +6,7 @@ import type { ActionKind, InputMap, ProcessorKind } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import {
   Button, ButtonWithConfirm, DocScope, Panel, Section, SectionTitle, Select, Slider, TextInput, Toggle, hintClass,
-} from '../../components/ui'
+} from '@cleo/app-kit/ui'
 import BindingRow from './BindingRow'
 import ProcessorList from './ProcessorList'
 import InputMonitor from './InputMonitor'

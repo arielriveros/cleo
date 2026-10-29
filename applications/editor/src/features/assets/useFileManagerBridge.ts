@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type { IApi } from '@svar-ui/react-filemanager'
 import { Logger } from 'cleo'
-import { startTask, StepStatus } from '../progress/progressStore'
+import { startTask, StepStatus } from '@cleo/app-kit/feedback/progressStore'
 import { useCleoEngine } from '../EngineContext'
 import { useVfs } from './VfsContext'
 import {
@@ -15,7 +15,7 @@ import {
 } from './assetKinds'
 import { inUseDialogOptions, planDelete } from './deleteFlow'
 import { assetGraph, assetKey } from 'cleo'
-import { confirmDialog } from '../dialogs/dialogStore'
+import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
 import { modelLodLevelCount } from '../../utils/models'
 import {
   collectReferencedMaterialIds, collectReferencedModelIds, collectReferencedTemplateIds,

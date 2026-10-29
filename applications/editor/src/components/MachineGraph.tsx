@@ -6,8 +6,8 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import FloatingEdge from '../features/animation/FloatingEdge'
-import { token } from '../utils/cssTokens'
-import { MenuItem } from './ui'
+import { token } from '@cleo/app-kit/utils/cssTokens'
+import { MenuItem } from '@cleo/app-kit/ui'
 
 /**
  * The node-graph canvas, shared by every state machine the editor edits.

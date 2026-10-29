@@ -1,4 +1,4 @@
-import type { TypeFile } from '../nodeInspector/scriptEditor/cleoTypes'
+import type { TypeFile } from '@cleo/app-kit/code/cleoTypes'
 import { hashSource, type MirrorState } from '../../utils/scriptMirror'
 
 // Everything besides the mirrored scripts that the workspace needs to be a real TypeScript project an
@@ -97,7 +97,7 @@ export function staticScaffold(): TypeFile[] {
  * bundle.
  */
 export async function buildScaffold(): Promise<{ files: TypeFile[]; typesHash: string }> {
-  const { workspaceTypeFiles } = await import('../nodeInspector/scriptEditor/cleoTypes')
+  const { workspaceTypeFiles } = await import('@cleo/app-kit/code/cleoTypes')
   const types = workspaceTypeFiles()
   const typesHash = hashSource(types.map(f => `${f.rel}:${f.content.length}`).join('\n'))
   return { files: [...staticScaffold(), ...types], typesHash }

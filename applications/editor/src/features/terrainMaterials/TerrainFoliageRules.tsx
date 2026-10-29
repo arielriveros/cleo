@@ -5,13 +5,13 @@ import {
 } from 'cleo'
 import type { FoliageOrientation } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
-import Collapsable from '../../components/Collapsable'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { buildFoliageRuleFromModelAsset, foliageRuleModels } from '../../utils/foliageRules'
 import { describeCollider, fitColliderToBounds, fitColliderToTrunk } from '../../utils/foliageColliderFit'
 import FoliageColliderModal from './FoliageColliderModal'
 import { cryptoRandomId } from '../../utils/ids'
-import { Button, FileButton, NumberInput, Select, TextInput, Toggle, cn, hintClass, labelClass } from '../../components/ui'
-import { toast } from '../toasts/toastStore'
+import { Button, FileButton, NumberInput, Select, TextInput, Toggle, cn, hintClass, labelClass } from '@cleo/app-kit/ui'
+import { toast } from '@cleo/app-kit/feedback/toastStore'
 
 // One foliage list of a landscape material and the foliage names kept off it: the whole-landscape list,
 // the Ground's, or one slot's (TerrainMaterialSlot.foliageInclude/foliageExclude). Edits `rules` IN PLACE

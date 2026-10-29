@@ -1,6 +1,6 @@
 import { Scene, Terrain, TerrainMaterial, LandscapeNode } from 'cleo';
 import { PREVIEW_TERRAIN_SIZE, REFERENCE_LANDSCAPE } from './previewFraming';
-import { clamp } from '../../utils/math';
+import { clamp } from '@cleo/app-kit/utils/math';
 
 /**
  * The subject of a terrain-material preview: a real patch of terrain carrying the material as layer 0.

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { CameraRigNode, ModelNode, type Node } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
-import Collapsable from '../../../components/Collapsable'
-import { Hint, Select } from '../../../components/ui'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import { Hint, Select } from '@cleo/app-kit/ui'
 import { RigIcon } from '../sectionIcons'
 
 // "Attach to socket": pin any node to a socket on a character's skeleton — the sword in the hand.

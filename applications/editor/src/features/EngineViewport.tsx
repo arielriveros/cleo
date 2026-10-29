@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useEngineViewport } from '@cleo/app-kit/engine/useEngineViewport';
 import { useCleoEngine } from "./EngineContext";
 import { Raycaster, Node, Vec, Logger } from "cleo";
 import TransformGizmo from "./gizmo/TransformGizmo";
@@ -10,8 +11,8 @@ import SocketPreviews from "./sockets/SocketPreviews";
 import SocketGizmo from "./sockets/SocketGizmo";
 import RagdollPreview from './rig/RagdollPreview';
 import useGizmoShortcuts from "./gizmo/useGizmoShortcuts";
-import type { TransformPatch } from "./gizmo/gizmoDrag";
-import { effectiveGizmoSpace } from "../utils/gizmoMath";
+import type { TransformPatch } from "@cleo/app-kit/gizmo/gizmoDrag";
+import { effectiveGizmoSpace } from "@cleo/app-kit/gizmo/gizmoMath";
 import LandscapeBrush from "./landscape/LandscapeBrush";
 import LandscapeToolbar from "./landscape/LandscapeToolbar";
 import TilemapBrush from "./tilemap/TilemapBrush";
@@ -24,11 +25,11 @@ import PreviewShapeSwitch from './PreviewShapeSwitch';
 import DebugSkeletonOverlay from "./DebugSkeletonOverlay";
 import DebugAnimationOverlay from "./DebugAnimationOverlay";
 import { useStateMachine } from "./animation/StateMachineContext";
-import { SegmentedControl, Select } from "../components/ui";
+import { SegmentedControl, Select } from "@cleo/app-kit/ui";
 import { instantiateTemplate, templateInstanceRootOf, isWithinTemplateInstance } from "../utils/templates";
 import { instantiateModelAsset, adoptModelMaterial } from "../utils/models";
 import { NEW_NODE_MIME, addItemTo, findAddItem } from "./sceneInspector/addCatalog";
-import { captureViewport, releaseViewport } from "../utils/pointerCapture";
+import { captureViewport, releaseViewport } from "@cleo/app-kit/utils/pointerCapture";
 import { GizmoMode, GizmoSpace, MODE_RENDERS_VIEWPORT, EditorMode } from "./EngineContext";
 import { useSelection } from "./SelectionContext";
 import { usePlayback } from "./PlaybackContext";
@@ -95,29 +96,8 @@ export default function EngineViewport() {
     // authored dimension is edited in its own settings panel.
     const dimension = viewDimension;
  
-    useEffect(() => {
-        if (viewportRef.current && instance) {
-            viewportRef.current.style.height = "100%";
-            viewportRef.current.style.backgroundColor = "black";
-            instance.setViewport(viewportRef.current);
-            instance.renderer.resize();
-        }
-    }, [instance, viewportRef]);
-
-    // The canvas is sized from this div's clientWidth/Height (renderer.resize measures the parent),
-    // and under dockview nothing else reacts to panel geometry — sash drags, docking, floating and
-    // per-mode panel changes all land here. rAF-throttled because resize() reallocates the FBOs.
-    useEffect(() => {
-        const el = viewportRef.current;
-        if (!el || !instance) return;
-        let raf = 0;
-        const observer = new ResizeObserver(() => {
-            cancelAnimationFrame(raf);
-            raf = requestAnimationFrame(() => instance.renderer.resize());
-        });
-        observer.observe(el);
-        return () => { cancelAnimationFrame(raf); observer.disconnect(); };
-    }, [instance]);
+    // Canvas hosting and resize-tracking are the app-kit's, shared with every app that embeds the engine.
+    useEngineViewport(viewportRef, instance);
 
     useEffect(() => {
         if (!viewportRef.current || !instance) return;

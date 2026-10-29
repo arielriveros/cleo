@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { SpriteNode } from 'cleo'
-import Collapsable from '../../../components/Collapsable'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { useEventBus } from '../../EventBusContext'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
-import { PropertyTable, PropertyRow, Select, Slider, Toggle, ColorInput, Hint } from '../../../components/ui'
+import { PropertyTable, PropertyRow, Select, Slider, Toggle, ColorInput, Hint } from '@cleo/app-kit/ui'
 import { AppearanceIcon } from '../sectionIcons'
 
 // Tint / opacity / blending for a sprite, inline. A sprite's image comes from its tileset, not a material.

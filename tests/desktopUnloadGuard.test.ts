@@ -21,7 +21,7 @@ import { execFileSync } from 'child_process';
 const ROOT = join(__dirname, '..');
 const MAIN = readFileSync(join(ROOT, 'desktop', 'main.js'), 'utf-8');
 const PRELOAD = readFileSync(join(ROOT, 'desktop', 'preload.js'), 'utf-8');
-const BRIDGE = readFileSync(join(ROOT, 'applications', 'editor', 'src', 'features', 'desktopShell.ts'), 'utf-8');
+const BRIDGE = readFileSync(join(ROOT, 'applications', 'app-kit', 'src', 'platform', 'desktopShell.ts'), 'utf-8');
 
 /** main -> renderer, then renderer -> main. */
 const CHANNELS = ['shell:confirm-unload', 'shell:unload-response'];

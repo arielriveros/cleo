@@ -3,12 +3,12 @@ import {
     UINode, UIRootNode, UITextNode, UIImageNode, UIButtonNode, UIStackNode, UISpacerNode,
     UIProgressBarNode, UISliderNode, UIToggleNode, UITextInputNode, UIColor,
 } from 'cleo';
-import Collapsable from '../../../components/Collapsable';
+import Collapsable from '@cleo/app-kit/ui/Collapsable';
 import { UI_ICONS, CanvasIcon } from '../../sceneInspector/uiIcons';
 import { TransformIcon, AppearanceIcon } from '../sectionIcons';
-import { ColorInput, NumberInput, TextInput, Select, Toggle, Slider, PropertyTable, PropertyRow, TexturePicker, DocScope } from '../../../components/ui';
+import { ColorInput, NumberInput, TextInput, Select, Toggle, Slider, PropertyTable, PropertyRow, TexturePicker, DocScope } from '@cleo/app-kit/ui';
 import { useEventBus } from '../../EventBusContext';
-import { clamp } from '../../../utils/math';
+import { clamp } from '@cleo/app-kit/utils/math';
 
 /** The inspector for every UI element type; the rect/appearance block is shared and only the payload differs. */
 

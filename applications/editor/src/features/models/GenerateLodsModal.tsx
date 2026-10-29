@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
-import { Modal, ModalHeader, ModalFooter, Toggle, Button, NumberInput } from '../../components/ui'
+import { Modal, ModalHeader, ModalFooter, Toggle, Button, NumberInput } from '@cleo/app-kit/ui'
 import { halveTo } from '../../utils/lodTextures'
-import { clamp } from '../../utils/math';
+import { clamp } from '@cleo/app-kit/utils/math';
 
 // Per-level control over generated LOD levels. Hosted by ModelInspector with plain local state rather
 // than the globally-mounted pending/resolver pattern — that exists for flows that PARK on the user's

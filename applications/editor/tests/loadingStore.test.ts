@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import {
   beginLoad, beginLoadWithHandoff, continueLoad, currentLoad, handoffFromCurrent, hasHandoff, loadFraction,
   resetLoadStore, runStep, saveHandoff, stepFraction, subscribeLoad, takeHandoff,
-} from '../src/features/loading/loadingStore'
+} from '@cleo/app-kit/feedback/loadingStore'
 import { BOOT_STEPS, BOOT_TITLE, beginBootLoad, currentOrNoop, NOOP_LOAD } from '../src/features/loading/bootLoad'
 
 // The tests run under node: a Map stands in for sessionStorage.

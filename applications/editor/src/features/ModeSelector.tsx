@@ -1,6 +1,6 @@
 import { useCleoEngine, EditorMode } from "./EngineContext";
 import { useProject } from "./ProjectContext";
-import { Button, cn, useDocEntry, useDocTooltip } from "../components/ui";
+import { Button, cn, useDocEntry, useDocTooltip } from "@cleo/app-kit/ui";
 
 // Inline SVG glyphs (stroke currentColor) so no binary icon assets are needed.
 const SceneIcon = () => (

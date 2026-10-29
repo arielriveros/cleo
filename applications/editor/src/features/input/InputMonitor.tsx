@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { InputSystem } from 'cleo'
 import type { ActionState } from 'cleo'
-import { hintClass, labelClass } from '../../components/ui'
+import { hintClass, labelClass } from '@cleo/app-kit/ui'
 
 /**
  * A live readout of what the input system is actually producing, for the selected map.

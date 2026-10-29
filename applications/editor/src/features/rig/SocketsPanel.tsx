@@ -5,7 +5,7 @@ import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { useRig } from './RigContext'
 import { getAnimationTarget } from '../animation/skeleton'
-import { Button, Hint, SectionTitle, Select, TextInput, VectorInput, cn, labelClass } from '../../components/ui'
+import { Button, Hint, SectionTitle, Select, TextInput, VectorInput, cn, labelClass } from '@cleo/app-kit/ui'
 import { cryptoRandomId } from '../../utils/ids'
 import type { RigSocket } from '../../utils/rigAssets'
 

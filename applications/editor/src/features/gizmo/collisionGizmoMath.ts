@@ -2,7 +2,7 @@ import { quat, vec3 } from 'gl-matrix';
 import type { ReadonlyQuat, ReadonlyVec3 } from 'gl-matrix';
 import { eulerFromQuatDeg } from 'cleo';
 import type { ShapeDescription } from '../engineContextTypes';
-import { snapValue } from '../../utils/gizmoMath';
+import { snapValue } from '@cleo/app-kit/gizmo/gizmoMath';
 
 /**
  * Pure geometry for the in-viewport collision-shape handles — no React, no scene graph.

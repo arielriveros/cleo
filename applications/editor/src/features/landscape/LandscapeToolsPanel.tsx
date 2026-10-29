@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import type { SculptTool, FalloffCurve, BrushShape } from 'cleo'
-import { Button, FileButton, Hint, NumberInput, SegmentedControl, Select, Slider, Toggle, cn, labelClass } from '../../components/ui'
-import Collapsable from '../../components/Collapsable'
+import { Button, FileButton, Hint, NumberInput, SegmentedControl, Select, Slider, Toggle, cn, labelClass } from '@cleo/app-kit/ui'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import {
   useLandscapeBrush, setBrush, activeStrength, setActiveStrength, strengthSpec, activeToolKey,
   type LandscapeMode, type PaintTool, type FlattenMode,
@@ -11,7 +11,7 @@ import { useStamp, setStamp, loadStampFile } from './stampStore'
 import { Logger } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { useActiveLandscape } from './useActiveLandscape'
-import { confirmDialog } from '../dialogs/dialogStore'
+import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
 
 // The landscape tools as a panel: the mode, the tool, the brush and whatever the tool itself needs.
 // Everything writes the brush store, which the viewport brush reads on every dab.

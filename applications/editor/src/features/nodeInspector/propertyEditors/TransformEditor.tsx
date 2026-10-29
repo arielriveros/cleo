@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Node, Vec } from 'cleo';
-import Collapsable from '../../../components/Collapsable';
-import { PropertyTable, PropertyRow, VectorInput, Button } from '../../../components/ui';
+import Collapsable from '@cleo/app-kit/ui/Collapsable';
+import { PropertyTable, PropertyRow, VectorInput, Button } from '@cleo/app-kit/ui';
 import { TransformIcon } from '../sectionIcons';
 import { useLiveTick } from '../useSelectedNode';
 

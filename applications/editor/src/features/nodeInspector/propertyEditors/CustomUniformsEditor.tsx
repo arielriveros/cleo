@@ -3,8 +3,8 @@ import { CustomMaterial, TextureManager } from 'cleo'
 import type { CustomUniform, CustomUniformType } from 'cleo'
 import { useEventBus } from '../../EventBusContext'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
-import Collapsable from '../../../components/Collapsable'
-import { NumberInput, TextInput, Toggle, Select, VectorInput, ColorInput, TypeSelect, Button, Hint, cn, labelClass } from '../../../components/ui'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import { NumberInput, TextInput, Toggle, Select, VectorInput, ColorInput, TypeSelect, Button, Hint, cn, labelClass } from '@cleo/app-kit/ui'
 import { UniformsIcon } from '../sectionIcons'
 
 const TYPES: CustomUniformType[] = ['float', 'vec2', 'vec3', 'vec4', 'int', 'bool', 'sampler2D', 'samplerCube']

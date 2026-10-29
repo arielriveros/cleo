@@ -1,4 +1,4 @@
-import EventEmitter from '../../utils/eventEmitter';
+import EventEmitter from '@cleo/app-kit/utils/eventEmitter';
 import { Logger, Scene, ModelNode, Model, Geometry, Material, ParticleSystemNode, CleoEngine, markEditorOwned } from 'cleo';
 import { cryptoRandomId } from '../../utils/ids';
 import {

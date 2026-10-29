@@ -1,7 +1,7 @@
 import { Logger, Node, ModelNode, Model, AnimatedModel, Loader } from 'cleo'
 import { parseModelFiles, parseGltfFiles, parseModelAsGltfFiles, ImportCancelled } from '../workers/importClient'
-import { yieldToPaint as nextPaint } from '../features/loading/loadingStore'
-import { clamp } from './math';
+import { yieldToPaint as nextPaint } from '@cleo/app-kit/feedback/loadingStore'
+import { clamp } from '@cleo/app-kit/utils/math';
 import { clipNameFromFile } from './clipNaming';
 
 /** Reports parse progress (0..1) and the current stage. See importClient for why this exists. */

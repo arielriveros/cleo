@@ -8,8 +8,8 @@ import { useSelection } from '../SelectionContext';
 import { useDebugVisibility } from '../DebugVisibilityContext';
 import type { ShapeDescription } from '../engineContextTypes';
 import { isWithinTemplateInstance } from '../../utils/templates';
-import { closestPointOnAxisToRay } from '../../utils/gizmoMath';
-import { snapSteps, type TransformPatch, type GizmoOverlayModel } from './gizmoDrag';
+import { closestPointOnAxisToRay } from '@cleo/app-kit/gizmo/gizmoMath';
+import { snapSteps, type TransformPatch, type GizmoOverlayModel } from '@cleo/app-kit/gizmo/gizmoDrag';
 import TransformGizmo from './TransformGizmo';
 import GizmoDragOverlay, { type GizmoOverlayHandle } from './GizmoDragOverlay';
 import {

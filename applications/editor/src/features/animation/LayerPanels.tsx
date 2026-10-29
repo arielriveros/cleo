@@ -1,6 +1,6 @@
 import { useStateMachine } from './StateMachineContext'
-import Collapsable from '../../components/Collapsable'
-import { Button, cn, SegmentedControl, Select, Slider, TextInput } from '../../components/ui'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import { Button, cn, SegmentedControl, Select, Slider, TextInput } from '@cleo/app-kit/ui'
 import type { AnimationBlendMode } from 'cleo'
 import type { ReactNode } from 'react'
 import { useAssetDrop } from '../../utils/useAssetDrop'

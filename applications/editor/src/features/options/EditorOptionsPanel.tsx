@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Button, Field, Hint, NumberInput, SegmentedControl, Section, Slider, TextInput, cn } from '../../components/ui'
+import { Button, Field, Hint, NumberInput, SegmentedControl, Section, Slider, TextInput, cn } from '@cleo/app-kit/ui'
 import { isDesktop } from '../publish/publishClient'
 import { useScriptWorkspace } from '../scriptWorkspace/ScriptWorkspaceContext'
-import { codeThemeStore, useCodeTheme, type CodeThemeName } from '../nodeInspector/scriptEditor/codeThemeStore'
+import { codeThemeStore, useCodeTheme, type CodeThemeName } from '@cleo/app-kit/code/codeThemeStore'
 import { DEFAULT_EDITOR_PREFS, editorPrefsStore, useEditorPrefs, type ScriptOpener } from './editorPrefs'
-import { OptionsPageBody, OptionsShell, OPTION_LABEL, useOptionsPage } from './OptionsShell'
+import { OptionsPageBody, OptionsShell, OPTION_LABEL, useOptionsPage } from '@cleo/app-kit/ui/OptionsShell'
 
 // Options ▸ Editor: how the editor behaves for YOU, on this machine, in every project. Nothing here
 // travels with a project or reaches a published game.

@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { TilemapNode } from 'cleo'
 import type { GridKind, HexOffset, HexOrientation } from 'cleo'
-import Collapsable from '../../../components/Collapsable'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { TilemapIcon } from '../../sceneInspector/nodeIcons'
-import { DocScope, Field, NumberInput, Select, Toggle } from '../../../components/ui'
+import { DocScope, Field, NumberInput, Select, Toggle } from '@cleo/app-kit/ui'
 import { useCleoEngine } from '../../EngineContext'
 
 // Node inspector for a TilemapNode: the grid layout every cell coordinate is interpreted through, plus the

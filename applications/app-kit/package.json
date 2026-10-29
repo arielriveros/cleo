@@ -5,7 +5,8 @@
   "description": "The UI shell, widgets, docs tooltips, viewport host and renderer panels shared by every Cleo application.",
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "author": "Ariel Riveros",
   "license": "ISC",
@@ -27,6 +28,8 @@
     "gl-matrix": "^3.4.4",
     "typescript": "^5.3.2",
     "vite": "^7.3.6",
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "@vitest/coverage-istanbul": "^3.2.7",
+    "@webgpu/types": "^0.1.72"
   }
 }

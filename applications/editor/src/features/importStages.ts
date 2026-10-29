@@ -1,4 +1,4 @@
-import { StepStatus } from './progress/progressStore';
+import { StepStatus } from '@cleo/app-kit/feedback/progressStore';
 
 // ---- Import progress -------------------------------------------------------------------------------
 // Every step importModelFiles walks a bundle through, in order. Maps onto the shared progress store's

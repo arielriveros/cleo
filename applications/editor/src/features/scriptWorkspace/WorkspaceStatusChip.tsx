@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { Button } from '../../components/ui/Button'
-import { cn } from '../../components/ui/cn'
-import { Modal, ModalFooter, ModalHeader } from '../../components/ui/Modal'
+import { Button } from '@cleo/app-kit/ui/Button'
+import { cn } from '@cleo/app-kit/ui/cn'
+import { Modal, ModalFooter, ModalHeader } from '@cleo/app-kit/ui/Modal'
 import { useScriptWorkspace } from './ScriptWorkspaceContext'
 
 // The external script workspace in the menu bar — ONLY when it needs attention (a paused sync, an error,

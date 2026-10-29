@@ -3,7 +3,7 @@ import { useDocument } from '../DocumentContext';
 import { useAssetLibrary } from '../AssetLibraryContext';
 import { useEditorSessions } from '../EditorSessionsContext';
 import { usePlayback } from '../PlaybackContext';
-import { Button, DocHover, MenuItem, Popover, cn, useDocEntry } from '../../components/ui';
+import { Button, DocHover, MenuItem, Popover, cn, useDocEntry } from '@cleo/app-kit/ui';
 import {
   PART_LABEL, PART_OF_KIND, groupTabStrip, isWorkspaceKind, type WorkspacePart,
 } from '../../utils/animationWorkspace';

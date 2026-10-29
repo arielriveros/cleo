@@ -7,7 +7,7 @@ import type { GraphLinkModel, GraphNodeModel } from '../../components/MachineGra
 import { behaviorLinkKey, behaviorLinks, hasWildcardTransitions } from '../../utils/aiGraphEdits'
 import { useAiEditor } from './AiEditorContext'
 import AiGraphToolbar, { AiEmptyState } from './AiGraphToolbar'
-import { Button } from '../../components/ui'
+import { Button } from '@cleo/app-kit/ui'
 
 /**
  * The AI behaviour machine on the same canvas the animation state machine uses.

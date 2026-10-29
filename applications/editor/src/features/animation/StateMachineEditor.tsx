@@ -10,10 +10,10 @@ import { useStateMachine } from './StateMachineContext'
 import ConditionTree from './ConditionTree'
 import { AssetDropRow, LayerSection, SlotsSection } from './LayerPanels'
 import AnimationAssetPicker from './AnimationAssetPicker'
-import Collapsable from '../../components/Collapsable'
-import { Button, cn, controlClass, FileButton, hintClass, NumberInput, OptionalNumberInput, SectionTitle, SegmentedControl, Select, TextInput, Toggle } from '../../components/ui'
-import { clamp } from '../../utils/math';
-import { promptDialog } from '../dialogs/dialogStore'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import { Button, cn, controlClass, FileButton, hintClass, NumberInput, OptionalNumberInput, SectionTitle, SegmentedControl, Select, TextInput, Toggle } from '@cleo/app-kit/ui'
+import { clamp } from '@cleo/app-kit/utils/math';
+import { promptDialog } from '@cleo/app-kit/feedback/dialogStore'
 
 // The Animation State Machine inspector, as three DOCK PANELS (Clips / Variables / State Machine) sharing
 // one working copy from StateMachineContext, which wraps the whole dock. Adding, moving and connecting

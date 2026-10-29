@@ -11,7 +11,7 @@ import type { AssetKind } from '../../utils/vfs'
 import { buildReferenceView } from './assetGraphLayout'
 import type { AssetNodeView } from './assetGraphLayout'
 import AssetGraphCanvas from './AssetGraphCanvas'
-import { Modal, ModalHeader, ModalFooter, Button, TextInput, SegmentedControl, SectionTitle, cn, hintClass } from '../../components/ui'
+import { Modal, ModalHeader, ModalFooter, Button, TextInput, SegmentedControl, SectionTitle, cn, hintClass } from '@cleo/app-kit/ui'
 
 // The reference viewer. One asset in the middle, what uses it on the left, what it uses on the right.
 //

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAiEditor } from './AiEditorContext'
-import { Button, cn, controlClass } from '../../components/ui'
+import { Button, cn, controlClass } from '@cleo/app-kit/ui'
 
 /**
  * The toolbar head every AI canvas shares: the brain's name, editable in place.

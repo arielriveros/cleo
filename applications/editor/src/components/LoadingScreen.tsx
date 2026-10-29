@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 // Only the store (no engine): the pre-engine boot gate renders this before EngineContext exists.
-import { loadFraction, stepFraction, useLoad, type LoadState, type LoadStepState } from '../features/loading/loadingStore'
+import { loadFraction, stepFraction, useLoad, type LoadState, type LoadStepState } from '@cleo/app-kit/feedback/loadingStore'
 // A value import is safe here: version.ts compiles to two string constants and pulls in nothing.
 import { VERSION_LABEL } from '../version'
 

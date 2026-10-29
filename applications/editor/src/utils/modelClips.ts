@@ -10,7 +10,7 @@
 // `cleo` → ../dist link, can exercise it.
 // ---------------------------------------------------------------------------------------------------
 
-import { deepClone } from './deepClone'
+import { deepClone } from '@cleo/app-kit/utils/deepClone'
 
 /** The shape these helpers need from a model asset. Structural, so ModelAsset satisfies it. */
 export type ClipBearingAsset = { nodeJson: any }

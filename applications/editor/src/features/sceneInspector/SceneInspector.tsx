@@ -13,10 +13,10 @@ import { TEMPLATE_ID_VAR, isWithinTemplateInstance } from '../../utils/templates
 import { setNameOverride } from '../../utils/templateOverrides';
 import { getScriptIdOf } from '../../utils/scripts';
 import { validateNodeName } from '../../utils/nodeNames';
-import { useElementSize } from '../../utils/useElementSize';
+import { useElementSize } from '@cleo/app-kit/utils/useElementSize';
 import { useScopedDndManager } from '../../utils/treeDnd';
 import { hoveredScriptStore, useHoveredScript } from './hoveredScriptStore';
-import { TextInput } from '../../components/ui';
+import { TextInput } from '@cleo/app-kit/ui';
 import { UI_ICONS } from './uiIcons';
 
 /** Glyph per node type, as a table rather than a chain of per-type conditionals in the row. */

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { SegmentedControl } from '../components/ui'
+import { SegmentedControl } from '@cleo/app-kit/ui'
 import { useCleoEngine } from './EngineContext'
 import { PREVIEW_SHAPES, loadPreviewShape, type PreviewKind, type PreviewShape } from './demoScene/previewShapes'
 

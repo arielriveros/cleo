@@ -7,8 +7,8 @@ import { seedCustomMaterial } from '../../../utils/customMaterials'
 import { ensureWgslTranslator } from '../../../utils/wgslTranslator'
 import GlslCodeEditor from '../scriptEditor/GlslCodeEditor'
 import CustomUniformsEditor from './CustomUniformsEditor'
-import { Select, Field, Hint, Button } from '../../../components/ui'
-import { confirmDialog } from '../../dialogs/dialogStore'
+import { Select, Field, Hint, Button } from '@cleo/app-kit/ui'
+import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
 
 const BASES: { value: string, label: string }[] = [
   { value: 'scratch', label: 'From scratch' },

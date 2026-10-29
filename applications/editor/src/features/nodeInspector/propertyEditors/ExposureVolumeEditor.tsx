@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { AUTO_EXPOSURE_PRESETS, ExposureVolumeNode, MIN_EXPOSURE_VOLUME_SIZE, type ExposureOverrides, type Preset } from 'cleo'
-import Collapsable from '../../../components/Collapsable'
-import { DocScope, Hint, NumberInput, PresetMenu, PropertyRow, PropertyTable, SectionTitle, Toggle, VectorInput } from '../../../components/ui'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import { DocScope, Hint, NumberInput, PresetMenu, PropertyRow, PropertyTable, SectionTitle, Toggle, VectorInput } from '@cleo/app-kit/ui'
 import { useCleoEngine } from '../../EngineContext'
 import { ExposureVolumeIcon } from '../sectionIcons'
 import { BOX_VOLUME_EDITED } from '../../gizmo/BoxVolumeGizmo'
-import ExposureSettingsFields, { type ExposureFieldKey, type ExposureFieldValues } from '../../renderer/ExposureSettingsFields'
+import ExposureSettingsFields, { type ExposureFieldKey, type ExposureFieldValues } from '@cleo/app-kit/renderer/ExposureSettingsFields'
 
 // The Exposure Volume inspector. The volume is an oriented box (the node's full transform) inside which
 // its overrides replace the scene's exposure settings; every field left unticked inherits the scene's.

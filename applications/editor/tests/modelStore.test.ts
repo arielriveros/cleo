@@ -13,7 +13,7 @@ const kv = new Map<string, any>();
 const writes: string[] = [];
 const deletes: string[] = [];
 
-vi.mock('../src/utils/idb', () => ({
+vi.mock('@cleo/app-kit/utils/idb', () => ({
   idbGet: async (key: string) => (kv.has(key) ? kv.get(key) : null),
   idbSet: async (key: string, value: any) => { writes.push(key); kv.set(key, value) },
   idbDelete: async (key: string) => { deletes.push(key); kv.delete(key) },

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Modal, ModalHeader, ModalFooter, Button } from '../../components/ui'
+import { Modal, ModalHeader, ModalFooter, Button } from '@cleo/app-kit/ui'
 import type { BundleData } from '../../utils/bundle'
 
 // Shown after a .zip project/asset-pack is parsed, before anything is written. Three destinations, in

@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { Button, SegmentedControl, TextInput } from '../../components/ui'
+import { Button, SegmentedControl, TextInput } from '@cleo/app-kit/ui'
 import { useTexture } from './TextureContext'
 import TextureCanvas from './TextureCanvas'
 import type { Channel } from './mipChain'

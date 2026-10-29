@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useEditorSessions } from '../EditorSessionsContext'
-import { DocScope, Modal, ModalHeader, ModalFooter, Button } from '../../components/ui'
+import { DocScope, Modal, ModalHeader, ModalFooter, Button } from '@cleo/app-kit/ui'
 
 /**
  * Asks which rig an imported animation file is for; an animation file names no character of its own.

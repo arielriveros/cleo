@@ -1,4 +1,4 @@
-import { Button } from '../components/ui'
+import { Button } from '@cleo/app-kit/ui'
 import { useHistory } from './HistoryContext'
 import { usePlayback } from './PlaybackContext'
 

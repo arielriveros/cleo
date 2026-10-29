@@ -19,7 +19,10 @@
         "skipLibCheck": true ,
         "forceConsistentCasingInFileNames": true ,
         "allowSyntheticDefaultImports": true,
-        "resolveJsonModule": true
+        "resolveJsonModule": true,
+        // The shared app-kit, by source -- the same mapping ../app-kit/vite.preset.ts gives Vite.
+        "baseUrl": ".",
+        "paths": { "@cleo/app-kit/*": ["../app-kit/src/*"] }
     },
     "include": ["src/**/*" , "@types/index.d.ts"]
 }

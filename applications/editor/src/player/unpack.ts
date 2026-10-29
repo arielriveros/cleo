@@ -4,7 +4,7 @@
 
 import { PACK_MAGIC, PACK_HEADER_BYTES, ATTRS } from '../features/publish/pack';
 import type { PackManifest, PackedTexture, PackedSound } from '../features/publish/pack';
-import { ChunkReader, align4 } from '../utils/chunkBlob';
+import { ChunkReader, align4 } from '@cleo/app-kit/utils/chunkBlob';
 import { serializedTerrainFoliageRules } from '../utils/terrainJson';
 
 /** The shape Model.parse reads out of `model.geometry`. */

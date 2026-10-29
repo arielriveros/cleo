@@ -1,5 +1,5 @@
 import { ControllerNode, FLOCKING_PRESETS, applyPreset, type FlockingPreset } from 'cleo'
-import { PresetMenu, SectionTitle, Slider } from '../../../components/ui'
+import { PresetMenu, SectionTitle, Slider } from '@cleo/app-kit/ui'
 
 /**
  * The three urges that turn a crowd into a shoal.

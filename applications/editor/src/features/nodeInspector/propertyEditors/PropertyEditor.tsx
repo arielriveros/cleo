@@ -34,7 +34,7 @@ import SceneSettings from './SceneSettings'
 import UIEditor from './UIEditor'
 import { isRootNode } from '../useSelectedNode'
 import { useCleoEngine } from '../../EngineContext'
-import { DocScope } from '../../../components/ui'
+import { DocScope } from '@cleo/app-kit/ui'
 
 export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) {
   const { activeTab, editorMode, templateRootId } = useCleoEngine();

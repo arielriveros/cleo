@@ -1,9 +1,9 @@
 import React, { useRef, useState } from 'react'
 import { SpriteNode } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
-import Collapsable from '../../../components/Collapsable'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { TilesetAsset, toRuntimeTileset } from '../../../utils/tilesets'
-import { Select, Button, Hint, cn, valueClass } from '../../../components/ui'
+import { Select, Button, Hint, cn, valueClass } from '@cleo/app-kit/ui'
 import { TilesetIcon } from '../sectionIcons'
 import { useAssetDrop } from '../../../utils/useAssetDrop'
 

@@ -8,7 +8,7 @@
 import playerContract from './playerContract.json';
 // The container primitives (alignment, chunk refs, byte hashing) are shared with the project export's
 // assets.bin — see utils/chunkBlob.ts.
-import { ChunkWriter, align4, asBytes, hashBytes, FNV_OFFSET, type ChunkRef } from '../../utils/chunkBlob';
+import { ChunkWriter, align4, asBytes, hashBytes, FNV_OFFSET, type ChunkRef } from '@cleo/app-kit/utils/chunkBlob';
 import { serializedTerrainFoliageRules } from '../../utils/terrainJson';
 
 /** File layout, version 1:

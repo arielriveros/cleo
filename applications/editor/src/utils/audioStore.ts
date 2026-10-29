@@ -16,7 +16,7 @@
 // a SoundNode resolving its sample stays synchronous.
 
 import { AudioManager, parseSoundSettings } from 'cleo'
-import { openDB, AUDIO_STORE, idbGet } from './idb'
+import { openDB, AUDIO_STORE, idbGet } from '@cleo/app-kit/utils/idb'
 import { projectPrefix } from './projectScope'
 import { libKey } from './storageKeys'
 import type { SoundSampleAsset } from './soundSamples'

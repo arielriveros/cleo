@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import InputMapPanel from '../input/InputMapPanel'
-import { Button, Field, NumberInput, Section, Select, TextInput, Toggle, cn } from '../../components/ui'
+import { Button, Field, NumberInput, Section, Select, TextInput, Toggle, cn } from '@cleo/app-kit/ui'
 import { loadProjects, renameProject } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'
-import { OptionsPageBody, OptionsShell, OPTION_LABEL, useMarkOptionPageShown, useOptionsPage } from './OptionsShell'
+import { OptionsPageBody, OptionsShell, OPTION_LABEL, useMarkOptionPageShown, useOptionsPage } from '@cleo/app-kit/ui/OptionsShell'
 import { DEFAULT_PROJECT_SETTINGS, type PublishWindowSettings } from './projectSettings'
 
 // Options ▸ Project: what belongs to THIS game and travels with it — its name, the scene it starts in,

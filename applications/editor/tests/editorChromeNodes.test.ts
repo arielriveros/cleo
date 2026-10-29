@@ -5,7 +5,7 @@ import { CleoEngine, Node, Scene, SkyAtmosphereNode, SkyboxNode, markEditorOwned
 import type { SceneChange } from 'cleo'
 import { isEditorOwnedChange } from '../src/utils/editorOwned'
 import { removeExistingSky } from '../src/features/sceneInspector/addCatalog'
-import EventEmitter from '../src/utils/eventEmitter'
+import EventEmitter from '@cleo/app-kit/utils/eventEmitter'
 
 /**
  * The editor chrome three viewport tools park in the scene — the clip tab's bone-gizmo proxy and the two

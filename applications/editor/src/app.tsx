@@ -6,7 +6,7 @@ import { AssetGraphProvider } from './features/assets/AssetGraphContext'
 import { ScriptWorkspaceProvider } from './features/scriptWorkspace/ScriptWorkspaceContext'
 import LoadingScreen from './components/LoadingScreen'
 import { BOOT_TITLE, beginBootLoad } from './features/loading/bootLoad'
-import { currentLoad } from './features/loading/loadingStore'
+import { currentLoad } from '@cleo/app-kit/feedback/loadingStore'
 import ProjectLauncher from './features/projects/ProjectLauncher'
 import { ProjectRecord, initProjects } from './utils/projects'
 

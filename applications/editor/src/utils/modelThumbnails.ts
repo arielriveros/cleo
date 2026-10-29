@@ -10,7 +10,7 @@ import { parseByType, regenerateIds } from './nodeSubtree';
 import { TerrainMaterialAsset, parseTerrainMaterialAsset } from './terrainMaterials';
 import { setFoliageFlattenSuppressor } from './foliageRules';
 import { awaitTexturesReady } from './textureReady';
-import { deepClone } from './deepClone';
+import { deepClone } from '@cleo/app-kit/utils/deepClone';
 
 const THUMB_SIZE = 256;
 

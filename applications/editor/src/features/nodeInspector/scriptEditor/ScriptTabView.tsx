@@ -4,7 +4,7 @@ import { BASE_TYPE_LABEL, scriptKindOfAsset } from '../../../utils/scripts'
 import { buildScriptGraphCtx, importSpecifierOf, scriptRoleLabel } from '../../../utils/scriptGraph'
 import { useScriptWorkspace } from '../../scriptWorkspace/ScriptWorkspaceContext'
 import { NOT_DESKTOP_REASON } from '../../scriptWorkspace/desktopScripts'
-import { Button } from '../../../components/ui/Button'
+import { Button } from '@cleo/app-kit/ui/Button'
 
 // Monaco (and monaco-editor itself) is heavy, so it downloads only when a Script tab is actually opened.
 const MonacoScriptEditor = React.lazy(() => import('./MonacoScriptEditor'))

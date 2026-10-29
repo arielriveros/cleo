@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url';
 // which does not need a type checker, and a cheap check that runs on every commit is the point.
 
 const SRC = fileURLToPath(new URL('../src', import.meta.url));
+// The shared chrome the editor is built from (dialogs, toasts, panels) is held to the same rule.
+const APP_KIT_SRC = fileURLToPath(new URL('../../app-kit/src', import.meta.url));
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const item of readdirSync(dir, { withFileTypes: true })) {
@@ -47,7 +49,7 @@ describe('no native browser dialogs in the editor', () => {
   it('has no window.alert / confirm / prompt call anywhere in src/', () => {
     const offenders: string[] = [];
 
-    for (const file of sourceFiles(SRC)) {
+    for (const file of [...sourceFiles(SRC), ...sourceFiles(APP_KIT_SRC)]) {
       const lines = readFileSync(file, 'utf8').split('\n');
       lines.forEach((line, i) => {
         // Comments name these three constantly — every replacement explains what it replaced.
@@ -61,8 +63,8 @@ describe('no native browser dialogs in the editor', () => {
 
     expect(
       offenders,
-      'Use confirmDialog/alertDialog/promptDialog from features/dialogs/dialogStore, or toast from ' +
-      'features/toasts/toastStore. Native dialogs do not belong in the desktop build.',
+      'Use confirmDialog/alertDialog/promptDialog from @cleo/app-kit/feedback/dialogStore, or toast from ' +
+      '@cleo/app-kit/feedback/toastStore. Native dialogs do not belong in the desktop build.',
     ).toEqual([]);
   });
 

@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AnimatedSpriteNode, SpriteFrameSource } from 'cleo';
-import Collapsable from '../../../components/Collapsable';
+import Collapsable from '@cleo/app-kit/ui/Collapsable';
 import TilesetSlot, { tilesetAssetOf } from './TilesetSlot';
 import SpriteAppearance from './SpriteAppearance';
 import TileGrid from '../../tileset/TileGrid';
 import { useCleoEngine } from '../../EngineContext';
-import { PropertyTable, PropertyRow, Field, Section, NumberInput, TextInput, Toggle, Select, Hint, Button, DocScope } from '../../../components/ui';
+import { PropertyTable, PropertyRow, Field, Section, NumberInput, TextInput, Toggle, Select, Hint, Button, DocScope } from '@cleo/app-kit/ui';
 import { SpriteIcon } from '../sectionIcons';
-import { token } from '../../../utils/cssTokens';
+import { token } from '@cleo/app-kit/utils/cssTokens';
 
 // An animated sprite is a tileset plus an ordered list of tiles. Dragging a rectangle over the atlas
 // produces that list directly, since TileGrid emits its selection row-major. The alternative source is the

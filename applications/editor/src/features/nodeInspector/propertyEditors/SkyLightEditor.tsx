@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { SkyLightNode } from 'cleo'
-import Collapsable from '../../../components/Collapsable'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { useEventBus } from '../../EventBusContext'
 import { useCleoEngine } from '../../EngineContext'
-import { PropertyTable, PropertyRow, Slider, Toggle } from '../../../components/ui'
+import { PropertyTable, PropertyRow, Slider, Toggle } from '@cleo/app-kit/ui'
 import { SkyIcon } from '../sectionIcons'
 
 type Vec3 = [number, number, number]

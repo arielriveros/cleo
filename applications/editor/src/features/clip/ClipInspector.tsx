@@ -3,10 +3,10 @@ import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { posesForRig } from '../../utils/poseAssets'
 import { useClip } from './ClipContext'
-import Collapsable from '../../components/Collapsable'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import BonePose from './BonePose'
-import { promptDialog } from '../dialogs/dialogStore'
-import { Button, DocScope, NumberInput, SegmentedControl, Select, Toggle } from '../../components/ui'
+import { promptDialog } from '@cleo/app-kit/feedback/dialogStore'
+import { Button, DocScope, NumberInput, SegmentedControl, Select, Toggle } from '@cleo/app-kit/ui'
 import type { StoredClip, StoredClipEdit } from '../../utils/animationAssets'
 
 // The clip editor's inspector: which clip is on screen, what its root motion does, and its edit stack.

@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState } from 'react'
-import { Button, TextInput } from '../../components/ui'
+import { Button, TextInput } from '@cleo/app-kit/ui'
 import { useTileset } from './TilesetContext'
 import TileGrid from './TileGrid'
-import { token } from '../../utils/cssTokens'
+import { token } from '@cleo/app-kit/utils/cssTokens'
 import { appendFrames, frameBadges, removeLastFrame } from '../../utils/tilesets'
 
 // The tileset tab's main area: the atlas with its slicing grid. A tileset has no 3D preview, so nothing

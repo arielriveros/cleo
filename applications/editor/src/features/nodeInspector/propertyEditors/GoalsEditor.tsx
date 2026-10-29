@@ -6,8 +6,8 @@ import type { ConditionParam } from '../../../components/ConditionTreeView'
 import {
   Button, ButtonWithConfirm, DocScope, NumberInput, SectionTitle, Select, Slider, TextInput, cn, hintClass,
   labelClass,
-} from '../../../components/ui'
-import { hintAffordance } from '../../../components/ui/Field'
+} from '@cleo/app-kit/ui'
+import { hintAffordance } from '@cleo/app-kit/ui/Field'
 import ParamSourcePicker from './ParamSourcePicker'
 import { renameGoal } from '../../../utils/aiGraphEdits'
 

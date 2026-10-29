@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { humanoidSlotOf, mirrorBoneName } from 'cleo'
 import type { BoneMapping, Skin } from 'cleo'
-import { DocScope, Modal, ModalHeader, Button, TextInput, cn } from '../../components/ui'
-import { token } from '../../utils/cssTokens'
+import { DocScope, Modal, ModalHeader, Button, TextInput, cn } from '@cleo/app-kit/ui'
+import { token } from '@cleo/app-kit/utils/cssTokens'
 import {
   skeletonLayout, retargetView, SOURCE_LABEL, TARGET_LABEL,
   type SkeletonLayout, type SourceStatus, type TargetStatus,

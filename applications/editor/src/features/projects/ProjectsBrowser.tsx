@@ -2,7 +2,7 @@ import { useState } from 'react'
 import ProjectsExplorer from './ProjectsExplorer'
 import ExamplesGallery, { useExampleIndex } from './ExamplesGallery'
 import { ProjectRecord } from '../../utils/projects'
-import { DocScope, useDocEntry, useDocTooltip } from '../../components/ui'
+import { DocScope, useDocEntry, useDocTooltip } from '@cleo/app-kit/ui'
 
 // Hosts the two ways to arrive at a project: existing ones and the examples this build ships with.
 // Rendered by both the boot launcher and the in-editor Projects modal.

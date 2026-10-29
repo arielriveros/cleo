@@ -1,5 +1,5 @@
 import { useProject } from '../ProjectContext'
-import { Modal, ModalHeader, ModalFooter, Button } from '../../components/ui'
+import { Modal, ModalHeader, ModalFooter, Button } from '@cleo/app-kit/ui'
 
 // Shown when a scene is switched between 2D and 3D while it still holds the other dimension's authoring.
 // `setSceneDimension` parks a promise (confirmDimensionSwitch) that this resolves. Nothing is deleted;

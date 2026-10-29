@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { useStateMachine, OP_LABEL, effectiveType } from './StateMachineContext'
-import { Button, SegmentedControl } from '../../components/ui'
+import { Button, SegmentedControl } from '@cleo/app-kit/ui'
 import MachineGraph from '../../components/MachineGraph'
 import { LayerTabs } from './LayerPanels'
 import type { GraphLinkModel, GraphNodeModel } from '../../components/MachineGraph'

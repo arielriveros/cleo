@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { useAnimationField } from './AnimationFieldContext'
-import { clamp } from '../../utils/math';
-import { Button } from '../../components/ui'
+import { clamp } from '@cleo/app-kit/utils/math';
+import { Button } from '@cleo/app-kit/ui'
 
 // The blend-space plot: the Animation Field mode's work surface, docked as the "Blend Space" tab in the
 // bottom strip beside Logger and Assets (see panels.tsx / DockLayout.tsx) so the viewport stays clear for

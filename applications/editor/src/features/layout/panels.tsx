@@ -40,16 +40,16 @@ import PhysicsEditor from '../nodeInspector/physicsEditors/PhysicsEditor';
 import TemplateInstanceNotice from '../nodeInspector/TemplateInstanceNotice';
 import TemplateVariantNotice from '../nodeInspector/TemplateVariantNotice';
 import { useSelectedNode } from '../nodeInspector/useSelectedNode';
-import ConsolePanel from '../logger/ConsolePanel';
+import ConsolePanel from '@cleo/app-kit/feedback/ConsolePanel';
 import EngineOptionsPanel from '../options/EngineOptionsPanel';
 import EditorOptionsPanel from '../options/EditorOptionsPanel';
 import ProjectOptionsPanel, { INPUT_PAGE_ID } from '../options/ProjectOptionsPanel';
-import { useOptionPageShown } from '../options/OptionsShell';
+import { useOptionPageShown } from '@cleo/app-kit/ui/OptionsShell';
 import AssetsExplorer from '../assets/AssetsExplorer';
 import { useCleoEngine, MODE_RENDERS_VIEWPORT } from '../EngineContext';
-import { TextInput, cn, labelClass } from '../../components/ui';
-import { DocHover } from '../../components/ui/DocTooltip';
-import { DocScope, useDocEntry } from '../docs/DocScope';
+import { TextInput, cn, labelClass } from '@cleo/app-kit/ui';
+import { DocHover } from '@cleo/app-kit/ui/DocTooltip';
+import { DocScope, useDocEntry } from '@cleo/app-kit/docs/DocScope';
 import { PANEL_TAB_DOC_PAGE, PANEL_TAB_DOC_SECTION, panelDocPage } from './panelTitles';
 
 // The wrapper must stay `relative` so UIOverlay/StateGraph/LoadingScreen (absolute inset-0) and the

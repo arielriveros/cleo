@@ -1,6 +1,6 @@
 import { Material, TerrainMaterial, Terrain, TextureManager, setTerrainSurfaceFrom, allTerrainFoliageRules } from 'cleo'
 import { cryptoRandomId } from './ids'
-import { deepClone } from './deepClone'
+import { deepClone } from '@cleo/app-kit/utils/deepClone'
 import { resolveFoliageRuleGeometry } from './foliageRules'
 import { layerStackOf, layersChanged, stackMaterials } from './terrainAccess'
 

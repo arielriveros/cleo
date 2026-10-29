@@ -11,7 +11,7 @@
 // The running editor's own list is `window.cleoDocs.misses()` in dev.
 import { statSync, readdirSync } from 'fs';
 import { join, resolve } from 'path';
-import { breadcrumb } from '../src/features/docs/parseDocs';
+import { breadcrumb } from '../../app-kit/src/docs/parseDocs';
 import { loadDocIndex, resolveSite, scanSource } from '../tests/support/docCoverage';
 
 const args = process.argv.slice(2);

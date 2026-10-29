@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { useAnimationField } from './AnimationFieldContext'
-import { Button, NumberInput, Slider } from '../../components/ui'
+import { Button, NumberInput, Slider } from '@cleo/app-kit/ui'
 
 // The Animation Field editor's transport, docked under the plot inside the "Blend Space" bottom tab:
 // play/scrub plus axis sliders that move the probe. The field tab's scene is paused

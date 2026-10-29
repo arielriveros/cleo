@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   breadcrumb, frameOf, looseKey, normalizeKey, parsePage, parseDocs, plainText, resolveDocKey, resolveTerm, slugify,
-} from '../src/features/docs/parseDocs';
+} from '@cleo/app-kit/docs/parseDocs';
 import { MODE_DOC_PAGE, MODE_PANEL_TITLES, PANEL_TAB_DOC_PAGE, PANEL_TAB_DOC_SECTION, PANEL_TITLES } from '../src/features/layout/panelTitles';
 import { EDITOR_SRC, loadDocIndex, resolveSite, scanSource } from './support/docCoverage';
 

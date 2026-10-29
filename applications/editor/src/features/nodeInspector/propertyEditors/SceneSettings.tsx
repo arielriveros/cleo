@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { SkyboxNode } from 'cleo'
 import { useCleoEngine } from '../../EngineContext'
-import Collapsable from '../../../components/Collapsable'
-import { PropertyTable, PropertyRow, TextInput, Button, ColorInput, NumberInput, SegmentedControl, DocScope } from '../../../components/ui'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import { PropertyTable, PropertyRow, TextInput, Button, ColorInput, NumberInput, SegmentedControl, DocScope } from '@cleo/app-kit/ui'
 import { InfoIcon, SkyIcon } from '../sectionIcons'
-import { clamp } from '../../../utils/math';
+import { clamp } from '@cleo/app-kit/utils/math';
 
 // The inspector for the scene ASSET, shown when the scene tab's root node is selected. Everything here
 // lives on SceneMeta (name, main, dimension) or on the live Scene/Renderer (clear color, environment map),

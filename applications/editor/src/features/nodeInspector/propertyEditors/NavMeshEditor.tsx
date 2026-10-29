@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { NavMeshNode, bakeNavMesh, navBakeSettings } from 'cleo'
-import Collapsable from '../../../components/Collapsable'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { useCleoEngine } from '../../EngineContext'
 import {
   Button, DocScope, NumberInput, PropertyRow, PropertyTable, Slider, Toggle, cn,
-} from '../../../components/ui'
+} from '@cleo/app-kit/ui'
 import { gatherNavSoup } from '../../../utils/navBakeSources'
 import { navPreviewSkippedFor } from '../../../utils/editorHelpers'
 import { NavMeshIcon } from '../../sceneInspector/nodeIcons'

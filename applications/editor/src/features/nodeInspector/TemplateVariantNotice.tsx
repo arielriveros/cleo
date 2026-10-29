@@ -2,7 +2,7 @@ import { useSelectedNode } from './useSelectedNode'
 import { useVariantBase } from './useVariantBase'
 import { useEditorSessions } from '../EditorSessionsContext'
 import { useCleoEngine } from '../EngineContext'
-import { Button, Select } from '../../components/ui'
+import { Button, Select } from '@cleo/app-kit/ui'
 import { hasOwnChanges, lineageOf } from '../../utils/templateVariants'
 
 // Above the inspector in a variant's tab: what the variant is based on, whether the selected node is

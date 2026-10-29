@@ -15,8 +15,8 @@
 //
 // Engine-free and DOM-free: this runs inside projectWorker.ts.
 
-import { ChunkWriter, ChunkReader, type ChunkRef } from './chunkBlob'
-import { base64ToBytes, bytesToBase64, bytesToDataUrl, parseBase64DataUri, deflateBytes, inflateBytes } from './bytes'
+import { ChunkWriter, ChunkReader, type ChunkRef } from '@cleo/app-kit/utils/chunkBlob'
+import { base64ToBytes, bytesToBase64, bytesToDataUrl, parseBase64DataUri, deflateBytes, inflateBytes } from '@cleo/app-kit/utils/bytes'
 import {
   ATTR_STRIDE, GEOMETRY_ATTRS, type BundleAssetIndex, type BundleData, type BundleGeometry,
 } from './bundle'

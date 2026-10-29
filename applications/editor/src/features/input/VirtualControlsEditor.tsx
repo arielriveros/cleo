@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 import { virtualLayoutRect } from 'cleo'
 import type { VirtualControl } from 'cleo'
-import { Button, NumberInput, Select, Slider, TextInput, hintClass, labelClass } from '../../components/ui'
+import { Button, NumberInput, Select, Slider, TextInput, hintClass, labelClass } from '@cleo/app-kit/ui'
 
 /**
  * Placement for the on-screen stick and buttons: drag them around a preview of the viewport.

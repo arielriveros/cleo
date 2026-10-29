@@ -3,10 +3,10 @@ import { Logger } from 'cleo'
 import { useAssetGraph } from './assets/AssetGraphContext'
 import { useDocument } from './DocumentContext'
 import { useCleoEngine } from './EngineContext'
-import { confirmDialog } from './dialogs/dialogStore'
+import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
 import { iconFor } from './assets/assetKinds'
 import { KIND_LABEL } from '../utils/vfs'
-import { Button, cn, hintClass } from '../components/ui'
+import { Button, cn, hintClass } from '@cleo/app-kit/ui'
 
 // "A model you have placed changed underneath you" — the one propagation that has to ask before it runs.
 //

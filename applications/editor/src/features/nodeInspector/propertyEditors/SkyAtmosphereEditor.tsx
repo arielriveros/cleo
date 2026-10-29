@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { SkyAtmosphereNode, SKY_ATMOSPHERE_PRESETS, type SkyAtmospherePreset } from 'cleo'
-import Collapsable from '../../../components/Collapsable'
-import AxisInput from '../../../components/AxisInput'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import AxisInput from '@cleo/app-kit/ui/AxisInput'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { useEventBus } from '../../EventBusContext'
-import { PresetMenu, SectionTitle, Select, Slider, TexturePicker, Toggle, labelClass } from '../../../components/ui'
+import { PresetMenu, SectionTitle, Select, Slider, TexturePicker, Toggle, labelClass } from '@cleo/app-kit/ui'
 import { SkyIcon } from '../sectionIcons'
 
 type Vec3 = [number, number, number]

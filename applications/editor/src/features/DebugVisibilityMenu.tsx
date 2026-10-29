@@ -1,4 +1,4 @@
-import { Popover, SectionTitle, Toggle } from '../components/ui';
+import { Popover, SectionTitle, Toggle } from '@cleo/app-kit/ui';
 import { useDebugVisibility, DEBUG_CATEGORIES } from './DebugVisibilityContext';
 import { useCleoEngine } from './EngineContext';
 import { MODE_SKELETON_OWNER } from './engineContextTypes';

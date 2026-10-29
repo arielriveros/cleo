@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { activeModule, maxLifetime, type Burst } from 'cleo'
-import { Button, Hint, NumberInput, Select, Slider, cn } from '../../components/ui'
+import { Button, Hint, NumberInput, Select, Slider, cn } from '@cleo/app-kit/ui'
 import { useParticleEditor } from './ParticleEditorContext'
 
 // The particle preview's transport: play state, speed, a one-shot burst, and a per-emitter timeline of

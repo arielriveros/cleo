@@ -3,14 +3,13 @@ import {
   DockviewApi,
   DockviewReact,
   DockviewReadyEvent,
-  DockviewTheme,
   SerializedDockview,
 } from 'dockview-react';
 import { dockComponents, PanelTab } from './panels';
 import { PANEL_TITLES, panelTitle } from './panelTitles';
 import { EditorMode, useCleoEngine } from '../EngineContext';
 import { LS_KEYS, lsKey } from '../../utils/lsScope';
-import './dockview.css';
+import { cleoDockTheme as cleoTheme, lockAnchorPanel } from '@cleo/app-kit/layout/DockShell';
 
 // Per-project. Both live keys resolve through lsScope, so deleting a project takes them with it.
 const dockLayoutKey = () => lsKey(LS_KEYS.dockLayout);
@@ -123,17 +122,9 @@ const CHROME_PANELS = [
 ] as const;
 
 
-const cleoTheme: DockviewTheme = { name: 'cleo', className: 'dockview-theme-cleo', colorScheme: 'dark' };
-
 // The viewport is the immovable center anchor: no tab header and no dropping into it; edge drops beside
 // it still work. Returns false when the panel is missing, which marks a restored layout as corrupt.
-function assertViewportLock(api: DockviewApi): boolean {
-  const vp = api.getPanel('viewport');
-  if (!vp) return false;
-  vp.group.locked = true;
-  vp.group.header.hidden = true;
-  return true;
-}
+const assertViewportLock = (api: DockviewApi): boolean => lockAnchorPanel(api, 'viewport');
 
 // Scene/UI tabbed 20vw left, Properties/Scripts/Physics tabbed 25vw right, Logger/Assets in a 30vh strip
 // under the viewport only. Every panel can be dragged out of its group and re-docked.

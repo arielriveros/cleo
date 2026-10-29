@@ -10,8 +10,8 @@ import {
   ProjectRecord, createProject, deleteProject, loadProjects, openProject, renameProject,
 } from '../../utils/projects'
 import { activeProjectId } from '../../utils/projectScope'
-import { confirmDialog } from '../dialogs/dialogStore'
-import { Button, TextInput } from '../../components/ui'
+import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
+import { Button, TextInput } from '@cleo/app-kit/ui'
 
 // The project browser: the same SVAR file manager the Assets tab uses, over the project registry. A flat
 // list — projects do not nest — so every project is one "file" whose id is its display path.

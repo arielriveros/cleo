@@ -5,7 +5,7 @@ import { useCleoEngine } from './EngineContext'
 import { usePlayback } from './PlaybackContext'
 import { useDebugVisibility } from './DebugVisibilityContext'
 import FieldDebugReadout from './animation/FieldDebugReadout'
-import { Select, SectionTitle } from '../components/ui'
+import { Select, SectionTitle } from '@cleo/app-kit/ui'
 
 // The animation blend readout, in the VIEWPORT. The State Machine inspector shows the same numbers, but it
 // runs against the editor's preview scene, which has no physics, so every MEASURED built-in reads 0 there.

@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { IK_DEFAULTS } from 'cleo'
 import type { IkRig, IkFootChain, Skin } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
-import Collapsable from '../../components/Collapsable'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { jointLabel } from './skeleton'
-import { Button, cn, controlClass } from '../../components/ui'
+import { Button, cn, controlClass } from '@cleo/app-kit/ui'
 import { guessFootPlacement } from '../../utils/footPlacementAuto'
 
 // Foot-IK rig authoring, under the skeleton tree. Bones are assigned by hand: select a joint (SELECT_JOINT,

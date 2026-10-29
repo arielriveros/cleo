@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { DirectionalLight, LightNode, PointLight, Spotlight, SpriteNode, applyPreset, lightPresetsFor, type LightPreset } from 'cleo'
 import { vec3ToHex } from '../../../utils/UtilFunctions';
 import { useEventBus } from '../../EventBusContext';
-import Collapsable from '../../../components/Collapsable'
-import { Button, ColorInput, PresetMenu, PropertyTable, PropertyRow, NumberInput, Slider, Section, Toggle, Hint } from '../../../components/ui'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import { Button, ColorInput, PresetMenu, PropertyTable, PropertyRow, NumberInput, Slider, Section, Toggle, Hint } from '@cleo/app-kit/ui'
 import { LightIcon } from '../sectionIcons'
 import { cloudBakeWarning, useCloudBakeStatus } from '../../../utils/cloudBake'
 

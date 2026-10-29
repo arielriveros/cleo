@@ -17,7 +17,7 @@ import type { BoneMaskAsset } from './boneMasks'
 import type { PoseAsset } from './poseAssets'
 import type { AudioSourceAsset } from './audioSources'
 import type { SoundSampleAsset } from './soundSamples'
-import type { ChunkRef } from './chunkBlob'
+import type { ChunkRef } from '@cleo/app-kit/utils/chunkBlob'
 import type { InputMap } from 'cleo'
 
 // The portable project/asset-pack bundle format (a .zip). A "project" bundle carries every scene, all

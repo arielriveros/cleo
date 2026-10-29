@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { Logger } from 'cleo';
-import { startTask } from '../progress/progressStore';
+import { startTask } from '@cleo/app-kit/feedback/progressStore';
 import { KIND_LABEL, SCENE_TAB_ID } from '../engineContextTypes';
 import type { EditorTab, SavingState, TabKind } from '../engineContextTypes';
 

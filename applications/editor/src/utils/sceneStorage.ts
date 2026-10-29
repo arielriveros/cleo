@@ -1,6 +1,6 @@
 import type { RenderSettings } from 'cleo';
 import { Logger } from 'cleo';
-import { idbGet, idbSet, idbDelete } from './idb';
+import { idbGet, idbSet, idbDelete } from '@cleo/app-kit/utils/idb';
 import { saveToStorage } from '../workers/workerClient';
 import { loadProject, ProjectPrefs } from './projectStorage';
 import { cryptoRandomId } from './ids';

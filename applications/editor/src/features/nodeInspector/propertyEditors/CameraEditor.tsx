@@ -3,8 +3,8 @@ import { CameraNode, CameraRigNode, Node, resolvePostChain, materialIndexOf } fr
 import NodeRefInput from '../NodeRefInput';
 import { useCleoEngine } from '../../EngineContext';
 import type { PostChainEntry, PostEffectId } from 'cleo';
-import Collapsable from '../../../components/Collapsable';
-import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Toggle, Hint, cn, valueClass } from '../../../components/ui';
+import Collapsable from '@cleo/app-kit/ui/Collapsable';
+import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Toggle, Hint, cn, valueClass } from '@cleo/app-kit/ui';
 import { CameraIcon, MaterialIcon } from '../sectionIcons';
 import { useAssetDrop } from '../../../utils/useAssetDrop';
 import { useEventBus } from '../../EventBusContext';

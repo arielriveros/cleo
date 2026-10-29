@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { CharacterNode, CHARACTER_PRESETS, FACING_MODES, type CharacterPreset } from 'cleo'
-import Collapsable from '../../../components/Collapsable'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { useCleoEngine } from '../../EngineContext'
-import { DocScope, PresetMenu, SectionTitle, SegmentedControl, Slider, Toggle, cn, labelClass } from '../../../components/ui'
-import { hintAffordance } from '../../../components/ui/Field'
+import { DocScope, PresetMenu, SectionTitle, SegmentedControl, Slider, Toggle, cn, labelClass } from '@cleo/app-kit/ui'
+import { hintAffordance } from '@cleo/app-kit/ui/Field'
 import { CharacterIcon } from '../sectionIcons'
 
 const SETTLE_HINT = 'Seconds the aim must stay past the threshold before a 90-degree turn engages, so a camera swept round to the back plays the 180 instead of a 90. Past 135 degrees the turn starts at once.'

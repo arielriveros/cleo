@@ -1,8 +1,8 @@
 import { TextureManager } from 'cleo'
 import { awaitTextureImage } from './textureReady'
 import { persistTextures } from './textureStore'
-import { parseBase64DataUri } from './bytes'
-import { deepClone } from './deepClone'
+import { parseBase64DataUri } from '@cleo/app-kit/utils/bytes'
+import { deepClone } from '@cleo/app-kit/utils/deepClone'
 import { cryptoRandomId } from './ids'
 import type { MaterialAsset } from './materials'
 

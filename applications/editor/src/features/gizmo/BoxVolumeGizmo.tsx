@@ -3,10 +3,10 @@ import { mat4, vec3 } from 'gl-matrix';
 import { ExposureVolumeNode, LightProbeNode, MIN_EXPOSURE_VOLUME_SIZE, Node, Raycaster, uiProjectToScreen } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
 import { usePlayback } from '../PlaybackContext';
-import type { GizmoOverlayModel } from './gizmoDrag';
-import { snapSteps } from './gizmoDrag';
+import type { GizmoOverlayModel } from '@cleo/app-kit/gizmo/gizmoDrag';
+import { snapSteps } from '@cleo/app-kit/gizmo/gizmoDrag';
 import { isWithinTemplateInstance } from '../../utils/templates';
-import { closestPointOnAxisToRay } from '../../utils/gizmoMath';
+import { closestPointOnAxisToRay } from '@cleo/app-kit/gizmo/gizmoMath';
 import GizmoDragOverlay, { type GizmoOverlayHandle } from './GizmoDragOverlay';
 import {
   collisionHandles, dimensionReadout, handleDirection, handleKey, handlePoint, handleTitle, shapeFrame,

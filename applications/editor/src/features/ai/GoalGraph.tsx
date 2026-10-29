@@ -5,7 +5,7 @@ import MachineGraph from '../../components/MachineGraph'
 import type { GraphLinkModel, GraphNodeModel } from '../../components/MachineGraph'
 import { useAiEditor } from './AiEditorContext'
 import AiGraphToolbar, { AiEmptyState } from './AiGraphToolbar'
-import { Button } from '../../components/ui'
+import { Button } from '@cleo/app-kit/ui'
 
 /**
  * The goal graph on a canvas: what an agent is trying to do, and what that breaks down into.

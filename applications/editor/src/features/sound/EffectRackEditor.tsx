@@ -1,6 +1,6 @@
 import { defaultEffect, EFFECT_KINDS } from 'cleo'
 import type { EffectKind, SoundEffect } from 'cleo'
-import { Button, SectionTitle, Select, Slider, Toggle, hintClass } from '../../components/ui'
+import { Button, SectionTitle, Select, Slider, Toggle, hintClass } from '@cleo/app-kit/ui'
 
 // The DSP rack: an ordered list of inserts, each toggleable, movable and removable.
 //

@@ -2,7 +2,7 @@ import type { Scene, Renderer, RenderSettings, InputMap } from 'cleo';
 import { Logger, InputSystem } from 'cleo';
 import { buildGameData } from '../features/publish/buildGameData';
 import type { ScriptAsset } from './scripts';
-import { idbGet, idbSet, idbDelete } from './idb';
+import { idbGet, idbSet, idbDelete } from '@cleo/app-kit/utils/idb';
 import { saveToStorage } from '../workers/workerClient';
 import type { BodyDescription, ShapeDescription } from '../features/EngineContext';
 import { migrateGameDataUI } from './uiMigration';

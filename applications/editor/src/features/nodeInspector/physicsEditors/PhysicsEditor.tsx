@@ -3,8 +3,8 @@ import { ModelNode, AnimatedModel, Node, RAGDOLL_DEFAULTS, PHYSICS_SURFACE_PRESE
 import type { RagdollOptions, HullQuality } from 'cleo'
 import { BodyDescription, ShapeDescription, useCleoEngine } from '../../EngineContext';
 import { useHistory } from '../../HistoryContext';
-import Collapsable from '../../../components/Collapsable'
-import AxisInput from '../../../components/AxisInput'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import AxisInput from '@cleo/app-kit/ui/AxisInput'
 import ShapeEditor from './ShapeEditor';
 import { HULL_QUALITIES } from './hullQuality';
 import {
@@ -16,7 +16,7 @@ import {
   COLLISION_SHAPE_FRAME, COLLISION_SHAPES_EDITED, remapCollisionShapeSelection, setCollisionShapeSelection,
   useCollisionShapeSelection, type CollisionChannel,
 } from '../../gizmo/collisionSelection';
-import { Field, Slider, Toggle, Select, NumberInput, Button, PresetMenu, Section, Hint, SegmentedControl, DocScope, cn, labelClass, valueClass } from '../../../components/ui'
+import { Field, Slider, Toggle, Select, NumberInput, Button, PresetMenu, Section, Hint, SegmentedControl, DocScope, cn, labelClass, valueClass } from '@cleo/app-kit/ui'
 import { PhysicsIcon, ShapeIcon } from '../sectionIcons'
 import { useAssetLibrary } from '../../AssetLibraryContext'
 import { modelIdOf } from '../../../utils/models'

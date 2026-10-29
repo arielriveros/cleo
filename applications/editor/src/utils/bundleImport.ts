@@ -1,5 +1,5 @@
 import { Logger, parseInputMap } from 'cleo'
-import { idbGet, idbSet, idbDelete, idbKeysByPrefix } from './idb'
+import { idbGet, idbSet, idbDelete, idbKeysByPrefix } from '@cleo/app-kit/utils/idb'
 import { readModelLibrary, replaceModelLibrary, appendModelLibrary } from './modelStore'
 import { VfsIndex, EMPTY_VFS, withAncestors, repairVfs } from './vfs'
 import { ProjectMeta } from './sceneStorage'
@@ -12,7 +12,7 @@ import { createProject, switchToProject } from './projects'
 import { confirmDiscard, reloadDiscarding } from '../features/unloadGuard'
 import type { BundleData } from './bundle'
 import { currentOrNoop } from '../features/loading/bootLoad'
-import { handoffFromCurrent, saveHandoff } from '../features/loading/loadingStore'
+import { handoffFromCurrent, saveHandoff } from '@cleo/app-kit/feedback/loadingStore'
 
 // Applies an imported bundle to local storage, then reloads. Both modes must write straight to IndexedDB
 // and let the boot path rebuild React/engine state: reconciling live state instead lets the debounced

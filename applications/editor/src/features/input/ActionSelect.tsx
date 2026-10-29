@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useCleoEngine } from '../EngineContext'
-import { Select, cn } from '../../components/ui'
+import { Select, cn } from '@cleo/app-kit/ui'
 
 /**
  * Picks one of the project's input ACTIONS by name.

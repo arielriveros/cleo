@@ -1,6 +1,6 @@
 import { isConditionGroup } from 'cleo'
 import type { Condition, ConditionGroup, ConditionNode, ConditionOp } from 'cleo'
-import { Button, cn, labelClass, NumberInput, OptionalNumberInput, SegmentedControl, Select } from './ui'
+import { Button, cn, labelClass, NumberInput, OptionalNumberInput, SegmentedControl, Select } from '@cleo/app-kit/ui'
 
 /**
  * Recursive editor for an AND/OR condition tree — the animation state machine's, the behaviour state

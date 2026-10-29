@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { DocScope, Field, Section, SegmentedControl, TextInput, Toggle, hintClass } from '../../components/ui'
+import { DocScope, Field, Section, SegmentedControl, TextInput, Toggle, hintClass } from '@cleo/app-kit/ui'
 import { useCleoEngine } from '../EngineContext'
 import { useTexture } from './TextureContext'
 import type { FilterMode, WrapMode } from '../../utils/textureAssets'

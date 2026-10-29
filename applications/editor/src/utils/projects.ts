@@ -5,7 +5,7 @@
 // page reload. The registry itself is the only kv record that is NOT scoped.
 
 import { Logger } from 'cleo';
-import { idbGet, idbSet, idbDelete, idbKeysByPrefix } from './idb';
+import { idbGet, idbSet, idbDelete, idbKeysByPrefix } from '@cleo/app-kit/utils/idb';
 import { KEYS, MIGRATABLE_KEYS, libKey, metaKey, scenePrefix, vfsKey } from './storageKeys';
 import { projectPrefix, setActiveProjectId } from './projectScope';
 import { MIGRATABLE_LS_KEYS, lsKey, projectLsKeys } from './lsScope';
@@ -14,7 +14,7 @@ import { createFreshProjectMeta } from './sceneStorage';
 import { EMPTY_VFS } from './vfs';
 import { cryptoRandomId } from './ids';
 import { confirmDiscard, reloadDiscarding } from '../features/unloadGuard';
-import { hasHandoff, saveHandoff } from '../features/loading/loadingStore';
+import { hasHandoff, saveHandoff } from '@cleo/app-kit/feedback/loadingStore';
 
 export type ProjectRecord = {
   id: string;

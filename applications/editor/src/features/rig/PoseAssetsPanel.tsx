@@ -3,13 +3,13 @@ import { Logger } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { useRig } from './RigContext'
-import { Button, Hint, SectionTitle, TextInput, cn } from '../../components/ui'
+import { Button, Hint, SectionTitle, TextInput, cn } from '@cleo/app-kit/ui'
 import { buildPoseAsset, newPose, poseAssetFromRig } from '../../utils/poseAssets'
 import type { RigPose } from '../../utils/rigAssets'
 import type { StoredPoseBone } from '../../utils/animationAssets'
 import { getAnimationTarget } from '../animation/skeleton'
 import { poseBoneLocal, poseDeltaOf } from '../clip/boneTrs'
-import { promptDialog } from '../dialogs/dialogStore'
+import { promptDialog } from '@cleo/app-kit/feedback/dialogStore'
 
 // The rig's POSES: named static poses of this skeleton, held in Pose assets.
 //

@@ -272,13 +272,8 @@ export const MODE_SKELETON_OWNER: Record<EditorMode, boolean> = {
   soundSample: false,
   particleSystem: false,
 };
-export type GizmoMode = 'position' | 'rotation' | 'scale';
-/**
- * Which frame the transform gizmo's handles point along: the selected node's own orientation, or the
- * world axes however deep in the hierarchy it sits. Scale ignores this and is always local — see
- * `effectiveGizmoSpace` in `utils/gizmoMath`.
- */
-export type GizmoSpace = 'local' | 'world';
+// The gizmo types live with the gizmo math in the app-kit; re-exported so editor code keeps one import.
+export type { GizmoMode, GizmoSpace } from '@cleo/app-kit/gizmo/types';
 export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 
 // Browser-style editor tabs. `editorMode` is derived from the active tab (see EngineProvider). The scene

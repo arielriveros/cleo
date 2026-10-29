@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { WindNode, WIND_PRESETS, type WindPreset } from 'cleo'
-import Collapsable from '../../../components/Collapsable'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { useEventBus } from '../../EventBusContext'
-import { PresetMenu, PropertyTable, PropertyRow, Slider } from '../../../components/ui'
+import { PresetMenu, PropertyTable, PropertyRow, Slider } from '@cleo/app-kit/ui'
 import { WindIcon } from '../../sceneInspector/nodeIcons'
 
 const DIRECTION_HINT = 'The way the wind blows, in degrees around the up axis (0 = +X, 90 = −Z).'

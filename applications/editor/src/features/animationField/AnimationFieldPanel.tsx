@@ -1,7 +1,7 @@
 import { DEFAULT_AXIS_SMOOTHING, DEFAULT_WEIGHT_SMOOTHING, coincidentSamples } from 'cleo'
 import { useAnimationField } from './AnimationFieldContext'
-import Collapsable from '../../components/Collapsable'
-import { Button, OptionalNumberInput, Select, SegmentedControl, TextInput, Toggle, cn, hintClass } from '../../components/ui'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import { Button, OptionalNumberInput, Select, SegmentedControl, TextInput, Toggle, cn, hintClass } from '@cleo/app-kit/ui'
 import { toRuntimeField } from '../../utils/animationFields'
 import type { AnimationFieldAxis } from '../../utils/animationFields'
 

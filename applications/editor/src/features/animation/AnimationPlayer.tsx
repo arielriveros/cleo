@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { getAnimationTarget } from './skeleton'
 import { useStateMachine } from './StateMachineContext'
-import { Button, NumberInput, Select, Toggle } from '../../components/ui'
-import { clamp } from '../../utils/math';
+import { Button, NumberInput, Select, Toggle } from '@cleo/app-kit/ui'
+import { clamp } from '@cleo/app-kit/utils/math';
 
 // Floating bottom transport for the Animation Editor: play/scrub the target clip and host its event
 // markers. The editor scene is paused (animators do not tick), so this drives the animator itself

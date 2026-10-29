@@ -6,7 +6,7 @@
 // or instantiated, which is what lets the restore paths stay synchronous.
 
 import { TextureManager, parseBase64DataUri } from 'cleo'
-import { openDB, TEXTURE_STORE, idbGet } from './idb'
+import { openDB, TEXTURE_STORE, idbGet } from '@cleo/app-kit/utils/idb'
 import { projectPrefix } from './projectScope'
 import { libKey } from './storageKeys'
 import { toTextureConfig } from './textureAssets'

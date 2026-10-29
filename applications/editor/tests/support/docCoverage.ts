@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, relative } from 'path';
-import { parseDocs, resolveDocKey, resolveTerm, type DocEntry, type DocFrame, type DocIndex } from '../../src/features/docs/parseDocs';
+import { parseDocs, resolveDocKey, resolveTerm, type DocEntry, type DocFrame, type DocIndex } from '@cleo/app-kit/docs/parseDocs';
 
 // Shared by docTooltips.test.ts and tools/docAudit.ts: the docs read off disk, and every literal title in
 // the editor's source matched against them the way the running editor would.
@@ -8,6 +8,9 @@ import { parseDocs, resolveDocKey, resolveTerm, type DocEntry, type DocFrame, ty
 export const ENGINE_ROOT = join(__dirname, '..', '..', '..', '..');
 export const DOCS_DIR = join(ENGINE_ROOT, 'docs');
 export const EDITOR_SRC = join(ENGINE_ROOT, 'applications', 'editor', 'src');
+// The shared chrome (renderer and performance panels, options shell...) the editor shows: its titles are
+// editor UI as much as anything under EDITOR_SRC, so they are held to the same docs.
+export const APP_KIT_SRC = join(ENGINE_ROOT, 'applications', 'app-kit', 'src');
 
 function walk(dir: string, ext: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -76,11 +79,14 @@ function inComment(src: string, index: number): boolean {
 
 export interface SourceScan { titles: TitleSite[]; scopes: ScopeSite[]; docKeys: { file: string; line: number; doc: string }[] }
 
-export function scanSource(files = [...walk(EDITOR_SRC, '.tsx'), ...walk(EDITOR_SRC, '.ts')]): SourceScan {
+export function scanSource(files = [
+  ...walk(EDITOR_SRC, '.tsx'), ...walk(EDITOR_SRC, '.ts'), ...walk(APP_KIT_SRC, '.tsx'), ...walk(APP_KIT_SRC, '.ts'),
+]): SourceScan {
   const scan: SourceScan = { titles: [], scopes: [], docKeys: [] };
   for (const path of files) {
     const src = readFileSync(path, 'utf-8').replace(/\r\n/g, '\n');
-    const file = unix(relative(EDITOR_SRC, path));
+    const inKit = !relative(APP_KIT_SRC, path).startsWith('..');
+    const file = inKit ? 'app-kit/' + unix(relative(APP_KIT_SRC, path)) : unix(relative(EDITOR_SRC, path));
 
     for (const m of src.matchAll(/<(Collapsable|Section|SectionTitle|ModalHeader|DocScope)\b/g)) {
       if (inComment(src, m.index!)) continue;

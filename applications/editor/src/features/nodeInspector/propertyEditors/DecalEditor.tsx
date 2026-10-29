@@ -1,7 +1,7 @@
 import type { DecalNode, DecalAffects, DecalColor, DecalPattern, DecalRadialPattern, DecalRadialCurve, DecalRadialShape, DecalReceivers } from 'cleo';
 import { useState, useEffect } from 'react';
-import Collapsable from '../../../components/Collapsable';
-import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Toggle, ColorInput, Section, Hint } from '../../../components/ui';
+import Collapsable from '@cleo/app-kit/ui/Collapsable';
+import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Toggle, ColorInput, Section, Hint } from '@cleo/app-kit/ui';
 import { DecalIcon } from '../sectionIcons';
 import { useEventBus } from '../../EventBusContext';
 import { vec3ToHex } from '../../../utils/UtilFunctions';
