@@ -269,20 +269,20 @@ function embeddedCharacterMachine(kind = 'player') {
 }
 
 /**
- * The "Chest Up" bone mask: the chest (Spine2) and everything above it -- shoulders, arms, neck, head.
- * What the sword-run layer plays on. It starts at the CHEST, not the spine: the run clip's lower spine
- * rocks the whole torso over the legs, and laid over the locomotion that read as a heavy sway.
+ * The "Weapon Arm" bone mask: the right shoulder and everything below it -- arm, forearm, hand, fingers.
+ * What the sword-run layer plays on: the sword arm carries the blade the way a fighter runs with one,
+ * while the torso, the head and the left arm keep the locomotion's own swing.
  */
 const UPPER_BODY_MASK = (() => {
   const skin = mannequinModelJson.skin
   const names = new Map(skin.nodeNames)
   const parents = new Map(skin.nodeParents)
-  const spine = [...names].find(([, n]) => /:Spine2$/.test(n))?.[0]
-  if (spine === undefined) throw new Error('the mannequin has no Spine2 (chest) bone for the chest-up mask')
-  const under = (n) => { for (let p = n; p !== undefined; p = parents.get(p)) if (p === spine) return true; return false }
+  const shoulder = [...names].find(([, n]) => /:RightShoulder$/.test(n))?.[0]
+  if (shoulder === undefined) throw new Error('the mannequin has no RightShoulder bone for the weapon-arm mask')
+  const under = (n) => { for (let p = n; p !== undefined; p = parents.get(p)) if (p === shoulder) return true; return false }
   const weights = {}
   for (const j of skin.joints) if (under(j.nodeIndex)) weights[names.get(j.nodeIndex)] = 1
-  return { id: stableId('mask:upper-body'), name: 'Chest Up', rigId: rig.id, weights }
+  return { id: stableId('mask:upper-body'), name: 'Weapon Arm', rigId: rig.id, weights }
 })()
 
 function characterStateMachine(kind = 'player') {
@@ -308,11 +308,13 @@ function characterStateMachine(kind = 'player') {
       edge('Idle', 'Dead', trigger('Died')),
       edge('Locomotion', 'Dead', trigger('Died')),
       edge('Dead', 'Idle', trigger('Revive')),
-      { ...edge('Idle', 'Locomotion', speed('gt', 0.5)), minDwell: 0.05 },
-      { ...edge('Locomotion', 'Idle', speed('lt', 0.5)), minDwell: 0.1 },
+      // A quarter second either way: a start or a stop (and the run picked up out of an attack's tail)
+      // eases in rather than snapping to the new cycle.
+      { ...edge('Idle', 'Locomotion', speed('gt', 0.5)), minDwell: 0.05, blendTime: 0.25 },
+      { ...edge('Locomotion', 'Idle', speed('lt', 0.5)), minDwell: 0.1, blendTime: 0.3 },
     ],
-    // The sword run, on the upper body only, while running: the arms carry the blade the way a fighter
-    // runs with one, over the legs' own locomotion. Off below a jog (walking and strafing in a fight
+    // The sword run, on the weapon arm only, while running: it carries the blade the way a fighter runs
+    // with one, over the body's own locomotion. Off below a jog (walking and strafing in a fight
     // keep the guard pose). Attacks, rolls and hit reactions are ACTIONS, which sit above every layer.
     layers: [{
       name: 'UpperBody', blend: 'override', weight: 1, maskId: UPPER_BODY_MASK.id, mask: { ...UPPER_BODY_MASK.weights },
@@ -331,12 +333,16 @@ function characterStateMachine(kind = 'player') {
   }
 }
 
-/** Sockets ride on every embedded skin — the rig is an authoring asset; the skin is what ships. */
+/**
+ * Sockets ride on every embedded MANNEQUIN skin — the rig is an authoring asset; the skin is what ships.
+ * A skin of another skeleton (the Valley's knight) carries its own rig's sockets and is left alone.
+ */
 function embedSockets(json) {
+  const isMannequin = (skin) => (skin.nodeNames ?? []).some(([, name]) => name === rig.sockets[0].bone)
   const walk = (n) => {
     if (!n || typeof n !== 'object') return
     if (Array.isArray(n)) { n.forEach(walk); return }
-    if (n.model?.skin) n.model.skin.sockets = rig.sockets.map(({ name, bone }) => ({ name, bone }))
+    if (n.model?.skin && isMannequin(n.model.skin)) n.model.skin.sockets = rig.sockets.map(({ name, bone }) => ({ name, bone }))
     for (const v of Object.values(n)) if (v && typeof v === 'object') walk(v)
   }
   walk(json)
@@ -405,15 +411,29 @@ function eulerFromQuat(q) {
 
 /**
  * A Mesh child's local transform so that its +Y (the blade/shaft axis of every weapon mesh here) points
- * along `bladeDir` in model space at Idle, with its origin `palm` metres from the wrist (model space).
+ * along `bladeDir` in model space at Idle, its `edgeAxis` (the mesh's own edge or striking face) turned
+ * toward `edgeDir`, with its origin `palm` metres from the wrist (model space).
+ *
+ * The twist about the blade is set, not left to `rotationTo`: that picks the shortest arc, which leaves
+ * the edge wherever the hand's frame happens to put it (a sideways edge on the mannequin).
  */
-function grip(hand, bladeDir, palm) {
+function grip(hand, bladeDir, palm, edgeDir = EDGE_OUT, edgeAxis = [0, 0, 1]) {
   const handRot = handWorld[hand]
   const inv = quat.invert(quat.create(), handRot)
-  const dirLocal = vec3.transformQuat(vec3.create(), vec3.normalize(vec3.create(), vec3.fromValues(...bladeDir)), inv)
-  const rot = quat.rotationTo(quat.create(), vec3.fromValues(0, 1, 0), dirLocal)
+  const blade = vec3.normalize(vec3.create(), vec3.fromValues(...bladeDir))
+  // Model-space rotation: +Y onto the blade, then about the blade until the edge faces `edgeDir`.
+  const swing = quat.rotationTo(quat.create(), vec3.fromValues(0, 1, 0), blade)
+  const edgeNow = vec3.transformQuat(vec3.create(), vec3.fromValues(...edgeAxis), swing)
+  const want = vec3.fromValues(...edgeDir)
+  const flat = (v) => { const out = vec3.scaleAndAdd(vec3.create(), v, blade, -vec3.dot(v, blade)); return vec3.normalize(out, out) }
+  const a = flat(edgeNow), b = flat(want)
+  const angle = Math.atan2(vec3.dot(vec3.cross(vec3.create(), a, b), blade), vec3.dot(a, b))
+  const twist = quat.setAxisAngle(quat.create(), blade, angle)
+  const model = quat.multiply(quat.create(), twist, swing)
+  // ...expressed in the hand's frame, which the Mesh child rides.
+  const rot = quat.multiply(quat.create(), inv, model)
   const off = vec3.transformQuat(vec3.create(), vec3.fromValues(...palm), inv)
-  return { position: Array.from(off, v => Math.round(v * 1e4) / 1e4), rotation: eulerFromQuat(rot) }
+  return { position: Array.from(off, v => Math.round(v * 1e4) / 1e4), rotation: eulerFromQuat(quat.normalize(rot, rot)) }
 }
 
 // =====================================================================================================
@@ -427,9 +447,12 @@ const materials = [clone(mannequinMaterial)]
  * wall, the bloodstain) and every unlit particle effect. Lights are physical, so the exposure runs from
  * about EV 15 at noon to EV 3-5 at night and underground, a thousand times brighter; a physical glow would
  * be faint by day and a white smear in the dungeon. A tenth of the exposure keeps each one the same effect
- * everywhere, a little hotter in the dark (Material emissiveExposureWeight, ParticleSystemNode exposureWeight).
+ * everywhere, a little hotter in the dark (Material emissiveExposureWeight). Particle effects no longer use it:
+ * they take the whole exposure, with their glows converted to a luminance (GLOW_LUMINANCE, below).
  */
 const GLOW_EXPOSURE_WEIGHT = 0.1
+/** Lux on a surface that renders white at exposure 1 (src/graphics/lighting.ts). */
+const REFERENCE_ILLUMINANCE = 78643.2
 
 function pbr(baseColor, extra = {}) {
   const glows = (extra.emissive ?? [0, 0, 0]).some(c => c > 0)
@@ -474,7 +497,7 @@ const MAT = {
   ash: material('ash', 'Bonfire Ash (placeholder)', pbr([0.12, 0.11, 0.1], { roughness: 1, emissive: [0.6, 0.18, 0.04], emissiveIntensity: 0.6 })),
   glyph: material('glyph', 'Message Glyph (placeholder)', pbr([0.9, 0.55, 0.2], { emissive: [1, 0.55, 0.15], emissiveIntensity: 3, castShadow: false })),
   item: material('item', 'Item Glow (placeholder)', pbr([0.95, 0.9, 0.75], { emissive: [1, 0.92, 0.7], emissiveIntensity: 4, castShadow: false })),
-  bolt: material('bolt', 'Magic Bolt (placeholder)', pbr([0.5, 0.7, 1], { emissive: [0.45, 0.65, 1], emissiveIntensity: 12, castShadow: false })),
+  bolt: material('bolt', 'Magic Bolt (placeholder)', pbr([0.5, 0.7, 1], { emissive: [0.45, 0.65, 1], emissiveIntensity: 5, castShadow: false })),
   fog: material('fog', 'Fog Wall (placeholder)', pbr([0.95, 0.95, 1], { opacity: 0.28, transparent: true, emissive: [0.6, 0.62, 0.7], emissiveIntensity: 0.6, castShadow: false })),
   // A HUD mark in the world: the same at every exposure.
   marker: material('marker', 'Lock Reticle', pbr([1, 1, 1], { emissive: [1, 1, 1], emissiveExposureWeight: 0, castShadow: false })),
@@ -631,8 +654,31 @@ const lodOf = (levels, cullDistance = 0) => ({
   levels: levels.map(([distance, spawnScale, stepScale]) => ({ distance, spawnScale, stepScale })),
 })
 
+/**
+ * Particles take the camera's exposure whole, like every surface and light (ParticleSystemNode
+ * exposureWeight 1). An unlit, ADDITIVE emitter is a glow: its colour is a luminance on the internal scale
+ * (1 = 78,643 nits). The effects here were tuned under a tenth of the exposure; GLOW_LUMINANCE carries each
+ * one over at the exposure torch-lit scenes sit at (GLOW_REFERENCE_EV), so it looks as tuned there, fades
+ * into the noon sun and blazes on a moonlit night — as the torch's own light does.
+ *
+ * An unlit ALPHA emitter (blood) is not a glow but a surface, so it becomes lit instead: the scene's light
+ * shades it.
+ */
+const GLOW_REFERENCE_EV = 5
+const exposureAtEV = ev => REFERENCE_ILLUMINANCE / (1.2 * 2 ** ev)
+const GLOW_LUMINANCE = exposureAtEV(GLOW_REFERENCE_EV) ** (GLOW_EXPOSURE_WEIGHT - 1)
+function physicalEmitter(e) {
+  if (e.render?.lit) return e
+  if ((e.render?.blend ?? 'alpha') !== 'additive') return { ...e, render: { ...e.render, lit: true } }
+  const tidy = v => +v.toPrecision(3)
+  return {
+    ...e,
+    init: e.init.map(m => (m.type === 'color' ? { ...m, params: { ...m.params, intensity: tidy((m.params.intensity ?? 1) * GLOW_LUMINANCE) } } : m)),
+  }
+}
+
 function vfx(key, name, emitters, bounds = { center: [0, 1, 0], extents: [2, 2, 2] }, lod = undefined) {
-  const system = parseParticleSystem({ version: 1, emitters, bounds, lod })
+  const system = parseParticleSystem({ version: 1, emitters: emitters.map(physicalEmitter), bounds, lod })
   const asset = { id: stableId(`vfx:${key}`), name, system }
   particleSystems.push(asset)
   return asset
@@ -700,18 +746,80 @@ const VFX = {
       spawn: [mod('spawnRate', { rate: 140 })],
       init: [mod('shape', { shape: 'sphere', radius: 0.08, thickness: 1 }), mod('lifetime', { range: [0.25, 0.5] }),
         mod('velocity', { mode: 'radial', speed: [0, 0.3] }), mod('size', { range: [0.08, 0.16] }),
-        mod('color', { mode: 'constant', colorA: [0.5, 0.75, 1, 1], intensity: 6 })],
+        mod('color', { mode: 'constant', colorA: [0.5, 0.75, 1, 1], intensity: 2 })],
       update: [mod('colorOverLife', { gradient: fade(1) }), mod('sizeOverLife', { curve: { keys: [{ t: 0, v: 1 }, { t: 1, v: 0 }] } })],
       render: { blend: 'additive', softness: 0 },
     }),
+    // Magic dust wound round the flight: one mote at a time on a ring across the bolt's path, the spawn
+    // point turning eight times a second (an ORBITING circle), so the bolt leaves a fine helix that lives
+    // for a breath.
+    emitter('bolt-spiral', 'Spiral', {
+      capacity: 256,
+      spawn: [mod('spawnRate', { rate: 110 })],
+      init: [mod('shape', { shape: 'circle', radius: 0.17, thickness: 0, orbit: 8 }), mod('lifetime', { range: [0.28, 0.45] }),
+        mod('velocity', { mode: 'shape', speed: [0.05, 0.25] }), mod('size', { range: [0.025, 0.045] }),
+        mod('color', { mode: 'constant', colorA: [0.7, 0.85, 1, 1], intensity: 4 })],
+      update: [mod('drag', { coefficient: 1.5 }),
+        mod('colorOverLife', { gradient: { color: [{ t: 0, c: [0.85, 0.95, 1] }, { t: 0.5, c: [0.45, 0.65, 1] }, { t: 1, c: [0.55, 0.3, 1] }], alpha: [{ t: 0, a: 1 }, { t: 0.6, a: 0.8 }, { t: 1, a: 0 }] } }),
+        mod('sizeOverLife', { curve: { keys: [{ t: 0, v: 1 }, { t: 1, v: 0.2 }] } })],
+      render: { blend: 'additive', softness: 0 },
+    }),
   ], { center: [0, 0, 0], extents: [1.5, 1.5, 1.5] }),
+  // Where a bolt strikes the world: an organic bloom of magic rather than a spray. A white-hot core, a
+  // burst of petals curling on a vortex and turbulence as they slow, a ring racing out across the hit,
+  // and motes that drift up after it. (The player-hit splash stays `boltImpact`.)
+  boltBurst: vfx('bolt-burst', 'Magic Bolt Burst', [
+    emitter('burst-core', 'Core', {
+      capacity: 16, looping: false, duration: 1,
+      spawn: [mod('spawnRate', { rate: 0 }), burst(6)],
+      init: [mod('shape', { shape: 'sphere', radius: 0.05, thickness: 1 }), mod('lifetime', { range: [0.18, 0.28] }),
+        mod('velocity', { mode: 'radial', speed: [0, 0.2] }), mod('size', { range: [0.55, 0.85] }),
+        mod('color', { mode: 'constant', colorA: [0.85, 0.92, 1, 1], intensity: 3 })],
+      update: [mod('colorOverLife', { gradient: { color: [{ t: 0, c: [1, 1, 1] }, { t: 1, c: [0.5, 0.6, 1] }], alpha: [{ t: 0, a: 1 }, { t: 1, a: 0 }] } }),
+        mod('sizeOverLife', { curve: { keys: [{ t: 0, v: 0.3 }, { t: 0.25, v: 1 }, { t: 1, v: 0.6 }] } })],
+      render: { blend: 'additive', softness: 0.2 },
+    }),
+    emitter('burst-petals', 'Petals', {
+      capacity: 96, looping: false, duration: 1.2,
+      spawn: [mod('spawnRate', { rate: 0 }), burst(46)],
+      init: [mod('shape', { shape: 'sphere', radius: 0.08, thickness: 0 }), mod('lifetime', { range: [0.5, 0.9] }),
+        mod('velocity', { mode: 'radial', speed: [2.5, 4.5] }), mod('size', { range: [0.1, 0.22] }),
+        mod('rotation', { angle: [0, 360], spin: [-180, 180] }),
+        mod('color', { mode: 'constant', colorA: [0.7, 0.85, 1, 1], intensity: 3 })],
+      update: [mod('drag', { coefficient: 3.5 }), mod('curlNoise', { strength: 6, frequency: 2.5, scroll: 1.5 }),
+        mod('vortex', { axis: [0, 1, 0], center: [0, 0, 0], strength: 6, pull: 0.5 }),
+        mod('colorOverLife', { gradient: { color: [{ t: 0, c: [1, 1, 1] }, { t: 0.3, c: [0.45, 0.8, 1] }, { t: 1, c: [0.55, 0.25, 1] }], alpha: [{ t: 0, a: 1 }, { t: 0.55, a: 0.85 }, { t: 1, a: 0 }] } }),
+        mod('sizeOverLife', { curve: { keys: [{ t: 0, v: 0.4 }, { t: 0.2, v: 1 }, { t: 1, v: 0 }] } })],
+      render: { blend: 'additive', alignment: 'velocity', stretch: 0.6, softness: 0.1 },
+    }),
+    emitter('burst-ring', 'Ring', {
+      capacity: 48, looping: false, duration: 1,
+      spawn: [mod('spawnRate', { rate: 0 }), burst(32)],
+      init: [mod('shape', { shape: 'circle', radius: 0.15, thickness: 0 }), mod('lifetime', { range: [0.32, 0.48] }),
+        mod('velocity', { mode: 'shape', speed: [4, 5.5] }), mod('size', { range: [0.12, 0.2] }),
+        mod('color', { mode: 'constant', colorA: [0.6, 0.8, 1, 1], intensity: 3 })],
+      update: [mod('drag', { coefficient: 4 }),
+        mod('colorOverLife', { gradient: { color: [{ t: 0, c: [0.9, 0.95, 1] }, { t: 1, c: [0.5, 0.35, 1] }], alpha: [{ t: 0, a: 1 }, { t: 1, a: 0 }] } })],
+      render: { blend: 'additive', alignment: 'velocity', stretch: 1, softness: 0.1 },
+    }),
+    emitter('burst-motes', 'Motes', {
+      capacity: 48, looping: false, duration: 1.8,
+      spawn: [mod('spawnRate', { rate: 0 }), burst(24)],
+      init: [mod('shape', { shape: 'sphere', radius: 0.3, thickness: 1 }), mod('lifetime', { range: [0.8, 1.4] }),
+        mod('velocity', { mode: 'radial', speed: [0.3, 0.8] }), mod('size', { range: [0.02, 0.05] }),
+        mod('color', { mode: 'constant', colorA: [0.65, 0.8, 1, 1], intensity: 4 })],
+      update: [mod('gravity', { scale: -0.15 }), mod('curlNoise', { strength: 1, frequency: 1.2, scroll: 0.5 }),
+        mod('colorOverLife', { gradient: fade(1) })],
+      render: { blend: 'additive', softness: 0 },
+    }),
+  ], { center: [0, 0.3, 0], extents: [2.5, 2, 2.5] }),
   boltImpact: vfx('bolt-impact', 'Magic Bolt Impact', [
     emitter('impact-burst', 'Burst', {
       capacity: 128, looping: false, duration: 1,
       spawn: [mod('spawnRate', { rate: 0 }), burst(48)],
       init: [mod('shape', { shape: 'sphere', radius: 0.1, thickness: 1 }), mod('lifetime', { range: [0.3, 0.7] }),
         mod('velocity', { mode: 'radial', speed: [2, 5] }), mod('size', { range: [0.05, 0.12] }),
-        mod('color', { mode: 'constant', colorA: [0.55, 0.75, 1, 1], intensity: 8 })],
+        mod('color', { mode: 'constant', colorA: [0.55, 0.75, 1, 1], intensity: 3 })],
       update: [mod('drag', { coefficient: 2 }), mod('colorOverLife', { gradient: fade(1) })],
       render: { blend: 'additive', softness: 0 },
     }),
@@ -721,7 +829,7 @@ const VFX = {
       spawn: [mod('spawnRate', { rate: 0 }), burst(22)],
       init: [mod('shape', { shape: 'sphere', radius: 0.1, thickness: 1 }), mod('lifetime', { range: [0.9, 1.6] }),
         mod('velocity', { mode: 'direction', direction: [0, 1, 0], spread: 75, speed: [2.5, 5] }), mod('size', { range: [0.04, 0.08] }),
-        mod('color', { mode: 'constant', colorA: [0.55, 0.8, 1, 1], intensity: 10 })],
+        mod('color', { mode: 'constant', colorA: [0.55, 0.8, 1, 1], intensity: 3 })],
       update: [mod('gravity', { scale: 1 }), mod('drag', { coefficient: 0.3 }), bounceOff(0.6, 0.25),
         mod('colorOverLife', { gradient: fade(1) })],
       render: { blend: 'additive', alignment: 'velocity', stretch: 0.4, softness: 0 },
@@ -814,13 +922,11 @@ const VFX = {
 }
 
 function particles(key, name, asset, { position = [0, 0, 0], playOnStart = true, scale = [1, 1, 1] } = {}) {
-  // Unlit effects glow and take GLOW_EXPOSURE_WEIGHT; a lit one (dust) is a surface and takes it all.
-  const lit = asset.system.emitters.every(e => e.render?.lit)
+  // The whole exposure: glows carry a real luminance (see physicalEmitter), and lit effects are surfaces.
   return node(name, 'particleSystem', {
     id: stableId(`particles:${key}`), position, scale,
     particleSystem: {
       system: clone(asset.system), particleSystemId: asset.id, playOnStart, simulationSpeed: 1, spawnRateScale: 1, tint: [1, 1, 1, 1],
-      ...(lit ? {} : { exposureWeight: GLOW_EXPOSURE_WEIGHT }),
     },
   })
 }
@@ -870,7 +976,9 @@ function capsuleBody(radius, height, mass = 60) {
  * either a list of primitive boxes/cylinders, or a scanned mesh from WEAPON_MESHES.
  */
 function weaponMesh(key, hand, bladeDir, parts) {
-  const g = grip(hand, bladeDir, [hand === 'RightHand' ? -0.02 : 0.02, -0.07, 0.03])
+  // A blade held out leads with its edge downward; an upright one (a staff) faces it ahead.
+  const edge = bladeDir === BLADE_OUT ? EDGE_DOWN : EDGE_OUT
+  const g = grip(hand, bladeDir, [hand === 'RightHand' ? -0.02 : 0.02, -0.07, 0.03], edge, parts.edgeAxis ?? [0, 0, 1])
   const children = Array.isArray(parts)
     ? parts.map(([name, shape, mat, size, at]) => prop(`${key}:${name}`, name, shape, mat, { position: at, scale: size }))
     : [node(parts.name, 'model', {
@@ -892,7 +1000,7 @@ const WEAPON_SRC = path.join(ROOT, 'build', 'props', 'weapons')
 const WEAPON_TEXTURES = []
 const WEAPON_MATERIAL_FOLDERS = {}
 
-function scannedWeapon(key, file, name, template, scale) {
+function scannedWeapon(key, file, name, template, scale, edgeAxis = [0, 0, 1]) {
   const dir = path.join(WEAPON_SRC, `${file}_1k.gltf`)
   const parts = partsOf(readGltf(path.join(dir, `${file}_1k.gltf`)))
   const part = mergeParts(parts, name, 0)
@@ -921,15 +1029,23 @@ function scannedWeapon(key, file, name, template, scale) {
     bladeRadius: r3(Math.min(0.2, Math.max(0.08, half))),
   }
   WEAPON_MATERIAL_FOLDERS[name] = `/Weapons/${template}/Materials`
-  return { name, geometry: geometryJson(part), materialId, hitbox }
+  return { name, geometry: geometryJson(part), materialId, hitbox, edgeAxis }
 }
 
-const BLADE_DOWN_FORWARD = [0, -0.45, 1]
+/**
+ * How every weapon is held at Idle, in the character's model space: pointing OUT from the fist, ahead of
+ * the character and a little down, its edge (or striking face) in the vertical plane through the blade —
+ * leading downward, the way the swings cut. An upright weapon (the staff) faces its edge ahead instead.
+ */
+const BLADE_OUT = [0, -0.2, 1]
+const EDGE_DOWN = [0, -1, 0]
+const EDGE_OUT = [0, 0, 1]
 
 const WEAPON_MESHES = {
+  // The saber's edge and the axe's bit lie along the mesh's +Z; the hammer's faces along its X.
   saber: scannedWeapon('saber', 'wooden_handle_saber', 'Wooden Saber', 'Straight Sword', 1),
   axe: scannedWeapon('axe', 'wooden_axe', 'Wooden Axe', 'Club', 1.2),
-  hammer: scannedWeapon('hammer', 'ornate_war_hammer', 'War Hammer', 'Greatsword', 1.8),
+  hammer: scannedWeapon('hammer', 'ornate_war_hammer', 'War Hammer', 'Greatsword', 1.8, [1, 0, 0]),
   mace: scannedWeapon('mace', 'ornate_medieval_mace', 'Ornate Mace', 'Halberd', 2.5),
 }
 
@@ -990,7 +1106,7 @@ function baseWeaponNode() {
 }
 
 /** One weapon's full tree — the variant's content, diffed against the base by `variantTemplate`. */
-function weaponNode(key, name, script, parts, moves = [], bladeDir = BLADE_DOWN_FORWARD) {
+function weaponNode(key, name, script, parts, moves = [], bladeDir = BLADE_OUT) {
   const mesh = weaponMesh(`weapon:${key}`, 'RightHand', bladeDir, parts)
   return withScript(node(name, 'node', {
     id: stableId(`weapon:${key}`),
@@ -1014,7 +1130,11 @@ const WEAPONS = [
   ]],
 ]
 
-function playerNode() {
+/**
+ * The player. `model` replaces the mannequin with another character's model node (the Valley's knight):
+ * a skinned model node carrying its own `__modelId`, materials and skin.
+ */
+function playerNode(model = null) {
   // A copy: the template and the placed player are both built from it.
   const player = clone(playableSource)
   stripClips(player)
@@ -1037,16 +1157,18 @@ function playerNode() {
   rigNode.variables = {}
   delete rigNode.script
   Object.assign(rigNode, {
-    position: [0, 1.5, 0], followId: null, lookAtId: null, aimMode: 'orbit', armLength: 4.4,
+    position: [0, 1.5, 0], followId: null, lookAtId: null, aimMode: 'orbit', armLength: 3.2,
     socketOffset: [0, 0.35, 0], pitchMin: -40, pitchMax: 65, followOffset: [0, 1.5, 0], lookAtOffset: [0, 0, 0],
     collisionEnabled: true, aimDamping: 0.08,
   })
   rigNode.children = rigNode.children.map(c => ({ ...c, id: stableId('player:camera') }))
   withScript(rigNode, 'SoulsLockOn')
 
-  const model = characterModel('player', MANNEQUIN_MATERIAL, 1)
-  model.variables = vars({ __modelId: MANNEQUIN_MODEL, __materialId: MANNEQUIN_MATERIAL })
-  model.model.material = clone(mannequinMaterial.material)
+  if (!model) {
+    model = characterModel('player', MANNEQUIN_MATERIAL, 1)
+    model.variables = vars({ __modelId: MANNEQUIN_MODEL, __materialId: MANNEQUIN_MATERIAL })
+    model.model.material = clone(mannequinMaterial.material)
+  } else model = clone(model)
   // The rig follows the MODEL, not the Player root it rides under: the camera tracks what is drawn. A
   // light, explicit damping: the rig's default (0.15 / 0.25 s) would add a lag the camera never had.
   Object.assign(rigNode, { followId: model.id, followDamping: [0.04, 0.08, 0.04] })
@@ -1106,13 +1228,16 @@ function enemyBrainMachine(spec) {
   ]
   if (spec.boss) transitions.push({ from: '*', to: 'Phase Shift', condition: all(leaf('Phase Shifting', 'true')) })
   // A hit reaction interrupts anything but death (and a boss's phase shift, which is listed above it).
-  for (const from of ['Idle', 'Chase', 'Attack', ...engaged])
+  for (const from of ['Idle', 'Patrol', 'Chase', 'Attack', ...engaged])
     transitions.push({ from, to: 'Stagger', condition: all(leaf('Reacting', 'true')) })
   transitions.push(
     { from: 'Stagger', to: 'Strafe', condition: all(leaf('Reacting', 'false')) },
     ...(spec.boss ? [{ from: 'Phase Shift', to: 'Strafe', condition: all(leaf('Phase Shifting', 'false')) }] : []),
 
     { from: 'Idle', to: 'Chase', condition: all(leaf('Awake', 'true'), leaf('Has Target', 'true'), leaf('Target Dead', 'false')) },
+    // A spawn that names a route walks it while nobody is in sight (SoulsEnemySpawn.patrolRoute).
+    { from: 'Idle', to: 'Patrol', condition: all(leaf('Has Patrol', 'true'), leaf('Has Target', 'false')), minDwell: 1.5 },
+    { from: 'Patrol', to: 'Chase', condition: all(leaf('Awake', 'true'), leaf('Has Target', 'true'), leaf('Target Dead', 'false')) },
     { from: 'Chase', to: 'Return', condition: giveUp },
     { from: 'Chase', to: 'Idle', condition: all(leaf('Has Target', 'false')) },
     { from: 'Chase', to: 'Approach', condition: all(leaf('Distance', 'lt', ai.engage)) },
@@ -1142,6 +1267,7 @@ function enemyBrainMachine(spec) {
 
   const states = [
     { name: 'Idle', goal: 'idle', speedScale: 0.5, isEntry: true, x: 40, y: 160 },
+    { name: 'Patrol', goal: 'patrol', speedScale: 0.4, x: 40, y: 20 },
     { name: 'Chase', goal: 'path', speedScale: 1, x: 260, y: 160 },
     { name: 'Approach', goal: 'seek', speedScale: 1, x: 480, y: 60 },
     { name: 'Strafe', goal: 'script', speedScale: 1, x: 700, y: 160 },
@@ -1169,6 +1295,7 @@ function enemyBrainMachine(spec) {
       builtin('Attack Ready', 'attackReady'),
       builtin('Attacking', 'isAttacking'),
       builtin('Reacting', 'isReacting'),
+      builtin('Has Patrol', 'hasPatrol'),
       ...(spec.boss ? [builtin('Phase Shifting', 'isPhaseShifting')] : []),
     ],
     states,
@@ -1319,10 +1446,10 @@ function boltTemplate() {
     id, children: [
       prop('bolt:core', 'Core', 'sphere', MAT.bolt, { scale: [0.22, 0.22, 0.22] }),
       particles('bolt:trail', 'Trail', VFX.boltTrail),
-      pointLight('bolt:light', 'Glow', [0.5, 0.7, 1], 600, 6),
+      pointLight('bolt:light', 'Glow', [0.5, 0.7, 1], 220, 6),
       soundsGroup('bolt', SOUNDS.bolt, { spatial: true }),
     ],
-  }), 'SoulsProjectile', { impactTemplate: 'Bolt Impact' })
+  }), 'SoulsProjectile', { impactTemplate: 'Bolt Burst', playerImpactTemplate: 'Bolt Impact' })
   return { id: stableId('template:bolt'), name: 'Magic Bolt', nodeJson: root, textureIds: [], scripts: {}, bodies: {}, triggers: {} }
 }
 
@@ -2072,7 +2199,7 @@ const FOLDERS = {
     Torch: PROP('Torch'), Bonfire: PROP('Bonfire'), 'Fog Gate': PROP('Fog Gate'),
     Lever: PROP('Lever & Gate'), Gate: PROP('Lever & Gate'), Message: PROP('Message'), Pickup: PROP('Pickup'),
     Bloodstain: PROP('Bloodstain'),
-    'Magic Bolt': FX('Magic Bolt'), 'Bolt Impact': FX('Magic Bolt'), 'Hit Spark': FX('Hit Spark'),
+    'Magic Bolt': FX('Magic Bolt'), 'Bolt Impact': FX('Magic Bolt'), 'Bolt Burst': FX('Magic Bolt'), 'Hit Spark': FX('Hit Spark'),
     'Slam Dust': FX('Slam Dust'), 'Blood Spray': FX('Blood'), 'Blood Splat': FX('Blood'), 'Blood Drops': FX('Blood'),
   },
   model: { mannequin: `${SHARED}/Models` },
@@ -2095,12 +2222,13 @@ const FOLDERS = {
   rig: { Mannequin: `${SHARED}/Rigs` },
   animationField: { 'Souls Locomotion': `${SHARED}/Animations` },
   animController: { 'Souls Character': `${SHARED}/Animations`, 'Souls Enemy': `${SHARED}/Animations` },
-  boneMask: { 'Chest Up': `${SHARED}/Animations` },
+  boneMask: { 'Weapon Arm': `${SHARED}/Animations` },
   particleSystem: {
     'Bonfire Fire': `${PROP('Bonfire')}/Particles`, 'Torch Fire': `${PROP('Torch')}/Particles`,
     'Fog Wall': `${PROP('Fog Gate')}/Particles`, 'Item Glow': `${PROP('Pickup')}/Particles`,
     'Message Glow': `${PROP('Message')}/Particles`, 'Bloodstain Glow': `${PROP('Bloodstain')}/Particles`,
     'Magic Bolt Trail': `${FX('Magic Bolt')}/Particles`, 'Magic Bolt Impact': `${FX('Magic Bolt')}/Particles`,
+    'Magic Bolt Burst': `${FX('Magic Bolt')}/Particles`,
     'Hit Spark': `${FX('Hit Spark')}/Particles`, 'Blood Spray': `${FX('Blood')}/Particles`, 'Slam Dust': `${FX('Slam Dust')}/Particles`,
     'Phase Two Aura': `${ENEMY('Hollow Warden')}/Particles`,
   },
@@ -2198,6 +2326,8 @@ export function writeProject({
   // A project's own values for some of the kit's materials, by material id: merged into the library entry
   // and into every copy embedded in a template or a scene, which is what the editor renders.
   materialOverrides = {},
+  // More skeletons beside the mannequin's: [RigAsset].
+  rigs: extraRigs = [],
 }) {
   fs.rmSync(out, { recursive: true, force: true })
   fs.mkdirSync(path.join(out, 'libraries'), { recursive: true })
@@ -2208,7 +2338,8 @@ export function writeProject({
     ...weaponTemplates(),
     ...enemyTemplates(),
     boltTemplate(),
-    fxTemplate('bolt-impact', 'Bolt Impact', VFX.boltImpact, 1.2, [pointLight('impact:light', 'Flash', [0.5, 0.7, 1], 900, 6)]),
+    fxTemplate('bolt-impact', 'Bolt Impact', VFX.boltImpact, 1.2, [pointLight('impact:light', 'Flash', [0.5, 0.7, 1], 350, 6)]),
+    fxTemplate('bolt-burst', 'Bolt Burst', VFX.boltBurst, 1.8, [pointLight('burst:light', 'Flash', [0.55, 0.6, 1], 450, 7)]),
     fxTemplate('hit-spark', 'Hit Spark', VFX.hitSpark, 0.8),
     fxTemplate('slam-dust', 'Slam Dust', VFX.slamDust, 1.8),
     fxTemplate('blood-spray', 'Blood Spray', VFX.bloodSpray, 1),
@@ -2239,7 +2370,7 @@ export function writeProject({
     animControllers: [characterController(), enemyController()],
     boneMasks: [UPPER_BODY_MASK],
     animations,
-    rigs: [rig],
+    rigs: [rig, ...extraRigs],
     tilesets: extraTilesets,
     scripts: scripts.assets,
     templates,
@@ -2340,9 +2471,10 @@ if (path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) main
 
 export {
   ROOT, CREATED_AT, MANNEQUIN_MODEL, stableId, textures, materials, material, pbr, matJson, MAT,
-  withScript, scripts, sourceNode, clone, prop, group, staticBody, particles, pointLight, VFX, SOUNDS,
+  withScript, scripts, sourceNode, clone, prop, group, staticBody, particles, pointLight, VFX, SOUNDS, GLOW_LUMINANCE,
   MUSIC_CUES, soundsGroup, banner, playerNode, bonfireNode, fogGateNode, leverNode, shortcutGate,
   torchNode, messageNode, linkInstance, LEVEL, placedMessage, placedSpawn, placedPickup, sourceScene,
   TEMPLATE_SOURCE, vfx, emitter, mod, burst, fade, fxTemplate, particleSystems, navBaker, isMover,
-  asTemplate, PROP,
+  asTemplate, PROP, rig as MANNEQUIN_RIG, animations as RIG_ANIMATIONS, handWorld, mannequinModelJson,
+  idleClip, characterModel,
 }

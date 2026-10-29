@@ -14,7 +14,9 @@ import { playDetached } from '@/Core/Scripts/SoulsAudio'
  *     the hurtbox is off (SoulsHitbox), so the sweep sees nothing and the bolt flies on through;
  *   - a ray against the world. Characters are skipped by the ray — the sphere handles them.
  *
- * On impact it spawns `impactTemplate` and removes itself; it also expires after `lifetime` seconds.
+ * On impact it spawns an effect and removes itself: `playerImpactTemplate` where it struck the player,
+ * `impactTemplate` where it struck the world. It also expires after `lifetime` seconds, bursting where it
+ * stopped.
  */
 export default class SoulsProjectileNode extends Node {
   public speed: number = 12
@@ -23,7 +25,10 @@ export default class SoulsProjectileNode extends Node {
   public lifetime: number = 4
   /** The bolt's hitbox: a sphere of this radius swept along its flight. */
   public radius: number = 0.2
-  public impactTemplate: TemplateName = 'Bolt Impact'
+  /** The effect where the bolt strikes the world, or runs out of flight. */
+  public impactTemplate: TemplateName = 'Bolt Burst'
+  /** The effect where it strikes the player. */
+  public playerImpactTemplate: TemplateName = 'Bolt Impact'
 
   private _dir: number[] = [0, 0, 1]
   private _age: number = 0
@@ -50,7 +55,7 @@ export default class SoulsProjectileNode extends Node {
   onUpdate(delta: number) {
     if (!this._live) return
     this._age += delta
-    if (this._age >= this.lifetime) { this._expire(false); return }
+    if (this._age >= this.lifetime) { this._expire('world'); return }
 
     const from = this.worldPosition
     const step = this.speed * delta
@@ -65,7 +70,7 @@ export default class SoulsProjectileNode extends Node {
     for (const h of hits) {
       if ((h.node as any).receiveHit(this.damage, this.poiseDamage, this)) {
         this.setPosition([h.point[0], h.point[1], h.point[2]])
-        this._expire(true)
+        this._expire('player')
         return
       }
     }
@@ -77,19 +82,17 @@ export default class SoulsProjectileNode extends Node {
     })
     if (hit) {
       this.setPosition([hit.point[0], hit.point[1], hit.point[2]])
-      this._expire(true)
+      this._expire('world')
       return
     }
     this.setPosition(to)
   }
 
-  private _expire(impact: boolean): void {
+  private _expire(on: 'player' | 'world'): void {
     this._live = false
-    if (impact) {
-      const gm = this._gm as any
-      gm?.fx?.(this.impactTemplate, this.worldPosition)
-      playDetached(this, 'Bolt Impact')
-    }
+    const gm = this._gm as any
+    gm?.fx?.(on === 'player' ? this.playerImpactTemplate : this.impactTemplate, this.worldPosition)
+    playDetached(this, 'Bolt Impact')
     // Immediate: the impact effect takes its place this frame.
     this.remove({ immediate: true })
   }

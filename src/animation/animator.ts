@@ -15,6 +15,7 @@ import { canAccessVariable } from '../core/scene/nodes/nodeVariables';
 import { InputSystem } from '../input/inputSystem';
 import { Logger } from '../core/logger';
 import { rootMotionNodeOf, rootParentRotation, rootParentScale } from './clipEdit';
+import { normalizeBoneName } from './boneNames';
 // The condition model and evaluator live in core/conditions.ts — they read a table of named values and
 // answer yes or no, which has nothing to do with animation, and the behavior state machine needs the
 // same latching. See that module for why the band is centred and why latches refresh machine-wide.
@@ -3087,8 +3088,11 @@ export class Animator {
 
             const action = o.action;
             if (action && !action.stopping && !action.loop) {
-                // Start fading out so the fade ENDS with the clip, not after it.
-                const remaining = child._getAnimationDuration() - child._currentTime;
+                // Start fading out so the fade ENDS with the clip, not after it. In real seconds: the
+                // clip's remaining time divided by its playback speed, since `blendOut` and the presence
+                // step below are both wall-clock (a 1.6x attack with a 0.3 s blend-out fades for 0.3 s,
+                // not the 0.19 s its clip time would give).
+                const remaining = (child._getAnimationDuration() - child._currentTime) / Math.max(child._speed, 1e-3);
                 if (remaining <= action.blendOut || !child._playing) {
                     action.stopping = true;
                     o.presenceTarget = 0;
@@ -3112,15 +3116,29 @@ export class Animator {
         }
     }
 
+    /**
+     * Bone name -> node index on this skin: the exact name, else the same bone under another exporter's
+     * spelling (`mixamorig1:Spine2` authored, `mixamorig:Spine2_04` on the skin) — masks and poses are
+     * authored by name on one skeleton and played on whatever skeleton a model retargets them onto.
+     */
+    private _nodeOfBoneName(): (name: string) => number | undefined {
+        const exact = new Map<string, number>(), loose = new Map<string, number>();
+        for (const [nodeIndex, name] of this._skin?.nodeNames ?? []) {
+            exact.set(name, nodeIndex);
+            const n = normalizeBoneName(name);
+            if (!loose.has(n)) loose.set(n, nodeIndex);
+        }
+        return (name) => exact.get(name) ?? loose.get(normalizeBoneName(name));
+    }
+
     // Node index -> weight for an overlay's mask, resolved by bone NAME against this skin once.
     private _overlayMask(o: Overlay): Map<number, number> | null {
         if (!o.maskSpec) return null;
         if (o.mask) return o.mask;
-        const byName = new Map<string, number>();
-        for (const [nodeIndex, name] of this._skin?.nodeNames ?? []) byName.set(name, nodeIndex);
+        const nodeOf = this._nodeOfBoneName();
         const mask = new Map<number, number>();
         for (const [name, w] of Object.entries(o.maskSpec)) {
-            const nodeIndex = byName.get(name);
+            const nodeIndex = nodeOf(name);
             if (nodeIndex !== undefined && w > 0) mask.set(nodeIndex, clamp(w, 0, 1));
         }
         o.mask = mask;
@@ -3178,13 +3196,12 @@ export class Animator {
     private _poseClip(state: AnimationState): Animation {
         const cached = this._poseClips.get(state);
         if (cached) return cached;
-        const nodeOfName = new Map<string, number>();
-        for (const [nodeIndex, name] of this._skin?.nodeNames ?? []) nodeOfName.set(name, nodeIndex);
+        const nodeOf = this._nodeOfBoneName();
 
         const samplers: AnimationSampler[] = [];
         const channels: AnimationChannel[] = [];
         for (const bone of state.pose?.bones ?? []) {
-            const nodeIndex = nodeOfName.get(bone.name);
+            const nodeIndex = nodeOf(bone.name);
             if (nodeIndex === undefined) continue;
             const rest = this._skin?.nodeTransforms?.get(nodeIndex) ?? mat4.create();
             const restT = vec3.create(), restR = quat.create();

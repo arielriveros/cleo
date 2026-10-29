@@ -218,7 +218,7 @@ export function modelAnimationIds(modelAsset: { rigId?: string }): string[] {
  * An id naming a deleted asset is skipped silently; the library is the source of truth.
  */
 export function resolveModelAnimations(
-  modelAsset: { id: string; nodeJson: any; rigId?: string },
+  modelAsset: { id: string; nodeJson: any; rigId?: string; nativeRigId?: string },
   animations: AnimationAsset[],
 ): StoredClip[] {
   const ids = modelAnimationIds(modelAsset)
@@ -244,7 +244,11 @@ export function resolveModelAnimations(
   for (const id of ids) {
     const asset = animations.find(a => a.id === id)
     if (!asset) continue
-    out.push(...(resolveAnimationAsset(asset, skin, modelAsset.id, modelAsset.rigId) as unknown as StoredClip[]))
+    // Corrections are read from the model's OWN skeleton's rig, which they map onto — `nativeRigId` when
+    // the model plays another skeleton. Passing `rigId` there would look the foreign rig's corrections up
+    // against itself, which is always empty.
+    const targetRigId = modelAsset.nativeRigId ?? modelAsset.rigId
+    out.push(...(resolveAnimationAsset(asset, skin, modelAsset.id, targetRigId) as unknown as StoredClip[]))
   }
   return out
 }
@@ -256,7 +260,7 @@ export function resolveModelAnimations(
  */
 export function applyModelAnimations(
   root: Node,
-  modelAsset: { id: string; nodeJson: any; rigId?: string },
+  modelAsset: { id: string; nodeJson: any; rigId?: string; nativeRigId?: string },
   animations: AnimationAsset[],
 ): number {
   const clips = resolveModelAnimations(modelAsset, animations) as unknown as Animation[]

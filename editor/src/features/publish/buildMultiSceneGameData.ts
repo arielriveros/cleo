@@ -215,7 +215,9 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   // resolves the two hops here rather than shipping a rig table.
   const retargets: Record<string, Record<string, unknown[]>> = {}
   for (const m of src.libs.models ?? []) {
-    const rig = m.rigId ? (src.libs.rigs ?? []).find(r => r.id === m.rigId) : undefined
+    // The model's OWN skeleton's rig: the corrections map onto it, also while it plays another skeleton.
+    const rigId = (m as { nativeRigId?: string }).nativeRigId ?? m.rigId
+    const rig = rigId ? (src.libs.rigs ?? []).find(r => r.id === rigId) : undefined
     if (!rig?.retargets) continue
     for (const id of modelAnimations[m.id] ?? []) {
       const sourceRigId = animations.find(a => a.id === id)?.rigId

@@ -58,6 +58,13 @@ export type RigAsset = {
    * bone no clip drives. Several overrides naming one target bone MERGE into it (see `retargetSegments`).
    */
   retargets?: Record<string, RetargetOverride[]>
+  /**
+   * The OTHER skeletons this one has been set up to play: rig ids whose clips, animators and blend spaces
+   * a model built on this skeleton may use, its bone corrections for each kept under `retargets[id]`. What
+   * RigSlot lists as a model's choices, beside its own skeleton — the ordered, explicit record of a
+   * retarget someone reviewed, where `retargets` alone is empty for a pair that needed no corrections.
+   */
+  retargetTargets?: string[]
   /** The ragdoll profile; see {@link RigRagdollProfile}. */
   ragdoll?: RigRagdollProfile
   /**
@@ -221,6 +228,44 @@ export function sourceSkinFor(
   rigs: RigAsset[],
 ): StoredSkin | null {
   return rigOf(asset, rigs)?.skin ?? asset?.sourceSkin ?? null
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Skeletons a model can play
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * The rig of a model's OWN skeleton: `nativeRigId` while it plays another, else the rig it is on. Never
+ * a foreign rig: this is where that model's retarget corrections are read from and written to.
+ */
+export function nativeRigOf(
+  model: { rigId?: string; nativeRigId?: string } | null | undefined, rigs: RigAsset[],
+): RigAsset | undefined {
+  const id = model?.nativeRigId ?? model?.rigId
+  return id ? rigs.find(r => r.id === id) : undefined
+}
+
+/**
+ * The skeletons a model may be switched to: its own first, then every skeleton its own has been set up
+ * to play (`retargetTargets`), then whatever it is on now if that is somehow neither. Missing ids skip.
+ */
+export function targetedRigs(
+  model: { rigId?: string; nativeRigId?: string } | null | undefined, rigs: RigAsset[],
+): RigAsset[] {
+  const native = nativeRigOf(model, rigs)
+  const ids = [native?.id, ...(native?.retargetTargets ?? []), model?.rigId]
+  const out: RigAsset[] = []
+  for (const id of ids) {
+    const rig = id ? rigs.find(r => r.id === id) : undefined
+    if (rig && !out.includes(rig)) out.push(rig)
+  }
+  return out
+}
+
+/** `rig` set up to play `sourceRigId`'s clips; the same object when it already is, or for itself. */
+export function withRetargetTarget(rig: RigAsset, sourceRigId: string): RigAsset {
+  if (sourceRigId === rig.id || rig.retargetTargets?.includes(sourceRigId)) return rig
+  return { ...rig, retargetTargets: [...(rig.retargetTargets ?? []), sourceRigId] }
 }
 
 // ---------------------------------------------------------------------------------------------------

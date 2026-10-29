@@ -159,6 +159,7 @@ import { Material, CustomMaterial } from './material';
 import { ensureCustomShader, customShaderReady, customShaderModules, customForwardTypes, screenShaderResources, screenUserSamplerNames, customShaderResources, usedResources } from './systems/customShaders';
 import { TexturePacker, DILATED_BASE_SLOT } from './systems/texturePacker';
 import { ParticleRenderer, PARTICLE_PROGRAMS, setParticleSimVariants, type ParticleSimFrame, type ParticleDrawFrame } from './particles/particleRenderer';
+import { skyAmbient, type ParticleLocalLight } from './particles/particleLighting';
 import { MAX_FORCE_FIELDS } from '../core/scene/nodes/forceFieldNode';
 import type { ParticleSystemNode } from '../core/scene/nodes/particleSystemNode';
 import { Model } from './model';
@@ -2991,7 +2992,14 @@ export class Renderer {
         GLState.depthMask(true);
     }
 
-    /** What a particle draw needs from this frame: camera, depth snapshot, and a sun for lit particles. */
+    /**
+     * What a particle draw needs from this frame: camera, depth snapshot, and the scene's light for lit
+     * particles — the same ambient and sky light the deferred pass gives surfaces, the key light (the sun,
+     * or the moon at night), and the punctual lights, which the particle renderer gathers per effect.
+     *
+     * `exposure` is the one the PREVIOUS frame's post chain settled on (the post chain runs after the scene
+     * draw), the same one-frame lag TAA has; it only matters for an `exposureWeight` below 1.
+     */
     private _particleDrawFrame(scene: Scene, pass: RenderPassEncoder, target: RenderTarget): ParticleDrawFrame {
         const camera = this._activeCamera;
         let sun: LightNode | null = null;
@@ -3007,9 +3015,34 @@ export class Renderer {
             const f = this._dirOf(sun);
             sunDirection[0] = -f[0]; sunDirection[1] = -f[1]; sunDirection[2] = -f[2];
         }
-        // A quarter of the sun as sky fill: lit particles are a cheap approximation, and an unlit
-        // underside reads as a hole in the effect.
-        const ambient = [sunColor[0] * 0.25 + 0.03, sunColor[1] * 0.25 + 0.03, sunColor[2] * 0.25 + 0.035];
+        // The fallback indirect term surfaces get (deferredLighting `indirect.diffuse`): the scene ambient,
+        // as the sky light scales it, plus the sky light's mean irradiance. No invented floor: a scene with
+        // neither is dark, for particles as for everything else.
+        const ambient = this._internalAmbient(scene);
+        const skyNode = scene.skyLight;
+        if (skyNode && this._skySHValid) {
+            const grade = this._cloudGrade(scene);
+            const sky = skyAmbient(this._skySH, skyNode.intensity * grade.sky);
+            ambient[0] += sky[0]; ambient[1] += sky[1]; ambient[2] += sky[2];
+        }
+
+        // The punctual lights as the light grid has them, less those whose whole reach was hidden this frame.
+        const localLights = this._particleLights;
+        localLights.length = 0;
+        for (const node of scene.lights) {
+            if (node.type === 'directional' || node.index < 0) continue;
+            if (this._lightOccludedMemo.get(node) === true) continue;
+            const light = node.light as PointLight | Spotlight;
+            const record: ParticleLocalLight = {
+                position: node.worldPosition, intensity: light.internalIntensity, color: light.color,
+                range: light.range, sourceRadius: light.sourceRadius,
+            };
+            if (node.type === 'spotlight') {
+                record.direction = node.worldForward;
+                record.cone = (light as Spotlight).coneScaleOffset;
+            }
+            localLights.push(record);
+        }
 
         return {
             pass, target,
@@ -3021,13 +3054,14 @@ export class Renderer {
             orthographic: camera.type === 'orthographic',
             depth: this._thumbnailMode ? null : this._depthSource(),
             width: this._renderWidth, height: this._renderHeight,
-            ambient, sunDirection, sunColor,
+            ambient, sunDirection, sunColor, localLights,
             visible: this._frustumCulling ? (min, max) => this._frustum.intersectsAABB(min, max) : undefined,
             lodDistanceScale: this._particleLodDistanceScale,
             exposure: this._exposure,
         };
     }
     private readonly _particleViewProj: mat4 = mat4.create();
+    private readonly _particleLights: ParticleLocalLight[] = [];
 
     private _ensurePackedTextures(scene: Scene): void {
         const packer = TexturePacker.Instance;
@@ -9839,6 +9873,24 @@ export class Renderer {
             mat4.scale(spriteMatrix, spriteMatrix, node.worldScale);
         }
 
+
+        // Soft fade (Sprite.softness): depth-tested `softness` metres nearer the camera, scaled about the
+        // eye so it covers exactly the same pixels. Whatever lies less than that behind a surface — a flame
+        // inside its torch head — passes the depth test; a wall further in front still hides it.
+        const softness = node.sprite.softness;
+        if (softness > 0) {
+            const eye = this._activeCamera.position;
+            const p = [spriteMatrix[12] - eye[0], spriteMatrix[13] - eye[1], spriteMatrix[14] - eye[2]];
+            const d = Math.hypot(p[0], p[1], p[2]);
+            // Never pulled through the near plane: a sprite at the lens keeps a sliver of its distance.
+            const pull = Math.min(softness, d - this._activeCamera.near * 2);
+            if (pull > 0) {
+                const k = this._activeCamera.type === 'orthographic' ? 1 : (d - pull) / d;
+                for (let i = 0; i < 12; i++) if (i % 4 !== 3) spriteMatrix[i] *= k;
+                const f = this._activeCamera.type === 'orthographic' ? pull / d : 1 - k;
+                spriteMatrix[12] -= p[0] * f; spriteMatrix[13] -= p[1] * f; spriteMatrix[14] -= p[2] * f;
+            }
+        }
 
         this._shaderManager.setUniform('u_model', spriteMatrix);
         this._setDissolve(node.effectiveFade);

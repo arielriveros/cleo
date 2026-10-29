@@ -45,6 +45,7 @@ export * from "./particles/particleSystemAsset";
 export { selectParticleLod, particleLodDistance, particleLodFactors, PARTICLE_LOD_HYSTERESIS, type ParticleLodState } from "./particles/particleLod";
 export * from "./particles/particleModules";
 export * from "./particles/curves";
+export { NITS_PER_INTERNAL_UNIT, particleLuminanceNits, particleIntensityForNits, formatNits } from "./graphics/particles/particleLighting";
 export { packEmitter, stepUniforms, SIM as PARTICLE_SIM_FLAGS, DRAW as PARTICLE_DRAW_FLAGS } from "./particles/particlePack";
 export type { PackedEmitter } from "./particles/particlePack";
 export { EmitterRuntime, ParticleSystemRuntime, particleTextureLayout, PARTICLE_TEXTURE_WIDTH, resolveSubEmitters } from "./particles/particleRuntime";

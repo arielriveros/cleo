@@ -82,6 +82,8 @@ export const FOLIAGE_COLLIDER_COLOR: [number, number, number] = [1, 0.55, 0.1];
 const COPLANAR_NUDGE = 1e-4;
 
 const NAVMESH_PREFIX = '__debug__navmesh_';
+/** The billboard a navmesh is clicked by: its volume spans the level, so it picks by this (pickBox). */
+const NAVMESH_ICON = '__editor__NavMeshIcon';
 const NAVVOLUME_PREFIX = '__debug__navvolume_';
 const NAVPREVIEW_PREFIX = '__debug__navpreview_';
 
@@ -427,6 +429,16 @@ function ensureProbeHelper(probe: LightProbeNode) {
   })));
   icon.setUniformScale(0.5);
   probe.addChild(icon);
+}
+
+// The same billboard under a navmesh, tinted green: the one place in the viewport that selects it.
+function ensureNavMeshIcon(navMesh: NavMeshNode) {
+  if (navMesh.getChildByName(NAVMESH_ICON).length) return;
+  const icon = chrome(new SpriteNode(NAVMESH_ICON, Sprite.fromTexture('__editor__probe_icon', {
+    tint: [0.45, 1, 0.5],
+  })));
+  icon.setUniformScale(0.5);
+  navMesh.addChild(icon);
 }
 
 // The same billboard under an exposure volume, tinted warm so it is not read as a probe.
@@ -1205,6 +1217,9 @@ export function reconcileEditorHelpers(
       const existing = node.getChildByName(PROBE_HELPER)[0];
       if (show('probes') && !existing) ensureProbeHelper(node);
       else if (!show('probes') && existing) node.removeChild(existing);
+    } else if (node instanceof NavMeshNode) {
+      // Always: the icon is how the navmesh is selected in the viewport, whatever its wireframe toggle.
+      ensureNavMeshIcon(node);
     } else if (node instanceof ExposureVolumeNode) {
       const existing = node.getChildByName(EXPOSURE_HELPER)[0];
       if (show('exposureVolumes') && !existing) ensureExposureHelper(node);

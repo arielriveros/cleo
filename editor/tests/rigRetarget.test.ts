@@ -4,6 +4,7 @@ import type { Skin } from 'cleo'
 import { mat4 } from 'gl-matrix'
 import {
   buildRigAsset, nodeByName, overridesFor, withOverride, withoutOverrides, overridesFromMapping, withOverrides,
+  nativeRigOf, targetedRigs, withRetargetTarget,
 } from '../src/utils/rigAssets'
 import type { StoredSkin } from '../src/utils/animationAssets'
 
@@ -190,5 +191,29 @@ describe('import review → stored overrides', () => {
     ])
     const rig = withOverrides(buildRigAsset('t', storedSkin(names)), 'src', o)
     expect(overridesFor(rig, 'src')).toEqual(o)
+  })
+})
+
+describe('skeletons a model can play', () => {
+  const rig = (id: string, extra: Record<string, unknown> = {}) => ({ id, name: id, skin: { joints: [] }, ...extra }) as any
+
+  it('lists its own skeleton first, then the ones it was retargeted to, never the rest', () => {
+    const rigs = [rig('knight', { retargetTargets: ['mannequin'] }), rig('mannequin'), rig('zombie')]
+    const model = { rigId: 'mannequin', nativeRigId: 'knight' }
+    expect(targetedRigs(model, rigs).map(r => r.id)).toEqual(['knight', 'mannequin'])
+    expect(nativeRigOf(model, rigs)?.id).toBe('knight')
+  })
+
+  it('a model on its own skeleton lists just that one', () => {
+    const rigs = [rig('knight'), rig('mannequin')]
+    expect(targetedRigs({ rigId: 'knight' }, rigs).map(r => r.id)).toEqual(['knight'])
+  })
+
+  it('records a retarget once, and never onto itself', () => {
+    const r = rig('knight')
+    const once = withRetargetTarget(r, 'mannequin')
+    expect(once.retargetTargets).toEqual(['mannequin'])
+    expect(withRetargetTarget(once, 'mannequin')).toBe(once)
+    expect(withRetargetTarget(r, 'knight')).toBe(r)
   })
 })

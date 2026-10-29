@@ -8,9 +8,10 @@
 // The souls-like content, outdoors. Every playable element — the player, both weapons, the four
 // enemy types, the Warden, the bonfire, the fog gate, the lever and gate, messages, pickups, the HUD — is
 // the souls demo's own, imported from tools/soulsDemo/build.mjs and linked to the same templates. What is
-// new is the level: a 2 km landscape from build/valley_height_4097_16bit.png with a four-surface landscape
-// material (ground, rock, snow, and painted trails along the roads), pre-scattered meadow grass and pines,
-// and four FBX buildings on the pads the heightmap was flattened for.
+// new is the level: a 2 km landscape from build/valley_height_4097_16bit.png with an eleven-surface landscape
+// material (ground, dirt, rock, snow, a clay and sand pond, painted roads, tracks and stone paths),
+// pre-scattered meadow grass, pines, jacarandas and undergrowth, and four FBX buildings on the pads the
+// heightmap was flattened for.
 //
 // Positions come from the map's technical reference (layout.mjs); every height is sampled from the
 // heightmap (heights.mjs). The source art is in build/, which is gitignored: this is run by hand and its
@@ -25,21 +26,23 @@ import { ASSET_HASH_VERSION } from '../exampleKit/editorConstants.mjs'
 import * as souls from '../soulsDemo/build.mjs'
 import { loadHeights } from './heights.mjs'
 import {
-  GATE_PLAZA, HAMLET, NOTCH_HALF_WIDTH, POND, ROADS, SPAWN, SUN_TRAVEL, TERRAIN, WATCHTOWER,
+  DIRT_ROADS, FENCES, GATE_PLAZA, HAMLET, NOTCH_HALF_WIDTH, POND, ROADS, SPAWN, SUN_TRAVEL, TERRAIN, WATCHTOWER,
   catmullRom, distanceToPolyline, rimRadius,
 } from './layout.mjs'
 import {
-  MASK_RES, ROCKY_DIRT_SLOT, SLOT_CHANNELS, TRAIL_CHANNEL, TRAIL_SLOT, loadLayerMath, paintForestFloor, sampleMask, surfaceWeights,
-  trailMask, valleyTerrainMaterial,
+  DIRT_ROAD_CHANNEL, FOREST_CHANNEL, paintDirtPatches, FOREST_SLOT, MASK_RES, MASK_SLICES, PATH_CHANNEL, ROCKY_DIRT_SLOT, SLOT_CHANNELS, TRAIL_CHANNEL,
+  TRAIL_SLOT, loadLayerMath, paintForestFloor, paintPolyline, paintPond, sampleMask, surfaceWeights, trailMask, valleyTerrainMaterial,
 } from './landscape.mjs'
 import {
-  FLOWER_CULL, GRASS_CULL, PINE_BILLBOARD, PINE_CULL, ROCK_CULL, buildFlowerPatches, buildGrassPatches, buildMossRocks, buildPine,
-  cliffDistanceField, flowerLevels, grassLevels, instancesBlob, jitteredCandidates, layerModels, modelAsset, onGround, onSurface,
-  pineLevels, rng, rockLevels, triangles,
+  BRANCH_CULL, BUSH_CULL, BUSH_LODS, FERN_CULL, FLOWER_CULL, GRASS_CULL, PINE_BILLBOARD, PINE_CULL, ROCK_CULL, UNDERGROWTH_LODS,
+  buildFlowerPatches, buildGrassPatches, buildJacaranda, buildMossRocks, buildPine, buildPlantSet, cliffDistanceField, flowerLevels,
+  grassLevels, instancesBlob, jacarandaLevels, jitteredCandidates, layerModels, modelAsset, onGround, onSurface, pineLevels,
+  plantLevels, rng, rockLevels, triangles,
 } from './foliage.mjs'
 import { buildProps } from './props.mjs'
+import { buildKnight } from './knight.mjs'
 import { WATER_SOURCE, WATER_UNIFORMS } from './water.mjs'
-import { boundsOf, convexShape, geometryJson, partsOf, readGltf } from './meshes.mjs'
+import { boundsOf, convexShape, geometryJson, mergeParts, partsOf, readGltf } from './meshes.mjs'
 import { buildBarrel, buildSkullCave } from './setPieces.mjs'
 import { buildCampfire, buildStandingTorch, buildWallTorch, rayHit } from './torches.mjs'
 import { buildCage, buildCandle } from './dungeon/props.mjs'
@@ -92,6 +95,8 @@ const TERRAIN_TEX = {
   ground: groundTex('ground', 'Ground'), rock: groundTex('rock', 'Rock'),
   snow: groundTex('snow', 'Snow'), trail: groundTex('trail', 'Trail'),
   forest: groundTex('forest', 'Forest Floor'), rockydirt: groundTex('rockydirt', 'Rocky Dirt'),
+  dirt: groundTex('dirt', 'Dirt'), clay: groundTex('clay', 'Pond Clay'),
+  sand: groundTex('sand', 'Shore Sand'), path: groundTex('path', 'Stone Path'),
 }
 
 /** A PBR material in Material.serialize()'s shape, with only the slots that are given. */
@@ -164,6 +169,70 @@ const MOSS_ROCK_MAT = libraryMaterial('moss-rock', 'Moss Rock', `${FOLIAGE}/Mate
   arm: tex('rock_moss_arm.jpg', `${FOLIAGE}/Textures`, 'Moss Rock ARM'),
 }))
 
+/** A Poly Haven plant's own 1k JPEG, shipped as it is. */
+const plantTex = (dir, file, label) => tex(path.join(dir, 'textures', file), `${FOLIAGE}/Textures`, label)
+const JACARANDA_SRC = path.join(BUILD, 'foliage', 'jacaranda_tree_1k.gltf')
+// One tree, bent as one plant like the pine: the wood shares the lean, the leaves add their flutter.
+const JACARANDA_WIND = { windStrength: 0.03, windStiffness: 2 }
+const JACARANDA_MATS = {
+  trunkId: libraryMaterial('jacaranda-trunk', 'Jacaranda Trunk', `${FOLIAGE}/Materials`, pbrMaterial({
+    diff: tex('jacaranda_trunk_diff.jpg', `${FOLIAGE}/Textures`, 'Jacaranda Trunk Base Color'),
+    nor: plantTex(JACARANDA_SRC, 'jacaranda_tree_trunk_nor_gl_1k.jpg', 'Jacaranda Trunk Normal'),
+    arm: plantTex(JACARANDA_SRC, 'jacaranda_tree_trunk_arm_1k.jpg', 'Jacaranda Trunk ARM'),
+    wind: JACARANDA_WIND,
+  })),
+  branchesId: libraryMaterial('jacaranda-branches', 'Jacaranda Branches', `${FOLIAGE}/Materials`, pbrMaterial({
+    diff: tex('jacaranda_branches_diff.jpg', `${FOLIAGE}/Textures`, 'Jacaranda Branches Base Color'),
+    nor: plantTex(JACARANDA_SRC, 'jacaranda_tree_branches_nor_gl_1k.jpg', 'Jacaranda Branches Normal'),
+    arm: plantTex(JACARANDA_SRC, 'jacaranda_tree_branches_arm_1k.jpg', 'Jacaranda Branches ARM'),
+    side: 'double', wind: JACARANDA_WIND,
+  })),
+  leavesId: libraryMaterial('jacaranda-leaves', 'Jacaranda Leaves', `${FOLIAGE}/Materials`, pbrMaterial({
+    diff: tex('jacaranda_leaves_diff.jpg', `${FOLIAGE}/Textures`, 'Jacaranda Leaves Base Color'),
+    nor: plantTex(JACARANDA_SRC, 'jacaranda_tree_leaves_nor_gl_1k.jpg', 'Jacaranda Leaves Normal'),
+    arm: plantTex(JACARANDA_SRC, 'jacaranda_tree_leaves_arm_1k.jpg', 'Jacaranda Leaves ARM'),
+    mask: tex('jacaranda_leaves_mask.png', `${FOLIAGE}/Textures`, 'Jacaranda Leaves Mask'),
+    side: 'double', wind: { ...JACARANDA_WIND, windRole: 'leaves', windFlutter: 0.5 },
+  })),
+}
+const FERN_SRC = path.join(BUILD, 'foliage', 'fern_02_1k.gltf')
+// Fronds: soft, a little stiffer than the grass, with a flutter at their tips.
+const FERN_WIND = { windStrength: 0.12, windStiffness: 0.9, windRole: 'leaves', windFlutter: 0.3 }
+const FERN_MAT = libraryMaterial('fern', 'Fern', `${FOLIAGE}/Materials`, pbrMaterial({
+  diff: plantTex(FERN_SRC, 'fern_02_diff_1k.jpg', 'Fern Base Color'),
+  nor: plantTex(FERN_SRC, 'fern_02_nor_gl_1k.jpg', 'Fern Normal'),
+  arm: plantTex(FERN_SRC, 'fern_02_arm_1k.jpg', 'Fern ARM'),
+  mask: tex('fern_mask.png', `${FOLIAGE}/Textures`, 'Fern Mask'),
+  side: 'double', castShadow: false, wind: FERN_WIND,
+}))
+const BROADLEAF_SRC = path.join(BUILD, 'foliage', 'anthurium_botany_01_1k.gltf')
+const BROADLEAF_MAT = libraryMaterial('broadleaf-fern', 'Broadleaf Fern', `${FOLIAGE}/Materials`, pbrMaterial({
+  diff: plantTex(BROADLEAF_SRC, 'anthurium_botany_01_diff_1k.jpg', 'Broadleaf Fern Base Color'),
+  nor: plantTex(BROADLEAF_SRC, 'anthurium_botany_01_nor_gl_1k.jpg', 'Broadleaf Fern Normal'),
+  arm: plantTex(BROADLEAF_SRC, 'anthurium_botany_01_arm_1k.jpg', 'Broadleaf Fern ARM'),
+  // Modelled leaves, no cutout.
+  side: 'double', castShadow: false, wind: FERN_WIND,
+}))
+const BUSH_SRC = path.join(BUILD, 'foliage', 'wild_rooibos_bush_1k.gltf')
+const BUSH_WIND = { windStrength: 0.06, windStiffness: 1.4 }
+const BUSH_TEX = {
+  diff: plantTex(BUSH_SRC, 'wild_rooibos_bush_diff_1k.jpg', 'Bush Base Color'),
+  nor: plantTex(BUSH_SRC, 'wild_rooibos_bush_nor_gl_1k.jpg', 'Bush Normal'),
+  arm: plantTex(BUSH_SRC, 'wild_rooibos_bush_arm_1k.jpg', 'Bush ARM'),
+}
+const BUSH_WOOD_MAT = libraryMaterial('bush-wood', 'Bush Wood', `${FOLIAGE}/Materials`, pbrMaterial({ ...BUSH_TEX, side: 'double', wind: BUSH_WIND }))
+const BUSH_LEAVES_MAT = libraryMaterial('bush-leaves', 'Bush Leaves', `${FOLIAGE}/Materials`, pbrMaterial({
+  ...BUSH_TEX, mask: tex('rooibos_mask.png', `${FOLIAGE}/Textures`, 'Bush Mask'),
+  side: 'double', wind: { ...BUSH_WIND, windRole: 'leaves', windFlutter: 0.4 },
+}))
+const BRANCHES_SRC = path.join(BUILD, 'foliage', 'dry_branches_medium_01_1k.gltf')
+const BRANCHES_MAT = libraryMaterial('dry-branches', 'Dry Branches', `${FOLIAGE}/Materials`, pbrMaterial({
+  diff: plantTex(BRANCHES_SRC, 'dry_branches_medium_01_diff_1k.jpg', 'Dry Branches Base Color'),
+  nor: plantTex(BRANCHES_SRC, 'dry_branches_medium_01_nor_gl_1k.jpg', 'Dry Branches Normal'),
+  arm: plantTex(BRANCHES_SRC, 'dry_branches_medium_01_arm_1k.jpg', 'Dry Branches ARM'),
+  castShadow: false,
+}))
+
 const BOARDS = {
   diff: tex('boards_diff.jpg', `${BUILDINGS}/Textures`, 'Boards Base Color'),
   nor: tex('boards_nor.png', `${BUILDINGS}/Textures`, 'Boards Normal'),
@@ -174,6 +243,23 @@ const THATCH = {
   nor: tex('thatch_nor.png', `${BUILDINGS}/Textures`, 'Thatch Normal'),
   rough: tex('thatch_rough.jpg', `${BUILDINGS}/Textures`, 'Thatch Roughness'),
 }
+// ----- the knight (the player) -------------------------------------------------------------------------
+// Three PBR metallic materials, the file's own (blinn2, blinn1, blinn3 in material order): base colour,
+// normal, and the packed occlusion/roughness/metal map as ARM; the two cut-out ones keep their alpha.
+const KNIGHT_DIR = '/Characters/Player/Knight'
+const knightMaterial = (blinn, name, mask) => libraryMaterial(`knight-${blinn}`, name, `${KNIGHT_DIR}/Materials`, pbrMaterial({
+  diff: tex(`knight_${blinn}_diff.jpg`, `${KNIGHT_DIR}/Textures`, `${name} Base Color`),
+  nor: tex(`knight_${blinn}_nor.png`, `${KNIGHT_DIR}/Textures`, `${name} Normal`),
+  arm: tex(`knight_${blinn}_arm.jpg`, `${KNIGHT_DIR}/Textures`, `${name} ARM`),
+  ...(mask ? { mask: tex(`knight_${blinn}_mask.png`, `${KNIGHT_DIR}/Textures`, `${name} Mask`) } : {}),
+  metallic: 1, roughness: 1, side: 'double',
+}))
+const KNIGHT_MATERIALS = [
+  knightMaterial('blinn2', 'Knight Armour', true),
+  knightMaterial('blinn1', 'Knight Plate', false),
+  knightMaterial('blinn3', 'Knight Cloth', true),
+]
+
 const SURFACES = {
   house: libraryMaterial('house', 'Old House', `${BUILDINGS}/Materials`, pbrMaterial({
     diff: tex('house_diff.jpg', `${BUILDINGS}/Textures`, 'Old House Base Color'),
@@ -219,19 +305,19 @@ const FIRE_TILESET = {
   id: id('tileset:fire'), name: 'Fire', textureId: FIRE_TEXTURE,
   imageWidth: 1024, imageHeight: 1024, tileWidth: 128, tileHeight: 256,
   margin: 0, spacing: 0, columns: 8, rows: 4,
-  // Over the bloom threshold: a flame should glow.
-  overdrive: 2, tiles: {}, terrains: [], variantSets: [], textureIds: [FIRE_TEXTURE],
+  // A luminance (1 = 78,643 nits): 2 was tuned under a tenth of the exposure, and GLOW_LUMINANCE carries it
+  // over to the whole exposure at a torch-lit night's EV (see FLAME_LUMINANCE below).
+  overdrive: +(2 * souls.GLOW_LUMINANCE).toPrecision(3), tiles: {}, terrains: [], variantSets: [], textureIds: [FIRE_TEXTURE],
 }
 const FIRE_FRAMES = Array.from({ length: 32 }, (_, i) => i)
 
 /**
- * How much the camera's exposure brightens the flames and embers (Sprite / ParticleSystemNode
- * exposureWeight). They are unlit, and the exposure runs from EV 15 at noon to EV 3-5 at night and in the
- * dungeon, a thousand times brighter: taken whole, every flame would be a white smear after dark. A tenth of
- * it keeps them the same flame everywhere, glowing a little brighter in the dark, in the editor as in play
- * (the souls glows use the same weight, GLOW_EXPOSURE_WEIGHT).
+ * The flames and embers take the camera's exposure whole, as the torch's light does (Sprite /
+ * ParticleSystemNode exposureWeight 1). Their brightness is a luminance: the flame sprite's tileset
+ * `overdrive` and the embers' colour intensity (converted in souls `physicalEmitter`) are set so a flame
+ * looks as it was tuned at a torch-lit night's exposure (EV 5). It fades into the noon sun, and blazes on a
+ * moonlit night, where the eye has opened up further.
  */
-const FIRE_EXPOSURE_WEIGHT = 0.1
 
 /**
  * A flame `height` tall standing on `base`: a cylindrical billboard (it turns to the camera about its
@@ -245,7 +331,8 @@ function flame(key, height, base = [0, 0, 0], name = 'Flame') {
     sprite: {
       constraints: 'cylindrical', tilesetId: FIRE_TILESET.id, tileset: FIRE_TILESET, tileIndex: 0,
       tint: [1, 1, 1], opacity: 1, transparent: true, side: 'double', wireframe: false, blend: 'additive',
-      exposureWeight: FIRE_EXPOSURE_WEIGHT,
+      // Its base sits inside the torch head or the fire pit's logs: shown through them, not cut off.
+      softness: Math.round(Math.min(0.4, height * 0.5) * 100) / 100,
     },
     animation: { frames: FIRE_FRAMES, frameSource: 'node', fps: 24, loop: true, randomStart: true },
   })
@@ -281,7 +368,12 @@ const emberFade = {
  * salts an effect's seed per node). Sparks fall under gravity and bounce off the colliders round the fire
  * (the dungeon's floor boxes, a building's hull) and scene depth, losing a little life at each bounce.
  */
-function emberEmitters(key, { rate, radius, interval, chance, count, speed }) {
+/**
+ * A fire's embers (a steady drift) and sparks. Sparks pop ONE at a time: `bursts` single sparks per
+ * five-second cycle, `interval` seconds apart, each landing with probability `chance` — a crackle, never
+ * a fountain of seven at once.
+ */
+function emberEmitters(key, { rate, radius, interval, chance, bursts, speed }) {
   return [
     souls.emitter(`valley:${key}-embers`, 'Embers', {
       capacity: 128,
@@ -295,7 +387,7 @@ function emberEmitters(key, { rate, radius, interval, chance, count, speed }) {
     }),
     souls.emitter(`valley:${key}-sparks`, 'Sparks', {
       capacity: 64, maxLod: 1,
-      spawn: [souls.mod('spawnRate', { rate: 0 }), souls.mod('spawnBurst', { bursts: [{ time: 0.3, count, cycles: 0, interval, probability: chance }] })],
+      spawn: [souls.mod('spawnRate', { rate: 0 }), souls.mod('spawnBurst', { bursts: [{ time: 0.3, count: 1, cycles: bursts, interval, probability: chance }] })],
       init: [souls.mod('shape', { shape: 'sphere', radius: radius * 0.6, thickness: 1 }), souls.mod('lifetime', { range: [1.4, 2.6] }),
         souls.mod('velocity', { mode: 'direction', direction: [0, 1, 0], spread: 65, speed }), souls.mod('size', { range: [0.01, 0.022] }),
         souls.mod('color', { mode: 'constant', colorA: [1, 0.75, 0.35, 1], intensity: 14 })],
@@ -314,15 +406,13 @@ const fxLod = (near, far, cull) => ({
 })
 // Bounds reach down to the floor under the flame: that is where the sparks end up.
 const TORCH_FX = souls.vfx('valley:torch-embers', 'Torch Embers',
-  emberEmitters('torch', { rate: 6, radius: 0.06, interval: 1.3, chance: 0.12, count: 7, speed: [1.2, 3] }),
+  emberEmitters('torch', { rate: 6, radius: 0.06, interval: 1.6, chance: 0.7, bursts: 3, speed: [1.2, 3] }),
   { center: [0, -1.1, 0], extents: [1.8, 1.9, 1.8] }, fxLod(8, 16, 26))
 const HEARTH_FX = souls.vfx('valley:hearth-embers', 'Hearth Embers',
-  emberEmitters('hearth', { rate: 16, radius: 0.3, interval: 0.8, chance: 0.3, count: 12, speed: [1.6, 3.6] }),
+  emberEmitters('hearth', { rate: 16, radius: 0.3, interval: 1.4, chance: 0.9, bursts: 3, speed: [1.6, 3.6] }),
   { center: [0, 0.8, 0], extents: [2.6, 2.4, 2.6] }, fxLod(12, 24, 45))
 const fx = (key, asset, position) => {
-  const n = souls.particles(`valley:${key}`, 'Embers', asset, { position })
-  n.particleSystem.exposureWeight = FIRE_EXPOSURE_WEIGHT
-  return n
+  return souls.particles(`valley:${key}`, 'Embers', asset, { position })
 }
 
 // ----- materials ---------------------------------------------------------------------------------------
@@ -579,6 +669,18 @@ function waterPlane(half, n) {
 const mask = trailMask()
 const roadLines = ROADS.map(r => catmullRom(r.points, 1))
 const roadDistance = (x, z) => Math.min(...roadLines.map(l => distanceToPolyline(x, z, l)))
+// The lesser roads on their own channel, and the pond's clay basin and sand bank.
+const dirtRoadLines = DIRT_ROADS.map(r => catmullRom(r.points, 0.5))
+DIRT_ROADS.forEach((r, i) => paintPolyline(mask, dirtRoadLines[i], r.halfWidth, r.blend, DIRT_ROAD_CHANNEL))
+paintPond(mask, heights, POND, POND_LEVEL, POND_REACH)
+for (const [i, r] of DIRT_ROADS.entries()) {
+  const line = dirtRoadLines[i]
+  let length = 0, steepest = 0
+  for (let k = 1; k < line.length; k++) length += Math.hypot(line[k][0] - line[k - 1][0], line[k][1] - line[k - 1][1])
+  for (const [x, z] of line) steepest = Math.max(steepest, heights.slopeAt(x, z))
+  const wet = line.filter(([x, z]) => Math.hypot(x - POND.x, z - POND.z) < POND_REACH).length
+  log(`dirt road ${r.key}: ${length.toFixed(0)} m, steepest ${steepest.toFixed(1)}°${wet ? `, ${wet} samples in the pond` : ''}`)
+}
 
 // =====================================================================================================
 // Buildings
@@ -596,7 +698,8 @@ const SITES = {
   windmill: { x: WATCHTOWER.x, z: WATCHTOWER.z, yaw: Math.atan2(-WATCHTOWER.z, WATCHTOWER.x) },
 }
 /** The bonfire, by the hamlet's well, just off the road. */
-const BONFIRE = { x: HAMLET.x + 6, z: HAMLET.z - 2 }
+/** The bonfire, a few metres to the east of where the player first stands, off the road. */
+const BONFIRE = { x: SPAWN.x + 5.5, z: SPAWN.z - 3 }
 
 /**
  * Settle each building near its site: the spot within a few metres whose footprint is flattest, clear of
@@ -635,6 +738,10 @@ function placeBuildings() {
 }
 const buildings = placeBuildings()
 for (const b of buildings) log(`building ${b.key} at (${b.x}, ${b.y.toFixed(2)}, ${b.z}) ground range ${b.range.toFixed(2)} m${b.cost >= 50 ? '  ** CROWDED **' : ''}`)
+for (const [i, r] of DIRT_ROADS.entries()) for (const b of buildings) {
+  const d = distanceToPolyline(b.x, b.z, dirtRoadLines[i])
+  if (d < b.radius * 0.7) throw new Error(`dirt road ${r.key} runs through ${b.key} (${d.toFixed(1)} m from its centre)`)
+}
 
 function propModelAsset(p) {
   const assetId = id(`model:${p.key}`)
@@ -687,6 +794,34 @@ const grassPatches = buildGrassPatches(path.join(BUILD, 'foliage', 'grass_medium
 const pine = buildPine(path.join(BUILD, 'foliage', 'realistic_pine.glb'))
 const flowerPatches = buildFlowerPatches(path.join(CELANDINE_SRC, 'celandine_01_1k.gltf'))
 const mossRocks = buildMossRocks(path.join(MOSS_SRC, 'rock_moss_set_02_1k.gltf'))
+const jacaranda = buildJacaranda(ROOT, path.join(JACARANDA_SRC, 'jacaranda_tree_1k.gltf'))
+log('jacaranda', ['trunk', 'branches', 'leaves'].map(k => `${k} ${triangles([jacaranda[k]])}`).join(', '),
+  `${boundsOf([jacaranda.trunk, jacaranda.branches, jacaranda.leaves]).size.map(v => v.toFixed(1)).join('x')} m`)
+/**
+ * A plant set's variants as level-0 parts, each source material given the example's material for it
+ * (`[materialId, part name]`); source materials that land on the same one are merged into one part.
+ */
+const plantParts = (set, materialOf) => set.map(v => {
+  const groups = new Map()
+  for (const p of v.parts) {
+    const [materialId, name] = materialOf(p.material)
+    if (!groups.has(materialId)) groups.set(materialId, { name, list: [] })
+    groups.get(materialId).list.push(p)
+  }
+  return { ...v, parts: [...groups].map(([materialId, g]) => ({ name: g.name, part: mergeParts(g.list, g.name, 0), materialId })) }
+})
+// Ferns sized from the scan's 0.3-0.45 m to a forest fern's 0.5-0.7 m; the broadleaf ferns a little less.
+const ferns = plantParts(buildPlantSet(path.join(FERN_SRC, 'fern_02_1k.gltf'), 'fern_02',
+  [{ key: 'b', name: 'Fern A' }, { key: 'c', name: 'Fern B' }], 1.6), () => [FERN_MAT, 'Fronds'])
+const broadleafs = plantParts(buildPlantSet(path.join(BROADLEAF_SRC, 'anthurium_botany_01_1k.gltf'), 'anthurium_botany_01',
+  [{ key: 'a', name: 'Broadleaf Fern A' }, { key: 'b', name: 'Broadleaf Fern B' }], 1.2), () => [BROADLEAF_MAT, 'Leaves'])
+// The rooibos is a 0.4-0.55 m shrub; at 2.6x it is the waist-to-shoulder bush the valley is missing.
+// Its glTF materials are twigs, leaves (both cut out of the shared atlas) and the woody base.
+const bushes = plantParts(buildPlantSet(path.join(BUSH_SRC, 'wild_rooibos_bush_1k.gltf'), 'wild_rooibos_bush',
+  [{ key: 'a', name: 'Bush A' }, { key: 'b', name: 'Bush B' }, { key: 'c', name: 'Bush C' }], 2.6),
+  (m) => m === 2 ? [BUSH_WOOD_MAT, 'Wood'] : [BUSH_LEAVES_MAT, 'Leaves'])
+const fallen = plantParts(buildPlantSet(path.join(BRANCHES_SRC, 'dry_branches_medium_01_1k.gltf'), 'dry_branches_medium_01',
+  [{ key: 'a', name: 'Dry Branches A' }, { key: 'b', name: 'Dry Branches B' }]), () => [BRANCHES_MAT, 'Branches'])
 log('foliage read', grassPatches.map(g => `${g.name} ${triangles([g.part])} tris ${boundsOf([g.part]).size.map(v => v.toFixed(2)).join('x')}`).join(', '),
   `pine ${triangles([pine.bark, pine.needles])} tris ${boundsOf([pine.bark, pine.needles]).size.map(v => v.toFixed(1)).join('x')} m`)
 
@@ -704,6 +839,31 @@ const FOLIAGE_PROTOS = [
   ...flowerPatches.map(f => ({
     key: `flower-${f.key}`, name: f.name, ...flowerLevels(ROOT, f, CELANDINE_MAT), cull: FLOWER_CULL,
     rule: { density: 0.04, minScale: 0.8, maxScale: 1.2, castShadows: false, collision: null }, cellSize: 13,
+  })),
+  {
+    key: 'jacaranda', name: 'Jacaranda', ...jacarandaLevels(ROOT, jacaranda, JACARANDA_MATS), cull: PINE_CULL,
+    rule: { density: 0.0012, minScale: 0.5, maxScale: 0.72, castShadows: true, collision: { shape: 'cylinder', radius: 0.5, height: 6 } },
+    cellSize: 40,
+  },
+  // The undergrowth: ferns and fallen branches belong to the Forest Floor, the bushes to the ground.
+  ...ferns.map(f => ({
+    key: `fern-${f.key}`, name: f.name, ...plantLevels(ROOT, f.parts, UNDERGROWTH_LODS), cull: FERN_CULL, surface: FOREST_SLOT,
+    rule: { density: 0.05, minScale: 0.8, maxScale: 1.3, castShadows: false, collision: null }, cellSize: 16,
+  })),
+  ...broadleafs.map(f => ({
+    // The scan's 15k triangles a plant are more than a knee-high plant needs; half reads the same.
+    key: `broadleaf-${f.key}`, name: f.name, ...plantLevels(ROOT, f.parts, UNDERGROWTH_LODS, 0.5), cull: FERN_CULL, surface: FOREST_SLOT,
+    rule: { density: 0.015, minScale: 0.8, maxScale: 1.25, castShadows: false, collision: null }, cellSize: 16,
+  })),
+  ...fallen.map(f => ({
+    key: `branches-${f.key}`, name: f.name, ...plantLevels(ROOT, f.parts, UNDERGROWTH_LODS), cull: BRANCH_CULL, surface: FOREST_SLOT,
+    // Lying along the ground they fell on.
+    orientation: 'normal',
+    rule: { density: 0.012, minScale: 0.8, maxScale: 1.4, castShadows: false, collision: null }, cellSize: 16,
+  })),
+  ...bushes.map(f => ({
+    key: `bush-${f.key}`, name: f.name, ...plantLevels(ROOT, f.parts, BUSH_LODS, 0.6), cull: BUSH_CULL,
+    rule: { density: 0.004, minScale: 0.8, maxScale: 1.25, castShadows: true, collision: null }, cellSize: 24,
   })),
   // Moss rocks: owned by the Rocky Dirt surface (its `foliageInclude`), not by the ground.
   ...mossRocks.map(r => ({
@@ -797,6 +957,7 @@ function bakeImpostor(asset, level, materials) {
   return { textureId: texId, textures: { normal: normalId }, octahedral: report.info }
 }
 const PINE_INDEX = FOLIAGE_PROTOS.findIndex(f => f.key === 'pine')
+const JACARANDA_INDEX = FOLIAGE_PROTOS.findIndex(f => f.key === 'jacaranda')
 const FLOWER_NAMES = flowerPatches.map(f => f.name)
 // From the LAST mesh level, the one it takes over from: baked from the full tree it came out denser and
 // darker than the sparse level beside it, and the hand-over at PINE_BILLBOARD showed as a pop.
@@ -806,6 +967,13 @@ const PINE_IMPOSTOR = bakeImpostor(foliageAssets[PINE_INDEX], PINE_LEVELS[PINE_L
   [NEEDLES_MAT]: { diffuse: 'pine_needles_diff.jpg', mask: 'pine_needles_mask.png' },
 })
 FOLIAGE_PROTOS[PINE_INDEX].billboard = { ...PINE_IMPOSTOR, distance: PINE_BILLBOARD }
+const JACARANDA_LEVELS = FOLIAGE_PROTOS[JACARANDA_INDEX].levels
+const JACARANDA_IMPOSTOR = bakeImpostor(foliageAssets[JACARANDA_INDEX], JACARANDA_LEVELS[JACARANDA_LEVELS.length - 1], {
+  [JACARANDA_MATS.trunkId]: { diffuse: 'jacaranda_trunk_diff.jpg' },
+  [JACARANDA_MATS.branchesId]: { diffuse: 'jacaranda_branches_diff.jpg' },
+  [JACARANDA_MATS.leavesId]: { diffuse: 'jacaranda_leaves_diff.jpg', mask: 'jacaranda_leaves_mask.png' },
+})
+FOLIAGE_PROTOS[JACARANDA_INDEX].billboard = { ...JACARANDA_IMPOSTOR, distance: PINE_BILLBOARD }
 const GRASS_NAMES = grassPatches.map(g => g.name)
 const RULES = FOLIAGE_PROTOS.map((f, i) => ({
   kind: 'mesh', id: id(`rule:${f.key}`), name: f.name, modelId: foliageAssets[i].id,
@@ -815,9 +983,13 @@ const RULES = FOLIAGE_PROTOS.map((f, i) => ({
   ...(f.orientation ? { orientation: f.orientation } : {}),
 }))
 
-// Ground rules on the Ground; the moss rocks on the Rocky Dirt that carries them.
-const terrainMaterial = valleyTerrainMaterial(TERRAIN_TEX, RULES.filter((_, i) => !FOLIAGE_PROTOS[i].surface),
-  [...GRASS_NAMES, ...FLOWER_NAMES], { rockFoliage: RULES.filter((_, i) => FOLIAGE_PROTOS[i].surface === ROCKY_DIRT_SLOT) })
+// Ground rules on the Ground; the moss rocks on the Rocky Dirt and the undergrowth on the Forest Floor
+// that carry them. Every painted road, path and the pond keep the small plants off.
+const SMALL_PLANTS = FOLIAGE_PROTOS.filter(f => !['pine', 'jacaranda'].includes(f.key) && !f.key.startsWith('moss-')).map(f => f.name)
+const terrainMaterial = valleyTerrainMaterial(TERRAIN_TEX, RULES.filter((_, i) => !FOLIAGE_PROTOS[i].surface), SMALL_PLANTS, {
+  rockFoliage: RULES.filter((_, i) => FOLIAGE_PROTOS[i].surface === ROCKY_DIRT_SLOT),
+  forestFoliage: RULES.filter((_, i) => FOLIAGE_PROTOS[i].surface === FOREST_SLOT),
+})
 /** Index of a slot's surface in `surfaceWeights` (0 is the ground). */
 const surfaceIndex = (slotId) => 1 + terrainMaterial.slots.findIndex(s => s.id === slotId)
 const TERRAIN_MATERIAL_ID = id('terrain-material')
@@ -826,11 +998,76 @@ const TERRAIN_MATERIAL_ID = id('terrain-material')
 
 const cliffDistance = cliffDistanceField(heights)
 log('cliff distance field')
+const inPlazaZone = (x, z) => z < -100 && Math.abs(x) < 20
+
+/**
+ * Forest tracks: dead ends off the roads into the pine belt. Each starts on a road 35-80 m from the cliff
+ * foot (three such points, at least 60 m apart) and walks downhill on the cliff distance, toward the
+ * cliffs, in 2 m steps until it is among the trees or the ground steepens.
+ */
+const trackStarts = []
+for (const line of roadLines) for (const [x, z] of line) {
+  const d = cliffDistance(x, z)
+  if (d < 35 || d > 80 || trackStarts.length >= 3 || inPlazaZone(x, z)) continue
+  if (trackStarts.some(([sx, sz]) => Math.hypot(x - sx, z - sz) < 60)) continue
+  if (buildings.some(b => Math.hypot(x - b.x, z - b.z) < b.radius + 15)) continue
+  trackStarts.push([x, z])
+}
+const trackLines = trackStarts.map(([x, z]) => {
+  let dx = 0, dz = 0
+  const pts = [[x, z]]
+  for (let k = 0; k < 120 && cliffDistance(x, z) > 12; k++) {
+    const gx = cliffDistance(x + 2, z) - cliffDistance(x - 2, z), gz = cliffDistance(x, z + 2) - cliffDistance(x, z - 2)
+    const g = Math.hypot(gx, gz) || 1
+    // Steer toward the cliff, keeping some of the heading so the track curves rather than zigzags.
+    dx = dx * 0.6 - (gx / g) * 0.4; dz = dz * 0.6 - (gz / g) * 0.4
+    const n = Math.hypot(dx, dz) || 1
+    x += (dx / n) * 2; z += (dz / n) * 2
+    if (heights.slopeAt(x, z) > 22) break
+    pts.push([x, z])
+  }
+  return catmullRom(pts.filter((_, i) => i % 3 === 0 || i === pts.length - 1), 0.5)
+})
+trackLines.forEach((line, i) => {
+  paintPolyline(mask, line, 1.0, 2, DIRT_ROAD_CHANNEL)
+  log(`forest track ${i}: ${line.length} samples, ends (${line[line.length - 1].map(v => v.toFixed(0)).join(', ')})`)
+})
+
+/**
+ * Stone paths: from each building's road side to the nearest point of the main road, and a paved patch
+ * round the bonfire.
+ */
+const mainLine = roadLines[0]
+const pathLines = buildings.map(b => {
+  const near = mainLine.reduce((best, p) => Math.hypot(p[0] - b.x, p[1] - b.z) < Math.hypot(best[0] - b.x, best[1] - b.z) ? p : best)
+  const d = Math.hypot(near[0] - b.x, near[1] - b.z) || 1
+  const start = [b.x + (near[0] - b.x) / d * b.radius * 0.6, b.z + (near[1] - b.z) / d * b.radius * 0.6]
+  return catmullRom([start, near], 0.5)
+})
+for (const line of pathLines) paintPolyline(mask, line, 1.1, 1.6, PATH_CHANNEL)
+paintPolyline(mask, [[BONFIRE.x - 0.5, BONFIRE.z], [BONFIRE.x + 0.5, BONFIRE.z]], 3, 1.5, PATH_CHANNEL)
+// Bare earth: patches through the meadows, and the ground worn bare about each building and the bonfire.
+paintDirtPatches(mask, heights, {
+  wear: (x, z) => {
+    let w = 1 - Math.min(1, Math.max(0, (Math.hypot(x - BONFIRE.x, z - BONFIRE.z) - 4) / 5))
+    for (const b of buildings) w = Math.max(w, 0.8 * (1 - Math.min(1, Math.max(0, (Math.hypot(x - b.x, z - b.z) - b.radius) / 4))))
+    return w
+  },
+})
+
+/** Distance to anything painted for walking on: roads, dirt roads, tracks and stone paths. */
+const walkLines = [...roadLines, ...dirtRoadLines, ...trackLines, ...pathLines]
+const pathDistance = (x, z) => {
+  let best = Infinity
+  for (const l of walkLines) best = Math.min(best, distanceToPolyline(x, z, l))
+  return best
+}
+
 const keepClear = [
   ...buildings.map(b => ({ x: b.x, z: b.z, r: b.radius + 1.5 })),
   { x: BONFIRE.x, z: BONFIRE.z, r: 4 },
   { x: SPAWN.x, z: SPAWN.z, r: 3 },
-  { x: POND.x, z: POND.z, r: POND.r + 1.5 },
+  { x: POND.x, z: POND.z, r: POND_REACH + 3 },
 ]
 const clear = (x, z, pad = 0) => keepClear.every(c => Math.hypot(x - c.x, z - c.z) > c.r + pad)
 const inPlaza = (x, z) => z < -112 && Math.abs(x) < 16
@@ -844,7 +1081,7 @@ function scatter() {
   {
     const random = rng(0x914e)
     const allowed = onGround(math, terrainMaterial, mask, heights, 'Pine')
-    const roadsClear = (x, z, d) => roadDistance(x, z) > d
+    const roadsClear = (x, z, d) => pathDistance(x, z) > d
     const belt = jitteredCandidates(random, { minX: -280, maxX: 280, minZ: -280, maxZ: 280 }, 0.02, (x, z) => {
       const d = cliffDistance(x, z)
       return d >= 8 && d <= 30 && heights.heightAt(x, z) < 45 && heights.slopeAt(x, z) < 32
@@ -862,6 +1099,22 @@ function scatter() {
     layers.push({ proto: protoOf('pine'), points: pts, seed: 0x9150, sink: 0.25 })
     // The leaf litter under them: the Forest Floor surface's mask channel.
     paintForestFloor(mask, pts)
+
+    // Jacarandas: broadleaf stands about the hamlet and the pond, among the meadows the pines leave open,
+    // and up the lower slopes around them (the valley floor proper is small).
+    const jacarandaAllowed = onGround(math, terrainMaterial, mask, heights, 'Jacaranda')
+    // A fine candidate grid, thinned by a spacing test, so the valley's small floor still gets its stands.
+    const jac = []
+    jitteredCandidates(rng(0x1ac0), { minX: -170, maxX: 170, minZ: -170, maxZ: 170 }, 0.02, (x, z, r) =>
+      r() < 0.5 && heights.heightAt(x, z) < 45 && heights.slopeAt(x, z) < 24 && cliffDistance(x, z) > 10
+        && clear(x, z, 6) && roadsClear(x, z, 6) && !inPlaza(x, z)
+        && Math.min(Math.hypot(x - HAMLET.x, z - HAMLET.z), Math.hypot(x - POND.x, z - POND.z)) < 130
+        && Math.hypot(x - SPAWN.x, z - SPAWN.z) > 18 && pts.every(([px, pz]) => Math.hypot(x - px, z - pz) > 9)
+        && jac.every(([jx, jz]) => Math.hypot(x - jx, z - jz) > 13) && jacarandaAllowed(x, z) && jac.push([x, z]) > 0)
+    counts.Jacaranda = jac.length
+    layers.push({ proto: protoOf('jacaranda'), points: jac, seed: 0x1ac1, sink: 0.2 })
+    // A wider crown, a wider litter.
+    paintForestFloor(mask, jac, 3.5, 7.5)
   }
   // Grass and celandine share the valley floor: one jittered grid, each candidate given to one patch.
   {
@@ -884,6 +1137,53 @@ function scatter() {
       layers.push({ proto: kinds[k], points: pts, seed: 0x6a60 + k, sink: 0.02 })
     })
   }
+  // The undergrowth on the Forest Floor: only where the litter clearly wins, as the engine places it.
+  {
+    const random = rng(0xf0e5)
+    const kinds = FOLIAGE_PROTOS.filter(f => f.surface === FOREST_SLOT)
+    const surface = surfaceIndex(FOREST_SLOT)
+    const allowed = kinds.map(f => onSurface(math, terrainMaterial, mask, heights, f.name, surface))
+    const per = kinds.map(() => [])
+    const total = kinds.reduce((sum, f) => sum + f.rule.density, 0)
+    jitteredCandidates(random, { minX: -650, maxX: 650, minZ: -650, maxZ: 650 }, total, (x, z, r) => {
+      // The mask first: most of the map has no litter, and the full surface test is the expensive one.
+      if (sampleMask(mask, x, z, FOREST_CHANNEL) < 0.3 || !clear(x, z, 1) || inPlaza(x, z) || pathDistance(x, z) < 2) return false
+      let pick = r() * total, k = 0
+      while (k < kinds.length - 1 && pick > kinds[k].rule.density) { pick -= kinds[k].rule.density; k++ }
+      if (!allowed[k](x, z)) return false
+      per[k].push([x, z])
+      return true
+    })
+    per.forEach((pts, k) => {
+      counts[kinds[k].name] = pts.length
+      layers.push({ proto: kinds[k], points: pts, seed: 0xf0f0 + k, sink: kinds[k].orientation ? 0.03 : 0.05 })
+    })
+  }
+  // Bushes on the ground: at the forest's edge, against the buildings and along the fences, a few in the open.
+  {
+    const random = rng(0xb05e)
+    const kinds = FOLIAGE_PROTOS.filter(f => f.key.startsWith('bush-'))
+    const allowed = kinds.map(f => onGround(math, terrainMaterial, mask, heights, f.name))
+    const per = kinds.map(() => [])
+    const fenceLines = FENCES.map(f => catmullRom(f, 1))
+    const near = (d, inner, outer) => d < inner ? 0 : d > outer ? 0 : 1 - Math.abs(d - (inner + outer) / 2) / ((outer - inner) / 2)
+    jitteredCandidates(random, { minX: -240, maxX: 240, minZ: -240, maxZ: 240 }, 0.08, (x, z, r) => {
+      if (heights.heightAt(x, z) > 60 || inPlaza(x, z) || !clear(x, z, 1) || pathDistance(x, z) < 3 || heights.slopeAt(x, z) > 30) return false
+      const edge = near(cliffDistance(x, z), 20, 50) * 0.5 + Math.min(1, sampleMask(mask, x, z, FOREST_CHANNEL) * 3) * 0.35
+      const wall = Math.max(0, ...buildings.map(b => near(Math.hypot(x - b.x, z - b.z) - b.radius, 1.5, 6)))
+      const fence = Math.max(0, ...fenceLines.map(l => near(distanceToPolyline(x, z, l), 0.8, 3.5)))
+      const chance = Math.max(0.2, edge, wall * 0.8, fence * 0.8)
+      if (r() > chance * 0.6) return false
+      const k = Math.floor(r() * kinds.length)
+      if (!allowed[k](x, z)) return false
+      per[k].push([x, z])
+      return true
+    })
+    per.forEach((pts, k) => {
+      counts[kinds[k].name] = pts.length
+      layers.push({ proto: kinds[k], points: pts, seed: 0xb060 + k, sink: 0.05 })
+    })
+  }
   // Moss rocks on the Rocky Dirt: only where that surface clearly wins, as the engine places them.
   {
     const random = rng(0x2c0c)
@@ -893,7 +1193,7 @@ function scatter() {
     const per = rocks.map(() => [])
     const total = rocks.reduce((sum, f) => sum + f.rule.density, 0)
     jitteredCandidates(random, { minX: -260, maxX: 260, minZ: -260, maxZ: 260 }, total, (x, z, r) => {
-      if (inPlaza(x, z) || !clear(x, z, 2) || roadDistance(x, z) < 4) return false
+      if (inPlaza(x, z) || !clear(x, z, 2) || pathDistance(x, z) < 4) return false
       const k = Math.floor(r() * rocks.length)
       if (!allowed[k](x, z)) return false
       per[k].push([x, z])
@@ -948,6 +1248,11 @@ function eulerToward(dir) {
   const yaw = Math.atan2(x, z) * 180 / Math.PI
   return [Math.round(pitch * 100) / 100, Math.round(yaw * 100) / 100, 0]
 }
+
+// The player is the knight: its template is rebuilt around it (see knight.mjs), before anything below reads it.
+const knight = buildKnight({ ROOT, BUILD, souls, idOf: id, node, vars, matJson, materialIds: KNIGHT_MATERIALS })
+log('knight', knight.report)
+LEVEL.player = souls.asTemplate('level:player', souls.playerNode(knight.playerModel), knight.textureIds)
 
 /** The player's camera sees the far mountains: the Playable's 100 m far plane is a room's. */
 const CAMERA_FAR = 3000
@@ -1081,23 +1386,52 @@ function caveEntranceNode(position = [0, 0, 0]) {
 const CAVE_TEMPLATE = souls.asTemplate('valley:cave', caveEntranceNode())
 
 /** Where the barrels stand: beside the hamlet's houses and by the bonfire, on level ground. */
+/**
+ * Patrol loops along the roads, each walked by `hollows` (indices of their starting points). The points
+ * are the path itself (a patrol walks straight between them), so each loop keeps to open road.
+ */
+const PATROLS = [
+  { name: 'Pond Road', points: [[-12, 28], [8, 30], [26, 26], [20, 18], [0, 21]], hollows: [0, 2] },
+  { name: 'Side Road', points: [[5, -8], [30, -26], [42, -30], [24, -16]], hollows: [1] },
+  { name: 'Gate Road', points: [[-10, -18], [-4, -50], [-1, -78], [-9, -58], [-15, -30]], hollows: [1, 3] },
+  { name: 'West Loop', points: [[-64, 14], [-72, 36], [-70, 62], [-62, 40]], hollows: [0] },
+  { name: 'Windmill Track', points: [[50, -52], [36, -64], [18, -74], [30, -60]], hollows: [2] },
+]
+
+/**
+ * Barrels stand in GROUPS of two or three against a wall, the way stores are stacked by a door, not
+ * scattered round each building one by one. One group per building, two by the larger ones.
+ */
 function barrelSpots() {
   const out = []
   const random = rng(0xba22e1)
+  const free = (x, z, gap) => heights.slopeAt(x, z) <= 14 && roadDistance(x, z) >= 3
+    && !buildings.some(o => Math.hypot(x - o.x, z - o.z) < o.radius + 0.6)
+    && out.every(([px, pz]) => Math.hypot(x - px, z - pz) >= gap)
   for (const b of buildings) {
-    let placed = 0
-    for (let tries = 0; tries < 24 && placed < 3; tries++) {
+    const groups = b.radius > 6 ? 2 : 1
+    let made = 0
+    for (let tries = 0; tries < 32 && made < groups; tries++) {
+      // The group's anchor: just off the wall, and well apart from the building's other group.
       const a = random() * Math.PI * 2
-      const r = b.radius + 1.2 + random() * 0.8
-      const x = b.x + Math.cos(a) * r, z = b.z + Math.sin(a) * r
-      if (heights.slopeAt(x, z) > 14 || roadDistance(x, z) < 3) continue
-      if (buildings.some(o => Math.hypot(x - o.x, z - o.z) < o.radius + 0.8)) continue
-      if (out.some(([px, pz]) => Math.hypot(x - px, z - pz) < 1.1)) continue
-      out.push([x, z, Math.round(random() * 360)])
-      placed++
+      const r = b.radius + 1.1 + random() * 0.5
+      const ax = b.x + Math.cos(a) * r, az = b.z + Math.sin(a) * r
+      if (!free(ax, az, 4)) continue
+      const group = [[ax, az]]
+      const want = 2 + (random() < 0.5 ? 1 : 0)
+      for (let k = 0; k < 12 && group.length < want; k++) {
+        // Shoulder to shoulder: a barrel's width apart, along the wall more than away from it.
+        const t = a + Math.PI / 2 * (random() < 0.5 ? 1 : -1)
+        const [px, pz] = group[group.length - 1]
+        const x = px + Math.cos(t) * (0.95 + random() * 0.25) + Math.cos(a) * (random() - 0.5) * 0.4
+        const z = pz + Math.sin(t) * (0.95 + random() * 0.25) + Math.sin(a) * (random() - 0.5) * 0.4
+        if (free(x, z, 0) && group.every(([gx, gz]) => Math.hypot(x - gx, z - gz) >= 0.9)) group.push([x, z])
+      }
+      if (group.length < 2) continue
+      for (const [x, z] of group) out.push([x, z, Math.round(random() * 360)])
+      made++
     }
   }
-  for (const [dx, dz] of [[3.2, 1.6], [3.8, 2.6], [-2.9, 2.4]]) out.push([BONFIRE.x + dx, BONFIRE.z + dz, Math.round(random() * 360)])
   return out
 }
 
@@ -1113,7 +1447,7 @@ function landscapeNode() {
         base: { materialId: TERRAIN_MATERIAL_ID, material: terrainMaterial },
         paintLayers: [],
         slotChannels: SLOT_CHANNELS,
-        maskRes: MASK_RES, maskSlices: 1,
+        maskRes: MASK_RES, maskSlices: MASK_SLICES,
         masks: Buffer.from(mask).toString('base64'),
       },
       foliage: foliageLayers,
@@ -1392,6 +1726,18 @@ function valleyScene() {
     souls.placedSpawn('hollow-e', 'Spawn Hollow E', at(14, -15), 300, { templateName: 'Hollow' }),
     souls.placedSpawn('caster', 'Spawn Sorcerer', at(WATCHTOWER.x - 7, WATCHTOWER.z + 7), 230, { templateName: 'Hollow Sorcerer' }),
     souls.placedSpawn('knight', 'Spawn Elite Knight', at(POND.x - 6, POND.z - 9), 300, { templateName: 'Elite Knight' }),
+    // Hollows on patrol, walking the roads' loops (the Nav Mesh's routes) until something comes into sight.
+    ...PATROLS.flatMap((route, r) => route.hollows.map((start, k) => {
+      const [x, z] = route.points[start]
+      return souls.placedSpawn(`patrol-${r}-${k}`, `Spawn Patrol ${route.name} ${k + 1}`, at(x, z), 0,
+        { templateName: 'Hollow', patrolRoute: route.name })
+    })),
+    // The landmarks are held by the heavies: the hamlet's well, the windmill, and the gate's approach.
+    souls.placedSpawn('well-knight', 'Spawn Hamlet Knight', at(HAMLET.x + 2, HAMLET.z + 4), 160, { templateName: 'Elite Knight' }),
+    souls.placedSpawn('mill-knight', 'Spawn Windmill Knight', at(WATCHTOWER.x - 9, WATCHTOWER.z - 2), 250, { templateName: 'Elite Knight' }),
+    souls.placedSpawn('gate-knight', 'Spawn Gate Knight', at(-3, -108), 0, { templateName: 'Elite Knight' }),
+    souls.placedSpawn('gate-hollow', 'Spawn Gate Hollow', at(4, -104), 340, { templateName: 'Hollow' }),
+    souls.placedSpawn('mill-caster', 'Spawn Windmill Sorcerer', at(WATCHTOWER.x + 6, WATCHTOWER.z + 9), 200, { templateName: 'Hollow Sorcerer' }),
   ])
 
   // Torches either side of the cave's mouth, down the road through the hamlet and on its walls: by day you
@@ -1401,7 +1747,7 @@ function valleyScene() {
   const torches = souls.group('torches', 'Torches', lamps.map((l, i) =>
     placeFire(l.kind, `valley:${i}`, l.at, [0, Math.round(l.yaw * 100) / 100, 0])))
 
-  const player = souls.playerNode()
+  const player = souls.playerNode(knight.playerModel)
   widenCamera(player)
   player.position = at(SPAWN.x, SPAWN.z)
   player.rotation = [0, SPAWN.yawDeg, 0]
@@ -1409,6 +1755,7 @@ function valleyScene() {
   // Bounded to the valley (the cliffs bound it anyway), so an editor bake stays inside the play area.
   const navMesh = node('Nav Mesh', 'navMesh', {
     id: id('navmesh'), position: [0, 20, -20], bake: {}, agentRadius: 0.45, size: [300, 80, 260],
+    routes: PATROLS.map(r => ({ name: r.name, loop: true, points: r.points.map(([x, z]) => at(x, z, 0.05)) })),
   })
 
 
@@ -1467,6 +1814,7 @@ function valleyScene() {
 const DUNGEON_ID = id('scene:dungeon')
 const DUNGEON_NAME = 'Dungeon'
 const dungeon = buildDungeon({
+  playerModel: knight.playerModel,
   id, node, vars, souls, withScript, linkInstance, tex, pbrMaterial, libraryMaterial, modelNode, matJson, texIdsOf, log,
   placeFire, wallTorch, brazierCage, campfire, CAMPFIRE_MATS, CAGE_MAT, CAVE_DARK_MAT, SURFACES, rayHit,
   BARREL_TEMPLATE, breakableBarrelNode, mossRocks, MOSS_ROCK_MAT,
@@ -1493,11 +1841,12 @@ const result = souls.writeProject({
     description: 'A souls-like on a 2 km mountain valley with a day and night cycle: stamina combat, rolls, lock-on, bonfires and Estus, on landscape layers for ground, rock, snow, forest floor and trails, meadow grass and flowers, pine forest, moss rocks, a torch-lit hamlet with breakable barrels, and a skull cave down into a three-level dungeon with a boss in its throne arena.',
     order: 0,
   },
-  models: [...propAssets, ...foliageAssets, ...dungeon.models],
+  models: [knight.model, ...propAssets, ...foliageAssets, ...dungeon.models],
+  rigs: [knight.rig],
   templates: [BARREL_TEMPLATE, DEBRIS_TEMPLATE, CAVE_TEMPLATE, ...Object.values(FIRE_TEMPLATES)],
   excludeTemplates: [LEVEL.torch.id, LEVEL.bonfire.id],
   tilesets: [FIRE_TILESET],
-  extraScenes: [{ id: DUNGEON_ID, name: DUNGEON_NAME, build: dungeon.scene, refs: { modelIds: [souls.MANNEQUIN_MODEL, ...dungeon.models.map(a => a.id)] } }],
+  extraScenes: [{ id: DUNGEON_ID, name: DUNGEON_NAME, build: dungeon.scene, refs: { modelIds: [souls.MANNEQUIN_MODEL, knight.model.id, ...dungeon.models.map(a => a.id)] } }],
   // 2 km of valley: barrels, debris and enemies far from the camera freeze in place instead of
   // simulating against the terrain. The player opts out (simulationMode 'always').
   projectSettings: { engine: { simulationRange: 90 } },
@@ -1514,7 +1863,8 @@ const result = souls.writeProject({
       ...Object.fromEntries(Object.values(FIRE_TEMPLATES).map(t => [t.name, FIRE])),
     },
     tileset: { Fire: FIRE },
-    model: { ...foliageFolder, ...buildingFolder, ...dungeon.folders },
+    model: { ...foliageFolder, ...buildingFolder, ...dungeon.folders, Knight: `${KNIGHT_DIR}/Models` },
+    rig: { Knight: `${KNIGHT_DIR}/Rigs` },
     // The souls torch and bonfire are excluded (the valley's fires replace them); what they leave in the
     // libraries joins the valley's fires rather than keeping a folder each.
     particleSystem: {
@@ -1531,7 +1881,7 @@ const result = souls.writeProject({
   },
   textureEntries: TEXTURE_ENTRIES,
   refs: {
-    modelIds: [souls.MANNEQUIN_MODEL, ...propAssets.map(a => a.id), ...foliageAssets.map(a => a.id)],
+    modelIds: [souls.MANNEQUIN_MODEL, knight.model.id, ...propAssets.map(a => a.id), ...foliageAssets.map(a => a.id)],
     terrainMaterialIds: [TERRAIN_MATERIAL_ID],
     foliageModelIds: foliageAssets.map(a => a.id),
   },

@@ -63,6 +63,17 @@ export default class SoulsCharacterNode extends CharacterNode {
    */
   public maxWalkSlope: number = 45
 
+  // ----- animation blending ------------------------------------------------------------------------
+  /**
+   * Seconds an attack takes to blend in over the locomotion under it, and to blend back out into idle or
+   * the run at its end. Real seconds, whatever the attack's playback speed.
+   */
+  public attackBlendIn: number = 0.12
+  public attackBlendOut: number = 0.35
+  /** The same for every other one-shot: rolls, reactions, drinking, swaps. */
+  public actionBlendIn: number = 0.1
+  public actionBlendOut: number = 0.22
+
   // ----- wading ------------------------------------------------------------------------------------
   /**
    * The water zones this character is standing in: nodes whose trigger it is inside and that carry the

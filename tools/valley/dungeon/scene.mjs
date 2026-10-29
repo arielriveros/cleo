@@ -20,7 +20,7 @@ const D = '/Environment/Dungeon'
 const DP = `${D}/Props`
 
 export function buildDungeon(kit) {
-  const { id, node, vars, souls, withScript, linkInstance, tex, pbrMaterial, libraryMaterial, modelNode, placeFire, log } = kit
+  const { id, node, vars, souls, withScript, linkInstance, tex, pbrMaterial, libraryMaterial, modelNode, placeFire, log, playerModel = null } = kit
 
   // ===================================================================================================
   // The structure
@@ -356,7 +356,7 @@ export function buildDungeon(kit) {
       souls.placedSpawn('dungeon:warden', 'Spawn Hollow Warden', L.BOSS.position, L.BOSS.yaw, { templateName: 'Hollow Warden', isBossSpawn: true }),
     ])
 
-    const player = souls.playerNode()
+    const player = souls.playerNode(playerModel)
     kit.widenCamera(player)
     player.position = L.SPAWN.position
     player.rotation = [0, L.SPAWN.yaw, 0]

@@ -32,6 +32,7 @@ import { FULL_DETAIL, particleLodDistance, selectParticleLod } from '../../parti
 import type { RenderSettings } from '../../particles/particleModules';
 import type { ParticleSystemNode } from '../../core/scene/nodes/particleSystemNode';
 import type { Scene } from '../../core/scene/scene';
+import { gatherParticleLocalLight, type ParticleLocalLight, type ParticleLocalLighting } from './particleLighting';
 // @ts-ignore -- WGSL modules, typed by the loader
 import ParticleSimComputeProgram from '../shaders/wgsl/particleSimCompute.wgsl';
 // @ts-ignore
@@ -126,9 +127,12 @@ export interface ParticleDrawFrame {
     depth: Texture | null;
     width: number;
     height: number;
+    /** Lit particles: the scene's indirect fill (scene ambient + sky light), irradiance. */
     ambient: readonly number[];
     sunDirection: readonly number[];
     sunColor: readonly number[];
+    /** Lit particles: the punctual lights, gathered per effect at its bounds centre. */
+    localLights?: readonly ParticleLocalLight[];
     /** Frustum test on a world AABB; a system wholly outside is not drawn (it still simulates). */
     visible?: (min: vec3, max: vec3) => boolean;
     /** Multiplies every system's LOD distances (the renderer's `particleLodDistanceScale`). Default 1. */
@@ -1027,8 +1031,18 @@ export class ParticleRenderer {
 
         const shaders = ShaderManager.Instance;
         const depth = this._depthOr(frame.depth);
+        const NO_LOCAL: ParticleLocalLighting = { fill: [0, 0, 0], keyDirection: [0, 1, 0], keyColor: [0, 0, 0] };
         try {
             for (const { node, gpu } of list) {
+                // The torches, lamps and spots that reach this effect, once for all its lit emitters.
+                let local: ParticleLocalLighting | null = null;
+                const localFor = (): ParticleLocalLighting => {
+                    if (local) return local;
+                    if (!frame.localLights?.length) return (local = NO_LOCAL);
+                    const box = node.getBoundingBox();
+                    const centre = [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2];
+                    return (local = gatherParticleLocalLight(centre, frame.localLights));
+                };
                 for (const emitter of gpu.drawOrder) {
                     const render = emitter.runtime.def.render;
                     const sorted = emitter.sorted && emitter.sort ? emitter.sort.textures[emitter.sort.result] : null;
@@ -1076,9 +1090,13 @@ export class ParticleRenderer {
                     shaders.setUniform('u_fragParams', packed.frag.u_fragParams);
                     shaders.setUniform('u_depthParams', [frame.near, frame.far, frame.orthographic ? 1 : 0, frame.depth ? 1 : 0]);
                     shaders.setUniform('u_fragMask', [sprite ? 1 : 0, render.lit ? 1 : 0, 1 / frame.width, 1 / frame.height]);
-                    shaders.setUniform('u_ambient', [frame.ambient[0], frame.ambient[1], frame.ambient[2], mesh ? 1 : 0]);
+                    const lights = render.lit ? localFor() : NO_LOCAL;
+                    shaders.setUniform('u_ambient', [frame.ambient[0] + lights.fill[0] / Math.PI, frame.ambient[1] + lights.fill[1] / Math.PI,
+                                                     frame.ambient[2] + lights.fill[2] / Math.PI, mesh ? 1 : 0]);
                     shaders.setUniform('u_sunDir', [frame.sunDirection[0], frame.sunDirection[1], frame.sunDirection[2], 0]);
                     shaders.setUniform('u_sunColor', [frame.sunColor[0], frame.sunColor[1], frame.sunColor[2], 0]);
+                    shaders.setUniform('u_keyDir', [lights.keyDirection[0], lights.keyDirection[1], lights.keyDirection[2], 0]);
+                    shaders.setUniform('u_keyColor', [lights.keyColor[0], lights.keyColor[1], lights.keyColor[2], 0]);
                     if (mesh) {
                         frame.pass.setVertexBuffer(0, mesh.vertices);
                         frame.pass.setIndexBuffer(mesh.indices, 'uint32');

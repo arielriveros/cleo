@@ -319,6 +319,22 @@ function armatureWorldRotation(skin: Skin, node: number): quat {
     return quat.normalize(q, q);
 }
 
+/**
+ * The world rotation of the frame a non-root joint is posed in: its parent joint's bind, from that joint's
+ * inverse bind matrix (which already carries the armature above it). Falls back to the node chain's rest
+ * when the parent has no usable bind.
+ */
+function parentFrameRotation(skin: Skin, node: number, pose?: RetargetPose): quat {
+    const parent = ancestorJointOf(skin, node);
+    const aligned = parent ? pose?.world.get(parent.nodeIndex) : undefined;
+    if (aligned) return quat.clone(aligned);
+    if (parent && !isIdentityMatrix(parent.inverseBindMatrix as any)) {
+        const world = mat4.invert(mat4.create(), parent.inverseBindMatrix as any);
+        if (world) return quat.normalize(quat.create(), mat4.getRotation(quat.create(), world));
+    }
+    return armatureWorldRotation(skin, node);
+}
+
 // The retarget correction for a matched bone: `corr` such that `At = corr · As`. Four regimes, in order:
 // a non-joint node (assimp pivot) copies through; the ROOT bone uses the armature difference
 // `Awt⁻¹ · Aws`; a source with no usable IBM copies through; otherwise the local bind delta `Bt · Bs⁻¹`.
@@ -329,16 +345,23 @@ function boneCorrection(sourceSkin: Skin, sNode: number, targetSkin: Skin, tNode
 // The same for a SEGMENT: a chain of source bones (top first) driving one target bone as if it were one bone,
 // `At = corr · (A1·A2·…)`. The segment's bind is the product of its members' local binds, so the correction
 // stays `Bt · (Bs1·Bs2·…)⁻¹`; a one-bone segment is exactly {@link boneCorrection}.
-function segmentCorrection(sourceSkin: Skin, segment: number[], targetSkin: Skin, tNode: number): quat {
+function segmentCorrection(sourceSkin: Skin, segment: number[], targetSkin: Skin, tNode: number, pose?: RetargetPose): quat {
     // A pivot has no inverse bind matrix on EITHER side, so there is no rest to delta against, and
     // `nodeTransforms` is frame 0 for an animation-only file. This makes the armature branch below
     // unreachable for a converted FBX, which only matters cross-rig.
     if (!topoOf(targetSkin).jointOfNode.has(tNode)) return quat.create();
 
-    if (isRootJoint(targetSkin, tNode)) {
-        const aws = armatureWorldRotation(sourceSkin, segment[0]);
-        const awt = armatureWorldRotation(targetSkin, tNode);
-        return quat.normalize(quat.create(), quat.multiply(quat.create(), quat.invert(quat.create(), awt), aws));
+    // The frame each side's bone is posed in: the armature for a root, its parent joint's bind otherwise.
+    // When ONE side is a root and the other is not (a Sketchfab export puts a `_rootJoint` above Mixamo's
+    // hips, so its hips is a child joint while the mannequin's is the root), the local-bind delta below
+    // compares a bone posed under a Z-up armature with one posed under a Y-up parent, and the character
+    // lies down. Their parent frames' world rotations are what must be bridged instead.
+    const sourceRoot = isRootJoint(sourceSkin, segment[0]);
+    const targetRoot = isRootJoint(targetSkin, tNode);
+    if (sourceRoot || targetRoot) {
+        const ps = sourceRoot ? armatureWorldRotation(sourceSkin, segment[0]) : parentFrameRotation(sourceSkin, segment[0]);
+        const pt = targetRoot ? armatureWorldRotation(targetSkin, tNode) : parentFrameRotation(targetSkin, tNode, pose);
+        return quat.normalize(quat.create(), quat.multiply(quat.create(), quat.invert(quat.create(), pt), ps));
     }
     const end = segment[segment.length - 1];
     const sJoint = sourceSkin.joints.find(j => j.nodeIndex === end);
@@ -346,8 +369,85 @@ function segmentCorrection(sourceSkin: Skin, segment: number[], targetSkin: Skin
     const bs = quat.create();
     for (const n of segment) quat.multiply(bs, bs, localBindRotation(sourceSkin, n));
     quat.normalize(bs, bs);
-    const bt = localBindRotation(targetSkin, tNode);
+    const bt = pose?.local.get(tNode) ?? localBindRotation(targetSkin, tNode);
     return quat.normalize(quat.create(), quat.multiply(quat.create(), bt, quat.invert(quat.create(), bs)));
+}
+
+/**
+ * The target skeleton re-posed to the SOURCE's bind pose, limb by limb: what the corrections are taken
+ * against when the two rigs were bound in different poses.
+ *
+ * The local-bind delta `Bt·Bs⁻¹` re-applies the source's motion relative to the TARGET's bind. That is right
+ * when both were bound in the same pose with different bone axes (a Mixamo T-pose onto an Unreal one), and
+ * wrong when they share bone axes but not the pose: an arm the clip lowers 90° from a T-pose was lowered 90°
+ * from an A-pose bind as well, 135° in all, into the chest. So each sided limb bone of the target is first
+ * turned, by the shortest arc, until it points where its source bone points at the source's bind (the
+ * direction to its driven children), with its parent's turn carried down the chain. Same-pose rigs come
+ * out unchanged. Centre bones (hips, spine, neck, head) are not turned.
+ *
+ * `local` / `world`: per target joint node, the aligned local and model-space rest rotations.
+ */
+export interface RetargetPose { local: Map<number, quat>; world: Map<number, quat> }
+
+function bindWorldOf(skin: Skin, node: number): mat4 | null {
+    const joint = skin.joints.find(j => j.nodeIndex === node);
+    if (!joint || isIdentityMatrix(joint.inverseBindMatrix as any)) return null;
+    return mat4.invert(mat4.create(), joint.inverseBindMatrix as any);
+}
+
+export function retargetPose(sourceSkin: Skin, targetSkin: Skin, plan: RetargetPlan, mapping?: BoneMapping): RetargetPose {
+    const topo = topoOf(targetSkin);
+    const local = new Map<number, quat>(), world = new Map<number, quat>();
+    // Driven target node -> the source bone it is mapped from (its segment's end).
+    const sourceOf = new Map<number, number>();
+    for (const [t, seg] of plan.segments) sourceOf.set(t, seg[seg.length - 1]);
+    // Bones no clip animates still say where a limb points (a hand's fingers, an arm's forearm).
+    for (const [s, t] of mapping?.restMatches ?? []) if (!sourceOf.has(t)) sourceOf.set(t, s);
+    const posOf = (skin: Skin, node: number): vec3 | null => {
+        const w = bindWorldOf(skin, node);
+        return w ? mat4.getTranslation(vec3.create(), w) : null;
+    };
+    const turnOf = new Map<number, quat>();
+    for (const ji of topo.order) {
+        const node = targetSkin.joints[ji].nodeIndex;
+        const w = bindWorldOf(targetSkin, node);
+        if (!w) continue;
+        const pj = topo.parentJoint[ji];
+        const parentNode = pj >= 0 ? targetSkin.joints[pj].nodeIndex : undefined;
+        let turn = parentNode !== undefined ? quat.clone(turnOf.get(parentNode) ?? quat.create()) : quat.create();
+
+        const src = sourceOf.get(node);
+        const name = targetSkin.nodeNames?.get(node) ?? '';
+        if (src !== undefined && (humanoidSlotOf(name) ?? '').includes('.')) {
+            // The bone's direction: towards its driven children (the fingers' average, for a hand), on both
+            // sides, the target's already carrying its parent's turn.
+            const here = posOf(targetSkin, node), hereS = posOf(sourceSkin, src);
+            const dt = vec3.create(), ds = vec3.create();
+            if (here && hereS) for (const cj of topo.children[ji]) {
+                const child = targetSkin.joints[cj].nodeIndex;
+                const childSrc = sourceOf.get(child);
+                const pt = posOf(targetSkin, child), ps = childSrc !== undefined ? posOf(sourceSkin, childSrc) : null;
+                if (!pt || !ps) continue;
+                vec3.add(dt, dt, vec3.normalize(vec3.create(), vec3.sub(vec3.create(), pt, here)));
+                vec3.add(ds, ds, vec3.normalize(vec3.create(), vec3.sub(vec3.create(), ps, hereS)));
+            }
+            if (vec3.length(dt) > 1e-6 && vec3.length(ds) > 1e-6) {
+                vec3.transformQuat(dt, vec3.normalize(dt, dt), turn);
+                const extra = quat.rotationTo(quat.create(), dt, vec3.normalize(ds, ds));
+                turn = quat.normalize(quat.create(), quat.multiply(quat.create(), extra, turn));
+            }
+        }
+        turnOf.set(node, turn);
+
+        const rest = quat.normalize(quat.create(), mat4.getRotation(quat.create(), w));
+        const aligned = quat.normalize(quat.create(), quat.multiply(quat.create(), turn, rest));
+        world.set(node, aligned);
+        const parentWorld = parentNode !== undefined ? world.get(parentNode) : undefined;
+        local.set(node, parentWorld
+            ? quat.normalize(quat.create(), quat.multiply(quat.create(), quat.invert(quat.create(), parentWorld), aligned))
+            : localBindRotation(targetSkin, node));
+    }
+    return { local, world };
 }
 
 /** A node's local rest rotation from its node transform, or identity. */
@@ -574,6 +674,7 @@ export function retargetAnimation(
     }
 
     const plan = retargetSegments(mapping, sourceSkin, targetSkin);
+    const pose = retargetPose(sourceSkin, targetSkin, plan, mapping);
     const hipsTarget = hipsNodeOf(targetSkin);
 
     // This clip's curves, by source node.
@@ -599,7 +700,7 @@ export function retargetAnimation(
     const rotOut = new Map<number, { input: number[]; output: number[]; channel: AnimationChannel }>();
 
     for (const [tgt, segment] of plan.segments) {
-        const corr = segmentCorrection(sourceSkin, segment, targetSkin, tgt);
+        const corr = segmentCorrection(sourceSkin, segment, targetSkin, tgt, pose);
         const end = segment[segment.length - 1];
 
         // ---- rotation: At = corr · (A1·A2·…). A one-bone segment keeps its own keys and interpolation.
@@ -684,8 +785,8 @@ export function retargetAnimation(
     for (const [tgt, gap] of plan.shares) {
         const curve = rotOut.get(tgt);
         if (!curve) continue;
-        const rest = gap.map(g => localBindRotation(targetSkin, g));
-        const bt = localBindRotation(targetSkin, tgt);
+        const rest = gap.map(g => pose.local.get(g) ?? localBindRotation(targetSkin, g));
+        const bt = pose.local.get(tgt) ?? localBindRotation(targetSkin, tgt);
         const restAbove = quat.create();
         for (const r of rest) quat.multiply(restAbove, restAbove, r);
         const restAboveInv = quat.invert(quat.create(), restAbove);

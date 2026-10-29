@@ -150,8 +150,9 @@ export class Raycaster {
     
     /** Bounding box for any node, via the node's own getBoundingBox. */
     private static getBoundingBox(node: Node): { min: vec3, max: vec3 } {
-        // A node may pick by a box other than its bounds. Only DecalNode does: its bounds are a projection
-        // volume that encloses what it lands on, and would swallow every click aimed at that. Duck-typed
+        // A node may pick by a box other than its bounds: a DecalNode (its bounds are a projection volume
+        // that encloses what it lands on) and a NavMeshNode (its bake volume spans the level), whose
+        // volumes would swallow every click aimed at what is inside them. Both pick by their icon. Duck-typed
         // so this module does not import a node class (the node graph is full of cycles).
         const pickBox = (node as { pickBox?: () => { min: vec3, max: vec3 } }).pickBox;
         return pickBox ? pickBox.call(node) : node.getBoundingBox();

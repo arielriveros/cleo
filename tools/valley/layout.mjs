@@ -56,6 +56,19 @@ export const ROADS = [
   },
 ]
 
+/**
+ * The lesser dirt roads, added after the reference: painted only (the heightmap was not graded for them),
+ * and kept out of ROADS so the road torches and the buildings' road-facing logic stay on the main road.
+ */
+export const DIRT_ROADS = [
+  // From the hamlet's road east to the pond's west bank.
+  { key: 'pond', halfWidth: 1.5, blend: 2.5, points: [[-30, 30], [-12, 28], [8, 30], [26, 26], [33, 23]] },
+  // A loop from the spawn round the west of the hamlet, past the Granary, back to the main road.
+  { key: 'west', halfWidth: 1.4, blend: 2.5, points: [[-12, 82], [-30, 82], [-54, 76], [-70, 62], [-72, 36], [-64, 14], [-40, 4], [-22, 10]] },
+  // From the windmill down to the gate road.
+  { key: 'windmill', halfWidth: 1.4, blend: 2.5, points: [[50, -52], [36, -64], [18, -74], [-1, -78]] },
+]
+
 /** The fences of the reference, as polylines — kept clear of foliage (no fence geometry is built). */
 export const FENCES = [
   [[-56, 30], [-54, 18], [-44, 14], [-36, 17]],

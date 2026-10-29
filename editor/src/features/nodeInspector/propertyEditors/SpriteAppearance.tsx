@@ -18,6 +18,7 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
   const [wireframe, setWireframe] = useState(sprite.wireframe)
   const [blend, setBlend] = useState(sprite.blend)
   const [exposureWeight, setExposureWeight] = useState(sprite.exposureWeight)
+  const [softness, setSoftness] = useState(sprite.softness)
 
   useEffect(() => {
     setTint(vec3ToHex(sprite.tint))
@@ -27,6 +28,7 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
     setWireframe(sprite.wireframe)
     setBlend(sprite.blend)
     setExposureWeight(sprite.exposureWeight)
+    setSoftness(sprite.softness)
   }, [props.node])
 
   const changed = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
@@ -57,6 +59,11 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
           <PropertyRow label='Exposure weight'>
             <Slider min={0} max={1} step={0.05} value={exposureWeight} onChange={(v) => {
               sprite.exposureWeight = v; setExposureWeight(v); changed()
+            }} />
+          </PropertyRow>
+          <PropertyRow label='Soft fade'>
+            <Slider min={0} max={1} step={0.01} value={softness} onChange={(v) => {
+              sprite.softness = v; setSoftness(v); changed()
             }} />
           </PropertyRow>
           <PropertyRow label='Transparent'>

@@ -127,7 +127,7 @@ better choice when the same animation is used in several places.
 - **Random start** — each copy starts on a random frame of its own list, so a row of the same sprite
   (torches along a wall) does not flicker in step. It applies when the sprite spawns.
 
-**Appearance** — tint, opacity, blending, exposure weight, transparency, which sides draw, and wireframe. A tileset with
+**Appearance** — tint, opacity, blending, exposure weight, soft fade, transparency, which sides draw, and wireframe. A tileset with
 **overdrive** makes its sprites glow through bloom; the value belongs to the tileset, and the section
 only reports it.
 
@@ -138,6 +138,11 @@ only reports it.
   daylight turns to a white smear at night or in a dark interior, where the exposure is hundreds of times
   higher. At 0 it keeps the same brightness under any exposure; fire usually wants a little (0.1), so it
   still glows brighter in the dark.
+- **Soft fade** — in metres, how far into the scene's geometry the sprite stays visible. At 0 a sprite is
+  cut off wherever it goes inside a surface, so a flame set into its torch loses its base inside the torch
+  head. Above 0 every part of the sprite within that distance behind a surface still shows, while a sprite
+  behind a wall further away is hidden as usual. A torch flame wants about the depth of the torch head
+  (0.2–0.3 m); much more lets the sprite show through things standing in front of it.
 
 Both support **billboarding** (**Constraints**: `free`, `spherical`, `cylindrical`), which matters in
 3D scenes where sprites are used for effects.

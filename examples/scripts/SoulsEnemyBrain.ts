@@ -25,9 +25,13 @@ export default class SoulsEnemyBrainNode extends ControllerNode {
     if (!pawn || pawn.isDead) return
     const key = this.targetKey
 
+    const self = this.possessed.worldPosition
+    // On patrol, "home" walks with the enemy: the leash is measured from where it LEFT its route, and
+    // giving up a chase returns it there. Left at the spawn, a patrol that saw the player 25 m down the
+    // road was already past its leash, so it gave up the chase the moment it began and never attacked.
+    if (this.behaviorState === 'Patrol' && pawn.home) pawn.home = [self[0], self[1], self[2]]
     const home = pawn.home ?? [0, 0, 0]
     this.goalPoint = [home[0], home[1], home[2]]
-    const self = this.possessed.worldPosition
 
     const held = this.getBlackboard(key)
     const heldId = typeof held === 'string' && held ? held : null

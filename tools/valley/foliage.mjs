@@ -157,6 +157,91 @@ export function buildPine(file) {
   return { bark, needles }
 }
 
+/**
+ * Keep one connected piece (a leaf card, a twig) in `keep`, chosen by a seeded draw, each kept piece
+ * scaled about its own centre by `grow` so the crown keeps its coverage with fewer, larger cards. A
+ * simplifier cannot do this: QEM collapses every card toward a sliver at once, and a crown of slivers
+ * reads as bare branches.
+ */
+export function thinPieces(part, keep, grow, seed) {
+  const n = part.positions.length / 3
+  const parent = new Int32Array(n).map((_, i) => i)
+  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x] } return x }
+  for (let i = 0; i < part.indices.length; i += 3) {
+    const a = find(part.indices[i]), b = find(part.indices[i + 1])
+    parent[b] = a
+    parent[find(part.indices[i + 2])] = a
+  }
+  const random = rng(seed)
+  const kept = new Map()   // root -> keep?
+  const centre = new Map() // root -> [x, y, z, count]
+  for (let v = 0; v < n; v++) {
+    const r = find(v)
+    if (!kept.has(r)) kept.set(r, random() < keep)
+    if (!kept.get(r)) continue
+    const c = centre.get(r) ?? [0, 0, 0, 0]
+    c[0] += part.positions[v * 3]; c[1] += part.positions[v * 3 + 1]; c[2] += part.positions[v * 3 + 2]; c[3]++
+    centre.set(r, c)
+  }
+  const remap = new Int32Array(n).fill(-1)
+  const positions = [], normals = [], uvs = []
+  for (let v = 0; v < n; v++) {
+    const r = find(v)
+    if (!kept.get(r)) continue
+    const c = centre.get(r)
+    remap[v] = positions.length / 3
+    for (let k = 0; k < 3; k++) positions.push(c[k] / c[3] + (part.positions[v * 3 + k] - c[k] / c[3]) * grow)
+    normals.push(part.normals[v * 3], part.normals[v * 3 + 1], part.normals[v * 3 + 2])
+    uvs.push(part.uvs[v * 2], part.uvs[v * 2 + 1])
+  }
+  const indices = []
+  for (let i = 0; i < part.indices.length; i += 3) {
+    if (remap[part.indices[i]] < 0) continue
+    indices.push(remap[part.indices[i]], remap[part.indices[i + 1]], remap[part.indices[i + 2]])
+  }
+  return {
+    ...part, positions: Float32Array.from(positions), normals: Float32Array.from(normals),
+    uvs: Float32Array.from(uvs), indices: Uint32Array.from(indices),
+  }
+}
+
+/**
+ * The jacaranda as [trunk, branches, leaves] parts, base centre of the trunk at the origin, brought down
+ * from the scan's 3.9M triangles to ~90k: a tenth of the leaf cards (grown to cover), then QEM on all
+ * three. Not the pine's 477k: a foliage layer embeds every level of its mesh in the scene, and the
+ * Valley's scene JSON already sits near V8's ~512 MB string ceiling (bundleAssetsRealProject.test.ts).
+ * Its glTF material order is branches, trunk, leaves.
+ */
+export function buildJacaranda(root, file, { leafKeep = 0.1, leafGrow = 1.9, leafRatio = 0.2, branchRatio = 0.02, trunkRatio = 0.06 } = {}) {
+  const parts = partsOf(readGltf(file))
+  const pick = (material) => mergeParts(parts.filter(p => p.material === material), undefined, material)
+  const branches = decimate(root, { ...pick(0), name: 'Branches' }, branchRatio)
+  const trunk = decimate(root, { ...pick(1), name: 'Trunk' }, trunkRatio)
+  const leaves = decimate(root, { ...thinPieces(pick(2), leafKeep, leafGrow, 0x1ac4), name: 'Leaves' }, leafRatio)
+  normalizeParts([trunk, branches, leaves], { reference: [trunk] })
+  return { trunk, branches, leaves }
+}
+
+/**
+ * Named nodes of a Poly Haven plant set as their own parts, each at the origin (the file lays its
+ * variants out in a row), merged per material when a variant has more than one.
+ */
+export function buildPlantSet(file, prefix, variants, scale = 1) {
+  const doc = readGltf(file)
+  const byName = new Map(doc.gltf.nodes.map((n, i) => [n.name, i]))
+  return variants.map(v => {
+    const index = byName.get(`${prefix}_${v.key}`) ?? byName.get(v.node)
+    if (index === undefined) throw new Error(`no "${prefix}_${v.key}" in ${file}`)
+    const m = mat4.fromScaling(mat4.create(), [scale, scale, scale])
+    const parts = partsOf(doc, { filter: (_, i) => i === index, transform: () => m })
+    const byMaterial = new Map()
+    for (const p of parts) byMaterial.set(p.material, [...(byMaterial.get(p.material) ?? []), p])
+    const merged = [...byMaterial].map(([mat, ps]) => mergeParts(ps, `${v.name} ${mat}`, mat))
+    normalizeParts(merged)
+    return { ...v, parts: merged }
+  })
+}
+
 // ---------------------------------------------------------------------------------------------------
 // Library assets
 // ---------------------------------------------------------------------------------------------------
@@ -215,6 +300,32 @@ export function pineLevels(root, pine, barkId, needlesId) {
     { name: 'Needles', part: decimate(root, pine.needles, ratio), materialId: needlesId },
   ]
   return { levels: [level(1), ...PINE_LODS.map(([r]) => level(r))], distances: PINE_LODS.map(([, d]) => d) }
+}
+
+/** The jacaranda on the pine's ladder: the same 15% and 5% levels, the same impostor hand-over. */
+export function jacarandaLevels(root, tree, { trunkId, branchesId, leavesId }) {
+  const level = (ratio) => [
+    { name: 'Trunk', part: decimate(root, tree.trunk, ratio), materialId: trunkId },
+    { name: 'Branches', part: decimate(root, tree.branches, ratio), materialId: branchesId },
+    { name: 'Leaves', part: decimate(root, tree.leaves, ratio), materialId: leavesId },
+  ]
+  return { levels: [level(1), ...PINE_LODS.map(([r]) => level(r))], distances: PINE_LODS.map(([, d]) => d) }
+}
+
+/** Undergrowth (ferns, bushes, fallen branches): full detail close up, then two QEM levels. */
+export const UNDERGROWTH_LODS = [[0.3, 8], [0.1, 18]]
+export const BUSH_LODS = [[0.3, 15], [0.1, 35]]
+export const FERN_CULL = 35
+export const BUSH_CULL = 90
+export const BRANCH_CULL = 30
+
+/**
+ * `parts` ([{ name, part, materialId }]) at `base` of their detail (1: the scan as it is) and at each
+ * `lods` ratio of that.
+ */
+export function plantLevels(root, parts, lods, base = 1) {
+  const level = (ratio) => parts.map(p => ({ ...p, part: decimate(root, p.part, ratio * base) }))
+  return { levels: [level(1), ...lods.map(([r]) => level(r))], distances: lods.map(([, d]) => d) }
 }
 
 export { triangles, boundsOf }

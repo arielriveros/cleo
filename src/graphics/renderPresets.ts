@@ -30,7 +30,11 @@ const EXPOSURE_BASE: AutoExposurePresetOptions = {
 
 // Darker-than-adapted trims for the dark end of the meter. Lights keep real values, so without these a
 // fully adapted eye lifts a moonlit field or a torch-lit crypt to a grey day. Keyed on the metered EV100.
-const NIGHT_CURVE: ExposureCurveKey[] = [[-3, -3.5], [1, -3], [5, -2], [9, -0.75], [12, 0]];
+// Through the day it keeps FALLING as the scene brightens: a view up into the sky or toward the sun
+// meters brighter, and the trim takes it darker still rather than handing back the stop the meter took
+// away (a rising curve there made looking at the sky brighten the picture). Day sits about a stop under
+// a fully adapted eye, which is how sunlit ground reads on film rather than as a grey card.
+const NIGHT_CURVE: ExposureCurveKey[] = [[-3, -3.5], [1, -3], [5, -2], [8, -0.8], [10, -0.7], [12, -1.1], [15, -1.6]];
 const CAVE_CURVE: ExposureCurveKey[] = [[0, -0.75], [4, -0.5], [8, -0.25], [11, 0]];
 
 export const AUTO_EXPOSURE_PRESETS: AutoExposurePreset[] = definePresets(EXPOSURE_BASE, [
@@ -43,7 +47,7 @@ export const AUTO_EXPOSURE_PRESETS: AutoExposurePreset[] = definePresets(EXPOSUR
         { exposureCompensation: 0, exposureMinEV: 3, exposureMaxEV: 13, exposureSpeedUp: 1.5, exposureSpeedDown: 0.4,
             exposureCompensationCurve: CAVE_CURVE }],
     ['dayNight', 'Day–Night Cycle', 'Meters from noon to a moonlit night, with a curve that keeps the night darker than a fully adapted eye would.',
-        { exposureMinEV: -3, exposureSpeedUp: 2, exposureSpeedDown: 0.7, exposureCompensationCurve: NIGHT_CURVE }],
+        { exposureCompensation: 0, exposureMinEV: -3, exposureSpeedUp: 2, exposureSpeedDown: 0.7, exposureCompensationCurve: NIGHT_CURVE }],
     ['lowKey', 'Low Key / Horror', 'Keeps darkness dark: never lifts shadows past EV 4, and adapts to the dark slowly.',
         { exposureCompensation: -0.5, exposureMinEV: 4, exposureMaxEV: 15, exposureSpeedUp: 2, exposureSpeedDown: 0.3 }],
     ['cinematic', 'Cinematic', 'Gentle, slow adaptation in both directions.',

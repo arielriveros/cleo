@@ -281,6 +281,15 @@ export type ModelAsset = {
    */
   rigId?: string
   /**
+   * The rig built from THIS model's own skeleton, when `rigId` names another one it has been retargeted
+   * to play (RigSlot's "Retarget skeleton…"). Absent while the model plays its own skeleton.
+   *
+   * It is where the bone corrections for that retarget live — `nativeRig.retargets[rigId]` — since a
+   * correction maps the other skeleton onto THIS one; and its `retargetTargets` is the list of skeletons
+   * this model can be switched to. See `nativeRigOf` / `targetedRigs` in rigAssets.ts.
+   */
+  nativeRigId?: string
+  /**
    * LEGACY — present only on a LOD level generated before levels were embedded: which model it was
    * decimated from, and which level it is. Generated levels now live inside their source (`lods`), so
    * nothing writes this any more; it is read so the source's next generate/save, and its deletion, can

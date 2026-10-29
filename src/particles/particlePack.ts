@@ -101,7 +101,7 @@ export function packEmitter(def: EmitterDef, flat2D = false): PackedEmitter {
     sim.u_shape0 = [SHAPE_KIND[shape.shape] ?? 0, Math.max(0, num(shape.radius, 0)),
                     num(shape.thickness, 1), num(shape.arc, 360) * DEG];
     sim.u_shape1 = [box[0] * 0.5, box[1] * 0.5, box[2] * 0.5, num(shape.angle, 0) * DEG];
-    sim.u_shapeOffset = [...triple(shape.offset, [0, 0, 0]), 0];
+    sim.u_shapeOffset = [...triple(shape.offset, [0, 0, 0]), shape.shape === 'circle' ? num(shape.orbit, 0) : 0];
 
     const life = pair(activeModule(def, 'lifetime')?.params.range, [1, 1]);
     const size = pair(activeModule(def, 'size')?.params.range, [0.1, 0.1]);

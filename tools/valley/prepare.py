@@ -24,8 +24,11 @@ Output is deterministic (fixed quality, no metadata), so re-running it is a no-o
 
 import io
 import json
+import shutil
 import struct
 import sys
+import urllib.request
+import zipfile
 from pathlib import Path
 
 from PIL import Image, ImageFile
@@ -85,6 +88,20 @@ def save_jpeg(im: Image.Image, name: str, size: int, grey: bool = False) -> None
 def save_png(im: Image.Image, name: str, size: int, mode: str = "RGB") -> None:
     im = fit(grey8(im) if mode == "L" else im.convert(mode), size)
     im.save(OUT / f"{name}.png", "PNG", optimize=True)
+
+
+def unpack() -> None:
+    """Poly Haven downloads arrive zipped: each is extracted once, beside itself, to the folder layout the
+    rest of this script and the generator read: `foliage/<name>.gltf/` (the zip's own name less `.zip`)
+    and `terrain_textures/<name>/textures/`."""
+    for folder in ("foliage", "terrain_textures"):
+        for z in sorted((SRC / folder).glob("*.zip")):
+            dest = z.with_suffix("")
+            if dest.exists():
+                continue
+            with zipfile.ZipFile(z) as f:
+                f.extractall(dest)
+            print(f"unpacked {z.relative_to(SRC)}")
 
 
 def terrain(prefix: str, folder: str, base: str) -> None:
@@ -210,6 +227,52 @@ def pine() -> None:
     save_png(pick(needles, "normalTexture"), "pine_needles_nor", 1024)
 
 
+# The cutout plants' alpha maps. Poly Haven's glTF zips leave them out (the JPEG colour maps carry no
+# alpha), so each is fetched from the asset's own file list once and kept beside its textures.
+CUTOUTS = {
+    "fern": ("fern_02", "fern_02_alpha_1k.png"),
+    "jacaranda_leaves": ("jacaranda_tree", "jacaranda_tree_leaves_alpha_1k.png"),
+    "rooibos": ("wild_rooibos_bush", "wild_rooibos_bush_alpha_1k.png"),
+}
+
+
+def cutout_masks() -> None:
+    """One single-channel mask per cutout plant, the slot the engine's cutout reads (RED). The alpha
+    maps are grey images (16-bit for the fern; RGBA with a near-opaque alpha for the jacaranda), so the
+    grey value is the coverage, never the alpha channel."""
+    for prefix, (asset, file) in CUTOUTS.items():
+        src = SRC / "foliage" / f"{asset}_1k.gltf" / "textures" / file
+        if not src.exists():
+            url = f"https://dl.polyhaven.org/file/ph-assets/Models/png/1k/{asset}/{file}"
+            print(f"fetching {url}")
+            urllib.request.urlretrieve(url, src)
+        im = load(src)
+        save_png(grey8(im if im.mode.startswith("I") else im.convert("RGB")), f"{prefix}_mask", 1024, "L")
+
+
+def jacaranda() -> None:
+    """The jacaranda's colour maps, copied here because its impostor bake decodes from this folder. Its
+    other maps (and every other new plant's) ship from build/foliage as the 1k JPEGs they already are."""
+    tex = SRC / "foliage" / "jacaranda_tree_1k.gltf" / "textures"
+    for part in ("trunk", "branches", "leaves"):
+        shutil.copyfile(tex / f"jacaranda_tree_{part}_diff_1k.jpg", OUT / f"jacaranda_{part}_diff.jpg")
+
+
+def knight() -> None:
+    """The knight player's three materials (blinn1/2/3): base colour, normal and the packed
+    occlusion/roughness/metal map glTF shares between the two slots, which is an ARM as it stands. The
+    two cut-out materials (the mohawk, straps and chain mail) get a mask from the base colour's alpha."""
+    path = SRC / "medieval_knight__sculpture__game_ready.glb"
+    doc, images = glb_images(path)
+    tex = [t["source"] for t in doc["textures"]]
+    for index, m in enumerate(doc["materials"]):
+        prefix = f"knight_{m['name']}"
+        gltf_material(path, index, prefix, 2048)
+        if m.get("alphaMode") == "MASK":
+            color = images[tex[m["pbrMetallicRoughness"]["baseColorTexture"]["index"]]].convert("RGBA")
+            save_png(color.getchannel("A"), f"{prefix}_mask", 2048, "L")
+
+
 def rock_moss() -> None:
     """The moss rocks ship roughness but no ARM: one is assembled (AO 1, roughness, metal 0), the layout
     every lit material in this example reads."""
@@ -269,16 +332,24 @@ def main() -> None:
     if not SRC.exists():
         sys.exit(f"no {SRC}")
     OUT.mkdir(parents=True, exist_ok=True)
+    unpack()
     terrain("ground", "brown_mud_leaves_01_1k", "brown_mud_leaves_01")
     terrain("trail", "rocky_trail_02_1k", "rocky_trail_02")
     terrain("rock", "rock_05_1k", "rock_05")
     terrain("snow", "snow_02_1k", "snow_02")
     terrain("forest", "forest_leaves_02_1k", "forest_leaves_02")
     terrain("rockydirt", "rocks_ground_05_1k", "rocks_ground_05")
+    terrain("dirt", "dirt_1k", "dirt")
+    terrain("clay", "clay_plaster_1k", "clay_plaster")
+    terrain("sand", "coast_sand_02_1k", "coast_sand_02")
+    terrain("path", "concrete_rock_path_1k", "concrete_rock_path")
     props()
     dungeon_props()
     grass()
     pine()
+    jacaranda()
+    cutout_masks()
+    knight()
     rock_moss()
     skull_cave()
     water_normal()

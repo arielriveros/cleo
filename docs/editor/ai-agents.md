@@ -155,6 +155,10 @@ no brain, the **Goal** section above is in charge.
 The walkable surface AI pathfinds over, baked from the scene's colliders and terrain inside the
 node's box. Add **Gameplay ▸ Nav Mesh**, size its box, and press **Bake**.
 
+In the viewport a navmesh is selected by its green icon, at the node's position. Clicking anywhere
+else inside its box (the landscape it covers) selects what you clicked, not the navmesh. It can also be
+selected from the scene tree.
+
 ### Bounds
 
 The node's **transform picks what gets baked** — an oriented box, so "navigate this room" is

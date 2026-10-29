@@ -219,7 +219,14 @@ describe.skipIf(!present)('the Valley example project', () => {
         expect(asset.variables.find((v: any) => v.name === 'spawnables')?.type).toBe('stringList');
         expect(asset.variables.find((v: any) => v.name === 'templateName')?.options).toBe('spawnables');
         const placed = allNodes(scene().scene).filter(n => scriptOf(n) === asset);
-        expect(placed).toHaveLength(7);
+        // The original seven, the patrolling hollows and the landmarks' guards.
+        expect(placed.length).toBeGreaterThanOrEqual(15);
+        // Every patrol walks a route the Nav Mesh actually has.
+        const nav = allNodes(scene().scene).find(n => n.type === 'navMesh');
+        const routes = new Set((nav?.routes ?? []).map((r: any) => r.name));
+        const patrols = placed.filter(n => n.scriptVars.patrolRoute);
+        expect(patrols.length).toBeGreaterThan(4);
+        for (const n of patrols) expect(routes.has(n.scriptVars.patrolRoute), n.name).toBe(true);
         for (const n of placed) {
             expect(n.variables.__templateId?.value, n.name).toBe(spawnTemplate.id);
             expect(list, n.name).toContain(n.scriptVars.templateName);
@@ -496,16 +503,15 @@ describe.skipIf(!present)('the Valley example project', () => {
         expect(dead(controllers[1])).toBe('Souls_Death');
     });
 
-    // "Run With Sword" from the waist up: a masked override layer over the locomotion blend, on while running.
-    it('runs with the sword on the upper body only', () => {
+    // "Run With Sword" on the sword arm: a masked override layer over the locomotion blend, on while running.
+    it('runs with the sword on the weapon arm only', () => {
         const [mask] = library('boneMasks');
-        expect(mask.name).toBe('Chest Up');
+        expect(mask.name).toBe('Weapon Arm');
         const bones = Object.keys(mask.weights);
-        // From the chest: the lower spine stays with the legs, or the run rocks the whole torso.
-        expect(bones.some(b => /:Spine2$/.test(b))).toBe(true);
-        expect(bones.some(b => /:Spine1?$/.test(b))).toBe(false);
-        expect(bones.some(b => /:Head$/.test(b))).toBe(true);
+        // The right shoulder down: the torso, the head and the left arm keep the locomotion's swing.
+        expect(bones.some(b => /:RightShoulder$/.test(b))).toBe(true);
         expect(bones.some(b => /:RightHand$/.test(b))).toBe(true);
+        expect(bones.some(b => /:(Spine\d?|Head|Neck|LeftArm|LeftShoulder)$/.test(b))).toBe(false);
         expect(bones.some(b => /(UpLeg|:Hips)$/.test(b))).toBe(false);
         for (const c of library('animControllers')) {
             const layer = c.machine.layers.find((l: any) => l.name === 'UpperBody');

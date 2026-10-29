@@ -640,7 +640,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this._recovered = false
     this._enter('attack')
     this._playSpeed = Math.max(0.05, num(move.playSpeed, 1))
-    this._play(move.clip, this._playSpeed)
+    this._play(move.clip, this._playSpeed, false, 1, false, true)
     this._usesEvents = this._clipHasEvent(move.clip, 'hit')
     const length = this._clipLength > 0 ? this._clipLength : num(move.recoverTime, 0.7) + 0.4
     this._actionSeconds = length / this._playSpeed
@@ -969,17 +969,20 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     }
   }
 
-  private _play(clip: string, speed: number, loop: boolean = false, ikWeight: number = 1, rootMotion: boolean = false): void {
+  private _play(clip: string, speed: number, loop: boolean = false, ikWeight: number = 1, rootMotion: boolean = false,
+                attack: boolean = false): void {
     this._clip = clip
     this._clipLength = this._clipDuration(clip)
     const animator = this._model?.animator as any
     if (!animator?.playAction || !clip) return
-    animator.playAction(clip, { speed, loop, blendIn: 0.08, blendOut: 0.18, ikWeight, rootMotion })
+    const blendIn = attack ? this.attackBlendIn : this.actionBlendIn
+    const blendOut = attack ? num(this._move?.blendOut, this.attackBlendOut) : this.actionBlendOut
+    animator.playAction(clip, { speed, loop, blendIn, blendOut, ikWeight, rootMotion })
   }
 
-  private _stopAction(): void {
+  private _stopAction(blendOut: number = this.actionBlendOut): void {
     const animator = this._model?.animator as any
-    animator?.stopAction?.(undefined, 0.12)
+    animator?.stopAction?.(undefined, blendOut)
     this._clip = ''
   }
 

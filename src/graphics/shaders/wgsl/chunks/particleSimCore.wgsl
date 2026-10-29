@@ -56,7 +56,7 @@ struct ParticleSimUniforms {
     u_mask: vec4<f32>,                // feature bits, reset, live window start, live window count
     u_shape0: vec4<f32>,              // shape kind, radius, volume (0 shell .. 1 solid), arc (rad)
     u_shape1: vec4<f32>,              // box half extents xyz, cone angle (rad)
-    u_shapeOffset: vec4<f32>,         // offset xyz (emitter space), 0
+    u_shapeOffset: vec4<f32>,         // offset xyz (emitter space), circle orbit (turns/s, 0 = off)
     u_life: vec4<f32>,                // lifetime min, max, size min, max
     u_speed: vec4<f32>,               // speed min, max, direction mode, inherit fraction
     u_dir: vec4<f32>,                 // direction xyz (emitter space), spread (rad)
@@ -223,6 +223,24 @@ fn spawnParticle(slot: u32, spawnIndex: u32, seed: u32, origin: vec4<f32>, inher
     var p: Particle;
     p.position = select(transformPoint(m, shape.position), shape.position, isLocal);
 
+    // An ORBITING circle: the ring stands across the emitter's direction of travel and the spawn point
+    // turns round it with time, so a moving emitter leaves a helix (a projectile's spiral trail). Its
+    // radial direction is the shape's normal, already in world space.
+    let orbit = u_sim.u_shapeOffset.w;
+    let orbiting = i32(u_sim.u_shape0.x) == 5 && orbit != 0.0 && !isLocal;
+    var orbitDir = vec3<f32>(0.0, 1.0, 0.0);
+    if (orbiting) {
+        let travel = u_sim.u_emitterVel.xyz;
+        let axis = select(normalize(transformDir(m, vec3<f32>(0.0, 1.0, 0.0))), normalize(travel), dot(travel, travel) > 1e-6);
+        let helper = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0), abs(axis.y) > 0.9);
+        let t = normalize(cross(axis, helper));
+        let b = cross(axis, t);
+        let when = u_sim.u_step.y - u_sim.u_step.x * (1.0 - birth);
+        let a = 6.2831853 * orbit * when;
+        orbitDir = t * cos(a) + b * sin(a);
+        p.position = m[3].xyz + orbitDir * u_sim.u_shape0.y + transformDir(m, u_sim.u_shapeOffset.xyz);
+    }
+
     let mode = i32(u_sim.u_speed.z);
     var dir = shape.normal;
     if (mode == 1) { dir = normalize(u_sim.u_dir.xyz + vec3<f32>(0.0, 1e-6, 0.0)); }
@@ -232,6 +250,7 @@ fn spawnParticle(slot: u32, spawnIndex: u32, seed: u32, origin: vec4<f32>, inher
     }
     dir = spreadDirection(dir, u_sim.u_dir.w, &rng);
     if (!isLocal) { dir = normalize(transformDir(m, dir)); }
+    if (orbiting && mode != 1) { dir = spreadDirection(orbitDir, u_sim.u_dir.w, &rng); }
     let speed = mix(u_sim.u_speed.x, u_sim.u_speed.y, particleRand(&rng));
     p.velocity = dir * speed;
     if (!isLocal) { p.velocity = p.velocity + u_sim.u_emitterVel.xyz * u_sim.u_speed.w; }

@@ -97,19 +97,28 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(b64(s.masks).length).toBe(s.maskSlices * s.maskRes * s.maskRes * 4);
     });
 
-    it('uses the library landscape material: ground, rocky dirt, a painted forest floor, rock, snow and a painted trail', () => {
+    it('uses the library landscape material: ground, dirt, rocky dirt, forest floor, rock, snow, a clay and sand pond and painted roads', () => {
         const s = terrain().layerStack;
         const asset = library('terrainMaterials').find((m: any) => m.id === s.base.materialId);
         expect(asset).toBeDefined();
         expect(s.base.material).toEqual(asset.material);
-        expect(asset.material.slots.map((x: any) => x.name)).toEqual(['Rocky Dirt', 'Forest Floor', 'Rock', 'Snow', 'Trail']);
-        for (const name of ['Trail', 'Forest Floor']) {
+        expect(asset.material.slots.map((x: any) => x.name)).toEqual([
+            'Dirt', 'Rocky Dirt', 'Forest Floor', 'Rock', 'Snow', 'Pond Clay', 'Shore Sand', 'Dirt Road', 'Trail', 'Stone Path',
+        ]);
+        const painted = ['Dirt', 'Forest Floor', 'Pond Clay', 'Shore Sand', 'Dirt Road', 'Trail', 'Stone Path'];
+        for (const name of painted) {
             const slot = asset.material.slots.find((x: any) => x.name === name);
             expect(slot.manual, name).toBe(true);
             expect(s.slotChannels[slot.id], name).toBeTypeOf('number');
         }
-        // Two painted slots, two channels.
-        expect(new Set(Object.values(s.slotChannels)).size).toBe(2);
+        // One channel per painted slot, over two RGBA slices.
+        expect(new Set(Object.values(s.slotChannels)).size).toBe(painted.length);
+        expect(s.maskSlices).toBe(2);
+        // The undergrowth belongs to the Forest Floor.
+        const forest = asset.material.slots.find((x: any) => x.name === 'Forest Floor');
+        expect(forest.foliageInclude.map((r: any) => r.name)).toEqual([
+            'Fern A', 'Fern B', 'Broadleaf Fern A', 'Broadleaf Fern B', 'Dry Branches A', 'Dry Branches B',
+        ]);
         // The moss rocks belong to the Rocky Dirt, not the ground.
         const dirt = asset.material.slots.find((x: any) => x.name === 'Rocky Dirt');
         expect(dirt.foliageInclude.map((r: any) => r.name)).toEqual(['Moss Rock A', 'Moss Rock B', 'Moss Rock C', 'Moss Rock D']);
@@ -159,8 +168,14 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             } else if (layer.name.includes('Moss Rock')) {
                 expect(lod0, layer.name).toBeGreaterThan(7000);
                 expect(layer.cullDistance, layer.name).toBe(120);
+            } else if (/Fern|Branches|Bush/.test(layer.name)) {
+                // Undergrowth: the scan at full detail, two QEM levels, culled well short of the trees.
+                expect(lod0, layer.name).toBeGreaterThan(2000);
+                expect(layer.billboard, layer.name).toBeUndefined();
+                expect(layer.cullDistance, layer.name).toBeLessThanOrEqual(90);
             } else {
-                expect(lod0, layer.name).toBeGreaterThan(400000);
+                // The pine at its scan's full detail; the jacaranda pre-reduced from 3.9M (see buildJacaranda).
+                expect(lod0, layer.name).toBeGreaterThan(layer.name === 'Jacaranda' ? 70000 : 400000);
                 // 15% and 5% of the source, give or take what the decimator keeps.
                 const [l1, l2] = layer.lods.map((l: any) => tris(l.models));
                 expect(l1 / lod0).toBeGreaterThan(0.13); expect(l1 / lod0).toBeLessThan(0.17);
@@ -183,7 +198,8 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             const bytes = b64(layer.instances);
             const f = new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
             const count = f.length / 5;
-            expect(count, layer.name).toBeGreaterThan(100);
+            // Trees and bushes stand on the small valley floor; everything else numbers in the hundreds.
+            expect(count, layer.name).toBeGreaterThan(/Jacaranda|Bush/.test(layer.name) ? 10 : 100);
             expect(count, layer.name).toBeLessThan(MAX_INSTANCES);
             for (let i = 0; i < f.length; i += 5 * 37) {
                 const [x, y, z] = [f[i], f[i + 1], f[i + 2]];
@@ -421,13 +437,17 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             expect(f.sprite.blend).toBe('additive');
             expect(f.animation.randomStart).toBe(true);
             expect(f.animation.frames).toHaveLength(32);
+            // The flame's base sits inside its torch or pit: shown through it, not cut off.
+            expect(f.sprite.softness, f.name).toBeGreaterThan(0);
         }
-        // Embers always; sparks now and then, falling and bouncing off the floor.
+        // Embers always; sparks one at a time, falling and bouncing off the floor.
         const fx = library('particleSystems').find((p: any) => p.name === 'Torch Embers');
         const sparks = fx.system.emitters.find((e: any) => e.name === 'Sparks');
         const burst = sparks.spawn.find((m: any) => m.type === 'spawnBurst').params.bursts[0];
-        expect(burst.probability).toBeLessThan(0.5);
-        expect(burst.cycles).toBe(0);
+        // Three single sparks a cycle, seconds apart: a crackle, not a fountain.
+        expect(burst.count).toBe(1);
+        expect(burst.cycles).toBe(3);
+        expect(burst.interval).toBeGreaterThan(1);
         const collision = sparks.update.find((m: any) => m.type === 'collision').params;
         // Off the scene depth, where the floor they land on is drawn; not the physics bodies, which would
         // pack every collider near every torch into the simulation each frame.

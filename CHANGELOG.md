@@ -102,8 +102,45 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   socket ignores its bone's scale, so an FBX armature's 0.01 does not shrink a held sword, and the
   follow runs after animation and before camera rigs, so nothing trails the hand by a frame.
 
+- **A character can play another skeleton's animation set.** The inspector's **Skeleton** slot now
+  lists only the character's own skeleton and the skeletons it has been retargeted to. **Retarget
+  skeleton…** picks another skeleton that has clips, shows the bone mapping (**Map bones…**), and **Use
+  skeleton** saves it and switches the character to that skeleton's clips, animators and blend spaces.
+  The mapping corrections are stored on the character's own rig (`RigAsset.retargetTargets` lists the
+  skeletons it is set up for; `ModelAsset.nativeRigId` names its own while it plays another). Sockets,
+  foot IK and the ragdoll keep following its own bones.
+- **Sprites have a Soft fade** (`Sprite.softness`, metres). Every part of the sprite within that
+  distance behind a surface stays visible, so a flame set into its torch is not cut off where it goes
+  inside it. A sprite behind a wall further away is still hidden.
+- **Particles: a circle shape can orbit.** `shape.orbit` (turns per second) turns the spawn point round
+  the circle over time, with the ring standing across the direction the emitter moves. A moving emitter,
+  such as a projectile, then leaves a spiral trail.
+
 ### Fixes & refactors
 
+- **Fixed: bones with exporter numbers did not match.** Sketchfab numbers every node in its glTF
+  exports (`mixamorig:Hips_01`), so those rigs matched nothing on retarget, implicit hand sockets or bone
+  masks. A trailing `_NN` is now ignored under a namespace. A bare `spine_01` is still its own bone,
+  because it is Unreal's real name. Bone masks and pose states also accept another exporter's spelling
+  of a bone.
+- **Fixed: retargeting from a root hips onto a child hips laid the character down.** When one skeleton's
+  hips is its root joint and the other's sits under a parent joint (Sketchfab's `_rootJoint`), the
+  correction compared bones posed under different parent frames. It now bridges the two parent frames.
+- **Fixed: retargeting between rigs bound in different poses folded the arms into the chest.** The
+  correction re-applied the source's motion relative to the target's own bind, so an arm a clip lowers
+  90° from a T-pose was lowered 90° from an A-pose too. The target's limbs are now first turned to the
+  source's bind pose (`retargetPose`, the "retarget pose" of other engines), so the arm ends up where the
+  source's points. Rigs bound in the same pose retarget exactly as before.
+- **Fixed: clicking the landscape selected the navmesh.** Its bake box spans the level, so any click
+  inside it picked the navmesh. It is now picked only by its green viewport icon (`NavMeshNode.pickBox`),
+  or from the scene tree.
+- **The Day–Night exposure preset is darker by day, and darkens toward the sky.** Its compensation
+  curve kept rising through daylight, giving back the stop the meter took when the view turned to the
+  sky or the sun, on top of a +1 stop bias. The preset now has no bias, and through the day the curve
+  keeps falling as the scene meters brighter.
+- **Fixed: an action's blend-out was shorter the faster it played.** The fade at the end of a
+  `playAction` clip is now timed in real seconds, so a 1.6× attack with a 0.3 s blend-out fades for
+  0.3 s rather than about 0.19 s.
 - **Fixed: importing a project left every texture loose in the Assets root.** The texture records are
   derived a render after the explorer starts pruning, so each texture's entry was pruned and then
   re-added at the root under its hash id. Entries for textures that are still registered are kept, and

@@ -55,7 +55,7 @@ The order is fixed so that one precompiled program serves every emitter.
 | Spawn | **Spawn Rate** | Particles per second (with a multiplier curve over the cycle) and per metre the emitter moves. |
 | | **Bursts** | Counts at set times, optionally repeating. |
 | | **Sub-Emitter** | Spawns from another emitter's particles when they die or collide. |
-| Initialize | **Shape** | Point, sphere, hemisphere, cone, box, circle or edge, from the surface or the whole volume. |
+| Initialize | **Shape** | Point, sphere, hemisphere, cone, box, circle or edge, from the surface or the whole volume. A circle's **Orbit** (turns per second) turns the spawn point round it over time, the ring standing across the direction the emitter moves, so a moving emitter (a projectile) leaves a spiral. |
 | | **Lifetime**, **Size** | A random range each. |
 | | **Velocity** | From the shape, a fixed direction, or radial, with spread and speed range; can inherit the emitter's motion. |
 | | **Rotation** | Starting angle and spin. |
@@ -116,8 +116,8 @@ so one effect can mix additive sparks with alpha-blended smoke.
 | **Blend** | Alpha, additive, or cutout. |
 | **Texture** | A texture asset; with no texture a billboard is a soft round puff. Flipbook settings appear once one is set. |
 | **Soft fade** | Fades particles out where they meet opaque geometry instead of clipping. |
-| **Brightness** | HDR multiplier. Values above 1 bloom. |
-| **Lit** | Half-Lambert sun plus sky fill. |
+| **Brightness** | Multiplies the colour's luminance (and, on a lit emitter, the lit result). |
+| **Lit** | Shaded by the scene's light, as surfaces are: the scene ambient and sky light, the sun (or the moon at night), and the strongest point or spot light reaching the effect, half-Lambert so thin smoke is never black on its far side. Off, the emitter is emissive: it glows at its colour's luminance. |
 | **Sort particles** | Back to front on the GPU every frame, which fixes dark fringes where alpha puffs overlap and costs a few passes. Alpha blending only; up to 65,536 particles. |
 | **Sorting order** | Draw order between emitters — higher draws later, on top — and the sorting band in 2D scenes. |
 
@@ -154,11 +154,12 @@ speed**, **Spawn rate** (a multiplier on continuous spawning), **Off screen**, *
 **Exposure weight** and **Tint**, with play, stop, clear and burst buttons. Selecting the node draws its
 bounds.
 
-**Exposure weight** — how much the camera's exposure brightens the particles. They are unlit, so at 1
-(the default) they are multiplied by the exposure like everything lit: embers tuned in daylight blaze white
-at night or in a torch-lit interior, where the exposure is hundreds of times higher. At 0 they keep the same
-brightness under any exposure; fire and glows usually want a little (0.1), so they still read brighter in
-the dark.
+**Exposure weight** — how much of the camera's exposure the particles take. At 1 (the default) they follow
+it like every surface and light: an emissive effect's colour is a real luminance — Color ▸ **Intensity** 1
+is 78,643 nits, and the field shows the luminance it gives — so a flame is faint in the noon sun and blazes
+at night, as the torch's own light does, and a lit effect is as bright as the light around it. Lower values
+hold an effect closer to one look under every exposure; keep that for the rare effect that must not adapt,
+such as a UI-like marker in the world.
 
 **Effect** — the `.vfx` asset the node plays, with ✎ into the particle editor. Linking one copies it
 onto the node, so the effect still plays where the library is not around (a published game ships

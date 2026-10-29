@@ -5,7 +5,8 @@
 
 /**
  * Strip exporter decoration off a bone name so the same joint compares equal across tools:
- * `mixamorig:LeftForeArm` and `LeftForeArm` both become `leftforearm`. Side markers are preserved.
+ * `mixamorig:LeftForeArm`, `mixamorig:LeftForeArm_010` and `LeftForeArm` all become `leftforearm`. Side
+ * markers are preserved.
  */
 export function normalizeBoneName(name: string): string {
     let s = name;
@@ -13,6 +14,10 @@ export function normalizeBoneName(name: string): string {
     const ns = Math.max(s.lastIndexOf(':'), s.lastIndexOf('|'));
     if (ns >= 0) s = s.slice(ns + 1);
     s = s.trim();
+    // Sketchfab's glTF export numbers every node: `mixamorig:Hips_01`, `mixamorig:LeftHandRing3_00`. Only
+    // under a namespace, where the number is plainly the exporter's: a bare `spine_01` is Unreal's own
+    // bone name, and stripping it would fold spine_01/02/03 into one.
+    if (ns >= 0) s = s.replace(/_\d+$/, '');
     s = s.replace(/^(def[-_]|org[-_]|mch[-_])/i, '');       // Rigify deform / original / mechanism
     s = s.replace(/^bip0*1[\s_-]*/i, '');                    // 3ds Max Biped: "Bip01 ", "Bip001_"
     s = s.replace(/^(b[_-]|bone[_-])/i, '');                 // generic "b_" / "bone_"

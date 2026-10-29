@@ -36,7 +36,9 @@ struct ParticleDrawFragment {
     u_fragMask: vec4<f32>,        // has texture, lit, 1 / screen width, 1 / screen height
     u_ambient: vec4<f32>,         // lit: ambient rgb; w = 1 for a mesh (no procedural disc)
     u_sunDir: vec4<f32>,          // lit: direction TO the sun, xyz
-    u_sunColor: vec4<f32>,        // lit: sun radiance rgb
+    u_sunColor: vec4<f32>,        // lit: key light (sun, or the moon at night) irradiance rgb
+    u_keyDir: vec4<f32>,          // lit: direction TO the strongest point / spot light reaching the effect
+    u_keyColor: vec4<f32>,        // lit: that light's irradiance rgb (zero when none reaches)
 };
 @group(1) @binding(1) var<uniform> u_frag: ParticleDrawFragment;
 
@@ -197,11 +199,14 @@ fn shadeParticle(in: ParticleVaryings) -> vec4<f32> {
 
     var rgb = color.rgb * u_frag.u_fragParams.w;
     if (u_frag.u_fragMask.y > 0.5) {
-        // Lit: a half-Lambert sun over sky ambient — particles are thin and back-lit as often as not,
-        // so a hard Lambert term would leave half of every cloud black.
+        // Lit: the scene's light, as surfaces take it — the ambient and sky fill, then the key light and the
+        // strongest local light through the diffuse 1/π. Half-Lambert rather than Lambert: particles are
+        // thin and back-lit as often as not, so a hard term would leave half of every cloud black.
         let n = normalize(in.normal);
-        let wrap = dot(n, u_frag.u_sunDir.xyz) * 0.5 + 0.5;
-        rgb = rgb * (u_frag.u_ambient.rgb + u_frag.u_sunColor.rgb * wrap);
+        let sunWrap = dot(n, u_frag.u_sunDir.xyz) * 0.5 + 0.5;
+        let keyWrap = dot(n, u_frag.u_keyDir.xyz) * 0.5 + 0.5;
+        let direct = (u_frag.u_sunColor.rgb * sunWrap + u_frag.u_keyColor.rgb * keyWrap) * 0.31830988618; // 1 / PI
+        rgb = rgb * (u_frag.u_ambient.rgb + direct);
     }
 
     // Premultiplied out. Alpha blends `one, one-minus-src-alpha`; additive drops the alpha term; cutout

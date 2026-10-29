@@ -175,6 +175,19 @@ export class NavMeshNode extends Node {
     }
 
     /**
+     * What a click in the viewport picks: a small box at the node, where the editor draws its icon. The
+     * bake volume spans the level, so ray-picking it (as `Raycaster` does other nodes' bounds) selected
+     * the navmesh on every click aimed at the landscape. `Raycaster` asks for this hook by name.
+     */
+    public pickBox(): { min: vec3, max: vec3 } {
+        const p = this.worldPosition;
+        const h = NavMeshNode.PICK_HALF_EXTENT;
+        return { min: vec3.fromValues(p[0] - h, p[1] - h, p[2] - h), max: vec3.fromValues(p[0] + h, p[1] + h, p[2] + h) };
+    }
+    /** Half the pick box's edge, in world units: about the size of the editor icon. */
+    public static readonly PICK_HALF_EXTENT = 0.4;
+
+    /**
      * The usable navmesh, built on first access, or null when this node has nothing baked into it.
      *
      * Lazy rather than built at parse time for two reasons: a scene may hold a navmesh nothing ever

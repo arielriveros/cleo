@@ -9,12 +9,15 @@
 
 import { constantCurve, linearCurve, fadeGradient, whiteGradient, type Curve, type Gradient } from './curves';
 import type { ParticleMeshData, ParticleMeshKind } from './particleMesh';
+import { formatNits, particleLuminanceNits } from '../graphics/particles/particleLighting';
 
 export type ParticleStage = 'spawn' | 'init' | 'update';
 
 /** How the editor draws one parameter. The value lives in `module.params[key]`. */
 export type ParamSpec =
-    | { key: string; label: string; kind: 'float'; min?: number; max?: number; step?: number; unit?: string; hint?: string; when?: Predicate }
+    | { key: string; label: string; kind: 'float'; min?: number; max?: number; step?: number; unit?: string; hint?: string; when?: Predicate;
+        /** A live reading of the value in other terms, shown beside the field ("≈ 8k nits"). */
+        readout?: (value: number) => string }
     | { key: string; label: string; kind: 'int'; min?: number; max?: number; hint?: string; when?: Predicate }
     | { key: string; label: string; kind: 'bool'; hint?: string; when?: Predicate }
     | { key: string; label: string; kind: 'vec3'; unit?: string; hint?: string; when?: Predicate }
@@ -107,7 +110,7 @@ export const MODULES: readonly ModuleDefinition[] = [
         type: 'shape', stage: 'init', label: 'Shape', unique: true,
         description: 'Where particles are born, and the direction "shape" velocity uses.',
         defaults: () => ({ shape: 'cone', radius: 0.25, thickness: 1, arc: 360, angle: 20,
-                           box: [1, 1, 1], offset: [0, 0, 0] }),
+                           box: [1, 1, 1], offset: [0, 0, 0], orbit: 0 }),
         params: [
             { key: 'shape', label: 'Shape', kind: 'enum', options: SHAPES },
             { key: 'radius', label: 'Radius', kind: 'float', min: 0, step: 0.05, unit: 'm', when: p => p.shape !== 'point' && p.shape !== 'box' },
@@ -115,6 +118,8 @@ export const MODULES: readonly ModuleDefinition[] = [
             { key: 'arc', label: 'Arc', kind: 'float', min: 0, max: 360, step: 1, unit: '°', when: isShape('cone', 'circle') },
             { key: 'angle', label: 'Cone angle', kind: 'float', min: 0, max: 89, step: 1, unit: '°', when: isShape('cone') },
             { key: 'box', label: 'Size', kind: 'vec3', unit: 'm', when: isShape('box') },
+            { key: 'orbit', label: 'Orbit', kind: 'float', step: 0.5, unit: 'turns/s', when: isShape('circle'),
+              hint: 'Turn the spawn point round the circle over time, the ring standing across the direction the emitter moves: a moving emitter leaves a spiral. 0 spawns anywhere on the arc.' },
             { key: 'offset', label: 'Offset', kind: 'vec3', unit: 'm' },
         ],
     },
@@ -165,7 +170,9 @@ export const MODULES: readonly ModuleDefinition[] = [
             { key: 'colorA', label: 'Color', kind: 'color', when: p => p.mode !== 'gradient' },
             { key: 'colorB', label: 'Color B', kind: 'color', when: p => p.mode === 'between' },
             { key: 'gradient', label: 'Gradient', kind: 'gradient', when: p => p.mode === 'gradient' },
-            { key: 'intensity', label: 'Intensity', kind: 'float', min: 0, step: 0.1, hint: 'HDR multiplier.' },
+            { key: 'intensity', label: 'Intensity', kind: 'float', min: 0, step: 0.01,
+              hint: 'Luminance multiplier on the colour: unlit particles are emissive, and 1 is 78,643 nits (cd/m²). A flame core is about 0.1, an ember 0.03. Exposed like every surface, so it reads faint in daylight and bright at night.',
+              readout: v => `≈ ${formatNits(particleLuminanceNits(v, 1))} at Brightness 1` },
         ],
     },
 
@@ -392,7 +399,8 @@ export const RENDER_PARAMS: ParamSpec[] = [
     { key: 'cutoff', label: 'Cutoff', kind: 'float', min: 0, max: 1, step: 0.05, when: p => p.blend === 'cutout' },
     { key: 'textureId', label: 'Texture', kind: 'asset', assetKind: 'texture' },
     { key: 'softness', label: 'Soft fade', kind: 'float', min: 0, step: 0.05, unit: 'm' },
-    { key: 'emissive', label: 'Brightness', kind: 'float', min: 0, step: 0.1 },
+    { key: 'emissive', label: 'Brightness', kind: 'float', min: 0, step: 0.1,
+      hint: "Multiplies the colour's luminance (Color ▸ Intensity). Lit particles: multiplies the lit result." },
     { key: 'lit', label: 'Lit', kind: 'bool' },
     { key: 'sort', label: 'Sort particles', kind: 'bool', when: p => p.blend === 'alpha',
       hint: 'Back to front, on the GPU, every frame. Fixes dark fringes where alpha puffs overlap; costs a few passes.' },

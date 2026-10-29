@@ -175,7 +175,9 @@ which is physics: the exposure, not the light, decides how bright it reads.
 An emissive material, a sprite or a particle system can take less than the whole exposure with its
 **exposure weight** (0..1, default 1): `setEmissiveExposureWeight(material, 0.1)`,
 `sprite.exposureWeight`, `particles.exposureWeight`. At 1 a glow is physical, faint by day and fierce
-in the dark; lower values hold it closer to one look at every exposure.
+in the dark; lower values hold it closer to one look at every exposure. Particles want 1: an emissive
+emitter's colour is a luminance (`particleLuminanceNits(intensity, brightness)`, 1 = 78,643 nits), and a
+lit one is shaded by the scene ambient, the sky light, the key light and the nearest point or spot light.
 
 ```ts
 const lamp = this.findNode('Lamp') as LightNode

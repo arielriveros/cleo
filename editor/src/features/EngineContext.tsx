@@ -1484,7 +1484,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setRigs(prev => prev.filter(x => x.id !== id));
     // Unlink, never leave dangling: an animation whose rigId names nothing and which has no `sourceSkin`
     // would retarget against nothing and silently play in the wrong space.
-    for (const m of modelsRef.current) if (m.rigId === id) updateModel(m.id, { ...m, rigId: undefined });
+    for (const m of modelsRef.current) {
+      if (m.nativeRigId === id) updateModel(m.id, { ...m, nativeRigId: undefined });
+      else if (m.rigId === id) {
+        // Playing a deleted foreign skeleton: back to its own; on its own skeleton: unlinked.
+        updateModel(m.id, { ...m, rigId: m.nativeRigId, nativeRigId: undefined });
+      }
+    }
+    for (const r of rigsRef.current) if (r.retargetTargets?.includes(id)) {
+      updateRig(r.id, { ...r, retargetTargets: r.retargetTargets.filter(t => t !== id) });
+    }
     for (const a of animationsRef.current) if (a.rigId === id) updateAnimation(a.id, { ...a, rigId: undefined });
     invalidateAnimationCache();
   };
@@ -2971,12 +2980,22 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const model = modelsRef.current.find(m => m.id === modelId);
     if (!model || model.rigId === rigId) return;
 
-    const updated: ModelAsset = { ...model, rigId };
+    // Which rig is this model's OWN skeleton: kept in `nativeRigId` while it plays another, so its bone
+    // corrections, sockets and IK (all named for its own bones) are still found. The current rig is the
+    // native one when the model has no `nativeRigId` yet and the rig is its skeleton's shape.
+    const native = model.nativeRigId
+      ?? (model.rigId && rigsRef.current.find(r => r.id === model.rigId)?.id === findEquivalentRig(rigsRef.current, storeSkin(skinnedModelJsonsOf(model.nodeJson)[0]?.skin))?.id
+        ? model.rigId : undefined);
+    const nativeRigId = rigId && native && rigId !== native ? native : undefined;
+    const updated: ModelAsset = { ...model, rigId: rigId ?? native, nativeRigId };
+    if (!rigId) { updated.rigId = undefined; updated.nativeRigId = undefined; }
     modelsRef.current = modelsRef.current.map(m => (m.id === modelId ? updated : m));
     updateModel(modelId, updated);
     invalidateAnimationCache();
     applyAnimationLinks(updated);
-    const rig = rigId ? rigsRef.current.find(r => r.id === rigId) : undefined;
+    // Sockets, ragdoll and IK name THIS skeleton's bones: always from the model's own rig, never from a
+    // foreign one whose joint indices and names mean nothing on it.
+    const rig = rigsRef.current.find(r => r.id === (updated.nativeRigId ?? updated.rigId));
     syncRigSockets(rig ?? { id: '', sockets: [] } as any, [modelId]);
     adoptRigController(modelId);
     eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
@@ -2993,7 +3012,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const sockets = runtimeSockets(rig.sockets);
     const targets = onlyModels
       ? modelsRef.current.filter(m => onlyModels.includes(m.id))
-      : modelsRef.current.filter(m => m.rigId === rig.id);
+      : modelsRef.current.filter(m => (m.nativeRigId ?? m.rigId) === rig.id);
     // The ragdoll profile rides along the same way: authored on the rig, read from the skin.
     const ragdoll = rig.ragdoll?.parts?.length ? rig.ragdoll : null;
     // So does foot placement, once the rig carries it (`null` = deliberately off). A rig that has never had
@@ -3264,8 +3283,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // Save the reviewed re-points before linking, so the first resolve already honours them.
         if (animAsset.rigId) {
           const overrides = overridesFromMapping(mapping, decision.mapping, targetSkin.nodeNames);
-          const targetRig = rigsRef.current.find(r => r.id === targetRigId);
-          if (overrides.length && targetRig) updateRig(targetRigId, withOverrides(targetRig, animAsset.rigId, overrides));
+          // Onto the model's OWN skeleton's rig — the bones they name are its bones, also while it plays
+          // another skeleton's clips (see ModelAsset.nativeRigId).
+          const correctionRigId = targetModel.nativeRigId ?? targetRigId;
+          const targetRig = rigsRef.current.find(r => r.id === correctionRigId);
+          if (overrides.length && targetRig) updateRig(correctionRigId, withOverrides(targetRig, animAsset.rigId, overrides));
         }
         // The link lives on the SKELETON, so every character built on it picks the clips up — this re-resolves
         // every placement, the node the editor was opened from included.
@@ -3275,7 +3297,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // The Animation Editor's preview clone carries no model link of its own; give it the clips directly
         // unless the re-resolve above already reached it.
         if (cloneModel && !cloneModel.animations.some(a => a.assetId === animAsset.id)) {
-          for (const clip of resolveAnimationAsset(animAsset, targetSkin, targetModel.id, targetRigId)) cloneModel.addAnimation({ ...clip });
+          for (const clip of resolveAnimationAsset(animAsset, targetSkin, targetModel.id, targetModel.nativeRigId ?? targetRigId)) cloneModel.addAnimation({ ...clip });
         }
 
         const added = namedClips.length;
@@ -3368,8 +3390,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const link = animationSourceAsset(src);
     // A Skeleton tab names its rig directly; a character's tab reaches it through the model asset.
     const rigTab = tabsRef.current.find(t => t.id === activeTabId && t.kind === 'rig');
+    // The model's OWN skeleton's rig: IK names joints of this skeleton, also while it plays another's clips.
     const rigId = (rigTab as { rigId?: string } | undefined)?.rigId
-      ?? link?.asset.rigId ?? (link ? ensureRigForModel(link.id) : null);
+      ?? link?.asset.nativeRigId ?? link?.asset.rigId ?? (link ? ensureRigForModel(link.id) : null);
     const owner = rigId ? rigsRef.current.find(r => r.id === rigId) : undefined;
     if (owner) updateRig(owner.id, { ...owner, ikRig: rig ?? null });
     else if (link) {

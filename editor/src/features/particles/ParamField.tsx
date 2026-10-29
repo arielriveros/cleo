@@ -34,6 +34,14 @@ export default function ParamField({ spec, value, onChange, params, onPatch, emi
     case 'float':
       if (spec.min !== undefined && spec.max !== undefined)
         return <Slider min={spec.min} max={spec.max} step={spec.step ?? 0.01} value={num(value)} onChange={v => onChange(v, true)} />
+      if (spec.readout) {
+        return (
+          <div className='flex flex-col gap-0.5'>
+            <NumberInput value={num(value)} min={spec.min} max={spec.max} step={spec.step ?? 0.1} onChange={v => onChange(v, true)} />
+            <span className='text-ui-xs text-dim tabular-nums'>{spec.readout(num(value))}</span>
+          </div>
+        )
+      }
       return <NumberInput value={num(value)} min={spec.min} max={spec.max} step={spec.step ?? 0.1} onChange={v => onChange(v, true)} />
     case 'int':
       return <NumberInput value={num(value)} min={spec.min} max={spec.max} step={1} onChange={v => onChange(Math.round(v), true)} />

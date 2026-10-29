@@ -328,12 +328,21 @@ describe('exposure compensation curve', () => {
         expect(exposureCurveStops([[10, 0], [0, -2], [4, -1]], 7)).toBeCloseTo(-0.5);
     });
 
-    it('darkens the dark end of the day-night and cave presets, and leaves daylight alone', () => {
+    it('darkens the dark end of the day-night and cave presets', () => {
         for (const id of ['dayNight', 'cave']) {
             const curve = AUTO_EXPOSURE_PRESETS.find(p => p.id === id)!.options.exposureCompensationCurve!;
             expect(exposureCurveStops(curve, -2), id).toBeLessThan(-0.5);
-            expect(exposureCurveStops(curve, 15), id).toBe(0);
         }
+        // The cave leaves daylight alone: stepping out into it dazzles for a moment, as it should.
+        const cave = AUTO_EXPOSURE_PRESETS.find(p => p.id === 'cave')!.options.exposureCompensationCurve!;
+        expect(exposureCurveStops(cave, 15)).toBe(0);
+    });
+
+    it('takes a brighter daytime view darker on the day-night curve, never brighter', () => {
+        // A view into the sky meters brighter than one at the ground; the trim must not hand that back.
+        const curve = AUTO_EXPOSURE_PRESETS.find(p => p.id === 'dayNight')!.options.exposureCompensationCurve!;
+        for (let ev = 10; ev < 15; ev += 0.5)
+            expect(exposureCurveStops(curve, ev + 0.5), String(ev)).toBeLessThanOrEqual(exposureCurveStops(curve, ev));
     });
 });
 

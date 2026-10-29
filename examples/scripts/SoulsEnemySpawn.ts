@@ -25,6 +25,11 @@ export default class SoulsEnemySpawnNode extends Node {
    */
   public templateName: string = 'Hollow'
   public isBossSpawn: boolean = false
+  /**
+   * A patrol route on the scene's Nav Mesh, by name: the enemy walks it, looping, until it sees someone,
+   * and goes back to it after giving up a chase. Empty: it stands where it spawned.
+   */
+  public patrolRoute: string = ''
   /** Seconds after the scene starts before the first spawn — lets the level settle first. */
   public initialDelay: number = 0.1
 
@@ -54,6 +59,12 @@ export default class SoulsEnemySpawnNode extends Node {
       return
     }
     this._live = enemy
+    if (this.patrolRoute) {
+      // The brain is the enemy's AI controller: the one child with a route to walk.
+      const brain: any = enemy.children.find((c: any) => 'routeName' in c)
+      if (brain) brain.routeName = this.patrolRoute
+      else Logger.warn('Hollow Keep: "' + this.templateName + '" has no AI controller to walk route "' + this.patrolRoute + '".', 'Script')
+    }
     if (this.isBossSpawn) (this._gm as any)?.registerBoss?.(enemy)
   }
 

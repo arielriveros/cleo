@@ -120,6 +120,8 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   public get isReacting(): boolean { return this.fightState === 'flinch' || this.fightState === 'stagger' }
   /** A boss's invulnerable phase transition is playing out. */
   public get isPhaseShifting(): boolean { return this.fightState === 'phase' }
+  /** The enemy walks a navmesh route while it has no target (its spawn's `patrolRoute`). */
+  public get hasPatrol(): boolean { return !!(this._brain as any)?.routeName }
 
   protected _player: Node = null
   protected _model: ModelNode = null
@@ -431,7 +433,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     closeSwing(this._swing)
     this._enter('attack')
     this._playSpeed = Math.max(0.05, num(attack.playSpeed, 1) * this._speedMul)
-    this._play(attack.clip, this._playSpeed)
+    this._play(attack.clip, this._playSpeed, true)
     this._usesEvents = this._clipHasEvent(attack.clip, 'hit') || this._clipHasEvent(attack.clip, 'cast')
     const length = this._clipLength > 0 ? this._clipLength : num(attack.hitTime, 0.6) + 0.6
     this._actionSeconds = length / this._playSpeed
@@ -640,15 +642,19 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     this.setRotation([0, have + Math.max(-maxDegrees, Math.min(maxDegrees, diff)), 0])
   }
 
-  protected _play(clip: string, speed: number): void {
+  protected _play(clip: string, speed: number, attack: boolean = false): void {
     this._clip = clip
     this._clipLength = this._clipDuration(clip)
     const animator = this._model?.animator as any
-    if (animator?.playAction && clip) animator.playAction(clip, { speed, blendIn: 0.1, blendOut: 0.2 })
+    if (animator?.playAction && clip) animator.playAction(clip, {
+      speed,
+      blendIn: attack ? this.attackBlendIn : this.actionBlendIn,
+      blendOut: attack ? this.attackBlendOut : this.actionBlendOut,
+    })
   }
 
-  protected _stopAction(): void {
-    ;(this._model?.animator as any)?.stopAction?.(undefined, 0.12)
+  protected _stopAction(blendOut: number = this.actionBlendOut): void {
+    ;(this._model?.animator as any)?.stopAction?.(undefined, blendOut)
     this._clip = ''
   }
 

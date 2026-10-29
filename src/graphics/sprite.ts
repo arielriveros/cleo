@@ -22,8 +22,11 @@ export interface SpriteOptions {
     wireframe?: boolean;
     blend?: SpriteBlend;
     exposureWeight?: number;
+    softness?: number;
 }
 
+/** A soft-fade distance: non-negative metres, capped where it stops meaning "near the surface". */
+const softnessOf = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? Math.min(10, Math.max(0, v)) : 0);
 const unitOr1 = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1);
 
 /** Full-quad UVs, for a sprite with no tileset. Matches what `Tileset.uvOf` returns for a 1x1 set. */
@@ -50,6 +53,7 @@ export class Sprite {
   private _opacity: number;
   private _blend: SpriteBlend;
   private _exposureWeight: number;
+  private _softness: number;
 
   constructor(options?: SpriteOptions) {
       this._tileset = options?.tileset ?? null;
@@ -58,6 +62,7 @@ export class Sprite {
       this._opacity = options?.opacity ?? 1;
       this._blend = options?.blend === 'additive' ? 'additive' : 'alpha';
       this._exposureWeight = unitOr1(options?.exposureWeight);
+      this._softness = softnessOf(options?.softness);
       this._material = Material.Basic(
           { color: this._tint, opacity: this._opacity, texture: this._tileset?.textureId },
           {
@@ -146,6 +151,17 @@ export class Sprite {
   public get exposureWeight(): number { return this._exposureWeight; }
   public set exposureWeight(value: number) { this._exposureWeight = unitOr1(value); }
 
+  /**
+   * Soft fade, in metres: how far into the scene's geometry the sprite stays visible. 0 (the default) is a
+   * plain depth test, so a flame set into its torch is cut off where it goes inside the torch head. Above 0
+   * the sprite is depth-tested as if it stood that much nearer the camera — drawn the same size in the same
+   * place on screen — so every part of it within `softness` metres behind a surface still shows, while a
+   * sprite behind a wall further away is hidden as before. A torch flame wants about the depth of its torch
+   * head, a quarter metre; more lets it show through things in front of it.
+   */
+  public get softness(): number { return this._softness; }
+  public set softness(value: number) { this._softness = softnessOf(value); }
+
   /** Texture-space rect [u0, v0, u1, v1] of the tile this sprite shows. */
   public uvRect(): [number, number, number, number] {
       return this.uvRectOf(this._tileIndex);
@@ -178,6 +194,7 @@ export class Sprite {
           // Only when set, so an alpha sprite serializes as it always did.
           ...(this._blend === 'additive' ? { blend: 'additive' } : {}),
           ...(this._exposureWeight < 1 ? { exposureWeight: this._exposureWeight } : {}),
+          ...(this._softness > 0 ? { softness: this._softness } : {}),
       };
   }
 
@@ -193,6 +210,7 @@ export class Sprite {
           wireframe: data?.wireframe ?? migrated.wireframe,
           blend: data?.blend,
           exposureWeight: data?.exposureWeight,
+          softness: data?.softness,
       });
   }
 }
