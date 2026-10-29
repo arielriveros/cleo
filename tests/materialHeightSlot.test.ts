@@ -31,7 +31,7 @@ describe('every material type round-trips a height map', () => {
     });
 
     it('puts the id inside `textures`, where the generic reference walk can see it', () => {
-        // editor/src/utils/nodeSubtree.ts only recognises a `textures` slot map. An id anywhere else is
+        // applications/editor/src/utils/nodeSubtree.ts only recognises a `textures` slot map. An id anywhere else is
         // invisible to it, which is why the old top-level shape needed three hand-written special cases.
         for (const m of [Material.Basic({ displacementMap: HEIGHT }),
                          Material.Default({ textures: { displacementMap: HEIGHT } }),

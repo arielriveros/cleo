@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url'
 import { moduleRegistry } from './tsLoader.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-const UTILS = path.resolve(HERE, '..', '..', 'editor', 'src', 'utils')
+const UTILS = path.resolve(HERE, '..', '..', 'applications', 'editor', 'src', 'utils')
 
 /** A `BundleSource` over a folder on disk. */
 export function folderSource(dir) {

@@ -1,4 +1,4 @@
-// Dev startup guard for the standalone game player (editor/public/player/, git-ignored). Publishing
+// Dev startup guard for the standalone game player (applications/editor/public/player/, git-ignored). Publishing
 // fetches that bundle, so it has to exist and match the engine -- but rebuilding it on every
 // `npm run editor:dev` / `desktop:dev` cost a full Vite library build each launch for a file most dev
 // sessions never touch. It is rebuilt only when it is missing, built against an older player contract,
@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
-const editor = path.join(root, 'editor');
+const editor = path.join(root, 'applications', 'editor');
 const out = path.join(editor, 'public', 'player');
 
 function newestMtime(dir) {

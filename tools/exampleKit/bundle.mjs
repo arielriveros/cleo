@@ -39,14 +39,14 @@ export function readJson(file) {
 }
 
 /**
- * Load `parseScriptVariables` out of `editor/src/utils/scripts.ts`.
+ * Load `parseScriptVariables` out of `applications/editor/src/utils/scripts.ts`.
  *
  * The module imports `Node` from the engine barrel — a value import that would drag in the renderer and
  * a GL context we do not have — and `cryptoRandomId` from a sibling. Neither is used by the reflector,
  * so both are stubbed. Sucrase emits CommonJS, which a tiny `require` shim then satisfies.
  */
 export function loadScriptReflector(root) {
-  const file = path.join(root, 'editor', 'src', 'utils', 'scripts.ts')
+  const file = path.join(root, 'applications', 'editor', 'src', 'utils', 'scripts.ts')
   const code = transform(fs.readFileSync(file, 'utf8'), {
     transforms: ['typescript', 'imports'],
     filePath: file,

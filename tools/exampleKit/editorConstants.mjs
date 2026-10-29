@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url'
 import { moduleRegistry } from './tsLoader.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-const editorUtil = (...parts) => path.join(HERE, '..', '..', 'editor', 'src', 'utils', ...parts)
+const editorUtil = (...parts) => path.join(HERE, '..', '..', 'applications', 'editor', 'src', 'utils', ...parts)
 
 // Both of these import nothing but types, which sucrase elides — so they load with an empty stub table.
 const load = moduleRegistry()

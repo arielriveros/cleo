@@ -1,0 +1,37 @@
+{
+  "name": "creator",
+  "version": "1.2.4",
+  "private": true,
+  "description": "Cleo Creator: procedural asset generation (World Creator heightmaps, FX Creator flipbooks).",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build:engine": "cd ../.. && npm run build",
+    "prebuild": "npm run build:engine",
+    "start": "vite --open",
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run"
+  },
+  "author": "Ariel Riveros",
+  "license": "ISC",
+  "dependencies": {
+    "@cleo/app-kit": "*",
+    "cleo": "file:../../dist",
+    "dockview-react": "^7.0.2",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@vitejs/plugin-react": "^5.1.0",
+    "autoprefixer": "^10.4.21",
+    "cannon-es": "^0.20.0",
+    "gl-matrix": "^3.4.4",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.18",
+    "typescript": "^5.3.2",
+    "vite": "^7.3.6",
+    "vitest": "^3.2.7"
+  }
+}

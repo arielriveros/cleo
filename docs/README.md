@@ -127,6 +127,6 @@ versus "and", and a count such as "(3)" do not matter. A field label inside a se
 or `**Term** —` line within that section's heading the same way, and falls back to the editor's own
 hint when there is none. Blockquote notes, code blocks and the "See also" line are never used.
 
-Renaming a term that names a title leaves that title without a card. `editor/tests/docTooltips.test.ts`
+Renaming a term that names a title leaves that title without a card. `applications/editor/tests/docTooltips.test.ts`
 catches it, and `npx vite-node tools/docAudit.ts --misses` (run in `editor/`) lists every title with
 no entry.

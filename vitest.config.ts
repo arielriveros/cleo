@@ -9,7 +9,7 @@ import engineConfig from './vite.config';
 // something misbehaves at runtime, so they are where tests earn their keep. Keep this suite free of the
 // DOM and of any test that needs a real GL context or an asset fixture.
 //
-// Editor-side tests live in editor/tests and run under editor/vitest.config.ts. This file is engine-only.
+// Editor-side tests live in applications/editor/tests and run under applications/editor/vitest.config.ts. This file is engine-only.
 //
 // The shader plugin and the `cleo` -> src/cleo.ts alias come from ./vite.config.ts, which everything
 // that builds or tests the engine merges — a test, the dev server and a production build then see one

@@ -1,6 +1,6 @@
 # Valley example generator
 
-Builds `editor/public/examples/valley/`, the engine's example game: the souls content of `tools/soulsDemo/build.mjs` set in an outdoor mountain valley with a day and night cycle, and a second scene, the Dungeon, entered through the skull cave.
+Builds `applications/editor/public/examples/valley/`, the engine's example game: the souls content of `tools/soulsDemo/build.mjs` set in an outdoor mountain valley with a day and night cycle, and a second scene, the Dungeon, entered through the skull cave.
 
 ```sh
 python tools/valley/prepare.py                          # unzips new downloads; textures: build/ -> build/valley_prepared/

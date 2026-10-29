@@ -170,7 +170,7 @@ jobs:
           git config user.name  'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           # Explicit paths rather than `-a`: on a first release CHANGELOG.md is untracked, and `-a` skips it.
-          git add package.json package-lock.json src/version.ts CHANGELOG.md editor/package.json editor/package-lock.json desktop/package.json desktop/package-lock.json
+          git add package.json package-lock.json src/version.ts CHANGELOG.md applications/package.json applications/package-lock.json applications/app-kit/package.json applications/creator/package.json applications/editor/package.json desktop/package.json desktop/package-lock.json
           git commit -m 'chore(release): v${{ steps.bump.outputs.version }}'
           git tag 'v${{ steps.bump.outputs.version }}'
 
@@ -178,7 +178,7 @@ jobs:
         run: npm ci && npm run build && npm run editor:install && npm run editor:build
 
       - name: Package editor bundle
-        run: cd editor/dist && zip -qr "$RUNNER_TEMP/cleo-editor-v${{ steps.bump.outputs.version }}.zip" .
+        run: cd applications/editor/dist && zip -qr "$RUNNER_TEMP/cleo-editor-v${{ steps.bump.outputs.version }}.zip" .
 
       - name: Push
         run: git push --atomic origin HEAD:main 'refs/tags/v${{ steps.bump.outputs.version }}'
@@ -202,7 +202,7 @@ jobs:
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
-          entryPoint: ./editor
+          entryPoint: ./applications/editor
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CLEO_EDITOR }}
           channelId: live
@@ -236,7 +236,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      # electron-builder packages ../editor/dist as extraResources, so the editor must be built first --
+      # electron-builder packages ../applications/editor/dist as extraResources, so the editor must be built first --
       # and with the production engine, since this is what ships in the installer.
       - name: Build engine and editor
         run: npm ci && npm run build && npm run editor:install && npm run editor:build

@@ -6,7 +6,7 @@ examples/assets/terrain/*
 *.zip
 
 # Generated standalone game player bundle (built by `npm --prefix editor run build:player`)
-editor/public/player/
+applications/editor/public/player/
 
 # vitest coverage reports (root and editor)
 coverage/

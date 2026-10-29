@@ -50,26 +50,26 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      # The root install is here for resolution, not for a build: editor/vitest.config.ts aliases `cleo`
+      # The root install is here for resolution, not for a build: applications/editor/vitest.config.ts aliases `cleo`
       # to the engine source, whose own imports (cannon-es, gl-matrix, uuid, sucrase) resolve out of the
       # root node_modules. That alias is why this job needs no `npm run build:dev` and stays fast.
       - run: npm ci
 
       - name: Install editor deps
         run: npm ci
-        working-directory: editor
+        working-directory: applications
 
       - name: Test
         run: npm run test:coverage
-        working-directory: editor
+        working-directory: applications/editor
 
       - name: Coverage summary
         if: always()
-        run: node tools/coverage-summary.mjs editor/coverage/coverage-summary.json Editor >> "$GITHUB_STEP_SUMMARY"
+        run: node tools/coverage-summary.mjs applications/editor/coverage/coverage-summary.json Editor >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage-editor
-          path: editor/coverage/lcov.info
+          path: applications/editor/coverage/lcov.info
           if-no-files-found: warn

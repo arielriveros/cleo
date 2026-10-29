@@ -819,7 +819,7 @@ Retreat, and plays reactions. Editing a brain asset updates every enemy of that 
 
 ## 13. Regenerating the example, tests, limitations
 
-The example folder `editor/public/examples/valley/` is **generated** (see `tools/valley/README.md` for
+The example folder `applications/editor/public/examples/valley/` is **generated** (see `tools/valley/README.md` for
 the source art it needs):
 
 ```

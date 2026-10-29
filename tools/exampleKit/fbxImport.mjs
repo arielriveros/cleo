@@ -63,7 +63,7 @@ export function editorModules(root) {
   const load = moduleRegistry({
     './ids': { cryptoRandomId: () => { throw new Error('ids must be stable in a generator') } },
   })
-  const mod = load(path.join(root, 'editor', 'src', 'utils', 'animationAssets.ts'))
+  const mod = load(path.join(root, 'applications', 'editor', 'src', 'utils', 'animationAssets.ts'))
   if (typeof mod.storeSkin !== 'function' || typeof mod.loadSkin !== 'function') {
     throw new Error('storeSkin/loadSkin did not load out of animationAssets.ts')
   }

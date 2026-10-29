@@ -5,7 +5,7 @@
 // of the same scene agree. What this file owns is the impure half the editor's `gatherNavSoup` does --
 // walking a scene -- but over scene JSON instead of live nodes.
 //
-// Rules shared with the editor (editor/src/utils/navBakeSources.ts):
+// Rules shared with the editor (applications/editor/src/utils/navBakeSources.ts):
 //   - colliders, not render meshes;
 //   - every static solid is also an obstacle, except dynamic bodies (mass > 0), ghosts
 //     (`simulatePhysics: false`) and nodes whose variable `navObstacle` is false (gates that open);

@@ -138,13 +138,13 @@ export function triangles(parts) {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// Decimation — the editor's own QEM simplifier (editor/src/utils/simplify.ts), run on plain arrays
+// Decimation — the editor's own QEM simplifier (applications/editor/src/utils/simplify.ts), run on plain arrays
 // ---------------------------------------------------------------------------------------------------
 
 let simplifier = null
 export function decimate(root, part, ratio) {
   if (ratio >= 1) return part
-  simplifier ??= moduleRegistry()(path.join(root, 'editor', 'src', 'utils', 'simplify.ts'))
+  simplifier ??= moduleRegistry()(path.join(root, 'applications', 'editor', 'src', 'utils', 'simplify.ts'))
   const out = simplifier.simplify({
     positions: part.positions, normals: part.normals, uvs: part.uvs,
     tangents: new Float32Array(0), bitangents: new Float32Array(0), indices: part.indices,

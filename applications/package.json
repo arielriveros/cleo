@@ -1,0 +1,17 @@
+{
+  "name": "cleo-applications",
+  "private": true,
+  "version": "1.2.4",
+  "description": "The applications built on the Cleo engine: the Editor, Cleo Creator, and the app-kit they share.",
+  "workspaces": [
+    "app-kit",
+    "editor",
+    "creator"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "author": "Ariel Riveros",
+  "license": "ISC"
+}

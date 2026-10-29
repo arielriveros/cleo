@@ -130,7 +130,7 @@ describe('RenderSettings survives save, publish and export', () => {
 });
 
 describe('the editor notifies when a render setting changes', () => {
-    const PANEL = readFileSync(join(__dirname, '..', 'editor', 'src', 'features', 'renderer',
+    const PANEL = readFileSync(join(__dirname, '..', 'applications', 'editor', 'src', 'features', 'renderer',
                                     'RendererSettingsPanel.tsx'), 'utf-8');
 
     it('marks the scene dirty from every handler that writes to the renderer', () => {
@@ -153,7 +153,7 @@ describe('the editor notifies when a render setting changes', () => {
 });
 
 describe('nothing between the ends drops a key', () => {
-    const BUILD = readFileSync(join(__dirname, '..', 'editor', 'src', 'features', 'publish',
+    const BUILD = readFileSync(join(__dirname, '..', 'applications', 'editor', 'src', 'features', 'publish',
                                     'buildGameData.ts'), 'utf-8');
 
     it('publishes the settings object wholesale rather than key by key', () => {

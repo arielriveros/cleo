@@ -249,7 +249,7 @@ describe('the authored exposure is kept apart from the metered one', () => {
 
 describe('metering is suppressed outside the scene tab', () => {
     const editorFile = (...parts: string[]) =>
-        readFileSync(join(__dirname, '..', 'editor', 'src', 'features', ...parts), 'utf-8');
+        readFileSync(join(__dirname, '..', 'applications', 'editor', 'src', 'features', ...parts), 'utf-8');
 
     // The declarations live in the types module; the WIRING that reads them is in the provider.
     const TYPES = editorFile('engineContextTypes.ts');

@@ -21,7 +21,7 @@
     ],
     "extraResources": [
       {
-        "from": "../editor/dist",
+        "from": "../applications/editor/dist",
         "to": "editor"
       }
     ],

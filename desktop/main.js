@@ -24,7 +24,7 @@ protocol.registerSchemesAsPrivileged([
 function editorRoot() {
   return app.isPackaged
     ? path.join(process.resourcesPath, 'editor')
-    : path.join(__dirname, '..', 'editor', 'dist');
+    : path.join(__dirname, '..', 'applications', 'editor', 'dist');
 }
 
 function registerAppProtocol() {

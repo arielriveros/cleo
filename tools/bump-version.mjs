@@ -21,8 +21,18 @@ import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-// Root first -- it is the one read to decide the bump; the other two only follow it.
-const PACKAGES = ['.', 'editor', 'desktop'];
+// Root first -- it is the one read to decide the bump; the others only follow it. `lock` is how many
+// "version" keys lead that folder's package-lock.json. applications/ is an npm workspace root: its one
+// lockfile carries the root's two, the linked ../dist engine package's, then one per workspace (app-kit,
+// creator, editor -- alphabetical, as npm writes them), and the workspaces have no lockfile of their own.
+const PACKAGES = [
+    { dir: '.', lock: 2 },
+    { dir: 'applications', lock: 6 },
+    { dir: 'applications/app-kit', lock: 0 },
+    { dir: 'applications/creator', lock: 0 },
+    { dir: 'applications/editor', lock: 0 },
+    { dir: 'desktop', lock: 2 },
+];
 const VERSION_TS = join(ROOT, 'src', 'version.ts');
 
 // Matches a "version" key. Line-anchored and searched in order, so the first match in a package.json is
@@ -64,13 +74,13 @@ function check() {
     const root = readVersions(pkgPath('.', 'package.json'), 1)[0];
     const problems = [];
 
-    for (const dir of PACKAGES) {
+    for (const { dir, lock } of PACKAGES) {
         if (dir !== '.') {
             const v = readVersions(pkgPath(dir, 'package.json'), 1)[0];
             if (v !== root) problems.push(`${dir}/package.json is "${v}" but package.json is "${root}"`);
         }
         // npm ci compares the lockfile's version against package.json's, so both copies must move too.
-        for (const [i, v] of readVersions(pkgPath(dir, 'package-lock.json'), 2).entries()) {
+        if (lock) for (const [i, v] of readVersions(pkgPath(dir, 'package-lock.json'), lock).entries()) {
             if (v !== root) problems.push(`${dir}/package-lock.json occurrence ${i + 1} is "${v}", expected "${root}"`);
         }
     }
@@ -99,9 +109,9 @@ function bump(level) {
     const to = parts.join('.');
     const display = `1.${to}`;
 
-    for (const dir of PACKAGES) {
+    for (const { dir, lock } of PACKAGES) {
         replaceVersions(pkgPath(dir, 'package.json'), from, to, 1);
-        replaceVersions(pkgPath(dir, 'package-lock.json'), from, to, 2);
+        if (lock) replaceVersions(pkgPath(dir, 'package-lock.json'), from, to, lock);
     }
     writeFileSync(VERSION_TS, versionTsSource(display));
 

@@ -49,7 +49,7 @@ else the project name) inside the location you pick.
   Start Menu shortcuts (`GAME_INSTALLER_NSH` in `gameTemplates.js`)
   (needs network access to download Electron).
 
-The published game reuses the prebuilt player bundle in `editor/public/player/`, so run
+The published game reuses the prebuilt player bundle in `applications/editor/public/player/`, so run
 `npm --prefix editor run build:player` before publishing.
 
 ## Package the editor app
