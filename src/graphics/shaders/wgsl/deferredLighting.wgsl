@@ -287,8 +287,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                                          u_gNormalRoughness_sampler, uv, 0.0);
     let emissiveAO = textureSampleLevel(u_gEmissiveAO_texture, u_gEmissiveAO_sampler, uv, 0.0);
 
-    let albedo = albedoMetallic.rgb;
-    let metallic = albedoMetallic.a;
+    // The alpha is SIGNED: a translucent dielectric (leaf, grass) stores `-translucency` where metallic
+    // would be — see chunks/pbrGBuffer.wgsl. Front-face diffuse keeps `1 - translucency` of the albedo;
+    // the rest leaves the unlit side through `thinTransmission` below.
+    let translucency = max(-albedoMetallic.a, 0.0);
+    let metallic = max(albedoMetallic.a, 0.0);
+    let surfaceAlbedo = albedoMetallic.rgb;
+    let albedo = surfaceAlbedo * (1.0 - translucency);
     // Two channels, not three — see chunks/octNormal.wgsl. The third now carries the dielectric
     // specular level, which is why every non-metal in the scene no longer has identical reflectivity.
     let N = octDecode(vec2<f32>(normalRoughness.x, normalRoughness.y));
@@ -315,6 +320,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var indirect: IndirectLight;
     indirect.diffuse = (u_lighting.u_sceneAmbient
                         + skyIrradiance(u_lighting.u_skyLight, N)) * albedo;
+    // A translucent surface also takes the fill arriving at its BACK face, through itself.
+    if (translucency > 0.0) {
+        indirect.diffuse += (u_lighting.u_sceneAmbient + skyIrradiance(u_lighting.u_skyLight, -N))
+                          * surfaceAlbedo * translucency;
+    }
     indirect.specular = vec3<f32>(0.0);
     if (u_lighting.u_useEnvMap != 0) {
         let NoV = max(dot(N, V), 0.0);
@@ -390,8 +400,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Once, and reused by the cascade tint below: every call inlines the whole cascade filter (two
     // cascades, both filter loops), and a second call doubled the program the driver has to compile.
-    let sunShadow = directionalShadow(worldPos, N, viewDepth);
+    //
+    // A translucent pixel lit from BEHIND looks the shadow up with its normal turned toward the light.
+    // The lookup offsets along the normal; along the unflipped one it would step away from the sun,
+    // into the leaf's own shadow, and the transmission would shadow itself out. The reflected lobe is
+    // zero on that side anyway, so the one lookup serves both.
+    let sunL = -u_lighting.u_dirLight.direction;
+    let sunShadowN = select(N, -N, translucency > 0.0 && dot(N, sunL) < 0.0);
+    let sunShadow = directionalShadow(worldPos, sunShadowN, viewDepth);
     Lo += evaluateDirectionalLight(u_lighting.u_dirLight, N, V, albedo, metallic, roughness, 1.0 - sunShadow);
+    if (translucency > 0.0) {
+        Lo += evaluateDirectionalTransmission(u_lighting.u_dirLight, N, V, surfaceAlbedo, translucency,
+                                              1.0 - sunShadow);
+    }
 
     // Every punctual light that reaches THIS fragment, out of however many the scene has. The two
     // fixed-length loops this replaced ran over 16 point and 8 spot slots for every pixel on screen.
@@ -401,9 +422,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     for (var i = 0; i < count; i++) {
         let cl = cleoLight(cleoClusterLight(first + i));
         if (cleoLightReaches(cl.light, worldPos)) {
-            Lo += evaluateSpotLight(cl.light, worldPos, N, V, albedo, metallic, roughness,
-                                    cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
-                                                           worldPos, N, cl.light.position));
+            // Same normal turn as the sun's, for the same reason.
+            let shadowN = select(N, -N, translucency > 0.0 && dot(N, cl.light.position - worldPos) < 0.0);
+            let visibility = cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
+                                                    worldPos, shadowN, cl.light.position);
+            Lo += evaluateSpotLight(cl.light, worldPos, N, V, albedo, metallic, roughness, visibility);
+            if (translucency > 0.0) {
+                Lo += evaluateSpotTransmission(cl.light, worldPos, N, V, surfaceAlbedo, translucency, visibility);
+            }
         }
     }
 

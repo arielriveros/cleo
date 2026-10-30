@@ -2,7 +2,7 @@
   "name": "creator",
   "version": "1.2.4",
   "private": true,
-  "description": "Cleo Creator: procedural asset generation (World Creator heightmaps, FX Creator flipbooks).",
+  "description": "Cleo Creator: procedural asset generation (World Creator heightmaps, FX Creator flipbooks, Foliage Creator plants and rocks).",
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:engine": "cd ../.. && npm run build",

@@ -53,6 +53,13 @@ struct PBRMaterial {
      * nothing says so.
      */
     alphaCutoff: f32,
+    /**
+     * Thin-surface diffuse transmission, 0..1 (glTF KHR_materials_diffuse_transmission). The G-buffer has
+     * no spare channel for it, so it travels as a NEGATIVE metallic: the targets are rgba16float, and a
+     * translucent surface (a leaf, a grass blade) is a dielectric by definition. deferredLighting.wgsl
+     * splits the sign back out. Same member in chunks/pbrForward.wgsl.
+     */
+    translucency: f32,
     // Every flag is an i32, not a bool: WGSL forbids bool in a uniform buffer (not host-shareable).
     // Call sites still pass JavaScript booleans — the std140 writer converts them, because the
     // reflected member type is integer.
@@ -424,7 +431,9 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     // because (0,0) is a VALID oct direction.
     //
     // chunks/pbrForward.wgsl, which has the light list, applies the same term properly.
-    out.gAlbedoMetallic = vec4<f32>(albedo * selfShadow, metallic);
+    // A translucent surface stores `-translucency` where metallic would be (see the struct member).
+    let translucency = saturate(u_material.translucency);
+    out.gAlbedoMetallic = vec4<f32>(albedo * selfShadow, select(metallic, -translucency, translucency > 0.0));
     // The roughness written here is FILTERED — see filterSpecularRoughness. It has to happen in this
     // pass and not in deferredLighting: taking dpdx of the G-buffer normal in a fullscreen pass would
     // straddle silhouettes, sampling two unrelated surfaces into one variance estimate and painting a

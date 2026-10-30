@@ -54,7 +54,12 @@ fn fs_main(in: VertexOutput) -> GBuffer {
     if (untouched || unlit) { discard; }
 
     let albedo = g0.rgb * dA.a + dA.rgb;
-    let metallic = g0.a * dC.a + dC.g;
+    // A NEGATIVE alpha is not metallic: it is a translucent dielectric's `-translucency` (pbrGBuffer.wgsl).
+    // Blend metallic from its non-negative part and keep the sign through, faded by the decal's coverage,
+    // so a leaf under a decal stays translucent where the decal is thin.
+    let baseMetallic = max(g0.a, 0.0);
+    let translucency = max(-g0.a, 0.0) * dC.a;
+    let metallic = baseMetallic * dC.a + dC.g;
     let roughness = g1.a * dC.a + dC.r;
     let ao = g2.a * dC.a + dC.b;
     let encoded = (octDecode(g1.rg) * 0.5 + 0.5) * dB.a + dB.rgb;
@@ -64,7 +69,7 @@ fn fs_main(in: VertexOutput) -> GBuffer {
     let oct = octEncode(normal);
 
     var out: GBuffer;
-    out.gAlbedoMetallic = vec4<f32>(clamp(albedo, vec3<f32>(0.0), vec3<f32>(1.0)), clamp(metallic, 0.0, 1.0));
+    out.gAlbedoMetallic = vec4<f32>(clamp(albedo, vec3<f32>(0.0), vec3<f32>(1.0)), select(clamp(metallic, 0.0, 1.0), -translucency, translucency > 0.0));
     out.gNormalRoughness = vec4<f32>(oct.x, oct.y, g1.b, clamp(roughness, 0.0, 1.0));
     out.gEmissiveAO = vec4<f32>(g2.rgb, clamp(ao, 0.0, 1.0));
     return out;

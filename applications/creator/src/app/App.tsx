@@ -8,7 +8,7 @@ import { readBackendPreference, writeBackendPreference } from '@cleo/app-kit/ren
 import { CreatorEngineProvider, useCreatorEngine } from './CreatorEngine';
 import { bootLoad, booting, finishIfSettled } from './bootLoad';
 
-type Tool = 'world' | 'fx';
+type Tool = 'world' | 'fx' | 'foliage';
 const TOOL_KEY = 'cleo_creator_tool';
 
 // Each sub-application is its own code chunk, fetched the first time it is selected: World Creator's
@@ -16,7 +16,14 @@ const TOOL_KEY = 'cleo_creator_tool';
 const TOOLS: Record<Tool, { label: string; load: () => Promise<ComponentType> }> = {
   world: { label: 'World Creator', load: () => import('../world/ui/WorldWorkspace').then(m => m.WorldWorkspace) },
   fx: { label: 'FX Creator', load: () => import('../fx/ui/FxWorkspace').then(m => m.FxWorkspace) },
+  foliage: { label: 'Foliage Creator', load: () => import('../foliage/ui/FoliageWorkspace').then(m => m.FoliageWorkspace) },
 };
+
+/** The stored tool, or World when nothing (or something no longer offered) is stored. */
+function storedTool(): Tool {
+  const v = localStorage.getItem(TOOL_KEY);
+  return v && v in TOOLS ? v as Tool : 'world';
+}
 const loaded = new Map<Tool, ComponentType>();
 const pending = new Map<Tool, Promise<ComponentType>>();
 
@@ -53,7 +60,7 @@ function useToolComponent(tool: Tool): { Component: ComponentType | null; error:
 }
 
 // The graphics API is fixed when the engine builds its device, so switching stores the preference and
-// reloads. Both workspaces keep their documents in localStorage, so nothing is lost across the reload.
+// reloads. Every workspace keeps its document in localStorage, so nothing is lost across the reload.
 function BackendSwitch() {
   const { instance, error, hasCompute } = useCreatorEngine();
   const preference = readBackendPreference();
@@ -84,7 +91,7 @@ function BackendSwitch() {
 
 function Shell() {
   const { instance, error } = useCreatorEngine();
-  const [tool, setTool] = useState<Tool>(() => (localStorage.getItem(TOOL_KEY) === 'fx' ? 'fx' : 'world'));
+  const [tool, setTool] = useState<Tool>(storedTool);
   const { Component, error: toolError } = useToolComponent(tool);
   const choose = (t: Tool) => { setTool(t); localStorage.setItem(TOOL_KEY, t); };
 
@@ -95,6 +102,7 @@ function Shell() {
         <SegmentedControl<Tool> size='sm' value={tool} onChange={choose} options={[
           { value: 'world', label: 'World Creator', title: 'Landscape heightmaps from landforms and erosion' },
           { value: 'fx', label: 'FX Creator', title: 'Fire and smoke flipbooks from a volumetric fluid simulation' },
+          { value: 'foliage', label: 'Foliage Creator', title: 'Grass, rocks and trees with LODs, exported as glTF' },
         ]} />
         <BackendSwitch />
       </Topbar>

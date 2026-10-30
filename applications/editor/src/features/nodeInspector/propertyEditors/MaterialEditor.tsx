@@ -48,6 +48,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   const [metallic, setMetallic] = useState<number>(material.properties.get('metallic') ?? 0);
   const [roughness, setRoughness] = useState<number>(material.properties.get('roughness') ?? 1);
   const [reflectance, setReflectance] = useState<number>(material.properties.get('reflectance') ?? 0.5);
+  const [translucency, setTranslucency] = useState<number>(material.properties.get('translucency') ?? 0);
   const [emissiveFactor, setEmissiveFactor] = useState<string>(vec3ToHex(material.properties.get('emissiveFactor') || [0,0,0]));
   const [emissiveIntensity, setEmissiveIntensity] = useState<number>(material.properties.get('emissiveIntensity') ?? 1);
   const [emissiveWeight, setEmissiveWeight] = useState<number>(emissiveExposureWeightOf(material));
@@ -127,6 +128,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     setMetallic(material.properties.get('metallic') ?? 0);
     setRoughness(material.properties.get('roughness') ?? 1);
     setReflectance(material.properties.get('reflectance') ?? 0.5);
+    setTranslucency(material.properties.get('translucency') ?? 0);
     setEmissiveFactor(vec3ToHex(material.properties.get('emissiveFactor') || [0,0,0]));
     setEmissiveIntensity(material.properties.get('emissiveIntensity') ?? 1);
     setEmissiveWeight(emissiveExposureWeightOf(material));
@@ -175,6 +177,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
       if (material.properties.get('metallic') === undefined) material.properties.set('metallic', 0.0);
       if (material.properties.get('roughness') === undefined) material.properties.set('roughness', 1.0);
       if (material.properties.get('reflectance') === undefined) material.properties.set('reflectance', 0.5);
+      if (material.properties.get('translucency') === undefined) material.properties.set('translucency', 0);
       if (material.properties.get('opacity') === undefined) material.properties.set('opacity', 1.0);
       if (!material.properties.get('emissiveFactor')) material.properties.set('emissiveFactor', material.properties.get('emissive') || [0,0,0]);
       if (material.properties.get('hasBaseColorTexture') === undefined) material.properties.set('hasBaseColorTexture', false);
@@ -557,6 +560,9 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                     nothing. The useful range is narrow and low: water sits near 0.35, skin near 0.42,
                     gemstones between 0.55 and 0.7. Has no effect at metallic 1. */}
                 <PropertyRow label='Reflectance'><Slider min={0} max={1} step={0.01} value={reflectance} onChange={setNum('reflectance', setReflectance)} /></PropertyRow>
+                {/* Thin-surface light transmission (leaves, grass, paper). Stored in the G-buffer as a
+                    negative metallic, so a translucent surface is always shaded as a dielectric. */}
+                <PropertyRow label='Translucency'><Slider min={0} max={1} step={0.01} value={translucency} onChange={setNum('translucency', setTranslucency)} /></PropertyRow>
                 <PropertyRow label='Opacity'><Slider min={0} max={1} step={0.01} value={pbrOpacity} onChange={setNum('opacity', setPbrOpacity)} /></PropertyRow>
                 <PropertyRow label='Emissive'><ColorInput color={emissiveFactor} onChange={setColor('emissiveFactor', setEmissiveFactor)} /></PropertyRow>
                 {/* The colour is a hex picker and so cannot exceed 1 per channel — which is below the

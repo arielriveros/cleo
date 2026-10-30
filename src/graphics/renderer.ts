@@ -8768,6 +8768,10 @@ export class Renderer {
             this._shaderManager.setUniform('u_material.uvWorldSize', 1);
             this._shaderManager.setUniform('u_material.uvBlend', 4);
         }
+        // And for translucency: a PBR material built by hand (not through Material.PBR) would otherwise
+        // inherit the last leaf's, and carry it into the G-buffer as a negative metallic.
+        if (material.type === 'pbr' && !material.properties.has('translucency'))
+            this._shaderManager.setUniform('u_material.translucency', 0);
         this._shaderManager.setUniform('u_material.viewPos', this._activeCamera.position);
         this._shaderManager.setUniform('u_material.sunDirection', this._sunDirection);
         // The parallax hit's pixel depth offset (`parallaxDepth`). Built from the camera being drawn
@@ -11936,13 +11940,14 @@ export class Renderer {
             return;
         }
 
-        // mode: 0 passthrough RGB · 1 normal remap · 2 alpha->grayscale · 3 depth · 4 red->grayscale
+        // mode: 0 passthrough RGB · 1 normal remap · 2 alpha->grayscale · 3 depth · 4 red->grayscale · 8 signed metallic
         let tex: Texture;
         let mode = 0;
         switch (this._debugView) {
             case 'scene':     tex = this._sceneFBO.colors[0];      mode = 6; break;
             case 'albedo':    tex = this._gBufferFBO.colors[0];    mode = 0; break;
-            case 'metallic':  tex = this._gBufferFBO.colors[0];    mode = 2; break;
+            // Mode 8, not 2: this alpha is signed (negative = translucency), which mode 2 would flag.
+            case 'metallic':  tex = this._gBufferFBO.colors[0];    mode = 8; break;
             case 'normal':    tex = this._gBufferFBO.colors[1];    mode = 1; break;
             case 'roughness': tex = this._gBufferFBO.colors[1];    mode = 2; break;
             case 'emissive':  tex = this._gBufferFBO.colors[2];    mode = 0; break;

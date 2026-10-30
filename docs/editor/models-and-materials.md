@@ -189,6 +189,10 @@ much of the camera's exposure the glow takes: 1 (the default) is physical, faint
 fierce in the dark like any other light; lower values hold it closer to one look in every exposure,
 for a rune or a magic effect that must read the same at noon and in a cave. The base colour multiplies a
 base-colour texture, and the section warns when a texture sits under a non-white colour.
+**Translucency** (PBR) is how much light passes through a thin surface: a leaf or a grass blade with
+the sun behind it glows in its own colour instead of going dark. 0 (the default) is opaque; 0.3–0.6
+suits foliage. A translucent surface is always shaded as a non-metal. glTF files carry it as
+`KHR_materials_diffuse_transmission`, which the importer reads.
 
 **Textures** — one slot per map. Drop a texture on a slot, or pick one.
 
