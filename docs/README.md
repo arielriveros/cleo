@@ -29,6 +29,7 @@ After that the two halves are independent, and you can read either first:
 |---|---|
 | **[Editor guide](editor/README.md)** | What every mode, panel and workflow does. Read this to author scenes, import models, paint terrain, rig animation, build UI and publish. |
 | **[Scripting guide](scripting/README.md)** | How to write game code. Read this to make things move, react, spawn, score and end. |
+| **[Cleo Creator](creator/index.md)** | The procedural asset tool: World Creator heightmaps and FX Creator fire/smoke flipbooks, ready to import into the editor. |
 | **[Reference](reference/node-types.md)** | Exhaustive tables: every node type, every export, every render setting, every input binding. Look things up here rather than reading it through. |
 
 ## The editor guide
@@ -127,6 +128,6 @@ versus "and", and a count such as "(3)" do not matter. A field label inside a se
 or `**Term** —` line within that section's heading the same way, and falls back to the editor's own
 hint when there is none. Blockquote notes, code blocks and the "See also" line are never used.
 
-Renaming a term that names a title leaves that title without a card. `editor/tests/docTooltips.test.ts`
+Renaming a term that names a title leaves that title without a card. `applications/editor/tests/docTooltips.test.ts`
 catches it, and `npx vite-node tools/docAudit.ts --misses` (run in `editor/`) lists every title with
 no entry.

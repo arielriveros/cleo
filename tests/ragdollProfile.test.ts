@@ -33,7 +33,7 @@ beforeAll(async () => {
     setDevice(new WebGL2Device(gl as unknown as WebGL2RenderingContext));
 
     // Through the bundle reader: the example is checked in as format 2, with its payloads in assets.bin.
-    const lib = (await readExample('editor/public/examples/valley')).read('libraries', 'models.json');
+    const lib = (await readExample('applications/editor/public/examples/valley')).read('libraries', 'models.json');
     const find = (n: any): any => n.model?.skin ? n : (n.children ?? []).map(find).find(Boolean);
     modelJson = find(lib[0].nodeJson).model;
 });

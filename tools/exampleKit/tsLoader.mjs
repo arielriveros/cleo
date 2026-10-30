@@ -14,12 +14,17 @@ import fs from 'fs'
 import path from 'path'
 import { transform } from 'sucrase'
 import * as glMatrix from 'gl-matrix'
+import { fileURLToPath } from 'url'
+
+// `@cleo/app-kit/<path>` is the shared app-kit's source, the same mapping applications/app-kit/vite.preset.ts
+// gives Vite; the editor's pure utils import a few of its pieces (chunkBlob, bytes) that way.
+const APP_KIT_SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'applications', 'app-kit', 'src')
 
 /**
  * A module registry, sucrase-transpiled and linked by hand.
  *
  * `stub` maps a specifier SUFFIX to a namespace, so `'/animatedModel'` catches any relative path ending
- * that way. Relative imports not stubbed are resolved and loaded for real; anything else throws, which is
+ * that way. Relative imports (and the app-kit's) not stubbed are resolved and loaded for real; anything else throws, which is
  * what stops a heavy dependency from creeping in unnoticed.
  *
  * Type-only imports need no handling: sucrase's TypeScript transform elides them, so a module importing
@@ -46,6 +51,7 @@ export function moduleRegistry(stub = {}) {
         if (name === suffix || name.endsWith(suffix)) return namespace
       }
       if (name.startsWith('.')) return load(path.join(path.dirname(key), name) + '.ts')
+      if (name.startsWith('@cleo/app-kit/')) return load(path.join(APP_KIT_SRC, name.slice('@cleo/app-kit/'.length)) + '.ts')
       throw new Error(`${path.basename(key)} reached for an unstubbed module: ${name}`)
     }
     new Function('require', 'module', 'exports', code)(req, module, module.exports)

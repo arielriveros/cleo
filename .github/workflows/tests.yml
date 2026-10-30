@@ -50,26 +50,53 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      # The root install is here for resolution, not for a build: editor/vitest.config.ts aliases `cleo`
+      # The root install is here for resolution, not for a build: applications/editor/vitest.config.ts aliases `cleo`
       # to the engine source, whose own imports (cannon-es, gl-matrix, uuid, sucrase) resolve out of the
       # root node_modules. That alias is why this job needs no `npm run build:dev` and stays fast.
       - run: npm ci
 
       - name: Install editor deps
         run: npm ci
-        working-directory: editor
+        working-directory: applications
 
       - name: Test
         run: npm run test:coverage
-        working-directory: editor
+        working-directory: applications/editor
 
       - name: Coverage summary
         if: always()
-        run: node tools/coverage-summary.mjs editor/coverage/coverage-summary.json Editor >> "$GITHUB_STEP_SUMMARY"
+        run: node tools/coverage-summary.mjs applications/editor/coverage/coverage-summary.json Editor >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage-editor
-          path: editor/coverage/lcov.info
+          path: applications/editor/coverage/lcov.info
           if-no-files-found: warn
+
+  test-apps:
+    name: Test app-kit and Cleo Creator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # Same arrangement as the editor job: engine source resolves out of the root install, the apps'
+      # dependencies out of the applications/ workspace install.
+      - run: npm ci
+
+      - name: Install application deps
+        run: npm ci
+        working-directory: applications
+
+      - name: Test app-kit
+        run: npm test
+        working-directory: applications/app-kit
+
+      - name: Test Cleo Creator
+        run: npm test
+        working-directory: applications/creator

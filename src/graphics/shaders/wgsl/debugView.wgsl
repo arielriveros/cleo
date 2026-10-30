@@ -122,6 +122,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(toSrgb(toneCurve(t.rgb * u_debug.u_exposure, u_debug.u_toneMapper)), 1.0);
     }
     if (mode == 7) { return vec4<f32>(heatMap(t.r), 1.0); }
+    // The albedo target's SIGNED alpha: metallic as greyscale, and a translucent dielectric's
+    // `-translucency` (pbrGBuffer.wgsl) as green, so the two packed meanings stay apart on screen.
+    if (mode == 8) {
+        if (t.a < 0.0) { return vec4<f32>(0.0, -t.a, 0.0, 1.0); }
+        return vec4<f32>(vec3<f32>(t.a), 1.0);
+    }
     // Passthrough RGB (albedo, emissive, …).
     return vec4<f32>(t.rgb, 1.0);
 }

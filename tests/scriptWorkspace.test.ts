@@ -8,7 +8,7 @@ import { createRequire } from 'module';
 // The main-process half of the script workspace, exercised against a real temp folder. It is CommonJS
 // and Electron-adjacent, but everything except launch() is plain fs -- the `shell` import is lazy
 // precisely so this suite can run outside Electron.
-const workspace = createRequire(import.meta.url)('../desktop/scriptWorkspace.js') as {
+const workspace = createRequire(import.meta.url)('../applications/app-kit/desktop/scriptWorkspace.js') as {
   openWorkspace(root: string, send: (c: Change) => void): Promise<{ ok: boolean; files: { rel: string; source: string }[]; manifest: any }>;
   closeWorkspace(root: string): Promise<{ ok: boolean }>;
   apply(root: string, batch: any): Promise<{ ok: boolean }>;

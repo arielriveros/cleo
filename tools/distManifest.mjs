@@ -1,6 +1,6 @@
 // dist/package.json: the root manifest verbatim, with "types" repointed at the declaration tree's own
 // root. Copied rather than hand-written because "dependencies" is load-bearing: `npm i file:../dist` in
-// editor/ is what puts howler, uuid and sucrase into editor/node_modules, and the editor builds engine
+// editor/ is what puts howler, uuid and sucrase into applications/editor/node_modules, and the editor builds engine
 // source that imports all three. Shared by buildDist.mjs (full build) and watchTypes.mjs (dev watch).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';

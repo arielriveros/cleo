@@ -567,3 +567,44 @@ fn evaluateSpotLight(light: SpotLight, fragPos: vec3<f32>, N: vec3<f32>, V: vec3
     return shadeSurface(N, V, albedo, metallic, roughness, L, sphere.direction, sphere.normalization,
                         radiance);
 }
+
+/**
+ * Thin-surface diffuse transmission: the light that passes THROUGH a leaf or a grass blade and leaves
+ * its unlit side. glTF's KHR_materials_diffuse_transmission, reduced to its thin-walled case: a Lambert
+ * lobe about `-N`, tinted by the surface's own albedo (the transmission colour is the base colour).
+ *
+ * ADDITIVE, as game foliage models are (Unreal's Two Sided Foliage): the front face keeps its full diffuse
+ * and this adds the back-lit glow on top. Not strictly energy conserving, but `t` then never changes how
+ * the sun-lit side looks — splitting the albedo by `1 - t` read as shadow on lit leaves. Adds nothing for
+ * an opaque surface, so callers branch on `t > 0` and every other pixel pays only that test.
+ *
+ * A small forward-scattering lift toward the light (the sun glowing through a canopy) is folded in:
+ * real leaves scatter forward, and a pure Lambert lobe reads flat when looking straight into the sun.
+ */
+const TRANSMISSION_FORWARD: f32 = 0.6;
+
+fn thinTransmission(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>, t: f32) -> vec3<f32> {
+    let back = saturate(-dot(N, L));
+    let forward = pow(saturate(dot(-V, L)), 8.0) * TRANSMISSION_FORWARD;
+    return albedo * (t * back * (1.0 + forward) / PI);
+}
+
+/** {@link thinTransmission} for the sun. `visibility` is the shadow term, as for the reflected lobe. */
+fn evaluateDirectionalTransmission(light: DirectionalLight, N: vec3<f32>, V: vec3<f32>, albedo: vec3<f32>,
+                                   t: f32, visibility: f32) -> vec3<f32> {
+    if (dot(light.direction, light.direction) <= 1e-6) { return vec3<f32>(0.0); }
+    let L = normalize(-light.direction);
+    return thinTransmission(N, V, L, albedo, t) * light.color * (light.intensity * visibility);
+}
+
+/** {@link thinTransmission} for a spot (a point light is a spot with an open cone). */
+fn evaluateSpotTransmission(light: SpotLight, fragPos: vec3<f32>, N: vec3<f32>, V: vec3<f32>,
+                            albedo: vec3<f32>, t: f32, visibility: f32) -> vec3<f32> {
+    let toLight = light.position - fragPos;
+    let d2 = max(dot(toLight, toLight), light.sourceRadius * light.sourceRadius);
+    let attenuation = distanceAttenuation(d2, light.invRangeSquared);
+    if (attenuation <= 0.0) { return vec3<f32>(0.0); }
+    let L = toLight / max(sqrt(d2), 1e-6);
+    let cone = spotAttenuation(dot(L, normalize(-light.direction)), light.coneScale, light.coneOffset);
+    return thinTransmission(N, V, L, albedo, t) * light.color * (light.intensity * attenuation * cone * visibility);
+}

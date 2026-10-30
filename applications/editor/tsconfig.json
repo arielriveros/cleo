@@ -1,0 +1,28 @@
+{
+    "compilerOptions": {
+        // ES2020, not ES6: `lib` below is already ESNext, and the editor uses syntax ES6 does not admit —
+        // a dotAll regex in publish/externalizeAssets.ts needs es2018+. This config only ever typechecks
+        // (noEmit is on, and the real build is babel-loader, which ignores `target` entirely), so raising
+        // it changes what the checker accepts and nothing about what ships.
+        "target": "ES2020" ,
+        "module": "ESNext" ,
+        "moduleResolution": "node" ,
+        "lib": [
+            "DOM",
+            "ESNext"
+        ] ,
+        "jsx": "react-jsx" ,
+        "noEmit": true ,
+        "isolatedModules": true ,
+        "esModuleInterop": true ,
+        "strict": true ,
+        "skipLibCheck": true ,
+        "forceConsistentCasingInFileNames": true ,
+        "allowSyntheticDefaultImports": true,
+        "resolveJsonModule": true,
+        // The shared app-kit, by source -- the same mapping ../app-kit/vite.preset.ts gives Vite.
+        "baseUrl": ".",
+        "paths": { "@cleo/app-kit/*": ["../app-kit/src/*"] }
+    },
+    "include": ["src/**/*" , "@types/index.d.ts"]
+}

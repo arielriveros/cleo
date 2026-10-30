@@ -5,7 +5,7 @@ import { glslRaw } from './tools/viteGlsl.mjs';
 
 // The engine's Vite surface: how engine SOURCE is resolved and transformed. Everything that builds or
 // tests the engine merges this file, so the shader plugin and the `cleo` alias are declared once —
-// ./vitest.config.ts, editor/vite.config.ts, editor/vite.player.config.ts, editor/vitest.config.ts.
+// ./vitest.config.ts, applications/editor/vite.config.ts, applications/editor/vite.player.config.ts, applications/editor/vitest.config.ts.
 //
 // There is deliberately no `build` section and no `vite build` at this root. webpack used to emit a UMD
 // dist/cleo.js here, and by the time the editor moved to Vite nothing loaded it: the editor dev server,

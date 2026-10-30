@@ -165,6 +165,17 @@ interface PBRProperties extends UvConfig {
      * Ignored where `metallic` is 1: a conductor's F0 is its base colour, not a scalar.
      */
     reflectance?: number;
+    /**
+     * Thin-surface diffuse transmission, 0..1. Default 0.
+     *
+     * The share of diffuse light that passes THROUGH the surface instead of bouncing off its lit side:
+     * a leaf or a grass blade with the sun behind it glows in its own colour rather than going black.
+     * glTF's `KHR_materials_diffuse_transmission` means the same thing by `diffuseTransmissionFactor`,
+     * which is what the importer reads into it. The glow is ADDED on top: the lit side shades exactly as
+     * an opaque surface, and specular is untouched. Dielectric only: it travels through the
+     * G-buffer as a NEGATIVE metallic, so a translucent surface is never metallic.
+     */
+    translucency?: number;
     opacity?: number;
     /**
      * glTF `alphaMode: MASK`. Below this base-colour alpha the fragment is discarded; the surface
@@ -653,6 +664,7 @@ export class Material {
         // 0.5 -> F0 0.04, which is what every dielectric was hardcoded to before this existed. That
         // default is what makes the whole change a no-op on content authored before it.
         material.properties.set('reflectance', properties.reflectance === undefined ? 0.5 : properties.reflectance);
+        material.properties.set('translucency', Math.min(1, Math.max(0, properties.translucency ?? 0)));
         material.properties.set('opacity', properties.opacity === undefined ? 1.0 : properties.opacity);
         material.properties.set('emissiveFactor', properties.emissiveFactor || [0.0, 0.0, 0.0]);
         material.properties.set('emissiveIntensity',
@@ -757,6 +769,8 @@ export class Material {
                 metallic: this.properties.get('metallic'),
                 roughness: this.properties.get('roughness'),
                 reflectance: this.properties.get('reflectance'),
+                // Omitted at 0, so a material that never used it serialises exactly as it did before.
+                ...(this.properties.get('translucency') ? { translucency: this.properties.get('translucency') } : {}),
                 opacity: this.properties.get('opacity'),
                 alphaCutoff: this.properties.get('alphaCutoff'),
                 emissiveFactor: this.properties.get('emissiveFactor'),
@@ -900,6 +914,7 @@ export class Material {
                 // `??`, so a project saved before reflectance existed reloads at the neutral 0.5
                 // rather than at 0, which would strip the specular off every dielectric in it.
                 reflectance: m.reflectance ?? 0.5,
+                translucency: m.translucency ?? 0,
                 opacity: m.opacity ?? 1.0,
                 // Left undefined when absent rather than forced to 0: applyMask needs to tell "no
                 // cutoff stored" from "cutoff explicitly off", so a mask can still pick up its 0.5

@@ -1,5 +1,5 @@
 import { Geometry } from "../core/geometry";
-import { Material } from "./material";
+import { Material, applyWind } from "./material";
 import { OutputMaterial, AssimpParseResult, AssimpTextureSlots, loadAssimpModel, parseMaterial, convertToGltf2FromFiles, parseAssimpFiles } from "./utils/assimpLoader";
 import { GLTFLoader, ImportTransform, GltfParseResult } from "./utils/gltfLoader";
 // A cycle (model.ts imports Loader), but benign: Model is only referenced inside method bodies.
@@ -328,12 +328,13 @@ export class Loader {
                 }
             }
 
-            return Material.PBR({
+            const material = Material.PBR({
                 baseColor: d.baseColor,
                 metallic: d.metallic,
                 roughness: d.roughness,
                 opacity: d.opacity,
                 alphaCutoff: d.alphaCutoff ?? 0,
+                translucency: d.translucency ?? 0,
                 emissiveFactor: d.emissiveFactor,
                 emissiveIntensity: d.emissiveIntensity ?? 1,
                 textures
@@ -341,6 +342,8 @@ export class Loader {
                 side: d.doubleSided ? 'double' : 'front',
                 transparent: d.transparent,
             });
+            if (d.wind) applyWind(material, d.wind);
+            return material;
         });
 
         return parsed.meshes.map(mesh => {

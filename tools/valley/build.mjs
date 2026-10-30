@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Authors the "Valley" example into editor/public/examples/valley/.
+// Authors the "Valley" example into applications/editor/public/examples/valley/.
 //
 //     python tools/valley/prepare.py                         # once: textures -> build/valley_prepared/
 //     node --max-old-space-size=12288 tools/valley/build.mjs
@@ -54,7 +54,7 @@ import { buildDungeon } from './dungeon/scene.mjs'
 const { ROOT, stableId: soulsId, clone, matJson, material, textures, LEVEL, linkInstance, withScript } = souls
 const BUILD = path.join(ROOT, 'build')
 const PREPARED = path.join(BUILD, 'valley_prepared')
-const OUT = path.join(ROOT, 'editor', 'public', 'examples', 'valley')
+const OUT = path.join(ROOT, 'applications', 'editor', 'public', 'examples', 'valley')
 const PROJECT_NAME = 'Valley'
 /** Lux on a surface that renders white at exposure 1 (src/graphics/lighting.ts). */
 const REFERENCE_ILLUMINANCE = 78643.2
@@ -2170,6 +2170,6 @@ const sceneBytes = fs.statSync(sceneFile).size
 // of decimal text, stored in the model library, the terrain material and the scene's foliage layer, which
 // put the scene file past GitHub's 100 MB limit. Packing interns it once, as binary, in split parts.
 const largest = await packFormat2(OUT)
-log(`${PROJECT_NAME} written to editor/public/examples/valley/`)
+log(`${PROJECT_NAME} written to applications/editor/public/examples/valley/`)
 log(`  templates ${result.templates} · materials ${result.materials} · textures ${result.textureCount} · scene ${mb(sceneBytes)} unpacked · largest file ${mb(largest)}`)
 log('Next:  npm --prefix editor run examples:list')

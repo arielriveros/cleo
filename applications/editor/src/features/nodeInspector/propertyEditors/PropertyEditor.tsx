@@ -1,0 +1,112 @@
+import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OccluderNode, ExposureVolumeNode } from 'cleo'
+import MaterialSlot from './MaterialSlot'
+import AnimationSlot from './AnimationSlot'
+import RigSlot from './RigSlot';
+import ModelSlot from './ModelSlot'
+import SocketAttachSlot from './SocketAttachSlot'
+import SkyboxEditor from './SkyboxEditor'
+import TransformEditor from './TransformEditor'
+import LightEditor from './LightEditor'
+import LightProbeEditor from './LightProbeEditor'
+import DecalEditor from './DecalEditor'
+import { nodeSupportsMaterial } from '../../../utils/materials'
+import NodeInfo from './NodeInfo'
+import CameraEditor from './CameraEditor'
+import SpriteEditor from './SpriteEditor'
+import AnimatedSpriteEditor from './SpriteSheetEditor'
+import VolumetricCloudsEditor from './VolumetricCloudsEditor'
+import SkyAtmosphereEditor from './SkyAtmosphereEditor'
+import SkyLightEditor from './SkyLightEditor'
+import WindEditor from './WindEditor'
+import CameraRigEditor from './CameraRigEditor'
+import CharacterEditor from './CharacterEditor'
+import ControllerEditor from './ControllerEditor'
+import NavMeshEditor from './NavMeshEditor'
+import SoundEditor from './SoundEditor'
+import ParticleSystemEditor from './ParticleSystemEditor'
+import ForceFieldEditor from './ForceFieldEditor'
+import WaterVolumeEditor from './WaterVolumeEditor'
+import OccluderEditor from './OccluderEditor'
+import ExposureVolumeEditor from './ExposureVolumeEditor'
+import TilemapEditor from './TilemapEditor'
+import LandscapeEditor from './LandscapeEditor'
+import SceneSettings from './SceneSettings'
+import UIEditor from './UIEditor'
+import { isRootNode } from '../useSelectedNode'
+import { useCleoEngine } from '../../EngineContext'
+import { DocScope } from '@cleo/app-kit/ui'
+
+export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) {
+  const { activeTab, editorMode, templateRootId } = useCleoEngine();
+  const root = isRootNode(props.node);
+  const ro = !!props.readOnly;
+  // The template root, and only it. A template's whole point is that its root is the thing you place, and
+  // enterTemplateEditor has to pick a type before you know what you are building — so the choice belongs
+  // here, after the fact. Every other node keeps the plain read-only Type row.
+  const allowTypeChange = editorMode === 'template' && props.node.id === templateRootId;
+  // A screen-space UI element has no meaningful world transform: the anchor solve owns its position. A
+  // WORLD-space canvas is the exception — its `position` is the point it projects from.
+  const isUI = isUINodeType(props.node.nodeType);
+  const showTransform = !root && (!isUI || (props.node instanceof UIRootNode && props.node.space === 'world'));
+
+  // Gated on the tab kind: a template/model tab's throwaway scene also has a root named 'root', and that
+  // one is not a scene asset.
+  if (root && activeTab.kind === 'scene') return <SceneSettings />;
+
+  // The inspector is documented on its own page whatever panel page hosts it (scene, template, model);
+  // editors described elsewhere (materials, UI, audio, terrain, 2D, particles) open their own scope.
+  return (
+    <DocScope page='editor/node-inspector'>
+        {/* NodeInfo (name locked, Delete kept) and Transform stay editable for instances. */}
+        <NodeInfo node={props.node} readOnly={ro} allowTypeChange={allowTypeChange} />
+        {showTransform && <TransformEditor node={props.node} />}
+
+        {/* Which model asset this subtree came from. Outside the fieldset below on purpose: it is a label
+            and a navigation button, not an edit, and jumping to the asset is exactly what you want from a
+            read-only template instance. Renders itself away for anything not placed from a model. */}
+        {!root && <ModelSlot node={props.node} />}
+
+        {/* Everything else is disabled in one shot for a template instance. */}
+        <fieldset disabled={ro} className={`${ro ? 'opacity-60' : ''} border-0 m-0 p-0 min-w-0`}>
+          {/* Models and decals: the one predicate every material helper uses, so the slot shows exactly
+              where linking, save propagation and deletion work. */}
+          { nodeSupportsMaterial(props.node) && <MaterialSlot node={props.node} /> }
+          {/* A node that IS a skinned model, or is the ROOT of an instance holding one — `ownSkinnedModelNodeOf`,
+              never a subtree search, so a section is about the selected node rather than anything below it.
+              Both render away otherwise. Between them these are the only animation-related sections on a
+              model node: the rig owns the clips, the node owns the machine that names them. */}
+          { !root && <RigSlot node={props.node} /> }
+          { !root && <AnimationSlot node={props.node} /> }
+          { props.node.nodeType === 'sprite' && <SpriteEditor node={props.node as SpriteNode} /> }
+          { props.node.nodeType === 'animatedSprite' && <AnimatedSpriteEditor /> }
+          { props.node.nodeType === 'light' && <LightEditor node={props.node as LightNode} /> }
+          { props.node.nodeType === 'lightProbe' && <LightProbeEditor node={props.node as LightProbeNode} /> }
+          { props.node.nodeType === 'exposureVolume' && <ExposureVolumeEditor key={props.node.id} node={props.node as ExposureVolumeNode} /> }
+          {/* Keyed by id so selecting another decal starts from ITS values rather than writing this one's
+              state into it for a frame. */}
+          { props.node.nodeType === 'decal' && <DecalEditor key={props.node.id} node={props.node as DecalNode} /> }
+          { props.node.nodeType === 'skybox' && <SkyboxEditor node={props.node as SkyboxNode} /> }
+          { props.node.nodeType === 'camera' && <CameraEditor node={props.node as CameraNode} /> }
+          { props.node.nodeType === 'cameraRig' && <CameraRigEditor node={props.node as CameraRigNode} /> }
+          { props.node.nodeType === 'character' && <CharacterEditor node={props.node as CharacterNode} /> }
+          { props.node.nodeType === 'controller' && <ControllerEditor node={props.node as ControllerNode} /> }
+          { props.node.nodeType === 'navMesh' && <NavMeshEditor node={props.node as NavMeshNode} /> }
+          { props.node.nodeType === 'sound' && <SoundEditor node={props.node as SoundNode} /> }
+          { props.node.nodeType === 'particleSystem' && <ParticleSystemEditor key={props.node.id} node={props.node as ParticleSystemNode} /> }
+          { props.node.nodeType === 'forceField' && <ForceFieldEditor key={props.node.id} node={props.node as ForceFieldNode} /> }
+          { props.node.nodeType === 'waterVolume' && <WaterVolumeEditor key={props.node.id} node={props.node as WaterVolumeNode} /> }
+          { props.node.nodeType === 'occluder' && <OccluderEditor key={props.node.id} node={props.node as OccluderNode} /> }
+          { props.node.nodeType === 'tilemap' && <TilemapEditor node={props.node as TilemapNode} /> }
+          { props.node.nodeType === 'landscape' && <LandscapeEditor key={props.node.id} node={props.node as LandscapeNode} /> }
+          { props.node.nodeType === 'volumetricClouds' && <VolumetricCloudsEditor node={props.node as VolumetricCloudsNode} /> }
+          { props.node.nodeType === 'skyAtmosphere' && <SkyAtmosphereEditor node={props.node as SkyAtmosphereNode} /> }
+          { props.node.nodeType === 'skyLight' && <SkyLightEditor node={props.node as SkyLightNode} /> }
+          { props.node.nodeType === 'wind' && <WindEditor node={props.node as WindNode} /> }
+          { isUI && <UIEditor node={props.node as UINode} /> }
+          {/* Last: a secondary option. Renders itself away unless the node is attached already or sits
+              inside a character with sockets — see SocketAttachSlot. */}
+          { !root && !isUI && <SocketAttachSlot node={props.node} /> }
+        </fieldset>
+    </DocScope>
+  )
+}

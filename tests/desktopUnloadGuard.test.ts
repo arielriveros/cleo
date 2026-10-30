@@ -14,14 +14,14 @@ import { execFileSync } from 'child_process';
  * Three files have to agree on two channel names, across two process boundaries and a
  * `contextBridge`. Nothing throws when they stop agreeing: `ipcRenderer.send` to a channel nobody
  * listens on is a no-op, `ipcMain.on` for a channel nobody sends is never called, and the guard simply
- * stops guarding — the window closes on dirty work with no dialog and no error. `editor/tests/
+ * stops guarding — the window closes on dirty work with no dialog and no error. `applications/editor/tests/
  * noNativeDialogs.test.ts` holds the other half: that `beforeunload` blocks in exactly one place and stands down for a navigation the editor started.
  */
 
 const ROOT = join(__dirname, '..');
-const MAIN = readFileSync(join(ROOT, 'desktop', 'main.js'), 'utf-8');
-const PRELOAD = readFileSync(join(ROOT, 'desktop', 'preload.js'), 'utf-8');
-const BRIDGE = readFileSync(join(ROOT, 'editor', 'src', 'features', 'desktopShell.ts'), 'utf-8');
+const MAIN = readFileSync(join(ROOT, 'applications', 'app-kit', 'desktop', 'main.js'), 'utf-8');
+const PRELOAD = readFileSync(join(ROOT, 'applications', 'app-kit', 'desktop', 'preload.js'), 'utf-8');
+const BRIDGE = readFileSync(join(ROOT, 'applications', 'app-kit', 'src', 'platform', 'desktopShell.ts'), 'utf-8');
 
 /** main -> renderer, then renderer -> main. */
 const CHANNELS = ['shell:confirm-unload', 'shell:unload-response'];
@@ -70,7 +70,7 @@ describe('desktop unload guard', () => {
 
   it('parses — neither desktop file is loadable outside Electron, so nothing else would catch a typo', () => {
     for (const file of ['main.js', 'preload.js']) {
-      expect(() => execFileSync(process.execPath, ['--check', join(ROOT, 'desktop', file)]))
+      expect(() => execFileSync(process.execPath, ['--check', join(ROOT, 'applications', 'app-kit', 'desktop', file)]))
         .not.toThrow();
     }
   });

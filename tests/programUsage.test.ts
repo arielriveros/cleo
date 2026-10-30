@@ -8,7 +8,7 @@ import { PARTICLE_PROGRAMS } from '../src/graphics/particles/particleRenderer';
 import type { ShaderProgram } from '../src/graphics/rhi/shaderProgram';
 import { readExample } from '../tools/exampleKit/readExample.mjs';
 
-const VALLEY_EXAMPLE = await readExample(join(__dirname, '..', 'editor', 'public', 'examples', 'valley'));
+const VALLEY_EXAMPLE = await readExample(join(__dirname, '..', 'applications', 'editor', 'public', 'examples', 'valley'));
 
 /**
  * A published game builds only the programs `programsFor` lists. Two ways that goes wrong quietly:

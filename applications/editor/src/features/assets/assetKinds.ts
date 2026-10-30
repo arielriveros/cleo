@@ -1,0 +1,915 @@
+import { TextureManager, AudioManager, CleoEngine, Logger } from 'cleo'
+import type { MaterialAsset } from '../../utils/materials'
+import type { TerrainMaterialAsset } from '../../utils/terrainMaterials'
+import type { Template } from '../../utils/templates'
+import type { ModelAsset } from '../../utils/models'
+import type { ScriptAsset } from '../../utils/scripts'
+import type { AnimationAsset } from '../../utils/animationAssets'
+import type { RigAsset } from '../../utils/rigAssets'
+import type { AnimationFieldAsset } from '../../utils/animationFields'
+import type { TilesetAsset } from '../../utils/tilesets'
+import type { AiBrainAsset } from '../../utils/aiBrains'
+import type { AnimControllerAsset } from '../../utils/animationControllers'
+import type { BoneMaskAsset } from '../../utils/boneMasks'
+import type { PoseAsset } from '../../utils/poseAssets'
+import type { ParticleSystemAsset } from '../../utils/particleSystems'
+import { renderParticleSystemThumbnail } from '../../utils/particleThumbnails'
+import type { SceneMeta } from '../../utils/sceneStorage'
+import {
+  renderMaterialAssetThumbnail, renderModelAssetThumbnail, renderTerrainMaterialAssetThumbnail,
+} from '../../utils/modelThumbnails'
+import { cryptoRandomId } from '../../utils/ids'
+import { deleteTextures, putTextures } from '../../utils/textureStore'
+import { AssetKind, AUDIO_EXTS, KIND_EXT, KIND_LABEL } from '../../utils/vfs'
+import type { ImageAsset } from '../../utils/images'
+import { toTextureConfig } from '../../utils/textureAssets'
+import type { TextureAsset } from '../../utils/textureAssets'
+import type { AudioSourceAsset } from '../../utils/audioSources'
+import { formatDuration } from '../../utils/audioSources'
+import type { SoundSampleAsset } from '../../utils/soundSamples'
+import { readsAudio } from '../../utils/soundSamples'
+import { deleteAudio, putAudio } from '../../utils/audioStore'
+import { deepClone } from '@cleo/app-kit/utils/deepClone'
+import { materializeVariant } from '../../utils/templateVariants'
+import { estimateBytes } from '../../utils/assetSize'
+import { IMAGE_EXTS } from './uploadRouter'
+
+// One adapter per asset kind, so the file-manager event bridge never has to branch five ways.
+
+export type AssetDeps = {
+  materials: MaterialAsset[]
+  terrainMaterials: TerrainMaterialAsset[]
+  templates: Template[]
+  models: ModelAsset[]
+  scripts: ScriptAsset[]
+  animationFields: AnimationFieldAsset[]
+  animations: AnimationAsset[]
+  rigs: RigAsset[]
+  tilesets: TilesetAsset[]
+  aiBrains: AiBrainAsset[]
+  animControllers: AnimControllerAsset[]
+  boneMasks: BoneMaskAsset[]
+  poseAssets: PoseAsset[]
+  images: ImageAsset[]
+  textures: TextureAsset[]
+  audioSources: AudioSourceAsset[]
+  soundSamples: SoundSampleAsset[]
+  particleSystems: ParticleSystemAsset[]
+  scenes: SceneMeta[]
+
+  addMaterial: (m: MaterialAsset) => void
+  updateMaterial: (id: string, m: MaterialAsset) => void
+  removeMaterial: (id: string) => void
+  addTerrainMaterial: (m: TerrainMaterialAsset) => void
+  updateTerrainMaterial: (id: string, m: TerrainMaterialAsset) => void
+  removeTerrainMaterial: (id: string) => void
+  addTemplate: (t: Template) => void
+  updateTemplate: (id: string, t: Template) => void
+  removeTemplate: (id: string) => void
+  addModel: (m: ModelAsset) => void
+  updateModel: (id: string, m: ModelAsset) => void
+  removeModel: (id: string) => void
+  addScriptAsset: (s: ScriptAsset) => void
+  updateScriptAsset: (id: string, s: ScriptAsset) => void
+  removeScriptAsset: (id: string) => void
+  addAnimationField: (f: AnimationFieldAsset) => void
+  updateAnimationField: (id: string, f: AnimationFieldAsset) => void
+  removeAnimationField: (id: string) => void
+  addAnimation: (a: AnimationAsset) => void
+  updateAnimation: (id: string, a: AnimationAsset) => void
+  removeAnimation: (id: string) => void
+  addRig: (r: RigAsset) => void
+  updateRig: (id: string, r: RigAsset) => void
+  removeRig: (id: string) => void
+  addAiBrain: (b: AiBrainAsset) => void
+  updateAiBrain: (id: string, b: AiBrainAsset) => void
+  removeAiBrain: (id: string) => void
+  addAnimController: (c: AnimControllerAsset) => void
+  updateAnimController: (id: string, c: AnimControllerAsset) => void
+  removeAnimController: (id: string) => void
+  addBoneMask: (m: BoneMaskAsset) => void
+  updateBoneMask: (id: string, m: BoneMaskAsset) => void
+  removeBoneMask: (id: string) => void
+  addPoseAsset: (p: PoseAsset) => void
+  updatePoseAsset: (id: string, p: PoseAsset) => void
+  removePoseAsset: (id: string) => void
+  addTileset: (t: TilesetAsset) => void
+  updateTileset: (id: string, t: TilesetAsset) => void
+  removeTileset: (id: string) => void
+  addImage: (i: ImageAsset) => void
+  updateImage: (id: string, i: ImageAsset) => void
+  removeImage: (id: string) => void
+  addTextureAsset: (t: TextureAsset) => void
+  updateTextureAsset: (id: string, t: TextureAsset) => void
+  removeTextureAsset: (id: string) => void
+  addAudioSource: (a: AudioSourceAsset) => void
+  updateAudioSource: (id: string, a: AudioSourceAsset) => void
+  removeAudioSource: (id: string) => void
+  addSoundSample: (s: SoundSampleAsset) => void
+  updateSoundSample: (id: string, s: SoundSampleAsset) => void
+  removeSoundSample: (id: string) => void
+  addParticleSystem: (p: ParticleSystemAsset) => void
+  updateParticleSystem: (id: string, p: ParticleSystemAsset) => void
+  removeParticleSystem: (id: string) => void
+  createScene: (name?: string) => Promise<string>
+  renameScene: (sceneId: string, name: string) => void
+  deleteScene: (sceneId: string) => Promise<string | null>
+  duplicateScene: (sceneId: string) => Promise<string | null>
+  openScene: (sceneId: string) => Promise<boolean>
+  setMainScene: (sceneId: string) => void
+
+  enterMaterialEditor: (id?: string) => void
+  enterTerrainMaterialEditor: (id?: string) => void
+  enterTemplateEditor: (id?: string) => void
+  createTemplateVariant: (baseId: string) => void
+  enterModelEditor: (id?: string) => void
+  enterScriptEditor: (id?: string) => void
+  enterAnimationFieldEditor: (id?: string) => void
+  enterTilesetEditor: (id?: string) => void
+  enterAiBrainEditor: (id?: string) => void
+  enterRigEditor: (id?: string) => void
+  openAnimController: (id: string) => void
+  enterClipEditor: (id?: string) => void
+  enterTextureEditor: (id?: string) => void
+  enterSoundEditor: (id?: string) => void
+  enterParticleSystemEditor: (id?: string) => void
+
+  emit: (event: string, payload?: any) => void
+}
+
+type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | AnimationAsset | RigAsset | TilesetAsset | AiBrainAsset | AnimControllerAsset | BoneMaskAsset | PoseAsset | SceneMeta | ImageAsset | TextureAsset | AudioSourceAsset | SoundSampleAsset | ParticleSystemAsset
+
+/** The asset record behind an entry, or undefined. Every kind has one now, textures included. */
+export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsset | undefined {
+  switch (kind) {
+    case 'material': return deps.materials.find(m => m.id === id)
+    case 'terrainMaterial': return deps.terrainMaterials.find(m => m.id === id)
+    case 'template': return deps.templates.find(t => t.id === id)
+    case 'model': return deps.models.find(m => m.id === id)
+    case 'script': return deps.scripts.find(s => s.id === id)
+    case 'animationField': return deps.animationFields.find(f => f.id === id)
+    case 'animation': return deps.animations.find(a => a.id === id)
+    case 'rig': return deps.rigs.find(r => r.id === id)
+    case 'tileset': return deps.tilesets.find(t => t.id === id)
+    case 'aiBrain': return deps.aiBrains.find(b => b.id === id)
+    case 'animController': return deps.animControllers.find(c => c.id === id)
+    case 'boneMask': return deps.boneMasks.find(m => m.id === id)
+    case 'pose': return deps.poseAssets.find(p => p.id === id)
+    case 'scene': return deps.scenes.find(s => s.id === id)
+    case 'image': return deps.images.find(i => i.id === id)
+    case 'texture': return deps.textures.find(t => t.id === id)
+    case 'audioSource': return deps.audioSources.find(a => a.id === id)
+    case 'soundSample': return deps.soundSamples.find(s => s.id === id)
+    case 'particleSystem': return deps.particleSystems.find(p => p.id === id)
+  }
+}
+
+/**
+ * True when the asset still exists.
+ *
+ * Textures are judged by their RECORD, not by whether the TextureManager currently holds one: a texture
+ * whose image failed to decode is still an asset the user owns and can repair, and treating it as gone
+ * would hide the very card they need to fix it with.
+ */
+export function assetExists(kind: AssetKind, id: string, deps: AssetDeps): boolean {
+  return !!findAsset(kind, id, deps)
+}
+
+/** A rough byte size, computed once when an asset is first indexed — never per render. */
+export function sizeOfAsset(kind: AssetKind, id: string, deps: AssetDeps): number | undefined {
+  // The bytes belong to the image, and it knows its own length exactly — no more guessing 3/4 of a
+  // base64 string's length and giving up entirely on a blob: URL.
+  if (kind === 'image') return deps.images.find(i => i.id === id)?.byteSize || undefined
+  // A texture is settings and a reference. Counting the image's bytes here as well would double every
+  // folder total, and would multiply it again for each texture sharing one image.
+  if (kind === 'texture') return undefined
+  // The audio split is the same shape: the source knows its exact byte length, the sample is a reference.
+  if (kind === 'audioSource') return deps.audioSources.find(a => a.id === id)?.byteSize || undefined
+  if (kind === 'soundSample') return undefined
+  const asset = findAsset(kind, id, deps)
+  if (!asset) return undefined
+  // Walked, not stringified: a model asset carries its vertex buffers, and building the text of one is
+  // minutes of work ending in `RangeError: Invalid string length` — for a number on a card. See assetSize.
+  try { return estimateBytes(asset) } catch { return undefined }
+}
+
+/** The preview image for a card: the asset's rendered thumbnail, or the texture's own image. */
+export function thumbnailOf(kind: AssetKind, id: string, deps: AssetDeps): string | null {
+  // Both halves preview off the live decoded image. A texture shows what it currently samples, which is
+  // its own id in the TextureManager; an image shows any texture reading it, since the bytes are the same
+  // picture either way and the image itself is never uploaded to the GPU on its own.
+  if (kind === 'texture') return liveImageSrc(id)
+  // Neither audio kind has a picture. Their cards show the kind glyph, which is what a null returns.
+  if (kind === 'audioSource' || kind === 'soundSample') return null
+  if (kind === 'image') {
+    const reader = deps.textures.find(t => t.source.kind === 'image' && t.source.imageId === id)
+    return reader ? liveImageSrc(reader.id) : null
+  }
+  // Templates have no thumbnail field; materials/terrain materials have an empty one until first save.
+  const asset = findAsset(kind, id, deps) as { thumbnail?: string } | undefined
+  return asset?.thumbnail || null
+}
+
+/** The decoded `<img>` behind a live texture, as a URL a card can show. */
+function liveImageSrc(textureId: string): string | null {
+  const data = TextureManager.Instance.getTexture(textureId)?.data as HTMLImageElement | undefined
+  return data instanceof HTMLImageElement && data.src ? data.src : null
+}
+
+/**
+ * Rename an asset to `stem` (the new basename without its extension).
+ *
+ * Textures rename like anything else now. Their ID is still immutable — it is baked into every serialized
+ * material — but the display name is a separate field, which is exactly what the split bought.
+ */
+export function renameAsset(kind: AssetKind, id: string, stem: string, deps: AssetDeps): void {
+  switch (kind) {
+    case 'material': {
+      const a = deps.materials.find(m => m.id === id)
+      if (a) deps.updateMaterial(id, { ...a, name: stem })
+      break
+    }
+    case 'terrainMaterial': {
+      const a = deps.terrainMaterials.find(m => m.id === id)
+      if (a) deps.updateTerrainMaterial(id, { ...a, name: stem })
+      break
+    }
+    case 'template': {
+      const a = deps.templates.find(t => t.id === id)
+      if (a) deps.updateTemplate(id, { ...a, name: stem })
+      break
+    }
+    case 'model': {
+      const a = deps.models.find(m => m.id === id)
+      if (a) deps.updateModel(id, { ...a, name: stem })
+      break
+    }
+    case 'script': {
+      const a = deps.scripts.find(s => s.id === id)
+      if (a) deps.updateScriptAsset(id, { ...a, name: stem })
+      break
+    }
+    case 'animationField': {
+      const a = deps.animationFields.find(f => f.id === id)
+      if (a) deps.updateAnimationField(id, { ...a, name: stem })
+      break
+    }
+    case 'animation': {
+      const a = deps.animations.find(x => x.id === id)
+      if (a) deps.updateAnimation(id, { ...a, name: stem })
+      break
+    }
+    case 'rig': {
+      const a = deps.rigs.find(x => x.id === id)
+      if (a) deps.updateRig(id, { ...a, name: stem })
+      break
+    }
+    case 'tileset': {
+      const a = deps.tilesets.find(t => t.id === id)
+      if (a) deps.updateTileset(id, { ...a, name: stem })
+      break
+    }
+    case 'aiBrain': {
+      const a = deps.aiBrains.find(b => b.id === id)
+      if (a) deps.updateAiBrain(id, { ...a, name: stem })
+      break
+    }
+    case 'animController': {
+      const a = deps.animControllers.find(c => c.id === id)
+      if (a) deps.updateAnimController(id, { ...a, name: stem })
+      break
+    }
+    case 'boneMask': {
+      const a = deps.boneMasks.find(m => m.id === id)
+      if (a) deps.updateBoneMask(id, { ...a, name: stem })
+      break
+    }
+    case 'pose': {
+      const a = deps.poseAssets.find(p => p.id === id)
+      if (a) deps.updatePoseAsset(id, { ...a, name: stem })
+      break
+    }
+    case 'scene': {
+      const a = deps.scenes.find(s => s.id === id)
+      if (a) deps.renameScene(id, stem)
+      break
+    }
+    case 'texture': {
+      const a = deps.textures.find(t => t.id === id)
+      if (a) deps.updateTextureAsset(id, { ...a, name: stem })
+      break
+    }
+    case 'image': {
+      const a = deps.images.find(i => i.id === id)
+      if (a) deps.updateImage(id, { ...a, name: stem })
+      break
+    }
+    case 'audioSource': {
+      const a = deps.audioSources.find(x => x.id === id)
+      if (a) deps.updateAudioSource(id, { ...a, name: stem })
+      break
+    }
+    case 'soundSample': {
+      const a = deps.soundSamples.find(x => x.id === id)
+      if (a) deps.updateSoundSample(id, { ...a, name: stem })
+      break
+    }
+    case 'particleSystem': {
+      const a = deps.particleSystems.find(p => p.id === id)
+      if (a) deps.updateParticleSystem(id, { ...a, name: stem })
+      break
+    }
+  }
+}
+
+/** Delete an asset. Each library's remover already unlinks the nodes that referenced it. */
+export function deleteAsset(kind: AssetKind, id: string, deps: AssetDeps): void {
+  switch (kind) {
+    case 'material': deps.removeMaterial(id); break
+    case 'terrainMaterial': deps.removeTerrainMaterial(id); break
+    case 'template': deps.removeTemplate(id); break
+    case 'model': deps.removeModel(id); break
+    case 'script': deps.removeScriptAsset(id); break
+    case 'animationField': deps.removeAnimationField(id); break
+    case 'animation': deps.removeAnimation(id); break
+    case 'rig': deps.removeRig(id); break
+    case 'tileset': deps.removeTileset(id); break
+    case 'aiBrain': deps.removeAiBrain(id); break
+    case 'animController': deps.removeAnimController(id); break
+    case 'boneMask': deps.removeBoneMask(id); break
+    case 'pose': deps.removePoseAsset(id); break
+    case 'particleSystem': deps.removeParticleSystem(id); break
+    case 'scene': {
+      void deps.deleteScene(id)
+      break
+    }
+    case 'texture': {
+      const asset = deps.textures.find(t => t.id === id)
+      TextureManager.Instance.removeTexture(id)
+      deps.removeTextureAsset(id)
+      // The bytes are only evicted when NOTHING else reads them. Several textures may share one image —
+      // that is the point of the split — so deleting one unconditionally, as this used to, would pull the
+      // pixels out from under every other texture pointing at the same picture.
+      //
+      // Explicit texture deletes only, either way: deleting a material or a mesh must never evict a map.
+      const imageId = asset?.source.kind === 'image' ? asset.source.imageId : undefined
+      if (imageId && !deps.textures.some(t => t.id !== id && readsImage(t, imageId))) {
+        deps.removeImage(imageId)
+        void deleteTextures([imageId])
+      }
+      deps.emit('TEXTURES_CHANGED')
+      break
+    }
+    case 'image': {
+      // The image goes, but a texture still pointing at it is left in place rather than silently
+      // deleted: it keeps its settings, reports itself broken, and can be re-pointed at another image.
+      deps.removeImage(id)
+      void deleteTextures([id])
+      deps.emit('TEXTURES_CHANGED')
+      break
+    }
+    case 'soundSample': {
+      const asset = deps.soundSamples.find(s => s.id === id)
+      AudioManager.Instance.removeSound(id)
+      deps.removeSoundSample(id)
+      // Same eviction rule as a texture's image: the bytes go only when NOTHING else reads them. Several
+      // samples may share one file — that is the point of the split — so an unconditional delete would
+      // pull the audio out from under every other sample pointing at it.
+      const audioId = asset?.source.kind === 'audio' ? asset.source.audioId : undefined
+      if (audioId && !deps.soundSamples.some(s => s.id !== id && readsAudio(s, audioId))) {
+        deps.removeAudioSource(audioId)
+        void deleteAudio([audioId])
+      }
+      deps.emit('SOUNDS_CHANGED')
+      break
+    }
+    case 'audioSource': {
+      // The file goes, but a sample still pointing at it is left in place rather than silently deleted:
+      // it keeps its settings and can be re-pointed at another file. Mirrors the image arm above.
+      deps.removeAudioSource(id)
+      void deleteAudio([id])
+      deps.emit('SOUNDS_CHANGED')
+      break
+    }
+  }
+}
+
+/** Whether `texture` reads `imageId`, through either an image source or a baked pack. */
+function readsImage(texture: TextureAsset, imageId: string): boolean {
+  const s = texture.source
+  if (s.kind === 'image') return s.imageId === imageId
+  if (s.kind === 'pack') return s.bakedImageId === imageId
+  return false
+}
+
+/**
+ * Deep-clone an asset under a new id and name. Returns the new asset id, or null if it couldn't be cloned.
+ * A mesh's `materialIds` are intentionally NOT cloned — the copy shares the originals' material assets.
+ */
+export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: AssetDeps): string | null {
+  const newId = cryptoRandomId()
+  switch (kind) {
+    case 'material': {
+      const a = deps.materials.find(m => m.id === id)
+      if (!a) return null
+      deps.addMaterial({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'terrainMaterial': {
+      const a = deps.terrainMaterials.find(m => m.id === id)
+      if (!a) return null
+      deps.addTerrainMaterial({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'template': {
+      const a = deps.templates.find(t => t.id === id)
+      if (!a) return null
+      const base = a.variant ? deps.templates.find(t => t.id === a.variant!.baseTemplateId) : undefined
+      if (a.variant && base) {
+        // A variant's node ids are derived from ITS id, so the copy is re-materialized under the new one —
+        // a verbatim copy would share ids with the original, and the published script table keys on them.
+        const diff = deepClone(a.variant.diff)
+        diff.nodes[''] = { ...(diff.nodes[''] ?? {}), merge: { ...(diff.nodes['']?.merge ?? {}), name: stem } }
+        deps.addTemplate({ ...a, id: newId, name: stem, ...materializeVariant(base, newId, diff), variant: { baseTemplateId: base.id, diff } })
+        return newId
+      }
+      deps.addTemplate({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'model': {
+      const a = deps.models.find(m => m.id === id)
+      if (!a) return null
+      deps.addModel({ ...deepClone(a), id: newId, name: stem, materialIds: [...(a.materialIds ?? [])] })
+      return newId
+    }
+    case 'script': {
+      const a = deps.scripts.find(s => s.id === id)
+      if (!a) return null
+      deps.addScriptAsset({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'animationField': {
+      const a = deps.animationFields.find(f => f.id === id)
+      if (!a) return null
+      // modelId is deliberately carried over: a duplicated field blends the same character's clips.
+      deps.addAnimationField({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'animation': {
+      const a = deps.animations.find(x => x.id === id)
+      if (!a) return null
+      // The copy keeps the same source skin and clips, so it retargets exactly like the original.
+      deps.addAnimation({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'rig': {
+      const a = deps.rigs.find(x => x.id === id)
+      if (!a) return null
+      // A real copy of the skeleton. Nothing is re-pointed at it: the original's models and animations keep
+      // naming the original, which is what makes this a safe way to fork a rig before editing it.
+      deps.addRig({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'tileset': {
+      const a = deps.tilesets.find(t => t.id === id)
+      if (!a) return null
+      // textureId carries over: a duplicated tileset re-slices the same atlas.
+      deps.addTileset({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'aiBrain': {
+      const a = deps.aiBrains.find(b => b.id === id)
+      if (!a) return null
+      // The copy keeps the original's kind, so it opens on the same canvas.
+      deps.addAiBrain({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    // The three animation-authoring records: plain JSON, so a deep clone is a complete copy. rigId carries
+    // over — the copy is authored against the same skeleton.
+    case 'animController': {
+      const a = deps.animControllers.find(c => c.id === id)
+      if (!a) return null
+      deps.addAnimController({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'boneMask': {
+      const a = deps.boneMasks.find(m => m.id === id)
+      if (!a) return null
+      deps.addBoneMask({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'pose': {
+      const a = deps.poseAssets.find(p => p.id === id)
+      if (!a) return null
+      deps.addPoseAsset({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'particleSystem': {
+      const a = deps.particleSystems.find(p => p.id === id)
+      if (!a) return null
+      // Emitter ids carry over unchanged: they only have to be unique WITHIN a system, and the copy is
+      // its own system. Texture and model references carry over too — the copy draws the same sprites.
+      deps.addParticleSystem({ ...deepClone(a), id: newId, name: stem })
+      return newId
+    }
+    case 'scene': {
+      const a = deps.scenes.find(s => s.id === id)
+      if (!a) return null
+      return null
+    }
+    case 'texture': {
+      const a = deps.textures.find(t => t.id === id)
+      if (!a) return null
+      const tm = TextureManager.Instance
+      // The TextureManager id appears inside serialized materials; keep the pretty name when it is free.
+      const texId = tm.getTexture(stem) ? `${stem}-${newId.slice(0, 6)}` : stem
+
+      // NO BYTES ARE COPIED. The duplicate shares the original's image and differs only in its settings —
+      // which is the whole point of splitting them: one rock.png tiling on a wall and clamped on a decal.
+      deps.addTextureAsset({ ...deepClone(a), id: texId, name: stem, textureIds: [texId, ...a.textureIds.slice(1)] })
+
+      // Register the copy so it is assignable immediately, reusing the source texture's own retained
+      // bytes rather than re-encoding the decoded image through a canvas.
+      const bytes = tm.getSource(id)
+      if (bytes) tm.addTextureFromBytes(bytes.bytes, bytes.mime, toTextureConfig(a.settings), texId)
+      deps.emit('TEXTURES_CHANGED')
+      return texId
+    }
+    case 'image': {
+      const a = deps.images.find(i => i.id === id)
+      if (!a) return null
+      // A real byte copy, unlike a texture duplicate: two image assets are two independent pictures.
+      const bytes = TextureManager.Instance.getSource(id)
+      if (!bytes) return null
+      void putTextures([{
+        id: newId,
+        blob: new Blob([bytes.bytes as unknown as BlobPart], { type: bytes.mime }),
+        mime: bytes.mime,
+        config: undefined,
+      }])
+      deps.addImage({ ...deepClone(a), id: newId, name: stem, created: Date.now() })
+      return newId
+    }
+    case 'soundSample': {
+      const a = deps.soundSamples.find(s => s.id === id)
+      if (!a) return null
+      const am = AudioManager.Instance
+      // The AudioManager id appears inside every serialized SoundNode; keep the pretty name when free.
+      const soundId = am.getSound(stem) ? `${stem}-${newId.slice(0, 6)}` : stem
+
+      // NO BYTES ARE COPIED. The duplicate shares the original's audio and differs only in its settings —
+      // which is the whole point of the split: one impact.wav dry on a footstep and drenched in a cave.
+      deps.addSoundSample({ ...deepClone(a), id: soundId, name: stem, soundIds: [soundId] })
+
+      // Register the copy so it is playable immediately, reusing the original's retained bytes.
+      const bytes = am.getSource(id)
+      if (bytes) am.addSoundFromBytes(bytes.bytes, bytes.mime, deepClone(a.settings), soundId)
+      deps.emit('SOUNDS_CHANGED')
+      return soundId
+    }
+    case 'audioSource': {
+      const a = deps.audioSources.find(x => x.id === id)
+      if (!a) return null
+      // A real byte copy, unlike a sample duplicate: two audio sources are two independent files.
+      const bytes = AudioManager.Instance.getSource(id)
+      if (!bytes) return null
+      void putAudio([{
+        id: newId,
+        blob: new Blob([bytes.bytes as unknown as BlobPart], { type: bytes.mime }),
+        mime: bytes.mime,
+      }])
+      deps.addAudioSource({ ...deepClone(a), id: newId, name: stem, created: Date.now() })
+      return newId
+    }
+  }
+}
+
+/**
+ * Re-render an asset's thumbnail from its saved data and store it. Returns true if a new image was written.
+ * Only kinds whose preview is actually rendered can be regenerated; the rest are no-ops.
+ */
+export async function regenerateThumbnail(
+  kind: AssetKind, id: string, engine: CleoEngine, deps: AssetDeps,
+): Promise<boolean> {
+  switch (kind) {
+    case 'material': {
+      const a = deps.materials.find(m => m.id === id)
+      if (!a) return false
+      const thumbnail = await renderMaterialAssetThumbnail(engine, a)
+      if (!thumbnail) return false
+      deps.updateMaterial(id, { ...a, thumbnail })
+      return true
+    }
+    case 'terrainMaterial': {
+      const a = deps.terrainMaterials.find(m => m.id === id)
+      if (!a) return false
+      const thumbnail = await renderTerrainMaterialAssetThumbnail(engine, a)
+      if (!thumbnail) return false
+      deps.updateTerrainMaterial(id, { ...a, thumbnail })
+      return true
+    }
+    case 'model': {
+      const a = deps.models.find(m => m.id === id)
+      if (!a) return false
+      const thumbnail = await renderModelAssetThumbnail(engine, a)
+      if (!thumbnail) return false
+      deps.updateModel(id, { ...a, thumbnail })
+      return true
+    }
+    case 'particleSystem': {
+      // A moment of the effect, simulated forward against a dark backdrop — see particleThumbnails.ts.
+      const a = deps.particleSystems.find(p => p.id === id)
+      if (!a) return false
+      const thumbnail = await renderParticleSystemThumbnail(engine, a)
+      if (!thumbnail) return false
+      deps.updateParticleSystem(id, { ...a, thumbnail })
+      return true
+    }
+    case 'scene':
+      return false
+    case 'template':
+    case 'script':
+    // A tileset's card shows its atlas image, downscaled on save rather than rendered here.
+    case 'tileset':
+    // A brain is a graph. There is no scene to point a camera at, so its card shows the kind icon.
+    case 'aiBrain':
+    // A controller is a graph too; a mask is per-bone weights and a pose asset a list of poses — none
+    // has a single character to render, so their cards show the kind icon.
+    case 'animController':
+    case 'boneMask':
+    case 'pose':
+    // A field's card shows its kind icon: its content is a 2D plot, not a posed model.
+    case 'animationField':
+    // Clips in source-rig space, with no character attached — there is nothing to pose for a picture.
+    case 'animation':
+    // A skeleton with no mesh on it. Its editor previews it through a character, but there is no single
+    // model a rig could claim for a card — several may use it, and none may.
+    case 'rig':
+    // Both halves of the image split show the decoded image itself — there is nothing to render.
+    case 'image':
+    case 'texture':
+    // The audio kinds have no picture at all; their cards carry the kind glyph.
+    case 'audioSource':
+    case 'soundSample':
+      return false
+  }
+}
+
+/**
+ * Open the asset's editor. Returns false for kinds that have no editor (textures).
+ * A mesh opens a read-only preview tab; opening an asset is what renders its preview.
+ */
+export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean {
+  switch (kind) {
+    case 'material': deps.enterMaterialEditor(id); return true
+    case 'terrainMaterial': deps.enterTerrainMaterialEditor(id); return true
+    case 'template': deps.enterTemplateEditor(id); return true
+    case 'model': deps.enterModelEditor(id); return true
+    case 'script': deps.enterScriptEditor(id); return true
+    case 'animationField': deps.enterAnimationFieldEditor(id); return true
+    case 'tileset': deps.enterTilesetEditor(id); return true
+    case 'aiBrain': deps.enterAiBrainEditor(id); return true
+    case 'scene': void deps.openScene(id); return true
+    case 'texture': deps.enterTextureEditor(id); return true
+    case 'soundSample': deps.enterSoundEditor(id); return true
+    case 'particleSystem': deps.enterParticleSystemEditor(id); return true
+    // Raw bytes have nothing to author, so an image opens the preview pane instead. What makes an image
+    // usable — wrap, filters, mipmaps — belongs to a texture, and that is what has an editor.
+    case 'image': return false
+    case 'animation': deps.enterClipEditor(id); return true
+    case 'rig': deps.enterRigEditor(id); return true
+    case 'animController': deps.openAnimController(id); return true
+    // A mask and a pose asset are edited inside the RIG editor of the skeleton they are authored against;
+    // the rig editor picks up which one to focus from FOCUS_RIG_ASSET.
+    case 'boneMask':
+    case 'pose': {
+      const asset = kind === 'boneMask'
+        ? deps.boneMasks.find(m => m.id === id)
+        : deps.poseAssets.find(p => p.id === id)
+      if (!asset?.rigId) {
+        Logger.warn(`${KIND_LABEL[kind]} "${asset?.name ?? id}" has no rig to open it in`, 'Editor')
+        return false
+      }
+      deps.enterRigEditor(asset.rigId)
+      deps.emit('FOCUS_RIG_ASSET', { kind, id })
+      return true
+    }
+    // Raw audio, same reasoning as an image: what makes a file usable — volume, loop points, effects,
+    // the bus — belongs to the sound sample, and that is what has an editor.
+    case 'audioSource': return false
+  }
+}
+
+/** What deleting this asset does to the things still referencing it — shown in the confirm dialog. */
+export function deleteConsequence(kind: AssetKind): string {
+  switch (kind) {
+    case 'material': return 'nodes using it fall back to a basic material'
+    case 'terrainMaterial': return 'terrain layers painted with it are cleared'
+    case 'template': return 'placed instances are unlinked and become normal nodes; variants based on it keep their content as standalone templates'
+    case 'model': return 'placed copies stay in the scene'
+    case 'script': return 'nodes using it lose their script and its variables'
+    case 'animationField': return 'animation states playing it fall back to no clip'
+    case 'animation': return 'models using it lose those clips'
+    case 'rig': return 'models and animations using it fall back to their embedded skeleton'
+    case 'tileset': return 'tilemap layers painted with it, and sprites drawing from it, are cleared'
+    // The embedded copy stays put — see detachBrain. Only the link goes.
+    case 'aiBrain': return 'controllers keep the brain they copied, but stop tracking this asset'
+    // Characters embed a resolved copy of what they use, so deleting only drops the link.
+    case 'animController': return 'characters keep the state machine they copied, but stop tracking this asset'
+    case 'boneMask': return 'layers and action slots using it stop affecting any bones until another mask is picked'
+    case 'pose': return 'states holding its poses hold nothing, and clip pose offsets using them are skipped'
+    // Embedded like a brain: the node keeps the effect it copied and goes on playing it.
+    case 'particleSystem': return 'particle systems keep the effect they copied, but stop tracking this asset'
+    case 'scene': return 'the project switches to another scene'
+    case 'texture': return 'materials and tilesets using it show no texture'
+    case 'image': return 'textures sourcing it lose their pixels'
+    case 'soundSample': return 'sound nodes playing it fall silent'
+    case 'audioSource': return 'sound samples sourcing it lose their audio'
+  }
+}
+
+/** The DataTransfer entries a drag of this asset must carry, so every existing drop target keeps working. */
+export function dragPayload(kind: AssetKind, assetId: string): [string, string][] {
+  switch (kind) {
+    case 'model': return [['text/cleo-model', assetId]]
+    case 'template': return [['text/cleo-template', assetId]]
+    case 'material': return [['text/cleo-material', assetId]]
+    case 'terrainMaterial': return [['text/cleo-terrain-material', assetId]]
+    case 'script': return [['text/cleo-script', assetId]]
+    case 'animationField': return [['text/cleo-animation-field', assetId]]
+    case 'animation': return [['text/cleo-animation', assetId]]
+    case 'rig': return [['text/cleo-rig', assetId]]
+    case 'tileset': return [['text/cleo-tileset', assetId]]
+    case 'aiBrain': return [['text/cleo-ai-brain', assetId]]
+    case 'animController': return [['text/cleo-anim-controller', assetId]]
+    case 'boneMask': return [['text/cleo-bone-mask', assetId]]
+    case 'pose': return [['text/cleo-pose', assetId]]
+    case 'particleSystem': return [['text/cleo-particle-system', assetId]]
+    case 'scene': return [['text/cleo-scene', assetId], ['text/plain', assetId]]
+    // Deliberately NOT the texture payload: dropping raw bytes into a material slot must not appear to
+    // work, because a slot needs a texture's sampling, not just an image.
+    case 'image': return [['text/cleo-image', assetId]]
+    case 'texture': return [
+      ['text/cleo-asset', JSON.stringify({ type: 'texture', id: assetId })],
+      ['text/plain', assetId], // TextureInspector's fallback
+    ]
+    case 'soundSample': return [['text/cleo-sound-sample', assetId]]
+    // Deliberately NOT the sample payload, for the same reason an image is not a texture: dropping raw
+    // bytes into a Sound node's slot must not appear to work, because a node needs a sample's settings.
+    case 'audioSource': return [['text/cleo-audio', assetId]]
+  }
+}
+
+/** Human-readable kind, for tooltips and dialogs. */
+export function labelOf(kind: AssetKind): string {
+  return KIND_LABEL[kind]
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Icons. Inlined as data URIs: the SVAR default fetches one SVG per card from its CDN.
+// ---------------------------------------------------------------------------------------------------
+
+// Line icons in the stroke style of filemanager.css's chrome glyphs, tinted per kind.
+//
+// Kept as PARTS rather than finished data URIs because the glyph body is reused at two sizes: whole, as
+// the icon, and shrunk into the corner of a folder (see `folderIconFor`).
+type Glyph = { stroke: string; body: string }
+
+const SVG_HEAD = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"'
+const SVG_STROKE = 'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"'
+
+function dataUri(inner: string): string {
+  return `data:image/svg+xml;utf8,${encodeURIComponent(inner)}`
+}
+
+function svg({ stroke, body }: Glyph): string {
+  return dataUri(`${SVG_HEAD} stroke="${stroke}" ${SVG_STROKE}>${body}</svg>`)
+}
+
+const GLYPHS: Record<AssetKind | 'folder', Glyph> = {
+  folder: { stroke: '#8f8fff', body: `<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="#8f8fff" fill-opacity=".16"/>` },
+  material: { stroke: '#6f9fe8', body: `<circle cx="12" cy="12" r="8.5" fill="#326acc" fill-opacity=".2"/><path d="M7.5 9.5a5 5 0 0 1 4-2.9"/>` },
+  terrainMaterial: { stroke: '#5cbf5c', body: `<path d="M2 19 8.5 8l4 5.6L15 10l7 9z" fill="#2c7a2c" fill-opacity=".2"/>` },
+  template: { stroke: '#b08fef', body: `<rect x="4" y="4" width="16" height="16" rx="2.5" fill="#7a4fd4" fill-opacity=".18"/><path d="M8 10.5h8M8 14.5h5"/>` },
+  model: { stroke: '#4fc3d5', body: `<path d="M12 2.5 20.5 7v10L12 21.5 3.5 17V7z" fill="#1f7f8f" fill-opacity=".18"/><path d="M3.5 7 12 11.5 20.5 7M12 11.5v10"/>` },
+  scene: { stroke: '#f2b84b', body: `<path d="M4 19V5h16v14z" fill="#7f5a10" fill-opacity=".18"/><path d="M7 15l3-3 2 2 3-4 2 2"/>` },
+  script: { stroke: '#e0794b', body: `<rect x="4" y="3" width="16" height="18" rx="2" fill="#8f4a26" fill-opacity=".18"/><path d="M10 9 8 12l2 3M14 9l2 3-2 3"/>` },
+  // A blend space: two axes with sample points scattered across them.
+  animationField: { stroke: '#d47ab8', body: `<rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="#8f3a70" fill-opacity=".18"/><path d="M3.5 16.5h17M8 20.5v-17" stroke-opacity=".5"/><circle cx="8" cy="16.5" r="1.5"/><circle cx="13" cy="10" r="1.5"/><circle cx="18" cy="7" r="1.5"/>` },
+  // A clip: a keyframe track, with its keys marked on it.
+  animation: { stroke: '#e8c14f', body: `<rect x="3.5" y="6" width="17" height="12" rx="2" fill="#8f7018" fill-opacity=".18"/><path d="M3.5 12h17" stroke-opacity=".5"/><path d="M7 12V8.5M12 12v-2M17 12v-4" stroke-opacity=".7"/><circle cx="7" cy="8.5" r="1.4"/><circle cx="12" cy="10" r="1.4"/><circle cx="17" cy="8.5" r="1.4"/>` },
+  // A skeleton: two bones meeting at a joint, with the joints picked out. Deliberately a different hue
+  // from `animation`'s amber — a rig and the clips that play on it sit side by side in the explorer.
+  rig: { stroke: '#c9b28a', body: `<path d="M7 4.5 12 11l5-6.5" stroke-opacity=".85"/><path d="M12 11v5.5" stroke-opacity=".85"/><circle cx="7" cy="4.5" r="1.8" fill="#8a7350" fill-opacity=".5"/><circle cx="17" cy="4.5" r="1.8" fill="#8a7350" fill-opacity=".5"/><circle cx="12" cy="11" r="2.2" fill="#c9b28a" fill-opacity=".45"/><circle cx="12" cy="18.5" r="1.8" fill="#8a7350" fill-opacity=".5"/>` },
+  // A sliced atlas: the grid, with one cell picked out.
+  // Two linked nodes with a decision branching out of them: a state machine and a goal tree read as the
+  // same shape at 24px, which is right — one asset holds either.
+  aiBrain: { stroke: '#c89ae0', body: `<circle cx="6" cy="6.5" r="3" fill="#8a5bb0" fill-opacity=".25"/><circle cx="18" cy="6.5" r="3" fill="#8a5bb0" fill-opacity=".25"/><circle cx="12" cy="18" r="3" fill="#c89ae0" fill-opacity=".45"/><path d="M8.2 8.6 10.6 15.6M15.8 8.6 13.4 15.6M9 6.5h6" stroke-opacity=".75"/>` },
+  // A state machine: three states and the transitions between them, in the animation family's pink.
+  animController: { stroke: '#e08fb8', body: `<rect x="2.5" y="4" width="7" height="5" rx="1.5" fill="#8f3a70" fill-opacity=".25"/><rect x="14.5" y="4" width="7" height="5" rx="1.5" fill="#8f3a70" fill-opacity=".25"/><rect x="8.5" y="15" width="7" height="5" rx="1.5" fill="#e08fb8" fill-opacity=".4"/><path d="M9.5 6.5h5M7 9l3.5 6M17 9l-3.5 6" stroke-opacity=".75"/>` },
+  // A bone over a half-weighted body: the mask's weights, in the rig family's tan.
+  boneMask: { stroke: '#c9b28a', body: `<circle cx="12" cy="12" r="8.5" stroke-opacity=".5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="#c9b28a" fill-opacity=".4" stroke="none"/><path d="M8 8l8 8" stroke-opacity=".9"/><circle cx="8" cy="8" r="1.6"/><circle cx="16" cy="16" r="1.6"/>` },
+  // A posed figure: a joint chain frozen mid-gesture.
+  pose: { stroke: '#c9b28a', body: `<circle cx="12" cy="4.5" r="2" fill="#8a7350" fill-opacity=".5"/><path d="M12 6.5v7M12 9l-5-2.5M12 9l4.5 3.5M12 13.5l-4 6.5M12 13.5l4 6" stroke-opacity=".85"/>` },
+  // Sparks rising from one point — the scene tree's ParticlesIcon, in a warm ember tint.
+  particleSystem: { stroke: '#f0a35a', body: `<circle cx="12" cy="19.5" r="1.6" fill="#f0a35a" stroke="none"/><circle cx="7" cy="11" r="1.5"/><circle cx="12" cy="7" r="1.9" fill="#a8541c" fill-opacity=".35"/><circle cx="17" cy="10.5" r="1.4"/><circle cx="9.5" cy="4" r="0.9" fill="#f0a35a" stroke="none"/><circle cx="15.5" cy="4.5" r="1" fill="#f0a35a" stroke="none"/><path d="M12 17.5 7.8 12.6M12 17.5V9.2M12 17.5l4.3-5.5" stroke-dasharray="1.6 1.6" stroke-opacity=".75"/>` },
+  tileset: { stroke: '#7ec8a9', body: `<rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="#2f7a63" fill-opacity=".2"/><path d="M9 3.5v17M14.5 3.5v17M3.5 9h17M3.5 14.5h17" stroke-opacity=".55"/><rect x="9" y="9" width="5.5" height="5.5" fill="#7ec8a9" fill-opacity=".45" stroke="none"/>` },
+  // A raw picture: the photo frame, unadorned. Kept as the old texture glyph so an existing project's
+  // image cards look like the texture cards they were.
+  image: { stroke: '#9aa4b2', body: `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#4a4a55" fill-opacity=".3"/><circle cx="8.5" cy="9.5" r="1.6" stroke="#ffd27a"/><path d="M4 17.5l5-5.5 3.5 4 3-2.5 4.5 4"/>` },
+  // A raw waveform: the file itself, with nothing authored about it. The audio twin of `image`.
+  audioSource: { stroke: '#9aa4b2', body: `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#4a4a55" fill-opacity=".3"/><path d="M3.5 12h1.5M7 8.5v7M10 6v12M13 9v6M16 7v10M19 10.5v3M20.5 12H21" stroke-opacity=".95"/>` },
+  // The same waveform with a speaker in front of it — a sample is audio plus how it is played. The audio
+  // twin of `texture`, tinted to match it.
+  soundSample: { stroke: '#7fb2d9', body: `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#2f5d80" fill-opacity=".35"/><path d="M6 10v4M9 7.5v9M15 8.5v7M18 10.5v3" stroke-opacity=".55"/><path d="M11.5 9.5 13.6 7.8v8.4l-2.1-1.7h-1.2v-5z" fill="#7fb2d9" fill-opacity=".45"/><path d="M16.2 9.6a3.4 3.4 0 0 1 0 4.8" stroke="#ffd27a"/>` },
+  // The same frame with a sampling grid over it — a texture is an image plus how it is read.
+  texture: { stroke: '#7fb2d9', body: `<rect x="3" y="4.5" width="18" height="15" rx="2" fill="#2f5d80" fill-opacity=".35"/><path d="M9 4.5v15M15 4.5v15M3 9.5h18M3 14.5h18" stroke-opacity=".45"/><circle cx="7" cy="8" r="1.2" stroke="#ffd27a"/><path d="M3.5 17l4-4 3 3.2 2.5-2 4.5 4" stroke-opacity=".9"/>` },
+}
+
+const ICONS = Object.fromEntries(
+  (Object.entries(GLYPHS) as [AssetKind | 'folder', Glyph][]).map(([kind, g]) => [kind, svg(g)]),
+) as Record<AssetKind | 'folder', string>
+
+/** Icon URL for a file-manager entry, by kind (or 'folder'). */
+export function iconFor(kind: AssetKind | 'folder'): string {
+  return ICONS[kind]
+}
+
+/**
+ * The folder icon with `kind`'s glyph badged into its bottom-right corner — for a folder whose direct
+ * children are all one kind (see `folderKinds` in VfsContext).
+ *
+ * It is a badge rather than a REPLACEMENT because the two readings are both wanted at once: a folder
+ * full of images should still look like a folder, or the only thing distinguishing it from an image is
+ * a name the card ellipsizes at 80px.
+ *
+ * The corner is cut out of the folder with a mask instead of being covered by an opaque chip. A data
+ * URI cannot read a CSS variable, so any chip colour would have to be hard-coded — and this icon is
+ * drawn over three different backgrounds (the card's sunken preview tile, the sidebar, the Add menu)
+ * and must survive a theme change. A hole is the same in every one of them.
+ */
+const FOLDER_BADGES = new Map<AssetKind, string>()
+
+export function folderIconFor(kind: AssetKind): string {
+  const cached = FOLDER_BADGES.get(kind)
+  if (cached) return cached
+
+  const folder = GLYPHS.folder
+  const badge = GLYPHS[kind]
+  // The hole and the glyph share a box so the notch always fits what sits in it. `stroke-width` is
+  // pre-divided by the scale: inherited stroke scales with the group, and at 0.44 the 1.6 line the rest
+  // of the set uses would come out at 0.7 and disappear at 30px.
+  const HOLE = '<rect x="12" y="12" width="12.6" height="12.6" rx="2.6" fill="#000"/>'
+  const inner =
+    `${SVG_HEAD} stroke="${folder.stroke}" ${SVG_STROKE}>` +
+    `<mask id="b"><rect width="24" height="24" fill="#fff"/>${HOLE}</mask>` +
+    `<g mask="url(#b)">${folder.body}</g>` +
+    `<g transform="translate(13.4 13.4) scale(0.425)" stroke="${badge.stroke}" stroke-width="3.5">${badge.body}</g>` +
+    `</svg>`
+
+  const uri = dataUri(inner)
+  FOLDER_BADGES.set(kind, uri)
+  return uri
+}
+
+/**
+ * CSS that badges a thumbnailed card with its asset type, in the corner opposite the ⋮ menu.
+ *
+ * Only cards showing a GENERATED thumbnail get one: a card with no thumbnail already displays its type
+ * icon as the card image, so a badge there would just repeat it. `.wx-preview.wx-file-preview` is the
+ * library's own class for exactly that state — matched positively, because the third state (neither
+ * thumbnail nor icon, a bare `wxi-` glyph) must not be badged either.
+ *
+ * The kind is read out of `data-id`, which is the VFS path, via an ends-with match on its extension.
+ * That needs no JavaScript and — unlike an attribute stamped onto the node — cannot go stale when the
+ * library reuses a card element for a different row.
+ *
+ * GENERATED rather than hand-written into filemanager.css so a new kind, a new image extension or a
+ * redrawn glyph cannot leave the badge pointing at the icon it used to be.
+ */
+export function badgeStyles(): string {
+  const rule = (ext: string, icon: string) =>
+    `.cleo-fm .wx-cards .wx-item[data-id$="${ext}" i] .wx-preview.wx-file-preview::after` +
+    `{background-image:url("${icon}")}`
+
+  const kinds = (Object.keys(KIND_EXT) as (keyof typeof KIND_EXT)[])
+    .map(kind => rule(KIND_EXT[kind], ICONS[kind]))
+  // The byte kinds keep their real extensions, so each needs one rule per format the importer accepts.
+  const images = IMAGE_EXTS.map(ext => rule(ext, ICONS.image))
+  const audio = AUDIO_EXTS.map(ext => rule(ext, ICONS.audioSource))
+
+  return [
+    // The preview box is the positioning context, so the badge clips to its rounded corner rather than
+    // hanging off the card. Mirrors `.wx-more`, which is the same overlay on the opposite side.
+    '.cleo-fm .wx-cards .wx-preview{position:relative}',
+    '.cleo-fm .wx-cards .wx-preview.wx-file-preview::after{' +
+      'content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;' +
+      'border-radius:calc(var(--radius) - 2px);background-color:rgb(var(--surface) / 0.85);' +
+      'background-size:11px 11px;background-position:center;background-repeat:no-repeat;' +
+      // Under the selected card's name overlay, which sits at 3.
+      'z-index:1;pointer-events:none}',
+    ...kinds,
+    ...images,
+    ...audio,
+  ].join('\n')
+}

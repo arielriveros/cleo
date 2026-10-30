@@ -4,9 +4,9 @@ import { join } from 'path';
 import { parseInputMap } from '../src/input/actionMap';
 import { buildNavMesh, parseNavMeshData } from '../src/ai/navMesh';
 import { parseBehaviorMachine, createBehaviorRuntime, stepBehavior } from '../src/core/control/behavior';
-import { KIND_EXT } from '../editor/src/utils/vfs';
-import { hashAsset, assetHashKey } from '../editor/src/utils/assetHash';
-import { materializeVariant } from '../editor/src/utils/templateVariants';
+import { KIND_EXT } from '../applications/editor/src/utils/vfs';
+import { hashAsset, assetHashKey } from '../applications/editor/src/utils/assetHash';
+import { materializeVariant } from '../applications/editor/src/utils/templateVariants';
 import { readExample } from '../tools/exampleKit/readExample.mjs';
 import { UIRootNode } from '../src/core/scene/nodes/ui/uiRoot';
 import { UIPanelNode } from '../src/core/scene/nodes/ui/uiContainers';
@@ -33,7 +33,7 @@ const allNodes = (root: any): any[] => {
 const scriptSources = () => readdirSync(SCRIPTS).filter(f => f.startsWith('Souls') && f.endsWith('.ts'))
     .map(f => readFileSync(join(SCRIPTS, f), 'utf8'));
 
-const PROJECT = join(__dirname, '..', 'editor', 'public', 'examples', 'valley');
+const PROJECT = join(__dirname, '..', 'applications', 'editor', 'public', 'examples', 'valley');
 const present = existsSync(join(PROJECT, 'manifest.json'));
 
 // Read once, up front, through the editor's own bundle reader: the example is checked in as format 2,

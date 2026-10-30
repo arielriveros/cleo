@@ -5,9 +5,9 @@
 // build, the player build and both vitest suites all alias `cleo` to src/cleo.ts (see vite.config.ts)
 // -- so every build spent its time on a 13 MB artifact with no reader. What dist/ is actually consumed
 // for is the declaration tree:
-//   - editor/src/features/nodeInspector/scriptEditor/cleoTypes.ts globs node_modules/cleo/**/*.d.ts and
+//   - applications/editor/src/features/nodeInspector/scriptEditor/cleoTypes.ts globs node_modules/cleo/**/*.d.ts and
 //     feeds it to Monaco and to the on-disk script workspace an external IDE opens;
-//   - editor/package.json's "cleo": "file:../dist" is how `cd editor && npm run typecheck` resolves a
+//   - applications/editor/package.json's "cleo": "file:../dist" is how `cd editor && npm run typecheck` resolves a
 //     bare `import ... from 'cleo'`;
 //   - examples/scripts/tsconfig.json points `cleo` at ../../dist/cleo.
 import { rmSync } from 'node:fs';

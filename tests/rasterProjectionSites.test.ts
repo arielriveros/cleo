@@ -91,6 +91,8 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             '_overdrawPass',
             // GPU particles: drawn after the transparents, in both pipelines and in the 2D pass.
             '_particleDrawFrame',
+            // Smoke-and-fire volumes, ray-marched over the resolved image (renderer `_renderFluidVolumes`).
+            '_renderFluidVolumes',
             '_renderSelectionMask',
             '_renderSprite',
         ].sort());

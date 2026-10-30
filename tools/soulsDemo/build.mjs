@@ -52,7 +52,7 @@ const { storeSkin } = editorModules(ROOT)
 const { buildAnimationFieldAsset, toRuntimeField } = moduleRegistry({
   cleo: { Node: class {}, ModelNode: class {}, AnimatedModel: class {} },
   './ids': { cryptoRandomId: () => { throw new Error('ids must be stable in a generator') } },
-})(path.join(ROOT, 'editor', 'src', 'utils', 'animationFields.ts'))
+})(path.join(ROOT, 'applications', 'editor', 'src', 'utils', 'animationFields.ts'))
 const engine = moduleRegistry({ uuid: { v4: () => 'unused' }, '/bvh': { BVH: class {} } })
 const { Geometry } = engine(path.join(ROOT, 'src', 'core', 'geometry.ts'))
 const { makeModule, parseParticleSystem } = engine(path.join(ROOT, 'src', 'particles', 'particleSystemAsset.ts'))
@@ -1742,7 +1742,7 @@ const isMover = (n) => n.type === 'character' || n.name === 'Enemy Spawns'
 const navBaker = headlessNavBaker(ROOT)
 
 const { regenerateNodeIds, cloneNodeJson } = engine(path.join(ROOT, 'src', 'core', 'scene', 'nodeJson.ts'))
-const { hashAsset, assetHashKey } = moduleRegistry()(path.join(ROOT, 'editor', 'src', 'utils', 'assetHash.ts'))
+const { hashAsset, assetHashKey } = moduleRegistry()(path.join(ROOT, 'applications', 'editor', 'src', 'utils', 'assetHash.ts'))
 
 /** A template's source json (builder output, before re-keying), for checking copies against it. */
 const TEMPLATE_SOURCE = new Map()
@@ -1784,7 +1784,7 @@ function asTemplate(key, nodeJson, textureIds = []) {
  * derived from the variant — through the editor's own templateVariants.ts, so the scene opens with
  * nothing to rebuild and the editor's inherited/overridden marks agree with what was authored here.
  */
-const { diffTemplate, materializeVariant } = moduleRegistry()(path.join(ROOT, 'editor', 'src', 'utils', 'templateVariants.ts'))
+const { diffTemplate, materializeVariant } = moduleRegistry()(path.join(ROOT, 'applications', 'editor', 'src', 'utils', 'templateVariants.ts'))
 
 /** A builder's node re-keyed and split as a template, sockets embedded — base or variant candidate. */
 function templateShape(key, nodeJson, textureIds) {

@@ -1,5 +1,5 @@
 import { Geometry } from "../../core/geometry";
-import { Material } from "../material";
+import { Material, applyWind, type WindConfig } from "../material";
 import { TextureManager } from "../systems/textureManager";
 import { AnimatedModel, Skin, Animation, AnimationSampler, AnimationChannel } from "../../animation/animatedModel";
 import { bakeClipCubicSplines } from "../../animation/samplerBake";
@@ -77,7 +77,7 @@ interface GLTFMaterial {
     alphaCutoff?: number;
     doubleSided?: boolean;
     /**
-     * The only glTF extension this loader reads.
+     * The material extensions this loader reads.
      *
      * `emissiveFactor` is capped at 1 per channel by the spec, so glTF has the same problem this engine
      * had: an emissive surface cannot be authored bright enough to do anything in an HDR pipeline.
@@ -87,7 +87,29 @@ interface GLTFMaterial {
      */
     extensions?: {
         KHR_materials_emissive_strength?: { emissiveStrength?: number };
+        /**
+         * Thin-surface diffuse transmission — maps onto the PBR `translucency` (leaves, grass). The
+         * optional texture and colour factor are not read: the transmission colour is the base colour.
+         */
+        KHR_materials_diffuse_transmission?: { diffuseTransmissionFactor?: number };
     };
+    /**
+     * Engine settings glTF has no field for, written by Cleo's own exporters (the Creator's Foliage
+     * mode). Read back so a generated plant arrives already swaying.
+     */
+    extras?: { cleo?: { wind?: WindConfig } };
+}
+
+/** `KHR_materials_diffuse_transmission`'s factor, clamped; 0 when the material does not use it. */
+function translucencyOf(m: GLTFMaterial): number {
+    const t = m.extensions?.KHR_materials_diffuse_transmission?.diffuseTransmissionFactor;
+    return typeof t === 'number' && Number.isFinite(t) ? Math.min(1, Math.max(0, t)) : 0;
+}
+
+/** The Cleo wind block in a material's extras, or undefined. Never trusted beyond being an object. */
+function windOf(m: GLTFMaterial): WindConfig | undefined {
+    const w = m.extras?.cleo?.wind;
+    return w && typeof w === 'object' ? w : undefined;
 }
 
 interface GLTFTexture {
@@ -230,6 +252,10 @@ export interface GltfMaterialDescriptor {
     transparent: boolean;
     /** glTF `alphaMode: MASK` as a cutoff; 0 when the material is not masked. */
     alphaCutoff?: number;
+    /** KHR_materials_diffuse_transmission, 0 when absent. */
+    translucency?: number;
+    /** `extras.cleo.wind`, when a Cleo exporter wrote one. */
+    wind?: WindConfig;
     textures: {
         baseColorTexture?: number;
         metallicRoughnessTexture?: number;
@@ -701,6 +727,8 @@ export class GLTFLoader {
             transparent: gltfMaterial.alphaMode === 'BLEND',
             // 0.5 is the glTF default for MASK; 0 disables the cutout for every other alpha mode.
             alphaCutoff: gltfMaterial.alphaMode === 'MASK' ? (gltfMaterial.alphaCutoff ?? 0.5) : 0,
+            translucency: translucencyOf(gltfMaterial),
+            wind: windOf(gltfMaterial),
             textures,
             name: gltfMaterial.name,
         };
@@ -1063,6 +1091,7 @@ export class GLTFLoader {
             opacity: pbr?.baseColorFactor ? pbr.baseColorFactor[3] : 1.0,
             // See describeMaterial: MASK is a cutout, not transparency.
             alphaCutoff: gltfMaterial.alphaMode === 'MASK' ? (gltfMaterial.alphaCutoff ?? 0.5) : 0,
+            translucency: translucencyOf(gltfMaterial),
             emissiveFactor,
             emissiveIntensity:
                 gltfMaterial.extensions?.KHR_materials_emissive_strength?.emissiveStrength ?? 1,
@@ -1071,6 +1100,8 @@ export class GLTFLoader {
             side: gltfMaterial.doubleSided ? 'double' : 'front',
             transparent: gltfMaterial.alphaMode === 'BLEND',
         });
+        const wind = windOf(gltfMaterial);
+        if (wind) applyWind(material, wind);
         this.materialCache.set(materialIndex, material);
         return material;
     }

@@ -1,6 +1,6 @@
 import { Logger } from "../../core/logger";
 // A static ESM import, not `require`: the editor now compiles the engine from source under Vite
-// (editor/vite.config.ts aliases `cleo` here), and a bare CommonJS `require` survives that build
+// (applications/editor/vite.config.ts aliases `cleo` here), and a bare CommonJS `require` survives that build
 // as a literal call -- "require is not defined" in the renderer, at import time. Both bundlers
 // give a CJS module's `module.exports` as the default binding, so this is the same function.
 // It stays STATIC on purpose: `dist/cleo.js` is a single UMD file, and a dynamic import would

@@ -49,6 +49,8 @@ struct PBRMaterial {
      * nothing says so.
      */
     alphaCutoff: f32,
+    /** Thin-surface diffuse transmission, 0..1. See the same member in chunks/pbrGBuffer.wgsl. */
+    translucency: f32,
     // Every flag is an i32: WGSL forbids bool in a uniform buffer. Call sites still pass booleans.
     hasBaseColorTexture: i32,
     // Occlusion, roughness and metallic are authored as separate maps and combined into ONE texture by
@@ -358,8 +360,18 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
 
     // Scene-wide indirect fill. This was the DIRECTIONAL light's own `ambient`, which every path added
     // to every pixel whether or not that light reached it — per-light in name, scene-wide in behaviour.
+    // Translucency is ADDITIVE (see thinTransmission): the lit face shades exactly as an opaque one and
+    // the transmission adds the glow through the unlit side. Scaling the front by `1 - t` made sun-lit
+    // leaves read as shadowed.
+    let translucency = saturate(u_material.translucency);
+    let surfaceAlbedo = albedo;
+    let frontAlbedo = albedo;
     var ambientDiffuse = (u_lighting.u_sceneAmbient
-                          + skyIrradiance(u_lighting.u_skyLight, N)) * albedo;
+                          + skyIrradiance(u_lighting.u_skyLight, N)) * frontAlbedo;
+    if (translucency > 0.0) {
+        ambientDiffuse += (u_lighting.u_sceneAmbient + skyIrradiance(u_lighting.u_skyLight, -N))
+                        * surfaceAlbedo * translucency;
+    }
     var ambientSpecular = vec3<f32>(0.0);
     if (u_lighting.u_useEnvMap != 0) {
         let R = reflect(normalize(fragPos - u_lighting.u_viewPos), N);
@@ -385,8 +397,13 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     // self-shadow belongs. The deferred twin cannot do this — it has no light list — and folds
     // selfShadow into albedo instead; see chunks/pbrGBuffer.wgsl.
     let viewDepth = -(u_lighting.u_view * vec4<f32>(fragPos, 1.0)).z;
-    Lo += evaluateDirectionalLight(u_lighting.u_dirLight, N, V, albedo, metallic, roughness,
-                                   (1.0 - directionalShadow(fragPos, N, viewDepth)) * selfShadow);
+    let sunShadowN = select(N, -N, translucency > 0.0 && dot(N, -u_lighting.u_dirLight.direction) < 0.0);
+    let sunVisibility = (1.0 - directionalShadow(fragPos, sunShadowN, viewDepth)) * selfShadow;
+    Lo += evaluateDirectionalLight(u_lighting.u_dirLight, N, V, frontAlbedo, metallic, roughness, sunVisibility);
+    if (translucency > 0.0) {
+        Lo += evaluateDirectionalTransmission(u_lighting.u_dirLight, N, V, surfaceAlbedo, translucency,
+                                              sunVisibility);
+    }
 
     // Every punctual light that reaches THIS fragment, and no others. The two loops this replaced ran
     // over fixed 16- and 8-element arrays for every fragment in the scene, including lights whose own
@@ -397,9 +414,13 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     for (var i = 0; i < count; i++) {
         let cl = cleoLight(cleoClusterLight(first + i));
         if (cleoLightReaches(cl.light, fragPos)) {
-            Lo += evaluateSpotLight(cl.light, fragPos, N, V, albedo, metallic, roughness,
-                                    cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
-                                                           fragPos, N, cl.light.position));
+            let shadowN = select(N, -N, translucency > 0.0 && dot(N, cl.light.position - fragPos) < 0.0);
+            let visibility = cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
+                                                    fragPos, shadowN, cl.light.position);
+            Lo += evaluateSpotLight(cl.light, fragPos, N, V, frontAlbedo, metallic, roughness, visibility);
+            if (translucency > 0.0) {
+                Lo += evaluateSpotTransmission(cl.light, fragPos, N, V, surfaceAlbedo, translucency, visibility);
+            }
         }
     }
 

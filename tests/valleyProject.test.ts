@@ -12,7 +12,7 @@ import { readExample } from '../tools/exampleKit/readExample.mjs';
 // which fails loudly: a mask at the wrong resolution is resampled with a warning, a foliage layer whose
 // key matches no rule is orphaned, a building on the wrong y floats.
 
-const PROJECT = join(__dirname, '..', 'editor', 'public', 'examples', 'valley');
+const PROJECT = join(__dirname, '..', 'applications', 'editor', 'public', 'examples', 'valley');
 const HEIGHTMAP = join(__dirname, '..', 'build', 'valley_height_4097_16bit.png');
 const present = existsSync(join(PROJECT, 'manifest.json'));
 

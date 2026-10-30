@@ -1,0 +1,437 @@
+import { useMemo, useState } from 'react'
+import {
+  TerrainMaterial, TerrainFoliageRule, Model, TextureManager, Logger,
+  DEFAULT_FOLIAGE_DENSITY, FOLIAGE_DENSITY_UNIT, MAX_INSTANCES, foliageEffectiveCull, allTerrainFoliageRules,
+} from 'cleo'
+import type { FoliageOrientation } from 'cleo'
+import { useCleoEngine } from '../EngineContext'
+import Collapsable from '@cleo/app-kit/ui/Collapsable'
+import { buildFoliageRuleFromModelAsset, foliageRuleModels } from '../../utils/foliageRules'
+import { describeCollider, fitColliderToBounds, fitColliderToTrunk } from '../../utils/foliageColliderFit'
+import FoliageColliderModal from './FoliageColliderModal'
+import { cryptoRandomId } from '../../utils/ids'
+import { Button, FileButton, NumberInput, Select, TextInput, Toggle, cn, hintClass, labelClass } from '@cleo/app-kit/ui'
+import { toast } from '@cleo/app-kit/feedback/toastStore'
+
+// One foliage list of a landscape material and the foliage names kept off it: the whole-landscape list,
+// the Ground's, or one slot's (TerrainMaterialSlot.foliageInclude/foliageExclude). Edits `rules` IN PLACE
+// and hands exclude changes to `setExclude`, then calls `onChange` — foliage rules are not part of the
+// slot undo (their prototypes are rebuilt on change).
+
+/** Area (units²) the density field is shown per: a 10 × 10 block. */
+const DENSITY_BLOCK = 100
+/** Terrain side length the density estimate is quoted against (matches the Landscape panel's default). */
+const ESTIMATE_SIZE = 200
+
+/** Instances a rule would place over a default-sized terrain — the sanity check on a per-m² number. */
+const estimateFor = (r: TerrainFoliageRule): number =>
+  Math.round((r.density ?? DEFAULT_FOLIAGE_DENSITY.mesh) * ESTIMATE_SIZE * ESTIMATE_SIZE)
+
+export default function TerrainFoliageRules({ material, rules, exclude, setExclude, onChange,
+                                             title = 'Foliage', excludeTitle = 'Exclude foliage',
+                                             defaultOpen = true }: {
+  /** The landscape material the lists belong to — for the names its other surfaces define. */
+  material: TerrainMaterial
+  rules: TerrainFoliageRule[]
+  exclude: string[]
+  setExclude: (names: string[]) => void
+  onChange: () => void
+  /** Which list this is ("Foliage on Ground"); the docs explain all three under terrain.md › Foliage rules. */
+  title?: string; excludeTitle?: string
+  /** Start collapsed (per-surface lists) unless the list already holds something. */
+  defaultOpen?: boolean
+}) {
+  const { terrainMaterials, models, materials, dropFoliageLayer, bakeFoliageImpostor, instance } = useCleoEngine()
+
+  /**
+   * Where a mesh rule's levels take over and how far it draws, as the renderer will actually do it
+   * (foliageEffectiveCull) — the readout that would have shown "draws to 65 m" next to an impostor at
+   * 320 m, which is the whole reason trees used to vanish without ever becoming their impostor.
+   */
+  const rangeOf = (r: TerrainFoliageRule): string => {
+    const levels = [{ distance: 0 }, ...(r.lods ?? []).map(l => ({ distance: l.distance }))]
+    const impostor = r.billboard?.textureId ? r.billboard.distance : undefined
+    const cull = foliageEffectiveCull({
+      kind: 'mesh', cullDistance: r.cullDistance ?? 0, levels,
+      billboardModel: impostor !== undefined ? true : null, billboardDistance: impostor ?? Infinity,
+    }, instance?.renderer.foliageCullDistance ?? 65)
+    const parts = levels.slice(1).map((l, i) => `LOD${i + 1} at ${Math.round(l.distance)} m`)
+    if (impostor !== undefined) parts.push(`impostor at ${Math.round(impostor)} m`)
+    parts.push(cull > 0 ? `draws to ${Math.round(cull)} m` : 'never culls')
+    return parts.join(' · ')
+  }
+  const [newFoliageTex, setNewFoliageTex] = useState('')
+  const [newFoliageModel, setNewFoliageModel] = useState('')
+  // Index of the rule currently baking, so the button can report progress. The bake renders a scene and
+  // reads it back, which is slow enough to need saying.
+  const [bakingRule, setBakingRule] = useState(-1)
+  const [, force] = useState(0)
+  // Index of the rule whose collider editor is open.
+  const [colliderRule, setColliderRule] = useState(-1)
+  const mat = material
+  // `exclude` is the CURRENT list: the parent re-reads it on every change.
+  const changed = () => { onChange(); force(x => x + 1) }
+  const label = labelClass
+  const num = 'w-16 px-1 py-0.5'
+
+  // Union of foliage prototype names across the library and this material, for the exclude picker.
+  const knownFoliageNames = useMemo(() => {
+    const names = new Set<string>()
+    for (const asset of terrainMaterials)
+      for (const r of allTerrainFoliageRules(asset.material)) if (r?.name) names.add(r.name)
+    // This material's own lists, every surface — what the rest of THIS landscape grows.
+    for (const r of allTerrainFoliageRules(mat)) names.add(r.name)
+    // A list never offers to exclude its own foliage: that is what removing it is for.
+    for (const r of rules) names.delete(r.name)
+    return Array.from(names)
+  }, [terrainMaterials, mat, rules.length])
+
+  /**
+   * Models offerable as a foliage prop: everything EXCEPT a generated LOD level.
+   *
+   * `generateLodLevel` strips `lods` and `cullDistance` from a level by design, so a rule built on one
+   * has no chain to descend and no cull distance of its own — it draws that level's full geometry
+   * out to the renderer's global distance. Picking one is always worse than picking the model it came
+   * from, which reaches the same geometry through its LOD chain.
+   */
+  const foliageSourceModels = useMemo(() => models.filter(m => !m.lodSource), [models])
+
+  const textureIds = useMemo(() =>
+    Array.from(TextureManager.Instance.textures.keys()).filter(id => !id.startsWith('__editor__') && !id.startsWith('__debug__')),
+    [mat])
+
+  const addBillboard = () => {
+    if (!newFoliageTex) { toast.warning('Pick a texture for the grass billboard.'); return }
+    const name = `${newFoliageTex.slice(0, 10)}_${allTerrainFoliageRules(mat).length}`
+    // densityUnit must be stamped here: a rule pushed straight onto a live material never passes through
+    // TerrainMaterial.parse, where an unmarked rule is treated as legacy and divided by 100.
+    rules.push({
+      // A stable identity so the scattered layer follows this rule through a rename. A billboard has
+      // no modelId to fall back on, so without this its only key would be the name.
+      id: cryptoRandomId(),
+      kind: 'billboard', name, textureId: newFoliageTex,
+      density: DEFAULT_FOLIAGE_DENSITY.billboard, densityUnit: FOLIAGE_DENSITY_UNIT,
+      minScale: 0.8, maxScale: 1.4,
+    })
+    changed()
+  }
+  const addModel = (files: File[]) => {
+    if (files.length === 0) return
+    Model.fromFile({ files }).then(models => {
+      if (!models.length) return
+      const rule: TerrainFoliageRule = {
+        // An imported rule carries no modelId (nothing links it to a library asset), so this id is
+        // the only thing that can keep its layer through a rename.
+        id: cryptoRandomId(),
+        kind: 'mesh', // rendering mode: real geometry, as opposed to 'billboard'
+        name: `${models[0].name}_${allTerrainFoliageRules(mat).length}`,
+        model: models[0].model.serialize(),
+        density: DEFAULT_FOLIAGE_DENSITY.mesh, densityUnit: FOLIAGE_DENSITY_UNIT,
+        minScale: 0.8, maxScale: 1.4,
+      }
+      rules.push(rule)
+      changed()
+    }).catch(err => console.error(err))
+  }
+  // Stays linked through rule.modelId, so saving the model asset refreshes the rule and live foliage.
+  const addModelFromLibrary = () => {
+    const asset = models.find(m => m.id === newFoliageModel)
+    if (!asset) { toast.warning('Pick a model from the library.'); return }
+    try {
+      // `models` and `materials`, NEVER omitted: a LOD level is a REFERENCE to another model asset, so
+      // without the library every level resolves to null and the rule is built with no `lods` at all.
+      // The foliage layer then draws LOD0 at every distance, the readout below says "1 LOD level", and
+      // the whole LOD feature looks broken when only this argument was missing.
+      const rule = buildFoliageRuleFromModelAsset(asset, undefined, models, materials)
+      rule.name = `${rule.name}_${allTerrainFoliageRules(mat).length}`
+      rules.push(rule)
+      changed()
+    } catch (e) {
+      Logger.warn(`${e}`, 'Editor')
+    }
+  }
+  // Rebuilds from the linked model asset, keeping name/density/impostor.
+  const resyncRule = (i: number) => {
+    const r = rules[i]
+    const asset = r.modelId ? models.find(m => m.id === r.modelId) : undefined
+    if (!asset) { Logger.warn('The source model asset no longer exists', 'Editor'); return }
+    try {
+      rules[i] = buildFoliageRuleFromModelAsset(asset, r, models, materials)
+      changed()
+    } catch (e) {
+      Logger.warn(`${e}`, 'Editor')
+    }
+  }
+  /**
+   * Drop a rule AND the runtime layer scattered from it.
+   *
+   * The layer is filed under `foliageRuleKey`, which is the rule's own id, so once the rule is gone
+   * nothing can reach the layer again: `pruneFoliage` deliberately keeps any layer that still holds
+   * instances, to protect hand-painted placement across a rename. Without this call the old layer kept
+   * every instance and kept drawing — so replacing a prop's model rendered both of them at once.
+   *
+   * This does discard the painted placement. That is the point: the rule that decided where those
+   * instances went no longer exists. Re-run Generate Foliage after adding the replacement.
+   */
+  const bakeImpostor = async (i: number) => {
+    const rule = rules[i]
+    if (!rule?.modelId) { Logger.warn('This prototype has no library model to bake a card from', 'Editor'); return }
+    setBakingRule(i)
+    try {
+      const id = await bakeFoliageImpostor(rule)
+      if (!id) Logger.warn('Could not bake an impostor for this model', 'Editor')
+      changed()
+    } finally {
+      setBakingRule(-1)
+    }
+  }
+
+  const removeRule = (i: number) => {
+    const rule = rules[i]
+    rules.splice(i, 1)
+    if (rule) dropFoliageLayer(rule)
+    changed()
+  }
+  const patchRule = (i: number, patch: Partial<TerrainFoliageRule>) => { Object.assign(rules[i], patch); changed() }
+  const toggleExclude = (name: string, on: boolean) => {
+    const set = new Set(exclude)
+    if (on) set.add(name); else set.delete(name)
+    setExclude(Array.from(set))
+    changed()
+  }
+
+  return (
+    <>
+        <Collapsable title={rules.length ? `${title} (${rules.length})` : title} doc='Foliage rules' defaultOpen={defaultOpen || rules.length > 0}>
+          <div className='p-2 space-y-2'>
+            <div className='border border-control rounded p-2 space-y-1'>
+              <div className={label}>Add grass billboard</div>
+              <div className='flex gap-1'>
+                <Select className={cn(num, 'flex-1')} value={newFoliageTex} onChange={e => setNewFoliageTex(e.target.value)}>
+                  <option value=''>(texture)</option>
+                  {textureIds.map(id => <option key={id} value={id}>{id.length > 16 ? id.slice(0, 15) + '…' : id}</option>)}
+                </Select>
+                <Button variant='success' size='sm' onClick={addBillboard}>+</Button>
+              </div>
+              <FileButton className='w-full py-1' accept='.obj,.gltf,.glb' multiple onFiles={addModel}>
+                Add model prop (import)
+              </FileButton>
+              <div className={label}>Add model prop from library (uses its LOD levels)</div>
+              <div className='flex gap-1'>
+                <Select className={cn(num, 'flex-1')} value={newFoliageModel} onChange={e => setNewFoliageModel(e.target.value)}>
+                  <option value=''>(model asset)</option>
+                  {foliageSourceModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </Select>
+                <Button variant='success' size='sm' onClick={addModelFromLibrary}>+</Button>
+              </div>
+            </div>
+
+            {rules.map((r, i) => (
+              <div key={i} className='border border-control rounded p-2 space-y-1'>
+                <div className='flex items-center gap-1'>
+                  <TextInput className={cn(num, 'flex-1')} value={r.name} onChange={v => patchRule(i, { name: v })} title='Foliage name (referenced by exclude lists)' />
+                  <span className='text-ui-xs text-muted'>{r.kind}</span>
+                  <Button variant='remove' size='sm' className='px-1' onClick={() => removeRule(i)} title='Remove'>✕</Button>
+                </div>
+                <div className='flex items-center justify-between'>
+                  {/* Shown per 10 × 10 block so sparse props read as whole numbers (5 trees, not 0.05); the rule
+                      and the engine keep instances per unit², so this is display only — no migration. */}
+                  <span className={label} title='Elements per 10 × 10 area (100 units²) — the same for the brush and for whole-terrain generation.'>Density / 10×10</span>
+                  <NumberInput step={0.5} min={0} className={num} value={+((r.density ?? DEFAULT_FOLIAGE_DENSITY.mesh) * DENSITY_BLOCK).toFixed(3)}
+                    onChange={v => patchRule(i, { density: Math.max(0, v) / DENSITY_BLOCK })} />
+                </div>
+                {/* Without this estimate a plausible-looking number silently clips at MAX_INSTANCES. */}
+                <div className={cn('text-ui-xs', estimateFor(r) > MAX_INSTANCES ? 'text-danger-fg' : 'text-muted')}>
+                  ≈ {estimateFor(r).toLocaleString()} instances on a {ESTIMATE_SIZE}×{ESTIMATE_SIZE} terrain
+                  {estimateFor(r) > MAX_INSTANCES && ` — over the ${MAX_INSTANCES.toLocaleString()} ceiling`}
+                </div>
+                <div className='flex items-center justify-between'>
+                  <span className={label}>Scale min/max</span>
+                  <span className='flex gap-1'>
+                    <NumberInput step={0.1} className={num} value={r.minScale ?? 0.8} onChange={v => patchRule(i, { minScale: v })} />
+                    <NumberInput step={0.1} className={num} value={r.maxScale ?? 1.4} onChange={v => patchRule(i, { maxScale: v })} />
+                  </span>
+                </div>
+                {/* Off by default: a layer casting shadows adds one instanced draw per cell PER CASCADE,
+                    which is fine for a few hundred trees and expensive for a field of grass. */}
+                <div className='flex items-center justify-between'>
+                  <span className={label} title='Rasterize these instances into the shadow cascades. Costs one extra instanced draw per cell per cascade — cheap for trees, expensive for dense grass.'>Cast shadows</span>
+                  <Toggle checked={!!r.castShadows} onChange={c => patchRule(i, { castShadows: c })} />
+                </div>
+                {/* Trees and tall props between the camera and the player: dithered see-through when a camera
+                    rig in Dither collision mode looks through them, instead of blocking the view. */}
+                {r.kind === 'mesh' && (
+                  <div className='flex items-center justify-between'>
+                    <span className={label} title='When a camera rig in Dither collision mode has these instances between the camera and the player, the part that blocks the view is dithered see-through.'>See-through to camera</span>
+                    <Toggle checked={!!r.cameraDither} onChange={c => patchRule(i, { cameraDither: c })} />
+                  </div>
+                )}
+                {/* How each instance stands. Rocks want the slope under them (or none at all); trees and
+                    grass want to stand up whatever the slope. Re-orients in place: nothing is re-scattered. */}
+                {r.kind === 'mesh' && (
+                  <div className='flex items-center justify-between'>
+                    <span className={label} title='Up: every instance stands upright (trees, grass). Ground normal: tilted to the slope it stands on (rocks bedded into a hillside). Free: a random orientation (scattered stones).'>Orientation</span>
+                    <Select className={num} value={r.orientation ?? 'up'}
+                      onChange={e => patchRule(i, { orientation: e.target.value as FoliageOrientation })}>
+                      <option value='up'>Up</option>
+                      <option value='normal'>Ground normal</option>
+                      <option value='free'>Free</option>
+                    </Select>
+                  </div>
+                )}
+                {/* A billboard has no material of its own, so its wind lives on the rule. A mesh prop
+                    answers the wind through its materials (material editor, Wind section). */}
+                {r.kind === 'billboard' && (
+                  <div className='flex items-center justify-between'>
+                    <span className={label} title='How far the tufts lean in the scene Wind, as a fraction of their height (0 = still), and how stiff they are (higher = slower). Needs a Wind node in the scene.'>Wind lean/stiffness</span>
+                    <span className='flex gap-1'>
+                      <NumberInput step={0.05} min={0} className={num} value={r.windStrength ?? 0} onChange={v => patchRule(i, { windStrength: Math.max(0, v) })} />
+                      <NumberInput step={0.1} min={0.1} className={num} value={r.windStiffness ?? 1} onChange={v => patchRule(i, { windStiffness: Math.max(0.1, v) })} />
+                    </span>
+                  </div>
+                )}
+                {r.kind === 'billboard' && (
+                  <div className='flex items-center justify-between'>
+                    <span className={label} title='How lively the tufts are on top of their lean, 0..1. 0 = they lean rigidly.'>Wind flutter</span>
+                    <NumberInput step={0.05} min={0} max={1} className={num} value={r.windFlutter ?? 0} onChange={v => patchRule(i, { windFlutter: Math.min(1, Math.max(0, v)) })} />
+                  </div>
+                )}
+
+                {r.kind === 'mesh' && <>
+                  {/* LOD/cull come from the model asset (edited in the model editor) — shown, not edited. */}
+                  {r.modelId && (
+                    <div className='flex items-center justify-between'>
+                      <span className='text-ui-xs text-muted'>
+                        {1 + (r.lods?.length ?? 0)} LOD level{r.lods?.length ? 's' : ''}: {rangeOf(r)}
+                      </span>
+                      <Button variant='ghost' size='sm' className='px-1 text-ui-xs underline' title='Rebuild from the current model asset' onClick={() => resyncRule(i)}>re-sync</Button>
+                    </div>
+                  )}
+                  {/* The card is what actually makes distant foliage cheap: a LOD level reduces triangles
+                      linearly, this replaces them all with four. Baking is offered only for a rule with a
+                      library model behind it — there is nothing to render otherwise. */}
+                  {/* Octahedral (the default): 8 x 8 views, lit by the scene and right from every side and from
+                      above. A flat card is one front view — cheaper in memory, fine for a small plant. */}
+                  {r.modelId && (
+                    <div className='flex items-center justify-between'>
+                      <span className={label} title='Octahedral: 8 x 8 views with normals, lit like the mesh and correct from every angle. Card: one front view, lit into the texture.'>Impostor</span>
+                      <Select className='w-24 px-1 py-0.5' value={r.impostorKind ?? 'octahedral'}
+                        onChange={e => patchRule(i, { impostorKind: e.target.value as 'octahedral' | 'card', impostorSize: undefined })}>
+                        <option value='octahedral'>Octahedral</option>
+                        <option value='card'>Flat card</option>
+                      </Select>
+                    </div>
+                  )}
+                  {r.modelId && (
+                    <div className='flex items-center justify-between'>
+                      <span className={label} title='Pixel size of the baked card, or of the whole atlas of views. Larger keeps distant leaves crisp and stable; costs memory per rule.'>Impostor size</span>
+                      <Select className={num} value={String(r.impostorSize ?? ((r.impostorKind ?? 'octahedral') === 'octahedral' ? 1024 : 512))}
+                        onChange={e => patchRule(i, { impostorSize: Number(e.target.value) })}>
+                        {((r.impostorKind ?? 'octahedral') === 'octahedral' ? [1024, 2048] : [512, 1024]).map(s =>
+                          <option key={s} value={String(s)}>{s}</option>)}
+                      </Select>
+                    </div>
+                  )}
+                  {r.modelId && (
+                    <Button
+                      size='sm'
+                      className='w-full text-ui-sm py-1'
+                      disabled={bakingRule >= 0}
+                      title='Bake this model into its impostor and use it past the last LOD band. The single biggest win for a heavy prototype.'
+                      onClick={() => void bakeImpostor(i)}>
+                      {bakingRule === i ? 'Baking…' : (r.billboard ? 'Re-bake impostor' : 'Bake impostor')}
+                    </Button>
+                  )}
+                  {/* Billboard impostor: the farthest LOD — past its distance instances draw as cross-quads. */}
+                  <div className='flex items-center justify-between'>
+                    <span className={label}>Billboard beyond</span>
+                    <span className='flex gap-1'>
+                      <Select
+                        className={num}
+                        value={r.billboard?.textureId ?? ''}
+                        onChange={e => patchRule(i, {
+                          // Picking the texture it already has keeps the rest (an octahedral bake's views and
+                          // normals); any other texture is a plain card.
+                          billboard: !e.target.value ? null
+                            : e.target.value === r.billboard?.textureId ? r.billboard
+                            : { textureId: e.target.value, distance: r.billboard?.distance ?? 60 },
+                        })}>
+                        <option value=''>(off)</option>
+                        {textureIds.map(id => <option key={id} value={id}>{id.length > 16 ? id.slice(0, 15) + '…' : id}</option>)}
+                      </Select>
+                      {r.billboard && (
+                        <NumberInput
+                          min={0} className={num} title='Distance where the billboard takes over'
+                          value={r.billboard.distance}
+                          onChange={v => patchRule(i, { billboard: { ...r.billboard!, distance: Math.max(0, v) } })} />
+                      )}
+                    </span>
+                  </div>
+
+                  {/* Physics proxy. Only instances near the camera get a body (pooled + recycled), so this is
+                      safe on a tree layer but should stay off for anything grass-like. */}
+                  <div className='flex items-center justify-between'>
+                    <span className={label} title='Static collider spawned for nearby instances. Off = walk straight through.'>Collision</span>
+                    <Select
+                      className='w-24 px-1 py-0.5'
+                      value={r.collision?.shape ?? ''}
+                      onChange={e => {
+                        const shape = e.target.value as '' | 'cylinder' | 'box' | 'sphere'
+                        // A newly picked shape starts fitted to the trunk when there is geometry to fit.
+                        patchRule(i, {
+                          collision: !shape ? null
+                            : fitColliderToTrunk(foliageRuleModels(r), shape)
+                              ?? { shape, radius: r.collision?.radius ?? 0.4, height: r.collision?.height ?? 2 },
+                        })
+                      }}>
+                      <option value=''>(none)</option>
+                      <option value='cylinder'>Cylinder</option>
+                      <option value='box'>Box</option>
+                      <option value='sphere'>Sphere</option>
+                    </Select>
+                  </div>
+                  {r.collision && <>
+                    <p className={cn(hintClass, 'text-right')} title='Prototype units — each instance multiplies these by its own random scale.'>
+                      {describeCollider(r.collision)}
+                    </p>
+                    <div className='flex gap-1 justify-end'>
+                      {r.kind === 'mesh' && <>
+                        <Button size='sm' variant='ghost' title='Fit to the trunk: what a character should bump into'
+                          onClick={() => { const f = fitColliderToTrunk(foliageRuleModels(r), r.collision!.shape); if (f) patchRule(i, { collision: f }) }}>
+                          Fit trunk
+                        </Button>
+                        <Button size='sm' variant='ghost' title='Fit around the whole plant, canopy included'
+                          onClick={() => { const f = fitColliderToBounds(foliageRuleModels(r), r.collision!.shape); if (f) patchRule(i, { collision: f }) }}>
+                          Fit bounds
+                        </Button>
+                      </>}
+                      <Button size='sm' title='See the collider on the prop and edit every dimension'
+                        onClick={() => setColliderRule(i)}>Edit collider…</Button>
+                    </div>
+                  </>}
+                </>}
+              </div>
+            ))}
+          </div>
+        </Collapsable>
+
+        <Collapsable title={exclude.length ? `${excludeTitle} (${exclude.length})` : excludeTitle} doc='Exclude foliage' defaultOpen={defaultOpen || exclude.length > 0}>
+          <div className='p-2 space-y-1'>
+            {knownFoliageNames.length === 0 && <p className={hintClass}>No other foliage defined yet.</p>}
+            {knownFoliageNames.map(name => (
+              <div key={name} className='flex items-center justify-between'>
+                <span className={label}>{name}</span>
+                <Toggle checked={exclude.includes(name)} onChange={c => toggleExclude(name, c)} />
+              </div>
+            ))}
+          </div>
+        </Collapsable>
+        {colliderRule >= 0 && rules[colliderRule] && (
+          <FoliageColliderModal
+            rule={rules[colliderRule]}
+            onApply={c => patchRule(colliderRule, { collision: c })}
+            onClose={() => setColliderRule(-1)} />
+        )}
+    </>
+  )
+}
