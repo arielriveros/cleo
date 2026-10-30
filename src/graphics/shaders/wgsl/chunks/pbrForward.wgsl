@@ -358,11 +358,12 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
 
     // Scene-wide indirect fill. This was the DIRECTIONAL light's own `ambient`, which every path added
     // to every pixel whether or not that light reached it — per-light in name, scene-wide in behaviour.
-    // Translucency: the front keeps `1 - t` of the diffuse and the rest leaves the unlit side (see
-    // thinTransmission). Only the DIFFUSE uses the scaled albedo; F0 above already took the real one.
+    // Translucency is ADDITIVE (see thinTransmission): the lit face shades exactly as an opaque one and
+    // the transmission adds the glow through the unlit side. Scaling the front by `1 - t` made sun-lit
+    // leaves read as shadowed.
     let translucency = saturate(u_material.translucency);
     let surfaceAlbedo = albedo;
-    let frontAlbedo = albedo * (1.0 - translucency);
+    let frontAlbedo = albedo;
     var ambientDiffuse = (u_lighting.u_sceneAmbient
                           + skyIrradiance(u_lighting.u_skyLight, N)) * frontAlbedo;
     if (translucency > 0.0) {

@@ -171,8 +171,8 @@ interface PBRProperties extends UvConfig {
      * The share of diffuse light that passes THROUGH the surface instead of bouncing off its lit side:
      * a leaf or a grass blade with the sun behind it glows in its own colour rather than going black.
      * glTF's `KHR_materials_diffuse_transmission` means the same thing by `diffuseTransmissionFactor`,
-     * which is what the importer reads into it. Front diffuse is scaled by `1 - translucency`, so the
-     * total is energy conserving; specular is untouched. Dielectric only: it travels through the
+     * which is what the importer reads into it. The glow is ADDED on top: the lit side shades exactly as
+     * an opaque surface, and specular is untouched. Dielectric only: it travels through the
      * G-buffer as a NEGATIVE metallic, so a translucent surface is never metallic.
      */
     translucency?: number;

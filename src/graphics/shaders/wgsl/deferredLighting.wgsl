@@ -288,12 +288,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let emissiveAO = textureSampleLevel(u_gEmissiveAO_texture, u_gEmissiveAO_sampler, uv, 0.0);
 
     // The alpha is SIGNED: a translucent dielectric (leaf, grass) stores `-translucency` where metallic
-    // would be — see chunks/pbrGBuffer.wgsl. Front-face diffuse keeps `1 - translucency` of the albedo;
-    // the rest leaves the unlit side through `thinTransmission` below.
+    // would be — see chunks/pbrGBuffer.wgsl. Transmission is ADDITIVE: the lit face shades exactly as an
+    // opaque one, and `thinTransmission` below adds the glow through the unlit side. Scaling the front by
+    // `1 - translucency` (energy conserving) made sun-lit leaves read as shadowed.
     let translucency = max(-albedoMetallic.a, 0.0);
     let metallic = max(albedoMetallic.a, 0.0);
     let surfaceAlbedo = albedoMetallic.rgb;
-    let albedo = surfaceAlbedo * (1.0 - translucency);
+    let albedo = surfaceAlbedo;
     // Two channels, not three — see chunks/octNormal.wgsl. The third now carries the dielectric
     // specular level, which is why every non-metal in the scene no longer has identical reflectivity.
     let N = octDecode(vec2<f32>(normalRoughness.x, normalRoughness.y));

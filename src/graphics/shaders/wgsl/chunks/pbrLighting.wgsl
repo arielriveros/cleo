@@ -573,9 +573,10 @@ fn evaluateSpotLight(light: SpotLight, fragPos: vec3<f32>, N: vec3<f32>, V: vec3
  * its unlit side. glTF's KHR_materials_diffuse_transmission, reduced to its thin-walled case: a Lambert
  * lobe about `-N`, tinted by the surface's own albedo (the transmission colour is the base colour).
  *
- * `albedo` is the FULL albedo; the caller scales the front-face diffuse by `1 - t`, which keeps the sum
- * energy conserving. Adds nothing for an opaque surface, so callers branch on `t > 0` and every other
- * pixel pays only that test.
+ * ADDITIVE, as game foliage models are (Unreal's Two Sided Foliage): the front face keeps its full diffuse
+ * and this adds the back-lit glow on top. Not strictly energy conserving, but `t` then never changes how
+ * the sun-lit side looks — splitting the albedo by `1 - t` read as shadow on lit leaves. Adds nothing for
+ * an opaque surface, so callers branch on `t > 0` and every other pixel pays only that test.
  *
  * A small forward-scattering lift toward the light (the sun glowing through a canopy) is folded in:
  * real leaves scatter forward, and a pure Lambert lobe reads flat when looking straight into the sun.
