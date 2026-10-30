@@ -12,7 +12,8 @@ import type { GizmoMode } from '../src/features/engineContextTypes';
  * the undo stack with gizmo movement. None of them produce an error anywhere.
  */
 
-const CONTROLLER = readFileSync(join(__dirname, '../src/features/gizmo/TransformGizmo.tsx'), 'utf8');
+// The controller lives in app-kit (shared with Cleo Creator); features/gizmo/TransformGizmo.tsx wraps it.
+const CONTROLLER = readFileSync(join(__dirname, '../../app-kit/src/gizmo/TransformGizmo.tsx'), 'utf8');
 const MODES: GizmoMode[] = ['position', 'rotation', 'scale'];
 
 describe('handle naming', () => {

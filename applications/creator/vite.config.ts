@@ -19,6 +19,9 @@ export default mergeConfig(engineConfig, defineConfig({
     strictPort: true,
     fs: { allow: [ENGINE_ROOT] },
   },
+  // The FX live preview's CPU solver is an ES-module worker (fx/liveSim.ts passes { type: 'module' });
+  // this keeps dev and build agreed on that. It imports no shaders, so no plugins are repeated here.
+  worker: { format: 'es' },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

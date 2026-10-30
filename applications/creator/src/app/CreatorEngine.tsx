@@ -5,6 +5,7 @@ import { EDITOR_CAMERA_MAP } from '@cleo/app-kit/engine/viewCameraMap';
 import { DEFAULT_VIEW_CAMERA_PREFS, stepViewCamera3D } from '@cleo/app-kit/engine/viewCamera';
 import { readBackendPreference } from '@cleo/app-kit/renderer/backendPreference';
 import { EventEmitter } from '@cleo/app-kit/utils/eventEmitter';
+import { abandonBoot, bootLoad, finishIfSettled } from './bootLoad';
 
 // Cleo Creator hosts one CleoEngine, exactly as the Editor does, so a preview looks the way the asset
 // will in a game: the same renderer, the same lighting model, the same terrain. The difference is that
@@ -15,6 +16,8 @@ export interface CreatorEngineState {
   /** The preview stage: a navigable camera and a sun. Tools add and remove their own nodes. */
   scene: Scene | null;
   camera: CameraNode | null;
+  /** The stage's directional light; a tool may aim it (FX Creator ties it to its light parameters). */
+  sun: LightNode | null;
   error: string | null;
   /** Whether the device can run compute (WebGPU): the GPU erosion and fluid paths need it. */
   hasCompute: boolean;
@@ -31,7 +34,7 @@ export function useCreatorEngine(): CreatorEngineState {
 
 const CLEAR_COLOR = [0.11, 0.12, 0.16, 1];
 
-function buildStage(): { scene: Scene; camera: CameraNode } {
+function buildStage(): { scene: Scene; camera: CameraNode; sun: LightNode } {
   const scene = new Scene();
   // Named like the Editor's own camera so the engine treats it as tooling, never as content.
   const camera = new CameraNode('__editor__Camera', new Camera({ near: 1, far: 40000 }));
@@ -44,7 +47,7 @@ function buildStage(): { scene: Scene; camera: CameraNode } {
   sun.setRotation([55, 35, 0]);
   sun.castShadows = true;
   scene.addNode(sun);
-  return { scene, camera };
+  return { scene, camera, sun };
 }
 
 function parkingViewport(): HTMLElement {
@@ -57,17 +60,24 @@ function parkingViewport(): HTMLElement {
 export function CreatorEngineProvider({ children }: { children: ReactNode }) {
   const bus = useRef(new EventEmitter()).current;
   const [state, setState] = useState<Omit<CreatorEngineState, 'bus'>>({
-    instance: null, scene: null, camera: null, error: null, hasCompute: false,
+    instance: null, scene: null, camera: null, sun: null, error: null, hasCompute: false,
   });
 
   useEffect(() => {
     let disposed = false;
+    const boot = bootLoad();
     (async () => {
       try {
         const engine = new CleoEngine({ graphics: { clearColor: CLEAR_COLOR, backend: readBackendPreference() } });
-        await engine.initialize();
+        // With a progress callback the engine compiles its shaders in slices, so the loading screen
+        // keeps painting through the longest part of startup.
+        await engine.initialize({ onProgress: (phase, done, total) => {
+          const step = boot.step(phase);
+          if (done < total) { if (phase === 'shaders') step.progress(done, total); else step.start(); }
+          else step.done(phase === 'device' ? engine.renderer.backend ?? '' : undefined);
+        } });
         if (disposed) return;
-        const { scene, camera } = buildStage();
+        const { scene, camera, sun } = buildStage();
         engine.setScene(scene);
         // Unpaused, so the scene updates every frame: camera navigation and transform edits need it.
         engine.isPaused = false;
@@ -86,13 +96,28 @@ export function CreatorEngineProvider({ children }: { children: ReactNode }) {
         // The device handle is set during initialize(); read it lazily so this file stays importable
         // in environments without a GPU.
         const { device } = await import('cleo/graphics/rhi/deviceHandle');
-        setState({ instance: engine, scene, camera, error: null, hasCompute: !!device?.capabilities?.hasCompute });
+        setState({ instance: engine, scene, camera, sun, error: null, hasCompute: !!device?.capabilities?.hasCompute });
+        // The first frame: two rAFs after run(), so one has actually been drawn.
+        boot.step('frame').start();
+        requestAnimationFrame(() => requestAnimationFrame(() => { boot.step('frame').done(); finishIfSettled(boot); }));
       } catch (e) {
-        setState(s => ({ ...s, error: String((e as Error)?.message ?? e) }));
+        const message = String((e as Error)?.message ?? e);
+        abandonBoot('not reached');
+        setState(s => ({ ...s, error: message }));
       }
     })();
     return () => { disposed = true; };
   }, []);
+
+  // A gizmo drag owns the mouse: the camera's input map goes off from GIZMO_DRAG_START to GIZMO_DRAG_END,
+  // exactly as the editor does (EngineContext), so dragging a handle never also orbits the view.
+  useEffect(() => {
+    const off = () => InputSystem.instance.disableMap('EditorCamera');
+    const on = () => InputSystem.instance.enableMap('EditorCamera');
+    bus.on('GIZMO_DRAG_START', off);
+    bus.on('GIZMO_DRAG_END', on);
+    return () => { bus.off('GIZMO_DRAG_START', off); bus.off('GIZMO_DRAG_END', on); on(); };
+  }, [bus]);
 
   const host = useMemo<EngineHost>(() => ({ instance: state.instance, isPlayMode: false, eventEmitter: bus }), [state.instance, bus]);
   const value = useMemo<CreatorEngineState>(() => ({ ...state, bus }), [state, bus]);

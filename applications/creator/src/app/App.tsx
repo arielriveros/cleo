@@ -1,16 +1,91 @@
-import { useState } from 'react';
+import { useEffect, useState, type ComponentType } from 'react';
 import Topbar from '@cleo/app-kit/ui/Topbar';
+import LoadingScreen from '@cleo/app-kit/feedback/LoadingScreen';
+import { beginLoad } from '@cleo/app-kit/feedback/loadingStore';
 import { SegmentedControl } from '@cleo/app-kit/ui';
+import { webgpuAvailableInBrowser, type BackendKind } from 'cleo';
+import { readBackendPreference, writeBackendPreference } from '@cleo/app-kit/renderer/backendPreference';
 import { CreatorEngineProvider, useCreatorEngine } from './CreatorEngine';
-import { WorldWorkspace } from '../world/ui/WorldWorkspace';
-import { FxWorkspace } from '../fx/ui/FxWorkspace';
+import { bootLoad, booting, finishIfSettled } from './bootLoad';
 
 type Tool = 'world' | 'fx';
 const TOOL_KEY = 'cleo_creator_tool';
 
-function Shell() {
+// Each sub-application is its own code chunk, fetched the first time it is selected: World Creator's
+// landform and erosion code never loads for someone who only makes FX, and the reverse.
+const TOOLS: Record<Tool, { label: string; load: () => Promise<ComponentType> }> = {
+  world: { label: 'World Creator', load: () => import('../world/ui/WorldWorkspace').then(m => m.WorldWorkspace) },
+  fx: { label: 'FX Creator', load: () => import('../fx/ui/FxWorkspace').then(m => m.FxWorkspace) },
+};
+const loaded = new Map<Tool, ComponentType>();
+const pending = new Map<Tool, Promise<ComponentType>>();
+
+/**
+ * The selected tool's component, fetched on demand. At startup the fetch reports into the boot load
+ * (it runs alongside the engine's own startup); afterwards it is a short overlay over the workspace.
+ */
+function useToolComponent(tool: Tool): { Component: ComponentType | null; error: string | null } {
+  const [, rerender] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (loaded.has(tool)) return;
+    setError(null);
+    const label = TOOLS[tool].label;
+    const atBoot = booting();
+    const load = atBoot ? bootLoad() : beginLoad(`Opening ${label}`, [{ id: 'workspace', label }], 'overlay', { showAfterMs: 120 });
+    const step = load.step('workspace').start(label);
+    let promise = pending.get(tool);
+    if (!promise) { promise = TOOLS[tool].load(); pending.set(tool, promise); }
+    promise.then(C => {
+      loaded.set(tool, C);
+      step.done(label);
+      if (atBoot) finishIfSettled(load); else load.finish();
+      rerender(x => x + 1);
+    }, e => {
+      pending.delete(tool);
+      const message = String((e as Error)?.message ?? e);
+      step.fail(message);
+      load.finish();
+      setError(message);
+    });
+  }, [tool]);
+  return { Component: loaded.get(tool) ?? null, error };
+}
+
+// The graphics API is fixed when the engine builds its device, so switching stores the preference and
+// reloads. Both workspaces keep their documents in localStorage, so nothing is lost across the reload.
+function BackendSwitch() {
   const { instance, error, hasCompute } = useCreatorEngine();
-  const [tool, setTool] = useState<Tool>(() => (localStorage.getItem(TOOL_KEY) as Tool) || 'world');
+  const preference = readBackendPreference();
+  const renderer = instance?.renderer as { backend?: BackendKind; backendFallbackReason?: string | null } | undefined;
+  const fallback = renderer?.backendFallbackReason ?? null;
+  const gpuReason = webgpuAvailableInBrowser() ? null : 'This browser does not expose navigator.gpu.';
+  const choose = (b: BackendKind) => {
+    if (b === preference) return;
+    writeBackendPreference(b);
+    location.reload();
+  };
+
+  return (
+    <div className='flex items-center gap-2 px-3'>
+      <SegmentedControl<BackendKind> size='sm' value={preference} onChange={choose} options={[
+        { value: 'webgl2', label: 'WebGL 2', title: 'Render with WebGL 2. No compute: erosion and fluid run on the CPU. Reloads.' },
+        { value: 'webgpu', label: 'WebGPU', disabled: !!gpuReason,
+          title: gpuReason ?? 'Render with WebGPU. Enables GPU compute for pipe erosion and the fluid solver. Reloads.' },
+      ]} />
+      <span className='text-ui-xs text-muted' title={fallback ?? undefined}>
+        {error ? 'Engine failed'
+          : instance ? `${renderer?.backend ?? ''}${hasCompute ? ' · compute' : ''}${fallback && preference === 'webgpu' ? ' (WebGPU fell back)' : ''}`
+          : 'Starting engine…'}
+      </span>
+    </div>
+  );
+}
+
+function Shell() {
+  const { instance, error } = useCreatorEngine();
+  const [tool, setTool] = useState<Tool>(() => (localStorage.getItem(TOOL_KEY) === 'fx' ? 'fx' : 'world'));
+  const { Component, error: toolError } = useToolComponent(tool);
   const choose = (t: Tool) => { setTool(t); localStorage.setItem(TOOL_KEY, t); };
 
   return (
@@ -21,14 +96,13 @@ function Shell() {
           { value: 'world', label: 'World Creator', title: 'Landscape heightmaps from landforms and erosion' },
           { value: 'fx', label: 'FX Creator', title: 'Fire and smoke flipbooks from a volumetric fluid simulation' },
         ]} />
-        <span className='px-3 text-ui-xs text-muted'>
-          {error ? 'Engine failed' : instance ? `${instance.renderer.backend ?? ''}${hasCompute ? ' · compute' : ''}` : 'Starting engine…'}
-        </span>
+        <BackendSwitch />
       </Topbar>
-      <div className='flex-1 min-h-0'>
+      <div className='relative flex-1 min-h-0'>
         {error && <div className='p-4 text-danger-fg'>The engine could not start: {error}</div>}
-        {!error && !instance && <div className='p-4 text-dim'>Starting the engine…</div>}
-        {instance && (tool === 'world' ? <WorldWorkspace /> : <FxWorkspace />)}
+        {toolError && <div className='p-4 text-danger-fg'>{TOOLS[tool].label} could not load: {toolError}</div>}
+        {instance && Component && <Component key={tool} />}
+        <LoadingScreen variant='overlay' subtitle='Creator' />
       </div>
     </div>
   );

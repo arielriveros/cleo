@@ -56,6 +56,8 @@ export const RENDER_PASSES = [
     'taa',
     'ssao.history',
     'grid',
+    // Smoke-and-fire volumes (FluidVolumeNode), over the resolved image just before the transparents.
+    'fluidVolumes',
     'transparent',
     'particles',
     '2d',

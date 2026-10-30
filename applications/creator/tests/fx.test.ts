@@ -4,13 +4,13 @@ import { fnv1a } from '../src/core/generator';
 import { inflateIdat } from '../src/core/png';
 import { FluidCpu, fluidDims, hash3 } from '../src/fx/fluidCpu';
 import { atlasLayout, blitTile, loopBlend, tileOrigin } from '../src/fx/flipbook';
-import { DEFAULT_FX, FX_PRESETS, type FxParams } from '../src/fx/fxParams';
+import { DEFAULT_FX, FX_PRESETS, normaliseFx, type FxParams } from '../src/fx/fxParams';
 import { exportFx, generateFx } from '../src/fx/generateFx';
 import { viewBasis } from '../src/fx/volumeRender';
 
 // Small enough to run in a second, big enough for a flame to form.
 const tiny = (p: Partial<FxParams> = {}): FxParams =>
-  ({ ...DEFAULT_FX, resolution: 16, heightRatio: 1.5, frames: 4, warmup: 6, tileSize: 16, loopBlend: 2, pressureIterations: 20, ...p });
+  normaliseFx({ ...DEFAULT_FX, regionSize: [1.6, 2.4, 1.6], voxelSize: 0.1, frames: 4, warmup: 6, tileSize: 16, loopBlend: 2, pressureIterations: 20, ...p });
 
 describe('fluid solver', () => {
   it('projection removes most of the divergence of a smooth source', () => {
@@ -111,7 +111,7 @@ describe('FX generation', () => {
 
   it('runs every preset', async () => {
     for (const preset of FX_PRESETS) {
-      const out = await generateFx({ ...preset.params, resolution: 12, frames: 2, warmup: 2, tileSize: 8, loopBlend: 0 });
+      const out = await generateFx({ ...preset.params, voxelSize: Math.max(...preset.params.regionSize) / 12, frames: 2, warmup: 2, tileSize: 8, loopBlend: 0 });
       expect(out.atlas.length, preset.id).toBe(out.layout.width * out.layout.height * 4);
     }
   });
@@ -134,5 +134,51 @@ describe('FX generation', () => {
       emitters: [{ id: 'e', name: 'fire', render: { textureId: tileset.id, flipbook: meta.output.particleFlipbook } }],
     });
     expect(system.emitters[0].render.flipbook).toMatchObject({ columns: 2, rows: 2, frames: 4, mode: 'fps' });
+  });
+});
+
+describe('live preview', () => {
+  it('takes whole frames and carries the remainder', async () => {
+    const { takeFrames } = await import('../src/fx/liveSim');
+    let s = takeFrames(0, 0.03, 1 / 24);
+    expect(s.frames).toBe(0);
+    s = takeFrames(s.accumulator, 0.03, 1 / 24);
+    expect(s.frames).toBe(1);
+    expect(s.accumulator).toBeCloseTo(0.06 - 1 / 24, 6);
+  });
+
+  it('drops time debt past the per-tick cap instead of repaying it', async () => {
+    const { takeFrames, MAX_FRAMES_PER_TICK } = await import('../src/fx/liveSim');
+    const s = takeFrames(0, 1, 1 / 24);
+    expect(s.frames).toBe(MAX_FRAMES_PER_TICK);
+    expect(s.accumulator).toBe(0);
+  });
+
+  it('trades pressure iterations for speed only in the preview', async () => {
+    const { previewParams } = await import('../src/fx/liveSim');
+    const high = previewParams({ ...DEFAULT_FX, previewQuality: 'high' });
+    const low = previewParams({ ...DEFAULT_FX, previewQuality: 'low' });
+    // The preview always runs the warm-started SOR, which needs fewer iterations than the authored Jacobi.
+    expect(high.pressureSolver).toBe('sor');
+    expect(high.pressureIterations).toBeLessThanOrEqual(DEFAULT_FX.pressureIterations);
+    expect(low.pressureIterations).toBeLessThan(high.pressureIterations);
+    // Bakes use the authored value: generateFx never sees previewParams.
+    expect(DEFAULT_FX.previewQuality).toBe('medium');
+  });
+
+  it('packs the CPU volume as density, temperature, light, fire glow with x fastest', async () => {
+    const { packVolumeCpu } = await import('../src/fx/volumeRender');
+    const p = tiny();
+    const fluid = new FluidCpu(fluidDims(p));
+    for (let i = 0; i < 6; i++) fluid.step(p, p.frameTime / p.substeps);
+    const out = packVolumeCpu(fluid, p, new Float32Array(fluid.count * 4));
+    const i = fluid.index(3, 5, 7);
+    expect(out[i * 4]).toBe(fluid.density[i]);
+    expect(out[i * 4 + 1]).toBe(fluid.temperature[i]);
+    expect(out[i * 4 + 3]).toBe(0);   // fireGlow is 0 by default: no glow channel
+    for (let k = 2; k < out.length; k += 4) {
+      expect(out[k]).toBeGreaterThanOrEqual(0);
+      expect(out[k]).toBeLessThanOrEqual(1);
+    }
   });
 });

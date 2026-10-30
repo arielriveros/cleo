@@ -1,9 +1,10 @@
 // FX Creator's generate(): simulate, capture `frames` (+ the loop tail), pack the flipbook.
 // The solver is behind `FluidBackend` so the GPU and CPU paths share the capture loop exactly.
 
+import type { Texture } from 'cleo/graphics/texture';
 import { encodePngRgba8 } from '../core/png';
 import { SILENT_CONTEXT, sidecar, yieldToUi, GenerationCancelled, type ExportFile, type GenerateContext } from '../core/generator';
-import { FluidCpu, fluidDims, type FluidDims } from './fluidCpu';
+import { FluidCpu, fluidDims, type FluidDims, type SceneWind } from './fluidCpu';
 import { atlasLayout, blitTile, loopBlend, particleFlipbook, tilesetJson, type AtlasLayout } from './flipbook';
 import { normaliseFx, type FxParams } from './fxParams';
 import { bakeFireLut, renderTile } from './volumeRender';
@@ -15,6 +16,22 @@ export interface FluidBackend {
   step(p: FxParams, dt: number): void | Promise<void>;
   /** The current state as a tile x tile RGBA8 image (straight alpha, row 0 at the top). */
   render(p: FxParams, tile: number, lut: Float32Array): Promise<Uint8Array>;
+  /**
+   * Write the current state into a FluidVolumeNode's compute-writable volume (R density, G temperature,
+   * B light), without a readback. GPU backends only; the CPU path packs with `packVolumeCpu`.
+   */
+  packVolume?(p: FxParams, volume: Texture, occupancy?: Texture | null, detail?: [Texture, Texture] | null): void;
+  /** The preview's placed bodies as a solid mask (one byte per voxel), or null for open air. */
+  setSolid?(mask: Uint8Array | null): void;
+  /**
+   * The fire light as of the last pack with occupancy: emission-weighted centre (0..1 of the grid per
+   * axis) and strength (0..1). Resolves a frame or more later; never awaited inside a frame.
+   */
+  fireLight?(): Promise<[number, number, number, number]>;
+  /** The shadow the gas casts on a square of ground (`area` in grid voxels) into a storage texture. */
+  groundShadow?(p: FxParams, texture: Texture, area: { x0: number; z0: number; size: number; res: number }): void;
+  /** The preview stage's wind, or null. */
+  setSceneWind?(wind: SceneWind | null): void;
   dispose(): void;
 }
 
@@ -29,6 +46,8 @@ export function cpuBackend(dims: FluidDims): FluidBackend {
       renderTile(fluid, p, out, tile, lut);
       return out;
     },
+    setSolid(mask) { fluid.solid = mask; },
+    setSceneWind(wind) { fluid.sceneWind = wind; },
     dispose() { /* garbage */ },
   };
 }

@@ -23,7 +23,48 @@ struct FxUniforms {
     cam_up: vec4<f32>,     // up xyz, tile size
     center: vec4<f32>,     // domain centre xyz, ray step
     light_dims: vec4<u32>, // half-res light grid lx, ly, lz
+    extra: vec4<f32>,      // emitter noise, expansion, sim time, SOR omega
+    wind: vec4<f32>,       // scene wind vx, vz (voxels/s), gustiness, gust scale (voxels)
+    wind2: vec4<f32>,      // gust speed (voxels/s), has wind (0/1), has solids (0/1), MacCormack (0/1)
+    look2: vec4<f32>,      // anisotropy, scattering octaves, fire glow, detail strength
+    look3: vec4<f32>,      // detail scale, -, -, -
+    real1: vec4<f32>,      // open boundaries (0/1), disturbance, disturbance block (voxels), disturbance phase
+    real2: vec4<f32>,      // shredding, diffusion (per step), flame kept per step, radiative cooling
+    real3: vec4<f32>,      // flicker (emitter multiplier), condensation, dew point, dust settling (voxels/s)
+    real4: vec4<f32>,      // blast (this step), ground drag, albedo, powder
+    real5: vec4<f32>,      // flame shape, fire intensity, sky occlusion, -
+    detail: vec4<f32>,     // reset set A this step (0/1), reset set B (0/1), set A's cross-fade weight, -
 };
+
+fn open_sides() -> bool { return u.real1.x > 0.5; }
+
+/** realism.ts `emissionTemperature`: the temperature the fire is drawn at, shaped by the flame field. */
+fn emission_temperature(t: f32, flame: f32) -> f32 {
+    let shape = u.real5.x;
+    if (shape <= 0.0 || t <= u.burn.x) { return t; }
+    let f = clamp(flame * 1.5, 0.0, 1.0);
+    return u.burn.x + (t - u.burn.x) * (1.0 - shape + shape * f);
+}
+
+/** realism.ts `powderTerm`. */
+fn powder_term(d: f32) -> f32 {
+    let pw = u.real4.w;
+    if (pw <= 0.0) { return 1.0; }
+    return 1.0 - pw + pw * (1.0 - exp(-2.0 * d * u.flags.y));
+}
+
+fn has_solids() -> bool { return u.wind2.z > 0.5; }
+
+/** The scene wind's gust factor -- fluidCpu.ts `gustAt`. */
+fn gust_at(p: vec3<f32>) -> f32 {
+    let gi = u.wind.z;
+    if (gi <= 0.0) { return 1.0; }
+    let len = max(length(u.wind.xy), 1e-6);
+    let s = 1.0 / max(0.5, u.wind.w);
+    let shift = u.wind2.x * u.extra.z;
+    let q = vec3<f32>((p.x - u.wind.x / len * shift) * s, p.y * s * 0.5, (p.z - u.wind.y / len * shift) * s);
+    return 1.0 - gi + gi * (0.5 + 0.5 * value_noise3(q, u.dims.w + 11u));
+}
 
 fn nx() -> u32 { return u.dims.x; }
 fn ny() -> u32 { return u.dims.y; }

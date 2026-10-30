@@ -28,7 +28,7 @@ describe('Creator compute kernels', () => {
     .map(f => path.join(dir, f)));
 
   it('finds the kernels', () => {
-    expect(kernels.length).toBe(15);
+    expect(kernels.length).toBe(24);
   });
 
   it('parses and validates every kernel', async () => {

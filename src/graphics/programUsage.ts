@@ -51,6 +51,7 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     motionBlurVelocity: 'feature', motionBlurTileMax: 'feature', motionBlurNeighborMax: 'feature', motionBlur: 'feature',
     objectVelocity: 'feature', objectVelocitySkinned: 'feature', objectVelocityBasicSkinned: 'feature',
     decalSurface: 'feature', decalResolve: 'feature', decalColor: 'feature',
+    fluidVolume: 'feature', fluidVolumeResolve: 'feature', fluidVolumeComposite: 'feature',
     particleSim: 'feature', particleBillboard: 'feature', particleMesh: 'feature', particleSort: 'feature',
     basicInstanced: 'editor', probePreview: 'editor', overlayComposite: 'editor', debugView: 'editor',
     shadowDebug: 'editor', overdraw: 'editor', overdrawInstanced: 'editor', grid: 'editor', outline: 'editor', outlinePost: 'editor',
@@ -169,6 +170,7 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
             break;
         case 'tilemap': add('tilemap'); break;
         case 'decal': add('decalSurface'); add('decalResolve'); add('decalColor'); break;
+        case 'fluidVolume': add('fluidVolume'); add('fluidVolumeResolve'); add('fluidVolumeComposite'); break;
         case 'volumetricClouds':
             for (const n of ['volumetricClouds', 'cloudNoiseBake', 'cloudTemporalResolve', 'cloudUpsample']) add(n);
             break;

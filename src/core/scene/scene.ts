@@ -12,6 +12,7 @@ import { TilemapNode } from "./nodes/tilemapNode";
 import { LightNode } from "./nodes/lightNode";
 import { LightProbeNode } from "./nodes/lightProbeNode";
 import { DecalNode } from "./nodes/decalNode";
+import { FluidVolumeNode } from "./nodes/fluidVolumeNode";
 import { ParticleSystemNode } from "./nodes/particleSystemNode";
 import { ForceFieldNode } from "./nodes/forceFieldNode";
 import { WaterVolumeNode } from "./nodes/waterVolumeNode";
@@ -111,6 +112,7 @@ export class Scene {
     private _controllers: Set<ControllerNode> = new Set();
     private _navMeshes: Set<NavMeshNode> = new Set();
     private _decals: Set<DecalNode> = new Set();
+    private _fluidVolumes: Set<FluidVolumeNode> = new Set();
     private _particleSystems: Set<ParticleSystemNode> = new Set();
     private _forceFields: Set<ForceFieldNode> = new Set();
     private _waterVolumes: Set<WaterVolumeNode> = new Set();
@@ -772,6 +774,7 @@ export class Scene {
         this._controllers = new Set();
         this._navMeshes = new Set();
         this._decals = new Set();
+        this._fluidVolumes = new Set();
         this._particleSystems = new Set();
         this._forceFields = new Set();
         this._waterVolumes = new Set();
@@ -811,6 +814,8 @@ export class Scene {
                 this._navMeshes.add(node);
             if (node instanceof DecalNode)
                 this._decals.add(node);
+            if (node instanceof FluidVolumeNode)
+                this._fluidVolumes.add(node);
             if (node instanceof ParticleSystemNode)
                 this._particleSystems.add(node);
             if (node instanceof ForceFieldNode)
@@ -1087,6 +1092,13 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._decals;
+    }
+
+    /** Every smoke-and-fire volume in the scene. Holds only SPAWNED nodes, like every other set here. */
+    public get fluidVolumes(): Set<FluidVolumeNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._fluidVolumes;
     }
 
     /** Every particle system in the scene. Holds only SPAWNED nodes — a despawned effect stops drawing. */

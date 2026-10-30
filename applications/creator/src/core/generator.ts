@@ -25,6 +25,8 @@ export const SILENT_CONTEXT: GenerateContext = { progress() { /* no-op */ }, can
 export interface Preset<P> {
   id: string;
   label: string;
+  /** One line for the preset menu's caption. */
+  description?: string;
   params: P;
 }
 
