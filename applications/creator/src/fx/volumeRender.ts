@@ -5,8 +5,11 @@
 
 import { evaluateGradient } from 'cleo/particles/curves';
 import { valueNoise3, type FluidCpu, type FluidDims } from './fluidCpu';
-import { kelvinToRgb } from './fxScene';
-import { detailBlend, emissionTemperature, powderTerm } from './realism';
+import { blackbodyRgb } from './blackbody';
+import {
+  absorptionScale, blueCoreSoot, blueCoreSource, detailBlend, emissionTemperature, FIRE_EMIT, glowSource, packGlowOrCore, powderTerm,
+  sampleBspline, sharpenDensity,
+} from './realism';
 import type { FxParams, FxView } from './fxParams';
 
 type V3 = [number, number, number];
@@ -46,8 +49,9 @@ export function lightVector(p: Pick<FxParams, 'lightYaw' | 'lightElevation'>): V
 
 /**
  * The fire colour baked into 256 RGB entries, so a sample costs a lookup: the gradient, or a black body
- * between `blackbodyMin` and `blackbodyMax` kelvin -- its hue from the temperature, its brightness rising
- * with T^4 (Stefan-Boltzmann) relative to the hottest, so the cool edges of a flame go a deep dull red.
+ * between `blackbodyMin` and `blackbodyMax` kelvin -- the hue of Planck's spectrum seen by an eye adapted
+ * to the hottest (blackbody.ts), the brightness rising as T^4, so a hot core reads white and the cool
+ * edges of a flame a deep dull red.
  */
 export function bakeFireLut(p: Pick<FxParams, 'fireGradient'> & Partial<Pick<FxParams, 'fireColorMode' | 'blackbodyMin' | 'blackbodyMax'>>): Float32Array {
   const lut = new Float32Array(256 * 4);
@@ -57,10 +61,14 @@ export function bakeFireLut(p: Pick<FxParams, 'fireGradient'> & Partial<Pick<FxP
     const t = i / 255;
     if (blackbody) {
       const k = kMin + (kMax - kMin) * t;
-      // Linear RGB from kelvinToRgb, re-encoded to the display values the gradient also holds.
-      const rgb = kelvinToRgb(k).map(c => Math.pow(c, 1 / 2.2));
-      const brightness = Math.max(0.02, Math.pow(k / kMax, 4));
-      lut.set([rgb[0] * brightness, rgb[1] * brightness, rgb[2] * brightness, 1], i * 4);
+      // Hue: Planck -> CIE XYZ -> CAT02 adapted to the hottest -> linear sRGB (blackbody.ts), so the
+      // hottest reads white and cooler gas orange and red. Brightness: T^4 (Stefan-Boltzmann) relative to
+      // the hottest -- the visible band alone falls off far faster, too dark for the eye's adaptation to
+      // a whole fire. Re-encoded to the display values the gradient also holds.
+      const rgb = blackbodyRgb(k, kMax);
+      const peak = Math.max(rgb[0], rgb[1], rgb[2], 1e-6);
+      const brightness = Math.max(0.02, Math.pow(k / kMax, 4)) / peak;
+      lut.set([Math.pow(rgb[0] * brightness, 1 / 2.2), Math.pow(rgb[1] * brightness, 1 / 2.2), Math.pow(rgb[2] * brightness, 1 / 2.2), 1], i * 4);
     } else {
       lut.set(evaluateGradient(p.fireGradient, t), i * 4);
     }
@@ -165,7 +173,7 @@ export function glowVolume(fluid: FluidCpu, p: FxParams): { data: Float32Array; 
   const e = new Float32Array(lx * ly * lz);
   for (let z = 0; z < lz; z++) for (let y = 0; y < ly; y++) for (let x = 0; x < lx; x++) {
     const t = fluid.temperature[fluid.index(Math.min(nx - 1, x * 2), Math.min(ny - 1, y * 2), Math.min(nz - 1, z * 2))];
-    e[x + lx * (y + ly * z)] = Math.min(1, Math.max(0, (t - p.ignition) / p.emissionRange));
+    e[x + lx * (y + ly * z)] = glowSource(Math.min(1, Math.max(0, (t - p.ignition) / p.emissionRange)), p.glowThreshold ?? 0);
   }
   // Separable box blur, radius 2, one axis at a time.
   const blur = (src: Float32Array, axis: 0 | 1 | 2): Float32Array => {
@@ -224,32 +232,65 @@ export function packVolumeCpu(fluid: FluidCpu, p: FxParams, out: Float32Array): 
     // G is the temperature the fire is DRAWN at: shaped by the flame field (realism.ts).
     out[k + 1] = emissionTemperature(fluid.temperature[i], fluid.flame[i], p.ignition, p.flameShape ?? 0);
     out[k + 2] = sampleLight(light, x, y, z);
-    out[k + 3] = glow ? sampleLight(glow, x, y, z) : 0;
+    const temp = out[k + 1];
+    const core = (p.blueCore ?? 0) > 0 ? blueCoreSource(Math.min(1, Math.max(0, (temp - p.ignition) / p.emissionRange)), fluid.fuel[i]) : 0;
+    out[k + 3] = packGlowOrCore(glow ? sampleLight(glow, x, y, z) : 0, core);
   }
   return out;
 }
 
 /** Shading constants every renderer of a frame shares. */
 export const RENDER_STEP = 0.75;
+/** The default `fireOpacity`; the fire's brightness is {@link FIRE_EMIT}, whatever its opacity. */
 export const FIRE_OPACITY = 0.6;
 
+/**
+ * What a tile shows:
+ *   color     the effect as seen: lit smoke and fire, straight alpha;
+ *   light     lighting only, for six-way lightmaps: white smoke lit by the params' light alone (no sky,
+ *             no fire), grey RGB plus coverage alpha;
+ *   emission  the fire's light alone, for additive particles: RGB as emitted (behind the smoke in front
+ *             of it), alpha its peak;
+ *   motion    screen-space flow, for flipbook frame blending: R/G = 0.5 + motion (tile widths per frame,
+ *             right and up) x `motionScale`, alpha coverage.
+ */
+export type RenderMode = 'color' | 'light' | 'emission' | 'motion';
+export const RENDER_MODES: Record<RenderMode, number> = { color: 0, light: 1, emission: 2, motion: 3 };
+
 /** Render the fluid's current state into `out` (tile x tile RGBA8, straight alpha, row 0 at the top). */
-export function renderTile(fluid: FluidCpu, p: FxParams, out: Uint8ClampedArray | Uint8Array, tile: number, lut: Float32Array): void {
+export function renderTile(fluid: FluidCpu, p: FxParams, out: Uint8ClampedArray | Uint8Array, tile: number, lut: Float32Array, mode: RenderMode = 'color'): void {
   const dims = fluid.dims;
   const b = viewBasis(dims, p.view, p.yaw);
   const ext: V3 = [dims.nx - 1, dims.ny - 1, dims.nz - 1];
   const light = lightVolume(fluid, p);
-  const glowGrid = p.fireGlow > 0 ? glowVolume(fluid, p) : null;
+  const lighting = mode === 'light';
+  const glowGrid = p.fireGlow > 0 && !lighting ? glowVolume(fluid, p) : null;
   const far = Math.hypot(...ext);
-  const [sr, sg, sb] = p.smokeColor;
+  const [sr, sg, sb] = lighting ? [1, 1, 1] : p.smokeColor;
+  const ambient = lighting ? 0 : p.ambient;
   const L = lightVector(p);
   const cosTheta = b.dir[0] * L[0] + b.dir[1] * L[1] + b.dir[2] * L[2];
   const g = p.anisotropy ?? 0, octaves = p.scatterOctaves ?? 1;
   const plain = g === 0 && octaves <= 1;
   // The fire's light on the smoke takes the middle of the fire colour.
   const glowRgb = [lut[128 * 4], lut[128 * 4 + 1], lut[128 * 4 + 2]];
-  const albedo = p.albedo ?? 1, powder = p.powder ?? 0, skyOcc = p.skyOcclusion ?? 0, intensity = p.fireIntensity ?? 1;
+  const albedo = lighting ? 1 : p.albedo ?? 1, powder = p.powder ?? 0, skyOcc = lighting ? 0 : p.skyOcclusion ?? 0;
+  const intensity = p.fireIntensity ?? 1;
+  const emits = !lighting && mode !== 'motion';
   const flameShape = p.flameShape ?? 0;
+  const opacity = p.fireOpacity ?? FIRE_OPACITY;
+  const k = absorptionScale(p.absorptionColor);
+  const chroma = k[0] !== 1 || k[1] !== 1 || k[2] !== 1;
+  const soot = p.fireSootMask ?? 0, blue = emits ? p.blueCore ?? 0 : 0, blueRgb = p.blueCoreColor ?? [0.3, 0.45, 1, 1];
+  const sharpen = p.sharpen ?? 0;
+  type Sampler = (x: number, y: number, z: number) => number;
+  const at = (f: Float32Array): Sampler => (x, y, z) => fluid.sample(f, x, y, z);
+  const densityAt = at(fluid.density), tempAt = at(fluid.temperature), flameAt = at(fluid.flame);
+  const field = p.smoothSampling
+    ? (s: Sampler, x: number, y: number, z: number) => sampleBspline(s, x, y, z)
+    : (s: Sampler, x: number, y: number, z: number) => s(x, y, z);
+  // Motion: grid velocity (voxels/s) to tile widths per frame, then the encoding's scale.
+  const motionK = p.frameTime / (2 * b.half) * (p.motionScale ?? 4);
   /** Bright fire rolled off into the tile's 0..1 instead of clipping, once it is boosted past 1. */
   const knee = (c: number) => (intensity === 1 || c <= 0.8 ? Math.min(1, c) : 0.8 + 0.2 * (1 - Math.exp(-(c - 0.8) * 5)));
   for (let py = 0; py < tile; py++) for (let px = 0; px < tile; px++) {
@@ -260,43 +301,91 @@ export function renderTile(fluid: FluidCpu, p: FxParams, out: Uint8ClampedArray 
       b.center[1] + b.right[1] * ox + b.up[1] * oy - b.dir[1] * far,
       b.center[2] + b.right[2] * ox + b.up[2] * oy - b.dir[2] * far,
     ];
-    let T = 1, r = 0, gr = 0, bl = 0;
+    // Per-channel transmittance (one value unless the absorption colour tints it).
+    let Tr = 1, Tg = 1, Tb = 1, r = 0, gr = 0, bl = 0, mx = 0, my = 0, mw = 0;
     const hit = slab(o, b.dir, ext);
     if (hit) {
-      for (let t = hit[0] + RENDER_STEP * 0.5; t < hit[1] && T > 0.003; t += RENDER_STEP) {
+      for (let t = hit[0] + RENDER_STEP * 0.5; t < hit[1] && Math.max(Tr, Tg, Tb) > 0.003; t += RENDER_STEP) {
         const x = o[0] + b.dir[0] * t, y = o[1] + b.dir[1] * t, z = o[2] + b.dir[2] * t;
-        const d = fluid.sample(fluid.density, x, y, z) * detailFactor(p, x, y, z, fluid.time, fluid);
-        const temp = flameShape > 0
-          ? emissionTemperature(fluid.sample(fluid.temperature, x, y, z), fluid.sample(fluid.flame, x, y, z), p.ignition, flameShape)
-          : fluid.sample(fluid.temperature, x, y, z);
+        const d = sharpenDensity(field(densityAt, x, y, z) * detailFactor(p, x, y, z, fluid.time, fluid), sharpen);
+        const raw = field(tempAt, x, y, z);
+        const temp = flameShape > 0 ? emissionTemperature(raw, flameAt(x, y, z), p.ignition, flameShape) : raw;
         const e = Math.min(1, Math.max(0, (temp - p.ignition) / p.emissionRange));
         if (d <= 1e-4 && e <= 0) continue;
-        const aSmoke = 1 - Math.exp(-d * p.absorption * RENDER_STEP);
-        const aFire = e > 0 ? 1 - Math.exp(-e * p.emission * FIRE_OPACITY * RENDER_STEP) : 0;
-        const tl = sampleLight(light, x, y, z);
-        // Sky occlusion: the smoke above shades the sky light reaching this point.
-        const sky = skyOcc > 0
-          ? 1 - skyOcc * (1 - Math.exp(-p.absorption * 2.5 * (fluid.sample(fluid.density, x, y + 2, z) + fluid.sample(fluid.density, x, y + 5, z) + fluid.sample(fluid.density, x, y + 10, z))))
-          : 1;
-        const sun = (plain ? tl : sunScatter(tl, cosTheta, g, octaves)) * powderTerm(d, p.absorption, powder);
-        const lit = albedo * (p.ambient * sky + (1 - p.ambient) * sun);
-        const fg = glowGrid ? albedo * p.fireGlow * p.emission * sampleLight(glowGrid, x, y, z) : 0;
-        const li = Math.round(e * 255) * 4;
-        const glow = p.emission * e * intensity;
-        r += T * (aSmoke * sr * (lit + fg * glowRgb[0]) + aFire * lut[li] * glow);
-        gr += T * (aSmoke * sg * (lit + fg * glowRgb[1]) + aFire * lut[li + 1] * glow);
-        bl += T * (aSmoke * sb * (lit + fg * glowRgb[2]) + aFire * lut[li + 2] * glow);
-        T *= (1 - aSmoke) * (1 - aFire);
+        const tau = d * p.absorption * RENDER_STEP;
+        const aR = 1 - Math.exp(-tau * k[0]), aG = chroma ? 1 - Math.exp(-tau * k[1]) : aR, aB = chroma ? 1 - Math.exp(-tau * k[2]) : aR;
+        // The fire hides what is behind it by its opacity, and gives light by FIRE_EMIT, independently.
+        const aFire = e > 0 ? 1 - Math.exp(-e * p.emission * opacity * RENDER_STEP) : 0;
+        const aEmit = e > 0 && emits ? 1 - Math.exp(-e * p.emission * FIRE_EMIT * RENDER_STEP) : 0;
+        if (mode === 'motion') {
+          const w = (Tr + Tg + Tb) / 3 * (1 - (1 - aR) * (1 - aFire));
+          const u = fluid.sample(fluid.u, x, y, z), v = fluid.sample(fluid.v, x, y, z), ww = fluid.sample(fluid.w, x, y, z);
+          mx += w * (u * b.right[0] + v * b.right[1] + ww * b.right[2]);
+          my += w * (u * b.up[0] + v * b.up[1] + ww * b.up[2]);
+          mw += w;
+        } else {
+          const tl = sampleLight(light, x, y, z);
+          // Sky occlusion: the smoke above shades the sky light reaching this point.
+          const sky = skyOcc > 0
+            ? 1 - skyOcc * (1 - Math.exp(-p.absorption * 2.5 * (densityAt(x, y + 2, z) + densityAt(x, y + 5, z) + densityAt(x, y + 10, z))))
+            : 1;
+          const pw = powderTerm(d, p.absorption, powder);
+          // The sunlight reaching this point crossed the smoke toward the sun, so the tint applies to it too.
+          const sunC = (tc: number) => (plain ? tc : sunScatter(tc, cosTheta, g, octaves)) * pw;
+          const sR = sunC(chroma ? Math.pow(tl, k[0]) : tl), sG = chroma ? sunC(Math.pow(tl, k[1])) : sR, sB = chroma ? sunC(Math.pow(tl, k[2])) : sR;
+          const fg = glowGrid ? albedo * p.fireGlow * p.emission * sampleLight(glowGrid, x, y, z) : 0;
+          const smoke = mode !== 'emission';
+          // What the smoke scatters is grey (its mean extinction); the tint is in what it absorbs, so it
+          // shows in the transmittance -- warm light through thin smoke.
+          const aS = chroma ? (aR + aG + aB) / 3 : aR;
+          const smokeR = smoke ? aS * sr * (albedo * (ambient * sky + (1 - ambient) * sR) + fg * glowRgb[0]) : 0;
+          const smokeG = smoke ? aS * sg * (albedo * (ambient * sky + (1 - ambient) * sG) + fg * glowRgb[1]) : 0;
+          const smokeB = smoke ? aS * sb * (albedo * (ambient * sky + (1 - ambient) * sB) + fg * glowRgb[2]) : 0;
+          let fR = 0, fG = 0, fB = 0;
+          if (aEmit > 0) {
+            const li = Math.round(e * 255) * 4;
+            // Soot masking: fire inside dense smoke is dimmed by it, so glow shows through the gaps.
+            const glow = p.emission * e * intensity * (soot > 0 ? Math.exp(-soot * d * p.absorption) : 1);
+            const bc = blue > 0 ? blue * blueCoreSource(e, fluid.sample(fluid.fuel, x, y, z)) * blueCoreSoot(d, p.absorption) * p.emission * intensity : 0;
+            fR = aEmit * (lut[li] * glow + blueRgb[0] * bc);
+            fG = aEmit * (lut[li + 1] * glow + blueRgb[1] * bc);
+            fB = aEmit * (lut[li + 2] * glow + blueRgb[2] * bc);
+          }
+          r += Tr * (smokeR + fR);
+          gr += Tg * (smokeG + fG);
+          bl += Tb * (smokeB + fB);
+        }
+        Tr *= (1 - aR) * (1 - aFire);
+        Tg *= (1 - aG) * (1 - aFire);
+        Tb *= (1 - aB) * (1 - aFire);
       }
     }
-    const alpha = 1 - T;
-    const k = (py * tile + px) * 4;
-    // Straight alpha: un-premultiply what was accumulated premultiplied.
-    const inv = alpha > 1e-4 ? 1 / alpha : 0;
-    out[k] = Math.round(knee(r * inv) * 255);
-    out[k + 1] = Math.round(knee(gr * inv) * 255);
-    out[k + 2] = Math.round(knee(bl * inv) * 255);
-    out[k + 3] = Math.round(Math.min(1, alpha) * 255);
+    const alpha = Math.min(1, 1 - (Tr + Tg + Tb) / 3);
+    const o4 = (py * tile + px) * 4;
+    if (mode === 'motion') {
+      const inv = mw > 1e-5 ? 1 / mw : 0;
+      out[o4] = Math.round(Math.min(1, Math.max(0, 0.5 + mx * inv * motionK)) * 255);
+      out[o4 + 1] = Math.round(Math.min(1, Math.max(0, 0.5 + my * inv * motionK)) * 255);
+      out[o4 + 2] = 0;
+      out[o4 + 3] = Math.round(alpha * 255);
+      continue;
+    }
+    if (mode === 'emission') {
+      out[o4] = Math.round(knee(r) * 255);
+      out[o4 + 1] = Math.round(knee(gr) * 255);
+      out[o4 + 2] = Math.round(knee(bl) * 255);
+      out[o4 + 3] = Math.round(Math.min(1, Math.max(r, gr, bl)) * 255);
+      continue;
+    }
+    // Straight alpha: un-premultiply what was accumulated premultiplied. Fire is light more than cover,
+    // so a straight-alpha tile carries it with at least its own brightness as alpha -- otherwise a
+    // transparent flame would un-premultiply far past white and clip away.
+    const a = mode === 'color' ? Math.max(alpha, Math.min(1, Math.max(r, gr, bl))) : alpha;
+    const inv = a > 1e-4 ? 1 / a : 0;
+    out[o4] = Math.round(knee(r * inv) * 255);
+    out[o4 + 1] = Math.round(knee(gr * inv) * 255);
+    out[o4 + 2] = Math.round(knee(bl * inv) * 255);
+    out[o4 + 3] = Math.round(a * 255);
   }
 }
 

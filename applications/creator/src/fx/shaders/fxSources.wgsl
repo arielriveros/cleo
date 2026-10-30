@@ -40,13 +40,24 @@ fn cs_sources(@builtin(global_invocation_id) g: vec3<u32>) {
         }
     }
 
-    if (u.turb.x > 0.0 && s.y > 0.02) {
-        let k = u.turb.x * min(1.0, s.y) * dt;
+    // Turbulence on hot gas and, with turbulence-on-smoke, cooled smoke too; plus a finer octave.
+    let on_smoke = u.real6.x;
+    var stir = min(1.0, s.y);
+    if (on_smoke > 0.0) { stir = stir + on_smoke * min(1.0, s.x); }
+    if (u.turb.x > 0.0 && (s.y > 0.02 || (on_smoke > 0.0 && stir > 0.02))) {
+        let k = u.turb.x * stir * dt;
         let q = vec3<f32>(p.x * u.turb.y, p.y * u.turb.y - u.turb.z, p.z * u.turb.y);
         let seed = u.dims.w;
         v.x = v.x + k * value_noise3(q, seed);
         v.y = v.y + k * 0.5 * value_noise3(q + vec3<f32>(31.4, 0.0, 0.0), seed + 1u);
         v.z = v.z + k * value_noise3(q + vec3<f32>(0.0, 0.0, 17.7), seed + 2u);
+        let kd = k * u.real6.y;
+        if (kd > 0.0) {
+            let f = vec3<f32>(q.x * 2.7, p.y * u.turb.y * 2.7 - u.turb.z * 2.0, q.z * 2.7);
+            v.x = v.x + kd * value_noise3(f, seed + 3u);
+            v.y = v.y + kd * 0.5 * value_noise3(f + vec3<f32>(31.4, 0.0, 0.0), seed + 4u);
+            v.z = v.z + kd * value_noise3(f + vec3<f32>(0.0, 0.0, 17.7), seed + 5u);
+        }
     }
 
     // Disturbance: one random kick per block, re-seeded every interval.
@@ -73,13 +84,18 @@ fn cs_sources(@builtin(global_invocation_id) g: vec3<u32>) {
     } else if (s.z > 0.0 && s.y > u.burn.x) {
         let b = min(s.z, u.burn.y * dt);
         s.z = s.z - b;
-        s.y = s.y + b * u.burn.z;
+        // Nguyen et al. 2002: heat toward the maximum temperature when one is set.
+        if (u.real6.z > 0.0) { s.y = s.y + (u.real6.z - s.y) * min(1.0, b * u.burn.z); }
+        else { s.y = s.y + b * u.burn.z; }
         s.x = s.x + b * u.burn.w;
         burned[i] = burned[i] + u.extra.y * b / dt;
         s.w = max(s.w, b / max(1e-6, u.burn.y * dt));
     }
 
-    v.y = v.y + (u.forces.x * s.y - u.forces.y * s.x) * dt;
+    // Buoyancy from the temperature above the surrounding air.
+    var lift = s.y;
+    if (u.real6.w > 0.0) { lift = select(0.0, s.y - u.real6.w, s.y > 0.0); }
+    v.y = v.y + (u.forces.x * lift - u.forces.y * s.x) * dt;
     if (u.forces.w != 0.0 && s.y + s.x > 0.01) { v.x = v.x + (u.forces.w - v.x) * min(1.0, dt); }
     if (u.wind2.y > 0.5 && s.y + s.x > 0.01) {
         let gst = gust_at(p);

@@ -3474,6 +3474,12 @@ export class Renderer {
             sm.setUniform('u_powder', node.powder);
             sm.setUniform('u_skyOcclusion', node.skyOcclusion);
             sm.setUniform('u_fireIntensity', node.fireIntensity);
+            sm.setUniform('u_absorptionScale', node.absorptionScale);
+            sm.setUniform('u_blueCoreColor', node.blueCoreColor);
+            sm.setUniform('u_sootMask', node.sootMask);
+            sm.setUniform('u_blueCore', node.blueCore);
+            sm.setUniform('u_sharpen', node.sharpen);
+            sm.setUniform('u_smoothSampling', node.smoothSampling ? 1 : 0);
             sm.setUniform('u_detailBlend', node.detailBlend);
             sm.setUniform('u_hasDetail', node.hasDetail && node.detailA && node.detailB ? 1 : 0);
             sm.setUniform('u_scatterOctaves', Math.max(1, Math.round(node.scatterOctaves)));

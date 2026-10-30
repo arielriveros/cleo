@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { FluidCpu, fluidDims } from '../src/fx/fluidCpu';
 import { DEFAULT_FX, FX_SCHEMA, FX_SCENE_SPECS, normaliseFx, type FxParams } from '../src/fx/fxParams';
-import { applySceneValues, EFFECT_SECTION_PRESETS, SCENE_PRESETS, SCENE_SECTION_PRESETS } from '../src/fx/fxPresets';
-import { DEFAULT_SCENE, SCENE_SCHEMA, type FxScene } from '../src/fx/fxScene';
+import { applySceneValues, EFFECT_SECTION_PRESETS, effectPresetLabel, effectPresetParams, SCENE_PRESETS, SCENE_SECTION_PRESETS } from '../src/fx/fxPresets';
+import { FX_PRESETS } from '../src/fx/fxParams';
+import { DEFAULT_SCENE, SCENE_SCHEMA, VIEW_KEYS, type FxScene } from '../src/fx/fxScene';
 import { detailBlend, emissionTemperature, groundShadow, SHADOW_RES } from '../src/fx/realism';
 
 // The realism models (realism.ts) in the CPU reference solver, and the preset contracts.
@@ -128,13 +129,29 @@ describe('section and scene presets', () => {
 
   it('on the scene side only touch their own section', () => {
     for (const [title, presets] of Object.entries(SCENE_SECTION_PRESETS)) {
-      const stageKeys = new Set((SCENE_SCHEMA.find(g => g.title === title)?.specs ?? []).map(s => s.key));
+      // What the eye menu shows and hides may be set by any section's preset (a sunset turns the sky on).
+      const stageKeys = new Set([...(SCENE_SCHEMA.find(g => g.title === title)?.specs ?? []).map(s => s.key), ...VIEW_KEYS]);
       const paramKeys = new Set(((FX_SCENE_SPECS as Record<string, { key: string }[]>)[title] ?? []).map(s => s.key));
       for (const p of presets) {
         for (const k of Object.keys(p.values.scene ?? {})) expect(stageKeys.has(k), `${title} / ${p.label}: ${k}`).toBe(true);
         for (const k of Object.keys(p.values.params ?? {})) expect(paramKeys.has(k), `${title} / ${p.label}: ${k}`).toBe(true);
       }
     }
+  });
+
+  it('replace every effect parameter but the preview quality, and Reset returns to the preset', () => {
+    const tweaked = normaliseFx({ ...DEFAULT_FX, seed: 999, lightYaw: 123, buoyancy: 77, frames: 3, previewQuality: 'low' });
+    const preset = FX_PRESETS.find(p => p.id === 'campfire-hq')!;
+    expect(effectPresetParams('campfire-hq', tweaked)).toEqual(normaliseFx({ ...preset.params, previewQuality: 'low' }));
+    expect(effectPresetParams(null, tweaked)).toEqual(normaliseFx({ ...DEFAULT_FX, previewQuality: 'low' }));
+    expect(effectPresetLabel('campfire-hq')).toBe(preset.label);
+    expect(effectPresetLabel(null)).toBe('Defaults');
+  });
+
+  it('leave visibility to the eye menu: no scene section draws a view toggle', () => {
+    for (const k of VIEW_KEYS) expect(k in DEFAULT_SCENE, k).toBe(true);
+    const drawn = new Set(SCENE_SCHEMA.flatMap(g => g.specs.map(s => s.key)));
+    for (const k of VIEW_KEYS) expect(drawn.has(k), k).toBe(false);
   });
 
   it('replace the bodies as whole scenes, and add to them as body presets', () => {

@@ -34,7 +34,28 @@ struct FxUniforms {
     real4: vec4<f32>,      // blast (this step), ground drag, albedo, powder
     real5: vec4<f32>,      // flame shape, fire intensity, sky occlusion, -
     detail: vec4<f32>,     // reset set A this step (0/1), reset set B (0/1), set A's cross-fade weight, -
+    real6: vec4<f32>,      // turbulence on smoke, turbulence detail, max temperature, ambient temperature
+    look4: vec4<f32>,      // absorption scale rgb (mean 1), fire soot mask
+    look5: vec4<f32>,      // blue core, sharpen, smooth sampling (0/1), glow threshold
+    look6: vec4<f32>,      // blue core rgb, render mode (0 colour, 1 lighting, 2 emission, 3 motion)
+    look7: vec4<f32>,      // motion encoding (voxels/s -> encoded units), -, -, -
 };
+
+/** realism.ts `FIRE_EMIT`: the fire's brightness per unit emission per voxel, whatever its opacity. */
+const FIRE_EMIT: f32 = 0.6;
+
+/** realism.ts `blueCoreSource`. */
+fn blue_core_source(e: f32, fuel: f32) -> f32 {
+    if (e <= 0.0 || fuel <= 0.0) { return 0.0; }
+    return min(1.0, fuel * 3.0) * (1.0 - 0.7 * e);
+}
+
+/** realism.ts `glowSource`. */
+fn glow_source(e: f32) -> f32 {
+    let th = u.look5.w;
+    if (th <= 0.0) { return e; }
+    return max(0.0, (e - th) / (1.0 - th));
+}
 
 fn open_sides() -> bool { return u.real1.x > 0.5; }
 

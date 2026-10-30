@@ -25,7 +25,7 @@ fn density_at(p: vec3<f32>) -> f32 {
 
 fn emission_at_cell(c: vec3<i32>) -> f32 {
     let t = sca[idxc(c.x * 2, c.y * 2, c.z * 2)].y;
-    return clamp((t - u.burn.x) / u.flags.w, 0.0, 1.0);
+    return glow_source(clamp((t - u.burn.x) / u.flags.w, 0.0, 1.0));
 }
 
 @compute @workgroup_size(4, 4, 4)

@@ -19,8 +19,7 @@ replays by itself once it has faded.
 The solver runs as GPU compute when the engine's device has it (the WebGPU backend), and otherwise as
 the CPU solver in a background worker, so the editor stays responsive either way.
 
-**Bake flipbook** runs the offline simulation from the start (warm-up, capture, loop blend) and fills the
-**Flipbook** and **Atlas** panels; **Export flipbook** writes the atlas, the `.tileset` and the sidecar.
+Baking lives in the **Bake** tab, beside **Parameters** on the right: see [Bake](#bake).
 
 The solver is an Eulerian gas solver: semi-Lagrangian advection, a Jacobi pressure projection that keeps
 the flow incompressible, vorticity confinement to restore the swirls the grid smooths out, and a
@@ -52,6 +51,8 @@ Where fuel, heat and smoke enter the domain.
 | **Speed** | Upward velocity the emitter imposes. |
 | **Turbulence** | Noise velocity stirred into hot gas. |
 | **Turbulence scale** | Noise features across the domain. |
+| **Turbulence on smoke** | How much the turbulence also stirs smoke that has cooled, not only hot gas. Missing motion in the smoke is what most often makes a simulation look fake. |
+| **Turbulence detail** | A second, finer turbulence octave (2.7 times the frequency), relative to the first. |
 | **Duration** | How long the emitter runs; 0 keeps it on (a flame), a short burst makes an explosion. |
 | **Noise** | Per-voxel, time-varying jitter of the fuel, heat and speed the emitter holds: flicker and a ragged source instead of a perfect ball. |
 
@@ -70,6 +71,8 @@ How fuel burns once it is hot enough.
 | **Flame lifetime** | How long the flame field lasts after fuel at a point stops burning. Shorter gives sharper, shorter tips. |
 | **Flicker** | Fuel pulses per second: a candle's or torch's rhythm. 0 is steady. |
 | **Blast** | A pressure pulse at the emitter for the first tenth of a second: an explosion's shock, blooming the fireball outward. |
+| **Max temperature** | Burning gas heats toward this temperature instead of without limit (Nguyen et al. 2002), so the core reaches white-hot and stays there. Radiative cooling is then measured over the range from the ambient temperature to it. 0 is off. |
+| **Ambient temperature** | The surrounding air's temperature: buoyancy lifts gas by how much hotter than it the gas is. 0 is off. |
 
 ## Forces
 
@@ -114,19 +117,7 @@ Time stepping and the pressure solve.
 | **Pressure solver** | Jacobi, or red-black SOR: Gauss-Seidel with over-relaxation, warm-started from the previous step's pressure. SOR reaches the same incompressibility in far fewer iterations. The live preview always uses it. |
 | **Boundaries** | Closed walls on every side but the top, or open air: gas leaves through the sides instead of piling against invisible glass. |
 | **Advection** | How the flow carries the smoke, heat and fuel. Semi-Lagrangian is plain and slightly blurry; MacCormack measures that blur with a backward pass and corrects it, keeping much sharper detail at the cost of two extra passes. |
-| **Warm-up frames** | Frames simulated before the first captured one, so the fire is established. |
 | **Seed** | The turbulence's seed. |
-
-## Flipbook
-
-How frames are captured and laid out.
-
-| Field | Meaning |
-|---|---|
-| **Frames** | Frames in the flipbook. The atlas is the squarest grid that holds them. |
-| **Tile size** | Pixels per frame. |
-| **View** | The camera: front, side, top, or an angle around the vertical axis (**Yaw**). Orthographic, framing the whole domain. |
-| **Loop blend** | Frames rendered past the end and cross-faded into the start, so the flipbook loops without a pop. 0 plays once (an explosion). |
 
 ## Look
 
@@ -136,7 +127,7 @@ How the volume is shaded, in the viewport and in the baked tiles.
 |---|---|
 | **Smoke colour** | Albedo of the smoke. |
 | **Density** | Extinction per unit of smoke: how opaque it is. |
-| **Fire colour from** | The gradient below, or black-body radiation: the colour a body glows at each temperature, with brightness rising as T^4, so a flame's cool edges fade to deep red. |
+| **Fire colour from** | The gradient below, or black-body radiation: the hue of Planck's spectrum at each temperature, seen by an eye adapted to the hottest (the way Nguyen et al. render fire), with brightness rising as T⁴, so the hottest core reads white, the body orange and the cool edges a deep, dim red. |
 | **Fire colour** | Colour by temperature, from ignition (left) to the hottest (right). |
 | **Coolest flame** / **Hottest flame** | Black-body temperatures, in kelvin, at ignition and at the top of the emission range. Wood fires run roughly 900 to 1500 K, gas burners hotter. |
 | **Emission** | Brightness of the fire. |
@@ -151,6 +142,14 @@ How the volume is shaded, in the viewport and in the baked tiles.
 | **Albedo** | The share of the light the smoke stops that it scatters rather than absorbs: near 1 bright steam, low values dark soot. |
 | **Powder** | Dark edges on dense smoke facing the light (the Beer-Powder effect of real clouds and billows). |
 | **Sky occlusion** | How much the smoke above shades the sky light below it, darkening the undersides of plumes. |
+| **Flame opacity** | How much the fire hides what is behind it. Real flames are nearly transparent (about 0.05): they give light, and only soot and smoke absorb it. It never changes how bright the fire is. |
+| **Blue core** | A blue emission in the reaction zone, where unburnt fuel is above ignition and burning: the base of a flame, before soot forms. It fades where the gas is white-hot and behind dense smoke. |
+| **Blue core colour** | Its colour. |
+| **Soot mask** | Fire inside dense smoke is dimmed by it, so the glow shows through the gaps in the soot. |
+| **Glow threshold** | Only fire hotter than this share of the emission range lights the smoke around it (**Fire glow**), so the glow comes from the core rather than every warm wisp. |
+| **Absorption colour** | The colour thin smoke tints the light passing through it. White is grey smoke; a warm colour (Houdini Pyro suggests about 0.43, 0.36, 0.30) absorbs blue fastest, so thin smoke reads brown and thick smoke dark. The smoke still scatters grey. |
+| **Smooth sampling** | Samples the voxels with a tricubic B-spline (Sigg and Hadwiger) instead of trilinearly, so the gas has no blocky voxel edges. Costs eight times the texture reads. |
+| **Sharpen** | Density contrast: thin smoke thinner, dense cores denser, for crisper edges. Pairs well with smooth sampling. |
 
 The detail noise rides the flow: it is sampled where each bit of gas came from (two sets of advected noise
 coordinates, cross-faded so their resets are never seen), so it stretches and swirls with the smoke.
@@ -181,7 +180,6 @@ The sun is the one light the effect is shaded with: its direction lights the vie
 | **Sun illuminance** | Direct sunlight, in lux. A clear noon is about 100 000 lux. |
 | **Sun temperature** | The sun's colour as a colour temperature: about 2000 K at sunset, 5800 K at noon. |
 | **Ambient light** | Flat light from every direction, in lux. |
-| **Physical sky** | A real atmosphere behind the effect, which also lights the smoke from the sky. |
 | **Auto exposure** | Let the camera adapt to the scene's brightness, as a game camera does. Off, **Exposure** sets it by hand. |
 | **Exposure** | Manual exposure, EV100. |
 
@@ -208,14 +206,20 @@ Wind across the stage: an engine Wind node, and a force on the gas that pulls it
 | **Gust size** | Metres between gust crests. |
 | **Gust speed** | How fast the gusts travel. |
 
-## Ground
+## Viewport visibility
 
-What the effect stands on.
+The eye button top-right of the viewport, beside the move / rotate / scale buttons, shows and hides what
+the viewport draws. None of it changes the effect or the bake.
 
 | Field | Meaning |
 |---|---|
 | **Grid** | The editor grid on the ground. |
-| **Ground plane** | A matte floor, for the fire light and shadows to land on. |
+| **Floor** | A matte ground plane, for the fire light and shadows to land on. |
+| **Sky** | A physical atmosphere behind the effect, which also lights the smoke from the sky. Off is a flat backdrop. |
+| **Ground shadow** | The effect's shadow on the floor: the light reaching the ground through the smoke toward the sun, drawn as a decal. Its darkness is **Shadow strength** under Rendering. |
+| **Region wireframe** | The simulation region's box. While the region is selected its handles draw it instead. |
+| **Emitter** | The emitter marker, always rather than only while the emitter is selected. |
+| **Bodies** | The placed bodies. Hidden bodies still shape the flow. |
 
 ## Rendering
 
@@ -224,7 +228,6 @@ How the viewport draws the volume.
 | Field | Meaning |
 |---|---|
 | **Quality** | Low runs fewer pressure iterations, marches the volume in longer steps at half the screen resolution and updates the self-shadowing less often, for big grids or slower machines. High uses finer steps at full resolution. A bake always uses the effect's own values. |
-| **Ground shadow** | The effect casts a shadow on the ground: the light reaching the floor through the smoke toward the sun, drawn as a decal. |
 | **Shadow strength** | How dark that shadow can get. |
 | **Temporal accumulation** | Each frame casts one jittered ray per pixel with longer steps, and blends it with the previous frames reprojected through where the smoke is: the volumetric clouds' and TAA's technique. Much cheaper per frame for the same settled quality; fast changes take a few frames to settle. While the camera moves or a setting changes, the march takes longer steps still and leans on the new frames. |
 
@@ -242,16 +245,54 @@ Static objects the gas flows around, never through: real engine models with phys
 
 ## Presets
 
-**Preset** replaces every parameter with a starting point, keeping your seed and preview quality: a
+**Effect presets** replace every parameter with a starting point (the seed, the sun's direction and the
+Bake tab's settings included), keeping only the viewport's preview quality. The header shows the preset
+picked last, and **Reset** returns every parameter to it (to the defaults before any is picked). The presets: a
 campfire (plain and realistic), torch, smoke plume, explosion burst, candle, bonfire, gas burner, brazier,
 chimney smoke, steam vent, smouldering embers, magic fire, fireball, large explosion, muzzle flash and a
 dust puff. Each comes with its own region size and voxel size for its scale.
 
-## Output
+## Bake
 
-The atlas is straight-alpha RGBA, frames left to right then top to bottom. The `.tileset` describes its
-grid; `fx.json` carries a `particleFlipbook` block (columns, rows, frames, FPS) for a particle system's
-**Render** module.
+The **Bake** tab turns the effect into textures. **Bake flipbook** runs its own simulation from the
+start (warm-up, capture, loop blend), so the live preview keeps going beside it; **Export** writes the
+files. The **Output** menu picks which baked atlas the player and the atlas view show. **Bake presets**
+set up the whole tab: Game-ready (8 × 8 frames of 128 px), Hero (8 × 8 of 256 px, relightable), Mobile
+(4 × 4 of 64 px) and Explosion one-shot.
+
+### Flipbook
+
+| Field | Meaning |
+|---|---|
+| **Warm-up frames** | Frames simulated before the first captured one, so the fire is established. |
+| **Frames** | Frames in the flipbook. The atlas is the squarest grid that holds them. |
+| **Tile size** | Pixels per frame. |
+| **View** | The camera: front, side, top, or an angle around the vertical axis (**Yaw**). Orthographic, framing the whole domain. |
+| **Loop blend** | Frames rendered past the end and cross-faded into the start, so the flipbook loops without a pop. 0 plays once (an explosion). |
+
+### Outputs
+
+| Field | Meaning |
+|---|---|
+| **Six-way lightmaps** | The smoke lit from six directions, so a game can relight the flipbook with its own lights (Unity VFX Graph and Unreal six-way lighting). Two atlases: `_6way_pos` holds the light from the right, top and back in RGB with the alpha in A; `_6way_neg` the left, bottom and front in RGB with the fire's emission in A. Directions are the tile's own: back is away from the camera. |
+| **Motion vectors** | The flow on screen, for flipbook frame blending that morphs instead of cross-fading. R and G are 0.5 plus the motion to the right and up, in tile widths per frame, times **Motion scale**; a blend shader divides it back out. |
+| **Motion scale** | That encoding's scale, written to the sidecar. |
+| **Emission only** | The fire's light alone, behind the smoke in front of it, for an additive particle layer. |
+
+The colour atlas is straight-alpha RGBA, frames left to right then top to bottom. Fire carries at least
+its own brightness as alpha, so transparent flames still show in it. The `.tileset` describes its grid;
+`fx.json` carries a `particleFlipbook` block (columns, rows, frames, FPS) for a particle system's
+**Render** module, and an `outputs` block naming the extra atlases and their conventions.
+
+## References
+
+- Nguyen, Fedkiw and Jensen 2002, *Physically Based Modeling and Animation of Fire*: the temperature model, black-body colour with adaptation, the blue core.
+- Houdini Pyro shading documentation: absorption colour, fire masked by smoke, scatter from a temperature range.
+- Scratchapixel, *Volume Rendering for Developers: Voxel Grids*: trilinear sampling and its higher-order alternatives.
+- Sigg and Hadwiger 2005, *Fast Third-Order Texture Filtering* (GPU Gems 2): tricubic B-spline from trilinear taps.
+- Wyman, Sloan and Shirley 2013, *Simple Analytic Approximations to the CIE XYZ Color Matching Functions*; CIECAM02's CAT02 adaptation.
+- FumeFX realistic fire and smoke (Super Renders Farm): motion complexity over settings; turbulence on smoke.
+- Six-way lightmaps: Unity VFX Graph and Unreal documentation; *Real-time Neural Six-way Lightmaps* (2026).
 
 ## Licensing note
 

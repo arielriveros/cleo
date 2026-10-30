@@ -129,3 +129,77 @@ export function groundShadow(dims: { nx: number; ny: number; nz: number }, light
   }
   return out;
 }
+
+// --- Shading models shared by every renderer (volumeRender.ts, fxRender.wgsl, the engine's
+// fluidVolume.wgsl) ---------------------------------------------------------------------------------
+
+/**
+ * How bright fire is per unit emission per voxel. Fixed: `fireOpacity` only changes how much the fire
+ * HIDES (real flames are nearly transparent; only soot absorbs), never how much light it gives.
+ */
+export const FIRE_EMIT = 0.6;
+
+/**
+ * Per-channel extinction scales for an absorption colour: the colour thin smoke tints the light passing
+ * through it. Normalised to a mean of 1, so the overall opacity stays put; white is (1, 1, 1), the old
+ * grey smoke. Warm colours extinguish blue fastest: thin smoke reads brown, thick smoke dark.
+ */
+export function absorptionScale(c: readonly number[] | undefined): [number, number, number] {
+  if (!c) return [1, 1, 1];
+  const r = Math.max(0.02, c[0]), g = Math.max(0.02, c[1]), b = Math.max(0.02, c[2]);
+  const m = Math.max(r, g, b);
+  const k: [number, number, number] = [m / r, m / g, m / b];
+  const mean = (k[0] + k[1] + k[2]) / 3;
+  return [k[0] / mean, k[1] / mean, k[2] / mean];
+}
+
+/** Density contrast: below half a unit thinner, above it denser (`sharpen` 0 is off). */
+export function sharpenDensity(d: number, sharpen: number): number {
+  if (sharpen <= 0 || d <= 0) return d;
+  return d * Math.min(4, Math.pow(d / 0.5, sharpen));
+}
+
+/**
+ * The blue core (Nguyen et al. 2002): the reaction zone, where unburnt fuel is above ignition and burning
+ * -- the base of a flame, before soot forms. It fades where the gas is white-hot, so the core stays white.
+ * 0..1; the renderers then hide it behind soot ({@link blueCoreSoot}).
+ */
+export function blueCoreSource(e: number, fuel: number): number {
+  return e > 0 && fuel > 0 ? Math.min(1, fuel * 3) * (1 - 0.7 * e) : 0;
+}
+
+/** Soot hides the blue core: dense smoke at a point dims it. */
+export function blueCoreSoot(density: number, absorption: number): number {
+  return Math.exp(-2 * density * absorption);
+}
+
+/**
+ * The live volume's A channel: the fire glow on the smoke (>= 0), or, where the blue core burns, minus
+ * its strength. The reaction zone has almost no smoke to light, so it gives up the glow there.
+ */
+export function packGlowOrCore(glow: number, core: number): number {
+  return core > 0.01 ? -core : glow;
+}
+
+/** The fire glow's source range: only emission above `threshold` (0..1) lights the smoke around it. */
+export function glowSource(e: number, threshold: number): number {
+  return threshold > 0 ? Math.max(0, (e - threshold) / (1 - threshold)) : e;
+}
+
+/**
+ * Cubic B-spline sampling from 8 trilinear taps (Sigg & Hadwiger, GPU Gems 2 ch. 20): per axis, the
+ * tap positions and their weights, in voxel-index space.
+ */
+export function bsplineAxis(x: number): [number, number, number, number] {
+  const i = Math.floor(x), f = x - i;
+  const f2 = f * f, f3 = f2 * f;
+  const w0 = (1 - 3 * f + 3 * f2 - f3) / 6, w1 = (4 - 6 * f2 + 3 * f3) / 6, w2 = (1 + 3 * f + 3 * f2 - 3 * f3) / 6, w3 = f3 / 6;
+  const g0 = w0 + w1, g1 = w2 + w3;
+  return [i - 1 + w1 / g0, i + 1 + w3 / g1, g0, g1];
+}
+
+export function sampleBspline(sample: (x: number, y: number, z: number) => number, x: number, y: number, z: number): number {
+  const [x0, x1, gx0, gx1] = bsplineAxis(x), [y0, y1, gy0, gy1] = bsplineAxis(y), [z0, z1, gz0, gz1] = bsplineAxis(z);
+  return gz0 * (gy0 * (gx0 * sample(x0, y0, z0) + gx1 * sample(x1, y0, z0)) + gy1 * (gx0 * sample(x0, y1, z0) + gx1 * sample(x1, y1, z0)))
+       + gz1 * (gy0 * (gx0 * sample(x0, y0, z1) + gx1 * sample(x1, y0, z1)) + gy1 * (gx0 * sample(x0, y1, z1) + gx1 * sample(x1, y1, z1)));
+}

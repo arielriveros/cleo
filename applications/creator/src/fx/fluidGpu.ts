@@ -32,8 +32,8 @@ import ReduceProgram from './shaders/fxReduce.wgsl';
 import { SOR_OMEGA, type FluidDims, type SceneWind } from './fluidCpu';
 import type { FluidBackend } from './generateFx';
 import type { FxParams } from './fxParams';
-import { FIRE_OPACITY, lightVector, RENDER_STEP, viewBasis } from './volumeRender';
-import { DETAIL_PERIOD, detailBlend, detailPhase, stepFactors } from './realism';
+import { FIRE_OPACITY, lightVector, RENDER_MODES, RENDER_STEP, viewBasis, type RenderMode } from './volumeRender';
+import { absorptionScale, DETAIL_PERIOD, detailBlend, detailPhase, stepFactors } from './realism';
 
 type Program = typeof SourcesProgram;
 
@@ -42,7 +42,7 @@ export function gpuFluidAvailable(): boolean {
   return !!device?.capabilities?.hasCompute;
 }
 
-const UNIFORM_BYTES = 26 * 16;
+const UNIFORM_BYTES = 31 * 16;
 
 function pipeline(program: Program, label: string): ComputePipeline {
   const module = device.createShaderModule({
@@ -60,7 +60,7 @@ interface StageState { wind: SceneWind | null; solids: boolean }
 
 /** Pack the uniform block of fxCommon.wgsl. `resets` says which detail coordinate sets go back to rest this step. */
 function packUniforms(p: FxParams, dims: FluidDims, dt: number, time: number, steps: number, tile: number, stage: StageState,
-                      resets: [boolean, boolean] = [false, false]): ArrayBuffer {
+                      resets: [boolean, boolean] = [false, false], mode: RenderMode = 'color'): ArrayBuffer {
   const buf = new ArrayBuffer(UNIFORM_BYTES);
   const f = new Float32Array(buf);
   const u = new Uint32Array(buf);
@@ -76,7 +76,7 @@ function packUniforms(p: FxParams, dims: FluidDims, dt: number, time: number, st
   set(7, p.emitDuration <= 0 || time < p.emitDuration ? 1 : 0, p.absorption, p.emission, p.emissionRange);
   set(8, p.smokeColor[0], p.smokeColor[1], p.smokeColor[2], p.ambient);
   const L = lightVector(p);
-  set(9, L[0], L[1], L[2], FIRE_OPACITY);
+  set(9, L[0], L[1], L[2], p.fireOpacity ?? FIRE_OPACITY);
   const b = viewBasis(dims, p.view, p.yaw);
   set(10, b.dir[0], b.dir[1], b.dir[2], b.half);
   set(11, b.right[0], b.right[1], b.right[2], Math.hypot(dims.nx - 1, dims.ny - 1, dims.nz - 1));
@@ -96,6 +96,13 @@ function packUniforms(p: FxParams, dims: FluidDims, dt: number, time: number, st
   set(23, k.blast, p.groundDrag ?? 0, p.albedo ?? 1, p.powder ?? 0);
   set(24, p.flameShape ?? 0, p.fireIntensity ?? 1, p.skyOcclusion ?? 0, 0);
   set(25, resets[0] ? 1 : 0, resets[1] ? 1 : 0, detailBlend(time), 0);
+  set(26, p.turbulenceOnSmoke ?? 0, p.turbulenceDetail ?? 0, p.maxTemperature ?? 0, p.ambientTemperature ?? 0);
+  const ks = absorptionScale(p.absorptionColor);
+  set(27, ks[0], ks[1], ks[2], p.fireSootMask ?? 0);
+  set(28, p.blueCore ?? 0, p.sharpen ?? 0, p.smoothSampling ? 1 : 0, p.glowThreshold ?? 0);
+  const bc = p.blueCoreColor ?? [0.3, 0.45, 1, 1];
+  set(29, bc[0], bc[1], bc[2], RENDER_MODES[mode]);
+  set(30, p.frameTime / (2 * b.half) * (p.motionScale ?? 4), 0, 0, 0);
   return buf;
 }
 
@@ -287,7 +294,7 @@ export function gpuBackend(dims: FluidDims): FluidBackend {
       time += dt;
       steps++;
     },
-    async render(p, tile, lutData) {
+    async render(p, tile, lutData, mode = 'color') {
       if (lutUploaded !== lutData) { device.writeBuffer(lut, 0, lutData); lutUploaded = lutData; }
       if (!tileTexture || tileSize !== tile) {
         tileTexture?.destroy();
@@ -309,11 +316,12 @@ export function gpuBackend(dims: FluidDims): FluidBackend {
             { binding: 5, buffer: glow },
             { binding: 6, buffer: detailA[0] },
             { binding: 7, buffer: detailB[0] },
+            { binding: 8, buffer: vel[c] },
           ],
         }));
       }
       // The tile size and camera live in the uniform block too; rewrite it for this frame.
-      device.writeBuffer(uniforms, 0, new Uint8Array(packUniforms(p, dims, 0, time, steps, tile, stage)));
+      device.writeBuffer(uniforms, 0, new Uint8Array(packUniforms(p, dims, 0, time, steps, tile, stage, [false, false], mode)));
       const encoder = device.createCommandEncoder('fx.render');
       recordLight(encoder);
       const pass = encoder.beginComputePass('fx.render');
@@ -325,6 +333,7 @@ export function gpuBackend(dims: FluidDims): FluidBackend {
           { binding: 0, buffer: uniforms }, { binding: 1, buffer: sca[cur] }, { binding: 2, buffer: light },
           { binding: 3, buffer: lut }, { binding: 4, storageTextureView: device.createWholeTextureView(tileTexture!) },
           { binding: 5, buffer: glow }, { binding: 6, buffer: detailA[1] }, { binding: 7, buffer: detailB[1] },
+          { binding: 8, buffer: vel[cur] },
         ],
       }));
       pass.dispatchWorkgroups(Math.ceil(tile / 8), Math.ceil(tile / 8), 1);

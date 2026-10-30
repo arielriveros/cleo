@@ -5,7 +5,7 @@ import { DockShell } from '@cleo/app-kit/layout/DockShell';
 import { ParamForm } from '@cleo/app-kit/params/ParamForm';
 import ConsolePanel from '@cleo/app-kit/feedback/ConsolePanel';
 import { ViewportHost } from '@cleo/app-kit/engine/ViewportHost';
-import { Button, Collapsable, DocScope, PresetMenu, Select, Toggle } from '@cleo/app-kit/ui';
+import { Button, Collapsable, DocScope, PresetMenu, Select, Toggle, VisibilityMenu } from '@cleo/app-kit/ui';
 import { toast } from '@cleo/app-kit/feedback/toastStore';
 import { useCreatorEngine } from '../../app/CreatorEngine';
 import { GenerationBar } from '../../app/StatusBar';
@@ -17,21 +17,24 @@ import { DEFAULT_FX, FX_PRESETS, FX_SCHEMA, normaliseFx, type FxParams } from '.
 import { cpuBackend, exportFx, generateFx, type FxOutput } from '../generateFx';
 import { LiveFx, type LiveStats } from '../liveSim';
 import { legacySunDirection, loadScene, saveScene, type FxScene } from '../fxScene';
-import { EFFECT_SECTION_PRESETS, type SectionPreset } from '../fxPresets';
+import { EFFECT_SECTION_PRESETS, effectPresetLabel, effectPresetParams, type SectionPreset } from '../fxPresets';
 import { frameAt, frameBox, hideFxVolume, installOrbitCamera, showFxVolume } from './fxPreview';
 import { emitterPose, FxGizmos, type FxSelection } from './FxGizmos';
 import type { GizmoMode, GizmoSpace } from '@cleo/app-kit/gizmo/types';
 import { GizmoModeControls } from '@cleo/app-kit/gizmo/GizmoModeControls';
 import { FxStage } from './fxStage';
 import { ScenePanel } from './ScenePanel';
+import { BakePanel } from './BakePanel';
 
 // FX Creator: fire and smoke simulated on a voxel grid, shown live in the 3D viewport as an engine
 // FluidVolumeNode -- every parameter change reaches the next simulation step, so there is nothing to
-// press to see it. "Bake flipbook" runs the deterministic offline simulation from t = 0 (warm-up,
-// capture, loop blend) and packs the tileset the export writes. The Scene panel dresses the stage the
+// press to see it. The Bake tab (beside Parameters) runs the deterministic offline simulation from t = 0
+// (warm-up, capture, loop blend) and packs the tileset -- and any extra outputs -- the export writes. The Scene panel dresses the stage the
 // effect is previewed in (sun, sky, wind, ground, placed bodies); none of it reaches a bake.
 
 const STORAGE_KEY = 'cleo_creator_fx_params_v1';
+/** The effect preset picked last: what Reset returns to. */
+const PRESET_KEY = 'cleo_creator_fx_preset_v1';
 /** A grid or seed change restarts the simulation, so it waits for the slider to settle. */
 const RESTART_DEBOUNCE_MS = 300;
 const SAVE_DEBOUNCE_MS = 250;
@@ -53,6 +56,12 @@ interface FxState {
   /** Everything the viewport's gizmos need, assembled once here. */
   gizmos: React.ReactNode;
   viewportRef: React.RefObject<HTMLDivElement>;
+  bakeRunning: boolean;
+  onBake: () => void;
+  onExport: () => void;
+  /** The effect preset picked last, or null for the defaults. */
+  presetId: string | null;
+  setPresetId: (id: string | null) => void;
 }
 
 const FxContext = createContext<FxState | null>(null);
@@ -81,6 +90,11 @@ export function FxWorkspace() {
   const [gizmoSpace, setGizmoSpace] = useState<GizmoSpace>('world');
   const viewportRef = useRef<HTMLDivElement>(null);
   const [params, setParamsState] = useState<FxParams>(loadParams);
+  const [presetId, setPresetIdState] = useState<string | null>(() => { try { return localStorage.getItem(PRESET_KEY); } catch { return null; } });
+  const setPresetId = (id: string | null) => {
+    setPresetIdState(id);
+    try { if (id) localStorage.setItem(PRESET_KEY, id); else localStorage.removeItem(PRESET_KEY); } catch { /* quota */ }
+  };
   const [stageScene, setStageScene] = useState<FxScene>(loadScene);
   const stage = useRef<FxStage | null>(null);
   const stageRef = useRef(stageScene);
@@ -245,6 +259,15 @@ export function FxWorkspace() {
   const gizmos = (<>
     {/* The editor's own floating controls, top-right over the viewport. */}
     <div data-cleo-overlay className='absolute top-2 right-2 z-20 flex items-center gap-2'>
+      <VisibilityMenu items={[
+        { key: 'grid', label: 'Grid', checked: stageScene.grid },
+        { key: 'groundPlane', label: 'Floor', checked: stageScene.groundPlane },
+        { key: 'sky', label: 'Sky', checked: stageScene.sky },
+        { key: 'effectShadow', label: 'Ground shadow', checked: stageScene.effectShadow },
+        { key: 'showRegion', label: 'Region wireframe', checked: stageScene.showRegion },
+        { key: 'showEmitter', label: 'Emitter', checked: stageScene.showEmitter },
+        { key: 'showBodies', label: 'Bodies', checked: stageScene.showBodies },
+      ].map(item => ({ ...item, onChange: (v: boolean) => setStageScene(s => ({ ...s, [item.key]: v })) }))} />
       <GizmoModeControls mode={gizmoMode} space={gizmoSpace} onMode={setGizmoMode} onSpace={setGizmoSpace} />
       <Button size='sm' variant='ghost' className='bg-surface-raised/80' title='Frame the selection (F)' onClick={frameSelection}>Frame</Button>
     </div>
@@ -255,7 +278,8 @@ export function FxWorkspace() {
   const value = useMemo(() => ({
     params, setParams, output, liveFrames, tile: normaliseFx(params).tileSize, stats, live, scene: stageScene, setScene: setStageScene,
     selection, select: setSelection, gizmos, viewportRef,
-  }), [params, output, liveFrames, stageScene, selection, gizmoMode, gizmoSpace, instance, scene]);
+    bakeRunning: bake.status.running, onBake: bakeFlipbook, onExport: exportFiles, presetId, setPresetId,
+  }), [params, output, liveFrames, stageScene, selection, gizmoMode, gizmoSpace, instance, scene, bake.status.running, gpu, presetId]);
 
   return (
     <FxContext.Provider value={value}>
@@ -274,14 +298,12 @@ export function FxWorkspace() {
             <label className='flex items-center gap-1 text-muted'>
               <Toggle checked={gpu} onChange={setUseGpu} /> GPU solver {hasCompute ? '' : '(unavailable)'}
             </label>
-            <Button variant='primary' disabled={bake.status.running} onClick={bakeFlipbook}>Bake flipbook</Button>
-            <Button disabled={!output || bake.status.running} onClick={exportFiles}>Export flipbook</Button>
           </div>
           <div className='flex-1 min-h-0'>
-            <DockShell components={FX_PANELS} storageKey='cleo_creator_fx_layout' version={3} buildDefault={buildFxLayout} anchorPanel='viewport' />
+            <DockShell components={FX_PANELS} storageKey='cleo_creator_fx_layout' version={4} buildDefault={buildFxLayout} anchorPanel='viewport' />
           </div>
           <GenerationBar status={bake.status} onCancel={bake.cancel}
-                         idle={output ? `Baked: ${output.frames.length} frames, ${output.layout.columns}×${output.layout.rows} atlas (${output.layout.width}×${output.layout.height}), ${output.fps} fps, ${output.backend.toUpperCase()}` : 'Live preview — Bake flipbook to make the tileset'} />
+                         idle={output ? `Baked: ${output.frames.length} frames, ${output.layout.columns}×${output.layout.rows} atlas (${output.layout.width}×${output.layout.height}), ${output.fps} fps, ${output.backend.toUpperCase()}` : 'Live preview — bake the tileset in the Bake tab'} />
         </div>
       </DocScope>
     </FxContext.Provider>
@@ -292,19 +314,9 @@ function buildFxLayout(api: DockviewApi) {
   api.addPanel({ id: 'viewport', component: 'viewport', title: 'Viewport' });
   api.addPanel({ id: 'scene', component: 'scene', title: 'Scene', position: { referencePanel: 'viewport', direction: 'left' }, initialWidth: 300 });
   api.addPanel({ id: 'parameters', component: 'parameters', title: 'Parameters', position: { referencePanel: 'viewport', direction: 'right' }, initialWidth: 340 });
-  api.addPanel({ id: 'flipbook', component: 'flipbook', title: 'Flipbook', position: { referencePanel: 'viewport', direction: 'below' }, initialHeight: 260 });
-  api.addPanel({ id: 'atlas', component: 'atlas', title: 'Atlas', position: { referencePanel: 'flipbook', direction: 'within' } });
-  api.addPanel({ id: 'console', component: 'console', title: 'Console', position: { referencePanel: 'flipbook', direction: 'within' } });
-  api.getPanel('flipbook')?.api.setActive();
-}
-
-function paint(canvas: HTMLCanvasElement | null, pixels: Uint8Array | undefined, width: number, height: number) {
-  if (!canvas || !pixels) return;
-  canvas.width = width; canvas.height = height;
-  const ctx = canvas.getContext('2d')!;
-  const image = ctx.createImageData(width, height);
-  image.data.set(pixels.subarray(0, width * height * 4));
-  ctx.putImageData(image, 0, 0);
+  api.addPanel({ id: 'bake', component: 'bake', title: 'Bake', position: { referencePanel: 'parameters', direction: 'within' } });
+  api.addPanel({ id: 'console', component: 'console', title: 'Console', position: { referencePanel: 'viewport', direction: 'below' }, initialHeight: 160 });
+  api.getPanel('parameters')?.api.setActive();
 }
 
 /** The live 3D view, with the solver's numbers in a corner. */
@@ -334,72 +346,32 @@ function LiveReadout() {
   );
 }
 
-/** Plays the baked flipbook (or the frames so far, while baking) at its own frame rate. */
-function FlipbookPanel(_: IDockviewPanelProps) {
-  const { output, liveFrames, tile, params } = useFx();
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [playing, setPlaying] = useState(true);
-  const [frame, setFrame] = useState(0);
-  const frames = output?.frames ?? liveFrames;
-  const size = output?.layout.tile ?? tile;
-  const fps = output?.fps ?? Math.round(1 / params.frameTime);
-
-  useEffect(() => {
-    if (!playing || frames.length === 0) return;
-    const id = setInterval(() => setFrame(f => (f + 1) % frames.length), 1000 / Math.max(1, fps));
-    return () => clearInterval(id);
-  }, [playing, frames.length, fps]);
-  useEffect(() => { paint(canvasRef.current, frames[Math.min(frame, frames.length - 1)], size, size); }, [frame, frames, size]);
-
-  return (
-    <div className='flex flex-col h-full cleo-texture-checker'>
-      <div className='flex-1 min-h-0 flex items-center justify-center p-2'>
-        {frames.length
-          ? <canvas ref={canvasRef} className='h-full max-w-full aspect-square' style={{ imageRendering: 'auto' }} />
-          : <span className='text-dim'>No flipbook yet — press Bake flipbook.</span>}
-      </div>
-      <div className='flex items-center gap-2 px-2 py-1 bg-surface-sunken border-t border-border'>
-        <Button size='sm' onClick={() => setPlaying(p => !p)}>{playing ? 'Pause' : 'Play'}</Button>
-        <input type='range' min={0} max={Math.max(0, frames.length - 1)} value={Math.min(frame, Math.max(0, frames.length - 1))}
-               onChange={e => { setPlaying(false); setFrame(Number(e.target.value)); }} className='flex-1' />
-        <span className='text-dim tabular-nums'>{frames.length ? `${Math.min(frame, frames.length - 1) + 1} / ${frames.length}` : '–'}</span>
-      </div>
-    </div>
-  );
-}
-
-function AtlasPanel(_: IDockviewPanelProps) {
-  const { output } = useFx();
-  const ref = useRef<HTMLCanvasElement>(null);
-  useEffect(() => { if (output) paint(ref.current, output.atlas, output.layout.width, output.layout.height); }, [output]);
-  return (
-    <div className='h-full overflow-auto cleo-texture-checker flex items-start justify-center p-2'>
-      {output ? <canvas ref={ref} className='max-h-full max-w-full' /> : <span className='text-dim'>The packed flipbook appears here after a bake.</span>}
-    </div>
-  );
-}
-
 /**
  * The RIGHT dock panel: the effect's own composition -- emitter, combustion, forces, dissipation,
- * simulation, flipbook and look. Whole-effect presets at the top, a Presets ▾ menu on each section.
+ * simulation and look. Baking is the Bake tab beside it. Whole-effect presets at the top, a Presets ▾ menu on each section.
  * The scene-side effect values (region size, sun direction, preview quality) are the left panel's.
  */
 function ParametersPanel(_: IDockviewPanelProps) {
-  const { params, setParams } = useFx();
+  const { params, setParams, presetId, setPresetId } = useFx();
   const values = { ...params, tileSize: String(params.tileSize) } as unknown as Record<string, unknown>;
-  // An effect preset replaces the effect but not the scene's choices: the seed, the sun's direction and
-  // the preview quality stay.
-  const applyEffect = (p: { params: FxParams }) => setParams({
-    ...p.params, seed: params.seed, previewQuality: params.previewQuality,
-    lightYaw: params.lightYaw, lightElevation: params.lightElevation,
-  });
+  // An effect preset replaces every parameter -- seed, sun direction and bake settings included -- except
+  // the viewport's preview quality. Reset applies the preset picked last again.
+  const applyEffect = (p: { id: string }) => {
+    setParams(effectPresetParams(p.id, params));
+    setPresetId(p.id);
+  };
+  const reset = () => {
+    setParams(effectPresetParams(presetId, params));
+    toast.success(`Reset to ${effectPresetLabel(presetId)}.`);
+  };
   return (
     <div className='p-2 overflow-auto h-full'>
-      <div className='flex items-center justify-between pb-1'>
-        <span className='text-ui-sm text-muted'>Effect</span>
+      <div className='flex items-center gap-2 pb-1'>
+        <span className='flex-1 min-w-0 truncate text-ui-sm text-muted'>Effect · <span className='text-fg'>{effectPresetLabel(presetId)}</span></span>
+        <Button size='sm' variant='ghost' onClick={reset}>Reset</Button>
         <PresetMenu label='Effect presets' presets={FX_PRESETS.map(p => ({ ...p, description: p.description ?? p.label }))} onApply={applyEffect} />
       </div>
-      {FX_SCHEMA.map(group => (
+      {FX_SCHEMA.filter(group => group.side !== 'bake').map(group => (
         <Collapsable key={group.title} title={group.title} persistKey={`cleo_creator_fx_${group.title}`}
                      right={EFFECT_SECTION_PRESETS[group.title]
                        ? <PresetMenu presets={EFFECT_SECTION_PRESETS[group.title]}
@@ -418,8 +390,14 @@ function SceneTab(_: IDockviewPanelProps) {
   return <ScenePanel scene={scene} setScene={setScene} params={params} setParams={setParams} selection={selection} select={select} />;
 }
 
+function BakeTab(_: IDockviewPanelProps) {
+  const { params, setParams, output, liveFrames, bakeRunning, onBake, onExport } = useFx();
+  return <BakePanel params={params} setParams={setParams} output={output} liveFrames={liveFrames}
+                    running={bakeRunning} onBake={onBake} onExport={onExport} />;
+}
+
 function ConsoleTab(_: IDockviewPanelProps) {
   return <ConsolePanel />;
 }
 
-const FX_PANELS = { viewport: ViewportPanel, scene: SceneTab, parameters: ParametersPanel, flipbook: FlipbookPanel, atlas: AtlasPanel, console: ConsoleTab };
+const FX_PANELS = { viewport: ViewportPanel, scene: SceneTab, parameters: ParametersPanel, bake: BakeTab, console: ConsoleTab };

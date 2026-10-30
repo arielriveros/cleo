@@ -46,6 +46,13 @@ fn cs_project(@builtin(global_invocation_id) g: vec3<u32>) {
     let s = sca[i];
     var t = s.y * u.diss.x;
     // Radiative cooling (T^4): the hottest gas cools fastest -- short, sharp flame tips.
-    if (u.real2.w > 0.0 && t > 0.0) { t = max(0.0, t - u.real2.w * t * t * t * t * u.diss.w); }
+    if (u.real2.w > 0.0) {
+        let span = u.real6.z - u.real6.w;
+        if (span > 0.0) {
+            // Nguyen et al. 2002: -c_T ((T - T_air) / (T_max - T_air))^4, scaled to the range.
+            let r = max(0.0, (t - u.real6.w) / span);
+            if (r > 0.0) { t = max(u.real6.w, t - u.real2.w * r * r * r * r * span * u.diss.w); }
+        } else if (t > 0.0) { t = max(0.0, t - u.real2.w * t * t * t * t * u.diss.w); }
+    }
     sca[i] = vec4<f32>(s.x * u.diss.y, t, s.z, s.w * u.real2.z);
 }

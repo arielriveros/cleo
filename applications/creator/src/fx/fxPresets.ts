@@ -2,7 +2,7 @@
 // fxParams.ts: whole stages for the left (Scene) panel, and one "Presets ▾" menu per section on both
 // sides. A section preset writes only its own section's values -- it is merged over what is there.
 
-import { FIRE_GRADIENT, type FxParams } from './fxParams';
+import { DEFAULT_FX, FIRE_GRADIENT, FX_PRESETS, normaliseFx, type FxParams } from './fxParams';
 import { newBody, type FxBody, type FxScene } from './fxScene';
 
 /** What a scene-side preset can touch: the stage, the scene-side effect values (the sun), and bodies. */
@@ -64,6 +64,7 @@ export const WIND_PRESETS: SectionPreset<SceneValues>[] = [
     values: { scene: { wind: true, windStrength: 14, windGustiness: 0.9, windGustScale: 8, windGustSpeed: 10 } } },
 ];
 
+/** Floor and grid looks, for the whole-stage presets (the viewport's eye menu toggles them by hand). */
 export const GROUND_PRESETS: SectionPreset<SceneValues>[] = [
   { id: 'grid', label: 'Grid only', description: 'The editor grid, no floor.', values: { scene: { grid: true, groundPlane: false } } },
   { id: 'plane', label: 'Ground plane', description: 'A matte floor and the grid.', values: { scene: { grid: true, groundPlane: true } } },
@@ -100,7 +101,6 @@ export const SCENE_SECTION_PRESETS: Record<string, SectionPreset<SceneValues>[]>
   'Sun & sky': SUN_PRESETS,
   'Fire light': FIRE_LIGHT_PRESETS,
   Wind: WIND_PRESETS,
-  Ground: GROUND_PRESETS,
   Bodies: BODY_PRESETS,
   Rendering: RENDERING_PRESETS,
 };
@@ -140,6 +140,23 @@ export function applySceneValues(v: SceneValues, scene: FxScene, params: FxParam
     scene: { ...scene, ...(v.scene ?? {}), bodies: bodies ? (replaceBodies ? bodies : [...scene.bodies, ...bodies]) : scene.bodies },
     params: { ...params, ...(v.params ?? {}) },
   };
+}
+
+// --- Effect: whole presets and Reset ----------------------------------------------------------------
+
+/**
+ * Every parameter of effect preset `id` (the defaults when there is none): the seed, the sun's
+ * direction and the Bake tab's settings included. Only the viewport's preview quality is kept from
+ * `current` -- it is how the viewport draws, not part of the effect. Reset applies the same thing again.
+ */
+export function effectPresetParams(id: string | null, current: Pick<FxParams, 'previewQuality'>): FxParams {
+  const preset = id ? FX_PRESETS.find(p => p.id === id) : undefined;
+  return normaliseFx({ ...(preset?.params ?? DEFAULT_FX), previewQuality: current.previewQuality });
+}
+
+/** The name the Parameters header shows for preset `id`. */
+export function effectPresetLabel(id: string | null): string {
+  return (id && FX_PRESETS.find(p => p.id === id)?.label) || 'Defaults';
 }
 
 // --- Effect: sections --------------------------------------------------------------------------------
@@ -197,6 +214,29 @@ export const EFFECT_SECTION_PRESETS: Record<string, SectionPreset<Partial<FxPara
     { id: 'blue', label: 'Blue gas', description: 'A blue-white gas flame.', values: { fireColorMode: 'blackbody', blackbodyMin: 2400, blackbodyMax: 6000, emission: 1.8 } },
     { id: 'white', label: 'Hot white', description: 'White-hot core, yellow edges.', values: { fireColorMode: 'blackbody', blackbodyMin: 1800, blackbodyMax: 4000, emission: 3 } },
     { id: 'stylised', label: 'Stylised', description: 'The hand-made fire gradient.', values: { fireColorMode: 'gradient', fireGradient: FIRE_GRADIENT } },
-    { id: 'steam', label: 'Steam', description: 'White, bright, forward-scattering vapour.', values: { smokeColor: [0.92, 0.93, 0.95, 1], absorption: 0.9, anisotropy: 0.55, scatterOctaves: 3, emission: 0, albedo: 0.97, powder: 0.3 } },
+    { id: 'steam', label: 'Steam', description: 'White, bright, forward-scattering vapour.', values: { smokeColor: [0.92, 0.93, 0.95, 1], absorption: 0.9, anisotropy: 0.55, scatterOctaves: 3, emission: 0, albedo: 0.97, powder: 0.3, absorptionColor: [1, 1, 1, 1] } },
+    { id: 'physical', label: 'Physical fire', description: 'Transparent flames over warm-brown smoke: glow through the soot gaps, a blue base, smooth gas.',
+      values: { fireOpacity: 0.05, absorptionColor: [0.425, 0.36, 0.3, 1], fireSootMask: 1, glowThreshold: 0.3, blueCore: 1, smoothSampling: true, sharpen: 0.25, fireIntensity: 3.2, fireColorMode: 'blackbody' } },
+    { id: 'solid', label: 'Solid flames', description: 'Opaque, grey-smoke, trilinear: the original look.',
+      values: { fireOpacity: 0.6, absorptionColor: [1, 1, 1, 1], fireSootMask: 0, glowThreshold: 0, blueCore: 0, smoothSampling: false, sharpen: 0 } },
+  ],
+  Flipbook: [
+    { id: 'game', label: 'Game-ready', description: '64 frames of 128 px (an 8 × 8 atlas, 1024 px), looping.', values: { frames: 64, tileSize: 128, loopBlend: 12, warmup: 36 } },
+    { id: 'hero', label: 'Hero', description: '64 frames of 256 px (a 2048 px atlas), looping: close-up effects.', values: { frames: 64, tileSize: 256, loopBlend: 12, warmup: 36 } },
+    { id: 'mobile', label: 'Mobile', description: '16 frames of 64 px (a 4 × 4 atlas, 256 px), looping.', values: { frames: 16, tileSize: 64, loopBlend: 4, warmup: 36 } },
+    { id: 'one-shot', label: 'One-shot', description: '48 frames from the very first moment, no loop: explosions and bursts.', values: { frames: 48, loopBlend: 0, warmup: 0 } },
+  ],
+  Outputs: [
+    { id: 'colour', label: 'Colour only', description: 'Just the lit flipbook.', values: { bakeSixWay: false, bakeMotion: false, bakeEmission: false } },
+    { id: 'relightable', label: 'Relightable', description: 'Six-way lightmaps and motion vectors: lit by the game, smoothly blended.', values: { bakeSixWay: true, bakeMotion: true, bakeEmission: false } },
+    { id: 'everything', label: 'Everything', description: 'Six-way, motion vectors and a separate emission atlas.', values: { bakeSixWay: true, bakeMotion: true, bakeEmission: true } },
   ],
 };
+
+/** Whole-tab presets for the Bake tab: Flipbook and Outputs together. */
+export const BAKE_PRESETS: SectionPreset<Partial<FxParams>>[] = [
+  { id: 'game', label: 'Game-ready', description: '8 × 8 frames of 128 px, looping, with motion vectors.', values: { frames: 64, tileSize: 128, loopBlend: 12, warmup: 36, bakeSixWay: false, bakeMotion: true, bakeEmission: false } },
+  { id: 'hero', label: 'Hero', description: '8 × 8 frames of 256 px, looping, relightable (six-way) with motion vectors.', values: { frames: 64, tileSize: 256, loopBlend: 12, warmup: 36, bakeSixWay: true, bakeMotion: true, bakeEmission: false } },
+  { id: 'mobile', label: 'Mobile', description: '4 × 4 frames of 64 px, looping, colour only.', values: { frames: 16, tileSize: 64, loopBlend: 4, warmup: 36, bakeSixWay: false, bakeMotion: false, bakeEmission: false } },
+  { id: 'explosion', label: 'Explosion one-shot', description: '48 frames of 256 px from ignition, no loop, with a separate emission atlas.', values: { frames: 48, tileSize: 256, loopBlend: 0, warmup: 0, bakeSixWay: false, bakeMotion: true, bakeEmission: true } },
+];

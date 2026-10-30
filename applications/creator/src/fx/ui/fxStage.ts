@@ -24,6 +24,8 @@ const shapeKey = (b: FxBody) => `${b.kind}:${b.size.map(v => v.toFixed(3)).join(
 export class FxStage {
   private bodies = new Map<string, BodyEntry>();
   private ground: ModelNode | null = null;
+  /** The simulation region's wireframe box. */
+  private region: ModelNode | null = null;
   private wind: WindNode | null = null;
   private sky: SkyAtmosphereNode | null = null;
   private skyLight: SkyLightNode | null = null;
@@ -135,7 +137,7 @@ export class FxStage {
         this.bodies.set(b.id, entry);
       }
       entry.body = b;
-      entry.node.visible = b.visible;
+      entry.node.visible = b.visible && scene.showBodies !== false;
       // A static body follows its node, so moving the node moves the collider too.
       entry.node.setPosition([...b.position]).setRotation([b.pitch, b.yaw, 0]);
     }
@@ -152,6 +154,20 @@ export class FxStage {
       this.world.addNode(this.emitter);
     }
     this.emitter.setPosition(position).setScale([radius, radius, radius]);
+  }
+
+  /** Draw the region's wireframe box (`origin` its min corner, `size` its extent, metres), or hide it. */
+  showRegion(origin: [number, number, number] | null, size: [number, number, number]): void {
+    if (!origin) {
+      if (this.region) { this.world.removeNode(this.region); this.region = null; }
+      return;
+    }
+    if (!this.region) {
+      const model = new Model(Geometry.Cube(1, 1, 1, true), Material.Basic({ color: [0.3, 0.9, 0.9] }, { wireframe: true, castShadow: false }));
+      this.region = new ModelNode(PREFIX + 'region', model);
+      this.world.addNode(this.region);
+    }
+    this.region.setPosition([origin[0] + size[0] / 2, origin[1] + size[1] / 2, origin[2] + size[2] / 2]).setScale([...size]);
   }
 
   /**
@@ -204,8 +220,8 @@ export class FxStage {
     const world = this.world;
     for (const entry of this.bodies.values()) world.removeNode(entry.node);
     this.bodies.clear();
-    for (const n of [this.ground, this.wind, this.sky, this.skyLight, this.fire, this.emitter, this.shadow]) if (n) world.removeNode(n);
-    this.ground = this.wind = this.sky = this.skyLight = this.fire = this.emitter = this.shadow = null;
+    for (const n of [this.ground, this.region, this.wind, this.sky, this.skyLight, this.fire, this.emitter, this.shadow]) if (n) world.removeNode(n);
+    this.ground = this.region = this.wind = this.sky = this.skyLight = this.fire = this.emitter = this.shadow = null;
     if (this.shadowTextureId) { TextureManager.Instance.removeTexture(this.shadowTextureId); this.shadowTextureId = null; }
     const s = this.saved;
     const light = this.sun?.light as DirectionalLight | undefined;

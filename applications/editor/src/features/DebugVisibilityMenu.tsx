@@ -1,15 +1,7 @@
-import { Popover, SectionTitle, Toggle } from '@cleo/app-kit/ui';
+import { EyeIcon, EYE_TRIGGER_CLASS, Popover, SectionTitle, Toggle } from '@cleo/app-kit/ui';
 import { useDebugVisibility, DEBUG_CATEGORIES } from './DebugVisibilityContext';
 import { useCleoEngine } from './EngineContext';
 import { MODE_SKELETON_OWNER } from './engineContextTypes';
-
-// Eye glyph matching the inline-SVG style of the viewport's gizmo icons (stroke currentColor).
-const EyeIcon = () => (
-    <svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round'>
-        <path d='M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z' />
-        <circle cx='12' cy='12' r='3' />
-    </svg>
-);
 
 /**
  * Expandable viewport menu (next to the 2D/3D switch) for toggling debug overlays. Each row is one
@@ -29,7 +21,7 @@ export default function DebugVisibilityMenu() {
         <Popover
             align='right'
             title='Debug overlays'
-            triggerClassName='flex items-center justify-center w-[26px] h-[25px] rounded border border-control-hover bg-surface-raised/80 hover:bg-surface-raised text-fg cursor-pointer'
+            triggerClassName={EYE_TRIGGER_CLASS}
             trigger={<EyeIcon />}
             className='min-w-[220px]'
         >

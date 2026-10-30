@@ -92,7 +92,6 @@ export function ScenePanel({ scene, setScene, params, setParams, selection, sele
       {section('Sun & sky', FX_SCENE_SPECS['Sun & sky'], stage('Sun & sky'))}
       {section('Fire light', undefined, stage('Fire light'))}
       {section('Wind', undefined, stage('Wind'))}
-      {section('Ground', undefined, stage('Ground'))}
       {section('Bodies', undefined, undefined, <>
         <div className='flex flex-wrap gap-1 py-1'>
           {BODY_KINDS.map(k => (

@@ -45,8 +45,23 @@ export class FluidVolumeNode extends Node {
     /** Temperature span above `ignition` that the fire colour covers. */
     public emissionRange = 1.2;
     public ignition = 0.25;
-    /** Fire's own opacity per unit emission per voxel; fire hides what is behind it a little. */
+    /**
+     * How much the fire hides what is behind it, per unit emission per voxel. Real flames are nearly
+     * transparent (about 0.05): only soot absorbs. Changes cover, never brightness.
+     */
     public fireOpacity = 0.6;
+    /** Per-channel extinction scale (mean 1): below white, thin smoke tints what is behind it warm. */
+    public absorptionScale: [number, number, number] = [1, 1, 1];
+    /** Fire inside dense smoke dimmed by it, so glow shows through the gaps. 0 is off. */
+    public sootMask = 0;
+    /** Blue reaction-zone emission at the bottom of the emission range. 0 is off. */
+    public blueCore = 0;
+    /** The blue core's colour, linear RGB. */
+    public blueCoreColor: [number, number, number] = [0.073, 0.17, 1];
+    /** Density contrast: thinner below half a unit, denser above. 0 is off. */
+    public sharpen = 0;
+    /** Tricubic B-spline sampling of the volume: smooth, unblocky gas at 8x the texture fetches. */
+    public smoothSampling = false;
     /** Fraction of the sun that reaches fully shadowed smoke (the sky's share). */
     public ambient = 0.35;
     /** Henyey-Greenstein anisotropy, -0.9..0.9: > 0 scatters forward (bright rims against the sun). */

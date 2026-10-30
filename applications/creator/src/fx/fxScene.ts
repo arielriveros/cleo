@@ -52,9 +52,15 @@ export interface FxScene {
   windGustSpeed: number;
   /** 0..1: how much of the wind comes and goes with the gusts. */
   windGustiness: number;
-  // --- Ground ---
+  // --- Viewport visibility (the viewport's eye menu; VIEW_KEYS) ---
   grid: boolean;
   groundPlane: boolean;
+  /** The simulation region's wireframe box, drawn whenever the region is not selected. */
+  showRegion: boolean;
+  /** The emitter marker, drawn always rather than only while the emitter is selected. */
+  showEmitter: boolean;
+  /** The placed bodies' models. Hidden bodies still shape the flow. */
+  showBodies: boolean;
   // --- Region ---
   /** Where the simulation region stands in the stage, metres: the centre of its floor. Preview only. */
   regionOffset: [number, number, number];
@@ -74,13 +80,16 @@ export const DEFAULT_SCENE: FxScene = {
   ambientLux: 8000, sky: false, autoExposure: true, ev100: 13,
   fireLight: true, fireLightLumens: 6000, fireLightFlicker: 0.35,
   wind: false, windDirection: 0, windStrength: 1.5, windGustScale: 3, windGustSpeed: 2, windGustiness: 0.5,
-  grid: true, groundPlane: true,
+  grid: true, groundPlane: true, showRegion: true, showEmitter: false, showBodies: true,
   temporal: true,
   effectShadow: true,
   effectShadowStrength: 0.85,
   regionOffset: [0, 0, 0],
   bodies: [],
 };
+
+/** What the viewport's eye menu shows and hides, rather than the Scene panel. */
+export const VIEW_KEYS = ['grid', 'groundPlane', 'sky', 'effectShadow', 'showRegion', 'showEmitter', 'showBodies'] as const;
 
 const STORAGE_KEY = 'cleo_creator_fx_scene_v1';
 
@@ -146,7 +155,6 @@ export const SCENE_SCHEMA: readonly { title: string; specs: GenericParamSpec[] }
       { key: 'sunLux', label: 'Sun illuminance', kind: 'float', min: 0, max: 120000, step: 500, unit: 'lx' },
       { key: 'sunKelvin', label: 'Sun temperature', kind: 'float', min: 1500, max: 12000, step: 50, unit: 'K' },
       { key: 'ambientLux', label: 'Ambient light', kind: 'float', min: 0, max: 40000, step: 100, unit: 'lx' },
-      { key: 'sky', label: 'Physical sky', kind: 'bool' },
       { key: 'autoExposure', label: 'Auto exposure', kind: 'bool' },
       { key: 'ev100', label: 'Exposure', kind: 'float', min: -2, max: 18, step: 0.1, unit: 'EV', when: s => !s.autoExposure },
     ],
@@ -169,15 +177,8 @@ export const SCENE_SCHEMA: readonly { title: string; specs: GenericParamSpec[] }
     ],
   },
   {
-    title: 'Ground', specs: [
-      { key: 'grid', label: 'Grid', kind: 'bool' },
-      { key: 'groundPlane', label: 'Ground plane', kind: 'bool' },
-    ],
-  },
-  {
     title: 'Rendering', specs: [
       { key: 'temporal', label: 'Temporal accumulation', kind: 'bool' },
-      { key: 'effectShadow', label: 'Ground shadow', kind: 'bool' },
       { key: 'effectShadowStrength', label: 'Shadow strength', kind: 'float', min: 0, max: 1, step: 0.01, when: s => !!s.effectShadow },
     ],
   },

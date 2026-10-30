@@ -40,6 +40,8 @@ export { Popover } from './Popover';
 export type { PopoverProps } from './Popover';
 
 export { PresetMenu } from './PresetMenu';
+export { VisibilityMenu, EyeIcon, EYE_TRIGGER_CLASS } from './VisibilityMenu';
+export type { VisibilityMenuProps, VisibilityItem } from './VisibilityMenu';
 export type { PresetMenuProps, PresetMenuEntry } from './PresetMenu';
 
 export { ComboSelect } from './ComboSelect';

@@ -49,6 +49,10 @@ export interface FxParams {
   turbulence: number;
   /** Noise features across the domain. */
   turbulenceScale: number;
+  /** 0..1: turbulence also stirs cooled smoke, not only hot gas. */
+  turbulenceOnSmoke: number;
+  /** A second, finer turbulence octave (strength relative to the first). */
+  turbulenceDetail: number;
   /** Seconds the emitter runs from the start of the simulation; 0 runs it throughout (a burst vs a flame). */
   emitDuration: number;
   /** 0..1: per-voxel, time-varying jitter of the emitted fuel, heat and speed (flicker, a ragged source). */
@@ -63,6 +67,10 @@ export interface FxParams {
   smokeYield: number;
   /** Gas expansion per unit of fuel burned: burning pushes outward, so a fireball blooms. */
   expansion: number;
+  /** Nguyen et al. 2002: burning heats gas TOWARD this temperature instead of without limit. 0 is off. */
+  maxTemperature: number;
+  /** The surrounding air's temperature: buoyancy and radiative cooling are measured from it. */
+  ambientTemperature: number;
   /** 0..1: how much fire is the thin burning sheet (the flame field) rather than all hot gas. */
   flameShape: number;
   /** Seconds the flame field lasts after the fuel at a point stops burning. */
@@ -125,6 +133,14 @@ export interface FxParams {
   yaw: number;
   /** Frames at the end cross-faded into the start so the cycle loops; 0 for no loop. */
   loopBlend: number;
+  /** Also bake six-way lightmaps: the smoke lit from right, top, back, left, bottom and front. */
+  bakeSixWay: boolean;
+  /** Also bake motion vectors, for flipbook frame blending that morphs instead of cross-fading. */
+  bakeMotion: boolean;
+  /** Also bake the fire's emission alone, for additive particles. */
+  bakeEmission: boolean;
+  /** Motion-vector encoding: tile widths per frame at full scale (R/G = 0.5 + motion x scale). */
+  motionScale: number;
   // --- Look ---
   smokeColor: [number, number, number, number];
   /** Extinction per unit smoke density per voxel. */
@@ -160,6 +176,21 @@ export interface FxParams {
   skyOcclusion: number;
   /** Fire brightness relative to the smoke: above 1 drives bloom in the viewport. */
   fireIntensity: number;
+  /** How much the fire hides what is behind it. Real flames are nearly transparent (about 0.05). */
+  fireOpacity: number;
+  /** A thin blue emission at the reaction zone where fuel first ignites (Nguyen et al. 2002). */
+  blueCore: number;
+  blueCoreColor: [number, number, number, number];
+  /** Per-channel smoke extinction tint: below white, thin smoke turns warm brown, thick smoke dark. */
+  absorptionColor: [number, number, number, number];
+  /** Fire seen through smoke is dimmed by it: glow shows through the gaps. */
+  fireSootMask: number;
+  /** 0..1 of the emission range: only fire hotter than this lights the smoke around it. */
+  glowThreshold: number;
+  /** Tricubic (B-spline) sampling of the voxels: smooth, unblocky gas. */
+  smoothSampling: boolean;
+  /** Density contrast: denser cores, crisper edges. */
+  sharpen: number;
   seed: number;
   // --- Preview ---
   previewQuality: FxPreviewQuality;
@@ -178,8 +209,8 @@ export const FIRE_GRADIENT: Gradient = {
 export const DEFAULT_FX: FxParams = {
   regionSize: [4.8, 7.2, 4.8], voxelSize: 0.1, emitterX: 0.5, emitterZ: 0.5,
   emitterShape: 'sphere', emitterRadius: 0.12, emitterHeight: 0.1,
-  fuel: 1.2, heat: 1.2, smoke: 0.2, emitSpeed: 6, turbulence: 8, turbulenceScale: 4, emitDuration: 0, emitterNoise: 0,
-  ignition: 0.25, burnRate: 1.6, heatRelease: 1.4, smokeYield: 0.6, expansion: 0, flameShape: 0, flameLifetime: 0.25, flicker: 0, blast: 0,
+  fuel: 1.2, heat: 1.2, smoke: 0.2, emitSpeed: 6, turbulence: 8, turbulenceScale: 4, emitDuration: 0, emitterNoise: 0, turbulenceOnSmoke: 0, turbulenceDetail: 0,
+  ignition: 0.25, burnRate: 1.6, heatRelease: 1.4, smokeYield: 0.6, expansion: 0, maxTemperature: 0, ambientTemperature: 0, flameShape: 0, flameLifetime: 0.25, flicker: 0, blast: 0,
   buoyancy: 14, weight: 1.5, vorticity: 0.35, wind: 0,
   disturbance: 0, disturbanceScale: 0.3, disturbanceInterval: 0.25, shredding: 0, settling: 0, groundDrag: 0,
   cooling: 1.1, smokeDissipation: 0.25, velocityDamping: 0.05, coolingT4: 0, diffusion: 0, condensation: 0, dewPoint: 0.35,
@@ -190,6 +221,9 @@ export const DEFAULT_FX: FxParams = {
   lightYaw: 35, lightElevation: 50, ambient: 0.35,
   anisotropy: 0, scatterOctaves: 1, fireGlow: 0, detailStrength: 0, detailScale: 6,
   albedo: 1, powder: 0, skyOcclusion: 0, fireIntensity: 1,
+  fireOpacity: 0.6, blueCore: 0, blueCoreColor: [0.3, 0.45, 1, 1], absorptionColor: [1, 1, 1, 1], fireSootMask: 0, glowThreshold: 0,
+  smoothSampling: false, sharpen: 0,
+  bakeSixWay: false, bakeMotion: false, bakeEmission: false, motionScale: 4,
   seed: 1,
   previewQuality: 'medium',
 };
@@ -199,7 +233,7 @@ const views = [
 ];
 
 /** Grouped so the panel can show one section per group. */
-export const FX_SCHEMA: readonly { title: string; specs: GenericParamSpec[] }[] = [
+export const FX_SCHEMA: readonly { title: string; specs: GenericParamSpec[]; side?: 'bake' }[] = [
   {
     title: 'Domain', specs: [
       { key: 'voxelSize', label: 'Voxel size', kind: 'float', min: 0.02, max: 0.5, step: 0.005, unit: 'm' },
@@ -218,6 +252,8 @@ export const FX_SCHEMA: readonly { title: string; specs: GenericParamSpec[] }[] 
       { key: 'emitSpeed', label: 'Speed', kind: 'float', min: 0, max: 40, step: 0.5, unit: 'vox/s' },
       { key: 'turbulence', label: 'Turbulence', kind: 'float', min: 0, max: 40, step: 0.5 },
       { key: 'turbulenceScale', label: 'Turbulence scale', kind: 'float', min: 0.5, max: 16, step: 0.25 },
+      { key: 'turbulenceOnSmoke', label: 'Turbulence on smoke', kind: 'float', min: 0, max: 1, step: 0.01 },
+      { key: 'turbulenceDetail', label: 'Turbulence detail', kind: 'float', min: 0, max: 2, step: 0.01 },
       { key: 'emitDuration', label: 'Duration', kind: 'float', min: 0, max: 10, step: 0.05, unit: 's', hint: 'How long the emitter runs. 0 keeps it on (a flame); a short burst makes an explosion.' },
       { key: 'emitterNoise', label: 'Noise', kind: 'float', min: 0, max: 1, step: 0.01 },
     ],
@@ -229,6 +265,8 @@ export const FX_SCHEMA: readonly { title: string; specs: GenericParamSpec[] }[] 
       { key: 'heatRelease', label: 'Heat release', kind: 'float', min: 0, max: 6, step: 0.05 },
       { key: 'smokeYield', label: 'Smoke yield', kind: 'float', min: 0, max: 4, step: 0.05 },
       { key: 'expansion', label: 'Expansion', kind: 'float', min: 0, max: 20, step: 0.1 },
+      { key: 'maxTemperature', label: 'Max temperature', kind: 'float', min: 0, max: 6, step: 0.05 },
+      { key: 'ambientTemperature', label: 'Ambient temperature', kind: 'float', min: 0, max: 1, step: 0.01 },
       { key: 'flameShape', label: 'Flame shape', kind: 'float', min: 0, max: 1, step: 0.01 },
       { key: 'flameLifetime', label: 'Flame lifetime', kind: 'float', min: 0.02, max: 2, step: 0.01, unit: 's', when: p => Number(p.flameShape) > 0 },
       { key: 'flicker', label: 'Flicker', kind: 'float', min: 0, max: 12, step: 0.1, unit: 'Hz' },
@@ -268,17 +306,25 @@ export const FX_SCHEMA: readonly { title: string; specs: GenericParamSpec[] }[] 
       { key: 'pressureSolver', label: 'Pressure solver', kind: 'enum', options: [{ value: 'jacobi', label: 'Jacobi' }, { value: 'sor', label: 'Red-black SOR' }] },
       { key: 'boundaries', label: 'Boundaries', kind: 'enum', options: [{ value: 'closed', label: 'Closed walls' }, { value: 'open', label: 'Open air' }] },
       { key: 'advection', label: 'Advection', kind: 'enum', options: [{ value: 'semi-lagrangian', label: 'Semi-Lagrangian' }, { value: 'maccormack', label: 'MacCormack (sharper)' }] },
-      { key: 'warmup', label: 'Warm-up frames', kind: 'int', min: 0, max: 240 },
       { key: 'seed', label: 'Seed', kind: 'int', min: 0 },
     ],
   },
   {
-    title: 'Flipbook', specs: [
+    title: 'Flipbook', side: 'bake', specs: [
+      { key: 'warmup', label: 'Warm-up frames', kind: 'int', min: 0, max: 240 },
       { key: 'frames', label: 'Frames', kind: 'int', min: 1, max: 256 },
       { key: 'tileSize', label: 'Tile size', kind: 'enum', options: ['64', '128', '256', '512'].map(v => ({ value: v, label: `${v} px` })) },
       { key: 'view', label: 'View', kind: 'enum', options: views },
       { key: 'yaw', label: 'Yaw', kind: 'float', min: -180, max: 180, step: 1, unit: '°', when: p => p.view === 'angle' },
       { key: 'loopBlend', label: 'Loop blend', kind: 'int', min: 0, max: 64, hint: 'Frames cross-faded into the start so the flipbook loops seamlessly. 0 plays once.' },
+    ],
+  },
+  {
+    title: 'Outputs', side: 'bake', specs: [
+      { key: 'bakeSixWay', label: 'Six-way lightmaps', kind: 'bool' },
+      { key: 'bakeMotion', label: 'Motion vectors', kind: 'bool' },
+      { key: 'motionScale', label: 'Motion scale', kind: 'float', min: 0.5, max: 32, step: 0.5, when: p => !!p.bakeMotion },
+      { key: 'bakeEmission', label: 'Emission only', kind: 'bool' },
     ],
   },
   {
@@ -295,8 +341,16 @@ export const FX_SCHEMA: readonly { title: string; specs: GenericParamSpec[] }[] 
       { key: 'anisotropy', label: 'Anisotropy', kind: 'float', min: -0.9, max: 0.9, step: 0.01 },
       { key: 'scatterOctaves', label: 'Scattering octaves', kind: 'int', min: 1, max: 3 },
       { key: 'fireGlow', label: 'Fire glow', kind: 'float', min: 0, max: 4, step: 0.05 },
-      { key: 'fireIntensity', label: 'Fire intensity', kind: 'float', min: 0.2, max: 12, step: 0.1 },
+      { key: 'fireIntensity', label: 'Fire intensity', kind: 'float', min: 0.2, max: 32, step: 0.1 },
+      { key: 'fireOpacity', label: 'Flame opacity', kind: 'float', min: 0, max: 1, step: 0.01 },
+      { key: 'blueCore', label: 'Blue core', kind: 'float', min: 0, max: 4, step: 0.05 },
+      { key: 'blueCoreColor', label: 'Blue core colour', kind: 'color', when: p => Number(p.blueCore) > 0 },
+      { key: 'fireSootMask', label: 'Soot mask', kind: 'float', min: 0, max: 4, step: 0.05 },
+      { key: 'glowThreshold', label: 'Glow threshold', kind: 'float', min: 0, max: 0.95, step: 0.01, when: p => Number(p.fireGlow) > 0 },
       { key: 'albedo', label: 'Albedo', kind: 'float', min: 0, max: 1, step: 0.01 },
+      { key: 'absorptionColor', label: 'Absorption colour', kind: 'color' },
+      { key: 'smoothSampling', label: 'Smooth sampling', kind: 'bool' },
+      { key: 'sharpen', label: 'Sharpen', kind: 'float', min: 0, max: 2, step: 0.01 },
       { key: 'powder', label: 'Powder', kind: 'float', min: 0, max: 1, step: 0.01 },
       { key: 'skyOcclusion', label: 'Sky occlusion', kind: 'float', min: 0, max: 1, step: 0.01 },
       { key: 'detailStrength', label: 'Detail', kind: 'float', min: 0, max: 1, step: 0.01 },
@@ -526,13 +580,20 @@ for (const preset of FX_PRESETS) (preset as Preset<FxParams>).description ??= PR
  * settling and ground drag for dust; diffusion, albedo, powder and sky occlusion for every smoke. The
  * plain Campfire stays the solver's reference (the determinism tests run it).
  */
+// From the research pass (docs/creator/fx.md, References): flames nearly transparent (only soot hides
+// what is behind them) and brighter than the smoke; chromatic, warm smoke extinction (Pyro's suggested
+// absorption colour); fire dimmed inside dense soot; glow only from the hot core; smooth tricubic
+// sampling with a little contrast; turbulence on the smoke as well as the hot gas, with a finer octave.
 const FIRE_REALISM: Partial<FxParams> = {
   boundaries: 'open', flameShape: 0.85, flameLifetime: 0.18, coolingT4: 0.12, disturbance: 10, disturbanceScale: 0.25,
-  disturbanceInterval: 0.2, shredding: 0.8, diffusion: 0.01, albedo: 0.7, powder: 0.5, skyOcclusion: 0.6, fireIntensity: 2.5,
+  disturbanceInterval: 0.2, shredding: 0.8, diffusion: 0.01, albedo: 0.7, powder: 0.5, skyOcclusion: 0.6, fireIntensity: 3.2,
+  fireOpacity: 0.05, absorptionColor: [0.425, 0.36, 0.3, 1], fireSootMask: 1, glowThreshold: 0.3, blueCore: 1,
+  smoothSampling: true, sharpen: 0.25, turbulenceOnSmoke: 0.5, turbulenceDetail: 0.5,
 };
 const SMOKE_REALISM: Partial<FxParams> = {
   boundaries: 'open', disturbance: 6, disturbanceScale: 0.4, disturbanceInterval: 0.35, shredding: 0.3, diffusion: 0.02,
   powder: 0.6, skyOcclusion: 0.7, detailStrength: 0.45, detailScale: 7,
+  absorptionColor: [0.6, 0.55, 0.5, 1], smoothSampling: true, sharpen: 0.2, turbulenceOnSmoke: 0.8, turbulenceDetail: 0.6,
 };
 const REALISM: Record<string, Partial<FxParams>> = {
   'campfire-hq': { ...FIRE_REALISM, flicker: 1.5, albedo: 0.55 },
@@ -545,12 +606,21 @@ const REALISM: Record<string, Partial<FxParams>> = {
   'magic-fire': { ...FIRE_REALISM, fireIntensity: 3 },
   'smoke-plume': { ...SMOKE_REALISM, albedo: 0.85 },
   chimney: { ...SMOKE_REALISM, albedo: 0.4, disturbance: 8 },
-  steam: { ...SMOKE_REALISM, condensation: 8, dewPoint: 0.55, albedo: 0.97, powder: 0.3, skyOcclusion: 0.3, heat: 1.4, smokeDissipation: 0.2 },
+  steam: { ...SMOKE_REALISM, condensation: 8, dewPoint: 0.55, albedo: 0.97, powder: 0.3, skyOcclusion: 0.3, heat: 1.4, smokeDissipation: 0.2, absorptionColor: [1, 1, 1, 1] },
   explosion: { ...FIRE_REALISM, blast: 25, flameShape: 0.6, flameLifetime: 0.3, albedo: 0.4, fireIntensity: 3.5 },
   fireball: { ...FIRE_REALISM, blast: 12, flameShape: 0.6, flameLifetime: 0.35, albedo: 0.45, fireIntensity: 3.5 },
   'big-explosion': { ...FIRE_REALISM, blast: 40, flameShape: 0.55, flameLifetime: 0.35, albedo: 0.3, disturbance: 20, disturbanceScale: 0.8, fireIntensity: 4 },
   'muzzle-flash': { ...FIRE_REALISM, blast: 20, flameShape: 0.7, flameLifetime: 0.05, coolingT4: 0.6, fireIntensity: 5 },
   dust: { ...SMOKE_REALISM, settling: 0.35, groundDrag: 3, albedo: 0.8, anisotropy: 0.4, scatterOctaves: 2 },
 };
-for (const preset of FX_PRESETS) Object.assign(preset.params as FxParams, REALISM[preset.id] ?? {});
+for (const preset of FX_PRESETS) {
+  const p = Object.assign(preset.params as FxParams, REALISM[preset.id] ?? {});
+  // Nguyen et al. 2002: burning heats toward a maximum temperature -- set just above the top of the
+  // fire's colour range, so the core reaches white-hot and no further -- and the radiative T^4 term is
+  // measured over that range, so it is scaled to keep the same strength.
+  if (REALISM[preset.id] && p.fuel > 0 && p.emission > 0) {
+    p.maxTemperature = Math.round((p.ignition + p.emissionRange * 1.15) * 100) / 100;
+    p.coolingT4 = Math.round((p.coolingT4 ?? 0) * 3 * 1000) / 1000;
+  }
+}
 

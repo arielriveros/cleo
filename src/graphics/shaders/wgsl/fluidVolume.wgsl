@@ -11,6 +11,9 @@
 //   - fire emission coloured by temperature (G) through the fire LUT, and the fire's own light on the
 //     smoke around it (A);
 //   - procedural detail noise eroding the density below the grid's resolution;
+//   - optionally tricubic B-spline sampling (Sigg & Hadwiger: 8 trilinear taps) for unblocky gas,
+//     chromatic smoke extinction (per-channel transmittance; alpha is its mean), soot-masked fire and
+//     the blue reaction-zone core;
 //   - two volumes (the previous and current simulation frame) blended, so playback is smooth between
 //     simulation frames;
 //   - an occupancy grid of 8^3 bricks: empty bricks are crossed in one jump.
@@ -27,7 +30,7 @@ const BRICK: f32 = 8.0;
 
 @group(0) @binding(0) var u_sceneDepth_texture: texture_depth_2d;   // opaque depth snapshot
 @group(0) @binding(1) var u_sceneDepth_sampler: sampler;
-@group(0) @binding(2) var u_volume_texture: texture_3d<f32>;        // R density, G temperature, B light, A fire glow
+@group(0) @binding(2) var u_volume_texture: texture_3d<f32>;        // R density, G temperature, B light, A fire glow (< 0: blue core)
 @group(0) @binding(3) var u_volume_sampler: sampler;
 @group(0) @binding(4) var u_fireLut_texture: texture_2d<f32>;       // 256 x 1 fire colour
 @group(0) @binding(5) var u_fireLut_sampler: sampler;
@@ -58,6 +61,8 @@ struct FluidVolumeUniforms {
     u_sunColor: vec3<f32>,           // the key light's illuminance, linear RGB
     u_sunAmbient: vec3<f32>,         // the scene's ambient irradiance, linear RGB
     u_sunDir: vec3<f32>,             // unit vector toward the key light, in the BOX's frame
+    u_absorptionScale: vec3<f32>,    // per-channel extinction scale (mean 1; white smoke is 1, 1, 1)
+    u_blueCoreColor: vec3<f32>,      // linear
     u_viewPos: vec3<f32>,
     u_bricks: vec3<f32>,             // occupancy grid size, bricks
     u_targetSize: vec2<f32>,         // the trace target, pixels
@@ -81,6 +86,10 @@ struct FluidVolumeUniforms {
     u_skyOcclusion: f32,
     u_fireIntensity: f32,
     u_detailBlend: f32,              // set A's share of the advected-detail cross-fade
+    u_sootMask: f32,                 // fire inside dense smoke dimmed by it
+    u_blueCore: f32,                 // blue reaction-zone emission strength
+    u_sharpen: f32,                  // density contrast
+    u_smoothSampling: i32,           // tricubic B-spline sampling
     u_scatterOctaves: i32,
     u_hasDetail: i32,
     u_jitterSlot: i32,
@@ -156,6 +165,36 @@ fn sample_volume(uvw: vec3<f32>) -> vec4<f32> {
     return mix(prev, cur, u_volume.u_blend);
 }
 
+/** Two tap positions (voxel-index space) and their weights along one axis of a cubic B-spline. */
+fn bspline_axis(x: f32) -> vec4<f32> {
+    let i = floor(x); let f = x - i;
+    let f2 = f * f; let f3 = f2 * f;
+    let w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+    let w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+    let w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+    let w3 = f3 / 6.0;
+    let g0 = w0 + w1; let g1 = w2 + w3;
+    return vec4<f32>(i - 1.0 + w1 / g0, i + 1.0 + w3 / g1, g0, g1);
+}
+
+/** Tricubic B-spline sampling from 8 trilinear taps (Sigg & Hadwiger, GPU Gems 2 ch. 20). */
+fn sample_smooth(uvw: vec3<f32>) -> vec4<f32> {
+    let n = u_volume.u_voxels;
+    let x = uvw * n - vec3<f32>(0.5);
+    let ax = bspline_axis(x.x); let ay = bspline_axis(x.y); let az = bspline_axis(x.z);
+    var acc = vec4<f32>(0.0);
+    for (var k = 0; k < 8; k = k + 1) {
+        let sx = (k & 1) != 0; let sy = (k & 2) != 0; let sz = (k & 4) != 0;
+        let q = vec3<f32>(select(ax.x, ax.y, sx), select(ay.x, ay.y, sy), select(az.x, az.y, sz));
+        let w = select(ax.z, ax.w, sx) * select(ay.z, ay.w, sy) * select(az.z, az.w, sz);
+        acc = acc + w * sample_volume((q + vec3<f32>(0.5)) / n);
+    }
+    return acc;
+}
+
+/** The fire's brightness per unit emission per voxel, whatever its opacity (Creator realism.ts `FIRE_EMIT`). */
+const FIRE_EMIT: f32 = 0.6;
+
 /** True when the brick around `uvw` holds nothing. */
 fn brick_empty(uvw: vec3<f32>) -> bool {
     if (u_volume.u_hasOccupancy == 0) { return false; }
@@ -208,11 +247,12 @@ fn fs_main(in: VertexOutput) -> TraceOutput {
     }
     let detail_s = u_volume.u_detailScale / 10.0;
 
-    var T = 1.0;
+    let kx = u_volume.u_absorptionScale;
+    var T = vec3<f32>(1.0);
     var col = vec3<f32>(0.0);
     var depthSum = 0.0;
     for (var i: i32 = 0; i < MAX_STEPS; i = i + 1) {
-        if (t >= t1 || T <= 0.003) { break; }
+        if (t >= t1 || max(max(T.x, T.y), T.z) <= 0.003) { break; }
         let uvw = lo + ld * t + vec3<f32>(0.5);
         // Empty-space skipping: jump to where the ray leaves this brick.
         if (brick_empty(uvw)) {
@@ -225,7 +265,8 @@ fn fs_main(in: VertexOutput) -> TraceOutput {
             t = t + max(ceil((exitT - t) / dt), 1.0) * dt;
             continue;
         }
-        var s = sample_volume(uvw);
+        var s: vec4<f32>;
+        if (u_volume.u_smoothSampling != 0) { s = sample_smooth(uvw); } else { s = sample_volume(uvw); }
         if (u_volume.u_detailStrength > 0.0) {
             var n = 0.0;
             if (u_volume.u_hasDetail != 0) {
@@ -239,14 +280,22 @@ fn fs_main(in: VertexOutput) -> TraceOutput {
             }
             s.r = s.r * max(0.0, 1.0 - u_volume.u_detailStrength * n);
         }
+        // Density contrast: thinner below half a unit, denser above.
+        if (u_volume.u_sharpen > 0.0 && s.r > 0.0) { s.r = s.r * min(4.0, pow(s.r / 0.5, u_volume.u_sharpen)); }
         let e = clamp((s.g - u_volume.u_ignition) / max(u_volume.u_emissionRange, 1e-4), 0.0, 1.0);
         if (s.r > 1e-4 || e > 0.0) {
-            let aSmoke = 1.0 - exp(-max(s.r, 0.0) * u_volume.u_absorption * stepVox);
+            let aSmoke = vec3<f32>(1.0) - exp(-max(s.r, 0.0) * u_volume.u_absorption * stepVox * kx);
+            // The fire hides what is behind it by its opacity, and gives light by FIRE_EMIT, independently.
             var aFire = 0.0;
-            if (e > 0.0) { aFire = 1.0 - exp(-e * u_volume.u_emission * u_volume.u_fireOpacity * stepVox); }
-            let tl = clamp(s.b, 0.0, 1.0);
-            var sunShare = tl;
-            if (!plain) { sunShare = sun_scatter(tl, cos_theta); }
+            var aEmit = 0.0;
+            if (e > 0.0) {
+                aFire = 1.0 - exp(-e * u_volume.u_emission * u_volume.u_fireOpacity * stepVox);
+                aEmit = 1.0 - exp(-e * u_volume.u_emission * FIRE_EMIT * stepVox);
+            }
+            // The sunlight reaching here crossed the smoke toward the sun: tinted by it too.
+            let tl = max(clamp(s.b, 0.0, 1.0), 1e-6);
+            var sunShare = vec3<f32>(pow(tl, kx.x), pow(tl, kx.y), pow(tl, kx.z));
+            if (!plain) { sunShare = vec3<f32>(sun_scatter(sunShare.x, cos_theta), sun_scatter(sunShare.y, cos_theta), sun_scatter(sunShare.z, cos_theta)); }
             // Beer-Powder: thin sunlit edges of dense smoke read darker than Beer's law alone.
             if (u_volume.u_powder > 0.0) {
                 sunShare = sunShare * (1.0 - u_volume.u_powder + u_volume.u_powder * (1.0 - exp(-2.0 * max(s.r, 0.0) * u_volume.u_absorption)));
@@ -265,15 +314,27 @@ fn fs_main(in: VertexOutput) -> TraceOutput {
             if (u_volume.u_hasLut != 0) {
                 fire = textureSampleLevel(u_fireLut_texture, u_fireLut_sampler, vec2<f32>((e * 255.0 + 0.5) / 256.0, 0.5), 0.0).rgb;
             }
-            let glow = fire * (u_volume.u_emission * e * u_volume.u_fireScale * u_volume.u_fireIntensity);
-            let contribution = T * (1.0 - (1.0 - aSmoke) * (1.0 - aFire));
-            col = col + T * (aSmoke * smoke * lit + aFire * glow);
+            // Soot masking: fire inside dense smoke is dimmed by it, so glow shows through the gaps.
+            var soot = 1.0;
+            if (u_volume.u_sootMask > 0.0) { soot = exp(-u_volume.u_sootMask * max(s.r, 0.0) * u_volume.u_absorption); }
+            let fireK = u_volume.u_emission * u_volume.u_fireScale * u_volume.u_fireIntensity;
+            var glow = fire * (e * fireK * soot);
+            // The blue core: the reaction zone (packed as negative A), hidden behind soot.
+            if (u_volume.u_blueCore > 0.0 && s.a < 0.0) {
+                let bc = -s.a * exp(-2.0 * max(s.r, 0.0) * u_volume.u_absorption);
+                glow = glow + u_volume.u_blueCoreColor * (u_volume.u_blueCore * bc * fireK);
+            }
+            let Tm = (T.x + T.y + T.z) / 3.0;
+            let contribution = Tm * (1.0 - (1.0 - (aSmoke.x + aSmoke.y + aSmoke.z) / 3.0) * (1.0 - aFire));
+            // What the smoke scatters is grey (its mean extinction); the tint is in what it absorbs.
+            let aScat = (aSmoke.x + aSmoke.y + aSmoke.z) / 3.0;
+            col = col + T * (aScat * smoke * lit + aEmit * glow);
             depthSum = depthSum + contribution * t * dlen;
-            T = T * (1.0 - aSmoke) * (1.0 - aFire);
+            T = T * (vec3<f32>(1.0) - aSmoke) * (1.0 - aFire);
         }
         t = t + dt;
     }
-    let alpha = 1.0 - T;
+    let alpha = 1.0 - (T.x + T.y + T.z) / 3.0;
     out.color = vec4<f32>(col, alpha);
     // Coverage-weighted distance from the near plane, premultiplied like the colour.
     out.depth = vec4<f32>(depthSum, 0.0, 0.0, alpha);

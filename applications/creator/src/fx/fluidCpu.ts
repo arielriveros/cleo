@@ -198,13 +198,24 @@ export class FluidCpu {
           if (burned && k.blast > 0) burned[i] += k.blast;
         }
       }
-      // Turbulence wherever there is something hot to stir.
-      if (p.turbulence > 0 && this.temperature[i] > 0.02) {
-        const k = p.turbulence * Math.min(1, this.temperature[i]) * dt;
+      // Turbulence wherever there is something hot to stir -- and, with `turbulenceOnSmoke`, cooled smoke
+      // too (FumeFX's lesson: missing motion complexity is what makes smoke look fake).
+      const onSmoke = p.turbulenceOnSmoke ?? 0;
+      const stir = Math.min(1, this.temperature[i]) + (onSmoke > 0 ? onSmoke * Math.min(1, this.density[i]) : 0);
+      if (p.turbulence > 0 && (this.temperature[i] > 0.02 || (onSmoke > 0 && stir > 0.02))) {
+        const k = p.turbulence * stir * dt;
         const sx = x * tScale, sy = y * tScale - tz, sz = z * tScale;
         this.u[i] += k * valueNoise3(sx, sy, sz, p.seed);
         this.v[i] += k * 0.5 * valueNoise3(sx + 31.4, sy, sz, p.seed + 1);
         this.w[i] += k * valueNoise3(sx, sy, sz + 17.7, p.seed + 2);
+        // A finer octave: 2.7 times the frequency, rising twice as fast.
+        const kd = k * (p.turbulenceDetail ?? 0);
+        if (kd > 0) {
+          const fx = sx * 2.7, fy = y * tScale * 2.7 - tz * 2, fz = sz * 2.7;
+          this.u[i] += kd * valueNoise3(fx, fy, fz, p.seed + 3);
+          this.v[i] += kd * 0.5 * valueNoise3(fx + 31.4, fy, fz, p.seed + 4);
+          this.w[i] += kd * valueNoise3(fx, fy, fz + 17.7, p.seed + 5);
+        }
       }
       // Disturbance: one random kick per block, re-seeded every interval, where there is gas to move.
       if (disturb) {
@@ -231,13 +242,19 @@ export class FluidCpu {
         // Combustion: ignited fuel burns into heat and smoke, and marks the flame field.
         const burn = Math.min(this.fuel[i], p.burnRate * dt);
         this.fuel[i] -= burn;
-        this.temperature[i] += burn * p.heatRelease;
+        // Nguyen et al. 2002: reacting gas heats TOWARD a maximum temperature; without one, without limit.
+        const tMax = p.maxTemperature ?? 0;
+        if (tMax > 0) this.temperature[i] += (tMax - this.temperature[i]) * Math.min(1, burn * p.heatRelease);
+        else this.temperature[i] += burn * p.heatRelease;
         this.density[i] += burn * p.smokeYield;
         if (burned) burned[i] += p.expansion * burn / dt;
         this.flame[i] = Math.max(this.flame[i], burn / Math.max(1e-6, p.burnRate * dt));
       }
       // Buoyancy: hot gas rises, smoke is heavy. Wind is a steady push along +X.
-      this.v[i] += (p.buoyancy * this.temperature[i] - p.weight * this.density[i]) * dt;
+      // Buoyancy from the temperature above the air around it (alpha (T - T_air), Nguyen et al. 2002).
+      const tAir = p.ambientTemperature ?? 0;
+      const lift = tAir > 0 ? (this.temperature[i] > 0 ? this.temperature[i] - tAir : 0) : this.temperature[i];
+      this.v[i] += (p.buoyancy * lift - p.weight * this.density[i]) * dt;
       if (p.wind !== 0 && this.temperature[i] + this.density[i] > 0.01) this.u[i] += (p.wind - this.u[i]) * Math.min(1, dt);
       // The stage's wind: the gas is dragged toward the (gusting) wind velocity, horizontally.
       if (wind && this.temperature[i] + this.density[i] > 0.01) {
@@ -629,7 +646,17 @@ export class FluidCpu {
     const c4 = p.coolingT4 ?? 0;
     if (c4 > 0) {
       const t = this.temperature;
-      for (let i = 0; i < this.count; i++) { const x = t[i]; if (x > 0) t[i] = Math.max(0, x - c4 * x * x * x * x * dt); }
+      const tMax = p.maxTemperature ?? 0, tAir = p.ambientTemperature ?? 0;
+      if (tMax > tAir) {
+        // Nguyen et al. 2002: dT/dt = -c_T ((T - T_air) / (T_max - T_air))^4, scaled to the range.
+        const span = tMax - tAir;
+        for (let i = 0; i < this.count; i++) {
+          const r = Math.max(0, (t[i] - tAir) / span);
+          if (r > 0) t[i] = Math.max(tAir, t[i] - c4 * r * r * r * r * span * dt);
+        }
+      } else {
+        for (let i = 0; i < this.count; i++) { const x = t[i]; if (x > 0) t[i] = Math.max(0, x - c4 * x * x * x * x * dt); }
+      }
     }
     // The flame field fades out over its lifetime once the fuel at a point stops burning.
     if (k.flameKeep < 1) { const f = this.flame; for (let i = 0; i < this.count; i++) f[i] *= k.flameKeep; }

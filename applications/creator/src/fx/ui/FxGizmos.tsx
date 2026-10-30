@@ -104,14 +104,21 @@ export function FxGizmos({ instance, scene, bus, stage, volume, viewportRef, par
   const lastDragEnd = useRef(0);
   const gizmoDragging = useRef(false);
 
-  // The emitter marker follows the parameters, and shows while the emitter is selected. It is created
-  // here, after the render that picked the gizmo's target, so its id is handed back through state.
+  // The emitter marker follows the parameters, and shows while the emitter is selected (or always, from
+  // the eye menu). It is created here, after the render that picked the gizmo's target, so its id is
+  // handed back through state. The region's wireframe follows the region the same way, except while the
+  // region is selected: its box gizmo draws it then.
   const [markerId, setMarkerId] = useState<string | null>(null);
   useEffect(() => {
-    const pose = emitterPose(params, fxScene.regionOffset ?? [0, 0, 0]);
-    stage.current?.showEmitter(selection?.kind === 'emitter' ? pose.position : null, pose.radius);
+    const offset = fxScene.regionOffset ?? [0, 0, 0];
+    const pose = emitterPose(params, offset);
+    stage.current?.showEmitter(selection?.kind === 'emitter' || fxScene.showEmitter ? pose.position : null, pose.radius);
     const id = stage.current?.emitterNode?.id ?? null;
     if (id !== markerId) setMarkerId(id);
+    const n = normaliseFx(params);
+    const d = fluidDims(n);
+    const size: [number, number, number] = [d.nx * n.voxelSize, d.ny * n.voxelSize, d.nz * n.voxelSize];
+    stage.current?.showRegion(fxScene.showRegion !== false && selection?.kind !== 'region' ? regionOrigin(d, n.voxelSize, offset) : null, size);
   });
 
   useEffect(() => {
@@ -164,7 +171,7 @@ export function FxGizmos({ instance, scene, bus, stage, volume, viewportRef, par
       const { fxScene: s, params: p } = live.current;
       let best: { t: number; sel: FxSelection } | null = null;
       const consider = (t: number | null, sel: FxSelection) => { if (t !== null && (!best || t < best.t)) best = { t, sel }; };
-      for (const b of s.bodies) if (b.visible) consider(rayBody(ray.origin, ray.direction, b), { kind: 'body', id: b.id });
+      if (s.showBodies !== false) for (const b of s.bodies) if (b.visible) consider(rayBody(ray.origin, ray.direction, b), { kind: 'body', id: b.id });
       const em = emitterPose(p, s.regionOffset ?? [0, 0, 0]);
       consider(raySphere(ray.origin, ray.direction, em.position, Math.max(em.radius, 0.15)), { kind: 'emitter' });
       if (!best) {

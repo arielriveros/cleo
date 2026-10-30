@@ -1,6 +1,7 @@
 // The live preview's hand-off to the engine: the solver's current scalars and the half-resolution
 // light grid, packed into the FluidVolumeNode's 3D texture (R density, G temperature, B light
-// transmittance, A fire glow) without leaving the GPU. One thread per voxel.
+// transmittance, A fire glow -- or minus the blue core where it burns, realism.ts `packGlowOrCore`)
+// without leaving the GPU. One thread per voxel.
 
 #include "./fxCommon.wgsl"
 
@@ -52,5 +53,10 @@ fn cs_pack(@builtin(global_invocation_id) g: vec3<u32>) {
     let l = light_at(vec3<f32>(g));
     var gl = 0.0;
     if (u.look2.z > 0.0) { gl = glow_at(vec3<f32>(g)); }
-    textureStore(volume, vec3<i32>(g), vec4<f32>(s.x, emission_temperature(s.y, s.w), l, gl));
+    let t = emission_temperature(s.y, s.w);
+    if (u.look5.x > 0.0) {
+        let core = blue_core_source(clamp((t - u.burn.x) / u.flags.w, 0.0, 1.0), s.z);
+        if (core > 0.01) { gl = -core; }
+    }
+    textureStore(volume, vec3<i32>(g), vec4<f32>(s.x, t, l, gl));
 }
