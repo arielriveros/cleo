@@ -233,16 +233,33 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         }
     });
 
-    it('places each building as a linked copy with a convex collider, nothing floating', () => {
+    it('places each building as a linked copy, the houses enterable, nothing floating', () => {
         const models = library('models');
         const buildings = nodes().find(n => n.name === 'Buildings').children;
         expect(buildings.map((b: any) => b.name).sort()).toEqual(['Granary', 'Long House', 'Old House', 'Windmill']);
         for (const b of buildings) {
             expect(models.some((m: any) => m.id === b.variables.__modelId.value), b.name).toBe(true);
             expect(b.body.mass).toBe(0);
-            expect(b.body.shapes[0].type).toBe('convex');
-            // The base goes at the LOWEST ground under the footprint, so it never floats over the centre.
-            expect(b.position[1], b.name).toBeLessThanOrEqual(heightAt(b.position[0], b.position[2]));
+            // The two houses are walled in boxes with their doorways open, under one hull for the roof
+            // (houses.mjs) — a few dozen shapes, not hundreds; the granary and the windmill keep a hull
+            // over their whole body.
+            const enterable = b.name === 'Old House' || b.name === 'Long House';
+            if (enterable) {
+                const shapes = b.body.shapes;
+                expect(shapes.length, b.name).toBeGreaterThan(10);
+                expect(shapes.length, b.name).toBeLessThan(200);
+                expect(shapes.filter((s: any) => s.type === 'convex'), b.name).toHaveLength(1);
+                expect(shapes.filter((s: any) => s.type !== 'convex').every((s: any) => s.type === 'box'), b.name).toBe(true);
+            } else {
+                expect(b.body.shapes[0].type).toBe('convex');
+            }
+            // The base goes at the LOWEST ground under the footprint, so it never floats over the centre —
+            // and inside a house the ground is raised to its raised floor (a third of a metre or so up).
+            const lift = heightAt(b.position[0], b.position[2]) - b.position[1];
+            if (enterable) {
+                expect(lift, b.name).toBeGreaterThan(0.2);
+                expect(lift, b.name).toBeLessThan(0.6);
+            } else expect(lift, b.name).toBeGreaterThanOrEqual(0);
         }
         const sails = allNodes(buildings.find((b: any) => b.name === 'Windmill')).find(n => n.name === 'Sails');
         expect(sails.script).toContain('class ValleyWindmillNode');
@@ -401,17 +418,23 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         const all = dungeonNodes();
         const bodies = allNodes(all.find(n => n.name === 'Collision')).filter(n => n.body);
         const shapes = bodies.flatMap(n => n.body.shapes);
+        // Merged hard (dungeon/collision.mjs: tolerances, pillars one box, diagonals one turned box): it
+        // was over 3000 boxes before.
         expect(shapes.length).toBeGreaterThan(1000);
+        expect(shapes.length).toBeLessThan(2000);
         expect(shapes.every((s: any) => s.type === 'box')).toBe(true);
         // The stairs are ramps under 45 degrees.
         const ramps = shapes.filter((s: any) => Math.abs(s.rotation[0]) > 20);
         expect(ramps.length).toBeGreaterThanOrEqual(2);
         for (const r of ramps) expect(Math.abs(r.rotation[0])).toBeLessThan(45);
-        // Walls are what swings bounce off; floors are walked on, never carved out of the navmesh.
+        // Walls and pillars are what swings bounce off; floors are walked on, never carved out of the navmesh.
+        // The pillars' bodies are see-through to the player camera, like the pillars; the walls' are not.
         for (const n of bodies) {
-            if (n.name.startsWith('Walls')) expect(n.variables.blocksSwings?.value, n.name).toBe(true);
+            if (n.name.startsWith('Walls') || n.name.startsWith('Pillars')) expect(n.variables.blocksSwings?.value, n.name).toBe(true);
             else expect(n.variables.navObstacle?.value, n.name).toBe(false);
+            expect(!!n.cameraDither, n.name).toBe(n.name.startsWith('Pillars'));
         }
+        expect(bodies.some(n => n.name.startsWith('Pillars'))).toBe(true);
     });
 
     it('hangs wall torches at the light rig sconces, spaced apart, and lights the dungeon with fire', () => {

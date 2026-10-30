@@ -28,7 +28,8 @@ const REFRESH_TRAVEL = 0.25;
 /** Upper bound on how long a stale active set may persist even if nothing appears to have changed. */
 const REFRESH_INTERVAL_MS = 250;
 
-interface Wanted { sig: string; x: number; y: number; z: number; yaw: number; scale: number; d2: number }
+/** `see`: the layer's `cameraDither`, stamped on the body (a pooled body may serve any layer of its shape). */
+interface Wanted { sig: string; x: number; y: number; z: number; yaw: number; scale: number; d2: number; see: boolean }
 
 /**
  * Static physics proxies for the collidable foliage instances near the camera, materialised only inside
@@ -82,7 +83,7 @@ export class FoliageColliderField {
                 const dx = ix - camPos[0], dy = iy - camPos[1], dz = iz - camPos[2];
                 wanted.set(`${layer.key}#${index}`, {
                     sig: signatureOf(col, scale), x: ix, y: iy, z: iz, yaw, scale,
-                    d2: dx * dx + dy * dy + dz * dz,
+                    d2: dx * dx + dy * dy + dz * dz, see: layer.cameraDither,
                 });
             });
         }
@@ -107,13 +108,16 @@ export class FoliageColliderField {
 
         // 4. Materialise what entered it, reusing a pooled body of the same signature when one exists.
         for (const [key, w] of keep) {
-            if (this._active.has(key)) continue;
+            const active = this._active.get(key);
+            // Read by the camera probe (cameraRayFilter): a 'dither' rig sees through this rule's trees.
+            if (active) { (active as any).cameraDither = w.see; continue; }
             const body = this._free.get(w.sig)?.pop() ?? buildBody(w.sig, layerCollisionFor(layers, key), w.scale, material);
             if (!body) continue;
             body.position.set(w.x, w.y, w.z);
             body.quaternion.setFromEuler(0, w.yaw, 0);
             // A pooled body keeps the box it had where it was last used; cannon only re-measures what it moves.
             body.aabbNeedsUpdate = true;
+            (body as any).cameraDither = w.see;
             world.addBody(body);
             this._active.set(key, body);
         }

@@ -25,13 +25,13 @@ The source art in `build/` is gitignored, so this generator is run by hand and i
 | `terrain_textures/concrete_rock_path_1k` | Stone Path: from each building to the main road, and paving round the bonfire. |
 | `foliage/grass_medium_01_1k.gltf` | Three "Meadow Grass" patches, each 5–6 clumps. |
 | `foliage/realistic_pine.glb` | "Pine": 477k triangles, decimated with the editor's QEM into three levels. |
-| `foliage/jacaranda_tree_1k.gltf` | "Jacaranda": 3.9M triangles, brought to 426k by keeping a quarter of the leaf cards (grown to cover) and QEM, then the pine's ladder and impostor. |
+| `foliage/jacaranda_tree_1k.gltf` | "Jacaranda": 3.9M triangles, brought to about 107k: a tenth of the leaf cards (grown to cover), QEM on the trunk (10%), branches (3.5%) and leaves, and the cards left without a twig dropped; then the pine's ladder and impostor. |
 | `foliage/fern_02_1k.gltf`, `anthurium_botany_01_1k.gltf`, `dry_branches_medium_01_1k.gltf` | Ferns, broadleaf ferns and fallen branches: the Forest Floor's own foliage. |
 | `foliage/wild_rooibos_bush_1k.gltf` | Bushes, scaled 2.6x: forest edges, house walls and fences. |
 
 The Poly Haven downloads may arrive as `.zip` beside these paths; `prepare.py` extracts each once. Their glTF zips leave out the cutout alpha maps, so `prepare.py` fetches the fern's, the jacaranda leaves' and the bush's from Poly Haven on first run.
-| `props/house` | Old House, decimated to 35%. |
-| `props/long_house` | Long House, from the artist's LOD1. |
+| `props/house` | Old House, decimated to 35%, scaled 1.75x so the knight fits its doors from its raised floor. |
+| `props/long_house` | Long House, from the artist's LOD1, 10.3 m tall so the knight fits its doors from its raised floor. |
 | `props/silo` | Granary. |
 | `props/windmill` | Windmill. Its sails spin via `ValleyWindmill.ts`. |
 | `props/skull_cave` | The Skull Cave Entrance in the cliff notch: the door to the Dungeon. |
@@ -54,9 +54,11 @@ The Poly Haven downloads may arrive as `.zip` beside these paths; `prepare.py` e
   fixed exposure, the Cinematic lens look and depth of field, the Hazy Summer sky, Sunny clouds, a Breezy wind,
   a Pond / Lake water volume and the Morning Sun (brightened against the valley's ambient). The High quality tier
   and a sky light with cloud shadows complete it. Nothing in the look is hand-tuned; change a preset to change it.
+- `houses.mjs` makes the Old House and the Long House enterable. It rasterises each into wall and lintel boxes, merged the way the dungeon's are, under one convex hull for the roof, with the doorways left open; the build logs each house's lowest lintel over its floor. Both stand on a raised floor, so the ground inside is raised to it and eased back to the hillside outside, and the navmesh carves only round the walls.
+- `occluders.mjs` fits occluder volumes as thin slabs down the middle of wall colliders, only as tall as the wall is unbroken. They go in the dungeon's walls and in the houses' walls.
 - `meshes.mjs` contains the part pipeline. It flips glTF V, leaves tangents for `Geometry` to rebuild, rounds values for JSON, and builds convex hulls.
 - `torches.mjs` builds the fire props (wall and standing torches, campfire, cages, candles) and finds walls to hang torches on.
-- `dungeon/` builds the Dungeon: `structure.mjs` loads and chunks the structure and opens its sealed doorways; `collision.mjs` rasterises its floors, walls, ceilings and stairs into box colliders (the scene format has no triangle meshes) and checks the level can be walked; `layout.mjs` holds the zones, fires, enemies, pickups and messages; `props.mjs` the procedural furniture; `scene.mjs` assembles it.
+- `dungeon/` builds the Dungeon: `structure.mjs` loads and chunks the structure and opens its sealed doorways; `collision.mjs` rasterises its floors, walls, ceilings and stairs into box colliders (the scene format has no triangle meshes), keeping their number down (cells merged within a tolerance, a pillar one box, a diagonal wall one turned box), and checks the level can be walked; the pillars' boxes go on bodies of their own that the camera sees through; `layout.mjs` holds the zones, fires, enemies, pickups and messages; `props.mjs` the procedural furniture; `scene.mjs` assembles it.
 - `knight.mjs` builds the player character: the skinned GLB read headlessly (`tools/exampleKit/skinnedGlb.mjs`), scaled to 1.9 m, one model with a submesh per material, its rig with hand sockets that turn its hand frame into the mannequin's (so the same weapons sit in either fist), and foot IK.
 - `build.mjs` assembles everything around `writeProject` from `tools/soulsDemo/build.mjs`.
 
@@ -65,6 +67,9 @@ The Poly Haven downloads may arrive as `.zip` beside these paths; `prepare.py` e
 - **The Time of Day** node (`examples/scripts/ValleyDayNight.ts`) runs the valley's day: the sun's path and colour, the moon, the exposure, the morning mist and the god rays, and how bright the fires are. A death skips half a day.
 - **Fires** (`examples/scripts/ValleyFireLight.ts`) are linked templates with a tileset flame, embers, sparks that bounce on the floor, and a flickering light. Their flames and embers have an Exposure weight of 0.1, so the camera's exposure barely changes them.
 - **The Dungeon** is held at EV 15, the valley's noon, and its fires are lit for that: the souls content (glyphs, glows, bolts) is tuned for an exposure about that. The Time of Day scales the fires down by day and up at night.
+
+- **Exposure volumes** trim the Day–Night metering by where the camera is. The village gets +0.15 stop, the pond −0.25 and the forest stands +0.35; the forest stands are the 40 m cells with 10 or more trees, merged. Inside each house an Interior trim (+0.5, quicker adaptation) wins at priority 1.
+- **The player camera** sits on a 2.4 m arm (1.6 m locked on), sees through trees and the dungeon's pillars, and pulls in for walls and ceilings (`playerCamera` in `build.mjs`).
 
 ## Not built
 

@@ -4032,6 +4032,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // What the user added inside this copy (a sprite on the tip, a light) is not the asset's: carried
         // over to the rebuilt copy rather than thrown away with it. See foreignChildren.ts.
         const foreign = detachForeignChildren(inst, modelInstanceShape(asset, modelsRef.current));
+        // The copy's own collider: a model asset carries no physics, so a body on the placed root is
+        // per-placement state, keyed by the id the cleanup below drops (see reinstantiate in sceneResync.ts).
+        const rootBody = maps.bodies.get(inst.id);
+        const rootTrigger = maps.triggers.get(inst.id);
         // Drop the old subtree's out-of-band data so map entries don't leak.
         for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
         // Detach synchronously with removeChild, not remove(): remove() only marks, and its deferred sweep
@@ -4047,6 +4051,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           newNode.setPosition(pos).setRotation(rot).setScale(scl);
           newNode.spawnOnStart = spawnOnStart;
           restoreAnimationState(newNode, animation);
+          if (rootBody) maps.bodies.set(newId, rootBody);
+          if (rootTrigger) maps.triggers.set(newId, rootTrigger);
           reattachForeignChildren(newNode, foreign);
           // A LOD-wrapped asset keeps its root transform on the wrapper's child 0, so the edit already
           // arrives through the child and applying it here as well would double it.

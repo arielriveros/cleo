@@ -40,6 +40,8 @@ import {
   plantLevels, rng, rockLevels, triangles,
 } from './foliage.mjs'
 import { buildProps } from './props.mjs'
+import { houseColliders } from './houses.mjs'
+import { fitOccluders } from './occluders.mjs'
 import { buildKnight } from './knight.mjs'
 import { buildHollow, buildStrongKnight } from './enemies.mjs'
 import { WATER_SOURCE, WATER_UNIFORMS } from './water.mjs'
@@ -708,11 +710,33 @@ for (const [i, r] of DIRT_ROADS.entries()) {
 const props = await buildProps(ROOT, path.join(BUILD, 'props'))
 log('props converted', props.map(p => `${p.key} ${p.triangles} tris ${p.size.map(v => v.toFixed(1)).join('x')} m`).join(', '))
 
+/**
+ * The houses the knight can walk into: walls, lintels and a roof as boxes (houses.mjs) instead of a hull
+ * that fills them. The granary and the windmill keep their hulls.
+ */
+const ENTERABLE = new Set(['house', 'long-house'])
+/** The player capsule's height, plus headroom: a doorway lower than this over the floor is logged as a problem. */
+const DOOR_CLEARANCE = 1.8
+const houseShapes = new Map()
+for (const p of props) {
+  if (!ENTERABLE.has(p.key)) continue
+  const h = houseColliders(p.parts.map(x => x.part))
+  const kinds = {}
+  for (const b of h.boxes) kinds[b.kind] = (kinds[b.kind] ?? 0) + 1
+  if (!kinds.wall) { log(`house ${p.key}: no walls found, keeping its hull`); continue }
+  const headroom = h.doorLows.length ? h.doorLows[0] - h.floor : undefined
+  log(`house ${p.key}: ${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(', ')} and a roof hull; floor ${h.floor.toFixed(2)} m,`
+    + ` lowest lintel ${headroom?.toFixed(2) ?? 'none'} m over it${headroom !== undefined && headroom < DOOR_CLEARANCE ? '  ** TOO LOW FOR THE KNIGHT **' : ''}`)
+  // The roof: one hull over everything above the eave (houses.mjs).
+  houseShapes.set(p.key, { ...h, roof: convexShape(ROOT, [{ positions: h.roofPoints }]) })
+}
+
 /** Where each building wants to stand (reference pads / sites) and which way it faces, in radians. */
 const SITES = {
   house: { x: -50, z: 30, yaw: 0.35 },
   'long-house': { x: -18, z: 44, yaw: -2.4 },   // east of the road: Cottage B's pad sits on it
-  silo: { x: -58, z: 48, yaw: 0.8 },
+  // Searched wider: the Old House's yard, wide since its scale-up, covers the granary's old pad.
+  silo: { x: -58, z: 48, yaw: 0.8, reach: 30 },
   // The sails face the valley centre. Local -X is the sail side, and Ry(yaw) takes -X to (-cos, 0, sin).
   windmill: { x: WATCHTOWER.x, z: WATCHTOWER.z, yaw: Math.atan2(-WATCHTOWER.z, WATCHTOWER.x) },
 }
@@ -740,7 +764,8 @@ function placeBuildings() {
       return pts
     }
     let best = null
-    for (let dz = -10; dz <= 10; dz += 1) for (let dx = -10; dx <= 10; dx += 1) {
+    const reach = site.reach ?? 10
+    for (let dz = -reach; dz <= reach; dz += 1) for (let dx = -reach; dx <= reach; dx += 1) {
       const cx = site.x + dx, cz = site.z + dz
       const pts = footprint(cx, cz, site.yaw)
       const hs = pts.map(([x, z]) => heights.heightAt(x, z))
@@ -748,6 +773,8 @@ function placeBuildings() {
       let cost = range + Math.hypot(dx, dz) * 0.05
       if (pts.some(([x, z]) => sampleMask(mask, x, z) > 0.05)) cost += 50
       if (Math.hypot(cx - BONFIRE.x, cz - BONFIRE.z) < radius + 4) cost += 50
+      // Off the dirt roads, by the margin the check below asserts (and a little more).
+      if (dirtRoadLines.some(line => distanceToPolyline(cx, cz, line) < radius * 0.75)) cost += 50
       for (const q of placed) if (Math.hypot(cx - q.x, cz - q.z) < radius + q.radius + 1) cost += 50
       if (!best || cost < best.cost) best = { cost, x: cx, z: cz, y: Math.min(...hs) - 0.05, range }
     }
@@ -761,6 +788,44 @@ for (const [i, r] of DIRT_ROADS.entries()) for (const b of buildings) {
   const d = distanceToPolyline(b.x, b.z, dirtRoadLines[i])
   if (d < b.radius * 0.7) throw new Error(`dirt road ${r.key} runs through ${b.key} (${d.toFixed(1)} m from its centre)`)
 }
+
+/**
+ * Level the ground inside each enterable house to its base, easing back to the hillside over a few
+ * metres outside. A house is set at the LOWEST ground under its footprint so it never floats, which on a
+ * slope left the floor inside up to a metre under the terrain — and that metre came straight off the
+ * headroom under the lintels. Cut AND fill inside, so the floor is the base everywhere; outside, only the
+ * blend. Done on the shipped 1 m grid, before anything else reads the ground round the houses.
+ */
+function levelHouseFloors() {
+  const MARGIN = 3
+  const R = Math.round(Math.sqrt(heights.grid.length)), e = heights.element, half = TERRAIN.size / 2
+  for (const b of buildings) {
+    if (!houseShapes.has(b.key)) continue
+    const hx = b.prop.size[0] / 2, hz = b.prop.size[2] / 2
+    // To the house's raised floor (houses.mjs): the terrain is the floor the knight walks on inside, and
+    // its slope up to the walls is how he climbs to the doorway.
+    const target = b.y + houseShapes.get(b.key).floor - 0.02
+    const reach = Math.hypot(hx, hz) + MARGIN
+    const c = Math.cos(b.yaw), s = Math.sin(b.yaw)
+    let moved = 0, deepest = 0
+    const c0 = Math.max(0, Math.floor((b.x - reach + half) / e)), c1 = Math.min(R - 1, Math.ceil((b.x + reach + half) / e))
+    const r0 = Math.max(0, Math.floor((b.z - reach + half) / e)), r1 = Math.min(R - 1, Math.ceil((b.z + reach + half) / e))
+    for (let r = r0; r <= r1; r++) for (let col = c0; col <= c1; col++) {
+      const dx = col * e - half - b.x, dz = r * e - half - b.z
+      const lx = dx * c - dz * s, lz = dx * s + dz * c
+      const d = Math.hypot(Math.max(Math.abs(lx) - hx, 0), Math.max(Math.abs(lz) - hz, 0))
+      if (d >= MARGIN) continue
+      const t = d === 0 ? 1 : 1 - d / MARGIN * d / MARGIN * (3 - 2 * d / MARGIN)
+      const i = r * R + col
+      const h = heights.grid[i]
+      // Outside, eased both ways: up to the floor at the walls, back to the slope MARGIN out.
+      const next = d === 0 ? target : h + (target - h) * t
+      if (next !== h) { deepest = Math.max(deepest, Math.abs(h - next)); heights.grid[i] = next; moved++ }
+    }
+    log(`house ${b.key}: floor levelled at ${target.toFixed(2)} m, ${moved} terrain samples, largest change ${deepest.toFixed(2)} m`)
+  }
+}
+levelHouseFloors()
 
 function propModelAsset(p) {
   const assetId = id(`model:${p.key}`)
@@ -789,7 +854,10 @@ function propModelAsset(p) {
 }
 const propAssets = props.map(propModelAsset)
 
-/** A placed copy of a building: the asset's subtree, linked, with a convex collider over its body. */
+/**
+ * A placed copy of a building: the asset's subtree, linked. An enterable house gets its wall, lintel and
+ * roof boxes (in the prop's own space, which is the node's); anything else a convex collider over its body.
+ */
 function placedBuilding(b, asset) {
   const copy = clone(asset.nodeJson)
   let i = 0
@@ -797,12 +865,45 @@ function placedBuilding(b, asset) {
   rekey(copy)
   copy.position = [b.x, Math.round(b.y * 1000) / 1000, b.z]
   copy.rotation = [0, Math.round(b.yaw * 180 / Math.PI * 1000) / 1000, 0]
-  copy.variables = vars({ __modelId: asset.id })
+  const house = houseShapes.get(b.key)
+  // Walls stop swings like the dungeon's do; a hull never needed to say so.
+  copy.variables = vars(house ? { __modelId: asset.id, blocksSwings: true } : { __modelId: asset.id })
   copy.body = {
     ...souls.staticBody('box'),
-    shapes: [convexShape(ROOT, b.prop.parts.map(x => x.part))],
+    shapes: house
+      ? [...house.boxes.map(x => ({ type: 'box', width: x.size[0], height: x.size[1], depth: x.size[2], offset: x.center, rotation: x.rotation })), house.roof]
+      : [convexShape(ROOT, b.prop.parts.map(x => x.part))],
   }
+  if (house) HOUSE_WALLS.set(copy, [...house.boxes.map(x => x.kind === 'wall'), false])
   return copy
+}
+
+/**
+ * Placed houses -> which of their body's shapes are walls. The navmesh takes only those from a house:
+ * every roof slab and lintel top would otherwise be tessellated as a floor nobody can reach (that nearly
+ * doubled the baked mesh), and only the walls need carving round.
+ */
+const HOUSE_WALLS = new Map()
+
+/** A point in a placed building's own space, in the world: Ry(yaw), as the footprint search turns it. */
+function buildingToWorld(b, [lx, ly, lz]) {
+  const c = Math.cos(b.yaw), s = Math.sin(b.yaw)
+  return [round3(b.x + lx * c + lz * s), round3(b.y + ly), round3(b.z - lx * s + lz * c)]
+}
+
+/** Occluders inside each enterable house's walls (occluders.mjs), placed with the house. */
+function buildingOccluders() {
+  const out = []
+  for (const b of buildings) {
+    const house = houseShapes.get(b.key)
+    if (!house) continue
+    fitOccluders(house.grid, house.boxes.filter(x => x.kind === 'wall')).forEach((o, i) => out.push(node(`${b.prop.name} Occluder ${i + 1}`, 'occluder', {
+      id: id(`occluder:${b.key}:${i}`), position: buildingToWorld(b, o.center),
+      rotation: [0, round3(b.yaw * 180 / Math.PI), 0], occluder: { size: o.size, enabled: true },
+    })))
+  }
+  log('occluders', `${out.length} inside the houses' walls`)
+  return out
 }
 
 // =====================================================================================================
@@ -1094,6 +1195,9 @@ const clear = (x, z, pad = 0) => keepClear.every(c => Math.hypot(x - c.x, z - c.
 const inPlaza = (x, z) => z < -112 && Math.abs(x) < 16
 const inValley = (x, z) => heights.heightAt(x, z) < 25 && Math.hypot(x, z) < 200 && cliffDistance(x, z) > 2
 
+/** Every tree in the valley (pines in the belt and the stands, and jacarandas), for the forest volumes. */
+const TREE_POINTS = []
+
 function scatter() {
   const layers = []
   const counts = {}
@@ -1116,6 +1220,7 @@ function scatter() {
       return h > 55 && h < 210 && cliffDistance(x, z) > 6 && heights.slopeAt(x, z) < 28 && allowed(x, z)
     })
     const pts = [...belt, ...stands, ...beyond]
+    TREE_POINTS.push(...belt, ...stands)
     counts.Pine = `${pts.length} (belt ${belt.length}, valley ${stands.length}, beyond ${beyond.length})`
     layers.push({ proto: protoOf('pine'), points: pts, seed: 0x9150, sink: 0.25 })
     // The leaf litter under them: the Forest Floor surface's mask channel.
@@ -1133,6 +1238,7 @@ function scatter() {
         && Math.hypot(x - SPAWN.x, z - SPAWN.z) > 18 && pts.every(([px, pz]) => Math.hypot(x - px, z - pz) > 9)
         && jac.every(([jx, jz]) => Math.hypot(x - jx, z - jz) > 13) && jacarandaAllowed(x, z) && jac.push([x, z]) > 0)
     counts.Jacaranda = jac.length
+    TREE_POINTS.push(...jac)
     layers.push({ proto: protoOf('jacaranda'), points: jac, seed: 0x1ac1, sink: 0.2 })
     // A wider crown, a wider litter.
     paintForestFloor(mask, jac, 3.5, 7.5)
@@ -1295,27 +1401,38 @@ const CHARACTER_MODELS = [knight.model, hollow.model, strongKnight.model]
 /** The player's camera sees the far mountains: the Playable's 100 m far plane is a room's. */
 const CAMERA_FAR = 3000
 /** The player camera's boom length: where the player stands from the lens, so where depth of field focuses. */
-const PLAYER_ARM = (() => {
-  let arm = null
-  const walk = (n) => { if (n.type === 'cameraRig' && arm === null) arm = n.armLength; (n.children ?? []).forEach(walk) }
+/**
+ * The player camera's boom: closer than the souls kit's 3.2 m, so the knight fills more of the frame and
+ * the camera has less room to end up behind a wall or a trunk. Depth of field focuses here.
+ */
+const PLAYER_ARM = 2.4
+/** The boom while locked on (SoulsLockOn.lockedArmLength): closer, so the fight fills the frame. */
+const PLAYER_LOCKED_ARM = 1.6
+if (!(() => {
+  let found = false
+  const walk = (n) => { if (n.type === 'cameraRig') found = true; (n.children ?? []).forEach(walk) }
   walk(LEVEL.player.nodeJson)
-  if (typeof arm !== 'number') throw new Error('the player template has no camera rig')
-  return arm
-})()
+  return found
+})()) throw new Error('the player template has no camera rig')
 
 function widenCamera(json) {
   const walk = (n) => { if (n.type === 'camera' && n.camera) n.camera.far = CAMERA_FAR; (n.children ?? []).forEach(walk) }
   walk(json)
 }
 /**
- * The player's camera rig sees through trees and dungeon pillars instead of pulling in behind them: in a
- * forest the retracting camera spent most of its time jammed against a trunk. Only what opted in
- * (`cameraDither` on the tree rules and the pillar nodes) is cut; walls and rocks still pull nothing in
- * and simply block, as the dungeon's tight rooms are framed for.
+ * The player's camera rig: on the shorter `PLAYER_ARM` (and closer still locked on), seeing through trees
+ * and dungeon pillars instead of pulling in behind them — in a forest the retracting camera spent most of
+ * its time jammed against a trunk. Only what opted in (`cameraDither` on the tree rules and the pillar
+ * nodes) is cut; walls, ceilings and rocks still pull the camera in, as 'retract' does.
  */
-function seeThroughCamera(json) {
+function playerCamera(json) {
   const walk = (n) => {
-    if (n.type === 'cameraRig') { n.collisionMode = 'dither'; n.ditherRadius = 1.1; n.ditherStrength = 0.85 }
+    if (n.type === 'cameraRig') {
+      n.armLength = PLAYER_ARM
+      n.collisionMode = 'dither'; n.ditherRadius = 1.1; n.ditherStrength = 0.85
+      // SoulsLockOn's framing while locked: in tight, over the shoulder.
+      n.scriptVars = { ...(n.scriptVars ?? {}), lockedArmLength: PLAYER_LOCKED_ARM }
+    }
     (n.children ?? []).forEach(walk)
   }
   walk(json)
@@ -1323,8 +1440,8 @@ function seeThroughCamera(json) {
 // The template, its recorded source (what copies are checked against), and the placed copy all agree.
 widenCamera(LEVEL.player.nodeJson)
 widenCamera(souls.TEMPLATE_SOURCE.get(LEVEL.player.id))
-seeThroughCamera(LEVEL.player.nodeJson)
-seeThroughCamera(souls.TEMPLATE_SOURCE.get(LEVEL.player.id))
+playerCamera(LEVEL.player.nodeJson)
+playerCamera(souls.TEMPLATE_SOURCE.get(LEVEL.player.id))
 
 /** A model node over one part, its material linked by id (as a library model's nodes are). */
 function modelNode(key, name, part, materialId, extra = {}) {
@@ -1611,7 +1728,12 @@ function bakeValleyNavMesh(root, navMesh) {
   const soup = { positions: new Float32Array(terrain), indices: new Uint32Array(0) }
 
   const { gather, bakeInto, sources } = souls.navBaker
-  const { surface, obstacles } = gather(root, { skip: n => souls.isMover(n) || n.body?.mass > 0 })
+  const { surface, obstacles } = gather(root, { skip: n => souls.isMover(n) || n.body?.mass > 0 || HOUSE_WALLS.has(n) })
+  // The houses: their walls carve, nothing of them is a surface — the floor inside is the terrain's.
+  for (const [house, walls] of HOUSE_WALLS) {
+    const wallsOnly = { ...house, children: [], body: { ...house.body, shapes: house.body.shapes.filter((_, i) => walls[i]) } }
+    obstacles.push(...gather(wallsOnly).obstacles)
+  }
   const inside = (x, z, m) => Math.abs(x - volume.position[0]) < volume.size[0] / 2 + m && Math.abs(z - volume.position[2]) < volume.size[2] / 2 + m
   let trunks = 0
   for (const layer of foliageLayers) {
@@ -1689,6 +1811,99 @@ function valleyLamps(cavePair) {
     })
   }
   return [...cavePair.map(([x, z]) => ({ kind: 'torch', at: at(x, z, 0.6), yaw: 0 })), ...out]
+}
+
+// =====================================================================================================
+// Exposure volumes
+// =====================================================================================================
+//
+// The scene meters with the Day–Night preset everywhere; these trim it where the camera is. Each sets only
+// the fields it changes, so the night curve and the adaptation speeds stay the scene's. The volume a camera
+// is in is chosen by priority, then by size, so a house interior (priority 1) wins inside the village.
+
+/** One exposure volume node, axis-aligned unless `yawDeg`. */
+function exposureVolume(key, name, center, size, overrides, { priority = 0, blendDistance = 6, yawDeg = 0 } = {}) {
+  return node(name, 'exposureVolume', {
+    id: id(`exposure:${key}`), position: center.map(round3), rotation: [0, round3(yawDeg), 0],
+    exposureVolume: { size: size.map(round3), blendDistance, priority, enabled: true, overrides },
+  })
+}
+
+/** Ground heights over an x/z box, sampled on a grid: [min, max]. */
+function groundRange(minX, maxX, minZ, maxZ, step = 4) {
+  let lo = Infinity, hi = -Infinity
+  for (let x = minX; x <= maxX; x += step) for (let z = minZ; z <= maxZ; z += step) {
+    const h = heights.heightAt(x, z)
+    lo = Math.min(lo, h); hi = Math.max(hi, h)
+  }
+  return [lo, hi]
+}
+
+/** An axis-aligned volume over an x/z box, from a little under its ground to `above` over its highest. */
+function groundVolume(key, name, minX, maxX, minZ, maxZ, overrides, opts = {}, above = 25) {
+  const [lo, hi] = groundRange(minX, maxX, minZ, maxZ)
+  const y0 = lo - 3, y1 = hi + above
+  return exposureVolume(key, name, [(minX + maxX) / 2, (y0 + y1) / 2, (minZ + maxZ) / 2],
+    [maxX - minX, y1 - y0, maxZ - minZ], overrides, opts)
+}
+
+function exposureVolumes() {
+  const out = []
+
+  // The hamlet: every building but the windmill on its hill, and a street's width round them. Timber and
+  // thatch under open sky: lifted a touch, so the village does not read as dark as the meadow it sits in.
+  const village = buildings.filter(b => b.key !== 'windmill')
+  const vMinX = Math.min(...village.map(b => b.x - b.radius)) - 10, vMaxX = Math.max(...village.map(b => b.x + b.radius)) + 10
+  const vMinZ = Math.min(...village.map(b => b.z - b.radius)) - 10, vMaxZ = Math.max(...village.map(b => b.z + b.radius)) + 10
+  out.push(groundVolume('village', 'Village Exposure', vMinX, vMaxX, vMinZ, vMaxZ,
+    { exposureCompensation: 0.15 }, { blendDistance: 8 }))
+
+  // The pond: open water throws the sky back, so hold the highlights a quarter stop down.
+  const pondHalf = POND_HALF + 5
+  out.push(exposureVolume('pond', 'Pond Exposure', [POND.x, POND_LEVEL + 5, POND.z], [pondHalf * 2, 16, pondHalf * 2],
+    { exposureCompensation: -0.25 }, { blendDistance: 5 }))
+
+  // The forests: wherever the trees stand thick, on a 40 m grid, merged into rectangles. Under the canopy
+  // the meter reads the bright gaps, so lift a third of a stop and let it adapt a little further down.
+  const CELL = 40, MIN_TREES = 10
+  const counts = new Map()
+  for (const [x, z] of TREE_POINTS) {
+    if (Math.abs(x) > 260 || Math.abs(z) > 260) continue
+    const k = `${Math.floor(x / CELL)},${Math.floor(z / CELL)}`
+    counts.set(k, (counts.get(k) ?? 0) + 1)
+  }
+  const hot = new Set([...counts].filter(([, n]) => n >= MIN_TREES).map(([k]) => k))
+  const used = new Set()
+  let forests = 0
+  for (const k of [...hot].sort()) {
+    if (used.has(k)) continue
+    const [gx, gz] = k.split(',').map(Number)
+    // Greedy: as far along +x as the run of hot cells goes, then as many rows of that run in +z.
+    let w = 1
+    while (hot.has(`${gx + w},${gz}`) && !used.has(`${gx + w},${gz}`)) w++
+    let h = 1
+    grow: for (;;) {
+      for (let i = 0; i < w; i++) if (!hot.has(`${gx + i},${gz + h}`) || used.has(`${gx + i},${gz + h}`)) break grow
+      h++
+    }
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) used.add(`${gx + i},${gz + j}`)
+    out.push(groundVolume(`forest:${forests}`, `Forest Exposure ${++forests}`,
+      gx * CELL, (gx + w) * CELL, gz * CELL, (gz + h) * CELL,
+      { exposureCompensation: 0.35 }, { blendDistance: 10 }, 30))
+  }
+
+  // Inside each enterable house: lamp-lit and windowed, so the Interior preset's lift and its quicker
+  // adaptation. Priority 1, so it wins over the village round it.
+  for (const b of buildings) {
+    const house = houseShapes.get(b.key)
+    if (!house?.interior) continue
+    const yawDeg = b.yaw * 180 / Math.PI
+    out.push(exposureVolume(`interior:${b.key}`, `${b.prop.name} Interior Exposure`, buildingToWorld(b, house.interior.center),
+      house.interior.size, { exposureCompensation: 0.5, exposureSpeedUp: 2.5, exposureSpeedDown: 1.5 },
+      { priority: 1, blendDistance: 1.5, yawDeg }))
+  }
+  log('exposure volumes', `village, pond, ${forests} forest, ${out.length - 2 - forests} interior`)
+  return out
 }
 
 function valleyScene() {
@@ -1802,7 +2017,7 @@ function valleyScene() {
 
   const player = souls.playerNode(knight.playerModel)
   widenCamera(player)
-  seeThroughCamera(player)
+  playerCamera(player)
   player.position = at(SPAWN.x, SPAWN.z)
   player.rotation = [0, SPAWN.yawDeg, 0]
 
@@ -1825,6 +2040,8 @@ function valleyScene() {
       souls.group('water', 'Water', [pondWater(), pondVolume(), pondZone(), ...floaters()]),
       valleyProbe(),
       souls.group('buildings', 'Buildings', placedBuildings),
+      souls.group('occluders', 'Occluders', buildingOccluders()),
+      souls.group('exposure-volumes', 'Exposure Volumes', exposureVolumes()),
       barrels,
       torches,
       interactables,
@@ -1872,7 +2089,7 @@ const dungeon = buildDungeon({
   id, node, vars, souls, withScript, linkInstance, tex, pbrMaterial, libraryMaterial, modelNode, matJson, texIdsOf, log,
   placeFire, wallTorch, brazierCage, campfire, CAMPFIRE_MATS, CAGE_MAT, CAVE_DARK_MAT, SURFACES, rayHit,
   BARREL_TEMPLATE, breakableBarrelNode, mossRocks, MOSS_ROCK_MAT,
-  ROOT, BUILD, PROPS, PROJECT_NAME, PRESETS, PLAYER_ARM, widenCamera, seeThroughCamera, REFERENCE_ILLUMINANCE, ASSET_HASH_VERSION,
+  ROOT, BUILD, PROPS, PROJECT_NAME, PRESETS, PLAYER_ARM, widenCamera, playerCamera, REFERENCE_ILLUMINANCE, ASSET_HASH_VERSION,
 })
 
 // =====================================================================================================

@@ -206,18 +206,78 @@ export function thinPieces(part, keep, grow, seed) {
 }
 
 /**
+ * `part` without the connected pieces (leaf cards) that hang in the air: a piece is kept when one of its
+ * vertices lies within `reach` of the wood in `anchors` (sampled along every edge, so a long decimated
+ * twig still holds the leaves along it). Simplifying the branches loses the finest twigs, and the cards
+ * they carried would float.
+ */
+export function anchoredPieces(part, anchors, reach) {
+  const cell = reach
+  const key = (x, y, z) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`
+  const wood = new Map()
+  const add = (x, y, z) => {
+    const k = key(x, y, z)
+    let list = wood.get(k)
+    if (!list) wood.set(k, list = [])
+    list.push(x, y, z)
+  }
+  for (const a of anchors) {
+    const P = a.positions, I = a.indices
+    for (let i = 0; i < I.length; i += 3) for (let e = 0; e < 3; e++) {
+      const p = I[i + e] * 3, q = I[i + (e + 1) % 3] * 3
+      const len = Math.hypot(P[q] - P[p], P[q + 1] - P[p + 1], P[q + 2] - P[p + 2])
+      const steps = Math.max(1, Math.ceil(len / (reach / 2)))
+      for (let s = 0; s < steps; s++) {
+        const t = s / steps
+        add(P[p] + (P[q] - P[p]) * t, P[p + 1] + (P[q + 1] - P[p + 1]) * t, P[p + 2] + (P[q + 2] - P[p + 2]) * t)
+      }
+    }
+  }
+  const near = (x, y, z) => {
+    const cx = Math.floor(x / cell), cy = Math.floor(y / cell), cz = Math.floor(z / cell)
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+      const list = wood.get(`${cx + dx},${cy + dy},${cz + dz}`)
+      if (!list) continue
+      for (let i = 0; i < list.length; i += 3)
+        if ((list[i] - x) ** 2 + (list[i + 1] - y) ** 2 + (list[i + 2] - z) ** 2 <= reach * reach) return true
+    }
+    return false
+  }
+
+  const n = part.positions.length / 3
+  const parent = new Int32Array(n).map((_, i) => i)
+  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x] } return x }
+  for (let i = 0; i < part.indices.length; i += 3) {
+    const a = find(part.indices[i]), b = find(part.indices[i + 1])
+    parent[b] = a
+    parent[find(part.indices[i + 2])] = a
+  }
+  const anchored = new Set()
+  for (let v = 0; v < n; v++) {
+    const r = find(v)
+    if (!anchored.has(r) && near(part.positions[v * 3], part.positions[v * 3 + 1], part.positions[v * 3 + 2])) anchored.add(r)
+  }
+  const indices = []
+  for (let i = 0; i < part.indices.length; i += 3)
+    if (anchored.has(find(part.indices[i]))) indices.push(part.indices[i], part.indices[i + 1], part.indices[i + 2])
+  return { ...part, indices: Uint32Array.from(indices) }
+}
+
+/**
  * The jacaranda as [trunk, branches, leaves] parts, base centre of the trunk at the origin, brought down
- * from the scan's 3.9M triangles to ~90k: a tenth of the leaf cards (grown to cover), then QEM on all
- * three. Not the pine's 477k: a foliage layer embeds every level of its mesh in the scene, and the
- * Valley's scene JSON already sits near V8's ~512 MB string ceiling (bundleAssetsRealProject.test.ts).
+ * from the scan's 3.9M triangles: a tenth of the leaf cards (grown to cover), then QEM on all three, and
+ * the cards whose twig the simplified branches lost dropped (`anchoredPieces`). The trunk and branches
+ * keep enough of the scan (a tenth, a thirtieth) to stay round and carry their leaves. Still well under the
+ * pine's 477k: a foliage layer embeds every level of its mesh in the scene, and the Valley's scene JSON
+ * already sits near V8's ~512 MB string ceiling (bundleAssetsRealProject.test.ts).
  * Its glTF material order is branches, trunk, leaves.
  */
-export function buildJacaranda(root, file, { leafKeep = 0.1, leafGrow = 1.9, leafRatio = 0.2, branchRatio = 0.02, trunkRatio = 0.06 } = {}) {
+export function buildJacaranda(root, file, { leafKeep = 0.1, leafGrow = 1.9, leafRatio = 0.2, branchRatio = 0.035, trunkRatio = 0.1, leafReach = 0.5 } = {}) {
   const parts = partsOf(readGltf(file))
   const pick = (material) => mergeParts(parts.filter(p => p.material === material), undefined, material)
   const branches = decimate(root, { ...pick(0), name: 'Branches' }, branchRatio)
   const trunk = decimate(root, { ...pick(1), name: 'Trunk' }, trunkRatio)
-  const leaves = decimate(root, { ...thinPieces(pick(2), leafKeep, leafGrow, 0x1ac4), name: 'Leaves' }, leafRatio)
+  const leaves = anchoredPieces(decimate(root, { ...thinPieces(pick(2), leafKeep, leafGrow, 0x1ac4), name: 'Leaves' }, leafRatio), [trunk, branches], leafReach)
   normalizeParts([trunk, branches, leaves], { reference: [trunk] })
   return { trunk, branches, leaves }
 }

@@ -11,6 +11,7 @@ import path from 'path'
 import { boundsOf, decimate } from '../meshes.mjs'
 import { loadStructure, chunkParts, doorFrames, openDoorways, removePieces } from './structure.mjs'
 import { buildColliders, chunkBoxes, reachability, walkableSoup } from './collision.mjs'
+import { fitOccluders } from '../occluders.mjs'
 import { buildBench, buildBookcase, buildCage, buildChain, buildCrate, buildLadder, buildRack, buildStaticBarrel, buildTable, buildWeapon } from './props.mjs'
 import * as L from './layout.mjs'
 
@@ -82,10 +83,15 @@ export function buildDungeon(kit) {
 
   // ----- colliders -------------------------------------------------------------------------------------
 
-  const { boxes } = buildColliders(structure.parts, structure.bounds)
+  const { boxes, grid } = buildColliders(structure.parts, structure.bounds)
   const kinds = {}
   for (const b of boxes) kinds[b.kind] = (kinds[b.kind] ?? 0) + 1
   log('dungeon', `colliders: ${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(', ')}`)
+
+  // Occluders down the middle of the walls between the rooms (occluders.mjs): a room through a wall is
+  // never drawn. No bodies, and a group of their own, beside the Collision group rather than in it.
+  const occluderBoxes = fitOccluders(grid, boxes.filter(b => b.kind === 'wall'))
+  log('dungeon', `${occluderBoxes.length} occluders`)
 
   // ===================================================================================================
   // Props: library models, placed as linked copies
@@ -311,15 +317,21 @@ export function buildDungeon(kit) {
                     partName === 'Pillars' ? { cameraDither: true } : {})))))
 
     // The colliders, one static body per 10 m cell and per role: walls (which swings bounce off and the
-    // navmesh carves round) apart from floors, ramps and wedges (which it walks on).
+    // navmesh carves round) apart from floors, ramps and wedges (which it walks on), and the pillars' walls
+    // apart from the rest — flagged `cameraDither` like the pillars themselves, so the player camera sees
+    // through them where every other wall and ceiling pulls it in.
     const collision = []
-    for (const role of ['walls', 'floors']) {
-      const mine = boxes.filter(b => role === 'walls' ? b.kind === 'wall' || b.kind === 'ceiling' : b.kind !== 'wall' && b.kind !== 'ceiling')
-      for (const { key, boxes: list } of chunkBoxes(mine, 10)) {
+    const ROLES = {
+      walls: { name: 'Walls', of: b => (b.kind === 'wall' && !b.seeThrough) || b.kind === 'ceiling', variables: { blocksSwings: true } },
+      pillars: { name: 'Pillars', of: b => b.kind === 'wall' && b.seeThrough, variables: { blocksSwings: true }, extra: { cameraDither: true } },
+      floors: { name: 'Floors', of: b => b.kind !== 'wall' && b.kind !== 'ceiling', variables: { navObstacle: false } },
+    }
+    for (const [role, R] of Object.entries(ROLES)) {
+      for (const { key, boxes: list } of chunkBoxes(boxes.filter(R.of), 10)) {
         const [cx, cz] = key.split(',').map(v => (parseInt(v) + 0.5) * 10)
-        const n = node(`${role === 'walls' ? 'Walls' : 'Floors'} ${key}`, 'node', {
+        const n = node(`${R.name} ${key}`, 'node', {
           id: id(`dungeon:collision:${role}:${key}`), position: [cx, 0, cz],
-          variables: vars(role === 'walls' ? { blocksSwings: true } : { navObstacle: false }),
+          variables: vars(R.variables), ...(R.extra ?? {}),
         })
         n.body = {
           ...souls.staticBody('box'),
@@ -361,7 +373,7 @@ export function buildDungeon(kit) {
 
     const player = souls.playerNode(playerModel)
     kit.widenCamera(player)
-    kit.seeThroughCamera(player)
+    kit.playerCamera(player)
     player.position = L.SPAWN.position
     player.rotation = [0, L.SPAWN.yaw, 0]
 
@@ -379,7 +391,10 @@ export function buildDungeon(kit) {
           id: id('dungeon:manager'), children: [souls.banner(), souls.soundsGroup('dungeon:manager', souls.SOUNDS.manager, { music: souls.MUSIC_CUES })],
         }), 'SoulsGameManager'),
         linkInstance(souls.LEVEL.player, player),
-        souls.group('dungeon:level', 'Level', [structureNode, souls.group('dungeon:collision', 'Collision', collision)]),
+        souls.group('dungeon:level', 'Level', [structureNode, souls.group('dungeon:collision', 'Collision', collision),
+          souls.group('dungeon:occluders', 'Occluders', occluderBoxes.map((o, i) => node(`Occluder ${i + 1}`, 'occluder', {
+            id: id(`dungeon:occluder:${i}`), position: o.center, occluder: { size: o.size, enabled: true },
+          })))]),
         props, barrels,
         souls.group('dungeon:fires', 'Fires', fireNodes),
         souls.group('dungeon:shafts', 'Moonlight', shafts()),

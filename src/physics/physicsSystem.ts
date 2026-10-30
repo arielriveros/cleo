@@ -951,15 +951,17 @@ export class PhysicsSystem {
    * false` ghosts still block the camera: the solver and camera channels are independent.
    * @param reject Called with the owning Node of each candidate hit (null for bodies with no owner, e.g.
    *               the terrain heightfield — those should normally be kept). Return true to skip.
+   * @param seeThrough The probe of a 'dither' camera rig: what opted into the see-through hole
+   *               (`cameraDither`) does not block it.
    */
-  public raycastCamera(from: vec3, to: vec3, reject?: (owner: Node | null) => boolean): number | null {
+  public raycastCamera(from: vec3, to: vec3, reject?: (owner: Node | null) => boolean, seeThrough: boolean = false): number | null {
     // The standard filters are turned OFF and delegated wholesale to skipCameraHit; applying both would
     // change which bodies block a camera.
     const hit = this.raycast(from, to, {
       checkCollisionResponse: false,
       includeTriggers: true,
       includeGhosts: true,
-      reject: (_owner, body) => skipCameraHit(body as CameraProbeBody | null, reject),
+      reject: (_owner, body) => skipCameraHit(body as CameraProbeBody | null, reject, seeThrough),
     });
     return hit ? hit.distance : null;
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildColliders, reachability, topAt, walkableSoup } from '../tools/valley/dungeon/collision.mjs';
+import { blockedAt, buildColliders, reachability, topAt, walkableSoup } from '../tools/valley/dungeon/collision.mjs';
 import { doorFrames, openDoorways } from '../tools/valley/dungeon/structure.mjs';
 
 // The Valley dungeon's colliders are generated from its render mesh (tools/valley/dungeon/collision.mjs):
@@ -129,5 +129,47 @@ describe('dungeon colliders from a render mesh', () => {
             const e1 = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], e2 = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]];
             expect(e1[2] * e2[0] - e1[0] * e2[2]).toBeGreaterThan(0);
         }
+    });
+});
+
+/** A thin wall slab from (x0, z0) to (x1, z1), `thick` across, `height` tall, as a part: two quads, one each side. */
+function diagonalWall(name: string, x0: number, z0: number, x1: number, z1: number, thick: number, height: number): Part {
+    const len = Math.hypot(x1 - x0, z1 - z0);
+    const nx = -(z1 - z0) / len * thick / 2, nz = (x1 - x0) / len * thick / 2;
+    const positions: number[] = [], indices: number[] = [];
+    for (const s of [1, -1]) {
+        const base = positions.length / 3;
+        const ax = x0 + nx * s, az = z0 + nz * s, bx = x1 + nx * s, bz = z1 + nz * s;
+        positions.push(ax, 0, az, bx, 0, bz, bx, height, bz, ax, height, az);
+        indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+    return { name, material: 0, positions: Float32Array.from(positions), normals: new Float32Array(positions.length), uvs: new Float32Array(positions.length / 3 * 2), indices: Uint32Array.from(indices) };
+}
+
+describe('dungeon colliders: few boxes', () => {
+    it('makes a hollow pillar one box, flagged see-through', () => {
+        const floor = boxPart('Floors', [-3, -0.3, -3], [3, 0, 3]);
+        // Four faces of a 1 m square pillar, open inside the way the dungeon's are modelled.
+        const pillar = boxPart('Pillars', [-0.5, 0, -0.5], [0.5, 4, 0.5]);
+        const parts = [floor, pillar];
+        const walls = buildColliders(parts, boundsOf(parts)).boxes.filter(b => b.kind === 'wall');
+        expect(walls).toHaveLength(1);
+        expect(walls[0].seeThrough).toBe(true);
+        expect(walls[0].size[0]).toBeGreaterThanOrEqual(1);
+        expect(walls[0].size[2]).toBeGreaterThanOrEqual(1);
+    });
+
+    it('lays a diagonal wall as one turned box that still blocks along its whole length', () => {
+        const floor = boxPart('Floors', [-6, -0.3, -6], [6, 0, 6]);
+        const wall = diagonalWall('Walls', -4, -3, 4, 3, 0.3, 3);
+        const parts = [floor, wall];
+        const walls = buildColliders(parts, boundsOf(parts)).boxes.filter(b => b.kind === 'wall');
+        expect(walls.length).toBeLessThanOrEqual(2);
+        const turned = walls.find(b => b.rotation[1] !== 0)!;
+        expect(turned).toBeDefined();
+        // Blocks a capsule standing on the wall's line anywhere along it, and not one 1.5 m off it.
+        for (const t of [-0.8, -0.4, 0, 0.4, 0.8])
+            expect(blockedAt(walls, 4 * t, 0, 3 * t)).not.toBeNull();
+        expect(blockedAt(walls, -0.9, 0, 1.2)).toBeNull();
     });
 });

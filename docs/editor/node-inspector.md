@@ -80,9 +80,10 @@ rather than moving the camera itself. Its groups:
     solids the character collides with. A body blocks it only while its **Camera Collision** channel is
     on (Physics panel); trigger volumes, the follow and look-at targets and the rig's own character are
     always ignored.
-  - **Dither** keeps the arm at full length and dithers away the part of each obstruction that blocks
-    the view, inside a hole around the camera-to-player line. Only nodes with **See-through to camera**
-    on (and foliage rules with it) are cut; anything else still blocks. **Hole Radius** is the hole's
+  - **Dither** dithers away the part of each see-through obstruction that blocks the view, inside a
+    hole around the camera-to-player line, instead of pulling in for it. Only nodes with **See-through to
+    camera** on (and foliage rules with it) are cut, and their colliders stop pulling the camera in;
+    anything else (a wall, a ceiling) still pulls it in, as **Retract** does. **Hole Radius** is the hole's
     size in metres, **Hole Strength** how much of the surface goes at its centre. Shadows are
     unaffected, and under TAA the dither reads as a smooth see-through.
 - **Shake** — position and rotation amplitude, frequency and decay. Shake shows only while the scene

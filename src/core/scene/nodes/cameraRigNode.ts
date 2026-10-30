@@ -92,9 +92,10 @@ export class CameraRigNode extends Node {
     public collisionIgnoreIds: string[] = [];
     /**
      * What the rig does when something comes between the camera and the pivot. `'retract'` pulls the
-     * camera in along the arm (the probe above). `'dither'` keeps the arm at full length and cuts a
-     * dithered see-through hole instead, in every node that opted in with `Node.cameraDither` (and
-     * every foliage rule with `cameraDither`). Anything that did not opt in still blocks the view.
+     * camera in along the arm (the probe above). `'dither'` cuts a dithered see-through hole instead in
+     * every node that opted in with `Node.cameraDither` (and every foliage rule with `cameraDither`), and
+     * the probe ignores their bodies; anything that did not opt in (a wall, a ceiling) still pulls the
+     * camera in, as `'retract'` does.
      */
     public collisionMode: CameraCollisionMode = 'retract';
     /** `'dither'` mode: radius of the hole around the camera -> pivot line, metres. */
@@ -478,14 +479,15 @@ export class CameraRigNode extends Node {
     }
 
     private _updateCollision(dt: number, snap: boolean, boomWorld: vec3, boomDistance: number, worldRotation: quat): void {
-        // 'dither' never pulls the camera in: the obstruction is see-through instead (`_updateSeeThrough`).
-        if (!this.collisionEnabled || this.collisionMode === 'dither' || snap || boomDistance < 1e-4) {
+        if (!this.collisionEnabled || snap || boomDistance < 1e-4) {
             this._armRatio = 1;
             return;
         }
 
+        // 'dither' still pulls the camera in for everything else, but not for what opted into the hole: that
+        // is see-through instead (`_updateSeeThrough`).
         const direction = vec3.scale(CameraRigNode._probeDir, boomWorld, 1 / boomDistance);
-        const hit = this._probe(direction, boomDistance, worldRotation);
+        const hit = this._probe(direction, boomDistance, worldRotation, this.collisionMode === 'dither');
         const target = collisionRatio(hit, boomDistance, this.collisionRadius, this.collisionMinRatio);
 
         // Fast in, slow out: easing the pull-in leaves the camera inside the wall for several frames,
@@ -504,7 +506,7 @@ export class CameraRigNode extends Node {
      * refreshed until step 8 of `lateUpdate`. Uses its own scratch vectors — `_v0.._v3` still hold the
      * caller's boom, which is read again after this returns.
      */
-    private _probe(direction: vec3, distance: number, worldRotation: quat): number | null {
+    private _probe(direction: vec3, distance: number, worldRotation: quat, seeThrough: boolean): number | null {
         const physics = this._scene?.physics;
         if (!physics) return null;
 
@@ -530,7 +532,7 @@ export class CameraRigNode extends Node {
             // A cannon ray is a segment, so the boom length goes into the endpoint.
             vec3.scaleAndAdd(to, from, direction, distance);
 
-            const hit = physics.raycastCamera(from, to, this._rejectHit);
+            const hit = physics.raycastCamera(from, to, this._rejectHit, seeThrough);
             if (hit !== null && (nearest === null || hit < nearest)) nearest = hit;
         }
         return nearest;

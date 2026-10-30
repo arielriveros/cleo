@@ -1,7 +1,7 @@
 // The hamlet's buildings: four FBX props through assimp, as static parts per material.
 //
 // The exports disagree about their units. The house is centimetres (19 m across, 6 m tall — an old
-// L-shaped farmhouse). The other three came out of one Blender scene with no unit stamp and read
+// L-shaped farmhouse), drawn a third over so the knight fits through its doors. The other three came out of one Blender scene with no unit stamp and read
 // 25-50 m tall in centimetres, which no thatched hut is; each is therefore scaled to a stated real
 // HEIGHT instead, and the height is the one number to change if a building looks wrong.
 //
@@ -23,9 +23,12 @@ const HUB = [-1169, 2880, 2]
  */
 export const PROPS = [
   // 90k triangles of scan-like detail; QEM to a third reads the same from a few metres away.
-  { key: 'house', name: 'Old House', file: 'house/003_fbx.fbx', scale: 0.01, decimate: 0.35, surfaces: { 0: 'house' } },
+  // Both houses are enterable (houses.mjs) and well over the artists' scale: they stand on raised floors
+  // (0.35 m or so), and the 2 m knight must clear their doorways from there. The build logs each house's
+  // doorway headroom over its floor.
+  { key: 'house', name: 'Old House', file: 'house/003_fbx.fbx', scale: 0.0175, decimate: 0.35, surfaces: { 0: 'house' } },
   // The artist's own LOD1: LOD0's thatch is 117k triangles of cards, LOD1's 7k of the same silhouette.
-  { key: 'long-house', name: 'Long House', file: 'long_house/model/LOD1_long_house.fbx', height: 7, surfaces: { 0: 'thatch-cutout', 1: 'boards' } },
+  { key: 'long-house', name: 'Long House', file: 'long_house/model/LOD1_long_house.fbx', height: 10.3, surfaces: { 0: 'thatch-cutout', 1: 'boards' } },
   { key: 'silo', name: 'Granary', file: 'silo/model/silo.fbx', height: 8, surfaces: { 0: 'boards', 1: 'thatch', 2: 'thatch-cutout' } },
   { key: 'windmill', name: 'Windmill', file: 'windmill/model/construction.fbx', sails: 'windmill/model/wings.fbx', height: 12, surfaces: { 0: 'boards' } },
 ]

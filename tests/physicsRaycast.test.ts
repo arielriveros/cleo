@@ -112,6 +112,20 @@ describe('skipCameraHit', () => {
         const reject = (owner: any) => owner !== null && owner.name === 'player';
         expect(skipCameraHit({}, reject)).toBe(false);
     });
+
+    // A 'dither' rig sees through what opted into its hole (a pillar, a tree) and pulls in for the rest.
+    it('lets a see-through probe pass bodies that opted into the hole, and only those', () => {
+        const pillar = { owner: { cameraDither: true } as any };
+        const tree = { cameraDither: true };
+        const wall = { owner: { cameraDither: false } as any };
+        expect(skipCameraHit(pillar, undefined, true)).toBe(true);
+        expect(skipCameraHit(tree, undefined, true)).toBe(true);
+        expect(skipCameraHit(wall, undefined, true)).toBe(false);
+        expect(skipCameraHit({}, undefined, true)).toBe(false);
+        // A 'retract' rig pulls in for all of them.
+        expect(skipCameraHit(pillar)).toBe(false);
+        expect(skipCameraHit(tree)).toBe(false);
+    });
 });
 
 // The general filter behind PhysicsSystem.raycast. Its defaults are what "solid" ordinarily means, which is

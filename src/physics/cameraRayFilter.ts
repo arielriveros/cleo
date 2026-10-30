@@ -8,6 +8,11 @@ export interface CameraProbeBody {
     isTrigger?: boolean;
     /** The per-body "camera collision" channel. Absent means solid. */
     cameraCollision?: boolean;
+    /**
+     * A body the camera may see through (a pooled foliage collider of a `cameraDither` rule). Bodies a
+     * node owns answer through `owner.cameraDither` instead.
+     */
+    cameraDither?: boolean;
     owner?: Node | null;
 }
 
@@ -17,14 +22,18 @@ export interface CameraProbeBody {
  * `cameraCollision` is tested as `=== false` so bodies without the field (e.g. terrain) count as solid.
  * @param reject Caller's ignore rule, receiving the owning Node — null for ownerless bodies like the
  *               terrain heightfield, which should normally be kept.
+ * @param seeThrough A 'dither' camera's probe: bodies that opted into the see-through hole (their own
+ *               `cameraDither`, or their owner's) are cut by the renderer instead, so they block nothing.
  */
 export function skipCameraHit(
     body: CameraProbeBody | null | undefined,
-    reject?: (owner: Node | null) => boolean
+    reject?: (owner: Node | null) => boolean,
+    seeThrough: boolean = false
 ): boolean {
     if (!body) return true;
     if (body.isTrigger) return true;
     if (body.cameraCollision === false) return true;
+    if (seeThrough && (body.cameraDither || body.owner?.cameraDither)) return true;
     if (reject && reject(body.owner ?? null)) return true;
     return false;
 }

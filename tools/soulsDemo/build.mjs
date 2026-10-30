@@ -667,19 +667,33 @@ const lodOf = (levels, cullDistance = 0) => ({
 const GLOW_REFERENCE_EV = 5
 const exposureAtEV = ev => REFERENCE_ILLUMINANCE / (1.2 * 2 ** ev)
 const GLOW_LUMINANCE = exposureAtEV(GLOW_REFERENCE_EV) ** (GLOW_EXPOSURE_WEIGHT - 1)
-function physicalEmitter(e) {
+/**
+ * Magic is not a fire: a sorcerer's bolt must read at noon as well as in a crypt. Its effects take only
+ * part of the exposure (ParticleSystemNode exposureWeight MAGIC.weight) and are matched to how they were
+ * tuned at a brighter EV, so in full sun they keep about a quarter of that look, where a torch's embers
+ * keep a five-hundredth — and on a moonlit night they glow brighter rather than blaze.
+ */
+const MAGIC = { exposureWeight: 0.3, referenceEV: 7 }
+/** The colour-intensity factor that carries a glow tuned at GLOW_EXPOSURE_WEIGHT over to `weight`, matched at `ev`. */
+const glowLuminance = (weight, ev) => exposureAtEV(ev) ** (GLOW_EXPOSURE_WEIGHT - weight)
+function physicalEmitter(e, luminance = GLOW_LUMINANCE) {
   if (e.render?.lit) return e
   if ((e.render?.blend ?? 'alpha') !== 'additive') return { ...e, render: { ...e.render, lit: true } }
   const tidy = v => +v.toPrecision(3)
   return {
     ...e,
-    init: e.init.map(m => (m.type === 'color' ? { ...m, params: { ...m.params, intensity: tidy((m.params.intensity ?? 1) * GLOW_LUMINANCE) } } : m)),
+    init: e.init.map(m => (m.type === 'color' ? { ...m, params: { ...m.params, intensity: tidy((m.params.intensity ?? 1) * luminance) } } : m)),
   }
 }
 
-function vfx(key, name, emitters, bounds = { center: [0, 1, 0], extents: [2, 2, 2] }, lod = undefined) {
-  const system = parseParticleSystem({ version: 1, emitters: emitters.map(physicalEmitter), bounds, lod })
+/** An effect's `exposureWeight` below 1, for the nodes `particles` places (not part of the library asset). */
+const VFX_EXPOSURE_WEIGHT = new WeakMap()
+/** `exposureWeight`: how much of the camera exposure the effect's nodes take (all of it, unless magic). */
+function vfx(key, name, emitters, bounds = { center: [0, 1, 0], extents: [2, 2, 2] }, lod = undefined, { exposureWeight = 1, referenceEV = GLOW_REFERENCE_EV } = {}) {
+  const luminance = glowLuminance(exposureWeight, referenceEV)
+  const system = parseParticleSystem({ version: 1, emitters: emitters.map(e => physicalEmitter(e, luminance)), bounds, lod })
   const asset = { id: stableId(`vfx:${key}`), name, system }
+  if (exposureWeight < 1) VFX_EXPOSURE_WEIGHT.set(asset, exposureWeight)
   particleSystems.push(asset)
   return asset
 }
@@ -764,7 +778,7 @@ const VFX = {
         mod('sizeOverLife', { curve: { keys: [{ t: 0, v: 1 }, { t: 1, v: 0.2 }] } })],
       render: { blend: 'additive', softness: 0 },
     }),
-  ], { center: [0, 0, 0], extents: [1.5, 1.5, 1.5] }),
+  ], { center: [0, 0, 0], extents: [1.5, 1.5, 1.5] }, undefined, MAGIC),
   // Where a bolt strikes the world: an organic bloom of magic rather than a spray. A white-hot core, a
   // burst of petals curling on a vortex and turbulence as they slow, a ring racing out across the hit,
   // and motes that drift up after it. (The player-hit splash stays `boltImpact`.)
@@ -812,7 +826,7 @@ const VFX = {
         mod('colorOverLife', { gradient: fade(1) })],
       render: { blend: 'additive', softness: 0 },
     }),
-  ], { center: [0, 0.3, 0], extents: [2.5, 2, 2.5] }),
+  ], { center: [0, 0.3, 0], extents: [2.5, 2, 2.5] }, undefined, MAGIC),
   boltImpact: vfx('bolt-impact', 'Magic Bolt Impact', [
     emitter('impact-burst', 'Burst', {
       capacity: 128, looping: false, duration: 1,
@@ -834,7 +848,7 @@ const VFX = {
         mod('colorOverLife', { gradient: fade(1) })],
       render: { blend: 'additive', alignment: 'velocity', stretch: 0.4, softness: 0 },
     }),
-  ], { center: [0, 0, 0], extents: [2.5, 2, 2.5] }),
+  ], { center: [0, 0, 0], extents: [2.5, 2, 2.5] }, undefined, MAGIC),
   hitSpark: vfx('hit-spark', 'Hit Spark', [
     emitter('spark-burst', 'Sparks', {
       capacity: 64, looping: false, duration: 1,
@@ -927,6 +941,7 @@ function particles(key, name, asset, { position = [0, 0, 0], playOnStart = true,
     id: stableId(`particles:${key}`), position, scale,
     particleSystem: {
       system: clone(asset.system), particleSystemId: asset.id, playOnStart, simulationSpeed: 1, spawnRateScale: 1, tint: [1, 1, 1, 1],
+      ...(VFX_EXPOSURE_WEIGHT.has(asset) ? { exposureWeight: VFX_EXPOSURE_WEIGHT.get(asset) } : {}),
     },
   })
 }

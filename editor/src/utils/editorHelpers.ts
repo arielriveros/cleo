@@ -1218,8 +1218,11 @@ export function reconcileEditorHelpers(
       if (show('probes') && !existing) ensureProbeHelper(node);
       else if (!show('probes') && existing) node.removeChild(existing);
     } else if (node instanceof NavMeshNode) {
-      // Always: the icon is how the navmesh is selected in the viewport, whatever its wireframe toggle.
-      ensureNavMeshIcon(node);
+      // Always while authoring: the icon is how the navmesh is selected in the viewport, whatever its
+      // wireframe toggle. Never in play, where nothing is selected and it is only clutter.
+      const existing = node.getChildByName(NAVMESH_ICON)[0];
+      if (channel === 'editor' && !existing) ensureNavMeshIcon(node);
+      else if (channel !== 'editor' && existing) node.removeChild(existing);
     } else if (node instanceof ExposureVolumeNode) {
       const existing = node.getChildByName(EXPOSURE_HELPER)[0];
       if (show('exposureVolumes') && !existing) ensureExposureHelper(node);

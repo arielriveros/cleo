@@ -13,7 +13,9 @@
 //     up through the steep faces above it (to the ceiling for a wall, to its top for a sarcophagus);
 //   - a CEILING slab under the lowest down face over it, for the camera boom.
 //
-// Cells that agree are greedy-merged into rectangles, one box each. Below 0.4 m a steep face is a STEP, not
+// Cells that agree to within a tolerance are merged into rectangles, one box each (`cover`); a pillar or
+// another small solid clump of wall is one box (`compactClumps`), and a diagonal wall one turned box
+// (`chainSlivers`) rather than a staircase of slivers. Below 0.4 m a steep face is a STEP, not
 // a wall, and the engine has no step-up: every step between floors is given a WEDGE, a 30° box over its
 // edge, and every staircase a RAMP, a single tilted box whose top touches each nosing. Boxes are grouped
 // into one static body per 10 m chunk, because the broadphase pairs bodies, not shapes.
@@ -28,13 +30,42 @@ const BINS = 80                    // -8 m .. +12 m
 const WALL_LOW = 0.4               // a steep face below this is a step
 const WALL_HIGH = 1.6
 const FLOOR_THICK = 0.3
+// How far the cells merged into one box may disagree (see `cover`). The fewer boxes, the cheaper every
+// broadphase pair and every camera ray; a few centimetres of floor or a little more wall changes nothing.
+const FLOOR_TOL = 0.06
+const WALL_BASE_TOL = 0.3
+const WALL_TOP_TOL = 0.75
+const CEILING_TOL = 1.0
+const CEILING_HEADROOM = 1.9
+/** Square metres: an enclosed pocket up to this size is filled solid (see `fillEnclosed`). */
+const MAX_POCKET = 2.5
+/** A wall clump this small (square metres of bounding box) and this full is one box (`compactClumps`). */
+const CLUMP_AREA = 4
+const CLUMP_FILL = 0.6
+/** A clump of any size this full of wall is its bounding box. */
+const SOLID_FILL = 0.85
+/**
+ * Diagonal walls (`chainSlivers`): a sliver is at most SLIVER cells across, a chain joins slivers up to
+ * CHAIN_GAP cells apart, and its turned box is at most CHAIN_WIDTH metres across.
+ */
+const SLIVER = 2
+const CHAIN_GAP = 2
+const CHAIN_WIDTH = 1.0
 const MAX_WEDGE_STEP = 0.36        // taller than this, an edge is a ledge (or a wall), not a step
+// Lower than this, the capsule's round foot rides up an edge on its own: no wedge (the floor tolerance
+// already merges most of these, and every one was a box).
+const MIN_WEDGE_STEP = 0.08
 const WEDGE_SLOPE = Math.tan(30 * Math.PI / 180)
 
 /** The parts whose up faces are walked on. Everything else only ever blocks. */
 export const FLOOR_PARTS = new Set(['Floors', 'Stairs', 'Gallery', 'Arena', 'Throne', 'Grate'])
 /** Parts that are not solid at all (bars you see through but the generator would wall in are kept). */
 const IGNORED_PARTS = new Set(['Windows', 'Oculus', 'Beams', 'Portcullis'])
+/**
+ * Parts the player camera sees through (the scene gives their nodes `cameraDither`): their walls are kept
+ * apart and flagged `seeThrough`, so they can go on bodies of their own that the camera rig ignores.
+ */
+export const SEE_THROUGH_PARTS = new Set(['Pillars'])
 
 /** Rasterise the structure. Returns the grid: per-cell floors, steep and down-face bins. */
 export function rasterise(parts, bounds) {
@@ -42,6 +73,8 @@ export function rasterise(parts, bounds) {
   const W = Math.ceil((bounds.max[0] + 1 - x0) / RES), H = Math.ceil((bounds.max[2] + 1 - z0) / RES)
   const floors = Array.from({ length: W * H }, () => [])   // [{ y, stairs }]
   const steep = new Uint8Array(W * H * BINS)
+  // Cells only a see-through part (SEE_THROUGH_PARTS) stands in (=== 1): their walls are boxes of their own.
+  const seeThrough = new Uint8Array(W * H)
   const down = new Uint8Array(W * H * BINS)
   const binOf = (y) => Math.max(0, Math.min(BINS - 1, Math.floor((y - Y0) / BIN)))
   const cellOf = (x, z) => {
@@ -53,6 +86,7 @@ export function rasterise(parts, bounds) {
     if (IGNORED_PARTS.has(part.name)) continue
     const isFloor = FLOOR_PARTS.has(part.name)
     const isStairs = part.name === 'Stairs'
+    const isSeeThrough = SEE_THROUGH_PARTS.has(part.name)
     const P = part.positions, I = part.indices
     for (let k = 0; k < I.length; k += 3) {
       const a = I[k] * 3, b = I[k + 1] * 3, c = I[k + 2] * 3
@@ -90,7 +124,10 @@ export function rasterise(parts, bounds) {
           const u = i / n, v = j / n
           const x = ax + e1x * u + e2x * v, y = ay + e1y * u + e2y * v, z = az + e1z * u + e2z * v
           const cell = cellOf(x, z)
-          if (cell >= 0) target[cell * BINS + binOf(y)] = 1
+          if (cell < 0) continue
+          target[cell * BINS + binOf(y)] = 1
+          // Bit 1: a see-through part has a face here; bit 2: something solid does too (it wins).
+          if (target === steep) seeThrough[cell] |= isSeeThrough ? 1 : 2
         }
       }
     }
@@ -102,7 +139,8 @@ export function rasterise(parts, bounds) {
     const list = floors[i].sort((p, q) => p.y - q.y)
     floors[i] = list.filter((f, k) => k === list.length - 1 || list[k + 1].y - f.y >= 1.0)
   }
-  return { x0, z0, W, H, floors, steep, down, binOf }
+  // `res`/`y0`/`bin`/`bins` describe the steep-face bins for readers outside this module (occluders.mjs).
+  return { x0, z0, W, H, floors, steep, down, seeThrough, binOf, res: RES, y0: Y0, bin: BIN, bins: BINS }
 }
 
 /**
@@ -163,37 +201,237 @@ function columnOver(grid, cell, floorIndex, rampOver = null) {
     wall = Math.min(lid, Y0 + (top + 1) * BIN)
     break
   }
-  return { h, wall, ceiling }
+  return { h, wall, ceiling, lid }
 }
 
 /**
- * Greedy rectangles over the grid: cells grouped by `keyOf(cell)` (null = none), each rectangle grown
- * along X then Z while every cell in it shares the key.
+ * Greedy rectangles over the grid, each grown along X then Z. Cells join one when their VALUES agree to
+ * within `tol`, and a rectangle may grow over cells an earlier one already covers (only its seed must be
+ * new). `valuesOf(cell)` is a number array (null = none), `tol` one tolerance per component. Each rectangle
+ * `{ gx, gz, w, h, lo, hi }` carries the `lo` and `hi` of every component over its cells.
+ *
+ * Far fewer boxes than exact keys: a floor whose tiles wander by a centimetre or two, or a wall whose top
+ * steps with the masonry, is one box rather than a strip per value; and overlapping lets an L or a T be two
+ * boxes instead of a staircase of slivers.
  */
-function greedy(grid, keyOf) {
+export function cover(grid, valuesOf, tol) {
   const { W, H } = grid
-  const keys = new Array(W * H)
-  for (let i = 0; i < W * H; i++) keys[i] = keyOf(i)
-  const used = new Uint8Array(W * H)
+  const vals = new Array(W * H)
+  for (let i = 0; i < W * H; i++) vals[i] = valuesOf(i)
+  const covered = new Uint8Array(W * H)
   const rects = []
+  const fits = (j, lo, hi) => {
+    const v = vals[j]
+    if (!v) return false
+    for (let c = 0; c < v.length; c++) if (Math.max(hi[c], v[c]) - Math.min(lo[c], v[c]) > tol[c]) return false
+    return true
+  }
+  const take = (j, lo, hi) => {
+    const v = vals[j]
+    for (let c = 0; c < v.length; c++) { lo[c] = Math.min(lo[c], v[c]); hi[c] = Math.max(hi[c], v[c]) }
+  }
   for (let gz = 0; gz < H; gz++) for (let gx = 0; gx < W; gx++) {
     const i = gz * W + gx
-    const key = keys[i]
-    if (key === null || used[i]) continue
-    let w = 1
-    while (gx + w < W && !used[i + w] && keys[i + w] === key) w++
-    let h = 1
-    grow: while (gz + h < H) {
-      for (let k = 0; k < w; k++) {
-        const j = (gz + h) * W + gx + k
-        if (used[j] || keys[j] !== key) break grow
+    if (!vals[i] || covered[i]) continue
+    const lo = vals[i].slice(), hi = vals[i].slice()
+    // Back along X first (over covered cells only: they are what an overlap can reuse), then forward.
+    let x0 = gx
+    while (x0 > 0 && covered[i - (gx - x0) - 1] && fits(i - (gx - x0) - 1, lo, hi)) { x0--; take(gz * W + x0, lo, hi) }
+    let x1 = gx + 1
+    while (x1 < W && fits(gz * W + x1, lo, hi)) { take(gz * W + x1, lo, hi); x1++ }
+    let z1 = gz + 1
+    grow: while (z1 < H) {
+      const l = lo.slice(), h = hi.slice()
+      for (let x = x0; x < x1; x++) {
+        const j = z1 * W + x
+        if (!fits(j, l, h)) break grow
+        take(j, l, h)
       }
-      h++
+      for (let c = 0; c < lo.length; c++) { lo[c] = l[c]; hi[c] = h[c] }
+      z1++
     }
-    for (let dz = 0; dz < h; dz++) for (let dx = 0; dx < w; dx++) used[(gz + dz) * W + gx + dx] = 1
-    rects.push({ gx, gz, w, h, key })
+    for (let z = gz; z < z1; z++) for (let x = x0; x < x1; x++) covered[z * W + x] = 1
+    rects.push({ gx: x0, gz, w: x1 - x0, h: z1 - gz, lo, hi })
   }
   return rects
+}
+
+/**
+ * Fill the small pockets a ring of walls closes off (the hollow inside a pillar, the gap inside a double
+ * wall): nothing can stand there, and a solid one is a box where its ring was a dozen. A pocket is a
+ * 4-connected run of empty cells, no larger than MAX_POCKET, that never reaches the grid's edge; it takes
+ * the values of the wall beside it. `walls` is modified in place.
+ */
+export function fillEnclosed(grid, walls) {
+  const { W, H } = grid
+  const seen = new Uint8Array(W * H)
+  const stack = []
+  for (let start = 0; start < W * H; start++) {
+    if (walls[start] || seen[start]) continue
+    const pocket = []
+    let open = false, ring = null
+    stack.push(start); seen[start] = 1
+    while (stack.length) {
+      const i = stack.pop()
+      pocket.push(i)
+      const gx = i % W, gz = (i - gx) / W
+      if (gx === 0 || gz === 0 || gx === W - 1 || gz === H - 1) open = true
+      for (const j of [gx > 0 ? i - 1 : -1, gx < W - 1 ? i + 1 : -1, gz > 0 ? i - W : -1, gz < H - 1 ? i + W : -1]) {
+        if (j < 0) continue
+        if (walls[j]) { ring ??= walls[j]; continue }
+        if (!seen[j]) { seen[j] = 1; stack.push(j) }
+      }
+    }
+    if (open || !ring || pocket.length * RES * RES > MAX_POCKET) continue
+    for (const i of pocket) walls[i] = ring.slice()
+  }
+}
+
+/**
+ * Small or solid clumps of wall as ONE box each: their bounding box, from the lowest base to the highest
+ * top. A clump is an 8-connected run of wall cells of one see-through kind (the last value); it qualifies
+ * when its bounding box is at most CLUMP_AREA and at least CLUMP_FILL full (a pillar, a column), or of any
+ * size and at least SOLID_FILL full (a row of sarcophagi). Their cells are cleared from `walls`. Returns
+ * `{ lo, hi, center: [x, z], size: [x, z], yaw: 0 }`.
+ */
+export function compactClumps(grid, walls) {
+  const { W, H, x0, z0 } = grid
+  const seen = new Uint8Array(W * H)
+  const out = []
+  const stack = []
+  for (let start = 0; start < W * H; start++) {
+    if (!walls[start] || seen[start]) continue
+    const kind = walls[start][walls[start].length - 1]
+    const cells = []
+    let gx0 = Infinity, gz0 = Infinity, gx1 = -Infinity, gz1 = -Infinity
+    stack.push(start); seen[start] = 1
+    while (stack.length) {
+      const i = stack.pop()
+      cells.push(i)
+      const gx = i % W, gz = (i - gx) / W
+      gx0 = Math.min(gx0, gx); gx1 = Math.max(gx1, gx); gz0 = Math.min(gz0, gz); gz1 = Math.max(gz1, gz)
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+        const x = gx + dx, z = gz + dz
+        if (x < 0 || z < 0 || x >= W || z >= H) continue
+        const j = z * W + x
+        if (!walls[j] || seen[j] || walls[j][walls[j].length - 1] !== kind) continue
+        seen[j] = 1; stack.push(j)
+      }
+    }
+    const w = gx1 - gx0 + 1, h = gz1 - gz0 + 1
+    const fill = cells.length / (w * h)
+    if (!((w * h * RES * RES <= CLUMP_AREA && fill >= CLUMP_FILL) || fill >= SOLID_FILL)) continue
+    const lo = walls[cells[0]].slice(), hi = walls[cells[0]].slice()
+    for (const i of cells) {
+      const v = walls[i]
+      for (let c = 0; c < v.length; c++) { lo[c] = Math.min(lo[c], v[c]); hi[c] = Math.max(hi[c], v[c]) }
+      walls[i] = null
+    }
+    out.push({ lo, hi, center: [x0 + (gx0 + w / 2) * RES, z0 + (gz0 + h / 2) * RES], size: [w * RES, h * RES], yaw: 0 })
+  }
+  return out
+}
+
+/**
+ * Diagonal walls as ONE turned box each. Axis-aligned rectangles can only follow a diagonal as a staircase
+ * of slivers, one or two per cell row, and a rasterised diagonal often does not even touch from row to row.
+ * So `cover`'s small rectangles (at most SLIVER cells across) are chained: from each, the slivers within
+ * CHAIN_GAP cells join while every cell of the chain stays inside a box at most CHAIN_WIDTH across, with
+ * values within the wall tolerances. A chain of three or more that ends at least three times as long as it
+ * is across is one box (`lineOf`). Returns `{ rects, lines }`: the rectangles left as they were, and the
+ * lines in the shape `compactClumps` returns.
+ */
+export function chainSlivers(grid, rects) {
+  const { W } = grid
+  const isSliver = r => Math.min(r.w, r.h) <= SLIVER && Math.max(r.w, r.h) <= 3 * SLIVER
+  const slivers = rects.filter(isSliver)
+  const gapOf = (a, b) => Math.max(
+    Math.max(a.gx, b.gx) - Math.min(a.gx + a.w, b.gx + b.w),
+    Math.max(a.gz, b.gz) - Math.min(a.gz + a.h, b.gz + b.h))
+  // Neighbours through a coarse bucket grid: slivers are small, so a bucket and its ring hold every candidate.
+  const B = 8
+  const buckets = new Map()
+  const keyOf = (bx, bz) => bx * 100003 + bz
+  for (const r of slivers) {
+    const k = keyOf(Math.floor(r.gx / B), Math.floor(r.gz / B))
+    if (!buckets.has(k)) buckets.set(k, [])
+    buckets.get(k).push(r)
+  }
+  const near = (r) => {
+    const out = []
+    const bx = Math.floor(r.gx / B), bz = Math.floor(r.gz / B)
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++)
+      for (const s of buckets.get(keyOf(bx + dx, bz + dz)) ?? []) if (s !== r && gapOf(r, s) <= CHAIN_GAP) out.push(s)
+    return out
+  }
+  const cellsOf = (r) => {
+    const out = []
+    for (let z = r.gz; z < r.gz + r.h; z++) for (let x = r.gx; x < r.gx + r.w; x++) out.push(z * W + x)
+    return out
+  }
+  const fits = (lo, hi, r) => r.lo[3] === lo[3]
+    && Math.max(hi[0], r.hi[0]) - Math.min(lo[0], r.lo[0]) <= WALL_BASE_TOL
+    && Math.max(hi[1], r.hi[1]) - Math.min(lo[1], r.lo[1]) <= WALL_TOP_TOL
+
+  const used = new Set()
+  const lines = []
+  for (const seed of slivers) {
+    if (used.has(seed)) continue
+    const chain = [seed]
+    const inChain = new Set(chain)
+    let cells = cellsOf(seed)
+    const lo = seed.lo.slice(), hi = seed.hi.slice()
+    let shape = null
+    for (let grown = true; grown;) {
+      grown = false
+      const candidates = new Set()
+      for (const r of chain) for (const s of near(r)) if (!used.has(s) && !inChain.has(s)) candidates.add(s)
+      for (const s of candidates) {
+        if (!fits(lo, hi, s)) continue
+        const next = cells.concat(cellsOf(s))
+        const line = lineOf(grid, next)
+        if (line.size[0] > CHAIN_WIDTH) continue
+        chain.push(s); inChain.add(s); cells = next; shape = line; grown = true
+        for (let c = 0; c < lo.length; c++) { lo[c] = Math.min(lo[c], s.lo[c]); hi[c] = Math.max(hi[c], s.hi[c]) }
+      }
+    }
+    // A line only once it is one: three slivers or more, three times as long as it is across.
+    if (chain.length < 3 || !shape || shape.size[1] < 3 * shape.size[0]) continue
+    for (const r of chain) used.add(r)
+    lines.push({ lo, hi, ...shape })
+  }
+  return { rects: rects.filter(r => !used.has(r)), lines }
+}
+
+/**
+ * The box along a set of cells: the principal axis of the cell centres, the box spanning them along it
+ * and across it (plus the cells' own reach). `size` is [across, along]; `yaw` turns local +Z onto the axis.
+ */
+function lineOf(grid, cells) {
+  const { W, x0, z0 } = grid
+  const pts = cells.map(i => { const gx = i % W, gz = (i - gx) / W; return [x0 + (gx + 0.5) * RES, z0 + (gz + 0.5) * RES] })
+  let mx = 0, mz = 0
+  for (const [x, z] of pts) { mx += x; mz += z }
+  mx /= pts.length; mz /= pts.length
+  let sxx = 0, szz = 0, sxz = 0
+  for (const [x, z] of pts) { const dx = x - mx, dz = z - mz; sxx += dx * dx; szz += dz * dz; sxz += dx * dz }
+  const theta = 0.5 * Math.atan2(2 * sxz, sxx - szz)
+  const ax = Math.cos(theta), az = Math.sin(theta)        // along
+  let t0 = Infinity, t1 = -Infinity, p0 = Infinity, p1 = -Infinity
+  for (const [x, z] of pts) {
+    const dx = x - mx, dz = z - mz
+    const t = dx * ax + dz * az, p = -dx * az + dz * ax
+    t0 = Math.min(t0, t); t1 = Math.max(t1, t); p0 = Math.min(p0, p); p1 = Math.max(p1, p)
+  }
+  // A cell reaches half its diagonal past its centre along a 45° axis, half a side along X or Z.
+  const reach = RES * (0.5 + Math.abs(2 * ax * az) * (Math.SQRT1_2 - 0.5))
+  const across = p1 - p0 + 2 * reach, along = t1 - t0 + 2 * reach
+  const tc = (t0 + t1) / 2, pc = (p0 + p1) / 2
+  return {
+    center: [mx + ax * tc - az * pc, mz + az * tc + ax * pc],
+    size: [across, along],
+    yaw: Math.atan2(ax, az) * 180 / Math.PI,
+  }
 }
 
 const q = (v, step) => Math.round(v / step) * step
@@ -235,31 +473,48 @@ export function buildColliders(parts, bounds, { ramps: extraRamps = [] } = {}) {
   const maxLayers = Math.max(...floors.map(f => f.length))
   const columns = floors.map((list, cell) => list.map((f, i) => columnOver(grid, cell, i, rampTop(cell, f.y))))
   for (let layer = 0; layer < maxLayers; layer++) {
-    // Floors: grouped by height to 2 cm.
-    for (const r of greedy(grid, cell => {
+    // Floors: tiles within FLOOR_TOL of each other are one box, its top at the highest of them.
+    for (const r of cover(grid, cell => {
       const f = floors[cell][layer]
-      return f ? q(f.y, 0.02).toFixed(2) : null
-    })) {
-      const top = parseFloat(r.key)
-      rectBox(r, top - FLOOR_THICK, top, 'floor')
+      return f ? [f.y] : null
+    }, [FLOOR_TOL])) {
+      rectBox(r, r.hi[0] - FLOOR_THICK, r.hi[0], 'floor')
     }
-    // Walls: grouped by base (to 10 cm) and top (up to the next half metre: a wall a little taller than
-    // its mesh blocks nothing more, and the coarser the tops, the fewer the boxes).
-    for (const r of greedy(grid, cell => {
+    // Walls: bases within WALL_BASE_TOL, tops within WALL_TOP_TOL; from the lowest base to the highest top,
+    // but never above the lowest lid (the floor or ceiling over a column) — a wall standing up through the
+    // gallery over it would block its walkway. The last value keeps see-through walls (pillars) and solid
+    // ones apart. Pockets filled, pillars and solid clumps as one box each, diagonals as one turned box
+    // each, and the rest rectangles.
+    const walls = new Array(W * H)
+    for (let cell = 0; cell < W * H; cell++) {
       const c = columns[cell][layer]
-      return c && c.wall !== null ? `${q(c.h, 0.1).toFixed(2)}|${(Math.ceil(c.wall / 0.5) * 0.5).toFixed(2)}` : null
-    })) {
-      const [base, top] = r.key.split('|').map(parseFloat)
-      rectBox(r, base, top, 'wall')
+      walls[cell] = c && c.wall !== null ? [c.h, c.wall, c.lid, grid.seeThrough[cell] === 1 ? 1 : 0] : null
     }
-    // Ceilings, for the camera boom: only the low ones it could reach (under 5 m), grouped by height to the
-    // half metre below.
-    for (const r of greedy(grid, cell => {
+    fillEnclosed(grid, walls)
+    const clumps = compactClumps(grid, walls)
+    const { rects, lines } = chainSlivers(grid, cover(grid, cell => walls[cell], [WALL_BASE_TOL, WALL_TOP_TOL, Infinity, 0]))
+    for (const r of rects) {
+      rectBox(r, r.lo[0], Math.min(r.hi[1], r.lo[2]), 'wall')
+      if (r.lo[3] === 1) boxes[boxes.length - 1].seeThrough = true
+    }
+    for (const c of [...clumps, ...lines]) {
+      const y0 = c.lo[0], y1 = Math.min(c.hi[1], c.lo[2])
+      boxes.push({
+        kind: 'wall',
+        center: [round(c.center[0]), round((y0 + y1) / 2), round(c.center[1])],
+        size: [round(c.size[0]), round(y1 - y0), round(c.size[1])],
+        rotation: [0, round(c.yaw), 0],
+        ...(c.lo[3] === 1 ? { seeThrough: true } : {}),
+      })
+    }
+    // Ceilings, for the camera boom: only the low ones it could reach (under 5 m). The slab's underside is
+    // the lowest ceiling over it, but never closer than CEILING_HEADROOM over the highest floor under it.
+    for (const r of cover(grid, cell => {
       const c = columns[cell][layer]
-      return c && c.ceiling !== null && c.wall === null && c.ceiling - c.h < 5 ? (Math.floor(c.ceiling / 0.5) * 0.5).toFixed(2) : null
-    })) {
-      const y = parseFloat(r.key)
-      rectBox(r, y, y + FLOOR_THICK, 'ceiling')
+      return c && c.ceiling !== null && c.wall === null && c.ceiling - c.h < 5 ? [c.ceiling, c.h] : null
+    }, [CEILING_TOL, WALL_BASE_TOL])) {
+      const y = Math.min(r.hi[0], Math.max(r.lo[0], r.hi[1] + CEILING_HEADROOM))
+      rectBox(r, y, r.hi[0] + FLOOR_THICK, 'ceiling')
     }
   }
 
@@ -406,11 +661,11 @@ function stairRamps(grid) {
 }
 
 /**
- * A 30° wedge over every step edge between two floor cells that differ by 3 cm .. MAX_WEDGE_STEP, on the
- * lower side, top flush with the upper floor at the edge. Edges along one row are merged first. Stairs are
- * skipped: their ramp already covers them.
+ * A 30° wedge over every step edge between two floor cells that differ by MIN_WEDGE_STEP .. `maxStep`, on
+ * the lower side, top flush with the upper floor at the edge. Edges along one row are merged first. Stairs
+ * are skipped: their ramp already covers them.
  */
-function stepWedges(grid) {
+export function stepWedges(grid, { maxStep = MAX_WEDGE_STEP } = {}) {
   const { x0, z0, W, H, floors } = grid
   const out = []
   // dir: 0 = +X neighbour, 1 = +Z neighbour.
@@ -420,7 +675,7 @@ function stepWedges(grid) {
       const i = gz * W + gx, j = dir ? i + W : i + 1
       for (const f of floors[i]) {
         if (f.stairs) continue
-        const g = floors[j].find(e => !e.stairs && Math.abs(e.y - f.y) > 0.03 && Math.abs(e.y - f.y) <= MAX_WEDGE_STEP)
+        const g = floors[j].find(e => !e.stairs && Math.abs(e.y - f.y) > MIN_WEDGE_STEP && Math.abs(e.y - f.y) <= maxStep)
         if (!g) continue
         // Skip it if the neighbour also has a floor at f's height: that edge is the boundary of a lip, not a step.
         if (floors[j].some(e => Math.abs(e.y - f.y) <= 0.03) || floors[i].some(e => Math.abs(e.y - g.y) <= 0.03)) continue
@@ -519,7 +774,13 @@ export function blockedAt(boxes, x, y, z, { radius = 0.3, from = 0.45, to = 1.6 
   for (const box of boxes) {
     if (box.kind !== 'wall') continue
     const hx = box.size[0] / 2 + radius, hz = box.size[2] / 2 + radius
-    if (Math.abs(x - box.center[0]) > hx || Math.abs(z - box.center[2]) > hz) continue
+    // Walls turn about Y only (compactClumps): test in the box's own frame, Ry(-yaw).
+    let lx = x - box.center[0], lz = z - box.center[2]
+    if (box.rotation[1]) {
+      const a = box.rotation[1] * Math.PI / 180, c = Math.cos(a), s = Math.sin(a)
+      ;[lx, lz] = [c * lx - s * lz, s * lx + c * lz]
+    }
+    if (Math.abs(lx) > hx || Math.abs(lz) > hz) continue
     const bottom = box.center[1] - box.size[1] / 2, top = box.center[1] + box.size[1] / 2
     if (top <= y + from || bottom >= y + to) continue
     return box
