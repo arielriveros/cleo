@@ -32,12 +32,14 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
   const [nodeName, setNodeName] = useState(props.node.name);
   const [spawnOnStart, setSpawnOnStart] = useState(props.node.spawnOnStart);
   const [motionBlur, setMotionBlur] = useState<MotionBlurMode>(props.node.motionBlur);
+  const [cameraDither, setCameraDither] = useState(props.node.cameraDither);
   const [converting, setConverting] = useState(false);
 
   useEffect(() => {
     setNodeName(props.node.name);
     setSpawnOnStart(props.node.spawnOnStart);
     setMotionBlur(props.node.motionBlur);
+    setCameraDither(props.node.cameraDither);
   }, [props.node]);
 
   // The scene tree's inline rename mutates the same node object, so the effect above never re-runs for it.
@@ -62,6 +64,13 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
   const handleMotionBlurChange = (value: MotionBlurMode) => {
     setMotionBlur(value);
     props.node.motionBlur = value;
+    eventEmitter.emit('SCENE_CHANGED');
+  }
+
+  // Fans out to descendants like motion blur, for the same reason.
+  const handleCameraDitherChange = (value: boolean) => {
+    setCameraDither(value);
+    props.node.cameraDither = value;
     eventEmitter.emit('SCENE_CHANGED');
   }
 
@@ -203,6 +212,12 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
               <SegmentedControl<MotionBlurMode> size='sm' grow className='flex w-full'
                 options={props.readOnly ? MOTION_BLUR_OPTIONS.map(o => ({ ...o, disabled: true })) : MOTION_BLUR_OPTIONS}
                 value={motionBlur} onChange={handleMotionBlurChange} />
+            </PropertyRow>
+          }
+          {props.node.name !== 'root' && hasGeometry &&
+            <PropertyRow label='See-through to camera' divider={false}
+              hint='When a camera rig in Dither collision mode has this node between its camera and the player, the part that blocks the view is dithered see-through instead of the camera pulling in. Shadows are unaffected. Applies to the whole subtree.'>
+              <Toggle checked={cameraDither} disabled={props.readOnly} onChange={handleCameraDitherChange} />
             </PropertyRow>
           }
         </PropertyTable>

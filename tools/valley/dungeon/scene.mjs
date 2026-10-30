@@ -305,7 +305,10 @@ export function buildDungeon(kit) {
     const structureNode = souls.group('dungeon:structure', 'Dungeon Structure',
       [...new Set(chunks.map(c => c.partName))].map(partName => souls.group(`dungeon:part:${partName}`, partName,
         chunks.filter(c => c.partName === partName).map((c, i) =>
-          modelNode(`dungeon:chunk:${partName}:${i}`, c.name, c, MATERIALS[c.materialName])))))
+          // Pillars stand between the player and the camera in every room: see-through rather than
+          // blocking the view (the player rig's 'dither' collision mode).
+          modelNode(`dungeon:chunk:${partName}:${i}`, c.name, c, MATERIALS[c.materialName],
+                    partName === 'Pillars' ? { cameraDither: true } : {})))))
 
     // The colliders, one static body per 10 m cell and per role: walls (which swings bounce off and the
     // navmesh carves round) apart from floors, ramps and wedges (which it walks on).
@@ -358,6 +361,7 @@ export function buildDungeon(kit) {
 
     const player = souls.playerNode(playerModel)
     kit.widenCamera(player)
+    kit.seeThroughCamera(player)
     player.position = L.SPAWN.position
     player.rotation = [0, L.SPAWN.yaw, 0]
 

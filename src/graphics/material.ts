@@ -1112,6 +1112,11 @@ export interface TerrainFoliageRule {
     /** Rasterize these instances into the shadow cascades. Off by default: one instanced draw per cell per cascade. */
     castShadows?: boolean;
     /**
+     * Mesh rules: dither these instances away where they block the view of a CameraRig in `'dither'`
+     * collision mode — the foliage form of `Node.cameraDither`. Off by default.
+     */
+    cameraDither?: boolean;
+    /**
      * Wind response of a BILLBOARD rule, which has no material of its own (see `WindConfig`). A mesh
      * rule's plants answer the wind through their materials instead.
      */

@@ -235,6 +235,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     cleoFragCoord = in.position.xy;
     // A despawn dissolve (and, on instanced draws, the foliage LOD crossfade): see chunks/modelVarying.
     if (!lodFadeKeeps(in.lodFade, in.position.xy)) { discard; }
+    // The camera see-through hole (chunks/cameraHole.wgsl): off unless this draw opted in.
+    if (!cameraHoleKeeps(in.camHole, in.camHoleParams, in.position.xy)) { discard; }
 
     let fragPos = in.fragPos;
     let tbn = tbnOf(in);

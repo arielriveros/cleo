@@ -203,6 +203,16 @@ get motionBlur: MotionBlurMode ; set motionBlur(v)   // 'full' | 'objectOnly' | 
 The setter fans out to children. Use `'none'` on things that should not smear — a first-person
 weapon model, a UI-adjacent prop.
 
+## See-through to camera
+
+```ts
+get cameraDither: boolean ; set cameraDither(v)
+```
+
+Lets a camera rig whose `collisionMode` is `'dither'` see through this node: where it stands between
+the camera and the player, the blocking part is dithered away instead of the camera pulling in. The
+setter fans out to children. Foliage rules have the same switch (`cameraDither` on the rule).
+
 ## Sockets
 
 Any node can be pinned to a **socket** — a named attach point on a character's bone, authored on the

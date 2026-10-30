@@ -11,6 +11,7 @@ import { DocScope, Section, Slider, Toggle, Field, NumberInput, PresetMenu, Segm
 const LABEL_W = 'w-[112px]';
 import BackendSelector from './BackendSelector';
 import ExposureSettingsFields from './ExposureSettingsFields';
+import Collapsable from '../../components/Collapsable';
 
 // Debug channels map 1:1 to the renderer's `debugView` setter; the grouping here is display only.
 const CHANNELS: { key: string; label: string }[] = [
@@ -95,11 +96,23 @@ function LutPicker({ value, onChange }: { value: string | null; onChange: (id: s
   return <TexturePicker value={value} onChange={onChange} emptyLabel='(none)' />;
 }
 
-// Motion-blur quality presets: sample taps per pixel (higher = smoother, costlier).
+// Motion-blur quality presets: sample taps per pixel (higher = smoother, less grain, costlier). Low is
+// the renderer's default count.
 const MB_QUALITY: { label: string; samples: number }[] = [
-  { label: 'Low',  samples: 8 },
-  { label: 'Med',  samples: 16 },
-  { label: 'High', samples: 24 },
+  { label: 'Low',  samples: 12 },
+  { label: 'Med',  samples: 20 },
+  { label: 'High', samples: 32 },
+];
+
+const TAA_HISTORY_FILTER = [
+  { value: 'catmullRom' as const, label: 'Catmull-Rom', title: 'Sharp 5-tap cubic fetch of the history — keeps detail under camera motion' },
+  { value: 'bilinear' as const,   label: 'Bilinear',    title: 'One bilinear tap — cheaper, and softens a little more every frame the camera moves' },
+];
+
+const FXAA_QUALITY = [
+  { value: 'low' as const,    label: 'Low',  title: 'Searches 5 steps along each edge' },
+  { value: 'medium' as const, label: 'Med',  title: 'Searches 8 steps along each edge' },
+  { value: 'high' as const,   label: 'High', title: 'Searches 12 steps — long, shallow edges come out smoother' },
 ];
 
 export default function RendererSettingsPanel() {
@@ -189,6 +202,17 @@ export default function RendererSettingsPanel() {
   const [motionBlur, setMotionBlur] = useState<boolean>(() => renderer?.motionBlurEnabled ?? true);
   const [motionBlurIntensity, setMotionBlurIntensity] = useState<number>(() => renderer?.motionBlurIntensity ?? 1.0);
   const [motionBlurSamples, setMotionBlurSamples] = useState<number>(() => renderer?.motionBlurSamples ?? 12);
+  const [motionBlurJitter, setMotionBlurJitter] = useState<number>(() => renderer?.motionBlurJitter ?? 0.5);
+  const [motionBlurMaxLength, setMotionBlurMaxLength] = useState<number>(() => renderer?.motionBlurMaxLength ?? 20);
+  const [taaSharpness, setTaaSharpness] = useState<number>(() => renderer?.taaSharpness ?? 0.25);
+  const [taaFeedback, setTaaFeedback] = useState<number>(() => renderer?.taaFeedback ?? 0.97);
+  const [taaMotionFeedback, setTaaMotionFeedback] = useState<number>(() => renderer?.taaMotionFeedback ?? 0.88);
+  const [taaClipStrength, setTaaClipStrength] = useState<number>(() => renderer?.taaClipStrength ?? 1);
+  const [taaHistoryFilter, setTaaHistoryFilter] = useState<'bilinear' | 'catmullRom'>(() => renderer?.taaHistoryFilter ?? 'catmullRom');
+  const [fxaa, setFxaa] = useState<boolean>(() => renderer?.fxaaEnabled ?? false);
+  const [fxaaQuality, setFxaaQuality] = useState<'low' | 'medium' | 'high'>(() => renderer?.fxaaQuality ?? 'medium');
+  const [fxaaSubpixel, setFxaaSubpixel] = useState<number>(() => renderer?.fxaaSubpixel ?? 0.75);
+  const [fxaaEdgeThreshold, setFxaaEdgeThreshold] = useState<number>(() => renderer?.fxaaEdgeThreshold ?? 0.125);
   const [shadowsEnabled, setShadowsEnabled] = useState<boolean>(() => renderer?.shadowsEnabled ?? true);
   const [shadowRes, setShadowRes] = useState<number>(() => renderer?.shadowMapResolution ?? 2048);
   const [shadowCascades, setShadowCascades] = useState<number>(() => renderer?.shadowCascades ?? 3);
@@ -295,6 +319,17 @@ export default function RendererSettingsPanel() {
     setMotionBlur(renderer.motionBlurEnabled);
     setMotionBlurIntensity(renderer.motionBlurIntensity);
     setMotionBlurSamples(renderer.motionBlurSamples);
+    setMotionBlurJitter(renderer.motionBlurJitter);
+    setMotionBlurMaxLength(renderer.motionBlurMaxLength);
+    setTaaSharpness(renderer.taaSharpness);
+    setTaaFeedback(renderer.taaFeedback);
+    setTaaMotionFeedback(renderer.taaMotionFeedback);
+    setTaaClipStrength(renderer.taaClipStrength);
+    setTaaHistoryFilter(renderer.taaHistoryFilter);
+    setFxaa(renderer.fxaaEnabled);
+    setFxaaQuality(renderer.fxaaQuality);
+    setFxaaSubpixel(renderer.fxaaSubpixel);
+    setFxaaEdgeThreshold(renderer.fxaaEdgeThreshold);
     setShadowsEnabled(renderer.shadowsEnabled);
     setShadowRes(renderer.shadowMapResolution);
     setShadowCascades(renderer.shadowCascades);
@@ -367,16 +402,15 @@ export default function RendererSettingsPanel() {
   return (
     // Each section is a heading of docs/editor/rendering.md › Renderer Settings, and the fields its docs
     // table names take their cards from that table: the explanation lives there, not in hints here.
-    // The content column is capped rather than filling the dock group (see PerformancePanel); the panel
-    // itself stays resizable.
+    // The sections fill the panel's width, like every other Options page.
     <DocScope page='editor/rendering'>
     <div className='h-full overflow-y-auto p-3 text-ui-sm text-fg'>
-      <div className='w-full max-w-[420px]'>
-      <Section title='Graphics API'>
+      <div className='w-full'>
+      <Collapsable title='Graphics API' persistKey='renderer.graphics-api'><div className='w-full p-2'>
         <BackendSelector />
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Channels'>
+      <Collapsable title='Channels' persistKey='renderer.channels' defaultOpen={false}><div className='w-full p-2'>
         <SegmentedControl
           className='grid grid-cols-3 gap-1'
           size='sm'
@@ -390,9 +424,9 @@ export default function RendererSettingsPanel() {
             cyan = a negative where the channel's encoding forbids one. */}
         <Toggle label='Highlight Invalid Pixels' checked={debugValidity} className='mt-2'
           onChange={setValidity} />
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Optimizations'>
+      <Collapsable title='Optimizations' persistKey='renderer.optimizations' defaultOpen={false}><div className='w-full p-2'>
         <Toggle label='Frustum Culling' checked={frustumCulling} className='my-1'
           onChange={(c) => { renderer.frustumCulling = c; setFrustumCulling(c); touch(); }} />
         {/* CPU occlusion culling (graphics/occlusion): what is behind a hill, or behind an Occluder volume,
@@ -488,9 +522,9 @@ export default function RendererSettingsPanel() {
             }))}
           />
         </Field>
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Tone / Post'
+      <Collapsable title='Tone / Post' persistKey='renderer.tone-post' defaultOpen={false}
         right={<>
           <PresetMenu label='Exposure' presets={AUTO_EXPOSURE_PRESETS}
             title='Exposure presets — metered ranges and adaptation, or a fixed EV'
@@ -498,7 +532,7 @@ export default function RendererSettingsPanel() {
           <PresetMenu label='Look' presets={LENS_LOOK_PRESETS}
             title='Lens looks — bloom, flare, dirt, vignette, grain, fringing and saturation; the tone map and LUT stay yours'
             onApply={(p) => applyRenderPreset(LENS_LOOK_PRESETS, p)} />
-        </>}>
+        </>}><div className='w-full p-2'>
         <ExposureSettingsFields labelClassName={LABEL_W} meteredEV={ev100}
           values={{
             autoExposureEnabled: autoExposure, ev100, exposureCompensation: exposureComp,
@@ -534,9 +568,9 @@ export default function RendererSettingsPanel() {
         {/* Hidden rather than disabled with no LUT: there is nothing for it to blend toward. */}
         {lutId && <Slider label='LUT Amount' value={lutIntensity} min={0} max={1} step={0.01}
           onChange={(v) => { renderer.colorGradingIntensity = v; setLutIntensity(v); touch(); }} />}
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Bloom'>
+      <Collapsable title='Bloom' persistKey='renderer.bloom' defaultOpen={false}><div className='w-full p-2'>
         <Slider label='Threshold' value={bloomThreshold} min={0} max={5} step={0.05}
           onChange={(v) => { renderer.bloomThreshold = v; setBloomThreshold(v); touch(); }} />
         <Slider label='Knee' value={bloomKnee} min={0} max={2} step={0.05}
@@ -546,13 +580,13 @@ export default function RendererSettingsPanel() {
         <Toggle label='Restrict to lit surfaces' checked={bloomMask}
           onChange={(v) => { renderer.bloomMaskEnabled = v; setBloomMask(v); touch(); }} />
         {bloomOff && <Hint>Bloom is currently inactive: {bloomOff}</Hint>}
-      </Section>
+      </div></Collapsable>
 
-      <Section
-        title='Depth of Field'
+      <Collapsable
+        title='Depth of Field' persistKey='renderer.depth-of-field' defaultOpen={false}
         right={<PresetMenu presets={DOF_PRESETS} title='Depth-of-field presets — the focus distance stays yours'
           onApply={(p) => applyRenderPreset(DOF_PRESETS, p)} />}
-      >
+      ><div className='w-full p-2'>
         <Toggle label='Enabled' checked={dofEnabled} className='my-1'
           onChange={(c) => { renderer.dofEnabled = c; setDofEnabled(c); touch(); }} />
         {dofEnabled && <>
@@ -569,8 +603,11 @@ export default function RendererSettingsPanel() {
             readout={(v) => `${v.toFixed(0)} px`}
             onChange={(v) => { renderer.dofMaxBlur = v; setDofMaxBlur(v); touch(); }} />
         </>}
-      </Section>
+      </div></Collapsable>
 
+      {/* One Lens group: flare, dirt and vignette are all things the glass does to the image. Each keeps
+          its own Section so its fields find their own docs (both Flare and Dirt have an "Intensity"). */}
+      <Collapsable title='Lens' persistKey='renderer.lens' defaultOpen={false}><div className='w-full p-2'>
       <Section title='Lens Flare'>
         <Slider label='Intensity' value={flare} min={0} max={2} step={0.01}
           onChange={(v) => { renderer.lensFlareIntensity = v; setFlare(v); touch(); }} />
@@ -597,7 +634,7 @@ export default function RendererSettingsPanel() {
           <Hint>Nothing to catch: lens dirt only shows where bloom or lens flare put glare on the frame.</Hint>}
       </Section>
 
-      <Section title='Vignette'>
+      <Section title='Vignette' className='mb-0'>
         <Slider label='Strength' value={vignette} min={0} max={1} step={0.01}
           onChange={(v) => { renderer.vignetteStrength = v; setVignette(v); touch(); }} />
         {vignette > 0 && <>
@@ -607,8 +644,9 @@ export default function RendererSettingsPanel() {
             onChange={(v) => { renderer.vignetteSmoothness = v; setVignetteSmooth(v); touch(); }} />
         </>}
       </Section>
+      </div></Collapsable>
 
-      <Section title='Film Grain'>
+      <Collapsable title='Film Grain' persistKey='renderer.film-grain' defaultOpen={false}><div className='w-full p-2'>
         <Slider label='Intensity' value={grain} min={0} max={0.5} step={0.005}
           onChange={(v) => { renderer.filmGrainIntensity = v; setGrain(v); touch(); }} />
         {grain > 0 && <>
@@ -618,17 +656,55 @@ export default function RendererSettingsPanel() {
           <Toggle label='Coloured' checked={grainColored}
             onChange={(c) => { renderer.filmGrainColored = c; setGrainColored(c); touch(); }} />
         </>}
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Antialiasing'>
+      <Collapsable title='Antialiasing' persistKey='renderer.antialiasing' defaultOpen={false}><div className='w-full p-2'>
         <Toggle label='Temporal AA' checked={taa} className='my-1'
           onChange={(c) => { renderer.taaEnabled = c; setTaa(c); touch(); }} />
         {taa && !renderer.taaSupported &&
           <Hint>Disabled on this device: float render targets are unavailable, so the history and
             velocity buffers cannot hold the values TAA needs.</Hint>}
-      </Section>
+        {taa && <>
+          <Slider label='Sharpness' labelClassName={LABEL_W} value={taaSharpness} min={0} max={1} step={0.01}
+            readout={(v) => (v <= 0 ? 'off' : v.toFixed(2))}
+            onChange={(v) => { renderer.taaSharpness = v; setTaaSharpness(renderer.taaSharpness); touch(); }} />
+          <div className='flex items-center gap-1 my-1 text-ui'>
+            <span className={cn(labelClass, LABEL_W, 'shrink-0')}>History Filter</span>
+            <SegmentedControl
+              value={taaHistoryFilter}
+              onChange={(f) => { renderer.taaHistoryFilter = f; setTaaHistoryFilter(f); touch(); }}
+              options={TAA_HISTORY_FILTER}
+            />
+          </div>
+          <Slider label='Stability' labelClassName={LABEL_W} value={taaFeedback} min={0.8} max={0.98} step={0.005}
+            readout={(v) => v.toFixed(3)}
+            onChange={(v) => { renderer.taaFeedback = v; setTaaFeedback(renderer.taaFeedback); touch(); }} />
+          <Slider label='Motion Stability' labelClassName={LABEL_W} value={taaMotionFeedback} min={0.5} max={0.95} step={0.01}
+            onChange={(v) => { renderer.taaMotionFeedback = v; setTaaMotionFeedback(renderer.taaMotionFeedback); touch(); }} />
+          <Slider label='Clip Width' labelClassName={LABEL_W} value={taaClipStrength} min={0.5} max={2} step={0.05}
+            readout={(v) => `${v.toFixed(2)} σ`}
+            onChange={(v) => { renderer.taaClipStrength = v; setTaaClipStrength(renderer.taaClipStrength); touch(); }} />
+        </>}
+        <Toggle label='FXAA' checked={fxaa} className='my-1'
+          onChange={(c) => { renderer.fxaaEnabled = c; setFxaa(c); touch(); }} />
+        {fxaa && <>
+          <div className='flex items-center gap-1 my-1 text-ui'>
+            <span className={cn(labelClass, LABEL_W, 'shrink-0')}>FXAA Quality</span>
+            <SegmentedControl
+              value={fxaaQuality}
+              onChange={(q) => { renderer.fxaaQuality = q; setFxaaQuality(q); touch(); }}
+              options={FXAA_QUALITY}
+            />
+          </div>
+          <Slider label='Subpixel' labelClassName={LABEL_W} value={fxaaSubpixel} min={0} max={1} step={0.05}
+            onChange={(v) => { renderer.fxaaSubpixel = v; setFxaaSubpixel(renderer.fxaaSubpixel); touch(); }} />
+          <Slider label='Edge Threshold' labelClassName={LABEL_W} value={fxaaEdgeThreshold} min={0.063} max={0.333} step={0.001}
+            readout={(v) => v.toFixed(3)}
+            onChange={(v) => { renderer.fxaaEdgeThreshold = v; setFxaaEdgeThreshold(renderer.fxaaEdgeThreshold); touch(); }} />
+        </>}
+      </div></Collapsable>
 
-      <Section title='Motion Blur'>
+      <Collapsable title='Motion Blur' persistKey='renderer.motion-blur' defaultOpen={false}><div className='w-full p-2'>
         <Toggle label='Enabled' checked={motionBlur} className='my-1'
           onChange={(c) => { renderer.motionBlurEnabled = c; setMotionBlur(c); touch(); }} />
         <Slider label='Amount' value={motionBlurIntensity} min={0} max={4} step={0.05}
@@ -638,14 +714,24 @@ export default function RendererSettingsPanel() {
           <SegmentedControl
             value={motionBlurSamples}
             onChange={(samples) => { renderer.motionBlurSamples = samples; setMotionBlurSamples(samples); touch(); }}
-            options={MB_QUALITY.map((q) => ({ value: q.samples, label: q.label }))}
+            options={MB_QUALITY.map((q) => ({ value: q.samples, label: q.label, title: `${q.samples} taps per pixel` }))}
           />
         </div>
-      </Section>
+        <Slider label='Noise' labelClassName={LABEL_W} value={motionBlurJitter} min={0} max={1} step={0.05}
+          onChange={(v) => { renderer.motionBlurJitter = v; setMotionBlurJitter(renderer.motionBlurJitter); touch(); }} />
+        <Slider label='Max Length' labelClassName={LABEL_W} value={motionBlurMaxLength} min={4} max={20} step={1}
+          readout={(v) => `${v.toFixed(0)} px`}
+          onChange={(v) => { renderer.motionBlurMaxLength = v; setMotionBlurMaxLength(renderer.motionBlurMaxLength); touch(); }} />
+      </div></Collapsable>
 
-      <Section title='Shadows'>
+      {/* One Shadows group: the master switch, then sun, spot and point shadows each in their own
+          Section, so their same-named fields (Resolution, Max Dist, Bias) find their own docs. */}
+      <Collapsable title='Shadows' persistKey='renderer.shadows' defaultOpen={false}><div className='w-full p-2'>
         <Toggle label='Enabled' checked={shadowsEnabled} className='my-1'
           onChange={(c) => { renderer.shadowsEnabled = c; setShadowsEnabled(c); touch(); }} />
+        {!shadowsEnabled && <Hint>Shadows are off — sun, spot and point lights all return fully lit.</Hint>}
+
+      <Section title='Sun Shadows' className='mt-2'>
 
         <div className='flex items-center gap-1 my-1 text-ui'>
           <span className={cn(labelClass, LABEL_W, 'shrink-0')}>Resolution</span>
@@ -715,7 +801,6 @@ export default function RendererSettingsPanel() {
             />
           </div>
         )}
-        {!shadowsEnabled && <Hint>Shadows are off — every lookup returns fully lit.</Hint>}
       </Section>
 
       <Section title='Spot Shadows'>
@@ -736,10 +821,9 @@ export default function RendererSettingsPanel() {
         <Slider label='Bias' value={spotShadowBias} min={0} max={0.02} step={0.0005}
           readout={(v) => v.toFixed(4)}
           onChange={(v) => { renderer.spotShadowBias = v; setSpotShadowBias(v); touch(); }} />
-        {!shadowsEnabled && <Hint>The global Shadows toggle above is off, which also disables these.</Hint>}
       </Section>
 
-      <Section title='Point Shadows'>
+      <Section title='Point Shadows' className='mb-0'>
         <Toggle label='Enabled' checked={pointShadows} className='my-1'
           onChange={(c) => { renderer.pointShadowsEnabled = c; setPointShadows(c); touch(); }} />
         <div className='flex items-center gap-1 my-1 text-ui'>
@@ -757,10 +841,10 @@ export default function RendererSettingsPanel() {
         <Slider label='Bias' value={pointShadowBias} min={0} max={0.02} step={0.0005}
           readout={(v) => v.toFixed(4)}
           onChange={(v) => { renderer.pointShadowBias = v; setPointShadowBias(v); touch(); }} />
-        {!shadowsEnabled && <Hint>The global Shadows toggle above is off, which also disables these.</Hint>}
       </Section>
+      </div></Collapsable>
 
-      <Section title='Ambient Occlusion & Indirect Light'>
+      <Collapsable title='Ambient Occlusion & Indirect Light' persistKey='renderer.ambient-occlusion-indirect-light' defaultOpen={false}><div className='w-full p-2'>
         <Toggle label='Enabled' checked={ssaoEnabled} className='my-1'
           onChange={(c) => { renderer.ssaoEnabled = c; setSsaoEnabled(c); touch(); }} />
         <Toggle label='Indirect Light' checked={ssilEnabled} className='my-1'
@@ -775,18 +859,18 @@ export default function RendererSettingsPanel() {
           onChange={(v) => { renderer.ssaoThickness = v; setSsaoThickness(v); touch(); }} />
         <Slider label='Bias' value={ssaoBias} min={0} max={0.2} step={0.005}
           onChange={(v) => { renderer.ssaoBias = v; setSsaoBias(v); touch(); }} />
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Shading'>
+      <Collapsable title='Shading' persistKey='renderer.shading' defaultOpen={false}><div className='w-full p-2'>
         <Toggle label='Specular occlusion' checked={specularOcclusion} className='my-1'
           onChange={(c) => { renderer.specularOcclusionEnabled = c; setSpecularOcclusion(c); touch(); }} />
         <Toggle label='Specular antialiasing' checked={specularAa} className='my-1'
           onChange={(c) => { renderer.specularAaEnabled = c; setSpecularAa(c); touch(); }} />
         <Toggle label='Horizon occlusion' checked={horizonOcclusion} className='my-1'
           onChange={(c) => { renderer.horizonOcclusionEnabled = c; setHorizonOcclusion(c); touch(); }} />
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Grid'>
+      <Collapsable title='Grid' persistKey='renderer.grid' defaultOpen={false}><div className='w-full p-2'>
         <Toggle label='Visible' checked={gridVisible} className='my-1'
           onChange={(c) => { renderer.setGridVisible(c); setGridVisible(c); touch(); }} />
         <div className='flex items-center gap-1 my-1 text-ui'>
@@ -798,7 +882,7 @@ export default function RendererSettingsPanel() {
             options={[{ value: 'xz', label: 'XZ' }, { value: 'xy', label: 'XY' }]}
           />
         </div>
-      </Section>
+      </div></Collapsable>
       </div>
     </div>
     </DocScope>

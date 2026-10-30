@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { gpuProfiler, cpuProfiler, frameHistory, frameStats, sceneStatsDetail, TextureManager, TOGGLEABLE_PASSES, navBuildStats, shaderOptimizerStats } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
-import { DocScope, Section, Slider, Toggle, SegmentedControl, Button, Hint } from '../../components/ui';
+import { DocScope, Slider, Toggle, SegmentedControl, Button, Hint } from '../../components/ui';
 import Sparkline from './Sparkline';
+import Collapsable from '../../components/Collapsable';
 
 // The renderer's performance panel: what the frame costs, and where. Cost is attributed two ways:
 //
@@ -342,12 +343,11 @@ export default function PerformancePanel() {
   const unattributed = Math.max(0, d.frameMs - d.cpuMs - d.physicsMs - d.sceneMs);
 
   return (
-    // The content column is capped rather than filling the dock group: options mode hides the rest of
-    // the right rail, so this group can end up 700px+ wide. The panel itself stays resizable.
+    // The sections fill the panel's width, like every other Options page.
     <DocScope page='editor/rendering' section='performance-hud'>
     <div className='h-full overflow-y-auto p-3 text-ui-sm text-fg'>
-      <div className='w-full max-w-[420px]'>
-      <Section title='Frame'>
+      <div className='w-full'>
+      <Collapsable title='Frame' persistKey='performance.frame'><div className='w-full p-2'>
         <div className='flex items-baseline justify-between'>
           <span className={`font-mono text-lg ${overBudget ? 'text-danger-fg' : 'text-success-fg'}`}>
             {fmt(d.frameMs, 1)} ms
@@ -363,9 +363,9 @@ export default function PerformancePanel() {
         <div className='mt-2' title={`Target line on the graph — ${fmt(budgetMs, 2)} ms per frame.`}>
           <SegmentedControl value={budgetHz} options={BUDGETS} onChange={v => setBudgetHz(v as number)} />
         </div>
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Frame budget'>
+      <Collapsable title='Frame budget' persistKey='performance.frame-budget' defaultOpen={false}><div className='w-full p-2'>
         <Row label='Render (CPU)' value={`${fmt(d.cpuMs, 1)} ms`} />
         {d.gpuOn
           ? <Row label='Render (GPU)' value={`${fmt(d.gpuMs)} ms`} hl={d.gpuMs > budgetMs} />
@@ -424,9 +424,9 @@ export default function PerformancePanel() {
           {detail ? '− hide script/animator split' : '+ script/animator split'}
         </Button>
         <Row label='Unattributed' value={`${fmt(unattributed)} ms`} />
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Passes (CPU / GPU)'>
+      <Collapsable title='Passes (CPU / GPU)' persistKey='performance.passes-cpu-gpu' defaultOpen={false}><div className='w-full p-2'>
         <Toggle
           label='Timer queries'
           checked={enabled}
@@ -472,9 +472,9 @@ export default function PerformancePanel() {
             </div>
           </div>
         )}
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Geometry'>
+      <Collapsable title='Geometry' persistKey='performance.geometry' defaultOpen={false}><div className='w-full p-2'>
         <RangeRow label='Draw calls' r={r.drawCalls} />
         <RangeRow label='Instanced' r={r.instancedDrawCalls} />
         <RangeRow label='Objects' r={r.objects} />
@@ -524,9 +524,9 @@ export default function PerformancePanel() {
             the scan is a linear walk of every cell in every layer, repeated per cascade. */}
         <RangeRow label='· scanned' r={r.foliageCellsScanned}
                   title='Cell culling tests run this frame, colour and shadow together. Far above "Foliage cells" means the linear scan itself is the cost, not the draws.' />
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Particles'>
+      <Collapsable title='Particles' persistKey='performance.particles' defaultOpen={false}><div className='w-full p-2'>
         <RangeRow label='Systems' r={r.particleSystems}
                   title='Particle systems that ran at least one simulation step this frame.' />
         <RangeRow label='· paused off screen' r={r.particleSystemsCulled}
@@ -545,18 +545,18 @@ export default function PerformancePanel() {
         <RangeRow label='GPU builds' r={r.particleGpuCreates} hl={r.particleGpuCreates.max > 0}
                   title='Emitters whose GPU state was built this frame. Pooled reuse is the next row.' />
         <RangeRow label='· reused' r={r.particleGpuReuses} title='Emitters handed pooled GPU state instead of building it.' />
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Fill rate'>
+      <Collapsable title='Fill rate' persistKey='performance.fill-rate' defaultOpen={false}><div className='w-full p-2'>
         <RangeRow label='Screen passes' r={r.fullscreenPasses} />
         <RangeRow label='Shaded' r={r.shadedMpx} dp={1} unit=' Mpx' hl={r.shadedMpx.mean > 40} />
         <RangeRow label='State changes' r={r.stateChanges}
                   title='GL state calls the cache could not elide (a genuine difference).' />
         <RangeRow label='· saved' r={r.stateChangesSaved}
                   title='Redundant GL state calls the state cache absorbed.' />
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Shaders'>
+      <Collapsable title='Shaders' persistKey='performance.shaders' defaultOpen={false}><div className='w-full p-2'>
         <Row label='Material writes' value={`${d.matWrites} · ${d.matSkips} skipped`}
              title='Per frame: material blocks written, and draws that found their material already in place.' />
         <Row label='Programs' value={`${d.asyncCompiles} background · ${d.syncCompiles} sync · ${d.pendingCompiles} pending`}
@@ -570,17 +570,17 @@ export default function PerformancePanel() {
              title='Recorded pipelines ship with a publish, and the player builds them during its loading screen.' />
         <Row label='· module reuses' value={`${d.moduleReuses}`}
              title='Pipelines that reused a compiled shader module instead of compiling the program again.' />
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Memory'>
+      <Collapsable title='Memory' persistKey='performance.memory' defaultOpen={false}><div className='w-full p-2'>
         <Row label='Textures' value={`${d.textures.toLocaleString()} · ${fmt(d.textureMB, 1)} MB`} />
         <Row label='GPU est.' value={`${fmt(d.gpuMB, 1)} MB`} />
         <Row label='JS heap'
              value={d.heapUsedMB != null ? `${fmt(d.heapUsedMB, 0)} / ${fmt(d.heapLimitMB!, 0)} MB` : 'n/a'}
              title={d.heapUsedMB != null ? undefined : 'performance.memory is Chromium-only.'} />
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Scene'>
+      <Collapsable title='Scene' persistKey='performance.scene' defaultOpen={false}><div className='w-full p-2'>
         <Row label='Lights' value={d.lights.toLocaleString()} />
         <Row label='Sprites' value={d.sprites.toLocaleString()} />
         <Row label='Resolution' value={`${d.width}×${d.height}`} />
@@ -590,9 +590,9 @@ export default function PerformancePanel() {
         )}
         <Row label='Backend' value={d.backend} />
         <Row label='Pipeline' value={d.pipeline} />
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Quality'>
+      <Collapsable title='Quality' persistKey='performance.quality'><div className='w-full p-2'>
         <SegmentedControl
           value={quality}
           options={QUALITY_OPTIONS}
@@ -614,9 +614,9 @@ export default function PerformancePanel() {
             onChange={v => { renderer.renderScale = v; setRenderScale(renderer.renderScale); }}
           />
         </div>
-      </Section>
+      </div></Collapsable>
 
-      <Section title='Pass switches'>
+      <Collapsable title='Pass switches' persistKey='performance.pass-switches' defaultOpen={false}><div className='w-full p-2'>
         <div className='grid grid-cols-2 gap-x-3'>
           {TOGGLEABLE_PASSES.map(name => (
             <Toggle
@@ -633,7 +633,7 @@ export default function PerformancePanel() {
           <Button onClick={() => gpuProfiler.reset()} title='Clear the accumulated per-pass averages.'>Reset timings</Button>
           <Button onClick={copyReport} title='Copy these numbers as plain text.'>Copy report</Button>
         </div>
-      </Section>
+      </div></Collapsable>
       </div>
     </div>
     </DocScope>

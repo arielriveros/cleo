@@ -29,6 +29,11 @@ struct MotionBlurUniforms {
     u_intensity: f32,          // shutter-like blur scale
     u_maxVelocityPx: f32,      // clamp blur length to this many pixels
     u_samples: i32,            // taps per pixel
+    // Scale of the per-pixel tap offset, 0..1. The offset trades banding (discrete ghost copies along
+    // the blur) for noise; this pass runs AFTER the TAA resolve, so nothing averages that noise away
+    // and at 1 it reads as static grain on everything moving. 0.5 keeps the copies from lining up
+    // without most of the grain.
+    u_mbJitter: f32,
 };
 @group(1) @binding(0) var<uniform> u_mb: MotionBlurUniforms;
 
@@ -95,7 +100,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                                      u_mb.u_near, u_mb.u_far);
 
     // `in.position` is the fragment coordinate — WGSL's gl_FragCoord.
-    let jitter = interleavedGradientNoise(in.position.xy) - 0.5;
+    let jitter = (interleavedGradientNoise(in.position.xy) - 0.5) * clamp(u_mb.u_mbJitter, 0.0, 1.0);
     let samples = u_mb.u_samples;
 
     // Weighted accumulation, seeded with the center tap.

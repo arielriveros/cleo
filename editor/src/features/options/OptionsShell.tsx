@@ -43,11 +43,11 @@ export function OptionsShell<T extends string>({ pages, page, onPage, children }
   )
 }
 
-/** A scrolling page of option sections, capped in width like the renderer panel. */
+/** A scrolling page of option sections, filling the panel's width like the project's Input page. */
 export function OptionsPageBody({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <div className={cn('h-full overflow-y-auto p-3 text-ui text-fg', className)}>
-      <div className='w-full max-w-[460px]'>{children}</div>
+      <div className='w-full'>{children}</div>
     </div>
   )
 }

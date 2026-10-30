@@ -20,6 +20,9 @@ export type FollowSpace = 'world' | 'targetYaw' | 'targetFull';
 /** What drives the rig's aim. */
 export type AimMode = 'orbit' | 'lookAt' | 'none';
 
+/** See {@link CameraRigNode.collisionMode}. */
+export type CameraCollisionMode = 'retract' | 'dither';
+
 /**
  * Drives a child CameraNode: follow, aim, spring arm, collision, shake.
  *
@@ -87,6 +90,17 @@ export class CameraRigNode extends Node {
     public collisionReturnTime: number = 0.35;
     /** Nodes (by id) whose bodies the probe ignores, alongside the follow/lookAt targets. */
     public collisionIgnoreIds: string[] = [];
+    /**
+     * What the rig does when something comes between the camera and the pivot. `'retract'` pulls the
+     * camera in along the arm (the probe above). `'dither'` keeps the arm at full length and cuts a
+     * dithered see-through hole instead, in every node that opted in with `Node.cameraDither` (and
+     * every foliage rule with `cameraDither`). Anything that did not opt in still blocks the view.
+     */
+    public collisionMode: CameraCollisionMode = 'retract';
+    /** `'dither'` mode: radius of the hole around the camera -> pivot line, metres. */
+    public ditherRadius: number = 1.0;
+    /** `'dither'` mode: 0..1, how much of a blocking surface is dithered away at the hole's centre. */
+    public ditherStrength: number = 0.85;
 
     // --- shake -----------------------------------------------------------------------------------
     public shakePositionAmplitude: vec3 = vec3.fromValues(0.15, 0.15, 0.05);
@@ -344,6 +358,7 @@ export class CameraRigNode extends Node {
         const boomDistance = vec3.length(boomWorld);
 
         this._updateCollision(dt, snap, boomWorld, boomDistance, worldRotation);
+        this._updateSeeThrough(cam);
 
         cam.setPosition(vec3.scale(CameraRigNode._v3, boomLocal, this._armRatio));
         cam.setQuaternion(quat.identity(CameraRigNode._q1));
@@ -452,8 +467,19 @@ export class CameraRigNode extends Node {
             this.setPosition(this._pivot);
     }
 
+    /** Publish (or withdraw) the dither-mode hole on the camera this rig drives. */
+    private _updateSeeThrough(cam: CameraNode): void {
+        const see = cam.seeThrough;
+        see.active = this.collisionEnabled && this.collisionMode === 'dither';
+        if (!see.active) return;
+        vec3.copy(see.pivot, this._pivot);
+        see.radius = Math.max(0.05, this.ditherRadius);
+        see.strength = clamp(this.ditherStrength, 0, 1);
+    }
+
     private _updateCollision(dt: number, snap: boolean, boomWorld: vec3, boomDistance: number, worldRotation: quat): void {
-        if (!this.collisionEnabled || snap || boomDistance < 1e-4) {
+        // 'dither' never pulls the camera in: the obstruction is see-through instead (`_updateSeeThrough`).
+        if (!this.collisionEnabled || this.collisionMode === 'dither' || snap || boomDistance < 1e-4) {
             this._armRatio = 1;
             return;
         }
@@ -630,6 +656,9 @@ export class CameraRigNode extends Node {
                     collisionPullTime: this.collisionPullTime,
                     collisionReturnTime: this.collisionReturnTime,
                     collisionIgnoreIds: [...this.collisionIgnoreIds],
+                    collisionMode: this.collisionMode,
+                    ditherRadius: this.ditherRadius,
+                    ditherStrength: this.ditherStrength,
 
                     shakePositionAmplitude: [...this.shakePositionAmplitude],
                     shakeRotationAmplitude: [...this.shakeRotationAmplitude],
@@ -688,6 +717,9 @@ export class CameraRigNode extends Node {
         node.collisionReturnTime = num(json.collisionReturnTime, node.collisionReturnTime);
         node.collisionIgnoreIds = Array.isArray(json.collisionIgnoreIds)
             ? json.collisionIgnoreIds.filter((id: any) => typeof id === 'string') : [];
+        node.collisionMode = json.collisionMode === 'dither' ? 'dither' : 'retract';
+        node.ditherRadius = num(json.ditherRadius, node.ditherRadius);
+        node.ditherStrength = num(json.ditherStrength, node.ditherStrength);
 
         v3(node.shakePositionAmplitude, json.shakePositionAmplitude);
         v3(node.shakeRotationAmplitude, json.shakeRotationAmplitude);

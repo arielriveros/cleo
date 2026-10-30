@@ -113,7 +113,8 @@ Fields: `followOffset`, `followSpace` (`'world' | 'targetYaw' | 'targetFull'`), 
 `yawSensitivity`, `pitchSensitivity`, `invertPitch`, `yawMin` / `yawMax`, `pitchMin = -80` /
 `pitchMax = 80`, `armLength = 4`, `socketOffset`, `fovEnabled` / `fov` / `fovDamping`,
 `collisionEnabled` / `collisionRadius` / `collisionMinRatio` / `collisionPullTime` /
-`collisionReturnTime` / `collisionIgnoreIds`, `shakePositionAmplitude`, `shakeRotationAmplitude`,
+`collisionReturnTime` / `collisionIgnoreIds`, `collisionMode` (`'retract' | 'dither'`) /
+`ditherRadius = 1` / `ditherStrength = 0.85`, `shakePositionAmplitude`, `shakeRotationAmplitude`,
 `shakeFrequency`, `shakeDecay`, `shakeSustained`, `cameraNodeId`.
 
 > Put a shoulder offset on **`socketOffset`**, never on the Camera child — the rig rewrites the

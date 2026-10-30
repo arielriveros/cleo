@@ -25,6 +25,9 @@ struct InstancedTransform {
     u_lodBand: vec4<f32>,
     u_lodCamera: vec4<f32>,
     u_lodFrame: vec4<f32>,
+    // Camera see-through hole (chunks/cameraHole.wgsl): camera xyz + 1/radius; pivot xyz + strength (0 = off).
+    u_camHole: vec4<f32>,
+    u_camHolePivot: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> u_transform: InstancedTransform;
 
@@ -68,6 +71,7 @@ fn vs_main(
                           u_transform.u_windShape, u_transform.u_windCamera);
     out.fragPos = windDisplace(out.fragPos, position, out.normal, model, u_transform.u_windTime.x, wind);
 #endif
+    cameraHoleVarying(&out, u_transform.u_camHole, u_transform.u_camHolePivot, u_transform.u_lodFrame.x);
     // From fragPos, which IS model * position unless the wind moved it.
     out.position = u_transform.u_projection * u_transform.u_view * vec4<f32>(out.fragPos, 1.0);
     // Fully faded: clip the whole instance away before it costs a single fragment.

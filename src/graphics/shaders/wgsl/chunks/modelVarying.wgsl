@@ -37,7 +37,16 @@ struct VertexOutput {
     // Foliage LOD crossfade (chunks/instancedVertex.wgsl): x = fade-in, y = fade-out, z = this frame's
     // dither phase. 1, 1 for everything else, which `lodFadeKeeps` always keeps.
     @location(7) lodFade: vec3<f32>,
+    // Camera see-through hole (chunks/cameraHole.wgsl): xyz = offset from the camera->pivot line in hole
+    // radii, w = position along it (0 camera, 1 pivot). Both are LINEAR in the world position, so they
+    // interpolate exactly and the fragment test is per pixel without the line reaching the fragment stage.
+    @location(8) camHole: vec4<f32>,
+    // x = how much of a blocking surface is dithered away (0 = this draw has no hole), y = dither phase.
+    @location(9) camHoleParams: vec2<f32>,
 };
+
+#include "./cameraHole.wgsl"
+
 
 /**
  * A despawn dissolve (`u_dissolve`: x = how far gone, y = dither phase) as a fade-OUT on the LOD

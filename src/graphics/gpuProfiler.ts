@@ -73,6 +73,7 @@ export const RENDER_PASSES = [
     'lensFlare',
     'vignette',
     'filmGrain',
+    'fxaa',
     'exposure',
     'bloom.bright',
     'bloom.blur',
@@ -95,7 +96,7 @@ export const TOGGLEABLE_PASSES: RenderPass[] = [
     // `dof.coc` switches depth of field as a whole. Its other two passes report their own timings
     // but are deliberately NOT switchable: the gather and the composite are halves of one effect,
     // and a composite that did not run would leave the next stage of the chain unwritten.
-    'dof.coc', 'lensFlare', 'vignette', 'filmGrain',
+    'dof.coc', 'lensFlare', 'vignette', 'filmGrain', 'fxaa',
 ];
 
 /**
@@ -138,6 +139,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     lensFlareComposite: 'lensFlare',
     vignette: 'vignette',
     filmGrain: 'filmGrain',
+    fxaa: 'fxaa',
     present: 'present',
     forwardOpaque: 'forwardOpaque',
     transparent: 'transparent',
@@ -161,6 +163,8 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     'velocity.objects': 'velocity',
     // The copy back over the scene buffer, which the resolve cannot avoid: it READS that buffer.
     'taa.copy': 'taa',
+    // The same copy, RCAS-sharpened on the way when `taaSharpness` > 0.
+    'taa.sharpen': 'taa',
     'velocity.tile': 'motionBlur',
     'velocity.neighbor': 'motionBlur',
     // The scene -> compose[0] copy; WebGL2 times it under `present`, which is reported twice a frame.

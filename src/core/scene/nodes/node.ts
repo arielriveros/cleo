@@ -144,6 +144,10 @@ export class Node {
   // serialized) and read by the renderer's object-velocity pass, never by anything else.
   protected _motionBlur: MotionBlurMode = 'full';
 
+  // Whether a CameraRig in 'dither' collision mode may cut its see-through hole into this node. Authored
+  // (inspector + serialized) and read by the renderer's model draws, never by anything else.
+  protected _cameraDither = false;
+
   // See SocketAttachment. Read by the scene's late socket pass.
   protected _socketAttachment: SocketAttachment | null = null;
 
@@ -871,6 +875,7 @@ export class Node {
       variables: this._serializeVariables(),
       spawnOnStart: this._spawnOnStart,
       ...(this._motionBlur !== 'full' ? { motionBlur: this._motionBlur } : {}),
+      ...(this._cameraDither ? { cameraDither: true } : {}),
       ...(this._socketAttachment ? { socketAttachment: { ...this._socketAttachment } } : {}),
       ...(await this._serializePayload()),
     };
@@ -912,6 +917,7 @@ export class Node {
     // Absent in older saves, which is exactly the 'full' default. Assigned to the field rather than
     // through the setter: the setter fans out to children, and this node has none yet.
     if (json.motionBlur === 'objectOnly' || json.motionBlur === 'none') node._motionBlur = json.motionBlur;
+    if (json.cameraDither === true) node._cameraDither = true;
 
     if (json.socketAttachment && typeof json.socketAttachment.socket === 'string') {
       node._socketAttachment = {
@@ -1245,6 +1251,20 @@ export class Node {
     this._motionBlur = value;
     for (const child of this._children) child.motionBlur = value;
     this._notifyChange('component', 'motionBlur', prev, value);
+  }
+
+  /**
+   * Whether this node is dithered away where it blocks the view of a CameraRig in `'dither'` collision
+   * mode, instead of the rig pulling its camera in (default false). Only the part inside the hole around
+   * the camera -> player line goes; shadows are untouched. Fans out to descendants like
+   * {@link motionBlur}, so it can be set on an imported model's holder node.
+   */
+  public get cameraDither(): boolean { return this._cameraDither; }
+  public set cameraDither(value: boolean) {
+    const prev = this._cameraDither;
+    this._cameraDither = !!value;
+    for (const child of this._children) child.cameraDither = value;
+    this._notifyChange('component', 'cameraDither', prev, this._cameraDither);
   }
 
   /** The socket this node is pinned to, or null. See {@link SocketAttachment}. */

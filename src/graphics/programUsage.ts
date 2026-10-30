@@ -47,7 +47,7 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     skyAtmosphere: 'feature', skyProject: 'feature', skyFog: 'feature', godRays: 'feature',
     chromaticAberration: 'feature', dofCoc: 'feature', dofGather: 'feature', dofComposite: 'feature',
     lensFlare: 'feature', lensFlareComposite: 'feature', vignette: 'feature', filmGrain: 'feature',
-    taaResolve: 'feature',
+    taaResolve: 'feature', taaSharpen: 'feature', fxaa: 'feature',
     motionBlurVelocity: 'feature', motionBlurTileMax: 'feature', motionBlurNeighborMax: 'feature', motionBlur: 'feature',
     objectVelocity: 'feature', objectVelocitySkinned: 'feature', objectVelocityBasicSkinned: 'feature',
     decalSurface: 'feature', decalResolve: 'feature', decalColor: 'feature',
@@ -221,7 +221,8 @@ export function usageFromRenderSettings(settings: Partial<RenderSettings> | null
     if (positive('filmGrainIntensity')) add('filmGrain');
     const taa = on('taaEnabled', 'taaEnabled');
     const blur = on('motionBlurEnabled', 'motionBlurEnabled');
-    if (taa) add('taaResolve');
+    if (taa) add('taaResolve', 'taaSharpen');
+    if (on('fxaaEnabled', 'fxaaEnabled')) add('fxaa');
     if (taa || blur) add('motionBlurVelocity');
     if (blur) add('motionBlurTileMax', 'motionBlurNeighborMax', 'motionBlur');
     // The foliage depth prepass is opt-in and off by default, so only a game that turns it on ships it.

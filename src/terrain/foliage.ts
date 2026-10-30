@@ -508,6 +508,8 @@ export class FoliageLayer {
      * materials stay authored `castShadow: false` for the colour pass.
      */
     public castShadows = false;
+    /** See `TerrainFoliageRule.cameraDither`: the camera rig's see-through hole may cut these instances. */
+    public cameraDither = false;
     /**
      * How a mesh instance stands (see `TerrainFoliageRule.orientation`): upright, tilted to the ground's
      * normal, or at a random orientation. Applied when the instance matrices are built -- the stored
@@ -684,6 +686,7 @@ export class FoliageLayer {
         this.cullDistance = Math.max(0, Number(src.cullDistance) || 0);
         this.collision = src.collision ?? null;
         this.castShadows = !!src.castShadows;
+        this.cameraDither = !!src.cameraDither;
         this.initialized = false; // new Model objects — the foliage pass re-uploads their meshes
     }
 
@@ -1126,6 +1129,7 @@ export class FoliageLayer {
                 } : undefined,
             cullDistance: this.cullDistance > 0 ? this.cullDistance : undefined,
             castShadows: this.castShadows || undefined,
+            cameraDither: this.cameraDither || undefined,
             orientation: this.orientation !== 'up' ? this.orientation : undefined,
             // A mesh layer's wind rides in its models' materials; a billboard's card material is rebuilt
             // on load, so its wind is carried here.
@@ -1160,6 +1164,7 @@ export class FoliageLayer {
             layer._applyMeshPrototype(json);
         }
         layer.castShadows = !!json.castShadows;
+        layer.cameraDither = !!json.cameraDither;
         // Restored BEFORE the instance rebuild below: setting it after would bucket every instance at the
         // default size and leave the renderer to notice the mismatch and rebuild the whole grid again on
         // its first frame. A layer saved before this was persisted keeps whatever default it loads with.

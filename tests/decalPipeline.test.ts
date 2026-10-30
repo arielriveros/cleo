@@ -155,7 +155,7 @@ describe('the programs', () => {
         const at = entries.indexOf('decalSurface');
         expect(entries.slice(at, at + 3)).toEqual(['decalSurface', 'decalResolve', 'decalColor']);
         expect(entries.slice(at + 3)).toEqual(['overdrawInstanced', 'foliageImpostorInstanced', 'occlusionBox',
-                                              'shadowMapImpostorInstanced']);
+                                              'shadowMapImpostorInstanced', 'taaSharpen', 'fxaa']);
     });
 
     it('never discard in the box passes, which keeps them in uniform control flow', () => {

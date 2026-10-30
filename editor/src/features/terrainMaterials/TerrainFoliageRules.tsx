@@ -258,6 +258,14 @@ export default function TerrainFoliageRules({ material, rules, exclude, setExclu
                   <span className={label} title='Rasterize these instances into the shadow cascades. Costs one extra instanced draw per cell per cascade — cheap for trees, expensive for dense grass.'>Cast shadows</span>
                   <Toggle checked={!!r.castShadows} onChange={c => patchRule(i, { castShadows: c })} />
                 </div>
+                {/* Trees and tall props between the camera and the player: dithered see-through when a camera
+                    rig in Dither collision mode looks through them, instead of blocking the view. */}
+                {r.kind === 'mesh' && (
+                  <div className='flex items-center justify-between'>
+                    <span className={label} title='When a camera rig in Dither collision mode has these instances between the camera and the player, the part that blocks the view is dithered see-through.'>See-through to camera</span>
+                    <Toggle checked={!!r.cameraDither} onChange={c => patchRule(i, { cameraDither: c })} />
+                  </div>
+                )}
                 {/* How each instance stands. Rocks want the slope under them (or none at all); trees and
                     grass want to stand up whatever the slope. Re-orients in place: nothing is re-scattered. */}
                 {r.kind === 'mesh' && (

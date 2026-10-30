@@ -851,7 +851,8 @@ const FOLIAGE_PROTOS = [
   })),
   {
     key: 'pine', name: 'Pine', ...pineLevels(ROOT, pine, BARK_MAT, NEEDLES_MAT), cull: PINE_CULL,
-    rule: { density: 0.004, minScale: 0.55, maxScale: 0.95, castShadows: true, collision: { shape: 'cylinder', radius: 0.4, height: 8 } },
+    // Trees are see-through to the player camera (its rig's 'dither' collision mode) where they block it.
+    rule: { density: 0.004, minScale: 0.55, maxScale: 0.95, castShadows: true, cameraDither: true, collision: { shape: 'cylinder', radius: 0.4, height: 8 } },
     cellSize: 40,
   },
   // Celandine: yellow flower clumps through the meadow grass, culled with it.
@@ -861,7 +862,7 @@ const FOLIAGE_PROTOS = [
   })),
   {
     key: 'jacaranda', name: 'Jacaranda', ...jacarandaLevels(ROOT, jacaranda, JACARANDA_MATS), cull: PINE_CULL,
-    rule: { density: 0.0012, minScale: 0.5, maxScale: 0.72, castShadows: true, collision: { shape: 'cylinder', radius: 0.5, height: 6 } },
+    rule: { density: 0.0012, minScale: 0.5, maxScale: 0.72, castShadows: true, cameraDither: true, collision: { shape: 'cylinder', radius: 0.5, height: 6 } },
     cellSize: 40,
   },
   // The undergrowth: ferns and fallen branches belong to the Forest Floor, the bushes to the ground.
@@ -999,6 +1000,7 @@ const RULES = FOLIAGE_PROTOS.map((f, i) => ({
   density: f.rule.density, densityUnit: 'm2', minScale: f.rule.minScale, maxScale: f.rule.maxScale,
   cullDistance: f.cull, billboard: f.billboard ?? null, ...(f.billboard ? { impostorSize: IMPOSTOR_SIZE } : {}),
   castShadows: f.rule.castShadows, collision: f.rule.collision,
+  ...(f.rule.cameraDither ? { cameraDither: true } : {}),
   ...(f.orientation ? { orientation: f.orientation } : {}),
 }))
 
@@ -1240,6 +1242,7 @@ function scatter() {
       ...(proto.orientation ? { orientation: proto.orientation } : {}),
       cullDistance: proto.cull,
       ...(proto.rule.castShadows ? { castShadows: true } : {}),
+      ...(proto.rule.cameraDither ? { cameraDither: true } : {}),
       cellSize: proto.cellSize,
       instances: instancesBlob(points, heights, random, proto.rule.minScale, proto.rule.maxScale, sink),
     }
@@ -1304,9 +1307,24 @@ function widenCamera(json) {
   const walk = (n) => { if (n.type === 'camera' && n.camera) n.camera.far = CAMERA_FAR; (n.children ?? []).forEach(walk) }
   walk(json)
 }
+/**
+ * The player's camera rig sees through trees and dungeon pillars instead of pulling in behind them: in a
+ * forest the retracting camera spent most of its time jammed against a trunk. Only what opted in
+ * (`cameraDither` on the tree rules and the pillar nodes) is cut; walls and rocks still pull nothing in
+ * and simply block, as the dungeon's tight rooms are framed for.
+ */
+function seeThroughCamera(json) {
+  const walk = (n) => {
+    if (n.type === 'cameraRig') { n.collisionMode = 'dither'; n.ditherRadius = 1.1; n.ditherStrength = 0.85 }
+    (n.children ?? []).forEach(walk)
+  }
+  walk(json)
+}
 // The template, its recorded source (what copies are checked against), and the placed copy all agree.
 widenCamera(LEVEL.player.nodeJson)
 widenCamera(souls.TEMPLATE_SOURCE.get(LEVEL.player.id))
+seeThroughCamera(LEVEL.player.nodeJson)
+seeThroughCamera(souls.TEMPLATE_SOURCE.get(LEVEL.player.id))
 
 /** A model node over one part, its material linked by id (as a library model's nodes are). */
 function modelNode(key, name, part, materialId, extra = {}) {
@@ -1784,6 +1802,7 @@ function valleyScene() {
 
   const player = souls.playerNode(knight.playerModel)
   widenCamera(player)
+  seeThroughCamera(player)
   player.position = at(SPAWN.x, SPAWN.z)
   player.rotation = [0, SPAWN.yawDeg, 0]
 
@@ -1853,7 +1872,7 @@ const dungeon = buildDungeon({
   id, node, vars, souls, withScript, linkInstance, tex, pbrMaterial, libraryMaterial, modelNode, matJson, texIdsOf, log,
   placeFire, wallTorch, brazierCage, campfire, CAMPFIRE_MATS, CAGE_MAT, CAVE_DARK_MAT, SURFACES, rayHit,
   BARREL_TEMPLATE, breakableBarrelNode, mossRocks, MOSS_ROCK_MAT,
-  ROOT, BUILD, PROPS, PROJECT_NAME, PRESETS, PLAYER_ARM, widenCamera, REFERENCE_ILLUMINANCE, ASSET_HASH_VERSION,
+  ROOT, BUILD, PROPS, PROJECT_NAME, PRESETS, PLAYER_ARM, widenCamera, seeThroughCamera, REFERENCE_ILLUMINANCE, ASSET_HASH_VERSION,
 })
 
 // =====================================================================================================

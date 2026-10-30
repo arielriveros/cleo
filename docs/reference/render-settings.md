@@ -44,6 +44,7 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | `bloomEnabled` | on | on | on | off |
 | `motionBlurEnabled` | on | on | off | off |
 | `taaEnabled` | on | on | on | off |
+| `fxaaEnabled` | off | off | off | **on** |
 
 ## Exposure and tone
 
@@ -136,10 +137,21 @@ with a real aperture, so the near field blurs harder than the far field.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `taaEnabled` | `boolean` | `true` | Temporal antialiasing. Deliberately a single switch — the feedback weights are not exposed. |
+| `taaEnabled` | `boolean` | `true` | Temporal antialiasing. |
+| `taaSharpness` | `number` | `0.25` | Contrast-adaptive sharpening (RCAS) of the resolved image, `0`–`1`. Never applied to the history. |
+| `taaHistoryFilter` | `'catmullRom' \| 'bilinear'` | `'catmullRom'` | How the history is fetched. Bilinear softens a little more every frame the camera moves. |
+| `taaFeedback` | `number` | `0.97` | History weight for a still pixel, `0.8`–`0.98`. |
+| `taaMotionFeedback` | `number` | `0.88` | History weight at 20 px/frame of motion and above, `0.5`–`0.95`. |
+| `taaClipStrength` | `number` | `1.0` | Width of the history clip box in standard deviations, `0.5`–`2`. Narrower ghosts less, flickers more. |
+| `fxaaEnabled` | `boolean` | `false` | FXAA after the post chain, before the tone curve. Alone or with TAA. |
+| `fxaaQuality` | `'low' \| 'medium' \| 'high'` | `'medium'` | Edge search length: 5, 8 or 12 steps. |
+| `fxaaSubpixel` | `number` | `0.75` | Sub-pixel smoothing, `0`–`1`. |
+| `fxaaEdgeThreshold` | `number` | `0.125` | Minimum relative contrast for an edge, `0.063`–`0.333`. |
 | `motionBlurEnabled` | `boolean` | `true` | Camera-reprojection motion blur. |
 | `motionBlurIntensity` | `number` | `1.0` | Effective shutter length. |
-| `motionBlurSamples` | `number` | `12` | Taps per pixel. |
+| `motionBlurSamples` | `number` | `12` | Taps per pixel, `4`–`32`. |
+| `motionBlurJitter` | `number` | `0.5` | Per-pixel tap offset, `0`–`1`: low bands, high is grainy. |
+| `motionBlurMaxLength` | `number` | `20` | Longest streak in pixels, `4`–`20`. |
 
 Per-object motion blur can be suppressed on a node with `node.motionBlur = 'objectOnly' | 'none'`.
 

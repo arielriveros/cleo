@@ -105,6 +105,8 @@ import DofCompositeProgram from './shaders/wgsl/dofComposite.wgsl'
 import LensFlareProgram from './shaders/wgsl/lensFlare.wgsl'
 import LensFlareCompositeProgram from './shaders/wgsl/lensFlareComposite.wgsl'
 import VignetteProgram from './shaders/wgsl/vignette.wgsl'
+import TaaSharpenProgram from './shaders/wgsl/taaSharpen.wgsl'
+import FxaaProgram from './shaders/wgsl/fxaa.wgsl'
 import FilmGrainProgram from './shaders/wgsl/filmGrain.wgsl'
 import ComposerProgram from './shaders/wgsl/composer.wgsl'
 import VolumetricGodRaysProgram from './shaders/wgsl/volumetricGodRays.wgsl'
@@ -484,11 +486,32 @@ export interface RenderSettings {
     motionBlurIntensity: number;
     motionBlurSamples: number;
     /**
-     * Temporal antialiasing. One knob deliberately: the feedback weights live in `taaResolve.wgsl`
-     * where they can be reasoned about, and exposing them would mostly be an invitation to make the
-     * image ghost.
+     * Scale of the per-pixel offset along the blur, 0..1. Low values give discrete copies (banding),
+     * high ones grain — motion blur runs after TAA, so nothing averages that grain away. Absent = 0.5.
      */
+    motionBlurJitter?: number;
+    /** Longest blur streak, pixels (4..20; 20 is the tile size and the hard cap). Absent = 20. */
+    motionBlurMaxLength?: number;
+    /** Temporal antialiasing. See `taaResolve.wgsl` for what the knobs below do. */
     taaEnabled: boolean;
+    /** History weight when the pixel is still (0.8..0.98). Higher = smoother and slower to settle. Absent = 0.97. */
+    taaFeedback?: number;
+    /** History weight under fast motion (0.5..0.95). Lower = sharper in motion, more aliasing. Absent = 0.88. */
+    taaMotionFeedback?: number;
+    /** Width of the history clip box in standard deviations (0.5..2). Lower = less ghosting, more flicker. Absent = 1. */
+    taaClipStrength?: number;
+    /** How the history is fetched: one bilinear tap (softer) or 5-tap Catmull-Rom. Absent = 'catmullRom'. */
+    taaHistoryFilter?: TaaHistoryFilter;
+    /** Contrast-adaptive sharpening of the resolved image, 0..1 (0 = off). Absent = 0.25. */
+    taaSharpness?: number;
+    /** FXAA, a single-frame edge smoother; on its own or on top of TAA. Absent = off. */
+    fxaaEnabled?: boolean;
+    /** Edge search length: 'low' 5, 'medium' 8, 'high' 12 steps. Absent = 'medium'. */
+    fxaaQuality?: FxaaQuality;
+    /** Sub-pixel smoothing 0..1. Higher removes more shimmer and softens more. Absent = 0.75. */
+    fxaaSubpixel?: number;
+    /** Minimum relative contrast to count as an edge (0.063..0.333). Lower smooths more edges. Absent = 0.125. */
+    fxaaEdgeThreshold?: number;
     frustumCulling: boolean;
     /**
      * CPU occlusion culling (graphics/occlusion): skip what is hidden behind the landscape (`terrain`) or
@@ -597,6 +620,17 @@ export interface QualityTier {
     bloomEnabled: boolean;
     motionBlurEnabled: boolean;
     taaEnabled: boolean;
+    /** The cheap edge smoother, standing in for TAA where the tier cannot afford it. */
+    fxaaEnabled: boolean;
+}
+
+export type TaaHistoryFilter = 'bilinear' | 'catmullRom';
+export type FxaaQuality = 'low' | 'medium' | 'high';
+const FXAA_SEARCH_STEPS: Record<FxaaQuality, number> = { low: 5, medium: 8, high: 12 };
+
+/** `v` clamped to [lo, hi]; `fallback` when it is not a finite number (a hand-edited or old save). */
+function clampFinite(v: number, lo: number, hi: number, fallback: number): number {
+    return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
 }
 
 // Tier definitions. Each step down roughly quarters the cost of the cloud raymarch and SSAO/SSIL, which
@@ -607,7 +641,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         cloudResolutionScale: 1.0, cloudSteps: 48, cloudLightSteps: 6,
         ssaoEnabled: true, ssaoSamples: 64, ssaoResolutionScale: 1.0, ssilEnabled: true,
         shadowMapResolution: 4096, shadowCascades: 4, shadowFilterMode: 1, shadowFilterRadius: 2.0,
-        bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true,
+        bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true, fxaaEnabled: false,
         particleLodDistanceScale: 1.5,
     },
     high: {
@@ -615,7 +649,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         cloudResolutionScale: 0.5, cloudSteps: 40, cloudLightSteps: 5,
         ssaoEnabled: true, ssaoSamples: 24, ssaoResolutionScale: 0.5, ssilEnabled: true,
         shadowMapResolution: 2048, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
-        bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true,
+        bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true, fxaaEnabled: false,
         particleLodDistanceScale: 1,
     },
     medium: {
@@ -626,7 +660,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         shadowMapResolution: 1024, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
         // Kept at medium: one fullscreen resolve is cheap next to what this tier already spends on
         // clouds and shadows, and aliasing is the most visible artefact left at a reduced tier.
-        bloomEnabled: true, motionBlurEnabled: false, taaEnabled: true,
+        bloomEnabled: true, motionBlurEnabled: false, taaEnabled: true, fxaaEnabled: false,
         particleLodDistanceScale: 0.75,
     },
     low: {
@@ -634,7 +668,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         cloudResolutionScale: 0.25, cloudSteps: 20, cloudLightSteps: 3,
         ssaoEnabled: false, ssaoSamples: 16, ssaoResolutionScale: 0.5, ssilEnabled: false,
         shadowMapResolution: 1024, shadowCascades: 2, shadowFilterMode: 0, shadowFilterRadius: 0.0,
-        bloomEnabled: false, motionBlurEnabled: false, taaEnabled: false,
+        bloomEnabled: false, motionBlurEnabled: false, taaEnabled: false, fxaaEnabled: true,
         particleLodDistanceScale: 0.5,
     },
 };
@@ -885,6 +919,8 @@ export class Renderer {
     private _motionBlurEnabled: boolean = true;
     private _motionBlurIntensity: number = 1.0;
     private _motionBlurSamples: number = 12;
+    private _motionBlurJitter: number = 0.5;
+    private _motionBlurMaxLength: number = 20;
     private static readonly MOTION_BLUR_TILE = 20; // tile edge (px); also caps the blur length
 
     // Selection outline: a silhouette mask FBO plus a screen-space edge pass. `_outlineActive` is set
@@ -1404,10 +1440,17 @@ export class Renderer {
     private _taaHistoryW: number = 0;
     private _taaHistoryH: number = 0;
     /** History weight when still and under fast motion. See `taaResolve.wgsl`. */
-    private static readonly TAA_FEEDBACK_MAX = 0.97;
-    private static readonly TAA_FEEDBACK_MIN = 0.88;
+    private _taaFeedback: number = 0.97;
+    private _taaMotionFeedback: number = 0.88;
     /** Standard deviations the neighbourhood clamp box spans. */
-    private static readonly TAA_VARIANCE_GAMMA = 1.0;
+    private _taaClipStrength: number = 1.0;
+    private _taaHistoryFilter: TaaHistoryFilter = 'catmullRom';
+    /** RCAS strength on the copy that goes on to the screen; never on the history. 0 = plain copy. */
+    private _taaSharpness: number = 0.25;
+    private _fxaaEnabled: boolean = false;
+    private _fxaaQuality: FxaaQuality = 'medium';
+    private _fxaaSubpixel: number = 0.75;
+    private _fxaaEdgeThreshold: number = 0.125;
 
     // SSIL (deferred path; screen-space indirect lighting with a visibility bitmask, which replaced the
     // old hemisphere-kernel SSAO and still answers to its settings). Trace -> temporal accumulation ->
@@ -2429,6 +2472,9 @@ export class Renderer {
             ['occlusionBox',                 OcclusionBoxProgram],
             // Foliage shadows cast through the octahedral impostor, in the outer cascades. APPENDED.
             ['shadowMapImpostorInstanced',   ShadowMapImpostorProgram],
+            // Antialiasing extras: RCAS sharpening of the TAA output, and FXAA. APPENDED.
+            ['taaSharpen',                   TaaSharpenProgram],
+            ['fxaa',                         FxaaProgram],
         ];
     }
 
@@ -2530,6 +2576,7 @@ export class Renderer {
         if (!scene.activeCamera) return;
         this._activeCamera = scene.activeCamera.camera;
         this._activeCamera.resize(this._renderWidth, this._renderHeight);
+        this._updateCameraHole(scene);
         // Kept for per-draw lookups (forward light-probe selection) that don't receive the scene.
         this._currentScene = scene;
         this._advanceWindTime();
@@ -4535,6 +4582,9 @@ export class Renderer {
         this._shaderManager.setUniform('u_lodBand', b);
         this._shaderManager.setUniform('u_lodCamera', c);
         this._shaderManager.setUniform('u_lodFrame', f);
+        // Every foliage program reads the hole block too, so it is written on every bind, never only on
+        // the layers that opt in: a uniform keeps its last value.
+        this._setCameraHole(layer.cameraDither);
     }
 
     /**
@@ -4550,6 +4600,47 @@ export class Renderer {
         this._shaderManager.setUniform('u_dissolve', d);
     }
     private readonly _dissolveVec: [number, number] = [0, 0];
+
+    /**
+     * This frame's camera see-through hole (chunks/cameraHole.wgsl), from the active camera's
+     * `seeThrough` — set by a CameraRig in 'dither' collision mode. `_camHolePivot[3]` is the strength,
+     * 0 when no rig asked for one, which switches the test off in every program at once.
+     */
+    private readonly _camHole: number[] = [0, 0, 0, 1];
+    private readonly _camHolePivot: number[] = [0, 0, 0, 0];
+    private readonly _camHoleDraw: number[] = [0, 0, 0, 0];
+    private _camHoleStrength = 0;
+
+    private _updateCameraHole(scene: Scene): void {
+        const see = scene.activeCamera?.seeThrough;
+        // Not in the editor's own views, not in captures and thumbnails: only the game camera has a player.
+        if (!see || !see.active || see.strength <= 0 || see.radius <= 0 || this._capturing || this._thumbnailMode) {
+            this._camHoleStrength = 0;
+            return;
+        }
+        const eye = this._activeCamera.position;
+        this._camHole[0] = eye[0]; this._camHole[1] = eye[1]; this._camHole[2] = eye[2];
+        this._camHole[3] = 1 / see.radius;
+        this._camHolePivot[0] = see.pivot[0]; this._camHolePivot[1] = see.pivot[1]; this._camHolePivot[2] = see.pivot[2];
+        this._camHoleStrength = Math.min(1, see.strength);
+    }
+
+    /** Whether a draw that opted in (`cameraDither`) gets the hole this frame. */
+    private _cameraHoleOn(optedIn: boolean): boolean {
+        return optedIn && this._camHoleStrength > 0 && !this._capturing && !this._cubeFaceCapture;
+    }
+
+    /**
+     * The hole block of the program just bound. Written on EVERY draw through a model or instanced
+     * program, like `_setDissolve`: a uniform keeps its last value.
+     */
+    private _setCameraHole(optedIn: boolean): void {
+        const p = this._camHoleDraw;
+        p[0] = this._camHolePivot[0]; p[1] = this._camHolePivot[1]; p[2] = this._camHolePivot[2];
+        p[3] = this._cameraHoleOn(optedIn) ? this._camHoleStrength : 0;
+        this._shaderManager.setUniform('u_camHole', this._camHole);
+        this._shaderManager.setUniform('u_camHolePivot', p);
+    }
 
     /** Whether every material maps by its mesh uv (no box or triplanar projection): the lean foliage test. */
     /** The (slot, model) pairs whose prepass depth went down this layer: see `_foliagePass`. */
@@ -4572,7 +4663,10 @@ export class Renderer {
                 const wind = this._foliageWind(scene, layer);
                 // Which buckets take the depth prepass: the two nearest real levels of a MESH layer, where
                 // leaves overlap on screen. Billboards gain nothing — their colour pass is already one fetch.
-                const prepassSlots = this._foliagePrepass && layer.kind !== 'billboard' ? Math.min(2, billboardBucket) : 0;
+                // Nor a layer the camera hole is cutting into: the colour pass after a prepass has no
+                // discard, so the depth the prepass wrote would show through as a solid silhouette.
+                const prepassSlots = this._foliagePrepass && layer.kind !== 'billboard' && !this._cameraHoleOn(layer.cameraDither)
+                    ? Math.min(2, billboardBucket) : 0;
                 const prepassed = (model: Model, slot: number) => slot < prepassSlots && model.material.type === 'pbr'
                     && !usesParallax(model.materials) && Renderer._meshUvOnly(model.materials);
 
@@ -5195,7 +5289,9 @@ export class Renderer {
                 // No cutout on any submesh and no despawn dissolve under way: the no-discard program,
                 // which keeps early-Z (chunks/pbrGBuffer.wgsl, CLEO_OPAQUE). A dissolving node falls
                 // back to the plain one for the length of its fade.
-                return opaqueEligible(node.model.materials) && !(node.effectiveFade > 0) ? base + 'Opaque' : base;
+                // Likewise a node the camera's see-through hole may cut into: it needs the discard.
+                return opaqueEligible(node.model.materials) && node.effectiveFade >= 1 && !this._cameraHoleOn(node.cameraDither)
+                    ? base + 'Opaque' : base;
             }
         }
     }
@@ -5211,6 +5307,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
         this._shaderManager.setUniform('u_model', node.worldTransform);
         this._setDissolve(node.effectiveFade);
+        this._setCameraHole(node.cameraDither);
 
         if (animated) this._uploadBoneMatrices(shaderType, node);
 
@@ -5521,6 +5618,7 @@ export class Renderer {
             this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
             // Placed instanced models never crossfade, and the foliage pass may have left it on.
             this._shaderManager.setUniform('u_lodCamera', Renderer._LOD_OFF);
+            this._setCameraHole(false);
             this._applyMaterialProperties(material);
             pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
         } else {
@@ -5528,6 +5626,7 @@ export class Renderer {
             this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
             this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
             this._shaderManager.setUniform('u_lodCamera', Renderer._LOD_OFF);
+            this._setCameraHole(false);
             this._applyMaterial(material);
             this._applyCull(material.config.side);
         }
@@ -9697,6 +9796,7 @@ export class Renderer {
         // TODO: Mutliply node transform with model transform for model correction
         this._shaderManager.setUniform('u_model', node.worldTransform);
         this._setDissolve(node.effectiveFade);
+        this._setCameraHole(node.cameraDither);
 
         // For animated models, set bone matrices
         if (isAnimatedModel) this._uploadBoneMatrices(shaderType, node);
@@ -11352,6 +11452,19 @@ export class Renderer {
             }
         }
 
+        // --- FXAA: a fixed slot after the reorderable chain, not an effect in it -------------------
+        // Last, so it smooths the edges whatever the chain did to them (DoF, bloom, grain), and on the
+        // final scene image only: the overlay is composited after the present, so the grid and gizmos
+        // keep their crisp lines.
+        if (this._fxaaEnabled && this._passEnabled['fxaa'] && this._debugView === 'final') {
+            const from = src, to = flip();
+            graph.addPass({
+                id: 'fxaa', scope: 'fxaa', reads: [from], writes: [to],
+                execute: ctx => this._fxaaPass(ctx.read(from), ctx.target(to)),
+            });
+            src = to;
+        }
+
         // --- tail: the single display resolve -----------------------------------------------------
         const result = src;
         graph.addPass({
@@ -12257,6 +12370,20 @@ export class Renderer {
     }
 
     /** Lens fall-off toward the corners, multiplicative on the linear-HDR chain. */
+    private _fxaaPass(source: Framebuffer, target: Framebuffer): void {
+        const pass = this._beginFullscreenPass(target.renderTarget, 'fxaa', true);
+        const pipeline = this._fullscreenPipeline('fxaa', FxaaProgram);
+        pass.setPipeline(pipeline);
+        this._shaderManager.setUniform('u_texelSize', [1 / Math.max(1, this._renderWidth), 1 / Math.max(1, this._renderHeight)]);
+        this._shaderManager.setUniform('u_exposure', this._exposure);
+        this._shaderManager.setUniform('u_edgeThreshold', this._fxaaEdgeThreshold);
+        this._shaderManager.setUniform('u_subpixel', this._fxaaSubpixel);
+        this._shaderManager.setUniform('u_searchSteps', FXAA_SEARCH_STEPS[this._fxaaQuality]);
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [source.colors[0]]));
+        this._drawFullscreen(pass);
+        this._endFullscreenPass(pass);
+    }
+
     private _vignettePass(source: Framebuffer, target: Framebuffer): void {
         const pass = this._beginFullscreenPass(target.renderTarget, 'vignette', true);
         const pipeline = this._fullscreenPipeline('vignette', VignetteProgram);
@@ -12373,18 +12500,33 @@ export class Renderer {
         // Last frame's exposure: `_resolveExposure` runs at the top of `_applyPostProcessing`, which is
         // now AFTER this pass. Correct for a weight, which is all it is used for.
         this._shaderManager.setUniform('u_exposure', this._exposure);
-        this._shaderManager.setUniform('u_feedbackMin', Renderer.TAA_FEEDBACK_MIN);
-        this._shaderManager.setUniform('u_feedbackMax', Renderer.TAA_FEEDBACK_MAX);
-        this._shaderManager.setUniform('u_varianceGamma', Renderer.TAA_VARIANCE_GAMMA);
+        this._shaderManager.setUniform('u_feedbackMin', Math.min(this._taaMotionFeedback, this._taaFeedback));
+        this._shaderManager.setUniform('u_feedbackMax', this._taaFeedback);
+        this._shaderManager.setUniform('u_varianceGamma', this._taaClipStrength);
         this._shaderManager.setUniform('u_historyValid', this._taaHistoryValid && this._hasPrevViewProj);
+        this._shaderManager.setUniform('u_historyFilter', this._taaHistoryFilter === 'catmullRom' ? 1 : 0);
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
 
-        const copy = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'taa.copy', false);
-        const copyPipeline = this._fullscreenPipeline('screen', ScreenProgram);
+        // Back over the scene buffer — sharpened on the way when asked. The HISTORY keeps the
+        // unsharpened resolve: sharpening inside the feedback loop would compound every frame.
+        const sharpen = this._taaSharpness > 0;
+        // Two literal calls rather than one with a computed label: the profiler-label test finds the
+        // labels by scanning for them.
+        const copy = sharpen
+            ? this._beginFullscreenPass(this._sceneFBO.renderTarget, 'taa.sharpen', false)
+            : this._beginFullscreenPass(this._sceneFBO.renderTarget, 'taa.copy', false);
+        const copyPipeline = sharpen
+            ? this._fullscreenPipeline('taaSharpen', TaaSharpenProgram)
+            : this._fullscreenPipeline('screen', ScreenProgram);
         copy.setPipeline(copyPipeline);
         copy.setBindGroup(0, this._textureBindGroup(copyPipeline, 0,
                                                    [this._taaHistoryFBOs[dst].colors[0]]));
+        if (sharpen) {
+            this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
+            this._shaderManager.setUniform('u_sharpness', this._taaSharpness);
+            this._shaderManager.setUniform('u_exposure', this._exposure);
+        }
         this._drawFullscreen(copy);
         this._endFullscreenPass(copy);
 
@@ -12631,7 +12773,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
         this._shaderManager.setUniform('u_screenSize', [w, h]);
         this._shaderManager.setUniform('u_intensity', this._motionBlurIntensity);
-        this._shaderManager.setUniform('u_maxVelocityPx', Renderer.MOTION_BLUR_TILE);
+        this._shaderManager.setUniform('u_maxVelocityPx', this._motionBlurMaxLength);
         this._shaderManager.setUniform('u_tileSize', K);
         this._drawFullscreen(tilePass);
         this._endFullscreenPass(tilePass);
@@ -12659,8 +12801,9 @@ export class Renderer {
         // per-tile velocities must agree about how long the shutter is or the gather reads a dominant
         // direction that does not match the taps it takes along it.
         this._shaderManager.setUniform('u_intensity', this._motionBlurIntensity);
-        this._shaderManager.setUniform('u_maxVelocityPx', Renderer.MOTION_BLUR_TILE);
+        this._shaderManager.setUniform('u_maxVelocityPx', this._motionBlurMaxLength);
         this._shaderManager.setUniform('u_samples', this._motionBlurSamples);
+        this._shaderManager.setUniform('u_mbJitter', this._motionBlurJitter);
         this._shaderManager.setUniform('u_near', this._activeCamera.near);
         this._shaderManager.setUniform('u_far', this._activeCamera.far);
         this._drawFullscreen(gatherPass);
@@ -12962,6 +13105,34 @@ export class Renderer {
     public set motionBlurIntensity(intensity: number) { this._motionBlurIntensity = Math.max(0, intensity); }
     public get motionBlurSamples(): number { return this._motionBlurSamples; }
     public set motionBlurSamples(samples: number) { this._motionBlurSamples = Math.min(32, Math.max(4, Math.round(samples))); }
+    public get motionBlurJitter(): number { return this._motionBlurJitter; }
+    public set motionBlurJitter(v: number) { this._motionBlurJitter = clampFinite(v, 0, 1, 0.5); }
+    public get motionBlurMaxLength(): number { return this._motionBlurMaxLength; }
+    public set motionBlurMaxLength(px: number) {
+        this._motionBlurMaxLength = clampFinite(px, 4, Renderer.MOTION_BLUR_TILE, Renderer.MOTION_BLUR_TILE);
+    }
+
+    // The TAA tuning knobs. A change to how the history is weighted or fetched leaves the history
+    // itself valid — it is still last frame's image — so none of these invalidate it.
+    public get taaFeedback(): number { return this._taaFeedback; }
+    public set taaFeedback(v: number) { this._taaFeedback = clampFinite(v, 0.8, 0.98, 0.97); }
+    public get taaMotionFeedback(): number { return this._taaMotionFeedback; }
+    public set taaMotionFeedback(v: number) { this._taaMotionFeedback = clampFinite(v, 0.5, 0.95, 0.88); }
+    public get taaClipStrength(): number { return this._taaClipStrength; }
+    public set taaClipStrength(v: number) { this._taaClipStrength = clampFinite(v, 0.5, 2, 1); }
+    public get taaHistoryFilter(): TaaHistoryFilter { return this._taaHistoryFilter; }
+    public set taaHistoryFilter(f: TaaHistoryFilter) { this._taaHistoryFilter = f === 'bilinear' ? 'bilinear' : 'catmullRom'; }
+    public get taaSharpness(): number { return this._taaSharpness; }
+    public set taaSharpness(v: number) { this._taaSharpness = clampFinite(v, 0, 1, 0.25); }
+
+    public get fxaaEnabled(): boolean { return this._fxaaEnabled; }
+    public set fxaaEnabled(enabled: boolean) { this._fxaaEnabled = !!enabled; }
+    public get fxaaQuality(): FxaaQuality { return this._fxaaQuality; }
+    public set fxaaQuality(q: FxaaQuality) { this._fxaaQuality = q in FXAA_SEARCH_STEPS ? q : 'medium'; }
+    public get fxaaSubpixel(): number { return this._fxaaSubpixel; }
+    public set fxaaSubpixel(v: number) { this._fxaaSubpixel = clampFinite(v, 0, 1, 0.75); }
+    public get fxaaEdgeThreshold(): number { return this._fxaaEdgeThreshold; }
+    public set fxaaEdgeThreshold(v: number) { this._fxaaEdgeThreshold = clampFinite(v, 0.063, 0.333, 0.125); }
 
     // Selection outline appearance (used by the post-process outline pass).
     public get outlineColor(): [number, number, number] { return this._outlineColor; }
@@ -13143,6 +13314,7 @@ export class Renderer {
             // Turning it on mid-session must not blend against whatever the buffer last held.
             this.invalidateTemporalHistory();
         }
+        this._fxaaEnabled = t.fxaaEnabled;
         // Restore what the user authored rather than a hardcoded default: a tier without bloom has to
         // zero the live value, and re-selecting a tier with bloom must give back the same setting.
         this._bloomIntensity = t.bloomEnabled ? this._bloomIntensityUser : 0;
@@ -13496,7 +13668,18 @@ export class Renderer {
             motionBlurEnabled: this._motionBlurEnabled,
             motionBlurIntensity: this._motionBlurIntensity,
             motionBlurSamples: this._motionBlurSamples,
+            motionBlurJitter: this._motionBlurJitter,
+            motionBlurMaxLength: this._motionBlurMaxLength,
             taaEnabled: this._taaEnabled,
+            taaFeedback: this._taaFeedback,
+            taaMotionFeedback: this._taaMotionFeedback,
+            taaClipStrength: this._taaClipStrength,
+            taaHistoryFilter: this._taaHistoryFilter,
+            taaSharpness: this._taaSharpness,
+            fxaaEnabled: this._fxaaEnabled,
+            fxaaQuality: this._fxaaQuality,
+            fxaaSubpixel: this._fxaaSubpixel,
+            fxaaEdgeThreshold: this._fxaaEdgeThreshold,
             frustumCulling: this._frustumCulling,
             occlusionCulling: this._occlusionMode,
             foliageShadowDistance: this._foliageShadowDistance,
@@ -13612,6 +13795,17 @@ export class Renderer {
         if (s.motionBlurIntensity !== undefined) this.motionBlurIntensity = s.motionBlurIntensity;
         if (s.motionBlurSamples !== undefined) this.motionBlurSamples = s.motionBlurSamples;
         if (s.taaEnabled !== undefined) this.taaEnabled = s.taaEnabled;
+        if (s.motionBlurJitter !== undefined) this.motionBlurJitter = s.motionBlurJitter;
+        if (s.motionBlurMaxLength !== undefined) this.motionBlurMaxLength = s.motionBlurMaxLength;
+        if (s.taaFeedback !== undefined) this.taaFeedback = s.taaFeedback;
+        if (s.taaMotionFeedback !== undefined) this.taaMotionFeedback = s.taaMotionFeedback;
+        if (s.taaClipStrength !== undefined) this.taaClipStrength = s.taaClipStrength;
+        if (s.taaHistoryFilter !== undefined) this.taaHistoryFilter = s.taaHistoryFilter;
+        if (s.taaSharpness !== undefined) this.taaSharpness = s.taaSharpness;
+        if (s.fxaaEnabled !== undefined) this.fxaaEnabled = s.fxaaEnabled;
+        if (s.fxaaQuality !== undefined) this.fxaaQuality = s.fxaaQuality;
+        if (s.fxaaSubpixel !== undefined) this.fxaaSubpixel = s.fxaaSubpixel;
+        if (s.fxaaEdgeThreshold !== undefined) this.fxaaEdgeThreshold = s.fxaaEdgeThreshold;
         if (s.frustumCulling !== undefined) this.frustumCulling = s.frustumCulling;
         if (s.occlusionCulling !== undefined) this.occlusionCulling = s.occlusionCulling;
         if (s.foliageShadowDistance !== undefined) this.foliageShadowDistance = s.foliageShadowDistance;

@@ -172,7 +172,11 @@ stronger presets read best with a narrower FOV. A camera that names a **Focus Ta
 inspector measures the distance to that node and ignores the focus distance here. The section's
 presets leave the focus distance alone.
 
-### Lens flare
+### Lens
+
+What the glass itself does to the image: flare, dirt on the front element, and vignetting.
+
+#### Lens flare
 
 Ghosts and a halo, traced from the bright areas of the *image* rather than from the sun. That is
 what makes them occlude correctly: a sun behind a wall is not in the buffer, so it throws nothing.
@@ -180,7 +184,7 @@ what makes them occlude correctly: a sun behind a wall is not in the buffer, so 
 after exposure like bloom's, so it means the same thing in a sunlit field and in a cave;
 **Ghosts** (up to 8) and **Halo** (0 keeps the ghosts and drops the halo) shape what it throws.
 
-### Lens dirt
+#### Lens dirt
 
 Smudges on the front element, which brighten the bloom and flare that pass through them and are
 invisible everywhere else — so nothing shows until there is glare to catch. **Intensity** is the
@@ -189,7 +193,7 @@ switch.
 **Mask** — the dirt texture, with an unusual polarity worth remembering: empty means **the built-in
 mask** that ships with the engine, not "off".
 
-### Vignette
+#### Vignette
 
 The fall-off toward the corners every real lens has. It is applied to linear radiance before the
 tone curve, so the corners are exposed down rather than crushed flat. **Roundness** 0 is a circle on
@@ -206,22 +210,62 @@ film does.
 
 ### Antialiasing
 
-Temporal antialiasing, deliberately a single toggle. The projection is offset by a fraction of a
-pixel each frame and the results are accumulated, so a still image converges on about eight times
-the sampling; motion vectors carry the history across camera and object movement. It resolves inside
-the scene render, so it applies to asset previews as well. The editor grid, gizmos and sprites are
-drawn afterwards and are never blended.
+Two antialiasers, usable alone or together.
+
+**Temporal AA** offsets the projection by a fraction of a pixel each frame and accumulates the
+results, so a still image converges on about eight times the sampling; motion vectors carry the
+history across camera and object movement. It resolves inside the scene render, so it applies to
+asset previews as well. The editor grid, gizmos and sprites are drawn afterwards and are never
+blended. Its tuning appears once it is on:
+
+- **Sharpness** — contrast-adaptive sharpening (AMD's RCAS) of the resolved image, 0 to 1. It restores
+  the detail the accumulation softens without creating halos, and only touches what goes to the screen,
+  never the history. 0.25 is the default; raise it if the image looks soft, lower it if fine
+  foliage starts to sparkle.
+- **History Filter** — how last frame's image is fetched. **Catmull-Rom** (the default) is a sharp cubic;
+  **Bilinear** is cheaper but blurs a little more every frame the camera moves, which is the soft,
+  smeared look in motion.
+- **Stability** — how much history is kept when a pixel is still (0.8–0.98, default 0.97). Higher is
+  smoother and slower to settle after a change.
+- **Motion Stability** — the same weight under fast motion (0.5–0.95, default 0.88). Lower keeps moving
+  things sharper but lets aliasing back in while they move.
+- **Clip Width** — how far the history may differ from this frame's neighbourhood before it is pulled
+  back, in standard deviations (0.5–2, default 1). Narrower ghosts less but flickers more.
+
+**FXAA** finds stair-stepped edges in the finished frame and smooths across them. It sees one frame and
+no motion, so it has nothing to ghost: cheap AA on its own (the Low quality preset uses it in place of
+TAA), and a clean-up for the edges TAA throws away during fast motion when used together. It runs after
+the post chain and before the tone curve; the grid and gizmos are drawn over it and keep their hard
+lines.
+
+- **FXAA Quality** — how far it searches along an edge: Low 5, Med 8, High 12 steps. Long, shallow
+  edges need the higher settings.
+- **Subpixel** — how strongly single-pixel detail is blended into its neighbourhood (0–1, default
+  0.75). Higher removes more shimmer and softens more.
+- **Edge Threshold** — the local contrast a pixel needs to count as an edge (0.063–0.333, default
+  0.125). Lower smooths more edges, including some texture detail.
 
 ### Motion blur
 
-Camera-reprojection motion blur. **Amount** scales the shutter length; **Quality** is 8, 16 or 24
+Camera-reprojection motion blur. **Amount** scales the shutter length; **Quality** is 12, 20 or 32
 taps per pixel (Low, Med, High). Suppress it per node with `node.motionBlur`.
+
+- **Noise** — how much each pixel's taps are offset along the blur (0–1, default 0.5). The offset
+  turns discrete ghost copies into grain. Motion blur runs after TAA, so nothing averages that grain
+  away; lower it if moving objects look noisy, raise **Quality** if they look banded.
+- **Max Length** — the longest streak, in pixels (4–20). Shorter keeps fast motion readable and hides
+  the blur's sampling.
 
 ### Shadows
 
+Every shadow setting, in one section. **Enabled** at the top is the master switch: off, sun, spot and
+point lights all return fully lit.
+
+#### Sun shadows
+
 Directional (sun) shadows in cascades: each cascade is one shadow map covering a slice of the view,
 nearest first. **Distance** is how far they reach, and nothing past it is shadowed unless **Far
-Distance** is on. Spot and point lights have their own sections below.
+Distance** is on. Spot and point lights have their own groups below.
 
 | Setting | Note |
 |---|---|
@@ -254,7 +298,7 @@ What keeps cascades cheap, all automatic:
   on it) draws at its coarsest level. The far cascade draws the landscape as a few dozen coarse
   blocks. The nearest cascade always draws the real meshes.
 
-### Spot shadows
+#### Spot shadows
 
 Up to **4** spot lights cast shadows at once. Flag each with **Cast Shadows** in its inspector; any
 beyond the cap simply go unshadowed, and a light that already holds a map keeps it, so one at the
@@ -262,7 +306,7 @@ edge of the cap goes dark once rather than flickering. Only spots whose cone rea
 ones last), and a map is
 redrawn only when something in its cone moves, as the point maps are below. A spot's
 frustum matches its outer cone, and its far plane is the light's range, capped by **Max Dist**. The
-global Shadows toggle switches these off too.
+Shadows **Enabled** switch turns these off too.
 
 | Setting | Note |
 |---|---|
@@ -270,7 +314,7 @@ global Shadows toggle switches these off too.
 | **Max Dist** | The farthest a spot shadow reaches; a light with a shorter range stops at its range. |
 | **Bias** | In *depth* units, not world units — perspective depth does not convert linearly — so it is a small number. |
 
-### Point shadows
+#### Point shadows
 
 Up to **4** point lights cast shadows at once, flagged per light with **Cast Shadows**. A point
 light shadows in every direction, so it costs *six* depth passes, one per cube face, where a spot
@@ -280,8 +324,8 @@ hidden come last), and each of the six faces is cached on its own. What stands s
 (walls, props at rest) is drawn into a static copy of each face once; when something moves inside a
 face (the player, an enemy, a falling barrel), that face starts from its static copy and draws only
 what moves. A static lamp is free after the first frame, and one the player walks past costs a face
-or two and a character, not six passes over the whole room. The global Shadows toggle switches these
-off too.
+or two and a character, not six passes over the whole room. The Shadows **Enabled** switch turns
+these off too.
 
 | Setting | Note |
 |---|---|

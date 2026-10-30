@@ -7,6 +7,17 @@ import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 
+/** See {@link CameraNode.seeThrough}. */
+export interface CameraSeeThrough {
+    active: boolean;
+    /** World-space end of the hole: the rig's pivot, i.e. the player. */
+    pivot: vec3;
+    /** Hole radius, metres. */
+    radius: number;
+    /** 0..1, how much of a blocking surface is dithered away at the centre of the hole. */
+    strength: number;
+}
+
 /**
  * A `Camera` in the scene graph, plus its ordered screen-space post passes.
  */
@@ -39,6 +50,14 @@ export class CameraNode extends Node {
      */
     private _focusTargetId: string | null = null;
     private _focusTargetNode: Node | null = null;
+
+    /**
+     * The see-through hole the renderer cuts while this camera is active (chunks/cameraHole.wgsl): the
+     * surfaces of opted-in nodes (`Node.cameraDither`) inside `radius` of the line from this camera to
+     * `pivot` are dithered away by up to `strength`. Written every frame by a CameraRig in `'dither'`
+     * collision mode; runtime state, never serialized.
+     */
+    public readonly seeThrough: CameraSeeThrough = { active: false, pivot: vec3.create(), radius: 1, strength: 0.85 };
 
     constructor(name: string, camera: Camera, id: string = uuidv4()) {
         super(name, 'camera', id);

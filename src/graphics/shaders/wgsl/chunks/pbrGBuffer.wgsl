@@ -349,6 +349,8 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
 
     // Foliage LOD crossfade: a screen-door dissolve between levels (always kept outside foliage).
     if (!lodFadeKeeps(in.lodFade, in.position.xy)) { discard; }
+    // The camera see-through hole (chunks/cameraHole.wgsl): off unless this draw opted in.
+    if (!cameraHoleKeeps(in.camHole, in.camHoleParams, in.position.xy)) { discard; }
 #endif
 
     var albedo = u_material.baseColor;

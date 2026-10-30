@@ -37,6 +37,8 @@ struct TaaUniforms {
     u_feedbackMax: f32,         // history weight when still
     u_varianceGamma: f32,       // how many standard deviations the clamp box spans
     u_historyValid: i32,
+    // 0 = one bilinear tap, 1 = 5-tap Catmull-Rom. See `sampleHistory`.
+    u_historyFilter: i32,
 };
 @group(1) @binding(0) var<uniform> u_taa: TaaUniforms;
 
@@ -118,6 +120,48 @@ fn rgbToYCoCg(c: vec3<f32>) -> vec3<f32> {
 fn yCoCgToRgb(c: vec3<f32>) -> vec3<f32> {
     let t = c.x - c.z;
     return vec3<f32>(t + c.y, c.x + c.z, t - c.y);
+}
+
+fn historyTap(p: vec2<f32>) -> vec3<f32> {
+    return sanitize(textureSampleLevel(u_history_texture, u_history_sampler, p, 0.0).rgb);
+}
+
+/**
+ * Fetch last frame's resolved colour at `p`.
+ *
+ * A single bilinear tap is a small box blur, and in a feedback loop it compounds: the history is
+ * re-filtered every frame it survives, so under a moving camera the accumulated image keeps getting
+ * softer for as long as the motion lasts. Catmull-Rom is a sharp, nearly interpolating cubic, and
+ * with the four corner taps dropped (their weights are tiny) it costs five bilinear fetches instead
+ * of sixteen point ones — Jimenez's "Filmic SMAA" trick, the one UE and most shipping TAAs use.
+ *
+ * Its negative lobes can overshoot below zero at a hard edge, which is why the result is floored:
+ * the variance clip after this would pull it back anyway, but the clip runs in tonemapped space and
+ * the tonemap's divisor wants a non-negative colour.
+ */
+fn sampleHistory(p: vec2<f32>) -> vec3<f32> {
+    if (u_taa.u_historyFilter == 0) { return historyTap(p); }
+    let texPos = p * u_taa.u_resolution;
+    let centre = floor(texPos - 0.5) + 0.5;
+    let f = texPos - centre;
+    let f2 = f * f;
+    let f3 = f2 * f;
+    let w0 = -0.5 * f3 + f2 - 0.5 * f;
+    let w1 = 1.5 * f3 - 2.5 * f2 + 1.0;
+    let w2 = -1.5 * f3 + 2.0 * f2 + 0.5 * f;
+    let w3 = 0.5 * f3 - 0.5 * f2;
+    // The middle two taps merged into one bilinear fetch at their weighted centre.
+    let w12 = w1 + w2;
+    let tc0 = (centre - 1.0) * u_taa.u_texelSize;
+    let tc12 = (centre + w2 / w12) * u_taa.u_texelSize;
+    let tc3 = (centre + 2.0) * u_taa.u_texelSize;
+    let sum = historyTap(vec2<f32>(tc12.x, tc0.y)) * (w12.x * w0.y)
+            + historyTap(vec2<f32>(tc0.x, tc12.y)) * (w0.x * w12.y)
+            + historyTap(tc12) * (w12.x * w12.y)
+            + historyTap(vec2<f32>(tc3.x, tc12.y)) * (w3.x * w12.y)
+            + historyTap(vec2<f32>(tc12.x, tc3.y)) * (w12.x * w3.y);
+    let total = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+    return sanitize(max(sum / max(total, 1e-4), vec3<f32>(0.0)));
 }
 
 @fragment
@@ -240,8 +284,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // CLIP toward the centre along the segment, rather than clamping per component. A per-component
     // clamp moves the three axes by different amounts and changes the colour's hue on every pixel it
     // touches; this moves it along the line it already sat on and only shortens it.
-    let historyRgb = sanitize(textureSampleLevel(u_history_texture, u_history_sampler,
-                                                 prevUV, 0.0).rgb);
+    let historyRgb = sampleHistory(prevUV);
     let history = rgbToYCoCg(tonemap(historyRgb * exposure));
     // Toward the neighbourhood MEAN, not the box centre. The centre of a YCoCg box is not necessarily
     // a colour at all — black, red and green neighbours put it at RGB (0.375, 0.375, -0.125) — so a

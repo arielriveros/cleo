@@ -5,7 +5,10 @@ The **Properties** panel. What it shows depends on the selected node's type.
 Every selection is composed the same way:
 
 1. **Node Information** — name, ID, node type, child count, **Spawn on start** (when off, the node
-   stays dormant until a script calls `spawn()` on it), **Motion blur** on nodes with geometry, and Delete.
+   stays dormant until a script calls `spawn()` on it), **Motion blur** and **See-through to camera** on
+   nodes with geometry, and Delete. **See-through to camera** lets a camera rig in Dither collision mode
+   see through this node where it stands between the camera and the player (it applies to the whole
+   subtree).
 2. **Transform** — position, rotation (degrees), scale. Hidden for screen-space UI, which has no
    meaningful transform.
 3. **Model slot**, when the node has geometry.
@@ -71,10 +74,17 @@ rather than moving the camera itself. Its groups:
   negative X puts the camera over the right shoulder.
 - **Field of View** — when **Rig Controls FOV** is on, the rig owns the camera's FOV and eases it
   with its own damping. Turning it off gives the camera back the FOV it had before.
-- **Collision** — pulls the camera in when something is between it and the pivot. It tests physics
-  collider shapes, terrain included: the same solids the character collides with. A body blocks it
-  only while its **Camera Collision** channel is on (Physics panel); trigger volumes, the follow and
-  look-at targets and the rig's own character are always ignored.
+- **Collision** — what happens when something is between the camera and the pivot. **Handle
+  Obstruction** switches it on; **Response** picks how:
+  - **Retract** pulls the camera in. It tests physics collider shapes, terrain included: the same
+    solids the character collides with. A body blocks it only while its **Camera Collision** channel is
+    on (Physics panel); trigger volumes, the follow and look-at targets and the rig's own character are
+    always ignored.
+  - **Dither** keeps the arm at full length and dithers away the part of each obstruction that blocks
+    the view, inside a hole around the camera-to-player line. Only nodes with **See-through to camera**
+    on (and foliage rules with it) are cut; anything else still blocks. **Hole Radius** is the hole's
+    size in metres, **Hole Strength** how much of the surface goes at its centre. Shadows are
+    unaffected, and under TAA the dither reads as a smooth see-through.
 - **Shake** — position and rotation amplitude, frequency and decay. Shake shows only while the scene
   runs (Play or Simulate), which is when **Test Shake** is worth pressing; a script calls
   `rig.shake(0.6)`.

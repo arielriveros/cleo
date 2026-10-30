@@ -222,6 +222,11 @@ octahedral bake (1024 = 128 px views; 2048 for a tree seen large).
 Defaults: `2.0` per m² for billboards, `0.05` for meshes. Meshes are three orders of magnitude
 sparser for the obvious reason.
 
+A mesh rule's **See-through to camera** lets a camera rig in Dither collision mode see through its
+instances — trees and tall props standing between the camera and the player are dithered away where
+they block the view, instead of the camera pulling in. See the camera rig's **Collision** in the
+[Node inspector](node-inspector.md).
+
 A mesh rule's **Orientation** decides how each instance stands:
 
 | Orientation | Use for |

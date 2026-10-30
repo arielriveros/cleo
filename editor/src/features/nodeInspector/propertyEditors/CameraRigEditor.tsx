@@ -4,7 +4,7 @@ import Collapsable from '../../../components/Collapsable'
 import AxisInput from '../../../components/AxisInput'
 import NodeRefInput from '../NodeRefInput'
 import { useCleoEngine } from '../../EngineContext'
-import { Button, PresetMenu, SectionTitle, Select, Slider, Toggle, cn, labelClass } from '../../../components/ui'
+import { Button, PresetMenu, SectionTitle, SegmentedControl, Select, Slider, Toggle, cn, labelClass } from '../../../components/ui'
 import { hintAffordance } from '../../../components/ui/Field'
 import { RigIcon } from '../sectionIcons'
 
@@ -26,6 +26,7 @@ interface RigState {
   fovEnabled: boolean; fov: number; fovDamping: number
   collisionEnabled: boolean; collisionRadius: number; collisionMinRatio: number
   collisionPullTime: number; collisionReturnTime: number
+  collisionMode: 'retract' | 'dither'; ditherRadius: number; ditherStrength: number
   shakePositionAmplitude: Vec3; shakeRotationAmplitude: Vec3; shakeFrequency: number; shakeDecay: number
 }
 
@@ -51,6 +52,7 @@ function readNode(node: CameraRigNode): RigState {
     collisionEnabled: node.collisionEnabled, collisionRadius: node.collisionRadius,
     collisionMinRatio: node.collisionMinRatio, collisionPullTime: node.collisionPullTime,
     collisionReturnTime: node.collisionReturnTime,
+    collisionMode: node.collisionMode, ditherRadius: node.ditherRadius, ditherStrength: node.ditherStrength,
     shakePositionAmplitude: toVec3(node.shakePositionAmplitude),
     shakeRotationAmplitude: toVec3(node.shakeRotationAmplitude),
     shakeFrequency: node.shakeFrequency, shakeDecay: node.shakeDecay,
@@ -187,12 +189,28 @@ export default function CameraRigEditor(props: { node: CameraRigNode }) {
         </>}
 
         <SectionTitle title='Collision' className='mt-3 mb-1' />
-        {check('Pull In On Obstruction', 'collisionEnabled')}
+        {check('Handle Obstruction', 'collisionEnabled')}
         {state.collisionEnabled && <>
-          {slider('Probe Radius', 'collisionRadius', 0, 2, 0.01)}
-          {slider('Min Arm Ratio', 'collisionMinRatio', 0, 0.9, 0.01)}
-          {slider('Pull In Time', 'collisionPullTime', 0, 1, 0.01)}
-          {slider('Return Time', 'collisionReturnTime', 0, 2, 0.01)}
+          {/* Retract pulls the camera in along the arm; Dither keeps the arm and makes whatever opted in
+              (a node's "See-through to camera", a foliage rule's) see-through where it blocks the view. */}
+          <div className='flex items-center justify-between mb-2'>
+            <span className={labelClass}>Response</span>
+            <SegmentedControl size='sm' value={state.collisionMode}
+              onChange={(m) => apply({ collisionMode: m })}
+              options={[
+                { value: 'retract' as const, label: 'Retract', title: 'Pull the camera in along the arm, in front of the obstruction' },
+                { value: 'dither' as const, label: 'Dither', title: 'Keep the arm; dither see-through every opted-in object between the camera and the player' },
+              ]} />
+          </div>
+          {state.collisionMode === 'retract' ? <>
+            {slider('Probe Radius', 'collisionRadius', 0, 2, 0.01)}
+            {slider('Min Arm Ratio', 'collisionMinRatio', 0, 0.9, 0.01)}
+            {slider('Pull In Time', 'collisionPullTime', 0, 1, 0.01)}
+            {slider('Return Time', 'collisionReturnTime', 0, 2, 0.01)}
+          </> : <>
+            {slider('Hole Radius', 'ditherRadius', 0.1, 4, 0.05)}
+            {slider('Hole Strength', 'ditherStrength', 0, 1, 0.01)}
+          </>}
         </>}
 
         <SectionTitle title='Shake' className='mt-3 mb-1' />

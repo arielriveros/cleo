@@ -15,6 +15,9 @@ struct SkinnedTransform {
     u_boneMatrices: array<mat4x4<f32>, 100>,
     // Despawn dissolve: x = how far gone (0 solid), y = dither phase. See Node.remove.
     u_dissolve: vec2<f32>,
+    // Camera see-through hole (chunks/cameraHole.wgsl): camera xyz + 1/radius; pivot xyz + strength (0 = off).
+    u_camHole: vec4<f32>,
+    u_camHolePivot: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> u_transform: SkinnedTransform;
 
@@ -63,6 +66,7 @@ fn vs_main(
     fillVarying(&out, u_transform.u_model, totalPosition.xyz, texCoord,
                 totalNormal, totalTangent, totalBitangent);
     out.lodFade = dissolveLodFade(u_transform.u_dissolve);
+    cameraHoleVarying(&out, u_transform.u_camHole, u_transform.u_camHolePivot, u_transform.u_dissolve.y);
     out.position = u_transform.u_projection * u_transform.u_view * u_transform.u_model * totalPosition;
     return out;
 }
