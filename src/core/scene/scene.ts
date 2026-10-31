@@ -15,6 +15,7 @@ import { DecalNode } from "./nodes/decalNode";
 import { FluidVolumeNode } from "./nodes/fluidVolumeNode";
 import { ParticleSystemNode } from "./nodes/particleSystemNode";
 import { ForceFieldNode } from "./nodes/forceFieldNode";
+import { ClothNode } from "./nodes/clothNode";
 import { WaterVolumeNode } from "./nodes/waterVolumeNode";
 import { ExposureVolumeNode } from "./nodes/exposureVolumeNode";
 import { OccluderNode } from "./nodes/occluderNode";
@@ -113,6 +114,9 @@ export class Scene {
     private _navMeshes: Set<NavMeshNode> = new Set();
     private _decals: Set<DecalNode> = new Set();
     private _fluidVolumes: Set<FluidVolumeNode> = new Set();
+    private _cloths: Set<ClothNode> = new Set();
+    /** Skinned models with cloth parts (AnimatedModel.skinnedCloth), stepped with the cloths. */
+    private _skinnedCloths: Set<ModelNode> = new Set();
     private _particleSystems: Set<ParticleSystemNode> = new Set();
     private _forceFields: Set<ForceFieldNode> = new Set();
     private _waterVolumes: Set<WaterVolumeNode> = new Set();
@@ -506,13 +510,29 @@ export class Scene {
             // item must see the item where the hand put it this frame.
             const rigs = this.cameraRigs;
             const followers = this._socketFollowers;
-            if (rigs.size > 0 || followers.size > 0) {
+            const cloths = this._cloths;
+            const skinnedCloths = this._skinnedCloths;
+            if (rigs.size > 0 || followers.size > 0 || cloths.size > 0 || skinnedCloths.size > 0) {
                 // Counted as transform cost, not rig cost: it is a second full-tree pass.
                 const rigTransformStart = performance.now();
                 this._root.updateTransforms();
                 sceneStats.transformMs += performance.now() - rigTransformStart;
 
                 if (followers.size > 0) this._followSockets();
+            }
+            // Cloth after the sockets, so a cape's held edge reads this frame's pose (and a banner its
+            // pole's). It simulates only while the scene plays; authoring shows the rest shape.
+            if (cloths.size > 0 || skinnedCloths.size > 0) {
+                const clothStart = performance.now();
+                const playing = this._hasStarted && !paused && !CleoEngine.authoringMode;
+                authoring.derived++;
+                try {
+                    for (const cloth of cloths) cloth.lateStep(delta, playing);
+                    for (const model of skinnedCloths) model.stepSkinnedCloth(delta, playing);
+                } finally {
+                    authoring.derived--;
+                }
+                sceneStats.clothMs = performance.now() - clothStart;
             }
             if (rigs.size > 0) {
 
@@ -775,6 +795,8 @@ export class Scene {
         this._navMeshes = new Set();
         this._decals = new Set();
         this._fluidVolumes = new Set();
+        this._cloths = new Set();
+        this._skinnedCloths = new Set();
         this._particleSystems = new Set();
         this._forceFields = new Set();
         this._waterVolumes = new Set();
@@ -816,6 +838,10 @@ export class Scene {
                 this._decals.add(node);
             if (node instanceof FluidVolumeNode)
                 this._fluidVolumes.add(node);
+            if (node instanceof ClothNode)
+                this._cloths.add(node);
+            else if (node instanceof ModelNode && node.hasSkinnedCloth)
+                this._skinnedCloths.add(node);
             if (node instanceof ParticleSystemNode)
                 this._particleSystems.add(node);
             if (node instanceof ForceFieldNode)

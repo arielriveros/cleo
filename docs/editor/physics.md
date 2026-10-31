@@ -182,6 +182,23 @@ The measured recommendation, from the [third-person example](../../examples/scri
 > A frictionless character does not slide when idle, because its locomotion zeroes horizontal
 > velocity when there is no input.
 
+## Cloth on a character
+
+A skinned model can carry cloth parts of its own — a surcoat's skirt, a loincloth, a tabard — that swing
+with the body instead of following the bones stiffly. They are vertices of the model itself: each one is
+pulled to where the skin puts it, with some slack, and the slack grows from where the cloth is sewn on
+(none: it stays put) to its hem (up to the model's **max distance**, a quarter of a metre or so). It never sinks
+more than a **backstop** behind where the skin holds it, and capsules fitted to the armour (else the
+ragdoll's) keep it outside the legs. The scene's
+[Wind](node-inspector.md#wind) blows it. The model also sets how heavy the cloth is: its **mass** (heavier
+cloth is moved less by the wind) and a **gravity scale** (above 1 it falls and settles harder).
+
+It simulates while the scene plays (Play and Simulate); while you edit, the model shows its bind shape.
+Which vertices are cloth, and how free each one is, is stored with the model (`skinnedCloth`) and
+painted in the model's [Cloth](models-and-materials.md#cloth) section: open the model, turn on **Paint**,
+and brush the parts that should move. For a
+separate panel — a banner, a flag, a cape — add a [Cloth](node-inspector.md#effects) node instead.
+
 ## Ragdoll
 
 How a skinned model falls when a script turns it into a ragdoll, with

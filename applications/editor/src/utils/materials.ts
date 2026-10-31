@@ -111,7 +111,8 @@ export function getNodeMaterial(node: Node): Material | null {
 
 /** True if this node type carries an editable material. */
 export function nodeSupportsMaterial(node: Node | null | undefined): boolean {
-  return !!node && (node.nodeType === 'model' || node.nodeType === 'decal')
+  // A cloth is drawn as a model, so it wears a material like one.
+  return !!node && (node.nodeType === 'model' || node.nodeType === 'decal' || node.nodeType === 'cloth')
 }
 
 /** Replace the live Material on a node's mesh. No-op for non-material nodes. */

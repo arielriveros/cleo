@@ -96,10 +96,12 @@ export function restHeightOf(skin, parts) {
  * @param boneMap    for a custom skeleton: [[mannequin base name, this skin's bone name | null], …]
  * @param optional   mannequin bones allowed to go unmapped (a RegExp on the source name)
  * @param ragdoll    true to author a ragdoll profile (for a skeleton the automatic humanoid cannot read)
+ * @param clothOf    the model's cloth parts (AnimatedModel.skinnedCloth), from the merged mesh:
+ *                   `({ positions, indices, submeshes, jointIndices, jointWeights, skin }) => data | null`
  */
 export function buildCharacter({
   ROOT, souls, idOf, node, vars, matJson, materialIds,
-  key, name, skin, parts, scale, height, nodeOf, boneMap = null, optional = /Pinky/i, ragdoll = false,
+  key, name, skin, parts, scale, height, nodeOf, boneMap = null, optional = /Pinky/i, ragdoll = false, clothOf = null,
 }) {
   if (parts.length !== materialIds.length) throw new Error(`${name} has ${parts.length} materials, ${materialIds.length} given`)
   const names = new Map(skin.nodeNames)
@@ -211,9 +213,11 @@ export function buildCharacter({
   const modelId = idOf(`model:${key}`)
   const geometry = geometryJson({ positions, normals, uvs, indices })
   const materials = materialIds.map(matJson)
+  const skinnedCloth = clothOf ? clothOf({ positions, indices, submeshes, jointIndices, jointWeights, skin }) : null
   const modelJson = {
     geometry, material: materials[0], materials, submeshes,
     skin: skinJson, jointIndices, jointWeights, animations: null,
+    ...(skinnedCloth ? { skinnedCloth } : {}),
   }
   const materialVars = { __materialId: materialIds[0], __materialIds: JSON.stringify(materialIds) }
   const assetNode = node(name, 'node', {

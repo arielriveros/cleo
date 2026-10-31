@@ -6,7 +6,7 @@ import type { SceneChange } from 'cleo';
 import { SkyIcon } from '../nodeInspector/sectionIcons'
 import {
   CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon, NavMeshIcon, ModelIcon, LightIcon, LightProbeIcon, ExposureVolumeIcon, SkyboxIcon, SkyLightIcon, CloudsIcon, WindIcon,
-  SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OccluderIcon,
+  SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OccluderIcon, ClothIcon,
 } from './nodeIcons'
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
 import { TEMPLATE_ID_VAR, isWithinTemplateInstance } from '../../utils/templates';
@@ -29,7 +29,7 @@ const TYPE_ICONS: Record<string, () => JSX.Element> = {
   landscape: LandscapeIcon,
   // One glyph for both modes: the tree shows what a node IS, and ambient vs spatial is a property of it.
   sound: SoundIcon,
-  particleSystem: ParticlesIcon, forceField: ForceFieldIcon, waterVolume: WaterVolumeIcon, occluder: OccluderIcon,
+  particleSystem: ParticlesIcon, forceField: ForceFieldIcon, cloth: ClothIcon, waterVolume: WaterVolumeIcon, occluder: OccluderIcon,
 };
 
 

@@ -131,12 +131,20 @@ function libraryMaterial(key, name, folder, m) {
   return addMaterial(key, name, m)
 }
 
+/**
+ * How much of the light behind a leaf comes through it (Material translucency: the back-lit glow added on
+ * top of the lit side). The Foliage Creator's defaults: broad leaves and fronds half, grass a little less,
+ * needles — dense and waxy — a quarter. Wood, bark and rock none. Every one of these is double-sided, which
+ * the glow needs: it is the back face that shows it.
+ */
+const TRANSLUCENCY = { leaves: 0.5, grass: 0.45, needles: 0.25 }
+
 const GRASS_MAT = libraryMaterial('grass', 'Meadow Grass', `${FOLIAGE}/Materials`, pbrMaterial({
   diff: tex('grass_diff.jpg', `${FOLIAGE}/Textures`, 'Grass Base Color'),
   nor: tex('grass_nor.jpg', `${FOLIAGE}/Textures`, 'Grass Normal'),
   arm: tex('grass_arm.jpg', `${FOLIAGE}/Textures`, 'Grass ARM'),
   mask: tex('grass_mask.png', `${FOLIAGE}/Textures`, 'Grass Mask'),
-  side: 'double', castShadow: false,
+  side: 'double', castShadow: false, translucency: TRANSLUCENCY.grass,
   // Soft meadow grass: a fifth of its height at full gust, little stiffness.
   wind: { windStrength: 0.2, windStiffness: 0.6 },
 }))
@@ -151,7 +159,7 @@ const NEEDLES_MAT = libraryMaterial('pine-needles', 'Pine Needles', `${FOLIAGE}/
   diff: tex('pine_needles_diff.jpg', `${FOLIAGE}/Textures`, 'Pine Needles Base Color'),
   nor: tex('pine_needles_nor.png', `${FOLIAGE}/Textures`, 'Pine Needles Normal'),
   mask: tex('pine_needles_mask.png', `${FOLIAGE}/Textures`, 'Pine Needles Mask'),
-  roughness: 0.75, side: 'double',
+  roughness: 0.75, side: 'double', translucency: TRANSLUCENCY.needles,
   // The needles add their own sprig sway and flutter on top of the trunk's sway.
   wind: { windStrength: 0.025, windStiffness: 2.2, windRole: 'leaves', windFlutter: 0.45 },
 }))
@@ -161,7 +169,7 @@ const CELANDINE_MAT = libraryMaterial('celandine', 'Celandine', `${FOLIAGE}/Mate
   diff: tex(path.join(CELANDINE_SRC, 'textures', 'celandine_01_diff_1k.jpg'), `${FOLIAGE}/Textures`, 'Celandine Base Color'),
   nor: tex(path.join(CELANDINE_SRC, 'textures', 'celandine_01_nor_gl_1k.jpg'), `${FOLIAGE}/Textures`, 'Celandine Normal'),
   arm: tex(path.join(CELANDINE_SRC, 'textures', 'celandine_01_arm_1k.jpg'), `${FOLIAGE}/Textures`, 'Celandine ARM'),
-  side: 'double', castShadow: false,
+  side: 'double', castShadow: false, translucency: TRANSLUCENCY.grass,
   // Modelled petals, no cutout: the flowers bend like the grass they grow in.
   wind: { windStrength: 0.2, windStiffness: 0.6 },
 }))
@@ -195,7 +203,7 @@ const JACARANDA_MATS = {
     nor: plantTex(JACARANDA_SRC, 'jacaranda_tree_leaves_nor_gl_1k.jpg', 'Jacaranda Leaves Normal'),
     arm: plantTex(JACARANDA_SRC, 'jacaranda_tree_leaves_arm_1k.jpg', 'Jacaranda Leaves ARM'),
     mask: tex('jacaranda_leaves_mask.png', `${FOLIAGE}/Textures`, 'Jacaranda Leaves Mask'),
-    side: 'double', wind: { ...JACARANDA_WIND, windRole: 'leaves', windFlutter: 0.5 },
+    side: 'double', translucency: TRANSLUCENCY.leaves, wind: { ...JACARANDA_WIND, windRole: 'leaves', windFlutter: 0.5 },
   })),
 }
 const FERN_SRC = path.join(BUILD, 'foliage', 'fern_02_1k.gltf')
@@ -206,7 +214,7 @@ const FERN_MAT = libraryMaterial('fern', 'Fern', `${FOLIAGE}/Materials`, pbrMate
   nor: plantTex(FERN_SRC, 'fern_02_nor_gl_1k.jpg', 'Fern Normal'),
   arm: plantTex(FERN_SRC, 'fern_02_arm_1k.jpg', 'Fern ARM'),
   mask: tex('fern_mask.png', `${FOLIAGE}/Textures`, 'Fern Mask'),
-  side: 'double', castShadow: false, wind: FERN_WIND,
+  side: 'double', castShadow: false, translucency: TRANSLUCENCY.leaves, wind: FERN_WIND,
 }))
 const BROADLEAF_SRC = path.join(BUILD, 'foliage', 'anthurium_botany_01_1k.gltf')
 const BROADLEAF_MAT = libraryMaterial('broadleaf-fern', 'Broadleaf Fern', `${FOLIAGE}/Materials`, pbrMaterial({
@@ -214,7 +222,7 @@ const BROADLEAF_MAT = libraryMaterial('broadleaf-fern', 'Broadleaf Fern', `${FOL
   nor: plantTex(BROADLEAF_SRC, 'anthurium_botany_01_nor_gl_1k.jpg', 'Broadleaf Fern Normal'),
   arm: plantTex(BROADLEAF_SRC, 'anthurium_botany_01_arm_1k.jpg', 'Broadleaf Fern ARM'),
   // Modelled leaves, no cutout.
-  side: 'double', castShadow: false, wind: FERN_WIND,
+  side: 'double', castShadow: false, translucency: TRANSLUCENCY.leaves, wind: FERN_WIND,
 }))
 const BUSH_SRC = path.join(BUILD, 'foliage', 'wild_rooibos_bush_1k.gltf')
 const BUSH_WIND = { windStrength: 0.06, windStiffness: 1.4 }
@@ -226,7 +234,7 @@ const BUSH_TEX = {
 const BUSH_WOOD_MAT = libraryMaterial('bush-wood', 'Bush Wood', `${FOLIAGE}/Materials`, pbrMaterial({ ...BUSH_TEX, side: 'double', wind: BUSH_WIND }))
 const BUSH_LEAVES_MAT = libraryMaterial('bush-leaves', 'Bush Leaves', `${FOLIAGE}/Materials`, pbrMaterial({
   ...BUSH_TEX, mask: tex('rooibos_mask.png', `${FOLIAGE}/Textures`, 'Bush Mask'),
-  side: 'double', wind: { ...BUSH_WIND, windRole: 'leaves', windFlutter: 0.4 },
+  side: 'double', translucency: TRANSLUCENCY.leaves, wind: { ...BUSH_WIND, windRole: 'leaves', windFlutter: 0.4 },
 }))
 const BRANCHES_SRC = path.join(BUILD, 'foliage', 'dry_branches_medium_01_1k.gltf')
 const BRANCHES_MAT = libraryMaterial('dry-branches', 'Dry Branches', `${FOLIAGE}/Materials`, pbrMaterial({

@@ -4,6 +4,7 @@ import { useCleoEngine } from '../EngineContext'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { Button, Field, NumberInput, Select, Slider, TextInput, cn, labelClass, hintClass } from '@cleo/app-kit/ui'
 import ModelPartsSection from './ModelPartsSection'
+import ClothPaintSection from './ClothPaintSection'
 import GenerateLodsModal, { defaultSpecs, type GenerateLodsSpec } from './GenerateLodsModal'
 import { modelAssetTextureIds, modelAssetDiameter } from '../../utils/models'
 
@@ -115,6 +116,8 @@ export default function ModelInspector() {
           </div>
         </Collapsable>
       )}
+
+      <ClothPaintSection />
 
       <Collapsable title='LOD levels'>
         <div className='p-2 space-y-2'>

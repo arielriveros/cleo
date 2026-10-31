@@ -129,12 +129,46 @@ and links the same materials. A piece of a skinned character keeps the rig and i
 
 Open a model asset (double-click it in Assets) and Properties shows the **Model inspector** above the
 usual node inspector: the model's name, its [Parts](#splitting-a-model-into-parts), the blend spaces
-on its skeleton, and its LOD levels.
+on its skeleton, and its cloth and its LOD levels.
 
 **Blend spaces** — on a skinned model, the blend spaces of the skeleton it is built on, shared by every
 character on that skeleton: click one to open it, or **+ New Blend Space** to make one from this
 model. A blend space mixes clips by one or two parameters and stands in an animator as a state of its
 own instead of a single clip — see [Blend spaces](animation.md#blend-spaces).
+
+### Cloth
+
+On a skinned model: paint which parts of the mesh are cloth, and how freely each part moves — see
+[Cloth on a character](physics.md#cloth-on-a-character). A painted vertex follows the skin with slack
+instead of exactly; the more weight, the more slack, up to **Max Distance**.
+
+- **Mesh** — which of the model's skinned meshes is painted, when it has more than one.
+- **Paint** — left-drag in the viewport paints instead of selecting. The painted parts are shown over the
+  model as a heat map: blue for a little weight, through green, to red for fully free; unpainted parts are
+  left bare. **Shift** erases (or paints, with Erase chosen), **Ctrl** smooths, `[` / `]` and
+  **Ctrl+wheel** size the brush, **Esc** stops painting. Each stroke is one undo step.
+- **Preview** — simulates the cloth in the tab, swinging the model from side to side so it moves. Turn
+  it off to put the cloth back on the skin.
+- **Paint tools** — **Paint** moves the weights toward **Value**, **Erase** toward 0, **Smooth**
+  evens them out with their neighbours, and **Fill** sets the whole connected piece under the cursor
+  (within its material) to Value in one click. A vertex is always painted with the other vertices at
+  its position, so seams never split.
+- **Value** — the weight Paint and Fill lay down: 0 stays on the skin, 1 is fully free.
+- **Radius** — the brush size.
+- **Strength** — how quickly a stroke reaches its goal.
+- **Falloff** — 0 a hard edge, 1 fully feathered toward the rim.
+- **Fill material** — sets every vertex of one material to Value: the quickest start for a tunic.
+- **Clear** — removes all the cloth from the mesh.
+- **Max Distance** — how far, in metres, a fully free vertex may stray from where the skin puts it.
+- **Stiffness** — how much the cloth resists stretching.
+- **Bend** — how much it resists folding; low hangs in soft folds.
+- **Damping** — how quickly a swing dies down.
+- **Mass** — heavier cloth is moved less by the wind.
+- **Gravity Scale** — above 1 the cloth falls and settles harder.
+- **Wind Response** — how much the scene's wind blows it.
+- **Thickness** — how far the cloth keeps off the body's collision capsules.
+- **Backstop** — how far it may sink behind its skinned place, which keeps it out of the body or armour
+  under it.
 
 ### LOD levels
 
@@ -192,7 +226,8 @@ base-colour texture, and the section warns when a texture sits under a non-white
 **Translucency** (PBR) is how much light passes through a thin surface: a leaf or a grass blade with
 the sun behind it glows in its own colour instead of going dark. 0 (the default) is opaque; 0.3–0.6
 suits foliage. A translucent surface is always shaded as a non-metal. glTF files carry it as
-`KHR_materials_diffuse_transmission`, which the importer reads.
+`KHR_materials_diffuse_transmission`, which the importer reads. A foliage layer's far impostor carries
+the translucency of its coarsest level's leaves, so a back-lit tree keeps its glow at any distance.
 
 **Textures** — one slot per map. Drop a texture on a slot, or pick one.
 

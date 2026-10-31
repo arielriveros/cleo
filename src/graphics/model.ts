@@ -136,9 +136,10 @@ export class Model {
 
 
     /**
-     * Replace this model's geometry. Two callers, both of which own their mesh outright and never
-     * serialize it: `Terrain._rebuildChunksIfDensityChanged`, and the editor's transform gizmo, which
-     * swaps a handle between a resting and a thicker hover shape (`gizmoHandles.thickenHandles`).
+     * Replace this model's geometry. Three callers, all of which own their mesh outright and never
+     * serialize it: `Terrain._rebuildChunksIfDensityChanged`, the editor's transform gizmo, which
+     * swaps a handle between a resting and a thicker hover shape (`gizmoHandles.thickenHandles`), and
+     * `ClothNode`, whose panel is rebuilt when its size or resolution changes.
      *
      * Chunks are built in the terrain's constructor, before any layer exists, so the first `setLayer` is
      * when the real vertex density becomes knowable and every chunk has to be rebuilt at it. That

@@ -120,6 +120,15 @@ export class Mesh {
         device.writeBuffer(this._vertexBuffer, 0, asF32(vertices));
     }
 
+    /**
+     * Re-upload part of the interleaved vertex data: `data` (whole vertices, `strideFloats` each) lands
+     * at vertex `firstVertex`. For a mesh that changes a few hundred vertices of thousands a frame —
+     * skinned cloth — where rewriting the whole buffer would cost more than the simulation.
+     */
+    public updateVertexRange(firstVertex: number, strideFloats: number, data: Float32Array): void {
+        device.writeBuffer(this._vertexBuffer, firstVertex * strideFloats * 4, data);
+    }
+
     public createAnimated(
         vertices: VertexData,
         vertex_count: number,

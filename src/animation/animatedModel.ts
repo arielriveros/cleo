@@ -6,6 +6,7 @@ import { Logger } from '../core/logger';
 import { mat4 } from 'gl-matrix';
 import type { IkRig } from './ik';
 import type { RagdollProfile } from '../physics/ragdollProfile';
+import { parseSkinnedCloth, type SkinnedClothData } from '../physics/cloth/skinnedClothData';
 
 // Animation data structures based on GLTF specification
 export interface AnimationSampler {
@@ -114,6 +115,12 @@ export class AnimatedModel {
     // Animation data
     private readonly _animations: Animation[] = [];
     
+    /**
+     * The parts of this mesh that are cloth (physics/cloth/skinnedCloth.ts): which vertices, and how
+     * free each is of the skin. Plain JSON, carried through serialize/parse. Null: none.
+     */
+    public skinnedCloth: SkinnedClothData | null = null;
+
     /** Which attribute layout the VAO currently holds; see initializeVAO. */
     private _vaoLayoutKey: string | null = null;
     private _isAnimated: boolean = false;
@@ -348,7 +355,9 @@ export class AnimatedModel {
             animations = (data.animations as Animation[]).map(a => ({ ...a }));
         }
         
-        return new AnimatedModel(geometry, materials, skin, jointIndices, jointWeights, animations, submeshes);
+        const model = new AnimatedModel(geometry, materials, skin, jointIndices, jointWeights, animations, submeshes);
+        model.skinnedCloth = parseSkinnedCloth(data.skinnedCloth);
+        return model;
     }
 
     /** Flatten the model to plain JSON. Clips backed by a shared animation asset are omitted. */
@@ -526,7 +535,8 @@ export class AnimatedModel {
             skin,
             jointIndices,
             jointWeights,
-            animations
+            animations,
+            ...(this.skinnedCloth ? { skinnedCloth: { ...this.skinnedCloth, vertices: [...this.skinnedCloth.vertices], weights: [...this.skinnedCloth.weights] } } : {}),
         };
         if (this._submeshes.length > 1) {
             out.materials = materials;

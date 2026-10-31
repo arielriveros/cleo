@@ -193,6 +193,25 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         }
     });
 
+    it('ships no cloth simulation', () => {
+        const player = library('templates').find((t: any) => t.name === 'Player');
+        const knight = player.nodeJson.children.find((c: any) => c.name === 'Knight');
+        expect(knight.model.skinnedCloth).toBeUndefined();
+    });
+
+    it('lets light through the leaves, and only the leaves', () => {
+        const byName = new Map(library('materials').map((m: any) => [m.name, m.material]));
+        // Leaves, fronds, grass and needles glow back-lit (Material translucency), double-sided so the
+        // back face draws; wood, bark and rock do not.
+        for (const name of ['Meadow Grass', 'Pine Needles', 'Celandine', 'Jacaranda Leaves', 'Fern', 'Broadleaf Fern', 'Bush Leaves']) {
+            const m = byName.get(name);
+            expect(m?.translucency, name).toBeGreaterThan(0);
+            expect(m?.config.side, name).toBe('double');
+        }
+        for (const name of ['Pine Bark', 'Jacaranda Trunk', 'Jacaranda Branches', 'Bush Wood', 'Dry Branches', 'Moss Rock'])
+            expect(byName.get(name)?.translucency ?? 0, name).toBe(0);
+    });
+
     it('stands every plant on the surface, keeps grass off the roads, and stays under the layer cap', () => {
         for (const layer of terrain().foliage) {
             const bytes = b64(layer.instances);

@@ -273,6 +273,23 @@ node's local +Y, **Radial**, **Vortex** around local +Y, **Turbulence** or **Dra
 where: everywhere, a sphere or a box, fading in over **Falloff** from its edge. Direction and axis
 come from rotating the node, so there is no vector to type. See [Particles](particles.md#force-fields).
 
+**Cloth** — a rectangular panel that hangs, swings and blows in the wind: a cape, a banner, a flag.
+It simulates while the scene plays (Play and Simulate) and shows its rest shape while you edit. The
+panel hangs in the node's local XY plane, down its −Y, so placing and turning the node places it.
+- **Width** and **Height** size it in metres; **Columns** and **Rows** set how finely it folds.
+- **Held Edge**: **Top** for a cape or a banner, **Left** for a flag on its pole, **None** to let it
+  fall.
+- **Ride On**: **This node** holds the edge where the node is. Under a character, **Chest**, **Spine**,
+  **Neck** or **Hips** carries it on that bone instead, so a cape follows the body through a roll.
+- **Stiffness** resists stretching, **Bend** resists folding (silk at 0, canvas at 1), and **Damping**
+  calms the swing. **Mass** is the whole panel's, in kilograms.
+- **Wind Response** scales how hard the scene's [Wind](#wind) pushes it; 0 ignores it.
+- **Collide With Character** keeps it outside the limbs of the character it hangs from, using the
+  same capsules as its ragdoll. **Thickness** is how far it stays off them.
+
+Its material is any PBR material, double-sided so both faces draw. The simulation costs a little CPU
+time per cloth each frame; the Performance panel lists it under **Scene** as **cloth**.
+
 ### Gameplay
 
 **Character** — the pawn. It turns a control intent into velocity and facing and never asks where

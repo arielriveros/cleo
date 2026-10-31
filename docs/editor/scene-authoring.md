@@ -98,6 +98,7 @@ effects, and the force fields that push particles around.
 | **Decal** | A `2 × 1 × 2` box that projects straight down, with a default PBR material. *(unreleased)* |
 | **Particle System** | Starts with the default effect (soft rising puffs) so it is visibly doing something; **Create asset** on its slot turns that into a reusable `.vfx`. *(unreleased)* |
 | **Force Field** | A spherical vortex that pushes the particles of emitters with the Force Fields module. *(unreleased)* |
+| **Cloth** | A banner, 0.9 × 1.2 m, held along its top edge. Under a character, set **Ride On** to make it a cape. *(unreleased)* |
 
 > **A freshly added primitive does not take a decal's colour.** Every primitive and complex geometry
 > starts with the Blinn-Phong default material, which is shaded forward. A decal's colour, normal

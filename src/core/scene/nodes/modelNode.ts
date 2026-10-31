@@ -10,6 +10,8 @@ import { mat4, vec3 } from "gl-matrix";
 import { socketModelMatrix, socketNames } from "../../../animation/sockets";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
+import { SkinnedCloth } from "../../../physics/cloth/skinnedCloth";
+import type { NodeType } from "./nodeType";
 
 /**
  * How far a skinned model's bind-pose bounds are inflated, as a CULLING margin: the mesh deforms on the
@@ -32,6 +34,11 @@ export class ModelNode extends Node {
     // the material type has not changed — and a terrain chunk changing density changes its vertex COUNT,
     // which `Mesh.updateVertexData` cannot express. Companion key, checked in the same place.
     private _initializedGeometry: number = -1;
+    /** The geometry attributes the uploaded vertex buffer interleaves, in order (see initializeModel). */
+    private _vertexAttributes: string[] = [];
+    /** The simulation of the model's cloth parts (AnimatedModel.skinnedCloth), built on first use. */
+    private _skinnedCloth: SkinnedCloth | null = null;
+    private _skinnedClothSource: unknown = null;
     private _animator: Animator | null;
     private _movementDirection: vec3;
     /**
@@ -48,8 +55,9 @@ export class ModelNode extends Node {
     /** Optional per-node ragdoll simulation config (skinned meshes). Persisted with the scene; read by Ragdoll. */
     private _ragdollConfig: RagdollOptions | null = null;
 
-    constructor(name: string, model: Model | AnimatedModel, id: string = uuidv4()) {
-        super(name, 'model', id);
+    /** `type` is for subclasses that are drawn as a model but saved as their own kind (ClothNode). */
+    constructor(name: string, model: Model | AnimatedModel, id: string = uuidv4(), type: NodeType = 'model') {
+        super(name, type, id);
         this._model = model;
         this._initialized = false;
         this._movementDirection = vec3.create();
@@ -69,6 +77,7 @@ export class ModelNode extends Node {
         const attributes = geometryAttributesFor(shader.attributes);
 
         const geometry = this._model.geometry;
+        this._vertexAttributes = attributes;
         this._model.mesh.create(geometry.getData(attributes), geometry.vertexCount, geometry.indices);
         this._initialized = true;
         this._initializedType = this._model.material.type;
@@ -118,6 +127,32 @@ export class ModelNode extends Node {
             && this._initializedGeometry === this._model.geometryVersion;
     }
     public get animator(): Animator | null { return this._animator; }
+    /** The attributes the vertex buffer holds, in order — what a partial re-upload must pack. Empty before the first upload. */
+    public get vertexAttributes(): readonly string[] { return this._vertexAttributes; }
+
+    /** Whether this model has cloth parts to simulate (AnimatedModel.skinnedCloth). */
+    public get hasSkinnedCloth(): boolean {
+        return this._model instanceof AnimatedModel && !!this._model.skinnedCloth && !!this._animator;
+    }
+
+    /** The running cloth simulation, if any (for tools and tests). */
+    public get skinnedCloth(): SkinnedCloth | null { return this._skinnedCloth; }
+
+    /**
+     * Step the model's cloth parts (the scene calls this after animation and sockets). `playing` false
+     * puts them back on the skin.
+     */
+    public stepSkinnedCloth(delta: number, playing: boolean): void {
+        const data = this._model instanceof AnimatedModel ? this._model.skinnedCloth : null;
+        if (!data) { this._skinnedCloth?.step(delta, false); this._skinnedCloth = null; return; }
+        // Rebuilt when the data is replaced (an edit, a model rebuilt in place).
+        if (!this._skinnedCloth || this._skinnedClothSource !== data) {
+            this._skinnedCloth?.step(delta, false);
+            this._skinnedCloth = new SkinnedCloth(this, data);
+            this._skinnedClothSource = data;
+        }
+        this._skinnedCloth.step(delta, playing);
+    }
 
     /** Sockets this model's skeleton can resolve. Empty for a static mesh or a skin without any. */
     public get socketNames(): string[] {

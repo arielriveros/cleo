@@ -45,6 +45,7 @@ import {
   NavMeshNode,
   ParticleSystemNode,
   ForceFieldNode,
+  ClothNode,
   WaterVolumeNode,
   OccluderNode,
   LIGHT_UNIT,
@@ -66,7 +67,7 @@ import {
   DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon, ExposureVolumeIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon,
-  SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OccluderIcon,
+  SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OccluderIcon, ClothIcon,
 } from './nodeIcons'
 import { createLandscapeNode } from '../../utils/landscapeSlots'
 import { defaultDecalMaterial } from '../../utils/materials'
@@ -390,6 +391,11 @@ export const ADD_ITEMS: AddItem[] = [
   {
     id: 'forceField', label: 'Force Field', icon: ForceFieldIcon, category: 'effects',
     create: async () => new ForceFieldNode('force field', { kind: 'vortex', shape: 'sphere' }),
+  },
+  {
+    // A banner held along its top edge. Under a character it becomes a cape (Ride On: Chest).
+    id: 'cloth', label: 'Cloth', icon: ClothIcon, category: 'effects',
+    create: async () => new ClothNode('cloth'),
   },
   // Two menu entries, ONE node class, exactly like the three lights above: ambient and spatial differ in
   // how a sound is heard, not in what it is, so the mode lives in the node's payload.

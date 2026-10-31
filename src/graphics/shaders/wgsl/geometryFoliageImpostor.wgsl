@@ -26,6 +26,7 @@ struct ImpostorTransform {
     // Foliage LOD crossfade, exactly as chunks/instancedVertex.wgsl reads it (xyz of u_lodCamera is the eye).
     u_lodBand: vec4<f32>,
     u_lodCamera: vec4<f32>,
+    // x = dither phase, y = the layer's leaf translucency (passed on as the `translucency` varying).
     u_lodFrame: vec4<f32>,
     // x = frames per side, y = capture radius (model units), z = 1 when the atlas texture keeps the image's
     // rows top-down, 0 when it was flipped on upload (the engine's default, `TextureConfig.flipY` false).
@@ -52,6 +53,8 @@ struct ImpostorVarying {
     @location(8) @interpolate(flat) axisZ: vec3<f32>,
     // u_impostor.z, for `atlasUv`: a varying, not a uniform read, for the reason `weights.w` is one.
     @location(9) @interpolate(flat) atlasTopDown: f32,
+    // u_lodFrame.y, the layer's leaf translucency: a varying for the same reason.
+    @location(10) @interpolate(flat) translucency: f32,
 };
 
 /** Unit direction (y >= 0) -> hemi-octahedral uv in [0, 1]². Below the horizon folds up. */
@@ -156,6 +159,7 @@ fn vs_main(
 
     // The LOD crossfade, as chunks/instancedVertex.wgsl: each INSTANCE fades by its own distance.
     out.lodFade = vec3<f32>(1.0, 1.0, 0.0);
+    out.translucency = u_transform.u_lodFrame.y;
     var hidden = false;
     if (u_transform.u_lodCamera.w > 0.5) {
         let dist = distance(model[3].xyz, eye);
@@ -226,8 +230,11 @@ fn fs_main(in: ImpostorVarying) -> GBuffer {
     let ao = n0.a * wk.x + n1.a * wk.y + n2.a * wk.z;
     let nWorld = normalize(in.axisX * nLocal.x + in.axisY * nLocal.y + in.axisZ * nLocal.z);
 
+    // Leaf translucency (FoliageLayer.farTranslucency), encoded as chunks/pbrGBuffer.wgsl does: a NEGATIVE
+    // metallic, so the deferred lighting adds the back-lit glow the mesh levels have.
+    let translucency = in.translucency;
     var out: GBuffer;
-    out.albedoMetallic = vec4<f32>(toLinear(albedo), 0.0);   // sRGB -> linear
+    out.albedoMetallic = vec4<f32>(toLinear(albedo), select(0.0, -translucency, translucency > 0.0));   // sRGB -> linear
     let octN = octEncode(nWorld);
     // Matte foliage: dielectric reflectance, high roughness — what the leaf materials it replaces use.
     out.normalRoughness = vec4<f32>(octN.x, octN.y, 0.5, 0.8);

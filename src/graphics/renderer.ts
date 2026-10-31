@@ -4834,6 +4834,9 @@ export class Renderer {
         c[3] = !band ? 0 : layer.kind === 'billboard' ? 2 : 1;
         // A different dither phase every frame, so TAA resolves the screen-door into a smooth blend.
         f[0] = ((this._frameIndex * 7) % 16) / 16;
+        // The leaf translucency the impostor program writes into the G-buffer (the mesh
+        // levels read it off their own materials instead).
+        f[1] = layer.farTranslucency;
         this._shaderManager.setUniform('u_lodBand', b);
         this._shaderManager.setUniform('u_lodCamera', c);
         this._shaderManager.setUniform('u_lodFrame', f);

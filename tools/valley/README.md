@@ -68,6 +68,7 @@ The Poly Haven downloads may arrive as `.zip` beside these paths; `prepare.py` e
 - **Fires** (`examples/scripts/ValleyFireLight.ts`) are linked templates with a tileset flame, embers, sparks that bounce on the floor, and a flickering light. Their flames and embers have an Exposure weight of 0.1, so the camera's exposure barely changes them.
 - **The Dungeon** is held at EV 15, the valley's noon, and its fires are lit for that: the souls content (glyphs, glows, bolts) is tuned for an exposure about that. The Time of Day scales the fires down by day and up at night.
 
+- **Leaves let light through** (Material translucency): broad leaves and fronds 0.5, grass and celandine 0.45, pine needles 0.25; wood, bark and rock none. The trees' far impostors carry the same glow.
 - **Exposure volumes** trim the Day–Night metering by where the camera is. The village gets +0.15 stop, the pond −0.25 and the forest stands +0.35; the forest stands are the 40 m cells with 10 or more trees, merged. Inside each house an Interior trim (+0.5, quicker adaptation) wins at priority 1.
 - **The player camera** sits on a 2.4 m arm (1.6 m locked on), sees through trees and the dungeon's pillars, and pulls in for walls and ceilings (`playerCamera` in `build.mjs`).
 

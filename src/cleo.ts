@@ -39,6 +39,14 @@ export { DecalNode, decalLocalToUV, radialDecalWeight, radialDecalT, DECAL_RADIA
 export { ParticleSystemNode } from "./core/scene/nodes/particleSystemNode";
 export type { ParticleSystemNodeOptions, ParticleCullingMode } from "./core/scene/nodes/particleSystemNode";
 export { ForceFieldNode, MAX_FORCE_FIELDS } from "./core/scene/nodes/forceFieldNode";
+export { ClothNode, CLOTH_DEFAULTS, jointOf as clothJointOf } from "./core/scene/nodes/clothNode";
+export type { ClothOptions, ClothPinEdge } from "./core/scene/nodes/clothNode";
+export { XpbdCloth, CLOTH_SOLVER_DEFAULTS, gridIndices, windGust } from "./physics/cloth/xpbdCloth";
+export type { ClothCapsule, ClothSettings } from "./physics/cloth/xpbdCloth";
+export { weightsFromCloth, clothFromWeights, settingsOf as clothSettingsOf, twinsOf as clothTwinsOf, neighboursOf as clothNeighboursOf, brushDab as clothBrushDab, fillPiece as clothFillPiece, fillRange as clothFillRange, DEFAULT_CLOTH_SETTINGS } from "./physics/cloth/clothPaint";
+export type { ClothSettings as SkinnedClothSettings, ClothBrushMode, ClothDab } from "./physics/cloth/clothPaint";
+export type { SkinnedClothData } from "./physics/cloth/skinnedClothData";
+export { parseSkinnedCloth } from "./physics/cloth/skinnedClothData";
 export { WaterVolumeNode, WATER_RIPPLE_SLOTS } from "./core/scene/nodes/waterVolumeNode";
 export type { WaterVolumeOptions } from "./core/scene/nodes/waterVolumeNode";
 export type { ForceFieldOptions, ForceFieldKind, ForceFieldShape } from "./core/scene/nodes/forceFieldNode";

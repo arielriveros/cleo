@@ -14,6 +14,8 @@ import useGizmoShortcuts from "./gizmo/useGizmoShortcuts";
 import type { TransformPatch } from "@cleo/app-kit/gizmo/gizmoDrag";
 import { GizmoModeControls } from "@cleo/app-kit/gizmo/GizmoModeControls";
 import LandscapeBrush from "./landscape/LandscapeBrush";
+import ClothBrush from "./models/ClothBrush";
+import ClothWeightOverlay from "./models/ClothWeightOverlay";
 import LandscapeToolbar from "./landscape/LandscapeToolbar";
 import TilemapBrush from "./tilemap/TilemapBrush";
 import TilemapInspector from "./tilemap/TilemapInspector";
@@ -481,6 +483,10 @@ export default function EngineViewport() {
             {editorMode === 'tilemap' && <>
                 <TilemapBrush viewportRef={viewportRef} />
                 <TilemapInspector />
+            </>}
+            {editorMode === 'model' && <>
+                <ClothBrush viewportRef={viewportRef} />
+                <ClothWeightOverlay />
             </>}
             {editorMode === 'landscape' && <>
                 <LandscapeBrush viewportRef={viewportRef} />

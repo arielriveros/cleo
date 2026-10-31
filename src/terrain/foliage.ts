@@ -500,6 +500,20 @@ export class FoliageLayer {
      */
     public billboardOctahedral: OctahedralImpostorInfo | null = null;
     public billboardNormalTextureId: string | null = null;
+
+    /**
+     * The leaf translucency the far octahedral impostor carries: the highest
+     * `translucency` among the materials of the coarsest mesh level — the one the impostor replaces — so
+     * a back-lit crown keeps its glow across the hand-off. Derived, never serialized. The impostor atlas
+     * mixes trunk and leaves under this one value; at impostor distance the trunk is a few pixels.
+     */
+    public get farTranslucency(): number {
+        const level = this.levels[this.levels.length - 1];
+        let t = 0;
+        for (const model of level?.models ?? [])
+            for (const m of model.materials) t = Math.max(t, (m.properties.get('translucency') as number | undefined) ?? 0);
+        return t;
+    }
     /** Hide instances beyond this camera distance; 0 = use the renderer's global foliage cull distance. */
     public cullDistance = 0;
     /**

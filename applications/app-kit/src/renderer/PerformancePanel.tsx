@@ -90,7 +90,7 @@ type Sample = {
   bodies: number; broadphaseBodies: number; contacts: number; terrainMs: number;
   activeBodies: number; frozenBodies: number; restingBodies: number;
   broadphaseMs: number; narrowphaseMs: number; solveMs: number; integrateMs: number;
-  sceneMs: number; transformMs: number; scriptMs: number; animatorMs: number; rigMs: number; nodes: number;
+  sceneMs: number; transformMs: number; scriptMs: number; animatorMs: number; rigMs: number; clothMs: number; nodes: number;
   aiPathMs: number; aiQueries: number; aiAgents: number; navBuildMs: number; navBuilds: number; navReused: number;
   matWrites: number; matSkips: number; fallbackDraws: number; pipelinesBuilt: number;
   asyncCompiles: number; pendingCompiles: number; syncCompiles: number; worstStallMs: number; worstStallName: string;
@@ -109,7 +109,7 @@ const EMPTY: Sample = {
   bodies: 0, broadphaseBodies: 0, contacts: 0, terrainMs: 0,
   activeBodies: 0, frozenBodies: 0, restingBodies: 0,
   broadphaseMs: 0, narrowphaseMs: 0, solveMs: 0, integrateMs: 0,
-  sceneMs: 0, transformMs: 0, scriptMs: 0, animatorMs: 0, rigMs: 0, nodes: 0,
+  sceneMs: 0, transformMs: 0, scriptMs: 0, animatorMs: 0, rigMs: 0, clothMs: 0, nodes: 0,
   aiPathMs: 0, aiQueries: 0, aiAgents: 0, navBuildMs: 0, navBuilds: 0, navReused: 0,
   matWrites: 0, matSkips: 0, fallbackDraws: 0, pipelinesBuilt: 0,
   asyncCompiles: 0, pendingCompiles: 0, syncCompiles: 0, worstStallMs: 0, worstStallName: '',
@@ -245,6 +245,7 @@ export default function PerformancePanel() {
           scriptMs: sceneS?.scriptMs ?? 0,
           animatorMs: sceneS?.animatorMs ?? 0,
           rigMs: sceneS?.rigMs ?? 0,
+          clothMs: sceneS?.clothMs ?? 0,
           nodes: sceneS?.nodes ?? 0,
           aiPathMs: ai?.pathMs ?? 0,
           aiQueries: ai?.pathQueries ?? 0,
@@ -401,6 +402,7 @@ export default function PerformancePanel() {
              title='Scripts, animators, transform propagation and camera rigs.' />
         <Row label='· transforms' value={`${fmt(d.transformMs)} ms`} />
         <Row label='· rigs' value={`${fmt(d.rigMs)} ms`} />
+        <Row label='· cloth' value={`${fmt(d.clothMs)} ms`} />
         {/* Path queries run inside the node loop (Scene), so these are a slice of it, not an addition. */}
         <Row label='· AI paths' value={`${fmt(d.aiPathMs)} ms · ${d.aiQueries} queries · ${d.aiAgents} agents`}
              title='Navmesh path queries this frame. Queries near the agent count per FRAME means a repath policy is not doing its job.' />

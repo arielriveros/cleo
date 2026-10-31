@@ -39,4 +39,5 @@ export const ParticlesIcon = () => (<S><circle cx='12' cy='19.5' r='1.6' fill='c
 /** Occluder: a solid block with a dashed silhouette behind it. */
 export const OccluderIcon = () => (<S><path d='M3.5 7.5h11v11h-11Z' fill='currentColor' fillOpacity='0.35' /><path d='M9.5 4.5h11v11' strokeDasharray='2 2' /></S>);
 export const WaterVolumeIcon = () => (<S><path d='M3 15c2 0 2-1.5 4.5-1.5S9.5 15 12 15s2-1.5 4.5-1.5S18.5 15 21 15' /><path d='M3 19.5c2 0 2-1.5 4.5-1.5S9.5 19.5 12 19.5s2-1.5 4.5-1.5 2 1.5 4.5 1.5' /><path d='M12 3.5c2.3 2.8 3.6 4.9 3.6 6.4a3.6 3.6 0 0 1-7.2 0c0-1.5 1.3-3.6 3.6-6.4Z' /></S>);
+export const ClothIcon = () => (<S><path d='M5 21V3' /><path d='M5 4c3-1.5 5 1.5 8 0s4-1 6 0v9c-2-1-3-1.5-6 0s-5-1.5-8 0' /></S>);
 export const ForceFieldIcon = () => (<S><path d='M3 8h10.5a2.5 2.5 0 1 0-2.5-2.5' /><path d='M3 12h15a3 3 0 1 1-3 3' /><path d='M3 16h6' /></S>);

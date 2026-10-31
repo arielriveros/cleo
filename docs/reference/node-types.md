@@ -11,7 +11,7 @@ type NodeType =
   | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite'
   | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'lodGroup'
   | 'cameraRig' | 'sound' | 'character' | 'controller' | 'navMesh' | 'decal'
-  | 'particleSystem' | 'forceField' | 'waterVolume' | 'occluder' | 'exposureVolume'
+  | 'particleSystem' | 'forceField' | 'waterVolume' | 'occluder' | 'exposureVolume' | 'cloth'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 ```
@@ -534,6 +534,20 @@ A volume that pushes particles of emitters with the Force Fields module. Up to 1
 Properties: `kind` (`'directional' | 'radial' | 'vortex' | 'turbulence' | 'drag'`), `shape`
 (`'global' | 'sphere' | 'box'`), `strength`, `radius`, `extents` (box half extents), `falloff`
 (0..1), `frequency` (turbulence), `enabled`. Direction and vortex axis are the node's local +Y.
+
+### ClothNode — `'cloth'` *(unreleased)*
+
+A rectangular cloth panel simulated on the CPU (XPBD): a cape, a banner, a flag. A `ModelNode` underneath,
+so it draws, shadows and takes a material like one; its mesh is rebuilt from its options and never saved.
+It simulates while the scene plays and shows its rest shape while authoring. The panel lies in the node's
+local XY plane, hanging down −Y.
+
+Options (`node.options`, changed with `node.setOptions({...})`): `width`, `height` (metres),
+`columns`, `rows` (particles, 2..64), `pinEdge` (`'top' | 'left' | 'none'`), `stiffness`, `bend`,
+`damping` (0..1), `mass` (kg), `thickness` (metres kept off colliders), `windResponse` (multiplier on
+the scene's `WindNode`), `collideWithOwner` (the ragdoll capsules of the character it hangs from),
+`bone` (a humanoid slot such as `'chest'`, or a bone name: the held edge rides that bone instead of the
+node), `enabled`. `particlePositions` is the simulated world positions, or null at rest.
 
 ### WaterVolumeNode — `'waterVolume'` *(unreleased)*
 
