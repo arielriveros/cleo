@@ -16,6 +16,19 @@ import {
 import { inUseDialogOptions, planDelete } from './deleteFlow'
 import { assetGraph, assetKey } from 'cleo'
 import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
+import { toast } from '@cleo/app-kit/feedback/toastStore'
+import { isCreatorPath } from '../creator/creatorPins'
+
+/**
+ * /Creator is the Creator sync's: whatever is edited there is overwritten by the next sync. Refuse, and
+ * say what to do instead. Returns true when the operation touches it (and was refused).
+ */
+function refuseCreatorEdit(paths: (string | undefined)[], what: string): boolean {
+  if (!paths.some(p => p && isCreatorPath(p))) return false
+  toast.info(`${what} is not possible in /Creator: it is managed by Cleo Creator. Edit the asset there, or duplicate it into another folder to change it here.`,
+             { title: 'Managed by Cleo Creator' })
+  return true
+}
 import { modelLodLevelCount } from '../../utils/models'
 import {
   collectReferencedMaterialIds, collectReferencedModelIds, collectReferencedTemplateIds,
@@ -218,6 +231,7 @@ export function useFileManagerBridge() {
     api.intercept('create-file', (cfg: any) => {
       if (cfg.skipProvider) return true
       if (cfg.file?.file instanceof File) return false
+      if (refuseCreatorEdit([cfg.parent], 'Creating a folder')) return false
       if (cfg.file?.type !== 'folder') return false
       return true
     })
@@ -237,6 +251,7 @@ export function useFileManagerBridge() {
     // Pin the extension before the store sees it: it encodes the asset's kind.
     api.intercept('rename-file', (cfg: any) => {
       if (cfg.skipProvider) return true
+      if (refuseCreatorEdit([cfg.id], 'Renaming')) return false
       const name = (cfg.name ?? '').trim().replace(/\//g, '-')
       if (!name) return false
       const entry = pathIndexRef.current.get(cfg.id)
@@ -264,6 +279,7 @@ export function useFileManagerBridge() {
     api.intercept('delete-files', (cfg: any) => {
       if (cfg.skipProvider) return true
       if (deleteConfirmRef.current) return false
+      if (refuseCreatorEdit(cfg.ids ?? [], 'Deleting')) return false
 
       // DataTree.remove purges a folder's subtree from the id pool then dereferences `_pool.get(nextId)`
       // blind: pass top-most, still-resolvable ids only or the batch throws and half-applies.
@@ -300,6 +316,10 @@ export function useFileManagerBridge() {
     })
 
     // --- move (cut/paste, and our own drag-to-folder) ------------------------------------------------
+    api.intercept('move-files', (cfg: any) => {
+      if (cfg.skipProvider) return true
+      return !refuseCreatorEdit([...(cfg.ids ?? []), cfg.target], 'Moving')
+    })
     api.on('move-files', (cfg: any) => {
       if (cfg.skipProvider || !cfg.newIds) return
       const pairs: [string, string][] = cfg.ids.map((id: string, i: number) => [id, cfg.newIds[i]])

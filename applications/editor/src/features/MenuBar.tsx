@@ -285,6 +285,7 @@ export default function MenuBar() {
   const importDoc = useBarDoc('editor/interface#menu-bar::Import', 'Import a project .zip — replace or merge the whole workspace');
   const exportDoc = useBarDoc('editor/interface#menu-bar::Export', 'Export the whole project (scenes + assets + textures) to a .zip');
   const publishDoc = useBarDoc('editor/interface#menu-bar::Publish', 'Publish an optimized build of your game');
+  const creatorDoc = useBarDoc('editor/interface#menu-bar::Creator', 'Open Cleo Creator; its saved assets appear under /Creator');
   const resetDoc = useBarDoc('editor/interface#the-dockable-workspace::Reset Layout', 'Restore the default panel layout');
 
   return (
@@ -383,6 +384,13 @@ export default function MenuBar() {
             </div>
           )}
         </div>
+        {/* Same origin (/creator/), so its saved assets reach this project through the shared Creator
+            library; one named window, reused by every click. */}
+        <Button variant='subtle' size='sm' className='h-[25px]' {...creatorDoc.props}
+                onClick={() => window.open('/creator/', 'cleo-creator')?.focus()}>
+          Creator
+        </Button>
+        {creatorDoc.card}
       </div>
       <div className='flex items-center h-full'>
         <div className='flex items-center rounded overflow-hidden border border-control-hover my-[2px]'>

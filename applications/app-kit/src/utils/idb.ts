@@ -31,7 +31,12 @@ export function openDB(): Promise<IDBDatabase> {
     // Another tab holds the DB open at the old version. Must surface: a silent hang here looks like the
     // editor failing to load.
     req.onblocked = () => reject(new Error('Cleo storage upgrade blocked — close the editor in other tabs and reload'));
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      // A newer version opening in another tab: close rather than block its upgrade; the next call reopens.
+      db.onversionchange = () => { db.close(); dbPromise = null; };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error);
   });
   return dbPromise;

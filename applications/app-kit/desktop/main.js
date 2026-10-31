@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, protocol, net } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, protocol, net, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -11,9 +11,10 @@ const isDev = process.env.CLEO_DEV === '1';
 
 // --- Hosted application ------------------------------------------------------------------------
 //
-// The shell lives in the app-kit, but it hosts ONE application: the Editor, the only app that ships on
-// desktop for now. Everything app-specific is here, so a second desktop target (Cleo Creator) is a
-// change to this block and to package.json's extraResources, not to the shell.
+// The shell lives in the app-kit and hosts the Editor. Cleo Creator rides along on the SAME origin, at
+// /creator/ (its build lands in editor/dist/creator; in dev the editor's server proxies it), so the two
+// share IndexedDB and the Creator library syncs into the editor. The editor opens it with window.open,
+// which `openCreatorWindows` below turns into a second window.
 const HOSTED_APP = {
   /** Host of the app:// origin the built bundle is served from. */
   name: 'editor',
@@ -46,6 +47,8 @@ function registerAppProtocol() {
   protocol.handle(APP_SCHEME, (request) => {
     let pathname = decodeURIComponent(new URL(request.url).pathname);
     if (!pathname || pathname === '/') pathname = '/index.html';
+    // The Creator's page, however it is linked.
+    else if (pathname === '/creator' || pathname === '/creator/') pathname = '/creator/index.html';
     // Resolve within root and block path traversal outside it.
     const filePath = path.join(root, pathname);
     if (!filePath.startsWith(root)) return new Response('Forbidden', { status: 403 });
@@ -126,6 +129,34 @@ function installAppMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+/** The app's own origin, in dev or packaged. */
+const appOrigin = () => isDev ? new URL(HOSTED_APP.devUrl).origin : APP_ORIGIN;
+
+/**
+ * window.open from a window: a page of the app's own origin (the Creator at /creator/, or the editor from
+ * the Creator) opens as another app window that keeps the shell's preload and isolation; anything else
+ * is a link and goes to the system browser.
+ */
+function openCreatorWindows(win) {
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    let parsed;
+    try { parsed = new URL(url); } catch { return { action: 'deny' }; }
+    if (parsed.origin === appOrigin()) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 1600, height: 900, backgroundColor: '#252525', autoHideMenuBar: true,
+          webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
+        },
+      };
+    }
+    if (/^https?:$/.test(parsed.protocol)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  // The Creator window can open the editor's links too.
+  win.webContents.on('did-create-window', (child) => { child.setMenuBarVisibility(false); openCreatorWindows(child); });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1600,
@@ -138,6 +169,7 @@ function createWindow() {
     },
   });
   win.setMenuBarVisibility(false);
+  openCreatorWindows(win);
 
   // Optional: forward renderer console + failed loads to the terminal (CLEO_LOG_CONSOLE=1).
   if (process.env.CLEO_LOG_CONSOLE === '1') {

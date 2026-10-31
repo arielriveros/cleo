@@ -116,14 +116,10 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(s.maskSlices).toBe(2);
         // The undergrowth belongs to the Forest Floor.
         const forest = asset.material.slots.find((x: any) => x.name === 'Forest Floor');
-        expect(forest.foliageInclude.map((r: any) => r.name)).toEqual([
-            'Fern A', 'Fern B', 'Broadleaf Fern A', 'Broadleaf Fern B', 'Dry Branches A', 'Dry Branches B',
-        ]);
-        // The moss rocks belong to the Rocky Dirt, not the ground.
+        expect(forest.foliageInclude.map((r: any) => r.name)).toEqual(['Forest Undergrowth A', 'Forest Undergrowth B', 'Boxwood']);
+        // The scree carries nothing: only plants grow in the valley, and only on the ground and the litter.
         const dirt = asset.material.slots.find((x: any) => x.name === 'Rocky Dirt');
-        expect(dirt.foliageInclude.map((r: any) => r.name)).toEqual(['Moss Rock A', 'Moss Rock B', 'Moss Rock C', 'Moss Rock D']);
-        // Bedded into the slope rather than standing level on it.
-        for (const r of dirt.foliageInclude) expect(r.orientation, r.name).toBe('normal');
+        expect(dirt.foliageInclude ?? []).toEqual([]);
         const shipped = new Set(read('textures', 'index.json').map((t: any) => t.id));
         for (const id of asset.textureIds) expect(shipped.has(id), id).toBe(true);
     });
@@ -154,32 +150,36 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         }
     });
 
-    it('draws the source plants at LOD0, ends grass at 20 m and hands distant pines to a shipped impostor', () => {
+    it('draws the Foliage Creator plants with their LOD ladders, ends grass by 30 m and hands distant trees to a shipped impostor', () => {
         const rules = allRules();
         const textures = new Set(manifest().sceneMetas[0].refs.textureIds);
         const tris = (models: any[]) => models.reduce((n, m) => n + m.geometry.indices.length / 3, 0);
         for (const layer of terrain().foliage) {
             const rule = rules.find((r: any) => r.id === layer.key);
             const lod0 = tris(layer.models ?? [layer.model]);
-            if (layer.name.includes('Grass') || layer.name.includes('Celandine')) {
-                expect(layer.cullDistance, layer.name).toBe(20);
-                expect(lod0, layer.name).toBeGreaterThan(4000);   // full clumps, not a thinned patch
+            const [l1, l2] = layer.lods.map((l: any) => tris(l.models));
+            // Every level cheaper than the one before it.
+            expect(l1, layer.name).toBeLessThan(lod0);
+            expect(l2, layer.name).toBeLessThan(l1);
+            if (layer.name.includes('Grass')) {
+                // A clump of blades, then fewer blades, then three crossed cards.
+                expect(layer.cullDistance, layer.name).toBeLessThanOrEqual(30);
+                expect(lod0, layer.name).toBeGreaterThan(200);
+                expect(l2, layer.name).toBeLessThanOrEqual(12);
                 expect(layer.billboard, layer.name).toBeUndefined();
-            } else if (layer.name.includes('Moss Rock')) {
-                expect(lod0, layer.name).toBeGreaterThan(7000);
-                expect(layer.cullDistance, layer.name).toBe(120);
-            } else if (/Fern|Branches|Bush/.test(layer.name)) {
-                // Undergrowth: the scan at full detail, two QEM levels, culled well short of the trees.
-                expect(lod0, layer.name).toBeGreaterThan(2000);
+            } else if (/Undergrowth|Boxwood|Shrub|Juniper/.test(layer.name)) {
+                // Bushes: walked through, no impostor, culled well short of the trees.
+                expect(lod0, layer.name).toBeGreaterThan(1000);
+                expect(lod0, layer.name).toBeLessThan(10000);
                 expect(layer.billboard, layer.name).toBeUndefined();
+                expect(layer.collision, layer.name).toBeUndefined();
                 expect(layer.cullDistance, layer.name).toBeLessThanOrEqual(90);
             } else {
-                // The pine at its scan's full detail; the jacaranda pre-reduced from 3.9M (see buildJacaranda).
-                expect(lod0, layer.name).toBeGreaterThan(layer.name === 'Jacaranda' ? 70000 : 400000);
-                // 15% and 5% of the source, give or take what the decimator keeps.
-                const [l1, l2] = layer.lods.map((l: any) => tris(l.models));
-                expect(l1 / lod0).toBeGreaterThan(0.13); expect(l1 / lod0).toBeLessThan(0.17);
-                expect(l2 / lod0).toBeGreaterThan(0.04); expect(l2 / lod0).toBeLessThan(0.06);
+                // Trees: a few thousand to some tens of thousands of triangles, never a scan's hundreds of thousands.
+                expect(lod0, layer.name).toBeGreaterThan(5000);
+                expect(lod0, layer.name).toBeLessThan(40000);
+                expect(l2 / lod0, layer.name).toBeLessThan(0.15);
+                expect(layer.collision?.shape, layer.name).toBe('cylinder');
                 expect(layer.billboard?.distance).toBeGreaterThan(layer.lods[1].distance);
                 expect(layer.billboard.textureId).toBe(`${rule.modelId}__impostor`);
                 expect(rule.billboard).toEqual(layer.billboard);
@@ -201,14 +201,17 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
 
     it('lets light through the leaves, and only the leaves', () => {
         const byName = new Map(library('materials').map((m: any) => [m.name, m.material]));
-        // Leaves, fronds, grass and needles glow back-lit (Material translucency), double-sided so the
-        // back face draws; wood, bark and rock do not.
-        for (const name of ['Meadow Grass', 'Pine Needles', 'Celandine', 'Jacaranda Leaves', 'Fern', 'Broadleaf Fern', 'Bush Leaves']) {
+        // Leaves, needles and grass glow back-lit (Material translucency), double-sided so the back face
+        // draws; bark and rock do not. The Creator's materials, named "<plant> <material>".
+        for (const name of ['Meadow Grass A Grass', 'Scots Pine A Needles', 'Spruce Needles',
+                            'Shrub A Leaves', 'Juniper Needles', 'Forest Undergrowth A Leaves']) {
             const m = byName.get(name);
             expect(m?.translucency, name).toBeGreaterThan(0);
             expect(m?.config.side, name).toBe('double');
         }
-        for (const name of ['Pine Bark', 'Jacaranda Trunk', 'Jacaranda Branches', 'Bush Wood', 'Dry Branches', 'Moss Rock'])
+        // Cards cut out on their base colour's alpha (no separate mask).
+        for (const name of ['Scots Pine A Needles', 'Spruce Needles', 'Shrub A Leaves']) expect(byName.get(name)?.alphaCutoff, name).toBe(0.5);
+        for (const name of ['Scots Pine A Bark', 'Spruce Bark', 'Shrub A Bark', 'Moss Rock'])
             expect(byName.get(name)?.translucency ?? 0, name).toBe(0);
     });
 
@@ -218,7 +221,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             const f = new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
             const count = f.length / 5;
             // Trees and bushes stand on the small valley floor; everything else numbers in the hundreds.
-            expect(count, layer.name).toBeGreaterThan(/Jacaranda|Bush/.test(layer.name) ? 10 : 100);
+            expect(count, layer.name).toBeGreaterThan(/Shrub|Juniper|Boxwood/.test(layer.name) ? 10 : 100);
             expect(count, layer.name).toBeLessThan(MAX_INSTANCES);
             for (let i = 0; i < f.length; i += 5 * 37) {
                 const [x, y, z] = [f[i], f[i + 1], f[i + 2]];

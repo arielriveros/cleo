@@ -4,11 +4,11 @@
     {
       "slug": "valley",
       "name": "Valley",
-      "description": "A souls-like on a 2 km mountain valley with a day and night cycle: stamina combat, rolls, lock-on, bonfires and Estus, on landscape layers for ground, rock, snow, forest floor and trails, meadow grass and flowers, pine forest, moss rocks, a torch-lit hamlet with breakable barrels, and a skull cave down into a three-level dungeon with a boss in its throne arena.",
+      "description": "A souls-like on a 2 km mountain valley with a day and night cycle: stamina combat, rolls, lock-on, bonfires and Estus, on landscape layers for ground, rock, snow, forest floor and trails, meadow grass, pine and spruce forest and bushes made with the Foliage Creator, a torch-lit hamlet with breakable barrels, and a skull cave down into a three-level dungeon with a boss in its throne arena.",
       "order": 0,
-      "bytes": 339762255,
+      "bytes": 284285963,
       "sceneCount": 2,
-      "textureCount": 210,
+      "textureCount": 212,
       "createdAt": 1790000000000
     }
   ]

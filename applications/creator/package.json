@@ -7,9 +7,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:engine": "cd ../.. && npm run build",
     "prebuild": "npm run build:engine",
-    "start": "vite --open",
+    "start": "vite --open /creator/",
     "dev": "vite",
     "build": "vite build",
+    "build:standalone": "vite build --mode standalone",
     "test": "vitest run"
   },
   "author": "Ariel Riveros",

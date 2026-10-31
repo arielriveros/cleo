@@ -1,9 +1,9 @@
 # Foliage Creator
 
-Generate grass clumps, rocks and trees from parameters, each with its levels of detail, and export them
-as glTF models ready for a foliage rule.
+Generate grass clumps, bushes, trees and rocks from parameters, each with its levels of detail and its
+materials, and export them as glTF models ready for a foliage rule.
 
-Pick **Grass**, **Rock** or **Tree** in the toolbar. Each kind keeps its own parameters, so switching
+Pick **Grass**, **Bush**, **Tree** or **Rock** in the toolbar. Each kind keeps its own parameters, so switching
 back and forth loses nothing. Every edit regenerates the asset in a background worker, and the
 **Viewport** shows it as a real LOD group, switching levels by distance exactly as a game does. The
 preview loads the same `.glb` files the export writes, through the Editor's own importer, so what you
@@ -13,9 +13,11 @@ The menu top-right of the viewport shows the grid, floor, sky, a patch of grass 
 The **LOD** menu beside it pins one level, or lets distance choose. The corner readout gives each
 level's triangles and the level on screen.
 
-The **right** dock holds **Parameters** (the shape and look), **LOD** (the level ladder) and **Export**
-(file name, texture sizes, texture overrides, Download). The **left** dock holds presets, seeds, saved
-variants and the preview stage.
+The layout is the Creator's own, the same in every mode (see [the Creator](index.md#layout)). The
+**right** dock holds **Parameters** (the shape), **Materials** (every material the asset carries, in the
+Editor's material sections), **LOD** (the level ladder) and **Export** (file name and texture sizes).
+**Download .glb** in the toolbar writes the files. The **left** dock holds presets, seeds, saved
+variants and the sun.
 
 Every asset is a pure function of its parameters and **Seed**. Random choices are keyed by what they
 decide (this branch, this leaf), so changing one slider moves only what it touches. **New seed** gives
@@ -33,7 +35,7 @@ The seeds tried this session. Click one to go back to it.
 
 Keep the current kind, parameters and seed under a name, and load it again later. Stored in the browser.
 
-## Stage
+## Sun & sky
 
 The light the preview is shown in. None of it reaches the export.
 
@@ -94,26 +96,51 @@ A rock starts as a dense sphere, is carved, and is then reduced to its triangle 
 | **Strata frequency** | How many layers. |
 | **Flatten bottom** | How much of the base is cut flat so the rock sits on the ground. |
 
-## Look
+## Blade texture
 
-Colours are baked into the asset's textures.
+Grass: the blade texture, generated from these colours. The clump card LOD 2 shows is drawn from the
+blades, so it follows. Edited in the **Materials** tab, under the Blades material.
 
 | Field | Meaning |
 |---|---|
-| **Base colour** | Grass: the colour low on the blade. |
-| **Tip colour** | Grass: the colour at the tip. |
-| **Dryness** | Grass: the share of blades that are dry. |
-| **Dry colour** | Grass: the dry blades' colour. |
-| **Root shade** | Grass: darkening at the root, standing in for the shadow inside the clump. |
-| **Colour** | Rock: the stone's base colour. |
-| **Colour variation** | Rock: broad tonal patches across the stone. |
-| **Edge wear** | Rock: lighter, worn crests. |
-| **Cavity dirt** | Rock: darker hollows and base. |
-| **Moss** | Rock: moss on faces that look up. |
-| **Moss colour** | Rock: the moss's colour. |
-| **Bumpiness** | Rock: strength of the baked normal map. |
-| **Roughness** | Surface roughness: 1 is fully matte. |
-| **Translucency** | How much light passes through, so blades and leaves glow when lit from behind. 0.3–0.6 suits foliage. |
+| **Base colour** | The colour low on the blade. |
+| **Tip colour** | The colour at the tip. |
+| **Dryness** | The share of blades that are dry. |
+| **Dry colour** | The dry blades' colour. |
+| **Root shade** | Darkening at the root, standing in for the shadow inside the clump. |
+
+## Rock texture
+
+Rock: the albedo and normal map, baked into the rock's own six-chart layout. Edited in the **Materials**
+tab.
+
+| Field | Meaning |
+|---|---|
+| **Colour** | The stone's base colour. |
+| **Colour variation** | Broad tonal patches across the stone. |
+| **Edge wear** | Lighter, worn crests. |
+| **Cavity dirt** | Darker hollows and base. |
+| **Moss** | Moss on faces that look up. |
+| **Moss colour** | The moss's colour. |
+| **Bumpiness** | Strength of the baked normal map. |
+
+## Stems
+
+A bush is several stems rising from one root crown, each grown like a small tree (with the tree's
+branching, leaves and bark) and leaning out from the centre. The outer stems lean furthest, which gives
+the vase shape most shrubs have. Bushes have no collider and no impostor: they are walked through, and
+culled before an impostor would pay.
+
+| Field | Meaning |
+|---|---|
+| **Stems** | How many stems rise from the root crown. |
+| **Spread** | The root crown's radius. |
+| **Height** | Average stem height. Outer stems are a little shorter. |
+| **Height variance** | How much stem heights vary. |
+| **Lean** | How far the outer stems lean out from vertical. |
+| **Stem radius** | A stem's radius at the ground. |
+| **Bare stem** | Fraction of each stem with no branches. |
+| **Gnarliness** | How much every stem wanders. |
 
 ## Trunk
 
@@ -159,44 +186,70 @@ Third-level branches. Fields as in [Branches](#branches).
 ## Leaves
 
 Leaves are cards, each carrying a sprig of several leaves (or a brush of needles) from a generated
-atlas: ten to twenty leaves for two triangles.
+atlas: ten to twenty leaves for two triangles. Where they grow is here; how they look is the **Leaf
+texture** in the Materials tab.
 
 | Field | Meaning |
 |---|---|
 | **Leaf kind** | Broadleaf sprigs, needle brushes, or none. |
-| **Leaf shape** | The broadleaf outline. |
 | **Cards per branch** | Cards on each end branch, plus one at its tip. |
 | **Card size** | One card's size. |
 | **Size variance** | How much card sizes vary. |
 | **Leaf start** | How far along an end branch leaves begin. |
 | **Normal bend** | How far card normals lean outward from the crown's centre, so the canopy shades as one volume instead of a scatter of flat cards. |
+
+## Leaf texture
+
+Trees and bushes: the leaf (or needle) atlas, generated from these settings. Edited in the **Materials**
+tab, under Leaves or Needles.
+
+| Field | Meaning |
+|---|---|
+| **Leaf shape** | The broadleaf outline. |
 | **Leaf colour** | The leaves' base colour. |
 | **Colour variation** | Variation in hue and value between leaves. |
 | **Autumn** | Blend toward autumn reds, oranges and yellows. |
-| **Leaf roughness** | The leaves' roughness. |
 
-## Bark
+## Bark texture
 
 A tiling bark texture, wrapped around and along every stem. Texels stay square on thick and thin
-stems.
+stems. Edited in the **Materials** tab, under Bark.
 
 | Field | Meaning |
 |---|---|
 | **Pattern** | Furrowed (oak), plated (pine), smooth (beech) or papery (birch). |
 | **Bark colour** | The bark's base colour. |
-| **Bark roughness** | The bark's roughness. |
 | **Bark scale** | Metres of circumference one texture repeat covers. |
 
-## Wind
+## Materials
 
-Written into the materials, so the asset sways once it is in a foliage rule. The Creator's preview does
-not sway.
+Every material the asset carries -- Bark and Leaves (or Needles) on a tree or bush, Blades and Clump card
+on grass, Rock on a rock -- edited with the Editor's own material sections: **Properties**,
+**Textures**, **Cutout** and **Wind** (see [the material editor](../editor/models-and-materials.md#the-material-editor)).
+What is set here is written into the `.glb` files, so the model arrives in the Editor looking the same.
 
-| Field | Meaning |
-|---|---|
-| **Wind strength** | How far the plant leans in the wind, as a fraction of its height. |
-| **Wind stiffness** | How hard it resists: higher sways less and faster. |
-| **Flutter** | The leaves' (or blades') fast flutter. |
+Roughness, translucency and the wind are the generator's own settings: a preset sets them, and a bush's
+bark and leaves share one wind strength and stiffness, because a plant bends as one. The rest --
+a tint over the texture, metallic, emission, the cutout threshold, whether the bark rides the wind
+rigidly or flutters with the leaves -- is kept per material; **Reset** at the top returns a material to
+what the generator chose.
+
+**Textures** lists the material's texture slots. Each is either **generated** -- its generator's
+settings sit beneath it (the Leaf texture, Bark texture, Blade texture or Rock texture) -- or an image of
+your own: **Image…** loads one, resized to the slot's size, and **Use generated** goes back. A rock's
+albedo is baked into its own six-chart layout, so a tiling photo works but shows seams.
+
+Bark carries every PBR channel: colour, normal, and an **ARM** map -- ambient occlusion in red, roughness
+in green, metallic in blue, glTF's own packing, written as both the occlusion and the metal/rough texture
+of the `.glb`. Generated bark derives its AO and roughness from the pattern's relief: cracks are darker
+and rougher than the plate tops. A scan's packed `_arm` map replaces all three channels; a greyscale
+**Bark AO**, **Bark roughness** or **Bark metallic** image replaces one channel, over the ARM map. The
+map's values are what the surface uses, so the Roughness slider scales the roughness channel, and Metallic
+fills the metallic channel when no map gives one. **Load texture set…** takes several images, or the `.zip`
+a PBR set was downloaded in, and puts each map in its slot by its file name (`diff`, `nor_gl`, `arm`, `ao`,
+`rough`, `metal`...). A DirectX normal map (`nor_dx`) is used with its green flipped when no OpenGL one
+is in the set. Height and displacement maps are skipped: foliage has no parallax. Wind is
+written into the materials so the asset sways in a foliage rule; the Creator's preview does not sway.
 
 ## Levels
 
@@ -207,10 +260,10 @@ Editor switches levels.
 |---|---|
 | **LOD 1 distance** | Where LOD 1 takes over from LOD 0. |
 | **LOD 1 blades** | Grass: the share of blades LOD 1 keeps (at half the segments), widened to cover. |
-| **LOD 1 leaves** | Tree: the share of leaf cards LOD 1 keeps, grown to cover. LOD 1 also drops the twig level and halves branch sides. |
+| **LOD 1 leaves** | Tree and bush: the share of leaf cards LOD 1 keeps, grown to cover. LOD 1 also drops the twig level and halves branch sides. |
 | **LOD 1 triangles** | Rock: LOD 1's triangles as a fraction of LOD 0. |
 | **LOD 2 distance** | Where LOD 2 takes over. Grass's LOD 2 is three crossed cards showing a picture of the clump. |
-| **LOD 2 leaves** | Tree: the share of cards LOD 2 keeps. LOD 2 keeps only the trunk and first-level branches. |
+| **LOD 2 leaves** | Tree and bush: the share of cards LOD 2 keeps. LOD 2 keeps only the trunk (or stems) and first-level branches. |
 | **LOD 2 triangles** | Rock: LOD 2's triangles as a fraction of LOD 0. |
 | **Cull distance** | Beyond this nothing is drawn. |
 
@@ -239,21 +292,19 @@ is the one the engine uses.
 
 ## File
 
-**Name** is the stem of every exported file.
+**Name** is the stem of every exported file. The list shows what **Download .glb** writes.
 
 ## Textures
 
 | Field | Meaning |
 |---|---|
 | **Texture size** | The generated textures' size. |
-| **Bark texture size** | The bark albedo and normal map's size. |
+| **Bark texture size** | The bark colour, normal and ARM maps' size. |
 | **Leaf texture size** | The leaf atlas's size. |
 
-## Texture overrides
+## Embedded textures
 
-Replace any generated texture with an image of your own. It is resized to the slot's size. A rock's
-albedo is baked into its own six-chart layout, so a tiling photo works but shows seams. **Use
-generated** goes back.
+Every texture the `.glb` files carry, at its export size. Replace any of them in the Materials tab.
 
 ## Using the export in the Editor
 

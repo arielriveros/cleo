@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { ParamForm } from '@cleo/app-kit/params/ParamForm';
-import { Button, Collapsable, PresetMenu, Select } from '@cleo/app-kit/ui';
+import { Button, Select } from '@cleo/app-kit/ui';
+import { PanelHeader, SchemaSections } from '../../app/workspace';
 import { FX_SCHEMA, type FxParams } from '../fxParams';
-import { BAKE_PRESETS, EFFECT_SECTION_PRESETS, type SectionPreset } from '../fxPresets';
+import { BAKE_PRESETS, type SectionPreset } from '../fxPresets';
+import { sectionPresets } from './sectionPresets';
 import { bakeKinds, OUTPUT_LABELS, type FxOutput, type FxOutputKind } from '../generateFx';
 
 // The Bake tab, beside Parameters in the right dock: everything about turning the effect into textures.
-// The bake-side sections (Flipbook, Outputs), the Bake and Export buttons, and a player and atlas view
-// for whichever output is selected. The bake runs its own deterministic simulation from t = 0; the live
+// The bake-side sections (Flipbook, Outputs), the Bake button, and a player and atlas view for whichever
+// output is selected. Export is the toolbar's, as in every Creator mode. The bake runs its own deterministic simulation from t = 0; the live
 // preview keeps going beside it.
 
 export interface BakePanelProps {
@@ -18,10 +19,9 @@ export interface BakePanelProps {
   liveFrames: Uint8Array[];
   running: boolean;
   onBake: () => void;
-  onExport: () => void;
 }
 
-export function BakePanel({ params, setParams, output, liveFrames, running, onBake, onExport }: BakePanelProps) {
+export function BakePanel({ params, setParams, output, liveFrames, running, onBake }: BakePanelProps) {
   const values = { ...params, tileSize: String(params.tileSize) } as unknown as Record<string, unknown>;
   const kinds = output ? (Object.keys(output.outputs) as FxOutputKind[]) : bakeKinds(params);
   const [kind, setKind] = useState<FxOutputKind>('color');
@@ -33,24 +33,13 @@ export function BakePanel({ params, setParams, output, liveFrames, running, onBa
   return (
     <div className='flex flex-col h-full min-h-0'>
       <div className='p-2 overflow-auto shrink-0' style={{ maxHeight: '55%' }}>
-        <div className='flex items-center justify-between pb-1'>
-          <span className='text-ui-sm text-muted'>Bake</span>
-          <PresetMenu label='Bake presets' presets={BAKE_PRESETS}
-                      onApply={(p: SectionPreset<Partial<FxParams>>) => setParams({ ...params, ...p.values })} />
-        </div>
-        {FX_SCHEMA.filter(g => g.side === 'bake').map(group => (
-          <Collapsable key={group.title} title={group.title} persistKey={`cleo_creator_fx_${group.title}`}
-                       right={EFFECT_SECTION_PRESETS[group.title]
-                         ? <PresetMenu presets={EFFECT_SECTION_PRESETS[group.title]}
-                                       onApply={(p: SectionPreset<Partial<FxParams>>) => setParams({ ...params, ...p.values })} />
-                         : undefined}>
-            <ParamForm schema={group.specs} values={values}
-                       onChange={patch => setParams({ ...params, ...(patch as Partial<FxParams>), tileSize: Number(patch.tileSize ?? params.tileSize) })} />
-          </Collapsable>
-        ))}
+        <PanelHeader kind='Bake' name={output ? `${output.frames.length} frames` : 'not baked'} presetLabel='Bake presets'
+                     presets={BAKE_PRESETS} onPreset={(p: SectionPreset<Partial<FxParams>>) => setParams({ ...params, ...p.values })} />
+        <SchemaSections groups={FX_SCHEMA.filter(g => g.side === 'bake')} values={values} persist='cleo_creator_fx'
+                        onChange={patch => setParams({ ...params, ...(patch as Partial<FxParams>), tileSize: Number(patch.tileSize ?? params.tileSize) })}
+                        right={title => sectionPresets(title, params, setParams)} />
         <div className='flex items-center gap-2 pt-2'>
           <Button variant='primary' disabled={running} onClick={onBake}>Bake flipbook</Button>
-          <Button disabled={!output || running} onClick={onExport}>Export</Button>
         </div>
       </div>
       <div className='flex items-center gap-2 px-2 py-1 border-y border-border bg-surface-sunken'>

@@ -23,13 +23,22 @@ The source art in `build/` is gitignored, so this generator is run by hand and i
 | `terrain_textures/dirt_1k` | Dirt (paint-only noise patches and worn ground about the buildings) and Dirt Road (the lesser roads of `DIRT_ROADS` and the forest tracks). |
 | `terrain_textures/clay_plaster_1k`, `coast_sand_02_1k` | Pond Clay under the water and Shore Sand on the bank, painted from the heights about the waterline. |
 | `terrain_textures/concrete_rock_path_1k` | Stone Path: from each building to the main road, and paving round the bonfire. |
-| `foliage/grass_medium_01_1k.gltf` | Three "Meadow Grass" patches, each 5–6 clumps. |
-| `foliage/realistic_pine.glb` | "Pine": 477k triangles, decimated with the editor's QEM into three levels. |
-| `foliage/jacaranda_tree_1k.gltf` | "Jacaranda": 3.9M triangles, brought to about 107k: a tenth of the leaf cards (grown to cover), QEM on the trunk (10%), branches (3.5%) and leaves, and the cards left without a twig dropped; then the pine's ladder and impostor. |
-| `foliage/fern_02_1k.gltf`, `anthurium_botany_01_1k.gltf`, `dry_branches_medium_01_1k.gltf` | Ferns, broadleaf ferns and fallen branches: the Forest Floor's own foliage. |
-| `foliage/wild_rooibos_bush_1k.gltf` | Bushes, scaled 2.6x: forest edges, house walls and fences. |
+| `foliage/rock_moss_set_02_1k.gltf` | The dungeon's rubble (four moss rocks). |
+| `pine_bark_1k.zip`, `jolcham_oak_bark_01_1k.zip` | Scanned bark (colour, normal, ARM) worn by the pines and spruce (the oak set is prepared but no Valley tree wears it now); `prepare.py` writes them to `bark_pine_*` / `bark_oak_*`. |
 
-The Poly Haven downloads may arrive as `.zip` beside these paths; `prepare.py` extracts each once. Their glTF zips leave out the cutout alpha maps, so `prepare.py` fetches the fern's, the jacaranda leaves' and the bush's from Poly Haven on first run.
+The Poly Haven downloads may arrive as `.zip` beside these paths; `prepare.py` extracts each once.
+
+### Plants
+
+No plant is an input: every tree, bush and grass clump is made with the Foliage Creator
+(`applications/creator`). `creatorFoliage.mjs` lists them, each a Creator preset with a seed and a few
+settings: two Scots pines (the belt, the valley stands and about the hamlet and the pond), spruce
+(beyond the rim), two meadow grasses and tall grass, two shrubs and a juniper (forest edges,
+walls and fences), and the Forest Floor's undergrowth (two leafy bushes and boxwood). `genFoliage.ts`
+generates them headless through `vite-node`, with the Creator's own generator, materials and octahedral
+impostor bake, and caches the result in `build/valley_creator/`, keyed by the spec and the generator's
+source. To change a plant, try it in the Creator's Foliage mode and copy its preset, seed and settings
+into `creatorFoliage.mjs`.
 | `props/house` | Old House, decimated to 35%, scaled 1.75x so the knight fits its doors from its raised floor. |
 | `props/long_house` | Long House, from the artist's LOD1, 10.3 m tall so the knight fits its doors from its raised floor. |
 | `props/silo` | Granary. |
@@ -47,7 +56,8 @@ The Poly Haven downloads may arrive as `.zip` beside these paths; `prepare.py` e
 - `layout.mjs` holds every position from the map's technical reference: spawn, pads, roads, gate plaza and sun. Heights are always sampled, never stored here.
 - `heights.mjs` decodes the PNG with the engine's `heightmapIO.ts`.
 - `landscape.mjs` builds the landscape material, the painted masks (seven channels in two slices: trail, forest floor, dirt road, stone path, clay, sand, dirt), and the CPU surface weights. The weights come from the engine's `terrainLayers.ts`, so the pre-baked foliage respects the same rules the shader draws.
-- `foliage.mjs` builds the grass patches, the pine and jacaranda levels, the undergrowth sets and the seeded scatter. Placement is pre-baked because opening a scene never scatters.
+- `creatorFoliage.mjs` lists the plants and generates them with the Foliage Creator (`genFoliage.ts`, through `vite-node`); `build.mjs` turns each one's levels, materials and impostor into a library model, library materials and a foliage rule.
+- `foliage.mjs` holds the library-asset helpers, the dungeon's moss rocks and the seeded scatter. Placement is pre-baked because opening a scene never scatters.
 - `props.mjs` handles the FBX props: assimp to parts, with scaling. Some files carry no unit stamp, so those props are sized to a stated height. It also measures the windmill hub.
 - `water.glsl` / `water.mjs` hold the pond's water: a transparent forward custom material (waves from a generated tiling normal map, Fresnel reflection of the pond's light probe, a sun glint, refraction with depth absorption, shore foam and a soft edge) and its uniforms. `compileCustomWgsl.ts` translates it to WGSL at build time (through `vite-node`), so a published WebGPU game can render it.
 - `presets.ts` resolves the engine presets the valley's look is made of, through `vite-node`: the Sunny 16
@@ -68,7 +78,7 @@ The Poly Haven downloads may arrive as `.zip` beside these paths; `prepare.py` e
 - **Fires** (`examples/scripts/ValleyFireLight.ts`) are linked templates with a tileset flame, embers, sparks that bounce on the floor, and a flickering light. Their flames and embers have an Exposure weight of 0.1, so the camera's exposure barely changes them.
 - **The Dungeon** is held at EV 15, the valley's noon, and its fires are lit for that: the souls content (glyphs, glows, bolts) is tuned for an exposure about that. The Time of Day scales the fires down by day and up at night.
 
-- **Leaves let light through** (Material translucency): broad leaves and fronds 0.5, grass and celandine 0.45, pine needles 0.25; wood, bark and rock none. The trees' far impostors carry the same glow.
+- **Leaves let light through** (Material translucency), at the Foliage Creator's values: broad leaves 0.5, grass 0.45, needles 0.25; bark none. The trees' far impostors carry the same glow.
 - **Exposure volumes** trim the Day–Night metering by where the camera is. The village gets +0.15 stop, the pond −0.25 and the forest stands +0.35; the forest stands are the 40 m cells with 10 or more trees, merged. Inside each house an Interior trim (+0.5, quicker adaptation) wins at priority 1.
 - **The player camera** sits on a 2.4 m arm (1.6 m locked on), sees through trees and the dungeon's pillars, and pulls in for walls and ceilings (`playerCamera` in `build.mjs`).
 

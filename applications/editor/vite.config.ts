@@ -95,6 +95,13 @@ export default mergeConfig(engineConfig, defineConfig({
       // -- a release tarball, say -- still serves them.
       allow: [ENGINE_ROOT],
     },
+    // Cleo Creator lives at /creator/ on this origin (its own dev server, 8081, serves under that base),
+    // so the two apps share IndexedDB and the Creator library syncs into the editor. `ws` carries the
+    // Creator's HMR when its client connects through here.
+    proxy: {
+      // CLEO_CREATOR_PORT: a Creator dev server on another port (a second checkout, a test pair).
+      '/creator': { target: `http://localhost:${process.env.CLEO_CREATOR_PORT ?? 8081}`, ws: true, changeOrigin: true },
+    },
   },
 
   build: {

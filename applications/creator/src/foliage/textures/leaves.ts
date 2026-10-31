@@ -125,19 +125,42 @@ export function leafAtlas(o: LeafAtlasOptions): Image {
     };
 
     if (o.kind === 'needles') {
-      // A brush: needles both sides of the twig, angled forward, shortest at the tip.
-      const count = 70;
-      for (let k = 0; k < count; k++) {
-        const s = 0.04 + 0.92 * (k / count);
+      // A conifer sprig: a twig with alternating side shoots, every shoot a dense bottlebrush of needles
+      // splayed forward on both sides (and some foreshortened, standing out of the card), lighter at the
+      // fresh tips. Dense enough that the card still reads as a tuft at a distance, after mipmapping.
+      const needleW = Math.max(1.8, cell * 0.013);
+      const brush = (x0: number, y0: number, x1: number, y1: number, k0: number) => {
+        const dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len, uy = dy / len;
+        const count = Math.max(8, Math.round(len / (cell * 0.0075)));
+        for (let k = 0; k < count; k++) {
+          const s = (k + r.next()) / count;
+          const px = x0 + dx * s, py = y0 + dy * s;
+          const side = k % 2 === 0 ? 1 : -1;
+          // Foreshortened needles (pointing at or away from the viewer) are drawn short.
+          const depth = r.next() < 0.3 ? 0.35 + 0.3 * r.next() : 1;
+          const ang = (40 + r.signed() * 15) * Math.PI / 180 * side;
+          const nl = cell * (0.11 + 0.03 * r.signed()) * depth * (1 - 0.35 * s * s);
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          const ex = px + (ux * ca - uy * sa) * nl, ey = py + (ux * sa + uy * ca) * nl;
+          // Fresh growth toward the shoot's tip is lighter.
+          const c = mixRgb(leafColor(k0 + k), scaleRgb(leafColor(k0 + k), 1.45), smoothstep(0.6, 1, s) * 0.6);
+          stroke(acc, size, size, px, py, ex, ey, needleW, needleW * 0.4, c, clip);
+        }
+        stroke(acc, size, size, x0, y0, x1, y1, Math.max(1.6, cell * 0.014), 1, stemColor, clip);
+      };
+      const shoots = 4 + r.int(0, 2);
+      for (let k = 0; k < shoots; k++) {
+        const s = 0.2 + 0.6 * (k / shoots) + r.signed() * 0.04;
         const [px, py] = pointAt(s);
         const side = k % 2 === 0 ? 1 : -1;
-        const ang = (55 + r.signed() * 12) * Math.PI / 180;
-        const len = cell * (0.2 + 0.07 * r.signed()) * (1 - 0.45 * s);
-        const dx = Math.sin(ang) * side, dy = -Math.cos(ang);
-        const c = leafColor(k);
-        stroke(acc, size, size, px, py, px + dx * len, py + dy * len, Math.max(1.4, cell * 0.012), 0.6, c, clip);
+        const ang = (38 + r.signed() * 10) * Math.PI / 180;
+        const len = cell * (0.36 - 0.14 * s + 0.04 * r.signed());
+        brush(px, py, px + Math.sin(ang) * side * len, py - Math.cos(ang) * len, k * 200);
       }
-      stroke(acc, size, size, bx, by, ...pointAt(1), Math.max(2, cell * 0.022), 1, stemColor, clip);
+      const [tx, ty] = pointAt(1);
+      brush(bx, by - cell * 0.12, tx, ty, 5000);
+      stroke(acc, size, size, bx, by, bx, by - cell * 0.12, Math.max(2, cell * 0.02), 1.6, stemColor, clip);
     } else {
       const [tx, ty] = pointAt(1);
       stroke(acc, size, size, bx, by, tx, ty, Math.max(1.6, cell * 0.016), 1, stemColor, clip);

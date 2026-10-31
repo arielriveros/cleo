@@ -10,8 +10,8 @@
 // the souls demo's own, imported from tools/soulsDemo/build.mjs and linked to the same templates. What is
 // new is the level: a 2 km landscape from build/valley_height_4097_16bit.png with an eleven-surface landscape
 // material (ground, dirt, rock, snow, a clay and sand pond, painted roads, tracks and stone paths),
-// pre-scattered meadow grass, pines, jacarandas and undergrowth, and four FBX buildings on the pads the
-// heightmap was flattened for.
+// pre-scattered trees, bushes and grass made with the Foliage Creator (creatorFoliage.mjs), and four FBX
+// buildings on the pads the heightmap was flattened for.
 //
 // Positions come from the map's technical reference (layout.mjs); every height is sampled from the
 // heightmap (heights.mjs). The source art is in build/, which is gitignored: this is run by hand and its
@@ -30,15 +30,13 @@ import {
   catmullRom, distanceToPolyline, rimRadius,
 } from './layout.mjs'
 import {
-  DIRT_ROAD_CHANNEL, FOREST_CHANNEL, paintDirtPatches, FOREST_SLOT, MASK_RES, MASK_SLICES, PATH_CHANNEL, ROCKY_DIRT_SLOT, SLOT_CHANNELS, TRAIL_CHANNEL,
+  DIRT_ROAD_CHANNEL, FOREST_CHANNEL, paintDirtPatches, FOREST_SLOT, MASK_RES, MASK_SLICES, PATH_CHANNEL, SLOT_CHANNELS, TRAIL_CHANNEL,
   TRAIL_SLOT, loadLayerMath, paintForestFloor, paintPolyline, paintPond, sampleMask, surfaceWeights, trailMask, valleyTerrainMaterial,
 } from './landscape.mjs'
 import {
-  BRANCH_CULL, BUSH_CULL, BUSH_LODS, FERN_CULL, FLOWER_CULL, GRASS_CULL, PINE_BILLBOARD, PINE_CULL, ROCK_CULL, UNDERGROWTH_LODS,
-  buildFlowerPatches, buildGrassPatches, buildJacaranda, buildMossRocks, buildPine, buildPlantSet, cliffDistanceField, flowerLevels,
-  grassLevels, instancesBlob, jacarandaLevels, jitteredCandidates, layerModels, modelAsset, onGround, onSurface, pineLevels,
-  plantLevels, rng, rockLevels, triangles,
+  buildMossRocks, cliffDistanceField, instancesBlob, jitteredCandidates, layerModels, modelAsset, onGround, onSurface, rng, triangles,
 } from './foliage.mjs'
+import { CREATOR_FOLIAGE, TREE_CULL, generateCreatorFoliage } from './creatorFoliage.mjs'
 import { buildProps } from './props.mjs'
 import { houseColliders } from './houses.mjs'
 import { fitOccluders } from './occluders.mjs'
@@ -131,117 +129,12 @@ function libraryMaterial(key, name, folder, m) {
   return addMaterial(key, name, m)
 }
 
-/**
- * How much of the light behind a leaf comes through it (Material translucency: the back-lit glow added on
- * top of the lit side). The Foliage Creator's defaults: broad leaves and fronds half, grass a little less,
- * needles — dense and waxy — a quarter. Wood, bark and rock none. Every one of these is double-sided, which
- * the glow needs: it is the back face that shows it.
- */
-const TRANSLUCENCY = { leaves: 0.5, grass: 0.45, needles: 0.25 }
-
-const GRASS_MAT = libraryMaterial('grass', 'Meadow Grass', `${FOLIAGE}/Materials`, pbrMaterial({
-  diff: tex('grass_diff.jpg', `${FOLIAGE}/Textures`, 'Grass Base Color'),
-  nor: tex('grass_nor.jpg', `${FOLIAGE}/Textures`, 'Grass Normal'),
-  arm: tex('grass_arm.jpg', `${FOLIAGE}/Textures`, 'Grass ARM'),
-  mask: tex('grass_mask.png', `${FOLIAGE}/Textures`, 'Grass Mask'),
-  side: 'double', castShadow: false, translucency: TRANSLUCENCY.grass,
-  // Soft meadow grass: a fifth of its height at full gust, little stiffness.
-  wind: { windStrength: 0.2, windStiffness: 0.6 },
-}))
-const BARK_MAT = libraryMaterial('pine-bark', 'Pine Bark', `${FOLIAGE}/Materials`, pbrMaterial({
-  diff: tex('pine_bark_diff.jpg', `${FOLIAGE}/Textures`, 'Pine Bark Base Color'),
-  nor: tex('pine_bark_nor.png', `${FOLIAGE}/Textures`, 'Pine Bark Normal'),
-  roughness: 0.85, side: 'double',
-  // A pine layer bends as one plant (the strongest of its materials), so bark and needles share the lean.
-  wind: { windStrength: 0.025, windStiffness: 2.2 },
-}))
-const NEEDLES_MAT = libraryMaterial('pine-needles', 'Pine Needles', `${FOLIAGE}/Materials`, pbrMaterial({
-  diff: tex('pine_needles_diff.jpg', `${FOLIAGE}/Textures`, 'Pine Needles Base Color'),
-  nor: tex('pine_needles_nor.png', `${FOLIAGE}/Textures`, 'Pine Needles Normal'),
-  mask: tex('pine_needles_mask.png', `${FOLIAGE}/Textures`, 'Pine Needles Mask'),
-  roughness: 0.75, side: 'double', translucency: TRANSLUCENCY.needles,
-  // The needles add their own sprig sway and flutter on top of the trunk's sway.
-  wind: { windStrength: 0.025, windStiffness: 2.2, windRole: 'leaves', windFlutter: 0.45 },
-}))
-
-const CELANDINE_SRC = path.join(BUILD, 'foliage', 'celandine_01_1k.gltf')
-const CELANDINE_MAT = libraryMaterial('celandine', 'Celandine', `${FOLIAGE}/Materials`, pbrMaterial({
-  diff: tex(path.join(CELANDINE_SRC, 'textures', 'celandine_01_diff_1k.jpg'), `${FOLIAGE}/Textures`, 'Celandine Base Color'),
-  nor: tex(path.join(CELANDINE_SRC, 'textures', 'celandine_01_nor_gl_1k.jpg'), `${FOLIAGE}/Textures`, 'Celandine Normal'),
-  arm: tex(path.join(CELANDINE_SRC, 'textures', 'celandine_01_arm_1k.jpg'), `${FOLIAGE}/Textures`, 'Celandine ARM'),
-  side: 'double', castShadow: false, translucency: TRANSLUCENCY.grass,
-  // Modelled petals, no cutout: the flowers bend like the grass they grow in.
-  wind: { windStrength: 0.2, windStiffness: 0.6 },
-}))
+// The dungeon's rubble: the scanned moss rocks, no longer scattered on the valley's ground.
 const MOSS_SRC = path.join(BUILD, 'foliage', 'rock_moss_set_02_1k.gltf')
 const MOSS_ROCK_MAT = libraryMaterial('moss-rock', 'Moss Rock', `${FOLIAGE}/Materials`, pbrMaterial({
   diff: tex(path.join(MOSS_SRC, 'textures', 'rock_moss_set_02_diff_1k.jpg'), `${FOLIAGE}/Textures`, 'Moss Rock Base Color'),
   nor: tex(path.join(MOSS_SRC, 'textures', 'rock_moss_set_02_nor_gl_1k.jpg'), `${FOLIAGE}/Textures`, 'Moss Rock Normal'),
   arm: tex('rock_moss_arm.jpg', `${FOLIAGE}/Textures`, 'Moss Rock ARM'),
-}))
-
-/** A Poly Haven plant's own 1k JPEG, shipped as it is. */
-const plantTex = (dir, file, label) => tex(path.join(dir, 'textures', file), `${FOLIAGE}/Textures`, label)
-const JACARANDA_SRC = path.join(BUILD, 'foliage', 'jacaranda_tree_1k.gltf')
-// One tree, bent as one plant like the pine: the wood shares the lean, the leaves add their flutter.
-const JACARANDA_WIND = { windStrength: 0.03, windStiffness: 2 }
-const JACARANDA_MATS = {
-  trunkId: libraryMaterial('jacaranda-trunk', 'Jacaranda Trunk', `${FOLIAGE}/Materials`, pbrMaterial({
-    diff: tex('jacaranda_trunk_diff.jpg', `${FOLIAGE}/Textures`, 'Jacaranda Trunk Base Color'),
-    nor: plantTex(JACARANDA_SRC, 'jacaranda_tree_trunk_nor_gl_1k.jpg', 'Jacaranda Trunk Normal'),
-    arm: plantTex(JACARANDA_SRC, 'jacaranda_tree_trunk_arm_1k.jpg', 'Jacaranda Trunk ARM'),
-    wind: JACARANDA_WIND,
-  })),
-  branchesId: libraryMaterial('jacaranda-branches', 'Jacaranda Branches', `${FOLIAGE}/Materials`, pbrMaterial({
-    diff: tex('jacaranda_branches_diff.jpg', `${FOLIAGE}/Textures`, 'Jacaranda Branches Base Color'),
-    nor: plantTex(JACARANDA_SRC, 'jacaranda_tree_branches_nor_gl_1k.jpg', 'Jacaranda Branches Normal'),
-    arm: plantTex(JACARANDA_SRC, 'jacaranda_tree_branches_arm_1k.jpg', 'Jacaranda Branches ARM'),
-    side: 'double', wind: JACARANDA_WIND,
-  })),
-  leavesId: libraryMaterial('jacaranda-leaves', 'Jacaranda Leaves', `${FOLIAGE}/Materials`, pbrMaterial({
-    diff: tex('jacaranda_leaves_diff.jpg', `${FOLIAGE}/Textures`, 'Jacaranda Leaves Base Color'),
-    nor: plantTex(JACARANDA_SRC, 'jacaranda_tree_leaves_nor_gl_1k.jpg', 'Jacaranda Leaves Normal'),
-    arm: plantTex(JACARANDA_SRC, 'jacaranda_tree_leaves_arm_1k.jpg', 'Jacaranda Leaves ARM'),
-    mask: tex('jacaranda_leaves_mask.png', `${FOLIAGE}/Textures`, 'Jacaranda Leaves Mask'),
-    side: 'double', translucency: TRANSLUCENCY.leaves, wind: { ...JACARANDA_WIND, windRole: 'leaves', windFlutter: 0.5 },
-  })),
-}
-const FERN_SRC = path.join(BUILD, 'foliage', 'fern_02_1k.gltf')
-// Fronds: soft, a little stiffer than the grass, with a flutter at their tips.
-const FERN_WIND = { windStrength: 0.12, windStiffness: 0.9, windRole: 'leaves', windFlutter: 0.3 }
-const FERN_MAT = libraryMaterial('fern', 'Fern', `${FOLIAGE}/Materials`, pbrMaterial({
-  diff: plantTex(FERN_SRC, 'fern_02_diff_1k.jpg', 'Fern Base Color'),
-  nor: plantTex(FERN_SRC, 'fern_02_nor_gl_1k.jpg', 'Fern Normal'),
-  arm: plantTex(FERN_SRC, 'fern_02_arm_1k.jpg', 'Fern ARM'),
-  mask: tex('fern_mask.png', `${FOLIAGE}/Textures`, 'Fern Mask'),
-  side: 'double', castShadow: false, translucency: TRANSLUCENCY.leaves, wind: FERN_WIND,
-}))
-const BROADLEAF_SRC = path.join(BUILD, 'foliage', 'anthurium_botany_01_1k.gltf')
-const BROADLEAF_MAT = libraryMaterial('broadleaf-fern', 'Broadleaf Fern', `${FOLIAGE}/Materials`, pbrMaterial({
-  diff: plantTex(BROADLEAF_SRC, 'anthurium_botany_01_diff_1k.jpg', 'Broadleaf Fern Base Color'),
-  nor: plantTex(BROADLEAF_SRC, 'anthurium_botany_01_nor_gl_1k.jpg', 'Broadleaf Fern Normal'),
-  arm: plantTex(BROADLEAF_SRC, 'anthurium_botany_01_arm_1k.jpg', 'Broadleaf Fern ARM'),
-  // Modelled leaves, no cutout.
-  side: 'double', castShadow: false, translucency: TRANSLUCENCY.leaves, wind: FERN_WIND,
-}))
-const BUSH_SRC = path.join(BUILD, 'foliage', 'wild_rooibos_bush_1k.gltf')
-const BUSH_WIND = { windStrength: 0.06, windStiffness: 1.4 }
-const BUSH_TEX = {
-  diff: plantTex(BUSH_SRC, 'wild_rooibos_bush_diff_1k.jpg', 'Bush Base Color'),
-  nor: plantTex(BUSH_SRC, 'wild_rooibos_bush_nor_gl_1k.jpg', 'Bush Normal'),
-  arm: plantTex(BUSH_SRC, 'wild_rooibos_bush_arm_1k.jpg', 'Bush ARM'),
-}
-const BUSH_WOOD_MAT = libraryMaterial('bush-wood', 'Bush Wood', `${FOLIAGE}/Materials`, pbrMaterial({ ...BUSH_TEX, side: 'double', wind: BUSH_WIND }))
-const BUSH_LEAVES_MAT = libraryMaterial('bush-leaves', 'Bush Leaves', `${FOLIAGE}/Materials`, pbrMaterial({
-  ...BUSH_TEX, mask: tex('rooibos_mask.png', `${FOLIAGE}/Textures`, 'Bush Mask'),
-  side: 'double', translucency: TRANSLUCENCY.leaves, wind: { ...BUSH_WIND, windRole: 'leaves', windFlutter: 0.4 },
-}))
-const BRANCHES_SRC = path.join(BUILD, 'foliage', 'dry_branches_medium_01_1k.gltf')
-const BRANCHES_MAT = libraryMaterial('dry-branches', 'Dry Branches', `${FOLIAGE}/Materials`, pbrMaterial({
-  diff: plantTex(BRANCHES_SRC, 'dry_branches_medium_01_diff_1k.jpg', 'Dry Branches Base Color'),
-  nor: plantTex(BRANCHES_SRC, 'dry_branches_medium_01_nor_gl_1k.jpg', 'Dry Branches Normal'),
-  arm: plantTex(BRANCHES_SRC, 'dry_branches_medium_01_arm_1k.jpg', 'Dry Branches ARM'),
-  castShadow: false,
 }))
 
 const BOARDS = {
@@ -918,95 +811,58 @@ function buildingOccluders() {
 // Foliage
 // =====================================================================================================
 
-const grassPatches = buildGrassPatches(path.join(BUILD, 'foliage', 'grass_medium_01_1k.gltf', 'grass_medium_01_1k.gltf'))
-const pine = buildPine(path.join(BUILD, 'foliage', 'realistic_pine.glb'))
-const flowerPatches = buildFlowerPatches(path.join(CELANDINE_SRC, 'celandine_01_1k.gltf'))
+// Every plant is the Foliage Creator's (creatorFoliage.mjs): generated headless with its LOD ladder, its
+// materials and, for trees, its octahedral impostor, then read back as parts like any other mesh here.
 const mossRocks = buildMossRocks(path.join(MOSS_SRC, 'rock_moss_set_02_1k.gltf'))
-const jacaranda = buildJacaranda(ROOT, path.join(JACARANDA_SRC, 'jacaranda_tree_1k.gltf'))
-log('jacaranda', ['trunk', 'branches', 'leaves'].map(k => `${k} ${triangles([jacaranda[k]])}`).join(', '),
-  `${boundsOf([jacaranda.trunk, jacaranda.branches, jacaranda.leaves]).size.map(v => v.toFixed(1)).join('x')} m`)
-/**
- * A plant set's variants as level-0 parts, each source material given the example's material for it
- * (`[materialId, part name]`); source materials that land on the same one are merged into one part.
- */
-const plantParts = (set, materialOf) => set.map(v => {
-  const groups = new Map()
-  for (const p of v.parts) {
-    const [materialId, name] = materialOf(p.material)
-    if (!groups.has(materialId)) groups.set(materialId, { name, list: [] })
-    groups.get(materialId).list.push(p)
-  }
-  return { ...v, parts: [...groups].map(([materialId, g]) => ({ name: g.name, part: mergeParts(g.list, g.name, 0), materialId })) }
-})
-// Ferns sized from the scan's 0.3-0.45 m to a forest fern's 0.5-0.7 m; the broadleaf ferns a little less.
-const ferns = plantParts(buildPlantSet(path.join(FERN_SRC, 'fern_02_1k.gltf'), 'fern_02',
-  [{ key: 'b', name: 'Fern A' }, { key: 'c', name: 'Fern B' }], 1.6), () => [FERN_MAT, 'Fronds'])
-const broadleafs = plantParts(buildPlantSet(path.join(BROADLEAF_SRC, 'anthurium_botany_01_1k.gltf'), 'anthurium_botany_01',
-  [{ key: 'a', name: 'Broadleaf Fern A' }, { key: 'b', name: 'Broadleaf Fern B' }], 1.2), () => [BROADLEAF_MAT, 'Leaves'])
-// The rooibos is a 0.4-0.55 m shrub; at 2.6x it is the waist-to-shoulder bush the valley is missing.
-// Its glTF materials are twigs, leaves (both cut out of the shared atlas) and the woody base.
-const bushes = plantParts(buildPlantSet(path.join(BUSH_SRC, 'wild_rooibos_bush_1k.gltf'), 'wild_rooibos_bush',
-  [{ key: 'a', name: 'Bush A' }, { key: 'b', name: 'Bush B' }, { key: 'c', name: 'Bush C' }], 2.6),
-  (m) => m === 2 ? [BUSH_WOOD_MAT, 'Wood'] : [BUSH_LEAVES_MAT, 'Leaves'])
-const fallen = plantParts(buildPlantSet(path.join(BRANCHES_SRC, 'dry_branches_medium_01_1k.gltf'), 'dry_branches_medium_01',
-  [{ key: 'a', name: 'Dry Branches A' }, { key: 'b', name: 'Dry Branches B' }]), () => [BRANCHES_MAT, 'Branches'])
-log('foliage read', grassPatches.map(g => `${g.name} ${triangles([g.part])} tris ${boundsOf([g.part]).size.map(v => v.toFixed(2)).join('x')}`).join(', '),
-  `pine ${triangles([pine.bark, pine.needles])} tris ${boundsOf([pine.bark, pine.needles]).size.map(v => v.toFixed(1)).join('x')} m`)
+const creatorPlants = generateCreatorFoliage(ROOT, BUILD, CREATOR_FOLIAGE, log)
 
-const FOLIAGE_PROTOS = [
-  ...grassPatches.map(g => ({
-    key: `grass-${g.key}`, name: g.name, ...grassLevels(ROOT, g, GRASS_MAT), cull: GRASS_CULL,
-    rule: { density: 0.4, minScale: 0.8, maxScale: 1.25, castShadows: false, collision: null }, cellSize: 13,
-  })),
-  {
-    key: 'pine', name: 'Pine', ...pineLevels(ROOT, pine, BARK_MAT, NEEDLES_MAT), cull: PINE_CULL,
-    // Trees are see-through to the player camera (its rig's 'dither' collision mode) where they block it.
-    rule: { density: 0.004, minScale: 0.55, maxScale: 0.95, castShadows: true, cameraDither: true, collision: { shape: 'cylinder', radius: 0.4, height: 8 } },
-    cellSize: 40,
-  },
-  // Celandine: yellow flower clumps through the meadow grass, culled with it.
-  ...flowerPatches.map(f => ({
-    key: `flower-${f.key}`, name: f.name, ...flowerLevels(ROOT, f, CELANDINE_MAT), cull: FLOWER_CULL,
-    rule: { density: 0.04, minScale: 0.8, maxScale: 1.2, castShadows: false, collision: null }, cellSize: 13,
-  })),
-  {
-    key: 'jacaranda', name: 'Jacaranda', ...jacarandaLevels(ROOT, jacaranda, JACARANDA_MATS), cull: PINE_CULL,
-    rule: { density: 0.0012, minScale: 0.5, maxScale: 0.72, castShadows: true, cameraDither: true, collision: { shape: 'cylinder', radius: 0.5, height: 6 } },
-    cellSize: 40,
-  },
-  // The undergrowth: ferns and fallen branches belong to the Forest Floor, the bushes to the ground.
-  ...ferns.map(f => ({
-    key: `fern-${f.key}`, name: f.name, ...plantLevels(ROOT, f.parts, UNDERGROWTH_LODS), cull: FERN_CULL, surface: FOREST_SLOT,
-    rule: { density: 0.05, minScale: 0.8, maxScale: 1.3, castShadows: false, collision: null }, cellSize: 16,
-  })),
-  ...broadleafs.map(f => ({
-    // The scan's 15k triangles a plant are more than a knee-high plant needs; half reads the same.
-    key: `broadleaf-${f.key}`, name: f.name, ...plantLevels(ROOT, f.parts, UNDERGROWTH_LODS, 0.5), cull: FERN_CULL, surface: FOREST_SLOT,
-    rule: { density: 0.015, minScale: 0.8, maxScale: 1.25, castShadows: false, collision: null }, cellSize: 16,
-  })),
-  ...fallen.map(f => ({
-    key: `branches-${f.key}`, name: f.name, ...plantLevels(ROOT, f.parts, UNDERGROWTH_LODS), cull: BRANCH_CULL, surface: FOREST_SLOT,
-    // Lying along the ground they fell on.
-    orientation: 'normal',
-    rule: { density: 0.012, minScale: 0.8, maxScale: 1.4, castShadows: false, collision: null }, cellSize: 16,
-  })),
-  ...bushes.map(f => ({
-    key: `bush-${f.key}`, name: f.name, ...plantLevels(ROOT, f.parts, BUSH_LODS, 0.6), cull: BUSH_CULL,
-    rule: { density: 0.004, minScale: 0.8, maxScale: 1.25, castShadows: true, collision: null }, cellSize: 24,
-  })),
-  // Moss rocks: owned by the Rocky Dirt surface (its `foliageInclude`), not by the ground.
-  ...mossRocks.map(r => ({
-    key: `moss-${r.key}`, name: r.name, ...rockLevels(ROOT, r, MOSS_ROCK_MAT), cull: ROCK_CULL, surface: ROCKY_DIRT_SLOT,
-    // Bedded into the slope they lie on, not standing level on it.
-    orientation: 'normal',
-    rule: {
-      density: 0.0035, minScale: 0.7, maxScale: 1.4, castShadows: true,
-      collision: r.collide ? { shape: 'sphere', radius: 0.7, offsetY: 0.35 } : null,
-    },
-    cellSize: 24,
-  })),
-]
-const protoOf = (key) => FOLIAGE_PROTOS.find(f => f.key === key)
+const TEXTURE_LABELS = { grass: 'Blades', grassCard: 'Clump Card', bark: 'Bark', barkNormal: 'Bark Normal', barkOrm: 'Bark ARM', leaves: 'Leaves', rockAlbedo: 'Albedo', rockNormal: 'Normal' }
+/**
+ * A Creator material (its MaterialSpec) as a library material, its textures the generator's own PNGs:
+ * what importing the Creator's .glb would give -- cutout on the base colour's alpha, double-siding,
+ * translucency and the wind response included.
+ */
+const BARK_LABELS = { bark_pine: 'Pine Bark', bark_oak: 'Oak Bark' }
+/** A scanned bark set (prepare.py `barks`), shared by every tree that wears it. */
+const scannedBark = (prefix) => ({
+  diff: tex(`${prefix}_diff.jpg`, `${FOLIAGE}/Textures`, `${BARK_LABELS[prefix]} Base Color`),
+  nor: tex(`${prefix}_nor.png`, `${FOLIAGE}/Textures`, `${BARK_LABELS[prefix]} Normal`),
+  arm: tex(`${prefix}_arm.jpg`, `${FOLIAGE}/Textures`, `${BARK_LABELS[prefix]} ARM`),
+})
+const SCANNED_BARK = Object.fromEntries([...new Set(CREATOR_FOLIAGE.map(s => s.bark).filter(Boolean))].map(b => [b, scannedBark(b)]))
+function creatorMaterial({ spec, manifest, dir }, key, m) {
+  const texOf = (t) => t ? tex(path.join(dir, manifest.textures[t]), `${FOLIAGE}/Textures`, `${spec.name} ${TEXTURE_LABELS[t] ?? t}`) : undefined
+  // A tree with scanned bark wears it in place of the generated maps; its roughness comes from the ARM.
+  const scanned = key === 'bark' && spec.bark ? SCANNED_BARK[spec.bark] : null
+  return libraryMaterial(`creator:${spec.key}:${key}`, `${spec.name} ${m.name}`, `${FOLIAGE}/Materials`, pbrMaterial({
+    // Every channel the Creator writes: colour, normal, and AO / roughness / metallic packed into one map.
+    ...(scanned ?? { diff: texOf(m.baseColorTexture), nor: texOf(m.normalTexture), arm: texOf(m.ormTexture) }),
+    roughness: scanned ? 1 : m.roughness, tint: scanned ? [1, 1, 1] : m.baseColor.slice(0, 3),
+    side: m.doubleSided ? 'double' : 'front', castShadow: spec.rule.castShadows, wind: m.wind,
+    ...(m.alphaCutoff ? { alphaCutoff: m.alphaCutoff } : {}),
+    ...(m.translucency ? { translucency: m.translucency } : {}),
+    ...(m.metallic ? { metallic: m.metallic } : {}),
+    ...(m.emissive ? { emissiveFactor: m.emissive, emissiveIntensity: m.emissiveIntensity ?? 1 } : {}),
+  }))
+}
+
+const FOLIAGE_PROTOS = creatorPlants.map(plant => {
+  const { spec, manifest } = plant
+  const materialIds = Object.fromEntries(Object.entries(manifest.materials).map(([k, m]) => [k, creatorMaterial(plant, k, m)]))
+  const c = manifest.collider
+  return {
+    key: spec.key, name: spec.name, group: spec.group, kind: spec.kind, plant,
+    levels: plant.levels.map(l => l.parts.map(part => ({ name: part.name, part, materialId: materialIds[part.material] }))),
+    distances: plant.levels.slice(1).map(l => l.distance), cull: manifest.cullDistance,
+    // The undergrowth belongs to the Forest Floor (its own foliageInclude); everything else to the ground.
+    surface: spec.group === 'undergrowth' ? FOREST_SLOT : undefined,
+    // The Creator's trunk fit, a little wider so the camera and the player keep off the bark.
+    rule: { ...spec.rule, collision: c?.shape === 'cylinder'
+      ? { shape: 'cylinder', radius: Math.round(Math.max(0.25, c.radius * 1.3) * 1000) / 1000, height: Math.round(c.height * 1000) / 1000 } : null },
+    cellSize: spec.cellSize,
+  }
+})
+const ofGroup = (group) => FOLIAGE_PROTOS.filter(f => f.group === group)
 log('foliage LODs', FOLIAGE_PROTOS.map(f => `${f.name} ${f.levels.map(l => triangles(l.map(x => x.part))).join('/')}`).join(', '))
 
 const foliageAssets = FOLIAGE_PROTOS.map(f => modelAsset({
@@ -1014,110 +870,34 @@ const foliageAssets = FOLIAGE_PROTOS.map(f => modelAsset({
   cullDistance: f.cull, materialJson: matJson, vars, node,
 }))
 
-// The pine's OCTAHEDRAL impostor: 8 x 8 views over the hemisphere, unlit albedo plus model-space normals,
-// baked offline by the engine's own baker (tools/valley/bakeOctahedral.ts runs src/terrain/octahedralBake.ts,
-// the code behind the editor's "Bake impostor"). Lit by the scene like the mesh, and right from every side
-// and from above, so it can take over far closer than the flat card it replaced. Registered under the
-// editor's own ids for it, so a re-bake in the terrain material REPLACES these rather than adding more.
-const IMPOSTOR_FRAMES = 8
-const IMPOSTOR_FRAME_SIZE = 256
-const IMPOSTOR_NORMAL_FRAME_SIZE = 128
-const IMPOSTOR_SIZE = IMPOSTOR_FRAMES * IMPOSTOR_FRAME_SIZE
-function bakeImpostor(asset, level, materials) {
-  const dir = path.join(BUILD, 'valley_impostor')
-  fs.mkdirSync(dir, { recursive: true })
-  const raw = path.join(ROOT, 'tools', 'valley', 'rawimage.py')
-  const python = (args) => {
-    const res = spawnSync('python', [raw, ...args], { encoding: 'utf8' })
-    if (res.status !== 0) throw new Error(`rawimage ${args[0]} failed:\n${res.stderr}`)
-    return res.stdout
-  }
-  const decoded = new Map()
-  const decode = (file) => {
-    if (!decoded.has(file)) {
-      const out = path.join(dir, `${file}.rgba`)
-      decoded.set(file, { file: out, ...JSON.parse(python(['decode', path.join(PREPARED, file), out])) })
-    }
-    return decoded.get(file)
-  }
-  const parts = level.map(({ name, part, materialId }, i) => {
-    const write = (suffix, arr) => {
-      const file = path.join(dir, `${asset.name}-${i}.${suffix}`)
-      fs.writeFileSync(file, Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength))
-      return file
-    }
-    const m = materials[materialId]
-    return {
-      name,
-      positions: write('pos', Float32Array.from(part.positions)),
-      normals: write('nrm', Float32Array.from(part.normals)),
-      uvs: write('uv', Float32Array.from(part.uvs)),
-      indices: write('idx', Uint32Array.from(part.indices)),
-      diffuse: decode(m.diffuse),
-      mask: m.mask ? decode(m.mask) : null,
-      // The needles' material cutoff, so the baked holes are the ones the mesh shows.
-      cutoff: m.mask ? 0.5 : 0,
-    }
-  })
-  const albedoRaw = path.join(dir, `${asset.name}_impostor.rgba`)
-  const normalRaw = path.join(dir, `${asset.name}_impostorNormal.rgba`)
-  const request = path.join(dir, `${asset.name}.json`)
-  fs.writeFileSync(request, JSON.stringify({
-    frames: IMPOSTOR_FRAMES, frameSize: IMPOSTOR_FRAME_SIZE, normalFrameSize: IMPOSTOR_NORMAL_FRAME_SIZE, supersample: 2,
-    albedoOut: albedoRaw, normalOut: normalRaw, parts,
-  }))
-  const res = spawnSync(process.platform === 'win32' ? 'npx.cmd' : 'npx',
-    ['vite-node', '--config', 'vitest.config.ts', 'tools/valley/bakeOctahedral.ts', request],
-    { cwd: ROOT, encoding: 'utf8', shell: process.platform === 'win32', maxBuffer: 64 << 20 })
-  if (res.status !== 0) throw new Error(`impostor bake failed:\n${res.stderr}`)
-  const report = JSON.parse(res.stdout.slice(res.stdout.indexOf('{')).trim().split('\n').pop())
-  const albedo = path.join(dir, `${asset.name}_impostor.png`)
-  const normal = path.join(dir, `${asset.name}_impostorNormal.png`)
-  python(['encode', albedoRaw, String(report.albedoSize), String(report.albedoSize), albedo])
-  python(['encode', normalRaw, String(report.normalSize), String(report.normalSize), normal])
-  // Clamp-wrapped (the default): repeat would blend the atlas's outer frames into its opposite edge.
+// The trees' OCTAHEDRAL impostors, baked by the Creator from each tree's last mesh level (the one they
+// take over from, so the hand-over does not pop) with the engine's own baker. Registered under the
+// editor's ids for them, so a re-bake in the terrain material REPLACES these rather than adding more;
+// clamp-wrapped (the default): repeat would blend the atlas's outer frames into its opposite edge.
+FOLIAGE_PROTOS.forEach((f, i) => {
+  const imp = f.plant.manifest.impostor
+  if (!imp) return
+  const asset = foliageAssets[i]
   const texId = `${asset.id}__impostor`, normalId = `${asset.id}__impostorNormal`
-  textures.add(texId, albedo, { mipMap: true }, 'image/png')
-  textures.add(normalId, normal, { mipMap: true }, 'image/png')
+  textures.add(texId, path.join(f.plant.dir, imp.albedo), { mipMap: true }, 'image/png')
+  textures.add(normalId, path.join(f.plant.dir, imp.normal), { mipMap: true }, 'image/png')
   TEXTURE_ENTRIES.push({ folder: `${FOLIAGE}/Textures`, name: `${asset.name} Impostor`, id: texId, ext: 'png' })
   TEXTURE_ENTRIES.push({ folder: `${FOLIAGE}/Textures`, name: `${asset.name} Impostor Normals`, id: normalId, ext: 'png' })
-  log('impostor', `${asset.name}: ${IMPOSTOR_FRAMES}x${IMPOSTOR_FRAMES} views, r ${report.info.radius.toFixed(1)} m, ` +
-    `${Math.round(report.coverage * 100)}% covered, ${report.ms} ms`)
-  return { textureId: texId, textures: { normal: normalId }, octahedral: report.info }
-}
-const PINE_INDEX = FOLIAGE_PROTOS.findIndex(f => f.key === 'pine')
-const JACARANDA_INDEX = FOLIAGE_PROTOS.findIndex(f => f.key === 'jacaranda')
-const FLOWER_NAMES = flowerPatches.map(f => f.name)
-// From the LAST mesh level, the one it takes over from: baked from the full tree it came out denser and
-// darker than the sparse level beside it, and the hand-over at PINE_BILLBOARD showed as a pop.
-const PINE_LEVELS = FOLIAGE_PROTOS[PINE_INDEX].levels
-const PINE_IMPOSTOR = bakeImpostor(foliageAssets[PINE_INDEX], PINE_LEVELS[PINE_LEVELS.length - 1], {
-  [BARK_MAT]: { diffuse: 'pine_bark_diff.jpg' },
-  [NEEDLES_MAT]: { diffuse: 'pine_needles_diff.jpg', mask: 'pine_needles_mask.png' },
+  f.billboard = { textureId: texId, textures: { normal: normalId }, octahedral: imp.info, distance: imp.distance }
+  f.impostorSize = imp.albedoSize
 })
-FOLIAGE_PROTOS[PINE_INDEX].billboard = { ...PINE_IMPOSTOR, distance: PINE_BILLBOARD }
-const JACARANDA_LEVELS = FOLIAGE_PROTOS[JACARANDA_INDEX].levels
-const JACARANDA_IMPOSTOR = bakeImpostor(foliageAssets[JACARANDA_INDEX], JACARANDA_LEVELS[JACARANDA_LEVELS.length - 1], {
-  [JACARANDA_MATS.trunkId]: { diffuse: 'jacaranda_trunk_diff.jpg' },
-  [JACARANDA_MATS.branchesId]: { diffuse: 'jacaranda_branches_diff.jpg' },
-  [JACARANDA_MATS.leavesId]: { diffuse: 'jacaranda_leaves_diff.jpg', mask: 'jacaranda_leaves_mask.png' },
-})
-FOLIAGE_PROTOS[JACARANDA_INDEX].billboard = { ...JACARANDA_IMPOSTOR, distance: PINE_BILLBOARD }
-const GRASS_NAMES = grassPatches.map(g => g.name)
 const RULES = FOLIAGE_PROTOS.map((f, i) => ({
   kind: 'mesh', id: id(`rule:${f.key}`), name: f.name, modelId: foliageAssets[i].id,
   density: f.rule.density, densityUnit: 'm2', minScale: f.rule.minScale, maxScale: f.rule.maxScale,
-  cullDistance: f.cull, billboard: f.billboard ?? null, ...(f.billboard ? { impostorSize: IMPOSTOR_SIZE } : {}),
+  cullDistance: f.cull, billboard: f.billboard ?? null, ...(f.billboard ? { impostorSize: f.impostorSize } : {}),
   castShadows: f.rule.castShadows, collision: f.rule.collision,
   ...(f.rule.cameraDither ? { cameraDither: true } : {}),
-  ...(f.orientation ? { orientation: f.orientation } : {}),
 }))
 
-// Ground rules on the Ground; the moss rocks on the Rocky Dirt and the undergrowth on the Forest Floor
-// that carry them. Every painted road, path and the pond keep the small plants off.
-const SMALL_PLANTS = FOLIAGE_PROTOS.filter(f => !['pine', 'jacaranda'].includes(f.key) && !f.key.startsWith('moss-')).map(f => f.name)
+// Ground rules on the Ground, the undergrowth on the Forest Floor that carries it. Every painted road,
+// path and the pond keep the small plants (grass and bushes) off.
+const SMALL_PLANTS = FOLIAGE_PROTOS.filter(f => f.kind !== 'tree').map(f => f.name)
 const terrainMaterial = valleyTerrainMaterial(TERRAIN_TEX, RULES.filter((_, i) => !FOLIAGE_PROTOS[i].surface), SMALL_PLANTS, {
-  rockFoliage: RULES.filter((_, i) => FOLIAGE_PROTOS[i].surface === ROCKY_DIRT_SLOT),
   forestFoliage: RULES.filter((_, i) => FOLIAGE_PROTOS[i].surface === FOREST_SLOT),
 })
 /** Index of a slot's surface in `surfaceWeights` (0 is the ground). */
@@ -1203,17 +983,36 @@ const clear = (x, z, pad = 0) => keepClear.every(c => Math.hypot(x - c.x, z - c.
 const inPlaza = (x, z) => z < -112 && Math.abs(x) < 16
 const inValley = (x, z) => heights.heightAt(x, z) < 25 && Math.hypot(x, z) < 200 && cliffDistance(x, z) > 2
 
-/** Every tree in the valley (pines in the belt and the stands, and jacarandas), for the forest volumes. */
+/** Every tree in the valley (pines in the belt, the stands and about the hamlet), for the forest volumes. */
 const TREE_POINTS = []
+
+/** `points` dealt among `kinds` at random, weighted by each one's rule density. */
+function deal(points, kinds, random) {
+  const per = kinds.map(() => [])
+  const total = kinds.reduce((sum, f) => sum + f.rule.density, 0)
+  for (const p of points) {
+    let pick = random() * total, k = 0
+    while (k < kinds.length - 1 && pick > kinds[k].rule.density) { pick -= kinds[k].rule.density; k++ }
+    per[k].push(p)
+  }
+  return per
+}
 
 function scatter() {
   const layers = []
   const counts = {}
+  const add = (kinds, per, seed, sink) => per.forEach((pts, k) => {
+    counts[kinds[k].name] = pts.length
+    layers.push({ proto: kinds[k], points: pts, seed: seed + k, sink })
+  })
   // Pines FIRST: the forest floor is painted where they stand, and everything after reads that mask.
-  // A dense belt at the cliff foot, a few stands in the valley, and sparse forest beyond the rim.
+  // A dense belt at the cliff foot and a few stands in the valley (the pine variants, dealt at random),
+  // and sparse spruce beyond the rim.
   {
     const random = rng(0x914e)
-    const allowed = onGround(math, terrainMaterial, mask, heights, 'Pine')
+    const pines = ofGroup('pine'), highland = ofGroup('highland')
+    const allowed = onGround(math, terrainMaterial, mask, heights, pines[0].name)
+    const highAllowed = onGround(math, terrainMaterial, mask, heights, highland[0].name)
     const roadsClear = (x, z, d) => pathDistance(x, z) > d
     const belt = jitteredCandidates(random, { minX: -280, maxX: 280, minZ: -280, maxZ: 280 }, 0.02, (x, z) => {
       const d = cliffDistance(x, z)
@@ -1225,52 +1024,45 @@ function scatter() {
         && Math.hypot(x - SPAWN.x, z - SPAWN.z) > 18 && allowed(x, z))
     const beyond = jitteredCandidates(random, { minX: -650, maxX: 650, minZ: -650, maxZ: 650 }, 0.0014, (x, z) => {
       const h = heights.heightAt(x, z)
-      return h > 55 && h < 210 && cliffDistance(x, z) > 6 && heights.slopeAt(x, z) < 28 && allowed(x, z)
+      return h > 55 && h < 210 && cliffDistance(x, z) > 6 && heights.slopeAt(x, z) < 28 && highAllowed(x, z)
     })
-    const pts = [...belt, ...stands, ...beyond]
-    TREE_POINTS.push(...belt, ...stands)
-    counts.Pine = `${pts.length} (belt ${belt.length}, valley ${stands.length}, beyond ${beyond.length})`
-    layers.push({ proto: protoOf('pine'), points: pts, seed: 0x9150, sink: 0.25 })
-    // The leaf litter under them: the Forest Floor surface's mask channel.
-    paintForestFloor(mask, pts)
+    const pts = [...belt, ...stands]
 
-    // Jacarandas: broadleaf stands about the hamlet and the pond, among the meadows the pines leave open,
-    // and up the lower slopes around them (the valley floor proper is small).
-    const jacarandaAllowed = onGround(math, terrainMaterial, mask, heights, 'Jacaranda')
-    // A fine candidate grid, thinned by a spacing test, so the valley's small floor still gets its stands.
-    const jac = []
+    // More pines about the hamlet and the pond, among the meadows the stands leave open, and up the lower
+    // slopes around them (the valley floor proper is small). A fine candidate grid, thinned by a spacing
+    // test, so the valley's small floor still gets its trees.
+    const placed = []
     jitteredCandidates(rng(0x1ac0), { minX: -170, maxX: 170, minZ: -170, maxZ: 170 }, 0.02, (x, z, r) =>
       r() < 0.5 && heights.heightAt(x, z) < 45 && heights.slopeAt(x, z) < 24 && cliffDistance(x, z) > 10
         && clear(x, z, 6) && roadsClear(x, z, 6) && !inPlaza(x, z)
         && Math.min(Math.hypot(x - HAMLET.x, z - HAMLET.z), Math.hypot(x - POND.x, z - POND.z)) < 130
-        && Math.hypot(x - SPAWN.x, z - SPAWN.z) > 18 && pts.every(([px, pz]) => Math.hypot(x - px, z - pz) > 9)
-        && jac.every(([jx, jz]) => Math.hypot(x - jx, z - jz) > 13) && jacarandaAllowed(x, z) && jac.push([x, z]) > 0)
-    counts.Jacaranda = jac.length
-    TREE_POINTS.push(...jac)
-    layers.push({ proto: protoOf('jacaranda'), points: jac, seed: 0x1ac1, sink: 0.2 })
-    // A wider crown, a wider litter.
-    paintForestFloor(mask, jac, 3.5, 7.5)
+        && Math.hypot(x - SPAWN.x, z - SPAWN.z) > 18 && pts.every(([px, pz]) => Math.hypot(x - px, z - pz) > 8)
+        && placed.every(([jx, jz]) => Math.hypot(x - jx, z - jz) > 10) && allowed(x, z) && placed.push([x, z]) > 0)
+
+    TREE_POINTS.push(...pts, ...placed)
+    add(pines, deal([...pts, ...placed], pines, rng(0x9151)), 0x9150, 0.25)
+    add(highland, deal(beyond, highland, rng(0x9161)), 0x9160, 0.25)
+    counts.pines = `belt ${belt.length}, valley ${stands.length + placed.length}, beyond ${beyond.length}`
+    // The needle litter under them: the Forest Floor surface's mask channel.
+    paintForestFloor(mask, [...pts, ...beyond])
+    paintForestFloor(mask, placed, 3.5, 7.5)
   }
-  // Grass and celandine share the valley floor: one jittered grid, each candidate given to one patch.
+  // Grass: one jittered grid over the valley floor, each candidate given to one kind by its density.
   {
     const random = rng(0x6a55)
-    const kinds = [...GRASS_NAMES, ...FLOWER_NAMES].map(name => FOLIAGE_PROTOS.find(f => f.name === name))
+    const kinds = ofGroup('grass')
     const allowed = kinds.map(f => onGround(math, terrainMaterial, mask, heights, f.name))
     const per = kinds.map(() => [])
     const total = kinds.reduce((sum, f) => sum + f.rule.density, 0)
     jitteredCandidates(random, { minX: -200, maxX: 200, minZ: -200, maxZ: 200 }, total, (x, z, r) => {
       if (!inValley(x, z) || inPlaza(x, z) || !clear(x, z) || heights.slopeAt(x, z) > 30) return false
-      // Weighted by each prototype's own density, so the flowers stay a sprinkle in the grass.
       let pick = r() * total, k = 0
       while (k < kinds.length - 1 && pick > kinds[k].rule.density) { pick -= kinds[k].rule.density; k++ }
       if (!allowed[k](x, z)) return false
       per[k].push([x, z])
       return true
     })
-    per.forEach((pts, k) => {
-      counts[kinds[k].name] = pts.length
-      layers.push({ proto: kinds[k], points: pts, seed: 0x6a60 + k, sink: 0.02 })
-    })
+    add(kinds, per, 0x6a60, 0.02)
   }
   // The undergrowth on the Forest Floor: only where the litter clearly wins, as the engine places it.
   {
@@ -1289,15 +1081,12 @@ function scatter() {
       per[k].push([x, z])
       return true
     })
-    per.forEach((pts, k) => {
-      counts[kinds[k].name] = pts.length
-      layers.push({ proto: kinds[k], points: pts, seed: 0xf0f0 + k, sink: kinds[k].orientation ? 0.03 : 0.05 })
-    })
+    add(kinds, per, 0xf0f0, 0.05)
   }
   // Bushes on the ground: at the forest's edge, against the buildings and along the fences, a few in the open.
   {
     const random = rng(0xb05e)
-    const kinds = FOLIAGE_PROTOS.filter(f => f.key.startsWith('bush-'))
+    const kinds = ofGroup('bush')
     const allowed = kinds.map(f => onGround(math, terrainMaterial, mask, heights, f.name))
     const per = kinds.map(() => [])
     const fenceLines = FENCES.map(f => catmullRom(f, 1))
@@ -1314,30 +1103,7 @@ function scatter() {
       per[k].push([x, z])
       return true
     })
-    per.forEach((pts, k) => {
-      counts[kinds[k].name] = pts.length
-      layers.push({ proto: kinds[k], points: pts, seed: 0xb060 + k, sink: 0.05 })
-    })
-  }
-  // Moss rocks on the Rocky Dirt: only where that surface clearly wins, as the engine places them.
-  {
-    const random = rng(0x2c0c)
-    const rocks = FOLIAGE_PROTOS.filter(f => f.surface === ROCKY_DIRT_SLOT)
-    const surface = surfaceIndex(ROCKY_DIRT_SLOT)
-    const allowed = rocks.map(f => onSurface(math, terrainMaterial, mask, heights, f.name, surface))
-    const per = rocks.map(() => [])
-    const total = rocks.reduce((sum, f) => sum + f.rule.density, 0)
-    jitteredCandidates(random, { minX: -260, maxX: 260, minZ: -260, maxZ: 260 }, total, (x, z, r) => {
-      if (inPlaza(x, z) || !clear(x, z, 2) || pathDistance(x, z) < 4) return false
-      const k = Math.floor(r() * rocks.length)
-      if (!allowed[k](x, z)) return false
-      per[k].push([x, z])
-      return true
-    })
-    per.forEach((pts, k) => {
-      counts[rocks[k].name] = pts.length
-      layers.push({ proto: rocks[k], points: pts, seed: 0x2c10 + k, sink: 0.1 })
-    })
+    add(kinds, per, 0xb060, 0.05)
   }
   log('scatter', JSON.stringify(counts))
   return layers.map(({ proto, points, seed, sink }) => {
@@ -1353,7 +1119,6 @@ function scatter() {
       ...(base.length > 1 ? { models: base } : {}),
       lods: lods.map((models, k) => ({ models, distance: proto.distances[k] })),
       ...(proto.billboard ? { billboard: proto.billboard } : {}),
-      ...(proto.orientation ? { orientation: proto.orientation } : {}),
       cullDistance: proto.cull,
       ...(proto.rule.castShadows ? { castShadows: true } : {}),
       ...(proto.rule.cameraDither ? { cameraDither: true } : {}),
@@ -2071,7 +1836,7 @@ function valleyScene() {
     exposure: REFERENCE_ILLUMINANCE / (1.2 * 2 ** 15),
     // The torches' cube shadows, for the nearest four: what makes the hamlet's night.
     pointShadowsEnabled: true, pointShadowResolution: 512, pointShadowDistance: 40,
-    foliageCullDistance: PINE_CULL, foliageCellSize: 13,
+    foliageCullDistance: TREE_CULL, foliageCellSize: 13,
     terrainLodEnabled: true, terrainLodDistance1: 150, terrainLodDistance2: 400, terrainLodStep1: 2, terrainLodStep2: 4,
     // A 2 km valley seen to 3 km: four detailed cascades over the first 150 m, then the far cascade
     // carries the ridges' and hills' shadows out to 1.5 km.
@@ -2117,7 +1882,7 @@ const result = souls.writeProject({
   buildScene: valleyScene,
   example: {
     name: PROJECT_NAME,
-    description: 'A souls-like on a 2 km mountain valley with a day and night cycle: stamina combat, rolls, lock-on, bonfires and Estus, on landscape layers for ground, rock, snow, forest floor and trails, meadow grass and flowers, pine forest, moss rocks, a torch-lit hamlet with breakable barrels, and a skull cave down into a three-level dungeon with a boss in its throne arena.',
+    description: 'A souls-like on a 2 km mountain valley with a day and night cycle: stamina combat, rolls, lock-on, bonfires and Estus, on landscape layers for ground, rock, snow, forest floor and trails, meadow grass, pine and spruce forest and bushes made with the Foliage Creator, a torch-lit hamlet with breakable barrels, and a skull cave down into a three-level dungeon with a boss in its throne arena.',
     order: 0,
   },
   models: [...CHARACTER_MODELS, ...propAssets, ...foliageAssets, ...dungeon.models],
@@ -2174,9 +1939,9 @@ const result = souls.writeProject({
 
 const sceneFile = path.join(OUT, 'scenes', `${SCENE_ID}.json`)
 const sceneBytes = fs.statSync(sceneFile).size
-// Format 1 is what writeProject can author; format 2 is what can be checked in. The pine alone is ~60 MB
-// of decimal text, stored in the model library, the terrain material and the scene's foliage layer, which
-// put the scene file past GitHub's 100 MB limit. Packing interns it once, as binary, in split parts.
+// Format 1 is what writeProject can author; format 2 is what can be checked in. Every plant's levels are
+// stored in the model library, the terrain material and the scene's foliage layer as decimal text;
+// packing interns them once, as binary, in split parts, under GitHub's 100 MB file limit.
 const largest = await packFormat2(OUT)
 log(`${PROJECT_NAME} written to applications/editor/public/examples/valley/`)
 log(`  templates ${result.templates} · materials ${result.materials} · textures ${result.textureCount} · scene ${mb(sceneBytes)} unpacked · largest file ${mb(largest)}`)

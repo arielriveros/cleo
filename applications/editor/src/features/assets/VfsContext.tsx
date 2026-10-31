@@ -7,6 +7,7 @@ import {
   EMPTY_VFS, LibSnapshot, VfsEntry, VfsIndex, vfsKey,
   AssetKind, indexByPath, reconcileVfs, repairVfs, baseOf, stemOf,
 } from '../../utils/vfs'
+import { pinKey, useCreatorPins } from '../creator/creatorPins'
 import { AssetDeps, sizeOfAsset } from './assetKinds'
 import { reconcileTextureAssets } from '../../utils/textureAssets'
 import { isLodTextureId } from '../../utils/lodTextures'
@@ -63,6 +64,7 @@ export function useVfs(): VfsContextValue {
 
 export function VfsProvider({ children }: { children: React.ReactNode }) {
   const engine = useCleoEngine()
+  const creatorPins = useCreatorPins()
   const { eventEmitter, isSceneReady, texturesPreloaded, audioPreloaded, sceneList } = engine
   // The five libraries come from the split-out slice, so reconciliation re-runs on library changes only.
   const {
@@ -127,6 +129,8 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
     // Names from the explorer's own entries where it has them: a bundle's index names every texture, and
     // the records minted here would otherwise carry the hash ids and drag the entries' names along.
     const named = new Map<string, string>()
+    // A texture the Creator sync registered from a .glb has a hash id; it gives the readable name.
+    for (const [id, name] of creatorPins.names) { named.set(`texture:${id}`, name); named.set(`image:${id}`, `${name}.png`) }
     for (const e of vfsRef.current.entries) {
       if (e.kind === 'texture') named.set(`texture:${e.assetId}`, stemOf(baseOf(e.path)))
       else if (e.kind === 'image') named.set(`image:${e.assetId}`, baseOf(e.path))
@@ -315,10 +319,12 @@ export function VfsProvider({ children }: { children: React.ReactNode }) {
         // `isSceneReady` on top of it: restoring the initial scene registers more textures.
         pruneTextures: assetsLoaded && texturesPreloaded && isSceneReady,
         sizeOf: (kind: AssetKind, assetId: string) => sizeOfAsset(kind, assetId, depsRef.current),
+        // The Creator sync's assets live in /Creator/<Kind>/<Name> (creator/creatorPins.ts).
+        pinnedFolder: (kind: AssetKind, assetId: string) => creatorPins.folders.get(pinKey(kind, assetId)),
       })
       return changed ? next : prev
     })
-  }, [vfsLoaded, libs, assetsLoaded, librariesPopulated, texturesPreloaded, isSceneReady])
+  }, [vfsLoaded, libs, assetsLoaded, librariesPopulated, texturesPreloaded, isSceneReady, creatorPins])
 
   // Persist, debounced: texture registration is chatty while a project or a mesh import loads.
   useEffect(() => {

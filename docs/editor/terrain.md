@@ -291,6 +291,11 @@ live on the landscape and applied as one undo step. **Cancel** puts the ground b
 painting and the foliage stay either way. A 16-bit file Cleo exported opens with its range already
 filled in.
 
+**From Creator ▾** — beside Import, when [Cleo Creator](../creator/index.md#saved-assets) has saved
+worlds: the world's 16-bit heightmap, with the range it was generated at filled in, into the same
+dialog. The landscape remembers the world; when it changes in the Creator, the inspector shows
+**Re-apply**, which opens the dialog again with the new heights. Nothing is replaced until you confirm.
+
 Export writes 16-bit PNG or RAW R16 and records the range in the file name, so a round trip through
 an external tool keeps absolute heights. An 8-bit PNG export is normalised to the terrain's own range
 and records none.

@@ -3,7 +3,9 @@
 Build a landscape from a stack of landform layers, erode it, and export the heightmap. The stack is
 applied top to bottom, each layer reading the height the ones above it made, and nothing is baked:
 every change re-evaluates the whole stack. The live preview runs at up to 257 x 257 on a real engine
-landscape in the viewport and on the **Map**; **Generate & export** runs the full resolution.
+landscape in the viewport and on the **Map**; **Generate & export** (toolbar) runs the full resolution.
+**Layers** is the left dock; **Parameters** (world settings and the selected layer or pass, with the
+world presets in its header) and **Export** are the right dock's tabs.
 
 Heights are a fraction of the **Height scale** (0 the lowest ground, 1 a full-height peak; layers may
 overshoot and erosion may cut below 0). Positions are map coordinates, 0 to 1 across the world, with
@@ -15,11 +17,15 @@ The frame every layer and pass works in.
 
 | Field | Meaning |
 |---|---|
-| **Resolution** | Samples per side of the export, 2^n + 1 to match the engine's terrain grids. |
 | **World size** | World units across the map. |
 | **Height scale** | World units of a height of 1. |
 | **Seed** | The world's seed. Every layer and erosion pass derives its randomness from it; change it for a new variation of the same design. |
 | **Sea level** | Normalised height of the sea, for the map's water tint. |
+
+## Layers
+
+The stack, top to bottom: the **Landforms** and then the **Erosion** passes. Click one to edit it in
+Parameters; the toggle switches it off without removing it.
 
 ## Landforms
 
@@ -53,6 +59,17 @@ Run after the landforms, in order.
 
 Erosion works in grid cells, so the same settings erode a 2049 export more finely than the 257 preview;
 check the full-resolution result before committing to a look.
+
+## Resolution
+
+| Field | Meaning |
+|---|---|
+| **Resolution** | Samples per side of the export, 2^n + 1 to match the engine's terrain grids. |
+
+## File
+
+What **Generate & export** writes: the 16-bit heightmap as PNG and RAW, one PNG per mask, and
+`world.json` with the heights and settings.
 
 ## Masks
 

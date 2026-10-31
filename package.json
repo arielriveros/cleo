@@ -21,14 +21,15 @@
     "editor:dev": "node tools/ensurePlayer.mjs && concurrently \"npm run watch:types\" \"npm run editor\"",
     "editor:build": "npm run build:player && cd applications/editor && npm run build",
     "desktop:install": "cd applications/app-kit/desktop && npm install",
-    "desktop:dev": "node tools/ensurePlayer.mjs && concurrently \"npm run watch:types\" \"npm run editor:serve\" \"cd applications/app-kit/desktop && npm run dev\"",
+    "desktop:dev": "node tools/ensurePlayer.mjs && concurrently \"npm run watch:types\" \"npm run editor:serve\" \"npm run creator:serve\" \"cd applications/app-kit/desktop && npm run dev\"",
     "desktop:build": "npm run build && npm run editor:build && cd applications/app-kit/desktop && npm run dist",
     "naga:build": "node tools/naga-wasm/build.mjs",
     "apps:install": "cd applications && npm ci",
     "creator": "cd applications/creator && npm run start",
     "creator:serve": "cd applications/creator && npm run dev",
     "creator:dev": "concurrently \"npm run watch:types\" \"npm run creator\"",
-    "creator:build": "cd applications/creator && npm run build"
+    "creator:build": "cd applications/creator && npm run build",
+    "dev:all": "node tools/ensurePlayer.mjs && concurrently \"npm run watch:types\" \"npm run editor\" \"npm run creator:serve\""
   },
   "author": "Ariel Riveros",
   "license": "ISC",

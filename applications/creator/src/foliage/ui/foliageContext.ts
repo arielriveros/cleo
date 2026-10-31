@@ -9,8 +9,11 @@ import type { StageSettings } from './foliageStage';
 
 export interface SavedVariant { id: string; label: string; doc: FoliageDoc }
 
-/** A user's replacement for one generated texture: the decoded pixels and a preview URL. */
-export interface TextureOverride { image: Image; url: string; fileName: string }
+/**
+ * A user's replacement for one generated texture: the decoded pixels, a preview URL, and the file as
+ * loaded (kept with a saved asset, so reopening it restores the override).
+ */
+export interface TextureOverride { image: Image; url: string; fileName: string; bytes: Uint8Array; mime: string; flipGreen: boolean }
 
 export interface FoliageState {
   doc: FoliageDoc;
@@ -22,7 +25,8 @@ export interface FoliageState {
   stage: StageSettings;
   setStage: (s: StageSettings) => void;
   overrides: Partial<Record<TextureKey, TextureOverride>>;
-  setOverride: (key: TextureKey, file: File | null) => void;
+  /** `flipGreen`: the file is a DirectX normal map. */
+  setOverride: (key: TextureKey, file: File | null, opts?: { flipGreen?: boolean }) => Promise<void>;
   variants: SavedVariant[];
   setVariants: (v: SavedVariant[]) => void;
   /** Seeds tried this session, newest first. */
@@ -31,8 +35,6 @@ export interface FoliageState {
   bakeImpostorPreview: () => void;
   exporting: boolean;
   onExport: () => void;
-  viewportRef: React.RefObject<HTMLDivElement>;
-  overlay: React.ReactNode;
 }
 
 export const FoliageContext = createContext<FoliageState | null>(null);

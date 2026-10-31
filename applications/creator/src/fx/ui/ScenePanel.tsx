@@ -1,6 +1,7 @@
 import { ParamForm } from '@cleo/app-kit/params/ParamForm';
 import type { GenericParamSpec } from '@cleo/app-kit/params/ParamField';
 import { Button, Collapsable, PresetMenu } from '@cleo/app-kit/ui';
+import { ListRow, PanelBody, PanelHeader } from '../../app/workspace';
 import { FX_SCENE_SPECS, normaliseFx, type FxParams } from '../fxParams';
 import { applySceneValues, SCENE_PRESETS, SCENE_SECTION_PRESETS, type SceneValues, type SectionPreset } from '../fxPresets';
 import { newBody, SCENE_SCHEMA, type FxBody, type FxBodyKind, type FxScene } from '../fxScene';
@@ -43,7 +44,6 @@ interface Props {
 export function ScenePanel({ scene, setScene, params, setParams, selection, select }: Props) {
   const isSel = (s: FxSelection) => JSON.stringify(s) === JSON.stringify(selection);
   const pick = (s: FxSelection) => (isSel(s) ? select(null) : select(s));
-  const rowClass = (on: boolean) => `w-full text-left px-1.5 py-0.5 rounded text-ui-sm ${on ? 'bg-primary/25 text-fg' : 'text-muted hover:bg-surface-raised'}`;
   const sceneValues = scene as unknown as Record<string, unknown>;
   const paramValues = params as unknown as Record<string, unknown>;
   const region = normaliseFx(params).regionSize;
@@ -71,19 +71,17 @@ export function ScenePanel({ scene, setScene, params, setParams, selection, sele
   const stage = (title: string) => SCENE_SCHEMA.find(g => g.title === title)?.specs;
 
   return (
-    <div className='p-2 overflow-auto h-full'>
-      <div className='flex items-center justify-between pb-1'>
-        <span className='text-ui-sm text-muted'>Scene</span>
-        <PresetMenu label='Scene presets' presets={SCENE_PRESETS} onApply={(p: SectionPreset<SceneValues>) => apply(p.values, true)} />
-      </div>
+    <PanelBody>
+      <PanelHeader kind='Scene' name={`${scene.bodies.length} ${scene.bodies.length === 1 ? 'body' : 'bodies'}`} presetLabel='Scene presets'
+                   presets={SCENE_PRESETS} onPreset={(p: SectionPreset<SceneValues>) => apply(p.values, true)} />
       <Collapsable title='Select' persistKey='cleo_creator_fx_scene_Select'>
         <div className='flex flex-col gap-0.5 py-1'>
-          <button type='button' className={rowClass(isSel({ kind: 'region' }))} onClick={() => pick({ kind: 'region' })}>Simulation region</button>
-          <button type='button' className={rowClass(isSel({ kind: 'emitter' }))} onClick={() => pick({ kind: 'emitter' })}>Emitter</button>
+          <ListRow selected={isSel({ kind: 'region' })} onClick={() => pick({ kind: 'region' })}>Simulation region</ListRow>
+          <ListRow selected={isSel({ kind: 'emitter' })} onClick={() => pick({ kind: 'emitter' })}>Emitter</ListRow>
           {scene.bodies.map((b, i) => (
-            <button key={b.id} type='button' className={rowClass(isSel({ kind: 'body', id: b.id }))} onClick={() => pick({ kind: 'body', id: b.id })}>
+            <ListRow key={b.id} selected={isSel({ kind: 'body', id: b.id })} onClick={() => pick({ kind: 'body', id: b.id })}>
               {b.kind[0].toUpperCase() + b.kind.slice(1)} {i + 1}
-            </button>
+            </ListRow>
           ))}
         </div>
         <div className='text-dim text-ui-xs pb-1'>Or click it in the viewport. W / E / R: move, rotate, scale. F frames it.</div>
@@ -110,18 +108,16 @@ export function ScenePanel({ scene, setScene, params, setParams, selection, sele
         {scene.bodies.length === 0 && <div className='text-dim text-ui-xs py-1'>No bodies. The gas flows around any you add.</div>}
         {scene.bodies.map((b, i) => (
           <div key={b.id} className='border-t border-border pt-1 mt-1'>
-            <div className='flex items-center justify-between'>
-              <button type='button' className={rowClass(isSel({ kind: 'body', id: b.id }))} onClick={() => pick({ kind: 'body', id: b.id })}>
-                {b.kind[0].toUpperCase() + b.kind.slice(1)} {i + 1}
-              </button>
-              <Button size='sm' variant='ghost' onClick={() => setScene({ ...scene, bodies: scene.bodies.filter(x => x.id !== b.id) })}>Remove</Button>
-            </div>
+            <ListRow selected={isSel({ kind: 'body', id: b.id })} onClick={() => pick({ kind: 'body', id: b.id })}
+                     actions={<Button size='sm' variant='ghost' onClick={() => setScene({ ...scene, bodies: scene.bodies.filter(x => x.id !== b.id) })}>Remove</Button>}>
+              {b.kind[0].toUpperCase() + b.kind.slice(1)} {i + 1}
+            </ListRow>
             <ParamForm schema={BODY_SCHEMA} values={b as unknown as Record<string, unknown>} onChange={patch => setBody(b.id, patch as Partial<FxBody>)} />
           </div>
         ))}
       </>)}
       {section('Rendering', FX_SCENE_SPECS.Rendering, stage('Rendering'))}
-    </div>
+    </PanelBody>
   );
 }
 

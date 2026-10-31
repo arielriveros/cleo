@@ -1,51 +1,176 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ParamForm } from '@cleo/app-kit/params/ParamForm';
 import type { GenericParamSpec } from '@cleo/app-kit/params/ParamField';
-import { Button, Collapsable, FileButton, PresetMenu, TextInput } from '@cleo/app-kit/ui';
+import { MaterialFields } from '@cleo/app-kit/materials/MaterialFields';
+import { Button, Collapsable, FileButton, SegmentedControl, TextInput } from '@cleo/app-kit/ui';
 import { toast } from '@cleo/app-kit/feedback/toastStore';
+import { ListRow, PanelBody, PanelHeader, SchemaSections } from '../../app/workspace';
 import { OVERRIDE_SLOTS, TEXTURE_LABELS, type TextureKey } from '../buildFoliage';
 import {
-  DEFAULT_GRASS, DEFAULT_ROCK, DEFAULT_TREE, FOLIAGE_SCHEMAS, KIND_LABELS, formValues, fromForm, type FoliageGroup, type FoliageKind,
+  DEFAULT_BUSH, DEFAULT_GRASS, DEFAULT_ROCK, DEFAULT_TREE, FOLIAGE_SCHEMAS, KIND_LABELS, formValues, fromForm, type FoliageGroup, type FoliageKind,
 } from '../foliageParams';
 import { applyPreset, presetsFor, type FoliagePreset } from '../foliagePresets';
+import { applyMaterialPatch, hasMaterial, MATERIAL_KEYS, materialLabel, materialValues, resetMaterial } from '../materials';
+import type { MaterialKey } from '../mesh';
+import { readZip } from '../../core/zip';
+import { PBR_SLOTS, planPbrSet } from '../pbrSet';
 import type { StageSettings } from './foliageStage';
 import { useFoliage } from './foliageContext';
 
-// The Foliage Creator's dock panels. Parameters, LOD and Export share the right dock as tabs (the FX
-// Creator's Parameters / Bake split); Variants is the left dock.
+// The Foliage Creator's dock panels. Parameters, Materials, LOD and Export share the right dock as tabs;
+// Variants is the left dock. Built from the Creator's shared panel pieces (app/workspace.tsx), and the
+// Materials tab from the Editor's own material sections (app-kit MaterialFields).
 
-const DEFAULTS: Record<FoliageKind, object> = { grass: DEFAULT_GRASS, rock: DEFAULT_ROCK, tree: DEFAULT_TREE };
+const DEFAULTS: Record<FoliageKind, object> = { grass: DEFAULT_GRASS, rock: DEFAULT_ROCK, tree: DEFAULT_TREE, bush: DEFAULT_BUSH };
 
 /** LOD 0 triangle counts above which a level is flagged: foliage is drawn thousands of times. */
-const LOD0_BUDGET: Record<FoliageKind, number> = { grass: 1500, rock: 6000, tree: 20000 };
+const LOD0_BUDGET: Record<FoliageKind, number> = { grass: 1500, rock: 6000, tree: 20000, bush: 8000 };
 
-function Groups({ groups, persist }: { groups: FoliageGroup[]; persist: string }) {
+/** The textures each material samples, in slot order (base colour first). */
+const MATERIAL_TEXTURES: Record<MaterialKey, TextureKey[]> = {
+  grass: ['grass'], grassCard: ['grassCard'], rock: ['rockAlbedo', 'rockNormal'], leaves: ['leaves'],
+  bark: ['bark', 'barkNormal', 'barkOrm', 'barkAo', 'barkRoughness', 'barkMetallic'],
+};
+/** Single-channel slots: no texture of their own, they replace one channel of the packed ARM map. */
+const CHANNEL_SLOTS = new Set<TextureKey>(['barkAo', 'barkRoughness', 'barkMetallic']);
+
+function KindSections({ groups, persist }: { groups: FoliageGroup[]; persist: string }) {
   const { doc, setParams } = useFoliage();
   const params = doc[doc.kind];
-  const values = formValues(params);
-  return (<>
-    {groups.map(group => (
-      <Collapsable key={group.title} title={group.title} persistKey={`cleo_creator_foliage_${persist}_${doc.kind}_${group.title}`}>
-        <ParamForm schema={group.specs} values={values} onChange={patch => setParams(fromForm(params, patch))} />
-      </Collapsable>
-    ))}
-  </>);
+  return <SchemaSections groups={groups} values={formValues(params)} onChange={patch => setParams(fromForm(params, patch))}
+                         persist={`cleo_creator_foliage_${persist}_${doc.kind}`} />;
 }
 
-/** Right dock: the shape and look of the current kind. */
+/** Right dock: the shape of the current kind. */
 export function ParametersPanel() {
   const { doc, setDoc } = useFoliage();
   const apply = (p: FoliagePreset) => setDoc({ ...doc, [p.kind]: applyPreset(p), name: p.id });
   const reset = () => { setDoc({ ...doc, [doc.kind]: DEFAULTS[doc.kind] }); toast.success(`${KIND_LABELS[doc.kind]} reset to its defaults.`); };
   return (
-    <div className='p-2 overflow-auto h-full'>
-      <div className='flex items-center gap-2 pb-1'>
-        <span className='flex-1 min-w-0 truncate text-ui-sm text-muted'>{KIND_LABELS[doc.kind]} · <span className='text-fg'>{doc.name}</span></span>
-        <Button size='sm' variant='ghost' onClick={reset}>Reset</Button>
-        <PresetMenu label={`${KIND_LABELS[doc.kind]} presets`} presets={presetsFor(doc.kind)} onApply={apply} />
+    <PanelBody>
+      <PanelHeader kind={KIND_LABELS[doc.kind]} name={doc.name} onReset={reset}
+                   presets={presetsFor(doc.kind)} onPreset={apply} presetLabel={`${KIND_LABELS[doc.kind]} presets`} />
+      <KindSections groups={FOLIAGE_SCHEMAS[doc.kind].filter(g => !g.side)} persist='params' />
+    </PanelBody>
+  );
+}
+
+/** Object URLs for the build's generated PNGs, revoked when the build changes. */
+function useGeneratedUrls(): Partial<Record<TextureKey, string>> {
+  const { build } = useFoliage();
+  const urls = useMemo(() => {
+    const out: Partial<Record<TextureKey, string>> = {};
+    if (build) for (const [k, bytes] of Object.entries(build.files.pngs) as [TextureKey, Uint8Array][])
+      out[k] = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/png' }));
+    return out;
+  }, [build]);
+  useEffect(() => () => { for (const u of Object.values(urls)) if (u) URL.revokeObjectURL(u); }, [urls]);
+  return urls;
+}
+
+/** One texture slot: the texture in use, and whether it is generated or the user's image. */
+function TextureSlot({ textureKey, url }: { textureKey: TextureKey; url?: string }) {
+  const { doc, overrides, setOverride } = useFoliage();
+  const slot = OVERRIDE_SLOTS[doc.kind].find(s => s.key === textureKey);
+  const o = overrides[textureKey];
+  const src = o?.url ?? url;
+  return (
+    <div className='flex gap-2 items-start'>
+      <div className={`${CHANNEL_SLOTS.has(textureKey) ? 'w-10 h-10 ml-6' : 'w-16 h-16'} shrink-0 cleo-texture-checker border border-border`}>
+        {src && <img src={src} className='w-full h-full object-cover' />}
       </div>
-      <Groups groups={FOLIAGE_SCHEMAS[doc.kind].filter(g => !g.side)} persist='params' />
+      <div className='flex-1 min-w-0'>
+        <div className='text-ui-sm'>
+          {slot?.label ?? TEXTURE_LABELS[textureKey]}{' '}
+          <span className='text-muted'>· {o ? o.fileName : CHANNEL_SLOTS.has(textureKey) ? 'from the ARM map' : 'generated'}</span>
+        </div>
+        <div className='text-ui-xs text-muted'>{slot ? slot.hint : 'Generated from the material above it; follows its texture.'}</div>
+        {slot && (
+          <div className='flex gap-1 pt-1'>
+            <FileButton accept='image/*' onFiles={files => files[0] && setOverride(textureKey, files[0])}>Image…</FileButton>
+            {o && <Button size='sm' variant='ghost' onClick={() => setOverride(textureKey, null)}>Use generated</Button>}
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+/**
+ * Load a whole PBR texture set -- several images, or the .zip they were downloaded in -- onto a material's
+ * slots by file name (pbrSet.ts).
+ */
+function PbrSetButton({ material }: { material: MaterialKey }) {
+  const { setOverride } = useFoliage();
+  const [loading, setLoading] = useState(false);
+  const load = async (picked: File[]) => {
+    setLoading(true);
+    try {
+      const files: File[] = [];
+      for (const f of picked) {
+        if (/\.zip$/i.test(f.name)) {
+          for (const e of await readZip(new Uint8Array(await f.arrayBuffer())))
+            files.push(new File([e.bytes as BlobPart], e.name.replace(/^.*\//, ''), { type: /\.png$/i.test(e.name) ? 'image/png' : 'image/jpeg' }));
+        } else files.push(f);
+      }
+      const plan = planPbrSet(material, files.map(f => f.name));
+      if (!plan.files.length) { toast.error(`No ${material} maps found in ${picked.map(f => f.name).join(', ')}.`); return; }
+      await Promise.all(plan.files.map(p => setOverride(p.slot, files.find(f => f.name === p.name)!, { flipGreen: p.flipGreen })));
+      const used = plan.files.map(p => `${TEXTURE_LABELS[p.slot]} ← ${p.name}${p.flipGreen ? ' (DirectX, green flipped)' : ''}`);
+      toast.success([...used, ...(plan.skipped.length ? [`Not used: ${plan.skipped.join(', ')}`] : [])].join('\n'), { title: 'Texture set loaded' });
+    } catch (e) {
+      toast.error(String((e as Error)?.message ?? e), { title: 'Could not read the texture set' });
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <FileButton accept='image/*,.zip' multiple disabled={loading} onFiles={files => files.length && load(files)}
+                title='Several images or a .zip: colour, normal, ARM, AO, roughness and metallic are matched by file name (diff, nor_gl, arm, ao, rough, metal...).'>
+      {loading ? 'Loading…' : 'Load texture set…'}
+    </FileButton>
+  );
+}
+
+/**
+ * Right dock tab: every material the kind generates -- bark, leaves or needles, blades, rock -- in the
+ * Editor's material sections (Properties, Textures, Cutout, Wind). Each texture slot is either generated
+ * (its generator's settings below it) or an image of the user's.
+ */
+export function MaterialsPanel() {
+  const { doc, setDoc } = useFoliage();
+  const urls = useGeneratedUrls();
+  const keys = MATERIAL_KEYS[doc.kind].filter(k => hasMaterial(doc, k));
+  const [picked, setPicked] = useState<MaterialKey>(keys[0]);
+  const key = keys.includes(picked) ? picked : keys[0];
+  if (!key) return <PanelBody><p className='text-ui-sm text-muted'>This {KIND_LABELS[doc.kind].toLowerCase()} has no materials.</p></PanelBody>;
+  const params = doc[doc.kind];
+  const generator = FOLIAGE_SCHEMAS[doc.kind].filter(g => g.side === 'material' && g.material === key);
+  const textures = MATERIAL_TEXTURES[key].filter(t => urls[t] || OVERRIDE_SLOTS[doc.kind].some(s => s.key === t));
+  const overridden = !!(params.materials && params.materials[key] && Object.keys(params.materials[key]!).length);
+  return (
+    <PanelBody>
+      <PanelHeader kind='Material' name={materialLabel(doc, key)}
+                   onReset={overridden ? () => { setDoc(resetMaterial(doc, key)); toast.success(`${materialLabel(doc, key)} back to its generated settings.`); } : undefined} />
+      {keys.length > 1 && (
+        <SegmentedControl<MaterialKey> size='sm' value={key} onChange={setPicked}
+                                       options={keys.map(k => ({ value: k, label: materialLabel(doc, k) }))} />
+      )}
+      <MaterialFields value={materialValues(doc, key)} onChange={patch => setDoc(applyMaterialPatch(doc, key, patch))}
+                      tintsTexture={textures.length > 0}
+                      textures={(
+                        <div className='flex flex-col gap-2'>
+                          {PBR_SLOTS[key] && <div><PbrSetButton material={key} /></div>}
+                          {textures.map(t => <TextureSlot key={t} textureKey={t} url={urls[t]} />)}
+                          {generator.length > 0 && (
+                            <div className='pt-1'>
+                              <SchemaSections groups={generator} values={formValues(params)} persist={`cleo_creator_foliage_material_${doc.kind}`}
+                                              onChange={patch => setDoc({ ...doc, [doc.kind]: fromForm(params, patch) })} />
+                            </div>
+                          )}
+                        </div>
+                      )} />
+    </PanelBody>
   );
 }
 
@@ -55,8 +180,8 @@ export function LodPanel() {
   const levels = build?.summary.levels ?? [];
   const budget = LOD0_BUDGET[doc.kind];
   return (
-    <div className='p-2 overflow-auto h-full flex flex-col gap-2'>
-      <Groups groups={FOLIAGE_SCHEMAS[doc.kind].filter(g => g.side === 'lod')} persist='lod' />
+    <PanelBody>
+      <KindSections groups={FOLIAGE_SCHEMAS[doc.kind].filter(g => g.side === 'lod')} persist='lod' />
       <Collapsable title='Level costs' persistKey='cleo_creator_foliage_lod_costs'>
         <table className='w-full text-ui-sm tabular-nums'>
           <thead className='text-muted'>
@@ -98,33 +223,18 @@ export function LodPanel() {
           )}
         </Collapsable>
       )}
-    </div>
+    </PanelBody>
   );
 }
 
-/** Object URLs for the build's generated PNGs, revoked when the build changes. */
-function useGeneratedUrls(): Partial<Record<TextureKey, string>> {
-  const { build } = useFoliage();
-  const urls = useMemo(() => {
-    const out: Partial<Record<TextureKey, string>> = {};
-    if (build) for (const [k, bytes] of Object.entries(build.files.pngs) as [TextureKey, Uint8Array][])
-      out[k] = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/png' }));
-    return out;
-  }, [build]);
-  useEffect(() => () => { for (const u of Object.values(urls)) if (u) URL.revokeObjectURL(u); }, [urls]);
-  return urls;
-}
-
-/** Right dock tab: the file name, texture sizes and overrides, and the download. */
+/** Right dock tab: what the export writes -- the file names, texture sizes and the textures themselves. */
 export function ExportPanel() {
-  const { doc, setDoc, build, overrides, setOverride, exporting, onExport } = useFoliage();
+  const { doc, setDoc } = useFoliage();
   const urls = useGeneratedUrls();
-  const slots = OVERRIDE_SLOTS[doc.kind];
-  const generatedOnly = (Object.keys(urls) as TextureKey[]).filter(k => !slots.some(s => s.key === k));
   const stem = doc.name.trim().replace(/\s+/g, '_') || 'foliage';
   const impostor = doc.kind === 'tree' && doc.tree.impostor;
   return (
-    <div className='p-2 overflow-auto h-full flex flex-col gap-2'>
+    <PanelBody>
       <Collapsable title='File' persistKey='cleo_creator_foliage_export_file'>
         <div className='flex items-center gap-2'>
           <span className='text-muted text-ui-sm w-16'>Name</span>
@@ -135,42 +245,21 @@ export function ExportPanel() {
           {impostor && <><li>{stem}_impostor_albedo.png</li><li>{stem}_impostor_normal.png</li></>}
           <li>{stem}.foliage.json</li>
         </ul>
+        <p className='text-ui-xs text-muted pt-1'>Download .glb (toolbar) writes them. Import the .glb files in the Editor, then set LOD 1 and 2 as the LOD 0 model's levels.</p>
       </Collapsable>
-      <Groups groups={FOLIAGE_SCHEMAS[doc.kind].filter(g => g.side === 'export')} persist='export' />
-      <Collapsable title='Texture overrides' persistKey='cleo_creator_foliage_export_overrides'>
-        <div className='flex flex-col gap-2'>
-          {slots.map(slot => {
-            const o = overrides[slot.key];
-            const src = o?.url ?? urls[slot.key];
-            return (
-              <div key={slot.key} className='flex gap-2 items-start'>
-                <div className='w-16 h-16 shrink-0 cleo-texture-checker border border-border'>
-                  {src && <img src={src} className='w-full h-full object-cover' />}
-                </div>
-                <div className='flex-1 min-w-0'>
-                  <div className='text-ui-sm'>{slot.label} {o && <span className='text-muted'>· {o.fileName}</span>}</div>
-                  <div className='text-ui-xs text-muted'>{slot.hint}</div>
-                  <div className='flex gap-1 pt-1'>
-                    <FileButton accept='image/*' onFiles={files => files[0] && setOverride(slot.key, files[0])}>Replace…</FileButton>
-                    {o && <Button size='sm' variant='ghost' onClick={() => setOverride(slot.key, null)}>Use generated</Button>}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          {generatedOnly.map(k => (
-            <div key={k} className='flex gap-2 items-center'>
-              <div className='w-16 h-16 shrink-0 cleo-texture-checker border border-border'><img src={urls[k]} className='w-full h-full object-cover' /></div>
-              <div className='text-ui-sm'>{TEXTURE_LABELS[k]} <span className='text-ui-xs text-muted'>· generated from the above</span></div>
-            </div>
+      <KindSections groups={FOLIAGE_SCHEMAS[doc.kind].filter(g => g.side === 'export')} persist='export' />
+      <Collapsable title='Embedded textures' persistKey='cleo_creator_foliage_export_textures'>
+        <div className='grid grid-cols-3 gap-2'>
+          {(Object.keys(urls) as TextureKey[]).map(k => (
+            <figure key={k} className='flex flex-col gap-0.5'>
+              <img src={urls[k]} className='w-full aspect-square object-cover cleo-texture-checker border border-border' />
+              <figcaption className='text-ui-xs text-muted truncate'>{TEXTURE_LABELS[k]}</figcaption>
+            </figure>
           ))}
         </div>
+        <p className='text-ui-xs text-muted pt-1'>Replace any of them in the Materials tab.</p>
       </Collapsable>
-      <div className='flex items-center gap-2 pt-1'>
-        <Button variant='primary' disabled={exporting || !build} onClick={onExport}>Download</Button>
-        <span className='text-ui-xs text-muted'>Import the .glb files in the Editor, then set LOD 1 and 2 as the LOD 0 model's levels.</span>
-      </div>
-    </div>
+    </PanelBody>
   );
 }
 
@@ -181,7 +270,7 @@ const STAGE_SPECS: GenericParamSpec[] = [
   { key: 'ambientLux', label: 'Ambient light', kind: 'float', min: 0, max: 40000, step: 100, unit: 'lx' },
 ];
 
-/** Left dock: presets, seeds, saved variants and the preview stage. */
+/** Left dock: presets, seeds, saved variants and the preview's sun. */
 export function VariantsPanel() {
   const { doc, setDoc, variants, setVariants, seedHistory, stage, setStage } = useFoliage();
   const [label, setLabel] = useState('');
@@ -192,16 +281,15 @@ export function VariantsPanel() {
     setLabel('');
   };
   return (
-    <div className='p-2 overflow-auto h-full flex flex-col gap-2'>
+    <PanelBody>
+      <PanelHeader kind={KIND_LABELS[doc.kind]} name={`seed ${doc.seed}`} />
       <Collapsable title='Presets' persistKey='cleo_creator_foliage_variants_presets'>
         <div className='flex flex-col'>
           {presets.map(p => (
-            <button key={p.id} type='button' title={p.description}
-                    className={`text-left px-2 py-1 rounded hover:bg-surface-raised ${doc.name === p.id ? 'bg-surface-raised' : ''}`}
-                    onClick={() => setDoc({ ...doc, [p.kind]: applyPreset(p), name: p.id })}>
-              <div className='text-ui-sm'>{p.label}</div>
-              <div className='text-ui-xs text-muted'>{p.description}</div>
-            </button>
+            <ListRow key={p.id} selected={doc.name === p.id} title={p.description} caption={p.description}
+                     onClick={() => setDoc({ ...doc, [p.kind]: applyPreset(p), name: p.id })}>
+              {p.label}
+            </ListRow>
           ))}
         </div>
       </Collapsable>
@@ -220,19 +308,17 @@ export function VariantsPanel() {
         </div>
         {variants.length === 0 && <p className='text-ui-xs text-muted'>Keep a parameter set and seed you like to come back to it.</p>}
         {variants.map(v => (
-          <div key={v.id} className='flex items-center gap-1 py-0.5'>
-            <button type='button' className='flex-1 min-w-0 truncate text-left text-ui-sm hover:text-fg text-muted'
-                    title={`${KIND_LABELS[v.doc.kind]}, seed ${v.doc.seed}`} onClick={() => setDoc(structuredClone(v.doc))}>
-              {v.label} <span className='text-ui-xs'>· {KIND_LABELS[v.doc.kind]}</span>
-            </button>
-            <Button size='sm' variant='ghost' title='Delete' onClick={() => setVariants(variants.filter(x => x.id !== v.id))}>✕</Button>
-          </div>
+          <ListRow key={v.id} title={`${KIND_LABELS[v.doc.kind]}, seed ${v.doc.seed}`} caption={KIND_LABELS[v.doc.kind]}
+                   onClick={() => setDoc(structuredClone(v.doc))}
+                   actions={<Button size='icon' variant='remove' title='Delete' onClick={() => setVariants(variants.filter(x => x.id !== v.id))}>✕</Button>}>
+            {v.label}
+          </ListRow>
         ))}
       </Collapsable>
-      <Collapsable title='Stage' persistKey='cleo_creator_foliage_variants_stage'>
+      <Collapsable title='Sun & sky' persistKey='cleo_creator_foliage_variants_stage'>
         <ParamForm schema={STAGE_SPECS} values={stage as unknown as Record<string, unknown>}
                    onChange={patch => setStage({ ...stage, ...(patch as Partial<StageSettings>) })} />
       </Collapsable>
-    </div>
+    </PanelBody>
   );
 }

@@ -494,6 +494,12 @@ type ReconcileOpts = {
   pruneTextures?: boolean
   /** Rough byte size for a newly indexed asset (computed once, at index time — never per render). */
   sizeOf?: (kind: AssetKind, assetId: string) => number | undefined
+  /**
+   * The folder an asset is KEPT in, when something owns its place (the Creator sync's /Creator folders).
+   * Unlike the landing folder this is an invariant: a pinned asset that sits anywhere else is moved back.
+   * Raw-byte kinds go into its `Source` subfolder, as they do under the landing folder.
+   */
+  pinnedFolder?: (kind: AssetKind, assetId: string) => string | undefined
 }
 
 /**
@@ -522,13 +528,19 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   const landingFor = (kind: AssetKind): string =>
     isRawByteKind(kind) ? joinPath(landing, SOURCE_FOLDER) : landing
 
+  const pinOf = (kind: AssetKind, assetId: string): string | undefined => {
+    const pin = opts.pinnedFolder?.(kind, assetId)
+    return pin && isRawByteKind(kind) ? joinPath(pin, SOURCE_FOLDER) : pin
+  }
+
   const visit = (kind: AssetKind, assetId: string, name: string) => {
     const ext = isRawByteKind(kind) ? extOf(name) : KIND_EXT[kind]
     const existing = byAsset.get(assetKey(kind, assetId))
+    const pin = pinOf(kind, assetId)
 
     if (!existing) {
       const stem = isRawByteKind(kind) ? stemOf(name) : name
-      const path = uniquePath(taken, landingFor(kind), stem, ext)
+      const path = uniquePath(taken, pin ?? landingFor(kind), stem, ext)
       taken.add(path)
       entries.push({ path, kind, assetId, created: Date.now(), size: opts.sizeOf?.(kind, assetId) })
       changed = true
@@ -536,6 +548,16 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
     }
 
     kept.add(existing)
+    // Pinned somewhere else: back to its folder, under its current name.
+    if (pin && dirOf(existing.path) !== pin) {
+      taken.delete(existing.path)
+      const stem = isRawByteKind(kind) ? stemOf(name) : name
+      const path = uniquePath(taken, pin, stem, ext)
+      taken.add(path)
+      entries.push({ ...existing, path })
+      changed = true
+      return
+    }
     // A byte asset's name IS the filename it arrived under; for every other kind the record's `name` wins.
     if (!isRawByteKind(kind) && !stemRepresents(stemOf(existing.path), name)) {
       taken.delete(existing.path)

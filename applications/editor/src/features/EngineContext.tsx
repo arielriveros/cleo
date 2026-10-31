@@ -100,8 +100,10 @@ import {
   collectReferencedTilesetIds,
   collectReferencedAiBrainIds,
   collectReferencedAnimationFieldIds, collectReferencedSoundIds, collectReferencedAudioIds,
-  collectReferencedAnimationIds, buildSceneRefs,
+  collectReferencedAnimationIds, buildSceneRefs, collectReferencedParticleSystemIds,
 } from "../utils/references";
+import { CreatorSync } from "./creator/creatorSync";
+import { impostorBillboardOf } from "../utils/foliageRules";
 import { idbGet, idbSet } from "@cleo/app-kit/utils/idb";
 import { EDITOR_CAMERA_MAP } from "@cleo/app-kit/engine/viewCameraMap";
 import { KEYS, libKey, inputMapKey, projectSettingsKey } from "../utils/storageKeys";
@@ -5127,6 +5129,99 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
     task.finish();
   };
+
+  // --- Cleo Creator ---------------------------------------------------------------------------------
+  //
+  // Assets saved in Cleo Creator (served on this origin at /creator/) are mirrored into the project's
+  // /Creator folder and follow every change made there: see creator/creatorSync.ts. Started once the
+  // libraries, the textures and the scene are real, so what it replaces is what the project holds; a
+  // project switch reloads the page, which starts it again for the new project.
+  useEffect(() => {
+    if (!assetsLoaded || !texturesPreloaded || !isSceneReady) return;
+    const engine = instanceRef.current;
+    const sync = new CreatorSync({
+      models: () => modelsRef.current,
+      materials: () => materialsRef.current,
+      particleSystems: () => particleSystemsRef.current,
+      putMaterial: asset => {
+        // The ref first: the model built next resolves its parts' materials through it, this same tick.
+        const exists = materialsRef.current.some(m => m.id === asset.id);
+        materialsRef.current = exists ? materialsRef.current.map(m => (m.id === asset.id ? asset : m)) : [...materialsRef.current, asset];
+        if (exists) updateMaterial(asset.id, asset); else addMaterial(asset);
+      },
+      commitModel: asset => {
+        const exists = modelsRef.current.some(m => m.id === asset.id);
+        modelsRef.current = exists ? modelsRef.current.map(m => (m.id === asset.id ? asset : m)) : [...modelsRef.current, asset];
+        if (exists) updateModel(asset.id, asset); else addModel(asset);
+        withoutDirty(() => {
+          // A foliage rule drawing the Creator's impostor follows its new atlas; one with an impostor of
+          // its own (a bake in the editor) keeps it.
+          const billboard = impostorBillboardOf(asset);
+          if (billboard) {
+            for (const tm of terrainMaterialsRef.current) {
+              const rules = allTerrainFoliageRules(tm.material).filter((r: any) => r?.modelId === asset.id
+                && (!r.billboard || r.billboard.textureId === billboard.textureId));
+              if (!rules.length) continue;
+              const next = deepClone(tm);
+              for (const r of allTerrainFoliageRules(next.material) as any[])
+                if (r?.modelId === asset.id && (!r.billboard || r.billboard.textureId === billboard.textureId)) { r.billboard = billboard; r.impostorSize = asset.impostor?.size; }
+              terrainMaterialsRef.current = terrainMaterialsRef.current.map(x => (x.id === tm.id ? next : x));
+              updateTerrainMaterial(tm.id, next);
+            }
+          }
+          syncModelInstances(asset.id, asset);
+          syncFoliageRulesForModel(asset);
+        });
+        if (engine) renderModelAssetThumbnail(engine, asset)
+          .then(thumbnail => { if (thumbnail) setModels(p => p.map(x => (x.id === asset.id ? { ...x, thumbnail } : x))); })
+          .catch(() => {});
+      },
+      commitParticleSystem: asset => {
+        const exists = particleSystemsRef.current.some(p => p.id === asset.id);
+        particleSystemsRef.current = exists ? particleSystemsRef.current.map(p => (p.id === asset.id ? asset : p)) : [...particleSystemsRef.current, asset];
+        if (exists) updateParticleSystem(asset.id, asset); else addParticleSystem(asset);
+        let changed = 0;
+        withoutDirty(() => { for (const scene of liveScenes()) changed += reembedParticleSystems(scene, particleSystemsRef.current); });
+        if (changed) eventEmitter.current.emit('SCENE_CHANGED');
+      },
+      removeModel: id => { modelsRef.current = modelsRef.current.filter(m => m.id !== id); removeModel(id); },
+      removeMaterial: id => { materialsRef.current = materialsRef.current.filter(m => m.id !== id); removeMaterial(id); },
+      removeParticleSystem: id => { particleSystemsRef.current = particleSystemsRef.current.filter(p => p.id !== id); removeParticleSystem(id); },
+      isUsed: (kind, id, ignore) => {
+        if (assetGraph.incoming(assetKey(kind, id)).some(e => !ignore?.has(e.from))) return true;
+        const scenes = liveScenes();
+        switch (kind) {
+          case 'model': return scenes.some(s => collectReferencedModelIds(s).has(id))
+            || terrainMaterialsRef.current.some(tm => allTerrainFoliageRules(tm.material).some((r: any) => r?.modelId === id));
+          case 'material': return scenes.some(s => collectReferencedMaterialIds(s, modelsRef.current.filter(m => !m.id.startsWith('cr_'))).has(id));
+          case 'particleSystem': return scenes.some(s => collectReferencedParticleSystemIds(s).has(id));
+          case 'texture': return scenes.some(s => collectReferencedTextureIds(s, materialsRef.current.filter(m => !m.id.startsWith('cr_')),
+            modelsRef.current.filter(m => !m.id.startsWith('cr_')), templatesRef.current, terrainMaterialsRef.current).has(id));
+          default: return false;
+        }
+      },
+      referencedTextures: except => referencedTextureIds(
+        materialsRef.current.filter(m => !except.has(m.id)), terrainMaterialsRef.current, templatesRef.current,
+        modelsRef.current.filter(m => !except.has(m.id))),
+      texturesChanged: () => eventEmitter.current.emit('TEXTURES_CHANGED'),
+      // The Image and Texture records the explorer minted for a texture: renamed to the readable name (a
+      // record minted before the sync knew it carries the hash id), and dropped with the texture.
+      nameTextures: names => {
+        setTextures(prev => prev.some(t => names.has(t.id) && t.name !== names.get(t.id))
+          ? prev.map(t => (names.has(t.id) ? { ...t, name: names.get(t.id)! } : t)) : prev);
+        setImages(prev => prev.some(i => names.has(i.id) && i.name !== `${names.get(i.id)}.png`)
+          ? prev.map(i => (names.has(i.id) ? { ...i, name: `${names.get(i.id)}.png` } : i)) : prev);
+      },
+      forgetTextures: ids => {
+        const gone = new Set(ids);
+        setTextures(prev => prev.some(t => gone.has(t.id)) ? prev.filter(t => !gone.has(t.id)) : prev);
+        setImages(prev => prev.some(i => gone.has(i.id)) ? prev.filter(i => !gone.has(i.id)) : prev);
+      },
+    });
+    void sync.start();
+    return () => sync.dispose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assetsLoaded, texturesPreloaded, isSceneReady]);
 
   // Save a material tab to the library (capturing a sphere thumbnail) and propagate to references.
   // captureMaterialSphere renders the tab's own scene offscreen, so this reaches a tab that is not on

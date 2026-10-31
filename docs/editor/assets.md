@@ -163,6 +163,19 @@ to acquire either.
 Hovering a script card highlights every node using it, which is the quickest way to answer "what is
 this script attached to".
 
+## Creator assets
+
+Assets saved in [Cleo Creator](../creator/index.md#saved-assets) appear in every project under
+`/Creator/<Foliage|FX|World>/<name>`: a Foliage asset as a model with its LOD levels, materials,
+textures and impostor; an FX asset as a particle system and its flipbook textures; a World as its
+heightmap and mask textures (apply the heightmap with **Import heightmap ▸ From Creator** on a
+landscape). They follow every change made in the Creator, live.
+
+The folder is read-only. Renaming, moving or deleting inside it is refused with a note, because the
+next sync would undo it. Duplicate an asset into another folder to make a copy of your own. When an
+asset is deleted in the Creator, a project that uses it keeps it, in `/Creator/Removed`; otherwise it is
+removed.
+
 ## Storage
 
 Assets live in the project's own storage, namespaced per project, not as files on disk. To get them

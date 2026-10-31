@@ -296,6 +296,12 @@ export type ModelAsset = {
    * clear these assets out of the library.
    */
   lodSource?: { modelId: string; level: number }
+  /**
+   * An octahedral impostor that came WITH the model (Cleo Creator bakes one for its trees): the atlas
+   * textures, the engine's atlas description and where it takes over. A foliage rule made from the model
+   * starts with it as its billboard (foliageRules.ts), so the tree needs no bake in the editor.
+   */
+  impostor?: { distance: number; textureId: string; normalId: string; octahedral: unknown; size: number }
 }
 
 /**

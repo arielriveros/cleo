@@ -11,6 +11,23 @@ import { applyHeightsTo } from '../../landscape/heightmapImport'
 import HeightmapImportDialog from '../../landscape/HeightmapImportDialog'
 import { setTerrainHeights } from '../../../utils/terrainAccess'
 import { clamp } from '@cleo/app-kit/utils/math';
+import { creatorChannel, getCreatorFiles, listCreatorAssets, type CreatorAssetMeta } from '@cleo/app-kit/creatorLibrary'
+
+/** On a landscape: the Cleo Creator world its heights came from, `<id>@<revision>`. */
+const CREATOR_WORLD_VAR = '__creatorWorld'
+
+/** The Creator library's worlds, kept current while the inspector is open. */
+function useCreatorWorlds(): CreatorAssetMeta[] {
+  const [worlds, setWorlds] = useState<CreatorAssetMeta[]>([])
+  useEffect(() => {
+    const load = () => listCreatorAssets()
+      .then(all => setWorlds(all.filter(a => a.kind === 'world' && !a.deleted && a.fileNames.length)))
+      .catch(() => setWorlds([]))
+    load()
+    return creatorChannel().subscribe(load)
+  }, [])
+  return worlds
+}
 
 // Node inspector for a LandscapeNode: the terrain's STRUCTURE — size, sampling, chunking — plus the
 // heightmap import/export that replaces its shape wholesale. Landscape mode holds the brushes that edit it.
@@ -48,7 +65,14 @@ function download(bytes: Uint8Array, name: string, mime: string): void {
 export default function LandscapeEditor(props: { node: LandscapeNode }) {
   const { eventEmitter, editorScene, withoutDirty } = useCleoEngine()
   const { push } = useHistory()
-  const [pendingImport, setPendingImport] = useState<{ image: HeightImage; fileName: string } | null>(null)
+  const [pendingImport, setPendingImport] = useState<{ image: HeightImage; fileName: string; creator?: { id: string; revision: number } } | null>(null)
+  const worlds = useCreatorWorlds()
+  const appliedWorld = (() => {
+    const v = props.node.getVariable(CREATOR_WORLD_VAR)
+    const m = typeof v === 'string' ? /^(.+)@(\d+)$/.exec(v) : null
+    return m ? { id: m[1], revision: Number(m[2]) } : null
+  })()
+  const newerWorld = appliedWorld && worlds.find(w => w.id === appliedWorld.id && w.revision > appliedWorld.revision)
   // For DISPLAY only. Every action below reads `props.node.terrain` when it runs: a rebuild replaces the
   // Terrain object on the node, and a closure holding this one would write into the disposed original.
   const terrain = props.node.terrain
@@ -118,8 +142,31 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
     }
   }
 
+  /**
+   * A Cleo Creator world's heightmap, at full precision: its 16-bit PNG, with the height range its sidecar
+   * records written into the name the import dialog reads it from.
+   */
+  const importFromCreator = async (world: CreatorAssetMeta) => {
+    setImporting(true)
+    try {
+      const files = await getCreatorFiles(world.id)
+      const height = files.find(f => /_height\.png$/i.test(f.name))
+      if (!height) throw new Error('it has no heightmap yet')
+      const out = (world.sidecar?.output ?? {}) as { minHeight?: number; maxHeight?: number }
+      const round = (x: number | undefined) => Math.round((x ?? 0) * 1000) / 1000
+      const fileName = `${world.name}_min${round(out.minHeight)}_max${round(out.maxHeight ?? 100)}.png`
+      setPendingImport({ image: await decodeHeightmapFile(new File([height.blob], fileName)), fileName, creator: { id: world.id, revision: world.revision } })
+    } catch (err) {
+      Logger.error(`Could not import the Creator world "${world.name}": ${err instanceof Error ? err.message : err}`, 'Editor')
+    } finally {
+      setImporting(false)
+    }
+  }
+
   /** One undo step for a whole-field replacement. The terrain is found by node id when it runs. */
   const commitHeights = (before: Float32Array, after: Float32Array) => {
+    // Remember which Creator world this is, so a later change to it offers a re-apply.
+    if (pendingImport?.creator) props.node.setVariable(CREATOR_WORLD_VAR, `${pendingImport.creator.id}@${pendingImport.creator.revision}`, 'string')
     const nodeId = props.node.id
     const put = (h: Float32Array) => {
       const node = editorScene.getNodeById(nodeId) as LandscapeNode | null
@@ -186,6 +233,14 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
         </Button>
 
         <div className='pt-2 border-t border-control space-y-2'>
+          {/* Never applied by itself: a re-import replaces the sculpted shape, so it waits to be asked. */}
+          {newerWorld && (
+            <div className='flex items-center gap-2 rounded border border-warning/50 bg-warning/10 px-2 py-1 text-ui'>
+              <span className='flex-1'>“{newerWorld.name}” changed in Cleo Creator.</span>
+              <Button size='sm' disabled={importing} onClick={() => void importFromCreator(newerWorld)}
+                title='Import its new heightmap; you confirm the range and see it before it replaces the shape'>Re-apply</Button>
+            </div>
+          )}
           <div className='flex gap-1'>
             {/* FileButton clears the input after each pick, so picking the SAME file again still fires
                 `change`. Without it a second pick of one file was silently ignored. */}
@@ -193,6 +248,13 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
               onFiles={(files) => { void importHeightmap(files[0]) }}>
               {importing ? 'Importing…' : 'Import heightmap'}
             </FileButton>
+            {worlds.length > 0 && (
+              <Popover align='right' title='A world made in Cleo Creator, at full precision' trigger={<span className='text-ui px-2'>From Creator ▾</span>}>
+                <div data-cleo-overlay className='flex flex-col p-1 text-ui min-w-[170px]'>
+                  {worlds.map(w => <MenuItem key={w.id} onClick={() => void importFromCreator(w)}>{w.name}</MenuItem>)}
+                </div>
+              </Popover>
+            )}
             <Popover align='right' title='Download the height field' trigger={<span className='text-ui px-2'>Export ▾</span>}>
               <div data-cleo-overlay className='flex flex-col p-1 text-ui min-w-[170px]'>
                 <MenuItem onClick={() => exportHeightmap('png16')}

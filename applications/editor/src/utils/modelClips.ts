@@ -309,8 +309,9 @@ export function modelTransformDelta(
  *    drops every clip carrying an `assetId`, so without this a re-save would unhook them all.
  *  - `nativeRigId`  — the model's own skeleton while it plays another (see ModelAsset).
  *  - `lodSource`    — provenance the node never carried (see ModelAsset).
+ *  - `impostor`     — the atlas a model arrived with (Cleo Creator's trees; see ModelAsset).
  */
-export const MODEL_ASSET_PRESERVED_KEYS = ['rigId', 'nativeRigId', 'lodSource'] as const
+export const MODEL_ASSET_PRESERVED_KEYS = ['rigId', 'nativeRigId', 'lodSource', 'impostor'] as const
 
 /**
  * Copy the preserved fields from `prev` onto `next`, for a record being rebuilt from a live subtree.

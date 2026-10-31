@@ -24,6 +24,8 @@ export function exportFoliage(doc: FoliageDoc, model: FoliageSummary, files: Fol
     impostor: impostor && model.impostor ? {
       distance: model.impostor.distance, albedo: `${stem}_impostor_albedo.png`, normal: `${stem}_impostor_normal.png`,
       frames: impostor.info.frames, radius: impostor.info.radius, center: impostor.info.center,
+      // The whole atlas description, as the engine's impostor reads it (the editor's Creator sync uses it).
+      info: impostor.info,
     } : null,
     wind,
     collider: model.collider,

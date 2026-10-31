@@ -261,17 +261,22 @@ function placeLeaves(seed: number, p: TreeParams, stems: Stem[]): LeafCard[] {
     cards.push({ anchor: tip.p, up, side, normal, size: p.leafSize * r.vary(0.9, p.leafSizeVariance), cell: r.int(0, 3), key: r.next() });
   }
 
-  // Bend card normals outward from the crown's centre, so the canopy shades as one volume rather than a
-  // scatter of flat cards (and a back-lit side keeps some light).
-  if (p.leafNormalBend > 0 && cards.length) {
-    const c: V3 = [0, 0, 0];
-    for (const card of cards) { c[0] += card.anchor[0]; c[1] += card.anchor[1]; c[2] += card.anchor[2]; }
-    c[0] /= cards.length; c[1] /= cards.length; c[2] /= cards.length;
-    for (const card of cards) {
-      const outward = normalize(sub(card.anchor, c));
-      const facing = dot(outward, card.normal) < 0 ? scale(card.normal, -1) : card.normal;
-      card.normal = normalize(add(scale(facing, 1 - p.leafNormalBend), scale(outward, p.leafNormalBend)));
-    }
-  }
+  bendLeafNormals(cards, p.leafNormalBend);
   return cards;
+}
+
+/**
+ * Bend card normals outward from the crown's centre, so the canopy shades as one volume rather than a
+ * scatter of flat cards (and a back-lit side keeps some light). In place.
+ */
+export function bendLeafNormals(cards: LeafCard[], amount: number): void {
+  if (amount <= 0 || !cards.length) return;
+  const c: V3 = [0, 0, 0];
+  for (const card of cards) { c[0] += card.anchor[0]; c[1] += card.anchor[1]; c[2] += card.anchor[2]; }
+  c[0] /= cards.length; c[1] /= cards.length; c[2] /= cards.length;
+  for (const card of cards) {
+    const outward = normalize(sub(card.anchor, c));
+    const facing = dot(outward, card.normal) < 0 ? scale(card.normal, -1) : card.normal;
+    card.normal = normalize(add(scale(facing, 1 - amount), scale(outward, amount)));
+  }
 }

@@ -5,9 +5,11 @@
 // derives tangents from the uvs, which is what this generator's normal maps were authored against.
 //
 // Materials carry what the engine reads back (src/graphics/utils/gltfLoader.ts):
+//   - one packed ORM image as both `occlusionTexture` and `metallicRoughnessTexture` (glTF's own layout);
 //   - `alphaMode: MASK` + `alphaCutoff` for leaf and card cutouts, `doubleSided` for thin surfaces;
 //   - `KHR_materials_diffuse_transmission` for translucency -- the standard extension, so other tools
 //     read it too;
+//   - `emissiveFactor` + `KHR_materials_emissive_strength` for emission above 1;
 //   - `extras.cleo.wind`, the engine's foliage wind response, which glTF has no field for.
 
 import type { PartBuffers } from './mesh';
@@ -23,9 +25,14 @@ export interface GlbMaterial {
   baseColorImage?: number;
   normalImage?: number;
   normalScale?: number;
+  /** Packed R = occlusion, G = roughness, B = metallic: both `occlusionTexture` and `metallicRoughnessTexture`. */
+  ormImage?: number;
   alphaCutoff?: number;
   doubleSided?: boolean;
   translucency?: number;
+  emissive?: [number, number, number];
+  /** Multiplies `emissive` (KHR_materials_emissive_strength). */
+  emissiveIntensity?: number;
   wind?: { windStrength: number; windStiffness: number; windRole: 'plant' | 'leaves'; windFlutter: number };
 }
 
@@ -91,7 +98,7 @@ export function writeGlb(meshes: readonly GlbMesh[], materials: readonly GlbMate
   const gltfImages = images.map(img => ({ name: img.name, mimeType: 'image/png', bufferView: addView(img.png) }));
   const textures = images.map((_, i) => ({ sampler: 0, source: i }));
 
-  let usesTransmission = false;
+  let usesTransmission = false, usesEmissiveStrength = false;
   const gltfMaterials = materials.map(m => {
     const out: Record<string, unknown> = {
       name: m.name,
@@ -100,22 +107,36 @@ export function writeGlb(meshes: readonly GlbMesh[], materials: readonly GlbMate
         metallicFactor: m.metallic ?? 0,
         roughnessFactor: m.roughness,
         ...(m.baseColorImage !== undefined ? { baseColorTexture: { index: m.baseColorImage } } : {}),
+        ...(m.ormImage !== undefined ? { metallicRoughnessTexture: { index: m.ormImage } } : {}),
       },
     };
+    if (m.ormImage !== undefined) out.occlusionTexture = { index: m.ormImage };
     if (m.normalImage !== undefined) out.normalTexture = { index: m.normalImage, ...(m.normalScale !== undefined ? { scale: m.normalScale } : {}) };
     if (m.alphaCutoff && m.alphaCutoff > 0) { out.alphaMode = 'MASK'; out.alphaCutoff = m.alphaCutoff; }
     if (m.doubleSided) out.doubleSided = true;
+    const extensions: Record<string, unknown> = {};
     if (m.translucency && m.translucency > 0) {
       usesTransmission = true;
-      out.extensions = { KHR_materials_diffuse_transmission: { diffuseTransmissionFactor: m.translucency } };
+      extensions.KHR_materials_diffuse_transmission = { diffuseTransmissionFactor: m.translucency };
     }
+    if (m.emissive && m.emissive.some(c => c > 0)) {
+      out.emissiveFactor = m.emissive;
+      if (m.emissiveIntensity !== undefined && m.emissiveIntensity !== 1) {
+        usesEmissiveStrength = true;
+        extensions.KHR_materials_emissive_strength = { emissiveStrength: m.emissiveIntensity };
+      }
+    }
+    if (Object.keys(extensions).length) out.extensions = extensions;
     if (m.wind) out.extras = { cleo: { wind: m.wind } };
     return out;
   });
 
   const json: Record<string, unknown> = {
     asset: { version: '2.0', generator: 'Cleo Creator · Foliage' },
-    ...(usesTransmission ? { extensionsUsed: ['KHR_materials_diffuse_transmission'] } : {}),
+    ...(usesTransmission || usesEmissiveStrength ? { extensionsUsed: [
+      ...(usesTransmission ? ['KHR_materials_diffuse_transmission'] : []),
+      ...(usesEmissiveStrength ? ['KHR_materials_emissive_strength'] : []),
+    ] } : {}),
     scene: 0,
     scenes: [{ nodes: nodes.map((_, i) => i) }],
     nodes,

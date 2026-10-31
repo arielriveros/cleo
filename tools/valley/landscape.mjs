@@ -62,9 +62,9 @@ function surface(tex, extra = {}) {
  * The landscape material, as TerrainMaterial.serialize() writes it.
  *
  * @param tex     ground/rock/snow/trail -> { diff, nor, arm, disp } texture ids
- * @param foliage ground foliage rules (grass + pines), library-linked by modelId
+ * @param foliage ground foliage rules (grass, trees and bushes), library-linked by modelId
  */
-export function valleyTerrainMaterial(tex, foliage, grassNames, { rockFoliage = [], forestFoliage = [] } = {}) {
+export function valleyTerrainMaterial(tex, foliage, grassNames, { forestFoliage = [] } = {}) {
   const base = surface(tex.ground)
   return {
     ...base,
@@ -89,14 +89,13 @@ export function valleyTerrainMaterial(tex, foliage, grassNames, { rockFoliage = 
           elevation: { enabled: true, min: -100, max: 190, falloff: 30 },
           noise: { amount: 0.5, scale: 9, seed: 17 }, heightBlend: 0.4,
         }),
-        // Its own foliage only: the moss rocks, placed where this surface clearly wins.
+        // Bare scree: no foliage of its own.
         allowFoliage: false, manual: false, normalStrength: 1.1, antiTiling: 0.5,
-        foliageInclude: rockFoliage,
       },
       {
         id: FOREST_SLOT, name: 'Forest Floor', material: surface(tex.forest), surfaceMaterialId: null, tiling: tilingFor(4),
         rule: rule({ noise: { amount: 0.45, scale: 5, seed: 23 }, heightBlend: 0.35 }),
-        // Its own foliage: the ferns and fallen branches of the undergrowth.
+        // Its own foliage: the undergrowth (Foliage Creator bushes).
         allowFoliage: false, manual: true, normalStrength: 1, antiTiling: 0.5,
         foliageInclude: forestFoliage,
       },

@@ -186,8 +186,9 @@ export function buildFoliageRuleFromModelAsset(asset: ModelAsset, existing?: Ter
     models,
     lods: lods.length ? lods : undefined,
     cullDistance: asset.cullDistance ?? 0,
-    billboard: existing?.billboard ?? null,
-    impostorSize: existing?.impostorSize,
+    // The rule's own impostor wins; a model that came with one (Cleo Creator's trees) lends it otherwise.
+    billboard: existing?.billboard ?? impostorBillboardOf(asset),
+    impostorSize: existing?.impostorSize ?? (existing?.billboard ? undefined : asset.impostor?.size),
     // Authored on the RULE like the impostor, not derived from the asset, so a re-sync must carry it.
     // Leaving it out silently cleared the inspector's own checkbox every time the button was pressed.
     castShadows: existing?.castShadows,
@@ -203,6 +204,13 @@ export function buildFoliageRuleFromModelAsset(asset: ModelAsset, existing?: Ter
     maxScale: existing?.maxScale ?? 1.4,
     collision: existing?.collision ?? null,
   }
+}
+
+/** A foliage rule's billboard from the impostor a model asset carries, or null when it has none. */
+export function impostorBillboardOf(asset: Pick<ModelAsset, 'impostor'>): TerrainFoliageRule['billboard'] {
+  const imp = asset.impostor
+  if (!imp) return null
+  return { textureId: imp.textureId, distance: imp.distance, octahedral: imp.octahedral as any, textures: { normal: imp.normalId } } as TerrainFoliageRule['billboard']
 }
 
 // ---------------------------------------------------------------------------------------------------

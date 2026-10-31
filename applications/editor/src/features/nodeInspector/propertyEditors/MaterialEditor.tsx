@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useReducer } from 'react';
 import { ModelNode, Material, CustomMaterial, TERRAIN_RELIEF_ENABLED, emissiveExposureWeightOf, setEmissiveExposureWeight } from 'cleo';
 import { useEventBus } from '../../EventBusContext';
 import { vec3ToHex } from '../../../utils/UtilFunctions';
@@ -8,6 +8,7 @@ import TextureInspector from './TextureInspector';
 import CustomMaterialEditor from './CustomMaterialEditor';
 import UvMappingSection from './UvMappingSection';
 import { PropertyTable, PropertyRow, Field, Select, NumberInput, Slider, Toggle, ColorInput, Section, DocScope } from '@cleo/app-kit/ui';
+import { CutoutSection, PbrPropertiesSection, WindSection, type MaterialFieldValues, type MaterialPatch } from '@cleo/app-kit/materials/MaterialFields';
 import { MaterialIcon } from '../sectionIcons';
 
 export default function MaterialEditor(props: {node: ModelNode}) {
@@ -44,14 +45,9 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   const [shininess, setShininess] = useState(material.properties.get('shininess') || 32);
   const [emission, setEmission] = useState(vec3ToHex(material.properties.get('emissive')));
 
-  const [baseColor, setBaseColor] = useState<string>(vec3ToHex(material.properties.get('baseColor') || [1,1,1]));
-  const [metallic, setMetallic] = useState<number>(material.properties.get('metallic') ?? 0);
-  const [roughness, setRoughness] = useState<number>(material.properties.get('roughness') ?? 1);
-  const [reflectance, setReflectance] = useState<number>(material.properties.get('reflectance') ?? 0.5);
-  const [translucency, setTranslucency] = useState<number>(material.properties.get('translucency') ?? 0);
-  const [emissiveFactor, setEmissiveFactor] = useState<string>(vec3ToHex(material.properties.get('emissiveFactor') || [0,0,0]));
-  const [emissiveIntensity, setEmissiveIntensity] = useState<number>(material.properties.get('emissiveIntensity') ?? 1);
-  const [emissiveWeight, setEmissiveWeight] = useState<number>(emissiveExposureWeightOf(material));
+  // PBR properties and Wind are drawn by the shared app-kit sections, which take values rather than
+  // state: they read the live material each render, and a write bumps this to re-render.
+  const [, bumpShared] = useReducer((n: number) => n + 1, 0);
 
   // Cel. `diffuse`/`specular`/`ambient`/`shininess`/`emissive` are shared with Blinn-Phong and already
   // have state above; only the toon-specific controls need their own.
@@ -65,7 +61,6 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   // mutates `material.textures` in place and announces it only on the bus, so this has to follow the bus
   // rather than be read once at render — otherwise the control goes stale the moment a ramp is dropped in.
   const [hasRamp, setHasRamp] = useState<boolean>(!!material.textures.get('rampMap'));
-  const [pbrOpacity, setPbrOpacity] = useState<number>(material.properties.get('opacity') ?? 1);
   // Parallax occlusion depth; inert without a Height map.
   const [dispScale, setDispScale] = useState<number>(
     (material as any).displacementScale ?? material.properties.get('dispScale') ?? 0.05);
@@ -93,11 +88,6 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   // Cutout threshold, shared by every shader type. 0 means no cutout.
   const [alphaCutoff, setAlphaCutoff] = useState<number>(material.properties.get('alphaCutoff') ?? 0);
   const [defaultOpacity, setDefaultOpacity] = useState<number>(material.properties.get('opacity') ?? 1);
-  // Wind response (any shader type): how far a plant wearing this material leans in the scene's Wind.
-  const [windStrength, setWindStrength] = useState<number>(material.properties.get('windStrength') ?? 0);
-  const [windStiffness, setWindStiffness] = useState<number>(material.properties.get('windStiffness') ?? 1);
-  const [windRole, setWindRole] = useState<'plant' | 'leaves'>(material.properties.get('windRole') === 'leaves' ? 'leaves' : 'plant');
-  const [windFlutter, setWindFlutter] = useState<number>(material.properties.get('windFlutter') ?? 0.5);
 
   const [basicColor, setBasicColor] = useState(
     vec3ToHex(material.properties.get('color') ?? [1,1,1])
@@ -124,15 +114,6 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     setShininess(material.properties.get('shininess') || 32);
     setEmission(vec3ToHex(material.properties.get('emissive')));
 
-    setBaseColor(vec3ToHex(material.properties.get('baseColor') || [1,1,1]));
-    setMetallic(material.properties.get('metallic') ?? 0);
-    setRoughness(material.properties.get('roughness') ?? 1);
-    setReflectance(material.properties.get('reflectance') ?? 0.5);
-    setTranslucency(material.properties.get('translucency') ?? 0);
-    setEmissiveFactor(vec3ToHex(material.properties.get('emissiveFactor') || [0,0,0]));
-    setEmissiveIntensity(material.properties.get('emissiveIntensity') ?? 1);
-    setEmissiveWeight(emissiveExposureWeightOf(material));
-    setPbrOpacity(material.properties.get('opacity') ?? 1);
     setDefaultOpacity(material.properties.get('opacity') ?? 1);
 
     setBasicColor(vec3ToHex(material.properties.get('color') ?? [1,1,1]));
@@ -260,6 +241,40 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     markMaterialDirty();
   };
   const updateOption = (patch: Partial<typeof options>) => { setOptions((prev) => ({ ...prev, ...patch })); markMaterialDirty(); };
+
+  // The shared sections' values, read live; and their patches, written back as the material's own keys.
+  const live = model.material.properties;
+  const pbrValues: MaterialFieldValues = {
+    baseColor: live.get('baseColor') ?? [1, 1, 1],
+    metallic: live.get('metallic') ?? 0,
+    roughness: live.get('roughness') ?? 1,
+    reflectance: live.get('reflectance') ?? 0.5,
+    translucency: live.get('translucency') ?? 0,
+    opacity: live.get('opacity') ?? 1,
+    emissive: live.get('emissiveFactor') ?? [0, 0, 0],
+    emissiveIntensity: live.get('emissiveIntensity') ?? 1,
+    emissiveWeight: emissiveExposureWeightOf(model.material),
+    alphaCutoff,
+  };
+  const windValues: MaterialFieldValues = {
+    windStrength: live.get('windStrength') ?? 0,
+    windStiffness: live.get('windStiffness') ?? 1,
+    windRole: live.get('windRole') === 'leaves' ? 'leaves' : 'plant',
+    windFlutter: live.get('windFlutter') ?? 0.5,
+  };
+  const applyShared = (patch: MaterialPatch) => {
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) continue;
+      if (key === 'emissiveWeight') setEmissiveExposureWeight(model.material, value as number);
+      else if (key === 'emissive') live.set('emissiveFactor', value);
+      else if (key === 'alphaCutoff') { live.set('alphaCutoff', value); setAlphaCutoff(value as number); }
+      // A role switch carries the flutter along only when the material has none yet.
+      else if (key === 'windFlutter' && 'windRole' in patch && live.has('windFlutter')) continue;
+      else live.set(key, value);
+    }
+    bumpShared();
+    markMaterialDirty();
+  };
 
   // Called as a function, not a component, so each TextureInspector stays mounted across re-renders.
   // -------------------------------------------------------------------------------------------
@@ -522,65 +537,13 @@ export default function MaterialEditor(props: {node: ModelNode}) {
               </div>
             </Section>
             {heightSection}
-            <Section title='Cutout'>
-              <PropertyTable columns={['40%', '60%']}>
-                {/* The mask is read from RED, so a grayscale map is what belongs here. 0 disables the
-                    cutout entirely; anything above it discards where the mask falls below. */}
-                <PropertyRow label='Alpha cutoff'>
-                  <Slider min={0} max={1} step={0.01} value={alphaCutoff} onChange={setNum('alphaCutoff', setAlphaCutoff)} />
-                </PropertyRow>
-                <PropertyRow label='Mask' divider={false}>
-                  <TextureInspector tex='maskMap' material={model.material} />
-                </PropertyRow>
-              </PropertyTable>
-            </Section>
+            <CutoutSection value={{ alphaCutoff }} onChange={applyShared} mask={<TextureInspector tex='maskMap' material={model.material} />} />
           </>
         )}
 
         {shaderType === 'pbr' && (
           <>
-            <Section title='Properties'>
-              <PropertyTable columns={['40%', '60%']}>
-                <PropertyRow label='Base Color'><ColorInput color={baseColor} onChange={setColor('baseColor', setBaseColor)} /></PropertyRow>
-                {/* The colour MULTIPLIES a base colour texture: a grey tint caps a white texture (snow) at
-                    that grey, which reads as a lighting problem rather than as this setting. */}
-                {material.textures.get('baseColorTexture') && baseColor.toLowerCase() !== '#ffffff' && (
-                  <PropertyRow label=''>
-                    <span className='text-ui-xs text-warning' title='The base colour multiplies the texture'>
-                      Tints the texture —{' '}
-                      <button type='button' className='underline' onClick={() => setColor('baseColor', setBaseColor)([1, 1, 1])}>use white</button>
-                      {' '}to show it as authored.
-                    </span>
-                  </PropertyRow>
-                )}
-                <PropertyRow label='Metallic'><Slider min={0} max={1} step={0.01} value={metallic} onChange={setNum('metallic', setMetallic)} /></PropertyRow>
-                <PropertyRow label='Roughness'><Slider min={0} max={1} step={0.01} value={roughness} onChange={setNum('roughness', setRoughness)} /></PropertyRow>
-                {/* Dielectric specular level. 0.5 is the neutral default and reproduces the fixed 4%
-                    reflectance every non-metal in this engine used to have, so leaving it alone changes
-                    nothing. The useful range is narrow and low: water sits near 0.35, skin near 0.42,
-                    gemstones between 0.55 and 0.7. Has no effect at metallic 1. */}
-                <PropertyRow label='Reflectance'><Slider min={0} max={1} step={0.01} value={reflectance} onChange={setNum('reflectance', setReflectance)} /></PropertyRow>
-                {/* Thin-surface light transmission (leaves, grass, paper). Stored in the G-buffer as a
-                    negative metallic, so a translucent surface is always shaded as a dielectric. */}
-                <PropertyRow label='Translucency'><Slider min={0} max={1} step={0.01} value={translucency} onChange={setNum('translucency', setTranslucency)} /></PropertyRow>
-                <PropertyRow label='Opacity'><Slider min={0} max={1} step={0.01} value={pbrOpacity} onChange={setNum('opacity', setPbrOpacity)} /></PropertyRow>
-                <PropertyRow label='Emissive'><ColorInput color={emissiveFactor} onChange={setColor('emissiveFactor', setEmissiveFactor)} /></PropertyRow>
-                {/* The colour is a hex picker and so cannot exceed 1 per channel — which is below the
-                    brightness at which anything happens, because bloom thresholds in display-referred
-                    terms and a mid-tone emissive lands exactly ON the default threshold. The colour is
-                    the hue; this is how hot. Above ~2 an emissive surface starts to bloom. */}
-                <PropertyRow label='Emissive power'>
-                  <Slider min={0} max={20} step={0.1} value={emissiveIntensity} onChange={setNum('emissiveIntensity', setEmissiveIntensity)} />
-                </PropertyRow>
-                <PropertyRow label='Exposure weight' divider={false}>
-                  <Slider min={0} max={1} step={0.05} value={emissiveWeight} onChange={(v) => {
-                    setEmissiveExposureWeight(model.material, v);
-                    setEmissiveWeight(v);
-                    markMaterialDirty();
-                  }} />
-                </PropertyRow>
-              </PropertyTable>
-            </Section>
+            <PbrPropertiesSection value={pbrValues} onChange={applyShared} tintsTexture={!!material.textures.get('baseColorTexture')} />
             <Section title='Textures'>
               <div className='flex flex-wrap gap-3'>
                 {/* Metallic/Roughness/Occlusion are authored separately and combined into one packed
@@ -598,51 +561,12 @@ export default function MaterialEditor(props: {node: ModelNode}) {
             </Section>
             {uvSection}
             {heightSection}
-            <Section title='Cutout'>
-              <PropertyTable columns={['40%', '60%']}>
-                {/* The mask is read from RED, so a grayscale map is what belongs here. 0 disables the
-                    cutout entirely; anything above it discards where the mask falls below. */}
-                <PropertyRow label='Alpha cutoff'>
-                  <Slider min={0} max={1} step={0.01} value={alphaCutoff} onChange={setNum('alphaCutoff', setAlphaCutoff)} />
-                </PropertyRow>
-                <PropertyRow label='Mask' divider={false}>
-                  <TextureInspector tex='maskMap' material={model.material} />
-                </PropertyRow>
-              </PropertyTable>
-            </Section>
+            <CutoutSection value={pbrValues} onChange={applyShared} mask={<TextureInspector tex='maskMap' material={model.material} />} />
           </>
         )}
 
         {!isTerrain && (
-          <Section title='Wind'>
-            <PropertyTable columns={['40%', '60%']}>
-              {/* Read by foliage only (instanced plants), and only while the scene has a Wind node. A
-                  tree's bark and needles bend as one: the strongest of its materials sets the lean. */}
-              <PropertyRow label='Strength' hint='How far a plant leans at full gust, as a fraction of its height. 0 = never moves. Grass ~0.3, trees ~0.08.'>
-                <Slider min={0} max={1} step={0.01} value={windStrength} onChange={setNum('windStrength', setWindStrength)} />
-              </PropertyRow>
-              <PropertyRow label='Stiffness' hint='Higher is slower and steadier: grass ~0.6, a young tree ~1.5, an old trunk ~3.'>
-                <Slider min={0.1} max={4} step={0.05} value={windStiffness} onChange={setNum('windStiffness', setWindStiffness)} />
-              </PropertyRow>
-              <PropertyRow label='Moves as' divider={windRole === 'leaves'} hint='Bark: Whole plant — it rides the plant&#39;s sway rigidly, like a trunk. Needles and leaves: Leaves — they follow the trunk and add their own sprig sway and flutter, more toward the outside of the canopy, so they stay on their branches.'>
-                <Select value={windRole} onChange={e => {
-                  const role = e.target.value === 'leaves' ? 'leaves' : 'plant'
-                  model.material.properties.set('windRole', role)
-                  if (!model.material.properties.has('windFlutter')) model.material.properties.set('windFlutter', windFlutter)
-                  setWindRole(role)
-                  markMaterialDirty()
-                }}>
-                  <option value='plant'>Whole plant</option>
-                  <option value='leaves'>Leaves</option>
-                </Select>
-              </PropertyRow>
-              {windRole === 'leaves' && (
-                <PropertyRow label='Flutter' divider={false} hint='How lively the leaves are on top of the plant&#39;s sway. 0 = they ride it rigidly.'>
-                  <Slider min={0} max={1} step={0.01} value={windFlutter} onChange={setNum('windFlutter', setWindFlutter)} />
-                </PropertyRow>
-              )}
-            </PropertyTable>
-          </Section>
+          <WindSection value={windValues} onChange={applyShared} />
         )}
 
         <Section title='Options'>

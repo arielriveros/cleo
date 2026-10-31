@@ -20,14 +20,16 @@ import { add, cross, dot, length, MeshBuilder, normalize, perpendicular, scale, 
 import { atlasCell } from '../textures/leaves';
 import type { LeafCard, Skeleton, Stem } from './skeleton';
 
-interface LodSpec {
+export interface LodSpec {
   maxLevel: number;
   sides: number[];
   stride: number;
+  /** Spine-point stride per stem level, replacing `stride` (and the trunk's finer one). */
+  strides?: number[];
   leafShare: number;
 }
 
-function lodSpecs(p: TreeParams): LodSpec[] {
+function lodSpecs(p: LevelParams): LodSpec[] {
   return [
     { maxLevel: 3, sides: [10, 6, 4, 3], stride: 1, leafShare: 1 },
     { maxLevel: p.levels >= 3 ? 2 : 3, sides: [6, 4, 3, 3], stride: 2, leafShare: p.lod1Leaves },
@@ -96,13 +98,17 @@ function leafMesh(mb: MeshBuilder, card: LeafCard, grow: number): void {
   mb.quad(a, b, c, d);
 }
 
-export function treeLevels(skeleton: Skeleton, p: TreeParams): FoliageLevel[] {
+type LevelParams = Pick<TreeParams, 'levels' | 'lod1Distance' | 'lod1Leaves' | 'lod2Distance' | 'lod2Leaves' | 'barkScale'>;
+
+/** The three levels; `specs` replaces the tree's ladder (a bush's thin stems need fewer sides). */
+export function treeLevels(skeleton: Skeleton, p: LevelParams, specs: LodSpec[] = lodSpecs(p)): FoliageLevel[] {
   const distances = [0, p.lod1Distance, p.lod2Distance];
-  return lodSpecs(p).map((spec, li) => {
+  return specs.map((spec, li) => {
     const bark = new MeshBuilder();
     for (const stem of skeleton.stems) {
       if (stem.level > spec.maxLevel) continue;
-      stemMesh(bark, stem, spec.sides[Math.min(3, stem.level)], stem.level === 0 ? Math.max(1, spec.stride - 1) : spec.stride, p.barkScale);
+      const stride = spec.strides?.[Math.min(3, stem.level)] ?? (stem.level === 0 ? Math.max(1, spec.stride - 1) : spec.stride);
+      stemMesh(bark, stem, spec.sides[Math.min(3, stem.level)], stride, p.barkScale);
     }
     const parts: FoliagePart[] = [{ name: 'Bark', material: 'bark', buffers: bark.build() }];
     if (skeleton.leaves.length) {

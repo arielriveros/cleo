@@ -19,7 +19,8 @@ replays by itself once it has faded.
 The solver runs as GPU compute when the engine's device has it (the WebGPU backend), and otherwise as
 the CPU solver in a background worker, so the editor stays responsive either way.
 
-Baking lives in the **Bake** tab, beside **Parameters** on the right: see [Bake](#bake).
+Baking lives in the **Bake** tab, beside **Parameters** on the right: see [Bake](#bake). **Export
+flipbook** in the toolbar writes the baked files.
 
 The solver is an Eulerian gas solver: semi-Lagrangian advection, a Jacobi pressure projection that keeps
 the flow incompressible, vorticity confinement to restore the swirls the grid smooths out, and a
@@ -255,8 +256,8 @@ dust puff. Each comes with its own region size and voxel size for its scale.
 ## Bake
 
 The **Bake** tab turns the effect into textures. **Bake flipbook** runs its own simulation from the
-start (warm-up, capture, loop blend), so the live preview keeps going beside it; **Export** writes the
-files. The **Output** menu picks which baked atlas the player and the atlas view show. **Bake presets**
+start (warm-up, capture, loop blend), so the live preview keeps going beside it; **Export flipbook**
+in the toolbar writes the files. The **Output** menu picks which baked atlas the player and the atlas view show. **Bake presets**
 set up the whole tab: Game-ready (8 × 8 frames of 128 px), Hero (8 × 8 of 256 px, relightable), Mobile
 (4 × 4 of 64 px) and Explosion one-shot.
 

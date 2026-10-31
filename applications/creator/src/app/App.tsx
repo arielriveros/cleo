@@ -2,7 +2,7 @@ import { useEffect, useState, type ComponentType } from 'react';
 import Topbar from '@cleo/app-kit/ui/Topbar';
 import LoadingScreen from '@cleo/app-kit/feedback/LoadingScreen';
 import { beginLoad } from '@cleo/app-kit/feedback/loadingStore';
-import { SegmentedControl } from '@cleo/app-kit/ui';
+import { Button, SegmentedControl } from '@cleo/app-kit/ui';
 import { webgpuAvailableInBrowser, type BackendKind } from 'cleo';
 import { readBackendPreference, writeBackendPreference } from '@cleo/app-kit/renderer/backendPreference';
 import { CreatorEngineProvider, useCreatorEngine } from './CreatorEngine';
@@ -89,6 +89,13 @@ function BackendSwitch() {
   );
 }
 
+/** The editor that opened this window, or a new one: both share this origin's Creator library. */
+function openEditor() {
+  const opener = window.opener as Window | null;
+  if (opener && !opener.closed) { opener.focus(); return; }
+  window.open(`${location.origin}/`, 'cleo-editor');
+}
+
 function Shell() {
   const { instance, error } = useCreatorEngine();
   const [tool, setTool] = useState<Tool>(storedTool);
@@ -105,6 +112,9 @@ function Shell() {
           { value: 'foliage', label: 'Foliage Creator', title: 'Grass, rocks and trees with LODs, exported as glTF' },
         ]} />
         <BackendSwitch />
+        <div className='flex-1' />
+        <Button size='sm' variant='ghost' className='mr-2' onClick={openEditor}
+                title='Switch to the Cleo Editor. Assets saved here appear there under /Creator, in every project.'>Cleo Editor</Button>
       </Topbar>
       <div className='relative flex-1 min-h-0'>
         {error && <div className='p-4 text-danger-fg'>The engine could not start: {error}</div>}

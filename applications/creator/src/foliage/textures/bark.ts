@@ -10,7 +10,8 @@ import { createImage, normalFromHeight, putLinear, rgb, type Image } from './ima
 
 const smoothstep = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
-export interface BarkTextures { albedo: Image; normal: Image }
+/** `height` is the pattern's relief, 0..1 (0 = the bottom of a crack): what the ORM map's AO and roughness read. */
+export interface BarkTextures { albedo: Image; normal: Image; height: Float32Array }
 
 export function barkTextures(seed: number, size: number, pattern: BarkPattern, color: Rgba): BarkTextures {
   const s = noiseSeed(seed, 'bark');
@@ -79,5 +80,9 @@ export function barkTextures(seed: number, size: number, pattern: BarkPattern, c
     putLinear(albedo, i, base[0] * k * (1 + warm), base[1] * k, base[2] * k * (1 - warm));
   }
 
-  return { albedo, normal: normalFromHeight(heights, size, size, pattern === 'smooth' || pattern === 'papery' ? 1.2 : 3, true) };
+  const normal = normalFromHeight(heights, size, size, pattern === 'smooth' || pattern === 'papery' ? 1.2 : 3, true);
+  let lo = Infinity, hi = -Infinity;
+  for (const h of heights) { if (h < lo) lo = h; if (h > hi) hi = h; }
+  const height = heights.map(h => hi > lo ? (h - lo) / (hi - lo) : 1);
+  return { albedo, normal, height };
 }

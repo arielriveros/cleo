@@ -4,7 +4,7 @@ The shell: a menu bar, a strip of document tabs, and a dockable workspace of pan
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ Projects  Save  Save All  Import  Export  VSCode  Publish ▾          │
+│ Projects  Save  Save All  Import  Export  VSCode  Publish ▾  Creator │
 │              ◀ Play Pause Stop ▶       [ Scene | Landscape | UI |    │
 │                                          Options ]  ↶ ↷  ⟲           │
 ├──────────────────────────────────────────────────────────────────────┤
@@ -33,6 +33,7 @@ The shell: a menu bar, a strip of document tabs, and a dockable workspace of pan
 | **Export** | Exports the whole project to a `.zip`. |
 | **Script sync chip** | Appears only when the VS Code workspace needs attention (sync paused or in error). Its setup lives in [Options ▸ Editor ▸ Scripts](options.md#editor). |
 | **Publish ▾** | Web (HTML), Desktop (Electron), Desktop installer. See [Publishing](publishing.md). |
+| **Creator** | Opens Cleo Creator in its own window. Assets you save there appear here under `/Creator`, in every project, and follow your edits. See [Creator assets](assets.md#creator-assets). |
 
 **Centre** — the **Play / Pause / Stop** transport.
 
